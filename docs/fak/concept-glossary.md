@@ -1035,3 +1035,10 @@ Private Session store-aware KV-span eviction body used inside an already-owned b
 A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay.
 
 **Distinct from:** Offline replay input data; it neither selects serving eviction policy nor owns a runtime cache or route-trace emitter.
+
+
+### AdmitCachedBudget
+
+The deadline admission estimator entrypoint that preserves caller-declared budget separately from remaining budget and returns bounded numeric input evidence with the same feasibility verdict and retry policy as AdmitCached.
+
+**Distinct from:** AdmitCached accepts only the remaining budget; AdmitCachedBudget also projects the declared budget and mutex snapshot. The supplied cache count is caller-supplied resident-prefix credit; callers validate route proof separately from prefix identity or cache allocation.

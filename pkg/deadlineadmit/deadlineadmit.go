@@ -30,6 +30,7 @@
 package deadlineadmit
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -122,22 +123,40 @@ func SetRemaining(h http.Header, remaining time.Duration) {
 // WriteRefusal writes the typed 503 for a refused verdict: Retry-After, the
 // reject reason, the estimate, and an OpenAI-shaped error body.
 func WriteRefusal(w http.ResponseWriter, v Verdict) {
+	reason := v.Reason
+	if reason != ReasonDeadlineExpired && reason != ReasonDeadlineInfeasible {
+		reason = ReasonDeadlineInfeasible
+	}
 	h := w.Header()
 	h.Set("Retry-After", strconv.Itoa(retryAfterSeconds(v.RetryAfter)))
-	h.Set(HeaderReject, string(v.Reason))
+	h.Set(HeaderReject, string(reason))
 	if v.Estimate > 0 {
 		h.Set(HeaderEstimateMs, strconv.FormatInt(v.Estimate.Milliseconds(), 10))
 	}
 	h.Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusServiceUnavailable)
-	msg := "request cannot finish before its declared deadline (" + string(v.Reason) + ")"
+	msg := "request cannot finish before its declared deadline (" + string(reason) + ")"
 	if v.PromptTooLong {
 		// Context-overflow wording, so an agent harness (Pi matches "prompt is
 		// too long") compacts and resends instead of retrying the same body
 		// through its whole backoff budget.
-		msg = "prompt is too long to finish before its declared deadline even on an idle node (" + string(v.Reason) + ")"
+		msg = "prompt is too long to finish before its declared deadline even on an idle node (" + string(reason) + ")"
 	}
-	_, _ = w.Write([]byte(`{"error":{"message":"` + msg + `","type":"server_overloaded","code":"` + CodeDeadlineInfeasible + `"}}`))
+	var evidence *Evidence
+	if v.Evidence != nil {
+		n := v.Evidence.normalized()
+		evidence = &n
+	}
+	type refusalFields struct {
+		Message  string    `json:"message"`
+		Type     string    `json:"type"`
+		Code     string    `json:"code"`
+		Evidence *Evidence `json:"evidence,omitempty"`
+	}
+	body, _ := json.Marshal(struct {
+		Error refusalFields `json:"error"`
+	}{refusalFields{msg, "server_overloaded", CodeDeadlineInfeasible, evidence}})
+	_, _ = w.Write(body)
 }
 
 func retryAfterSeconds(d time.Duration) int {
@@ -184,16 +203,18 @@ type Estimator struct {
 	cfg Config
 	now func() time.Time
 
-	mu       sync.Mutex
-	inFlight int
-	samples  int
-	last     time.Time
-	prefill  float64 // tokens/second per request
-	decode   float64 // tokens/second per request
-	complTok float64 // completion tokens per request
-	conc     float64 // in-flight count at observation time
-	hasPre   bool
-	hasDec   bool
+	mu          sync.Mutex
+	inFlight    int
+	samples     int
+	last        time.Time
+	prefill     float64 // tokens/second per request
+	decode      float64 // tokens/second per request
+	complTok    float64 // completion tokens per request
+	conc        float64 // in-flight count at observation time
+	hasPre      bool
+	hasDec      bool
+	prefillLast time.Time
+	decodeLast  time.Time
 }
 
 // NewEstimator returns an Estimator reading time from now (time.Now when nil).
@@ -311,11 +332,13 @@ func (e *Estimator) Observe(o Observation) {
 	if pre > 0 {
 		e.prefill = blend(e.prefill, e.hasPre, pre)
 		e.hasPre = true
+		e.prefillLast = now
 	}
 	if dec > 0 {
 		e.decode = blend(e.decode, e.hasDec, dec)
 		e.complTok = blend(e.complTok, e.hasDec, float64(o.CompletionTokens))
 		e.hasDec = true
+		e.decodeLast = now
 	}
 	e.conc = blend(e.conc, e.samples > 0, conc)
 	e.samples++
@@ -339,6 +362,9 @@ type Verdict struct {
 	// PromptTooLong marks a deadline_infeasible refusal that would be refused
 	// on an idle node too: only a shorter prompt can be admitted.
 	PromptTooLong bool
+	// Evidence holds bounded inputs captured under the estimate's mutex.
+	// Nil means a legacy manually constructed verdict has no input evidence.
+	Evidence *Evidence
 }
 
 // Err returns nil for an admitted verdict and an error wrapping
@@ -455,19 +481,33 @@ func (e *Estimator) Admit(promptTokens, maxTokens int, remaining time.Duration, 
 // A caller without evidence of a resident prefix passes 0, which keeps the
 // cold-prefill protection for a genuinely uncached prompt.
 func (e *Estimator) AdmitCached(promptTokens, cachedTokens, maxTokens int, remaining time.Duration, hasBudget bool) Verdict {
+	return e.admitCachedBudget(promptTokens, cachedTokens, maxTokens, nil, remaining, hasBudget)
+}
+
+// AdmitCachedBudget preserves AdmitCached's verdict and retry policy while
+// recording the caller's declared budget separately from its remaining budget.
+func (e *Estimator) AdmitCachedBudget(promptTokens, cachedTokens, maxTokens int, declared, remaining time.Duration, hasBudget bool) Verdict {
+	ms := boundedMS(declared)
+	return e.admitCachedBudget(promptTokens, cachedTokens, maxTokens, &ms, remaining, hasBudget)
+}
+
+func (e *Estimator) admitCachedBudget(promptTokens, cachedTokens, maxTokens int, declared *int64, remaining time.Duration, hasBudget bool) Verdict {
 	if !hasBudget {
 		return Verdict{Admit: true}
 	}
-	if remaining <= 0 {
-		return Verdict{Reason: ReasonDeadlineExpired, Remaining: remaining, RetryAfter: time.Second}
-	}
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	evidence := e.evidenceLocked(promptTokens, cachedTokens, maxTokens, remaining)
+	evidence.DeclaredBudgetMS = declared
+	if remaining <= 0 {
+		return Verdict{Reason: ReasonDeadlineExpired, Remaining: remaining, RetryAfter: time.Second, Evidence: evidence}
+	}
 	uncached := uncachedTokens(promptTokens, cachedTokens)
 	est, ok := e.estimateLocked(uncached, maxTokens)
 	idle, _ := e.estimateAtLocked(uncached, maxTokens, 0)
 	inFlight := e.inFlight
-	e.mu.Unlock()
-	v := Verdict{Admit: true, Estimate: est, Remaining: remaining, Measured: ok}
+	evidence.EstimateMS = boundedMS(est)
+	v := Verdict{Admit: true, Estimate: est, Remaining: remaining, Measured: ok, Evidence: evidence}
 	if !ok {
 		return v
 	}

@@ -53,6 +53,7 @@ func postDeadlineChat(t *testing.T, ts *httptest.Server, headers map[string]stri
 	return resp
 }
 
+// fak-test:runtime fast est=20ms lane=default
 func TestChatCompletionsShedsRequestThatCannotMeetClientDeadline(t *testing.T) {
 	ts := httptest.NewServer(saturatedDeadlineServer(t).Handler())
 	defer ts.Close()
@@ -69,7 +70,8 @@ func TestChatCompletionsShedsRequestThatCannotMeetClientDeadline(t *testing.T) {
 	}
 	var env struct {
 		Error struct {
-			Code string `json:"code"`
+			Code     string                  `json:"code"`
+			Evidence *deadlineadmit.Evidence `json:"evidence"`
 		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
@@ -77,6 +79,10 @@ func TestChatCompletionsShedsRequestThatCannotMeetClientDeadline(t *testing.T) {
 	}
 	if env.Error.Code != deadlineadmit.CodeDeadlineInfeasible {
 		t.Fatalf("error.code = %q, want %q", env.Error.Code, deadlineadmit.CodeDeadlineInfeasible)
+	}
+	x := env.Error.Evidence
+	if x == nil || x.DeclaredBudgetMS == nil || *x.DeclaredBudgetMS != 300000 || x.RemainingBudgetMS <= 0 || x.RemainingBudgetMS > 300000 || x.PromptTokens != 1600 || x.CachedTokens != 0 || x.OutputCeiling != 0 || x.InFlight != 6 || x.RateBasis != deadlineadmit.RateBasis("prefill_decode") || x.RateSampleAgeMS == nil || *x.RateSampleAgeMS != 0 {
+		t.Fatalf("loopback ingress refusal evidence does not match admission inputs: %+v", x)
 	}
 }
 

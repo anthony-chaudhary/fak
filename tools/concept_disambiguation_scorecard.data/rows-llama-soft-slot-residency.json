@@ -8,7 +8,8 @@
       "definition": "The deadlineadmit Estimator method that evaluates prompt tokens, caller-supplied cached tokens, output limit and remaining declared budget using measured rates and live concurrency. It returns a deadline admission verdict; callers are responsible for validating the supplied resident-prefix credit.",
       "distinction": "This is a duration-budget decision using an already supplied cache count, rather than the promptcachekey identity used to distinguish cached prompts. It does not discover, allocate or prove KV residency.",
       "distinct_from": [
-        "promptcachekey"
+        "promptcachekey",
+        "deadline-admit-cached-budget-evidence"
       ],
       "aliases": [],
       "grounding": "AdmitCached",
@@ -243,6 +244,25 @@
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "deadline-admit-cached-budget-evidence",
+      "canonical": "AdmitCachedBudget",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The deadline admission estimator entrypoint that preserves caller-declared budget separately from remaining budget and returns bounded numeric input evidence with the same feasibility verdict and retry policy as AdmitCached.",
+      "distinction": "AdmitCached accepts only the remaining budget; AdmitCachedBudget also projects the declared budget and mutex snapshot. The supplied cache count is caller-supplied resident-prefix credit; callers validate route proof separately from prefix identity or cache allocation.",
+      "distinct_from": [
+        "deadline-admit-cached"
+      ],
+      "aliases": [],
+      "grounding": "AdmitCachedBudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
       "gaps": []
     }
   ]

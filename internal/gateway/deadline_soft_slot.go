@@ -70,10 +70,10 @@ func (s *Server) prepareDeadlineSoftSlot(r *http.Request, t *deadlineResidencyTi
 			t.mu.Lock()
 			t.credited = credit
 			t.mu.Unlock()
-			v := est.AdmitCached(promptTok, credit, maxTokens, remaining, true)
+			v := est.AdmitCachedBudget(promptTok, credit, maxTokens, budget, remaining, true)
 			if !v.Admit {
 				s.logf("gateway: deadline admission refused: reason=%s estimate=%s remaining=%s in_flight=%d prompt_tokens=%d predicted_cached=%d credit_source=prepared-soft-slot",
-					v.Reason, v.Estimate, v.Remaining, est.InFlight(), promptTok, credit)
+					v.Reason, v.Estimate, v.Remaining, v.Evidence.InFlight, promptTok, credit)
 				return &deadlineAdmissionError{verdict: v}
 			}
 			if end == nil {

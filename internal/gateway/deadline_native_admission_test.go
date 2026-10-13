@@ -101,6 +101,10 @@ func TestNativeDeadlineColdStreamRefusesBeforeSSE(t *testing.T) {
 	if strings.Contains(w.Body.String(), "data:") || strings.Contains(w.Body.String(), "fak-heartbeat") {
 		t.Fatalf("SSE committed before refusal: %s", w.Body.String())
 	}
+	x, err := deadlineadmit.ReadEvidence(bytes.NewReader(w.Body.Bytes()))
+	if err != nil || x == nil || x.DeclaredBudgetMS == nil || *x.DeclaredBudgetMS != 10000 || x.RemainingBudgetMS <= 0 || x.RemainingBudgetMS > 10000 || x.PromptTokens <= 20 || x.CachedTokens != 0 || x.OutputCeiling != 1 || x.InFlight != 0 || x.RateBasis != deadlineadmit.RateBasis("prefill_decode") {
+		t.Fatalf("execution-owned stream refusal evidence: %+v err=%v", x, err)
+	}
 	if n := s.metrics.deadlineEst.InFlight(); n != 0 {
 		t.Fatalf("refused stream leaked reservation: %d", n)
 	}
@@ -204,6 +208,12 @@ func TestNativeDeadlineExpiredCancellationAndWatchdog(t *testing.T) {
 			case "client-expired":
 				if !errors.As(err, &refusal) || refusal.verdict.Reason != deadlineadmit.ReasonDeadlineExpired {
 					t.Fatalf("expired client error=%v", err)
+				}
+				x := refusal.verdict.Evidence
+				// Preparation expires before prefix ownership/tokenization. The
+				// native executionDeadlineError seam deliberately supplies 0/0/0.
+				if x == nil || x.DeclaredBudgetMS == nil || *x.DeclaredBudgetMS != 10000 || x.RemainingBudgetMS != 0 || x.OutputCeiling != 0 || x.PromptTokens != 0 || x.CachedTokens != 0 || x.EstimateMS != 0 || x.InFlight != 0 {
+					t.Fatalf("expired execution lost budget or actual token evidence: %+v", x)
 				}
 			case "client-canceled":
 				if !errors.Is(err, context.Canceled) || errors.As(err, &refusal) {
