@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,6 +128,9 @@ func TestPerfLedgerFailedTurnLeavesOneRow(t *testing.T) {
 				t.Fatalf("perf rows = %d, want exactly 1: %+v", len(recs), recs)
 			}
 			got := recs[0]
+			if got.Model != "" {
+				t.Errorf("failed turn model = %q, want unknown", got.Model)
+			}
 			if got.Error != tc.wantClass || got.Status != tc.wantStatus || got.FinishReason != perfledger.FinishReasonError {
 				t.Fatalf("row error/status/finish = %q/%d/%q, want %q/%d/%q", got.Error, got.Status, got.FinishReason, tc.wantClass, tc.wantStatus, perfledger.FinishReasonError)
 			}
@@ -241,6 +246,119 @@ func TestPerfLedgerBufferedTurnPastWriteTimeout(t *testing.T) {
 			}
 			if got.E2EMS < float64(wt/time.Millisecond) {
 				t.Fatalf("e2e_ms = %v, want >= the %v write timeout", got.E2EMS, wt)
+			}
+		})
+	}
+}
+
+type perfPausedBody struct {
+	io.ReadCloser
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (b *perfPausedBody) Read(p []byte) (int, error) {
+	b.once.Do(func() {
+		close(b.entered)
+		<-b.release
+	})
+	return b.ReadCloser.Read(p)
+}
+
+// fak-test:runtime fast est=700ms lane=default
+func TestPerfLedgerHandlerElapsed(t *testing.T) {
+	t.Run("phase clocks", func(t *testing.T) {
+		srv := newTestServer(t)
+		srv.metrics.setPerfIdentity("configured-default", perfledger.Identity{})
+		handler := srv.withMetrics(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			<-time.After(10 * time.Millisecond)
+			srv.metrics.recordPerf(localitySelfHosted, 256, 3, 0, "stop", 2*time.Millisecond, time.Millisecond, perfDetail{src: perfSourceFrom(r.Context())})
+		}))
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+		srv.metrics.recordPerf(localitySelfHosted, 256, 3, 0, "stop", 2*time.Millisecond, time.Millisecond, perfDetail{})
+		recs := waitPerfRows(t, srv, 2)
+		if len(recs) != 2 {
+			t.Fatalf("perf rows = %d, want 2", len(recs))
+		}
+		for _, rec := range recs {
+			if rec.Model != "configured-default" || rec.Error != "" || rec.TTFTMS != 1 || rec.PrefillTPS != 256000 || rec.DecodeTPS != 2000 {
+				t.Errorf("successful record lost fallback identity or planner phase measurements: model=%q error=%q ttft=%g prefill=%g decode=%g", rec.Model, rec.Error, rec.TTFTMS, rec.PrefillTPS, rec.DecodeTPS)
+			}
+		}
+		if recs[0].E2EMS < 10 || recs[1].E2EMS != 2 {
+			t.Errorf("edge/no-edge e2e_ms = %g/%g, want >=10/2", recs[0].E2EMS, recs[1].E2EMS)
+		}
+	})
+
+	const writeTimeout = 100 * time.Millisecond
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("planner_failure=%t", failed), func(t *testing.T) {
+			srv := newTestServer(t)
+			srv.metrics.setPerfIdentity("configured-default", perfledger.Identity{Planner: "mock"})
+			wantModel := "reported-model"
+			srv.planner = stubPlanner{comp: &agent.Completion{
+				Model:        wantModel,
+				Message:      agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+				FinishReason: "stop",
+			}}
+			if failed {
+				srv.planner = failingPlanner{err: &agent.UpstreamStatusError{Status: 500}}
+				wantModel = ""
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			resume := func() { releaseOnce.Do(func() { close(release) }) }
+			handler := srv.Handler()
+			ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = &perfPausedBody{ReadCloser: r.Body, entered: entered, release: release}
+				handler.ServeHTTP(w, r)
+			}))
+			ts.Config.WriteTimeout = writeTimeout
+			srv.metrics.setHTTPWriteTimeout(writeTimeout)
+			ts.Start()
+			defer ts.Close()
+			defer resume()
+
+			result := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			go func() {
+				resp, err := postPerfChat(t, ctx, ts.URL, false)
+				if resp != nil {
+					resp.Body.Close()
+				}
+				result <- err
+			}()
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal("request never reached the body reader")
+			}
+			// Release body decoding only after this real server's write deadline.
+			// The planner itself completes immediately on both paths.
+			select {
+			case <-time.After(3 * writeTimeout):
+			case <-ctx.Done():
+				t.Fatal("request expired before body release")
+			}
+			resume()
+			if err := <-result; err == nil {
+				t.Fatal("client received a response past the write deadline")
+			}
+			recs := waitPerfRows(t, srv, 1)
+			if len(recs) != 1 {
+				t.Fatalf("perf rows = %d, want 1", len(recs))
+			}
+			got := recs[0]
+			if got.Error != perfledger.ErrorClientWriteTimeout || got.Status != 0 || got.FinishReason != perfledger.FinishReasonError {
+				t.Errorf("error/status/finish = %q/%d/%q, want client write timeout without status", got.Error, got.Status, got.FinishReason)
+			}
+			if got.E2EMS < float64(3*writeTimeout/time.Millisecond) {
+				t.Errorf("e2e_ms = %v, excludes time spent reading the request", got.E2EMS)
+			}
+			if got.Model != wantModel || got.Planner != "mock" {
+				t.Errorf("model/planner = %q/%q, want %q/mock", got.Model, got.Planner, wantModel)
 			}
 		})
 	}
