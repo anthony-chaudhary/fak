@@ -631,7 +631,11 @@ func TestChatEndpointSelectionHelper(t *testing.T) {
 	if os.Getenv("FAK_TEST_CHAT_ENDPOINT_HELPER") != "1" {
 		return
 	}
-	cmdChat([]string{"--task", "say hello", "--tools=none", "--memory=false", "--max-turns=1"})
+	args := []string{"--task", "say hello", "--tools=none", "--memory=false", "--max-turns=1"}
+	if model := os.Getenv("FAK_TEST_CHAT_ENDPOINT_MODEL"); model != "" {
+		args = append(args, "--model", model)
+	}
+	cmdChat(args)
 }
 
 func testChatPairNode(t *testing.T, origin string) {
@@ -647,12 +651,12 @@ func testChatPairNode(t *testing.T, origin string) {
 	}
 }
 
-func testChatEndpointSubprocess(t *testing.T) (string, error) {
+func testChatEndpointSubprocess(t *testing.T, model string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestChatEndpointSelectionHelper$")
-	cmd.Env = append(os.Environ(), "FAK_TEST_CHAT_ENDPOINT_HELPER=1")
+	cmd.Env = append(os.Environ(), "FAK_TEST_CHAT_ENDPOINT_HELPER=1", "FAK_TEST_CHAT_ENDPOINT_MODEL="+model)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -662,7 +666,7 @@ func TestChatPairedRouterDownFailsLoud(t *testing.T) {
 	testChatPairNode(t, pairedOrigin)
 	t.Setenv("OPENAI_BASE_URL", "")
 
-	out, err := testChatEndpointSubprocess(t)
+	out, err := testChatEndpointSubprocess(t, "")
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 		t.Fatalf("down paired router exit = %v, want code 1:\n%s", err, out)
@@ -692,8 +696,7 @@ func TestChatProviderEnvOverridesPairedRouter(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/healthz":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"ok":true,"model":"provider-model"}`)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 		case "/v1/chat/completions":
 			var request struct {
 				Model string `json:"model"`
@@ -716,7 +719,7 @@ func TestChatProviderEnvOverridesPairedRouter(t *testing.T) {
 	testChatPairNode(t, paired.URL)
 	t.Setenv("OPENAI_BASE_URL", provider.URL+"/v1")
 	t.Setenv("GEMINI_API_KEY", "provider-key")
-	out, err := testChatEndpointSubprocess(t)
+	out, err := testChatEndpointSubprocess(t, "provider-model")
 	if err != nil || !strings.Contains(out, "provider reply") {
 		t.Fatalf("chat did not use provider env endpoint: %v\n%s", err, out)
 	}
