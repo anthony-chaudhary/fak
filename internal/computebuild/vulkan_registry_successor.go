@@ -50,6 +50,8 @@ const (
 	// VulkanShaderRegistryV17ID identifies the exact 81-module bundle that adds the
 	// two V4.1 fused routed-FFN modules (gate+up+SwiGLU+mid, down+sum) to V16/79.
 	VulkanShaderRegistryV17ID = "fak.vulkan-shader-registry.v17.current81"
+	// VulkanShaderRegistryV18ID adds the opt-in same-weight Q2_K token tile.
+	VulkanShaderRegistryV18ID = "fak.vulkan-shader-registry.v18.current82"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -84,10 +86,12 @@ var (
 
 	vulkanRegistryV17 = &vulkanSuccessorRegistry{version: "V17", schema: VulkanBuildReceiptSchemaV17, id: VulkanShaderRegistryV17ID, count: 81, parent: vulkanRegistryV16, added: []string{"v41_routed_gate_up_swiglu_id", "v41_routed_down_sum"}}
 
+	vulkanRegistryV18 = &vulkanSuccessorRegistry{version: "V18", schema: VulkanBuildReceiptSchemaV18, id: VulkanShaderRegistryV18ID, count: 82, parent: vulkanRegistryV17, added: []string{"v41_q2k_token_panel"}}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV17
+	vulkanCurrentRegistry = vulkanRegistryV18
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -184,6 +188,9 @@ func CurrentVulkanShaderRegistryV16() []string { return vulkanRegistryV16.stems(
 
 // CurrentVulkanShaderRegistryV17 returns an owned copy of the trusted V17 set.
 func CurrentVulkanShaderRegistryV17() []string { return vulkanRegistryV17.stems() }
+
+// CurrentVulkanShaderRegistryV18 returns the exact experimental tile bundle.
+func CurrentVulkanShaderRegistryV18() []string { return vulkanRegistryV18.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.

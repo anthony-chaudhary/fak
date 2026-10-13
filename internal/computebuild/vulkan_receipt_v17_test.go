@@ -14,8 +14,8 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV17Current81Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV16(), "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum")
-	if len(want) != 81 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV17(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
-		t.Fatal("current builder does not use V16 plus the two fused routed-FFN modules exactly once")
+	if len(want) != 81 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV17(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+		t.Fatal("historical V17 is not V16 plus the two fused routed-FFN modules exactly once")
 	}
 	registry, err := vulkanRegistryV17.identity()
 	if err != nil {

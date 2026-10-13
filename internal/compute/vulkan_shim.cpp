@@ -299,7 +299,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -332,7 +332,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherGDN;
     case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
     case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL: case K_V41_SCALE_EXACT: case K_V41_ENGRAM_ROW_DECODE: case K_V41_ROUTED_PUBLISH_SUM:
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_V41_Q2K_TOKEN_PANEL: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -343,7 +343,7 @@ static inline void dpDispatch(const Kernel& k) {
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
-    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC || id == K_V41_Q2K_MATVEC_ID) {
+    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC || id == K_V41_Q2K_MATVEC_ID || id == K_V41_Q2K_TOKEN_PANEL) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_dp.other.fetch_add(1, std::memory_order_relaxed);
@@ -1417,7 +1417,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -3778,6 +3778,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20)) {
         buildKernel(g_kern[K_V41_ROUTED_DOWN_SUM], P("v41_routed_down_sum.spv"), 12, 16);
     }
+    // Experimental V18 token tile: do not even build its pipeline unless the
+    // exact opt-in was supplied before Vulkan initialization. An absent module
+    // never disables the existing Q2_K paths.
+    const char* q2TokenEnv = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
+    if (q2TokenEnv && q2TokenEnv[0] == '1' && q2TokenEnv[1] == '\0' && g_v41IndexerFloatControls) {
+        buildKernel(g_kern[K_V41_Q2K_TOKEN_PANEL], P("v41_q2k_token_panel.spv"), 3, 12);
+    }
     // Registry V9/current68 promotes only the unchanged finite checked module.
     // A current archive and its complete bundle cut over together. Keep the
     // capability false unless mandatory initialization completes below.
@@ -5696,6 +5703,42 @@ static int v41RoutedIDState(bool requireFused = false) {
 static bool v41RoutedIDBytesOK(const Buffer* b, uint64_t bytes) {
     return b && b->buf != VK_NULL_HANDLE && b->mem != VK_NULL_HANDLE && bytes > 0 && bytes <= b->bytes &&
         b->bytes <= std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset;
+}
+
+int fvk_have_v41_q2k_token_panel(void) {
+    const char* enabled = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
+    return enabled && enabled[0] == '1' && enabled[1] == '\0' && g_ready && g_v41IndexerFloatControls &&
+        g_kern[K_V41_Q2K_TOKEN_PANEL].pipe != VK_NULL_HANDLE && g_kern[K_V41_Q2K_TOKEN_PANEL].nbuf == 3;
+}
+
+int fvk_v41_q2k_token_panel_shape(int out, int in, int tokens) {
+    if ((tokens != 2 && tokens != 4 && tokens != 8) || out <= 0 || in <= 0 || in % 256 != 0) return 0;
+    const uint64_t wBytes = uint64_t(out) * uint64_t(in / 256) * 84u;
+    const uint64_t xBytes = uint64_t(tokens) * uint64_t(in) * 4u;
+    const uint64_t yBytes = uint64_t(tokens) * uint64_t(out) * 4u;
+    const uint64_t groups = (uint64_t(out) + 1u) / 2u;
+    return wBytes <= INT32_MAX && xBytes <= INT32_MAX && yBytes <= INT32_MAX &&
+        g_maxComputeWorkGroupCountX != 0 && groups <= g_maxComputeWorkGroupCountX;
+}
+
+int fvk_v41_q2k_token_panel_f32(const void* dW, const void* dX, void* dY, int out, int in, int tokens) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_q2k_token_panel()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if ((g_batching && !g_stepBatch) || !fvk_v41_q2k_token_panel_shape(out, in, tokens)) return 2;
+    Buffer* bufs[3] = {B((void*)dW), B((void*)dX), B(dY)};
+    if (!v41RoutedIDBytesOK(bufs[0], uint64_t(out) * uint64_t(in / 256) * 84u) ||
+        !v41RoutedIDBytesOK(bufs[1], uint64_t(tokens) * uint64_t(in) * 4u) ||
+        !v41RoutedIDBytesOK(bufs[2], uint64_t(tokens) * uint64_t(out) * 4u) ||
+        v41BuffersAlias(bufs[2], bufs[0]) || v41BuffersAlias(bufs[2], bufs[1])) return 2;
+    struct Push { int32_t outDim, inDim, tokens; } pc{out, in, tokens};
+    static_assert(sizeof(Push) == 12 && offsetof(Push, inDim) == 4 && offsetof(Push, tokens) == 8,
+                  "Q2_K token-panel push ABI must be three int32 values");
+    if (!dispatch(g_kern[K_V41_Q2K_TOKEN_PANEL], bufs, &pc, sizeof(pc), uint32_t((uint64_t(out) + 1u) / 2u), 1, true)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
 }
 
 // dtype 0 is Q2_K (84-byte blocks), 1 is Q3_K (110-byte blocks). xStride is the

@@ -84,6 +84,20 @@ func (v *vulkanBackend) RMSNormMatMulArgmax(w, x, normWeight Tensor, eps float32
 // BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ over P input rows, dispatching the
 // F32, Q8_0, Q4_K, Q6_K, Q5_K, Q3_K, or Q2_K shader by the weight's dtype.
 func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
+	// An unavailable or unrequested tile declines before allocations/recording.
+	// Once selected, any validation or device failure surfaces without replay.
+	if w.Dtype == Q2_K && v.SupportsV41Q2KTokenPanel(w, P) {
+		input := X
+		if len(X.Shape) == 2 && X.Shape[0] == P && X.Shape[1] == w.Shape[1] {
+			input.Shape = []int{P * w.Shape[1]}
+		}
+		y, err := v.V41Q2KTokenPanel(w, input, P)
+		if err != nil {
+			panic(err)
+		}
+		y.Shape = []int{P, w.Shape[0]}
+		return y
+	}
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	if w.Dtype == Q6_K {

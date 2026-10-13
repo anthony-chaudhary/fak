@@ -18,5 +18,45 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "v41q2ktokenpanelplan",
+      "canonical": "V41Q2KTokenPanelPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure bounded Q2_K token-panel geometry carrying output/input widths, exactly 2/4/8 rows, validated byte extents and the workgroup count for the three-int32 shader push ABI.",
+      "distinction": "An immutable launch geometry result, not a recorded Vulkan command buffer or a device qualification claim.",
+      "distinct_from": [
+        "x2-plan-vulkanplan",
+        "planv41q2ktokenpanel"
+      ],
+      "aliases": [],
+      "grounding": "V41Q2KTokenPanelPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "planv41q2ktokenpanel",
+      "canonical": "PlanV41Q2KTokenPanel",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure planner that validates Q2_K matrix geometry, block divisibility, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q2KTokenPanelPlan.",
+      "distinction": "Performs host arithmetic admission only; the returned plan holds geometry while provider capability and opt-in decide whether native execution is available.",
+      "distinct_from": [
+        "v41q2ktokenpanelplan",
+        "x2-plan-vulkanplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanV41Q2KTokenPanel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

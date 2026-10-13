@@ -13431,9 +13431,15 @@
           "category": "incidental",
           "reason": "Private backend capability predicate; it makes no product support-maturity or hardware qualification assertion.",
           "token": "v41HeadLayoutSupported"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Runtime capability/admission predicate for owned storage, exact opt-in, pipeline and recording-window state; not a product-support maturity or native qualification assertion.",
+          "token": "SupportsV41Q2KTokenPanel"
         }
       ],
       "exclude": [
+        "SupportsV41Q2KTokenPanel",
         "broadefficiencysupported",
         "factual_correctness"
       ],

@@ -186,6 +186,8 @@ function Build-Shaders {
     # Coupled V17/complete81 migration; V16/79 remains a historical artifact identity.
     $shaders += "v41_routed_gate_up_swiglu_id"
     $shaders += "v41_routed_down_sum"
+    # Coupled V18/complete82 migration; V17/81 remains a historical identity.
+    $shaders += "v41_q2k_token_panel"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

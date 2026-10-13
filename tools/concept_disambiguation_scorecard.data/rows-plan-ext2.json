@@ -92,7 +92,9 @@
       "distinction": "It is a GPU compute/command-buffer plan, NOT a ctxplan conversation resident view nor a compute MemoryPlan headroom fit.",
       "distinct_from": [
         "MemoryPlan (compute)",
-        "fak13823-plan-vulkanreceiptbuildplan"
+        "fak13823-plan-vulkanreceiptbuildplan",
+        "v41q2ktokenpanelplan",
+        "planv41q2ktokenpanel"
       ],
       "aliases": [],
       "grounding": "vulkanplan",

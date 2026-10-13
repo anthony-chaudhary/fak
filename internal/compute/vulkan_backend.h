@@ -469,6 +469,12 @@ int fvk_v41_compressor_pool_f32(const void *dKV, const void *dScores, void *dOut
  * count, float32 limit, weight. Returns the tail RoPE status codes. Optional
  * module (registry V10): absence or missing binary32 float controls leave have=0. */
 int fvk_have_v41_routed_id(void);
+/* Experimental V18 Q2_K same-weight 2/4/8-token panel. Three disjoint output
+ * bindings W/X/Y, push ABI int32 out,in,tokens. No numeric status or host read:
+ * the caller retains its activation/publication checks. Optional and default-off. */
+int fvk_have_v41_q2k_token_panel(void);
+int fvk_v41_q2k_token_panel_shape(int out, int in, int tokens);
+int fvk_v41_q2k_token_panel_f32(const void *dW, const void *dX, void *dY, int out, int in, int tokens);
 int fvk_v41_routed_id_max_picks(void);
 int fvk_v41_matvec_id_f32(int dtype, void *const *dW, int slots, const void *dX, void *dY, const void *dIds,
                           int out, int in, int picks, int xStride);

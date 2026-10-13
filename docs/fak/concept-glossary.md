@@ -1182,3 +1182,17 @@ Selects each decode lane request cancellation/deadline context with driver-conte
 The deadline admission estimator entrypoint that preserves caller-declared budget separately from remaining budget and returns bounded numeric input evidence with the same feasibility verdict and retry policy as AdmitCached.
 
 **Distinct from:** AdmitCached accepts only the remaining budget; AdmitCachedBudget also projects the declared budget and mutex snapshot. The supplied cache count is caller-supplied resident-prefix credit; callers validate route proof separately from prefix identity or cache allocation.
+
+
+### V41Q2KTokenPanelPlan
+
+Pure bounded Q2_K token-panel geometry carrying output/input widths, exactly 2/4/8 rows, validated byte extents and the workgroup count for the three-int32 shader push ABI.
+
+**Distinct from:** An immutable launch geometry result, not a recorded Vulkan command buffer or a device qualification claim.
+
+
+### PlanV41Q2KTokenPanel
+
+Pure planner that validates Q2_K matrix geometry, block divisibility, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q2KTokenPanelPlan.
+
+**Distinct from:** Performs host arithmetic admission only; the returned plan holds geometry while provider capability and opt-in decide whether native execution is available.
