@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:db8c52aa99cd7709af200e119833c6d325cffc689a69a022eebd5423d65d3879",
-  "tracked_files": 25138,
-  "tracked_bytes": 508398181,
+  "content_root": "sha256:d68cbb63a2c6725df1d891c85731ea435c1a90fda085044d380655d171969307",
+  "tracked_files": 25140,
+  "tracked_bytes": 508406702,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -162195,8 +162195,8 @@
     },
     {
       "path": "internal/model/v41_incremental.go",
-      "content_sha256": "sha256:6983195fcb2ac5b9b746906b60fc5fbfa6421516d2ea7192322f3ba10235acd7",
-      "bytes": 20370,
+      "content_sha256": "sha256:c4257e0381908f3bdb1663ede132a11962b8f4156e273f69f8a8864320161097",
+      "bytes": 7828,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163604,6 +163604,24 @@
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_step_transaction.go",
+      "content_sha256": "sha256:580c008612f8879469c3426f45516ae020c13ccbb077482fe80cd2c598b50eb1",
+      "bytes": 15240,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_step_transaction_test.go",
+      "content_sha256": "sha256:cd6eb353314e735233dad430d7f0eb7ac14c2928a9da3a38428174e883f714d7",
+      "bytes": 5823,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
