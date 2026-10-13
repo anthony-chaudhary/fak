@@ -903,7 +903,7 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 
 	bounds := validateWSLPreflightBounds()
 	var out []byte
-	timedOut := false
+	timedOut, serviceFailed := false, false
 	for _, bound := range bounds {
 		probeCtx, cancel := context.WithTimeout(ctx, bound)
 		started := validateNow()
@@ -913,6 +913,7 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 		out, err = validateWSLCommand(probeCtx, "-e", "bash", "-lc", validateWSLCapabilityScript(required))
 		attempt := validateWSLProbeAttempt{BoundMS: bound.Milliseconds(), ElapsedMS: validateNow().Sub(started).Milliseconds(), Outcome: validateWSLProbeOK}
 		timedOut = err != nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		serviceFailed = err != nil && !timedOut && ctx.Err() == nil && validateWSLServiceFailure(out)
 		cancel()
 		switch {
 		case timedOut:
@@ -921,15 +922,19 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 			attempt.Outcome = validateWSLProbeError
 		}
 		verdict.Attempts = append(verdict.Attempts, attempt)
-		if !timedOut {
+		if !timedOut && !serviceFailed {
 			break
 		}
 	}
 	if err != nil {
-		if timedOut {
+		switch {
+		case timedOut:
 			verdict.Status = "unavailable"
 			verdict.Detail = fmt.Sprintf("WSL capability preflight exceeded %s across %d attempts before workspace allocation (raise %s under host load); repair WSL and rerun; no fallback selected", bounds, len(bounds), validateWSLPreflightTimeoutEnv)
-		} else {
+		case serviceFailed:
+			verdict.Status = "unavailable"
+			verdict.Detail = fmt.Sprintf("WSL capability preflight: the WSL service failed to start the distribution across %d attempts: %s; repair WSL and rerun; no fallback selected", len(verdict.Attempts), validateCommandDetail(bytes.ReplaceAll(out, []byte{0}, nil), err))
+		default:
 			verdict.Status = "missing"
 			verdict.Missing = []string{"bash"}
 			verdict.Detail = fmt.Sprintf("WSL capability preflight: bash is unavailable in the selected WSL environment: %s; repair WSL and rerun; no fallback selected", validateCommandDetail(out, err))
@@ -972,6 +977,10 @@ func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapa
 	return verdict
 }
 
+func validateWSLServiceFailure(out []byte) bool {
+	return strings.Contains(strings.ReplaceAll(string(out), "\x00", ""), "Wsl/Service/")
+}
+
 const (
 	validateWSLDistroPrefix  = "__FAK_VALIDATE_DISTRO__="
 	validateWSLPathPrefix    = "__FAK_VALIDATE_PATH__="
@@ -1005,14 +1014,19 @@ func validateWSLEnvironmentIdentity(out []byte) (display, key string) {
 
 func validateWSLCapabilityScript(required []string) string {
 	var checked []string
+	gofmtCheck := ""
 	for _, command := range required {
-		if command != "wsl.exe" {
+		switch command {
+		case "wsl.exe":
+		case "gofmt":
+			gofmtCheck = "g=$(go env GOROOT 2>/dev/null) || g=''; { [ -n \"$g\" ] && [ -x \"$g/bin/gofmt\" ]; } || printf '%s\\n' gofmt; "
+		default:
 			checked = append(checked, posixQuote(command))
 		}
 	}
 	return "set -u; t0=${EPOCHREALTIME:-}; printf '" + validateWSLDistroPrefix + "%s\\n" + validateWSLPathPrefix + "%s\\n' \"${WSL_DISTRO_NAME:-unknown}\" \"${PATH:-}\"; " +
 		"for cmd in " + strings.Join(checked, " ") + "; do " +
-		"command -v \"$cmd\" >/dev/null 2>&1 || printf '%s\\n' \"$cmd\"; done; " +
+		"command -v \"$cmd\" >/dev/null 2>&1 || printf '%s\\n' \"$cmd\"; done; " + gofmtCheck +
 		"t1=${EPOCHREALTIME:-}; if [ -n \"$t0\" ] && [ -n \"$t1\" ]; then printf '" + validateWSLCheckUSPrefix + "%s\\n' \"$(( 10#${t1//[.,]/} - 10#${t0//[.,]/} ))\"; fi"
 }
 

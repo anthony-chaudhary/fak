@@ -3,6 +3,7 @@ package validate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -64,19 +65,79 @@ func TestValidateWSLCapabilityPreflightReportsMissingAndCachesByIdentity(t *test
 	}
 }
 
-func TestValidateWSLCapabilityScriptReportsGofmtMissingFromPATH(t *testing.T) {
+func TestValidateWSLCapabilityScriptResolvesGofmtFromGOROOT(t *testing.T) {
 	script := validateWSLCapabilityScript([]string{"wsl.exe", "go", "gofmt"})
-	if !strings.Contains(script, "for cmd in 'go' 'gofmt'") || !strings.Contains(script, "command -v \"$cmd\"") {
-		t.Fatalf("capability script does not check bare go and gofmt through PATH: %s", script)
+	if !strings.Contains(script, "for cmd in 'go'") || !strings.Contains(script, "command -v \"$cmd\"") {
+		t.Fatalf("capability script does not retain the PATH check for go: %s", script)
 	}
-	if strings.Contains(script, "GOROOT") || strings.Contains(script, "go env") {
-		t.Fatalf("capability script accepts a GOROOT-only gofmt that the real command cannot invoke: %s", script)
+	if strings.Contains(script, "for cmd in 'go' 'gofmt'") {
+		t.Fatalf("capability script still requires a bare PATH gofmt: %s", script)
+	}
+	if !strings.Contains(script, "go env GOROOT") || !strings.Contains(script, `-x "$g/bin/gofmt"`) {
+		t.Fatalf("capability script does not resolve the executable used by the WSL gofmt phase: %s", script)
 	}
 
-	stubValidateWSLCapabilityCommands(t, "Ubuntu-24.04\n/usr/bin", "gofmt\n")
+	checkRuns := stubValidateWSLCapabilityCommands(t, "Ubuntu-24.04\n/usr/bin", "gofmt\n")
 	verdict := preflightValidateWSLCapabilitiesWithin(context.Background())
-	if verdict.Status != "missing" || strings.Join(verdict.Missing, ",") != "gofmt" {
-		t.Fatalf("verdict = %+v; want go present and bare gofmt missing", verdict)
+	if verdict.Status != "missing" || strings.Join(verdict.Missing, ",") != "gofmt" || *checkRuns != 1 {
+		t.Fatalf("missing GOROOT formatter verdict = %+v, runs = %d", verdict, *checkRuns)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestValidateWSLCapabilityPreflightRetriesServiceFailure(t *testing.T) {
+	serviceError := []byte("E\x00r\x00r\x00o\x00r\x00 \x00c\x00o\x00d\x00e\x00:\x00 \x00W\x00s\x00l\x00/\x00S\x00e\x00r\x00v\x00i\x00c\x00e\x00/\x00E\x00_\x00U\x00N\x00E\x00X\x00P\x00E\x00C\x00T\x00E\x00D\x00")
+	ready := []byte(validateWSLDistroPrefix + "Ubuntu-24.04\n" + validateWSLPathPrefix + "/usr/bin\n")
+	tests := []struct {
+		name        string
+		ctx         context.Context
+		command     func(int) ([]byte, error)
+		wantStatus  string
+		wantMissing string
+		wantRuns    int
+	}{
+		{"persistent service failure", context.Background(), func(int) ([]byte, error) { return serviceError, errors.New("exit status 1") }, "unavailable", "", 2},
+		{"transient service failure", context.Background(), func(run int) ([]byte, error) {
+			if run == 1 {
+				return serviceError, errors.New("exit status 1")
+			}
+			return ready, nil
+		}, "ready", "", 2},
+		{"ordinary command failure", context.Background(), func(int) ([]byte, error) { return nil, errors.New("exit status 1") }, "missing", "bash", 1},
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests = append(tests, struct {
+		name        string
+		ctx         context.Context
+		command     func(int) ([]byte, error)
+		wantStatus  string
+		wantMissing string
+		wantRuns    int
+	}{"parent cancellation", canceled, func(int) ([]byte, error) { return serviceError, context.Canceled }, "missing", "bash", 1})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetValidateWSLCapabilityCacheForTest()
+			oldLookPath := validateWSLLookPath
+			oldCommand := validateWSLCommand
+			validateWSLLookPath = func(string) (string, error) { return `C:\Windows\System32\wsl.exe`, nil }
+			attempts := 0
+			validateWSLCommand = func(context.Context, ...string) ([]byte, error) {
+				attempts++
+				return tt.command(attempts)
+			}
+			t.Cleanup(func() {
+				validateWSLLookPath = oldLookPath
+				validateWSLCommand = oldCommand
+				resetValidateWSLCapabilityCacheForTest()
+			})
+
+			verdict := preflightValidateWSLCapabilitiesWithin(tt.ctx)
+			if attempts != tt.wantRuns || verdict.Status != tt.wantStatus || strings.Join(verdict.Missing, ",") != tt.wantMissing || len(verdict.Attempts) != tt.wantRuns {
+				t.Fatalf("attempts = %d, verdict = %+v", attempts, verdict)
+			}
+		})
 	}
 }
 
