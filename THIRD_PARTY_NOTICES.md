@@ -285,9 +285,13 @@ https://github.com/PKU-SEC-Lab/HybriMoE/blob/508a85b9a43dff37124370d8816e411e748
 
 Changed for Fak: the policies are reimplemented over the package's offline
 unit-group access stream and its deterministic tie-break (`groupLess`), not over
-a torch tensor store or the upstream ring. HybriMoE's `TopP(s)` routing score is
-not carried by a routed-expert trace, so the offline arm substitutes an access
-indicator (1.0); `alpha` defaults to 0.5. No upstream storage, scheduler,
+a torch tensor store or the upstream ring. The optional `CachePolicyStream.Scores` and `fak expert-trace policy` use selected
+route weights emitted by Fak's router. These are selected expert weights, not
+HybriMoE's full-distribution top-p scores. Fak decays all tracked scores once per flattened
+expert access, whereas upstream updates one layer's selected scores together.
+An omitted score array preserves the prior access-indicator (1.0) experiment;
+`alpha` remains 0.5. The CLI requires scores and labels its capacity as global
+uniform expert slots. No serving eviction policy is changed. No upstream storage, scheduler,
 kernel or test fixture is copied.
 
 The HybriMoE Apache-2.0 license follows:
@@ -614,3 +618,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## freetoken-mlx adaptive segmented LRU replay
+
+The optional offline `slru` replay arm in `internal/deepseekv4moe/cache_policy_slru.go`
+is adapted from `stevezkw1998/freetoken-mlx`, commit
+`2d5bd339ab599a36e663ef90a813fc0adc5ad0a9`,
+`python/freetoken/mlx_cache.py:45-98`:
+https://github.com/stevezkw1998/freetoken-mlx/blob/2d5bd339ab599a36e663ef90a813fc0adc5ad0a9/python/freetoken/mlx_cache.py
+
+Licensed under Apache License, Version 2.0 (upstream `LICENSE`), copyright and
+attribution retained from the FreeToken/freetoken-mlx contributors. License text:
+https://www.apache.org/licenses/LICENSE-2.0
+The upstream source file has no individual copyright header and the acquired
+repository has no root NOTICE file. This adaptation replaces Python ordered
+maps with Go ordered lists, computes the 10%/80% protected target without integer
+overflow, and stores only touched resident groups. It preserves the switch after
+more than four full-capacity request windows. It is an offline experiment,
+without MLX materialization, serving eviction or a hardware performance claim.

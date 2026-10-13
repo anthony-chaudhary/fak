@@ -15,15 +15,16 @@ type KVPreemptionMetricWriter interface {
 	WriteKVPreemptionMetrics(*strings.Builder)
 }
 
-// SetKVPreemptor wires the native KV preemption gate (#31) onto the Server so its
+// SetKVPreemptor wires the live native scheduler or gateway preemptor onto the Server so
 // fak_sched_preempt_* metrics render into /metrics. Passing nil detaches it, keeping the
 // surface inert by default for servers that do not own a paged native scheduler.
-func (s *Server) SetKVPreemptor(c *KVPreemptor) {
+func (s *Server) SetKVPreemptor(c KVPreemptionMetricWriter) {
 	s.SetKVPreemptionMetrics(c)
 }
 
 // SetKVPreemptionMetrics wires a provider of #31 preemption counters onto the live /metrics
-// render path. It accepts the older gateway KVPreemptor and the modelengine NativeScheduler.
+// render path. It accepts the gateway KVPreemptor, modelengine NativeScheduler, and the
+// startup-captured writer of the selected native Engine.
 func (s *Server) SetKVPreemptionMetrics(c KVPreemptionMetricWriter) {
 	if s == nil {
 		return

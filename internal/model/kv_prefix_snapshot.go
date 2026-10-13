@@ -412,18 +412,22 @@ func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 		return
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.halKV != nil {
-		p.halKV.Free()
-		p.halKV = nil
-	}
-	if p.qwen35 != nil {
-		p.qwen35.free(p.Backend)
-		p.qwen35 = nil
-	}
+	// Detach ownership before callbacks so legacy backends can re-enter Close
+	// without waiting on this snapshot mutex. The caller's backend execution
+	// scope, when present, still owns device cleanup.
+	kv, recurrent, backend := p.halKV, p.qwen35, p.Backend
+	p.halKV, p.qwen35 = nil, nil
+	p.halLineage = tokenLineage{}
 	p.Cache = nil
 	p.targetHidden, p.targetHiddenTokens = nil, nil
 	p.v41 = nil
+	p.mu.Unlock()
+	if kv != nil {
+		kv.Free()
+	}
+	if recurrent != nil {
+		recurrent.free(backend)
+	}
 }
 
 // snapshotResidentPositions reports a restore target's resident position count

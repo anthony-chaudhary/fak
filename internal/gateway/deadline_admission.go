@@ -66,7 +66,7 @@ func (s *Server) admitRoutedClientDeadline(w http.ResponseWriter, r *http.Reques
 // historical cache observation earns credit.
 func (s *Server) admitRoutedClientDeadlineModel(w http.ResponseWriter, r *http.Request, arrived time.Time, model string, messages []agent.Message, maxTokens int) (*http.Request, func(), bool) {
 	planner, native := s.chatPlanner(r.Context()).(*agent.InKernelPlanner)
-	_, hasBudget := deadlineadmit.Budget(r.Header)
+	budget, hasBudget := deadlineadmit.Budget(r.Header)
 	if !native || !hasBudget || !planner.ExecutionDeadlineAdmissionSupported() {
 		return s.admitClientDeadlineChat(w, r, arrived, model, messages, maxTokens)
 	}
@@ -99,10 +99,10 @@ func (s *Server) admitRoutedClientDeadlineModel(w http.ResponseWriter, r *http.R
 		// Re-evaluate every attempt, including OOM retries, with time spent in
 		// cloning/restoring/setup already consumed. After Begin, retry estimates
 		// conservatively include this request in the existing in-flight count.
-		v := est.AdmitCached(prompt, cached, output, time.Until(deadline), true)
+		v := est.AdmitCachedBudget(prompt, cached, output, budget, time.Until(deadline), true)
 		if !v.Admit {
 			s.logf("gateway: deadline admission refused: reason=%s estimate=%s remaining=%s in_flight=%d prompt_tokens=%d predicted_cached=%d credit_source=execution-owned-prefix",
-				v.Reason, v.Estimate, v.Remaining, est.InFlight(), prompt, cached)
+				v.Reason, v.Estimate, v.Remaining, v.Evidence.InFlight, prompt, cached)
 			return &deadlineAdmissionError{verdict: v}
 		}
 		if end == nil {
@@ -203,10 +203,10 @@ func (s *Server) admitClientDeadlineCached(w http.ResponseWriter, r *http.Reques
 	}
 	budget, has := deadlineadmit.Budget(r.Header)
 	remaining := budget - time.Since(arrived)
-	v := est.AdmitCached(promptTok, cachedTok, maxTokens, remaining, has)
+	v := est.AdmitCachedBudget(promptTok, cachedTok, maxTokens, budget, remaining, has)
 	if !v.Admit {
 		s.logf("gateway: deadline admission refused: reason=%s estimate=%s remaining=%s in_flight=%d prompt_tokens=%d predicted_cached=%d",
-			v.Reason, v.Estimate, v.Remaining, est.InFlight(), promptTok, cachedTok)
+			v.Reason, v.Estimate, v.Remaining, v.Evidence.InFlight, promptTok, cachedTok)
 		deadlineadmit.WriteRefusal(w, v)
 		return r, nil, false
 	}

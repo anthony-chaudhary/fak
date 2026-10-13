@@ -213,6 +213,7 @@ func TestDeadlineAdmissionPreparedSoftSlotResidency(t *testing.T) {
 			srv, p, f := softDeadlineServer(t)
 			slot := softDeadlineCold(t, srv, f)
 			wantCredit := name == "buffered" || name == "streamed" || name == "other_slot_evicted"
+			shapedPromptTokens := 0
 			f.mu.Lock()
 			switch name {
 			case "shorter_watchdog":
@@ -244,7 +245,12 @@ func TestDeadlineAdmissionPreparedSoftSlotResidency(t *testing.T) {
 				p.CoherenceShaper = func(messages []agent.Message) []agent.Message { return messages[:1] }
 			case "shaping_grows_tail":
 				p.CoherenceShaper = func(messages []agent.Message) []agent.Message {
-					return append(append([]agent.Message(nil), messages...), agent.Message{Role: "user", Content: strings.Repeat("x", 400_000)})
+					out := append(append([]agent.Message(nil), messages...), agent.Message{Role: "user", Content: strings.Repeat("x", 400_000)})
+					// Capture the real gateway-prepared input, including gateway-added
+					// content, then apply the planner's following stabilization seam.
+					prepared, _ := agent.StabilizePromptPrefix(out)
+					shapedPromptTokens = estimateMessageContentTokens(prepared)
+					return out
 				}
 			case "static_authorization_override":
 				p.ExtraHeaders = map[string]string{"Authorization": "Bearer distinct-static-tenant"}
@@ -265,6 +271,12 @@ func TestDeadlineAdmissionPreparedSoftSlotResidency(t *testing.T) {
 				}
 			} else if !isColdRefusal(w) || len(f.dispatch) != 1 {
 				t.Fatalf("unproven warm prefix dispatched: status=%d reject=%q calls=%+v body=%s", w.Code, w.Header().Get(deadlineadmit.HeaderReject), f.dispatch, w.Body.String())
+			}
+			if name == "shaping_grows_tail" {
+				x, err := deadlineadmit.ReadEvidence(bytes.NewReader(w.Body.Bytes()))
+				if err != nil || x == nil || x.DeclaredBudgetMS == nil || *x.DeclaredBudgetMS != 600000 || x.RemainingBudgetMS <= 0 || x.RemainingBudgetMS > 600000 || shapedPromptTokens <= estimateMessageContentTokens(warm) || x.PromptTokens != int64(shapedPromptTokens) || x.CachedTokens != 0 || x.OutputCeiling != 0 || x.InFlight != 0 {
+					t.Fatalf("prepared soft-slot refusal lost actual shaped inputs: %+v err=%v", x, err)
+				}
 			}
 		})
 	}

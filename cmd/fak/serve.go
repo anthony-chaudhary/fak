@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -27,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
+	"github.com/anthony-chaudhary/fak/internal/modelengine"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
@@ -1136,6 +1138,9 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 			_ = controlIngress.Close()
 		}
 		return nil, err
+	}
+	if native, ok := abi.Engine(*sf.engineID).(*modelengine.Engine); ok {
+		srv.SetKVPreemptor(native.KVPreemptionMetricWriter())
 	}
 	srv.AddStartupMessages(startupMessages...)
 	// fak#13567: gateway.New built the in-kernel planner, which performs the Metal residency
