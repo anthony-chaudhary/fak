@@ -40,7 +40,7 @@ func CompleteOpenAIChat(ctx context.Context, client *http.Client, endpoint, mode
 		"model":       model,
 		"stream":      false,
 		"temperature": 0,
-		"messages":    messages,
+		"messages":    openAIWireMessages(messages),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
