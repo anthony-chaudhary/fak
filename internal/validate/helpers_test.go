@@ -2,11 +2,15 @@ package validate
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOwnedTestRunExpressionSelectsOnlyOwnedTests(t *testing.T) {
@@ -77,6 +81,120 @@ func TestValidateBuildAndVetArgsArePathPortable(t *testing.T) {
 		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
 			t.Fatalf("%s args = %v, want exact %v", tc.mode, got, tc.want)
 		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestValidateGoVetArgsWithinUsesSelectedCgoMetadata(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "1")
+	t.Setenv("GOWORK", "off")
+	writeModule := func(root, source string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, "p"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for rel, body := range map[string]string{
+			"go.mod": "module vetargs.test\n\ngo 1.21\n",
+			"p/p.go": source,
+		} {
+			if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	pure := filepath.Join(t.TempDir(), "pure")
+	writeModule(pure, "package p\n\nfunc Value() int { return 1 }\n")
+	args, err := validateGoVetArgsWithin(context.Background(), pure, false, []string{"./p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(args, "|"), "vet|-trimpath|./p"; got != want {
+		t.Fatalf("pure-Go vet args = %q, want %q", got, want)
+	}
+
+	cgo := filepath.Join(t.TempDir(), "cgo")
+	writeModule(cgo, "package p\n\n/* int value(void); */\nimport \"C\"\n\nfunc Value() int { return int(C.value()) }\n")
+	args, err = validateGoVetArgsWithin(context.Background(), cgo, false, []string{"./p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(args, "|"), "vet|./p"; got != want {
+		t.Fatalf("cgo vet args = %q, want %q", got, want)
+	}
+	if _, err := validateGoVetArgsWithin(context.Background(), pure, false, []string{"./missing"}); err == nil {
+		t.Fatal("missing target metadata probe succeeded; want fail-closed error")
+	}
+}
+
+// fak-test:runtime slow est=15s
+func TestValidateGoVetArgsWithinAvoidsRemovedCgoWorkspaceCachePath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("WSL cache-path regression applies to Windows validation")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if verdict := preflightValidateWSLCapabilitiesWithin(ctx); verdict.Status != "ready" {
+		t.Skipf("WSL validation unavailable: %s", verdict.Detail)
+	}
+
+	nonce := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	first := "/tmp/fak-validate-vetargs-" + nonce + "-one"
+	second := "/tmp/fak-validate-vetargs-" + nonce + "-two"
+	cache := "/tmp/fak-validate-vetargs-cache-" + nonce
+	for _, dir := range []string{first, second, cache} {
+		dir := dir
+		defer cleanupValidateWSLDir(dir)
+	}
+	if out, err := runValidateWSLCommandWithin(ctx, "/", "mkdir", "-p", first, second, cache); err != nil {
+		t.Fatalf("create WSL fixtures: %v: %s", err, out)
+	}
+
+	source := t.TempDir()
+	files := map[string]string{
+		"go.mod":          "module buildcheck.test\n\ngo 1.21\n",
+		"p/p.go":          "package p\n\n/*\nint native_value(void);\n*/\nimport \"C\"\n\nfunc Value() int { return int(C.native_value()) }\n",
+		"p/native.c":      "int native_value(void) { return 2; }\n",
+		"cmd/fak/main.go": "package main\n\nimport \"buildcheck.test/p\"\n\nfunc main() { _ = p.Value() }\n",
+	}
+	var paths []string
+	for rel, body := range files {
+		paths = append(paths, rel)
+		full := filepath.Join(source, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slices.Sort(paths)
+	for _, root := range []string{first, second} {
+		if err := overlayMinePathsWSLWithin(ctx, source, root, paths, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	targets := []string{"buildcheck.test/cmd/fak", "buildcheck.test/p"}
+	env := []string{"GOWORK=off", "GOCACHE=" + cache}
+	if out, ok := validateRunGoEnvWithin(ctx, first, true, env, validateGoCheckArgs("vet", targets)...); !ok {
+		t.Fatalf("seed trimmed cgo vet cache: %s", out)
+	}
+	cleanupValidateWSLDir(first)
+	if out, err := runValidateWSLCommandWithin(ctx, "/", "test", "!", "-e", first); err != nil {
+		t.Fatalf("first workspace still exists: %v: %s", err, out)
+	}
+	if out, ok := validateRunGoEnvWithin(ctx, second, true, env, validateGoCheckArgs("vet", targets)...); ok {
+		t.Fatalf("trimmed warm-cache control unexpectedly passed after its source workspace was removed: %q", out)
+	}
+	args, err := validateGoVetArgsWithin(ctx, second, true, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, "-trimpath") {
+		t.Fatalf("selected cgo vet args retain unsafe trimpath: %v", args)
+	}
+	if out, ok := validateRunGoEnvWithin(ctx, second, true, env, args...); !ok {
+		t.Fatalf("cgo-safe warm-cache vet failed: %s", out)
 	}
 }
 

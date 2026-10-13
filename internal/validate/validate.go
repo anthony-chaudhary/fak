@@ -470,11 +470,33 @@ func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validate
 
 	phase := recorder.start("vet")
 	if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "vet", errors.New("affected package vet failed"), asJSON, func() (string, bool) {
-		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("vet", vetTargets)...)
+		args, err := validateGoVetArgsWithin(ctx, dir, wslWorkspace, vetTargets)
+		if err != nil {
+			return "select cgo-safe vet cache identity: " + err.Error(), false
+		}
+		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, args...)
 	}); timedOut {
 		return code, true
 	}
 	return 0, false
+}
+
+func validateGoVetArgsWithin(ctx context.Context, dir string, wsl bool, targets []string) ([]string, error) {
+	listArgs := append([]string{"list", "-f", "{{if .CgoFiles}}{{.ImportPath}}{{end}}"}, targets...)
+	out, ok := validateRunGoEnvWithin(ctx, dir, wsl, nil, listArgs...)
+	if !ok {
+		if out == "" {
+			out = "go list failed"
+		}
+		return nil, errors.New(out)
+	}
+	if strings.TrimSpace(out) != "" {
+		// Vet's cgocall analyzer reparses the raw cgo source path stored in export data.
+		// A trimmed cache identity may reuse that path after a validation workspace is
+		// removed, so cgo vet keeps the current workspace path in its cache key.
+		return append([]string{"vet"}, targets...), nil
+	}
+	return validateGoCheckArgs("vet", targets), nil
 }
 
 func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip, effectiveTestRun string, fileToPkg map[string]string, wslTests, wslWorkspace, auditSelection, asJSON bool) (affectedtests.TestObservation, int, bool) {

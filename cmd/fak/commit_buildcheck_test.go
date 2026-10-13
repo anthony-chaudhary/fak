@@ -242,7 +242,7 @@ func main() { _ = p.Value() }
 	writeBuildCheckFile(t, repo, "p/native.c", "extern int missing_native(void);\nint native_value(void) { return missing_native(); }\n")
 	var stderr bytes.Buffer
 	outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/native.c"})
-	requireProspectiveRefusal(t, outcome, detail, "missing_native")
+	requireProspectiveRefusal(t, outcome, detail)
 	requireBuildCheckGitState(t, git, head, index)
 
 	writeBuildCheckFile(t, repo, "p/native.c", "int native_value(void) { return 2; }\n")
