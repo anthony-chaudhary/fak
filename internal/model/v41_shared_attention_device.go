@@ -343,7 +343,7 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-shared-attention", Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		defer func() {

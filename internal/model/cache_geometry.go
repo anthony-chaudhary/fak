@@ -197,6 +197,12 @@ func (s *Session) currentCacheGeometry() CacheGeometry {
 // window pools while no forward operation is active. Model weights are untouched.
 // Existing context is deliberately invalidated because allocator identities change.
 func (s *Session) RebuildCacheGeometry(req CacheGeometryRequest) (report CacheRebuildReport, err error) {
+	scope := s.beginBackendExecution()
+	defer scope.finishError(&err)
+	return s.rebuildCacheGeometryOwned(req)
+}
+
+func (s *Session) rebuildCacheGeometryOwned(req CacheGeometryRequest) (report CacheRebuildReport, err error) {
 	started := time.Now()
 	if !s.cacheGeometryMu.TryLock() {
 		return report, &CacheRebuildError{Reason: CacheRebuildBusy}

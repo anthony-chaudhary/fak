@@ -129,7 +129,7 @@ func (s *Session) v41DeviceOnlyMissingOp(layer int, op string) error {
 		Cause: fmt.Errorf("%w: %s", errV41DeviceOnlyHostOp, op),
 	}
 	s.halFailure = closed
-	s.Close()
+	s.closeBackendOwned()
 	return closed
 }
 

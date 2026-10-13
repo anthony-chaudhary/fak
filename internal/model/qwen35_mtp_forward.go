@@ -67,7 +67,13 @@ func (m *Model) NewQwen35MTPForwardWithBackend(be compute.Backend) (*Qwen35MTPFo
 	return m.newQwen35MTPForward(be)
 }
 
-func (m *Model) newQwen35MTPForward(be compute.Backend) (*Qwen35MTPForward, error) {
+func (m *Model) newQwen35MTPForward(be compute.Backend) (forward *Qwen35MTPForward, err error) {
+	scope := beginBackendExecution(be)
+	defer scope.finishError(&err)
+	return m.newQwen35MTPForwardOwned(scope, be)
+}
+
+func (m *Model) newQwen35MTPForwardOwned(scope *backendExecutionScope, be compute.Backend) (*Qwen35MTPForward, error) {
 	if m == nil {
 		return nil, qwen35MTPStateError("model", "non-nil model", "nil")
 	}
@@ -86,7 +92,7 @@ func (m *Model) newQwen35MTPForward(be compute.Backend) (*Qwen35MTPForward, erro
 	held := true
 	defer func() {
 		if held {
-			m.releaseWeightSession()
+			scope.afterRelease(m.releaseWeightSession)
 		}
 	}()
 
@@ -227,6 +233,7 @@ func (m *Model) newQwen35MTPForward(be compute.Backend) (*Qwen35MTPForward, erro
 		draft.halW = make(map[string]compute.Tensor)
 		draft.borrowedHALW = make(map[string]struct{})
 	}
+	scope.bind(draft)
 	draft.initMixedQKV()
 	forward := &Qwen35MTPForward{
 		target: m, draft: draft, mat: mat, tensorFormat: layout.Format, lastPos: -1,
@@ -238,7 +245,7 @@ func (m *Model) newQwen35MTPForward(be compute.Backend) (*Qwen35MTPForward, erro
 		forward.receipt.TransferCounterScope = "backend-global counter deltas; exclusive execution required for per-draft attribution"
 		if err := forward.initResidentMTP(); err != nil {
 			held = false
-			forward.Close()
+			forward.closeOwned(scope)
 			return nil, err
 		}
 	}
@@ -251,6 +258,15 @@ func (f *Qwen35MTPForward) Close() {
 	if f == nil {
 		return
 	}
+	scope := f.draft.beginBackendExecution()
+	defer scope.finish()
+	f.closeOwned(scope)
+}
+
+func (f *Qwen35MTPForward) closeOwned(scope *backendExecutionScope) {
+	if f == nil {
+		return
+	}
 	f.closeOnce.Do(func() {
 		f.closed = true
 		if f.draft != nil {
@@ -259,16 +275,16 @@ func (f *Qwen35MTPForward) Close() {
 				releaseModelQ4KHandles(f.draft.M)
 				f.draft.M.releaseMetalQ8Residency()
 			}
-			f.draft.Close()
+			f.draft.closeOwned(scope)
 			if f.resident != nil && draftModel != nil {
 				// Resident weights are memoized on the short-lived aliased draft
 				// model. Close that model-owned pool after the session drops its
 				// borrowed handles so rebase/recreate cannot accumulate VRAM.
-				_ = draftModel.CloseWeights()
+				scope.afterRelease(func() { _ = draftModel.CloseWeights() })
 			}
 		}
 		if f.target != nil {
-			f.target.releaseWeightSession()
+			scope.afterRelease(f.target.releaseWeightSession)
 		}
 	})
 }
@@ -279,7 +295,16 @@ func (f *Qwen35MTPForward) Close() {
 //  2. concatenate [embedding, hidden] and apply mtp.fc;
 //  3. execute the exact retained mtp.layers.0 decoder tensors;
 //  4. apply mtp.norm and the shared target LM head.
-func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []float32) ([]float32, error) {
+func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []float32) (logits []float32, err error) {
+	if f == nil {
+		return nil, qwen35MTPStateError("forward state", "initialized Qwen35MTPForward", "nil")
+	}
+	scope := f.draft.beginBackendExecution()
+	defer scope.finishError(&err)
+	return f.forwardOwned(pos, priorHidden, currentEmbedding)
+}
+
+func (f *Qwen35MTPForward) forwardOwned(pos int, priorHidden, currentEmbedding []float32) ([]float32, error) {
 	if f == nil || f.target == nil || f.draft == nil || f.draft.Cache == nil {
 		return nil, qwen35MTPStateError("forward state", "initialized Qwen35MTPForward", "nil or incomplete")
 	}
@@ -305,7 +330,7 @@ func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []floa
 	x = f.draft.blockStep(0, pos, x, cos, sin, f.mat)
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
-	return f.ProjectHead(f.draft.M.finalNorm(x)), nil
+	return f.projectHeadOwned(f.draft.M.finalNorm(x)), nil
 }
 
 // SetDraftVocabFilter configures the empirical draft vocabulary filter on the forward head.
@@ -327,6 +352,15 @@ func (f *Qwen35MTPForward) DraftVocabFilter() *DraftVocabFilter {
 // is configured on the forward head, it projects only across the truncated vocabulary
 // subset. Otherwise, it projects across the full model vocabulary.
 func (f *Qwen35MTPForward) ProjectHead(xf []float32) []float32 {
+	if f == nil {
+		return nil
+	}
+	scope := f.draft.beginBackendExecution()
+	defer scope.finish()
+	return f.projectHeadOwned(xf)
+}
+
+func (f *Qwen35MTPForward) projectHeadOwned(xf []float32) []float32 {
 	if f == nil || f.draft == nil || f.draft.M == nil {
 		return nil
 	}

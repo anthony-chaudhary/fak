@@ -82,7 +82,7 @@ func (d *v41MHCDevice) fail(layer int, op, stage string, cause error) error {
 	}
 	d.s.halFailure = closed
 	d.s.halClosed = true
-	d.s.Close()
+	d.s.closeBackendOwned()
 	return &V41MHCOperationError{Layer: layer, Op: op, Cause: closed}
 }
 

@@ -79,6 +79,15 @@ func (p *PrefixSnapshot) ResidencyBytes() (host, device int64) {
 // snapshot. Callers can therefore stage first and free the device owner only after
 // the host copy is confirmed, preserving the capacity adapter's fail-safe ordering.
 func (p *PrefixSnapshot) CloneToHost() (out *HostPrefixSnapshot, err error) {
+	if p == nil {
+		return nil, errors.New("model: prefix snapshot has no complete backend state to stage")
+	}
+	scope := beginBackendExecution(p.Backend)
+	defer scope.finishError(&err)
+	return p.cloneToHostOwned()
+}
+
+func (p *PrefixSnapshot) cloneToHostOwned() (out *HostPrefixSnapshot, err error) {
 	started := prefixProfileStart()
 	defer func() { emitPrefixProfile(started, "stage_to_host", "complete", p, out) }()
 	if p == nil || p.Cache == nil || p.Backend == nil || p.halKV == nil {
@@ -150,6 +159,15 @@ func tensorToHost(be compute.Backend, t compute.Tensor) (hostTensor, error) {
 // Restore materializes an independently owned live PrefixSnapshot on the original
 // backend. The host image remains intact for later L2 hits.
 func (h *HostPrefixSnapshot) Restore() (out *PrefixSnapshot, err error) {
+	if h == nil {
+		return nil, errors.New("model: invalid host prefix snapshot restore")
+	}
+	scope := beginBackendExecution(h.backend)
+	defer scope.finishError(&err)
+	return h.restoreOwned(scope)
+}
+
+func (h *HostPrefixSnapshot) restoreOwned(scope *backendExecutionScope) (out *PrefixSnapshot, err error) {
 	started := prefixProfileStart()
 	defer func() { emitPrefixProfile(started, "restore_from_host", "complete", out, h) }()
 	if h == nil || h.cache == nil || h.backend == nil {
@@ -163,7 +181,7 @@ func (h *HostPrefixSnapshot) Restore() (out *PrefixSnapshot, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if out != nil {
-				out.Close()
+				out.closeOwned(scope)
 			}
 			out = nil
 			err = fmt.Errorf("model: restore prefix snapshot from host: %v", r)

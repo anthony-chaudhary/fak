@@ -48,7 +48,7 @@ func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 			// An incoming typed error can belong to another operation. Retire
 			// this owner without letting a secondary Close panic replace it.
 			defer func() { s.halClosed = true; _ = recover() }()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {

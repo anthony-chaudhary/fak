@@ -160,6 +160,12 @@ func (s *Session) beginHALTokenLineageWrite(tokenIDs []int) func() {
 // evictKV is the shared shift/rollback/eviction seam. The resident store mutates
 // first and the exact number it reports removed drives the paired lineage compaction.
 func (s *Session) evictKV(from, n int) int {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	return s.evictKVOwned(from, n)
+}
+
+func (s *Session) evictKVOwned(from, n int) int {
 	if s == nil {
 		return 0
 	}

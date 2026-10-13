@@ -78,7 +78,7 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-tail-rope", Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		defer func() {

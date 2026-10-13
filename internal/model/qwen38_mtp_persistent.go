@@ -202,6 +202,19 @@ func (s *Qwen38MTPPersistentSession) Prefill(prompt []int) ([]float32, error) {
 // replayPrompt starts from the native empty state while retaining the target
 // session and its execution configuration. The caller holds s.mu.
 func (s *Qwen38MTPPersistentSession) replayPrompt(prompt []int) []float32 {
+	// s.mu is the outer persistent-session lock. No execution-owned model body
+	// acquires it. Release the domain before publishing through acquiring
+	// snapshot/cache APIs, so reset + prefill remain one indivisible operation.
+	func() {
+		scope := s.target.beginBackendExecution()
+		defer scope.finish()
+		s.replayPromptOwned(prompt)
+	}()
+	s.updatePromptCache(prompt)
+	return append([]float32(nil), s.lastLogits...)
+}
+
+func (s *Qwen38MTPPersistentSession) replayPromptOwned(prompt []int) {
 	s.target.closeQwen35HALState()
 	if s.target.Backend != nil {
 		if s.target.halKV != nil {
@@ -223,11 +236,8 @@ func (s *Qwen38MTPPersistentSession) replayPrompt(prompt []int) []float32 {
 	s.target.targetHidden = nil
 	s.target.targetHiddenTokens = nil
 	s.target.targetHiddenMu.Unlock()
-	s.lastLogits = s.target.Prefill(prompt)
+	s.lastLogits = s.target.prefillOwned(prompt)
 	s.committed = append([]int(nil), prompt...)
-	s.updatePromptCache(prompt)
-
-	return append([]float32(nil), s.lastLogits...)
 }
 
 // StepRound executes a single MTP speculative block round using batched target verification,

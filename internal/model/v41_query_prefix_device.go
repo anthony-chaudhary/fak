@@ -83,7 +83,7 @@ func (s *Session) v41QueryPrefixFunc() v41QueryPrefixFunc {
 				return
 			}
 			defer func() { s.halClosed = true; _ = recover() }()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(primary error) error {
 			if s.halFailure != nil {

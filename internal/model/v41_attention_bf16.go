@@ -41,7 +41,7 @@ func (s *Session) v41AttentionBF16Func() v41BF16BoundaryFunc {
 			// A secondary Close panic must not replace the selected failure
 			// or leave this session eligible for another operation.
 			defer func() { s.halClosed = true; _ = recover() }()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {

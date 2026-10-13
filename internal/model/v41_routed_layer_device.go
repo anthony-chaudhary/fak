@@ -92,7 +92,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		var opened int64
@@ -440,7 +440,7 @@ func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float3
 	closeFailure := func(err error) error {
 		closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert-panel", Layer: layer, Stage: stage, Cause: err}
 		s.halFailure = closed
-		s.Close()
+		s.closeBackendOwned()
 		return closed
 	}
 	defer func() {

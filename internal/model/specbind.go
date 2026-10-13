@@ -137,7 +137,7 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	}
 	tx := &qwen35MTPTargetTransaction{
 		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
-		step: target.Step, beforeHALStep: target.halStep, beforeHALWarm: target.halLogitsWarm,
+		step: target.stepOwned, beforeHALStep: target.halStep, beforeHALWarm: target.halLogitsWarm,
 	}
 	tx.verify = func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
 		if qwen35MTPMetalP4Verify != nil {
@@ -173,6 +173,15 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 }
 
 func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err error) {
+	if tx == nil {
+		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
+	}
+	scope := tx.target.beginBackendExecution()
+	defer scope.finishError(&err)
+	return tx.verifyOwned(draft)
+}
+
+func (tx *qwen35MTPTargetTransaction) verifyOwned(draft []int) (rows [][]float32, err error) {
 	if tx == nil || tx.closed || tx.snapshot == nil {
 		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
 	}
@@ -200,7 +209,7 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 			return nil, verifyErr
 		}
 		started := time.Now()
-		rows = tx.target.verifyForwardSequential(draft)
+		rows = tx.target.verifyForwardSequentialOwned(draft)
 		tx.receipt.Path = targetVerificationDecodePath
 		tx.receipt.DowngradeReason = downgrade.Reason
 		tx.receipt.TargetDecodeSteps = len(draft)
@@ -228,6 +237,15 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 }
 
 func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, err error) {
+	if tx == nil {
+		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
+	}
+	scope := tx.target.beginBackendExecution()
+	defer scope.finishError(&err)
+	return tx.commitOwned(accepted)
+}
+
+func (tx *qwen35MTPTargetTransaction) commitOwned(accepted int) (logits []float32, err error) {
 	if tx == nil || tx.closed || tx.snapshot == nil {
 		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
 	}
@@ -267,7 +285,7 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 		tx.finish()
 		return logits, nil
 	}
-	rollback, err := tx.snapshot.Clone()
+	rollback, err := tx.snapshot.cloneOwned(tx.target.backendExecutionScope)
 	if err != nil {
 		return nil, tx.rollbackFailure("preserve commit rollback", err)
 	}
@@ -278,14 +296,14 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 		tx.receipt.Accounting.Rollback.Measured = true
 	} else {
 		if err := tx.restore(); err != nil {
-			rollback.Close()
+			rollback.closeOwned(tx.target.backendExecutionScope)
 			tx.finish()
 			return nil, err
 		}
 	}
 	// Retain the independent clone until replay succeeds so a mid-block failure
 	// can undo every accepted token rather than exposing a partial prefix.
-	tx.snapshot.Close()
+	tx.snapshot.closeOwned(tx.target.backendExecutionScope)
 	tx.snapshot = rollback
 	logits = append([]float32(nil), tx.beforeLogits...)
 	started := time.Now()
@@ -358,7 +376,16 @@ func (tx *qwen35MTPTargetTransaction) rollbackFailure(stage string, cause error)
 	return fmt.Errorf("model: %s Qwen3.8 MTP target transaction: %w", stage, cause)
 }
 
-func (tx *qwen35MTPTargetTransaction) Abort() error {
+func (tx *qwen35MTPTargetTransaction) Abort() (err error) {
+	if tx == nil {
+		return nil
+	}
+	scope := tx.target.beginBackendExecution()
+	defer scope.finishError(&err)
+	return tx.abortOwned()
+}
+
+func (tx *qwen35MTPTargetTransaction) abortOwned() error {
 	if tx == nil || tx.closed {
 		return nil
 	}
@@ -376,7 +403,7 @@ func (tx *qwen35MTPTargetTransaction) restore() error {
 	if tx.checkpoint != nil {
 		checkpointErr = tx.checkpoint.Restore()
 	}
-	snapshotErr := tx.snapshot.Restore(tx.target)
+	snapshotErr := tx.snapshot.restoreOwned(tx.target.backendExecutionScope, tx.target)
 	if snapshotErr == nil {
 		tx.target.halStep = tx.beforeHALStep
 		tx.target.halLogitsWarm = tx.beforeHALWarm
@@ -409,7 +436,7 @@ func (tx *qwen35MTPTargetTransaction) finish() {
 		tx.checkpoint.Close()
 		tx.checkpoint = nil
 	}
-	tx.snapshot.Close()
+	tx.snapshot.closeOwned(tx.target.backendExecutionScope)
 	tx.snapshot = nil
 	tx.lastLogits = nil
 	tx.verifiedRows = nil

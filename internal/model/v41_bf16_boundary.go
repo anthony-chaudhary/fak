@@ -86,7 +86,7 @@ func (s *Session) v41BF16BoundaryFunc() v41BF16BoundaryFunc {
 			}
 			s.halClosed = true
 			// Retirement cannot replace the selected operation's primary fault.
-			func() { defer func() { _ = recover() }(); s.Close() }()
+			func() { defer func() { _ = recover() }(); s.closeBackendOwned() }()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {

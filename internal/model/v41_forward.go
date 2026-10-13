@@ -1229,7 +1229,7 @@ func (s *Session) v41RMSNormFunc() v41RMSNormFunc {
 			// A typed incoming fault does not prove this callback's owner is
 			// retired. Keep its primary even if this owner's Close also panics.
 			defer func() { s.halClosed = true; _ = recover() }()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {
@@ -1341,7 +1341,7 @@ func (s *Session) v41ExpertGateUpFunc() v41ExpertGateUpFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert", Layer: layer, Stage: "gate/up", Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		// Admission resolves and stages native expert weights, so its failures
@@ -1407,7 +1407,7 @@ func (s *Session) v41ExpertDownFunc() v41ExpertDownFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert", Layer: layer, Stage: "down", Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		// Admission resolves and stages native expert weights, so its failures

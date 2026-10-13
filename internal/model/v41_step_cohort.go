@@ -62,7 +62,8 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 	if !owner.TryLock() {
 		return nil, fmt.Errorf("%w: device owner is already held", errV41StepCohortDeclined)
 	}
-	defer owner.Unlock()
+	scope := &backendExecutionScope{owner: owner, live: true}
+	defer scope.finishError(&err)
 	if err := m.v41StepCohortAdmit(lanes); err != nil {
 		return nil, err
 	}
@@ -70,6 +71,14 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 		if err := m.v41SharedHeadAdmit(lanes); err != nil {
 			return nil, err
 		}
+	}
+	for _, lane := range lanes {
+		if domain := backendExecutionOwner(lane.session.Backend); domain != nil && domain != owner {
+			return nil, fmt.Errorf("%w: caller does not own the backend recording domain", errV41StepCohortDeclined)
+		}
+	}
+	for _, lane := range lanes {
+		scope.bind(lane.session)
 	}
 	results = make([]v41StepCohortResult, len(lanes))
 	txs := make([]*v41StepTransaction, len(lanes))

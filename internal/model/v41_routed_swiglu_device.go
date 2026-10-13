@@ -55,7 +55,7 @@ func (s *Session) v41RoutedExpertFunc() v41RoutedExpertFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert", Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		// Admission stages native expert weights, so its failures belong to this

@@ -89,7 +89,7 @@ func (s *Session) refuseHostFallbackCause(stage string, cause error) {
 	}
 	s.halFailure = err
 	s.halClosed = true
-	s.Close()
+	s.closeBackendOwned()
 	panic(err)
 }
 
@@ -734,7 +734,7 @@ func (s *Session) failBackendForward(layer int, stage string, cause error) {
 		Layer: layer, Stage: stage, Cause: cause,
 	}
 	s.halFailure = err
-	s.Close()
+	s.closeBackendOwned()
 	panic(err)
 }
 

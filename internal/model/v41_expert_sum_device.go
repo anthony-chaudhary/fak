@@ -90,7 +90,7 @@ func v41SelectedDeviceCall[T any](s *Session, layer int, path string, run func(s
 		// An incoming typed fault can belong to another operation or owner.
 		// Retire this owner without replacing its primary if Close also fails.
 		defer func() { s.halClosed = true; _ = recover() }()
-		s.Close()
+		s.closeBackendOwned()
 	}
 	closeFailure := func(err error) error {
 		if s.halFailure != nil {

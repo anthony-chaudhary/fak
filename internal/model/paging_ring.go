@@ -217,6 +217,11 @@ func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, s
 // corrupt the offload accounting that sizes the ring. Async is the newer, narrower capability, so
 // it yields.
 func uploadStagedAsync(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string) (compute.Tensor, compute.Fence) {
+	// An undemanded prefetch fence can outlive the enclosing forward. Keep
+	// transfers synchronous until async lifetime joins the domain lease.
+	if _, owned := be.(compute.ForwardExecutionOwnerBackend); owned {
+		return uploadStaged(be, src, dtype, site), nil
+	}
 	if _, classed := be.(classedUploadBackend); !classed {
 		if ab, ok := be.(compute.AsyncUploader); ok {
 			return ab.UploadAsync(src, dtype)

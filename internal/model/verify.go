@@ -159,7 +159,9 @@ type qwen38TargetForward func(*Model, []int) *Activations
 // Steps. The Qwen3.8 hybrid lane recomputes the exact token-lineage prefix and
 // draft through one cacheless native Forward; the transaction later restores
 // and replays only the accepted prefix, preserving live recurrent/KV state.
-func (s *Session) VerifyForwardOneOperation(ids []int, boundaryLogits []float32) ([][]float32, TargetVerificationReceipt, error) {
+func (s *Session) VerifyForwardOneOperation(ids []int, boundaryLogits []float32) (rows [][]float32, receipt TargetVerificationReceipt, err error) {
+	scope := s.beginBackendExecution()
+	defer scope.finishError(&err)
 	return s.verifyForwardOneOperation(ids, boundaryLogits, nil)
 }
 
@@ -318,9 +320,15 @@ func maxAbsF32Delta(a, b []float32) float32 {
 // returning that position's logits. It is the pre-#533 verify path (one step per
 // candidate), kept so VerifyForward never regresses a model the batched path does not cover.
 func (s *Session) verifyForwardSequential(ids []int) [][]float32 {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	return s.verifyForwardSequentialOwned(ids)
+}
+
+func (s *Session) verifyForwardSequentialOwned(ids []int) [][]float32 {
 	out := make([][]float32, len(ids))
 	for i, id := range ids {
-		out[i] = append([]float32(nil), s.Step(id)...)
+		out[i] = append([]float32(nil), s.stepOwned(id)...)
 	}
 	return out
 }

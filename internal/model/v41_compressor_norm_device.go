@@ -66,7 +66,7 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 				Path: "v41-compressor-norm", Layer: layer, Stage: stage, Cause: err,
 			}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return v41CompressorNormOperationErr(layer, closed)
 		}
 		defer func() {

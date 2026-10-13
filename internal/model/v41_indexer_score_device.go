@@ -50,7 +50,7 @@ func (s *Session) v41IndexerScoreGuard() {
 					Path: "v41-indexer-score", Layer: selected.Layer, Stage: "selection", Cause: err,
 				}
 				s.halFailure = closed
-				s.Close()
+				s.closeBackendOwned()
 				panic(v41IndexerScoreOperationErr(selected.Layer, closed))
 			}
 		}
@@ -169,7 +169,7 @@ func (s *Session) v41IndexerScoreHealthFunc() v41IndexerScoreHealthFunc {
 				Path: "v41-indexer-score", Layer: layer, Stage: "admission", Cause: err,
 			}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		return nil
@@ -202,7 +202,7 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 				Path: "v41-indexer-score", Layer: layer, Stage: stage, Cause: err,
 			}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		defer func() {

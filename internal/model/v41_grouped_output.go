@@ -360,7 +360,7 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-grouped-output", Layer: l, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		defer func() {

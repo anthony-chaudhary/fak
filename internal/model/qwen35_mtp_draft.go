@@ -509,7 +509,16 @@ func (d *Qwen35MTPDraftSession) latch(stage string, pos int, cause error) {
 // 8a87079dbbf0f5b1543ec25d914dfd988eba42de carries logits_output.hidden_states
 // step to step; llama.cpp 9723942adc518b43c4b95dc4dce6906903eb5e09 is
 // reference-only and likewise feeds each Qwen3.5 draft hidden to the next step.
-func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, currentEmbedding []float32) ([]float32, []float32, error) {
+func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, currentEmbedding []float32) (feedback, logits []float32, err error) {
+	if f == nil {
+		return nil, nil, qwen35MTPStateError("forward state", "initialized Qwen35MTPForward", "nil")
+	}
+	scope := f.draft.beginBackendExecution()
+	defer scope.finishError(&err)
+	return qwen35MTPForwardFeedbackOwned(f, pos, priorHidden, currentEmbedding)
+}
+
+func qwen35MTPForwardFeedbackOwned(f *Qwen35MTPForward, pos int, priorHidden, currentEmbedding []float32) ([]float32, []float32, error) {
 	if f == nil || f.target == nil || f.draft == nil || f.draft.Cache == nil {
 		return nil, nil, qwen35MTPStateError("forward state", "initialized Qwen35MTPForward", "nil or incomplete")
 	}
@@ -535,7 +544,7 @@ func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, current
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
 	feedback := f.draft.M.finalNorm(x)
-	return append([]float32(nil), feedback...), f.ProjectHead(feedback), nil
+	return append([]float32(nil), feedback...), f.projectHeadOwned(feedback), nil
 }
 
 // SpecDecodeGreedyQwen35MTPDepthN is the bounded fak-native Qwen3.8 depth-N

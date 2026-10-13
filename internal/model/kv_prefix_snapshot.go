@@ -158,7 +158,13 @@ func (s *Session) PrefixSnapshotHostOnly() (*PrefixSnapshot, error) {
 	return s.prefixSnapshot(false)
 }
 
-func (s *Session) prefixSnapshot(readResidentGDN bool) (*PrefixSnapshot, error) {
+func (s *Session) prefixSnapshot(readResidentGDN bool) (out *PrefixSnapshot, err error) {
+	scope := s.beginBackendExecution()
+	defer scope.finishError(&err)
+	return s.prefixSnapshotOwned(scope, readResidentGDN)
+}
+
+func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResidentGDN bool) (*PrefixSnapshot, error) {
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	if s == nil || s.Cache == nil {
@@ -213,12 +219,12 @@ func (s *Session) prefixSnapshot(readResidentGDN bool) (*PrefixSnapshot, error) 
 		if s.qwen35GDNOwnersHoldLiveState() {
 			snapshots, layer, stage, err := s.snapshotQwen35GDNOwners()
 			if err != nil {
-				out.Close()
+				out.closeOwned(scope)
 				return nil, fmt.Errorf("model: prefix snapshot cannot read resident GDN layer %d (%s): %w", layer, stage, err)
 			}
 			writeQwen35GDNSnapshotsToHost(s.M.Cfg, out.Cache, snapshots)
 		} else if s.qwen35HAL != nil && s.qwen35HAL.sequenceFailure != nil {
-			out.Close()
+			out.closeOwned(scope)
 			return nil, fmt.Errorf("model: cannot snapshot prefix after resident GDN failure: %w", s.qwen35HAL.sequenceFailure)
 		}
 		return out, nil
@@ -230,14 +236,23 @@ func (s *Session) prefixSnapshot(readResidentGDN bool) (*PrefixSnapshot, error) 
 	var err error
 	out.qwen35, err = cloneQwen35HALState(s.qwen35HAL, s.Backend)
 	if err != nil {
-		out.Close()
+		out.closeOwned(scope)
 		return nil, err
 	}
 	return out, nil
 }
 
 // Clone makes a second independent owner for lookup; the cache retains the original.
-func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
+func (p *PrefixSnapshot) Clone() (out *PrefixSnapshot, err error) {
+	if p == nil {
+		return nil, nil
+	}
+	scope := beginBackendExecution(p.Backend)
+	defer scope.finishError(&err)
+	return p.cloneOwned(scope)
+}
+
+func (p *PrefixSnapshot) cloneOwned(scope *backendExecutionScope) (*PrefixSnapshot, error) {
 	if p == nil {
 		return nil, nil
 	}
@@ -273,14 +288,23 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 	var err error
 	out.qwen35, err = cloneQwen35HALState(p.qwen35, p.Backend)
 	if err != nil {
-		out.Close()
+		out.closeOwned(scope)
 		return nil, err
 	}
 	return out, nil
 }
 
 // Restore installs this snapshot into a fresh backend session and transfers ownership.
-func (p *PrefixSnapshot) Restore(s *Session) error {
+func (p *PrefixSnapshot) Restore(s *Session) (err error) {
+	if p == nil {
+		return fmt.Errorf("model: invalid prefix snapshot restore")
+	}
+	scope := beginBackendExecution(p.Backend)
+	defer scope.finishError(&err)
+	return p.restoreOwned(scope, s)
+}
+
+func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) error {
 	if p == nil {
 		return fmt.Errorf("model: invalid prefix snapshot restore")
 	}
@@ -299,6 +323,7 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 	if p.Backend != s.Backend {
 		return fmt.Errorf("model: prefix snapshot backend mismatch")
 	}
+	scope.bind(s)
 	// A V4.1 continuation is a backend-session prefix, not a portable host blob:
 	// the arithmetic reads state bound to the device it was prepared on, so a
 	// DEVICE capture that names no device, names an unqualified device, or names a
@@ -374,6 +399,15 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 
 // Close releases all device ownership held by a cache node or failed clone.
 func (p *PrefixSnapshot) Close() {
+	if p == nil {
+		return
+	}
+	scope := beginBackendExecution(p.Backend)
+	defer scope.finish()
+	p.closeOwned(scope)
+}
+
+func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 	if p == nil {
 		return
 	}

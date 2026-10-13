@@ -1215,7 +1215,8 @@
       "definition": "`cachegeometrymu` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
       "distinction": "Use `cachegeometrymu` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
       "distinct_from": [
-        "promptcachekey"
+        "promptcachekey",
+        "rebuildcachegeometryowned"
       ],
       "aliases": [],
       "grounding": "cachegeometrymu",

@@ -16,7 +16,7 @@ func (s *Session) v41DeviceOnlyDeclined(layer int, op string) error {
 	s.hostFallbackObserved = true
 	s.halFailure = closed
 	s.halClosed = true
-	s.Close()
+	s.closeBackendOwned()
 	return closed
 }
 

@@ -94,7 +94,7 @@ func (s *Session) v41EmbeddingGatherSelected(key string, check func() error, sta
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-embedding-gather", Layer: -1, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		defer func() {

@@ -195,7 +195,7 @@ func (s *Session) failExpertRing(r *pagedRing, cause error) {
 	}
 	s.halFailure = err
 	s.cancelRingSpan(r)
-	s.Close()
+	s.closeBackendOwned()
 	panic(err)
 }
 

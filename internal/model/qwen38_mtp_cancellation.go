@@ -5,7 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// ErrMTPExecutionOwnerCancellation refuses the unjoined-worker cancellation
+// route for an execution-owned backend before any snapshot or worker starts.
+var ErrMTPExecutionOwnerCancellation = errors.New("model: execution-owned MTP requires joined cancellation")
 
 // Closed reason tokens for cancellation and memory bounds.
 const (
@@ -407,6 +413,11 @@ func (m *Qwen38MTPCancellationManager) ExecuteSessionRoundWithContext(
 	target := sess.Target()
 	if target == nil {
 		return nil, nil, errors.New("model: session target required")
+	}
+	// This legacy cancellation route returns before its StepRound worker has
+	// joined. Domain serialization alone cannot make the same Session safe.
+	if _, owned := target.Backend.(compute.ForwardExecutionOwnerBackend); owned {
+		return nil, nil, ErrMTPExecutionOwnerCancellation
 	}
 
 	// Snapshot baseline target state for guaranteed rollback on cancellation

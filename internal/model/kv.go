@@ -18,11 +18,14 @@ type q4kMLPOutputSlabStats struct {
 }
 
 type Session struct {
-	cacheGeometryMu     sync.RWMutex
-	cacheGeometryFailed bool
-	cacheGeometryEpoch  uint64
-	M                   *Model
-	Cache               *KVCache
+	// Only private already-owned bodies consult this operation-local scope.
+	// Public entrypoints acquire their domain regardless of this binding.
+	backendExecutionScope *backendExecutionScope
+	cacheGeometryMu       sync.RWMutex
+	cacheGeometryFailed   bool
+	cacheGeometryEpoch    uint64
+	M                     *Model
+	Cache                 *KVCache
 	// Backend is non-nil when this session is intentionally running through the
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.
@@ -971,6 +974,12 @@ func ropeRowQKInto(q, k, cos, sin []float32, hd, nH, nKV int) {
 // distribution over the first generated token). Each token is placed at the next
 // absolute position (Cache.Len()), so a prior Evict() compaction shifts these down.
 func (s *Session) Prefill(ids []int) []float32 {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	return s.prefillOwned(ids)
+}
+
+func (s *Session) prefillOwned(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1099,6 +1108,12 @@ func (s *Session) Prefill(ids []int) []float32 {
 // distribution. It is for teacher-forced context growth where the caller already knows the
 // next input token and only needs KV state advanced.
 func (s *Session) PrefillNoLogits(ids []int) {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	s.prefillNoLogitsOwned(ids)
+}
+
+func (s *Session) prefillNoLogitsOwned(ids []int) {
 	if len(ids) == 0 {
 		return
 	}
@@ -1175,7 +1190,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		return
 	}
 	if s.PrecisionPolicy != nil {
-		s.Prefill(ids)
+		s.prefillOwned(ids)
 		return
 	}
 	if s.Metal {
@@ -1239,6 +1254,12 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	return s.stepOwned(id)
+}
+
+func (s *Session) stepOwned(id int) []float32 {
 	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
 		panic(err)
 	}

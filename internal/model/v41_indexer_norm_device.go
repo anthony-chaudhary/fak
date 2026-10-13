@@ -58,7 +58,7 @@ func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
 				s.halClosed = true
 				_ = recover()
 			}()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {
@@ -211,7 +211,7 @@ func (s *Session) v41IndexKeyNormFunc() v41IndexKeyNormFunc {
 				Path: "v41-index-key-norm", Layer: layer, Stage: stage, Cause: err,
 			}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return v41IndexKeyNormOperationErr(layer, closed)
 		}
 		defer func() {

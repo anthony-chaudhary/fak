@@ -1014,3 +1014,17 @@ v41SharedAttentionRows is an internal model request descriptor containing borrow
 Vulkan fused wrapper helper checking all selected weight-slot pointers have sufficient nominal resident buffer bytes while their live owners and command-stream lock are retained.
 
 **Distinct from:** These slots are expert weight bindings, unlike the scheduler Slot free/busy signal. The helper checks nominal bytes only and does not validate stale aliases, device generations, or dispatch-grid limits.
+
+
+### rebuildCacheGeometryOwned
+
+Private Session cache-pool rebuild body invoked after its public boundary acquires the optional backend recording-domain owner; replaces expert, KV, recurrent and window pools while preserving maintenance locking and rollback.
+
+**Distinct from:** The already-owned operation body performs the rebuild; cacheGeometryMu is the separate session maintenance mutex, not device-domain ownership. This body never reacquires the outer backend owner.
+
+
+### evictKVOwned
+
+Private Session store-aware KV-span eviction body used inside an already-owned backend operation; coordinates host or HAL eviction and token-lineage indices without reacquiring the recording-domain mutex.
+
+**Distinct from:** This performs an index span eviction under an existing operation scope; EvictKV speculative rollback is the rejected-position count supplied to eviction, not the operation or ownership boundary.

@@ -39,7 +39,7 @@ func (s *Session) v41SharedActivationFunc() v41SharedActivationFunc {
 				s.halClosed = true
 				_ = recover()
 			}()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {

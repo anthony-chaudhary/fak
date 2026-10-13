@@ -1140,6 +1140,12 @@ func (s *Session) speculativeResidentLen() int {
 // releases its device store and lineage by the same indices. It is the rollback
 // the in-kernel planner uses to drop a verified-but-unemitted accepted suffix.
 func (s *Session) RollbackResidentSuffix(n int) {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	s.rollbackResidentSuffixOwned(n)
+}
+
+func (s *Session) rollbackResidentSuffixOwned(n int) {
 	if s == nil || n <= 0 {
 		return
 	}
@@ -1150,7 +1156,7 @@ func (s *Session) RollbackResidentSuffix(n int) {
 	if n > curr {
 		n = curr
 	}
-	s.evictKV(curr-n, n)
+	s.evictKVOwned(curr-n, n)
 }
 
 // Stats returns a snapshot of speculative decoding statistics.

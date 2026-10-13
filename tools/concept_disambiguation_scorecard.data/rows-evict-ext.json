@@ -70,7 +70,8 @@
         "EvictColdest (kvmmu)",
         "evict-kvcache",
         "evict-evictor",
-        "x-evict-evicted"
+        "x-evict-evicted",
+        "evictkvowned"
       ],
       "aliases": [],
       "grounding": "evictkv",

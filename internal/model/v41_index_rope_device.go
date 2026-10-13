@@ -37,7 +37,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				s.halClosed = true
 				_ = recover()
 			}()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {

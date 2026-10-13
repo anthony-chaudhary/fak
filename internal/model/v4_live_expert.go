@@ -102,7 +102,16 @@ func (o *v4ExpertOwner) detach() {
 
 // free releases the ring exactly once, at model-weight teardown, after the last session has
 // detached. It is a no-op on a second call and on an owner that never built a runtime.
-func (o *v4ExpertOwner) free() error {
+func (o *v4ExpertOwner) free() (err error) {
+	if o == nil {
+		return nil
+	}
+	scope := beginBackendExecution(o.be)
+	defer scope.finishError(&err)
+	return o.freeOwned()
+}
+
+func (o *v4ExpertOwner) freeOwned() error {
 	if o == nil {
 		return nil
 	}

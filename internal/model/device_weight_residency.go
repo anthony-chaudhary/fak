@@ -86,15 +86,21 @@ func (r *modelHALWeightResidency) close() {
 	r.mu.Unlock()
 
 	for _, resident := range backends {
-		resident.mu.Lock()
-		if !resident.closed {
-			resident.closed = true
-			for key, weight := range resident.weights {
-				resident.be.Free(weight)
-				delete(resident.weights, key)
-			}
+		resident.close()
+	}
+}
+
+func (resident *backendHALWeightResidency) close() {
+	scope := beginBackendExecution(resident.be)
+	defer scope.finish()
+	resident.mu.Lock()
+	defer resident.mu.Unlock()
+	if !resident.closed {
+		resident.closed = true
+		for key, weight := range resident.weights {
+			resident.be.Free(weight)
+			delete(resident.weights, key)
 		}
-		resident.mu.Unlock()
 	}
 }
 

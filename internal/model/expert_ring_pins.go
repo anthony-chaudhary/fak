@@ -177,7 +177,13 @@ func (p *ExpertPinSet) fillPins() []ExpertPinSwap {
 // policy, not the ring's. maxSwaps <= 0 still ages the heat, still fills free slots, and still dumps
 // — that is the mode a cold first run uses to BUILD the prior without churning a set it has no
 // basis for re-ranking yet.
-func (s *Session) ExpertRingEndTurn(decay float64, maxSwaps int) ([]ExpertPinSwap, error) {
+func (s *Session) ExpertRingEndTurn(decay float64, maxSwaps int) (swaps []ExpertPinSwap, err error) {
+	scope := s.beginBackendExecution()
+	defer scope.finishError(&err)
+	return s.expertRingEndTurnOwned(decay, maxSwaps)
+}
+
+func (s *Session) expertRingEndTurnOwned(decay float64, maxSwaps int) ([]ExpertPinSwap, error) {
 	if s == nil || s.expertRing == nil || s.expertRing.pins == nil {
 		return nil, nil
 	}

@@ -200,7 +200,14 @@ type MoEDoubleBufferedPipeline struct {
 }
 
 // NewMoEDoubleBufferedPipeline instantiates a pipeline with 2 * E staging slots.
+// ErrMoEPipelineExecutionOwner refuses an asynchronous device producer whose
+// lifetime has not been integrated with the backend recording-domain owner.
+var ErrMoEPipelineExecutionOwner = errors.New("moe_double_buffered: execution-owned backend requires an owned asynchronous pipeline")
+
 func NewMoEDoubleBufferedPipeline(cfg MoEPipelineConfig) (*MoEDoubleBufferedPipeline, error) {
+	if _, owned := cfg.Backend.(compute.ForwardExecutionOwnerBackend); owned {
+		return nil, ErrMoEPipelineExecutionOwner
+	}
 	if cfg.NumExperts <= 0 {
 		return nil, errors.New("moe_double_buffered: NumExperts must be positive")
 	}

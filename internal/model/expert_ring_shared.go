@@ -333,7 +333,16 @@ func (sh *SharedExpertRing) NoteAgentToken() {
 // Close frees every device handle the ring holds. It REFUSES while agents are still attached,
 // because freeing a handle a live session is about to multiply against is a use-after-free the
 // per-session ring could not produce. Closing twice is a no-op.
-func (sh *SharedExpertRing) Close() error {
+func (sh *SharedExpertRing) Close() (err error) {
+	if sh == nil {
+		return nil
+	}
+	scope := beginBackendExecution(sh.be)
+	defer scope.finishError(&err)
+	return sh.closeOwned()
+}
+
+func (sh *SharedExpertRing) closeOwned() error {
 	if sh == nil {
 		return nil
 	}

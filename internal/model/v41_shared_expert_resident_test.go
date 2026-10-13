@@ -257,6 +257,34 @@ func v41ColdSharedFixture(t *testing.T, dtype compute.Dtype) (*Model, []float32)
 func v41ColdSharedSession(m *Model, b *v41ColdSharedRecorder) *Session {
 	return &Session{M: m, Backend: b, halW: map[string]compute.Tensor{}}
 }
+
+func v41ColdSharedEqualWords(a, b []float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if math.Float32bits(a[i]) != math.Float32bits(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func v41ColdSharedEqualMath(a, b []v41ColdSharedMath) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, op := range a {
+		other := b[i]
+		if op.kind != other.kind || op.dtype != other.dtype || !reflect.DeepEqual(op.shape, other.shape) ||
+			math.Float32bits(op.limit) != math.Float32bits(other.limit) || !v41ColdSharedEqualWords(op.x, other.x) ||
+			!v41ColdSharedEqualWords(op.second, other.second) || !v41ColdSharedEqualWords(op.y, other.y) {
+			return false
+		}
+	}
+	return true
+}
+
 func v41ColdSharedAssertReleased(t *testing.T, b *v41ColdSharedRecorder, s *Session) {
 	t.Helper()
 	cached := map[compute.Buffer]bool{}
@@ -279,6 +307,9 @@ func v41ColdSharedAssertReleased(t *testing.T, b *v41ColdSharedRecorder, s *Sess
 
 // fak-test:runtime fast est=500ms lane=default
 func TestV41ColdSharedResidentScalarChain(t *testing.T) {
+	if v41ColdSharedEqualWords([]float32{math.Float32frombits(0x80000000)}, []float32{0}) {
+		t.Fatal("word comparator failed to distinguish signed zero")
+	}
 	for _, dtype := range []compute.Dtype{compute.F32, compute.Q2_K, compute.Q4_K, compute.Q6_K} {
 		for _, limit := range []float64{0, .125} {
 			name := "limited"
@@ -302,7 +333,7 @@ func TestV41ColdSharedResidentScalarChain(t *testing.T) {
 				if err != nil || !selected {
 					t.Fatalf("selected=%t error=%v", selected, err)
 				}
-				if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(next.math, old.math) {
+				if !v41ColdSharedEqualWords(got, want) || !v41ColdSharedEqualMath(next.math, old.math) {
 					t.Fatal("result or actual scalar arithmetic operands/results changed")
 				}
 				if len(next.math) != 4 || next.math[0].dtype != dtype || next.math[1].dtype != dtype || next.math[3].dtype != dtype {
@@ -324,7 +355,7 @@ func TestV41ColdSharedResidentScalarChain(t *testing.T) {
 				}
 				before := next.weightUploads
 				again, selected, err := chain(input)
-				if err != nil || !selected || !reflect.DeepEqual(again, got) || next.weightUploads != before {
+				if err != nil || !selected || !v41ColdSharedEqualWords(again, got) || next.weightUploads != before {
 					t.Fatal("warm chain changed output or restaged weights")
 				}
 				v41ColdSharedAssertReleased(t, next, candidate)

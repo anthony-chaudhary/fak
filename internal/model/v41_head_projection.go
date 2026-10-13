@@ -157,7 +157,7 @@ func (s *Session) v41HeadCloseFailure(stage string, cause error) error {
 		// leave its owner eligible for another operation.
 		func() {
 			defer func() { s.halClosed = true; _ = recover() }()
-			s.Close()
+			s.closeBackendOwned()
 		}()
 	}
 	return s.halFailure

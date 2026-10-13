@@ -44,6 +44,9 @@ type BackendCollective struct {
 // — not at first reduce — that this backend cannot drive tensor-parallel collectives.
 // compute.Default() (cpu-ref) satisfies it today.
 func NewBackendCollective(be compute.Backend) (*BackendCollective, error) {
+	if _, owned := be.(compute.ForwardExecutionOwnerBackend); owned {
+		return nil, fmt.Errorf("model: execution-owned backend requires owned collective integration")
+	}
 	if be == nil {
 		return nil, fmt.Errorf("model: NewBackendCollective got a nil backend")
 	}

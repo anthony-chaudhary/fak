@@ -159,7 +159,7 @@ func (s *Session) v41MHCProjectionFuncNamed(leaf string) v41MHCProjectionFunc {
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-mhc-projection", Layer: l, Stage: stage, Cause: err}
 			s.halFailure = closed
-			s.Close()
+			s.closeBackendOwned()
 			return closed
 		}
 		var payloadFailure error

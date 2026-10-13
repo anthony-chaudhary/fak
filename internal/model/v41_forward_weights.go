@@ -1472,13 +1472,13 @@ func (s *Session) v41DenseLeafCloseFailure(layer int, leaf, stage string, cause 
 	}
 	closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-indexer-projection", Layer: layer, Stage: stage, Cause: cause}
 	s.halFailure = closed
-	s.Close()
+	s.closeBackendOwned()
 	return closed
 }
 
 func (s *Session) v41CompressorCloseFailure(layer int, stage string, cause error) error {
 	closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-compressor-projection", Layer: layer, Stage: stage, Cause: cause}
 	s.halFailure = closed
-	s.Close()
+	s.closeBackendOwned()
 	return closed
 }

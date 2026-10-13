@@ -120,5 +120,43 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "rebuildcachegeometryowned",
+      "canonical": "rebuildCacheGeometryOwned",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Private Session cache-pool rebuild body invoked after its public boundary acquires the optional backend recording-domain owner; replaces expert, KV, recurrent and window pools while preserving maintenance locking and rollback.",
+      "distinction": "The already-owned operation body performs the rebuild; cacheGeometryMu is the separate session maintenance mutex, not device-domain ownership. This body never reacquires the outer backend owner.",
+      "distinct_from": [
+        "coverage-9678-cache-cachegeometrymu"
+      ],
+      "aliases": [],
+      "grounding": "rebuildCacheGeometryOwned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "evictkvowned",
+      "canonical": "evictKVOwned",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Private Session store-aware KV-span eviction body used inside an already-owned backend operation; coordinates host or HAL eviction and token-lineage indices without reacquiring the recording-domain mutex.",
+      "distinction": "This performs an index span eviction under an existing operation scope; EvictKV speculative rollback is the rejected-position count supplied to eviction, not the operation or ownership boundary.",
+      "distinct_from": [
+        "x-evict-evictkv"
+      ],
+      "aliases": [],
+      "grounding": "evictKVOwned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

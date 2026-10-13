@@ -117,7 +117,7 @@ func (s *Session) v41ColdSharedExpertResident(layer int, input []float32, protec
 		if !s.halClosed {
 			func() {
 				defer func() { s.halClosed = true; _ = recover() }()
-				s.Close()
+				s.closeBackendOwned()
 			}()
 		}
 		if site != "" {

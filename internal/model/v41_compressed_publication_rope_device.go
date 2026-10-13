@@ -42,7 +42,7 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 				s.halClosed = true
 				_ = recover()
 			}()
-			s.Close()
+			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {

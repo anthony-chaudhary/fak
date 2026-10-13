@@ -40,13 +40,15 @@ func (m *Model) NewBackendSession(be compute.Backend) *Session {
 // session. It returns a typed architecture/backend refusal before any weight
 // upload or generic operator runs. NewBackendSession preserves the established
 // panic-on-invalid-construction API by wrapping this checked entry point.
-func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
+func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, err error) {
 	if be == nil {
 		be = compute.Default()
 	}
 	if be == nil {
 		panic("model: no compute backend registered")
 	}
+	scope := beginBackendExecution(be)
+	defer scope.finishError(&err)
 	if err := m.ValidateBackendForwardPath(be); err != nil {
 		return nil, err
 	}
@@ -61,17 +63,32 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 		}
 		panic("model: weights are closing or closed")
 	}
-	// A reusable captured graph is bound to one session's buffer addresses; reset it so
-	// this session captures fresh (no-op on cpu-ref / when graphs are off).
-	if gr, ok := be.(interface{ GraphReset() }); ok {
-		gr.GraphReset()
-	}
 	s := &Session{
 		M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv,
 		halW:             make(map[string]compute.Tensor),
 		borrowedHALW:     make(map[string]struct{}),
 		modelWeightsHeld: true,
 		ExpertRingBytes:  deviceRingBudget,
+	}
+	scope.bind(s)
+	ready := false
+	defer func() {
+		if ready {
+			return
+		}
+		if primary := recover(); primary != nil {
+			func() { defer func() { _ = recover() }(); s.closeOwned(scope) }()
+			panic(primary)
+		}
+		if err != nil {
+			defer func() { _ = recover() }()
+		}
+		s.closeOwned(scope)
+	}()
+	// A reusable captured graph is bound to one session's buffer addresses; reset it so
+	// this session captures fresh (no-op on cpu-ref / when graphs are off).
+	if gr, ok := be.(interface{ GraphReset() }); ok {
+		gr.GraphReset()
 	}
 	s.initMixedQKV()
 	if m.Cfg.IsQwen35Hybrid() {
@@ -80,14 +97,20 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 		s.initQwen35HALState(be.(Qwen35GDNBackend))
 	}
 	if err := m.attachSharedExpertRing(s); err != nil {
-		s.Close()
 		return nil, err
 	}
+	ready = true
 	return s, nil
 }
 
 // Close releases session-owned device state and its model-weight lifetime reference.
 func (s *Session) Close() {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	s.closeOwned(scope)
+}
+
+func (s *Session) closeOwned(scope *backendExecutionScope) {
 	if s == nil {
 		return
 	}
@@ -155,7 +178,7 @@ func (s *Session) Close() {
 		}
 		if s.modelWeightsHeld {
 			s.modelWeightsHeld = false
-			s.M.releaseWeightSession()
+			scope.afterRelease(s.M.releaseWeightSession)
 		}
 	})
 }
