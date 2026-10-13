@@ -854,10 +854,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if resident != nil {
 		moeRows = make([][]float32, seq)
 	}
+	var sharedChain v41ColdSharedResidentFunc
+	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m &&
+		scratch.denseProjection != nil && scratch.sharedActivation != nil && scratch.gatherOps.bf16PublishFunc() != nil {
+		sharedChain = st.callbackOwner.v41ColdSharedExpertChain(l)
+	}
 	for t := 0; t < seq; t++ {
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
-		shared, err := m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+		var shared []float32
+		var sharedResident bool
+		if sharedChain != nil {
+			shared, sharedResident, err = sharedChain(xn)
+		}
+		if err == nil && !sharedResident {
+			shared, err = m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+		}
 		if err != nil {
 			return err
 		}
