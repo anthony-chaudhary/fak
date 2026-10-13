@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -286,6 +287,19 @@ func estimateMetalWeightsMemoryBounds(ggufPath string) (localadmission.MemoryPla
 		return localadmission.MemoryPlan{}, err
 	}
 	defer ws.Close()
+	if routes, censusErr := metalQuantCapabilityCensus(ws); routes != nil || censusErr != nil {
+		// Selection only: never describe this preflight census as GPU execution.
+		_ = json.NewEncoder(os.Stderr).Encode(struct {
+			Stage   string                       `json:"stage"`
+			LoadArm string                       `json:"load_arm"`
+			Schema  string                       `json:"schema"`
+			Bands   []fakmodel.QuantBandDispatch `json:"bands"`
+			Refused bool                         `json:"refused"`
+		}{"selection", string(resolveMetalServeLoadArm(ws)), "fak-quant-capability/1", routes, censusErr != nil})
+		if censusErr != nil {
+			return localadmission.MemoryPlan{}, censusErr
+		}
+	}
 	arm := resolveMetalServeLoadArm(ws)
 	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
 		// Preserve the separately qualified streaming reservation policy. Its raw
@@ -324,6 +338,37 @@ func estimateMetalWeightsMemoryBounds(ggufPath string) (localadmission.MemoryPla
 	}
 	peak, _ := metalServeStartupPeakBytes(arm, peakBasis, 0, false)
 	return localadmission.MemoryPlan{StartupPeakBytes: peak, SteadyBytes: steady}, nil
+}
+
+// metalQuantCapabilityCensus uses only the GGUF header, before loading or
+// transforming tensor payloads. The retained arm keeps source encodings; the Q8
+// profile converts them to Q8 and therefore must not be gated by source dtype.
+func metalQuantCapabilityCensus(ws *ggufload.WeightSource) ([]fakmodel.QuantBandDispatch, error) {
+	if ws == nil || ws.File == nil {
+		return nil, fmt.Errorf("quant capability refusal: missing GGUF metadata")
+	}
+	if resolveMetalServeLoadArm(ws) != serveLoadArmResidentQ4K {
+		return nil, nil
+	}
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return nil, fmt.Errorf("quant capability refusal: derive active tensor roles: %w", err)
+	}
+	bands := make([]fakmodel.QuantWeightBand, 0, len(ws.File.Tensors))
+	for _, tensor := range ws.File.Tensors {
+		switch tensor.Type {
+		case ggufload.TensorF32, ggufload.TensorF16, ggufload.TensorBF16:
+			continue
+		}
+		// The same canonical eligibility gate used by the resident loader keeps
+		// embedding gathers, normalization, and transformed/nonmatrix tensors
+		// off the retained Metal matmul route. A kernel for the dtype alone is
+		// insufficient evidence that this band can take that route.
+		canon, mapped := ggufload.CanonicalTensorNameArch(tensor.Name, cfg.ModelType)
+		cpuOnly := !mapped || len(tensor.Dims) != 2 || !fakmodel.ResidentKQuantEligible(cfg, canon)
+		bands = append(bands, fakmodel.QuantWeightBand{Name: tensor.Name, QuantType: tensor.Type.String(), CPUOnly: cpuOnly, UnknownRole: !mapped})
+	}
+	return fakmodel.QuantCapabilityCensus("metal", bands)
 }
 
 // metalLeaseRefusalAdvice builds the actionable tail of the `fak up` Metal

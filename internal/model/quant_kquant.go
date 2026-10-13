@@ -2,10 +2,89 @@ package model
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
+	"sort"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// QuantWeightBand identifies a retained GGUF weight encoding before loading it.
+type QuantWeightBand struct {
+	Name        string `json:"name"`
+	QuantType   string `json:"quant_type"`
+	CPUOnly     bool   `json:"cpu_only,omitempty"`
+	UnknownRole bool   `json:"unknown_role,omitempty"`
+}
+
+// QuantBandDispatch records the selected native execution route. This is a
+// preflight selection receipt, not evidence that a kernel has executed.
+type QuantBandDispatch struct {
+	Name      string `json:"name"`
+	QuantType string `json:"quant_type"`
+	Backend   string `json:"backend"`
+	Refused   bool   `json:"refused,omitempty"`
+}
+
+// QuantCapabilityRefusal identifies every retained quant type that has no
+// qualified route on the selected backend.
+type QuantCapabilityRefusal struct {
+	Backend     string
+	Unsupported []string
+}
+
+func (e *QuantCapabilityRefusal) Error() string {
+	return fmt.Sprintf("quant capability refusal before model load: active backend %s has no qualified native serving kernel for unsupported quant types [%s]; select an artifact with supported quants or explicitly select CPU serving", e.Backend, strings.Join(e.Unsupported, ", "))
+}
+
+// QuantCapabilityCensus refuses retained encodings that would escape the Metal
+// serving path into the unqualified IQ/Q3 CPU dequant loops. The allowlist follows
+// metal_q4k_on.go's active Q4_K/Q8_0/Q2_K/Q6_K dispatch, not SupportsHALKQuant:
+// staging support alone does not prove that this serving route calls a kernel.
+// Q5_K preserves its existing explicit native CPU route. Explicit CPU serving
+// remains available; this gate never selects an external inference engine.
+func QuantCapabilityCensus(backend string, bands []QuantWeightBand) ([]QuantBandDispatch, error) {
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	if backend != "metal" && backend != "cpu" {
+		return nil, fmt.Errorf("quant capability refusal: unknown active backend %q", backend)
+	}
+	routes := make([]QuantBandDispatch, 0, len(bands))
+	unsupported := make(map[string]bool)
+	for _, band := range bands {
+		route := "cpu"
+		refused := false
+		if backend == "metal" {
+			if band.UnknownRole {
+				route = "unselected"
+			}
+			switch band.QuantType {
+			case "Q8_0", "Q4_K", "Q2_K", "Q6_K":
+				if !band.CPUOnly && !band.UnknownRole {
+					route = "metal"
+				}
+			case "Q5_K", "F32", "F16", "BF16":
+				// Preserve the qualified legacy native CPU bands.
+			default:
+				if !band.CPUOnly || band.UnknownRole {
+					unsupported[band.QuantType] = true
+					refused = true
+					route = "unselected"
+				}
+			}
+		}
+		routes = append(routes, QuantBandDispatch{Name: band.Name, QuantType: band.QuantType, Backend: route, Refused: refused})
+	}
+	if len(unsupported) != 0 {
+		names := make([]string, 0, len(unsupported))
+		for name := range unsupported {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return routes, &QuantCapabilityRefusal{Backend: backend, Unsupported: names}
+	}
+	return routes, nil
+}
 
 // quant_kquant.go â€” resident raw expert-quant weight path, the load-time lever for GLM-5.2's
 // MIXED-quant MoE experts. unsloth's UD checkpoints can store the routed-expert bulk as Q4_K,
