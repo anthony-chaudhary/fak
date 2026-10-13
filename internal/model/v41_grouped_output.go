@@ -415,6 +415,43 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 				return nil, v41ProjectionError, closeFailure(err)
 			}
 		}
+		// Capabilities choose the resident chain before it uploads or records
+		// anything. Unsupported backends retain the existing synchronous seam.
+		if resident, supported := v41GroupedResidentCapabilities(s.Backend, rank, dim); full && supported && compute.ValidateV41RowLogAlloc(groups, rank) == nil {
+			weights := make([]func() compute.Tensor, groups)
+			// Protect future cached operands without staging them or scanning
+			// the whole session weight map for every temporary tensor.
+			protected := make([]compute.Tensor, 0, groups+1)
+			for g := range weights {
+				if cached, ok := s.halW[aKeys[g]]; ok {
+					protected = append(protected, cached)
+				}
+				weights[g] = func() compute.Tensor {
+					key := aKeys[g]
+					return s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceA[g], a.dtype) })
+				}
+			}
+			if cached, ok := s.halW[bKey]; ok {
+				protected = append(protected, cached)
+			}
+			weight := func() compute.Tensor {
+				return s.cachedImmutableWeight(bKey, bKey, func() compute.Tensor { return s.Backend.Upload(sourceB, b.dtype) })
+			}
+			var stats v41GroupedResidentStats
+			defer func() {
+				calls += stats.calls
+				upload += stats.upload
+				readback += stats.readback
+			}()
+			var err error
+			result, err = s.v41GroupedResident(resident, weights, weight, o, rank, dim, protected, &stage, &stats)
+			if err != nil {
+				return nil, v41ProjectionError, closeFailure(err)
+			}
+			completed = 1
+			return result, v41ProjectionHandled, nil
+		}
+
 		run := func(weight compute.Tensor, input []float32, out int) ([]float32, error) {
 			stage = "activation upload"
 			x := s.uploadHostF32([]int{len(input)}, input, compute.MemoryActivation, "V4.1 grouped output activation")

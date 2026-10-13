@@ -62,43 +62,15 @@ const uint kExponent = 0x7f800000u;
 uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
 bool nonfinite(uint bits) { return (bits & kExponent) == kExponent; }
 
-// slot is uniform across the workgroup, so neither switch diverges. The two
-// loaders are the only difference between the gate and up row reads.
-uint gload(uint slot, uint i) {
-    switch (slot) {
-    case 0u: return g0[i];
-    case 1u: return g1[i];
-    case 2u: return g2[i];
-    case 3u: return g3[i];
-    case 4u: return g4[i];
-    case 5u: return g5[i];
-    case 6u: return g6[i];
-    default: return g7[i];
-    }
-}
-
-uint uload(uint slot, uint i) {
-    switch (slot) {
-    case 0u: return u0[i];
-    case 1u: return u1[i];
-    case 2u: return u2[i];
-    case 3u: return u3[i];
-    case 4u: return u4[i];
-    case 5u: return u5[i];
-    case 6u: return u6[i];
-    default: return u7[i];
-    }
-}
-
 vec4 bytesOf(uint w) {
     return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
 }
 
 // One row bank of the Q2_K GEMV, written exactly as v41_q2k_matvec_id.comp's
 // per-row body: `acc[r]` accumulates one per-superblock `sum`. ACC names the
-// row accumulator array and WLOAD the projection's loader, so the gate and up
+// row accumulator array and RAW the projection's binding, so the gate and up
 // passes are the same program text.
-#define Q2K_BANK(WLOAD, ACC)                                                                    \
+#define Q2K_BANK(RAW, ACC)                                                                    \
     for (uint r = 0u; r < ROWS; ++r) ACC[r] = 0.0;                                              \
     for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {                                    \
         vec4 xv[4];                                                                             \
@@ -113,10 +85,10 @@ vec4 bytesOf(uint w) {
             uint row = rowBase + r;                                                             \
             if (row >= outDim) break;                                                           \
             uint base = row * wordsPerRow + sb * 21u;                                           \
-            uint q = WLOAD(slot, base + 4u + t16);                                              \
-            uint sc0 = WLOAD(slot, base + h * 2u);                                              \
-            uint sc1 = WLOAD(slot, base + h * 2u + 1u);                                         \
-            uint dm = WLOAD(slot, base + 20u);                                                  \
+            uint q = RAW[base + 4u + t16];                                              \
+            uint sc0 = RAW[base + h * 2u];                                              \
+            uint sc1 = RAW[base + h * 2u + 1u];                                         \
+            uint dm = RAW[base + 20u];                                                  \
             vec2 dd = unpackHalf2x16(dm);                                                       \
             uint scj[4];                                                                        \
             scj[0] = (sc0 >> (s * 8u)) & 255u;                                                  \
@@ -152,8 +124,18 @@ void main() {
 
     float accG[ROWS];
     float accU[ROWS];
-    Q2K_BANK(gload, accG)
-    Q2K_BANK(uload, accU)
+    // Select one matching gate/up binding pair before either reduction bank.
+    // ids[pick] is uniform across this workgroup; barriers remain outside.
+    switch (slot) {
+    case 0u: { Q2K_BANK(g0, accG) Q2K_BANK(u0, accU) break; }
+    case 1u: { Q2K_BANK(g1, accG) Q2K_BANK(u1, accU) break; }
+    case 2u: { Q2K_BANK(g2, accG) Q2K_BANK(u2, accU) break; }
+    case 3u: { Q2K_BANK(g3, accG) Q2K_BANK(u3, accU) break; }
+    case 4u: { Q2K_BANK(g4, accG) Q2K_BANK(u4, accU) break; }
+    case 5u: { Q2K_BANK(g5, accG) Q2K_BANK(u5, accU) break; }
+    case 6u: { Q2K_BANK(g6, accG) Q2K_BANK(u6, accU) break; }
+    default: { Q2K_BANK(g7, accG) Q2K_BANK(u7, accU) break; }
+    }
 
     for (uint r = 0u; r < ROWS; ++r) {
         red[r * LANES + tid] = accG[r];

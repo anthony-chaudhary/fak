@@ -337,7 +337,9 @@ func TestV41DenseProjectionActualSessionRoutes(t *testing.T) {
 					wantHostRows = 7 * len(ids)
 					wantHostCalls = 7 * len(ids)
 					if index == 0 {
-						wantHostCalls = 2 + 5*len(ids)
+						// Cold query A/B, KV and router use one panel each;
+						// the three shared-expert projections remain per row.
+						wantHostCalls = 4 + 3*len(ids)
 					}
 				}
 				if delta["dense_projection_device_calls"] != float64(calls) || delta["dense_projection_device_rows"] != float64(rows) || delta["dense_projection_host_rows"] != float64(wantHostRows) || delta["dense_projection_host_calls"] != float64(wantHostCalls) {

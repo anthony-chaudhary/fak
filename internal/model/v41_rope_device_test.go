@@ -24,6 +24,8 @@ type v41TailRoPETestBackend struct {
 	supported                bool
 	calls                    []v41TailRoPECall
 	transients               map[compute.Buffer]bool
+	tables                   map[compute.Buffer]bool
+	tableUploads, tableBytes int
 	outputs                  map[compute.Buffer]string
 	uploadCount, uploadBytes int
 	readCount, readBytes     int
@@ -37,7 +39,7 @@ type v41TailRoPETestBackend struct {
 func newV41TailRoPETestBackend() *v41TailRoPETestBackend {
 	return &v41TailRoPETestBackend{
 		v41DenseTestBackend: newV41DenseTestBackend(), supported: true,
-		transients: map[compute.Buffer]bool{}, outputs: map[compute.Buffer]string{},
+		transients: map[compute.Buffer]bool{}, tables: map[compute.Buffer]bool{}, outputs: map[compute.Buffer]string{},
 	}
 }
 
@@ -57,7 +59,13 @@ func (b *v41TailRoPETestBackend) UploadClass(x compute.Tensor, dt compute.Dtype,
 	// cpu-ref's otherwise identity Upload implementation.
 	values := append([]float32(nil), b.Backend.Read(x)...)
 	y := compute.NewF32(b, append([]int(nil), x.Shape...), values)
-	b.transients[y.Buf()] = true
+	if site == "V4.1 tail-RoPE table" {
+		b.tables[y.Buf()] = true
+		b.tableUploads++
+		b.tableBytes += 4 * len(values)
+	} else {
+		b.transients[y.Buf()] = true
+	}
 	b.uploadCount++
 	b.uploadBytes += 4 * len(values)
 	return y
@@ -161,6 +169,7 @@ func (b *v41TailRoPETestBackend) Free(x compute.Tensor) {
 		delete(b.outputs, x.Buf())
 	}
 	delete(b.transients, x.Buf())
+	delete(b.tables, x.Buf())
 	b.v41DenseTestBackend.Free(x)
 }
 
@@ -282,6 +291,48 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("bounded-exact-table-reuse", func(t *testing.T) {
+		b := newV41TailRoPETestBackend()
+		s := &Session{M: &Model{}, Backend: b}
+		t.Cleanup(s.Close)
+		rotate := s.v41TailRoPEFunc()
+		q := []float32{5, -7, 3, 11}
+		call := func(cos, sin []float32, uploads int) {
+			t.Helper()
+			qo, ko, err := rotate(0, q, q, cos, sin, 1, 4, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			table := []float32{sin[0], cos[0]}
+			want := v41TailRoPEExactOracle(q, table, 4, 2)
+			v41TailRoPECheckBits(t, "cached query", qo, want)
+			v41TailRoPECheckBits(t, "cached KV", ko, want)
+			if b.tableUploads != uploads || b.tableBytes != uploads*8 || len(b.tables) > 2 || len(b.transients) != 0 || b.uploadCount != 2*len(b.calls)+uploads || b.readCount != 2*len(b.calls) {
+				t.Fatalf("table reuse: uploads=%d bytes=%d live=%d calls=%d", b.tableUploads, b.tableBytes, len(b.tables), len(b.calls))
+			}
+		}
+		call([]float32{1}, []float32{0}, 1)
+		call([]float32{1}, []float32{0}, 1)
+		call([]float32{.5}, []float32{.25}, 2)
+		call([]float32{1}, []float32{0}, 2)
+		call([]float32{.5}, []float32{.25}, 2)
+		call([]float32{1}, []float32{math.Float32frombits(0x80000000)}, 3)
+		call([]float32{.75}, []float32{.125}, 4)
+		s.cacheGeometryEpoch++
+		call([]float32{.75}, []float32{.125}, 5)
+		// Rebinding replaces the same bounded slots; an older callback must
+		// reject its stale handle even when its remembered bytes still match.
+		old := rotate
+		rotate = s.v41TailRoPEFunc()
+		call([]float32{.625}, []float32{.375}, 6)
+		rotate = old
+		call([]float32{.75}, []float32{.125}, 7)
+		s.Close()
+		if len(b.tables) != 0 || len(b.transients) != 0 {
+			t.Fatal("Close leaked rotary storage")
+		}
+	})
+
 	t.Run("partial-upload-cleanup", func(t *testing.T) {
 		for failedUpload, stage := range []string{"query upload", "kv upload", "table upload"} {
 			b := newV41TailRoPETestBackend()
@@ -297,7 +348,7 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 			if !errors.As(err, &selected) || !errors.As(err, &closed) || closed.Stage != stage || !errors.Is(err, b.cause) || !s.BackendSessionClosed() {
 				t.Fatalf("partial upload lost selected failure identity: %v", err)
 			}
-			if b.uploadCount != failedUpload || len(b.calls) != 0 || len(b.transients) != 0 {
+			if b.uploadCount != failedUpload || len(b.calls) != 0 || len(b.transients) != 0 || len(b.tables) != 0 {
 				t.Fatal("partial upload dispatched or leaked a prior allocation")
 			}
 			v41TailRoPECheckBits(t, "failed upload Q", q, beforeQ)
@@ -323,7 +374,7 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 			}
 			v41GroupedParity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})), 1e-4)
 			v41GroupedParity(t, s.Prefill([]int{4}), lastLogits(m.Forward([]int{1, 2, 3, 4})), 1e-4)
-			if len(b.calls) != 4*m.Cfg.NumLayers || b.uploadCount != 3*len(b.calls) || b.readCount != 2*len(b.calls) || len(b.transients) != 0 {
+			if len(b.calls) != 4*m.Cfg.NumLayers || b.uploadCount != 2*len(b.calls)+b.tableUploads || b.readCount != 2*len(b.calls) || len(b.transients) != 0 {
 				t.Fatal("Step/suffix replayed a prefix, skipped RoPE, or leaked a transient")
 			}
 			for i, call := range b.calls {
@@ -418,7 +469,7 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 		b.cause = &compute.BackendError{Backend: "test-device", Class: compute.VulkanClassExecutionFailed, Err: ErrV41ForwardStage}
 		err := recoverError(func() { s.Prefill([]int{3, 4}) })
 		var selected *V41TailRoPEOperationError
-		if !errors.As(err, &selected) || !errors.Is(err, b.cause) || !s.BackendSessionClosed() || len(b.calls) != b.failCall || len(b.transients) != 0 {
+		if !errors.As(err, &selected) || !errors.Is(err, b.cause) || !s.BackendSessionClosed() || len(b.calls) != b.failCall || len(b.transients) != 0 || len(b.tables) != 0 {
 			t.Fatalf("later suffix failure replayed or lost selection: %v", err)
 		}
 		if !reflect.DeepEqual(s.v41Forward.history, []int{1, 2, 3}) || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), captureV41ForwardSnapshot(expected)) {
@@ -454,7 +505,7 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 			if original, ok := tc.value.(error); ok && !errors.Is(closed, original) {
 				t.Fatal("unclassified error cause was not retained")
 			}
-			if len(b.calls) != b.failCall || len(b.transients) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {
+			if len(b.calls) != b.failCall || len(b.transients) != 0 || len(b.tables) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {
 				t.Fatal("unclassified panic replayed, leaked, or advanced continuation state")
 			}
 			if retry := recoverError(func() { s.Step(3) }); retry != s.halFailure || len(b.calls) != b.failCall {
@@ -510,7 +561,7 @@ func TestV41TailRoPEDeviceDispatch(t *testing.T) {
 			if (tc.fault == "dispatch" || tc.fault == "panic" || tc.fault == "partial-output" || strings.HasPrefix(tc.fault, "read-")) && (!errors.Is(err, b.cause) || !errors.Is(err, ErrV41ForwardStage)) {
 				t.Fatalf("selected failure lost nested cause identity: %v", err)
 			}
-			if !s.BackendSessionClosed() || len(b.calls) != b.failCall || len(b.transients) != 0 || len(b.outputs) != 0 {
+			if !s.BackendSessionClosed() || len(b.calls) != b.failCall || len(b.transients) != 0 || len(b.tables) != 0 || len(b.outputs) != 0 {
 				t.Fatalf("selected failure replayed or leaked: calls=%d want=%d live=%d", len(b.calls), b.failCall, len(b.transients))
 			}
 			if !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {

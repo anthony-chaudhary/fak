@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41CombinedAttention composes already-resolved logical window rows with
@@ -67,14 +69,9 @@ func v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim int, q
 			return fail("canonical compressed row ID is out of range")
 		}
 	}
-	flat := make([]float32, 0, kvCount)
 	idx := make([]int32, 0, slots)
-	for i, row := range window {
-		flat = append(flat, row...)
+	for i := range window {
 		idx = append(idx, int32(i))
-	}
-	for _, row := range compressed {
-		flat = append(flat, row...)
 	}
 	for _, id := range compressedIDs {
 		// Avoid (pos+1)/ratio and (id+1)*ratio overflow at extreme positions.
@@ -84,9 +81,26 @@ func v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim int, q
 			idx = append(idx, int32(len(window)+int(id)))
 		}
 	}
-	out, err := v41SparseAttentionSinkResident(layer, q, flat, sink, idx, V41SparseAttentionSinkOptions{
+	opt := V41SparseAttentionSinkOptions{
 		B: 1, M: 1, Heads: heads, HeadDim: headDim, N: rows, TopK: len(idx), Softmax: scale,
-	}, resident, attend)
+	}
+	var out []float32
+	var err error
+	if attend != nil && resident != nil && !v41ResidentKVDisabled {
+		out, err = v41SelectedSharedAttention(layer, v41SharedAttentionRequest{
+			mode: compute.V41SharedAttentionPlain, q: q, sink: sink, idx: idx, plain: opt,
+			rowKV:    &v41SharedAttentionRows{window: window, compressed: compressed},
+			resident: resident, sinkKey: resident.sinkKey,
+		}, attend)
+	} else {
+		flat := make([]float32, 0, kvCount)
+		for _, stream := range [][][]float32{window, compressed} {
+			for _, row := range stream {
+				flat = append(flat, row...)
+			}
+		}
+		out, err = v41SparseAttentionSinkResident(layer, q, flat, sink, idx, opt, resident, attend)
+	}
 	if err != nil {
 		return nil, err
 	}

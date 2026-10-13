@@ -582,7 +582,8 @@
       "distinct_from": [
         "attnScale (SDPA denominator)",
         "issue9256-attention-fill-scores",
-        "issue9256-attention-fill-softmax"
+        "issue9256-attention-fill-softmax",
+        "x-attention-v41sharedattentionplain"
       ],
       "aliases": [],
       "grounding": "softmaxattentionscores",
@@ -701,6 +702,45 @@
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-attention-v41sharedattentionplain",
+      "canonical": "V41SharedAttentionPlain (V4.1 softmax mode)",
+      "family": "attention",
+      "kind": "config",
+      "definition": "V41SharedAttentionPlain is the V4.1 shared-attention native/shader ABI mode value 0. It selects a negative-infinity softmax maximum seed.",
+      "distinction": "V41SharedAttentionCompressed selects negative MaxFloat32 and skips when that sentinel survives. Plain can consume selected compressed-history rows; it does not mean uncompressed storage. Unlike softmaxAttentionScores, this is a numerical mode selector, not the score-normalization function. Unlike v41SharedAttentionRows, the mode does not describe borrowed row storage.",
+      "distinct_from": [
+        "x-attention-softmaxattentionscores",
+        "x-attention-v41sharedattentionrows"
+      ],
+      "aliases": [],
+      "grounding": "V41SharedAttentionPlain",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-attention-v41sharedattentionrows",
+      "canonical": "v41SharedAttentionRows (borrowed combined KV descriptor)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "v41SharedAttentionRows is an internal model request descriptor containing borrowed window and compressed row slices, logically concatenated in that order, valid only during the synchronous attention callback. It does not own or cache the float data.",
+      "distinction": "Unlike V41SharedAttentionPlain, a numerical softmax mode selector, this type describes input row storage. Admission validates every original row before selection; resident staging materializes only missing upload runs and no-row-log fallback packs selected rows.",
+      "distinct_from": [
+        "x-attention-v41sharedattentionplain"
+      ],
+      "aliases": [],
+      "grounding": "v41SharedAttentionRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
       "gaps": []
     }
   ]

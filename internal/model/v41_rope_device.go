@@ -49,9 +49,9 @@ func v41TailRoPEInPlace(layer int, q, kv, cos, sin []float32, heads, headDim, ro
 }
 
 // Refs #13668. This leaf uses the exact host-generated table, including its
-// current per-layer theta and amplitude. It uploads Q, KV and [sin,cos], then
-// reads both outputs back: 4*((heads+1)*D+R) upload bytes and 4*(heads+1)*D
-// readback bytes per call. It neither establishes residency nor claims a gain.
+// current per-layer theta and amplitude. Q and KV remain transient. At most two
+// exact tables are session-owned; a miss adds 4*R uploaded bytes to the unchanged
+// 4*(heads+1)*D Q/KV transfers. Refs #13846; no latency gain is implied.
 func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
@@ -61,6 +61,17 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 	if !ok || !operation.SupportsV41TailRoPE() {
 		return nil
 	}
+	// These keys are session-local, never model-owned immutable weights. A newly
+	// bound callback may replace them, so a hit must also match the live handle.
+	keys := [2]string{"v41-tail-rope-table:0", "v41-tail-rope-table:1"}
+	type tableEntry struct {
+		values []float32
+		tensor compute.Tensor
+		model  *Model
+		epoch  uint64
+	}
+	var tables [2]tableEntry
+	next := 0
 	return func(layer int, q, kv, cos, sin []float32, heads, headDim, rotaryDim int) (qResult, kvResult []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
@@ -124,8 +135,40 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 			kt := s.uploadHostF32([]int{headDim}, kv, compute.MemoryActivation, "V4.1 tail-RoPE KV")
 			defer s.Backend.Free(kt)
 			stage = "table upload"
-			tt := s.uploadHostF32([]int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 tail-RoPE table")
-			defer s.Backend.Free(tt)
+			var tt compute.Tensor
+			for i, entry := range tables {
+				live, present := s.halW[keys[i]]
+				if !present || live.Buf() == nil || live.Buf() != entry.tensor.Buf() ||
+					live.Backend() != s.Backend || entry.model != s.M || entry.epoch != s.cacheGeometryEpoch || len(entry.values) != len(table) {
+					continue
+				}
+				equal := true
+				for j, value := range table {
+					if math.Float32bits(value) != math.Float32bits(entry.values[j]) {
+						equal = false
+						break
+					}
+				}
+				if equal {
+					tt = live
+					break
+				}
+			}
+			if tt.Buf() == nil {
+				if s.halW == nil {
+					s.halW = make(map[string]compute.Tensor)
+				}
+				key := keys[next]
+				if old, present := s.halW[key]; present {
+					// The prior call completed its readbacks before this replacement.
+					delete(s.halW, key)
+					s.Backend.Free(old)
+				}
+				tt = s.uploadHostF32([]int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 tail-RoPE table")
+				s.halW[key] = tt
+				tables[next] = tableEntry{values: table, tensor: tt, model: s.M, epoch: s.cacheGeometryEpoch}
+				next = (next + 1) % len(tables)
+			}
 			stage = "tail-rope"
 			qo, ko, err := operation.V41TailRoPEQK(qt, kt, tt, heads, headDim, rotaryDim)
 			// Even an error may return partially allocated outputs. Free each

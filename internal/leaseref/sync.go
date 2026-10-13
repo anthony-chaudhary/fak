@@ -93,6 +93,23 @@ type SyncResult struct {
 	PushSkippedEmpty bool `json:"push_skipped_empty,omitempty"`
 }
 
+// SyncError describes a nonzero Git exit without exposing transport output or
+// a remote URL. Its category is diagnostic only; exit status governs failure.
+type SyncError struct {
+	Verb     string
+	ExitCode int
+	category string
+	extra    string
+}
+
+func (e *SyncError) Error() string {
+	return fmt.Sprintf("leaseref: %s exited %d (%s)%s", e.Verb, e.ExitCode, e.category, e.extra)
+}
+
+// Category returns client-rejected, remote-rejected, remote-failure, or unknown.
+// Unknown includes mixed, malformed, absent, or localized push statuses.
+func (e *SyncError) Category() string { return e.category }
+
 func validRemote(remote string) bool { return wipref.ValidRemote(remote) }
 
 // Sync converges the refs/fak/locks/* namespace with remote: push the local records,
@@ -189,16 +206,71 @@ func (s *Store) runSyncDirection(ctx context.Context, verb, remote, extra string
 	args := []string{verb}
 	if verb == "fetch" {
 		args = append(args, "--no-prune")
+	} else if verb == "push" {
+		args = append(args, "--porcelain")
 	}
 	args = append(args, remote, syncRefspec)
-	_, code, err := s.run(ctx, s.dir, args...)
+	out, code, err := s.run(ctx, s.dir, args...)
 	if err != nil {
 		return fmt.Errorf("leaseref: git not executable: %w", err)
 	}
 	if code != 0 {
-		return fmt.Errorf("leaseref: %s exited %d%s", strings.Join(args, " "), code, extra)
+		category := "unknown"
+		if verb == "push" {
+			category = syncPushFailureCategory(out)
+		}
+		return &SyncError{Verb: verb, ExitCode: code, category: category, extra: extra}
 	}
 	return nil
+}
+
+// Porcelain's status columns are the only evidence interpreted here. Free-form
+// reasons and non-status output are never rendered or used to infer a cause.
+func syncPushFailureCategory(out string) string {
+	category := ""
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if !strings.HasPrefix(line, "!") {
+			continue
+		}
+		cols := strings.Split(line, "\t")
+		if len(cols) != 3 || cols[0] != "!" {
+			return "unknown"
+		}
+		from, to, ok := strings.Cut(cols[1], ":")
+		if !ok || !syncStatusRefValid(from) || !syncStatusRefValid(to) {
+			return "unknown"
+		}
+		summary, _, hasReason := strings.Cut(cols[2], " (")
+		if hasReason && !strings.HasSuffix(cols[2], ")") {
+			return "unknown"
+		}
+		var next string
+		switch summary {
+		case "[rejected]":
+			next = "client-rejected"
+		case "[remote rejected]":
+			next = "remote-rejected"
+		case "[remote failure]":
+			next = "remote-failure"
+		default:
+			return "unknown"
+		}
+		if category != "" && category != next {
+			return "unknown"
+		}
+		category = next
+	}
+	if category == "" {
+		return "unknown"
+	}
+	return category
+}
+
+func syncStatusRefValid(ref string) bool {
+	id, ok := strings.CutPrefix(ref, refPrefix)
+	return ok && validID(id) && !strings.Contains(id, "..") &&
+		!strings.HasSuffix(id, ".") && !strings.HasSuffix(id, ".lock")
 }
 
 // QuarantineMalformedLockRefs moves malformed loose files out of refs/fak/locks

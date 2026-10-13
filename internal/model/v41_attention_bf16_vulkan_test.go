@@ -425,8 +425,8 @@ func TestV41AttentionBF16Vulkan(t *testing.T) {
 					s.Close()
 					bind(target, true)
 					compare(target.Prefill([]int{4}), control.Prefill([]int{4}))
-					if w.calls-calls != 8*m.Cfg.NumLayers || w.norms-norms != 4*m.Cfg.NumLayers || target.v41State().callbackOwner != target {
-						t.Fatal("prefill/decode/restore did not exercise both real boundaries")
+					if w.calls-calls != 4*m.Cfg.NumLayers || w.norms-norms != 4*m.Cfg.NumLayers || target.v41State().callbackOwner != target {
+						t.Fatal("prefill/decode/restore missed output boundaries or republished BF16 inputs")
 					}
 				})
 			}

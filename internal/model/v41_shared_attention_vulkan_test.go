@@ -279,6 +279,7 @@ func v41AttentionPhysicalSnapshot(t *testing.T, backend compute.Backend) compute
 // Independent slot filtering: do not call production gather, mask or BF16 code.
 func v41AttentionPhysicalSelection(t *testing.T, r v41SharedAttentionRequest) (rows []int, values []float32, heads, dim int, scale float32) {
 	t.Helper()
+	r.kv = v41TestAttentionFlatKV(r)
 	if r.mode == compute.V41SharedAttentionPlain {
 		heads, dim, scale = r.plain.Heads, r.plain.HeadDim, r.plain.Softmax
 		limit := len(r.idx)
@@ -325,6 +326,9 @@ func v41AttentionPhysicalCopyRequest(r v41SharedAttentionRequest) v41SharedAtten
 		return result
 	}
 	r.values = cloneRows(r.values)
+	if r.rowKV != nil {
+		r.rowKV = &v41SharedAttentionRows{window: cloneRows(r.rowKV.window), compressed: cloneRows(r.rowKV.compressed)}
+	}
 	r.compressed.Sink, r.compressed.Idx, r.compressed.SourceRows = slices.Clone(r.compressed.Sink), slices.Clone(r.compressed.Idx), cloneRows(r.compressed.SourceRows)
 	return r
 }

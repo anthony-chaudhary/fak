@@ -221,7 +221,7 @@ func v41SyntheticPanel(rows, in int) []float32 {
 
 // TestV41ProjectionBatchForwardInvocation drives a real two-token V4.1 forward
 // and pins that the batched query projections actually run in the production
-// path (one attn.wq_a panel + one attn.wq_b panel per layer) and that the
+// path (query A/B, KV and router panels per layer) and that the
 // forward still emits finite logits. The byte-identity of each batched row to
 // the scalar per-token read is pinned by the tests above.
 func TestV41ProjectionBatchForwardInvocation(t *testing.T) {
@@ -232,14 +232,102 @@ func TestV41ProjectionBatchForwardInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("forwardV41 error = %v, want nil", err)
 	}
-	wantPanels := 2 * m.Cfg.NumLayers // wq_a + wq_b per layer
+	wantPanels := 4 * m.Cfg.NumLayers
 	if calls := int(v41PanelInvocationCount.Load()); calls != wantPanels {
-		t.Fatalf("forwardV41 ran %d panel primitive(s), want %d (wq_a + wq_b per layer)", calls, wantPanels)
+		t.Fatalf("forwardV41 ran %d panel primitive(s), want %d (query A/B, KV and router per layer)", calls, wantPanels)
 	}
 	for r, row := range act.Logits {
 		for i, v := range row {
 			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 				t.Fatalf("logits[%d][%d] = %v, want finite after the batched query projections", r, i, v)
+			}
+		}
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41ProjectionBatchKVRouterChunkCoverage(t *testing.T) {
+	v41CheckKVRouterForwardPanels(t, v41ReducedModel(t), 65, []int{64, 1}, false)
+}
+
+// fak-test:runtime fast
+func TestV41ProjectionBatchKVRouterScalarForward(t *testing.T) {
+	v41PanelInvocationCount.Store(0)
+	v41CheckKVRouterForwardPanels(t, v41ReducedModel(t), 1, []int{1}, false)
+	if calls := v41PanelInvocationCount.Load(); calls != 0 {
+		t.Fatalf("single-token forward invoked %d panel primitives", calls)
+	}
+}
+
+// fak-test:runtime slow est=30s lane=default
+func TestV41ProjectionBatchKVRouterFullRank(t *testing.T) {
+	v41CheckKVRouterForwardPanels(t, v41PinnedSlateFixture(t, false), 2, []int{2}, true)
+}
+
+func v41CheckKVRouterForwardPanels(t *testing.T, m *Model, seq int, wantChunks []int, full bool) {
+	t.Helper()
+	ids := make([]int, seq)
+	for i := range ids {
+		ids[i] = i % m.Cfg.VocabSize
+	}
+	type call struct {
+		leaf             string
+		layer, rows, out int
+		input, snapshot  []float32
+	}
+	var calls []call
+	project := func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+		if leaf != "attn.wkv.weight" && leaf != "ffn.gate.weight" {
+			return nil, v41ProjectionDeclined, nil
+		}
+		calls = append(calls, call{leaf: leaf, layer: layer, rows: rows, out: out, input: panel, snapshot: append([]float32(nil), panel...)})
+		result := make([]float32, rows*out)
+		for row := 0; row < rows; row++ {
+			x, err := m.v41ProjMatRows(layer, leaf, panel[row*in:(row+1)*in], out, in)
+			if err != nil {
+				return nil, v41ProjectionError, err
+			}
+			copy(result[row*out:(row+1)*out], x)
+		}
+		return result, v41ProjectionHandled, nil
+	}
+	got, err := m.forwardV41(ids, &v41ForwardState{denseProjection: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := m.forwardV41(ids, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Logits) != seq || len(want.Logits) != seq {
+		t.Fatalf("logit row coverage got=%d want=%d seq=%d", len(got.Logits), len(want.Logits), seq)
+	}
+	for row := range want.Logits {
+		if !v41SameBits(got.Logits[row], want.Logits[row]) {
+			t.Fatalf("scalar-row projection oracle differs at logit row %d", row)
+		}
+	}
+	for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+		for _, leaf := range []string{"attn.wkv.weight", "ffn.gate.weight"} {
+			var selected []call
+			for _, c := range calls {
+				if c.layer == layer && c.leaf == leaf {
+					selected = append(selected, c)
+				}
+			}
+			if len(selected) != len(wantChunks) {
+				t.Fatalf("layer %d %s dispatched %d calls, want %d bounded chunks", layer, leaf, len(selected), len(wantChunks))
+			}
+			for chunk, c := range selected {
+				if c.rows != wantChunks[chunk] || len(c.input) != c.rows*m.Cfg.HiddenSize {
+					t.Fatalf("layer %d %s chunk %d rows=%d input=%d", layer, leaf, chunk, c.rows, len(c.input))
+				}
+				if full && leaf == "attn.wkv.weight" && c.out != v41KVLoraRank {
+					t.Fatalf("full KV projection width=%d want %d", c.out, v41KVLoraRank)
+				}
+				if !v41SameBits(c.input, c.snapshot) {
+					t.Fatalf("layer %d %s chunk %d input was overwritten after dispatch", layer, leaf, chunk)
+				}
 			}
 		}
 	}

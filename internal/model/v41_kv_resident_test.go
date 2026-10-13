@@ -3,12 +3,110 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// Observer snapshots own their rows after the synchronous callback returns.
+// Keep this independent of the production row lookup and selection helpers.
+func v41TestAttentionFlatKV(r v41SharedAttentionRequest) []float32 {
+	if r.rowKV == nil {
+		return append([]float32(nil), r.kv...)
+	}
+	var out []float32
+	for _, stream := range [][][]float32{r.rowKV.window, r.rowKV.compressed} {
+		for _, row := range stream {
+			out = append(out, row...)
+		}
+	}
+	return out
+}
+
+// CPU-storage contract witness; this does not qualify hardware throughput.
+// fak-test:runtime fast est=50ms lane=default
+func TestV41CombinedResidentBorrowedRows(t *testing.T) {
+	prior := v41ResidentKVDisabled
+	v41ResidentKVDisabled = false
+	defer func() { v41ResidentKVDisabled = prior }()
+	for _, rowLog := range []bool{false, true} {
+		t.Run(fmt.Sprintf("row_log_%t", rowLog), func(t *testing.T) {
+			recorder := newV41SharedAttentionTestBackend()
+			var backend compute.Backend = recorder
+			if rowLog {
+				resident := newV41ResidentKVTestBackend()
+				backend, recorder = resident, resident.v41SharedAttentionTestBackend
+			}
+			s := v41DenseTestSession(t, v41IncrementalPlainModel(t, 1), backend)
+			selected := s.v41SharedAttentionFunc()
+			if selected == nil {
+				t.Fatal("shared attention was not bound")
+			}
+			owner := &V41AttentionState{}
+			window := [][]float32{{0.25, -0.5}, {0.75, 0.125}}
+			compressed := [][]float32{{-0.25, 0.5}, {0.125, 0.25}}
+			for pos := 0; pos < 2; pos++ {
+				view := &v41ResidentKVView{owner: owner, pos: pos, ringRows: 2, windowRows: pos + 1, compressedRows: pos + 1}
+				ids := []int32{0, 0, -1}
+				if pos == 1 {
+					ids = []int32{1, 0, 1, -1}
+				}
+				before := recorder.uploadBytes
+				var expected v41SharedAttentionTestCall
+				attend := func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+					if r.kv != nil || r.rowKV == nil || &r.rowKV.window[0][0] != &window[0][0] || &r.rowKV.compressed[0][0] != &compressed[0][0] {
+						t.Fatal("resident seam copied or flattened borrowed history")
+					}
+					flat := v41TestAttentionFlatKV(r)
+					expected = v41SharedAttentionTestCall{q: append([]float32(nil), r.q...), sink: append([]float32(nil), r.sink...), heads: 1, dim: 2, scale: 0.5, mode: r.mode, hasSink: true}
+					for _, id := range r.idx {
+						if id >= 0 {
+							expected.kv = append(expected.kv, flat[int(id)*2:(int(id)+1)*2]...)
+							expected.rows++
+						}
+					}
+					out, err := selected(layer, r)
+					if !reflect.DeepEqual(v41TestAttentionFlatKV(r), flat) {
+						t.Fatal("callback mutated borrowed source rows")
+					}
+					return out, err
+				}
+				got, err := v41CombinedAttentionResident(0, pos, 1, 1, 2, []float32{0.5, -0.25}, []float32{0.125}, window[:pos+1], compressed[:pos+1], ids, 0.5, view, attend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, err := v41SharedAttentionRoundedControl(expected)
+				if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(recorder.calls[pos], expected) {
+					t.Fatalf("row payload/parity mismatch: got=%v want=%v err=%v", got, want, err)
+				}
+				if pos == 1 {
+					wantBytes := 4 * (2 + 5*2 + 1)
+					if rowLog {
+						wantBytes = 4 * (2 + 2 + 2 + 1) // Q, new window/log rows, transient sink
+					}
+					if delta := recorder.uploadBytes - before; delta != wantBytes {
+						t.Fatalf("steady upload bytes=%d want=%d", delta, wantBytes)
+					}
+				}
+			}
+		})
+	}
+	// Invalid future rows must still fail before masking or backend dispatch.
+	called := false
+	_, err := v41CombinedAttentionResident(0, 0, 2, 1, 2, []float32{1, 0}, nil,
+		[][]float32{{0, 1}}, [][]float32{{0, float32(math.NaN())}}, []int32{0}, 1,
+		&v41ResidentKVView{}, func(int, v41SharedAttentionRequest) ([]float32, error) {
+			called = true
+			return []float32{0, 0}, nil
+		})
+	var stage *V41ForwardError
+	if called || !errors.As(err, &stage) || stage.Stage != v41StageAttention {
+		t.Fatalf("invisible invalid row: called=%t err=%v", called, err)
+	}
+}
 
 // v41ResidentKVTestBackend adds a CPU-storage row log to the shared-attention
 // recorder. It tests mirror routing, transfer volume and failure typing only;

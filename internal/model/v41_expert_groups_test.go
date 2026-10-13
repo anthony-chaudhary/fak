@@ -547,6 +547,7 @@ func TestV41ExpertGroupsDeviceSeam(t *testing.T) {
 // their original (token, slot) keys without changing BF16-visible logits.
 // fak-test:runtime slow est=30s lane=default
 func TestV41ExpertGroupsRoutedIDPanels(t *testing.T) {
+	v41PanelTestEnv(t, "FAK_V41_PREFILL_EXPERT_PANEL", "", false)
 	t.Setenv(v41RoutedIDEnv, "1")
 	ids := []int{0, 1, 2, 3, 4, 5, 6, 7}
 	panelModel, rowModel := v41PinnedSlateFixture(t, false), v41PinnedSlateFixture(t, false)
@@ -642,6 +643,7 @@ func TestV41ExpertGroupsRoutedIDPanels(t *testing.T) {
 // cpu-ref software witness, not hardware or performance qualification.
 // fak-test:runtime medium est=5s lane=default
 func TestV41ExpertGroupsRoutedIDPanelSingletonTail(t *testing.T) {
+	v41PanelTestEnv(t, "FAK_V41_PREFILL_EXPERT_PANEL", "", false)
 	t.Setenv(v41RoutedIDEnv, "1")
 	for _, tc := range []struct {
 		name  string
@@ -708,6 +710,7 @@ func TestV41ExpertGroupsRoutedIDPanelSingletonTail(t *testing.T) {
 // the historical per-row or host expert paths.
 // fak-test:runtime slow est=15s lane=default
 func TestV41ExpertGroupsRoutedIDPanelFailureDoesNotReplay(t *testing.T) {
+	v41PanelTestEnv(t, "FAK_V41_PREFILL_EXPERT_PANEL", "", false)
 	t.Setenv(v41RoutedIDEnv, "1")
 	m := v41PinnedSlateFixture(t, false)
 	b := newV41ExpertPanelRecorder()
@@ -732,6 +735,7 @@ func TestV41ExpertGroupsRoutedIDPanelFailureDoesNotReplay(t *testing.T) {
 // never touch an ID upload or projection.
 // fak-test:runtime slow est=15s lane=default
 func TestV41ExpertGroupsRoutedIDPanelDeclinesBeforeDispatch(t *testing.T) {
+	v41PanelTestEnv(t, "FAK_V41_PREFILL_EXPERT_PANEL", "", false)
 	t.Setenv(v41RoutedIDEnv, "1")
 	m := v41PinnedSlateFixture(t, false)
 	host, err := m.forwardV41([]int{1, 2, 3, 4}, (&Session{M: m}).v41State())
@@ -759,6 +763,7 @@ func TestV41ExpertGroupsRoutedIDPanelDeclinesBeforeDispatch(t *testing.T) {
 // sessions must use the legacy grouped path without any panel ID operation.
 // fak-test:runtime slow est=30s lane=default
 func TestV41ExpertGroupsRoutedIDPanelRequiresOptIn(t *testing.T) {
+	v41PanelTestEnv(t, "FAK_V41_PREFILL_EXPERT_PANEL", "", false)
 	original, hadOriginal := os.LookupEnv(v41RoutedIDEnv)
 	t.Cleanup(func() {
 		if hadOriginal {

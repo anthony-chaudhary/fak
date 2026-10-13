@@ -12,6 +12,22 @@ import (
 // callback has no decline outcome and must be rebound after clone or restore.
 type v41SharedAttentionFunc func(layer int, request v41SharedAttentionRequest) ([]float32, error)
 
+// Rows borrow the host window and append-only compressed log only for the
+// synchronous callback. Neither the callback nor the mirror retains or mutates
+// these slices; device uploads own their storage before the callback returns.
+type v41SharedAttentionRows struct {
+	window, compressed [][]float32
+}
+
+func (r *v41SharedAttentionRows) len() int { return len(r.window) + len(r.compressed) }
+
+func (r *v41SharedAttentionRows) row(i int) []float32 {
+	if i < len(r.window) {
+		return r.window[i]
+	}
+	return r.compressed[i-len(r.window)]
+}
+
 // Keep original inputs intact until validation completes. Gathering first would
 // incorrectly hide invalid padding indices or non-finite invisible source rows.
 type v41SharedAttentionRequest struct {
@@ -21,6 +37,9 @@ type v41SharedAttentionRequest struct {
 	plain       V41SparseAttentionSinkOptions
 	values      [][]float32
 	compressed  V41AttentionSharedKVOptions
+	// rowKV is an alternative to flat kv for plain combined attention. It
+	// survives loss of resident capability so fallback gathers selected rows.
+	rowKV *v41SharedAttentionRows
 	// resident names the decode step's flat KV rows in the session mirror; nil
 	// keeps the per-call KV upload. sinkKey names the checkpoint tensor the sink
 	// was read from; residency is never inferred from a layer index.
@@ -139,7 +158,21 @@ func v41PrepareSharedAttention(request v41SharedAttentionRequest) (v41SharedAtte
 	if len(request.q) != qSize || !finite32(p.scale) || p.scale == 0 {
 		return bad("query length or finite nonzero scale is invalid")
 	}
-	if request.mode == compute.V41SharedAttentionPlain && len(request.kv) != kvSize {
+	if request.rowKV != nil {
+		if request.mode != compute.V41SharedAttentionPlain || request.kv != nil || request.rowKV.len() != rows {
+			return bad("row KV requires plain mode, no flat KV, and %d rows", rows)
+		}
+		for _, stream := range [][][]float32{request.rowKV.window, request.rowKV.compressed} {
+			for _, row := range stream {
+				if len(row) != p.headDim {
+					return bad("row KV width %d, want %d", len(row), p.headDim)
+				}
+				if err := finiteRow32(row, "shared attention row KV"); err != nil {
+					return bad("%v", err)
+				}
+			}
+		}
+	} else if request.mode == compute.V41SharedAttentionPlain && len(request.kv) != kvSize {
 		return bad("plain KV length %d, want %d", len(request.kv), kvSize)
 	}
 	if request.sink != nil && len(request.sink) != p.heads {
@@ -218,7 +251,9 @@ func v41PrepareSharedAttention(request v41SharedAttentionRequest) (v41SharedAtte
 	}
 	p.kv = make([]float32, 0, selectedSize)
 	for _, row := range p.sourceRows {
-		if request.mode == compute.V41SharedAttentionPlain {
+		if request.rowKV != nil {
+			p.kv = append(p.kv, request.rowKV.row(row)...)
+		} else if request.mode == compute.V41SharedAttentionPlain {
 			p.kv = append(p.kv, request.kv[row*p.headDim:(row+1)*p.headDim]...)
 		} else {
 			p.kv = append(p.kv, request.values[row]...)
@@ -410,7 +445,7 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 			var kt compute.Tensor
 			if request.resident != nil {
 				stage = "resident KV"
-				kt, err = resident.panel(layer, request.resident, request.kv, p.headDim, p.sourceRows)
+				kt, err = resident.panel(layer, request.resident, request.kv, request.rowKV, p.headDim, p.sourceRows)
 				if err != nil {
 					return nil, err
 				}

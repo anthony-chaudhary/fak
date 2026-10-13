@@ -144,6 +144,7 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 		contractedLayer, contractions, projections := -1, 0, 0
 		changed := false
 		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+			r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 			out, err := V41SparseAttentionSink(r.q, r.kv, r.sink, r.idx, r.plain)
 			if err != nil {
 				return nil, err

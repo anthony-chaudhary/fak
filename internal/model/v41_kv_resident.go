@@ -24,7 +24,7 @@ var v41ResidentKVDisabled bool
 // [0, windowRows) are the window keys firstKey..pos, the last being this step's
 // new row; the remaining compressedRows rows are compressed groups 0..n-1. The
 // host ring stays the source of truth: the mirror only ever receives rows from
-// the request's own flat KV.
+// the request's flat KV or synchronously borrowed row view.
 type v41ResidentKVView struct {
 	owner          *V41AttentionState
 	pos            int
@@ -100,18 +100,33 @@ func (r *v41ResidentKV) copyRows(dst compute.Tensor, dstRow int, src compute.Ten
 
 // write uploads flat rows [from, from+rows) once and copies them to dst at
 // dstRow. The staging tensor is released before returning.
-func (r *v41ResidentKV) write(dst compute.Tensor, dstRow int, kv []float32, width, from, rows int) error {
-	staged := r.s.uploadHostF32([]int{rows, width}, kv[from*width:(from+rows)*width], compute.MemoryActivation, "V4.1 resident KV rows")
+func (r *v41ResidentKV) write(dst compute.Tensor, dstRow int, kv []float32, rowKV *v41SharedAttentionRows, width, from, rows int) error {
+	var values []float32
+	if rowKV == nil {
+		values = kv[from*width : (from+rows)*width]
+	} else {
+		// Pack only the missing span, never the full retained history.
+		values = make([]float32, 0, rows*width)
+		for i := from; i < from+rows; i++ {
+			values = append(values, rowKV.row(i)...)
+		}
+	}
+	staged := r.s.uploadHostF32([]int{rows, width}, values, compute.MemoryActivation, "V4.1 resident KV rows")
 	defer r.s.Backend.Free(staged)
 	return r.copyRows(dst, dstRow, staged, 0, rows)
 }
 
 // panel returns a fresh caller-owned [len(sourceRows), width] device panel of
 // the selected flat rows, uploading only rows the mirror does not yet hold.
-func (r *v41ResidentKV) panel(layer int, view *v41ResidentKVView, kv []float32, width int, sourceRows []int) (compute.Tensor, error) {
+func (r *v41ResidentKV) panel(layer int, view *v41ResidentKVView, kv []float32, rowKV *v41SharedAttentionRows, width int, sourceRows []int) (compute.Tensor, error) {
 	flatRows := len(kv) / width
+	shapeOK := len(kv) == flatRows*width
+	if rowKV != nil {
+		flatRows = rowKV.len()
+		shapeOK = kv == nil && len(rowKV.window) == view.windowRows && len(rowKV.compressed) == view.compressedRows
+	}
 	if view.owner == nil || view.windowRows < 1 || view.compressedRows < 0 || view.firstKey < 0 ||
-		view.firstKey+view.windowRows-1 != view.pos || view.windowRows+view.compressedRows != flatRows || len(kv) != flatRows*width {
+		view.firstKey+view.windowRows-1 != view.pos || view.windowRows+view.compressedRows != flatRows || !shapeOK {
 		return compute.Tensor{}, fmt.Errorf("%w: layer %d view window=[%d,+%d) compressed=%d does not describe %d flat rows at position %d",
 			errV41ResidentKVDesync, layer, view.firstKey, view.windowRows, view.compressedRows, flatRows, view.pos)
 	}
@@ -152,7 +167,7 @@ func (r *v41ResidentKV) panel(layer int, view *v41ResidentKVView, kv []float32, 
 		for at+run < view.windowRows && slot+run < slots && (m.ringKeys[slot+run] != key+run || key+run == view.pos) {
 			run++
 		}
-		if err := r.write(m.ring, slot, kv, width, at, run); err != nil {
+		if err := r.write(m.ring, slot, kv, rowKV, width, at, run); err != nil {
 			return compute.Tensor{}, err
 		}
 		for i := 0; i < run; i++ {
@@ -179,7 +194,7 @@ func (r *v41ResidentKV) panel(layer int, view *v41ResidentKVView, kv []float32, 
 			r.adopt(logKey, next)
 			m.log, m.logCap = next, capacity
 		}
-		if err := r.write(m.log, m.logRows, kv, width, view.windowRows+m.logRows, grow); err != nil {
+		if err := r.write(m.log, m.logRows, kv, rowKV, width, view.windowRows+m.logRows, grow); err != nil {
 			return compute.Tensor{}, err
 		}
 		m.logRows = view.compressedRows
