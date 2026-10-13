@@ -26,7 +26,7 @@ const (
 	StatusExcluded = "excluded"
 )
 
-// Metric defines one immutable telemetry signal with bounded labels and explicit cardinality budgets in the native performance contract.
+// Metric defines a catalog signal; its presence does not establish a live exporter.
 // Invariant: All metric identifiers must adhere to the fak_native_ namespace prefix and declare a positive cardinality budget.
 type Metric struct {
 	Name              string   `json:"name"`
@@ -60,7 +60,7 @@ type Contract struct {
 	Surfaces     []Surface `json:"surfaces"`
 }
 
-// Frozen returns the canonical versioned native performance signal contract with deterministic metrics and execution surfaces.
+// Frozen preserves the signal catalog while explicitly excluding unsupported exports.
 // Invariant: Returned metrics enforce bounded label dimensions with zero unbound runtime identifiers or prompt strings.
 // Postcondition: The resulting contract is fully populated and guaranteed to pass Validate without errors.
 func Frozen() Contract {
@@ -85,20 +85,20 @@ func Frozen() Contract {
 			metric("fak_native_promotion_total", "counter", "decisions", []string{"engine", "model_family", "action", "verdict"}, 96, "native benchmark promotion/revert receipt", "updated for each promote, hold, or revert decision", "missing decision provenance is unsupported and must block promotion"),
 		},
 		Surfaces: []Surface{
-			surface("model_loading", "internal/modelengine", "fak_native_model_load_seconds", "internal/modelengine/lifecycle.go"),
-			surface("admission_queueing", "internal/modelengine", "fak_native_admission_wait_seconds", "internal/modelengine/nativesched.go"),
-			surface("tokenization", "internal/tokenizer", "fak_native_tokenization_seconds", "internal/tokenizer/tokenizer.go"),
-			surface("prefill", "internal/nativeperf", "fak_native_phase_seconds", "internal/nativeperf/receipt.go"),
-			surface("decode", "internal/nativeperf", "fak_native_phase_seconds", "internal/nativeperf/receipt.go"),
-			surface("kv_cache", "internal/modelperfobs", "fak_native_kv_bytes", "internal/modelperfobs/kv_capacity.go"),
-			surface("cache", "internal/modelperfobs", "fak_native_cache_events_total", "internal/modelperfobs/cache_state.go"),
-			surface("transfers", "internal/modelperfobs", "fak_native_transfer_bytes_total", "internal/modelperfobs/bandwidth.go"),
-			surface("kernel_launches", "internal/metalgemm", "fak_native_kernel_launches_total", "internal/metalgemm/execution_events.go"),
-			surface("synchronization", "internal/metalgemm", "fak_native_synchronization_seconds", "internal/metalgemm/execution_events.go"),
-			surface("memory", "internal/modelperfobs", "fak_native_memory_bytes", "internal/modelperfobs/observation.go"),
-			surface("output", "internal/modelengine", "fak_native_output_seconds", "internal/modelengine/pipeline.go"),
-			surface("benchmark_gates", "internal/nativebench", "fak_native_benchmark_gate_total", "internal/nativebench/nativebench.go"),
-			surface("promotion_revert", "internal/nativeperf", "fak_native_promotion_total", "internal/nativeperf/gate.go"),
+			retiredSurface("model_loading", "internal/modelengine", "fak_native_model_load_seconds", "internal/modelengine/lifecycle.go"),
+			retiredSurface("admission_queueing", "internal/modelengine", "fak_native_admission_wait_seconds", "internal/modelengine/nativesched.go"),
+			retiredSurface("tokenization", "internal/tokenizer", "fak_native_tokenization_seconds", "internal/tokenizer/tokenizer.go"),
+			retiredSurface("prefill", "internal/nativeperf", "fak_native_phase_seconds, fak_native_tokens_total", "internal/nativeperf/receipt.go"),
+			retiredSurface("decode", "internal/nativeperf", "fak_native_phase_seconds, fak_native_tokens_total", "internal/nativeperf/receipt.go"),
+			retiredSurface("kv_cache", "internal/modelperfobs", "fak_native_kv_bytes", "internal/modelperfobs/kv_capacity.go"),
+			retiredSurface("cache", "internal/modelperfobs", "fak_native_cache_events_total", "internal/modelperfobs/cache_state.go"),
+			retiredSurface("transfers", "internal/modelperfobs", "fak_native_transfer_bytes_total", "internal/modelperfobs/bandwidth.go"),
+			retiredSurface("kernel_launches", "internal/metalgemm", "fak_native_kernel_launches_total", "internal/metalgemm/execution_events.go"),
+			retiredSurface("synchronization", "internal/metalgemm", "fak_native_synchronization_seconds", "internal/metalgemm/execution_events.go"),
+			retiredSurface("memory", "internal/modelperfobs", "fak_native_memory_bytes", "internal/modelperfobs/observation.go"),
+			retiredSurface("output", "internal/modelengine", "fak_native_output_seconds", "internal/modelengine/pipeline.go"),
+			retiredSurface("benchmark_gates", "internal/nativebench", "fak_native_benchmark_gate_total", "internal/nativebench/nativebench.go"),
+			retiredSurface("promotion_revert", "internal/nativeperf", "fak_native_promotion_total", "internal/nativeperf/gate.go"),
 		},
 	}
 }
@@ -107,8 +107,11 @@ func metric(name, kind, unit string, labels []string, budget int, provenance, fr
 	return Metric{Name: name, Kind: kind, Unit: unit, Labels: labels, CardinalityBudget: budget, Provenance: provenance, Freshness: freshness, Unsupported: unsupported}
 }
 
-func surface(id, producer, metricName, evidence string) Surface {
-	return Surface{ID: id, Producer: producer, Status: StatusExported, Metric: metricName, Evidence: evidence}
+func retiredSurface(id, producer, metricNames, evidence string) Surface {
+	return Surface{
+		ID: id, Producer: producer, Status: StatusExcluded, Evidence: evidence,
+		Exclusion: "RETIRED: " + metricNames + " have no invoked Prometheus exporter; catalog and receipt presence do not establish emission.",
+	}
 }
 
 // Validate verifies that a candidate contract satisfies all structural, naming, cardinality, and engine-safety invariants.

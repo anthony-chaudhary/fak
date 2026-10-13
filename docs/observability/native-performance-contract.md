@@ -5,11 +5,13 @@ description: "Frozen observability contract for fak-native performance metrics, 
 
 # fak-native performance observability contract
 
-Status: frozen contract v1 (2026-08-28)  
+Status: frozen catalog v1; unsupported export declarations retired
 Machine-readable source: `internal/nativeperfobscontract.Frozen()`  
 Validator: `go test ./internal/nativeperfobscontract`
 
 This contract answers one bounded question: **does every performance-relevant stage of a fak-native model run have a stable exported signal, or an explicit justified exclusion?** The validator treats `UNKNOWN` as debt and fails closed. It also fixes the engine to `fak-native`; this contract cannot silently relabel llama.cpp execution as native evidence.
+
+All 14 surfaces are currently `excluded`, with an explicit `RETIRED` reason and no `metric` field. None of the 14 catalog metric names has an invoked Prometheus exporter. The definitions remain for schema v1 compatibility; catalog entries and receipt source references do not establish runtime emission. `fak_native_tokens_total` is a catalog entry covered by both prefill and decode exclusions. The existing `fak_native_phase_seconds_total` export is a different metric family and does not implement `fak_native_phase_seconds`.
 
 New evidence defaults to **Qwen3.8**. Qwen3.6 remains valid only for explicit regression, compatibility, historical comparison, or hardware/artifact constraints, and historical Qwen3.6 artifacts keep their original identity.
 
@@ -20,13 +22,15 @@ New evidence defaults to **Qwen3.8**. Qwen3.6 remains valid only for explicit re
 - Every metric carries the bounded `engine` label. The only valid value for this contract is `fak-native`.
 - Labels describe receipt-bounded enums. Request IDs, prompts, paths, hosts, and arbitrary model strings are forbidden. `model_family` is a curated bounded value, not an artifact path or free-form model name.
 - `cardinality_budget` is the maximum intended live series count for the metric. Raising it is a contract change.
-- Provenance names the existing fak receipt or producer. This contract does not create a parallel source of truth.
-- Freshness states when the producer must update the signal. Missing observations are unsupported; they are never converted to zero.
+- Provenance identifies the referenced fak receipt or source; it does not prove an exporter invokes it.
+- Freshness describes the catalog's intended update boundary, not a current runtime guarantee. Missing observations are unsupported; they are never converted to zero.
 - A surface is complete only with `status: exported` plus a contracted metric, or `status: excluded` plus a justification. Any other status, including `UNKNOWN`, fails validation.
 
-## Native performance surface inventory
+## Retired native performance export inventory
 
-| Surface | Existing producer / truth | Contracted signal | Freshness |
+Every row below is excluded from exported coverage. The names and intended freshness remain catalog definitions.
+
+| Surface | Referenced source / receipt | Retired catalog signal | Intended freshness |
 |---|---|---|---|
 | Model loading | `internal/modelengine/lifecycle.go` | `fak_native_model_load_seconds` | Each load attempt |
 | Admission and queueing | `internal/modelengine/nativesched.go` | `fak_native_admission_wait_seconds` | Each admission/rejection |
@@ -43,7 +47,7 @@ New evidence defaults to **Qwen3.8**. Qwen3.6 remains valid only for explicit re
 | Benchmark gates | `internal/nativebench/nativebench.go`, `internal/nativeperf/gate.go` | `fak_native_benchmark_gate_total` | Each gate decision |
 | Promotion / revert | native benchmark gate receipt | `fak_native_promotion_total` | Each promote, hold, or revert decision |
 
-The complete names, types, units, label sets, cardinality budgets, provenance, freshness, and unsupported semantics live in the machine-readable Go contract. Keep dashboards and exporters downstream of that contract instead of copying this table into a second schema.
+The complete names, types, units, label sets, cardinality budgets, provenance, freshness, unsupported semantics, and exclusions live in the machine-readable Go contract. Dashboards must not query retired names as live signals. A surface may claim `exported` only after an actual invoked exporter and emitted-series witness exist.
 
 ## Existing receipts and dashboards
 
@@ -65,7 +69,7 @@ Run:
 go test ./internal/nativeperfobscontract
 ```
 
-`TestFrozenContractIsValidAndMachineReadable` emits and decodes the deterministic JSON coverage matrix in-process. The negative witnesses prove that validation fails when:
+`TestFrozenCatalogDoesNotClaimUnsupportedExports` decodes the JSON matrix and verifies the 14 catalog names remain stable, all 14 required surfaces are explicitly retired without a metric, and every catalog name has a retirement reason. This checks declaration truth; it does not qualify runtime telemetry or hardware. `TestFrozenContractIsValidAndMachineReadable` serializes and decodes the deterministic JSON coverage matrix in-process. The negative witnesses prove that validation fails when:
 
 1. a required producer has neither a metric nor an exclusion;
 2. the engine changes from `fak-native` (including a llama.cpp fallback); or
