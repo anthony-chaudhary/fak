@@ -55,6 +55,7 @@ const (
 	// decayed routing score (HybriMoE KScoreAwareCache, Apache-2.0). On each access the
 	// touched group gains alpha times its selected weight (or 1.0 for legacy streams).
 	CachePolicyScoreEMA
+	ReplayArmAdaptiveSLRU
 )
 
 // cachePolicyScoreEMAAlpha is the Score-EMA blending factor. HybriMoE drives this from
@@ -79,6 +80,8 @@ func (p CachePolicy) String() string {
 		return "lfru"
 	case CachePolicyScoreEMA:
 		return "scoreema"
+	case ReplayArmAdaptiveSLRU:
+		return "slru"
 	default:
 		return "unknown"
 	}
@@ -327,6 +330,8 @@ func cachePolicyReplayArm(policy CachePolicy, groups []ExpertGroup, capacity int
 	case CachePolicyScoreEMA:
 		hits, miss, evictions := replayOnlineScoreEMA(groups, capacity)
 		row.Hits, row.Misses, row.Evictions = hits, miss, evictions
+	case ReplayArmAdaptiveSLRU:
+		row.Hits, row.Misses, row.Evictions = replayAdaptiveSLRU(groups, capacity)
 	}
 	// Every shipped arm already satisfies these bounds (OPT early-returns above), so this
 	// is a no-op for existing output. It exists so a future arm that over-counts hits
@@ -718,6 +723,9 @@ func zipfRank(cumulative []float64, u float64) int {
 }
 
 func ParseReplayArm(name string) (CachePolicy, bool) {
+	if name == "slru" {
+		return ReplayArmAdaptiveSLRU, true
+	}
 	for _, policy := range append(CachePolicyArms(), CachePolicyScoredArms()...) {
 		if policy.String() == name {
 			return policy, true

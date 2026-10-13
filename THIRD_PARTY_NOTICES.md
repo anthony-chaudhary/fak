@@ -618,3 +618,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## freetoken-mlx adaptive segmented LRU replay
+
+The optional offline `slru` replay arm in `internal/deepseekv4moe/cache_policy_slru.go`
+is adapted from `stevezkw1998/freetoken-mlx`, commit
+`2d5bd339ab599a36e663ef90a813fc0adc5ad0a9`,
+`python/freetoken/mlx_cache.py:45-98`:
+https://github.com/stevezkw1998/freetoken-mlx/blob/2d5bd339ab599a36e663ef90a813fc0adc5ad0a9/python/freetoken/mlx_cache.py
+
+Licensed under Apache License, Version 2.0 (upstream `LICENSE`), copyright and
+attribution retained from the FreeToken/freetoken-mlx contributors. License text:
+https://www.apache.org/licenses/LICENSE-2.0
+The upstream source file has no individual copyright header and the acquired
+repository has no root NOTICE file. This adaptation replaces Python ordered
+maps with Go ordered lists, computes the 10%/80% protected target without integer
+overflow, and stores only touched resident groups. It preserves the switch after
+more than four full-capacity request windows. It is an offline experiment,
+without MLX materialization, serving eviction or a hardware performance claim.
