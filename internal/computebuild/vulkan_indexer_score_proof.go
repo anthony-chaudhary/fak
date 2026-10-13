@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-const vulkanIndexerScoreStructureID = "fak.v41-indexer-score-f32-structure.v1"
+const vulkanIndexerScoreStructureID = "fak.v41-indexer-score-f32-structure.v2"
 const vulkanNativeArchivePath = "internal/compute/libfakvulkan.a"
 
 // VulkanIndexerScoreContract describes independently inspected SPIR-V structure.
@@ -32,7 +32,7 @@ type VulkanIndexerScoreContract struct {
 func expectedVulkanIndexerScoreContract(digest string) VulkanIndexerScoreContract {
 	return VulkanIndexerScoreContract{
 		PolicyID: vulkanIndexerScoreStructureID, ModuleSHA256: digest,
-		EntryPoint: "main", LocalSize: [3]uint32{1, 1, 1}, FloatWidth: 32,
+		EntryPoint: "main", LocalSize: [3]uint32{64, 1, 1}, FloatWidth: 32,
 		DenormPreserve: true, SignedZeroInfNanPreserve: true, RoundingModeRTE: true,
 		NoContractionFAddCount: 2, NoContractionFMulCount: 2,
 	}
@@ -119,8 +119,8 @@ func inspectVulkanIndexerScoreSPIRV(data []byte) (VulkanIndexerScoreContract, er
 			}
 			switch a[2] {
 			case 17: // LocalSize
-				if count != 6 || a[3] != 1 || a[4] != 1 || a[5] != 1 {
-					return fail("expected local size 1,1,1")
+				if count != 6 || a[3] != 64 || a[4] != 1 || a[5] != 1 {
+					return fail("expected local size 64,1,1")
 				}
 				localEntry, locals = a[1], locals+1
 			case 4459, 4461, 4462: // DenormPreserve, SignedZeroInfNanPreserve, RTE

@@ -542,7 +542,7 @@ func validateVulkanVerificationSuccess(verified *computebuild.VulkanBinaryReceip
 		return incomplete("native archive identity")
 	}
 	score := receipt.VulkanIndexerScore
-	if score.PolicyID != "fak.v41-indexer-score-f32-structure.v1" || score.EntryPoint != "main" || !validVulkanVerificationHex(score.ModuleSHA256, sha256.Size) || score.LocalSize != [3]uint32{1, 1, 1} || score.FloatWidth != 32 || !score.DenormPreserve || !score.SignedZeroInfNanPreserve || !score.RoundingModeRTE || score.NoContractionFAddCount != 2 || score.NoContractionFMulCount != 2 {
+	if score.PolicyID != "fak.v41-indexer-score-f32-structure.v2" || score.EntryPoint != "main" || !validVulkanVerificationHex(score.ModuleSHA256, sha256.Size) || score.LocalSize != [3]uint32{64, 1, 1} || score.FloatWidth != 32 || !score.DenormPreserve || !score.SignedZeroInfNanPreserve || !score.RoundingModeRTE || score.NoContractionFAddCount != 2 || score.NoContractionFMulCount != 2 {
 		return incomplete("indexer score contract")
 	}
 	roles := []string{"go", "cc", "cxx", "ar", "glslc"}

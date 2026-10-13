@@ -134,14 +134,16 @@ func TestV41IndexerScoreSourceContract(t *testing.T) {
 	shader := read("shaders/v41_indexer_score.comp")
 	for _, token := range []string{
 		"#extension GL_EXT_spirv_intrinsics : require", "capabilities = [4464], 4459, 32", "capabilities = [4466], 4461, 32", "capabilities = [4467], 4462, 32",
-		"layout(local_size_x = 1) in;", "for (int h = 0; h < pc.heads; ++h)", "for (int d = 0; d < pc.headDim; ++d)",
-		"precise float product =", "precise float nextDot = dot + product;", "if (dot < 0.0) dot = 0.0;", "precise float weighted = dot * Weights[h];", "precise float nextScore = score + weighted;",
+		"layout(local_size_x = 64) in;", "const int LANES = 64;", "shared float sWeighted[LANES];", "uint row = gl_WorkGroupID.x;",
+		"for (int base = 0; base < pc.heads; base += LANES)", "for (int d = 0; d < pc.headDim; ++d)", "sWeighted[lane] = weighted;",
+		"for (int i = 0; i < count; ++i)", "precise float nextScore = score + sWeighted[i];", "if (lane == 0) Scores[row] = score;",
+		"precise float product =", "precise float nextDot = dot + product;", "if (dot < 0.0) dot = 0.0;", "precise float weighted = dot * Weights[h];",
 	} {
 		if !strings.Contains(shader, token) {
 			t.Errorf("missing shader contract %q", token)
 		}
 	}
-	for _, token := range []string{"fma(", "dot(", "float16_t", "double", "isinf(", "isnan(", "subgroup", "max("} {
+	for _, token := range []string{"fma(", "dot(", "float16_t", "double", "isinf(", "isnan(", "subgroup", "max(", "atomic"} {
 		if strings.Contains(shader, token) {
 			t.Errorf("forbidden shader behavior %q", token)
 		}

@@ -2283,7 +2283,7 @@ bool v41IndexerScoreABI(const std::vector<char>& code) {
         } else if (op == 16) { // OpExecutionMode, fixed entry/modes/width
             if (count < 3 || !validID(a[1])) return false;
             if (a[2] == 17) {
-                if (count != 6 || a[3] != 1 || a[4] != 1 || a[5] != 1) return false;
+                if (count != 6 || a[3] != 64 || a[4] != 1 || a[5] != 1) return false;
                 localEntry = a[1]; ++localCount;
             } else {
                 // SPV_KHR_float_controls: DenormPreserve, SignedZeroInfNanPreserve,
@@ -2314,7 +2314,7 @@ bool v41IndexerScoreABI(const std::vector<char>& code) {
             // No extended Fma/reductions, floating conversions/quantization, matrices,
             // decoration groups or ID-based execution modes/decorations.
             return false;
-        } else if (op == 23) { // only the integer GlobalInvocationID vector is needed
+        } else if (op == 23) { // only integer builtin ID vectors (workgroup, local invocation) are needed
             if (count != 4 || !validID(a[1]) || !validID(a[2])) return false;
             auto scalar = defs.find(a[2]);
             if (scalar == defs.end() || (scalar->second[0] & 0xffff) != typeInt) return false;

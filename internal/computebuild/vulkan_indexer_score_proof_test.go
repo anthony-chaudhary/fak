@@ -19,7 +19,7 @@ func vulkanV5StructuralFixture() []byte {
 		2<<16 | 17, 4467,
 		7<<16 | 10, 0x5f565053, 0x5f52484b, 0x616f6c66, 0x6f635f74, 0x6f72746e, 0x0000736c,
 		5<<16 | 15, 5, 1, 0x6e69616d, 0,
-		6<<16 | 16, 1, 17, 1, 1, 1,
+		6<<16 | 16, 1, 17, 64, 1, 1,
 		4<<16 | 16, 1, 4459, 32,
 		4<<16 | 16, 1, 4461, 32,
 		4<<16 | 16, 1, 4462, 32,
@@ -54,8 +54,8 @@ func TestVulkanV5IndexerScoreStructuralControls(t *testing.T) {
 	}
 	digest := sha256.Sum256(raw)
 	want := VulkanIndexerScoreContract{
-		PolicyID: "fak.v41-indexer-score-f32-structure.v1", ModuleSHA256: hex.EncodeToString(digest[:]),
-		EntryPoint: "main", LocalSize: [3]uint32{1, 1, 1}, FloatWidth: 32,
+		PolicyID: "fak.v41-indexer-score-f32-structure.v2", ModuleSHA256: hex.EncodeToString(digest[:]),
+		EntryPoint: "main", LocalSize: [3]uint32{64, 1, 1}, FloatWidth: 32,
 		DenormPreserve: true, SignedZeroInfNanPreserve: true, RoundingModeRTE: true,
 		NoContractionFAddCount: 2, NoContractionFMulCount: 2,
 	}

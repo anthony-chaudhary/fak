@@ -6,7 +6,9 @@
 spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
 spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
 spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
-layout(local_size_x = 1) in;
+layout(local_size_x = 64) in;
+
+const int LANES = 64;
 
 layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
 layout(std430, binding = 1) readonly buffer KeyBuf { float Keys[]; };
@@ -19,26 +21,43 @@ layout(push_constant) uniform Push {
     int headDim;
 } pc;
 
-// One invocation owns one row. The loops preserve dimension/head order, with
-// separate binary32 products and sums. Overflow is not clamped or rejected;
-// downstream selection retains ownership of the existing NaN/infinity policy.
+shared float sWeighted[LANES];
+
+// One workgroup owns one row. Each lane owns whole heads and keeps the serial
+// dimension order of its dot; lane 0 adds the weighted heads in head order, so
+// every separate binary32 product and sum equals the one-invocation-per-row
+// kernel. Overflow is not clamped or rejected; downstream selection retains
+// ownership of the existing NaN/infinity policy.
 void main() {
-    uint row = gl_GlobalInvocationID.x;
+    uint row = gl_WorkGroupID.x;
+    int lane = int(gl_LocalInvocationID.x);
     if (row >= uint(pc.rows)) return;
     uint keyBase = row * uint(pc.headDim);
     precise float score = 0.0;
-    for (int h = 0; h < pc.heads; ++h) {
-        uint queryBase = uint(h) * uint(pc.headDim);
-        precise float dot = 0.0;
-        for (int d = 0; d < pc.headDim; ++d) {
-            precise float product = Q[queryBase + uint(d)] * Keys[keyBase + uint(d)];
-            precise float nextDot = dot + product;
-            dot = nextDot;
+    for (int base = 0; base < pc.heads; base += LANES) {
+        int h = base + lane;
+        if (h < pc.heads) {
+            uint queryBase = uint(h) * uint(pc.headDim);
+            precise float dot = 0.0;
+            for (int d = 0; d < pc.headDim; ++d) {
+                precise float product = Q[queryBase + uint(d)] * Keys[keyBase + uint(d)];
+                precise float nextDot = dot + product;
+                dot = nextDot;
+            }
+            if (dot < 0.0) dot = 0.0;
+            precise float weighted = dot * Weights[h];
+            sWeighted[lane] = weighted;
         }
-        if (dot < 0.0) dot = 0.0;
-        precise float weighted = dot * Weights[h];
-        precise float nextScore = score + weighted;
-        score = nextScore;
+        memoryBarrierShared();
+        barrier();
+        if (lane == 0) {
+            int count = pc.heads - base < LANES ? pc.heads - base : LANES;
+            for (int i = 0; i < count; ++i) {
+                precise float nextScore = score + sWeighted[i];
+                score = nextScore;
+            }
+        }
+        barrier();
     }
-    Scores[row] = score;
+    if (lane == 0) Scores[row] = score;
 }
