@@ -6,6 +6,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
 
+const (
+	v41PhaseHostLayerSetupQKV          = "v41_host_layer_setup_qkv"
+	v41PhaseHostLayerCompressorIndexer = "v41_host_layer_compressor_indexer"
+	v41PhaseHostLayerAttention         = "v41_host_layer_attention"
+	v41PhaseHostLayerMoE               = "v41_host_layer_moe"
+	v41PhaseHostLayerCommit            = "v41_host_layer_commit"
+)
+
 // v41RoleSchedule reports whether any configured layer resolves to a non-plain
 // attention role. It is the release gate for the shared source registry: a role
 // schedule must retain the source publications across a prefill so a later
@@ -32,6 +40,20 @@ func (m *Model) v41RoleSchedule() bool {
 // reads and writes all four DISTINCT persistent streams.
 func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch, trace *v41ActivationTraceState) error {
 	cfg := m.Cfg
+	var phaseAdvance func(string)
+	var phaseFinish func()
+	if st != nil && st.callbackOwner != nil && st.callbackOwner.PhaseProfiler != nil {
+		owner := st.callbackOwner
+		phase := v41PhaseHostLayerSetupQKV
+		started := owner.phaseStart()
+		phaseAdvance = func(next string) {
+			owner.phaseEnd(phase, started)
+			phase = next
+			started = owner.phaseStart()
+		}
+		phaseFinish = func() { owner.phaseEnd(phase, started) }
+		defer phaseFinish()
+	}
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
@@ -394,6 +416,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		qLatRows[t] = qLat
 	}
 
+	if phaseAdvance != nil {
+		phaseAdvance(v41PhaseHostLayerCompressorIndexer)
+	}
 	// ---- CED/CSA2 compressor + lightning indexer stages (#13006, #12896) ----
 	//
 	// A compressed producer pools its pre-attention inputs through the compressor;
@@ -560,6 +585,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 
+	if phaseAdvance != nil {
+		phaseAdvance(v41PhaseHostLayerAttention)
+	}
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
@@ -637,6 +665,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		trace.record(l, t, v41TraceStageAttnOut, projected)
 	}
 
+	if phaseAdvance != nil {
+		phaseAdvance(v41PhaseHostLayerMoE)
+	}
 	// ---- MoE: router + shared expert + routed experts ----
 	//
 	// The router projects the normalized panel and routes each position in order;
@@ -889,6 +920,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 			copy(x[t], next[0])
 		}
+	}
+	if phaseAdvance != nil {
+		phaseAdvance(v41PhaseHostLayerCommit)
 	}
 	if resident != nil {
 		// Every token row succeeded: publish the pending panel and its carry.
