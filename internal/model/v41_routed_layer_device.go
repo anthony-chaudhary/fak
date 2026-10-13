@@ -19,6 +19,8 @@ const v41LayerExpertBatchEnv = "FAK_V41_LAYER_EXPERT_BATCH"
 // because the id arm decoded about 3x slower warm on a Strix Halo gfx1151.
 const v41RoutedIDEnv = "FAK_V41_ROUTED_ID"
 
+const v41PrefillExpertPanelEnv = "FAK_V41_PREFILL_EXPERT_PANEL"
+
 // v41RoutedFusedEnv set to "0" keeps the batched layer on the id or per-pick
 // path instead of the two-dispatch fused path, for A/B and bisection.
 const v41RoutedFusedEnv = "FAK_V41_ROUTED_FUSED"
@@ -38,6 +40,13 @@ type v41RoutedLayerFunc func(layer int, picks []routePick, x []float32) ([]float
 const v41RoutedLayerProbe polymodel.ModelID = "v41-routed-layer-probe"
 
 func v41RoutedIDOptedIn() bool { return os.Getenv(v41RoutedIDEnv) == "1" }
+
+func v41PrefillExpertPanelOptedIn() bool {
+	if value, present := os.LookupEnv(v41PrefillExpertPanelEnv); present {
+		return value == "1"
+	}
+	return v41RoutedIDOptedIn()
+}
 
 // v41RoutedLayerFunc binds the batched routed layer, or nil when the fused
 // per-pick seam is unbound or the backend cannot defer its status records.
@@ -377,7 +386,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 // to slot zero; activations and route weights remain distinct per row. Decline
 // is possible only before any selected device operation.
 func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float32, routeWeights []float32, publish v41BF16BoundaryFunc) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
-	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory || !v41RoutedIDOptedIn() {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory || !v41PrefillExpertPanelOptedIn() {
 		return nil, v41RoutedExpertDeclined, nil
 	}
 	idBackend, idOK := s.Backend.(compute.V41RoutedIDBackend)
