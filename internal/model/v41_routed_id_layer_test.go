@@ -168,6 +168,7 @@ func (b *v41RoutedIDTestBackend) V41ReadDeferred(statuses []compute.V41DeferredS
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime slow est=30s lane=default
 func TestV41RoutedLayerIDMatchesPerPick(t *testing.T) {
+	t.Setenv(v41LayerExpertBatchEnv, "1")
 	t.Setenv(v41RoutedIDEnv, "1")
 	const steps = 3
 	for _, fx := range []struct {
@@ -224,7 +225,7 @@ func TestV41RoutedLayerIDMatchesPerPick(t *testing.T) {
 				t.Fatalf("id arm reads=%d activations=%d publishes=%d, per-pick %d/%d/%d",
 					idb.deferredReads, idb.calls, idb.publishes, perPick.deferredReads, perPick.calls, perPick.publishes)
 			}
-			if idb.idCalls["matvec"] != 3*idb.idCalls["ids"] || idb.idCalls["swiglu"] != idb.idCalls["ids"] || idb.idCalls["publish_sum"] != idb.idCalls["ids"] {
+			if idb.idCalls["ids"] != steps*layers || idb.idCalls["matvec"] != 3*idb.idCalls["ids"] || idb.idCalls["swiglu"] != idb.idCalls["ids"] || idb.idCalls["publish_sum"] != idb.idCalls["ids"] {
 				t.Fatalf("id stages per layer: %v, want one ids upload, three GEMVs, one SwiGLU and one publish+sum", idb.idCalls)
 			}
 			if len(idb.pending) != 0 || len(idb.multiPending) != 0 {
@@ -245,10 +246,11 @@ func TestV41RoutedLayerIDMatchesPerPick(t *testing.T) {
 	}
 }
 
-// The id arm is opt-in: unset, "0" or any value but "1" keeps the batched
+// The id arm is opt-in: unset, empty, "0" or any value but "1" keeps the batched
 // layer on its per-pick dispatches even on an id-capable backend.
-// fak-test:runtime fast est=1s lane=default
+// fak-test:runtime slow est=20s lane=default
 func TestV41RoutedIDDefaultsOffUntilOptedIn(t *testing.T) {
+	t.Setenv(v41LayerExpertBatchEnv, "1")
 	for _, c := range []struct {
 		name  string
 		value string
@@ -256,6 +258,7 @@ func TestV41RoutedIDDefaultsOffUntilOptedIn(t *testing.T) {
 		id    bool
 	}{
 		{name: "unset"},
+		{name: "empty", value: "", set: true},
 		{name: "zero", value: "0", set: true},
 		{name: "other", value: "true", set: true},
 		{name: "opted_in", value: "1", set: true, id: true},
@@ -275,11 +278,23 @@ func TestV41RoutedIDDefaultsOffUntilOptedIn(t *testing.T) {
 			}
 			defer s.Close()
 			picks, x := v41RoutedLayerFaultPicks(m)
-			if _, outcome, err := s.v41RoutedLayerFunc()(0, picks, x); err != nil || outcome != v41RoutedExpertHandled {
-				t.Fatalf("outcome=%v err=%v", outcome, err)
+			routed := s.v41RoutedLayerFunc()
+			if routed == nil {
+				t.Fatal("explicitly enabled batched routed layer did not bind")
 			}
-			if got := b.idCalls["ids"] > 0; got != c.id {
-				t.Fatalf("id stages issued=%t want %t (%v)", got, c.id, b.idCalls)
+			sum, outcome, err := routed(0, picks, x)
+			if err != nil || outcome != v41RoutedExpertHandled || len(sum) != m.Cfg.HiddenSize {
+				t.Fatalf("result width=%d outcome=%v err=%v", len(sum), outcome, err)
+			}
+			if b.deferredReads != 1 || b.calls != len(picks) || b.publishes != len(picks) {
+				t.Fatalf("reads=%d activations=%d publishes=%d, want 1/%d/%d", b.deferredReads, b.calls, b.publishes, len(picks), len(picks))
+			}
+			wantIDCalls := map[string]int{}
+			if c.id {
+				wantIDCalls = map[string]int{"ids": 1, "matvec": 3, "swiglu": 1, "publish_sum": 1}
+			}
+			if !reflect.DeepEqual(b.idCalls, wantIDCalls) {
+				t.Fatalf("id stages=%v, want %v", b.idCalls, wantIDCalls)
 			}
 		})
 	}
@@ -290,6 +305,7 @@ func TestV41RoutedIDDefaultsOffUntilOptedIn(t *testing.T) {
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime medium est=5s lane=default
 func TestV41RoutedLayerIDFaultAttribution(t *testing.T) {
+	t.Setenv(v41LayerExpertBatchEnv, "1")
 	t.Setenv(v41RoutedIDEnv, "1")
 	cases := []struct {
 		name       string
@@ -330,9 +346,20 @@ func TestV41RoutedLayerIDFaultAttribution(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer s.Close()
-				sum, outcome, err := s.v41RoutedLayerFunc()(0, picks, x)
+				routed := s.v41RoutedLayerFunc()
+				if routed == nil {
+					t.Fatal("explicitly enabled batched routed layer did not bind")
+				}
+				sum, outcome, err := routed(0, picks, x)
 				if sum != nil || outcome != v41RoutedExpertError {
 					t.Fatalf("id=%t faulting layer published=%v outcome=%v", id, sum != nil, outcome)
+				}
+				if id {
+					calls := be.(*v41RoutedIDTestBackend).idCalls
+					want := map[string]int{"ids": 1, "matvec": 3, "swiglu": 1, "publish_sum": 1}
+					if !reflect.DeepEqual(calls, want) {
+						t.Fatalf("faulting id stages=%v, want %v", calls, want)
+					}
 				}
 				return err, s.BackendSessionClosed()
 			}
