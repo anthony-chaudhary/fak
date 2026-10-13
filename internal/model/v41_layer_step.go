@@ -462,7 +462,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		return routed, nil
 	}
 	work.finish = func(routed []float32) error {
-		shared, err := m.v41SharedExpertSwiGLUWithPublish(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+		shared, err := m.v41SharedExpertForStep(l, ffnX, cfg, scratch)
 		if err != nil {
 			return err
 		}
@@ -972,7 +972,7 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 		return routed, nil
 	}
 	work.finish = func(routed []float32) error {
-		shared, err := m.v41SharedExpertSwiGLUWithPublish(l, ffnX, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+		shared, err := m.v41SharedExpertForStep(l, ffnX, cfg, scratch)
 		if err != nil {
 			return err
 		}
