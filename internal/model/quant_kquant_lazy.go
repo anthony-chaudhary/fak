@@ -59,16 +59,14 @@ func (qt *kQuantTensor) materializeRawLocked() ([]byte, error) {
 	if window <= 0 || window > qt.lazy.Bytes {
 		window = qt.lazy.Bytes
 	}
-	buf := make([]byte, window)
 	for done := 0; done < qt.lazy.Bytes; {
 		n := qt.lazy.Bytes - done
-		if n > len(buf) {
-			n = len(buf)
+		if n > window {
+			n = window
 		}
-		if _, err := qt.lazy.Reader.ReadAt(buf[:n], qt.lazy.Offset+int64(done)); err != nil {
+		if _, err := qt.lazy.Reader.ReadAt(raw[done:done+n], qt.lazy.Offset+int64(done)); err != nil {
 			return nil, err
 		}
-		copy(raw[done:], buf[:n])
 		done += n
 	}
 	return raw, nil
@@ -80,7 +78,7 @@ func (qt *kQuantTensor) materializeRawLocked() ([]byte, error) {
 // k-quant twin of the `qt.materializeRaw()` call the device staging path already makes in
 // weightHALQ4K (hal.go): the retention primitive has always been able to fault the range, and
 // the CPU forward was simply never asking it to. Each fault allocates one full
-// page-aligned payload plus a read window; the positive retention bound is checked
+// page-aligned payload, filled directly in bounded read windows; the positive retention bound is checked
 // before that allocation, not merely before publishing its result.
 //
 // Fail-closed is preserved: a tensor with no resident and no lazy payload is left untouched for
