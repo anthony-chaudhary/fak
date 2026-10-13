@@ -23,7 +23,7 @@ var reservedLaunchAliases = map[string]bool{
 	"commit": true, "concept": true, "dev": true, "doctor": true,
 	"fleet": true, "go": true, "guard": true, "help": true,
 	"hook": true, "launch": true, "merge": true, "model": true,
-	"policy": true, "preflight": true, "replay": true, "route": true,
+	"policy": true, "preflight": true, "replay": true, "route": true, "router": true,
 	"run": true, "serve": true, "session": true, "stats": true,
 	"sweep": true, "sync": true, "version": true, "worktree": true,
 }
