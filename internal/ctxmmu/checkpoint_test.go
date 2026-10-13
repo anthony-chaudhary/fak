@@ -711,3 +711,89 @@ func TestCheckpointRejectsPoolOnlyAccounting(t *testing.T) {
 	t.Fatalf("pool-only checkpoint fabricated tokens=%v pinned_physical=%d pinned_cow=%d and restore_err=%v; want SaveInPlaceCheckpoint to fail with ErrSessionNotFound",
 		desc.TokenSequence, len(desc.PinnedBlocks), len(desc.PinnedCOWBlocks), restoreErr)
 }
+
+// fak-test:runtime fast est=1ms
+func TestMTPCheckpointPageOwnershipLifecycle(t *testing.T) {
+	table := NewCOWPageTable(WithBlockCapacity(2), WithBytesPerToken(8))
+	baseline := table.TotalAllocatedBytes()
+	const sessionID = "mtp-checkpoint-owner"
+	session, err := table.CreateSession(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.AppendTokens([]int{10, 11, 12, 13, 14, 15}); err != nil {
+		t.Fatal(err)
+	}
+	blocks := append([]*PageBlock(nil), session.Blocks...)
+	if len(blocks) != 3 {
+		t.Fatalf("allocated blocks = %d, want 3", len(blocks))
+	}
+	manager := NewCheckpointManager(nil, nil, nil, table)
+	desc, err := manager.SaveInPlaceCheckpoint(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		desc.ReleasePins()
+		if err := session.Release(); err != nil && !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, ErrSessionReleased) {
+			t.Errorf("cleanup session: %v", err)
+		}
+	})
+	checkRefs := func(phase string, want ...int32) {
+		t.Helper()
+		for i, block := range blocks {
+			if got := block.RefCount(); got != want[i] {
+				t.Errorf("%s: block %d refs = %d, want %d", phase, i, got, want[i])
+			}
+		}
+	}
+	checkRefs("checkpoint pins", 2, 2, 2)
+	if err := manager.RecordMTPDraftPages(sessionID, []int32{10, 12}, blocks[0], blocks[1]); err != nil {
+		t.Fatal(err)
+	}
+	checkRefs("first draft", 3, 3, 2)
+	if committed, freed, err := manager.CommitMTPDraft(sessionID, 1); err != nil || committed != 1 || freed != 1 {
+		t.Fatalf("first commit = (%d, %d, %v), want (1, 1, nil)", committed, freed, err)
+	}
+	checkRefs("rejected tail released", 3, 2, 2)
+	if err := manager.RecordMTPDraftPages(sessionID, []int32{14}, blocks[2]); err != nil {
+		t.Fatal(err)
+	}
+	checkRefs("accepted round replaced", 2, 2, 3)
+	if committed, freed, err := manager.CommitMTPDraft(sessionID, 1); err != nil || committed != 1 || freed != 0 {
+		t.Fatalf("second commit = (%d, %d, %v), want (1, 0, nil)", committed, freed, err)
+	}
+	desc.ReleasePins()
+	checkRefs("accepted checkpoint cleanup", 1, 1, 1)
+	desc.ReleasePins()
+	checkRefs("repeated cleanup", 1, 1, 1)
+	if len(desc.MTPState.DraftPages) != 0 || desc.MTPState.FreedPages != 3 {
+		t.Errorf("cleanup draft pages = %d, freed = %d; want 0, 3", len(desc.MTPState.DraftPages), desc.MTPState.FreedPages)
+	}
+
+	// A released descriptor may record another round. Its draft references still
+	// need an owner, without releasing the original checkpoint pins a second time.
+	// Two tokens can retain the same physical page independently.
+	if err := manager.RecordMTPDraftPages(sessionID, []int32{10, 11}, blocks[0], blocks[0]); err != nil {
+		t.Fatal(err)
+	}
+	checkRefs("draft after cleanup", 3, 1, 1)
+	if committed, freed, err := manager.CommitMTPDraft(sessionID, 2); err != nil || committed != 2 || freed != 0 {
+		t.Fatalf("later commit = (%d, %d, %v), want (2, 0, nil)", committed, freed, err)
+	}
+	desc.ReleasePins()
+	desc.ReleasePins()
+	checkRefs("later cleanup", 1, 1, 1)
+	if len(desc.MTPState.DraftPages) != 0 || desc.MTPState.FreedPages != 5 {
+		t.Errorf("later draft pages = %d, freed = %d; want 0, 5", len(desc.MTPState.DraftPages), desc.MTPState.FreedPages)
+	}
+
+	// Release the original COW owner last so its allocator reclaims the pages.
+	if err := session.Release(); err != nil {
+		t.Fatal(err)
+	}
+	checkRefs("final owner released", 0, 0, 0)
+	if got := table.TotalAllocatedBytes(); got != baseline {
+		t.Errorf("allocated bytes after final cleanup = %d, want baseline %d", got, baseline)
+	}
+}

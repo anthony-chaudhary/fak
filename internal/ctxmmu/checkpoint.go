@@ -243,20 +243,7 @@ func (s *MTPDraftState) RecordDraft(tokens []int32, pages ...*PageBlock) {
 	s.AcceptedCount = 0
 	s.RollbackOccurred = false
 
-	// If there were existing uncommitted draft pages, free them first to prevent leaks
-	for _, dp := range s.DraftPages {
-		if dp != nil && !dp.Committed {
-			if dp.PageBlock != nil {
-				dp.PageBlock.Release()
-				dp.PageBlock = nil
-			}
-			if dp.KVBlock != nil {
-				dp.KVBlock.Release()
-				dp.KVBlock = nil
-			}
-			s.FreedPages++
-		}
-	}
+	s.releaseDraftPagesLocked()
 
 	s.DraftPages = make([]*MTPDraftPage, 0, len(tokens))
 	for i, tok := range tokens {
@@ -275,6 +262,27 @@ func (s *MTPDraftState) RecordDraft(tokens []int32, pages ...*PageBlock) {
 			Committed:  false,
 		})
 	}
+}
+
+// releaseDraftPagesLocked releases each reference retained by this draft state.
+// Acceptance does not transfer ownership; repeated page pointers have separate
+// retains. The caller holds the MTP mutex.
+func (s *MTPDraftState) releaseDraftPagesLocked() {
+	for _, dp := range s.DraftPages {
+		if dp == nil {
+			continue
+		}
+		if dp.PageBlock != nil {
+			dp.PageBlock.Release()
+			dp.PageBlock = nil
+		}
+		if dp.KVBlock != nil {
+			dp.KVBlock.Release()
+			dp.KVBlock = nil
+		}
+		s.FreedPages++
+	}
+	s.DraftPages = nil
 }
 
 // CommitDraft atomically commits accepted draft tokens and immediately frees rejected draft pages.
@@ -367,7 +375,7 @@ func (d *SessionDescriptor) isExpiredLocked(now time.Time) bool {
 	return now.After(d.ExpiresAt) || now.Equal(d.ExpiresAt)
 }
 
-// ReleasePins releases the reference counts retained on physical blocks during in-place pinning.
+// ReleasePins releases the references retained by checkpoint pins and the active draft round.
 func (d *SessionDescriptor) ReleasePins() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -375,34 +383,25 @@ func (d *SessionDescriptor) ReleasePins() {
 }
 
 func (d *SessionDescriptor) releasePinsLocked() {
-	if d.pinsReleased {
-		return
-	}
-	d.pinsReleased = true
-
-	for _, blk := range d.PinnedBlocks {
-		if blk != nil {
-			blk.Release()
-		}
-	}
-	for _, cowBlk := range d.PinnedCOWBlocks {
-		if cowBlk != nil {
-			cowBlk.Release()
-		}
-	}
-	for _, dp := range d.MTPState.DraftPages {
-		if dp != nil && !dp.Committed {
-			if dp.PageBlock != nil {
-				dp.PageBlock.Release()
-				dp.PageBlock = nil
+	if !d.pinsReleased {
+		d.pinsReleased = true
+		for _, blk := range d.PinnedBlocks {
+			if blk != nil {
+				blk.Release()
 			}
-			if dp.KVBlock != nil {
-				dp.KVBlock.Release()
-				dp.KVBlock = nil
+		}
+		for _, cowBlk := range d.PinnedCOWBlocks {
+			if cowBlk != nil {
+				cowBlk.Release()
 			}
-			d.MTPState.FreedPages++
 		}
 	}
+	// Recording a later round creates new draft references even after the base
+	// checkpoint pins have been released. Drain only that round on each cleanup.
+	mu := d.MTPState.getMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	d.MTPState.releaseDraftPagesLocked()
 }
 
 // RecordMTPDraft registers candidate draft tokens and associates speculative pages under descriptor lock.
