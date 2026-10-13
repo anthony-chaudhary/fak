@@ -122,7 +122,8 @@ type v41AttentionPublicationKey struct {
 
 // V41AttentionState is session-owned state shared by the sequential attention
 // stack. One instance replaces the reference's process-global shared runtime so
-// concurrent sessions cannot alias each other. A source layer publishes before
+// concurrent sessions cannot alias mutable state. Cache-restore forks may share
+// a sealed immutable publication prefix. A source layer publishes before
 // its consumers read within the same Prefill or Step call; readers reuse the
 // latest publication.
 //
@@ -153,6 +154,7 @@ type V41AttentionState struct {
 	retainedCopies   int
 
 	window            [][]float32
+	publicationPrefix *v41PublicationPrefix // sealed rows; maps below are private writable overlays
 	kvPublications    map[v41AttentionPublicationKey][]float32
 	indexPublications map[v41AttentionPublicationKey][]float32
 	kvPublishedEnd    map[int]int
@@ -325,6 +327,7 @@ func (s *V41AttentionState) seedTemporalWithInputs(projectedKV, partialInputs []
 		retainedCopies += len(carriers)
 	}
 	s.retainedCopies = retainedCopies
+	s.publicationPrefix = nil
 	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.kvPublishedEnd = make(map[int]int)
@@ -763,6 +766,7 @@ func (s *V41AttentionState) Reset() {
 	s.partialKV = nil
 	s.partialPositions = nil
 	s.retainedCopies = 0
+	s.publicationPrefix = nil
 	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.kvPublishedEnd = make(map[int]int)
@@ -791,6 +795,19 @@ func (s *V41AttentionState) WindowKV() [][]float32 {
 // KVSourceRows returns a copy of the completed compressed rows published by the
 // given source layer, in group order.
 func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) {
+	return s.kvSourceRows(sourceLayerID, true)
+}
+
+// borrowKVSourceRows returns fresh descriptors over read-only publications for
+// one synchronous Step. The caller exclusively owns the state until consumption
+// ends: no concurrent publication, Reset, or reseed is permitted. Neither these
+// rows nor their descriptors may be retained by callbacks, snapshots, or mirrors;
+// a synchronous consumer needing retained data must copy it before returning.
+func (s *V41AttentionState) borrowKVSourceRows(sourceLayerID int) ([][]float32, bool) {
+	return s.kvSourceRows(sourceLayerID, false)
+}
+
+func (s *V41AttentionState) kvSourceRows(sourceLayerID int, copyPayload bool) ([][]float32, bool) {
 	if s == nil {
 		return nil, false
 	}
@@ -801,11 +818,14 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 	out := make([][]float32, 0, end)
 	for start := 0; start < end; start++ {
 		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
-		row, ok := s.kvPublications[key]
+		row, ok := s.kvPublication(key)
 		if !ok {
 			return nil, false
 		}
-		out = append(out, append([]float32(nil), row...))
+		if copyPayload {
+			row = append([]float32(nil), row...)
+		}
+		out = append(out, row)
 	}
 	return out, true
 }
@@ -813,6 +833,16 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 // IndexKeys returns a copy of the index-key cache published by the given source
 // layer, in group order.
 func (s *V41AttentionState) IndexKeys(sourceLayerID int) ([][]float32, bool) {
+	return s.indexKeys(sourceLayerID, true)
+}
+
+// borrowIndexKeys has the same Step-only lifetime as borrowKVSourceRows. The
+// index scorer receives its existing owned flat copy, never these publications.
+func (s *V41AttentionState) borrowIndexKeys(sourceLayerID int) ([][]float32, bool) {
+	return s.indexKeys(sourceLayerID, false)
+}
+
+func (s *V41AttentionState) indexKeys(sourceLayerID int, copyPayload bool) ([][]float32, bool) {
 	if s == nil {
 		return nil, false
 	}
@@ -823,11 +853,14 @@ func (s *V41AttentionState) IndexKeys(sourceLayerID int) ([][]float32, bool) {
 	out := make([][]float32, 0, end)
 	for start := 0; start < end; start++ {
 		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
-		row, ok := s.indexPublications[key]
+		row, ok := s.indexPublication(key)
 		if !ok {
 			return nil, false
 		}
-		out = append(out, append([]float32(nil), row...))
+		if copyPayload {
+			row = append([]float32(nil), row...)
+		}
+		out = append(out, row)
 	}
 	return out, true
 }

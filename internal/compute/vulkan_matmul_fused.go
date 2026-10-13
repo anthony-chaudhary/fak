@@ -98,6 +98,18 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		y.Shape = []int{P, w.Shape[0]}
 		return y
 	}
+	if w.Dtype == Q3_K && v.SupportsV41Q3KTokenPanel(w, P) {
+		input := X
+		if len(X.Shape) == 2 && X.Shape[0] == P && X.Shape[1] == w.Shape[1] {
+			input.Shape = []int{P * w.Shape[1]}
+		}
+		y, err := v.V41Q3KTokenPanel(w, input, P)
+		if err != nil {
+			panic(err)
+		}
+		y.Shape = []int{P, w.Shape[0]}
+		return y
+	}
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	if w.Dtype == Q6_K {
@@ -112,6 +124,9 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	out, in := w.Shape[0], w.Shape[1]
 	if P <= 0 || in <= 0 || X.Numel() != P*in {
 		panic(fmt.Sprintf("compute: vulkan BatchedMatMul input numel=%d, want P*in=%d*%d", X.Numel(), P, in))
+	}
+	if v41ScalarHeadShape(w.Dtype, out, in, P) && v.v41ScalarHeadAvailableLocked(out, in, P) {
+		return v.v41ScalarHeadLocked(w, X, P)
 	}
 	y, _ := v.devTr([]int{P, out}, F32)
 	v.recordBatchDispatch(

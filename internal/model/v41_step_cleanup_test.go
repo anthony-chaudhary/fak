@@ -30,7 +30,7 @@ func TestV41StepTransactionCleanupPreservesPrimary(t *testing.T) {
 				}
 				tx := &v41StepTransaction{
 					layers:    1,
-					layer:     func(int) error { return op() },
+					layer:     func(int) (*v41LayerStepWork, error) { return nil, op() },
 					headInput: func() ([]float32, error) { return nil, op() },
 					rollback: func() {
 						rolledBack = true

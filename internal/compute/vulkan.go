@@ -1889,6 +1889,11 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 		v.validateQ3KMatMulInputs(w, x, 1)
 	}
 	out, in := w.Shape[0], w.Shape[1]
+	if v41ScalarHeadShape(w.Dtype, out, in, 1) && v.v41ScalarHeadAvailableLocked(out, in, 1) {
+		y := v.v41ScalarHeadLocked(w, x, 1)
+		y.Shape = []int{out}
+		return y
+	}
 	y, _ := v.devTr([]int{out}, F32)
 	if isRawIQ(w.Dtype) {
 		v.iqMatVecLocked(w, x, y, out, in, 1)

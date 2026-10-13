@@ -869,19 +869,30 @@ func v41OwnsCompressedRows(plan V41AttentionPlan) bool {
 // of the most recent index-query source. Readers must never synthesize missing
 // source rows, project fresh index keys, or rotate borrowed publications again.
 func (m *Model) v41CompressedReaderRows(plan V41AttentionPlan, registry *V41AttentionState, positions int) ([][]float32, [][]float32, error) {
+	return m.v41CompressedReaderPublications(plan, registry, positions, true)
+}
+
+// v41CompressedReaderStepRows borrows publications only during the synchronous
+// Step consumer. Full prefill keeps the owned resolver above. Both routes retain
+// identical source identity, index-source gating, and exact group-count checks.
+func (m *Model) v41CompressedReaderStepRows(plan V41AttentionPlan, registry *V41AttentionState, positions int) ([][]float32, [][]float32, error) {
+	return m.v41CompressedReaderPublications(plan, registry, positions, false)
+}
+
+func (m *Model) v41CompressedReaderPublications(plan V41AttentionPlan, registry *V41AttentionState, positions int, copyPayload bool) ([][]float32, [][]float32, error) {
 	if registry == nil || plan.KVSourceLayer < 0 || positions < 0 {
 		return nil, nil, v41StageErr(v41StageAttention, plan.Layer,
 			fmt.Errorf("%w: layer %d has no shared KV source state", ErrV41ForwardStage, plan.Layer))
 	}
 	groups := positions / plan.kvGroupSize(m.Cfg)
-	rows, ok := registry.KVSourceRows(plan.KVSourceLayer)
+	rows, ok := registry.kvSourceRows(plan.KVSourceLayer, copyPayload)
 	if len(rows) != groups || (groups > 0 && !ok) {
 		return nil, nil, v41StageErr(v41StageAttention, plan.Layer,
 			fmt.Errorf("%w: layer %d requires %d completed rows from KV source %d, got %d", ErrV41ForwardStage, plan.Layer, groups, plan.KVSourceLayer, len(rows)))
 	}
 	var keys [][]float32
 	if indexSourceAt(m.Cfg.DeepSeekV41, plan.Layer) {
-		keys, ok = registry.IndexKeys(plan.KVSourceLayer)
+		keys, ok = registry.indexKeys(plan.KVSourceLayer, copyPayload)
 		if len(keys) != groups || (groups > 0 && !ok) {
 			return nil, nil, v41StageErr(v41StageIndexer, plan.Layer,
 				fmt.Errorf("%w: index-only layer %d requires %d keys from KV source %d, got %d", ErrV41ForwardStage, plan.Layer, groups, plan.KVSourceLayer, len(keys)))

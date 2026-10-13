@@ -8,8 +8,8 @@ import "sync"
 // Model entrypoints acquire it before recording, transfer or lifecycle work.
 // This cooperative contract does not make direct, unaudited Backend calls safe
 // and does not qualify a shared-head arithmetic or device capability.
-// No production backend advertises this capability until its complete model
-// execution and lifecycle surface has been independently qualified.
+// Providers join the complete owned model execution and lifecycle surface.
+// Source or CPU protocol evidence does not establish native execution safety.
 type ForwardExecutionOwnerBackend interface {
 	ForwardExecutionOwner() *sync.Mutex
 }

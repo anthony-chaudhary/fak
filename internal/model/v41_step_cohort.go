@@ -177,6 +177,12 @@ func (m *Model) forwardV41StepCohortOwned(scope *backendExecutionScope, lanes []
 		}
 	}
 	for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+		if m.v41LayerCohortEnabled(lanes, txs) {
+			if err = m.advanceV41LayerCohort(scope, lanes, txs, results, receipt, cancelled); err != nil {
+				return err
+			}
+			continue
+		}
 		for lane, tx := range txs {
 			if tx == nil || tx.closed || cancelled(lane) {
 				continue

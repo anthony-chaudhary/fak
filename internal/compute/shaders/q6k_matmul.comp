@@ -75,7 +75,9 @@ void decodeRows() {
         barrier();
         if (live) {
             uint lead = ((row * blocks + sb) * 210u) & 3u;
-            float d = unpackHalf2x16(blockWord(rowBase, lead, 52u) & 0xffffu).x;
+            // The final half fits in word 52 at either byte lead (0 or 2).
+            // Do not read word 53: the last live row never stages that word.
+            float d = unpackHalf2x16((RawS[rowBase + 52u] >> (8u * lead)) & 0xffffu).x;
             for (uint segment = 0u; segment < 2u; ++segment) {
                 uint qlW = segment * 16u;
                 uint qhW = 32u + segment * 8u;

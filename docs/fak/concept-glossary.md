@@ -1196,3 +1196,24 @@ Pure bounded Q2_K token-panel geometry carrying output/input widths, exactly 2/4
 Pure planner that validates Q2_K matrix geometry, block divisibility, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q2KTokenPanelPlan.
 
 **Distinct from:** Performs host arithmetic admission only; the returned plan holds geometry while provider capability and opt-in decide whether native execution is available.
+
+
+### V41Q3KTokenPanelPlan
+
+Pure bounded Q3_K token-panel geometry carrying output/input widths, exactly 2/4/8 rows, 110-byte quantized block extents padded to four bytes, and workgroup count for the three-int32 shader push ABI.
+
+**Distinct from:** An immutable launch geometry result for Q3_K storage rather than Q2_K geometry or a recorded Vulkan command buffer; does not qualify native device execution.
+
+
+### PlanV41Q3KTokenPanel
+
+Pure planner validating Q3_K matrix geometry, block divisibility, padded 110-byte block storage, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q3KTokenPanelPlan.
+
+**Distinct from:** Host arithmetic admission for Q3_K storage; the result contains geometry while provider capability and opt-in independently control execution. Distinct from the Q2_K planner.
+
+
+### PrepareForCache
+
+PrefixSnapshot cache-admission method that seals independently owned V4.1 publication rows into immutable shared prefix storage before publishing an admitted snapshot, retaining private mutable continuation fields.
+
+**Distinct from:** A snapshot publication preparation step invoked by the serialized cache owner after admission succeeds; not the RadixKV index, cache identity, lookup operation or a native performance qualification.

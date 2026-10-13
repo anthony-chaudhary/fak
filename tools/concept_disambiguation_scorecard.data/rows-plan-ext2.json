@@ -94,7 +94,8 @@
         "MemoryPlan (compute)",
         "fak13823-plan-vulkanreceiptbuildplan",
         "v41q2ktokenpanelplan",
-        "planv41q2ktokenpanel"
+        "planv41q2ktokenpanel",
+        "v41q3ktokenpanelplan"
       ],
       "aliases": [],
       "grounding": "vulkanplan",

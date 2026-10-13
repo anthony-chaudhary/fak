@@ -15,7 +15,8 @@ type v41StepTransaction struct {
 	nextLayer, layers int
 	closed            bool
 	headPrepared      bool
-	layer             func(int) error
+	layer             func(int) (*v41LayerStepWork, error)
+	pendingLayer      *v41LayerStepWork
 	headInput         func() ([]float32, error)
 	headProject       func([]float32) ([]float32, error)
 	headFinish        func([]float32, func() error) ([]float32, error)
@@ -276,7 +277,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		}
 	}
 
-	tx.layer = func(l int) error {
+	tx.layer = func(l int) (*v41LayerStepWork, error) {
 		state := st.layerState(l)
 		stagedPos = append(stagedPos, state.nextWindowPos)
 		stagedCompress = append(stagedCompress, state.nextCompressRow)
@@ -306,12 +307,12 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 				geometry.project = st.engramProjection
 				if geometryErr != nil {
 					rollback()
-					return geometryErr
+					return nil, geometryErr
 				}
 				base, ok := checkedMulInt(cacheIdx, geometry.cols)
 				if !ok || base < 0 || base > len(engramRows) || geometry.cols > len(engramRows)-base {
 					rollback()
-					return v41StageErr(v41StageEngram, l,
+					return nil, v41StageErr(v41StageEngram, l,
 						fmt.Errorf("%w: Engram current row identifiers do not cover layer %d", ErrV41NativeUnsupported, l))
 				}
 				opened := m.v41NowNanos()
@@ -332,7 +333,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 						host, readErr := resident.hostStreams(l)
 						if readErr != nil {
 							rollback()
-							return readErr
+							return nil, readErr
 						}
 						copy(x, host[0][0])
 						engramStreams = host
@@ -358,21 +359,16 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 					if errors.As(injectionErr, &projection) {
 						panic(injectionErr)
 					}
-					return injectionErr
+					return nil, injectionErr
 				}
 			}
 		}
 		stats.LayerCalls++
-		if lerr := m.v41LayerStepWithRegistry(l, x, streams, pos, state, registry, scratch); lerr != nil {
-			rollback()
-			var operation *V41ExpertOperationError
-			var projection *V41ProjectionOperationError
-			if errors.As(lerr, &operation) || errors.As(lerr, &projection) {
-				panic(lerr)
-			}
-			return lerr
+		work, lerr := m.prepareV41LayerStepWithRegistry(l, x, streams, pos, state, registry, scratch)
+		if lerr != nil {
+			return nil, tx.abortLayerError(lerr)
 		}
-		return nil
+		return work, nil
 	}
 	tx.headInput = func() ([]float32, error) {
 
@@ -430,23 +426,55 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 
 // advanceLayer runs precisely the next layer. An error or panic aborts only
 // this transaction; a selected device-operation panic is never replayed on host.
-func (tx *v41StepTransaction) advanceLayer() (err error) {
-	if tx.closed || tx.nextLayer >= tx.layers {
+func (tx *v41StepTransaction) advanceLayer() error {
+	if err := tx.prepareLayer(); err != nil {
+		return err
+	}
+	return tx.finishLayer(nil)
+}
+
+// prepareLayer owns one lane's attention/router work and undo journal. It
+// yields before expert contraction; no peer may borrow its scratch or state.
+func (tx *v41StepTransaction) prepareLayer() (err error) {
+	if tx.closed || tx.pendingLayer != nil || tx.nextLayer >= tx.layers {
 		return fmt.Errorf("%w: incremental transaction has no next layer", ErrV41ForwardStage)
 	}
 	defer tx.abortOnPanic()
-	if err = tx.layer(tx.nextLayer); err != nil {
-		tx.abortAfterFailure()
-		return err
+	tx.pendingLayer, err = tx.layer(tx.nextLayer)
+	if err != nil {
+		return tx.abortLayerError(err)
 	}
+	return nil
+}
+
+func (tx *v41StepTransaction) finishLayer(routed []float32) (err error) {
+	if tx.closed || tx.pendingLayer == nil {
+		return fmt.Errorf("%w: incremental transaction has no prepared layer", ErrV41ForwardStage)
+	}
+	defer tx.abortOnPanic()
+	work := tx.pendingLayer
+	if err = work.complete(routed); err != nil {
+		return tx.abortLayerError(err)
+	}
+	tx.pendingLayer = nil
 	tx.nextLayer++
 	return nil
+}
+
+func (tx *v41StepTransaction) abortLayerError(err error) error {
+	tx.abortAfterFailure()
+	var operation *V41ExpertOperationError
+	var projection *V41ProjectionOperationError
+	if errors.As(err, &operation) || errors.As(err, &projection) {
+		panic(err)
+	}
+	return err
 }
 
 // prepareHead leaves the token uncommitted and can run only once. The returned
 // row owns its final-normalization/BF16 boundary and may join compatible peers.
 func (tx *v41StepTransaction) prepareHead() (row []float32, err error) {
-	if tx.closed || tx.headPrepared || tx.nextLayer != tx.layers {
+	if tx.closed || tx.pendingLayer != nil || tx.headPrepared || tx.nextLayer != tx.layers {
 		return nil, fmt.Errorf("%w: incremental transaction is not ready for head", ErrV41ForwardStage)
 	}
 	defer tx.abortOnPanic()
@@ -515,10 +543,20 @@ func (tx *v41StepTransaction) abort() {
 	if tx.closed {
 		return
 	}
+	// A suspended resident layer must release its local epoch before journal
+	// rollback and transaction cleanup. Even a release panic cannot skip them.
+	var cleanup any
+	if work := tx.pendingLayer; work != nil {
+		tx.pendingLayer = nil
+		func() { defer func() { cleanup = recover() }(); work.close() }()
+	}
 	if !tx.stats.Committed && tx.rollback != nil {
 		tx.rollback()
 	}
 	tx.close()
+	if cleanup != nil {
+		panic(cleanup)
+	}
 }
 
 func (tx *v41StepTransaction) close() {

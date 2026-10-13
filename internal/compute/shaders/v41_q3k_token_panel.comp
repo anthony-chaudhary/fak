@@ -1,0 +1,78 @@
+#version 450
+
+// Same-expert Q3_K token tile, derived from fak's q3k_matmul.comp packed
+// layout and scalar accumulation order. Decode each quant weight once, then
+// reuse it across 2/4/8 independent token accumulators. This primitive performs
+// no route weighting or BF16 publication: the existing caller owns those
+// ordered boundaries before and after the down projection.
+layout(local_size_x = 64) in;
+
+const uint MAX_TOKENS = 8u;
+layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X { float x[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+
+// The final uint load may include the two-byte allocation padding required by
+// the existing Q3_K upload. The launch contract admits the padded byte extent.
+uint byteAt(uint offset) {
+    return (raw[offset >> 2u] >> ((offset & 3u) * 8u)) & 255u;
+}
+uint leU32(uint offset) {
+    return byteAt(offset) | (byteAt(offset + 1u) << 8u) |
+           (byteAt(offset + 2u) << 16u) | (byteAt(offset + 3u) << 24u);
+}
+void unpackScales(uint sc, out int scales[16]) {
+    uint aux0 = leU32(sc), aux1 = leU32(sc + 4u), tmp = leU32(sc + 8u);
+    uint words[4];
+    words[0] = (aux0 & 0x0f0f0f0fu) | ((tmp & 0x03030303u) << 4u);
+    words[1] = (aux1 & 0x0f0f0f0fu) | (((tmp >> 2u) & 0x03030303u) << 4u);
+    words[2] = ((aux0 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 4u) & 0x03030303u) << 4u);
+    words[3] = ((aux1 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 6u) & 0x03030303u) << 4u);
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            uint b = (words[i] >> uint(8 * j)) & 255u;
+            scales[i * 4 + j] = b >= 128u ? int(b) - 256 : int(b);
+        }
+    }
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), tokens = uint(pc.tokens);
+    if (row >= outDim) return;
+    uint blocks = inDim / 256u;
+    float sums[MAX_TOKENS];
+    for (uint token = 0u; token < tokens; ++token) sums[token] = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        uint base = (row * blocks + sb) * 110u;
+        float d = unpackHalf2x16(byteAt(base + 108u) | (byteAt(base + 109u) << 8u)).x;
+        int scales[16];
+        unpackScales(base + 96u, scales);
+        uint qi = 0u, mask = 1u;
+        int si = 0;
+        for (uint halfBase = 0u; halfBase < 256u; halfBase += 128u) {
+            uint shift = 0u;
+            for (uint j = 0u; j < 4u; ++j) {
+                for (uint sub = 0u; sub < 2u; ++sub) {
+                    float dl = d * float(scales[si] - 32);
+                    si++;
+                    for (uint l = 0u; l < 16u; ++l) {
+                        uint lane = sub * 16u + l;
+                        int code = int((byteAt(base + 32u + qi + lane) >> shift) & 3u);
+                        if ((byteAt(base + lane) & mask) == 0u) code -= 4;
+                        float decoded = dl * float(code);
+                        uint col = sb * 256u + halfBase + j * 32u + lane;
+                        for (uint token = 0u; token < tokens; ++token) {
+                            sums[token] += decoded * x[token * inDim + col];
+                        }
+                    }
+                }
+                shift += 2u;
+                mask <<= 1u;
+            }
+            qi += 32u;
+        }
+    }
+    for (uint token = 0u; token < tokens; ++token) y[token * outDim + row] = sums[token];
+}

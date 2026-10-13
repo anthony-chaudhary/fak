@@ -88,9 +88,8 @@ func (q *q4kTensor) mappedRaw() (span []byte, offset int, ok bool) {
 	return mappedLazyRaw(q.lazy)
 }
 
-// q4kMaterializeWindowBytes bounds the transient host window the non-mmap lazy read streams
-// through: peak anon-RSS beyond the output is one window, never the tensor size (a 63.22 GiB
-// dense V4.1 transit would otherwise make() its whole payload in host RAM and OOM the serve).
+// q4kMaterializeWindowBytes bounds each non-mmap lazy ReadAt request. Reads fill
+// the final page-aligned output directly, without a separate scratch window.
 const q4kMaterializeWindowBytes = 64 << 20
 
 func (q *q4kTensor) materializeRaw() ([]byte, error) {
@@ -108,8 +107,8 @@ func (q *q4kTensor) materializeRaw() ([]byte, error) {
 	// Read directly into Metal-compatible backing. Allocating an ordinary slice and then
 	// page-aligning it would transiently hold a second copy of every streamed tensor during
 	// first-token promotion — roughly another 10 GiB for Qwen3.8-27B. With no mapping the
-	// page-aligned output is still allocated once, but it is filled window-by-window out of a
-	// single reusable scratch buffer so the transient beyond it is bounded by the window.
+	// page-aligned output is still allocated once and filled directly window-by-window,
+	// without a scratch allocation or an additional payload copy.
 	//
 	// #13253 ledger note: unlike the non-Q4_K lazy k-quants (quant_kquant_lazy.go, which
 	// MEMOIZE into kQuantTensor.raw), the Q4_K lazy host bytes here are TRANSIENT — the caller
@@ -122,16 +121,14 @@ func (q *q4kTensor) materializeRaw() ([]byte, error) {
 	if window <= 0 || window > q.lazy.Bytes {
 		window = q.lazy.Bytes
 	}
-	buf := make([]byte, window)
 	for done := 0; done < q.lazy.Bytes; {
 		n := q.lazy.Bytes - done
-		if n > len(buf) {
-			n = len(buf)
+		if n > window {
+			n = window
 		}
-		if _, err := q.lazy.Reader.ReadAt(buf[:n], q.lazy.Offset+int64(done)); err != nil {
+		if _, err := q.lazy.Reader.ReadAt(raw[done:done+n], q.lazy.Offset+int64(done)); err != nil {
 			return nil, err
 		}
-		copy(raw[done:], buf[:n])
 		done += n
 	}
 	return raw, nil

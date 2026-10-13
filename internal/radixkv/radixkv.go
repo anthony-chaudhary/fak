@@ -790,7 +790,7 @@ func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*
 		if candidate.snapshot == nil {
 			continue
 		}
-		snap, err := acquireSnapshotForRequest(ctx, candidate.snapshot.Clone)
+		snap, err := acquireSnapshotForRequest(ctx, candidate.snapshot.CloneForRestore)
 		if err != nil {
 			t.l1Faults++
 			return n, nil, candidate.plen, SnapshotTierDeviceL1, err
@@ -861,6 +861,9 @@ func (t *Tree) InsertSnapshot(boundary *node, suffix []int, snap *model.PrefixSn
 	if !t.makeSnapshotRoom(incoming-oldBytes, n) {
 		return n, ErrSnapshotByteBudget
 	}
+	// Seal only after admission succeeds and before exposing the new owner.
+	// Preparation allocates host metadata before retiring the previous snapshot.
+	snap.PrepareForCache()
 	if n.snapshot != nil && n.snapshot != snap {
 		n.snapshot.Close()
 	}

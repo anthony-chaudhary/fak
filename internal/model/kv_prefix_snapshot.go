@@ -127,8 +127,9 @@ const v41QualifiedBackendName = "cpu-ref"
 // reads -- token history, the per-layer temporal attention states, and the
 // shared source-publication registry -- and NEVER the expertGateUp callback,
 // which is a per-session device binding rather than continuation data, and
-// never any weight table. Ownership is deep: every row is copied, so mutating
-// or closing one branch cannot alter another (fak#13342).
+// never any weight table. Capture and ordinary Clone deep-copy every row.
+// Cache-restore forks may retain sealed immutable publications; every writable
+// continuation field remains branch-owned (fak#13342).
 type v41ForwardSnapshot struct {
 	history []int
 	attn    *V41AttentionState
@@ -243,7 +244,27 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	return out, nil
 }
 
-// Clone makes a second independent owner for lookup; the cache retains the original.
+// PrepareForCache seals independently owned V4.1 publication rows for reuse.
+// The cache admission owner calls this before publishing the snapshot. It must
+// serialize admission/accounting as it does insertion; cache hits never seal.
+// Other continuation fields and malformed publication stores stay unchanged.
+func (p *PrefixSnapshot) PrepareForCache() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.Cache == nil || p.v41 == nil || !p.v41.hadState {
+		return
+	}
+	p.v41.attn.sealPublications()
+	for _, layer := range p.v41.layers {
+		layer.sealPublications()
+	}
+}
+
+// Clone makes a fully materialized, independent writable owner. Sealed V4.1
+// publication rows are copied just like ordinary mutable publication rows.
 func (p *PrefixSnapshot) Clone() (out *PrefixSnapshot, err error) {
 	if p == nil {
 		return nil, nil
@@ -253,7 +274,23 @@ func (p *PrefixSnapshot) Clone() (out *PrefixSnapshot, err error) {
 	return p.cloneOwned(scope)
 }
 
+// CloneForRestore keeps sealed V4.1 publication rows immutable and shared while
+// privately cloning every mutable continuation field. Unprepared rows retain
+// Clone's deep-copy behavior. The result is consumed by Restore as usual.
+func (p *PrefixSnapshot) CloneForRestore() (out *PrefixSnapshot, err error) {
+	if p == nil {
+		return nil, nil
+	}
+	scope := beginBackendExecution(p.Backend)
+	defer scope.finishError(&err)
+	return p.cloneOwnedWithPublications(scope, true)
+}
+
 func (p *PrefixSnapshot) cloneOwned(scope *backendExecutionScope) (*PrefixSnapshot, error) {
+	return p.cloneOwnedWithPublications(scope, false)
+}
+
+func (p *PrefixSnapshot) cloneOwnedWithPublications(scope *backendExecutionScope, shareSealed bool) (*PrefixSnapshot, error) {
 	if p == nil {
 		return nil, nil
 	}
@@ -270,7 +307,7 @@ func (p *PrefixSnapshot) cloneOwned(scope *backendExecutionScope) (*PrefixSnapsh
 		captureTargetHidden: p.captureTargetHidden,
 		targetHidden:        cloneTargetHidden(p.targetHidden),
 		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
-		v41:                 p.v41.clone(),
+		v41:                 p.v41.cloneWithPublications(shareSealed),
 		// A backend identity is copied by reference (it names the device the state
 		// belongs to, never device memory this snapshot owns), so a clone keeps the
 		// same backend-prefix contract as its source.
@@ -486,34 +523,39 @@ func captureV41ForwardSnapshot(st *v41ForwardState) *v41ForwardSnapshot {
 // clone makes a second deep-owned copy, so two branches of one snapshot never
 // alias mutable rows. A nil snapshot clones to nil.
 func (n *v41ForwardSnapshot) clone() *v41ForwardSnapshot {
+	return n.cloneWithPublications(false)
+}
+
+func (n *v41ForwardSnapshot) cloneWithPublications(shareSealed bool) *v41ForwardSnapshot {
 	if n == nil {
 		return nil
 	}
 	out := &v41ForwardSnapshot{
 		history:  append([]int(nil), n.history...),
-		attn:     n.attn.clone(),
+		attn:     n.attn.cloneWithPublications(shareSealed),
 		hadState: n.hadState,
 	}
 	if len(n.layers) > 0 {
 		out.layers = make([]*V41AttentionState, len(n.layers))
 		for i, layer := range n.layers {
-			out.layers[i] = layer.clone()
+			out.layers[i] = layer.cloneWithPublications(shareSealed)
 		}
 	}
 	return out
 }
 
 // restore builds a fresh v41ForwardState that takes ownership of the snapshot's
-// deep-owned rows. It never aliases the snapshot: the history is copied and the
-// layer slice is handed over, then the snapshot's references are cleared by the
-// caller. Session callbacks are left nil for the destination session to bind
+// deep-owned rows. Capture and clone already isolate the history from other
+// owners, so transfer it with the attention state rather than copying the full
+// prefix again. Clear all transferred references before returning. Session
+// callbacks are left nil for the destination session to bind
 // through Session.v41State, eagerly in PrefixSnapshot.Restore or on first use.
 func (n *v41ForwardSnapshot) restore() *v41ForwardState {
 	if n == nil {
 		return nil
 	}
 	out := &v41ForwardState{
-		history: append([]int(nil), n.history...),
+		history: n.history,
 		attn:    n.attn,
 		layers:  n.layers,
 	}
@@ -526,6 +568,10 @@ func (n *v41ForwardSnapshot) restore() *v41ForwardState {
 // publications and their ranges, and the latest candidate/top-k selections. It
 // returns nil for nil so an absent per-layer state stays absent.
 func (s *V41AttentionState) clone() *V41AttentionState {
+	return s.cloneWithPublications(false)
+}
+
+func (s *V41AttentionState) cloneWithPublications(shareSealed bool) *V41AttentionState {
 	if s == nil {
 		return nil
 	}
@@ -549,8 +595,14 @@ func (s *V41AttentionState) clone() *V41AttentionState {
 	out.partialKV = cloneV41Rows(s.partialKV)
 	out.partialInputs = cloneV41Rows(s.partialInputs)
 	out.partialPositions = append([]int(nil), s.partialPositions...)
-	out.kvPublications = cloneV41PublicationRows(s.kvPublications)
-	out.indexPublications = cloneV41PublicationRows(s.indexPublications)
+	if shareSealed || s.publicationPrefix == nil {
+		out.publicationPrefix = s.publicationPrefix
+		out.kvPublications = cloneV41PublicationRows(s.kvPublications)
+		out.indexPublications = cloneV41PublicationRows(s.indexPublications)
+	} else {
+		out.kvPublications = cloneV41PublicationView(s.publicationPrefix.kv, s.kvPublications)
+		out.indexPublications = cloneV41PublicationView(s.publicationPrefix.index, s.indexPublications)
+	}
 	for k, v := range s.kvPublishedEnd {
 		out.kvPublishedEnd[k] = v
 	}

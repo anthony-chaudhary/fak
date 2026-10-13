@@ -27,7 +27,7 @@ func v41TestAttentionFlatKV(r v41SharedAttentionRequest) []float32 {
 }
 
 // CPU-storage contract witness; this does not qualify hardware throughput.
-// fak-test:runtime fast est=50ms lane=default
+// fak-test:runtime medium est=1s lane=default
 func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 	prior := v41ResidentKVDisabled
 	v41ResidentKVDisabled = false
@@ -106,6 +106,196 @@ func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 	if called || !errors.As(err, &stage) || stage.Stage != v41StageAttention {
 		t.Fatalf("invisible invalid row: called=%t err=%v", called, err)
 	}
+
+	t.Run("restored_step_borrows_source_publications", func(t *testing.T) {
+		m := v41CompressorTestFixtureIndex(t, 128)
+		// The reader owns its query but must consume layer 0's KV and keys.
+		m.Cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0, 1}
+		source := m.NewSession()
+		t.Cleanup(source.Close)
+		source.Prefill([]int{1, 2, 3})
+		cached, err := source.PrefixSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cached.Close)
+		cached.PrepareForCache()
+		pristine := cached.v41.clone()
+		restore := func(shared bool) *Session {
+			t.Helper()
+			var snapshot *PrefixSnapshot
+			var err error
+			if shared {
+				snapshot, err = cached.CloneForRestore()
+			} else {
+				snapshot, err = cached.Clone()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(snapshot.Close)
+			s := m.NewSession()
+			t.Cleanup(s.Close)
+			if err := snapshot.Restore(s); err != nil {
+				t.Fatal(err)
+			}
+			return s
+		}
+		branch, sibling, control := restore(true), restore(true), restore(false)
+		st := branch.v41Forward
+		oldKey := v41AttentionPublicationKey{sourceLayer: 0, start: 0, end: 1}
+		newKey := v41AttentionPublicationKey{sourceLayer: 0, start: 1, end: 2}
+		if st.attn.publicationPrefix == nil || st.layers[0].publicationPrefix == nil ||
+			control.v41Forward.attn.publicationPrefix != nil {
+			t.Fatal("witness requires sealed and deep-owned restored branches")
+		}
+		base, ownerBase := st.attn.publicationPrefix, st.layers[0].publicationPrefix
+		before := captureV41ForwardSnapshot(st)
+		failure := errors.New("selected reader after borrowed source publication")
+		fail := true
+		calls, scores := [2]int{}, [2]int{}
+		var retained [2][]float32 // Only owned copies may outlive each callback.
+		storeFor := func(layer int) *V41AttentionState {
+			if layer == 0 {
+				return st.layers[0]
+			}
+			return st.attn
+		}
+		st.indexerScore = func(layer int, q, flat, weights []float32, heads, dim, rows int) ([]float32, error) {
+			store := storeFor(layer)
+			keys, ok := store.borrowIndexKeys(0)
+			if !ok || len(keys) != 2 || rows != 2 || len(flat) != 2*dim {
+				t.Fatal("Step scorer lost completed source keys")
+			}
+			for group, key := range keys {
+				published, ok := store.indexPublication(v41AttentionPublicationKey{sourceLayer: 0, start: group, end: group + 1})
+				if !ok || &key[0] != &published[0] || &flat[group*dim] == &key[0] ||
+					!reflect.DeepEqual(flat[group*dim:(group+1)*dim], key) {
+					t.Fatal("keys were copied before packing, aliased the scorer, or changed source")
+				}
+			}
+			scores[layer]++
+			return V41IndexerScore(q, flat, weights, heads, dim, rows)
+		}
+		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+			store := storeFor(layer)
+			if r.kv != nil || r.rowKV == nil || len(r.rowKV.compressed) != 2 ||
+				len(store.publicationPrefix.kv[oldKey]) != 512 || len(store.kvPublications[newKey]) != 512 {
+				t.Fatal("Step did not expose a sealed row and a private append")
+			}
+			for group, row := range r.rowKV.compressed {
+				published, ok := store.kvPublication(v41AttentionPublicationKey{sourceLayer: 0, start: group, end: group + 1})
+				if !ok || &row[0] != &published[0] {
+					t.Fatalf("layer %d group %d copied its source publication", layer, group)
+				}
+			}
+			flat := v41TestAttentionFlatKV(r)
+			out, err := V41SparseAttentionSink(r.q, flat, r.sink, r.idx, r.plain)
+			if !reflect.DeepEqual(v41TestAttentionFlatKV(r), flat) {
+				t.Fatal("synchronous consumer mutated borrowed publications")
+			}
+			retained[layer] = flat
+			calls[layer]++
+			if layer == 1 && fail {
+				return nil, failure
+			}
+			return out, err
+		}
+		_, stats, err := m.forwardV41Step(4, st, nil)
+		var selected *V41SharedAttentionOperationError
+		if !errors.Is(err, failure) || !errors.As(err, &selected) || selected.Layer != 1 || stats.Committed ||
+			calls != [2]int{1, 1} || scores != [2]int{1, 1} ||
+			!reflect.DeepEqual(captureV41ForwardSnapshot(st), before) ||
+			len(st.attn.kvPublications) != 0 || len(st.layers[0].kvPublications) != 0 ||
+			st.attn.publicationPrefix != base || st.layers[0].publicationPrefix != ownerBase {
+			t.Fatalf("selected reader failure lost rollback or borrowed-prefix ownership: %v", err)
+		}
+		fail = false
+		got, stats, err := m.forwardV41Step(4, st, nil)
+		want, controlStats, controlErr := m.forwardV41Step(4, control.v41Forward, nil)
+		if err != nil || controlErr != nil || !stats.Committed || !controlStats.Committed ||
+			calls != [2]int{2, 2} || scores != [2]int{2, 2} || !reflect.DeepEqual(got, want) ||
+			!reflect.DeepEqual(captureV41ForwardSnapshot(st), captureV41ForwardSnapshot(control.v41Forward)) ||
+			!reflect.DeepEqual(captureV41ForwardSnapshot(sibling.v41Forward), pristine) || !reflect.DeepEqual(cached.v41.clone(), pristine) {
+			t.Fatalf("borrowed Step differs from owned continuation or changed a sibling: %v / %v", err, controlErr)
+		}
+		for layer := 0; layer < 2; layer++ {
+			store := storeFor(layer)
+			rows, _ := store.KVSourceRows(0)
+			keys, _ := store.IndexKeys(0)
+			for group := range rows {
+				row, _ := store.kvPublication(v41AttentionPublicationKey{sourceLayer: 0, start: group, end: group + 1})
+				key, _ := store.indexPublication(v41AttentionPublicationKey{sourceLayer: 0, start: group, end: group + 1})
+				rows[group][0], keys[group][0] = row[0]+1, key[0]+1
+				if row[0] == rows[group][0] || key[0] == keys[group][0] {
+					t.Fatal("public reader exposed a writable publication")
+				}
+			}
+			compressed := retained[layer][len(retained[layer])-2*m.Cfg.HeadDim:]
+			if !reflect.DeepEqual(compressed, append(append([]float32(nil), store.publicationPrefix.kv[oldKey]...), store.kvPublications[newKey]...)) {
+				t.Fatal("borrowed publications changed after callback return")
+			}
+		}
+
+		plan, err := m.v41AttentionPlan(1)
+		if err != nil || plan.KVSourceLayer != 0 || plan.IndexSourceLayer != 1 {
+			t.Fatalf("witness must separate KV ownership from query ownership: %v", err)
+		}
+		ownedRows, ownedKeys, err := m.v41CompressedReaderRows(plan, st.attn, 4)
+		borrowedRows, borrowedKeys, borrowErr := m.v41CompressedReaderStepRows(plan, st.attn, 4)
+		if err != nil || borrowErr != nil || !reflect.DeepEqual(ownedRows, borrowedRows) || !reflect.DeepEqual(ownedKeys, borrowedKeys) ||
+			&ownedRows[0][0] == &borrowedRows[0][0] || &ownedKeys[0][0] == &borrowedKeys[0][0] {
+			t.Fatal("full-prefill resolver lost its independent writable result")
+		}
+		for _, fault := range []string{"nil", "short", "stale", "missing", "hole", "keys", "empty"} {
+			registry := st.attn.clone()
+			positions := 4
+			switch fault {
+			case "nil":
+				registry = nil
+			case "short":
+				positions = 6
+			case "stale":
+				positions = 2
+			case "missing":
+				registry.kvPublications = nil
+			case "hole":
+				delete(registry.kvPublications, oldKey)
+			case "keys":
+				registry.indexPublications = nil
+			case "empty":
+				registry.Reset()
+				positions = 1
+			}
+			_, _, ownedErr := m.v41CompressedReaderRows(plan, registry, positions)
+			_, _, borrowedErr := m.v41CompressedReaderStepRows(plan, registry, positions)
+			if fault == "empty" {
+				if ownedErr != nil || borrowedErr != nil {
+					t.Fatal("incomplete source group was refused")
+				}
+				continue
+			}
+			var ownedStage, borrowedStage *V41ForwardError
+			if !errors.As(ownedErr, &ownedStage) || !errors.As(borrowedErr, &borrowedStage) ||
+				!errors.Is(borrowedErr, ErrV41ForwardStage) || ownedErr.Error() != borrowedErr.Error() || ownedStage.Stage != borrowedStage.Stage {
+				t.Fatalf("%s changed the exact source refusal: %v / %v", fault, ownedErr, borrowedErr)
+			}
+		}
+		ordinary := &Model{Cfg: m.Cfg}
+		d41 := *m.Cfg.DeepSeekV41
+		d41.IndexSourceLayerIDs = []int{0}
+		ordinary.Cfg.DeepSeekV41 = &d41
+		noKeys := st.attn.clone()
+		noKeys.indexPublications = nil
+		for _, resolve := range []func(V41AttentionPlan, *V41AttentionState, int) ([][]float32, [][]float32, error){
+			ordinary.v41CompressedReaderRows, ordinary.v41CompressedReaderStepRows,
+		} {
+			rows, keys, err := resolve(plan, noKeys, 4)
+			if err != nil || len(rows) != 2 || keys != nil {
+				t.Fatalf("ordinary reader required index keys: %v", err)
+			}
+		}
+	})
 }
 
 // v41ResidentKVTestBackend adds a CPU-storage row log to the shared-attention
