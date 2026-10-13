@@ -894,6 +894,98 @@ func TestQwen35RecurrentSnapshotCopyOnWriteIsolation(t *testing.T) {
 	}
 }
 
+type reentrantPrefixSnapshotKV struct {
+	compute.KVStore
+	freeCalls int
+	freeHook  func()
+}
+
+func (kv *reentrantPrefixSnapshotKV) Free() {
+	kv.freeCalls++
+	hook := kv.freeHook
+	kv.freeHook = nil
+	kv.KVStore.Free()
+	if hook != nil {
+		hook()
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestQwen35PrefixSnapshotCloseReentrantCleanup(t *testing.T) {
+	for _, callbackSite := range []string{"kv", "recurrent"} {
+		t.Run(callbackSite, func(t *testing.T) {
+			m := NewSynthetic(qwen35HybridTestCfg())
+			be := newRecordingQwen35Backend(m)
+			be.Backend = compute.Pick("cpu-ref")
+			if be.Backend == nil {
+				t.Fatal("cpu-ref backend missing")
+			}
+			s, err := m.NewBackendSessionChecked(be)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Prefill([]int{3, 7, 11})
+			snap, err := s.PrefixSnapshot()
+			if err != nil {
+				s.Close()
+				t.Fatal(err)
+			}
+			var buffers []compute.Buffer
+			for _, layer := range be.linearLayers {
+				state := snap.qwen35.layers[layer]
+				buffers = append(buffers, state.conv.Buf(), state.recurrent.Buf())
+			}
+			// The snapshot keeps the shared recurrent owners alive after its source
+			// closes; it must perform their final physical release exactly once.
+			s.Close()
+			for _, buffer := range buffers {
+				if got := be.freeCalls[buffer]; got != 0 {
+					t.Fatalf("live snapshot tensor freed %d times by source cleanup", got)
+				}
+			}
+			kv := &reentrantPrefixSnapshotKV{KVStore: snap.halKV}
+			snap.halKV = kv
+			reentered := make(chan struct{})
+			reenter := func() {
+				snap.Close()
+				close(reentered)
+			}
+			if callbackSite == "kv" {
+				kv.freeHook = reenter
+			} else {
+				be.freeHook = reenter
+			}
+			closed := make(chan struct{})
+			go func() {
+				snap.Close()
+				close(closed)
+			}()
+			select {
+			case <-closed:
+			case <-time.After(2 * time.Second):
+				t.Fatal("prefix snapshot cleanup deadlocked during recursive Close")
+			}
+			select {
+			case <-reentered:
+			default:
+				t.Fatal("backend cleanup did not invoke recursive Close")
+			}
+			snap.Close()
+			if kv.freeCalls != 1 {
+				t.Fatalf("snapshot KV freed %d times, want once", kv.freeCalls)
+			}
+			for _, buffer := range buffers {
+				if got := be.freeCalls[buffer]; got != 1 {
+					t.Fatalf("snapshot tensor freed %d times, want once", got)
+				}
+			}
+			if clone, err := snap.Clone(); clone != nil || err != nil {
+				t.Fatalf("closed snapshot Clone = %v, %v; want nil, nil", clone, err)
+			}
+		})
+	}
+}
+
 func TestQwen35PrefixSnapshotHostRoundTripOwnsCompleteHybridState(t *testing.T) {
 	m := NewSynthetic(qwen35HybridTestCfg())
 	be := newRecordingQwen35Backend(m)
