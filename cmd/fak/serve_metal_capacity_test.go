@@ -167,10 +167,12 @@ func writeSynth27BGGUF(t *testing.T, path string, isUDQ2KXL bool) {
 	}
 
 	if isUDQ2KXL {
-		// UD-Q2_K_XL mixture: Q8_0 embedding + Q2_K matmul + IQ2_XXS
+		// Supported UD-Q2_K_XL shape: Q2_K MLP with higher-precision attention.
+		// Keep IQ bands out of this capacity fixture: unsupported retained Metal
+		// encodings are covered by TestServeQuantCapabilityRefusalPrecedesModelLoad.
 		writeTensor("token_embd.weight", []uint64{5120, 152064}, ggufload.TensorQ8_0, 0)
 		writeTensor("blk.0.ffn_gate.weight", []uint64{5120, 5600000}, ggufload.TensorQ2_K, 0)
-		writeTensor("blk.0.ffn_down.weight", []uint64{256, 256}, ggufload.TensorIQ2_XXS, 0)
+		writeTensor("blk.0.attn_q.weight", []uint64{256, 256}, ggufload.TensorQ8_0, 0)
 	} else {
 		// Standard Q4_K_M 27B model
 		writeTensor("token_embd.weight", []uint64{5120, 152064}, ggufload.TensorQ4_K, 0)
