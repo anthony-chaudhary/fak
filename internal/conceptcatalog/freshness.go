@@ -292,13 +292,35 @@ func extractGitTree(root, treeish, tmp string) error {
 // refreshed. Classifications live in the input catalog, so generation reads and
 // preserves the same source that concept classify updates.
 func Regenerate(root string) ([]string, error) {
-	out := filepath.Join(root, filepath.FromSlash("docs/concept-disambiguation-scorecard"))
+	// Render into an empty directory: an ACTION exit is usable only when this
+	// invocation produced the artifacts, never because old worktree files exist.
+	out, err := os.MkdirTemp("", "fak-concept-generate-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(out)
 	if err := generate(root, out); err != nil {
 		return nil, err
 	}
+	// Read every artifact before publishing any, including on exit zero. A
+	// partial render must leave the previous worktree snapshot untouched.
+	rendered := make([][]byte, len(generatedArtifacts))
+	for i, artifact := range generatedArtifacts {
+		rendered[i], err = os.ReadFile(filepath.Join(out, artifact.Name))
+		if err != nil {
+			return nil, fmt.Errorf("read generated %s: %w", artifact.Name, err)
+		}
+	}
 	files := make([]string, 0, len(generatedArtifacts))
-	for _, artifact := range generatedArtifacts {
-		files = append(files, filepath.Join(out, artifact.Name))
+	for i, artifact := range generatedArtifacts {
+		target := filepath.Join(root, filepath.FromSlash(artifact.Tracked))
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return files, err
+		}
+		if err := os.WriteFile(target, rendered[i], 0644); err != nil {
+			return files, err
+		}
+		files = append(files, target)
 	}
 	return files, nil
 }

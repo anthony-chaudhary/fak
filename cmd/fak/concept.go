@@ -60,22 +60,7 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 		res, e := conceptcatalog.CheckFresh(root)
 		return conceptcatalog.RenderFreshness(stdout, stderr, "fak concept freshness", "", res, e, *jsonOut)
 	case "generate":
-		cmd := exec.Command("python", filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), "--workspace", root, "--markdown-dir", filepath.Join(root, "docs", "concept-disambiguation-scorecard"))
-		cmd.Dir = root
-		windowgate.ConfigureBackgroundCommand(cmd)
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-		cmd.Env = os.Environ()
-		if e := cmd.Run(); e != nil {
-			// Exit 1 is an honest ACTION snapshot, not a generator failure - but only
-			// if EVERY tracked artifact was actually written.
-			for _, tracked := range []string{conceptcatalog.GeneratedReadme, conceptcatalog.GeneratedIndex} {
-				if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(tracked))); statErr != nil {
-					return 1
-				}
-			}
-		}
-		return 0
+		return runConceptGenerate(stdout, stderr, c, args[1:])
 	case "validate":
 		ds := conceptcatalog.Validate(c)
 		if len(ds) > 0 {
@@ -145,7 +130,13 @@ func runConceptGenerate(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	fs := flag.NewFlagSet("concept generate", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	jsonOut := fs.Bool("json", false, "emit JSON result")
+	// The CLI dispatcher leaves explicit --staged=false on the worktree path.
+	staged := fs.Bool("staged", false, "regenerate from the staged git tree instead of the worktree")
 	if fs.Parse(args) != nil {
+		return 2
+	}
+	if *staged {
+		fmt.Fprintln(errw, "fak concept generate: --staged requires the staged generation path")
 		return 2
 	}
 	if fs.NArg() != 0 {

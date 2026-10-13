@@ -206,3 +206,80 @@ func TestConceptGenerateFailsLoudWhenPythonMissing(t *testing.T) {
 		t.Fatal("concept generate must not report success when generation failed")
 	}
 }
+
+// fak-test:runtime fast est=600ms
+func TestConceptGenerateRequiresNewCompleteArtifacts(t *testing.T) {
+	if _, err := conceptcatalog.ResolvePython(); err != nil {
+		t.Skip(err)
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		script   string
+		wantCode int
+	}{
+		{"crash", nil, "raise RuntimeError('generation failed')\n", 1},
+		{"partial ACTION", nil, "(out/'README.md').write_text('new\\n')\nraise SystemExit(1)\n", 1},
+		{"partial success", nil, "(out/'README.md').write_text('new\\n')\n", 1},
+		{"complete failure", nil, "for name in ('README.md', 'INDEX.md'): (out/name).write_text('new\\n')\nraise SystemExit(2)\n", 1},
+		{"complete ACTION", []string{"--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_text('new\\n')\nraise SystemExit(1)\n", 0},
+		{"explicit worktree", []string{"--staged=false", "--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_text('new\\n')\nraise SystemExit(1)\n", 0},
+		{"tree requires staged mode", []string{"--tree", "HEAD"}, "raise RuntimeError('must not run')\n", 2},
+		{"unknown flag", []string{"--unknown"}, "raise RuntimeError('must not run')\n", 2},
+		{"positional unsupported", []string{"extra"}, "raise RuntimeError('must not run')\n", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, root := conceptCLIFixture(t)
+			if out, err := runGitAt(root, "init"); err != nil {
+				t.Fatalf("git init: %v: %s", err, out)
+			}
+			t.Chdir(root)
+			outDir := filepath.Join(root, "docs", "concept-disambiguation-scorecard")
+			if err := os.MkdirAll(outDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"README.md", "INDEX.md"} {
+				if err := os.WriteFile(filepath.Join(outDir, name), []byte("old\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			script := `import argparse
+from pathlib import Path
+p = argparse.ArgumentParser()
+p.add_argument('--workspace')
+p.add_argument('--markdown-dir')
+a = p.parse_args()
+out = Path(a.markdown_dir)
+out.mkdir(parents=True, exist_ok=True)
+` + tc.script
+			if err := os.WriteFile(filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), []byte(script), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out, errb bytes.Buffer
+			if code := runConceptCLI(&out, &errb, append([]string{"generate"}, tc.args...)); code != tc.wantCode {
+				t.Fatalf("code=%d want=%d stdout=%s stderr=%s", code, tc.wantCode, out.String(), errb.String())
+			}
+			want := "old\n"
+			if tc.wantCode == 0 {
+				want = "new\n"
+				var result struct {
+					OK bool `json:"ok"`
+				}
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || !result.OK {
+					t.Fatalf("invalid success JSON: %s (%v)", out.String(), err)
+				}
+			} else if out.Len() != 0 || errb.Len() == 0 {
+				t.Fatalf("failure must be diagnostic only: stdout=%s stderr=%s", out.String(), errb.String())
+			}
+			for _, name := range []string{"README.md", "INDEX.md"} {
+				got, err := os.ReadFile(filepath.Join(outDir, name))
+				if err != nil || string(got) != want {
+					t.Fatalf("%s = %q, %v; want %q", name, got, err, want)
+				}
+			}
+		})
+	}
+}
