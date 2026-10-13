@@ -27,9 +27,18 @@ func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratc
 	var resident *v41MHCResident
 	ready := false
 	defer func() {
-		if !ready {
-			tx.abort()
+		if ready {
+			return
 		}
+		if primary := recover(); primary != nil {
+			tx.abortAfterFailure()
+			panic(primary)
+		}
+		if err != nil {
+			tx.abortAfterFailure()
+			return
+		}
+		tx.abort()
 	}()
 	if st == nil {
 		return tx, v41StageErr(v41StageEmbedding, -1,
@@ -400,7 +409,7 @@ func (tx *v41StepTransaction) advanceLayer() (err error) {
 	}
 	defer tx.abortOnPanic()
 	if err = tx.layer(tx.nextLayer); err != nil {
-		tx.abort()
+		tx.abortAfterFailure()
 		return err
 	}
 	tx.nextLayer++
@@ -414,7 +423,7 @@ func (tx *v41StepTransaction) finalize() (logits []float32, err error) {
 	defer tx.abortOnPanic()
 	logits, err = tx.head()
 	if err != nil {
-		tx.abort()
+		tx.abortAfterFailure()
 		return nil, err
 	}
 	tx.close()
@@ -423,9 +432,17 @@ func (tx *v41StepTransaction) finalize() (logits []float32, err error) {
 
 func (tx *v41StepTransaction) abortOnPanic() {
 	if r := recover(); r != nil {
-		tx.abort()
+		tx.abortAfterFailure()
 		panic(r)
 	}
+}
+
+// An already-selected error or panic owns the result. Abort still attempts its
+// rollback and cleanup, but a secondary resource-release panic cannot replace it.
+// With no primary failure callers use abort directly, so cleanup faults escape.
+func (tx *v41StepTransaction) abortAfterFailure() {
+	defer func() { _ = recover() }()
+	tx.abort()
 }
 
 // abort is idempotent and never undoes an already committed token.
@@ -441,8 +458,8 @@ func (tx *v41StepTransaction) abort() {
 
 func (tx *v41StepTransaction) close() {
 	tx.closed = true
+	defer func() { tx.layer, tx.head, tx.rollback, tx.cleanup = nil, nil, nil, nil }()
 	if tx.cleanup != nil {
 		tx.cleanup()
 	}
-	tx.layer, tx.head, tx.rollback, tx.cleanup = nil, nil, nil, nil
 }

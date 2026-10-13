@@ -1,0 +1,247 @@
+package model
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"reflect"
+	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
+
+var errV41StepCohortDeclined = errors.New("model: incompatible V4.1 step cohort")
+
+type v41StepCohortLane struct {
+	session *Session
+	id      int
+	ctx     context.Context
+}
+
+type v41StepCohortResult struct {
+	logits []float32
+	stats  v41StepStats
+	err    error
+}
+
+// forwardV41StepCohort is an internal continuation driver, not a serving
+// admission capability or a shared-weight projection path. Each lane keeps its
+// own history, retained KV, source/index registry, Engram and mHC scratch.
+//
+// The caller supplies the SAME device-owner mutex used by its serial forwards,
+// prefill and other cohorts, and grants exclusive ownership of every Session
+// for the call. The owner must be unlocked on entry: TryLock declines a busy or
+// already-held owner rather than deadlocking a caller that still holds its
+// serial gate. One goroutine advances all lanes in layer-major order. This does
+// not make concurrent Session.Step calls safe unless those calls already use
+// that owner. No package-global or model-global lock is added.
+//
+// Admission examines the whole cohort before binding callbacks or beginning a
+// transaction. A declined backend recording window is a refusal, never consent
+// to enter somebody else's window. The layer window is flushed before ANY
+// head can commit; heads then run synchronously under the same device owner.
+// Cancellation aborts only its lane. An execution error aborts all remaining
+// uncommitted lanes, and a panic retains its original type. Neither is replayed.
+func (m *Model) forwardV41StepCohort(owner *sync.Mutex, lanes []v41StepCohortLane) (results []v41StepCohortResult, err error) {
+	if owner == nil {
+		return nil, fmt.Errorf("%w: missing device owner", errV41StepCohortDeclined)
+	}
+	if !owner.TryLock() {
+		return nil, fmt.Errorf("%w: device owner is already held", errV41StepCohortDeclined)
+	}
+	defer owner.Unlock()
+	if err := m.v41StepCohortAdmit(lanes); err != nil {
+		return nil, err
+	}
+	results = make([]v41StepCohortResult, len(lanes))
+	txs := make([]*v41StepTransaction, len(lanes))
+	scratch := make([]v41ProjScratch, len(lanes))
+	defer v41AbortStepCohort(txs, results, &err)
+
+	cancelled := func(lane int) bool {
+		if ctx := lanes[lane].ctx; ctx != nil && ctx.Err() != nil {
+			results[lane].err = ctx.Err()
+			if txs[lane] != nil {
+				txs[lane].abort()
+			}
+			return true
+		}
+		return false
+	}
+	active := 0
+	for lane := range lanes {
+		if !cancelled(lane) {
+			active++
+		}
+	}
+	if active == 0 {
+		return results, nil
+	}
+
+	// Close the recording window once on success, error or panic. Mark it
+	// closed BEFORE End so even a panicking End cannot cause a duplicate End.
+	var end func() error
+	if backend, ok := lanes[0].session.Backend.(compute.V41StepBatchBackend); ok && os.Getenv(v41StepBatchEnv) != "0" {
+		if !backend.BeginV41StepBatch() {
+			return nil, fmt.Errorf("%w: backend recording window is unavailable", errV41StepCohortDeclined)
+		}
+		end = backend.EndV41StepBatch
+	}
+	finish := func() error {
+		if end == nil {
+			return nil
+		}
+		closeWindow := end
+		end = nil
+		if err := closeWindow(); err != nil {
+			return &v41StepBatchError{err: err}
+		}
+		return nil
+	}
+	defer v41FinishStepCohort(finish, &err)
+
+	for lane, input := range lanes {
+		if cancelled(lane) {
+			continue
+		}
+		txs[lane], err = m.beginV41Step(input.id, input.session.v41State(), &scratch[lane])
+		if err != nil {
+			results[lane].err = err
+			return results, err
+		}
+	}
+	for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+		for lane, tx := range txs {
+			if tx == nil || tx.closed || cancelled(lane) {
+				continue
+			}
+			if err = tx.advanceLayer(); err != nil {
+				results[lane].err = err
+				return results, err
+			}
+		}
+	}
+	if err = finish(); err != nil {
+		return results, err
+	}
+	for lane, tx := range txs {
+		if tx == nil || tx.closed || cancelled(lane) {
+			continue
+		}
+		results[lane].logits, err = tx.finalize()
+		if err != nil {
+			results[lane].err = err
+			return results, err
+		}
+	}
+	return results, nil
+}
+
+// Exact Model and pointer Backend identities bind configuration and immutable
+// weights, rather than trusting equal names. Only session-created/restored
+// states are supported; rejecting shared state objects catches an accidental
+// shallow lane clone before any ring or source publication is touched.
+func (m *Model) v41StepCohortAdmit(lanes []v41StepCohortLane) error {
+	decline := func(reason string) error { return fmt.Errorf("%w: %s", errV41StepCohortDeclined, reason) }
+	if m == nil || len(lanes) < 2 || !m.Cfg.IsDeepSeekV41() {
+		return decline("need at least two V4.1 sessions")
+	}
+	if err := m.v41ForwardAdmitted(); err != nil {
+		return err
+	}
+	if lanes[0].session == nil {
+		return decline("nil session")
+	}
+	first := lanes[0].session
+	if first.Backend != nil {
+		v := reflect.ValueOf(first.Backend)
+		if v.Kind() != reflect.Pointer || v.IsNil() {
+			return decline("backend lacks a stable pointer identity")
+		}
+	}
+	seenSessions := make(map[*Session]bool, len(lanes))
+	seenStates := make(map[*v41ForwardState]bool, len(lanes))
+	seenAttention := make(map[*V41AttentionState]bool, len(lanes)*(m.Cfg.NumLayers+1))
+	for _, lane := range lanes {
+		s := lane.session
+		if s == nil || s.M != m || seenSessions[s] || s.Backend != first.Backend || s.BackendSessionClosed() {
+			return decline("session, model or backend identity differs")
+		}
+		if s.Quant != first.Quant || s.Q4K != first.Q4K || s.KVPrecision != first.KVPrecision || s.executionPolicy != first.executionPolicy || s.DenseGPULayers != first.DenseGPULayers || s.GPULayers != first.GPULayers {
+			return decline("session execution layout differs")
+		}
+		if lane.id < 0 || lane.id >= m.Cfg.VocabSize || !s.v41IncrementalEligible() {
+			return decline("invalid token or unseeded incremental state")
+		}
+		st := s.v41Forward
+		if seenStates[st] {
+			return decline("lanes share a continuation state")
+		}
+		seenSessions[s], seenStates[st] = true, true
+		if err := v41CandidatePoolCovers(m.Cfg, len(st.history)+1); err != nil {
+			return err
+		}
+		if st.attn != nil {
+			if seenAttention[st.attn] {
+				return decline("lanes share a source registry")
+			}
+			seenAttention[st.attn] = true
+		}
+		for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+			state := st.layerState(layer)
+			if seenAttention[state] || state.nextWindowPos != len(st.history) {
+				return decline("retained layer is shared or has a stale cursor")
+			}
+			seenAttention[state] = true
+		}
+	}
+	return nil
+}
+
+// v41AbortStepCohort drains every lane even when releasing one lane's resources
+// panics. It preserves an existing panic or returned error; absent either, the
+// first cleanup panic escapes after all journals and stats have been processed.
+func v41AbortStepCohort(txs []*v41StepTransaction, results []v41StepCohortResult, err *error) {
+	primary := recover()
+	var cleanupPanic any
+	for lane, tx := range txs {
+		if tx == nil {
+			continue
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil && cleanupPanic == nil {
+					cleanupPanic = r
+				}
+			}()
+			tx.abort()
+		}()
+		results[lane].stats = tx.stats
+	}
+	if primary != nil {
+		panic(primary)
+	}
+	if *err == nil && cleanupPanic != nil {
+		panic(cleanupPanic)
+	}
+}
+
+// v41FinishStepCohort closes the recording window once while preserving an
+// earlier returned error as well as an earlier panic. A standalone End panic
+// still escapes and is handled by the outer all-lane abort and owner release.
+func v41FinishStepCohort(finish func() error, err *error) {
+	if primary := recover(); primary != nil {
+		func() {
+			defer func() { _ = recover() }()
+			_ = finish()
+		}()
+		panic(primary)
+	}
+	if *err != nil {
+		defer func() { _ = recover() }()
+	}
+	if closeErr := finish(); closeErr != nil {
+		*err = errors.Join(*err, closeErr)
+	}
+}
