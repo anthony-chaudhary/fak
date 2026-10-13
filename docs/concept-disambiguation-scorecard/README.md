@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **643** (clarity 0 + coverage 643) |
-| **Crystal-clear concepts (and climbing)** | **1194** crystal of 2984 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3080 / 3723** (82.7% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **644** (clarity 0 + coverage 644) |
+| **Crystal-clear concepts (and climbing)** | **1199** crystal of 2989 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3085 / 3729** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **86** of 4230 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **86** of 4237 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2984 concepts - score 88.8/100 (grade B) - disambiguation-debt 643
+concept-disambiguation chart - 2989 concepts - score 88.8/100 (grade B) - disambiguation-debt 644
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1194
+  * crystal       ###################......... 1199
   o defined       ############################ 1790
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -40,38 +40,38 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        **********************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (118 concept(s); 22 crystal)
-  cache            **************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (291 concept(s); 110 crystal)
+  cache            ***************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (292 concept(s); 111 crystal)
   context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 84 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            *****************oooooooooooooooooooooooooooooooo (49 concept(s); 17 crystal)
   gateway-engine   *********************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (179 concept(s); 57 crystal)
-  guard-gate       ******************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (452 concept(s); 210 crystal)
+  guard-gate       *******************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (453 concept(s); 211 crystal)
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             *****************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (405 concept(s); 161 crystal)
+  plan             ******************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (406 concept(s); 162 crystal)
   policy-capability *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 101 crystal)
   pool             *******oooooooooooooooooooooooooooooooo (39 concept(s); 7 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 91 crystal)
-  support-maturity ************************************************ooooooooooooooooooooooooooo (75 concept(s); 48 crystal)
+  support-maturity **************************************************ooooooooooooooooooooooooooo (77 concept(s); 50 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             #######################..... 469/573
+  plan             #######################..... 470/574
   session-runtime  #######################..... 287/355
-  cache            #######################..... 333/399
+  cache            #######################..... 334/401
   gateway-engine   #######################..... 226/281
-  guard-gate       ##########################.. 511/557
+  guard-gate       ##########################.. 513/559
   context-ctx      ########################.... 263/307
   attention        ####################........ 113/156
   pool             ##############.............. 41/83
   policy-capability ########################.... 224/264
-  support-maturity ###################......... 80/117
+  support-maturity ###################......... 82/119
   render-materialize ########################.... 217/251
   witness-proof    ########################.... 173/202
   evict            ####################........ 56/79
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3080/3723 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.7%  (3085/3729 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 225
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 225/225
 
-name index: 4230 lookup name(s) -> 2984 concept(s), 86 ambiguous
+name index: 4237 lookup name(s) -> 2989 concept(s), 86 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **225 / 225** (225 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2182 / 5390 |
+| Boundaries drawn (mutual / total) | 2182 / 5400 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4230 over 2984 concepts |
+| Lookup names indexed | 4237 over 2989 concepts |
 | Lookup names landing on several concepts | 86 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2984 |
+| Concepts carrying a contrast set | 2989 |
 
 ## The concepts (best verdict first)
 
@@ -244,6 +244,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **cache implementation surface for vcacherecentobservation** - `vcacherecentobservation` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | cache | **cache implementation surface for vcachevarsfromsnapshot** - `vcachevarsfromsnapshot` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | cache | **cache implementation surface for cacheidentity** - `cacheidentity` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
+| * | crystal | symbol | cache | **ExpertCacheMeasurementSimulated** - The locked PROVENANCE rung on a routed-expert cache receipt (internal/model/expert_cache_receipt.go): the string constant marking a measurement captured from a synthetic or replayed trace, so a simulated run can never masquerade as a hardware one. It is the sibling of ExpertCacheMeasurementHardware. |
 | * | crystal | symbol | cache | **SimulateExpertCacheBatch** - Deterministic weight-free simulator replaying B agents advancing one decode step together; streams each distinct (layer,expert) group once per step and reports coalesced page-ins (DistinctStreamed) vs B un-coalesced streams (NaiveStreamed) and CoalesceRatio. |
 | * | crystal | symbol | cache | **ExpertCacheBatchAdmission** - Result struct pairing a byte-bounded ExpertCachePlan with a BatchCoalesceTrace: the admitted routed-group capacity plus the cross-agent coalescing evidence measured under exactly that capacity. |
 | * | crystal | symbol | cache | **AdmitExpertCacheBatchTrace** - Computes a byte-bounded routed-group capacity via PlanExpertCache then simulates the supplied B-agent batch steps under that exact capacity, failing closed when one step's distinct union exceeds the plan. |
@@ -688,6 +689,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **GateParkingEnabled** - GateParkingEnabled is the loop-side predicate of the out-of-band operator inbox (#2757): it reports whether EnableGateParking opened the inbox for a session trace — the check the agent dispatch seam makes before parking an ESCALATE-gated deny, so an unopened inbox falls straight through to the historical deny path. |
 | * | crystal | symbol | guard-gate | **disaggregatedStore** - Fold predicate reporting whether an artifact ref points at a disaggregated store, which makes a digest-shaped deletion witness mandatory on removal. |
 | * | crystal | symbol | guard-gate | **disaggregatedBodyRef** - Fold predicate reporting whether a note or task body ref is disaggregated and therefore requires a digest-shaped deletion witness on removal. |
+| * | crystal | symbol | guard-gate | **V41RoutedGateUpSwiGLUDeferred (fused routed gate/up + SwiGLU dispatch)** - The deferred device entrypoint that dispatches the fused routed gate/up module once over all picks of a step: it reads the shared device ids image, applies the SwiGLU activation in-kernel, and writes the gated mid rows for the down stage to consume. |
 | * | crystal | symbol | layout | **layout implementation surface for qwen38mtptensorlayout** - `qwen38MTPTensorLayout` is the layout symbol declared or used at `internal/model/qwen35_mtp_forward.go:58`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | layout | **layout implementation surface for inputlayout** - `inputlayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | layout | **layout implementation surface for refusalunknownnativelayout** - `refusalunknownnativelayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -807,6 +809,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **plan implementation surface for termcandidate** - `termcandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | plan | **plan implementation surface for waitcandidateready** - `waitcandidateready` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | plan | **plan implementation surface for wavecandidateid** - `wavecandidateid` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
+| * | crystal | symbol | plan | **MoEMissCandidate** - internal/model/moe_bandwidth_partition.go MoEMissCandidate: one ACTIVATED routed expert that missed the device ring, carrying its ExpertID and a Recency score. It is the unit the MoE bandwidth-partition solver partitions between the PCIe stream and the host CPU. |
 | * | crystal | symbol | plan | **PlanTurnTax** - The pure per-turn function that scores the three context-acquisition strategies (prefix reuse, session-index query, cold prefill) by their token tax and returns the single cheapest AVAILABLE one together with the reason it won. |
 | * | crystal | symbol | plan | **CachePlanningAvailable (device memory facts are sufficient)** - DeviceMemoryProfile.CachePlanningAvailable in internal/compute/device_memory_profile.go requires established positive cache capacity, allocation alignment, and subgroup width before ROCm QSA or Vulkan scratch policy can make a cache-bounded planning decision (#12440). |
 | * | crystal | concept | plan | **replanning** - The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority. |
@@ -1234,6 +1237,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | support-maturity | **correctness** - Correctness is the property that the implementation's behavior matches its stated contract or oracle for the case being judged. |
 | * | crystal | concept | support-maturity | **parity** - Parity is a same-workload comparison against a named peer, baseline, or oracle, reporting match, lead, or trailing behavior under the stated conditions. |
 | * | crystal | concept | support-maturity | **maturity** - Maturity is the readiness level of a supported capability after considering implementation completeness, evidence breadth, correctness witnesses, parity results, guardrails, and operating posture. |
+| * | crystal | symbol | support-maturity | **SupportsV41RoutedFusedGateUp (fused routed gate/up pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle's fused routed-FFN gate/up module serves the given (gate, up) dtype pair, checked before a batched routed layer picks the two-dispatch fused path over the five-dispatch id path. |
+| * | crystal | symbol | support-maturity | **SupportsV41RoutedFusedDown (fused routed down/sum pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle's fused routed-FFN down/sum module serves the given down-projection dtype, checked before a batched routed layer picks the two-dispatch fused path over the five-dispatch id path. |
 | * | crystal | symbol | support-maturity | **SupportsQ3KMatMul (packed Q3_K pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q3_K matrix-multiply pipeline needed before device selection. |
 | * | crystal | symbol | support-maturity | **SupportsQ5KMatMul (packed Q5_K pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle has the packed Q5_K matrix-multiply pipeline needed before device selection. |
 | * | crystal | concept | trajectory-control | **trajectory control (trajctl)** - The LIVE forward-progress control plane over declared objectives (internal/trajctl, epic #2533): anything you want to progress gets a named objective and a witnessed score curve, and steering reads curves, never points |
@@ -3264,8 +3269,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3208/5390 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2984 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3218/5400 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2989 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3274,23 +3279,23 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4230 lookup name(s) resolves - 86 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4237 lookup name(s) resolves - 86 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 469 | 573 | 104 |
+| plan | 470 | 574 | 104 |
 | session-runtime | 287 | 355 | 68 |
-| cache | 333 | 399 | 66 |
+| cache | 334 | 401 | 67 |
 | gateway-engine | 226 | 281 | 55 |
-| guard-gate | 511 | 557 | 46 |
+| guard-gate | 513 | 559 | 46 |
 | context-ctx | 263 | 307 | 44 |
 | attention | 113 | 156 | 43 |
 | pool | 41 | 83 | 42 |
 | policy-capability | 224 | 264 | 40 |
-| support-maturity | 80 | 117 | 37 |
+| support-maturity | 82 | 119 | 37 |
 | render-materialize | 217 | 251 | 34 |
 | witness-proof | 173 | 202 | 29 |
 | evict | 56 | 79 | 23 |

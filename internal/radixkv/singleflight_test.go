@@ -637,6 +637,29 @@ func receiveSharedPrefixResult(t *testing.T, ch <-chan sharedPrefixFlightResult)
 	}
 }
 
+// publicationPausedContext holds a registered follower before its select, to
+// reproduce delayed scheduling without delaying the underlying cancellation.
+type publicationPausedContext struct {
+	context.Context
+	entered chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+	inspect func()
+}
+
+func (c *publicationPausedContext) Err() error {
+	// A valid caller-supplied Context may inspect the group. Publication must
+	// never call this method while holding the group's mutex.
+	c.inspect()
+	return c.Context.Err()
+}
+
+func (c *publicationPausedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	<-c.resume
+	return c.Context.Done()
+}
+
 // TestPrefixFlightGroupSharedPrefixContract is the behavioral contract for
 // transient CPU prefill reuse. Distinct prompts may share only valuable work,
 // and every waiter receives independently owned state.
@@ -985,19 +1008,36 @@ func TestPrefixFlightGroupSharedPrefixContract(t *testing.T) {
 			}
 
 			entered, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			releaseLeader := func() { releaseOnce.Do(func() { close(release) }) }
+			t.Cleanup(releaseLeader)
+			leaderSession := m.NewSession()
 			leaderDone := make(chan sharedPrefixFlightResult, 1)
 			go func() {
-				s := m.NewSession()
 				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(context.Background(), "tenant/a", a, 64, func(context.Context) (*model.KVCache, []float32, error) {
 					close(entered)
 					<-release
-					logits := s.Prefill(a)
-					return s.Cache, logits, nil
+					logits := leaderSession.Prefill(a)
+					return leaderSession.Cache, logits, nil
 				})
 				leaderDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
 			}()
-			<-entered
-			ctx, cancelRace := context.WithCancel(context.Background())
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("leader did not enter prefill")
+			}
+			base, cancelRace := context.WithCancel(context.Background())
+			t.Cleanup(cancelRace)
+			ctx := &publicationPausedContext{
+				Context: base,
+				entered: make(chan struct{}),
+				resume:  make(chan struct{}),
+				inspect: func() { g.InFlight() },
+			}
+			var resumeOnce sync.Once
+			resume := func() { resumeOnce.Do(func() { close(ctx.resume) }) }
+			t.Cleanup(resume)
 			followerDone := make(chan sharedPrefixFlightResult, 1)
 			go func() {
 				kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(ctx, "tenant/a", b, 64, func(context.Context) (*model.KVCache, []float32, error) {
@@ -1005,17 +1045,35 @@ func TestPrefixFlightGroupSharedPrefixContract(t *testing.T) {
 				})
 				followerDone <- sharedPrefixFlightResult{kv, logits, matched, leader, err}
 			}()
-			awaitSharedPrefixCondition(t, "ready-race follower to join", func() bool { return g.Coalesced() == 1 })
-			cancelRace()
-			close(release)
-			if result := receiveSharedPrefixResult(t, followerDone); !errors.Is(result.err, context.Canceled) {
-				t.Fatalf("ready-race follower err=%v", result.err)
+			select {
+			case <-ctx.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("ready-race follower did not register")
 			}
-			if result := receiveSharedPrefixResult(t, leaderDone); result.err != nil {
-				t.Fatal(result.err)
+			cancelRace()
+			releaseLeader()
+			leader := receiveSharedPrefixResult(t, leaderDone)
+			if leader.err != nil || !leader.leader || leader.matched != 0 || leader.kv != leaderSession.Cache {
+				t.Fatalf("leader result: leader=%v matched=%d err=%v", leader.leader, leader.matched, leader.err)
+			}
+			if leader.kv.ClonePayloadBytes() == 0 {
+				t.Fatal("regression requires a nonempty clone payload")
+			}
+			// The follower cannot clean up until resumed; publication must observe
+			// the completed cancellation while its registration is still present.
+			if got := g.ClonePayloadBytes(); got != 0 {
+				t.Errorf("all followers cancelled before completion but flight cloned %d payload bytes", got)
+			}
+			resume()
+			follower := receiveSharedPrefixResult(t, followerDone)
+			if !errors.Is(follower.err, context.Canceled) || follower.kv != nil || follower.logits != nil || follower.matched != 0 || follower.leader {
+				t.Fatalf("ready-race follower result: leader=%v matched=%d err=%v", follower.leader, follower.matched, follower.err)
 			}
 			if got := g.ClonePayloadBytes(); got != 0 {
-				t.Fatalf("all followers cancelled before completion but flight cloned %d payload bytes", got)
+				t.Errorf("cancelled follower completion caused %d total payload bytes", got)
+			}
+			if got := g.InFlight(); got != 0 {
+				t.Fatalf("remaining flights=%d", got)
 			}
 		})
 

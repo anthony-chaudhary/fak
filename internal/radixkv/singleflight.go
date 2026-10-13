@@ -42,7 +42,7 @@ type flightPromise struct {
 	logits    []float32
 	err       error
 	followers int
-	waiters   int
+	waiters   map[int]context.Context
 	namespace string
 	tokens    []int
 	sequence  uint64
@@ -260,7 +260,11 @@ func (g *PrefixFlightGroup) CoalesceSharedPrefixNS(ctx context.Context, ns strin
 		}
 
 		candidate.followers++
-		candidate.waiters++
+		waiterID := candidate.followers
+		if candidate.waiters == nil {
+			candidate.waiters = make(map[int]context.Context)
+		}
+		candidate.waiters[waiterID] = ctx
 		g.coalesced.Add(1)
 		ready := candidate.ready
 		g.mu.Unlock()
@@ -271,7 +275,7 @@ func (g *PrefixFlightGroup) CoalesceSharedPrefixNS(ctx context.Context, ns strin
 			cancelled = true
 		case <-ready:
 		}
-		g.releaseSharedPrefixWaiter(candidate)
+		g.releaseSharedPrefixWaiter(candidate, waiterID)
 		if cancelled {
 			return nil, nil, 0, false, ctx.Err()
 		}
@@ -366,12 +370,35 @@ func (g *PrefixFlightGroup) runSharedPrefixLeader(ctx context.Context, f *flight
 		return nil, nil, err
 	}
 
-	// Avoid the publication clone for an uncontended cold request. Once a
-	// follower exists, clone before waking it or returning control to leader
-	// decode, so later mutation of the live session cannot affect the handoff.
+	// Cancellation can precede a waiter's scheduled cleanup. Inspect contexts
+	// at publication rather than counting registrations that may already be
+	// cancelled. A live follower still needs a clone before leader decode resumes.
 	g.mu.Lock()
-	waiters := f.waiters
-	if waiters == 0 {
+	hasLiveWaiter := false
+	for len(f.waiters) != 0 {
+		// Context methods are caller code: they may reenter the group or panic.
+		// Snapshot under the lock, inspect outside it, then validate that no
+		// registration or release changed the set before deciding publication.
+		generation := f.followers
+		waiterContexts := make([]context.Context, 0, len(f.waiters))
+		for _, waiterCtx := range f.waiters {
+			waiterContexts = append(waiterContexts, waiterCtx)
+		}
+		g.mu.Unlock()
+		hasLiveWaiter = false
+		for _, waiterCtx := range waiterContexts {
+			if waiterCtx.Err() == nil {
+				hasLiveWaiter = true
+				break
+			}
+		}
+		g.mu.Lock()
+		if generation == f.followers && len(waiterContexts) == len(f.waiters) {
+			break
+		}
+		hasLiveWaiter = false
+	}
+	if !hasLiveWaiter {
 		if current := g.shared[f.sequence]; current == f {
 			delete(g.shared, f.sequence)
 		}
@@ -406,13 +433,13 @@ func (g *PrefixFlightGroup) finishSharedPrefixFlight(f *flightPromise, kv *model
 	g.mu.Unlock()
 }
 
-func (g *PrefixFlightGroup) releaseSharedPrefixWaiter(f *flightPromise) {
+func (g *PrefixFlightGroup) releaseSharedPrefixWaiter(f *flightPromise, waiterID int) {
 	g.mu.Lock()
-	f.waiters--
-	if f.waiters < 0 {
+	if _, ok := f.waiters[waiterID]; !ok {
 		g.mu.Unlock()
 		panic("radixkv: shared-prefix waiter released more than once")
 	}
+	delete(f.waiters, waiterID)
 	g.mu.Unlock()
 }
 
