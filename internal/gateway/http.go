@@ -1444,7 +1444,7 @@ func (s *Server) handleFakTokenize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servedModel := strings.TrimSpace(s.model)
-	if requested := strings.TrimSpace(req.Model); requested != "" && requested != servedModel {
+	if requested := strings.TrimSpace(req.Model); requested != "" && !sameServedModel(requested, servedModel) {
 		writeErrCode(w, http.StatusBadRequest, "model_mismatch", "requested model does not match the loaded native model")
 		return
 	}
