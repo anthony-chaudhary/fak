@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:d68cbb63a2c6725df1d891c85731ea435c1a90fda085044d380655d171969307",
-  "tracked_files": 25140,
-  "tracked_bytes": 508406702,
+  "content_root": "sha256:cc89c5d1dc463bacb17b76abe93fd2db52b9a0e40b23cbd0cf75191ae0bd5c56",
+  "tracked_files": 25149,
+  "tracked_bytes": 508468246,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1286,6 +1286,15 @@
       ]
     },
     {
+      "path": ".github/actions/release-upload/action.yml",
+      "content_sha256": "sha256:a3f7bd0184393bb8116d7aad67398020bac4e3a8a06ec96f65ec8c729e0f33ec",
+      "bytes": 3010,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
       "path": ".github/branch-integration-closeout.md",
       "content_sha256": "sha256:1945aa8df22d70818aa74a9d05880bd594261fb5a5922be42bc9190139e00b04",
       "bytes": 2796,
@@ -1707,8 +1716,8 @@
     },
     {
       "path": ".github/workflows/release-artifacts.yml",
-      "content_sha256": "sha256:8599f0c27e4c663000b6a2ad20d61975a5ea6d744f87669241b0304c875a9a8c",
-      "bytes": 39600,
+      "content_sha256": "sha256:ed73922142b036f3800a78ce72d5acfef12f91956734c634e75a204007d0ad15",
+      "bytes": 40768,
       "classification": "runtime_source",
       "source_classes": [
         "history_changelog_releases",
@@ -1747,8 +1756,8 @@
     },
     {
       "path": ".github/workflows/release-macos.yml",
-      "content_sha256": "sha256:b3d52d6f41b4bad57cc1cb45159f04abfa6ecc03a151f41dc57d8d25917ba3e0",
-      "bytes": 8722,
+      "content_sha256": "sha256:76618fef9e701b15531407d9bb148521e650487018f68e1bd839c9007ada7c8a",
+      "bytes": 9043,
       "classification": "runtime_source",
       "source_classes": [
         "history_changelog_releases",
@@ -2953,8 +2962,8 @@
     },
     {
       "path": "cmd/dedupbench/main.go",
-      "content_sha256": "sha256:3816e3c355b5b9a99fc8ce4fbcc693bad8c5208a77485541b2fe1301a4f64fb5",
-      "bytes": 12752,
+      "content_sha256": "sha256:d69c048f150b93a79294d94cbf7bd7c01a771cbf50f931969432a2c597df9504",
+      "bytes": 14528,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -2962,8 +2971,8 @@
     },
     {
       "path": "cmd/dedupbench/main_test.go",
-      "content_sha256": "sha256:582ee5bed4be69a34f91bfe6a018d722e31e342ce177e74168e98ea24c684d54",
-      "bytes": 3117,
+      "content_sha256": "sha256:76d6f9621573aca4d9d3d83ba67eb75c5e0a49621244e2a1e14b5d57dd94a258",
+      "bytes": 4293,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -60068,6 +60077,15 @@
       ]
     },
     {
+      "path": "docs/research/BORROW-SGLANG-TOOL-CHOICE-NONE-2026-10-13.md",
+      "content_sha256": "sha256:b2d47a3185004b3b4bf84a394558bd84fa6756e398b1e9a3aed0abc223af3362",
+      "bytes": 1648,
+      "classification": "documentation",
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
       "path": "docs/research/CROSS-ARCHITECTURE-INNOVATION-MATRIX.md",
       "content_sha256": "sha256:495d1d9d684d9a71d70573732fe6b3896102b88413ad3fcc9142026bf6dbac45",
       "bytes": 11406,
@@ -80324,8 +80342,8 @@
     },
     {
       "path": "internal/agent/inkernel_render_deepseek41.go",
-      "content_sha256": "sha256:2d5459e1d58d58deb393c48758ad04f7b03938727be740f5d971aae698bef031",
-      "bytes": 7601,
+      "content_sha256": "sha256:19bf57ecdc005858e40ffa23cec617902d9d797f6d69adea8ed0a0e4b00782e1",
+      "bytes": 7721,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -80470,6 +80488,15 @@
       "path": "internal/agent/inkernel_stream_test.go",
       "content_sha256": "sha256:10da13431750b52801340b06e0b2f589760407106d4530cbbc5b091d3706a52a",
       "bytes": 938,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/agent/inkernel_tool_choice_none_test.go",
+      "content_sha256": "sha256:91b218ef80b58d9005aaed6b857b27dc3be7430a4d21f4945e5cdafc290e048b",
+      "bytes": 6087,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -99172,6 +99199,15 @@
       ]
     },
     {
+      "path": "internal/compute/q6k_shared_head_parity_test.go",
+      "content_sha256": "sha256:81afee88a2149ec7e7f47100669cd3ad452641f8bcb0898c5cd89aa835770d5d",
+      "bytes": 3413,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/compute/quant_grouped_sym4.go",
       "content_sha256": "sha256:571b3655b0cceaf7c3c4cc014b5f98812225bd2f510d3ec4b1006fe699b4ef8e",
       "bytes": 9608,
@@ -99764,8 +99800,8 @@
     },
     {
       "path": "internal/compute/shaders/coopmat_wave32_wmma.comp",
-      "content_sha256": "sha256:998d3296c942577831a5efbfb8ad4cf1e130c9ee2f5048ff3bbe6e32e3f46860",
-      "bytes": 7983,
+      "content_sha256": "sha256:4da73bbe8cae3b7b9aa424da91d49259cc5fa640bb75a6083958de2aa03f7b72",
+      "bytes": 8303,
       "classification": "artifact"
     },
     {
@@ -102031,6 +102067,15 @@
       ]
     },
     {
+      "path": "internal/compute/vulkan_coopmat_compiler_test.go",
+      "content_sha256": "sha256:0298b8a39b829fa94753f413ed7d3132f8e8fa45d98b2874f4eb85b18026f3f9",
+      "bytes": 1670,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/compute/vulkan_decode_split_test.go",
       "content_sha256": "sha256:21aa4cd8c8af38fcf3ada5f0948f103f1108c10a0974211ee6e19aacfcfbe6be",
       "bytes": 6985,
@@ -102520,6 +102565,15 @@
       "path": "internal/compute/vulkan_q5k_test.go",
       "content_sha256": "sha256:f9a430bd6cb7626098b7f6aff7a2c04ec5bc71a8bb8bb8a733c32cee49d38f73",
       "bytes": 16372,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/compute/vulkan_q6k_shared_head_parity_test.go",
+      "content_sha256": "sha256:fd740c9d00fabc5213309c2822e112d2f7aa32ce61a871081297dd3188e262b6",
+      "bytes": 2252,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -103950,8 +104004,8 @@
     },
     {
       "path": "internal/computetrace/llamacpp_dump.go",
-      "content_sha256": "sha256:93b428c1ccb2f4c44863e1d392b5109607a586b49f41717f442e41278e9653ca",
-      "bytes": 8443,
+      "content_sha256": "sha256:aa17d3de63df1fbff674540b92e4823ab361fee90c66e2b7333103813525224d",
+      "bytes": 8803,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -103968,8 +104022,8 @@
     },
     {
       "path": "internal/computetrace/llamacpp_dump_test.go",
-      "content_sha256": "sha256:d04eb643f465a9f0367ddcf4dd351fee965b0eb6afeb501fde53102210948cb1",
-      "bytes": 5858,
+      "content_sha256": "sha256:b496ecfa5c053231ac36c00fa9c2cf494260574542319759c0652faaf109e92a",
+      "bytes": 8333,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -160754,8 +160808,8 @@
     },
     {
       "path": "internal/model/v41_attention_bf16_test.go",
-      "content_sha256": "sha256:1d742a64d89e7e5cfd4a27a0b85ff22fc0e4bc2202b84b3b3a15a92e9c7448ab",
-      "bytes": 14557,
+      "content_sha256": "sha256:4087df0a67ee5ac266e9363558eb02d51baf4fd0d3fb7a7cb030d4a3e9c58bf6",
+      "bytes": 19073,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -160763,8 +160817,8 @@
     },
     {
       "path": "internal/model/v41_attention_bf16_vulkan_test.go",
-      "content_sha256": "sha256:b89258c1f6a243969c62364280829832cfbb524cab1f93498f0b6cb01d198ad8",
-      "bytes": 17110,
+      "content_sha256": "sha256:64687f0b6c5bf03292daaccc8789bb02232ebf3c2d3bf5afb07e34df54a5293b",
+      "bytes": 17124,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -160772,8 +160826,8 @@
     },
     {
       "path": "internal/model/v41_attention_input_norm_device.go",
-      "content_sha256": "sha256:9be25679527cc01d6a1661abff73f2273befb4ed56694a5a3c8c864444bd6723",
-      "bytes": 2344,
+      "content_sha256": "sha256:1aee658e0b9474785e0eff8c1dff725efa035a987e1d44504766d068c75f0080",
+      "bytes": 2861,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -161321,8 +161375,8 @@
     },
     {
       "path": "internal/model/v41_dense_projection_test.go",
-      "content_sha256": "sha256:be32b6dfe5e907225def502625ce8fc07129438082d452bda289b656959436ad",
-      "bytes": 21468,
+      "content_sha256": "sha256:cf12e436e79971e07cecfeb06623022d69d3187ca3ad1d1d21ad6822ba415fad",
+      "bytes": 21588,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -162033,8 +162087,8 @@
     },
     {
       "path": "internal/model/v41_forward_layer.go",
-      "content_sha256": "sha256:318d449dd4c93ee4117d925c3ccff187fd59b0bd5d4e9a15d177b9bf57cf46d4",
-      "bytes": 35101,
+      "content_sha256": "sha256:455672340e9b24c316fb52227b4f8f24b91ea0bc9f5e9986da52b554326debb5",
+      "bytes": 35451,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163032,8 +163086,8 @@
     },
     {
       "path": "internal/model/v41_projection_batch.go",
-      "content_sha256": "sha256:3099fb041eba600d824925cd9a7c861813c6870734fe15608be4c5cf2a63265b",
-      "bytes": 4251,
+      "content_sha256": "sha256:c245ea1bc6cb1625e26c63f509e34bfdaf88382de556c5e86d8750bd905b3507",
+      "bytes": 4190,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163041,8 +163095,8 @@
     },
     {
       "path": "internal/model/v41_projection_batch_test.go",
-      "content_sha256": "sha256:d006a7e65e7ff24a315fc67d71e4cc0108b1674c3b800cbd85160a95b82b7789",
-      "bytes": 9037,
+      "content_sha256": "sha256:e86c1b2355028bdde582867ea972c14622f3db0eab9b9c628f7ddff0983a9ef6",
+      "bytes": 12183,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -163607,9 +163661,36 @@
       ]
     },
     {
+      "path": "internal/model/v41_step_cleanup_test.go",
+      "content_sha256": "sha256:90214eabea5dcc1cb9511633b2b34da14bffe8c6a66a636160fdd05dcf47865a",
+      "bytes": 4841,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/model/v41_step_cohort.go",
+      "content_sha256": "sha256:c00cdf01e1b85b0a5d120a6e7bfb5cf33dce75af506615179b459a2538c8f7c9",
+      "bytes": 7846,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_step_cohort_test.go",
+      "content_sha256": "sha256:3e94b23dbfe5bbb8c267c76bf3ab40b05e2296bab500861ec52de4fd97ae4167",
+      "bytes": 10102,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/model/v41_step_transaction.go",
-      "content_sha256": "sha256:580c008612f8879469c3426f45516ae020c13ccbb077482fe80cd2c598b50eb1",
-      "bytes": 15240,
+      "content_sha256": "sha256:1316bcb3388ec0854db7097f30e5cc28d39961f4e765f30ba9440e3737ff7680",
+      "bytes": 15798,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -212006,8 +212087,8 @@
     },
     {
       "path": "tools/build_entrypoint_test.py",
-      "content_sha256": "sha256:e26a694a49b5ea5772d463cb9e2ea1a5ce2db7c9fb879962d8791a66c7cdb214",
-      "bytes": 12755,
+      "content_sha256": "sha256:86d3b43a15e4fe96fa6ecc539e3ce3748b144b7474b975db8cf21af49dba86dc",
+      "bytes": 12848,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -212512,8 +212593,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:6e00c43f00e96b10e4684c0ca0a7d3030af50a64932d21000d9f21f59f25e6ce",
-      "bytes": 798732,
+      "content_sha256": "sha256:15ed1fe03af4af5604fc197201a734882adbfba5a97caa8def960995c25d0bd7",
+      "bytes": 799041,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -219526,8 +219607,8 @@
     },
     {
       "path": "tools/release_artifacts_workflow_test.py",
-      "content_sha256": "sha256:6e55d1d715d7b8646f3b9900781c4038eaa47f96c4d90e6a92dbe050f0a094a8",
-      "bytes": 16712,
+      "content_sha256": "sha256:a970a3d797466d7962e2f503f89da22713cd729d01a4d6ecae4b3c010a00015c",
+      "bytes": 20007,
       "classification": "test_fixture",
       "source_classes": [
         "history_changelog_releases",
@@ -219536,8 +219617,8 @@
     },
     {
       "path": "tools/release_build_flags_drift_test.py",
-      "content_sha256": "sha256:296f9be8e64b0d5423d1050fcc137ae019274c3be3f90c58808b509bf9462a9b",
-      "bytes": 5137,
+      "content_sha256": "sha256:32de6bb5819dcb886a4ab90ca2c3bee5efd47c043da0a9cd6e9d6ad61e56f507",
+      "bytes": 5239,
       "classification": "test_fixture",
       "source_classes": [
         "history_changelog_releases",
