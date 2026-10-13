@@ -61,14 +61,10 @@ func TestV41RoutedFusedSlotHoistSourceContract(t *testing.T) {
 	if canonical(section(down, "void q3kScales", "// Q3K_SLOT")) != canonical(section(q3, "void q3kScales", "// Q3K_SLOT")) {
 		t.Error("down scale decoder differs from routed-id")
 	}
-	// Compare the complete Q2_K bank with the existing routed-id bank, allowing
-	// only the intended literal-binding and accumulator/output variable names.
-	bank := section(gate, "    for (uint r = 0u; r < ROWS; ++r) ACC[r] = 0.0;", "void main()")
-	refBank := section(q2, "    for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;", "    for (uint r = 0u; r < ROWS; ++r) red[")
-	refBank = strings.NewReplacer("acc[", "ACC[", "rowsOut", "outDim").Replace(refBank)
-	for _, addr := range []string{"base + 4u + t16", "base + h * 2u", "base + h * 2u + 1u", "base + 20u"} {
-		refBank = strings.ReplaceAll(refBank, "wload(slot, "+addr+")", "RAW["+addr+"]")
-	}
+	// The routed-id Q2_K kernel carries the same bank macro, so the fused gate/up
+	// banks are its program text.
+	bank := section(gate, "#define Q2K_BANK(RAW, ACC)", "void main()")
+	refBank := section(q2, "#define Q2K_BANK(RAW, ACC)", "void main()")
 	if canonical(bank) != canonical(refBank) {
 		t.Error("gate/up bank differs from routed-id Q2_K arithmetic or addressing")
 	}

@@ -69,3 +69,48 @@ func TestV41Q3KMatVecIDSlotHoistSourceContract(t *testing.T) {
 		t.Error("Q3_K id grid is no longer one thread per output row")
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+// Source witness only: every routed slot-table shader picks its binding once per
+// workgroup (or once per pick in the fused down sum) and no helper before main
+// branches on the slot per load. The fused pair's own contract is
+// TestV41RoutedFusedSlotHoistSourceContract.
+func TestV41RoutedSlotTableShadersHoistSlotSelect(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		path, stamp, call string
+	}{
+		{"shaders/v41_q3k_matvec_id.comp", "Q3K_SLOT(q3kRow%d, byteAt%d, raw%d)", "q3kRow%d(row, blocks, xPick)"},
+		{"shaders/v41_routed_down_sum.comp", "Q3K_SLOT(q3kRow%d, byteAt%d, raw%d)", "d = q3kRow%d(row, blocks, midBase)"},
+		{"shaders/v41_q2k_matvec_id.comp", "", "{ Q2K_BANK(raw%d, acc) break; }"},
+		{"shaders/v41_routed_gate_up_swiglu_id.comp", "", "Q2K_BANK(g%d, accG) Q2K_BANK(u%d, accU)"},
+	} {
+		raw, err := os.ReadFile(filepath.FromSlash(c.path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := strings.ReplaceAll(string(raw), "\r\n", "\n")
+		at := strings.Index(src, "void main()")
+		if at < 0 {
+			t.Fatalf("%s has no main", c.path)
+		}
+		helpers, main := src[:at], src[at:]
+		if strings.Contains(helpers, "switch (") || strings.Contains(helpers, "\nuint slot;") {
+			t.Errorf("%s selects the slot inside a load helper", c.path)
+		}
+		if strings.Count(main, "switch (") != 1 {
+			t.Errorf("%s main must branch on the slot exactly once", c.path)
+		}
+		for s := 0; s < 8; s++ {
+			if c.stamp != "" {
+				stamp := fmt.Sprintf(c.stamp, []any{s, s, s}[:strings.Count(c.stamp, "%d")]...)
+				if !strings.Contains(helpers, stamp) {
+					t.Errorf("%s lacks per-slot body %q", c.path, stamp)
+				}
+			}
+			if call := fmt.Sprintf(c.call, []any{s, s}[:strings.Count(c.call, "%d")]...); !strings.Contains(main, call) {
+				t.Errorf("%s main does not route slot %d: missing %q", c.path, s, call)
+			}
+		}
+	}
+}

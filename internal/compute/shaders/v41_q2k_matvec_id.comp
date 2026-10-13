@@ -41,30 +41,55 @@ layout(push_constant) uniform PC {
 
 shared float red[ROWS * LANES];
 
-// slot is uniform across the workgroup, so the switch never diverges.
-uint wload(uint slot, uint i) {
-    switch (slot) {
-    case 0u: return raw0[i];
-    case 1u: return raw1[i];
-    case 2u: return raw2[i];
-    case 3u: return raw3[i];
-    case 4u: return raw4[i];
-    case 5u: return raw5[i];
-    case 6u: return raw6[i];
-    default: return raw7[i];
-    }
-}
-
 vec4 bytesOf(uint w) {
     return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
 }
+
+// One row bank per slot binding: main selects the slot once and every word load
+// indexes a single buffer, as q2k_matvec.comp does. v41_routed_gate_up_swiglu_id
+// carries this macro verbatim for its gate and up banks.
+#define Q2K_BANK(RAW, ACC)                                                                    \
+    for (uint r = 0u; r < ROWS; ++r) ACC[r] = 0.0;                                              \
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {                                    \
+        vec4 xv[4];                                                                             \
+        float xsum[4];                                                                          \
+        for (uint j = 0u; j < 4u; ++j) {                                                        \
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;                   \
+            vec4 v = x4[xBase + idx];                                                           \
+            xv[j] = v;                                                                          \
+            xsum[j] = v.x + v.y + v.z + v.w;                                                    \
+        }                                                                                       \
+        for (uint r = 0u; r < ROWS; ++r) {                                                      \
+            uint row = rowBase + r;                                                             \
+            if (row >= outDim) break;                                                           \
+            uint base = row * wordsPerRow + sb * 21u;                                           \
+            uint q = RAW[base + 4u + t16];                                              \
+            uint sc0 = RAW[base + h * 2u];                                              \
+            uint sc1 = RAW[base + h * 2u + 1u];                                         \
+            uint dm = RAW[base + 20u];                                                  \
+            vec2 dd = unpackHalf2x16(dm);                                                       \
+            uint scj[4];                                                                        \
+            scj[0] = (sc0 >> (s * 8u)) & 255u;                                                  \
+            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;                                           \
+            scj[2] = (sc1 >> (s * 8u)) & 255u;                                                  \
+            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;                                           \
+            float sum = 0.0;                                                                    \
+            for (uint j = 0u; j < 4u; ++j) {                                                    \
+                vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);                               \
+                float dl = dd.x * float(scj[j] & 15u);                                          \
+                float ml = dd.y * float(scj[j] >> 4u);                                          \
+                sum += dl * dot(qv, xv[j]) - ml * xsum[j];                                      \
+            }                                                                                   \
+            ACC[r] += sum;                                                                      \
+        }                                                                                       \
+    }
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
     uint pick = gl_WorkGroupID.y;
     uint slot = ids[pick];
     uint rowBase = gl_WorkGroupID.x * ROWS;
-    uint rowsOut = uint(pc.outDim);
+    uint outDim = uint(pc.outDim);
     uint inDim = uint(pc.inDim);
     uint nsb = inDim / 256u;
     uint wordsPerRow = nsb * 21u;
@@ -76,40 +101,15 @@ void main() {
     uint lq = (t16 & 3u) * 4u;
 
     float acc[ROWS];
-    for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;
-
-    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
-        vec4 xv[4];
-        float xsum[4];
-        for (uint j = 0u; j < 4u; ++j) {
-            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
-            vec4 v = x4[xBase + idx];
-            xv[j] = v;
-            xsum[j] = v.x + v.y + v.z + v.w;
-        }
-        for (uint r = 0u; r < ROWS; ++r) {
-            uint row = rowBase + r;
-            if (row >= rowsOut) break;
-            uint base = row * wordsPerRow + sb * 21u;
-            uint q = wload(slot, base + 4u + t16);
-            uint sc0 = wload(slot, base + h * 2u);
-            uint sc1 = wload(slot, base + h * 2u + 1u);
-            uint dm = wload(slot, base + 20u);
-            vec2 dd = unpackHalf2x16(dm);
-            uint scj[4];
-            scj[0] = (sc0 >> (s * 8u)) & 255u;
-            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;
-            scj[2] = (sc1 >> (s * 8u)) & 255u;
-            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;
-            float sum = 0.0;
-            for (uint j = 0u; j < 4u; ++j) {
-                vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);
-                float dl = dd.x * float(scj[j] & 15u);
-                float ml = dd.y * float(scj[j] >> 4u);
-                sum += dl * dot(qv, xv[j]) - ml * xsum[j];
-            }
-            acc[r] += sum;
-        }
+    switch (slot) {
+    case 0u: { Q2K_BANK(raw0, acc) break; }
+    case 1u: { Q2K_BANK(raw1, acc) break; }
+    case 2u: { Q2K_BANK(raw2, acc) break; }
+    case 3u: { Q2K_BANK(raw3, acc) break; }
+    case 4u: { Q2K_BANK(raw4, acc) break; }
+    case 5u: { Q2K_BANK(raw5, acc) break; }
+    case 6u: { Q2K_BANK(raw6, acc) break; }
+    default: { Q2K_BANK(raw7, acc) break; }
     }
 
     for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] = acc[r];
@@ -122,6 +122,6 @@ void main() {
     }
     if (tid < ROWS) {
         uint row = rowBase + tid;
-        if (row < rowsOut) y[pick * rowsOut + row] = red[tid * LANES];
+        if (row < outDim) y[pick * outDim + row] = red[tid * LANES];
     }
 }
