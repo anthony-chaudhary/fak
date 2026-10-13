@@ -23,7 +23,8 @@ type syncRec struct {
 	calls [][]string
 	refs  []string       // local refs the for-each-ref probe reports
 	code  map[string]int // args[0] -> exit code
-	err   error          // non-nil = git not executable
+	out   map[string]string
+	err   error // non-nil = git not executable
 }
 
 func (r *syncRec) run(ctx context.Context, dir string, args ...string) (string, int, error) {
@@ -37,7 +38,126 @@ func (r *syncRec) run(ctx context.Context, dir string, args ...string) (string, 
 	if args[0] == "for-each-ref" {
 		return strings.Join(r.refs, "\n"), r.code[args[0]], nil
 	}
-	return "", r.code[args[0]], nil
+	return r.out[args[0]], r.code[args[0]], nil
+}
+
+// fak-test:runtime fast est=20ms
+func TestSyncPushFailureCategories(t *testing.T) {
+	const pair = "refs/fak/locks/private-ref:refs/fak/locks/private-ref"
+	status := func(summary string) string { return "!\t" + pair + "\t" + summary + "\n" }
+	for _, tc := range []struct{ name, output, category string }{
+		{"client", status("[rejected] (private-reason)"), "client-rejected"},
+		{"remote", status("[remote rejected] (private-reason)"), "remote-rejected"},
+		{"failure", status("[remote failure] (private-reason)"), "remote-failure"},
+		{"crlf", strings.ReplaceAll(status("[remote rejected]"), "\n", "\r\n"), "remote-rejected"},
+		{"repeated", status("[remote rejected]") + status("[remote rejected]"), "remote-rejected"},
+		{"success-row", "=\t" + pair + "\t[remote failure]\n" + status("[remote rejected]"), "remote-rejected"},
+		{"mixed", status("[remote rejected]") + status("[rejected]"), "unknown"},
+		{"mixed-reversed", status("[rejected]") + status("[remote rejected]"), "unknown"},
+		{"malformed", status("[remote rejected]") + "!\tprivate-ref\n", "unknown"},
+		{"extra-column", status("[remote rejected]\tprivate-reason"), "unknown"},
+		{"wrong-ref", "!\trefs/heads/private-ref:refs/heads/private-ref\t[remote rejected]\n", "unknown"},
+		{"malformed-ref", "!\trefs/fak/locks/bad name:refs/fak/locks/bad name\t[remote rejected]\n", "unknown"},
+		{"dot-ref", "!\trefs/fak/locks/../x:refs/fak/locks/../x\t[remote rejected]\n", "unknown"},
+		{"double-dot-ref", "!\trefs/fak/locks/a..b:refs/fak/locks/a..b\t[remote rejected]\n", "unknown"},
+		{"lock-suffix", "!\trefs/fak/locks/a.lock:refs/fak/locks/a.lock\t[remote rejected]\n", "unknown"},
+		{"empty-ref", "!\trefs/fak/locks/:refs/fak/locks/\t[remote rejected]\n", "unknown"},
+		{"multiple-colons", "!\t" + pair + ":private-ref\t[remote rejected]\n", "unknown"},
+		{"localized", status("[rejet distant]"), "unknown"},
+		{"marker-prefix", status("[remote rejected]private-reason"), "unknown"},
+		{"no-status", "private-reason: [remote rejected]\n", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &syncRec{refs: oneLease(), code: map[string]int{"push": 1}, out: map[string]string{"push": tc.output}}
+			res, err := NewWithRunner(rec.run, "").Sync(context.Background(), "https://private-user:private-password@example.invalid/repo", true, true)
+			if err == nil || res.Pushed || res.Fetched || res.PushSkippedEmpty {
+				t.Fatalf("failed push changed completion state: result=%+v err=%v", res, err)
+			}
+			var categorized interface{ Category() string }
+			if !errors.As(err, &categorized) || categorized.Category() != tc.category {
+				t.Fatalf("want category %q, got %v", tc.category, err)
+			}
+			for _, secret := range []string{"private-ref", "private-reason", "private-user", "private-password", "example.invalid"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatal("push diagnostic exposed transport data")
+				}
+			}
+			if len(rec.calls) != 2 || strings.Join(rec.calls[1], " ") != "push --porcelain https://private-user:private-password@example.invalid/repo "+wantRefspec {
+				t.Fatal("failed push must request porcelain once and never fetch")
+			}
+		})
+	}
+	t.Run("exit-status-authority", func(t *testing.T) {
+		rec := &syncRec{refs: oneLease(), out: map[string]string{"push": status("[remote rejected]")}}
+		res, err := NewWithRunner(rec.run, "").Sync(context.Background(), "origin", true, true)
+		if err != nil || !res.Pushed || !res.Fetched {
+			t.Fatalf("diagnostic parser overrode successful exit: result=%+v err=%v", res, err)
+		}
+	})
+	t.Run("fetch-unknown", func(t *testing.T) {
+		rec := &syncRec{code: map[string]int{"fetch": 128}, out: map[string]string{"fetch": status("[remote rejected] (private-reason)")}}
+		_, err := NewWithRunner(rec.run, "").Sync(context.Background(), "https://private-user:private-password@example.invalid/repo", false, true)
+		var categorized interface{ Category() string }
+		if !errors.As(err, &categorized) || categorized.Category() != "unknown" {
+			t.Fatalf("want unknown fetch failure, got %v", err)
+		}
+		for _, secret := range []string{"private-ref", "private-reason", "private-user", "private-password", "example.invalid"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Fatal("fetch diagnostic exposed transport data")
+			}
+		}
+	})
+}
+
+// fak-test:runtime fast est=250ms
+func TestSyncPushFailureCategoryRealGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	local, remote := filepath.Join(root, "local"), filepath.Join(root, "remote.git")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(root, "init", "--bare", remote)
+	git(root, "init", local)
+	git(local, "remote", "add", "origin", remote)
+	blob := filepath.Join(root, "record")
+	if err := os.WriteFile(blob, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	localOID := git(local, "hash-object", "-w", blob)
+	remoteOID := git(remote, "hash-object", "-w", blob)
+	git(local, "update-ref", refPrefix+"collision", localOID)
+	git(remote, "update-ref", refPrefix+"collision/child", remoteOID)
+	var fetches int
+	store := NewWithRunner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		if args[0] == "fetch" {
+			fetches++
+		}
+		return gitRunner(ctx, dir, args...)
+	}, local)
+	res, err := store.Sync(context.Background(), "origin", true, true)
+	var categorized interface{ Category() string }
+	if !errors.As(err, &categorized) || categorized.Category() != "remote-rejected" {
+		t.Fatalf("want real remote rejection, got %v", err)
+	}
+	if fetches != 0 || res.Pushed || res.Fetched {
+		t.Fatalf("failed real push changed completion state: fetches=%d result=%+v", fetches, res)
+	}
+	if got := git(remote, "for-each-ref", "--format=%(refname) %(objectname)", refPrefix); got != refPrefix+"collision/child "+remoteOID {
+		t.Fatalf("rejected push changed remote refs: %s", got)
+	}
+	if got := git(local, "for-each-ref", "--format=%(refname) %(objectname)", refPrefix); got != refPrefix+"collision "+localOID {
+		t.Fatalf("failed sync changed local refs: %s", got)
+	}
 }
 
 // wantRefspec is the literal refspec the sync contract promises: the whole locks
@@ -86,7 +206,7 @@ func TestSyncPushThenFetchExactArgv(t *testing.T) {
 	}
 	assertArgv(t, rec.calls, [][]string{
 		wantProbe,
-		{"push", "origin", wantRefspec},
+		{"push", "--porcelain", "origin", wantRefspec},
 		{"fetch", "--no-prune", "origin", wantRefspec},
 	}, "the emptiness probe precedes the push, and the push precedes the fetch")
 }
@@ -99,7 +219,7 @@ func TestSyncSingleDirection(t *testing.T) {
 		wantPushed  bool
 		wantFetched bool
 	}{
-		{"push-only", true, false, [][]string{wantProbe, {"push", "origin", wantRefspec}}, true, false},
+		{"push-only", true, false, [][]string{wantProbe, {"push", "--porcelain", "origin", wantRefspec}}, true, false},
 		{"fetch-only", false, true, [][]string{{"fetch", "--no-prune", "origin", wantRefspec}}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,7 +256,7 @@ func TestSyncPushFailureStopsBeforeFetch(t *testing.T) {
 	if res.Pushed || res.Fetched || res.PushSkippedEmpty {
 		t.Fatalf("nothing should be marked done (or excused) after a failed push, got %+v", res)
 	}
-	assertArgv(t, rec.calls, [][]string{wantProbe, {"push", "origin", wantRefspec}},
+	assertArgv(t, rec.calls, [][]string{wantProbe, {"push", "--porcelain", "origin", wantRefspec}},
 		"a failed push must not be followed by a force-fetch")
 }
 
@@ -153,7 +273,7 @@ func TestSyncUnreadableNamespaceStillPushes(t *testing.T) {
 	if res.PushSkippedEmpty {
 		t.Fatalf("an unreadable namespace is UNKNOWN, not empty — must not skip the push: %+v", res)
 	}
-	assertArgv(t, rec.calls, [][]string{wantProbe, {"push", "origin", wantRefspec}},
+	assertArgv(t, rec.calls, [][]string{wantProbe, {"push", "--porcelain", "origin", wantRefspec}},
 		"an unreadable probe falls through to the push")
 }
 
