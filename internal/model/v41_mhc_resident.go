@@ -236,10 +236,14 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 	if len(scale) != 3 || len(base) != compute.V41MHCCoeffWidth || iters < 1 || !finite32(hcEps) || hcEps <= 0 || !finite32(rmsEps) || rmsEps <= 0 {
 		return compute.Tensor{}, v41StageErr(v41StageMHC, layer, fmt.Errorf("model: invalid V41 mHC geometry iters=%d scale=%d base=%d", iters, len(scale), len(base)))
 	}
-	params := append(append(make([]float32, 0, compute.V41MHCParamWidth), scale...), base...)
-	for i, v := range params {
+	for i, v := range scale {
 		if !finite32(v) {
 			return compute.Tensor{}, v41StageErr(v41StageMHC, layer, fmt.Errorf("model: non-finite V41 mHC coefficient at %d", i))
+		}
+	}
+	for i, v := range base {
+		if !finite32(v) {
+			return compute.Tensor{}, v41StageErr(v41StageMHC, layer, fmt.Errorf("model: non-finite V41 mHC coefficient at %d", len(scale)+i))
 		}
 	}
 	_, transposed, ok := m.v41MHCWeightLayoutNamed(layer, leaf)
@@ -280,6 +284,7 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 		// and attention/FFN role. Forward-local cleanup must not free them.
 		paramsKey := "v41-mhc-split-params:" + layerName(layer, scaleLeaf) + ":" + layerName(layer, baseLeaf)
 		pt := s.cachedImmutableWeight(paramsKey, paramsKey, func() compute.Tensor {
+			params := append(append(make([]float32, 0, compute.V41MHCParamWidth), scale...), base...)
 			return s.uploadHostF32([]int{compute.V41MHCParamWidth}, params, compute.MemoryWeights, "V4.1 mHC split params")
 		})
 		*stage = "rms-split"

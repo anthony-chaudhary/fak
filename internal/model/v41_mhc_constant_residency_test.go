@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -144,6 +145,31 @@ func TestV41DecodeResidentH2DMHCConstants(t *testing.T) {
 			t.Fatal(err)
 		}
 		v41MHCConstantFrees(t, b, count, 2*count, 1)
+	})
+	t.Run("warm-cache-still-refuses-malformed-coefficient", func(t *testing.T) {
+		m := v41MHCConstantFixture(t)
+		b := v41MHCConstantRecorder()
+		s := v41DenseTestSession(t, m, b)
+		s.Prefill([]int{1})
+		count, splits := len(b.paramUploads), b.calls["rms-split"]
+		if count != 2*m.Cfg.NumLayers {
+			t.Fatal("malformed-coefficient witness did not warm the constant cache")
+		}
+		base := append([]float32(nil), m.tensor(layerName(0, "mhc.base"))...)
+		base[len(base)-1] = float32(math.NaN())
+		v41WriteTensorF32(t, m, layerName(0, "mhc.base"), base)
+		r := &v41MHCResident{d: s.v41MHCDeviceSeam()}
+		// A nil stream pins admission before projection or stream access, even
+		// when immutable device parameters already exist for this exact key.
+		_, err := r.mixes(0, nil, "mhc.mixes.weight", "mhc.scale", "mhc.base", 1, 1e-6, 1e-6)
+		var malformed *V41ForwardError
+		if !errors.As(err, &malformed) || malformed.Stage != v41StageMHC || malformed.Layer != 0 || malformed.Err.Error() != "model: non-finite V41 mHC coefficient at 26" {
+			t.Fatalf("warm malformed coefficient lost its original stage/index: %v", err)
+		}
+		if len(b.paramUploads) != count || b.calls["rms-split"] != splits || s.BackendSessionClosed() {
+			t.Fatal("payload admission dispatched, uploaded, or retired the backend")
+		}
+		v41MHCConstantFrees(t, b, 0, count, 0)
 	})
 	t.Run("failed-staging-publishes-no-constant", func(t *testing.T) {
 		m := v41MHCConstantFixture(t)
