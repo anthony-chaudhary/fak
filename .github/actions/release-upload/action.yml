@@ -1,0 +1,70 @@
+name: release-upload
+description: >-
+  Idempotently attach files to an existing GitHub release. `gh release upload
+  --clobber` only replaces assets it sees BEFORE uploading; when gh's own retry
+  re-POSTs an asset whose first attempt already landed server-side, GitHub answers
+  HTTP 422 already_exists and the step fails although the asset is published
+  (v0.56.0 windows/amd64). On any upload failure this action accepts an asset only
+  when the release already holds an `uploaded` copy of identical byte size;
+  otherwise it deletes that asset and retries. Content integrity stays with the
+  downstream sha256 verification of the published set.
+inputs:
+  tag:
+    description: Release tag to upload to (the release page must exist or appear within ~2 min).
+    required: true
+  files:
+    description: Whitespace-separated local file paths to upload.
+    required: true
+  attempts:
+    description: Upload attempts before failing.
+    required: false
+    default: "3"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        FILES: ${{ inputs.files }}
+        ATTEMPTS: ${{ inputs.attempts }}
+      run: |
+        set -euo pipefail
+        # The tag push also fires the workflow that creates the release PAGE; wait
+        # for it rather than 404ing on "release not found" (issue #369).
+        for i in $(seq 1 24); do
+          gh release view "$TAG" >/dev/null 2>&1 && break
+          echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
+          sleep 5
+        done
+        gh release view "$TAG" >/dev/null
+        read -r -a files <<<"$FILES"
+        [ "${#files[@]}" -gt 0 ] || { echo "::error::release-upload: no files given"; exit 1; }
+        for f in "${files[@]}"; do
+          [ -s "$f" ] || { echo "::error::release-upload: missing or empty $f"; exit 1; }
+        done
+        for attempt in $(seq 1 "$ATTEMPTS"); do
+          if gh release upload "$TAG" "${files[@]}" --clobber; then
+            exit 0
+          fi
+          ok=1
+          for f in "${files[@]}"; do
+            name="$(basename "$f")"
+            want="$(wc -c <"$f" | tr -d '[:space:]')"
+            got="$(gh release view "$TAG" --json assets \
+              --jq ".assets[] | select(.name == \"${name}\" and .state == \"uploaded\") | .size" || true)"
+            if [ "$got" = "$want" ]; then
+              echo "release-upload: ${name} already published with matching size (${want} bytes)"
+            else
+              ok=0
+              echo "release-upload: ${name} remote size '${got}' != local ${want}; deleting before retry"
+              gh release delete-asset "$TAG" "$name" --yes >/dev/null 2>&1 || true
+            fi
+          done
+          if [ "$ok" -eq 1 ]; then
+            exit 0
+          fi
+          echo "release-upload: attempt ${attempt}/${ATTEMPTS} incomplete; retrying in 5s..."
+          sleep 5
+        done
+        echo "::error::release-upload: could not publish ${FILES} to ${TAG} after ${ATTEMPTS} attempts"
+        exit 1

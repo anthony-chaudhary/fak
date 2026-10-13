@@ -1877,6 +1877,11 @@
           "category": "false-positive",
           "reason": "Scanner artifact joining the %s formatting verb to full_attention_interval in a GGUF metadata refusal; no symbol named sfull_attention_interval or new attention primitive exists.",
           "token": "sfull_attention_interval"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local pointer identity set in cohort admission; tracks already-seen existing attention states to reject aliasing, without defining a new attention abstraction.",
+          "token": "seenAttention"
         }
       ],
       "exclude": [
@@ -1913,6 +1918,7 @@
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
         "qwenfullattentionlayers",
+        "seenAttention",
         "tattn",
         "v41NoteAttentionContraction"
       ],
