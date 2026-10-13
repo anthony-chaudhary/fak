@@ -1882,6 +1882,11 @@
           "category": "incidental",
           "reason": "Function-local pointer identity set in cohort admission; tracks already-seen existing attention states to reject aliasing, without defining a new attention abstraction.",
           "token": "seenAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local variable retaining the existing admitted attention owner; introduces no new type, capability or ownership domain.",
+          "token": "coldAttentionOwner"
         }
       ],
       "exclude": [
@@ -1909,6 +1914,7 @@
         "attn_q_full",
         "attn_q_normed",
         "attnkvanorm",
+        "coldAttentionOwner",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
         "linear_attn_out",
@@ -14908,6 +14914,11 @@
           "category": "incidental",
           "reason": "Private diagnostic formatting of a metadata or optional HF-config value in header mismatch reports; this is not model/token materialization or prompt rendering.",
           "token": "renderHF"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private v41HostReadbackImage method exposing the admitted float row or decoding legacy independent rows; no rendering or materialization service interface.",
+          "token": "materializeRows"
         }
       ],
       "id": "render-materialize",
@@ -14953,6 +14964,7 @@
         "incumbentRenderSpec",
         "incumbentRenderSummary",
         "indexrenderhits",
+        "materializeRows",
         "materializeSessionMoveCheckpoint",
         "materialized",
         "materializers",
@@ -16936,6 +16948,11 @@
           "category": "incidental",
           "reason": "Typed refusal within the existing grouped-sign metadata contract, not a new storage layout or reordering mechanism.",
           "token": "ErrPrismHadamardGDNLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private pure helper deciding whether a single host-readback row fits the typed allocation bounds; an implementation predicate, not a separate layout interface.",
+          "token": "v41TypedReadbackLayout"
         }
       ],
       "id": "layout",
@@ -16955,7 +16972,8 @@
         "imageLayoutVersion",
         "layouts",
         "usesmlamoelayout",
-        "v41DeferredLayout"
+        "v41DeferredLayout",
+        "v41TypedReadbackLayout"
       ],
       "known_tokens": [],
       "min_files": 2,

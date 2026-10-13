@@ -49,7 +49,8 @@
       "definition": "Owns full V4.1 BF16 sparse-attention output staging before inverse F32 tail rotary arithmetic and BF16 publication to grouped output projection.",
       "distinction": "Unlike v41AttentionQKRoPE, this owner operates on attention output after sparse attention and applies inverse rotation before output projection.",
       "distinct_from": [
-        "v41attentionqkrope"
+        "v41attentionqkrope",
+        "v41coldattentionresidentowner"
       ],
       "aliases": [],
       "grounding": "v41AttentionOutputForProjection",
@@ -172,6 +173,105 @@
       ],
       "aliases": [],
       "grounding": "v41BatchIndexerGuard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41coldattentionresidentowner",
+      "canonical": "v41ColdAttentionResidentOwner",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Pure cold-layer admission that returns the seeded attention state only when existing mirror windows fit and repeated-window upload savings cover the compressed bank; it performs no backend operation.",
+      "distinction": "This decides upload-volume eligibility for a whole cold layer; v41AttentionOutputForProjection produces the attention result for projection. Eligibility is not a hardware speed guarantee and does not replace callback capability checks.",
+      "distinct_from": [
+        "v41attentionoutputforprojection",
+        "v41coldattentionresidentview",
+        "v41coldplainattentioninput"
+      ],
+      "aliases": [],
+      "grounding": "v41ColdAttentionResidentOwner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41coldattentionresidentview",
+      "canonical": "v41ColdAttentionResidentView",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Constructs a borrowed resident KV view using a successfully seeded layer attention state, logical position, window row count and compressed row count; original row streams remain authoritative.",
+      "distinction": "This describes the already admitted state for one query without owning a temporary identity or validating row data; v41ColdAttentionResidentOwner performs the separate whole-layer upload-volume admission.",
+      "distinct_from": [
+        "v41coldattentionresidentowner"
+      ],
+      "aliases": [],
+      "grounding": "v41ColdAttentionResidentView",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41coldplainattentioninput",
+      "canonical": "v41ColdPlainAttentionInput",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Chooses a bounded borrowed contiguous KV-row window for valid admitted cold plain attention, otherwise preserves original flat packing.",
+      "distinction": "Host materialization choice rather than whole-layer resident-owner upload admission.",
+      "distinct_from": [
+        "v41coldattentionresidentowner",
+        "v41coldplainattentioncanborrow"
+      ],
+      "aliases": [],
+      "grounding": "v41ColdPlainAttentionInput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41coldplainattentioncanborrow",
+      "canonical": "v41ColdPlainAttentionCanBorrow",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Pure shape, finite-value and index predicate for safe contiguous cold plain KV-row borrowing.",
+      "distinction": "Eligibility predicate rather than packing or dispatch; questionable inputs retain original flat validation precedence.",
+      "distinct_from": [
+        "v41coldplainattentioninput",
+        "v41coldplainattentionsink"
+      ],
+      "aliases": [],
+      "grounding": "v41ColdPlainAttentionCanBorrow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41coldplainattentionsink",
+      "canonical": "v41ColdPlainAttentionSink",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Synchronous cold plain attention dispatch through borrowed rows with original flat reconstruction when dispatch guards change.",
+      "distinction": "Timed dispatch and guard recheck rather than pre-dispatch borrowing predicate.",
+      "distinct_from": [
+        "v41coldplainattentioncanborrow"
+      ],
+      "aliases": [],
+      "grounding": "v41ColdPlainAttentionSink",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

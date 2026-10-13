@@ -177,5 +177,288 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "inkerneldecodev41lanes",
+      "canonical": "inKernelDecodeV41Lanes",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Concrete adapter to result-bearing Model.StepV41Batch with untouched unselected scalar fallback and owner-busy wait.",
+      "distinction": "Executes prepared-lane decoding rather than reporting coordinator cleanup; does not activate serving.",
+      "distinct_from": [
+        "coverage-9678-gateway-engine-inkernelbatchreceipt",
+        "inkernelv41decodereceipt",
+        "inkernelv41validateresult"
+      ],
+      "aliases": [],
+      "grounding": "inKernelDecodeV41Lanes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41decodereceipt",
+      "canonical": "inKernelV41DecodeReceipt",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Private driver aggregate of completed shared-head panels and rows returned by model operations.",
+      "distinction": "Completed-operation counts rather than the concrete decode adapter; no physical throughput claim.",
+      "distinct_from": [
+        "inkerneldecodev41lanes",
+        "inkernelv41decodeops",
+        "inkernelv41pending"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41DecodeReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41decodeops",
+      "canonical": "inKernelV41DecodeOps",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Private callbacks for batch attempt, acquiring scalar fallback and cancellation-aware busy wait.",
+      "distinction": "Operation bundle rather than completed-operation receipt or capability declaration.",
+      "distinct_from": [
+        "inkernelv41decodereceipt",
+        "inkerneldecodev41laneswithops"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41DecodeOps",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkerneldecodev41laneswithops",
+      "canonical": "inKernelDecodeV41LanesWithOps",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Stable-ID decode state machine retaining sampled token, emission and penalty/RNG state across busy retries and scattering outcomes without selected replay.",
+      "distinction": "Execution algorithm rather than callback bundle.",
+      "distinct_from": [
+        "inkernelv41decodeops"
+      ],
+      "aliases": [],
+      "grounding": "inKernelDecodeV41LanesWithOps",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41pending",
+      "canonical": "inKernelV41Pending",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "One stable lane slot retains Session identity, chosen token and pending-forward state across retries and compaction.",
+      "distinction": "Uncommitted request progress rather than completed-operation aggregate.",
+      "distinct_from": [
+        "inkernelv41decodereceipt",
+        "inkernelv41lanecontext",
+        "inkernelcoalescekind",
+        "inkernelv41requeststate",
+        "inkernelv41lanecontext-cancellation"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41Pending",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41lanecontext",
+      "canonical": "inKernelV41LaneContext",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Selects a decode lane request context, falling back to driver context.",
+      "distinction": "Cancellation authority selection rather than retained token progress; creates no context and does not cancel healthy peers.",
+      "distinct_from": [
+        "inkernelv41pending",
+        "inkernelv41lanecontext-cancellation"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41LaneContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41validateresult",
+      "canonical": "inKernelV41ValidateResult",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Post-operation check of unique exact lane-ID coverage and untouched unselected results before fallback.",
+      "distinction": "No-replay protocol validation rather than executing concrete model wiring.",
+      "distinct_from": [
+        "inkerneldecodev41lanes",
+        "inkernelv41applyrow"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41ValidateResult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41applyrow",
+      "canonical": "inKernelV41ApplyRow",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Applies one validated stable-ID outcome, updating history only on commit and preserving committed errors and actual forward kind.",
+      "distinction": "Commit-aware mutation rather than pre-scatter validation.",
+      "distinct_from": [
+        "inkernelv41validateresult"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41ApplyRow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelcoalescekind",
+      "canonical": "inKernelCoalesceKind",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Decode-algorithm discriminator and Qwen/V41 values separating unlike queued requests into contiguous FIFO cohorts.",
+      "distinction": "Queue grouping and Flash lane bounds rather than pending token progress or backend capability.",
+      "distinct_from": [
+        "inkernelv41pending",
+        "inkernelcoalesceqwen",
+        "inkernelcoalescev41"
+      ],
+      "aliases": [],
+      "grounding": "inKernelCoalesceKind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41requeststate",
+      "canonical": "inKernelV41RequestState",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Associates a request with its prepared decode lane and unknown panic published by closure completion.",
+      "distinction": "Prepared-request lifecycle rather than pending sampled-token state; creates no Session lock.",
+      "distinct_from": [
+        "inkernelv41pending",
+        "errinkernelv41cohortaborted"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41RequestState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "errinkernelv41cohortaborted",
+      "canonical": "errInKernelV41CohortAborted",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Terminal no-replay outcome for unfinished or unstarted requests in an aborted selected Flash cohort.",
+      "distinction": "Selected-cohort termination rather than retained request state or untouched fallback eligibility.",
+      "distinct_from": [
+        "inkernelv41requeststate"
+      ],
+      "aliases": [],
+      "grounding": "errInKernelV41CohortAborted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelcoalesceqwen",
+      "canonical": "Qwen coalesced decode kind",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Existing Qwen algorithm selector for contiguous queue grouping.",
+      "distinction": "Selects Qwen execution rather than the Flash four-lane grouping variant.",
+      "distinct_from": [
+        "inkernelcoalescekind",
+        "inkernelcoalescev41"
+      ],
+      "aliases": [],
+      "grounding": "inKernelCoalesceQwen",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelcoalescev41",
+      "canonical": "Flash coalesced decode kind",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Flash algorithm selector for bounded four-lane contiguous FIFO cohorts.",
+      "distinction": "Selects the Flash member of the decode-kind discriminator, distinct from Qwen; neither grouping value declares backend capability.",
+      "distinct_from": [
+        "inkernelcoalesceqwen",
+        "inkernelcoalescekind"
+      ],
+      "aliases": [],
+      "grounding": "inKernelCoalesceV41",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelv41lanecontext-cancellation",
+      "canonical": "Flash lane-local cancellation context",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Selects each decode lane request cancellation/deadline context with driver-context fallback.",
+      "distinction": "Context-family view of the same helper: cancellation authority rather than gateway decode flow or retained token progress; creates no new context.",
+      "distinct_from": [
+        "inkernelv41pending",
+        "inkernelv41lanecontext"
+      ],
+      "aliases": [],
+      "grounding": "inKernelV41LaneContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

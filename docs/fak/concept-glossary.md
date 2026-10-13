@@ -1035,3 +1035,150 @@ Private Session store-aware KV-span eviction body used inside an already-owned b
 Cohort fault-boundary adapter that invokes the serial selected-indexer panic guard for only the recorded failing Session and recovers the resulting primary value after cohort rollback.
 
 **Distinct from:** This preserves selected-indexer failure and teardown semantics for one faulting lane without retiring surviving peers. evictKVOwned is an ordinary store-aware KV span mutation inside an owned operation, not a selected-failure panic or Session retirement boundary.
+
+
+### CachePolicyStream (offline expert access replay input)
+
+A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay.
+
+**Distinct from:** Offline replay input data; it neither selects serving eviction policy nor owns a runtime cache or route-trace emitter.
+
+
+### v41ColdAttentionResidentOwner
+
+Pure cold-layer admission that returns the seeded attention state only when existing mirror windows fit and repeated-window upload savings cover the compressed bank; it performs no backend operation.
+
+**Distinct from:** This decides upload-volume eligibility for a whole cold layer; v41AttentionOutputForProjection produces the attention result for projection. Eligibility is not a hardware speed guarantee and does not replace callback capability checks.
+
+
+### v41ColdAttentionResidentView
+
+Constructs a borrowed resident KV view using a successfully seeded layer attention state, logical position, window row count and compressed row count; original row streams remain authoritative.
+
+**Distinct from:** This describes the already admitted state for one query without owning a temporary identity or validating row data; v41ColdAttentionResidentOwner performs the separate whole-layer upload-volume admission.
+
+
+### inKernelDecodeV41Lanes
+
+Concrete adapter to result-bearing Model.StepV41Batch with untouched unselected scalar fallback and owner-busy wait.
+
+**Distinct from:** Executes prepared-lane decoding rather than reporting coordinator cleanup; does not activate serving.
+
+
+### inKernelV41DecodeReceipt
+
+Private driver aggregate of completed shared-head panels and rows returned by model operations.
+
+**Distinct from:** Completed-operation counts rather than the concrete decode adapter; no physical throughput claim.
+
+
+### inKernelV41DecodeOps
+
+Private callbacks for batch attempt, acquiring scalar fallback and cancellation-aware busy wait.
+
+**Distinct from:** Operation bundle rather than completed-operation receipt or capability declaration.
+
+
+### inKernelDecodeV41LanesWithOps
+
+Stable-ID decode state machine retaining sampled token, emission and penalty/RNG state across busy retries and scattering outcomes without selected replay.
+
+**Distinct from:** Execution algorithm rather than callback bundle.
+
+
+### inKernelV41Pending
+
+One stable lane slot retains Session identity, chosen token and pending-forward state across retries and compaction.
+
+**Distinct from:** Uncommitted request progress rather than completed-operation aggregate.
+
+
+### inKernelV41LaneContext
+
+Selects a decode lane request context, falling back to driver context.
+
+**Distinct from:** Cancellation authority selection rather than retained token progress; creates no context and does not cancel healthy peers.
+
+
+### inKernelV41ValidateResult
+
+Post-operation check of unique exact lane-ID coverage and untouched unselected results before fallback.
+
+**Distinct from:** No-replay protocol validation rather than executing concrete model wiring.
+
+
+### inKernelV41ApplyRow
+
+Applies one validated stable-ID outcome, updating history only on commit and preserving committed errors and actual forward kind.
+
+**Distinct from:** Commit-aware mutation rather than pre-scatter validation.
+
+
+### inKernelCoalesceKind
+
+Decode-algorithm discriminator and Qwen/V41 values separating unlike queued requests into contiguous FIFO cohorts.
+
+**Distinct from:** Queue grouping and Flash lane bounds rather than pending token progress or backend capability.
+
+
+### inKernelV41RequestState
+
+Associates a request with its prepared decode lane and unknown panic published by closure completion.
+
+**Distinct from:** Prepared-request lifecycle rather than pending sampled-token state; creates no Session lock.
+
+
+### errInKernelV41CohortAborted
+
+Terminal no-replay outcome for unfinished or unstarted requests in an aborted selected Flash cohort.
+
+**Distinct from:** Selected-cohort termination rather than retained request state or untouched fallback eligibility.
+
+
+### v41ColdPlainAttentionInput
+
+Chooses a bounded borrowed contiguous KV-row window for valid admitted cold plain attention, otherwise preserves original flat packing.
+
+**Distinct from:** Host materialization choice rather than whole-layer resident-owner upload admission.
+
+
+### v41ColdPlainAttentionCanBorrow
+
+Pure shape, finite-value and index predicate for safe contiguous cold plain KV-row borrowing.
+
+**Distinct from:** Eligibility predicate rather than packing or dispatch; questionable inputs retain original flat validation precedence.
+
+
+### v41ColdPlainAttentionSink
+
+Synchronous cold plain attention dispatch through borrowed rows with original flat reconstruction when dispatch guards change.
+
+**Distinct from:** Timed dispatch and guard recheck rather than pre-dispatch borrowing predicate.
+
+
+### Qwen coalesced decode kind
+
+Existing Qwen algorithm selector for contiguous queue grouping.
+
+**Distinct from:** Selects Qwen execution rather than the Flash four-lane grouping variant.
+
+
+### Flash coalesced decode kind
+
+Flash algorithm selector for bounded four-lane contiguous FIFO cohorts.
+
+**Distinct from:** Selects the Flash member of the decode-kind discriminator, distinct from Qwen; neither grouping value declares backend capability.
+
+
+### Flash lane-local cancellation context
+
+Selects each decode lane request cancellation/deadline context with driver-context fallback.
+
+**Distinct from:** Context-family view of the same helper: cancellation authority rather than gateway decode flow or retained token progress; creates no new context.
+
+
+### AdmitCachedBudget
+
+The deadline admission estimator entrypoint that preserves caller-declared budget separately from remaining budget and returns bounded numeric input evidence with the same feasibility verdict and retry policy as AdmitCached.
+
+**Distinct from:** AdmitCached accepts only the remaining budget; AdmitCachedBudget also projects the declared budget and mutex snapshot. The supplied cache count is caller-supplied resident-prefix credit; callers validate route proof separately from prefix identity or cache allocation.

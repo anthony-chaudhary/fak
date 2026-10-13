@@ -8,7 +8,6 @@ package compute
 import "C"
 
 import (
-	"encoding/binary"
 	"math"
 	"unsafe"
 )
@@ -179,36 +178,43 @@ func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Ten
 		}
 		srcs, sizes = append(srcs, b), append(sizes, n*4)
 	}
-	image, readErr := vulkanV41ReadMany("V41ReadDeferred", srcs, sizes)
+	image, readErr := vulkanV41ReadImage("V41ReadDeferred", srcs, sizes, len(rows))
 	if readErr != nil {
 		return nil, nil, readErr
 	}
 	verdicts = make([]error, 0, verdictCount)
 	for i, st := range statuses {
 		for r := 0; r < V41DeferredRecords(st); r++ {
-			verdicts = append(verdicts, v41DeferredVerdict("vulkan", st, image[i][16*r:16*r+16]))
+			verdicts = append(verdicts, v41DeferredVerdict("vulkan", st, image.region(i, sizes[i])[16*r:16*r+16]))
 		}
 	}
-	values = make([][]float32, len(rows))
-	for i := range rows {
-		raw := image[len(statuses)+i]
-		row := make([]float32, len(raw)/4)
-		for j := range row {
-			row[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[4*j:]))
-		}
-		values[i] = row
-	}
+	values = image.materializeRows(sizes, len(statuses))
 	return verdicts, values, nil
 }
 
 // vulkanV41ReadMany reads each region behind one checked host fence and
 // returns one owned slice per region. Caller holds vulkanMu.
 func vulkanV41ReadMany(site string, srcs []*vulkanBuf, sizes []int) ([][]byte, error) {
-	if len(srcs) == 0 || len(srcs) != len(sizes) || len(srcs) > math.MaxInt32 {
-		return nil, &BackendError{Backend: "vulkan", Site: site, Class: VulkanClassInvalidGeometry, Err: ErrVulkanInvalidGeometry, Message: "readback needs one size per region"}
+	image, err := vulkanV41ReadImage(site, srcs, sizes, 0)
+	if err != nil {
+		return nil, err
 	}
-	offsets, total := v41DeferredLayout(sizes)
-	host := make([]byte, total)
+	out := make([][]byte, len(srcs))
+	for i := range srcs {
+		out[i] = image.region(i, sizes[i])
+	}
+	return out, nil
+}
+
+// The same native transfer writes an owned image. Only the deferred one-row
+// consumer can request the bounded typed arena; other readers keep byte storage.
+func vulkanV41ReadImage(site string, srcs []*vulkanBuf, sizes []int, rows int) (v41HostReadbackImage, error) {
+	if len(srcs) == 0 || len(srcs) != len(sizes) || len(srcs) > math.MaxInt32 {
+		return v41HostReadbackImage{}, &BackendError{Backend: "vulkan", Site: site, Class: VulkanClassInvalidGeometry, Err: ErrVulkanInvalidGeometry, Message: "readback needs one size per region"}
+	}
+	image := newV41HostReadbackImage(sizes, rows, v41NativeLittleEndian())
+	host, offsets := image.host, image.offsets
+	total := len(host)
 	ptrs := make([]unsafe.Pointer, len(srcs))
 	cOffsets := make([]C.size_t, len(srcs))
 	cSizes := make([]C.size_t, len(srcs))
@@ -219,13 +225,9 @@ func vulkanV41ReadMany(site string, srcs []*vulkanBuf, sizes []int) ([][]byte, e
 		(*unsafe.Pointer)(unsafe.Pointer(&ptrs[0])), &cOffsets[0], &cSizes[0])); status != 0 {
 		readErr := vulkanReadError(status)
 		readErr.Site = site + " readback"
-		return nil, readErr
+		return v41HostReadbackImage{}, readErr
 	}
-	out := make([][]byte, len(srcs))
-	for i := range srcs {
-		out[i] = host[offsets[i] : offsets[i]+sizes[i] : offsets[i]+sizes[i]]
-	}
-	return out, nil
+	return image, nil
 }
 
 // freeDeferredLocked releases native storage owned by a deferred call. Like

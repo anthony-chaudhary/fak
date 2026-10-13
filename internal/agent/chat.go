@@ -503,6 +503,7 @@ const (
 	NativeDecodeTokenIDsEngine   = "fak-native"
 	NativeForwardSessionStep     = "session_step"
 	NativeForwardStepBatchActive = "step_batch_active"
+	NativeForwardV41BatchStep    = "v41_batch_step"
 )
 
 // NativeDecodeTrace is the versioned, engine-authored timeline of generated-token
@@ -522,7 +523,7 @@ type NativeDecodeTraceEvent struct {
 }
 
 // NativeForwardTiming binds the direct model-forward wall time to the committed
-// token which caused it. StepBatchActive duration is one shared batch wall time;
+// token which caused it. A batch duration is one shared batch wall time;
 // ActiveLanes records how many lanes shared that call.
 type NativeForwardTiming struct {
 	Kind        string `json:"kind"`

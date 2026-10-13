@@ -2701,7 +2701,8 @@
       "definition": "`inkernelbatchreceipt` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
       "distinction": "Use `inkernelbatchreceipt` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
       "distinct_from": [
-        "x2-gateway-engine-enginecallsavoided"
+        "x2-gateway-engine-enginecallsavoided",
+        "inkerneldecodev41lanes"
       ],
       "aliases": [],
       "grounding": "inkernelbatchreceipt",

@@ -13,6 +13,13 @@ import (
 
 const inKernelDecodeCohortMax = 8
 
+type inKernelCoalesceKind uint8
+
+const (
+	inKernelCoalesceQwen inKernelCoalesceKind = iota
+	inKernelCoalesceV41
+)
+
 var qwenSharedReceiptProbe struct {
 	sync.Mutex
 	fn func(*model.BatchSession, []int, []bool) ([][]float32, int, int64, bool)
@@ -110,6 +117,7 @@ type InKernelBatchReceipt struct {
 	CohortID      uint64 `json:"cohort_id"`
 	CohortSize    int    `json:"cohort_size"`
 	SharedPanels  int    `json:"shared_panels"`
+	SharedRows    int    `json:"shared_rows,omitempty"`
 	SharedMACs    int64  `json:"shared_macs"`
 	SessionCloses uint32 `json:"session_closes"`
 }
@@ -119,6 +127,7 @@ type inKernelCoalesceResult struct {
 }
 
 type inKernelCoalesceRequest struct {
+	kind         inKernelCoalesceKind
 	ctx          context.Context
 	run          func(context.Context) (inKernelGenerateResult, error)
 	prepared     chan *decodeLane
@@ -140,7 +149,12 @@ func (p *InKernelPlanner) coalescesQwenDecode() bool {
 }
 
 func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(context.Context) (inKernelGenerateResult, error)) (inKernelGenerateResult, error) {
+	return p.runCoalescedGenerateKind(ctx, run, inKernelCoalesceQwen)
+}
+
+func (p *InKernelPlanner) runCoalescedGenerateKind(ctx context.Context, run func(context.Context) (inKernelGenerateResult, error), kind inKernelCoalesceKind) (inKernelGenerateResult, error) {
 	req := &inKernelCoalesceRequest{
+		kind:         kind,
 		ctx:          ctx,
 		run:          run,
 		prepared:     make(chan *decodeLane, 1),
@@ -238,8 +252,19 @@ func (p *InKernelPlanner) drainCoalescedGenerates() {
 		p.coalesceMu.Unlock()
 		return
 	}
-	if n > inKernelDecodeCohortMax {
-		n = inKernelDecodeCohortMax
+	kind := p.coalesceReady[0].kind
+	limit := inKernelDecodeCohortMax
+	if kind == inKernelCoalesceV41 {
+		limit = 4
+	}
+	if n > limit {
+		n = limit
+	}
+	for i := 1; i < n; i++ {
+		if p.coalesceReady[i].kind != kind {
+			n = i // Never skip a different kind or reorder its FIFO position.
+			break
+		}
 	}
 	cohort := append([]*inKernelCoalesceRequest(nil), p.coalesceReady[:n]...)
 	p.coalesceReady = p.coalesceReady[n:]
@@ -248,8 +273,18 @@ func (p *InKernelPlanner) drainCoalescedGenerates() {
 	for _, req := range cohort {
 		enginestep.Default.ObservePhase(enginestep.PhaseCohortWait, time.Since(req.enqueued))
 	}
+	if kind == inKernelCoalesceV41 {
+		// The Flash runner joins every selected request before an unknown
+		// panic can escape. Hand off queued work even on that fatal path.
+		defer p.finishCoalescedCohort()
+		p.runV41DecodeCohort(cohort, inKernelDecodeV41Lanes)
+		return
+	}
 	p.runDecodeCohort(cohort)
+	p.finishCoalescedCohort()
+}
 
+func (p *InKernelPlanner) finishCoalescedCohort() {
 	p.coalesceMu.Lock()
 	if len(p.coalesceReady) == 0 {
 		p.coalesceRunning = false

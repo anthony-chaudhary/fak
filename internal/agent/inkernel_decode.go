@@ -1031,7 +1031,7 @@ func (m *nativeInferenceMeasurement) recordForwardTiming(tokenIndex int, kind st
 	if tokenIndex <= 0 || tokenIndex > len(m.traceEvents) || m.traceEvents[tokenIndex-1].TokenIndex != tokenIndex {
 		return fmt.Errorf("native decode forward token index %d has no committed trace event", tokenIndex)
 	}
-	if activeLanes <= 0 || (kind != NativeForwardSessionStep && kind != NativeForwardStepBatchActive) {
+	if activeLanes <= 0 || (kind != NativeForwardSessionStep && kind != NativeForwardStepBatchActive && kind != NativeForwardV41BatchStep) {
 		return fmt.Errorf("native decode forward token %d has invalid kind/active lanes %q/%d", tokenIndex, kind, activeLanes)
 	}
 	event := &m.traceEvents[tokenIndex-1]

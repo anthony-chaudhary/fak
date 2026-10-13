@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **647** (clarity 0 + coverage 647) |
-| **Crystal-clear concepts (and climbing)** | **1205** crystal of 2995 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3091 / 3738** (82.7% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **650** (clarity 0 + coverage 650) |
+| **Crystal-clear concepts (and climbing)** | **1226** crystal of 3016 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3109 / 3759** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 225 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **86** of 4243 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **87** of 4266 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2995 concepts - score 88.8/100 (grade B) - disambiguation-debt 647
+concept-disambiguation chart - 3016 concepts - score 88.8/100 (grade B) - disambiguation-debt 650
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1205
+  * crystal       ###################......... 1226
   o defined       ############################ 1790
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,14 +39,14 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (120 concept(s); 24 crystal)
-  cache            ****************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (293 concept(s); 112 crystal)
-  context-ctx      ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 84 crystal)
+  attention        *****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 29 crystal)
+  cache            ******************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (295 concept(s); 114 crystal)
+  context-ctx      *************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (244 concept(s); 85 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
-  gateway-engine   *********************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (179 concept(s); 57 crystal)
+  gateway-engine   **********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 70 crystal)
   guard-gate       ********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (454 concept(s); 212 crystal)
   layout           **********ooooooooo (19 concept(s); 10 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
@@ -63,14 +63,14 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   plan             #######################..... 470/574
-  session-runtime  #######################..... 288/357
-  cache            #######################..... 335/403
-  gateway-engine   #######################..... 226/281
+  session-runtime  #######################..... 288/358
+  cache            #######################..... 337/405
+  gateway-engine   #######################..... 237/292
   guard-gate       ##########################.. 514/561
-  context-ctx      ########################.... 263/307
-  attention        ####################........ 115/158
+  attention        ####################........ 120/165
+  context-ctx      ########################.... 264/308
   pool             ##############.............. 41/83
-  policy-capability ########################.... 224/265
+  policy-capability ########################.... 225/266
   support-maturity ###################......... 82/119
   render-materialize ########################.... 217/251
   witness-proof    ########################.... 173/202
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3091/3738 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.7%  (3109/3759 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 225
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 225/225
 
-name index: 4243 lookup name(s) -> 2995 concept(s), 86 ambiguous
+name index: 4266 lookup name(s) -> 3016 concept(s), 87 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **225 / 225** (225 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2194 / 5412 |
+| Boundaries drawn (mutual / total) | 2240 / 5458 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4243 over 2995 concepts |
-| Lookup names landing on several concepts | 86 |
+| Lookup names indexed | 4266 over 3016 concepts |
+| Lookup names landing on several concepts | 87 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2995 |
+| Concepts carrying a contrast set | 3016 |
 
 ## The concepts (best verdict first)
 
@@ -159,6 +159,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | attention | **attnPrefillDispatch** - The Session-level prefill attention route chooser: on a Metal prefill path it runs metalgemm.PrefillAttention and otherwise, or on any case the device kernel cannot reproduce exactly (observer, soft-cap, unsupported geometry, tiny panel, device failure), runs the host attnPrefillInto. |
 | * | crystal | symbol | attention | **v41AttentionQKRoPE** - Owns BF16 query and key-value publication before and after the full V4.1 forward tail rotary operation, whose arithmetic remains F32. |
 | * | crystal | symbol | attention | **v41AttentionOutputForProjection** - Owns full V4.1 BF16 sparse-attention output staging before inverse F32 tail rotary arithmetic and BF16 publication to grouped output projection. |
+| * | crystal | symbol | attention | **v41ColdAttentionResidentOwner** - Pure cold-layer admission that returns the seeded attention state only when existing mirror windows fit and repeated-window upload savings cover the compressed bank; it performs no backend operation. |
+| * | crystal | symbol | attention | **v41ColdAttentionResidentView** - Constructs a borrowed resident KV view using a successfully seeded layer attention state, logical position, window row count and compressed row count; original row streams remain authoritative. |
+| * | crystal | symbol | attention | **v41ColdPlainAttentionInput** - Chooses a bounded borrowed contiguous KV-row window for valid admitted cold plain attention, otherwise preserves original flat packing. |
+| * | crystal | symbol | attention | **v41ColdPlainAttentionCanBorrow** - Pure shape, finite-value and index predicate for safe contiguous cold plain KV-row borrowing. |
+| * | crystal | symbol | attention | **v41ColdPlainAttentionSink** - Synchronous cold plain attention dispatch through borrowed rows with original flat reconstruction when dispatch guards change. |
 | * | crystal | symbol | attention | **V41AttentionRoleReader (V4.1 shared-source consumer role)** - The V4.1 decoder role assigned to a layer that consumes the nearest preceding declared KV source's published compressed rows. Its resolved plan also identifies the index source whose published selection it consumes unless the layer owns that index selection. A ratio-greater-than-one reader still advances its own compressor and private history while contracting the resolved shared KV stream. |
 | * | crystal | symbol | cache | **PromptCacheKey** - The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186). |
 | * | crystal | symbol | cache | **SilentCacheInvalidation** - The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent). |
@@ -197,6 +202,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **GoCacheReport** - GoCacheReport is the tree-doctor report for one Go build-cache lifecycle inspection, including observed bytes, reclaimable bytes, completeness, and retained-entry reasons. |
 | * | crystal | symbol | cache | **GoCacheRootFromEnv** - GoCacheRootFromEnv resolves the Go build-cache root from the process environment for reporting and lifecycle operations. |
 | * | crystal | symbol | cache | **SweepGoCache** - SweepGoCache inventories Go build-cache entries and, only when explicitly applied, removes eligible old entries while returning a GoCacheReport. |
+| * | crystal | symbol | cache | **CachePolicyStream (offline expert access replay input)** - A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay. |
 | * | crystal | symbol | cache | **sharedCache (requested worker Go build-cache path)** - sharedCache is the requested Go build-cache path read by internal/workerworktree.WorktreeEnv from an explicit caller-map FAK_SHARED_GOCACHE value, otherwise the process environment. An explicit empty value suppresses ambient opt-in. After trimming, an absolute path without NUL selects GOCACHE; invalid or disabled input retains the worktree-local default. |
 | * | crystal | symbol | cache | **SharedGoCacheEnv (Go constant naming worker shared-cache opt-in)** - SharedGoCacheEnv is the exported workerworktree Go constant whose value is FAK_SHARED_GOCACHE. Callers use it as the explicit WorktreeEnv map key for a requested shared Go build-cache path; it names the control rather than storing the selected directory. |
 | * | crystal | symbol | cache | **FAK_SHARED_GOCACHE (worker shared-cache opt-in environment key)** - FAK_SHARED_GOCACHE is the environment-key spelling of the worker shared Go build-cache opt-in, also exposed to Go callers as SharedGoCacheEnv. WorktreeEnv reads an explicit caller-map value before the ambient environment; an explicit empty value disables ambient opt-in, and only a trimmed absolute non-NUL path selects the child GOCACHE. |
@@ -263,6 +269,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | metric | cache | **fak_gateway_inference_cached_prompt_hit_ratio (provider-cache turn ratio)** - fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn. |
 | * | crystal | symbol | cache | **KVCacheShape** - The model.Config method that reads a loaded model header and returns the kvbudget.Shape sizing that model's KV cache: MLA geometry (layers, KVLoraRank, QKRopeHeadDim) when the header declares a compressed latent, plus the DSA/NSA indexer key over an upper bound of NumLayers when it declares an indexer, and otherwise MHA/GQA geometry (NumKVHeads, HeadDim, VHeadDim). It replaces kvbudget's hardcoded GLM52DSA estimate with the served model's own declared widths (#5242). |
 | * | crystal | doc-term | cache | **kv_cache_calculator (ktransformers KV sizing reference)** - ktransformers' external KV-sizing utility python/cli/utils/kv_cache_calculator.py, studied in docs/notes/CONCEPT-STUDY-KTRANSFORMERS-2026-07-18.md, whose MLA / NSA-indexer / MHA branch over a loaded ModelConfig is the named prior art fak ports into AttnKind and Config.KVCacheShape (#5242). It appears in this repo only as a pinned citation coordinate in doc comments (kv_cache_calculator.py:LINES@0c2912a). |
+| * | crystal | symbol | cache | **AdmitCachedBudget** - The deadline admission estimator entrypoint that preserves caller-declared budget separately from remaining budget and returns bounded numeric input evidence with the same feasibility verdict and retry policy as AdmitCached. |
 | * | crystal | concept | cache | **managed cache** - managed cache (the FAMILY) is the set of features by which fak shapes the provider prompt cache on the client's behalf: the provider 5m prompt cache riding the client's own cache_control breakpoints, tool-prune, star-anchor breakpoint placement (--vcache-anchor), compaction shed (--compact-history-budget), defer-cold-tools, in-kernel KV-prefix reuse (when fak runs the model itself), the 1h-TTL upgrade, and volatile-head redaction, among others. On our own OAuth Claude Code seats the family is EFFECTIVE BY DEFAULT - carried by the 5m prompt cache (median cache-read share ~78-85% on substantial sessions) and tool-prune (~96-99% of sessions) - so caching IS working even though the --managed-cache posture resolves passive; the other members are inert-by-design or provider-blocked there. Audit: docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md. |
 | * | crystal | symbol | cache | **guardManagedCachePosture** - guardManagedCachePosture (cmd/fak/guard_managed_cache.go) is the resolved managed-cache decision for one guard session - mode, active, and the operator-facing reason - rendered once in the startup banner so the session's cache posture is explicit instead of inferred from flag defaults. |
 | * | crystal | config | cache | **Config.CacheTTL1H** - Config.CacheTTL1H (internal/gateway/gateway.go) is the gateway LEVER an active managed-cache posture arms: when true, each outbound Anthropic request's existing stable-head cache_control breakpoint is upgraded to the 1-hour tier (maybeUpgradeAnthropicCacheTTL1H -> agent.UpgradeAnthropicStableCacheTTL1h), so an idle gap past 5 minutes re-enters on a 0.1x cache read instead of re-writing the prefix. |
@@ -272,6 +279,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **FAK_RESUME_CACHE_AFFINITY** - Env-var name carrying the transcript-UUID-derived relaunch cache-affinity route onto a resumed claude --resume child, so the warm provider cache route survives the OS relaunch (#4140/#5189). |
 | * | crystal | symbol | cache | **MedianCacheReadFraction** - Median share of post-compaction window input tokens served as provider cache reads (cached_input_tokens / input_tokens), rolled up per regrowth cohort in the #4768 compact-audit aggregate. |
 | * | crystal | symbol | cache | **cachedImmutableWeight (borrowed device weight staging)** - Session.cachedImmutableWeight reuses a session handle or borrows a model-owned immutable device weight and stages it only on a miss. |
+| * | crystal | symbol | context-ctx | **Flash lane-local cancellation context** - Selects each decode lane request cancellation/deadline context with driver-context fallback. |
 | * | crystal | symbol | context-ctx | **requestCtx** - The cancellable context scoped to one agentbench inference request, used to stop that request without ending the enclosing benchmark run. |
 | * | crystal | symbol | context-ctx | **CompactionJoinKey** - The event-join coordinate a compaction fire shares with the provider usage record for the turn it rewrote, so the fire's provider-side re-warm counters can be PROVEN against one usage row instead of pasted in by caller convention. The zero value is UNSTAMPED: a sample assembled without turn context, which the join passes through verbatim rather than counting as a failed join. |
 | * | crystal | symbol | context-ctx | **CompactionJoinResult** - The outcome of attempting to bind one compaction fire to the provider usage record sharing its CompactionJoinKey: the joined sample plus whether the binding was PROVEN, left unstamped, or withdrawn because no single usage row matched. It reports the provenance of the provider counters, so an unproven join withdraws them rather than letting an unmatched number stand as evidence. |
@@ -426,6 +434,19 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | evict | **evictKVOwned** - Private Session store-aware KV-span eviction body used inside an already-owned backend operation; coordinates host or HAL eviction and token-lineage indices without reacquiring the recording-domain mutex. |
 | * | crystal | symbol | evict | **INSUFFICIENT_NONEVICTING_HBM** - The #4801 typed refusal verdict returned when accelerator memory reachable WITHOUT evicting any peer workload is below the artifact size plus runtime headroom. |
 | * | crystal | doc-term | evict | **non-evicting (placement constraint)** - The #4801 placement constraint that accelerator capacity may only be counted when it is reachable WITHOUT displacing any peer workload, making eviction unavailable as a way to close a shortfall. |
+| * | crystal | symbol | gateway-engine | **inKernelDecodeV41Lanes** - Concrete adapter to result-bearing Model.StepV41Batch with untouched unselected scalar fallback and owner-busy wait. |
+| * | crystal | symbol | gateway-engine | **inKernelV41DecodeReceipt** - Private driver aggregate of completed shared-head panels and rows returned by model operations. |
+| * | crystal | symbol | gateway-engine | **inKernelV41DecodeOps** - Private callbacks for batch attempt, acquiring scalar fallback and cancellation-aware busy wait. |
+| * | crystal | symbol | gateway-engine | **inKernelDecodeV41LanesWithOps** - Stable-ID decode state machine retaining sampled token, emission and penalty/RNG state across busy retries and scattering outcomes without selected replay. |
+| * | crystal | symbol | gateway-engine | **inKernelV41Pending** - One stable lane slot retains Session identity, chosen token and pending-forward state across retries and compaction. |
+| * | crystal | symbol | gateway-engine | **inKernelV41LaneContext** - Selects a decode lane request context, falling back to driver context. |
+| * | crystal | symbol | gateway-engine | **inKernelV41ValidateResult** - Post-operation check of unique exact lane-ID coverage and untouched unselected results before fallback. |
+| * | crystal | symbol | gateway-engine | **inKernelV41ApplyRow** - Applies one validated stable-ID outcome, updating history only on commit and preserving committed errors and actual forward kind. |
+| * | crystal | symbol | gateway-engine | **inKernelCoalesceKind** - Decode-algorithm discriminator and Qwen/V41 values separating unlike queued requests into contiguous FIFO cohorts. |
+| * | crystal | symbol | gateway-engine | **inKernelV41RequestState** - Associates a request with its prepared decode lane and unknown panic published by closure completion. |
+| * | crystal | symbol | gateway-engine | **errInKernelV41CohortAborted** - Terminal no-replay outcome for unfinished or unstarted requests in an aborted selected Flash cohort. |
+| * | crystal | symbol | gateway-engine | **Qwen coalesced decode kind** - Existing Qwen algorithm selector for contiguous queue grouping. |
+| * | crystal | symbol | gateway-engine | **Flash coalesced decode kind** - Flash algorithm selector for bounded four-lane contiguous FIFO cohorts. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for busiestengine** - `BusiestEngine` is the engine fact symbol at `internal/amdgpu/governor.go:199`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for statusgatewaytimeout** - `StatusGatewayTimeout` is the HTTP status code symbol used across gateway error paths. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for fakinkernel** - FakInKernel is the gateway-engine symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
@@ -3275,8 +3296,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3218/5412 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2995 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3218/5458 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3016 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3285,7 +3306,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4243 lookup name(s) resolves - 86 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4266 lookup name(s) resolves - 87 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3293,14 +3314,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | plan | 470 | 574 | 104 |
-| session-runtime | 288 | 357 | 69 |
-| cache | 335 | 403 | 68 |
-| gateway-engine | 226 | 281 | 55 |
+| session-runtime | 288 | 358 | 70 |
+| cache | 337 | 405 | 68 |
+| gateway-engine | 237 | 292 | 55 |
 | guard-gate | 514 | 561 | 47 |
-| context-ctx | 263 | 307 | 44 |
-| attention | 115 | 158 | 43 |
+| attention | 120 | 165 | 45 |
+| context-ctx | 264 | 308 | 44 |
 | pool | 41 | 83 | 42 |
-| policy-capability | 224 | 265 | 41 |
+| policy-capability | 225 | 266 | 41 |
 | support-maturity | 82 | 119 | 37 |
 | render-materialize | 217 | 251 | 34 |
 | witness-proof | 173 | 202 | 29 |

@@ -560,6 +560,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 
+	// Keep the exact seeded owner that a successful forward commits for Step.
+	// Decline the whole cold layer before device effects if its window or bank
+	// would exceed the existing mirror's capacity or increase KV upload volume.
+	coldAttentionOwner := v41ColdAttentionResidentOwner(st.layerState(l), seq, cfg.windowForLayer(l), len(sharedKV), scratch.sharedAttention)
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
@@ -585,7 +589,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 				}
 			}
 			attentionOpened := m.v41NowNanos()
-			o, err := v41CombinedAttention(l, t, plan.kvGroupSize(cfg), nH, hd, qHeads[t], sink, window, sharedKV, ids, scale, scratch.sharedAttention)
+			o, err := v41CombinedAttentionResident(l, t, plan.kvGroupSize(cfg), nH, hd, qHeads[t], sink, window, sharedKV, ids, scale,
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttention)
 			m.v41NoteAttentionContraction(attentionOpened)
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
@@ -613,14 +618,13 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		keys := v41PlainWindowKeys(t, window)
 		idx := v41PlainWindowIndexList(keys)
 		rows := len(keys)
-		flatKV := make([]float32, 0, rows*hd)
-		for _, k := range keys {
-			flatKV = append(flatKV, kvRows[k]...)
-		}
-		attentionOpened := m.v41NowNanos()
-		o, err := v41SparseAttentionSinkWithDevice(l, qHeads[t], flatKV, sink, idx, V41SparseAttentionSinkOptions{
+		opt := V41SparseAttentionSinkOptions{
 			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
-		}, scratch.sharedAttention)
+		}
+		flatKV, borrowedWindow := v41ColdPlainAttentionInput(qHeads[t], sink, kvRows, keys, idx, opt, coldAttentionOwner, scratch.sharedAttention)
+		attentionOpened := m.v41NowNanos()
+		o, err := v41ColdPlainAttentionSink(l, qHeads[t], flatKV, sink, borrowedWindow, idx, opt,
+			v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), scratch.sharedAttention)
 		m.v41NoteAttentionContraction(attentionOpened)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)
