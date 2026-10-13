@@ -132,7 +132,6 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				releases[i]()
 			}
 		}()
-		s.prefetchV41RoutedPicks(names)
 		weights := make([]v41RoutedLayerWeights, len(picks))
 		admitted := func() bool {
 			if r := s.routedExpertRing(names[0][0]); r != nil {
