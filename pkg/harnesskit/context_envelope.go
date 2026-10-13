@@ -39,8 +39,10 @@ const (
 
 // Closed refusal sentinels for DeriveContextEnvelope.
 var (
-	ErrDerivedWindow  = errors.New("context envelope input is a derived window, not a served window")
-	ErrNoServedWindow = errors.New("context envelope input has no positive served window")
+	ErrDerivedWindow            = errors.New("context envelope input is a derived window, not a served window")
+	ErrNoServedWindow           = errors.New("context envelope input has no positive served window")
+	ErrFixedPromptExceedsWindow = errors.New("context envelope fixed prompt exceeds context window")
+	ErrOutputExceedsWindow      = errors.New("context envelope output budget exceeds context window")
 )
 
 // Closed reason tokens carried by a non-viable envelope.
@@ -81,10 +83,11 @@ const (
 type ContextEnvelopeInput struct {
 	ServedWindow int
 	Source       WindowSource
-	// FixedPromptTokens is the system prompt plus tool schemas; 0 means
-	// DefaultFixedPromptTokens.
+	// FixedPromptTokens is the system prompt plus tool schemas; nonpositive means
+	// DefaultFixedPromptTokens. A positive override must not exceed ContextWindow.
 	FixedPromptTokens int
-	// MaxOutputTokens overrides the derived output budget when positive.
+	// MaxOutputTokens overrides the derived output budget when positive and must
+	// not exceed ContextWindow.
 	MaxOutputTokens int
 	// MaxCompactTrigger, when positive and below the derived trigger, lowers the
 	// trigger to it by enlarging the reserve (see ColdAdmission.MaxTrigger).
@@ -177,12 +180,20 @@ func DeriveContextEnvelope(in ContextEnvelopeInput) (ContextEnvelope, error) {
 	if in.ServedWindow <= 0 {
 		return ContextEnvelope{}, ErrNoServedWindow
 	}
+	window := min(in.ServedWindow, QualityCapTokens)
+	// Bound explicit overrides before arithmetic, without rejecting defaults for
+	// small windows that legitimately produce a non-viable envelope.
+	if in.FixedPromptTokens > window {
+		return ContextEnvelope{}, ErrFixedPromptExceedsWindow
+	}
+	if in.MaxOutputTokens > window {
+		return ContextEnvelope{}, ErrOutputExceedsWindow
+	}
 	fixed := in.FixedPromptTokens
 	if fixed <= 0 {
 		fixed = DefaultFixedPromptTokens
 	}
 
-	window := min(in.ServedWindow, QualityCapTokens)
 	output := in.MaxOutputTokens
 	if output <= 0 {
 		output = min(max(window/8, MinOutputTokens), MaxOutputTokens)
