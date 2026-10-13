@@ -3,6 +3,7 @@ package ctxmmu
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -376,17 +377,28 @@ func (c *TieredPromptCache) PutWithID(id string, role PromptRole, tokens []int, 
 		role = RoleAssistant
 	}
 
+	tokenCount := len(tokens)
+	// Refuse individually impossible entries before eviction can disturb residents.
+	if c.config.MaxTokens > 0 && tokenCount > c.config.MaxTokens {
+		return nil, ErrCacheCapacityExceeded
+	}
+	sequenceLen, bytesPerTok := int64(tokenCount), int64(c.config.BytesPerTok)
+	if buffer != nil {
+		buffer.mu.RLock()
+		sequenceLen, bytesPerTok = int64(buffer.SequenceLen), int64(buffer.BytesPerTok)
+		buffer.mu.RUnlock()
+	}
+	if sequenceLen > 0 && bytesPerTok > math.MaxInt64/sequenceLen {
+		return nil, ErrCacheCapacityExceeded
+	}
+	byteSize := sequenceLen * bytesPerTok
+	if c.config.MaxBytes > 0 && byteSize > c.config.MaxBytes {
+		return nil, ErrCacheCapacityExceeded
+	}
+
 	if id == "" {
 		c.nextID++
 		id = fmt.Sprintf("prompt-%d", c.nextID)
-	}
-
-	tokenCount := len(tokens)
-	var byteSize int64
-	if buffer != nil {
-		byteSize = buffer.ByteSize()
-	} else {
-		byteSize = int64(tokenCount * c.config.BytesPerTok)
 	}
 
 	// Evict entries under pressure prior to insertion
