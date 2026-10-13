@@ -226,23 +226,15 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	return out
 }
 
-// refuseIntegratedVulkanUnifiedMemory closes the double-counting hole in the generic
-// host/device fit contract for an integrated Vulkan GPU. vulkanBackend's tier prefix comes from
-// the physical-device type returned by fvk_init, so this does not infer UMA from a product name.
-// The full simultaneous plan is compared with the backend's host-memory snapshot because Linux
-// MemAvailable is the allocatable physical pool shared by Vulkan device allocations, retained Go
-// weights, and loader staging on an APU. Discrete Vulkan devices keep independent pool checks.
+// refuseIntegratedVulkanUnifiedMemory applies the canonical integrated-memory capacity contract
+// after the generic per-scope checks. That contract distinguishes a split device/host aperture,
+// credits a reported dedicated VRAM carve-out, and still bounds the simultaneous physical pool.
 func refuseIntegratedVulkanUnifiedMemory(in PreflightInput, plan compute.MemoryPlan) error {
 	if !in.VulkanMixedQ4K || in.Backend == nil || in.Backend.Name() != "vulkan" ||
 		!strings.HasPrefix(in.Backend.Tier(), "integrated:") || plan.DeviceTotal() <= 0 || plan.HostTotal() <= 0 {
 		return nil
 	}
-	total, free, known := compute.HostMemoryInfo(in.Backend)
-	err := compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, total, free, known, in.Headroom)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("integrated Vulkan unified-memory admission: %w", err)
+	return RefuseUnifiedHostResidencyIfTooBig(plan, in.Backend, in.Headroom)
 }
 
 type preflightEstimate struct {

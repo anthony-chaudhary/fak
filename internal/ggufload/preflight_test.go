@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -10,6 +11,48 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// fak-test:runtime fast est=100ms lane=default
+func TestPreflightVulkanMixedQ4KQwen38Envelope(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "1")
+	gg, err := Read(bytes.NewReader(qwen38Q4KMHeaderRaw(t)))
+	if err != nil {
+		t.Fatalf("Read pinned Qwen3.8 header: %v", err)
+	}
+	ws, err := NewWeightSource(gg, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	if got := len(gg.Tensors); got != 866 {
+		t.Fatalf("pinned Qwen3.8 tensor inventory = %d, want 866", got)
+	}
+
+	backend := carveoutBackend{
+		dualCapacityBackend: dualCapacityBackend{
+			capBackend: capBackend{total: 64 << 30, free: 64 << 30, known: true},
+			hostTotal:  gibBytes(62.4), hostFree: gibBytes(49.88), hostKnown: true,
+			name: "vulkan", tier: "integrated:strix-halo",
+		},
+		carveout: 64 << 30, carveoutKnown: true,
+	}
+	ready := BuildModelPreflight(PreflightInput{
+		Path: "Qwen3.8-27B-Q4_K_M.gguf", Source: ws, Backend: backend,
+		Headroom: 0.15, VulkanMixedQ4K: true, SingleResidencyQ4K: true,
+	})
+	if ready.Verdict != PreflightReady || ready.FitState != FitOK {
+		t.Fatalf("corrected exact-header preflight = %+v, want READY/FIT_OK at the 42.40 GiB envelope", ready)
+	}
+
+	below := backend
+	below.hostFree = ready.EstHostResidentBytes + ready.EstLoadStagingBytes - 1
+	refused := BuildModelPreflight(PreflightInput{
+		Path: "Qwen3.8-27B-Q4_K_M.gguf", Source: ws, Backend: below,
+		Headroom: 0.15, VulkanMixedQ4K: true, SingleResidencyQ4K: true,
+	})
+	if refused.Verdict != PreflightRefuseTooBig || refused.FitState != FitTooBigState || refused.FitScope != string(compute.MemoryScopeHost) {
+		t.Fatalf("below-envelope exact-header preflight = %+v, want typed host REFUSE_TOO_BIG", refused)
+	}
+}
 
 type dualCapacityBackend struct {
 	capBackend
@@ -323,10 +366,6 @@ func TestPreflightVulkanMixedQ4KCountsUnifiedAPUMemoryOnce(t *testing.T) {
 		t.Fatalf("fixture did not isolate combined-pool refusal: device=%d host=%d total=%d avail=%d",
 			pf.EstDeviceResidentBytes, hostWant, pf.EstLoadBytes, pf.HostAvailBytes)
 	}
-	if !strings.Contains(pf.Reason, "integrated Vulkan unified-memory admission") {
-		t.Fatalf("refusal reason %q does not identify the shared physical pool", pf.Reason)
-	}
-
 	backend.tier = "discrete:test-gpu"
 	pf = BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true})
 	if pf.Verdict != PreflightReady || pf.FitState != FitOK {
