@@ -9,9 +9,10 @@ import (
 
 const v41ExpertCohortRows = 32
 
-// v41RoutedExpertCohort keeps the existing scalar kernels and the expert-major
-// row order. Only the status/output fence is shared. The ID panel's explicit
-// opt-in takes precedence; this path does not select an ID-table kernel.
+// v41RoutedExpertCohort keeps the expert-major row order and shares the final
+// status/output fence. An explicitly available Q2_K token tile may share only
+// gate/up; scalar activation/down retain their row order. The ID panel's
+// explicit opt-in takes precedence; this path selects no ID-table kernel.
 func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float32, weights []float32) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
 	if s == nil || s.M == nil || s.Backend == nil || s.v41RoutedExpertFunc() == nil ||
 		v41PrefillExpertPanelOptedIn() || len(inputs) < 2 || len(inputs) > v41ExpertCohortRows || len(weights) != len(inputs) {
@@ -227,38 +228,51 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 				*recordingFailed = true
 			}
 		}()
+		var tile *v41ExpertTile
+		if options == nil {
+			// Only this caller promises one common expert triple. Cross-lane
+			// prepared rows may carry distinct experts and stay unchanged.
+			tile = newV41ExpertTile(s.Backend, gateW, upW, count)
+		}
 		for current = 0; current < count; current++ {
 			*stage = "gate/up"
-			x := compute.Tensor{}
-			if options != nil {
-				x = uploads[options.inputKeys[current]]
+			down := downW
+			g, u, tiled, err := tile.project(s, inputs, current, H, I, own, valid)
+			if cause = err; cause != nil {
+				break
 			}
-			if x.Buf() == nil {
-				x = s.uploadHostF32([]int{H}, inputs[current], compute.MemoryActivation, "moe expert gate/up activation")
-				if !own(x) || !valid(x, H) {
+			if !tiled {
+				x := compute.Tensor{}
+				if options != nil {
+					x = uploads[options.inputKeys[current]]
+				}
+				if x.Buf() == nil {
+					x = s.uploadHostF32([]int{H}, inputs[current], compute.MemoryActivation, "moe expert gate/up activation")
+					if !own(x) || !valid(x, H) {
+						cause = errV41ExpertResult
+						break
+					}
+					if options != nil {
+						uploads[options.inputKeys[current]] = x
+					}
+				}
+				gate, up := gateW, upW
+				if options != nil {
+					gate, up, down = options.triples[current][0], options.triples[current][1], options.triples[current][2]
+					if options.note != nil {
+						options.note(current, true)
+					}
+				}
+				g = s.Backend.MatMul(gate, x)
+				if !own(g) || !valid(g, I) {
 					cause = errV41ExpertResult
 					break
 				}
-				if options != nil {
-					uploads[options.inputKeys[current]] = x
+				u = s.Backend.MatMul(up, x)
+				if !own(u) || !valid(u, I) {
+					cause = errV41ExpertResult
+					break
 				}
-			}
-			gate, up, down := gateW, upW, downW
-			if options != nil {
-				gate, up, down = options.triples[current][0], options.triples[current][1], options.triples[current][2]
-				if options.note != nil {
-					options.note(current, true)
-				}
-			}
-			g := s.Backend.MatMul(gate, x)
-			if !own(g) || !valid(g, I) {
-				cause = errV41ExpertResult
-				break
-			}
-			u := s.Backend.MatMul(up, x)
-			if !own(u) || !valid(u, I) {
-				cause = errV41ExpertResult
-				break
 			}
 			*stage = "activation"
 			a, st, err := deferred.V41RoutedSwiGLUDeferred(g, u, limit, weights[current])
