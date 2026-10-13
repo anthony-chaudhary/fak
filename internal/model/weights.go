@@ -550,6 +550,9 @@ func Load(dir string) (*Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("weights: %w", err)
 	}
+	if err := validateNativeManifest(man, raw); err != nil {
+		return nil, err
+	}
 	// export_oracle.py writes HF tensors verbatim, so this is an HF-layout checkpoint and
 	// takes the same rotary re-layout as the safetensors loaders (cohere_rotary.go).
 	return newHFCheckpointModel(cfg, man, raw)
@@ -621,6 +624,9 @@ func manifestTensor(manifest map[string]tensorMeta, raw []byte, owner, name stri
 	meta, ok := manifest[name]
 	if !ok {
 		panic("model: " + owner + "missing tensor " + name)
+	}
+	if meta.Nbytes == 0 {
+		return nil // an empty view may start at EOF, including an empty blob
 	}
 	n := meta.Nbytes / 4
 	return unsafe.Slice((*float32)(unsafe.Pointer(&raw[meta.Offset])), n)
