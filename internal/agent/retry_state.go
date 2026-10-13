@@ -2,10 +2,155 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 )
+
+// ErrSerialRetryBudgetExhausted is terminal across nested replica dispatchers,
+// even when the error also retains a retryable upstream status.
+var ErrSerialRetryBudgetExhausted = errors.New("planner: serial retry budget exhausted")
+
+type serialRetryBudgetKey struct{}
+type replicaFailoverKey struct{}
+
+type serialRetryBudget struct {
+	mu            sync.Mutex
+	remaining     int
+	deadline      time.Time
+	budgetOn      bool
+	lastStatusErr *UpstreamStatusError
+}
+
+// WithSerialRetryBudget shares the configured attempt count and deadline across
+// serial replica calls, including credential resends and buffered-to-stream
+// recovery. Nested dispatchers inherit the existing budget without replenishing
+// it. Callers without this opt-in retain their ordinary planner retry behavior.
+func WithSerialRetryBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Value(serialRetryBudgetKey{}).(*serialRetryBudget); ok {
+		return ctx, func() {}
+	}
+	count, deadline, budgetOn := retryBounds(time.Now())
+	budget := &serialRetryBudget{remaining: count, deadline: deadline, budgetOn: budgetOn}
+	ctx = context.WithValue(ctx, serialRetryBudgetKey{}, budget)
+	if budgetOn {
+		return context.WithDeadline(ctx, deadline)
+	}
+	return ctx, func() {}
+}
+
+// WithReplicaFailover lets an ordinary transient retry yield to an untried
+// replica. An outer dispatcher's remaining siblings still count when a nested
+// dispatcher reaches its own last replica.
+func WithReplicaFailover(ctx context.Context, available bool) context.Context {
+	if available {
+		return context.WithValue(ctx, replicaFailoverKey{}, true)
+	}
+	return ctx
+}
+
+// RecordSerialReplicaError publishes the planner's final truth before retargeting.
+// In particular, an accepted SSE response may fail outside its connection retry
+// loop: that read error supersedes an older status even without another wait.
+func RecordSerialReplicaError(ctx context.Context, err error) {
+	if budget, ok := ctx.Value(serialRetryBudgetKey{}).(*serialRetryBudget); ok {
+		var status *UpstreamStatusError
+		errors.As(err, &status)
+		budget.mu.Lock()
+		budget.lastStatusErr = status
+		budget.mu.Unlock()
+	}
+}
+
+// WithSerialStreamBoundary observes the existing held-activity callback without
+// replacing it. Reasoning/tool fragments can commit the gateway's role frame
+// before any content reaches the sink, making replica replay irreversible too.
+func WithSerialStreamBoundary(ctx context.Context, emitted func()) context.Context {
+	held := streamHeldActivity(ctx)
+	if held == nil {
+		return ctx
+	}
+	return WithStreamHeldActivity(ctx, func() {
+		emitted()
+		held()
+	})
+}
+
+func (b *serialRetryBudget) syncStatus(s *retryState) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.serialInitialized {
+		// Carry a prior replica's status into the ordinary retry-state policy:
+		// transport glitches retain it, whereas an HTTP 200 body-read failure
+		// explicitly clears it at the existing buffered/streaming call sites.
+		s.lastStatusErr = b.lastStatusErr
+		s.serialInitialized = true
+		return
+	}
+	b.lastStatusErr = s.lastStatusErr
+}
+
+func (b *serialRetryBudget) available() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.remaining > 0
+}
+
+func (b *serialRetryBudget) admit() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.remaining == 0 {
+		return false
+	}
+	b.remaining--
+	return true
+}
+
+func (s *retryState) serialExhausted() error {
+	if s.lastStatusErr != nil {
+		return errors.Join(ErrSerialRetryBudgetExhausted, s.lastStatusErr)
+	}
+	if s.lastErr != nil {
+		return errors.Join(ErrSerialRetryBudgetExhausted, s.lastErr)
+	}
+	return ErrSerialRetryBudgetExhausted
+}
+
+func (s *retryState) serialInterrupted(ctx context.Context, budget *serialRetryBudget) error {
+	err := ctx.Err()
+	if err == nil && budget.budgetOn && !time.Now().Before(budget.deadline) {
+		err = context.DeadlineExceeded
+	}
+	if err != nil && s.lastStatusErr != nil {
+		return &RetryInterruptedError{Cause: s.lastStatusErr, Err: err}
+	}
+	return err
+}
+
+// SerialReplicaFallbackAllowed limits new static failover to transient failures.
+// A terminal wait, request-shape refusal, or deterministic configuration error
+// must not become retryable merely because it wraps a 5xx or a network error.
+func SerialReplicaFallbackAllowed(err error) bool {
+	var ceiling *RetryCeilingError
+	var interrupted *RetryInterruptedError
+	if errors.Is(err, ErrSerialRetryBudgetExhausted) || errors.As(err, &ceiling) || errors.As(err, &interrupted) {
+		return false
+	}
+	var status *UpstreamStatusError
+	if errors.As(err, &status) {
+		return transientTargetStatus(status.Status) && status.RetryAfter == "" &&
+			classifyUpstream(status.Status, []byte(status.Body), nil) == RemedyBackoff
+	}
+	if deterministicTransportError(err) {
+		return false
+	}
+	var network net.Error
+	return errors.As(err, &network) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
 
 // retryState accumulates the between-attempt truth every planner retry loop tracks.
 // Complete, streamConnect, and the Anthropic streaming passthrough all run the same
@@ -16,21 +161,57 @@ import (
 // 429/503/529 that actually drove the failure: on exhaustion the loop surfaces the
 // real status (and Retry-After), not an opaque 502 (#1358).
 type retryState struct {
-	lastErr        error
-	lastStatusErr  *UpstreamStatusError // last real-HTTP-status error; a glitch can't shadow it (#1358)
-	lastStatus     int                  // status that triggered the pending retry (0 = a transient transport error)
-	lastRetryAfter string               // the triggering response's Retry-After header, honored as the next wait
-	lastCapWait    string               // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
+	lastErr           error
+	lastStatusErr     *UpstreamStatusError // last real-HTTP-status error; a glitch can't shadow it (#1358)
+	lastStatus        int                  // status that triggered the pending retry (0 = a transient transport error)
+	lastRetryAfter    string               // the triggering response's Retry-After header, honored as the next wait
+	lastCapWait       string               // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
+	serialInitialized bool                 // prior replica truth is seeded once, never after a newer response clears it
 }
 
-// waitBeforeAttempt applies the common between-attempt wait. Attempt zero is a
-// no-op so callers can keep checkpoint work conditional without duplicating the
-// retry-loop control flow.
+// waitBeforeAttempt applies the common between-attempt wait. Under serial
+// dispatch, every pass also consumes an admitted attempt opportunity, including
+// immediate rewinds to attempt zero. Admission/request construction may still
+// refuse afterward, so this conservatively bounds actual HTTP sends.
 func (p *HTTPPlanner) waitBeforeAttempt(ctx context.Context, attempt int, s *retryState, deadline time.Time, budgetOn bool) (bool, error) {
-	if attempt == 0 {
-		return false, nil
+	budget, shared := ctx.Value(serialRetryBudgetKey{}).(*serialRetryBudget)
+	if shared {
+		budget.syncStatus(s)
+		if err := s.serialInterrupted(ctx, budget); err != nil {
+			return false, err
+		}
+		if !budget.available() {
+			return false, s.serialExhausted()
+		}
+		deadline, budgetOn = budget.deadline, budget.budgetOn
 	}
-	return p.retryBackoffWait(ctx, attempt, s.lastStatus, s.lastRetryAfter, s.lastCapWait, s.lastStatusErr, deadline, budgetOn)
+	if attempt > 0 {
+		stop, err := p.retryBackoffWait(ctx, attempt, s.lastStatus, s.lastRetryAfter, s.lastCapWait, s.lastStatusErr, deadline, budgetOn)
+		if stop || err != nil {
+			if shared && stop {
+				if interrupted := s.serialInterrupted(ctx, budget); interrupted != nil {
+					return false, interrupted
+				}
+				return false, s.serialExhausted()
+			}
+			return stop, err
+		}
+		if shared {
+			if err := s.serialInterrupted(ctx, budget); err != nil {
+				return false, err
+			}
+		}
+		// Provider-directed waits and cap/auth recovery keep their existing local
+		// policy. Only an ordinary transient failure can hand off to a sibling.
+		if failover, _ := ctx.Value(replicaFailoverKey{}).(bool); shared && failover && s.lastRetryAfter == "" && s.lastCapWait == "" &&
+			(transientTargetStatus(s.lastStatus) || (s.lastStatus == 0 && s.lastErr != nil)) {
+			return true, nil
+		}
+	}
+	if shared && !budget.admit() {
+		return false, s.serialExhausted()
+	}
+	return false, nil
 }
 
 func providerResponseStatus(resp *http.Response) int {
