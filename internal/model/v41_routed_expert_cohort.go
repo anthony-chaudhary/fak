@@ -112,9 +112,39 @@ func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float
 // an earlier row's primary. Transport failure leaves every verdict unknown, as
 // specified by V41ReadDeferred; no failed operation is replayed.
 func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool) (result [][]float32, cause error) {
+	return s.v41RunExpertCohortSelected(deferred, gateW, upW, downW, inputs, weights, limit, layer, stage, recordingFailed, nil)
+}
+
+// Only the owned decode adapter supplies options. Its prepared triples and sum
+// indices are validated before selection; the cold-prefill wrapper stays nil.
+type v41ExpertCohortOptions struct {
+	triples   [][3]compute.Tensor
+	borrowed  []compute.Tensor
+	inputKeys []int
+	sums      [][]int
+	note      func(row int, gateUp bool)
+}
+
+func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool, options *v41ExpertCohortOptions) (result [][]float32, cause error) {
 	H, I, count := s.M.Cfg.HiddenSize, s.M.Cfg.MoEIntermediateSize, len(inputs)
-	owned := make([][]compute.Tensor, count)
+	owners := count
+	if options != nil && options.sums != nil {
+		owners++ // Sum temporaries follow every expert row in the fault ledger.
+	}
+	owned := make([][]compute.Tensor, owners)
 	seen := map[compute.Buffer]bool{gateW.Buf(): true, upW.Buf(): true, downW.Buf(): true}
+	if options != nil {
+		for _, triple := range options.triples {
+			for _, weight := range triple {
+				seen[weight.Buf()] = true
+			}
+		}
+		for _, weight := range options.borrowed {
+			if weight.Buf() != nil {
+				seen[weight.Buf()] = true
+			}
+		}
+	}
 	for _, weight := range s.halW {
 		if weight.Buf() != nil {
 			seen[weight.Buf()] = true
@@ -124,6 +154,8 @@ func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, 
 	var statuses []compute.V41DeferredStatus
 	var statusRows []int
 	var published []compute.Tensor
+	var sums []compute.Tensor
+	uploads := map[int]compute.Tensor{}
 	faultRow, current := count, 0
 	var primary any
 	valid := func(t compute.Tensor, n int) bool {
@@ -197,17 +229,33 @@ func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, 
 		}()
 		for current = 0; current < count; current++ {
 			*stage = "gate/up"
-			x := s.uploadHostF32([]int{H}, inputs[current], compute.MemoryActivation, "moe expert gate/up activation")
-			if !own(x) || !valid(x, H) {
-				cause = errV41ExpertResult
-				break
+			x := compute.Tensor{}
+			if options != nil {
+				x = uploads[options.inputKeys[current]]
 			}
-			g := s.Backend.MatMul(gateW, x)
+			if x.Buf() == nil {
+				x = s.uploadHostF32([]int{H}, inputs[current], compute.MemoryActivation, "moe expert gate/up activation")
+				if !own(x) || !valid(x, H) {
+					cause = errV41ExpertResult
+					break
+				}
+				if options != nil {
+					uploads[options.inputKeys[current]] = x
+				}
+			}
+			gate, up, down := gateW, upW, downW
+			if options != nil {
+				gate, up, down = options.triples[current][0], options.triples[current][1], options.triples[current][2]
+				if options.note != nil {
+					options.note(current, true)
+				}
+			}
+			g := s.Backend.MatMul(gate, x)
 			if !own(g) || !valid(g, I) {
 				cause = errV41ExpertResult
 				break
 			}
-			u := s.Backend.MatMul(upW, x)
+			u := s.Backend.MatMul(up, x)
 			if !own(u) || !valid(u, I) {
 				cause = errV41ExpertResult
 				break
@@ -218,7 +266,10 @@ func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, 
 				break
 			}
 			*stage = "down"
-			d := s.Backend.MatMul(downW, a)
+			if options != nil && options.note != nil {
+				options.note(current, false)
+			}
+			d := s.Backend.MatMul(down, a)
 			if !own(d) || !valid(d, H) {
 				cause = errV41ExpertResult
 				break
@@ -229,6 +280,18 @@ func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, 
 			}
 			published = append(published, p)
 		}
+		if cause == nil && options != nil && options.sums != nil {
+			*stage = "routed-sum"
+			for _, order := range options.sums {
+				acc := s.uploadHostF32([]int{H}, make([]float32, H), compute.MemoryActivation, "V4.1 routed-sum accumulator")
+				if !own(acc) || !valid(acc, H) {
+					cause = errV41ExpertResult
+					break
+				}
+				v41DeviceAccumulate(s.Backend, acc, published, order)
+				sums = append(sums, acc)
+			}
+		}
 		if cause != nil {
 			faultRow = current
 			*recordingFailed = true
@@ -238,6 +301,9 @@ func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, 
 		return nil, cause
 	}
 	readRows := published
+	if options != nil && options.sums != nil {
+		readRows = sums
+	}
 	if cause != nil || primary != nil {
 		readRows = nil
 	}
@@ -291,14 +357,33 @@ func (s *Session) v41RunExpertCohort(deferred compute.V41DeferredStatusBackend, 
 	if cause != nil || primary != nil {
 		return nil, cause
 	}
-	result = make([][]float32, count)
+	result = make([][]float32, len(values))
 	for r, row := range values {
-		if len(row) != H || !v41BF16Widened(row) {
+		validRow := len(row) == H
+		if options != nil && options.sums != nil {
+			for _, v := range row {
+				validRow = validRow && finite32(v)
+			}
+		} else {
+			validRow = validRow && v41BF16Widened(row)
+		}
+		if !validRow {
 			faultRow, *stage = r, "readback"
+			if options != nil && options.sums != nil {
+				faultRow, *recordingFailed = count, true
+				return nil, v41ExpertOperationErr(layer, "sum", errV41ExpertResult)
+			}
 			return nil, errV41ExpertResult
 		}
 		result[r] = append([]float32(nil), row...)
-		s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(r, opened))
+		if options == nil || options.sums == nil {
+			s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(r, opened))
+		}
+	}
+	if options != nil && options.sums != nil {
+		for r := 0; r < count; r++ {
+			s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(r, opened))
+		}
 	}
 	return result, nil
 }

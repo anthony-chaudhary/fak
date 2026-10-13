@@ -6790,6 +6790,11 @@
           "category": "incidental",
           "reason": "Subordinate constant, predicate, refusal or routing helper of positioned serveexecutionpolicy; it implements launch policy resolution or reporting rather than a separate policy or session-lifetime concept.",
           "token": "executionPolicyBypassDeviceOnlySession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local flattened lane-slot indices mapping grouped expert work back to pending layer continuations; not a session slot or lifetime interface.",
+          "token": "flatSlots"
         }
       ],
       "exclude": [
@@ -6985,6 +6990,7 @@
         "filterToolSchedulerSchema",
         "filterToolSchedulerTrials",
         "findcodexlooparchivemanifest",
+        "flatSlots",
         "frictionSessions",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
