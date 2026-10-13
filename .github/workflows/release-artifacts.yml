@@ -8,7 +8,8 @@
 # download a prebuilt binary WITHOUT cloning the monorepo (issue #133).
 #
 # `cmd/fak` is pure Go (no cgo — the Vulkan backend is behind a build tag and absent
-# from the default binary), so every target builds static with CGO_ENABLED=0. A binary
+# from the default binary), so every target builds static with CGO_ENABLED=0 EXCEPT
+# darwin/arm64, which builds with cgo on a macOS runner so it links Metal. A binary
 # shipped without a VERSION file alongside resolves its version from the BuildVersion
 # ldflag stamped here (internal/appversion.Current precedence).
 #
@@ -52,7 +53,7 @@ concurrency:
 jobs:
   build:
     name: ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: write # gh release upload
@@ -61,22 +62,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Every leg is static CGO_ENABLED=0 EXCEPT darwin/arm64: scripts/build.sh
+        # refuses a cgo-less darwin/arm64 build (it links the Metal STUB and silently
+        # serves CPU, #12771/#12784), and cgo needs Apple clang, so that leg builds
+        # natively on a macOS runner with CGO_ENABLED=1.
         include:
           - goos: linux
             goarch: amd64
+            runner: ubuntu-latest
+            cgo: "0"
           - goos: linux
             goarch: arm64
+            runner: ubuntu-latest
+            cgo: "0"
           - goos: darwin
             goarch: amd64
+            runner: ubuntu-latest
+            cgo: "0"
           - goos: darwin
             goarch: arm64
+            runner: macos-latest
+            cgo: "1"
           - goos: windows
             goarch: amd64
+            runner: ubuntu-latest
+            cgo: "0"
     env:
       GOTOOLCHAIN: auto
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
-      CGO_ENABLED: "0"
+      CGO_ENABLED: ${{ matrix.cgo }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,7 +132,13 @@ jobs:
             ARCHIVE="${NAME}.tar.gz"
             tar -C pkg -czf "${ARCHIVE}" .
           fi
-          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          # macOS runners ship `shasum`, not GNU `sha256sum`; both emit the same
+          # `<hash>  <archive>` line the installer and the SHA256SUMS fold consume.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          else
+            shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          fi
           echo "built ${ARCHIVE}"
           cat "${ARCHIVE}.sha256"
           # Hand the exact pair this leg produced to the upload step. Globbing for
@@ -126,25 +147,26 @@ jobs:
           echo "ARCHIVE=dist/${ARCHIVE}" >> "$GITHUB_ENV"
           echo "ARCHIVE_SUM=dist/${ARCHIVE}.sha256" >> "$GITHUB_ENV"
 
+      - name: Check out release tooling from the workflow revision
+        # A dispatch backfill checks out an OLDER tag above, which may predate the
+        # release-upload action; take the tooling from the workflow's own commit.
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tooling
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
       - name: Upload to the GitHub release
+        # Upload only the one archive (+ its checksum) this matrix leg built. The
+        # action waits for the release page (release-cadence creates it, #369) and
+        # is idempotent across re-runs AND gh's internal retry (v0.56.0 HTTP 422).
+        uses: ./.release-tooling/.github/actions/release-upload
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          # The tag push that triggered us ALSO fires release-cadence's
-          # `release_publish.py` step, which creates the release PAGE. We race it:
-          # without waiting, `gh release upload` 404s with "release not found"
-          # (issue #369). Wait up to ~2 min for the page to appear, then fail loud.
-          for i in $(seq 1 24); do
-            gh release view "$TAG" >/dev/null 2>&1 && break
-            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
-            sleep 5
-          done
-          gh release view "$TAG" >/dev/null
-          # Upload only the one archive (+ its checksum) this matrix leg built.
-          # --clobber makes a re-run (dispatch backfill, retried matrix leg) idempotent.
-          gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE_SUM" --clobber
+        with:
+          tag: ${{ github.event.inputs.tag || github.ref_name }}
+          files: ${{ env.ARCHIVE }} ${{ env.ARCHIVE_SUM }}
 
       - name: Attest build provenance (SLSA)
         # Cryptographic, machine-verifiable proof that THIS archive was built by THIS
@@ -265,19 +287,23 @@ jobs:
           echo "VULKAN_ARCHIVE=dist/${ARCHIVE}" >> "$GITHUB_ENV"
           echo "VULKAN_ARCHIVE_SUM=dist/${ARCHIVE}.sha256" >> "$GITHUB_ENV"
 
+      - name: Check out release tooling from the workflow revision
+        # A dispatch backfill checks out an OLDER tag above, which may predate the
+        # release-upload action; take the tooling from the workflow's own commit.
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tooling
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
       - name: Upload validated Vulkan archive to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          for i in $(seq 1 24); do
-            gh release view "$TAG" >/dev/null 2>&1 && break
-            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
-            sleep 5
-          done
-          gh release view "$TAG" >/dev/null
-          gh release upload "$TAG" "$VULKAN_ARCHIVE" "$VULKAN_ARCHIVE_SUM" --clobber
+        uses: ./.release-tooling/.github/actions/release-upload
+        with:
+          tag: ${{ github.event.inputs.tag || github.ref_name }}
+          files: ${{ env.VULKAN_ARCHIVE }} ${{ env.VULKAN_ARCHIVE_SUM }}
 
       - name: Attest Vulkan build provenance (SLSA)
         if: ${{ !github.event.repository.fork }}

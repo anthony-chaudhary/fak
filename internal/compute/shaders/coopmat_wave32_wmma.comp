@@ -64,7 +64,7 @@ layout(push_constant) uniform PushConstants {
 const uint TILE_K = 32u;
 #define ELEM_TYPE_A int8_t
 #define ELEM_TYPE_B int8_t
-#define ELEM_TYPE_C int32_t
+#define ELEM_TYPE_C int
 #else
 const uint TILE_K = 16u;
 #define ELEM_TYPE_A float16_t
@@ -187,7 +187,12 @@ void main() {
         if (pc.beta != 0.0) {
             coopmat<ELEM_TYPE_C, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matPriorC;
             coopMatLoad(matPriorC, dataC, globalOffsetC, ldc, gl_CooperativeMatrixLayoutRowMajor);
-            matC = matC + matPriorC * ELEM_TYPE_C(pc.beta);
+            // Keep the beta update component-wise: shaderc 2023.8's optimizer
+            // crashes on the equivalent cooperative-matrix add/scale expression.
+            // Corresponding accumulator components have the same lane mapping.
+            for (uint i = 0u; i < matC.length(); ++i) {
+                matC[i] = matC[i] + matPriorC[i] * ELEM_TYPE_C(pc.beta);
+            }
         }
 
         // Store cooperative matrix accumulator to VRAM
