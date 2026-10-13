@@ -673,6 +673,7 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if c.IntermediateSize == 0 && strings.Contains(family, "falcon") && c.HiddenSize > 0 {
 		c.IntermediateSize = 4 * c.HiddenSize
 	}
+	c.promoteLongRope("linear")
 	if c.promoteLongRope("llama3") {
 		c.RopeLowFreqFactor = c.LongRope.LowFreqFactor
 		c.RopeHighFreqFactor = c.LongRope.HighFreqFactor
@@ -689,8 +690,8 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 		c.RopeTheta = c.LongRope.RopeTheta
 	}
 	if c.RopeScaling == "" {
-		if rp, ok := c.RopeParameters["default"]; ok && rp.kind() == "yarn" {
-			c.RopeScaling = "yarn"
+		if rp, ok := c.RopeParameters["default"]; ok && (rp.kind() == "yarn" || rp.kind() == "linear") {
+			c.RopeScaling = rp.kind()
 			c.RopeFactor = rp.Factor
 			c.RopeOrigContext = rp.OriginalMaxPositionEmbeddings
 			if c.RopeTheta == 0 {
