@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,12 +10,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Issue #9587 review-fix witnesses for admitLocalMetalModel: deferred release
@@ -59,7 +63,11 @@ func seedMetalAdmissionLedger(t *testing.T, dir string, rows ...localadmission.R
 // keep the ledger row and a retained GPU lease, emit a DEFERRED release receipt,
 // and a second release() must be a no-op.
 func TestMetalAdmissionTeardownWithActiveSessionsDefersReleaseToExit(t *testing.T) {
-	for _, tc := range []struct {
+	const (
+		childCaseEnv = "FAK_TEST_METAL_DEFERRED_RELEASE_CASE"
+		childRootEnv = "FAK_TEST_METAL_DEFERRED_RELEASE_ROOT"
+	)
+	tests := []struct {
 		name         string
 		mode         string
 		wantRetained bool
@@ -69,55 +77,90 @@ func TestMetalAdmissionTeardownWithActiveSessionsDefersReleaseToExit(t *testing.
 		{"default/wrapped", "default", true, fmt.Errorf("close admitted weights: %w", &fakmodel.WeightSessionsActiveError{Count: 1})},
 		// A small aggregate load already dropped the lease; the row alone stays.
 		{"aggregate/direct", "aggregate", false, &fakmodel.WeightSessionsActiveError{Count: 1}},
-	} {
+	}
+	if childCase := os.Getenv(childCaseEnv); childCase != "" {
+		for _, tc := range tests {
+			if tc.name == childCase {
+				runMetalAdmissionDeferredReleaseCase(t, os.Getenv(childRootEnv), tc.mode, tc.wantRetained, tc.err)
+				return
+			}
+		}
+		t.Fatalf("unknown deferred-release child case %q", childCase)
+	}
+
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			resDir, leasePath := metalLifecycleEnv(t, tc.mode, lifecyclePeak, lifecycleSteady)
-			buf := stubMetalAdmissionSeams(t, lifecycleHost(16<<30, 8<<30), measuredLifecycleProbes)
-
-			teardowns := 0
-			release, err := admitLocalMetalModel(true, "sessions-attached.gguf", gpulease.Options{}, metalAdmissionSpec{
-				Load:     func() bool { return true },
-				Teardown: func() error { teardowns++; return tc.err },
-			})
-			if err != nil {
-				t.Fatalf("admission refused a fitting plan: %v", err)
+			root := t.TempDir()
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			child := windowgate.CommandContext(ctx, os.Args[0], "-test.run=^TestMetalAdmissionTeardownWithActiveSessionsDefersReleaseToExit$", "-test.count=1")
+			child.Env = append(os.Environ(), childCaseEnv+"="+tc.name, childRootEnv+"="+root)
+			if out, err := child.CombinedOutput(); err != nil {
+				t.Fatalf("deferred-release child failed: %v\n%s", err, out)
 			}
-			rows := readMetalAdmissionLedger(t, resDir)
-			if len(rows) != 1 || rows[0].Phase != "steady" {
-				t.Fatalf("ledger after load = %+v, want one steady row", rows)
-			}
-
-			for i := 1; i <= 2; i++ {
-				release()
-				if teardowns != 1 {
-					t.Fatalf("after release #%d Teardown ran %d time(s), want exactly 1", i, teardowns)
-				}
-				after := readMetalAdmissionLedger(t, resDir)
-				if len(after) != 1 || after[0].ID != rows[0].ID || after[0].Phase != "steady" || after[0].HeldBytes != lifecycleSteady {
-					t.Fatalf("after release #%d ledger = %+v, want the steady row %s kept while sessions hold the weights", i, after, rows[0].ID)
-				}
-				if tc.wantRetained {
-					requireLeaseBusy(t, leasePath, fmt.Sprintf("deferred release #%d", i))
-				} else {
-					requireLeaseFree(t, leasePath, fmt.Sprintf("deferred release #%d of an aggregate load", i))
-				}
-			}
-
-			receipts := decodeMetalAdmissionReceipts(t, buf)
-			if stages := metalReceiptStages(receipts); !slices.Equal(stages, []string{"admit", "steady", "release"}) {
-				t.Fatalf("receipt stages = %v, want [admit steady release] (the second release must not re-emit)", stages)
-			}
-			rel := receipts[2].rc
-			if rel.Verdict != "DEFERRED" || rel.Reason != "weight_sessions_active" || rel.Cleanup != "deferred_to_exit" {
-				t.Errorf("release receipt verdict/reason/cleanup = %s/%s/%s, want DEFERRED/weight_sessions_active/deferred_to_exit", rel.Verdict, rel.Reason, rel.Cleanup)
-			}
-			if rel.TeardownError != tc.err.Error() {
-				t.Errorf("release receipt teardown_error = %q, want %q", rel.TeardownError, tc.err.Error())
-			}
-			if rel.ReservationID != rows[0].ID || rel.Phase == "released" {
-				t.Errorf("release receipt reservation_id/phase = %s/%s, want the kept reservation %s, not released", rel.ReservationID, rel.Phase, rows[0].ID)
-			}
+			requireLeaseFree(t, filepath.Join(root, "gpu.lease"), "deferred-release child exit")
 		})
+	}
+}
+
+func runMetalAdmissionDeferredReleaseCase(t *testing.T, root, mode string, wantRetained bool, teardownErr error) {
+	t.Helper()
+	if root == "" {
+		t.Fatal("deferred-release child root is empty")
+	}
+	resDir := filepath.Join(root, "reservations")
+	leasePath := filepath.Join(root, "gpu.lease")
+	t.Setenv("FAK_RESERVATION_DIR", resDir)
+	t.Setenv("FAK_GPU_LEASE", leasePath)
+	t.Setenv("FAK_NATIVE_ADMISSION", mode)
+	t.Setenv("FAK_ADMISSION_POLICY", "")
+	t.Setenv("FAK_ADMISSION_STATE_ENVELOPE", "")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", strconv.FormatInt(lifecyclePeak, 10))
+	t.Setenv("FAK_TEST_STEADY_BYTES", strconv.FormatInt(lifecycleSteady, 10))
+	buf := stubMetalAdmissionSeams(t, lifecycleHost(16<<30, 8<<30), measuredLifecycleProbes)
+
+	teardowns := 0
+	release, err := admitLocalMetalModel(true, "sessions-attached.gguf", gpulease.Options{}, metalAdmissionSpec{
+		Load:     func() bool { return true },
+		Teardown: func() error { teardowns++; return teardownErr },
+	})
+	if err != nil {
+		t.Fatalf("admission refused a fitting plan: %v", err)
+	}
+	rows := readMetalAdmissionLedger(t, resDir)
+	if len(rows) != 1 || rows[0].Phase != "steady" {
+		t.Fatalf("ledger after load = %+v, want one steady row", rows)
+	}
+
+	for i := 1; i <= 2; i++ {
+		release()
+		if teardowns != 1 {
+			t.Fatalf("after release #%d Teardown ran %d time(s), want exactly 1", i, teardowns)
+		}
+		after := readMetalAdmissionLedger(t, resDir)
+		if len(after) != 1 || after[0].ID != rows[0].ID || after[0].Phase != "steady" || after[0].HeldBytes != lifecycleSteady {
+			t.Fatalf("after release #%d ledger = %+v, want the steady row %s kept while sessions hold the weights", i, after, rows[0].ID)
+		}
+		if wantRetained {
+			requireLeaseBusy(t, leasePath, fmt.Sprintf("deferred release #%d", i))
+		} else {
+			requireLeaseFree(t, leasePath, fmt.Sprintf("deferred release #%d of an aggregate load", i))
+		}
+	}
+
+	receipts := decodeMetalAdmissionReceipts(t, buf)
+	if stages := metalReceiptStages(receipts); !slices.Equal(stages, []string{"admit", "steady", "release"}) {
+		t.Fatalf("receipt stages = %v, want [admit steady release] (the second release must not re-emit)", stages)
+	}
+	rel := receipts[2].rc
+	if rel.Verdict != "DEFERRED" || rel.Reason != "weight_sessions_active" || rel.Cleanup != "deferred_to_exit" {
+		t.Errorf("release receipt verdict/reason/cleanup = %s/%s/%s, want DEFERRED/weight_sessions_active/deferred_to_exit", rel.Verdict, rel.Reason, rel.Cleanup)
+	}
+	if rel.TeardownError != teardownErr.Error() {
+		t.Errorf("release receipt teardown_error = %q, want %q", rel.TeardownError, teardownErr.Error())
+	}
+	if rel.ReservationID != rows[0].ID || rel.Phase == "released" {
+		t.Errorf("release receipt reservation_id/phase = %s/%s, want the kept reservation %s, not released", rel.ReservationID, rel.Phase, rows[0].ID)
 	}
 }
 

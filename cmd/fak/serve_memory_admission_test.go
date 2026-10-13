@@ -23,6 +23,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memgate"
 )
 
+func stubServeMemoryHost(t *testing.T, total, available int64) {
+	t.Helper()
+	orig := serveReadMemory
+	t.Cleanup(func() { serveReadMemory = orig })
+	serveReadMemory = lifecycleHost(total, available)
+}
+
 func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterServe(t *testing.T) {
 	const holderEnv = "FAK_LOCAL_LAUNCHER_METAL_LEASE_HOLDER_TEST"
 	if path := os.Getenv(holderEnv); path != "" {
@@ -37,6 +44,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesBeforeLoadAndReleasesAfterSe
 		runtime.KeepAlive(lease)
 		os.Exit(0) // The OS, not an in-process Release call, drops the child flock.
 	}
+	stubServeMemoryHost(t, 16<<30, 8<<30)
 
 	modelPath := writeServePackedEmbeddingFixture(t, "lease-model.gguf", false)
 	path := filepath.Join(t.TempDir(), "gpu.lease")
@@ -176,6 +184,7 @@ func TestLoadLocalLauncherModelWithMetalLeasePressurePolicy(t *testing.T) {
 }
 
 func TestLoadLocalLauncherModelWithMetalLeaseCoexistsForSmallModels(t *testing.T) {
+	stubServeMemoryHost(t, 16<<30, 8<<30)
 	resDir := filepath.Join(t.TempDir(), "reservations")
 	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
 	t.Setenv("FAK_RESERVATION_DIR", resDir)
@@ -267,6 +276,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesOvercommitBeforeLoader(t *te
 }
 
 func TestLoadLocalLauncherModelWithMetalLeaseLoadFailureReleasesReservation(t *testing.T) {
+	stubServeMemoryHost(t, 16<<30, 8<<30)
 	resDir := filepath.Join(t.TempDir(), "reservations")
 	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
 	t.Setenv("FAK_RESERVATION_DIR", resDir)
@@ -641,17 +651,7 @@ func TestLoadServeModelWithVulkanLeaseUsesEffectiveBackendAndGGUF(t *testing.T) 
 }
 
 func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t *testing.T) {
-	origRead := serveReadMemory
-	defer func() { serveReadMemory = origRead }()
-	serveReadMemory = func() (memgate.Memory, error) {
-		mem, err := origRead()
-		if err == nil && mem.AvailableBytes < 15*(1<<30) {
-			mem.TotalBytes = 36 * (1 << 30)
-			mem.AvailableBytes = 22 * (1 << 30)
-			mem.FreeBytes = 20 * (1 << 30)
-		}
-		return mem, err
-	}
+	stubServeMemoryHost(t, 36<<30, 22<<30)
 
 	resDir := filepath.Join(t.TempDir(), "reservations")
 	leasePath := filepath.Join(t.TempDir(), "gpu.lease")
@@ -659,16 +659,16 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t 
 	t.Setenv("FAK_GPU_LEASE", leasePath)
 	t.Setenv("FAK_ADMISSION_POLICY", "dev")
 
-	udPath := filepath.Join(t.TempDir(), "qwen38-27b-ud-q2kxl.gguf")
-	writeSynth27BGGUF(t, udPath, true)
+	q4kPath := filepath.Join(t.TempDir(), "qwen38-27b-q4-k-m.gguf")
+	writeSynth27BGGUF(t, q4kPath, false)
 
-	t.Run("resident UD-Q2_K_XL admits on host", func(t *testing.T) {
+	t.Run("resident Q4_K_M admits on host", func(t *testing.T) {
 		loads := 0
-		release, err := loadLocalLauncherModelWithMetalLease(true, udPath, gpulease.Options{}, func() {
+		release, err := loadLocalLauncherModelWithMetalLease(true, q4kPath, gpulease.Options{}, func() {
 			loads++
 		})
 		if err != nil {
-			t.Fatalf("expected resident load of 27B UD-Q2_K_XL to admit, got: %v", err)
+			t.Fatalf("expected resident load of supported 27B Q4_K_M to admit, got: %v", err)
 		}
 		defer release()
 		if loads != 1 {
@@ -679,7 +679,7 @@ func TestLoadLocalLauncherModelWithMetalLeaseRefusesExpandingQ8LoadOn36GBHost(t 
 	t.Run("FAK_Q4K=0 forces expanding Q8 load and refuses", func(t *testing.T) {
 		t.Setenv("FAK_Q4K", "0")
 		loads := 0
-		release, err := loadLocalLauncherModelWithMetalLease(true, udPath, gpulease.Options{}, func() {
+		release, err := loadLocalLauncherModelWithMetalLease(true, q4kPath, gpulease.Options{}, func() {
 			loads++
 		})
 		if err == nil {
