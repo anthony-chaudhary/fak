@@ -12,6 +12,7 @@ import json
 import time
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import fleet_bottleneck as fb
@@ -26,13 +27,6 @@ ROLLUP_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-cache-value-rollu
 CACHEHEALTH_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-cache-health.json")
 ALERTS = os.path.join(HERE, "grafana", "prometheus-alerts.yml")
 PROMETHEUS = os.path.join(HERE, "grafana", "prometheus.yml")
-# fak_gateway_/fak_kernel_ families are emitted from the gateway package: the
-# request/kernel counters live in metrics.go, whose exposition renderer (the quoted
-# family names) was split into metrics_render.go (3f1c3c83c), plus the one-time
-# boot timeline in startup.go.
-GATEWAY_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "metrics.go")
-GATEWAY_RENDER_GO = os.path.join(HERE, "..", "internal", "gateway", "metrics_render.go")
-STARTUP_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "startup.go")
 # fak_cachevalue_/fak_ablation_ families are emitted by the `fak cachevalue metrics`
 # exposition command (NOT the gateway package): renderCachevalueExposition builds them
 # via w.gauge("name", ...) call sites, so the emitted set is parsed straight from there.
@@ -371,17 +365,22 @@ def _fleet_metric_names(exprs):
 
 
 def _gateway_metric_names(exprs):
-    """fak_gateway_/fak_kernel_ metric names in PromQL exprs, ignoring label values."""
+    """Every fak_* metric name in PromQL exprs, ignoring quoted label values."""
     joined = re.sub(r'"[^"]*"', "", " ; ".join(exprs))
-    return set(re.findall(r"fak_(?:gateway|kernel)_[a-z0-9_]+", joined))
+    return set(re.findall(r"(?<![a-z0-9_])fak_[a-z0-9_]+", joined))
 
 
 def _gateway_families():
-    """fak_gateway_/fak_kernel_ metric families emitted by the gateway package
-    (metrics.go + its split-out exposition renderer metrics_render.go: request/kernel
-    counters; startup.go: the boot timeline)."""
-    src = "\n".join(_read(p) for p in (GATEWAY_METRICS_GO, GATEWAY_RENDER_GO, STARTUP_METRICS_GO))
-    return set(re.findall(r'"(fak_(?:gateway|kernel)_[a-z0-9_]+)"', src))
+    """Families declared by gateway renderers and its injected metric providers."""
+    root = Path(HERE).parent
+    sources = [root / "internal/gateway/metrics.go",
+               root / "internal/gateway/startup.go",
+               root / "internal/gateway/serving_metrics.go",
+               root / "internal/metrics/trust_violation.go"]
+    sources += sorted((root / "internal/gateway").glob("metrics_render*.go"))
+    sources += sorted((root / "internal/harnessres").glob("*.go"))
+    src = "\n".join(_read(p) for p in sources if not p.name.endswith("_test.go"))
+    return set(re.findall(r'"(fak_[a-z0-9_]+)"', src))
 
 
 def _missing_gateway(refs, families):
@@ -460,6 +459,16 @@ class CrossSurfaceContractTest(unittest.TestCase):
         self.fams, _, _ = emitted_families(make_snap())
         self.gateway_fams = _gateway_families()
 
+    def test_phantom_check_covers_every_fak_family(self):
+        refs = _gateway_metric_names([
+            'sum(fak_harness_tool_calls_total{tool="fak_label_value"})',
+            'fak_vcache_hit_rate + fak_future_family',
+        ])
+        self.assertEqual(refs, {"fak_harness_tool_calls_total",
+                                "fak_vcache_hit_rate", "fak_future_family"})
+        self.assertEqual(_missing_gateway(refs, self.gateway_fams),
+                         {"fak_harness_tool_calls_total", "fak_future_family"})
+
     def test_dashboard_queries_only_emitted_metrics(self):
         dash = json.loads(_read(FLEET_DASH))
         referenced = _fleet_metric_names(_panel_exprs(dash))
@@ -488,13 +497,17 @@ class CrossSurfaceContractTest(unittest.TestCase):
         self.assertIn("fleet_apierr_per_min 0", text)
 
     def test_gateway_dashboard_queries_only_emitted_metrics(self):
-        for path in (GATEWAY_DASH, DOGFOOD_DASH, STARTUP_DASH, GUARD_DASH,
-                     CACHEHEALTH_DASH):
+        paths = [GATEWAY_DASH, DOGFOOD_DASH, STARTUP_DASH, GUARD_DASH,
+                 CACHEHEALTH_DASH, FLEET_OVERVIEW_DASH, FLEET_SESSION_DASH,
+                 ROLLUP_DASH]
+        paths += sorted((Path(HERE) / "grafana/dashboards").glob("fak-harness*.json"))
+        families = self.gateway_fams | _fleet_exporter_families() | _cachevalue_families()
+        for path in paths:
             with self.subTest(path=os.path.basename(path)):
                 dash = json.loads(_read(path))
                 referenced = _gateway_metric_names(_panel_exprs(dash))
-                self.assertTrue(referenced, "gateway dashboard references no fak_gateway_/fak_kernel_ metrics?")
-                missing = _missing_gateway(referenced, self.gateway_fams)
+                self.assertTrue(referenced, "gateway dashboard references no fak_* metrics?")
+                missing = _missing_gateway(referenced, families)
                 self.assertFalse(missing, f"gateway dashboard queries phantom metrics: {sorted(missing)}")
 
     def test_alerts_reference_only_emitted_metrics(self):
@@ -504,7 +517,8 @@ class CrossSurfaceContractTest(unittest.TestCase):
         missing_fleet = fleet_refs - self.fams
         self.assertFalse(missing_fleet, f"alerts query phantom fleet metrics: {sorted(missing_fleet)}")
 
-        gateway_refs = _gateway_metric_names(exprs)
+        gateway_refs = {name for name in _gateway_metric_names(exprs)
+                        if name.startswith(("fak_gateway_", "fak_kernel_"))}
         self.assertTrue(gateway_refs, "alerts reference no fak gateway/kernel metrics?")
         missing_gateway = _missing_gateway(gateway_refs, self.gateway_fams)
         self.assertFalse(missing_gateway, f"alerts query phantom gateway metrics: {sorted(missing_gateway)}")
