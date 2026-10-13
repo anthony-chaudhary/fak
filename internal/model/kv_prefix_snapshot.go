@@ -42,6 +42,7 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // KV and recurrent Qwen state; keeping all three in one owner prevents partial restores.
 type PrefixSnapshot struct {
 	mu         sync.Mutex
+	closed     bool // Protected by mu; ownership detached, cleanup may still be running.
 	owner      *Session
 	epoch      uint64
 	Cache      *KVCache
@@ -398,8 +399,18 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 }
 
 // Close releases all device ownership held by a cache node or failed clone.
+// Repeated calls after ownership is detached need not wait for cleanup to finish.
 func (p *PrefixSnapshot) Close() {
 	if p == nil {
+		return
+	}
+	// A terminal call has no backend work. Release mu before acquiring the
+	// domain so a live caller keeps the domain-then-mu cleanup order, while a
+	// cleanup callback can re-enter Close without reacquiring its own domain.
+	p.mu.Lock()
+	closed := p.closed
+	p.mu.Unlock()
+	if closed {
 		return
 	}
 	scope := beginBackendExecution(p.Backend)
@@ -412,15 +423,16 @@ func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 		return
 	}
 	p.mu.Lock()
-	// Detach ownership before callbacks so legacy backends can re-enter Close
-	// without waiting on this snapshot mutex. The caller's backend execution
-	// scope, when present, still owns device cleanup.
+	// Detach ownership and publish terminal state before callbacks. Recursive
+	// public Close then needs neither this call's scope nor its backend domain.
+	// The caller's execution scope, when present, still owns physical cleanup.
 	kv, recurrent, backend := p.halKV, p.qwen35, p.Backend
 	p.halKV, p.qwen35 = nil, nil
 	p.halLineage = tokenLineage{}
 	p.Cache = nil
 	p.targetHidden, p.targetHiddenTokens = nil, nil
 	p.v41 = nil
+	p.closed = true
 	p.mu.Unlock()
 	if kv != nil {
 		kv.Free()

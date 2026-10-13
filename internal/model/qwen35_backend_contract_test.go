@@ -898,9 +898,11 @@ type reentrantPrefixSnapshotKV struct {
 	compute.KVStore
 	freeCalls int
 	freeHook  func()
+	owner     *sync.Mutex
 }
 
 func (kv *reentrantPrefixSnapshotKV) Free() {
+	requirePrefixSnapshotCleanupOwner(kv.owner)
 	kv.freeCalls++
 	hook := kv.freeHook
 	kv.freeHook = nil
@@ -910,17 +912,52 @@ func (kv *reentrantPrefixSnapshotKV) Free() {
 	}
 }
 
-// fak-test:runtime fast est=20ms lane=default
+// ownedQwen35CloseBackend uses CPU primitives; the mutex witnesses recording
+// domain ownership during cleanup, not physical device execution.
+type ownedQwen35CloseBackend struct {
+	*recordingQwen35Backend
+	owner sync.Mutex
+}
+
+func (b *ownedQwen35CloseBackend) ForwardExecutionOwner() *sync.Mutex { return &b.owner }
+
+func (b *ownedQwen35CloseBackend) Free(t compute.Tensor) {
+	requirePrefixSnapshotCleanupOwner(&b.owner)
+	b.recordingQwen35Backend.Free(t)
+}
+
+func requirePrefixSnapshotCleanupOwner(owner *sync.Mutex) {
+	if owner != nil && owner.TryLock() {
+		owner.Unlock()
+		panic("prefix snapshot cleanup escaped its execution owner")
+	}
+}
+
+// fak-test:runtime fast est=40ms lane=default
 func TestQwen35PrefixSnapshotCloseReentrantCleanup(t *testing.T) {
-	for _, callbackSite := range []string{"kv", "recurrent"} {
-		t.Run(callbackSite, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, callbackSite string
+		owned              bool
+	}{
+		{"legacy-kv", "kv", false},
+		{"legacy-recurrent", "recurrent", false},
+		{"owned-kv", "kv", true},
+		{"owned-recurrent", "recurrent", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			m := NewSynthetic(qwen35HybridTestCfg())
 			be := newRecordingQwen35Backend(m)
 			be.Backend = compute.Pick("cpu-ref")
 			if be.Backend == nil {
 				t.Fatal("cpu-ref backend missing")
 			}
-			s, err := m.NewBackendSessionChecked(be)
+			var backend compute.Backend = be
+			var owner *sync.Mutex
+			if tc.owned {
+				owned := &ownedQwen35CloseBackend{recordingQwen35Backend: be}
+				backend, owner = owned, &owned.owner
+			}
+			s, err := m.NewBackendSessionChecked(backend)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -943,25 +980,30 @@ func TestQwen35PrefixSnapshotCloseReentrantCleanup(t *testing.T) {
 					t.Fatalf("live snapshot tensor freed %d times by source cleanup", got)
 				}
 			}
-			kv := &reentrantPrefixSnapshotKV{KVStore: snap.halKV}
+			kv := &reentrantPrefixSnapshotKV{KVStore: snap.halKV, owner: owner}
 			snap.halKV = kv
 			reentered := make(chan struct{})
 			reenter := func() {
+				requirePrefixSnapshotCleanupOwner(owner)
 				snap.Close()
+				requirePrefixSnapshotCleanupOwner(owner)
 				close(reentered)
 			}
-			if callbackSite == "kv" {
+			if tc.callbackSite == "kv" {
 				kv.freeHook = reenter
 			} else {
 				be.freeHook = reenter
 			}
-			closed := make(chan struct{})
+			closed := make(chan any, 1)
 			go func() {
+				defer func() { closed <- recover() }()
 				snap.Close()
-				close(closed)
 			}()
 			select {
-			case <-closed:
+			case got := <-closed:
+				if got != nil {
+					t.Fatalf("prefix snapshot cleanup panic: %v", got)
+				}
 			case <-time.After(2 * time.Second):
 				t.Fatal("prefix snapshot cleanup deadlocked during recursive Close")
 			}
@@ -981,6 +1023,9 @@ func TestQwen35PrefixSnapshotCloseReentrantCleanup(t *testing.T) {
 			}
 			if clone, err := snap.Clone(); clone != nil || err != nil {
 				t.Fatalf("closed snapshot Clone = %v, %v; want nil, nil", clone, err)
+			}
+			if owner != nil {
+				executionOwnerAvailable(t, owner, s)
 			}
 		})
 	}
