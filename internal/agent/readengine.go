@@ -14,6 +14,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/fakroot"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // readengine.go — the real filesystem-read engine that backs the `fak_read` MCP tool
@@ -155,7 +156,7 @@ func (e readEngine) readWithOptions(pathArg string, offset, limit int, lineNumbe
 	if !e.lexicallyConfined(abs) {
 		return errResult("path_escape", "confinement", "path escapes the read root")
 	}
-	if escaped := e.symlinkEscapes(abs); escaped {
+	if escaped, canonicalErr := e.symlinkEscapes(abs); escaped || canonicalErr != nil {
 		return errResult("path_escape", "confinement", "path escapes the read root via symlink")
 	}
 	data, err := os.ReadFile(abs)
@@ -233,25 +234,33 @@ func escapes(rel string) bool { return rel == ".." || hasDotDotPrefix(rel) }
 // symlinkEscapes is the symlink half of the confinement (#11399): it resolves abs and
 // every root and reports whether the resolved path lands outside ALL of them. The test
 // runs once per root, so a widened root set cannot launder a symlink out of every root.
-// A path that does not resolve (missing file) or a root that does not resolve is not a
-// symlink escape — os.ReadFile reports the real reason, as before.
-func (e readEngine) symlinkEscapes(abs string) bool {
-	realPath, err := filepath.EvalSymlinks(abs)
+// A missing requested path is left for os.ReadFile to classify as not_found. Every root
+// is canonicalized before comparison; if none can be established, confinement fails closed.
+func (e readEngine) symlinkEscapes(abs string) (bool, error) {
+	realPath, err := pathutil.CanonicalExisting(abs)
 	if err != nil {
-		return false
+		if _, statErr := os.Stat(abs); errors.Is(statErr, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
 	}
-	resolved := false
+	canonicalRoots := make([]string, 0, len(e.roots))
 	for _, root := range e.roots {
-		realRoot, rErr := filepath.EvalSymlinks(root)
+		realRoot, rErr := pathutil.CanonicalExisting(root)
 		if rErr != nil {
 			continue
 		}
-		resolved = true
+		canonicalRoots = append(canonicalRoots, realRoot)
+	}
+	if len(canonicalRoots) == 0 {
+		return false, errors.New("no trusted read root could be canonicalized")
+	}
+	for _, realRoot := range canonicalRoots {
 		if rel, err := filepath.Rel(realRoot, realPath); err == nil && !escapes(rel) {
-			return false
+			return false, nil
 		}
 	}
-	return resolved
+	return true, nil
 }
 
 // RegisterReadEngine registers the working-tree-confined read engine under FakReadEngineID,

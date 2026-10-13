@@ -11,12 +11,17 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
@@ -103,6 +108,41 @@ func assertRefused(t *testing.T, body map[string]any, raw []byte, code, source, 
 	if body["error"] != message {
 		t.Fatalf("error = %v, want %q (body = %v)", body["error"], message, body)
 	}
+}
+
+func createFileLink(t *testing.T, target, link string) string {
+	t.Helper()
+	if err := os.Symlink(target, link); err == nil {
+		return link
+	} else if runtime.GOOS != "windows" || !errors.Is(err, syscall.Errno(1314)) {
+		t.Fatalf("create file symlink: %v", err)
+	}
+
+	junction := link + ".parent"
+	out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, filepath.Dir(target)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("create directory junction after Windows symlink privilege refusal: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(junction); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("remove test junction %q: %v", junction, err)
+		}
+	})
+
+	linkedFile := filepath.Join(junction, filepath.Base(target))
+	resolvedLink, err := pathutil.CanonicalExisting(linkedFile)
+	if err != nil {
+		t.Fatalf("resolve junction-backed file link: %v", err)
+	}
+	resolvedTarget, err := pathutil.CanonicalExisting(target)
+	if err != nil {
+		t.Fatalf("resolve file-link target: %v", err)
+	}
+	if !strings.EqualFold(filepath.Clean(resolvedLink), filepath.Clean(resolvedTarget)) {
+		t.Fatalf("junction-backed file link resolved to %q, want exact target %q", resolvedLink, resolvedTarget)
+	}
+	t.Logf("Windows symlink privilege unavailable; using directory junction fixture for %s", filepath.Base(link))
+	return linkedFile
 }
 
 // TestReadEngineCompanionRootMatrix pins, over one widened engine, exactly which trees the
@@ -271,11 +311,9 @@ func TestReadEngineCompanionSymlinkLaunderingGuard(t *testing.T) {
 	ran := 0
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := os.Symlink(tc.target, tc.link); err != nil {
-				t.Skipf("skipping symlink subtest: symlink creation not permitted: %v", err)
-			}
+			linkedFile := createFileLink(t, tc.target, tc.link)
 			ran++
-			raw, isErr := e.read(tc.link)
+			raw, isErr := e.read(linkedFile)
 			body := decodeReadBody(t, raw)
 			if tc.admit {
 				if isErr {
