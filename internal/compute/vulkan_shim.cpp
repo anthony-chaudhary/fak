@@ -3771,9 +3771,13 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         buildKernel(g_kern[K_V41_Q2K_MATVEC_ID], P("v41_q2k_matvec_id.spv"), 11, 16) &&
         buildKernel(g_kern[K_V41_Q3K_MATVEC_ID], P("v41_q3k_matvec_id.spv"), 11, 16) &&
         buildKernel(g_kern[K_V41_ROUTED_SWIGLU_ID], P("v41_routed_swiglu_id.spv"), 5, 12) &&
-        buildKernel(g_kern[K_V41_ROUTED_PUBLISH_SUM], P("v41_routed_publish_sum.spv"), 4, 12) &&
-        buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20) &&
+        buildKernel(g_kern[K_V41_ROUTED_PUBLISH_SUM], P("v41_routed_publish_sum.spv"), 4, 12);
+    // The optional fused pair must not disable the four-kernel ID fallback.
+    // Its capability separately requires both pipelines to be present.
+    if (v41RoutedIDBuilt &&
+        buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20)) {
         buildKernel(g_kern[K_V41_ROUTED_DOWN_SUM], P("v41_routed_down_sum.spv"), 12, 16);
+    }
     // Registry V9/current68 promotes only the unchanged finite checked module.
     // A current archive and its complete bundle cut over together. Keep the
     // capability false unless mandatory initialization completes below.
@@ -5678,9 +5682,11 @@ int fvk_have_v41_routed_id(void) {
 
 int fvk_v41_routed_id_max_picks(void) { return kV41RoutedIDSlots; }
 
-static int v41RoutedIDState(void) {
+// Fused calls require the optional pair at the capability stage, preserving
+// unavailable-before-submission-error precedence without disabling legacy calls.
+static int v41RoutedIDState(bool requireFused = false) {
     if (!g_ready) return 1;
-    if (!fvk_have_v41_routed_id()) return 3;
+    if (!fvk_have_v41_routed_id() || (requireFused && !fvk_have_v41_routed_fused())) return 3;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
     if (g_batching && !g_stepBatch) return 2;
@@ -5808,7 +5814,7 @@ int fvk_have_v41_routed_fused(void) {
 int fvk_v41_routed_gate_up_swiglu_id_f32(void* const* dGate, void* const* dUp, int slots,
                                           const void* dX, const void* dIds, void* dMid, void* dStatus,
                                           int out, int in, int picks, int xStride, float limit) {
-    const int state = v41RoutedIDState();
+    const int state = v41RoutedIDState(true);
     if (state != 0) return state;
     if (!dGate || !dUp || !std::isfinite(limit) || slots <= 0 || slots > kV41RoutedIDSlots || picks <= 0 ||
         picks > kV41RoutedIDSlots || out <= 0 || in <= 0 || in % 256 != 0 || (xStride != 0 && xStride != in) ||
@@ -5851,7 +5857,7 @@ int fvk_v41_routed_gate_up_swiglu_id_f32(void* const* dGate, void* const* dUp, i
 // reduction order is the q3k id kernel's exactly. Returns the tail status codes.
 int fvk_v41_routed_down_sum_f32(void* const* dDown, int slots, const void* dMid, void* dSum,
                                 const void* dIds, void* dStatus, int out, int midDim, int picks, uint32_t site) {
-    const int state = v41RoutedIDState();
+    const int state = v41RoutedIDState(true);
     if (state != 0) return state;
     const bool validSite = site == 1 || site == 2 || (site >= 5 && site <= 27);
     if (!dDown || !validSite || slots <= 0 || slots > kV41RoutedIDSlots || picks <= 0 ||

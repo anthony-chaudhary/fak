@@ -91,3 +91,82 @@ func TestQwen35GDNQ8InputProjectionShimContract(t *testing.T) {
 		t.Error("Vulkan build does not compile the fused Q8 GDN shader")
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+// Source contract only: optional fused pipeline failures must not clear the
+// four-kernel routed ID capability. This does not witness native execution.
+func TestVulkanRoutedIDCapabilityIndependentOfFusedModules(t *testing.T) {
+	_, shim := qwen35GDNComputeFixture(t, "vulkan_shim.cpp")
+	src := string(shim)
+	const prefix = "const bool v41RoutedIDBuilt ="
+	start := strings.Index(src, prefix)
+	if start < 0 {
+		t.Fatal("missing routed ID capability initializer")
+	}
+	end := strings.Index(src[start:], ";")
+	if end < 0 {
+		t.Fatal("unterminated routed ID capability initializer")
+	}
+	initializer := strings.Join(strings.Fields(src[start:start+end+1]), " ")
+	const want = `const bool v41RoutedIDBuilt = g_v41IndexerFloatControls && buildKernel(g_kern[K_V41_Q2K_MATVEC_ID], P("v41_q2k_matvec_id.spv"), 11, 16) && buildKernel(g_kern[K_V41_Q3K_MATVEC_ID], P("v41_q3k_matvec_id.spv"), 11, 16) && buildKernel(g_kern[K_V41_ROUTED_SWIGLU_ID], P("v41_routed_swiglu_id.spv"), 5, 12) && buildKernel(g_kern[K_V41_ROUTED_PUBLISH_SUM], P("v41_routed_publish_sum.spv"), 4, 12);`
+	if initializer != want {
+		t.Fatal("routed ID capability must depend only on float controls and its four legacy kernels")
+	}
+	const optional = `if (v41RoutedIDBuilt && buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20)) { buildKernel(g_kern[K_V41_ROUTED_DOWN_SUM], P("v41_routed_down_sum.spv"), 12, 16); }`
+	if !strings.Contains(strings.Join(strings.Fields(src[start+end+1:]), " "), optional) {
+		t.Fatal("optional fused pair must build separately after routed ID succeeds")
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+// Source contract only: either missing fused pipeline must refuse both C entry
+// points before sticky errors or operand handling. No native execution is witnessed.
+func TestVulkanRoutedFusedEntryPointAvailabilityContract(t *testing.T) {
+	_, shim := qwen35GDNComputeFixture(t, "vulkan_shim.cpp")
+	src := string(shim)
+	body := func(t *testing.T, signature string) string {
+		t.Helper()
+		start := strings.Index(src, signature)
+		if start < 0 {
+			t.Fatalf("missing definition %q", signature)
+		}
+		open := strings.Index(src[start:], "{")
+		if open < 0 {
+			t.Fatalf("missing body for %q", signature)
+		}
+		start += open + 1
+		end := strings.Index(src[start:], "\n}")
+		if end < 0 {
+			t.Fatalf("unterminated body for %q", signature)
+		}
+		return strings.Join(strings.Fields(src[start:start+end]), " ")
+	}
+
+	// Exact conjunction: gate/up and down/sum are independently mandatory,
+	// including their descriptor counts, even when the legacy kernels are ready.
+	const capability = `return g_ready && g_v41IndexerFloatControls && g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID].nbuf == 20 && g_kern[K_V41_ROUTED_DOWN_SUM].pipe != VK_NULL_HANDLE && g_kern[K_V41_ROUTED_DOWN_SUM].nbuf == 12;`
+	if got := body(t, "int fvk_have_v41_routed_fused(void)"); got != capability {
+		t.Fatal("fused capability must require both complete pipelines")
+	}
+	const state = `if (!g_ready) return 1; if (!fvk_have_v41_routed_id() || (requireFused && !fvk_have_v41_routed_fused())) return 3; if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus; if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4; if (g_batching && !g_stepBatch) return 2; return 0;`
+	if got := body(t, "static int v41RoutedIDState(bool requireFused = false)"); got != state {
+		t.Fatal("routed state must keep readiness, capability, submission, restore and batching error precedence")
+	}
+	for _, tc := range []struct {
+		entry string
+		arg   string
+	}{
+		{"fvk_v41_matvec_id_f32", ""},
+		{"fvk_v41_routed_swiglu_id_f32", ""},
+		{"fvk_v41_routed_publish_sum_f32", ""},
+		{"fvk_v41_routed_gate_up_swiglu_id_f32", "true"},
+		{"fvk_v41_routed_down_sum_f32", "true"},
+	} {
+		t.Run(tc.entry, func(t *testing.T) {
+			want := "const int state = v41RoutedIDState(" + tc.arg + "); if (state != 0) return state;"
+			if !strings.HasPrefix(body(t, "int "+tc.entry+"("), want) {
+				t.Fatal("entry point must check its complete capability before operands or dispatch")
+			}
+		})
+	}
+}
