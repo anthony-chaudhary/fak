@@ -124,8 +124,22 @@ func serveResidentQ4KLoadOptions(backend compute.Backend, ggufPath string, resid
 		// The witnessed UD-Q2_K_XL token embedding is Q2_K; keeping it packed
 		// avoids the ~5.09 GB F32 expansion that breached the 36 GiB envelope.
 		opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
+	} else if serveV41Q2KEmbeddingResident(ggufPath) {
+		// The V4.1 Q2_K token table expands to ~2 GiB of F32 and was the largest anonymous host
+		// allocation of the load; the V4.1 forward gathers rows from the packed table on host
+		// and device alike.
+		opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
 	}
 	return opts
+}
+
+func serveV41Q2KEmbeddingResident(ggufPath string) bool {
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return false
+	}
+	defer ws.Close()
+	return ws.DeepSeek41Q2KEmbeddingResident()
 }
 
 func serveDeviceResidentQ4K(backend compute.Backend) bool {

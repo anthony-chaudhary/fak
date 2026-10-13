@@ -519,14 +519,29 @@ func (s *WeightSource) validateResidentQ2KEmbedding(cfg model.Config) error {
 	return s.validateResidentPackedEmbedding(cfg, TensorQ2_K, qkK, blockQ2KBytes)
 }
 
+// DeepSeek41Q2KEmbeddingResident reports whether s is a DeepSeek-V4.1 checkpoint whose distinct
+// Q2_K token table can stay packed (WithQ2KEmbeddingResident) instead of expanding to F32.
+func (s *WeightSource) DeepSeek41Q2KEmbeddingResident() bool {
+	if s == nil || s.File == nil {
+		return false
+	}
+	cfg, err := s.File.Config()
+	if err != nil || !archIsDeepSeek41(cfg.ModelType) {
+		return false
+	}
+	return s.validateResidentQ2KEmbedding(cfg) == nil
+}
+
 func (s *WeightSource) validateResidentQ4KEmbedding(cfg model.Config) error {
 	return s.validateResidentPackedEmbedding(cfg, TensorQ4_K, qkK, blockQ4KBytes)
 }
 
 func (s *WeightSource) validateResidentPackedEmbedding(cfg model.Config, wantType TensorType, blockWeights, blockBytes uint64) error {
 	format := wantType.String()
-	if !cfg.IsQwen35Hybrid() || cfg.IsMoE() {
-		return fmt.Errorf("gguf: resident %s embedding requires a dense Qwen3.5-family hybrid model", format)
+	denseQwen := cfg.IsQwen35Hybrid() && !cfg.IsMoE()
+	v41Q2K := wantType == TensorQ2_K && archIsDeepSeek41(cfg.ModelType)
+	if !denseQwen && !v41Q2K {
+		return fmt.Errorf("gguf: resident %s embedding requires a dense Qwen3.5-family hybrid model or a DeepSeek-V4.1 Q2_K table", format)
 	}
 	if cfg.TieWordEmbeddings {
 		return fmt.Errorf("gguf: resident %s embedding requires untied word embeddings", format)

@@ -86,7 +86,7 @@ func (s *WeightSource) EstimateStreamedExpertHostLoadPeak(opts ...Q4KLoadOption)
 			n   int64
 		}{
 			{&row.PayloadBytes, ch.payload}, {&row.StreamBytes, ch.stream}, {&eligible, ch.stream},
-			{&row.Q8Bytes, ch.q8}, {&row.F32Bytes, ch.f32}, {&out.ArenaCopyBytes, ch.f32},
+			{&row.PackedBytes, ch.packed}, {&row.Q8Bytes, ch.q8}, {&row.F32Bytes, ch.f32}, {&out.ArenaCopyBytes, ch.f32},
 		} {
 			if err := add(d.dst, d.n); err != nil {
 				return HostLoadPeak{}, err
@@ -144,6 +144,7 @@ type streamedTensorCharge struct {
 	skip    bool  // dropped by the loader (QuantSourceTensorName keep=false)
 	payload int64 // packed bytes on disk
 	stream  int64 // bounded streamed-dense candidate (a range descriptor; no anon bytes at load)
+	packed  int64 // steady packed token table kept by WithQ2KEmbeddingResident
 	q8      int64 // steady native Q8 (a 2-D quant weight, plus a tied head's Q8 copy)
 	f32     int64 // steady F32 builder chunk; Build coalesces it into the arena with a second copy
 	window  int64 // the tensor's own worker-window transient
@@ -190,6 +191,12 @@ func streamedTensorHostCharge(cfg model.Config, o q4kLoadOptions, info TensorInf
 			ch.window, err = sumWindow(ch.payload, f32, f32)
 			return ch, err
 		}
+	}
+	if o.residentQ2KEmbedding && info.Name == "token_embd.weight" {
+		// The packed table is an owned copy of the payload (model.NewQ2KEmbedding) made from one read.
+		ch.packed = ch.payload
+		ch.window, err = sumWindow(ch.payload, ch.payload)
+		return ch, err
 	}
 	canon, mapped := CanonicalTensorNameArch(info.Name, cfg.ModelType)
 	if mapped {
