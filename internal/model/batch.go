@@ -106,10 +106,13 @@ func batchDecodeFastPathOK(cfg Config, quant bool) bool {
 // (already excluded), but a DENSE glm_moe_dsa (the synthetic / pipelinegen form) is only
 // caught by this explicit guard, so the exclusion keys on the attention arch, not on the
 // incidental MoE property.
+// V4.1 uses non-MLA attention and must reach its per-session admission checks
+// even when a malformed or synthetic config does not declare any experts.
 func batchPreNormFastPathOK(cfg Config, quant bool) bool {
 	if cfg.BlockTopology != PreNorm ||
 		cfg.IsMoE() ||
 		cfg.usesMLAMoELayout() ||
+		cfg.IsDeepSeekV41() ||
 		cfg.DenseMLP ||
 		cfg.Alibi ||
 		cfg.IsQwen35Hybrid() ||
