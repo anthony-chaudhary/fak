@@ -44,40 +44,9 @@ layout(push_constant) uniform PC {
     uint picks;
 } pc;
 
-uint slot;
-
-uint wload(uint i) {
-    switch (slot) {
-    case 0u: return raw0[i];
-    case 1u: return raw1[i];
-    case 2u: return raw2[i];
-    case 3u: return raw3[i];
-    case 4u: return raw4[i];
-    case 5u: return raw5[i];
-    case 6u: return raw6[i];
-    default: return raw7[i];
-    }
-}
-
-uint byteAt(uint offset) {
-    uint word = wload(offset >> 2u);
-    return (word >> ((offset & 3u) * 8u)) & 255u;
-}
-
-uint leU32(uint offset) {
-    return byteAt(offset) | (byteAt(offset + 1u) << 8u) |
-           (byteAt(offset + 2u) << 16u) | (byteAt(offset + 3u) << 24u);
-}
-
-float halfAt(uint offset) {
-    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
-    return unpackHalf2x16(bits).x;
-}
-
-void unpackQ3KScales(uint sc, out int scales[16]) {
-    uint aux0 = leU32(sc);
-    uint aux1 = leU32(sc + 4u);
-    uint aux2 = leU32(sc + 8u);
+// q3kScales expands the 12 packed 6-bit sub-scale bytes (three LE words) into 16
+// signed scales, byte-for-byte unpackQ3KScales in q3k_matmul.comp.
+void q3kScales(uint aux0, uint aux1, uint aux2, out int scales[16]) {
     uint tmp = aux2;
     uint words[4];
     words[0] = (aux0 & 0x0f0f0f0fu) | (((tmp)        & 0x03030303u) << 4u);
@@ -92,46 +61,64 @@ void unpackQ3KScales(uint sc, out int scales[16]) {
     }
 }
 
-// One Q3_K row of binding `sl`, term for term v41_q3k_matvec_id.comp.
-float q3kRow(uint sl, uint row, uint blocks, uint midBase) {
-    float sum = 0.0;
-    for (uint sb = 0u; sb < blocks; ++sb) {
-        uint base = (row * blocks + sb) * 110u;
-        float d = halfAt(base + 108u);
-        uint hmBase = base;
-        uint qBase  = base + 32u;
-        uint scBase = base + 96u;
-        uint xBlock = midBase + sb * 256u;
-
-        int scales[16];
-        unpackQ3KScales(scBase, scales);
-
-        uint qi = 0u;
-        int si = 0;
-        uint m = 1u;
-        for (uint n = 0u; n < 256u; n += 128u) {
-            uint shift = 0u;
-            for (uint j = 0u; j < 4u; ++j) {
-                float dl0 = d * float(scales[si] - 32); si++;
-                for (uint l = 0u; l < 16u; ++l) {
-                    int code = int((byteAt(qBase + qi + l) >> shift) & 3u);
-                    if ((byteAt(hmBase + l) & m) == 0u) code -= 4;
-                    sum += dl0 * float(code) * mid[xBlock + n + j * 32u + l];
-                }
-                float dl1 = d * float(scales[si] - 32); si++;
-                for (uint l = 0u; l < 16u; ++l) {
-                    int code = int((byteAt(qBase + qi + 16u + l) >> shift) & 3u);
-                    if ((byteAt(hmBase + 16u + l) & m) == 0u) code -= 4;
-                    sum += dl1 * float(code) * mid[xBlock + n + j * 32u + 16u + l];
-                }
-                shift += 2u;
-                m <<= 1u;
-            }
-            qi += 32u;
-        }
-    }
-    return sum;
+// Q3K_SLOT stamps one row body per slot binding, so the slot is selected once per
+// pick in main and every byte load below indexes a single buffer. The slot is
+// uniform across active rows for a pick, but can change between routed picks.
+// Arithmetic and byte addressing match v41_q3k_matvec_id.comp term for term.
+#define Q3K_SLOT(ROW, BYTE, RAW) \
+uint BYTE(uint offset) { \
+    return (RAW[offset >> 2u] >> ((offset & 3u) * 8u)) & 255u; \
+} \
+float ROW(uint row, uint blocks, uint midBase) { \
+    float sum = 0.0; \
+    for (uint sb = 0u; sb < blocks; ++sb) { \
+        uint base = (row * blocks + sb) * 110u; \
+        float d = unpackHalf2x16(BYTE(base + 108u) | (BYTE(base + 109u) << 8u)).x; \
+        uint hmBase = base; \
+        uint qBase  = base + 32u; \
+        uint scBase = base + 96u; \
+        uint xBlock = midBase + sb * 256u; \
+        int scales[16]; \
+        q3kScales( \
+            BYTE(scBase) | (BYTE(scBase + 1u) << 8u) | (BYTE(scBase + 2u) << 16u) | (BYTE(scBase + 3u) << 24u), \
+            BYTE(scBase + 4u) | (BYTE(scBase + 5u) << 8u) | (BYTE(scBase + 6u) << 16u) | (BYTE(scBase + 7u) << 24u), \
+            BYTE(scBase + 8u) | (BYTE(scBase + 9u) << 8u) | (BYTE(scBase + 10u) << 16u) | (BYTE(scBase + 11u) << 24u), \
+            scales); \
+        uint qi = 0u; \
+        int si = 0; \
+        uint m = 1u; \
+        for (uint n = 0u; n < 256u; n += 128u) { \
+            uint shift = 0u; \
+            for (uint j = 0u; j < 4u; ++j) { \
+                float dl0 = d * float(scales[si] - 32); si++; \
+                for (uint l = 0u; l < 16u; ++l) { \
+                    int code = int((BYTE(qBase + qi + l) >> shift) & 3u); \
+                    if ((BYTE(hmBase + l) & m) == 0u) code -= 4; \
+                    sum += dl0 * float(code) * mid[xBlock + n + j * 32u + l]; \
+                } \
+                float dl1 = d * float(scales[si] - 32); si++; \
+                for (uint l = 0u; l < 16u; ++l) { \
+                    int code = int((BYTE(qBase + qi + 16u + l) >> shift) & 3u); \
+                    if ((BYTE(hmBase + 16u + l) & m) == 0u) code -= 4; \
+                    sum += dl1 * float(code) * mid[xBlock + n + j * 32u + 16u + l]; \
+                } \
+                shift += 2u; \
+                m <<= 1u; \
+            } \
+            qi += 32u; \
+        } \
+    } \
+    return sum; \
 }
+
+Q3K_SLOT(q3kRow0, byteAt0, raw0)
+Q3K_SLOT(q3kRow1, byteAt1, raw1)
+Q3K_SLOT(q3kRow2, byteAt2, raw2)
+Q3K_SLOT(q3kRow3, byteAt3, raw3)
+Q3K_SLOT(q3kRow4, byteAt4, raw4)
+Q3K_SLOT(q3kRow5, byteAt5, raw5)
+Q3K_SLOT(q3kRow6, byteAt6, raw6)
+Q3K_SLOT(q3kRow7, byteAt7, raw7)
 
 uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
 
@@ -149,8 +136,19 @@ void main() {
     precise float acc = 0.0;
     for (uint j = 0u; j < picks; ++j) {
         uint p = ids[2u * picks + j];
-        slot = ids[p];
-        float d = q3kRow(slot, row, blocks, p * uint(pc.midDim));
+        uint slot = ids[p];
+        uint midBase = p * uint(pc.midDim);
+        float d;
+        switch (slot) {
+        case 0u: d = q3kRow0(row, blocks, midBase); break;
+        case 1u: d = q3kRow1(row, blocks, midBase); break;
+        case 2u: d = q3kRow2(row, blocks, midBase); break;
+        case 3u: d = q3kRow3(row, blocks, midBase); break;
+        case 4u: d = q3kRow4(row, blocks, midBase); break;
+        case 5u: d = q3kRow5(row, blocks, midBase); break;
+        case 6u: d = q3kRow6(row, blocks, midBase); break;
+        default: d = q3kRow7(row, blocks, midBase); break;
+        }
         uint bits = floatBitsToUint(d);
         uint rounded = roundBF16(bits);
         if ((bits & 0x7f800000u) == 0x7f800000u ||
