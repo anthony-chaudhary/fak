@@ -116,6 +116,11 @@ func CompareActivationTraces(ref, got Artifact, tol ActivationTolerance) Activat
 		if !sameShape(re.Shapes, ge.Shapes) || len(re.SampleValues) != len(ge.SampleValues) {
 			return incomparable("incompatible sampled shape at " + key.String())
 		}
+		_, refIndicesOK := indexedValues(re)
+		_, gotIndicesOK := indexedValues(ge)
+		if !refIndicesOK || !gotIndicesOK {
+			return incomparable("malformed or duplicate sample indices at " + key.String())
+		}
 		for i, rv := range re.SampleValues {
 			gv := ge.SampleValues[i]
 			if len(re.SampleIndices) != 0 && len(ge.SampleIndices) != 0 && re.SampleIndices[i] != ge.SampleIndices[i] {
