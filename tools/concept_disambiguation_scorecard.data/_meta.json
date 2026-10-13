@@ -10610,6 +10610,11 @@
           "category": "incidental",
           "reason": "serveRuntime method that resolves the serve execution policy once before delegation and compute; the concept is serveexecutionpolicy, this is its resolver.",
           "token": "resolveExecutionPolicy"
+        },
+        {
+          "category": "build-tag-only",
+          "reason": "Genuine qualification preflight compiled only with wip_v41_shared_head_qualification plus Vulkan/cgo/platform tags; absent from the production corpus and installs no production provider. Checks necessary Q6_K resource bounds only, not physical parity or serving admission.",
+          "token": "VulkanQ6KSharedHeadQualificationPreflight"
         }
       ],
       "exclude": [
@@ -10712,6 +10717,7 @@
         "StrengthToolPolicyGrammar",
         "ToolPolicyVersion",
         "VerdictPolicyBlock",
+        "VulkanQ6KSharedHeadQualificationPreflight",
         "adjudicate",
         "adjudicated",
         "adjudicates",
