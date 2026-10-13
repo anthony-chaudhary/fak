@@ -13,8 +13,9 @@ import (
 // "0", so the per-pick fused seam stays one switch away for A/B and bisection.
 const v41LayerExpertBatchEnv = "FAK_V41_LAYER_EXPERT_BATCH"
 
-// v41RoutedIDEnv set to "0" keeps the batched layer on its per-pick dispatches
-// instead of the one-dispatch-per-stage id kernels, for A/B and bisection.
+// v41RoutedIDEnv set to "1" opts the batched layer into the one-dispatch-per-
+// stage id kernels; unset or any other value keeps its per-pick dispatches,
+// because the id arm decoded about 3x slower warm on a Strix Halo gfx1151.
 const v41RoutedIDEnv = "FAK_V41_ROUTED_ID"
 
 // v41RoutedLayerFunc runs every routed pick of one full-profile decode layer on
@@ -31,6 +32,8 @@ type v41RoutedLayerFunc func(layer int, picks []routePick, x []float32) ([]float
 // the ring can still pin the given bytes.
 const v41RoutedLayerProbe polymodel.ModelID = "v41-routed-layer-probe"
 
+func v41RoutedIDOptedIn() bool { return os.Getenv(v41RoutedIDEnv) == "1" }
+
 // v41RoutedLayerFunc binds the batched routed layer, or nil when the fused
 // per-pick seam is unbound or the backend cannot defer its status records.
 func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
@@ -45,7 +48,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		return nil
 	}
 	idBackend, _ := s.Backend.(compute.V41RoutedIDBackend)
-	if idBackend != nil && (os.Getenv(v41RoutedIDEnv) == "0" || !idBackend.V41RoutedIDAvailable()) {
+	if idBackend != nil && (!v41RoutedIDOptedIn() || !idBackend.V41RoutedIDAvailable()) {
 		idBackend = nil
 	}
 	return func(layer int, picks []routePick, x []float32) (result []float32, outcome v41RoutedExpertOutcome, cause error) {

@@ -59,8 +59,8 @@ func TestV41RoutedLayerBatchVulkan(t *testing.T) {
 					if !batch {
 						t.Setenv(v41LayerExpertBatchEnv, "0")
 					}
-					if arm == "batch_per_pick" {
-						t.Setenv(v41RoutedIDEnv, "0")
+					if arm == "batch_id" {
+						t.Setenv(v41RoutedIDEnv, "1")
 					}
 					m := v41PinnedSlateFixture(t, compressed)
 					defer func() {
