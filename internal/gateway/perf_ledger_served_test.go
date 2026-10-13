@@ -104,6 +104,22 @@ func (h *perfServedHarness) durable() []perfledger.Record {
 	return recs
 }
 
+func perfServedMetricSample(t *testing.T, metrics, series string) float64 {
+	t.Helper()
+	for _, line := range strings.Split(metrics, "\n") {
+		if strings.HasPrefix(line, series+" ") {
+			fields := strings.Fields(line)
+			value, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+			if err != nil {
+				t.Fatalf("parse metric %s: %v", series, err)
+			}
+			return value
+		}
+	}
+	t.Fatalf("missing metric %s", series)
+	return 0
+}
+
 func newPerfServedNativePlanner(t *testing.T) *agent.InKernelPlanner {
 	t.Helper()
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "6")
@@ -182,6 +198,8 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 	wantPrefillMeasured, wantDecodeMeasured, wantTTFTMeasured := 0, 0, 0
 	var prefillRateTokens, decodeRateTokens int
 	var prefillRateMS, decodeRateMS float64
+	var wantMetricPromptTokens, wantMetricGeneratedTokens int
+	var wantMetricPrefillSeconds, wantMetricDecodeSeconds float64
 	for i, r := range rep.Records {
 		if r.Model != "native-synth" {
 			t.Errorf("row %d model = %q, want native-synth", i, r.Model)
@@ -193,6 +211,8 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		if timing := r.NativeTiming; timing != nil {
 			prefillMeasured = phaseMeasured(i, "prefill", timing.PrefillMS, timing.PrefillTokens, timing.PrefillTPS)
 			decodeMeasured = phaseMeasured(i, "decode", timing.DecodeMS, timing.DecodeTokens, timing.DecodeTPS)
+			wantMetricPrefillSeconds += timing.PrefillMS / 1000
+			wantMetricDecodeSeconds += timing.DecodeMS / 1000
 			if prefillMeasured && timing.PrefillTokens >= perfledger.MinPrefillRateTokens {
 				prefillRateTokens += timing.PrefillTokens
 				prefillRateMS += timing.PrefillMS
@@ -235,6 +255,8 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		if r.TTFTMS > 0 {
 			wantTTFTMeasured++
 		}
+		wantMetricPromptTokens += r.PromptTokens
+		wantMetricGeneratedTokens += r.CompletionTokens
 	}
 	if wantTTFTMeasured < 2 {
 		t.Fatalf("ordinary cohort lost measured TTFT: measured=%d", wantTTFTMeasured)
@@ -266,38 +288,30 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		t.Fatalf("live serial path summary = %+v, want measured prefill/decode=%d/%d", path, wantPrefillMeasured, wantDecodeMeasured)
 	}
 	metrics := h.srv.renderMetrics()
-	sample := func(series string) float64 {
-		t.Helper()
-		for _, line := range strings.Split(metrics, "\n") {
-			if strings.HasPrefix(line, series+" ") {
-				fields := strings.Fields(line)
-				value, err := strconv.ParseFloat(fields[len(fields)-1], 64)
-				if err != nil {
-					t.Fatalf("parse metric %s: %v", series, err)
-				}
-				return value
-			}
-		}
-		t.Fatalf("missing metric %s", series)
-		return 0
-	}
 	requestSeries := `fak_native_execution_requests_total{path="serial"}`
-	if got := sample(requestSeries); got != 3 || strings.Count(metrics, "fak_native_execution_requests_total{") != 1 {
+	if got := perfServedMetricSample(t, metrics, requestSeries); got != 3 || strings.Count(metrics, "fak_native_execution_requests_total{") != 1 {
 		t.Fatalf("native execution bookings=%v rows=%d, want exactly three serial bookings", got, strings.Count(metrics, "fak_native_execution_requests_total{"))
 	}
-	for _, series := range []string{
-		`fak_native_execution_phase_seconds_total{path="serial",phase="prefill"}`,
-		`fak_native_execution_phase_seconds_total{path="serial",phase="decode"}`,
-		`fak_native_execution_tokens_total{path="serial",kind="prompt"}`,
-		`fak_native_execution_tokens_total{path="serial",kind="generated"}`,
+	phaseRoundToleranceSeconds := float64(len(rep.Records))*0.5e-6 + 1e-12
+	for series, want := range map[string]float64{
+		`fak_native_execution_phase_seconds_total{path="serial",phase="prefill"}`: wantMetricPrefillSeconds,
+		`fak_native_execution_phase_seconds_total{path="serial",phase="decode"}`:  wantMetricDecodeSeconds,
 	} {
-		value := sample(series)
-		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-			t.Fatalf("native execution metric %s=%v, want finite positive", series, value)
+		got := perfServedMetricSample(t, metrics, series)
+		if got < 0 || math.IsNaN(got) || math.IsInf(got, 0) || math.Abs(got-want) > phaseRoundToleranceSeconds {
+			t.Fatalf("native execution metric %s=%v, want finite non-negative observed sum %v within %v serialization tolerance", series, got, want, phaseRoundToleranceSeconds)
+		}
+	}
+	for series, want := range map[string]int{
+		`fak_native_execution_tokens_total{path="serial",kind="prompt"}`:    wantMetricPromptTokens,
+		`fak_native_execution_tokens_total{path="serial",kind="generated"}`: wantMetricGeneratedTokens,
+	} {
+		if got := perfServedMetricSample(t, metrics, series); got != float64(want) || want <= 0 {
+			t.Fatalf("native execution metric %s=%v, want positive observed token sum %d", series, got, want)
 		}
 	}
 	strictSeries := `fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other",evidence_class="measured"}`
-	if got := sample(strictSeries); got != 1 || strings.Count(metrics, "fak_native_receipt_requests_total{") != 1 {
+	if got := perfServedMetricSample(t, metrics, strictSeries); got != 1 || strings.Count(metrics, "fak_native_receipt_requests_total{") != 1 {
 		t.Fatalf("strict receipt bookings=%v rows=%d, want exactly one strict booking", got, strings.Count(metrics, "fak_native_receipt_requests_total{"))
 	}
 	line := h.compact()
@@ -321,6 +335,26 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 	offlinePath := offline.Summary.ByPathStats[perfledger.PathSerial]
 	if offlinePath.Count != 3 || offlinePath.PrefillMeasured != wantPrefillMeasured || offlinePath.DecodeMeasured != wantDecodeMeasured || offlinePath.PrefillTPSWeighted != wantPrefillWeighted || offlinePath.DecodeTPSWeighted != wantDecodeWeighted {
 		t.Fatalf("durable serial path summary = %+v, want measured prefill/decode=%d/%d", offlinePath, wantPrefillMeasured, wantDecodeMeasured)
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestPerfLedgerNativeExecutionMetricsUseControlledTimings(t *testing.T) {
+	h := newPerfServedHarness(t, &perfNativeTimingPlanner{})
+	h.chat("native-timing-model", "controlled metric turn", false)
+
+	metrics := h.srv.renderMetrics()
+	for series, want := range map[string]float64{
+		`fak_native_execution_requests_total{path="serial"}`:                      1,
+		`fak_native_execution_phase_seconds_total{path="serial",phase="prefill"}`: 0.08,
+		`fak_native_execution_phase_seconds_total{path="serial",phase="decode"}`:  0.004,
+		`fak_native_execution_tokens_total{path="serial",kind="prompt"}`:          80,
+		`fak_native_execution_tokens_total{path="serial",kind="generated"}`:       4,
+		`fak_native_execution_tokens_total{path="serial",kind="cached"}`:          40,
+	} {
+		if got := perfServedMetricSample(t, metrics, series); got != want || got <= 0 {
+			t.Fatalf("controlled native execution metric %s=%v, want positive planner-authored value %v", series, got, want)
+		}
 	}
 }
 
