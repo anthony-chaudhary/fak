@@ -3,7 +3,6 @@ package model
 import (
 	"math"
 	"os"
-	"strings"
 )
 
 // gemma4 debug knobs (default = the reference behavior). These let a diagnostic load the
@@ -32,7 +31,7 @@ func gemma4ScaleSqrt() bool     { return os.Getenv("FAK_GEMMA4_SCALE_SQRT") == "
 // shared m.layer path bit-for-bit (the slices below are empty for them).
 
 func (c Config) isGemma4() bool {
-	return strings.Contains(c.archFamilyKey(), "gemma4")
+	return c.archFamilyHas("gemma4")
 }
 
 // headDimForLayer returns layer l's attention head_dim, honoring the per-layer slice

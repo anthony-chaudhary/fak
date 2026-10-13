@@ -65,7 +65,7 @@ func materializeGPTNeoXTensors(cfg Config, man map[string]tensorMeta, raw *[]byt
 }
 
 func materializeFalconTensors(cfg Config, man map[string]tensorMeta, raw *[]byte) error {
-	if !strings.Contains(cfg.archFamilyKey(), "falcon") && !manifestHasPrefix(man, "transformer.h.") {
+	if !cfg.archFamilyHas("falcon") && !manifestHasPrefix(man, "transformer.h.") {
 		return nil
 	}
 	aliasTensorIfPresent(man, "model.embed_tokens.weight", "transformer.word_embeddings.weight")
@@ -92,7 +92,7 @@ func materializeFalconTensors(cfg Config, man map[string]tensorMeta, raw *[]byte
 }
 
 func materializeMPTTensors(cfg Config, man map[string]tensorMeta) error {
-	if !strings.Contains(cfg.archFamilyKey(), "mpt") && !manifestHasPrefix(man, "transformer.blocks.") {
+	if !cfg.archFamilyHas("mpt") && !manifestHasPrefix(man, "transformer.blocks.") {
 		return nil
 	}
 	aliasTensorIfPresent(man, "model.embed_tokens.weight", "transformer.wte.weight")
@@ -115,7 +115,7 @@ func materializeMixtralBlockSparseTensors(cfg Config, man map[string]tensorMeta)
 	if cfg.NumExperts <= 0 {
 		return nil
 	}
-	if !strings.Contains(cfg.archFamilyKey(), "mixtral") && !manifestHasPrefix(man, "model.layers.0.block_sparse_moe.") {
+	if !cfg.archFamilyHas("mixtral") && !manifestHasPrefix(man, "model.layers.0.block_sparse_moe.") {
 		return nil
 	}
 	for l := 0; l < cfg.NumLayers; l++ {

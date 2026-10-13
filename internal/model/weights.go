@@ -22,7 +22,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -95,12 +95,54 @@ func windowLoStep(priorPos []int, nPos, qpos, W int) int {
 	return lo
 }
 
+const layerNameCacheLayers = 256
+
+var layerPrefixes = func() (p [layerNameCacheLayers]string) {
+	for l := range p {
+		p[l] = "model.layers." + itoa(l) + "."
+	}
+	return p
+}()
+
 func layerPrefix(layer int) string {
+	if layer >= 0 && layer < layerNameCacheLayers {
+		return layerPrefixes[layer]
+	}
 	return "model.layers." + itoa(layer) + "."
 }
 
+type layerNameKey struct {
+	layer  int
+	suffix string
+}
+
+const layerNameCacheMax = 1 << 16
+
+// layerNames interns layerName results: decode resolves dozens of per-layer tensor
+// names every step, and concatenating them was the largest per-step allocation site.
+var layerNames struct {
+	mu sync.RWMutex
+	m  map[layerNameKey]string
+}
+
 func layerName(layer int, suffix string) string {
-	return layerPrefix(layer) + suffix
+	k := layerNameKey{layer, suffix}
+	layerNames.mu.RLock()
+	name, ok := layerNames.m[k]
+	layerNames.mu.RUnlock()
+	if ok {
+		return name
+	}
+	name = layerPrefix(layer) + suffix
+	layerNames.mu.Lock()
+	if layerNames.m == nil {
+		layerNames.m = make(map[layerNameKey]string)
+	}
+	if len(layerNames.m) < layerNameCacheMax {
+		layerNames.m[k] = name
+	}
+	layerNames.mu.Unlock()
+	return name
 }
 
 func (m *Model) attentionNorms(layer int) normWeights {
@@ -128,11 +170,13 @@ func (m *Model) attentionNorms(layer int) normWeights {
 
 func (m *Model) mlpNorms(layer int) normWeights {
 	preName := layerName(layer, "post_attention_layernorm.weight")
+	preBiasName := layerName(layer, "post_attention_layernorm.bias")
 	if name := layerName(layer, "pre_feedforward_layernorm.weight"); m.has(name) {
 		preName = name
+		preBiasName = layerName(layer, "pre_feedforward_layernorm.bias")
 	}
 	pre := m.tensor(preName)
-	preBias := m.tensorOptional(strings.TrimSuffix(preName, ".weight") + ".bias")
+	preBias := m.tensorOptional(preBiasName)
 	post := pre
 	postBias := preBias
 	if name := layerName(layer, "post_feedforward_layernorm.weight"); m.has(name) {

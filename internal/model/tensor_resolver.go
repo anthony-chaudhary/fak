@@ -167,7 +167,7 @@ func resolveSpecFor(cfg Config) resolverSpec {
 // Called only inside the deepseek branch of resolveSpecFor, so it is already
 // gated to the DeepSeek family.
 func isDeepSeekV4(cfg Config) bool {
-	if strings.Contains(cfg.archFamilyKey(), "v4") {
+	if cfg.archFamilyHas("v4") {
 		return true
 	}
 	_, _, ok := cfg.V4CompressionRates()

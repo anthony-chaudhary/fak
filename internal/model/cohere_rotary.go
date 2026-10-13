@@ -67,7 +67,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"strings"
 )
 
 // newHFCheckpointModel builds a Model from a checkpoint that arrived in HUGGINGFACE
@@ -87,7 +86,7 @@ func newHFCheckpointModel(cfg Config, man map[string]tensorMeta, raw []byte) (*M
 // cohere2 do; every other family fak serves uses rotate_half, so this is exactly false
 // for them and the load path is byte-identical.
 func (c Config) usesCohereInterleavedRope() bool {
-	return strings.Contains(c.archFamilyKey(), "cohere")
+	return c.archFamilyHas("cohere")
 }
 
 // relayoutCohereRotaryTensors rewrites the head-local component order of every tensor on

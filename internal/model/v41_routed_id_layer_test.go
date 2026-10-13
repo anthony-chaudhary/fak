@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"math"
+	"os"
 	"reflect"
 	"testing"
 
@@ -167,6 +168,7 @@ func (b *v41RoutedIDTestBackend) V41ReadDeferred(statuses []compute.V41DeferredS
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime slow est=30s lane=default
 func TestV41RoutedLayerIDMatchesPerPick(t *testing.T) {
+	t.Setenv(v41RoutedIDEnv, "1")
 	const steps = 3
 	for _, fx := range []struct {
 		name  string
@@ -224,22 +226,43 @@ func TestV41RoutedLayerIDMatchesPerPick(t *testing.T) {
 	}
 }
 
+// The id arm is opt-in: unset, "0" or any value but "1" keeps the batched
+// layer on its per-pick dispatches even on an id-capable backend.
 // fak-test:runtime fast est=1s lane=default
-func TestV41RoutedIDEnvKeepsPerPickDispatches(t *testing.T) {
-	t.Setenv(v41RoutedIDEnv, "0")
-	m := v41IncrementalExpertFixture(t, true, false)
-	b := newV41RoutedIDTestBackend()
-	s, err := m.NewBackendSessionChecked(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	picks, x := v41RoutedLayerFaultPicks(m)
-	if _, outcome, err := s.v41RoutedLayerFunc()(0, picks, x); err != nil || outcome != v41RoutedExpertHandled {
-		t.Fatalf("outcome=%v err=%v", outcome, err)
-	}
-	if len(b.idCalls) != 0 {
-		t.Fatalf("%s=0 still issued id stages %v", v41RoutedIDEnv, b.idCalls)
+func TestV41RoutedIDDefaultsOffUntilOptedIn(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		value string
+		set   bool
+		id    bool
+	}{
+		{name: "unset"},
+		{name: "zero", value: "0", set: true},
+		{name: "other", value: "true", set: true},
+		{name: "opted_in", value: "1", set: true, id: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv(v41RoutedIDEnv, "")
+			if !c.set {
+				os.Unsetenv(v41RoutedIDEnv)
+			} else {
+				t.Setenv(v41RoutedIDEnv, c.value)
+			}
+			m := v41IncrementalExpertFixture(t, true, false)
+			b := newV41RoutedIDTestBackend()
+			s, err := m.NewBackendSessionChecked(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			picks, x := v41RoutedLayerFaultPicks(m)
+			if _, outcome, err := s.v41RoutedLayerFunc()(0, picks, x); err != nil || outcome != v41RoutedExpertHandled {
+				t.Fatalf("outcome=%v err=%v", outcome, err)
+			}
+			if got := b.idCalls["ids"] > 0; got != c.id {
+				t.Fatalf("id stages issued=%t want %t (%v)", got, c.id, b.idCalls)
+			}
+		})
 	}
 }
 
@@ -248,6 +271,7 @@ func TestV41RoutedIDEnvKeepsPerPickDispatches(t *testing.T) {
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime medium est=5s lane=default
 func TestV41RoutedLayerIDFaultAttribution(t *testing.T) {
+	t.Setenv(v41RoutedIDEnv, "1")
 	cases := []struct {
 		name       string
 		activation map[int]compute.V41RoutedSwiGLUStage

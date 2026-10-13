@@ -576,6 +576,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdModelLs(args)
 	case "route":
 		cmdRoute(args)
+	case "router":
+		cmdRouter(args)
 	case "execution-route":
 		cmdExecutionRoute(args)
 	case "llmd-smoke", "llm-d-smoke":
