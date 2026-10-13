@@ -151,6 +151,29 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				if !s.v41RoutedLayerRingFits(r, names) {
 					return false
 				}
+				// Protect the resident part of this exact demand set before its
+				// first miss can evict a later pick. These temporary holds do
+				// not stage bytes or change the pick/dispatch order; successful
+				// acquisition transfers protection to the existing weight holds.
+				var held []string
+				defer func() {
+					// A fail-closed stage may cancel the outer shared span, so
+					// reacquire the original ring just like weight releases do.
+					done := s.ringEnter(r)
+					defer done()
+					for i := len(held) - 1; i >= 0; i-- {
+						r.release(held[i])
+					}
+				}()
+				for _, triple := range names {
+					for _, name := range triple {
+						if w, ok := s.resolveExpertWeight(name); ok && r.isResident(w.halKey()) {
+							key := w.halKey()
+							r.hold(key)
+							held = append(held, key)
+						}
+					}
+				}
 			}
 			for slot := range picks {
 				gateW, releaseGate, upW, releaseUp, _, ok := expertInputDeviceAdmitted(s, names[slot][0], names[slot][1], x, H)

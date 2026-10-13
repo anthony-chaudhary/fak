@@ -234,6 +234,11 @@ func guardIssueCreatesInToolUse(use transcript.ToolUse) (int, bool) {
 	}
 }
 
+// Toolchain verbs that run no caller-chosen program unless -exec/-toolexec names one.
+var guardGoToolchainVerb = map[string]bool{
+	"build": true, "test": true, "vet": true, "fmt": true, "list": true, "mod": true, "env": true, "version": true,
+}
+
 var guardCommandWord = regexp.MustCompile(`"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+`)
 
 func guardIssueCreatesInCommand(command string) (int, bool) {
@@ -290,6 +295,15 @@ func guardIssueCreatesInArgv(argv []string, unwrap bool) (int, bool) {
 		}
 		return 0, false
 	case "go":
+		if len(argv) >= 2 && guardGoToolchainVerb[argv[1]] {
+			for _, arg := range argv[2:] {
+				flag := strings.TrimLeft(arg, "-")
+				if strings.HasPrefix(arg, "-") && (flag == "exec" || flag == "toolexec" || strings.HasPrefix(flag, "exec=") || strings.HasPrefix(flag, "toolexec=")) {
+					return 0, false
+				}
+			}
+			return 0, true
+		}
 		if len(argv) < 3 || argv[1] != "run" {
 			return 0, false
 		}

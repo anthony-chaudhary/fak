@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "fused-vulkan-slot-bytes-ok-locked",
+      "canonical": "fusedVulkanSlotBytesOKLocked",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Vulkan fused wrapper helper checking all selected weight-slot pointers have sufficient nominal resident buffer bytes while their live owners and command-stream lock are retained.",
+      "distinction": "These slots are expert weight bindings, unlike the scheduler Slot free/busy signal. The helper checks nominal bytes only and does not validate stale aliases, device generations, or dispatch-grid limits.",
+      "distinct_from": [
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "fusedVulkanSlotBytesOKLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

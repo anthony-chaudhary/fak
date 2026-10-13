@@ -53,11 +53,12 @@ type perfDetail struct {
 	src      perfSource
 }
 
-// perfSource is who sent a turn: the closed client class and whether the sender
-// marked it synthetic (a readiness canary or health probe).
+// perfSource carries the HTTP-edge observation: arrival time, closed client
+// class, and whether the sender marked a readiness canary or health probe.
 type perfSource struct {
 	client    string
 	synthetic bool
+	began     time.Time
 }
 
 type perfSourceKey struct{}
@@ -80,6 +81,13 @@ func perfSourceFrom(ctx context.Context) perfSource {
 	}
 	src, _ := ctx.Value(perfSourceKey{}).(perfSource)
 	return src
+}
+
+func (src perfSource) elapsed(fallback time.Duration) time.Duration {
+	if src.began.IsZero() {
+		return fallback
+	}
+	return time.Since(src.began)
 }
 
 func (src perfSource) apply(rec *perfledger.Record) {
@@ -229,7 +237,7 @@ func perfBuildVersion() string {
 }
 
 // setPerfIdentity installs the identity every later row carries; defaultModel
-// fills a row whose turn reported no model of its own.
+// fills a successful row whose turn reported no model of its own.
 func (m *gatewayMetrics) setPerfIdentity(defaultModel string, id perfledger.Identity) {
 	if m != nil {
 		m.perfServedBy.Store(&perfledger.ServedBy{Model: strings.TrimSpace(defaultModel), Identity: id})
@@ -244,15 +252,19 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		return
 	}
 	rec := perfledger.NewRecord(time.Now(), finishReason, loc.perfLabel(), promptTok, complTok, cachedTok, dur, ttft)
+	// Keep model phase/rate measurements on the planner clock. End-to-end time
+	// and the server's write deadline also include decoding and admission.
+	elapsed := max(detail.src.elapsed(dur), 0)
+	rec.E2EMS = float64(elapsed.Round(time.Microsecond)) / float64(time.Millisecond)
 	if detail.nativeLoop {
 		// An owned loop's client TTFT can span model/tool/model turns. Preserve it
 		// as client latency, but do not present it as an engine phase estimate.
 		rec.PrefillTPS, rec.DecodeTPS = 0, 0
 	}
-	if ttft <= 0 && m.pastWriteDeadline(dur) {
+	if ttft <= 0 && m.pastWriteDeadline(elapsed) {
 		// A buffered turn writes its body only after the planner returns; past the
 		// server's WriteTimeout that write is refused, so the client got nothing.
-		rec = perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), perfledger.ErrorClientWriteTimeout, 0, dur, 0)
+		rec = perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), perfledger.ErrorClientWriteTimeout, 0, elapsed, 0)
 	}
 	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
@@ -273,7 +285,7 @@ func (m *gatewayMetrics) recordPerfFailure(src perfSource, loc servingLocality, 
 	if m == nil {
 		return
 	}
-	rec := perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), errClass, status, dur, ttft)
+	rec := perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), errClass, status, src.elapsed(dur), ttft)
 	src.apply(&rec)
 	m.commitPerf(rec)
 }
@@ -281,7 +293,7 @@ func (m *gatewayMetrics) recordPerfFailure(src perfSource, loc servingLocality, 
 func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
 	if sb := m.perfServedBy.Load(); sb != nil {
 		rec.Identity = sb.Identity
-		if rec.Model == "" {
+		if rec.Model == "" && rec.Error == "" {
 			rec.Model = sb.Model
 		}
 	}
@@ -306,7 +318,7 @@ func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err 
 		// the client, the same first-token timeout the buffered watchdog reports.
 		class = perfledger.ErrorFirstTokenTimeout
 	}
-	elapsed := time.Since(began)
+	elapsed := perfSourceFrom(ctx).elapsed(time.Since(began))
 	status := http.StatusOK
 	switch {
 	case !committed && s.metrics.pastWriteDeadline(elapsed):
@@ -328,9 +340,9 @@ func (m *gatewayMetrics) setHTTPWriteTimeout(d time.Duration) {
 	}
 }
 
-// pastWriteDeadline reports that a turn which took dur (measured from the planner
-// call, so never longer than the handler) outlived the server's WriteTimeout, which
-// runs from the end of the request headers. Streams lift that deadline once their
+// pastWriteDeadline reports that a turn outlived the server's WriteTimeout.
+// HTTP callers include time since the request entered the handler, immediately
+// after its headers were read. Streams lift that deadline once their
 // SSE header is committed (clearStreamWriteDeadline); callers only ask for turns
 // that wrote nothing yet.
 func (m *gatewayMetrics) pastWriteDeadline(dur time.Duration) bool {

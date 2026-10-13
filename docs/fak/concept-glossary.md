@@ -1007,3 +1007,10 @@ V41SharedAttentionPlain is the V4.1 shared-attention native/shader ABI mode valu
 v41SharedAttentionRows is an internal model request descriptor containing borrowed window and compressed row slices, logically concatenated in that order, valid only during the synchronous attention callback. It does not own or cache the float data.
 
 **Distinct from:** Unlike V41SharedAttentionPlain, a numerical softmax mode selector, this type describes input row storage. Admission validates every original row before selection; resident staging materializes only missing upload runs and no-row-log fallback packs selected rows.
+
+
+### fusedVulkanSlotBytesOKLocked
+
+Vulkan fused wrapper helper checking all selected weight-slot pointers have sufficient nominal resident buffer bytes while their live owners and command-stream lock are retained.
+
+**Distinct from:** These slots are expert weight bindings, unlike the scheduler Slot free/busy signal. The helper checks nominal bytes only and does not validate stale aliases, device generations, or dispatch-grid limits.

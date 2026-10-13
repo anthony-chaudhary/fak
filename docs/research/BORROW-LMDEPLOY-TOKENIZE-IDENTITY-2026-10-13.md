@@ -1,0 +1,11 @@
+# Native tokenization model identity
+
+The native HTTP tokenization endpoint (`POST /v1/fak/tokenize`) should recognize the same loaded-model names as native chat. Callers using a case variant or a registry alias for the same artifact should receive a tokenization receipt. Unknown names, different sizes and different quantized artifacts remain rejected before prompt encoding.
+
+This adapts the endpoint-consistent base-model matching mechanism proposed in [InternLM/lmdeploy #5029](https://github.com/InternLM/lmdeploy/pull/5029), pinned to `c87878fa0fa77131bb454c2d5bba85f692cdeffb` (source commit **2026-10-13 10:30:00 UTC**, proposed and unmerged when inspected). Its [model_name.py](https://github.com/InternLM/lmdeploy/blob/c87878fa0fa77131bb454c2d5bba85f692cdeffb/lmdeploy/serve/core/model_name.py#L24) supplies shared base-model matching; [messages_count_tokens.py](https://github.com/InternLM/lmdeploy/blob/c87878fa0fa77131bb454c2d5bba85f692cdeffb/lmdeploy/serve/anthropic/endpoints/messages_count_tokens.py#L31) applies it to token-count diagnostics.
+
+**ADAPT, Apache-2.0.** Source attribution: Copyright (c) OpenMMLab. All rights reserved. [Pinned license](https://github.com/InternLM/lmdeploy/blob/c87878fa0fa77131bb454c2d5bba85f692cdeffb/LICENSE), SHA-256 `811e05b43b0d985814c7ffd0a1d0b93e9166e6f0271245d540302505734528ba`; model helper SHA-256 `f82e9c59d4dbd54d47c02c55cea7d71c312be8bb6785739b520de4f09844cb8d`.
+
+Fak reuses its existing `sameServedModel` matcher at request admission. This is an independently expressed Go adaptation of the mechanism, with no Python code or tests copied. The encoder's returned `ModelID` remains an exact comparison against the canonical served name: accepted request aliases do not relax authoritative encoder identity. This does not introduce comma-separated custom aliases or adapter matching.
+
+Acceptance uses actual loopback HTTP requests through the ordinary gateway `Handler`, a preparation-only encoder and zero completion/decode calls. `TestGatewayNativeTokenizeModelIdentity` covers seven identity cases; `TestGatewayNativeTokenizeNoDecode` and `TestChatCompletionsNativeEngineRegistryAliases` cover essential neighboring contracts. This is host software verification, with no hardware inference, throughput or model-quality claim.

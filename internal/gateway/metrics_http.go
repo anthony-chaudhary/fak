@@ -196,7 +196,9 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 			// progress wiring (ProgressHeartbeat ticks -> SetInflightProgress)
 			// can fold its ticks onto THIS request's row without a new side
 			// table; discovery is a single context read, no hot-path allocation.
-			r = r.WithContext(withPerfSource(withInflightID(r.Context(), liveID), perfSourceFromRequest(r)))
+			src := perfSourceFromRequest(r)
+			src.began = start
+			r = r.WithContext(withPerfSource(withInflightID(r.Context(), liveID), src))
 		}
 		traceID := ensureHTTPTrace(s, w, r)
 		rec, responseWriter := newStatusRecorder(w)
