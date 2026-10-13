@@ -14,7 +14,7 @@ import (
 // executable SPIR-V, source correspondence, or hardware qualification.
 func TestVulkanReceiptV16Current79Boundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV15(), "v41_shared_attention_fast")
-	if len(want) != 79 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV16(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+	if len(want) != 79 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV16(), want) || !reflect.DeepEqual(VulkanShaders[:79], want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest()[:79], want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 		t.Fatal("current builder does not use V15 plus the run-to-run shared attention module exactly once")
 	}
 	registry, err := vulkanRegistryV16.identity()

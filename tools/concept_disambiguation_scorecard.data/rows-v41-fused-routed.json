@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "v41-fused-supports-gate-up",
+      "canonical": "SupportsV41RoutedFusedGateUp (fused routed gate/up pipeline availability)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The optional backend predicate reports whether the loaded Vulkan bundle's fused routed-FFN gate/up module serves the given (gate, up) dtype pair, checked before a batched routed layer picks the two-dispatch fused path over the five-dispatch id path.",
+      "distinction": "It reports one dtype PAIR for the fused gate/up kernel; SupportsV41RoutedFusedDown reports the single down dtype of the companion kernel, and SupportsV41RoutedIDWeight reports the id path's per-projection dtypes. None of them reports model-execution fitness.",
+      "distinct_from": [
+        "v41-grouped-supports-q3k-matmul",
+        "halo-mtp-support-supportsq6kmatmul"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41RoutedFusedGateUp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "v41-fused-supports-down",
+      "canonical": "SupportsV41RoutedFusedDown (fused routed down/sum pipeline availability)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The optional backend predicate reports whether the loaded Vulkan bundle's fused routed-FFN down/sum module serves the given down-projection dtype, checked before a batched routed layer picks the two-dispatch fused path over the five-dispatch id path.",
+      "distinction": "It reports the single down dtype for the fused down/sum kernel; SupportsV41RoutedFusedGateUp reports the gate/up dtype pair of the companion kernel. It is a device-capability predicate, never a quality or correctness claim about fused output.",
+      "distinct_from": [
+        "v41-grouped-supports-q5k-matmul",
+        "v41-grouped-supports-q3k-matmul"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41RoutedFusedDown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "v41-fused-gate-up-swiglu-deferred",
+      "canonical": "V41RoutedGateUpSwiGLUDeferred (fused routed gate/up + SwiGLU dispatch)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The deferred device entrypoint that dispatches the fused routed gate/up module once over all picks of a step: it reads the shared device ids image, applies the SwiGLU activation in-kernel, and writes the gated mid rows for the down stage to consume.",
+      "distinction": "It is the fused two-dispatch producer of gated mid rows; V41RoutedDownSumDeferred is the fused consumer that reduces those rows and sums them into the layer output. Both replace the five-dispatch id path only when the fused capability predicates pass, and neither is a per-pick host-side expert loop.",
+      "distinct_from": [
+        "v41-fused-supports-gate-up",
+        "v41-fused-supports-down"
+      ],
+      "aliases": [],
+      "grounding": "V41RoutedGateUpSwiGLUDeferred",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

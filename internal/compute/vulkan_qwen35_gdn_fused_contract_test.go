@@ -76,7 +76,7 @@ func TestQwen35GDNQ8InputProjectionShimContract(t *testing.T) {
 	for _, token := range []string{
 		"K_QWEN35_GDN_Q8_IN_PROJ",
 		"case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV",
-		"static constexpr int MAX_DISPATCH_BUFS = 13;",
+		"static constexpr int MAX_DISPATCH_BUFS = 20;",
 		"P(\"qwen35_gdn_q8_in_proj.spv\"),",
 		"13, 5 * sizeof(int)) ? 1 : 0;",
 		"int fvk_qwen35_gdn_q8_in_proj_f32(",

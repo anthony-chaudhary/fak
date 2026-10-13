@@ -1,0 +1,163 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+// SignedZeroInfNanPreserve keeps the constant +0 start from folding away, so a
+// -0 first row still sums to +0 as add.comp's loaded accumulator does.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+
+// v41_routed_down_sum.comp - one dispatch per routed layer that folds the down GEMV,
+// the checked BF16 publication of every pick's down row and their routed sum into a
+// single `[hidden]` output (DeepSeek V4.1, fak-private#3341).
+//
+// ADAPT (MIT, Copyright (c) 2025-2026 antirez): antirez/ds4 ds4_cuda.cu
+// moe_down_sum_qwarp32_kernel @fc80bd695da76ee14bcb86820bf900a5cdfda806:23869 and
+// moe_down_q4K_sum6_qwarp32_kernel:24099 do the down projection plus the six-expert
+// sum. Here the Q3_K body and per-row accumulation order are
+// v41_q3k_matvec_id.comp's term for term, so each pick's down row is bitwise the id
+// path's, and the publication/sum terms are v41_routed_publish_sum.comp's, so each
+// pick's 16-byte status record and the summed `[hidden]` row are bitwise the id
+// path's.
+//
+// One thread owns one output row, so the k-quant reduction order is exactly the id
+// kernel's (no tree fold), and the sum of the picks is one sequential F32 add per
+// pick in ids order, exactly add.comp over a zeroed accumulator.
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer W0 { uint raw0[]; };
+layout(std430, set = 0, binding = 1) readonly buffer W1 { uint raw1[]; };
+layout(std430, set = 0, binding = 2) readonly buffer W2 { uint raw2[]; };
+layout(std430, set = 0, binding = 3) readonly buffer W3 { uint raw3[]; };
+layout(std430, set = 0, binding = 4) readonly buffer W4 { uint raw4[]; };
+layout(std430, set = 0, binding = 5) readonly buffer W5 { uint raw5[]; };
+layout(std430, set = 0, binding = 6) readonly buffer W6 { uint raw6[]; };
+layout(std430, set = 0, binding = 7) readonly buffer W7 { uint raw7[]; };
+layout(std430, set = 0, binding = 8) readonly buffer Mid { float mid[]; };
+layout(std430, set = 0, binding = 9) readonly buffer Ids { uint ids[]; };
+layout(std430, set = 0, binding = 10) writeonly buffer Sum { float sumOut[]; };
+// Native ownership fills 4*picks words with UINT32_MAX in the same command before
+// this dispatch. Per pick: magic, site, lowest fault lane, count.
+layout(std430, set = 0, binding = 11) buffer Status { uint status[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int midDim;
+    uint site;
+    uint picks;
+} pc;
+
+uint slot;
+
+uint wload(uint i) {
+    switch (slot) {
+    case 0u: return raw0[i];
+    case 1u: return raw1[i];
+    case 2u: return raw2[i];
+    case 3u: return raw3[i];
+    case 4u: return raw4[i];
+    case 5u: return raw5[i];
+    case 6u: return raw6[i];
+    default: return raw7[i];
+    }
+}
+
+uint byteAt(uint offset) {
+    uint word = wload(offset >> 2u);
+    return (word >> ((offset & 3u) * 8u)) & 255u;
+}
+
+uint leU32(uint offset) {
+    return byteAt(offset) | (byteAt(offset + 1u) << 8u) |
+           (byteAt(offset + 2u) << 16u) | (byteAt(offset + 3u) << 24u);
+}
+
+float halfAt(uint offset) {
+    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void unpackQ3KScales(uint sc, out int scales[16]) {
+    uint aux0 = leU32(sc);
+    uint aux1 = leU32(sc + 4u);
+    uint aux2 = leU32(sc + 8u);
+    uint tmp = aux2;
+    uint words[4];
+    words[0] = (aux0 & 0x0f0f0f0fu) | (((tmp)        & 0x03030303u) << 4u);
+    words[1] = (aux1 & 0x0f0f0f0fu) | (((tmp >> 2u)  & 0x03030303u) << 4u);
+    words[2] = ((aux0 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 4u) & 0x03030303u) << 4u);
+    words[3] = ((aux1 >> 4u) & 0x0f0f0f0fu) | (((tmp >> 6u) & 0x03030303u) << 4u);
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            uint b = (words[i] >> uint(8 * j)) & 0xffu;
+            scales[i * 4 + j] = (b >= 128u) ? int(b) - 256 : int(b);
+        }
+    }
+}
+
+// One Q3_K row of binding `sl`, term for term v41_q3k_matvec_id.comp.
+float q3kRow(uint sl, uint row, uint blocks, uint midBase) {
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        uint base = (row * blocks + sb) * 110u;
+        float d = halfAt(base + 108u);
+        uint hmBase = base;
+        uint qBase  = base + 32u;
+        uint scBase = base + 96u;
+        uint xBlock = midBase + sb * 256u;
+
+        int scales[16];
+        unpackQ3KScales(scBase, scales);
+
+        uint qi = 0u;
+        int si = 0;
+        uint m = 1u;
+        for (uint n = 0u; n < 256u; n += 128u) {
+            uint shift = 0u;
+            for (uint j = 0u; j < 4u; ++j) {
+                float dl0 = d * float(scales[si] - 32); si++;
+                for (uint l = 0u; l < 16u; ++l) {
+                    int code = int((byteAt(qBase + qi + l) >> shift) & 3u);
+                    if ((byteAt(hmBase + l) & m) == 0u) code -= 4;
+                    sum += dl0 * float(code) * mid[xBlock + n + j * 32u + l];
+                }
+                float dl1 = d * float(scales[si] - 32); si++;
+                for (uint l = 0u; l < 16u; ++l) {
+                    int code = int((byteAt(qBase + qi + 16u + l) >> shift) & 3u);
+                    if ((byteAt(hmBase + 16u + l) & m) == 0u) code -= 4;
+                    sum += dl1 * float(code) * mid[xBlock + n + j * 32u + 16u + l];
+                }
+                shift += 2u;
+                m <<= 1u;
+            }
+            qi += 32u;
+        }
+    }
+    return sum;
+}
+
+uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim);
+    if (row >= outDim) return;
+    uint picks = pc.picks;
+    for (uint p = 0u; p < picks; ++p) {
+        status[4u * p] = 0x42463143u;
+        status[4u * p + 1u] = pc.site;
+        status[4u * p + 3u] = outDim;
+    }
+    uint blocks = uint(pc.midDim) / 256u;
+    precise float acc = 0.0;
+    for (uint j = 0u; j < picks; ++j) {
+        uint p = ids[2u * picks + j];
+        slot = ids[p];
+        float d = q3kRow(slot, row, blocks, p * uint(pc.midDim));
+        uint bits = floatBitsToUint(d);
+        uint rounded = roundBF16(bits);
+        if ((bits & 0x7f800000u) == 0x7f800000u ||
+            (rounded & 0x7f800000u) == 0x7f800000u) {
+            atomicMin(status[4u * p + 2u], row);
+        }
+        acc = acc + uintBitsToFloat(rounded);
+    }
+    sumOut[row] = acc;
+}
