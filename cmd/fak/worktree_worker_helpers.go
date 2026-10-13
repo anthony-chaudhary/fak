@@ -166,7 +166,8 @@ func worktreeWorkerGitOutputContext(ctx context.Context, dir string, args ...str
 		}
 		return "", fmt.Errorf("%s", detail)
 	}
-	return strings.TrimSpace(string(out)), nil
+	// Porcelain status uses leading spaces as fixed-width status columns.
+	return strings.TrimRight(string(out), "\r\n"), nil
 }
 
 func worktreeWorkerDirtyPaths(status string) []string {
