@@ -193,8 +193,27 @@ func TestV41RoutedLayerIDMatchesPerPick(t *testing.T) {
 			}
 			defer sp.Close()
 			prompt := []int{1, 2, 3}
-			got := v41RoutedLayerSteps(t, si, prompt, steps)
-			want := v41RoutedLayerSteps(t, sp, prompt, steps)
+			idLast := si.Prefill(prompt)
+			perPickLast := sp.Prefill(prompt)
+			if !reflect.DeepEqual(idLast, perPickLast) {
+				t.Fatal("prefill logits differ between the id arm and the per-pick arm")
+			}
+			if len(idb.pending) != 0 || len(idb.multiPending) != 0 || len(perPick.pending) != 0 {
+				t.Fatalf("prefill left deferred records unread: id=%d/%d per-pick=%d", len(idb.pending), len(idb.multiPending), len(perPick.pending))
+			}
+			idb.deferredReads, idb.calls, idb.publishes = 0, 0, 0
+			idb.idCalls = map[string]int{}
+			perPick.deferredReads, perPick.calls, perPick.publishes = 0, 0, 0
+			decodeSteps := func(s *Session, last []float32) [][]float32 {
+				out := make([][]float32, 0, steps+1)
+				for i := 0; i < steps; i++ {
+					out = append(out, append([]float32(nil), last...))
+					last = s.Step(argmaxF32(last))
+				}
+				return append(out, append([]float32(nil), last...))
+			}
+			got := decodeSteps(si, idLast)
+			want := decodeSteps(sp, perPickLast)
 			for i := range want {
 				if !reflect.DeepEqual(got[i], want[i]) {
 					t.Fatalf("window %d logits differ between the id arm and the per-pick arm", i)

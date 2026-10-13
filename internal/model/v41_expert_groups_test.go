@@ -25,11 +25,102 @@ package model
 //     duplicate experts / repeated routes do not double-count.
 
 import (
+	"errors"
 	"math"
+	"os"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+type v41ExpertPanelRecorder struct {
+	*v41RoutedIDTestBackend
+	panels         int
+	panelPicks     []int
+	panelSlots     [][]int
+	panelWeights   [][]float32
+	panelInputs    [][]float32
+	injectVerdict  error
+	poisonReadback bool
+	borrowed       []float32
+	poisons        int
+}
+
+func newV41ExpertPanelRecorder() *v41ExpertPanelRecorder {
+	b := newV41RoutedIDTestBackend()
+	b.verdictFailure = map[float32]error{}
+	return &v41ExpertPanelRecorder{v41RoutedIDTestBackend: b}
+}
+
+func (b *v41ExpertPanelRecorder) V41RoutedIDs(slots []int, weights []float32, order []int) (compute.Tensor, error) {
+	if b.poisonReadback && b.borrowed != nil {
+		for i := range b.borrowed {
+			b.borrowed[i] = float32(math.Inf(1))
+		}
+		b.borrowed = nil
+		b.poisons++
+	}
+	b.panelPicks = append(b.panelPicks, len(slots))
+	b.panelSlots = append(b.panelSlots, append([]int(nil), slots...))
+	b.panelWeights = append(b.panelWeights, append([]float32(nil), weights...))
+	if b.injectVerdict != nil && len(weights) > 0 {
+		b.verdictFailure[weights[0]] = b.injectVerdict
+	}
+	return b.v41RoutedIDTestBackend.V41RoutedIDs(slots, weights, order)
+}
+
+func (b *v41ExpertPanelRecorder) V41MatVecID(weights []compute.Tensor, ids compute.Tensor, picks int, x compute.Tensor) (compute.Tensor, error) {
+	if b.idCalls["matvec"]%3 == 0 {
+		b.panelInputs = append(b.panelInputs, append([]float32(nil), b.Backend.Read(x)...))
+	}
+	return b.v41RoutedIDTestBackend.V41MatVecID(weights, ids, picks, x)
+}
+
+func (b *v41ExpertPanelRecorder) V41ReadDeferred(statuses []compute.V41DeferredStatus, rows []compute.Tensor) ([]error, [][]float32, error) {
+	if len(statuses) == 2 && statuses[0].Records > 0 && len(rows) == 1 {
+		b.panels++
+	}
+	verdicts, values, err := b.v41RoutedIDTestBackend.V41ReadDeferred(statuses, rows)
+	if err == nil && b.poisonReadback && len(values) == 1 {
+		b.borrowed = values[0]
+	}
+	return verdicts, values, err
+}
+
+// v41IDWithoutDeferredBackend advertises routed-ID but deliberately omits the
+// deferred-status interface. Its routed-ID operations must remain untouched:
+// grouped prefill must decline the panel before staging or dispatching it.
+type v41IDWithoutDeferredBackend struct {
+	compute.Backend
+	idCalls int
+}
+
+func (b *v41IDWithoutDeferredBackend) Caps() compute.Caps {
+	caps := b.Backend.Caps()
+	caps.DeviceMemory = true
+	return caps
+}
+
+func (b *v41IDWithoutDeferredBackend) V41RoutedIDAvailable() bool { return true }
+func (b *v41IDWithoutDeferredBackend) SupportsV41RoutedIDWeight(compute.Dtype) bool {
+	return true
+}
+func (b *v41IDWithoutDeferredBackend) V41RoutedIDs([]int, []float32, []int) (compute.Tensor, error) {
+	b.idCalls++
+	return compute.Tensor{}, errors.New("unexpected routed-ID dispatch")
+}
+func (b *v41IDWithoutDeferredBackend) V41MatVecID([]compute.Tensor, compute.Tensor, int, compute.Tensor) (compute.Tensor, error) {
+	b.idCalls++
+	return compute.Tensor{}, errors.New("unexpected routed-ID dispatch")
+}
+func (b *v41IDWithoutDeferredBackend) V41RoutedSwiGLUIDDeferred(compute.Tensor, compute.Tensor, compute.Tensor, int, float32) (compute.Tensor, compute.V41DeferredStatus, error) {
+	b.idCalls++
+	return compute.Tensor{}, compute.V41DeferredStatus{}, errors.New("unexpected routed-ID dispatch")
+}
+func (b *v41IDWithoutDeferredBackend) V41RoutedPublishSumDeferred(compute.Tensor, compute.Tensor, int, uint32) (compute.Tensor, compute.V41DeferredStatus, error) {
+	b.idCalls++
+	return compute.Tensor{}, compute.V41DeferredStatus{}, errors.New("unexpected routed-ID dispatch")
+}
 
 // v41GroupPicks builds a deterministic per-token pick set that cycles through a
 // declared expert pool with a declared per-token window, so alternating routes
@@ -444,6 +535,216 @@ func TestV41ExpertGroupsDeviceSeam(t *testing.T) {
 			for pos := range devAct.Logits {
 				assertV41LogitsClose(t, devAct.Logits[pos], hostAct.Logits[pos],
 					"grouped device Q2_K gate/up + host Q3_K down vs host triple")
+			}
+		})
+	}
+}
+
+// TestV41ExpertGroupsRoutedIDPanels is the grouped-prefill counterpart to the
+// decode-layer routed-ID witness. Rows for one expert share its held Q2_K/Q3_K
+// projections, while each row keeps its own activation and route weight. The
+// panel must publish behind one deferred read, then replay the returned rows by
+// their original (token, slot) keys without changing BF16-visible logits.
+// fak-test:runtime slow est=30s lane=default
+func TestV41ExpertGroupsRoutedIDPanels(t *testing.T) {
+	t.Setenv(v41RoutedIDEnv, "1")
+	ids := []int{0, 1, 2, 3, 4, 5, 6, 7}
+	panelModel, rowModel := v41PinnedSlateFixture(t, false), v41PinnedSlateFixture(t, false)
+	panelBackend := newV41ExpertPanelRecorder()
+	panelBackend.poisonReadback = true
+	panelSession, err := panelModel.NewBackendSessionChecked(panelBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer panelSession.Close()
+	rowBackend := newV41RoutedLayerTestBackend()
+	rowSession, err := rowModel.NewBackendSessionChecked(rowBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rowSession.Close()
+
+	panelState := panelSession.v41State()
+	panelState.sharedActivation = nil
+	panelState.routedSum = nil
+	got, err := panelModel.forwardV41(ids, panelState)
+	if err != nil {
+		t.Fatalf("panel prefill: %v", err)
+	}
+	rowState := rowSession.v41State()
+	rowState.sharedActivation = nil
+	rowState.routedSum = nil
+	want, err := rowModel.forwardV41(ids, rowState)
+	if err != nil {
+		t.Fatalf("per-row prefill: %v", err)
+	}
+	if len(got.Logits) != len(want.Logits) {
+		t.Fatalf("panel returned %d logit rows, want %d", len(got.Logits), len(want.Logits))
+	}
+	for pos := range want.Logits {
+		if !v41SameBits(got.Logits[pos], want.Logits[pos]) {
+			t.Fatalf("position %d: routed-ID panel changed BF16-visible logits", pos)
+		}
+	}
+	if panelBackend.panels == 0 || len(panelBackend.panelPicks) != panelBackend.panels {
+		t.Fatalf("routed-ID panels=%d ids=%d, want one ids image and read per panel", panelBackend.panels, len(panelBackend.panelPicks))
+	}
+	if panelBackend.idCalls["matvec"] != 3*panelBackend.panels || panelBackend.idCalls["swiglu"] != panelBackend.panels {
+		t.Fatalf("panel calls matvec=%d swiglu=%d panels=%d, want three projections and one activation per panel",
+			panelBackend.idCalls["matvec"], panelBackend.idCalls["swiglu"], panelBackend.panels)
+	}
+	if panelBackend.deferredReads != panelBackend.panels || panelBackend.publishes != panelBackend.panels {
+		t.Fatalf("panel reads=%d publishes=%d panels=%d, want exactly one deferred read and publication per panel",
+			panelBackend.deferredReads, panelBackend.publishes, panelBackend.panels)
+	}
+	if panelBackend.poisons == 0 {
+		t.Fatal("readback storage was never reused and poisoned; owned-row witness is vacuous")
+	}
+	multi, diverseInputs, diverseWeights := false, false, false
+	for i, picks := range panelBackend.panelPicks {
+		if picks < 2 || picks > compute.V41RoutedIDMaxPicks {
+			t.Fatalf("panel %d has %d rows, want 2..%d", i, picks, compute.V41RoutedIDMaxPicks)
+		}
+		if picks > 1 {
+			multi = true
+		}
+		for _, slot := range panelBackend.panelSlots[i] {
+			if slot != 0 {
+				t.Fatalf("same-expert panel %d used weight-table slot %d, want shared slot 0", i, slot)
+			}
+		}
+		if picks > 1 {
+			width := len(panelBackend.panelInputs[i]) / picks
+			for p := 1; p < picks; p++ {
+				for lane := 0; lane < width; lane++ {
+					if math.Float32bits(panelBackend.panelInputs[i][lane]) != math.Float32bits(panelBackend.panelInputs[i][p*width+lane]) {
+						diverseInputs = true
+						break
+					}
+				}
+				if math.Float32bits(panelBackend.panelWeights[i][0]) != math.Float32bits(panelBackend.panelWeights[i][p]) {
+					diverseWeights = true
+				}
+			}
+		}
+	}
+	if !multi {
+		t.Fatal("fixture produced no multi-row expert panel; batching witness is vacuous")
+	}
+	if !diverseInputs || !diverseWeights {
+		t.Fatalf("same-expert panels did not retain distinct row payloads and weights: inputs=%v weights=%v", diverseInputs, diverseWeights)
+	}
+}
+
+// TestV41ExpertGroupsRoutedIDPanelFailureDoesNotReplay pins the selected-work
+// boundary: once the panel has dispatched, a deferred numeric verdict closes
+// the session and returns the typed failure. It must never retry rows through
+// the historical per-row or host expert paths.
+// fak-test:runtime slow est=15s lane=default
+func TestV41ExpertGroupsRoutedIDPanelFailureDoesNotReplay(t *testing.T) {
+	t.Setenv(v41RoutedIDEnv, "1")
+	m := v41PinnedSlateFixture(t, false)
+	b := newV41ExpertPanelRecorder()
+	b.injectVerdict = errors.New("panel verdict")
+	s, err := m.NewBackendSessionChecked(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.forwardV41([]int{1, 2, 3, 4}, s.v41State())
+	var closed *BackendForwardOperationError
+	if !errors.As(err, &closed) || !s.BackendSessionClosed() {
+		t.Fatalf("selected panel verdict did not close the session: err=%v closed=%v", err, s.BackendSessionClosed())
+	}
+	if b.panels != 1 || b.idCalls["ids"] != 1 {
+		t.Fatalf("selected panel failure replayed work: panels=%d ids=%d, want one attempted panel", b.panels, b.idCalls["ids"])
+	}
+}
+
+// TestV41ExpertGroupsRoutedIDPanelDeclinesBeforeDispatch proves interface
+// admission is atomic. Routed-ID without deferred status cannot form a checked
+// panel, so the existing grouped entrypoint must use its ordinary fallback and
+// never touch an ID upload or projection.
+// fak-test:runtime slow est=15s lane=default
+func TestV41ExpertGroupsRoutedIDPanelDeclinesBeforeDispatch(t *testing.T) {
+	t.Setenv(v41RoutedIDEnv, "1")
+	m := v41PinnedSlateFixture(t, false)
+	host, err := m.forwardV41([]int{1, 2, 3, 4}, (&Session{M: m}).v41State())
+	if err != nil {
+		t.Fatalf("host grouped prefill: %v", err)
+	}
+	b := &v41IDWithoutDeferredBackend{Backend: compute.Default()}
+	s := &Session{M: m, Backend: b, halW: map[string]compute.Tensor{}}
+	got, err := m.forwardV41([]int{1, 2, 3, 4}, s.v41State())
+	if err != nil {
+		t.Fatalf("unsupported panel fallback: %v", err)
+	}
+	if b.idCalls != 0 {
+		t.Fatalf("missing deferred-status interface reached %d routed-ID operations, want zero", b.idCalls)
+	}
+	for pos := range host.Logits {
+		if !v41SameBits(got.Logits[pos], host.Logits[pos]) {
+			t.Fatalf("position %d: pre-dispatch panel decline changed fallback logits", pos)
+		}
+	}
+}
+
+// TestV41ExpertGroupsRoutedIDPanelRequiresOptIn keeps the unqualified panel
+// geometry behind the established routed-ID opt-in. Unset and explicit-off
+// sessions must use the legacy grouped path without any panel ID operation.
+// fak-test:runtime slow est=30s lane=default
+func TestV41ExpertGroupsRoutedIDPanelRequiresOptIn(t *testing.T) {
+	original, hadOriginal := os.LookupEnv(v41RoutedIDEnv)
+	t.Cleanup(func() {
+		if hadOriginal {
+			_ = os.Setenv(v41RoutedIDEnv, original)
+		} else {
+			_ = os.Unsetenv(v41RoutedIDEnv)
+		}
+	})
+	for _, tc := range []struct {
+		name  string
+		value *string
+	}{
+		{name: "unset"},
+		{name: "off", value: func() *string { value := "0"; return &value }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.value == nil {
+				_ = os.Unsetenv(v41RoutedIDEnv)
+			} else {
+				_ = os.Setenv(v41RoutedIDEnv, *tc.value)
+			}
+			ids := []int{1, 2, 3, 4}
+			panelModel, rowModel := v41PinnedSlateFixture(t, false), v41PinnedSlateFixture(t, false)
+			panelBackend := newV41ExpertPanelRecorder()
+			panelSession, err := panelModel.NewBackendSessionChecked(panelBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer panelSession.Close()
+			rowBackend := newV41RoutedLayerTestBackend()
+			rowSession, err := rowModel.NewBackendSessionChecked(rowBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rowSession.Close()
+
+			got, err := panelModel.forwardV41(ids, panelSession.v41State())
+			if err != nil {
+				t.Fatalf("legacy grouped prefill: %v", err)
+			}
+			want, err := rowModel.forwardV41(ids, rowSession.v41State())
+			if err != nil {
+				t.Fatalf("legacy row prefill: %v", err)
+			}
+			if panelBackend.panels != 0 || len(panelBackend.panelPicks) != 0 || panelBackend.idCalls["ids"] != 0 || panelBackend.idCalls["matvec"] != 0 || panelBackend.idCalls["swiglu"] != 0 {
+				t.Fatalf("disabled panel had effects: panels=%d picks=%d ids=%d matvec=%d swiglu=%d",
+					panelBackend.panels, len(panelBackend.panelPicks), panelBackend.idCalls["ids"], panelBackend.idCalls["matvec"], panelBackend.idCalls["swiglu"])
+			}
+			for pos := range want.Logits {
+				if !v41SameBits(got.Logits[pos], want.Logits[pos]) {
+					t.Fatalf("position %d: disabled panel changed legacy logits", pos)
+				}
 			}
 		})
 	}

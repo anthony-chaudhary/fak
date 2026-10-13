@@ -326,6 +326,205 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 	}
 }
 
+// v41RoutedExpertPanel runs up to one routed-ID slot-table width of rows for
+// the same expert. The table has one held gate/up/down triple and every id maps
+// to slot zero; activations and route weights remain distinct per row. Decline
+// is possible only before any selected device operation.
+func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float32, routeWeights []float32, publish v41BF16BoundaryFunc) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory || !v41RoutedIDOptedIn() {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+	idBackend, idOK := s.Backend.(compute.V41RoutedIDBackend)
+	deferred, deferredOK := s.Backend.(compute.V41DeferredStatusBackend)
+	if !idOK || !deferredOK || !idBackend.V41RoutedIDAvailable() {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+	cfg := s.M.Cfg
+	full, geometryErr := v41ForwardGeometry(cfg)
+	H, I, picks := cfg.HiddenSize, cfg.MoEIntermediateSize, len(inputs)
+	if geometryErr != nil || !full || picks < 2 || picks > compute.V41RoutedIDMaxPicks || len(routeWeights) != picks || !deferred.SupportsV41DeferredStatus(picks*H) {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+	limit := float32(cfg.SwigluLimit)
+	for p := range inputs {
+		if len(inputs[p]) != H || !finite32(routeWeights[p]) || !finite32(limit) {
+			return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
+		}
+	}
+	gateName := layerName(layer, stem+".w1.weight")
+	upName := layerName(layer, stem+".w3.weight")
+	downName := layerName(layer, stem+".w2.weight")
+	if s.M.has(downName[:len(downName)-len("weight")] + "bias") {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+	s.ensureOpenBackendSession()
+	stage := "gate/up"
+	closeFailure := func(err error) error {
+		closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert-panel", Layer: layer, Stage: stage, Cause: err}
+		s.halFailure = closed
+		s.Close()
+		return closed
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err, isErr := r.(error)
+			if isErr {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
+				}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
+					result, outcome, cause = nil, v41RoutedExpertError, closeFailure(err)
+					return
+				}
+			}
+			if converted, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if isErr {
+					converted = err
+				}
+				result, outcome, cause = nil, v41RoutedExpertError, closeFailure(converted)
+				return
+			}
+			if !isErr {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
+		}
+	}()
+
+	gateW, releaseGate, upW, releaseUp, _, ok := expertInputDeviceAdmitted(s, gateName, upName, inputs[0], H)
+	if !ok {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+	defer releaseGate()
+	defer releaseUp()
+	downW, releaseDown, ok := s.q4kExpertDownDeviceWeight(downName)
+	if !ok {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+	defer releaseDown()
+	if !idBackend.SupportsV41RoutedIDWeight(gateW.Dtype) || !idBackend.SupportsV41RoutedIDWeight(upW.Dtype) || !idBackend.SupportsV41RoutedIDWeight(downW.Dtype) ||
+		len(gateW.Shape) != 2 || gateW.Shape[0] != I || gateW.Shape[1] != H ||
+		len(upW.Shape) != 2 || upW.Shape[0] != I || upW.Shape[1] != H ||
+		len(downW.Shape) != 2 || downW.Shape[0] != H || downW.Shape[1] != I {
+		return nil, v41RoutedExpertDeclined, nil
+	}
+
+	flatInput := make([]float32, 0, picks*H)
+	for _, input := range inputs {
+		row, err := v41RoutedBF16Publish(layer, "gate/up", input, H, publish)
+		if err != nil {
+			return nil, v41RoutedExpertError, err
+		}
+		flatInput = append(flatInput, row...)
+	}
+	var owned []compute.Tensor
+	defer func() {
+		for i := len(owned) - 1; i >= 0; i-- {
+			s.Backend.Free(owned[i])
+		}
+	}()
+	var statuses []compute.V41DeferredStatus
+	consumed := false
+	defer func() {
+		if !consumed {
+			for _, status := range statuses {
+				s.Backend.Free(status.Record)
+			}
+		}
+	}()
+	xd := s.uploadHostF32([]int{picks * H}, flatInput, compute.MemoryActivation, "moe expert input panel")
+	owned = append(owned, xd)
+	slots, order := make([]int, picks), make([]int, picks)
+	for p := range order {
+		order[p] = p
+	}
+	ids, err := idBackend.V41RoutedIDs(slots, routeWeights, order)
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	owned = append(owned, ids)
+	g, err := idBackend.V41MatVecID([]compute.Tensor{gateW}, ids, picks, xd)
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	owned = append(owned, g)
+	u, err := idBackend.V41MatVecID([]compute.Tensor{upW}, ids, picks, xd)
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	owned = append(owned, u)
+	stage = "activation"
+	opened := s.M.v41NowNanos()
+	activation, activationStatus, err := idBackend.V41RoutedSwiGLUIDDeferred(g, u, ids, picks, limit)
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	owned, statuses = append(owned, activation), append(statuses, activationStatus)
+	stage = "down"
+	down, err := idBackend.V41MatVecID([]compute.Tensor{downW}, ids, picks, activation)
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	owned = append(owned, down)
+	published, publishStatus, err := deferred.V41BF16PublishDeferred(down, compute.V41BF16PublishRoutedDown)
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	owned, statuses = append(owned, published), append(statuses, publishStatus)
+	if published.Buf() == nil || published.Buf() == down.Buf() || published.Dtype != compute.F32 || len(published.Shape) != 1 || published.Shape[0] != picks*H {
+		return nil, v41RoutedExpertError, closeFailure(errV41BF16BoundaryResult)
+	}
+	stage = "readback"
+	consumed = true
+	verdicts, rows, err := deferred.V41ReadDeferred(statuses, []compute.Tensor{published})
+	if err != nil {
+		return nil, v41RoutedExpertError, closeFailure(err)
+	}
+	if len(verdicts) != picks+1 || len(rows) != 1 || len(rows[0]) != picks*H {
+		return nil, v41RoutedExpertError, closeFailure(errV41ExpertResult)
+	}
+	publishFaultRow := -1
+	if verdicts[picks] != nil {
+		publishFaultRow = 0
+		var numeric *compute.V41BF16CheckedArithmeticError
+		if errors.As(verdicts[picks], &numeric) && numeric.Index >= 0 {
+			publishFaultRow = numeric.Index / H
+			if publishFaultRow >= picks {
+				return nil, v41RoutedExpertError, closeFailure(errV41ExpertResult)
+			}
+		}
+	}
+	result = make([][]float32, picks)
+	for p := 0; p < picks; p++ {
+		stage = "activation"
+		if err := verdicts[p]; err != nil {
+			var fault *compute.V41RoutedSwiGLUFault
+			if errors.As(err, &fault) {
+				faultStage := "gate/up"
+				if fault.Stage == compute.V41RoutedSwiGLUStageDownOperand {
+					faultStage = "down"
+				}
+				return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, faultStage, errV41ExpertResult)
+			}
+			return nil, v41RoutedExpertError, closeFailure(err)
+		}
+		s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(p, opened))
+		stage = "down"
+		if publishFaultRow == p {
+			var numeric *compute.V41BF16CheckedArithmeticError
+			if errors.As(verdicts[picks], &numeric) {
+				return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+			}
+			return nil, v41RoutedExpertError, closeFailure(verdicts[picks])
+		}
+		result[p] = append([]float32(nil), rows[0][p*H:(p+1)*H]...)
+	}
+	return result, v41RoutedExpertHandled, nil
+}
+
 // v41RoutedLayerWeights is one pick's staged and held device projections.
 type v41RoutedLayerWeights struct{ gate, up, down compute.Tensor }
 

@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41_expert_groups.go -- bounded grouped execution of the V4.1 prefill MoE
@@ -186,6 +188,48 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 			w1, w3, w2  []float32
 			tripleReady bool
 		)
+		if full && st != nil && st.callbackOwner != nil {
+			panelHandled := false
+			for first := 0; first < len(g.Rows); first += compute.V41RoutedIDMaxPicks {
+				last := min(first+compute.V41RoutedIDMaxPicks, len(g.Rows))
+				inputs := make([][]float32, last-first)
+				weights := make([]float32, last-first)
+				for p, row := range g.Rows[first:last] {
+					inputs[p] = xnByToken[row.Token]
+					weights[p] = perTokenPicks[row.Token][row.Slot].weight
+				}
+				rows, outcome, cause := st.callbackOwner.v41RoutedExpertPanel(l, stem, inputs, weights, st.gatherOps.bf16PublishFunc())
+				switch outcome {
+				case v41RoutedExpertHandled:
+					if cause != nil || len(rows) != len(inputs) {
+						return v41ExpertOperationErr(l, "down", errV41ExpertResult)
+					}
+					panelHandled = true
+					for p, row := range g.Rows[first:last] {
+						if len(rows[p]) != H {
+							return v41ExpertOperationErr(l, "down", errV41ExpertResult)
+						}
+						unweighted[row.Token][row.Slot] = rows[p]
+						m.v41NoteExpertContraction()
+					}
+				case v41RoutedExpertError:
+					if cause == nil {
+						cause = v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+					}
+					return cause
+				case v41RoutedExpertDeclined:
+					if panelHandled {
+						return v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+					}
+					first = len(g.Rows)
+				default:
+					return v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+				}
+			}
+			if panelHandled {
+				continue
+			}
+		}
 		for _, row := range g.Rows {
 			xn := xnByToken[row.Token]
 			if full {
