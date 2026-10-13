@@ -37,6 +37,25 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "v41-fused-gate-up-swiglu-deferred",
+      "canonical": "V41RoutedGateUpSwiGLUDeferred (fused routed gate/up + SwiGLU dispatch)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The deferred device entrypoint that dispatches the fused routed gate/up module once over all picks of a step: it reads the shared device ids image, applies the SwiGLU activation in-kernel, and writes the gated mid rows for the down stage to consume.",
+      "distinction": "It is the fused two-dispatch producer of gated mid rows; V41RoutedDownSumDeferred is the fused consumer that reduces those rows and sums them into the layer output. Both replace the five-dispatch id path only when the fused capability predicates pass, and neither is a per-pick host-side expert loop.",
+      "distinct_from": [
+        "v41-fused-supports-gate-up",
+        "v41-fused-supports-down"
+      ],
+      "aliases": [],
+      "grounding": "V41RoutedGateUpSwiGLUDeferred",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }
