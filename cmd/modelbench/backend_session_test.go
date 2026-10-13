@@ -649,3 +649,166 @@ func TestPreflightInputForResolvesSingleResidencyOnIntegratedTier(t *testing.T) 
 		t.Fatal("discrete tier armed the single-residency release")
 	}
 }
+
+type benchPrefillObservationBackend struct {
+	benchObservedBackend
+	mode          string
+	snapshotCalls []int
+}
+
+func (b *benchPrefillObservationBackend) BackendExecutionSnapshot() (compute.BackendExecutionSnapshot, error) {
+	b.snapshotCalls = append(b.snapshotCalls, b.matmuls)
+	if b.mode == "error" {
+		return compute.BackendExecutionSnapshot{}, errors.New("fixture observation unavailable")
+	}
+	n := uint64(b.matmuls)
+	s := compute.BackendExecutionSnapshot{
+		Identity:                 compute.BackendRuntimeIdentity{Backend: b.Name(), Device: "fixture-device", Driver: "fixture-driver", Runtime: "fixture-runtime"},
+		TransferCountersObserved: b.mode != "transfer_unobserved" && b.mode != "zero_profile",
+		Counters: compute.BackendCounterSnapshot{
+			ComputeDispatches: 1000 + n, OtherDispatches: 1000 + n, DispatchSubmits: 2000 + n,
+			H2DCount: 3000 + n, H2DBytes: 12000 + 4*n,
+			Q4KStageCalls: 4000 + n, Q4KStageBytes: 16000 + 4*n,
+			TensorHomeHits: 5000 + n, TensorHomeAdmissions: 6000 + n,
+			TensorHomeBypasses: 7000 + n, TensorHomeCopiedBytes: 28000 + 4*n,
+		},
+	}
+	if b.mode == "zero_profile" {
+		s.Counters.ComputeDispatches, s.Counters.OtherDispatches, s.Counters.DispatchSubmits = 0, 0, 0
+	}
+	if b.mode == "zero_compute" {
+		s.Counters.ComputeDispatches, s.Counters.OtherDispatches = 1000, 1000
+	}
+	if b.mode == "zero_submits" {
+		s.Counters.DispatchSubmits = 2000
+	}
+	if len(b.snapshotCalls) == 2 {
+		if b.mode == "after_error" {
+			return compute.BackendExecutionSnapshot{}, errors.New("fixture closing observation unavailable")
+		}
+		if b.mode == "reset" {
+			s.Counters.ComputeDispatches = 999
+		}
+		if b.mode == "identity" {
+			s.Identity.Device = "different-device"
+		}
+	}
+	return s, nil
+}
+
+// fak-test:runtime medium est=2s
+func TestModelbenchInitialPrefillObservation(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	ref, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("CPU reference backend missing")
+	}
+	m := model.NewSynthetic(model.Config{HiddenSize: 16, NumLayers: 1, NumHeads: 4, NumKVHeads: 2, HeadDim: 4, IntermediateSize: 32, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1})
+	defer m.CloseWeights()
+	oracleBackend := &benchObservedBackend{Backend: ref}
+	oracleFlags := testCompleteBenchFlags()
+	*oracleFlags.decodePrompt = 3
+	oracle := newBenchSession(m, oracleFlags, oracleBackend)
+	_ = oracle.Prefill(lcgIDs(3, m.Cfg.VocabSize))
+	prefillCalls := oracleBackend.matmuls
+	oracle.Close()
+	if prefillCalls == 0 {
+		t.Fatal("oracle fixture bypassed actual HAL")
+	}
+	for _, mode := range []string{"observed", "reset", "identity", "error", "after_error", "unsupported", "zero_profile", "zero_compute", "zero_submits", "transfer_unobserved"} {
+		t.Run(mode, func(t *testing.T) {
+			be := &benchPrefillObservationBackend{benchObservedBackend: benchObservedBackend{Backend: ref}, mode: mode}
+			var selected compute.Backend = be
+			if mode == "unsupported" {
+				selected = &benchObservedBackend{Backend: ref}
+			}
+			compute.Register(selected)
+			t.Cleanup(func() { compute.Register(ref) })
+			f := testCompleteBenchFlags()
+			*f.backendName, *f.decodePrompt, *f.smokeDecodeSteps = "cpu-ref", 3, 1
+			*f.out = filepath.Join(t.TempDir(), "observation.json")
+			exitCode := 0
+			f.processExit = func(code int) { exitCode = code }
+			runSmoke(f, m, "fixture", 12345, m.Cfg.VocabSize)
+			raw, err := os.ReadFile(*f.out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var report map[string]any
+			if err := json.Unmarshal(raw, &report); err != nil {
+				t.Fatal(err)
+			}
+			if exitCode != 0 || report["smoke_status"] != smokeStatusOK {
+				t.Fatal("optional observation broke successful smoke")
+			}
+			observation, ok := report["smoke_prefill_backend_execution"].(map[string]any)
+			if !ok {
+				t.Fatal("actual first Prefill emitted no backend observation status")
+			}
+			wantStatus := "observed"
+			if mode == "unsupported" {
+				wantStatus = "unsupported"
+			}
+			if mode == "reset" || mode == "identity" || mode == "error" || mode == "after_error" {
+				wantStatus = "error"
+			}
+			if observation["status"] != wantStatus {
+				t.Fatalf("observation status=%v want=%s", observation["status"], wantStatus)
+			}
+			if wantStatus != "observed" {
+				if _, present := observation["counters"]; present {
+					t.Fatal("unavailable observation published numeric counters")
+				}
+				return
+			}
+			if len(be.snapshotCalls) != 2 || be.snapshotCalls[0] != 0 || be.snapshotCalls[1] != prefillCalls || be.matmuls <= prefillCalls {
+				t.Fatalf("snapshots failed to bracket initial Prefill before decode: positions=%v prefill=%d final=%d", be.snapshotCalls, prefillCalls, be.matmuls)
+			}
+			counters, ok := observation["counters"].(map[string]any)
+			if !ok {
+				t.Fatal("observed execution missing counters")
+			}
+			identity, ok := observation["identity"].(map[string]any)
+			if !ok || identity["backend"] != "cpu-ref" || identity["device"] != "fixture-device" || identity["driver"] != "fixture-driver" || identity["runtime"] != "fixture-runtime" {
+				t.Fatal("observation lost the actual backend identity")
+			}
+			for key, value := range map[string]float64{"q4k_stage_calls": float64(prefillCalls), "q4k_stage_bytes": float64(4 * prefillCalls), "fallbacks": 0, "tensor_home_hits": float64(prefillCalls), "tensor_home_admissions": float64(prefillCalls), "tensor_home_bypasses": float64(prefillCalls), "tensor_home_copied_bytes": float64(4 * prefillCalls)} {
+				if counters[key] != value {
+					t.Fatalf("%s=%v want prefill-only delta=%v", key, counters[key], value)
+				}
+			}
+			dispatchKnown := mode != "zero_profile" && mode != "zero_compute" && mode != "zero_submits"
+			if observation["dispatch_observed"] != dispatchKnown {
+				t.Fatal("dispatch availability was fabricated")
+			}
+			for key, value := range map[string]float64{"compute_dispatches": float64(prefillCalls), "q4k_matmul_dispatches": 0, "other_dispatches": float64(prefillCalls), "dispatch_submits": float64(prefillCalls)} {
+				got, present := counters[key]
+				if !dispatchKnown {
+					if present {
+						t.Fatalf("unknown dispatch %s published numeric zero", key)
+					}
+					continue
+				}
+				if !present || got != value {
+					t.Fatalf("%s=%v want prefill-only delta=%v", key, got, value)
+				}
+			}
+			transferKnown := mode != "zero_profile" && mode != "transfer_unobserved"
+			if observation["transfer_counters_observed"] != transferKnown {
+				t.Fatal("transfer availability was fabricated")
+			}
+			for key, value := range map[string]float64{"h2d_count": float64(prefillCalls), "h2d_bytes": float64(4 * prefillCalls), "d2h_count": 0, "d2h_bytes": 0, "d2d_copies": 0, "d2d_bytes": 0} {
+				got, present := counters[key]
+				if !transferKnown {
+					if present {
+						t.Fatalf("unknown transfer %s published numeric zero", key)
+					}
+					continue
+				}
+				if !present || got != value {
+					t.Fatalf("%s=%v want prefill-only delta=%v", key, got, value)
+				}
+			}
+		})
+	}
+}
