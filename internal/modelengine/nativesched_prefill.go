@@ -95,6 +95,7 @@ type nativePrefixState struct {
 	mu            sync.RWMutex
 	tree          *radixkv.Tree
 	prefixTree    PrefixTree
+	deterministic bool
 	stats         PrefixStats
 	holderLookups map[*model.Session]*prefixHitInfo
 	laneLookups   map[*schedLane]*prefixHitInfo
@@ -147,6 +148,33 @@ func (s *NativeScheduler) RadixKV() *radixkv.Tree {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	return st.tree
+}
+
+// SetDeterministicMode toggles deterministic serving. When enabled the
+// scheduler stops inserting finished prompts into the radix KV tree and skips
+// prefix-hit application, because cache-hit sets that depend on eviction timing
+// change float accumulation order. The zero value (false) preserves historical
+// reuse. Adapted from SGLang python/sglang/srt/mem_cache/radix_cache.py:483-484
+// (flag disable_finished_insert, cache_init_params.py:33@00a9a81b, Apache-2.0).
+func (s *NativeScheduler) SetDeterministicMode(enabled bool) {
+	st := s.getOrCreatePrefixState()
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	st.deterministic = enabled
+	st.mu.Unlock()
+}
+
+// DeterministicMode reports whether deterministic serving is enabled.
+func (s *NativeScheduler) DeterministicMode() bool {
+	st := s.getPrefixState()
+	if st == nil {
+		return false
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.deterministic
 }
 
 // SetPrefixTree installs a generic PrefixTree for prefix-cache-aware prefill scheduling.
@@ -298,7 +326,7 @@ func (s *NativeScheduler) maybeInsertRadixKV(prompt []int, sess *model.Session, 
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.tree == nil {
+	if st.tree == nil || st.deterministic {
 		return
 	}
 	boundary, matched := st.tree.Lookup(prompt)
@@ -420,6 +448,14 @@ func (s *NativeScheduler) enforcePreemptionPreservingPrefillLocked() {
 }
 
 func (s *NativeScheduler) applyPrefixHitsLocked() {
+	if st := s.getPrefixState(); st != nil {
+		st.mu.RLock()
+		deterministic := st.deterministic
+		st.mu.RUnlock()
+		if deterministic {
+			return
+		}
+	}
 	for _, ln := range s.lanes {
 		if ln == nil || ln.state != schedLanePrefilling || ln.promptCursor != 0 {
 			continue
