@@ -76,6 +76,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefAnnounceView(stdout, stderr, rest)
 	case "sync":
 		return runLeaserefSync(stdout, stderr, rest)
+	case "publish":
+		return runLeaserefPublish(stdout, stderr, rest)
 	case "drain":
 		return runLeaserefDrain(stdout, stderr, rest)
 	case "-h", "--help", "help":
@@ -168,6 +170,25 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
   fak leaseref list [--json] [--dir DIR]
       List every record under refs/fak/locks/* (incl. expired), one per line with
       its LIVE/EXPIRED status; --json emits the raw records.
+
+  fak leaseref publish --ref REF --oid OID (--expected-remote OID | --expect-absent)
+      --holder H --session S [--generation N] [--remote NAME] [--dir DIR]
+      --trusted-direct-refs METHOD:SOURCE [--timeout 30s]
+      Conditionally publish ONE immutable owned lease/intent blob, with exact
+      expected-remote-object fencing and local/remote readback. No fetch or retry.
+      Lease generations must match; intent predecessor replacement requires the
+      same holder/session/acquisition because intents have no generation token.
+      NAME must have one push destination, no mirror or URL rewrite configuration.
+      Normal hooks run; follow-tags and recursive submodule pushes are disabled.
+      Requires Git support for --no-replace-objects and --no-lazy-fetch.
+      METHOD is documented-enforcement or authorized-server-control. SOURCE cites
+      evidence the caller already established that the trusted server preserves
+      direct refs throughout refs/fak/locks/. A boolean or ls-remote advertisement
+      cannot establish that invariant: hidden symrefs and target races exist.
+      No live server, including GitHub, is qualified by this command. Its JSON
+      receipt records an unverified server assumption and a CONDITIONAL point-in-
+      time publication witness, never tree arbitration or persistent ownership.
+      Attempted but unconfirmed writes are indeterminate; inspect before recovery.
 
   fak leaseref reap [--dir DIR]
       Delete the expired (reapable) records — expired lock leases, expired
@@ -981,6 +1002,28 @@ func runLeaserefSync(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return emitLeaserefJSON(stdout, stderr, res, "sync")
+}
+
+func runLeaserefPublish(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref publish", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var opts leaseref.PublishOptions
+	dir := fs.String("dir", "", "repository directory")
+	fs.StringVar(&opts.Remote, "remote", "origin", "configured remote with exactly one push destination")
+	fs.StringVar(&opts.Ref, "ref", "", "exact refs/fak/locks/ lease or intent reference")
+	fs.StringVar(&opts.PinnedOID, "oid", "", "full immutable local blob object ID")
+	fs.StringVar(&opts.ExpectedRemoteOID, "expected-remote", "", "full expected remote object ID, already available locally")
+	fs.BoolVar(&opts.ExpectAbsent, "expect-absent", false, "require the remote reference to be absent")
+	fs.StringVar(&opts.Holder, "holder", "", "exact current holder identity")
+	fs.StringVar(&opts.SessionID, "session", "", "exact current session identity")
+	fs.Int64Var(&opts.Generation, "generation", 0, "matching positive fenced lease generation; omit for intents")
+	fs.DurationVar(&opts.Timeout, "timeout", 30*time.Second, "total operation budget, at most 2m")
+	fs.StringVar(&opts.TrustedDirectRefs, "trusted-direct-refs", "", "caller-established documented-enforcement:SOURCE or authorized-server-control:SOURCE; assumed, never client-verified")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	result := leaseref.NewInDir(pathutil.ExpandTilde(*dir)).PublishOwnedRef(context.Background(), opts)
+	return emitLeaserefOutcome(stdout, stderr, result, result.ConfirmedPublication, "publish")
 }
 
 // runLeaserefDrain is the sanctioned session-descriptor drainer (#5358): it delete-pushes the
