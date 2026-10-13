@@ -2115,11 +2115,28 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return false
 	}
 
+	// Resolve one request-local mode before dropping the ordinary planner gate.
+	// Flash is target-only and opt-in; unsupported exact layouts retain the
+	// lease through ordinary fallback, and never silently suppress speculation.
+	coalesced := p.coalescesQwenDecode()
+	coalesceKind := inKernelCoalesceQwen
+	if !coalesced && p.batchDecode && p.backend != nil && p.m.Cfg.IsDeepSeekV41() &&
+		p.speculativeEngine == nil && !p.vulkanMTP && p.vulkanMTPDraftFactory == nil && p.MetalMTPCoordinator() == nil {
+		eligibility, admissionErr := p.m.AcquireV41BatchEligibility(ctx, p.backend, 4)
+		if admissionErr != nil {
+			return nil, admissionErr
+		}
+		defer eligibility.Finish(&err)
+		if eligibility.Eligible() {
+			coalesced, coalesceKind = true, inKernelCoalesceV41
+		}
+	}
+
 	// Serialize the entire device forward pass: a single-stream accelerator cannot run two
 	// forwards at once without the concurrent op-streams corrupting shared device buffers
 	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
 	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
-	if p.requiresDeviceSerialization() && !p.coalescesQwenDecode() {
+	if p.requiresDeviceSerialization() && !coalesced {
 		// #1589 phase-timeline probe: record the fan-out boundary and the
 		// serialized critical section. Both calls are nil-safe no-ops unless a
 		// caller opted into a concurrency profile.
@@ -2146,7 +2163,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		p.concurrencyProfile.forwardEnter(phase, false)
 		defer p.concurrencyProfile.forwardExit(phase)
 	}
-	if p.coalescesQwenDecode() {
+	if coalesced {
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
 			return nil, err
 		}
@@ -2191,8 +2208,8 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}, measurement)
 	}
 	var genRes inKernelGenerateResult
-	if p.coalescesQwenDecode() {
-		genRes, err = p.runCoalescedGenerate(ctx, generate)
+	if coalesced {
+		genRes, err = p.runCoalescedGenerateKind(ctx, generate, coalesceKind)
 	} else {
 		genRes, err = generate(ctx)
 	}

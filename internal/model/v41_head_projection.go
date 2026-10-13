@@ -4,42 +4,51 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 
 type v41HeadPayloadError struct{ cause error }
 
-// v41HeadProjectionDtype is the read-only admission used by serial projection
-// and the shared-head cohort. It selects the same resident format and block
-// layout without staging a weight, binding callbacks or opening a batch.
-func (s *Session) v41HeadProjectionDtype(name string, out, in int) (compute.Dtype, bool) {
-	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
-		return compute.F32, false
+// v41HeadLayout contains copied metadata only; no mapped payload or device handle.
+type v41HeadLayout struct {
+	name    string
+	out, in int
+	dtype   compute.Dtype
+}
+
+// v41HeadLayoutSnapshot owns the complete q8 metadata read, including head
+// resolution. Callers hold a model lifetime pin. Fixed non-Q8 layout/config is
+// published before serving; concurrent external layout mutation is unsupported.
+func (m *Model) v41HeadLayoutSnapshot(name string, out, in int, resolve bool) (v41HeadLayout, bool) {
+	q8Mu.RLock()
+	defer q8Mu.RUnlock()
+	if resolve {
+		name, out, in = m.headName(), m.Cfg.VocabSize, m.Cfg.HiddenSize
 	}
-	wr, wc, present := s.M.v41HeadWeightShape(name)
+	wr, wc, present := m.v41HeadWeightShape(name)
 	_, valid := checkedMulInt(out, in)
 	if !valid || out <= 0 || in <= 0 || !present || wr != out || wc != in {
-		return compute.F32, false
+		return v41HeadLayout{}, false
 	}
 	dtype := compute.F32
 	switch {
-	case s.M.has(name):
-	case s.M.q8w[name] != nil:
+	case m.has(name):
+	case m.q8w[name] != nil:
 		if in%qBlk != 0 {
-			return dtype, false
+			return v41HeadLayout{}, false
 		}
 		dtype = compute.Q8_0
-	case s.M.q4kw[name] != nil:
-		if in%qkK != 0 || s.M.q4kw[name].nblk != in/qkK {
-			return dtype, false
+	case m.q4kw[name] != nil:
+		if in%qkK != 0 || m.q4kw[name].nblk != in/qkK {
+			return v41HeadLayout{}, false
 		}
 		dtype = compute.Q4_K
-	case s.M.kqw[name] != nil:
-		q := s.M.kqw[name]
+	case m.kqw[name] != nil:
+		q := m.kqw[name]
 		desc, ok := LookupQuantDescriptor(q.kind)
 		if !ok || !desc.SupportsHAL() || desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || q.nblk != in/desc.BlockWeights() {
-			return dtype, false
+			return v41HeadLayout{}, false
 		}
 		dtype = desc.Dtype()
-	case s.M.v41PackedHead(name) != nil:
-		q := s.M.v41PackedHead(name)
+	case m.v41PackedHead(name) != nil:
+		q := m.v41PackedHead(name)
 		if q.prism != nil || in%qkK != 0 {
-			return dtype, false
+			return v41HeadLayout{}, false
 		}
 		switch q.format {
 		case packedEmbeddingQ2K:
@@ -47,25 +56,45 @@ func (s *Session) v41HeadProjectionDtype(name string, out, in int) (compute.Dtyp
 		case packedEmbeddingQ4K:
 			dtype = compute.Q4_K
 		default:
-			return dtype, false
+			return v41HeadLayout{}, false
 		}
 	default:
-		return dtype, false
+		return v41HeadLayout{}, false
 	}
-	if !compute.BackendSupportsDeviceWeightDtype(s.Backend, dtype) || (dtype != compute.F32 && !s.Backend.Caps().UploadDtype) {
+	return v41HeadLayout{name: name, out: out, in: in, dtype: dtype}, true
+}
+
+// v41HeadProjectionDtype is the read-only admission used by serial projection
+// and the shared-head cohort. It selects the same resident format and block
+// layout without staging a weight, binding callbacks or opening a batch.
+func (s *Session) v41HeadProjectionDtype(name string, out, in int) (compute.Dtype, bool) {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		return compute.F32, false
+	}
+	layout, ok := s.M.v41HeadLayoutSnapshot(name, out, in, false)
+	if !ok {
+		return compute.F32, false
+	}
+	return v41HeadLayoutSupported(s.Backend, layout)
+}
+
+// Provider callbacks run after the copied metadata read has released q8Mu.
+func v41HeadLayoutSupported(be compute.Backend, layout v41HeadLayout) (compute.Dtype, bool) {
+	dtype := layout.dtype
+	if !compute.BackendSupportsDeviceWeightDtype(be, dtype) || (dtype != compute.F32 && !be.Caps().UploadDtype) {
 		return dtype, false
 	}
 	switch dtype {
 	case compute.Q3_K:
-		if native, ok := s.Backend.(interface{ SupportsQ3KMatMul() bool }); ok && !native.SupportsQ3KMatMul() {
+		if native, ok := be.(interface{ SupportsQ3KMatMul() bool }); ok && !native.SupportsQ3KMatMul() {
 			return dtype, false
 		}
 	case compute.Q5_K:
-		if native, ok := s.Backend.(interface{ SupportsQ5KMatMul() bool }); ok && !native.SupportsQ5KMatMul() {
+		if native, ok := be.(interface{ SupportsQ5KMatMul() bool }); ok && !native.SupportsQ5KMatMul() {
 			return dtype, false
 		}
 	case compute.Q6_K:
-		if native, ok := s.Backend.(interface{ SupportsQ6KMatMul() bool }); ok && !native.SupportsQ6KMatMul() {
+		if native, ok := be.(interface{ SupportsQ6KMatMul() bool }); ok && !native.SupportsQ6KMatMul() {
 			return dtype, false
 		}
 	}

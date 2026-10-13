@@ -36,6 +36,12 @@ func (m *Model) NewBackendSession(be compute.Backend) *Session {
 	return s
 }
 
+// ModelWeightsClosedError refuses new sessions or request leases after weight
+// closing starts, even when an earlier request still retains a lifetime pin.
+type ModelWeightsClosedError struct{}
+
+func (*ModelWeightsClosedError) Error() string { return "model: weights are closing or closed" }
+
 // NewBackendSessionChecked is the fail-closed constructor for a compute-HAL
 // session. It returns a typed architecture/backend refusal before any weight
 // upload or generic operator runs. NewBackendSession preserves the established
@@ -49,6 +55,19 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 	}
 	scope := beginBackendExecution(be)
 	defer scope.finishError(&err)
+	if !m.holdModelWeights() {
+		return nil, &ModelWeightsClosedError{}
+	}
+	held := true
+	defer func() {
+		primary := recover()
+		finishModelCleanup(primary, &err, func() {
+			if held {
+				held = false
+				scope.afterRelease(m.releaseWeightSession)
+			}
+		})
+	}()
 	if err := m.ValidateBackendForwardPath(be); err != nil {
 		return nil, err
 	}
@@ -57,12 +76,7 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 	if kv == nil {
 		panic("model: compute backend " + be.Name() + " does not provide KVStore")
 	}
-	if !m.holdModelWeights() {
-		if free, ok := kv.(interface{ Free() }); ok {
-			free.Free()
-		}
-		panic("model: weights are closing or closed")
-	}
+
 	s := &Session{
 		M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv,
 		halW:             make(map[string]compute.Tensor),
@@ -70,21 +84,32 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 		modelWeightsHeld: true,
 		ExpertRingBytes:  deviceRingBudget,
 	}
-	scope.bind(s)
+	held = false // Transfer exactly once to the Session cleanup guard.
 	ready := false
 	defer func() {
+		primary := recover()
 		if ready {
+			if primary != nil {
+				panic(primary)
+			}
 			return
 		}
-		if primary := recover(); primary != nil {
-			func() { defer func() { _ = recover() }(); s.closeOwned(scope) }()
-			panic(primary)
-		}
-		if err != nil {
-			defer func() { _ = recover() }()
-		}
-		s.closeOwned(scope)
+		finishModelCleanup(primary, &err, func() {
+			// Failed construction owns the transferred pin even if device
+			// cleanup panics before closeOwned reaches its final release.
+			defer func() {
+				closePanic := recover()
+				finishModelCleanup(closePanic, &err, func() {
+					if s.modelWeightsHeld {
+						s.modelWeightsHeld = false
+						scope.afterRelease(m.releaseWeightSession)
+					}
+				})
+			}()
+			s.closeOwned(scope)
+		})
 	}()
+	scope.bind(s)
 	// A reusable captured graph is bound to one session's buffer addresses; reset it so
 	// this session captures fresh (no-op on cpu-ref / when graphs are off).
 	if gr, ok := be.(interface{ GraphReset() }); ok {

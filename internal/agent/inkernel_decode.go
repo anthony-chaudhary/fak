@@ -313,20 +313,36 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			cacheable = m
 		}
 		if matchedSnapshot != nil {
-			if p.backend != nil {
-				s = p.m.NewBackendSession(p.backend)
-			} else {
-				// Host-session (Metal seam) snapshot: a plain session, never a
-				// backend session on the default backend. Restore installs the
-				// cloned Cache (which carries the hybrid recurrent state).
-				s = p.m.NewSession()
-			}
-			if err = matchedSnapshot.Restore(s); err != nil {
+			s, err = func() (restored *model.Session, restoreErr error) {
+				var candidate *model.Session
+				snapshotClosed := false
+				defer finishInKernelCleanup(&restoreErr, func() {
+					if !snapshotClosed {
+						matchedSnapshot.Close()
+					}
+				}, func() {
+					if restored == nil && candidate != nil {
+						candidate.Close()
+					}
+				})
+				if p.backend != nil {
+					candidate, restoreErr = p.m.NewBackendSessionChecked(p.backend)
+					if restoreErr != nil {
+						return nil, restoreErr
+					}
+				} else {
+					candidate = p.m.NewSession()
+				}
+				if restoreErr = matchedSnapshot.Restore(candidate); restoreErr != nil {
+					return nil, restoreErr
+				}
+				snapshotClosed = true
 				matchedSnapshot.Close()
-				s.Close()
+				return candidate, nil
+			}()
+			if err != nil {
 				return
 			}
-			matchedSnapshot.Close()
 			closeSession, matched, sourceTier = true, m, tier
 		} else if matchedKV != nil {
 			s = p.sessionFromPrefixClone(matchedKV)
@@ -365,14 +381,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if s == nil {
 		matched = 0
 		if p.backend != nil {
-			s = p.m.NewBackendSession(p.backend)
+			s, err = p.m.NewBackendSessionChecked(p.backend)
+			if err != nil {
+				return
+			}
 			closeSession = true
 		} else {
 			s = p.m.NewSession()
 		}
 	}
 	if closeSession {
-		defer s.Close()
+		defer finishInKernelCleanup(&err, s.Close)
 	}
 	if measurement != nil {
 		// Reads s at return, so it observes the session that actually ran even
@@ -417,14 +436,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				// at matched=0. cacheable keeps the structural lookup result.
 				s.Close()
 				s = p.m.NewSession()
-				defer s.Close()
+				defer finishInKernelCleanup(&err, s.Close)
 				matched, sourceTier = 0, radixkv.SnapshotTierMiss
 				skipExactDeviceL1Readmission = false
 				continue
 			}
 			// The historical CPU-session path otherwise has no close requirement. The
 			// candidate owns native state, so bind cleanup even when prefill panics.
-			defer s.Close()
+			defer finishInKernelCleanup(&err, s.Close)
 		}
 		break
 	}
@@ -714,7 +733,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		p.admitGeneratedContinuation(ctx, s, ids, ln.forwarded, ln.logits)
 	}
 	// 5) R6/#5617: fold this request's activated-expert residency into the serve-scoped ledger while
-	// the session is still alive — the `defer s.Close()` above takes the ring, and with it every
+	// the session is still alive — the `defer finishInKernelCleanup(&err, s.Close)` above takes the ring, and with it every
 	// counter the offload ladder built, the moment this function returns. The token count is what
 	// was actually FORWARDED (the prompt suffix the prefix cache could not serve, plus what was
 	// generated), because a token served from cache activated no expert and would make the ring's
@@ -1313,4 +1332,29 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+// finishInKernelCleanup is deferred directly by the boundary that owns the
+// operation error/panic. A coordinator lane result is not cleanup provenance.
+// Attempt every owned cleanup and preserve the primary failure, including its
+// panic identity; expose the first cleanup panic only when there is no primary.
+func finishInKernelCleanup(err *error, cleanups ...func()) {
+	primary := recover()
+	var secondary any
+	for _, cleanup := range cleanups {
+		func() {
+			defer func() {
+				if r := recover(); r != nil && secondary == nil {
+					secondary = r
+				}
+			}()
+			cleanup()
+		}()
+	}
+	if primary != nil {
+		panic(primary)
+	}
+	if secondary != nil && (err == nil || *err == nil) {
+		panic(secondary)
+	}
 }

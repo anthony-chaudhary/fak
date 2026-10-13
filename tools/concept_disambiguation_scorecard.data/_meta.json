@@ -9188,6 +9188,11 @@
           "category": "incidental",
           "reason": "Prometheus wire label reporting existing device-weight arena, page-in or expert-ring accounting. The gateway namespace identifies the emitting component; this measurement is not a new gateway, engine, or guard abstraction.",
           "token": "fak_gateway_moe_expert_ring_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private cleanup helper preserving a primary failure while running local session and lifetime-pin cleanup; not another gateway or engine interface.",
+          "token": "finishInKernelCleanup"
         }
       ],
       "exclude": [
@@ -9276,6 +9281,7 @@
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
         "fak_gateway_moe_expert_ring_bytes",
         "fetchWebEngine",
+        "finishInKernelCleanup",
         "forcedtoolargumentsfrommessages",
         "gatewayLink",
         "gatewayOverview",
@@ -13420,6 +13426,11 @@
           "category": "incidental",
           "reason": "Recognizes record encoding and schema handled by the existing observe-only filing sensor; supported here is a parsing contract, not a product-maturity or qualification claim.",
           "token": "guardClaudeRecordSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private backend capability predicate; it makes no product support-maturity or hardware qualification assertion.",
+          "token": "v41HeadLayoutSupported"
         }
       ],
       "exclude": [
@@ -13680,6 +13691,7 @@
         "unsupported_version",
         "unsupportedgdnpreprojectedsequenceerror",
         "unsupportedqwen4expexecutionerror",
+        "v41HeadLayoutSupported",
         "windowsFaultDomain",
         "workCoverage",
         "workCoverageUnavailableSources",
@@ -16953,6 +16965,21 @@
           "category": "incidental",
           "reason": "Private pure helper deciding whether a single host-readback row fits the typed allocation bounds; an implementation predicate, not a separate layout interface.",
           "token": "v41TypedReadbackLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private copied head weight metadata containing only the name, dimensions and dtype, without mapped payload or device ownership.",
+          "token": "v41HeadLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper copying validated head metadata under the existing quantized-weight read lock while the caller holds a model lifetime pin.",
+          "token": "v41HeadLayoutSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private predicate checking existing backend dtype capabilities against copied head metadata after the metadata lock is released.",
+          "token": "v41HeadLayoutSupported"
         }
       ],
       "id": "layout",
@@ -16973,6 +17000,9 @@
         "layouts",
         "usesmlamoelayout",
         "v41DeferredLayout",
+        "v41HeadLayout",
+        "v41HeadLayoutSnapshot",
+        "v41HeadLayoutSupported",
         "v41TypedReadbackLayout"
       ],
       "known_tokens": [],
