@@ -1,0 +1,16 @@
+vLLM integer-schema argument coercion
+
+Copyright contributors to the vLLM project
+Copyright 2026 The HuggingFace Team. All rights reserved.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: vllm-project/vllm, vllm/parser/chat_parsing/response_parser.py
+Revision: 69d00bc2645cac2144096be3ef1a12a73f95f366
+https://github.com/vllm-project/vllm/blob/69d00bc2645cac2144096be3ef1a12a73f95f366/vllm/parser/chat_parsing/response_parser.py
+Upstream change: https://github.com/vllm-project/vllm/pull/61297
+
+Adaptation: Go implementation of schema-guided integer coercion for string
+arguments after native tool-call parsing. Only explicit integer properties
+are converted. Exact bounded rational arithmetic replaces upstream float
+conversion to preserve large integer precision and bound exponent expansion.
+Other schema types and nonintegral or invalid values remain unchanged.
