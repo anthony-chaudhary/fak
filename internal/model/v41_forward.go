@@ -913,7 +913,7 @@ func (s *Session) stepV41(id int) []float32 {
 					logits = nil
 				}
 			}()
-			logits, _, err = s.M.forwardV41Step(id, s.v41State(), &v41ProjScratch{})
+			logits, _, err = s.M.forwardV41StepAdmitted(id, s.v41State(), &v41ProjScratch{})
 		}()
 		if err == nil {
 			s.M.v41NoteExpertFaultToken(1)

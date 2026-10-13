@@ -81,8 +81,24 @@ type v41StepStats struct {
 // already-stepped layers rolled back by restoring their staged cursors
 // (nextWindowPos, nextCompressRow) and the one ring row each overwrote, and the
 // uncommitted history left untouched. It returns one logits row on success.
-func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) (logits []float32, stats v41StepStats, err error) {
-	tx, err := m.beginV41Step(id, st, scratch)
+func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) ([]float32, v41StepStats, error) {
+	return m.forwardV41StepCore(id, st, scratch, false)
+}
+
+// forwardV41StepAdmitted is for Session.Step after its full-model check in the
+// same owned dispatch. It never carries admission across calls; live token,
+// state, cursor, selected-operation and rollback checks stay in the transaction.
+func (m *Model) forwardV41StepAdmitted(id int, st *v41ForwardState, scratch *v41ProjScratch) ([]float32, v41StepStats, error) {
+	return m.forwardV41StepCore(id, st, scratch, true)
+}
+
+func (m *Model) forwardV41StepCore(id int, st *v41ForwardState, scratch *v41ProjScratch, admitted bool) (logits []float32, stats v41StepStats, err error) {
+	var tx *v41StepTransaction
+	if admitted {
+		tx, err = m.beginV41StepAdmitted(id, st, scratch)
+	} else {
+		tx, err = m.beginV41Step(id, st, scratch)
+	}
 	if err != nil {
 		return nil, tx.stats, err
 	}
