@@ -1210,12 +1210,12 @@ func (m *Model) v41IndexReaderStep(layer, sourceLayer, pos int, state *V41Attent
 	// Contiguity: every row in [0,end) must be present. A hole or an
 	// out-of-order/duplicate staging refuses, matching IndexKeys' oracle.
 	key := v41AttentionPublicationKey{sourceLayer: sourceLayer, start: start, end: end}
-	row, ok := state.indexPublications[key]
+	row, ok := state.indexPublication(key)
 	if !ok {
 		return nil, fmt.Errorf("%w: index reader layer %d position %d: no publication for group [%d,%d)", ErrV41ForwardStage, layer, pos, start, end)
 	}
 	for i := 0; i < end; i++ {
-		if _, present := state.indexPublications[v41AttentionPublicationKey{sourceLayer: sourceLayer, start: i, end: i + 1}]; !present {
+		if _, present := state.indexPublication(v41AttentionPublicationKey{sourceLayer: sourceLayer, start: i, end: i + 1}); !present {
 			return nil, fmt.Errorf("%w: index reader layer %d position %d: publication set has a hole at row %d", ErrV41ForwardStage, layer, pos, i)
 		}
 	}

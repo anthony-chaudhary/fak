@@ -122,7 +122,8 @@ type v41AttentionPublicationKey struct {
 
 // V41AttentionState is session-owned state shared by the sequential attention
 // stack. One instance replaces the reference's process-global shared runtime so
-// concurrent sessions cannot alias each other. A source layer publishes before
+// concurrent sessions cannot alias mutable state. Cache-restore forks may share
+// a sealed immutable publication prefix. A source layer publishes before
 // its consumers read within the same Prefill or Step call; readers reuse the
 // latest publication.
 //
@@ -153,6 +154,7 @@ type V41AttentionState struct {
 	retainedCopies   int
 
 	window            [][]float32
+	publicationPrefix *v41PublicationPrefix // sealed rows; maps below are private writable overlays
 	kvPublications    map[v41AttentionPublicationKey][]float32
 	indexPublications map[v41AttentionPublicationKey][]float32
 	kvPublishedEnd    map[int]int
@@ -325,6 +327,7 @@ func (s *V41AttentionState) seedTemporalWithInputs(projectedKV, partialInputs []
 		retainedCopies += len(carriers)
 	}
 	s.retainedCopies = retainedCopies
+	s.publicationPrefix = nil
 	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.kvPublishedEnd = make(map[int]int)
@@ -763,6 +766,7 @@ func (s *V41AttentionState) Reset() {
 	s.partialKV = nil
 	s.partialPositions = nil
 	s.retainedCopies = 0
+	s.publicationPrefix = nil
 	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
 	s.kvPublishedEnd = make(map[int]int)
@@ -801,7 +805,7 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 	out := make([][]float32, 0, end)
 	for start := 0; start < end; start++ {
 		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
-		row, ok := s.kvPublications[key]
+		row, ok := s.kvPublication(key)
 		if !ok {
 			return nil, false
 		}
@@ -823,7 +827,7 @@ func (s *V41AttentionState) IndexKeys(sourceLayerID int) ([][]float32, bool) {
 	out := make([][]float32, 0, end)
 	for start := 0; start < end; start++ {
 		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
-		row, ok := s.indexPublications[key]
+		row, ok := s.indexPublication(key)
 		if !ok {
 			return nil, false
 		}

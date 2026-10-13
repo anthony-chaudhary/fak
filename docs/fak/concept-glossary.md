@@ -1210,3 +1210,10 @@ Pure bounded Q3_K token-panel geometry carrying output/input widths, exactly 2/4
 Pure planner validating Q3_K matrix geometry, block divisibility, padded 110-byte block storage, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q3KTokenPanelPlan.
 
 **Distinct from:** Host arithmetic admission for Q3_K storage; the result contains geometry while provider capability and opt-in independently control execution. Distinct from the Q2_K planner.
+
+
+### PrepareForCache
+
+PrefixSnapshot cache-admission method that seals independently owned V4.1 publication rows into immutable shared prefix storage before publishing an admitted snapshot, retaining private mutable continuation fields.
+
+**Distinct from:** A snapshot publication preparation step invoked by the serialized cache owner after admission succeeds; not the RadixKV index, cache identity, lookup operation or a native performance qualification.

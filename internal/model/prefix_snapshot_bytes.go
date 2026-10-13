@@ -50,7 +50,13 @@ func (s *V41AttentionState) residentBytes() int64 {
 	}
 	bytes := v41RowsBytes(s.window) + v41RowsBytes(s.partialKV) + v41RowsBytes(s.partialInputs)
 	bytes += int64(len(s.partialPositions)) * hostPositionBytes
-	bytes += v41PublicationBytes(s.kvPublications) + v41PublicationBytes(s.indexPublications)
+	if s.publicationPrefix == nil {
+		bytes += v41PublicationBytes(s.kvPublications) + v41PublicationBytes(s.indexPublications)
+	} else {
+		base := s.publicationPrefix
+		bytes += v41PublicationViewBytes(base.kv, base.kvBytes, s.kvPublications)
+		bytes += v41PublicationViewBytes(base.index, base.indexBytes, s.indexPublications)
+	}
 	bytes += int64(len(s.candidates))
 	for _, row := range s.topk {
 		bytes += int64(len(row)) * int32Bytes

@@ -190,7 +190,8 @@
       "distinction": "The token-trie INDEX into KV spans - NOT the KV cache (the tensor storage it indexes) and NOT vCache (remote abstraction).",
       "distinct_from": [
         "kv-cache",
-        "vcache"
+        "vcache",
+        "prepareforcache"
       ],
       "aliases": [
         "radix tree KV"

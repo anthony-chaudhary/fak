@@ -230,7 +230,7 @@ func (s *ScopedTree) LookupSnapshotTieredContext(ctx context.Context, owner Cach
 		}
 	}
 	if bestHot != nil {
-		snap, err := acquireSnapshotForRequest(ctx, bestHot.snapshot.Clone)
+		snap, err := acquireSnapshotForRequest(ctx, bestHot.snapshot.CloneForRestore)
 		if err != nil {
 			s.tree.l1Faults++
 			return nil, nil, bestHotMatched, bestHotScope, SnapshotTierDeviceL1, err
@@ -518,7 +518,7 @@ func (s *ScopedTree) LookupSnapshotTieredContextRegime(ctx context.Context, regi
 		}
 	}
 	if bestHot != nil {
-		snap, err := bestHot.snapshot.Clone()
+		snap, err := bestHot.snapshot.CloneForRestore()
 		if err != nil {
 			s.tree.l1Faults++
 			return nil, nil, bestHotMatched, bestHotScope, SnapshotTierDeviceL1, err

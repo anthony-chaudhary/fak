@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "prepareforcache",
+      "canonical": "PrepareForCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "PrefixSnapshot cache-admission method that seals independently owned V4.1 publication rows into immutable shared prefix storage before publishing an admitted snapshot, retaining private mutable continuation fields.",
+      "distinction": "A snapshot publication preparation step invoked by the serialized cache owner after admission succeeds; not the RadixKV index, cache identity, lookup operation or a native performance qualification.",
+      "distinct_from": [
+        "radixkv"
+      ],
+      "aliases": [],
+      "grounding": "PrepareForCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
