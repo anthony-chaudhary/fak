@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:fe9caa079c61fec7b5f30900db7d3473fb95e5c317e33ac9300e54868f239f1f",
-  "tracked_files": 25130,
-  "tracked_bytes": 508336882,
+  "content_root": "sha256:a338df65562612712dd5409f496449fe68fb61f01f0054578b26ce712c09bf92",
+  "tracked_files": 25131,
+  "tracked_bytes": 508342441,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -100184,8 +100184,8 @@
     },
     {
       "path": "internal/compute/shaders/v41_q3k_matvec_id.comp",
-      "content_sha256": "sha256:0ba1860aeee6981d82728dfffcbed4de14f7b9e1a4af3cfdd96d54375e072732",
-      "bytes": 4802,
+      "content_sha256": "sha256:ae3752ac098497303b74d64ea238da53d205ab3dbbcfa26a9639efaa25dbc797",
+      "bytes": 5830,
       "classification": "artifact"
     },
     {
@@ -101674,6 +101674,15 @@
       "path": "internal/compute/v41_mhc_test.go",
       "content_sha256": "sha256:d25d31c060ff33713c241ffd82ca45ec8353901333f372a94dd9d03f8e2145fb",
       "bytes": 9382,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/compute/v41_q3k_matvec_id_source_test.go",
+      "content_sha256": "sha256:ac97a409aa34155d6b5a23e89b35c094ca6357b7558fa20bad100b2df24d5df4",
+      "bytes": 2739,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -163239,8 +163248,8 @@
     },
     {
       "path": "internal/model/v41_routed_id_layer_test.go",
-      "content_sha256": "sha256:4a683b355cfdbf3de3142f97a33c2a78fd6f1dfc7468b4c01a6a6886234aef93",
-      "bytes": 13704,
+      "content_sha256": "sha256:9e6c99ec295c576158d40647f740c25f82a0d4c374b8e4127bd6e0da0d8c6371",
+      "bytes": 14817,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -163266,8 +163275,8 @@
     },
     {
       "path": "internal/model/v41_routed_layer_vulkan_test.go",
-      "content_sha256": "sha256:edf8a05bfcf14475f41f5054b7561f4fb12333a3be4c11b092fc981dfab5e0b9",
-      "bytes": 6212,
+      "content_sha256": "sha256:dc3be894112f50f1c5aef7be4ceaae7d57d8beb991cca7738d4de03133509d3d",
+      "bytes": 6891,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
