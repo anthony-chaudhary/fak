@@ -50,7 +50,12 @@ const (
 
 const disambiguationAnalyzerContractPath = "tools/concept_disambiguation_scorecard.py"
 
-var disambiguationCacheLockStripes [64]sync.Mutex
+var disambiguationCacheLockStripes = func() (stripes [64]chan struct{}) {
+	for i := range stripes {
+		stripes[i] = make(chan struct{}, 1)
+	}
+	return stripes
+}()
 
 const (
 	disambiguationRecoveryDefault  = "default"
@@ -603,9 +608,25 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 
 	key := disambiguationCacheKey(treeID)
 	w.CacheIdentity = key
-	stripe := &disambiguationCacheLockStripes[int(key[0])%len(disambiguationCacheLockStripes)]
-	stripe.Lock()
-	defer stripe.Unlock()
+	stripe := disambiguationCacheLockStripes[int(key[0])%len(disambiguationCacheLockStripes)]
+	setSubphase("cache-lock")
+	if err := ctx.Err(); err != nil {
+		w.Detail = err.Error()
+		return w
+	}
+	select {
+	case stripe <- struct{}{}:
+		defer func() { <-stripe }()
+	case <-ctx.Done():
+		w.Detail = ctx.Err().Error()
+		return w
+	}
+	// Cancellation and availability may become ready together. A canceled
+	// waiter must return its token without entering the cache protocol.
+	if err := ctx.Err(); err != nil {
+		w.Detail = err.Error()
+		return w
+	}
 	cacheRoot, cacheErr := disambiguationCacheRoot(repo)
 	if cacheErr != nil {
 		w.CacheState, w.CacheReason = "bypass", "git-common-dir-unavailable"
