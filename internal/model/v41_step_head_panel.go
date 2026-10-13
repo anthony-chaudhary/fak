@@ -45,7 +45,7 @@ func (m *Model) v41SharedHeadAdmit(lanes []v41StepCohortLane) error {
 // v41FinishSharedHeads runs after the cohort's layer recording window flushes.
 // Lane-local preparation preserves mHC collapse and the final BF16/RMSNorm
 // boundaries; only the resulting independent rows share the immutable head.
-func (m *Model) v41FinishSharedHeads(lanes []v41StepCohortLane, txs []*v41StepTransaction, results []v41StepCohortResult, cancelled func(int) bool) error {
+func (m *Model) v41FinishSharedHeads(lanes []v41StepCohortLane, txs []*v41StepTransaction, results []v41StepCohortResult, cancelled func(int) bool, receipt *v41StepCohortReceipt) error {
 	indices := make([]int, 0, len(lanes))
 	panel := make([]float32, 0, len(lanes)*m.Cfg.HiddenSize)
 	for lane, tx := range txs {
@@ -66,11 +66,18 @@ func (m *Model) v41FinishSharedHeads(lanes []v41StepCohortLane, txs []*v41StepTr
 	if len(indices) == 0 {
 		return nil
 	}
+	receipt.atLane(-1)
 	projected, err := m.v41ProjectSharedHead(lanes, txs, indices, panel)
 	if err != nil {
 		// Once selected, a decline/error is fatal. There is no scalar host
 		// retry and none of this panel's lanes have committed a history row.
 		panic(err)
+	}
+	// This records a completed projection, not admission or token commits.
+	// Cancellation during projection or later scaling cannot erase real work.
+	if receipt != nil && len(indices) > 1 {
+		receipt.sharedPanels++
+		receipt.sharedRows += len(indices)
 	}
 	for row, lane := range indices {
 		if cancelled(lane) {

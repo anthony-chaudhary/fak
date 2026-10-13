@@ -148,10 +148,30 @@
       "definition": "Private Session store-aware KV-span eviction body used inside an already-owned backend operation; coordinates host or HAL eviction and token-lineage indices without reacquiring the recording-domain mutex.",
       "distinction": "This performs an index span eviction under an existing operation scope; EvictKV speculative rollback is the rejected-position count supplied to eviction, not the operation or ownership boundary.",
       "distinct_from": [
-        "x-evict-evictkv"
+        "x-evict-evictkv",
+        "v41batchindexerguard"
       ],
       "aliases": [],
       "grounding": "evictKVOwned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41batchindexerguard",
+      "canonical": "v41BatchIndexerGuard",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Cohort fault-boundary adapter that invokes the serial selected-indexer panic guard for only the recorded failing Session and recovers the resulting primary value after cohort rollback.",
+      "distinction": "This preserves selected-indexer failure and teardown semantics for one faulting lane without retiring surviving peers. evictKVOwned is an ordinary store-aware KV span mutation inside an owned operation, not a selected-failure panic or Session retirement boundary.",
+      "distinct_from": [
+        "evictkvowned"
+      ],
+      "aliases": [],
+      "grounding": "v41BatchIndexerGuard",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

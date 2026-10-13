@@ -25,6 +25,20 @@ type v41StepCohortResult struct {
 	err    error
 }
 
+// This operation-local receipt survives an unwind independently of return-value
+// assignment. A negative faultLane identifies a shared operation, not a lane.
+type v41StepCohortReceipt struct {
+	faultLane                int
+	sharedPanels, sharedRows int
+	windowDeclined           bool
+}
+
+func (r *v41StepCohortReceipt) atLane(lane int) {
+	if r != nil {
+		r.faultLane = lane
+	}
+}
+
 // forwardV41StepCohort is an internal continuation driver, not a serving
 // admission capability or a shared-weight projection path. Each lane keeps its
 // own history, retained KV, source/index registry, Engram and mHC scratch.
@@ -81,11 +95,32 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 		scope.bind(lane.session)
 	}
 	results = make([]v41StepCohortResult, len(lanes))
+	receipt := &v41StepCohortReceipt{faultLane: -1}
+	err = m.forwardV41StepCohortOwned(scope, lanes, sharedHead, results, receipt)
+	if receipt.windowDeclined {
+		return nil, err
+	}
+	return results, err
+}
+
+// forwardV41StepCohortOwned does not acquire, bind, or release a domain. Both
+// callers retain that responsibility, including boundary guards and teardown.
+// Results belong to the caller so a later panic cannot hide an earlier commit.
+func (m *Model) forwardV41StepCohortOwned(scope *backendExecutionScope, lanes []v41StepCohortLane, sharedHead bool, results []v41StepCohortResult, receipt *v41StepCohortReceipt) (err error) {
+	if scope == nil || !scope.live || len(results) != len(lanes) {
+		panic("model: invalid owned V4.1 cohort scope")
+	}
+	for _, lane := range lanes {
+		if lane.session.backendExecutionScope != scope {
+			panic("model: V4.1 cohort session is not bound to its owner")
+		}
+	}
 	txs := make([]*v41StepTransaction, len(lanes))
 	scratch := make([]v41ProjScratch, len(lanes))
 	defer v41AbortStepCohort(txs, results, &err)
 
 	cancelled := func(lane int) bool {
+		receipt.atLane(lane)
 		if ctx := lanes[lane].ctx; ctx != nil && ctx.Err() != nil {
 			results[lane].err = ctx.Err()
 			if txs[lane] != nil {
@@ -102,15 +137,19 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 		}
 	}
 	if active == 0 {
-		return results, nil
+		return nil
 	}
 
 	// Close the recording window once on success, error or panic. Mark it
 	// closed BEFORE End so even a panicking End cannot cause a duplicate End.
 	var end func() error
+	receipt.atLane(-1)
 	if backend, ok := lanes[0].session.Backend.(compute.V41StepBatchBackend); ok && os.Getenv(v41StepBatchEnv) != "0" {
 		if !backend.BeginV41StepBatch() {
-			return nil, fmt.Errorf("%w: backend recording window is unavailable", errV41StepCohortDeclined)
+			if receipt != nil {
+				receipt.windowDeclined = true
+			}
+			return fmt.Errorf("%w: backend recording window is unavailable", errV41StepCohortDeclined)
 		}
 		end = backend.EndV41StepBatch
 	}
@@ -134,7 +173,7 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 		txs[lane], err = m.beginV41Step(input.id, input.session.v41State(), &scratch[lane])
 		if err != nil {
 			results[lane].err = err
-			return results, err
+			return err
 		}
 	}
 	for layer := 0; layer < m.Cfg.NumLayers; layer++ {
@@ -144,15 +183,16 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 			}
 			if err = tx.advanceLayer(); err != nil {
 				results[lane].err = err
-				return results, err
+				return err
 			}
 		}
 	}
+	receipt.atLane(-1)
 	if err = finish(); err != nil {
-		return results, err
+		return err
 	}
 	if sharedHead {
-		return results, m.v41FinishSharedHeads(lanes, txs, results, cancelled)
+		return m.v41FinishSharedHeads(lanes, txs, results, cancelled, receipt)
 	}
 	for lane, tx := range txs {
 		if tx == nil || tx.closed || cancelled(lane) {
@@ -161,10 +201,10 @@ func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepC
 		results[lane].logits, err = tx.finalize()
 		if err != nil {
 			results[lane].err = err
-			return results, err
+			return err
 		}
 	}
-	return results, nil
+	return nil
 }
 
 // Exact Model and pointer Backend identities bind configuration and immutable

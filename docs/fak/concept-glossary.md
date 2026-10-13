@@ -1028,3 +1028,10 @@ Private Session cache-pool rebuild body invoked after its public boundary acquir
 Private Session store-aware KV-span eviction body used inside an already-owned backend operation; coordinates host or HAL eviction and token-lineage indices without reacquiring the recording-domain mutex.
 
 **Distinct from:** This performs an index span eviction under an existing operation scope; EvictKV speculative rollback is the rejected-position count supplied to eviction, not the operation or ownership boundary.
+
+
+### v41BatchIndexerGuard
+
+Cohort fault-boundary adapter that invokes the serial selected-indexer panic guard for only the recorded failing Session and recovers the resulting primary value after cohort rollback.
+
+**Distinct from:** This preserves selected-indexer failure and teardown semantics for one faulting lane without retiring surviving peers. evictKVOwned is an ordinary store-aware KV span mutation inside an owned operation, not a selected-failure panic or Session retirement boundary.
