@@ -269,10 +269,10 @@ func ambientLeaseRefSyncSkippedReport(steps []loopdrive.LeaseRefSyncStep, remain
 	return report
 }
 
-// ambientLeaseRefSyncImpl runs the surface's sync plan against store and folds
-// the per-step transport results into one advisory report. It never turns a
-// transport failure into a fatal verdict — the caller proceeds on local lease
-// evidence regardless.
+// ambientLeaseRefSyncImpl runs the current boundary of the surface's sync plan
+// against store and folds the transport result into one advisory report. It never
+// turns a transport failure into a fatal verdict — the caller proceeds on local
+// lease evidence regardless.
 func ambientLeaseRefSyncImpl(surface loopdrive.LeaseRefSyncSurface, store *leaseref.Store, remote string, written bool) loopdrive.LeaseRefSyncReport {
 	if !ambientLeaseRefSyncEnabled() {
 		return loopdrive.LeaseRefSyncReport{Outcome: loopdrive.LeaseRefSyncOK, Summary: "lease-ref sync disabled (FAK_LEASEREF_SYNC=off)"}
@@ -280,7 +280,20 @@ func ambientLeaseRefSyncImpl(surface loopdrive.LeaseRefSyncSurface, store *lease
 	if strings.TrimSpace(remote) == "" {
 		remote = ambientLeaseRefSyncRemote()
 	}
-	steps := loopdrive.LeaseRefSyncPlanForSurface(surface, loopdrive.LeaseRefSyncPlanInput{Remote: remote, LeaseRefsWritten: written})
+	plan := loopdrive.LeaseRefSyncPlanForSurface(surface, loopdrive.LeaseRefSyncPlanInput{Remote: remote, LeaseRefsWritten: written})
+	boundary := loopdrive.LeaseRefSyncBeforeDecide
+	if written {
+		boundary = loopdrive.LeaseRefSyncAfterWrite
+	}
+	// Callers cross each boundary separately. Replaying the full tick plan after
+	// a write would fetch stale remote state over an acquisition, renewal, or
+	// local release before publication. Keep the full-tick planner unchanged.
+	steps := make([]loopdrive.LeaseRefSyncStep, 0, 1)
+	for _, step := range plan {
+		if step.Boundary == boundary {
+			steps = append(steps, step)
+		}
+	}
 	// #5569: a node that already spent a whole budget on this remote has LEARNED
 	// that the transport is not answering. Skip the plan rather than re-buy that
 	// answer at full price every crossing; the skip is reported, not swallowed.

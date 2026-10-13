@@ -11,6 +11,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +51,122 @@ func TestAmbientLeaseRefSyncDefaultsOrigin(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=20ms
+func TestAmbientLeaseRefSyncSelectsOnlyCurrentBoundary(t *testing.T) {
+	t.Setenv("FAK_LEASEREF_SYNC", "on")
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
+	for _, tc := range []struct {
+		name    string
+		written bool
+		verb    string
+	}{
+		{"before-decide", false, "fetch"},
+		{"after-write", true, "push"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var transport []string
+			run := func(_ context.Context, _ string, args ...string) (string, int, error) {
+				switch args[0] {
+				case "fetch", "push":
+					transport = append(transport, args[0])
+				case "for-each-ref":
+					return "refs/fak/locks/owned\n", 0, nil
+				}
+				return "", 0, nil
+			}
+			store := leaseref.NewWithRunner(run, t.TempDir())
+			report := ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "origin", tc.written)
+			if report.Outcome != loopdrive.LeaseRefSyncOK || report.Fatal {
+				t.Fatalf("selected boundary report = %+v", report)
+			}
+			if len(transport) != 1 || transport[0] != tc.verb {
+				t.Fatalf("transport = %v, want only %s", transport, tc.verb)
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=2s
+func TestLeaserefAcquirePreservesGenerationAfterExpiredRemoteSync(t *testing.T) {
+	t.Setenv("FAK_LEASEREF_SYNC", "on")
+	t.Setenv("FAK_LEASEREF_REMOTE", "origin")
+	t.Setenv("FAK_LEASE_COORDINATOR_URL", "")
+	t.Setenv("FAK_LEASE_COORDINATOR_KEY_FILE", "")
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
+	orig := ambientLeaseRefSync
+	ambientLeaseRefSync = ambientLeaseRefSyncImpl
+	t.Cleanup(func() { ambientLeaseRefSync = orig })
+
+	dir := initRegionTestRepo(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	git := func(cwd string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = cwd
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(dir, "init", "--bare", "--quiet", remote)
+	git(dir, "remote", "add", "origin", remote)
+	ctx := context.Background()
+	store := leaseref.NewInDir(dir)
+	first, verdict, err := store.AcquireFenced(ctx, leaseref.Record{
+		ID: "ambient-epoch", Holder: "previous-worker", TreeGlobs: []string{"internal/gateway/**"}, TTLSeconds: 60,
+	}, time.Now().Add(-time.Hour))
+	if err != nil || !verdict.OK || first.Generation != 1 {
+		t.Fatalf("seed expired generation: record=%+v verdict=%+v err=%v", first, verdict, err)
+	}
+	if _, err := store.Sync(ctx, "origin", true, false); err != nil {
+		t.Fatalf("publish expired generation: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := runLeaseref(&out, &errOut, []string{"acquire", "--dir", dir, "--id", first.ID,
+		"--holder", "new-worker", "--tree", "internal/gateway/**", "--ttl", "300", "--announce", "off"})
+	if code != 0 {
+		t.Fatalf("acquire exit=%d, want 0; out=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	var acquired fencedResult
+	if err := json.Unmarshal(out.Bytes(), &acquired); err != nil || acquired.Record == nil || !acquired.Verdict.OK {
+		t.Fatalf("decode acquisition: result=%+v err=%v out=%s", acquired, err, out.String())
+	}
+	want := *acquired.Record
+	if want.Generation != first.Generation+1 || want.Holder != "new-worker" {
+		t.Fatalf("acquired record=%+v, want new holder at next generation", want)
+	}
+	for _, repo := range []string{dir, remote} {
+		got, ok, err := leaseref.NewInDir(repo).Get(ctx, first.ID)
+		if err != nil || !ok || got.Generation != want.Generation || got.Holder != want.Holder {
+			t.Fatalf("post-sync record=%+v present=%v err=%v, want %+v", got, ok, err, want)
+		}
+	}
+	localOID := git(dir, "rev-parse", want.Ref())
+	if remoteOID := git(remote, "rev-parse", want.Ref()); remoteOID != localOID {
+		t.Fatalf("publication OIDs differ: local=%s remote=%s", localOID, remoteOID)
+	}
+
+	// Release shares the same after-write boundary. Its local absence must survive
+	// that invocation, while remote deletion still follows the existing TTL contract.
+	out.Reset()
+	errOut.Reset()
+	code = runLeaseref(&out, &errOut, []string{"release", "--dir", dir, "--id", want.ID,
+		"--holder", want.Holder, "--generation", fmt.Sprint(want.Generation), "--announce", "off"})
+	if code != 0 {
+		t.Fatalf("release exit=%d, want 0; out=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	if _, present, err := store.Get(ctx, want.ID); err != nil || present {
+		t.Fatalf("release restored the local lease: present=%v err=%v", present, err)
+	}
+	if remoteOID := git(remote, "rev-parse", want.Ref()); remoteOID != localOID {
+		t.Fatalf("boundary repair changed remote deletion semantics: before=%s after=%s", localOID, remoteOID)
+	}
+}
+
 // TestAmbientLeaseRefSyncDegradesNonFatalWithoutOrigin: in a clone with no
 // configured remote (single-box dev, CI) the convergence transport fails, but
 // the boundary folds it to a NONFATAL degraded report — the caller must keep
@@ -57,6 +176,7 @@ func TestAmbientLeaseRefSyncDegradesNonFatalWithoutOrigin(t *testing.T) {
 	t.Cleanup(ambientLeaseRefSyncBreakerReset)
 	dir := initRegionTestRepo(t)
 	store := leaseref.NewInDir(dir)
+	acquireRegionTestLease(t, dir, "missing-origin", "worker", []string{"internal/gateway/**"})
 
 	report := ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
 	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
@@ -86,13 +206,10 @@ func TestAmbientLeaseRefSyncDegradesNonFatalWithoutOrigin(t *testing.T) {
 // against a real network — the ambient boundary must GIVE UP and report, not
 // block the tick that called it.
 //
-// It fails in two distinguishable ways on a regression, both of them loud. If
-// the call site goes back to an unexpirable context the runner's <-ctx.Done()
+// If the call site goes back to an unexpirable context the runner's <-ctx.Done()
 // never fires and the select below fails the test in bounded time with the
-// diagnosis, instead of wedging the package suite until the go-test timeout —
-// which is exactly how this bug spent its career being misread as a flake. If
-// the deadline survives but moves to a per-step budget, the second transport
-// call arrives with a LIVE context and that assertion names it.
+// diagnosis, instead of wedging the package suite until the go-test timeout.
+// The selected after-write boundary must carry a live deadline and run only push.
 func TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner(t *testing.T) {
 	restore := ambientLeaseRefSyncBudget
 	ambientLeaseRefSyncBudget = 200 * time.Millisecond
@@ -133,8 +250,7 @@ func TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner(t *testing.T) {
 	}
 	store := leaseref.NewWithRunner(stalled, t.TempDir())
 
-	// written=true plans BOTH steps (fetch-before-decide, push-after-write), which
-	// is what makes the one-budget-per-call property observable.
+	// written=true selects only after-write publication, under one bounded context.
 	done := make(chan loopdrive.LeaseRefSyncReport, 1)
 	go func() {
 		done <- ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
@@ -155,8 +271,8 @@ func TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner(t *testing.T) {
 	if report.Reason != loopdrive.ReasonLeaseRefSyncTransport {
 		t.Fatalf("reason = %q, want %q", report.Reason, loopdrive.ReasonLeaseRefSyncTransport)
 	}
-	if len(report.Failures) != 2 {
-		t.Fatalf("failures = %d, want both planned steps reported: %+v", len(report.Failures), report.Failures)
+	if len(report.Failures) != 1 {
+		t.Fatalf("failures = %d, want selected boundary reported: %+v", len(report.Failures), report.Failures)
 	}
 	for _, f := range report.Failures {
 		if !strings.Contains(f, "budget") {
@@ -164,20 +280,17 @@ func TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner(t *testing.T) {
 		}
 	}
 
-	if len(calls) != 2 {
-		t.Fatalf("transport calls = %+v, want one fetch then one push", calls)
+	if len(calls) != 1 {
+		t.Fatalf("transport calls = %+v, want one push", calls)
 	}
-	if calls[0].verb != "fetch" || calls[1].verb != "push" {
-		t.Fatalf("transport order = %+v, want fetch-before-decide then push-after-write", calls)
+	if calls[0].verb != "push" {
+		t.Fatalf("transport = %+v, want push-after-write only", calls)
 	}
 	if !calls[0].hasDeadline {
 		t.Error("the first transport call carried NO deadline: the ambient sync is back on an unexpirable context (#5564)")
 	}
 	if calls[0].expiredOnEntry {
 		t.Error("the first transport call started already expired: the budget is not being spent on real work")
-	}
-	if !calls[1].expiredOnEntry {
-		t.Error("the second transport call got a fresh live context: the budget is per-STEP, so the tick's exposure still multiplies by the plan's length")
 	}
 }
 
@@ -224,7 +337,7 @@ func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
 	}
 	store := leaseref.NewWithRunner(run, t.TempDir())
 
-	// written=true plans BOTH steps, so one full crossing is two transport verbs.
+	// written=true selects after-write only, so one crossing is one transport verb.
 	cross := func() loopdrive.LeaseRefSyncReport {
 		return ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
 	}
@@ -244,7 +357,7 @@ func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
 	// 1. The first crossing pays the budget in full — #5564's behaviour, unchanged.
 	report := cross()
 	nonfatal("first crossing", report)
-	wantTransport("first crossing", 2)
+	wantTransport("first crossing", 1)
 	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
 		t.Fatalf("first crossing outcome = %q, want degraded: %+v", report.Outcome, report)
 	}
@@ -256,14 +369,14 @@ func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
 		when := fmt.Sprintf("skip %d/%d", i, ambientLeaseRefSyncBreakerSkips)
 		report = cross()
 		nonfatal(when, report)
-		if transport != 2 {
+		if transport != 1 {
 			t.Fatalf("%s: transport verbs rose to %d — the breaker never opened, so a wedged node still re-buys the answer every crossing (#5569)", when, transport)
 		}
 		if report.Outcome != loopdrive.LeaseRefSyncDegraded {
 			t.Fatalf("%s: outcome = %q, want degraded — a skipped sync must never read as 'synced fine': %+v", when, report.Outcome, report)
 		}
-		if len(report.Failures) != 2 {
-			t.Fatalf("%s: failures = %d, want both planned steps reported as skipped: %+v", when, len(report.Failures), report.Failures)
+		if len(report.Failures) != 1 {
+			t.Fatalf("%s: failures = %d, want selected boundary reported as skipped: %+v", when, len(report.Failures), report.Failures)
 		}
 		for _, f := range report.Failures {
 			if !strings.Contains(f, ambientLeaseRefSyncBreakerOpen) {
@@ -279,7 +392,7 @@ func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
 	// still wedged, so it spends the budget again and re-arms the breaker.
 	report = cross()
 	nonfatal("probe while still wedged", report)
-	wantTransport("probe while still wedged", 4)
+	wantTransport("probe while still wedged", 2)
 	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
 		t.Fatalf("probe outcome = %q, want degraded: %+v", report.Outcome, report)
 	}
@@ -290,13 +403,13 @@ func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
 	for i := 1; i <= ambientLeaseRefSyncBreakerSkips; i++ {
 		report = cross()
 		nonfatal("skip after recovery", report)
-		wantTransport("skip after recovery", 4)
+		wantTransport("skip after recovery", 2)
 	}
 
 	// 5. The next probe finds a healthy transport, syncs for real, and CLOSES.
 	report = cross()
 	nonfatal("recovery probe", report)
-	wantTransport("recovery probe", 6)
+	wantTransport("recovery probe", 3)
 	if report.Outcome != loopdrive.LeaseRefSyncOK {
 		t.Fatalf("recovery probe outcome = %q, want ok — a recovered transport must sync: %+v", report.Outcome, report)
 	}
@@ -305,8 +418,8 @@ func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
 	// the breaker outright, so recovery costs one crossing, not another N.
 	report = cross()
 	nonfatal("after recovery", report)
-	if transport != 8 {
-		t.Fatalf("the crossing after a successful probe ran %d transport verbs, want 8: the breaker stayed armed on a verdict the transport already disproved", transport)
+	if transport != 4 {
+		t.Fatalf("the crossing after a successful probe ran %d transport verbs, want 4: the breaker stayed armed on a verdict the transport already disproved", transport)
 	}
 	if report.Outcome != loopdrive.LeaseRefSyncOK {
 		t.Fatalf("post-recovery outcome = %q, want ok: %+v", report.Outcome, report)
@@ -351,9 +464,9 @@ func TestAmbientLeaseRefSyncBreakerIgnoresAnOrdinaryTransportFailure(t *testing.
 		if report.Outcome != loopdrive.LeaseRefSyncDegraded {
 			t.Fatalf("crossing %d: outcome = %q, want degraded: %+v", i, report.Outcome, report)
 		}
-		if transport != 2*i {
+		if transport != i {
 			t.Fatalf("crossing %d ran %d transport verbs in total, want %d: a cheap transport failure tripped the breaker, so a clone that just gained its remote waits %d crossings to find out (#5569)",
-				i, transport, 2*i, ambientLeaseRefSyncBreakerSkips)
+				i, transport, i, ambientLeaseRefSyncBreakerSkips)
 		}
 		for _, f := range report.Failures {
 			if strings.Contains(f, ambientLeaseRefSyncBreakerOpen) {
@@ -654,5 +767,84 @@ func TestLeaserefAcquireFailsClosedWhenDisplacedPostSync(t *testing.T) {
 	}
 	if res.Record != nil {
 		t.Fatalf("expected result record to be nil on refusal, got %+v", res.Record)
+	}
+}
+
+// fak-test:runtime medium est=2s
+// A successful renewal receipt must describe the state retained locally and
+// published remotely, not a local write immediately regressed by ambient fetch.
+func TestLeaserefRenewPreservesFreshRecordAcrossAmbientSync(t *testing.T) {
+	t.Setenv("FAK_LEASEREF_SYNC", "on")
+	t.Setenv("FAK_LEASEREF_REMOTE", "origin")
+	t.Setenv("FAK_LEASE_COORDINATOR_URL", "")
+	t.Setenv("FAK_LEASE_COORDINATOR_KEY_FILE", "")
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
+	orig := ambientLeaseRefSync
+	ambientLeaseRefSync = ambientLeaseRefSyncImpl
+	t.Cleanup(func() { ambientLeaseRefSync = orig })
+
+	dir := initRegionTestRepo(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	git := func(cwd string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = cwd
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(dir, "init", "--bare", "--quiet", remote)
+	git(dir, "remote", "add", "origin", remote)
+	ctx := context.Background()
+	store := leaseref.NewInDir(dir)
+	now := time.Now()
+	first, verdict, err := store.AcquireFenced(ctx, leaseref.Record{
+		ID: "ambient-renewal", Holder: "same-worker", SessionID: "same-worker",
+		TreeGlobs: []string{"docs/research/inventory/example.json"}, TTLSeconds: 1800,
+	}, now.Add(-10*time.Minute))
+	if err != nil || !verdict.OK || first.Generation != 1 {
+		t.Fatalf("seed live generation: record=%+v verdict=%+v err=%v", first, verdict, err)
+	}
+	previous, verdict, err := store.RenewFenced(ctx, first.ID, first.Holder, first.Generation, 0, now.Add(-5*time.Minute))
+	if err != nil || !verdict.OK {
+		t.Fatalf("seed prior renewal: record=%+v verdict=%+v err=%v", previous, verdict, err)
+	}
+	if _, err := store.Sync(ctx, "origin", true, false); err != nil {
+		t.Fatalf("publish older live renewal: %v", err)
+	}
+	oldOID := git(dir, "rev-parse", previous.Ref())
+
+	var out, errOut bytes.Buffer
+	code := runLeaseref(&out, &errOut, []string{"renew", "--dir", dir, "--id", previous.ID,
+		"--holder", previous.Holder, "--generation", fmt.Sprint(previous.Generation), "--announce", "off"})
+	if code != 0 {
+		t.Fatalf("renew exit=%d, want 0; out=%s stderr=%s", code, out.String(), errOut.String())
+	}
+	var renewed fencedResult
+	if err := json.Unmarshal(out.Bytes(), &renewed); err != nil || renewed.Record == nil || !renewed.Verdict.OK {
+		t.Fatalf("decode renewal: result=%+v err=%v out=%s", renewed, err, out.String())
+	}
+	want := *renewed.Record
+	expected := previous
+	expected.RenewedAt = want.RenewedAt
+	if want.RenewedAt <= previous.RenewedAt || !reflect.DeepEqual(want, expected) {
+		t.Fatalf("renewal changed authority/scope or failed to advance time: previous=%+v got=%+v", previous, want)
+	}
+	for _, repo := range []string{dir, remote} {
+		view := leaseref.NewInDir(repo)
+		got, ok, err := view.Get(ctx, previous.ID)
+		if err != nil || !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("renewal receipt differs from stored state in %s: got=%+v present=%v err=%v want=%+v", repo, got, ok, err, want)
+		}
+		if fence, err := view.Fence(ctx, want, time.Now()); err != nil || !fence.OK {
+			t.Fatalf("renewed record failed exact live fence in %s: verdict=%+v err=%v", repo, fence, err)
+		}
+	}
+	localOID := git(dir, "rev-parse", want.Ref())
+	if remoteOID := git(remote, "rev-parse", want.Ref()); localOID == oldOID || remoteOID != localOID {
+		t.Fatalf("fresh renewal not converged: old=%s local=%s remote=%s", oldOID, localOID, remoteOID)
 	}
 }
