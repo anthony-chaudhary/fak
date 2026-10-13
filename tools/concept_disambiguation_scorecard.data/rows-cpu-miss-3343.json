@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "id": "halo3343-expert-cache-measurement-provenance",
+      "canonical": "ExpertCacheMeasurementSimulated",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The locked PROVENANCE rung on a routed-expert cache receipt (internal/model/expert_cache_receipt.go): the string constant marking a measurement captured from a synthetic or replayed trace, so a simulated run can never masquerade as a hardware one. It is the sibling of ExpertCacheMeasurementHardware.",
+      "distinction": "Names the PROVENANCE of a receipt (simulated vs hardware), not the receipt shape (ExpertCacheReceipt) and not the residency plan or tier it measures. A receipt that flips this field to ExpertCacheMeasurementHardware without a physical capture is the exact false-green this rung exists to refuse.",
+      "distinct_from": [
+        "expert-tier-cache-tier",
+        "cov5304-expert-cache-plan"
+      ],
+      "aliases": [
+        "expertcachemeasurementhardware"
+      ],
+      "grounding": "ExpertCacheMeasurementSimulated",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "halo3343-moe-miss-candidate",
+      "canonical": "MoEMissCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/model/moe_bandwidth_partition.go MoEMissCandidate: one ACTIVATED routed expert that missed the device ring, carrying its ExpertID and a Recency score. It is the unit the MoE bandwidth-partition solver partitions between the PCIe stream and the host CPU.",
+      "distinction": "A single miss CANDIDATE (one expert, its recency) fed to the partition solver - not the solved split (MoEPartitionSplit), not the bandwidth profile (MoEBandwidthProfile), and not a warm-plan selection. It is the solver's input element, not its result.",
+      "distinct_from": [
+        "expert-tier-cache-tier",
+        "cov5304-expert-cache-plan"
+      ],
+      "aliases": [
+        "moemisscandidates"
+      ],
+      "grounding": "MoEMissCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
