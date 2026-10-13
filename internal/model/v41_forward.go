@@ -571,6 +571,20 @@ func (m *Model) v41HeadWithBF16Boundary(x []float32, project v41DenseProjectionF
 }
 
 func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
+	xf, err := m.v41PrepareHeadInput(x, normalize, round)
+	if err != nil {
+		return nil, err
+	}
+	logits, err := m.v41ProjectHeadInput(xf, project, 1)
+	if err != nil {
+		return nil, err
+	}
+	return v41ScaleHeadLogits(logits, m.Cfg, scale, refuse)
+}
+
+// v41PrepareHeadInput retains the serial final-normalization and BF16 boundaries.
+// A cohort prepares each row separately; normalization never crosses sessions.
+func (m *Model) v41PrepareHeadInput(x []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
@@ -613,6 +627,10 @@ func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFun
 			return nil, &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, err)}
 		}
 	}
+	return xf, nil
+}
+
+func (m *Model) v41ProjectHeadInput(xf []float32, project v41DenseProjectionFunc, rows int) ([]float32, error) {
 	if project == nil {
 		for _, v := range xf {
 			if !finite32(v) {
@@ -620,11 +638,7 @@ func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFun
 			}
 		}
 	}
-	logits, err := m.v41ProjectionRows(-1, m.headName(), xf, m.Cfg.VocabSize, m.Cfg.HiddenSize, 1, project)
-	if err != nil {
-		return nil, err
-	}
-	return v41ScaleHeadLogits(logits, m.Cfg, scale, refuse)
+	return m.v41ProjectionRows(-1, m.headName(), xf, m.Cfg.VocabSize, m.Cfg.HiddenSize, rows, project)
 }
 
 // v41FullFinalNorm owns the reference's BF16 -> learned F32 RMSNorm -> BF16

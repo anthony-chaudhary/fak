@@ -1251,69 +1251,64 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		}
 		var stage func() compute.Tensor
 		dtype := compute.F32
-		switch {
-		case s.M.has(name):
-			stage = func() compute.Tensor { return s.weightHAL(name) }
-		case s.M.q8w[name] != nil:
-			dtype = compute.Q8_0
-			if head || guarded {
-				if in%qBlk != 0 {
-					return nil, v41ProjectionDeclined, nil
+		if head {
+			var supported bool
+			dtype, supported = s.v41HeadProjectionDtype(name, out, in)
+			if !supported {
+				return nil, v41ProjectionDeclined, nil
+			}
+		} else {
+			switch {
+			case s.M.has(name):
+				stage = func() compute.Tensor { return s.weightHAL(name) }
+			case s.M.q8w[name] != nil:
+				dtype = compute.Q8_0
+				if guarded {
+					if in%qBlk != 0 {
+						return nil, v41ProjectionDeclined, nil
+					}
 				}
-			}
-			stage = func() compute.Tensor { return s.weightHALQ8(name, s.M.q8w[name]) }
-		case s.M.q4kw[name] != nil:
-			dtype = compute.Q4_K
-			if head || guarded {
-				q := s.M.q4kw[name]
-				if in%qkK != 0 || q.nblk != in/qkK {
-					return nil, v41ProjectionDeclined, nil
-				}
-			}
-			stage = func() compute.Tensor { return s.weightHALQ4K(name, s.M.q4kw[name]) }
-		case s.M.kqw[name] != nil:
-			qt := s.M.kqw[name]
-			desc, ok := LookupQuantDescriptor(qt.kind)
-			if !ok || !desc.SupportsHAL() || (!head && qt.kind == kindQ6K && !s.useHALKQuantWeight(qt)) {
-				return nil, v41ProjectionDeclined, nil
-			}
-			dtype = desc.Dtype()
-			if (head || guarded) && (desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || qt.nblk != in/desc.BlockWeights()) {
-				return nil, v41ProjectionDeclined, nil
-			}
-			stage = func() compute.Tensor { return s.weightHALKQuant(name, qt) }
-
-		case head && s.M.v41PackedHead(name) != nil:
-			q := s.M.v41PackedHead(name)
-			if q.prism != nil || in%qkK != 0 {
-				return nil, v41ProjectionDeclined, nil
-			}
-			switch q.format {
-			case packedEmbeddingQ2K:
-				dtype = compute.Q2_K
-			case packedEmbeddingQ4K:
+				stage = func() compute.Tensor { return s.weightHALQ8(name, s.M.q8w[name]) }
+			case s.M.q4kw[name] != nil:
 				dtype = compute.Q4_K
+				if guarded {
+					q := s.M.q4kw[name]
+					if in%qkK != 0 || q.nblk != in/qkK {
+						return nil, v41ProjectionDeclined, nil
+					}
+				}
+				stage = func() compute.Tensor { return s.weightHALQ4K(name, s.M.q4kw[name]) }
+			case s.M.kqw[name] != nil:
+				qt := s.M.kqw[name]
+				desc, ok := LookupQuantDescriptor(qt.kind)
+				if !ok || !desc.SupportsHAL() || (qt.kind == kindQ6K && !s.useHALKQuantWeight(qt)) {
+					return nil, v41ProjectionDeclined, nil
+				}
+				dtype = desc.Dtype()
+				if (guarded) && (desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || qt.nblk != in/desc.BlockWeights()) {
+					return nil, v41ProjectionDeclined, nil
+				}
+				stage = func() compute.Tensor { return s.weightHALKQuant(name, qt) }
+
 			default:
 				return nil, v41ProjectionDeclined, nil
 			}
-		default:
-			return nil, v41ProjectionDeclined, nil
-		}
-		if !compute.BackendSupportsDeviceWeightDtype(s.Backend, dtype) || (dtype != compute.F32 && !s.Backend.Caps().UploadDtype) {
-			return nil, v41ProjectionDeclined, nil
-		}
-		switch dtype {
-		case compute.Q3_K:
-			if native, ok := s.Backend.(interface{ SupportsQ3KMatMul() bool }); ok && !native.SupportsQ3KMatMul() {
+			if !compute.BackendSupportsDeviceWeightDtype(s.Backend, dtype) || (dtype != compute.F32 && !s.Backend.Caps().UploadDtype) {
 				return nil, v41ProjectionDeclined, nil
 			}
-		case compute.Q5_K:
-			if native, ok := s.Backend.(interface{ SupportsQ5KMatMul() bool }); ok && !native.SupportsQ5KMatMul() {
-				return nil, v41ProjectionDeclined, nil
-			}
-		case compute.Q6_K:
-			if native, ok := s.Backend.(interface{ SupportsQ6KMatMul() bool }); ok && !native.SupportsQ6KMatMul() {
-				return nil, v41ProjectionDeclined, nil
+			switch dtype {
+			case compute.Q3_K:
+				if native, ok := s.Backend.(interface{ SupportsQ3KMatMul() bool }); ok && !native.SupportsQ3KMatMul() {
+					return nil, v41ProjectionDeclined, nil
+				}
+			case compute.Q5_K:
+				if native, ok := s.Backend.(interface{ SupportsQ5KMatMul() bool }); ok && !native.SupportsQ5KMatMul() {
+					return nil, v41ProjectionDeclined, nil
+				}
+			case compute.Q6_K:
+				if native, ok := s.Backend.(interface{ SupportsQ6KMatMul() bool }); ok && !native.SupportsQ6KMatMul() {
+					return nil, v41ProjectionDeclined, nil
+				}
 			}
 		}
 		if head || guarded {
@@ -1383,7 +1378,11 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 				panic(r)
 			}
 		}()
-		run := func() ([]float32, error) {
+		run := func() (values []float32, err error) {
+			var owned []compute.Tensor
+			if head {
+				defer v41ReleaseHeadTensors(s.Backend, &owned, &err)
+			}
 			weight := stage()
 			if guarded && dtype == compute.Q4_K {
 				q := s.M.q4kw[name]
@@ -1412,7 +1411,11 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			}
 			opStage = "activation upload"
 			x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
-			defer s.Backend.Free(x)
+			if head {
+				owned = append(owned, x)
+			} else {
+				defer s.Backend.Free(x)
+			}
 			uploaded = int64(len(input)) * 4
 			opStage = "matmul"
 			var y compute.Tensor
@@ -1421,9 +1424,13 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			} else {
 				y = s.Backend.BatchedMatMul(weight, x, rows)
 			}
-			defer s.Backend.Free(y)
+			if head {
+				owned = append(owned, y)
+			} else {
+				defer s.Backend.Free(y)
+			}
 			opStage = "readback"
-			values := s.Backend.Read(y)
+			values = s.Backend.Read(y)
 			readback = int64(len(values)) * 4
 			want, ok := checkedMulInt(rows, out)
 			if !ok || len(values) != want {

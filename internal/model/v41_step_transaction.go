@@ -14,8 +14,11 @@ type v41StepTransaction struct {
 	stats             v41StepStats
 	nextLayer, layers int
 	closed            bool
+	headPrepared      bool
 	layer             func(int) error
-	head              func() ([]float32, error)
+	headInput         func() ([]float32, error)
+	headProject       func([]float32) ([]float32, error)
+	headFinish        func([]float32, func() error) ([]float32, error)
 	rollback, cleanup func()
 }
 
@@ -357,7 +360,7 @@ func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratc
 		}
 		return nil
 	}
-	tx.head = func() ([]float32, error) {
+	tx.headInput = func() ([]float32, error) {
 
 		// Head runs BEFORE any commit; a head fault rolls back exactly like a layer
 		// fault (truncate/restore, no clone).
@@ -376,14 +379,24 @@ func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratc
 				return nil, err
 			}
 		}
-		res, herr := m.v41HeadWithLogitScale(headInput, scratch.denseProjection, st.finalNorm, st.bf16Boundary, st.logitScale, st.logitHostRefusal())
-		if herr != nil {
-			rollback()
-			var projection *V41ProjectionOperationError
-			if errors.As(herr, &projection) {
-				panic(herr)
+		return m.v41PrepareHeadInput(headInput, st.finalNorm, st.bf16Boundary)
+	}
+	tx.headProject = func(input []float32) ([]float32, error) {
+		return m.v41ProjectHeadInput(input, scratch.denseProjection, 1)
+	}
+	tx.headFinish = func(logits []float32, beforeCommit func() error) ([]float32, error) {
+		if len(logits) != cfg.VocabSize {
+			return nil, v41ProjectionOperationErr(-1, m.headName(), errV41ProjectionResult)
+		}
+		res, err := v41ScaleHeadLogits(logits, cfg, st.logitScale, st.logitHostRefusal())
+		if err != nil {
+			return nil, err
+		}
+
+		if beforeCommit != nil {
+			if err := beforeCommit(); err != nil {
+				return nil, err
 			}
-			return nil, herr
 		}
 
 		// Commit: append the token and, for a plain-only session, release the
@@ -416,18 +429,56 @@ func (tx *v41StepTransaction) advanceLayer() (err error) {
 	return nil
 }
 
-func (tx *v41StepTransaction) finalize() (logits []float32, err error) {
-	if tx.closed || tx.nextLayer != tx.layers {
+// prepareHead leaves the token uncommitted and can run only once. The returned
+// row owns its final-normalization/BF16 boundary and may join compatible peers.
+func (tx *v41StepTransaction) prepareHead() (row []float32, err error) {
+	if tx.closed || tx.headPrepared || tx.nextLayer != tx.layers {
 		return nil, fmt.Errorf("%w: incremental transaction is not ready for head", ErrV41ForwardStage)
 	}
 	defer tx.abortOnPanic()
-	logits, err = tx.head()
+	row, err = tx.headInput()
 	if err != nil {
-		tx.abortAfterFailure()
-		return nil, err
+		return nil, tx.abortHeadError(err)
+	}
+	tx.headPrepared = true
+	return row, nil
+}
+
+// finishHead scales exactly this lane's projected row before committing its
+// history. A peer's projection or cancellation cannot publish this token early.
+func (tx *v41StepTransaction) finishHead(projected []float32, beforeCommit func() error) (logits []float32, err error) {
+	if tx.closed || !tx.headPrepared {
+		return nil, fmt.Errorf("%w: incremental transaction has no prepared head", ErrV41ForwardStage)
+	}
+	defer tx.abortOnPanic()
+	logits, err = tx.headFinish(projected, beforeCommit)
+	if err != nil {
+		return nil, tx.abortHeadError(err)
 	}
 	tx.close()
 	return logits, nil
+}
+
+func (tx *v41StepTransaction) finalize() (logits []float32, err error) {
+	defer tx.abortOnPanic()
+	row, err := tx.prepareHead()
+	if err != nil {
+		return nil, err
+	}
+	logits, err = tx.headProject(row)
+	if err != nil {
+		return nil, tx.abortHeadError(err)
+	}
+	return tx.finishHead(logits, nil)
+}
+
+func (tx *v41StepTransaction) abortHeadError(err error) error {
+	tx.abortAfterFailure()
+	var projection *V41ProjectionOperationError
+	if errors.As(err, &projection) {
+		panic(err)
+	}
+	return err
 }
 
 func (tx *v41StepTransaction) abortOnPanic() {
@@ -458,7 +509,10 @@ func (tx *v41StepTransaction) abort() {
 
 func (tx *v41StepTransaction) close() {
 	tx.closed = true
-	defer func() { tx.layer, tx.head, tx.rollback, tx.cleanup = nil, nil, nil, nil }()
+	defer func() {
+		tx.layer, tx.headInput, tx.headProject, tx.headFinish = nil, nil, nil, nil
+		tx.rollback, tx.cleanup = nil, nil
+	}()
 	if tx.cleanup != nil {
 		tx.cleanup()
 	}

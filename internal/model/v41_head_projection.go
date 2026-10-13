@@ -4,6 +4,74 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 
 type v41HeadPayloadError struct{ cause error }
 
+// v41HeadProjectionDtype is the read-only admission used by serial projection
+// and the shared-head cohort. It selects the same resident format and block
+// layout without staging a weight, binding callbacks or opening a batch.
+func (s *Session) v41HeadProjectionDtype(name string, out, in int) (compute.Dtype, bool) {
+	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
+		return compute.F32, false
+	}
+	wr, wc, present := s.M.v41HeadWeightShape(name)
+	_, valid := checkedMulInt(out, in)
+	if !valid || out <= 0 || in <= 0 || !present || wr != out || wc != in {
+		return compute.F32, false
+	}
+	dtype := compute.F32
+	switch {
+	case s.M.has(name):
+	case s.M.q8w[name] != nil:
+		if in%qBlk != 0 {
+			return dtype, false
+		}
+		dtype = compute.Q8_0
+	case s.M.q4kw[name] != nil:
+		if in%qkK != 0 || s.M.q4kw[name].nblk != in/qkK {
+			return dtype, false
+		}
+		dtype = compute.Q4_K
+	case s.M.kqw[name] != nil:
+		q := s.M.kqw[name]
+		desc, ok := LookupQuantDescriptor(q.kind)
+		if !ok || !desc.SupportsHAL() || desc.BlockWeights() <= 0 || desc.BlockBytes() <= 0 || in%desc.BlockWeights() != 0 || q.nblk != in/desc.BlockWeights() {
+			return dtype, false
+		}
+		dtype = desc.Dtype()
+	case s.M.v41PackedHead(name) != nil:
+		q := s.M.v41PackedHead(name)
+		if q.prism != nil || in%qkK != 0 {
+			return dtype, false
+		}
+		switch q.format {
+		case packedEmbeddingQ2K:
+			dtype = compute.Q2_K
+		case packedEmbeddingQ4K:
+			dtype = compute.Q4_K
+		default:
+			return dtype, false
+		}
+	default:
+		return dtype, false
+	}
+	if !compute.BackendSupportsDeviceWeightDtype(s.Backend, dtype) || (dtype != compute.F32 && !s.Backend.Caps().UploadDtype) {
+		return dtype, false
+	}
+	switch dtype {
+	case compute.Q3_K:
+		if native, ok := s.Backend.(interface{ SupportsQ3KMatMul() bool }); ok && !native.SupportsQ3KMatMul() {
+			return dtype, false
+		}
+	case compute.Q5_K:
+		if native, ok := s.Backend.(interface{ SupportsQ5KMatMul() bool }); ok && !native.SupportsQ5KMatMul() {
+			return dtype, false
+		}
+	case compute.Q6_K:
+		if native, ok := s.Backend.(interface{ SupportsQ6KMatMul() bool }); ok && !native.SupportsQ6KMatMul() {
+			return dtype, false
+		}
+	}
+	return dtype, true
+}
+
 func (s *Session) v41HeadWeightHAL(name string, dtype compute.Dtype, out, in int) compute.Tensor {
 	fail := func(err error) { panic(v41HeadPayloadError{cause: err}) }
 	elems, ok := checkedMulInt(out, in)
@@ -81,10 +149,18 @@ func (s *Session) v41HeadWeightHAL(name string, dtype compute.Dtype, out, in int
 }
 
 func (s *Session) v41HeadCloseFailure(stage string, cause error) error {
-	closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-head-projection", Layer: -1, Stage: stage, Cause: cause}
-	s.halFailure = closed
-	s.Close()
-	return closed
+	if s.halFailure == nil {
+		s.halFailure = &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-head-projection", Layer: -1, Stage: stage, Cause: cause}
+	}
+	if !s.halClosed {
+		// Teardown cannot replace the selected operation's primary failure or
+		// leave its owner eligible for another operation.
+		func() {
+			defer func() { s.halClosed = true; _ = recover() }()
+			s.Close()
+		}()
+	}
+	return s.halFailure
 }
 
 func (m *Model) v41PackedHead(name string) *Q2KEmbedding {
@@ -136,4 +212,30 @@ func (m *Model) v41PackedHeadRows(name string, panel []float32, out, in, rows in
 		m.loraApply(name, original, y[row*out:(row+1)*out])
 	}
 	return y, nil
+}
+
+// v41ReleaseHeadTensors is deferred directly by the selected head operation.
+// It attempts every transient free, preserving the operation's earlier panic
+// or returned error. With no earlier failure, its first Free panic escapes so
+// the selected callback still retires its owner rather than reporting success.
+func v41ReleaseHeadTensors(backend compute.Backend, owned *[]compute.Tensor, err *error) {
+	primary := recover()
+	var cleanupPanic any
+	for i := len(*owned) - 1; i >= 0; i-- {
+		func() {
+			defer func() {
+				if r := recover(); r != nil && cleanupPanic == nil {
+					cleanupPanic = r
+				}
+			}()
+			backend.Free((*owned)[i])
+		}()
+	}
+	*owned = nil
+	if primary != nil {
+		panic(primary)
+	}
+	if *err == nil && cleanupPanic != nil {
+		panic(cleanupPanic)
+	}
 }

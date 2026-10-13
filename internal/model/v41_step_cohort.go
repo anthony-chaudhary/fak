@@ -44,6 +44,18 @@ type v41StepCohortResult struct {
 // Cancellation aborts only its lane. An execution error aborts all remaining
 // uncommitted lanes, and a panic retains its original type. Neither is replayed.
 func (m *Model) forwardV41StepCohort(owner *sync.Mutex, lanes []v41StepCohortLane) (results []v41StepCohortResult, err error) {
+	return m.forwardV41StepCohortWithHead(owner, lanes, false)
+}
+
+// forwardV41StepCohortSharedHead uses one actual backend projection over the
+// prepared surviving rows. Unsupported head dtype/layout declines before Begin.
+// The caller has the same exclusive-session and shared-device-owner obligations
+// as forwardV41StepCohort; this is not yet a serving admission entrypoint.
+func (m *Model) forwardV41StepCohortSharedHead(owner *sync.Mutex, lanes []v41StepCohortLane) ([]v41StepCohortResult, error) {
+	return m.forwardV41StepCohortWithHead(owner, lanes, true)
+}
+
+func (m *Model) forwardV41StepCohortWithHead(owner *sync.Mutex, lanes []v41StepCohortLane, sharedHead bool) (results []v41StepCohortResult, err error) {
 	if owner == nil {
 		return nil, fmt.Errorf("%w: missing device owner", errV41StepCohortDeclined)
 	}
@@ -53,6 +65,11 @@ func (m *Model) forwardV41StepCohort(owner *sync.Mutex, lanes []v41StepCohortLan
 	defer owner.Unlock()
 	if err := m.v41StepCohortAdmit(lanes); err != nil {
 		return nil, err
+	}
+	if sharedHead {
+		if err := m.v41SharedHeadAdmit(lanes); err != nil {
+			return nil, err
+		}
 	}
 	results = make([]v41StepCohortResult, len(lanes))
 	txs := make([]*v41StepTransaction, len(lanes))
@@ -124,6 +141,9 @@ func (m *Model) forwardV41StepCohort(owner *sync.Mutex, lanes []v41StepCohortLan
 	}
 	if err = finish(); err != nil {
 		return results, err
+	}
+	if sharedHead {
+		return results, m.v41FinishSharedHeads(lanes, txs, results, cancelled)
 	}
 	for lane, tx := range txs {
 		if tx == nil || tx.closed || cancelled(lane) {

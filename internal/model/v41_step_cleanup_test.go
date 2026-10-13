@@ -29,9 +29,9 @@ func TestV41StepTransactionCleanupPreservesPrimary(t *testing.T) {
 					return primary
 				}
 				tx := &v41StepTransaction{
-					layers: 1,
-					layer:  func(int) error { return op() },
-					head:   func() ([]float32, error) { return nil, op() },
+					layers:    1,
+					layer:     func(int) error { return op() },
+					headInput: func() ([]float32, error) { return nil, op() },
 					rollback: func() {
 						rolledBack = true
 					},
@@ -52,7 +52,7 @@ func TestV41StepTransactionCleanupPreservesPrimary(t *testing.T) {
 				if panics && got != primary || !panics && (got != nil || returned != primary) {
 					t.Fatalf("panic=%v returned=%v want primary=%v", got, returned, primary)
 				}
-				if !rolledBack || !tx.closed || cleanups != 1 || tx.layer != nil || tx.head != nil || tx.rollback != nil || tx.cleanup != nil {
+				if !rolledBack || !tx.closed || cleanups != 1 || tx.layer != nil || tx.headInput != nil || tx.headProject != nil || tx.headFinish != nil || tx.rollback != nil || tx.cleanup != nil {
 					t.Fatal("transaction did not roll back and finish cleanup bookkeeping")
 				}
 				tx.abort()
@@ -66,9 +66,11 @@ func TestV41StepTransactionCleanupPreservesPrimary(t *testing.T) {
 		fault := errors.New("committed cleanup")
 		rolledBack := false
 		tx := &v41StepTransaction{}
-		tx.head = func() ([]float32, error) {
+		tx.headInput = func() ([]float32, error) { return []float32{1}, nil }
+		tx.headProject = func(row []float32) ([]float32, error) { return row, nil }
+		tx.headFinish = func(row []float32, _ func() error) ([]float32, error) {
 			tx.stats.Committed = true
-			return []float32{1}, nil
+			return row, nil
 		}
 		tx.rollback = func() { rolledBack = true }
 		tx.cleanup = func() { panic(fault) }
