@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -698,6 +699,30 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 // outstanding. A read that a demand fault joined is handed to it through the in-flight load; one
 // that finishes first waits in ready for the next fault of that name. Ready entries from the
 // previous generation are dropped, so at most two layers' prefetches are held.
+//
+// PINNED-BUFFER IDENTITY + DEPENDENCY ORDERING (vLLM offloader port, see THIRD_PARTY_NOTICES.md).
+// vLLM's static buffer pool keys a staging buffer by the parameter's IDENTITY -- name, shape,
+// stride, dtype -- and reuses it across layers, while its prefetch custom ops declare the
+// prefetch/use edges as data dependencies so the compiler cannot reorder a wait ahead of the copy
+// it guards. This port takes the two parts that survive the move to a synchronous ReaderAt ring
+// fill:
+//
+//  1. IDENTITY. A miss is identified by its name, so the same name arriving twice in one layer's
+//     pick list is one in-flight read, not two -- the existing t.loading guard already enforced
+//     that inside this method's single lock hold, and it is now covered by a regression witness.
+//     The read's FILE RANGE (src.expertReadSpan) is derived from the directory geometry alone,
+//     moving no payload, and is what the dispatch order below is stated in.
+//  2. ORDERING. Jobs are dispatched in ascending file-offset order, so the fill walks the shard
+//     forward instead of seeking at random. The dependency edge itself was already here -- a
+//     demand fault joins the in-flight load through t.loading and observes the completed bytes
+//     through load.done -- and this port adds a bounded worker pool so a layer's misses cannot fan
+//     out past a fixed concurrency.
+//
+// fakExpertPrefetchWorkers caps how many reads a single fill has in flight. It is deliberately NOT
+// 1 (that is the queue-depth-one baseline P2 step 1 already beat) and not unbounded (a deep top-k
+// over several shard readers would spawn one goroutine per miss).
+const fakExpertPrefetchWorkers = 8
+
 func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 	if t == nil || len(names) == 0 {
 		return 0
@@ -709,6 +734,7 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		src     *ggufExpertSource
 		overlay *ExpertSparseOverlay
 		load    *expertCheckpointLoad
+		off     int64
 	}
 	t.mu.Lock()
 	t.readyGen++
@@ -731,6 +757,8 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		if _, ok := t.ready[id]; ok {
 			continue
 		}
+		// The in-flight guard is also the identity dedup: a name repeated in this slice finds its
+		// own load here and starts no second read.
 		if t.loading[id] != nil {
 			continue
 		}
@@ -739,30 +767,63 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		}
 		load := &expertCheckpointLoad{done: make(chan struct{})}
 		t.loading[id] = load
-		jobs = append(jobs, job{name: name, id: id, entry: entry, src: t.shards[entry.shard], overlay: t.overlays[entry.fused], load: load})
+		src := t.shards[entry.shard]
+		var off int64
+		if src != nil {
+			off, _, _ = src.expertReadSpan(entry.fused, entry.expert)
+		}
+		jobs = append(jobs, job{name: name, id: id, entry: entry, src: src, overlay: t.overlays[entry.fused], load: load, off: off})
 	}
+	// Ascending file offset is the fill ORDER (dependency ordering). Offsets come from
+	// src.expertReadSpan, which moves no payload; off stays 0 for a shard that could not be
+	// resolved, which sorts to the front and cannot reorder a readable job's range.
+	sort.SliceStable(jobs, func(i, j int) bool { return jobs[i].off < jobs[j].off })
 	gen := t.readyGen
 	t.prefetched += len(jobs)
 	t.mu.Unlock()
-	for _, j := range jobs {
+
+	// Bounded worker pool over an ordered queue. Prefetch enqueues every job (in ascending-offset
+	// order) into a buffer large enough to never block, then returns; a fixed pool of
+	// fakExpertPrefetchWorkers goroutines drains it. So the cap is on reads IN FLIGHT, not reads
+	// started — a layer's whole miss set is handed off without the caller waiting on IO (Prefetch's
+	// historical non-blocking contract), while at most 8 readers touch the shard at once, and the
+	// queue preserves the ascending order the sort above established.
+	queue := make(chan job, len(jobs))
+	workers := fakExpertPrefetchWorkers
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+	for w := 0; w < workers; w++ {
 		go func() {
-			w, err := t.faultOwned(j.name, j.id, j.entry, j.src, j.overlay)
-			t.mu.Lock()
-			defer t.mu.Unlock()
-			j.load.weight, j.load.err = w, err
-			delete(t.loading, j.id)
-			if err == nil && j.load.waiters == 0 {
-				if _, live := t.host[j.id]; !live {
-					if t.ready == nil {
-						t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
-					}
-					t.ready[j.id] = expertCheckpointReady{weight: w, gen: gen}
-				}
+			for j := range queue {
+				t.finishPrefetchJob(j.name, j.id, j.entry, j.src, j.overlay, j.load, gen)
 			}
-			close(j.load.done)
 		}()
 	}
+	for _, j := range jobs {
+		queue <- j
+	}
+	close(queue)
 	return len(jobs)
+}
+
+// finishPrefetchJob runs one prefetch read and publishes its handoff. It is the body the goroutine
+// used to inline, lifted out so the bounded pool above reads as a pool rather than a spawn loop.
+func (t *ExpertCheckpointTier) finishPrefetchJob(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay, load *expertCheckpointLoad, gen uint64) {
+	w, err := t.faultOwned(name, id, entry, src, overlay)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	load.weight, load.err = w, err
+	delete(t.loading, id)
+	if err == nil && load.waiters == 0 {
+		if _, live := t.host[id]; !live {
+			if t.ready == nil {
+				t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
+			}
+			t.ready[id] = expertCheckpointReady{weight: w, gen: gen}
+		}
+	}
+	close(load.done)
 }
 
 func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay) (expertWeight, error) {

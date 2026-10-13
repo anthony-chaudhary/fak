@@ -209,6 +209,19 @@ func (s *ggufExpertSource) readExpertReadOnly(name string, e int) ([]byte, error
 	return raw[:len(raw):len(raw)], nil
 }
 
+// expertReadSpan returns the absolute byte range [off, off+stride) that expert e of the named
+// fused tensor occupies, derived ONLY from the directory geometry indexed at construction. It
+// moves no payload bytes, so it is the read identity the P2 fill pool orders by without paying
+// the IO it is scheduling. ok=false for an unknown tensor or an out-of-range expert, exactly
+// the cases readExpert refuses, so a caller can treat it as a plan-time check.
+func (s *ggufExpertSource) expertReadSpan(name string, e int) (off, size int64, ok bool) {
+	entry, found := s.tensors[name]
+	if !found || e < 0 || e >= entry.desc.Experts {
+		return 0, 0, false
+	}
+	return entry.desc.Offset + int64(e)*entry.stride, entry.stride, true
+}
+
 // expertStride returns the derived per-expert byte stride of the named fused tensor.
 func (s *ggufExpertSource) expertStride(name string) (int64, bool) {
 	entry, ok := s.tensors[name]

@@ -448,6 +448,43 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## vLLM offloader pinned-buffer identity and dependency ordering
+
+The checkpoint expert-ring fill in `internal/model/expert_checkpoint_tier.go`
+(`ExpertCheckpointTier.Prefetch`, the bounded fill pool and the ascending-offset
+dispatch order) and the directory-only read-span accessor
+`ggufExpertSource.expertReadSpan` in `internal/model/gguf_expert_source.go` adapt
+the static-buffer-pool identity rule and the prefetch/sync dependency-ordering
+contract from the vLLM offloader at revision
+`f47792af7fba76eb8e8f6a564b35cfad316d39f2`:
+https://github.com/vllm-project/vllm/tree/f47792af7fba76eb8e8f6a564b35cfad316d39f2
+- `vllm/model_executor/offloader/prefetch.py` (`ParamInfo.key` — a staging buffer
+  is keyed by parameter identity (name, shape, stride, dtype) and reused across
+  layers; `StaticBufferPool`, `_get_next_prefetch_index`).
+- `vllm/model_executor/offloader/prefetch_ops.py` (`wait_prefetch` / `start_prefetch`
+  declare a mutated argument so the compiler cannot reorder a wait ahead of the
+  copy it guards).
+- `vllm/model_executor/offloader/uva.py` (pinned staging storage).
+
+Changed for Fak: the port is expressed over a synchronous `io.ReaderAt` ring fill
+rather than a CUDA copy stream. Identity becomes the absolute checkpoint byte
+range derived from GGUF directory geometry, which also supplies the dispatch
+order; the dependency edge is the existing one-shot in-flight `expertCheckpointLoad`
+handoff a demand fault joins; and a fixed 8-worker pool bounds the fan-out a
+layer's misses may have instead of one goroutine per miss. No vLLM Python source,
+CUDA kernel, or runtime scheduling code is included.
+
+```text
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+```
+
+The full Apache License, Version 2.0 text is reproduced in the
+"TensorFold benchmark evidence" section above (that section carries the complete
+license body shared by both Apache-2.0 notices). Copyright: the vLLM project
+contributors, Licensed under the Apache License, Version 2.0.
+
 ## llama.cpp mul_mat_vec_id and llama_moe_cache slot map
 
 The V4.1 routed-expert id kernels `internal/compute/shaders/v41_q2k_matvec_id.comp`
