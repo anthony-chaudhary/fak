@@ -1269,6 +1269,13 @@ func chatStreamModel(stream *chatStreamWriter) string {
 // refused or served inline (with the deny summary in-band when the content is
 // otherwise empty), else the upstream's own finish.
 func (s *Server) applyAdjudicatedTurn(asst *agent.Message, adjs []ToolAdjudication, kept []agent.ToolCall, dropped, servedHits int, servedText string, bodyRefused bool, upstreamFinish string) string {
+	if len(kept) == 0 {
+		if asst.ToolCalls != nil && len(asst.ToolCalls) == 0 {
+			kept = []agent.ToolCall{}
+		} else {
+			kept = nil
+		}
+	}
 	asst.ToolCalls = kept
 	// #3567 output-side shadow: classify the MODEL's own outbound prose (sampled,
 	// observe-only) before fak blanks/appends anything, folding the negative-framing

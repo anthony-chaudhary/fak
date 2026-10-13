@@ -91,7 +91,7 @@ func (f *Func) UnmarshalJSON(raw []byte) error {
 type Message struct {
 	Role         string     `json:"role"`
 	Content      string     `json:"content,omitempty"`
-	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitzero"`
 	FunctionCall *Func      `json:"function_call,omitempty"` // legacy OpenAI-compatible single-call shape
 	ToolCallID   string     `json:"tool_call_id,omitempty"`  // for role=tool
 	Name         string     `json:"name,omitempty"`

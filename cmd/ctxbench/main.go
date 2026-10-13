@@ -81,6 +81,8 @@ type corpusJSONLRow struct {
 	Bytes   int    `json:"bytes,omitempty"`
 }
 
+var errEmptyCorpus = errors.New("corpus has no call or result rows")
+
 func loadCorpus(path string) (corpus, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -88,6 +90,14 @@ func loadCorpus(path string) (corpus, error) {
 	}
 	var cp corpus
 	if err := json.Unmarshal(raw, &cp); err == nil {
+		if len(cp.Calls) == 0 && len(cp.Results) == 0 {
+			var row corpusJSONLRow
+			if strings.HasSuffix(strings.ToLower(path), ".jsonl") && json.Unmarshal(raw, &row) == nil &&
+				(row.Type != "" || row.Tool != "" || row.Name != "" || row.Source != "") {
+				return parseJSONLCorpus(raw)
+			}
+			return corpus{}, errEmptyCorpus
+		}
 		return cp, nil
 	} else if !strings.HasSuffix(strings.ToLower(path), ".jsonl") {
 		return corpus{}, fmt.Errorf("parse corpus: %w", err)
@@ -132,7 +142,7 @@ func parseJSONLCorpus(raw []byte) (corpus, error) {
 		}
 	}
 	if len(cp.Results) == 0 && len(cp.Calls) == 0 {
-		return corpus{}, fmt.Errorf("no call or result rows")
+		return corpus{}, errEmptyCorpus
 	}
 	return cp, nil
 }

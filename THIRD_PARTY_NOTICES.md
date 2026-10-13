@@ -636,3 +636,36 @@ maps with Go ordered lists, computes the 10%/80% protected target without intege
 overflow, and stores only touched resident groups. It preserves the switch after
 more than four full-capacity request windows. It is an offline experiment,
 without MLX materialization, serving eviction or a hardware performance claim.
+
+## MLX-LM declared RoPE scaling
+
+The model configuration handling and linear RoPE compatibility in
+`internal/model/config.go` and `internal/model/arch.go` adapt the declared
+scaling contract in `ml-explore/mlx-lm`, commit
+`8d47a50482e27ad972e545f94f7ecb9e73a44635`,
+`mlx_lm/models/qwen3_moe.py` and `mlx_lm/models/rope_utils.py:290-307`.
+Source: https://github.com/ml-explore/mlx-lm/tree/8d47a50482e27ad972e545f94f7ecb9e73a44635
+
+```text
+MIT License
+
+Copyright © 2023 Apple Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

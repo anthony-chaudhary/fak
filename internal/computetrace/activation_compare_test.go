@@ -60,6 +60,58 @@ func collect(events ...Event) Artifact {
 	return a
 }
 
+// fak-test:runtime fast est=10ms
+func TestActivationTraceMalformedIndices(t *testing.T) {
+	decode := func(indices string) Artifact {
+		t.Helper()
+		a, err := Read(strings.NewReader(`{"schema":"fak.compute_trace.v1","events":[{
+			"layer":4,"token":2,"phase":"q_proj","shapes":[[3]],
+			"input_digest":"input","weight_digest":"weight",
+			"sample_indices":` + indices + `,"sample_values":[1,2,3]}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	for _, tc := range []struct{ name, indices string }{
+		{"short", "[0]"},
+		{"overlong", "[0,1,2,3]"},
+		{"duplicate", "[0,0,2]"},
+	} {
+		for _, peer := range []struct{ name, indices string }{
+			{"explicit", "[0,1,2]"},
+			{"implicit", "null"},
+		} {
+			for _, side := range []string{"reference", "actual"} {
+				t.Run(tc.name+"/"+peer.name+"/"+side, func(t *testing.T) {
+					ref, got := decode(tc.indices), decode(peer.indices)
+					if side == "actual" {
+						ref, got = got, ref
+					}
+					if r := CompareActivationTraces(ref, got, ActivationTolerance{}); r.Verdict != TraceIncomparable {
+						t.Fatalf("strict verdict=%s, want %s", r.Verdict, TraceIncomparable)
+					}
+					r := FirstDivergence(ref, got, DivergenceTolerance{}, ActivationTolerance{})
+					if r.Verdict != TraceIncomparable || r.Strict.Verdict != TraceIncomparable || r.FirstDivergent != nil {
+						t.Fatalf("first-divergence verdict=%s strict=%s first=%v", r.Verdict, r.Strict.Verdict, r.FirstDivergent)
+					}
+				})
+			}
+		}
+	}
+	for _, indices := range []string{"[0,1,2]", "null"} {
+		ref, got := decode("null"), decode(indices)
+		if r := CompareActivationTraces(ref, got, ActivationTolerance{}); r.Verdict != TraceEqual {
+			t.Fatalf("legacy positional control verdict=%s", r.Verdict)
+		}
+		got.Events[0].SampleValues[2]++
+		r := CompareActivationTraces(ref, got, ActivationTolerance{})
+		if r.Verdict != TraceDivergent || r.Divergent != (ActivationIdentity{Layer: 4, Token: 2, Stage: "q_proj"}) || r.DivergentIndex != 2 {
+			t.Fatalf("valid divergence control: verdict=%s identity=%v index=%d", r.Verdict, r.Divergent, r.DivergentIndex)
+		}
+	}
+}
+
 // TestActivationTraceCompare is the named #13324 witness.
 func TestActivationTraceCompare(t *testing.T) {
 	t.Run("identical fixtures compare equal", func(t *testing.T) {

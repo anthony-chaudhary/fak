@@ -31,6 +31,17 @@ func applyRopeScaling(cfg Config, inv []float64) {
 	switch cfg.RopeScaling {
 	case "", "none":
 		return
+	case "linear":
+		factor := cfg.RopeFactor
+		if factor == 0 {
+			factor = cfg.effectiveRopeParameters().Factor
+		}
+		if factor <= 0 || math.IsNaN(factor) || math.IsInf(factor, 0) {
+			return
+		}
+		for j := range inv {
+			inv[j] /= factor
+		}
 	case "llama3":
 		factor := cfg.RopeFactor
 		lowFreqFactor := cfg.RopeLowFreqFactor
