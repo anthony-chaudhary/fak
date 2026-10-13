@@ -795,16 +795,18 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		if err != nil {
 			return nil, v41StageErr(v41StageCompress, l, err)
 		}
-		sharedKV, _ = layerState.KVSourceRows(l)
+		// Step owns the state synchronously. Attention consumes these rows before
+		// returning; index scoring still packs its own flat key buffer.
+		sharedKV, _ = layerState.borrowKVSourceRows(l)
 		if indexPub {
 			var ok bool
-			indexKeys, ok = layerState.IndexKeys(l)
+			indexKeys, ok = layerState.borrowIndexKeys(l)
 			if len(sharedKV) != len(indexKeys) || (len(sharedKV) > 0 && !ok) {
 				return nil, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
 			}
 		}
 	} else {
-		sharedKV, indexKeys, err = m.v41CompressedReaderRows(plan, registry, pos+1)
+		sharedKV, indexKeys, err = m.v41CompressedReaderStepRows(plan, registry, pos+1)
 		if err != nil {
 			return nil, err
 		}

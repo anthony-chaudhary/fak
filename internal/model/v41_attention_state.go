@@ -795,6 +795,19 @@ func (s *V41AttentionState) WindowKV() [][]float32 {
 // KVSourceRows returns a copy of the completed compressed rows published by the
 // given source layer, in group order.
 func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) {
+	return s.kvSourceRows(sourceLayerID, true)
+}
+
+// borrowKVSourceRows returns fresh descriptors over read-only publications for
+// one synchronous Step. The caller exclusively owns the state until consumption
+// ends: no concurrent publication, Reset, or reseed is permitted. Neither these
+// rows nor their descriptors may be retained by callbacks, snapshots, or mirrors;
+// a synchronous consumer needing retained data must copy it before returning.
+func (s *V41AttentionState) borrowKVSourceRows(sourceLayerID int) ([][]float32, bool) {
+	return s.kvSourceRows(sourceLayerID, false)
+}
+
+func (s *V41AttentionState) kvSourceRows(sourceLayerID int, copyPayload bool) ([][]float32, bool) {
 	if s == nil {
 		return nil, false
 	}
@@ -809,7 +822,10 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 		if !ok {
 			return nil, false
 		}
-		out = append(out, append([]float32(nil), row...))
+		if copyPayload {
+			row = append([]float32(nil), row...)
+		}
+		out = append(out, row)
 	}
 	return out, true
 }
@@ -817,6 +833,16 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 // IndexKeys returns a copy of the index-key cache published by the given source
 // layer, in group order.
 func (s *V41AttentionState) IndexKeys(sourceLayerID int) ([][]float32, bool) {
+	return s.indexKeys(sourceLayerID, true)
+}
+
+// borrowIndexKeys has the same Step-only lifetime as borrowKVSourceRows. The
+// index scorer receives its existing owned flat copy, never these publications.
+func (s *V41AttentionState) borrowIndexKeys(sourceLayerID int) ([][]float32, bool) {
+	return s.indexKeys(sourceLayerID, false)
+}
+
+func (s *V41AttentionState) indexKeys(sourceLayerID int, copyPayload bool) ([][]float32, bool) {
 	if s == nil {
 		return nil, false
 	}
@@ -831,7 +857,10 @@ func (s *V41AttentionState) IndexKeys(sourceLayerID int) ([][]float32, bool) {
 		if !ok {
 			return nil, false
 		}
-		out = append(out, append([]float32(nil), row...))
+		if copyPayload {
+			row = append([]float32(nil), row...)
+		}
+		out = append(out, row)
 	}
 	return out, true
 }
