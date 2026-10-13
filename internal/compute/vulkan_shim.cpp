@@ -1526,7 +1526,9 @@ void tsBatchCollect() {
 void batchBegin() {
 	if (g_v41SubmissionPendingFailure) return;
 	if (g_batching) return;          // already recording — the model brackets each token
-	g_batchCmd = beginCmd();
+	// A V4.1 window must latch command allocation/begin failures, not abort.
+	g_batchCmd = g_stepBatch ? v41BeginCmdChecked() : beginCmd();
+	if (g_batchCmd == VK_NULL_HANDLE) return;
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
 	g_batchOps = 0;
@@ -2962,7 +2964,9 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
             statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID) ||
             initializedStatus->bytes < statusBytes) return false;
     }
-    const bool checkedV41 = forceChecked || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
+    // Ordinary scalar kernels inside a checked step also fail closed on
+    // descriptor allocation; skipping a dispatch must never publish stale data.
+    const bool checkedV41 = forceChecked || g_stepBatch || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);

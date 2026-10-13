@@ -10,7 +10,8 @@ import (
 
 // This same-backend witness compares the actual P=1 decode layout with each
 // P=1..4 panel, including a real rows=2 dispatch and distinct BF16 input rows.
-// It does not opt production Vulkan into the model's shared-head capability.
+// At the full Flash shape this exercises the scalar-composition capability;
+// reduced shapes still compare the separate generic panel implementation.
 // The normal case uses a reduced vocabulary. Explicit FULL=1 selects synthetic
 // packed weights at the pinned Flash [129280,5120] shape: 542,976,000 raw bytes
 // plus a matching device allocation, never an expanded F32 weight matrix.
@@ -35,6 +36,10 @@ func TestVulkanQ6KSharedHeadPanelBitIdenticalToScalar(t *testing.T) {
 	if full {
 		out = 129280
 	}
+	composed := v.V41SharedHeadAvailable(Q6_K, out, in, maxRows)
+	if full && !composed {
+		t.Fatal("full-shape witness requires the admitted AMD UMA scalar-head route")
+	}
 	raw := q6KSharedHeadFixture(out, in)
 	w := v.Upload(NewQ6K(Default(), []int{out, in}, raw), Q6_K)
 	defer v.Free(w)
@@ -50,10 +55,20 @@ func TestVulkanQ6KSharedHeadPanelBitIdenticalToScalar(t *testing.T) {
 			got := v.Read(output)
 			q6KSharedHeadCompare(t, got, want[:rows*out], rows, out)
 			profile := v.VulkanDebugDispatchProfileSnapshot()
-			if profile.ComputeDispatches != 1 || profile.OtherComputeDispatches != 1 || profile.OtherMatmulDispatches != 1 {
-				t.Fatalf("rows=%d must be one native Q6_K panel dispatch, got %+v", rows, profile)
+			dispatches, copies := uint64(1), uint64(0)
+			if composed {
+				dispatches = uint64(rows)
+				if rows > 1 {
+					copies = uint64(2 * rows)
+				}
 			}
-			t.Logf("Q6_K same-backend parity: synthetic [%d,%d], rows=%d, distinct BF16 inputs, exact F32 logits, one native dispatch", out, in, rows)
+			if profile.ComputeDispatches != dispatches || profile.OtherComputeDispatches != dispatches || profile.OtherMatmulDispatches != dispatches || profile.D2DCopies != copies {
+				t.Fatalf("rows=%d composed=%v require %d Q6_K dispatches and %d D2D copies, got %+v", rows, composed, dispatches, copies, profile)
+			}
+			if composed && (profile.BatchSubmits != 1 || profile.OneShotComputeSubmits != 0 || profile.OneShotD2DSubmits != 0) {
+				t.Fatalf("rows=%d scalar composition must use one checked batch, got %+v", rows, profile)
+			}
+			t.Logf("Q6_K same-backend parity: synthetic [%d,%d], rows=%d, distinct BF16 inputs, exact F32 logits, native_dispatches=%d scalar_composition=%v", out, in, rows, dispatches, composed)
 		}()
 	}
 }

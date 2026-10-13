@@ -125,6 +125,9 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	if P <= 0 || in <= 0 || X.Numel() != P*in {
 		panic(fmt.Sprintf("compute: vulkan BatchedMatMul input numel=%d, want P*in=%d*%d", X.Numel(), P, in))
 	}
+	if v41ScalarHeadShape(w.Dtype, out, in, P) && v.v41ScalarHeadAvailableLocked(out, in, P) {
+		return v.v41ScalarHeadLocked(w, X, P)
+	}
 	y, _ := v.devTr([]int{P, out}, F32)
 	v.recordBatchDispatch(
 		VulkanBufferAccess{BufferID: v.bufferIdentity(w), Size: 0, Mode: VulkanAccessRead},

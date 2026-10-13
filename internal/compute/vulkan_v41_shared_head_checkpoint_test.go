@@ -47,6 +47,7 @@ func TestVulkanV41SharedHeadCheckpointParity(t *testing.T) {
 	}
 	probe, ok := be.(interface {
 		VulkanQ6KSharedHeadQualificationPreflight(compute.Dtype, int, int, int) (compute.VulkanQ6KSharedHeadQualification, error)
+		V41SharedHeadAvailable(compute.Dtype, int, int, int) bool
 		VulkanDebugResetDispatchProfile()
 		VulkanDebugDispatchProfileSnapshot() compute.VulkanDispatchProfile
 	})
@@ -56,6 +57,9 @@ func TestVulkanV41SharedHeadCheckpointParity(t *testing.T) {
 	device, err := probe.VulkanQ6KSharedHeadQualificationPreflight(compute.Q6_K, out, in, maxRows)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !probe.V41SharedHeadAvailable(compute.Q6_K, out, in, maxRows) {
+		t.Fatal("checkpoint witness requires the admitted scalar-head composition route")
 	}
 	expectedDevice, err := strconv.ParseUint(os.Getenv("FAK_V41_SHARED_HEAD_EXPECT_DEVICE_ID"), 0, 32)
 	if err != nil || uint32(expectedDevice) != device.DeviceID {
@@ -172,8 +176,12 @@ func TestVulkanV41SharedHeadCheckpointParity(t *testing.T) {
 		defer be.Free(output)
 		got := append([]float32(nil), be.Read(output)...)
 		p := probe.VulkanDebugDispatchProfileSnapshot()
-		if p.ComputeDispatches != 1 || p.OtherComputeDispatches != 1 || p.OtherMatmulDispatches != 1 {
-			t.Fatalf("rows=%d scalar=%v: require exactly one native Q6_K dispatch, got %+v", rows, scalar, p)
+		dispatches, copies := uint64(rows), uint64(0)
+		if rows > 1 {
+			copies = uint64(2 * rows)
+		}
+		if p.ComputeDispatches != dispatches || p.OtherComputeDispatches != dispatches || p.OtherMatmulDispatches != dispatches || p.D2DCopies != copies || p.BatchSubmits != 1 || p.OneShotComputeSubmits != 0 || p.OneShotD2DSubmits != 0 {
+			t.Fatalf("rows=%d scalar=%v: require %d native scalar Q6_K dispatches, %d D2D copies and one checked batch, got %+v", rows, scalar, dispatches, copies, p)
 		}
 		profiles = append(profiles, p)
 		if len(got) != rows*out {
@@ -222,8 +230,9 @@ func TestVulkanV41SharedHeadCheckpointParity(t *testing.T) {
 	inputSum := sha256.Sum256(inputBytes)
 	receipt := map[string]any{
 		"schema": "fak-v41-q6k-shared-head-component/1", "engine": "fak-native", "status": "component-pass",
-		"scope":  "checkpoint head bytes with synthetic BF16 input; no model/cohort/serving/performance qualification",
-		"device": device, "tensor": "output.weight", "shape": []int{out, in}, "rows": []int{1, 2, 3, 4},
+		"scope":       "checkpoint head bytes with synthetic BF16 input; no model/cohort/serving/performance qualification",
+		"native_path": "checked-scalar-row-composition",
+		"device":      device, "tensor": "output.weight", "shape": []int{out, in}, "rows": []int{1, 2, 3, 4},
 		"checkpoint_header_sha256": headerHash, "tensor_sha256": headHash, "shader_file_sha256": shaderHash,
 		"checkpoint_shard_sha256": shardSHA, "checkpoint_revision": "58d8ac86298fdf85a2440defee08b1abcad32e45", "checkpoint_shard_bytes_hashed": shardBytes,
 		"test_binary_sha256": sharedHeadFileSHA(t, exe), "input_f32_sha256": hex.EncodeToString(inputSum[:]),
