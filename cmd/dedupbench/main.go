@@ -1,30 +1,28 @@
-// Command dedupbench measures the value of fak's IN-BATCH COLD-PREFIX FUSION
+// Command dedupbench measures fak's IN-BATCH COLD-PREFIX FUSION
 // (fak#1914, internal/modelengine's SetInBatchPrefixDedup over
-// radixkv.PrefixFlightGroup) against the real next-best alternative caching arm.
+// radixkv.PrefixFlightGroup) against a serial warm-cache comparison arm.
 //
-// The mechanism under test. When N cold admissions arrive together from one prompt
-// family (a shared prefix P, then a divergent suffix), fak coalesces the shared
-// prefill through PrefixFlightGroup: the FIRST admission becomes the leader and runs
-// the shared prefix ONCE; every later admission JOINS THE IN-FLIGHT leader, adopts a
-// clone of its prefix KV, and prefills only its divergent suffix. The followers do
-// not wait for the leader to finish and then redo the work — they piggyback on the
-// promise while it is still computing.
+// The mechanism under test. N cold admissions from one prompt family share a
+// prefix P, then diverge. The FIRST admission becomes the leader and prefills its
+// full prompt. Every follower JOINS THE IN-FLIGHT leader before computation starts,
+// waits for publication, adopts a clone of the shared prefix KV, and prefills its
+// own divergent suffix. The admission barrier makes this synthetic simultaneous
+// workload deterministic; its scheduling overhead is included in wall-clock time.
 //
-// The tuned next-best alternative (NBA). SGLang's in-batch prefix caching defers the
-// twin until the leader's cache is WARM, then serves the twin from the warm prefix.
-// That baseline also avoids recomputing the shared prefix — but only after the leader
-// has FINISHED. It is a warm-cache reuse, not an in-flight join. We model it exactly:
-// run the leader to completion, insert its KV into a radix tree, then serve each
-// follower from the warm prefix (clone + suffix prefill). This is the baseline the
-// headline ratio is taken against; a whole-prompt recompute arm is reported only as
+// The warm-cache comparison. Run the leader to completion, insert its KV into a
+// radix tree, then serve each follower serially from the warm prefix (clone +
+// suffix prefill). This avoids recomputing the same shared prefix too, but has no
+// in-flight registration. A whole-prompt recompute arm is reported only as
 // CONTEXT, never as the headline (see BENCHMARK-GOVERNANCE.md anti-inflation).
 //
-// What the ratio means. Both arms do the SAME total prefill TOKENS (one shared
-// prefix + N suffixes), so the token-count axis cannot separate them; the honest
-// discriminating axis is WALL-CLOCK to complete the batch — fusion overlaps the
-// leader's prefill with the followers' prefix adoption, the warm-cache baseline
-// serializes behind the finished leader. Every arm is correctness-gated: its final
-// session must produce last-token logits bit-identical to a fresh full prefill.
+// What the ratio means. For immediately divergent suffixes both arms compute one
+// shared prefix + N suffixes. Actual token counts are reported per arm: accidental
+// matches inside generated suffixes can change reuse with the chosen leader.
+// In both arms followers adopt KV only after the leader finishes. The fusion cohort runs follower suffixes concurrently; the warm-cache
+// comparison runs them serially. Their wall-clock ratio describes these synthetic
+// workloads, including scheduling and cloning costs, and does not isolate a gain
+// from prefix fusion alone. Every arm is correctness-gated: final last-token logits
+// must be bit-identical to a fresh full prefill.
 //
 // Usage:
 //
@@ -40,6 +38,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -65,6 +64,7 @@ type armResult struct {
 	WallMS      float64 `json:"wall_ms_best"`
 	PrefillTok  int     `json:"prefill_tokens"`
 	Correctness bool    `json:"correctness_bit_identical"`
+	Failure     string  `json:"failure,omitempty"`
 	// CoalescedLeaders / CoalescedFollowers prove the FUSION arm actually coalesced
 	// rather than accidentally serializing into N independent leaders. Both are 0 for
 	// the non-fusion arms.
@@ -135,7 +135,7 @@ func main() {
 
 	env := envelope{N: *n, Prefix: *prefix, Suffix: *suffix, MinShared: minShared, Reps: *reps}
 
-	fusion := runBest(m, *reps, func() (armResult, bool) { return armFusion(m, prompts, oracle, *prefix) })
+	fusion := runBest(m, *reps, func() (armResult, bool) { return armFusion(m, prompts, oracle) })
 	nba := runBest(m, *reps, func() (armResult, bool) { return armWarmCacheNBA(m, prompts, oracle) })
 	naive := runBest(m, *reps, func() (armResult, bool) { return armNaive(m, prompts, oracle) })
 
@@ -152,11 +152,14 @@ func main() {
 		WarmCacheNBA:    nba,
 		NaiveContext:    naive,
 		FusionVsWarmNBA: ratio,
-		Note: "Headline = fusion(=in-flight coalescing) wall-clock vs warm-cache next-best " +
-			"(leader finishes, then followers reuse the warm prefix). Both arms compute the SAME total " +
-			"prefill tokens (one shared prefix + N suffixes); the ratio isolates the in-flight overlap. " +
-			"The naive recompute arm is context only. All arms best-of-N; every arm is correctness-gated " +
-			"bit-identical to a fresh full prefill. [SW-VERIFIED] Go-receipt numbers are not hardware evidence.",
+		Note: "Synthetic concurrent fusion cohort vs serial warm-cache comparison. Followers in both arms " +
+			"wait for the leader to finish before adopting KV. Fusion follower suffixes run concurrently; " +
+			"warm-cache follower suffixes run serially. Actual prefill token counts are reported per arm; " +
+			"extra suffix-prefix matches can change reuse with the chosen leader. " +
+			"Wall-clock includes admission, scheduling and cloning; " +
+			"the ratio does not isolate a gain from prefix fusion alone. Naive recompute is context only. " +
+			"All arms best-of-N and bit-identical to fresh full prefill. [SW-VERIFIED] Go-receipt numbers " +
+			"are not hardware evidence.",
 	}
 
 	if *check {
@@ -168,7 +171,7 @@ func main() {
 		if *asJSON {
 			emit(r)
 		} else {
-			fmt.Printf("dedupbench -check: OK (all arms bit-identical to full prefill; fusion leaders=%d followers=%d); fusion/warm-NBA wall ratio = %.3fx\n",
+			fmt.Printf("dedupbench -check: OK (all arms bit-identical to full prefill; fusion leaders=%d followers=%d); concurrent-fusion/serial-warm-cache wall ratio = %.3fx\n",
 				fusion.CoalescedLeaders, fusion.CoalescedFollowers, ratio)
 		}
 		return
@@ -180,9 +183,9 @@ func main() {
 	}
 	fmt.Printf("envelope: N=%d prefix=%d suffix=%d minShared=%d reps=%d\n", env.N, env.Prefix, env.Suffix, env.MinShared, env.Reps)
 	fmt.Printf("  fusion (in-flight coalesce) : %8.3f ms  prefill_tokens=%d  correct=%v\n", fusion.WallMS, fusion.PrefillTok, fusion.Correctness)
-	fmt.Printf("  warm-cache NBA (deferred)   : %8.3f ms  prefill_tokens=%d  correct=%v\n", nba.WallMS, nba.PrefillTok, nba.Correctness)
+	fmt.Printf("  warm-cache (serial)         : %8.3f ms  prefill_tokens=%d  correct=%v\n", nba.WallMS, nba.PrefillTok, nba.Correctness)
 	fmt.Printf("  naive recompute (context)   : %8.3f ms  prefill_tokens=%d  correct=%v\n", naive.WallMS, naive.PrefillTok, naive.Correctness)
-	fmt.Printf("  fusion / warm-cache-NBA wall-clock speedup: %.3fx\n", ratio)
+	fmt.Printf("  concurrent fusion / serial warm-cache wall-clock ratio: %.3fx\n", ratio)
 }
 
 func emit(r receipt) {
@@ -201,7 +204,7 @@ func runBest(m *model.Model, reps int, arm func() (armResult, bool)) armResult {
 	for i := 0; i < reps; i++ {
 		res, ok := arm()
 		if !ok {
-			fmt.Fprintln(os.Stderr, "dedupbench: arm failed its correctness gate")
+			fmt.Fprintf(os.Stderr, "dedupbench: arm failed its correctness gate: %s\n", res.Failure)
 			os.Exit(1)
 		}
 		if res.WallMS < best.WallMS {
@@ -214,13 +217,16 @@ func runBest(m *model.Model, reps int, arm func() (armResult, bool)) armResult {
 // armFusion runs N concurrent admissions through the PrefixFlightGroup single-flight:
 // one leader prefills its full prompt; every follower joins the in-flight leader,
 // adopts a clone of its prefix KV, and prefills only its divergent suffix.
-func armFusion(m *model.Model, prompts [][]int, oracle [][]float32, prefix int) (armResult, bool) {
+func armFusion(m *model.Model, prompts [][]int, oracle [][]float32) (armResult, bool) {
 	g := radixkv.NewPrefixFlightGroup(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	type out struct {
-		logits []float32
-		ok     bool
+		logits     []float32
+		prefillTok int
+		err        error
 	}
 	outs := make([]out, len(prompts))
 
@@ -229,60 +235,94 @@ func armFusion(m *model.Model, prompts [][]int, oracle [][]float32, prefix int) 
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			<-start // release all N together so the coalescing window is real
+			<-start
 			p := prompts[i]
 			kv, logits, matched, leader, err := g.CoalesceSharedPrefixNS(
-				context.Background(), "", p, minShared,
-				func(context.Context) (*model.KVCache, []float32, error) {
+				ctx, "", p, minShared,
+				func(ctx context.Context) (*model.KVCache, []float32, error) {
+					// A start-channel release only makes admissions runnable. Hold
+					// computation until every follower has registered, before the
+					// model's spin workers can occupy all available scheduler Ps.
+					// This establishes the simultaneous cold workload under test;
+					// admission and its scheduling cost remain inside the timer.
+					if err := waitForFusionFollowers(ctx, g, int64(len(prompts)-1)); err != nil {
+						cancel()
+						return nil, nil, err
+					}
 					s := m.NewSession()
 					lg := s.Prefill(p)
 					return s.Cache, lg, nil
 				})
 			if err != nil {
-				outs[i] = out{ok: false}
+				outs[i] = out{err: err}
 				return
 			}
 			if leader {
-				// The leader's session already prefilled the full prompt; logits come
-				// back directly.
-				outs[i] = out{logits: logits, ok: true}
+				// The leader computed its full prompt, including its own suffix.
+				outs[i] = out{logits: logits, prefillTok: len(p)}
 				return
 			}
 			// Follower: adopt the prefix clone and prefill only the divergent suffix.
 			s := m.SessionFromPrefix(kv)
 			lg := s.Prefill(p[matched:])
-			outs[i] = out{logits: lg, ok: true}
+			outs[i] = out{logits: lg, prefillTok: len(p) - matched}
 		}(i)
 	}
 	close(start)
 	wg.Wait()
-	wall := msSince(t0)
 
-	prefill := prefix + (len(prompts)-1)*(len(prompts[0])-prefix)
+	result := armResult{
+		WallMS:             msSince(t0),
+		CoalescedLeaders:   g.Leaders(),
+		CoalescedFollowers: g.Coalesced(),
+	}
+	for _, out := range outs {
+		result.PrefillTok += out.prefillTok
+	}
 	// Integrity: the fusion arm MUST have coalesced exactly once (one leader) with
 	// every other admission as a follower; otherwise this is not a fusion measurement.
-	leaders := g.Leaders()
-	followers := g.Coalesced()
-	if leaders != 1 || followers != int64(len(prompts)-1) {
-		return armResult{}, false
+	if result.CoalescedLeaders != 1 || result.CoalescedFollowers != int64(len(prompts)-1) {
+		result.Failure = fmt.Sprintf("coalescing leaders=%d followers=%d, want 1/%d",
+			result.CoalescedLeaders, result.CoalescedFollowers, len(prompts)-1)
+		return result, false
 	}
 	for i := range prompts {
-		if !outs[i].ok || !bitEqual(outs[i].logits, oracle[i]) {
-			return armResult{}, false
+		if outs[i].err != nil {
+			result.Failure = fmt.Sprintf("admission %d: %v", i, outs[i].err)
+			return result, false
+		}
+		if !bitEqual(outs[i].logits, oracle[i]) {
+			result.Failure = fmt.Sprintf("admission %d logits differ from full prefill", i)
+			return result, false
 		}
 	}
-	return armResult{
-		WallMS:             wall,
-		PrefillTok:         prefill,
-		Correctness:        true,
-		CoalescedLeaders:   leaders,
-		CoalescedFollowers: followers,
-	}, true
+	result.Correctness = true
+	return result, true
 }
 
-// armWarmCacheNBA models SGLang-style in-batch prefix caching: the leader completes
-// FIRST and warms a radix tree, then each follower reuses the warm prefix (clone +
-// suffix prefill). No follower overlaps the leader's in-flight computation.
+// waitForFusionFollowers establishes a real in-flight registration for every
+// follower, even when a short leader prefill would finish before Go schedules one.
+// The group releases its lock before invoking the leader callback, so yielding
+// here lets followers register without blocking on the leader's computation.
+func waitForFusionFollowers(ctx context.Context, g *radixkv.PrefixFlightGroup, want int64) error {
+	// Bound admission only; a legitimately slow prefill keeps its existing budget.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for g.Coalesced() < want {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("waiting for %d fusion followers: %w", want, err)
+		}
+		if g.Leaders() != 1 {
+			return fmt.Errorf("fusion workload admitted %d leaders, want 1", g.Leaders())
+		}
+		runtime.Gosched()
+	}
+	return ctx.Err()
+}
+
+// armWarmCacheNBA is the serial warm-cache comparison: the leader completes and
+// warms a radix tree, then each follower reuses the warm prefix (clone + suffix
+// prefill). Both arms wait for leader publication; this arm serializes followers.
 func armWarmCacheNBA(m *model.Model, prompts [][]int, oracle [][]float32) (armResult, bool) {
 	tree := radixkv.New(0)
 	t0 := time.Now()
