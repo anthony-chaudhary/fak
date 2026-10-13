@@ -210,6 +210,42 @@ func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTo
 			w1, w3, w2  []float32
 			tripleReady bool
 		)
+		if full && st != nil && st.callbackOwner != nil && !v41PrefillExpertPanelOptedIn() {
+			cohortHandled := false
+			for first := 0; first < len(g.Rows); {
+				last := min(first+v41ExpertCohortRows, len(g.Rows))
+				if len(g.Rows)-last == 1 {
+					last--
+				}
+				inputs := make([][]float32, last-first)
+				weights := make([]float32, last-first)
+				for p, row := range g.Rows[first:last] {
+					inputs[p] = xnByToken[row.Token]
+					weights[p] = perTokenPicks[row.Token][row.Slot].weight
+				}
+				rows, outcome, cause := st.callbackOwner.v41RoutedExpertCohort(l, stem, inputs, weights)
+				if outcome == v41RoutedExpertDeclined && !cohortHandled {
+					break
+				}
+				if outcome != v41RoutedExpertHandled || cause != nil || len(rows) != len(inputs) {
+					if cause == nil {
+						cause = v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+					}
+					return cause
+				}
+				for p, row := range g.Rows[first:last] {
+					if len(rows[p]) != H {
+						return v41ExpertOperationErr(l, "down", errV41ExpertResult)
+					}
+					unweighted[row.Token][row.Slot] = rows[p]
+					m.v41NoteExpertContraction()
+				}
+				cohortHandled, first = true, last
+			}
+			if cohortHandled {
+				continue
+			}
+		}
 		if full && st != nil && st.callbackOwner != nil {
 			panelHandled := false
 			for first := 0; first < len(g.Rows); {
