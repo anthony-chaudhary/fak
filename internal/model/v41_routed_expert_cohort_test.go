@@ -109,6 +109,208 @@ func (b *v41TimedCohortTileWitness) V41Q3KTokenPanel(w, x compute.Tensor, rows i
 	return b.v41ExpertDownTileWitness.V41Q3KTokenPanel(w, x, rows)
 }
 
+type v41EntryPointCohortBatch struct {
+	weights           []compute.Buffer
+	statuses          []compute.V41DeferredStatus
+	readRows          int
+	opened, completed int64
+}
+
+// Operand identities and completion records are independent of the model's
+// phase ledger. Only the pinned fixture's routed experts use Q2_K/Q3_K.
+type v41EntryPointCohortWitness struct {
+	*v41ScalarCohortWitness
+	ordinary    *v41BF16PublishRecorder
+	now, opened int64
+	weights     []compute.Buffer
+	batches     []v41EntryPointCohortBatch
+}
+
+// Ordinary publication belongs to the Session backend; routed expert tensors
+// retain the borrowed weights' cpu-ref identity, as in v41LayerCohortBackend.
+func (b *v41EntryPointCohortWitness) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	if site == "V4.1 BF16 publication input" {
+		return b.ordinary.UploadClass(x, dt, class, site)
+	}
+	return b.Backend.Upload(x, dt)
+}
+
+func (b *v41EntryPointCohortWitness) V41BF16Publish(x compute.Tensor, site uint32) (compute.Tensor, error) {
+	if x.Backend() == b {
+		return b.ordinary.V41BF16Publish(x, site)
+	}
+	return b.v41ScalarCohortWitness.V41BF16Publish(x, site)
+}
+
+func (b *v41EntryPointCohortWitness) V41BF16PublishDeferred(x compute.Tensor, site uint32) (compute.Tensor, compute.V41DeferredStatus, error) {
+	if x.Backend() == b {
+		return b.ordinary.V41BF16PublishDeferred(x, site)
+	}
+	return b.v41ScalarCohortWitness.V41BF16PublishDeferred(x, site)
+}
+
+func (b *v41EntryPointCohortWitness) MatMul(w, x compute.Tensor) compute.Tensor {
+	if w.Dtype == compute.Q2_K || w.Dtype == compute.Q3_K {
+		if len(b.weights) == 0 {
+			b.opened = b.now
+		}
+		b.weights = append(b.weights, w.Buf())
+	}
+	return b.v41ScalarCohortWitness.MatMul(w, x)
+}
+
+func (b *v41EntryPointCohortWitness) V41ReadDeferred(st []compute.V41DeferredStatus, rows []compute.Tensor) ([]error, [][]float32, error) {
+	if len(st) > 0 && st[0].Record.Backend() == b {
+		return b.ordinary.V41ReadDeferred(st, rows)
+	}
+	// Resident ordinary publications also retain cpu-ref identity, but only
+	// routed batches carry an activation verdict alongside the down verdict.
+	if len(st) == 0 || st[0].Kind != compute.V41DeferredRoutedSwiGLU {
+		return b.v41ScalarCohortWitness.V41ReadDeferred(st, rows)
+	}
+	batch := v41EntryPointCohortBatch{
+		weights: append([]compute.Buffer(nil), b.weights...), statuses: append([]compute.V41DeferredStatus(nil), st...),
+		readRows: len(rows), opened: b.opened,
+	}
+	verdicts, values, err := b.v41ScalarCohortWitness.V41ReadDeferred(st, rows)
+	batch.completed = b.now
+	b.batches = append(b.batches, batch)
+	b.weights = nil
+	return verdicts, values, err
+}
+
+// The actual caller selects cold multirow cohorts, then one incremental decode.
+// The clock advances on operations and completion only, never on clock reads;
+// this is CPU wiring evidence, not a physical-device timing measurement.
+// fak-test:runtime medium est=10s lane=default
+func TestV41ColdPrefillSingleDecodeDispatchAttribution(t *testing.T) {
+	t.Setenv(v41DeferredBF16PublishEnv, "1")
+	t.Setenv(v41RoutedIDEnv, "0")
+	t.Setenv(v41PrefillExpertPanelEnv, "0")
+	t.Setenv(v41LayerExpertBatchEnv, "1")
+	m, controlModel := v41PinnedSlateFixture(t, false), v41PinnedSlateFixture(t, false)
+	b := &v41EntryPointCohortWitness{v41ScalarCohortWitness: &v41ScalarCohortWitness{
+		v41RoutedLayerTestBackend: newV41RoutedLayerTestBackend(), enabled: true,
+	}, now: 100}
+	b.ordinary = newV41DeferredPublishRecorder()
+	b.ordinary.self = b
+	b.advance = func(n int64) { b.now += n }
+	m.v41SetExpertTimeClock(func() int64 { return b.now })
+	defer m.v41SetExpertTimeClock(nil)
+	s, err := m.NewBackendSessionChecked(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	serial := &v41EntryPointCohortWitness{v41ScalarCohortWitness: &v41ScalarCohortWitness{
+		v41RoutedLayerTestBackend: newV41RoutedLayerTestBackend(),
+	}}
+	serial.ordinary = newV41DeferredPublishRecorder()
+	serial.ordinary.self = serial
+	control, err := controlModel.NewBackendSessionChecked(serial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close()
+	checkLogits := func(phase string, got, want []float32) {
+		t.Helper()
+		if len(got) == 0 || !v41SameBits(got, want) {
+			t.Fatalf("%s logits differ from independent serial session", phase)
+		}
+		for _, v := range got {
+			if !finite32(v) {
+				t.Fatalf("%s returned nonfinite logits", phase)
+			}
+		}
+	}
+	checkDispatch := func(phase string, ledger V41ExpertFaultAttributionPhase, batches []v41EntryPointCohortBatch, cold bool) {
+		t.Helper()
+		roles := map[compute.Buffer]int{}
+		for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+			for expert := 0; expert < m.Cfg.NumExperts; expert++ {
+				for role, leaf := range []string{"w1.weight", "w3.weight", "w2.weight"} {
+					name := layerName(layer, "ffn.experts."+itoa(expert)+"."+leaf)
+					if weight, ok := s.halW["kquant-raw:"+name]; ok {
+						if _, duplicate := roles[weight.Buf()]; duplicate {
+							t.Fatal("ambiguous expert operand identity")
+						}
+						roles[weight.Buf()] = role
+					}
+				}
+			}
+		}
+		groups, nanos := 0, int64(0)
+		if len(batches) == 0 {
+			t.Fatalf("%s selected no deferred expert work", phase)
+		}
+		for i, batch := range batches {
+			rows := len(batch.weights) / 3
+			if rows == 0 || len(batch.weights) != 3*rows || len(batch.statuses) != 2*rows {
+				t.Fatalf("%s batch %d has unmatched operations/statuses: %d/%d", phase, i, len(batch.weights), len(batch.statuses))
+			}
+			if cold && (rows < 2 || batch.readRows != rows) || !cold && batch.readRows != 1 {
+				t.Fatalf("%s batch %d has %d expert rows and %d output rows", phase, i, rows, batch.readRows)
+			}
+			for j, weight := range batch.weights {
+				role, ok := roles[weight]
+				if !ok || role != j%3 || cold && weight != batch.weights[j%3] {
+					t.Fatalf("%s batch %d operation %d is not the selected gate/up/down group", phase, i, j)
+				}
+			}
+			for row := 0; row < rows; row++ {
+				activation, publication := batch.statuses[2*row], batch.statuses[2*row+1]
+				if activation.Kind != compute.V41DeferredRoutedSwiGLU || publication.Kind != compute.V41DeferredBF16Publish || publication.Site != compute.V41BF16PublishRoutedDown {
+					t.Fatalf("%s batch %d row %d did not fence routed activation and down publication", phase, i, row)
+				}
+			}
+			elapsed := int64(3*len(batch.weights) + 11)
+			if batch.completed-batch.opened != elapsed {
+				t.Fatalf("%s batch %d completion interval=%d want %d", phase, i, batch.completed-batch.opened, elapsed)
+			}
+			groups += rows
+			nanos += elapsed
+		}
+		if ledger.IncrementalDeviceGateUpCalls != groups || ledger.IncrementalDeviceDownCalls != groups || ledger.IncrementalDeviceDispatchNanos != nanos {
+			t.Fatalf("%s ledger gate/up=%d down=%d elapsed=%d; actual groups=%d elapsed=%d", phase,
+				ledger.IncrementalDeviceGateUpCalls, ledger.IncrementalDeviceDownCalls, ledger.IncrementalDeviceDispatchNanos, groups, nanos)
+		}
+	}
+	before := m.V41ExpertFaultAttribution()
+	prompt := []int{1, 2, 3}
+	checkLogits("prefill", s.Prefill(prompt), control.Prefill(prompt))
+	prefill := m.V41ExpertFaultAttribution()
+	if prefill.Prefill.Tokens != len(prompt) || !reflect.DeepEqual(prefill.Decode, before.Decode) {
+		t.Fatalf("cold prefill changed phase/token accounting: prefill=%d decode=%d", prefill.Prefill.Tokens, prefill.Decode.Tokens)
+	}
+	checkDispatch("prefill", prefill.Prefill, b.batches, true)
+	if m.v41ExpertFaultPhase() != V41PhaseUnknown || len(b.pending) != 0 || len(b.weights) != 0 || !s.v41IncrementalEligible() {
+		t.Fatal("prefill did not leave a completed, inert, incremental-ready session")
+	}
+	firstDecodeBatch := len(b.batches)
+	incremental := 0
+	prior := v41IncrementalStepProbe
+	v41IncrementalStepProbe = func() { incremental++ }
+	defer func() { v41IncrementalStepProbe = prior }()
+	got := s.Step(4)
+	if incremental != 1 {
+		t.Fatalf("Step executed %d incremental forwards, want exactly one", incremental)
+	}
+	checkLogits("decode", got, control.Step(4))
+	after := m.V41ExpertFaultAttribution()
+	if after.Decode.Tokens != prefill.Decode.Tokens+1 || !reflect.DeepEqual(after.Prefill, prefill.Prefill) {
+		t.Fatal("one decode changed the prefill snapshot or the decode token denominator")
+	}
+	checkDispatch("decode", after.Decode, b.batches[firstDecodeBatch:], false)
+	if m.v41ExpertFaultPhase() != V41PhaseUnknown || len(b.pending) != 0 || len(b.weights) != 0 || s.BackendSessionClosed() || len(serial.cohortRows) != 0 || serial.calls == 0 {
+		t.Fatal("completion, phase restoration, or independent serial control changed")
+	}
+	s.Close()
+	control.Close()
+	if len(b.pending) != 0 || len(serial.pending) != 0 || len(b.ordinary.deferredPending) != 0 || len(serial.ordinary.deferredPending) != 0 {
+		t.Fatal("session teardown retained deferred records")
+	}
+}
+
 // fak-test:runtime medium est=5s lane=default
 func TestV41ColdCohortDispatchAttribution(t *testing.T) {
 	t.Setenv(v41DeferredBF16PublishEnv, "1")
