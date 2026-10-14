@@ -20,6 +20,8 @@ type v41ScalarCohortWitness struct {
 	publicationErrorAt int
 	cleanupErrorAt     int
 	publicationRows    map[compute.Buffer]int
+	advance            func(int64)
+	readFailure        error
 }
 
 func (b *v41ScalarCohortWitness) SupportsV41DeferredStatus(n int) bool { return b.enabled && n > 0 }
@@ -63,6 +65,9 @@ func (b *v41ScalarCohortWitness) V41RoutedSwiGLU(g, u compute.Tensor, limit, wei
 	return b.v41RoutedLayerTestBackend.V41RoutedSwiGLU(g, u, limit, weight)
 }
 func (b *v41ScalarCohortWitness) MatMul(w, x compute.Tensor) compute.Tensor {
+	if b.advance != nil {
+		b.advance(3)
+	}
 	b.matmulInputs = append(b.matmulInputs, append([]float32(nil), b.Backend.Read(x)...))
 	if len(b.matmulInputs) == b.failMatmul {
 		panic(b.failure)
@@ -80,7 +85,138 @@ func (b *v41ScalarCohortWitness) V41ReadDeferred(st []compute.V41DeferredStatus,
 	if len(st) > 1 {
 		b.cohortRows = append(b.cohortRows, len(st)/2)
 	}
-	return b.v41RoutedLayerTestBackend.V41ReadDeferred(st, rows)
+	verdicts, values, err := b.v41RoutedLayerTestBackend.V41ReadDeferred(st, rows)
+	if b.advance != nil {
+		b.advance(11)
+	}
+	if b.readFailure != nil {
+		return nil, nil, b.readFailure
+	}
+	return verdicts, values, err
+}
+
+// The clock advances only on issued operations and completion, independently
+// of diagnostic clock reads. These CPU recorders make no device-time claim.
+type v41TimedCohortTileWitness struct{ *v41ExpertDownTileWitness }
+
+func (b *v41TimedCohortTileWitness) V41Q2KTokenPanel(w, x compute.Tensor, rows int) (compute.Tensor, error) {
+	b.advance(3)
+	return b.v41ExpertTileWitness.V41Q2KTokenPanel(w, x, rows)
+}
+
+func (b *v41TimedCohortTileWitness) V41Q3KTokenPanel(w, x compute.Tensor, rows int) (compute.Tensor, error) {
+	b.advance(3)
+	return b.v41ExpertDownTileWitness.V41Q3KTokenPanel(w, x, rows)
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41ColdCohortDispatchAttribution(t *testing.T) {
+	t.Setenv(v41DeferredBF16PublishEnv, "1")
+	t.Setenv(v41RoutedIDEnv, "0")
+	t.Setenv(v41PrefillExpertPanelEnv, "0")
+	m := v41PinnedSlateFixture(t, false)
+	inputs, weights := make([][]float32, 2), []float32{.25, .5}
+	for r := range inputs {
+		inputs[r] = make([]float32, m.Cfg.HiddenSize)
+		for i := range inputs[r] {
+			inputs[r][i] = float32((r*3+i)%13-6) / 16
+		}
+	}
+	control, err := m.NewBackendSessionChecked(&v41ScalarCohortWitness{v41RoutedLayerTestBackend: newV41RoutedLayerTestBackend()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close()
+	want := make([][]float32, len(inputs))
+	picks := [][]routePick{{{expert: 0, weight: weights[0]}}, {{expert: 0, weight: weights[1]}}}
+	state := control.v41State()
+	state.routedSum = nil
+	if err := m.v41ContractRoutedGrouped(0, inputs, picks, &v41ProjScratch{}, m.Cfg, want, state); err != nil {
+		t.Fatal(err)
+	}
+	defer m.v41SetExpertTimeClock(nil)
+	for _, tc := range []struct {
+		name                 string
+		tiles, decline       bool
+		failMatmul, failRead bool
+		gateUp, down, fences int
+		nanos                int64
+	}{
+		{name: "scalar", gateUp: 2, down: 2, fences: 1, nanos: 29},
+		{name: "token_tiles", tiles: true, gateUp: 1, down: 1, fences: 1, nanos: 20},
+		{name: "unavailable", decline: true},
+		{name: "first_dispatch_failure", failMatmul: true, gateUp: 1, nanos: 3},
+		{name: "readback_failure", failRead: true, gateUp: 2, down: 2, fences: 1, nanos: 29},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := int64(100)
+			b := &v41ScalarCohortWitness{
+				v41RoutedLayerTestBackend: newV41RoutedLayerTestBackend(), enabled: !tc.decline,
+				advance: func(n int64) { now += n },
+			}
+			var backend compute.Backend = b
+			var tiled *v41TimedCohortTileWitness
+			if tc.tiles {
+				tiled = &v41TimedCohortTileWitness{&v41ExpertDownTileWitness{
+					v41ExpertTileWitness: &v41ExpertTileWitness{v41ScalarCohortWitness: b, tiles: true, ownedTiles: map[compute.Buffer]bool{}},
+					downTiles:            true,
+				}}
+				backend = tiled
+			}
+			s, err := m.NewBackendSessionChecked(backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			failure := &compute.BackendError{Backend: "test", Site: tc.name, Err: errors.New("selected failure")}
+			if tc.failMatmul {
+				b.failMatmul, b.failure = 1, failure
+			}
+			if tc.failRead {
+				b.readFailure = failure
+			}
+			m.v41SetExpertTimeClock(func() int64 { return now })
+			m.v41SetExpertFaultPhase(V41PhasePrefill)
+			before := m.V41ExpertFaultAttribution()
+			got, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
+			m.v41SetExpertFaultPhase(V41PhaseUnknown)
+			after := m.V41ExpertFaultAttribution()
+			pre, old := after.Prefill, before.Prefill
+			if pre.IncrementalDeviceGateUpCalls-old.IncrementalDeviceGateUpCalls != tc.gateUp ||
+				pre.IncrementalDeviceDownCalls-old.IncrementalDeviceDownCalls != tc.down ||
+				pre.IncrementalDeviceDispatchNanos-old.IncrementalDeviceDispatchNanos != tc.nanos {
+				t.Fatalf("dispatch gate/up=%d down=%d elapsed=%d; want %d/%d/%d",
+					pre.IncrementalDeviceGateUpCalls-old.IncrementalDeviceGateUpCalls,
+					pre.IncrementalDeviceDownCalls-old.IncrementalDeviceDownCalls,
+					pre.IncrementalDeviceDispatchNanos-old.IncrementalDeviceDispatchNanos, tc.gateUp, tc.down, tc.nanos)
+			}
+			if !reflect.DeepEqual(after.Decode, before.Decode) || b.fences != tc.fences || len(b.pending) != 0 {
+				t.Fatalf("decode attribution or ownership changed: fences=%d pending=%d", b.fences, len(b.pending))
+			}
+			switch {
+			case tc.decline:
+				if outcome != v41RoutedExpertDeclined || got != nil || err != nil || len(b.matmulInputs) != 0 || s.BackendSessionClosed() {
+					t.Fatalf("decline dispatched or retired: outcome=%v error=%v", outcome, err)
+				}
+			case tc.failMatmul || tc.failRead:
+				if outcome != v41RoutedExpertError || got != nil || !errors.Is(err, failure) || !s.BackendSessionClosed() {
+					t.Fatalf("selected failure lost: outcome=%v error=%v", outcome, err)
+				}
+			default:
+				if outcome != v41RoutedExpertHandled || err != nil || len(got) != len(want) || s.BackendSessionClosed() {
+					t.Fatalf("cohort not handled: outcome=%v error=%v", outcome, err)
+				}
+				for r := range got {
+					if !v41SameBits(got[r], want[r]) {
+						t.Fatalf("row %d differs from serial control", r)
+					}
+				}
+				if tiled != nil && (!reflect.DeepEqual(tiled.tileRows, []int{2, 2}) || !reflect.DeepEqual(tiled.downRows, []int{2}) || len(tiled.ownedTiles) != 0 || len(b.matmulInputs) != 0) {
+					t.Fatal("actual tile groups or ownership changed")
+				}
+			}
+		})
+	}
 }
 
 // fak-test:runtime medium est=5s lane=default

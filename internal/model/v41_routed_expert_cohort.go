@@ -232,6 +232,26 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 		return nil
 	}
 	opened := s.M.v41NowNanos()
+	coldDispatched := false
+	noteDispatch := func(row int, gateUp bool) {
+		if options != nil {
+			if options.note != nil {
+				options.note(row, gateUp)
+			}
+			return
+		}
+		coldDispatched = true
+		s.M.v41NoteIncrementalDeviceDispatch(gateUp, 0)
+	}
+	// This host-observed envelope ends at completion/readback, before result
+	// copying and cleanup. It overlaps ExpertActivationNanos, not a disjoint
+	// kernel-only cost, and is charged once for the whole cold cohort.
+	closeColdDispatch := func() {
+		if coldDispatched {
+			s.M.v41NoteIncrementalDeviceDispatchElapsed(opened)
+			coldDispatched = false
+		}
+	}
 	func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -255,12 +275,12 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 				tile = newV41ExpertTile(s.Backend, gate, up, groupEnd-groupStart)
 				downTile = newV41ExpertDownTile(s.Backend, down, groupEnd-groupStart)
 				usedDownTile = usedDownTile || downTile != nil
-				if options != nil && options.note != nil {
+				if options == nil || options.note != nil {
 					if tile != nil {
-						tile.note = func() { options.note(current, true) }
+						tile.note = func() { noteDispatch(current, true) }
 					}
 					if downTile != nil {
-						downTile.note = func() { options.note(current, false) }
+						downTile.note = func() { noteDispatch(current, false) }
 					}
 				}
 			}
@@ -283,9 +303,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 						uploads[options.inputKeys[current]] = x
 					}
 				}
-				if options != nil && options.note != nil {
-					options.note(current, true)
-				}
+				noteDispatch(current, true)
 				g = s.Backend.MatMul(gate, x)
 				if !own(g) || !valid(g, I) {
 					cause = errV41ExpertResult
@@ -326,9 +344,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 				current, chunkStart, activations = last, last+1, activations[:0]
 				continue
 			}
-			if options != nil && options.note != nil {
-				options.note(current, false)
-			}
+			noteDispatch(current, false)
 			d := s.Backend.MatMul(down, a)
 			if !own(d) || !valid(d, H) {
 				cause = errV41ExpertResult
@@ -356,6 +372,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 		}
 	}()
 	if len(statuses) == 0 {
+		closeColdDispatch()
 		return nil, cause
 	}
 	if usedDownTile {
@@ -390,6 +407,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 		}()
 		verdicts, values, readErr = deferred.V41ReadDeferred(statuses, readRows)
 	}()
+	closeColdDispatch()
 	if readErr != nil {
 		cause, primary, faultRow, *stage = readErr, nil, statusRows[0], "readback"
 		return nil, cause

@@ -663,6 +663,25 @@ func (m *Model) v41NoteIncrementalDeviceDispatch(gateUp bool, opened int64) {
 	}
 }
 
+// v41NoteIncrementalDeviceDispatchElapsed closes a shared dispatch/completion
+// envelope without inventing another gate/up or down dispatch count.
+func (m *Model) v41NoteIncrementalDeviceDispatchElapsed(opened int64) {
+	if opened == 0 {
+		return
+	}
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if led := l.ledgerLocked(); led != nil {
+		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+			led.IncrementalDeviceDispatchNanos += elapsed
+		}
+	}
+}
+
 func (m *Model) v41NoteIncrementalEngram(injections, rows, hashTokens int, nanos int64) {
 	l := v41ExpertFaultLedgerOf(m, false)
 	if l == nil {
