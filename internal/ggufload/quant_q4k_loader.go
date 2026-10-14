@@ -798,17 +798,6 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 				st.Tensors, st.BudgetBytes)
 		}
 	}
-	// #4974: reproduce the witnessed `numactl --interleave=all` weight placement in-process so the
-	// CPU Q4_K decode path gets the multi-node bandwidth regime out of the box (no external wrapper).
-	// Gated + no-op off linux/amd64, on a single-node/constrained host, or under FAK_NUMA_INTERLEAVE=off
-	// (see Model.ApplyDecodeNUMAInterleave). Reported through the load profiler so the placement
-	// decision that governed the run is visible on the load-path summary line.
-	if lbl := m.ApplyDecodeNUMAInterleave(); p != nil && p.Progress != nil && lbl != "" {
-		fmt.Fprintf(p.Progress, "numa: %s\n", lbl)
-	}
-	if lbl := m.ApplyNUMAWeightReplicas(""); p != nil && p.Progress != nil && lbl != "" {
-		fmt.Fprintf(p.Progress, "numa_replicas: %s\n", lbl)
-	}
 	if w3Requested {
 		if err := m.ValidateResidentW3MLP(); err != nil {
 			return nil, err
@@ -819,6 +808,17 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	// a typed ErrV41NativeUnsupported (the fence's contract, preserved).
 	if err := attachV41EngramServing(m, s); err != nil {
 		return nil, err
+	}
+	// #4974: reproduce the witnessed `numactl --interleave=all` weight placement in-process so the
+	// CPU Q4_K decode path gets the multi-node bandwidth regime out of the box (no external wrapper).
+	// Gated + no-op off linux/amd64, on a single-node/constrained host, or under FAK_NUMA_INTERLEAVE=off
+	// (see Model.ApplyDecodeNUMAInterleave). Reported through the load profiler so the placement
+	// decision that governed the run is visible on the load-path summary line.
+	if lbl := m.ApplyDecodeNUMAInterleave(); p != nil && p.Progress != nil && lbl != "" {
+		fmt.Fprintf(p.Progress, "numa: %s\n", lbl)
+	}
+	if lbl := m.ApplyNUMAWeightReplicas(""); p != nil && p.Progress != nil && lbl != "" {
+		fmt.Fprintf(p.Progress, "numa_replicas: %s\n", lbl)
 	}
 	return m, nil
 }
