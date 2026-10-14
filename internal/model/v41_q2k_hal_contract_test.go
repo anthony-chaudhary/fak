@@ -227,14 +227,6 @@ func v41ReducedBlockAlignedModel(t *testing.T) *Model {
 			ts{layerName(l, "ffn.shared_experts.w3.weight"), []int{I, H}},
 			ts{layerName(l, "ffn.shared_experts.w2.weight"), []int{H, I}},
 		)
-		for e := 0; e < cfg.NumExperts; e++ {
-			stem := "ffn.experts." + itoa(e)
-			tensors = append(tensors,
-				ts{layerName(l, stem+".w1.weight"), []int{I, H}},
-				ts{layerName(l, stem+".w3.weight"), []int{I, H}},
-				ts{layerName(l, stem+".w2.weight"), []int{H, I}},
-			)
-		}
 	}
 
 	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
