@@ -120,7 +120,7 @@ func TestV41ScalarHeadCompositionContract(t *testing.T) {
 	head := read("vulkan_v41_shared_head.go")
 	require(head,
 		"v != vulkanDev || C.fvk_device_type() != 1", "uint32(vendor) == vulkanAMDVendorID && device != 0",
-		"C.fvk_batch_active() || C.fvk_v41_step_batch_active() != 0",
+		"bool(C.fvk_batch_active()) || C.fvk_v41_step_batch_active() != 0",
 		"v.maxBufferBytes, v.maxStorageBufferRange, v.maxMemoryAllocationSize",
 		"xs[0], ys[0] = x, y", "if rows > 1 {", "var inputRows, outputRows [4]*vulkanBuf",
 		"C.fvk_d2d_range(inputRows[row].ptr, 0, xb.ptr, C.size_t(row*in*4), C.size_t(in*4))",

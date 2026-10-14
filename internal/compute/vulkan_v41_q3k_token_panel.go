@@ -24,7 +24,7 @@ func (v *vulkanBackend) SupportsV41Q3KTokenPanel(weight Tensor, rows int) bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	w, ok := v.ownedVulkanBuf(weight)
-	return ok && w.n >= plan.WeightBytes && !C.fvk_batch_foreign_active() && C.fvk_have_v41_q3k_token_panel() != 0 &&
+	return ok && w.n >= plan.WeightBytes && !bool(C.fvk_batch_foreign_active()) && C.fvk_have_v41_q3k_token_panel() != 0 &&
 		C.fvk_v41_q3k_token_panel_shape(C.int(plan.Out), C.int(plan.In), C.int(plan.Rows)) != 0
 }
 
