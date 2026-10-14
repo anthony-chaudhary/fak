@@ -232,7 +232,7 @@ func TestQ8NormPanelReuseExactAndAllocation(t *testing.T) {
 			ids := []int{1, 3, 5, 7, 9, 11, 13, 15, 17}
 			measure := func(reference bool) int64 {
 				return testing.Benchmark(func(bb *testing.B) {
-					for i := 0; i < bb.N; i++ {
+					for bb.Loop() {
 						ss := m.NewSession()
 						ss.Quant = true
 						if reference {
