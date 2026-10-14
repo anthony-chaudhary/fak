@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:1ae706eba3044722324f1c39878bc1f5dfa0116d765d8fb2d056fec43d65690a",
-  "tracked_files": 25278,
-  "tracked_bytes": 509568195,
+  "content_root": "sha256:634ccb3b77821f3fe07e71f835a7d548d035e7f3c546369042c073de7283da6b",
+  "tracked_files": 25281,
+  "tracked_bytes": 509595910,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -130151,6 +130151,33 @@
       ]
     },
     {
+      "path": "internal/ggufload/expert_shard_engram_lifetime_test.go",
+      "content_sha256": "sha256:d9b4205d78d0f32326d40f7316e6395d2144ab22b2fe2b3b74f196bcec9c3a4c",
+      "bytes": 8077,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/ggufload/expert_shard_range.go",
+      "content_sha256": "sha256:5ae64f8f18a50d1ec8bc89dabe7ebd025368773f1f7e156e56f9e74b8eb60368",
+      "bytes": 4950,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/ggufload/expert_shard_range_test.go",
+      "content_sha256": "sha256:963a5ea1d090cea965cd11a9fbd6a13a86a03ed3aada229aa3172c6586d722b3",
+      "bytes": 14486,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/ggufload/gemma4_moe_config_test.go",
       "content_sha256": "sha256:e9d86b975ac3e470852a010f944b41b44c243f508caadb6c0ccca1580cf6f5a2",
       "bytes": 5660,
@@ -131193,8 +131220,8 @@
     },
     {
       "path": "internal/ggufload/quant_q4k_loader.go",
-      "content_sha256": "sha256:ecc86e14255fc739d7b47afafb0ec5ef2adbed8ea07cff84bf112e0878d36a0e",
-      "bytes": 64284,
+      "content_sha256": "sha256:81eb5ba22b6b6c2cdc21873d40b7c6bcab2f76e3ec4fdbabf6d58d760813f829",
+      "bytes": 64486,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
