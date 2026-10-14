@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -253,6 +254,26 @@ func (s *Session) epAnnounce(op epDecodeOp, ids []int) func() {
 	return s.M.epCoord.announce(s, op, s.epSeqLen(), ids)
 }
 
+// EPFollowerPanicError retains a panic captured by the error-returning follower
+// boundary. PanicValue returns the original value; error-valued panics remain
+// errors.Is-visible through Unwrap. A primary panic precedes cleanup panics in
+// the returned error chain, so errors.As finds the primary carrier first.
+type EPFollowerPanicError struct {
+	value     any
+	operation string
+}
+
+func (e *EPFollowerPanicError) Error() string {
+	return fmt.Sprintf("model: EP follower %s panic: %v", e.operation, e.value)
+}
+
+func (e *EPFollowerPanicError) PanicValue() any { return e.value }
+
+func (e *EPFollowerPanicError) Unwrap() error {
+	err, _ := e.value.(error)
+	return err
+}
+
 // RunEPFollower runs a follower rank's (rank>0) half of the coordinated decode: it receives
 // broadcast frames from rank 0 and contributes ONLY its local expert compute + collectives. It
 // never tokenizes, never samples, never builds a response, and discards every Prefill/Step
@@ -267,7 +288,56 @@ func (s *Session) epAnnounce(op epDecodeOp, ids []int) func() {
 // AllReduce would sum a garbage partial into a plausible-looking answer. That is the one
 // failure this protocol must never take silently, so it is an error, not a warning. The serve
 // wiring must therefore disable prefix reuse on the coordinated path (#4835).
-func RunEPFollower(g *DistComm, newSession func() *Session) (err error) {
+//
+// Recovered loop/cleanup panics return EPFollowerPanicError carriers rather than
+// escaping this error-returning API. An ordinary returned error is unchanged when
+// cleanup succeeds. Session ownership is cleared before every Close attempt.
+// Abort is best-effort: a panic inside abortV41EP can prevent its later raw closes.
+// The caller still owns final raw retirement and group teardown after this joins.
+// A factory owns resources it allocates but does not return, including on panic.
+func RunEPFollower(g *DistComm, newSession func() *Session) error {
+	return RunEPFollowerWithResult(g, newSession).Err
+}
+
+// EPFollowerRetirement records exact ownership events from one follower call.
+// AcceptedSessions counts non-nil factory returns (including reset replacements).
+// A completion is counted only after the public Session.Close returns normally.
+// Available is false after any counter overflow; zero is otherwise observed zero.
+// These values are lifecycle observations, not authenticated benchmark evidence.
+type EPFollowerRetirement struct {
+	AcceptedSessions uint64
+	CloseAttempts    uint64
+	CloseCompletions uint64
+	Available        bool
+}
+
+// EPFollowerResult separates execution failure from Session retirement. A failed
+// forward can still retire every accepted Session; a Close panic cannot. The
+// caller remains responsible for its factories' unreturned allocations and for
+// joined raw transport/group retirement, which these counts do not establish.
+type EPFollowerResult struct {
+	Err        error
+	Retirement EPFollowerRetirement
+}
+
+// RunEPFollowerWithResult has the same protocol and error contract as
+// RunEPFollower, with per-invocation ownership observations after its deferred
+// cleanup has finished. It does not infer completion from err or closeOnce.
+func RunEPFollowerWithResult(g *DistComm, newSession func() *Session) (out EPFollowerResult) {
+	out.Retirement.Available = true
+	out.Err = runEPFollowerWithRetirement(g, newSession, &out.Retirement)
+	return out
+}
+
+func (r *EPFollowerRetirement) increment(counter *uint64) {
+	if *counter == ^uint64(0) {
+		r.Available = false
+		return
+	}
+	*counter += 1
+}
+
+func runEPFollowerWithRetirement(g *DistComm, newSession func() *Session, retirement *EPFollowerRetirement) (err error) {
 	if g == nil {
 		return fmt.Errorf("model: RunEPFollower needs a process group, got nil")
 	}
@@ -278,21 +348,33 @@ func RunEPFollower(g *DistComm, newSession func() *Session) (err error) {
 		return fmt.Errorf("model: RunEPFollower needs a session factory, got nil")
 	}
 	var sess *Session
+	closeSession := func() {
+		owned := sess
+		sess = nil
+		if owned != nil {
+			retirement.increment(&retirement.CloseAttempts)
+			owned.Close()
+			retirement.increment(&retirement.CloseCompletions)
+		}
+	}
 	defer func() {
-		// Forward APIs report selected faults as panics. Retire the mirror and
-		// close the group before returning so no peer waits on a dead rank.
+		// Forward APIs report selected faults as panics. Attempt best-effort
+		// raw abort and mirror retirement independently. The caller still
+		// owns final raw retirement if an abort handle panics.
 		if r := recover(); r != nil {
-			if cause, ok := r.(error); ok {
-				err = cause
-			} else {
-				err = fmt.Errorf("model: EP follower panic: %v", r)
+			err = &EPFollowerPanicError{value: r, operation: "loop"}
+		}
+		failed := err != nil
+		if failed {
+			err = epFollowerAppendFailure(err, epFollowerCleanup("abort", g.abortV41EP))
+		}
+		if closeErr := epFollowerCleanup("Session.Close", closeSession); closeErr != nil {
+			err = epFollowerAppendFailure(err, closeErr)
+			// A successful SHUTDOWN does not make failed Session retirement a
+			// success. Abort also in this path, without masking the Close panic.
+			if !failed {
+				err = epFollowerAppendFailure(err, epFollowerCleanup("abort", g.abortV41EP))
 			}
-		}
-		if err != nil {
-			g.abortV41EP()
-		}
-		if sess != nil {
-			sess.Close()
 		}
 	}()
 	for {
@@ -308,10 +390,11 @@ func RunEPFollower(g *DistComm, newSession func() *Session) (err error) {
 		case epOpPrefill:
 			// pos 0 opens a new request: rank 0 started a fresh session, so the mirror does too.
 			if pos == 0 {
-				if sess != nil {
-					sess.Close()
-				}
+				closeSession()
 				sess = newSession()
+				if sess != nil {
+					retirement.increment(&retirement.AcceptedSessions)
+				}
 			}
 			if err := epCheckMirror(g, sess, op, pos); err != nil {
 				return err
@@ -326,6 +409,26 @@ func RunEPFollower(g *DistComm, newSession func() *Session) (err error) {
 			return nil
 		}
 	}
+}
+
+func epFollowerCleanup(operation string, fn func()) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = &EPFollowerPanicError{value: value, operation: operation}
+		}
+	}()
+	fn()
+	return nil
+}
+
+func epFollowerAppendFailure(primary, cleanup error) error {
+	if cleanup == nil {
+		return primary // Preserve ordinary returned-error identity.
+	}
+	if primary == nil {
+		return cleanup
+	}
+	return errors.Join(primary, cleanup)
 }
 
 // epCheckMirror is the follower's fail-closed guard that its mirror session sits at exactly the

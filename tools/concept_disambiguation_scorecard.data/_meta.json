@@ -6836,6 +6836,11 @@
           "category": "incidental",
           "reason": "Nullable elapsed metric for teardown of an existing session; it does not define ownership or prove completed retirement.",
           "token": "SessionTeardownNS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Count of non-nil sessions whose ownership was accepted from the existing factory within one follower invocation, including reset replacements; tracked separately from CloseAttempts and CloseCompletions and not proof of retirement.",
+          "token": "AcceptedSessions"
         }
       ],
       "exclude": [
@@ -6843,6 +6848,7 @@
       ],
       "id": "session-runtime",
       "ignore": [
+        "AcceptedSessions",
         "AdmitSessionMoveCheckpoint",
         "AffinityFromContext",
         "AffinityGatewayConfig",
