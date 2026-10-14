@@ -13,13 +13,26 @@ import (
 // input or reads a freed row is visible. DeviceMemory tests routing only.
 type v41SumTestBackend struct {
 	compute.Backend
-	live      map[compute.Buffer]bool
-	adds      int
-	uploads   int
-	faultAdd  int
-	faultRead bool
-	shortRead bool
-	nanRead   bool
+	observation *v41SumTestObservation
+	live        map[compute.Buffer]bool
+	adds        int
+	uploads     int
+	faultAdd    int
+	faultRead   bool
+	shortRead   bool
+	nanRead     bool
+}
+
+// Optional diagnostic only. These are CPU-recorder HAL calls and logical
+// owned tensor payloads, never physical transfers, submissions, fences or RSS.
+// Existing fixtures leave observation nil, preserving their recorder behavior.
+type v41SumTestObservation struct {
+	uploadBytes, returnedBytes uint64
+	readAttempts, readReturned int
+	liveBytes, peakBytes       uint64
+	peakBuffers                int
+	sizes                      map[compute.Buffer]uint64
+	uploaded, freed            []compute.Buffer
 }
 
 func newV41SumTestBackend() *v41SumTestBackend {
@@ -37,6 +50,15 @@ func (b *v41SumTestBackend) Upload(x compute.Tensor, dt compute.Dtype) compute.T
 	y := compute.NewF32(b, append([]int(nil), x.Shape...), values)
 	b.live[y.Buf()] = true
 	b.uploads++
+	if o := b.observation; o != nil {
+		n := uint64(len(values)) * 4
+		o.uploadBytes += n
+		o.liveBytes += n
+		o.peakBytes = max(o.peakBytes, o.liveBytes)
+		o.sizes[y.Buf()] = n
+		o.peakBuffers = max(o.peakBuffers, len(o.sizes))
+		o.uploaded = append(o.uploaded, y.Buf())
+	}
 	return y
 }
 
@@ -55,19 +77,29 @@ func (b *v41SumTestBackend) Read(x compute.Tensor) []float32 {
 	if !b.live[x.Buf()] {
 		panic("read of a freed buffer")
 	}
+	if b.observation != nil {
+		b.observation.readAttempts++
+	}
 	if b.faultRead {
 		panic(&compute.BackendError{Backend: "sum-test", Site: "Read", Err: errors.New("injected read fault")})
 	}
 	values := b.Backend.Read(x)
+	returned := func(values []float32) []float32 {
+		if o := b.observation; o != nil {
+			o.readReturned++
+			o.returnedBytes += uint64(len(values)) * 4
+		}
+		return values
+	}
 	if b.shortRead {
-		return values[:len(values)-1]
+		return returned(values[:len(values)-1])
 	}
 	if b.nanRead {
 		out := append([]float32(nil), values...)
 		out[0] = float32(math.NaN())
-		return out
+		return returned(out)
 	}
-	return values
+	return returned(values)
 }
 
 func (b *v41SumTestBackend) Free(x compute.Tensor) {
@@ -75,6 +107,11 @@ func (b *v41SumTestBackend) Free(x compute.Tensor) {
 		panic("double free")
 	}
 	delete(b.live, x.Buf())
+	if o := b.observation; o != nil {
+		o.liveBytes -= o.sizes[x.Buf()]
+		delete(o.sizes, x.Buf())
+		o.freed = append(o.freed, x.Buf())
+	}
 }
 
 func v41SumFixture(rng *rand.Rand, picks, width int) [][]float32 {
