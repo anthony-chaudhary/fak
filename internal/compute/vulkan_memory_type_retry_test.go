@@ -39,7 +39,7 @@ func TestVulkanCompatibleMemoryTypeSelection(t *testing.T) {
 		{"no_types", 1, 1, nil, nil, true, absent, nil, none},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			status, attempts, selected, published := vulkanDebugMemoryTypeSelection(tc.bits, tc.want, tc.flags, tc.results, make([]uint32, len(tc.flags)), []uint64{1024}, 1024, tc.all)
+			status, attempts, selected, published := vulkanDebugMemoryTypeSelection(tc.bits, tc.want, 0, tc.flags, tc.results, make([]uint32, len(tc.flags)), []uint64{1024}, 1024, tc.all)
 			if status != tc.status || !reflect.DeepEqual(attempts, tc.attempts) || selected != tc.selected || published != (tc.status == success) {
 				t.Fatalf("status=%d attempts=%v selected=%d published=%t; want status=%d attempts=%v selected=%d", status, attempts, selected, published, tc.status, tc.attempts, tc.selected)
 			}
@@ -50,7 +50,7 @@ func TestVulkanCompatibleMemoryTypeSelection(t *testing.T) {
 	flags, results := make([]uint32, 33), make([]int32, 33)
 	flags[31], flags[32] = 1, 1
 	results[31] = deviceOOM
-	status, attempts, selected, published := vulkanDebugMemoryTypeSelection(1<<31, 1, flags, results, make([]uint32, len(flags)), []uint64{1024}, 1024, true)
+	status, attempts, selected, published := vulkanDebugMemoryTypeSelection(1<<31, 1, 0, flags, results, make([]uint32, len(flags)), []uint64{1024}, 1024, true)
 	if status != deviceOOM || !reflect.DeepEqual(attempts, []uint32{31}) || selected != none || published {
 		t.Fatalf("type bound escaped: status=%d attempts=%v selected=%d published=%t", status, attempts, selected, published)
 	}
@@ -64,14 +64,14 @@ func TestVulkanMemoryTypeRetryOwnerSourceContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(raw)
-	start := strings.Index(source, "Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage) {")
+	start := strings.Index(source, "Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage,\n                    VkMemoryPropertyFlags preferred) {")
 	end := strings.Index(source, "// device-local storage buffer used for all tensors")
 	if start < 0 || end <= start {
 		t.Fatal("missing allocation owner")
 	}
 	owner := source[start:end]
 	for _, clause := range []string{
-		"allocateCompatibleMemory(req.memoryTypeBits, want, g_memprops, req.size, tryAll,",
+		"allocateCompatibleMemory(req.memoryTypeBits, want, preferred, g_memprops, req.size, tryAll,",
 		"VkResult r = tryAlloc(props, &b->mem, &selectedMemoryType);",
 		"if (allocPressure(r)) {\n        drainPool();\n        r = tryAlloc(props, &b->mem, &selectedMemoryType, true);",
 		"if ((allocPressure(r) || (r == VK_ERROR_FEATURE_NOT_PRESENT && !allocationAttempted)) &&",
@@ -80,6 +80,14 @@ func TestVulkanMemoryTypeRetryOwnerSourceContract(t *testing.T) {
 	} {
 		if !strings.Contains(owner, clause) {
 			t.Errorf("allocation policy lost %q", clause)
+		}
+	}
+	for _, clause := range []string{
+		`environmentFlagEnabled("FAK_VULKAN_STAGE_HOST_CACHED")`,
+		"g_preferCachedTransferStage ? VK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0",
+	} {
+		if !strings.Contains(source, clause) {
+			t.Errorf("cached staging preference lost %q", clause)
 		}
 	}
 	failure := strings.Index(owner, "if (r != VK_SUCCESS) {")
@@ -115,7 +123,7 @@ func TestVulkanCompatibleMemoryTypeHeapEligibility(t *testing.T) {
 			for i := range flags {
 				flags[i] = 1
 			}
-			status, attempts, selected, published := vulkanDebugMemoryTypeSelection(^uint32(0), 1, flags, tc.results, tc.indices, tc.heaps, 1024, true)
+			status, attempts, selected, published := vulkanDebugMemoryTypeSelection(^uint32(0), 1, 0, flags, tc.results, tc.indices, tc.heaps, 1024, true)
 			if status != tc.status || !reflect.DeepEqual(attempts, tc.attempts) || selected != tc.selected || published != (tc.status == 0) {
 				t.Fatalf("heap eligibility: status=%d attempts=%v selected=%d published=%t", status, attempts, selected, published)
 			}
@@ -124,8 +132,90 @@ func TestVulkanCompatibleMemoryTypeHeapEligibility(t *testing.T) {
 	// Vulkan's fixed memoryHeaps[16] bound wins over synthetic reported count.
 	heaps := make([]uint64, 17)
 	heaps[16] = 2048
-	status, attempts, selected, published := vulkanDebugMemoryTypeSelection(1, 1, []uint32{1}, []int32{0}, []uint32{16}, heaps, 1024, true)
+	status, attempts, selected, published := vulkanDebugMemoryTypeSelection(1, 1, 0, []uint32{1}, []int32{0}, []uint32{16}, heaps, 1024, true)
 	if status != -8 || len(attempts) != 0 || selected != none || published {
 		t.Fatalf("heap bound escaped: status=%d attempts=%v selected=%d published=%t", status, attempts, selected, published)
 	}
+}
+
+// Estimate only; no runtime measurement has been performed.
+// fak-test:runtime fast est=1ms lane=default
+func TestVulkanPreferredMemoryTypeSelection(t *testing.T) {
+	const visible, coherent, cached = uint32(2), uint32(4), uint32(8)
+	required := visible | coherent
+	flags := []uint32{required, required | cached, required | cached, required}
+	heaps := []uint64{1024}
+	heapIndices := make([]uint32, len(flags))
+	for _, tc := range []struct {
+		name      string
+		results   []int32
+		tryAll    bool
+		status    int32
+		attempts  []uint32
+		selected  uint32
+		published bool
+	}{
+		{"cached_first", []int32{0, 0, 0, 0}, false, 0, []uint32{1}, 1, true},
+		{"cached_absent_falls_back", []int32{0, 0, 0, 0}, false, 0, []uint32{0}, 0, true},
+		{"cached_pressure_then_compatible", []int32{0, -2, -1, 0}, true, 0, []uint32{1, 2, 0}, 0, true},
+		{"pressure_exhausted", []int32{-2, -2, -1, -2}, true, -2, []uint32{1, 2, 0, 3}, ^uint32(0), false},
+		{"cached_fatal_stops", []int32{0, -4, 0, 0}, true, -4, []uint32{1}, ^uint32(0), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typeBits := uint32(15)
+			fixtureFlags := flags
+			if tc.name == "cached_absent_falls_back" {
+				typeBits = 9
+			}
+			status, attempts, selected, published := vulkanDebugMemoryTypeSelection(typeBits, required, cached, fixtureFlags, tc.results, heapIndices, heaps, 1024, tc.tryAll)
+			if status != tc.status || !reflect.DeepEqual(attempts, tc.attempts) || selected != tc.selected || published != tc.published {
+				t.Fatalf("status=%d attempts=%v selected=%d published=%t; want status=%d attempts=%v selected=%d published=%t", status, attempts, selected, published, tc.status, tc.attempts, tc.selected, tc.published)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name        string
+		flags       []uint32
+		heapIndices []uint32
+		heapSizes   []uint64
+	}{
+		{"cached_missing_coherent", []uint32{visible | cached, required}, []uint32{0, 0}, []uint64{1024}},
+		{"cached_heap_ineligible", []uint32{required | cached, required}, []uint32{0, 1}, []uint64{1023, 1024}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, attempts, selected, published := vulkanDebugMemoryTypeSelection(3, required, cached, tc.flags, []int32{0, 0}, tc.heapIndices, tc.heapSizes, 1024, true)
+			if status != 0 || !reflect.DeepEqual(attempts, []uint32{1}) || selected != 1 || !published {
+				t.Fatalf("status=%d attempts=%v selected=%d published=%t; want uncached type 1 only", status, attempts, selected, published)
+			}
+		})
+	}
+}
+
+// fak-test:runtime hardware est=1s lane=hardware
+func TestVulkanCachedTransferStageBacking(t *testing.T) {
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") != "1" {
+		t.Skip("requires an explicitly admitted Vulkan device")
+	}
+	if os.Getenv("FAK_VULKAN_STAGE_HOST_CACHED") != "1" {
+		t.Fatal("device witness requires FAK_VULKAN_STAGE_HOST_CACHED=1 before process start")
+	}
+	if vulkanDev == nil {
+		t.Fatal("required Vulkan backend was not initialized")
+	}
+	src := NewF32(cpu(), []int{4}, []float32{1, 2, 3, 4})
+	device := vulkanDev.Upload(src, F32)
+	t.Cleanup(func() { vulkanDev.Free(device) })
+	if got := vulkanDev.Read(device); !reflect.DeepEqual(got, []float32{1, 2, 3, 4}) {
+		t.Fatalf("transfer round trip = %v", got)
+	}
+	backings, ok := vulkanDev.VulkanTransferStageBufferBackings()
+	if !ok || len(backings) != 1 {
+		t.Fatalf("transfer stage backing ok=%t len=%d", ok, len(backings))
+	}
+	const hostVisible, hostCoherent, hostCached = uint32(2), uint32(4), uint32(8)
+	want := hostVisible | hostCoherent
+	if backings[0].Backing.PropertyFlags&want != want {
+		t.Fatalf("transfer stage memory type=%d flags=%#x, want flags %#x", backings[0].Backing.MemoryTypeIndex, backings[0].Backing.PropertyFlags, want)
+	}
+	t.Logf("transfer stage memory type=%d flags=%#x host_cached=%t", backings[0].Backing.MemoryTypeIndex, backings[0].Backing.PropertyFlags, backings[0].Backing.PropertyFlags&hostCached != 0)
 }
