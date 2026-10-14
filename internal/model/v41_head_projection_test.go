@@ -105,6 +105,22 @@ type v41HeadProjBackend struct {
 	weightFrees                      map[compute.Buffer]int
 }
 
+type v41HeadDeferredBackend struct {
+	*v41HeadProjBackend
+	endErr       error
+	begins, ends int
+}
+
+func (b *v41HeadDeferredBackend) BeginV41StepBatch() bool {
+	b.begins++
+	return true
+}
+
+func (b *v41HeadDeferredBackend) EndV41StepBatch() error {
+	b.ends++
+	return b.endErr
+}
+
 func newV41HeadProjBackend(raw []byte, decline bool) *v41HeadProjBackend {
 	return &v41HeadProjBackend{v41DenseTestBackend: newV41DenseTestBackend(), raw: raw, dtype: compute.Q2_K, decline: decline, weightFrees: map[compute.Buffer]int{}, weights: map[compute.Buffer]bool{}, outputs: map[compute.Buffer]int{}, payloads: map[compute.Buffer][]float32{}}
 }
@@ -225,13 +241,17 @@ func TestV41HeadProjectionActualDefaultSession(t *testing.T) {
 			upload += op.upload
 			read += op.read
 		}
-		if rows != len(ids) || delta["head_projection_device_rows"] != float64(len(ids)) || delta["head_projection_device_calls"] <= 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_host_rows"] != 0 {
-			t.Errorf("default head route rows=%d want=%d ledger=%v", rows, len(ids), delta)
+		wantRows := len(ids)
+		if index == 0 {
+			wantRows = 1
 		}
-		if upload != 4*m.Cfg.HiddenSize*len(ids) || read != 4*m.Cfg.VocabSize*len(ids) || delta["head_projection_activation_upload_bytes"] != float64(upload) || delta["head_projection_readback_bytes"] != float64(read) {
+		if rows != wantRows || delta["head_projection_device_rows"] != float64(wantRows) || delta["head_projection_device_calls"] <= 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_host_rows"] != 0 {
+			t.Errorf("default head route rows=%d want=%d ledger=%v", rows, wantRows, delta)
+		}
+		if upload != 4*m.Cfg.HiddenSize*wantRows || read != 4*m.Cfg.VocabSize*wantRows || delta["head_projection_activation_upload_bytes"] != float64(upload) || delta["head_projection_readback_bytes"] != float64(read) {
 			t.Errorf("actual head transfers upload=%d read=%d ledger=%v", upload, read, delta)
 		}
-		if hd["head_projection_device_calls"] != 0 || hd["head_projection_device_rows"] != 0 || hd["head_projection_host_rows"] != float64(len(ids)) || len(hb.operations) != 0 {
+		if hd["head_projection_device_calls"] != 0 || hd["head_projection_device_rows"] != 0 || hd["head_projection_host_rows"] != float64(wantRows) || len(hb.operations) != 0 {
 			t.Errorf("natural head dtype decline=%v operations=%d", hd, len(hb.operations))
 		}
 		if delta["head_projection_nanos"] <= 0 || hd["head_projection_nanos"] <= 0 {
@@ -376,6 +396,90 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 			}
 		})
 	}
+	t.Run("cold-prior-normalization", func(t *testing.T) {
+		m := v41HeadProjClone(t, fixture)
+		b := newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false)
+		s := v41EngProjSession(t, m, b)
+		st := s.v41State()
+		normalize := st.finalNorm
+		if normalize == nil {
+			normalize = func(row []float32) ([]float32, error) {
+				return rmsnorm(row, m.tensor("model.norm.weight"), float32(m.Cfg.RMSNormEps)), nil
+			}
+		}
+		fault := errors.New("prior final norm sentinel")
+		calls := 0
+		st.finalNorm = func(row []float32) ([]float32, error) {
+			calls++
+			if calls == 2 {
+				return nil, fault
+			}
+			return normalize(row)
+		}
+		err := recoverError(func() { s.Prefill([]int{1, 2, 3}) })
+		var selected *V41ProjectionOperationError
+		if !errors.As(err, &selected) || !errors.Is(err, fault) || selected.Stage != string(v41StageFinalNorm) {
+			t.Fatalf("prior normalization error=%v", err)
+		}
+		if calls != 2 || len(b.operations) != 0 || len(st.history) != 0 {
+			t.Fatalf("prior failure calls=%d head=%d history=%v", calls, len(b.operations), st.history)
+		}
+	})
+	t.Run("cold-selected-no-replay", func(t *testing.T) {
+		m := v41HeadProjClone(t, fixture)
+		b := newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false)
+		s := v41EngProjSession(t, m, b)
+		fault := &compute.BackendError{Backend: "cpu-ref-recording", Class: compute.VulkanClassExecutionFailed, Err: ErrV41ForwardStage}
+		b.fault, b.site, b.cause = true, "matmul", fault
+		err := recoverError(func() { s.Prefill([]int{1, 2, 3}) })
+		if !errors.Is(err, fault) || b.faultAttempts != 1 || len(s.v41State().history) != 0 {
+			t.Fatalf("cold selected error=%v attempts=%d history=%v", err, b.faultAttempts, s.v41State().history)
+		}
+	})
+}
+
+// fak-test:justify why=regression when=changed:internal/model/**
+// fak-test:runtime medium est=2s lane=default
+func TestV41HeadProjectionLastOnlyMissingAndDeferredFailure(t *testing.T) {
+	t.Setenv(v41StepBatchEnv, "1")
+	fixture := v41HeadProjFixture(t)
+	t.Run("missing-final-norm", func(t *testing.T) {
+		m := v41HeadProjClone(t, fixture)
+		m.manifest = make(map[string]tensorMeta, len(fixture.manifest))
+		for name, meta := range fixture.manifest {
+			m.manifest[name] = meta
+		}
+		delete(m.manifest, "model.norm.weight")
+		s := v41EngProjSession(t, m, newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false))
+		err := recoverError(func() { s.Prefill([]int{1, 2, 3}) })
+		if !errors.Is(err, ErrV41ForwardStage) || len(s.v41State().history) != 0 {
+			t.Fatalf("missing final norm error=%v history=%v", err, s.v41State().history)
+		}
+	})
+	t.Run("deferred-batch", func(t *testing.T) {
+		m := v41HeadProjClone(t, fixture)
+		fault := errors.New("head batch completion sentinel")
+		b := &v41HeadDeferredBackend{v41HeadProjBackend: newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false), endErr: fault}
+		s := v41EngProjSession(t, m, b)
+		err := recoverError(func() { s.Prefill([]int{1, 2, 3}) })
+		rows := 0
+		for _, op := range b.operations {
+			rows += op.rows
+		}
+		var batchErr *v41StepBatchError
+		if !errors.As(err, &batchErr) || !errors.Is(err, fault) || b.begins != 1 || b.ends != 1 || rows != 1 {
+			t.Fatalf("deferred error=%v begin/end=%d/%d head rows=%d", err, b.begins, b.ends, rows)
+		}
+	})
+	t.Run("expert-parallel-needs-bound-session", func(t *testing.T) {
+		m := v41HeadProjClone(t, fixture)
+		m.SetExpertParallelRanks(2)
+		for _, lastHeadOnly := range []bool{false, true} {
+			if _, err := m.forwardV41WithHeadSelection([]int{1, 2, 3}, nil, lastHeadOnly); !errors.Is(err, ErrV41ExpertParallel) {
+				t.Fatalf("lastHeadOnly=%t error=%v", lastHeadOnly, err)
+			}
+		}
+	})
 }
 
 // fak-test:justify why=regression when=changed:internal/model/**
@@ -464,16 +568,67 @@ func TestV41HeadProjectionFullNormAndScaleSemantics(t *testing.T) {
 			oracle := v41HeadProjClone(t, m)
 			b := newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false)
 			s := v41EngProjSession(t, m, b)
+			st := s.v41State()
+			normalize := st.finalNorm
+			if normalize == nil {
+				normalize = func(row []float32) ([]float32, error) {
+					return rmsnorm(row, m.tensor("model.norm.weight"), float32(m.Cfg.RMSNormEps)), nil
+				}
+			}
+			normCalls := 0
+			st.finalNorm = func(row []float32) ([]float32, error) {
+				normCalls++
+				return normalize(row)
+			}
+			boundaryCalls := map[string]int{}
+			st.bf16Boundary = func(layer int, site string, row []float32) ([]float32, error) {
+				if layer == -1 && (site == "model.norm.weight input" || site == "model.norm.weight output") {
+					boundaryCalls[site]++
+				}
+				out := make([]float32, len(row))
+				for i, value := range row {
+					out[i] = v41RoundBF16(value)
+				}
+				return out, nil
+			}
 			ids := []int{1, 2, 3}
 			got := s.Prefill(ids)
-			act := oracle.Forward(ids)
+			candidateOps := append([]v41HeadProjOp(nil), b.operations...)
+			baseline := v41EngProjSession(t, m, b)
+			act, err := m.forwardV41(ids, baseline.v41State())
+			if err != nil {
+				t.Fatal(err)
+			}
 			want := lastLogits(act)
-			v41GroupedParity(t, got, want, 1e-4)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatal("last-row Prefill logits differ bitwise from the all-row path on the same backend")
+			}
+			if normCalls != len(ids) || boundaryCalls["model.norm.weight input"] != len(ids) || boundaryCalls["model.norm.weight output"] != len(ids) {
+				t.Fatalf("head preparation calls norm=%d boundary=%v want=%d", normCalls, boundaryCalls, len(ids))
+			}
+			public := oracle.Forward(ids)
+			if len(public.Logits) != len(ids) {
+				t.Fatalf("Model.Forward logits=%d want=%d", len(public.Logits), len(ids))
+			}
+			for row := range public.Logits {
+				if len(public.Logits[row]) != m.Cfg.VocabSize {
+					t.Fatalf("Model.Forward row %d logits=%d want=%d", row, len(public.Logits[row]), m.Cfg.VocabSize)
+				}
+			}
+			if coverage := s.NativeForwardCoverage(); coverage == nil || coverage.Validate() != nil || coverage.LogitsSource != NativeForwardLogitsSourceV41Full || !reflect.DeepEqual(captureV41ForwardSnapshot(st), captureV41ForwardSnapshot(baseline.v41State())) {
+				t.Fatal("last-row selection changed cold state, cursor, or full-depth coverage")
+			}
+			if gotStep, wantStep := s.Step(4), baseline.Step(4); !reflect.DeepEqual(gotStep, wantStep) || !reflect.DeepEqual(captureV41ForwardSnapshot(st), captureV41ForwardSnapshot(baseline.v41State())) {
+				t.Fatal("last-row selection changed next-step logits, state, or cursor")
+			}
+			if coverage := s.NativeForwardCoverage(); coverage == nil || coverage.Validate() != nil || coverage.LogitsSource != NativeForwardLogitsSourceV41Incremental {
+				t.Fatal("next step lost full-depth incremental coverage")
+			}
 			rows := 0
-			for _, op := range b.operations {
+			for _, op := range candidateOps {
 				for row := 0; row < op.rows; row++ {
-					pos := rows + row
-					hidden := act.Hidden[len(act.Hidden)-1][pos*m.Cfg.HiddenSize : (pos+1)*m.Cfg.HiddenSize]
+					pos := len(ids) - 1
+					hidden := public.Hidden[len(public.Hidden)-1][pos*m.Cfg.HiddenSize : (pos+1)*m.Cfg.HiddenSize]
 					expected := v41AttentionInputNormOracle(hidden, cpuOracleTensor(t, m, "model.norm.weight"), float32(m.Cfg.RMSNormEps))
 					if !reflect.DeepEqual(op.activation[row*m.Cfg.HiddenSize:(row+1)*m.Cfg.HiddenSize], expected) {
 						t.Fatal("head did not consume BF16 learned RMSNorm independent of generic flags")
@@ -481,10 +636,10 @@ func TestV41HeadProjectionFullNormAndScaleSemantics(t *testing.T) {
 				}
 				rows += op.rows
 			}
-			if rows != len(ids) || len(b.operations) == 0 {
+			if rows != 1 || len(candidateOps) == 0 {
 				t.Fatal("host norm contract did not reach actual head GEMM")
 			}
-			last := b.operations[len(b.operations)-1]
+			last := candidateOps[len(candidateOps)-1]
 			if len(last.result) < m.Cfg.VocabSize {
 				t.Fatal("head readback missing")
 			}
@@ -563,10 +718,14 @@ func TestV41HeadProjectionDedicatedPackedTiedStores(t *testing.T) {
 						t.Error("tied head immutable cache identity changed")
 					}
 				}
-				if rows != len(ids) || delta["head_projection_device_rows"] != float64(len(ids)) || delta["head_projection_device_calls"] <= 0 || delta["head_projection_host_rows"] != 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_activation_upload_bytes"] != float64(upload) || delta["head_projection_readback_bytes"] != float64(read) || upload != 4*m.Cfg.HiddenSize*len(ids) || read != 4*m.Cfg.VocabSize*len(ids) {
+				wantRows := len(ids)
+				if index == 0 {
+					wantRows = 1
+				}
+				if rows != wantRows || delta["head_projection_device_rows"] != float64(wantRows) || delta["head_projection_device_calls"] <= 0 || delta["head_projection_host_rows"] != 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_activation_upload_bytes"] != float64(upload) || delta["head_projection_readback_bytes"] != float64(read) || upload != 4*m.Cfg.HiddenSize*wantRows || read != 4*m.Cfg.VocabSize*wantRows {
 					t.Errorf("dedicated tied head actual route/traffic=%v rows=%d", delta, rows)
 				}
-				if hd["head_projection_device_rows"] != 0 || hd["head_projection_host_rows"] != float64(len(ids)) || hd["head_projection_host_calls"] <= 0 || len(hb.operations) != 0 {
+				if hd["head_projection_device_rows"] != 0 || hd["head_projection_host_rows"] != float64(wantRows) || hd["head_projection_host_calls"] <= 0 || len(hb.operations) != 0 {
 					t.Errorf("dedicated tied natural dtype decline=%v", hd)
 				}
 				dense, group, mhc := v41DenseTestDelta(v41DenseTestPhase(t, m, phase), denseBefore), v41DenseTestDelta(v41GroupedPhase(t, m, phase), groupBefore), v41DenseTestDelta(v41MHCProjPhase(t, m, phase), mhcBefore)
