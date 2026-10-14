@@ -203,6 +203,10 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	if out.v41 != nil && out.v41.hadState {
 		out.v41Tokens = len(out.v41.history)
 		out.hasV41Tokens = true
+		// V4.1 advances its committed history, not the generic HAL KV store.
+		// Consumers validate this complete snapshot's length before admitting
+		// generated continuations, so publish the same position authority here.
+		out.Tokens = out.v41Tokens
 		if s.Backend != nil {
 			out.v41DeviceIdentity = s.Backend
 			out.hasV41DeviceIdentity = true
