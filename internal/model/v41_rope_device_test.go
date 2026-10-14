@@ -189,7 +189,8 @@ func v41TailRoPEOnly(s *Session) {
 	st := s.v41State()
 	// Isolate this boundary; other selected components have their own witnesses.
 	st.expertGateUp, st.expertDown = nil, nil
-	st.denseProjection, st.groupedOutput, st.engramProjection = nil, nil, nil
+	st.setDenseProjection(nil)
+	st.groupedOutput, st.engramProjection = nil, nil
 	st.mhcProjection, st.mhcFFNProjection, st.finalNorm, st.queryNorm, st.kvNorm = nil, nil, nil, nil, nil
 	st.ffnNorm, st.sharedActivation = nil, nil
 }

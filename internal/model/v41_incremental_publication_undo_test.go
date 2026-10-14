@@ -176,12 +176,12 @@ func TestV41StepRegistryLiveFailureRestoration(t *testing.T) {
 			case "returned late layer", "incomplete group":
 				st.layers[1].nextWindowPos += 7
 			case "panic late layer":
-				st.denseProjection = func(layer int, _ string, _ []float32, _, _, _ int) ([]float32, v41DenseProjectionOutcome, error) {
+				st.setDenseProjection(func(layer int, _ string, _ []float32, _, _, _ int) ([]float32, v41DenseProjectionOutcome, error) {
 					if layer == 1 {
 						panic(sentinel)
 					}
 					return nil, v41ProjectionDeclined, nil
-				}
+				})
 			case "head failure":
 				st.finalNorm = func([]float32) ([]float32, error) { return nil, sentinel }
 			}

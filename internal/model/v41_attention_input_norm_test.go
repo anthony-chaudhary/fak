@@ -142,7 +142,7 @@ func TestV41AttentionInputNormAfterCollapse(t *testing.T) {
 			mix := func(int, []float32, int, float32, bool, bool) ([]float32, v41DenseProjectionOutcome, error) {
 				return make([]float32, v41MHCMixWidth), v41ProjectionHandled, nil
 			}
-			scratch := &v41ProjScratch{denseProjection: project, mhcProjection: mix, mhcCarry: &v41MHCCarry{pre: [][]float32{append([]float32(nil), incoming...)}}}
+			scratch := &v41ProjScratch{projectionRoute: newV41ProjectionRouteBinding(project, nil), mhcProjection: mix, mhcCarry: &v41MHCCarry{pre: [][]float32{append([]float32(nil), incoming...)}}}
 			state, err := NewV41AttentionState(cfg.HeadDim, 8)
 			if err != nil {
 				t.Fatal(err)
@@ -151,7 +151,7 @@ func TestV41AttentionInputNormAfterCollapse(t *testing.T) {
 			switch route {
 			case "prefill":
 				scratch.mhcCarry.pre = append(scratch.mhcCarry.pre, append([]float32(nil), incoming...))
-				st := &v41ForwardState{denseProjection: project, mhcProjection: mix}
+				st := &v41ForwardState{projectionRoute: newV41ProjectionRouteBinding(project, nil), mhcProjection: mix}
 				err = m.v41Layer(0, []int{0, 0}, [][]float32{x, x}, [][][]float32{streams, streams}, true,
 					cfg.HeadDim, cfg.NumHeads, H, eps, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), v41RouterConfig{}, st, scratch, nil)
 			case "plain step":

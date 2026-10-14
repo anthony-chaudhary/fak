@@ -90,11 +90,8 @@ func TestV41IndexerProjectionBorrowedKVFirstDivergenceDiagnostic(t *testing.T) {
 		probe := probeModel.NewSession()
 		state := probe.v41State()
 		var hostInput, hostRaw []float32
-		callback := reflect.ValueOf(&state.denseProjection).Elem()
-		callback.Set(reflect.MakeFunc(callback.Type(), func(args []reflect.Value) []reflect.Value {
-			if int(args[0].Int()) == 0 && args[1].String() == "indexer.wk.weight" {
-				input := args[2].Interface().([]float32)
-				out, in, rows := int(args[3].Int()), int(args[4].Int()), int(args[5].Int())
+		state.setDenseProjection(func(layer int, leaf string, input []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+			if layer == 0 && leaf == "indexer.wk.weight" {
 				hostInput = append(hostInput, input...)
 				weight := probeModel.tensor(layerName(0, "indexer.wk.weight"))
 				for row := 0; row < rows; row++ {
@@ -107,8 +104,8 @@ func TestV41IndexerProjectionBorrowedKVFirstDivergenceDiagnostic(t *testing.T) {
 					}
 				}
 			}
-			return []reflect.Value{reflect.Zero(callback.Type().Out(0)), reflect.ValueOf(v41ProjectionDeclined), reflect.Zero(callback.Type().Out(2))}
-		}))
+			return nil, v41ProjectionDeclined, nil
+		})
 		if _, err := probeModel.forwardV41(history, state); err != nil {
 			t.Fatal(err)
 		}

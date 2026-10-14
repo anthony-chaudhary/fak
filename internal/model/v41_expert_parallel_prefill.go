@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 )
 
 // Full-forward history already contains every row. Incremental Step keeps its
@@ -12,6 +13,57 @@ import (
 type v41RoutedPrefillFunc func(layer int, picks [][]routePick, inputs [][]float32, scratch *v41ProjScratch) ([][]float32, error)
 
 type v41EPNextIdentity func(layer, position int, prefill bool, picks []routePick, input []float32) [32]byte
+
+type v41EPPrefillResultStorage struct {
+	backingBytes, rowHeaderBytes, totalBytes uint64
+}
+
+// Check cumulative retained outputs before any selected work. A scalar reply
+// retains at most H+10 words (the root's result is smaller); a panel retains
+// N*(H+10)+11. There can be at most floor(T/2) panels. The outer T slice
+// descriptors are additional storage, not another copy of the result backing.
+// This is checked accounting, not a caller memory budget or context limit.
+func v41EPPrefillResultStorageBound(tokens, width int) (v41EPPrefillResultStorage, error) {
+	var storage v41EPPrefillResultStorage
+	maxBytes := uint64(^uint(0) >> 1)
+	if tokens <= 0 || width <= 0 || uint64(width) > maxBytes/4-v41EPHeaderWords {
+		return storage, fmt.Errorf("%w: invalid cumulative Prefill result geometry", ErrV41ExpertParallel)
+	}
+	T, rowBytes := uint64(tokens), 4*(uint64(width)+v41EPHeaderWords)
+	if T > maxBytes/rowBytes {
+		return storage, fmt.Errorf("%w: cumulative Prefill result backing overflows", ErrV41ExpertParallel)
+	}
+	backing := T * rowBytes
+	if T/2 > (maxBytes-backing)/(4*v41EPPanelHeaderWords) {
+		return storage, fmt.Errorf("%w: cumulative Prefill panel headers overflow", ErrV41ExpertParallel)
+	}
+	backing += (T / 2) * (4 * v41EPPanelHeaderWords)
+	const rowHeaderBytes = 3 * (bits.UintSize / 8)
+	if T > (maxBytes-backing)/rowHeaderBytes {
+		return storage, fmt.Errorf("%w: cumulative Prefill row descriptors overflow", ErrV41ExpertParallel)
+	}
+	storage.backingBytes, storage.rowHeaderBytes = backing, T*rowHeaderBytes
+	storage.totalBytes = storage.backingBytes + storage.rowHeaderBytes
+	return storage, nil
+}
+
+// Shared deterministic window selection, used by execution and storage
+// witnesses. Callers preflight per-token shapes/routes before entering here.
+func v41EPPrefillWindowEnd(owners TPPlan, picks [][]routePick, width, first int) int {
+	limit := min(v41EPOwnerPanelPicks, v41EPOwnerPanelMaxBytes/4/width)
+	last, count := first, 0
+	for last < len(picks) && last-first < v41EPOwnerPanelTokens && len(picks[last]) <= limit-count {
+		count += len(picks[last])
+		last++
+	}
+	for last-first > 1 {
+		if _, cause := v41EPPanelPlan(owners, picks[first:last], width); cause == nil {
+			break
+		}
+		last--
+	}
+	return last
+}
 
 // The common round header still carries an opaque digest. Distinct execution
 // domains refuse mixed scalar/full-forward owners even when a repeated token
@@ -26,9 +78,9 @@ func v41EPPositionIdentity(digest [32]byte, position int, prefill bool) [32]byte
 	return sha256.Sum256(identity[:])
 }
 
-// v41EPPrefillSum changes only owner-local contraction scheduling. Each bounded
-// window finishes all local expert work before its first exact token reduction.
-// Original contributions are sent independently, never rank-presummed. Output
+// Each bounded window finishes all local expert work before its exact panel
+// exchange. Every original per-token contribution and identity is retained,
+// never rank-presummed. Output
 // is published to the layer only after every window succeeds; a later failure
 // invalidates the group, but cannot undo rounds a peer has already received.
 func (m *Model) v41EPPrefillSum(c *v41ExpertParallelCollective, owners TPPlan, layer int, picks [][]routePick, inputs [][]float32, scratch *v41ProjScratch, st *v41ForwardState, next v41EPNextIdentity) (out [][]float32, err error) {
@@ -55,6 +107,9 @@ func (m *Model) v41EPPrefillSum(c *v41ExpertParallelCollective, owners TPPlan, l
 	H := m.Cfg.HiddenSize
 	if H <= 0 || st == nil || scratch == nil || next == nil || len(picks) == 0 || len(inputs) != len(picks) || len(st.history) != len(picks) {
 		return nil, fmt.Errorf("%w: invalid full-forward history or panel", ErrV41ExpertParallel)
+	}
+	if _, cause := v41EPPrefillResultStorageBound(len(picks), H); cause != nil {
+		return nil, cause
 	}
 	// All ranks choose the same boundary from total picks and common geometry.
 	// Using this rank's owned count here could desynchronize skewed/empty owners.
@@ -85,21 +140,30 @@ func (m *Model) v41EPPrefillSum(c *v41ExpertParallelCollective, owners TPPlan, l
 	}
 	out = make([][]float32, len(picks))
 	for first := 0; first < len(picks); {
-		last, count := first, 0
-		for last < len(picks) && last-first < v41EPOwnerPanelTokens && len(picks[last]) <= limit-count {
-			count += len(picks[last])
-			last++
-		}
+		last := v41EPPrefillWindowEnd(owners, picks, H, first)
 		// Per-token preflight guarantees progress before any selected work.
 		if last == first {
 			return nil, fmt.Errorf("%w: empty owner panel window", ErrV41ExpertParallel)
 		}
+		// Shorten solely from common geometry before any selected expert work.
+		// A one-row tail retains the scalar protocol; a selected error below
+		// is terminal and can never retry this admission or replay scalar work.
 		rows, cause := m.v41EPOwnerPanelRows(layer, owners, c.g.Rank(), picks[first:last], inputs[first:last], scratch, st)
 		if cause != nil {
 			return nil, cause
 		}
+		digests := make([][32]byte, last-first)
 		for token := first; token < last; token++ {
-			digest := next(layer, token, true, picks[token], inputs[token])
+			digests[token-first] = next(layer, token, true, picks[token], inputs[token])
+		}
+		if last-first > 1 {
+			reduced, cause := c.reducePanel(rows, v41EPPanelReduction{owners: owners, layer: layer, width: H, picks: picks[first:last], digests: digests, sum: st.routedSum})
+			if cause != nil {
+				return nil, cause
+			}
+			copy(out[first:last], reduced)
+		} else {
+			token, digest := first, digests[0]
 			part := make([]float32, v41EPHeaderWords+len(rows[token-first]))
 			v41EPHeader(part, digest, false)
 			copy(part[v41EPHeaderWords:], rows[token-first])

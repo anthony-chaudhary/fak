@@ -193,7 +193,8 @@
       "definition": "internal/compute's MemoryPlan is the classed form of a 'will this fit?' estimate \u2014 a list of MemoryDemand rows split into device- and host-scoped totals.",
       "distinction": "It is a memory-capacity plan checked against a backend, NOT a context-window plan (ctxplan) nor a routed model plan (modelroute).",
       "distinct_from": [
-        "plan-planner"
+        "plan-planner",
+        "v41-ep-panel-plan"
       ],
       "aliases": [],
       "grounding": "memoryplan",
@@ -853,7 +854,8 @@
       "definition": "internal/model's NewTPPlan builds a tensor-parallel plan: the row/column tiling of a layer's matrices across TP ranks.",
       "distinction": "It is TENSOR-parallel intra-layer sharding, NOT the pipeline-parallel layer partition PartitionPlan.",
       "distinct_from": [
-        "PartitionPlan (model)"
+        "PartitionPlan (model)",
+        "v41-ep-panel-plan"
       ],
       "aliases": [
         "newtpplan"

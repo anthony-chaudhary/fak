@@ -20,7 +20,7 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 		s := v41ColdSharedSession(m, b)
 		ops := &v41DeviceGatherOps{owner: s, bf16Publish: s.v41BF16PublishFunc()}
 		s.v41Forward = &v41ForwardState{callbackOwner: s, gatherOps: ops}
-		scratch := &v41ProjScratch{denseProjection: s.v41DenseProjectionFunc(), sharedActivation: s.v41SharedActivationFunc(), gatherOps: ops}
+		scratch := &v41ProjScratch{projectionRoute: newV41ProjectionRouteBinding(s.v41DenseProjectionFunc(), nil), sharedActivation: s.v41SharedActivationFunc(), gatherOps: ops}
 		t.Cleanup(s.Close)
 		return s, scratch, b
 	}
@@ -37,7 +37,7 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 	var want []float32
 	owned(control, func() {
 		var err error
-		want, err = m.v41SharedExpertSwiGLUWithPublish(0, input, m.Cfg, oldScratch.denseProjection, oldScratch.sharedActivation, oldScratch.gatherOps.bf16PublishFunc())
+		want, err = m.v41SharedExpertSwiGLUWithPublish(0, input, m.Cfg, oldScratch.denseProjection(), oldScratch.sharedActivation, oldScratch.gatherOps.bf16PublishFunc())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +142,7 @@ func TestV41DecodeSharedAddResidentOwned(t *testing.T) {
 		s := v41ColdSharedSession(m, b)
 		ops := &v41DeviceGatherOps{owner: s, bf16Publish: s.v41BF16PublishFunc()}
 		s.v41Forward = &v41ForwardState{callbackOwner: s, gatherOps: ops}
-		scratch := &v41ProjScratch{denseProjection: s.v41DenseProjectionFunc(), sharedActivation: s.v41SharedActivationFunc(), sharedAdd: s.v41SharedAddFunc(), gatherOps: ops}
+		scratch := &v41ProjScratch{projectionRoute: newV41ProjectionRouteBinding(s.v41DenseProjectionFunc(), nil), sharedActivation: s.v41SharedActivationFunc(), sharedAdd: s.v41SharedAddFunc(), gatherOps: ops}
 		t.Cleanup(s.Close)
 		return s, scratch, b
 	}

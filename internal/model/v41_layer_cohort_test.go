@@ -180,6 +180,18 @@ func TestV41LayerCohortTransactions(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(refs[i].Close)
+			// Ordinary uploads in this recorder retain their inner cpu-ref owner.
+			// Keep both scripted callbacks, without the native router loan protocol.
+			for _, session := range []*Session{lanes[i].Session, refs[i]} {
+				st := session.v41State()
+				st.setDenseProjection(st.denseProjection())
+				binding := st.projectionRoute
+				if binding.projectionFunc() == nil || binding.routerFunc() == nil ||
+					binding.nativeProjection.owner != nil || binding.nativeProjection.core != nil ||
+					binding.nativeRouter.owner != nil || binding.nativeRouter.core != nil {
+					t.Fatal("scripted cohort fixture did not retain ordinary-only callbacks")
+				}
+			}
 			lanes[i].Session.v41State().groupedOutput = nil
 			refs[i].v41State().groupedOutput = nil
 			prefix := []int{1, 2}

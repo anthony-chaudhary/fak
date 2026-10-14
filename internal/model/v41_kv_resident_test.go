@@ -180,7 +180,7 @@ func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			store := storeFor(layer)
 			if r.kv != nil || r.rowKV == nil || len(r.rowKV.compressed) != 2 ||
-				len(store.publicationPrefix.kv[oldKey]) != 512 || len(store.kvPublications[newKey]) != 512 {
+				len(store.publicationPrefix.kv[oldKey]) != m.Cfg.HeadDim || len(store.kvPublications[newKey]) != m.Cfg.HeadDim {
 				t.Fatal("Step did not expose a sealed row and a private append")
 			}
 			for group, row := range r.rowKV.compressed {

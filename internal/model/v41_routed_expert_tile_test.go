@@ -136,13 +136,14 @@ func TestV41ExpertTokenTileConsumer(t *testing.T) {
 	}
 	// A later tile's selected failure must not hide an earlier row's numeric
 	// verdict, and must retire the session without scalar replay or leaked panels.
+	const completedTileRows, tailRows = 8, 2
 	s, b := newSession(true)
 	b.publishFaultAt = map[int]bool{1: true}
 	b.failTileAt = 3 // First projection of the two-row tail after eight rows.
 	b.tileFailure = &compute.BackendError{Backend: "test", Site: "token tile", Err: errors.New("selected tile failure")}
-	out, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs[:10], weights[:10])
+	out, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs[:completedTileRows+tailRows], weights[:completedTileRows+tailRows])
 	var numeric *V41ExpertOperationError
-	if out != nil || outcome != v41RoutedExpertError || !errors.As(err, &numeric) || numeric.Stage != "down" || !s.BackendSessionClosed() || len(b.matmulInputs) != 8 || len(b.pending) != 0 || len(b.ownedTiles) != 0 || b.fences != 1 {
+	if out != nil || outcome != v41RoutedExpertError || !errors.As(err, &numeric) || numeric.Stage != "down" || !s.BackendSessionClosed() || len(b.matmulInputs) != completedTileRows || len(b.pending) != 0 || len(b.ownedTiles) != 0 || b.fences != 1 {
 		t.Fatalf("selected failure replay/precedence/cleanup: outcome=%v err=%v matmuls=%d pending=%d owners=%d fences=%d", outcome, err, len(b.matmulInputs), len(b.pending), len(b.ownedTiles), b.fences)
 	}
 }

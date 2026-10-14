@@ -256,7 +256,8 @@ func v41AttentionBF16PhysicalIsolate(st *v41ForwardState) {
 	v41NormRoPEHaloIsolate(st)
 	st.queryNorm, st.kvNorm, st.ffnNorm, st.finalNorm, st.tailRoPE = nil, nil, nil, nil, nil
 	st.queryPrefix, st.bf16Boundary, st.logitScale = nil, nil, nil
-	st.routerTopK, st.routedSum, st.sharedAdd = nil, nil, nil
+	st.setRouterTopK(nil)
+	st.routedSum, st.sharedAdd = nil, nil
 	st.mhcDevice, st.gatherOps = nil, nil
 	st.attentionNorm, st.attentionBF16 = norm, publish
 }

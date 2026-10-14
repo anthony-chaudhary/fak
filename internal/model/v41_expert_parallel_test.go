@@ -218,7 +218,7 @@ func TestV41ExpertParallelSessionTCPExact(t *testing.T) {
 			}
 			for rank, band := range owners.Shards {
 				stats := models[rank].V41ExpertParallelTransportStats()
-				if stats.CompletedGathers != 10 || stats.SentFrameBytes == 0 || stats.ReceivedFrameBytes == 0 {
+				if stats.CompletedGathers != 7 || stats.CompletedRows != 10 || stats.SentFrameBytes == 0 || stats.ReceivedFrameBytes == 0 {
 					t.Fatalf("rank %d transport stats=%+v", rank, stats)
 				}
 				for _, expert := range routed {

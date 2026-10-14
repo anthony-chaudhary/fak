@@ -84,7 +84,7 @@ func ds41AuthenticatedEPShards(t *testing.T) ([]ShardIdentity, string) {
 			bias := make([]float32, 384)
 			// Interleave owners in the global pick order. Rank pre-sums must
 			// not replace the existing exact per-pick reduction.
-			for i, expert := range []int{258, 130, 2, 257, 129, 1} {
+			for i, expert := range ds41EPSelectedExperts() {
 				bias[expert] = float32(1000 - i*10)
 			}
 			tensor.data = f32Payload(bias...)

@@ -1224,3 +1224,17 @@ PrefixSnapshot cache-admission method that seals independently owned V4.1 public
 Session-owned resident F32 indexer-key matrices keyed by immutable publication ownership, source and geometry identity, with live handles charged across callback rebinding. Admission requires an explicit positive index-key byte allowance that defaults to zero; unchanged history reuses its exact buffer, append stages only new rows while copying the old device prefix, and invalidated identity reseeds.
 
 **Distinct from:** Separate from attention KV state and model-owned immutable weight staging. It owns indexer score inputs, charges retained plus replacement/staging peak, and retires replaced storage only after checked score read; append still incurs O(history) device copies. No production default or hardware-performance qualification.
+
+
+### V4.1 EP panel transport layout
+
+Checked per-owner request word counts, aggregate payload words, reply words, and explicit live-byte allowance for one V4.1 expert-parallel prefill panel exchange.
+
+**Distinct from:** Transient wire-exchange geometry derived from routed rows and existing TPPlan owner bands, not tensor element ordering or context-region layout. Named live transport allocations do not cover RSS, device scratch, borrowed normalized input, or all-history Prefill outputs.
+
+
+### V4.1 EP panel geometry admission
+
+Validates the existing owner partition, routed picks, token/width bounds, every owner's encoded request size, response size, and explicit live transport allowance before creating v41EPPanelLayout.
+
+**Distinct from:** Bounds one exchange before allocation or I/O; does not select TPPlan partitions or estimate complete host/device model memory, and does not certify hardware execution or full-history memory use.

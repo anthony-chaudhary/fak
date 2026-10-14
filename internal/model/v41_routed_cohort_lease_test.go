@@ -138,7 +138,11 @@ func TestV41RoutedCohortLeaseProtocol(t *testing.T) {
 		if after.IncrementalDeviceGateUpCalls-before.IncrementalDeviceGateUpCalls != 4 || after.IncrementalDeviceDownCalls-before.IncrementalDeviceDownCalls != 4 || after.Contractions-before.Contractions != 4 {
 			t.Fatalf("successful dispatch/contraction counters differ: before=%+v after=%+v", before, after)
 		}
-		if b.fences != 1 || control.fences != 2 || b.adds != 4 || len(b.matmulInputs) != 12 || len(b.pending) != 0 {
+		wantMatmuls := 0
+		for _, lanePicks := range picks {
+			wantMatmuls += 3 * len(lanePicks) // gate, up and down for every routed pick
+		}
+		if b.fences != 1 || control.fences != 2 || b.adds != 4 || len(b.matmulInputs) != wantMatmuls || len(b.pending) != 0 {
 			t.Fatalf("candidate/control fences=%d/%d adds=%d matmuls=%d pending=%d", b.fences, control.fences, b.adds, len(b.matmulInputs), len(b.pending))
 		}
 		if !reflect.DeepEqual(b.uploads, []string{"moe expert gate/up activation", "moe expert gate/up activation", "V4.1 routed-sum accumulator", "V4.1 routed-sum accumulator"}) {

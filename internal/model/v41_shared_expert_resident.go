@@ -359,6 +359,9 @@ func (s *Session) v41SharedExpertPanelChunk(layer int, input []float32, rows, H,
 		if firstNumeric >= 0 {
 			entry := pending[firstNumeric]
 			state.leaf, state.site, state.stage = entry.leaf, entry.site, "checked publication"
+			if len(output) == 0 {
+				return verdicts[firstNumeric]
+			}
 			if len(output) != 1 || len(values) != 1 || len(values[0]) != rows*H {
 				return errV41BF16BoundaryResult
 			}

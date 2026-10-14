@@ -201,13 +201,13 @@ func TestV41BatchStep(t *testing.T) {
 				cancel()
 				rows = 1
 			case "during layer":
-				project := f.lanes[1].Session.v41State().denseProjection
-				f.lanes[1].Session.v41State().denseProjection = func(layer int, leaf string, x []float32, out, in, n int) ([]float32, v41DenseProjectionOutcome, error) {
+				project := f.lanes[1].Session.v41State().denseProjection()
+				f.lanes[1].Session.v41State().setDenseProjection(func(layer int, leaf string, x []float32, out, in, n int) ([]float32, v41DenseProjectionOutcome, error) {
 					if layer == 0 && leaf == "attn.wq_a.weight" {
 						cancel()
 					}
 					return project(layer, leaf, x, out, in, n)
-				}
+				})
 				rows = 1
 			case "after projection":
 				f.b.afterHead = cancel

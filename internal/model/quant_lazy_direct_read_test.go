@@ -101,7 +101,7 @@ func TestLazyMaterializeDirectFinalRead(t *testing.T) {
 				span := makePageAlignedResidentBytes(os.Getpagesize())
 				lazy := &LazyQ4KRange{Reader: r, Bytes: 144, MappedSpan: span, MappedOffset: 32}
 				got, err := tc.run(t, lazy, nil)
-				if err != nil || len(got) != 144 || &got[0] != &span[32] || r.calls != 0 {
+				if err != nil || len(got) != lazy.Bytes || &got[0] != &span[32] || r.calls != 0 {
 					t.Fatal("mapped alias fast path changed")
 				}
 				resident := []byte{1, 2, 3}

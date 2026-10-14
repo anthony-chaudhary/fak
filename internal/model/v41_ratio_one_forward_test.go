@@ -67,7 +67,7 @@ func TestV41RatioOneForwardParity(t *testing.T) {
 			gateProjections := 0
 			bind := func(st *v41ForwardState, start int) {
 				pos := [2]int{start, start}
-				st.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+				st.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 					switch {
 					case leaf == "attn.compressor.wgate.weight":
 						gateProjections++
@@ -80,7 +80,7 @@ func TestV41RatioOneForwardParity(t *testing.T) {
 						t.Fatal("ratio-one reader projected a private compressor row")
 					}
 					return nil, v41ProjectionDeclined, nil
-				}
+				})
 				st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 					r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 					at := pos[layer]

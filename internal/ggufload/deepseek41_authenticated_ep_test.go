@@ -23,6 +23,26 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
+// The packed authenticated fixture uses one Q2_K/Q3_K block per hidden row.
+const ds41EPHiddenWidth = 256
+
+// The fixture interleaves two selected experts per rank. Return a fresh list so
+// neither model construction nor expected-call derivation can mutate the source.
+func ds41EPSelectedExperts() []int { return []int{258, 130, 2, 257, 129, 1} }
+
+func ds41EPOwnedProjectionCounts(band ExpertShard, rows int) map[string]int {
+	expected := make(map[string]int)
+	for _, expert := range ds41EPSelectedExperts() {
+		if expert < band.Lo || expert >= band.Hi {
+			continue
+		}
+		for _, projection := range []string{"gate_proj", "up_proj", "down_proj"} {
+			expected[batchedExpertCanonicalName("deepseek41", 0, expert, projection)] += rows
+		}
+	}
+	return expected
+}
+
 type ds41EPSource struct {
 	io.ReaderAt
 	io.Closer
@@ -84,7 +104,7 @@ func (b *ds41EPRecorder) Upload(x compute.Tensor, dt compute.Dtype) compute.Tens
 	name := ""
 	if dt == compute.Q2_K || dt == compute.Q3_K {
 		host, ok := x.Buf().(compute.HostBuffer)
-		if !ok || x.Dtype != dt || !slices.Equal(x.Shape, []int{256, 256}) {
+		if !ok || x.Dtype != dt || !slices.Equal(x.Shape, []int{ds41EPHiddenWidth, ds41EPHiddenWidth}) {
 			panic("expert upload lost packed dtype or geometry")
 		}
 		raw := make([]byte, len(host.I8()))
@@ -123,11 +143,11 @@ func (b *ds41EPRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class c
 	case "V4.1 shared-add accumulator":
 		// Observe the exact routed F32 row before adding the shared expert.
 		// Every rank consumes this site, including followers with no sum.
-		if class != compute.MemoryActivation || dt != compute.F32 || !slices.Equal(out.Shape, []int{256}) {
+		if class != compute.MemoryActivation || dt != compute.F32 || !slices.Equal(out.Shape, []int{ds41EPHiddenWidth}) {
 			panic("final routed row lost its F32 geometry or class")
 		}
 		values := b.Backend.Read(out)
-		if len(values) != 256 {
+		if len(values) != ds41EPHiddenWidth {
 			panic("final routed row changed width")
 		}
 		raw := make([]byte, 4*len(values))
@@ -139,7 +159,7 @@ func (b *ds41EPRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class c
 		}
 		b.finalRows = append(b.finalRows, sha256.Sum256(raw))
 	case "V4.1 routed-sum accumulator", "V4.1 routed-sum expert output":
-		if class != compute.MemoryActivation || dt != compute.F32 || !slices.Equal(out.Shape, []int{256}) {
+		if class != compute.MemoryActivation || dt != compute.F32 || !slices.Equal(out.Shape, []int{ds41EPHiddenWidth}) {
 			panic("routed-sum upload lost site geometry or class")
 		}
 		if site == "V4.1 routed-sum accumulator" {
@@ -164,7 +184,7 @@ func (b *ds41EPRecorder) AddInPlace(dst, src compute.Tensor) {
 			panic("routed sum did not consume its live tagged expert row")
 		}
 		values := b.Backend.Read(src)
-		if len(values) != 256 {
+		if len(values) != ds41EPHiddenWidth {
 			panic("routed sum contribution changed width")
 		}
 		raw := make([]byte, 4*len(values))
@@ -355,7 +375,8 @@ func TestDeepSeek41AuthenticatedExpertParallelSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(reference.Close)
-	want := [][]float32{reference.Prefill([]int{1, 2}), reference.Step(3)}
+	tokens := []int{1, 2, 3}
+	want := [][]float32{reference.Prefill(tokens[:2]), reference.Step(tokens[2])}
 	reference.Close()
 	if err := oracle.CloseWeights(); err != nil {
 		t.Fatal(err)
@@ -425,7 +446,7 @@ func TestDeepSeek41AuthenticatedExpertParallelSession(t *testing.T) {
 			}
 			m.SetEPDecodeCoordinator(coord)
 			s := newSession()
-			got := [][]float32{s.Prefill([]int{1, 2}), s.Step(3)}
+			got := [][]float32{s.Prefill(tokens[:2]), s.Step(tokens[2])}
 			for step := range got {
 				if len(got[step]) != len(want[step]) || len(got[step]) == 0 {
 					return fmt.Errorf("operation %d logit shape changed", step)
@@ -458,7 +479,12 @@ func TestDeepSeek41AuthenticatedExpertParallelSession(t *testing.T) {
 		for _, name := range backend.order {
 			actual[name]++
 		}
-		if len(expected) != 6 || len(backend.order) != 18 || !maps.Equal(actual, expected) || backend.routed != 6 {
+		declared := ds41EPOwnedProjectionCounts(bands[rank], len(tokens))
+		wantCalls := 0
+		for _, count := range declared {
+			wantCalls += count
+		}
+		if !maps.Equal(expected, declared) || len(backend.order) != wantCalls || !maps.Equal(actual, expected) || backend.routed != 6 {
 			return fmt.Errorf("rank %d owned projection identities/counts differ: actual=%v expected=%v routed=%d", rank, actual, expected, backend.routed)
 		}
 		for name, count := range expected {

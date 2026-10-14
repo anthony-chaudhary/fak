@@ -27,6 +27,7 @@ type v41ExpertParallelCollective struct {
 	g                                             *DistComm
 	binding                                       [64]byte
 	rounds, sentBytes, receivedBytes, gatherNanos atomic.Uint64
+	panelExtraRows                                atomic.Uint64
 	timeout                                       time.Duration
 	failure                                       error // Serial, like DistComm; the first failed round is terminal.
 }
@@ -132,11 +133,15 @@ func v41EPHeader(part []float32, digest [32]byte, failed bool) {
 var _ Collective = (*v41ExpertParallelCollective)(nil)
 
 // V41ExpertParallelTransportStats counts completed gather/reduce/broadcast rounds
-// on this rank only. CompletedGathers retains its existing public field name.
+// on this rank only. CompletedGathers counts physical exchanges and retains
+// its existing public field name. CompletedRows counts logical rows, credited
+// only when the entire local exchange completes; scalar rounds credit one.
+// As with the byte/time fields, concurrent snapshots are not transactional.
 // It excludes decode broadcasts, failed partial I/O and TCP/IP overhead. It is
 // mechanism telemetry, not throughput or device-execution qualification.
 type V41ExpertParallelTransportStats struct {
 	CompletedGathers   uint64
+	CompletedRows      uint64
 	SentFrameBytes     uint64
 	ReceivedFrameBytes uint64
 	GatherNanoseconds  uint64
@@ -150,7 +155,8 @@ func (m *Model) V41ExpertParallelTransportStats() V41ExpertParallelTransportStat
 	if !ok || c == nil {
 		return V41ExpertParallelTransportStats{}
 	}
-	return V41ExpertParallelTransportStats{CompletedGathers: c.rounds.Load(), SentFrameBytes: c.sentBytes.Load(), ReceivedFrameBytes: c.receivedBytes.Load(), GatherNanoseconds: c.gatherNanos.Load()}
+	rounds := c.rounds.Load()
+	return V41ExpertParallelTransportStats{CompletedGathers: rounds, CompletedRows: rounds + c.panelExtraRows.Load(), SentFrameBytes: c.sentBytes.Load(), ReceivedFrameBytes: c.receivedBytes.Load(), GatherNanoseconds: c.gatherNanos.Load()}
 }
 
 func (g *DistComm) v41EPDeadline(deadline time.Time) error {

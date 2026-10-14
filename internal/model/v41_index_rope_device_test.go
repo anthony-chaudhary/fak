@@ -505,6 +505,27 @@ func TestV41IndexRoPERestoredGatherOwnership(t *testing.T) {
 		len(b.outputs) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(target.v41Forward), captureV41ForwardSnapshot(host.v41Forward)) {
 		t.Fatal("restored step lost target ownership, omitted a callback, leaked, or changed continuation")
 	}
+	// Inverse tables are session-owned; all other recorded activations remain
+	// transient. A restored target must retain only its own two live tables.
+	liveTables := map[compute.Buffer]bool{}
+	for _, key := range []string{"v41-inverse-rope-table:0", "v41-inverse-rope-table:1"} {
+		table, present := target.halW[key]
+		resource := b.resources[table.Buf()]
+		if !present || table.Buf() == nil || table.Backend() != b || resource == nil ||
+			resource.attempts != 0 || resource.released || liveTables[table.Buf()] {
+			t.Fatalf("restored target inverse table %q is absent, aliased, foreign, or already released", key)
+		}
+		liveTables[table.Buf()] = true
+	}
+	for buffer, resource := range b.resources {
+		if !liveTables[buffer] && (resource.attempts != 1 || !resource.released) {
+			t.Fatalf("nonresident activation Free attempts=%d released=%t", resource.attempts, resource.released)
+		}
+	}
+	target.Close()
+	if !target.BackendSessionClosed() || len(target.halW) != 0 {
+		t.Fatal("closing restored target retained inverse table ownership")
+	}
 	v41IndexRoPECheckResources(t, b, false)
 }
 

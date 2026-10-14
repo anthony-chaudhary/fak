@@ -154,8 +154,8 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 				b := newV41LogitScaleRecorder()
 				s := v41DenseTestSession(t, m, b)
 				state := s.v41State()
-				original := state.denseProjection
-				state.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+				original := state.denseProjection()
+				state.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 					if layer == -1 && leaf == m.headName() {
 						if out < len(tc.input) || rows != 1 {
 							t.Fatal("fixture head geometry changed")
@@ -170,7 +170,7 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 						return original(layer, leaf, panel, out, in, rows)
 					}
 					return nil, v41ProjectionDeclined, nil
-				}
+				})
 				check := func(got []float32, calls int) {
 					t.Helper()
 					if b.calls != calls || math.Float32bits(b.lastScale) != math.Float32bits(float32(tc.factor)) || len(b.scaleLive) != 0 {
@@ -208,9 +208,10 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 				logitScaleInPlace(want, m.Cfg)
 				v41LogitScaleCheckBits(t, got, want)
 			}
-			check(s.Prefill([]int{1, 2}), 2)
-			check(s.Step(3), 3)
-			if b.uploads != 3 || b.reads != 3 || b.frees != 6 || !s.v41IncrementalEligible() {
+			// Cold Prefill selects only the final row's head and scale.
+			check(s.Prefill([]int{1, 2}), 1)
+			check(s.Step(3), 2)
+			if b.uploads != 2 || b.reads != 2 || b.frees != 4 || !s.v41IncrementalEligible() {
 				t.Fatal("scale copies changed the incremental path or leaked ownership")
 			}
 			snap, err := s.PrefixSnapshot()
@@ -226,7 +227,7 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 			snap.Close()
 			s.Close()
 			got := target.Prefill([]int{4})
-			if b.calls != 4 || target.v41State().callbackOwner != target {
+			if b.calls != 3 || target.v41State().callbackOwner != target {
 				t.Fatal("restored suffix retained the source scale owner")
 			}
 			want := append([]float32(nil), b.lastInput...)
@@ -240,9 +241,9 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 		b := newV41LogitScaleRecorder()
 		s := v41DenseTestSession(t, m, b)
 		state := s.v41State()
-		original := state.denseProjection
+		original := state.denseProjection()
 		var head []float32
-		state.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+		state.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 			if layer == -1 && leaf == m.headName() {
 				if out < 4 || rows != 1 {
 					t.Fatal("fixture head geometry changed")
@@ -255,7 +256,7 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 				return original(layer, leaf, panel, out, in, rows)
 			}
 			return nil, v41ProjectionDeclined, nil
-		}
+		})
 		got := s.Prefill([]int{1})
 		if b.calls != 0 || s.BackendSessionClosed() {
 			t.Fatal("out-of-domain row selected a finite-only scale operation")
@@ -289,9 +290,13 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 			// a missing parent dispatch must fail this subtest without a cleanup panic.
 			t.Cleanup(func() { b.closePanic = nil })
 			s.Prefill([]int{1, 2})
+			if b.calls != 1 {
+				t.Fatalf("cold prefill scale calls=%d want 1", b.calls)
+			}
+			nextCall := b.calls + 1
 			before := captureV41ForwardSnapshot(s.v41Forward)
 			primary := &BackendForwardOperationError{Backend: "scale-recorder", Forward: ForwardPathKind("deepseek41"), Path: "wrapped-scale-operation", Layer: -1, Stage: "multiply", Cause: ErrV41ForwardStage}
-			b.panicFault, b.faultAt = primary, 3
+			b.panicFault, b.faultAt = primary, nextCall
 			b.cleanup = errors.New("secondary scalar free failure")
 			b.closePanic = errors.New("secondary session close failure")
 			err := recoverError(func() {
@@ -301,10 +306,10 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 					s.Step(3)
 				}
 			})
-			if err != primary || s.halFailure != primary || !s.BackendSessionClosed() || b.closeCalls != 1 || b.calls != 3 || len(b.ops) != b.opsAtFailure || len(b.scaleLive) != 0 || !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
+			if err != primary || s.halFailure != primary || !s.BackendSessionClosed() || b.closeCalls != 1 || b.calls != nextCall || len(b.ops) != b.opsAtFailure || len(b.scaleLive) != 0 || !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
 				t.Fatalf("typed panic lost identity, replayed or left current owner open: suffix=%t err=%v closed=%v calls=%d close_calls=%d", suffix, err, s.BackendSessionClosed(), b.calls, b.closeCalls)
 			}
-			if retry := recoverError(func() { s.Step(3) }); retry != primary || b.calls != 3 {
+			if retry := recoverError(func() { s.Step(3) }); retry != primary || b.calls != nextCall {
 				t.Fatal("retired scalar owner retried")
 			}
 		}
@@ -315,19 +320,23 @@ func TestV41LogitScaleSessionDispatch(t *testing.T) {
 		b := newV41LogitScaleRecorder()
 		s := v41DenseTestSession(t, m, b)
 		s.Prefill([]int{1, 2})
+		if b.calls != 1 {
+			t.Fatalf("cold prefill scale calls=%d want 1", b.calls)
+		}
+		nextCall := b.calls + 1
 		before := captureV41ForwardSnapshot(s.v41Forward)
 		primary := &compute.BackendError{Backend: "scale-recorder", Class: compute.VulkanClassExecutionFailed, Err: ErrV41ForwardStage}
-		b.fault, b.faultAt = primary, 3
+		b.fault, b.faultAt = primary, nextCall
 		b.cleanup = errors.New("secondary scale cleanup failure")
 		err := recoverError(func() { s.Step(3) })
 		var closed *BackendForwardOperationError
 		if !errors.Is(err, primary) || !errors.As(err, &closed) || closed.Path != "v41-logit-scale" {
 			t.Fatalf("selected scale failure lost primary identity: %v", err)
 		}
-		if b.calls != 3 || len(b.ops) != b.opsAtFailure || len(b.scaleLive) != 0 || !s.BackendSessionClosed() || !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
+		if b.calls != nextCall || len(b.ops) != b.opsAtFailure || len(b.scaleLive) != 0 || !s.BackendSessionClosed() || !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
 			t.Fatal("selected scale failure replayed, leaked, or advanced state")
 		}
-		if retry := recoverError(func() { s.Step(3) }); retry != s.halFailure || b.calls != 3 {
+		if retry := recoverError(func() { s.Step(3) }); retry != s.halFailure || b.calls != nextCall {
 			t.Fatal("closed scale session retried")
 		}
 	})

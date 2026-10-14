@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -38,7 +39,8 @@ func TestV41ExpertParallelSessionFactory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ref.Close()
-	want := [][]float32{ref.Prefill([]int{1, 2}), ref.Step(3)}
+	tokens := []int{1, 2, 3}
+	want := [][]float32{ref.Prefill(tokens[:2]), ref.Step(tokens[2])}
 	ref.Close()
 	const ranks = 3
 	// This is caller-declared agreement for a synthetic software fixture.
@@ -141,7 +143,7 @@ func TestV41ExpertParallelSessionFactory(t *testing.T) {
 			if coord == nil || !m.EPDecodeCoordinated() {
 				return fmt.Errorf("factory omitted rank-0 decode coordinator")
 			}
-			got := [][]float32{s.Prefill([]int{1, 2}), s.Step(3)}
+			got := [][]float32{s.Prefill(tokens[:2]), s.Step(tokens[2])}
 			for step, row := range got {
 				if len(row) != len(want[step]) || len(row) == 0 {
 					return fmt.Errorf("factory operation %d changed logits width", step)
@@ -171,7 +173,16 @@ func TestV41ExpertParallelSessionFactory(t *testing.T) {
 				return err
 			}
 		}
-		if len(backend.order) != 18 || backend.routed != 6 {
+		expected := ds41EPOwnedProjectionCounts(band, len(tokens))
+		actual := make(map[string]int)
+		for _, name := range backend.order {
+			actual[name]++
+		}
+		wantCalls := 0
+		for _, count := range expected {
+			wantCalls += count
+		}
+		if len(backend.order) != wantCalls || !maps.Equal(actual, expected) || backend.routed != 6 {
 			return fmt.Errorf("factory rank %d missed owned native work", g.Rank())
 		}
 		if g.Rank() == 0 {

@@ -51,10 +51,17 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 			m.Cfg.RopeFactor, m.Cfg.RopeOrigContext = 0, 0
 			m.Cfg.DeepSeekV41.CompressRopeTheta = 4096
 			b := newV41SharedAttentionTestBackend()
+			if rows, ok := any(b).(compute.V41RowLogBackend); ok && rows.V41RowLogAvailable() {
+				t.Fatal("inverse operand witness must not bypass its scalar projection callback")
+			}
 			s := v41DenseTestSession(t, m, b)
 			requests, projections := 0, 0
 			distinct := false
-			var expected, unrotated []float32
+			type projectionOracle struct {
+				layer, position     int
+				expected, unrotated []float32
+			}
+			var oracles []projectionOracle
 			bind := func(session *Session) {
 				v41SharedAttentionOnly(session)
 				st := session.v41State()
@@ -64,10 +71,14 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 				}
 				st.sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 					wantLayer, pos := requests/2, requests%2
+					// Cold prefill contracts both rows before projecting that layer;
+					// incremental calls still contract and project one row at a time.
+					wantProjections := wantLayer * 2
 					if requests >= 4 {
 						wantLayer, pos = requests%2, requests/2
+						wantProjections = requests
 					}
-					if layer != wantLayer || projections != requests {
+					if layer != wantLayer || projections != wantProjections {
 						t.Fatalf("contraction order: layer=%d want=%d requests=%d projections=%d", layer, wantLayer, requests, projections)
 					}
 					if request.plain.Inverse != nil || request.compressed.Inverse != nil {
@@ -77,7 +88,7 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					unrotated = append([]float32(nil), out...)
+					unrotated := append([]float32(nil), out...)
 					full, geometryErr := v41ForwardGeometry(m.Cfg)
 					if geometryErr != nil {
 						t.Fatal(geometryErr)
@@ -89,27 +100,32 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 					if role {
 						theta = 4096
 					}
-					expected = v41InverseOutputOracle(unrotated, m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, theta)
+					expected := v41InverseOutputOracle(unrotated, m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, theta)
 					if full {
 						expected = v41LatentNormOracleBF16(expected)
 					}
+					oracles = append(oracles, projectionOracle{layer: layer, position: pos, expected: expected, unrotated: unrotated})
 					requests++
 					return out, nil
 				}
 				st.groupedOutput = func(layer int, out []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error) {
-					if requests != projections+1 || len(out) != len(expected) {
-						t.Fatal("grouped projection did not immediately consume the contraction output")
+					if projections >= len(oracles) || len(oracles) != requests {
+						t.Fatal("grouped projection has no matching contraction row")
 					}
-					for i, want := range expected {
+					oracle := oracles[projections]
+					if layer != oracle.layer || len(out) != len(oracle.expected) {
+						t.Fatalf("projection %d did not consume layer=%d position=%d contraction row", projections, oracle.layer, oracle.position)
+					}
+					for i, want := range oracle.expected {
 						if i%headDim < headDim-m.Cfg.QKRopeHeadDim {
-							if math.Float32bits(out[i]) != math.Float32bits(unrotated[i]) {
+							if math.Float32bits(out[i]) != math.Float32bits(oracle.unrotated[i]) {
 								t.Fatalf("output prefix changed at %d", i)
 							}
 						}
 						if delta := math.Abs(float64(out[i]) - float64(want)); math.IsNaN(delta) || delta > 1e-6+1e-6*math.Abs(float64(want)) {
 							t.Fatalf("projection %d layer %d input[%d]=%g want inverse=%g", projections, layer, i, out[i], want)
 						}
-						if math.Abs(float64(want)-float64(unrotated[i])) > 1e-5 {
+						if math.Abs(float64(want)-float64(oracle.unrotated[i])) > 1e-5 {
 							distinct = true
 						}
 					}
@@ -119,12 +135,12 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 			}
 			bind(s)
 			s.Prefill([]int{1, 2})
-			if !s.v41IncrementalEligible() || requests != 4 {
+			if !s.v41IncrementalEligible() || requests != 4 || projections != requests {
 				t.Fatal("cold prefill did not seed both layer paths")
 			}
 			s.Step(3)
 			s.Prefill([]int{4})
-			if requests != 8 {
+			if requests != 8 || projections != requests {
 				t.Fatal("Step or suffix replayed the prefix")
 			}
 			snapshot, err := s.PrefixSnapshot()

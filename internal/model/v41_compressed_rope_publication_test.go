@@ -62,7 +62,7 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 				r.key[l] = append(r.key[l], append([]float32(nil), out...))
 				return out, nil
 			}
-			st.denseProjection = func(l int, leaf string, input []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+			st.setDenseProjection(func(l int, leaf string, input []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 				if leaf == "indexer.wk.weight" {
 					if rows != 1 || !reflect.DeepEqual(input, r.latent[l][len(r.key[l])]) {
 						t.Fatal("index projection did not receive the unrotated normalized latent")
@@ -70,7 +70,7 @@ func TestV41CompressedRotaryPublication(t *testing.T) {
 					r.projections++
 				}
 				return nil, v41ProjectionDeclined, nil
-			}
+			})
 		}
 		check := func(st *v41ForwardState, r *records, groups int) {
 			t.Helper()

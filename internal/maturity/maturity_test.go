@@ -872,7 +872,7 @@ func TestRuntimeModuleInventoryIsOneNamedObservation(t *testing.T) {
 		t.Fatalf("assertions and executions were conflated: %+v", p)
 	}
 	snapshot := p.ModuleInventorySnapshot
-	if snapshot == nil || snapshot.CapturedBeforeProofIndex != 1 || snapshot.AssertionCount != 2 || snapshot.SourceRevision != strings.TrimSpace(string(head)) || snapshot.SourceInputsSHA256 != beforeSource || snapshot.ArtifactSHA256 != artifactDigest || len(snapshot.OutputSHA256) != 64 {
+	if snapshot == nil || snapshot.CapturedBeforeProofIndex != 1 || snapshot.AssertionCount != 2 || snapshot.SourceRevision != strings.TrimSpace(string(head)) || snapshot.SourceInputsSHA256 != beforeSource || snapshot.ArtifactSHA256 != artifactDigest || len(snapshot.OutputSHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hexadecimal output is exactly 64 characters
 		t.Fatalf("missing capture provenance: %+v", snapshot)
 	}
 	identity, err := json.Marshal([]any{snapshot.Command, snapshot.CapturedBeforeProofIndex,

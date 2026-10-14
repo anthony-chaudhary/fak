@@ -54,7 +54,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// A refused or failed layer never publishes its pending panel.
 		defer resident.abort()
 	}
-	scratch.denseProjection = nil
+	scratch.projectionRoute = nil
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
 	scratch.mhcFFNProjection = nil
@@ -71,12 +71,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.sharedAttention = nil
-	scratch.routerTopK = nil
 	scratch.routedSum = nil
 	scratch.sharedAdd = nil
 	scratch.gatherOps = nil
 	if st != nil {
-		scratch.denseProjection = st.denseProjection
+		scratch.projectionRoute = st.projectionRoute
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
 		scratch.mhcFFNProjection = st.mhcFFNProjection
@@ -93,13 +92,12 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.sharedAttention = st.sharedAttention
-		scratch.routerTopK = st.routerTopK
 		scratch.routedSum = st.routedSum
 		scratch.sharedAdd = st.sharedAdd
 		scratch.gatherOps = st.gatherOps
 	}
 	defer func() {
-		scratch.denseProjection = nil
+		scratch.projectionRoute = nil
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
 		scratch.mhcFFNProjection = nil
@@ -116,7 +114,6 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.sharedAttention = nil
-		scratch.routerTopK = nil
 		scratch.routedSum = nil
 		scratch.sharedAdd = nil
 		scratch.gatherOps = nil
@@ -320,7 +317,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	for t := 0; t < seq; t++ {
 		copy(preFlat[t*H:(t+1)*H], preByPos[t])
 	}
-	qLatPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq, scratch.denseProjection)
+	qLatPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq, scratch.denseProjection())
 	if err != nil {
 		return err
 	}
@@ -342,7 +339,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		// RMSNorm. Captured BEFORE the wq_b panel consumes it.
 		trace.record(l, t, v41TraceStageQLatent, qLat)
 	}
-	qPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq, scratch.denseProjection)
+	qPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq, scratch.denseProjection())
 	if err != nil {
 		return err
 	}
@@ -354,7 +351,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 		kvRank = v41KVLoraRank
 	}
-	kvPanel, err := m.v41ProjPanelWithProjection(l, "attn.wkv.weight", preFlat, kvRank, H, seq, scratch.denseProjection)
+	kvPanel, err := m.v41ProjPanelWithProjection(l, "attn.wkv.weight", preFlat, kvRank, H, seq, scratch.denseProjection())
 	if err != nil {
 		return err
 	}
@@ -418,7 +415,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	ownsCompressed := v41OwnsCompressedRows(plan)
 	var compressedKV [][]float32
 	if ownsCompressed {
-		compressed, err := m.v41CompressedRowsWithDeviceOps(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection, scratch.compressorNorm, scratch.gatherOps.compressorPoolFunc())
+		compressed, err := m.v41CompressedRowsWithDeviceOps(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection(), scratch.compressorNorm, scratch.gatherOps.compressorPoolFunc())
 		if err != nil {
 			return err
 		}
@@ -470,7 +467,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
-			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 			if err != nil {
 				return err
 			}
@@ -481,7 +478,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
 		if err != nil {
 			return err
 		}
@@ -749,13 +746,13 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			copy(ffnFlat[t*H:(t+1)*H], xn)
 		}
 	}
-	routerPanel, err := m.v41ProjPanelWithProjection(l, "ffn.gate.weight", ffnFlat, cfg.NumExperts, H, seq, scratch.denseProjection)
+	routerPanel, err := m.v41ProjPanelWithProjection(l, "ffn.gate.weight", ffnFlat, cfg.NumExperts, H, seq, scratch.denseProjection())
 	if err != nil {
 		return err
 	}
 	for t := 0; t < seq; t++ {
 		routerLogits := routerPanel[t*cfg.NumExperts : (t+1)*cfg.NumExperts]
-		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
+		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK())
 		if err != nil {
 			return v41StageErr(v41StageMoE, l, err)
 		}
@@ -922,7 +919,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	var sharedPanelSelected bool
 	var sharedPanelFault *v41SharedPanelDeferredFault
 	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m &&
-		scratch.denseProjection != nil && scratch.sharedActivation != nil && scratch.gatherOps.bf16PublishFunc() != nil {
+		scratch.denseProjection() != nil && scratch.sharedActivation != nil && scratch.gatherOps.bf16PublishFunc() != nil {
 		sharedChain = st.callbackOwner.v41ColdSharedExpertChain(l)
 		sharedPanel, sharedPanelSelected, err = st.callbackOwner.v41ColdSharedExpertPanel(l)(ffnFlat, seq)
 		if err != nil {
@@ -947,7 +944,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			shared, sharedResident, err = sharedChain(xn)
 		}
 		if err == nil && !sharedResident {
-			shared, err = m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+			shared, err = m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection(), scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 		}
 		if err != nil {
 			return err

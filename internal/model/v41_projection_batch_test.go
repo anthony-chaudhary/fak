@@ -291,7 +291,7 @@ func v41CheckKVRouterForwardPanels(t *testing.T, m *Model, seq int, wantChunks [
 		}
 		return result, v41ProjectionHandled, nil
 	}
-	got, err := m.forwardV41(ids, &v41ForwardState{denseProjection: project})
+	got, err := m.forwardV41(ids, &v41ForwardState{projectionRoute: newV41ProjectionRouteBinding(project, nil)})
 	if err != nil {
 		t.Fatal(err)
 	}

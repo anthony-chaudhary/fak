@@ -60,15 +60,25 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 	sourceRows := make(map[int][][]float32)
 	sourceIDs := make(map[int][]int32)
 	var coldOutputs [2][][]float32
+	var checkProjected func()
 	bind := func(st *v41ForwardState, start int) {
 		projectPos, attendPos := [2]int{start, start}, [2]int{start, start}
-		var expected [2][]float32
-		st.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+		var expected [2][][]float32
+		var projected [2]int
+		checkProjected = func() {
+			t.Helper()
+			for layer := range expected {
+				if projected[layer] != len(expected[layer]) {
+					t.Fatalf("layer %d projected %d of %d expected rows", layer, projected[layer], len(expected[layer]))
+				}
+			}
+		}
+		st.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 			if layer == 1 && (strings.HasPrefix(leaf, "attn.compressor.") || strings.HasPrefix(leaf, "indexer.")) {
 				t.Fatalf("reader projected private source tensor %s", leaf)
 			}
 			return nil, v41ProjectionDeclined, nil
-		}
+		})
 		st.tailRoPE = func(layer int, q, kv, cos, sin []float32, heads, headDim, rotaryDim int) ([]float32, []float32, error) {
 			pos := projectPos[layer]
 			projectPos[layer]++
@@ -169,7 +179,8 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 			}
 			// Full attention publishes BF16 before inverse rotation and copies
 			// the F32 complex result back to BF16 before grouped projection.
-			expected[layer] = v41LatentNormOracleBF16(v41InverseOutputOracle(v41LatentNormOracleBF16(want), m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, 4096))
+			// Full forward may collect all attention rows before projecting them.
+			expected[layer] = append(expected[layer], v41LatentNormOracleBF16(v41InverseOutputOracle(v41LatentNormOracleBF16(want), m.Cfg.NumHeads, m.Cfg.HeadDim, m.Cfg.QKRopeHeadDim, pos, 4096)))
 			if duplicateReader && layer == 0 {
 				// Only the incremental call uses this active registry directly.
 				// Its source has published exactly one newest selection row.
@@ -182,7 +193,11 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 			return out, nil
 		}
 		st.groupedOutput = func(layer int, out []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error) {
-			near(out, expected[layer]) // inverse output RoPE exactly once, on both layers
+			if projected[layer] >= len(expected[layer]) {
+				t.Fatalf("layer %d extra projection %d with %d expected rows", layer, projected[layer], len(expected[layer]))
+			}
+			near(out, expected[layer][projected[layer]]) // inverse output RoPE exactly once, on both layers
+			projected[layer]++
 			projections++
 			return make([]float32, dim), v41ProjectionHandled, nil
 		}
@@ -215,6 +230,7 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 	if _, err := m.forwardV41(ids, cold); err != nil {
 		t.Fatal(err)
 	}
+	checkProjected()
 	checkWindow(cold, len(ids))
 	if contractions != 12 || projections != 12 {
 		t.Fatal("cold path skipped or duplicated a window-plus-compressed contraction")
@@ -249,12 +265,14 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 				!reflect.DeepEqual(captureV41ForwardSnapshot(st), before) {
 				t.Fatalf("position %d selected failure replayed or changed window/source state: %v", pos, err)
 			}
+			checkProjected()
 			failPos = -1
 		}
 		bind(st, pos)
 		if _, stats, err := m.forwardV41Step(token, st, nil); err != nil || !stats.Committed {
 			t.Fatalf("position %d continuation: %v", pos, err)
 		}
+		checkProjected()
 		checkWindow(st, pos+1)
 	}
 	if failures != 3 || contractions != 30 || projections != 27 {
@@ -267,6 +285,7 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 	if _, stats, err := m.forwardV41Step(7, st, nil); err != nil || !stats.Committed {
 		t.Fatalf("duplicate selection continuation: %v", err)
 	}
+	checkProjected()
 	checkWindow(st, len(ids)+1)
 	if failures != 3 || contractions != 32 || projections != 29 {
 		t.Fatal("duplicate selection skipped or repeated a contraction/projection")

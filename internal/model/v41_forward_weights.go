@@ -37,7 +37,7 @@ type v41ProjScratch struct {
 	expertDown       v41ExpertDownFunc
 	routedExpert     v41RoutedExpertFunc
 	routedLayer      v41RoutedLayerFunc
-	denseProjection  v41DenseProjectionFunc
+	projectionRoute  *v41ProjectionRouteBinding
 	groupedOutput    v41GroupedOutputFunc
 	mhcProjection    v41MHCProjectionFunc
 	mhcFFNProjection v41MHCProjectionFunc
@@ -55,7 +55,6 @@ type v41ProjScratch struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
-	routerTopK       v41RouterTopKFunc
 	routedSum        v41RoutedSumFunc
 	sharedAdd        v41SharedAddFunc
 	gatherOps        *v41DeviceGatherOps
@@ -1122,7 +1121,23 @@ func v41ProjectionOperationErr(l int, leaf string, cause error) error {
 	return &V41ProjectionOperationError{Layer: l, Leaf: leaf, Stage: string(stage), Cause: v41StageErr(stage, l, cause)}
 }
 
+type v41ProjectionRequest struct {
+	layer                     int
+	leaf, name                string
+	stage                     v41ForwardStage
+	head, indexer, compressor bool
+	out, in, rows, outputN    int
+}
+
 func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, rows int, project v41DenseProjectionFunc) ([]float32, error) {
+	req, err := m.v41AdmitProjectionRows(l, leaf, panel, out, in, rows)
+	if err != nil {
+		return nil, err
+	}
+	return m.v41ProjectionRowsAdmitted(req, panel, project)
+}
+
+func (m *Model) v41AdmitProjectionRows(l int, leaf string, panel []float32, out, in, rows int) (v41ProjectionRequest, error) {
 	name := layerName(l, leaf)
 	stage := v41StageAttention
 	compressor := v41CompressorProjectionLeaf(leaf)
@@ -1142,15 +1157,20 @@ func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, 
 	outputN, outputOK := checkedMulInt(rows, out)
 	_, weightOK := checkedMulInt(out, in)
 	if rows <= 0 || out <= 0 || in <= 0 || !inputOK || !outputOK || !weightOK || len(panel) != inputN {
-		return nil, v41StageErr(stage, l, fmt.Errorf("%w: invalid projection dimensions for %s", ErrV41ForwardStage, name))
+		return v41ProjectionRequest{}, v41StageErr(stage, l, fmt.Errorf("%w: invalid projection dimensions for %s", ErrV41ForwardStage, name))
 	}
 	wr, wc, present := m.residentShape(name)
 	if head {
 		wr, wc, present = m.v41HeadWeightShape(name)
 	}
 	if !present || wr != out || wc != in {
-		return nil, v41StageErr(stage, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
+		return v41ProjectionRequest{}, v41StageErr(stage, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
 	}
+	return v41ProjectionRequest{layer: l, leaf: leaf, name: name, stage: stage, head: head, indexer: indexer, compressor: compressor, out: out, in: in, rows: rows, outputN: outputN}, nil
+}
+
+func (m *Model) v41ProjectionRowsAdmitted(req v41ProjectionRequest, panel []float32, project v41DenseProjectionFunc) ([]float32, error) {
+	l, leaf, out, in, rows, outputN := req.layer, req.leaf, req.out, req.in, req.rows, req.outputN
 	if project != nil {
 		y, outcome, cause := project(l, leaf, panel, out, in, rows)
 		switch outcome {
@@ -1169,6 +1189,13 @@ func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, 
 			return nil, v41ProjectionOperationErr(l, leaf, errV41ProjectionResult)
 		}
 	}
+	return m.v41ProjectionHostRows(req, panel)
+}
+
+func (m *Model) v41ProjectionHostRows(req v41ProjectionRequest, panel []float32) ([]float32, error) {
+	name := req.name
+	head, indexer, compressor := req.head, req.indexer, req.compressor
+	out, in, rows, outputN := req.out, req.in, req.rows, req.outputN
 	opened := m.v41NowNanos()
 	succeeded := 0
 	defer func() {
@@ -1204,10 +1231,14 @@ func (m *Model) v41ProjectionRows(l int, leaf string, panel []float32, out, in, 
 }
 
 func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
+	return s.v41BindDenseProjection().ordinary
+}
+
+func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
-		return nil
+		return v41BoundDenseProjection{}
 	}
-	return func(l int, leaf string, panel []float32, out, in, rows int) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
+	core := func(l int, leaf string, panel []float32, out, in, rows int, continuation *v41ProjectionContinuation) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
 		head := l == -1 && leaf == s.M.headName()
 		compressor := v41CompressorProjectionLeaf(leaf)
 		indexer := v41IndexerProjectionLeaf(leaf)
@@ -1315,6 +1346,9 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			s.ensureOpenBackendSession()
 			stage = func() compute.Tensor { return s.v41HeadWeightHAL(name, dtype, out, in) }
 		}
+		if continuation != nil && (continuation.valid == nil || !continuation.valid()) {
+			return nil, v41ProjectionError, errV41RouterProjectionScope
+		}
 		opened := s.M.v41NowNanos()
 		successfulRows := 0
 		var uploaded, readback int64
@@ -1380,10 +1414,27 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		}()
 		run := func() (values []float32, err error) {
 			var owned []compute.Tensor
+			var loan *v41ProjectionLoan
+			if continuation != nil {
+				loan = &v41ProjectionLoan{backend: s.Backend}
+				defer func() {
+					primary := recover()
+					cleanup := loan.release()
+					if primary != nil {
+						panic(primary)
+					}
+					if err == nil && continuation.cause == nil && continuation.panicValue == nil && cleanup != nil {
+						panic(cleanup)
+					}
+				}()
+			}
 			if head {
 				defer v41ReleaseHeadTensors(s.Backend, &owned, &err)
 			}
 			weight := stage()
+			if loan != nil {
+				loan.protected = weight.Buf()
+			}
 			if guarded && dtype == compute.Q4_K {
 				q := s.M.q4kw[name]
 				if q4kHostCopyReleasable(s, q, weight.Ready()) {
@@ -1411,7 +1462,11 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			}
 			opStage = "activation upload"
 			x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
-			if head {
+			if loan != nil {
+				if !loan.own(x) {
+					return nil, errV41ProjectionResult
+				}
+			} else if head {
 				owned = append(owned, x)
 			} else {
 				defer s.Backend.Free(x)
@@ -1424,10 +1479,21 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 			} else {
 				y = s.Backend.BatchedMatMul(weight, x, rows)
 			}
-			if head {
+			if loan != nil {
+				if !loan.own(y) {
+					return nil, errV41ProjectionResult
+				}
+			} else if head {
 				owned = append(owned, y)
 			} else {
 				defer s.Backend.Free(y)
+			}
+			if continuation != nil {
+				if rows != 1 || leaf != "ffn.gate.weight" || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
+					return nil, errV41ProjectionResult
+				}
+				continuation.invoke(y, loan)
+				return nil, nil
 			}
 			opStage = "readback"
 			values = s.Backend.Read(y)
@@ -1461,9 +1527,15 @@ func (s *Session) v41DenseProjectionFunc() v41DenseProjectionFunc {
 		if err != nil {
 			return nil, v41ProjectionError, closeFailure(err)
 		}
-		successfulRows = rows
+		if continuation == nil || continuation.completed {
+			successfulRows = rows
+		}
 		return result, v41ProjectionHandled, nil
 	}
+	ordinary := func(l int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+		return core(l, leaf, panel, out, in, rows, nil)
+	}
+	return v41BoundDenseProjection{ordinary: ordinary, core: core, owner: s, model: s.M, backend: s.Backend}
 }
 
 func (s *Session) v41DenseLeafCloseFailure(layer int, leaf, stage string, cause error) error {

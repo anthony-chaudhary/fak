@@ -264,7 +264,11 @@ func TestInKernelV41CoordinatorFIFOAndCap(t *testing.T) {
 			t.Fatal("FIFO request stranded")
 		}
 	}
-	if !reflect.DeepEqual(order, []int{0, 1, 2, 3, 4, 5, 6, 7}) || !reflect.DeepEqual(sizes, []int{4, 1, 2, 1}) || p.coalesceRunning || len(p.coalesceReady) != 0 {
+	wantOrder := make([]int, len(kinds))
+	for i := range wantOrder {
+		wantOrder[i] = i
+	}
+	if !reflect.DeepEqual(order, wantOrder) || !reflect.DeepEqual(sizes, []int{4, 1, 2, 1}) || p.coalesceRunning || len(p.coalesceReady) != 0 {
 		t.Fatalf("FIFO order=%v sizes=%v idle=%t", order, sizes, !p.coalesceRunning)
 	}
 }

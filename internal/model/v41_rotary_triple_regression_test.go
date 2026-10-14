@@ -139,9 +139,13 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 		// conjugate-rotated at the query's absolute position with the layer's
 		// (compressed) theta, on both the source and the reader layer.
 		st := &v41ForwardState{}
-		positions := map[int]int{}
-		var contracted []float32
-		contractedLayer, contractions, projections := -1, 0, 0
+		positions, contractionPositions := map[int]int{}, map[int]int{}
+		type projectionOracle struct {
+			layer, position int
+			raw, expected   []float32
+		}
+		var oracles []projectionOracle
+		projections := 0
 		changed := false
 		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
@@ -149,18 +153,28 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			contracted, contractedLayer = append([]float32(nil), out...), layer
-			contractions++
+			pos := contractionPositions[layer]
+			contractionPositions[layer]++
+			// Cold forward contracts all rows of a layer before projecting them.
+			// Own both the raw row and its oracle before production rotates out.
+			raw := append([]float32(nil), out...)
+			// model.py780-781: BF16 attention output, F32 inverse rotation, BF16 copyback.
+			want := v41LatentNormOracleBF16(rotateTail(v41LatentNormOracleBF16(raw), hd, rd, pos, compressedTheta, -1))
+			oracles = append(oracles, projectionOracle{layer: layer, position: pos, raw: raw, expected: want})
 			return out, nil
 		}
 		st.groupedOutput = func(layer int, out []float32, h, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error) {
-			if layer != contractedLayer || contractions != projections+1 || len(out) != len(contracted) {
-				t.Fatalf("grouped projection did not immediately consume layer %d's contraction", layer)
+			if projections >= len(oracles) {
+				t.Fatal("grouped projection has no matching contraction row")
 			}
+			oracle := oracles[projections]
 			pos := positions[layer]
+			if layer != oracle.layer || pos != oracle.position || len(out) != len(oracle.raw) ||
+				len(out) != len(oracle.expected) || h != heads || headDim != hd {
+				t.Fatalf("grouped projection %d did not consume layer %d position %d's contraction", projections, oracle.layer, oracle.position)
+			}
 			positions[layer]++
-			// model.py780-781: BF16 attention output, F32 inverse rotation, BF16 copyback.
-			want := v41LatentNormOracleBF16(rotateTail(v41LatentNormOracleBF16(contracted), headDim, rd, pos, compressedTheta, -1))
+			contracted, want := oracle.raw, oracle.expected
 			for i := range want {
 				if delta := math.Abs(float64(out[i]) - float64(want[i])); math.IsNaN(delta) || delta > 1e-6+1e-6*math.Abs(float64(want[i])) {
 					t.Fatalf("layer %d pos %d: projection input[%d]=%g, want inverse-rotated %g (raw %g)",
@@ -176,8 +190,10 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 		if _, err := m.forwardV41([]int{1, 2, 3, 4}, st); err != nil {
 			t.Fatal(err)
 		}
-		if positions[0] != 4 || positions[1] != 4 || !changed {
-			t.Fatalf("forward witness incomplete: positions=%v discriminating=%v", positions, changed)
+		if positions[0] != 4 || positions[1] != 4 || contractionPositions[0] != 4 || contractionPositions[1] != 4 ||
+			projections != len(oracles) || projections != positions[0]+positions[1] || !changed {
+			t.Fatalf("forward witness incomplete: positions=%v contractions=%v projections=%d rows=%d discriminating=%v",
+				positions, contractionPositions, projections, len(oracles), changed)
 		}
 	})
 
