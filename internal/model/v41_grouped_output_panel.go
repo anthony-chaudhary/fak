@@ -79,18 +79,18 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 		groupElems := rank * groupIn
 		for g := range w.a {
 			key := fmt.Sprintf("v41-grouped:%s:%v:%d:%d:%d", aName, aSource.dtype, g, rank, groupIn)
-			host, cause := aSource.host(g*groupElems, rank, groupIn)
+			var cause error
+			w.a[g], cause = s.v41GroupedPanelWeight(key, aSource, g*groupElems, rank, groupIn)
 			if cause != nil {
 				return v41GroupedPanelWeights{}, cause
 			}
-			w.a[g] = s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(host, aSource.dtype) })
 		}
 		key := fmt.Sprintf("v41-grouped:%s:%v:%d:%d", bName, bSource.dtype, dim, joined)
-		host, cause := bSource.host(0, dim, joined)
+		var cause error
+		w.b, cause = s.v41GroupedPanelWeight(key, bSource, 0, dim, joined)
 		if cause != nil {
 			return v41GroupedPanelWeights{}, cause
 		}
-		w.b = s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(host, bSource.dtype) })
 		return w, nil
 	})
 	if err != nil {
@@ -135,6 +135,33 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 	}
 	completed = rows
 	return result, v41ProjectionHandled, nil
+}
+
+// Resolve the immutable handle before materializing or validating its payload.
+// Both session hits and model-owned borrowed hits have already staged these bytes.
+func (s *Session) v41GroupedPanelWeight(key string, source v41GroupedWeight, offset, out, in int) (weight compute.Tensor, err error) {
+	var payload error
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if recovered == &payload {
+				weight, err = compute.Tensor{}, payload
+				return
+			}
+			panic(recovered)
+		}
+	}()
+	weight = s.cachedImmutableWeight(key, key, func() compute.Tensor {
+		host, cause := source.host(offset, out, in)
+		if cause != nil {
+			// The staging callback cannot return an error. Unwind its cache
+			// lock without publishing a failed handle, then return the original
+			// error to the selected-call boundary. Backend panics pass through.
+			payload = cause
+			panic(&payload)
+		}
+		return s.Backend.Upload(host, source.dtype)
+	})
+	return weight, nil
 }
 
 func v41GroupedPanelTiles(rows int) []int {
