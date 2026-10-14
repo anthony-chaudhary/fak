@@ -225,17 +225,45 @@ func TestV41BF16PublishSession(t *testing.T) {
 	m := v41FullStepPatchedNorms(t)
 	b := newV41BF16PublishRecorder()
 	s := v41DenseTestSession(t, m, b)
+	st := s.v41State()
+	normalize := st.attentionNorm
+	if normalize == nil || st.attentionBF16 == nil {
+		t.Fatal("attention normalization/publication not bound")
+	}
+	attentionInputs := 0
+	st.attentionNorm = func(layer int, row []float32) ([]float32, error) {
+		attentionInputs++
+		for i, value := range row {
+			if !finite32(value) || math.Float32bits(value)&0xffff != 0 {
+				t.Fatalf("attention norm received unpublished input at layer %d lane %d", layer, i)
+			}
+		}
+		return normalize(layer, row)
+	}
 	v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
 	v41AttentionBF16Parity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})))
 	if b.calls == 0 || s.BackendSessionClosed() {
 		t.Fatalf("session issued %d publications (closed=%t)", b.calls, s.BackendSessionClosed())
 	}
+	attentionOutputs := 0
 	for _, site := range b.sites {
 		if !compute.V41BF16PublishSite(site) && site != 3 && site != 4 {
 			t.Fatalf("publication outside the closed policy: %d", site)
 		}
+		if site == compute.V41BF16CheckedAttentionNormInput {
+			t.Fatal("session redundantly published its already widened BF16 attention input")
+		}
+		if site == compute.V41BF16CheckedAttentionNormOutput {
+			attentionOutputs++
+		}
 	}
-	for _, want := range []uint32{compute.V41BF16PublishFinalNormInput, compute.V41BF16PublishFinalNormOutput, 3, 4} {
+	// This fixture's collapse is already BF16, so input publication is an
+	// owned identity copy. Every token still normalizes and publishes its output.
+	// TestV41AttentionBF16InputIdentity covers non-BF16 and invalid input dispatch.
+	if want := 3 * m.Cfg.NumLayers; attentionInputs != want || attentionOutputs != want {
+		t.Fatalf("attention inputs=%d outputs=%d, want %d each", attentionInputs, attentionOutputs, want)
+	}
+	for _, want := range []uint32{compute.V41BF16PublishFinalNormInput, compute.V41BF16PublishFinalNormOutput} {
 		if !slices.Contains(b.sites, want) {
 			t.Fatalf("session never published site %d: %v", want, b.sites)
 		}
