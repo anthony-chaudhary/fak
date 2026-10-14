@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "v41-ep-panel-layout",
+      "canonical": "V4.1 EP panel transport layout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Checked per-owner request word counts, aggregate payload words, reply words, and explicit live-byte allowance for one V4.1 expert-parallel prefill panel exchange.",
+      "distinction": "Transient wire-exchange geometry derived from routed rows and existing TPPlan owner bands, not tensor element ordering or context-region layout. Named live transport allocations do not cover RSS, device scratch, borrowed normalized input, or all-history Prefill outputs.",
+      "distinct_from": [
+        "layout-tensor",
+        "layout-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "v41EPPanelLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41-ep-panel-plan",
+      "canonical": "V4.1 EP panel geometry admission",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Validates the existing owner partition, routed picks, token/width bounds, every owner's encoded request size, response size, and explicit live transport allowance before creating v41EPPanelLayout.",
+      "distinction": "Bounds one exchange before allocation or I/O; does not select TPPlan partitions or estimate complete host/device model memory, and does not certify hardware execution or full-history memory use.",
+      "distinct_from": [
+        "x-plan-tpplan",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "v41EPPanelPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

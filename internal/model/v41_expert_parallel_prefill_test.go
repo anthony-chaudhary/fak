@@ -67,7 +67,12 @@ func (w *v41EPPrefillWire) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (w *v41EPPrefillWire) checkDigests(want [][32]byte) error {
+func (w *v41EPPrefillWire) checkDigests(want [][32]byte, picks []routePick, owners TPPlan, rank, width int) error {
+	plan, err := v41EPGatherPlan(picks, owners, width)
+	if err != nil {
+		return err
+	}
+	rowWords := plan.Shards[rank].Width()
 	round := 0
 	for data := w.bytes; len(data) != 0; {
 		if len(data) < 4 {
@@ -79,21 +84,41 @@ func (w *v41EPPrefillWire) checkDigests(want [][32]byte) error {
 		}
 		payload := data[4 : 4+n]
 		data = data[4+n:]
-		if distOp(payload[0]) != opV41EPReduce {
+		op := distOp(payload[0])
+		if op != opV41EPReduce && op != opV41EPPanelReduce {
 			continue
 		}
-		part, _, err := decodeF32(payload[1:])
-		if err != nil || len(part) < v41EPHeaderWords || round >= len(want) {
+		part, consumed, err := decodeF32(payload[1:])
+		if err != nil || consumed != len(payload)-1 || len(part) < v41EPHeaderWords {
 			return errors.New("invalid recorded reduction")
 		}
-		var got [32]byte
-		for i := 0; i < 8; i++ {
-			binary.LittleEndian.PutUint32(got[4*i:], math.Float32bits(part[i+2]))
+		rows, at := 1, 0
+		if op == opV41EPPanelReduce {
+			if len(part) < v41EPPanelHeaderWords || math.Float32bits(part[0]) != v41EPPanelWireVersion {
+				return errors.New("invalid recorded panel envelope")
+			}
+			rows, at = int(math.Float32bits(part[10])), v41EPPanelHeaderWords
+			if rows < 2 || rows > v41EPOwnerPanelTokens {
+				return errors.New("invalid recorded panel rows")
+			}
 		}
-		if got != want[round] {
-			return fmt.Errorf("round %d lost shared ordinal, position, history or domain", round)
+		if len(part) != at+rows*rowWords {
+			return errors.New("invalid recorded owner payload span")
 		}
-		round++
+		for token := 0; token < rows; token++ {
+			if round >= len(want) {
+				return errors.New("extra recorded logical row")
+			}
+			var header [v41EPHeaderWords]float32
+			v41EPHeader(header[:], want[round], false)
+			for i, value := range header {
+				if math.Float32bits(part[at+i]) != math.Float32bits(value) {
+					return fmt.Errorf("row %d lost shared ordinal, position, history or domain", round)
+				}
+			}
+			at += rowWords
+			round++
+		}
 	}
 	if round != len(want) {
 		return fmt.Errorf("recorded %d reductions, want %d", round, len(want))
@@ -249,7 +274,7 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 						if err := RunEPFollower(g, newSession); err != nil {
 							return err
 						}
-						if err := wire.checkDigests(digests); err != nil {
+						if err := wire.checkDigests(digests, picks, owners, rank, m.Cfg.HiddenSize); err != nil {
 							return err
 						}
 					}
@@ -259,7 +284,12 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 							return errors.New("closed Session retained owner weights")
 						}
 					}
-					if m.V41ExpertParallelTransportStats().CompletedGathers != 44 || b.expertWork || len(b.pending) != 0 || len(b.ownedTiles) != 0 {
+					wantRounds := uint64(9)
+					if scalar {
+						wantRounds = 44
+					}
+					stats := m.V41ExpertParallelTransportStats()
+					if stats.CompletedGathers != wantRounds || stats.CompletedRows != 44 || b.expertWork || len(b.pending) != 0 || len(b.ownedTiles) != 0 {
 						return errors.New("missing exact rounds or retained cohort temporaries")
 					}
 					return nil
@@ -320,7 +350,7 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 		rounds uint64
 	}{
 		{"failure_before_first_reduce", 1, 0},
-		{"failure_after_first_window", 49, 32},
+		{"failure_after_first_window", 49, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			failure := &compute.BackendError{Backend: "test", Site: "prefill Q2 tile", Err: errors.New("selected tile failed")}
@@ -406,15 +436,16 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 				if !errors.Is(err, ErrV41ExpertParallel) || rank == 2 && !errors.Is(err, failure) {
 					t.Fatalf("rank %d lost selected/terminal error: %v", rank, err)
 				}
-				// The failed owner finished round 32 before selecting its next
+				// The failed owner finished the 32-row exchange before its next
 				// tile. Its socket abort may race a peer's deadline-clear/count
 				// step for that same round; remote accounting is not atomic.
 				minimum := test.rounds
 				if rank != 2 && minimum > 0 {
 					minimum--
 				}
-				rounds := models[rank].V41ExpertParallelTransportStats().CompletedGathers
-				if rounds < minimum || rounds > test.rounds || b.expertWork || scalarCalls[rank] != 0 || len(b.pending) != 0 || len(b.ownedTiles) != 0 || len(s.halW) != 0 || s.modelWeightsHeld {
+				stats := models[rank].V41ExpertParallelTransportStats()
+				rounds := stats.CompletedGathers
+				if rounds < minimum || rounds > test.rounds || stats.CompletedRows != 32*rounds || b.expertWork || scalarCalls[rank] != 0 || len(b.pending) != 0 || len(b.ownedTiles) != 0 || len(s.halW) != 0 || s.modelWeightsHeld {
 					t.Fatalf("rank %d partial success, replay or retained ownership: rounds=%d scalar=%d", rank, rounds, scalarCalls[rank])
 				}
 			}
