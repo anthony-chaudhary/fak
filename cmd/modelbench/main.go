@@ -585,7 +585,7 @@ func requireNoMetalFallbacks(count int) error {
 // verbatim on resume, so a crash mid-grid keeps the sizes already measured (#2382).
 func runPrefill(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Session, vocab int, prefillSizes []int, report, phaseReport map[string]any) {
 	var prefills []prefillResult
-	var prefillPhases []*model.PhaseProfile
+	var prefillPhases []*phaseProfileReceipt
 	for _, p := range prefillSizes {
 		ids := lcgIDs(p, vocab)
 		res, reused := checkpointCell(ck, fmt.Sprintf("prefill:P=%d", p), func() prefillResult {
@@ -604,11 +604,17 @@ func runPrefill(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Se
 			s := newSession()
 			pp := model.NewPhaseProfiler()
 			s.PhaseProfiler = pp
+			observation := beginPhaseObservation(s, "prefill")
 			t := time.Now()
 			s.Prefill(ids)
-			total := time.Since(t)
-			snap := pp.Snapshot("prefill", p, 0, total.Nanoseconds())
-			prefillPhases = append(prefillPhases, snap)
+			wallNanos := time.Since(t).Nanoseconds()
+			attribution := observation.end(s, wallNanos)
+			receipt := &phaseProfileReceipt{
+				PhaseProfile:        pp.Snapshot("prefill", p, 0, wallNanos),
+				V41ModelAttribution: attribution,
+			}
+			prefillPhases = append(prefillPhases, receipt)
+			snap := receipt.PhaseProfile
 			fmt.Fprint(os.Stderr, phaseTable(snap))
 			s.Close()
 		}
@@ -646,9 +652,11 @@ func runDecode(f *benchFlags, ck *benchckpt.Ledger, newSession func() *model.Ses
 		pp := model.NewPhaseProfiler()
 		s.PhaseProfiler = pp
 		id := 7
+		observation := beginPhaseObservation(s, "decode")
 		total := stepDecode(s, id, *f.decodeSteps, vocab)
+		attribution := observation.end(s, total.Nanoseconds())
 		snap := pp.Snapshot("decode", *f.decodePrompt, *f.decodeSteps, total.Nanoseconds())
-		phaseReport["decode"] = snap
+		phaseReport["decode"] = &phaseProfileReceipt{PhaseProfile: snap, V41ModelAttribution: attribution}
 		fmt.Fprint(os.Stderr, phaseTable(snap))
 		s.Close()
 	}
