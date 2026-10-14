@@ -227,7 +227,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		if useFused {
 			swigluVerdict = func(slot int) int { return slot }
 			publishVerdict = func(slot int) int { return len(picks) + slot }
-			gates, ups, downs := make([]compute.Tensor, len(picks)), make([]compute.Tensor, len(picks)), make([]compute.Tensor, len(picks))
+			gates, ups, downs := v41RoutedLayerProjectionTables(len(picks))
 			slots, routeWeights := make([]int, len(picks)), make([]float32, len(picks))
 			for slot, pick := range picks {
 				gates[slot], ups[slot], downs[slot] = weights[slot].gate, weights[slot].up, weights[slot].down
@@ -261,7 +261,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		} else if useID {
 			swigluVerdict = func(slot int) int { return slot }
 			publishVerdict = func(slot int) int { return len(picks) + slot }
-			gates, ups, downs := make([]compute.Tensor, len(picks)), make([]compute.Tensor, len(picks)), make([]compute.Tensor, len(picks))
+			gates, ups, downs := v41RoutedLayerProjectionTables(len(picks))
 			slots, routeWeights := make([]int, len(picks)), make([]float32, len(picks))
 			for slot, pick := range picks {
 				gates[slot], ups[slot], downs[slot] = weights[slot].gate, weights[slot].up, weights[slot].down
@@ -606,6 +606,15 @@ func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float3
 
 // v41RoutedLayerWeights is one pick's staged and held device projections.
 type v41RoutedLayerWeights struct{ gate, up, down compute.Tensor }
+
+// v41RoutedLayerProjectionTables allocates independent descriptor views for an
+// admitted ID or fused dispatch. Both admission checks bound picks to 1..8
+// (V41RoutedIDMaxPicks), so 3*picks cannot overflow. Full slice capacities keep
+// an append to any table from overwriting another table's descriptors.
+func v41RoutedLayerProjectionTables(picks int) (gates, ups, downs []compute.Tensor) {
+	tables := make([]compute.Tensor, 3*picks)
+	return tables[:picks:picks], tables[picks : 2*picks : 2*picks], tables[2*picks : 3*picks : 3*picks]
+}
 
 // Routed dispatches one batched layer records: the per-pick arm issues gate,
 // up, SwiGLU, down and publication per pick plus one sum add per pick; the id
