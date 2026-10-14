@@ -41,11 +41,11 @@ const v41RoutedLayerProbe polymodel.ModelID = "v41-routed-layer-probe"
 
 func v41RoutedIDOptedIn() bool { return os.Getenv(v41RoutedIDEnv) == "1" }
 
+// v41PrefillExpertPanelOptedIn reads only FAK_V41_PREFILL_EXPERT_PANEL. It no
+// longer inherits the decode-side FAK_V41_ROUTED_ID, so a prefill setting can
+// never change decode and a decode setting can never change prefill.
 func v41PrefillExpertPanelOptedIn() bool {
-	if value, present := os.LookupEnv(v41PrefillExpertPanelEnv); present {
-		return value == "1"
-	}
-	return v41RoutedIDOptedIn()
+	return os.Getenv(v41PrefillExpertPanelEnv) == "1"
 }
 
 // v41RoutedLayerFunc binds the batched routed layer, or nil when the fused

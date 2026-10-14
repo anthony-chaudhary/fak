@@ -36,7 +36,7 @@ func TestV41PrefillPanelIndependentOptIn(t *testing.T) {
 		legacyPresent, panelPresent, enabled bool
 	}{
 		{name: "absent_default"},
-		{name: "absent_inherits_on", legacy: "1", legacyPresent: true, enabled: true},
+		{name: "absent_ignores_decode_on", legacy: "1", legacyPresent: true},
 		{name: "absent_inherits_off", legacy: "0", legacyPresent: true},
 		{name: "panel_only", panel: "1", panelPresent: true, enabled: true},
 		{name: "panel_with_decode_off", legacy: "0", panel: "1", legacyPresent: true, panelPresent: true, enabled: true},
