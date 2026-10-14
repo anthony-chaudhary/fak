@@ -28,9 +28,10 @@ type V41ExpertParallelSessionRequest struct {
 
 // V41ExpertParallelLoadRetirement describes only construction-owned releases.
 // Available && Completed on a preflight refusal means no owned work began.
+// An ordinary authenticated-reader failure may supply typed retirement evidence.
 // An unsuccessful opaque factory leaves the observation unavailable unless an
-// observed outer release failure establishes Completed=false. Err contains only
-// those observed release failures, never an inferred failure of hidden cleanup.
+// observed release failure establishes Completed=false. Err contains only
+// observed release failures, never an inferred failure of hidden cleanup.
 type V41ExpertParallelLoadRetirement struct {
 	Available bool
 	Completed bool
@@ -89,13 +90,16 @@ func (e *V41ExpertParallelLoadPanicError) Unwrap() error {
 // construction only, after admitted loader work drains; it does not supervise
 // returned sessions or idle follower waits.
 func LoadV41ExpertParallelSession(ctx context.Context, req V41ExpertParallelSessionRequest) (*model.Session, *model.EPDecodeCoordinator, error) {
-	return loadV41ExpertParallelSession(ctx, req, OpenWeightsAuthenticated)
+	return v41EPLoadLegacyResult(LoadV41ExpertParallelSessionWithResult(ctx, req))
 }
 
 func loadV41ExpertParallelSession(ctx context.Context, req V41ExpertParallelSessionRequest,
 	open func(context.Context, []ShardIdentity, string) (*WeightSource, error),
 ) (*model.Session, *model.EPDecodeCoordinator, error) {
-	result := loadV41ExpertParallelSessionWithResult(ctx, req, open)
+	return v41EPLoadLegacyResult(loadV41ExpertParallelSessionWithResult(ctx, req, open))
+}
+
+func v41EPLoadLegacyResult(result V41ExpertParallelSessionResult) (*model.Session, *model.EPDecodeCoordinator, error) {
 	if result.Panicked {
 		panic(result.PrimaryPanic)
 	}
@@ -104,16 +108,33 @@ func loadV41ExpertParallelSession(ctx context.Context, req V41ExpertParallelSess
 
 // LoadV41ExpertParallelSessionWithResult uses the same authenticated loader as
 // LoadV41ExpertParallelSession, but captures construction panics explicitly and
-// retains observed outer cleanup failures. It does not supervise returned users.
+// retains observed cleanup failures, including typed ordinary authenticated-reader
+// retirement. It does not supervise returned users.
 // Opaque factory failures cannot establish complete retirement of their private
 // allocations. Group and Backend remain borrowed on every outcome.
 func LoadV41ExpertParallelSessionWithResult(ctx context.Context, req V41ExpertParallelSessionRequest) V41ExpertParallelSessionResult {
-	return loadV41ExpertParallelSessionWithResult(ctx, req, OpenWeightsAuthenticated)
+	return loadV41ExpertParallelSessionWithAuthenticatedResult(ctx, req,
+		func(ctx context.Context, shards []ShardIdentity, set string) authenticatedWeightOpenResult {
+			return openWeightsAuthenticatedWithResult(ctx, shards, set, ggufMmapEnabled(), openShardReader)
+		})
 }
 
 func loadV41ExpertParallelSessionWithResult(ctx context.Context, req V41ExpertParallelSessionRequest,
 	open func(context.Context, []ShardIdentity, string) (*WeightSource, error),
+) V41ExpertParallelSessionResult {
+	// This compatibility seam has no evidence about an opaque opener's
+	// unreturned allocations, even if its visible partial source closes cleanly.
+	return loadV41ExpertParallelSessionWithAuthenticatedResult(ctx, req,
+		func(ctx context.Context, shards []ShardIdentity, set string) authenticatedWeightOpenResult {
+			ws, err := open(ctx, shards, set)
+			return authenticatedWeightOpenResult{Source: ws, Err: err}
+		})
+}
+
+func loadV41ExpertParallelSessionWithAuthenticatedResult(ctx context.Context, req V41ExpertParallelSessionRequest,
+	open func(context.Context, []ShardIdentity, string) authenticatedWeightOpenResult,
 ) (result V41ExpertParallelSessionResult) {
+	var authenticatedRetirement V41ExpertParallelLoadRetirement
 	var ws *WeightSource
 	var m *model.Model
 	var session *model.Session
@@ -150,8 +171,18 @@ func loadV41ExpertParallelSessionWithResult(ctx context.Context, req V41ExpertPa
 		// internal allocations unobserved. Returned non-nil partial resources
 		// are still owned here and receive the same ordered cleanup.
 		opaqueIncomplete = true
-		ws, err = open(ctx, req.Shards, req.ExpectedShardSetSHA256)
+		opened := open(ctx, req.Shards, req.ExpectedShardSetSHA256)
+		ws, err = opened.Source, opened.Err
 		if err != nil {
+			retired := opened.Retirement
+			if ws == nil && !opened.OwnershipTransferred && retired.Available && retired.Completed == (retired.Err == nil) {
+				// Consume only coherent ordinary failure evidence. The auth Err
+				// already includes its primary-first release failures; keep it intact.
+				authenticatedRetirement = V41ExpertParallelLoadRetirement{
+					Available: true, Completed: retired.Completed, Err: retired.Err,
+				}
+				opaqueIncomplete = !retired.Completed
+			}
 			return err
 		}
 		if ws == nil {
@@ -221,6 +252,9 @@ func loadV41ExpertParallelSessionWithResult(ctx context.Context, req V41ExpertPa
 	}
 	result.Retirement.Available = !opaqueIncomplete
 	result.Retirement.Completed = !opaqueIncomplete
+	if authenticatedRetirement.Available {
+		result.Retirement = authenticatedRetirement
+	}
 	var failures [3]error // One per outer release stage; never unbounded.
 	count := 0
 	cleanup := func(operation string, fn func() error) {
@@ -245,11 +279,16 @@ func loadV41ExpertParallelSessionWithResult(ctx context.Context, req V41ExpertPa
 		cleanup("WeightSource.Close", ws.Close)
 	}
 	if count != 0 {
-		result.Retirement.Err = errors.Join(failures[:count]...)
-		if result.Err == nil {
-			result.Err = result.Retirement.Err
+		outerFailures := errors.Join(failures[:count]...)
+		if result.Retirement.Err == nil {
+			result.Retirement.Err = outerFailures
 		} else {
-			result.Err = errors.Join(result.Err, result.Retirement.Err)
+			result.Retirement.Err = errors.Join(result.Retirement.Err, outerFailures)
+		}
+		if result.Err == nil {
+			result.Err = outerFailures
+		} else {
+			result.Err = errors.Join(result.Err, outerFailures)
 		}
 	}
 	return result
