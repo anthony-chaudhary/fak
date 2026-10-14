@@ -6826,6 +6826,16 @@
           "category": "incidental",
           "reason": "Function-local guard for at most one Close attempt on the existing candidate model.Session; set before Close, it does not establish completed retirement or introduce a separate session owner or lifecycle abstraction.",
           "token": "sessionClosed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Nullable elapsed metric for setup of an existing session; it does not define ownership or establish retirement.",
+          "token": "SessionSetupNS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Nullable elapsed metric for teardown of an existing session; it does not define ownership or prove completed retirement.",
+          "token": "SessionTeardownNS"
         }
       ],
       "exclude": [
@@ -6954,12 +6964,14 @@
         "SessionRate",
         "SessionRecoveryScenarios",
         "SessionResidencyPlan",
+        "SessionSetupNS",
         "SessionShellErrorRate",
         "SessionSourceResolution",
         "SessionSourceSelfTestReport",
         "SessionSourceSelfTestSchemaVersion",
         "SessionStarted",
         "SessionSupport",
+        "SessionTeardownNS",
         "SessionTerminalView",
         "SetSessionAffinity",
         "SlotStatus",
@@ -11744,6 +11756,11 @@
           "category": "incidental",
           "reason": "Exported context.Context-carrying entry point through the existing model execution observer path, with cooperative cancellation checks between synchronous operations; it introduces no separate context abstraction.",
           "token": "ExecuteModelContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request admission ceiling for token context length; no context.Context or separate context abstraction.",
+          "token": "V41EPOwnerMaxContextTokens"
         }
       ],
       "exclude": [
@@ -11800,6 +11817,7 @@
         "SetIncrementalContext",
         "SystemContext",
         "TerminationContextLimit",
+        "V41EPOwnerMaxContextTokens",
         "ValidContextKey",
         "WithAffinity",
         "WithNativeCompactionObserver",
@@ -17530,6 +17548,11 @@
           "category": "incidental",
           "reason": "agentbench receipt JSON key: fraction of measured trials flagged looping; a benchmark metric, not the agent loop concept",
           "token": "loop_rate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Nullable elapsed nanosecond metric including sampling and bookkeeping; not loop control or kernel-only timing.",
+          "token": "DecodeLoopNS"
         }
       ],
       "id": "loop",
@@ -17537,6 +17560,7 @@
         "BackgroundLoop",
         "ClassLoop",
         "ClassPollingLoop",
+        "DecodeLoopNS",
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
         "LoopView",
