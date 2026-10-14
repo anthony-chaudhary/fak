@@ -41,6 +41,12 @@ func (c Config) ContextSizeConfig() compute.ContextSizeConfig {
 // for f32 while the engine resides q8, refusing a context that fits. The F32 zero
 // value reproduces ContextSizeConfig byte-for-byte.
 func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute.ContextSizeConfig {
+	if c.IsDeepSeekV41() {
+		// V41Prefill/V41Step bypass the generic q8 KV cache and retain F32
+		// host/device rows. BF16 numerical boundaries do not narrow that
+		// storage. Keep the conservative F32 tier until V4.1 realizes q8.
+		prec = compute.KVPrecisionF32
+	}
 	kv := compute.KVConfig{
 		NumLayers:  c.NumLayers,
 		NumKVHeads: c.NumKVHeads,
