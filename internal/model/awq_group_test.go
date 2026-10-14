@@ -9,10 +9,12 @@ package model
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -341,6 +343,69 @@ func TestAWQGroupLoaderRoundTrip(t *testing.T) {
 				t.Fatalf("o=%d i=%d: dequant=%g want=%g", o, i, buf[i], want)
 			}
 		}
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestAWQGroupLoaderRejectsPartialPackedWords(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		tensor     string
+		payloadLen int
+		padHeader  bool
+	}{
+		{name: "valid"},
+		{name: "padded_header", padHeader: true},
+		{name: "qweight_partial_word", tensor: "proj.qweight", payloadLen: 9},
+		{name: "qzeros_partial_word", tensor: "proj.qzeros", payloadLen: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tensors := map[string]tinySTTensor{
+				"proj.qweight": {dtype: "I32", shape: []int{2, 1}, data: u32TestBytes([]uint32{0, 0})},
+				"proj.qzeros":  {dtype: "I32", shape: []int{1, 1}, data: u32TestBytes([]uint32{0})},
+				"proj.scales":  {dtype: "F32", shape: []int{1, 8}, data: f32TestBytes([]float32{1, 1, 1, 1, 1, 1, 1, 1})},
+			}
+			if tc.tensor != "" {
+				tensor := tensors[tc.tensor]
+				tensor.data = append(tensor.data, 0xff)
+				tensors[tc.tensor] = tensor
+			}
+			data := tinySafetensorsBytes(t, tensors)
+			if tc.padHeader {
+				headerLen := int(binary.LittleEndian.Uint64(data[:8]))
+				padded := append([]byte(nil), data[:8+headerLen]...)
+				padded = append(padded, []byte("       ")...)
+				padded = append(padded, data[8+headerLen:]...)
+				binary.LittleEndian.PutUint64(padded[:8], uint64(headerLen+7))
+				data = padded
+			}
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "model.safetensors"), data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"model_type":"llama"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			m, err := LoadAWQ(dir)
+			if tc.tensor == "" {
+				if err != nil {
+					t.Fatalf("valid AWQ rejected: %v", err)
+				}
+				if m.AWQGroupCount() != 1 {
+					t.Fatalf("AWQGroupCount = %d, want 1", m.AWQGroupCount())
+				}
+				return
+			}
+			if err == nil || m != nil {
+				t.Fatalf("partial packed word admitted: model=%v err=%v", m, err)
+			}
+			for _, want := range []string{tc.tensor, fmt.Sprint(tc.payloadLen), "4-byte"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q lacks %q", err, want)
+				}
+			}
+		})
 	}
 }
 

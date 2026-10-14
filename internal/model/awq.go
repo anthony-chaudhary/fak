@@ -375,9 +375,15 @@ func loadAWQGroupSafetensors(sf *safetensorsFile, cfg Config) (*Model, error) {
 		if err != nil {
 			return nil, fmt.Errorf("awq group: read qweight %s: %w", base, err)
 		}
+		if len(qwBytes)%4 != 0 {
+			return nil, fmt.Errorf("awq group: %s.qweight payload has %d bytes, want whole 4-byte packed words", base, len(qwBytes))
+		}
 		qzBytes, err := sf.tensorBytes(zEntry)
 		if err != nil {
 			return nil, fmt.Errorf("awq group: read qzeros %s: %w", base, err)
+		}
+		if len(qzBytes)%4 != 0 {
+			return nil, fmt.Errorf("awq group: %s.qzeros payload has %d bytes, want whole 4-byte packed words", base, len(qzBytes))
 		}
 		scBytes, err := sf.tensorBytes(sEntry)
 		if err != nil {
