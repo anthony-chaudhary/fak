@@ -12,7 +12,14 @@ import "fmt"
 // ExecutionPolicyDeviceOnly: there the accessor returns a refusal that closes
 // the session with a typed error naming the op, so no host compute runs.
 type v41DeviceGatherOps struct {
-	owner                     *Session
+	owner *Session
+	// This optional allowance covers index-key residency and its replacement/
+	// staging peak only; query, weight and score transients remain unchanged.
+	// Zero preserves the ordinary upload path. Set before enabling this owner;
+	// lowering it never grants fresh work over already charged live handles.
+	indexerKeyBudgetBytes     int64
+	indexerKeys               *v41IndexerKeyCache
+	indexerKeyCall            *v41IndexerKeyCall // synchronous score invocation only
 	inverseOutput             v41InverseOutputRoPEFunc
 	indexSelect               v41IndexSelectFunc
 	indexRoPE                 v41IndexRoPEFunc

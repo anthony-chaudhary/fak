@@ -8,7 +8,8 @@
       "definition": "Session.cachedImmutableWeight reuses a session handle or borrows a model-owned immutable device weight and stages it only on a miss.",
       "distinction": "It reuses immutable model weights whose borrowed handles survive Session.Close until Model.CloseWeights; KV cache stores mutable per-token attention state.",
       "distinct_from": [
-        "kv-cache"
+        "kv-cache",
+        "v41-indexer-key-cache"
       ],
       "aliases": [],
       "grounding": "cachedImmutableWeight",

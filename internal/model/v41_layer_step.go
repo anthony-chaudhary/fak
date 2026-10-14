@@ -766,7 +766,14 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	// at seq == 1.
 	var sharedKV, indexKeys [][]float32
 	var sourceIdx []int32
+	var indexView *v41IndexerKeyView
+	if scratch.indexerScore != nil && scratch.gatherOps != nil && scratch.gatherOps.indexerKeyBudgetBytes > 0 {
+		indexView = &v41IndexerKeyView{owner: registry, source: plan.KVSourceLayer}
+	}
 	if v41OwnsCompressedRows(plan) {
+		if indexView != nil {
+			indexView.owner, indexView.source = layerState, l
+		}
 		width := v41CompressorWidth(cfg)
 		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
 		pool, perr := NewV41CompressorPool(plan.Ratio, width)
@@ -827,7 +834,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 	}
 	if indexSourceAt(cfg.DeepSeekV41, l) {
-		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps, indexView)
 		if err != nil {
 			return nil, err
 		}

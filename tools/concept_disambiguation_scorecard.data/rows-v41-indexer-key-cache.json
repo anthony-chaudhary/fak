@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "v41-indexer-key-cache",
+      "canonical": "v41IndexerKeyCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Session-owned resident F32 indexer-key matrices keyed by immutable publication ownership, source and geometry identity, with live handles charged across callback rebinding. Admission requires an explicit positive index-key byte allowance that defaults to zero; unchanged history reuses its exact buffer, append stages only new rows while copying the old device prefix, and invalidated identity reseeds.",
+      "distinction": "Separate from attention KV state and model-owned immutable weight staging. It owns indexer score inputs, charges retained plus replacement/staging peak, and retires replaced storage only after checked score read; append still incurs O(history) device copies. No production default or hardware-performance qualification.",
+      "distinct_from": [
+        "kv-cache",
+        "v41-grouped-cached-immutable-weight"
+      ],
+      "aliases": [
+        "indexerKeys"
+      ],
+      "grounding": "v41IndexerKeyCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

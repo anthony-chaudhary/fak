@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -32,6 +33,298 @@ func (e *V41IndexerScoreOperationError) Error() string {
 func (e *V41IndexerScoreOperationError) Unwrap() error { return e.Cause }
 
 var errV41IndexerScoreResult = errors.New("model: invalid selected V4.1 indexer score result")
+
+// Only the synchronous Step composer supplies this carrier. Its source can be
+// the producer's layer state or a reader's shared registry; arbitrary flat-key
+// callbacks never acquire publication authority.
+type v41IndexerKeyView struct {
+	owner  *V41AttentionState
+	source int
+}
+
+const v41IndexerKeyPrefix = "v41-indexer-keys/"
+
+type v41IndexerKeyEntry struct {
+	view    v41IndexerKeyView
+	forward *v41ForwardState
+	model   *Model
+	epoch   uint64
+	pos     int
+	rows    int
+	width   int
+	anchor  []float32
+	tensor  compute.Tensor
+}
+
+type v41IndexerKeyCache struct {
+	s       *Session
+	ops     compute.V41RowLogBackend
+	entries map[int]v41IndexerKeyEntry
+	// Include orphaned handles from a prior callback binding. Rebinding cannot
+	// make already-live session allocations disappear from the budget ledger.
+	handles map[string]compute.Tensor
+}
+
+type v41IndexerKeyCall struct {
+	cache      *v41IndexerKeyCache
+	layer      int
+	entry      v41IndexerKeyEntry
+	key        string
+	rows       [][]float32
+	old        compute.Tensor
+	copyRows   int
+	replace    bool
+	budget     int64
+	extraBytes int64
+	claimed    bool
+}
+
+func (c *v41IndexerKeyCache) protected(t compute.Tensor) bool {
+	for key, held := range c.handles {
+		live, ok := c.s.halW[key]
+		if ok && live.Buf() == held.Buf() && t.Buf() == held.Buf() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *v41IndexerKeyCache) charged() (int64, bool) {
+	var total int64
+	for key, held := range c.handles {
+		live, ok := c.s.halW[key]
+		if !ok || live.Buf() != held.Buf() {
+			continue
+		}
+		if live.Backend() != c.s.Backend || live.Dtype != compute.F32 || live.Layout != compute.RowMajor || live.Quant != nil || len(live.Shape) != 2 {
+			return 0, false
+		}
+		bytes, ok := checkedMul(int64(live.Shape[0]), int64(live.Shape[1]), 4)
+		if !ok || bytes > math.MaxInt64-total {
+			return 0, false
+		}
+		total += bytes
+	}
+	return total, true
+}
+
+// Publication rows are immutable owned allocations. publish only appends;
+// rollback restores/deletes the prospective end; reset/reseed replace the map.
+// Thus a still-present terminal anchor identifies the complete cached prefix.
+// Keeping the slice alive prevents address reuse. Cursor equality alone is not
+// used as identity, and neither caller-owned flats nor snapshots carry a cache.
+func (o *v41DeviceGatherOps) residentIndexerScore(m *Model, layer, pos int, rows [][]float32, view *v41IndexerKeyView, score v41IndexerScoreFunc) v41IndexerScoreFunc {
+	if o == nil || o.owner == nil || o.indexerKeyBudgetBytes <= 0 || o.indexerKeyCall != nil || score == nil || view == nil || view.owner == nil || len(rows) == 0 {
+		return nil
+	}
+	s := o.owner
+	st := s.v41Forward
+	if s.M != m || s.Backend == nil || s.halClosed || s.halFailure != nil || st == nil || st.callbackOwner != s || st.gatherOps != o || len(st.history) != pos ||
+		layer < 0 || layer >= m.Cfg.NumLayers || view.source < 0 || view.source >= m.Cfg.NumLayers || m.Cfg.MaxPositionEmbeddings <= 0 || pos < 0 || pos >= m.Cfg.MaxPositionEmbeddings {
+		return nil
+	}
+	plan, err := m.v41AttentionPlan(layer)
+	if err != nil {
+		return nil
+	}
+	expected, source := st.attn, plan.KVSourceLayer
+	if v41OwnsCompressedRows(plan) {
+		expected, source = st.layerState(layer), layer
+	}
+	width, end := m.Cfg.IndexHeadDim, len(rows)
+	if view.owner != expected || view.source != source || width <= 0 || view.owner.indexWidth() != width || view.owner.indexPublishedEnd[source] != end ||
+		end > (pos+1)/max(1, plan.kvGroupSize(m.Cfg)) {
+		return nil
+	}
+	// Verify descriptor provenance against the authoritative store. This adds
+	// an O(rows) descriptor check, never a retained payload copy/hash.
+	for i, row := range rows {
+		published, ok := view.owner.indexPublication(v41AttentionPublicationKey{sourceLayer: source, start: i, end: i + 1})
+		if !ok || len(row) != width || len(published) != width || &row[0] != &published[0] {
+			return nil
+		}
+	}
+	ops, ok := s.Backend.(compute.V41RowLogBackend)
+	if !ok || !ops.V41RowLogAvailable() {
+		return nil
+	}
+	c := o.indexerKeys
+	if c == nil {
+		c = &v41IndexerKeyCache{s: s, ops: ops, entries: map[int]v41IndexerKeyEntry{}, handles: map[string]compute.Tensor{}}
+		for key, t := range s.halW {
+			if strings.HasPrefix(key, v41IndexerKeyPrefix) {
+				c.handles[key] = t
+			}
+		}
+	}
+	charged, valid := c.charged()
+	if !valid || charged > o.indexerKeyBudgetBytes {
+		return nil
+	}
+	key := fmt.Sprintf("%s%d", v41IndexerKeyPrefix, layer)
+	old := s.halW[key]
+	entry, hit := c.entries[layer]
+	hit = hit && entry.view == *view && entry.forward == st && entry.model == m && entry.epoch == s.cacheGeometryEpoch && entry.width == width &&
+		entry.pos+1 == pos && entry.rows > 0 && entry.rows <= end && old.Backend() == s.Backend && old.Buf() != nil && old.Buf() == entry.tensor.Buf() && slices.Equal(old.Shape, []int{entry.rows, width})
+	if hit {
+		anchor, present := view.owner.indexPublication(v41AttentionPublicationKey{sourceLayer: source, start: entry.rows - 1, end: entry.rows})
+		hit = present && len(anchor) == width && len(entry.anchor) == width && &anchor[0] == &entry.anchor[0]
+	}
+	copyRows := 0
+	if hit {
+		copyRows = entry.rows
+	}
+	replace := !hit || copyRows != end
+	peak := charged
+	if replace {
+		nextBytes, ok := checkedMul(int64(end), int64(width), 4)
+		stageBytes, stageOK := checkedMul(int64(end-copyRows), int64(width), 4)
+		if !ok || !stageOK || nextBytes > o.indexerKeyBudgetBytes-peak {
+			return nil
+		}
+		peak += nextBytes
+		if stageBytes > o.indexerKeyBudgetBytes-peak {
+			return nil
+		}
+		peak += stageBytes
+	}
+	call := &v41IndexerKeyCall{cache: c, layer: layer, key: key, rows: rows, old: old, copyRows: copyRows, replace: replace, budget: o.indexerKeyBudgetBytes, extraBytes: peak - charged,
+		entry: v41IndexerKeyEntry{view: *view, forward: st, model: m, epoch: s.cacheGeometryEpoch, pos: pos, rows: end, width: width, anchor: rows[end-1]}}
+	o.indexerKeys = c
+	return func(layer int, q, flat, weights []float32, heads, width, count int) ([]float32, error) {
+		if o.indexerKeyCall != nil || s.v41Forward != st || st.gatherOps != o || layer != call.layer {
+			return nil, errV41IndexerScoreResult
+		}
+		// The original bound callback remains authoritative, including its
+		// captured admission error. No extra early backend admission is run.
+		// This carrier exists only while that owned synchronous call executes.
+		o.indexerKeyCall = call
+		defer func() { o.indexerKeyCall = nil }()
+		values, err := score(layer, q, flat, weights, heads, width, count)
+		if err == nil && !call.claimed {
+			return nil, errV41IndexerScoreResult
+		}
+		return values, err
+	}
+}
+
+func (p *v41IndexerKeyCall) validate(q, flat, weights []float32, heads, width, rows int) error {
+	if p.claimed {
+		return errV41IndexerScoreResult
+	}
+	p.claimed = true
+	count, ok := checkedMulInt(rows, width)
+	if !ok || flat != nil || width != p.entry.width || rows != len(p.rows) {
+		return errV41IndexerScoreResult
+	}
+	if err := v41ValidateIndexerScoreGeometry(len(q), count, len(weights), heads, width, rows); err != nil {
+		return err
+	}
+	check := func(name string, values []float32, offset int) error {
+		for i, value := range values {
+			if !finite32(value) {
+				return fmt.Errorf("%w: indexer score %s element %d is non-finite", ErrV41ForwardStage, name, offset+i)
+			}
+		}
+		return nil
+	}
+	if err := check("query", q, 0); err != nil {
+		return err
+	}
+	for i, row := range p.rows {
+		if len(row) != width {
+			return errV41IndexerScoreResult
+		}
+		if err := check("keys", row, i*width); err != nil {
+			return err
+		}
+	}
+	return check("weights", weights, 0)
+}
+
+func (p *v41IndexerKeyCall) acquire(query compute.Tensor) (compute.Tensor, error) {
+	c, s := p.cache, p.cache.s
+	charged, valid := c.charged()
+	if !valid || charged > p.budget || p.extraBytes > p.budget-charged || s.v41Forward != p.entry.forward || s.M != p.entry.model || s.cacheGeometryEpoch != p.entry.epoch || len(s.v41Forward.history) != p.entry.pos {
+		return compute.Tensor{}, errV41IndexerScoreResult
+	}
+	if s.halW == nil {
+		s.halW = make(map[string]compute.Tensor)
+	}
+	if !p.replace {
+		if live, present := s.halW[p.key]; !present || live.Buf() != p.old.Buf() {
+			return compute.Tensor{}, errV41IndexerScoreResult
+		}
+		p.entry.tensor = p.old
+		return p.old, nil
+	}
+	if _, present := s.halW[p.key+"/next"]; present {
+		return compute.Tensor{}, errV41IndexerScoreResult
+	}
+	if _, present := s.halW[p.key+"/staging"]; present {
+		return compute.Tensor{}, errV41IndexerScoreResult
+	}
+	// All cache-owned allocations, including staging, enter halW immediately.
+	// Failure cleanup then flushes the owning session before retiring them.
+	adopt := func(key string, t compute.Tensor, rows int) bool {
+		if t.Buf() == nil || t.Backend() != s.Backend || t.Buf() == query.Buf() || c.protected(t) {
+			return false
+		}
+		s.halW[key], c.handles[key] = t, t
+		return t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && slices.Equal(t.Shape, []int{rows, p.entry.width})
+	}
+	next, err := c.ops.V41RowLogAlloc(p.entry.rows, p.entry.width)
+	owned := adopt(p.key+"/next", next, p.entry.rows)
+	if err != nil {
+		return compute.Tensor{}, err
+	}
+	if !owned {
+		return compute.Tensor{}, errV41IndexerScoreResult
+	}
+	if p.copyRows > 0 {
+		if err := c.ops.V41RowLogCopy(next, 0, p.old, 0, p.copyRows); err != nil {
+			return compute.Tensor{}, err
+		}
+	}
+	n := p.entry.rows - p.copyRows
+	var values []float32
+	if n == 1 {
+		values = p.rows[p.copyRows]
+	} else {
+		values = make([]float32, 0, n*p.entry.width)
+		for _, row := range p.rows[p.copyRows:] {
+			values = append(values, row...)
+		}
+	}
+	staged := s.uploadHostF32([]int{n, p.entry.width}, values, compute.MemoryActivation, "V4.1 indexer score key append")
+	if !adopt(p.key+"/staging", staged, n) {
+		return compute.Tensor{}, errV41IndexerScoreResult
+	}
+	if err := c.ops.V41RowLogCopy(next, p.copyRows, staged, 0, n); err != nil {
+		return compute.Tensor{}, err
+	}
+	p.entry.tensor = next
+	return next, nil
+}
+
+func (p *v41IndexerKeyCall) commit() {
+	c, s := p.cache, p.cache.s
+	retire := func(key string) {
+		if t, present := s.halW[key]; present {
+			delete(s.halW, key)
+			delete(c.handles, key)
+			s.Backend.Free(t)
+		}
+	}
+	if p.replace {
+		retire(p.key + "/staging")
+		retire(p.key)
+		delete(s.halW, p.key+"/next")
+		delete(c.handles, p.key+"/next")
+		s.halW[p.key], c.handles[p.key] = p.entry.tensor, p.entry.tensor
+	}
+	c.entries[p.layer] = p.entry
+}
 
 func v41IndexerScoreOperationErr(layer int, cause error) error {
 	return &V41IndexerScoreOperationError{Layer: layer, Cause: v41StageErr(v41StageIndexer, layer, cause)}
@@ -127,17 +420,8 @@ func v41IndexRowsSelected(layer int, q, keys, weights []float32, heads, headDim,
 // Check the original host operands before any upload, even for an empty row
 // set. The native ABI uses signed 32-bit element indices and host byte counts.
 func v41ValidateIndexerScoreInputs(q, keys, weights []float32, heads, headDim, rows int) error {
-	qSize, qOK := checkedMulInt(heads, headDim)
-	keySize, keyOK := checkedMulInt(rows, headDim)
-	_, qBytesOK := checkedMulInt(qSize, 4)
-	_, keyBytesOK := checkedMulInt(keySize, 4)
-	_, weightBytesOK := checkedMulInt(heads, 4)
-	_, outBytesOK := checkedMulInt(rows, 4)
-	if heads <= 0 || headDim <= 0 || rows < 0 || heads > math.MaxInt32 || headDim > math.MaxInt32 || rows > math.MaxInt32 ||
-		!qOK || !keyOK || qSize > math.MaxInt32 || keySize > math.MaxInt32 ||
-		!qBytesOK || !keyBytesOK || !weightBytesOK || !outBytesOK ||
-		len(q) != qSize || len(keys) != keySize || len(weights) != heads {
-		return fmt.Errorf("%w: invalid indexer score geometry heads=%d dim=%d rows=%d", ErrV41ForwardStage, heads, headDim, rows)
+	if err := v41ValidateIndexerScoreGeometry(len(q), len(keys), len(weights), heads, headDim, rows); err != nil {
+		return err
 	}
 	for _, operand := range []struct {
 		name   string
@@ -148,6 +432,22 @@ func v41ValidateIndexerScoreInputs(q, keys, weights []float32, heads, headDim, r
 				return fmt.Errorf("%w: indexer score %s element %d is non-finite", ErrV41ForwardStage, operand.name, i)
 			}
 		}
+	}
+	return nil
+}
+
+func v41ValidateIndexerScoreGeometry(qLen, keyLen, weightLen, heads, headDim, rows int) error {
+	qSize, qOK := checkedMulInt(heads, headDim)
+	keySize, keyOK := checkedMulInt(rows, headDim)
+	_, qBytesOK := checkedMulInt(qSize, 4)
+	_, keyBytesOK := checkedMulInt(keySize, 4)
+	_, weightBytesOK := checkedMulInt(heads, 4)
+	_, outBytesOK := checkedMulInt(rows, 4)
+	if heads <= 0 || headDim <= 0 || rows < 0 || heads > math.MaxInt32 || headDim > math.MaxInt32 || rows > math.MaxInt32 ||
+		!qOK || !keyOK || qSize > math.MaxInt32 || keySize > math.MaxInt32 ||
+		!qBytesOK || !keyBytesOK || !weightBytesOK || !outBytesOK ||
+		qLen != qSize || keyLen != keySize || weightLen != heads {
+		return fmt.Errorf("%w: invalid indexer score geometry heads=%d dim=%d rows=%d", ErrV41ForwardStage, heads, headDim, rows)
 	}
 	return nil
 }
@@ -195,6 +495,10 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 	}
 	return func(layer int, q, keys, weights []float32, heads, headDim, rows int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
+		var resident *v41IndexerKeyCall
+		if st := s.v41Forward; st != nil && st.gatherOps != nil && st.gatherOps.owner == s {
+			resident = st.gatherOps.indexerKeyCall
+		}
 		stage := "payload"
 		closeFailure := func(err error) error {
 			closed := &BackendForwardOperationError{
@@ -235,7 +539,11 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 				panic(r)
 			}
 		}()
-		if err := v41ValidateIndexerScoreInputs(q, keys, weights, heads, headDim, rows); err != nil {
+		validate := func() error { return v41ValidateIndexerScoreInputs(q, keys, weights, heads, headDim, rows) }
+		if resident != nil {
+			validate = func() error { return resident.validate(q, keys, weights, heads, headDim, rows) }
+		}
+		if err := validate(); err != nil {
 			return nil, closeFailure(err)
 		}
 		stage = "admission"
@@ -276,6 +584,9 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 				if x.Buf() == nil || x.Backend() != s.Backend {
 					return false
 				}
+				if resident != nil && resident.cache.protected(x) {
+					return false
+				}
 				for _, previous := range owned {
 					if previous.Buf() == x.Buf() {
 						return false
@@ -299,7 +610,13 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 			if err != nil {
 				return nil, err
 			}
-			kt, err := upload("keys", []int{rows, headDim}, keys)
+			var kt compute.Tensor
+			if resident == nil {
+				kt, err = upload("keys", []int{rows, headDim}, keys)
+			} else {
+				stage = "resident keys"
+				kt, err = resident.acquire(qt)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -325,7 +642,13 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 			}
 			// Finite inputs may produce +/-Inf or NaN. Do not clamp, rescale,
 			// round, or reject here: the unchanged selector owns that policy.
-			return append([]float32(nil), values...), nil
+			result = append([]float32(nil), values...)
+			if resident != nil {
+				// Checked Read is the completion boundary for both the score
+				// and every prefix/staging copy feeding its exact-sized input.
+				resident.commit()
+			}
+			return result, nil
 		}
 		result, cause = run()
 		if cause != nil {
