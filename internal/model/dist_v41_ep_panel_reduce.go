@@ -88,7 +88,9 @@ func v41EPPanelPlan(owners TPPlan, picks [][]routePick, width int) (v41EPPanelLa
 	// borrowed owner rows P, decoded requests A (including the local copy),
 	// in-flight encoded read Qmax, private exact-capacity unpack slab P,
 	// response F, encoded response F, current backend result H. Reserve an
-	// additional Gmax + F, and all slice/header/plan metadata below. Follower:
+	// additional Gmax + F, and all slice/header/plan metadata below. The extra
+	// F also covers simultaneous cached success and small failure encodings
+	// during a response-write failure. Follower:
 	// owner rows P, request + encoding <= 3*Qmax, reply + decoding <= 3*F.
 	// Borrowed normalized inputs and backend scratch are excluded. Earlier
 	// completed windows retain caller-owned results plus their bounded wire
@@ -285,11 +287,23 @@ func (c *v41ExpertParallelCollective) reducePanelRoot(part []float32, plan v41EP
 		reply = make([]float32, v41EPPanelHeaderWords)
 		v41EPPanelHeader(reply, digest, len(r.picks), true)
 	}
+	// Encode lazily so a zero-peer root retains its original behavior. All
+	// writes are synchronous; peers share immutable bytes, never the F32 slab.
+	var payload []byte
 	for rank := 1; rank < c.g.Size(); rank++ {
-		if err := writeV41EPPanelVector(c.g.workers[rank], reply); err != nil && cause == nil {
+		var err error
+		if payload == nil {
+			payload, err = encodeV41EPPanelVector(reply)
+		}
+		if err == nil {
+			err = writeFrame(c.g.workers[rank], payload)
+		}
+		if err != nil && cause == nil {
 			cause = fmt.Errorf("owner %d panel response: %w", rank, err)
 			// Preserve the existing partial-write asymmetry. No later peer
 			// receives success, but an earlier completed response is irrevocable.
+			// Discard the success encoding before visiting any later peer.
+			payload = nil
 			reply = make([]float32, v41EPPanelHeaderWords)
 			v41EPPanelHeader(reply, digest, len(r.picks), true)
 		}
@@ -405,8 +419,16 @@ func (r v41EPPanelReduction) response(reply []float32, digest [32]byte) ([][]flo
 // These typed frame helpers never use append-grown encoding buffers. Both the
 // trusted bound and untrusted advertised span are checked before allocation.
 func writeV41EPPanelVector(conn net.Conn, row []float32) error {
+	payload, err := encodeV41EPPanelVector(row)
+	if err != nil {
+		return err
+	}
+	return writeFrame(conn, payload)
+}
+
+func encodeV41EPPanelVector(row []float32) ([]byte, error) {
 	if len(row) < v41EPPanelHeaderWords || len(row) > v41EPMaxWords {
-		return fmt.Errorf("invalid panel write bound")
+		return nil, fmt.Errorf("invalid panel write bound")
 	}
 	payload := make([]byte, 5+4*len(row))
 	payload[0] = byte(opV41EPPanelReduce)
@@ -414,7 +436,7 @@ func writeV41EPPanelVector(conn net.Conn, row []float32) error {
 	for i, value := range row {
 		binary.LittleEndian.PutUint32(payload[5+4*i:], math.Float32bits(value))
 	}
-	return writeFrame(conn, payload)
+	return payload, nil
 }
 
 func readV41EPPanelVector(conn net.Conn, words int, exact bool) ([]float32, error) {
