@@ -141,7 +141,7 @@ func (s *Session) closeOwned(scope *backendExecutionScope) {
 		return
 	}
 	s.closeOnce.Do(func() {
-		DetachBranchCache(s)
+		retireBranchCache(s)
 		if stats := s.q4kMLPOutputSlabStats; stats.Calls != 0 {
 			fmt.Fprintf(os.Stderr, "{\"schema\":%q,\"engine\":\"fak-native\",\"backend\":\"metal\",\"quant\":\"q4_k\",\"calls\":%d,\"allocations\":%d,\"reuses\":%d,\"high_water_bytes\":%d}\n",
 				q4kMLPOutputSlabReceiptSchema, stats.Calls, stats.Allocations, stats.Reuses, stats.HighWaterBytes)

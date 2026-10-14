@@ -1387,6 +1387,21 @@
           "category": "incidental",
           "reason": "Summary field exposing the positioned DeadlineCacheCreditStats compatibility schema, not a separate cache mechanism.",
           "token": "DeadlineCacheCredit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing Session registry attachment and retirement synchronization mutex; it introduces no cache abstraction.",
+          "token": "branchCacheMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing Session sticky attachment-refusal latch set before fallible resource teardown; it is not proof that resource Close completed and introduces no cache abstraction.",
+          "token": "branchCacheRetired"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper that sets the existing Session attachment-retirement latch and removes only that Session's registry association under the mutex; it neither frees nor clears the caller-owned cache and leaves no registry tombstone.",
+          "token": "retireBranchCache"
         }
       ],
       "exclude": [
@@ -1492,6 +1507,8 @@
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
         "boundedSelfUpdateCandidateCacheReason",
+        "branchCacheMu",
+        "branchCacheRetired",
         "builtinCacheLevers",
         "cacheActivity",
         "cacheAmbiguous",
@@ -1687,6 +1704,7 @@
         "replaceMicroCacheWitness",
         "requireexplicitcache",
         "resetClaudeKeychainCache",
+        "retireBranchCache",
         "reuseRatio",
         "runCacheValueGateScore",
         "runCachevalueQwen38Campaign",
