@@ -6875,6 +6875,11 @@
           "category": "incidental",
           "reason": "Equality-only diagnostic reporting unavailable or supplied-values-match for the positioned build-session declaration; no execution observation or additional session abstraction.",
           "token": "SessionComparison"
+        },
+        {
+          "category": "incidental",
+          "reason": "Adapter returning the positioned V41ExpertParallelSessionResult for the existing authenticated EP construction path; it retains borrowed group/backend ownership and unavailable opaque-cleanup evidence rather than adding a second Session abstraction.",
+          "token": "loadV41ExpertParallelSessionWithResult"
         }
       ],
       "exclude": [
@@ -7122,6 +7127,7 @@
         "live_count",
         "live_sessions",
         "loadSchedulerRecords",
+        "loadV41ExpertParallelSessionWithResult",
         "logicalSession",
         "loopStateForSession",
         "matchedSessions",

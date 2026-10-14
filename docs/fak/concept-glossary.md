@@ -1252,3 +1252,10 @@ Pure value descriptor fixing the supported owner-build profile, helper-digest li
 Supplied invocation, receipt digest, finished/joined flags, exit code, and output identity in an optional owner-build supplement declaration; the pure checker requires exact supplied counterparts and a finished, joined, zero-exit declaration before reporting value agreement.
 
 **Distinct from:** A build-invocation declaration, not a live served Session or scheduler model-session origin. Parsing/equality do not observe a process, authenticate an issuer, prove historical build causality or binary linkage, or grant native admission.
+
+
+### V4.1 EP session construction ownership result
+
+Reports one authenticated EP loader invocation's returned Session/coordinator, error, separately flagged panic payload, ownership transfer, and construction-owned retirement observation.
+
+**Distinct from:** A construction outcome, not a runtime Session or scheduler fresh/restored origin. Successful transfer leaves factory retirement unavailable/not applicable and ownership with the caller. Unsuccessful opaque constructors leave hidden cleanup unknown unless an observed outer-release failure proves incomplete retirement. The additive result API returns this evidence; the compatibility wrapper rethrows the original primary panic. Group/backend remain borrowed; no field proves device execution.

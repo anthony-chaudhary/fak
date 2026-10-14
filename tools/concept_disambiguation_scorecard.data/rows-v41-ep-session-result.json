@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "v41-ep-session-result",
+      "canonical": "V4.1 EP session construction ownership result",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Reports one authenticated EP loader invocation's returned Session/coordinator, error, separately flagged panic payload, ownership transfer, and construction-owned retirement observation.",
+      "distinction": "A construction outcome, not a runtime Session or scheduler fresh/restored origin. Successful transfer leaves factory retirement unavailable/not applicable and ownership with the caller. Unsuccessful opaque constructors leave hidden cleanup unknown unless an observed outer-release failure proves incomplete retirement. The additive result API returns this evidence; the compatibility wrapper rethrows the original primary panic. Group/backend remain borrowed; no field proves device execution.",
+      "distinct_from": [
+        "session",
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "V41ExpertParallelSessionResult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
