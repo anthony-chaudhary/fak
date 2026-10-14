@@ -10,7 +10,8 @@
       "distinct_from": [
         "x2-session-runtime-sessiontype",
         "nativesessionrestored",
-        "v41-ep-owner-build-session"
+        "v41-ep-owner-build-session",
+        "v41-ep-session-result"
       ],
       "aliases": [],
       "grounding": "nativesessionlifecycle",
