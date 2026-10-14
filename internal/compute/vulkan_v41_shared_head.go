@@ -35,7 +35,7 @@ func (v *vulkanBackend) v41ScalarHeadDeviceLocked() bool {
 
 func (v *vulkanBackend) v41ScalarHeadAvailableLocked(out, in, rows int) bool {
 	if !v.v41ScalarHeadDeviceLocked() || C.fvk_have_q6k_matmul() == 0 || C.fvk_submission_status() != 0 ||
-		C.fvk_batch_active() || C.fvk_v41_step_batch_active() != 0 {
+		bool(C.fvk_batch_active()) || C.fvk_v41_step_batch_active() != 0 {
 		return false
 	}
 	// Keep the existing Q6 input validator's conservative panel-grid bound,
