@@ -25,7 +25,7 @@ func TestV41ImmutablePrefixFork(t *testing.T) {
 		bytes := cached.ResidentBytes()
 		key := v41AttentionPublicationKey{sourceLayer: 0, start: 0, end: 1}
 		row := cached.v41.attn.kvPublications[key]
-		if len(row) != 512 || len(cached.v41.attn.indexPublications[key]) != 128 {
+		if len(row) != m.Cfg.HeadDim || len(cached.v41.attn.indexPublications[key]) != m.Cfg.IndexHeadDim {
 			t.Fatal("fixture lacks the real compressed publication widths")
 		}
 		cached.PrepareForCache()

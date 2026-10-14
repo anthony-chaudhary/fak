@@ -227,6 +227,7 @@ func TestV41CompleteAdmissionCausal(t *testing.T) {
 		if len(serial.headOutputs) != 3 || serial.kvCreates.Load() != 1 || serial.kvCloses.Load() != 1 {
 			t.Fatalf("serial operations: heads=%d created=%d closed=%d", len(serial.headOutputs), serial.kvCreates.Load(), serial.kvCloses.Load())
 		}
+		const requestCount = 2
 		for _, available := range []bool{true, false} {
 			be := &v41CompleteBackend{Backend: compute.Default(), available: available}
 			p := v41CompletePlanner(t, m, be, true)
@@ -239,8 +240,8 @@ func TestV41CompleteAdmissionCausal(t *testing.T) {
 				err   error
 				emits int
 			}
-			done := make(chan answer, 2)
-			for i := 0; i < 2; i++ {
+			done := make(chan answer, requestCount)
+			for i := 0; i < requestCount; i++ {
 				go func() {
 					n := 0
 					c, err := p.Complete(context.Background(), messages, nil, WithRawPrompt(), func(sp *SampleParams) {
@@ -266,7 +267,7 @@ func TestV41CompleteAdmissionCausal(t *testing.T) {
 				}
 				close(release)
 			}
-			for i := 0; i < 2; i++ {
+			for i := 0; i < requestCount; i++ {
 				select {
 				case got := <-done:
 					if got.err != nil || got.c == nil {
@@ -291,7 +292,7 @@ func TestV41CompleteAdmissionCausal(t *testing.T) {
 				t.Fatalf("admissions=%d KV=%d/%d", be.admissions.Load(), be.kvCreates.Load(), be.kvCloses.Load())
 			}
 			if available {
-				if be.headRows != 4 || len(be.headOutputs) != 6 {
+				if be.headRows != 4 || len(be.headOutputs) != requestCount*len(serial.headOutputs) {
 					t.Fatalf("completed shared rows=%d heads=%d", be.headRows, len(be.headOutputs))
 				}
 				for i, row := range be.headOutputs {

@@ -216,7 +216,8 @@ func TestV41ExpertParallelDeviceOwner(t *testing.T) {
 	t.Run("session-tcp", func(t *testing.T) {
 		full := v41IncrementalExpertFixture(t, true, false)
 		bias := make([]float32, full.Cfg.NumExperts)
-		for i, expert := range []int{1, 2, 129, 130, 257, 258} {
+		selectedExperts := []int{1, 2, 129, 130, 257, 258}
+		for i, expert := range selectedExperts {
 			bias[expert] = float32(100 + i)
 		}
 		v41WriteTensorF32(t, full, layerName(0, "ffn.gate.e_score_correction_bias"), bias)
@@ -256,11 +257,18 @@ func TestV41ExpertParallelDeviceOwner(t *testing.T) {
 				}
 				_ = m.CloseWeights()
 			}()
+			ownedRouted := make(map[int]bool)
+			band := owners.Shards[rank]
+			for _, expert := range selectedExperts {
+				if expert >= band.Lo && expert < band.Hi {
+					ownedRouted[expert] = true
+				}
+			}
 			check := func() error {
 				if b.ownershipError != nil {
 					return b.ownershipError
 				}
-				if len(b.expertCalls) != 6 || b.calls != 6 {
+				if len(b.expertCalls) != 3*len(ownedRouted) || b.calls != 6 {
 					return fmt.Errorf("rank %d projection identities=%d routed calls=%d, want 6/6", rank, len(b.expertCalls), b.calls)
 				}
 				for name, count := range b.expertCalls {

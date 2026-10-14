@@ -45,7 +45,7 @@ func TestV41RecaptureImmutablePrefix(t *testing.T) {
 	seed := capture(source)
 	first := v41AttentionPublicationKey{sourceLayer: 0, start: 0, end: 1}
 	second := v41AttentionPublicationKey{sourceLayer: 0, start: 1, end: 2}
-	if len(seed.v41.attn.kvPublications[first]) != 512 || len(seed.v41.attn.indexPublications[first]) != 128 ||
+	if len(seed.v41.attn.kvPublications[first]) != m.Cfg.HeadDim || len(seed.v41.attn.indexPublications[first]) != m.Cfg.IndexHeadDim ||
 		&seed.v41.attn.kvPublications[first][0] == &source.v41Forward.attn.kvPublications[first][0] ||
 		&seed.v41.attn.indexPublications[first][0] == &source.v41Forward.attn.indexPublications[first][0] {
 		t.Fatal("ordinary capture lacks real publications or shares writable rows")
@@ -90,8 +90,8 @@ func TestV41RecaptureImmutablePrefix(t *testing.T) {
 	}
 	layer, original := recaptured.v41.layers[0], parent.v41Forward.layers[0]
 	if len(layer.partialInputs) != 1 || len(layer.partialPositions) != 1 ||
-		len(recaptured.v41.attn.kvPublications[second]) != 512 ||
-		len(recaptured.v41.attn.indexPublications[second]) != 128 ||
+		len(recaptured.v41.attn.kvPublications[second]) != m.Cfg.HeadDim ||
+		len(recaptured.v41.attn.indexPublications[second]) != m.Cfg.IndexHeadDim ||
 		&layer.window[0][0] == &original.window[0][0] ||
 		&layer.partialInputs[0][0] == &original.partialInputs[0][0] ||
 		&layer.partialPositions[0] == &original.partialPositions[0] {
