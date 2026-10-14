@@ -1905,6 +1905,11 @@
           "category": "incidental",
           "reason": "Function-local variable retaining the existing admitted attention owner; introduces no new type, capability or ownership domain.",
           "token": "coldAttentionOwner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private preparation helper for the existing shared-attention callback; it reuses caller-owned source-row descriptor capacity while preserving selection semantics and independently owned Q/KV/sink and output storage, without defining a distinct attention concept.",
+          "token": "v41PrepareSharedAttentionWithRows"
         }
       ],
       "exclude": [
@@ -1944,7 +1949,8 @@
         "qwenfullattentionlayers",
         "seenAttention",
         "tattn",
-        "v41NoteAttentionContraction"
+        "v41NoteAttentionContraction",
+        "v41PrepareSharedAttentionWithRows"
       ],
       "known_tokens": [],
       "min_files": 3,

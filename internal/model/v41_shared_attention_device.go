@@ -118,7 +118,13 @@ func v41SharedAttentionGeometry(heads, headDim, rows int) (int, int, error) {
 }
 
 func v41PrepareSharedAttention(request v41SharedAttentionRequest) (v41SharedAttentionPayload, error) {
-	p := v41SharedAttentionPayload{mode: request.mode}
+	return v41PrepareSharedAttentionWithRows(request, nil)
+}
+
+// Only selection descriptors borrow scratch. The caller must finish consuming
+// the payload, including fault attribution, before reusing these descriptors.
+func v41PrepareSharedAttentionWithRows(request v41SharedAttentionRequest, sourceRows []int) (v41SharedAttentionPayload, error) {
+	p := v41SharedAttentionPayload{mode: request.mode, sourceRows: sourceRows[:0]}
 	bad := func(format string, args ...any) (v41SharedAttentionPayload, error) {
 		return p, fmt.Errorf("%w: shared attention %s", ErrV41ForwardStage, fmt.Sprintf(format, args...))
 	}
@@ -334,8 +340,17 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 		return nil
 	}
 	resident := s.newV41ResidentKV()
+	// Session ownership remains serial. Lease this metadata through cleanup and
+	// fault attribution; reentrant calls get independent descriptors instead.
+	var sourceRows []int
+	selectionInUse := false
 	return func(layer int, request v41SharedAttentionRequest) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
+		reuseSelection := !selectionInUse
+		if reuseSelection {
+			selectionInUse = true
+			defer func() { selectionInUse = false }()
+		}
 		if resident == nil {
 			request.resident, request.sinkKey = nil, ""
 		}
@@ -374,7 +389,14 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 				panic(r)
 			}
 		}()
-		p, err := v41PrepareSharedAttention(request)
+		var p v41SharedAttentionPayload
+		var err error
+		if reuseSelection {
+			p, err = v41PrepareSharedAttentionWithRows(request, sourceRows)
+			sourceRows = p.sourceRows[:0]
+		} else {
+			p, err = v41PrepareSharedAttention(request)
+		}
 		if err != nil {
 			return nil, closeFailure(err)
 		}
