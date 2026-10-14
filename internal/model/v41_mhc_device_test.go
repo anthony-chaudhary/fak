@@ -348,12 +348,12 @@ func TestV41ForwardStateBindsExpertSumAndRouterSeams(t *testing.T) {
 	if device.routedSum == nil || device.sharedAdd == nil {
 		t.Fatal("device-memory session did not bind the routed-sum and shared-add seams")
 	}
-	if device.routerTopK != nil {
+	if device.routerTopK() != nil {
 		t.Fatal("router top-k bound on a backend without the V4.1 router primitive")
 	}
 	host := v41FullStepPatchedNorms(t).NewSession()
 	defer host.Close()
-	if st := host.v41State(); st.routedSum != nil || st.sharedAdd != nil || st.routerTopK != nil {
+	if st := host.v41State(); st.routedSum != nil || st.sharedAdd != nil || st.routerTopK() != nil {
 		t.Fatal("host session bound a device expert seam")
 	}
 }

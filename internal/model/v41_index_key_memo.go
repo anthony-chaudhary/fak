@@ -38,7 +38,7 @@ func (m *Model) v41IndexKeysReusing(l int, rows [][]float32, st *v41ForwardState
 		pending = append(pending, row)
 		fresh = append(fresh, g)
 	}
-	projected, err := m.v41IndexKeysPublished(l, pending, scratch.denseProjection, scratch.indexKeyNorm, scratch.gatherOps.bf16PublishFunc())
+	projected, err := m.v41IndexKeysPublished(l, pending, scratch.denseProjection(), scratch.indexKeyNorm, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return nil, nil, nil, err
 	}

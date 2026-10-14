@@ -635,7 +635,7 @@ func TestV41FullRouteZeroScoresLiveOwners(t *testing.T) {
 			defer s.Close()
 			state := s.v41State()
 			gateCalls, downCalls := 0, 0
-			state.denseProjection = func(layer int, leaf string, input []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+			state.setDenseProjection(func(layer int, leaf string, input []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 				if leaf != "ffn.gate.weight" {
 					return nil, v41ProjectionDeclined, nil
 				}
@@ -645,7 +645,7 @@ func TestV41FullRouteZeroScoresLiveOwners(t *testing.T) {
 					logits[i] = -120
 				}
 				return logits, v41ProjectionHandled, nil
-			}
+			})
 			state.expertGateUp = func(layer int, stem string, input []float32) ([]float32, v41ExpertGateUpOutcome, error) {
 				fused := make([]float32, m.Cfg.MoEIntermediateSize)
 				for i := range fused {

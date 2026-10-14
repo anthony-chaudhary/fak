@@ -129,7 +129,7 @@ func TestV41ClampedDeviceSwiGLUHalo(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.v41State().denseProjection = nil
+		s.v41State().setDenseProjection(nil)
 		s.v41State().groupedOutput = nil
 		// This physical witness isolates routed-expert activation transfers.
 		s.v41State().sharedActivation = nil
@@ -141,7 +141,8 @@ func TestV41ClampedDeviceSwiGLUHalo(t *testing.T) {
 		s.v41State().finalNorm = nil
 		// The router, routed-sum and shared-add seams read back outside this
 		// routed-activation budget (one HiddenSize-F32 read per token).
-		s.v41State().routerTopK, s.v41State().routedSum, s.v41State().sharedAdd = nil, nil, nil
+		s.v41State().setRouterTopK(nil)
+		s.v41State().routedSum, s.v41State().sharedAdd = nil, nil
 		defer s.Close()
 		if len(s.Prefill([]int{1, 2, 3})) == 0 || !s.v41IncrementalEligible() {
 			t.Fatal("physical session did not seed incremental state")

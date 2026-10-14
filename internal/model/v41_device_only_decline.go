@@ -21,7 +21,7 @@ func (s *Session) v41DeviceOnlyDeclined(layer int, op string) error {
 }
 
 func (s *Session) v41BindDeviceOnlyDeclineRefusals(st *v41ForwardState) {
-	st.denseProjection = v41DeviceOnlyDense(s, st.denseProjection)
+	st.setDenseProjection(v41DeviceOnlyDense(s, st.denseProjection()))
 	st.groupedOutput = v41DeviceOnlyGrouped(s, st.groupedOutput)
 	st.engramProjection = v41DeviceOnlyEngram(s, st.engramProjection)
 	st.mhcProjection = v41DeviceOnlyMHCProjection(s, st.mhcProjection)

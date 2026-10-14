@@ -42,10 +42,10 @@ func TestV41StepCohortIsolation(t *testing.T) {
 				t.Fatal("prefix produced no logits")
 			}
 			snapshot := captureV41ForwardSnapshot(source.v41State())
-			source.v41State().denseProjection = func(int, string, []float32, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
+			source.v41State().setDenseProjection(func(int, string, []float32, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
 				t.Fatal("cohort called a prefix source callback")
 				return nil, v41ProjectionDeclined, nil
-			}
+			})
 			s := v41DenseTestSession(t, m, f.backend)
 			ref := v41DenseTestSession(t, m, f.backend)
 			s.v41Forward, ref.v41Forward = snapshot.clone().restore(), snapshot.clone().restore()
@@ -77,8 +77,8 @@ func TestV41StepCohortIsolation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			project := input.session.v41State().denseProjection
-			input.session.v41State().denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+			project := input.session.v41State().denseProjection()
+			input.session.v41State().setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 				if owner.TryLock() {
 					owner.Unlock()
 					t.Fatal("operation ran without the cohort device owner")
@@ -93,7 +93,7 @@ func TestV41StepCohortIsolation(t *testing.T) {
 					t.Fatal("head can commit before the layer window flush")
 				}
 				return project(layer, leaf, panel, out, in, rows)
-			}
+			})
 		}
 		f.backend.reset()
 		got, err := m.forwardV41StepCohort(&owner, f.lanes)
@@ -146,13 +146,13 @@ func TestV41StepCohortIsolation(t *testing.T) {
 		f.lanes[1].ctx = ctx
 		st := f.lanes[1].session.v41State()
 		before, registry := captureV41ForwardSnapshot(st), st.attn
-		project := st.denseProjection
-		st.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+		project := st.denseProjection()
+		st.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 			if layer == 0 && leaf == "attn.wq_a.weight" {
 				cancel()
 			}
 			return project(layer, leaf, panel, out, in, rows)
-		}
+		})
 		got, err := m.forwardV41StepCohort(&owner, f.lanes)
 		if err != nil || !got[0].stats.Committed || !errors.Is(got[1].err, context.Canceled) || got[1].stats.Committed || got[1].stats.LayersRolledBack != 1 || got[1].logits != nil {
 			t.Fatalf("cancellation results=%+v err=%v", got, err)
@@ -195,13 +195,13 @@ func TestV41StepCohortIsolation(t *testing.T) {
 				primary := &V41ProjectionOperationError{Layer: 1, Leaf: "attn.wq_a.weight", Cause: errors.New("selected layer panic")}
 				want = primary
 				st := f.lanes[1].session.v41State()
-				project := st.denseProjection
-				st.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+				project := st.denseProjection()
+				st.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 					if layer == 1 && leaf == "attn.wq_a.weight" {
 						panic(primary)
 					}
 					return project(layer, leaf, panel, out, in, rows)
-				}
+				})
 			}
 			got := recoverError(func() { _, _ = m.forwardV41StepCohort(&owner, f.lanes) })
 			if got != want || f.backend.beginCalls != 1 || f.backend.ends != 1 || f.backend.active {

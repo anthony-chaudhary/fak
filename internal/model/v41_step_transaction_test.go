@@ -24,10 +24,10 @@ func TestV41StepTransactionInterleavedSessions(t *testing.T) {
 		}
 		// A restored session must rebind its own callbacks, never keep those
 		// of the prefix source. Make accidental source invocation fatal.
-		source.v41State().denseProjection = func(int, string, []float32, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
+		source.v41State().setDenseProjection(func(int, string, []float32, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
 			t.Fatal("restored transaction called prefix source callback")
 			return nil, v41ProjectionDeclined, nil
-		}
+		})
 		snapshot := captureV41ForwardSnapshot(source.v41State())
 		sessions[lane], serial[lane] = m.NewSession(), m.NewSession()
 		t.Cleanup(sessions[lane].Close)
@@ -38,15 +38,15 @@ func TestV41StepTransactionInterleavedSessions(t *testing.T) {
 		if states[lane].callbackOwner != sessions[lane] || refs[lane].callbackOwner != serial[lane] {
 			t.Fatal("restored callbacks do not belong to destination sessions")
 		}
-		states[lane].denseProjection = func(int, string, []float32, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
+		states[lane].setDenseProjection(func(int, string, []float32, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
 			if active != lane {
 				t.Fatalf("lane %d callback ran while lane %d owned the step", lane, active)
 			}
 			calls[lane]++
 			return nil, v41ProjectionDeclined, nil
-		}
+		})
 		// Match the callback's arithmetic path in the serial reference.
-		refs[lane].denseProjection = nil
+		refs[lane].setDenseProjection(nil)
 	}
 	runPair := func(fail bool) {
 		t.Helper()
@@ -141,7 +141,7 @@ func TestV41StepTransactionInterleavedSessions(t *testing.T) {
 					t.Fatalf("lane %d differs from serial continuation", lane)
 				}
 			}
-			if scratch[lane].denseProjection != nil || scratch[lane].mhcCarry != nil {
+			if scratch[lane].denseProjection() != nil || scratch[lane].mhcCarry != nil {
 				t.Fatal("transaction retained session scratch callbacks")
 			}
 			tx[lane].abort() // no duplicate rollback and no committed-token undo

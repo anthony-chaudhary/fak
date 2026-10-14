@@ -37,7 +37,7 @@ type v41ProjScratch struct {
 	expertDown       v41ExpertDownFunc
 	routedExpert     v41RoutedExpertFunc
 	routedLayer      v41RoutedLayerFunc
-	denseProjection  v41DenseProjectionFunc
+	projectionRoute  *v41ProjectionRouteBinding
 	groupedOutput    v41GroupedOutputFunc
 	mhcProjection    v41MHCProjectionFunc
 	mhcFFNProjection v41MHCProjectionFunc
@@ -55,7 +55,6 @@ type v41ProjScratch struct {
 	sharedActivation v41SharedActivationFunc
 	tailRoPE         v41TailRoPEFunc
 	sharedAttention  v41SharedAttentionFunc
-	routerTopK       v41RouterTopKFunc
 	routedSum        v41RoutedSumFunc
 	sharedAdd        v41SharedAddFunc
 	gatherOps        *v41DeviceGatherOps

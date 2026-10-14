@@ -182,9 +182,9 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 						if b.expertWork || b.V41RowLogAvailable() || st.gatherOps.bf16PublishFunc() != nil || st.bf16Boundary != nil || st.routedExpert == nil {
 							panic("expert-only recorder bound unrelated capability or omitted packed owner binding")
 						}
-						st.routerTopK = func(int, []float32, []float32, v41RouterConfig, bool) ([]routePick, error) {
+						st.setRouterTopK(func(int, []float32, []float32, v41RouterConfig, bool) ([]routePick, error) {
 							return append([]routePick(nil), picks...), nil
-						}
+						})
 						routed := st.routedExpert
 						st.routedExpert = func(l int, stem string, x []float32, weight float32) ([]float32, v41RoutedExpertOutcome, error) {
 							scalarCalls[rank]++
@@ -363,9 +363,9 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 						defer b.expertScope()()
 						return step(l, p, x)
 					}
-					st.routerTopK = func(int, []float32, []float32, v41RouterConfig, bool) ([]routePick, error) {
+					st.setRouterTopK(func(int, []float32, []float32, v41RouterConfig, bool) ([]routePick, error) {
 						return []routePick{{257, .125}, {257, .25}, {258, .125}, {258, .25}, {259, .125}, {259, .25}}, nil
-					}
+					})
 					routed := st.routedExpert
 					st.routedExpert = func(l int, stem string, x []float32, weight float32) ([]float32, v41RoutedExpertOutcome, error) {
 						scalarCalls[rank]++

@@ -44,7 +44,7 @@ func TestV41CompressedReaderOwnership(t *testing.T) {
 			keyRows, readerQueries, faults := 0, 0, 0
 			ownerKeys := map[int][]float32{}
 			bind := func(st *v41ForwardState) {
-				st.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+				st.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 					if layer == 1 && (strings.HasPrefix(leaf, "attn.compressor.") || leaf == "indexer.wk.weight" || (!ownQuery && strings.HasPrefix(leaf, "indexer."))) {
 						t.Fatalf("reader projected producer-only tensor %s", leaf)
 					}
@@ -63,7 +63,7 @@ func TestV41CompressedReaderOwnership(t *testing.T) {
 						return nil, v41ProjectionError, boom
 					}
 					return nil, v41ProjectionDeclined, nil
-				}
+				})
 				st.indexerScore = func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
 					if layer == 0 {
 						ownerKeys[rows] = append([]float32(nil), keys...)

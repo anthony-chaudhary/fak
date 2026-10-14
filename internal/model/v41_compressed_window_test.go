@@ -63,12 +63,12 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 	bind := func(st *v41ForwardState, start int) {
 		projectPos, attendPos := [2]int{start, start}, [2]int{start, start}
 		var expected [2][]float32
-		st.denseProjection = func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+		st.setDenseProjection(func(layer int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 			if layer == 1 && (strings.HasPrefix(leaf, "attn.compressor.") || strings.HasPrefix(leaf, "indexer.")) {
 				t.Fatalf("reader projected private source tensor %s", leaf)
 			}
 			return nil, v41ProjectionDeclined, nil
-		}
+		})
 		st.tailRoPE = func(layer int, q, kv, cos, sin []float32, heads, headDim, rotaryDim int) ([]float32, []float32, error) {
 			pos := projectPos[layer]
 			projectPos[layer]++

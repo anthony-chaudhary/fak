@@ -80,7 +80,7 @@ func v41DeviceParitySeams(st *v41ForwardState) (bound, host []string) {
 		on   bool
 	}{
 		{"expert_gate_up", st.expertGateUp != nil}, {"expert_down", st.expertDown != nil},
-		{"dense_projection", st.denseProjection != nil}, {"grouped_output", st.groupedOutput != nil},
+		{"dense_projection", st.denseProjection() != nil}, {"grouped_output", st.groupedOutput != nil},
 		{"engram_projection", st.engramProjection != nil}, {"mhc_projection", st.mhcProjection != nil},
 		{"mhc_ffn_projection", st.mhcFFNProjection != nil}, {"final_norm", st.finalNorm != nil},
 		{"attention_norm", st.attentionNorm != nil}, {"attention_bf16", st.attentionBF16 != nil},
@@ -88,7 +88,7 @@ func v41DeviceParitySeams(st *v41ForwardState) (bound, host []string) {
 		{"compressor_norm", st.compressorNorm != nil}, {"index_key_norm", st.indexKeyNorm != nil},
 		{"indexer_score", st.indexerScore != nil}, {"shared_activation", st.sharedActivation != nil},
 		{"tail_rope", st.tailRoPE != nil}, {"shared_attention", st.sharedAttention != nil},
-		{"router_topk", st.routerTopK != nil}, {"routed_sum", st.routedSum != nil},
+		{"router_topk", st.routerTopK() != nil}, {"routed_sum", st.routedSum != nil},
 		{"shared_add", st.sharedAdd != nil}, {"gather_ops", st.gatherOps != nil},
 		{"mhc_device", st.mhcDevice != nil}, {"routed_expert", st.routedExpert != nil},
 		{"routed_layer", st.routedLayer != nil},

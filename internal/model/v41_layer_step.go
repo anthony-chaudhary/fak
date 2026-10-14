@@ -267,7 +267,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
 	if !prefixHandled {
-		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
+		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection())
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +277,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 			}
 		}
 	}
-	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
+	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection())
 	if err != nil {
 		return nil, err
 	}
@@ -287,13 +287,13 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 			return nil, v41StageErr(v41StageAttention, l,
 				fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 		}
-		kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection)
+		kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection())
 		if err != nil {
 			return nil, err
 		}
 		kv = kvFull[:hd]
 	} else {
-		kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, hd, H, scratch.denseProjection)
+		kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, hd, H, scratch.denseProjection())
 		if err != nil {
 			return nil, err
 		}
@@ -412,11 +412,11 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 	if err != nil {
 		return nil, err
 	}
-	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
+	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection())
 	if err != nil {
 		return nil, err
 	}
-	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK)
+	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK())
 	if err != nil {
 		return nil, v41StageErr(v41StageMoE, l, err)
 	}
@@ -721,7 +721,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
 	if !prefixHandled {
-		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection)
+		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection())
 		if err != nil {
 			return nil, err
 		}
@@ -729,7 +729,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 			return nil, err
 		}
 	}
-	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection)
+	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection())
 	if err != nil {
 		return nil, err
 	}
@@ -737,7 +737,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		return nil, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 	}
-	kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection)
+	kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection())
 	if err != nil {
 		return nil, err
 	}
@@ -787,17 +787,17 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 		pool.bindGatedPool(l, scratch.gatherOps.compressorPoolFunc())
 		projectKV := func(in []float32) ([]float32, error) {
-			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wkv.weight", in, width, H, scratch.denseProjection)
+			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wkv.weight", in, width, H, scratch.denseProjection())
 		}
 		projectScore := func(in []float32) ([]float32, error) {
-			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, scratch.denseProjection)
+			return m.v41ProjMatRowsWithProjection(l, "attn.compressor.wgate.weight", in, width, H, scratch.denseProjection())
 		}
 		var indexPub bool
 		var projectIndex func([]float32) ([]float32, error)
 		if indexSourceAt(cfg.DeepSeekV41, l) {
 			indexPub = true
 			projectIndex = func(row []float32) ([]float32, error) {
-				keys, err := m.v41IndexKeysPublished(l, [][]float32{row}, scratch.denseProjection, scratch.indexKeyNorm, scratch.gatherOps.bf16PublishFunc())
+				keys, err := m.v41IndexKeysPublished(l, [][]float32{row}, scratch.denseProjection(), scratch.indexKeyNorm, scratch.gatherOps.bf16PublishFunc())
 				if err != nil {
 					return nil, err
 				}
@@ -834,7 +834,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 	}
 	if indexSourceAt(cfg.DeepSeekV41, l) {
-		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection, scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps, indexView)
+		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps, indexView)
 		if err != nil {
 			return nil, err
 		}
@@ -957,12 +957,12 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 	if err != nil {
 		return nil, err
 	}
-	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection)
+	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection())
 	if err != nil {
 		return nil, err
 	}
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, true, scratch.routerTopK)
+	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, true, scratch.routerTopK())
 	if err != nil {
 		return nil, v41StageErr(v41StageMoE, l, err)
 	}

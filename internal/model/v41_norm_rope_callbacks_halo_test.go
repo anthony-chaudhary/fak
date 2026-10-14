@@ -162,12 +162,14 @@ func (w *v41NormRoPEHaloObserver) rope(run v41TailRoPEFunc) v41TailRoPEFunc {
 func v41NormRoPEHaloIsolate(st *v41ForwardState) {
 	st.attentionNorm = nil
 	st.expertGateUp, st.expertDown = nil, nil
-	st.denseProjection, st.groupedOutput, st.engramProjection = nil, nil, nil
+	st.setDenseProjection(nil)
+	st.groupedOutput, st.engramProjection = nil, nil
 	st.mhcProjection, st.mhcFFNProjection = nil, nil
 	st.sharedActivation, st.sharedAttention = nil, nil
 	st.compressorNorm, st.indexKeyNorm, st.indexerScore = nil, nil, nil
 	st.indexScoreHealth = nil
-	st.routerTopK, st.routedSum, st.sharedAdd = nil, nil, nil
+	st.setRouterTopK(nil)
+	st.routedSum, st.sharedAdd = nil, nil
 	st.gatherOps, st.mhcDevice = nil, nil
 	// The final-norm BF16 pair binds the ordinary publication; this witness
 	// budgets only its five callbacks' dispatches.

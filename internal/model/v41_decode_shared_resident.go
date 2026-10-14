@@ -11,7 +11,7 @@ import (
 // intermediates. A decline happens before any resident work is selected.
 func (m *Model) v41SharedExpertStepOwner(cfg Config, scratch *v41ProjScratch) *Session {
 	publish := scratch.gatherOps.bf16PublishFunc()
-	if scratch.gatherOps != nil && scratch.denseProjection != nil && scratch.sharedActivation != nil && publish != nil {
+	if scratch.gatherOps != nil && scratch.denseProjection() != nil && scratch.sharedActivation != nil && publish != nil {
 		s := scratch.gatherOps.owner
 		if s != nil && s.M == m && s.Backend != nil && !s.halClosed && s.halFailure == nil &&
 			s.v41Forward != nil && s.v41Forward.callbackOwner == s && s.v41Forward.gatherOps == scratch.gatherOps &&
@@ -38,7 +38,7 @@ func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, s
 			return output, cause
 		}
 	}
-	return m.v41SharedExpertSwiGLUWithPublish(layer, input, cfg, scratch.denseProjection, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+	return m.v41SharedExpertSwiGLUWithPublish(layer, input, cfg, scratch.denseProjection(), scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 }
 
 // v41SharedExpertAddForStep consumes the live shared output before its cleanup,

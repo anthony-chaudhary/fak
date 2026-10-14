@@ -10,12 +10,12 @@ func v41IndexKeyMemoCountingSession(t *testing.T, m *Model, calls *int) *Session
 	s := m.NewSession()
 	t.Cleanup(s.Close)
 	st := s.v41State()
-	st.denseProjection = func(layer int, leaf string, _ []float32, _, _, rows int) ([]float32, v41DenseProjectionOutcome, error) {
+	st.setDenseProjection(func(layer int, leaf string, _ []float32, _, _, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 		if leaf == "indexer.wk.weight" {
 			*calls += rows
 		}
 		return nil, v41ProjectionDeclined, nil
-	}
+	})
 	return s
 }
 

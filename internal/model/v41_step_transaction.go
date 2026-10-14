@@ -67,7 +67,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
 	scratch.routedExpert = st.routedExpert
 	scratch.routedLayer = st.routedLayer
-	scratch.denseProjection = st.denseProjection
+	scratch.projectionRoute = st.projectionRoute
 	scratch.groupedOutput = st.groupedOutput
 	scratch.mhcProjection = st.mhcProjection
 	scratch.mhcFFNProjection = st.mhcFFNProjection
@@ -85,7 +85,6 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
 	scratch.sharedAttention = st.sharedAttention
-	scratch.routerTopK = st.routerTopK
 	scratch.routedSum = st.routedSum
 	scratch.sharedAdd = st.sharedAdd
 	scratch.gatherOps = st.gatherOps
@@ -94,7 +93,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.expertGateUp, scratch.expertDown = nil, nil
 			scratch.routedExpert = nil
 			scratch.routedLayer = nil
-			scratch.denseProjection = nil
+			scratch.projectionRoute = nil
 			scratch.groupedOutput = nil
 			scratch.mhcProjection = nil
 			scratch.mhcFFNProjection = nil
@@ -112,7 +111,6 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.sharedActivation = nil
 			scratch.tailRoPE = nil
 			scratch.sharedAttention = nil
-			scratch.routerTopK = nil
 			scratch.routedSum = nil
 			scratch.sharedAdd = nil
 			scratch.gatherOps = nil
@@ -402,7 +400,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		return m.v41PrepareHeadInput(headInput, st.finalNorm, st.bf16Boundary)
 	}
 	tx.headProject = func(input []float32) ([]float32, error) {
-		return m.v41ProjectHeadInput(input, scratch.denseProjection, 1)
+		return m.v41ProjectHeadInput(input, scratch.denseProjection(), 1)
 	}
 	tx.headFinish = func(logits []float32, beforeCommit func() error) ([]float32, error) {
 		if len(logits) != cfg.VocabSize {

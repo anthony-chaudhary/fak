@@ -189,8 +189,8 @@ func TestV41LayerCohortTokenTiles(t *testing.T) {
 				}
 				return picks, err
 			}
-			lanes[lane].Session.v41State().routerTopK = route
-			refs[lane].v41State().routerTopK = route
+			lanes[lane].Session.v41State().setRouterTopK(route)
+			refs[lane].v41State().setRouterTopK(route)
 		}
 	}
 	for _, count := range []int{2, 3, 4} {

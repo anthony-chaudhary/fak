@@ -83,7 +83,7 @@ func TestV41DeviceOnlyDeclinedSeamsRefuseTyped(t *testing.T) {
 		m, s := newSession(t)
 		st := s.v41State()
 		for name, bound := range map[string]bool{
-			"dense": st.denseProjection != nil, "grouped": st.groupedOutput != nil, "engram": st.engramProjection != nil,
+			"dense": st.denseProjection() != nil, "grouped": st.groupedOutput != nil, "engram": st.engramProjection != nil,
 			"mhc": st.mhcProjection != nil && st.mhcFFNProjection != nil, "activation": st.sharedActivation != nil,
 			"gate-up": st.expertGateUp != nil, "down": st.expertDown != nil,
 		} {
@@ -91,9 +91,9 @@ func TestV41DeviceOnlyDeclinedSeamsRefuseTyped(t *testing.T) {
 				t.Fatalf("device-only state left %s unbound, so its host arm would run", name)
 			}
 		}
-		st.denseProjection = v41DeviceOnlyDense(s, declineDense)
+		st.setDenseProjection(v41DeviceOnlyDense(s, declineDense))
 		H := m.Cfg.HiddenSize
-		_, err := m.v41ProjMatRowsWithProjection(0, "attn.wq_a.weight", make([]float32, H), m.Cfg.QLoraRank, H, st.denseProjection)
+		_, err := m.v41ProjMatRowsWithProjection(0, "attn.wq_a.weight", make([]float32, H), m.Cfg.QLoraRank, H, st.denseProjection())
 		refused(t, s, "dense consumer", err)
 	})
 }
