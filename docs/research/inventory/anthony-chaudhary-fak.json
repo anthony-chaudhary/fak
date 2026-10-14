@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:67d96de3bb302a9268ba9a7f065096e92f18c7d4f90c7cd9dce5a1cbd5e02bbb",
-  "tracked_files": 25274,
-  "tracked_bytes": 509517237,
+  "content_root": "sha256:1ae706eba3044722324f1c39878bc1f5dfa0116d765d8fb2d056fec43d65690a",
+  "tracked_files": 25278,
+  "tracked_bytes": 509568195,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -22652,8 +22652,8 @@
     },
     {
       "path": "cmd/fak/serve_ep.go",
-      "content_sha256": "sha256:54afa4ca3d8a853e1d3a4b197cdffb85b19536c8c4daa36987bcd7f743131ef5",
-      "bytes": 9625,
+      "content_sha256": "sha256:661bc3a2f52c7387a91f968704ae29566e5a0e4dd74f5f9dfe29f6f59aec0e1e",
+      "bytes": 10245,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -23689,6 +23689,15 @@
       "path": "cmd/fak/serve_usage_provenance_test.go",
       "content_sha256": "sha256:96757254d6e3772946ed3c39562979abca5eb77d8043cbb30f918b07845edaf2",
       "bytes": 636,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "cmd/fak/serve_v41_ep_test.go",
+      "content_sha256": "sha256:74767ad0cf9f621ada9722a52b28dfe104141257e606831c1093c5e3201808bf",
+      "bytes": 668,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -102089,8 +102098,8 @@
     },
     {
       "path": "internal/compute/v41_scalar_head_test.go",
-      "content_sha256": "sha256:af4c2323842bb6b151a24bd9d561e52b70d02373ea3a9445915871d1ccca857d",
-      "bytes": 5804,
+      "content_sha256": "sha256:7dfe89f61f6607b6b84c9e6d7df815d0e22c86cda48dcb2aaea63401e747c528",
+      "bytes": 5810,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -103421,8 +103430,8 @@
     },
     {
       "path": "internal/compute/vulkan_v41_q2k_token_panel.go",
-      "content_sha256": "sha256:cbd612d90806f504313354750e91c583e5b2e6559bccc2735895fc1d19311083",
-      "bytes": 3225,
+      "content_sha256": "sha256:563177f1ca4805f450d5e3b85be44920b18f76e731ade04704659ff7db31219e",
+      "bytes": 3231,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -103430,8 +103439,8 @@
     },
     {
       "path": "internal/compute/vulkan_v41_q3k_token_panel.go",
-      "content_sha256": "sha256:c47b5c507d479f25eb8bae9d9c3b37247b435e4cf79e2f5fd35fedac2fa631e3",
-      "bytes": 3228,
+      "content_sha256": "sha256:fdeed2dd1152f2d4768268cb9410768b6370c13c43f89dfd4da36091daa03df4",
+      "bytes": 3234,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -103664,8 +103673,8 @@
     },
     {
       "path": "internal/compute/vulkan_v41_shared_head.go",
-      "content_sha256": "sha256:b777090d3139fff64587b4a1ecbc477c04d2a29ee9d6d959a642393e60ffd752",
-      "bytes": 5429,
+      "content_sha256": "sha256:279f0a36891e0bc1f9f7d56c47f3f57c75903e5dab04cbb750c4e885b292915c",
+      "bytes": 5435,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -152274,6 +152283,15 @@
       ]
     },
     {
+      "path": "internal/model/dist_v41_expert_parallel.go",
+      "content_sha256": "sha256:32c87c691046de291913f04eb2cc8f423a6333768553c1fe5fc514fa41800290",
+      "bytes": 7787,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
       "path": "internal/model/dsa_index.go",
       "content_sha256": "sha256:7df7a121e1269dee40d2bf4549f3f9fc1e4b363219fbc1bfbd01552b729232df",
       "bytes": 8912,
@@ -152374,8 +152392,8 @@
     },
     {
       "path": "internal/model/ep_decode_coord.go",
-      "content_sha256": "sha256:acd9aef46d73c7faaf45d5cb9952f21b4d5619cf06e8bd37b958a76fea547e8f",
-      "bytes": 14161,
+      "content_sha256": "sha256:e1abbdf93f6104948486a815ded74ab8fbcbfe3cbffd565f37506ef02fc25150",
+      "bytes": 16093,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -154396,8 +154414,8 @@
     },
     {
       "path": "internal/model/hal.go",
-      "content_sha256": "sha256:94c2670e3f70e37c2056741c13a21aa1614ae90d847be9001bd8ddbfd321e4f5",
-      "bytes": 46250,
+      "content_sha256": "sha256:24828d32dd2724d27ad84aa1d429216c9a6f0a84c38494223d22cf71d5ddcd33",
+      "bytes": 46278,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -154621,8 +154639,8 @@
     },
     {
       "path": "internal/model/kv.go",
-      "content_sha256": "sha256:f6c494fb3ae71e4782254e6f63a1246d9a4a786de622236c0785a268d6705660",
-      "bytes": 60632,
+      "content_sha256": "sha256:11daa9b87ef3f21ba8e4777f3ea29861346ecc80b6b2c41efd4b3251cb833095",
+      "bytes": 60932,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -154666,8 +154684,8 @@
     },
     {
       "path": "internal/model/kv_prefix_snapshot.go",
-      "content_sha256": "sha256:25ebead16bf2b31541d8e7c66c4021e60032a007f04cde4c350b054261d307dc",
-      "bytes": 27092,
+      "content_sha256": "sha256:d4a704b3065c8e89bd38a5776292612c6000c37fbed5126b0363086b95b40288",
+      "bytes": 27368,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -162656,6 +162674,24 @@
       ]
     },
     {
+      "path": "internal/model/v41_expert_parallel.go",
+      "content_sha256": "sha256:449993e63c4b56cca239b872b39e8da9a4600c13ce906ce21ab8096e668611c1",
+      "bytes": 7558,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_expert_parallel_test.go",
+      "content_sha256": "sha256:57144ff1a635eae173bd3632cc877f50b87f9c9bc6cf5d8e78fde0cf0067e325",
+      "bytes": 20480,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/model/v41_expert_placement_seam_test.go",
       "content_sha256": "sha256:4a45ce34888b928662f430cdaad00f5d70a159c4fa03810f6ae1ae533fd1c9c8",
       "bytes": 2570,
@@ -162783,8 +162819,8 @@
     },
     {
       "path": "internal/model/v41_forward.go",
-      "content_sha256": "sha256:b5f72ad7ba93c73e4ff2ba0a1042aa6c5ce4a8e19f6842d26903099aa5496b86",
-      "bytes": 59161,
+      "content_sha256": "sha256:e2a649c31e9615318c5459626cc74a5778a47abbbc584434f7a8ecf4a0817e49",
+      "bytes": 59513,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -162792,8 +162828,8 @@
     },
     {
       "path": "internal/model/v41_forward_admit.go",
-      "content_sha256": "sha256:2078a463e0402049a2ed492b8d9cc81af1d97f706c0ccefe39d7bb626156d86c",
-      "bytes": 40419,
+      "content_sha256": "sha256:d85f317a521267aa5e7d3fb6dbd0070928c875678f540fa24d8776e9c15e25ed",
+      "bytes": 40621,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -162828,8 +162864,8 @@
     },
     {
       "path": "internal/model/v41_forward_layer.go",
-      "content_sha256": "sha256:8c184793d852fb3daaebb3c69c95ab785d5454949c89510dd3410cab2a537cf7",
-      "bytes": 36554,
+      "content_sha256": "sha256:299ddce782e544ee78cf1fe49c690c9ed0c3088806df7763357052378f605117",
+      "bytes": 37109,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163467,8 +163503,8 @@
     },
     {
       "path": "internal/model/v41_layer_cohort_tile_test.go",
-      "content_sha256": "sha256:fc61d1c993301e88d0cf486f46fb8fa8e79554aaf35e6ed4f19548cd02f4725a",
-      "bytes": 10959,
+      "content_sha256": "sha256:28ac0afaff4619808a3507e0a14e910c02025ba35389704985af836be17d1410",
+      "bytes": 20003,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -164601,8 +164637,8 @@
     },
     {
       "path": "internal/model/v41_step_cohort.go",
-      "content_sha256": "sha256:3da7ce60cd8a2c94aeffd254c3755d60d080c3c933f1a8a973ad70a7142fcbc2",
-      "bytes": 10658,
+      "content_sha256": "sha256:5b4fbf587e150eee079cbcd3cf4ca7a7093d07672dab7d08cc7cd5b44283b3d1",
+      "bytes": 10797,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -213685,8 +213721,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:3052659ff64ec271b5fe8e9a2bbb5659d43aa8385600fea5f4628408b23ef0ec",
-      "bytes": 803696,
+      "content_sha256": "sha256:31c77e69cf34944d9afeea1b97c0ed40475e4e92b19407108cf0340696437fbd",
+      "bytes": 804689,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
