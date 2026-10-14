@@ -17,6 +17,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
 
+const amdStrixValidateProducer = "fak-dev amd-strix-validate"
+
 var (
 	runStrixValidationFn          = amdgpu.RunStrixValidation
 	discoverStrixTargetFn         = amdgpu.DiscoverStrixTarget
@@ -276,7 +278,8 @@ func emitFailReceipt(w io.Writer, host, gitTip, gitRef string, argv []string, er
 	receipt := amdgpu.NewStrixValidationReceipt(amdgpu.StrixTarget{
 		Mode: "ssh", Host: host, Reachable: false, TargetISA: "gfx1151", ComputeUnits: 40,
 		DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-	}, gitRef, gitTip, "fak-dev amd-strix-validate "+strings.Join(argv, " "))
+	}, gitRef, gitTip, amdStrixValidateProducer+" "+strings.Join(argv, " "))
+	receipt.Provenance.GeneratedBy = amdStrixValidateProducer
 	receipt.Verdict = "FAIL"
 	receipt.Verified = false
 	receipt.Failures = append(receipt.Failures, err.Error())
@@ -363,7 +366,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	opts := amdgpu.StrixValidationOpts{
 		Host: *host, RunSubkernels: runSK, Subkernels: skList, RunAblations: runAB, Ablations: abList,
 		GitRef: candidate.archive.SourceArchiveSHA256, GitTip: candidate.tip,
-		Command: "fak-dev amd-strix-validate " + strings.Join(argv, " "),
+		Command: amdStrixValidateProducer + " " + strings.Join(argv, " "), GeneratedBy: amdStrixValidateProducer,
 		Timeout: time.Duration(*timeoutSec) * time.Second, RequireSourceBinding: true,
 		CandidateArchive: candidate.archive.Bytes, SourceArchiveSHA256: candidate.archive.SourceArchiveSHA256,
 		AdmissionTimeout: time.Duration(*admissionTimeoutSec) * time.Second,

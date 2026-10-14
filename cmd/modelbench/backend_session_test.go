@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -860,6 +861,128 @@ type benchPrefillObservationBackend struct {
 	benchObservedBackend
 	mode          string
 	snapshotCalls []int
+}
+
+// fak-test:runtime fast est=2s lane=default
+func TestModelbenchSmokeCheckpointSurvivesBlockedPrefill(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	ref, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("CPU reference backend missing")
+	}
+	m := model.NewSynthetic(model.Config{HiddenSize: 16, NumLayers: 1, NumHeads: 4, NumKVHeads: 2, HeadDim: 4, IntermediateSize: 32, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1})
+	defer m.CloseWeights()
+	be := &benchPrefillObservationBackend{benchObservedBackend: benchObservedBackend{Backend: ref}, mode: "observed"}
+	compute.Register(be)
+	t.Cleanup(func() { compute.Register(ref) })
+
+	f := testCompleteBenchFlags()
+	*f.backendName, *f.decodePrompt, *f.smokeDecodeSteps = "cpu-ref", 3, 1
+	*f.out = filepath.Join(t.TempDir(), "smoke.json")
+	exitCode := 0
+	f.processExit = func(code int) { exitCode = code }
+
+	originalPrefill, originalWritten := smokeSessionPrefill, smokeCheckpointWritten
+	t.Cleanup(func() {
+		smokeSessionPrefill = originalPrefill
+		smokeCheckpointWritten = originalWritten
+	})
+	entered := make(chan struct{})
+	releasePrefill := make(chan struct{})
+	smokeSessionPrefill = func(s *model.Session, ids []int) []float32 {
+		close(entered)
+		<-releasePrefill
+		return originalPrefill(s, ids)
+	}
+	phases := make(chan string, 3)
+	releaseCheckpoint := make(chan struct{}, 2)
+	smokeCheckpointWritten = func(phase string) {
+		phases <- phase
+		if phase != "prefill_started" {
+			<-releaseCheckpoint
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		runSmoke(f, m, "fixture", 12345, m.Cfg.VocabSize)
+		close(done)
+	}()
+
+	wait := func(ch <-chan string, want string) {
+		t.Helper()
+		select {
+		case got := <-ch:
+			if got != want {
+				t.Fatalf("checkpoint phase=%q want=%q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for checkpoint %q", want)
+		}
+	}
+	readCheckpoint := func(wantPhase string, wantSequence float64) map[string]any {
+		t.Helper()
+		raw, err := os.ReadFile(*f.out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(raw) > smokeCheckpointMaxBytes {
+			t.Fatalf("checkpoint bytes=%d exceed cap=%d", len(raw), smokeCheckpointMaxBytes)
+		}
+		var checkpoint map[string]any
+		if err := json.Unmarshal(raw, &checkpoint); err != nil {
+			t.Fatal(err)
+		}
+		if checkpoint["schema"] != smokeCheckpointSchema || checkpoint["phase"] != wantPhase || checkpoint["sequence"] != wantSequence || checkpoint["partial"] != true || checkpoint["qualifying"] != false || checkpoint["exclusive_request_attribution"] != false {
+			t.Fatalf("checkpoint contract mismatch: %+v", checkpoint)
+		}
+		return checkpoint
+	}
+
+	wait(phases, "prefill_started")
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Prefill did not enter")
+	}
+	started := readCheckpoint("prefill_started", 1)
+	startedBackend := started["backend_execution"].(map[string]any)
+	if startedBackend["status"] != "pending" || len(be.snapshotCalls) != 1 {
+		t.Fatalf("blocked Prefill checkpoint=%+v snapshots=%v", startedBackend, be.snapshotCalls)
+	}
+	close(releasePrefill)
+
+	wait(phases, "prefill_completed")
+	completed := readCheckpoint("prefill_completed", 2)
+	completedBackend := completed["backend_execution"].(map[string]any)
+	if completedBackend["status"] != "observed" || len(be.snapshotCalls) != 2 {
+		t.Fatalf("completed checkpoint=%+v snapshots=%v", completedBackend, be.snapshotCalls)
+	}
+	releaseCheckpoint <- struct{}{}
+
+	wait(phases, "decode_started")
+	decode := readCheckpoint("decode_started", 3)
+	if decode["backend_execution"].(map[string]any)["status"] != "observed" {
+		t.Fatal("decode boundary lost completed backend observation")
+	}
+	releaseCheckpoint <- struct{}{}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("smoke did not finish")
+	}
+
+	raw, err := os.ReadFile(*f.out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if exitCode != 0 || report["smoke_status"] != smokeStatusOK || report["schema"] != nil || report["phase"] != nil || report["partial"] != nil {
+		t.Fatalf("ordinary final report changed: exit=%d report=%+v", exitCode, report)
+	}
 }
 
 func (b *benchPrefillObservationBackend) BackendExecutionSnapshot() (compute.BackendExecutionSnapshot, error) {

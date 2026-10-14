@@ -1235,6 +1235,7 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 	var decodeMS float64
 	var decodeTokS float64
 	prefillProof := map[string]any{}
+	checkpoint := newSmokeCheckpointWriter(*f.out)
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1251,10 +1252,21 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 		}
 		ids := lcgIDs(*f.decodePrompt, vocab)
 		prefillObservation := beginSmokePrefillObservation(be, m)
+		if err := checkpoint.write("prefill_started", prefillObservation.started()); err != nil {
+			status = smokeStatusForwardFailed
+			detail = err.Error()
+			return
+		}
 		tPrefillStart := time.Now()
-		logits := s.Prefill(ids)
+		logits := smokeSessionPrefill(s, ids)
 		prefillElapsed := time.Since(tPrefillStart)
-		prefillProof["smoke_prefill_backend_execution"] = prefillObservation.end(be, m)
+		backendExecution := prefillObservation.end(be, m)
+		prefillProof["smoke_prefill_backend_execution"] = backendExecution
+		if err := checkpoint.write("prefill_completed", backendExecution); err != nil {
+			status = smokeStatusForwardFailed
+			detail = err.Error()
+			return
+		}
 		if !allFinite(logits) || s.BackendSessionClosed() {
 			status = smokeStatusForwardFailed
 			detail = "prefill produced empty or non-finite logits, or closed its session"
@@ -1274,6 +1286,11 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 		prefillProof["smoke_prefill_kv_reused_tokens"] = 0
 		prefillProof["smoke_prefill_pass"] = "first_after_load"
 		prefillProof["smoke_prefill_logits_sha256"] = fmt.Sprintf("%x", hash.Sum(nil))
+		if err := checkpoint.write("decode_started", backendExecution); err != nil {
+			status = smokeStatusForwardFailed
+			detail = err.Error()
+			return
+		}
 		tDecodeStart := time.Now()
 		for step := 0; step < smokeSteps; step++ {
 			logits = s.Step(mathx.ArgmaxF32(logits))
@@ -1328,6 +1345,10 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 	if status != smokeStatusOK {
 		f.exit(1)
 	}
+}
+
+var smokeSessionPrefill = func(s *model.Session, ids []int) []float32 {
+	return s.Prefill(ids)
 }
 
 func parseTokenSize(s string) (int, error) {

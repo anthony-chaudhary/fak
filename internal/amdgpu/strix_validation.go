@@ -61,6 +61,7 @@ type StrixValidationOpts struct {
 	GitRef               string        `json:"git_ref,omitempty"`
 	GitTip               string        `json:"git_tip,omitempty"`
 	Command              string        `json:"command,omitempty"`
+	GeneratedBy          string        `json:"generated_by,omitempty"`
 	Timeout              time.Duration `json:"timeout,omitempty"`
 	RequireSourceBinding bool          `json:"require_source_binding,omitempty"`
 	CandidateArchive     []byte        `json:"-"`
@@ -550,8 +551,16 @@ func markerValue(out, prefix string) string {
 	return ""
 }
 
-func failedReceipt(opts StrixValidationOpts, target StrixTarget, message string, err error) *StrixValidationReceipt {
+func newStrixValidationReceipt(opts StrixValidationOpts, target StrixTarget) *StrixValidationReceipt {
 	r := NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
+	if generatedBy := strings.TrimSpace(opts.GeneratedBy); generatedBy != "" {
+		r.Provenance.GeneratedBy = generatedBy
+	}
+	return r
+}
+
+func failedReceipt(opts StrixValidationOpts, target StrixTarget, message string, err error) *StrixValidationReceipt {
+	r := newStrixValidationReceipt(opts, target)
 	if opts.RunSubkernels {
 		if specs, selectErr := FilterSubkernelSpecs(opts.Subkernels); selectErr == nil {
 			r.SelectedCount = len(specs)
@@ -601,7 +610,7 @@ func RunStrixValidation(ctx context.Context, opts StrixValidationOpts) (*StrixVa
 		}
 		return failedReceipt(opts, StrixTarget{Host: opts.Host}, "strix halo target unreachable: "+err.Error(), err), err
 	}
-	receipt := NewStrixValidationReceipt(*target, opts.GitRef, opts.GitTip, opts.Command)
+	receipt := newStrixValidationReceipt(opts, *target)
 	receipt.SelectedCount = len(specs)
 	receipt.SelectedSubkernels = len(specs)
 	receipt.SelectedAblations = selectedAblations
