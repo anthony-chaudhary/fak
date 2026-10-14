@@ -1,6 +1,7 @@
 package issueorchestrator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,6 +53,9 @@ func LoadIssues(path string, workspace string) ([]Issue, error) {
 
 // DecodeIssues parses raw JSON bytes into a slice of Issues.
 func DecodeIssues(b []byte) ([]Issue, error) {
+	// A UTF-8 BOM (PowerShell Set-Content -Encoding utf8 on Windows) is not
+	// JSON whitespace; strip it so a Windows-written snapshot still parses.
+	b = bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
 	trimmed := strings.TrimSpace(string(b))
 	if trimmed == "" {
 		return nil, fmt.Errorf("empty issue payload")
