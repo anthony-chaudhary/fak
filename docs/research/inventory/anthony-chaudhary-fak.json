@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:08ed9b0ccfa92f533e831d96ee2a4f637bf15ba748dea892068868044a9bc6ef",
+  "content_root": "sha256:7f86916d264ba2251969959e08356c69833cf033c97dabb4618b325a4e27bbf2",
   "tracked_files": 25266,
-  "tracked_bytes": 509442983,
+  "tracked_bytes": 509444683,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -7123,8 +7123,8 @@
     },
     {
       "path": "cmd/fak/concept_test.go",
-      "content_sha256": "sha256:da40c813b23c95b2fecde6b6d501d27acedc5b905757291609293a19d52c97e9",
-      "bytes": 11648,
+      "content_sha256": "sha256:5616ff65737087680916848c7c6a1de292b0a6e5cdc7e2d2599ece7a38aa9c29",
+      "bytes": 11739,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -109615,8 +109615,8 @@
     },
     {
       "path": "internal/devcmd/build_vulkan_verify_test.go",
-      "content_sha256": "sha256:629ebe9060ff5b0e0de0691b51f92bcd21468ff23ffc3831545a6dac034a5ea7",
-      "bytes": 27279,
+      "content_sha256": "sha256:74b6395c83f2a652a160cc56286ee9f9a0d4d22ba4ca687ba5f0c646f8f08149",
+      "bytes": 27177,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -116712,8 +116712,8 @@
     },
     {
       "path": "internal/enumlint/exempt.go",
-      "content_sha256": "sha256:0d2e4c2068cd7ce09ee1dbbb5974a025ec30e15f30dea052588bd477d95842c6",
-      "bytes": 22925,
+      "content_sha256": "sha256:f805144143da3e259d82d29abf3ed8e6632621f12e2acb3842d42357fa94c9f1",
+      "bytes": 23465,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -161639,8 +161639,8 @@
     },
     {
       "path": "internal/model/v41_bf16_publish_test.go",
-      "content_sha256": "sha256:f2264c6c621a762bcb0eddcf1127c943fdd0c4c7ed1341ac30e363d4f65c0650",
-      "bytes": 14045,
+      "content_sha256": "sha256:df8309f26035f90c62233e5fb59ce5ce310d0c0a27c23f03ead0538972a2ec4c",
+      "bytes": 15216,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
