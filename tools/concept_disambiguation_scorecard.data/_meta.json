@@ -11802,6 +11802,11 @@
           "category": "incidental",
           "reason": "Function-local context.WithDeadline derived from the caller context and the validated request total deadline during supervisor admission; it creates no separate context abstraction or authority.",
           "token": "admissionCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper selecting the earlier of the caller context deadline and an existing cap for the owner handoff, or the cap when no caller deadline exists; it introduces no context abstraction or execution authority.",
+          "token": "v41EPHContextDeadline"
         }
       ],
       "exclude": [
@@ -11972,6 +11977,7 @@
         "shedOldContext",
         "takeCompactionContract",
         "traceContext",
+        "v41EPHContextDeadline",
         "waiterContexts",
         "waiterCtx",
         "wctx",
