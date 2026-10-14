@@ -1242,11 +1242,11 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 			return
 		}
 		ids := lcgIDs(*f.decodePrompt, vocab)
-		prefillObservation := beginSmokePrefillObservation(be)
+		prefillObservation := beginSmokePrefillObservation(be, m)
 		tPrefillStart := time.Now()
 		logits := s.Prefill(ids)
 		prefillElapsed := time.Since(tPrefillStart)
-		prefillProof["smoke_prefill_backend_execution"] = prefillObservation.end(be)
+		prefillProof["smoke_prefill_backend_execution"] = prefillObservation.end(be, m)
 		if !allFinite(logits) || s.BackendSessionClosed() {
 			status = smokeStatusForwardFailed
 			detail = "prefill produced empty or non-finite logits, or closed its session"

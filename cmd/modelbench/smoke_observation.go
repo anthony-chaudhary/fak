@@ -1,19 +1,56 @@
 package main
 
-import "github.com/anthony-chaudhary/fak/internal/compute"
+import (
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
+
+const smokeV41ModelAttributionSchema = "fak.modelbench.v41-model-attribution/1"
+
+type smokeV41ModelAttribution struct {
+	Schema                      string                               `json:"schema"`
+	Scope                       string                               `json:"scope"`
+	Phase                       string                               `json:"phase"`
+	Partial                     bool                                 `json:"partial"`
+	ExclusiveRequestAttribution bool                                 `json:"exclusive_request_attribution"`
+	Before                      model.V41ExpertFaultAttributionPhase `json:"before"`
+	After                       model.V41ExpertFaultAttributionPhase `json:"after"`
+}
 
 type smokePrefillObservation struct {
-	before    compute.BackendExecutionSnapshot
-	available bool
-	err       error
+	before         compute.BackendExecutionSnapshot
+	v41ModelBefore *model.V41ExpertFaultAttributionPhase
+	available      bool
+	err            error
 }
 
-func beginSmokePrefillObservation(be compute.Backend) smokePrefillObservation {
+func beginSmokePrefillObservation(be compute.Backend, m *model.Model) smokePrefillObservation {
 	before, available, err := compute.CaptureBackendExecutionSnapshot(be)
-	return smokePrefillObservation{before: before, available: available, err: err}
+	o := smokePrefillObservation{before: before, available: available, err: err}
+	if m != nil && m.Cfg.IsDeepSeekV41() {
+		before := m.V41ExpertFaultAttribution().Prefill
+		o.v41ModelBefore = &before
+	}
+	return o
 }
 
-func (o smokePrefillObservation) end(be compute.Backend) map[string]any {
+func (o smokePrefillObservation) end(be compute.Backend, m *model.Model) map[string]any {
+	result := o.backendResult(be)
+	if result["status"] == "observed" && o.v41ModelBefore != nil && m != nil && m.Cfg.IsDeepSeekV41() {
+		result["v41_model_attribution"] = smokeV41ModelAttribution{
+			Schema:                      smokeV41ModelAttributionSchema,
+			Scope:                       "model_lifetime_snapshots",
+			Phase:                       "prefill",
+			Partial:                     true,
+			ExclusiveRequestAttribution: false,
+			Before:                      *o.v41ModelBefore,
+			After:                       m.V41ExpertFaultAttribution().Prefill,
+		}
+	}
+	return result
+}
+
+func (o smokePrefillObservation) backendResult(be compute.Backend) map[string]any {
 	if o.err != nil {
 		return map[string]any{"status": "error", "reason": o.err.Error()}
 	}
