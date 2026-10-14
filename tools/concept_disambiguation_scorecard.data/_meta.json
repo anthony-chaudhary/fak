@@ -6811,6 +6811,16 @@
           "category": "incidental",
           "reason": "Typed trace correlation label preserves an existing producer session identifier; it does not define a session lifecycle, runtime owner or new session mechanism.",
           "token": "CorrelationSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported construction inputs for the existing native Session and EPDecodeCoordinator: authenticated shard identity, borrowed group/backend and loader options; it introduces no separate runtime session identity or lifecycle.",
+          "token": "V41ExpertParallelSessionRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported loader/constructor adapter composing authenticated retained readers, existing owner-range loading and checked native Session construction; returned Session and coordinator keep their existing lifecycle and first-forward admission contracts.",
+          "token": "LoadV41ExpertParallelSession"
         }
       ],
       "exclude": [
@@ -6853,6 +6863,7 @@
         "LifecycleReportCell",
         "LifecycleSession",
         "LifecycleSessionSchema",
+        "LoadV41ExpertParallelSession",
         "LogicalSessionID",
         "MalformedSessionRef",
         "MatchesSession",
@@ -6950,6 +6961,7 @@
         "SoftSlotStolen",
         "StoreVerifiedSlot",
         "UNSUPPORTED_SESSION_KIND",
+        "V41ExpertParallelSessionRequest",
         "VerifySessionMoveDestinationReceipt",
         "WatchdogExcludeKind",
         "WithAffinity",
