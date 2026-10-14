@@ -278,7 +278,7 @@ func TestV41BatchStep(t *testing.T) {
 			f := newV41BatchFixture(t)
 			primary := &V41IndexerScoreOperationError{Layer: 0, Cause: errors.New("selected indexer rejected scores")}
 			calls := 0
-			f.lanes[1].Session.v41State().indexerScore = func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
+			f.lanes[1].Session.v41State().setIndexerScore(func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
 				calls++
 				if layer != 0 || rows == 0 {
 					t.Fatal("selected score fault did not reach real retained source rows")
@@ -287,7 +287,7 @@ func TestV41BatchStep(t *testing.T) {
 					panic(primary)
 				}
 				return nil, primary
-			}
+			})
 			got, err := f.m.StepV41Batch(f.lanes)
 			if calls != 1 || !errors.Is(err, primary) || !errors.Is(got.Lanes[1].Err, primary) || got.Lanes[0].Err != ErrV41BatchAborted || f.lanes[0].Session.BackendSessionClosed() || !f.lanes[1].Session.BackendSessionClosed() {
 				t.Fatalf("indexer fault attribution result=%+v err=%v", got, err)

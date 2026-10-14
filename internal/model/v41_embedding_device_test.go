@@ -65,7 +65,8 @@ func (b *v41EmbeddingGatherTestBackend) Free(x compute.Tensor) {
 func v41EmbeddingGatherOnly(s *Session) {
 	v41ScoreOnly(s)
 	st := s.v41State()
-	st.indexerScore, st.indexScoreHealth = nil, nil
+	st.setIndexerScore(nil)
+	st.indexScoreHealth = nil
 }
 
 // Refs #13668. The token-embedding gather leaves the host: the panel is the

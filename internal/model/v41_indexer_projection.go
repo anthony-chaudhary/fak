@@ -89,6 +89,17 @@ func v41ColdIndexerKeyPanel(keys [][]float32, dim int) []float32 {
 // their independent mutable flat input, including when a panel is supplied.
 // No prepared storage is retained in continuation or publication state.
 func (m *Model) v41IndexRowsWithPreparedKeys(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, views ...*v41IndexerKeyView) ([]int32, error) {
+	ordinary := v41IndexerScoreBinding{ordinary: score}
+	return m.v41IndexRowsWithPreparedBinding(l, pos, qLat, hidden, keys, project, &ordinary, health, ops, prepared, nil, views...)
+}
+
+// Native borrowing requires the same immutable binding that supplies the
+// invoked scorer. Ordinary callers cannot inherit this synchronous authority.
+func (m *Model) v41IndexRowsWithPreparedBinding(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, views ...*v41IndexerKeyView) ([]int32, error) {
+	score := binding.scoreFunc()
+	if borrow == nil || borrow.binding != binding || !borrow.valid() {
+		borrow = nil
+	}
 	d41 := m.Cfg.DeepSeekV41
 	if !indexSourceAt(d41, l) {
 		return nil, nil
@@ -112,12 +123,14 @@ func (m *Model) v41IndexRowsWithPreparedKeys(l, pos int, qLat, hidden []float32,
 	if score != nil && len(views) == 1 {
 		if selected := ops.residentIndexerScore(m, l, pos, keys, views[0], score); selected != nil {
 			score, resident = selected, true
+			borrow = nil
 		}
 	}
 	var flat []float32
-	if score == nil && prepared != nil && len(prepared) == elements {
+	if !resident && (score == nil || borrow != nil) && prepared != nil && len(prepared) == elements {
 		flat = prepared[:elements:elements]
 	} else if !resident {
+		borrow = nil
 		flat = make([]float32, 0, elements)
 		for _, key := range keys {
 			flat = append(flat, key...)
@@ -151,7 +164,7 @@ func (m *Model) v41IndexRowsWithPreparedKeys(l, pos int, qLat, hidden []float32,
 	}
 	opened := m.v41NowNanos()
 	defer m.v41NoteIndexerScoring(opened)
-	return v41IndexRowsSelected(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health, ops.indexSelectFunc())
+	return v41IndexRowsSelectedWithBorrow(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health, ops.indexSelectFunc(), borrow)
 }
 
 // v41CompressedPublicationRoPE runs only on a producer's fresh rows, after the

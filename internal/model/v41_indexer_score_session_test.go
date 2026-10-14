@@ -74,7 +74,7 @@ func TestV41IndexerScoreProjectedOperands(t *testing.T) {
 		values, err := m.v41ProjectionRows(layer, leaf, panel, out, in, rows, nil)
 		return values, v41ProjectionHandled, err
 	}
-	got, err := m.v41IndexRowsWithOperations(0, 7, qLat, hidden, keys, project, s.v41State().indexerScore, s.v41State().indexScoreHealth)
+	got, err := m.v41IndexRowsWithOperations(0, 7, qLat, hidden, keys, project, s.v41State().indexerScore(), s.v41State().indexScoreHealth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestV41IndexerScoreSession(t *testing.T) {
 		b := newV41ScoreTestBackend()
 		s := v41DenseTestSession(t, m, b)
 		v41ScoreOnly(s)
-		if s.v41State().indexerScore == nil {
+		if s.v41State().indexerScore() == nil {
 			t.Fatal("qualified score callback missing")
 		}
 		return s, b
@@ -182,7 +182,7 @@ func TestV41IndexerScoreSession(t *testing.T) {
 			t.Fatal("score path changed retained index/KV/top-k state")
 		}
 		dataOnly := before.clone().restore()
-		if dataOnly.indexerScore != nil || dataOnly.indexScoreHealth != nil || dataOnly.callbackOwner != nil {
+		if dataOnly.indexerScore() != nil || dataOnly.indexScoreHealth != nil || dataOnly.callbackOwner != nil {
 			t.Fatal("snapshot persisted score callback or owner")
 		}
 		snap, err := s.PrefixSnapshot()
@@ -204,7 +204,7 @@ func TestV41IndexerScoreSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			st := item.session.v41Forward
-			if st == nil || st.callbackOwner != item.session || st.indexerScore == nil || !reflect.DeepEqual(captureV41ForwardSnapshot(st), before) {
+			if st == nil || st.callbackOwner != item.session || st.indexerScore() == nil || !reflect.DeepEqual(captureV41ForwardSnapshot(st), before) {
 				t.Fatalf("restore %d did not rebind the target owner", i)
 			}
 			v41ScoreOnly(item.session)
@@ -233,7 +233,7 @@ func TestV41IndexerScoreSession(t *testing.T) {
 		b.supported = false
 		s := v41DenseTestSession(t, m, b)
 		v41ScoreOnly(s)
-		if s.v41State().indexerScore != nil {
+		if s.v41State().indexerScore() != nil {
 			t.Fatal("unsupported score callback installed")
 		}
 		host := m.NewSession()
@@ -263,14 +263,14 @@ func TestV41IndexerScoreSession(t *testing.T) {
 		host.Prefill([]int{1, 2, 3})
 		host.Step(4)
 		want := captureV41ForwardSnapshot(host.v41Forward)
-		selected, attempts := s.v41State().indexerScore, 0
-		s.v41State().indexerScore = func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
+		selected, attempts := s.v41State().indexerScore(), 0
+		s.v41State().setIndexerScore(func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
 			attempts++
 			if attempts == 2 {
 				b.forceNaN = true
 			}
 			return selected(layer, q, keys, weights, heads, dim, rows)
-		}
+		})
 		calls := len(b.calls)
 		err := recoverError(func() { s.Prefill([]int{4, 5}) })
 		var closed *BackendForwardOperationError

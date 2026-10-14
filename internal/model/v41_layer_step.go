@@ -763,7 +763,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	var sharedKV, indexKeys [][]float32
 	var sourceIdx []int32
 	var indexView *v41IndexerKeyView
-	if scratch.indexerScore != nil && scratch.gatherOps != nil && scratch.gatherOps.indexerKeyBudgetBytes > 0 {
+	if scratch.indexerScore() != nil && scratch.gatherOps != nil && scratch.gatherOps.indexerKeyBudgetBytes > 0 {
 		indexView = &v41IndexerKeyView{owner: registry, source: plan.KVSourceLayer}
 	}
 	if v41OwnsCompressedRows(plan) {
@@ -830,7 +830,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 	}
 	if indexSourceAt(cfg.DeepSeekV41, l) {
-		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps, indexView)
+		sourceIdx, err = m.v41IndexRowsWithDeviceOps(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection(), scratch.indexerScore(), scratch.indexScoreHealth, scratch.gatherOps, indexView)
 		if err != nil {
 			return nil, err
 		}

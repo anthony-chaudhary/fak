@@ -64,14 +64,14 @@ func TestV41CompressedReaderOwnership(t *testing.T) {
 					}
 					return nil, v41ProjectionDeclined, nil
 				})
-				st.indexerScore = func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
+				st.setIndexerScore(func(layer int, q, keys, weights []float32, heads, dim, rows int) ([]float32, error) {
 					if layer == 0 {
 						ownerKeys[rows] = append([]float32(nil), keys...)
 					} else if !ownQuery || (rows > 0 && !reflect.DeepEqual(keys, ownerKeys[rows])) {
 						t.Fatal("index-only reader did not query the owner's already-rotated key bytes")
 					}
 					return V41IndexerScore(q, keys, weights, heads, dim, rows)
-				}
+				})
 			}
 			checkReader := func(st *v41ForwardState, positions int) {
 				t.Helper()

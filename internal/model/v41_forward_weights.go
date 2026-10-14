@@ -31,33 +31,33 @@ import (
 // 40-layer churn, with byte-identical arithmetic (the same f32 values land in
 // the same layout).
 type v41ProjScratch struct {
-	woA              []float32
-	woB              []float32
-	expertGateUp     v41ExpertGateUpFunc
-	expertDown       v41ExpertDownFunc
-	routedExpert     v41RoutedExpertFunc
-	routedLayer      v41RoutedLayerFunc
-	projectionRoute  *v41ProjectionRouteBinding
-	groupedOutput    v41GroupedOutputFunc
-	mhcProjection    v41MHCProjectionFunc
-	mhcFFNProjection v41MHCProjectionFunc
-	mhcCarry         *v41MHCCarry
-	attentionNorm    v41AttentionInputNormFunc
-	attentionBF16    v41BF16BoundaryFunc
-	queryNorm        v41QueryNormFunc
-	queryPrefix      v41QueryPrefixFunc
-	kvNorm           v41KVNormFunc
-	ffnNorm          v41FFNNormFunc
-	compressorNorm   v41CompressorNormFunc
-	indexKeyNorm     v41IndexKeyNormFunc
-	indexerScore     v41IndexerScoreFunc
-	indexScoreHealth v41IndexerScoreHealthFunc
-	sharedActivation v41SharedActivationFunc
-	tailRoPE         v41TailRoPEFunc
-	sharedAttention  v41SharedAttentionFunc
-	routedSum        v41RoutedSumFunc
-	sharedAdd        v41SharedAddFunc
-	gatherOps        *v41DeviceGatherOps
+	woA                 []float32
+	woB                 []float32
+	expertGateUp        v41ExpertGateUpFunc
+	expertDown          v41ExpertDownFunc
+	routedExpert        v41RoutedExpertFunc
+	routedLayer         v41RoutedLayerFunc
+	projectionRoute     *v41ProjectionRouteBinding
+	groupedOutput       v41GroupedOutputFunc
+	mhcProjection       v41MHCProjectionFunc
+	mhcFFNProjection    v41MHCProjectionFunc
+	mhcCarry            *v41MHCCarry
+	attentionNorm       v41AttentionInputNormFunc
+	attentionBF16       v41BF16BoundaryFunc
+	queryNorm           v41QueryNormFunc
+	queryPrefix         v41QueryPrefixFunc
+	kvNorm              v41KVNormFunc
+	ffnNorm             v41FFNNormFunc
+	compressorNorm      v41CompressorNormFunc
+	indexKeyNorm        v41IndexKeyNormFunc
+	indexerScoreBinding *v41IndexerScoreBinding
+	indexScoreHealth    v41IndexerScoreHealthFunc
+	sharedActivation    v41SharedActivationFunc
+	tailRoPE            v41TailRoPEFunc
+	sharedAttention     v41SharedAttentionFunc
+	routedSum           v41RoutedSumFunc
+	sharedAdd           v41SharedAddFunc
+	gatherOps           *v41DeviceGatherOps
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were

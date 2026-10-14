@@ -161,7 +161,7 @@ func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 			}
 			return st.attn
 		}
-		st.indexerScore = func(layer int, q, flat, weights []float32, heads, dim, rows int) ([]float32, error) {
+		st.setIndexerScore(func(layer int, q, flat, weights []float32, heads, dim, rows int) ([]float32, error) {
 			store := storeFor(layer)
 			keys, ok := store.borrowIndexKeys(0)
 			if !ok || len(keys) != 2 || rows != 2 || len(flat) != 2*dim {
@@ -176,7 +176,7 @@ func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 			}
 			scores[layer]++
 			return V41IndexerScore(q, flat, weights, heads, dim, rows)
-		}
+		})
 		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			store := storeFor(layer)
 			if r.kv != nil || r.rowKV == nil || len(r.rowKV.compressed) != 2 ||

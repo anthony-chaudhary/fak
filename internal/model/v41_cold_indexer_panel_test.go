@@ -151,9 +151,9 @@ func TestV41ColdIndexerKeyPanel(t *testing.T) {
 			left, right := m.NewSession(), m.NewSession()
 			t.Cleanup(left.Close)
 			t.Cleanup(right.Close)
-			right.v41State().indexerScore = func(_ int, q, flat, weights []float32, heads, width, rows int) ([]float32, error) {
+			right.v41State().setIndexerScore(func(_ int, q, flat, weights []float32, heads, width, rows int) ([]float32, error) {
 				return V41IndexerScore(q, flat, weights, heads, width, rows)
-			}
+			})
 			prefix, next := v41IncrementalPrefix(m.Cfg, count)
 			check := func(got, want []float32) {
 				v41ScoreTestBits(t, got, want)
