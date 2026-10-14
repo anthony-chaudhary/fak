@@ -38,15 +38,18 @@ type hostTensor struct {
 	data  []float32
 }
 
-// ResidencyBytes splits this live snapshot's payload by its physical owner. On
+// ResidencyBytes splits this live snapshot's accounted payload by memory tier. On
 // a device backend, KV positions and the model cache remain host metadata while
-// K/Kraw/V and Qwen recurrent tensors are device-resident.
+// K/Kraw/V and Qwen recurrent tensors are device-resident. V4.1 continuation
+// state remains on the host, retaining ResidentBytes' conservative per-snapshot
+// publication charge even when immutable rows are shared.
 func (p *PrefixSnapshot) ResidencyBytes() (host, device int64) {
 	if p == nil || p.Cache == nil {
 		return 0, 0
 	}
 	host = p.Cache.residentBytes()
 	host += p.halLineage.metadataBytes()
+	host += p.v41ResidentBytes()
 	deviceBacked := p.Backend != nil && p.Backend.Caps().DeviceMemory
 	if p.halKV != nil {
 		bytes := p.halKV.ResidentBytes()
