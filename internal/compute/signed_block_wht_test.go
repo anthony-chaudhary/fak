@@ -103,6 +103,15 @@ func TestSignedBlockWHTConstructorRefusals(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1ms lane=default
+func TestSignedBlockWHTAggregateWidthOverflow(t *testing.T) {
+	_, err := NewSignedBlockWHT(1, []int{1, int(^uint(0) >> 1)}, []int{1})
+	var typed ErrSignedBlockWHT
+	if !asSignedErr(err, &typed) || typed.Field != "sign" || typed.Value != 1 {
+		t.Fatalf("overflowing aggregate widths must return the sign-length refusal, got %T: %v", err, err)
+	}
+}
+
 func repSign(n int) []int {
 	v := make([]int, n)
 	for i := range v {

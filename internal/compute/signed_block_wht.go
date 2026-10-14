@@ -90,9 +90,11 @@ func NewSignedBlockWHT(block int, widths, values []int) (*SignedBlockWHT, error)
 				Value:   width,
 			}
 		}
-		if offset+width > len(values) {
+		// Bound the remaining values before addition or allocation. A valid width
+		// may still overflow offset+width when the declared widths are malformed.
+		if offset < 0 || offset > len(values) || width > len(values)-offset {
 			return nil, ErrSignedBlockWHT{
-				Message: fmt.Sprintf("sign values are shorter than the declared widths: need at least %d, have %d", offset+width, len(values)),
+				Message: fmt.Sprintf("sign values are shorter than the declared widths: width %d at offset %d exceeds %d values", width, offset, len(values)),
 				Field:   "sign",
 				Value:   len(values),
 			}
