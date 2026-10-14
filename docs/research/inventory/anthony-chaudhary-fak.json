@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:c4780502b55685afd0ebd1e34e52b73c82d7ad9b3d77fc94c7cfaf333078620b",
-  "tracked_files": 25283,
-  "tracked_bytes": 509658513,
+  "content_root": "sha256:fe8ca684ee209992904f951e9235b87ce2bbaa18524dd6efd1983682fc089a98",
+  "tracked_files": 25286,
+  "tracked_bytes": 509682153,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -162702,11 +162702,29 @@
     },
     {
       "path": "internal/model/v41_expert_parallel.go",
-      "content_sha256": "sha256:449993e63c4b56cca239b872b39e8da9a4600c13ce906ce21ab8096e668611c1",
-      "bytes": 7558,
+      "content_sha256": "sha256:00cea367838ed356b0e302c54208afbc8ca4c90d78e71665e6a4ba513859fdd2",
+      "bytes": 7867,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_expert_parallel_device.go",
+      "content_sha256": "sha256:7cfefe5b5e2ffd9f4452e62a80e309c9c5087d9ed862b88b5a2b1d3eace9d544",
+      "bytes": 4148,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/model/v41_expert_parallel_device_test.go",
+      "content_sha256": "sha256:695654241aa28da787b8da5566aa48fea880a4ef46830b2254905f0af6bfc5fd",
+      "bytes": 12213,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
@@ -164726,6 +164744,15 @@
       ]
     },
     {
+      "path": "internal/model/v41_step_partial_undo_test.go",
+      "content_sha256": "sha256:795ee9e3bbe9ed5f19d9bf0519aaaa1c45f4f4362e4ecfc9fe8f2a6ea30bb9ac",
+      "bytes": 6403,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/model/v41_step_single_admission_test.go",
       "content_sha256": "sha256:c9f62c330300cdb360e9910042898f112da8ce913edb7c8df56330b1edebf949",
       "bytes": 3085,
@@ -164736,8 +164763,8 @@
     },
     {
       "path": "internal/model/v41_step_transaction.go",
-      "content_sha256": "sha256:1d60b38f0dcab618550fa23eaf79b826d221513d3280ecd81a00b4d0f16c526f",
-      "bytes": 19602,
+      "content_sha256": "sha256:5a723a78a4614ee6507699cd53668ffa8bddc067a57fe5b056888a31b771e1bf",
+      "bytes": 20169,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"

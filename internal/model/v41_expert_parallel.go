@@ -55,6 +55,15 @@ func (s *Session) bindV41ExpertParallel(st *v41ForwardState) {
 	if err != nil {
 		panic(err)
 	}
+	routed, err := s.v41EPOwnerDeviceBinding(owners, st.routedExpert)
+	if err != nil {
+		// v41State publishes callbackOwner before binding EP. A refused
+		// binding must not leave its local-only callbacks reusable on retry.
+		st.callbackOwner = nil
+		c.g.abortV41EP()
+		panic(err)
+	}
+	st.routedExpert = routed
 	config, err := json.Marshal(s.M.Cfg)
 	if err != nil {
 		panic(fmt.Errorf("%w: config identity: %v", ErrV41ExpertParallel, err))
