@@ -76,14 +76,9 @@ func (s *Session) bindV41ExpertParallel(st *v41ForwardState) {
 		ordinal++
 		digest := v41EPIdentity(c.binding, configDigest, ordinal, layer, s.v41Forward.history, picks, input)
 		scratch := &v41ProjScratch{}
-		outputs, cause := s.M.v41EPOwnerRows(c, owners, digest, layer, picks, input, scratch, st)
+		sum, cause := s.M.v41EPOwnerSum(c, owners, digest, layer, picks, input, scratch, st)
 		if cause != nil {
 			return nil, v41RoutedExpertError, cause
-		}
-		sum, cause := v41FullRoutedSumWith(layer, picks, outputs, s.M.Cfg.HiddenSize, st.routedSum)
-		if cause != nil {
-			c.g.abortV41EP()
-			return nil, v41RoutedExpertError, fmt.Errorf("%w: exact sum: %w", ErrV41ExpertParallel, cause)
 		}
 		return sum, v41RoutedExpertHandled, nil
 	}
@@ -115,12 +110,18 @@ func v41EPIdentity(binding [64]byte, config [32]byte, ordinal uint64, layer int,
 	return out
 }
 
-func (m *Model) v41EPOwnerRows(c *v41ExpertParallelCollective, owners TPPlan, digest [32]byte, layer int, picks []routePick, input []float32, scratch *v41ProjScratch, st *v41ForwardState) (outputs [][]float32, err error) {
+func (m *Model) v41EPOwnerSum(c *v41ExpertParallelCollective, owners TPPlan, digest [32]byte, layer int, picks []routePick, input []float32, scratch *v41ProjScratch, st *v41ForwardState) (sum []float32, err error) {
 	defer func() {
 		if err != nil {
+			if c.failure == nil {
+				c.failure = err
+			}
 			c.g.abortV41EP()
 		}
 	}()
+	if c.failure != nil {
+		return nil, c.failure
+	}
 	H := m.Cfg.HiddenSize
 	plan, err := v41EPGatherPlan(picks, owners, H)
 	if err != nil {
@@ -165,14 +166,14 @@ func (m *Model) v41EPOwnerRows(c *v41ExpertParallelCollective, owners TPPlan, di
 		return nil
 	}()
 	v41EPHeader(part, digest, localErr != nil)
-	gathered, err := c.gather(part, plan)
-	if err != nil {
-		return nil, err
-	}
+	sum, err = c.reduce(part, v41EPReduction{owners: owners, digest: digest, layer: layer, picks: picks, width: H, sum: st.routedSum})
+	// A failed owner receives only the generic root refusal. Preserve its own
+	// selected-operation cause locally, after participating in the failed round.
 	if localErr != nil {
-		return nil, fmt.Errorf("%w: owner %d layer %d: %w", ErrV41ExpertParallel, rank, layer, localErr)
+		c.failure = fmt.Errorf("%w: owner %d layer %d: %w", ErrV41ExpertParallel, rank, layer, localErr)
+		return nil, c.failure
 	}
-	return v41EPUnpack(gathered, plan, owners, digest, picks, H)
+	return sum, err
 }
 
 func v41EPUnpack(gathered []float32, plan, owners TPPlan, digest [32]byte, picks []routePick, width int) ([][]float32, error) {

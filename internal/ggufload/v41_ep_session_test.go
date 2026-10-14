@@ -171,13 +171,23 @@ func TestV41ExpertParallelSessionFactory(t *testing.T) {
 				return err
 			}
 		}
-		if len(backend.sums) != len(refBackend.sums) || len(backend.order) != 18 || backend.routed != 6 {
+		if len(backend.order) != 18 || backend.routed != 6 {
 			return fmt.Errorf("factory rank %d missed owned native work", g.Rank())
 		}
-		for i, round := range backend.sums {
-			if !slices.Equal(round, refBackend.sums[i]) {
-				return fmt.Errorf("factory rank %d position %d changed exact reduction", g.Rank(), i)
+		if g.Rank() == 0 {
+			if len(backend.sums) != len(refBackend.sums) {
+				return fmt.Errorf("factory root changed routed sum count")
 			}
+			for i, round := range backend.sums {
+				if !slices.Equal(round, refBackend.sums[i]) {
+					return fmt.Errorf("factory root position %d changed exact reduction", i)
+				}
+			}
+		} else if len(backend.sums) != 0 {
+			return fmt.Errorf("factory follower rank %d executed a routed sum", g.Rank())
+		}
+		if len(refBackend.finalRows) != 3 || !slices.Equal(backend.finalRows, refBackend.finalRows) {
+			return fmt.Errorf("factory rank %d changed final routed F32 row bytes", g.Rank())
 		}
 		return backend.retired()
 	})

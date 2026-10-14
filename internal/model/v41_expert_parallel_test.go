@@ -107,12 +107,10 @@ func v41EPTestGroup(t *testing.T, fn func(*DistComm) error) []error {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		closeSockets()
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Fatal("EP workers did not retire after socket cancellation")
-		}
-		t.Fatal("EP operation exceeded bounded regression deadline")
+		// Never unwind into model/session cleanup while a worker still uses
+		// it. Test/process deadlines bound this join after socket cancellation.
+		<-done
+		t.Fatal("EP operation exceeded bounded regression deadline; joined workers after socket cancellation")
 	}
 	return errs
 }

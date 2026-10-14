@@ -27,6 +27,8 @@ type v41ExpertParallelCollective struct {
 	g                                             *DistComm
 	binding                                       [64]byte
 	rounds, sentBytes, receivedBytes, gatherNanos atomic.Uint64
+	timeout                                       time.Duration
+	failure                                       error // Serial, like DistComm; the first failed round is terminal.
 }
 
 // NewV41ExpertParallelCollective binds exact per-pick transport to an existing
@@ -37,7 +39,7 @@ func NewV41ExpertParallelCollective(g *DistComm, binding V41ExpertParallelBindin
 	if g == nil || g.Size() < 2 || g.Rank() < 0 || g.Rank() >= g.Size() {
 		return nil, fmt.Errorf("%w: invalid process group", ErrV41ExpertParallel)
 	}
-	c := &v41ExpertParallelCollective{g: g}
+	c := &v41ExpertParallelCollective{g: g, timeout: v41EPRoundTimeout}
 	for i, value := range []string{binding.ArtifactSHA256, binding.SourceSHA256} {
 		decoded, err := hex.DecodeString(value)
 		if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != value {
@@ -53,7 +55,7 @@ func (*v41ExpertParallelCollective) AllReduceSum([][]float32) ([]float32, error)
 }
 
 func (*v41ExpertParallelCollective) AllGather([][]float32, TPPlan) ([]float32, error) {
-	return nil, fmt.Errorf("%w: use the checked per-pick gather", ErrV41ExpertParallel)
+	return nil, fmt.Errorf("%w: use the checked root-ordered reduction", ErrV41ExpertParallel)
 }
 
 // Abort closes socket handles without mutating DistComm's connection table, so
@@ -77,11 +79,16 @@ func (g *DistComm) abortV41EP() {
 // Payload widths are header + owned picks*H, never ranks*topK*H padding. Using
 // positive header widths preserves TPPlan's nonempty-band invariant.
 const v41EPHeaderWords = 10
-const v41EPWireVersion = uint32(0x56343101)
+const v41EPWireVersion = uint32(0x56343102)
 const v41EPRoundTimeout = 30 * time.Second
 
+// Bound both aggregate host storage and each length-prefixed wire payload before
+// allocation. This is an admission limit, not a throughput qualification.
+const v41EPMaxFrameBytes = 64 << 20
+const v41EPMaxWords = (v41EPMaxFrameBytes - 5) / 4
+
 func v41EPGatherPlan(picks []routePick, owners TPPlan, width int) (TPPlan, error) {
-	if err := owners.Validate(); err != nil || width <= 0 {
+	if err := owners.Validate(); err != nil || width <= 0 || width > v41EPMaxWords-v41EPHeaderWords || len(owners.Shards) > v41EPMaxWords/v41EPHeaderWords {
 		return TPPlan{}, fmt.Errorf("%w: invalid ownership or row width", ErrV41ExpertParallel)
 	}
 	counts := make([]int, len(owners.Shards))
@@ -99,7 +106,7 @@ func v41EPGatherPlan(picks []routePick, owners TPPlan, width int) (TPPlan, error
 	plan := TPPlan{Shards: make([]TPShard, len(counts))}
 	for rank, count := range counts {
 		cells, ok := checkedMulInt(count, width)
-		if !ok || cells > int(^uint(0)>>1)-v41EPHeaderWords-plan.Dim {
+		if !ok || cells > v41EPMaxWords-v41EPHeaderWords-plan.Dim {
 			return TPPlan{}, fmt.Errorf("%w: gather dimensions overflow", ErrV41ExpertParallel)
 		}
 		next := plan.Dim + v41EPHeaderWords + cells
@@ -109,42 +116,9 @@ func v41EPGatherPlan(picks []routePick, owners TPPlan, width int) (TPPlan, error
 	return plan, plan.Validate()
 }
 
-func (c *v41ExpertParallelCollective) gather(part []float32, plan TPPlan) (out []float32, err error) {
-	// Only the selected V4.1 operation sets deadlines. Idle follower frame
-	// waits and every existing GLM collective keep their prior behavior.
-	err = c.g.v41EPDeadline(time.Now().Add(v41EPRoundTimeout))
-	defer func() {
-		if err == nil {
-			err = c.g.v41EPDeadline(time.Time{})
-		}
-		if err != nil {
-			c.g.abortV41EP()
-			err = fmt.Errorf("%w: gather: %v", ErrV41ExpertParallel, err)
-		}
-	}()
-	if err != nil {
-		return nil, err
-	}
-	opened := time.Now()
-	out, err = c.g.AllGather(part, plan)
-	if err == nil {
-		// These are completed application frames (length/op/status/vector
-		// headers included), not socket/IP overhead or failed partial I/O.
-		if c.g.Rank() == 0 {
-			c.sentBytes.Add(uint64((c.g.Size() - 1) * (9 + 4*len(out))))
-			c.receivedBytes.Add(uint64(9*(c.g.Size()-1) + 4*(plan.Dim-len(part))))
-		} else {
-			c.sentBytes.Add(uint64(9 + 4*len(part)))
-			c.receivedBytes.Add(uint64(9 + 4*len(out)))
-		}
-		c.gatherNanos.Add(uint64(time.Since(opened)))
-		c.rounds.Add(1)
-	}
-	return out, err
-}
-
 func v41EPHeader(part []float32, digest [32]byte, failed bool) {
 	part[0] = math.Float32frombits(v41EPWireVersion)
+	part[1] = 0
 	if failed {
 		part[1] = math.Float32frombits(1)
 	}
@@ -157,7 +131,8 @@ func v41EPHeader(part []float32, digest [32]byte, failed bool) {
 
 var _ Collective = (*v41ExpertParallelCollective)(nil)
 
-// V41ExpertParallelTransportStats counts completed gathers on this rank only.
+// V41ExpertParallelTransportStats counts completed gather/reduce/broadcast rounds
+// on this rank only. CompletedGathers retains its existing public field name.
 // It excludes decode broadcasts, failed partial I/O and TCP/IP overhead. It is
 // mechanism telemetry, not throughput or device-execution qualification.
 type V41ExpertParallelTransportStats struct {

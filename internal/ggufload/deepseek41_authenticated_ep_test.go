@@ -39,15 +39,16 @@ func (r *ds41EPSource) Close() error {
 // establishes physical device execution, residency, DMA or performance.
 type ds41EPRecorder struct {
 	compute.Backend
-	allowed map[[32]byte]string
-	names   map[compute.Buffer]string
-	live    map[compute.Buffer]bool
-	frees   map[compute.Buffer]int
-	order   []string
-	routed  int
-	sumAcc  map[compute.Buffer]int
-	sumRows map[compute.Buffer]bool
-	sums    [][][32]byte
+	allowed   map[[32]byte]string
+	names     map[compute.Buffer]string
+	live      map[compute.Buffer]bool
+	frees     map[compute.Buffer]int
+	order     []string
+	routed    int
+	sumAcc    map[compute.Buffer]int
+	sumRows   map[compute.Buffer]bool
+	sums      [][][32]byte
+	finalRows [][32]byte
 }
 
 func newDS41EPRecorder(m *model.Model) *ds41EPRecorder {
@@ -119,6 +120,24 @@ func (b *ds41EPRecorder) Free(x compute.Tensor) {
 func (b *ds41EPRecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
 	out := b.Upload(x, dt)
 	switch site {
+	case "V4.1 shared-add accumulator":
+		// Observe the exact routed F32 row before adding the shared expert.
+		// Every rank consumes this site, including followers with no sum.
+		if class != compute.MemoryActivation || dt != compute.F32 || !slices.Equal(out.Shape, []int{256}) {
+			panic("final routed row lost its F32 geometry or class")
+		}
+		values := b.Backend.Read(out)
+		if len(values) != 256 {
+			panic("final routed row changed width")
+		}
+		raw := make([]byte, 4*len(values))
+		for i, value := range values {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				panic("final routed row is nonfinite")
+			}
+			binary.LittleEndian.PutUint32(raw[4*i:], math.Float32bits(value))
+		}
+		b.finalRows = append(b.finalRows, sha256.Sum256(raw))
 	case "V4.1 routed-sum accumulator", "V4.1 routed-sum expert output":
 		if class != compute.MemoryActivation || dt != compute.F32 || !slices.Equal(out.Shape, []int{256}) {
 			panic("routed-sum upload lost site geometry or class")
@@ -350,8 +369,8 @@ func TestDeepSeek41AuthenticatedExpertParallelSession(t *testing.T) {
 	if len(refBackend.order) != 3*model.V41RouterTopK*3 || refBackend.routed != 3*model.V41RouterTopK {
 		t.Fatal("full reference did not execute the expected mixed expert graph")
 	}
-	if len(refBackend.sums) != 3 {
-		t.Fatal("reference did not record one routed sum per position")
+	if len(refBackend.sums) != 3 || len(refBackend.finalRows) != 3 {
+		t.Fatal("reference did not record one routed sum and final F32 row per position")
 	}
 	for _, round := range refBackend.sums {
 		unique := map[[32]byte]bool{}
@@ -447,13 +466,22 @@ func TestDeepSeek41AuthenticatedExpertParallelSession(t *testing.T) {
 				return fmt.Errorf("rank %d reference projection %s executions=%d want3", rank, name, count)
 			}
 		}
-		if len(backend.sums) != len(refBackend.sums) {
-			return fmt.Errorf("rank %d routed sum count=%d want%d", rank, len(backend.sums), len(refBackend.sums))
-		}
-		for i, round := range backend.sums {
-			if !slices.Equal(round, refBackend.sums[i]) {
-				return fmt.Errorf("rank %d position %d routed contribution bytes/order differ", rank, i)
+		if rank == 0 {
+			if len(backend.sums) != len(refBackend.sums) {
+				return fmt.Errorf("root routed sum count=%d want%d", len(backend.sums), len(refBackend.sums))
 			}
+			for i, round := range backend.sums {
+				if !slices.Equal(round, refBackend.sums[i]) {
+					return fmt.Errorf("root position %d routed contribution bytes/order differ", i)
+				}
+			}
+		} else if len(backend.sums) != 0 {
+			// Keep shutdown joined even in the baseline witness; returning
+			// here would cancel peers still receiving the shutdown frame.
+			t.Errorf("follower rank %d executed %d routed sums", rank, len(backend.sums))
+		}
+		if !slices.Equal(backend.finalRows, refBackend.finalRows) {
+			return fmt.Errorf("rank %d final routed F32 row bytes differ", rank)
 		}
 		if err := backend.retired(); err != nil {
 			return err
