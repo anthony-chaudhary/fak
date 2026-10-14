@@ -6800,6 +6800,11 @@
           "category": "incidental",
           "reason": "Outcome value reporting replacement of an existing llama soft-slot owner; extends the existing soft-slot decision vocabulary without introducing a separate session-runtime concept.",
           "token": "SoftSlotStolen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed trace correlation label preserves an existing producer session identifier; it does not define a session lifecycle, runtime owner or new session mechanism.",
+          "token": "CorrelationSession"
         }
       ],
       "exclude": [
@@ -6817,6 +6822,7 @@
         "BytesPerSession",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
+        "CorrelationSession",
         "CoveredSessions",
         "DataSlotDescriptor",
         "DiagnoseHistoryIndex",

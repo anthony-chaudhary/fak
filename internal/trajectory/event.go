@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/traceabi"
 )
 
 const EventSchema = "fak-trajectory-event/1alpha1"
@@ -82,6 +84,18 @@ type Event struct {
 	Source         EventSource     `json:"source"`
 	Payload        json.RawMessage `json:"payload"`
 	Loss           *LossReport     `json:"loss,omitempty"`
+	// Causal is additive: new readers accept legacy rows, leaving this nil.
+	// Old strict readers must upgrade before consuming rows with this field.
+	Causal *traceabi.CausalEnvelope `json:"causal,omitempty"`
+}
+
+// CausalMappingStatus reports legacy absence as unknown without manufacturing
+// an envelope or changing legacy JSON bytes and digests.
+func (e Event) CausalMappingStatus() traceabi.MappingStatus {
+	if e.Causal == nil {
+		return traceabi.MappingUnknown
+	}
+	return e.Causal.MappingStatus
 }
 
 func (e Event) Validate() error {
@@ -108,6 +122,11 @@ func (e Event) Validate() error {
 	}
 	if len(e.Payload) == 0 || !json.Valid(e.Payload) {
 		return errors.New("trajectory event payload must be valid JSON")
+	}
+	if e.Causal != nil {
+		if err := e.Causal.Validate(); err != nil {
+			return fmt.Errorf("trajectory event causal identity: %w", err)
+		}
 	}
 	return nil
 }

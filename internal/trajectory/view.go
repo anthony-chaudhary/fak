@@ -112,6 +112,22 @@ func CompileView(events []Event, spec ViewSpec) ([]ProjectedEvent, ViewReceipt, 
 			return nil, receipt, fmt.Errorf("event %s redaction: %w", event.ID, err)
 		}
 		copyEvent.Payload = redactedPayload
+		if event.Causal != nil {
+			if len(spec.RedactFields) != 0 {
+				// Opaque correlations can alias redacted payload fields. Drop the
+				// entire optional envelope for any requested field redaction;
+				// selective replacement would manufacture invalid identity.
+				copyEvent.Causal = nil
+				redacted = append(redacted, "causal")
+				sort.Strings(redacted)
+			} else {
+				causal, err := event.Causal.Canonical()
+				if err != nil {
+					return nil, receipt, err
+				}
+				copyEvent.Causal = &causal
+			}
+		}
 		receipt.RedactedFields += len(redacted)
 		projected = append(projected, ProjectedEvent{Event: copyEvent, RedactedFields: redacted})
 	}
