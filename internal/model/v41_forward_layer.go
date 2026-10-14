@@ -566,6 +566,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	coldAttentionOwner := v41ColdAttentionResidentOwner(st.layerState(l), seq, cfg.windowForLayer(l), len(sharedKV), scratch.sharedAttention)
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
+	attnProjectionInput := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
 		// The reference concatenates this layer's window with selected source
 		// groups before ONE sink contraction, even before a group completes.
@@ -599,12 +600,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			if err != nil {
 				return err
 			}
-			projected, err := projectOutput(o)
-			if err != nil {
-				return v41StageErr(v41StageAttention, l, err)
-			}
-			attnOut[t] = projected
-			trace.record(l, t, v41TraceStageAttnOut, projected)
+			attnProjectionInput[t] = o
 			continue
 		}
 		// #13303: the plain layer's visible keys are its CONFIGURED causal
@@ -633,12 +629,56 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		projected, err := projectOutput(o)
-		if err != nil {
-			return v41StageErr(v41StageAttention, l, err)
+		attnProjectionInput[t] = o
+	}
+
+	panelHandled := false
+	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m {
+		totalIn, valid := checkedMulInt(nH, hd)
+		panelN, panelValid := checkedMulInt(seq, totalIn)
+		if valid && panelValid {
+			flat := make([]float32, panelN)
+			for t, row := range attnProjectionInput {
+				if len(row) != totalIn {
+					return v41StageErr(v41StageAttention, l, errV41ProjectionResult)
+				}
+				copy(flat[t*totalIn:(t+1)*totalIn], row)
+			}
+			projected, outcome, cause := st.callbackOwner.v41GroupedOutputPanel(l, flat, seq, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			switch outcome {
+			case v41ProjectionHandled:
+				if cause != nil || len(projected) != seq {
+					if cause == nil {
+						cause = errV41ProjectionResult
+					}
+					return v41StageErr(v41StageAttention, l, cause)
+				}
+				for t, row := range projected {
+					if len(row) != H {
+						return v41StageErr(v41StageAttention, l, errV41ProjectionResult)
+					}
+					attnOut[t] = row
+				}
+				panelHandled = true
+			case v41ProjectionError:
+				return v41StageErr(v41StageAttention, l, cause)
+			case v41ProjectionDeclined:
+			default:
+				return v41StageErr(v41StageAttention, l, errV41ProjectionResult)
+			}
 		}
-		attnOut[t] = projected
-		trace.record(l, t, v41TraceStageAttnOut, projected)
+	}
+	if !panelHandled {
+		for t, row := range attnProjectionInput {
+			projected, cause := projectOutput(row)
+			if cause != nil {
+				return v41StageErr(v41StageAttention, l, cause)
+			}
+			attnOut[t] = projected
+		}
+	}
+	for t, row := range attnOut {
+		trace.record(l, t, v41TraceStageAttnOut, row)
 	}
 
 	// ---- MoE: router + shared expert + routed experts ----
