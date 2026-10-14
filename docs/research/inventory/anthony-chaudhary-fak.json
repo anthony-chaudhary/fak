@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:7f86916d264ba2251969959e08356c69833cf033c97dabb4618b325a4e27bbf2",
-  "tracked_files": 25266,
-  "tracked_bytes": 509444683,
+  "content_root": "sha256:91c84f96e17971e6d8a2e68c5feb31d4f8144c995e0558ca9852c2bdbf8e976b",
+  "tracked_files": 25267,
+  "tracked_bytes": 509463538,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -161953,9 +161953,18 @@
       ]
     },
     {
+      "path": "internal/model/v41_decode_checked_sum_test.go",
+      "content_sha256": "sha256:8b56de4dd859a9826d127cd0e4f3ab00ef68af99c7db76c54703012e4492638a",
+      "bytes": 15767,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/model/v41_decode_shared_resident.go",
-      "content_sha256": "sha256:c2a873fa9e9682559dfab53057d1b29069ee2e409253bda641cfcac17cd1182a",
-      "bytes": 4106,
+      "content_sha256": "sha256:d5e05f2b4f6e4e786867cae76345a2274dbc8da1cac40f4bfa9f9f76979c7bb6",
+      "bytes": 4648,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163404,8 +163413,8 @@
     },
     {
       "path": "internal/model/v41_layer_step.go",
-      "content_sha256": "sha256:5cf1f2ce3c0df9a90c5e7efe02c25904a7a81310593bc35e50cbce744eb10c14",
-      "bytes": 55614,
+      "content_sha256": "sha256:6daeec32d362211017d9fa81a4458d84c5d967232e90702b0ae0a973885084c3",
+      "bytes": 56313,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163602,8 +163611,8 @@
     },
     {
       "path": "internal/model/v41_mhc_resident.go",
-      "content_sha256": "sha256:68353cb1fb541c842bdf7f1625409f759650fe4644eea6a307cd73307fb072a9",
-      "bytes": 17863,
+      "content_sha256": "sha256:4889fa90785a40325cea94f78b17baa6803658e5b0f5cfe789e445f26ef563e5",
+      "bytes": 19060,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -164421,8 +164430,8 @@
     },
     {
       "path": "internal/model/v41_shared_expert_resident.go",
-      "content_sha256": "sha256:138a924ebc00e4a7abafd30a045079a20357ffaa48ae539869adad3b38af4bd5",
-      "bytes": 14750,
+      "content_sha256": "sha256:0488c04ab03eac0848fca683dc7b0f8e4935453721d01c3f25f1f148c22d8ad3",
+      "bytes": 15400,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
