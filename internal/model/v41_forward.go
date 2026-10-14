@@ -323,6 +323,10 @@ func (st *v41ForwardState) retainedCopyCount() int {
 // logits. It is package-private: the public entry points are Model.Forward and
 // Session.Prefill/Step.
 func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, err error) {
+	return m.forwardV41WithHeadSelection(ids, st, false)
+}
+
+func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, lastHeadOnly bool) (act *Activations, err error) {
 	if m.v41EPRequested() && (st == nil || st.callbackOwner == nil || st.routedLayer == nil) {
 		return nil, fmt.Errorf("%w: requires the bound Session forward", ErrV41ExpertParallel)
 	}
@@ -516,6 +520,12 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 		headInput := x[t]
 		if full {
 			headInput = act.Hidden[len(act.Hidden)-1][t*H : (t+1)*H]
+		}
+		if lastHeadOnly && t != len(seq)-1 {
+			if _, err := m.v41PrepareHeadInput(headInput, finalNorm, bf16Boundary); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		logits, err := m.v41HeadWithLogitScale(headInput, headProjection, finalNorm, bf16Boundary, logitScale, logitRefusal)
 		if err != nil {
@@ -748,7 +758,7 @@ func (s *Session) prefillV41(ids []int) []float32 {
 				act = nil
 			}
 		}()
-		act, err = s.M.forwardV41(ids, s.v41State())
+		act, err = s.M.forwardV41WithHeadSelection(ids, s.v41State(), true)
 	}()
 	if err != nil {
 		panic(err)
