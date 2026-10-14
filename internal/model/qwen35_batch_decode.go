@@ -13,11 +13,7 @@ func (bs *BatchSession) stepBatchQwen35HybridQ4K(ids []int) [][]float32 {
 	out, accepted := qwen35HybridQ4KBatchStep(bs, ids)
 	if !accepted {
 		// A decline occurs before any model state mutation, so scalar replay is safe.
-		fallback := make([][]float32, len(ids))
-		for i, id := range ids {
-			fallback[i] = bs.Seqs[i].Step(id)
-		}
-		return fallback
+		return bs.stepBatchSerial(ids, "backend_declined")
 	}
 	return out
 }

@@ -62,7 +62,7 @@ var Phases = []Phase{
 // Decode step paths.
 const (
 	PathSerial  = "serial"  // one lane advanced by Session.Step
-	PathBatched = "batched" // N lanes advanced by one BatchSession.StepBatchActive
+	PathBatched = "batched" // native batch execution; scalar fallbacks use serial
 	// PathSpeculative is one draft-verify round: one target forward that commits
 	// the accepted draft prefix plus the bonus token.
 	PathSpeculative = "speculative"
@@ -173,6 +173,7 @@ type StepRecord struct {
 	Kind       string `json:"kind"`
 	Phase      string `json:"phase,omitempty"`
 	Path       string `json:"path,omitempty"`
+	Reason     string `json:"reason,omitempty"` // named scalar fallback, absent for other steps
 	Lanes      int    `json:"lanes,omitempty"`
 	Tokens     int    `json:"tokens,omitempty"`
 	DurationNS int64  `json:"duration_ns"`
@@ -348,6 +349,17 @@ func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 // ObserveDecodeStep records one decode forward that advanced `lanes` sequences
 // by one token each, over the named path.
 func (r *Recorder) ObserveDecodeStep(path string, lanes int, d time.Duration) {
+	r.observeDecodeStep(path, "", lanes, d)
+}
+
+// ObserveSerialFallback records one actual Session.Step inside a batch-call
+// fallback. Reason is carried only in the bounded recent ring, never as a new
+// metric label; d is that lane's forward time, not the enclosing batch duration.
+func (r *Recorder) ObserveSerialFallback(reason string, d time.Duration) {
+	r.observeDecodeStep(PathSerial, reason, 1, d)
+}
+
+func (r *Recorder) observeDecodeStep(path, reason string, lanes int, d time.Duration) {
 	if r == nil || lanes <= 0 {
 		return
 	}
@@ -364,7 +376,7 @@ func (r *Recorder) ObserveDecodeStep(path string, lanes int, d time.Duration) {
 	r.stepLanes[path].observe(float64(lanes))
 	r.decodeTokens[path] += uint64(lanes)
 	r.lastStep = r.now()
-	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: path, Lanes: lanes, Tokens: lanes, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
+	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: path, Reason: reason, Lanes: lanes, Tokens: lanes, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
 }
 
 // ObserveSpeculativeRound records one draft-verify round on PathSpeculative:

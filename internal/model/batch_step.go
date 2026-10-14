@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // StepBatch decodes ONE token for each user (ids[b] is user b's already-chosen token) and
 // returns B next-token logit vectors. In the f32 path each user's logits are bit-for-bit
 // identical to bs.Seqs[b].Step(ids[b]) run serially; the only difference is that the weight
@@ -18,18 +20,31 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 	}
 	if len(ids) == 1 || !batchDecodeFastPathOK(bs.M.Cfg, bs.Quant) {
 		if len(ids) == 1 {
-			return [][]float32{bs.Seqs[0].Step(ids[0])}
+			return bs.stepBatchSerial(ids, "singleton")
 		}
-		out := make([][]float32, len(ids))
-		for b, id := range ids {
-			out[b] = bs.Seqs[b].Step(id)
-		}
-		return out
+		return bs.stepBatchSerial(ids, "unsupported_config")
 	}
 	if bs.Quant {
 		return bs.stepBatchQ(ids)
 	}
 	return bs.stepBatchF32(ids)
+}
+
+func (bs *BatchSession) stepBatchSerial(ids []int, reason string) [][]float32 {
+	out := make([][]float32, len(ids))
+	observe := bs.ObserveSerialStep
+	for b, id := range ids {
+		if observe == nil {
+			out[b] = bs.Seqs[b].Step(id)
+			continue
+		}
+		started := time.Now()
+		out[b] = bs.Seqs[b].Step(id)
+		// Neither another lane's forward nor observer overhead belongs to this
+		// scalar execution. Never replicate the enclosing batch-call duration.
+		observe(reason, time.Since(started))
+	}
+	return out
 }
 
 // LastStepMACs returns the exact multiply-accumulate count of the B-proportional projection
@@ -115,11 +130,12 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 	// are absent from sub.Seqs, so they are neither projected over nor attended — zero work on
 	// them, which is exactly the (C−K)/C compaction LastStepMACs witnesses.
 	sub := &BatchSession{
-		M:       bs.M,
-		Seqs:    make([]*Session, len(idx)),
-		Quant:   bs.Quant,
-		scratch: bs.scratch,
-		dbuf:    bs.dbuf,
+		M:                 bs.M,
+		Seqs:              make([]*Session, len(idx)),
+		Quant:             bs.Quant,
+		scratch:           bs.scratch,
+		dbuf:              bs.dbuf,
+		ObserveSerialStep: bs.ObserveSerialStep,
 	}
 	subIDs := make([]int, len(idx))
 	for i, b := range idx {

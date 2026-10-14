@@ -41,6 +41,7 @@ package model
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 const batchRectPrefillMaxTokens = 512
@@ -161,6 +162,12 @@ type BatchSession struct {
 
 	// lastStepSharedPanels counts operations where one weight served at least two lanes.
 	lastStepSharedPanels int
+
+	// ObserveSerialStep optionally observes each actual Session.Step fallback.
+	// It runs synchronously after that lane's forward, with only the forward's
+	// elapsed time. Ragged sub-sessions retain this caller-owned observer.
+	// Reasons are singleton, unsupported_config, and backend_declined.
+	ObserveSerialStep func(reason string, d time.Duration)
 
 	// lastStepMACs is the exact MAC count of the B-proportional projection GEMMs (QKV +
 	// attention-output + SwiGLU gate/up/down + the LM head) of the most recent StepBatch /

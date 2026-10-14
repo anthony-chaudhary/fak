@@ -1224,6 +1224,11 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		seqs[i] = ln.s
 	}
 	bs := &model.BatchSession{M: m, Seqs: seqs, Quant: quant}
+	serialSteps := 0
+	bs.ObserveSerialStep = func(reason string, d time.Duration) {
+		serialSteps++
+		enginestep.Default.ObserveSerialFallback(reason, d)
+	}
 	ids := make([]int, len(lanes))
 	active := make([]bool, len(lanes))
 	for {
@@ -1264,14 +1269,19 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 			forwardStarted = forwardNow()
 		}
 		stepStart := time.Now()
+		serialSteps = 0
 		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
 		if !probed {
 			out = bs.StepBatchActive(ids, active)
 			panels = bs.LastStepSharedPanels()
 			macs = bs.LastStepMACs()
 		}
-		enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
+		if serialSteps == 0 {
+			enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
+		}
 		if forwardNow != nil {
+			// This trace preserves outer call provenance and duration even when
+			// the execution recorder above reports individual scalar fallbacks.
 			duration := forwardNow().Sub(forwardStarted)
 			for i, isActive := range active {
 				if !isActive {
