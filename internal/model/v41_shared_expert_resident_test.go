@@ -30,6 +30,8 @@ type v41ColdSharedRecorder struct {
 	activationBytes, dataBytes                  int
 	sharedWeights                               map[compute.Buffer]int
 	sharedReads                                 []int
+	deferredReadSites                           [][]uint32
+	deferredReadRows                            []int
 	active, lastProjection                      int
 	deny, denyQ6                                bool
 	failMatMul                                  int
@@ -199,13 +201,19 @@ func (b *v41ColdSharedRecorder) V41BF16PublishDeferred(x compute.Tensor, site ui
 	return p, st, err
 }
 func (b *v41ColdSharedRecorder) V41ReadDeferred(statuses []compute.V41DeferredStatus, rows []compute.Tensor) ([]error, [][]float32, error) {
+	sites := make([]uint32, len(statuses))
+	for i := range statuses {
+		sites[i] = statuses[i].Site
+	}
+	b.deferredReadSites = append(b.deferredReadSites, sites)
+	b.deferredReadRows = append(b.deferredReadRows, len(rows))
 	b.dataReads += len(rows)
 	for _, row := range rows {
 		b.dataBytes += row.Numel() * 4
 	}
 	if b.active >= 0 {
 		b.sharedReads[b.active] += len(rows)
-		if b.lastProjection == 2 && len(statuses) == 1 && statuses[0].Site == compute.V41BF16PublishSharedExpertProjection {
+		if b.lastProjection == 2 && len(statuses) > 0 && statuses[len(statuses)-1].Site == compute.V41BF16PublishSharedExpertProjection {
 			b.active = -1
 		}
 	}
@@ -320,33 +328,43 @@ func TestV41ColdSharedResidentScalarChain(t *testing.T) {
 				m, input := v41ColdSharedFixture(t, dtype)
 				m.Cfg.SwigluLimit = limit
 				t.Cleanup(func() { _ = m.CloseWeights() })
-				old, next := newV41ColdSharedRecorder(), newV41ColdSharedRecorder()
-				control, candidate := v41ColdSharedSession(m, old), v41ColdSharedSession(m, next)
+				full, old, next := newV41ColdSharedRecorder(), newV41ColdSharedRecorder(), newV41ColdSharedRecorder()
+				reference, control, candidate := v41ColdSharedSession(m, full), v41ColdSharedSession(m, old), v41ColdSharedSession(m, next)
+				defer reference.Close()
 				defer control.Close()
 				defer candidate.Close()
-				chain := candidate.v41ColdSharedExpertChain(0)
-				want, err := m.v41FullSharedExpertSwiGLU(0, input, m.Cfg, control.v41DenseProjectionFunc(), control.v41SharedActivationFunc(), control.v41BF16PublishFunc())
+				want, err := m.v41FullSharedExpertSwiGLU(0, input, m.Cfg, reference.v41DenseProjectionFunc(), reference.v41SharedActivationFunc(), reference.v41BF16PublishFunc())
 				if err != nil {
 					t.Fatal(err)
 				}
+				oldChain := control.v41SharedExpertChain(0, false, nil, nil)
+				oldWant, oldSelected, err := oldChain(input)
+				if err != nil || !oldSelected {
+					t.Fatalf("old four-read control selected=%t error=%v", oldSelected, err)
+				}
+				chain := candidate.v41ColdSharedExpertChain(0)
 				got, selected, err := chain(input)
 				if err != nil || !selected {
 					t.Fatalf("selected=%t error=%v", selected, err)
 				}
-				if !v41ColdSharedEqualWords(got, want) || !v41ColdSharedEqualMath(next.math, old.math) {
-					t.Fatal("result or actual scalar arithmetic operands/results changed")
+				if !v41ColdSharedEqualWords(got, want) || !v41ColdSharedEqualWords(got, oldWant) || !v41ColdSharedEqualMath(next.math, full.math) || !v41ColdSharedEqualMath(next.math, old.math) {
+					t.Fatal("result or actual scalar arithmetic differs from independent full helper or old resident control")
 				}
 				if len(next.math) != 4 || next.math[0].dtype != dtype || next.math[1].dtype != dtype || next.math[3].dtype != dtype {
 					t.Fatal("wrong kernel sequence or weight dtype")
 				}
-				if next.activationUploads != 1 || next.dataReads != 1 || next.deferredFences != 4 || old.dataReads <= next.dataReads {
-					t.Fatalf("uploads/reads/fences=%d/%d/%d baseline reads=%d", next.activationUploads, next.dataReads, next.deferredFences, old.dataReads)
+				if next.activationUploads != 1 || next.dataReads != 1 || next.deferredFences != 1 || old.dataReads != 1 || old.deferredFences != 4 || full.dataReads <= next.dataReads {
+					t.Fatalf("uploads=%d candidate rows/fences=%d/%d old rows/fences=%d/%d full-helper rows=%d", next.activationUploads, next.dataReads, next.deferredFences, old.dataReads, old.deferredFences, full.dataReads)
 				}
 				if next.activationBytes != 4*len(input) || next.dataBytes != 4*len(input) {
 					t.Fatalf("activation/data bytes=%d/%d want=%d/%d", next.activationBytes, next.dataBytes, 4*len(input), 4*len(input))
 				}
-				if !reflect.DeepEqual(next.deferredSites, []uint32{compute.V41BF16PublishSharedExpertProjection, compute.V41BF16PublishSharedExpertProjection, compute.V41BF16PublishSharedExpertDownInput, compute.V41BF16PublishSharedExpertProjection}) {
+				orderedSites := []uint32{compute.V41BF16PublishSharedExpertProjection, compute.V41BF16PublishSharedExpertProjection, compute.V41BF16PublishSharedExpertDownInput, compute.V41BF16PublishSharedExpertProjection}
+				if !reflect.DeepEqual(next.deferredSites, orderedSites) || !reflect.DeepEqual(next.deferredReadSites, [][]uint32{orderedSites}) || !reflect.DeepEqual(next.deferredReadRows, []int{1}) {
 					t.Fatal("BF16 boundary order changed")
+				}
+				if !reflect.DeepEqual(old.deferredReadSites, [][]uint32{{orderedSites[0]}, {orderedSites[1]}, {orderedSites[2]}, {orderedSites[3]}}) || !reflect.DeepEqual(old.deferredReadRows, []int{0, 0, 0, 1}) {
+					t.Fatal("old four-read control no longer witnesses one status per fence and one final row")
 				}
 				for _, op := range next.math[1:] {
 					if !v41BF16Widened(op.x) {
@@ -420,12 +438,13 @@ func TestV41ColdSharedResidentFailureOrderAndOwnership(t *testing.T) {
 			case "gate-status", "primary-before-cleanup":
 				b.deferredFaultAt, b.deferredFault = 1, primary
 				b.failMatMul = 2
+				wantMatmuls = 2
 			case "up-status":
 				b.deferredFaultAt, b.deferredFault = 2, primary
-				wantMatmuls = 2
+				wantMatmuls = 3
 			case "activation-status":
 				b.deferredFaultAt, b.deferredFault = 3, primary
-				wantMatmuls = 2
+				wantMatmuls = 3
 			case "down-status":
 				b.deferredFaultAt, b.deferredFault = 4, primary
 				wantMatmuls = 3
@@ -433,6 +452,7 @@ func TestV41ColdSharedResidentFailureOrderAndOwnership(t *testing.T) {
 				b.failMatMul = 1
 			case "transport":
 				b.deferredReadErr = primary
+				wantMatmuls = 3
 			}
 			if mode == "primary-before-cleanup" {
 				b.cleanupPanic = true
@@ -444,6 +464,9 @@ func TestV41ColdSharedResidentFailureOrderAndOwnership(t *testing.T) {
 			}
 			if b.deferredFaultAt > 0 && (!errors.Is(err, primary) || errors.Is(err, later)) {
 				t.Fatalf("fault precedence lost: %v", err)
+			}
+			if b.deferredFaultAt > 0 && (b.deferredFences != 1 || len(b.deferredReadSites) != 1 || len(b.deferredPending) != 0) {
+				t.Fatalf("issued statuses were not drained once: fences=%d batches=%d pending=%d", b.deferredFences, len(b.deferredReadSites), len(b.deferredPending))
 			}
 			if b.freed[b.unrelated.Buf()] != 0 || b.freed[b.foreign.Buf()] != 0 {
 				t.Fatal("borrowed or foreign tensor freed")

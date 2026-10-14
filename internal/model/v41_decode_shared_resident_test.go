@@ -42,11 +42,11 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	cold, _, fourFence := newLane()
+	cold, _, packedCold := newLane()
 	owned(cold, func() {
 		got, selected, err := cold.v41ColdSharedExpertChain(0)(input)
-		if err != nil || !selected || !v41ColdSharedEqualWords(got, want) || fourFence.dataReads != 1 || fourFence.deferredFences != 4 {
-			t.Fatalf("cold resident control changed: reads=%d fences=%d error=%v", fourFence.dataReads, fourFence.deferredFences, err)
+		if err != nil || !selected || !v41ColdSharedEqualWords(got, want) || packedCold.dataReads != 1 || packedCold.deferredFences != 1 {
+			t.Fatalf("cold resident packed read changed: reads=%d fences=%d error=%v", packedCold.dataReads, packedCold.deferredFences, err)
 		}
 	})
 	s, scratch, next := newLane()

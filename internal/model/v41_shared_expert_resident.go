@@ -53,11 +53,11 @@ type v41SharedResidentConsumer func(shared compute.Tensor, own func(compute.Tens
 // Appending its lazy resolutions protects future tokens without rescanning the
 // whole model cache for every row or temporary tensor.
 func (s *Session) v41ColdSharedExpertChain(layer int) v41ColdSharedResidentFunc {
-	return s.v41SharedExpertChain(layer, false, nil, nil)
+	return s.v41SharedExpertChain(layer, true, nil, nil)
 }
 
-// The owner-bound decode tail selects one packed read for the four existing
-// status records. Cold prefill retains its original four-fence control.
+// Both cold prefill and the owner-bound decode tail select one packed read for
+// the four existing status records.
 func (s *Session) v41DeferredSharedExpertChain(layer int) v41ColdSharedResidentFunc {
 	return s.v41SharedExpertChain(layer, true, nil, nil)
 }
