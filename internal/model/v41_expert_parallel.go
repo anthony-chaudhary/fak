@@ -72,9 +72,17 @@ func (s *Session) bindV41ExpertParallel(st *v41ForwardState) {
 	// The session-local ordinal binds repeated layer/route calls; the existing
 	// coordinator serializes frames and resets follower sessions on pos=0.
 	var ordinal uint64
-	st.routedLayer = func(layer int, picks []routePick, input []float32) ([]float32, v41RoutedExpertOutcome, error) {
+	nextIdentity := func(layer, position int, prefill bool, picks []routePick, input []float32) [32]byte {
 		ordinal++
 		digest := v41EPIdentity(c.binding, configDigest, ordinal, layer, s.v41Forward.history, picks, input)
+		return v41EPPositionIdentity(digest, position, prefill)
+	}
+	st.routedPrefill = func(layer int, picks [][]routePick, inputs [][]float32, scratch *v41ProjScratch) ([][]float32, error) {
+		return s.M.v41EPPrefillSum(c, owners, layer, picks, inputs, scratch, st, nextIdentity)
+	}
+	st.routedLayer = func(layer int, picks []routePick, input []float32) ([]float32, v41RoutedExpertOutcome, error) {
+		// Incremental Step appends its current token only after the head commits.
+		digest := nextIdentity(layer, len(s.v41Forward.history), false, picks, input)
 		scratch := &v41ProjScratch{}
 		sum, cause := s.M.v41EPOwnerSum(c, owners, digest, layer, picks, input, scratch, st)
 		if cause != nil {

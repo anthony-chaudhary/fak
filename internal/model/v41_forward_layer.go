@@ -775,19 +775,20 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// token-major stream byte-for-byte.
 	var routedByToken [][]float32
 	if m.v41EPRequested() {
-		if !full || st == nil || st.routedLayer == nil {
-			return fmt.Errorf("%w: missing Session routed-layer binding", ErrV41ExpertParallel)
+		if !full || st == nil || st.routedPrefill == nil {
+			return fmt.Errorf("%w: missing Session routed-prefill binding", ErrV41ExpertParallel)
 		}
-		routedByToken = make([][]float32, seq)
-		for t := range perTokenPicks {
-			values, outcome, cause := st.routedLayer(l, perTokenPicks[t], ffnInputs[t])
-			if cause != nil {
-				return cause
+		routedByToken, err = st.routedPrefill(l, perTokenPicks, ffnInputs, scratch)
+		if err != nil {
+			return err
+		}
+		if len(routedByToken) != seq {
+			return fmt.Errorf("%w: invalid distributed prefill panel", ErrV41ExpertParallel)
+		}
+		for _, values := range routedByToken {
+			if len(values) != H {
+				return fmt.Errorf("%w: invalid distributed prefill row", ErrV41ExpertParallel)
 			}
-			if outcome != v41RoutedExpertHandled || len(values) != H {
-				return fmt.Errorf("%w: distributed routed layer declined", ErrV41ExpertParallel)
-			}
-			routedByToken[t] = values
 		}
 	} else if seq > 1 && !v41ForceTokenMajor {
 		// #13511: thread the session's optional device gate/up callback into the
