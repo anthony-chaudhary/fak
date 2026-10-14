@@ -64,7 +64,10 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 	tiles := v41GroupedPanelTiles(rows)
 	for _, n := range tiles {
 		for _, count := range []int{n * groupIn, n * rank, n * dim} {
-			if !pub.SupportsV41BF16Publish(count) || !deferred.SupportsV41DeferredStatus(count) {
+			if !pub.SupportsV41BF16Publish(count) {
+				return nil, v41ProjectionDeclined, nil
+			}
+			if _, supported := v41DeferredBF16Publisher(s.Backend, count); !supported {
 				return nil, v41ProjectionDeclined, nil
 			}
 		}
