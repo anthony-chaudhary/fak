@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,18 @@ const focusedHelperEnv = "FAK_FOCUSED_PREPUSH_HELPER"
 // testing parses the CLI arguments; no shell launcher or second Go build is needed.
 func init() {
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if name == "git-remote-fak-stall" && os.Getenv("FAK_FOCUSED_PREPUSH_STALL_ADDR") != "" {
+		// A real Git remote-helper child holds this connection until the
+		// production deadline terminates the fetch process group.
+		conn, err := net.DialTimeout("tcp", os.Getenv("FAK_FOCUSED_PREPUSH_STALL_ADDR"), 5*time.Second)
+		if err != nil {
+			os.Exit(94)
+		}
+		_, _ = io.WriteString(conn, "started")
+		_, _ = io.Copy(io.Discard, conn)
+		_ = conn.Close()
+		os.Exit(0)
+	}
 	if os.Getenv(focusedHelperEnv) != "1" || (name != "fak" && name != "go") {
 		return
 	}
@@ -47,7 +60,9 @@ func init() {
 		forbidden("compile a fallback verifier")
 	}
 	normalBuild := os.Getenv("FAK_FOCUSED_PREPUSH_NORMAL_BUILD") == "1"
-	if normalBuild {
+	if os.Getenv("FAK_FOCUSED_PREPUSH_REAL_BUILD") == "1" {
+		prepushTestQuality = func(io.Writer, io.Writer, []string) int { return 0 }
+	} else if normalBuild {
 		// Exercise the real hook and range admission with only compilation
 		// stubbed. No compiler or archive is needed for the protocol witness.
 		prepushExtractTip = func(string, string) (string, error) { return os.MkdirTemp("", "prepush-protocol-") }
@@ -71,11 +86,31 @@ func init() {
 		prepushTestQuality = func(io.Writer, io.Writer, []string) int { forbidden("live test-quality scan"); return 2 }
 	}
 	args := os.Args[1:]
+	if len(args) >= 2 && args[0] == "workflow" {
+		os.Exit(runWorkflow(os.Stdout, os.Stderr, os.Stdin, args[1:]))
+	}
 	if len(args) >= 2 && args[0] == "hooks" {
 		switch args[1] {
 		case "import-witness":
 			os.Exit(runHooksImportWitness(os.Stdout, os.Stderr, args[2:]))
 		case "pre-push":
+			for _, arg := range args[2:] {
+				if arg != "--hydrate-bases" || os.Getenv("FAK_FOCUSED_PREPUSH_ADVANCE_REMOTE") == "" {
+					continue
+				}
+				// Advance the peer after the hook observed the missing old object,
+				// before the native acquisition starts. The protocol row stays fixed.
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				for _, argv := range [][]string{{"commit", "--allow-empty", "-m", "advance during admission"}, {"push", "origin", "main"}} {
+					cmd := windowgate.CommandContext(ctx, "git", argv...)
+					cmd.Dir = os.Getenv("FAK_FOCUSED_PREPUSH_ADVANCE_REMOTE")
+					if out, err := cmd.CombinedOutput(); err != nil {
+						fmt.Fprintln(os.Stderr, err, string(out))
+						os.Exit(93)
+					}
+				}
+			}
 			os.Exit(runHooksPrePush(os.Stdout, os.Stderr, args[2:]))
 		}
 	}
@@ -328,7 +363,17 @@ func (f focusedFixture) run(t *testing.T, executable string, args []string, inpu
 		buildMode = "block"
 		cmd.Env = append(cmd.Env, "FAK_FOCUSED_PREPUSH_NORMAL_BUILD=1")
 	}
+	if os.Getenv("FAK_FOCUSED_PREPUSH_REAL_BUILD") == "1" {
+		buildMode = "block"
+		cmd.Env = append(cmd.Env, "FAK_FOCUSED_PREPUSH_REAL_BUILD=1")
+	}
 	workflowMode, tierMode, popupMode, reviewMode := "off", "off", "off", "off"
+	if os.Getenv("FAK_FOCUSED_PREPUSH_WORKFLOW") == "1" {
+		workflowMode = "block"
+	}
+	if peer := os.Getenv("FAK_FOCUSED_PREPUSH_ADVANCE_REMOTE"); peer != "" {
+		cmd.Env = append(cmd.Env, "FAK_FOCUSED_PREPUSH_ADVANCE_REMOTE="+peer)
+	}
 	if os.Getenv("FAK_FOCUSED_PREPUSH_ALL_CONTENT_GATES") == "1" {
 		workflowMode, tierMode, popupMode, reviewMode = "block", "block", "block", "block"
 	}
@@ -444,5 +489,185 @@ func TestPrepushDeletionOnlySkipsAllContentGatesButRetainsRefPolicy(t *testing.T
 	out, code, calls = f.run(t, gitHookShell(t), []string{hook}, row)
 	if code != 1 || len(calls) != 0 || !strings.Contains(out, "REF_PRUNE (blocked)") {
 		t.Fatalf("deletion lost ref policy: code=%d calls=%v\n%s", code, calls, out)
+	}
+}
+
+// fak-test:runtime medium est=8s lane=default
+func TestPrepushAdvertisedBasePeerRace(t *testing.T) {
+	t.Setenv("FAK_FOCUSED_PREPUSH_NORMAL_BUILD", "1")
+	t.Setenv("FAK_FOCUSED_PREPUSH_WORKFLOW", "1")
+	f := newFocusedFixture(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	f.git(t, "init", "--bare", remote)
+	f.git(t, "push", remote, f.good+":refs/heads/main")
+	f.git(t, "remote", "add", "origin", remote)
+	peer := focusedFixture{root: filepath.Join(t.TempDir(), "peer")}
+	f.git(t, "clone", "--no-local", "--branch", "main", remote, peer.root)
+	peer.git(t, "config", "user.name", "Peer Push Test")
+	peer.git(t, "config", "user.email", "peer-push@example.invalid")
+	peer.git(t, "config", "core.hooksPath", t.TempDir())
+	if err := os.WriteFile(filepath.Join(peer.root, "internal/demo/demo.go"), []byte("package demo\nconst Value = 1\nconst CacheAdded = 2\nconst PeerValue = 3\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	peer.git(t, "add", "internal/demo/demo.go")
+	peer.git(t, "commit", "-m", "peer advances after the pusher last fetched")
+	old := peer.git(t, "rev-parse", "HEAD")
+	peer.git(t, "push", "origin", "main")
+	if advertisedBaseObjectPresent(t, f.root, old) {
+		t.Fatal("race fixture already has the peer's advertised old object")
+	}
+	zero := strings.Repeat("0", len(old))
+	row := func(tip, base, target string) string {
+		return "refs/heads/main " + tip + " refs/heads/" + target + " " + base + "\n"
+	}
+	input := row(f.good, old, "main")
+	hook := prepushHookUnderTest(t)
+	shell := gitHookShell(t)
+	out, code, calls := f.run(t, shell, []string{hook, "origin", remote}, input+"malformed\n")
+	if code == 0 || len(calls) != 0 || !strings.Contains(out, "PREPUSH_UPDATE_INVALID") || advertisedBaseObjectPresent(t, f.root, old) {
+		t.Fatalf("malformed tail admitted a prefix: code=%d calls=%v\n%s", code, calls, out)
+	}
+	out, code, _ = f.run(t, shell, []string{hook, "origin", filepath.Join(t.TempDir(), "absent.git")}, input)
+	if code == 0 || advertisedBaseObjectPresent(t, f.root, old) {
+		t.Fatalf("failed push endpoint substituted configured origin: code=%d\n%s", code, out)
+	}
+	refs := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)")
+	fetchHead := filepath.Join(f.root, ".git", "FETCH_HEAD")
+	if err := os.WriteFile(fetchHead, []byte("unchanged fetch head\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_FOCUSED_PREPUSH_ADVANCE_REMOTE", peer.root)
+	input += row(f.good, f.base, "master") + row(f.good, zero, "new") + row(zero, old, "deleted")
+	out, code, calls = f.run(t, shell, []string{hook, "origin", remote}, input)
+	if code != 0 {
+		t.Fatalf("advertised-base availability must precede exact-range admission: code=%d\n%s", code, out)
+	}
+	if !advertisedBaseObjectPresent(t, f.root, old) || peer.git(t, "rev-parse", "HEAD") == old {
+		t.Fatal("missing exact object was not acquired across the controlled second peer advance")
+	}
+	if got := f.git(t, "for-each-ref", "--format=%(refname) %(objectname)"); got != refs {
+		t.Fatalf("object acquisition changed refs:\nbefore=%s\nafter=%s", refs, got)
+	}
+	if got, err := os.ReadFile(fetchHead); err != nil || string(got) != "unchanged fetch head\n" {
+		t.Fatalf("object acquisition changed shared FETCH_HEAD: %q, %v", got, err)
+	}
+	if focusedCallCount(calls, "pre-push", "--hydrate-bases", old) != 1 {
+		t.Fatalf("missing bases were not acquired once: %v", calls)
+	}
+	for _, base := range []string{old, f.base, zero} {
+		if focusedCallCount(calls, "pre-push", "--base", base, "--tip", f.good) != 1 {
+			t.Fatalf("original old:new pair was replaced or dropped: base=%s calls=%v", base, calls)
+		}
+		workflow := 0
+		for _, call := range calls {
+			if len(call) > 1 && call[0] == "workflow" && strings.Contains(strings.Join(call, " "), "--base "+base+" --tip "+f.good) {
+				workflow++
+			}
+		}
+		if workflow != 1 {
+			t.Fatalf("workflow consumer did not receive exact pair: base=%s calls=%v", base, calls)
+		}
+	}
+	t.Setenv("FAK_FOCUSED_PREPUSH_ADVANCE_REMOTE", "")
+	out, code, calls = f.run(t, shell, []string{hook, "origin", filepath.Join(t.TempDir(), "absent.git")}, row(f.good, old, "main"))
+	if code != 0 || focusedCallCount(calls, "pre-push", "--hydrate-bases", "") != 0 {
+		t.Fatalf("known-local old commit attempted transport: code=%d calls=%v\n%s", code, calls, out)
+	}
+	for _, unavailable := range []string{strings.Repeat("f", len(old)), f.git(t, "rev-parse", f.good+":internal/demo/demo.go")} {
+		out, code, calls = f.run(t, shell, []string{hook, "origin", remote}, row(f.good, unavailable, "main"))
+		if code == 0 || !strings.Contains(out, "PREPUSH_BASE_UNAVAILABLE") || strings.Contains(out, "TRUNK_WOULD_NOT_COMPILE") || focusedCallCount(calls, "pre-push", "--tip", f.good) != 0 {
+			t.Fatalf("unavailable/non-commit base entered compilation: code=%d calls=%v\n%s", code, calls, out)
+		}
+	}
+	// Availability is not integration authority: the original local tip remains
+	// behind the peer, so ordinary Git publication must still reject it.
+	remoteBefore := peer.git(t, "rev-parse", "HEAD")
+	out, code, _ = f.run(t, "git", []string{"push", "--porcelain", remote, f.good + ":refs/heads/main"}, "")
+	if code == 0 || !strings.Contains(out, "[rejected]") || peer.git(t, "ls-remote", "origin", "refs/heads/main") != remoteBefore+"\trefs/heads/main" {
+		t.Fatalf("availability changed non-fast-forward publication: code=%d\n%s", code, out)
+	}
+}
+
+func advertisedBaseObjectPresent(t *testing.T, root, oid string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := windowgate.CommandContext(ctx, "git", "--no-lazy-fetch", "--no-replace-objects", "-C", root, "cat-file", "-e", oid)
+	return cmd.Run() == nil
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestPrepushAdvertisedBasePreservesRealCompileRefusal(t *testing.T) {
+	t.Setenv("FAK_FOCUSED_PREPUSH_REAL_BUILD", "1")
+	f := newFocusedFixture(t)
+	f.git(t, "reset", "--hard", f.good)
+	if err := os.WriteFile(filepath.Join(f.root, "internal/demo/demo.go"), []byte("package demo\nconst Value = MissingDefinition\nconst CacheAdded = 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, "add", "internal/demo/demo.go")
+	f.git(t, "commit", "-m", "introduce an actual compile regression")
+	bad := f.git(t, "rev-parse", "HEAD")
+	row := "refs/heads/main " + bad + " refs/heads/main " + f.good + "\n"
+	out, code, calls := f.run(t, gitHookShell(t), []string{prepushHookUnderTest(t), "origin", filepath.Join(t.TempDir(), "absent.git")}, row)
+	if code != 1 || !strings.Contains(out, "TRUNK_WOULD_NOT_COMPILE") || !strings.Contains(out, "MissingDefinition") || strings.Contains(out, "PREPUSH_BASE_UNAVAILABLE") {
+		t.Fatalf("real compiler refusal lost its classification: code=%d\n%s", code, out)
+	}
+	if focusedCallCount(calls, "pre-push", "--hydrate-bases", "") != 0 {
+		t.Fatalf("known-local compile-red base attempted transport: %v", calls)
+	}
+}
+
+// fak-test:runtime medium est=32s lane=default
+func TestPrepushAdvertisedBaseAcquisitionDeadline(t *testing.T) {
+	f := newFocusedFixture(t)
+	f.git(t, "config", "protocol.fak-stall.allow", "always")
+	name := "git-remote-fak-stall"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	focusedLinkExecutable(t, f.executable, filepath.Join(f.bin, name))
+	t.Setenv("PATH", f.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_ = listener.SetDeadline(time.Now().Add(35 * time.Second))
+	t.Setenv("FAK_FOCUSED_PREPUSH_STALL_ADDR", listener.Addr().String())
+	type drainResult struct {
+		output string
+		err    error
+	}
+	drained := make(chan drainResult, 1)
+	go func() {
+		conn, err := listener.AcceptTCP()
+		if err != nil {
+			drained <- drainResult{err: err}
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(35 * time.Second))
+		out, err := io.ReadAll(conn)
+		drained <- drainResult{output: string(out), err: err}
+	}()
+	var out, diagnostic bytes.Buffer
+	start := time.Now()
+	// Use only the existing CLI entry point so the complete changed test file
+	// also compiles in the native parent overlay for the PeerRace symptom proof.
+	code := runHooksPrePush(&out, &diagnostic, []string{"--root", f.root, "--hydrate-bases", strings.Repeat("f", 40), "--remote", "fak-stall::https://credential-must-not-appear@example.invalid/repo"})
+	if elapsed := time.Since(start); elapsed > 33*time.Second {
+		t.Fatalf("acquisition exceeded its single deadline and drain allowance: %s", elapsed)
+	}
+	_ = listener.SetDeadline(time.Now().Add(time.Second))
+	select {
+	case result := <-drained:
+		if result.err != nil || result.output != "started" {
+			t.Fatalf("live fetch descendant was not started and drained: %+v; diagnostic=%s", result, &diagnostic)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fetch descendant retained its live connection after cancellation")
+	}
+	if code != 2 || !strings.Contains(diagnostic.String(), "PREPUSH_BASE_UNAVAILABLE") || strings.Contains(diagnostic.String(), "credential-must-not-appear") || out.Len() != 0 {
+		t.Fatalf("failed acquisition leaked an endpoint or emitted success: stdout=%s stderr=%s", &out, &diagnostic)
 	}
 }

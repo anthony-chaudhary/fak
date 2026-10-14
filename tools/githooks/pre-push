@@ -82,6 +82,28 @@ if [ "$trunk_push" -ne 1 ]; then
 	exit 0
 fi
 
+# Git may advertise a peer commit this clone has never fetched. Acquire only
+# those exact old commits from this push's endpoint before any range consumer.
+# Deletion/new-ref rows need no base, and every original old:new pair stays intact.
+advertised_bases="$(printf '%s\n' "$push_updates" | awk 'NF == 4 && $2 !~ /^0+$/ && $4 !~ /^0+$/ { print $4 }' | sort -u)"
+missing_bases=""
+for advertised_base in $advertised_bases; do
+	base_type="$(git --no-lazy-fetch --no-replace-objects cat-file -t "$advertised_base" 2>/dev/null)"
+	if [ "$base_type" != "commit" ]; then
+		missing_bases="${missing_bases}${missing_bases:+ }${advertised_base}"
+	fi
+done
+if [ -n "$missing_bases" ]; then
+	if ! command -v fak >/dev/null 2>&1; then
+		echo "PREPUSH_BASE_UNAVAILABLE (blocked): native fak is required to acquire exact advertised old commits." >&2
+		exit 1
+	fi
+	if ! fak hooks pre-push --root "$root" --hydrate-bases "$missing_bases" --remote "${2:-}"; then
+		echo "PREPUSH_BASE_UNAVAILABLE (blocked): exact advertised old commits could not be acquired; push refused before range gates." >&2
+		exit 1
+	fi
+fi
+
 # Require the native verifier before unrelated rungs can choose a go-run
 # fallback. Deletion-only updates have no pushed content to verify.
 if [ "${FLEET_BUILD_GUARD:-block}" = "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ] &&

@@ -21,8 +21,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workflowlint"
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // cmd/fak/prepush_build.go — `fak hooks pre-push`: the push-seam compile gate
@@ -705,6 +707,8 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	budget := fs.Duration("budget", 60*time.Second, "report GATE_LATENCY_REGRESSION if the build exceeds this (still exits 0 when green)")
 	report := fs.String("report", "", "write the JSON result to this path in addition to stdout")
 	skipBuild := fs.Bool("skip-build", false, "run immutable-range concept admission without compilation, build receipts or the live test-quality advisory")
+	hydrateBases := fs.String("hydrate-bases", "", "admit availability of these exact advertised old commit OIDs only (space-separated; no build evidence)")
+	remote := fs.String("remote", "", "actual push endpoint supplied by Git; used only with --hydrate-bases")
 	advisory := fs.Bool("advisory", false, "advisory mode (FLEET_BUILD_GUARD=warn): single-flight the build — skip with SKIPPED_CONTENDED when a peer build is already running on this host, rather than run a redundant concurrent full build (skip == push allowed)")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -714,6 +718,19 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	if r == "" {
 		// Could-not-run: block mode refuses; warn mode reports the skipped gate.
 		fmt.Fprintln(stderr, "fak hooks pre-push: not in a git repo (or git unavailable); build gate skipped")
+		return 2
+	}
+	hydration := false
+	fs.Visit(func(f *flag.Flag) { hydration = hydration || f.Name == "hydrate-bases" })
+	if hydration {
+		if *base != "" || *tip != "" || *report != "" || *skipBuild || *advisory {
+			fmt.Fprintln(stderr, "PREPUSH_BASE_UNAVAILABLE: availability-only mode cannot produce build admission or reports")
+			return 2
+		}
+		return runPrepushBaseHydration(stdout, stderr, r, *hydrateBases, *remote)
+	}
+	if *remote != "" {
+		fmt.Fprintln(stderr, "fak hooks pre-push: --remote requires --hydrate-bases")
 		return 2
 	}
 
@@ -1167,6 +1184,89 @@ func hasAnySuffix(s string, suffixes []string) bool {
 func prepushGitRevParse(r, ref string) (string, error) {
 	out, err := gitOut(r, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	return strings.TrimSpace(out), err
+}
+
+func runPrepushBaseHydration(stdout, stderr io.Writer, root, raw, remote string) int {
+	fail := func(detail string) int {
+		fmt.Fprintln(stderr, "PREPUSH_BASE_UNAVAILABLE:", detail)
+		return 2
+	}
+	oids := strings.Fields(raw)
+	if len(oids) == 0 {
+		return fail("no exact advertised old commits supplied")
+	}
+	seen := make(map[string]bool, len(oids))
+	unique := make([]string, 0, len(oids))
+	for _, oid := range oids {
+		if (len(oid) != 40 && len(oid) != 64) || strings.IndexFunc(oid, func(r rune) bool {
+			return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F')
+		}) >= 0 || prepushNewRefBase(oid) {
+			return fail("expected only full nonzero advertised commit OIDs")
+		}
+		oid = strings.ToLower(oid)
+		if !seen[oid] {
+			seen[oid] = true
+			unique = append(unique, oid)
+		}
+	}
+	// One deadline covers all local checks, the single acquisition, and readback.
+	// Lazy fetch and replacements cannot satisfy this check from another source.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	git := func(capture bool, args ...string) (string, error) {
+		argv := append([]string{"--no-lazy-fetch", "--no-replace-objects", "-C", root}, args...)
+		cmd := windowgate.CommandContext(ctx, "git", argv...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		sysproc.ConfigureProcessGroup(cmd)
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.WaitDelay = time.Second
+		cmd.Cancel = func() error {
+			if cmd.Process != nil {
+				procguard.KillPID(cmd.Process.Pid)
+			}
+			return nil
+		}
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+		if capture {
+			cmd.Stdout = &out
+		}
+		err := cmd.Run()
+		return strings.TrimSpace(out.String()), err
+	}
+	present := func(oid string) bool {
+		resolved, err := git(true, "rev-parse", "--verify", "--end-of-options", oid+"^{commit}")
+		return err == nil && resolved == oid
+	}
+	var missing []string
+	for _, oid := range unique {
+		if present(oid) {
+			continue
+		}
+		if kind, err := git(true, "cat-file", "-t", oid); err == nil && kind != "commit" {
+			return fail("advertised old object is not a commit: " + oid)
+		}
+		missing = append(missing, oid)
+	}
+	if len(missing) > 0 {
+		if remote == "" || strings.ContainsAny(remote, "\x00\r\n") {
+			return fail("Git's actual push endpoint is required to acquire missing bases")
+		}
+		args := []string{"fetch", "--no-tags", "--no-prune", "--no-recurse-submodules", "--no-write-fetch-head", "--no-auto-maintenance", "--no-write-commit-graph", "--refmap=", "--", remote}
+		args = append(args, missing...)
+		if _, err := git(false, args...); err != nil {
+			// Endpoints and transport stderr may contain credentials. Report only
+			// the availability failure, never the command or its remote string.
+			return fail("bounded acquisition of exact advertised old commits failed")
+		}
+	}
+	for _, oid := range unique {
+		if !present(oid) {
+			return fail("exact advertised commit is unavailable after acquisition: " + oid)
+		}
+	}
+	fmt.Fprintf(stdout, "PREPUSH_BASE_AVAILABLE: %d exact advertised commits; build and structural gates remain unrun\n", len(unique))
+	return 0
 }
 
 // prepushArchiveTip archives sha from repo r into a fresh temp dir (committed bytes only — `git
