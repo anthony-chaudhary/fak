@@ -465,9 +465,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	var indexList []int32
 	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
+		// Projection, normalization, rotation and memo copies have completed.
+		// Scalar scoring reads one stable snapshot through causal prefixes;
+		// its peak payload equals the old final query's flat key allocation.
+		// Non-nil score callbacks keep their private per-query mutable inputs.
+		var keyPanel []float32
+		if scratch.indexerScore == nil && seq > 1 {
+			keyPanel = v41ColdIndexerKeyPanel(indexKeys, cfg.IndexHeadDim)
+		}
 		for t := 0; t < seq; t++ {
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
-			localIdx, err := m.v41IndexRowsWithDeviceOps(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+			var prefix []float32
+			if keyPanel != nil {
+				end := groups * cfg.IndexHeadDim
+				prefix = keyPanel[:end:end]
+			}
+			localIdx, err := m.v41IndexRowsWithPreparedKeys(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps, prefix)
 			if err != nil {
 				return err
 			}
