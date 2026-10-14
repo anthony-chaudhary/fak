@@ -67,6 +67,19 @@ type v41EPOwnerLifecycleLoaded struct {
 	FollowerRetirement func() (model.EPFollowerRetirement, error)
 }
 
+// v41EPOwnerLoadRetirement is an invocation-local observation of construction-
+// owned resources that a failed Load did not transfer in its returned bundle.
+// A complete preflight refusal means no owned construction work began. Successful
+// transfer is not a factory-retirement observation; its actual releases are used.
+// Unavailable is false/false/nil. Available failure requires a release error.
+// Native adapters explicitly map the authenticated loader's result into this
+// value, without inferring completion from nil ownership or an error string.
+type v41EPOwnerLoadRetirement struct {
+	Available bool
+	Completed bool
+	Err       error
+}
+
 // These hooks are trusted internal dependencies, not user-supplied declarations.
 // Native bindings must use actual identity observation, live supervisor admission,
 // the authenticated loader, and genuine successful rawdecode observations.
@@ -82,9 +95,13 @@ type v41EPOwnerLifecycleDeps struct {
 	Group            func(context.Context, V41EPOwnerRequest, int, time.Time) (*v41EPOwnerLifecycleGroup, error)
 	Backend          func(context.Context, V41EPOwnerSelection) (*v41EPOwnerLifecycleBackend, error)
 	Load             func(context.Context, V41EPOwnerRequest, *v41EPOwnerLifecycleBackend, *v41EPOwnerLifecycleGroup) (*v41EPOwnerLifecycleLoaded, error)
-	Root             func(context.Context, V41EPOwnerRequest, *v41EPOwnerLifecycleLoaded) (*V41EPOwnerRootWork, error)
-	Follower         func(context.Context, *v41EPOwnerLifecycleLoaded, func() error) error
-	Shutdown         func(context.Context, *v41EPOwnerLifecycleLoaded) error
+	// LoadRetirement is a nonblocking snapshot of this invocation's failed
+	// factory. Called only after Load and its phase watcher have joined. All
+	// factory-owned users must already be joined, including panic unwind.
+	LoadRetirement func() (v41EPOwnerLoadRetirement, error)
+	Root           func(context.Context, V41EPOwnerRequest, *v41EPOwnerLifecycleLoaded) (*V41EPOwnerRootWork, error)
+	Follower       func(context.Context, *v41EPOwnerLifecycleLoaded, func() error) error
+	Shutdown       func(context.Context, *v41EPOwnerLifecycleLoaded) error
 }
 
 // A captured panic is an explicitly failed outcome with its original identity.
@@ -211,6 +228,7 @@ func runV41EPOwnerLifecycle(ctx context.Context, req V41EPOwnerRequest, rank int
 	var sessionState atomic.Uint32 // 0 runner-owned, 1 follower-owned, 2 close attempted.
 	var claimViolation atomic.Bool
 	executionEntered, rootSucceeded := false, false
+	loadAttempted, loadComplete := false, false
 	cleanupOK, cleanupKnown := true, true
 	cleanup := func(label string, fn func() error) {
 		err, p := v41EPOwnerInvoke(func() error {
@@ -286,6 +304,7 @@ func runV41EPOwnerLifecycle(ctx context.Context, req V41EPOwnerRequest, rank int
 			if err := phaseCtx.Err(); err != nil {
 				return err
 			}
+			loadAttempted = true
 			loaded, err = deps.Load(phaseCtx, req, backend, group)
 			if err != nil {
 				return err
@@ -293,10 +312,47 @@ func runV41EPOwnerLifecycle(ctx context.Context, req V41EPOwnerRequest, rank int
 			if loaded == nil || loaded.CloseSession == nil || loaded.CloseModel == nil {
 				return errors.New("v41 EP owner lifecycle: incomplete authenticated loader ownership bundle")
 			}
+			loadComplete = true
 			return nil
 		})
 		r.Phases.LoadNS = load.elapsed
 		out.add(load.err(), load.panic)
+		// A complete bundle can still be followed by phase cancellation. Its
+		// transferred resources are judged by their actual releases below; do
+		// not confuse that case with failed opaque construction. runPhase has
+		// joined the callback and raw-stop watcher before this observation.
+		if loadAttempted && !loadComplete {
+			var retired v41EPOwnerLoadRetirement
+			observeErr, observePanic := v41EPOwnerInvoke(func() error {
+				if deps.LoadRetirement == nil {
+					return errors.New("loader construction retirement observer unavailable")
+				}
+				var err error
+				retired, err = deps.LoadRetirement()
+				if err != nil {
+					return err
+				}
+				if !retired.Available {
+					if retired.Completed || retired.Err != nil {
+						return errors.New("loader construction retirement observation incoherent")
+					}
+					return errors.New("loader construction retirement unavailable")
+				}
+				if retired.Completed != (retired.Err == nil) {
+					return errors.New("loader construction retirement observation incoherent")
+				}
+				return nil
+			})
+			if observeErr != nil {
+				cleanupKnown = false
+				out.add(fmt.Errorf("loader construction retirement observation: %w", observeErr), observePanic)
+			} else if !retired.Completed {
+				cleanupOK = false
+				failure := fmt.Errorf("loader construction retirement: %w", retired.Err)
+				r.CleanupFailures = append(r.CleanupFailures, failure.Error())
+				out.add(failure, nil)
+			}
+		}
 		if out.Err == nil {
 			authenticated := true
 			r.ArtifactAuthenticated = &authenticated
@@ -488,7 +544,7 @@ func runV41EPOwnerLifecycle(ctx context.Context, req V41EPOwnerRequest, rank int
 		r.CleanupFailures = append(r.CleanupFailures, cleaned.err().Error())
 		out.add(cleaned.err(), cleaned.panic)
 	}
-	// Unknown follower evidence cannot override a separately known release
+	// Unknown factory/follower evidence cannot override a known release
 	// failure. Otherwise preserve unknown as null rather than observed success.
 	if cleanupKnown || !cleanupOK {
 		r.CleanupCompleted = &cleanupOK
