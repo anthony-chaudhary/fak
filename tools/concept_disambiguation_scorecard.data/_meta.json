@@ -6880,6 +6880,11 @@
           "category": "incidental",
           "reason": "Adapter returning the positioned V41ExpertParallelSessionResult for the existing authenticated EP construction path; it retains borrowed group/backend ownership and unavailable opaque-cleanup evidence rather than adding a second Session abstraction.",
           "token": "loadV41ExpertParallelSessionWithResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation adapter for the represented V41ExpertParallelSessionResult; imports coherent ordinary authenticated-reader retirement evidence while preserving borrowed group/backend ownership and unknown opaque or panic cleanup. It creates no separate Session owner or runtime lifecycle.",
+          "token": "loadV41ExpertParallelSessionWithAuthenticatedResult"
         }
       ],
       "exclude": [
@@ -7127,6 +7132,7 @@
         "live_count",
         "live_sessions",
         "loadSchedulerRecords",
+        "loadV41ExpertParallelSessionWithAuthenticatedResult",
         "loadV41ExpertParallelSessionWithResult",
         "logicalSession",
         "loopStateForSession",

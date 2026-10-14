@@ -79,11 +79,10 @@ func (m *Model) v41EPOwnerPanelRows(layer int, owners TPPlan, rank int, picks []
 	}
 	flat := make([]float32, cells)
 	out = make([][]float32, len(picks))
-	offsets := make([][]int, len(picks))
+	offsets := v41EPOwnerPanelOffsets(picks, total)
 	offset := 0
 	for token, perToken := range picks {
 		start := offset
-		offsets[token] = make([]int, len(perToken))
 		for slot, pick := range perToken {
 			offsets[token][slot] = -1
 			if pick.expert >= band.Lo && pick.expert < band.Hi {
@@ -173,4 +172,20 @@ func (m *Model) v41EPOwnerPanelRows(layer int, owners TPPlan, rank int, picks []
 		}
 	}
 	return out, nil
+}
+
+// The caller has already bounded the panel and checked that total is the sum
+// of its pick counts. Offset rows share one exact slab but cannot append into
+// a neighboring token's slots; the caller still assigns every owned offset and
+// unowned sentinel before the table is read.
+func v41EPOwnerPanelOffsets(picks [][]routePick, total int) [][]int {
+	offsets := make([][]int, len(picks))
+	slots := make([]int, total)
+	first := 0
+	for token, row := range picks {
+		last := first + len(row)
+		offsets[token] = slots[first:last:last]
+		first = last
+	}
+	return offsets
 }

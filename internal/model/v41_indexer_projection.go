@@ -62,6 +62,33 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 // v41IndexRowsWithDeviceOps also offers the row selection to the session's
 // device index-select seam when ops binds one (Ref #13668).
 func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, views ...*v41IndexerKeyView) ([]int32, error) {
+	return m.v41IndexRowsWithPreparedKeys(l, pos, qLat, hidden, keys, project, score, health, ops, nil, views...)
+}
+
+// v41ColdIndexerKeyPanel snapshots a completed layer's stable keys. A malformed
+// panel declines reuse so the ordinary per-query validator still reports a bad
+// row only when that row becomes visible. Finiteness is checked by the scorer.
+func v41ColdIndexerKeyPanel(keys [][]float32, dim int) []float32 {
+	elements, valid := checkedMulInt(len(keys), dim)
+	if dim <= 0 || !valid || elements == 0 {
+		return nil
+	}
+	for _, key := range keys {
+		if len(key) != dim {
+			return nil
+		}
+	}
+	panel := make([]float32, elements)
+	for i, key := range keys {
+		copy(panel[i*dim:(i+1)*dim], key)
+	}
+	return panel
+}
+
+// Only the scalar scorer borrows a prepared prefix. Arbitrary callbacks retain
+// their independent mutable flat input, including when a panel is supplied.
+// No prepared storage is retained in continuation or publication state.
+func (m *Model) v41IndexRowsWithPreparedKeys(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, views ...*v41IndexerKeyView) ([]int32, error) {
 	d41 := m.Cfg.DeepSeekV41
 	if !indexSourceAt(d41, l) {
 		return nil, nil
@@ -88,7 +115,9 @@ func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, ke
 		}
 	}
 	var flat []float32
-	if !resident {
+	if score == nil && prepared != nil && len(prepared) == elements {
+		flat = prepared[:elements:elements]
+	} else if !resident {
 		flat = make([]float32, 0, elements)
 		for _, key := range keys {
 			flat = append(flat, key...)
