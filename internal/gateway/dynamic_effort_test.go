@@ -578,6 +578,7 @@ func TestDynamicEffort_OpenAIJSONModulation(t *testing.T) {
 func TestDynamicEffort_AnthropicJSONModulation(t *testing.T) {
 	raw := []byte(`{
 		"model": "claude-3-7-sonnet-20250219",
+		"max_tokens": 4096,
 		"messages": [{"role": "user", "content": "Plan and break down the project."}]
 	}`)
 
@@ -620,6 +621,131 @@ func TestDynamicEffort_AnthropicJSONModulation(t *testing.T) {
 	_ = json.Unmarshal(zeroRoot["thinking"], &zeroThinkCfg)
 	if zeroThinkCfg.Type != "disabled" {
 		t.Errorf("zero thinking: got %s, want disabled", zeroThinkCfg.Type)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestModulateAnthropicJSON_ClampsMinimumBudget(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"claude-3-7-sonnet-20250219","max_tokens":4096,"system":"Review only.","tools":[{"name":"test_runner","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"Run tests and verify output"},{"role":"assistant","content":[{"type":"tool_use","id":"test_1","name":"test_runner","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"test_1","content":"PASS: all tests passed"}]}],"metadata":{"user_id":"example"}}`)
+	prefix, err := ExtractPromptPrefixFromJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkWire := func(t *testing.T, out []byte, wantBudget int) {
+		t.Helper()
+		var got struct {
+			MaxTokens int `json:"max_tokens"`
+			Thinking  struct {
+				Type   string `json:"type"`
+				Budget int    `json:"budget_tokens"`
+			} `json:"thinking"`
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Thinking.Type != "enabled" || got.Thinking.Budget != wantBudget || got.MaxTokens != 4096 {
+			t.Errorf("wire thinking=%+v max_tokens=%d, want enabled/%d and unchanged 4096", got.Thinking, got.MaxTokens, wantBudget)
+		}
+		after, err := ExtractPromptPrefixFromJSON(out)
+		if err != nil || !bytes.Equal(prefix, after) {
+			t.Fatalf("prompt content changed: %s (error %v)", after, err)
+		}
+	}
+	for _, budget := range []int{1, 256, 1023, 1024, 2048} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			out, err := ModulateAnthropicJSON(raw, agentopt.TurnEffortDecision{AllocatedBudget: budget})
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkWire(t, out, max(1024, budget))
+		})
+	}
+	t.Run("classified_diagnostic", func(t *testing.T) {
+		req, err := agent.DecodeAnthropicMessagesRequest(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		planned := ClassifyTurnEffort(BuildTurnContext(req.Messages, req.System))
+		if planned.Effort != agentopt.EffortLow || planned.AllocatedBudget != 256 || planned.ThinkingBudget != 256 {
+			t.Fatalf("generic diagnostic decision changed: %+v", planned)
+		}
+		out, applied, err := ApplyDynamicEffortToAnthropicJSON(raw, req.Model)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkWire(t, out, 1024)
+		if applied == nil || applied.Effort != planned.Effort || applied.Category != planned.Category || applied.AllocatedBudget != 1024 || applied.ThinkingBudget != 1024 {
+			t.Errorf("applied Anthropic decision=%+v, want the diagnostic category/effort and both wire budgets 1024", applied)
+		}
+		gemini, err := ModulateGeminiJSON([]byte(`{"contents":[]}`), planned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(gemini, []byte(`"thinkingBudget":256`)) {
+			t.Errorf("Gemini's provider-neutral low budget changed: %s", gemini)
+		}
+	})
+}
+
+// fak-test:runtime fast est=1ms
+func TestModulateAnthropicJSON_PreservesLimitsAndModes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		budget int
+		refuse bool
+	}{
+		{"null_object", `null`, 256, true},
+		{"missing_max", `{}`, 256, true},
+		{"invalid_max", `{"max_tokens":"4096"}`, 256, true},
+		{"nonpositive_max", `{"max_tokens":0}`, 256, true},
+		{"below_minimum", `{"max_tokens":1023}`, 256, true},
+		{"equal_minimum", `{"max_tokens":1024}`, 256, true},
+		{"equal_budget", `{"max_tokens":2048}`, 2048, true},
+		{"negative_budget", `{"max_tokens":4096}`, -1, true},
+		{"null_thinking", `{"thinking":null,"max_tokens":4096}`, 0, true},
+		{"empty_mode", `{"thinking":{"type":""},"max_tokens":4096}`, 0, true},
+		{"missing_mode", `{"thinking":{},"max_tokens":4096}`, 0, true},
+		{"nonstring_mode", `{"thinking":{"type":42},"max_tokens":4096}`, 0, true},
+		{"adaptive_before_manual_validation", ` {"thinking": {"type":"adaptive","display":"summarized"},"max_tokens":"unchanged"} `, -1, false},
+		{"unknown_before_manual_validation", ` {"thinking": {"type":"future-mode","extra":true},"max_tokens":1} `, -1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(tc.raw)
+			out, err := ModulateAnthropicJSON(raw, agentopt.TurnEffortDecision{AllocatedBudget: tc.budget})
+			if (err != nil) != tc.refuse {
+				t.Fatalf("error=%v, want refusal=%v", err, tc.refuse)
+			}
+			if !bytes.Equal(out, raw) {
+				t.Fatalf("refusal/pass-through changed raw bytes: %s", out)
+			}
+		})
+	}
+	t.Run("zero_disables_without_headroom", func(t *testing.T) {
+		out, err := ModulateAnthropicJSON([]byte(`{"max_tokens":0,"thinking":{"type":"enabled","budget_tokens":2048}}`), agentopt.TurnEffortDecision{})
+		if err != nil || string(out) != `{"max_tokens":0,"thinking":{"type":"disabled"}}` {
+			t.Fatalf("zero budget: got %s, %v", out, err)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		fields string
+		refuse bool
+	}{
+		{"wrapper_headroom", `"max_tokens":1024`, true},
+		{"wrapper_adaptive", `"max_tokens":1,"thinking":{"type":"adaptive"}`, false},
+		{"wrapper_unknown", `"max_tokens":1,"thinking":{"type":"future-mode"}`, false},
+		{"wrapper_decode_precedes_mode", `"max_tokens":"4096","thinking":{"type":"adaptive"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(` {"model":"claude-3-7-sonnet-20250219","messages":[{"role":"user","content":"Plan the project."}],` + tc.fields + `} `)
+			out, applied, err := ApplyDynamicEffortToAnthropicJSON(raw, "claude-3-7-sonnet-20250219")
+			if (err != nil) != tc.refuse || applied != nil || !bytes.Equal(out, raw) {
+				t.Fatalf("got %s, decision=%+v, error=%v; want unchanged raw, no applied decision, refusal=%v", out, applied, err, tc.refuse)
+			}
+		})
 	}
 }
 

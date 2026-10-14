@@ -229,9 +229,10 @@ func decodeAnthropicMessage(m anthropicInboundMessage) []Message {
 			switch b.Type {
 			case "tool_result":
 				msgs = append(msgs, Message{
-					Role:       RoleTool,
-					ToolCallID: b.ToolUseID,
-					Content:    parseAnthropicText(b.Content),
+					Role:              RoleTool,
+					ToolCallID:        b.ToolUseID,
+					Content:           parseAnthropicText(b.Content),
+					ToolResultIsError: b.IsError,
 				})
 			case "text":
 				appendText(&text, b.Text)

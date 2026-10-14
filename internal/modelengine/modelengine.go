@@ -321,6 +321,7 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 				q4k:    e.q4k,
 			}
 		})
+		sched.modelName = e.ModelName()
 		sched.SetQ4KGateUpOutputSlab(e.q4kGateUpOutputSlab)
 		sched.SetMaxRunning(nativeMaxRunningFromEnv())
 		// Arm cross-agent in-flight coalescing of a shared cold prefill prefix

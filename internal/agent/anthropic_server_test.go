@@ -1,9 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A Claude-Code-shaped request: system as a block array, a prior assistant turn
@@ -233,5 +239,217 @@ func TestEstimateAnthropicTokens(t *testing.T) {
 	req, _ := DecodeAnthropicMessagesRequest([]byte(ccRequest))
 	if n := EstimateAnthropicTokens(req); n <= 0 {
 		t.Errorf("token estimate must be positive, got %d", n)
+	}
+}
+
+func toolResultOutcomeMessages(t *testing.T, outcome string) []Message {
+	t.Helper()
+	req, err := DecodeAnthropicMessagesRequest([]byte(`{"model":"m","messages":[
+		{"role":"user","content":"look up entries"},
+		{"role":"assistant","content":[{"type":"tool_use","id":"lookup_1","name":"lookup","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"lookup_1","content":"two entries"` + outcome + `}]}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(req.Messages))
+	}
+	return req.Messages
+}
+
+func assertToolResultOutcomeWire(t *testing.T, raw []byte, wantError bool) {
+	t.Helper()
+	var wire struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type      string `json:"type"`
+				ToolUseID string `json:"tool_use_id"`
+				Content   string `json:"content"`
+				IsError   bool   `json:"is_error"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire.Messages) != 3 || wire.Messages[2].Role != "user" || len(wire.Messages[2].Content) != 1 {
+		t.Fatalf("unexpected Anthropic messages: %s", raw)
+	}
+	result := wire.Messages[2].Content[0]
+	if result.Type != "tool_result" || result.ToolUseID != "lookup_1" || result.Content != "two entries" || result.IsError != wantError {
+		t.Errorf("tool result = %+v, want unchanged ID/content and is_error=%t", result, wantError)
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestToolResultOutcomeAnthropicRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		outcome   string
+		wantError bool
+	}{
+		{"error", `,"is_error":true`, true},
+		{"success", `,"is_error":false`, false},
+		{"unspecified", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := toolResultOutcomeMessages(t, tc.outcome)
+			raw, err := json.Marshal(messages)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var canonical []struct {
+				IsError bool `json:"tool_result_is_error"`
+			}
+			if err := json.Unmarshal(raw, &canonical); err != nil {
+				t.Fatal(err)
+			}
+			if canonical[2].IsError != tc.wantError {
+				t.Errorf("canonical error = %t, want %t", canonical[2].IsError, tc.wantError)
+			}
+			var replay []Message
+			if err := json.Unmarshal(raw, &replay); err != nil {
+				t.Fatal(err)
+			}
+			if got := replay[2]; got.Role != RoleTool || got.ToolCallID != "lookup_1" || got.Name != "lookup" || got.Content != "two entries" {
+				t.Fatalf("canonical tool result changed: %+v", got)
+			}
+			raw, err = (anthropicAdapter{}).MarshalRequest(adapterRequest{Model: "m", Messages: replay})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertToolResultOutcomeWire(t, raw, tc.wantError)
+
+			captured := make(chan []byte, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/messages" {
+					t.Errorf("request = %s %s", r.Method, r.URL.Path)
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+				}
+				select {
+				case captured <- body:
+				default:
+					t.Error("unexpected duplicate Anthropic request")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+			}))
+			defer server.Close()
+			planner, err := NewProviderHTTPPlanner("anthropic", server.URL, "m", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			planner.Client = server.Client()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			completion, err := planner.Complete(ctx, replay, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if completion.Message.Content != "ok" {
+				t.Fatalf("completion = %+v", completion)
+			}
+			assertToolResultOutcomeWire(t, <-captured, tc.wantError)
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestToolResultOutcomeProviderIsolation(t *testing.T) {
+	messages := toolResultOutcomeMessages(t, `,"is_error":true`)
+	before, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []map[string]any
+	if err := json.Unmarshal(before, &want); err != nil {
+		t.Fatal(err)
+	}
+	delete(want[2], "tool_result_is_error")
+	check := func(t *testing.T, body []byte, chat bool) {
+		t.Helper()
+		if strings.Contains(string(body), `"tool_result_is_error"`) || strings.Contains(string(body), `"is_error"`) {
+			t.Errorf("canonical outcome leaked to unsupported provider wire: %s", body)
+		}
+		if chat {
+			var wire struct {
+				Messages []map[string]any `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &wire); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(wire.Messages, want) {
+				t.Errorf("OpenAI projection changed existing message fields: %s", body)
+			}
+		}
+		after, err := json.Marshal(messages)
+		if err != nil || string(after) != string(before) {
+			t.Fatalf("provider projection mutated caller messages: %s (error %v)", after, err)
+		}
+	}
+	for _, provider := range []Provider{ProviderOpenAI, ProviderXAI, ProviderOpenAIResponses, ProviderGemini} {
+		t.Run(string(provider), func(t *testing.T) {
+			adapter, err := NewTranscriptAdapter(provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := adapter.MarshalRequest(adapterRequest{Model: "m", Messages: messages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, body, provider == ProviderOpenAI || provider == ProviderXAI)
+		})
+	}
+	t.Run("direct_openai_chat", func(t *testing.T) {
+		captured := make(chan []byte, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			select {
+			case captured <- body:
+			default:
+				t.Error("unexpected duplicate OpenAI request")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+		}))
+		defer server.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		got, err := CompleteOpenAIChat(ctx, server.Client(), server.URL, "m", messages)
+		if err != nil || got != "ok" {
+			t.Fatalf("CompleteOpenAIChat = %q, %v", got, err)
+		}
+		check(t, <-captured, true)
+	})
+}
+
+// fak-test:runtime fast est=1ms
+func TestToolResultOutcomeCanonicalReset(t *testing.T) {
+	message := toolResultOutcomeMessages(t, `,"is_error":true`)[2]
+	for _, raw := range []string{
+		`{"role":"tool","content":"two entries","tool_result_is_error":false}`,
+		`{"role":"user","content":"continue"}`,
+	} {
+		if err := json.Unmarshal([]byte(`{"role":"tool","tool_result_is_error":true}`), &message); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(raw), &message); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), `"tool_result_is_error":true`) {
+			t.Errorf("reused message retained prior error: %s", encoded)
+		}
 	}
 }

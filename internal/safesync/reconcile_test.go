@@ -410,6 +410,123 @@ func TestRouteReconciliationApplyExecution(t *testing.T) {
 	})
 }
 
+// fak-test:runtime integration est=3s lane=default
+func TestRouteReconciliationQueuedIntegrate(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, goal, blocker, wantRoute string
+		apply                          bool
+	}{
+		{name: "preview", goal: "integrate", wantRoute: RouteDisjointIntegrate},
+		{name: "apply", goal: "integrate origin/work", apply: true, wantRoute: RouteDisjointIntegrate},
+		{name: "default still drains", apply: true, wantRoute: RouteDrain},
+		{name: "publish still drains", goal: "publish", apply: true, wantRoute: RouteDrain},
+		{name: "writer lease", goal: "integrate", blocker: "writer", apply: true, wantRoute: RouteDrain},
+		{name: "index lock", goal: "integrate", blocker: "index", apply: true, wantRoute: RouteDrain},
+		{name: "active merge", goal: "integrate", blocker: "merge", apply: true, wantRoute: RouteHoldMergeActive},
+		{name: "dirty collision", goal: "integrate", blocker: "dirty", apply: true, wantRoute: RouteHoldDirtyCollision},
+		{name: "overlapping divergence", goal: "integrate", blocker: "overlap", apply: true, wantRoute: RouteReconcilePacket},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin, clone := setupTestOriginAndClone(t)
+			localPath, remotePath := "disjoint_local.txt", "disjoint_remote.txt"
+			if tc.blocker == "overlap" {
+				localPath, remotePath = "a.txt", "a.txt"
+			}
+			writeFile(t, filepath.Join(clone, localPath), "local\n")
+			git(t, clone, "add", localPath)
+			git(t, clone, "commit", "-m", "queued local commit")
+			localHead := revString(t, clone, "HEAD")
+			writeFile(t, filepath.Join(origin, remotePath), "remote\n")
+			git(t, origin, "add", remotePath)
+			git(t, origin, "commit", "-m", "remote commit")
+			git(t, clone, "fetch", "origin")
+			targetHead := revString(t, clone, "origin/work")
+
+			// Match the drain queue's persisted shape, including backpressure metadata.
+			// The queued SHA must remain reachable and the queue must remain untouched.
+			writeFile(t, filepath.Join(clone, ".git", "info", "exclude"), ".fak/\n")
+			queuePath := filepath.Join(clone, ".fak", "sync-drain-queue.json")
+			mkdir(t, filepath.Dir(queuePath))
+			queue := `{"schema":"fak.sync_drain.v1","entries":[{"sha":"` + localHead + `","subject":"queued local commit","refusal_reason":"diverged","queued_at_unix":1}],"attempts":3,"next_retry_unix":99}` + "\n"
+			writeFile(t, queuePath, queue)
+			t.Cleanup(func() {
+				if got := readFile(t, queuePath); got != queue {
+					t.Errorf("drain queue changed: got %q, want %q", got, queue)
+				}
+				if got := revString(t, origin, "work"); got != targetHead {
+					t.Errorf("integration published unexpectedly: origin = %s, want %s", got, targetHead)
+				}
+			})
+
+			switch tc.blocker {
+			case "writer":
+				lease, err := AcquireWriterLease(clone, "peer-writer", time.Now, time.Minute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer lease.Release()
+			case "index":
+				writeFile(t, filepath.Join(clone, ".git", "index.lock"), "peer lock\n")
+			case "merge":
+				writeFile(t, filepath.Join(clone, ".git", "MERGE_HEAD"), targetHead+"\n")
+			case "dirty":
+				writeFile(t, filepath.Join(clone, remotePath), "untracked peer work\n")
+			}
+
+			var refUpdates [][]string
+			res, err := RouteReconciliation(context.Background(), ReconcileOptions{
+				Repo: clone, Remote: "origin", Branch: "work", Goal: tc.goal, Apply: tc.apply,
+				Runner: func(ctx context.Context, repo string, args ...string) RunResult {
+					if len(args) > 0 && args[0] == "update-ref" {
+						refUpdates = append(refUpdates, append([]string(nil), args...))
+					}
+					return RealRunner(ctx, repo, args...)
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Route != tc.wantRoute {
+				t.Fatalf("queued %q route = %q, want %q", tc.goal, res.Route, tc.wantRoute)
+			}
+			wantApplied := tc.apply && tc.wantRoute == RouteDisjointIntegrate
+			if res.Applied != wantApplied || res.OK != (tc.wantRoute == RouteDisjointIntegrate) {
+				t.Fatalf("unexpected queued reconciliation result: %+v", res)
+			}
+			if !wantApplied {
+				if got := revString(t, clone, "HEAD"); got != localHead || len(refUpdates) != 0 {
+					t.Fatalf("preview or hold moved local HEAD: got %s, want %s; updates=%v", got, localHead, refUpdates)
+				}
+				if tc.blocker == "dirty" && readFile(t, filepath.Join(clone, remotePath)) != "untracked peer work\n" {
+					t.Fatal("dirty collision changed peer work")
+				}
+				return
+			}
+
+			newHead := revString(t, clone, "HEAD")
+			if res.Execution == nil || !res.Execution.Success || res.Execution.NewHead != newHead {
+				t.Fatalf("integration execution = %+v, want successful HEAD %s", res.Execution, newHead)
+			}
+			wantCAS := "update-ref refs/heads/work " + newHead + " " + localHead
+			if len(refUpdates) != 1 || strings.Join(refUpdates[0], " ") != wantCAS {
+				t.Fatalf("ref updates = %v, want expected-parent CAS %q", refUpdates, wantCAS)
+			}
+			if got := strings.TrimSpace(gitOutput(t, clone, "show", "-s", "--format=%P", "HEAD")); got != localHead+" "+targetHead {
+				t.Fatalf("merge parents = %q, want queued local commit and pinned target", got)
+			}
+			for path, want := range map[string]string{localPath: "local\n", remotePath: "remote\n"} {
+				if head, index, worktree := gitOutput(t, clone, "show", "HEAD:"+path), gitOutput(t, clone, "show", ":"+path), readFile(t, filepath.Join(clone, path)); head != want || index != want || worktree != want {
+					t.Errorf("%s: HEAD=%q index=%q worktree=%q, want %q", path, head, index, worktree, want)
+				}
+			}
+			if got := strings.TrimSpace(gitOutput(t, clone, "status", "--porcelain")); got != "" {
+				t.Fatalf("integration left index/worktree drift: %q", got)
+			}
+		})
+	}
+}
+
 func TestParseGoal(t *testing.T) {
 	t.Parallel()
 

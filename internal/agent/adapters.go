@@ -165,6 +165,21 @@ func (a openAIAdapter) Headers(apiKey string) map[string]string {
 	return jsonAuthHeaders(apiKey, "Authorization", "Bearer "+apiKey)
 }
 
+// openAIWireMessages omits canonical tool-result status from the OpenAI wire,
+// which has no corresponding field, without changing the caller's transcript.
+func openAIWireMessages(messages []Message) []Message {
+	for _, m := range messages {
+		if m.ToolResultIsError {
+			out := append([]Message(nil), messages...)
+			for i := range out {
+				out[i].ToolResultIsError = false
+			}
+			return out
+		}
+	}
+	return messages
+}
+
 type openAIRequest struct {
 	ServiceTier        string               `json:"service_tier,omitempty"`
 	Model              string               `json:"model"`
@@ -227,7 +242,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	req := openAIRequest{
 		ServiceTier:        serviceTierWire(a.Provider(), r.ServiceTier),
 		Model:              r.Model,
-		Messages:           messages,
+		Messages:           openAIWireMessages(messages),
 		Tools:              openAICompatibleTools(r.Tools),
 		ToolChoice:         toolChoice,
 		Temperature:        temp,

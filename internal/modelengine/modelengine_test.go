@@ -3,7 +3,11 @@ package modelengine
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // register the Ref resolver (CAS backend)
@@ -210,6 +214,107 @@ func TestModelNameReportsSyntheticVsPreloadedHonestly(t *testing.T) {
 	ePre.Preload(model.NewSynthetic(SyntheticConfig()))
 	if got := ePre.ModelName(); got != "smollm2-inkernel" {
 		t.Fatalf("preloaded ModelName = %q, want \"smollm2-inkernel\"", got)
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestEngineResultsIdentifyOwningModel(t *testing.T) {
+	const childEnv = "FAK_TEST_ENGINE_RESULT_IDENTITY"
+	if os.Getenv(childEnv) != "1" {
+		// Default's lazy model must start untouched, independent of suite order or
+		// a developer's model export. Do not replace the registered global engine.
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestEngineResultsIdentifyOwningModel$", "-test.count=1", "-test.v")
+		cmd.Env = append(os.Environ(), childEnv+"=1", "FAK_MODEL_DIR=", "FAK_NATIVE_KV_MAX_BLOCKS=0", "FAK_NATIVE_MAX_RUNNING=", "FAK_NATIVE_IN_BATCH_PREFIX_DEDUP=")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("isolated engine identity witness: %v\n%s", err, out)
+		}
+		t.Logf("%s", out)
+		return
+	}
+
+	cfg := SyntheticConfig()
+	cfg.HiddenSize, cfg.NumLayers = 8, 1
+	cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim = 2, 1, 4
+	cfg.IntermediateSize = 16
+	m := model.NewSynthetic(cfg)
+	e := New()
+	e.Preload(m)
+	want := e.ModelName()
+	defaultName := Default.ModelName()
+	if want == defaultName || defaultName != "smollm2-synthetic" {
+		t.Fatalf("precondition: receiver model = %q, default = %q; want distinct synthetic default", want, defaultName)
+	}
+	standalone := NewNativeScheduler(m)
+	t.Cleanup(func() {
+		for _, s := range []*NativeScheduler{e.nativeScheduler(), Default.nativeScheduler(), standalone} {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			err := s.CloseAndWait(ctx)
+			cancel()
+			if err != nil {
+				t.Errorf("CloseAndWait: %v", err)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		e     abi.LifecycleEngine
+		model string
+	}{
+		{"preloaded", e, want},
+		{"default", Default, defaultName},
+		{"standalone", standalone, defaultName},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			call := inlineCall("identity", `{"input":"x"}`)
+			check := func(api string, r *abi.Result) genResult {
+				t.Helper()
+				if r == nil || r.Status != abi.StatusOK {
+					t.Fatalf("%s result = %v, want StatusOK", api, r)
+				}
+				g := decodeGen(t, ctx, r)
+				if g.Model != tc.model {
+					t.Errorf("%s payload model = %q, want owning model %q", api, g.Model, tc.model)
+				}
+				if g.Tool != call.Tool || g.Engine != EngineID || len(g.Tokens) != genTokens {
+					t.Errorf("%s payload contract changed: %+v", api, g)
+				}
+				if r.Meta["engine"] != EngineID || r.Meta["output_tokens"] != strconv.Itoa(genTokens) || r.Meta["input_tokens"] != strconv.Itoa(len(call.Tool)+len(call.Args.Inline)) {
+					t.Errorf("%s token metadata changed: %v", api, r.Meta)
+				}
+				return g
+			}
+			res, err := tc.e.Complete(ctx, call)
+			if err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			complete := check("Complete", res)
+			req, err := tc.e.Admit(ctx, call)
+			if err != nil {
+				t.Fatalf("Admit: %v", err)
+			}
+			var streamed []int
+			for tok := range req.Tokens() {
+				streamed = append(streamed, tok.ID)
+			}
+			res, err = req.Result()
+			if err != nil {
+				t.Fatalf("Result: %v", err)
+			}
+			admit := check("Admit", res)
+			if !equalInts(admit.Tokens, streamed) || !equalInts(complete.Tokens, streamed) {
+				t.Errorf("generated tokens differ: Complete=%v Admit=%v stream=%v", complete.Tokens, admit.Tokens, streamed)
+			}
+		})
 	}
 }
 

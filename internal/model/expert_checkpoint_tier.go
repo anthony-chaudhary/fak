@@ -817,10 +817,14 @@ func (t *ExpertCheckpointTier) finishPrefetchJob(name string, id polymodel.Model
 	delete(t.loading, id)
 	if err == nil && load.waiters == 0 {
 		if _, live := t.host[id]; !live {
-			if t.ready == nil {
-				t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
+			if gen+1 < t.readyGen {
+				t.prefetchStale++
+			} else {
+				if t.ready == nil {
+					t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
+				}
+				t.ready[id] = expertCheckpointReady{weight: w, gen: gen}
 			}
-			t.ready[id] = expertCheckpointReady{weight: w, gen: gen}
 		}
 	}
 	close(load.done)

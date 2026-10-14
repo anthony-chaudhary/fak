@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
 // overlapReaderAt serves bytes like bytes.Reader, holds each read briefly and records the
@@ -136,5 +138,103 @@ func TestExpertCheckpointPrefetchDropsUnconsumedHandoffs(t *testing.T) {
 	}
 	if n := tier.Prefetch([]string{"model.layers.0.mlp.experts.9.gate_proj.weight"}); n != 0 {
 		t.Fatalf("Prefetch of an unindexed name started %d reads, want 0", n)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestExpertCheckpointPrefetchDelayedGeneration(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		advance   int
+		waiter    bool
+		budget    int64
+		wantReady bool
+		wantStale int
+	}{
+		{name: "previous-generation", advance: 1, wantReady: true},
+		{name: "obsolete-generation", advance: 2, wantStale: 1},
+		{name: "obsolete-demand-waiter", advance: 2, waiter: true},
+		{name: "obsolete-host-retention", advance: 2, budget: 3 * q4kBlockBytes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const stride = q4kBlockBytes
+			data := make([]byte, 3*stride)
+			for i := range data {
+				data[i] = byte(i%251 + 1)
+			}
+			reader := &checkpointFlightReader{data: data, entered: make(chan int64, 16), release: make(chan struct{})}
+			t.Cleanup(reader.unblock)
+			tier := NewExpertCheckpointTier(tc.budget)
+			if err := tier.AddShard(reader, int64(len(data)), []FusedExpertTensor{{
+				Name: "blk.0.ffn_gate_exps.weight", Layer: 0, Proj: "gate_proj",
+				Quant: ExpertCheckpointQ4K, Experts: 3, Rows: 1, Cols: qkK,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			name := expertName(0, 0, "gate_proj.weight")
+			id := polymodel.ModelID(name)
+			var loads []*expertCheckpointLoad
+			for generation := 0; generation <= tc.advance; generation++ {
+				next := expertName(0, generation, "gate_proj.weight")
+				if got := tier.Prefetch([]string{next}); got != 1 {
+					t.Fatalf("generation %d started %d reads, want 1", generation+1, got)
+				}
+				tier.mu.Lock()
+				load := tier.loading[polymodel.ModelID(next)]
+				tier.mu.Unlock()
+				if load == nil {
+					t.Fatal("gated prefetch has no loading owner")
+				}
+				loads = append(loads, load)
+				if generation == 0 {
+					checkpointFlightWait(t, func() bool { return len(reader.entered) > 0 })
+				}
+			}
+			var demand <-chan checkpointFlightResult
+			if tc.waiter {
+				demand = checkpointFlightFaults(tier, name)
+				checkpointFlightWait(t, func() bool {
+					tier.mu.Lock()
+					defer tier.mu.Unlock()
+					return loads[0].waiters == 1
+				})
+			}
+			reader.unblock()
+			for _, load := range loads {
+				checkpointFlightWait(t, func() bool {
+					select {
+					case <-load.done:
+						return true
+					default:
+						return false
+					}
+				})
+			}
+			if tc.waiter {
+				checkpointFlightComplete(t, checkpointFlightCollect(t, demand, 1)[0], data[:stride])
+			}
+			tier.mu.Lock()
+			_, ready := tier.ready[id]
+			tier.mu.Unlock()
+			if ready != tc.wantReady {
+				t.Errorf("delayed handoff retained = %t, want %t", ready, tc.wantReady)
+			}
+			st := tier.Stats()
+			if st.PrefetchStale != tc.wantStale {
+				t.Errorf("stale handoffs = %d, want %d", st.PrefetchStale, tc.wantStale)
+			}
+			if calls := reader.calls.Load(); calls != int64(tc.advance+1) {
+				t.Fatalf("prefetch and joined demand made %d reads, want %d", calls, tc.advance+1)
+			}
+			w, err := tier.fault(name)
+			checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, data[:stride])
+			wantReads := st.Reads
+			if !tc.wantReady && tc.budget == 0 {
+				wantReads++
+			}
+			if got := tier.Stats().Reads; got != wantReads {
+				t.Errorf("reads after later demand = %d, want %d", got, wantReads)
+			}
+		})
 	}
 }

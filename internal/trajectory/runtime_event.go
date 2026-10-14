@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/traceabi"
 )
 
 const RuntimeEventSchema = "fak-runtime-event/1"
@@ -136,18 +138,39 @@ func ToolCallEvents(sessionID, turnID, traceID, callID, tool string, admitted bo
 	return out, nil
 }
 
+// CausalEnvelope projects native identity without guessing span context or
+// parentage. Runtime schema 1 supplies no spans, so its mapping stays unknown.
+// Invalid UTF-8 is refused rather than silently replaced during JSON encoding.
+func (r RuntimeEvent) CausalEnvelope() (traceabi.CausalEnvelope, error) {
+	if err := ValidateRuntimeEvent(r); err != nil {
+		return traceabi.CausalEnvelope{}, err
+	}
+	envelope := traceabi.CausalEnvelope{
+		Schema: traceabi.Schema, TraceID: r.TraceID, TraceFormat: traceabi.TraceOpaque,
+		ParentStatus: traceabi.ParentUnknown, Sequence: r.Sequence, LogicalID: r.EventID,
+		Operation: r.Source.Component, Phase: r.Kind,
+		Correlations: []traceabi.Correlation{
+			{Kind: traceabi.CorrelationSession, Value: r.SessionID},
+			{Kind: traceabi.CorrelationTurn, Value: r.TurnID},
+		},
+		SourceSchema: r.Schema, SourceVersion: "1", MappingStatus: traceabi.MappingUnknown,
+	}
+	return envelope.Canonical()
+}
+
 // AsTrajectoryEvents adapts runtime wire events into the canonical strict trajectory stream.
 func AsTrajectoryEvents(in []RuntimeEvent) ([]Event, error) {
 	out := make([]Event, 0, len(in))
 	for _, r := range in {
-		if err := ValidateRuntimeEvent(r); err != nil {
+		causal, err := r.CausalEnvelope()
+		if err != nil {
 			return nil, err
 		}
 		b, err := json.Marshal(r)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Event{Schema: EventSchema, ID: r.EventID, ConversationID: r.SessionID, Kind: EventTool, Action: r.Kind, Timestamp: r.Timestamp, Sequence: r.Sequence, Visibility: VisibilityOperator, Source: EventSource{Type: "runtime", SessionID: r.SessionID, EventID: r.EventID, OrderingKey: fmt.Sprint(r.Sequence), Adapter: "runtime-event", AdapterVersion: "1"}, Payload: b})
+		out = append(out, Event{Schema: EventSchema, ID: r.EventID, ConversationID: r.SessionID, Kind: EventTool, Action: r.Kind, Timestamp: r.Timestamp, Sequence: r.Sequence, Visibility: VisibilityOperator, Source: EventSource{Type: "runtime", SessionID: r.SessionID, EventID: r.EventID, OrderingKey: fmt.Sprint(r.Sequence), Adapter: "runtime-event", AdapterVersion: "1"}, Payload: b, Causal: &causal})
 	}
 	return out, nil
 }

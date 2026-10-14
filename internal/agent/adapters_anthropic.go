@@ -161,6 +161,7 @@ type anthropicBlock struct {
 	Input     any             `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 	Thinking  string          `json:"thinking,omitempty"`  // type=thinking reasoning text
 	Signature string          `json:"signature,omitempty"` // signs a thinking block for round-trip
 	Data      string          `json:"data,omitempty"`      // type=redacted_thinking opaque payload
@@ -234,7 +235,7 @@ func (anthropicAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 			// one assistant turn's parallel tool calls). Anthropic docs: splitting parallel
 			// tool results across separate user turns suppresses parallelism (#5797). Fold
 			// them into ONE user turn with N tool_result blocks, preserving run order.
-			block := anthropicBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content}
+			block := anthropicBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content, IsError: m.ToolResultIsError}
 			if n := len(req.Messages); n > 0 && anthropicToolResultOnly(req.Messages[n-1].Content) {
 				req.Messages[n-1].Content = append(req.Messages[n-1].Content, block)
 			} else {

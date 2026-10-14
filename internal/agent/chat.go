@@ -95,6 +95,9 @@ type Message struct {
 	FunctionCall *Func      `json:"function_call,omitempty"` // legacy OpenAI-compatible single-call shape
 	ToolCallID   string     `json:"tool_call_id,omitempty"`  // for role=tool
 	Name         string     `json:"name,omitempty"`
+	// ToolResultIsError preserves an explicit tool failure independently of Content.
+	// False means no explicit error, not proof of success. Provider adapters project it.
+	ToolResultIsError bool `json:"tool_result_is_error,omitempty"`
 	// Witness binds a client-supplied tool result to an externally verifiable resource version.
 	Witness string `json:"fak_witness,omitempty"`
 	// RefutesWitness names an older version invalidated by this observed result or write.
@@ -138,6 +141,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 		FunctionCall      *Func           `json:"function_call,omitempty"`
 		ToolCallID        string          `json:"tool_call_id,omitempty"`
 		Name              string          `json:"name,omitempty"`
+		ToolResultIsError bool            `json:"tool_result_is_error,omitempty"`
 		Thinking          string          `json:"thinking,omitempty"`
 		ThinkingSignature string          `json:"thinking_signature,omitempty"`
 		RedactedThinking  []string        `json:"redacted_thinking,omitempty"`
@@ -157,6 +161,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	m.FunctionCall = aux.FunctionCall
 	m.ToolCallID = aux.ToolCallID
 	m.Name = aux.Name
+	m.ToolResultIsError = aux.ToolResultIsError
 	m.Thinking = aux.Thinking
 	m.ThinkingSignature = aux.ThinkingSignature
 	m.RedactedThinking = aux.RedactedThinking
