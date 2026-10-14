@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:16f89dcbcd77f3d1c7d6f6de1287f2023a3ec23098f6204be1c0289811464d01",
+  "content_root": "sha256:67d96de3bb302a9268ba9a7f065096e92f18c7d4f90c7cd9dce5a1cbd5e02bbb",
   "tracked_files": 25274,
-  "tracked_bytes": 509500381,
+  "tracked_bytes": 509517237,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -45458,7 +45458,7 @@
     },
     {
       "path": "docs/concept-disambiguation-scorecard/README.md",
-      "content_sha256": "sha256:431c454abda882aed66a7db9b680fc1aa52ada033759a5b39284a07623ed6692",
+      "content_sha256": "sha256:8a1489f9215489c1ee5f782667f7fc4b94be253f8a4398f0ddf0af77d88cab0a",
       "bytes": 916002,
       "classification": "documentation",
       "source_classes": [
@@ -163449,8 +163449,8 @@
     },
     {
       "path": "internal/model/v41_layer_cohort.go",
-      "content_sha256": "sha256:c6dd93a431e6e9409ea1ddfe05545f0d359f31d267147a7e5701cb392f16f997",
-      "bytes": 8045,
+      "content_sha256": "sha256:6d1d08005559486a2f3b122cd60035484dca998697bf28674c28835ae87c2f70",
+      "bytes": 9075,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -163458,8 +163458,8 @@
     },
     {
       "path": "internal/model/v41_layer_cohort_test.go",
-      "content_sha256": "sha256:4c0f032fe938090bcab79cc17d8972fffb2d7a3d5d5b5f28a89538c43ad1ac60",
-      "bytes": 9006,
+      "content_sha256": "sha256:4dffee0a980f4368422a7d045fc357ab1808bb2f50d87552e168ae97923132f1",
+      "bytes": 20283,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -164142,7 +164142,7 @@
     },
     {
       "path": "internal/model/v41_routed_cohort_lease.go",
-      "content_sha256": "sha256:c50b5c7bd0c54789b15a2143395520b7ac346c041e6bc1267a6977e4fc21eb00",
+      "content_sha256": "sha256:6c7872d1b931a9a841b19eca74f8001c199cb42ce41e52e08ff43f6cd3c2339b",
       "bytes": 11376,
       "classification": "runtime_source",
       "source_classes": [
@@ -213467,8 +213467,8 @@
     },
     {
       "path": "tools/code_slop_scorecard.py",
-      "content_sha256": "sha256:93aba357413339a84b5d7610e7aff5a1f5b6f6b0c32cff50df61aa91aebf89c0",
-      "bytes": 111261,
+      "content_sha256": "sha256:2cdaed292e9a5f1f8d1b03ae6ea3e39bba6a60c172b5f8e3fb6abc5b85640396",
+      "bytes": 111653,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -213476,8 +213476,8 @@
     },
     {
       "path": "tools/code_slop_scorecard_test.py",
-      "content_sha256": "sha256:8955987458a1789f118510276013bc9632865053f9517d47e067abd0c981c556",
-      "bytes": 74798,
+      "content_sha256": "sha256:aa715449efd34cd68e21e3130b3fccd08cea136000ba84b10a348f4f4693f920",
+      "bytes": 78955,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
