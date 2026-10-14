@@ -23,9 +23,9 @@ type v41TailRoPERowsBackend interface {
 type v41InverseOutputRoPEFunc func(layer int, out, cos, conjSin []float32, heads, headDim, rotaryDim int) ([]float32, error)
 
 // Refs #13668. The inverse output rotation reuses the tail-RoPE kernel through
-// its row-panel contract with the negated-sine [-sin,cos] table. It uploads the
-// output row and table, then reads one rotated row back: 4*(heads*D+R) upload
-// bytes and 4*heads*D readback bytes per call. It does not claim residency.
+// its row-panel contract with the negated-sine [-sin,cos] table. The output row
+// stays transient; at most two exact tables are session-owned. A table miss adds
+// 4*R upload bytes to the unchanged 4*heads*D row upload/readback per call.
 func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
@@ -35,6 +35,18 @@ func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 	if !ok || !operation.V41TailRoPERowsAvailable() {
 		return nil
 	}
+	// Position, theta and amplitude are represented by the exact supplied table
+	// bits. Session-local keys keep those mutable values out of model residency;
+	// a rebound callback must also match the live handle before borrowing it.
+	keys := [2]string{"v41-inverse-rope-table:0", "v41-inverse-rope-table:1"}
+	type tableEntry struct {
+		values []float32
+		tensor compute.Tensor
+		model  *Model
+		epoch  uint64
+	}
+	var tables [2]tableEntry
+	next := 0
 	return func(layer int, out, cos, conjSin []float32, heads, headDim, rotaryDim int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
@@ -109,8 +121,40 @@ func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 			xt := s.uploadHostF32([]int{heads, headDim}, out, compute.MemoryActivation, "V4.1 inverse-RoPE output")
 			defer s.Backend.Free(xt)
 			stage = "table upload"
-			tt := s.uploadHostF32([]int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 inverse-RoPE table")
-			defer s.Backend.Free(tt)
+			var tt compute.Tensor
+			for i, entry := range tables {
+				live, present := s.halW[keys[i]]
+				if !present || live.Buf() == nil || live.Buf() != entry.tensor.Buf() ||
+					live.Backend() != s.Backend || entry.model != s.M || entry.epoch != s.cacheGeometryEpoch || len(entry.values) != len(table) {
+					continue
+				}
+				equal := true
+				for j, value := range table {
+					if math.Float32bits(value) != math.Float32bits(entry.values[j]) {
+						equal = false
+						break
+					}
+				}
+				if equal {
+					tt = live
+					break
+				}
+			}
+			if tt.Buf() == nil {
+				if s.halW == nil {
+					s.halW = make(map[string]compute.Tensor)
+				}
+				key := keys[next]
+				if old, present := s.halW[key]; present {
+					// Every prior consumer completed its readback before replacement.
+					delete(s.halW, key)
+					s.Backend.Free(old)
+				}
+				tt = s.uploadHostF32([]int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 inverse-RoPE table")
+				s.halW[key] = tt
+				tables[next] = tableEntry{values: table, tensor: tt, model: s.M, epoch: s.cacheGeometryEpoch}
+				next = (next + 1) % len(tables)
+			}
 			stage = "inverse-rope"
 			rotated, err := operation.V41TailRoPERows(xt, tt, heads, headDim, rotaryDim)
 			fresh := rotated.Buf() != nil && rotated.Backend() == s.Backend && rotated.Buf() != xt.Buf() && rotated.Buf() != tt.Buf()

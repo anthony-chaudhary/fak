@@ -15,6 +15,7 @@ import (
 type v41InverseRetirementRecorder struct {
 	*v41DenseTestBackend
 	inverseLive                  map[compute.Buffer]bool
+	inverseTables                map[compute.Buffer]bool
 	inverseCalls, inverseUploads int
 	faultAt, retireCalls         int
 	primary                      error
@@ -33,6 +34,9 @@ func (b *v41InverseRetirementRecorder) UploadClass(x compute.Tensor, dt compute.
 	b.inverseUploads++
 	out := compute.NewF32(b, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
 	b.inverseLive[out.Buf()] = true
+	if site == "V4.1 inverse-RoPE table" {
+		b.inverseTables[out.Buf()] = true
+	}
 	return out
 }
 
@@ -53,6 +57,7 @@ func (b *v41InverseRetirementRecorder) V41TailRoPERows(x, table compute.Tensor, 
 
 func (b *v41InverseRetirementRecorder) Free(x compute.Tensor) {
 	delete(b.inverseLive, x.Buf())
+	delete(b.inverseTables, x.Buf())
 	b.v41DenseTestBackend.Free(x)
 }
 
@@ -60,6 +65,22 @@ func (b *v41InverseRetirementRecorder) Recycle() {
 	b.retireCalls++
 	if b.closePanic != nil {
 		panic(b.closePanic)
+	}
+}
+
+func v41InverseRetirementResidentOnly(t *testing.T, s *Session, b *v41InverseRetirementRecorder) {
+	t.Helper()
+	owned := make(map[compute.Buffer]bool)
+	for name, tensor := range s.halW {
+		if strings.HasPrefix(name, "v41-inverse-rope-table:") {
+			if tensor.Backend() != b || !b.inverseTables[tensor.Buf()] || !b.inverseLive[tensor.Buf()] {
+				t.Fatal("inverse cache did not retain its own live table")
+			}
+			owned[tensor.Buf()] = true
+		}
+	}
+	if len(owned) == 0 || len(owned) > 2 || !reflect.DeepEqual(owned, b.inverseTables) || !reflect.DeepEqual(owned, b.inverseLive) {
+		t.Fatal("healthy inverse retained transient or foreign storage")
 	}
 }
 
@@ -75,7 +96,7 @@ func TestV41InverseOutputRetiresIncomingForwardError(t *testing.T) {
 		for _, closeFault := range []bool{false, true} {
 			t.Run(fmt.Sprintf("suffix=%t/close-fault=%t", suffix, closeFault), func(t *testing.T) {
 				m := v41IncrementalPlainModel(t, 2)
-				b := &v41InverseRetirementRecorder{v41DenseTestBackend: newV41DenseTestBackend(), inverseLive: map[compute.Buffer]bool{}}
+				b := &v41InverseRetirementRecorder{v41DenseTestBackend: newV41DenseTestBackend(), inverseLive: map[compute.Buffer]bool{}, inverseTables: map[compute.Buffer]bool{}}
 				s := v41DenseTestSession(t, m, b)
 				peer := v41DenseTestSession(t, m, b)
 				// LIFO: disarm before either registered Session.Close, including
@@ -88,9 +109,10 @@ func TestV41InverseOutputRetiresIncomingForwardError(t *testing.T) {
 					session.v41State().gatherOps.indexRoPE = nil
 				}
 				v41GroupedParity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})), 1e-4)
-				if b.inverseCalls != 2*m.Cfg.NumLayers || len(b.inverseLive) != 0 {
+				if b.inverseCalls != 2*m.Cfg.NumLayers {
 					t.Fatal("healthy inverse consumer did not execute or release its outputs")
 				}
+				v41InverseRetirementResidentOnly(t, s, b)
 				before := captureV41ForwardSnapshot(s.v41Forward)
 				calls, uploads := b.inverseCalls, b.inverseUploads
 				inner := &BackendForwardOperationError{Backend: "another-operation", Forward: ForwardPathKind("deepseek41"), Path: "incoming", Layer: 7, Stage: "rotation", Cause: ErrV41ForwardStage}
@@ -119,8 +141,13 @@ func TestV41InverseOutputRetiresIncomingForwardError(t *testing.T) {
 				}
 				b.primary, b.closePanic, b.faultAt = nil, nil, 0
 				v41GroupedParity(t, peer.Prefill([]int{4}), lastLogits(m.Forward([]int{4})), 1e-4)
-				if peer.BackendSessionClosed() || b.inverseCalls != calls+1+m.Cfg.NumLayers || len(b.inverseLive) != 0 {
+				if peer.BackendSessionClosed() || b.inverseCalls != calls+1+m.Cfg.NumLayers {
 					t.Fatal("unrelated owner could not continue after selected retirement")
+				}
+				v41InverseRetirementResidentOnly(t, peer, b)
+				peer.Close()
+				if len(b.inverseLive) != 0 || len(b.inverseTables) != 0 {
+					t.Fatal("peer close retained inverse storage")
 				}
 			})
 		}
