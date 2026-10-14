@@ -53,9 +53,42 @@ type PagedKVPool struct {
 	// MaxBlocks optionally caps the pool's backing store (#3386): when > 0, capacity-aware
 	// reservation (TryReserveBlocks / Reserve) may grow the pool to at most MaxBlocks physical
 	// blocks and refuses — all-or-nothing, mutating nothing — a batch the free list plus the
-	// remaining growth budget cannot fully satisfy. 0 (the zero value) means unbounded, which
+	// remaining growth budget cannot fully satisfy. Non-positive values mean unbounded, which
 	// preserves the pre-#3386 behavior exactly for every existing caller.
+	// LowerMaxBlocks adds an independent reservation ceiling without changing this setting.
 	MaxBlocks int
+
+	loweredMaxBlocks int
+	maxBlocksLowered bool // distinguishes an explicit zero ceiling from no lowering
+}
+
+// LowerMaxBlocks latches a stricter backing-growth ceiling for Reserve and
+// TryReserveBlocks. It returns true only when n is nonnegative and below the
+// current effective ceiling (or the pool is unbounded). Rejected, equal and
+// larger calls do nothing, including installing no latch. A successful zero
+// ceiling forbids new backing blocks but still permits reuse of existing free
+// blocks. No existing blocks, page tables or KV bytes are removed or changed.
+//
+// The latch never increases, even if callers later raise or clear MaxBlocks;
+// a positive MaxBlocks still applies when stricter. Like other pool operations,
+// lowering requires external serialization. Alloc, Append and Clone remain
+// unchecked allocation APIs, outside this reservation-only ceiling.
+func (p *PagedKVPool) LowerMaxBlocks(n int) bool {
+	limit, bounded := p.reservationMaxBlocks()
+	if n < 0 || (bounded && n >= limit) {
+		return false
+	}
+	p.loweredMaxBlocks = n
+	p.maxBlocksLowered = true
+	return true
+}
+
+func (p *PagedKVPool) reservationMaxBlocks() (limit int, bounded bool) {
+	limit, bounded = p.MaxBlocks, p.MaxBlocks > 0
+	if p.maxBlocksLowered && (!bounded || p.loweredMaxBlocks < limit) {
+		return p.loweredMaxBlocks, true
+	}
+	return limit, bounded
 }
 
 // Alloc allocates and returns an owned block id from the pool.

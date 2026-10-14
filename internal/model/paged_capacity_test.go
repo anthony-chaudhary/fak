@@ -232,3 +232,138 @@ func TestTryReserveBlocksThenAppendReusesReservedBlocks(t *testing.T) {
 	}
 	assertGathersEqual(t, "reserved-then-appended", s, wantK, wantV)
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestPagedKVDownwardCap(t *testing.T) {
+	t.Parallel()
+	// Keep the feature witness compilable on the parent: absence is a missing
+	// capability, not a claim that a serving path already used this setter.
+	type downwardCap interface{ LowerMaxBlocks(int) bool }
+	lowerer := func(t *testing.T, p *PagedKVPool) downwardCap {
+		t.Helper()
+		c, ok := any(p).(downwardCap)
+		if !ok {
+			t.Fatal("paged reservation pool has no downward-only cap capability")
+		}
+		return c
+	}
+
+	t.Run("sticky reservation ceiling", func(t *testing.T) {
+		p := NewPagedKVPool(pagedReserveCfg(), 4)
+		p.MaxBlocks = 8
+		c := lowerer(t, p)
+		if !c.LowerMaxBlocks(2) || c.LowerMaxBlocks(2) || c.LowerMaxBlocks(4) || c.LowerMaxBlocks(-1) {
+			t.Fatal("lowering must be strict, nonnegative and idempotent")
+		}
+		if p.MaxBlocks != 8 {
+			t.Fatalf("configured MaxBlocks = %d, want unchanged 8", p.MaxBlocks)
+		}
+		s := p.NewSequence()
+		before := snapshotPool(p)
+		p.MaxBlocks = 1
+		if s.TryReserveBlocks(2) || c.LowerMaxBlocks(1) {
+			t.Fatal("stricter configured cap was ignored or equal lowering was accepted")
+		}
+		p.MaxBlocks = 0 // Legacy unbounded configuration cannot erase the latch.
+		if s.TryReserveBlocks(3) {
+			t.Fatal("reservation grew past the latched ceiling")
+		}
+		s.Reserve(12)
+		assertPoolUnchanged(t, "lowered TryReserveBlocks and Reserve", p, before)
+		if s.Blocks() != 0 {
+			t.Fatal("refused reservation changed the page table")
+		}
+		if !s.TryReserveBlocks(2) || p.TotalBlocks() != 2 {
+			t.Fatal("exact lowered-cap reservation did not succeed")
+		}
+		p.MaxBlocks = 16
+		if c.LowerMaxBlocks(16) || s.TryReserveBlocks(1) {
+			t.Fatal("a larger configuration or lowering call regrew the pool")
+		}
+	})
+
+	t.Run("reuse above a lowered and zero ceiling", func(t *testing.T) {
+		p := NewPagedKVPool(pagedReserveCfg(), 4)
+		p.MaxBlocks = 8
+		live, wantK, wantV := newPagedSeq(p, 3)
+		spare := p.NewSequence()
+		if !spare.TryReserveBlocks(2) {
+			t.Fatal("setup reservation failed")
+		}
+		spare.Free() // Three backing blocks, two already allocated and reusable.
+		before := snapshotPool(p)
+		c := lowerer(t, p)
+		if !c.LowerMaxBlocks(1) || !c.LowerMaxBlocks(0) || c.LowerMaxBlocks(0) || c.LowerMaxBlocks(1) {
+			t.Fatal("explicit zero must be a strict, persistent lowering")
+		}
+		assertPoolUnchanged(t, "lowering below existing backing", p, before)
+		assertGathersEqual(t, "lowering preserves KV", live, wantK, wantV)
+		s := p.NewSequence()
+		if s.TryReserveBlocks(3) {
+			t.Fatal("zero ceiling allowed new backing allocation")
+		}
+		s.Reserve(12)
+		assertPoolUnchanged(t, "refusal preserves reusable blocks", p, before)
+		if s.Blocks() != 0 {
+			t.Fatal("refused batch partially reserved free blocks")
+		}
+		if !s.TryReserveBlocks(2) || p.TotalBlocks() != 3 || p.FreeBlocks() != 0 {
+			t.Fatal("zero ceiling must permit reuse without growing backing")
+		}
+		p.MaxBlocks = -1
+		if s.TryReserveBlocks(1) || !s.TryReserveBlocks(0) || !s.TryReserveBlocks(-1) {
+			t.Fatal("zero ceiling lost growth refusal or nonpositive no-op behavior")
+		}
+		assertGathersEqual(t, "reuse preserves live KV", live, wantK, wantV)
+	})
+
+	t.Run("only successful lowering installs a latch", func(t *testing.T) {
+		for _, configured := range []int{-1, 0, 2} {
+			p := NewPagedKVPool(pagedReserveCfg(), 4)
+			p.MaxBlocks = configured
+			c := lowerer(t, p)
+			if c.LowerMaxBlocks(-1) {
+				t.Fatal("negative lowering was accepted")
+			}
+			if configured > 0 && (c.LowerMaxBlocks(configured) || c.LowerMaxBlocks(configured+1)) {
+				t.Fatal("equal or higher than configured lowering was accepted")
+			}
+			if p.MaxBlocks != configured {
+				t.Fatal("rejected lowering changed the configured cap")
+			}
+			p.MaxBlocks = 6
+			if !p.NewSequence().TryReserveBlocks(6) {
+				t.Fatal("rejected lowering installed a hidden latch")
+			}
+		}
+		for _, configured := range []int{-1, 0} {
+			p := NewPagedKVPool(pagedReserveCfg(), 4)
+			p.MaxBlocks = configured
+			if !lowerer(t, p).LowerMaxBlocks(0) || p.NewSequence().TryReserveBlocks(1) || p.MaxBlocks != configured {
+				t.Fatal("unbounded configuration did not accept an explicit zero ceiling")
+			}
+		}
+	})
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestPagedKVDownwardCapLegacyConfiguration(t *testing.T) {
+	t.Parallel()
+	// This control stays green on the parent: without a successful lowering,
+	// MaxBlocks remains the same mutable optional cap, including negative values.
+	for _, configured := range []int{-1, 0, 2} {
+		p := NewPagedKVPool(pagedReserveCfg(), 4)
+		p.MaxBlocks = configured
+		s := p.NewSequence()
+		if got, want := s.TryReserveBlocks(3), configured <= 0; got != want {
+			t.Fatalf("configured %d: reserve = %v, want %v", configured, got, want)
+		}
+		if p.MaxBlocks != configured {
+			t.Fatal("reservation changed the configured cap")
+		}
+		p.MaxBlocks = 8
+		if !s.TryReserveBlocks(3) {
+			t.Fatal("legacy configuration increase stopped permitting growth")
+		}
+	}
+}
