@@ -1292,6 +1292,10 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 			if streamed[info.Name] {
 				return tw
 			}
+			if loadOpts.expertShardSet && archIsDeepSeek41(cfg.ModelType) &&
+				(info.Type == TensorQ2_K || info.Type == TensorQ3_K) {
+				return s.computeOwnedExpertRange(info, cfg, loadOpts.expertShard)
+			}
 			shape, raw, okShape := s.shapeAndBytesOrFail(info, &tw)
 			if !okShape {
 				return tw
