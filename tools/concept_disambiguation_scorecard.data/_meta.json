@@ -4194,6 +4194,11 @@
           "category": "incidental",
           "reason": "Record encoding and schema check subordinate to the existing observe-only filing sensor; it introduces no separate enforcement gate.",
           "token": "guardClaudeRecordSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deferred Session panic-cleanup helper that closes the selected V4.1 DistComm and rethrows the original panic; it implements transport lifetime cleanup rather than a new admission gate or policy.",
+          "token": "v41EPGuard"
         }
       ],
       "exclude": [
@@ -4681,6 +4686,7 @@
         "transform_guard",
         "ungated",
         "unguarded",
+        "v41EPGuard",
         "v41UsesGatedCompressor",
         "validateGuardBudgetFlags",
         "verifyGateCheckout",
@@ -16244,6 +16250,16 @@
           "category": "incidental",
           "reason": "Function-local boolean from the existing soft-slot owner map used to prefer unowned eligible slots; not a planning abstraction.",
           "token": "candidateOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private V4.1 expert-parallel wire-layout helper constructing the existing TPPlan bands from routed picks and fixed headers; it preserves TPPlan validation and introduces no separate plan representation.",
+          "token": "v41EPGatherPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private V4.1 admission helper that validates the exact transport, rank and geometry before returning the existing ExpertParallelPlan as TPPlan; not an independent planning abstraction.",
+          "token": "v41EPPlan"
         }
       ],
       "exclude": [
@@ -16488,6 +16504,8 @@
         "stagedStrixCandidate",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
+        "v41EPGatherPlan",
+        "v41EPPlan",
         "v41PublishedCandidateBlockSize",
         "v41PublishedCandidateSourceLayerID",
         "v41PublishedCandidateTopKBlocks",

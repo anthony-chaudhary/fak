@@ -988,6 +988,10 @@ func (s *Session) prefillOwned(ids []int) []float32 {
 	}
 	s.validateDeviceOnlyExecution("prefill")
 	if s.M.Cfg.IsDeepSeekV41() {
+		defer s.v41EPGuard()
+		if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
+			defer rel()
+		}
 		return s.prefillV41(ids)
 	}
 	s.cacheGeometryMu.RLock()
@@ -1122,6 +1126,10 @@ func (s *Session) prefillNoLogitsOwned(ids []int) {
 	}
 	s.validateDeviceOnlyExecution("prefill-no-logits")
 	if s.M.Cfg.IsDeepSeekV41() {
+		defer s.v41EPGuard()
+		if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
+			defer rel()
+		}
 		// V4.1 owns its continuation state outside the generic KV cache. Its
 		// forward still computes the head; only the returned logits are discarded.
 		s.prefillV41(ids)
@@ -1266,6 +1274,10 @@ func (s *Session) stepOwned(id int) []float32 {
 	defer s.BeginGPUKeepAlive()()
 	s.validateDeviceOnlyExecution("decode")
 	if s.M.Cfg.IsDeepSeekV41() {
+		defer s.v41EPGuard()
+		if rel := s.epAnnounce(epOpStep, []int{id}); rel != nil {
+			defer rel()
+		}
 		return s.stepV41(id)
 	}
 	s.cacheGeometryMu.RLock()

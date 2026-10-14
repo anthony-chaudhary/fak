@@ -734,7 +734,22 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// served the repeats either way); the single-token path keeps the historical
 	// token-major stream byte-for-byte.
 	var routedByToken [][]float32
-	if seq > 1 && !v41ForceTokenMajor {
+	if m.v41EPRequested() {
+		if !full || st == nil || st.routedLayer == nil {
+			return fmt.Errorf("%w: missing Session routed-layer binding", ErrV41ExpertParallel)
+		}
+		routedByToken = make([][]float32, seq)
+		for t := range perTokenPicks {
+			values, outcome, cause := st.routedLayer(l, perTokenPicks[t], ffnInputs[t])
+			if cause != nil {
+				return cause
+			}
+			if outcome != v41RoutedExpertHandled || len(values) != H {
+				return fmt.Errorf("%w: distributed routed layer declined", ErrV41ExpertParallel)
+			}
+			routedByToken[t] = values
+		}
+	} else if seq > 1 && !v41ForceTokenMajor {
 		// #13511: thread the session's optional device gate/up callback into the
 		// grouped (expert-major) contraction too, so a multi-token prefill offers
 		// each routed row to the same device seam the token-major arm uses

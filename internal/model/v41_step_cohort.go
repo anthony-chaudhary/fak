@@ -222,6 +222,9 @@ func (m *Model) v41StepCohortAdmit(lanes []v41StepCohortLane) error {
 	if m == nil || len(lanes) < 2 || !m.Cfg.IsDeepSeekV41() {
 		return decline("need at least two V4.1 sessions")
 	}
+	if m.v41EPRequested() || m.EPDecodeCoordinated() {
+		return decline("expert-parallel sessions require coordinated scalar entrypoints")
+	}
 	if err := m.v41ForwardAdmitted(); err != nil {
 		return err
 	}

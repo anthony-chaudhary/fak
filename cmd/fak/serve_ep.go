@@ -99,6 +99,9 @@ func ggufNumExperts(ggufPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if err := admitServeV41ExpertParallel(fileCfg); err != nil {
+		return 0, err
+	}
 	return fileCfg.NumExperts, nil
 }
 
@@ -222,4 +225,14 @@ func joinDevicePGIfSupported(be compute.Backend, group *fakmodel.DistComm, cfg e
 		return nil, err
 	}
 	return coll, nil
+}
+
+// The header-only sharded-load caller must not turn the synthetic TCP proof
+// into production admission. A real checkpoint needs digest-bound shard loading,
+// mixed Q2/Q3 owner-device capability and end-to-end hardware qualification.
+func admitServeV41ExpertParallel(cfg fakmodel.Config) error {
+	if cfg.IsDeepSeekV41() {
+		return fmt.Errorf("V4.1 expert-parallel serve is not qualified: requires digest-bound mixed Q2/Q3 sharded loading and owner-device execution; the exact TCP Session path is software proof only")
+	}
+	return nil
 }

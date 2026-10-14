@@ -323,6 +323,9 @@ func (st *v41ForwardState) retainedCopyCount() int {
 // logits. It is package-private: the public entry points are Model.Forward and
 // Session.Prefill/Step.
 func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, err error) {
+	if m.v41EPRequested() && (st == nil || st.callbackOwner == nil || st.routedLayer == nil) {
+		return nil, fmt.Errorf("%w: requires the bound Session forward", ErrV41ExpertParallel)
+	}
 	if st != nil {
 		st.forwardCoverage = nil
 	}
@@ -795,7 +798,7 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 			var selectedAttention *V41SharedAttentionOperationError
 			var selectedScore *V41IndexerScoreOperationError
 			var selectedMHC *V41MHCOperationError
-			if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
+			if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || s.M.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage) {
 				panic(err)
 			}
 			// Roll the suffix back to the pre-call boundary and re-fold the
@@ -927,7 +930,7 @@ func (s *Session) stepV41(id int) []float32 {
 		var selectedAttention *V41SharedAttentionOperationError
 		var selectedScore *V41IndexerScoreOperationError
 		var selectedMHC *V41MHCOperationError
-		if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || !errors.Is(err, ErrV41ForwardStage) {
+		if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || s.M.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage) {
 			panic(err)
 		}
 		// A typed stage refusal the eligibility check could not foresee (e.g. the
@@ -992,6 +995,7 @@ func (s *Session) v41State() *v41ForwardState {
 			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)
 		}
 		s.v41Forward.callbackOwner = s
+		s.bindV41ExpertParallel(s.v41Forward)
 	}
 	return s.v41Forward
 }

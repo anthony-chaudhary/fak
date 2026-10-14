@@ -168,6 +168,9 @@ func (s *Session) prefixSnapshot(readResidentGDN bool) (out *PrefixSnapshot, err
 }
 
 func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResidentGDN bool) (*PrefixSnapshot, error) {
+	if s != nil && s.M.v41EPRequested() {
+		return nil, fmt.Errorf("%w: distributed prefix snapshot is not supported", ErrV41ExpertParallel)
+	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
 	if s == nil || s.Cache == nil {
@@ -348,6 +351,9 @@ func (p *PrefixSnapshot) Restore(s *Session) (err error) {
 }
 
 func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) error {
+	if s != nil && s.M.v41EPRequested() {
+		return fmt.Errorf("%w: distributed prefix restore is not supported", ErrV41ExpertParallel)
+	}
 	if p == nil {
 		return fmt.Errorf("model: invalid prefix snapshot restore")
 	}

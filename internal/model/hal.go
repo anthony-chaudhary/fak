@@ -130,6 +130,7 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 
 // Close releases session-owned device state and its model-weight lifetime reference.
 func (s *Session) Close() {
+	defer s.finishV41EPOwner()
 	scope := s.beginBackendExecution()
 	defer scope.finish()
 	s.closeOwned(scope)

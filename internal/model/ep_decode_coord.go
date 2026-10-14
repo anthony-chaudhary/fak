@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // ep_decode_coord.go — the coordinated expert-parallel decode protocol (#4835).
@@ -115,7 +116,9 @@ func decodeEPDecodeFrame(payload []byte) (epDecodeOp, int, []int, error) {
 // cache, or stop rule it uses — drives the group. It must be built on rank 0; every other rank
 // runs RunEPFollower. Call Shutdown after the last request to release the followers.
 type EPDecodeCoordinator struct {
-	g *DistComm
+	g          *DistComm
+	v41Timeout time.Duration
+	v41Owner   *Session
 	// mu serializes the (broadcast frame, run forward) critical section. Holding it ACROSS the
 	// forward is the point: two concurrent rank-0 requests would otherwise interleave their
 	// frames and their AllReduces, and followers — which see one flat frame stream with no
@@ -142,9 +145,20 @@ func NewEPDecodeCoordinator(g *DistComm) (*EPDecodeCoordinator, error) {
 // are now at a different point in the frame stream than rank 0, so the very next per-layer
 // AllReduce would block forever. Panicking turns that silent hang into a loud, honest
 // boundary — the same discipline requirePreNorm uses for an unimplemented topology.
-func (c *EPDecodeCoordinator) announce(op epDecodeOp, pos int, ids []int) func() {
+func (c *EPDecodeCoordinator) announce(owner *Session, op epDecodeOp, pos int, ids []int) func() {
 	c.mu.Lock()
-	if _, err := c.g.BroadcastFromRoot(encodeEPDecodeFrame(op, pos, ids)); err != nil {
+	if c.v41Timeout > 0 {
+		if owner == nil || (c.v41Owner != nil && c.v41Owner != owner) {
+			c.mu.Unlock()
+			panic(fmt.Errorf("%w: another root Session still owns the group; close it before starting a request", ErrV41ExpertParallel))
+		}
+		if c.v41Owner == nil && (op != epOpPrefill || pos != 0) {
+			c.mu.Unlock()
+			panic(fmt.Errorf("%w: a new root Session must start with an uncached Prefill", ErrV41ExpertParallel))
+		}
+		c.v41Owner = owner
+	}
+	if _, err := c.broadcast(encodeEPDecodeFrame(op, pos, ids)); err != nil {
 		c.mu.Unlock()
 		panic(fmt.Sprintf("model: EP decode coordinator broadcast (op=%d pos=%d n=%d) failed, the process group is desynced and every following collective would hang: %v", op, pos, len(ids), err))
 	}
@@ -156,7 +170,7 @@ func (c *EPDecodeCoordinator) announce(op epDecodeOp, pos int, ids []int) func()
 func (c *EPDecodeCoordinator) Shutdown() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, err := c.g.BroadcastFromRoot(encodeEPDecodeFrame(epOpShutdown, 0, nil)); err != nil {
+	if _, err := c.broadcast(encodeEPDecodeFrame(epOpShutdown, 0, nil)); err != nil {
 		return fmt.Errorf("model: EP decode coordinator shutdown broadcast: %w", err)
 	}
 	return nil
@@ -167,7 +181,12 @@ func (c *EPDecodeCoordinator) Shutdown() error {
 // forward it is about to run to the follower ranks, so the followers replay it and reach the
 // same collectives. nil — the default, and every non-sharded serve — leaves the forward
 // entry points byte-identical to today: the hook reads one nil field and returns.
-func (m *Model) SetEPDecodeCoordinator(c *EPDecodeCoordinator) { m.epCoord = c }
+func (m *Model) SetEPDecodeCoordinator(c *EPDecodeCoordinator) {
+	if c != nil && m.Cfg.IsDeepSeekV41() {
+		c.v41Timeout = v41EPRoundTimeout
+	}
+	m.epCoord = c
+}
 
 // EPDecodeCoordinated reports whether this model decodes through a coordinated EP group —
 // whether every Prefill/Step on its sessions is announced to follower ranks that replay it.
@@ -190,6 +209,12 @@ func (m *Model) EPDecodeCoordinated() bool { return m != nil && m.epCoord != nil
 // frame must carry whichever one the forward will actually append to, because that is the
 // number the follower's mirror is checked against.
 func (s *Session) epSeqLen() int {
+	if s.M != nil && s.M.Cfg.IsDeepSeekV41() {
+		if s.v41Forward == nil {
+			return 0
+		}
+		return len(s.v41Forward.history)
+	}
 	if s.halKV != nil {
 		return s.halKV.Len()
 	}
@@ -204,10 +229,28 @@ func (s *Session) epSeqLen() int {
 // for every ordinary serve; on rank 0 of a coordinated sharded serve it broadcasts the frame
 // and returns the release the caller defers until after its forward.
 func (s *Session) epAnnounce(op epDecodeOp, ids []int) func() {
-	if s == nil || s.M == nil || s.M.epCoord == nil {
+	if s == nil || s.M == nil {
 		return nil
 	}
-	return s.M.epCoord.announce(op, s.epSeqLen(), ids)
+	if s.M.v41EPRequested() {
+		c, _, err := s.M.v41EPPlan()
+		if err != nil {
+			panic(err)
+		}
+		if c.g.Rank() == 0 && s.M.epCoord == nil {
+			panic(fmt.Errorf("%w: rank-0 Session requires a decode coordinator", ErrV41ExpertParallel))
+		}
+	}
+	if s.M.epCoord == nil {
+		return nil
+	}
+	if s.M.Cfg.IsDeepSeekV41() {
+		c, _, err := s.M.v41EPPlan()
+		if err != nil || c == nil || c.g != s.M.epCoord.g {
+			panic(fmt.Errorf("%w: coordinator does not match exact transport: %v", ErrV41ExpertParallel, err))
+		}
+	}
+	return s.M.epCoord.announce(s, op, s.epSeqLen(), ids)
 }
 
 // RunEPFollower runs a follower rank's (rank>0) half of the coordinated decode: it receives
@@ -224,7 +267,7 @@ func (s *Session) epAnnounce(op epDecodeOp, ids []int) func() {
 // AllReduce would sum a garbage partial into a plausible-looking answer. That is the one
 // failure this protocol must never take silently, so it is an error, not a warning. The serve
 // wiring must therefore disable prefix reuse on the coordinated path (#4835).
-func RunEPFollower(g *DistComm, newSession func() *Session) error {
+func RunEPFollower(g *DistComm, newSession func() *Session) (err error) {
 	if g == nil {
 		return fmt.Errorf("model: RunEPFollower needs a process group, got nil")
 	}
@@ -235,6 +278,23 @@ func RunEPFollower(g *DistComm, newSession func() *Session) error {
 		return fmt.Errorf("model: RunEPFollower needs a session factory, got nil")
 	}
 	var sess *Session
+	defer func() {
+		// Forward APIs report selected faults as panics. Retire the mirror and
+		// close the group before returning so no peer waits on a dead rank.
+		if r := recover(); r != nil {
+			if cause, ok := r.(error); ok {
+				err = cause
+			} else {
+				err = fmt.Errorf("model: EP follower panic: %v", r)
+			}
+		}
+		if err != nil {
+			g.abortV41EP()
+		}
+		if sess != nil {
+			sess.Close()
+		}
+	}()
 	for {
 		payload, err := g.BroadcastFromRoot(nil)
 		if err != nil {
@@ -248,6 +308,9 @@ func RunEPFollower(g *DistComm, newSession func() *Session) error {
 		case epOpPrefill:
 			// pos 0 opens a new request: rank 0 started a fresh session, so the mirror does too.
 			if pos == 0 {
+				if sess != nil {
+					sess.Close()
+				}
 				sess = newSession()
 			}
 			if err := epCheckMirror(g, sess, op, pos); err != nil {
@@ -271,6 +334,12 @@ func RunEPFollower(g *DistComm, newSession func() *Session) error {
 func epCheckMirror(g *DistComm, sess *Session, op epDecodeOp, pos int) error {
 	if sess == nil {
 		return fmt.Errorf("model: EP follower rank %d got op=%d at pos %d before any PREFILL opened a mirror session", g.Rank(), op, pos)
+	}
+	if sess.M != nil && sess.M.Cfg.IsDeepSeekV41() {
+		c, _, err := sess.M.v41EPPlan()
+		if err != nil || c == nil || c.g != g || sess.M.epCoord != nil {
+			return fmt.Errorf("%w: follower Session does not belong to the frame process group: %v", ErrV41ExpertParallel, err)
+		}
 	}
 	if got := sess.epSeqLen(); got != pos {
 		return fmt.Errorf("model: EP follower rank %d mirror desync — rank 0 runs op=%d at pos %d but this rank's mirror is at pos %d; the reduce would sum a partial computed from a different context (rank 0 must not resume a coordinated session from a restored prefix cache)", g.Rank(), op, pos, got)

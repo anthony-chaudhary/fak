@@ -546,6 +546,15 @@ func (m *Model) v41ForwardAdmitted() error {
 			fmt.Errorf("%w: reduced weights absent", ErrV41NativeUnsupported))
 	}
 	cfg := m.Cfg
+	ep, owners, err := m.v41EPPlan()
+	if err != nil {
+		return err
+	}
+	expertLo, expertHi := 0, cfg.NumExperts
+	if ep != nil {
+		band := owners.Shards[m.epRank]
+		expertLo, expertHi = band.Lo, band.Hi
+	}
 	// Geometry discrimination fails closed: a parsed/published config whose flat
 	// axes disagree with its Attention envelope is refused here rather than
 	// silently assembled against the reduced stand-in geometry.
@@ -666,7 +675,7 @@ func (m *Model) v41ForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w2.weight"), v41StageMoE, l, H, I); err != nil {
 			return err
 		}
-		for e := 0; e < cfg.NumExperts; e++ {
+		for e := expertLo; e < expertHi; e++ {
 			stem := "ffn.experts." + itoa(e)
 			if err := m.v41AdmitShape(layerName(l, stem+".w1.weight"), v41StageMoE, l, I, H); err != nil {
 				return err
