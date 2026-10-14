@@ -236,6 +236,7 @@ func TestRunStrixValidation_UnknownSelector_FailsClosed(t *testing.T) {
 		RunAblations:  false,
 		GitRef:        "HEAD",
 		Command:       "fak-dev amd-strix-validate --subkernels=invalid_name --ablate=none",
+		GeneratedBy:   "fak-dev amd-strix-validate",
 	}
 
 	receipt, err := RunStrixValidation(ctx, opts)
@@ -250,6 +251,12 @@ func TestRunStrixValidation_UnknownSelector_FailsClosed(t *testing.T) {
 	}
 	if receipt.Verified {
 		t.Errorf("receipt.Verified = true, want false")
+	}
+	if receipt.Provenance.GeneratedBy != opts.GeneratedBy {
+		t.Fatalf("receipt producer = %q, want %q", receipt.Provenance.GeneratedBy, opts.GeneratedBy)
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("producer-stamped failure receipt is invalid: %v", err)
 	}
 	if receipt.SelectedSubkernels != 0 || receipt.SelectedCount != 0 {
 		t.Errorf("receipt.SelectedSubkernels = %d, SelectedCount = %d, want 0", receipt.SelectedSubkernels, receipt.SelectedCount)
@@ -1052,7 +1059,7 @@ func TestRunStrixValidationCleanupUsesFreshContextExactlyOnce(t *testing.T) {
 		cancel()
 		return StrixSubkernelResult{Name: "argmax", Status: "PASS", DurationUS: 1, Iterations: 1, ParityEvents: []StrixParityEvent{NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)}, Evidence: validStrixExecutionEvidence()}
 	}
-	r, err := RunStrixValidation(ctx, StrixValidationOpts{Host: target.Host, RunSubkernels: true, Subkernels: []string{"argmax"}, GitRef: "HEAD", GitTip: testTip, Command: "test", RequireSourceBinding: true, CandidateArchive: []byte("unused by stub"), SourceArchiveSHA256: testHash, AdmissionTimeout: 30 * time.Second})
+	r, err := RunStrixValidation(ctx, StrixValidationOpts{Host: target.Host, RunSubkernels: true, Subkernels: []string{"argmax"}, GitRef: "HEAD", GitTip: testTip, Command: "test", GeneratedBy: "fak-dev amd-strix-validate", RequireSourceBinding: true, CandidateArchive: []byte("unused by stub"), SourceArchiveSHA256: testHash, AdmissionTimeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("validation failed: %v", err)
 	}
@@ -1061,6 +1068,17 @@ func TestRunStrixValidationCleanupUsesFreshContextExactlyOnce(t *testing.T) {
 	}
 	if !r.Provenance.CleanupObserved {
 		t.Fatal("cleanup not recorded")
+	}
+	if r.Provenance.GeneratedBy != "fak-dev amd-strix-validate" {
+		t.Fatalf("receipt producer = %q", r.Provenance.GeneratedBy)
+	}
+	if !r.CreditEligible() {
+		t.Fatal("producer-stamped genuine receipt lost physical credit")
+	}
+
+	defaultReceipt := newStrixValidationReceipt(StrixValidationOpts{}, *target)
+	if defaultReceipt.Provenance.GeneratedBy != "fak/internal/amdgpu" {
+		t.Fatalf("low-level producer = %q", defaultReceipt.Provenance.GeneratedBy)
 	}
 }
 

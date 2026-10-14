@@ -146,6 +146,9 @@ bool environmentFlagEnabled(const char* name) {
 #endif
 }
 
+const bool g_preferCachedTransferStage =
+    environmentFlagEnabled("FAK_VULKAN_STAGE_HOST_CACHED");
+
 bool memoryTypeUsesDeviceLocalHeap(uint32_t memoryType) {
     if (memoryType >= g_memprops.memoryTypeCount) return false;
     uint32_t heap = g_memprops.memoryTypes[memoryType].heapIndex;
@@ -556,9 +559,11 @@ bool allocPressure(VkResult r) {
 // SOFTWARE.
 // Fak retains its first-attempt/pool-drain policy and retries only allocation
 // pressure, never device loss or another fatal error. This selector performs no
-// accounting or binding; the caller publishes those only after success.
+// accounting or binding; the caller publishes those only after success. Preferred
+// flags order otherwise-compatible candidates; they never become requirements.
 template <typename Allocate>
 VkResult allocateCompatibleMemory(uint32_t typeBits, VkMemoryPropertyFlags want,
+                                  VkMemoryPropertyFlags preferred,
                                   const VkPhysicalDeviceMemoryProperties& properties,
                                   VkDeviceSize allocationSize, bool tryAll, Allocate allocate,
                                   VkDeviceMemory* out, uint32_t* selectedType,
@@ -569,21 +574,27 @@ VkResult allocateCompatibleMemory(uint32_t typeBits, VkMemoryPropertyFlags want,
     VkResult result = VK_ERROR_FEATURE_NOT_PRESENT;
     const uint32_t count = std::min(properties.memoryTypeCount, uint32_t(32));
     const uint32_t heapCount = std::min(properties.memoryHeapCount, uint32_t(VK_MAX_MEMORY_HEAPS));
-    for (uint32_t i = 0; i < count; ++i) {
-        const VkMemoryType& type = properties.memoryTypes[i];
-        if (!(typeBits & (uint32_t(1) << i)) || (type.propertyFlags & want) != want) continue;
-        // VUID-vkAllocateMemory-pAllocateInfo-01713: use the Vulkan allocation
-        // requirement, not the smaller logical payload, for heap eligibility.
-        if (type.heapIndex >= heapCount || allocationSize > properties.memoryHeaps[type.heapIndex].size) continue;
-        VkDeviceMemory candidate = VK_NULL_HANDLE;
-        *allocationAttempted = true;
-        result = allocate(i, &candidate);
-        if (result == VK_SUCCESS) {
-            *out = candidate;
-            *selectedType = i;
-            return result;
+    const uint32_t passes = preferred ? 2 : 1;
+    for (uint32_t pass = 0; pass < passes; ++pass) {
+        const bool preferredPass = preferred && pass == 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            const VkMemoryType& type = properties.memoryTypes[i];
+            if (!(typeBits & (uint32_t(1) << i)) || (type.propertyFlags & want) != want) continue;
+            const bool hasPreferred = preferred && (type.propertyFlags & preferred) == preferred;
+            if (preferred && hasPreferred != preferredPass) continue;
+            // VUID-vkAllocateMemory-pAllocateInfo-01713: use the Vulkan allocation
+            // requirement, not the smaller logical payload, for heap eligibility.
+            if (type.heapIndex >= heapCount || allocationSize > properties.memoryHeaps[type.heapIndex].size) continue;
+            VkDeviceMemory candidate = VK_NULL_HANDLE;
+            *allocationAttempted = true;
+            result = allocate(i, &candidate);
+            if (result == VK_SUCCESS) {
+                *out = candidate;
+                *selectedType = i;
+                return result;
+            }
+            if (!tryAll || !allocPressure(result)) return result;
         }
-        if (!tryAll || !allocPressure(result)) return result;
     }
     return result;
 }
@@ -657,7 +668,8 @@ void destroyBuffer(Buffer* b) {
     releaseWeightArena();
 }
 
-Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage);
+Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage,
+                    VkMemoryPropertyFlags preferred = 0);
 
 bool g_debugD2HStagingFailureOnce = false;
 
@@ -688,7 +700,8 @@ Buffer* stagingBuffer(size_t bytes, int* failureStatus = nullptr) {
     size_t cap = stageCapacity(bytes);
     g_stage = allocBuffer(cap,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        g_preferCachedTransferStage ? VK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0);
     if (!g_stage) {
         if (failureStatus) *failureStatus = FVK_D2H_STAGING_ALLOCATION_FAILED;
         return nullptr;
@@ -729,7 +742,8 @@ size_t drainPool() {
     return freed;
 }
 
-Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage) {
+Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage,
+                    VkMemoryPropertyFlags preferred) {
     if (g_v41SubmissionPendingFailure) return nullptr;
     size_t reqBytes = bytes ? bytes : 1;
     if ((usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) &&
@@ -760,7 +774,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     vkGetBufferMemoryRequirements(g_dev, b->buf, &req);
     bool allocationAttempted = false;
     auto tryAlloc = [&](VkMemoryPropertyFlags want, VkDeviceMemory* out, uint32_t* selectedType, bool tryAll = false) -> VkResult {
-        return allocateCompatibleMemory(req.memoryTypeBits, want, g_memprops, req.size, tryAll, [&](uint32_t index, VkDeviceMemory* candidate) {
+        return allocateCompatibleMemory(req.memoryTypeBits, want, preferred, g_memprops, req.size, tryAll, [&](uint32_t index, VkDeviceMemory* candidate) {
                 VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
                 ai.allocationSize = req.size;
                 ai.memoryTypeIndex = index;
@@ -957,11 +971,11 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
         // retry only allocation pressure, with fresh private output per attempt.
         const uint32_t preferredBits = preferredType < 32 ? (uint32_t(1) << preferredType) : 0;
         if (preferredBits) {
-            VkResult result = allocateCompatibleMemory(preferredBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VkResult result = allocateCompatibleMemory(preferredBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0,
                 g_memprops, blockBytes, false, allocate, &memory, &memoryType, &allocationAttempted);
             if (allocationAttempted && (!tryAll || !allocPressure(result))) return result;
         }
-        return allocateCompatibleMemory(req.memoryTypeBits & ~preferredBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        return allocateCompatibleMemory(req.memoryTypeBits & ~preferredBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0,
             g_memprops, blockBytes, tryAll, allocate, &memory, &memoryType, &allocationAttempted);
     };
     VkResult ar = tryAlloc(false);
@@ -3299,7 +3313,7 @@ float gdnVerifySelfCheck() {
 
 // Pure synthetic seam: shares the actual selector above, never calls Vulkan,
 // mutates backend state, or fabricates live allocation/dispatch observations.
-extern "C" int fvk_debug_memory_type_selection(uint32_t typeBits, uint32_t want,
+extern "C" int fvk_debug_memory_type_selection(uint32_t typeBits, uint32_t want, uint32_t preferred,
         uint32_t typeCount, const uint32_t* flags, const int* results,
         const uint32_t* heapIndices, uint32_t heapCount, const uint64_t* heapSizes,
         uint64_t allocationSize, int tryAll, uint32_t* attempts, uint32_t* attemptCount, uint32_t* selectedType,
@@ -3318,7 +3332,7 @@ extern "C" int fvk_debug_memory_type_selection(uint32_t typeBits, uint32_t want,
     *attemptCount = 0;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     bool allocationAttempted = false;
-    VkResult result = allocateCompatibleMemory(typeBits, want, properties, allocationSize,
+    VkResult result = allocateCompatibleMemory(typeBits, want, preferred, properties, allocationSize,
         tryAll != 0, [&](uint32_t i, VkDeviceMemory* out) {
             attempts[(*attemptCount)++] = i;
             VkResult status = static_cast<VkResult>(results[i]);

@@ -264,6 +264,21 @@ func TestV41GroupedOutputPanelDeclinesBeforeActivation(t *testing.T) {
 }
 
 // fak-test:runtime fast est=100ms lane=default
+func TestV41GroupedOutputPanelDeferredDisabledBeforeActivation(t *testing.T) {
+	t.Setenv(v41DeferredBF16PublishEnv, "0")
+	m, s, b := v41GroupedPanelFixture(t)
+	c := m.Cfg
+	rows, width := 4, c.NumHeads*c.HeadDim
+	got, outcome, err := s.v41GroupedOutputPanel(0, v41GroupedPanelInput(rows, width), rows, c.NumHeads, c.HeadDim, c.OGroups, c.OLoraRank, c.HiddenSize)
+	if got != nil || err != nil || outcome != v41ProjectionDeclined {
+		t.Fatalf("disabled deferred publication got=%v outcome=%d err=%v", got, outcome, err)
+	}
+	if b.uploads != 0 || b.matmuls != 0 || b.gathers != 0 || b.deferredPublishes != 0 || len(b.created) != 0 || s.BackendSessionClosed() {
+		t.Fatalf("disabled panel effects=%d/%d/%d/%d created=%d closed=%t", b.uploads, b.matmuls, b.gathers, b.deferredPublishes, len(b.created), s.BackendSessionClosed())
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
 func TestV41GroupedOutputPanelFaultOrder(t *testing.T) {
 	inputFault := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishGroupedOutputProjection, Index: 7}
 	laterA := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishGroupedOutputProjection, Index: 3}

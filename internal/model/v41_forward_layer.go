@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
@@ -775,19 +776,20 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// token-major stream byte-for-byte.
 	var routedByToken [][]float32
 	if m.v41EPRequested() {
-		if !full || st == nil || st.routedLayer == nil {
-			return fmt.Errorf("%w: missing Session routed-layer binding", ErrV41ExpertParallel)
+		if !full || st == nil || st.routedPrefill == nil {
+			return fmt.Errorf("%w: missing Session routed-prefill binding", ErrV41ExpertParallel)
 		}
-		routedByToken = make([][]float32, seq)
-		for t := range perTokenPicks {
-			values, outcome, cause := st.routedLayer(l, perTokenPicks[t], ffnInputs[t])
-			if cause != nil {
-				return cause
+		routedByToken, err = st.routedPrefill(l, perTokenPicks, ffnInputs, scratch)
+		if err != nil {
+			return err
+		}
+		if len(routedByToken) != seq {
+			return fmt.Errorf("%w: invalid distributed prefill panel", ErrV41ExpertParallel)
+		}
+		for _, values := range routedByToken {
+			if len(values) != H {
+				return fmt.Errorf("%w: invalid distributed prefill row", ErrV41ExpertParallel)
 			}
-			if outcome != v41RoutedExpertHandled || len(values) != H {
-				return fmt.Errorf("%w: distributed routed layer declined", ErrV41ExpertParallel)
-			}
-			routedByToken[t] = values
 		}
 	} else if seq > 1 && !v41ForceTokenMajor {
 		// #13511: thread the session's optional device gate/up callback into the
@@ -916,16 +918,32 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		moeRows = make([][]float32, seq)
 	}
 	var sharedChain v41ColdSharedResidentFunc
+	var sharedPanel []float32
+	var sharedPanelSelected bool
+	var sharedPanelFault *v41SharedPanelDeferredFault
 	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m &&
 		scratch.denseProjection != nil && scratch.sharedActivation != nil && scratch.gatherOps.bf16PublishFunc() != nil {
 		sharedChain = st.callbackOwner.v41ColdSharedExpertChain(l)
+		sharedPanel, sharedPanelSelected, err = st.callbackOwner.v41ColdSharedExpertPanel(l)(ffnFlat, seq)
+		if err != nil {
+			if !errors.As(err, &sharedPanelFault) {
+				return err
+			}
+			err = nil
+		}
 	}
 	for t := 0; t < seq; t++ {
+		if sharedPanelFault != nil && t == sharedPanelFault.Row {
+			return sharedPanelFault.finalize()
+		}
 		xn := ffnInputs[t]
 		routed := routedByToken[t]
 		var shared []float32
 		var sharedResident bool
-		if sharedChain != nil {
+		if sharedPanelSelected {
+			shared = sharedPanel[t*H : (t+1)*H]
+			sharedResident = true
+		} else if sharedChain != nil {
 			shared, sharedResident, err = sharedChain(xn)
 		}
 		if err == nil && !sharedResident {

@@ -682,6 +682,8 @@ func TestParseRenameSummary(t *testing.T) {
 func TestSyntheticTreeTransplantBatchCheckout(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init", "-b", "main")
+	// Detached maintenance must not outlive this temporary repository.
+	git(t, repo, "config", "maintenance.auto", "false")
 	git(t, repo, "config", "core.autocrlf", "false")
 	git(t, repo, "config", "user.name", "test")
 	git(t, repo, "config", "user.email", "test@example.com")

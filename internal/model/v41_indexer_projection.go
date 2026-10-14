@@ -61,7 +61,7 @@ func (m *Model) v41IndexRowsWithOperations(l, pos int, qLat, hidden []float32, k
 
 // v41IndexRowsWithDeviceOps also offers the row selection to the session's
 // device index-select seam when ops binds one (Ref #13668).
-func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps) ([]int32, error) {
+func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, views ...*v41IndexerKeyView) ([]int32, error) {
 	d41 := m.Cfg.DeepSeekV41
 	if !indexSourceAt(d41, l) {
 		return nil, nil
@@ -76,12 +76,23 @@ func (m *Model) v41IndexRowsWithDeviceOps(l, pos int, qLat, hidden []float32, ke
 	if !valid {
 		return nil, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: index key geometry overflow", ErrV41ForwardStage))
 	}
-	flat := make([]float32, 0, elements)
 	for _, key := range keys {
 		if len(key) != dim {
 			return nil, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: invalid index key width", ErrV41ForwardStage))
 		}
-		flat = append(flat, key...)
+	}
+	resident := false
+	if score != nil && len(views) == 1 {
+		if selected := ops.residentIndexerScore(m, l, pos, keys, views[0], score); selected != nil {
+			score, resident = selected, true
+		}
+	}
+	var flat []float32
+	if !resident {
+		flat = make([]float32, 0, elements)
+		for _, key := range keys {
+			flat = append(flat, key...)
+		}
 	}
 	q, err := m.v41ProjMatRowsWithProjection(l, "indexer.wq_b.weight", qLat, width, cfg.QLoraRank, project)
 	if err != nil {

@@ -26,7 +26,7 @@ int fvk_phase_performance_query_available(void);
 int fvk_phase_counter_count(void);
 int fvk_phase_counter_describe(int index, char* name, size_t name_len, char* unit, size_t unit_len, int* scope);
 // Pure test adapter for the production compatible-memory-type selector.
-int fvk_debug_memory_type_selection(uint32_t type_bits, uint32_t want,
+int fvk_debug_memory_type_selection(uint32_t type_bits, uint32_t want, uint32_t preferred,
     uint32_t type_count, const uint32_t* flags, const int* results,
     const uint32_t* heap_indices, uint32_t heap_count, const uint64_t* heap_sizes,
     uint64_t allocation_size, int try_all, uint32_t* attempts, uint32_t* attempt_count, uint32_t* selected_type,
@@ -1214,7 +1214,7 @@ func boolToCInt(b bool) C.int {
 
 // vulkanDebugMemoryTypeSelection runs only the shared pure native selector with
 // synthetic results. It performs no Vulkan calls and changes no backend state.
-func vulkanDebugMemoryTypeSelection(typeBits, want uint32, flags []uint32, results []int32, heapIndices []uint32, heapSizes []uint64, allocationSize uint64, tryAll bool) (status int32, attempts []uint32, selected uint32, published bool) {
+func vulkanDebugMemoryTypeSelection(typeBits, want, preferred uint32, flags []uint32, results []int32, heapIndices []uint32, heapSizes []uint64, allocationSize uint64, tryAll bool) (status int32, attempts []uint32, selected uint32, published bool) {
 	if len(flags) != len(results) || len(flags) != len(heapIndices) {
 		panic("compute: synthetic Vulkan memory type fixtures differ in length")
 	}
@@ -1247,7 +1247,7 @@ func vulkanDebugMemoryTypeSelection(typeBits, want uint32, flags []uint32, resul
 	if tryAll {
 		all = 1
 	}
-	status = int32(C.fvk_debug_memory_type_selection(C.uint32_t(typeBits), C.uint32_t(want), C.uint32_t(len(flags)), fp, rp, ip, C.uint32_t(len(heapSizes)), sp, C.uint64_t(allocationSize), all, &tried[0], &count, &chosen, &handle))
+	status = int32(C.fvk_debug_memory_type_selection(C.uint32_t(typeBits), C.uint32_t(want), C.uint32_t(preferred), C.uint32_t(len(flags)), fp, rp, ip, C.uint32_t(len(heapSizes)), sp, C.uint64_t(allocationSize), all, &tried[0], &count, &chosen, &handle))
 	for i := 0; i < int(count); i++ {
 		attempts = append(attempts, uint32(tried[i]))
 	}

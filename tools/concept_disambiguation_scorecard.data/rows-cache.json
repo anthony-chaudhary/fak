@@ -13,7 +13,8 @@
         "radixkv",
         "c4681-kvcached",
         "x3-cache-gocache",
-        "v41-grouped-cached-immutable-weight"
+        "v41-grouped-cached-immutable-weight",
+        "v41-indexer-key-cache"
       ],
       "aliases": [
         "model KV",

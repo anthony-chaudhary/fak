@@ -35,11 +35,18 @@ type v41ScoreTestBackend struct {
 	forceNaN          bool
 	healthErr         error
 	healthCalls       int
+	rowLog            bool
+	keyUploadBytes    int64
+	keyCopyBytes      int64
+	keyLiveBytes      int64
+	keyPeakBytes      int64
+	keyOwned          map[compute.Buffer]int64
+	copyPending       map[compute.Buffer]bool
 }
 
 func newV41ScoreTestBackend() *v41ScoreTestBackend {
 	return &v41ScoreTestBackend{v41DenseTestBackend: newV41DenseTestBackend(), supported: true, device: true,
-		allocations: map[compute.Buffer]bool{}, managed: map[compute.Buffer]bool{}}
+		allocations: map[compute.Buffer]bool{}, managed: map[compute.Buffer]bool{}, keyOwned: map[compute.Buffer]int64{}, copyPending: map[compute.Buffer]bool{}}
 }
 
 func (b *v41ScoreTestBackend) Caps() compute.Caps {
@@ -74,6 +81,12 @@ func (b *v41ScoreTestBackend) UploadClass(x compute.Tensor, dt compute.Dtype, cl
 	out := compute.NewF32(b, append([]int(nil), x.Shape...), values)
 	b.allocations[out.Buf()], b.managed[out.Buf()] = true, true
 	b.uploadCount++
+	if strings.HasSuffix(site, " keys") || strings.HasSuffix(site, " key append") {
+		b.keyUploadBytes += int64(len(values)) * 4
+	}
+	if strings.HasSuffix(site, " key append") {
+		b.ownKeys(out)
+	}
 	return out
 }
 
@@ -104,6 +117,9 @@ func (b *v41ScoreTestBackend) V41IndexerScore(q, keys, weights compute.Tensor, r
 	}
 	if b.fault == "alias" {
 		return q, nil
+	}
+	if b.fault == "cache alias" {
+		return keys, nil
 	}
 	values := v41ScoreTestOracle(c)
 	if b.forceNaN {
@@ -137,6 +153,7 @@ func (b *v41ScoreTestBackend) Read(x compute.Tensor) []float32 {
 	if b.fault == "read" {
 		panic(b.cause)
 	}
+	clear(b.copyPending) // Checked score read fences the copies feeding it.
 	b.readScratch = append(b.readScratch[:0], b.Backend.Read(x)...)
 	if b.fault == "short read" {
 		return b.readScratch[:len(b.readScratch)-1]
@@ -145,6 +162,9 @@ func (b *v41ScoreTestBackend) Read(x compute.Tensor) []float32 {
 }
 
 func (b *v41ScoreTestBackend) Free(x compute.Tensor) {
+	if b.copyPending[x.Buf()] {
+		panic("index key buffer freed before score read or batch flush")
+	}
 	if !b.managed[x.Buf()] {
 		b.v41DenseTestBackend.Free(x)
 		return
@@ -163,6 +183,8 @@ func (b *v41ScoreTestBackend) Free(x compute.Tensor) {
 		b.Backend.Read(x)[i] = float32(math.NaN())
 	}
 	delete(b.allocations, x.Buf())
+	b.keyLiveBytes -= b.keyOwned[x.Buf()]
+	delete(b.keyOwned, x.Buf())
 	b.Backend.Free(x)
 	b.freeAttempts++
 	if b.cleanupPanic != nil {
@@ -170,6 +192,229 @@ func (b *v41ScoreTestBackend) Free(x compute.Tensor) {
 	}
 	if isOutput && b.fault == "free" {
 		panic(b.cause)
+	}
+}
+
+func (b *v41ScoreTestBackend) BeginBatch()              {}
+func (b *v41ScoreTestBackend) FlushBatch()              { clear(b.copyPending) }
+func (b *v41ScoreTestBackend) V41RowLogAvailable() bool { return b.rowLog }
+func (b *v41ScoreTestBackend) ownKeys(t compute.Tensor) {
+	bytes := int64(t.Numel()) * 4
+	b.keyOwned[t.Buf()] = bytes
+	b.keyLiveBytes += bytes
+	b.keyPeakBytes = max(b.keyPeakBytes, b.keyLiveBytes)
+}
+func (b *v41ScoreTestBackend) V41RowLogAlloc(rows, width int) (compute.Tensor, error) {
+	if err := compute.ValidateV41RowLogAlloc(rows, width); err != nil {
+		return compute.Tensor{}, err
+	}
+	if b.fault == "row allocation" {
+		return compute.Tensor{}, b.cause
+	}
+	out := compute.NewF32(b, []int{rows, width}, make([]float32, rows*width))
+	b.allocations[out.Buf()], b.managed[out.Buf()] = true, true
+	b.ownKeys(out)
+	return out, nil
+}
+func (b *v41ScoreTestBackend) V41RowLogCopy(dst compute.Tensor, dstRow int, src compute.Tensor, srcRow, rows int) error {
+	if b.fault == "row copy" {
+		return b.cause
+	}
+	stride, err := compute.ValidateV41RowLogCopy(dst, dstRow, src, srcRow, rows)
+	if err != nil || dst.Backend() != b || src.Backend() != b || !b.allocations[dst.Buf()] || !b.allocations[src.Buf()] {
+		return errors.New("invalid live row-log copy")
+	}
+	width := stride / 4
+	copy(b.Backend.Read(dst)[dstRow*width:(dstRow+rows)*width], b.Backend.Read(src)[srcRow*width:(srcRow+rows)*width])
+	b.keyCopyBytes += int64(rows * stride)
+	b.copyPending[dst.Buf()], b.copyPending[src.Buf()] = true, true
+	return nil
+}
+func (b *v41ScoreTestBackend) V41RowLogGather([]compute.V41RowSpan, int) (compute.Tensor, error) {
+	return compute.Tensor{}, errors.New("exact key residency must not gather full history per score")
+}
+
+// fak-test:runtime medium est=3s lane=default
+func TestV41IndexerKeyResidency(t *testing.T) {
+	const allowance int64 = 32 << 10
+	fixture := func(t *testing.T) *Model {
+		m := v41IndexerTestFixture(t)
+		// Layer 1 scores keys owned by the registry's layer-0 source.
+		m.Cfg.DeepSeekV41.IndexSourceLayerIDs = []int{0, 1}
+		return m
+	}
+	newSession := func(t *testing.T, m *Model, budget int64) (*Session, *v41ScoreTestBackend) {
+		b := newV41ScoreTestBackend()
+		b.rowLog = true
+		s := v41DenseTestSession(t, m, b)
+		v41ScoreOnly(s)
+		s.v41State().gatherOps.indexerKeyBudgetBytes = budget
+		return s, b
+	}
+	t.Run("actual producer reader traffic and rebind budget", func(t *testing.T) {
+		m := fixture(t)
+		s, b := newSession(t, m, allowance)
+		control, plain := newSession(t, m, 0)
+		bound, callbacks := s.v41State().indexerScore, 0
+		s.v41State().indexerScore = func(layer int, q, keys, weights []float32, heads, width, rows int) ([]float32, error) {
+			callbacks++
+			return bound(layer, q, keys, weights, heads, width, rows)
+		}
+		v41ScoreTestBits(t, s.Prefill([]int{1, 2, 3}), control.Prefill([]int{1, 2, 3}))
+		width := int64(m.Cfg.IndexHeadDim * 4)
+		for _, token := range []int{4, 5, 6} {
+			before, copyBefore := b.keyUploadBytes, b.keyCopyBytes
+			beforeCallbacks := callbacks
+			v41ScoreTestBits(t, s.Step(token), control.Step(token))
+			want := int64(2) * width
+			if token == 4 {
+				want = 4 * width // Both independent source domains seed two rows.
+			} else if token == 5 {
+				want = 0
+				if b.keyCopyBytes != copyBefore {
+					t.Fatal("unchanged key history was copied on device")
+				}
+			} else if b.keyCopyBytes-copyBefore != 6*width {
+				t.Fatal("append D2D accounting omitted old-prefix or staging copies")
+			}
+			if delta := b.keyUploadBytes - before; delta != want {
+				t.Fatalf("token=%d key H2D=%d want=%d", token, delta, want)
+			}
+			if b.keyPeakBytes > allowance || plain.keyLiveBytes != 0 || len(b.copyPending) != 0 || callbacks != beforeCallbacks+2 || s.v41State().gatherOps.indexerKeyCall != nil ||
+				!reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), captureV41ForwardSnapshot(control.v41Forward)) {
+				t.Fatal("budget, read fence, disabled control or retained-state parity changed")
+			}
+		}
+		// Restore/rebinding creates a fresh gather owner but cannot erase its
+		// session's still-live tensors from the accounting ledger.
+		snap, err := s.PrefixSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer snap.Close()
+		if err := snap.Restore(s); err != nil {
+			t.Fatal(err)
+		}
+		v41ScoreOnly(s)
+		s.v41State().gatherOps.indexerKeyBudgetBytes = b.keyLiveBytes
+		before, retained := b.keyUploadBytes, b.keyLiveBytes
+		v41ScoreTestBits(t, s.Step(7), control.Step(7))
+		if b.keyUploadBytes-before != 6*width || b.keyLiveBytes != retained {
+			t.Fatal("rebound cache discarded live-byte charges or mutated before refusal")
+		}
+		s.v41State().gatherOps.indexerKeyBudgetBytes = allowance
+		v41ScoreTestBits(t, s.Step(0), control.Step(0))
+		if b.keyPeakBytes > allowance {
+			t.Fatal("reseed exceeded all-owner peak allowance")
+		}
+		s.Close()
+		if b.keyLiveBytes != 0 || len(b.allocations) != 0 {
+			t.Fatal("session close retained index-key allocations")
+		}
+	})
+	t.Run("original captured admission and panic hook", func(t *testing.T) {
+		for _, panicCallback := range []bool{false, true} {
+			m := fixture(t)
+			s, b := newSession(t, m, allowance)
+			s.Prefill([]int{1, 2, 3})
+			s.Step(4)
+			st := s.v41State()
+			fault := &compute.BackendError{Backend: "score-recorder", Class: compute.VulkanClassDeviceLost, Err: ErrV41ForwardStage}
+			before := b.uploadCount
+			if panicCallback {
+				marker := &struct{ value int }{73}
+				st.indexerScore = func(int, []float32, []float32, []float32, int, int, int) ([]float32, error) { panic(marker) }
+				if got := v41IndexerTestRecover(func() { s.Step(5) }); got != marker {
+					t.Fatalf("callback panic identity changed: %v", got)
+				}
+			} else {
+				b.healthErr = fault
+				st.indexerScore = s.v41IndexerScoreFunc()
+				b.healthErr = nil // Even this artificial recovery cannot erase the captured error.
+				if err := recoverError(func() { s.Step(5) }); !errors.Is(err, fault) || !s.BackendSessionClosed() {
+					t.Fatalf("original admission capture was bypassed: %v", err)
+				}
+			}
+			if st.gatherOps.indexerKeyCall != nil || b.uploadCount != before {
+				t.Fatal("invocation hook survived unwind or staged before original refusal")
+			}
+		}
+	})
+	t.Run("rollback reseeds immutable anchor", func(t *testing.T) {
+		m := fixture(t)
+		s, b := newSession(t, m, allowance)
+		control, _ := newSession(t, m, 0)
+		v41ScoreTestBits(t, s.Prefill([]int{1, 2, 3}), control.Prefill([]int{1, 2, 3}))
+		v41ScoreTestBits(t, s.Step(4), control.Step(4))
+		v41ScoreTestBits(t, s.Step(5), control.Step(5))
+		st := s.v41State()
+		before := captureV41ForwardSnapshot(st)
+		fault := errors.New("after index scoring")
+		st.finalNorm = func([]float32) ([]float32, error) { return nil, fault }
+		calls := len(b.calls)
+		err := recoverError(func() { _, _, _ = m.forwardV41Step(6, st, nil) })
+		var selected *V41ProjectionOperationError
+		if !errors.As(err, &selected) || !errors.Is(err, fault) || len(b.calls) != calls+2 || !reflect.DeepEqual(captureV41ForwardSnapshot(st), before) {
+			t.Fatalf("late selected panic did not roll back publication after both scores: %v", err)
+		}
+		st.finalNorm = nil
+		uploads := b.keyUploadBytes
+		v41ScoreTestBits(t, s.Step(7), control.Step(7))
+		if b.keyUploadBytes-uploads != int64(2*3*m.Cfg.IndexHeadDim*4) {
+			t.Fatal("retry reused the failed step's removed publication")
+		}
+	})
+	t.Run("same state reset and forged caller rows", func(t *testing.T) {
+		m := fixture(t)
+		s, b := newSession(t, m, allowance)
+		s.Prefill([]int{1, 2, 3})
+		s.Step(4)
+		st := s.v41State()
+		owner := st.layerState(0)
+		owner.Reset()
+		for value := 1; value <= 2; value++ {
+			row := make([]float32, m.Cfg.IndexHeadDim)
+			row[0] = float32(value)
+			owner.publish([]V41AttentionStateUpdate{{Ref: V41AttentionStateRef{LayerID: 0, IsIndexSource: true}, IndexKey: row}})
+		}
+		keys, _ := owner.borrowIndexKeys(0)
+		view := &v41IndexerKeyView{owner: owner, source: 0}
+		forged := cloneV41Rows(keys)
+		if st.gatherOps.residentIndexerScore(m, 0, 4, forged, view, st.indexerScore) != nil {
+			t.Fatal("caller-owned equal rows gained publication identity")
+		}
+		score := st.gatherOps.residentIndexerScore(m, 0, 4, keys, view, st.indexerScore)
+		if score == nil {
+			t.Fatal("same-owner reset did not admit a bounded reseed")
+		}
+		q := make([]float32, m.Cfg.IndexHeadDim)
+		q[0] = 1
+		before := b.keyUploadBytes
+		got, err := score(0, q, nil, []float32{1}, 1, len(q), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v41ScoreTestBits(t, got, []float32{1, 2})
+		if b.keyUploadBytes-before != int64(2*len(q)*4) {
+			t.Fatal("same-pointer reset reused the old terminal anchor")
+		}
+	})
+	for _, fault := range []string{"row allocation", "row copy", "key append upload", "cache alias", "read"} {
+		t.Run("selected failure "+fault, func(t *testing.T) {
+			m := fixture(t)
+			s, b := newSession(t, m, allowance)
+			s.Prefill([]int{1, 2, 3})
+			s.Step(4)
+			s.Step(5)
+			before := captureV41ForwardSnapshot(s.v41Forward)
+			b.fault, b.cause = fault, &compute.BackendError{Backend: "score-recorder", Class: compute.VulkanClassExecutionFailed, Err: ErrV41ForwardStage}
+			var closed *BackendForwardOperationError
+			err := recoverError(func() { s.Step(6) })
+			if !errors.As(err, &closed) || closed.Path != "v41-indexer-score" || !s.BackendSessionClosed() || b.keyLiveBytes != 0 || len(b.allocations) != 0 ||
+				!reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {
+				t.Fatalf("selected key failure did not retire/roll back once: %v", err)
+			}
+		})
 	}
 }
 

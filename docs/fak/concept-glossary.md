@@ -1217,3 +1217,10 @@ Pure planner validating Q3_K matrix geometry, block divisibility, padded 110-byt
 PrefixSnapshot cache-admission method that seals independently owned V4.1 publication rows into immutable shared prefix storage before publishing an admitted snapshot, retaining private mutable continuation fields.
 
 **Distinct from:** A snapshot publication preparation step invoked by the serialized cache owner after admission succeeds; not the RadixKV index, cache identity, lookup operation or a native performance qualification.
+
+
+### v41IndexerKeyCache
+
+Session-owned resident F32 indexer-key matrices keyed by immutable publication ownership, source and geometry identity, with live handles charged across callback rebinding. Admission requires an explicit positive index-key byte allowance that defaults to zero; unchanged history reuses its exact buffer, append stages only new rows while copying the old device prefix, and invalidated identity reseeds.
+
+**Distinct from:** Separate from attention KV state and model-owned immutable weight staging. It owns indexer score inputs, charges retained plus replacement/staging peak, and retires replaced storage only after checked score read; append still incurs O(history) device copies. No production default or hardware-performance qualification.
