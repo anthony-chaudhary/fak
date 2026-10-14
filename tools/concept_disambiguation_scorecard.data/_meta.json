@@ -1387,6 +1387,21 @@
           "category": "incidental",
           "reason": "Summary field exposing the positioned DeadlineCacheCreditStats compatibility schema, not a separate cache mechanism.",
           "token": "DeadlineCacheCredit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing Session registry attachment and retirement synchronization mutex; it introduces no cache abstraction.",
+          "token": "branchCacheMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing Session sticky attachment-refusal latch set before fallible resource teardown; it is not proof that resource Close completed and introduces no cache abstraction.",
+          "token": "branchCacheRetired"
+        },
+        {
+          "category": "incidental",
+          "reason": "Helper that sets the existing Session attachment-retirement latch and removes only that Session's registry association under the mutex; it neither frees nor clears the caller-owned cache and leaves no registry tombstone.",
+          "token": "retireBranchCache"
         }
       ],
       "exclude": [
@@ -1492,6 +1507,8 @@
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
         "boundedSelfUpdateCandidateCacheReason",
+        "branchCacheMu",
+        "branchCacheRetired",
         "builtinCacheLevers",
         "cacheActivity",
         "cacheAmbiguous",
@@ -1687,6 +1704,7 @@
         "replaceMicroCacheWitness",
         "requireexplicitcache",
         "resetClaudeKeychainCache",
+        "retireBranchCache",
         "reuseRatio",
         "runCacheValueGateScore",
         "runCachevalueQwen38Campaign",
@@ -4199,6 +4217,11 @@
           "category": "incidental",
           "reason": "Deferred Session panic-cleanup helper that closes the selected V4.1 DistComm and rethrows the original panic; it implements transport lifetime cleanup rather than a new admission gate or policy.",
           "token": "v41EPGuard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exact helper-digest linker pin referenced by the build descriptor and checked by existing handoff code; identity data rather than a separate guard. The digest alone does not establish live supervision or artifact qualification.",
+          "token": "v41EPOwnerGuardBinarySHA256"
         }
       ],
       "exclude": [
@@ -4687,6 +4710,7 @@
         "ungated",
         "unguarded",
         "v41EPGuard",
+        "v41EPOwnerGuardBinarySHA256",
         "v41UsesGatedCompressor",
         "validateGuardBudgetFlags",
         "verifyGateCheckout",
@@ -6841,6 +6865,16 @@
           "category": "incidental",
           "reason": "Count of non-nil sessions whose ownership was accepted from the existing factory within one follower invocation, including reset replacements; tracked separately from CloseAttempts and CloseCompletions and not proof of retirement.",
           "token": "AcceptedSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional field holding the positioned V41EPOwnerBuildSession supplied declaration; no additional session abstraction or execution observation.",
+          "token": "BuildSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Equality-only diagnostic reporting unavailable or supplied-values-match for the positioned build-session declaration; no execution observation or additional session abstraction.",
+          "token": "SessionComparison"
         }
       ],
       "exclude": [
@@ -6856,6 +6890,7 @@
         "AppendSession",
         "AttributeOutcomes",
         "BeginSessionEffect",
+        "BuildSession",
         "BytesPerSession",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
@@ -6935,6 +6970,7 @@
         "SessionClientDescriptor",
         "SessionClientDetachRequest",
         "SessionClientTokenHeader",
+        "SessionComparison",
         "SessionDiscoveryPublication",
         "SessionDiscoveryRecord",
         "SessionDiscoveryState",
@@ -10687,6 +10723,16 @@
           "category": "build-tag-only",
           "reason": "Genuine qualification preflight compiled only with wip_v41_shared_head_qualification plus Vulkan/cgo/platform tags; absent from the production corpus and installs no production provider. Checks necessary Q6_K resource bounds only, not physical parity or serving admission.",
           "token": "VulkanQ6KSharedHeadQualificationPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixed ELF-profile version string used for exact diagnostic comparison; it is not policy authority or an admission decision.",
+          "token": "V41EPOwnerBuildPinPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private bounded ELF structural validator before debug/elf parsing; it grants no execution or native-admission permission.",
+          "token": "preflightV41EPOwnerELF"
         }
       ],
       "exclude": [
@@ -10788,6 +10834,7 @@
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",
         "ToolPolicyVersion",
+        "V41EPOwnerBuildPinPolicy",
         "VerdictPolicyBlock",
         "VulkanQ6KSharedHeadQualificationPreflight",
         "adjudicate",
@@ -10899,6 +10946,7 @@
         "postureWorkProfile",
         "postures",
         "preflightServeBackendForward",
+        "preflightV41EPOwnerELF",
         "preflightWithProbe",
         "printGuardLaunchPostures",
         "qwenEmptyUsageGuardFromEnv",
@@ -11772,6 +11820,11 @@
           "category": "incidental",
           "reason": "Function-local context.WithDeadline derived from the caller context and the validated request total deadline during supervisor admission; it creates no separate context abstraction or authority.",
           "token": "admissionCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper selecting the earlier of the caller context deadline and an existing cap for the owner handoff, or the cap when no caller deadline exists; it introduces no context abstraction or execution authority.",
+          "token": "v41EPHContextDeadline"
         }
       ],
       "exclude": [
@@ -11942,6 +11995,7 @@
         "shedOldContext",
         "takeCompactionContract",
         "traceContext",
+        "v41EPHContextDeadline",
         "waiterContexts",
         "waiterCtx",
         "wctx",
@@ -16314,6 +16368,11 @@
           "category": "incidental",
           "reason": "Private V4.1 admission helper that validates the exact transport, rank and geometry before returning the existing ExpertParallelPlan as TPPlan; not an independent planning abstraction.",
           "token": "v41EPPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure constructor of the positioned V41EPOwnerBuildPlan from validated supplied configuration; no additional planner abstraction or execution.",
+          "token": "PlanV41EPOwnerBuild"
         }
       ],
       "exclude": [
@@ -16400,6 +16459,7 @@
         "PlanStepDecision",
         "PlanUnits",
         "PlanUnregisteredResidue",
+        "PlanV41EPOwnerBuild",
         "PlanningEffect",
         "PressuredSnapshotCandidates",
         "ProjectWatchdogCandidates",

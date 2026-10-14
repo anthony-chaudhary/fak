@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "v41-ep-owner-build-plan",
+      "canonical": "V4.1 EP owner build invocation plan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure value descriptor fixing the supported owner-build profile, helper-digest linker symbol/value, build argv, working directory, and complete replacement environment derived from validated configuration values.",
+      "distinction": "A proposed invocation, not VulkanReceiptBuildPlan verification expectations or BuildPlan action diffs. It performs no filesystem observation or execution and proves neither fresh output, approved source contents, nor actual linkage of the requested helper pin.",
+      "distinct_from": [
+        "fak13823-plan-vulkanreceiptbuildplan",
+        "x-plan-buildplan"
+      ],
+      "aliases": [],
+      "grounding": "V41EPOwnerBuildPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41-ep-owner-build-session",
+      "canonical": "V4.1 EP owner build-session declaration",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Supplied invocation, receipt digest, finished/joined flags, exit code, and output identity in an optional owner-build supplement declaration; the pure checker requires exact supplied counterparts and a finished, joined, zero-exit declaration before reporting value agreement.",
+      "distinction": "A build-invocation declaration, not a live served Session or scheduler model-session origin. Parsing/equality do not observe a process, authenticate an issuer, prove historical build causality or binary linkage, or grant native admission.",
+      "distinct_from": [
+        "session",
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "V41EPOwnerBuildSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

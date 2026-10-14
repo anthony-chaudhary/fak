@@ -373,6 +373,18 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "v41-ep-owner", Kind: KindVerb, Need: NeedWeights, Manual: true,
+		Summary: "Bounded V4.1 EP request/provenance diagnostics; native execution is unavailable until reviewed artifact issuance and owner binding exist.",
+		Run:     "fak benchmarks run v41-ep-owner -- --validate --request request.json --rank 0",
+		Flags: []string{
+			"--validate --request FILE --rank 0|1|2  -  strict input agreement and unavailable-provenance diagnostics; no benchmark execution",
+			"--supervised-owner  -  reserved tools/v41epguard child entry; refuses while native issuer and binding are unavailable",
+			"tools/v41epguard  -  driver-free external owner supervisor; production artifact issuance remains unavailable",
+			"package initialization  -  GPU-tagged initialization can precede command-body validation",
+		},
+		Doc: "internal/localbench/v41_ep_owner_command.go",
+	},
+	{
 		Name: "vcache", Kind: KindVerb, Need: NeedNone,
 		Summary: "vCache 2x readiness scorecard: planned/observed cache savings, workload concentration, false-warm risk, recall risk, and hot-anchor index size.",
 		Run:     "fak vcache bench --json",

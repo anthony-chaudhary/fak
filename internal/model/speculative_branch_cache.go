@@ -113,13 +113,19 @@ func NewSpeculativeBranchCache(cfg SpeculativeBranchCacheConfig) *SpeculativeBra
 // sessionBranchCacheRegistry provides safe external attachment of a branch cache to a Session.
 var sessionBranchCacheRegistry sync.Map
 
-// AttachBranchCache associates a SpeculativeBranchCache with a Session.
+// AttachBranchCache associates a cache with a Session unless the session has retired.
+// A nil cache detaches without retiring an otherwise live session.
 func AttachBranchCache(s *Session, c *SpeculativeBranchCache) {
 	if s == nil {
 		return
 	}
 	if c == nil {
 		sessionBranchCacheRegistry.Delete(s)
+		return
+	}
+	s.branchCacheMu.Lock()
+	defer s.branchCacheMu.Unlock()
+	if s.branchCacheRetired {
 		return
 	}
 	sessionBranchCacheRegistry.Store(s, c)
@@ -142,6 +148,15 @@ func DetachBranchCache(s *Session) {
 	if s != nil {
 		sessionBranchCacheRegistry.Delete(s)
 	}
+}
+
+// retireBranchCache prevents later attachment without retaining a registry tombstone.
+// Called only inside the owned close boundary, before fallible resource teardown.
+func retireBranchCache(s *Session) {
+	s.branchCacheMu.Lock()
+	defer s.branchCacheMu.Unlock()
+	s.branchCacheRetired = true
+	sessionBranchCacheRegistry.Delete(s)
 }
 
 // computeBranchHash computes a 64-bit FNV-1a hash for sub-5µs cache lookup.

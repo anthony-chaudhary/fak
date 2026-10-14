@@ -725,7 +725,8 @@
       "distinct_from": [
         "PlanTemplate (cachemeta)",
         "PlanCells (ctxplan)",
-        "fak13823-plan-vulkanreceiptbuildplan"
+        "fak13823-plan-vulkanreceiptbuildplan",
+        "v41-ep-owner-build-plan"
       ],
       "aliases": [],
       "grounding": "buildplan",

@@ -89,12 +89,12 @@ func TestPrefillWindowScratchParityAndAllocation(t *testing.T) {
 			}
 			if tc.base == 1024 || tc.window < 0 {
 				before := testing.Benchmark(func(b *testing.B) {
-					for i := 0; i < b.N; i++ {
+					for b.Loop() {
 						run(true)
 					}
 				}).AllocedBytesPerOp()
 				after := testing.Benchmark(func(b *testing.B) {
-					for i := 0; i < b.N; i++ {
+					for b.Loop() {
 						run(false)
 					}
 				}).AllocedBytesPerOp()

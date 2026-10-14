@@ -587,7 +587,8 @@
       "distinction": "It is the verifier's expected build-policy input, not vulkan_plan command-buffer scheduling and not the generic BuildPlan action planner.",
       "distinct_from": [
         "x2-plan-vulkanplan",
-        "x-plan-buildplan"
+        "x-plan-buildplan",
+        "v41-ep-owner-build-plan"
       ],
       "aliases": [],
       "grounding": "vulkanreceiptbuildplan",

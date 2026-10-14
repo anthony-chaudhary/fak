@@ -362,6 +362,9 @@ type Session struct {
 	// routed-expert runtime (fak#13479). Session.Close DETACHES without freeing resident pages;
 	// Model.CloseWeights frees it once. nil for every non-V4 session.
 	v4ExpertOwner *v4ExpertOwner
+	// branchCacheMu serializes registry attachment with retirement.
+	branchCacheMu      sync.Mutex
+	branchCacheRetired bool
 	// closeOnce covers backend resources and the model-weight reference. Legacy sessions also
 	// participate because retained no-copy Metal weights borrow model-owned backing.
 	closeOnce        sync.Once

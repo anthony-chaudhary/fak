@@ -285,7 +285,7 @@ func TestPrefillQ4KNormReuseExactAndAllocation(t *testing.T) {
 				// Each measured request owns a fresh session and executes the real native path.
 				measure := func(reference bool) int64 {
 					return testing.Benchmark(func(bb *testing.B) {
-						for i := 0; i < bb.N; i++ {
+						for bb.Loop() {
 							ss := m.NewSession()
 							ss.Q4K = true
 							if reference {
