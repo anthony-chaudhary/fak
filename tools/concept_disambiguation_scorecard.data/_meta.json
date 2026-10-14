@@ -10710,6 +10710,11 @@
           "category": "incidental",
           "reason": "Fixed ELF-profile version string used for exact diagnostic comparison; it is not policy authority or an admission decision.",
           "token": "V41EPOwnerBuildPinPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private bounded ELF structural validator before debug/elf parsing; it grants no execution or native-admission permission.",
+          "token": "preflightV41EPOwnerELF"
         }
       ],
       "exclude": [
@@ -10923,6 +10928,7 @@
         "postureWorkProfile",
         "postures",
         "preflightServeBackendForward",
+        "preflightV41EPOwnerELF",
         "preflightWithProbe",
         "printGuardLaunchPostures",
         "qwenEmptyUsageGuardFromEnv",
