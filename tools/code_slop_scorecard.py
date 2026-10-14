@@ -887,6 +887,14 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             "subcategory_weights": dict(_DUP_WEIGHTS), "weighted_debt": weighted_debt}
 
 
+# Bound run-local reuse by tokens and source characters, not a claimed byte/RSS
+# cap: tuple/list/string overhead and Unicode representation vary by interpreter.
+# Oversized or late files keep the existing two-lex path; no unique windows are
+# retained. Keeping admitted entries until pass two avoids same-order LRU thrash.
+_DUP_TOKEN_CACHE_TOKENS = 65_536
+_DUP_TOKEN_CACHE_SOURCE_CHARS = 1_048_576
+
+
 def _dup_scan_windows(
         files: dict[str, str],
 ) -> tuple[dict[tuple[str, ...], set[tuple[str, int]]],
@@ -899,8 +907,17 @@ def _dup_scan_windows(
     """
     seen: set[int] = set()
     repeated: set[int] = set()
+    token_cache: dict[str, list[tuple[str, int, bool]]] = {}
+    cached_tokens = cached_chars = 0
     for rel in sorted(files):
-        for _, _, _, key in _dup_windows(files[rel]):
+        text = files[rel]
+        toks = go_tokens(text, normalize_idents=False)
+        if (toks and cached_tokens + len(toks) <= _DUP_TOKEN_CACHE_TOKENS
+                and cached_chars + len(text) <= _DUP_TOKEN_CACHE_SOURCE_CHARS):
+            token_cache[rel] = toks
+            cached_tokens += len(toks)
+            cached_chars += len(text)
+        for _, _, _, key in _dup_windows_from_tokens(toks):
             fingerprint = hash(key)
             if fingerprint in seen:
                 repeated.add(fingerprint)
@@ -911,7 +928,10 @@ def _dup_scan_windows(
     per_file: dict[str, list[tuple[int, int, int, tuple[str, ...]]]] = {}
     for rel in sorted(files):
         quals = []
-        for row in _dup_windows(files[rel]):
+        toks = token_cache.pop(rel, None)
+        if toks is None:
+            toks = go_tokens(files[rel], normalize_idents=False)
+        for row in _dup_windows_from_tokens(toks):
             _, sline, _, key = row
             if hash(key) in repeated:
                 quals.append(row)
@@ -922,7 +942,11 @@ def _dup_scan_windows(
 
 def _dup_windows(text: str):
     """Yield qualifying token windows without retaining unrelated file state."""
-    toks = go_tokens(text, normalize_idents=False)
+    yield from _dup_windows_from_tokens(go_tokens(text, normalize_idents=False))
+
+
+def _dup_windows_from_tokens(toks: list[tuple[str, int, bool]]):
+    """Yield the same exact windows from a current scan's immutable token list."""
     m = len(toks)
     symbols = [token[0] for token in toks]
     if m >= CLONE_WINDOW_TOKENS:

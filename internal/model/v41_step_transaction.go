@@ -80,7 +80,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.ffnNorm = st.ffnNorm
 	scratch.compressorNorm = st.compressorNorm
 	scratch.indexKeyNorm = st.indexKeyNorm
-	scratch.indexerScore = st.indexerScore
+	scratch.indexerScoreBinding = st.indexerScoreBinding
 	scratch.indexScoreHealth = st.indexScoreHealth
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
@@ -106,7 +106,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.ffnNorm = nil
 			scratch.compressorNorm = nil
 			scratch.indexKeyNorm = nil
-			scratch.indexerScore = nil
+			scratch.indexerScoreBinding = nil
 			scratch.indexScoreHealth = nil
 			scratch.sharedActivation = nil
 			scratch.tailRoPE = nil

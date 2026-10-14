@@ -363,6 +363,10 @@ func v41IndexRowsWithScore(layer int, q, keys, weights []float32, heads, headDim
 // tie order, pinning and -1 sentinels; its failure propagates without a host
 // re-selection (Ref #13668).
 func v41IndexRowsSelected(layer int, q, keys, weights []float32, heads, headDim, rows, topKBlocks, blockSize, topK int, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, sel v41IndexSelectFunc) ([]int32, error) {
+	return v41IndexRowsSelectedWithBorrow(layer, q, keys, weights, heads, headDim, rows, topKBlocks, blockSize, topK, score, health, sel, nil)
+}
+
+func v41IndexRowsSelectedWithBorrow(layer int, q, keys, weights []float32, heads, headDim, rows, topKBlocks, blockSize, topK int, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, sel v41IndexSelectFunc, borrow *v41IndexerScoreBorrow) ([]int32, error) {
 	if health != nil {
 		if err := health(layer); err != nil {
 			return nil, v41IndexerScoreOperationErr(layer, err)
@@ -385,7 +389,15 @@ func v41IndexRowsSelected(layer int, q, keys, weights []float32, heads, headDim,
 			return nil, v41StageErr(v41StageIndexer, layer, err)
 		}
 	} else {
-		values, err = score(layer, q, keys, weights, heads, headDim, rows)
+		var keyInput v41IndexerScoreKeys
+		if borrow != nil {
+			score, keys, keyInput = borrow.resolve(keys)
+		}
+		if keyInput.borrow != nil {
+			values, err = borrow.binding.native.core(layer, q, keys, weights, heads, headDim, rows, keyInput)
+		} else {
+			values, err = score(layer, q, keys, weights, heads, headDim, rows)
+		}
 		if err == nil && len(values) != rows {
 			err = errV41IndexerScoreResult
 		}
@@ -481,19 +493,26 @@ func (s *Session) v41IndexerScoreHealthFunc() v41IndexerScoreHealthFunc {
 // Scores are returned as an owned host copy; this is not device-resident top-k
 // or whole-model GPU execution. Snapshots never persist the callback.
 func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
-	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
-		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
-		return nil
+	return s.v41BindIndexerScore().ordinary
+}
+
+func (s *Session) v41BindIndexerScore() v41BoundIndexerScore {
+	if s == nil || s.M == nil || s.Backend == nil {
+		return v41BoundIndexerScore{}
 	}
-	operation, ok := s.Backend.(compute.V41IndexerScoreBackend)
+	model, backend := s.M, s.Backend
+	if !backend.Caps().DeviceMemory || !compute.BackendSupportsDeviceWeightDtype(backend, compute.F32) {
+		return v41BoundIndexerScore{}
+	}
+	operation, ok := backend.(compute.V41IndexerScoreBackend)
 	if !ok {
-		return nil
+		return v41BoundIndexerScore{}
 	}
 	supported, admissionErr := operation.V41IndexerScoreAdmission()
 	if admissionErr == nil && !supported {
-		return nil
+		return v41BoundIndexerScore{}
 	}
-	return func(layer int, q, keys, weights []float32, heads, headDim, rows int) (result []float32, cause error) {
+	core := func(layer int, q, keys, weights []float32, heads, headDim, rows int, keyInput v41IndexerScoreKeys) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		var resident *v41IndexerKeyCall
 		if st := s.v41Forward; st != nil && st.gatherOps != nil && st.gatherOps.owner == s {
@@ -612,6 +631,9 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 			}
 			var kt compute.Tensor
 			if resident == nil {
+				// Revalidate after the existing admission and query upload, just
+				// before dynamic backend use of the frozen host key operand.
+				keys = keyInput.beforeUpload(keys)
 				kt, err = upload("keys", []int{rows, headDim}, keys)
 			} else {
 				stage = "resident keys"
@@ -656,4 +678,8 @@ func (s *Session) v41IndexerScoreFunc() v41IndexerScoreFunc {
 		}
 		return result, nil
 	}
+	ordinary := func(layer int, q, keys, weights []float32, heads, headDim, rows int) ([]float32, error) {
+		return core(layer, q, keys, weights, heads, headDim, rows, v41IndexerScoreKeys{})
+	}
+	return v41BoundIndexerScore{ordinary: ordinary, core: core, owner: s, model: model, backend: backend}
 }

@@ -264,6 +264,15 @@ type Metric struct {
 	Carried bool `json:"carried,omitempty"`
 	// Origin is present only for cards with an at-producer hook.
 	Origin *ProducerOrigin `json:"origin,omitempty"`
+	// Owner is the registered ownership destination of this metric's debt key
+	// (#1974): the owning package leaf, the declared dos.toml lane, and the
+	// repo-relative pathspec a fix lands in. It is present only when the debt key
+	// has a DebtOwners row, so an unmapped key omits the fields rather than
+	// inventing an owner. A metric with debt > 0 and no owner is the gap the
+	// registry coverage gate fails on.
+	OwnerLeaf     string `json:"owner_leaf,omitempty"`
+	OwnerLane     string `json:"lane,omitempty"`
+	OwnerPathspec string `json:"pathspec,omitempty"`
 }
 
 // displayGrade is the single source of truth for a metric's effective letter grade.
@@ -309,9 +318,11 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 		if e == "" {
 			e = "no payload"
 		}
+		o, _ := OwnerForDebt(card.Debt)
 		return Metric{
 			Key: card.Key, Label: card.Label, DebtKey: card.Debt, Origin: card.Origin,
 			Debt: nil, Grade: nil, Score: nil, OK: false, Verdict: "ERROR", Error: e,
+			OwnerLeaf: o.Leaf, OwnerLane: o.Lane, OwnerPathspec: o.Pathspec,
 		}
 	}
 	debt := findInt(payload, card.Debt)
@@ -336,6 +347,12 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 		Score:           scorePtr,
 		OK:              scorecard.True(payload["ok"]),
 		Verdict:         asString(payload["verdict"]),
+	}
+	// Stamp the ownership destination from the registry (#1974) so a regressed row
+	// carries where its fix lands, not just its magnitude. An unregistered debt key
+	// leaves the fields empty (omitempty), never a fabricated owner.
+	if owner, ok := OwnerForDebt(card.Debt); ok {
+		m.OwnerLeaf, m.OwnerLane, m.OwnerPathspec = owner.Leaf, owner.Lane, owner.Pathspec
 	}
 	if debt == nil {
 		m.Error = "missing " + card.Debt + " in payload"

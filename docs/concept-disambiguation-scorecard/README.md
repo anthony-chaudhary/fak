@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **653** (clarity 0 + coverage 653) |
+| **Disambiguation-debt (drive to 0)** | **668** (clarity 0 + coverage 668) |
 | **Crystal-clear concepts (and climbing)** | **1237** crystal of 3027 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3116 / 3769** (82.7% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3117 / 3785** (82.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **87** of 4283 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3027 concepts - score 88.8/100 (grade B) - disambiguation-debt 653
+concept-disambiguation chart - 3027 concepts - score 88.6/100 (grade B) - disambiguation-debt 668
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1237
@@ -66,7 +66,7 @@ coverage by family (positioned / discovered):
   session-runtime  ######################...... 288/359
   cache            #######################..... 338/407
   gateway-engine   #######################..... 238/293
-  guard-gate       ##########################.. 514/561
+  guard-gate       ##########################.. 514/562
   attention        ####################........ 120/165
   context-ctx      ########################.... 264/308
   policy-capability ########################.... 225/267
@@ -74,17 +74,17 @@ coverage by family (positioned / discovered):
   support-maturity ###################......... 82/119
   render-materialize ########################.... 217/251
   witness-proof    ########################.... 173/202
+  score-debt       #######################..... 114/139
   evict            ####################........ 57/80
   loop             ########################.... 100/117
   layout           #################........... 20/33
-  score-debt       ##########################.. 113/123
   decision         #########################... 60/66
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3116/3769 confusable tokens positioned)
+namespace coverage  [##########################......] 82.4%  (3117/3785 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -3328,7 +3328,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | session-runtime | 288 | 359 | 71 |
 | cache | 338 | 407 | 69 |
 | gateway-engine | 238 | 293 | 55 |
-| guard-gate | 514 | 561 | 47 |
+| guard-gate | 514 | 562 | 48 |
 | attention | 120 | 165 | 45 |
 | context-ctx | 264 | 308 | 44 |
 | policy-capability | 225 | 267 | 42 |
@@ -3336,10 +3336,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | support-maturity | 82 | 119 | 37 |
 | render-materialize | 217 | 251 | 34 |
 | witness-proof | 173 | 202 | 29 |
+| score-debt | 114 | 139 | 25 |
 | evict | 57 | 80 | 23 |
 | loop | 100 | 117 | 17 |
 | layout | 20 | 33 | 13 |
-| score-debt | 113 | 123 | 10 |
 | decision | 60 | 66 | 6 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |

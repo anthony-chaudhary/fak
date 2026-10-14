@@ -62,6 +62,9 @@ type v41EPOwnerLifecycleLoaded struct {
 	CloseSession func() error
 	CloseModel   func() error // Includes retained authenticated readers.
 	OwnerCounts  func() (V41EPOwnerRoundCounters, bool)
+	// A nonblocking invocation-local snapshot after Root and its watcher join.
+	// It covers Root-owned fresh Sessions, not this bundle's initial Session.
+	RootRetirement func() (v41EPOwnerRootRetirement, error)
 	// A nonblocking snapshot from this loaded bundle's joined follower call.
 	// It must describe actual accepted/Close events, not infer them from Err.
 	FollowerRetirement func() (model.EPFollowerRetirement, error)
@@ -75,6 +78,18 @@ type v41EPOwnerLifecycleLoaded struct {
 // Native adapters explicitly map the authenticated loader's result into this
 // value, without inferring completion from nil ownership or an error string.
 type v41EPOwnerLoadRetirement struct {
+	Available bool
+	Completed bool
+	Err       error
+}
+
+// v41EPOwnerRootRetirement describes observed retirement of Root-owned work.
+// A successful direct ExecuteModelContext return proves its fresh Session.Close
+// returned; model-weight/pin retirement is still checked by CloseModel. A failed
+// opaque call is unavailable unless its actual retirement was observed. Neither
+// a joined call nor successful CloseModel can establish that hidden retirement.
+// Unavailable is false/false/nil; available failure requires a release error.
+type v41EPOwnerRootRetirement struct {
 	Available bool
 	Completed bool
 	Err       error
@@ -414,6 +429,41 @@ func runV41EPOwnerLifecycle(ctx context.Context, req V41EPOwnerRequest, rank int
 			}
 		}
 	}
+	// The forward phase has joined both Root and its raw-stop watcher, including
+	// panic unwind. The runner's initial Session release does not retire any fresh
+	// Session constructed inside Root; only its invocation-local observer can.
+	if executionEntered && rank == 0 {
+		var retired v41EPOwnerRootRetirement
+		observeErr, observePanic := v41EPOwnerInvoke(func() error {
+			if loaded.RootRetirement == nil {
+				return errors.New("root execution retirement observer unavailable")
+			}
+			var err error
+			retired, err = loaded.RootRetirement()
+			if err != nil {
+				return err
+			}
+			if !retired.Available {
+				if retired.Completed || retired.Err != nil {
+					return errors.New("root execution retirement observation incoherent")
+				}
+				return errors.New("root execution retirement unavailable")
+			}
+			if retired.Completed != (retired.Err == nil) {
+				return errors.New("root execution retirement observation incoherent")
+			}
+			return nil
+		})
+		if observeErr != nil {
+			cleanupKnown = false
+			out.add(fmt.Errorf("root execution retirement observation: %w", observeErr), observePanic)
+		} else if !retired.Completed {
+			cleanupOK = false
+			failure := fmt.Errorf("root execution retirement: %w", retired.Err)
+			r.CleanupFailures = append(r.CleanupFailures, failure.Error())
+			out.add(failure, nil)
+		}
+	}
 	// Ownership transferred to the follower cannot be credited merely because
 	// the executor joined or returned an ordinary error. Observe its exact local
 	// result only after all executor users have joined, including panic unwind.
@@ -544,7 +594,7 @@ func runV41EPOwnerLifecycle(ctx context.Context, req V41EPOwnerRequest, rank int
 		r.CleanupFailures = append(r.CleanupFailures, cleaned.err().Error())
 		out.add(cleaned.err(), cleaned.panic)
 	}
-	// Unknown factory/follower evidence cannot override a known release
+	// Unknown factory/executor evidence cannot override a known release
 	// failure. Otherwise preserve unknown as null rather than observed success.
 	if cleanupKnown || !cleanupOK {
 		r.CleanupCompleted = &cleanupOK

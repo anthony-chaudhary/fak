@@ -653,6 +653,11 @@ func newV41EPLifecycleFake() *v41EPLifecycleFake {
 		},
 		CloseModel:  func() error { f.event("model"); return nil },
 		OwnerCounts: func() (V41EPOwnerRoundCounters, bool) { f.event("rounds"); return V41EPOwnerRoundCounters{}, true },
+		// The fake Root allocates no intermediate resources. Tests invoking a
+		// real executor must replace this with that invocation's observation.
+		RootRetirement: func() (v41EPOwnerRootRetirement, error) {
+			return v41EPOwnerRootRetirement{Available: true, Completed: true}, nil
+		},
 		FollowerRetirement: func() (model.EPFollowerRetirement, error) {
 			f.event("follower-retirement")
 			return f.retirement, nil

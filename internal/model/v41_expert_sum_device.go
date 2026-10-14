@@ -1,9 +1,10 @@
 package model
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -55,7 +56,7 @@ func v41RoutedSumOrder(picks []routePick) []int {
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(i, j int) bool { return picks[order[i]].expert < picks[order[j]].expert })
+	slices.SortStableFunc(order, func(i, j int) int { return cmp.Compare(picks[i].expert, picks[j].expert) })
 	return order
 }
 

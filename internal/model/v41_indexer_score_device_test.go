@@ -19,6 +19,10 @@ type v41ScoreTestCall struct {
 // adapter. This recorder is not a hardware or production qualification.
 type v41ScoreTestBackend struct {
 	*v41DenseTestBackend
+	identity          compute.Backend
+	afterAdmission    func()
+	onKeyUpload       func([]float32)
+	afterQueryUpload  func()
 	supported, device bool
 	calls             []v41ScoreTestCall
 	allocations       map[compute.Buffer]bool
@@ -26,6 +30,7 @@ type v41ScoreTestBackend struct {
 	output            compute.Buffer
 	readScratch       []float32
 	uploadCount       int
+	dispatchCount     int
 	readCount         int
 	fault             string
 	cause             error
@@ -44,6 +49,13 @@ type v41ScoreTestBackend struct {
 	copyPending       map[compute.Buffer]bool
 }
 
+func (b *v41ScoreTestBackend) scoreIdentity() compute.Backend {
+	if b.identity != nil {
+		return b.identity
+	}
+	return b
+}
+
 func newV41ScoreTestBackend() *v41ScoreTestBackend {
 	return &v41ScoreTestBackend{v41DenseTestBackend: newV41DenseTestBackend(), supported: true, device: true,
 		allocations: map[compute.Buffer]bool{}, managed: map[compute.Buffer]bool{}, keyOwned: map[compute.Buffer]int64{}, copyPending: map[compute.Buffer]bool{}}
@@ -58,6 +70,9 @@ func (b *v41ScoreTestBackend) Caps() compute.Caps {
 func (b *v41ScoreTestBackend) SupportsV41IndexerScore() bool { return b.supported }
 func (b *v41ScoreTestBackend) V41IndexerScoreAdmission() (bool, error) {
 	b.healthCalls++
+	if b.afterAdmission != nil {
+		b.afterAdmission()
+	}
 	if b.healthErr != nil {
 		return false, b.healthErr
 	}
@@ -77,8 +92,12 @@ func (b *v41ScoreTestBackend) UploadClass(x compute.Tensor, dt compute.Dtype, cl
 	if strings.TrimPrefix(site, "V4.1 indexer score ")+" upload" == b.fault {
 		panic(b.cause)
 	}
-	values := append([]float32(nil), b.Backend.Read(x)...)
-	out := compute.NewF32(b, append([]int(nil), x.Shape...), values)
+	source := b.Backend.Read(x)
+	if strings.HasSuffix(site, " keys") && b.onKeyUpload != nil {
+		b.onKeyUpload(source)
+	}
+	values := append([]float32(nil), source...)
+	out := compute.NewF32(b.scoreIdentity(), append([]int(nil), x.Shape...), values)
 	b.allocations[out.Buf()], b.managed[out.Buf()] = true, true
 	b.uploadCount++
 	if strings.HasSuffix(site, " keys") || strings.HasSuffix(site, " key append") {
@@ -87,15 +106,19 @@ func (b *v41ScoreTestBackend) UploadClass(x compute.Tensor, dt compute.Dtype, cl
 	if strings.HasSuffix(site, " key append") {
 		b.ownKeys(out)
 	}
+	if strings.HasSuffix(site, " query") && b.afterQueryUpload != nil {
+		b.afterQueryUpload()
+	}
 	return out
 }
 
 func (b *v41ScoreTestBackend) V41IndexerScore(q, keys, weights compute.Tensor, rows, heads, dim int) (compute.Tensor, error) {
+	b.dispatchCount++
 	for _, input := range []struct {
 		x     compute.Tensor
 		shape []int
 	}{{q, []int{heads, dim}}, {keys, []int{rows, dim}}, {weights, []int{heads}}} {
-		if input.x.Backend() != b || !b.allocations[input.x.Buf()] || input.x.Dtype != compute.F32 ||
+		if input.x.Backend() != b.scoreIdentity() || !b.allocations[input.x.Buf()] || input.x.Dtype != compute.F32 ||
 			input.x.Layout != compute.RowMajor || input.x.Quant != nil || !reflect.DeepEqual(input.x.Shape, input.shape) {
 			return compute.Tensor{}, errors.New("invalid score tensor")
 		}
@@ -125,7 +148,7 @@ func (b *v41ScoreTestBackend) V41IndexerScore(q, keys, weights compute.Tensor, r
 	if b.forceNaN {
 		values[0] = float32(math.NaN())
 	}
-	out := compute.NewF32(b, []int{rows}, values)
+	out := compute.NewF32(b.scoreIdentity(), []int{rows}, values)
 	b.allocations[out.Buf()], b.managed[out.Buf()], b.output = true, true, out.Buf()
 	if b.fault == "partial output" {
 		return out, b.cause
@@ -211,7 +234,7 @@ func (b *v41ScoreTestBackend) V41RowLogAlloc(rows, width int) (compute.Tensor, e
 	if b.fault == "row allocation" {
 		return compute.Tensor{}, b.cause
 	}
-	out := compute.NewF32(b, []int{rows, width}, make([]float32, rows*width))
+	out := compute.NewF32(b.scoreIdentity(), []int{rows, width}, make([]float32, rows*width))
 	b.allocations[out.Buf()], b.managed[out.Buf()] = true, true
 	b.ownKeys(out)
 	return out, nil
@@ -221,7 +244,7 @@ func (b *v41ScoreTestBackend) V41RowLogCopy(dst compute.Tensor, dstRow int, src 
 		return b.cause
 	}
 	stride, err := compute.ValidateV41RowLogCopy(dst, dstRow, src, srcRow, rows)
-	if err != nil || dst.Backend() != b || src.Backend() != b || !b.allocations[dst.Buf()] || !b.allocations[src.Buf()] {
+	if err != nil || dst.Backend() != b.scoreIdentity() || src.Backend() != b.scoreIdentity() || !b.allocations[dst.Buf()] || !b.allocations[src.Buf()] {
 		return errors.New("invalid live row-log copy")
 	}
 	width := stride / 4
@@ -255,11 +278,11 @@ func TestV41IndexerKeyResidency(t *testing.T) {
 		m := fixture(t)
 		s, b := newSession(t, m, allowance)
 		control, plain := newSession(t, m, 0)
-		bound, callbacks := s.v41State().indexerScore, 0
-		s.v41State().indexerScore = func(layer int, q, keys, weights []float32, heads, width, rows int) ([]float32, error) {
+		bound, callbacks := s.v41State().indexerScore(), 0
+		s.v41State().setIndexerScore(func(layer int, q, keys, weights []float32, heads, width, rows int) ([]float32, error) {
 			callbacks++
 			return bound(layer, q, keys, weights, heads, width, rows)
-		}
+		})
 		v41ScoreTestBits(t, s.Prefill([]int{1, 2, 3}), control.Prefill([]int{1, 2, 3}))
 		width := int64(m.Cfg.IndexHeadDim * 4)
 		for _, token := range []int{4, 5, 6} {
@@ -323,13 +346,13 @@ func TestV41IndexerKeyResidency(t *testing.T) {
 			before := b.uploadCount
 			if panicCallback {
 				marker := &struct{ value int }{73}
-				st.indexerScore = func(int, []float32, []float32, []float32, int, int, int) ([]float32, error) { panic(marker) }
+				st.setIndexerScore(func(int, []float32, []float32, []float32, int, int, int) ([]float32, error) { panic(marker) })
 				if got := v41IndexerTestRecover(func() { s.Step(5) }); got != marker {
 					t.Fatalf("callback panic identity changed: %v", got)
 				}
 			} else {
 				b.healthErr = fault
-				st.indexerScore = s.v41IndexerScoreFunc()
+				st.setIndexerScore(s.v41IndexerScoreFunc())
 				b.healthErr = nil // Even this artificial recovery cannot erase the captured error.
 				if err := recoverError(func() { s.Step(5) }); !errors.Is(err, fault) || !s.BackendSessionClosed() {
 					t.Fatalf("original admission capture was bypassed: %v", err)
@@ -380,10 +403,10 @@ func TestV41IndexerKeyResidency(t *testing.T) {
 		keys, _ := owner.borrowIndexKeys(0)
 		view := &v41IndexerKeyView{owner: owner, source: 0}
 		forged := cloneV41Rows(keys)
-		if st.gatherOps.residentIndexerScore(m, 0, 4, forged, view, st.indexerScore) != nil {
+		if st.gatherOps.residentIndexerScore(m, 0, 4, forged, view, st.indexerScore()) != nil {
 			t.Fatal("caller-owned equal rows gained publication identity")
 		}
-		score := st.gatherOps.residentIndexerScore(m, 0, 4, keys, view, st.indexerScore)
+		score := st.gatherOps.residentIndexerScore(m, 0, 4, keys, view, st.indexerScore())
 		if score == nil {
 			t.Fatal("same-owner reset did not admit a bounded reseed")
 		}

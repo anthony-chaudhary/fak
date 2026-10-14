@@ -80,7 +80,8 @@ func (b *v41IndexSelectTestBackend) Free(x compute.Tensor) {
 func v41IndexSelectOnly(s *Session) {
 	v41ScoreOnly(s)
 	st := s.v41State()
-	st.indexerScore, st.indexScoreHealth = nil, nil
+	st.setIndexerScore(nil)
+	st.indexScoreHealth = nil
 }
 
 // v41IndexSelectHost is the existing host selection pair the device must match.

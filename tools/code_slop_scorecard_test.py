@@ -1725,6 +1725,101 @@ def test_duplication_compact_candidates_preserve_exact_windows_under_collisions(
         del cs.hash
 
 
+def test_duplication_token_reuse_is_run_local_bounded_and_exact():
+    # Pure fixture/call-count witness; no wall-clock threshold or corpus scan.
+    files = {
+        "a.go": "package a\n" + _dup_block("sum"),
+        "b.go": "package b\n" + _dup_block("sum"),
+        "c.go": "package c\n" + _same_skeleton("unique", "a", "b", "c", "r"),
+    }
+    raw_tokens = cs.go_tokens
+    old_limits = cs._DUP_TOKEN_CACHE_TOKENS, cs._DUP_TOKEN_CACHE_SOURCE_CHARS
+    sizes = {text: len(raw_tokens(text, normalize_idents=False)) for text in files.values()}
+    calls: dict[str, int] = {}
+
+    def counted_tokens(text, *, normalize_idents=True):
+        calls[text] = calls.get(text, 0) + 1
+        return raw_tokens(text, normalize_idents=normalize_idents)
+
+    def scan(token_limit, char_limit, current):
+        cs._DUP_TOKEN_CACHE_TOKENS = token_limit
+        cs._DUP_TOKEN_CACHE_SOURCE_CHARS = char_limit
+        calls.clear()
+        result = cs._dup_scan_windows(current)
+        # The only one-lex files are admitted retained arrays; all others lex
+        # twice. Summed admissions must obey both independent resource budgets.
+        retained = [text for text, count in calls.items() if count == 1]
+        assert all(count in (1, 2) for count in calls.values()), calls
+        assert sum(sizes[text] for text in retained) <= token_limit
+        assert sum(map(len, retained)) <= char_limit
+        return result, dict(calls)
+
+    try:
+        cs.go_tokens = counted_tokens
+        expected, uncached = scan(0, 0, files)
+        assert set(uncached.values()) == {2}
+        total_tokens = sum(sizes.values())
+        total_chars = sum(map(len, files.values()))
+        actual, cached = scan(total_tokens, total_chars, files)
+        assert actual == expected and set(cached.values()) == {1}
+
+        first = files["a.go"]
+        actual, bounded = scan(sizes[first], total_chars, files)
+        assert actual == expected and bounded[first] == 1
+        assert all(bounded[text] == 2 for text in files.values() if text != first)
+        actual, bounded = scan(total_tokens, len(first), files)
+        assert actual == expected and bounded[first] == 1
+        assert all(bounded[text] == 2 for text in files.values() if text != first)
+
+        # An oversized file is recomputed, never truncated or excluded.
+        actual, oversized = scan(sizes[first] - 1, total_chars, {"a.go": first})
+        baseline, _ = scan(0, 0, {"a.go": first})
+        assert actual == baseline and oversized[first] == 2
+
+        # Zero-token files cannot add uncounted retained cache entries.
+        sizes[""] = 0
+        empty, empty_calls = scan(total_tokens, total_chars, {"empty.go": ""})
+        assert empty == ({}, {"empty.go": []}) and empty_calls == {"": 2}
+
+        # Equal source bytes still identify distinct locations. Admitting only
+        # one path reuses its tokens while the other follows the two-lex path.
+        twins = {"a.go": first, "b.go": first}
+        cs._DUP_TOKEN_CACHE_TOKENS = sizes[first]
+        cs._DUP_TOKEN_CACHE_SOURCE_CHARS = 2 * len(first)
+        calls.clear()
+        twin_result = cs._dup_scan_windows(twins)
+        assert calls == {first: 3}, calls
+        assert any({rel for rel, _ in sites} == {"a.go", "b.go"}
+                   for sites in twin_result[0].values())
+        cs._DUP_TOKEN_CACHE_TOKENS = 0
+        cs._DUP_TOKEN_CACHE_SOURCE_CHARS = 0
+        calls.clear()
+        assert cs._dup_scan_windows(twins) == twin_result
+        assert calls == {first: 4}, calls
+
+        # Forced digest collisions still use exact keys in the second pass.
+        cs.hash = lambda _: 0
+        expected_collision, _ = scan(0, 0, files)
+        actual, _ = scan(total_tokens, total_chars, files)
+        assert actual == expected_collision
+        del cs.hash
+
+        # A later scan of changed bytes cannot inherit tokens from the old run.
+        revised = dict(files)
+        revised["a.go"] = first.replace("total += v * 2", "total += v * v", 1)
+        sizes[revised["a.go"]] = len(raw_tokens(revised["a.go"], normalize_idents=False))
+        expected_revised, _ = scan(0, 0, revised)
+        actual, fresh = scan(sum(sizes[text] for text in revised.values()),
+                             sum(map(len, revised.values())), revised)
+        assert actual == expected_revised and set(fresh.values()) == {1}
+        assert first not in fresh
+    finally:
+        cs.go_tokens = raw_tokens
+        cs._DUP_TOKEN_CACHE_TOKENS, cs._DUP_TOKEN_CACHE_SOURCE_CHARS = old_limits
+        if hasattr(cs, "hash"):
+            del cs.hash
+
+
 def test_operator_dispatch_preserves_full_scan_tokens_and_order():
     class CountedText(str):
         checks = 0

@@ -66,7 +66,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.ffnNorm = nil
 	scratch.compressorNorm = nil
 	scratch.indexKeyNorm = nil
-	scratch.indexerScore = nil
+	scratch.indexerScoreBinding = nil
 	scratch.indexScoreHealth = nil
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
@@ -87,7 +87,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.ffnNorm = st.ffnNorm
 		scratch.compressorNorm = st.compressorNorm
 		scratch.indexKeyNorm = st.indexKeyNorm
-		scratch.indexerScore = st.indexerScore
+		scratch.indexerScoreBinding = st.indexerScoreBinding
 		scratch.indexScoreHealth = st.indexScoreHealth
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
@@ -109,7 +109,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.ffnNorm = nil
 		scratch.compressorNorm = nil
 		scratch.indexKeyNorm = nil
-		scratch.indexerScore = nil
+		scratch.indexerScoreBinding = nil
 		scratch.indexScoreHealth = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
@@ -466,21 +466,29 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	var indexList []int32
 	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
 		// Projection, normalization, rotation and memo copies have completed.
-		// Scalar scoring reads one stable snapshot through causal prefixes;
-		// its peak payload equals the old final query's flat key allocation.
-		// Non-nil score callbacks keep their private per-query mutable inputs.
+		// Scalar and canonically bound native scoring read causal prefixes of
+		// one stable snapshot. Ordinary callbacks keep fresh mutable inputs.
+		// Revocation copies only the current prefix, then ends panel reuse.
 		var keyPanel []float32
-		if scratch.indexerScore == nil && seq > 1 {
+		binding := scratch.indexerScoreBinding
+		borrow := binding.prepareBorrow(m, st, scratch)
+		if (binding.scoreFunc() == nil || borrow.valid()) && seq > 1 {
 			keyPanel = v41ColdIndexerKeyPanel(indexKeys, cfg.IndexHeadDim)
 		}
 		for t := 0; t < seq; t++ {
+			if binding.scoreFunc() != nil && !borrow.valid() {
+				keyPanel = nil
+			}
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
 			var prefix []float32
 			if keyPanel != nil {
 				end := groups * cfg.IndexHeadDim
 				prefix = keyPanel[:end:end]
 			}
-			localIdx, err := m.v41IndexRowsWithPreparedKeys(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps, prefix)
+			localIdx, err := m.v41IndexRowsWithPreparedBinding(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow)
+			if borrow.revoked {
+				keyPanel = nil
+			}
 			if err != nil {
 				return err
 			}
@@ -491,7 +499,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			indexList = append(indexList, row...)
 		}
 	} else {
-		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection(), scratch.indexerScore, scratch.indexScoreHealth, scratch.gatherOps)
+		localIdx, err := m.v41IndexRowsWithDeviceOps(l, seq-1, qLatRows[seq-1], preByPos[seq-1], indexKeys, scratch.denseProjection(), scratch.indexerScore(), scratch.indexScoreHealth, scratch.gatherOps)
 		if err != nil {
 			return err
 		}

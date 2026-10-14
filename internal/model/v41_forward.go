@@ -158,31 +158,31 @@ type v41ForwardState struct {
 	// backend and no host expert GEMM remains — the requirement for the pinned Q2_K
 	// streamed route to satisfy the Halo GPU-only guard. A nil callback (or any
 	// decline) preserves the historical host f32 down contraction byte-for-byte.
-	expertDown       v41ExpertDownFunc
-	projectionRoute  *v41ProjectionRouteBinding
-	groupedOutput    v41GroupedOutputFunc
-	engramProjection v41EngramProjectionFunc
-	mhcProjection    v41MHCProjectionFunc
-	mhcFFNProjection v41MHCProjectionFunc
-	finalNorm        v41FinalNormFunc
-	bf16Boundary     v41BF16BoundaryFunc
-	logitScale       v41LogitScaleFunc
-	attentionNorm    v41AttentionInputNormFunc
-	attentionBF16    v41BF16BoundaryFunc
-	queryNorm        v41QueryNormFunc
-	queryPrefix      v41QueryPrefixFunc
-	kvNorm           v41KVNormFunc
-	ffnNorm          v41FFNNormFunc
-	compressorNorm   v41CompressorNormFunc
-	indexKeyNorm     v41IndexKeyNormFunc
-	indexerScore     v41IndexerScoreFunc
-	indexScoreHealth v41IndexerScoreHealthFunc
-	sharedActivation v41SharedActivationFunc
-	tailRoPE         v41TailRoPEFunc
-	sharedAttention  v41SharedAttentionFunc
-	routedSum        v41RoutedSumFunc
-	sharedAdd        v41SharedAddFunc
-	gatherOps        *v41DeviceGatherOps
+	expertDown          v41ExpertDownFunc
+	projectionRoute     *v41ProjectionRouteBinding
+	groupedOutput       v41GroupedOutputFunc
+	engramProjection    v41EngramProjectionFunc
+	mhcProjection       v41MHCProjectionFunc
+	mhcFFNProjection    v41MHCProjectionFunc
+	finalNorm           v41FinalNormFunc
+	bf16Boundary        v41BF16BoundaryFunc
+	logitScale          v41LogitScaleFunc
+	attentionNorm       v41AttentionInputNormFunc
+	attentionBF16       v41BF16BoundaryFunc
+	queryNorm           v41QueryNormFunc
+	queryPrefix         v41QueryPrefixFunc
+	kvNorm              v41KVNormFunc
+	ffnNorm             v41FFNNormFunc
+	compressorNorm      v41CompressorNormFunc
+	indexKeyNorm        v41IndexKeyNormFunc
+	indexerScoreBinding *v41IndexerScoreBinding
+	indexScoreHealth    v41IndexerScoreHealthFunc
+	sharedActivation    v41SharedActivationFunc
+	tailRoPE            v41TailRoPEFunc
+	sharedAttention     v41SharedAttentionFunc
+	routedSum           v41RoutedSumFunc
+	sharedAdd           v41SharedAddFunc
+	gatherOps           *v41DeviceGatherOps
 	// routedExpert is the OPTIONAL fused device routed expert (gate/up, BF16
 	// clamp-SwiGLU route weight, down). The full profile offers each pick to it
 	// before expertGateUp/expertDown; nil keeps those seams unchanged.
@@ -352,7 +352,7 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, attentionBF16: st.attentionBF16, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScore: st.indexerScore, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routedSum: st.routedSum, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, attentionBF16: st.attentionBF16, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, sharedAttention: st.sharedAttention, gatherOps: st.gatherOps, routedSum: st.routedSum, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {
@@ -991,7 +991,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()
 		s.v41Forward.indexKeyNorm = s.v41IndexKeyNormFunc()
-		s.v41Forward.indexerScore = s.v41IndexerScoreFunc()
+		s.v41Forward.bindCanonicalIndexerScore(s.v41BindIndexerScore())
 		s.v41Forward.indexScoreHealth = s.v41IndexerScoreHealthFunc()
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
