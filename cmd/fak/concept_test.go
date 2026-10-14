@@ -69,7 +69,8 @@ p.add_argument("--data")
 p.add_argument("--markdown-dir")
 p.add_argument("--json", action="store_true")
 a=p.parse_args()
-meta=json.loads((Path(a.data)/"_meta.json").read_text())
+data=Path(a.data) if a.data else Path(a.workspace)/"tools"/"concept_disambiguation_scorecard.data"
+meta=json.loads((data/"_meta.json").read_text())
 tokens=[x.get("token") for x in meta["families"][0].get("classifications", [])]
 out=Path(a.markdown_dir); out.mkdir(parents=True, exist_ok=True)
 for name in ("README.md","INDEX.md","DEBT.md","GAPS.md","PAIRS.md","CONCEPTS.md","FAMILIES.md","SOURCES.md","ADR.md"):
