@@ -884,47 +884,66 @@ def _dup_scan_windows(
         files: dict[str, str],
 ) -> tuple[dict[tuple[str, ...], set[tuple[str, int]]],
            dict[str, list[tuple[int, int, int, tuple[str, ...]]]]]:
-    """Slide the clone window over every file and collect qualifying windows.
+    """Retain exact windows only when a compact first pass finds a repeat.
 
-    Returns ``(win_locs, per_file)``: the distinct (file, start_line) sites per
-    normalized token key, and each file's qualifying windows as ascending
-    (tok_idx, start_line, end_line, key) rows."""
-    win_locs: dict[tuple[str, ...], set[tuple[str, int]]] = {}  # key -> {(file, start_line)}
-    # file -> [(tok_idx, start_line, end_line, key)] for qualifying windows
+    Hashes only admit candidates: colliding windows still undergo the original
+    exact token-key and distinct-location checks. Unique windows cannot enter a
+    clone group, so retaining their tuples and singleton sets only consumes space.
+    """
+    seen: set[int] = set()
+    repeated: set[int] = set()
+    for rel in sorted(files):
+        for _, _, _, key in _dup_windows(files[rel]):
+            fingerprint = hash(key)
+            if fingerprint in seen:
+                repeated.add(fingerprint)
+            else:
+                seen.add(fingerprint)
+    seen.clear()
+    win_locs: dict[tuple[str, ...], set[tuple[str, int]]] = {}
     per_file: dict[str, list[tuple[int, int, int, tuple[str, ...]]]] = {}
     for rel in sorted(files):
-        toks = go_tokens(files[rel], normalize_idents=False)
-        m = len(toks)
-        quals: list[tuple[int, int, int, int]] = []
-        if m >= CLONE_WINDOW_TOKENS:
-            # Per token: is_logic (as before) and is_nonassign_logic (logic AND not a
-            # bare assignment op). FIX 6: bare `=`/`:=` are CONTEXT-GATED — a window's
-            # EFFECTIVE logic count is its full logic count only when it carries >= 1
-            # non-assignment logic token; otherwise the assignments don't count and the
-            # window (a pure declaration/literal/field-init block) is demoted to zero.
-            logic = [1 if t[2] else 0 for t in toks]
-            nonassign = [1 if (t[2] and t[0] not in _ASSIGN_OPS) else 0 for t in toks]
-            running = sum(logic[:CLONE_WINDOW_TOKENS])
-            running_na = sum(nonassign[:CLONE_WINDOW_TOKENS])
-            for start in range(0, m - CLONE_WINDOW_TOKENS + 1):
-                if start > 0:
-                    running += logic[start + CLONE_WINDOW_TOKENS - 1] - logic[start - 1]
-                    running_na += (nonassign[start + CLONE_WINDOW_TOKENS - 1]
-                                   - nonassign[start - 1])
-                effective = running if running_na >= 1 else 0
-                if effective < CLONE_MIN_LOGIC_TOKENS:
-                    continue
-                key = tuple(toks[j][0] for j in range(start, start + CLONE_WINDOW_TOKENS))
-                # FIX 5: a sort-scaffold-only window (a `sort.<verb>` call with NO
-                # comparison operator) is shared boilerplate, not a comparator clone.
-                if _is_sort_scaffold_only(key):
-                    continue
-                sline = toks[start][1]
-                eline = toks[start + CLONE_WINDOW_TOKENS - 1][1]
-                quals.append((start, sline, eline, key))
+        quals = []
+        for row in _dup_windows(files[rel]):
+            _, sline, _, key = row
+            if hash(key) in repeated:
+                quals.append(row)
                 win_locs.setdefault(key, set()).add((rel, sline))
         per_file[rel] = quals
     return win_locs, per_file
+
+
+def _dup_windows(text: str):
+    """Yield qualifying token windows without retaining unrelated file state."""
+    toks = go_tokens(text, normalize_idents=False)
+    m = len(toks)
+    symbols = [token[0] for token in toks]
+    if m >= CLONE_WINDOW_TOKENS:
+        # Per token: is_logic (as before) and is_nonassign_logic (logic AND not a
+        # bare assignment op). FIX 6: bare `=`/`:=` are CONTEXT-GATED — a window's
+        # EFFECTIVE logic count is its full logic count only when it carries >= 1
+        # non-assignment logic token; otherwise the assignments don't count and the
+        # window (a pure declaration/literal/field-init block) is demoted to zero.
+        logic = [1 if t[2] else 0 for t in toks]
+        nonassign = [1 if (t[2] and t[0] not in _ASSIGN_OPS) else 0 for t in toks]
+        running = sum(logic[:CLONE_WINDOW_TOKENS])
+        running_na = sum(nonassign[:CLONE_WINDOW_TOKENS])
+        for start in range(0, m - CLONE_WINDOW_TOKENS + 1):
+            if start > 0:
+                running += logic[start + CLONE_WINDOW_TOKENS - 1] - logic[start - 1]
+                running_na += (nonassign[start + CLONE_WINDOW_TOKENS - 1]
+                               - nonassign[start - 1])
+            effective = running if running_na >= 1 else 0
+            if effective < CLONE_MIN_LOGIC_TOKENS:
+                continue
+            key = tuple(symbols[start:start + CLONE_WINDOW_TOKENS])
+            # FIX 5: a sort-scaffold-only window (a `sort.<verb>` call with NO
+            # comparison operator) is shared boilerplate, not a comparator clone.
+            if _is_sort_scaffold_only(key):
+                continue
+            sline = toks[start][1]
+            eline = toks[start + CLONE_WINDOW_TOKENS - 1][1]
+            yield start, sline, eline, key
 
 
 def _dup_merge_blocks(
