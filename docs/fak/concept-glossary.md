@@ -1238,3 +1238,17 @@ Checked per-owner request word counts, aggregate payload words, reply words, and
 Validates the existing owner partition, routed picks, token/width bounds, every owner's encoded request size, response size, and explicit live transport allowance before creating v41EPPanelLayout.
 
 **Distinct from:** Bounds one exchange before allocation or I/O; does not select TPPlan partitions or estimate complete host/device model memory, and does not certify hardware execution or full-history memory use.
+
+
+### V4.1 EP owner build invocation plan
+
+Pure value descriptor fixing the supported owner-build profile, helper-digest linker symbol/value, build argv, working directory, and complete replacement environment derived from validated configuration values.
+
+**Distinct from:** A proposed invocation, not VulkanReceiptBuildPlan verification expectations or BuildPlan action diffs. It performs no filesystem observation or execution and proves neither fresh output, approved source contents, nor actual linkage of the requested helper pin.
+
+
+### V4.1 EP owner build-session declaration
+
+Supplied invocation, receipt digest, finished/joined flags, exit code, and output identity in an optional owner-build supplement declaration; the pure checker requires exact supplied counterparts and a finished, joined, zero-exit declaration before reporting value agreement.
+
+**Distinct from:** A build-invocation declaration, not a live served Session or scheduler model-session origin. Parsing/equality do not observe a process, authenticate an issuer, prove historical build causality or binary linkage, or grant native admission.

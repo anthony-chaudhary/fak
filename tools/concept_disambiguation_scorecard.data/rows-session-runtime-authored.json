@@ -9,7 +9,8 @@
       "distinction": "It records model-session construction origin, not the cache-value SessionType workload-reporting tag and not mutable runtime session state.",
       "distinct_from": [
         "x2-session-runtime-sessiontype",
-        "nativesessionrestored"
+        "nativesessionrestored",
+        "v41-ep-owner-build-session"
       ],
       "aliases": [],
       "grounding": "nativesessionlifecycle",

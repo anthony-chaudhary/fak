@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **653** (clarity 0 + coverage 653) |
-| **Crystal-clear concepts (and climbing)** | **1234** crystal of 3024 positioned |
+| **Crystal-clear concepts (and climbing)** | **1236** crystal of 3026 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **3116 / 3769** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **87** of 4277 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **87** of 4281 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3024 concepts - score 88.8/100 (grade B) - disambiguation-debt 653
+concept-disambiguation chart - 3026 concepts - score 88.8/100 (grade B) - disambiguation-debt 653
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1234
+  * crystal       ###################......... 1236
   o defined       ############################ 1790
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -50,12 +50,12 @@ clarity mix by family (each cell = one concept):
   guard-gate       ********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (454 concept(s); 212 crystal)
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             ***********************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (411 concept(s); 167 crystal)
+  plan             ************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (412 concept(s); 168 crystal)
   policy-capability *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 101 crystal)
   pool             *******oooooooooooooooooooooooooooooooo (39 concept(s); 7 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
-  session-runtime  ********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (265 concept(s); 92 crystal)
+  session-runtime  *********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (266 concept(s); 93 crystal)
   support-maturity **************************************************ooooooooooooooooooooooooooo (77 concept(s); 50 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4277 lookup name(s) -> 3024 concept(s), 87 ambiguous
+name index: 4281 lookup name(s) -> 3026 concept(s), 87 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2268 / 5486 |
+| Boundaries drawn (mutual / total) | 2276 / 5494 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4277 over 3024 concepts |
+| Lookup names indexed | 4281 over 3026 concepts |
 | Lookup names landing on several concepts | 87 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3024 |
+| Concepts carrying a contrast set | 3026 |
 
 ## The concepts (best verdict first)
 
@@ -938,6 +938,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **PlannerTurnContext (gateway request binding)** - The single context binding the gateway applies before every planner call (buffered Complete and streaming CompleteStream): it binds the authenticated principal to the in-kernel prefix-cache identity at tenant scope and carries the harness session id for prefix-reuse attribution. |
 | * | crystal | symbol | plan | **EvaluateCandidate (candidate-adjudication verb)** - The per-domain candidate-ADJUDICATION verb that scores one staged candidate against its baseline: strix's StrixCandidateRegistry.EvaluateCandidate turns an ablation arm into PROMOTED/NEUTRAL/REGRESSED, docfreshrsi's EvaluateCandidate measures one README fragment against an isolated base clone, and conceptbench's EvaluateCandidate applies a floor threshold. |
 | * | crystal | symbol | plan | **FilingPlan (quality regression auto-filing lifecycle plan)** - internal/quality/issue_autofile.go: the set of issue-tracker lifecycle actions (open/update/hold/close) one quality RUN implies, computed purely from the durable Tracker state plus that run's observations, each action carrying the scrubbed replay bundle that reproduces it. |
+| * | crystal | symbol | plan | **V4.1 EP owner build invocation plan** - Pure value descriptor fixing the supported owner-build profile, helper-digest linker symbol/value, build argv, working directory, and complete replacement environment derived from validated configuration values. |
 | * | crystal | symbol | plan | **V4.1 EP panel geometry admission** - Validates the existing owner partition, routed picks, token/width bounds, every owner's encoded request size, response size, and explicit live transport allowance before creating v41EPPanelLayout. |
 | * | crystal | symbol | plan | **verifyTopologyCandidate (land-verify candidate checkout)** - internal/workerworktree.verifyTopologyCandidate materializes the exact tree a land is about to publish as a detached verify-only git worktree named .fak-cand-validate-<pid>-<start>-<n> beside the repository (or in the system temp directory), runs the verify hook in it, and removes it afterwards. |
 | * | crystal | symbol | plan | **SweepTopologyCandidates (leaked verify-checkout collector)** - internal/workerworktree.SweepTopologyCandidates classifies every .fak-cand-validate-* verify checkout in a parent directory and, under Apply, removes those whose owner process is gone, then prunes their git worktree registrations. |
@@ -1226,6 +1227,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **ProviderSessionBoundary** - A provider-reported replacement conversation that closes one fak trace and opens another inside the same guard process. |
 | * | crystal | symbol | session-runtime | **BeginProviderSessionAt** - The session-table transition that terminalizes the current fak trace and creates the fresh provider-conversation trace while carrying cumulative envelopes. |
 | * | crystal | symbol | session-runtime | **SessionKey** - The deterministic, surface-independent cross-surface session identity derived by hashing a normalized conversation id under a versioned scheme tag; it doubles as the sessionledger trace name, so continuity rides the ledger's durable hash chain. |
+| * | crystal | symbol | session-runtime | **V4.1 EP owner build-session declaration** - Supplied invocation, receipt digest, finished/joined flags, exit code, and output identity in an optional owner-build supplement declaration; the pure checker requires exact supplied counterparts and a finished, joined, zero-exit declaration before reporting value agreement. |
 | * | crystal | symbol | support-maturity | **KVPrefixReuseSupported** - Config predicate reporting whether a *KVCache is a COMPLETE session prefix for this architecture — i.e. whether cloning the cache carries the whole of what the session already ingested. True for cached architectures whose per-layer K/V rows are the entire state; false for the gemma4 recompute bridge, whose state is the token history and whose cache stays empty. |
 | * | crystal | symbol | support-maturity | **ExecutionDeadlineAdmissionSupported** - Reports whether the normal request-owned prefix acquisition route can perform deadline admission using usable cached-prefix credit; speculative routes remain cold-admitted. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for commitsubjectcoverage** - commit_subject_coverage is the support-maturity symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
@@ -3304,8 +3306,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3218/5486 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3024 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3218/5494 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3026 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3314,7 +3316,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4277 lookup name(s) resolves - 87 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4281 lookup name(s) resolves - 87 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
