@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcatalog"
+	"github.com/anthony-chaudhary/fak/internal/localbench"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -340,6 +342,8 @@ func parseBenchmarkRunArgs(stderr io.Writer, argv []string) (receiptPath string,
 
 func runBuiltInBenchmark(name string, stdout, stderr io.Writer, extra []string) (int, bool) {
 	switch name {
+	case "v41-ep-owner":
+		return localbench.RunV41EPOwnerCommand(context.Background(), stdout, stderr, extra), true
 	case "vcache":
 		args := []string{"bench", "--json", "--snapshot", "off"}
 		args = append(args, extra...)
