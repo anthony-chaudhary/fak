@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:0b751592f6c56855bae86122d58b8d62ba73af98e864db641f665dcbd90a7933",
-  "tracked_files": 25291,
-  "tracked_bytes": 509740591,
+  "content_root": "sha256:c297479c05222a612b7e6516665383caf2520bad4ebc988fb570a51b29e7d37a",
+  "tracked_files": 25293,
+  "tracked_bytes": 509757525,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -131615,6 +131615,24 @@
       ]
     },
     {
+      "path": "internal/ggufload/v41_ep_session.go",
+      "content_sha256": "sha256:00fde1eddfbca9c080070647bc75c8494c1cdf0642269ac88328e8a5066667cf",
+      "bytes": 5866,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/ggufload/v41_ep_session_test.go",
+      "content_sha256": "sha256:59d162f4046e922ba2df9e8aba3d74f45a44473acdd4e1b79ca40c5ebca82ded",
+      "bytes": 10248,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/ggufload/v41_streamed_expert_tier_seam_test.go",
       "content_sha256": "sha256:547937faa5c8c17badb5bd068fc0519ea239a9e87ab2178fc383c410b4b507aa",
       "bytes": 4526,
@@ -213838,8 +213856,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:31c77e69cf34944d9afeea1b97c0ed40475e4e92b19407108cf0340696437fbd",
-      "bytes": 804689,
+      "content_sha256": "sha256:155903bf2b73b150ac9ded4d7697a2e95b655fa375b16fa07dbc94b439f68827",
+      "bytes": 805509,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
