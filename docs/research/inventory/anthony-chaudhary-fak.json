@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:1b3ff81b8c7b3079e310c690d860515e9c04b6d9d4651b9ab3db08664d286e52",
-  "tracked_files": 25359,
-  "tracked_bytes": 510577818,
+  "content_root": "sha256:a918e17f1a9c4580ddebe6efc710f2f98420df5b66c60afee4eea5d80b3805a6",
+  "tracked_files": 25360,
+  "tracked_bytes": 510586962,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -165078,8 +165078,8 @@
     },
     {
       "path": "internal/model/v41_shared_attention_device.go",
-      "content_sha256": "sha256:37fb33f5a619c86a838749084a721512eb4494a2fadc59b5619d9295ee0b1c12",
-      "bytes": 18845,
+      "content_sha256": "sha256:29ebfb338a393961e6b2a6ca15eeb41e4daa67e294c1cfc3017d4a3048f7e650",
+      "bytes": 19739,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -165089,6 +165089,15 @@
       "path": "internal/model/v41_shared_attention_device_test.go",
       "content_sha256": "sha256:55fb0adcbd3b0df6375169f70918c64f5631ad4097bd62e5936f988d6d9bf367",
       "bytes": 32010,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/model/v41_shared_attention_selection_scratch_test.go",
+      "content_sha256": "sha256:d97a13b801111ea546600c59315b8b3cef3eb3a9fc14fc55d684ac457a7c59fb",
+      "bytes": 7807,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -214369,8 +214378,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:8a41f7b3028653e2f7b28a488ae850d304637d4d96d6282168886f7800f67eef",
-      "bytes": 812111,
+      "content_sha256": "sha256:97bc2277e0e49054aa7c4245b3893d988a165b55eabf668347a377f84ecab777",
+      "bytes": 812554,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
