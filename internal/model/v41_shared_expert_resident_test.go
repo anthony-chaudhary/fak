@@ -32,18 +32,36 @@ type v41ColdSharedRecorder struct {
 	sharedReads                                 []int
 	deferredReadSites                           [][]uint32
 	deferredReadRows                            []int
+	panelVerdicts                               []error
+	panelTransport                              error
+	panelProtocol                               bool
+	panelVerdictMinCount                        int
+	panelVerdictAt                              int
+	panelReads                                  int
+	batchedRows                                 []int
+	batchedDtypes                               []compute.Dtype
+	sharedBatchedRows                           []int
+	panel, rejectPanelDtype, rejectPanelRows    bool
+	rejectedPanelDtype                          compute.Dtype
+	rejectedPanelRowCount                       int
 	active, lastProjection                      int
 	deny, denyQ6                                bool
 	failMatMul                                  int
 	matmuls                                     int
 	fault                                       error
 	malformed                                   string
+	malformedAt                                 int
 	foreign, unrelated                          compute.Tensor
 	cleanupPanic                                bool
+	mhc                                         *v41MHCTestBackend
+	mhcPostFault                                error
+	mhcPostFaultAt                              int
+	mhcPosts                                    int
+	enableMHC                                   bool
 }
 
 func newV41ColdSharedRecorder() *v41ColdSharedRecorder {
-	b := &v41ColdSharedRecorder{Backend: compute.Default(), created: map[compute.Buffer]int{}, freed: map[compute.Buffer]int{}, sharedWeights: map[compute.Buffer]int{}, active: -1}
+	b := &v41ColdSharedRecorder{Backend: compute.Default(), created: map[compute.Buffer]int{}, freed: map[compute.Buffer]int{}, sharedWeights: map[compute.Buffer]int{}, active: -1, mhc: newV41MHCTestBackend(true)}
 	b.v41DeferredLedger = newV41DeferredLedger(func() compute.Backend { return b })
 	return b
 }
@@ -56,6 +74,9 @@ func (b *v41ColdSharedRecorder) SupportsDeviceWeightDtype(dt compute.Dtype) bool
 	return !b.deny && (dt == compute.F32 || dt == compute.Q2_K || dt == compute.Q4_K || dt == compute.Q6_K)
 }
 func (b *v41ColdSharedRecorder) SupportsQ6KMatMul() bool { return !b.denyQ6 }
+func (b *v41ColdSharedRecorder) SupportsV41SharedExpertPanel(dtype compute.Dtype, rows, _, _ int) bool {
+	return b.panel && !(b.rejectPanelDtype && dtype == b.rejectedPanelDtype) && !(b.rejectPanelRows && rows == b.rejectedPanelRowCount)
+}
 func (b *v41ColdSharedRecorder) tensor(shape []int, values []float32) compute.Tensor {
 	t := compute.NewF32(b, append([]int(nil), shape...), append([]float32(nil), values...))
 	b.created[t.Buf()]++
@@ -120,6 +141,11 @@ func (b *v41ColdSharedRecorder) MatMul(w, x compute.Tensor) compute.Tensor {
 	return b.tensor(y.Shape, values)
 }
 func (b *v41ColdSharedRecorder) BatchedMatMul(w, x compute.Tensor, rows int) compute.Tensor {
+	b.batchedRows = append(b.batchedRows, rows)
+	b.batchedDtypes = append(b.batchedDtypes, w.Dtype)
+	if _, ok := b.sharedWeights[w.Buf()]; ok {
+		b.sharedBatchedRows = append(b.sharedBatchedRows, rows)
+	}
 	y := b.Backend.BatchedMatMul(w, x, rows)
 	return b.tensor(y.Shape, b.Backend.Read(y))
 }
@@ -173,7 +199,11 @@ func (b *v41ColdSharedRecorder) V41BF16PublishDeferred(x compute.Tensor, site ui
 	p, st, err := b.v41DeferredLedger.V41BF16PublishDeferred(x, site)
 	b.created[p.Buf()]++
 	b.created[st.Record.Buf()]++
-	if b.deferredPublishes == 1 {
+	malformedAt := b.malformedAt
+	if malformedAt == 0 {
+		malformedAt = 1
+	}
+	if b.deferredPublishes == malformedAt {
 		switch b.malformed {
 		case "output-input":
 			b.Free(p)
@@ -217,7 +247,56 @@ func (b *v41ColdSharedRecorder) V41ReadDeferred(statuses []compute.V41DeferredSt
 			b.active = -1
 		}
 	}
-	return b.v41DeferredLedger.V41ReadDeferred(statuses, rows)
+	verdicts, values, err := b.v41DeferredLedger.V41ReadDeferred(statuses, rows)
+	panelRead := len(statuses) == 4 && statuses[0].Count >= b.panelVerdictMinCount &&
+		reflect.DeepEqual(sites, []uint32{compute.V41BF16PublishSharedExpertProjection, compute.V41BF16PublishSharedExpertProjection, compute.V41BF16PublishSharedExpertDownInput, compute.V41BF16PublishSharedExpertProjection})
+	if panelRead {
+		b.panelReads++
+		panelRead = b.panelVerdictAt == 0 || b.panelReads == b.panelVerdictAt
+	}
+	if err == nil && panelRead && b.panelTransport != nil {
+		return nil, nil, b.panelTransport
+	}
+	if err == nil && panelRead && b.panelProtocol {
+		return verdicts[:len(verdicts)-1], values, nil
+	}
+	if err == nil && panelRead && len(b.panelVerdicts) != 0 {
+		verdicts = append([]error(nil), verdicts...)
+		copy(verdicts, b.panelVerdicts)
+	}
+	return verdicts, values, err
+}
+
+func (b *v41ColdSharedRecorder) SupportsV41MHC() bool { return b.enableMHC }
+func (b *v41ColdSharedRecorder) mhcOperand(x compute.Tensor) compute.Tensor {
+	return compute.NewF32(b.mhc, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
+}
+func (b *v41ColdSharedRecorder) mhcResult(out compute.Tensor, err error) (compute.Tensor, error) {
+	if err != nil {
+		return compute.Tensor{}, err
+	}
+	result := b.tensor(out.Shape, b.mhc.Read(out))
+	b.mhc.Free(out)
+	return result, nil
+}
+func (b *v41ColdSharedRecorder) V41MHCInitialStreams(x compute.Tensor, rows, hidden int) (compute.Tensor, error) {
+	return b.mhcResult(b.mhc.V41MHCInitialStreams(b.mhcOperand(x), rows, hidden))
+}
+func (b *v41ColdSharedRecorder) V41MHCSplit(m, s, base compute.Tensor, rows, iters int, eps float32) (compute.Tensor, error) {
+	return b.mhcResult(b.mhc.V41MHCSplit(b.mhcOperand(m), b.mhcOperand(s), b.mhcOperand(base), rows, iters, eps))
+}
+func (b *v41ColdSharedRecorder) V41MHCRMSSplit(m, s, p compute.Tensor, rows, hidden, iters int, eps, rmsEps float32) (compute.Tensor, error) {
+	return b.mhcResult(b.mhc.V41MHCRMSSplit(b.mhcOperand(m), b.mhcOperand(s), b.mhcOperand(p), rows, hidden, iters, eps, rmsEps))
+}
+func (b *v41ColdSharedRecorder) V41MHCPre(s, k compute.Tensor, rows, hidden int) (compute.Tensor, error) {
+	return b.mhcResult(b.mhc.V41MHCPre(b.mhcOperand(s), b.mhcOperand(k), rows, hidden))
+}
+func (b *v41ColdSharedRecorder) V41MHCPost(x, s, k compute.Tensor, rows, hidden int) (compute.Tensor, error) {
+	b.mhcPosts++
+	if b.mhcPostFault != nil && (b.mhcPostFaultAt == 0 || b.mhcPosts == b.mhcPostFaultAt) {
+		return compute.Tensor{}, b.mhcPostFault
+	}
+	return b.mhcResult(b.mhc.V41MHCPost(b.mhcOperand(x), b.mhcOperand(s), b.mhcOperand(k), rows, hidden))
 }
 
 func v41ColdSharedFixture(t *testing.T, dtype compute.Dtype) (*Model, []float32) {
@@ -264,6 +343,35 @@ func v41ColdSharedFixture(t *testing.T, dtype compute.Dtype) (*Model, []float32)
 }
 func v41ColdSharedSession(m *Model, b *v41ColdSharedRecorder) *Session {
 	return &Session{M: m, Backend: b, halW: map[string]compute.Tensor{}}
+}
+
+func v41ColdSharedRegisterWeights(s *Session, b *v41ColdSharedRecorder) {
+	for i, leaf := range []string{"w1", "w3", "w2"} {
+		out, in := s.M.Cfg.MoEIntermediateSize, s.M.Cfg.HiddenSize
+		if i == 2 {
+			out, in = in, out
+		}
+		weight, ok := s.v41ColdSharedWeight(layerName(0, "ffn.shared_experts."+leaf+".weight"), out, in)
+		if !ok {
+			panic("shared test weight unavailable")
+		}
+		w := weight.resolve()
+		b.sharedWeights[w.Buf()] = i
+	}
+}
+
+func v41ColdSharedPanelInput(rows, width int) []float32 {
+	values := make([]float32, rows*width)
+	for row := 0; row < rows; row++ {
+		for col := 0; col < width; col++ {
+			bits := uint32(0x3e000000) + uint32((row*width+col)%256)<<16
+			if (row+col)%3 == 0 {
+				bits |= 1 << 31
+			}
+			values[row*width+col] = math.Float32frombits(bits)
+		}
+	}
+	return values
 }
 
 func v41ColdSharedEqualWords(a, b []float32) bool {
@@ -505,5 +613,396 @@ func TestV41ColdSharedResidentPrefillBridge(t *testing.T) {
 	v41GroupedParity(t, step, lastLogits(m.Forward([]int{1, 2, 3})), 1e-4)
 	if len(b.sharedReads) != before+1 || b.sharedReads[before] <= 1 {
 		t.Fatal("incremental scalar bridge was changed")
+	}
+}
+
+// fak-test:runtime medium est=4s lane=default
+func TestV41ColdSharedResidentPanelChunksAndParity(t *testing.T) {
+	const rows = 65
+	orderedSites := []uint32{
+		compute.V41BF16PublishSharedExpertProjection,
+		compute.V41BF16PublishSharedExpertProjection,
+		compute.V41BF16PublishSharedExpertDownInput,
+		compute.V41BF16PublishSharedExpertProjection,
+	}
+	for _, dtype := range []compute.Dtype{compute.F32, compute.Q2_K} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			m, _ := v41ColdSharedFixture(t, dtype)
+			t.Cleanup(func() { _ = m.CloseWeights() })
+			input := v41ColdSharedPanelInput(rows, m.Cfg.HiddenSize)
+
+			referenceBackend := newV41ColdSharedRecorder()
+			reference := v41ColdSharedSession(m, referenceBackend)
+			defer reference.Close()
+			want := make([]float32, 0, len(input))
+			for row := 0; row < rows; row++ {
+				start := row * m.Cfg.HiddenSize
+				values, err := m.v41FullSharedExpertSwiGLU(0, input[start:start+m.Cfg.HiddenSize], m.Cfg, reference.v41DenseProjectionFunc(), reference.v41SharedActivationFunc(), reference.v41BF16PublishFunc())
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = append(want, values...)
+			}
+
+			backend := newV41ColdSharedRecorder()
+			backend.panel = true
+			s := v41ColdSharedSession(m, backend)
+			defer s.Close()
+			v41ColdSharedRegisterWeights(s, backend)
+			panel := s.v41ColdSharedExpertPanel(0)
+			got, selected, err := panel(input, rows)
+			if err != nil || !selected {
+				t.Fatalf("selected=%t error=%v", selected, err)
+			}
+			if !v41ColdSharedEqualWords(got, want) || !v41BF16Widened(got) {
+				t.Fatal("panel output differs bitwise from the independent per-row helper or is not BF16-published")
+			}
+			for row := 0; row < rows; row++ {
+				start := row * m.Cfg.HiddenSize
+				if !v41ColdSharedEqualWords(got[start:start+m.Cfg.HiddenSize], want[start:start+m.Cfg.HiddenSize]) {
+					t.Fatalf("row %d moved or changed", row)
+				}
+			}
+			if !reflect.DeepEqual(backend.sharedBatchedRows, []int{64, 64, 64, 1, 1, 1}) {
+				t.Fatalf("shared batch rows=%v", backend.sharedBatchedRows)
+			}
+			if !reflect.DeepEqual(backend.batchedDtypes, []compute.Dtype{dtype, dtype, dtype, dtype, dtype, dtype}) || backend.matmuls != 0 {
+				t.Fatalf("batch dtypes=%v scalar matmuls=%d", backend.batchedDtypes, backend.matmuls)
+			}
+			if backend.activationUploads != 2 || backend.deferredFences != 2 || backend.dataReads != 2 {
+				t.Fatalf("activation uploads=%d fences=%d row reads=%d", backend.activationUploads, backend.deferredFences, backend.dataReads)
+			}
+			if !reflect.DeepEqual(backend.deferredReadSites, [][]uint32{orderedSites, orderedSites}) || !reflect.DeepEqual(backend.deferredReadRows, []int{1, 1}) {
+				t.Fatalf("publication groups=%v output groups=%v", backend.deferredReadSites, backend.deferredReadRows)
+			}
+			v41ColdSharedAssertReleased(t, backend, s)
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41ColdSharedResidentPanelRejectsMalformedWeightBeforeBMM(t *testing.T) {
+	m, _ := v41ColdSharedFixture(t, compute.F32)
+	t.Cleanup(func() { _ = m.CloseWeights() })
+	b := newV41ColdSharedRecorder()
+	b.panel = true
+	s := v41ColdSharedSession(m, b)
+	defer s.Close()
+	v41ColdSharedRegisterWeights(s, b)
+	name := layerName(0, "ffn.shared_experts.w1.weight")
+	malformed := s.halW[name]
+	malformed.Layout = compute.ColMajor
+	s.halW[name] = malformed
+	out, selected, err := s.v41ColdSharedExpertPanel(0)(v41ColdSharedPanelInput(2, m.Cfg.HiddenSize), 2)
+	if out != nil || !selected || !errors.Is(err, errV41ProjectionResult) || len(b.batchedRows) != 0 {
+		t.Fatalf("out=%v selected=%t error=%v batches=%v", out, selected, err, b.batchedRows)
+	}
+}
+
+// fak-test:runtime fast est=300ms lane=default
+func TestV41ColdSharedResidentPanelDeclinesBeforeBMM(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		dtype compute.Dtype
+		rows  int
+		setup func(*v41ColdSharedRecorder, []float32)
+	}{
+		{name: "capability", dtype: compute.F32, rows: 2},
+		{name: "dtype-f32", dtype: compute.F32, rows: 2, setup: func(b *v41ColdSharedRecorder, _ []float32) {
+			b.panel, b.rejectPanelDtype, b.rejectedPanelDtype = true, true, compute.F32
+		}},
+		{name: "dtype-q2", dtype: compute.Q2_K, rows: 2, setup: func(b *v41ColdSharedRecorder, _ []float32) {
+			b.panel, b.rejectPanelDtype, b.rejectedPanelDtype = true, true, compute.Q2_K
+		}},
+		{name: "first-chunk-rows", dtype: compute.F32, rows: 65, setup: func(b *v41ColdSharedRecorder, _ []float32) {
+			b.panel, b.rejectPanelRows, b.rejectedPanelRowCount = true, true, 64
+		}},
+		{name: "last-chunk-rows", dtype: compute.F32, rows: 65, setup: func(b *v41ColdSharedRecorder, _ []float32) {
+			b.panel, b.rejectPanelRows, b.rejectedPanelRowCount = true, true, 1
+		}},
+		{name: "single-row", dtype: compute.F32, rows: 1, setup: func(b *v41ColdSharedRecorder, _ []float32) { b.panel = true }},
+		{name: "unpublished-input", dtype: compute.F32, rows: 2, setup: func(b *v41ColdSharedRecorder, input []float32) {
+			b.panel = true
+			input[0] = math.Float32frombits(math.Float32bits(input[0]) | 1)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := v41ColdSharedFixture(t, tc.dtype)
+			t.Cleanup(func() { _ = m.CloseWeights() })
+			input := v41ColdSharedPanelInput(tc.rows, m.Cfg.HiddenSize)
+			b := newV41ColdSharedRecorder()
+			if tc.setup != nil {
+				tc.setup(b, input)
+			}
+			s := v41ColdSharedSession(m, b)
+			defer s.Close()
+			out, selected, err := s.v41ColdSharedExpertPanel(0)(input, tc.rows)
+			if out != nil || selected || err != nil {
+				t.Fatalf("out=%v selected=%t error=%v", out, selected, err)
+			}
+			if len(b.batchedRows) != 0 || b.deferredPublishes != 0 || b.activationUploads != 0 || s.halClosed {
+				t.Fatalf("decline crossed arithmetic boundary: batches=%v publishes=%d uploads=%d closed=%t", b.batchedRows, b.deferredPublishes, b.activationUploads, s.halClosed)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestV41ColdSharedResidentPanelFailureOrderAndOwnership(t *testing.T) {
+	for _, mode := range []string{"numeric-token-order", "numeric-prefix", "numeric-index-negative", "numeric-index-count", "nonnumeric-first", "transport", "partial-recording"} {
+		t.Run(mode, func(t *testing.T) {
+			m, _ := v41ColdSharedFixture(t, compute.F32)
+			t.Cleanup(func() { _ = m.CloseWeights() })
+			const rows = 2
+			input := v41ColdSharedPanelInput(rows, m.Cfg.HiddenSize)
+			b := newV41ColdSharedRecorder()
+			b.panel = true
+			s := v41ColdSharedSession(m, b)
+			defer s.Close()
+			v41ColdSharedRegisterWeights(s, b)
+			panel := s.v41ColdSharedExpertPanel(0)
+			row0Down := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection, Index: 0}
+			row1Gate := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection, Index: m.Cfg.MoEIntermediateSize}
+			first := errors.New("first panel status")
+			want := error(row0Down)
+			wantRows := 0
+			switch mode {
+			case "numeric-token-order":
+				b.panelVerdicts = []error{row1Gate, nil, nil, row0Down}
+			case "numeric-prefix":
+				b.panelVerdicts = []error{row1Gate, nil, nil, nil}
+				want, wantRows = row1Gate, 1
+			case "numeric-index-negative":
+				b.panelVerdicts = []error{&compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection, Index: -1}, nil, nil, nil}
+				want = errV41BF16BoundaryResult
+			case "numeric-index-count":
+				b.panelVerdicts = []error{&compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection, Index: rows * m.Cfg.MoEIntermediateSize}, nil, nil, nil}
+				want = errV41BF16BoundaryResult
+			case "nonnumeric-first":
+				b.panelVerdicts = []error{first, nil, nil, row0Down}
+				want = first
+			case "transport":
+				b.panelVerdicts = []error{row1Gate, nil, nil, row0Down}
+				b.deferredReadErr = first
+				want = first
+			case "partial-recording":
+				b.fault, b.malformed, b.malformedAt = first, "partial", 2
+				want = first
+			}
+			out, selected, err := panel(input, rows)
+			if len(out) != wantRows*m.Cfg.HiddenSize || !selected || !errors.Is(err, want) {
+				t.Fatalf("out=%v selected=%t error=%v want=%v closed=%t", out, selected, err, want, s.halClosed)
+			}
+			if mode == "numeric-token-order" || mode == "numeric-prefix" {
+				var deferred *v41SharedPanelDeferredFault
+				if !errors.As(err, &deferred) || deferred.Row != wantRows || s.halClosed || mode == "numeric-token-order" && errors.Is(err, row1Gate) {
+					t.Fatalf("numeric fault was not delayed at the earliest token: %v", err)
+				}
+				if wantRows == 1 {
+					referenceBackend := newV41ColdSharedRecorder()
+					reference := v41ColdSharedSession(m, referenceBackend)
+					wantPrefix, referenceErr := m.v41FullSharedExpertSwiGLU(0, input[:m.Cfg.HiddenSize], m.Cfg, reference.v41DenseProjectionFunc(), reference.v41SharedActivationFunc(), reference.v41BF16PublishFunc())
+					reference.Close()
+					if referenceErr != nil || !v41ColdSharedEqualWords(out, wantPrefix) {
+						t.Fatalf("valid prefix changed: %v", referenceErr)
+					}
+				}
+				err = deferred.finalize()
+			}
+			if !s.halClosed || !errors.Is(err, want) {
+				t.Fatalf("fault was not finalized and retired: %v", err)
+			}
+			if b.deferredFences != 1 || len(b.deferredReadSites) != 1 || len(b.deferredPending) != 0 {
+				t.Fatalf("statuses were not drained exactly once: fences=%d reads=%d pending=%d", b.deferredFences, len(b.deferredReadSites), len(b.deferredPending))
+			}
+			v41ColdSharedAssertReleased(t, b, s)
+			beforeBatches, beforeUploads, beforePublishes := len(b.batchedRows), b.activationUploads, b.deferredPublishes
+			_ = recoverError(func() { _, _, _ = panel(input, rows) })
+			if len(b.batchedRows) != beforeBatches || b.activationUploads != beforeUploads || b.deferredPublishes != beforePublishes {
+				t.Fatal("retired panel replayed host or device arithmetic")
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41ColdSharedResidentPanelGlobalTokenFaultOrder(t *testing.T) {
+	for _, mode := range []string{"earlier-shared-add", "resident-panel-before-queued-mhc", "panel-at-fault-row", "transport-immediate", "protocol-immediate"} {
+		t.Run(mode, func(t *testing.T) {
+			m := v41FullStepModel(t)
+			m.Cfg.SwigluLimit = .125
+			b := newV41ColdSharedRecorder()
+			b.panel, b.enableMHC = true, true
+			s := v41DenseTestSession(t, m, b)
+			v41ColdSharedRegisterWeights(s, b)
+			earlier := &compute.BackendError{Backend: "test", Site: mode, Err: errors.New("earlier row tail failure")}
+			sharedAdds := 0
+			state := s.v41State()
+			sharedAdd := state.sharedAdd
+			state.sharedAdd = func(layer int, routed, shared []float32) ([]float32, error) {
+				sharedAdds++
+				if mode == "earlier-shared-add" {
+					b.malformed, b.fault = "shared-add-panic", earlier
+				}
+				return sharedAdd(layer, routed, shared)
+			}
+			panelFault := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection, Index: m.Cfg.MoEIntermediateSize}
+			b.panelVerdictMinCount = 2 * m.Cfg.MoEIntermediateSize
+			b.panelVerdicts = []error{panelFault, nil, nil, nil}
+			want, wantAdds, wantPosts := error(panelFault), 1, 1
+			switch mode {
+			case "earlier-shared-add":
+				want, wantPosts = earlier, 1
+			case "resident-panel-before-queued-mhc":
+				b.mhcPostFault, b.mhcPostFaultAt = earlier, 2
+				wantPosts = 1
+			case "transport-immediate":
+				b.panelTransport = earlier
+				want, wantAdds = earlier, 0
+			case "protocol-immediate":
+				b.panelProtocol = true
+				want, wantAdds = errV41BF16BoundaryResult, 0
+			}
+			var logits []float32
+			err := recoverError(func() { logits = s.Prefill([]int{1, 2}) })
+			if logits != nil || !errors.Is(err, want) || !s.halClosed {
+				t.Fatalf("logits=%v error=%v want=%v closed=%t", logits, err, want, s.halClosed)
+			}
+			if (mode == "earlier-shared-add" || mode == "transport-immediate" || mode == "protocol-immediate") && errors.Is(err, panelFault) {
+				t.Fatal("later panel arithmetic fault displaced an earlier or immediate failure")
+			}
+			if sharedAdds != wantAdds || b.mhcPosts != wantPosts {
+				t.Fatalf("completed row tails add/mhc=%d/%d want=%d/%d", sharedAdds, b.mhcPosts, wantAdds, wantPosts)
+			}
+			if len(b.sharedBatchedRows) != 3 || !reflect.DeepEqual(b.sharedBatchedRows, []int{2, 2, 2}) {
+				t.Fatalf("panel arithmetic was replayed or skipped: %v", b.sharedBatchedRows)
+			}
+			v41ColdSharedAssertReleased(t, b, s)
+			beforeBatches, beforeAdds, beforePosts := len(b.sharedBatchedRows), sharedAdds, b.mhcPosts
+			_ = recoverError(func() { _ = s.Prefill([]int{1, 2}) })
+			if len(b.sharedBatchedRows) != beforeBatches || sharedAdds != beforeAdds || b.mhcPosts != beforePosts {
+				t.Fatal("retired Prefill replayed panel or token-tail arithmetic")
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=3s lane=default
+func TestV41ColdSharedResidentPanelResidentFaultOrderMatchesScalar(t *testing.T) {
+	for _, panel := range []bool{false, true} {
+		name := "scalar-control"
+		if panel {
+			name = "panel-candidate"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := v41FullStepModel(t)
+			m.Cfg.SwigluLimit = .125
+			b := newV41ColdSharedRecorder()
+			b.panel, b.enableMHC = panel, true
+			s := v41DenseTestSession(t, m, b)
+			v41ColdSharedRegisterWeights(s, b)
+			state := s.v41State()
+			sharedAdd := state.sharedAdd
+			sharedAdds := 0
+			state.sharedAdd = func(layer int, routed, shared []float32) ([]float32, error) {
+				sharedAdds++
+				return sharedAdd(layer, routed, shared)
+			}
+			panelFault := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection}
+			if panel {
+				panelFault.Index = m.Cfg.MoEIntermediateSize
+				b.panelVerdictMinCount = 2 * m.Cfg.MoEIntermediateSize
+				b.panelVerdictAt = 1
+			} else {
+				b.panelVerdictAt = 2
+			}
+			b.panelVerdicts = []error{panelFault, nil, nil, nil}
+			queuedMHC := &compute.BackendError{Backend: "test", Site: name, Err: errors.New("queued row-zero mHC tail failure")}
+			b.mhcPostFault, b.mhcPostFaultAt = queuedMHC, 2
+			var logits []float32
+			err := recoverError(func() { logits = s.Prefill([]int{1, 2}) })
+			var arithmetic *compute.V41BF16CheckedArithmeticError
+			if logits != nil || !errors.As(err, &arithmetic) || errors.Is(err, queuedMHC) || sharedAdds != 1 || b.mhcPosts != 1 || !s.halClosed {
+				t.Fatalf("resident first cause diverged: logits=%v err=%v adds=%d posts=%d closed=%t", logits, err, sharedAdds, b.mhcPosts, s.halClosed)
+			}
+			v41ColdSharedAssertReleased(t, b, s)
+		})
+	}
+}
+
+// fak-test:runtime medium est=3s lane=default
+func TestV41ColdSharedResidentPanelNonresidentFaultOrderMatchesScalar(t *testing.T) {
+	for _, panel := range []bool{false, true} {
+		name := "scalar-control"
+		if panel {
+			name = "panel-candidate"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := v41FullStepModel(t)
+			m.Cfg.SwigluLimit = .125
+			cfg := m.Cfg
+			b := newV41ColdSharedRecorder()
+			b.panel, b.enableMHC = panel, true
+			s := v41DenseTestSession(t, m, b)
+			v41ColdSharedRegisterWeights(s, b)
+			state := s.v41State()
+			sharedAdd := state.sharedAdd
+			sharedAdds := 0
+			state.sharedAdd = func(layer int, routed, shared []float32) ([]float32, error) {
+				sharedAdds++
+				return sharedAdd(layer, routed, shared)
+			}
+			panelFault := &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection}
+			if panel {
+				panelFault.Index = cfg.MoEIntermediateSize
+				b.panelVerdictMinCount = 2 * cfg.MoEIntermediateSize
+				b.panelVerdictAt = 1
+			} else {
+				b.panelVerdictAt = 2
+			}
+			b.panelVerdicts = []error{panelFault, nil, nil, nil}
+			earlierMHC := &compute.BackendError{Backend: "test", Site: name, Err: errors.New("row-zero nonresident mHC tail failure")}
+			b.mhcPostFault, b.mhcPostFaultAt = earlierMHC, 3
+			x0, streams0 := v41LayerStepInputs(t, m, 1, true)
+			x1, streams1 := v41LayerStepInputs(t, m, 2, true)
+			carry := newV41MHCCarry(2)
+			carry.device = state.mhcDevice
+			route, routeErr := v41RouterConfigFullGeometry(cfg)
+			if routeErr != nil {
+				t.Fatal(routeErr)
+			}
+			err := m.v41Layer(0, []int{1, 2}, [][]float32{x0, x1}, [][][]float32{streams0, streams1}, true,
+				cfg.HeadDim, cfg.NumHeads, cfg.HiddenSize, float32(cfg.RMSNormEps), hcItersOrDefault(cfg), hcEpsOrDefault(cfg), route, state, &v41ProjScratch{mhcCarry: carry}, nil)
+			if !errors.Is(err, earlierMHC) || errors.Is(err, panelFault) || sharedAdds != 1 || b.mhcPosts != 3 || !s.halClosed {
+				t.Fatalf("nonresident first cause diverged: err=%v adds=%d posts=%d closed=%t", err, sharedAdds, b.mhcPosts, s.halClosed)
+			}
+			v41ColdSharedAssertReleased(t, b, s)
+		})
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestV41ColdSharedResidentPanelPrefillBridge(t *testing.T) {
+	m := v41FullStepModel(t)
+	m.Cfg.SwigluLimit = .125
+	b := newV41ColdSharedRecorder()
+	b.panel = true
+	s := v41DenseTestSession(t, m, b)
+	v41ColdSharedRegisterWeights(s, b)
+	ids := make([]int, 65)
+	for i := range ids {
+		ids[i] = 1 + i%3
+	}
+	got := s.Prefill(ids)
+	want := lastLogits(m.Forward(ids))
+	v41GroupedParity(t, got, want, 1e-4)
+	if !reflect.DeepEqual(b.sharedBatchedRows, []int{64, 64, 64, 1, 1, 1}) || len(b.sharedReads) != 0 {
+		t.Fatalf("prefill batches=%v scalar reads=%v", b.sharedBatchedRows, b.sharedReads)
+	}
+	beforeBatches := len(b.sharedBatchedRows)
+	step := s.Step(4)
+	v41GroupedParity(t, step, lastLogits(m.Forward(append(append([]int(nil), ids...), 4))), 1e-4)
+	if len(b.sharedBatchedRows) != beforeBatches || len(b.sharedReads) != 1 || b.sharedReads[0] <= 1 {
+		t.Fatalf("decode did not retain scalar bridge: batches=%v reads=%v", b.sharedBatchedRows, b.sharedReads)
 	}
 }
