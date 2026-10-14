@@ -203,8 +203,8 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	// nextWindowPos/nextCompressRow; a role layer's source append ALSO advances the
 	// compressor group (partialInputs/partialPositions) and publishes into the
 	// shared registry. The staged ledger holds one entry per STEPPED layer -- the
-	// cursor scalars, the one O(state) ring row the step may overwrite, and a copy
-	// of the at-most-(ratio-1)-row partial group -- so it is O(NumLayers) bounded
+	// cursor scalars, the one O(state) ring row the step may overwrite, and the
+	// retained partial-group headers -- so it is O(NumLayers) bounded
 	// rows, never a prefix-sized clone. Restoration writes back INTO the same state
 	// objects (never replacing st.layers[i]), so a caller holding a layer-state
 	// pointer observes the restored contents.
@@ -229,6 +229,11 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			state := st.layerState(i)
 			state.nextWindowPos = stagedPos[i]
 			state.nextCompressRow = stagedCompress[i]
+			// Append may reuse the saved backing array. Drop failed rows beyond
+			// its old length so rollback does not keep their allocations alive.
+			if n := len(stagedInputs[i]); n < len(state.partialInputs) {
+				clear(state.partialInputs[n:])
+			}
 			state.partialInputs = stagedInputs[i]
 			state.partialPositions = stagedInputPos[i]
 			state.retainedCopies = stagedCopies[i]
@@ -281,8 +286,13 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		state := st.layerState(l)
 		stagedPos = append(stagedPos, state.nextWindowPos)
 		stagedCompress = append(stagedCompress, state.nextCompressRow)
-		stagedInputs = append(stagedInputs, cloneV41Rows(state.partialInputs))
-		stagedInputPos = append(stagedInputPos, append([]int(nil), state.partialPositions...))
+		// The compressor appends a fresh owned input or releases a completed
+		// group. Projection reads retained inputs without changing their values,
+		// and append only writes beyond the old lengths, even with spare capacity.
+		// Keep these headers for this exclusively owned transaction; external
+		// snapshots still deep-copy partial groups in kv_prefix_snapshot.go.
+		stagedInputs = append(stagedInputs, state.partialInputs)
+		stagedInputPos = append(stagedInputPos, state.partialPositions)
 		stagedCopies = append(stagedCopies, state.retainedCopies)
 		stagedWindowRows = append(stagedWindowRows, state.retainedWindowRows)
 		stagedKV = append(stagedKV, stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, l))
