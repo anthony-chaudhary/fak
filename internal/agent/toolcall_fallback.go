@@ -104,6 +104,7 @@ var toolCallDialects = []dialectExtractor{
 type OfferedTools struct {
 	names     map[string]struct{}
 	extension func(string) bool
+	observer  func(string, int)
 }
 
 func NewOfferedTools(tools []ToolDef) OfferedTools {
@@ -114,6 +115,25 @@ func NewOfferedTools(tools []ToolDef) OfferedTools {
 		}
 	}
 	return o
+}
+
+// WithLiftObserver returns a request-owned copy that observes successful text
+// lifts. The callback receives the winning registry extractor name and accepted
+// call count, never content, tool names, or arguments. It runs synchronously and
+// must return promptly; callers synchronize any observer state shared by requests.
+// A nil callback disables observation without changing tool admission or parsing.
+func (o OfferedTools) WithLiftObserver(observer func(dialect string, liftedCalls int)) OfferedTools {
+	o.observer = observer
+	return o
+}
+
+type textToolLiftObserverKey struct{}
+
+// WithTextToolLiftObserver opts this request context into text-lift observation
+// by HTTP and native planners. The callback has the same contract as
+// OfferedTools.WithLiftObserver. No observer is installed by default.
+func WithTextToolLiftObserver(ctx context.Context, observer func(dialect string, liftedCalls int)) context.Context {
+	return context.WithValue(ctx, textToolLiftObserverKey{}, observer)
 }
 
 type textToolExtensionKey struct{}
@@ -128,6 +148,7 @@ func WithTextToolExtension(ctx context.Context, extension func(string) bool) con
 func offeredToolsFor(ctx context.Context, tools []ToolDef) OfferedTools {
 	o := NewOfferedTools(tools)
 	o.extension, _ = ctx.Value(textToolExtensionKey{}).(func(string) bool)
+	o.observer, _ = ctx.Value(textToolLiftObserverKey{}).(func(string, int))
 	return o
 }
 
@@ -145,18 +166,35 @@ func (o OfferedTools) allows(name string) bool {
 // offered set. Unoffered blocks remain byte-identical, including wrapped Qwen
 // blocks and mixed-name arrays. No structured call is filtered here.
 func LiftTextToolCalls(m Message, offered OfferedTools) Message {
-	m, _ = liftTextToolCalls(m, offered)
+	m, _ = liftTextToolCallsObserved(m, offered)
 	return m
 }
 
+// Keep parser probes side-effect-free: guard callers inspect rejected blocks
+// without consuming a lift and must not emit successful-lift observations.
 func liftTextToolCalls(m Message, offered OfferedTools) (Message, bool) {
+	m, rejected, _ := liftTextToolCallsWithDialect(m, offered)
+	return m, rejected
+}
+
+func liftTextToolCallsObserved(m Message, offered OfferedTools) (Message, bool) {
+	m, rejected, dialect := liftTextToolCallsWithDialect(m, offered)
+	if dialect != "" && offered.observer != nil {
+		offered.observer(dialect, len(m.ToolCalls))
+	}
+	return m, rejected
+}
+
+func liftTextToolCallsWithDialect(m Message, offered OfferedTools) (Message, bool, string) {
 	if len(m.ToolCalls) > 0 || m.Content == "" {
-		return m, false
+		return m, false, ""
 	}
 	content := normalizeQwenFunctionToolCalls(m.Content, offered)
 	var blocks []liftedBlock
+	var dialect string
 	for _, d := range toolCallDialects {
 		if blocks = d.extract(content); len(blocks) > 0 {
+			dialect = d.name
 			break
 		}
 	}
@@ -183,7 +221,7 @@ func liftTextToolCalls(m Message, offered OfferedTools) (Message, bool) {
 		i = end
 	}
 	if len(selected) == 0 {
-		return m, rejected
+		return m, rejected, ""
 	}
 	var calls []ToolCall
 	var stripped strings.Builder
@@ -197,7 +235,7 @@ func liftTextToolCalls(m Message, offered OfferedTools) (Message, bool) {
 	stripped.WriteString(content[last:])
 	m.Content = strings.TrimSpace(stripped.String())
 	m.ToolCalls = calls
-	return m, rejected
+	return m, rejected, dialect
 }
 
 // qwenFunctionParamRe locates Qwen's antl-style <function=name>…</function> block when
@@ -581,7 +619,7 @@ func normalizeCompletionToolCalls(comp *Completion, offered OfferedTools) *Compl
 	rawClaimedToolCalls := finishReasonClaimsToolCalls(comp.FinishReason)
 
 	var rejected bool
-	comp.Message, rejected = liftTextToolCalls(comp.Message, offered)
+	comp.Message, rejected = liftTextToolCallsObserved(comp.Message, offered)
 	normalizeToolCallFields(&comp.Message)
 	if len(comp.Message.ToolCalls) > 0 {
 		comp.FinishReason = "tool_calls"

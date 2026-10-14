@@ -10,6 +10,97 @@ import (
 	"testing"
 )
 
+// fak-test:runtime fast est=2ms
+func TestLiftTextToolCallsObserver(t *testing.T) {
+	type event struct {
+		dialect string
+		calls   int
+	}
+	read := `<tool_call>{"name":"read","arguments":{"path":"a"}}</tool_call>`
+	other := `<tool_call>{"name":"other","arguments":{"path":"b"}}</tool_call>`
+	for _, tc := range []struct {
+		name        string
+		content     string
+		dialect     string
+		wantContent string
+		calls       int
+	}{
+		{"hermes", read, "hermes", "", 1},
+		{"qwen", `<function=read><parameter=path>a</parameter></function>`, "qwen_function_parameter", "", 1},
+		{"wrapped_qwen", `<tool_call><function=read><parameter=path>a</parameter></function></tool_call>`, "hermes", "", 1},
+		{"accepted_count", read + read + other, "hermes", other, 2},
+		{"unoffered", other, "", other, 0},
+		{"malformed", `<tool_call>{broken}</tool_call>`, "", `<tool_call>{broken}</tool_call>`, 0},
+		{"mixed_array", `[TOOL_CALLS][{"name":"read","arguments":{}},{"name":"other","arguments":{}}]`, "", `[TOOL_CALLS][{"name":"read","arguments":{}},{"name":"other","arguments":{}}]`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plain := offeredTestNames("read")
+			// This assertion can observe feature absence on the old public API
+			// without requiring a new symbol in this direct-call regression.
+			options, ok := any(plain).(interface {
+				WithLiftObserver(func(string, int)) OfferedTools
+			})
+			if !ok {
+				t.Fatal("OfferedTools has no successful-lift observer")
+			}
+			var events []event
+			observed := options.WithLiftObserver(func(dialect string, calls int) {
+				events = append(events, event{dialect, calls})
+			})
+			input := Message{Role: RoleAssistant, Content: tc.content}
+			got := LiftTextToolCalls(input, observed)
+			if got.Content != tc.wantContent || len(got.ToolCalls) != tc.calls {
+				t.Fatalf("lift = %+v; want content %q and %d calls", got, tc.wantContent, tc.calls)
+			}
+			for _, call := range got.ToolCalls {
+				if call.Function.Name != "read" || call.Function.Arguments != `{"path":"a"}` {
+					t.Fatalf("lift changed name/arguments: %+v", call)
+				}
+			}
+			var want []event
+			if tc.calls > 0 {
+				want = []event{{tc.dialect, tc.calls}}
+			}
+			if !reflect.DeepEqual(events, want) {
+				t.Fatalf("observations = %v, want %v", events, want)
+			}
+			if without := LiftTextToolCalls(input, plain); !reflect.DeepEqual(got, without) || !reflect.DeepEqual(events, want) {
+				t.Fatal("observer changed output or mutated the original options")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestLiftTextToolCallsObserverContext(t *testing.T) {
+	input := Message{Role: RoleAssistant, Content: `<tool_call>{"name":"read","arguments":{"path":"a"}}</tool_call>`}
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "read"}}}
+	var observations int
+	ctx := WithTextToolLiftObserver(context.Background(), func(dialect string, calls int) {
+		if dialect != "hermes" || calls != 1 {
+			t.Fatalf("observation = %q/%d, want hermes/1", dialect, calls)
+		}
+		observations++
+	})
+	offered := offeredToolsFor(ctx, tools)
+	if probe, rejected := liftTextToolCalls(input, offered); rejected || len(probe.ToolCalls) != 1 || observations != 0 {
+		t.Fatalf("pure parser probe emitted observation or lost lift: %+v, rejected=%t, observations=%d", probe, rejected, observations)
+	}
+	comp := normalizeCompletionToolCalls(&Completion{Message: input, FinishReason: "stop"}, offered)
+	if comp.FinishReason != "tool_calls" || len(comp.Message.ToolCalls) != 1 || observations != 1 {
+		t.Fatalf("completion lift = %+v, observations=%d", comp, observations)
+	}
+	normalizeCompletionToolCalls(comp, offered)
+	LiftTextToolCalls(comp.Message, offered)
+	LiftTextToolCalls(input, offeredToolsFor(ctx, nil))
+	LiftTextToolCalls(input, offeredToolsFor(context.Background(), tools))
+	LiftTextToolCalls(input, offeredToolsFor(WithTextToolLiftObserver(ctx, nil), tools))
+	LiftTextToolCalls(input, offered.WithLiftObserver(nil))
+	if observations != 1 {
+		t.Fatalf("structured, empty-offer, independent or disabled request emitted: %d observations", observations)
+	}
+}
+
 func TestLiftTextToolCalls_Hermes(t *testing.T) {
 	m := Message{
 		Role:    RoleAssistant,
