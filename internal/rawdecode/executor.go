@@ -1140,13 +1140,21 @@ func describeEngine(req Request, be compute.Backend) (string, string) {
 // non-GGUF command inputs. It executes the same orchestration loop but cannot
 // produce artifact identity because it did not open the artifact.
 func ExecuteModel(req Request, m *model.Model, be compute.Backend) (Execution, error) {
-	return ExecuteModelWithHostObserver(context.Background(), req, m, be, compute.ObserveVulkanHostEnvironment)
+	return ExecuteModelContext(context.Background(), req, m, be)
+}
+
+// ExecuteModelContext executes an already-loaded, caller-owned model and backend.
+// Cancellation is checked between synchronous operations; it cannot interrupt an
+// in-flight backend call. Callers requiring a hard deadline must supervise the
+// process. Model weights and the backend remain owned by the caller.
+func ExecuteModelContext(ctx context.Context, req Request, m *model.Model, be compute.Backend) (Execution, error) {
+	return ExecuteModelWithHostObserver(ctx, req, m, be, compute.ObserveVulkanHostEnvironment)
 }
 
 // ExecuteModelWithHostObserver executes an already-loaded model while allowing
 // callers to inject the host observer for deterministic device-free tests.
-// Production callers should use ExecuteModel, which installs the strict
-// backend-bound Linux/RADV observer.
+// Production callers should use ExecuteModelContext or ExecuteModel, which
+// install the strict backend-bound Linux/RADV observer.
 func ExecuteModelWithHostObserver(ctx context.Context, req Request, m *model.Model, be compute.Backend, observeHost func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error)) (Execution, error) {
 	if m == nil {
 		return Execution{}, errors.New("raw decode: nil model")
@@ -1165,6 +1173,9 @@ func ExecuteModelWithHostObserver(ctx context.Context, req Request, m *model.Mod
 }
 
 func executeLoaded(ctx context.Context, req Request, m loadedModel, be compute.Backend, observeHost func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error), now func() time.Time, since func(time.Time) time.Duration) (Execution, error) {
+	if err := ctx.Err(); err != nil {
+		return Execution{}, err
+	}
 	if len(req.PromptTokenIDs) == 0 || req.GeneratedTokenLimit < 1 || req.Repetitions < 1 || req.ContextLimit < len(req.PromptTokenIDs)+req.GeneratedTokenLimit {
 		return Execution{}, errors.New("raw decode: invalid execution request")
 	}
@@ -1186,36 +1197,24 @@ func executeLoaded(ctx context.Context, req Request, m loadedModel, be compute.B
 	}
 	var verifyErr error
 	for rep := 0; rep < req.Repetitions; rep++ {
-		window, windowAvailable, err := compute.BeginBackendExecutionObservation(be)
-		if err != nil {
-			return Execution{}, fmt.Errorf("raw decode: begin backend observation for run %d: %w", rep+1, err)
+		if err := ctx.Err(); err != nil {
+			return Execution{}, err
 		}
-		run, selectedTokenLogprobs, runErr := executeRun(req, m, be, generationSeal, rep, now, since)
-		if windowAvailable {
-			backendExecution, endErr := window.End()
-			if runErr != nil {
-				if endErr != nil {
-					return Execution{}, errors.Join(runErr, fmt.Errorf("raw decode: end backend observation for run %d: %w", rep+1, endErr))
-				}
-				return Execution{}, runErr
-			}
-			if endErr != nil {
-				return Execution{}, fmt.Errorf("raw decode: end backend observation for run %d: %w", rep+1, endErr)
-			}
-			if !completeBackendExecutionObservation(backendExecution) || backendExecution.Identity.Backend != be.Name() {
-				return Execution{}, fmt.Errorf("raw decode: backend observation for run %d is incomplete or malformed", rep+1)
-			}
-			run.BackendExecution = &backendExecution
-			run.timing.backendExecution = backendExecution
-			run.timing.observed = true
-		} else if runErr != nil {
+		run, selectedTokenLogprobs, runErr := executeObservedRun(ctx, req, m, be, generationSeal, rep, now, since)
+		if runErr != nil {
 			return Execution{}, runErr
+		}
+		if err := ctx.Err(); err != nil {
+			return Execution{}, err
 		}
 		if run.BackendExecution != nil && observeHost != nil && run.BackendExecution.Identity.Backend == "vulkan" {
 			host, hostErr := observeHost(ctx, be)
 			if hostErr == nil && rawDecodeHostMatchesBackend(host, run.BackendExecution.Identity) {
 				run.HostEnvironment = &host
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return Execution{}, err
 		}
 		exec.Runs = append(exec.Runs, run)
 		evidence.runs = append(evidence.runs, selectedTokenLogprobRunEvidence{
@@ -1301,22 +1300,89 @@ func rawDecodeBackendPCIIdentity(driver string) (string, string, bool) {
 	return vendor, device, ok
 }
 
-func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *generationExecutionSeal, repetition int, now func() time.Time, since func(time.Time) time.Duration) (Run, []float64, error) {
+// preserveExecutionCleanup is deferred directly so it can retain the original
+// panic while still attempting cleanup. Cleanup failures join an existing error;
+// a cleanup panic without an earlier failure retains its normal panic semantics.
+func preserveExecutionCleanup(err *error, label string, cleanup func() error) {
+	primaryPanic := recover()
+	var cleanupPanic any
+	cleanupErr := func() (err error) {
+		defer func() { cleanupPanic = recover() }()
+		return cleanup()
+	}()
+	if primaryPanic != nil {
+		panic(primaryPanic)
+	}
+	if cleanupPanic != nil {
+		if *err == nil {
+			panic(cleanupPanic)
+		}
+		cleanupErr = fmt.Errorf("panic: %v", cleanupPanic)
+	}
+	if cleanupErr != nil {
+		*err = errors.Join(*err, fmt.Errorf("%s: %w", label, cleanupErr))
+	}
+}
+
+func executeObservedRun(ctx context.Context, req Request, m loadedModel, be compute.Backend, executionSeal *generationExecutionSeal, repetition int, now func() time.Time, since func(time.Time) time.Duration) (run Run, logprobs []float64, err error) {
+	window, available, err := compute.BeginBackendExecutionObservation(be)
+	if err != nil {
+		return Run{}, nil, fmt.Errorf("raw decode: begin backend observation for run %d: %w", repetition+1, err)
+	}
+	if available {
+		defer preserveExecutionCleanup(&err, fmt.Sprintf("raw decode: end backend observation for run %d", repetition+1), func() error {
+			observed, endErr := window.End()
+			if endErr != nil {
+				return endErr
+			}
+			if err != nil {
+				return nil
+			}
+			if !completeBackendExecutionObservation(observed) || observed.Identity.Backend != be.Name() {
+				return errors.New("backend observation is incomplete or malformed")
+			}
+			run.BackendExecution = &observed
+			run.timing.backendExecution = observed
+			run.timing.observed = true
+			return nil
+		})
+	}
+	return executeRun(ctx, req, m, be, executionSeal, repetition, now, since)
+}
+
+func executeRun(ctx context.Context, req Request, m loadedModel, be compute.Backend, executionSeal *generationExecutionSeal, repetition int, now func() time.Time, since func(time.Time) time.Duration) (run Run, selectedTokenLogprobs []float64, err error) {
+	if err := ctx.Err(); err != nil {
+		return Run{}, nil, err
+	}
 	start := now()
 	s, err := m.NewCandidateSession(be, req)
 	if err != nil {
 		return Run{}, nil, fmt.Errorf("raw decode: create candidate session: %w", err)
 	}
+	sessionClosed := false
+	closeSession := func() error {
+		if !sessionClosed {
+			sessionClosed = true
+			s.Close()
+		}
+		return nil
+	}
+	defer preserveExecutionCleanup(&err, "raw decode: close candidate session", closeSession)
 	setupDone := now()
+	if err := ctx.Err(); err != nil {
+		return Run{}, nil, err
+	}
 	logits := s.Prefill(req.PromptTokenIDs)
 	prefillDone := now()
+	if err := ctx.Err(); err != nil {
+		return Run{}, nil, err
+	}
 	token, top1, top2, selectedTokenLogprob, err := greedySelection(logits)
 	if err != nil {
-		s.Close()
 		return Run{}, nil, errors.New("raw decode: prefill produced non-finite logits")
 	}
-	run := Run{PrefillOutputID: token, GeneratedTokens: []int{token}, Steps: []Step{{Step: 0, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2}}}
-	selectedTokenLogprobs := []float64{selectedTokenLogprob}
+	run = Run{PrefillOutputID: token, GeneratedTokens: []int{token}, Steps: []Step{{Step: 0, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2}}}
+	selectedTokenLogprobs = []float64{selectedTokenLogprob}
 	var candidateLogits [][]float32
 	if req.VerifyCPU {
 		candidateLogits = append(candidateLogits, slices.Clone(logits))
@@ -1327,10 +1393,15 @@ func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *g
 	run.EOSStopped = shouldStopOnEOS(token)
 	previous := token
 	for step := 1; !run.EOSStopped && step < req.GeneratedTokenLimit && len(req.PromptTokenIDs)+len(run.GeneratedTokens) < req.ContextLimit; step++ {
+		if err := ctx.Err(); err != nil {
+			return Run{}, nil, err
+		}
 		logits = s.Step(previous)
+		if err := ctx.Err(); err != nil {
+			return Run{}, nil, err
+		}
 		token, top1, top2, selectedTokenLogprob, err = greedySelection(logits)
 		if err != nil {
-			s.Close()
 			return Run{}, nil, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
 		}
 		run.StepTokens = append(run.StepTokens, token)
@@ -1343,6 +1414,9 @@ func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *g
 		previous = token
 		run.EOSStopped = shouldStopOnEOS(token)
 	}
+	if err := ctx.Err(); err != nil {
+		return Run{}, nil, err
+	}
 	run.generation = GenerationObservation{
 		observed:       true,
 		executionSeal:  executionSeal,
@@ -1352,7 +1426,7 @@ func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *g
 		outputTokenIDs: slices.Clone(run.GeneratedTokens),
 	}
 	decoded := now()
-	s.Close()
+	_ = closeSession()
 	closed := now()
 	boundaries := [6]time.Time{start, setupDone, prefillDone, sampled, decoded, closed}
 	if !monotonicTimingBoundaries(boundaries) {
@@ -1370,7 +1444,10 @@ func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *g
 	run.TeardownDuration = run.timing.TeardownDuration()
 	if req.VerifyCPU {
 		verifyStart := now()
-		verification, err := verifyCPU(req, m.NewCPUSession(req), run, candidateLogits)
+		if err := ctx.Err(); err != nil {
+			return Run{}, nil, err
+		}
+		verification, err := verifyCPU(ctx, req, m.NewCPUSession(req), run, candidateLogits)
 		run.CPUVerifyDuration = since(verifyStart)
 		if err != nil {
 			return Run{}, nil, err
@@ -1380,17 +1457,29 @@ func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *g
 	return run, selectedTokenLogprobs, nil
 }
 
-func verifyCPU(req Request, s session, run Run, candidate [][]float32) (CPUVerification, error) {
-	defer s.Close()
+func verifyCPU(ctx context.Context, req Request, s session, run Run, candidate [][]float32) (result CPUVerification, err error) {
+	defer preserveExecutionCleanup(&err, "raw verify cpu: close session", func() error { s.Close(); return nil })
+	if err := ctx.Err(); err != nil {
+		return CPUVerification{}, err
+	}
 	logits := s.Prefill(req.PromptTokenIDs)
+	if err := ctx.Err(); err != nil {
+		return CPUVerification{}, err
+	}
 	if !allFinite(logits) {
 		return CPUVerification{}, errors.New("raw verify cpu: CPU prefill produced non-finite logits")
 	}
 	verification := compareStep(0, run.PrefillOutputID, candidate[0], logits)
-	result := CPUVerification{Passed: verification.Agree, AllAgree: verification.Agree, AllArgmaxAgree: verification.Agree, MinCosine: verification.Cosine, MaxDelta: verification.MaxDelta, Prefill: verification}
+	result = CPUVerification{Passed: verification.Agree, AllAgree: verification.Agree, AllArgmaxAgree: verification.Agree, MinCosine: verification.Cosine, MaxDelta: verification.MaxDelta, Prefill: verification}
 	previous := run.PrefillOutputID
 	for i, token := range run.StepTokens {
+		if err := ctx.Err(); err != nil {
+			return CPUVerification{}, err
+		}
 		logits = s.Step(previous)
+		if err := ctx.Err(); err != nil {
+			return CPUVerification{}, err
+		}
 		if !allFinite(logits) {
 			return CPUVerification{}, fmt.Errorf("raw verify cpu: CPU step %d produced non-finite logits", i+1)
 		}

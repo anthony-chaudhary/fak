@@ -6821,6 +6821,11 @@
           "category": "incidental",
           "reason": "Exported loader/constructor adapter composing authenticated retained readers, existing owner-range loading and checked native Session construction; returned Session and coordinator keep their existing lifecycle and first-forward admission contracts.",
           "token": "LoadV41ExpertParallelSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local guard for at most one Close attempt on the existing candidate model.Session; set before Close, it does not establish completed retirement or introduce a separate session owner or lifecycle abstraction.",
+          "token": "sessionClosed"
         }
       ],
       "exclude": [
@@ -7176,6 +7181,7 @@
         "sessionClientRuntimes",
         "sessionClientSchema",
         "sessionClientSession",
+        "sessionClosed",
         "sessionCorpusCapabilities",
         "sessionDiscoverySchema",
         "sessionEnvelopeRefusalReasonOrder",
@@ -11733,6 +11739,11 @@
           "category": "incidental",
           "reason": "Loop-local registered follower context used to test cancellation; no new context abstraction.",
           "token": "waiterCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported context.Context-carrying entry point through the existing model execution observer path, with cooperative cancellation checks between synchronous operations; it introduces no separate context abstraction.",
+          "token": "ExecuteModelContext"
         }
       ],
       "exclude": [
@@ -11758,6 +11769,7 @@
         "ContextualID",
         "DuplicateContextKeyError",
         "EmptyIncrementalContext",
+        "ExecuteModelContext",
         "ExtractCompactionSummary",
         "FAK_COMPACTION_THRASH_STOP",
         "FeatureActivationTrackerFromContext",
