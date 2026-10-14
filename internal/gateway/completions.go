@@ -85,10 +85,15 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// The legacy wire has no message array; the whole request is one user prompt.
 	messages := []agent.Message{{Role: agent.RoleUser, Content: prompt}}
 
+	// Retain only the authenticated context principal, never a caller attribution
+	// header. Admission can replace the context/trace on a session reset.
+	outcomeOwner := principalFromContext(r.Context())
 	ctx, reqTrace, messages, sessionTurn, admitted := s.admitServedRequest(w, r, messages)
 	if !admitted {
 		return
 	}
+	finishOutcome := s.beginRequestOutcome(ctx, outcomeOwner, reqTrace, w.Header())
+	defer finishOutcome(nil, nil)
 
 	// #5514 (the legacy half of #5399): completeServed below blocks for the WHOLE decode,
 	// and this handler used to write its first byte only after that returned —
@@ -123,6 +128,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithStop(normalizeStop(req.Stop)),
 		agent.WithRawPrompt(),
 	)
+	finishOutcome(comp, err)
 	if err != nil {
 		s.logf("gateway: upstream model error: %v", err)
 		if stream != nil {

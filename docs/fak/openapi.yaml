@@ -1627,7 +1627,7 @@ paths:
   /v1/fak/observation/requests:
     get:
       tags: [fak-native]
-      summary: Snapshot every live in-flight request (id, route, start, elapsed)
+      summary: Snapshot live requests or read one native buffered-generation attempt
       description: |
         The per-request arm of the observation family (`/v1/fak/observation`
         carries the aggregate source envelopes): one point-in-time copy of the
@@ -1641,30 +1641,87 @@ paths:
         same observability auth floor as `/v1/fak/observation` and
         `/metrics`: loopback reads may be anonymous; off-box reads require
         the gateway bearer or the read-scoped bearer.
+
+        Supplying either `trace_id` or `traceparent` selects the separate
+        terminal-outcome mode. Both must occur exactly once, nonempty: copy the
+        accepted response `X-Trace-Id` and the exact response `traceparent`
+        (including the fresh server span), not the caller's input parent.
+        Trace IDs alone never select the latest request. Identity values are
+        canonical UTF-8, at most 512 bytes; traceparent is lowercase W3C v00.
+        Malformed query encoding is refused, never restored to a legacy read.
+
+        Outcome reads ALWAYS require an existing accepted gateway credential,
+        including on loopback/LAN; unconfigured credentials yield 401. A keyset
+        principal can read only its exact authenticated principal's attempts.
+        RequireKey and ReadBearer share the empty-principal single-tenant
+        domain; neither is an administrator over nonempty keyset principals.
+        Caller attribution headers cannot change this ownership.
+
+        This partial outcome view covers admitted `POST /v1/completions`
+        buffered generation (also its synthetic SSE response). `succeeded`
+        requires the actually selected direct native planner, a request-owned
+        NativeDecode receipt and a clean served-call return after settlement.
+        Proxies, custom planners, errors and cancellation yield
+        `completion_unknown`. Text, token bytes and normalized finish reasons
+        alone never prove completion. Success describes generation completion,
+        not response delivery, tool execution, remote cancellation or safe retry.
+
+        Storage is memory-only, bounded to 4096 rows and 168 hours since the
+        first terminal observation. A nonblocking writer may drop new offers
+        under contention. Fresh server spans and a single terminal producer
+        identify attempts; duplicate writes never replace or refresh a row.
+        Missing, in-flight, uncovered, dropped, evicted, expired, restarted and
+        other-principal attempts all return the same 404 `not_found` envelope.
+        Absence proves nothing about completion. Admission/header identity
+        disagreement is not recorded. Readers need both response headers;
+        headerless timeout recovery is unavailable.
+
+        Durable storage, CLI lookup, broader route coverage and authoritative
+        failed/cancelled outcomes remain unimplemented (#13719). This endpoint
+        is not a general retry-safety authority. Outcome envelopes use Cache-Control:
+        no-store and contain no prompts, result text, error text or credentials.
+      parameters:
+        - in: query
+          name: trace_id
+          schema: { type: string, minLength: 1, maxLength: 512 }
+          description: Accepted response X-Trace-Id; requires traceparent.
+        - in: query
+          name: traceparent
+          schema: { type: string, minLength: 55, maxLength: 55 }
+          description: Exact response server-attempt traceparent; requires trace_id.
       responses:
         '200':
-          description: The versioned in-flight request snapshot (possibly empty while idle).
+          description: A live snapshot, or an observed memory-only terminal outcome when both identity parameters are supplied.
           content:
             application/json:
               schema:
-                type: object
-                required: [schema, count, requests]
-                properties:
-                  schema: { type: string }
-                  count:
-                    type: integer
-                    description: Number of records in `requests` (a clean zero is data).
-                  requests:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, route, start_unix_nanos, elapsed_ms]
-                      properties:
-                        id: { type: integer }
-                        route: { type: string }
-                        start_unix_nanos: { type: integer }
-                        elapsed_ms: { type: integer }
+                oneOf:
+                  - $ref: '#/components/schemas/RequestOutcome'
+                  - type: object
+                    required: [schema, count, requests]
+                    properties:
+                      schema: { type: string, enum: [fak.observation.requests.v1] }
+                      count:
+                        type: integer
+                        description: Number of records in `requests` (a clean zero is data).
+                      requests:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, route, start_unix_nanos, elapsed_ms]
+                          properties:
+                            id: { type: integer }
+                            route: { type: string }
+                            start_unix_nanos: { type: integer }
+                            elapsed_ms: { type: integer }
+        '400':
+          description: Ambiguous, malformed or incomplete outcome identity (outcome_identity_invalid).
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No retained outcome for this exact attempt and authenticated principal; completion remains unknown.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestOutcome' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /v1/fak/observation/engine:
@@ -2938,6 +2995,30 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
+    RequestOutcome:
+      type: object
+      required: [schema, availability, scope, persistence, max_records, max_age_seconds]
+      properties:
+        schema: { type: string, enum: [fak.request.outcome.v1] }
+        availability: { type: string, enum: [observed, not_found] }
+        scope: { type: string, enum: [buffered_generation] }
+        persistence: { type: string, enum: [memory_only] }
+        max_records: { type: integer, enum: [4096] }
+        max_age_seconds: { type: integer, enum: [604800] }
+        record:
+          type: object
+          description: Present only for an observed attempt; no payload or principal is returned.
+          required: [trace_id, traceparent, started_unix_nanos, finished_unix_nanos, outcome, terminal_source, causal]
+          properties:
+            trace_id: { type: string }
+            traceparent: { type: string }
+            started_unix_nanos: { type: integer, format: int64 }
+            finished_unix_nanos: { type: integer, format: int64 }
+            outcome: { type: string, enum: [succeeded, completion_unknown] }
+            terminal_source: { type: string, enum: [native_generate_return, served_call_unproven] }
+            causal:
+              type: object
+              description: The authoritative pkg/traceabi fak-causal-envelope/1 encoding, with the response W3C trace/span, producer-native X-Trace-Id correlation, and explicit unknown parent/mapping.
     EngineLatencyStat:
       type: object
       required: [count, total_seconds, mean_seconds, p50_seconds, p95_seconds, max_seconds]

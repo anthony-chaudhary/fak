@@ -550,6 +550,10 @@ func (s *Server) handleFakObservationRequests(w http.ResponseWriter, r *http.Req
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+	if values, selected, err := requestOutcomeQuery(r); selected {
+		s.handleRequestOutcome(w, r, values, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, s.observationRequestsWithProgress(time.Now(), r.URL.Query().Get("progress") == "1"))
 }
 

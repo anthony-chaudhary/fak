@@ -525,7 +525,8 @@ func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 
 // withAuth enforces the configured secret on every route except the auth-exempt
 // set (authExempt) when RequireKey is set. With no key configured it is a
-// pass-through (drop-in, loopback default). The comparison is constant-time over
+// pass-through (drop-in, loopback default), except that terminal-outcome reads
+// always require an accepted configured credential. The comparison is constant-time over
 // SHA-256 digests so the reject latency leaks neither the secret's bytes nor its
 // length — this is the gateway's only auth primitive on a network-reachable
 // security kernel.
@@ -541,7 +542,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		if !s.enforceAuthScope(w, r) {
 			return
 		}
-		if (s.requireKey != "" || s.keyset != nil) && !s.authExempt(r) {
+		if requiresRequestOutcomeAuth(r) || ((s.requireKey != "" || s.keyset != nil) && !s.authExempt(r)) {
 			tok, ok := gatewayCredential(r)
 			got := sha256.Sum256([]byte(tok))
 			// The single RequireKey bearer authenticates the anonymous single-tenant

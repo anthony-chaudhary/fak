@@ -25,6 +25,8 @@ var gatewayLatencyBuckets = []float64{
 }
 
 type gatewayMetrics struct {
+	// requestOutcomes is a bounded, lossy memory-only terminal view.
+	requestOutcomes    requestOutcomeStore
 	featureActivations featureActivationMetrics
 	start              time.Time
 	inflight           int64
