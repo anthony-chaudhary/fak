@@ -13585,6 +13585,11 @@
           "category": "false-positive",
           "reason": "Runtime capability and admission predicate for owned Q3 token-panel storage, opt-in, pipeline and recording state; not a support maturity or product qualification claim.",
           "token": "SupportsV41Q3KTokenPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Named per-step scalar fallback reason for a generic batch configuration that uses Session.Step; not a product support-maturity or hardware qualification claim.",
+          "token": "unsupported_config"
         }
       ],
       "exclude": [
@@ -13835,6 +13840,7 @@
         "unsupported",
         "unsupportedFaultDomain",
         "unsupported_activation",
+        "unsupported_config",
         "unsupported_cpu_envelope",
         "unsupported_encoding",
         "unsupported_event_kinds",
