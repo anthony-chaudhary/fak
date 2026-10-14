@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -599,7 +601,7 @@ func TestRawDecodeExecutorRejectsArtifactMismatchBeforeExecution(t *testing.T) {
 	}
 }
 
-func rawDecodeProductionArtifactFixture(t *testing.T) []byte {
+func rawDecodeProductionArtifactFixture(t *testing.T, shard ...int) []byte {
 	t.Helper()
 	// One real decoder block: the swap changes weight bytes while preserving
 	// every model/config/tokenizer field, so metadata equality cannot detect it.
@@ -627,8 +629,25 @@ func rawDecodeProductionArtifactFixture(t *testing.T) []byte {
 		{name: "blk.0.ffn_up.weight", dims: []uint64{32, 32}},
 		{name: "blk.0.ffn_down.weight", dims: []uint64{32, 32}},
 	}
+	metadataCount := uint64(10)
+	if len(shard) != 0 {
+		metadataCount += 2
+		if shard[0] == 0 {
+			tensors = tensors[:2]
+		} else {
+			tensors = tensors[2:]
+		}
+	}
 	write(uint64(len(tensors)))
-	write(uint64(10))
+	write(metadataCount)
+	if len(shard) != 0 {
+		writeString("split.count")
+		write(uint32(ggufload.TypeUint32))
+		write(uint32(2))
+		writeString("split.no")
+		write(uint32(ggufload.TypeUint32))
+		write(uint32(shard[0]))
+	}
 	for _, item := range []struct{ key, value string }{
 		{"general.architecture", "qwen2"}, {"tokenizer.ggml.pre", "qwen2"},
 	} {
@@ -1591,4 +1610,139 @@ func TestRawDecodeHostEnvironmentIsPerRunInjectedAndCrossBound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestRawDecodeAuthenticatedShardExecution(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	fixture := func(t *testing.T) Request {
+		t.Helper()
+		dir := t.TempDir()
+		req := Request{PromptTokenIDs: []int{0}, ContextLimit: 3, GeneratedTokenLimit: 2, Repetitions: 1, IgnoreEOS: true}
+		for i := range 2 {
+			data := rawDecodeProductionArtifactFixture(t, i)
+			path := filepath.Join(dir, fmt.Sprintf("model-%05d-of-00002.gguf", i+1))
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			req.ArtifactShards = append(req.ArtifactShards, ggufload.ShardIdentity{Path: path, Size: int64(len(data)), RawFileSHA256: fmt.Sprintf("%x", sha256.Sum256(data))})
+		}
+		req.ArtifactPath = req.ArtifactShards[0].Path
+		raw, err := json.Marshal(req.ArtifactShards)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.ExpectedArtifactShardSetSHA256 = fmt.Sprintf("%x", sha256.Sum256(raw))
+		return req
+	}
+	t.Run("real two-shard forward and sealed identity", func(t *testing.T) {
+		req := fixture(t)
+		d := defaultDependencies()
+		d.now = fakeClock()
+		got, err := d.execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.LoadDuration != 2*time.Millisecond {
+			t.Fatalf("load duration omitted authenticated shard reads: got %s, want authentication plus construction", got.LoadDuration)
+		}
+		if got.ArtifactSHA256 != "" || got.ArtifactShardSetSHA256 != req.ExpectedArtifactShardSetSHA256 || !slices.Equal(got.ArtifactShards, req.ArtifactShards) {
+			t.Fatalf("ambiguous or unbound identity: %+v", got)
+		}
+		original, err := ggufload.Read(bytes.NewReader(rawDecodeProductionArtifactFixture(t)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.TensorInventorySHA256 != original.CanonicalManifestDigest() || !slices.Equal(got.Runs[0].GeneratedTokens, []int{2, 2}) {
+			t.Fatalf("merged tensor inventory/real forward mismatch: %s %+v", got.TensorInventorySHA256, got.Runs)
+		}
+		text, ok := got.OutputTextObservation(0)
+		if value, textOK := text.Text(); !ok || !textOK || value != "abab" {
+			t.Fatalf("decoded output=%q available=%v/%v", value, ok, textOK)
+		}
+		req.ArtifactShards[0].Size++
+		if _, ok := got.GenerationObservation(0); !ok {
+			t.Fatal("request aliases execution manifest")
+		}
+		for _, mutate := range []func(*Execution){
+			func(e *Execution) { e.ArtifactShardSetSHA256 = strings.Repeat("a", 64) },
+			func(e *Execution) { e.ArtifactShards[1].Size++ },
+			func(e *Execution) {
+				e.ArtifactShards[0], e.ArtifactShards[1] = e.ArtifactShards[1], e.ArtifactShards[0]
+			},
+			func(e *Execution) { e.ArtifactSHA256 = e.ArtifactShardSetSHA256 },
+		} {
+			changed := got
+			changed.ArtifactShards = slices.Clone(got.ArtifactShards)
+			mutate(&changed)
+			if _, ok := changed.GenerationObservation(0); ok {
+				t.Fatal("changed shard identity retained generation authority")
+			}
+			if _, ok := changed.OutputTextObservation(0); ok {
+				t.Fatal("changed shard identity retained output authority")
+			}
+		}
+	})
+	for _, kind := range []string{"no manifest", "no trusted digest", "no manifest entries", "wrong digest", "reordered", "tampered payload", "mixed meanings", "wrong selected path", "cancelled"} {
+		t.Run(kind, func(t *testing.T) {
+			req := fixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			switch kind {
+			case "no manifest":
+				req.ExpectedArtifactSHA256 = req.ArtifactShards[0].RawFileSHA256
+				req.ArtifactShards, req.ExpectedArtifactShardSetSHA256 = nil, ""
+			case "no trusted digest":
+				req.ExpectedArtifactShardSetSHA256 = ""
+			case "no manifest entries":
+				req.ArtifactShards = nil
+			case "wrong digest":
+				req.ExpectedArtifactShardSetSHA256 = strings.Repeat("0", 64)
+			case "reordered":
+				req.ArtifactShards[0], req.ArtifactShards[1] = req.ArtifactShards[1], req.ArtifactShards[0]
+			case "tampered payload":
+				path := req.ArtifactShards[1].Path
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data[len(data)-1] ^= 1
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "mixed meanings":
+				req.ExpectedArtifactSHA256 = req.ArtifactShards[0].RawFileSHA256
+			case "wrong selected path":
+				req.ArtifactPath = req.ArtifactShards[1].Path
+			case "cancelled":
+				cancel()
+			}
+			got, err := Execute(ctx, req)
+			if err == nil || len(got.Runs) != 0 || got.ArtifactSHA256 != "" || got.ArtifactShardSetSHA256 != "" {
+				t.Fatalf("invalid request gained execution identity: %+v err=%v", got, err)
+			}
+		})
+	}
+	t.Run("construction uses retained shard readers", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows open-file sharing forbids pathname replacement")
+		}
+		req := fixture(t)
+		d := defaultDependencies()
+		d.resolveBackend = func(Request) (compute.Backend, BackendObservation, error) {
+			for _, shard := range req.ArtifactShards {
+				if err := os.Rename(shard.Path, shard.Path+".retained"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(shard.Path, []byte("untrusted replacement"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return nil, BackendObservation{Selected: "legacy"}, nil
+		}
+		got, err := d.execute(context.Background(), req)
+		if err != nil || len(got.Runs) != 1 || !slices.Equal(got.Runs[0].GeneratedTokens, []int{2, 2}) {
+			t.Fatalf("reopened substituted shards: %+v err=%v", got, err)
+		}
+	})
 }

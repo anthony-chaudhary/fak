@@ -134,7 +134,7 @@ func (ProductionExecutor) Prepare(ctx context.Context, cfg Config) (Prepared, er
 	priorRetain := model.RetainMTP
 	model.SetRetainMTP(true)
 	q6Before := liveQ6KWeights()
-	m, err := loadProductionModel(ctx, cfg.ArtifactPath)
+	m, err := loadProductionModel(ctx, shardsBefore, cfg.ExpectedArtifactShardSetSHA256)
 	if err != nil {
 		model.SetRetainMTP(priorRetain)
 		return nil, fmt.Errorf("mtpbench: Q4_K_M load: %w", err)
@@ -162,8 +162,25 @@ func (ProductionExecutor) Prepare(ctx context.Context, cfg Config) (Prepared, er
 // loadProductionModel keeps the checkpoint open for lazy dense Q4_K weights and
 // transfers that lifetime to Model.CloseWeights. The loader's existing mmap
 // selector still decides whether eligible spans use mapped or ReaderAt backing.
-func loadProductionModel(ctx context.Context, path string) (*model.Model, error) {
-	return ggufload.LoadModelQ4KStreamedDenseContext(ctx, path, nil)
+// expectedSetSHA256 must come from the caller's trusted pin, never from this
+// loader's current filesystem. Checkpoint contents must remain immutable until
+// Model.CloseWeights; retained descriptors cannot prevent in-place writes.
+func loadProductionModel(ctx context.Context, shards []ArtifactShard, expectedSetSHA256 string) (*model.Model, error) {
+	manifest := make([]ggufload.ShardIdentity, len(shards))
+	for i, shard := range shards {
+		manifest[i] = ggufload.ShardIdentity(shard)
+	}
+	ws, err := ggufload.OpenWeightsAuthenticated(ctx, manifest, expectedSetSHA256)
+	if err != nil {
+		return nil, err
+	}
+	m, err := ws.QuantModelQ4KProfileOptionsContext(ctx, nil, ggufload.WithStreamedDenseQ4K(true))
+	if err != nil {
+		_ = ws.Close()
+		return nil, err
+	}
+	m.SetWeightCloser(ws)
+	return m, nil
 }
 
 var shardPattern = regexp.MustCompile(`^(.*-)(\d+)(-of-)(\d+)(\.gguf)$`)
