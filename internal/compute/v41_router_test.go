@@ -96,7 +96,9 @@ func TestV41RouterTopKSourceContract(t *testing.T) {
 	src := string(raw)
 	for _, want := range []string{
 		"layout(local_size_x = 1) in;",
-		"if (best < 0 || c > bestValue)", // strict > keeps the lower expert on ties
+		"if (c > selectedValues[slot])", // strict > keeps the lower expert on ties
+		"int filled = min(e, pc.topK);",
+		"selectedScores[insert] = s;",
 		"fault(row, 1u, e, z)", "fault(row, 2u, e, s)", "fault(row, 3u, e, b)", "fault(row, 4u, e, c)",
 		"fault(row, 5u, -1, sum)", "fault(row, 6u, picked[slot], w)",
 		"(pc.full == 0 && sum == 0.0)",
@@ -107,6 +109,9 @@ func TestV41RouterTopKSourceContract(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Errorf("router shader lost contract fragment %q", want)
 		}
+	}
+	if strings.Count(src, "routerScore(") != 2 || strings.Count(src, "precise float s = selectedScores[slot];") != 2 {
+		t.Fatal("router must evaluate each expert score once and reuse selected raw scores for sum and weights")
 	}
 	if V41RouterTopKStageLogit != 1 || V41RouterTopKStageWeight != 6 || V41RouterTopKMaxK != 8 {
 		t.Fatal("Go stage or bound constants drifted from the shader ABI")

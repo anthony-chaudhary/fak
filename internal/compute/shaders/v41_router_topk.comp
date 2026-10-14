@@ -58,15 +58,6 @@ float routerScore(float z) {
     return s;
 }
 
-float selectionScore(uint row, int expert) {
-    precise float s = routerScore(Logits[row * uint(pc.experts) + uint(expert)]);
-    if (pc.hasBias != 0) {
-        precise float c = s + Bias[expert];
-        return c;
-    }
-    return s;
-}
-
 void main() {
     uint row = gl_GlobalInvocationID.x;
     if (row >= uint(pc.rows)) return;
@@ -81,38 +72,45 @@ void main() {
         Weights[pickBase + uint(slot)] = 0.0;
     }
 
+    int picked[MAX_K];
+    precise float selectedValues[MAX_K];
+    precise float selectedScores[MAX_K];
     // Host order: per expert ascending, logit, score, bias, then selection score.
+    // Keep only the best MAX_K scores; every expert is still validated.
     for (int e = 0; e < pc.experts; ++e) {
         float z = Logits[row * uint(pc.experts) + uint(e)];
         if (!finiteValue(z)) { fault(row, 1u, e, z); return; }
         precise float s = routerScore(z);
         if (!finiteValue(s)) { fault(row, 2u, e, s); return; }
+        precise float c = s;
         if (pc.hasBias != 0) {
             float b = Bias[e];
             if (!finiteValue(b)) { fault(row, 3u, e, b); return; }
-            precise float c = s + b;
+            c = s + b;
             if (!finiteValue(c)) { fault(row, 4u, e, c); return; }
         }
-    }
 
-    int picked[MAX_K];
-    for (int slot = 0; slot < pc.topK; ++slot) {
-        int best = -1;
-        float bestValue = 0.0;
-        for (int e = 0; e < pc.experts; ++e) {
-            bool taken = false;
-            for (int j = 0; j < slot; ++j) taken = taken || picked[j] == e;
-            if (taken) continue;
-            float c = selectionScore(row, e);
-            // Strict > over an ascending scan keeps the lower expert on ties.
-            if (best < 0 || c > bestValue) { best = e; bestValue = c; }
+        int filled = min(e, pc.topK);
+        int insert = filled;
+        for (int slot = 0; slot < filled; ++slot) {
+            // Strict > keeps earlier (lower) experts first on corrected ties.
+            if (c > selectedValues[slot]) { insert = slot; break; }
         }
-        picked[slot] = best;
+        if (insert < pc.topK) {
+            for (int slot = min(e, pc.topK - 1); slot > insert; --slot) {
+                picked[slot] = picked[slot - 1];
+                selectedValues[slot] = selectedValues[slot - 1];
+                selectedScores[slot] = selectedScores[slot - 1];
+            }
+            picked[insert] = e;
+            selectedValues[insert] = c;
+            selectedScores[insert] = s;
+        }
     }
 
     precise float sum = 0.0;
     for (int slot = 0; slot < pc.topK; ++slot) {
-        precise float s = routerScore(Logits[row * uint(pc.experts) + uint(picked[slot])]);
+        precise float s = selectedScores[slot];
         precise float next = sum + s;
         sum = next;
     }
@@ -123,7 +121,7 @@ void main() {
         denominator = d;
     }
     for (int slot = 0; slot < pc.topK; ++slot) {
-        precise float s = routerScore(Logits[row * uint(pc.experts) + uint(picked[slot])]);
+        precise float s = selectedScores[slot];
         precise float q = s / denominator;
         precise float w = q * pc.routeScale;
         if (!finiteValue(w)) { fault(row, 6u, picked[slot], w); return; }
