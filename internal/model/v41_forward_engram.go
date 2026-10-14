@@ -534,9 +534,9 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 			for i := 0; i < H; i++ {
 				key[i] = v41BF16(projected[s*H+i])
 				hi := hs[i]
-				h2 += hi * hi
-				k2 += key[i] * key[i]
-				dotSum += hi * (qNorm[s*H+i] * kNorm[s*H+i]) * key[i]
+				h2 += float32(hi * hi)
+				k2 += float32(key[i] * key[i])
+				dotSum += float32(float32(hi*(qNorm[s*H+i]*kNorm[s*H+i])) * key[i])
 			}
 			dot := dotSum * rsqrtf(h2/float32(H)+eps) * rsqrtf(k2/float32(H)+eps) * rsqrtf(float32(H))
 			gate := float32(1) / (1 + expf(-copysignf(sqrtf(maxf(absf(dot), 1e-6)), dot)))

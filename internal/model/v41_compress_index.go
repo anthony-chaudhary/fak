@@ -101,7 +101,7 @@ func (c *V41CompressorPool) PushNormalized(pos int, projectedKV, projectedScore,
 	var meanSquare float32
 	for i := range pooled {
 		pooled[i] = v41RoundBF16(pooled[i])
-		meanSquare += pooled[i] * pooled[i]
+		meanSquare += float32(pooled[i] * pooled[i])
 	}
 	rstd := float32(1 / math.Sqrt(float64(meanSquare/float32(c.width)+eps)))
 	for i := range pooled {
@@ -178,7 +178,7 @@ func (c *V41CompressorPool) Push(pos int, projectedKV, projectedScore []float32)
 		var weighted float32
 		for token := 0; token < c.ratio; token++ {
 			weight := c.scores[token*c.width+dim] / denom
-			weighted += c.kv[token*c.width+dim] * weight
+			weighted += float32(c.kv[token*c.width+dim] * weight)
 		}
 		out[dim] = weighted
 	}

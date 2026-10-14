@@ -234,7 +234,7 @@ func (m *Model) v41PackedHeadRows(name string, panel []float32, out, in, rows in
 			}
 			var sum float32
 			for i, w := range weightRow {
-				sum += w * x[i]
+				sum += float32(w * x[i])
 			}
 			y[row*out+token] = sum
 		}

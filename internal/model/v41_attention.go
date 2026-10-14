@@ -427,7 +427,7 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 				var dot float32
 				row := values[g]
 				for d := 0; d < opt.HeadDim; d++ {
-					dot += q[hBase+d] * row[d]
+					dot += float32(q[hBase+d] * row[d])
 				}
 				dot *= opt.Softmax
 				if !finite32(dot) {
@@ -448,7 +448,7 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 				var dot float32
 				row := values[g]
 				for d := 0; d < opt.HeadDim; d++ {
-					dot += q[hBase+d] * row[d]
+					dot += float32(q[hBase+d] * row[d])
 				}
 				term := exp32(dot*opt.Softmax - maxScore)
 				if !finite32(term) {
@@ -466,14 +466,14 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 				var dot float32
 				row := values[g]
 				for d := 0; d < opt.HeadDim; d++ {
-					dot += q[hBase+d] * row[d]
+					dot += float32(q[hBase+d] * row[d])
 				}
 				weight := exp32(dot*opt.Softmax-maxScore) / sum
 				if !finite32(weight) {
 					return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageValue, t, h, g, -1, weight)
 				}
 				for d := 0; d < opt.HeadDim; d++ {
-					out[hBase+d] += weight * row[d]
+					out[hBase+d] += float32(weight * row[d])
 					if !finite32(out[hBase+d]) {
 						return nil, v41CompressedNonFinite(opt.Layer, v41CompressedStageValue, t, h, g, d, out[hBase+d])
 					}

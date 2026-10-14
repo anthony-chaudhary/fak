@@ -117,7 +117,7 @@ func v41MHCPre(streams [][]float32, pre []float32) ([]float32, error) {
 			return nil, fmt.Errorf("model: inconsistent V41 mHC stream width")
 		}
 		for d := range out {
-			out[d] += pre[h] * streams[h][d]
+			out[d] += float32(pre[h] * streams[h][d])
 		}
 	}
 	return out, nil
@@ -135,11 +135,11 @@ func v41MHCPost(x []float32, residual [][]float32, post []float32, comb []float3
 				return nil, fmt.Errorf("model: inconsistent V41 mHC residual width")
 			}
 			for d := range x {
-				out[dst][d] += comb[src*4+dst] * residual[src][d]
+				out[dst][d] += float32(comb[src*4+dst] * residual[src][d])
 			}
 		}
 		for d := range x {
-			out[dst][d] += post[dst] * x[d]
+			out[dst][d] += float32(post[dst] * x[d])
 		}
 	}
 	return out, nil

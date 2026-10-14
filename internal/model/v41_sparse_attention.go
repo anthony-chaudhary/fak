@@ -329,7 +329,7 @@ func V41GroupedOutputProjection(o, woA, woB []float32, b, m, heads, headDim, gro
 				aBase := (g*oLoRARank + r) * aRow
 				var acc float32
 				for k := 0; k < aRow; k++ {
-					acc += o[groupBase+k] * woA[aBase+k]
+					acc += float32(o[groupBase+k] * woA[aBase+k])
 				}
 				joined[pos*groups*oLoRARank+g*oLoRARank+r] = acc
 			}
@@ -343,7 +343,7 @@ func V41GroupedOutputProjection(o, woA, woB []float32, b, m, heads, headDim, gro
 			bBase := d * groups * oLoRARank
 			var acc float32
 			for k := 0; k < groups*oLoRARank; k++ {
-				acc += woB[bBase+k] * joined[joinedBase+k]
+				acc += float32(woB[bBase+k] * joined[joinedBase+k])
 			}
 			out[pos*dim+d] = acc
 		}
