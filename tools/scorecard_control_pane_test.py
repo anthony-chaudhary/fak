@@ -932,6 +932,32 @@ def test_default_jobs_is_bounded() -> None:
     assert 1 <= scp.default_jobs() <= scp.JOBS_CAP
 
 
+
+def test_build_fak_binary_requires_matched_sibling_companion() -> None:
+    from unittest.mock import patch
+
+    suffix = ".exe" if os.name == "nt" else ""
+    for companion_present in (False, True):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            root.mkdir()
+            output = Path(directory) / "bin"
+            output.mkdir()
+
+            def build(argv, **kwargs):
+                assert argv == ["go", "build", "-o", str(output), "./cmd/fak", "./cmd/fak-dev"], argv
+                assert kwargs["cwd"] == str(root) and kwargs["timeout"] == 17
+                (output / ("fak" + suffix)).write_bytes(b"same-source runtime")
+                if companion_present:
+                    (output / ("fak-dev" + suffix)).write_bytes(b"same-source companion")
+                return subprocess.CompletedProcess(argv, 0)
+
+            with patch.object(scp.subprocess, "run", side_effect=build) as run:
+                result = scp.build_fak_binary(root, str(output), timeout=17)
+                assert run.call_count == 1
+            expected = str(output / ("fak" + suffix)) if companion_present else ""
+            assert result == expected, (companion_present, result)
+
 def test_card_argv_rewrites_go_run_to_the_prebuilt_binary() -> None:
     card = next(c for c in scp.SCORECARDS if c["key"] in scp.GO_BACKED_KEYS)
     argv, err = scp.card_argv(scp.repo_root(), card, python="py", fak_bin="/tmp/fak")

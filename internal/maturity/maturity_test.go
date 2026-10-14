@@ -1,6 +1,7 @@
 package maturity
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -657,9 +658,13 @@ func TestRuntimeProofRejectsStalePathArtifact(t *testing.T) {
 	}
 }
 
-func buildRuntimeFakFixture(t *testing.T, revision, output string) string {
+func buildRuntimeFakFixture(t *testing.T, revision, output string, runLogs ...string) string {
 	t.Helper()
 	dir := t.TempDir()
+	runLog := ""
+	if len(runLogs) > 0 {
+		runLog = runLogs[0]
+	}
 	source := fmt.Sprintf(`package main
 import (
     "fmt"
@@ -672,9 +677,23 @@ func main() {
         fmt.Println("go: fixture")
         return
     }
+    if path := %q; path != "" {
+        f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+        if err != nil { panic(err) }
+        fmt.Fprintln(f, os.Args[1:])
+        if err := f.Close(); err != nil { panic(err) }
+    }
+    if len(os.Args) == 3 && os.Args[1] == "version" && os.Args[2] == "modules" {
+        if _, err := os.Stat("mutate-during-listing"); err == nil {
+            if err := os.WriteFile("VERSION", []byte("changed during listing"), 0600); err != nil { panic(err) }
+        }
+    }
+    if len(os.Args) > 1 && os.Args[1] == "mutate-inventory-fixture" {
+        if err := os.WriteFile("VERSION", []byte("changed fixture"), 0600); err != nil { panic(err) }
+    }
     fmt.Println(%q)
 }
-`, revision, output)
+`, revision, runLog, output)
 	sourcePath := filepath.Join(dir, "main.go")
 	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
@@ -819,5 +838,86 @@ func TestHilRuntimeProofRecorded(t *testing.T) {
 	}
 	if proof.OutputContains != "internal/hil" {
 		t.Fatalf("unexpected output_contains for hil: %q", proof.OutputContains)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestRuntimeModuleInventoryIsOneNamedObservation(t *testing.T) {
+	root := initRuntimeProofGitRepo(t)
+	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runLog := filepath.Join(t.TempDir(), "runs.txt")
+	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(head)), "alpha beta gamma delta", runLog)
+	oldResolver := resolveRuntimeFak
+	resolveRuntimeFak = func() (string, error) { return artifact, nil }
+	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
+	proofs := []RuntimeProof{
+		{Lane: "alpha", Command: "fak version modules", OutputContains: "alpha"},
+		{Lane: "beta", Command: "fak mutate-inventory-fixture", OutputContains: "beta"},
+		{Lane: "gamma", Command: "fak version modules", OutputContains: "gamma"},
+		{Lane: "delta", Command: "fak version modules --json", OutputContains: "delta"},
+	}
+	writeRuntimeProofFixture(t, root, proofs)
+	facts := func(string) []Capability {
+		return []Capability{{Lane: "alpha", HasCode: true, HasTests: true}, {Lane: "gamma", HasCode: true, HasTests: true}}
+	}
+	beforeSource, artifactDigest, err := inventoryIdentity(root, artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Build(Options{Root: root, facts: facts})
+	if !p.RuntimeProofOK || p.RuntimeProofCount != 4 || p.RuntimeExecutionCount == nil || *p.RuntimeExecutionCount != 3 {
+		t.Fatalf("assertions and executions were conflated: %+v", p)
+	}
+	snapshot := p.ModuleInventorySnapshot
+	if snapshot == nil || snapshot.CapturedBeforeProofIndex != 1 || snapshot.AssertionCount != 2 || snapshot.SourceRevision != strings.TrimSpace(string(head)) || snapshot.SourceInputsSHA256 != beforeSource || snapshot.ArtifactSHA256 != artifactDigest || len(snapshot.OutputSHA256) != 64 {
+		t.Fatalf("missing capture provenance: %+v", snapshot)
+	}
+	identity, err := json.Marshal([]any{snapshot.Command, snapshot.CapturedBeforeProofIndex,
+		snapshot.SourceRevision, snapshot.SourceInputsSHA256, snapshot.ArtifactSHA256, snapshot.OutputSHA256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(identity)); got != snapshot.ID {
+		t.Fatalf("final report cannot recompute inventory ID: got %s want %s", got, snapshot.ID)
+	}
+	for _, capability := range p.Caps {
+		if capability.RuntimeSnapshotID != snapshot.ID {
+			t.Fatalf("unbound inventory assertion: %+v", capability)
+		}
+	}
+	data, err := os.ReadFile(runLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "[version modules]\n[mutate-inventory-fixture]\n[version modules --json]\n" {
+		t.Fatalf("expected one captured listing, with other commands in sorted order, got %q", got)
+	}
+	// VERSION changed in an intervening proof. The later assertion deliberately
+	// names the earlier observation, and a subsequent pass must capture anew.
+	afterSource, _, err := inventoryIdentity(root, artifact)
+	if err != nil || afterSource == beforeSource {
+		t.Fatalf("fixture did not change inventory inputs: %v", err)
+	}
+	proofs[2].OutputContains = "missing gamma evidence"
+	writeRuntimeProofFixture(t, root, proofs)
+	failed := Build(Options{Root: root, facts: facts})
+	if failed.RuntimeProofOK || !strings.Contains(failed.RuntimeProofError, "gamma did not emit") || failed.RuntimeExecutionCount == nil || *failed.RuntimeExecutionCount != 3 || failed.ModuleInventorySnapshot == nil || failed.ModuleInventorySnapshot.AssertionCount != 1 || failed.ModuleInventorySnapshot.SourceInputsSHA256 != afterSource {
+		t.Fatalf("failure or fresh-pass provenance lost: %+v", failed)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mutate-during-listing"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	mutated := Build(Options{Root: root, facts: facts})
+	if mutated.RuntimeProofOK || !strings.Contains(mutated.RuntimeProofError, "changed during capture") || mutated.RuntimeExecutionCount == nil || *mutated.RuntimeExecutionCount != 1 || mutated.ModuleInventorySnapshot != nil {
+		t.Fatalf("capture-time mutation accepted or miscounted: %+v", mutated)
+	}
+	injected := Build(Options{Root: root, facts: facts, Witnesses: func(string) (map[string]RuntimeProof, error) {
+		return map[string]RuntimeProof{"alpha": {Command: "fak version modules", SnapshotID: "forged"}}, nil
+	}})
+	if injected.RuntimeExecutionCount != nil || injected.ModuleInventorySnapshot != nil || injected.Caps[0].RuntimeSnapshotID != "" {
+		t.Fatalf("injected provider manufactured runner provenance: %+v", injected)
 	}
 }

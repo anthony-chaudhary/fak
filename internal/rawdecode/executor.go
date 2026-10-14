@@ -30,29 +30,34 @@ import (
 )
 
 // Request is the complete, explicit input to one real raw-decode execution.
-// ExpectedArtifactSHA256 is mandatory and is checked from opened bytes before
-// model loading or backend/session construction.
+// A single-file SHA-256 or an ordered shard manifest with an independently
+// trusted set SHA-256 is mandatory. They are distinct, mutually exclusive
+// identities checked before model/backend construction. Checkpoint files must
+// remain immutable until execution returns; retained readers prevent pathname
+// replacement, not concurrent in-place writes.
 type Request struct {
-	ArtifactPath           string
-	ExpectedArtifactSHA256 string
-	ModelName              string
-	BackendName            string
-	PromptTokenIDs         []int
-	ContextLimit           int
-	GeneratedTokenLimit    int
-	Repetitions            int
-	IgnoreEOS              bool
-	VerifyCPU              bool
-	Quant                  bool
-	Lean                   bool
-	Q4K                    bool
-	StreamQ4K              bool
-	Metal                  bool
-	Q4KGateUpOutputSlab    bool
-	VulkanQ4KProfile       bool
-	VulkanStageQ4K         bool
-	RequireNonReference    bool
-	LoadProfiler           *ggufload.LoadProfiler
+	ArtifactPath                   string
+	ExpectedArtifactSHA256         string
+	ArtifactShards                 []ggufload.ShardIdentity
+	ExpectedArtifactShardSetSHA256 string
+	ModelName                      string
+	BackendName                    string
+	PromptTokenIDs                 []int
+	ContextLimit                   int
+	GeneratedTokenLimit            int
+	Repetitions                    int
+	IgnoreEOS                      bool
+	VerifyCPU                      bool
+	Quant                          bool
+	Lean                           bool
+	Q4K                            bool
+	StreamQ4K                      bool
+	Metal                          bool
+	Q4KGateUpOutputSlab            bool
+	VulkanQ4KProfile               bool
+	VulkanStageQ4K                 bool
+	RequireNonReference            bool
+	LoadProfiler                   *ggufload.LoadProfiler
 }
 
 // Step is one observed greedy-selection result.
@@ -169,19 +174,21 @@ type generationExecutionSeal struct {
 }
 
 type generationExecutionBinding struct {
-	promptTokenIDs        []int
-	contextLimit          int
-	generatedLimit        int
-	ignoreEOS             bool
-	modelName             string
-	modelConfigSHA256     [sha256.Size]byte
-	modelConfigValid      bool
-	artifactPath          string
-	artifactSHA256        string
-	tensorInventorySHA256 string
-	tokenizerSHA256       string
-	templateSHA256        string
-	quantization          string
+	promptTokenIDs         []int
+	contextLimit           int
+	generatedLimit         int
+	ignoreEOS              bool
+	modelName              string
+	modelConfigSHA256      [sha256.Size]byte
+	modelConfigValid       bool
+	artifactPath           string
+	artifactSHA256         string
+	artifactShardSetSHA256 string
+	artifactShards         []ggufload.ShardIdentity
+	tensorInventorySHA256  string
+	tokenizerSHA256        string
+	templateSHA256         string
+	quantization           string
 }
 
 // IgnoreEOS reports the EOS policy observed by the real decode loop.
@@ -251,26 +258,28 @@ type BackendObservation struct {
 // Execution is the device-free observation produced by the real orchestration
 // path. It intentionally has no source, binary, device, memory, or counter fields.
 type Execution struct {
-	ArtifactPath          string
-	ArtifactSHA256        string
-	TensorInventorySHA256 string
-	TokenizerSHA256       string
-	TemplateSHA256        string
-	Quantization          string
-	ModelName             string
-	ModelConfig           model.Config
-	Engine                string
-	Precision             string
-	Backend               BackendObservation
-	LoadDuration          time.Duration
-	QuantDuration         time.Duration
-	PromptTokenIDs        []int
-	ContextLimit          int
-	GeneratedLimit        int
-	IgnoreEOS             bool
-	FiniteLogits          bool
-	CPUModelParity        *bool
-	Runs                  []Run
+	ArtifactPath           string
+	ArtifactSHA256         string
+	ArtifactShardSetSHA256 string
+	ArtifactShards         []ggufload.ShardIdentity
+	TensorInventorySHA256  string
+	TokenizerSHA256        string
+	TemplateSHA256         string
+	Quantization           string
+	ModelName              string
+	ModelConfig            model.Config
+	Engine                 string
+	Precision              string
+	Backend                BackendObservation
+	LoadDuration           time.Duration
+	QuantDuration          time.Duration
+	PromptTokenIDs         []int
+	ContextLimit           int
+	GeneratedLimit         int
+	IgnoreEOS              bool
+	FiniteLogits           bool
+	CPUModelParity         *bool
+	Runs                   []Run
 
 	selectedTokenLogprobs *selectedTokenLogprobEvidence
 	generationSeal        *generationExecutionSeal
@@ -282,7 +291,8 @@ func generationBinding(execution Execution) generationExecutionBinding {
 		promptTokenIDs: slices.Clone(execution.PromptTokenIDs), contextLimit: execution.ContextLimit,
 		generatedLimit: execution.GeneratedLimit, ignoreEOS: execution.IgnoreEOS,
 		modelName: execution.ModelName, modelConfigSHA256: modelConfigSHA256, modelConfigValid: modelConfigValid, artifactPath: execution.ArtifactPath,
-		artifactSHA256: execution.ArtifactSHA256, tensorInventorySHA256: execution.TensorInventorySHA256,
+		artifactSHA256: execution.ArtifactSHA256, artifactShardSetSHA256: execution.ArtifactShardSetSHA256,
+		artifactShards: slices.Clone(execution.ArtifactShards), tensorInventorySHA256: execution.TensorInventorySHA256,
 		tokenizerSHA256: execution.TokenizerSHA256, templateSHA256: execution.TemplateSHA256,
 		quantization: execution.Quantization,
 	}
@@ -295,6 +305,7 @@ func (binding generationExecutionBinding) matches(execution Execution) bool {
 		binding.ignoreEOS == execution.IgnoreEOS && binding.modelName == execution.ModelName &&
 		binding.modelConfigValid && modelConfigValid && binding.modelConfigSHA256 == modelConfigSHA256 &&
 		binding.artifactPath == execution.ArtifactPath && binding.artifactSHA256 == execution.ArtifactSHA256 &&
+		binding.artifactShardSetSHA256 == execution.ArtifactShardSetSHA256 && slices.Equal(binding.artifactShards, execution.ArtifactShards) &&
 		binding.tensorInventorySHA256 == execution.TensorInventorySHA256 && binding.tokenizerSHA256 == execution.TokenizerSHA256 &&
 		binding.templateSHA256 == execution.TemplateSHA256 && binding.quantization == execution.Quantization
 }
@@ -636,21 +647,57 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	if err := validateRequest(req); err != nil {
 		return Execution{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return Execution{}, err
+	}
+	req.ArtifactShards = slices.Clone(req.ArtifactShards)
 	artifact := artifactObservation{Path: req.ArtifactPath}
-	var inspectErr error
-	if d.inspectArtifact != nil {
-		artifact, inspectErr = d.inspectArtifact(req.ArtifactPath, d.openArtifact)
+	load := d.loadModel
+	authenticationDuration := time.Duration(0)
+	if len(req.ArtifactShards) != 0 {
+		authenticationStart := d.now()
+		// Inspect and construct from one authenticated source. No subsequent
+		// pathname read can replace the readers that supplied this identity.
+		ws, err := ggufload.OpenWeightsAuthenticated(ctx, req.ArtifactShards, req.ExpectedArtifactShardSetSHA256)
+		if err != nil {
+			return Execution{}, fmt.Errorf("raw decode: authenticate shard set: %w", err)
+		}
+		modelOwnsWeights := false
+		defer func() {
+			if !modelOwnsWeights {
+				_ = ws.Close()
+			}
+		}()
+		artifact.ArtifactShardSetSHA256 = strings.ToLower(req.ExpectedArtifactShardSetSHA256)
+		artifact.ArtifactShards = slices.Clone(req.ArtifactShards)
+		artifact, err = observeGGUFArtifact(artifact, ws.File)
+		if err != nil {
+			return Execution{}, err
+		}
+		// Authentication reads the complete set. Include it in reported load
+		// work even though backend selection must wait until identity is trusted.
+		authenticationDuration = d.now().Sub(authenticationStart)
+		load = func(ctx context.Context, req Request) (loadedModel, string, error) {
+			lm, name, err := loadProductionModelFromWeights(ctx, req, ws, ws)
+			modelOwnsWeights = err == nil
+			return lm, name, err
+		}
 	} else {
-		artifact.SHA256, inspectErr = hashArtifact(req.ArtifactPath, d.openArtifact)
-	}
-	if artifact.SHA256 == "" {
-		return Execution{}, inspectErr
-	}
-	if !strings.EqualFold(artifact.SHA256, req.ExpectedArtifactSHA256) {
-		return Execution{}, fmt.Errorf("raw decode: artifact SHA-256 mismatch: expected %s, observed %s", strings.ToLower(req.ExpectedArtifactSHA256), artifact.SHA256)
-	}
-	if inspectErr != nil {
-		return Execution{}, inspectErr
+		var inspectErr error
+		if d.inspectArtifact != nil {
+			artifact, inspectErr = d.inspectArtifact(req.ArtifactPath, d.openArtifact)
+		} else {
+			artifact.SHA256, inspectErr = hashArtifact(req.ArtifactPath, d.openArtifact)
+		}
+		if artifact.SHA256 == "" {
+			return Execution{}, inspectErr
+		}
+		if !strings.EqualFold(artifact.SHA256, req.ExpectedArtifactSHA256) {
+			return Execution{}, fmt.Errorf("raw decode: artifact SHA-256 mismatch: expected %s, observed %s", strings.ToLower(req.ExpectedArtifactSHA256), artifact.SHA256)
+		}
+		if inspectErr != nil {
+			return Execution{}, inspectErr
+		}
 	}
 
 	be, backendObserved, err := d.resolveBackend(req)
@@ -661,8 +708,8 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 		return Execution{}, fmt.Errorf("raw decode: resolved backend label %q does not match actual backend %q", backendObserved.Selected, be.Name())
 	}
 	loadStart := d.now()
-	lm, derivedName, err := d.loadModel(ctx, req)
-	loadDuration := d.now().Sub(loadStart)
+	lm, derivedName, err := load(ctx, req)
+	loadDuration := authenticationDuration + d.now().Sub(loadStart)
 	if err != nil {
 		return Execution{}, fmt.Errorf("raw decode: load artifact: %w", err)
 	}
@@ -692,6 +739,8 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	}
 	exec.ArtifactPath = artifact.Path
 	exec.ArtifactSHA256 = artifact.SHA256
+	exec.ArtifactShardSetSHA256 = artifact.ArtifactShardSetSHA256
+	exec.ArtifactShards = slices.Clone(artifact.ArtifactShards)
 	exec.TensorInventorySHA256 = artifact.TensorInventorySHA256
 	exec.TokenizerSHA256 = artifact.TokenizerSHA256
 	exec.TemplateSHA256 = artifact.TemplateSHA256
@@ -708,17 +757,8 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 }
 
 func validateRequest(req Request) error {
-	if strings.TrimSpace(req.ArtifactPath) == "" {
-		return errors.New("raw decode: artifact path is required")
-	}
-	digest := strings.TrimSpace(req.ExpectedArtifactSHA256)
-	if len(digest) != sha256.Size*2 {
-		return errors.New("raw decode: expected artifact SHA-256 must be 64 hexadecimal characters")
-	}
-	for _, c := range digest {
-		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
-			return errors.New("raw decode: expected artifact SHA-256 must be hexadecimal")
-		}
+	if err := validateArtifactIdentity(req); err != nil {
+		return err
 	}
 	if len(req.PromptTokenIDs) == 0 {
 		return errors.New("raw decode: prompt token IDs must be non-empty")
@@ -743,6 +783,34 @@ func validateRequest(req Request) error {
 	return nil
 }
 
+func validateArtifactIdentity(req Request) error {
+	if strings.TrimSpace(req.ArtifactPath) == "" {
+		return errors.New("raw decode: artifact path is required")
+	}
+	digest, kind := strings.TrimSpace(req.ExpectedArtifactSHA256), "artifact"
+	if len(req.ArtifactShards) != 0 || req.ExpectedArtifactShardSetSHA256 != "" {
+		if len(req.ArtifactShards) == 0 || req.ExpectedArtifactShardSetSHA256 == "" {
+			return errors.New("raw decode: split artifacts require a digest-bound shard manifest")
+		}
+		if req.ExpectedArtifactSHA256 != "" {
+			return errors.New("raw decode: single-file and shard-set SHA-256 identities are mutually exclusive")
+		}
+		if req.ArtifactPath != req.ArtifactShards[0].Path {
+			return errors.New("raw decode: artifact path must identify the first authenticated shard")
+		}
+		digest, kind = req.ExpectedArtifactShardSetSHA256, "artifact shard-set"
+	}
+	if len(digest) != sha256.Size*2 {
+		return fmt.Errorf("raw decode: expected %s SHA-256 must be 64 hexadecimal characters", kind)
+	}
+	for _, c := range digest {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return fmt.Errorf("raw decode: expected %s SHA-256 must be hexadecimal", kind)
+		}
+	}
+	return nil
+}
+
 func hashArtifact(path string, open func(string) (io.ReadCloser, error)) (string, error) {
 	f, err := open(path)
 	if err != nil {
@@ -757,13 +825,15 @@ func hashArtifact(path string, open func(string) (io.ReadCloser, error)) (string
 }
 
 type artifactObservation struct {
-	Path                  string
-	SHA256                string
-	TensorInventorySHA256 string
-	TokenizerSHA256       string
-	TemplateSHA256        string
-	Quantization          string
-	outputTokenizer       *tokenizer.Tokenizer
+	Path                   string
+	SHA256                 string
+	ArtifactShardSetSHA256 string
+	ArtifactShards         []ggufload.ShardIdentity
+	TensorInventorySHA256  string
+	TokenizerSHA256        string
+	TemplateSHA256         string
+	Quantization           string
+	outputTokenizer        *tokenizer.Tokenizer
 }
 
 // inspectGGUFArtifact derives model identity and hashes the exact byte stream
@@ -788,6 +858,10 @@ func inspectGGUFArtifact(path string, open func(string) (io.ReadCloser, error)) 
 	if parseErr != nil {
 		return observed, fmt.Errorf("raw decode: parse artifact header: %w", parseErr)
 	}
+	return observeGGUFArtifact(observed, gg)
+}
+
+func observeGGUFArtifact(observed artifactObservation, gg *ggufload.File) (artifactObservation, error) {
 	quant := ggufload.ClassifyTensorQuant(gg.Tensors)
 	observed.TensorInventorySHA256 = gg.CanonicalManifestDigest()
 	if identity, err := qwen38quantrun.DerivePromptPacketGGUFIdentityFromFile(gg); err == nil {
@@ -885,15 +959,23 @@ func loadProductionModel(ctx context.Context, req Request) (loadedModel, string,
 	if err != nil {
 		return nil, "", err
 	}
+	return loadProductionModelFromWeights(ctx, req, ws, closer)
+}
+
+func loadProductionModelFromWeights(ctx context.Context, req Request, ws *ggufload.WeightSource, closer io.Closer) (loadedModel, string, error) {
 	retained := false
 	defer func() {
 		if !retained {
 			_ = closer.Close()
 		}
 	}()
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	var (
 		m     *model.Model
 		label string
+		err   error
 	)
 	switch {
 	case req.Q4K && req.BackendName != "" && req.BackendName != "legacy":
@@ -945,6 +1027,16 @@ func loadProductionModel(ctx context.Context, req Request) (loadedModel, string,
 func openVerifiedProductionWeights(ctx context.Context, req Request) (*ggufload.WeightSource, io.Closer, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
+	}
+	if len(req.ArtifactShards) != 0 || req.ExpectedArtifactShardSetSHA256 != "" {
+		if err := validateArtifactIdentity(req); err != nil {
+			return nil, nil, err
+		}
+		ws, err := ggufload.OpenWeightsAuthenticated(ctx, req.ArtifactShards, req.ExpectedArtifactShardSetSHA256)
+		if err != nil {
+			return nil, nil, err
+		}
+		return ws, ws, nil
 	}
 	var reader io.ReaderAt
 	var size int64

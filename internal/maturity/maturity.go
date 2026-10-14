@@ -99,13 +99,14 @@ type Capability struct {
 	Lane string `json:"lane"` // the dos.toml lane key (== leaf package name)
 	Dir  string `json:"dir"`  // the leaf tree root, e.g. internal/adjudicator
 
-	HasCode        bool   `json:"has_code"`   // a non-test .go file exists
-	HasTests       bool   `json:"has_tests"`  // a *_test.go exists
-	Integrated     bool   `json:"integrated"` // reachable from a production command import graph
-	Dogfooded      bool   `json:"dogfooded"`  // a declared runtime witness passes
-	RuntimeProof   string `json:"runtime_proof,omitempty"`
-	Benchmarked    bool   `json:"benchmarked"`     // a Benchmark func or a BENCHMARK-AUTHORITY row
-	DefaultSurface bool   `json:"default_surface"` // a documented verb / named in llms.txt
+	HasCode           bool   `json:"has_code"`   // a non-test .go file exists
+	HasTests          bool   `json:"has_tests"`  // a *_test.go exists
+	Integrated        bool   `json:"integrated"` // reachable from a production command import graph
+	Dogfooded         bool   `json:"dogfooded"`  // a declared runtime assertion passes; inventory rows share a named observation
+	RuntimeProof      string `json:"runtime_proof,omitempty"`
+	RuntimeSnapshotID string `json:"runtime_snapshot_id,omitempty"`
+	Benchmarked       bool   `json:"benchmarked"`     // a Benchmark func or a BENCHMARK-AUTHORITY row
+	DefaultSurface    bool   `json:"default_surface"` // a documented verb / named in llms.txt
 
 	// Rung is the monotonic current lifecycle rung: the highest R such that EVERY
 	// promotion predicate up to and including R holds. A gap caps it.
@@ -255,19 +256,21 @@ func (o Options) normalize() Options {
 
 // ScorecardPayload is the uniform control-pane envelope every fak scorecard emits.
 type ScorecardPayload struct {
-	Schema            string         `json:"schema"`
-	OK                bool           `json:"ok"`
-	Verdict           string         `json:"verdict"`
-	Finding           string         `json:"finding"`
-	Reason            string         `json:"reason"`
-	NextAction        string         `json:"next_action"`
-	Workspace         string         `json:"workspace"`
-	Corpus            map[string]any `json:"corpus"`
-	Caps              []Capability   `json:"capabilities"`
-	Backlog           []NextWork     `json:"backlog"`
-	RuntimeProofOK    bool           `json:"runtime_proof_ok"`
-	RuntimeProofCount int            `json:"runtime_proof_count"`
-	RuntimeProofError string         `json:"runtime_proof_error,omitempty"`
+	Schema                  string                   `json:"schema"`
+	OK                      bool                     `json:"ok"`
+	Verdict                 string                   `json:"verdict"`
+	Finding                 string                   `json:"finding"`
+	Reason                  string                   `json:"reason"`
+	NextAction              string                   `json:"next_action"`
+	Workspace               string                   `json:"workspace"`
+	Corpus                  map[string]any           `json:"corpus"`
+	Caps                    []Capability             `json:"capabilities"`
+	Backlog                 []NextWork               `json:"backlog"`
+	RuntimeProofOK          bool                     `json:"runtime_proof_ok"`
+	RuntimeProofCount       int                      `json:"runtime_proof_count"`               // verified assertions, not subprocess executions
+	RuntimeExecutionCount   *int                     `json:"runtime_execution_count,omitempty"` // proof commands only; excludes Git/artifact validation; absent for supplied witness providers
+	ModuleInventorySnapshot *ModuleInventorySnapshot `json:"module_inventory_snapshot,omitempty"`
+	RuntimeProofError       string                   `json:"runtime_proof_error,omitempty"`
 }
 
 // Build is the fold: re-derive every capability's facts, adjudicate each, and
@@ -283,20 +286,27 @@ func Build(opts Options) ScorecardPayload {
 	progress("gather_facts", 0)
 	caps := factsFn(root)
 	witnessFn := opts.Witnesses
+	var executionCount *int
+	var evidence runtimeProofEvidence
 	if witnessFn == nil {
+		executionCount = &evidence.Executions
 		witnessFn = func(root string) (map[string]RuntimeProof, error) {
-			return verifyRuntimeProofsWithProgress(root, progress)
+			return verifyRuntimeProofsWithEvidence(root, progress, &evidence)
 		}
 	}
 	witnesses, proofLoadErr := witnessFn(root)
 	progress("adjudicate", 0)
 	for i := range caps {
 		caps[i].Dogfooded = false
+		caps[i].RuntimeSnapshotID = ""
 		if proofLoadErr == nil {
 			if witness, ok := witnesses[caps[i].Lane]; ok {
 				caps[i].Dogfooded = true
 				caps[i].DefaultSurface = witness.DefaultOn
 				caps[i].RuntimeProof = witness.Command
+				if opts.Witnesses == nil {
+					caps[i].RuntimeSnapshotID = witness.SnapshotID
+				}
 			}
 		}
 		caps[i] = adjudicate(caps[i])
@@ -408,11 +418,13 @@ func Build(opts Options) ScorecardPayload {
 			"distribution":  dist,
 			"ladder":        RungName,
 		},
-		Caps:              caps,
-		Backlog:           backlog,
-		RuntimeProofOK:    runtimeProofOK,
-		RuntimeProofCount: len(witnesses),
-		RuntimeProofError: errorString(proofLoadErr),
+		Caps:                    caps,
+		Backlog:                 backlog,
+		RuntimeProofOK:          runtimeProofOK,
+		RuntimeProofCount:       len(witnesses),
+		RuntimeExecutionCount:   executionCount,
+		ModuleInventorySnapshot: evidence.Inventory,
+		RuntimeProofError:       errorString(proofLoadErr),
 	}
 }
 

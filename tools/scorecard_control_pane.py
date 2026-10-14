@@ -1002,7 +1002,10 @@ def default_jobs() -> int:
 
 
 def build_fak_binary(root: Path, out_dir: str, *, timeout: int = GO_BUILD_TIMEOUT) -> str:
-    """Build ``./cmd/fak`` ONCE into out_dir; return its path, or "" if it will not build.
+    """Build matched ``fak`` and ``fak-dev`` artifacts once; return fak's path.
+
+    Maturity's runtime registry calls ``fak dev``. Its sibling-artifact lookup must
+    find fak-dev built from this same checkout, not an unrelated PATH installation.
 
     Seventeen registered cards shell ``go run ./cmd/fak …``, and every ``go run`` is
     its own build: run serially that re-links cmd/fak seventeen times, and fanned out
@@ -1017,15 +1020,16 @@ def build_fak_binary(root: Path, out_dir: str, *, timeout: int = GO_BUILD_TIMEOU
     diagnosis.
     """
     out = str(Path(out_dir) / ("fak.exe" if os.name == "nt" else "fak"))
+    companion = Path(out_dir) / ("fak-dev.exe" if os.name == "nt" else "fak-dev")
     try:
         proc = subprocess.run(
-            ["go", "build", "-o", out, "./cmd/fak"],
+            ["go", "build", "-o", out_dir, "./cmd/fak", "./cmd/fak-dev"],
             cwd=str(root), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
-    return out if proc.returncode == 0 and Path(out).exists() else ""
+    return out if proc.returncode == 0 and Path(out).is_file() and companion.is_file() else ""
 
 
 def card_argv(root: Path, card: dict[str, str] | str, *, python: str,
