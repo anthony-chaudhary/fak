@@ -629,23 +629,44 @@ func TestV41IndexerScoreDeviceHealth(t *testing.T) {
 			}
 		})
 	}
-	t.Run("unsupported-to-sticky-at-host-seam", func(t *testing.T) {
+	// #13791: healthy absence (the Vulkan shim's current production gate) binds
+	// no health seam, so the host scorer pays no per-call admission probe.
+	t.Run("unsupported-binds-no-health", func(t *testing.T) {
 		s, b := v41ScoreTestSession(t)
 		b.supported = false
 		score, health := s.v41IndexerScoreFunc(), s.v41IndexerScoreHealthFunc()
-		if score != nil || health == nil {
-			t.Fatal("healthy absence did not retain a separate health seam")
+		if score != nil || health != nil {
+			t.Fatal("healthy absence bound a device score or health seam")
 		}
-		rows, err := v41IndexRowsWithScore(0, []float32{1}, []float32{2}, []float32{1}, 1, 1, 1, 0, 0, 1, score, health)
-		if err != nil || !reflect.DeepEqual(rows, []int32{0}) {
-			t.Fatalf("healthy unsupported host changed: %v %v", rows, err)
+		bound := b.healthCalls
+		for i := 0; i < 3; i++ {
+			rows, err := v41IndexRowsWithScore(0, []float32{1}, []float32{2}, []float32{1}, 1, 1, 1, 0, 0, 1, score, health)
+			if err != nil || !reflect.DeepEqual(rows, []int32{0}) {
+				t.Fatalf("healthy unsupported host changed: %v %v", rows, err)
+			}
 		}
+		if b.healthCalls != bound || b.uploadCount != 0 || len(b.calls) != 0 || b.readCount != 0 || s.BackendSessionClosed() {
+			t.Fatalf("host path probed the device: admission calls %d after bind %d", b.healthCalls, bound)
+		}
+	})
+	t.Run("bind-time-fault-keeps-health", func(t *testing.T) {
+		s, b := v41ScoreTestSession(t)
 		fault := &compute.BackendError{Backend: "score-recorder", Class: compute.VulkanClassSubmissionFailed, Err: ErrV41ForwardStage}
-		b.healthErr = fault
-		rows, err = v41IndexRowsWithScore(0, []float32{1}, []float32{2}, []float32{1}, 1, 1, 1, 0, 0, 1, score, health)
+		b.supported, b.healthErr = false, fault
+		health := s.v41IndexerScoreHealthFunc()
+		if health == nil {
+			t.Fatal("bind-time admission fault dropped the health seam")
+		}
+		rows, err := v41IndexRowsWithScore(0, []float32{1}, []float32{2}, []float32{1}, 1, 1, 1, 0, 0, 1, nil, health)
 		var selected *V41IndexerScoreOperationError
 		if rows != nil || !errors.Is(err, fault) || !errors.As(err, &selected) || !s.BackendSessionClosed() || b.uploadCount != 0 || len(b.calls) != 0 || b.readCount != 0 {
-			t.Fatalf("cached nil score hid sticky fault: %v", err)
+			t.Fatalf("bind-time fault hidden: %v", err)
+		}
+	})
+	t.Run("supported-keeps-health", func(t *testing.T) {
+		s, _ := v41ScoreTestSession(t)
+		if s.v41IndexerScoreHealthFunc() == nil {
+			t.Fatal("supported backend lost its health seam")
 		}
 	})
 }

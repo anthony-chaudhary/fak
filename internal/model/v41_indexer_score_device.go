@@ -15,8 +15,11 @@ import (
 // decline or host replay, including when downstream selection rejects NaN.
 type v41IndexerScoreFunc func(layer int, q, keys, weights []float32, heads, headDim, rows int) ([]float32, error)
 
-// Health remains bound when healthy capability absence selects the host path,
-// so a later shared-backend sticky fault cannot masquerade as host eligibility.
+// Health is bound only when the device scorer may be selected: the backend
+// admits the operation, or admission failed at bind time. Healthy capability
+// absence binds no health seam, so the host path pays no per-call device probe
+// (#13791). A bind-time admission fault keeps the seam, so the first call still
+// reports the shared-backend fault instead of silently scoring on the host.
 type v41IndexerScoreHealthFunc func(layer int) error
 
 // V41IndexerScoreOperationError excludes score-boundary health failures and
@@ -471,6 +474,13 @@ func (s *Session) v41IndexerScoreHealthFunc() v41IndexerScoreHealthFunc {
 	}
 	operation, ok := s.Backend.(compute.V41IndexerScoreBackend)
 	if !ok {
+		return nil
+	}
+	// Healthy absence at bind time selects the host scorer for the session, so
+	// skip the per-call admission probe (#13791): on Vulkan it takes vulkanMu
+	// on every indexer call for a device op that never runs. A bind-time
+	// admission fault keeps the seam so the first call still reports it.
+	if supported, err := operation.V41IndexerScoreAdmission(); err == nil && !supported {
 		return nil
 	}
 	return func(layer int) error {

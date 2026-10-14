@@ -243,15 +243,15 @@ func TestV41IndexerScoreSession(t *testing.T) {
 		if len(b.calls) != 0 || b.uploadCount != 0 || b.readCount != 0 {
 			t.Fatal("unsupported path performed score device I/O")
 		}
-		before := captureV41ForwardSnapshot(s.v41Forward)
-		b.healthErr = &compute.BackendError{Backend: "score-recorder", Class: compute.VulkanClassDeviceLost, Err: ErrV41ForwardStage}
-		err := recoverError(func() { s.Step(5) })
-		var closed *BackendForwardOperationError
-		if !errors.As(err, &closed) || !errors.Is(err, b.healthErr) || closed.Stage != "admission" || !s.BackendSessionClosed() || !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
-			t.Fatalf("cached unsupported score masked later sticky fault: %v", err)
+		// #13791: healthy absence binds no health seam, so later host indexer
+		// calls pay no per-call admission probe.
+		if s.v41State().indexScoreHealth != nil {
+			t.Fatal("unsupported score bound a per-call health seam")
 		}
-		if len(b.calls) != 0 || b.uploadCount != 0 || b.readCount != 0 {
-			t.Fatal("sticky health performed score I/O or retried on host")
+		probes := b.healthCalls
+		v41ScoreTestBits(t, s.Step(5), host.Step(5))
+		if b.healthCalls != probes || len(b.calls) != 0 || b.uploadCount != 0 || b.readCount != 0 {
+			t.Fatalf("host indexer probed device admission: %d -> %d", probes, b.healthCalls)
 		}
 	})
 	t.Run("late-suffix-retains-earlier-token", func(t *testing.T) {
