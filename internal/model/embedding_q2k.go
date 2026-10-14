@@ -37,6 +37,14 @@ func NewQ2KEmbedding(data []byte, vocab, hidden int) (*Q2KEmbedding, error) {
 	return newPackedEmbedding(data, vocab, hidden, packedEmbeddingQ2K)
 }
 
+// NewQ2KEmbeddingOwned constructs a validated Q2_K table without copying data.
+// On success ownership transfers to the embedding: the caller must not mutate,
+// reuse, or release the backing storage. On failure data remains caller-owned.
+// Use NewQ2KEmbedding when the caller needs to retain mutable access.
+func NewQ2KEmbeddingOwned(data []byte, vocab, hidden int) (*Q2KEmbedding, error) {
+	return newPackedEmbeddingWithOwnership(data, vocab, hidden, packedEmbeddingQ2K, true)
+}
+
 // NewQ4KEmbedding constructs an immutable packed Q4_K embedding table with the
 // same bounded row-gather API as NewQ2KEmbedding.
 func NewQ4KEmbedding(data []byte, vocab, hidden int) (*Q2KEmbedding, error) {
@@ -50,6 +58,10 @@ func NewPQ2Embedding(data []byte, vocab, hidden int) (*Q2KEmbedding, error) {
 }
 
 func newPackedEmbedding(data []byte, vocab, hidden int, format packedEmbeddingFormat) (*Q2KEmbedding, error) {
+	return newPackedEmbeddingWithOwnership(data, vocab, hidden, format, false)
+}
+
+func newPackedEmbeddingWithOwnership(data []byte, vocab, hidden int, format packedEmbeddingFormat, owned bool) (*Q2KEmbedding, error) {
 	if vocab <= 0 || hidden <= 0 {
 		return nil, fmt.Errorf("model: invalid embedding dimensions: vocab=%d, hidden=%d", vocab, hidden)
 	}
@@ -69,7 +81,10 @@ func newPackedEmbedding(data []byte, vocab, hidden int, format packedEmbeddingFo
 	if int64(len(data)) != wantBytes {
 		return nil, fmt.Errorf("model: embedding payload size mismatch: got %d bytes, want %d", len(data), wantBytes)
 	}
-	raw := append([]byte(nil), data...)
+	raw := data
+	if !owned {
+		raw = append([]byte(nil), data...)
+	}
 	return &Q2KEmbedding{
 		raw:    raw,
 		vocab:  vocab,

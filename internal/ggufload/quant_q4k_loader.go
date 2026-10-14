@@ -977,7 +977,9 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			if pt.residentType == TensorPQ2_0 {
 				embed, err = model.NewPQ2Embedding(pt.raw, pt.shape[0], pt.shape[1])
 			} else {
-				embed, err = model.NewQ2KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
+				// TensorBytes produced a fresh heap buffer for this single work item.
+				// The collector consumes it once and never mutates it after adoption.
+				embed, err = model.NewQ2KEmbeddingOwned(pt.raw, pt.shape[0], pt.shape[1])
 			}
 			if err != nil {
 				return err
