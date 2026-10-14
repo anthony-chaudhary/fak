@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:66e72e0a2cc9e84942412dd0ac38d50145f363bfccb1902bd1ded425e320685a",
-  "tracked_files": 25351,
-  "tracked_bytes": 510491167,
+  "content_root": "sha256:cab8909e607fbdfde95012799cffb455b860e84d0700620438dcc6ae21ef456b",
+  "tracked_files": 25355,
+  "tracked_bytes": 510528578,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -45485,8 +45485,8 @@
     },
     {
       "path": "docs/concept-disambiguation-scorecard/INDEX.md",
-      "content_sha256": "sha256:78128dca551c2da11203cc2f33b97b6a1db42f868ba6da2853168d4cf8151325",
-      "bytes": 768088,
+      "content_sha256": "sha256:d336fd28166f90390bc17d637ec0fb8ee8fcc7fa2c331b1d0782eea47d8de7de",
+      "bytes": 768455,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -45494,8 +45494,8 @@
     },
     {
       "path": "docs/concept-disambiguation-scorecard/README.md",
-      "content_sha256": "sha256:b1a1122f2e54528355d37a1bbb29f09d842a186f33cdc21045111bb988819605",
-      "bytes": 917631,
+      "content_sha256": "sha256:cc95fe114bf99fd7d95dc3e530576b96d97e545d9fbbca0469b03b15f52fc28a",
+      "bytes": 917916,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -46812,8 +46812,8 @@
     },
     {
       "path": "docs/fak/concept-glossary.md",
-      "content_sha256": "sha256:3d726b87bb82848c79a3eeb81f12d65c98703bc80ca878d236f9cf1feeb102de",
-      "bytes": 78207,
+      "content_sha256": "sha256:9f0c5674d72c5f1ac96e0a7429e554508d450d821c7807f7cb974f2b5fe7b9e6",
+      "bytes": 78961,
       "classification": "documentation",
       "source_classes": [
         "readme_docs"
@@ -130314,11 +130314,20 @@
     },
     {
       "path": "internal/ggufload/gguf_authenticated.go",
-      "content_sha256": "sha256:ab1b50224b795fbd631771e83ae4abbe50ec31e65c80e073a7e34381959b38f2",
-      "bytes": 6835,
+      "content_sha256": "sha256:3ad45a03d5c67f2a3f6fedb982af8f68ac7836626d000c9f02217c5cecb0c580",
+      "bytes": 9397,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/ggufload/gguf_authenticated_retirement_test.go",
+      "content_sha256": "sha256:97d7b38426500939647408538faa49091d5bb353a03215059479bfaa5964feb9",
+      "bytes": 10487,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
@@ -131310,7 +131319,7 @@
     },
     {
       "path": "internal/ggufload/quant_q4k_loader.go",
-      "content_sha256": "sha256:81eb5ba22b6b6c2cdc21873d40b7c6bcab2f76e3ec4fdbabf6d58d760813f829",
+      "content_sha256": "sha256:36cc68cd7f93eb298da3776ce8f8df7f28847e62363f7928d3434a11b1854dfe",
       "bytes": 64486,
       "classification": "runtime_source",
       "source_classes": [
@@ -131348,6 +131357,15 @@
       "path": "internal/ggufload/quant_q4k_mtp_loader_test.go",
       "content_sha256": "sha256:3e7fbc6dec293facdd6cf90e666a7a89026894bad44bb6e97f4bfbb328172b9c",
       "bytes": 10695,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/ggufload/quant_q4k_numa_finalization_test.go",
+      "content_sha256": "sha256:90126490b930ba85c44a304ab01734b5672da7abf830581492159a551def3f21",
+      "bytes": 2317,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -131688,11 +131706,20 @@
     },
     {
       "path": "internal/ggufload/v41_ep_session.go",
-      "content_sha256": "sha256:00fde1eddfbca9c080070647bc75c8494c1cdf0642269ac88328e8a5066667cf",
-      "bytes": 5866,
+      "content_sha256": "sha256:b18c2e85299fe9896bdb50c94c8e35f139c4f0069389556535d0988479bd9e42",
+      "bytes": 10423,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/ggufload/v41_ep_session_retirement_test.go",
+      "content_sha256": "sha256:c9a8fe18e93a46ceeab2a469c02869264406d156bc8e496a26cfb9c3844ce192",
+      "bytes": 14344,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
@@ -214306,8 +214333,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:177e497b0b0b7968274465250c80020609397e27ac54caff7a8de4698c5313fe",
-      "bytes": 811159,
+      "content_sha256": "sha256:4ab0b42b36188da52f6ae4539994cca16c703da418fb5f5b592130e8fb4e9a11",
+      "bytes": 811599,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -216295,8 +216322,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/rows-session-runtime-authored.json",
-      "content_sha256": "sha256:81f7cbafb5d659ee3cfabf1dc1b2e6c28571f780363ad0d8664988d7c421e83c",
-      "bytes": 3688,
+      "content_sha256": "sha256:092d4a93548312717fc85a6b1d60887b4015aded1697ac75983770561b666e17",
+      "bytes": 3721,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -216340,8 +216367,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/rows-session-runtime.json",
-      "content_sha256": "sha256:d3f0d2651e65d8feae44cd04cb89fdc9cad99a553d5b44e855f970513fd192d2",
-      "bytes": 12376,
+      "content_sha256": "sha256:60505ff295bdfb97a01f717f4befca1f2cb7a129d0aa3a0b8a2a6e55e44bb033",
+      "bytes": 12401,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -216540,6 +216567,15 @@
       "path": "tools/concept_disambiguation_scorecard.data/rows-v41-ep-panel.json",
       "content_sha256": "sha256:5e4e15bb63f43a6f341ffe4a23a4e09a70c9db1706b9c8da0ec0cb0c14f852a0",
       "bytes": 1843,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "tools/concept_disambiguation_scorecard.data/rows-v41-ep-session-result.json",
+      "content_sha256": "sha256:bc000aed0ffc93adf7a339292917288ed5496de93c30082152845cdbe34b00d6",
+      "bytes": 1240,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
