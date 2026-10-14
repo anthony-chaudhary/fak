@@ -194,6 +194,9 @@ func TestRunAMDStrixValidatePassesCanonicalArchiveFieldsUnchanged(t *testing.T) 
 	if captured.AdmissionTimeout != 7*time.Second || captured.Timeout != 20*time.Second || captured.AdmissionTimeout <= 0 || captured.AdmissionTimeout >= captured.Timeout {
 		t.Fatalf("invalid runner timeout envelope: admission=%s total=%s", captured.AdmissionTimeout, captured.Timeout)
 	}
+	if captured.GeneratedBy != amdStrixValidateProducer {
+		t.Fatalf("runner producer = %q, want %q", captured.GeneratedBy, amdStrixValidateProducer)
+	}
 }
 
 func TestRunAMDStrixValidateRejectsInvalidMineBeforeBuilderOrRunner(t *testing.T) {
