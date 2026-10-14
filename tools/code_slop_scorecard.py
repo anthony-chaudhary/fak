@@ -402,6 +402,13 @@ _GO_OPS = (
     "(", ")", "[", "]", "{", "}", ",", ";", ".", ":",
 )
 
+# Preserve the greedy order while excluding operators that cannot match the
+# current character. This changes candidate work only, never token boundaries.
+_GO_OPS_BY_INITIAL = {
+    initial: tuple(op for op in _GO_OPS if op[0] == initial)
+    for initial in {op[0] for op in _GO_OPS}
+}
+
 # LOGIC tokens — the ones that denote computation or control flow, the signal that a
 # duplicated window is copy-pasted LOGIC rather than a data/declaration shape. A window
 # must carry CLONE_MIN_LOGIC_TOKENS of these to count. Identifiers, literals,
@@ -511,7 +518,7 @@ def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, in
             i = j
             continue
         # operator / punctuation (greedy, longest-first)
-        for op in _GO_OPS:
+        for op in _GO_OPS_BY_INITIAL.get(c, ()):
             if text.startswith(op, i):
                 out.append((op, line, op in _LOGIC_OPS))
                 i += len(op)

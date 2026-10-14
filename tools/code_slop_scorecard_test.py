@@ -1724,6 +1724,42 @@ def test_duplication_compact_candidates_preserve_exact_windows_under_collisions(
     finally:
         del cs.hash
 
+
+def test_operator_dispatch_preserves_full_scan_tokens_and_order():
+    class CountedText(str):
+        checks = 0
+
+        def startswith(self, prefix, *args):
+            self.checks += 1
+            return super().startswith(prefix, *args)
+
+    class FullScan(dict):
+        def get(self, initial, default=None):
+            return cs._GO_OPS
+
+    dispatch = cs._GO_OPS_BY_INITIAL
+    assert set(dispatch) == {op[0] for op in cs._GO_OPS}
+    for initial, operators in dispatch.items():
+        assert operators == tuple(op for op in cs._GO_OPS if op[0] == initial)
+    text = CountedText(
+        "package witness\nfunc f(π int) int {\n"
+        + " ".join(cs._GO_OPS)
+        + "\nx <<= 2; y >>= 3; z &^= 4; a := .5e+2; b := 0x1p-2\n"
+        + 's := "<= // text"; r := \'\\\'\'; raw := `&&\n...`\n'
+        + "// ignore >>=\n/* ignore ++ */\n@ € x+++y; p...q; <-ch\nreturn π\n}\n")
+    try:
+        cs._GO_OPS_BY_INITIAL = FullScan()
+        expected = [cs.go_tokens(text, normalize_idents=normalize) for normalize in (False, True)]
+        full_checks = text.checks
+        text.checks = 0
+        cs._GO_OPS_BY_INITIAL = dispatch
+        actual = [cs.go_tokens(text, normalize_idents=normalize) for normalize in (False, True)]
+        assert actual == expected
+        assert text.checks < full_checks, (text.checks, full_checks)
+    finally:
+        cs._GO_OPS_BY_INITIAL = dispatch
+
+
 def main() -> int:
     tests = sorted((n, f) for n, f in globals().items()
                    if n.startswith("test_") and callable(f))
