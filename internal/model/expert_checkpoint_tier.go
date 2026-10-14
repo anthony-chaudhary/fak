@@ -259,6 +259,7 @@ type ExpertCheckpointTier struct {
 	prefetched    int
 	prefetchHits  int
 	prefetchStale int
+	readahead     ExpertCheckpointReadaheadStats
 
 	reads     int
 	hits      int
@@ -902,7 +903,11 @@ type ExpertCheckpointStats struct {
 	Prefetched    int `json:"prefetched"`
 	PrefetchHits  int `json:"prefetch_hits"`
 	PrefetchStale int `json:"prefetch_stale"`
-	Evictions     int `json:"evictions"`
+
+	// Readahead records advisory outcomes separately from demand reads.
+	Readahead ExpertCheckpointReadaheadStats `json:"readahead"`
+
+	Evictions int `json:"evictions"`
 	// OverlayRows/OverlayBytesRead are the per-rank sparse-overlay ledger (#13030): how many faults
 	// were served from a registered overlay's copied rows, and the row bytes those faults moved.
 	// A fault outside every registered overlay falls through to the dense stride and is counted in
@@ -946,6 +951,7 @@ func (t *ExpertCheckpointTier) Stats() ExpertCheckpointStats {
 		Prefetched:    t.prefetched,
 		PrefetchHits:  t.prefetchHits,
 		PrefetchStale: t.prefetchStale,
+		Readahead:     t.readahead,
 		Evictions:     t.evictions,
 		BudgetBytes:   t.pool.Budget(),
 		ResidentBytes: t.pool.Used(),

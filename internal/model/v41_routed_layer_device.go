@@ -174,6 +174,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 						}
 					}
 				}
+				s.readAheadV41RoutedPicks(r, names)
 			}
 			for slot := range picks {
 				gateW, releaseGate, upW, releaseUp, _, ok := expertInputDeviceAdmitted(s, names[slot][0], names[slot][1], x, H)
