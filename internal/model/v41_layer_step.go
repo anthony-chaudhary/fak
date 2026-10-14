@@ -462,13 +462,28 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		return routed, nil
 	}
 	work.finish = func(routed []float32) error {
-		moe, err := m.v41SharedExpertAddForStep(l, ffnX, routed, cfg, routeCfg, scratch)
+		posted := false
+		var owner *Session
+		var post func(compute.Tensor) error
+		if resident != nil {
+			owner = resident.d.s
+			post = func(sum compute.Tensor) error {
+				if err := resident.finishLayerChecked(l, sum); err != nil {
+					return v41StageErr(v41StageMHC, l, err)
+				}
+				posted = true
+				return nil
+			}
+		}
+		moe, err := m.v41SharedExpertAddThenForStep(l, ffnX, routed, cfg, routeCfg, scratch, owner, post)
 		if err != nil {
 			return err
 		}
 		var next [][]float32
 		if resident != nil {
-			err = resident.finishLayer(l, [][]float32{moe})
+			if !posted {
+				err = resident.finishLayer(l, [][]float32{moe})
+			}
 		} else if full {
 			next, err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual, ffnMix)
 		} else {
@@ -970,13 +985,28 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 		return routed, nil
 	}
 	work.finish = func(routed []float32) error {
-		moe, err := m.v41SharedExpertAddForStep(l, ffnX, routed, cfg, routeCfg, scratch)
+		posted := false
+		var owner *Session
+		var post func(compute.Tensor) error
+		if resident != nil {
+			owner = resident.d.s
+			post = func(sum compute.Tensor) error {
+				if err := resident.finishLayerChecked(l, sum); err != nil {
+					return err
+				}
+				posted = true
+				return nil
+			}
+		}
+		moe, err := m.v41SharedExpertAddThenForStep(l, ffnX, routed, cfg, routeCfg, scratch, owner, post)
 		if err != nil {
 			return err
 		}
 		if resident != nil {
-			if err := resident.finishLayer(l, [][]float32{moe}); err != nil {
-				return err
+			if !posted {
+				if err := resident.finishLayer(l, [][]float32{moe}); err != nil {
+					return err
+				}
 			}
 			if err := resident.publish(l); err != nil {
 				return err

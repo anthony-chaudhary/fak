@@ -45,6 +45,12 @@ func (m *Model) v41SharedExpertForStep(layer int, input []float32, cfg Config, s
 // retaining the original routed-then-shared F32 addition. Only the sum crosses
 // the host boundary. Neither a tensor nor an owner scope escapes this call.
 func (m *Model) v41SharedExpertAddForStep(layer int, input, routed []float32, cfg Config, routeCfg v41RouterConfig, scratch *v41ProjScratch) ([]float32, error) {
+	return m.v41SharedExpertAddThenForStep(layer, input, routed, cfg, routeCfg, scratch, nil, nil)
+}
+
+// afterChecked borrows the finite-validated, unrounded sum only when the caller
+// belongs to the same owned session. A declined chain retains the host control.
+func (m *Model) v41SharedExpertAddThenForStep(layer int, input, routed []float32, cfg Config, routeCfg v41RouterConfig, scratch *v41ProjScratch, owner *Session, afterChecked func(compute.Tensor) error) ([]float32, error) {
 	if s := m.v41SharedExpertStepOwner(cfg, scratch); s != nil && scratch.sharedAdd != nil {
 		consume := func(shared compute.Tensor, own func(compute.Tensor) bool, stage *string) (compute.Tensor, error) {
 			if routeCfg.SharedCount < 1 {
@@ -70,7 +76,10 @@ func (m *Model) v41SharedExpertAddForStep(layer int, input, routed []float32, cf
 			s.Backend.AddInPlace(acc, shared)
 			return acc, nil
 		}
-		output, selected, cause := s.v41SharedExpertChain(layer, true, consume)(input)
+		if owner != s {
+			afterChecked = nil
+		}
+		output, selected, cause := s.v41SharedExpertChain(layer, true, consume, afterChecked)(input)
 		if selected || cause != nil {
 			var operation *BackendForwardOperationError
 			if errors.As(cause, &operation) && operation.Path == "v41-shared-add" {

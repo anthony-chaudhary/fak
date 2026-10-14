@@ -365,20 +365,47 @@ func (r *v41MHCResident) post(layer int, x [][]float32, streams *v41DeviceStream
 		xt := s.uploadHostF32([]int{rows, H}, flat, compute.MemoryActivation, "V4.1 mHC post-mix x")
 		defer s.Backend.Free(xt)
 		*stage = "post-mix"
-		out, err := r.d.op.V41MHCPost(xt, streams.Tensor(), coeffs, rows, H)
-		if err != nil {
-			if out.Buf() != nil && out.Buf() != xt.Buf() && out.Buf() != streams.Tensor().Buf() && out.Buf() != coeffs.Buf() {
-				s.Backend.Free(out)
-			}
-			return err
-		}
-		if !v41MHCFreshOutput(s, out, []int{rows, compute.V41MHCStreams, H}, xt, streams.Tensor(), coeffs) {
-			return errV41MHCResult
-		}
-		next = out
-		return nil
+		var err error
+		next, err = r.recordPost(xt, streams, coeffs)
+		return err
 	})
 	return next, err
+}
+
+// recordPost preserves the existing operand order and fresh-output contract.
+// Its caller owns the guard and every input; only the returned panel is new.
+func (r *v41MHCResident) recordPost(x compute.Tensor, streams *v41DeviceStreams, coeffs compute.Tensor) (compute.Tensor, error) {
+	s := r.d.s
+	out, err := r.d.op.V41MHCPost(x, streams.Tensor(), coeffs, streams.Rows(), streams.Hidden())
+	if err != nil {
+		if out.Buf() != nil && out.Buf() != x.Buf() && out.Buf() != streams.Tensor().Buf() && out.Buf() != coeffs.Buf() {
+			s.Backend.Free(out)
+		}
+		return compute.Tensor{}, err
+	}
+	if !v41MHCFreshOutput(s, out, []int{streams.Rows(), compute.V41MHCStreams, streams.Hidden()}, x, streams.Tensor(), coeffs) {
+		return compute.Tensor{}, errV41MHCResult
+	}
+	return out, nil
+}
+
+// finishLayerChecked borrows the decode chain's still-owned [H] sum after its
+// finite-only readback. The shape view adds no BF16 publication or device allocation.
+func (r *v41MHCResident) finishLayerChecked(layer int, sum compute.Tensor) error {
+	err := r.d.guard(layer, "post-mix", func(stage *string) error {
+		if r.rows != 1 || sum.Buf() == nil || sum.Backend() != r.d.s.Backend || sum.Dtype != compute.F32 || sum.Layout != compute.RowMajor || sum.Quant != nil || len(sum.Shape) != 1 || sum.Shape[0] != r.hidden {
+			return errV41MHCResult
+		}
+		sum.Shape = []int{1, r.hidden}
+		*stage = "post-mix"
+		var err error
+		r.layer.next, err = r.recordPost(sum, r.layer.updated, r.layer.ffn)
+		return err
+	})
+	if err != nil {
+		r.abort()
+	}
+	return err
 }
 
 // v41MHCMixWeight stages (or borrows the cached) device mHC mix weight in its

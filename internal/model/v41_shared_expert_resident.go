@@ -53,16 +53,16 @@ type v41SharedResidentConsumer func(shared compute.Tensor, own func(compute.Tens
 // Appending its lazy resolutions protects future tokens without rescanning the
 // whole model cache for every row or temporary tensor.
 func (s *Session) v41ColdSharedExpertChain(layer int) v41ColdSharedResidentFunc {
-	return s.v41SharedExpertChain(layer, false, nil)
+	return s.v41SharedExpertChain(layer, false, nil, nil)
 }
 
 // The owner-bound decode tail selects one packed read for the four existing
 // status records. Cold prefill retains its original four-fence control.
 func (s *Session) v41DeferredSharedExpertChain(layer int) v41ColdSharedResidentFunc {
-	return s.v41SharedExpertChain(layer, true, nil)
+	return s.v41SharedExpertChain(layer, true, nil, nil)
 }
 
-func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool, consume v41SharedResidentConsumer) v41ColdSharedResidentFunc {
+func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool, consume v41SharedResidentConsumer, afterChecked func(compute.Tensor) error) v41ColdSharedResidentFunc {
 	protected := map[compute.Buffer]bool{}
 	if s != nil {
 		for _, weight := range s.halW {
@@ -72,7 +72,7 @@ func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool, consume v
 		}
 	}
 	return func(input []float32) ([]float32, bool, error) {
-		return s.v41SharedExpertResident(layer, input, protected, deferredChecks, consume)
+		return s.v41SharedExpertResident(layer, input, protected, deferredChecks, consume, afterChecked)
 	}
 }
 
@@ -82,10 +82,10 @@ func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool, consume v
 // asymmetric clamp, BF16 sites and reduction order are unchanged. The cold layer
 // owns selection; no callback binding or persistent activation is added here.
 func (s *Session) v41ColdSharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool) (result []float32, selected bool, cause error) {
-	return s.v41SharedExpertResident(layer, input, protected, false, nil)
+	return s.v41SharedExpertResident(layer, input, protected, false, nil, nil)
 }
 
-func (s *Session) v41SharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool, deferredChecks bool, consume v41SharedResidentConsumer) (result []float32, selected bool, cause error) {
+func (s *Session) v41SharedExpertResident(layer int, input []float32, protected map[compute.Buffer]bool, deferredChecks bool, consume v41SharedResidentConsumer, afterChecked func(compute.Tensor) error) (result []float32, selected bool, cause error) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!backendHasComparableIdentity(s.Backend) || s.M.lora != nil || s.M.prism != nil {
 		return nil, false, nil
@@ -124,7 +124,7 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 	s.ensureOpenBackendSession()
 	selected = true
 	stage, leaf, site := "weight upload", leaves[0], ""
-	sharedAdd := false
+	sharedAdd, checkedContinuation := false, false
 	retire := func(err error) error {
 		if s.halFailure == nil {
 			path := "v41-shared-expert-resident"
@@ -142,6 +142,11 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 				defer func() { s.halClosed = true; _ = recover() }()
 				s.closeBackendOwned()
 			}()
+		}
+		if checkedContinuation {
+			// The mHC guard already attributed its error. Keep its wrapper as well
+			// as the original cause while this chain retires its own temporaries.
+			return err
 		}
 		if site != "" || sharedAdd {
 			return s.halFailure
@@ -442,6 +447,15 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 		}
 		if err := drain(sum); err != nil {
 			return nil, true, err
+		}
+		if afterChecked != nil {
+			// The finite-only sum read and every issued publication verdict precede
+			// the consumer. Keep ownership until its dependent work is recorded.
+			checkedContinuation = true
+			if err := afterChecked(sum); err != nil {
+				return nil, true, err
+			}
+			checkedContinuation = false
 		}
 	}
 	return result, true, nil
