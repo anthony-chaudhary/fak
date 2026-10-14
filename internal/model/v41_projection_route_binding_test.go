@@ -31,6 +31,46 @@ func TestV41ProjectionRouteBindingEquivalence(t *testing.T) {
 		return st.routerTopK()(0, x, nil, v41DefaultRouterConfig(), true)
 	}
 
+	t.Run("ordinary-replacement-clears-whole-native-pair", func(t *testing.T) {
+		s := &Session{}
+		st := &v41ForwardState{}
+		p := v41BoundDenseProjection{ordinary: projection, owner: s, core: func(int, string, []float32, int, int, int, *v41ProjectionContinuation) ([]float32, v41DenseProjectionOutcome, error) {
+			t.Fatal("native core was invoked")
+			return nil, v41ProjectionDeclined, nil
+		}}
+		r := v41BoundRouterTopK{ordinary: router, owner: s, core: func(int, []float32, []float32, v41RouterConfig, bool, *v41RouterResidentInput) ([]routePick, error) {
+			t.Fatal("native router was invoked")
+			return nil, nil
+		}}
+		for _, replaceProjection := range []bool{false, true} {
+			st.bindCanonicalDense(p)
+			st.bindCanonicalRouter(r)
+			old := st.projectionRoute
+			if replaceProjection {
+				st.setDenseProjection(st.denseProjection())
+			} else {
+				st.setRouterTopK(st.routerTopK())
+			}
+			if st.projectionRoute.nativeProjection.core != nil || st.projectionRoute.nativeRouter.core != nil || old.nativeProjection.core == nil || old.nativeRouter.core == nil {
+				t.Fatal("replacement inherited or mutated native authority")
+			}
+			st.liftDeviceOnlyDense(s)
+			if st.projectionRoute.nativeProjection.core != nil || st.projectionRoute.nativeRouter.core != nil {
+				t.Fatal("known wrapper elevated an ordinary replacement")
+			}
+		}
+		st.bindCanonicalDense(p)
+		st.bindCanonicalRouter(r)
+		st.liftDeviceOnlyDense(s)
+		if st.projectionRoute.nativeProjection.core == nil || st.projectionRoute.nativeRouter.core == nil || st.projectionRoute.deviceOnly != s {
+			t.Fatal("known wrapper lost canonical pair")
+		}
+		st.bindCanonicalDense(p)
+		if st.projectionRoute.nativeRouter.core != nil {
+			t.Fatal("rebind paired new projection with old router")
+		}
+	})
+
 	t.Run("wrappers-see-and-change-results", func(t *testing.T) {
 		st := &v41ForwardState{projectionRoute: newV41ProjectionRouteBinding(projection, router)}
 		old := &v41ProjScratch{projectionRoute: st.projectionRoute}

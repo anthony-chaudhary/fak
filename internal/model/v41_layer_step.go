@@ -412,13 +412,9 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 	if err != nil {
 		return nil, err
 	}
-	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection())
+	picks, err := m.v41RouterPicksForStep(l, ffnX, H, routeCfg, full, scratch, func() []float32 { return gateBias })
 	if err != nil {
 		return nil, err
-	}
-	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK())
-	if err != nil {
-		return nil, v41StageErr(v41StageMoE, l, err)
 	}
 	m.emitExpertRouteAt(l, pos, picks)
 	work = &v41LayerStepWork{layer: l, input: ffnX, picks: picks, full: full, scratch: scratch}
@@ -957,14 +953,11 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 	if err != nil {
 		return nil, err
 	}
-	routerLogits, err := m.v41ProjMatRowsWithProjection(l, "ffn.gate.weight", ffnX, cfg.NumExperts, H, scratch.denseProjection())
+	picks, err := m.v41RouterPicksForStep(l, ffnX, H, routeCfg, true, scratch, func() []float32 {
+		return m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
+	})
 	if err != nil {
 		return nil, err
-	}
-	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-	picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, true, scratch.routerTopK())
-	if err != nil {
-		return nil, v41StageErr(v41StageMoE, l, err)
 	}
 	m.emitExpertRouteAt(l, pos, picks)
 	work = &v41LayerStepWork{layer: l, input: ffnX, picks: picks, full: true, scratch: scratch}

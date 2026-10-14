@@ -38,16 +38,23 @@ func v41RouteForGeometryWith(layer int, logits, correctionBias []float32, cfg v4
 // ring, and the logits stay on the device. A numeric fault maps to the host
 // router's refusal field.
 func v41DeviceRoute(op compute.V41RouterTopKBackend, logits, bias compute.Tensor, rows int, cfg v41RouterConfig, full, hasBias bool) ([][]routePick, error) {
+	rowsOut, _, err := v41DeviceRouteCore(op, logits, bias, rows, cfg, full, hasBias)
+	return rowsOut, err
+}
+
+func v41DeviceRouteCore(op compute.V41RouterTopKBackend, logits, bias compute.Tensor, rows int, cfg v41RouterConfig, full, hasBias bool) ([][]routePick, bool, error) {
 	got, err := op.V41RouterTopK(logits, bias, rows, cfg.Experts, cfg.TopK, cfg.RouteScale, full, hasBias)
 	var fault *compute.V41RouterTopKFault
-	if errors.As(err, &fault) {
-		return nil, v41RouterFaultError(fault)
+	numericFault := errors.As(err, &fault)
+	completed := err == nil || numericFault
+	if numericFault {
+		return nil, completed, v41RouterFaultError(fault)
 	}
 	if err != nil {
-		return nil, err
+		return nil, completed, err
 	}
 	if len(got.Experts) != rows*cfg.TopK || len(got.Weights) != rows*cfg.TopK {
-		return nil, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
+		return nil, completed, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
 	}
 	out := make([][]routePick, rows)
 	for row := range out {
@@ -56,12 +63,12 @@ func v41DeviceRoute(op compute.V41RouterTopKBackend, logits, bias compute.Tensor
 			i := row*cfg.TopK + slot
 			e, w := int(got.Experts[i]), got.Weights[i]
 			if e < 0 || e >= cfg.Experts || !finite32(w) {
-				return nil, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
+				return nil, completed, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
 			}
 			out[row][slot] = routePick{expert: e, weight: w}
 		}
 	}
-	return out, nil
+	return out, completed, nil
 }
 
 func v41RouterFaultError(f *compute.V41RouterTopKFault) error {
@@ -87,16 +94,31 @@ func v41RouterFaultError(f *compute.V41RouterTopKFault) error {
 // row per call, borrowing canonical checkpoint bias from the immutable owner.
 // Arbitrary caller bias remains a transient 4*E upload. It reads back 8*k pick
 // bytes plus 16 status bytes; v41DeviceRoute also accepts resident logits.
-func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc {
+func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc { return s.v41BindRouterTopK().ordinary }
+
+func (s *Session) v41BindRouterTopK() v41BoundRouterTopK {
 	if !s.v41DeviceSumAvailable() {
-		return nil
+		return v41BoundRouterTopK{}
 	}
-	op, ok := s.Backend.(compute.V41RouterTopKBackend)
+	boundBackend := s.Backend
+	op, ok := boundBackend.(compute.V41RouterTopKBackend)
 	if !ok || !op.V41RouterTopKAvailable() {
-		return nil
+		return v41BoundRouterTopK{}
 	}
-	return func(layer int, logits, correctionBias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
+	core := func(layer int, logits, correctionBias []float32, cfg v41RouterConfig, full bool, residentInput *v41RouterResidentInput) ([]routePick, error) {
 		return v41SelectedDeviceCall(s, layer, "v41-router-topk", func(stage *string) (result []routePick, cause error) {
+			if residentInput != nil {
+				defer func() {
+					primary := recover()
+					cleanup := residentInput.loan.release()
+					if primary != nil {
+						panic(primary)
+					}
+					if cause == nil && cleanup != nil {
+						panic(cleanup)
+					}
+				}()
+			}
 			// Release only call-owned uploads. Preserve a primary selected
 			// failure if a later Free also fails, while attempting both frees.
 			var owned []compute.Tensor
@@ -123,16 +145,32 @@ func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc {
 			if err := cfg.validate(); err != nil {
 				return nil, err
 			}
-			if len(logits) != cfg.Experts {
-				return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("width %d, want %d", len(logits), cfg.Experts)}
+			width := len(logits)
+			if residentInput != nil {
+				if residentInput.loan.valid == nil || !residentInput.loan.valid() {
+					return nil, errV41RouterProjectionScope
+				}
+				lt := residentInput.tensor
+				if lt.Buf() == nil || lt.Backend() != s.Backend || lt.Dtype != compute.F32 || lt.Layout != compute.RowMajor || lt.Quant != nil || len(lt.Shape) != 2 || lt.Shape[0] != 1 {
+					return nil, errV41DeviceRouteResult
+				}
+				width = lt.Shape[1]
+			}
+			if width != cfg.Experts {
+				return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("width %d, want %d", width, cfg.Experts)}
 			}
 			hasBias := len(correctionBias) != 0
 			if hasBias && len(correctionBias) != cfg.Experts {
 				return nil, &v4RouteError{Field: "correction_bias", Reason: fmt.Sprintf("width %d does not match experts width %d", len(correctionBias), cfg.Experts)}
 			}
-			*stage = "logit upload"
-			lt := s.uploadHostF32([]int{1, cfg.Experts}, logits, compute.MemoryActivation, "V4.1 router logits")
-			owned = append(owned, lt)
+			var lt compute.Tensor
+			if residentInput == nil {
+				*stage = "logit upload"
+				lt = s.uploadHostF32([]int{1, cfg.Experts}, logits, compute.MemoryActivation, "V4.1 router logits")
+				owned = append(owned, lt)
+			} else {
+				lt = residentInput.tensor
+			}
 			*stage = "bias upload"
 			bias := []float32{0}
 			if hasBias {
@@ -164,11 +202,24 @@ func (s *Session) v41RouterTopKFunc() v41RouterTopKFunc {
 				owned = append(owned, bt)
 			}
 			*stage = "router-topk"
-			rows, err := v41DeviceRoute(op, lt, bt, 1, cfg, full, hasBias)
+			if residentInput != nil {
+				*stage = "projection/router command window"
+			}
+			rows, completed, err := v41DeviceRouteCore(op, lt, bt, 1, cfg, full, hasBias)
+			if residentInput != nil {
+				*residentInput.completed = completed
+			}
 			if err != nil {
 				return nil, err
+			}
+			if residentInput != nil && !residentInput.loan.valid() {
+				return nil, errV41RouterProjectionScope
 			}
 			return rows[0], nil
 		})
 	}
+	ordinary := func(layer int, logits, bias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
+		return core(layer, logits, bias, cfg, full, nil)
+	}
+	return v41BoundRouterTopK{ordinary: ordinary, core: core, owner: s, model: s.M, backend: boundBackend}
 }

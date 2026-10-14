@@ -975,7 +975,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.routedExpert = s.v41RoutedExpertFunc()
 		s.v41Forward.routedLayer = s.v41RoutedLayerFunc()
 		s.v41Forward.routedPrefill = nil
-		s.v41Forward.setDenseProjection(s.v41DenseProjectionFunc())
+		s.v41Forward.bindCanonicalDense(s.v41BindDenseProjection())
 		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
@@ -996,7 +996,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.sharedActivation = s.v41SharedActivationFunc()
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.sharedAttention = s.v41SharedAttentionFunc()
-		s.v41Forward.setRouterTopK(s.v41RouterTopKFunc())
+		s.v41Forward.bindCanonicalRouter(s.v41BindRouterTopK())
 		s.v41Forward.routedSum = s.v41RoutedSumFunc()
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
