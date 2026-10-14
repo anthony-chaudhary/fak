@@ -34,7 +34,7 @@ type v41RoutedCohortLease struct {
 
 func prepareV41RoutedExpertCohortOwned(scope *backendExecutionScope, layer int, stem string, rows []v41RoutedCohortRow) (lease *v41RoutedCohortLease, outcome v41RoutedExpertOutcome, faultLane int, err error) {
 	faultLane = -1
-	if scope == nil || !scope.live || scope.owner == nil || len(rows) < 2 || len(rows) > 4 {
+	if scope == nil || !scope.live || scope.owner == nil || len(rows) < 1 || len(rows) > 4 {
 		return nil, v41RoutedExpertDeclined, -1, nil
 	}
 	leader := rows[0].Session

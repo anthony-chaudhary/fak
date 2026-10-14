@@ -78,6 +78,8 @@ type v41LayerExpertGroup struct {
 	lanes, slots []int
 }
 
+const v41LayerCohortMaxRows = 4 * V41RouterTopK
+
 func closeV41LayerExpertGroups(groups []v41LayerExpertGroup) {
 	var primary any
 	for i := len(groups) - 1; i >= 0; i-- {
@@ -157,43 +159,57 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 	if !first.full || len(first.picks) == 0 {
 		return fallback()
 	}
-	// This bounded first consumer requires the same ordered expert IDs. It
-	// never replaces an unselected whole-lane fused route with per-pick work.
+	// Build a deterministic first-seen expert union. Every selected lane keeps
+	// its original slot and later routed-sum order; only cross-lane recording is
+	// expert-major. The official four-lane/top-six envelope bounds both rows and
+	// held expert triples before any arithmetic is selected.
 	slots := make([]map[int]int, len(active))
+	experts := make([]int, 0, len(active)*len(first.picks))
+	seenExperts := make(map[int]bool, len(active)*len(first.picks))
+	leader := lanes[active[0]].session
+	if leader == nil || leader.M != m || leader.Backend == nil || leader.backendExecutionScope != scope {
+		return fallback()
+	}
 	for row, lane := range active {
 		work := txs[lane].pendingLayer
-		if !work.full || work.layer != first.layer || len(work.picks) != len(first.picks) {
+		session := lanes[lane].session
+		if session == nil || session.M != leader.M || session.Backend != leader.Backend || session.backendExecutionScope != scope ||
+			!work.full || work.layer != first.layer || len(work.picks) != len(first.picks) {
 			return fallback()
 		}
 		slots[row] = make(map[int]int, len(work.picks))
 		for slot, pick := range work.picks {
-			if pick.expert != first.picks[slot].expert {
-				return fallback()
-			}
 			if _, duplicate := slots[row][pick.expert]; duplicate {
 				return fallback()
 			}
 			slots[row][pick.expert] = slot
-		}
-		for _, pick := range first.picks {
-			if _, ok := slots[row][pick.expert]; !ok {
-				return fallback()
+			if !seenExperts[pick.expert] {
+				seenExperts[pick.expert] = true
+				experts = append(experts, pick.expert)
 			}
 		}
 	}
+	flatRows := len(active) * len(first.picks)
+	if flatRows > v41LayerCohortMaxRows || len(experts) > v41LayerCohortMaxRows {
+		return fallback()
+	}
 	var groups []v41LayerExpertGroup
 	defer finishV41LayerExpertGroups(&groups, &err, receipt)
-	for _, pick := range first.picks {
-		rows := make([]v41RoutedCohortRow, len(active))
-		group := v41LayerExpertGroup{lanes: append([]int(nil), active...), slots: make([]int, len(active))}
+	for _, expert := range experts {
+		rows := make([]v41RoutedCohortRow, 0, len(active))
+		group := v41LayerExpertGroup{lanes: make([]int, 0, len(active)), slots: make([]int, 0, len(active))}
 		for row, lane := range active {
 			work := txs[lane].pendingLayer
-			slot := slots[row][pick.expert]
-			group.slots[row] = slot
-			rows[row] = v41RoutedCohortRow{Lane: lane, Session: lanes[lane].session, Input: work.input, Weight: work.picks[slot].weight}
+			slot, participates := slots[row][expert]
+			if !participates {
+				continue
+			}
+			group.lanes = append(group.lanes, lane)
+			group.slots = append(group.slots, slot)
+			rows = append(rows, v41RoutedCohortRow{Lane: lane, Session: lanes[lane].session, Input: work.input, Weight: work.picks[slot].weight})
 		}
 		receipt.atLane(-1)
-		lease, outcome, fault, cause := prepareV41RoutedExpertCohortOwned(scope, first.layer, "ffn.experts."+itoa(pick.expert), rows)
+		lease, outcome, fault, cause := prepareV41RoutedExpertCohortOwned(scope, first.layer, "ffn.experts."+itoa(expert), rows)
 		if lease != nil {
 			group.lease = lease
 			groups = append(groups, group)
@@ -232,6 +248,9 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 	flatSlots := make([][]int, len(lanes))
 	for _, lane := range active {
 		flatSlots[lane] = make([]int, len(first.picks))
+		for slot := range flatSlots[lane] {
+			flatSlots[lane][slot] = -1
+		}
 	}
 	flat := 0
 	for i, group := range groups {
@@ -246,7 +265,11 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 		order := v41RoutedSumOrder(txs[lane].pendingLayer.picks)
 		sums[row] = v41RoutedCohortSum{Lane: lane, Rows: make([]int, len(order))}
 		for i, slot := range order {
-			sums[row].Rows[i] = flatSlots[lane][slot]
+			flatRow := flatSlots[lane][slot]
+			if flatRow < 0 {
+				return v41ExpertOperationErr(first.layer, "cohort admission", errV41ExpertResult)
+			}
+			sums[row].Rows[i] = flatRow
 		}
 	}
 	receipt.atLane(-1)
