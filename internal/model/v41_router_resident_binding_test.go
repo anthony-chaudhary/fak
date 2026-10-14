@@ -318,6 +318,57 @@ func TestV41RouterResidentBinding(t *testing.T) {
 
 // fak-test:runtime medium est=3s lane=default
 func TestV41RouterResidentBindingOwnership(t *testing.T) {
+	t.Run("factory-unavailable-router-is-not-reopened", func(t *testing.T) {
+		m := v41FullStepPatchedNorms(t)
+		b := newV41RouterResidentRecorder()
+		b.unavailable = true
+		v41RouterResidentModelCleanup(t, m, b)
+		s := v41DenseTestSession(t, m, b)
+		if b.availableCalls != 0 {
+			t.Fatal("constructor observed router availability before state binding")
+		}
+		st := s.v41State()
+		binding := st.projectionRoute
+		if b.availableCalls != 1 || binding == nil || binding.projection == nil || binding.nativeProjection.core == nil ||
+			binding.nativeProjection.owner != s || binding.nativeProjection.model != m || binding.nativeProjection.backend != b ||
+			binding.router != nil || binding.nativeRouter.core != nil {
+			t.Fatal("original factories did not capture the unavailable router half")
+		}
+		x := make([]float32, m.Cfg.HiddenSize)
+		for i := range x {
+			x[i] = float32(i%7-3) / 16
+		}
+		cfg := v41DefaultRouterConfig()
+		logits, err := m.v41ProjMatRows(0, "ffn.gate.weight", x, cfg.Experts, m.Cfg.HiddenSize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bias := func() []float32 { return m.tensor(layerName(0, "ffn.gate.e_score_correction_bias")) }
+		want, err := v41RouteForGeometry(logits, bias(), cfg, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := s.beginBackendExecution()
+		t.Cleanup(scope.finish)
+		scratch := &v41ProjScratch{projectionRoute: binding}
+		b.unavailable = false // No setter, callback replacement, factory call or rebind.
+		m.v41SetExpertFaultPhase(V41PhaseDecode)
+		before := m.V41ExpertFaultAttribution().Decode
+		got, err := m.v41RouterPicksForStep(0, x, m.Cfg.HiddenSize, cfg, true, scratch, bias)
+		after := m.V41ExpertFaultAttribution().Decode
+		if err != nil || !reflect.DeepEqual(got, want) || b.matmuls != 1 || b.outputReads != 1 ||
+			b.routerCalls != 0 || b.nativeInputs != 0 || b.logitUploads != 0 || b.availableCalls != 1 {
+			t.Fatalf("captured unavailable route changed: err=%v matmuls=%d reads=%d router=%d native=%d uploads=%d probes=%d", err, b.matmuls, b.outputReads, b.routerCalls, b.nativeInputs, b.logitUploads, b.availableCalls)
+		}
+		if s.v41State() != st || st.projectionRoute != binding || st.callbackOwner != s || b.availableCalls != 1 || s.halClosed || s.halFailure != nil {
+			t.Fatal("ordinary continuation rebound or retired the live session")
+		}
+		if after.DenseProjectionDeviceCalls-before.DenseProjectionDeviceCalls != 1 || after.DenseProjectionDeviceRows-before.DenseProjectionDeviceRows != 1 ||
+			after.DenseProjectionReadbackBytes-before.DenseProjectionReadbackBytes != int64(4*cfg.Experts) || after.DenseProjectionActivationUploadBytes-before.DenseProjectionActivationUploadBytes != int64(4*len(x)) ||
+			after.DenseProjectionHostCalls-before.DenseProjectionHostCalls != 0 || after.DenseProjectionHostRows-before.DenseProjectionHostRows != 0 {
+			t.Fatalf("ordinary projection ledger changed: before=%+v after=%+v", before, after)
+		}
+	})
 	t.Run("inherited-cpu-output-cannot-hide-retired-recorder-buffer", func(t *testing.T) {
 		b := newV41RouterResidentRecorder()
 		x := compute.NewF32(b.Backend, []int{2}, []float32{1, 2})
