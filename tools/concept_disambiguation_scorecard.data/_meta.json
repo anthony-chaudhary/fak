@@ -11767,6 +11767,11 @@
           "category": "incidental",
           "reason": "Request admission ceiling for token context length; no context.Context or separate context abstraction.",
           "token": "V41EPOwnerMaxContextTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local context.WithDeadline derived from the caller context and the validated request total deadline during supervisor admission; it creates no separate context abstraction or authority.",
+          "token": "admissionCtx"
         }
       ],
       "exclude": [
@@ -11828,6 +11833,7 @@
         "WithAffinity",
         "WithNativeCompactionObserver",
         "WithTraceContext",
+        "admissionCtx",
         "admitAndRouteChatInputTriggerWithContext",
         "affinityContextKey",
         "appendGuardCompactionWitnessTo",
