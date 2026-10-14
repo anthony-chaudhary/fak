@@ -189,7 +189,13 @@ func (c *v41ExpertParallelCollective) reducePanel(ownerRows [][]float32, r v41EP
 		return nil, fmt.Errorf("invalid panel rank or identity count")
 	}
 	digest := r.identity()
-	part, err := r.pack(ownerRows, plan, c.g.Rank(), digest)
+	var part []float32
+	var request []byte
+	if c.g.Rank() == 0 {
+		part, err = r.pack(ownerRows, plan, 0, digest)
+	} else {
+		request, err = r.encodeOwnerRequest(ownerRows, plan, c.g.Rank(), digest)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +208,7 @@ func (c *v41ExpertParallelCollective) reducePanel(ownerRows [][]float32, r v41EP
 	}
 	if c.g.Rank() == 0 {
 		out, err = c.reducePanelRoot(part, plan, r, digest)
-	} else if err = writeV41EPPanelVector(c.g.coord, part); err == nil {
+	} else if err = writeFrame(c.g.coord, request); err == nil {
 		var reply []float32
 		reply, err = readV41EPPanelVector(c.g.coord, plan.replyWords, false)
 		if err == nil {
@@ -222,7 +228,7 @@ func (c *v41ExpertParallelCollective) reducePanel(ownerRows [][]float32, r v41EP
 			c.receivedBytes.Add(uint64(9 + 4*words))
 		}
 	} else {
-		c.sentBytes.Add(uint64(9 + 4*len(part)))
+		c.sentBytes.Add(uint64(9 + 4*plan.requests[c.g.Rank()]))
 		c.receivedBytes.Add(replyBytes)
 	}
 	c.gatherNanos.Add(uint64(time.Since(opened)))
@@ -262,6 +268,54 @@ func (r v41EPPanelReduction) pack(rows [][]float32, plan v41EPPanelLayout, rank 
 		offset += len(row)
 	}
 	return part, nil
+}
+
+// Followers need only a wire snapshot. Preserve pack's full local validation
+// and refusal order before allocating it, without the intermediate F32 part.
+// Source rows own their storage under Session execution ownership; this copy
+// is independent and complete before deadline installation or any I/O. The
+// existing conservative panel allowance and deterministic windows are unchanged.
+func (r v41EPPanelReduction) encodeOwnerRequest(rows [][]float32, plan v41EPPanelLayout, rank int, digest [32]byte) ([]byte, error) {
+	band := r.owners.Shards[rank]
+	for token, picks := range r.picks {
+		words := 0
+		for _, pick := range picks {
+			if pick.expert >= band.Lo && pick.expert < band.Hi {
+				words += r.width
+			}
+		}
+		if len(rows[token]) != words {
+			return nil, fmt.Errorf("invalid panel owner row %d width", token)
+		}
+		for _, value := range rows[token] {
+			if !finite32(value) {
+				return nil, fmt.Errorf("nonfinite panel owner row %d", token)
+			}
+		}
+	}
+	words := plan.requests[rank]
+	if words < v41EPPanelHeaderWords || words > v41EPMaxWords {
+		return nil, fmt.Errorf("invalid panel write bound")
+	}
+	payload := make([]byte, 5+4*words)
+	payload[0] = byte(opV41EPPanelReduce)
+	binary.LittleEndian.PutUint32(payload[1:5], uint32(words))
+	at := 5
+	put := func(values []float32) {
+		for _, value := range values {
+			binary.LittleEndian.PutUint32(payload[at:], math.Float32bits(value))
+			at += 4
+		}
+	}
+	var header [v41EPPanelHeaderWords]float32
+	v41EPPanelHeader(header[:], digest, len(rows), false)
+	put(header[:])
+	for token, row := range rows {
+		v41EPHeader(header[:], r.digests[token], false)
+		put(header[:v41EPHeaderWords])
+		put(row)
+	}
+	return payload, nil
 }
 
 func (c *v41ExpertParallelCollective) reducePanelRoot(part []float32, plan v41EPPanelLayout, r v41EPPanelReduction, digest [32]byte) ([][]float32, error) {
