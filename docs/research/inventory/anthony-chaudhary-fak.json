@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:93ee355f8a8f58e58b16b2cbc13ba422d09411b0120a26a8966f0923439c2ab2",
+  "content_root": "sha256:30ddacc00de98d96bc07455502dc3acaaae1f47dda675c4f10df19732a42cea4",
   "tracked_files": 25399,
-  "tracked_bytes": 511073511,
+  "tracked_bytes": 511074889,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -99281,8 +99281,8 @@
     },
     {
       "path": "internal/compute/physical_observation_native_binding_test.go",
-      "content_sha256": "sha256:a05e567a4d90eb8121bd933bc0b3080ca5c0d06df9992500aa2ba5be1931cd66",
-      "bytes": 7866,
+      "content_sha256": "sha256:d3e3119605ca79ca11caa4d09ac7f9fc401db6ae80453a7c2b151aeb5fb92b09",
+      "bytes": 9133,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -102341,8 +102341,8 @@
     },
     {
       "path": "internal/compute/vulkan.go",
-      "content_sha256": "sha256:9aa3c7cc3d440a941a790cdd6e417055b7de5ad260ce5b2c1631792a5222a5fd",
-      "bytes": 75290,
+      "content_sha256": "sha256:d780ccfa8454b4f6907437c70a7d240d32c3cee406929a804dad0b664dee8055",
+      "bytes": 75247,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -103232,8 +103232,8 @@
     },
     {
       "path": "internal/compute/vulkan_shim.cpp",
-      "content_sha256": "sha256:0f53080744495575b0093d060928d117b4984d6c82f8d153737a320954a7089a",
-      "bytes": 369349,
+      "content_sha256": "sha256:576d872e5bf2753957d91d48fb6712ab8c7e3944c4151c83803f92e7a00a2af7",
+      "bytes": 369503,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
