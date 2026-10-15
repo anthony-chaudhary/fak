@@ -253,7 +253,7 @@ func TestCompanionBridge_Live(t *testing.T) {
 
 	// 1. Gate --help
 	var stdout, stderr bytes.Buffer
-	code := RunCompanionGate(&stdout, &stderr, []string{"--help"})
+	code := runCompanionLiveGate(t, &stdout, &stderr, []string{"--help"})
 	if code != 0 {
 		t.Fatalf("gate --help failed with code %d. stderr: %s", code, stderr.String())
 	}
@@ -264,7 +264,7 @@ func TestCompanionBridge_Live(t *testing.T) {
 	// 2. Gate check --staged
 	stdout.Reset()
 	stderr.Reset()
-	code = RunCompanionGate(&stdout, &stderr, []string{"check", "--staged"})
+	code = runCompanionLiveGate(t, &stdout, &stderr, []string{"check", "--staged"})
 	if code != 0 {
 		t.Fatalf("gate check --staged failed with code %d. stderr: %s", code, stderr.String())
 	}
