@@ -13930,6 +13930,11 @@
           "category": "incidental",
           "reason": "Closed profile ledger diagnostic withholding forward-versus-remainder decomposition when saved forward events do not establish complete single-lane coverage; evidence sufficiency, not a product support or maturity classification.",
           "token": "forward_coverage_not_single_lane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional backend capability predicate for the existing routed SwiGLU operation over a borrowed panel row; it is not an independent support-maturity policy.",
+          "token": "SupportsV41RoutedSwiGLUPanelRow"
         }
       ],
       "exclude": [
@@ -14061,6 +14066,7 @@
         "SupportsBorrowedExpertUploads",
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
+        "SupportsV41RoutedSwiGLUPanelRow",
         "TensorCoverageArchSchema",
         "TensorCoverageCanonicalMap",
         "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
@@ -16749,6 +16755,16 @@
           "category": "incidental",
           "reason": "Private probe adapter for an existing HTTPPlanner request, not a new planning abstraction or planner algorithm; it prepares the configured inference request and records bounded qualification evidence.",
           "token": "opsRunPlannerInferencePreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded geometry result containing row offset and byte extents for the existing routed SwiGLU arithmetic; it is not a separate planning mechanism.",
+          "token": "V41RoutedSwiGLUPanelRowPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure geometry and overflow validator for one routed SwiGLU panel row; it introduces no scheduling or independent planning mechanism.",
+          "token": "PlanV41RoutedSwiGLUPanelRow"
         }
       ],
       "exclude": [
@@ -16837,6 +16853,7 @@
         "PlanUnits",
         "PlanUnregisteredResidue",
         "PlanV41EPOwnerBuild",
+        "PlanV41RoutedSwiGLUPanelRow",
         "PlanningEffect",
         "PressuredSnapshotCandidates",
         "ProjectWatchdogCandidates",
@@ -16862,6 +16879,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "UncoveredCandidateClasses",
+        "V41RoutedSwiGLUPanelRowPlan",
         "ValidateListPlan",
         "WalkPlanners",
         "WatchdogCandidate",
