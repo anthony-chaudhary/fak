@@ -190,6 +190,7 @@ function Build-Shaders {
     $shaders += "v41_q2k_token_panel"
     # V19/complete83 adds the Q3_K token panel, preserving historical V18/82.
     $shaders += "v41_q3k_token_panel"
+    $shaders += "v41_routed_swiglu_panel_row"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"
