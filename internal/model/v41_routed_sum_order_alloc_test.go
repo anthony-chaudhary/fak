@@ -36,6 +36,27 @@ func TestV41RoutedSumOrderStableAllocations(t *testing.T) {
 		if got == nil {
 			t.Fatal("empty order lost the original non-nil slice contract")
 		}
+		// Every original slot appears once, ordered by expert and then by its
+		// original position within each equal-expert group.
+		if len(got) != len(picks) {
+			t.Fatalf("order length=%d, want one slot per input pick (%d)", len(got), len(picks))
+		}
+		seen := make([]bool, len(picks))
+		for pos, slot := range got {
+			if slot < 0 || slot >= len(picks) || seen[slot] {
+				t.Fatalf("order=%v is not a permutation of input slots: position=%d slot=%d", got, pos, slot)
+			}
+			seen[slot] = true
+			if pos > 0 {
+				previous := got[pos-1]
+				if picks[previous].expert > picks[slot].expert {
+					t.Fatalf("expert order decreased at position %d: order=%v picks=%v", pos, got, picks)
+				}
+				if picks[previous].expert == picks[slot].expert && previous >= slot {
+					t.Fatalf("equal experts lost original slot order at position %d: order=%v", pos, got)
+				}
+			}
+		}
 		for i := range picks {
 			if picks[i] != before[i] {
 				t.Fatalf("input pick %d mutated", i)
@@ -48,9 +69,6 @@ func TestV41RoutedSumOrderStableAllocations(t *testing.T) {
 				t.Fatal("returned orders share mutable storage")
 			}
 		}
-	}
-	if got := v41RoutedSumOrder(cases[4]); !reflect.DeepEqual(got, []int{4, 1, 3, 0, 2, 5}) {
-		t.Fatalf("equal experts lost original slot order: %v", got)
 	}
 
 	picks := cases[3]
