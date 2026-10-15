@@ -16,6 +16,8 @@ layout(local_size_x = 64) in;
 const uint OUT_ROWS = 2u;
 const uint LANES = 64u;
 const uint MAX_TOKENS = 8u;
+// Loaded-module marker: only this bounded Y-grid ABI may admit larger panels.
+layout(constant_id = 31) const uint Q2_TOKEN_GRID_ABI = 0x51324731u;
 layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
 layout(std430, set = 0, binding = 1) readonly buffer X { vec4 x4[]; };
 layout(std430, set = 0, binding = 2) writeonly buffer Y { float y[]; };
@@ -32,7 +34,10 @@ void main() {
     uint rowBase = gl_WorkGroupID.x * OUT_ROWS;
     uint outDim = uint(pc.outDim), inDim = uint(pc.inDim);
     bool hasRow1 = rowBase + 1u < outDim;
-    uint tokens = uint(pc.tokens), nsb = inDim / 256u;
+    uint totalTokens = uint(pc.tokens);
+    uint tokenBase = gl_WorkGroupID.y * MAX_TOKENS;
+    if (Q2_TOKEN_GRID_ABI != 0x51324731u || totalTokens < 2u || totalTokens > 64u || tokenBase >= totalTokens) return;
+    uint tokens = min(MAX_TOKENS, totalTokens - tokenBase), nsb = inDim / 256u;
     uint wordsPerRow = nsb * 21u;
     uint t16 = tid & 15u, h = t16 >> 3u, s = (t16 >> 2u) & 1u;
     uint lq = (t16 & 3u) * 4u;
@@ -81,7 +86,7 @@ void main() {
             }
             uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
             for (uint t = 0u; t < tokens; ++t) {
-                vec4 xv = x4[t * (inDim >> 2u) + idx];
+                vec4 xv = x4[(tokenBase + t) * (inDim >> 2u) + idx];
                 precise float x01 = xv.x + xv.y;
                 precise float x012 = x01 + xv.z;
                 precise float xsum = x012 + xv.w;
@@ -141,6 +146,6 @@ void main() {
         barrier();
     }
     if (tid < OUT_ROWS && rowBase + tid < outDim) {
-        for (uint t = 0u; t < tokens; ++t) y[t * outDim + rowBase + tid] = red[(t * OUT_ROWS + tid) * LANES];
+        for (uint t = 0u; t < tokens; ++t) y[(tokenBase + t) * outDim + rowBase + tid] = red[(t * OUT_ROWS + tid) * LANES];
     }
 }

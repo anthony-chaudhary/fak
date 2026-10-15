@@ -1,17 +1,21 @@
 package compute
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/kquantbits"
 )
 
-// fak-test:runtime fast est=50ms
+// fak-test:runtime fast est=100ms
 // This software witness proves indexing, independent row arithmetic and a
-// token-independent number of decoded quant quartets in the scalar model of
+// eight-token-tile-independent count of decoded quant quartets in the scalar model of
 // the shader. It does not claim Vulkan compilation, device parity or traffic.
 func TestV41Q2KTokenPanelContract(t *testing.T) {
 	const out, in = 5, 512 // Includes the final odd output row and several lane groups.
@@ -23,9 +27,9 @@ func TestV41Q2KTokenPanelContract(t *testing.T) {
 		binary.LittleEndian.PutUint16(raw[off+80:], 0x2000) // 1/128
 		binary.LittleEndian.PutUint16(raw[off+82:], 0x1c00) // 1/256
 	}
-	for _, rows := range []int{2, 4, 8} {
+	for _, rows := range []int{2, 3, 4, 7, 8, 9, 16, 31, 32, 63, 64} {
 		plan, err := PlanV41Q2KTokenPanel(out, in, rows)
-		if err != nil || plan.WeightBytes != len(raw) || plan.InputBytes != rows*in*4 || plan.OutputBytes != rows*out*4 || plan.WorkgroupsX != 3 {
+		if err != nil || plan.WeightBytes != len(raw) || plan.InputBytes != rows*in*4 || plan.OutputBytes != rows*out*4 || plan.WorkgroupsX != 3 || plan.WorkgroupsY != uint32((rows+7)/8) {
 			t.Fatalf("rows=%d plan=%+v err=%v", rows, plan, err)
 		}
 		x := make([]float32, rows*in)
@@ -35,12 +39,12 @@ func TestV41Q2KTokenPanelContract(t *testing.T) {
 			}
 		}
 		got, decodes := v41Q2KTokenPanelScalar(raw, x, out, in, rows)
-		if decodes != out*(in/256)*64 {
-			t.Fatalf("rows=%d decoded %d quartets, want token-independent %d", rows, decodes, out*(in/256)*64)
+		if decodes != out*(in/256)*64*int(plan.WorkgroupsY) {
+			t.Fatalf("rows=%d decoded %d quartets, want once per eight-token tile %d", rows, decodes, out*(in/256)*64*int(plan.WorkgroupsY))
 		}
 		for token := 0; token < rows; token++ {
 			want, scalarDecodes := v41Q2KTokenPanelScalar(raw, x[token*in:(token+1)*in], out, in, 1)
-			if scalarDecodes != decodes {
+			if scalarDecodes*int(plan.WorkgroupsY) != decodes {
 				t.Fatal("repeated scalar arms must each pay the whole quant decode count")
 			}
 			for o := 0; o < out; o++ {
@@ -69,7 +73,7 @@ func TestV41Q2KTokenPanelContract(t *testing.T) {
 			t.Fatalf("full expert geometry %v refused: %v", dims, err)
 		}
 	}
-	for _, dims := range [][3]int{{5, 512, 1}, {5, 512, 3}, {5, 512, 9}, {0, 512, 2}, {5, 511, 2}, {1 << 30, 512, 8}, {5, 1 << 30, 8}} {
+	for _, dims := range [][3]int{{5, 512, 0}, {5, 512, 1}, {5, 512, 65}, {0, 512, 2}, {5, 511, 2}, {1 << 30, 512, 8}, {5, 1 << 30, 8}} {
 		if _, err := PlanV41Q2KTokenPanel(dims[0], dims[1], dims[2]); err == nil {
 			t.Fatalf("invalid geometry %v admitted", dims)
 		}
@@ -83,9 +87,47 @@ func TestV41Q2KTokenPanelContract(t *testing.T) {
 	if err := q2TokenPanelActivationReuseSourceContract(string(source)); err != nil {
 		t.Fatal(err)
 	}
+	for _, replacement := range [][2]string{
+		{"tokenBase >= totalTokens", "tokenBase > totalTokens"},
+		{"x4[(tokenBase + t)", "x4[t"},
+		{"y[(tokenBase + t)", "y[t"},
+	} {
+		broken := strings.Replace(string(source), replacement[0], replacement[1], 1)
+		if broken == string(source) || q2TokenPanelActivationReuseSourceContract(broken) == nil {
+			t.Fatal("negative control accepted unmasked or misaddressed token grid")
+		}
+	}
+	native, err := os.ReadFile("vulkan_shim.cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v41Q2TokenGridNativeSource(string(native)); err != nil {
+		t.Fatal(err)
+	}
+	for _, replacement := range [][2]string{
+		{"!g_v41Q2TokenGridModule && tokens != 2", "false && tokens != 2"},
+		{"g_v41Q2TokenGridModule = q2GridABI == 1", "g_v41Q2TokenGridModule = true"},
+		{"if (q2GridABI < 0) return false;", ""},
+	} {
+		broken := strings.Replace(string(native), replacement[0], replacement[1], 1)
+		if broken == string(native) || v41Q2TokenGridNativeSource(broken) == nil {
+			t.Fatal("negative control accepted unsafe loaded-module grid admission")
+		}
+	}
 }
 
 func v41Q2KTokenPanelScalar(raw []byte, x []float32, out, in, rows int) ([]float32, int) {
+	y, decodes := make([]float32, rows*out), 0
+	for base := 0; base < rows; base += 8 {
+		count := min(8, rows-base)
+		tile, n := v41Q2KTokenPanelScalarTile(raw, x[base*in:(base+count)*in], out, in, count)
+		copy(y[base*out:], tile)
+		decodes += n
+	}
+	return y, decodes
+}
+
+func v41Q2KTokenPanelScalarTile(raw []byte, x []float32, out, in, rows int) ([]float32, int) {
 	y := make([]float32, rows*out)
 	decodes := 0
 	for o := 0; o < out; o++ {
@@ -129,4 +171,80 @@ func v41Q2KTokenPanelScalar(raw []byte, x []float32, out, in, rows int) ([]float
 		}
 	}
 	return y, decodes
+}
+
+func v41Q2TokenGridNativeSource(source string) error {
+	comments := regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`)
+	source = comments.ReplaceAllString(source, "")
+	normalize := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	for _, text := range []string{
+		"uint32_t g_maxComputeWorkGroupCountY = 0;",
+		"bool g_v41Q2TokenGridModule = false;",
+		"g_maxComputeWorkGroupCountY = props2.properties.limits.maxComputeWorkGroupCount[1];",
+	} {
+		if strings.Count(normalize(source), text) != 1 {
+			return fmt.Errorf("missing actual device Y limit: %s", text)
+		}
+	}
+	extract := func(name string) (string, error) {
+		start := strings.Index(source, name)
+		if start < 0 {
+			return "", fmt.Errorf("missing native Q2 function %s", name)
+		}
+		brace := strings.Index(source[start:], "{")
+		if brace < 0 {
+			return "", fmt.Errorf("missing native Q2 body %s", name)
+		}
+		depth, end := 1, start+brace+1
+		for ; end < len(source) && depth != 0; end++ {
+			if source[end] == '{' {
+				depth++
+			}
+			if source[end] == '}' {
+				depth--
+			}
+		}
+		if depth != 0 {
+			return "", fmt.Errorf("unterminated native Q2 body %s", name)
+		}
+		return normalize(source[start:end]), nil
+	}
+	// Pin actual loaded-byte classification and its publication only after a
+	// successful pipeline build. A filename or mere framing is insufficient.
+	for name, want := range map[string]string{
+		"static int v41TokenGridModuleABI(": "1de863aa99e27cc08a870eef8e21dde6eb65babdb907531e998bd0e5b9f6ef98",
+		"bool buildKernel(":                 "c79c275b55af1a0ef9eb66c265ecdda2cb6d3cb71d1834b0544d042e6329b41b",
+	} {
+		body, err := extract(name)
+		if err != nil {
+			return err
+		}
+		if fmt.Sprintf("%x", sha256.Sum256([]byte(body))) != want {
+			return fmt.Errorf("loaded-module ABI admission changed: %s", name)
+		}
+	}
+	var native string
+	for _, name := range []string{"fvk_have_v41_q2k_token_panel", "fvk_v41_q2k_token_panel_shape", "fvk_v41_q2k_token_panel_f32"} {
+		body, err := extract("int " + name + "(")
+		if err != nil {
+			return err
+		}
+		native += body
+	}
+	for _, replacement := range [][2]string{
+		{"if (!g_v41Q2TokenGridModule && tokens != 2 && tokens != 4 && tokens != 8) return 0; ", ""},
+		{"(tokens < 2 || tokens > 64)", "(tokens != 2 && tokens != 4 && tokens != 8)"},
+		{"const uint64_t tokenGroups = (uint64_t(tokens) + 7u) / 8u; ", ""},
+		{" && g_maxComputeWorkGroupCountY != 0 && tokenGroups <= g_maxComputeWorkGroupCountY", ""},
+		{"uint32_t((uint64_t(tokens) + 7u) / 8u), true)", "1, true)"},
+	} {
+		if strings.Count(native, replacement[0]) != 1 {
+			return fmt.Errorf("native token bounds or dispatch grid changed")
+		}
+		native = strings.Replace(native, replacement[0], replacement[1], 1)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(native))); got != "226a83ea071cc8fcc29e7b7d174b28b1da10ccf595bca597056c9dd4b31c1e6d" {
+		return fmt.Errorf("native Q2 availability/storage/state contract changed: %s", got)
+	}
+	return nil
 }
