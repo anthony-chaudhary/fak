@@ -48,6 +48,33 @@ func v41TailRoPEInPlace(layer int, q, kv, cos, sin []float32, heads, headDim, ro
 	return nil
 }
 
+// v41TailRoPEHostTable snapshots already validated sin/cos operands before any
+// backend callback. Prior tables are immutable callback-owned host copies, not
+// caller slices. Reusing their exact bits does not admit their device handles;
+// the ordinary live-handle/model/epoch checks still run at the upload site.
+func v41TailRoPEHostTable(cos, sin []float32, prior [2][]float32) []float32 {
+	for _, table := range prior {
+		if len(table) != 2*len(sin) {
+			continue
+		}
+		equal := true
+		for j, value := range sin {
+			if math.Float32bits(value) != math.Float32bits(table[2*j]) || math.Float32bits(cos[j]) != math.Float32bits(table[2*j+1]) {
+				equal = false
+				break
+			}
+		}
+		if equal {
+			return table
+		}
+	}
+	table := make([]float32, 2*len(sin))
+	for j := range sin {
+		table[2*j], table[2*j+1] = sin[j], cos[j]
+	}
+	return table
+}
+
 // Refs #13668. This leaf uses the exact host-generated table, including its
 // current per-layer theta and amplitude. Q and KV remain transient. At most two
 // exact tables are session-owned; a miss adds 4*R uploaded bytes to the unchanged
@@ -123,10 +150,7 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				}
 			}
 		}
-		table := make([]float32, rotaryDim)
-		for j := range sin {
-			table[2*j], table[2*j+1] = sin[j], cos[j]
-		}
+		table := v41TailRoPEHostTable(cos, sin, [2][]float32{tables[0].values, tables[1].values})
 		run := func() ([]float32, []float32, error) {
 			stage = "query upload"
 			qt := s.uploadHostF32([]int{heads, headDim}, q, compute.MemoryActivation, "V4.1 tail-RoPE query")

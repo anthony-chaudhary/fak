@@ -83,7 +83,7 @@ func TestV41RoutedSlotTableShadersHoistSlotSelect(t *testing.T) {
 		{"shaders/v41_q3k_matvec_id.comp", "Q3K_SLOT(q3kRow%d, byteAt%d, raw%d)", "q3kRow%d(row, blocks, xPick)"},
 		{"shaders/v41_routed_down_sum.comp", "Q3K_SLOT(q3kRow%d, byteAt%d, raw%d)", "d = q3kRow%d(row, blocks, midBase)"},
 		{"shaders/v41_q2k_matvec_id.comp", "", "{ Q2K_BANK(raw%d, acc) break; }"},
-		{"shaders/v41_routed_gate_up_swiglu_id.comp", "", "Q2K_BANK(g%d, accG) Q2K_BANK(u%d, accU)"},
+		{"shaders/v41_routed_gate_up_swiglu_id.comp", "", "Q2K_PAIR(g%d, u%d)"},
 	} {
 		raw, err := os.ReadFile(filepath.FromSlash(c.path))
 		if err != nil {

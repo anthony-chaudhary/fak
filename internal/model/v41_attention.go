@@ -643,6 +643,10 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 //
 // The update carries every published row in increasing stack order, which the
 // state's validateUpdates requires; a caller therefore never reorders them.
+// Positive-ratio payloads borrow the completed input rows until the caller's
+// immediate, synchronous publishUpdates call. That call validates the full batch
+// before copying into independently owned state; callers must not retain these
+// updates or mutate their inputs before publication completes.
 func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV [][]float32, qLatRows [][]float32, projectedKeys ...[][]float32) []V41AttentionStateUpdate {
 	if plan.Ratio == 0 {
 		return nil
@@ -687,14 +691,22 @@ func (m *Model) v41AttentionSourceUpdates(plan V41AttentionPlan, compressedKV []
 	for i, row := range compressedKV {
 		up := V41AttentionStateUpdate{Ref: ref}
 		if isKV {
-			up.Latent = append([]float32(nil), row...)
+			if plan.Ratio > 0 && len(row) > 0 {
+				up.Latent = row[:len(row):len(row)]
+			} else {
+				up.Latent = append([]float32(nil), row...)
+			}
 		}
 		if isIndex {
 			key := row
 			if indexKeys != nil {
 				key = indexKeys[i]
 			}
-			up.IndexKey = append([]float32(nil), key...)
+			if plan.Ratio > 0 && len(key) > 0 {
+				up.IndexKey = key[:len(key):len(key)]
+			} else {
+				up.IndexKey = append([]float32(nil), key...)
+			}
 		}
 		updates = append(updates, up)
 	}

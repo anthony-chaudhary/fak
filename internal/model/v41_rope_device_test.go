@@ -34,6 +34,7 @@ type v41TailRoPETestBackend struct {
 	failCall                 int
 	cause                    error
 	panicValue               any
+	onUpload                 func(string)
 }
 
 func newV41TailRoPETestBackend() *v41TailRoPETestBackend {
@@ -51,6 +52,9 @@ func (b *v41TailRoPETestBackend) UploadClass(x compute.Tensor, dt compute.Dtype,
 	}
 	if class != compute.MemoryActivation || dt != compute.F32 {
 		panic("tail-RoPE upload is not a classed F32 activation")
+	}
+	if b.onUpload != nil {
+		b.onUpload(site)
 	}
 	if b.fault == "upload" && b.uploadCount+1 == b.failCall {
 		panic(b.cause)
@@ -671,5 +675,85 @@ func TestV41FullAttentionRoPEAliasedOutputsAndAtomicFailure(t *testing.T) {
 	}
 	if _, _, err := v41AttentionQKRoPE(cfg, 0, q, kv, []float32{1}, []float32{0}, 1, hd, 2, fail); !errors.Is(err, sentinel) {
 		t.Fatalf("selected identity lost: %v", err)
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/model/v41_rope_device.go
+// fak-test:runtime fast est=100ms lane=default
+func TestV41TailRoPEHostTableSnapshot(t *testing.T) {
+	pack := func(cos, sin []float32) []float32 {
+		table := make([]float32, 2*len(sin))
+		for j := range sin {
+			table[2*j], table[2*j+1] = sin[j], cos[j]
+		}
+		return table
+	}
+	cos, sin := make([]float32, 32), make([]float32, 32)
+	for j := range sin {
+		cos[j], sin[j] = 1-float32(j)/64, float32(j)/64
+	}
+	want := pack(cos, sin)
+	first := v41TailRoPEHostTable(cos, sin, [2][]float32{})
+	v41TailRoPECheckBits(t, "cold owned table", first, want)
+	cos[0], sin[0] = .25, .5
+	v41TailRoPECheckBits(t, "snapshot after caller mutation", first, want)
+	second := v41TailRoPEHostTable(cos, sin, [2][]float32{first})
+	v41TailRoPECheckBits(t, "changed same-width table", second, pack(cos, sin))
+	if &first[0] == &second[0] {
+		t.Fatal("changed operands reused a stale host table")
+	}
+	prior := [2][]float32{first, second}
+	var retained []float32
+	control := testing.AllocsPerRun(25, func() { retained = pack(cos, sin) })
+	warm := testing.AllocsPerRun(25, func() { retained = v41TailRoPEHostTable(cos, sin, prior) })
+	if warm != 0 || control < 1 || &retained[0] != &second[0] {
+		t.Fatalf("exact warm host reuse missing: control=%g warm=%g", control, warm)
+	}
+	t.Logf("64-float host table staging allocations: control=%g warm=%g", control, warm)
+	cos[0], sin[0] = 1, math.Float32frombits(0x80000000)
+	negativeZero := v41TailRoPEHostTable(cos, sin, prior)
+	v41TailRoPECheckBits(t, "signed-zero miss", negativeZero, pack(cos, sin))
+	if &negativeZero[0] == &first[0] || &negativeZero[0] == &second[0] {
+		t.Fatal("signed-zero table aliased a different-bit snapshot")
+	}
+
+	// Exercise the actual selected callback: mutating caller operands during
+	// query upload cannot change the table snapshot chosen before that callback.
+	b := newV41TailRoPETestBackend()
+	s := &Session{M: &Model{}, Backend: b}
+	t.Cleanup(s.Close)
+	rotate := s.v41TailRoPEFunc()
+	q := []float32{5, -7, 3, 11}
+	c, sn := []float32{1}, []float32{0}
+	if _, _, err := rotate(0, q, q, c, sn, 1, 4, 2); err != nil {
+		t.Fatal(err)
+	}
+	b.onUpload = func(site string) {
+		if site == "V4.1 tail-RoPE query" {
+			c[0], sn[0] = .5, .25
+		}
+	}
+	qo, ko, err := rotate(0, q, q, c, sn, 1, 4, 2)
+	b.onUpload = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	v41TailRoPECheckBits(t, "warm callback snapshot", b.calls[1].table, []float32{0, 1})
+	v41TailRoPECheckBits(t, "warm query", qo, q)
+	v41TailRoPECheckBits(t, "warm KV", ko, q)
+	if b.tableUploads != 1 {
+		t.Fatal("exact host snapshot changed device table residency")
+	}
+	if _, _, err := rotate(0, q, q, c, sn, 1, 4, 2); err != nil {
+		t.Fatal(err)
+	}
+	v41TailRoPECheckBits(t, "later changed caller table", b.calls[2].table, []float32{.25, .5})
+	if b.tableUploads != 2 {
+		t.Fatal("later changed input did not replace the table")
+	}
+	// Warm snapshots never authorize non-finite payloads or bypass admission.
+	c[0] = float32(math.NaN())
+	if _, _, err := rotate(0, q, q, c, sn, 1, 4, 2); err == nil || !s.BackendSessionClosed() || len(b.calls) != 3 || len(b.tables) != 0 {
+		t.Fatal("non-finite caller table reused cached admission or leaked ownership")
 	}
 }

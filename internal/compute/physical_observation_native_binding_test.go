@@ -31,8 +31,17 @@ func TestVulkanUploadAttributionNativeBinding(t *testing.T) {
 		t.Fatal("upload attribution must be gated and deferred inside the existing lock")
 	}
 	state := nativeAttributionDeclaration(t, "vulkan.go", "vulkanUploadAttribution")
-	if !strings.Contains(state, `os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1"`) {
-		t.Fatal("upload attribution must use the exact startup dispatch-profile gate")
+	if !strings.Contains(state, "C.fvk_dispatch_profile_enabled() != 0") {
+		t.Fatal("upload attribution must capture the native startup dispatch-profile gate")
+	}
+	shim, err := os.ReadFile("vulkan_shim.cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	getter := sourceSection(t, string(shim), `extern "C" int fvk_dispatch_profile_enabled`, "static inline void dp_inc")
+	if !strings.Contains(string(shim), "static const bool g_dp_on =") ||
+		!strings.Contains(getter, "return g_dp_on ? 1 : 0;") || strings.Contains(getter, "getenv") {
+		t.Fatal("native profile getter must only expose the captured immutable gate")
 	}
 	snapshot := nativeAttributionDeclaration(t, "vulkan_device_debug.go", "backendExecutionSnapshotLocked")
 	for _, required := range []string{
@@ -60,7 +69,9 @@ func TestVulkanUploadAttributionNativeBinding(t *testing.T) {
 		}
 	}
 	goHelpers := strings.NewReplacer("C.uint64_t", "uint64", "C.fvk_transfer_counters", "stubTransfers", "C.fvk_direct_h2d_bytes", "stubDirect").Replace(helpers.String())
-	fixture := "package compute\nimport (\"fmt\"; \"os\")\n" + state + "\n" +
+	goState := strings.ReplaceAll(state, "C.fvk_dispatch_profile_enabled", "stubProfileEnabled")
+	goStateOff := strings.NewReplacer("vulkanUploadAttribution", "disabledUploadAttribution", "stubProfileEnabled", "stubProfileDisabled").Replace(goState)
+	fixture := "package compute\nimport \"fmt\"\n" + goState + "\n" + goStateOff + "\n" +
 		nativeAttributionDeclaration(t, "physical_observation.go", "BackendCounterSnapshot") + "\n" +
 		nativeAttributionDeclaration(t, "physical_observation.go", "validateBackendTransferCounterPairs") + "\n" +
 		goHelpers + "\nfunc upload(class MemoryClass, operation func()) {\n" + prefix + "operation()\n}\n" + `
@@ -72,6 +83,10 @@ var vulkanMu checkedLock
 var reads, directReads int
 var total, count, direct uint64
 var nativeAvailable = true
+var nativeProfile = 1
+var profileReads int
+func stubProfileEnabled() int { profileReads++; return nativeProfile }
+func stubProfileDisabled() int { return 0 }
 func stubTransfers(hc, hb, dc, db, cc, cb *uint64) int {
  if !vulkanMu.held { panic("transfer sample outside lock") }; reads++
  if !nativeAvailable { return 0 }; *hc, *hb = count, total; return 1
@@ -146,6 +161,13 @@ func nativeAttributionDeclaration(t *testing.T, path, name string) string {
 const nativeAttributionFixtureTest = `package compute
 import "testing"
 func TestExtractedUploadControlFlow(t *testing.T) {
+ if !vulkanUploadAttribution.enabled || disabledUploadAttribution.enabled || profileReads != 1 {
+  t.Fatal("upload attribution did not capture enabled/disabled native gates exactly once")
+ }
+ nativeProfile = 0
+ if !vulkanUploadAttribution.enabled || profileReads != 1 {
+  t.Fatal("upload attribution reread the startup gate")
+ }
  vulkanUploadAttribution.enabled = false
  upload("weights", func() { total += 5; count++ })
  if a, observed, err := snapshot(); err != nil || observed || a != (BackendH2DAttribution{}) || reads != 0 || directReads != 0 {
@@ -184,5 +206,6 @@ func TestExtractedUploadControlFlow(t *testing.T) {
  count = 0
  upload("weights", func() {})
  if _, observed, err := snapshot(); err == nil || observed { t.Fatal("invalid native tuple was accepted") }
+ if profileReads != 1 { t.Fatal("upload or snapshot reread the startup gate") }
 }
 `

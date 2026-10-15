@@ -57,6 +57,10 @@ struct DispatchProfileCounters {
 };
 static DispatchProfileCounters g_dp;
 static const bool g_dp_on = [] { const char* v = std::getenv("FAK_VULKAN_DISPATCH_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
+// One startup authority for native dispatch and Go upload attribution.
+extern "C" int fvk_dispatch_profile_enabled(void) {
+    return g_dp_on ? 1 : 0;
+}
 static inline void dp_inc(std::atomic<uint64_t>& v) { if (g_dp_on) v.fetch_add(1, std::memory_order_relaxed); }
 
 #define VKCHECK(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { \

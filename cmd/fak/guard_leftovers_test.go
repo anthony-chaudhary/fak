@@ -209,7 +209,7 @@ func TestGuardIssuesFiledCodexNativeCoverage(t *testing.T) {
 		{name: "Go execution wrapper", input: shell("go test -exec ./file-issue ./internal/headlesslint")},
 		{name: "Go toolexec wrapper", input: shell("go build -toolexec=./file-issue ./cmd/fak")},
 		{name: "Go generate runs directives", input: shell("go generate ./...")},
-		{name: "Go test without wrapper", input: shell("go test ./internal/headlesslint/"), known: true},
+		{name: "Go test executes package code", input: shell("go test ./internal/headlesslint/")},
 		{name: "Claude metadata", input: claude + "\n" + `{"type":"summary"}` + "\n" + `{"type":"system"}`, known: true},
 		{name: "foreign loaded record", input: claude + "\n" + `{"type":"foreign"}`},
 		{name: "nonrecord JSON", input: claude + "\n1"},

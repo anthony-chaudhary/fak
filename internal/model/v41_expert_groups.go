@@ -75,15 +75,29 @@ func v41PlanExpertGroups(picks [][]routePick) []v41ExpertGroup {
 	}
 	groups := make([]v41ExpertGroup, 0, total)
 	index := make(map[int]int, total)
-	for tok, perToken := range picks {
-		for slot := range perToken {
-			expert := perToken[slot].expert
-			gi, ok := index[expert]
-			if !ok {
-				gi = len(groups)
-				groups = append(groups, v41ExpertGroup{Expert: expert})
-				index[expert] = gi
+	for _, perToken := range picks {
+		for _, pick := range perToken {
+			if index[pick.expert] == 0 {
+				groups = append(groups, v41ExpertGroup{Expert: pick.expert})
 			}
+			index[pick.expert]++
+		}
+	}
+	// The whole plan has one synchronous owner. Count first so its rows need
+	// one exact backing allocation, without per-expert append growth/copies.
+	// Cap each view at its boundary: appending must never overwrite a peer.
+	rows := make([]v41ExpertRow, total)
+	offset := 0
+	for gi := range groups {
+		expert := groups[gi].Expert
+		end := offset + index[expert]
+		groups[gi].Rows = rows[offset:offset:end]
+		offset = end
+		index[expert] = gi // Counts are consumed; reuse the map for lookup.
+	}
+	for tok, perToken := range picks {
+		for slot, pick := range perToken {
+			gi := index[pick.expert]
 			groups[gi].Rows = append(groups[gi].Rows, v41ExpertRow{Token: tok, Slot: slot})
 		}
 	}

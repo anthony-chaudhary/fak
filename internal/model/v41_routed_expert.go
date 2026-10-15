@@ -163,7 +163,9 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 			fused[i] = silu(gate[i]) * up[i]
 		}
 	}
-	weighted := make([]float32, I)
+	// Both paths own fused: callback output was copied and the host path
+	// allocated it. No caller can observe the unweighted intermediate.
+	weighted := fused
 	for i, v := range fused {
 		if !finite32(v) {
 			return nil, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)

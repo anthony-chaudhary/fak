@@ -133,10 +133,13 @@ func (b *v41EPNativeRouterBackend) Free(x compute.Tensor) {
 func (*v41EPNativeRouterBackend) V41RouterTopKAvailable() bool { return true }
 
 func (b *v41EPNativeRouterBackend) V41RouterTopK(logits, bias compute.Tensor, rows, experts, topK int, scale float32, full, hasBias bool) (compute.V41RouterPicks, error) {
-	if b.expertWork || rows != 1 || logits.Dtype != compute.F32 || !reflect.DeepEqual(logits.Shape, []int{1, experts}) {
+	if b.expertWork || rows <= 0 || logits.Dtype != compute.F32 || !reflect.DeepEqual(logits.Shape, []int{rows, experts}) {
 		return compute.V41RouterPicks{}, errors.New("canonical router entered the wrong ownership scope")
 	}
 	b.requireOuter(logits)
+	if b.gateOutputs[logits.Buf()] != 0 && rows != 1 {
+		return compute.V41RouterPicks{}, errors.New("resident decode router input is not single-row")
+	}
 	b.router++
 	if b.gateOutputs[logits.Buf()] != 0 {
 		b.native++
@@ -150,14 +153,18 @@ func (b *v41EPNativeRouterBackend) V41RouterTopK(logits, bias compute.Tensor, ro
 		correction = b.Backend.Read(bias)
 	}
 	// Internal CPU reads implement the recorder's math, not outer seam traffic.
-	picks, err := v41RouteForGeometry(b.Backend.Read(logits), correction, v41RouterConfig{Experts: experts, TopK: topK, SharedCount: 1, RouteScale: scale}, full)
-	if err != nil {
-		return compute.V41RouterPicks{}, err
-	}
+	values := b.Backend.Read(logits)
+	cfg := v41RouterConfig{Experts: experts, TopK: topK, SharedCount: 1, RouteScale: scale}
 	out := compute.V41RouterPicks{}
-	for _, pick := range picks {
-		out.Experts = append(out.Experts, int32(pick.expert))
-		out.Weights = append(out.Weights, pick.weight)
+	for row := 0; row < rows; row++ {
+		picks, err := v41RouteForGeometry(values[row*experts:(row+1)*experts], correction, cfg, full)
+		if err != nil {
+			return compute.V41RouterPicks{}, err
+		}
+		for _, pick := range picks {
+			out.Experts = append(out.Experts, int32(pick.expert))
+			out.Weights = append(out.Weights, pick.weight)
+		}
 	}
 	return out, nil
 }
@@ -172,6 +179,59 @@ func (b *v41EPNativeRouterBackend) retired() error {
 		}
 	}
 	return nil
+}
+
+// The native recorder must accept ordinary uploaded cold-prefill panels while
+// keeping resident decode inputs single-row and retaining exact ownership.
+// fak-test:runtime fast est=20ms lane=default
+func TestV41EPNativeRouterRecorderPanel(t *testing.T) {
+	cfg := v41DefaultRouterConfig()
+	const rows = 2
+	b := newV41EPNativeRouterBackend(Config{NumExperts: cfg.Experts})
+	values, correction := make([]float32, rows*cfg.Experts), make([]float32, cfg.Experts)
+	for i := range values {
+		values[i] = float32((i+i/cfg.Experts*31)%cfg.Experts) / 32
+	}
+	for i := range correction {
+		correction[i] = float32(i%5) / 10
+	}
+	logits := b.own([]int{rows, cfg.Experts}, values, "test ordinary router panel")
+	bias := b.own([]int{cfg.Experts}, correction, "test router bias")
+	defer func() {
+		b.Free(bias)
+		b.Free(logits)
+		if err := b.retired(); err != nil {
+			t.Error(err)
+		}
+	}()
+	got, err := b.V41RouterTopK(logits, bias, rows, cfg.Experts, cfg.TopK, cfg.RouteScale, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want compute.V41RouterPicks
+	for row := 0; row < rows; row++ {
+		picks, err := v41RouteForGeometry(values[row*cfg.Experts:(row+1)*cfg.Experts], correction, cfg, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, pick := range picks {
+			want.Experts = append(want.Experts, int32(pick.expert))
+			want.Weights = append(want.Weights, pick.weight)
+		}
+	}
+	if !reflect.DeepEqual(got.Experts, want.Experts) || !v41SameBits(got.Weights, want.Weights) {
+		t.Fatal("ordinary panel changed row order, expert IDs or weight bits")
+	}
+	if _, err := b.V41RouterTopK(logits, bias, 1, cfg.Experts, cfg.TopK, cfg.RouteScale, false, true); err == nil {
+		t.Fatal("recorder accepted a mismatched declared row count")
+	}
+	b.gateOutputs[logits.Buf()] = uint64(logits.Numel()) * 4
+	if _, err := b.V41RouterTopK(logits, bias, rows, cfg.Experts, cfg.TopK, cfg.RouteScale, false, true); err == nil {
+		t.Fatal("recorder accepted a multirow resident decode input")
+	}
+	if b.router != 1 || b.native != 0 || b.gateReads != 0 {
+		t.Fatal("ordinary panel or rejected input changed native/read counters")
+	}
 }
 
 type v41EPNativeRouterResult struct {
@@ -328,6 +388,9 @@ func TestV41ExpertParallelNativeRouterTCP(t *testing.T) {
 						}
 						if err != nil {
 							results[rank].failure = err
+							if mode != "router_fault" || action != 1 {
+								return fmt.Errorf("unexpected forward failure at action %d: %w", action, err)
+							}
 							if logits != nil || !reflect.DeepEqual(st.history, []int{1, 2, 3}) {
 								return errors.New("failed Step committed output or history")
 							}

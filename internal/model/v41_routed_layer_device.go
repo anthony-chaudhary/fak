@@ -310,7 +310,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 			sumRow = sum
 			s.M.v41NoteRoutedLayerDispatches(true, v41RoutedIDLayerDispatches)
 		}
-		published := make([]compute.Tensor, len(picks))
+		published := v41RoutedLayerPublicationRows(len(picks), useID, useFused)
 		for slot, pick := range picks {
 			if useID || useFused {
 				break
@@ -614,6 +614,15 @@ type v41RoutedLayerWeights struct{ gate, up, down compute.Tensor }
 func v41RoutedLayerProjectionTables(picks int) (gates, ups, downs []compute.Tensor) {
 	tables := make([]compute.Tensor, 3*picks)
 	return tables[:picks:picks], tables[picks : 2*picks : 2*picks], tables[2*picks : 3*picks : 3*picks]
+}
+
+// v41RoutedLayerPublicationRows holds the per-pick arm's published rows. The
+// ID and fused arms already produced their sum, so neither uses this table.
+func v41RoutedLayerPublicationRows(picks int, useID, useFused bool) []compute.Tensor {
+	if useID || useFused {
+		return nil
+	}
+	return make([]compute.Tensor, picks)
 }
 
 // Routed dispatches one batched layer records: the per-pick arm issues gate,
