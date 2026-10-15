@@ -1118,8 +1118,10 @@ func (s *Session) prefillOwned(ids []int) []float32 {
 // next input token and only needs KV state advanced.
 func (s *Session) PrefillNoLogits(ids []int) {
 	scope := s.beginBackendExecution()
-	defer scope.finish()
+	complete := false
+	defer scope.finishCompleted(&complete)
 	s.prefillNoLogitsOwned(ids)
+	complete = true
 }
 
 func (s *Session) prefillNoLogitsOwned(ids []int) {
