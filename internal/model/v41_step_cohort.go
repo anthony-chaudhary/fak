@@ -117,100 +117,110 @@ func (m *Model) forwardV41StepCohortOwned(scope *backendExecutionScope, lanes []
 	}
 	txs := make([]*v41StepTransaction, len(lanes))
 	scratch := make([]v41ProjScratch, len(lanes))
-	defer v41AbortStepCohort(txs, results, &err)
+	complete := false
+	defer func() { v41AbortStepCohort(txs, results, &err, complete) }()
+	err = func() (err error) {
 
-	cancelled := func(lane int) bool {
-		receipt.atLane(lane)
-		if ctx := lanes[lane].ctx; ctx != nil && ctx.Err() != nil {
-			results[lane].err = ctx.Err()
-			if txs[lane] != nil {
-				txs[lane].abort()
+		cancelled := func(lane int) bool {
+			receipt.atLane(lane)
+			if ctx := lanes[lane].ctx; ctx != nil && ctx.Err() != nil {
+				results[lane].err = ctx.Err()
+				if txs[lane] != nil {
+					txs[lane].abort()
+				}
+				return true
 			}
-			return true
+			return false
 		}
-		return false
-	}
-	active := 0
-	for lane := range lanes {
-		if !cancelled(lane) {
-			active++
-		}
-	}
-	if active == 0 {
-		return nil
-	}
-
-	// Close the recording window once on success, error or panic. Mark it
-	// closed BEFORE End so even a panicking End cannot cause a duplicate End.
-	var end func() error
-	receipt.atLane(-1)
-	if backend, ok := lanes[0].session.Backend.(compute.V41StepBatchBackend); ok && os.Getenv(v41StepBatchEnv) != "0" {
-		if !backend.BeginV41StepBatch() {
-			if receipt != nil {
-				receipt.windowDeclined = true
+		active := 0
+		for lane := range lanes {
+			if !cancelled(lane) {
+				active++
 			}
-			return fmt.Errorf("%w: backend recording window is unavailable", errV41StepCohortDeclined)
 		}
-		end = backend.EndV41StepBatch
-	}
-	finish := func() error {
-		if end == nil {
+		if active == 0 {
 			return nil
 		}
-		closeWindow := end
-		end = nil
-		if err := closeWindow(); err != nil {
-			return &v41StepBatchError{err: err}
-		}
-		return nil
-	}
-	defer v41FinishStepCohort(finish, &err)
 
-	for lane, input := range lanes {
-		if cancelled(lane) {
-			continue
+		// Close the recording window once on success, error or panic. Mark it
+		// closed BEFORE End so even a panicking End cannot cause a duplicate End.
+		var end func() error
+		receipt.atLane(-1)
+		if backend, ok := lanes[0].session.Backend.(compute.V41StepBatchBackend); ok && os.Getenv(v41StepBatchEnv) != "0" {
+			if !backend.BeginV41StepBatch() {
+				if receipt != nil {
+					receipt.windowDeclined = true
+				}
+				return fmt.Errorf("%w: backend recording window is unavailable", errV41StepCohortDeclined)
+			}
+			end = backend.EndV41StepBatch
 		}
-		txs[lane], err = m.beginV41StepAdmitted(input.id, input.session.v41State(), &scratch[lane])
-		if err != nil {
-			results[lane].err = err
-			return err
+		finish := func() error {
+			if end == nil {
+				return nil
+			}
+			closeWindow := end
+			end = nil
+			if err := closeWindow(); err != nil {
+				return &v41StepBatchError{err: err}
+			}
+			return nil
 		}
-	}
-	for layer := 0; layer < m.Cfg.NumLayers; layer++ {
-		if m.v41LayerCohortEnabled(lanes, txs) {
-			if err = m.advanceV41LayerCohort(scope, lanes, txs, results, receipt, cancelled); err != nil {
+		windowComplete := false
+		defer func() { v41FinishStepCohort(finish, &err, windowComplete) }()
+		err = func() error {
+
+			for lane, input := range lanes {
+				if cancelled(lane) {
+					continue
+				}
+				txs[lane], err = m.beginV41StepAdmitted(input.id, input.session.v41State(), &scratch[lane])
+				if err != nil {
+					results[lane].err = err
+					return err
+				}
+			}
+			for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+				if m.v41LayerCohortEnabled(lanes, txs) {
+					if err = m.advanceV41LayerCohort(scope, lanes, txs, results, receipt, cancelled); err != nil {
+						return err
+					}
+					continue
+				}
+				for lane, tx := range txs {
+					if tx == nil || tx.closed || cancelled(lane) {
+						continue
+					}
+					if err = tx.advanceLayer(); err != nil {
+						results[lane].err = err
+						return err
+					}
+				}
+			}
+			receipt.atLane(-1)
+			if err = finish(); err != nil {
 				return err
 			}
-			continue
-		}
-		for lane, tx := range txs {
-			if tx == nil || tx.closed || cancelled(lane) {
-				continue
+			if sharedHead {
+				return m.v41FinishSharedHeads(lanes, txs, results, cancelled, receipt)
 			}
-			if err = tx.advanceLayer(); err != nil {
-				results[lane].err = err
-				return err
+			for lane, tx := range txs {
+				if tx == nil || tx.closed || cancelled(lane) {
+					continue
+				}
+				results[lane].logits, err = tx.finalize()
+				if err != nil {
+					results[lane].err = err
+					return err
+				}
 			}
-		}
-	}
-	receipt.atLane(-1)
-	if err = finish(); err != nil {
+			return nil
+		}()
+		windowComplete = true
 		return err
-	}
-	if sharedHead {
-		return m.v41FinishSharedHeads(lanes, txs, results, cancelled, receipt)
-	}
-	for lane, tx := range txs {
-		if tx == nil || tx.closed || cancelled(lane) {
-			continue
-		}
-		results[lane].logits, err = tx.finalize()
-		if err != nil {
-			results[lane].err = err
-			return err
-		}
-	}
-	return nil
+	}()
+	complete = true
+	return err
 }
 
 // Exact Model and pointer Backend identities bind configuration and immutable
@@ -280,8 +290,8 @@ func (m *Model) v41StepCohortAdmit(lanes []v41StepCohortLane) error {
 // v41AbortStepCohort drains every lane even when releasing one lane's resources
 // panics. It preserves an existing panic or returned error; absent either, the
 // first cleanup panic escapes after all journals and stats have been processed.
-func v41AbortStepCohort(txs []*v41StepTransaction, results []v41StepCohortResult, err *error) {
-	primary := recover()
+func v41AbortStepCohort(txs []*v41StepTransaction, results []v41StepCohortResult, err *error, complete bool) {
+	failed := !complete || *err != nil
 	var cleanupPanic any
 	for lane, tx := range txs {
 		if tx == nil {
@@ -297,10 +307,7 @@ func v41AbortStepCohort(txs []*v41StepTransaction, results []v41StepCohortResult
 		}()
 		results[lane].stats = tx.stats
 	}
-	if primary != nil {
-		panic(primary)
-	}
-	if *err == nil && cleanupPanic != nil {
+	if !failed && cleanupPanic != nil {
 		panic(cleanupPanic)
 	}
 }
@@ -308,13 +315,11 @@ func v41AbortStepCohort(txs []*v41StepTransaction, results []v41StepCohortResult
 // v41FinishStepCohort closes the recording window once while preserving an
 // earlier returned error as well as an earlier panic. A standalone End panic
 // still escapes and is handled by the outer all-lane abort and owner release.
-func v41FinishStepCohort(finish func() error, err *error) {
-	if primary := recover(); primary != nil {
-		func() {
-			defer func() { _ = recover() }()
-			_ = finish()
-		}()
-		panic(primary)
+func v41FinishStepCohort(finish func() error, err *error, complete bool) {
+	if !complete {
+		defer func() { _ = recover() }()
+		_ = finish()
+		return
 	}
 	if *err != nil {
 		defer func() { _ = recover() }()
