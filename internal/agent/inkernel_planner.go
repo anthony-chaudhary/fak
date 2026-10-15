@@ -1587,6 +1587,26 @@ func recoverDevicePanic(r any) (err error, handled bool) {
 	return nil, false
 }
 
+// recoverDeviceCall preserves panic presence separately from its payload.
+// Recovery is local to the inner call; Goexit never reaches the conversion below.
+func recoverDeviceCall[T any](call func() (T, error)) (result T, err error) {
+	returned := false
+	var payload any
+	func() {
+		defer func() { payload = recover() }()
+		result, err = call()
+		returned = true
+	}()
+	if !returned {
+		if converted, handled := recoverDevicePanic(payload); handled {
+			var zero T
+			return zero, converted
+		}
+		panic(payload)
+	}
+	return result, err
+}
+
 type inKernelGenerateResult struct {
 	gen, promptTok, matched int
 	// cacheable is the lookup-side prefix match (#3390): tokens the radix index matched
@@ -1639,46 +1659,39 @@ const (
 )
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			if e, ok := recoverDevicePanic(r); ok {
-				err = e
-				return
+	return recoverDeviceCall(func() (res inKernelGenerateResult, err error) {
+		// Budgeted requests use the shared target sampler until speculative acceptance
+		// and rollback carry the same request-local constraint.
+		targetOnly := nativeThinkingConstraintFromContext(ctx) != nil
+		if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
+			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
+				return inKernelGenerateResult{}, err
 			}
-			panic(r)
+			return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
+		} else if coord != nil {
+			targetOnly = true
 		}
-	}()
-	// Budgeted requests use the shared target sampler until speculative acceptance
-	// and rollback carry the same request-local constraint.
-	targetOnly := nativeThinkingConstraintFromContext(ctx) != nil
-	if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
-		if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
+		if !targetOnly && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
+			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
+				return inKernelGenerateResult{}, err
+			}
+			return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
+		}
+		gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
+		if err != nil {
 			return inKernelGenerateResult{}, err
 		}
-		return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
-	} else if coord != nil {
-		targetOnly = true
-	}
-	if !targetOnly && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
-		if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
-			return inKernelGenerateResult{}, err
-		}
-		return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
-	}
-	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
-	if err != nil {
-		return inKernelGenerateResult{}, err
-	}
-	return inKernelGenerateResult{
-		gen:        gen,
-		promptTok:  promptTok,
-		cacheable:  cacheable,
-		matched:    matched,
-		sourceTier: sourceTier,
-		prefillS:   prefillS,
-		decodeS:    decodeS,
-		stopped:    stopped,
-	}, nil
+		return inKernelGenerateResult{
+			gen:        gen,
+			promptTok:  promptTok,
+			cacheable:  cacheable,
+			matched:    matched,
+			sourceTier: sourceTier,
+			prefillS:   prefillS,
+			decodeS:    decodeS,
+			stopped:    stopped,
+		}, nil
+	})
 }
 
 func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func(), measurementOpt ...*nativeInferenceMeasurement) (inKernelGenerateResult, error) {
@@ -1978,414 +1991,414 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// goroutine. The same seam recovers the two declared Flash attention-admission
 	// refusals from direct Prefill/Step calls. Everything else re-panics, preserving
 	// today's crash/stack behavior for bugs.
-	defer func() {
-		if r := recover(); r != nil {
-			if e, ok := recoverDevicePanic(r); ok {
-				comp, err = nil, e
-				return
+	return recoverDeviceCall(func() (comp *Completion, err error) {
+		defer enginestep.Default.RequestStart()()
+		if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
+			return nil, p.qwenQ4KPrefillChunkConfigErr
+		}
+		if p.qwenQ4KPrefillChunkExplicit && p.qwenQ4KPrefillChunkTarget() {
+			if _, capacityErr := p.deviceBoundedQwenQ4KPrefillChunkTokens(); capacityErr != nil {
+				return nil, capacityErr
 			}
-			panic(r)
 		}
-	}()
-	defer enginestep.Default.RequestStart()()
-	if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
-		return nil, p.qwenQ4KPrefillChunkConfigErr
-	}
-	if p.qwenQ4KPrefillChunkExplicit && p.qwenQ4KPrefillChunkTarget() {
-		if _, capacityErr := p.deviceBoundedQwenQ4KPrefillChunkTokens(); capacityErr != nil {
-			return nil, capacityErr
+		sp := applySampleOpts(opts...)
+		if observer := sp.DecodeTokenObserver; observer != nil {
+			delivered := &atomic.Bool{}
+			ctx = context.WithValue(ctx, inKernelObserverDeliveryContextKey{}, delivered)
+			sp.DecodeTokenObserver = func(piece, raw string) {
+				// Mark before calling out: an observer can mutate a stream projector,
+				// deliver output, or fail itself. None of those effects are rewindable.
+				delivered.Store(true)
+				observer(piece, raw)
+			}
 		}
-	}
-	sp := applySampleOpts(opts...)
-	if observer := sp.DecodeTokenObserver; observer != nil {
-		delivered := &atomic.Bool{}
-		ctx = context.WithValue(ctx, inKernelObserverDeliveryContextKey{}, delivered)
-		sp.DecodeTokenObserver = func(piece, raw string) {
-			// Mark before calling out: an observer can mutate a stream projector,
-			// deliver output, or fail itself. None of those effects are rewindable.
-			delivered.Store(true)
-			observer(piece, raw)
+		if sp.NativeDecodeTokenIDs && !sp.DecodeTrace {
+			return nil, fmt.Errorf("native decode token IDs require a decode trace")
 		}
-	}
-	if sp.NativeDecodeTokenIDs && !sp.DecodeTrace {
-		return nil, fmt.Errorf("native decode token IDs require a decode trace")
-	}
-	var requestStarted time.Time
-	if sp.NativeInferenceReceipt {
-		if _, _, err := p.nativeSelectionIdentity(); err != nil {
-			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: err.Error()}
-		}
-		requestStarted = time.Now()
-	}
-	temp := p.temp
-	if sp.Temperature != nil {
-		temp = *sp.Temperature
-	}
-	// Per-request nucleus cutoff; 0 (the zero value) disables truncation so an omitted
-	// top_p keeps the full softmax draw, identical to the pre-seam path.
-	topP := 0.0
-	if sp.TopP != nil {
-		topP = *sp.TopP
-	}
-	// Per-request top-k; 0 (the zero value, and any value <=0) disables truncation so
-	// an omitted top_k keeps the full distribution, identical to the pre-seam path.
-	topK := 0
-	if sp.TopK != nil {
-		topK = *sp.TopK
-	}
-	var logitBias model.LogitBias
-	if len(sp.LogitBias) > 0 {
-		logitBias = model.LogitBias(sp.LogitBias)
-	}
-	// Per-request OpenAI repetition penalties; nil/omitted stays 0, which
-	// sampleLogitsWithPenalty treats as a byte-for-byte no-op (the pre-#1705 path).
-	var freqPenalty, presPenalty float64
-	if sp.FrequencyPenalty != nil {
-		freqPenalty = *sp.FrequencyPenalty
-	}
-	if sp.PresencePenalty != nil {
-		presPenalty = *sp.PresencePenalty
-	}
-	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
-		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
-	}
-	prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
-	if err != nil {
-		return nil, err
-	}
-	messages, tools = prepared.messages, prepared.tools
-	chat, ids, maxNew := prepared.rendered, prepared.ids, prepared.maxNew
-	ctx = withInKernelSharedPrefixBoundary(ctx, prepared.sharedBoundary)
-	if err := p.refuseContextLength(len(ids), maxNew); err != nil {
-		return nil, err
-	}
-	stops := StopIDs(p.tok, p.m.Cfg)
-	var turnContext []TurnAssessment
-	if ta, ok := AssessTranscriptTurn(messages); ok {
-		turnContext = append(turnContext, ta)
-	}
-	effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
-	startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
-	var thinking *nativeThinkingConstraint
-	if effectiveBudget > 0 {
+		var requestStarted time.Time
 		if sp.NativeInferenceReceipt {
-			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "thinking budget constrains token selection"}
+			if _, _, err := p.nativeSelectionIdentity(); err != nil {
+				return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: err.Error()}
+			}
+			requestStarted = time.Now()
 		}
-		thinking, err = p.newNativeThinkingConstraint(effectiveBudget, startInSpan, stops)
+		temp := p.temp
+		if sp.Temperature != nil {
+			temp = *sp.Temperature
+		}
+		// Per-request nucleus cutoff; 0 (the zero value) disables truncation so an omitted
+		// top_p keeps the full softmax draw, identical to the pre-seam path.
+		topP := 0.0
+		if sp.TopP != nil {
+			topP = *sp.TopP
+		}
+		// Per-request top-k; 0 (the zero value, and any value <=0) disables truncation so
+		// an omitted top_k keeps the full distribution, identical to the pre-seam path.
+		topK := 0
+		if sp.TopK != nil {
+			topK = *sp.TopK
+		}
+		var logitBias model.LogitBias
+		if len(sp.LogitBias) > 0 {
+			logitBias = model.LogitBias(sp.LogitBias)
+		}
+		// Per-request OpenAI repetition penalties; nil/omitted stays 0, which
+		// sampleLogitsWithPenalty treats as a byte-for-byte no-op (the pre-#1705 path).
+		var freqPenalty, presPenalty float64
+		if sp.FrequencyPenalty != nil {
+			freqPenalty = *sp.FrequencyPenalty
+		}
+		if sp.PresencePenalty != nil {
+			presPenalty = *sp.PresencePenalty
+		}
+		if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
+			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
+		}
+		prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 		if err != nil {
 			return nil, err
 		}
-		ctx = context.WithValue(ctx, nativeThinkingConstraintContextKey{}, thinking)
-	}
-	// emit runs per generated token: decode the piece, accumulate the text, and apply the
-	// per-request string-suffix Stop (orthogonal to the token-ID stops). Returning true
-	// ends the turn with the token counted and its text trimmed (the stop string is not
-	// echoed back, matching the HTTP wires). Factoring decode into this closure keeps the
-	// unbudgeted reuse/decode core (generateReused) tokenizer-free, so the candidate-#13
-	// reuse and #14 eviction are witnessable on a synthetic model with no tokenizer fixture.
-	//
-	// Delta accrual: tokens append into the accumulator once; the stop probe scans only a
-	// bounded tail window (the longest stop length) per token instead of re-materializing
-	// the whole buffer per token — O(N) total string work per completion instead of
-	// O(N^2) (issue #922). The fire path's whole-buffer checkStop stays the authoritative
-	// longest-match trim and runs once per completion; with no stop strings the scanner
-	// is a no-op and checkStop's hoisted empty-set early-out ends the probe at O(1).
-	var sb strings.Builder
-	maxStop := 0
-	for _, s := range sp.Stop {
-		if s != "" && len(s) > maxStop {
-			maxStop = len(s)
+		messages, tools = prepared.messages, prepared.tools
+		chat, ids, maxNew := prepared.rendered, prepared.ids, prepared.maxNew
+		ctx = withInKernelSharedPrefixBoundary(ctx, prepared.sharedBoundary)
+		if err := p.refuseContextLength(len(ids), maxNew); err != nil {
+			return nil, err
 		}
-	}
-	scanner := newIncrementalStopScanner(maxStop, sp.Stop)
-	emit := func(next int) bool {
-		if piece, derr := p.tok.Decode([]int{next}); derr == nil {
-			sb.WriteString(piece)
-			if sp.DecodeTokenObserver != nil {
-				sp.DecodeTokenObserver(piece, "")
+		stops := StopIDs(p.tok, p.m.Cfg)
+		var turnContext []TurnAssessment
+		if ta, ok := AssessTranscriptTurn(messages); ok {
+			turnContext = append(turnContext, ta)
+		}
+		effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
+		startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
+		var thinking *nativeThinkingConstraint
+		if effectiveBudget > 0 {
+			if sp.NativeInferenceReceipt {
+				return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "thinking budget constrains token selection"}
 			}
-			if scanner.appendPiece(piece) {
-				if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
-					sb.Reset()
-					sb.WriteString(trimmed)
-					return true
+			thinking, err = p.newNativeThinkingConstraint(effectiveBudget, startInSpan, stops)
+			if err != nil {
+				return nil, err
+			}
+			ctx = context.WithValue(ctx, nativeThinkingConstraintContextKey{}, thinking)
+		}
+		// emit runs per generated token: decode the piece, accumulate the text, and apply the
+		// per-request string-suffix Stop (orthogonal to the token-ID stops). Returning true
+		// ends the turn with the token counted and its text trimmed (the stop string is not
+		// echoed back, matching the HTTP wires). Factoring decode into this closure keeps the
+		// unbudgeted reuse/decode core (generateReused) tokenizer-free, so the candidate-#13
+		// reuse and #14 eviction are witnessable on a synthetic model with no tokenizer fixture.
+		//
+		// Delta accrual: tokens append into the accumulator once; the stop probe scans only a
+		// bounded tail window (the longest stop length) per token instead of re-materializing
+		// the whole buffer per token — O(N) total string work per completion instead of
+		// O(N^2) (issue #922). The fire path's whole-buffer checkStop stays the authoritative
+		// longest-match trim and runs once per completion; with no stop strings the scanner
+		// is a no-op and checkStop's hoisted empty-set early-out ends the probe at O(1).
+		var sb strings.Builder
+		maxStop := 0
+		for _, s := range sp.Stop {
+			if s != "" && len(s) > maxStop {
+				maxStop = len(s)
+			}
+		}
+		scanner := newIncrementalStopScanner(maxStop, sp.Stop)
+		emit := func(next int) bool {
+			if piece, derr := p.tok.Decode([]int{next}); derr == nil {
+				sb.WriteString(piece)
+				if sp.DecodeTokenObserver != nil {
+					sp.DecodeTokenObserver(piece, "")
+				}
+				if scanner.appendPiece(piece) {
+					if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
+						sb.Reset()
+						sb.WriteString(trimmed)
+						return true
+					}
 				}
 			}
+			return false
 		}
-		return false
-	}
 
-	// Resolve one request-local mode before dropping the ordinary planner gate.
-	// Flash is target-only and opt-in; unsupported exact layouts retain the
-	// lease through ordinary fallback, and never silently suppress speculation.
-	coalesced := p.coalescesQwenDecode()
-	coalesceKind := inKernelCoalesceQwen
-	if !coalesced && p.batchDecode && p.backend != nil && p.m.Cfg.IsDeepSeekV41() &&
-		p.speculativeEngine == nil && !p.vulkanMTP && p.vulkanMTPDraftFactory == nil && p.MetalMTPCoordinator() == nil {
-		eligibility, admissionErr := p.m.AcquireV41BatchEligibility(ctx, p.backend, 4)
-		if admissionErr != nil {
-			return nil, admissionErr
-		}
-		defer eligibility.Finish(&err)
-		if eligibility.Eligible() {
-			coalesced, coalesceKind = true, inKernelCoalesceV41
-		}
-	}
-
-	// Serialize the entire device forward pass: a single-stream accelerator cannot run two
-	// forwards at once without the concurrent op-streams corrupting shared device buffers
-	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
-	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
-	if p.requiresDeviceSerialization() && !coalesced {
-		// #1589 phase-timeline probe: record the fan-out boundary and the
-		// serialized critical section. Both calls are nil-safe no-ops unless a
-		// caller opted into a concurrency profile.
-		phase := p.concurrencyProfile.admit()
-		deviceWait := time.Now()
-		if err := p.devMu.LockContext(ctx); err != nil {
-			enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
-			return nil, err
-		}
-		enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
-		p.concurrencyProfile.forwardEnter(phase, true)
-		defer func() {
-			p.concurrencyProfile.forwardExit(phase)
-			p.devMu.Unlock()
-		}()
-		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
-			return nil, err
-		}
-	} else if p.concurrencyProfile != nil {
-		// Concurrent-unfused path (coalescing or CPU): still record the boundary
-		// so the timeline can distinguish "no mutex serialized us" from "no
-		// overlap happened at all".
-		phase := p.concurrencyProfile.admit()
-		p.concurrencyProfile.forwardEnter(phase, false)
-		defer p.concurrencyProfile.forwardExit(phase)
-	}
-	if coalesced {
-		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
-			return nil, err
-		}
-	}
-	// #13267: the host-session (Metal) seam has no compute.Backend for refuseOversizeRequest
-	// to ask, so an armed host ceiling prices it here, before any session or clone exists.
-	ctx, releaseHostMemory, hostErr := p.admitHostMemory(ctx, len(ids), maxNew)
-	if hostErr != nil {
-		return nil, hostErr
-	}
-	defer releaseHostMemory()
-	var measurement *nativeInferenceMeasurement
-	if sp.NativeInferenceReceipt || (sp.DecodeTrace && sp.DecodeTokenObserver == nil) || sp.NativeDecodeTokenIDs {
-		measurement = &nativeInferenceMeasurement{
-			startedAt:             requestStarted,
-			inferenceDisabled:     !sp.NativeInferenceReceipt,
-			decodeTokenIDsEnabled: sp.NativeDecodeTokenIDs,
-		}
-		if sp.NativeDecodeTokenIDs {
-			measurement.decodeTokenIDs = make([]int, 0, maxNew)
-		}
-		if sp.NativeInferenceReceipt {
-			measurement.cudaImmutableWeightUploadsBefore, measurement.cudaImmutableWeightUploadsAvailable = cudaImmutableWeightUploadSnapshot(p.backend)
-		}
-		if sp.DecodeTrace {
-			measurement.traceNow = p.decodeTraceNow
-			if measurement.traceNow == nil {
-				measurement.traceNow = time.Now
+		// Resolve one request-local mode before dropping the ordinary planner gate.
+		// Flash is target-only and opt-in; unsupported exact layouts retain the
+		// lease through ordinary fallback, and never silently suppress speculation.
+		complete := false
+		coalesced := p.coalescesQwenDecode()
+		coalesceKind := inKernelCoalesceQwen
+		if !coalesced && p.batchDecode && p.backend != nil && p.m.Cfg.IsDeepSeekV41() &&
+			p.speculativeEngine == nil && !p.vulkanMTP && p.vulkanMTPDraftFactory == nil && p.MetalMTPCoordinator() == nil {
+			eligibility, admissionErr := p.m.AcquireV41BatchEligibility(ctx, p.backend, 4)
+			if admissionErr != nil {
+				return nil, admissionErr
+			}
+			defer func() { eligibility.FinishCompleted(&err, complete) }()
+			if eligibility.Eligible() {
+				coalesced, coalesceKind = true, inKernelCoalesceV41
 			}
 		}
-	}
-	generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
-		return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
-			sb.Reset()
-			scanner.reset()
-			if thinking != nil {
-				thinking.reset()
-			}
-			if measurement != nil {
-				measurement.reset()
-			}
-		}, measurement)
-	}
-	var genRes inKernelGenerateResult
-	if coalesced {
-		genRes, err = p.runCoalescedGenerateKind(ctx, generate, coalesceKind)
-	} else {
-		genRes, err = generate(ctx)
-	}
-	if err != nil {
-		// A generate path that bailed before its decode boundary (prefix-snapshot, admission,
-		// context cancel) never reached the in-loop terminal emit, so the request still gets a
-		// terminal observation here — bound to the same trace id (#13120).
-		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, false)
-		if genRes.vulkanMTP != nil {
-			return &Completion{VulkanMTP: genRes.vulkanMTP}, err
-		}
-		return nil, err
-	}
-	gen, promptTok, matched, prefillS, decodeS, stopped := genRes.gen, genRes.promptTok, genRes.matched, genRes.prefillS, genRes.decodeS, genRes.stopped
-	observeNativeCompaction(ctx, prepared.nativeCompaction)
-	// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
-	// per-request Stop sequence fired, "length" when maxNew was the only limit hit.
-	finishReason := "length"
-	if stopped {
-		finishReason = "stop"
-	}
 
-	// Witness line (mirrors cmd/fakchat): real per-turn prefill/decode tok/s through the
-	// in-kernel model, now also reporting the RadixAttention prefix reuse (reused vs
-	// prompt) so a served chat turn self-reports the candidate-#13 win. prefill tok/s is
-	// over the COMPUTED suffix (prompt minus the reused prefix) — the work actually done.
-	computed := promptTok - matched
-	prefTPS, decTPS := 0.0, 0.0
-	if prefillS > 0 {
-		prefTPS = float64(computed) / prefillS
-	}
-	// Decode throughput is reported over COMPLETED post-prefill intervals only.
-	// The first generated token is produced by the prefill block, so a one-token
-	// turn has no decode interval to report; the historical gen/decodeS form
-	// serialized that case as a near-arbitrary finite "success" rate (#13298).
-	decTPS, _ = nativeDecodeRate(gen, decodeS)
-	// #3176 Q1/Q2 decode witness: report the resolved Q8 SIMD kernel tier (+ whether the fused
-	// fast decode GEMV engaged) and the effective decode-worker count, so an operator can SEE —
-	// without wall-clock guessing — that the AVX2/AVX-512 lane fired (not the reference path) and
-	// that decode parallelizes across a modest, capped stream count rather than either 1 core or
-	// an oversubscribed all-core dispatch (the pathology 40e0afd fixed on many-core amd64).
-	q8kern, q8fused := model.Q8DecodeKernel()
-	q8fusedMark := ""
-	if q8fused {
-		q8fusedMark = "+fused"
-	}
-	p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
-	// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
-	// /metrics, not just this log line — the live measurement of the frozen-trajectory
-	// cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md). #3390: BOTH halves —
-	// the lookup-side index match (cacheability) and the realized serve (matched/prompt) —
-	// so the gap lost to eviction/admission is observable, not folded into "miss".
-	// #3391 adds (a) the eligibility-filtered denominator — sampled BEFORE this turn is
-	// latched as admitted, so the always-cold first prefill books zero eligible tokens
-	// instead of depressing the fair hit-rate — and (b) the (model, tenant) attribution,
-	// with the tenant drawn from the SAME authenticated prefix-cache identity the scoped
-	// tree isolates on (unscoped traffic normalizes to "unknown" inside the tap).
-	eligibleTok := p.kvPrefixEligiblePromptTokens(promptTok)
-	p.noteKVPrefixAdmitted()
-	tenant := ""
-	if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
-		tenant = owner.Tenant
-	}
-	// A boot probe (readiness warmup, coherence probe) is not a served turn; booking it
-	// would put kv_prefix turns ahead of the latency histograms and the perf ledger.
-	if !IsBootProbe(ctx) {
-		cacheobs.Default.ObserveLabeled(cacheobs.Labels{Model: p.modelID, Tenant: tenant},
-			promptTok, genRes.cacheable, matched, eligibleTok)
-		// #3896 provenance axis: remote L3 matches are external transfers; L1/L2
-		// matches stay local, and the unmatched suffix is local compute.
-		localHit, externalHit := matched, 0
-		if genRes.sourceTier == radixkv.SnapshotTierRemoteL3 {
-			localHit, externalHit = 0, matched
-		}
-		cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, localHit)
-		cacheobs.Default.ObserveBySource(cacheobs.SourceExternalTransfer, externalHit)
-		cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
-	}
-	compReuseEntry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: p.modelID, PromptTokens: int64(promptTok), CachedTokens: int64(matched)})
-
-	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
-	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
-	// the turn with the open reasoning tag, then its final answer; renderChatMLTools does
-	// NOT pre-seed the open tag, so the model emits both. splitReasoning is the in-kernel
-	// equivalent of vLLM's --reasoning-parser qwen3: the reasoning lands in
-	// ReasoningContent and only the post-reasoning answer flows into Content (and thus
-	// into Claude Code's context). It is gated — a non-reasoning turn (no reasoning tags)
-	// returns the decoded text untouched, so this is byte-identical to today for any
-	// model that does not open a reasoning span.
-	//
-	// Raw-observer junction: the raw-text callback (rawText) carries the byte-identical
-	// buffer the post-decode pipeline is about to consume, issued BEFORE splitReasoning
-	// reads it. It is not called at all when no observer was requested.
-	if sp.DecodeTokenObserver != nil {
-		sp.DecodeTokenObserver("", sb.String())
-	}
-	reasoning, content := splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
-	for strings.Contains(content, thinkClose) {
-		idx := strings.Index(content, thinkClose)
-		residual := strings.TrimSpace(content[:idx])
-		if strings.HasPrefix(strings.ToLower(residual), thinkOpen) {
-			residual = residual[len(thinkOpen):]
-		}
-		residual = strings.TrimSpace(residual)
-		if residual != "" {
-			if reasoning != "" {
-				reasoning = strings.TrimSpace(reasoning + "\n" + residual)
+		comp, err = func() (*Completion, error) {
+			// Serialize the entire device forward pass: a single-stream accelerator cannot run two
+			// forwards at once without the concurrent op-streams corrupting shared device buffers
+			// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
+			// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
+			if p.requiresDeviceSerialization() && !coalesced {
+				// #1589 phase-timeline probe: record the fan-out boundary and the
+				// serialized critical section. Both calls are nil-safe no-ops unless a
+				// caller opted into a concurrency profile.
+				phase := p.concurrencyProfile.admit()
+				deviceWait := time.Now()
+				if err := p.devMu.LockContext(ctx); err != nil {
+					enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
+					return nil, err
+				}
+				enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
+				p.concurrencyProfile.forwardEnter(phase, true)
+				defer func() {
+					p.concurrencyProfile.forwardExit(phase)
+					p.devMu.Unlock()
+				}()
+				if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+					return nil, err
+				}
+			} else if p.concurrencyProfile != nil {
+				// Concurrent-unfused path (coalescing or CPU): still record the boundary
+				// so the timeline can distinguish "no mutex serialized us" from "no
+				// overlap happened at all".
+				phase := p.concurrencyProfile.admit()
+				p.concurrencyProfile.forwardEnter(phase, false)
+				defer p.concurrencyProfile.forwardExit(phase)
+			}
+			if coalesced {
+				if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+					return nil, err
+				}
+			}
+			// #13267: the host-session (Metal) seam has no compute.Backend for refuseOversizeRequest
+			// to ask, so an armed host ceiling prices it here, before any session or clone exists.
+			var releaseHostMemory func()
+			var hostErr error
+			ctx, releaseHostMemory, hostErr = p.admitHostMemory(ctx, len(ids), maxNew)
+			if hostErr != nil {
+				return nil, hostErr
+			}
+			defer releaseHostMemory()
+			var measurement *nativeInferenceMeasurement
+			if sp.NativeInferenceReceipt || (sp.DecodeTrace && sp.DecodeTokenObserver == nil) || sp.NativeDecodeTokenIDs {
+				measurement = &nativeInferenceMeasurement{
+					startedAt:             requestStarted,
+					inferenceDisabled:     !sp.NativeInferenceReceipt,
+					decodeTokenIDsEnabled: sp.NativeDecodeTokenIDs,
+				}
+				if sp.NativeDecodeTokenIDs {
+					measurement.decodeTokenIDs = make([]int, 0, maxNew)
+				}
+				if sp.NativeInferenceReceipt {
+					measurement.cudaImmutableWeightUploadsBefore, measurement.cudaImmutableWeightUploadsAvailable = cudaImmutableWeightUploadSnapshot(p.backend)
+				}
+				if sp.DecodeTrace {
+					measurement.traceNow = p.decodeTraceNow
+					if measurement.traceNow == nil {
+						measurement.traceNow = time.Now
+					}
+				}
+			}
+			generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
+				return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
+					sb.Reset()
+					scanner.reset()
+					if thinking != nil {
+						thinking.reset()
+					}
+					if measurement != nil {
+						measurement.reset()
+					}
+				}, measurement)
+			}
+			var genRes inKernelGenerateResult
+			if coalesced {
+				genRes, err = p.runCoalescedGenerateKind(ctx, generate, coalesceKind)
 			} else {
-				reasoning = residual
+				genRes, err = generate(ctx)
 			}
-		}
-		content = strings.TrimSpace(content[idx+len(thinkClose):])
-	}
-	if thinking != nil && thinking.forced {
-		content = StripReasoning(content)
-	}
-	// Model reports the artifact this planner actually decoded, so the gateway
-	// echoes the served model rather than whatever name the client sent.
-	comp = &Completion{
-		Model:         p.modelID,
-		Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
-		FinishReason:  finishReason,
-		ProviderCache: &compReuseEntry,
-		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
-		VulkanMTP:     genRes.vulkanMTP,
-		Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
-		NativeDecode:  newNativeDecodeSummary(genRes),
-	}
-	if sp.NativeInferenceReceipt {
-		accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{
-			promptTokens:    promptTok,
-			cacheableTokens: genRes.cacheable,
-			matchedTokens:   matched,
-			sourceTier:      genRes.sourceTier,
-			prefillSecs:     prefillS,
-			generated:       gen,
-		})
-		receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS, accounting)
-		if err := validateNativeInferenceReceiptForwardCoverage(p.m.Cfg, receipt); err != nil {
-			return nil, err
-		}
-		renderedSum := sha256.Sum256([]byte(prepared.rendered))
-		receipt.PromptTokenIDs = append([]int(nil), prepared.ids...)
-		receipt.TokenizerID = p.tok.Identity()
-		receipt.RendererID = inKernelPromptRendererID(p.m.Cfg, sp)
-		receipt.RenderedSHA256 = hex.EncodeToString(renderedSum[:])
-		comp.NativeInference = receipt
-	}
-	if genRes.batchReceipt.CohortID != 0 {
-		receipt := genRes.batchReceipt
-		comp.InKernelBatch = &receipt
-	}
-	if sp.DecodeTrace && measurement != nil {
-		events := make([]NativeDecodeTraceEvent, len(measurement.traceEvents))
-		copy(events, measurement.traceEvents)
-		comp.DecodeTrace = &NativeDecodeTrace{
-			Schema: NativeDecodeTraceSchema,
-			Engine: NativeDecodeTraceEngine,
-			Events: events,
-		}
-	}
-	if sp.NativeDecodeTokenIDs && measurement != nil {
-		comp.NativeDecodeTokenIDs = &NativeDecodeTokenIDs{
-			Schema:   NativeDecodeTokenIDsSchema,
-			Engine:   NativeDecodeTokenIDsEngine,
-			TokenIDs: append([]int(nil), measurement.decodeTokenIDs...),
-		}
-	}
-	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
-	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
-	// claimed-but-unparseable call — the SAME normalization every proxy adapter runs, so
-	// the in-kernel forward becomes a first-class tool-calling planner. Without this the
-	// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
-	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
-	comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
-	return comp, nil
+			if err != nil {
+				// A generate path that bailed before its decode boundary (prefix-snapshot, admission,
+				// context cancel) never reached the in-loop terminal emit, so the request still gets a
+				// terminal observation here — bound to the same trace id (#13120).
+				p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, false)
+				if genRes.vulkanMTP != nil {
+					return &Completion{VulkanMTP: genRes.vulkanMTP}, err
+				}
+				return nil, err
+			}
+			gen, promptTok, matched, prefillS, decodeS, stopped := genRes.gen, genRes.promptTok, genRes.matched, genRes.prefillS, genRes.decodeS, genRes.stopped
+			observeNativeCompaction(ctx, prepared.nativeCompaction)
+			// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
+			// per-request Stop sequence fired, "length" when maxNew was the only limit hit.
+			finishReason := "length"
+			if stopped {
+				finishReason = "stop"
+			}
+
+			// Witness line (mirrors cmd/fakchat): real per-turn prefill/decode tok/s through the
+			// in-kernel model, now also reporting the RadixAttention prefix reuse (reused vs
+			// prompt) so a served chat turn self-reports the candidate-#13 win. prefill tok/s is
+			// over the COMPUTED suffix (prompt minus the reused prefix) — the work actually done.
+			computed := promptTok - matched
+			prefTPS, decTPS := 0.0, 0.0
+			if prefillS > 0 {
+				prefTPS = float64(computed) / prefillS
+			}
+			// Decode throughput is reported over COMPLETED post-prefill intervals only.
+			// The first generated token is produced by the prefill block, so a one-token
+			// turn has no decode interval to report; the historical gen/decodeS form
+			// serialized that case as a near-arbitrary finite "success" rate (#13298).
+			decTPS, _ = nativeDecodeRate(gen, decodeS)
+			// #3176 Q1/Q2 decode witness: report the resolved Q8 SIMD kernel tier (+ whether the fused
+			// fast decode GEMV engaged) and the effective decode-worker count, so an operator can SEE —
+			// without wall-clock guessing — that the AVX2/AVX-512 lane fired (not the reference path) and
+			// that decode parallelizes across a modest, capped stream count rather than either 1 core or
+			// an oversubscribed all-core dispatch (the pathology 40e0afd fixed on many-core amd64).
+			q8kern, q8fused := model.Q8DecodeKernel()
+			q8fusedMark := ""
+			if q8fused {
+				q8fusedMark = "+fused"
+			}
+			p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+			// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
+			// /metrics, not just this log line — the live measurement of the frozen-trajectory
+			// cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md). #3390: BOTH halves —
+			// the lookup-side index match (cacheability) and the realized serve (matched/prompt) —
+			// so the gap lost to eviction/admission is observable, not folded into "miss".
+			// #3391 adds (a) the eligibility-filtered denominator — sampled BEFORE this turn is
+			// latched as admitted, so the always-cold first prefill books zero eligible tokens
+			// instead of depressing the fair hit-rate — and (b) the (model, tenant) attribution,
+			// with the tenant drawn from the SAME authenticated prefix-cache identity the scoped
+			// tree isolates on (unscoped traffic normalizes to "unknown" inside the tap).
+			eligibleTok := p.kvPrefixEligiblePromptTokens(promptTok)
+			p.noteKVPrefixAdmitted()
+			tenant := ""
+			if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
+				tenant = owner.Tenant
+			}
+			// A boot probe (readiness warmup, coherence probe) is not a served turn; booking it
+			// would put kv_prefix turns ahead of the latency histograms and the perf ledger.
+			if !IsBootProbe(ctx) {
+				cacheobs.Default.ObserveLabeled(cacheobs.Labels{Model: p.modelID, Tenant: tenant},
+					promptTok, genRes.cacheable, matched, eligibleTok)
+				// #3896 provenance axis: remote L3 matches are external transfers; L1/L2
+				// matches stay local, and the unmatched suffix is local compute.
+				localHit, externalHit := matched, 0
+				if genRes.sourceTier == radixkv.SnapshotTierRemoteL3 {
+					localHit, externalHit = 0, matched
+				}
+				cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, localHit)
+				cacheobs.Default.ObserveBySource(cacheobs.SourceExternalTransfer, externalHit)
+				cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
+			}
+			compReuseEntry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: p.modelID, PromptTokens: int64(promptTok), CachedTokens: int64(matched)})
+
+			// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
+			// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
+			// the turn with the open reasoning tag, then its final answer; renderChatMLTools does
+			// NOT pre-seed the open tag, so the model emits both. splitReasoning is the in-kernel
+			// equivalent of vLLM's --reasoning-parser qwen3: the reasoning lands in
+			// ReasoningContent and only the post-reasoning answer flows into Content (and thus
+			// into Claude Code's context). It is gated — a non-reasoning turn (no reasoning tags)
+			// returns the decoded text untouched, so this is byte-identical to today for any
+			// model that does not open a reasoning span.
+			//
+			// Raw-observer junction: the raw-text callback (rawText) carries the byte-identical
+			// buffer the post-decode pipeline is about to consume, issued BEFORE splitReasoning
+			// reads it. It is not called at all when no observer was requested.
+			if sp.DecodeTokenObserver != nil {
+				sp.DecodeTokenObserver("", sb.String())
+			}
+			reasoning, content := splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
+			for strings.Contains(content, thinkClose) {
+				idx := strings.Index(content, thinkClose)
+				residual := strings.TrimSpace(content[:idx])
+				if strings.HasPrefix(strings.ToLower(residual), thinkOpen) {
+					residual = residual[len(thinkOpen):]
+				}
+				residual = strings.TrimSpace(residual)
+				if residual != "" {
+					if reasoning != "" {
+						reasoning = strings.TrimSpace(reasoning + "\n" + residual)
+					} else {
+						reasoning = residual
+					}
+				}
+				content = strings.TrimSpace(content[idx+len(thinkClose):])
+			}
+			if thinking != nil && thinking.forced {
+				content = StripReasoning(content)
+			}
+			// Model reports the artifact this planner actually decoded, so the gateway
+			// echoes the served model rather than whatever name the client sent.
+			comp = &Completion{
+				Model:         p.modelID,
+				Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
+				FinishReason:  finishReason,
+				ProviderCache: &compReuseEntry,
+				Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
+				VulkanMTP:     genRes.vulkanMTP,
+				Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
+				NativeDecode:  newNativeDecodeSummary(genRes),
+			}
+			if sp.NativeInferenceReceipt {
+				accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{
+					promptTokens:    promptTok,
+					cacheableTokens: genRes.cacheable,
+					matchedTokens:   matched,
+					sourceTier:      genRes.sourceTier,
+					prefillSecs:     prefillS,
+					generated:       gen,
+				})
+				receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS, accounting)
+				if err := validateNativeInferenceReceiptForwardCoverage(p.m.Cfg, receipt); err != nil {
+					return nil, err
+				}
+				renderedSum := sha256.Sum256([]byte(prepared.rendered))
+				receipt.PromptTokenIDs = append([]int(nil), prepared.ids...)
+				receipt.TokenizerID = p.tok.Identity()
+				receipt.RendererID = inKernelPromptRendererID(p.m.Cfg, sp)
+				receipt.RenderedSHA256 = hex.EncodeToString(renderedSum[:])
+				comp.NativeInference = receipt
+			}
+			if genRes.batchReceipt.CohortID != 0 {
+				receipt := genRes.batchReceipt
+				comp.InKernelBatch = &receipt
+			}
+			if sp.DecodeTrace && measurement != nil {
+				events := make([]NativeDecodeTraceEvent, len(measurement.traceEvents))
+				copy(events, measurement.traceEvents)
+				comp.DecodeTrace = &NativeDecodeTrace{
+					Schema: NativeDecodeTraceSchema,
+					Engine: NativeDecodeTraceEngine,
+					Events: events,
+				}
+			}
+			if sp.NativeDecodeTokenIDs && measurement != nil {
+				comp.NativeDecodeTokenIDs = &NativeDecodeTokenIDs{
+					Schema:   NativeDecodeTokenIDsSchema,
+					Engine:   NativeDecodeTokenIDsEngine,
+					TokenIDs: append([]int(nil), measurement.decodeTokenIDs...),
+				}
+			}
+			// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
+			// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
+			// claimed-but-unparseable call — the SAME normalization every proxy adapter runs, so
+			// the in-kernel forward becomes a first-class tool-calling planner. Without this the
+			// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
+			// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
+			comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
+			return comp, nil
+		}()
+		complete = true
+		return comp, err
+	})
 }
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {
