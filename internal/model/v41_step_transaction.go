@@ -161,9 +161,10 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			return tx, err
 		}
 	}
-	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
+	var streams [][]float32
 	if full && st.mhcDevice.resident() {
-		// The panel is authoritative; streams stays a shape placeholder.
+		// Only shapes are read on the resident path; the panel owns all values.
+		streams = [][]float32{x, x, x, x}
 		if resident, err = st.mhcDevice.newResident([][]float32{x}); err != nil {
 			return tx, err
 		}
@@ -183,6 +184,8 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		copy(x, streams[0])
 		scratch.mhcCarry = newV41MHCCarry(1)
 		scratch.mhcCarry.device = st.mhcDevice
+	} else {
+		streams = [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
 	}
 	if scratch.activationTrace != nil {
 		tx.afterLayer = func(layer int) error {
