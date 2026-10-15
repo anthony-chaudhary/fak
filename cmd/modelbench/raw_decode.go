@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"runtime"
 	"slices"
 	"strconv"
@@ -22,12 +26,14 @@ import (
 )
 
 var (
-	rawDecodeFlag         = flag.Bool("raw-decode", false, "capture raw greedy decode with exact token accounting")
-	rawPromptIDsFlag      = flag.String("raw-prompt-ids", "", "comma-separated prompt token IDs for raw decode (e.g. 1,2,3)")
-	rawContextFlag        = flag.Int("raw-context", 256, "positive logical token context limit for raw decode")
-	rawIgnoreEOSFlag      = flag.Bool("raw-ignore-eos", false, "ignore EOS during raw decode and continue until decode-steps")
-	rawVerifyCPUFlag      = flag.Bool("raw-verify-cpu", false, "replay raw decode against fresh CPU session to verify logits and argmax")
-	rawArtifactSHA256Flag = flag.String("raw-artifact-sha256", "", "required expected SHA-256 of the -gguf artifact for production raw decode")
+	rawDecodeFlag                 = flag.Bool("raw-decode", false, "capture raw greedy decode with exact token accounting")
+	rawPromptIDsFlag              = flag.String("raw-prompt-ids", "", "comma-separated prompt token IDs for raw decode (e.g. 1,2,3)")
+	rawContextFlag                = flag.Int("raw-context", 256, "positive logical token context limit for raw decode")
+	rawIgnoreEOSFlag              = flag.Bool("raw-ignore-eos", false, "ignore EOS during raw decode and continue until decode-steps")
+	rawVerifyCPUFlag              = flag.Bool("raw-verify-cpu", false, "replay raw decode against fresh CPU session to verify logits and argmax")
+	rawArtifactSHA256Flag         = flag.String("raw-artifact-sha256", "", "expected SHA-256 of the -gguf artifact for single-file production raw decode")
+	rawArtifactShardsFlag         = flag.String("raw-artifact-shards", "", "ordered shard identity JSON file for production raw decode; requires -raw-artifact-shard-set-sha256")
+	rawArtifactShardSetSHA256Flag = flag.String("raw-artifact-shard-set-sha256", "", "independently trusted SHA-256 of the ordered shard identity array for production raw decode")
 )
 
 func rawDecodeEnabled() bool {
@@ -694,6 +700,12 @@ func rawDecodeReport(f *benchFlags, execution rawdecode.Execution, runErr error,
 	}
 	report["model_config"] = modelConfigReport(execution.ModelConfig)
 	report["eos_id"] = execution.ModelConfig.EOSTokenID
+	if execution.ArtifactShardSetSHA256 != "" && len(execution.ArtifactShards) != 0 {
+		if _, authenticated := execution.GenerationObservation(0); authenticated {
+			report["artifact_shard_set_sha256"] = execution.ArtifactShardSetSHA256
+			report["artifact_shards"] = slices.Clone(execution.ArtifactShards)
+		}
+	}
 	if reps > 1 {
 		report["runs"] = runs
 	}
@@ -711,6 +723,40 @@ func rawDecodeReport(f *benchFlags, execution rawdecode.Execution, runErr error,
 
 type rawDecodeArtifactExecutor func(context.Context, rawdecode.Request) (rawdecode.Execution, error)
 
+const rawArtifactManifestLimit = 1 << 20
+
+var errRawArtifactIdentity = errors.New("invalid raw decode artifact identity")
+
+func loadRawArtifactShards(path string) ([]ggufload.ShardIdentity, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open shard manifest: %w", errRawArtifactIdentity, err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, rawArtifactManifestLimit+1))
+	if err := errors.Join(readErr, file.Close()); err != nil {
+		return nil, fmt.Errorf("%w: read shard manifest: %w", errRawArtifactIdentity, err)
+	}
+	if len(data) > rawArtifactManifestLimit {
+		return nil, fmt.Errorf("%w: shard manifest exceeds %d bytes", errRawArtifactIdentity, rawArtifactManifestLimit)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var shards []ggufload.ShardIdentity
+	if err := decoder.Decode(&shards); err != nil {
+		return nil, fmt.Errorf("%w: decode shard manifest: %w", errRawArtifactIdentity, err)
+	}
+	if len(shards) == 0 {
+		return nil, fmt.Errorf("%w: shard manifest requires a nonempty array", errRawArtifactIdentity)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			err = errors.New("trailing JSON value")
+		}
+		return nil, fmt.Errorf("%w: trailing shard manifest data: %w", errRawArtifactIdentity, err)
+	}
+	return shards, nil
+}
+
 func runRawDecodeArtifactWith(f *benchFlags, profiler *ggufload.LoadProfiler, execute rawDecodeArtifactExecutor) error {
 	if err := validateRawDecodeFlags(f); err != nil {
 		return err
@@ -718,16 +764,44 @@ func runRawDecodeArtifactWith(f *benchFlags, profiler *ggufload.LoadProfiler, ex
 	if f.gguf == nil || strings.TrimSpace(*f.gguf) == "" {
 		return errors.New("-raw-decode production execution requires an explicit -gguf artifact")
 	}
-	if rawArtifactSHA256Flag == nil || strings.TrimSpace(*rawArtifactSHA256Flag) == "" {
-		return errors.New("-raw-decode production execution requires -raw-artifact-sha256")
-	}
 	promptIDs, err := parsePromptIDs(*rawPromptIDsFlag)
 	if err != nil {
 		return err
 	}
 	req := rawDecodeRequest(f, promptIDs)
 	req.ArtifactPath = *f.gguf
-	req.ExpectedArtifactSHA256 = strings.TrimSpace(*rawArtifactSHA256Flag)
+	singleSHA256, manifestPath, setSHA256 := "", "", ""
+	if rawArtifactSHA256Flag != nil {
+		singleSHA256 = strings.TrimSpace(*rawArtifactSHA256Flag)
+	}
+	if rawArtifactShardsFlag != nil {
+		manifestPath = *rawArtifactShardsFlag
+	}
+	if rawArtifactShardSetSHA256Flag != nil {
+		setSHA256 = *rawArtifactShardSetSHA256Flag
+	}
+	if manifestPath != "" || setSHA256 != "" {
+		if strings.TrimSpace(manifestPath) == "" || strings.TrimSpace(setSHA256) == "" {
+			return fmt.Errorf("%w: -raw-artifact-shards and -raw-artifact-shard-set-sha256 are required together", errRawArtifactIdentity)
+		}
+		if singleSHA256 != "" {
+			return fmt.Errorf("%w: single-file and shard-set SHA-256 identities are mutually exclusive", errRawArtifactIdentity)
+		}
+		shards, err := loadRawArtifactShards(manifestPath)
+		if err != nil {
+			return err
+		}
+		if shards[0].Path != req.ArtifactPath {
+			return fmt.Errorf("%w: -gguf must identify the first shard in -raw-artifact-shards", errRawArtifactIdentity)
+		}
+		req.ArtifactShards = shards
+		req.ExpectedArtifactShardSetSHA256 = setSHA256
+	} else {
+		if singleSHA256 == "" {
+			return errors.New("-raw-decode production execution requires -raw-artifact-sha256")
+		}
+		req.ExpectedArtifactSHA256 = singleSHA256
+	}
 	req.ModelName = strings.TrimSpace(*f.name)
 	req.LoadProfiler = profiler
 	execution, runErr := execute(context.Background(), req)
