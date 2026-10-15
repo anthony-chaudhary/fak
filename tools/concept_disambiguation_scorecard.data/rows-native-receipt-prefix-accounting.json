@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "native-receipt-prefix-accounting",
+      "canonical": "NativeCacheAccounting",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The optional per-request accounting block on model.NativeInferenceReceipt, serialized as native_cache_accounting. It records the operation, total/stable/cached/restored/computed prompt-token counts, restore source and separate restore/prime durations. Validate enforces token conservation and operation constraints; absent accounting is compatible and does not supply evidence.",
+      "distinction": "This is caller-populated evidence about one native request, not the KV cache tensors or upstream provider prompt-cache usage. It neither owns reusable state nor proves OS page-cache warmth, expert-weight residency or exclusive request timing. Prime duration is separate from request restore duration; restored plus computed tokens must equal the total prompt.",
+      "distinct_from": [
+        "kv-cache",
+        "prompt-cache"
+      ],
+      "aliases": [
+        "native_cache_accounting"
+      ],
+      "grounding": "NativeCacheAccounting",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

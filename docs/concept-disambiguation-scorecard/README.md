@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **668** (clarity 0 + coverage 668) |
-| **Crystal-clear concepts (and climbing)** | **1237** crystal of 3027 positioned |
+| **Crystal-clear concepts (and climbing)** | **1237** crystal of 3028 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **3117 / 3785** (82.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **87** of 4283 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **87** of 4284 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3027 concepts - score 88.6/100 (grade B) - disambiguation-debt 668
+concept-disambiguation chart - 3028 concepts - score 88.6/100 (grade B) - disambiguation-debt 668
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1237
-  o defined       ############################ 1790
+  o defined       ############################ 1791
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -40,7 +40,7 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        *****************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 29 crystal)
-  cache            ********************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (297 concept(s); 116 crystal)
+  cache            ********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (298 concept(s); 116 crystal)
   context-ctx      *************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (244 concept(s); 85 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4283 lookup name(s) -> 3027 concept(s), 87 ambiguous
+name index: 4284 lookup name(s) -> 3028 concept(s), 87 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2280 / 5498 |
+| Boundaries drawn (mutual / total) | 2280 / 5500 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4283 over 3027 concepts |
+| Lookup names indexed | 4284 over 3028 concepts |
 | Lookup names landing on several concepts | 87 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3027 |
+| Concepts carrying a contrast set | 3028 |
 
 ## The concepts (best verdict first)
 
@@ -1650,6 +1650,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **ColdCache (rehydrate/compact cold prompt-cache reason)** - ColdCache is the rehydrate reason and compact option indicating that the prompt/message-span cache is cold, so a prompt-cache preserving path no longer has warm-cache value to protect. |
 | o | defined | symbol | cache | **coldMessageSpanCache (gateway idle-gap witness)** - coldMessageSpanCache is the gateway metrics helper that witnesses whether a trace's message-span cache has aged past the provider TTL. |
 | o | defined | symbol | cache | **AdmitCached** - The deadlineadmit Estimator method that evaluates prompt tokens, caller-supplied cached tokens, output limit and remaining declared budget using measured rates and live concurrency. It returns a deadline admission verdict; callers are responsible for validating the supplied resident-prefix credit. |
+| o | defined | symbol | cache | **NativeCacheAccounting** - The optional per-request accounting block on model.NativeInferenceReceipt, serialized as native_cache_accounting. It records the operation, total/stable/cached/restored/computed prompt-token counts, restore source and separate restore/prime durations. Validate enforces token conservation and operation constraints; absent accounting is compatible and does not supply evidence. |
 | o | defined | symbol | context-ctx | **context.Context plumbing helpers (stdlib)** - exec.CommandContext is the Go standard-library constructor that threads a cancellable context.Context into a spawned subprocess, one of the stdlib context-plumbing helpers fak uses to carry deadlines and cancellation through calls. |
 | o | defined | symbol | context-ctx | **BaseContextPlan (syspromptmmu)** - syspromptmmu.BaseContextPlan returns the embedded-PromptSegment projection of the base system context (TierSpine then the TierPolicy floor) as a byte-identical, no-wire-mutation plan. |
 | o | defined | symbol | context-ctx | **AutoSizeContextPlan (compute sizer)** - compute.AutoSizeContextPlan derives the largest context-token count that fits available memory and returns the per-context KV/scratch MemoryPlan for it, reading geometry from a compute.ContextSizeConfig (KV/scratch configs plus the model's declared MaxContext). |
@@ -3307,8 +3308,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3218/5498 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3027 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3220/5500 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3028 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3317,7 +3318,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4283 lookup name(s) resolves - 87 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4284 lookup name(s) resolves - 87 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
