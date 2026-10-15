@@ -396,3 +396,118 @@ func TestV41FullRoutedGroupedHostMaterializesOnce(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41RoutedWeightScratchOwnership(t *testing.T) {
+	const width = 512
+	cfg := Config{HiddenSize: 1, MoEIntermediateSize: width, HeadDim: v41KVLoraRank}
+	m := &Model{Cfg: cfg}
+	input := []float32{1}
+	fused := make([]float32, width)
+	pattern := []float32{0, math.Float32frombits(0x80000000), 1, -1, 1.00390625, -0.51, math.Float32frombits(0x00800000)}
+	for i := range fused {
+		fused[i] = pattern[i%len(pattern)]
+	}
+	before := append([]float32(nil), fused...)
+	const weight = float32(-.501953125)
+	borrowedOutput := []float32{0}
+	var operand []float32
+	downCalls := 0
+	gate := func(int, string, []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+		return fused, v41GateUpHandled, nil
+	}
+	down := func(_ int, _ string, values []float32) ([]float32, v41ExpertDownOutcome, error) {
+		downCalls++
+		operand = values
+		borrowedOutput[0] = values[0]
+		return borrowedOutput, v41DownHandled, nil
+	}
+	run := func() ([]float32, error) {
+		return m.v41FullRoutedExpert(0, "ffn.experts.0", input, weight, cfg, gate, down, nil, nil, false)
+	}
+	checkBits := func(got, want []float32) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("width=%d want=%d", len(got), len(want))
+		}
+		for i := range want {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("element %d bits=%08x want=%08x", i, math.Float32bits(got[i]), math.Float32bits(want[i]))
+			}
+		}
+	}
+	got, err := run()
+	if err != nil || downCalls != 1 {
+		t.Fatalf("down calls=%d error=%v", downCalls, err)
+	}
+	want := make([]float32, width)
+	for i, v := range before {
+		want[i] = v41OracleBF16(float32(v * weight))
+	}
+	checkBits(operand, want)
+	checkBits(fused, before)
+	checkBits(got, want[:1])
+	operand[0], borrowedOutput[0], fused[0] = 77, 88, 99
+	checkBits(got, want[:1])
+	if input[0] != 1 {
+		t.Fatal("input was mutated")
+	}
+	copy(fused, before)
+
+	// The pre-reuse handled-gate/down path retained a separate weighted row.
+	// Keep that exact successful ownership sequence as the allocation control.
+	legacy := func() ([]float32, error) {
+		x, err := v41RoutedBF16Publish(0, "gate/up", input, 1, nil)
+		if err != nil {
+			return nil, err
+		}
+		h, _, _ := gate(0, "ffn.experts.0", x)
+		owned := append([]float32(nil), h...)
+		weighted := make([]float32, width)
+		for i, v := range owned {
+			if !finite32(v) {
+				return nil, v41ExpertOperationErr(0, "gate/up", errV41ExpertResult)
+			}
+			weighted[i] = float32(v * weight)
+		}
+		d, err := v41RoutedBF16Publish(0, "down", weighted, width, nil)
+		if err != nil {
+			return nil, err
+		}
+		y, _, _ := down(0, "ffn.experts.0", d)
+		out, err := v41RoutedBF16Publish(0, "down", y, 1, nil)
+		m.v41NoteExpertContraction()
+		return out, err
+	}
+	measure := func(call func() ([]float32, error)) float64 {
+		return testing.AllocsPerRun(25, func() {
+			got, err = call()
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	old, current := measure(legacy), measure(run)
+	checkBits(got, want[:1])
+	checkBits(operand, want)
+	checkBits(fused, before)
+	if old-current < 1 {
+		t.Fatalf("separate weighted-row control=%g allocations, reused scratch=%g; want at least one fewer", old, current)
+	}
+
+	// A late invalid element must still refuse before down, and cannot expose
+	// partially weighted scratch through the callback's original storage.
+	for _, bad := range []float32{math.Float32frombits(0x7fc00001), float32(math.Inf(1))} {
+		fused[width-1] = bad
+		calls := downCalls
+		result, err := run()
+		var operation *V41ExpertOperationError
+		if result != nil || !errors.As(err, &operation) || operation.Stage != "gate/up" || downCalls != calls {
+			t.Fatalf("invalid intermediate reached down: result=%v calls=%d error=%v", result, downCalls-calls, err)
+		}
+		checkBits(fused[:width-1], before[:width-1])
+		if math.Float32bits(fused[width-1]) != math.Float32bits(bad) {
+			t.Fatal("invalid borrowed element was mutated")
+		}
+	}
+}
