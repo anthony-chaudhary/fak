@@ -286,10 +286,7 @@ func TestV41HeadProjectionGGUFLoaderToDefaultSession(t *testing.T) {
 						t.Fatal("head scalar witness has zero signal")
 					}
 				}
-				wantRows := len(ids)
-				if index == 0 {
-					wantRows = 1
-				}
+				wantRows := 1
 				if rows != wantRows || data["head_projection_device_calls"] != float64(calls) || data["head_projection_device_rows"] != float64(rows) || data["head_projection_host_calls"] != 0 || data["head_projection_host_rows"] != 0 || data["head_projection_activation_upload_bytes"] != float64(upload) || data["head_projection_readback_bytes"] != float64(read) || upload != 1024*wantRows || read != 32*wantRows || data["head_projection_nanos"] <= 0 {
 					t.Errorf("loaded actual head route calls=%d rows=%d upload=%d read=%d ledger=%v", calls, rows, upload, read, data)
 				}
