@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:e2b5d9cf5ffd762706408486a971c044b57c7f3bda2f3f33eb9847a32f7db15b",
+  "content_root": "sha256:93ee355f8a8f58e58b16b2cbc13ba422d09411b0120a26a8966f0923439c2ab2",
   "tracked_files": 25399,
-  "tracked_bytes": 511062847,
+  "tracked_bytes": 511073511,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -163332,8 +163332,8 @@
     },
     {
       "path": "internal/model/v41_expert_parallel_native_router_test.go",
-      "content_sha256": "sha256:5407101b1d83ae5bb1cf0002bc4eb5a56bfcce4ff27267a55dde43afe4edbfb5",
-      "bytes": 17887,
+      "content_sha256": "sha256:28aea67bba7b4de2c6b3d95223332b4a7037fecc826f0d5cf82e06d27dd0cd7b",
+      "bytes": 20393,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -164943,8 +164943,8 @@
     },
     {
       "path": "internal/model/v41_rope_device.go",
-      "content_sha256": "sha256:e814853fc268cd102be96b60dbbe583056b045f3c3f3067dd38398856ebfc819",
-      "bytes": 12264,
+      "content_sha256": "sha256:0902d5cf2592ac4df253e1e78be75d1449f07f54822167bd95d6d9d6d88618c7",
+      "bytes": 13089,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -164952,8 +164952,8 @@
     },
     {
       "path": "internal/model/v41_rope_device_test.go",
-      "content_sha256": "sha256:06d8635cf89b0509a928cee8b948e421ce0cf63c33708fb41e06f1762efc12c0",
-      "bytes": 28299,
+      "content_sha256": "sha256:6abc950e2f0e47c20c3128b9aaf2b2aa48f1b6207e1dac00ed1b4c8a934fc76f",
+      "bytes": 31609,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -165024,8 +165024,8 @@
     },
     {
       "path": "internal/model/v41_routed_expert.go",
-      "content_sha256": "sha256:f23a3ef5fde19f15d551658855685a56261521a44c3fa2bea6ceba050890f8d4",
-      "bytes": 9293,
+      "content_sha256": "sha256:d13d39cc28a3b1c120d60e3a4b43722173d60eef7bfc7fd5a570bc5551e96558",
+      "bytes": 9420,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -165033,8 +165033,8 @@
     },
     {
       "path": "internal/model/v41_routed_expert_bf16_test.go",
-      "content_sha256": "sha256:94f06713b534d71aa60c805932916d0fb0ba42bf455acd506240881e92a28ec3",
-      "bytes": 15062,
+      "content_sha256": "sha256:211ecd591ae779430d887c7e12719c1a39ebc8fdbee23d69fd9dbcec74298ea9",
+      "bytes": 18958,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
