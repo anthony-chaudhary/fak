@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -108,8 +109,10 @@ type recordingSystemBaselineAttributor struct {
 	finishCalls int
 }
 
-func (*recordingSystemBaselineAttributor) Configure(*exec.Cmd) bool { return true }
-func (*recordingSystemBaselineAttributor) Active() bool             { return true }
+func (*recordingSystemBaselineAttributor) ConfigureSysProcAttr(attr *syscall.SysProcAttr) (*syscall.SysProcAttr, bool) {
+	return attr, true
+}
+func (*recordingSystemBaselineAttributor) Active() bool { return true }
 func (a *recordingSystemBaselineAttributor) Started(pid int) error {
 	a.startedPID = pid
 	return nil

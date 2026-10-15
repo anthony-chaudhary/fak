@@ -3,8 +3,8 @@ package systembaseline
 import (
 	"fmt"
 	"math"
-	"os/exec"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -107,7 +107,7 @@ func cloneCounters(in map[string]uint64) map[string]uint64 {
 }
 
 type commandAttributorPlatform interface {
-	configure(*exec.Cmd) bool
+	configureSysProcAttr(*syscall.SysProcAttr) (*syscall.SysProcAttr, bool)
 	active() bool
 	started(int) error
 	launchFailed(error)
@@ -127,7 +127,7 @@ type commandAttributionFinisher interface {
 }
 
 // CommandAttributor owns the optional OS boundary used by the command wrapper.
-// Call Configure before Start, Started after a successful Start, and
+// Call ConfigureSysProcAttr before Start, Started after a successful Start, and
 // FinishAttribution exactly once after Wait. Finish remains the Linux-specific
 // compatibility surface.
 type CommandAttributor struct {
@@ -138,8 +138,14 @@ func NewCommandAttributor() *CommandAttributor {
 	return &CommandAttributor{platform: newCommandAttributorPlatform()}
 }
 
-func (a *CommandAttributor) Configure(cmd *exec.Cmd) bool {
-	return a != nil && a.platform != nil && a.platform.configure(cmd)
+// ConfigureSysProcAttr merges attribution into process attributes without owning
+// a command or launching it. Assign the returned attributes before Start. An
+// unavailable adapter returns the original pointer and false without mutation.
+func (a *CommandAttributor) ConfigureSysProcAttr(attr *syscall.SysProcAttr) (*syscall.SysProcAttr, bool) {
+	if a == nil || a.platform == nil {
+		return attr, false
+	}
+	return a.platform.configureSysProcAttr(attr)
 }
 
 func (a *CommandAttributor) Active() bool {

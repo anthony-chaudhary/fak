@@ -33,6 +33,22 @@ func (e *V41BatchEligibility) Finish(err *error) {
 	})
 }
 
+// FinishCompleted retires an eligibility after an explicit caller completion
+// boundary. Call through a deferred closure that reads complete after the request
+// body and its cleanup have returned; an incomplete unwind or returned error wins
+// over retirement panic. Finish retains its legacy directly-deferred contract.
+func (e *V41BatchEligibility) FinishCompleted(err *error, complete bool) {
+	if e == nil {
+		return
+	}
+	failed := !complete || (err != nil && *err != nil)
+	if failed {
+		// This recovery belongs only to retirement, never the caller's unwind.
+		defer func() { _ = recover() }()
+	}
+	e.once.Do(e.model.releaseWeightSession)
+}
+
 func finishModelCleanup(primary any, err *error, cleanup func()) {
 	var secondary any
 	func() {
@@ -57,11 +73,11 @@ func (m *Model) AcquireV41BatchEligibility(ctx context.Context, be compute.Backe
 	}
 	e := &V41BatchEligibility{model: m}
 	defer func() {
-		primary := recover()
 		if eligibility == nil {
-			finishModelCleanup(primary, &err, func() { e.once.Do(m.releaseWeightSession) })
-		} else if primary != nil {
-			panic(primary)
+			// No eligibility was transferred. Preserve the acquisition unwind
+			// or returned error while suppressing only rollback cleanup panics.
+			defer func() { _ = recover() }()
+			e.once.Do(m.releaseWeightSession)
 		}
 	}()
 	if err = ctx.Err(); err != nil {

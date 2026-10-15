@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -51,7 +52,9 @@ func TestWindowsJobObjectExactDescendantsAndCleanup(t *testing.T) {
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsJobObjectExactDescendantsAndCleanup$")
 			cmd.Env = append(os.Environ(), windowsJobHelperRole+"="+tc.role, windowsJobHelperFan+"="+strconv.Itoa(fanout))
 			attributor := NewCommandAttributor()
-			if !attributor.Configure(cmd) {
+			var configured bool
+			cmd.SysProcAttr, configured = attributor.ConfigureSysProcAttr(cmd.SysProcAttr)
+			if !configured {
 				receipt := attributor.FinishAttribution()
 				t.Fatalf("Windows Job Object unavailable on integration host: %+v", receipt.WindowsJobObject)
 			}
@@ -108,7 +111,9 @@ func TestWindowsJobAssignmentDenialResumesSampledFallback(t *testing.T) {
 
 	cmd := exec.Command("cmd.exe", "/d", "/c", "exit", "0")
 	attributor := NewCommandAttributor()
-	if !attributor.Configure(cmd) {
+	var configured bool
+	cmd.SysProcAttr, configured = attributor.ConfigureSysProcAttr(cmd.SysProcAttr)
+	if !configured {
 		t.Fatal("job setup unavailable before injected assignment denial")
 	}
 	if err := cmd.Start(); err != nil {
@@ -173,5 +178,46 @@ func runWindowsJobHelper(role string) {
 		os.Exit(0)
 	default:
 		os.Exit(24)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestWindowsJobConfigureSysProcAttrPreservesState(t *testing.T) {
+	// Configuration only reads the handle value; no OS call uses this sentinel.
+	scope := &windowsCommandAttributor{job: 1, startProcessed: true}
+	attributor := &CommandAttributor{platform: scope}
+	attr := &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP, HideWindow: true, CmdLine: "preserved"}
+	want := *attr
+	want.CreationFlags |= createSuspended
+	got, configured := attributor.ConfigureSysProcAttr(attr)
+	if !configured || got != attr || !reflect.DeepEqual(got, &want) || !scope.configured {
+		t.Fatalf("merge changed identity/state: got=%+v configured=%v", got, configured)
+	}
+	got, configured = attributor.ConfigureSysProcAttr(nil)
+	if !configured || got == nil || got.CreationFlags != createSuspended {
+		t.Fatalf("nil attributes were not configured: got=%+v configured=%v", got, configured)
+	}
+	if scope.job != 1 || scope.finished || !scope.startProcessed {
+		t.Fatal("configuration changed Job Object lifecycle state")
+	}
+
+	for _, a := range []*CommandAttributor{nil, {}, {platform: (*windowsCommandAttributor)(nil)}} {
+		for _, input := range []*syscall.SysProcAttr{nil, attr} {
+			if got, configured := a.ConfigureSysProcAttr(input); configured || got != input {
+				t.Fatalf("absent adapter changed attributes: got=%p input=%p configured=%v", got, input, configured)
+			}
+		}
+	}
+	for _, inactive := range []*windowsCommandAttributor{
+		{},
+		{job: 1, finished: true, configured: true},
+	} {
+		beforeConfigured := inactive.configured
+		for _, input := range []*syscall.SysProcAttr{nil, attr} {
+			got, configured := (&CommandAttributor{platform: inactive}).ConfigureSysProcAttr(input)
+			if configured || got != input || inactive.configured != beforeConfigured || !reflect.DeepEqual(attr, &want) {
+				t.Fatalf("inactive adapter changed attributes/state: got=%p input=%p configured=%v", got, input, configured)
+			}
+		}
 	}
 }

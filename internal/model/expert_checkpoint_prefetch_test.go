@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"errors"
 	"math/rand"
 	"runtime"
 	"sync"
@@ -380,6 +381,258 @@ func TestExpertCheckpointPrefetchDelayedGeneration(t *testing.T) {
 			}
 			if got := tier.Stats().Reads; got != wantReads {
 				t.Errorf("reads after later demand = %d, want %d", got, wantReads)
+			}
+		})
+	}
+}
+
+// checkpointPrefetchExitReader gates the first worker wave, then aborts selected
+// offsets without returning. Its deferred active count runs before load settlement.
+type checkpointPrefetchExitReader struct {
+	data       []byte
+	entered    chan int64
+	release    chan struct{}
+	releaseOne sync.Once
+	mu         sync.Mutex
+	abortBelow int64
+	calls      int
+	active     int
+	peak       int
+}
+
+func (r *checkpointPrefetchExitReader) ReadAt(p []byte, off int64) (int, error) {
+	r.mu.Lock()
+	r.calls++
+	r.active++
+	r.peak = max(r.peak, r.active)
+	abort := off < r.abortBelow
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.active--
+		r.mu.Unlock()
+	}()
+	r.entered <- off
+	<-r.release
+	if abort {
+		runtime.Goexit()
+	}
+	return copy(p, r.data[off:off+int64(len(p))]), nil
+}
+
+func (r *checkpointPrefetchExitReader) unblock() {
+	r.releaseOne.Do(func() { close(r.release) })
+}
+
+// A load's Goexit finalizer is insufficient if it also retires the only worker
+// that could drain queued owners. Both cases exhaust the initial worker wave;
+// the all-aborted case also requires a finite succession through the entire queue.
+// fak-test:runtime fast est=100ms lane=default
+func TestExpertCheckpointPrefetchGoexitDrainsQueue(t *testing.T) {
+	const jobs = fakExpertPrefetchJobs
+	const stride = q4kBlockBytes
+	for _, aborted := range []int{fakExpertPrefetchWorkers, jobs} {
+		name := "first-wave"
+		if aborted == jobs {
+			name = "every-job"
+		}
+		t.Run(name, func(t *testing.T) {
+			data := make([]byte, jobs*stride)
+			for i := range data {
+				data[i] = byte(i%251 + 1)
+			}
+			reader := &checkpointPrefetchExitReader{
+				data: data, entered: make(chan int64, 2*jobs), release: make(chan struct{}),
+				abortBelow: int64(aborted * stride),
+			}
+			t.Cleanup(reader.unblock)
+			tier := NewExpertCheckpointTier(0)
+			if err := tier.AddShard(reader, int64(len(data)), []FusedExpertTensor{{
+				Name: "blk.0.ffn_gate_exps.weight", Layer: 0, Proj: "gate_proj",
+				Quant: ExpertCheckpointQ4K, Experts: jobs, Rows: 1, Cols: qkK,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			names := make([]string, jobs)
+			for i := range names {
+				names[i] = expertName(0, i, "gate_proj.weight")
+			}
+			if got := tier.Prefetch(names); got != jobs {
+				t.Fatalf("admitted %d jobs, want %d", got, jobs)
+			}
+			checkpointFlightWait(t, func() bool { return len(reader.entered) == fakExpertPrefetchWorkers })
+			// Prefetch has returned with every reader slot blocked and further jobs
+			// queued. All names already have owners before a demand can attach.
+			tier.mu.Lock()
+			loads := make([]*expertCheckpointLoad, jobs)
+			for i, name := range names {
+				loads[i] = tier.loading[polymodel.ModelID(name)]
+			}
+			pending := tier.prefetchJobs
+			tier.mu.Unlock()
+			if pending != jobs {
+				t.Fatalf("pending jobs before release = %d, want %d", pending, jobs)
+			}
+			for i, load := range loads {
+				if load == nil {
+					t.Fatalf("admitted job %d has no loading owner", i)
+				}
+			}
+			results := checkpointFlightFaults(tier, names[:fakExpertPrefetchWorkers]...)
+			checkpointFlightWait(t, func() bool {
+				tier.mu.Lock()
+				defer tier.mu.Unlock()
+				for _, load := range loads[:fakExpertPrefetchWorkers] {
+					if load.waiters != 1 {
+						return false
+					}
+				}
+				return true
+			})
+			reader.unblock()
+			// Only the first wave has test-owned demand goroutines. Collect them
+			// before the tail watchdog, so the old broken queue fails without
+			// leaving demand goroutines waiting on its stranded loading entries.
+			for _, result := range checkpointFlightCollect(t, results, fakExpertPrefetchWorkers) {
+				if !errors.Is(result.err, ErrExpertCheckpointLoadAborted) || result.panic != nil || result.weight.q4 != nil || result.weight.kq != nil {
+					t.Fatalf("first-wave demand returned error=%v panic=%v or a weight", result.err, result.panic)
+				}
+			}
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			for _, load := range loads {
+				select {
+				case <-load.done:
+				case <-deadline.C:
+					settled := 0
+					for _, owner := range loads {
+						select {
+						case <-owner.done:
+							settled++
+						default:
+						}
+					}
+					tier.mu.Lock()
+					pending := tier.prefetchJobs
+					tier.mu.Unlock()
+					t.Fatalf("prefetch queue stranded: settled %d of %d loads after first-wave Goexit; pending=%d", settled, jobs, pending)
+				}
+			}
+			for i, name := range names {
+				result := checkpointFlightResult{weight: loads[i].weight, err: loads[i].err}
+				if i < aborted {
+					if !errors.Is(result.err, ErrExpertCheckpointLoadAborted) || result.panic != nil || result.weight.q4 != nil || result.weight.kq != nil {
+						t.Fatalf("aborted job %d returned error=%v panic=%v or a weight", i, result.err, result.panic)
+					}
+				} else {
+					checkpointFlightComplete(t, result, data[i*stride:(i+1)*stride])
+					w, err := tier.fault(name)
+					checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, data[i*stride:(i+1)*stride])
+				}
+			}
+			tier.mu.Lock()
+			pending, loading, ready := tier.prefetchJobs, len(tier.loading), len(tier.ready)
+			tier.mu.Unlock()
+			if pending != 0 || loading != 0 || ready != 0 {
+				t.Fatalf("settled queue retained jobs=%d loading=%d ready=%d", pending, loading, ready)
+			}
+			reader.mu.Lock()
+			calls, active, peak := reader.calls, reader.active, reader.peak
+			reader.abortBelow = 0
+			reader.mu.Unlock()
+			if calls != jobs || active != 0 || peak != fakExpertPrefetchWorkers {
+				t.Fatalf("source calls=%d active=%d peak=%d, want %d/0/%d", calls, active, peak, jobs, fakExpertPrefetchWorkers)
+			}
+			if st := tier.Stats(); st.Failures != aborted || st.Reads != jobs-aborted || st.Coalesced != fakExpertPrefetchWorkers {
+				t.Fatalf("settled queue stats: %+v", st)
+			}
+			// Retry the aborted names through the real asynchronous API, proving
+			// both loading ownership and the aggregate admission slots were released.
+			if got := tier.Prefetch(names[:aborted]); got != aborted {
+				t.Fatalf("retry admitted %d jobs, want %d", got, aborted)
+			}
+			waitPrefetchSettled(t, tier)
+			for i, name := range names[:aborted] {
+				w, err := tier.fault(name)
+				checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, data[i*stride:(i+1)*stride])
+			}
+			reader.mu.Lock()
+			calls, active, peak = reader.calls, reader.active, reader.peak
+			reader.mu.Unlock()
+			if calls != jobs+aborted || active != 0 || peak != fakExpertPrefetchWorkers {
+				t.Fatalf("retry source calls=%d active=%d peak=%d, want %d/0/%d", calls, active, peak, jobs+aborted, fakExpertPrefetchWorkers)
+			}
+			if st := tier.Stats(); st.Failures != aborted || st.Reads != jobs {
+				t.Fatalf("retry stats: %+v", st)
+			}
+		})
+	}
+}
+
+// Decline only a hint that cannot fit the positive total capacity. A full pool
+// may still evict an older resident; zero budget keeps stream-through semantics.
+// fak-test:runtime fast est=100ms lane=default
+func TestExpertCheckpointPrefetchDeclinesImpossibleCapacity(t *testing.T) {
+	const stride = q4kBlockBytes
+	for _, tc := range []struct {
+		name      string
+		budget    int64
+		warmOther bool
+		wantJobs  int
+	}{
+		{name: "too-large", budget: stride - 1},
+		{name: "zero-stream-through", budget: 0, wantJobs: 1},
+		{name: "exact-fit", budget: stride, wantJobs: 1},
+		{name: "exact-fit-full-pool", budget: stride, warmOther: true, wantJobs: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tier, reader, actualStride := checkpointFlightFixture(t, tc.budget)
+			reader.unblock()
+			if actualStride != stride {
+				t.Fatalf("fixture stride = %d, want %d", actualStride, stride)
+			}
+			name := expertName(0, 0, "gate_proj.weight")
+			if tc.warmOther {
+				other := expertName(0, 1, "gate_proj.weight")
+				w, err := tier.fault(other)
+				checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, reader.data[stride:])
+				if st := tier.Stats(); st.ResidentBytes != tc.budget {
+					t.Fatalf("warm control did not fill total budget: %+v", st)
+				}
+			}
+			before, beforeCalls := tier.Stats(), reader.calls.Load()
+			got := tier.Prefetch([]string{name})
+			// Also drain the pre-fix read before asserting, so the negative control
+			// never leaves an owned source operation behind when it fails.
+			waitPrefetchSettled(t, tier)
+			calls := reader.calls.Load() - beforeCalls
+			if got != tc.wantJobs || calls != int64(tc.wantJobs) {
+				t.Fatalf("budget %d stride %d: admitted %d hints and made %d source reads, want %d and %d", tc.budget, stride, got, calls, tc.wantJobs, tc.wantJobs)
+			}
+			after := tier.Stats()
+			if after.Prefetched-before.Prefetched != tc.wantJobs || after.Failures != before.Failures {
+				t.Fatalf("hint admission ledger: before=%+v after=%+v", before, after)
+			}
+			if tc.warmOther && after.Evictions-before.Evictions != 1 {
+				t.Fatalf("exact-fit hint did not preserve normal eviction: before=%+v after=%+v", before, after)
+			}
+			w, err := tier.fault(name)
+			if tc.wantJobs == 0 {
+				var refusal *ExpertCheckpointBudgetError
+				if !errors.Is(err, ErrExpertCheckpointBudget) || !errors.As(err, &refusal) ||
+					refusal.Tensor != name || refusal.Bytes != stride || refusal.Budget != tc.budget || w.q4 != nil || w.kq != nil {
+					t.Fatalf("demand after declined hint: weight=%+v error=%v", w, err)
+				}
+				if st := tier.Stats(); st.Failures != before.Failures+1 || st.Reads != before.Reads+1 {
+					t.Fatalf("normal demand refusal ledger: %+v", st)
+				}
+			} else {
+				checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, reader.data[:stride])
+			}
+			// Accepted hints supply this demand once. A declined hint leaves the
+			// ordinary demand path's single read and typed budget error unchanged.
+			if calls := reader.calls.Load() - beforeCalls; calls != 1 {
+				t.Fatalf("hint plus later demand made %d source reads, want 1", calls)
 			}
 		})
 	}

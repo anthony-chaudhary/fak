@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -134,7 +136,9 @@ func TestLinuxCgroupIntegrationShortLivedDescendants(t *testing.T) {
 		t.Fatal("integration gate requested but cgroup v2 delegation is unavailable")
 	}
 	cmd := exec.Command("/bin/sh", "-c", `i=0; while [ "$i" -lt 24 ]; do /bin/sh -c 'j=0; while [ "$j" -lt 10000 ]; do j=$((j+1)); done' & i=$((i+1)); done; wait`)
-	if !scope.Configure(cmd) {
+	var configured bool
+	cmd.SysProcAttr, configured = scope.ConfigureSysProcAttr(cmd.SysProcAttr)
+	if !configured {
 		t.Fatal("delegated cgroup was not configured")
 	}
 	if err := cmd.Start(); err != nil {
@@ -204,5 +208,58 @@ func TestParseLinuxCPUMaxRejectsAmbiguousValues(t *testing.T) {
 	quota, period, finite, err := parseLinuxCPUMax([]byte("max 100000"))
 	if err != nil || finite || quota != 0 || period != 100000 {
 		t.Fatalf("unlimited=%d/%d finite=%v err=%v", quota, period, finite, err)
+	}
+}
+
+// fak-test:runtime fast est=5ms
+func TestLinuxCgroupConfigureSysProcAttrPreservesState(t *testing.T) {
+	dir, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := dir.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	scope := &linuxCommandAttributor{path: dir.Name(), dir: dir}
+	attributor := &CommandAttributor{platform: scope}
+	attr := &syscall.SysProcAttr{Setpgid: true, Pgid: 37}
+	want := *attr
+	want.UseCgroupFD, want.CgroupFD = true, int(dir.Fd())
+	got, configured := attributor.ConfigureSysProcAttr(attr)
+	if !configured || got != attr || !reflect.DeepEqual(got, &want) || !scope.configured {
+		t.Fatalf("merge changed identity/state: got=%+v configured=%v", got, configured)
+	}
+	got, configured = attributor.ConfigureSysProcAttr(nil)
+	if !configured || got == nil || !got.UseCgroupFD || got.CgroupFD != int(dir.Fd()) {
+		t.Fatalf("nil attributes were not configured: got=%+v configured=%v", got, configured)
+	}
+	if scope.dir != dir {
+		t.Fatal("configuration replaced the owned cgroup descriptor")
+	}
+	if _, err := dir.Stat(); err != nil {
+		t.Fatalf("configuration closed the cgroup descriptor before Start: %v", err)
+	}
+
+	for _, a := range []*CommandAttributor{nil, {}, {platform: (*linuxCommandAttributor)(nil)}} {
+		for _, input := range []*syscall.SysProcAttr{nil, attr} {
+			if got, configured := a.ConfigureSysProcAttr(input); configured || got != input {
+				t.Fatalf("absent adapter changed attributes: got=%p input=%p configured=%v", got, input, configured)
+			}
+		}
+	}
+	for _, inactive := range []*linuxCommandAttributor{
+		{},
+		{path: dir.Name()},
+		{path: dir.Name(), dir: dir, finished: true, configured: true},
+	} {
+		beforeConfigured := inactive.configured
+		for _, input := range []*syscall.SysProcAttr{nil, attr} {
+			got, configured := (&CommandAttributor{platform: inactive}).ConfigureSysProcAttr(input)
+			if configured || got != input || inactive.configured != beforeConfigured || !reflect.DeepEqual(attr, &want) {
+				t.Fatalf("inactive adapter changed attributes/state: got=%p input=%p configured=%v", got, input, configured)
+			}
+		}
 	}
 }

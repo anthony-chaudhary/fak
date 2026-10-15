@@ -809,6 +809,12 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		if t.prefetchDeclined(src, overlay) {
 			continue
 		}
+		// The indexed stride is validated at construction. A hint larger than
+		// a positive TOTAL budget can never be retained, so do not allocate/read
+		// it. This is not a reservation or a check of currently unused capacity.
+		if budget := t.pool.Budget(); budget > 0 && entry.stride > budget {
+			continue
+		}
 		// Aggregate admission: bound the job collection itself, so a caller passing thousands of
 		// names allocates and starts at most the remaining aggregate allowance. Best-effort and
 		// nonblocking -- a declined hint is simply not started, and demand serving is untouched.
@@ -846,12 +852,27 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 	if workers > len(jobs) {
 		workers = len(jobs)
 	}
-	for w := 0; w < workers; w++ {
-		go func() {
-			for j := range queue {
-				t.finishPrefetchJob(j.name, j.id, j.entry, j.src, j.overlay, j.load, gen)
+	// Goexit settles the current load in finishPrefetchJob but also terminates its
+	// queue worker. Replace that reader slot after settlement so queued owners are
+	// not stranded. Do not inspect len(queue): the producer may still be enqueueing.
+	// A successor consumes the same finite queue and generation without admission.
+	// Active reads remain bounded by workers; transient unwinding goroutines may
+	// overlap successors, with at most workers+len(jobs) total goroutine starts.
+	var drain func()
+	drain = func() {
+		drained := false
+		defer func() {
+			if !drained {
+				go drain()
 			}
 		}()
+		for j := range queue {
+			t.finishPrefetchJob(j.name, j.id, j.entry, j.src, j.overlay, j.load, gen)
+		}
+		drained = true
+	}
+	for w := 0; w < workers; w++ {
+		go drain()
 	}
 	for _, j := range jobs {
 		queue <- j
