@@ -56,12 +56,22 @@ func compileNormalSchedule(plan profileplan.Plan) ([]normalCell, error) {
 		if name == "no-share" {
 			sessions, turns = 4, 1
 		}
-		if name == "tool-completion-burst" {
-			sessions, turns = plan.PreferredConcurrency, 4/plan.PreferredConcurrency
-		}
-		cells = append(cells, normalCell{Name: name, Phase: "controls", Concurrency: plan.PreferredConcurrency, Sessions: sessions, TurnsPerSession: turns, OutputTokens: 256})
+		cell := normalCell{Name: name, Phase: "controls", Sessions: sessions, TurnsPerSession: turns, OutputTokens: 256}
+		cells = append(cells, normalCellAtConcurrency(cell, plan.PreferredConcurrency))
 	}
 	return cells, nil
+}
+
+// normalCellAtConcurrency preserves the fixed four-turn control budget. The
+// burst can overlap at most those four requests, even when service capacity is C8.
+func normalCellAtConcurrency(cell normalCell, concurrency int) normalCell {
+	cell.Concurrency = concurrency
+	if cell.Name == "tool-completion-burst" {
+		cell.Concurrency = min(concurrency, 4)
+		cell.Sessions = cell.Concurrency
+		cell.TurnsPerSession = 4 / cell.Sessions
+	}
+	return cell
 }
 
 func runNormalReplay(ctx context.Context, progress io.Writer, endpoint, model, out string, inputs frozenInputs) (*normalReplayResult, error) {
@@ -145,11 +155,7 @@ func runNormalReplay(ctx context.Context, progress io.Writer, endpoint, model, o
 			selectedRuntime = selection.Selected
 		}
 		if cell.Phase == "steady" || cell.Phase == "controls" {
-			cell.Concurrency = selectedRuntime
-			if cell.Name == "tool-completion-burst" {
-				cell.Sessions = min(selectedRuntime, 4)
-				cell.TurnsPerSession = 4 / cell.Sessions
-			}
+			cell = normalCellAtConcurrency(cell, selectedRuntime)
 			cells[i] = cell
 		}
 		fmt.Fprintf(progress, "agentbench normal phase=%s cell=%s\n", cell.Phase, cell.Name)
