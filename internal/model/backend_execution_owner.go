@@ -99,8 +99,13 @@ func (scope *backendExecutionScope) finish() {
 // bit distinguishes a normal return from both legacy panic(nil) and Goexit,
 // neither of which may be converted into successful session retirement.
 func (scope *backendExecutionScope) finishCompleted(complete *bool) {
-	if scope != nil {
-		scope.release(nil, !*complete)
+	if scope == nil {
+		return
+	}
+	completed := *complete
+	cleanup := scope.releaseCleanup(nil)
+	if completed && cleanup.present {
+		panic(cleanup.value)
 	}
 }
 
@@ -114,6 +119,22 @@ func (scope *backendExecutionScope) finishError(err *error) {
 }
 
 func (scope *backendExecutionScope) release(primary any, failed bool) {
+	cleanup := scope.releaseCleanup(primary)
+	if cleanup.legacyValue != nil && !failed {
+		panic(cleanup.legacyValue)
+	}
+}
+
+// Legacy boundaries select the first nonnil payload. Completion-aware Close
+// selects the first panic, including legacy panic(nil). Keep both selections:
+// a nil panic followed by a nonnil panic has different established precedence.
+type backendCleanupPanic struct {
+	value       any
+	present     bool
+	legacyValue any
+}
+
+func (scope *backendExecutionScope) releaseCleanup(primary any) (cleanup backendCleanupPanic) {
 	if !scope.live {
 		if primary != nil {
 			panic(primary)
@@ -128,23 +149,27 @@ func (scope *backendExecutionScope) release(primary any, failed bool) {
 	after := scope.after
 	scope.after = nil
 	scope.owner.Unlock()
-	var cleanup any
 	for _, f := range after {
 		func() {
+			completed := false
 			defer func() {
-				if r := recover(); r != nil && cleanup == nil {
-					cleanup = r
+				r := recover()
+				if !completed && !cleanup.present {
+					cleanup.value, cleanup.present = r, true
+				}
+				if r != nil && cleanup.legacyValue == nil {
+					cleanup.legacyValue = r
 				}
 			}()
 			f()
+			completed = true
 		}()
 	}
 	if primary != nil {
 		panic(primary)
 	}
-	if cleanup != nil && !failed {
-		panic(cleanup)
-	}
+	// Goexit does not return through the callback boundary or publish an outcome.
+	return cleanup
 }
 
 // closeBackendOwned is used only by selected-operation error paths inside an
