@@ -39,6 +39,10 @@ func newPublishFixture(t *testing.T) *publishFixture {
 	f := &publishFixture{t: t, local: filepath.Join(root, "local"), remote: filepath.Join(root, "remote.git")}
 	f.git(root, "", "init", "-q", f.local)
 	f.git(root, "", "init", "-q", "--bare", f.remote)
+	// Keep receive-pack maintenance inside the temporary repository's lifetime.
+	// Older Git uses gc.autoDetach; newer Git prefers maintenance.autoDetach.
+	f.git(f.remote, "", "config", "gc.autoDetach", "false")
+	f.git(f.remote, "", "config", "maintenance.autoDetach", "false")
 	f.git(f.local, "", "remote", "add", "origin", f.remote)
 	f.store = NewInDir(f.local)
 	f.record = Record{ID: "owned", Holder: "holder", SessionID: "session", Generation: 2,
@@ -164,6 +168,9 @@ func TestLeaserefPublish(t *testing.T) {
 				}
 				if slices.Contains(event.Argv, "fetch") {
 					t.Fatalf("Git spawned an implicit fetch: %v", event.Argv)
+				}
+				if (slices.Contains(event.Argv, "maintenance") || slices.Contains(event.Argv, "gc")) && slices.Contains(event.Argv, "--detach") {
+					t.Fatalf("Git maintenance can outlive its temporary repository: %v", event.Argv)
 				}
 			}
 			if f.refs(f.local) != beforeLocal || f.git(f.remote, "", "rev-parse", "refs/fak/locks/unrelated") != unrelated {
