@@ -1432,6 +1432,11 @@
           "category": "incidental",
           "reason": "Closed profile ledger prefix-state value for validated positive restored-token accounting, explicitly leaving OS cache state unknown; reports existing receipt evidence without defining another reuse mechanism.",
           "token": "prefix_reused_os_cache_unknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixed uint64 byte-counter field in BackendH2DAttribution for uploads labeled with the existing MemoryClass MemoryDDRCache (wire value ddr_cache). It partitions native-accounted H2D counter deltas by the caller's memory class; it introduces no cache implementation, residency policy, tensor-role inference or proof of device completion.",
+          "token": "DDRCache"
         }
       ],
       "exclude": [
@@ -1477,6 +1482,7 @@
         "CodeKVCache",
         "CounterCacheEvictions",
         "CounterPrefixCacheHits",
+        "DDRCache",
         "DeadlineCacheCredit",
         "DefaultCacheBytes",
         "DefaultCacheStateAllowlist",
