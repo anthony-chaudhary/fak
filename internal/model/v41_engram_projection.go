@@ -191,7 +191,7 @@ func (s *Session) v41EngramProjectionFunc() v41EngramProjectionFunc {
 		}()
 		key := fmt.Sprintf("v41-engram:%s:%v:%d:%d", name, descriptor.dtype, out, in)
 		var source compute.Tensor
-		if _, cached := s.halW[key]; !cached {
+		if _, cached := s.lookupImmutableWeight(key, key); !cached {
 			var err error
 			source, err = descriptor.host(0, out, in)
 			if err != nil {

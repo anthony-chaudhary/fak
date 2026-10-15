@@ -2,12 +2,18 @@ package devcmd
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // companionLiveSkipReason reports why the companion live proxy tests must skip,
@@ -25,14 +31,28 @@ func companionLiveSkipReason(t *testing.T, privRoot string) string {
 	if _, err := os.Stat(filepath.Join(privRoot, "docs", "tickets")); err != nil {
 		return "companion fak-private lacks docs/tickets"
 	}
+	deadline := time.Now().Add(30 * time.Second)
+	if outer, ok := t.Deadline(); ok && outer.Add(-2*time.Second).Before(deadline) {
+		deadline = outer.Add(-2 * time.Second)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	// Waiting for the in-process probe slot consumes the same deadline.
+	select {
+	case companionProbeSlot <- struct{}{}:
+		defer func() { <-companionProbeSlot }()
+	case <-ctx.Done():
+		return fmt.Sprintf("companion build probe admission expired: %v", ctx.Err())
+	}
 	out := filepath.Join(t.TempDir(), "fak-boundary-probe")
-	cmd := exec.Command("go", "-C", privRoot, "build", "-o", out, "./cmd/fak-boundary")
-	if b, err := cmd.CombinedOutput(); err != nil {
-		detail := strings.TrimSpace(string(b))
-		if len(detail) > 300 {
-			detail = detail[:300]
+	cmd := exec.CommandContext(ctx, "go", "-C", privRoot, "build", "-p=1", "-o", out, "./cmd/fak-boundary")
+	cmd.Env = companionProbeEnv(filepath.Dir(out))
+	detail, err := runCompanionProbe(cmd)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Sprintf("companion build probe deadline exceeded; buildability unverified: %v", ctx.Err())
 		}
-		return fmt.Sprintf("companion fak-private cmd/fak-boundary does not build: %v: %s", err, detail)
+		return fmt.Sprintf("companion fak-private cmd/fak-boundary does not build: %v: %s", err, strings.TrimSpace(detail))
 	}
 	return ""
 }
@@ -302,5 +322,205 @@ func TestCompanionBridge_Live(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Usage: fak-dev strix") {
 		t.Errorf("unexpected strix --help output: %s", stdout.String())
+	}
+}
+
+var companionProbeSlot = make(chan struct{}, 1)
+
+func companionProbeEnv(tmp string) []string {
+	// Native helper TestMain and Go build temporary files belong to this probe.
+	return append(os.Environ(), "GOMAXPROCS=1", "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp)
+}
+
+// The output cap applies while copying, not after an unbounded CombinedOutput.
+// Both streams share the same writer; the mutex also covers distinct copy loops.
+type companionProbeOutput struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+func (w *companionProbeOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := len(p)
+	if room := 300 - len(w.data); room > 0 {
+		w.data = append(w.data, p[:min(room, n)]...)
+	}
+	return n, nil
+}
+
+func runCompanionProbe(cmd *exec.Cmd) (string, error) {
+	var output companionProbeOutput
+	cmd.Stdout, cmd.Stderr = &output, &output
+	// Bound inherited-pipe drain after the direct child exits or is cancelled.
+	cmd.WaitDelay = time.Second
+	err := runOwnedCompanionProbe(cmd)
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	return string(output.data), err
+}
+
+// Dispatch private native fixtures before Git-isolating TestMain. Ordinary test
+// invocations do not match these modes and retain the normal TestMain contract.
+func init() {
+	mode := ""
+	if len(os.Args) >= 4 {
+		mode = os.Args[len(os.Args)-3]
+	}
+	switch mode {
+	case "companion-probe-descendant", "companion-probe-owner", "companion-probe-leader", "companion-probe-owner-target":
+		if err := companionProbeFixture(mode, os.Args[len(os.Args)-2], os.Args[len(os.Args)-1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) > 1 && os.Args[len(os.Args)-1] == "companion-probe-child" {
+		fmt.Fprint(os.Stdout, strings.Repeat("x", 4096))
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
+}
+
+func companionProbeFixture(mode, address, ready string) error {
+	switch mode {
+	case "companion-probe-descendant":
+		conn, err := net.DialTimeout("tcp", address, 3*time.Second)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			return err
+		}
+		if err := os.WriteFile(ready, []byte("ready"), 0600); err != nil {
+			return err
+		}
+		_, err = io.Copy(io.Discard, conn)
+		return err
+	case "companion-probe-owner":
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		probe := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCompanionProbeBounds$", "--", "companion-probe-owner-target", address, ready)
+		probe.Env = os.Environ()
+		_, err := runCompanionProbe(probe)
+		return err
+	default:
+		child := exec.Command(os.Args[0], "-test.run=^TestCompanionProbeBounds$", "--", "companion-probe-descendant", address, ready)
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			return err
+		}
+		// The descendant inherits the probe's pipes and process ownership.
+		for until := time.Now().Add(3 * time.Second); time.Now().Before(until); {
+			if _, err := os.Stat(ready); err == nil {
+				if mode == "companion-probe-owner-target" {
+					time.Sleep(8 * time.Second)
+				}
+				return nil
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return errors.New("descendant readiness timeout")
+	}
+}
+
+// fak-test:runtime fast est=4s lane=default
+func TestCompanionProbeBounds(t *testing.T) {
+	// Re-exec the native test binary; this regression never launches a compiler.
+	var out companionProbeOutput
+	if n, err := out.Write([]byte(strings.Repeat("x", 4096))); n != 4096 || err != nil || len(out.data) != 300 {
+		t.Fatalf("bounded writer: n=%d err=%v bytes=%d", n, err, len(out.data))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCompanionProbeBounds$", "--", "companion-probe-child")
+	cmd.Env = companionProbeEnv(t.TempDir())
+	started := time.Now()
+	detail, err := runCompanionProbe(cmd)
+	if err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("probe did not expire: err=%v context=%v", err, ctx.Err())
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("probe cancellation took %s", elapsed)
+	}
+	if len(detail) != 300 {
+		t.Fatalf("probe child did not exercise capped output: %d bytes", len(detail))
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("probe returned without waiting for its direct child")
+	}
+
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := listener.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	treeCtx, treeCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer treeCancel()
+	leader := exec.CommandContext(treeCtx, os.Args[0], "-test.run=^TestCompanionProbeBounds$", "--", "companion-probe-leader", listener.Addr().String(), filepath.Join(t.TempDir(), "ready"))
+	leader.Env = companionProbeEnv(t.TempDir())
+	done := make(chan error, 1)
+	go func() { _, err := runCompanionProbe(leader); done <- err }()
+	conn, err := listener.AcceptTCP()
+	if err != nil {
+		treeCancel()
+		<-done
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := <-done; !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("early leader exit did not exercise inherited-pipe timeout: %v", err)
+	}
+	if leader.ProcessState == nil {
+		t.Fatal("early leader was not waited")
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var one [1]byte
+	if _, err := conn.Read(one[:]); !companionProbeSocketClosed(err) {
+		t.Fatalf("owned descendant survived probe return: %v", err)
+	}
+
+	// Kill only the exact owner child. Its anchor is outside this process group;
+	// EOF therefore witnesses the parent-liveness pipe, not outer group cleanup.
+	ownerListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ownerListener.Close()
+	if err := ownerListener.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	ownerCtx, ownerCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer ownerCancel()
+	owner := exec.CommandContext(ownerCtx, os.Args[0], "-test.run=^TestCompanionProbeBounds$", "--", "companion-probe-owner", ownerListener.Addr().String(), filepath.Join(t.TempDir(), "ready"))
+	owner.Env = companionProbeEnv(t.TempDir())
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ownerDone := make(chan error, 1)
+	go func() { ownerDone <- owner.Wait() }()
+	ownerConn, err := ownerListener.AcceptTCP()
+	if err != nil {
+		_ = owner.Process.Kill()
+		<-ownerDone
+		t.Fatal(err)
+	}
+	defer ownerConn.Close()
+	killErr := owner.Process.Kill()
+	waitErr := <-ownerDone
+	if killErr != nil || waitErr == nil || owner.ProcessState == nil {
+		t.Fatalf("owner termination was not witnessed: kill=%v wait=%v", killErr, waitErr)
+	}
+	if err := ownerConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ownerConn.Read(one[:]); !companionProbeSocketClosed(err) {
+		t.Fatalf("descendant survived parent-owner termination: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package localbench
 
 import (
 	"crypto/ed25519"
+	"encoding/hex"
 	"path/filepath"
 	"testing"
 	"time"
@@ -220,7 +221,13 @@ func TestAttestationTamperRejection(t *testing.T) {
 	// Case 6: Tamper signature
 	t.Run("tamper_signature", func(t *testing.T) {
 		tampered := env
-		tampered.Attestation.Signature = "00" + tampered.Attestation.Signature[2:]
+		signature, err := hex.DecodeString(tampered.Attestation.Signature)
+		if err != nil || len(signature) != ed25519.SignatureSize {
+			t.Fatalf("invalid signed fixture: signature bytes=%d err=%v", len(signature), err)
+		}
+		// Flipping a bit changes even a signature whose first byte is already zero.
+		signature[0] ^= 1
+		tampered.Attestation.Signature = hex.EncodeToString(signature)
 		status, err := VerifyAttestation(tampered, nil, time.Time{})
 		if status != TrustInvalid || err == nil {
 			t.Fatalf("expected TrustInvalid on tampered signature, got %s err=%v", status, err)

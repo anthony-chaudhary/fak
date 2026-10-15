@@ -85,7 +85,7 @@ func (s *Session) v41EngramGateFuncWith(decoder compute.V41EngramRowDecodeBacken
 		_, err := v41SelectedDeviceCall(s, l, "v41-engram-gate", func(stage *string) (struct{}, error) {
 			key := fmt.Sprintf("v41-engram:%s:%v:%d:%d", name, descriptor.dtype, out, in)
 			var source compute.Tensor
-			if _, cached := s.halW[key]; !cached {
+			if _, cached := s.lookupImmutableWeight(key, key); !cached {
 				var err error
 				if source, err = descriptor.host(0, out, in); err != nil {
 					return struct{}{}, err
