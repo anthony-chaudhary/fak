@@ -122,6 +122,9 @@ const (
 	// VulkanBuildReceiptSchemaV20 binds V19/83 plus optional row-addressed routed SwiGLU.
 	VulkanBuildReceiptSchemaV20 = "fak.vulkan-build-receipt.v20"
 
+	// VulkanBuildReceiptSchemaV21 binds V20/84 plus optional row-addressed down publication.
+	VulkanBuildReceiptSchemaV21 = "fak.vulkan-build-receipt.v21"
+
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
 
