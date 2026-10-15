@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func TestParkAheadBehindUniqueRetainedIdenticalSuppressed(t *testing.T) {
@@ -397,6 +399,88 @@ func TestParkUpstreamIdenticalSuppressed(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(clone, "a.txt")); got != "v2\n" {
 		t.Fatalf("a.txt = %q, want 'v2\\n'", got)
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestParkDetachedWorkerPreservesSharedBranch(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	mkdir(t, repo)
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "core.autocrlf", "false")
+	git(t, repo, "config", "user.name", "test")
+	git(t, repo, "config", "user.email", "test@example.com")
+	writeFile(t, filepath.Join(repo, "a.txt"), "top\nmiddle\nbottom\n")
+	writeFile(t, filepath.Join(repo, "peer.txt"), "peer base\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "base")
+	base := revString(t, repo, "HEAD")
+
+	prepared := workerworktree.Prepare(repo, "safesync", "park-detached", base, filepath.Join(tmp, "workers"), nil)
+	if !prepared.OK {
+		t.Fatalf("prepare detached worker: %+v", prepared)
+	}
+	worker := prepared.Path
+	if !isSanctionedWorkerWorktree(worker) {
+		t.Fatal("fixture must exercise the sanctioned-worker branch fallback")
+	}
+
+	// Create an explicit checkpoint target without advancing either checkout.
+	const targetBytes = "top\nincoming\nmiddle\nbottom\n"
+	writeFile(t, filepath.Join(worker, "a.txt"), targetBytes)
+	git(t, worker, "add", "a.txt")
+	tree := strings.TrimSpace(gitOutput(t, worker, "write-tree"))
+	target := strings.TrimSpace(gitOutput(t, worker, "commit-tree", tree, "-p", base, "-m", "checkpoint target"))
+	const targetRef = "refs/fak/wip/worker-target/checkpoint"
+	git(t, worker, "update-ref", targetRef, target)
+	git(t, worker, "checkout", "HEAD", "--", "a.txt")
+	const ownedBytes = targetBytes + "unique\n"
+	writeFile(t, filepath.Join(worker, "a.txt"), ownedBytes)
+
+	// The other checkout owns independent staged and unstaged edits.
+	writeFile(t, filepath.Join(repo, "a.txt"), "parent dirty\n")
+	writeFile(t, filepath.Join(repo, "peer.txt"), "parent staged\n")
+	git(t, repo, "add", "peer.txt")
+	writeFile(t, filepath.Join(repo, "peer.txt"), "parent working\n")
+	parentIndex := readFile(t, filepath.Join(repo, ".git", "index"))
+
+	rec, err := Park(ctx, ParkOptions{
+		Repo: worker, Session: "sess-worker", Paths: []string{"a.txt"}, TargetRef: targetRef, Apply: true,
+	})
+	if err != nil {
+		t.Fatalf("Park: %v", err)
+	}
+	if !rec.OK || rec.Status != ParkStatusRestored || rec.NewHEAD != target {
+		t.Fatalf("park receipt = %+v, want restored target %s", rec, target)
+	}
+	if got := revString(t, repo, "refs/heads/main"); got != base {
+		t.Errorf("shared main moved: got %s, want %s", got, base)
+	}
+	if got := readFile(t, filepath.Join(repo, ".git", "index")); got != parentIndex {
+		t.Error("parent index changed")
+	}
+	if got := readFile(t, filepath.Join(repo, "a.txt")); got != "parent dirty\n" {
+		t.Errorf("parent selected-path bytes changed: %q", got)
+	}
+	if got := readFile(t, filepath.Join(repo, "peer.txt")); got != "parent working\n" {
+		t.Errorf("parent peer bytes changed: %q", got)
+	}
+	if got := revString(t, worker, "HEAD"); got != rec.NewHEAD {
+		t.Errorf("worker HEAD = %s, want receipt NewHEAD %s", got, rec.NewHEAD)
+	}
+	if got := strings.TrimSpace(gitOutput(t, worker, "rev-parse", "--abbrev-ref", "HEAD")); got != "HEAD" {
+		t.Errorf("worker attached to %q", got)
+	}
+	if got := readFile(t, filepath.Join(worker, "a.txt")); got != ownedBytes {
+		t.Errorf("worker selected bytes = %q, want %q", got, ownedBytes)
+	}
+	if got := gitOutput(t, worker, "show", ":a.txt"); got != targetBytes {
+		t.Errorf("worker index = %q, want integrated target %q", got, targetBytes)
+	}
+	if got := gitOutput(t, worker, "show", rec.CheckpointRef+":a.txt"); got != ownedBytes {
+		t.Errorf("recovery checkpoint = %q, want original selected bytes %q", got, ownedBytes)
 	}
 }
 

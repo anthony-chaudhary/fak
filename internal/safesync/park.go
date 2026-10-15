@@ -402,12 +402,10 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 			newCommit = strings.TrimSpace(string(cTree.Stdout))
 		}
 
-		branch, _ := currentBranch(ctx, run, repo)
-		refTarget := "HEAD"
-		if branch != "" {
-			refTarget = "refs/heads/" + branch
-		}
-		urRes := run(ctx, repo, "update-ref", refTarget, newCommit, baseHEAD)
+		// HEAD follows the actual checkout: its branch when attached, or the
+		// worktree-local ref when detached. currentBranch's logical sync-target
+		// fallback must never select a shared branch for a detached worker write.
+		urRes := run(ctx, repo, "update-ref", "HEAD", newCommit, baseHEAD)
 		if urRes.Err != nil || urRes.Code != 0 {
 			for _, p := range selectedPaths {
 				_ = run(ctx, repo, "checkout", checkpointRef, "--", p)
