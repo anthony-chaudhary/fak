@@ -523,6 +523,13 @@ int fvk_have_v41_routed_swiglu_panel_row(void);
 int fvk_v41_routed_swiglu_panel_row_shape(int rows, int count, int row);
 int fvk_v41_routed_swiglu_panel_row_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                                        int rows, int count, int row, float limit, float weight);
+/* Optional marked strict F32 multiply + ordinary checked BF16 at fixed site 25.
+ * Three disjoint buffers; input remains borrowed until deferred completion. */
+int fvk_have_v41_index_scale_bf16(void);
+int fvk_v41_index_scale_bf16_count(int count);
+int fvk_v41_index_scale_bf16_f32(const void *dInput, void *dOut, void *dStatus, int count, float scale);
+int fvk_v41_index_scale_bf16_module_abi(const void *data, size_t bytes);
+
 /* Optional marked row-addressed ordinary RoutedDown (site 21) publication.
  * Input is borrowed F32 [rows,count], output is one fresh count-wide row;
  * status is one 16-byte checked BF16 record with row-local fault index.
