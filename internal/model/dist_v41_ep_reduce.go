@@ -148,28 +148,33 @@ func (p *v41EPRootPanic) Unwrap() error {
 func (r v41EPReduction) reduce(gathered []float32, plan TPPlan) (row []float32, err error) {
 	// A selected root backend can return or panic. Either must reach peers as
 	// a failure verdict before sockets close, without replay or another sum.
+	complete := false
 	defer func() {
-		if value := recover(); value != nil {
+		if value := recover(); !complete {
 			row, err = nil, &v41EPRootPanic{value: value}
 		}
 	}()
-	outputs, err := v41EPUnpack(gathered, plan, r.owners, r.digest, r.picks, r.width)
-	if err != nil {
-		return nil, err
-	}
-	row, err = v41FullRoutedSumWith(r.layer, r.picks, outputs, r.width, r.sum)
-	if err != nil {
-		return nil, fmt.Errorf("exact sum: %w", err)
-	}
-	if len(row) != r.width {
-		return nil, fmt.Errorf("invalid exact sum width")
-	}
-	for _, value := range row {
-		if !finite32(value) {
-			return nil, fmt.Errorf("nonfinite exact sum")
+	row, err = func() ([]float32, error) {
+		outputs, err := v41EPUnpack(gathered, plan, r.owners, r.digest, r.picks, r.width)
+		if err != nil {
+			return nil, err
 		}
-	}
-	return row, nil
+		row, err = v41FullRoutedSumWith(r.layer, r.picks, outputs, r.width, r.sum)
+		if err != nil {
+			return nil, fmt.Errorf("exact sum: %w", err)
+		}
+		if len(row) != r.width {
+			return nil, fmt.Errorf("invalid exact sum width")
+		}
+		for _, value := range row {
+			if !finite32(value) {
+				return nil, fmt.Errorf("nonfinite exact sum")
+			}
+		}
+		return row, nil
+	}()
+	complete = true
+	return row, err
 }
 
 // The generic frame readers intentionally retain their existing semantics.
