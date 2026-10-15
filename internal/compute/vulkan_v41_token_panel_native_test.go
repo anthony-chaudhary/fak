@@ -15,7 +15,7 @@ import (
 
 // Ref #12640. The existing subprocess harness sets the opt-in before init()
 // builds optional pipelines. Setting it with t.Setenv after vk(t) is too late.
-func v41TokenPanelNativeStartup(t *testing.T) bool {
+func v41TokenPanelNativeStartup(t *testing.T, q2, q3 string) bool {
 	t.Helper()
 	if _, ok := Lookup("vulkan"); !ok {
 		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
@@ -24,13 +24,14 @@ func v41TokenPanelNativeStartup(t *testing.T) bool {
 		t.Skip("UNQUALIFIED: no Vulkan device; native token-panel parity did not execute")
 	}
 	return runVulkanStartupEnvFixture(t, 2*time.Minute, map[string]string{
-		"FAK_V41_Q2K_TOKEN_PANEL":      "1",
+		"FAK_V41_Q2K_TOKEN_PANEL":      q2,
+		"FAK_V41_Q3K_TOKEN_PANEL":      q3,
 		"FAK_VULKAN_Q2K_MATVEC":        "1",
 		"FAK_STRIX_WAVE32_GEMV_DECODE": "0",
 	})
 }
 
-func v41TokenPanelNativeDevice(t *testing.T) *vulkanBackend {
+func v41TokenPanelNativePhysicalDevice(t *testing.T) *vulkanBackend {
 	t.Helper()
 	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") != "1" || os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
 		t.Fatal("UNQUALIFIED: child must start with required-device mode and dispatch profiling")
@@ -39,6 +40,14 @@ func v41TokenPanelNativeDevice(t *testing.T) *vulkanBackend {
 	if kind := v.v41PhysicalDeviceType(); kind != 1 && kind != 2 {
 		t.Fatalf("UNQUALIFIED: native parity needs a physical GPU, deviceType=%d tier=%s", kind, v.Tier())
 	}
+	identity := v41TokenPanelNativeSnapshot(t, v).Identity
+	t.Logf("engine=fak-native backend=%s device=%q driver=%q runtime=%q", identity.Backend, identity.Device, identity.Driver, identity.Runtime)
+	return v
+}
+
+func v41TokenPanelNativeDevice(t *testing.T) *vulkanBackend {
+	t.Helper()
+	v := v41TokenPanelNativePhysicalDevice(t)
 	if os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") != "1" || !v.SupportsQ3KMatMul() {
 		t.Fatal("UNQUALIFIED: token-panel opt-in or native Q3_K scalar pipeline unavailable")
 	}
@@ -49,8 +58,6 @@ func v41TokenPanelNativeDevice(t *testing.T) *vulkanBackend {
 	if !vulkanDebugSelectQ2KMatvec(true) {
 		t.Fatal("UNQUALIFIED: native Q2_K mode-0 matvec pipeline unavailable")
 	}
-	identity := v41TokenPanelNativeSnapshot(t, v).Identity
-	t.Logf("engine=fak-native backend=%s device=%q driver=%q runtime=%q", identity.Backend, identity.Device, identity.Driver, identity.Runtime)
 	return v
 }
 
@@ -129,7 +136,7 @@ func v41TokenPanelNativeFixture(dtype Dtype, out, in, rows int, exact bool) (Ten
 // The ordinary MatMul Approx contract does not qualify this model route.
 // fak-test:runtime integration est=15s lane=optin
 func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
-	if v41TokenPanelNativeStartup(t) {
+	if v41TokenPanelNativeStartup(t, "1", "0") {
 		return
 	}
 	v := v41TokenPanelNativeDevice(t)
@@ -283,7 +290,7 @@ func v41TokenPanelNativeEqual(t *testing.T, got, want []float32) {
 // separate model cohort's status-ordering and session-retirement contract.
 // fak-test:runtime integration est=3s lane=optin
 func TestVulkanV41TokenPanelNativeRefusalCleanup(t *testing.T) {
-	if v41TokenPanelNativeStartup(t) {
+	if v41TokenPanelNativeStartup(t, "1", "0") {
 		return
 	}
 	v := v41TokenPanelNativeDevice(t)
@@ -344,6 +351,7 @@ func TestVulkanV41TokenPanelNativeRefusalCleanup(t *testing.T) {
 			}()
 			t.Run("disabled-opt-in", func(t *testing.T) {
 				t.Setenv("FAK_V41_Q2K_TOKEN_PANEL", "0")
+				t.Setenv("FAK_V41_Q3K_TOKEN_PANEL", "0")
 				if v41TokenPanelNativeSupports(v, w, rows) {
 					t.Fatal("disabled opt-in admitted")
 				}
@@ -364,6 +372,78 @@ func TestVulkanV41TokenPanelNativeRefusalCleanup(t *testing.T) {
 			got := v41TokenPanelNativeRead(t, v, dtype, w, x, rows, false)
 			v41TokenPanelNativeEqual(t, got, want)
 			assertBitIdentical(t, "input after refusals and read failure", values, v.Read(x))
+		})
+	}
+}
+
+// The independent Q3 opt-in must reach a real native dispatch while Q2 remains
+// unavailable. A late opt-in must not invent an unbuilt pipeline.
+// fak-test:runtime integration est=3s lane=optin
+func TestVulkanV41TokenPanelNativeQ3Only(t *testing.T) {
+	for _, startupQ3 := range []string{"1", "0"} {
+		t.Run("startup-q3-"+startupQ3, func(t *testing.T) {
+			if v41TokenPanelNativeStartup(t, "0", startupQ3) {
+				return
+			}
+			v := v41TokenPanelNativePhysicalDevice(t)
+			const out, in, rows = 65, 256, 2
+			hw, values := v41TokenPanelNativeFixture(Q3_K, out, in, rows, true)
+			w := v.Upload(hw, Q3_K)
+			defer v.Free(w)
+			hq2, _ := v41TokenPanelNativeFixture(Q2_K, out, in, rows, true)
+			q2 := v.Upload(hq2, Q2_K)
+			defer v.Free(q2)
+			x := v.UploadClass(NewF32(Default(), []int{len(values)}, values), F32, MemoryActivation, "Q3-only token-panel input")
+			defer v.Free(x)
+			refuse := func(t *testing.T, weight Tensor) {
+				t.Helper()
+				before := v41TokenPanelNativeSnapshot(t, v)
+				if v41TokenPanelNativeSupports(v, weight, rows) {
+					t.Fatal("disabled or unbuilt token-panel pipeline admitted")
+				}
+				y, err := v41TokenPanelNativeCall(v, weight.Dtype, weight, x, rows)
+				defer v.Free(y)
+				var backend *BackendError
+				if y.Buf() != nil || !errors.As(err, &backend) || !errors.Is(err, ErrVulkanExecutionFailed) {
+					t.Fatalf("unavailable tile published output or lost typed error: output=%v error=%v", y.Buf(), err)
+				}
+				after := v41TokenPanelNativeSnapshot(t, v)
+				if after.Counters != before.Counters || after.DeviceAllocationLiveBytes != before.DeviceAllocationLiveBytes {
+					t.Fatal("unavailable tile changed native counters or live allocation bytes")
+				}
+			}
+			refuse(t, q2)
+			t.Run("late-q2", func(t *testing.T) {
+				t.Setenv("FAK_V41_Q2K_TOKEN_PANEL", "1")
+				refuse(t, q2)
+			})
+			if startupQ3 == "0" {
+				t.Setenv("FAK_V41_Q3K_TOKEN_PANEL", "1")
+				refuse(t, w)
+				return
+			}
+			if !v.SupportsQ3KMatMul() || !v.SupportsV41Q3KTokenPanel(w, rows) {
+				t.Fatal("UNQUALIFIED: Q3-only scalar/tile module, float controls, or device geometry unavailable")
+			}
+			want := make([]float32, 0, rows*out)
+			beforeScalar := v.VulkanDebugDispatchProfileSnapshot()
+			for row := 0; row < rows; row++ {
+				func() {
+					dx := v.Upload(NewF32(Default(), []int{in}, values[row*in:(row+1)*in]), F32)
+					defer v.Free(dx)
+					dy := v.MatMul(w, dx)
+					defer v.Free(dy)
+					want = append(want, v.Read(dy)...)
+				}()
+			}
+			v41TokenPanelNativeDispatches(t, Q3_K, beforeScalar, v.VulkanDebugDispatchProfileSnapshot(), rows)
+			got := v41TokenPanelNativeRead(t, v, Q3_K, w, x, rows, false)
+			v41TokenPanelNativeEqual(t, got, want)
+			t.Run("disabled-q3", func(t *testing.T) {
+				t.Setenv("FAK_V41_Q3K_TOKEN_PANEL", "0")
+				refuse(t, w)
+			})
+			t.Logf("NATIVE_TOKEN_PANEL_Q3_ONLY out=%d in=%d rows=%d scalar_dispatches=%d tile_dispatches=1 bit_equal=%d", out, in, rows, rows, len(got))
 		})
 	}
 }

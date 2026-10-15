@@ -3796,13 +3796,17 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20)) {
         buildKernel(g_kern[K_V41_ROUTED_DOWN_SUM], P("v41_routed_down_sum.spv"), 12, 16);
     }
-    // Experimental V18 token tile: do not even build its pipeline unless the
-    // exact opt-in was supplied before Vulkan initialization. An absent module
-    // never disables the existing Q2_K paths.
+    // Experimental token tiles require an exact opt-in before initialization.
+    // Q3 accepts its independent opt-in or the legacy Q2 opt-in; Q3 alone must
+    // not build Q2. Missing optional modules leave the existing paths alone.
     const char* q2TokenEnv = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
-    if (q2TokenEnv && q2TokenEnv[0] == '1' && q2TokenEnv[1] == '\0' && g_v41IndexerFloatControls) {
+    const char* q3TokenEnv = std::getenv("FAK_V41_Q3K_TOKEN_PANEL");
+    const bool q2TokenOptedIn = q2TokenEnv && q2TokenEnv[0] == '1' && q2TokenEnv[1] == '\0';
+    const bool q3TokenOptedIn = q3TokenEnv && q3TokenEnv[0] == '1' && q3TokenEnv[1] == '\0';
+    if (q2TokenOptedIn && g_v41IndexerFloatControls) {
         buildKernel(g_kern[K_V41_Q2K_TOKEN_PANEL], P("v41_q2k_token_panel.spv"), 3, 12);
-        // V19 extends this same opt-in with Q3_K down token sharing.
+    }
+    if ((q2TokenOptedIn || q3TokenOptedIn) && g_v41IndexerFloatControls) {
         buildKernel(g_kern[K_V41_Q3K_TOKEN_PANEL], P("v41_q3k_token_panel.spv"), 3, 12);
     }
     // Registry V9/current68 promotes only the unchanged finite checked module.
@@ -5762,8 +5766,11 @@ int fvk_v41_q2k_token_panel_f32(const void* dW, const void* dX, void* dY, int ou
 }
 
 int fvk_have_v41_q3k_token_panel(void) {
-    const char* enabled = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
-    return enabled && enabled[0] == '1' && enabled[1] == '\0' && g_ready && g_v41IndexerFloatControls &&
+    const char* q2Enabled = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
+    const char* q3Enabled = std::getenv("FAK_V41_Q3K_TOKEN_PANEL");
+    return ((q2Enabled && q2Enabled[0] == '1' && q2Enabled[1] == '\0') ||
+            (q3Enabled && q3Enabled[0] == '1' && q3Enabled[1] == '\0')) &&
+        g_ready && g_v41IndexerFloatControls &&
         g_kern[K_V41_Q3K_TOKEN_PANEL].pipe != VK_NULL_HANDLE && g_kern[K_V41_Q3K_TOKEN_PANEL].nbuf == 3;
 }
 
