@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1308<br>
-rows: 1282<br>
-unverified rows: 0 / 1282<br>
-source-only rows absent from help: 1046
+parsed files: 1312<br>
+rows: 1294<br>
+unverified rows: 0 / 1294<br>
+source-only rows absent from help: 1058
 
 ## Surface table
 
@@ -147,7 +147,7 @@ source-only rows absent from help: 1046
 | `fak benchmarks help` |  | benchmarksUsage | `case` arm of the dispatch switch in runBenchmarks() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks list` | prints the catalog as a table (or JSON) | benchmarksList / internal/benchcatalog | `case` arm of the dispatch switch in runBenchmarks() | NONE | — | yes |
 | `fak benchmarks preflight` |  | benchmarksEnvironmentCheck / internal/benchcatalog | `case` arm of the dispatch switch in runBenchmarks() | NONE | — | **SOURCE ONLY** |
-| `fak benchmarks run` | resolves the benchmark to its real command and runs it | benchmarksRun / internal/benchcatalog, internal/windowgate | `case` arm of the dispatch switch in runBenchmarks() | NONE | — | yes |
+| `fak benchmarks run` | resolves the benchmark to its real command and runs it | benchmarksRun / internal/benchcatalog, internal/localbench, internal/windowgate | `case` arm of the dispatch switch in runBenchmarks() | NONE | — | yes |
 | `fak benchmarks run actions` |  | runVCacheActions / internal/vcacheobserve, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run apply-actions` |  | runVCacheApplyActions / internal/vcacheobserve, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak benchmarks run calibrate` |  | runVCacheCalibrate / internal/vcachecal, internal/vcachecalibration | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
@@ -442,10 +442,15 @@ source-only rows absent from help: 1046
 | `fak experiments help` |  | experimentsUsage | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments list` |  | experimentsList / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments lookup` |  | experimentsLookup / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
+| `fak experiments native-performance` |  | runExperimentsNativePerformance / internal/experiments, internal/nativeperf | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
+| `fak experiments native-performance decisions` |  |  | `if` arm of the dispatch in runExperimentsNativePerformance() | N/A | — | **SOURCE ONLY** |
+| `fak experiments native-performance help` |  | experimentsNativePerformanceUsage | `if` arm of the dispatch in runExperimentsNativePerformance() | NONE | — | **SOURCE ONLY** |
+| `fak experiments native-performance replay` |  |  | `if` arm of the dispatch in runExperimentsNativePerformance() | N/A | — | **SOURCE ONLY** |
 | `fak experiments query` |  | experimentsQuery / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments record` |  | experimentsRecord / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments register` |  | experimentsRegister / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak expert-trace` | analyze a FAK_EXPERT_TRACE route trace: unique experts, reuse, LRU/Belady curve, prewarm hot set | runExpertTrace / internal/model | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
+| `fak expert-trace policy` |  | runExpertTraceReplay / internal/deepseekv4moe, internal/model | `if` arm of the dispatch in runExpertTrace() | NONE | — | **SOURCE ONLY** |
 | `fak fanout` | fold the nightrun fan-out reuse ledger into a trend report | cmdFanout | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak fleet` | headless-worker fleet control surface: monitor/janitor/fold/replace/capacity/control (read-only by default) | cmdFleet | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak fleet-accounts` | fleet-wide account management across config-home seats | cmdFleetAccounts / internal/accountprobe, internal/dispatchaudit, internal/dispatchtick, internal/fleetaccounts, internal/strmatch | `case` arm of the dispatch switch in dispatchExtendedVerbA() | STRUCTURAL | `ASSISTANT_RESPONSE_MISSING`, `PROMPT_HOOK_BLOCK` | **SOURCE ONLY** |
@@ -544,7 +549,7 @@ source-only rows absent from help: 1046
 | `fak hooks lane-audit` | reports every internal/<leaf> Go package with no declared dos.toml lane — the standing, whole-tree form of the per-commit leaf check the commit-msg stamp lint runs | runHooksLaneAudit / internal/hooks, internal/windowgate | `case` arm of the dispatch switch in runHooks() | RUNTIME | — | **SOURCE ONLY** |
 | `fak hooks popup-scan` | desktop-popup push gate (reason: DESKTOP_POPUP_REGRESSION) | runHooksPopupScan / internal/procguard, internal/windowgate | `case` arm of the dispatch switch in runHooks() | RUNTIME | — | **SOURCE ONLY** |
 | `fak hooks pre-commit` |  | runHooksPreCommit / internal/hooks, internal/safecommit, internal/windowgate | `case` arm of the dispatch switch in runHooks() | RUNTIME | — | yes |
-| `fak hooks pre-push` |  | runHooksPrePush / internal/affectedtests, internal/committedbuildwitness, internal/hooks, internal/jsonlledger, internal/procguard, internal/windowgate | `case` arm of the dispatch switch in runHooks() | STRUCTURAL | `COULD_NOT_RUN`, `PREPUSH_WAIT_TIMEOUT`, `TRUNK_WOULD_NOT_COMPILE` | **SOURCE ONLY** |
+| `fak hooks pre-push` |  | runHooksPrePush / internal/affectedtests, internal/committedbuildwitness, internal/hooks, internal/jsonlledger, internal/procguard, internal/windowgate | `case` arm of the dispatch switch in runHooks() | STRUCTURAL | `COULD_NOT_RUN`, `PREPUSH_BASE_UNAVAILABLE`, `PREPUSH_WAIT_TIMEOUT`, `TRUNK_WOULD_NOT_COMPILE` | **SOURCE ONLY** |
 | `fak horizon-recovery` | recover stranded / stalled long-horizon work | cmdHorizonRecovery / internal/horizonrecovery | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak host-crash` | watch the host for crash/reboot events and append a durable JSONL signal (--once scans once) | cmdHostCrash / internal/flock, internal/guardsessions, internal/hostfault, internal/hostresurrect, internal/processalive, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak host-relaunch-broker` | drain the control-plane->desktop relaunch spool and launch the queued Windows Terminal sessions | runHostRelaunchBroker / internal/hostresurrect, internal/pathutil, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
@@ -628,6 +633,7 @@ source-only rows absent from help: 1046
 | `fak leaseref list` |  | runLeaserefList / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | yes |
 | `fak leaseref live` |  | runLeaserefLive / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | yes |
 | `fak leaseref liveness` | #2164 witness: each LIVE lease tagged by its owning session's liveness (self \\| peer-live \\| peer-dead \\| peer-unknown), keyed on the session descriptor heartbeat — never the ephemeral acquiring pid | runLeaserefLiveness / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
+| `fak leaseref publish` |  | runLeaserefPublish / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak leaseref reap` |  | runLeaserefReap / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | yes |
 | `fak leaseref release` |  | runLeaserefRelease / internal/gateway, internal/hooks, internal/leaseref, internal/loopdrive, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | RUNTIME | — | **SOURCE ONLY** |
 | `fak leaseref renew` |  | runLeaserefRenew / internal/gateway, internal/hooks, internal/leaseref, internal/loopdrive, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | RUNTIME | — | **SOURCE ONLY** |
@@ -740,6 +746,7 @@ source-only rows absent from help: 1046
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model qwen38-ladder` |  | runModelQwen38Ladder / internal/qwen38ladder | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model readiness-inventory` |  | runModelReadinessInventory / internal/modelaccept | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model trace-stub` |  | runModelTraceStub / internal/ggufload, internal/model, internal/pathutil, internal/qwen4exp | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model-default` | report the default model identity and fold dated Qwen3.8 evidence | runModelDefault / internal/modelreg | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe` | proxy and summarize model performance observations or verify cache-state transitions | cmdModelObserve / internal/modelperfobs | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe bandwidth` |  | runModelObserveBandwidth / internal/modelperfobs | `case` arm of the dispatch switch in cmdModelObserve() | NONE | — | **SOURCE ONLY** |
@@ -749,6 +756,7 @@ source-only rows absent from help: 1046
 | `fak model-observe cache-state-bench` |  | runModelObserveStateBench / internal/modelperfobs | `case` arm of the dispatch switch in cmdModelObserve() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe proxy` |  |  | `case` arm of the dispatch switch in cmdModelObserve() | N/A | — | **SOURCE ONLY** |
 | `fak model-observe report` |  |  | `case` arm of the dispatch switch in cmdModelObserve() | N/A | — | **SOURCE ONLY** |
+| `fak model-observe time-burndown` |  |  | `case` arm of the dispatch switch in cmdModelObserve() | N/A | — | **SOURCE ONLY** |
 | `fak multisubmit` | multi-submission planner: lay out N profiles for a resolved issue, seat round-robin over the rotation pool | cmdMultiSubmit / internal/accounts | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak native-benchmarks` | report required native benchmark witnesses and fail when obligations are missing | cmdNativeBenchmarks / internal/nativebench | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak native-first-lint` | lint prose for native-inference stops that should route to sanctioned compute instead | cmdNativeFirstLint / internal/nativefirst | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -837,6 +845,7 @@ source-only rows absent from help: 1046
 | `fak profile continuity sync-apply` |  | runContinuitySyncApply / internal/portability | `if` arm of the dispatch in runContinuity() | NONE | — | **SOURCE ONLY** |
 | `fak profile continuity sync-plan` |  | runContinuitySyncPlan / internal/portability | `if` arm of the dispatch in runContinuity() | NONE | — | **SOURCE ONLY** |
 | `fak profile continuity ux-selfcheck` |  | runContinuityUXSelfcheck | `if` arm of the dispatch in runContinuity() | NONE | — | **SOURCE ONLY** |
+| `fak profile ledger` |  | runProfileLedger | `if` arm of the dispatch in cmdProfile() | NONE | — | **SOURCE ONLY** |
 | `fak program` | the ongoing-optimization program report (a frontier + a trend, never a completion %) | cmdProgram | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak progress` | detect fleet progress stalls from recent and baseline windows | cmdProgress / internal/pathutil | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak project` | the ProjectsV2 board control-pane fold: report/verdict/Slack-ready board dimension, not a write-only sync | cmdProject | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
@@ -920,6 +929,9 @@ source-only rows absent from help: 1046
 | `fak roofline` | run micro-roofline probes measuring compute and memory bandwidth ceilings on accelerator hardware | cmdRoofline / internal/roofline | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak route` | the model-routing oracle: per-aspect + ensemble model routing for one classified subject | cmdRoute / internal/maputil, internal/modelroute | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak routebench` | the offline routing benchmark: a per-aspect+ensemble policy vs a single-model baseline | cmdRoutebench / internal/modelroute | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
+| `fak router` | one verb that starts the always-on routing gateway from the ~/.fak/router layout | cmdRouter | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak router help` |  |  | `if` arm of the dispatch in runRouter() | N/A | — | **SOURCE ONLY** |
+| `fak router up` |  | runRouterUp | `case` arm of the dispatch switch in runRouter() | NONE | — | **SOURCE ONLY** |
 | `fak run` | run an agent turn (or a recorded trace via --trace) through the kernel | cmdRun / internal/abi, internal/agent, internal/bench, internal/cacheobs, internal/cachevalueledger, internal/gateway, internal/gpulease, internal/hfhub, internal/kernel, internal/localadmission, internal/memgate, internal/model, internal/modelengine, internal/modelreg, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak rungstats` | stats over the verification-ladder rungs | cmdRungStats / internal/abi, internal/adjudicator, internal/kernel, internal/rungobs | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak runtime-capabilities` | report the capabilities exposed by the current runtime build | runRuntimeCapabilities / internal/runtimecap | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
