@@ -1502,44 +1502,52 @@ func (s *Session) v41ExpertGateUpFunc() v41ExpertGateUpFunc {
 		}
 		// Admission resolves and stages native expert weights, so its failures
 		// belong to this selected callback just like GEMM and readback failures.
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41GateUpError, closeFailure(err)
-						return
-					}
+		var primary any
+		complete := false
+		func() {
+			defer func() { primary = recover() }()
+			result, outcome, cause = func() ([]float32, v41ExpertGateUpOutcome, error) {
+				if geometryErr != nil {
+					return nil, v41GateUpError, geometryErr
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				gateName := layerName(layer, stem+".w1.weight")
+				upName := layerName(layer, stem+".w3.weight")
+				out, ok := q4kExpertInputHALWithLimitAndBF16(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, float32(cfg.SwigluLimit), full, layer)
+				if !ok {
+					return nil, v41GateUpDeclined, nil
+				}
+				return out, v41GateUpHandled, nil
+			}()
+			complete = true
+		}()
+		if !complete {
+			r := primary
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
+				}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, outcome, cause = nil, v41GateUpError, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
-				}
-				closeFailure(err)
-				panic(r)
 			}
-		}()
-		if geometryErr != nil {
-			return nil, v41GateUpError, geometryErr
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
+				}
+				result, outcome, cause = nil, v41GateUpError, closeFailure(err)
+				return
+			}
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
 		}
-		gateName := layerName(layer, stem+".w1.weight")
-		upName := layerName(layer, stem+".w3.weight")
-		out, ok := q4kExpertInputHALWithLimitAndBF16(s, gateName, upName, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, float32(cfg.SwigluLimit), full, layer)
-		if !ok {
-			return nil, v41GateUpDeclined, nil
-		}
-		return out, v41GateUpHandled, nil
+		return
 	}
 }
 
@@ -1568,43 +1576,51 @@ func (s *Session) v41ExpertDownFunc() v41ExpertDownFunc {
 		}
 		// Admission resolves and stages native expert weights, so its failures
 		// belong to this selected callback just like GEMM and readback failures.
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41DownError, closeFailure(err)
-						return
-					}
+		var primary any
+		complete := false
+		func() {
+			defer func() { primary = recover() }()
+			result, outcome, cause = func() ([]float32, v41ExpertDownOutcome, error) {
+				if geometryErr != nil {
+					return nil, v41DownError, geometryErr
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				downName := layerName(layer, stem+".w2.weight")
+				out, ok := q4kExpertDownHALWithBF16(s, downName, fused, cfg.MoEIntermediateSize, cfg.HiddenSize, full, layer)
+				if !ok {
+					return nil, v41DownDeclined, nil
+				}
+				return out, v41DownHandled, nil
+			}()
+			complete = true
+		}()
+		if !complete {
+			r := primary
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
+				}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, outcome, cause = nil, v41DownError, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
-				}
-				closeFailure(err)
-				panic(r)
 			}
-		}()
-		if geometryErr != nil {
-			return nil, v41DownError, geometryErr
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
+				}
+				result, outcome, cause = nil, v41DownError, closeFailure(err)
+				return
+			}
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
 		}
-		downName := layerName(layer, stem+".w2.weight")
-		out, ok := q4kExpertDownHALWithBF16(s, downName, fused, cfg.MoEIntermediateSize, cfg.HiddenSize, full, layer)
-		if !ok {
-			return nil, v41DownDeclined, nil
-		}
-		return out, v41DownHandled, nil
+		return
 	}
 }
 

@@ -1315,148 +1315,156 @@ func (m *Model) v41IncrementalExpert(l int, stem string, xn []float32, weight fl
 	cfg := m.Cfg
 	var dispatchOpen int64
 	var dispatchActive, gateUp bool
-	defer func() {
-		if r := recover(); r != nil {
-			if cause, ok := r.(error); ok && dispatchActive {
-				var expertOperation *V41ExpertOperationError
-				if errors.As(cause, &expertOperation) {
-					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
-					out, resultErr = nil, cause
-					return
-				}
-				var operation *BackendForwardOperationError
-				if errors.As(cause, &operation) {
-					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
-					panic(r)
-				}
-				var backendError *compute.BackendError
-				if errors.As(cause, &backendError) {
-					m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
-					stage := "down"
-					if gateUp {
-						stage = "gate/up"
+	var primary any
+	complete := false
+	func() {
+		defer func() { primary = recover() }()
+		out, resultErr = func() ([]float32, error) {
+			full, geometryErr := v41ForwardGeometry(cfg)
+			if geometryErr != nil {
+				return nil, geometryErr
+			}
+			if full {
+				var routedCallback v41RoutedExpertFunc
+				var gateCallback v41ExpertGateUpFunc
+				var downCallback v41ExpertDownFunc
+				if scratch.routedExpert != nil {
+					routedCallback = func(layer int, name string, x []float32, w float32) ([]float32, v41RoutedExpertOutcome, error) {
+						dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
+						values, outcome, cause := scratch.routedExpert(layer, name, x, w)
+						dispatchActive = false
+						if outcome == v41RoutedExpertHandled || outcome == v41RoutedExpertError {
+							m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
+							m.v41NoteIncrementalDeviceDispatch(false, 0)
+						}
+						return values, outcome, cause
 					}
-					out, resultErr = nil, v41ExpertOperationErr(l, stage, cause)
-					return
 				}
-			}
-			panic(r)
-		}
-	}()
-	full, geometryErr := v41ForwardGeometry(cfg)
-	if geometryErr != nil {
-		return nil, geometryErr
-	}
-	if full {
-		var routedCallback v41RoutedExpertFunc
-		var gateCallback v41ExpertGateUpFunc
-		var downCallback v41ExpertDownFunc
-		if scratch.routedExpert != nil {
-			routedCallback = func(layer int, name string, x []float32, w float32) ([]float32, v41RoutedExpertOutcome, error) {
-				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
-				values, outcome, cause := scratch.routedExpert(layer, name, x, w)
-				dispatchActive = false
-				if outcome == v41RoutedExpertHandled || outcome == v41RoutedExpertError {
-					m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
-					m.v41NoteIncrementalDeviceDispatch(false, 0)
+				if scratch.expertGateUp != nil {
+					gateCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+						dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
+						values, outcome, cause := scratch.expertGateUp(layer, name, x)
+						dispatchActive = false
+						if outcome == v41GateUpHandled || outcome == v41GateUpError {
+							m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
+						}
+						return values, outcome, cause
+					}
 				}
-				return values, outcome, cause
+				if scratch.expertDown != nil {
+					downCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
+						dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, false
+						values, outcome, cause := scratch.expertDown(layer, name, x)
+						dispatchActive = false
+						if outcome == v41DownHandled || outcome == v41DownError {
+							m.v41NoteIncrementalDeviceDispatch(false, dispatchOpen)
+						}
+						return values, outcome, cause
+					}
+				}
+				return m.v41FullRoutedExpertPublished(l, stem, xn, weight, cfg, routedCallback, gateCallback, downCallback,
+					func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
+					func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, false, scratch.gatherOps.bf16PublishFunc())
 			}
-		}
-		if scratch.expertGateUp != nil {
-			gateCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertGateUpOutcome, error) {
+			if scratch.expertGateUp != nil {
 				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
-				values, outcome, cause := scratch.expertGateUp(layer, name, x)
+				h, outcome, err := scratch.expertGateUp(l, stem, xn)
 				dispatchActive = false
 				if outcome == v41GateUpHandled || outcome == v41GateUpError {
 					m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
 				}
-				return values, outcome, cause
-			}
-		}
-		if scratch.expertDown != nil {
-			downCallback = func(layer int, name string, x []float32) ([]float32, v41ExpertDownOutcome, error) {
-				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, false
-				values, outcome, cause := scratch.expertDown(layer, name, x)
-				dispatchActive = false
-				if outcome == v41DownHandled || outcome == v41DownError {
-					m.v41NoteIncrementalDeviceDispatch(false, dispatchOpen)
-				}
-				return values, outcome, cause
-			}
-		}
-		return m.v41FullRoutedExpertPublished(l, stem, xn, weight, cfg, routedCallback, gateCallback, downCallback,
-			func() ([]float32, []float32, []float32, error) { return m.v41ExpertTripleInto(l, stem, scratch, true) },
-			func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, false, scratch.gatherOps.bf16PublishFunc())
-	}
-	if scratch.expertGateUp != nil {
-		dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, true
-		h, outcome, err := scratch.expertGateUp(l, stem, xn)
-		dispatchActive = false
-		if outcome == v41GateUpHandled || outcome == v41GateUpError {
-			m.v41NoteIncrementalDeviceDispatch(true, dispatchOpen)
-		}
-		switch outcome {
-		case v41GateUpError:
-			return nil, v41ExpertOperationErr(l, "gate/up", err)
-		case v41GateUpHandled:
-			if err != nil {
-				return nil, v41ExpertOperationErr(l, "gate/up", err)
-			}
-			if len(h) != cfg.MoEIntermediateSize {
-				return nil, v41ExpertOperationErr(l, "gate/up", fmt.Errorf("%w: intermediate width %d, want %d", errV41ExpertResult, len(h), cfg.MoEIntermediateSize))
-			}
-			if scratch.expertDown != nil {
-				dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, false
-				y, downOutcome, downErr := scratch.expertDown(l, stem, h)
-				dispatchActive = false
-				if downOutcome == v41DownHandled || downOutcome == v41DownError {
-					m.v41NoteIncrementalDeviceDispatch(false, dispatchOpen)
-				}
-				switch downOutcome {
-				case v41DownError:
-					return nil, v41ExpertOperationErr(l, "down", downErr)
-				case v41DownHandled:
-					if downErr != nil {
-						return nil, v41ExpertOperationErr(l, "down", downErr)
+				switch outcome {
+				case v41GateUpError:
+					return nil, v41ExpertOperationErr(l, "gate/up", err)
+				case v41GateUpHandled:
+					if err != nil {
+						return nil, v41ExpertOperationErr(l, "gate/up", err)
 					}
-					if len(y) != cfg.HiddenSize {
-						return nil, v41ExpertOperationErr(l, "down", fmt.Errorf("%w: output width %d, want %d", errV41ExpertResult, len(y), cfg.HiddenSize))
+					if len(h) != cfg.MoEIntermediateSize {
+						return nil, v41ExpertOperationErr(l, "gate/up", fmt.Errorf("%w: intermediate width %d, want %d", errV41ExpertResult, len(h), cfg.MoEIntermediateSize))
 					}
-					m.v41NoteExpertContraction()
+					if scratch.expertDown != nil {
+						dispatchOpen, dispatchActive, gateUp = m.v41NowNanos(), true, false
+						y, downOutcome, downErr := scratch.expertDown(l, stem, h)
+						dispatchActive = false
+						if downOutcome == v41DownHandled || downOutcome == v41DownError {
+							m.v41NoteIncrementalDeviceDispatch(false, dispatchOpen)
+						}
+						switch downOutcome {
+						case v41DownError:
+							return nil, v41ExpertOperationErr(l, "down", downErr)
+						case v41DownHandled:
+							if downErr != nil {
+								return nil, v41ExpertOperationErr(l, "down", downErr)
+							}
+							if len(y) != cfg.HiddenSize {
+								return nil, v41ExpertOperationErr(l, "down", fmt.Errorf("%w: output width %d, want %d", errV41ExpertResult, len(y), cfg.HiddenSize))
+							}
+							m.v41NoteExpertContraction()
+							return y, nil
+						case v41DownDeclined:
+						default:
+							return nil, v41ExpertOperationErr(l, "down", errV41ExpertResult)
+						}
+					}
+					w2, err := m.hostExpertDown(l, stem, scratch)
+					if err != nil {
+						return nil, err
+					}
+					contractOpen := m.v41NowNanos()
+					y := matRows(w2, h, cfg.HiddenSize, cfg.MoEIntermediateSize)
+					if contractOpen != 0 {
+						m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
+					} else {
+						m.v41NoteExpertContraction()
+					}
 					return y, nil
-				case v41DownDeclined:
+				case v41GateUpDeclined:
 				default:
-					return nil, v41ExpertOperationErr(l, "down", errV41ExpertResult)
+					return nil, v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
 				}
 			}
-			w2, err := m.hostExpertDown(l, stem, scratch)
+			w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
 			if err != nil {
 				return nil, err
 			}
 			contractOpen := m.v41NowNanos()
-			y := matRows(w2, h, cfg.HiddenSize, cfg.MoEIntermediateSize)
+			y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, cfg)
 			if contractOpen != 0 {
 				m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
 			} else {
 				m.v41NoteExpertContraction()
 			}
 			return y, nil
-		case v41GateUpDeclined:
-		default:
-			return nil, v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+		}()
+		complete = true
+	}()
+	if !complete {
+		r := primary
+		if cause, ok := r.(error); ok && dispatchActive {
+			var expertOperation *V41ExpertOperationError
+			if errors.As(cause, &expertOperation) {
+				m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+				out, resultErr = nil, cause
+				return
+			}
+			var operation *BackendForwardOperationError
+			if errors.As(cause, &operation) {
+				m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+				panic(r)
+			}
+			var backendError *compute.BackendError
+			if errors.As(cause, &backendError) {
+				m.v41NoteIncrementalDeviceDispatch(gateUp, dispatchOpen)
+				stage := "down"
+				if gateUp {
+					stage = "gate/up"
+				}
+				out, resultErr = nil, v41ExpertOperationErr(l, stage, cause)
+				return
+			}
 		}
+		panic(r)
 	}
-	w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)
-	if err != nil {
-		return nil, err
-	}
-	contractOpen := m.v41NowNanos()
-	y := v41SwiGLU(w1, w3, w2, xn, cfg.MoEIntermediateSize, cfg.HiddenSize, cfg)
-	if contractOpen != 0 {
-		m.v41NoteExpertContractionNanos(m.v41NowNanos() - contractOpen)
-	} else {
-		m.v41NoteExpertContraction()
-	}
-	return y, nil
+	return
 }
