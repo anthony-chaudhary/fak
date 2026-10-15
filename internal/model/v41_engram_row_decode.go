@@ -119,6 +119,8 @@ type v41EngramGatheredRows struct {
 	cacheIdx int
 	rows     [][]byte
 	dim      int
+	// encoded owns the contiguous resident gather, never cache or pooled storage.
+	encoded []byte
 }
 
 // encoding names the device decode dialect of the stage's rows.
@@ -140,14 +142,31 @@ func (g *v41EngramGatheredRows) encoding() (compute.V41EngramRowEncoding, bool) 
 	return encoding, g.dim > 0 && g.dim <= compute.V41EngramRowDecodeMaxDim
 }
 
-// stored concatenates the gathered rows' stored bytes for one upload.
+// stored borrows the resident gather's owned panel for one synchronous upload.
+// Hand-built or noncontiguous rows retain the historical concatenation path.
 func (g *v41EngramGatheredRows) stored() ([]byte, bool) {
+	if g == nil || g.stage == nil {
+		return nil, false
+	}
 	stride := g.stage.rowBytes
-	out := make([]byte, 0, len(g.rows)*stride)
-	for _, row := range g.rows {
+	bytes, ok := checkedMulInt(len(g.rows), stride)
+	if !ok || stride <= 0 {
+		return nil, false
+	}
+	contiguous := g.encoded != nil && len(g.encoded) == bytes
+	for i, row := range g.rows {
 		if len(row) != stride {
 			return nil, false
 		}
+		if contiguous && &row[0] != &g.encoded[i*stride] {
+			contiguous = false
+		}
+	}
+	if contiguous {
+		return g.encoded, true
+	}
+	out := make([]byte, 0, bytes)
+	for _, row := range g.rows {
 		out = append(out, row...)
 	}
 	return out, true
@@ -202,18 +221,19 @@ func (g *v41EngramGatheredRows) deviceFault(words []float32) error {
 // without decoding them.
 func (m *Model) v41EngramGatherRows(l, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (*v41EngramGatheredRows, error) {
 	stage, cacheIdx, cols := geometry.stage, geometry.cacheIdx, geometry.cols
-	if positions < 0 || len(layerRows) != positions*cols {
+	count, ok := checkedMulInt(positions, cols)
+	if positions < 0 || cols <= 0 || !ok || len(layerRows) != count {
 		return nil, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d, want %d positions x %d columns", ErrV41NativeUnsupported, len(layerRows), positions, cols))
 	}
 	if err := v41EngramGateParamsErr(l, eps, geometry.qNorm, geometry.kNorm); err != nil {
 		return nil, err
 	}
-	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
+	gathered, encoded, err := stage.caches[cacheIdx].gatherKnownRowsOwned(layerRows, true)
 	if err != nil {
 		return nil, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
 	}
-	return &v41EngramGatheredRows{layer: l, stage: stage, cacheIdx: cacheIdx, rows: gathered, dim: geometry.dim}, nil
+	return &v41EngramGatheredRows{layer: l, stage: stage, cacheIdx: cacheIdx, rows: gathered, dim: geometry.dim, encoded: encoded}, nil
 }
 
 // v41EngramRowDecoder returns the backend's device row decode, or nil.

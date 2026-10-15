@@ -43,9 +43,40 @@ func (c *V41EngramRowCache) validateGatherGeometry() error {
 }
 
 func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
+	out, _, err := c.gatherKnownRowsOwned(rows, false)
+	return out, err
+}
+
+// gatherKnownRowsOwned optionally owns one encoded panel for the resident
+// decoder. The public gather keeps independent row allocations: retaining one
+// public row must not retain an otherwise dead batch. Neither form borrows
+// cache payloads or source read buffers.
+func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool) ([][]byte, []byte, error) {
+	panelBytes := 0
+	if contiguous {
+		if err := c.validateGatherGeometry(); err != nil {
+			return nil, nil, err
+		}
+		var ok bool
+		panelBytes, ok = checkedMulInt(len(rows), c.opts.RowBytes)
+		if !ok {
+			return nil, nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1,
+				Err: fmt.Errorf("encoded Engram panel byte size overflows")}
+		}
+		for _, row := range rows {
+			if uint64(row) >= uint64(c.opts.TableRows) {
+				return nil, nil, &V41EngramStreamError{Kind: V41EngramStreamOutOfBounds, Row: int(row),
+					Err: fmt.Errorf("gather layer 0 row outside [0,%d)", c.opts.TableRows)}
+			}
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make([][]byte, len(rows))
+	var panel []byte
+	if contiguous {
+		panel = make([]byte, panelBytes)
+	}
 	positions := make(map[uint32][]int, len(rows))
 	unique := make([]uint32, 0, len(rows))
 	for position, row := range rows {
@@ -56,7 +87,14 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 	}
 	serve := func(row uint32, payload []byte, hits int64) {
 		for _, position := range positions[row] {
-			out[position] = append([]byte(nil), payload...)
+			if contiguous {
+				lo := position * c.opts.RowBytes
+				hi := lo + c.opts.RowBytes
+				out[position] = panel[lo:hi:hi]
+				copy(out[position], payload)
+			} else {
+				out[position] = append([]byte(nil), payload...)
+			}
 		}
 		served := int64(len(positions[row]))
 		c.stats.Hits += hits
@@ -80,7 +118,7 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 	for _, row := range unique {
 		resident, err := serveResident(row)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !resident {
 			missing = append(missing, row)
@@ -100,7 +138,7 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 		// Readahead from an earlier range may already hold this row.
 		resident, err := serveResident(missing[lo])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if resident {
 			lo++
@@ -119,7 +157,7 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 		c.stats.Misses += int64(count)
 		n, err := c.src.ReadRows(int(missing[lo]), count, buf)
 		if n < 0 || n > want {
-			return nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: int(missing[lo]),
+			return nil, nil, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: int(missing[lo]),
 				Err: fmt.Errorf("source returned invalid byte count %d for %d-byte range", n, want)}
 		}
 		c.stats.BytesRead += int64(n)
@@ -127,11 +165,11 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 			if err == nil {
 				err = io.ErrUnexpectedEOF
 			}
-			return nil, &V41EngramStreamError{Kind: V41EngramStreamShortRead, Row: int(missing[lo]),
+			return nil, nil, &V41EngramStreamError{Kind: V41EngramStreamShortRead, Row: int(missing[lo]),
 				Err: fmt.Errorf("source returned bytes=%d want=%d: %w", n, want, err)}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("model: V41 Engram row read: %w", err)
+			return nil, nil, fmt.Errorf("model: V41 Engram row read: %w", err)
 		}
 		for i, row := range missing[lo:hi] {
 			payload := buf[i*c.opts.RowBytes : (i+1)*c.opts.RowBytes]
@@ -148,5 +186,5 @@ func (c *V41EngramRowCache) gatherKnownRows(rows []uint32) ([][]byte, error) {
 			_ = c.inner.Put(0, int(row), out[position])
 		}
 	}
-	return out, nil
+	return out, panel, nil
 }

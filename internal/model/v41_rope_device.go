@@ -190,8 +190,7 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				len(qo.Shape) != 2 || qo.Shape[0] != heads || qo.Shape[1] != headDim || len(ko.Shape) != 1 || ko.Shape[0] != headDim {
 				return nil, nil, errV41TailRoPEResult
 			}
-			read := func(output compute.Tensor, input []float32) ([]float32, error) {
-				values := s.Backend.Read(output)
+			own := func(values, input []float32) ([]float32, error) {
 				if len(values) != len(input) {
 					return nil, errV41TailRoPEResult
 				}
@@ -204,13 +203,35 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				// KV, and own both rows before their device allocations are freed.
 				return append([]float32(nil), values...), nil
 			}
+			if grouped, ok := s.Backend.(compute.V41DeferredStatusBackend); ok {
+				// A zero-status read needs no SwiGLU/BF16 module, so the
+				// unrelated SupportsV41DeferredStatus probe does not gate it.
+				// Both outputs share one checked host fence. A transport error
+				// can precede Q's numeric validation; never retry with Read.
+				stage = "paired readback"
+				verdicts, rows, err := grouped.V41ReadDeferred(nil, []compute.Tensor{qo, ko})
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(verdicts) != 0 || len(rows) != 2 {
+					return nil, nil, errV41TailRoPEResult
+				}
+				stage = "query readback"
+				qValues, err := own(rows[0], q)
+				if err != nil {
+					return nil, nil, err
+				}
+				stage = "kv readback"
+				kvValues, err := own(rows[1], kv)
+				return qValues, kvValues, err
+			}
 			stage = "query readback"
-			qValues, err := read(qo, q)
+			qValues, err := own(s.Backend.Read(qo), q)
 			if err != nil {
 				return nil, nil, err
 			}
 			stage = "kv readback"
-			kvValues, err := read(ko, kv)
+			kvValues, err := own(s.Backend.Read(ko), kv)
 			return qValues, kvValues, err
 		}
 		qResult, kvResult, cause = run()
