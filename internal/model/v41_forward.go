@@ -492,15 +492,17 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		retainHidden := !lastHeadOnly || l == cfg.NumLayers-1
 		var hidden []float32
 		if resident != nil {
-			rows, err := resident.hiddenRows(l)
-			if err != nil {
-				return nil, err
-			}
 			if retainHidden {
+				rows, err := resident.hiddenRows(l)
+				if err != nil {
+					return nil, err
+				}
 				hidden = make([]float32, 0, len(seq)*H)
 				for _, row := range rows {
 					hidden = append(hidden, row...)
 				}
+			} else if err := resident.checkHiddenRows(l); err != nil {
+				return nil, err
 			}
 		} else if full {
 			if retainHidden {

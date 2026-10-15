@@ -307,6 +307,12 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 // collapse returns the BF16 hc_pre rows sum_h pre[h]*stream[h] of streams under
 // coeffs, owned on the host for the sublayer that consumes them.
 func (r *v41MHCResident) collapse(layer int, streams *v41DeviceStreams, coeffs compute.Tensor) ([][]float32, error) {
+	return r.collapseWithRetention(layer, streams, coeffs, true)
+}
+
+// collapseWithRetention keeps the selected dispatch, readback and validation
+// boundary even when no host consumer needs an independently owned copy.
+func (r *v41MHCResident) collapseWithRetention(layer int, streams *v41DeviceStreams, coeffs compute.Tensor, retain bool) ([][]float32, error) {
 	s := r.d.s
 	rows, H := streams.Rows(), streams.Hidden()
 	var out [][]float32
@@ -327,6 +333,16 @@ func (r *v41MHCResident) collapse(layer int, streams *v41DeviceStreams, coeffs c
 		values := s.Backend.Read(t)
 		if len(values) != rows*H {
 			return errV41MHCResult
+		}
+		if !retain {
+			// Read may lend backend scratch. Inspect it before Free, then drop
+			// it; no borrowed value escapes or substitutes for a later read.
+			for _, v := range values {
+				if !finite32(v) {
+					return errV41MHCResult
+				}
+			}
+			return nil
 		}
 		flat := make([]float32, len(values))
 		for i, v := range values {
@@ -575,4 +591,11 @@ func (r *v41MHCResident) abort() {
 // published streams under the carried coefficients.
 func (r *v41MHCResident) hiddenRows(layer int) ([][]float32, error) {
 	return r.collapse(layer, r.streams, r.carry)
+}
+
+// checkHiddenRows preserves the per-layer hidden collapse's failure boundary
+// without materializing a host panel that serving will immediately discard.
+func (r *v41MHCResident) checkHiddenRows(layer int) error {
+	_, err := r.collapseWithRetention(layer, r.streams, r.carry, false)
+	return err
 }

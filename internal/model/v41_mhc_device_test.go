@@ -20,6 +20,7 @@ type v41MHCTestBackend struct {
 	calls       map[string]int
 	outputs     map[compute.Buffer]string
 	readScratch []float32
+	readFault   func(compute.Tensor, []float32) []float32
 	failOp      string
 	failCall    int
 	cause       error
@@ -181,6 +182,9 @@ func (b *v41MHCTestBackend) Read(x compute.Tensor) []float32 {
 	}
 	b.readScratch = b.readScratch[:len(values)]
 	copy(b.readScratch, values)
+	if b.readFault != nil {
+		return b.readFault(x, b.readScratch)
+	}
 	return b.readScratch
 }
 
@@ -386,5 +390,82 @@ func TestV41DeviceOnlyInventoryDropsResidentStreamOps(t *testing.T) {
 		if op.name == "residual-stream-carry" || op.name == "mhc-projection-rms-scale" {
 			t.Fatalf("%s runs on the resident device panel (v41MHCResident) but is still inventoried as host", op.name)
 		}
+	}
+}
+
+// TestV41MHCDiscardedHiddenCapture pins the two omitted host allocations and
+// the discarded layer-zero collapse's checked-read failure boundary.
+// fak-test:runtime medium est=6s lane=default
+func TestV41MHCDiscardedHiddenCapture(t *testing.T) {
+	t.Run("allocations-and-ownership", func(t *testing.T) {
+		m := v41MHCProjVariant(t, "F32", false, false, 2)
+		b := newV41MHCTestBackend(true)
+		s := v41DenseTestSession(t, m, b)
+		x := [][]float32{make([]float32, m.Cfg.HiddenSize), make([]float32, m.Cfg.HiddenSize)}
+		x[0][0], x[1][0] = 1, 2
+		resident, err := s.v41State().mhcDevice.newResident(x)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resident.free()
+		var owned [][]float32
+		retained := testing.AllocsPerRun(20, func() {
+			owned, err = resident.hiddenRows(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+		discarded := testing.AllocsPerRun(20, func() {
+			if err := resident.checkHiddenRows(0); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if retained-discarded != 2 {
+			t.Fatalf("retained=%g discarded=%g allocations; want exactly two removed", retained, discarded)
+		}
+		// The backend reuses and poisons readScratch on Free. Retained results
+		// must still own their rows after subsequent discard-only collapses.
+		if len(owned) != 2 || !reflect.DeepEqual(owned, x) || b.calls["pre"] != 42 {
+			t.Fatalf("retained rows or collapse count changed: rows=%v calls=%v", owned, b.calls)
+		}
+		t.Logf("retained=%g discarded=%g allocations per collapse", retained, discarded)
+	})
+	for _, fault := range []string{"read-panic", "read-length", "read-nonfinite"} {
+		t.Run(fault, func(t *testing.T) {
+			for _, lastHeadOnly := range []bool{false, true} {
+				m := v41MHCProjVariant(t, "F32", false, false, 2)
+				b := newV41MHCTestBackend(true)
+				cause := error(errV41MHCResult)
+				if fault == "read-panic" {
+					cause = &compute.BackendError{Backend: "cpu-ref-mhc", Class: compute.VulkanClassExecutionFailed, Err: compute.ErrVulkanExecutionFailed}
+				}
+				reads := 0
+				b.readFault = func(x compute.Tensor, values []float32) []float32 {
+					if b.outputs[x.Buf()] != "pre" || b.calls["pre"] != 3 {
+						return values
+					}
+					reads++
+					switch fault {
+					case "read-panic":
+						panic(cause)
+					case "read-length":
+						return values[:len(values)-1]
+					case "read-nonfinite":
+						values[len(values)-1] = float32(math.NaN())
+					}
+					return values
+				}
+				s := v41DenseTestSession(t, m, b)
+				act, err := m.forwardV41WithHeadSelection([]int{1, 2}, s.v41State(), lastHeadOnly)
+				var selected *V41MHCOperationError
+				var closed *BackendForwardOperationError
+				if act != nil || !errors.Is(err, cause) || !errors.As(err, &selected) || selected.Layer != 0 ||
+					!errors.As(err, &closed) || closed.Stage != "readback" || reads != 1 ||
+					b.calls["pre"] != 3 || b.calls["rms-split"] != 2 || len(b.outputs) != 0 ||
+					len(s.v41State().history) != 0 || !s.BackendSessionClosed() {
+					t.Fatalf("lastHeadOnly=%t discarded read failure changed: act=%v err=%v reads=%d calls=%v live=%d", lastHeadOnly, act != nil, err, reads, b.calls, len(b.outputs))
+				}
+			}
+		})
 	}
 }
