@@ -167,7 +167,7 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 				b := newV41AttentionBF16Recorder()
 				s := v41AttentionBF16Session(t, m, b)
 				v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
-				if s.v41State().attentionBF16 == nil || b.calls != 2*m.Cfg.NumLayers {
+				if s.v41State().attentionBF16Func() == nil || b.calls != 2*m.Cfg.NumLayers {
 					t.Fatalf("prefill missing output boundaries or republished BF16 inputs: calls=%d", b.calls)
 				}
 				v41AttentionBF16Parity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})))
@@ -212,11 +212,11 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 			b := newV41MHCTestBackend(true)
 			s := v41DenseTestSession(t, m, b)
 			st := s.v41State()
-			if st.attentionNorm == nil || st.mhcDevice == nil {
+			if st.attentionNormFunc() == nil || st.mhcDevice == nil {
 				t.Fatal("resident fixture not bound")
 			}
 			calls := 0
-			st.attentionBF16 = func(layer int, site string, values []float32) ([]float32, error) {
+			st.setAttentionBF16(func(layer int, site string, values []float32) ([]float32, error) {
 				want := "attn_norm.weight output"
 				if site != want || layer != 0 || len(values) != m.Cfg.HiddenSize {
 					t.Fatal("resident publication site/order")
@@ -230,7 +230,7 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 					}
 				}
 				return out, nil
-			}
+			})
 			v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
 			v41AttentionBF16Parity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})))
 			if calls != 3*m.Cfg.NumLayers || b.calls["rms-split"] == 0 || len(b.outputs) != 0 {
@@ -244,7 +244,7 @@ func TestV41AttentionBF16SessionDispatch(t *testing.T) {
 		b.unavailable = true
 		s := v41AttentionBF16Session(t, m, b)
 		v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
-		if b.calls != 0 || s.v41State().attentionBF16 != nil || s.BackendSessionClosed() {
+		if b.calls != 0 || s.v41State().attentionBF16Func() != nil || s.BackendSessionClosed() {
 			t.Fatal("absent boundary capability changed old route")
 		}
 	})
@@ -335,7 +335,7 @@ func TestV41AttentionBF16SelectedFailure(t *testing.T) {
 							out, err := m.v41AttentionInputNormWithPublications(0, input, float32(m.Cfg.RMSNormEps), func(int, []float32) ([]float32, error) {
 								t.Fatal("failed input publication reached normalization")
 								return nil, nil
-							}, s.v41State().attentionBF16)
+							}, s.v41State().attentionBF16Func())
 							if out != nil {
 								t.Fatal("failed input publication returned a row")
 							}

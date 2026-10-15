@@ -349,7 +349,7 @@ func TestV41DeviceOnlyInventoryDropsDeviceMHCOps(t *testing.T) {
 func TestV41ForwardStateBindsExpertSumAndRouterSeams(t *testing.T) {
 	m := v41FullStepPatchedNorms(t)
 	device := v41DenseTestSession(t, m, newV41MHCTestBackend(true)).v41State()
-	if device.routedSum == nil || device.sharedAdd == nil {
+	if device.routedSumFunc() == nil || device.sharedAdd == nil {
 		t.Fatal("device-memory session did not bind the routed-sum and shared-add seams")
 	}
 	if device.routerTopK() != nil {
@@ -357,7 +357,7 @@ func TestV41ForwardStateBindsExpertSumAndRouterSeams(t *testing.T) {
 	}
 	host := v41FullStepPatchedNorms(t).NewSession()
 	defer host.Close()
-	if st := host.v41State(); st.routedSum != nil || st.sharedAdd != nil || st.routerTopK() != nil {
+	if st := host.v41State(); st.routedSumFunc() != nil || st.sharedAdd != nil || st.routerTopK() != nil {
 		t.Fatal("host session bound a device expert seam")
 	}
 }

@@ -5,7 +5,9 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // Only the private shared-expert down site calls this helper. Capability
 // probes stay at that contraction's original position, after the unchanged
 // gate, up and down-input publications. A missing capability declines before
-// any copy; once a copy is issued, no failure can replay the legacy down.
+// any selected operation; once selected, no failure can replay the legacy down.
+// Grid-capable backends consume the existing full panel directly. Legacy
+// modules retain the eight-row gather path below.
 func (s *Session) v41SharedDownTokenPanel(expected compute.Backend, weight, input compute.Tensor, rows, out, in int, own func(compute.Tensor) bool) (compute.Tensor, bool, error) {
 	const tileRows = 8
 	if s != nil && (!backendHasComparableIdentity(expected) || !backendHasComparableIdentity(s.Backend) || s.Backend != expected) {
@@ -48,10 +50,9 @@ func (s *Session) v41SharedDownTokenPanel(expected compute.Backend, weight, inpu
 		return compute.Tensor{}, false, nil
 	}
 	panel, havePanel := backend.(compute.V41Q3KTokenPanelBackend)
-	copies, haveCopies := backend.(compute.V41RowLogBackend)
 	recording, haveRecording := backend.(compute.V41StepBatchRecordingBackend)
 	provider, haveOwner := backend.(compute.ForwardExecutionOwnerBackend)
-	if !havePanel || !haveCopies || !haveRecording || !haveOwner {
+	if !havePanel || !haveRecording || !haveOwner {
 		return compute.Tensor{}, false, nil
 	}
 	owner := provider.ForwardExecutionOwner()
@@ -61,7 +62,41 @@ func (s *Session) v41SharedDownTokenPanel(expected compute.Backend, weight, inpu
 	if owner == nil || owner != scope.owner {
 		return compute.Tensor{}, true, errV41ProjectionResult
 	}
-	available := copies.V41RowLogAvailable()
+	validTensor := func(t compute.Tensor, count int) bool {
+		return t.Backend() == backend && t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && t.Numel() == count
+	}
+	// The loaded-module capability, not the planner's range, selects the grid.
+	// Probe at the same down-contraction boundary as the legacy tile route.
+	available := panel.SupportsV41Q3KTokenPanel(weight, rows)
+	if !validScope() {
+		return compute.Tensor{}, true, errV41ProjectionResult
+	}
+	if available {
+		active := recording.V41StepBatchRecording()
+		if !validScope() {
+			return compute.Tensor{}, true, errV41ProjectionResult
+		}
+		if !active {
+			return compute.Tensor{}, false, nil
+		}
+		y, err := panel.V41Q3KTokenPanel(weight, input, rows)
+		fresh := own(y)
+		if err != nil {
+			return compute.Tensor{}, true, err
+		}
+		if !fresh || !validScope() || !validTensor(y, outputCount) || len(y.Shape) != 1 || y.Shape[0] != outputCount {
+			return compute.Tensor{}, true, errV41ProjectionResult
+		}
+		y.Shape = []int{rows, out}
+		return y, true, nil
+	}
+	// An old optional module declines the full panel before selection. Keep
+	// its previous eight-row tile/copy contract, including probe order.
+	copies, haveCopies := backend.(compute.V41RowLogBackend)
+	if !haveCopies {
+		return compute.Tensor{}, false, nil
+	}
+	available = copies.V41RowLogAvailable()
 	if !validScope() {
 		return compute.Tensor{}, true, errV41ProjectionResult
 	}
@@ -83,9 +118,6 @@ func (s *Session) v41SharedDownTokenPanel(expected compute.Backend, weight, inpu
 	}
 	if !active {
 		return compute.Tensor{}, false, nil
-	}
-	validTensor := func(t compute.Tensor, count int) bool {
-		return t.Backend() == backend && t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && t.Numel() == count
 	}
 	input.Shape = []int{rows, in}
 	spans := make([]compute.V41RowSpan, 0, rows/tileRows)

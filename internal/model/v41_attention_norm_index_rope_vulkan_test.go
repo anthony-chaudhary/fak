@@ -159,7 +159,7 @@ func TestV41AttentionInputNormVulkan(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer s.Close()
-		normalize, publish := s.v41State().attentionNorm, s.v41State().attentionBF16
+		normalize, publish := s.v41State().attentionNormFunc(), s.v41State().attentionBF16Func()
 		if normalize == nil {
 			t.Fatal("attention-input norm seam was not bound for the full-geometry fixture")
 		}
@@ -205,17 +205,17 @@ func TestV41AttentionInputNormVulkan(t *testing.T) {
 	})
 	t.Run("default-session", func(t *testing.T) {
 		v41SeamGreedy(t, "attention-input-norm", fixture, be, func(st *v41ForwardState) *int {
-			calls, inner := new(int), st.attentionNorm
+			calls, inner := new(int), st.attentionNormFunc()
 			if inner == nil {
 				t.Fatal("attention-input norm seam was not bound")
 			}
-			st.attentionNorm = func(l int, x []float32) ([]float32, error) {
+			st.setAttentionNorm(func(l int, x []float32) ([]float32, error) {
 				*calls++
 				return inner(l, x)
-			}
+			})
 			return calls
 		}, func(st *v41ForwardState) {
-			st.attentionNorm, st.attentionBF16 = nil, nil
+			st.attentionNormBinding = nil
 		}, func(m *Model) int {
 			return m.Cfg.NumLayers * (3 + v41DeviceParitySteps - 1)
 		})

@@ -252,14 +252,16 @@ func (w *v41AttentionBF16PhysicalObserver) normalization(s *Session, run v41Atte
 	}
 }
 func v41AttentionBF16PhysicalIsolate(st *v41ForwardState) {
-	norm, publish := st.attentionNorm, st.attentionBF16
+	norm, publish := st.attentionNormFunc(), st.attentionBF16Func()
 	v41NormRoPEHaloIsolate(st)
 	st.queryNorm, st.kvNorm, st.ffnNorm, st.finalNorm, st.tailRoPE = nil, nil, nil, nil, nil
 	st.queryPrefix, st.bf16Boundary, st.logitScale = nil, nil, nil
 	st.setRouterTopK(nil)
-	st.routedSum, st.sharedAdd = nil, nil
+	st.setRoutedSum(nil)
+	st.sharedAdd = nil
 	st.mhcDevice, st.gatherOps = nil, nil
-	st.attentionNorm, st.attentionBF16 = norm, publish
+	st.setAttentionNorm(norm)
+	st.setAttentionBF16(publish)
 }
 
 // Exact H5120 publication and small real Session routes are separate controls.
@@ -382,14 +384,14 @@ func TestV41AttentionBF16Vulkan(t *testing.T) {
 							}
 							st.mhcDevice = mhc
 						}
-						if st.attentionNorm == nil || st.attentionBF16 == nil {
+						if st.attentionNormFunc() == nil || st.attentionBF16Func() == nil {
 							t.Fatal("actual consumer not bound")
 						}
 						if observe {
-							st.attentionNorm = w.normalization(s, st.attentionNorm)
-							st.attentionBF16 = w.publication(st.attentionBF16)
+							st.setAttentionNorm(w.normalization(s, st.attentionNormFunc()))
+							st.setAttentionBF16(w.publication(st.attentionBF16Func()))
 						} else {
-							st.attentionBF16 = nil
+							st.setAttentionBF16(nil)
 						}
 					}
 					bind(s, true)

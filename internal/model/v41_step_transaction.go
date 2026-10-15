@@ -69,8 +69,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.mhcProjection = st.mhcProjection
 	scratch.mhcFFNProjection = st.mhcFFNProjection
 	scratch.mhcCarry = nil
-	scratch.attentionNorm = st.attentionNorm
-	scratch.attentionBF16 = st.attentionBF16
+	scratch.attentionNormBinding = st.attentionNormBinding
 	scratch.queryNorm = st.queryNorm
 	scratch.queryPrefix = st.queryPrefix
 	scratch.kvNorm = st.kvNorm
@@ -82,7 +81,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
 	scratch.copySharedAttentionFrom(st)
-	scratch.routedSum = st.routedSum
+	scratch.copyRoutedSumFrom(st)
 	scratch.sharedAdd = st.sharedAdd
 	scratch.gatherOps = st.gatherOps
 	tx.cleanup = func() {
@@ -96,8 +95,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.mhcProjection = nil
 			scratch.mhcFFNProjection = nil
 			scratch.mhcCarry = nil
-			scratch.attentionNorm = nil
-			scratch.attentionBF16 = nil
+			scratch.attentionNormBinding = nil
 			scratch.queryNorm = nil
 			scratch.queryPrefix = nil
 			scratch.kvNorm = nil
@@ -109,7 +107,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.sharedActivation = nil
 			scratch.tailRoPE = nil
 			scratch.clearSharedAttention()
-			scratch.routedSum = nil
+			scratch.setRoutedSum(nil)
 			scratch.sharedAdd = nil
 			scratch.gatherOps = nil
 		}()
@@ -152,9 +150,10 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			return tx, err
 		}
 	}
-	streams := [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
+	var streams [][]float32
 	if full && st.mhcDevice.resident() {
-		// The panel is authoritative; streams stays a shape placeholder.
+		// Only shapes are read on the resident path; the panel owns all values.
+		streams = [][]float32{x, x, x, x}
 		if resident, err = st.mhcDevice.newResident([][]float32{x}); err != nil {
 			return tx, err
 		}
@@ -174,6 +173,8 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		copy(x, streams[0])
 		scratch.mhcCarry = newV41MHCCarry(1)
 		scratch.mhcCarry.device = st.mhcDevice
+	} else {
+		streams = [][]float32{x, make([]float32, H), make([]float32, H), make([]float32, H)}
 	}
 	if scratch.activationTrace != nil {
 		tx.afterLayer = func(layer int) error {

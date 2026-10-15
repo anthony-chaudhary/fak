@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -18,6 +19,7 @@ type v41SharedDownPanelRecorder struct {
 	owner                sync.Mutex
 	reportedOwner        *sync.Mutex
 	tiles, recording     bool
+	grid                 bool
 	tileRows             []int
 	gatherRows           [][]int
 	failGather, failTile int
@@ -124,11 +126,15 @@ func (b *v41SharedDownPanelRecorder) SupportsV41Q3KTokenPanel(w compute.Tensor, 
 	if b.deferredPublishes%4 != 3 {
 		panic("tile admission moved before existing publications")
 	}
-	b.probes = append(b.probes, "tile")
+	if rows == v41ColdSharedPanelRows {
+		b.probes = append(b.probes, "panel")
+	} else {
+		b.probes = append(b.probes, "tile")
+	}
 	if b.afterSupport != nil {
 		b.afterSupport()
 	}
-	return b.tiles && w.Dtype == compute.Q3_K && rows == 8
+	return b.tiles && w.Dtype == compute.Q3_K && (rows == 8 || b.grid && rows == v41ColdSharedPanelRows)
 }
 func (b *v41SharedDownPanelRecorder) V41StepBatchRecording() bool {
 	b.probes = append(b.probes, "recording")
@@ -167,13 +173,15 @@ func v41SharedDownPanelFixture() *Model {
 
 // One bounded orchestration regression covers default decline, selection,
 // partial-result ownership and the unchanged deferred fault ordering.
-// fak-test:runtime fast est=300ms lane=default
+// fak-test:runtime fast est=500ms lane=default
 func TestV41SharedDown64TokenPanel(t *testing.T) {
 	t.Setenv(v41DeferredBF16PublishEnv, "1")
-	for _, mode := range []string{"selected", "chunk-tail", "two-chunks", "disabled", "inactive", "tail", "unowned", "owner-mismatch", "epoch-drift", "scope-drift", "copy-partial", "tile-partial", "join-partial", "tile-alias", "numeric-order", "earlier-numeric"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, variant := range []string{"grid-selected", "grid-chunk-tail", "grid-two-chunks", "grid-inactive", "grid-tile-partial", "grid-tile-alias", "grid-epoch-drift", "grid-scope-drift", "grid-numeric-order", "grid-earlier-numeric", "selected", "chunk-tail", "two-chunks", "disabled", "inactive", "tail", "unowned", "owner-mismatch", "epoch-drift", "scope-drift", "copy-partial", "tile-partial", "join-partial", "tile-alias", "numeric-order", "earlier-numeric"} {
+		t.Run(variant, func(t *testing.T) {
+			mode := strings.TrimPrefix(variant, "grid-")
 			m := v41SharedDownPanelFixture()
 			b := newV41SharedDownPanelRecorder()
+			b.grid = mode != variant
 			if !m.holdModelWeights() {
 				t.Fatal("model pin refused")
 			}
@@ -220,6 +228,9 @@ func TestV41SharedDown64TokenPanel(t *testing.T) {
 				b.deferredFaultAt = 2
 				b.deferredFault = &compute.V41BF16CheckedArithmeticError{Site: compute.V41BF16PublishSharedExpertProjection, Index: 0}
 				want = b.deferredFault
+			}
+			if b.grid && b.failTile != 0 {
+				b.failTile = 1 // One full-panel contraction replaces eight tiles.
 			}
 			input := v41ColdSharedPanelInput(rows, m.Cfg.HiddenSize)
 			var got []float32
@@ -286,23 +297,34 @@ func TestV41SharedDown64TokenPanel(t *testing.T) {
 			}
 			if mode == "selected" || mode == "chunk-tail" || mode == "two-chunks" {
 				fullChunks := rows / 64
-				wantRows, wantProbes := make([]int, 8*fullChunks), make([]string, 0, 3*fullChunks)
+				tileCount, tileSize, gathers := 8*fullChunks, 8, 9*fullChunks
+				if b.grid {
+					tileCount, tileSize, gathers = fullChunks, 64, 0
+				}
+				wantRows, wantProbes := make([]int, tileCount), make([]string, 0, 4*fullChunks)
 				for i := range wantRows {
-					wantRows[i] = 8
+					wantRows[i] = tileSize
 				}
 				for i := 0; i < fullChunks; i++ {
-					wantProbes = append(wantProbes, "copies", "tile", "recording")
+					wantProbes = append(wantProbes, "panel")
+					if !b.grid {
+						wantProbes = append(wantProbes, "copies", "tile")
+					}
+					wantProbes = append(wantProbes, "recording")
 				}
-				if !reflect.DeepEqual(b.tileRows, wantRows) || len(b.gatherRows) != 9*fullChunks || !reflect.DeepEqual(b.probes, wantProbes) {
+				if !reflect.DeepEqual(b.tileRows, wantRows) || len(b.gatherRows) != gathers || !reflect.DeepEqual(b.probes, wantProbes) {
 					t.Fatalf("tiles=%v gathers=%v probes=%v", b.tileRows, b.gatherRows, b.probes)
 				}
-				for chunk := 0; chunk < fullChunks; chunk++ {
+				for chunk := 0; !b.grid && chunk < fullChunks; chunk++ {
 					for tile := 0; tile < 8; tile++ {
 						if !reflect.DeepEqual(b.gatherRows[chunk*9+tile], []int{tile * 8, 8}) {
 							t.Fatalf("chunk %d tile %d changed source row order", chunk, tile)
 						}
 					}
 				}
+			}
+			if b.grid && len(b.gatherRows) != 0 {
+				t.Fatal("grid route copied the existing full panel")
 			}
 			if !selectedTiles && (len(b.gatherRows) != 0 || len(b.tileRows) != 0) {
 				t.Fatal("declined path issued tile work")

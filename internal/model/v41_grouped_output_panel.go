@@ -109,6 +109,31 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 			return nil, v41GroupedPanelDecline(layer, rows, "tile_weight_b"), nil
 		}
 	}
+	// Widen only after the historical tiles have passed admission. Each larger
+	// chunk must be supported by both weight families and every publication;
+	// older Q2/Q3 modules therefore keep their original 8/4/2/1 path. The
+	// backend owns inner kernel tiling and per-row reduction order.
+	tiles = v41GroupedPanelChunks(rows, func(n int) bool {
+		for _, width := range []int{groupIn, rank, dim, joined} {
+			count, valid := checkedMulInt(n, width)
+			if !valid || count > math.MaxInt32/4 || !pub.SupportsV41BF16Publish(count) {
+				return false
+			}
+			if _, supported := v41DeferredBF16Publisher(s.Backend, count); !supported {
+				return false
+			}
+		}
+		spanCount, valid := checkedMulInt(n, groups)
+		if !valid || spanCount > math.MaxInt32 || compute.ValidateV41RowLogAlloc(spanCount, rank) != nil {
+			return false
+		}
+		for _, w := range weights.a {
+			if !v41GroupedPanelWeightSupports(s.Backend, w, n) {
+				return false
+			}
+		}
+		return v41GroupedPanelWeightSupports(s.Backend, weights.b, n)
+	})
 
 	s.ensureOpenBackendSession()
 	opened := s.M.v41NowNanos()
@@ -192,8 +217,13 @@ func v41GroupedPanelWeightSupports(be compute.Backend, w compute.Tensor, rows in
 	case compute.Q3_K:
 		op, ok := be.(compute.V41Q3KTokenPanelBackend)
 		return ok && op.SupportsV41Q3KTokenPanel(w, rows)
-	default:
+	case compute.F32:
+		// The row-log device backend's F32 kernel assigns one workgroup per
+		// token; P changes its grid, not the per-row serial reduction. Other
+		// quantized GEMMs stay bounded until their wider dispatch is qualified.
 		return true
+	default:
+		return rows <= 8
 	}
 }
 

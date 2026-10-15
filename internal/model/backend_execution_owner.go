@@ -184,6 +184,11 @@ func (s *Session) closeBackendOwned() {
 		(scope == nil || !scope.live || scope.owner != owner) {
 		panic("model: selected teardown has no matching execution scope")
 	}
+	if cleanup := s.drainV41RoutedOutputs(); cleanup.present {
+		// A cleanup-only failure escapes after teardown. An existing selected
+		// primary stays authoritative; the drain has already attempted all rows.
+		defer func() { panic(cleanup.value) }()
+	}
 	if s.halFailure != nil {
 		// This is a selected operation's cleanup; its caller still returns or
 		// panics with that primary failure after this private teardown returns.

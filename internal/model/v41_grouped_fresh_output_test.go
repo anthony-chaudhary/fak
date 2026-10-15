@@ -32,14 +32,14 @@ func TestV41GroupedFreshAvoidsDeadFullRows(t *testing.T) {
 		routedCalls++
 		return x, v41RoutedExpertHandled, nil
 	}}
-	scratch := &v41ProjScratch{routedSum: func(_ int, _ []routePick, _ [][]float32, width int) ([]float32, error) {
+	scratch := &v41ProjScratch{routedSumBinding: newV41RoutedSumBinding(func(_ int, _ []routePick, _ [][]float32, width int) ([]float32, error) {
 		if width != hidden {
 			panic("unexpected hidden width")
 		}
 		row := results[calls]
 		calls++
 		return row, nil
-	}}
+	})}
 	run := func(fresh bool) {
 		calls, routedCalls = 0, 0
 		var err error
@@ -63,14 +63,14 @@ func TestV41GroupedFreshAvoidsDeadFullRows(t *testing.T) {
 	// them. The fresh entry never exposes its private table at this point.
 	out := make([][]float32, tokens)
 	bytes := 0
-	scratch.routedSum = func(_ int, _ []routePick, _ [][]float32, _ int) ([]float32, error) {
+	scratch.setRoutedSum(func(_ int, _ []routePick, _ [][]float32, _ int) ([]float32, error) {
 		if bytes == 0 {
 			for _, row := range out {
 				bytes += 4 * len(row)
 			}
 		}
 		return results[0], nil
-	}
+	})
 	if err := m.v41ContractRoutedGrouped(0, inputs, picks, scratch, cfg, out, st); err != nil {
 		t.Fatal(err)
 	}
@@ -121,10 +121,10 @@ func TestV41GroupedFreshFullAndReducedParity(t *testing.T) {
 				}
 				scratch := &v41ProjScratch{}
 				if full {
-					scratch.routedSum = func(l int, p []routePick, rows [][]float32, h int) ([]float32, error) {
+					scratch.setRoutedSum(func(l int, p []routePick, rows [][]float32, h int) ([]float32, error) {
 						trace = append(trace, "sum")
 						return v41FullRoutedSum(l, p, rows, h)
-					}
+					})
 				}
 				if fresh {
 					out, err := m.v41ContractRoutedGroupedFresh(0, inputs, picks, scratch, cfg, st)
@@ -175,7 +175,7 @@ func TestV41GroupedFreshFailureAndPanicParity(t *testing.T) {
 					}
 					return []float32{x[0], 1, 2, 3}, v41RoutedExpertHandled, nil
 				}}
-				scratch := &v41ProjScratch{routedSum: func(l int, picks []routePick, rows [][]float32, h int) ([]float32, error) {
+				scratch := &v41ProjScratch{routedSumBinding: newV41RoutedSumBinding(func(l int, picks []routePick, rows [][]float32, h int) ([]float32, error) {
 					sums++
 					trace = append(trace, fmt.Sprintf("sum%d", sums))
 					if sums == 2 {
@@ -187,7 +187,7 @@ func TestV41GroupedFreshFailureAndPanicParity(t *testing.T) {
 						}
 					}
 					return v41FullRoutedSum(l, picks, rows, h)
-				}}
+				})}
 				p = v41GroupedFreshRecover(func() {
 					if fresh {
 						out, err = m.v41ContractRoutedGroupedFresh(0, inputs, picks, scratch, cfg, st)
@@ -218,10 +218,10 @@ func TestV41GroupedFreshBoundaryAndLegacyAdmission(t *testing.T) {
 	cfg := Config{HiddenSize: 4, MoEIntermediateSize: 3, HeadDim: v41KVLoraRank}
 	m := &Model{Cfg: cfg}
 	called := 0
-	scratch := &v41ProjScratch{routedSum: func(_ int, _ []routePick, _ [][]float32, h int) ([]float32, error) {
+	scratch := &v41ProjScratch{routedSumBinding: newV41RoutedSumBinding(func(_ int, _ []routePick, _ [][]float32, h int) ([]float32, error) {
 		called++
 		return make([]float32, h), nil
-	}}
+	})}
 	if out, err := m.v41ContractRoutedGroupedFresh(0, nil, nil, scratch, cfg, nil); err != nil || len(out) != 0 || called != 0 {
 		t.Fatalf("empty panel: %v %v", out, err)
 	}

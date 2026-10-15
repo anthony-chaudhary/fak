@@ -253,7 +253,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 			}
 		}
 		if !prefixHandled {
-			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
+			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNormFunc(), scratch.attentionBF16Func())
 			if err != nil {
 				return nil, err
 			}
@@ -451,7 +451,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 				}
 			}
 			if full {
-				routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
+				routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSumFunc())
 				if err != nil {
 					return nil, err
 				}
@@ -709,7 +709,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 	}
 	if !prefixHandled {
-		collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
+		collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNormFunc(), scratch.attentionBF16Func())
 		if err != nil {
 			return nil, err
 		}
@@ -984,7 +984,7 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 				}
 				fullOutputs[slot] = y
 			}
-			routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSum)
+			routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSumFunc())
 			if err != nil {
 				return nil, err
 			}

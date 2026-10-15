@@ -2,14 +2,18 @@
 
 // Same-expert Q3_K token tile, derived from fak's q3k_matmul.comp packed
 // layout and scalar accumulation order. Decode each quant weight once, then
-// reuse it across 2/4/8 independent token accumulators. This primitive performs
+// reuse it across at most eight independent token accumulators per workgroup.
+// Workgroup Y partitions a bounded 2..64-token panel without extra copies. This primitive performs
 // no route weighting or BF16 publication: the existing caller owns those
 // ordered boundaries before and after the down projection.
 layout(local_size_x = 64) in;
 
+// Kept in optimized SPIR-V as the loaded-module grid ABI discriminator.
+// An unmarked legacy module is admitted only for its original 2/4/8 tokens.
+layout(constant_id = 31) const uint Q3_TOKEN_GRID_ABI = 0x51334731u;
 const uint MAX_TOKENS = 8u;
 layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
-layout(std430, set = 0, binding = 1) readonly buffer X { float x[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X { vec4 x4[]; };
 layout(std430, set = 0, binding = 2) writeonly buffer Y { float y[]; };
 layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
 
@@ -45,19 +49,43 @@ int unpackScale(uint low0, uint low1, uint high, uint index) {
     return int(((low >> lowShift) & 15u) | (((high >> highShift) & 3u) << 4u));
 }
 
+// Decode all four scalar weights before visiting tokens. Each token then
+// consumes one aligned activation vec4 while retaining four ordered additions.
+float decodedLane(uint quantBytes, uint highBytes, uint shift, uint mask, uint component, float dl) {
+    uint byteShift = component * 8u;
+    int code = int((quantBytes >> (byteShift + shift)) & 3u);
+    if (((highBytes >> byteShift) & mask) == 0u) code -= 4;
+    float decoded = dl * float(code);
+    return decoded;
+}
+
 void main() {
+    if (Q3_TOKEN_GRID_ABI != 0x51334731u) return;
     uint row = gl_GlobalInvocationID.x;
-    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), tokens = uint(pc.tokens);
-    if (row >= outDim) return;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), totalTokens = uint(pc.tokens);
+    uint tokenBase = gl_WorkGroupID.y * MAX_TOKENS;
+    if (row >= outDim || tokenBase >= totalTokens) return;
+    uint tokens = min(MAX_TOKENS, totalTokens - tokenBase);
     uint blocks = inDim / 256u;
     float sums[MAX_TOKENS];
     for (uint token = 0u; token < tokens; ++token) sums[token] = 0.0;
     for (uint sb = 0u; sb < blocks; ++sb) {
         uint base = (row * blocks + sb) * 110u;
-        float d = unpackHalf2x16(byteAt(base + 108u) | (byteAt(base + 109u) << 8u)).x;
-        uint scaleLow0 = packedFourBytes(base + 96u);
-        uint scaleLow1 = packedFourBytes(base + 100u);
-        uint scaleHigh = packedFourBytes(base + 104u);
+        // Four enclosing words cover all twelve scale bytes and the half scale.
+        // Blocks start at byte alignment zero or two; no fifth word is needed.
+        uint metadataWord = (base + 96u) >> 2u;
+        uint metadataShift = (base & 3u) * 8u;
+        uint metadata0 = raw[metadataWord];
+        uint metadata1 = raw[metadataWord + 1u];
+        uint metadata2 = raw[metadataWord + 2u];
+        uint metadata3 = raw[metadataWord + 3u];
+        uint scaleLow0 = metadata0, scaleLow1 = metadata1, scaleHigh = metadata2;
+        if (metadataShift != 0u) {
+            scaleLow0 = (metadata0 >> metadataShift) | (metadata1 << (32u - metadataShift));
+            scaleLow1 = (metadata1 >> metadataShift) | (metadata2 << (32u - metadataShift));
+            scaleHigh = (metadata2 >> metadataShift) | (metadata3 << (32u - metadataShift));
+        }
+        float d = unpackHalf2x16((metadata3 >> metadataShift) & 65535u).x;
         uint qi = 0u, mask = 1u;
         int si = 0;
         for (uint halfBase = 0u; halfBase < 256u; halfBase += 128u) {
@@ -70,16 +98,18 @@ void main() {
                         uint laneBase = sub * 16u + l;
                         uint quantBytes = packedFourBytes(base + 32u + qi + laneBase);
                         uint highBytes = packedFourBytes(base + laneBase);
-                        for (uint component = 0u; component < 4u; ++component) {
-                            uint lane = laneBase + component;
-                            uint byteShift = component * 8u;
-                            int code = int((quantBytes >> (byteShift + shift)) & 3u);
-                            if (((highBytes >> byteShift) & mask) == 0u) code -= 4;
-                            float decoded = dl * float(code);
-                            uint col = sb * 256u + halfBase + j * 32u + lane;
-                            for (uint token = 0u; token < tokens; ++token) {
-                                sums[token] += decoded * x[token * inDim + col];
-                            }
+                        float decoded0 = decodedLane(quantBytes, highBytes, shift, mask, 0u, dl);
+                        float decoded1 = decodedLane(quantBytes, highBytes, shift, mask, 1u, dl);
+                        float decoded2 = decodedLane(quantBytes, highBytes, shift, mask, 2u, dl);
+                        float decoded3 = decodedLane(quantBytes, highBytes, shift, mask, 3u, dl);
+                        uint col4 = (sb * 256u + halfBase + j * 32u + laneBase) >> 2u;
+                        for (uint token = 0u; token < tokens; ++token) {
+                            vec4 xv = x4[(tokenBase + token) * (inDim >> 2u) + col4];
+                            float sum0 = sums[token] + decoded0 * xv.x;
+                            float sum1 = sum0 + decoded1 * xv.y;
+                            float sum2 = sum1 + decoded2 * xv.z;
+                            float sum3 = sum2 + decoded3 * xv.w;
+                            sums[token] = sum3;
                         }
                     }
                 }
@@ -89,5 +119,5 @@ void main() {
             qi += 32u;
         }
     }
-    for (uint token = 0u; token < tokens; ++token) y[token * outDim + row] = sums[token];
+    for (uint token = 0u; token < tokens; ++token) y[(tokenBase + token) * outDim + row] = sums[token];
 }

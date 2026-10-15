@@ -7,7 +7,10 @@ package compute
 */
 import "C"
 
-import "fmt"
+import (
+	"fmt"
+	"unsafe"
+)
 
 var _ V41RowLogBackend = (*vulkanBackend)(nil)
 
@@ -82,7 +85,8 @@ func (v *vulkanBackend) V41RowLogCopy(dst Tensor, dstRow int, src Tensor, srcRow
 	return vulkanV41RowLogStatus("V41RowLogCopy", int(C.fvk_submission_status()))
 }
 
-// V41RowLogGather records one copy per span into a fresh panel.
+// V41RowLogGather groups bounded gathers into one native copy per source.
+// Larger generic requests retain the ordinary per-span recording path.
 func (v *vulkanBackend) V41RowLogGather(spans []V41RowSpan, width int) (out Tensor, err error) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -119,10 +123,23 @@ func (v *vulkanBackend) V41RowLogGather(spans []V41RowSpan, width int) (out Tens
 	}
 	rowBytes := width * 4
 	outBuf = v.dallocForClass(total*rowBytes, MemoryActivation, "V4.1 resident KV panel")
-	at := 0
-	for i, span := range spans {
-		C.fvk_d2d_range(outBuf.ptr, C.size_t(at*rowBytes), bufs[i].ptr, C.size_t(span.Row*rowBytes), C.size_t(span.Rows*rowBytes))
-		at += span.Rows
+	if len(spans) <= C.FVK_V41_GATHER_MAX_REGIONS {
+		ptrs := make([]unsafe.Pointer, len(spans))
+		offsets := make([]C.size_t, len(spans))
+		bytes := make([]C.size_t, len(spans))
+		for i, span := range spans {
+			ptrs[i], offsets[i], bytes[i] = bufs[i].ptr, C.size_t(span.Row*rowBytes), C.size_t(span.Rows*rowBytes)
+		}
+		if err := vulkanV41RowLogStatus("V41RowLogGather", int(C.fvk_v41_d2d_gather(outBuf.ptr, C.int(len(spans)),
+			(*unsafe.Pointer)(unsafe.Pointer(&ptrs[0])), &offsets[0], &bytes[0]))); err != nil {
+			return Tensor{}, err
+		}
+	} else {
+		at := 0
+		for i, span := range spans {
+			C.fvk_d2d_range(outBuf.ptr, C.size_t(at*rowBytes), bufs[i].ptr, C.size_t(span.Row*rowBytes), C.size_t(span.Rows*rowBytes))
+			at += span.Rows
+		}
 	}
 	if err := vulkanV41RowLogStatus("V41RowLogGather", int(C.fvk_submission_status())); err != nil {
 		return Tensor{}, err

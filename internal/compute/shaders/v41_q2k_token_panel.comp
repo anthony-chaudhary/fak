@@ -8,6 +8,8 @@
 // are shared by the two output rows. Each row/token retains its own ordered
 // sums and the same 64-lane reduction tree. The paired sums and weight metadata
 // increase register liveness; no full four-plane activation panel is retained.
+// Select each ordered scale byte directly from its row's packed words instead
+// of keeping two private four-element scale arrays.
 // No activation/BF16/status policy is changed by this contraction primitive.
 layout(local_size_x = 64) in;
 
@@ -45,24 +47,16 @@ void main() {
         uint sc0Row0 = raw[baseRow0 + h * 2u];
         uint sc1Row0 = raw[baseRow0 + h * 2u + 1u];
         vec2 ddRow0 = unpackHalf2x16(raw[baseRow0 + 20u]);
-        uint scjRow0[4];
-        scjRow0[0] = (sc0Row0 >> (s * 8u)) & 255u;
-        scjRow0[1] = (sc0Row0 >> ((2u + s) * 8u)) & 255u;
-        scjRow0[2] = (sc1Row0 >> (s * 8u)) & 255u;
-        scjRow0[3] = (sc1Row0 >> ((2u + s) * 8u)) & 255u;
         uint qRow1;
         vec2 ddRow1;
-        uint scjRow1[4];
+        uint sc0Row1;
+        uint sc1Row1;
         if (hasRow1) {
             uint baseRow1 = (rowBase + 1u) * wordsPerRow + sb * 21u;
             qRow1 = raw[baseRow1 + 4u + t16];
-            uint sc0Row1 = raw[baseRow1 + h * 2u];
-            uint sc1Row1 = raw[baseRow1 + h * 2u + 1u];
+            sc0Row1 = raw[baseRow1 + h * 2u];
+            sc1Row1 = raw[baseRow1 + h * 2u + 1u];
             ddRow1 = unpackHalf2x16(raw[baseRow1 + 20u]);
-            scjRow1[0] = (sc0Row1 >> (s * 8u)) & 255u;
-            scjRow1[1] = (sc0Row1 >> ((2u + s) * 8u)) & 255u;
-            scjRow1[2] = (sc1Row1 >> (s * 8u)) & 255u;
-            scjRow1[3] = (sc1Row1 >> ((2u + s) * 8u)) & 255u;
         }
         precise float sumRow0[MAX_TOKENS];
         precise float sumRow1[MAX_TOKENS];
@@ -71,16 +65,19 @@ void main() {
             sumRow1[t] = 0.0;
         }
         for (uint j = 0u; j < 4u; ++j) {
+            uint scaleShift = ((j & 1u) * 2u + s) * 8u;
+            uint scjRow0 = ((j < 2u ? sc0Row0 : sc1Row0) >> scaleShift) & 255u;
             vec4 qvRow0 = bytesOf((qRow0 >> (2u * j)) & 0x03030303u);
-            precise float dlRow0 = ddRow0.x * float(scjRow0[j] & 15u);
-            precise float mlRow0 = ddRow0.y * float(scjRow0[j] >> 4u);
+            precise float dlRow0 = ddRow0.x * float(scjRow0 & 15u);
+            precise float mlRow0 = ddRow0.y * float(scjRow0 >> 4u);
             vec4 qvRow1;
             precise float dlRow1;
             precise float mlRow1;
             if (hasRow1) {
+                uint scjRow1 = ((j < 2u ? sc0Row1 : sc1Row1) >> scaleShift) & 255u;
                 qvRow1 = bytesOf((qRow1 >> (2u * j)) & 0x03030303u);
-                dlRow1 = ddRow1.x * float(scjRow1[j] & 15u);
-                mlRow1 = ddRow1.y * float(scjRow1[j] >> 4u);
+                dlRow1 = ddRow1.x * float(scjRow1 & 15u);
+                mlRow1 = ddRow1.y * float(scjRow1 >> 4u);
             }
             uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
             for (uint t = 0u; t < tokens; ++t) {

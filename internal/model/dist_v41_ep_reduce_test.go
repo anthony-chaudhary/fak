@@ -452,7 +452,7 @@ func v41EPRootSelectedSumSession(t *testing.T, panicValue any) {
 			s := m.NewBackendSession(backend)
 			sessions[rank] = s
 			st := s.v41State()
-			st.routedSum = func(layer int, picks []routePick, rows [][]float32, width int) ([]float32, error) {
+			st.setRoutedSum(func(layer int, picks []routePick, rows [][]float32, width int) ([]float32, error) {
 				calls[rank]++
 				if rank != 0 || s.backendExecutionScope == nil || !s.backendExecutionScope.live || s.backendExecutionScope.owner != &backend.owner {
 					return nil, errors.New("root sum lost the calling Session's execution scope")
@@ -470,7 +470,7 @@ func v41EPRootSelectedSumSession(t *testing.T, panicValue any) {
 					})
 				}
 				return v41FullRoutedSum(layer, picks, rows, width)
-			}
+			})
 			return s
 		}
 		if rank != 0 {

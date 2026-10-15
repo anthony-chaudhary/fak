@@ -13,7 +13,16 @@ const v41ExpertCohortRows = 32
 // status/output fence. An explicitly available Q2_K token tile may share only
 // gate/up; scalar activation/down retain their row order. The ID panel's
 // explicit opt-in takes precedence; this path selects no ID-table kernel.
-func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float32, weights []float32) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
+func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float32, weights []float32) ([][]float32, v41RoutedExpertOutcome, error) {
+	return s.v41RoutedExpertCohortRetained(layer, stem, inputs, weights, nil)
+}
+
+// A retained call transfers only checked publications. The layer owner remains
+// responsible even if a later cohort-temporary or weight-release cleanup fails.
+func (s *Session) v41RoutedExpertCohortRetained(layer int, stem string, inputs [][]float32, weights []float32, handoff *v41RoutedOutputHandoff) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
+	if handoff != nil && (!handoff.owner.live() || handoff.owner.session != s || handoff.owner.layer != layer || len(handoff.rows) != len(inputs)) {
+		return nil, v41RoutedExpertDeclined, nil
+	}
 	if s == nil || s.M == nil || s.Backend == nil || s.v41RoutedExpertFunc() == nil ||
 		v41PrefillExpertPanelOptedIn() || len(inputs) < 2 || len(inputs) > v41ExpertCohortRows || len(weights) != len(inputs) {
 		return nil, v41RoutedExpertDeclined, nil
@@ -39,6 +48,11 @@ func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float
 	s.ensureOpenBackendSession()
 	stage := "gate/up"
 	retire := func(err error) error {
+		if handoff != nil {
+			// Retire only after all retained rows have had a release attempt.
+			// The selected compute/validation fault remains primary.
+			handoff.owner.release(0, true)
+		}
 		if s.halFailure == nil {
 			s.halFailure = &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert", Layer: layer, Stage: stage, Cause: err}
 		}
@@ -94,7 +108,7 @@ func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float
 	defer releaseDown()
 	outcome = v41RoutedExpertError
 	recordingFailed := false
-	result, cause = s.v41RunExpertCohort(deferred, gate, up, down, inputs, weights, float32(s.M.Cfg.SwigluLimit), layer, &stage, &recordingFailed)
+	result, cause = s.v41RunExpertCohortRetained(deferred, gate, up, down, inputs, weights, float32(s.M.Cfg.SwigluLimit), layer, &stage, &recordingFailed, nil, handoff)
 	if cause != nil {
 		var numeric *V41ExpertOperationError
 		if !errors.As(cause, &numeric) {
@@ -128,8 +142,16 @@ type v41ExpertCohortOptions struct {
 	note      func(row int, gateUp bool)
 }
 
-func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool, options *v41ExpertCohortOptions) (result [][]float32, cause error) {
+func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool, options *v41ExpertCohortOptions) ([][]float32, error) {
+	return s.v41RunExpertCohortRetained(deferred, gateW, upW, downW, inputs, weights, limit, layer, stage, recordingFailed, options, nil)
+}
+
+func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool, options *v41ExpertCohortOptions, handoff *v41RoutedOutputHandoff) (result [][]float32, cause error) {
 	H, I, count := s.M.Cfg.HiddenSize, s.M.Cfg.MoEIntermediateSize, len(inputs)
+	if handoff != nil && (options != nil || !handoff.owner.live() || handoff.owner.session != s ||
+		handoff.owner.layer != layer || handoff.owner.width != H || handoff.owner.inner != I || handoff.owner.limit != limit || len(handoff.rows) != count) {
+		return nil, errV41ExpertResult
+	}
 	owners := count
 	if options != nil && options.sums != nil {
 		owners++ // Sum temporaries follow every expert row in the fault ledger.
@@ -166,7 +188,7 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 		return t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && len(t.Shape) == 1 && t.Shape[0] == n
 	}
 	own := func(t compute.Tensor) bool {
-		if t.Buf() == nil || t.Backend() != gateW.Backend() || seen[t.Buf()] {
+		if t.Buf() == nil || t.Backend() != gateW.Backend() || seen[t.Buf()] || handoff != nil && handoff.owner.owns(t.Buf()) {
 			return false
 		}
 		seen[t.Buf()] = true
@@ -472,6 +494,16 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 	if options != nil && options.sums != nil {
 		for r := 0; r < count; r++ {
 			s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(r, opened))
+		}
+	}
+	if handoff != nil {
+		n, err := handoff.adopt(published)
+		if err != nil {
+			faultRow, *stage, *recordingFailed = 0, "readback", true
+			return nil, err
+		}
+		for _, row := range published[:n] {
+			consumed[row.Buf()] = true // ownership moved; never freed here
 		}
 	}
 	return result, nil

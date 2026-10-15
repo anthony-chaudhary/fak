@@ -23,11 +23,30 @@ func TestV41Q3KTokenPanelPackedLoads(t *testing.T) {
 	if err := v41Q3PackedLoadSource(string(source)); err != nil {
 		t.Fatal(err)
 	}
+	for _, replacement := range [][2]string{
+		{"min(MAX_TOKENS, totalTokens - tokenBase)", "MAX_TOKENS"},
+		{"0x51334731u", "0x51334732u"},
+		{"x4[(tokenBase + token)", "x4[token"},
+		{"y[(tokenBase + token)", "y[token"},
+	} {
+		broken := strings.Replace(string(source), replacement[0], replacement[1], 1)
+		if broken == string(source) || v41Q3PackedLoadSource(broken) == nil {
+			t.Fatal("negative control accepted an unmasked tail or missing token-tile offset")
+		}
+	}
 	// A wrong straddling shift must fail the source-bound contract, even when
 	// aligned blocks would still decode correctly.
 	broken := strings.Replace(string(source), "32u - shift", "8u", 1)
 	if broken == string(source) || v41Q3PackedLoadSource(broken) == nil {
 		t.Fatal("negative control accepted a corrupt cross-word byte extraction")
+	}
+	brokenActivation := strings.Replace(string(source), "sum1 + decoded2 * xv.z", "sum0 + decoded2 * xv.z", 1)
+	if brokenActivation == string(source) || v41Q3PackedLoadSource(brokenActivation) == nil {
+		t.Fatal("negative control accepted a missing prior scalar addition")
+	}
+	brokenMetadata := strings.Replace(string(source), "metadata3 >> metadataShift", "metadata2 >> metadataShift", 1)
+	if brokenMetadata == string(source) || v41Q3PackedLoadSource(brokenMetadata) == nil {
+		t.Fatal("negative control accepted the wrong half-scale word")
 	}
 	brokenScale := strings.Replace(string(source), "(index >> 2u) * 2u", "(index >> 2u)", 1)
 	if brokenScale == string(source) || v41Q3PackedLoadSource(brokenScale) == nil {
@@ -82,6 +101,52 @@ func TestV41Q3KTokenPanelPackedLoads(t *testing.T) {
 			}
 		}
 	}
+	// Four scalar visits and one vector visit cover the same contiguous input
+	// bytes. Keep every rounded scalar product and running addition in order.
+	for _, tokens := range []int{2, 4, 8} {
+		const width = 3 * 256
+		input := make([]float32, tokens*width)
+		weights := make([]float32, width)
+		for i := range input {
+			input[i] = float32((i*37)%251-125) / 31
+		}
+		for i := range weights {
+			weights[i] = float32((i*13)%127-63) / 19
+		}
+		scalar, quartet := make([]float32, tokens), make([]float32, tokens)
+		for col := 0; col < width; col++ {
+			for token := 0; token < tokens; token++ {
+				product := float32(weights[col] * input[token*width+col])
+				scalar[token] = float32(scalar[token] + product)
+			}
+		}
+		loads, stores := 0, 0
+		for col := 0; col < width; col += 4 {
+			for token := 0; token < tokens; token++ {
+				vectorIndex := token*(width>>2) + (col >> 2)
+				start := vectorIndex * 4
+				if start != token*width+col || start+4 > len(input) {
+					t.Fatal("activation quartet changed token stride or crossed storage")
+				}
+				xv := input[start : start+4]
+				loads++
+				sum0 := float32(quartet[token] + float32(weights[col]*xv[0]))
+				sum1 := float32(sum0 + float32(weights[col+1]*xv[1]))
+				sum2 := float32(sum1 + float32(weights[col+2]*xv[2]))
+				sum3 := float32(sum2 + float32(weights[col+3]*xv[3]))
+				quartet[token] = sum3
+				stores++
+			}
+		}
+		for token := 0; token < tokens; token++ {
+			if quartet[token] != scalar[token] {
+				t.Fatalf("tokens=%d token=%d quartet=%g scalar=%g", tokens, token, quartet[token], scalar[token])
+			}
+		}
+		if loads != tokens*width/4 || stores != tokens*width/4 {
+			t.Fatalf("tokens=%d loads=%d stores=%d", tokens, loads, stores)
+		}
+	}
 	const blocks = 3 // Both alignments and an odd, minimally padded tail.
 	raw := make([]byte, blocks*110+2)
 	for seed := 0; seed < 256; seed++ {
@@ -105,13 +170,25 @@ func TestV41Q3KTokenPanelPackedLoads(t *testing.T) {
 				}
 				return lo>>shift | read(word+1)<<(32-shift)
 			}
-			low0, low1, high := packed(base+96), packed(base+100), packed(base+104)
-			wantScaleLoads := 3
-			if base&3 != 0 {
-				wantScaleLoads = 6
+			word, metadataShift := (base+96)/4, uint(base&3)*8
+			var metadata [4]uint32
+			for i := range metadata {
+				if (word+i)*4+4 > len(raw) {
+					t.Fatal("metadata word load crossed the padded extent")
+				}
+				metadata[i] = binary.LittleEndian.Uint32(raw[(word+i)*4:])
+				loads++
 			}
-			if loads != wantScaleLoads {
-				t.Fatalf("block=%d scale loads=%d want=%d", sb, loads, wantScaleLoads)
+			low0, low1, high := metadata[0], metadata[1], metadata[2]
+			if metadataShift != 0 {
+				low0 = metadata[0]>>metadataShift | metadata[1]<<(32-metadataShift)
+				low1 = metadata[1]>>metadataShift | metadata[2]<<(32-metadataShift)
+				high = metadata[2]>>metadataShift | metadata[3]<<(32-metadataShift)
+			}
+			if loads != 4 || low0 != binary.LittleEndian.Uint32(raw[base+96:]) ||
+				low1 != binary.LittleEndian.Uint32(raw[base+100:]) || high != binary.LittleEndian.Uint32(raw[base+104:]) ||
+				uint16(metadata[3]>>metadataShift) != binary.LittleEndian.Uint16(raw[base+108:]) {
+				t.Fatalf("block=%d metadata extraction changed or used %d word loads", sb, loads)
 			}
 			wantScales := legacyScales(binary.LittleEndian.Uint32(raw[base+96:]), binary.LittleEndian.Uint32(raw[base+100:]), binary.LittleEndian.Uint32(raw[base+104:]))
 			for i := uint(0); i < 16; i++ {
@@ -170,6 +247,39 @@ func v41Q3PackedLoadSource(source string) error {
 		return strings.Join(strings.Fields(comments.ReplaceAllString(s, "")), "")
 	}
 	source = normalize(source)
+	for _, replacement := range [][2]string{
+		{"layout(constant_id = 31) const uint Q3_TOKEN_GRID_ABI = 0x51334731u;", ""},
+		{"if (Q3_TOKEN_GRID_ABI != 0x51334731u) return;", ""},
+		{v41Q3TokenGridPreludeAfter, v41Q3TokenGridPreludeBefore},
+		{"x4[(tokenBase + token) * (inDim >> 2u) + col4]", "x4[token * (inDim >> 2u) + col4]"},
+		{"y[(tokenBase + token) * outDim + row] = sums[token]", "y[token * outDim + row] = sums[token]"},
+	} {
+		after, before := normalize(replacement[0]), normalize(replacement[1])
+		if strings.Count(source, after) != 1 {
+			return fmt.Errorf("bounded token grid, masked tail or global token address changed")
+		}
+		source = strings.Replace(source, after, before, 1)
+	}
+	metadataAfter, metadataBefore := normalize(v41Q3MetadataWordsAfter), normalize(v41Q3MetadataWordsBefore)
+	if strings.Count(source, metadataAfter) != 1 {
+		return fmt.Errorf("metadata word sharing or half-scale extraction changed")
+	}
+	source = strings.Replace(source, metadataAfter, metadataBefore, 1)
+	activationHelper := normalize(v41Q3ActivationQuartetHelper)
+	if strings.Count(source, activationHelper) != 1 {
+		return fmt.Errorf("quartet weight decoder changed")
+	}
+	source = strings.Replace(source, activationHelper, "", 1)
+	for _, replacement := range [][2]string{
+		{"readonly buffer X { vec4 x4[]; };", "readonly buffer X { float x[]; };"},
+		{v41Q3ActivationQuartetAfter, v41Q3PackedLoadAfter},
+	} {
+		after, before := normalize(replacement[0]), normalize(replacement[1])
+		if strings.Count(source, after) != 1 {
+			return fmt.Errorf("aligned activation quartet or ordered accumulation changed")
+		}
+		source = strings.Replace(source, after, before, 1)
+	}
 	for _, replacement := range [][2]string{
 		{v41Q3DirectScaleAfter, v41Q3DirectScaleBefore},
 		{v41Q3DirectScalePreludeAfter, v41Q3DirectScalePreludeBefore},
@@ -271,3 +381,65 @@ const v41Q3DirectScalePreludeBefore = `        int scales[16];
 const v41Q3DirectScalePreludeAfter = `        uint scaleLow0 = packedFourBytes(base + 96u);
         uint scaleLow1 = packedFourBytes(base + 100u);
         uint scaleHigh = packedFourBytes(base + 104u);`
+
+const v41Q3ActivationQuartetHelper = `// Decode all four scalar weights before visiting tokens. Each token then
+// consumes one aligned activation vec4 while retaining four ordered additions.
+float decodedLane(uint quantBytes, uint highBytes, uint shift, uint mask, uint component, float dl) {
+    uint byteShift = component * 8u;
+    int code = int((quantBytes >> (byteShift + shift)) & 3u);
+    if (((highBytes >> byteShift) & mask) == 0u) code -= 4;
+    float decoded = dl * float(code);
+    return decoded;
+}
+
+`
+
+const v41Q3ActivationQuartetAfter = `                    for (uint l = 0u; l < 16u; l += 4u) {
+                        uint laneBase = sub * 16u + l;
+                        uint quantBytes = packedFourBytes(base + 32u + qi + laneBase);
+                        uint highBytes = packedFourBytes(base + laneBase);
+                        float decoded0 = decodedLane(quantBytes, highBytes, shift, mask, 0u, dl);
+                        float decoded1 = decodedLane(quantBytes, highBytes, shift, mask, 1u, dl);
+                        float decoded2 = decodedLane(quantBytes, highBytes, shift, mask, 2u, dl);
+                        float decoded3 = decodedLane(quantBytes, highBytes, shift, mask, 3u, dl);
+                        uint col4 = (sb * 256u + halfBase + j * 32u + laneBase) >> 2u;
+                        for (uint token = 0u; token < tokens; ++token) {
+                            vec4 xv = x4[token * (inDim >> 2u) + col4];
+                            float sum0 = sums[token] + decoded0 * xv.x;
+                            float sum1 = sum0 + decoded1 * xv.y;
+                            float sum2 = sum1 + decoded2 * xv.z;
+                            float sum3 = sum2 + decoded3 * xv.w;
+                            sums[token] = sum3;
+                        }
+                    }`
+
+const v41Q3MetadataWordsBefore = `        float d = unpackHalf2x16(byteAt(base + 108u) | (byteAt(base + 109u) << 8u)).x;
+        uint scaleLow0 = packedFourBytes(base + 96u);
+        uint scaleLow1 = packedFourBytes(base + 100u);
+        uint scaleHigh = packedFourBytes(base + 104u);`
+
+const v41Q3MetadataWordsAfter = `        // Four enclosing words cover all twelve scale bytes and the half scale.
+        // Blocks start at byte alignment zero or two; no fifth word is needed.
+        uint metadataWord = (base + 96u) >> 2u;
+        uint metadataShift = (base & 3u) * 8u;
+        uint metadata0 = raw[metadataWord];
+        uint metadata1 = raw[metadataWord + 1u];
+        uint metadata2 = raw[metadataWord + 2u];
+        uint metadata3 = raw[metadataWord + 3u];
+        uint scaleLow0 = metadata0, scaleLow1 = metadata1, scaleHigh = metadata2;
+        if (metadataShift != 0u) {
+            scaleLow0 = (metadata0 >> metadataShift) | (metadata1 << (32u - metadataShift));
+            scaleLow1 = (metadata1 >> metadataShift) | (metadata2 << (32u - metadataShift));
+            scaleHigh = (metadata2 >> metadataShift) | (metadata3 << (32u - metadataShift));
+        }
+        float d = unpackHalf2x16((metadata3 >> metadataShift) & 65535u).x;`
+
+const v41Q3TokenGridPreludeBefore = `    uint row = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), tokens = uint(pc.tokens);
+    if (row >= outDim) return;`
+
+const v41Q3TokenGridPreludeAfter = `    uint row = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), totalTokens = uint(pc.tokens);
+    uint tokenBase = gl_WorkGroupID.y * MAX_TOKENS;
+    if (row >= outDim || tokenBase >= totalTokens) return;
+    uint tokens = min(MAX_TOKENS, totalTokens - tokenBase);`

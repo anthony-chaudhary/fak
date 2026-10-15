@@ -205,7 +205,8 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		}
 		defer hostArm.Close()
 		hs := hostArm.v41State()
-		hs.gatherOps.bf16Publish, hs.bf16Boundary, hs.attentionBF16 = nil, nil, nil
+		hs.gatherOps.bf16Publish, hs.bf16Boundary = nil, nil
+		hs.setAttentionBF16(nil)
 		alt := v41DeviceParitySession(t, hostArm, prompt, v41DeviceParitySteps)
 		v41BF16PublishBitIdentical(t, "engram", got, alt)
 		t.Logf("V41_BF16_PUBLISH_ENGRAM_SESSION tokens=%v host_arm=%v ab_bit_identical=true publications=%d resident=%d host_rounds_default_policy=%d", got.tokens, alt.tokens, publishes, resident, rounds)
@@ -303,7 +304,7 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		sites := map[string]int{}
 		st := dev.v41State()
 		inner, final := st.gatherOps.bf16Publish, st.bf16Boundary
-		if inner == nil || final == nil || st.attentionBF16 == nil {
+		if inner == nil || final == nil || st.attentionBF16Func() == nil {
 			t.Fatal("publication seams not bound on the device-only session")
 		}
 		count := func(next v41BF16BoundaryFunc) v41BF16BoundaryFunc {
@@ -344,7 +345,8 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		}
 		defer hostArm.Close()
 		hs := hostArm.v41State()
-		hs.gatherOps.bf16Publish, hs.bf16Boundary, hs.attentionBF16 = nil, nil, nil
+		hs.gatherOps.bf16Publish, hs.bf16Boundary = nil, nil
+		hs.setAttentionBF16(nil)
 		alt := v41DeviceParitySession(t, hostArm, prompt, v41DeviceParitySteps)
 		v41BF16PublishBitIdentical(t, "device-only", got, alt)
 		// The host-arm session is bit-identical, so any logit drift against the

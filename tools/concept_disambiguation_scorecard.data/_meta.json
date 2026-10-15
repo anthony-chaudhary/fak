@@ -1819,8 +1819,88 @@
       "classifications": [
         {
           "category": "incidental",
-          "reason": "Private helper deriving configured full-attention layer indices, not a new attention concept",
-          "token": "qwenfullattentionlayers"
+          "reason": "Private role-step local holding the positioned v41SharedAttentionContinuation for this call; construction and use retain the positioned live-context and one-use validation-witness checks, with no separate semantic authority.",
+          "token": "attentionContinuation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private nil-safe accessor exposing only the ordinary callback from v41SharedAttentionBinding, never its canonical provenance.",
+          "token": "attentionFunc"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local v41_forward_layer batch variable holding already normalized attention-input rows for the current cold layer; storage for the existing attention-input norm binding, not an independently configurable or reusable attention concept.",
+          "token": "attentionRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_core"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_gate_sigmoid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_gated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_k_normed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_pregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_q_full"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "attn_q_normed"
+        },
+        {
+          "category": "incidental",
+          "reason": "canonical V4.1 per-layer KV latent-norm tensor name (model.layers.<L>.attn.kv_norm.weight) carried as a string literal by the ggufload attention-descriptor preflight; an existing tensor-name leaf, not a new attention concept",
+          "token": "attnkvanorm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private installation adapter preserving a canonical v41SharedAttentionBinding identity in forward state; it neither acquires live execution ownership nor supplies the one-use row-validation witness.",
+          "token": "bindCanonicalSharedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask builder",
+          "token": "BuildTreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private scratch reset adapter that clears the existing shared-attention callback; it introduces no new attention behavior or resource authority.",
+          "token": "clearSharedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local variable retaining the existing admitted attention owner; introduces no new type, capability or ownership domain.",
+          "token": "coldAttentionOwner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private forward-state/scratch copy adapter copying the same immutable v41SharedAttentionBinding pointer; it does not clone authority, acquire ownership, or establish that borrowed rows were validated.",
+          "token": "copySharedAttentionFrom"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON key for estimated operator-attention cost in seconds",
+          "token": "estimated_attention_s"
         },
         {
           "category": "incidental",
@@ -1834,38 +1914,28 @@
         },
         {
           "category": "incidental",
-          "reason": "JSON key for estimated operator-attention cost in seconds",
-          "token": "estimated_attention_s"
-        },
-        {
-          "category": "incidental",
-          "reason": "tree speculative attention mask struct",
-          "token": "TreeAttentionMask"
-        },
-        {
-          "category": "incidental",
-          "reason": "tree speculative attention mask builder",
-          "token": "BuildTreeAttentionMask"
-        },
-        {
-          "category": "incidental",
-          "reason": "tree speculative attention mask validator",
-          "token": "ValidateTreeAttentionMask"
-        },
-        {
-          "category": "incidental",
-          "reason": "canonical V4.1 per-layer KV latent-norm tensor name (model.layers.<L>.attn.kv_norm.weight) carried as a string literal by the ggufload attention-descriptor preflight; an existing tensor-name leaf, not a new attention concept",
-          "token": "attnkvanorm"
-        },
-        {
-          "category": "incidental",
           "reason": "pre-existing dequant-once attention entrypoint referenced by the execution-contract classifier doc; not a new concept",
           "token": "executevulkanattentionwithdequantonce"
         },
         {
           "category": "incidental",
           "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
-          "token": "mg_prefill_attn_supported"
+          "token": "ExecutionPrefillAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "linear_attn_out"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
+          "token": "linear_attn_qkv_mixed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
+          "token": "MetalFallbackPrefillAttentionCPU"
         },
         {
           "category": "incidental",
@@ -1875,7 +1945,17 @@
         {
           "category": "incidental",
           "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
-          "token": "prefillAttnMu"
+          "token": "mg_prefill_attn_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ordinary-callback constructor for v41SharedAttentionBinding; reconstructing a callback records no canonical provenance and introduces no separate attention concept.",
+          "token": "newV41SharedAttentionBinding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constructor for the positioned v41SharedAttentionContinuation; it captures and rechecks canonical binding, owner, state, geometry and role-plan identities rather than defining a separate attention operation.",
+          "token": "newV41SharedAttentionContinuation"
         },
         {
           "category": "incidental",
@@ -1895,17 +1975,12 @@
         {
           "category": "incidental",
           "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
-          "token": "MetalFallbackPrefillAttentionCPU"
+          "token": "prefillAttnMu"
         },
         {
           "category": "incidental",
-          "reason": "Plumbing of the fak#13695 PrefillAttention device route (cgo entry, lock, capability probe, timing receipt, admission threshold, fallback route, or execution operation label); the concept itself is the positioned PrefillAttention row.",
-          "token": "ExecutionPrefillAttention"
-        },
-        {
-          "category": "incidental",
-          "reason": "Unexported recorder for the existing V4.1 attention phase counters; it introduces no separate attention algorithm or placement contract.",
-          "token": "v41NoteAttentionContraction"
+          "reason": "Private helper deriving configured full-attention layer indices, not a new attention concept",
+          "token": "qwenfullattentionlayers"
         },
         {
           "category": "false-positive",
@@ -1914,48 +1989,13 @@
         },
         {
           "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "linear_attn_qkv_mixed"
+          "reason": "Function-local pointer identity set in cohort admission; tracks already-seen existing attention states to reject aliasing, without defining a new attention abstraction.",
+          "token": "seenAttention"
         },
         {
           "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "linear_attn_out"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_q_full"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_q_normed"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_k_normed"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_pregate"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_core"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_gate_sigmoid"
-        },
-        {
-          "category": "incidental",
-          "reason": "Existing external attention tensor or normalized activation-stage wire label in the pinned llama.cpp reference importer map; it introduces no new attention algorithm, cache policy, or runtime backend.",
-          "token": "attn_gated"
+          "reason": "Private ordinary-callback replacement adapter for the existing shared-attention seam; it introduces no attention operation or independent trust concept.",
+          "token": "setSharedAttention"
         },
         {
           "category": "false-positive",
@@ -1964,33 +2004,8 @@
         },
         {
           "category": "incidental",
-          "reason": "Function-local pointer identity set in cohort admission; tracks already-seen existing attention states to reject aliasing, without defining a new attention abstraction.",
-          "token": "seenAttention"
-        },
-        {
-          "category": "incidental",
-          "reason": "Function-local variable retaining the existing admitted attention owner; introduces no new type, capability or ownership domain.",
-          "token": "coldAttentionOwner"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private preparation helper for the existing shared-attention callback; it reuses caller-owned source-row descriptor capacity while preserving selection semantics and independently owned Q/KV/sink and output storage, without defining a distinct attention concept.",
-          "token": "v41PrepareSharedAttentionWithRows"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private owner/model/backend provenance tuple subordinate to v41SharedAttentionBinding; it introduces no attention operator, validation bypass, or independent resource/lifetime authority.",
-          "token": "v41BoundSharedAttention"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private ordinary-callback constructor for v41SharedAttentionBinding; reconstructing a callback records no canonical provenance and introduces no separate attention concept.",
-          "token": "newV41SharedAttentionBinding"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private nil-safe accessor exposing only the ordinary callback from v41SharedAttentionBinding, never its canonical provenance.",
-          "token": "attentionFunc"
+          "reason": "Private forward-state and scratch field holding the positioned immutable v41SharedAttentionBinding identity; the field defines no separate attention operation or independent invocation authority.",
+          "token": "sharedAttentionBinding"
         },
         {
           "category": "incidental",
@@ -1999,23 +2014,8 @@
         },
         {
           "category": "incidental",
-          "reason": "Private ordinary-callback replacement adapter for the existing shared-attention seam; it introduces no attention operation or independent trust concept.",
-          "token": "setSharedAttention"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private installation adapter preserving a canonical v41SharedAttentionBinding identity in forward state; it neither acquires live execution ownership nor supplies the one-use row-validation witness.",
-          "token": "bindCanonicalSharedAttention"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private forward-state/scratch copy adapter copying the same immutable v41SharedAttentionBinding pointer; it does not clone authority, acquire ownership, or establish that borrowed rows were validated.",
-          "token": "copySharedAttentionFrom"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private scratch reset adapter that clears the existing shared-attention callback; it introduces no new attention behavior or resource authority.",
-          "token": "clearSharedAttention"
+          "reason": "tree speculative attention mask struct",
+          "token": "TreeAttentionMask"
         },
         {
           "category": "incidental",
@@ -2024,18 +2024,8 @@
         },
         {
           "category": "incidental",
-          "reason": "Private holder of the ordinary and validated entries of one selected shared-attention operation; it shares their lifecycle and acquires no independent provenance, ownership, or validation authority.",
-          "token": "v41SharedAttentionCore"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private constructor for the positioned v41SharedAttentionContinuation; it captures and rechecks canonical binding, owner, state, geometry and role-plan identities rather than defining a separate attention operation.",
-          "token": "newV41SharedAttentionContinuation"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private shared row-preparation implementation; its strict entry validates every original row, while only the checked private validation-witness path may omit the redundant row-finiteness loop. Geometry, shapes, IDs, Q, sink and other input guards remain independent.",
-          "token": "v41PrepareSharedAttentionRows"
+          "reason": "Private owner/model/backend provenance tuple subordinate to v41SharedAttentionBinding; it introduces no attention operator, validation bypass, or independent resource/lifetime authority.",
+          "token": "v41BoundSharedAttention"
         },
         {
           "category": "incidental",
@@ -2044,13 +2034,28 @@
         },
         {
           "category": "incidental",
-          "reason": "Private forward-state and scratch field holding the positioned immutable v41SharedAttentionBinding identity; the field defines no separate attention operation or independent invocation authority.",
-          "token": "sharedAttentionBinding"
+          "reason": "Unexported recorder for the existing V4.1 attention phase counters; it introduces no separate attention algorithm or placement contract.",
+          "token": "v41NoteAttentionContraction"
         },
         {
           "category": "incidental",
-          "reason": "Private role-step local holding the positioned v41SharedAttentionContinuation for this call; construction and use retain the positioned live-context and one-use validation-witness checks, with no separate semantic authority.",
-          "token": "attentionContinuation"
+          "reason": "Private shared row-preparation implementation; its strict entry validates every original row, while only the checked private validation-witness path may omit the redundant row-finiteness loop. Geometry, shapes, IDs, Q, sink and other input guards remain independent.",
+          "token": "v41PrepareSharedAttentionRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private preparation helper for the existing shared-attention callback; it reuses caller-owned source-row descriptor capacity while preserving selection semantics and independently owned Q/KV/sink and output storage, without defining a distinct attention concept.",
+          "token": "v41PrepareSharedAttentionWithRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private holder of the ordinary and validated entries of one selected shared-attention operation; it shares their lifecycle and acquires no independent provenance, ownership, or validation authority.",
+          "token": "v41SharedAttentionCore"
+        },
+        {
+          "category": "incidental",
+          "reason": "tree speculative attention mask validator",
+          "token": "ValidateTreeAttentionMask"
         }
       ],
       "exclude": [
@@ -2059,17 +2064,9 @@
       ],
       "id": "attention",
       "ignore": [
-        "BuildTreeAttentionMask",
-        "EstimatedAttention",
-        "EstimatedAttentionSeconds",
-        "ExecutionPrefillAttention",
-        "MetalFallbackPrefillAttentionCPU",
-        "PrefillAttentionSupported",
-        "PrefillAttentionTiming",
-        "TreeAttentionMask",
-        "ValidateTreeAttentionMask",
         "attentionContinuation",
         "attentionFunc",
+        "attentionRows",
         "attentions",
         "attentive",
         "attn_core",
@@ -2081,17 +2078,24 @@
         "attn_q_normed",
         "attnkvanorm",
         "bindCanonicalSharedAttention",
+        "BuildTreeAttentionMask",
         "clearSharedAttention",
         "coldAttentionOwner",
         "copySharedAttentionFrom",
         "estimated_attention_s",
+        "EstimatedAttention",
+        "EstimatedAttentionSeconds",
         "executevulkanattentionwithdequantonce",
+        "ExecutionPrefillAttention",
         "linear_attn_out",
         "linear_attn_qkv_mixed",
+        "MetalFallbackPrefillAttentionCPU",
         "mg_prefill_attn",
         "mg_prefill_attn_supported",
         "newV41SharedAttentionBinding",
         "newV41SharedAttentionContinuation",
+        "PrefillAttentionSupported",
+        "PrefillAttentionTiming",
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
         "qwenfullattentionlayers",
@@ -2100,13 +2104,15 @@
         "sharedAttentionBinding",
         "sharedAttentionFunc",
         "tattn",
+        "TreeAttentionMask",
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
         "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
         "v41PrepareSharedAttentionRows",
         "v41PrepareSharedAttentionWithRows",
-        "v41SharedAttentionCore"
+        "v41SharedAttentionCore",
+        "ValidateTreeAttentionMask"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -11027,6 +11033,16 @@
           "category": "incidental",
           "reason": "Private bounded ELF structural validator before debug/elf parsing; it grants no execution or native-admission permission.",
           "token": "preflightV41EPOwnerELF"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter constructing the existing HTTPPlanner from explicit endpoint, model and token-field settings before invoking the existing inference qualification probe; it introduces no separate policy or capability authority.",
+          "token": "opsRunConfiguredInferencePreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation of the existing inference qualification probe using HTTPPlanner.PrepareRequest and bounded receipt/cache handling; it preserves configured request semantics and introduces no separate capability policy.",
+          "token": "opsRunPlannerInferencePreflight"
         }
       ],
       "exclude": [
@@ -11209,6 +11225,8 @@
         "normalizeGuardReasoningPosture",
         "numareplicapolicyunsupported",
         "observeIncumbentPreflight",
+        "opsRunConfiguredInferencePreflight",
+        "opsRunPlannerInferencePreflight",
         "orgPostureGloss",
         "phasePolicy",
         "policies",
@@ -16720,6 +16738,11 @@
           "category": "false-positive",
           "reason": "internal/safesync's git tree-transplant verb (TransplantDisjointTree / TransplantDisjointTreeWithRunner, tree_transplant.go) moves one commit's tree onto another branch; it carries the 'plan' root only as a substring of 'plant' - the same swallowed-root false friend as plane/plank/explanat - and defines no planning concept.",
           "token": "transplant"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private probe adapter for an existing HTTPPlanner request, not a new planning abstraction or planner algorithm; it prepares the configured inference request and records bounded qualification evidence.",
+          "token": "opsRunPlannerInferencePreflight"
         }
       ],
       "exclude": [
@@ -16908,6 +16931,7 @@
         "newLivePlanner",
         "notplanned",
         "nplan",
+        "opsRunPlannerInferencePreflight",
         "orderLaneCandidatesAged",
         "overlayPlan",
         "planErr",
@@ -16995,18 +17019,13 @@
       "classifications": [
         {
           "category": "incidental",
-          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "canonicalPoolLane"
-        },
-        {
-          "category": "incidental",
-          "reason": "Unexported package constant holding the off-by-default cap value (0) for the warm worktree pool; the concept it stands for is positioned as x2-pool-workerworktreepoolcapenv/x2-pool-workerworktreepoolcap. It is a default literal, not a distinct pool concept.",
-          "token": "defaultPoolCap"
-        },
-        {
-          "category": "incidental",
           "reason": "ErrNotPoolable is the sentinel error for a local failed pool-eligibility check and names an implementation outcome, not a standalone concept.",
           "token": "ErrNotPoolable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal environment-variable spelling for the positioned FakExpertRingPoolFractionEnv host-memory sizing knob (pool-expert-ring-host-memory-fraction); it is an alias of that one configuration concept, not a second pool.",
+          "token": "FAK_EXPERT_RING_POOL_FRACTION"
         },
         {
           "category": "incidental",
@@ -17015,13 +17034,18 @@
         },
         {
           "category": "incidental",
-          "reason": "Unexported helper taking an idle member for a new worker on the Prepare path. An internal step of the positioned pool cap, not a separate concept.",
-          "token": "leasePooled"
+          "reason": "Exported",
+          "token": "MultiTensorSlotPool"
         },
         {
           "category": "incidental",
-          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "leaseSpecificPooled"
+          "reason": "Constructor",
+          "token": "NewMultiTensorSlotPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for internal Kimi K3 paged attention allocator",
+          "token": "NewPagePool"
         },
         {
           "category": "incidental",
@@ -17030,33 +17054,38 @@
         },
         {
           "category": "incidental",
-          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "pool_capacity"
+          "reason": "Internal Kimi K3 paged attention memory block allocator",
+          "token": "PagePool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Derived byte count used by the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; the activated-layer floor can exceed it, and it is not a separate memory pool.",
+          "token": "PoolCapBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Configuration/result field carrying the positioned expert-ring host-memory fraction FakExpertRingPoolFractionEnv through sizing and diagnostics; it is not an allocator or independent pool.",
+          "token": "PoolFraction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field name identifying the agentqueue controller scope; not a new pool mechanism.",
+          "token": "PoolID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Agentqueue-local desired population bounds; not a resource or inference pool.",
+          "token": "PoolSpec"
         },
         {
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "pool_lane_lock_failed"
+          "token": "PoolState"
         },
         {
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "pool_metadata_unreadable"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "pool_metadata_write_failed"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "pool_state_changed"
-        },
-        {
-          "category": "incidental",
-          "reason": "poolability is ordinary prose describing whether a local MCP session can be reused; the established concept remains session pooling.",
-          "token": "poolability"
+          "token": "PoolUpdatedAt"
         },
         {
           "category": "incidental",
@@ -17072,6 +17101,41 @@
           "category": "incidental",
           "reason": "bench setup-parity receipt symbol (issue #5704): 'pooled' is the VERB of aggregating the speedup across admitted trial pairs, the same verb-sense this family already ignores as poolspanscores - not a session bounded-LRU pool container and not a cachemeta PoolProfile.",
           "token": "PooledSpeedupPct"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "canonicalPoolLane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported package constant holding the off-by-default cap value (0) for the warm worktree pool; the concept it stands for is positioned as x2-pool-workerworktreepoolcapenv/x2-pool-workerworktreepoolcap. It is a default literal, not a distinct pool concept.",
+          "token": "defaultPoolCap"
+        },
+        {
+          "category": "incidental",
+          "reason": "External indexer cache-block tensor label explicitly listed as unmapped for per-token activation import; it is not a memory-pool allocator or ownership policy.",
+          "token": "indexer_k_pooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper taking an idle member for a new worker on the Prepare path. An internal step of the positioned pool cap, not a separate concept.",
+          "token": "leasePooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "leaseSpecificPooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private parser validating the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it introduces no separate allocation lifetime or pool.",
+          "token": "parseServeExpertRingPoolFraction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private diagnostic formatter for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv and derived byte count; it owns no memory or pool lifecycle.",
+          "token": "poolCapText"
         },
         {
           "category": "incidental",
@@ -17160,11 +17224,6 @@
         },
         {
           "category": "incidental",
-          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "PoolState"
-        },
-        {
-          "category": "incidental",
           "reason": "Unexported constant naming the sidecar directory (.fak-wt-pool) that holds the pool's idle markers. A file-layout detail of one package's pool implementation, not a pool concept.",
           "token": "poolStateDir"
         },
@@ -17191,7 +17250,32 @@
         {
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
-          "token": "PoolUpdatedAt"
+          "token": "pool_capacity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_lane_lock_failed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_metadata_unreadable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_metadata_write_failed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_state_changed"
+        },
+        {
+          "category": "incidental",
+          "reason": "poolability is ordinary prose describing whether a local MCP session can be reused; the established concept remains session pooling.",
+          "token": "poolability"
         },
         {
           "category": "incidental",
@@ -17220,6 +17304,21 @@
         },
         {
           "category": "incidental",
+          "reason": "Default numeric value for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it defines no separate pool or allocation policy.",
+          "token": "serveExpertRingPoolFractionDef"
+        },
+        {
+          "category": "incidental",
+          "reason": "Maximum accepted numeric value for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it is validation data, not a separate pool.",
+          "token": "serveExpertRingPoolFractionMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private boolean helper deciding whether expert-ring device and host budgets share physical RAM. It does not allocate or introduce a new pool abstraction.",
+          "token": "serveExpertRingSharedPool"
+        },
+        {
+          "category": "incidental",
           "reason": "Windows print-spooler PROCESS NAME in internal/runaway's protected-names allowlist (never auto-terminate). Not a pooling concept: it is an OS image name matched case-insensitively against Win32_Process.Name, and shares only the substring 'pool'.",
           "token": "spoolsv"
         },
@@ -17227,6 +17326,21 @@
           "category": "incidental",
           "reason": "unpoolable is an implementation adjective for a session rejected by the existing pool contract, not a meaningful API to rename or a new concept family.",
           "token": "unpoolable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
+          "token": "v41CandidatePoolCovers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
+          "token": "v41CandidatePoolRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local closure in v41CompressedRowsColdPanels validating the existing compressor gain and epsilon operands before speculative projection; it introduces no pool type, ownership authority or independent configurable mechanism.",
+          "token": "validPoolOperands"
         },
         {
           "category": "incidental",
@@ -17242,91 +17356,6 @@
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
           "token": "writePoolMemberLocked"
-        },
-        {
-          "category": "incidental",
-          "reason": "Field name identifying the agentqueue controller scope; not a new pool mechanism.",
-          "token": "PoolID"
-        },
-        {
-          "category": "incidental",
-          "reason": "Agentqueue-local desired population bounds; not a resource or inference pool.",
-          "token": "PoolSpec"
-        },
-        {
-          "category": "incidental",
-          "reason": "Internal Kimi K3 paged attention memory block allocator",
-          "token": "PagePool"
-        },
-        {
-          "category": "incidental",
-          "reason": "Constructor for internal Kimi K3 paged attention allocator",
-          "token": "NewPagePool"
-        },
-        {
-          "category": "incidental",
-          "reason": "Exported",
-          "token": "MultiTensorSlotPool"
-        },
-        {
-          "category": "incidental",
-          "reason": "Constructor",
-          "token": "NewMultiTensorSlotPool"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private boolean helper deciding whether expert-ring device and host budgets share physical RAM. It does not allocate or introduce a new pool abstraction.",
-          "token": "serveExpertRingSharedPool"
-        },
-        {
-          "category": "incidental",
-          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
-          "token": "v41CandidatePoolCovers"
-        },
-        {
-          "category": "incidental",
-          "reason": "Arithmetic coverage and row-count helpers for the already-positioned V4.1 candidate publication/source contract. They add neither a work-plan abstraction nor an independently owned resource pool.",
-          "token": "v41CandidatePoolRows"
-        },
-        {
-          "category": "incidental",
-          "reason": "Default numeric value for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it defines no separate pool or allocation policy.",
-          "token": "serveExpertRingPoolFractionDef"
-        },
-        {
-          "category": "incidental",
-          "reason": "Maximum accepted numeric value for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it is validation data, not a separate pool.",
-          "token": "serveExpertRingPoolFractionMax"
-        },
-        {
-          "category": "incidental",
-          "reason": "Configuration/result field carrying the positioned expert-ring host-memory fraction FakExpertRingPoolFractionEnv through sizing and diagnostics; it is not an allocator or independent pool.",
-          "token": "PoolFraction"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private parser validating the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; it introduces no separate allocation lifetime or pool.",
-          "token": "parseServeExpertRingPoolFraction"
-        },
-        {
-          "category": "incidental",
-          "reason": "Derived byte count used by the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv; the activated-layer floor can exceed it, and it is not a separate memory pool.",
-          "token": "PoolCapBytes"
-        },
-        {
-          "category": "incidental",
-          "reason": "Private diagnostic formatter for the positioned expert-ring host-memory fraction knob FakExpertRingPoolFractionEnv and derived byte count; it owns no memory or pool lifecycle.",
-          "token": "poolCapText"
-        },
-        {
-          "category": "incidental",
-          "reason": "Literal environment-variable spelling for the positioned FakExpertRingPoolFractionEnv host-memory sizing knob (pool-expert-ring-host-memory-fraction); it is an alias of that one configuration concept, not a second pool.",
-          "token": "FAK_EXPERT_RING_POOL_FRACTION"
-        },
-        {
-          "category": "incidental",
-          "reason": "External indexer cache-block tensor label explicitly listed as unmapped for per-token activation import; it is not a memory-pool allocator or ownership policy.",
-          "token": "indexer_k_pooled"
         }
       ],
       "exclude": [
@@ -17400,6 +17429,7 @@
         "unpoolable",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
+        "validPoolOperands",
         "validPoolState",
         "withPoolLaneLock",
         "writePoolMemberLocked"
