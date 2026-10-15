@@ -36,6 +36,9 @@ import (
 )
 
 func cmdProfile(argv []string) {
+	if len(argv) > 0 && argv[0] == "ledger" {
+		os.Exit(runProfileLedger(os.Stdout, os.Stderr, argv[1:]))
+	}
 	if len(argv) > 0 && argv[0] == "continuity" {
 		os.Exit(runContinuity(os.Stdout, os.Stderr, argv[1:]))
 	}
