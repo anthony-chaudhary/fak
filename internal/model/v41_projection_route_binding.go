@@ -125,16 +125,23 @@ func (st *v41ForwardState) liftDeviceOnlyDense(s *Session) {
 var errV41RouterProjectionScope = errors.New("model: V4.1 router projection scope changed")
 
 type v41ProjectionContinuation struct {
-	consume    func(compute.Tensor, *v41ProjectionLoan)
-	valid      func() bool
-	cause      error
-	panicValue any
-	completed  bool
+	consume      func(compute.Tensor, *v41ProjectionLoan)
+	valid        func() bool
+	cause        error
+	panicValue   any
+	panicPresent bool
+	completed    bool
 }
 
 func (c *v41ProjectionContinuation) invoke(t compute.Tensor, loan *v41ProjectionLoan) {
-	defer func() { c.panicValue = recover() }()
+	complete := false
+	defer func() {
+		if !complete {
+			c.panicValue, c.panicPresent = recover(), true
+		}
+	}()
 	c.consume(t, loan)
+	complete = true
 }
 
 // The projection remains the owner. Only its synchronous router continuation
@@ -309,7 +316,7 @@ func (m *Model) v41RouterPicksForStep(layer int, input []float32, hidden int, cf
 		}
 		return nil, v41ProjectionOperationErr(layer, "ffn.gate.weight", cause)
 	}
-	if c.panicValue != nil {
+	if c.panicPresent {
 		panic(c.panicValue)
 	}
 	if c.cause != nil {

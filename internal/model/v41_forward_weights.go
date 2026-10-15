@@ -1329,6 +1329,12 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 			if continuation != nil {
 				loan = &v41ProjectionLoan{backend: s.Backend}
 				defer func() {
+					if continuation.panicPresent {
+						// Recover only secondary release faults, never the active Goexit.
+						defer func() { _ = recover() }()
+						loan.release()
+						return
+					}
 					primary := recover()
 					cleanup := loan.release()
 					if primary != nil {
