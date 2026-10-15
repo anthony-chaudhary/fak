@@ -35,15 +35,18 @@ func (m *Model) v41EPPlan() (*v41ExpertParallelCollective, TPPlan, error) {
 
 // v41EPGuard is deferred before announcement/admission. A local failure closes
 // the selected transport, unblocking peer reads without authorizing any replay.
-func (s *Session) v41EPGuard() {
-	if r := recover(); r != nil {
-		if c, ok := s.M.epColl.(*v41ExpertParallelCollective); ok && c != nil {
-			c.g.abortV41EP()
-		}
-		if s.M.epCoord != nil && s.M.Cfg.IsDeepSeekV41() {
-			s.M.epCoord.g.abortV41EP()
-		}
-		panic(r)
+func (s *Session) v41EPGuard(completed *bool) {
+	if *completed {
+		return
+	}
+	// Preserve the caller's active panic or Goexit. Recover only a secondary
+	// abort panic; the existing first-fault transport sequence stays unchanged.
+	defer func() { _ = recover() }()
+	if c, ok := s.M.epColl.(*v41ExpertParallelCollective); ok && c != nil {
+		c.g.abortV41EP()
+	}
+	if s.M.epCoord != nil && s.M.Cfg.IsDeepSeekV41() {
+		s.M.epCoord.g.abortV41EP()
 	}
 }
 

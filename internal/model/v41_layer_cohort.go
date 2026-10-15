@@ -30,22 +30,31 @@ func (w *v41LayerStepWork) close() {
 	}
 }
 
-func (w *v41LayerStepWork) finishCleanup(err *error) {
-	finishModelCleanup(recover(), err, w.close)
+func (w *v41LayerStepWork) finishCleanup(err *error, complete bool) {
+	failed := !complete || *err != nil
+	if failed {
+		defer func() { _ = recover() }()
+	}
+	w.close()
 }
 
 func (w *v41LayerStepWork) complete(routed []float32) (err error) {
 	if w == nil || w.closed {
 		return fmt.Errorf("%w: layer continuation is closed", ErrV41ForwardStage)
 	}
-	defer w.finishCleanup(&err)
-	if routed == nil {
-		routed, err = w.scalar()
-		if err != nil {
-			return err
+	complete := false
+	defer func() { w.finishCleanup(&err, complete) }()
+	err = func() error {
+		if routed == nil {
+			routed, err = w.scalar()
+			if err != nil {
+				return err
+			}
 		}
-	}
-	return w.finish(routed)
+		return w.finish(routed)
+	}()
+	complete = true
+	return err
 }
 
 // The existing explicit decode ID route and disabled layer batching retain precedence.

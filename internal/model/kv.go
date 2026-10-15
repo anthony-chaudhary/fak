@@ -980,8 +980,11 @@ func ropeRowQKInto(q, k, cos, sin []float32, hd, nH, nKV int) {
 // absolute position (Cache.Len()), so a prior Evict() compaction shifts these down.
 func (s *Session) Prefill(ids []int) []float32 {
 	scope := s.beginBackendExecution()
-	defer scope.finish()
-	return s.prefillOwned(ids)
+	complete := false
+	defer scope.finishCompleted(&complete)
+	logits := s.prefillOwned(ids)
+	complete = true
+	return logits
 }
 
 func (s *Session) prefillOwned(ids []int) []float32 {
@@ -993,11 +996,16 @@ func (s *Session) prefillOwned(ids []int) []float32 {
 	}
 	s.validateDeviceOnlyExecution("prefill")
 	if s.M.Cfg.IsDeepSeekV41() {
-		defer s.v41EPGuard()
-		if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
-			defer rel()
-		}
-		return s.prefillV41(ids)
+		completed := false
+		defer s.v41EPGuard(&completed)
+		logits := func() []float32 {
+			if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
+				defer rel()
+			}
+			return s.prefillV41(ids)
+		}()
+		completed = true
+		return logits
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
@@ -1118,8 +1126,10 @@ func (s *Session) prefillOwned(ids []int) []float32 {
 // next input token and only needs KV state advanced.
 func (s *Session) PrefillNoLogits(ids []int) {
 	scope := s.beginBackendExecution()
-	defer scope.finish()
+	complete := false
+	defer scope.finishCompleted(&complete)
 	s.prefillNoLogitsOwned(ids)
+	complete = true
 }
 
 func (s *Session) prefillNoLogitsOwned(ids []int) {
@@ -1131,13 +1141,17 @@ func (s *Session) prefillNoLogitsOwned(ids []int) {
 	}
 	s.validateDeviceOnlyExecution("prefill-no-logits")
 	if s.M.Cfg.IsDeepSeekV41() {
-		defer s.v41EPGuard()
-		if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
-			defer rel()
-		}
-		// V4.1 owns its continuation state outside the generic KV cache. Its
-		// forward preserves checked input boundaries without projecting discarded logits.
-		s.prefillV41WithLogits(ids, false)
+		completed := false
+		defer s.v41EPGuard(&completed)
+		func() {
+			if rel := s.epAnnounce(epOpPrefill, ids); rel != nil {
+				defer rel()
+			}
+			// V4.1 owns its continuation state outside the generic KV cache. Its
+			// forward preserves checked input boundaries without projecting discarded logits.
+			s.prefillV41WithLogits(ids, false)
+		}()
+		completed = true
 		return
 	}
 	s.cacheGeometryMu.RLock()
@@ -1268,8 +1282,11 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
 	scope := s.beginBackendExecution()
-	defer scope.finish()
-	return s.stepOwned(id)
+	complete := false
+	defer scope.finishCompleted(&complete)
+	logits := s.stepOwned(id)
+	complete = true
+	return logits
 }
 
 func (s *Session) stepOwned(id int) []float32 {
@@ -1279,11 +1296,16 @@ func (s *Session) stepOwned(id int) []float32 {
 	defer s.BeginGPUKeepAlive()()
 	s.validateDeviceOnlyExecution("decode")
 	if s.M.Cfg.IsDeepSeekV41() {
-		defer s.v41EPGuard()
-		if rel := s.epAnnounce(epOpStep, []int{id}); rel != nil {
-			defer rel()
-		}
-		return s.stepV41(id)
+		completed := false
+		defer s.v41EPGuard(&completed)
+		logits := func() []float32 {
+			if rel := s.epAnnounce(epOpStep, []int{id}); rel != nil {
+				defer rel()
+			}
+			return s.stepV41(id)
+		}()
+		completed = true
+		return logits
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()

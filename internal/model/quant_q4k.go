@@ -730,8 +730,25 @@ func (m *Model) holdModelWeights() bool {
 	return true
 }
 
+// ModelWeightRetirementIncompleteError reports an earlier weight-close attempt
+// that did not return normally. The attempted releases are not retried because
+// a backend may have released storage before its panic or Goexit.
+type ModelWeightRetirementIncompleteError struct{}
+
+func (*ModelWeightRetirementIncompleteError) Error() string {
+	return "model: weight retirement did not complete"
+}
+
 func (m *Model) finishWeightClose(s *weightCloserState) {
 	s.once.Do(func() {
+		complete := false
+		defer func() {
+			if !complete {
+				// Publish before Once releases concurrent followers. Do not recover:
+				// the initial caller keeps its original panic or Goexit.
+				s.err = &ModelWeightRetirementIncompleteError{}
+			}
+		}()
 		// Immutable HAL weights are model-owned and may outlive every individual request,
 		// but never the mapped Q4_K/Q8 or checkpoint bytes from which they were staged.
 		s.halWeights.close()
@@ -747,6 +764,7 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 		if s.c != nil {
 			s.err = s.c.Close()
 		}
+		complete = true // Preserve ordinary checkpoint-close errors verbatim.
 	})
 }
 

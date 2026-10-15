@@ -554,7 +554,8 @@ func (t *ExpertCheckpointTier) stagingForBackend(name string, be compute.Backend
 		return nil, false
 	}
 	capability, capable := be.(borrowedExpertUploadBackend)
-	borrowSafe := capable && capability.SupportsBorrowedExpertUploads()
+	borrowSafe := capable && capability.SupportsBorrowedExpertUploads() &&
+		(entry.quant == ExpertCheckpointQ2K || entry.quant == ExpertCheckpointQ3K)
 	return &checkpointStaging{
 		key: entry.halKey(name),
 		mk: func() compute.Tensor {
@@ -564,8 +565,14 @@ func (t *ExpertCheckpointTier) stagingForBackend(name string, be compute.Backend
 			}
 			if w.borrowed && !borrowSafe {
 				// Ownership is per consumer, after shared fault publication. Never
-				// replace a waiter's kq/raw in place: another backend may use it.
-				w = entry.weight(name, append([]byte(nil), w.kq.raw...))
+				// replace a shared raw slice in place: another backend may use it.
+				var raw []byte
+				if w.q4 != nil {
+					raw = w.q4.raw
+				} else {
+					raw = w.kq.raw
+				}
+				w = entry.weight(name, append([]byte(nil), raw...))
 			}
 			if w.q4 != nil {
 				return compute.NewQ4K(compute.Default(), []int{w.q4.out, w.q4.in}, w.q4.raw)
@@ -661,6 +668,9 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 		t.pool.Touch(id)
 		t.hits++
 		t.mu.Unlock()
+		// The retained slab may already back another consumer's upload. Mark
+		// only this returned value; the cache keeps its original provenance.
+		w.borrowed = true
 		return w, nil
 	}
 	if r, ok := t.ready[id]; ok {
@@ -674,7 +684,13 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 		load.waiters++
 		t.mu.Unlock()
 		<-load.done
-		return load.weight, load.err
+		w := load.weight
+		if load.err == nil {
+			// Publication is complete, but the owner and other waiters may
+			// still use this slab. Each unsafe consumer needs its own copy.
+			w.borrowed = true
+		}
+		return w, load.err
 	}
 	load := &expertCheckpointLoad{done: make(chan struct{})}
 	if t.loading == nil {
@@ -964,7 +980,9 @@ func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, ent
 		_, borrowed = src.r.(ggufReadOnlyRange)
 		raw, err = src.readExpertReadOnly(entry.fused, entry.expert)
 	} else {
-		raw, _, ownedBytes, err = src.readExpertPageCacheOwned(entry.fused, entry.expert)
+		// A warm page-cache hit is a source-owned mapping view for every
+		// admitted quant, including when the host pool retains that view.
+		raw, borrowed, ownedBytes, err = src.readExpertPageCacheOwned(entry.fused, entry.expert)
 	}
 	if err != nil {
 		t.mu.Lock()

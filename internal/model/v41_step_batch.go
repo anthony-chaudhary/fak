@@ -35,7 +35,13 @@ func (s *Session) v41BeginStepBatch() func() error {
 	}
 }
 
-func v41FinishStepBatch(endBatch func() error, forwardErr *error) {
+func v41FinishStepBatch(endBatch func() error, forwardErr *error, bodyComplete bool) {
+	if !bodyComplete {
+		// Recover only a secondary End panic while the forward unwind continues.
+		defer func() { _ = recover() }()
+		_ = endBatch()
+		return
+	}
 	if endErr := endBatch(); endErr != nil {
 		if *forwardErr == nil {
 			*forwardErr = endErr

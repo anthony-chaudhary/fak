@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -328,10 +329,19 @@ func (b *mappedUploadWitness) Upload(t compute.Tensor, as compute.Dtype) compute
 		raw[i] = byte(v)
 	}
 	var out compute.Tensor
-	if as == compute.Q2_K {
+	switch as {
+	case compute.Q2_K:
 		out = compute.NewQ2K(compute.Default(), t.Shape, raw)
-	} else {
+	case compute.Q3_K:
 		out = compute.NewQ3K(compute.Default(), t.Shape, raw)
+	case compute.Q4_K:
+		out = compute.NewQ4K(compute.Default(), t.Shape, raw)
+	case compute.Q5_K:
+		out = compute.NewQ5K(compute.Default(), t.Shape, raw)
+	case compute.Q6_K:
+		out = compute.NewQ6K(compute.Default(), t.Shape, raw)
+	default:
+		panic("unexpected mapped upload dtype")
 	}
 	if b.intern {
 		if b.cache == nil {
@@ -466,5 +476,351 @@ func TestExpertCheckpointMappedRangeMixedBackendWaiters(t *testing.T) {
 				t.Fatalf("mixed consumer byte %d changed", i)
 			}
 		}
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointWarmMappedConsumerOwnership(t *testing.T) {
+	t.Parallel()
+	for _, quant := range []ExpertCheckpointQuant{ExpertCheckpointQ2K, ExpertCheckpointQ3K, ExpertCheckpointQ4K, ExpertCheckpointQ5K, ExpertCheckpointQ6K} {
+		t.Run(quant.String(), func(t *testing.T) {
+			_, stride, _ := quant.blockGeometry()
+			for _, budget := range []struct {
+				name  string
+				bytes int64
+			}{{"stream-through", 0}, {"retained", int64(stride)}} {
+				t.Run(budget.name, func(t *testing.T) {
+					for _, policy := range []string{"unknown", "declined", "admitted"} {
+						t.Run(policy, func(t *testing.T) {
+							tier, r, name, _ := mappedCheckpointFixture(t, quant, budget.bytes, true, false)
+							// Prime only source pages: no tier host entry may hide the warm fault.
+							_, warm, err := tier.shards[0].readExpertPageCache("blk.0.ffn_gate_exps.weight", 0)
+							if err != nil || warm || tier.Stats().Reads != 0 || r.reads.Load() != 1 {
+								t.Fatalf("source-only cold prime failed: warm=%t err=%v", warm, err)
+							}
+							before := append([]byte(nil), r.data...)
+							m := NewSynthetic(Config{VocabSize: 8, HiddenSize: 256, NumLayers: 0})
+							m.SetExpertCheckpoint(tier)
+							closer := &countWeightCloser{}
+							m.SetWeightCloser(closer)
+							t.Cleanup(func() { _ = m.CloseWeights() })
+							rec := &mappedUploadWitness{Backend: compute.Default(), label: policy, intern: policy != "admitted"}
+							var backend compute.Backend = rec
+							switch policy {
+							case "declined":
+								backend = &mappedBorrowDeclinedUpload{rec}
+							case "admitted":
+								backend = &mappedBorrowSafeUpload{rec}
+							}
+							first, second := mappedBackendSession(t, m, backend), mappedBackendSession(t, m, backend)
+							one, two := mappedSessionStage(first, name), mappedSessionStage(second, name)
+							mapped := uintptr(unsafe.Pointer(&r.data[0]))
+							mayBorrow := policy == "admitted" && (quant == ExpertCheckpointQ2K || quant == ExpertCheckpointQ3K)
+							if len(rec.inputs) != 2 || (rec.inputs[0] == mapped) != mayBorrow || (rec.inputs[1] == mapped) != mayBorrow || (policy != "admitted" && rec.inputs[0] == rec.inputs[1]) || one.Buf() == two.Buf() {
+								t.Fatalf("warm mapping lost per-consumer ownership: inputs=%v mapped=%d mayBorrow=%t sharedOutput=%t", rec.inputs, mapped, mayBorrow, one.Buf() == two.Buf())
+							}
+							if one.Dtype != tier.index[name].dtype() || two.Dtype != one.Dtype {
+								t.Fatal("upload witness changed the packed dtype")
+							}
+							wantReads, wantHits, wantResident := 2, 0, 0
+							if budget.bytes > 0 {
+								wantReads, wantHits, wantResident = 1, 1, 1
+							}
+							st := tier.Stats()
+							pc, _ := tier.shards[0].pageCacheSession()
+							if r.reads.Load() != 1 || r.ranges.Load() != 0 || st.Reads != wantReads || st.Hits != wantHits || st.BytesRead != int64(wantReads*stride) || st.ResidentCount != wantResident || st.ResidentBytes != int64(wantResident*stride) || st.Failures != 0 || pc.WarmHits != wantReads {
+								t.Fatalf("warm staging changed source/accounting: tier=%+v page=%+v", st, pc)
+							}
+							var active *WeightSessionsActiveError
+							if err := m.CloseWeights(); !errors.As(err, &active) || active.Count != 2 || closer.n.Load() != 0 {
+								t.Fatalf("live source pin lost: %v", err)
+							}
+							first.Close()
+							if closer.n.Load() != 0 {
+								t.Fatal("peer close retired the source")
+							}
+							for i, b := range two.Buf().(compute.HostBuffer).I8() {
+								if b != int8(before[i]) {
+									t.Fatalf("peer close invalidated byte %d", i)
+								}
+							}
+							if !bytes.Equal(before, r.data) {
+								t.Fatal("consumer changed the source mapping")
+							}
+							second.Close()
+							if closer.n.Load() != 1 {
+								t.Fatal("final session did not retire the source once")
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointColdMappedOwnedStagingIdentity(t *testing.T) {
+	t.Parallel()
+	r := &mappedOwnedReader{data: bytes.Repeat([]byte{31}, 2*q2kBlockBytes)}
+	tier := NewExpertCheckpointTier(0)
+	if err := tier.AddShardData(r, int64(len(r.data)), r.data, []FusedExpertTensor{{Name: "gate", Layer: 0, Proj: "gate_proj", Quant: ExpertCheckpointQ2K, Experts: 2, Rows: 1, Cols: 256}}); err != nil {
+		t.Fatal(err)
+	}
+	stage, ok := tier.stagingForBackend(expertName(0, 0, "gate_proj.weight"), &mappedUploadWitness{Backend: compute.Default(), label: "unknown", intern: true})
+	if !ok {
+		t.Fatal("missing cold mapped staging")
+	}
+	host := stage.mk()
+	if len(r.last) != len(r.data) || mappedHostPointer(host) != uintptr(unsafe.Pointer(&r.last[0])) || mappedHostPointer(host) == uintptr(unsafe.Pointer(&r.data[0])) {
+		t.Fatal("cold owned page-cache result was copied again or borrowed")
+	}
+	pc, _ := tier.shards[0].pageCacheSession()
+	if pc.WarmHits != 0 || pc.ExpertsRead != 1 || tier.Stats().Reads != 1 {
+		t.Fatal("cold control did not execute one owned read")
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointSharedOwnedConsumerOwnership(t *testing.T) {
+	t.Parallel()
+	for _, quant := range []ExpertCheckpointQuant{ExpertCheckpointQ2K, ExpertCheckpointQ3K, ExpertCheckpointQ4K, ExpertCheckpointQ5K, ExpertCheckpointQ6K} {
+		t.Run(quant.String(), func(t *testing.T) {
+			_, stride, _ := quant.blockGeometry()
+			for _, mode := range []string{"retained", "coalesced"} {
+				t.Run(mode, func(t *testing.T) {
+					for _, policy := range []string{"unknown", "declined", "admitted"} {
+						t.Run(policy, func(t *testing.T) {
+							data := make([]byte, 2*stride)
+							for i := range data {
+								data[i] = byte(i*7 + 11)
+							}
+							// Ordinary ReaderAt owns its output; no mapped-range capability.
+							r := &checkpointFlightReader{data: data, entered: make(chan int64, 4), release: make(chan struct{})}
+							budget := int64(0)
+							if mode == "retained" {
+								budget = int64(stride)
+								r.unblock()
+							}
+							tier := NewExpertCheckpointTier(budget)
+							if err := tier.AddShard(r, int64(len(data)), []FusedExpertTensor{{Name: "gate", Layer: 0, Proj: "gate_proj", Quant: quant, Experts: 2, Rows: 1, Cols: 256}}); err != nil {
+								t.Fatal(err)
+							}
+							name := expertName(0, 0, "gate_proj.weight")
+							m := NewSynthetic(Config{VocabSize: 8, HiddenSize: 256, NumLayers: 0})
+							m.SetExpertCheckpoint(tier)
+							closer := &countWeightCloser{}
+							m.SetWeightCloser(closer)
+							rec := &mappedUploadWitness{Backend: compute.Default(), label: policy, intern: policy != "admitted"}
+							var backend compute.Backend = rec
+							switch policy {
+							case "declined":
+								backend = &mappedBorrowDeclinedUpload{rec}
+							case "admitted":
+								backend = &mappedBorrowSafeUpload{rec}
+							}
+							var sessions [2]*Session
+							var finished []chan struct{}
+							t.Cleanup(func() {
+								r.unblock()
+								timer := time.NewTimer(5 * time.Second)
+								defer timer.Stop()
+								for _, done := range finished {
+									select {
+									case <-done:
+									case <-timer.C:
+										t.Error("shared owned staging did not retire; session cleanup withheld")
+										return
+									}
+								}
+								for _, s := range sessions {
+									if s != nil {
+										s.Close()
+									}
+								}
+								if err := m.CloseWeights(); err != nil {
+									t.Error(err)
+								}
+							})
+							for i := range sessions {
+								var err error
+								sessions[i], err = m.NewBackendSessionChecked(backend)
+								if err != nil {
+									t.Fatal(err)
+								}
+							}
+							var got [2]compute.Tensor
+							var original expertWeight
+							if mode == "retained" {
+								got[0] = mappedSessionStage(sessions[0], name)
+								got[1] = mappedSessionStage(sessions[1], name)
+								tier.mu.Lock()
+								for _, w := range tier.host {
+									original = w
+								}
+								tier.mu.Unlock()
+							} else {
+								type outcome struct {
+									slot     int
+									tensor   compute.Tensor
+									panic    any
+									complete bool
+								}
+								results := make(chan outcome, 2)
+								start := func(slot int) {
+									done := make(chan struct{})
+									finished = append(finished, done)
+									go func() {
+										result := outcome{slot: slot}
+										defer close(done)
+										defer func() { result.panic = recover(); results <- result }()
+										result.tensor = mappedSessionStage(sessions[slot], name)
+										result.complete = true
+									}()
+								}
+								start(0)
+								checkpointFlightWait(t, func() bool { return len(r.entered) == 1 })
+								var load *expertCheckpointLoad
+								tier.mu.Lock()
+								for _, pending := range tier.loading {
+									load = pending
+								}
+								tier.mu.Unlock()
+								if load == nil {
+									t.Fatal("gated owner was not registered")
+								}
+								start(1)
+								checkpointFlightWait(t, func() bool { return checkpointFlightCoalesced(tier) == 1 })
+								r.unblock()
+								timer := time.NewTimer(5 * time.Second)
+								defer timer.Stop()
+								for range sessions {
+									select {
+									case result := <-results:
+										if !result.complete || result.panic != nil {
+											t.Fatalf("shared owned staging did not return: %+v", result)
+										}
+										got[result.slot] = result.tensor
+									case <-timer.C:
+										t.Fatal("shared owned staging result timed out")
+									}
+								}
+								for _, done := range finished {
+									select {
+									case <-done:
+									case <-timer.C:
+										t.Fatal("shared owned staging did not finish its deferred result")
+									}
+								}
+								original = load.weight
+							}
+							raw := mappedCheckpointRaw(original)
+							if len(raw) != stride || original.borrowed || !bytes.Equal(raw, data[:stride]) {
+								t.Fatal("shared record lost original owned provenance or bytes")
+							}
+							ptr := uintptr(unsafe.Pointer(&raw[0]))
+							originalInputs := 0
+							for _, input := range rec.inputs {
+								if input == ptr {
+									originalInputs++
+								}
+							}
+							wantOriginal := 1 // the exclusive cold owner keeps its existing identity
+							if policy == "admitted" && (quant == ExpertCheckpointQ2K || quant == ExpertCheckpointQ3K) {
+								wantOriginal = 2
+							}
+							if len(rec.inputs) != 2 || originalInputs != wantOriginal || got[0].Buf() == got[1].Buf() {
+								t.Fatalf("shared owned slab lost per-consumer ownership: originalInputs=%d want=%d sharedOutput=%t", originalInputs, wantOriginal, got[0].Buf() == got[1].Buf())
+							}
+							if got[0].Dtype != tier.index[name].dtype() || got[1].Dtype != got[0].Dtype {
+								t.Fatal("shared owned upload changed dtype")
+							}
+							wantHits, wantCoalesced, wantResident := 0, 1, 0
+							if mode == "retained" {
+								wantHits, wantCoalesced, wantResident = 1, 0, 1
+							}
+							st := tier.Stats()
+							if r.calls.Load() != 1 || st.Reads != 1 || st.Hits != wantHits || st.Coalesced != wantCoalesced || st.BytesRead != int64(stride) || st.ResidentCount != wantResident || st.ResidentBytes != int64(wantResident*stride) || st.BudgetBytes != budget || st.PeakBytes != budget || st.Failures != 0 {
+								t.Fatalf("shared owned accounting changed: %+v", st)
+							}
+							// One real eviction while both uploaded session handles remain live.
+							if mode == "retained" && quant == ExpertCheckpointQ3K && policy == "unknown" {
+								if _, err := tier.fault(expertName(0, 1, "gate_proj.weight")); err != nil {
+									t.Fatal(err)
+								}
+								st = tier.Stats()
+								if st.Evictions != 1 || st.ResidentCount != 1 || st.ResidentBytes != int64(stride) || st.Reads != 2 || st.BytesRead != int64(2*stride) || st.BudgetBytes != budget || st.PeakBytes != budget || !bytes.Equal(raw, data[:stride]) {
+									t.Fatalf("eviction changed held slab/accounting: %+v", st)
+								}
+							}
+							var active *WeightSessionsActiveError
+							if err := m.CloseWeights(); !errors.As(err, &active) || active.Count != 2 || closer.n.Load() != 0 {
+								t.Fatalf("shared owned source pin lost: %v", err)
+							}
+							sessions[0].Close()
+							if closer.n.Load() != 0 {
+								t.Fatal("peer close retired shared owned source")
+							}
+							for i, b := range got[1].Buf().(compute.HostBuffer).I8() {
+								if b != int8(data[i]) {
+									t.Fatalf("peer close invalidated shared owned byte %d", i)
+								}
+							}
+							if !bytes.Equal(raw, data[:stride]) {
+								t.Fatal("consumer mutated shared owned slab")
+							}
+							sessions[1].Close()
+							if closer.n.Load() != 1 {
+								t.Fatal("shared owned source did not retire exactly once")
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestExpertCheckpointReadyOwnedStagingIdentity(t *testing.T) {
+	t.Parallel()
+	r := &checkpointFlightReader{data: bytes.Repeat([]byte{31}, q2kBlockBytes), entered: make(chan int64, 1), release: make(chan struct{})}
+	r.unblock()
+	tier := NewExpertCheckpointTier(0)
+	if err := tier.AddShard(r, int64(len(r.data)), []FusedExpertTensor{{Name: "gate", Layer: 0, Proj: "gate_proj", Quant: ExpertCheckpointQ2K, Experts: 1, Rows: 1, Cols: 256}}); err != nil {
+		t.Fatal(err)
+	}
+	name := expertName(0, 0, "gate_proj.weight")
+	if tier.Prefetch([]string{name}) != 1 {
+		t.Fatal("exclusive ready fixture was not admitted")
+	}
+	checkpointFlightWait(t, func() bool {
+		tier.mu.Lock()
+		defer tier.mu.Unlock()
+		return len(tier.ready) == 1 && len(tier.loading) == 0 && tier.prefetchJobs == 0
+	})
+	var original expertWeight
+	tier.mu.Lock()
+	for _, ready := range tier.ready {
+		original = ready.weight
+	}
+	tier.mu.Unlock()
+	raw := mappedCheckpointRaw(original)
+	if len(raw) != q2kBlockBytes || original.borrowed {
+		t.Fatal("ready record was not an exclusive owned read")
+	}
+	stage, ok := tier.stagingForBackend(name, &mappedUploadWitness{Backend: compute.Default(), label: "unknown", intern: true})
+	if !ok {
+		t.Fatal("exclusive ready staging missing")
+	}
+	host := stage.mk()
+	if mappedHostPointer(host) != uintptr(unsafe.Pointer(&raw[0])) || !bytes.Equal(raw, r.data) {
+		t.Fatal("exclusive ready handoff was copied or changed")
+	}
+	tier.mu.Lock()
+	remaining := len(tier.ready)
+	tier.mu.Unlock()
+	if st := tier.Stats(); remaining != 0 || r.calls.Load() != 1 || st.Reads != 1 || st.PrefetchHits != 1 || st.Coalesced != 0 || st.ResidentBytes != 0 {
+		t.Fatalf("exclusive ready accounting changed: %+v", st)
 	}
 }

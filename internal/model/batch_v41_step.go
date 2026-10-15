@@ -93,39 +93,47 @@ func (m *Model) StepV41Batch(input []V41BatchLane) (out V41BatchResult, err erro
 		return out, ErrV41BatchBusy
 	}
 	scope := &backendExecutionScope{owner: owner, live: true}
-	defer scope.finishError(&err)
-	if cause := m.v41StepCohortAdmit(lanes); cause != nil {
-		return out, fmt.Errorf("%w: %w", ErrV41BatchUnavailable, cause)
-	}
-	if cause := m.v41SharedHeadAdmit(lanes); cause != nil {
-		return out, fmt.Errorf("%w: %w", ErrV41BatchUnavailable, cause)
-	}
-	active := 0
-	for i, lane := range input {
-		if lane.Context != nil && lane.Context.Err() != nil {
-			out.Lanes[i].Err = lane.Context.Err()
-		} else {
-			active++
+	complete := false
+	defer func() {
+		successful := complete && err == nil
+		scope.finishCompleted(&successful)
+	}()
+	out, err = func() (V41BatchResult, error) {
+		if cause := m.v41StepCohortAdmit(lanes); cause != nil {
+			return out, fmt.Errorf("%w: %w", ErrV41BatchUnavailable, cause)
 		}
-	}
-	if active == 0 {
-		return out, nil
-	}
-	for _, lane := range input {
-		scope.bind(lane.Session)
-	}
-	out.Selected = true
-	results := make([]v41StepCohortResult, len(input))
-	receipt := &v41StepCohortReceipt{faultLane: -1}
-	err = m.stepV41BatchOwned(scope, lanes, results, receipt)
-	out.SharedHeadPanels, out.SharedHeadRows = receipt.sharedPanels, receipt.sharedRows
-	for i, result := range results {
-		lane := &out.Lanes[i]
-		lane.Logits, lane.Committed, lane.Err = result.logits, result.stats.Committed, result.err
-		if lane.Err == nil && !lane.Committed && err != nil {
-			lane.Err = ErrV41BatchAborted
+		if cause := m.v41SharedHeadAdmit(lanes); cause != nil {
+			return out, fmt.Errorf("%w: %w", ErrV41BatchUnavailable, cause)
 		}
-	}
+		active := 0
+		for i, lane := range input {
+			if lane.Context != nil && lane.Context.Err() != nil {
+				out.Lanes[i].Err = lane.Context.Err()
+			} else {
+				active++
+			}
+		}
+		if active == 0 {
+			return out, nil
+		}
+		for _, lane := range input {
+			scope.bind(lane.Session)
+		}
+		out.Selected = true
+		results := make([]v41StepCohortResult, len(input))
+		receipt := &v41StepCohortReceipt{faultLane: -1}
+		err = m.stepV41BatchOwned(scope, lanes, results, receipt)
+		out.SharedHeadPanels, out.SharedHeadRows = receipt.sharedPanels, receipt.sharedRows
+		for i, result := range results {
+			lane := &out.Lanes[i]
+			lane.Logits, lane.Committed, lane.Err = result.logits, result.stats.Committed, result.err
+			if lane.Err == nil && !lane.Committed && err != nil {
+				lane.Err = ErrV41BatchAborted
+			}
+		}
+		return out, err
+	}()
+	complete = true
 	return out, err
 }
 
@@ -134,64 +142,73 @@ func (m *Model) StepV41Batch(input []V41BatchLane) (out V41BatchResult, err erro
 // its panic to every Session would retire innocent, possibly committed peers.
 func (m *Model) stepV41BatchOwned(scope *backendExecutionScope, lanes []v41StepCohortLane, results []v41StepCohortResult, receipt *v41StepCohortReceipt) (err error) {
 	keepAlive := make([]func(), 0, len(lanes))
-	defer v41BatchEndKeepAlive(&keepAlive, &err)
+	complete := false
+	defer func() { v41BatchEndKeepAlive(&keepAlive, &err, complete) }()
 	guarded := make([]bool, len(lanes))
-	defer func() {
-		primary := recover()
-		lane := receipt.faultLane
-		// Serial stepV41 panics with returned selected-indexer errors before
-		// its guard runs. Reproduce that boundary after the cohort rollback.
-		var selectedScore *V41IndexerScoreOperationError
-		if primary == nil && errors.As(err, &selectedScore) {
-			primary = err
-		}
-		if primary != nil {
-			if lane >= 0 && lane < len(lanes) && guarded[lane] {
-				primary = v41BatchIndexerGuard(lanes[lane].session, primary)
-			}
-			cause, ok := primary.(error)
-			if !ok || !v41BatchSelectedError(cause) {
-				panic(primary)
-			}
-			err = cause
-		}
-		if err != nil && lane >= 0 && lane < len(results) {
-			results[lane].err = err
-		}
-	}()
-	for i, lane := range lanes {
-		receipt.atLane(i)
-		if lane.ctx != nil && lane.ctx.Err() != nil {
-			results[i].err = lane.ctx.Err()
-			continue
-		}
-		s := lane.session
-		if cause := s.refuseUnimplementedV4FlashAttention(); cause != nil {
-			return cause
-		}
-		keepAlive = append(keepAlive, s.BeginGPUKeepAlive())
-		s.validateDeviceOnlyExecution("decode")
-		s.ensureOpenBackendSession()
-		guarded[i] = true
-		if cause := m.v41ForwardAdmitted(); cause != nil {
-			return cause
-		}
-	}
-	m.v41SetExpertFaultPhase(V41PhaseDecode)
-	defer func() {
-		defer m.v41SetExpertFaultPhase(V41PhaseUnknown)
-		// The owned core has already drained every transaction, so this remains
-		// accurate when a later lane failed after an earlier history append.
-		for _, result := range results {
-			if result.stats.Committed {
-				m.v41NoteExpertFaultToken(1)
-				if v41IncrementalStepProbe != nil {
-					v41IncrementalStepProbe()
+	var primary any
+	bodyComplete := false
+	func() {
+		defer func() { primary = recover() }()
+		err = func() (err error) {
+			for i, lane := range lanes {
+				receipt.atLane(i)
+				if lane.ctx != nil && lane.ctx.Err() != nil {
+					results[i].err = lane.ctx.Err()
+					continue
+				}
+				s := lane.session
+				if cause := s.refuseUnimplementedV4FlashAttention(); cause != nil {
+					return cause
+				}
+				keepAlive = append(keepAlive, s.BeginGPUKeepAlive())
+				s.validateDeviceOnlyExecution("decode")
+				s.ensureOpenBackendSession()
+				guarded[i] = true
+				if cause := m.v41ForwardAdmitted(); cause != nil {
+					return cause
 				}
 			}
-		}
+			m.v41SetExpertFaultPhase(V41PhaseDecode)
+			defer func() {
+				defer m.v41SetExpertFaultPhase(V41PhaseUnknown)
+				// The owned core has already drained every transaction, so this remains
+				// accurate when a later lane failed after an earlier history append.
+				for _, result := range results {
+					if result.stats.Committed {
+						m.v41NoteExpertFaultToken(1)
+						if v41IncrementalStepProbe != nil {
+							v41IncrementalStepProbe()
+						}
+					}
+				}
+			}()
+			return m.forwardV41StepCohortOwned(scope, lanes, true, results, receipt)
+		}()
+		bodyComplete = true
 	}()
-	return m.forwardV41StepCohortOwned(scope, lanes, true, results, receipt)
+	present := !bodyComplete
+	lane := receipt.faultLane
+	// Promote only an ordinary returned selected-indexer error. A present nil
+	// panic is still an unclassified unwind, never an absent payload.
+	var selectedScore *V41IndexerScoreOperationError
+	if !present && errors.As(err, &selectedScore) {
+		primary, present = err, true
+	}
+	if present {
+		if primary != nil && lane >= 0 && lane < len(lanes) && guarded[lane] {
+			primary = v41BatchIndexerGuard(lanes[lane].session, primary)
+		}
+		cause, ok := primary.(error)
+		if !ok || !v41BatchSelectedError(cause) {
+			panic(primary)
+		}
+		err = cause
+	}
+	if err != nil && lane >= 0 && lane < len(results) {
+		results[lane].err = err
+	}
+	complete = true
+	return err
 }
 
 func v41BatchIndexerGuard(s *Session, primary any) (out any) {
@@ -201,24 +218,26 @@ func v41BatchIndexerGuard(s *Session, primary any) (out any) {
 }
 
 // Keep all scopes balanced without replacing an earlier operation failure.
-func v41BatchEndKeepAlive(ends *[]func(), err *error) {
-	primary := recover()
+func v41BatchEndKeepAlive(ends *[]func(), err *error, complete bool) {
+	failed := !complete || *err != nil
+	pending := *ends
+	*ends = nil
 	var cleanup any
-	for i := len(*ends) - 1; i >= 0; i-- {
+	present := false
+	for i := len(pending) - 1; i >= 0; i-- {
 		func() {
+			returned := false
 			defer func() {
-				if r := recover(); r != nil && cleanup == nil {
-					cleanup = r
+				value := recover()
+				if !returned && !present {
+					cleanup, present = value, true
 				}
 			}()
-			(*ends)[i]()
+			pending[i]()
+			returned = true
 		}()
 	}
-	*ends = nil
-	if primary != nil {
-		panic(primary)
-	}
-	if cleanup != nil && *err == nil {
+	if present && !failed {
 		panic(cleanup)
 	}
 }

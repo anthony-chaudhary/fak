@@ -241,6 +241,7 @@ func TestV41HeadProjectionActualDefaultSession(t *testing.T) {
 			upload += op.upload
 			read += op.read
 		}
+		// Prefill returns only the final token's logits; Step also projects one row.
 		wantRows := 1
 		if rows != wantRows || delta["head_projection_device_rows"] != float64(wantRows) || delta["head_projection_device_calls"] <= 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_host_rows"] != 0 {
 			t.Errorf("default head route rows=%d want=%d ledger=%v", rows, wantRows, delta)
@@ -715,6 +716,7 @@ func TestV41HeadProjectionDedicatedPackedTiedStores(t *testing.T) {
 						t.Error("tied head immutable cache identity changed")
 					}
 				}
+				// Prefill returns only the final token's logits; Step also projects one row.
 				wantRows := 1
 				if rows != wantRows || delta["head_projection_device_rows"] != float64(wantRows) || delta["head_projection_device_calls"] <= 0 || delta["head_projection_host_rows"] != 0 || delta["head_projection_host_calls"] != 0 || delta["head_projection_activation_upload_bytes"] != float64(upload) || delta["head_projection_readback_bytes"] != float64(read) || upload != 4*m.Cfg.HiddenSize*wantRows || read != 4*m.Cfg.VocabSize*wantRows {
 					t.Errorf("dedicated tied head actual route/traffic=%v rows=%d", delta, rows)

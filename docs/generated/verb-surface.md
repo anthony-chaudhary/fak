@@ -6,7 +6,7 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1312<br>
+parsed files: 1313<br>
 rows: 1294<br>
 unverified rows: 0 / 1294<br>
 source-only rows absent from help: 1058
@@ -799,7 +799,7 @@ source-only rows absent from help: 1058
 | `fak ops` | production operational tooling, health probes, and cluster telemetry | runOps / internal/ops, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | **SOURCE ONLY** |
 | `fak ops daemon` |  | runOpsDaemon / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
 | `fak ops log` |  | runOpsLog / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
-| `fak ops run` |  | runOpsRun / internal/canon, internal/childprocess, internal/policy, internal/procguard, internal/projectassets, internal/sessionjournal, internal/systools, internal/windowgate | `case` arm of the dispatch switch in runOps() | RUNTIME | — | **SOURCE ONLY** |
+| `fak ops run` |  | runOpsRun / internal/agent, internal/canon, internal/childprocess, internal/policy, internal/procguard, internal/projectassets, internal/sessionjournal, internal/systools, internal/windowgate | `case` arm of the dispatch switch in runOps() | RUNTIME | — | **SOURCE ONLY** |
 | `fak ops schedule` |  | runOpsSchedule / internal/windowgate | `case` arm of the dispatch switch in runOps() | RUNTIME | — | **SOURCE ONLY** |
 | `fak ops status` |  | runOpsStatus / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |
 | `fak ops sweep` |  | runOpsSweep / internal/ops | `case` arm of the dispatch switch in runOps() | NONE | — | **SOURCE ONLY** |

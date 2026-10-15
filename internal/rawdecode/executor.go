@@ -1300,21 +1300,25 @@ func rawDecodeBackendPCIIdentity(driver string) (string, string, bool) {
 	return vendor, device, ok
 }
 
-// preserveExecutionCleanup is deferred directly so it can retain the original
-// panic while still attempting cleanup. Cleanup failures join an existing error;
-// a cleanup panic without an earlier failure retains its normal panic semantics.
-func preserveExecutionCleanup(err *error, label string, cleanup func() error) {
-	primaryPanic := recover()
+// preserveExecutionCleanup leaves an incomplete body unwind in flight while
+// attempting cleanup once. Cleanup failures join an ordinary returned error;
+// without an earlier failure, an incomplete cleanup retains panic semantics.
+func preserveExecutionCleanup(err *error, bodyComplete *bool, label string, cleanup func() error) {
+	failed := !*bodyComplete
+	hadError := *err != nil
+	cleanupComplete := false
 	var cleanupPanic any
 	cleanupErr := func() (err error) {
 		defer func() { cleanupPanic = recover() }()
-		return cleanup()
+		err = cleanup()
+		cleanupComplete = true
+		return err
 	}()
-	if primaryPanic != nil {
-		panic(primaryPanic)
+	if failed {
+		return
 	}
-	if cleanupPanic != nil {
-		if *err == nil {
+	if !cleanupComplete {
+		if !hadError {
 			panic(cleanupPanic)
 		}
 		cleanupErr = fmt.Errorf("panic: %v", cleanupPanic)
@@ -1329,8 +1333,9 @@ func executeObservedRun(ctx context.Context, req Request, m loadedModel, be comp
 	if err != nil {
 		return Run{}, nil, fmt.Errorf("raw decode: begin backend observation for run %d: %w", repetition+1, err)
 	}
+	bodyComplete := false
 	if available {
-		defer preserveExecutionCleanup(&err, fmt.Sprintf("raw decode: end backend observation for run %d", repetition+1), func() error {
+		defer preserveExecutionCleanup(&err, &bodyComplete, fmt.Sprintf("raw decode: end backend observation for run %d", repetition+1), func() error {
 			observed, endErr := window.End()
 			if endErr != nil {
 				return endErr
@@ -1347,7 +1352,9 @@ func executeObservedRun(ctx context.Context, req Request, m loadedModel, be comp
 			return nil
 		})
 	}
-	return executeRun(ctx, req, m, be, executionSeal, repetition, now, since)
+	run, logprobs, err = executeRun(ctx, req, m, be, executionSeal, repetition, now, since)
+	bodyComplete = true
+	return run, logprobs, err
 }
 
 func executeRun(ctx context.Context, req Request, m loadedModel, be compute.Backend, executionSeal *generationExecutionSeal, repetition int, now func() time.Time, since func(time.Time) time.Duration) (run Run, selectedTokenLogprobs []float64, err error) {
@@ -1367,131 +1374,141 @@ func executeRun(ctx context.Context, req Request, m loadedModel, be compute.Back
 		}
 		return nil
 	}
-	defer preserveExecutionCleanup(&err, "raw decode: close candidate session", closeSession)
-	setupDone := now()
-	if err := ctx.Err(); err != nil {
-		return Run{}, nil, err
-	}
-	logits := s.Prefill(req.PromptTokenIDs)
-	prefillDone := now()
-	if err := ctx.Err(); err != nil {
-		return Run{}, nil, err
-	}
-	token, top1, top2, selectedTokenLogprob, err := greedySelection(logits)
-	if err != nil {
-		return Run{}, nil, errors.New("raw decode: prefill produced non-finite logits")
-	}
-	run = Run{PrefillOutputID: token, GeneratedTokens: []int{token}, Steps: []Step{{Step: 0, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2}}}
-	selectedTokenLogprobs = []float64{selectedTokenLogprob}
-	var candidateLogits [][]float32
-	if req.VerifyCPU {
-		candidateLogits = append(candidateLogits, slices.Clone(logits))
-	}
-	sampled := now()
-	ignoreEOS := req.IgnoreEOS
-	shouldStopOnEOS := func(token int) bool { return m.IsEOS(token) && !ignoreEOS }
-	run.EOSStopped = shouldStopOnEOS(token)
-	previous := token
-	for step := 1; !run.EOSStopped && step < req.GeneratedTokenLimit && len(req.PromptTokenIDs)+len(run.GeneratedTokens) < req.ContextLimit; step++ {
+	bodyComplete := false
+	defer preserveExecutionCleanup(&err, &bodyComplete, "raw decode: close candidate session", closeSession)
+	run, selectedTokenLogprobs, err = func() (Run, []float64, error) {
+		setupDone := now()
 		if err := ctx.Err(); err != nil {
 			return Run{}, nil, err
 		}
-		logits = s.Step(previous)
+		logits := s.Prefill(req.PromptTokenIDs)
+		prefillDone := now()
 		if err := ctx.Err(); err != nil {
 			return Run{}, nil, err
 		}
-		token, top1, top2, selectedTokenLogprob, err = greedySelection(logits)
+		token, top1, top2, selectedTokenLogprob, err := greedySelection(logits)
 		if err != nil {
-			return Run{}, nil, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
+			return Run{}, nil, errors.New("raw decode: prefill produced non-finite logits")
 		}
-		run.StepTokens = append(run.StepTokens, token)
-		run.GeneratedTokens = append(run.GeneratedTokens, token)
-		run.Steps = append(run.Steps, Step{Step: step, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2})
-		selectedTokenLogprobs = append(selectedTokenLogprobs, selectedTokenLogprob)
+		run = Run{PrefillOutputID: token, GeneratedTokens: []int{token}, Steps: []Step{{Step: 0, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2}}}
+		selectedTokenLogprobs = []float64{selectedTokenLogprob}
+		var candidateLogits [][]float32
 		if req.VerifyCPU {
 			candidateLogits = append(candidateLogits, slices.Clone(logits))
 		}
-		previous = token
+		sampled := now()
+		ignoreEOS := req.IgnoreEOS
+		shouldStopOnEOS := func(token int) bool { return m.IsEOS(token) && !ignoreEOS }
 		run.EOSStopped = shouldStopOnEOS(token)
-	}
-	if err := ctx.Err(); err != nil {
-		return Run{}, nil, err
-	}
-	run.generation = GenerationObservation{
-		observed:       true,
-		executionSeal:  executionSeal,
-		repetition:     repetition,
-		ignoreEOS:      ignoreEOS,
-		eosStopped:     run.EOSStopped,
-		outputTokenIDs: slices.Clone(run.GeneratedTokens),
-	}
-	decoded := now()
-	_ = closeSession()
-	closed := now()
-	boundaries := [6]time.Time{start, setupDone, prefillDone, sampled, decoded, closed}
-	if !monotonicTimingBoundaries(boundaries) {
-		return Run{}, nil, errors.New("raw decode: timing clock regressed during repetition")
-	}
-	run.timing = TimingObservation{
-		executionSeal: executionSeal,
-		repetition:    repetition,
-		boundaries:    boundaries,
-	}
-	run.SessionSetupDuration = run.timing.SessionSetupDuration()
-	run.PrefillDuration = run.timing.PrefillDuration()
-	run.FirstSampleDuration = run.timing.FirstSampleDuration()
-	run.DecodeDuration = run.timing.DecodeDuration()
-	run.TeardownDuration = run.timing.TeardownDuration()
-	if req.VerifyCPU {
-		verifyStart := now()
+		previous := token
+		for step := 1; !run.EOSStopped && step < req.GeneratedTokenLimit && len(req.PromptTokenIDs)+len(run.GeneratedTokens) < req.ContextLimit; step++ {
+			if err := ctx.Err(); err != nil {
+				return Run{}, nil, err
+			}
+			logits = s.Step(previous)
+			if err := ctx.Err(); err != nil {
+				return Run{}, nil, err
+			}
+			token, top1, top2, selectedTokenLogprob, err = greedySelection(logits)
+			if err != nil {
+				return Run{}, nil, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
+			}
+			run.StepTokens = append(run.StepTokens, token)
+			run.GeneratedTokens = append(run.GeneratedTokens, token)
+			run.Steps = append(run.Steps, Step{Step: step, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2})
+			selectedTokenLogprobs = append(selectedTokenLogprobs, selectedTokenLogprob)
+			if req.VerifyCPU {
+				candidateLogits = append(candidateLogits, slices.Clone(logits))
+			}
+			previous = token
+			run.EOSStopped = shouldStopOnEOS(token)
+		}
 		if err := ctx.Err(); err != nil {
 			return Run{}, nil, err
 		}
-		verification, err := verifyCPU(ctx, req, m.NewCPUSession(req), run, candidateLogits)
-		run.CPUVerifyDuration = since(verifyStart)
-		if err != nil {
-			return Run{}, nil, err
+		run.generation = GenerationObservation{
+			observed:       true,
+			executionSeal:  executionSeal,
+			repetition:     repetition,
+			ignoreEOS:      ignoreEOS,
+			eosStopped:     run.EOSStopped,
+			outputTokenIDs: slices.Clone(run.GeneratedTokens),
 		}
-		run.CPUVerification = &verification
-	}
-	return run, selectedTokenLogprobs, nil
+		decoded := now()
+		_ = closeSession()
+		closed := now()
+		boundaries := [6]time.Time{start, setupDone, prefillDone, sampled, decoded, closed}
+		if !monotonicTimingBoundaries(boundaries) {
+			return Run{}, nil, errors.New("raw decode: timing clock regressed during repetition")
+		}
+		run.timing = TimingObservation{
+			executionSeal: executionSeal,
+			repetition:    repetition,
+			boundaries:    boundaries,
+		}
+		run.SessionSetupDuration = run.timing.SessionSetupDuration()
+		run.PrefillDuration = run.timing.PrefillDuration()
+		run.FirstSampleDuration = run.timing.FirstSampleDuration()
+		run.DecodeDuration = run.timing.DecodeDuration()
+		run.TeardownDuration = run.timing.TeardownDuration()
+		if req.VerifyCPU {
+			verifyStart := now()
+			if err := ctx.Err(); err != nil {
+				return Run{}, nil, err
+			}
+			verification, err := verifyCPU(ctx, req, m.NewCPUSession(req), run, candidateLogits)
+			run.CPUVerifyDuration = since(verifyStart)
+			if err != nil {
+				return Run{}, nil, err
+			}
+			run.CPUVerification = &verification
+		}
+		return run, selectedTokenLogprobs, nil
+	}()
+	bodyComplete = true
+	return run, selectedTokenLogprobs, err
 }
 
 func verifyCPU(ctx context.Context, req Request, s session, run Run, candidate [][]float32) (result CPUVerification, err error) {
-	defer preserveExecutionCleanup(&err, "raw verify cpu: close session", func() error { s.Close(); return nil })
-	if err := ctx.Err(); err != nil {
-		return CPUVerification{}, err
-	}
-	logits := s.Prefill(req.PromptTokenIDs)
-	if err := ctx.Err(); err != nil {
-		return CPUVerification{}, err
-	}
-	if !allFinite(logits) {
-		return CPUVerification{}, errors.New("raw verify cpu: CPU prefill produced non-finite logits")
-	}
-	verification := compareStep(0, run.PrefillOutputID, candidate[0], logits)
-	result = CPUVerification{Passed: verification.Agree, AllAgree: verification.Agree, AllArgmaxAgree: verification.Agree, MinCosine: verification.Cosine, MaxDelta: verification.MaxDelta, Prefill: verification}
-	previous := run.PrefillOutputID
-	for i, token := range run.StepTokens {
+	bodyComplete := false
+	defer preserveExecutionCleanup(&err, &bodyComplete, "raw verify cpu: close session", func() error { s.Close(); return nil })
+	result, err = func() (CPUVerification, error) {
 		if err := ctx.Err(); err != nil {
 			return CPUVerification{}, err
 		}
-		logits = s.Step(previous)
+		logits := s.Prefill(req.PromptTokenIDs)
 		if err := ctx.Err(); err != nil {
 			return CPUVerification{}, err
 		}
 		if !allFinite(logits) {
-			return CPUVerification{}, fmt.Errorf("raw verify cpu: CPU step %d produced non-finite logits", i+1)
+			return CPUVerification{}, errors.New("raw verify cpu: CPU prefill produced non-finite logits")
 		}
-		step := compareStep(i+1, token, candidate[i+1], logits)
-		result.Steps = append(result.Steps, step)
-		result.Passed = result.Passed && step.Agree
-		result.AllAgree, result.AllArgmaxAgree = result.Passed, result.Passed
-		result.MinCosine = math.Min(result.MinCosine, step.Cosine)
-		result.MaxDelta = math.Max(result.MaxDelta, step.MaxDelta)
-		previous = token
-	}
-	return result, nil
+		verification := compareStep(0, run.PrefillOutputID, candidate[0], logits)
+		result = CPUVerification{Passed: verification.Agree, AllAgree: verification.Agree, AllArgmaxAgree: verification.Agree, MinCosine: verification.Cosine, MaxDelta: verification.MaxDelta, Prefill: verification}
+		previous := run.PrefillOutputID
+		for i, token := range run.StepTokens {
+			if err := ctx.Err(); err != nil {
+				return CPUVerification{}, err
+			}
+			logits = s.Step(previous)
+			if err := ctx.Err(); err != nil {
+				return CPUVerification{}, err
+			}
+			if !allFinite(logits) {
+				return CPUVerification{}, fmt.Errorf("raw verify cpu: CPU step %d produced non-finite logits", i+1)
+			}
+			step := compareStep(i+1, token, candidate[i+1], logits)
+			result.Steps = append(result.Steps, step)
+			result.Passed = result.Passed && step.Agree
+			result.AllAgree, result.AllArgmaxAgree = result.Passed, result.Passed
+			result.MinCosine = math.Min(result.MinCosine, step.Cosine)
+			result.MaxDelta = math.Max(result.MaxDelta, step.MaxDelta)
+			previous = token
+		}
+		return result, nil
+	}()
+	bodyComplete = true
+	return result, err
 }
 
 func compareStep(step, candidateToken int, candidate, cpu []float32) VerificationStep {

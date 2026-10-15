@@ -363,6 +363,8 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 			if st != nil && st.expertGateUp != nil {
 				h, outcome, gerr := st.expertGateUp(l, stem, xn)
 				switch outcome {
+				case v41GateUpDeclined:
+					// Continue to the unchanged host triple below.
 				case v41GateUpError:
 					return v41StageErr(v41StageMoE, l, gerr)
 				case v41GateUpHandled:
@@ -373,6 +375,8 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 					if st.expertDown != nil {
 						yd, dOutcome, derr := st.expertDown(l, stem, h)
 						switch dOutcome {
+						case v41DownDeclined:
+							// Continue to the unchanged host down contraction below.
 						case v41DownError:
 							return v41StageErr(v41StageMoE, l, derr)
 						case v41DownHandled:
