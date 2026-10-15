@@ -272,7 +272,7 @@ func TestServeNativeContextAutoAdmitsLongNativeHTTP(t *testing.T) {
 	}
 
 	tok := testProbeTokenizer(t)
-	prompt := strings.Repeat("a", 9000)
+	prompt := strings.Repeat("a", 8193)
 	promptIDs, err := tok.Encode(prompt)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestServeNativeContextAutoAdmitsLongNativeHTTP(t *testing.T) {
 		NumHeads:              4,
 		NumKVHeads:            2,
 		HeadDim:               8,
-		IntermediateSize:      64,
+		IntermediateSize:      32,
 		VocabSize:             260,
 		RMSNormEps:            1e-5,
 		RopeTheta:             10000,
