@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **668** (clarity 0 + coverage 668) |
 | **Crystal-clear concepts (and climbing)** | **1237** crystal of 3028 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3117 / 3785** (82.4% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3118 / 3786** (82.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **87** of 4284 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -64,7 +64,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   plan             #######################..... 475/579
   session-runtime  ######################...... 288/359
-  cache            #######################..... 338/407
+  cache            #######################..... 339/408
   gateway-engine   #######################..... 238/293
   guard-gate       ##########################.. 514/562
   attention        ####################........ 120/165
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.4%  (3117/3785 confusable tokens positioned)
+namespace coverage  [##########################......] 82.4%  (3118/3786 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -3327,7 +3327,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | plan | 475 | 579 | 104 |
 | session-runtime | 288 | 359 | 71 |
-| cache | 338 | 407 | 69 |
+| cache | 339 | 408 | 69 |
 | gateway-engine | 238 | 293 | 55 |
 | guard-gate | 514 | 562 | 48 |
 | attention | 120 | 165 | 45 |
