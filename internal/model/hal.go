@@ -54,19 +54,38 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 		panic("model: no compute backend registered")
 	}
 	scope := beginBackendExecution(be)
-	defer scope.finishError(&err)
+	completed := false
+	defer func() {
+		if scope == nil {
+			return
+		}
+		failed := !completed || err != nil
+		cleanup := scope.releaseCleanup(nil)
+		if !failed && cleanup.present {
+			panic(cleanup.value)
+		}
+	}()
+	session, err = m.newBackendSessionOwned(scope, be)
+	// Include construction rollback defers in the completion boundary. Neither
+	// a primary panic nor Goexit can return a false (nil session, nil error).
+	completed = true
+	return session, err
+}
+
+func (m *Model) newBackendSessionOwned(scope *backendExecutionScope, be compute.Backend) (*Session, error) {
 	if !m.holdModelWeights() {
 		return nil, &ModelWeightsClosedError{}
 	}
 	held := true
 	defer func() {
-		primary := recover()
-		finishModelCleanup(primary, &err, func() {
-			if held {
-				held = false
-				scope.afterRelease(m.releaseWeightSession)
-			}
-		})
+		if !held {
+			return
+		}
+		held = false
+		// This guard runs only on failed construction. Recover solely a
+		// secondary cleanup panic; the constructor's unwind stays in flight.
+		defer func() { _ = recover() }()
+		scope.afterRelease(m.releaseWeightSession)
 	}()
 	if err := m.ValidateBackendForwardPath(be); err != nil {
 		return nil, err
@@ -87,27 +106,21 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 	held = false // Transfer exactly once to the Session cleanup guard.
 	ready := false
 	defer func() {
-		primary := recover()
 		if ready {
-			if primary != nil {
-				panic(primary)
-			}
 			return
 		}
-		finishModelCleanup(primary, &err, func() {
-			// Failed construction owns the transferred pin even if device
-			// cleanup panics before closeOwned reaches its final release.
-			defer func() {
-				closePanic := recover()
-				finishModelCleanup(closePanic, &err, func() {
-					if s.modelWeightsHeld {
-						s.modelWeightsHeld = false
-						scope.afterRelease(m.releaseWeightSession)
-					}
-				})
-			}()
-			s.closeOwned(scope)
-		})
+		// Both cleanup attempts are secondary to the construction failure.
+		// The inner recovery never observes the constructor's primary unwind.
+		defer func() { _ = recover() }()
+		// Failed construction owns the transferred pin even if device
+		// cleanup panics before closeOwned reaches its final release.
+		defer func() {
+			if s.modelWeightsHeld {
+				s.modelWeightsHeld = false
+				scope.afterRelease(m.releaseWeightSession)
+			}
+		}()
+		s.closeOwned(scope)
 	}()
 	scope.bind(s)
 	// A reusable captured graph is bound to one session's buffer addresses; reset it so

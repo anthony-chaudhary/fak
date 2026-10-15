@@ -7046,6 +7046,11 @@
           "category": "incidental",
           "reason": "Private CLI formatter of the existing bounded session-journal Refusal projection; it prints persisted content-free fields and adds no session lifecycle, capture authority, or refusal semantics.",
           "token": "renderSessionJournalRefusals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constructor body for the existing backend session, extracted to preserve rollback ownership and completion evidence across panic or Goexit; it does not define a distinct session abstraction or lifecycle policy.",
+          "token": "newBackendSessionOwned"
         }
       ],
       "exclude": [
@@ -7306,6 +7311,7 @@
         "microagentSessionID",
         "mixedQKVSession",
         "modeled_from_observed_session_mean",
+        "newBackendSessionOwned",
         "newMixedQKVSessionFromEnv",
         "normalizeProviderSessionBoundary",
         "normalizedSessionHarness",
