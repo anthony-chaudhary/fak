@@ -3,6 +3,7 @@ package model
 import (
 	"bytes"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -138,6 +139,44 @@ func TestExpertCheckpointPrefetchDropsUnconsumedHandoffs(t *testing.T) {
 	}
 	if n := tier.Prefetch([]string{"model.layers.0.mlp.experts.9.gate_proj.weight"}); n != 0 {
 		t.Fatalf("Prefetch of an unindexed name started %d reads, want 0", n)
+	}
+}
+
+// Unindexed hints must not allocate job storage proportional to caller input, even when
+// nothing is admitted. No source or goroutine is needed to exercise the real Prefetch path.
+// fak-test:runtime fast est=20ms lane=default
+func TestExpertCheckpointPrefetchBoundsJobStorage(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		names, active int
+		maxBytes      uint64
+	}{
+		{"small-input", 1, 0, 16 << 10},
+		{"large-input", 4096, 0, 16 << 10},
+		{"one-slot-left", 4096, fakExpertPrefetchJobs - 1, 16 << 10},
+		{"exhausted", 4096, fakExpertPrefetchJobs, 16 << 10},
+		{"over-cap", 4096, fakExpertPrefetchJobs + 1, 16 << 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Stay nonparallel: TotalAlloc is process-wide. Build the input and tier
+			// before measuring so only Prefetch's bookkeeping is charged here.
+			names := make([]string, tc.names)
+			tier := NewExpertCheckpointTier(0)
+			tier.prefetchJobs = tc.active
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			got := tier.Prefetch(names)
+			runtime.ReadMemStats(&after)
+			if got != 0 || tier.prefetchJobs != tc.active {
+				t.Fatalf("unindexed hints admitted %d jobs, active=%d, want 0 and %d", got, tier.prefetchJobs, tc.active)
+			}
+			// Allow allocator rounding and process-wide runtime noise without
+			// allowing job storage proportional to the large caller input.
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > tc.maxBytes {
+				t.Fatalf("Prefetch of %d names with %d active jobs allocated %d bytes, want <= %d", tc.names, tc.active, allocated, tc.maxBytes)
+			}
+		})
 	}
 }
 

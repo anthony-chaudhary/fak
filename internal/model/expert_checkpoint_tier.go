@@ -785,7 +785,8 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 			t.prefetchStale++
 		}
 	}
-	jobs := make([]job, 0, len(names))
+	remainingJobs := max(0, fakExpertPrefetchJobs-t.prefetchJobs)
+	jobs := make([]job, 0, min(len(names), remainingJobs))
 	for _, name := range names {
 		id := polymodel.ModelID(name)
 		entry, indexed := t.index[name]
