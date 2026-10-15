@@ -154,18 +154,22 @@ func v41BF16PublishSiteID(layer, layers int, site string) uint32 {
 // selected failure retires this Session without host replay. Backend identity is
 // immutable for the Session lifetime; restored state binds a new closure.
 func (s *Session) v41BF16PublishFunc() v41BF16BoundaryFunc {
+	return s.v41BindBF16Publication().publicationFunc()
+}
+
+func (s *Session) v41BindBF16Publication() *v41BF16PublicationBinding {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!backendHasComparableIdentity(s.Backend) ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
 		return nil
 	}
-	backend := s.Backend
+	backend, model := s.Backend, s.M
 	layers := s.M.Cfg.NumLayers
 	operation, ok := backend.(compute.V41BF16PublishBackend)
 	if !ok || !operation.SupportsV41BF16Publish(max(1, s.M.Cfg.HiddenSize)) {
 		return nil
 	}
-	return func(layer int, site string, values []float32) (result []float32, cause error) {
+	core := func(layer int, site string, values []float32, resident *v41BF16ResidentInput) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
 		closeSelected := func(primary error) {
@@ -184,6 +188,11 @@ func (s *Session) v41BF16PublishFunc() v41BF16BoundaryFunc {
 			if s.halFailure != nil {
 				closeSelected(s.halFailure)
 				return s.halFailure
+			}
+			var prior *BackendForwardOperationError
+			if resident != nil && errors.As(err, &prior) {
+				closeSelected(err)
+				return err
 			}
 			selected := &V41BF16BoundaryOperationError{Layer: layer, Site: site, Cause: err}
 			closed := &BackendForwardOperationError{Backend: backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-bf16-publish", Layer: layer, Stage: stage, Cause: selected}
@@ -219,12 +228,23 @@ func (s *Session) v41BF16PublishFunc() v41BF16BoundaryFunc {
 				panic(r)
 			}
 		}()
+		count := len(values)
+		if resident != nil {
+			var valid bool
+			count, valid = v41ResidentBF16Count(resident.tensor)
+			if !valid || len(values) != 0 || !resident.admitted(s, model, backend) {
+				return nil, closeFailure(errV41BF16ResidentScope)
+			}
+		}
 		siteID := v41BF16PublishSiteID(layer, layers, site)
-		if siteID == 0 || len(values) == 0 || len(values) > math.MaxInt32 || len(values) > math.MaxInt/4 ||
-			!operation.SupportsV41BF16Publish(len(values)) {
+		if resident == nil && (siteID == 0 || count == 0 || count > math.MaxInt32 || count > math.MaxInt/4 ||
+			!operation.SupportsV41BF16Publish(count)) {
 			return nil, closeFailure(errV41BF16BoundaryResult)
 		}
 		run := func() (result []float32, cause error) {
+			if resident != nil {
+				return v41RunResidentBF16(s, model, backend, layer, site, siteID, count, resident, &stage)
+			}
 			var owned []compute.Tensor
 			defer func() {
 				primaryPanic := recover()
@@ -319,6 +339,10 @@ func (s *Session) v41BF16PublishFunc() v41BF16BoundaryFunc {
 		}
 		return result, nil
 	}
+	ordinary := func(layer int, site string, values []float32) ([]float32, error) {
+		return core(layer, site, values, nil)
+	}
+	return &v41BF16PublicationBinding{ordinary: ordinary, core: core, owner: s, model: model, backend: backend}
 }
 
 // v41DeferredBF16Publisher returns the backend's deferred-status publication
