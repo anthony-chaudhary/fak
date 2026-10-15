@@ -9,7 +9,7 @@ layout(local_size_x = 64) in;
 
 const uint MAX_TOKENS = 8u;
 layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
-layout(std430, set = 0, binding = 1) readonly buffer X { float x[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X { vec4 x4[]; };
 layout(std430, set = 0, binding = 2) writeonly buffer Y { float y[]; };
 layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
 
@@ -45,6 +45,16 @@ int unpackScale(uint low0, uint low1, uint high, uint index) {
     return int(((low >> lowShift) & 15u) | (((high >> highShift) & 3u) << 4u));
 }
 
+// Decode all four scalar weights before visiting tokens. Each token then
+// consumes one aligned activation vec4 while retaining four ordered additions.
+float decodedLane(uint quantBytes, uint highBytes, uint shift, uint mask, uint component, float dl) {
+    uint byteShift = component * 8u;
+    int code = int((quantBytes >> (byteShift + shift)) & 3u);
+    if (((highBytes >> byteShift) & mask) == 0u) code -= 4;
+    float decoded = dl * float(code);
+    return decoded;
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.x;
     uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), tokens = uint(pc.tokens);
@@ -70,16 +80,18 @@ void main() {
                         uint laneBase = sub * 16u + l;
                         uint quantBytes = packedFourBytes(base + 32u + qi + laneBase);
                         uint highBytes = packedFourBytes(base + laneBase);
-                        for (uint component = 0u; component < 4u; ++component) {
-                            uint lane = laneBase + component;
-                            uint byteShift = component * 8u;
-                            int code = int((quantBytes >> (byteShift + shift)) & 3u);
-                            if (((highBytes >> byteShift) & mask) == 0u) code -= 4;
-                            float decoded = dl * float(code);
-                            uint col = sb * 256u + halfBase + j * 32u + lane;
-                            for (uint token = 0u; token < tokens; ++token) {
-                                sums[token] += decoded * x[token * inDim + col];
-                            }
+                        float decoded0 = decodedLane(quantBytes, highBytes, shift, mask, 0u, dl);
+                        float decoded1 = decodedLane(quantBytes, highBytes, shift, mask, 1u, dl);
+                        float decoded2 = decodedLane(quantBytes, highBytes, shift, mask, 2u, dl);
+                        float decoded3 = decodedLane(quantBytes, highBytes, shift, mask, 3u, dl);
+                        uint col4 = (sb * 256u + halfBase + j * 32u + laneBase) >> 2u;
+                        for (uint token = 0u; token < tokens; ++token) {
+                            vec4 xv = x4[token * (inDim >> 2u) + col4];
+                            float sum0 = sums[token] + decoded0 * xv.x;
+                            float sum1 = sum0 + decoded1 * xv.y;
+                            float sum2 = sum1 + decoded2 * xv.z;
+                            float sum3 = sum2 + decoded3 * xv.w;
+                            sums[token] = sum3;
                         }
                     }
                 }
