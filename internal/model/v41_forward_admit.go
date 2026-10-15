@@ -824,7 +824,7 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 		}
 		if out != want[0] || in != want[1] {
 			return v41StageErr(stage, layer,
-				fmt.Errorf("%w: tensor %s shape [%d %d], want %v", ErrV41ForwardStage, name, out, in, want))
+				fmt.Errorf("%w: tensor %s shape [%d %d], want %v", ErrV41ForwardStage, name, out, in, append([]int(nil), want...)))
 		}
 		return nil
 	}
@@ -839,7 +839,7 @@ func (m *Model) v41AdmitShape(name string, stage v41ForwardStage, layer int, wan
 	for i := range want {
 		if meta.Shape[i] != want[i] {
 			return v41StageErr(stage, layer,
-				fmt.Errorf("%w: tensor %s shape %v, want %v", ErrV41ForwardStage, name, meta.Shape, want))
+				fmt.Errorf("%w: tensor %s shape %v, want %v", ErrV41ForwardStage, name, meta.Shape, append([]int(nil), want...)))
 		}
 	}
 	return nil
