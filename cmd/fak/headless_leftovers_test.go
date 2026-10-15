@@ -79,7 +79,7 @@ func TestRunHeadlessLintLeftoversCountsEvidenceNotTheClaim(t *testing.T) {
 	// are ordinary work (and whose PROSE says an issue was filed) evidences no filing.
 	empty := filepath.Join(dir, "no-filings.jsonl")
 	writeGuardLeftoversTranscript(t, empty, []toolUseFixture{
-		{Name: "functions.shell_command", Input: map[string]any{"command": "go test ./internal/headlesslint/"}},
+		{Name: "functions.shell_command", Input: map[string]any{"command": "git status"}},
 		{Name: "functions.shell_command", Input: map[string]any{"description": "I filed the two follow-ups as gh issue create", "command": "git status --porcelain"}},
 	})
 	code, s := run("--leftovers", "--transcript", empty, "--issues-filed", "5", "--json", summary)

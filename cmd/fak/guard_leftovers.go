@@ -234,9 +234,9 @@ func guardIssueCreatesInToolUse(use transcript.ToolUse) (int, bool) {
 	}
 }
 
-// Toolchain verbs that run no caller-chosen program unless -exec/-toolexec names one.
+// These toolchain verbs do not execute package test code. Test execution remains opaque.
 var guardGoToolchainVerb = map[string]bool{
-	"build": true, "test": true, "vet": true, "fmt": true, "list": true, "mod": true, "env": true, "version": true,
+	"build": true, "vet": true, "fmt": true, "list": true, "mod": true, "env": true, "version": true,
 }
 
 var guardCommandWord = regexp.MustCompile(`"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+`)
