@@ -3,8 +3,9 @@ layout(local_size_x = 256) in;
 
 // One workgroup selects the DeepSeek-V4.1 index rows for one query. Scores are
 // compared as order-preserving integer keys, never as floats, so no driver float
-// mode can change a decision. Partial coverage uses exact rank counts: a higher
-// score ranks first, ties rank lower positions first, and -0 equals +0.
+// mode can change a decision. Higher scores rank first, ties rank lower
+// positions first, and -0 equals +0. Large partial panels use an exact radix
+// threshold; small panels retain rank counts. The crossover is not tuned.
 layout(std430, binding = 0) readonly buffer ScoreBuf { uint Score[]; };
 // Scratch: [blocks] block keys, [blocks] block keep flags, [rows] selected flags.
 // coherent: later phases read Scratch written by other waves of this workgroup;
@@ -25,6 +26,13 @@ layout(push_constant) uniform Push {
 const uint KEY_NEG_INF = 0x007fffffu; // order key of 0xff800000
 const uint KEY_POS_INF = 0xff800000u; // order key of 0x7f800000
 
+// Shared storage is reserved even when a coverage/small-panel arm bypasses it.
+shared uint radixHistogram[256];
+shared uint radixPrefix;
+shared uint radixMask;
+shared uint radixRank;
+shared uvec2 partitionPrefix[256];
+
 uint orderKey(uint bits) {
     if (bits == 0x80000000u) bits = 0u; // -0 ranks equal to +0
     return (bits & 0x80000000u) != 0u ? ~bits : bits | 0x80000000u;
@@ -41,6 +49,81 @@ bool outranks(uint a, uint ia, uint b, uint ib) {
 void phaseBarrier() {
     memoryBarrierBuffer();
     barrier();
+}
+
+uint effectiveKey(uint i, bool masked, uint keepBase, uint blockSize) {
+    return (!masked || Scratch[keepBase + i / blockSize] != 0u) ? orderKey(Score[i]) : KEY_NEG_INF;
+}
+
+void selectRadix(uint rows, uint topK, bool masked, uint keepBase, uint blockSize) {
+    uint lane = gl_LocalInvocationID.x;
+    if (lane == 0u) {
+        radixPrefix = 0u;
+        radixMask = 0u;
+        radixRank = topK - 1u;
+    }
+    barrier();
+
+    // Invariant: the selected prefix contains the original kth key; radixRank
+    // is its zero-based rank among matching keys. Include masked/-Inf rows:
+    // their selected sentinel slots must not be compacted out of the result.
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        radixHistogram[lane] = 0u;
+        barrier();
+        for (uint i = lane; i < rows; i += 256u) {
+            uint key = effectiveKey(i, masked, keepBase, blockSize);
+            if ((key & radixMask) == radixPrefix) {
+                atomicAdd(radixHistogram[(key >> uint(shift)) & 255u], 1u);
+            }
+        }
+        barrier();
+        if (lane == 0u) {
+            for (int bucket = 255; bucket >= 0; --bucket) {
+                uint count = radixHistogram[bucket];
+                if (radixRank < count) {
+                    radixPrefix |= uint(bucket) << uint(shift);
+                    break;
+                }
+                radixRank -= count;
+            }
+            radixMask |= 255u << uint(shift);
+        }
+        barrier();
+    }
+
+    uint threshold = radixPrefix;
+    uint tieAllowance = radixRank + 1u;
+    // Contiguous, position-ordered partitions. Avoid rows*(lane+1), which
+    // would overflow uint at the admitted maximum rows == 1<<24.
+    uint quotient = rows / 256u;
+    uint remainder = rows % 256u;
+    uint begin = lane * quotient + min(lane, remainder);
+    uint end = begin + quotient + (lane < remainder ? 1u : 0u);
+    uvec2 counts = uvec2(0u);
+    for (uint i = begin; i < end; ++i) {
+        uint key = effectiveKey(i, masked, keepBase, blockSize);
+        if (key > threshold) ++counts.x;
+        if (key == threshold) ++counts.y;
+    }
+    partitionPrefix[lane] = counts;
+    barrier();
+    // Each step completes every read before any write, then completes every
+    // write before the next read. No subgroup/wave-width assumption is made.
+    for (uint offset = 1u; offset < 256u; offset <<= 1u) {
+        uvec2 prior = lane >= offset ? partitionPrefix[lane - offset] : uvec2(0u);
+        barrier();
+        partitionPrefix[lane] += prior;
+        barrier();
+    }
+    uvec2 before = lane == 0u ? uvec2(0u) : partitionPrefix[lane - 1u];
+    uint slot = before.x + min(before.y, tieAllowance);
+    uint equalSeen = before.y;
+    for (uint i = begin; i < end; ++i) {
+        uint key = effectiveKey(i, masked, keepBase, blockSize);
+        bool selected = key > threshold || (key == threshold && equalSeen < tieAllowance);
+        if (key == threshold) ++equalSeen;
+        if (selected) Out[slot++] = key == KEY_NEG_INF ? -1.0 : float(i);
+    }
 }
 
 void main() {
@@ -95,6 +178,13 @@ void main() {
             Out[i] = mine == KEY_NEG_INF ? -1.0 : float(i);
         }
         return; // uniform: no lane skips a barrier required by another lane
+    }
+
+    // Initial uniform crossover, pending matched device timing. Retain the
+    // exact small-panel path; this branch changes neither mask nor score math.
+    if (rows >= 1024u) {
+        selectRadix(rows, uint(pc.topK), masked, keepBase, blockSize);
+        return;
     }
 
     for (uint i = lane; i < rows; i += 256u) {

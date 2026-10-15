@@ -20,8 +20,8 @@ var v41IndexSelectFullCoverageSource string
 // The independent full-rank reference is deliberately unchanged.
 // fak-test:runtime fast est=500ms lane=default
 func TestV41IndexSelectFullCoverage(t *testing.T) {
-	const parentSHA = "b7855ccb6d241213bfb1dbeada14c4b55a75a78e0b3fb517fa9ffad796013f0f"
-	const candidateSHA = "eea9fc242fb08c5b89c27657cfd9c0726ac13375ce37abc135ab372cda8c09cd"
+	const parentSHA = "eea9fc242fb08c5b89c27657cfd9c0726ac13375ce37abc135ab372cda8c09cd"
+	const candidateSHA = "9daccb1beddb9920feec1c12f0c06c372dd34fad8b8268fde0e013e3aa047fcf"
 	shaderSHA := fmt.Sprintf("%x", sha256.Sum256([]byte(v41IndexSelectFullCoverageSource)))
 	t.Logf("embedded shader SHA256=%s candidate=%s parent=%s", shaderSHA, candidateSHA, parentSHA)
 	if shaderSHA != candidateSHA {
@@ -122,7 +122,7 @@ func TestV41IndexSelectFullCoverage(t *testing.T) {
 	for _, g := range [][3]int{{0, 0, 0}, {-1, 0, 0}, {1, -1, 0}, {1, 1, 0}} {
 		check([]float32{1, 2}, g[0], g[1], g[2])
 	}
-	t.Log("covered geometry performs zero block/row ranking and row-prefix comparisons; partial-coverage loops retain full scans (CPU operation counts only)")
+	t.Log("covered geometry performs zero block/row ranking and row-prefix comparisons; tested small partial panels retain full scans (CPU operation counts only)")
 }
 
 // Work records block-rank, row-rank and output-prefix comparisons. Row flags
