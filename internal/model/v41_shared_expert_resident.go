@@ -267,6 +267,7 @@ func (s *Session) v41SharedExpertPanel(layer int, input []float32, rows int, pro
 func (s *Session) v41SharedExpertPanelChunk(layer int, input []float32, rows, H, I int, limit float32, limited interface {
 	SwiGLUWithLimit(compute.Tensor, compute.Tensor, float32) compute.Tensor
 }, deferred compute.V41DeferredStatusBackend, weights [3]compute.Tensor, protected map[compute.Buffer]bool, state *v41SharedPanelFailureState) (result []float32, cause error) {
+	backend := s.Backend
 	leaves := [3]string{"ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight", "ffn.shared_experts.w2.weight"}
 	widths := [3][2]int{{I, H}, {I, H}, {H, I}}
 	var owned []compute.Tensor
@@ -284,7 +285,7 @@ func (s *Session) v41SharedExpertPanelChunk(layer int, input []float32, rows, H,
 						cleanup = recovered
 					}
 				}()
-				s.Backend.Free(owned[i])
+				backend.Free(owned[i])
 			}()
 		}
 		if primary != nil {
@@ -295,7 +296,7 @@ func (s *Session) v41SharedExpertPanelChunk(layer int, input []float32, rows, H,
 		}
 	}()
 	own := func(t compute.Tensor) bool {
-		if t.Buf() == nil || t.Backend() != s.Backend || protected[t.Buf()] {
+		if t.Buf() == nil || t.Backend() != backend || protected[t.Buf()] {
 			return false
 		}
 		for _, prior := range owned {
@@ -307,7 +308,7 @@ func (s *Session) v41SharedExpertPanelChunk(layer int, input []float32, rows, H,
 		return true
 	}
 	valid := func(t compute.Tensor, count int, flat bool) bool {
-		if t.Backend() != s.Backend || t.Buf() == nil || t.Dtype != compute.F32 || t.Layout != compute.RowMajor || t.Quant != nil || t.Numel() != count {
+		if t.Backend() != backend || t.Buf() == nil || t.Dtype != compute.F32 || t.Layout != compute.RowMajor || t.Quant != nil || t.Numel() != count {
 			return false
 		}
 		if flat {
@@ -436,9 +437,23 @@ func (s *Session) v41SharedExpertPanelChunk(layer int, input []float32, rows, H,
 		defer func() {
 			s.M.v41NoteDenseProjection(1, 0, succeeded, 0, uploaded, readback, opened)
 		}()
-		y := s.Backend.BatchedMatMul(weights[index], x, rows)
 		out := widths[index][0]
-		if !own(y) || !valid(y, rows*out, false) {
+		var y compute.Tensor
+		var tiled bool
+		if index == 2 {
+			var err error
+			y, tiled, err = s.v41SharedDownTokenPanel(backend, weights[index], x, rows, out, widths[index][1], own)
+			if err != nil {
+				return compute.Tensor{}, err
+			}
+		}
+		if !tiled {
+			y = s.Backend.BatchedMatMul(weights[index], x, rows)
+			if !own(y) {
+				return compute.Tensor{}, errV41ProjectionResult
+			}
+		}
+		if !valid(y, rows*out, false) {
 			return compute.Tensor{}, errV41ProjectionResult
 		}
 		succeeded = rows
