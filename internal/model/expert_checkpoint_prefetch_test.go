@@ -568,3 +568,72 @@ func TestExpertCheckpointPrefetchGoexitDrainsQueue(t *testing.T) {
 		})
 	}
 }
+
+// Decline only a hint that cannot fit the positive total capacity. A full pool
+// may still evict an older resident; zero budget keeps stream-through semantics.
+// fak-test:runtime fast est=100ms lane=default
+func TestExpertCheckpointPrefetchDeclinesImpossibleCapacity(t *testing.T) {
+	const stride = q4kBlockBytes
+	for _, tc := range []struct {
+		name      string
+		budget    int64
+		warmOther bool
+		wantJobs  int
+	}{
+		{name: "too-large", budget: stride - 1},
+		{name: "zero-stream-through", budget: 0, wantJobs: 1},
+		{name: "exact-fit", budget: stride, wantJobs: 1},
+		{name: "exact-fit-full-pool", budget: stride, warmOther: true, wantJobs: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tier, reader, actualStride := checkpointFlightFixture(t, tc.budget)
+			reader.unblock()
+			if actualStride != stride {
+				t.Fatalf("fixture stride = %d, want %d", actualStride, stride)
+			}
+			name := expertName(0, 0, "gate_proj.weight")
+			if tc.warmOther {
+				other := expertName(0, 1, "gate_proj.weight")
+				w, err := tier.fault(other)
+				checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, reader.data[stride:])
+				if st := tier.Stats(); st.ResidentBytes != tc.budget {
+					t.Fatalf("warm control did not fill total budget: %+v", st)
+				}
+			}
+			before, beforeCalls := tier.Stats(), reader.calls.Load()
+			got := tier.Prefetch([]string{name})
+			// Also drain the pre-fix read before asserting, so the negative control
+			// never leaves an owned source operation behind when it fails.
+			waitPrefetchSettled(t, tier)
+			calls := reader.calls.Load() - beforeCalls
+			if got != tc.wantJobs || calls != int64(tc.wantJobs) {
+				t.Fatalf("budget %d stride %d: admitted %d hints and made %d source reads, want %d and %d", tc.budget, stride, got, calls, tc.wantJobs, tc.wantJobs)
+			}
+			after := tier.Stats()
+			if after.Prefetched-before.Prefetched != tc.wantJobs || after.Failures != before.Failures {
+				t.Fatalf("hint admission ledger: before=%+v after=%+v", before, after)
+			}
+			if tc.warmOther && after.Evictions-before.Evictions != 1 {
+				t.Fatalf("exact-fit hint did not preserve normal eviction: before=%+v after=%+v", before, after)
+			}
+			w, err := tier.fault(name)
+			if tc.wantJobs == 0 {
+				var refusal *ExpertCheckpointBudgetError
+				if !errors.Is(err, ErrExpertCheckpointBudget) || !errors.As(err, &refusal) ||
+					refusal.Tensor != name || refusal.Bytes != stride || refusal.Budget != tc.budget || w.q4 != nil || w.kq != nil {
+					t.Fatalf("demand after declined hint: weight=%+v error=%v", w, err)
+				}
+				if st := tier.Stats(); st.Failures != before.Failures+1 || st.Reads != before.Reads+1 {
+					t.Fatalf("normal demand refusal ledger: %+v", st)
+				}
+			} else {
+				checkpointFlightComplete(t, checkpointFlightResult{weight: w, err: err}, reader.data[:stride])
+			}
+			// Accepted hints supply this demand once. A declined hint leaves the
+			// ordinary demand path's single read and typed budget error unchanged.
+			if calls := reader.calls.Load() - beforeCalls; calls != 1 {
+				t.Fatalf("hint plus later demand made %d source reads, want 1", calls)
+			}
+		})
+	}
+}

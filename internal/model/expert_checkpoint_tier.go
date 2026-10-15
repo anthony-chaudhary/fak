@@ -809,6 +809,12 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		if t.prefetchDeclined(src, overlay) {
 			continue
 		}
+		// The indexed stride is validated at construction. A hint larger than
+		// a positive TOTAL budget can never be retained, so do not allocate/read
+		// it. This is not a reservation or a check of currently unused capacity.
+		if budget := t.pool.Budget(); budget > 0 && entry.stride > budget {
+			continue
+		}
 		// Aggregate admission: bound the job collection itself, so a caller passing thousands of
 		// names allocates and starts at most the remaining aggregate allowance. Best-effort and
 		// nonblocking -- a declined hint is simply not started, and demand serving is untouched.
