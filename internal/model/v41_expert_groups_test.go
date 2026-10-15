@@ -28,6 +28,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -971,4 +972,96 @@ func TestV41ExpertGroupsReplayIsSlotOrdered(t *testing.T) {
 			}
 		}
 	}
+}
+
+// fak-test:justify why=regression when=changed:internal/model/v41_expert_groups.go
+// fak-test:runtime fast est=100ms lane=default
+func TestV41ExpertGroupsPackedRows(t *testing.T) {
+	// Preserve the prior planner as an independent ordering/allocation control.
+	legacy := func(picks [][]routePick) []v41ExpertGroup {
+		total := 0
+		for _, row := range picks {
+			total += len(row)
+		}
+		if total == 0 {
+			return nil
+		}
+		groups := make([]v41ExpertGroup, 0, total)
+		index := make(map[int]int, total)
+		for tok, perToken := range picks {
+			for slot := range perToken {
+				expert := perToken[slot].expert
+				gi, ok := index[expert]
+				if !ok {
+					gi = len(groups)
+					groups = append(groups, v41ExpertGroup{Expert: expert})
+					index[expert] = gi
+				}
+				groups[gi].Rows = append(groups[gi].Rows, v41ExpertRow{Token: tok, Slot: slot})
+			}
+		}
+		return groups
+	}
+	cases := [][][]routePick{
+		nil,
+		{{}, {}},
+		{{{expert: 3}}},
+		{{{expert: 9}, {expert: -1}, {expert: 9}}, {}, {{expert: -1}, {expert: 9}, {expert: 4}}},
+		{{{expert: math.MaxInt}, {expert: math.MinInt}}, {{expert: math.MaxInt}, {expert: 0}}},
+		v41GroupPicks(9, 1, 1),
+		v41GroupPicks(128, 32, 8),
+	}
+	for _, picks := range cases {
+		var before [][]routePick
+		if picks != nil {
+			before = make([][]routePick, len(picks))
+			for tok, row := range picks {
+				if row != nil {
+					before[tok] = make([]routePick, len(row))
+					copy(before[tok], row)
+				}
+			}
+		}
+		want, got := legacy(picks), v41PlanExpertGroups(picks)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("group plan differs from first-touch/token-slot control: got %v want %v", got, want)
+		}
+		later := v41PlanExpertGroups(picks)
+		for gi, group := range got {
+			if cap(group.Rows) != len(group.Rows) {
+				t.Fatalf("expert %d row capacity=%d, want exact length %d", group.Expert, cap(group.Rows), len(group.Rows))
+			}
+			extended := append(group.Rows, v41ExpertRow{Token: -1, Slot: -1})
+			extended[len(group.Rows)].Token = -2
+			if !reflect.DeepEqual(got, want) {
+				t.Fatal("append overwrote a neighboring group's rows")
+			}
+			got[gi].Rows[0].Token = -3
+			want[gi].Rows[0].Token = -3
+			if !reflect.DeepEqual(got, want) {
+				t.Fatal("group rows overlap")
+			}
+		}
+		if !reflect.DeepEqual(later, legacy(picks)) {
+			t.Fatal("separate plans share mutable storage")
+		}
+		if !reflect.DeepEqual(picks, before) {
+			t.Fatal("planner mutated caller picks")
+		}
+	}
+	picks := cases[len(cases)-1]
+	var retained []v41ExpertGroup
+	measure := func(plan func([][]routePick) []v41ExpertGroup) float64 {
+		return testing.AllocsPerRun(20, func() { retained = plan(picks) })
+	}
+	old, current := measure(legacy), measure(v41PlanExpertGroups)
+	if !reflect.DeepEqual(retained, legacy(picks)) {
+		t.Fatal("allocation witness did not retain the complete plan")
+	}
+	// Map and group-header costs are shared. The control grows 32 independent
+	// row slices; the candidate needs one backing allocation for all 1024 rows.
+	if old-current < 31 {
+		t.Fatalf("group-row allocation reduction missing: control=%g candidate=%g", old, current)
+	}
+	t.Logf("128-token/32-expert/8-pick grouping allocations: control=%g candidate=%g", old, current)
 }
