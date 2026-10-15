@@ -309,7 +309,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 					}
 				}
 			}
-			g, u, tiled, err := tile.project(s, inputs[groupStart:groupEnd], current-groupStart, H, I, own, valid)
+			g, u, tiled, panelRow, err := tile.project(s, inputs[groupStart:groupEnd], current-groupStart, H, I, options == nil, own, valid)
 			if cause = err; cause != nil {
 				break
 			}
@@ -341,7 +341,13 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 				}
 			}
 			*stage = "activation"
-			a, st, err := deferred.V41RoutedSwiGLUDeferred(g, u, limit, weights[current])
+			var a compute.Tensor
+			var st compute.V41DeferredStatus
+			if panelRow != nil {
+				a, st, err = panelRow.V41RoutedSwiGLUPanelRowDeferred(g, u, current-groupStart-tile.start, limit, weights[current])
+			} else {
+				a, st, err = deferred.V41RoutedSwiGLUDeferred(g, u, limit, weights[current])
+			}
 			if cause = record(a, st, I, compute.V41DeferredRoutedSwiGLU, 0, err); cause != nil {
 				break
 			}
