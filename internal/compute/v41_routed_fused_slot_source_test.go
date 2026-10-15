@@ -9,7 +9,8 @@ import (
 
 // fak-test:runtime fast est=5ms lane=default
 // Source-only witness: literal bindings replace per-load switches without
-// changing either quantized reduction order. Compiler/device parity and fused
+// changing either quantized reduction order. Paired Q2 gate/up work also reuses
+// the unchanged activation prelude. Compiler/device parity and fused
 // performance still require the existing Vulkan witnesses on physical silicon.
 func TestV41RoutedFusedSlotHoistSourceContract(t *testing.T) {
 	t.Parallel()
@@ -63,13 +64,33 @@ func TestV41RoutedFusedSlotHoistSourceContract(t *testing.T) {
 	if canonical(section(down, "void q3kScales", "// Q3K_SLOT")) != canonical(section(q3, "void q3kScales", "// Q3K_SLOT")) {
 		t.Error("down scale decoder differs from routed-id")
 	}
-	// The routed-id Q2_K kernel carries the same bank macro, so the fused gate/up
-	// banks are its program text.
-	bank := section(gate, "#define Q2K_BANK(RAW, ACC)", "void main()")
-	refBank := section(q2, "#define Q2K_BANK(RAW, ACC)", "void main()")
-	if canonical(bank) != canonical(refBank) {
-		t.Error("gate/up bank differs from routed-id Q2_K arithmetic or addressing")
+	// Compare the complete row body to the unchanged routed-id bank. Only the
+	// outer loop is paired: each accumulator keeps the same sb/j order.
+	refBank := canonical(section(q2, "#define Q2K_BANK(RAW, ACC)", "void main()"))
+	rowStart := strings.Index(refBank, "for (uint r = 0u; r < ROWS; ++r) {")
+	if rowStart < 0 || !strings.HasSuffix(refBank, " }") {
+		t.Fatal("routed-id Q2_K bank no longer has the expected row/outer-loop shape")
 	}
+	refRowQ2 := strings.TrimSuffix(refBank[rowStart:], " }")
+	row := canonical(section(gate, "#define Q2K_ROW(RAW, ACC)", "#define Q2K_PAIR(GRAW, URAW)"))
+	if row != "#define Q2K_ROW(RAW, ACC) "+refRowQ2 {
+		t.Error("gate/up row differs from routed-id Q2_K arithmetic or addressing")
+	}
+	activation := canonical(section(q2, "        vec4 xv[4];", "        for (uint r = 0u; r < ROWS; ++r) {"))
+	superblockLoop := "for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) { "
+	if refBank != "#define Q2K_BANK(RAW, ACC) for (uint r = 0u; r < ROWS; ++r) ACC[r] = 0.0; "+superblockLoop+activation+" "+refRowQ2+" }" {
+		t.Fatal("routed-id Q2_K bank has unchecked initialization or outer-loop work")
+	}
+	// Pin the entire paired wrapper, including both zero initializations and
+	// exactly one original activation load/sum followed by G then U row work.
+	paired := "#define Q2K_PAIR(GRAW, URAW) " +
+		"for (uint r = 0u; r < ROWS; ++r) accG[r] = 0.0; " +
+		"for (uint r = 0u; r < ROWS; ++r) accU[r] = 0.0; " +
+		superblockLoop + activation + " Q2K_ROW(GRAW, accG) Q2K_ROW(URAW, accU) }"
+	if canonical(section(gate, "#define Q2K_PAIR(GRAW, URAW)", "void main()")) != paired {
+		t.Error("gate/up must share one activation prelude without changing accumulator order")
+	}
+
 	for slot := 0; slot < 8; slot++ {
 		label := fmt.Sprintf("case %du", slot)
 		if slot == 7 {
@@ -78,7 +99,7 @@ func TestV41RoutedFusedSlotHoistSourceContract(t *testing.T) {
 		for _, pair := range [][2]string{
 			{down, fmt.Sprintf("Q3K_SLOT(q3kRow%d, byteAt%d, raw%d)", slot, slot, slot)},
 			{down, fmt.Sprintf("%s: d = q3kRow%d(row, blocks, midBase); break;", label, slot)},
-			{gate, fmt.Sprintf("%s: { Q2K_BANK(g%d, accG) Q2K_BANK(u%d, accU) break; }", label, slot, slot)},
+			{gate, fmt.Sprintf("%s: { Q2K_PAIR(g%d, u%d) break; }", label, slot, slot)},
 		} {
 			if !strings.Contains(pair[0], pair[1]) {
 				t.Errorf("missing correct slot mapping %q", pair[1])

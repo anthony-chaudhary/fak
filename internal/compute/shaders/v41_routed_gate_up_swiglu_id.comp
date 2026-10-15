@@ -8,9 +8,9 @@
 // moe_gate_up_mid_decode_lut_qwarp32_kernel @fc80bd695da76ee14bcb86820bf900a5cdfda806:22143
 // does gate + up + SwiGLU + route weight into one mid buffer.
 //
-// Each projection's GEMV is v41_q2k_matvec_id.comp's main body textually, one
-// pass per row bank, so each pick's gate and up rows reduce in that kernel's
-// order; the published lane is v41_routed_swiglu_id.comp's body term for term.
+// Each projection retains v41_q2k_matvec_id.comp's row arithmetic and
+// superblock order. Gate and up share one activation load/sum per superblock;
+// the published lane is v41_routed_swiglu_id.comp's body term for term.
 // Parity against the id path is therefore ULP (the two-id-dispatch association
 // is reproduced here), and the witness bounds it by ULP rather than by bit.
 //
@@ -66,45 +66,50 @@ vec4 bytesOf(uint w) {
     return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
 }
 
-// One row bank of the Q2_K GEMV, written exactly as v41_q2k_matvec_id.comp's
-// per-row body: `acc[r]` accumulates one per-superblock `sum`. ACC names the
-// row accumulator array and RAW the projection's binding, so the gate and up
-// passes are the same program text.
-#define Q2K_BANK(RAW, ACC)                                                                    \
-    for (uint r = 0u; r < ROWS; ++r) ACC[r] = 0.0;                                              \
-    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {                                    \
-        vec4 xv[4];                                                                             \
-        float xsum[4];                                                                          \
-        for (uint j = 0u; j < 4u; ++j) {                                                        \
-            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;                   \
-            vec4 v = x4[xBase + idx];                                                           \
-            xv[j] = v;                                                                          \
-            xsum[j] = v.x + v.y + v.z + v.w;                                                    \
-        }                                                                                       \
-        for (uint r = 0u; r < ROWS; ++r) {                                                      \
-            uint row = rowBase + r;                                                             \
-            if (row >= outDim) break;                                                           \
-            uint base = row * wordsPerRow + sb * 21u;                                           \
-            uint q = RAW[base + 4u + t16];                                              \
-            uint sc0 = RAW[base + h * 2u];                                              \
-            uint sc1 = RAW[base + h * 2u + 1u];                                         \
-            uint dm = RAW[base + 20u];                                                  \
-            vec2 dd = unpackHalf2x16(dm);                                                       \
-            uint scj[4];                                                                        \
-            scj[0] = (sc0 >> (s * 8u)) & 255u;                                                  \
-            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;                                           \
-            scj[2] = (sc1 >> (s * 8u)) & 255u;                                                  \
-            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;                                           \
-            float sum = 0.0;                                                                    \
-            for (uint j = 0u; j < 4u; ++j) {                                                    \
-                vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);                               \
-                float dl = dd.x * float(scj[j] & 15u);                                          \
-                float ml = dd.y * float(scj[j] >> 4u);                                          \
-                sum += dl * dot(qv, xv[j]) - ml * xsum[j];                                      \
-            }                                                                                   \
-            ACC[r] += sum;                                                                      \
-        }                                                                                       \
+// Complete per-superblock row body from v41_q2k_matvec_id.comp. Each ACC
+// retains its ascending sb/j arithmetic order; gate and up only share the
+// read-only activation vectors and their unchanged component sums.
+#define Q2K_ROW(RAW, ACC) \
+    for (uint r = 0u; r < ROWS; ++r) { \
+        uint row = rowBase + r; \
+        if (row >= outDim) break; \
+        uint base = row * wordsPerRow + sb * 21u; \
+        uint q = RAW[base + 4u + t16]; \
+        uint sc0 = RAW[base + h * 2u]; \
+        uint sc1 = RAW[base + h * 2u + 1u]; \
+        uint dm = RAW[base + 20u]; \
+        vec2 dd = unpackHalf2x16(dm); \
+        uint scj[4]; \
+        scj[0] = (sc0 >> (s * 8u)) & 255u; \
+        scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u; \
+        scj[2] = (sc1 >> (s * 8u)) & 255u; \
+        scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u; \
+        float sum = 0.0; \
+        for (uint j = 0u; j < 4u; ++j) { \
+            vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u); \
+            float dl = dd.x * float(scj[j] & 15u); \
+            float ml = dd.y * float(scj[j] >> 4u); \
+            sum += dl * dot(qv, xv[j]) - ml * xsum[j]; \
+        } \
+        ACC[r] += sum; \
     }
+
+#define Q2K_PAIR(GRAW, URAW) \
+    for (uint r = 0u; r < ROWS; ++r) accG[r] = 0.0; \
+    for (uint r = 0u; r < ROWS; ++r) accU[r] = 0.0; \
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) { \
+        vec4 xv[4]; \
+        float xsum[4]; \
+        for (uint j = 0u; j < 4u; ++j) { \
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u; \
+            vec4 v = x4[xBase + idx]; \
+            xv[j] = v; \
+            xsum[j] = v.x + v.y + v.z + v.w; \
+        } \
+        Q2K_ROW(GRAW, accG) \
+        Q2K_ROW(URAW, accU) \
+    }
+
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
@@ -127,14 +132,14 @@ void main() {
     // Select one matching gate/up binding pair before either reduction bank.
     // ids[pick] is uniform across this workgroup; barriers remain outside.
     switch (slot) {
-    case 0u: { Q2K_BANK(g0, accG) Q2K_BANK(u0, accU) break; }
-    case 1u: { Q2K_BANK(g1, accG) Q2K_BANK(u1, accU) break; }
-    case 2u: { Q2K_BANK(g2, accG) Q2K_BANK(u2, accU) break; }
-    case 3u: { Q2K_BANK(g3, accG) Q2K_BANK(u3, accU) break; }
-    case 4u: { Q2K_BANK(g4, accG) Q2K_BANK(u4, accU) break; }
-    case 5u: { Q2K_BANK(g5, accG) Q2K_BANK(u5, accU) break; }
-    case 6u: { Q2K_BANK(g6, accG) Q2K_BANK(u6, accU) break; }
-    default: { Q2K_BANK(g7, accG) Q2K_BANK(u7, accU) break; }
+    case 0u: { Q2K_PAIR(g0, u0) break; }
+    case 1u: { Q2K_PAIR(g1, u1) break; }
+    case 2u: { Q2K_PAIR(g2, u2) break; }
+    case 3u: { Q2K_PAIR(g3, u3) break; }
+    case 4u: { Q2K_PAIR(g4, u4) break; }
+    case 5u: { Q2K_PAIR(g5, u5) break; }
+    case 6u: { Q2K_PAIR(g6, u6) break; }
+    default: { Q2K_PAIR(g7, u7) break; }
     }
 
     for (uint r = 0u; r < ROWS; ++r) {
