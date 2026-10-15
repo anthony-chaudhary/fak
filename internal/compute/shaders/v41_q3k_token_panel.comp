@@ -22,6 +22,18 @@ uint leU32(uint offset) {
     return byteAt(offset) | (byteAt(offset + 1u) << 8u) |
            (byteAt(offset + 2u) << 16u) | (byteAt(offset + 3u) << 24u);
 }
+// Four consecutive bytes share their raw word loads. Every caller uses a
+// four-byte lane group inside the block's quant or high-mask array. Q3 blocks
+// are 110 bytes, so their starting alignment alternates between zero and two;
+// the straddling read still stays inside those arrays' enclosing raw words.
+uint packedFourBytes(uint offset) {
+    uint word = offset >> 2u;
+    uint shift = (offset & 3u) * 8u;
+    uint lo = raw[word];
+    if (shift == 0u) return lo;
+    return (lo >> shift) | (raw[word + 1u] << (32u - shift));
+}
+
 void unpackScales(uint sc, out int scales[16]) {
     uint aux0 = leU32(sc), aux1 = leU32(sc + 4u), tmp = leU32(sc + 8u);
     uint words[4];
@@ -57,14 +69,20 @@ void main() {
                 for (uint sub = 0u; sub < 2u; ++sub) {
                     float dl = d * float(scales[si] - 32);
                     si++;
-                    for (uint l = 0u; l < 16u; ++l) {
-                        uint lane = sub * 16u + l;
-                        int code = int((byteAt(base + 32u + qi + lane) >> shift) & 3u);
-                        if ((byteAt(base + lane) & mask) == 0u) code -= 4;
-                        float decoded = dl * float(code);
-                        uint col = sb * 256u + halfBase + j * 32u + lane;
-                        for (uint token = 0u; token < tokens; ++token) {
-                            sums[token] += decoded * x[token * inDim + col];
+                    for (uint l = 0u; l < 16u; l += 4u) {
+                        uint laneBase = sub * 16u + l;
+                        uint quantBytes = packedFourBytes(base + 32u + qi + laneBase);
+                        uint highBytes = packedFourBytes(base + laneBase);
+                        for (uint component = 0u; component < 4u; ++component) {
+                            uint lane = laneBase + component;
+                            uint byteShift = component * 8u;
+                            int code = int((quantBytes >> (byteShift + shift)) & 3u);
+                            if (((highBytes >> byteShift) & mask) == 0u) code -= 4;
+                            float decoded = dl * float(code);
+                            uint col = sb * 256u + halfBase + j * 32u + lane;
+                            for (uint token = 0u; token < tokens; ++token) {
+                                sums[token] += decoded * x[token * inDim + col];
+                            }
                         }
                     }
                 }
