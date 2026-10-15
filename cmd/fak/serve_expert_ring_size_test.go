@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -382,20 +383,37 @@ func TestServeActivatedExpertRingAutoReservesKVBeforeRing(t *testing.T) {
 }
 
 // fak-test:runtime fast est=20ms lane=default
-func TestServeExpertRingContextWeightsOnlyForNonTokenModes(t *testing.T) {
+func TestServeExpertRingContextWeightsForAllModes(t *testing.T) {
 	ws := serveStreamedSynthWeightSource(t)
 	be := serveCapBackend{total: 1 << 20, free: 1 << 20, known: true}
 	fit := serveFitBudget{Base: 1 << 20}
 	full := compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: 1 << 40, Detail: "full", Scope: compute.MemoryScopeDevice}}
-	if got, ok := serveExpertRingContextWeights(ws, be, true, serveExpertRingSize{Mode: serveExpertRingToken}, full, fit); ok || got.Total() != full.Total() {
-		t.Fatal("token mode changed the context sizing weights")
+	want, ok := serveExpertRingContextWeights(ws, be, true, serveExpertRingSize{Mode: serveExpertRingAuto}, full, fit)
+	if !ok || want.DeviceTotal() >= full.DeviceTotal() {
+		t.Fatalf("auto mode kept full weights: ok=%v total=%d", ok, want.DeviceTotal())
 	}
-	got, ok := serveExpertRingContextWeights(ws, be, true, serveExpertRingSize{Mode: serveExpertRingAuto}, full, fit)
-	if !ok || got.DeviceTotal() >= full.DeviceTotal() {
-		t.Fatalf("auto mode kept sizing the context against the full weights: ok=%v total=%d", ok, got.DeviceTotal())
+	for _, mode := range []serveExpertRingMode{"", serveExpertRingToken, serveExpertRingAuto, serveExpertRingExplicit} {
+		got, ok := serveExpertRingContextWeights(ws, be, true, serveExpertRingSize{Mode: mode}, full, fit)
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("mode %q context weights=%+v ok=%v, want exact bounded token plan %+v", mode, got, ok, want)
+		}
 	}
-	if _, ok := serveExpertRingContextWeights(ws, be, false, serveExpertRingSize{Mode: serveExpertRingAuto}, full, fit); ok {
+	if got, ok := serveExpertRingContextWeights(ws, be, false, serveExpertRingSize{Mode: serveExpertRingToken}, full, fit); ok || !reflect.DeepEqual(got, full) {
 		t.Fatal("a serve that is not device-only changed its context sizing")
+	}
+	if got, ok := serveExpertRingContextWeights(ws, be, true, serveExpertRingSize{Mode: serveExpertRingToken}, full, serveFitBudget{}); ok || !reflect.DeepEqual(got, full) {
+		t.Fatal("unknown device capacity changed the resident context weights")
+	}
+	unstageable, err := ggufload.NewWeightSource(ws.File, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := serveExpertRingContextWeights(unstageable, be, true, serveExpertRingSize{Mode: serveExpertRingToken}, full, fit); ok || !reflect.DeepEqual(got, full) {
+		t.Fatal("an unstageable checkpoint changed its context weights")
+	}
+	fitting := compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: 4096, Scope: compute.MemoryScopeDevice}}
+	if got, ok := serveExpertRingContextWeights(ws, be, true, serveExpertRingSize{Mode: serveExpertRingToken}, fitting, fit); ok || !reflect.DeepEqual(got, fitting) {
+		t.Fatal("fitting resident arm changed its context weights")
 	}
 }
 
@@ -427,5 +445,170 @@ func TestServeActivatedExpertRingAutoTrimsToTheLoadGuard(t *testing.T) {
 	_, ok, err = serveActivatedExpertRingPlacementSized(ws, unified(tooSmall), true, serveRingFullPlanTooBig(), 64, fit, serveExpertRingSize{Mode: serveExpertRingAuto}, serveExpertRingHost{})
 	if ok || !errors.Is(err, ErrServeExpertRingTooBig) {
 		t.Fatalf("auto placement with no room for the floor ok=%v err=%v, want ErrServeExpertRingTooBig", ok, err)
+	}
+}
+
+// serveContextHeaderReader makes any accidental payload read fail immediately.
+// The fixture below describes realistic byte counts without allocating those bytes.
+type serveContextHeaderReader struct{ reads int }
+
+func (r *serveContextHeaderReader) ReadAt([]byte, int64) (int, error) {
+	r.reads++
+	panic("header-only context admission read a tensor payload")
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestServeTokenExpertRingContextAdmission(t *testing.T) {
+	t.Setenv("FAK_HYBRID_KV", "0")
+	t.Setenv("FAK_UP_KV_PRECISION", "f32")
+	const (
+		gib          = int64(1 << 30)
+		layers       = 40
+		hidden       = 5120
+		intermediate = 2304
+		experts      = 384
+		active       = 6
+		denseBytes   = 3 * gib
+		engramRows   = uint64(384000000)
+		declared     = 1048576
+		requested    = 4096
+	)
+	// Published Flash geometry with a synthetic 3 GiB dense remainder, Q2_K
+	// gate/up and Q3_K down slabs, and two packed Engram tables. This is an
+	// accounting fixture, not a runnable model or a physical allocation receipt.
+	f := &ggufload.File{Metadata: map[string]ggufload.Value{
+		"general.architecture":                        {Type: ggufload.TypeString, Value: "deepseek41"},
+		"deepseek41.embedding_length":                 {Type: ggufload.TypeUint64, Value: uint64(hidden)},
+		"deepseek41.block_count":                      {Type: ggufload.TypeUint64, Value: uint64(layers)},
+		"deepseek41.context_length":                   {Type: ggufload.TypeUint64, Value: uint64(declared)},
+		"deepseek41.feed_forward_length":              {Type: ggufload.TypeUint64, Value: uint64(intermediate)},
+		"deepseek41.attention.head_count":             {Type: ggufload.TypeUint64, Value: uint64(64)},
+		"deepseek41.attention.head_count_kv":          {Type: ggufload.TypeUint64, Value: uint64(1)},
+		"deepseek41.attention.layer_norm_rms_epsilon": {Type: ggufload.TypeFloat32, Value: float32(1e-6)},
+		"deepseek41.attention.q_lora_rank":            {Type: ggufload.TypeUint64, Value: uint64(1280)},
+		"deepseek41.attention.kv_lora_rank":           {Type: ggufload.TypeUint64, Value: uint64(512)},
+		"deepseek41.attention.qk_nope_head_dim":       {Type: ggufload.TypeUint64, Value: uint64(448)},
+		"deepseek41.attention.qk_rope_head_dim":       {Type: ggufload.TypeUint64, Value: uint64(64)},
+		"deepseek41.attention.value_length_mla":       {Type: ggufload.TypeUint64, Value: uint64(512)},
+		"deepseek41.attention.output_group_count":     {Type: ggufload.TypeUint64, Value: uint64(8)},
+		"deepseek41.attention.output_lora_rank":       {Type: ggufload.TypeUint64, Value: uint64(1024)},
+		"deepseek41.expert_count":                     {Type: ggufload.TypeUint64, Value: uint64(experts)},
+		"deepseek41.expert_used_count":                {Type: ggufload.TypeUint64, Value: uint64(active)},
+		"deepseek41.expert_feed_forward_length":       {Type: ggufload.TypeUint64, Value: uint64(intermediate)},
+	}}
+	var offset int64
+	add := func(name string, dims []uint64, typ ggufload.TensorType, bytes int64) {
+		f.Tensors = append(f.Tensors, ggufload.TensorInfo{Name: name, Dims: dims, Type: typ, FileOffset: offset})
+		offset += bytes
+	}
+	add("dense_fixture.weight", []uint64{uint64(denseBytes / 4)}, ggufload.TensorF32, denseBytes)
+	const blocksPerSlab = int64(hidden) * intermediate * experts / 256
+	for l := 0; l < layers; l++ {
+		add(fmt.Sprintf("blk.%d.ffn_gate_exps.weight", l), []uint64{hidden, intermediate, experts}, ggufload.TensorQ2_K, blocksPerSlab*84)
+		add(fmt.Sprintf("blk.%d.ffn_up_exps.weight", l), []uint64{hidden, intermediate, experts}, ggufload.TensorQ2_K, blocksPerSlab*84)
+		add(fmt.Sprintf("blk.%d.ffn_down_exps.weight", l), []uint64{intermediate, hidden, experts}, ggufload.TensorQ3_K, blocksPerSlab*110)
+	}
+	for _, l := range []int{1, 14} {
+		add(fmt.Sprintf("blk.%d.engram_embd.weight", l), []uint64{256, engramRows}, ggufload.TensorQ2_K, int64(engramRows)*84)
+	}
+	reader := &serveContextHeaderReader{}
+	ws, err := ggufload.NewWeightSource(f, reader, offset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := ws.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	cfg, err := ws.File.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.IsDeepSeekV41() || cfg.MaxPositionEmbeddings != declared || cfg.HeadDim != 512 {
+		t.Fatalf("fixture lost V4.1 geometry: %+v", cfg)
+	}
+	full, err := serveGGUFWeightMemoryPlanForArm(ws, serveLoadArmResidentQ4K)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const routedBytes = blocksPerSlab * (84 + 84 + 110) * layers
+	const gatheredBytes = int64(engramRows) * 84 * 2
+	if full.Total() != denseBytes+routedBytes+gatheredBytes || full.Total() <= 128*gib {
+		t.Fatalf("full header charge=%d, want %d above the device budget", full.Total(), denseBytes+routedBytes+gatheredBytes)
+	}
+	// A 128 GiB integrated pool with 96 GiB free. The reported capacities are
+	// deterministic CPU test doubles; no accelerator capability is exercised.
+	be := serveCapBackend{total: 128 * gib, free: 128 * gib, known: true, hostTotal: 128 * gib, hostFree: 96 * gib, hostKnown: true, tier: "integrated:context-test"}
+	fit := serveDeviceFitBudget(be)
+	baseline, _, err := resolveServeNativeContext(ws, be, full, fit, requested)
+	if err != nil || baseline.ResolvedTokens != compute.MinAutoContextTokens {
+		t.Fatalf("full-charge control=%+v err=%v, want unchanged 512-token clamp", baseline, err)
+	}
+	mode, err := resolveServeExpertRingSize("", nil)
+	if err != nil || mode.Mode != serveExpertRingToken {
+		t.Fatalf("default ring mode=%+v err=%v", mode, err)
+	}
+	weights, selected := serveExpertRingContextWeights(ws, be, true, mode, full, fit)
+	resolution, contextPlan, err := resolveServeNativeContext(ws, be, weights, fit, requested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.ResolvedTokens != requested || !selected {
+		t.Fatalf("default token-ring context resolved=%d selected=%v, want explicit4096 using its bounded load charge (full=%d, effective=%d)", resolution.ResolvedTokens, selected, full.Total(), weights.Total())
+	}
+	if resolution.RequestedTokens != requested || resolution.ModelDeclaredTokens != declared || resolution.Source != "explicit" {
+		t.Fatalf("resolution changed declaration or request: %+v", resolution)
+	}
+	const wantRing = routedBytes / experts * active
+	wantWeights := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Bytes: denseBytes, Detail: serveActivatedRingBaseDetail, Scope: compute.MemoryScopeDevice},
+		{Class: compute.MemoryWeights, Bytes: wantRing, Detail: serveActivatedRingDetail, Scope: compute.MemoryScopeDevice},
+		{Class: compute.MemoryWeights, Bytes: 4 * gib, Detail: ggufload.HostGatheredDetail, Scope: compute.MemoryScopeHost},
+	}
+	if !reflect.DeepEqual(weights, wantWeights) {
+		t.Fatalf("effective weights=%+v, want independent dense+token+page sum %+v", weights, wantWeights)
+	}
+	_, fullErr := refuseIfTooBigOnDevice(full, nil, be, &fit)
+	if !serveFullPlanFitTooBig(fullErr) {
+		t.Fatalf("full resident control did not refuse: %v", fullErr)
+	}
+	ring, ok, err := serveActivatedExpertRingPlacement(ws, be, true, fullErr, requested, fit)
+	if err != nil || !ok {
+		t.Fatalf("bounded load plan failed: ok=%v err=%v", ok, err)
+	}
+	var loadWeights, loadContext compute.MemoryPlan
+	transientRows := 0
+	for _, row := range ring.Plan {
+		if row.Detail == "gguf-host-expert-band" {
+			t.Fatal("disk-only expert remainder became a host allocation")
+		}
+		if row.Class == compute.MemoryWeights {
+			loadWeights = append(loadWeights, row)
+			continue
+		}
+		if row.Detail == "v41-forward-transient-scratch" {
+			transientRows++
+			if row.Bytes <= 0 {
+				t.Fatal("V4.1 transient charge vanished")
+			}
+			continue
+		}
+		loadContext = append(loadContext, row)
+	}
+	if !reflect.DeepEqual(loadWeights, weights) || !reflect.DeepEqual(loadContext, contextPlan) || transientRows != 1 {
+		t.Fatalf("load/resolve mismatch: weights=%+v context=%+v transientRows=%d; want weights=%+v context=%+v plus one transient", loadWeights, loadContext, transientRows, weights, contextPlan)
+	}
+	// Keep a real shared-pool refusal: device room alone cannot erase the dense,
+	// ring and Engram-page charges when physical host RAM is below their sum.
+	small := be
+	small.hostTotal, small.hostFree = 8*gib, 8*gib
+	refused, ok, err := serveActivatedExpertRingPlacement(ws, small, true, fullErr, requested, fit)
+	var tooBig *compute.FitError
+	if ok || !errors.As(err, &tooBig) || tooBig.Verdict != compute.FitTooBig || tooBig.Want <= tooBig.Avail || refused.Plan != nil {
+		t.Fatalf("genuinely too-small shared pool accepted: ok=%v plan=%+v err=%v", ok, refused.Plan, err)
+	}
+	if reader.reads != 0 {
+		t.Fatalf("header admission read %d payloads", reader.reads)
 	}
 }

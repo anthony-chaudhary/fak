@@ -248,14 +248,15 @@ func serveExpertRingSharedPool(sharesHostRAM bool, carveout int64, carveoutKnown
 	return sharesHostRAM && (!carveoutKnown || carveout <= serveExpertRingUMACarveoutMax)
 }
 
-// serveExpertRingContextWeights is the weight plan a non-token ring size resolves the native
+// serveExpertRingContextWeights is the weight plan every ring size resolves the native
 // context against. A device-only serve whose full resident weights exceed the device budget loads
 // the ring placement, so sizing the context against the full weights collapses it to the minimum
 // window; the placement's token plan (dense base + token ring + host page reserve) is what KV is
-// actually reserved next to before the ring takes the rest. Token mode keeps the historical
-// context resolution unchanged.
+// actually reserved next to before the ring takes the rest. Token mode uses the same
+// bounded charge: retaining the full checkpoint here would clamp its context before
+// the loader selects the already bounded token ring (fak#13863).
 func serveExpertRingContextWeights(ws *ggufload.WeightSource, be compute.Backend, requireDevice bool, size serveExpertRingSize, weights compute.MemoryPlan, fit serveFitBudget) (compute.MemoryPlan, bool) {
-	if size.Mode == serveExpertRingToken || size.Mode == "" || !requireDevice || be == nil || ws == nil {
+	if !requireDevice || be == nil || ws == nil {
 		return weights, false
 	}
 	avail := fit.avail()
