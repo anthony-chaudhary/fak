@@ -158,22 +158,51 @@ func (l *v41ProjectionLoan) own(t compute.Tensor) bool {
 	l.owned = append(l.owned, t)
 	return true
 }
-func (l *v41ProjectionLoan) release() (first any) {
+
+type v41ProjectionCleanup struct {
+	value   any
+	present bool
+	legacy  any
+}
+
+func (l *v41ProjectionLoan) releaseCleanup() (out v41ProjectionCleanup) {
 	for i := len(l.owned) - 1; i >= 0; i-- {
 		func() {
+			complete := false
 			defer func() {
-				if r := recover(); r != nil && first == nil {
-					first = r
+				value := recover()
+				if !complete && !out.present {
+					out.value, out.present = value, true
+				}
+				if value != nil && out.legacy == nil {
+					out.legacy = value
 				}
 			}()
 			l.backend.Free(l.owned[i])
+			complete = true
 		}()
 	}
 	l.owned = nil
+	return out
+}
+
+func (l *v41ProjectionLoan) release() (first any) {
+	first = l.releaseCleanup().legacy
 	if first == nil && l.valid != nil && !l.valid() {
 		first = errV41RouterProjectionScope
 	}
 	return first
+}
+
+func (l *v41ProjectionLoan) releasePresent() (any, bool) {
+	out := l.releaseCleanup()
+	if out.present {
+		return out.value, true
+	}
+	if l.valid != nil && !l.valid() {
+		return errV41RouterProjectionScope, true
+	}
+	return nil, false
 }
 
 type v41RouterResidentInput struct {
