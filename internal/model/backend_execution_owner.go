@@ -95,6 +95,15 @@ func (scope *backendExecutionScope) finish() {
 	scope.release(recover(), false)
 }
 
+// finishCompleted leaves the caller's unwind untouched. An explicit completion
+// bit distinguishes a normal return from both legacy panic(nil) and Goexit,
+// neither of which may be converted into successful session retirement.
+func (scope *backendExecutionScope) finishCompleted(complete *bool) {
+	if scope != nil {
+		scope.release(nil, !*complete)
+	}
+}
+
 // finishError additionally preserves a primary returned error over a cleanup
 // panic. The caller's error stays authoritative, just as in the forward unwind.
 func (scope *backendExecutionScope) finishError(err *error) {

@@ -393,11 +393,13 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 				panic(r)
 			}
 		}()
+		// Immutable hits were validated when staged. Validate all misses across A
+		// and B before staging any of them, including a partially warm model.
 		sourceA := make([]compute.Tensor, groups)
 		aKeys := make([]string, groups)
 		for g := 0; g < groups; g++ {
 			aKeys[g] = fmt.Sprintf("v41-grouped:%s:%v:%d:%d:%d", aName, a.dtype, g, rank, groupIn)
-			if _, present := s.halW[aKeys[g]]; present {
+			if _, present := s.lookupImmutableWeight(aKeys[g], aKeys[g]); present {
 				continue
 			}
 			var err error
@@ -408,7 +410,7 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 		}
 		bKey := fmt.Sprintf("v41-grouped:%s:%v:%d:%d", bName, b.dtype, dim, joinedWidth)
 		var sourceB compute.Tensor
-		if _, present := s.halW[bKey]; !present {
+		if _, present := s.lookupImmutableWeight(bKey, bKey); !present {
 			var err error
 			sourceB, err = b.host(0, dim, joinedWidth)
 			if err != nil {

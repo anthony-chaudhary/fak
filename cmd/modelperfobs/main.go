@@ -23,6 +23,8 @@ func main() {
 		runProxy(os.Args[2:])
 	case "report":
 		runReport(os.Args[2:])
+	case "time-burndown":
+		fatalIf(modelperfobs.RunTimeBurndown(os.Args[2:], os.Stdout))
 	case "cache-state-bench":
 		runStateBench(os.Args[2:])
 	default:
@@ -36,10 +38,14 @@ func runProxy(args []string) {
 	listen := fs.String("listen", "127.0.0.1:8091", "proxy listen address")
 	backend := fs.String("backend", "", "OpenAI-compatible backend base URL")
 	ledger := fs.String("ledger", "model-perf.jsonl", "append-only observation JSONL")
+	cache := fs.String("cache-state", "unknown", "declared cache state: cold, warm, steady, or unknown")
+	warmup := fs.Bool("warmup", false, "mark observations as warmups for time-burndown exclusion")
 	_ = fs.Parse(args)
+	cacheState, err := modelperfobs.ParseCacheState(*cache)
+	fatalIf(err)
 	u, err := modelperfobs.ParseBackend(*backend)
 	fatalIf(err)
-	server := &http.Server{Addr: *listen, Handler: &modelperfobs.Proxy{Backend: u, Ledger: *ledger}, ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Addr: *listen, Handler: &modelperfobs.Proxy{Backend: u, Ledger: *ledger, CacheState: cacheState, Warmup: *warmup}, ReadHeaderTimeout: 10 * time.Second}
 	fmt.Fprintf(os.Stderr, "modelperfobs: proxy http://%s -> %s; ledger=%s\n", *listen, u, *ledger)
 	fatalIf(server.ListenAndServe())
 }
@@ -103,5 +109,5 @@ func fatalIf(err error) {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: modelperfobs proxy --backend URL [--listen ADDR --ledger FILE]\n       modelperfobs report --input FILE [--format md|json]\n       modelperfobs cache-state-bench [--output FILE --pretty=true]\n       modelperfobs cache-state-bench --verify FILE")
+	fmt.Fprintln(os.Stderr, "usage: modelperfobs proxy --backend URL [--listen ADDR --ledger FILE --cache-state cold|warm|steady|unknown --warmup]\n       modelperfobs report --input FILE [--format md|json]\n       modelperfobs time-burndown --input FILE [--phases FILE --format md|json|prom]\n       modelperfobs cache-state-bench [--output FILE --pretty=true]\n       modelperfobs cache-state-bench --verify FILE")
 }

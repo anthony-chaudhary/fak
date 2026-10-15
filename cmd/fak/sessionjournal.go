@@ -67,6 +67,10 @@ func runSessionJournal(stdout, stderr io.Writer, argv []string) int {
 func sessionJournalUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak sessionjournal [report|open|beat|close] [flags]")
 	fmt.Fprintln(w, "  report   classify recorded sessions (LIVE/CRASHED/STALE/CLOSED) against the boot epoch")
+	fmt.Fprintln(w, "           --refusals        only the content-free capture-refusal audit rows")
+	fmt.Fprintln(w, "           --refusal-id <id> filter refusal rows to one exact session id")
+	fmt.Fprintln(w, "           --refusal-limit N cap the refusal projection at N rows (0 = all)")
+	fmt.Fprintln(w, "           a refusal row (KindRefuse) never becomes a lifecycle verdict; JSON adds counts.refusals")
 	fmt.Fprintln(w, "  open     register a session at start (boot-stamped)   --id <sid> [--cwd --model --account ...]")
 	fmt.Fprintln(w, "  beat     heartbeat                                    --id <sid>")
 	fmt.Fprintln(w, "  close    clean deregister at graceful exit            --id <sid> [--reason ...]")
@@ -149,6 +153,9 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 	staleMin := fs.Int("stale-after-min", 15, "same-boot last-seen older than this (minutes) -> STALE (0 disables)")
 	all := fs.Bool("all", false, "include CLOSED sessions")
 	crashedOnly := fs.Bool("crashed", false, "only the CRASHED (resume-candidate) set")
+	refusalsOnly := fs.Bool("refusals", false, "only the content-free capture-refusal audit rows")
+	refusalID := fs.String("refusal-id", "", "filter refusal rows to this exact session id")
+	refusalLimit := fs.Int("refusal-limit", 0, "cap the refusal projection at N rows (0 = all)")
 	causes := fs.Bool("causes", false, "correlate CRASHED rows with Windows Event-1000 causes")
 	causeSince := fs.Duration("cause-since", 24*time.Hour, "Windows event-log lookback for crash causes")
 	bootOverride := fs.String("boot-time", "", "override the machine boot instant (RFC3339) — for folding a journal copied from a crashed box")
@@ -172,7 +179,10 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 	if strings.TrimSpace(jp) == "" {
 		jp = sessionjournal.DefaultPath()
 	}
-	sessions := sessionjournal.FoldEvents(sessionjournal.LoadFile(jp))
+	journalEvents := sessionjournal.LoadFile(jp)
+	sessions := sessionjournal.FoldEvents(journalEvents)
+	refusalCount := sessionjournal.RefusalCount(journalEvents)
+	refusals := sessionjournal.Refusals(journalEvents, *refusalID, *refusalLimit)
 
 	// Source 2: the existing guard_sessions.jsonl index as open-only records, so the report
 	// is useful over fleet data recorded before this journal existed.
@@ -205,6 +215,10 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 		crashCauses = matchEvent1000Crashes(classified, consoleFaultEventsFromWinRecords(records, now.UnixMilli()), event1000WindowMS)
 	}
 
+	if *refusalsOnly {
+		classified = nil
+	}
+
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
 			"schema":      "fak.sessionjournal.report.v1",
@@ -213,20 +227,26 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 			"boot_id":     sessionjournal.BootID(bt),
 			"journal":     jp,
 			"counts": map[string]int{
-				"live":    counts[sessionjournal.StatusLive],
-				"crashed": counts[sessionjournal.StatusCrashed],
-				"stale":   counts[sessionjournal.StatusStale],
-				"closed":  counts[sessionjournal.StatusClosed],
+				"live":     counts[sessionjournal.StatusLive],
+				"crashed":  counts[sessionjournal.StatusCrashed],
+				"stale":    counts[sessionjournal.StatusStale],
+				"closed":   counts[sessionjournal.StatusClosed],
+				"refusals": refusalCount,
 			},
 			"sessions": reportRows(classified),
+			"refusals": refusals,
 			"causes":   crashCauses,
 		}, "fak sessionjournal")
 	}
 
-	fmt.Fprintf(stdout, "boot: %s (%s)  |  live=%d crashed=%d stale=%d closed=%d\n",
+	fmt.Fprintf(stdout, "boot: %s (%s)  |  live=%d crashed=%d stale=%d closed=%d refusals=%d\n",
 		bootTimeString(bt), bootSrc,
 		counts[sessionjournal.StatusLive], counts[sessionjournal.StatusCrashed],
-		counts[sessionjournal.StatusStale], counts[sessionjournal.StatusClosed])
+		counts[sessionjournal.StatusStale], counts[sessionjournal.StatusClosed], refusalCount)
+	if *refusalsOnly {
+		renderSessionJournalRefusals(stdout, refusals)
+		return 0
+	}
 	if len(classified) == 0 {
 		fmt.Fprintf(stdout, "no recorded sessions (journal: %s)\n", jp)
 		return 0
@@ -342,6 +362,22 @@ func renderSessionJournalTable(w io.Writer, cs []sessionjournal.Classified) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			c.Status, c.Reason, orDash(c.ID), orDash(firstNonEmpty(c.Agent, c.Model)),
 			c.PID, orDash(startedString(c.StartedAt)), orDash(driveSummary(c.Drive)), orDash(c.CWD))
+	}
+	_ = tw.Flush()
+}
+
+// renderSessionJournalRefusals renders the bounded, content-free refusal projection. Only the
+// fields persisted on a KindRefuse row appear — never the denied cwd, source text, model, or argv.
+func renderSessionJournalRefusals(w io.Writer, rs []sessionjournal.Refusal) {
+	if len(rs) == 0 {
+		fmt.Fprintln(w, "no capture refusals")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "REASON\tID\tTS\tBOOT\tSOURCE_DIGEST\n")
+	for _, r := range rs {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			orDash(r.Reason), orDash(r.ID), orDash(r.TS), orDash(r.Boot), orDash(r.SourceDigest))
 	}
 	_ = tw.Flush()
 }

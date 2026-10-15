@@ -397,6 +397,13 @@ Block layout definitions are in `ggml/src/ggml-common.h` at the same revision.
 The translation omits function pointers and retains the loader's existing local
 format geometry, including its 128-element Q2_0 layout.
 
+The V4.1 activation comparison and deliberate-divergence controls also adapt
+the backend graph node-comparison and sentinel process from
+`tests/test-backend-ops.cpp` at revision
+`fd55cb98fe29d3df0054d3f3e6e6f15958ea72ab`:
+https://github.com/ggml-org/llama.cpp/blob/fd55cb98fe29d3df0054d3f3e6e6f15958ea72ab/tests/test-backend-ops.cpp
+That upstream source uses the same MIT license below.
+
 MIT License
 
 Copyright (c) 2023-2026 The ggml authors

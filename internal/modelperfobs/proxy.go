@@ -27,14 +27,16 @@ var fallbackProxyClient = func() *http.Client {
 }()
 
 type Proxy struct {
-	Backend  *url.URL
-	Ledger   string
-	Client   *http.Client
-	Now      func() time.Time
-	mu       sync.Mutex
-	active   map[string]struct{}
-	overlaps map[string]map[string]struct{}
-	seq      atomic.Uint64
+	Backend    *url.URL
+	Ledger     string
+	Client     *http.Client
+	Now        func() time.Time
+	CacheState string
+	Warmup     bool
+	mu         sync.Mutex
+	active     map[string]struct{}
+	overlaps   map[string]map[string]struct{}
+	seq        atomic.Uint64
 }
 
 type requestEnvelope struct {
@@ -51,9 +53,19 @@ type responseUsage struct {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cacheState, err := ParseCacheState(p.CacheState)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	started := p.now()
 	id := fmt.Sprintf("%d-%d", started.UnixNano(), p.seq.Add(1))
-	obs := Observation{Schema: Schema, Timestamp: started.UTC(), RequestID: id, Backend: p.Backend.String()}
+	obs := Observation{Schema: Schema, Timestamp: started.UTC(), RequestID: id, Backend: p.Backend.String(),
+		CacheState: cacheState, CacheStateSource: "unknown", Warmup: p.Warmup,
+		AttributionUnavailable: BackendAttributionUnavailable}
+	if strings.TrimSpace(p.CacheState) != "" {
+		obs.CacheStateSource = "declared"
+	}
 	p.beginRequest(id)
 	completed := false
 	defer func() {

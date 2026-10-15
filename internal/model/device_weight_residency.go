@@ -127,6 +127,64 @@ func (m *Model) immutableDeviceWeights(be compute.Backend) *backendHALWeightResi
 	return closer.halWeights.backend(be)
 }
 
+// lookupImmutableWeight adopts only an existing immutable handle. It never creates
+// owner state, stages storage or calls a backend. This lets callers validate every
+// missing host payload before the first upload, without rereading resident weights.
+// The caller serializes session use, just as for cachedImmutableWeight.
+func (s *Session) lookupImmutableWeight(sessionKey, residencyKey string) (compute.Tensor, bool) {
+	if s == nil || s.halClosed {
+		return compute.Tensor{}, false
+	}
+	if weight, ok := s.halW[sessionKey]; ok {
+		return weight, true // Preserve the local handle's existing ownership marker.
+	}
+	// Model adoption needs both the lifetime pin and a local memo: resident chains
+	// collect protected operands from halW before executing any weight closures.
+	if s.M == nil || !s.modelWeightsHeld || s.halW == nil || !backendHasComparableIdentity(s.Backend) {
+		return compute.Tensor{}, false
+	}
+	weightCloserInitMu.Lock()
+	closer := s.M.weightCloser
+	weightCloserInitMu.Unlock()
+	if closer == nil {
+		return compute.Tensor{}, false
+	}
+	closer.mu.Lock()
+	defer closer.mu.Unlock()
+	// A pinned session may still borrow while CloseWeights waits for it. The
+	// final release cannot retire these handles until this session detaches.
+	if closer.closed || closer.halWeights == nil {
+		return compute.Tensor{}, false
+	}
+	registry := closer.halWeights
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.closed {
+		return compute.Tensor{}, false
+	}
+	for _, resident := range registry.backends {
+		if resident.be != s.Backend {
+			continue
+		}
+		resident.mu.Lock()
+		defer resident.mu.Unlock()
+		if resident.closed {
+			return compute.Tensor{}, false
+		}
+		weight, ok := resident.weights[residencyKey]
+		if !ok {
+			return compute.Tensor{}, false
+		}
+		s.halW[sessionKey] = weight
+		if s.borrowedHALW == nil {
+			s.borrowedHALW = make(map[string]struct{})
+		}
+		s.borrowedHALW[sessionKey] = struct{}{}
+		return weight, true
+	}
+	return compute.Tensor{}, false
+}
+
 // VisitImmutableDeviceWeights observes already staged model-owned weights for one
 // exact backend instance. It never creates a residency pool or stages a weight.
 // The caller must invoke it outside token loops. false means unavailable (closed

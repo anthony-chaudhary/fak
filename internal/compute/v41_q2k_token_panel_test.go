@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"math"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/kquantbits"
@@ -79,14 +78,10 @@ func TestV41Q2KTokenPanelContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(source)
-	decode := strings.Index(text, "vec4 qv = bytesOf")
-	if decode < 0 {
-		t.Fatal("shader quant decode site is missing")
-	}
-	token := strings.Index(text[decode:], "for (uint t = 0u; t < tokens; ++t)")
-	if token < 0 || !strings.Contains(text, "layout(local_size_x = 64)") || strings.Count(text, "uint q = raw[") != 1 {
-		t.Fatal("shader must retain one quant-load site with its token loop after decode")
+	// The paired-row contract pins both quant decodes before the token loop,
+	// the guarded odd tail, and the shared activation with separate row sums.
+	if err := q2TokenPanelActivationReuseSourceContract(string(source)); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -16,7 +16,10 @@ package computetrace
 // must never be reported as agreement.
 
 import (
+	"encoding/json"
+	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -382,4 +385,265 @@ func TestActivationSampleBoundsAndCounters(t *testing.T) {
 			t.Fatalf("sampleless trace: verdict=%s, want INCOMPARABLE", res.Verdict)
 		}
 	})
+}
+
+func activationCaptureFixture(layers int) Artifact {
+	a := Artifact{Schema: Schema, InputTokens: []int{7, 3, 9}, ActivationCapture: &ActivationCapture{
+		ID: "step-current", Kind: ActivationCaptureIncrementalStep, Outcome: ActivationCaptureCommitted,
+		Token: 2, ExpectedLayers: layers,
+		ExpectedStages: []string{"q_latent", "kv_latent", "attention_projected", "moe_sum", "residual_streams"},
+	}}
+	for layer := 0; layer < layers; layer++ {
+		for _, stage := range a.ActivationCapture.ExpectedStages {
+			e := indexedSample(layer, 2, stage, []float32{1, 2})
+			e.RunID, e.Operation = a.ActivationCapture.ID, "v41.activation"
+			a.Events = append(a.Events, e)
+			a.RetainedSampleValues += uint64(len(e.SampleValues))
+		}
+	}
+	return a
+}
+
+// fak-test:justify why=regression when=changed:internal/computetrace/**
+// fak-test:runtime fast est=20ms lane=default
+func TestActivationCaptureValidation(t *testing.T) {
+	if err := ValidateActivationCapture(activationCaptureFixture(40)); err != nil {
+		t.Fatalf("complete 40-layer capture rejected: %v", err)
+	}
+	if err := ValidateActivationCapture(collect(indexedSample(0, 0, "q_proj", []float32{1}))); err != nil {
+		t.Fatalf("legacy numerical artifact rejected: %v", err)
+	}
+	cases := []struct {
+		name    string
+		corrupt func(*Artifact)
+	}{
+		{"aborted", func(a *Artifact) { a.ActivationCapture.Outcome = ActivationCaptureAborted }},
+		{"stale_token", func(a *Artifact) { a.ActivationCapture.Token-- }},
+		{"wrong_event_capture", func(a *Artifact) { a.Events[0].RunID = "older-step" }},
+		{"unknown_kind", func(a *Artifact) { a.ActivationCapture.Kind = "unknown" }},
+		{"dropped_event", func(a *Artifact) { a.Dropped++ }},
+		{"dropped_sample", func(a *Artifact) { a.DroppedSampleValues++ }},
+		{"missing_stage", func(a *Artifact) { a.Events = a.Events[1:]; a.RetainedSampleValues -= 2 }},
+		{"duplicate_stage", func(a *Artifact) { a.Events[1] = a.Events[0] }},
+		{"false_stage_declaration", func(a *Artifact) { a.ActivationCapture.ExpectedStages[0] = "unknown" }},
+		{"wrong_layers", func(a *Artifact) { a.ActivationCapture.ExpectedLayers++ }},
+		{"missing_samples", func(a *Artifact) {
+			a.Events[0].SampleValues = nil
+			a.Events[0].SampleIndices = nil
+			a.RetainedSampleValues -= 2
+		}},
+		{"nonfinite_sample", func(a *Artifact) { a.Events[0].SampleValues[0] = float32(math.NaN()) }},
+		{"invalid_sample_index", func(a *Artifact) { a.Events[0].SampleIndices[0] = 2 }},
+		{"sample_accounting", func(a *Artifact) { a.RetainedSampleValues++ }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := activationCaptureFixture(2)
+			tc.corrupt(&bad)
+			if err := ValidateActivationCapture(bad); !errors.Is(err, ErrActivationCaptureInvalid) {
+				t.Fatalf("invalid capture error = %v, want sentinel", err)
+			}
+			for _, side := range []string{"reference", "actual"} {
+				t.Run(side, func(t *testing.T) {
+					ref, got := bad, activationCaptureFixture(2)
+					if side == "actual" {
+						ref, got = got, ref
+					}
+					if r := CompareActivationTraces(ref, got, ActivationTolerance{}); r.Verdict != TraceIncomparable || r.ComparedSamples != 0 {
+						t.Fatalf("invalid %s admitted: verdict=%s samples=%d", side, r.Verdict, r.ComparedSamples)
+					}
+					r := FirstDivergence(ref, got, DivergenceTolerance{}, ActivationTolerance{})
+					if r.Verdict != TraceIncomparable || r.FirstDivergent != nil {
+						t.Fatalf("invalid %s established first divergence: verdict=%s first=%v", side, r.Verdict, r.FirstDivergent)
+					}
+				})
+			}
+		})
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/computetrace/**
+// fak-test:runtime fast est=20ms lane=default
+func TestActivationCaptureReferenceProjection(t *testing.T) {
+	makePair := func() (Artifact, Artifact) {
+		actual := activationCaptureFixture(40)
+		ref := Artifact{Schema: Schema, InputTokens: slices.Clone(actual.InputTokens)}
+		for token := range ref.InputTokens {
+			for _, e := range actual.Events {
+				e.Token, e.RunID = token, "full-forward-reference"
+				e.InputDigest, e.WeightDigest = "reference-input", "reference-weights"
+				e.SampleValues = slices.Clone(e.SampleValues)
+				e.SampleIndices = slices.Clone(e.SampleIndices)
+				ref.Events = append(ref.Events, e)
+				ref.RetainedSampleValues += uint64(len(e.SampleValues))
+			}
+		}
+		return ref, actual
+	}
+	ref, actual := makePair()
+	projected, err := ProjectActivationReference(ref, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected.ActivationCapture != nil || !slices.Equal(projected.InputTokens, ref.InputTokens) || len(projected.Events) != 40*5 || projected.RetainedSampleValues != 40*5*2 {
+		t.Fatal("projection changed the full input identity, fabricated capture metadata, or lost target coverage")
+	}
+	for _, e := range projected.Events {
+		if e.Token != 2 || e.InputDigest != "reference-input" || e.WeightDigest != "reference-weights" || e.RunID != "full-forward-reference" {
+			t.Fatal("projection rewrote absolute token or reference provenance")
+		}
+	}
+	projected.InputTokens[0]++
+	projected.Events[0].SampleValues[0]++
+	projected.Events[0].SampleIndices[0]++
+	projected.Events[0].Shapes[0][0]++
+	if ref.InputTokens[0] != 7 || ref.Events[40*5*2].SampleValues[0] != 1 || ref.Events[40*5*2].SampleIndices[0] != 0 || ref.Events[40*5*2].Shapes[0][0] != 2 {
+		t.Fatal("projection aliases the source reference")
+	}
+	cases := []struct {
+		name    string
+		corrupt func(*Artifact, *Artifact)
+	}{
+		{"earlier_prefix_same_last_token", func(r, a *Artifact) { r.InputTokens[0]++ }},
+		{"missing_actual_capture", func(r, a *Artifact) { a.ActivationCapture = nil }},
+		{"aborted_actual", func(r, a *Artifact) { a.ActivationCapture.Outcome = ActivationCaptureAborted }},
+		{"missing_reference_stage", func(r, a *Artifact) { r.Events = r.Events[:len(r.Events)-1]; r.RetainedSampleValues -= 2 }},
+		{"duplicate_reference_stage", func(r, a *Artifact) { r.Events[len(r.Events)-1] = r.Events[len(r.Events)-2] }},
+		{"dropped_reference", func(r, a *Artifact) { r.Dropped++ }},
+		{"aborted_reference_capture", func(r, a *Artifact) {
+			*r = activationCaptureFixture(40)
+			r.ActivationCapture.Outcome = ActivationCaptureAborted
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref, actual := makePair()
+			tc.corrupt(&ref, &actual)
+			if _, err := ProjectActivationReference(ref, actual); !errors.Is(err, ErrActivationCaptureInvalid) {
+				t.Fatalf("projection error=%v, want sentinel", err)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestActivationCaptureReadEnvelope(t *testing.T) {
+	const legacy = "{\"schema\":\"fak.compute_trace.v1\",\"events\":[],\"future_field\":true}"
+	if _, err := Read(strings.NewReader(legacy + " \n\t")); err != nil {
+		t.Fatalf("unknown legacy field or trailing whitespace rejected: %v", err)
+	}
+	for _, suffix := range []string{"{}", "[]", "]", "}", "garbage"} {
+		t.Run(suffix, func(t *testing.T) {
+			if _, err := Read(strings.NewReader(legacy + suffix)); err == nil {
+				t.Fatal("trailing JSON or garbage accepted as one artifact")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestActivationCaptureTokenPresence(t *testing.T) {
+	a := activationCaptureFixture(1)
+	a.InputTokens, a.ActivationCapture.Token = []int{0}, 0
+	for i := range a.Events {
+		a.Events[i].Token = 0
+		a.Events[i].SampleValues[0] = 0
+	}
+	raw, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit, err := Read(strings.NewReader(string(raw)))
+	if err != nil || ValidateActivationCapture(explicit) != nil {
+		t.Fatal("explicit absolute token zero rejected")
+	}
+	for _, missing := range []bool{true, false} {
+		name := "null"
+		if missing {
+			name = "absent"
+		}
+		t.Run(name, func(t *testing.T) {
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			var capture map[string]json.RawMessage
+			if err := json.Unmarshal(envelope["activation_capture"], &capture); err != nil {
+				t.Fatal(err)
+			}
+			if missing {
+				delete(capture, "token")
+			} else {
+				capture["token"] = json.RawMessage("null")
+			}
+			envelope["activation_capture"], err = json.Marshal(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bad, err := json.Marshal(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := Read(strings.NewReader(string(bad)))
+			if err == nil {
+				err = ValidateActivationCapture(decoded)
+			}
+			if !errors.Is(err, ErrActivationCaptureInvalid) {
+				t.Fatalf("missing explicit absolute token error=%v, want sentinel", err)
+			}
+		})
+	}
+
+	reference := explicit
+	reference.ActivationCapture = nil
+	if _, err := ProjectActivationReference(reference, explicit); err != nil {
+		t.Fatal("explicit zero legacy reference rejected by Step admission")
+	}
+	for _, field := range []string{"input_tokens", "sample_values", "sample_indices"} {
+		for _, side := range []string{"actual", "reference"} {
+			t.Run("null_element_"+side+"_"+field, func(t *testing.T) {
+				var envelope map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if side == "reference" {
+					delete(envelope, "activation_capture")
+				}
+				if field == "input_tokens" {
+					envelope[field] = json.RawMessage("[null]")
+				} else {
+					var events []map[string]json.RawMessage
+					if err := json.Unmarshal(envelope["events"], &events); err != nil {
+						t.Fatal(err)
+					}
+					events[0][field] = json.RawMessage("[null,1]")
+					if field == "sample_values" {
+						events[0][field] = json.RawMessage("[null,2]")
+					}
+					envelope["events"], err = json.Marshal(events)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				data, err := json.Marshal(envelope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				decoded, err := Read(strings.NewReader(string(data)))
+				if side == "reference" && err != nil {
+					t.Fatalf("legacy numerical reader rejected reference before Step admission: %v", err)
+				}
+				if err == nil {
+					if side == "reference" {
+						_, err = ProjectActivationReference(decoded, explicit)
+					} else {
+						err = ValidateActivationCapture(decoded)
+					}
+				}
+				if !errors.Is(err, ErrActivationCaptureInvalid) {
+					t.Fatalf("null %s %s element error=%v, want sentinel", side, field, err)
+				}
+			})
+		}
+	}
 }

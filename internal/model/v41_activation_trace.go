@@ -34,6 +34,7 @@ package model
 // left to the loader's LoadProvenance rather than invented.
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +68,8 @@ const (
 type v41ActivationTraceState struct {
 	inputDigest  string
 	weightDigest string
+	recorder     *computetrace.Recorder
+	captureID    string
 }
 
 // v41ActivationTracer returns the forward's tracer, or nil when tracing is not
@@ -145,8 +148,28 @@ func (s *v41ActivationTraceState) recordLayerStreams(layer int, streams [][][]fl
 	return nil
 }
 
+func (s *v41ActivationTraceState) recordStepStreams(layer, token int, streams [][]float32, resident *v41MHCResident) error {
+	if s == nil {
+		return nil
+	}
+	if resident != nil {
+		host, err := resident.hostStreams(layer)
+		if err != nil {
+			return err
+		}
+		if len(host) != 1 {
+			return fmt.Errorf("model: incremental activation readback has %d rows, want one", len(host))
+		}
+		streams = host[0]
+	}
+	s.recordStreams(layer, token, streams)
+	return nil
+}
+
 func (s *v41ActivationTraceState) emit(layer, token int, stage string, width int, idx []int, vals []float32) {
-	computetrace.Record(computetrace.Event{
+	event := computetrace.Event{
+		RunID:            s.captureID,
+		RequestID:        s.captureID,
 		Operation:        v41ActivationTraceOperation,
 		Phase:            stage,
 		Backend:          v41TraceCaptureBackend,
@@ -160,7 +183,12 @@ func (s *v41ActivationTraceState) emit(layer, token int, stage string, width int
 		SampleValues:     vals,
 		ProvenanceDigest: computetrace.Digest("v41-activation", DeepSeekV41FlashModelID+"@"+DeepSeekV41FlashRevision, stage),
 		Status:           "ok",
-	})
+	}
+	if s.recorder != nil {
+		s.recorder.Record(event)
+		return
+	}
+	computetrace.Record(event)
 }
 
 // v41ActivationInputIdentity binds the pinned source revision, the flat decoder

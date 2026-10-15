@@ -31,6 +31,7 @@ import (
 // 40-layer churn, with byte-identical arithmetic (the same f32 values land in
 // the same layout).
 type v41ProjScratch struct {
+	activationTrace     *v41ActivationTraceState
 	woA                 []float32
 	woB                 []float32
 	expertGateUp        v41ExpertGateUpFunc

@@ -9,17 +9,18 @@ package model
 // sized for that forward (every layer x every stage x up to
 // v41ActivationTraceEnvMaxTokens tokens x 8 samples), runs, and writes the
 // artifact -- with the consumed token ids in InputTokens -- to <path>,
-// replacing the previous full forward's trace. Incremental Session.Step and
-// suffix-prefill routes do not currently emit these activation checkpoints;
-// their successful completion does not update this artifact.
+// replacing the previous capture. Incremental Session.Step uses its own recorder
+// and publishes its absolute-position checkpoints after committing or aborting.
+// Suffix-prefill routes do not emit these activation checkpoints.
 //
 // The env recorder retains only v41.activation events. Other backend events
 // cannot consume its event/sample budget; global observers still receive them.
 //
-// Unset, the cost is one cached string check per full forward. Env capture and
-// publication are serialized because the recorder is process-global. Recorder
+// Unset, the cost is one cached string check per full forward or Step. Full
+// forward capture is serialized because its recorder is process-global. Recorder
 // installation atomically preserves an existing owner. The event budget bounds
 // all recorded events; it is not an independently enforced token-coverage cap.
+// Step recorders are transaction-local; only their publication is serialized.
 
 import (
 	"crypto/rand"
@@ -46,8 +47,127 @@ var (
 	v41ActivationTraceEnvPath = sync.OnceValue(func() string {
 		return strings.TrimSpace(os.Getenv(v41ActivationTraceEnvVar))
 	})
-	v41ActivationTraceEnvMu sync.Mutex
+	v41ActivationTraceEnvMu         sync.Mutex
+	v41ActivationTracePublicationMu sync.Mutex
+	v41ActivationTracePublishedID   string
+	v41ActivationTracePublishedPath string
 )
+
+// V41ActivationCaptureReceipt describes the session's last configured Step
+// capture. Published records a successful write; Current means it remains the
+// recorder's latest known publication. External file changes require artifact
+// validation, and neither field proves hardware or reference authenticity.
+type V41ActivationCaptureReceipt struct {
+	ID               string `json:"id"`
+	Token            int    `json:"token"`
+	Outcome          string `json:"outcome"`
+	Path             string `json:"path"`
+	Published        bool   `json:"published"`
+	Current          bool   `json:"current"`
+	PublicationError string `json:"publication_error,omitempty"`
+}
+
+// LastV41ActivationCapture returns the last configured incremental capture.
+// An overwritten cohort lane remains Published but is no longer Current.
+func (s *Session) LastV41ActivationCapture() V41ActivationCaptureReceipt {
+	if s == nil || s.v41Forward == nil {
+		return V41ActivationCaptureReceipt{}
+	}
+	v41ActivationTracePublicationMu.Lock()
+	defer v41ActivationTracePublicationMu.Unlock()
+	r := s.v41Forward.activationCapture
+	r.Current = r.Published && r.ID != "" && r.ID == v41ActivationTracePublishedID && r.Path == v41ActivationTracePublishedPath
+	return r
+}
+
+type v41StepActivationCapture struct {
+	state    *v41ForwardState
+	recorder *computetrace.Recorder
+	trace    *v41ActivationTraceState
+	tokens   []int
+	layers   int
+	receipt  V41ActivationCaptureReceipt
+	finished bool
+}
+
+func (m *Model) beginV41StepActivationCapture(id int, state *v41ForwardState) *v41StepActivationCapture {
+	path := v41ActivationTraceEnvPath()
+	if m == nil || state == nil || path == "" {
+		return nil
+	}
+	c := &v41StepActivationCapture{
+		state:   state,
+		tokens:  append(append([]int(nil), state.history...), id),
+		layers:  m.Cfg.NumLayers,
+		receipt: V41ActivationCaptureReceipt{Token: len(state.history), Outcome: computetrace.ActivationCaptureAborted, Path: path},
+	}
+	var identity [16]byte
+	if _, err := rand.Read(identity[:]); err != nil {
+		c.receipt.PublicationError = fmt.Sprintf("capture identity: %v", err)
+	} else {
+		c.receipt.ID = fmt.Sprintf("v41-step-%x", identity[:])
+		events, ok := checkedMulInt(max(1, c.layers), 5)
+		samples, samplesOK := checkedMulInt(events, v41ActivationTraceMaxSamples)
+		if !ok || !samplesOK {
+			c.receipt.PublicationError = "capture budget overflow"
+		} else {
+			c.recorder = computetrace.NewWithOptions(events, computetrace.RecorderOptions{
+				MaxSamples: samples,
+				Operations: []string{v41ActivationTraceOperation},
+			})
+			c.trace = &v41ActivationTraceState{
+				inputDigest:  m.v41ActivationInputIdentity(c.tokens),
+				weightDigest: m.v41ActivationWeightIdentity(),
+				recorder:     c.recorder,
+				captureID:    c.receipt.ID,
+			}
+		}
+	}
+	v41ActivationTracePublicationMu.Lock()
+	state.activationCapture = c.receipt
+	v41ActivationTracePublicationMu.Unlock()
+	return c
+}
+
+func (c *v41StepActivationCapture) finish(committed bool) {
+	if c == nil || c.finished {
+		return
+	}
+	c.finished = true
+	coverage := c.state.forwardCoverage
+	if committed && coverage != nil && coverage.Validate() == nil && coverage.LogitsSource == NativeForwardLogitsSourceV41Incremental {
+		c.receipt.Outcome = computetrace.ActivationCaptureCommitted
+	}
+	v41ActivationTracePublicationMu.Lock()
+	defer v41ActivationTracePublicationMu.Unlock()
+	defer func() { c.state.activationCapture = c.receipt }()
+	if c.recorder == nil {
+		return
+	}
+	a := c.recorder.Artifact()
+	a.InputTokens = c.tokens
+	a.ActivationCapture = &computetrace.ActivationCapture{
+		ID:             c.receipt.ID,
+		Kind:           computetrace.ActivationCaptureIncrementalStep,
+		Outcome:        c.receipt.Outcome,
+		Token:          c.receipt.Token,
+		ExpectedLayers: c.layers,
+		ExpectedStages: []string{v41TraceStageQLatent, v41TraceStageKVLatent, v41TraceStageAttnOut, v41TraceStageMoESum, v41TraceStageResidual},
+	}
+	// A diagnostic publication failure must not turn a committed token into an
+	// execution error that a caller might replay.
+	defer func() {
+		if failure := recover(); failure != nil {
+			c.receipt.PublicationError = fmt.Sprintf("capture publication: %v", failure)
+		}
+	}()
+	if err := writeV41ActivationTrace(c.receipt.Path, a); err != nil {
+		c.receipt.PublicationError = err.Error()
+		return
+	}
+	c.receipt.Published = true
+	v41ActivationTracePublishedID, v41ActivationTracePublishedPath = c.receipt.ID, c.receipt.Path
+}
 
 // v41ActivationTraceFromEnv starts the env-selected recorder for one forward
 // over seq and returns the finisher the forward defers, or nil when the
@@ -77,7 +197,16 @@ func (m *Model) v41ActivationTraceFromEnv(seq []int) func(error) error {
 		disable()
 		a := rec.Artifact()
 		a.InputTokens = tokens
-		if werr := writeV41ActivationTrace(path, a); werr != nil && err == nil {
+		werr := func() error {
+			v41ActivationTracePublicationMu.Lock()
+			defer v41ActivationTracePublicationMu.Unlock()
+			werr := writeV41ActivationTrace(path, a)
+			if werr == nil {
+				v41ActivationTracePublishedID, v41ActivationTracePublishedPath = "", path
+			}
+			return werr
+		}()
+		if werr != nil && err == nil {
 			return fmt.Errorf("model: %s=%s: %w", v41ActivationTraceEnvVar, path, werr)
 		}
 		return err

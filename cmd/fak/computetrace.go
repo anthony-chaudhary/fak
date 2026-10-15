@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -71,6 +72,27 @@ func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "schema=%s events=%d dropped=%d duration_ns=%d observer_overhead_ns=%d\n", a.Schema, len(a.Events), a.Dropped, eventDuration(a), a.ObserverOverheadNS)
+		if capture := a.ActivationCapture; capture != nil {
+			validation := "valid"
+			captureErr := computetrace.ValidateActivationCapture(a)
+			if captureErr != nil {
+				validation = "invalid"
+			}
+			stages := make([]string, 0, min(5, len(capture.ExpectedStages)))
+			truncated := len(capture.ID) > 256 || len(capture.Kind) > 32 || len(capture.Outcome) > 32 || len(capture.ExpectedStages) > 5
+			for _, stage := range capture.ExpectedStages[:min(5, len(capture.ExpectedStages))] {
+				truncated = truncated || len(stage) > 64
+				stages = append(stages, fmt.Sprintf("%.64s", stage))
+			}
+			fmt.Fprintf(stdout, "activation_capture_id=%.256s kind=%.32s outcome=%.32s token=%d expected_layers=%d expected_stages=%s declared_stages=%d capture_validation=%s capture_metadata_truncated=%t\n",
+				capture.ID, capture.Kind, capture.Outcome, capture.Token, capture.ExpectedLayers, strings.Join(stages, ","), len(capture.ExpectedStages), validation, truncated)
+			if captureErr != nil {
+				fmt.Fprintln(stderr, captureErr)
+				return 1
+			}
+		} else {
+			fmt.Fprintln(stdout, "capture_validation=legacy_numerical")
+		}
 		return 0
 	case "from-llamacpp":
 		return runComputeTraceFromLlamaCpp(stdout, stderr, args[1:])

@@ -28,13 +28,20 @@ func cmdModelObserve(args []string) {
 		listen := fs.String("listen", "127.0.0.1:8091", "proxy listen address")
 		backend := fs.String("backend", "", "OpenAI-compatible backend base URL")
 		ledger := fs.String("ledger", "model-perf.jsonl", "append-only observation JSONL")
+		cache := fs.String("cache-state", "unknown", "declared cache state: cold, warm, steady, or unknown")
+		warmup := fs.Bool("warmup", false, "mark observations as warmups for time-burndown exclusion")
 		_ = fs.Parse(args[1:])
+		cacheState, err := modelperfobs.ParseCacheState(*cache)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "model-observe:", err)
+			os.Exit(2)
+		}
 		u, err := modelperfobs.ParseBackend(*backend)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "model-observe:", err)
 			os.Exit(2)
 		}
-		server := &http.Server{Addr: *listen, Handler: &modelperfobs.Proxy{Backend: u, Ledger: *ledger}, ReadHeaderTimeout: 10 * time.Second}
+		server := &http.Server{Addr: *listen, Handler: &modelperfobs.Proxy{Backend: u, Ledger: *ledger, CacheState: cacheState, Warmup: *warmup}, ReadHeaderTimeout: 10 * time.Second}
 		fmt.Fprintf(os.Stderr, "model-observe: proxy http://%s -> %s; ledger=%s\n", *listen, u, *ledger)
 		if err := server.ListenAndServe(); err != nil {
 			fmt.Fprintln(os.Stderr, "model-observe:", err)
@@ -68,6 +75,11 @@ func cmdModelObserve(args []string) {
 			os.Exit(2)
 		}
 		if err := modelperfobs.WriteMarkdown(os.Stdout, s); err != nil {
+			os.Exit(1)
+		}
+	case "time-burndown":
+		if err := modelperfobs.RunTimeBurndown(args[1:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "model-observe:", err)
 			os.Exit(1)
 		}
 	case "bandwidth":
@@ -570,8 +582,9 @@ func runModelObserveStateBench(args []string) error {
 }
 
 func modelObserveUsage() string {
-	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE]\n" +
+	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE --cache-state cold|warm|steady|unknown --warmup]\n" +
 		"       fak model-observe report --input FILE [--format md|json]\n" +
+		"       fak model-observe time-burndown --input FILE [--phases FILE --format md|json|prom]\n" +
 		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
 		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +
 		"       fak model-observe bandwidth numa-topology [--output FILE --pretty=true]\n" +

@@ -21,6 +21,8 @@ type v41StepTransaction struct {
 	headProject       func([]float32) ([]float32, error)
 	headFinish        func([]float32, func() error) ([]float32, error)
 	rollback, cleanup func()
+	afterLayer        func(int) error
+	activationCapture *v41StepActivationCapture
 }
 
 // beginV41Step performs admission, embedding and journal setup in serial order.
@@ -64,6 +66,10 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
+	tx.activationCapture = m.beginV41StepActivationCapture(id, st)
+	if tx.activationCapture != nil {
+		scratch.activationTrace = tx.activationCapture.trace
+	}
 	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
 	scratch.routedExpert = st.routedExpert
 	scratch.routedLayer = st.routedLayer
@@ -90,6 +96,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.gatherOps = st.gatherOps
 	tx.cleanup = func() {
 		defer func() {
+			scratch.activationTrace = nil
 			scratch.expertGateUp, scratch.expertDown = nil, nil
 			scratch.routedExpert = nil
 			scratch.routedLayer = nil
@@ -176,6 +183,11 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		copy(x, streams[0])
 		scratch.mhcCarry = newV41MHCCarry(1)
 		scratch.mhcCarry.device = st.mhcDevice
+	}
+	if scratch.activationTrace != nil {
+		tx.afterLayer = func(layer int) error {
+			return scratch.activationTrace.recordStepStreams(layer, pos, streams, resident)
+		}
 	}
 
 	// Fail closed BEFORE any mutation: every layer needs a seeded retained state.
@@ -464,6 +476,11 @@ func (tx *v41StepTransaction) finishLayer(routed []float32) (err error) {
 	if err = work.complete(routed); err != nil {
 		return tx.abortLayerError(err)
 	}
+	if tx.afterLayer != nil {
+		if err = tx.afterLayer(tx.nextLayer); err != nil {
+			return tx.abortLayerError(err)
+		}
+	}
 	tx.pendingLayer = nil
 	tx.nextLayer++
 	return nil
@@ -570,8 +587,15 @@ func (tx *v41StepTransaction) abort() {
 func (tx *v41StepTransaction) close() {
 	tx.closed = true
 	defer func() {
+		if tx.activationCapture != nil {
+			tx.activationCapture.finish(tx.stats.Committed)
+			tx.activationCapture = nil
+		}
+	}()
+	defer func() {
 		tx.layer, tx.headInput, tx.headProject, tx.headFinish = nil, nil, nil, nil
 		tx.rollback, tx.cleanup = nil, nil
+		tx.afterLayer = nil
 	}()
 	if tx.cleanup != nil {
 		tx.cleanup()

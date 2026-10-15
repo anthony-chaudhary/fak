@@ -1437,6 +1437,21 @@
           "category": "incidental",
           "reason": "Fixed uint64 byte-counter field in BackendH2DAttribution for uploads labeled with the existing MemoryClass MemoryDDRCache (wire value ddr_cache). It partitions native-accounted H2D counter deltas by the caller's memory class; it introduces no cache implementation, residency policy, tensor-role inference or proof of device completion.",
           "token": "DDRCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Observation provenance field labels declared versus unknown cache metadata; it adds no cache mechanism or admission authority.",
+          "token": "cachestatesource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed-vocabulary parser for declared observation cohorts; it does not inspect, load, invalidate, or admit a cache.",
+          "token": "parsecachestate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Escaped newline followed by Cache in a renderer string yields this exact lexical token, not a cache mechanism; exact-token ignore preserves existing uncached identifiers.",
+          "token": "ncache"
         }
       ],
       "exclude": [
@@ -1626,6 +1641,7 @@
         "cacherevoke",
         "cacherow",
         "caches",
+        "cachestatesource",
         "cachestream",
         "cachetokens",
         "cachettl",
@@ -1710,6 +1726,7 @@
         "microCacheWitnessSchema",
         "minCacheRun",
         "missing_prefix_cache_accounting",
+        "ncache",
         "newCache",
         "newDeadlineCacheTicket",
         "no_cache_state_delta",
@@ -1721,6 +1738,7 @@
         "observecachettlupgrade",
         "os_cache_and_expert_ring_state",
         "parseCacheSeats",
+        "parsecachestate",
         "persistMicroCacheWitness",
         "persistVCacheCalibration",
         "postureVCacheCalibration",
@@ -7023,6 +7041,11 @@
           "category": "incidental",
           "reason": "Private implementation adapter for the represented V41ExpertParallelSessionResult; imports coherent ordinary authenticated-reader retirement evidence while preserving borrowed group/backend ownership and unknown opaque or panic cleanup. It creates no separate Session owner or runtime lifecycle.",
           "token": "loadV41ExpertParallelSessionWithAuthenticatedResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CLI formatter of the existing bounded session-journal Refusal projection; it prints persisted content-free fields and adds no session lifecycle, capture authority, or refusal semantics.",
+          "token": "renderSessionJournalRefusals"
         }
       ],
       "exclude": [
@@ -7307,6 +7330,7 @@
         "recoverySessionDiag",
         "refusalSafeSessionID",
         "renderSessionJournalAudit",
+        "renderSessionJournalRefusals",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
         "reportFromSessions",
@@ -15375,6 +15399,11 @@
           "category": "incidental",
           "reason": "Private v41HostReadbackImage method exposing the admitted float row or decoding legacy independent rows; no rendering or materialization service interface.",
           "token": "materializeRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private text presentation helper for existing content-free session-journal refusal records; it formats bounded rows without materializing a new runtime artifact or introducing a separate rendering contract.",
+          "token": "renderSessionJournalRefusals"
         }
       ],
       "id": "render-materialize",
@@ -15467,6 +15496,7 @@
         "renderSearchHuman",
         "renderSeatCells",
         "renderSessionJournalAudit",
+        "renderSessionJournalRefusals",
         "renderSessionOpen",
         "renderShellChoice",
         "renderSteerLifecycleStatus",

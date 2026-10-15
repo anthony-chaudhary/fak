@@ -57,6 +57,38 @@ zero and a fresh `succeeded` receipt before running its own artifact checks.
 or writing a receipt. It does not verify credentials, provider reachability or
 OpenCode availability.
 
+## `compute-trace`: inspect a committed V4.1 Step
+
+Set `FAK_V41_ACTIVATION_TRACE=<path>` in the native V4.1 process to capture
+activation checkpoints from its incremental `Session.Step` transaction. The
+latest artifact carries the full consumed prefix, absolute token position,
+capture ID, terminal outcome, and configured layer/stage coverage. Each layer
+requires `q_latent`, `kv_latent`, `attention_projected`, `moe_sum`, and
+`residual_streams`; these stages exclude embedding, final normalization, and
+logit activations. The 40-layer model requires 200 stage events for one Step.
+
+```text
+fak compute-trace summary --in step.json
+fak compute-trace first-divergence --ref reference.json --got step.json --step-capture-id ID --step-token N --json
+```
+
+Retain the ID and absolute token from `Session.LastV41ActivationCapture()` for
+the desired Step, and check its `Published`, `Current`, and `PublicationError`
+fields before comparing. The bounded summary inspects the supplied artifact;
+it cannot identify a later unpublished attempt. Bind the CLI comparison to the
+independent session receipt. A full-forward reference must carry the same full input prefix;
+comparison selects its matching absolute token and requires complete selected
+stage coverage. The numerical tolerances retain their existing meaning.
+Missing, stale, dropped, aborted, incomplete, or mismatched Step captures refuse
+committed Step comparison. Legacy artifacts retain `sampled_numerical` scope.
+
+Capture publication uses one latest artifact path, so another attempt can
+replace it. `Current` records process-local publication identity rather than
+monitoring external file edits. The session diagnostic receipt reports publication status separately
+from token execution. A diagnostic write failure after commit leaves the token
+committed exactly once. Complete captures establish internal evidence coverage;
+external parity requires an independently produced, source-bound reference.
+
 ## `runtime-capabilities`: inspect the deployable runtime before payload load
 
 ```text
