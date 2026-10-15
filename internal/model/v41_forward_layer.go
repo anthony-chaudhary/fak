@@ -771,11 +771,27 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err != nil {
 		return err
 	}
+	var panelPicks [][]routePick
+	panelRouted := false
 	for t := 0; t < seq; t++ {
-		routerLogits := routerPanel[t*cfg.NumExperts : (t+1)*cfg.NumExperts]
-		picks, err := v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK())
-		if err != nil {
-			return v41StageErr(v41StageMoE, l, err)
+		// Keep the first successful route/emission at its original boundary,
+		// including lazy process trace initialization and observer side effects.
+		// Only the remaining rows may share selected router completions.
+		if t == 1 {
+			panelPicks, panelRouted, err = m.v41ColdRouterPanel(l, routerPanel[cfg.NumExperts:], gateBias, seq-1, routeCfg, full, scratch)
+			if err != nil {
+				return v41StageErr(v41StageMoE, l, err)
+			}
+		}
+		var picks []routePick
+		if panelRouted {
+			picks = panelPicks[t-1]
+		} else {
+			routerLogits := routerPanel[t*cfg.NumExperts : (t+1)*cfg.NumExperts]
+			picks, err = v41RouteForGeometryWith(l, routerLogits, gateBias, routeCfg, full, scratch.routerTopK())
+			if err != nil {
+				return v41StageErr(v41StageMoE, l, err)
+			}
 		}
 		m.emitExpertRouteAt(l, t, picks)
 		perTokenPicks[t] = picks

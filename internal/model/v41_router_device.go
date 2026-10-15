@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -106,120 +107,206 @@ func (s *Session) v41BindRouterTopK() v41BoundRouterTopK {
 		return v41BoundRouterTopK{}
 	}
 	core := func(layer int, logits, correctionBias []float32, cfg v41RouterConfig, full bool, residentInput *v41RouterResidentInput) ([]routePick, error) {
-		return v41SelectedDeviceCall(s, layer, "v41-router-topk", func(stage *string) (result []routePick, cause error) {
-			if residentInput != nil {
-				defer func() {
-					primary := recover()
-					cleanup := residentInput.loan.release()
-					if primary != nil {
-						panic(primary)
-					}
-					if cause == nil && cleanup != nil {
-						panic(cleanup)
-					}
-				}()
-			}
-			// Release only call-owned uploads. Preserve a primary selected
-			// failure if a later Free also fails, while attempting both frees.
-			var owned []compute.Tensor
-			defer func() {
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						s.Backend.Free(owned[i])
-					}()
-				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
-				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
-			}()
-			if err := cfg.validate(); err != nil {
-				return nil, err
-			}
-			width := len(logits)
-			if residentInput != nil {
-				if residentInput.loan.valid == nil || !residentInput.loan.valid() {
-					return nil, errV41RouterProjectionScope
-				}
-				lt := residentInput.tensor
-				if lt.Buf() == nil || lt.Backend() != s.Backend || lt.Dtype != compute.F32 || lt.Layout != compute.RowMajor || lt.Quant != nil || len(lt.Shape) != 2 || lt.Shape[0] != 1 {
-					return nil, errV41DeviceRouteResult
-				}
-				width = lt.Shape[1]
-			}
-			if width != cfg.Experts {
-				return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("width %d, want %d", width, cfg.Experts)}
-			}
-			hasBias := len(correctionBias) != 0
-			if hasBias && len(correctionBias) != cfg.Experts {
-				return nil, &v4RouteError{Field: "correction_bias", Reason: fmt.Sprintf("width %d does not match experts width %d", len(correctionBias), cfg.Experts)}
-			}
-			var lt compute.Tensor
-			if residentInput == nil {
-				*stage = "logit upload"
-				lt = s.uploadHostF32([]int{1, cfg.Experts}, logits, compute.MemoryActivation, "V4.1 router logits")
-				owned = append(owned, lt)
-			} else {
-				lt = residentInput.tensor
-			}
-			*stage = "bias upload"
-			bias := []float32{0}
-			if hasBias {
-				bias = correctionBias
-			}
-			var bt compute.Tensor
-			resident := false
-			// Production passes the immutable checkpoint view. The callback
-			// also accepts arbitrary caller slices: equal values, a layer id,
-			// or a backend name do not establish checkpoint identity.
-			// A bare callback session without a held model lifetime stays transient.
-			name := layerName(layer, "ffn.gate.e_score_correction_bias")
-			if hasBias && s.modelWeightsHeld && s.halW != nil {
-				meta, present := s.M.manifest[name]
-				bytes, valid := checkedMulInt(len(bias), 4)
-				if present && valid && strings.EqualFold(meta.Dtype, "F32") &&
-					len(meta.Shape) == 1 && meta.Shape[0] == len(bias) && meta.Nbytes == bytes &&
-					meta.Offset >= 0 && meta.Offset <= len(s.M.raw) && bytes <= len(s.M.raw)-meta.Offset {
-					canonical := s.M.tensor(name)
-					if &canonical[0] == &bias[0] {
-						// Existing cache ownership separates loaded-model and
-						// exact-backend identities and owns final release.
-						bt, resident = s.weightHAL(name), true
-					}
-				}
-			}
-			if !resident {
-				bt = s.uploadHostF32([]int{len(bias)}, bias, compute.MemoryActivation, "V4.1 router correction bias")
-				owned = append(owned, bt)
-			}
-			*stage = "router-topk"
-			if residentInput != nil {
-				*stage = "projection/router command window"
-			}
-			rows, completed, err := v41DeviceRouteCore(op, lt, bt, 1, cfg, full, hasBias)
-			if residentInput != nil {
-				*residentInput.completed = completed
-			}
-			if err != nil {
-				return nil, err
-			}
-			if residentInput != nil && !residentInput.loan.valid() {
-				return nil, errV41RouterProjectionScope
-			}
-			return rows[0], nil
-		})
+		rows, err := v41SelectedRouterRows(s, op, layer, logits, correctionBias, 1, cfg, full, residentInput, nil)
+		if err != nil {
+			return nil, err
+		}
+		return rows[0], nil
 	}
 	ordinary := func(layer int, logits, bias []float32, cfg v41RouterConfig, full bool) ([]routePick, error) {
 		return core(layer, logits, bias, cfg, full, nil)
 	}
 	return v41BoundRouterTopK{ordinary: ordinary, core: core, owner: s, model: s.M, backend: boundBackend}
+}
+
+// v41SelectedRouterRows shares the ordinary one-row adapter's ownership and
+// failure boundary. Only cold prefill supplies multiple rows; resident decode
+// loans remain one row. scopeValid is nil for the unchanged ordinary adapters.
+func v41SelectedRouterRows(s *Session, op compute.V41RouterTopKBackend, layer int, logits, correctionBias []float32, count int, cfg v41RouterConfig, full bool, residentInput *v41RouterResidentInput, scopeValid func() bool) ([][]routePick, error) {
+	return v41SelectedDeviceCall(s, layer, "v41-router-topk", func(stage *string) (result [][]routePick, cause error) {
+		ownerBackend := s.Backend
+		if residentInput != nil {
+			defer func() {
+				primary := recover()
+				cleanup := residentInput.loan.release()
+				if primary != nil {
+					panic(primary)
+				}
+				if cause == nil && cleanup != nil {
+					panic(cleanup)
+				}
+			}()
+		}
+		// Release only call-owned uploads. Preserve a primary selected
+		// failure if a later Free also fails, while attempting both frees.
+		var owned []compute.Tensor
+		defer func() {
+			primaryPanic := recover()
+			var cleanupPanic any
+			for i := len(owned) - 1; i >= 0; i-- {
+				func() {
+					defer func() {
+						if r := recover(); r != nil && cleanupPanic == nil {
+							cleanupPanic = r
+						}
+					}()
+					if scopeValid != nil {
+						ownerBackend.Free(owned[i])
+					} else {
+						s.Backend.Free(owned[i])
+					}
+				}()
+			}
+			if primaryPanic != nil {
+				panic(primaryPanic)
+			}
+			if cause == nil && cleanupPanic != nil {
+				panic(cleanupPanic)
+			}
+			if cause == nil && scopeValid != nil && !scopeValid() {
+				cause = errV41RouterProjectionScope
+			}
+		}()
+		if scopeValid != nil && !scopeValid() {
+			return nil, errV41RouterProjectionScope
+		}
+		if err := cfg.validate(); err != nil {
+			return nil, err
+		}
+		width := len(logits)
+		if count != 1 {
+			n, ok := checkedMulInt(count, cfg.Experts)
+			if count <= 0 || !ok || residentInput != nil || len(logits) != n {
+				return nil, errV41DeviceRouteResult
+			}
+			width = cfg.Experts
+		}
+		if residentInput != nil {
+			if residentInput.loan.valid == nil || !residentInput.loan.valid() {
+				return nil, errV41RouterProjectionScope
+			}
+			lt := residentInput.tensor
+			if lt.Buf() == nil || lt.Backend() != s.Backend || lt.Dtype != compute.F32 || lt.Layout != compute.RowMajor || lt.Quant != nil || len(lt.Shape) != 2 || lt.Shape[0] != 1 {
+				return nil, errV41DeviceRouteResult
+			}
+			width = lt.Shape[1]
+		}
+		if width != cfg.Experts {
+			return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("width %d, want %d", width, cfg.Experts)}
+		}
+		hasBias := len(correctionBias) != 0
+		if hasBias && len(correctionBias) != cfg.Experts {
+			return nil, &v4RouteError{Field: "correction_bias", Reason: fmt.Sprintf("width %d does not match experts width %d", len(correctionBias), cfg.Experts)}
+		}
+		var lt compute.Tensor
+		if residentInput == nil {
+			*stage = "logit upload"
+			lt = s.uploadHostF32([]int{count, cfg.Experts}, logits, compute.MemoryActivation, "V4.1 router logits")
+			owned = append(owned, lt)
+		} else {
+			lt = residentInput.tensor
+		}
+		if scopeValid != nil && !scopeValid() {
+			return nil, errV41RouterProjectionScope
+		}
+		*stage = "bias upload"
+		bias := []float32{0}
+		if hasBias {
+			bias = correctionBias
+		}
+		var bt compute.Tensor
+		resident := false
+		// Production passes the immutable checkpoint view. The callback
+		// also accepts arbitrary caller slices: equal values, a layer id,
+		// or a backend name do not establish checkpoint identity.
+		// A bare callback session without a held model lifetime stays transient.
+		name := layerName(layer, "ffn.gate.e_score_correction_bias")
+		if hasBias && s.modelWeightsHeld && s.halW != nil {
+			meta, present := s.M.manifest[name]
+			bytes, valid := checkedMulInt(len(bias), 4)
+			if present && valid && strings.EqualFold(meta.Dtype, "F32") &&
+				len(meta.Shape) == 1 && meta.Shape[0] == len(bias) && meta.Nbytes == bytes &&
+				meta.Offset >= 0 && meta.Offset <= len(s.M.raw) && bytes <= len(s.M.raw)-meta.Offset {
+				canonical := s.M.tensor(name)
+				if &canonical[0] == &bias[0] {
+					// Existing cache ownership separates loaded-model and
+					// exact-backend identities and owns final release.
+					bt, resident = s.weightHAL(name), true
+				}
+			}
+		}
+		if !resident {
+			bt = s.uploadHostF32([]int{len(bias)}, bias, compute.MemoryActivation, "V4.1 router correction bias")
+			owned = append(owned, bt)
+		}
+		if scopeValid != nil && !scopeValid() {
+			return nil, errV41RouterProjectionScope
+		}
+		*stage = "router-topk"
+		if residentInput != nil {
+			*stage = "projection/router command window"
+		}
+		rows, completed, err := v41DeviceRouteCore(op, lt, bt, count, cfg, full, hasBias)
+		if residentInput != nil {
+			*residentInput.completed = completed
+		}
+		if err != nil {
+			return nil, err
+		}
+		if residentInput != nil && !residentInput.loan.valid() {
+			return nil, errV41RouterProjectionScope
+		}
+		if scopeValid != nil && !scopeValid() {
+			return nil, errV41RouterProjectionScope
+		}
+		return rows, nil
+	})
+}
+
+// v41ColdRouterPanel batches selection, not the preceding projection. Ordinary
+// callback replacements and observable routes retain their per-token boundary:
+// a later-row fault must not erase earlier observer or JSONL publications.
+// Its caller has already routed and emitted token0, so inspecting the process
+// sink here preserves its original lazy initialization timing.
+// The existing multirow primitive preserves numeric row/stage order, but checks
+// all status records before picked IDs/weights. Mixed malformed publications
+// may therefore report a different diagnostic than separate scalar calls;
+// every selected failure still closes the owner without replay or state commit.
+func (m *Model) v41ColdRouterPanel(layer int, logits, bias []float32, rows int, cfg v41RouterConfig, full bool, scratch *v41ProjScratch) ([][]routePick, bool, error) {
+	if rows <= 1 || scratch == nil || m.expertRouteObs != nil || m.expertRouteEventObs != nil || strings.TrimSpace(os.Getenv(ExpertRouteTraceEnv)) != "" {
+		return nil, false, nil
+	}
+	count, ok := checkedMulInt(rows, cfg.Experts)
+	if !ok || len(logits) != count {
+		return nil, false, nil
+	}
+	binding := scratch.projectionRoute
+	s := binding.nativeOwner(m, scratch, cfg, full, layer)
+	if s == nil || processExpertRouteSink() != nil {
+		return nil, false, nil
+	}
+	// Native provenance already captured availability. Do not reprobe a changed
+	// module or infer qualification from a backend name here.
+	op, ok := binding.nativeRouter.backend.(compute.V41RouterTopKBackend)
+	if !ok {
+		return nil, false, nil
+	}
+	state, scope, epoch, backend := s.v41Forward, s.backendExecutionScope, s.cacheGeometryEpoch, s.Backend
+	valid := func() bool {
+		return binding.nativeOwner(m, scratch, cfg, full, layer) == s && s.v41Forward == state && s.backendExecutionScope == scope &&
+			s.cacheGeometryEpoch == epoch && s.Backend == backend && m.expertRouteObs == nil && m.expertRouteEventObs == nil &&
+			strings.TrimSpace(os.Getenv(ExpertRouteTraceEnv)) == "" && processExpertRouteSink() == nil
+	}
+	out := make([][]routePick, rows)
+	for start := 0; start < rows; {
+		n := min(v41ProjPanelRowChunk, rows-start)
+		end := start + n
+		picks, err := v41SelectedRouterRows(s, op, layer, logits[start*cfg.Experts:end*cfg.Experts], bias, n, cfg, full, nil, valid)
+		if err != nil {
+			return nil, true, err
+		}
+		copy(out[start:end], picks)
+		start = end
+	}
+	return out, true, nil
 }
