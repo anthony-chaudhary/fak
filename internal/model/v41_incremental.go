@@ -82,17 +82,17 @@ type v41StepStats struct {
 // (nextWindowPos, nextCompressRow) and the one ring row each overwrote, and the
 // uncommitted history left untouched. It returns one logits row on success.
 func (m *Model) forwardV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) ([]float32, v41StepStats, error) {
-	return m.forwardV41StepCore(id, st, scratch, false)
+	return m.forwardV41StepCore(id, st, scratch, false, true)
 }
 
 // forwardV41StepAdmitted is for Session.Step after its full-model check in the
 // same owned dispatch. It never carries admission across calls; live token,
 // state, cursor, selected-operation and rollback checks stay in the transaction.
 func (m *Model) forwardV41StepAdmitted(id int, st *v41ForwardState, scratch *v41ProjScratch) ([]float32, v41StepStats, error) {
-	return m.forwardV41StepCore(id, st, scratch, true)
+	return m.forwardV41StepCore(id, st, scratch, true, true)
 }
 
-func (m *Model) forwardV41StepCore(id int, st *v41ForwardState, scratch *v41ProjScratch, admitted bool) (logits []float32, stats v41StepStats, err error) {
+func (m *Model) forwardV41StepCore(id int, st *v41ForwardState, scratch *v41ProjScratch, admitted, wantLogits bool) (logits []float32, stats v41StepStats, err error) {
 	var tx *v41StepTransaction
 	if admitted {
 		tx, err = m.beginV41StepAdmitted(id, st, scratch)
@@ -107,6 +107,10 @@ func (m *Model) forwardV41StepCore(id int, st *v41ForwardState, scratch *v41Proj
 		if err := tx.advanceLayer(); err != nil {
 			return nil, tx.stats, err
 		}
+	}
+	if !wantLogits {
+		err = tx.finalizeNoLogits()
+		return nil, tx.stats, err
 	}
 	logits, err = tx.finalize()
 	return logits, tx.stats, err

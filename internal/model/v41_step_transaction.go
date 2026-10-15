@@ -20,6 +20,7 @@ type v41StepTransaction struct {
 	headInput         func() ([]float32, error)
 	headProject       func([]float32) ([]float32, error)
 	headFinish        func([]float32, func() error) ([]float32, error)
+	commit            func(bool)
 	rollback, cleanup func()
 	afterLayer        func(int) error
 	activationCapture *v41StepActivationCapture
@@ -430,6 +431,10 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			}
 		}
 
+		tx.commit(true)
+		return res, nil
+	}
+	tx.commit = func(withLogits bool) {
 		// Commit: append the token and, for a plain-only session, release the
 		// step-scoped registry to match forwardV41. A role session retains the registry
 		// because it is the cross-step source publication store a reader resolves.
@@ -438,9 +443,15 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			st.attn = nil
 		}
 		stats.Committed = true
-		st.forwardCoverage = newNativeV41ForwardCoverage(cfg, stats.LayerCalls, NativeForwardLogitsSourceV41Incremental)
-		return res, nil
+		if tx.activationCapture != nil {
+			tx.activationCapture.stateOnlyCommit = !withLogits
+		}
+		st.forwardCoverage = nil
+		if withLogits {
+			st.forwardCoverage = newNativeV41ForwardCoverage(cfg, stats.LayerCalls, NativeForwardLogitsSourceV41Incremental)
+		}
 	}
+
 	ready = true
 	return tx, nil
 }
@@ -540,6 +551,23 @@ func (tx *v41StepTransaction) finalize() (logits []float32, err error) {
 	return tx.finishHead(logits, nil)
 }
 
+// finalizeNoLogits preserves head-input validation and the normal transaction
+// commit/cleanup, but omits projection and scaling when no caller consumes logits.
+// It cannot finish a partially advanced or already prepared transaction.
+func (tx *v41StepTransaction) finalizeNoLogits() (err error) {
+	defer tx.abortOnPanic()
+	row, err := tx.prepareHead()
+	if err != nil {
+		return err
+	}
+	if err = v41ValidateDiscardedHeadInput(row); err != nil {
+		return tx.abortHeadError(err)
+	}
+	tx.commit(false)
+	tx.close()
+	return nil
+}
+
 func (tx *v41StepTransaction) abortHeadError(err error) error {
 	tx.abortAfterFailure()
 	var projection *V41ProjectionOperationError
@@ -597,6 +625,7 @@ func (tx *v41StepTransaction) close() {
 		tx.layer, tx.headInput, tx.headProject, tx.headFinish = nil, nil, nil, nil
 		tx.rollback, tx.cleanup = nil, nil
 		tx.afterLayer = nil
+		tx.commit = nil
 	}()
 	if tx.cleanup != nil {
 		tx.cleanup()
