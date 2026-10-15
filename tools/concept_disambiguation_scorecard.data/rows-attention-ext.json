@@ -714,7 +714,8 @@
       "distinction": "V41SharedAttentionCompressed selects negative MaxFloat32 and skips when that sentinel survives. Plain can consume selected compressed-history rows; it does not mean uncompressed storage. Unlike softmaxAttentionScores, this is a numerical mode selector, not the score-normalization function. Unlike v41SharedAttentionRows, the mode does not describe borrowed row storage.",
       "distinct_from": [
         "x-attention-softmaxattentionscores",
-        "x-attention-v41sharedattentionrows"
+        "x-attention-v41sharedattentionrows",
+        "v41sharedattentionbinding"
       ],
       "aliases": [],
       "grounding": "V41SharedAttentionPlain",
@@ -733,10 +734,31 @@
       "definition": "v41SharedAttentionRows is an internal model request descriptor containing borrowed window and compressed row slices, logically concatenated in that order, valid only during the synchronous attention callback. It does not own or cache the float data.",
       "distinction": "Unlike V41SharedAttentionPlain, a numerical softmax mode selector, this type describes input row storage. Admission validates every original row before selection; resident staging materializes only missing upload runs and no-row-log fallback packs selected rows.",
       "distinct_from": [
-        "x-attention-v41sharedattentionplain"
+        "x-attention-v41sharedattentionplain",
+        "v41sharedattentionbinding"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41sharedattentionbinding",
+      "canonical": "v41SharedAttentionBinding",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private immutable identity container pairing one ordinary shared-attention callback with optional canonical Session, Model, and Backend provenance. Reconstructing or wrapping the callback creates an ordinary-only binding, so function identity does not transfer canonical provenance.",
+      "distinction": "Unlike v41SharedAttentionRows, which describes borrowed KV input slices, this binding describes callback origin and identity. Unlike V41SharedAttentionPlain, it selects no numerical mode. In this foundation provenance is dormant, raw-field adapters discard it, and every validation scan remains strict; the binding grants no independent lifetime authority or validation bypass.",
+      "distinct_from": [
+        "x-attention-v41sharedattentionrows",
+        "x-attention-v41sharedattentionplain"
+      ],
+      "aliases": [],
+      "grounding": "v41SharedAttentionBinding",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
