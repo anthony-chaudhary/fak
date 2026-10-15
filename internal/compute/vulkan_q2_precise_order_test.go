@@ -349,6 +349,35 @@ func TestVulkanQ2TokenPanelActivationReuseSource(t *testing.T) {
 	if err := q2TokenPanelActivationReuseSourceContract(source); err != nil {
 		t.Fatal(err)
 	}
+	// The packed-word selector must remain bound to its own row and to the
+	// same ascending j byte; the row-1 selector is guarded like its reads.
+	const selector = "j < 2u ? sc0Row1 : sc1Row1"
+	wrongRow := strings.Replace(source, selector, "j < 2u ? sc0Row0 : sc1Row0", 1)
+	if wrongRow == source || q2TokenPanelActivationReuseSourceContract(wrongRow) == nil {
+		t.Fatal("source contract accepted a row-0 packed scale in row 1")
+	}
+	for _, background := range []uint32{0, 0xffffffff} {
+		for byteIndex := uint(0); byteIndex < 8; byteIndex++ {
+			for value := uint32(0); value < 256; value++ {
+				words := [2]uint32{background, background}
+				shift := (byteIndex & 3) * 8
+				words[byteIndex/4] = words[byteIndex/4]&^(255<<shift) | value<<shift
+				for s := uint(0); s < 2; s++ {
+					legacy := [4]uint32{(words[0] >> (s * 8)) & 255, (words[0] >> ((2 + s) * 8)) & 255, (words[1] >> (s * 8)) & 255, (words[1] >> ((2 + s) * 8)) & 255}
+					for j := uint(0); j < 4; j++ {
+						word := words[0]
+						if j >= 2 {
+							word = words[1]
+						}
+						got := (word >> (((j&1)*2 + s) * 8)) & 255
+						if got != legacy[j] {
+							t.Fatalf("scale s=%d j=%d byte=%d value=%d got=%d want=%d", s, j, byteIndex, value, got, legacy[j])
+						}
+					}
+				}
+			}
+		}
+	}
 	// A complete precise chain can still be wrong if it uses the other row's
 	// quant. The negative control must reject this otherwise plausible mutation.
 	const row1Product = "qvRow1.y * xv.y"
@@ -428,24 +457,16 @@ void main() {
         uint sc0Row0 = raw[baseRow0 + h * 2u];
         uint sc1Row0 = raw[baseRow0 + h * 2u + 1u];
         vec2 ddRow0 = unpackHalf2x16(raw[baseRow0 + 20u]);
-        uint scjRow0[4];
-        scjRow0[0] = (sc0Row0 >> (s * 8u)) & 255u;
-        scjRow0[1] = (sc0Row0 >> ((2u + s) * 8u)) & 255u;
-        scjRow0[2] = (sc1Row0 >> (s * 8u)) & 255u;
-        scjRow0[3] = (sc1Row0 >> ((2u + s) * 8u)) & 255u;
         uint qRow1;
         vec2 ddRow1;
-        uint scjRow1[4];
+        uint sc0Row1;
+        uint sc1Row1;
         if (hasRow1) {
             uint baseRow1 = (rowBase + 1u) * wordsPerRow + sb * 21u;
             qRow1 = raw[baseRow1 + 4u + t16];
-            uint sc0Row1 = raw[baseRow1 + h * 2u];
-            uint sc1Row1 = raw[baseRow1 + h * 2u + 1u];
+            sc0Row1 = raw[baseRow1 + h * 2u];
+            sc1Row1 = raw[baseRow1 + h * 2u + 1u];
             ddRow1 = unpackHalf2x16(raw[baseRow1 + 20u]);
-            scjRow1[0] = (sc0Row1 >> (s * 8u)) & 255u;
-            scjRow1[1] = (sc0Row1 >> ((2u + s) * 8u)) & 255u;
-            scjRow1[2] = (sc1Row1 >> (s * 8u)) & 255u;
-            scjRow1[3] = (sc1Row1 >> ((2u + s) * 8u)) & 255u;
         }
         precise float sumRow0[MAX_TOKENS];
         precise float sumRow1[MAX_TOKENS];
@@ -454,16 +475,19 @@ void main() {
             sumRow1[t] = 0.0;
         }
         for (uint j = 0u; j < 4u; ++j) {
+            uint scaleShift = ((j & 1u) * 2u + s) * 8u;
+            uint scjRow0 = ((j < 2u ? sc0Row0 : sc1Row0) >> scaleShift) & 255u;
             vec4 qvRow0 = bytesOf((qRow0 >> (2u * j)) & 0x03030303u);
-            precise float dlRow0 = ddRow0.x * float(scjRow0[j] & 15u);
-            precise float mlRow0 = ddRow0.y * float(scjRow0[j] >> 4u);
+            precise float dlRow0 = ddRow0.x * float(scjRow0 & 15u);
+            precise float mlRow0 = ddRow0.y * float(scjRow0 >> 4u);
             vec4 qvRow1;
             precise float dlRow1;
             precise float mlRow1;
             if (hasRow1) {
+                uint scjRow1 = ((j < 2u ? sc0Row1 : sc1Row1) >> scaleShift) & 255u;
                 qvRow1 = bytesOf((qRow1 >> (2u * j)) & 0x03030303u);
-                dlRow1 = ddRow1.x * float(scjRow1[j] & 15u);
-                mlRow1 = ddRow1.y * float(scjRow1[j] >> 4u);
+                dlRow1 = ddRow1.x * float(scjRow1 & 15u);
+                mlRow1 = ddRow1.y * float(scjRow1 >> 4u);
             }
             uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
             for (uint t = 0u; t < tokens; ++t) {
