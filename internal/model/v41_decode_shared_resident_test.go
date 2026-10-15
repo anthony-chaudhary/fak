@@ -18,7 +18,7 @@ func TestV41DecodeSharedResidentOwned(t *testing.T) {
 	newLane := func() (*Session, *v41ProjScratch, *v41ColdSharedRecorder) {
 		b := newV41ColdSharedRecorder()
 		s := v41ColdSharedSession(m, b)
-		ops := &v41DeviceGatherOps{owner: s, bf16Publish: s.v41BF16PublishFunc()}
+		ops := &v41DeviceGatherOps{owner: s, bf16Publish: s.v41BindBF16Publication()}
 		s.v41Forward = &v41ForwardState{callbackOwner: s, gatherOps: ops}
 		scratch := &v41ProjScratch{projectionRoute: newV41ProjectionRouteBinding(s.v41DenseProjectionFunc(), nil), sharedActivation: s.v41SharedActivationFunc(), gatherOps: ops}
 		t.Cleanup(s.Close)
@@ -140,7 +140,7 @@ func TestV41DecodeSharedAddResidentOwned(t *testing.T) {
 	newLane := func() (*Session, *v41ProjScratch, *v41ColdSharedRecorder) {
 		b := newV41ColdSharedRecorder()
 		s := v41ColdSharedSession(m, b)
-		ops := &v41DeviceGatherOps{owner: s, bf16Publish: s.v41BF16PublishFunc()}
+		ops := &v41DeviceGatherOps{owner: s, bf16Publish: s.v41BindBF16Publication()}
 		s.v41Forward = &v41ForwardState{callbackOwner: s, gatherOps: ops}
 		scratch := &v41ProjScratch{projectionRoute: newV41ProjectionRouteBinding(s.v41DenseProjectionFunc(), nil), sharedActivation: s.v41SharedActivationFunc(), sharedAdd: s.v41SharedAddFunc(), gatherOps: ops}
 		t.Cleanup(s.Close)

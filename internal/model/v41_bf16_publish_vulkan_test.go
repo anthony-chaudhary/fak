@@ -303,7 +303,7 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		defer func() { v41DeviceOnlyHostOps = saved }()
 		sites := map[string]int{}
 		st := dev.v41State()
-		inner, final := st.gatherOps.bf16Publish, st.bf16Boundary
+		inner, final := st.gatherOps.bf16PublishFunc(), st.bf16Boundary
 		if inner == nil || final == nil || st.attentionBF16Func() == nil {
 			t.Fatal("publication seams not bound on the device-only session")
 		}
@@ -313,7 +313,8 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 				return next(layer, site, values)
 			}
 		}
-		st.gatherOps.bf16Publish, st.bf16Boundary = count(inner), count(final)
+		st.gatherOps.setBF16Publication(count(inner))
+		st.bf16Boundary = count(final)
 		stop := enableV41BF16Witness()
 		var got v41DeviceParityRun
 		dispatches := v41SeamDispatches(t, be, func() { got = v41DeviceParitySession(t, dev, prompt, v41DeviceParitySteps) })
