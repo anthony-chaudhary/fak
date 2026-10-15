@@ -210,7 +210,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
 	projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
-	hcByPos := make([]v41MHCMix, seq)
+	var hcByPos []v41MHCMix
+	if resident == nil {
+		hcByPos = make([]v41MHCMix, seq)
+	}
 	preByPos := make([][]float32, seq)
 	if resident != nil {
 		collapsedRows, err := resident.beginLayer(l, hcIters, hcEps, eps)
@@ -731,8 +734,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		ffnResidual = make([][][]float32, seq)
-		ffnMixes = make([]v41MHCMix, seq)
+		if resident == nil {
+			ffnResidual = make([][][]float32, seq)
+			ffnMixes = make([]v41MHCMix, seq)
+		}
 	}
 	var ffnCollapsed [][]float32
 	if resident != nil {
@@ -947,7 +952,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 
 	var nextPanel [][][]float32
-	if full {
+	if full && resident == nil {
 		nextPanel = make([][][]float32, seq)
 	}
 	var moeRows [][]float32
