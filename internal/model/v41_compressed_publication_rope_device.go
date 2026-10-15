@@ -53,6 +53,12 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 			if s.halClosed {
 				return
 			}
+			// Cleanup can panic before Close marks the session closed; retain the
+			// selected primary and prohibit reuse even when cleanup is incomplete.
+			defer func() {
+				s.halClosed = true
+				_ = recover()
+			}()
 			// Detach once before Close's flush: a secondary flush panic must not
 			// strand these owners. Backend.Free retains its normal deferred-release
 			// contract (Vulkan parks uncertain submissions in native quarantine).
@@ -63,12 +69,6 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 					func() { defer func() { _ = recover() }(); backend.Free(table) }()
 				}
 			}
-			// Cleanup can panic before Close marks the session closed; retain the
-			// selected primary and prohibit reuse even when cleanup is incomplete.
-			defer func() {
-				s.halClosed = true
-				_ = recover()
-			}()
 			s.closeBackendOwned()
 		}
 		closeFailure := func(err error) error {

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -31,11 +33,14 @@ type v41PublicationRoPERecorder struct {
 	foreignReads, foreignFrees int
 	// publishes adds the ordinary BF16 publication, so the selected owner
 	// rounds its rotated tails while resident.
-	tableUploads int
-	tablePeak    int
-	tables       map[compute.Buffer]bool
-	publishes    bool
-	publishSites []uint32
+	tableUploads    int
+	uploadCalls     int
+	cachedFreeCalls int
+	cachedFreeFault string
+	tablePeak       int
+	tables          map[compute.Buffer]bool
+	publishes       bool
+	publishSites    []uint32
 	*v41DeferredLedger
 }
 
@@ -76,6 +81,7 @@ func (b *v41PublicationRoPERecorder) FlushBatch() {
 	}
 }
 func (b *v41PublicationRoPERecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	b.uploadCalls++
 	selected := strings.HasPrefix(site, "V4.1 compressed publication RoPE")
 	isTable := selected && strings.HasSuffix(site, " table")
 	if isTable {
@@ -123,6 +129,19 @@ func (b *v41PublicationRoPERecorder) Free(x compute.Tensor) {
 	r := b.resources[x.Buf()]
 	if r != nil {
 		r.attempts++
+	}
+	if b.armed && b.tables[x.Buf()] && b.cachedFreeFault != "" {
+		b.cachedFreeCalls++
+		if b.cachedFreeCalls == 1 {
+			switch b.cachedFreeFault {
+			case "nil":
+				panic(nil)
+			case "value":
+				panic(errors.New("secondary cached-table Free failure"))
+			case "goexit":
+				runtime.Goexit()
+			}
+		}
 	}
 	if r != nil && b.armed && b.cleanup == "free" && b.cleanupCalls == 0 {
 		b.cleanupCalls++
@@ -981,4 +1000,103 @@ func TestV41CompressedPublicationRoPETableCache(t *testing.T) {
 		v41PublicationRoPECensus(t, s, b, false)
 	})
 
+}
+
+// fak-test:runtime fast est=50ms lane=default
+// fak-test:justify Actual cached-table cleanup must close the selected callback even when Free exits its goroutine.
+func TestV41CompressedPublicationRoPECachedFreeClosesSession(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	for _, mode := range []string{"0", "1"} {
+		t.Run("panicnil="+mode, func(t *testing.T) {
+			t.Setenv("GODEBUG", "panicnil="+mode)
+			for _, fault := range []string{"nil", "value", "goexit", "healthy"} {
+				t.Run(fault, func(t *testing.T) {
+					m := &Model{Cfg: Config{HeadDim: 4, QKRopeHeadDim: 2, RopeTheta: 10000}}
+					b := newV41PublicationRoPERecorder()
+					s := &Session{M: m, Backend: b}
+					rotate := s.v41CompressedPublicationRoPEFunc()
+					if rotate == nil {
+						t.Fatal("selected publication callback did not bind")
+					}
+					keys := [2]string{"v41-compressed-publication-rope-table:0", "v41-compressed-publication-rope-table:1"}
+					var tables [2]compute.Tensor
+					joined := true
+					t.Cleanup(func() {
+						// Never race cleanup with a worker that missed the watchdog.
+						if !joined {
+							return
+						}
+						b.armed, b.cachedFreeFault = false, ""
+						s.Close()
+						// The fixture owns CPU storage left unknown by an injected
+						// failed Free. This is not production retirement credit.
+						for _, table := range tables {
+							if r := b.resources[table.Buf()]; r != nil && !r.released {
+								b.v41DenseTestBackend.Free(table)
+							}
+						}
+					})
+					input := []float32{.5, -.25}
+					for pos := 0; pos < 2; pos++ {
+						cos, sin := v41RopeTableForLayer(m.Cfg, 0, pos)
+						got, err := rotate(0, input, cos, sin, 1, 2)
+						if err != nil {
+							t.Fatal(err)
+						}
+						v41TailRoPECheckBits(t, "warm cached table", got, v41PublicationRoPEOracle(input, 2, cos, sin))
+						tables[pos] = s.halW[keys[pos]]
+					}
+					if b.tableUploads != 2 || len(b.tables) != 2 || len(b.calls) != 2 || tables[0].Buf() == nil || tables[1].Buf() == nil || tables[0].Buf() == tables[1].Buf() {
+						t.Fatal("two distinct actual table owners were not warmed")
+					}
+					for i, table := range tables {
+						if s.halW[keys[i]].Buf() != table.Buf() || !b.tables[table.Buf()] || b.resources[table.Buf()].attempts != 0 {
+							t.Fatal("warm table identity or ownership changed")
+						}
+					}
+					primary := fmt.Errorf("cached publication wrapper: %w", &BackendForwardOperationError{Backend: b.Name(), Path: "selected-primary", Cause: ErrV41ForwardStage})
+					b.fault, b.cause, b.failCall, b.cachedFreeFault = "panic", primary, 3, fault
+					cos, sin := v41RopeTableForLayer(m.Cfg, 0, 0)
+					var recovered any
+					returned := false
+					done := make(chan struct{})
+					joined = false
+					go func() {
+						defer close(done)
+						defer func() { recovered = recover() }()
+						_, _ = rotate(0, input, cos, sin, 1, 2)
+						returned = true
+					}()
+					select {
+					case <-done:
+						joined = true
+					case <-time.After(2 * time.Second):
+						t.Fatal("cached Free worker did not terminate")
+					}
+					if !s.BackendSessionClosed() || s.halFailure != primary || returned {
+						t.Fatalf("cached Free fault=%q returned=%t closed=%t primary=%t", fault, returned, s.BackendSessionClosed(), s.halFailure == primary)
+					}
+					if fault == "goexit" {
+						if recovered != nil || b.cachedFreeCalls != 1 || s.halW[keys[1]].Buf() != tables[1].Buf() || b.resources[tables[1].Buf()].attempts != 0 {
+							t.Fatal("Goexit was recovered, drained the second table, or changed its ownership")
+						}
+					} else if recovered != primary || b.cachedFreeCalls != 2 || len(s.halW) != 0 || b.resources[tables[1].Buf()].attempts != 1 {
+						t.Fatal("cached cleanup changed the selected primary or ordinary cleanup progress")
+					}
+					if _, present := s.halW[keys[0]]; present || b.resources[tables[0].Buf()].attempts != 1 || b.resources[tables[0].Buf()].released != (fault == "healthy") {
+						t.Fatal("first cached table was not detached once with truthful release evidence")
+					}
+					calls, uploads, frees := len(b.calls), b.uploadCalls, b.cachedFreeCalls
+					if retry := recoverError(func() { _, _ = rotate(0, input, cos, sin, 1, 2) }); retry != primary || len(b.calls) != calls || b.uploadCalls != uploads || b.cachedFreeCalls != frees {
+						t.Fatal("closed cached callback retried upload, dispatch, or Free")
+					}
+					b.armed, b.cachedFreeFault = false, ""
+					s.Close()
+					if b.resources[tables[0].Buf()].attempts != 1 || b.resources[tables[1].Buf()].attempts != 1 {
+						t.Fatal("later Close retried a detached table or omitted the remaining owner")
+					}
+				})
+			}
+		})
+	}
 }
