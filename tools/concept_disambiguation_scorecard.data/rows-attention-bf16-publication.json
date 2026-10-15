@@ -294,16 +294,16 @@
     },
     {
       "id": "v41-attention-bf16-state-field",
-      "canonical": "attentionBF16",
+      "canonical": "attentionBF16Func",
       "family": "attention",
       "kind": "symbol",
-      "definition": "The optional v41ForwardState and scratch field retaining the session-bound ordinary attention BF16 publication callback. Forward binding, scratch propagation and reset carry it alongside attentionNorm through grouped and incremental consumers.",
-      "distinction": "This field stores the publication callable around normalization; attentionNorm stores the separate RMSNorm callable. Neither field itself qualifies the complete ordinary device route.",
+      "definition": "The v41ForwardState and v41ProjScratch accessor returning the ordinary attention BF16 publication callable from the sealed attentionNormBinding. A nil binding yields no callable; replacing the publication edge creates a new binding without canonical panel authority.",
+      "distinction": "This accessor reads the BF16 publication edge; attentionNormFunc reads the RMSNorm edge. The accessors expose scalar callables, while the binding retains the shared provenance needed to qualify cold-panel dispatch.",
       "distinct_from": [
         "v41-attention-input-norm-state"
       ],
       "aliases": [],
-      "grounding": "attentionBF16",
+      "grounding": "attentionBF16Func",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

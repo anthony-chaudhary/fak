@@ -332,7 +332,7 @@ func TestV41ColdCohortDispatchAttribution(t *testing.T) {
 	want := make([][]float32, len(inputs))
 	picks := [][]routePick{{{expert: 0, weight: weights[0]}}, {{expert: 0, weight: weights[1]}}}
 	state := control.v41State()
-	state.routedSum = nil
+	state.setRoutedSum(nil)
 	if err := m.v41ContractRoutedGrouped(0, inputs, picks, &v41ProjScratch{}, m.Cfg, want, state); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestV41ExpertScalarCohortProtocol(t *testing.T) {
 	run := func(s *Session) [][]float32 {
 		out := make([][]float32, count)
 		state := s.v41State()
-		state.routedSum = nil
+		state.setRoutedSum(nil)
 		err := m.v41ContractRoutedGrouped(0, inputs, picks, &v41ProjScratch{}, m.Cfg, out, state)
 		if err != nil {
 			t.Fatal(err)

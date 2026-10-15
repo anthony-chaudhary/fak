@@ -14,19 +14,27 @@ import (
 // Backend identity is immutable for the Session lifetime; restored state binds
 // a new closure to its destination owner.
 func (s *Session) v41AttentionBF16Func() v41BF16BoundaryFunc {
+	publish, _, _ := s.v41AttentionBF16WithProvenance()
+	return publish
+}
+
+// v41AttentionBF16WithProvenance reports the exact model/backend captured by
+// the ordinary closure, after admission callbacks have run. Callers must not
+// infer that provenance from Session fields before or after those callbacks.
+func (s *Session) v41AttentionBF16WithProvenance() (v41BF16BoundaryFunc, *Model, compute.Backend) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		!backendHasComparableIdentity(s.Backend) ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
-		return nil
+		return nil, nil, nil
 	}
 	if s.v41AttentionInputNormFunc() == nil {
-		return nil
+		return nil, nil, nil
 	}
-	backend := s.Backend
-	hidden, layers := s.M.Cfg.HiddenSize, s.M.Cfg.NumLayers
+	backend, model := s.Backend, s.M
+	hidden, layers := model.Cfg.HiddenSize, model.Cfg.NumLayers
 	operation, ok := backend.(compute.V41AttentionBF16Backend)
 	if !ok || !operation.SupportsV41AttentionBF16(s.M.Cfg.HiddenSize) {
-		return nil
+		return nil, nil, nil
 	}
 	return func(layer int, site string, values []float32) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
@@ -166,5 +174,5 @@ func (s *Session) v41AttentionBF16Func() v41BF16BoundaryFunc {
 			return nil, closeFailure(cause)
 		}
 		return result, nil
-	}
+	}, model, backend
 }

@@ -41,7 +41,7 @@ func TestV41AttentionInputNormDeviceDispatch(t *testing.T) {
 				m = v41IncrementalExpertFixture(t, true, false)
 			}
 			s, b := newSession(t, m)
-			if s.v41State().attentionNorm == nil {
+			if s.v41State().attentionNormFunc() == nil {
 				t.Fatal("device session did not bind attention-input RMSNorm")
 			}
 			v41GroupedParity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})), 1e-4)
@@ -70,7 +70,7 @@ func TestV41AttentionInputNormDeviceDispatch(t *testing.T) {
 			s.Close()
 			b.queryWeight = func() compute.Tensor { return target.halW[layerName(0, leaf)] }
 			v41GroupedParity(t, target.Prefill([]int{4}), lastLogits(m.Forward([]int{1, 2, 3, 4})), 1e-4)
-			if b.norms != 4 || target.v41Forward.callbackOwner != target || target.v41Forward.attentionNorm == nil {
+			if b.norms != 4 || target.v41Forward.callbackOwner != target || target.v41Forward.attentionNormFunc() == nil {
 				t.Fatal("suffix restore did not execute target-owned attention normalization")
 			}
 			before := captureV41ForwardSnapshot(target.v41Forward)
@@ -94,7 +94,7 @@ func TestV41AttentionInputNormDeviceDispatch(t *testing.T) {
 	t.Run("portable and reduced", func(t *testing.T) {
 		m := v41IncrementalPlainModel(t, 1)
 		s, b := newSession(t, m)
-		if s.v41State().attentionNorm != nil {
+		if s.v41State().attentionNormFunc() != nil {
 			t.Fatal("reduced graph bound full-profile input normalization")
 		}
 		v41GroupedParity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})), 1e-5)
@@ -121,14 +121,14 @@ func TestV41AttentionInputNormResidentDispatch(t *testing.T) {
 		b := newV41MHCTestBackend(true)
 		s := v41DenseTestSession(t, m, b)
 		st := s.v41State()
-		normalize, calls := st.attentionNorm, 0
+		normalize, calls := st.attentionNormFunc(), 0
 		if normalize == nil {
 			t.Fatal("resident session did not bind attention normalization")
 		}
-		st.attentionNorm = func(layer int, input []float32) ([]float32, error) {
+		st.setAttentionNorm(func(layer int, input []float32) ([]float32, error) {
 			calls++
 			return normalize(layer, input)
-		}
+		})
 		v41GroupedParity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})), 1e-4)
 		v41GroupedParity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})), 1e-4)
 		if calls != 3 || b.calls["rms-split"] == 0 || len(b.outputs) != 0 {

@@ -21,11 +21,13 @@ type Session struct {
 	// Only private already-owned bodies consult this operation-local scope.
 	// Public entrypoints acquire their domain regardless of this binding.
 	backendExecutionScope *backendExecutionScope
-	cacheGeometryMu       sync.RWMutex
-	cacheGeometryFailed   bool
-	cacheGeometryEpoch    uint64
-	M                     *Model
-	Cache                 *KVCache
+	// One active cold grouped layer; drained before any selected retirement.
+	v41RoutedOutputs    *v41RoutedOutputOwner
+	cacheGeometryMu     sync.RWMutex
+	cacheGeometryFailed bool
+	cacheGeometryEpoch  uint64
+	M                   *Model
+	Cache               *KVCache
 	// Backend is non-nil when this session is intentionally running through the
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.

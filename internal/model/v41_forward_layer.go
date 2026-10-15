@@ -58,8 +58,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
 	scratch.mhcFFNProjection = nil
-	scratch.attentionNorm = nil
-	scratch.attentionBF16 = nil
+	scratch.attentionNormBinding = nil
 	scratch.queryNorm = nil
 	scratch.queryPrefix = nil
 	scratch.kvNorm = nil
@@ -71,7 +70,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
 	scratch.clearSharedAttention()
-	scratch.routedSum = nil
+	scratch.setRoutedSum(nil)
 	scratch.sharedAdd = nil
 	scratch.gatherOps = nil
 	if st != nil {
@@ -79,8 +78,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.groupedOutput = st.groupedOutput
 		scratch.mhcProjection = st.mhcProjection
 		scratch.mhcFFNProjection = st.mhcFFNProjection
-		scratch.attentionNorm = st.attentionNorm
-		scratch.attentionBF16 = st.attentionBF16
+		scratch.attentionNormBinding = st.attentionNormBinding
 		scratch.queryNorm = st.queryNorm
 		scratch.queryPrefix = st.queryPrefix
 		scratch.kvNorm = st.kvNorm
@@ -92,7 +90,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
 		scratch.copySharedAttentionFrom(st)
-		scratch.routedSum = st.routedSum
+		scratch.copyRoutedSumFrom(st)
 		scratch.sharedAdd = st.sharedAdd
 		scratch.gatherOps = st.gatherOps
 	}
@@ -101,8 +99,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.groupedOutput = nil
 		scratch.mhcProjection = nil
 		scratch.mhcFFNProjection = nil
-		scratch.attentionNorm = nil
-		scratch.attentionBF16 = nil
+		scratch.attentionNormBinding = nil
 		scratch.queryNorm = nil
 		scratch.queryPrefix = nil
 		scratch.kvNorm = nil
@@ -114,7 +111,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
 		scratch.clearSharedAttention()
-		scratch.routedSum = nil
+		scratch.setRoutedSum(nil)
 		scratch.sharedAdd = nil
 		scratch.gatherOps = nil
 	}()
@@ -220,9 +217,17 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		if err != nil {
 			return err
 		}
-		for t := range collapsedRows {
-			if preByPos[t], err = m.v41AttentionInputNormWithPublications(l, collapsedRows[t], eps, scratch.attentionNorm, scratch.attentionBF16); err != nil {
-				return err
+		normalized, handled, err := scratch.attentionNormBinding.coldPanel(m, st, scratch, resident, l, collapsedRows, eps)
+		if err != nil {
+			return err
+		}
+		if handled {
+			preByPos = normalized
+		} else {
+			for t := range collapsedRows {
+				if preByPos[t], err = m.v41AttentionInputNormWithPublications(l, collapsedRows[t], eps, scratch.attentionNormFunc(), scratch.attentionBF16Func()); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -287,7 +292,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 		}
 		if full {
-			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNorm, scratch.attentionBF16)
+			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNormFunc(), scratch.attentionBF16Func())
 			if err != nil {
 				return err
 			}
@@ -418,7 +423,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	ownsCompressed := v41OwnsCompressedRows(plan)
 	var compressedKV [][]float32
 	if ownsCompressed {
-		compressed, err := m.v41CompressedRowsWithDeviceOps(l, plan.Ratio, kvRows, preByPos, scratch.denseProjection(), scratch.compressorNorm, scratch.gatherOps.compressorPoolFunc())
+		compressed, err := m.v41ColdCompressedRows(l, plan.Ratio, kvRows, preByPos, full, st, scratch)
 		if err != nil {
 			return err
 		}
@@ -875,7 +880,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 						return err
 					}
 				}
-				routedByToken[t], err = v41FullRoutedSumWith(l, perTokenPicks[t], outputs, H, scratch.routedSum)
+				routedByToken[t], err = v41FullRoutedSumWith(l, perTokenPicks[t], outputs, H, scratch.routedSumFunc())
 				if err != nil {
 					return err
 				}

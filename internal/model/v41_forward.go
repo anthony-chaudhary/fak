@@ -159,33 +159,32 @@ type v41ForwardState struct {
 	// backend and no host expert GEMM remains — the requirement for the pinned Q2_K
 	// streamed route to satisfy the Halo GPU-only guard. A nil callback (or any
 	// decline) preserves the historical host f32 down contraction byte-for-byte.
-	expertDown          v41ExpertDownFunc
-	projectionRoute     *v41ProjectionRouteBinding
-	groupedOutput       v41GroupedOutputFunc
-	engramProjection    v41EngramProjectionFunc
-	mhcProjection       v41MHCProjectionFunc
-	mhcFFNProjection    v41MHCProjectionFunc
-	finalNorm           v41FinalNormFunc
-	bf16Boundary        v41BF16BoundaryFunc
-	logitScale          v41LogitScaleFunc
-	attentionNorm       v41AttentionInputNormFunc
-	attentionBF16       v41BF16BoundaryFunc
-	queryNorm           v41QueryNormFunc
-	queryPrefix         v41QueryPrefixFunc
-	kvNorm              v41KVNormFunc
-	ffnNorm             v41FFNNormFunc
-	compressorNorm      v41CompressorNormFunc
-	indexKeyNorm        v41IndexKeyNormFunc
-	indexerScoreBinding *v41IndexerScoreBinding
-	indexScoreHealth    v41IndexerScoreHealthFunc
-	sharedActivation    v41SharedActivationFunc
-	tailRoPE            v41TailRoPEFunc
+	expertDown           v41ExpertDownFunc
+	projectionRoute      *v41ProjectionRouteBinding
+	groupedOutput        v41GroupedOutputFunc
+	engramProjection     v41EngramProjectionFunc
+	mhcProjection        v41MHCProjectionFunc
+	mhcFFNProjection     v41MHCProjectionFunc
+	finalNorm            v41FinalNormFunc
+	bf16Boundary         v41BF16BoundaryFunc
+	logitScale           v41LogitScaleFunc
+	attentionNormBinding *v41AttentionNormBinding
+	queryNorm            v41QueryNormFunc
+	queryPrefix          v41QueryPrefixFunc
+	kvNorm               v41KVNormFunc
+	ffnNorm              v41FFNNormFunc
+	compressorNorm       v41CompressorNormFunc
+	indexKeyNorm         v41IndexKeyNormFunc
+	indexerScoreBinding  *v41IndexerScoreBinding
+	indexScoreHealth     v41IndexerScoreHealthFunc
+	sharedActivation     v41SharedActivationFunc
+	tailRoPE             v41TailRoPEFunc
 
 	sharedAttentionBinding *v41SharedAttentionBinding
 
-	routedSum v41RoutedSumFunc
-	sharedAdd v41SharedAddFunc
-	gatherOps *v41DeviceGatherOps
+	routedSumBinding *v41RoutedSumBinding
+	sharedAdd        v41SharedAddFunc
+	gatherOps        *v41DeviceGatherOps
 	// routedExpert is the OPTIONAL fused device routed expert (gate/up, BF16
 	// clamp-SwiGLU route weight, down). The full profile offers each pick to it
 	// before expertGateUp/expertDown; nil keeps those seams unchanged.
@@ -355,7 +354,7 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNorm: st.attentionNorm, attentionBF16: st.attentionBF16, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSum: st.routedSum, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.copySharedAttentionFrom(st)
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
@@ -1011,8 +1010,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.finalNorm = s.v41FinalNormFunc()
 		s.v41Forward.bf16Boundary = s.v41FinalNormBF16CheckedFunc()
 		s.v41Forward.logitScale = s.v41LogitScaleFunc()
-		s.v41Forward.attentionNorm = s.v41AttentionInputNormFunc()
-		s.v41Forward.attentionBF16 = s.v41AttentionBF16Func()
+		s.v41Forward.attentionNormBinding = s.v41BindAttentionNorm()
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
@@ -1025,7 +1023,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.tailRoPE = s.v41TailRoPEFunc()
 		s.v41Forward.bindCanonicalSharedAttention(s.v41BindSharedAttention())
 		s.v41Forward.bindCanonicalRouter(s.v41BindRouterTopK())
-		s.v41Forward.routedSum = s.v41RoutedSumFunc()
+		s.v41Forward.routedSumBinding = s.v41CanonicalRoutedSumBinding()
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
 		if s.v41Forward.bf16Boundary == nil {
@@ -1261,108 +1259,184 @@ func (s *Session) v41RMSNormFunc() v41RMSNormFunc {
 	if eps := float32(s.M.Cfg.RMSNormEps); !finite32(eps) || eps <= 0 {
 		return nil
 	}
-	return func(name string, input []float32, width int, path string, layer int) (result []float32, cause error) {
-		s.ensureOpenBackendSession()
-		stage := "payload"
-		closeSelected := func(primary error) {
-			if s.halFailure == nil {
-				s.halFailure = primary
-			}
-			if s.halClosed {
-				return
-			}
-			// A typed incoming fault does not prove this callback's owner is
-			// retired. Keep its primary even if this owner's Close also panics.
-			defer func() { s.halClosed = true; _ = recover() }()
-			s.closeBackendOwned()
+	return func(name string, input []float32, width int, path string, layer int) ([]float32, error) {
+		return s.v41RMSNormRows(name, input, width, 1, path, layer, nil)
+	}
+}
+
+// v41RMSNormRows preserves the scalar kernel and selected-operation lifecycle.
+// A private canonical panel may supply a row finisher; no panel result escapes
+// until every row and its output publication have succeeded.
+func (s *Session) v41RMSNormRows(name string, input []float32, width, rows int, path string, layer int, finish func([]float32) ([]float32, error)) (result []float32, cause error) {
+	s.ensureOpenBackendSession()
+	stage := "payload"
+	panelComplete := false
+	closeSelected := func(primary error) {
+		if s.halFailure == nil {
+			s.halFailure = primary
 		}
-		closeFailure := func(err error) error {
-			if s.halFailure != nil {
-				closeSelected(s.halFailure)
-				return s.halFailure
-			}
-			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
-			closeSelected(closed)
-			return closed
+		if s.halClosed {
+			return
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						closeSelected(err)
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		// A typed incoming fault does not prove this callback's owner is
+		// retired. Keep its primary even if this owner's Close also panics.
+		defer func() { s.halClosed = true; _ = recover() }()
+		s.closeBackendOwned()
+	}
+	closeFailure := func(err error) error {
+		if s.halFailure != nil {
+			closeSelected(s.halFailure)
+			return s.halFailure
+		}
+		closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
+		closeSelected(closed)
+		return closed
+	}
+	defer func() {
+		r := recover()
+		if finish != nil && !panelComplete && r == nil {
+			// Goexit keeps unwinding; legacy panic(nil) must not become a
+			// successful panel return after a cleanup recovered its payload.
+			if cause == nil {
+				cause = errV41ProjectionResult
+			}
+			result, cause = nil, closeFailure(cause)
+			return
+		}
+		if r != nil {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					closeSelected(err)
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				// Some backends report plain errors. Preserve an unclassified
-				// panic's identity, but never leave its selected session reusable.
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, cause = nil, closeFailure(err)
+				return
 			}
-		}()
-		eps := float32(s.M.Cfg.RMSNormEps)
-		meta, present := s.M.manifest[name]
-		if width <= 0 || len(input) != width || !finite32(eps) || eps <= 0 ||
-			!present || len(meta.Shape) != 1 || meta.Shape[0] != width {
+			// Some backends report plain errors. Preserve an unclassified
+			// panic's identity, but never leave its selected session reusable.
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
+		}
+	}()
+	eps := float32(s.M.Cfg.RMSNormEps)
+	meta, present := s.M.manifest[name]
+	count, countOK := checkedMulInt(rows, width)
+	if rows <= 0 || rows > 64 || width <= 0 || !countOK || len(input) != count || !finite32(eps) || eps <= 0 ||
+		!present || len(meta.Shape) != 1 || meta.Shape[0] != width {
+		return nil, closeFailure(errV41ProjectionResult)
+	}
+	gain := s.M.tensor(name)
+	if len(gain) != width {
+		return nil, closeFailure(errV41ProjectionResult)
+	}
+	for i, v := range input {
+		if !finite32(v) || !finite32(gain[i%width]) {
 			return nil, closeFailure(errV41ProjectionResult)
 		}
-		gain := s.M.tensor(name)
-		if len(gain) != width {
-			return nil, closeFailure(errV41ProjectionResult)
+	}
+	run := func() (values []float32, err error) {
+		var owned []compute.Tensor
+		completed := false
+		if finish != nil {
+			defer v41ReleaseNormPanelTensors(s.Backend, &owned, &err, &completed)
 		}
-		for i, v := range input {
-			if !finite32(v) || !finite32(gain[i]) {
-				return nil, closeFailure(errV41ProjectionResult)
-			}
-		}
-		run := func() ([]float32, error) {
+		body := func() (values []float32, err error) {
 			stage = "weight upload"
 			weight := s.weightHAL(name)
 			stage = "activation upload"
-			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
-			defer s.Backend.Free(x)
-			stage = "rmsnorm"
-			y := s.Backend.RMSNorm(x, weight, eps)
-			defer s.Backend.Free(y)
-			if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
-				return nil, errV41ProjectionResult
+			shape := []int{width}
+			if finish != nil {
+				shape = []int{rows, width}
 			}
-			stage = "readback"
-			values := s.Backend.Read(y)
-			if len(values) != width {
-				return nil, errV41ProjectionResult
-			}
-			for _, v := range values {
-				if !finite32(v) {
+			x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
+			if finish == nil {
+				defer s.Backend.Free(x)
+			} else {
+				if x.Buf() == nil || x.Backend() != s.Backend || x.Buf() == weight.Buf() {
+					return nil, errV41ProjectionResult
+				}
+				owned = append(owned, x)
+				if !v41MHCFreshOutput(s, x, shape, weight) {
 					return nil, errV41ProjectionResult
 				}
 			}
-			// Read may expose backend-owned host memory; retain the row before
-			// releasing the temporary output tensor.
-			return append([]float32(nil), values...), nil
+			stage = "rmsnorm"
+			y := s.Backend.RMSNorm(x, weight, eps)
+			if finish == nil {
+				defer s.Backend.Free(y)
+			} else if y.Buf() != nil && y.Backend() == s.Backend && y.Buf() != x.Buf() && y.Buf() != weight.Buf() {
+				owned = append(owned, y)
+			}
+			if finish == nil {
+				if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
+					return nil, errV41ProjectionResult
+				}
+			} else if !v41MHCFreshOutput(s, y, shape, x, weight) {
+				return nil, errV41ProjectionResult
+			}
+			stage = "readback"
+			values = s.Backend.Read(y)
+			if len(values) != count {
+				return nil, errV41ProjectionResult
+			}
+			// Copy the complete read before releasing this chunk's device tensors.
+			// A BF16 publication may retire the backend, so it must run only after
+			// these transient tensors have been released.
+			values = append([]float32(nil), values...)
+			if finish == nil {
+				for _, v := range values {
+					if !finite32(v) {
+						return nil, errV41ProjectionResult
+					}
+				}
+			}
+			return values, nil
 		}
-		result, cause = run()
-		if cause != nil {
-			return nil, closeFailure(cause)
-		}
-		return result, nil
+		values, err = body()
+		completed = true
+		return values, err
 	}
+	result, cause = run()
+	if cause != nil {
+		return nil, closeFailure(cause)
+	}
+	if finish != nil {
+		// Validate and publish in logical row order. A later invalid norm must
+		// not precede an earlier output-publication failure.
+		for row := 0; row < rows; row++ {
+			current := result[row*width : (row+1)*width : (row+1)*width]
+			for _, v := range current {
+				if !finite32(v) {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
+			}
+			published, err := finish(current)
+			if err != nil {
+				return nil, err
+			}
+			if len(published) != width {
+				return nil, closeFailure(errV41ProjectionResult)
+			}
+			copy(current, published)
+		}
+	}
+	panelComplete = true
+	return result, nil
 }
 
 // v41ExpertGateUpFunc binds the shared device gate/up operation (#13357) onto the

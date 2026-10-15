@@ -174,7 +174,7 @@ func (m *Model) v41EPOwnerSum(c *v41ExpertParallelCollective, owners TPPlan, dig
 		return nil
 	}()
 	v41EPHeader(part, digest, localErr != nil)
-	sum, err = c.reduce(part, v41EPReduction{owners: owners, digest: digest, layer: layer, picks: picks, width: H, sum: st.routedSum})
+	sum, err = c.reduce(part, v41EPReduction{owners: owners, digest: digest, layer: layer, picks: picks, width: H, sum: st.routedSumFunc()})
 	// A failed owner receives only the generic root refusal. Preserve its own
 	// selected-operation cause locally, after participating in the failed round.
 	if localErr != nil {

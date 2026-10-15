@@ -179,7 +179,7 @@ func (m *Model) v41EPPrefillSum(c *v41ExpertParallelCollective, owners TPPlan, l
 			digests[token-first] = next(layer, token, true, picks[token], inputs[token])
 		}
 		if last-first > 1 {
-			reduced, cause := c.reducePanel(rows, v41EPPanelReduction{owners: owners, layer: layer, width: H, picks: picks[first:last], digests: digests, sum: st.routedSum})
+			reduced, cause := c.reducePanel(rows, v41EPPanelReduction{owners: owners, layer: layer, width: H, picks: picks[first:last], digests: digests, sum: st.routedSumFunc()})
 			if cause != nil {
 				return nil, cause
 			}
@@ -189,7 +189,7 @@ func (m *Model) v41EPPrefillSum(c *v41ExpertParallelCollective, owners TPPlan, l
 			part := make([]float32, v41EPHeaderWords+len(rows[token-first]))
 			v41EPHeader(part, digest, false)
 			copy(part[v41EPHeaderWords:], rows[token-first])
-			out[token], cause = c.reduce(part, v41EPReduction{owners: owners, digest: digest, layer: layer, picks: picks[token], width: H, sum: st.routedSum})
+			out[token], cause = c.reduce(part, v41EPReduction{owners: owners, digest: digest, layer: layer, picks: picks[token], width: H, sum: st.routedSumFunc()})
 			if cause != nil {
 				return nil, cause
 			}

@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **665** (clarity 0 + coverage 665) |
-| **Crystal-clear concepts (and climbing)** | **1241** crystal of 3033 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3124 / 3789** (82.4% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **664** (clarity 0 + coverage 664) |
+| **Crystal-clear concepts (and climbing)** | **1241** crystal of 3040 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3125 / 3789** (82.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **87** of 4290 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **87** of 4297 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,18 +28,18 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3033 concepts - score 88.6/100 (grade B) - disambiguation-debt 665
+concept-disambiguation chart - 3040 concepts - score 88.6/100 (grade B) - disambiguation-debt 664
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1241
-  o defined       ############################ 1792
+  o defined       ############################ 1799
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (129 concept(s); 32 crystal)
+  attention        ********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (136 concept(s); 32 crystal)
   cache            ********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (298 concept(s); 116 crystal)
   context-ctx      *************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (244 concept(s); 85 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -67,8 +67,8 @@ coverage by family (positioned / discovered):
   cache            #######################..... 339/408
   gateway-engine   #######################..... 238/293
   guard-gate       ##########################.. 514/562
-  attention        #####################....... 125/169
   context-ctx      ########################.... 264/308
+  attention        #####################....... 126/169
   policy-capability ########################.... 225/267
   pool             ##############.............. 41/83
   support-maturity ###################......... 82/119
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.4%  (3124/3789 confusable tokens positioned)
+namespace coverage  [##########################......] 82.5%  (3125/3789 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4290 lookup name(s) -> 3033 concept(s), 87 ambiguous
+name index: 4297 lookup name(s) -> 3040 concept(s), 87 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2302 / 5522 |
+| Boundaries drawn (mutual / total) | 2344 / 5566 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4290 over 3033 concepts |
+| Lookup names indexed | 4297 over 3040 concepts |
 | Lookup names landing on several concepts | 87 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3033 |
+| Concepts carrying a contrast set | 3040 |
 
 ## The concepts (best verdict first)
 
@@ -1402,7 +1402,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **fvk_v41_attention_bf16_f32** - The ordinary C entrypoint that checks transient state and the closed site 3/4 policy, then invokes the common checked-BF16 dispatch. Its command initializes the separate status buffer, applies the existing conservative barrier and submits the checked integer kernel. |
 | o | defined | symbol | attention | **v41AttentionBF16Func** - The Session constructor for an ordinary attention publication callback, selected only alongside a full-profile device RMSNorm callback and the ordinary BF16 capability. Its captured owner stages an input row, verifies fresh owned output and checked finite widened-BF16 payload, copies host results and retires selected failures without replay. |
 | o | defined | symbol | attention | **v41AttentionInputNormWithPublications** - The Model helper applying a publication callback before and after the unchanged selected attention-input RMSNorm. A nil publication retains the prior host BF16 casts, and the existing WithDevice helper delegates with nil. |
-| o | defined | symbol | attention | **attentionBF16** - The optional v41ForwardState and scratch field retaining the session-bound ordinary attention BF16 publication callback. Forward binding, scratch propagation and reset carry it alongside attentionNorm through grouped and incremental consumers. |
+| o | defined | symbol | attention | **attentionBF16Func** - The v41ForwardState and v41ProjScratch accessor returning the ordinary attention BF16 publication callable from the sealed attentionNormBinding. A nil binding yields no callable; replacing the publication edge creates a new binding without canonical panel authority. |
 | o | defined | concept | attention | **Attention (softmax token-mixer)** - The default softmax scaled-dot-product self-attention token mixer (the be.Attention HAL op and m.attnSeq body) that mixes tokens via Q·K softmax over V. |
 | o | defined | concept | attention | **self_attn (projection namespace)** - The self-attention sublayer's canonical tensor namespace (self_attn.{q,k,v,o}_proj plus q_norm/k_norm) that holds the projection weights of a softmax-attention block. |
 | o | defined | symbol | attention | **attnOut (attention output buffer)** - The per-head context-vector buffer (nH*hd wide) that attention accumulates per position and then feeds into the o_proj output matmul. |
@@ -1468,7 +1468,14 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | attention | **refuseUnimplementedV4FlashAttention** - The Session admission check for the deepseek_v4 Flash attention schedule. It returns the existing typed refusal for an invalid compression ratio or an unimplemented ratio 4/128 layer. GenerateContext returns this error; nonempty Prefill and PrefillNoLogits calls and every Step call panic with it before forward state or keepalive begins. |
 | o | defined | symbol | attention | **v41AttentionInputNormFunc** - The model callback signature and same-named Session constructor for normalizing one full-profile V4.1 collapsed hidden row. The constructor binds the existing session-owned RMSNorm operation to the layer attn_norm.weight and HiddenSize, or returns nil when that operation is unavailable. |
 | o | defined | symbol | attention | **v41AttentionInputNormWithDevice** - The Model adapter used at V4.1 attention-input normalization sites. A selected callback receives an owned BF16-rounded hidden row and its result is checked, copied and BF16-rounded for publication. A nil callback preserves the existing host normalization; a selected callback error is returned without host retry. |
-| o | defined | symbol | attention | **attentionNorm (V4.1 forward-state callback)** - The optional v41ForwardState field retaining the session-bound attention-input normalization callback across grouped, incremental and resident-stream forward execution. Scratch reuse clears the field and session state restoration rebinds it to the target session owner. |
+| o | defined | symbol | attention | **attentionNormFunc (V4.1 forward-state accessor)** - The v41ForwardState and v41ProjScratch accessor returning the session-bound attention-input RMSNorm callable from attentionNormBinding. Scratch propagation preserves binding identity; replacing either scalar edge discards canonical panel authority. |
+| o | defined | symbol | attention | **attentionNormBinding** - The shared V4.1 forward-state and scratch binding holding the attention-input RMSNorm and BF16 publication callables plus optional canonical session/model/backend provenance. Its coldPanel path admits only matching live resident ownership and validated input geometry. |
+| o | defined | symbol | attention | **v41AttentionNormBinding** - The binding value type pairing attention-input RMSNorm and BF16 publication callables with an optional canonical native provenance record. Copying the pointer preserves identity; replacing either edge creates a binding without native authority. |
+| o | defined | symbol | attention | **v41BoundAttentionNorm** - The canonical provenance record retaining the Session, Model and comparable backend identity captured for a V4.1 attention normalization binding. Cold panel selection rechecks these identities and the live binding and resident owner. |
+| o | defined | symbol | attention | **v41BindAttentionNorm** - The Session constructor selecting normalization and publication closures and attaching native panel authority only when both are present and their captured model and comparable backend identities agree. |
+| o | defined | symbol | attention | **v41AttentionBF16WithProvenance** - The Session publication constructor returning the ordinary checked BF16 closure together with the exact model and backend captured after capability admission callbacks have run. |
+| o | defined | symbol | attention | **setAttentionNorm** - The forward-state setter replacing the normalization callable while preserving the current publication callable in a new binding with no native panel authority. |
+| o | defined | symbol | attention | **setAttentionBF16** - The forward-state setter replacing the BF16 publication callable while preserving the current normalization callable in a new binding with no native panel authority. |
 | o | defined | symbol | attention | **v41AttentionPublicationKey** - The internal/model value key containing sourceLayer and an absolute half-open compressed-row range [start,end). Separate KV and index publication maps use it to identify source-published completed rows; current publication appends a unit range and advances that source's published end. |
 | o | defined | symbol | attention | **V41AttentionStateRef** - The layer-publication descriptor shared by the corresponding internal/model and internal/model/v41 types: zero-based LayerID, compression Ratio, and independent IsKVSource and IsIndexSource flags. Attention-state update validation uses these fields to check stack order and whether a supplied completed row is permitted. |
 | o | defined | symbol | attention | **V41AttentionStateUpdate** - The projection-free update value used by the corresponding internal/model and internal/model/v41 attention-state APIs: a V41AttentionStateRef plus optional Latent and IndexKey slices for a completed compressor group. The state validates updates before publication and copies each supplied row into its own registry. |
@@ -3313,8 +3320,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3220/5522 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3033 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3222/5566 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3040 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3323,7 +3330,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4290 lookup name(s) resolves - 87 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4297 lookup name(s) resolves - 87 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3335,8 +3342,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cache | 339 | 408 | 69 |
 | gateway-engine | 238 | 293 | 55 |
 | guard-gate | 514 | 562 | 48 |
-| attention | 125 | 169 | 44 |
 | context-ctx | 264 | 308 | 44 |
+| attention | 126 | 169 | 43 |
 | policy-capability | 225 | 267 | 42 |
 | pool | 41 | 83 | 42 |
 | support-maturity | 82 | 119 | 37 |

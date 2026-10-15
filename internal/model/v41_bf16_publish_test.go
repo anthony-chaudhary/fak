@@ -226,12 +226,12 @@ func TestV41BF16PublishSession(t *testing.T) {
 	b := newV41BF16PublishRecorder()
 	s := v41DenseTestSession(t, m, b)
 	st := s.v41State()
-	normalize := st.attentionNorm
-	if normalize == nil || st.attentionBF16 == nil {
+	normalize := st.attentionNormFunc()
+	if normalize == nil || st.attentionBF16Func() == nil {
 		t.Fatal("attention normalization/publication not bound")
 	}
 	attentionInputs := 0
-	st.attentionNorm = func(layer int, row []float32) ([]float32, error) {
+	st.setAttentionNorm(func(layer int, row []float32) ([]float32, error) {
 		attentionInputs++
 		for i, value := range row {
 			if !finite32(value) || math.Float32bits(value)&0xffff != 0 {
@@ -239,7 +239,7 @@ func TestV41BF16PublishSession(t *testing.T) {
 			}
 		}
 		return normalize(layer, row)
-	}
+	})
 	v41AttentionBF16Parity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})))
 	v41AttentionBF16Parity(t, s.Step(3), lastLogits(m.Forward([]int{1, 2, 3})))
 	if b.calls == 0 || s.BackendSessionClosed() {

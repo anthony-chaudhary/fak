@@ -78,8 +78,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.mhcProjection = st.mhcProjection
 	scratch.mhcFFNProjection = st.mhcFFNProjection
 	scratch.mhcCarry = nil
-	scratch.attentionNorm = st.attentionNorm
-	scratch.attentionBF16 = st.attentionBF16
+	scratch.attentionNormBinding = st.attentionNormBinding
 	scratch.queryNorm = st.queryNorm
 	scratch.queryPrefix = st.queryPrefix
 	scratch.kvNorm = st.kvNorm
@@ -91,7 +90,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
 	scratch.copySharedAttentionFrom(st)
-	scratch.routedSum = st.routedSum
+	scratch.copyRoutedSumFrom(st)
 	scratch.sharedAdd = st.sharedAdd
 	scratch.gatherOps = st.gatherOps
 	tx.cleanup = func() {
@@ -105,8 +104,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.mhcProjection = nil
 			scratch.mhcFFNProjection = nil
 			scratch.mhcCarry = nil
-			scratch.attentionNorm = nil
-			scratch.attentionBF16 = nil
+			scratch.attentionNormBinding = nil
 			scratch.queryNorm = nil
 			scratch.queryPrefix = nil
 			scratch.kvNorm = nil
@@ -118,7 +116,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.sharedActivation = nil
 			scratch.tailRoPE = nil
 			scratch.clearSharedAttention()
-			scratch.routedSum = nil
+			scratch.setRoutedSum(nil)
 			scratch.sharedAdd = nil
 			scratch.gatherOps = nil
 		}()

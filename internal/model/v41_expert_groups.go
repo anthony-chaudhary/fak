@@ -188,12 +188,28 @@ func (m *Model) v41ContractRoutedGroupedFresh(l int, xnByToken [][]float32, perT
 	return out, nil
 }
 
-func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState, freshOutput bool) error {
-	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
+func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState, freshOutput bool) (err error) {
+	H := cfg.HiddenSize
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
 		return err
 	}
+	completed := false
+	var resident *v41RoutedOutputOwner
+	if freshOutput && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m &&
+		cfg.MoEIntermediateSize == m.Cfg.MoEIntermediateSize && float32(cfg.SwigluLimit) == float32(m.Cfg.SwigluLimit) {
+		resident = scratch.routedOutputOwner(st.callbackOwner, l, H, perTokenPicks)
+		if resident != nil {
+			defer resident.finish(&err, &completed)
+		}
+	}
+	err = m.v41ContractRoutedGroupedOwned(l, xnByToken, perTokenPicks, scratch, cfg, out, st, freshOutput, full, resident)
+	completed = true
+	return err
+}
+
+func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState, freshOutput, full bool, resident *v41RoutedOutputOwner) error {
+	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	groups := v41PlanExpertGroups(perTokenPicks)
 	// The caller's normalized rows are shared with routing and the shared
 	// expert; neither host nor selected device normalization is repeated here.
@@ -237,7 +253,7 @@ func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTo
 					inputs[p] = xnByToken[row.Token]
 					weights[p] = perTokenPicks[row.Token][row.Slot].weight
 				}
-				rows, outcome, cause := st.callbackOwner.v41RoutedExpertCohort(l, stem, inputs, weights)
+				rows, outcome, cause := st.callbackOwner.v41RoutedExpertCohortRetained(l, stem, inputs, weights, resident.handoff(g.Rows[first:last]))
 				if outcome == v41RoutedExpertDeclined && !cohortHandled {
 					break
 				}
@@ -413,7 +429,16 @@ func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTo
 	// accumulation `routed[i] += pick.weight * y[i]` per slot.
 	for t, picks := range perTokenPicks {
 		if full {
-			values, cause := v41FullRoutedSumWith(l, picks, unweighted[t], H, scratch.routedSum)
+			var values []float32
+			var cause error
+			if resident != nil {
+				values, cause = resident.sum(t, picks, unweighted[t])
+				if cause == nil && len(values) != H {
+					cause = v41ExpertOperationErr(l, "sum", errV41DeviceSumResult)
+				}
+			} else {
+				values, cause = v41FullRoutedSumWith(l, picks, unweighted[t], H, scratch.routedSumFunc())
+			}
 			if cause != nil {
 				return cause
 			}

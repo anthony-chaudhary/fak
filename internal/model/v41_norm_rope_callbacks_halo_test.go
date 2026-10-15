@@ -160,7 +160,7 @@ func (w *v41NormRoPEHaloObserver) rope(run v41TailRoPEFunc) v41TailRoPEFunc {
 }
 
 func v41NormRoPEHaloIsolate(st *v41ForwardState) {
-	st.attentionNorm = nil
+	st.setAttentionNorm(nil)
 	st.expertGateUp, st.expertDown = nil, nil
 	st.setDenseProjection(nil)
 	st.groupedOutput, st.engramProjection = nil, nil
@@ -171,7 +171,8 @@ func v41NormRoPEHaloIsolate(st *v41ForwardState) {
 	st.setIndexerScore(nil)
 	st.indexScoreHealth = nil
 	st.setRouterTopK(nil)
-	st.routedSum, st.sharedAdd = nil, nil
+	st.setRoutedSum(nil)
+	st.sharedAdd = nil
 	st.gatherOps, st.mhcDevice = nil, nil
 	// The final-norm BF16 pair binds the ordinary publication; this witness
 	// budgets only its five callbacks' dispatches.
@@ -273,7 +274,7 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 	v41NormRoPEHaloIsolate(hs)
 	// Keep this witness's original five-callback scope. Neither attention-input
 	// normalization nor exact compressor/index-key execution is qualified here.
-	if st.attentionNorm != nil || hs.attentionNorm != nil || st.compressorNorm != nil || hs.compressorNorm != nil || st.indexKeyNorm != nil || hs.indexKeyNorm != nil {
+	if st.attentionNormFunc() != nil || hs.attentionNormFunc() != nil || st.compressorNorm != nil || hs.compressorNorm != nil || st.indexKeyNorm != nil || hs.indexKeyNorm != nil {
 		t.Fatal("five-callback witness did not isolate adjacent normalization seams")
 	}
 	hs.queryNorm, hs.kvNorm, hs.ffnNorm, hs.finalNorm, hs.tailRoPE = nil, nil, nil, nil, nil

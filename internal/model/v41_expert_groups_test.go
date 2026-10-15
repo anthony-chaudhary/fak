@@ -568,14 +568,14 @@ func TestV41ExpertGroupsRoutedIDPanels(t *testing.T) {
 
 	panelState := panelSession.v41State()
 	panelState.sharedActivation = nil
-	panelState.routedSum = nil
+	panelState.setRoutedSum(nil)
 	got, err := panelModel.forwardV41(ids, panelState)
 	if err != nil {
 		t.Fatalf("panel prefill: %v", err)
 	}
 	rowState := rowSession.v41State()
 	rowState.sharedActivation = nil
-	rowState.routedSum = nil
+	rowState.setRoutedSum(nil)
 	want, err := rowModel.forwardV41(ids, rowState)
 	if err != nil {
 		t.Fatalf("per-row prefill: %v", err)
