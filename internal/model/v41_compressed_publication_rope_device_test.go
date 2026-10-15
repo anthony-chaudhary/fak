@@ -27,9 +27,13 @@ type v41PublicationRoPERecorder struct {
 	resources                  map[compute.Buffer]*v41IndexRoPEResource
 	outputs                    map[compute.Buffer][]float32
 	foreign                    compute.Buffer
+	cacheAlias                 compute.Tensor
 	foreignReads, foreignFrees int
 	// publishes adds the ordinary BF16 publication, so the selected owner
 	// rounds its rotated tails while resident.
+	tableUploads int
+	tablePeak    int
+	tables       map[compute.Buffer]bool
 	publishes    bool
 	publishSites []uint32
 	*v41DeferredLedger
@@ -73,6 +77,13 @@ func (b *v41PublicationRoPERecorder) FlushBatch() {
 }
 func (b *v41PublicationRoPERecorder) UploadClass(x compute.Tensor, dt compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
 	selected := strings.HasPrefix(site, "V4.1 compressed publication RoPE")
+	isTable := selected && strings.HasSuffix(site, " table")
+	if isTable {
+		b.tableUploads++
+	}
+	if selected && !isTable && b.fault == "tail-cache-alias" {
+		return b.cacheAlias
+	}
 	if selected && ((b.fault == "tail-upload" && !strings.HasSuffix(site, " table")) || (b.fault == "table-upload" && strings.HasSuffix(site, " table"))) {
 		b.armed = true
 		panic(b.cause)
@@ -83,6 +94,15 @@ func (b *v41PublicationRoPERecorder) UploadClass(x compute.Tensor, dt compute.Dt
 	out := compute.NewF32(b, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
 	if selected {
 		b.resources[out.Buf()] = &v41IndexRoPEResource{}
+	}
+	if isTable {
+		if b.tables == nil {
+			b.tables = make(map[compute.Buffer]bool)
+		}
+		b.tables[out.Buf()] = true
+		if len(b.tables) > b.tablePeak {
+			b.tablePeak = len(b.tables)
+		}
 	}
 	return out
 }
@@ -108,6 +128,7 @@ func (b *v41PublicationRoPERecorder) Free(x compute.Tensor) {
 		b.cleanupCalls++
 		panic(errors.New("secondary publication Free failure"))
 	}
+	delete(b.tables, x.Buf())
 	// Deliberately invalidate a borrowed Read slice before releasing its tensor.
 	if values, ok := b.outputs[x.Buf()]; ok {
 		for i := range values {
@@ -139,6 +160,8 @@ func (b *v41PublicationRoPERecorder) V41TailRoPERows(x, table compute.Tensor, ro
 			return compute.Tensor{}, b.cause
 		case "panic":
 			panic(b.cause)
+		case "cache-alias":
+			return b.cacheAlias, nil
 		case "alias-input":
 			return x, nil
 		case "alias-table":
@@ -181,8 +204,10 @@ func (b *v41PublicationRoPERecorder) V41TailRoPERows(x, table compute.Tensor, ro
 	}
 	return out, nil
 }
-func v41PublicationRoPECensus(t *testing.T, b *v41PublicationRoPERecorder, failedFree bool) {
+func v41PublicationRoPECensus(t *testing.T, s *Session, b *v41PublicationRoPERecorder, failedFree bool) {
 	t.Helper()
+	// Tables survive successful calls but must retire exactly once with the session.
+	s.Close()
 	unreleased := 0
 	for _, r := range b.resources {
 		if r.attempts != 1 {
@@ -271,7 +296,7 @@ func TestV41CompressedPublicationRoPEReachability(t *testing.T) {
 	if !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), captureV41ForwardSnapshot(host.v41Forward)) {
 		t.Fatal("selected publication changed continuation")
 	}
-	v41PublicationRoPECensus(t, b, false)
+	v41PublicationRoPECensus(t, s, b, false)
 }
 
 // Candidate-only owner API tests below are deliberately excluded from the
@@ -335,7 +360,7 @@ func TestV41CompressedPublicationRoPEBits(t *testing.T) {
 				t.Fatal("unequal-width tails were not packed in one call")
 			}
 			v41TailRoPECheckBits(t, "index-first packed input", b.calls[0].x, []float32{originalK[4], originalK[5], originalL[6], originalL[7]})
-			v41PublicationRoPECensus(t, b, false)
+			v41PublicationRoPECensus(t, s, b, false)
 		})
 	}
 	t.Run("fused-negative-control", func(t *testing.T) {
@@ -365,7 +390,7 @@ func TestV41CompressedPublicationRoPEBits(t *testing.T) {
 		if len(b.calls) != 1 || b.calls[0].rows != 1 {
 			t.Fatal("missing index should dispatch one tail")
 		}
-		v41PublicationRoPECensus(t, b, false)
+		v41PublicationRoPECensus(t, s, b, false)
 	})
 }
 
@@ -400,7 +425,7 @@ func TestV41CompressedPublicationRoPEFailures(t *testing.T) {
 			if retry := recoverError(func() { _, _ = rotate(0, []float32{1, 2}, []float32{1}, []float32{0}, 1, 2) }); retry != s.halFailure || len(b.calls) != calls {
 				t.Fatal("retired owner retried")
 			}
-			v41PublicationRoPECensus(t, b, false)
+			v41PublicationRoPECensus(t, s, b, false)
 		})
 	}
 	for _, bits := range []uint32{0x7f800000, 0xff800000, 0x7fffffff, 0xffffffff} {
@@ -444,7 +469,7 @@ func TestV41CompressedPublicationRoPEFailures(t *testing.T) {
 				t.Fatal("secondary cleanup fault was not reached")
 			}
 			v41TailRoPECheckBits(t, "panic atomicity", x, before)
-			v41PublicationRoPECensus(t, b, cleanup == "free")
+			v41PublicationRoPECensus(t, s, b, cleanup == "free")
 		})
 	}
 }
@@ -500,7 +525,7 @@ func TestV41CompressedPublicationRoPERestore(t *testing.T) {
 	if retry := recoverError(func() { target.Step(6) }); retry != primary || len(b.calls) != 3 {
 		t.Fatal("retired restored owner replayed")
 	}
-	v41PublicationRoPECensus(t, b, false)
+	v41PublicationRoPECensus(t, target, b, false)
 }
 
 // fak-test:runtime medium est=2s lane=default
@@ -525,7 +550,7 @@ func TestV41CompressedPublicationRoPEColdReusedKeys(t *testing.T) {
 	if !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
 		t.Fatal("cold refold changed already published continuation")
 	}
-	v41PublicationRoPECensus(t, b, false)
+	v41PublicationRoPECensus(t, s, b, false)
 }
 
 // fak-test:runtime medium est=3s lane=default
@@ -556,7 +581,7 @@ func TestV41CompressedPublicationRoPEStepFailures(t *testing.T) {
 			if retry := recoverError(func() { s.Step(4) }); retry != s.halFailure || len(b.calls) != 2 {
 				t.Fatal("selected failure replayed")
 			}
-			v41PublicationRoPECensus(t, b, false)
+			v41PublicationRoPECensus(t, s, b, false)
 		})
 	}
 }
@@ -699,7 +724,7 @@ func TestV41CompressedPublicationRoPEReducedCold(t *testing.T) {
 		}
 		v41TailRoPECheckBits(t, "reduced group-first table", call.table, []float32{float32(math.Sin(float64(2 * group))), float32(math.Cos(float64(2 * group)))})
 	}
-	v41PublicationRoPECensus(t, b, false)
+	v41PublicationRoPECensus(t, s, b, false)
 }
 
 // With the ordinary publication bound, the rotated tails round on the device
@@ -737,7 +762,7 @@ func TestV41CompressedPublicationRoPEPublishesOnDevice(t *testing.T) {
 				if err != nil || s.BackendSessionClosed() {
 					t.Fatalf("publishes=%t: %v", publishes, err)
 				}
-				v41PublicationRoPECensus(t, b, false)
+				v41PublicationRoPECensus(t, s, b, false)
 				return latent, key, b, rounds
 			}
 			hostL, hostK, _, hostRounds := run(false)
@@ -808,4 +833,152 @@ func TestV41CompressedPublicationRoPEPublishesOnDevice(t *testing.T) {
 		}
 		v41TailRoPECheckBits(t, "refused tail unchanged", x, before)
 	})
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41CompressedPublicationRoPETableCache(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	newOwner := func() (*Session, *v41PublicationRoPERecorder, v41CompressedPublicationRoPEFunc) {
+		m := &Model{Cfg: Config{HeadDim: 64, IndexHeadDim: 64, QKRopeHeadDim: 64, DeepSeekV41: &DeepSeekV41Config{CompressRatios: append([]int(nil), v41PublishedCompressRatios...), CompressRopeTheta: v41PublishedCompressRopeTheta}}}
+		b := newV41PublicationRoPERecorder()
+		s := &Session{M: m, Backend: b}
+		t.Cleanup(s.Close)
+		return s, b, s.v41CompressedPublicationRoPEFunc()
+	}
+	input := make([]float32, 64)
+	for i := range input {
+		input[i] = float32(i%7-3) / 8
+	}
+	call := func(s *Session, rotate v41CompressedPublicationRoPEFunc, layer, pos int) error {
+		cos, sin := v41RopeTableForLayer(s.M.Cfg, layer, pos)
+		got, err := rotate(layer, input, cos, sin, 1, 64)
+		if err == nil {
+			v41TailRoPECheckBits(t, "cached table parity", got, v41PublicationRoPEOracle(input, 64, cos, sin))
+		}
+		return err
+	}
+	t.Run("published_decode_producer_trace", func(t *testing.T) {
+		s, b, rotate := newOwner()
+		// Replay only the published compressor-finalization call sequence, not
+		// model execution: ratio-two sources emit at odd positions and pass
+		// groupLo; ratio-one emits every position. All use compressed theta.
+		for pos := 0; pos < 64; pos++ {
+			for _, layer := range v41PublishedKVSourceLayerIDs {
+				ratio := v41CompressRatioAt(s.M.Cfg, layer)
+				if (pos+1)%ratio != 0 {
+					continue
+				}
+				if err := call(s, rotate, layer, pos+1-ratio); err != nil {
+					t.Fatal(err)
+				}
+				if len(b.tables) > 2 || b.tablePeak > 3 {
+					t.Fatalf("table bound live=%d peak=%d", len(b.tables), b.tablePeak)
+				}
+			}
+		}
+		if len(b.calls) != 160 || b.tableUploads != 64 || len(b.tables) != 2 || b.tablePeak != 3 {
+			t.Fatalf("calls=%d table uploads=%d live=%d peak=%d", len(b.calls), b.tableUploads, len(b.tables), b.tablePeak)
+		}
+		v41PublicationRoPECensus(t, s, b, false)
+	})
+	t.Run("identity_and_exact_bits", func(t *testing.T) {
+		s, b, rotate := newOwner()
+		cos, sin := v41RopeTableForLayer(s.M.Cfg, 2, 0)
+		invoke := func() {
+			if _, err := rotate(2, input, cos, sin, 1, 64); err != nil {
+				t.Fatal(err)
+			}
+		}
+		invoke()
+		invoke()
+		if b.tableUploads != 1 {
+			t.Fatal("exact table missed")
+		}
+		sin[0] = math.Float32frombits(0x80000000)
+		invoke()
+		if b.tableUploads != 2 {
+			t.Fatal("signed-zero table falsely reused")
+		}
+		s.cacheGeometryEpoch++
+		invoke()
+		if b.tableUploads != 3 {
+			t.Fatal("geometry epoch reused stale table")
+		}
+		model := *s.M
+		s.M = &model
+		invoke()
+		if b.tableUploads != 4 {
+			t.Fatal("model replacement reused stale table")
+		}
+		rebound := s.v41CompressedPublicationRoPEFunc()
+		if _, err := rebound(2, input, cos, sin, 1, 64); err != nil {
+			t.Fatal(err)
+		}
+		otherSin := append([]float32(nil), sin...)
+		otherSin[0] = 0
+		if _, err := rebound(2, input, cos, otherSin, 1, 64); err != nil {
+			t.Fatal(err)
+		}
+		invoke()
+		if b.tableUploads != 7 {
+			t.Fatal("old callback reused replaced live handle")
+		}
+		v41PublicationRoPECensus(t, s, b, false)
+	})
+	for _, fault := range []string{"table-upload", "partial-error"} {
+		t.Run(fault, func(t *testing.T) {
+			s, b, rotate := newOwner()
+			for pos := 0; pos < 2; pos++ {
+				if err := call(s, rotate, 2, pos); err != nil {
+					t.Fatal(err)
+				}
+			}
+			failure := &compute.BackendError{Backend: "test", Site: fault, Err: errors.New("selected cache failure")}
+			b.fault, b.cause, b.failCall = fault, failure, 3
+			pos := 0 // Rotation failure exercises a hit; upload failure exercises replacement.
+			if fault == "table-upload" {
+				pos = 2
+			}
+			err := call(s, rotate, 2, pos)
+			if !errors.Is(err, failure) || !s.BackendSessionClosed() || len(b.tables) != 0 {
+				t.Fatalf("selected cache failure did not retire: %v", err)
+			}
+			calls, uploads := len(b.calls), b.tableUploads
+			if retry := recoverError(func() { _ = call(s, rotate, 2, pos) }); retry != s.halFailure || len(b.calls) != calls || b.tableUploads != uploads {
+				t.Fatal("retired cache replayed")
+			}
+			v41PublicationRoPECensus(t, s, b, false)
+		})
+	}
+	for _, fault := range []string{"tail-cache-alias", "cache-alias", "alias-table"} {
+		t.Run(fault, func(t *testing.T) {
+			s, b, rotate := newOwner()
+			for pos := 0; pos < 2; pos++ {
+				if err := call(s, rotate, 2, pos); err != nil {
+					t.Fatal(err)
+				}
+			}
+			b.cacheAlias = s.halW["v41-compressed-publication-rope-table:1"] // inactive for the position-zero hit
+			b.fault, b.failCall = fault, 3
+			if err := call(s, rotate, 2, 0); err == nil || !s.BackendSessionClosed() {
+				t.Fatalf("cache alias accepted: %v", err)
+			}
+			v41PublicationRoPECensus(t, s, b, false)
+		})
+	}
+	t.Run("warm_wrapped_primary_flush_failure", func(t *testing.T) {
+		s, b, rotate := newOwner()
+		for pos := 0; pos < 2; pos++ {
+			if err := call(s, rotate, 2, pos); err != nil {
+				t.Fatal(err)
+			}
+		}
+		primary := &BackendForwardOperationError{Backend: b.Name(), Forward: ForwardPathKind("deepseek41"), Path: "other", Layer: 2, Stage: "dispatch", Cause: errors.New("primary")}
+		b.fault, b.cause, b.failCall, b.cleanup = "panic", primary, 3, "flush"
+		if got := recoverError(func() { _ = call(s, rotate, 2, 0) }); got != primary || s.halFailure != primary || !s.BackendSessionClosed() || b.cleanupCalls != 1 {
+			t.Fatalf("primary/flush changed: %v", got)
+		}
+		v41PublicationRoPECensus(t, s, b, false)
+	})
+
 }

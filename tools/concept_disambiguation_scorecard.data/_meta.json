@@ -1457,6 +1457,11 @@
           "category": "incidental",
           "reason": "Private page-cache read helper that carries existing read ownership and requested allocation extent for retained-buffer accounting; it introduces no distinct cache policy or abstraction.",
           "token": "readExpertPageCacheOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local buffer identity predicate in compressed publication RoPE; it tests whether either already-owned table slot aliases a tensor and introduces no independently addressable cache mechanism.",
+          "token": "cacheOwned"
         }
       ],
       "exclude": [
@@ -1583,6 +1588,7 @@
         "cacheEntryPresent",
         "cacheLoadMaxWorkersFor",
         "cacheMissing",
+        "cacheOwned",
         "cachePrompt",
         "cacheRatio",
         "cacheReceipt",
