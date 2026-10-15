@@ -74,7 +74,15 @@ func normalCellAtConcurrency(cell normalCell, concurrency int) normalCell {
 	return cell
 }
 
+// normalProbeTiming substitutes only probe measurements, never request evidence.
+// Production replay uses the observed timestamps; fixtures can supply a fixed clock.
+type normalProbeTiming func(rung string, sequence int) (started, completed time.Time)
+
 func runNormalReplay(ctx context.Context, progress io.Writer, endpoint, model, out string, inputs frozenInputs) (*normalReplayResult, error) {
+	return runNormalReplayWithProbeTiming(ctx, progress, endpoint, model, out, inputs, nil)
+}
+
+func runNormalReplayWithProbeTiming(ctx context.Context, progress io.Writer, endpoint, model, out string, inputs frozenInputs, probeTiming normalProbeTiming) (*normalReplayResult, error) {
 	chatEndpoint, err := normalizeEndpoint(endpoint)
 	if err != nil {
 		return nil, err
@@ -148,7 +156,7 @@ func runNormalReplay(ctx context.Context, progress io.Writer, endpoint, model, o
 			break
 		}
 		if cell.Phase != "probe" && selectedRuntime == 0 {
-			selection := selectNormalCapacity(plan, sink.terminals())
+			selection := selectNormalCapacityWithProbeTiming(plan, sink.terminals(), probeTiming)
 			if !selection.Qualified {
 				return &normalReplayResult{events: sink.terminals(), peaks: sink.peaks()}, errors.New(selection.Reason)
 			}
@@ -182,7 +190,7 @@ func runNormalReplay(ctx context.Context, progress io.Writer, endpoint, model, o
 	if scored != 184 {
 		return &normalReplayResult{events: all, peaks: sink.peaks()}, fmt.Errorf("normal replay incomplete: %d/184 scored terminal requests", scored)
 	}
-	selection := selectNormalCapacity(plan, terminals)
+	selection := selectNormalCapacityWithProbeTiming(plan, terminals, probeTiming)
 	result := &normalReplayResult{events: all, peaks: sink.peaks(), selectedConcurrency: selection.Selected, highestPassingConcurrency: selection.HighestPassing}
 	if sink.err() != nil {
 		return result, sink.err()
@@ -505,6 +513,10 @@ func hardNormalFailure(events []lifecycleEvent, cell string) bool {
 }
 
 func selectNormalCapacity(plan profileplan.Plan, events []lifecycleEvent) normalCapacitySelection {
+	return selectNormalCapacityWithProbeTiming(plan, events, nil)
+}
+
+func selectNormalCapacityWithProbeTiming(plan profileplan.Plan, events []lifecycleEvent, probeTiming normalProbeTiming) normalCapacitySelection {
 	result := normalCapacitySelection{Reason: "probe cells are incomplete or failed"}
 	if err := validateProbePreconditions(events); err != nil {
 		result.Reason = err.Error()
@@ -527,6 +539,10 @@ func selectNormalCapacity(plan profileplan.Plan, events []lifecycleEvent) normal
 				total += float64(max(1, e.DurationMilliseconds))
 				started, serr := time.Parse(time.RFC3339Nano, e.StartedAt)
 				completed, cerr := time.Parse(time.RFC3339Nano, e.CompletedAt)
+				if probeTiming != nil {
+					started, completed = probeTiming(e.Rung, e.Sequence)
+					serr, cerr = nil, nil
+				}
 				if serr == nil && cerr == nil {
 					if first.IsZero() || started.Before(first) {
 						first = started

@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agentbench/profileplan"
 )
 
+// fak-test:runtime integration est=30s lane=default
 func TestAgentBenchNormal184Replay(t *testing.T) {
 	plan, err := profileplan.Build(profileplan.Options{Profile: "normal", PreferredConcurrency: 2})
 	if err != nil {
@@ -78,9 +79,14 @@ func TestAgentBenchNormal184Replay(t *testing.T) {
 	inputs := newNormalInputs(repo, repoInput)
 	server, chatCalls, capCounts, preconditions, shallowProbes := normalReferenceServer(t, 32768)
 	defer server.Close()
-	result, err := runNormalReplay(context.Background(), io.Discard, server.URL, "fixture-model", t.TempDir(), inputs)
-	// Localhost replay proves the real streaming and scheduling path, but host load is
-	// not a qualification clock oracle. normal_qualification_test.go covers the fixed
+	probeTiming := normalFixtureProbeTiming(t, plan, 4)
+	measurementReads := 0
+	result, err := runNormalReplayWithProbeTiming(context.Background(), io.Discard, server.URL, "fixture-model", t.TempDir(), inputs, func(rung string, sequence int) (time.Time, time.Time) {
+		measurementReads++
+		return probeTiming(rung, sequence)
+	})
+	// Capacity uses fixed probe measurements; localhost replay still proves real
+	// streaming, scheduling and overlap. Host load is not a qualification clock oracle. normal_qualification_test.go covers the fixed
 	// SLO thresholds and missing-evidence denial with deterministic timestamps.
 	if err != nil && !normalFixtureSLOExceeded(result, err) {
 		t.Fatalf("run normal replay: %v", err)
@@ -102,6 +108,9 @@ func TestAgentBenchNormal184Replay(t *testing.T) {
 	}
 	if shallowProbes.Load() != 0 {
 		t.Fatalf("%d scored probe requests used the layer-only preconditioning prompt instead of full 13k-15k session context", shallowProbes.Load())
+	}
+	if measurementReads != 2*phaseRequests["probe"] {
+		t.Fatalf("runtime/final selection consumed %d probe measurements, want twice the scored probe count", measurementReads)
 	}
 	if result.selectedConcurrency != 4 || result.highestPassingConcurrency != 8 {
 		t.Fatalf("capacity result selected/highest = %d/%d, want 4/8", result.selectedConcurrency, result.highestPassingConcurrency)
@@ -494,16 +503,7 @@ func normalReferenceServer(t *testing.T, contextTokens int) (*httptest.Server, *
 				} else if strings.HasPrefix(rung, "probe-c") && strings.Contains(strings.ToLower(fmt.Sprint(req["messages"])), "preconditioning marker") {
 					shallowProbes.Add(1)
 				}
-				switch metadata["rung"] {
-				case "probe-c1":
-					time.Sleep(200 * time.Millisecond)
-				case "probe-c2":
-					time.Sleep(100 * time.Millisecond)
-				case "probe-c4":
-					time.Sleep(5 * time.Millisecond)
-				case "probe-c8":
-					time.Sleep(50 * time.Millisecond)
-				case "tool-completion-burst":
+				if rung == "tool-completion-burst" {
 					if burstEntered.Add(1) == 4 {
 						burstReleaseOnce.Do(func() { close(burstRelease) })
 					}
@@ -570,5 +570,65 @@ func TestNormalBurstFitsFourRequestBudget(t *testing.T) {
 				t.Fatal("burst with a missing request accepted")
 			}
 		})
+	}
+}
+
+// normalFixtureProbeTiming models the former per-rung service delays without
+// sleeping or allowing host scheduling to choose the replay's capacity.
+func normalFixtureProbeTiming(t *testing.T, plan profileplan.Plan, fastest int) normalProbeTiming {
+	t.Helper()
+	perRung := plan.ProbeTurns / len(plan.CapacitySelection.ProbeConcurrency)
+	durations := map[int]time.Duration{1: 200 * time.Millisecond, 2: 100 * time.Millisecond, 4: 5 * time.Millisecond, 8: 50 * time.Millisecond}
+	if fastest == 1 {
+		durations[1] = time.Millisecond
+	}
+	base := time.Date(2026, 9, 10, 14, 0, 0, 0, time.UTC)
+	return func(rung string, sequence int) (time.Time, time.Time) {
+		var concurrency int
+		if _, err := fmt.Sscanf(strings.ToLower(strings.TrimPrefix(rung, "probe-")), "c%d", &concurrency); err != nil || durations[concurrency] == 0 || sequence <= 0 {
+			t.Fatalf("invalid fixture probe identity %q/%d", rung, sequence)
+		}
+		duration := durations[concurrency]
+		started := base.Add(time.Duration(((sequence-1)%perRung)/concurrency) * duration)
+		return started, started.Add(duration)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestNormalProbeTimingPreservesCapacityEvidence(t *testing.T) {
+	plan, err := profileplan.Build(profileplan.Options{Profile: "normal", PreferredConcurrency: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := append(normalPreconditionEvents(), normalCapacityEvents()...)
+	before, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed, defaulted := selectNormalCapacity(plan, events), selectNormalCapacityWithProbeTiming(plan, events, nil); observed != defaulted || !observed.Qualified || observed.Selected != 4 {
+		t.Fatalf("default measured selection changed: observed=%+v defaulted=%+v", observed, defaulted)
+	}
+	timing := normalFixtureProbeTiming(t, plan, 1)
+	if got := selectNormalCapacityWithProbeTiming(plan, events, timing); !got.Qualified || got.Selected != 1 || got.HighestPassing != 8 {
+		t.Fatalf("injected measurements did not drive the real capacity policy: %+v", got)
+	}
+	if got := selectNormalCapacityWithProbeTiming(plan, events[:len(events)-1], timing); got.Qualified || got.Reason == "" {
+		t.Fatalf("favorable timing admitted missing probe terminal: %+v", got)
+	}
+	if got := selectNormalCapacityWithProbeTiming(plan, normalCapacityEvents(), timing); got.Qualified || got.Reason == "" {
+		t.Fatalf("favorable timing admitted missing preconditions: %+v", got)
+	}
+	failed := append([]lifecycleEvent(nil), events...)
+	for i := range failed {
+		if failed[i].Phase == "probe" {
+			failed[i].Status = "failed"
+		}
+	}
+	if got := selectNormalCapacityWithProbeTiming(plan, failed, timing); got.Qualified || got.Reason == "" {
+		t.Fatalf("favorable timing admitted failed probe terminals: %+v", got)
+	}
+	after, err := json.Marshal(events)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("measurement injection mutated observed events: error=%v", err)
 	}
 }
