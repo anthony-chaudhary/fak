@@ -16631,6 +16631,11 @@
           "category": "incidental",
           "reason": "Pure constructor of the positioned V41EPOwnerBuildPlan from validated supplied configuration; no additional planner abstraction or execution.",
           "token": "PlanV41EPOwnerBuild"
+        },
+        {
+          "category": "false-positive",
+          "reason": "internal/safesync's git tree-transplant verb (TransplantDisjointTree / TransplantDisjointTreeWithRunner, tree_transplant.go) moves one commit's tree onto another branch; it carries the 'plan' root only as a substring of 'plant' - the same swallowed-root false friend as plane/plank/explanat - and defines no planning concept.",
+          "token": "transplant"
         }
       ],
       "exclude": [
@@ -16640,7 +16645,8 @@
         "explanat",
         "hasTextToolCandidate",
         "plane",
-        "plank"
+        "plank",
+        "transplant"
       ],
       "id": "plan",
       "ignore": [
