@@ -564,6 +564,8 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 			OmitTemperature:          forceResponsesStream || (sp.Temperature == nil && sp.InheritUpstreamTemperature),
 			OmitMaxOutputTokens:      forceResponsesStream,
 			MaxTokens:                maxTokens,
+			CompletionTokenField:     p.CompletionTokenField,
+			ToolChoice:               sp.ToolChoice,
 			TopP:                     sp.TopP,
 			TopK:                     sp.TopK,
 			FrequencyPenalty:         sp.FrequencyPenalty,

@@ -354,6 +354,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	fs.StringVar(workspace, "code-workspace", "", "alias for --workspace")
 	maxTurns := fs.Int("max-turns", 10, "positive native model turn ceiling")
 	effort := fs.String("effort", "", "native reasoning effort")
+	completionTokenField := fs.String("completion-token-field", "", "OpenAI chat output cap field: max_tokens (default) or max_completion_tokens")
 	timeout := fs.Duration("timeout", 5*time.Minute, "positive wall-clock deadline")
 	dryRun := fs.Bool("dry-run", false, "validate without launching")
 	if err := fs.Parse(args); err != nil {
@@ -368,6 +369,10 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	}
 	if *effort != "" && *effort != "none" && *effort != "low" && *effort != "medium" && *effort != "balanced" && *effort != "adaptive" && *effort != "high" {
 		fmt.Fprintln(stderr, "ops run native: unsupported reasoning effort")
+		return 2
+	}
+	if !validChatCompletionTokenField(*completionTokenField) || (*completionTokenField != "" && *provider != "openai") {
+		fmt.Fprintln(stderr, "ops run native: unsupported completion token field or provider")
 		return 2
 	}
 	switch *provider {
@@ -429,7 +434,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	argv := []string{"chat", "--task-file", promptPath, "--provider", *provider, "--model", *model, "--base-url", *baseURL, "--api-key-env", *keyEnv, "--receipt", nativePath, "--max-turns", fmt.Sprint(*maxTurns), "--posture", floor.Posture, "--sys-tools=" + fmt.Sprint(floor.System), "--mcp-tools=false", "--skills=false", "--memory=false"}
-	for _, pair := range [][2]string{{"--policy", *policy}, {"--code-workspace", *workspace}, {"--effort", *effort}} {
+	for _, pair := range [][2]string{{"--policy", *policy}, {"--code-workspace", *workspace}, {"--effort", *effort}, {"--completion-token-field", *completionTokenField}} {
 		if pair[1] != "" {
 			argv = append(argv, pair[0], pair[1])
 		}
@@ -480,7 +485,7 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 		preflight := opsRunInferenceRefusal(*provider, *baseURL, *model, "unsupported_provider_protocol")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
-	preflight, err := opsRunInferencePreflight(ctx, *baseURL, *model, *keyEnv)
+	preflight, err := opsRunConfiguredInferencePreflight(ctx, *baseURL, *model, *keyEnv, *effort, *completionTokenField, 1024)
 	receipt.InferencePreflight = &preflight
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)

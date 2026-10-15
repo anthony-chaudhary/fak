@@ -10,6 +10,27 @@
 
 ## 1. Executive Summary & The Paradigm Shift
 
+### Native inference request qualification
+
+`fak ops run --harness native` prepares its bounded streamed tool probe through
+the same `HTTPPlanner` request preparation and provider adapter used by `fak chat`.
+An explicit `--effort` reaches the OpenAI chat wire as `reasoning_effort`.
+Both commands accept `--completion-token-field max_completion_tokens` for an
+endpoint that requires that output-cap field. The default remains `max_tokens`;
+only one cap is sent, and conflicting provider extra-body caps are refused.
+The native probe uses the same 1024-token planner ceiling as its child and keeps
+its separate five-second wall-clock limit.
+
+Qualification requires the exact requested response model and one complete
+non-mutating tool call, its terminal `tool_calls` finish, `[DONE]`, and EOF.
+A valid final usage-only event with empty `choices` is optional; it cannot
+establish tool completion. Truncated output and model-label differences refuse
+qualification. Receipts retain request/response digests, expected and observed
+labels and finish reason, without prompts, response text or credentials.
+The one-minute cache binds the effective prepared body, endpoint and provider;
+headers and credentials affect cache identity only in memory. This protocol
+check does not establish task correctness or model quality.
+
 ### The Legacy 'guard' Mindset (Out-of-Process Wire Proxy Interception)
 Historically, **`fak guard`** approached harness governance by interposing an external HTTP reverse-proxy between an agent runtime and the upstream LLM API. The operator or factory configured:
 ```bash

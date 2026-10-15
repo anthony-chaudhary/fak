@@ -746,6 +746,7 @@ type HTTPPlanner struct {
 	Provider             Provider
 	Adapter              TranscriptAdapter
 	ExtraBody            json.RawMessage
+	CompletionTokenField string
 	// CacheIntent negotiates provider-owned prompt-cache behavior. Nil preserves the legacy wire.
 	CacheIntent *CacheIntent
 	// OpenAIToolMessagesAsText is an opt-in compatibility mode for OpenAI-compatible
@@ -1061,7 +1062,7 @@ func mergeGuidedDecodeExtraBody(extra json.RawMessage, guided map[string]json.Ra
 func reservedExtraBodyKey(k string) bool {
 	switch strings.ToLower(strings.TrimSpace(k)) {
 	case "model", "messages", "input", "tools", "tool_choice", "temperature",
-		"max_tokens", "max_output_tokens", "top_p", "stop", "stop_sequences",
+		"max_tokens", "max_completion_tokens", "max_output_tokens", "top_p", "stop", "stop_sequences",
 		"stream", "stream_options", "store":
 		return true
 	default:
