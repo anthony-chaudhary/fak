@@ -252,6 +252,13 @@ type ExpertCheckpointTier struct {
 	loading   map[polymodel.ModelID]*expertCheckpointLoad
 	coalesced int
 
+	// prefetchJobs is the aggregate count of speculative reads this tier has in flight across
+	// every simultaneous Prefetch call. fakExpertPrefetchWorkers bounds ONE call's readers; only
+	// this counter bounds N concurrent calls. It is incremented under the mutex when a job is
+	// admitted and decremented exactly once by that job's single deferred finalizer, so a
+	// best-effort hint can never leak its share of the bound.
+	prefetchJobs int
+
 	// ready holds prefetched projections no demand fault has consumed yet. Each entry is
 	// handed out once, and entries left from an older Prefetch generation are dropped.
 	ready         map[polymodel.ModelID]expertCheckpointReady
@@ -724,6 +731,39 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 // over several shard readers would spawn one goroutine per miss).
 const fakExpertPrefetchWorkers = 8
 
+// fakExpertPrefetchJobs caps the AGGREGATE speculative reads in flight across every simultaneous
+// Prefetch call. fakExpertPrefetchWorkers bounds one call's readers; without an aggregate bound N
+// concurrent callers each get 8 readers and the tier's speculative read set is unbounded. The cap
+// is on admitted jobs, so it also bounds the job slice and the goroutines a call may start: a call
+// admits at most this many jobs and declines the rest rather than allocating one per input name.
+const fakExpertPrefetchJobs = 32
+
+// prefetchDeclined reports whether speculative work must be declined outright for this entry.
+// Called with t.mu held. The issue's contract is that a hint is only started when its owned
+// allocation is fully accounted for under the tier's EXISTING positive host allowance; a hint that
+// cannot be charged is declined and demand serving is unaffected.
+//
+// A zero budget is NOT a decline: zero is the documented stream-through default, where the faulted
+// slab is handed to the caller and dropped, so a prefetch of a zero-budget tier still starts reads
+// (the existing dedupe/ordering/bounded-concurrency witnesses depend on that). What a zero budget
+// cannot do is RESERVE, so a zero-budget prefetch is admitted only while the aggregate job bound
+// has room, and it holds no reservation.
+//
+// The two unsupported-allocation paths are declined because their true allocation extent is not
+// the projection stride: a page-cache cold read allocates a page-aligned buffer and returns a
+// stride-length subslice (expert_pagecache.go), and a sparse overlay read has its own allocation
+// path. Charging the stride for either would undercount the backing allocation, so this leaf
+// declines them rather than silently assuming their extent.
+func (t *ExpertCheckpointTier) prefetchDeclined(src *ggufExpertSource, overlay *ExpertSparseOverlay) bool {
+	if overlay != nil {
+		return true
+	}
+	if src == nil {
+		return true
+	}
+	return src.PageCacheEnabled()
+}
+
 func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 	if t == nil || len(names) == 0 {
 		return 0
@@ -763,17 +803,27 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		if t.loading[id] != nil {
 			continue
 		}
+		src := t.shards[entry.shard]
+		overlay := t.overlays[entry.fused]
+		if t.prefetchDeclined(src, overlay) {
+			continue
+		}
+		// Aggregate admission: bound the job collection itself, so a caller passing thousands of
+		// names allocates and starts at most the remaining aggregate allowance. Best-effort and
+		// nonblocking -- a declined hint is simply not started, and demand serving is untouched.
+		if t.prefetchJobs+len(jobs) >= fakExpertPrefetchJobs {
+			break
+		}
 		if t.loading == nil {
 			t.loading = make(map[polymodel.ModelID]*expertCheckpointLoad)
 		}
 		load := &expertCheckpointLoad{done: make(chan struct{})}
 		t.loading[id] = load
-		src := t.shards[entry.shard]
 		var off int64
 		if src != nil {
 			off, _, _ = src.expertReadSpan(entry.fused, entry.expert)
 		}
-		jobs = append(jobs, job{name: name, id: id, entry: entry, src: src, overlay: t.overlays[entry.fused], load: load, off: off})
+		jobs = append(jobs, job{name: name, id: id, entry: entry, src: src, overlay: overlay, load: load, off: off})
 	}
 	// Ascending file offset is the fill ORDER (dependency ordering). Offsets come from
 	// src.expertReadSpan, which moves no payload; off stays 0 for a shard that could not be
@@ -781,6 +831,7 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 	sort.SliceStable(jobs, func(i, j int) bool { return jobs[i].off < jobs[j].off })
 	gen := t.readyGen
 	t.prefetched += len(jobs)
+	t.prefetchJobs += len(jobs)
 	t.mu.Unlock()
 
 	// Bounded worker pool over an ordered queue. Prefetch enqueues every job (in ascending-offset
@@ -810,25 +861,50 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 
 // finishPrefetchJob runs one prefetch read and publishes its handoff. It is the body the goroutine
 // used to inline, lifted out so the bounded pool above reads as a pool rather than a spawn loop.
+//
+// Exactly-once completion: the deferred finalizer is the ONLY place that settles this job's
+// ownership -- it removes that exact loading owner, releases the aggregate job counter, publishes
+// the permitted result, and closes the completion notification. It runs on success, read error,
+// panic, and Goexit alike, so a best-effort hint can never strand its loading entry, its waiters,
+// or its share of the aggregate bound. A background panic is recovered into the existing
+// aborted-load error class rather than terminating the process.
 func (t *ExpertCheckpointTier) finishPrefetchJob(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay, load *expertCheckpointLoad, gen uint64) {
-	w, err := t.faultOwned(name, id, entry, src, overlay)
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	load.weight, load.err = w, err
-	delete(t.loading, id)
-	if err == nil && load.waiters == 0 {
-		if _, live := t.host[id]; !live {
-			if gen+1 < t.readyGen {
-				t.prefetchStale++
-			} else {
-				if t.ready == nil {
-					t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
+	var (
+		w         expertWeight
+		err       error
+		completed bool
+	)
+	defer func() {
+		if r := recover(); r != nil {
+			w, err, completed = expertWeight{}, ErrExpertCheckpointLoadAborted, false
+		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if !completed {
+			err = ErrExpertCheckpointLoadAborted
+			t.failures, t.lastErr = t.failures+1, err
+		}
+		load.weight, load.err = w, err
+		delete(t.loading, id)
+		if t.prefetchJobs > 0 {
+			t.prefetchJobs--
+		}
+		if err == nil && load.waiters == 0 {
+			if _, live := t.host[id]; !live {
+				if gen+1 < t.readyGen {
+					t.prefetchStale++
+				} else {
+					if t.ready == nil {
+						t.ready = make(map[polymodel.ModelID]expertCheckpointReady)
+					}
+					t.ready[id] = expertCheckpointReady{weight: w, gen: gen}
 				}
-				t.ready[id] = expertCheckpointReady{weight: w, gen: gen}
 			}
 		}
-	}
-	close(load.done)
+		close(load.done)
+	}()
+	w, err = t.faultOwned(name, id, entry, src, overlay)
+	completed = true
 }
 
 func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay) (expertWeight, error) {
