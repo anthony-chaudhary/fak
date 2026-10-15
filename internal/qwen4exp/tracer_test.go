@@ -2,121 +2,100 @@ package qwen4exp
 
 import (
 	"errors"
-	"math"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
-// fak-test:runtime fast est=10ms
-func TestDiagnosticStubRecordsBoundedTruthfulSpine(t *testing.T) {
-	embeds, projects := 0, 0
-	receipt, err := RunDiagnosticStub([]int{7, 11}, StubSeams{
-		Embed: func(tokenID int) ([]float32, string, error) {
-			embeds++
-			row := make([]float32, StubHiddenSize)
-			for i := range row {
-				row[i] = float32(tokenID*StubHiddenSize + i)
-			}
-			return row, "sha256:embed", nil
-		},
-		ProjectSamples: func(hidden []float32, indices []int) ([]float32, string, error) {
-			projects++
-			values := make([]float32, len(indices))
-			for i, index := range indices {
-				values[i] = hidden[index%len(hidden)]
-			}
-			return values, "sha256:head", nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+type stubTraceProbe struct {
+	t       *testing.T
+	bad     string
+	records int
+	samples [][]int
+}
+
+func (*stubTraceProbe) Digest(...string) string { return "input-digest" }
+
+func (p *stubTraceProbe) SampleIndices(width, limit int) []int {
+	indices := make([]int, min(width, limit))
+	for i := range indices {
+		indices[i] = i * (width / len(indices))
 	}
-	if embeds != 2 || projects != 2 {
-		t.Fatalf("seam calls embed/project = %d/%d, want 2/2", embeds, projects)
+	switch p.bad {
+	case "empty":
+		indices = nil
+	case "short":
+		indices = indices[:len(indices)-1]
+	case "long":
+		indices = append(indices, width-1)
+	case "negative":
+		indices[0] = -1
+	case "outside":
+		indices[len(indices)-1] = width
+	case "duplicate":
+		indices[1] = indices[0]
 	}
-	if receipt.Mode != "diagnostic_stub" || receipt.Layers != StubLayers || receipt.Tokens != 2 {
-		t.Fatalf("receipt metadata = %#v", receipt)
+	p.samples = append(p.samples, indices)
+	return indices
+}
+
+func (p *stubTraceProbe) Record(layer, token int, phase string, shape, indices []int, values []float32, inputDigest, weightDigest, candidate string) {
+	p.records++
+	if len(indices) != MaxStubSamplesPerEvent || indices[0] != 0 || len(values) != len(indices) || values[0] != 7 || inputDigest != "input-digest" {
+		p.t.Fatalf("borrowed trace data changed at %s layer %d: indices=%v values=%v digest=%q", phase, layer, indices, values, inputDigest)
 	}
-	if got, want := len(receipt.Artifact.Events), 2*(StubLayers+2); got != want {
-		t.Fatalf("events=%d want %d", got, want)
-	}
-	if receipt.Artifact.Dropped != 0 || receipt.Artifact.DroppedSampleValues != 0 {
-		t.Fatalf("bounded trace dropped data: %#v", receipt.Artifact)
-	}
-	for _, event := range receipt.Artifact.Events {
-		if event.Backend != "diagnostic-stub" || event.Status != "stub_missing_native_layer_math" {
-			t.Fatalf("event is not explicitly stub-labeled: %#v", event)
-		}
-		if event.Phase == "residual_streams" {
-			if event.Candidate != "identity-replicated-hc4-missing-real-layer" || len(event.Shapes) != 1 || event.Shapes[0][0] != StubHCCount || event.Shapes[0][1] != StubHiddenSize {
-				t.Fatalf("identity residual is not truthful HC4 placeholder: %#v", event)
-			}
-		}
-	}
+	// Hostile retention/mutation cannot affect the next residual event or projection.
+	shape[0], indices[0], values[0] = -1, -1, -1
 }
 
 // fak-test:runtime fast est=10ms
-func TestDiagnosticStubComparatorPlumbingFindsLayerZero(t *testing.T) {
-	receipt, err := RunDiagnosticStub([]int{3}, deterministicSeams())
-	if err != nil {
-		t.Fatal(err)
-	}
-	reference := receipt.Artifact
-	reference.Events = append([]computetrace.Event(nil), receipt.Artifact.Events...)
-	for i := range reference.Events {
-		if reference.Events[i].Layer == 0 && reference.Events[i].Phase == "residual_streams" {
-			reference.Events[i].SampleValues = append([]float32(nil), reference.Events[i].SampleValues...)
-			reference.Events[i].SampleValues[0]++
-			break
-		}
-	}
-	report := computetrace.FirstDivergence(reference, receipt.Artifact, computetrace.DivergenceTolerance{RelL2: 0}, computetrace.ActivationTolerance{})
-	if report.FirstDivergent == nil || report.FirstDivergent.Layer != 0 || report.FirstDivergent.Stage != "residual_streams" {
-		t.Fatalf("altered diagnostic reference first divergence = %#v", report.FirstDivergent)
-	}
-}
-
-// fak-test:runtime fast est=1ms
-func TestDiagnosticStubRejectsInvalidSeamsAndWidth(t *testing.T) {
-	if _, err := RunDiagnosticStub(nil, StubSeams{}); !errors.Is(err, ErrDiagnosticStub) {
-		t.Fatalf("empty input error=%v", err)
-	}
-	seams := deterministicSeams()
-	seams.Embed = func(int) ([]float32, string, error) { return []float32{1}, "digest", nil }
-	if _, err := RunDiagnosticStub([]int{1}, seams); !errors.Is(err, ErrDiagnosticStub) {
-		t.Fatalf("bad width error=%v", err)
-	}
-	if _, err := RunDiagnosticStub([]int{-1}, deterministicSeams()); !errors.Is(err, ErrDiagnosticStub) {
-		t.Fatalf("negative token error=%v", err)
-	}
-	seams = deterministicSeams()
-	seams.ProjectSamples = func(_ []float32, indices []int) ([]float32, string, error) {
-		values := make([]float32, len(indices))
-		values[0] = float32(math.NaN())
-		return values, "digest", nil
-	}
-	if _, err := RunDiagnosticStub([]int{1}, seams); !errors.Is(err, ErrDiagnosticStub) {
-		t.Fatalf("non-finite projection error=%v", err)
-	}
-}
-
-func deterministicSeams() StubSeams {
-	return StubSeams{
-		InputDigest: "sha256:input",
-		Embed: func(tokenID int) ([]float32, string, error) {
+func TestDiagnosticStubTraceSinkBoundary(t *testing.T) {
+	calls := 0
+	seams := StubSeams{
+		Embed: func(int) ([]float32, string, error) {
+			calls++
 			row := make([]float32, StubHiddenSize)
 			for i := range row {
-				row[i] = float32(tokenID+i) / StubHiddenSize
+				row[i] = 7
 			}
-			return row, "sha256:embed", nil
+			return row, "embed-digest", nil
 		},
 		ProjectSamples: func(hidden []float32, indices []int) ([]float32, string, error) {
+			calls++
+			if hidden[0] != 7 || indices[0] != 0 || len(indices) != MaxStubSamplesPerEvent {
+				t.Fatal("trace sink changed projection input")
+			}
+			indices[0] = -1 // The emitted logit indices must still be isolated.
 			values := make([]float32, len(indices))
 			for i := range values {
-				values[i] = hidden[i%len(hidden)]
+				values[i] = 7
 			}
-			return values, "sha256:head", nil
+			return values, "head-digest", nil
 		},
+	}
+	sink := &stubTraceProbe{t: t}
+	factories := 0
+	receipt, err := RunDiagnosticStub([]int{7}, seams, func(count int) StubTrace {
+		factories++
+		if count != StubLayers+2 {
+			t.Fatalf("event budget=%d", count)
+		}
+		return sink
+	})
+	if err != nil || receipt.Mode != "diagnostic_stub" || calls != 2 || factories != 1 || sink.records != StubLayers+2 {
+		t.Fatalf("receipt=%+v error=%v seam calls=%d factories=%d records=%d", receipt, err, calls, factories, sink.records)
+	}
+	for _, indices := range sink.samples {
+		if indices[0] != 0 {
+			t.Fatal("sink-owned sample indices were mutated")
+		}
+	}
+	for _, bad := range []string{"empty", "short", "long", "negative", "outside", "duplicate"} {
+		t.Run(bad, func(t *testing.T) {
+			calls = 0
+			sink := &stubTraceProbe{t: t, bad: bad}
+			_, err := RunDiagnosticStub([]int{7}, seams, func(int) StubTrace { return sink })
+			if !errors.Is(err, ErrDiagnosticStub) || calls != 0 || sink.records != 0 {
+				t.Fatalf("error=%v seam calls=%d records=%d", err, calls, sink.records)
+			}
+		})
 	}
 }

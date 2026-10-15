@@ -79,7 +79,7 @@ func TestModelTraceStubCommandEmitsBoundedDiagnosticArtifact(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
-	var receipt qwen4exp.StubReceipt
+	var receipt model.Qwen4ExpDiagnosticReceipt
 	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
 		t.Fatalf("decode receipt: %v\n%s", err, stdout.String())
 	}
