@@ -276,121 +276,137 @@ func (s *Session) v41GroupedOutputTile(rows compute.V41RowLogBackend, deferred c
 		}
 		return values, nil
 	}
+	var primary any
+	var primaryPresent, bodyReturned bool
 	defer func() {
-		p := recover()
+		p := primary
+		present := bodyReturned && primaryPresent
 		if len(pending) != 0 {
 			_, drain := read(nil)
 			if drain != nil {
 				err = errors.Join(drain, err)
 				if pe, ok := p.(error); ok {
 					err = errors.Join(err, pe)
-					p = nil
+					present = false
 				}
 			}
 		}
 		for i := len(owned) - 1; i >= 0; i-- {
 			s.Backend.Free(owned[i])
 		}
-		if p != nil {
+		if present {
 			panic(p)
 		}
 	}()
-	publish := func(x compute.Tensor, n, logicalStage, group int) (compute.Tensor, error) {
-		*stage = "BF16 publication"
-		x.Shape = []int{n}
-		p, status, cause := deferred.V41BF16PublishDeferred(x, compute.V41BF16PublishGroupedOutputProjection)
-		fresh := own(p)
-		recordFresh := own(status.Record)
-		recordValid := recordFresh && status.Kind == compute.V41DeferredBF16Publish && status.Count == n && status.Site == compute.V41BF16PublishGroupedOutputProjection && status.Records <= 1 && valid(status.Record, 4)
-		if recordValid {
-			owned = owned[:len(owned)-1]
-			pending = append(pending, v41GroupedPanelStatus{status: status, stage: logicalStage, group: group, width: n / count})
-		}
-		if cause != nil {
-			return compute.Tensor{}, cause
-		}
-		if !fresh || !valid(p, n) || !recordValid {
-			return compute.Tensor{}, errV41BF16BoundaryResult
-		}
-		return p, nil
-	}
-	project := func(w, x compute.Tensor, n int) compute.Tensor {
-		stats.calls++
-		if count == 1 {
-			x.Shape = []int{n}
-			return s.Backend.MatMul(w, x)
-		}
-		x.Shape = []int{count, n}
-		return s.Backend.BatchedMatMul(w, x, count)
-	}
+	func() {
+		complete := false
+		defer func() {
+			if !complete {
+				primary, primaryPresent = recover(), true
+			}
+		}()
+		result, err = func() ([][]float32, error) {
+			publish := func(x compute.Tensor, n, logicalStage, group int) (compute.Tensor, error) {
+				*stage = "BF16 publication"
+				x.Shape = []int{n}
+				p, status, cause := deferred.V41BF16PublishDeferred(x, compute.V41BF16PublishGroupedOutputProjection)
+				fresh := own(p)
+				recordFresh := own(status.Record)
+				recordValid := recordFresh && status.Kind == compute.V41DeferredBF16Publish && status.Count == n && status.Site == compute.V41BF16PublishGroupedOutputProjection && status.Records <= 1 && valid(status.Record, 4)
+				if recordValid {
+					owned = owned[:len(owned)-1]
+					pending = append(pending, v41GroupedPanelStatus{status: status, stage: logicalStage, group: group, width: n / count})
+				}
+				if cause != nil {
+					return compute.Tensor{}, cause
+				}
+				if !fresh || !valid(p, n) || !recordValid {
+					return compute.Tensor{}, errV41BF16BoundaryResult
+				}
+				return p, nil
+			}
+			project := func(w, x compute.Tensor, n int) compute.Tensor {
+				stats.calls++
+				if count == 1 {
+					x.Shape = []int{n}
+					return s.Backend.MatMul(w, x)
+				}
+				x.Shape = []int{count, n}
+				return s.Backend.BatchedMatMul(w, x, count)
+			}
 
-	aPanels := make([]compute.Tensor, groups)
-	for g := 0; g < groups; g++ {
-		grouped := make([]float32, count*groupIn)
-		for t := 0; t < count; t++ {
-			copy(grouped[t*groupIn:(t+1)*groupIn], input[t*groups*groupIn+g*groupIn:t*groups*groupIn+(g+1)*groupIn])
-		}
-		*stage = "activation upload"
-		x := s.uploadHostF32([]int{count, groupIn}, grouped, compute.MemoryActivation, "V4.1 grouped output panel")
-		stats.upload += int64(len(grouped)) * 4
-		if !own(x) || !valid(x, count*groupIn) {
-			return nil, errV41ProjectionResult
-		}
-		p, cause := publish(x, count*groupIn, 0, g)
-		if cause != nil {
-			return nil, cause
-		}
-		*stage = "wo_a"
-		y := project(weights.a[g], p, groupIn)
-		if !own(y) || !valid(y, count*rank) {
-			return nil, errV41ProjectionResult
-		}
-		p, cause = publish(y, count*rank, 1+g, g)
-		if cause != nil {
-			return nil, cause
-		}
-		p.Shape = []int{count, rank}
-		aPanels[g] = p
-	}
-	spans := make([]compute.V41RowSpan, 0, count*groups)
-	for t := 0; t < count; t++ {
-		for g := 0; g < groups; g++ {
-			spans = append(spans, compute.V41RowSpan{Src: aPanels[g], Row: t, Rows: 1})
-		}
-	}
-	*stage = "device concat"
-	joined, cause := rows.V41RowLogGather(spans, rank)
-	fresh := own(joined)
-	if cause != nil {
-		return nil, cause
-	}
-	if !fresh || !valid(joined, count*groups*rank) {
-		return nil, errV41ProjectionResult
-	}
-	joined.Shape = []int{count, groups * rank}
-	*stage = "wo_b"
-	y := project(weights.b, joined, groups*rank)
-	if !own(y) || !valid(y, count*dim) {
-		return nil, errV41ProjectionResult
-	}
-	p, cause := publish(y, count*dim, 1+groups, -1)
-	if cause != nil {
-		return nil, cause
-	}
-	*stage = "readback"
-	values, cause := read([]compute.Tensor{p})
-	if cause != nil {
-		return nil, cause
-	}
-	if len(values[0]) != count*dim || !v41BF16Widened(values[0]) {
-		return nil, errV41ProjectionResult
-	}
-	stats.readback += int64(count*dim) * 4
-	result = make([][]float32, count)
-	for t := range result {
-		result[t] = append([]float32(nil), values[0][t*dim:(t+1)*dim]...)
-	}
-	return result, nil
+			aPanels := make([]compute.Tensor, groups)
+			for g := 0; g < groups; g++ {
+				grouped := make([]float32, count*groupIn)
+				for t := 0; t < count; t++ {
+					copy(grouped[t*groupIn:(t+1)*groupIn], input[t*groups*groupIn+g*groupIn:t*groups*groupIn+(g+1)*groupIn])
+				}
+				*stage = "activation upload"
+				x := s.uploadHostF32([]int{count, groupIn}, grouped, compute.MemoryActivation, "V4.1 grouped output panel")
+				stats.upload += int64(len(grouped)) * 4
+				if !own(x) || !valid(x, count*groupIn) {
+					return nil, errV41ProjectionResult
+				}
+				p, cause := publish(x, count*groupIn, 0, g)
+				if cause != nil {
+					return nil, cause
+				}
+				*stage = "wo_a"
+				y := project(weights.a[g], p, groupIn)
+				if !own(y) || !valid(y, count*rank) {
+					return nil, errV41ProjectionResult
+				}
+				p, cause = publish(y, count*rank, 1+g, g)
+				if cause != nil {
+					return nil, cause
+				}
+				p.Shape = []int{count, rank}
+				aPanels[g] = p
+			}
+			spans := make([]compute.V41RowSpan, 0, count*groups)
+			for t := 0; t < count; t++ {
+				for g := 0; g < groups; g++ {
+					spans = append(spans, compute.V41RowSpan{Src: aPanels[g], Row: t, Rows: 1})
+				}
+			}
+			*stage = "device concat"
+			joined, cause := rows.V41RowLogGather(spans, rank)
+			fresh := own(joined)
+			if cause != nil {
+				return nil, cause
+			}
+			if !fresh || !valid(joined, count*groups*rank) {
+				return nil, errV41ProjectionResult
+			}
+			joined.Shape = []int{count, groups * rank}
+			*stage = "wo_b"
+			y := project(weights.b, joined, groups*rank)
+			if !own(y) || !valid(y, count*dim) {
+				return nil, errV41ProjectionResult
+			}
+			p, cause := publish(y, count*dim, 1+groups, -1)
+			if cause != nil {
+				return nil, cause
+			}
+			*stage = "readback"
+			values, cause := read([]compute.Tensor{p})
+			if cause != nil {
+				return nil, cause
+			}
+			if len(values[0]) != count*dim || !v41BF16Widened(values[0]) {
+				return nil, errV41ProjectionResult
+			}
+			stats.readback += int64(count*dim) * 4
+			result = make([][]float32, count)
+			for t := range result {
+				result[t] = append([]float32(nil), values[0][t*dim:(t+1)*dim]...)
+			}
+			return result, nil
+		}()
+		complete = true
+	}()
+	bodyReturned = true
+	return
 }
 
 func v41GroupedPanelFirstFault(verdicts []error, meta []v41GroupedPanelStatus, rows, groups int) error {
