@@ -81,13 +81,13 @@ void main() {
     uint s = (t16 >> 2u) & 1u;
     uint lq = (t16 & 3u) * 4u;
 
-    float acc[ROWS];
+    precise float acc[ROWS];
     for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;
 
     for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
         // Activation slice for this lane: four vec4s, one per bit-plane j.
         vec4 xv[4];
-        float xsum[4];
+        precise float xsum[4];
         for (uint j = 0u; j < 4u; ++j) {
             uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
             vec4 v = x4[idx];
@@ -98,7 +98,10 @@ void main() {
                 v = v * inv * norm4[idx];
             }
             xv[j] = v;
-            xsum[j] = v.x + v.y + v.z + v.w;
+            precise float x01 = v.x + v.y;
+            precise float x012 = x01 + v.z;
+            precise float x0123 = x012 + v.w;
+            xsum[j] = x0123;
         }
         for (uint r = 0u; r < ROWS; ++r) {
             uint row = rowBase + r;
@@ -123,14 +126,25 @@ void main() {
             scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;
             scj[2] = (sc1 >> (s * 8u)) & 255u;
             scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;
-            float sum = 0.0;
+            precise float sum = 0.0;
             for (uint j = 0u; j < 4u; ++j) {
                 vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);
-                float dl = dd.x * float(scj[j] & 15u);
-                float ml = dd.y * float(scj[j] >> 4u);
-                sum += dl * dot(qv, xv[j]) - ml * xsum[j];
+                precise float dl = dd.x * float(scj[j] & 15u);
+                precise float ml = dd.y * float(scj[j] >> 4u);
+                precise float q0 = qv.x * xv[j].x;
+                precise float q1 = qv.y * xv[j].y;
+                precise float q2 = qv.z * xv[j].z;
+                precise float q3 = qv.w * xv[j].w;
+                precise float q01 = q0 + q1;
+                precise float q012 = q01 + q2;
+                precise float qdot = q012 + q3;
+                precise float scaledDot = dl * qdot;
+                precise float minTerm = ml * xsum[j];
+                precise float term = scaledDot - minTerm;
+                sum = sum + term;
             }
-            acc[r] += sum;
+            precise float nextAcc = acc[r] + sum;
+            acc[r] = nextAcc;
         }
     }
 
@@ -138,7 +152,11 @@ void main() {
     barrier();
     for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
         if (tid < stride) {
-            for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] += red[r * LANES + tid + stride];
+            for (uint r = 0u; r < ROWS; ++r) {
+                uint off = r * LANES + tid;
+                precise float reduced = red[off] + red[off + stride];
+                red[off] = reduced;
+            }
         }
         barrier();
     }

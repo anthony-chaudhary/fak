@@ -31,7 +31,7 @@ void main() {
     uint wordsPerRow = nsb * 21u;
     uint t16 = tid & 15u, h = t16 >> 3u, s = (t16 >> 2u) & 1u;
     uint lq = (t16 & 3u) * 4u;
-    float acc[MAX_TOKENS * OUT_ROWS];
+    precise float acc[MAX_TOKENS * OUT_ROWS];
     for (uint t = 0u; t < tokens; ++t) {
         for (uint r = 0u; r < OUT_ROWS; ++r) acc[t * OUT_ROWS + r] = 0.0;
     }
@@ -49,20 +49,37 @@ void main() {
             scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;
             scj[2] = (sc1 >> (s * 8u)) & 255u;
             scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;
-            float sum[MAX_TOKENS];
+            precise float sum[MAX_TOKENS];
             for (uint t = 0u; t < tokens; ++t) sum[t] = 0.0;
             for (uint j = 0u; j < 4u; ++j) {
                 vec4 qv = bytesOf((q >> (2u * j)) & 0x03030303u);
-                float dl = dd.x * float(scj[j] & 15u);
-                float ml = dd.y * float(scj[j] >> 4u);
+                precise float dl = dd.x * float(scj[j] & 15u);
+                precise float ml = dd.y * float(scj[j] >> 4u);
                 uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
                 for (uint t = 0u; t < tokens; ++t) {
                     vec4 xv = x4[t * (inDim >> 2u) + idx];
-                    float xsum = xv.x + xv.y + xv.z + xv.w;
-                    sum[t] += dl * dot(qv, xv) - ml * xsum;
+                    precise float x01 = xv.x + xv.y;
+                    precise float x012 = x01 + xv.z;
+                    precise float xsum = x012 + xv.w;
+                    precise float q0 = qv.x * xv.x;
+                    precise float q1 = qv.y * xv.y;
+                    precise float q2 = qv.z * xv.z;
+                    precise float q3 = qv.w * xv.w;
+                    precise float q01 = q0 + q1;
+                    precise float q012 = q01 + q2;
+                    precise float qdot = q012 + q3;
+                    precise float scaledDot = dl * qdot;
+                    precise float minTerm = ml * xsum;
+                    precise float term = scaledDot - minTerm;
+                    precise float nextSum = sum[t] + term;
+                    sum[t] = nextSum;
                 }
             }
-            for (uint t = 0u; t < tokens; ++t) acc[t * OUT_ROWS + r] += sum[t];
+            for (uint t = 0u; t < tokens; ++t) {
+                uint accIdx = t * OUT_ROWS + r;
+                precise float nextAcc = acc[accIdx] + sum[t];
+                acc[accIdx] = nextAcc;
+            }
         }
     }
     for (uint t = 0u; t < tokens; ++t) {
@@ -74,7 +91,8 @@ void main() {
             for (uint t = 0u; t < tokens; ++t) {
                 for (uint r = 0u; r < OUT_ROWS; ++r) {
                     uint off = (t * OUT_ROWS + r) * LANES + tid;
-                    red[off] += red[off + stride];
+                    precise float reduced = red[off] + red[off + stride];
+                    red[off] = reduced;
                 }
             }
         }
