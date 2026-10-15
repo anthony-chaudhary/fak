@@ -156,11 +156,13 @@ type v41ExpertGateUp32Witness struct {
 	grid                               bool
 	gridChecks, declineGridAt, uploads int
 	scalarUploads                      int
+	gridProbeRows                      []int
 	partialTileFailure                 error
 }
 
 func (b *v41ExpertGateUp32Witness) SupportsV41Q2KTokenPanel(w compute.Tensor, rows int) bool {
-	if rows > 8 && rows <= 32 {
+	if rows > 2 && rows != 4 && rows != 8 && rows <= 32 {
+		b.gridProbeRows = append(b.gridProbeRows, rows)
 		b.gridChecks++
 		return b.grid && b.gridChecks != b.declineGridAt && w.Dtype == compute.Q2_K
 	}
@@ -314,7 +316,7 @@ func TestV41ExpertGateUpTailConsumer(t *testing.T) {
 		t.Cleanup(s.Close)
 		return s, b
 	}
-	for _, count := range []int{8, 9, 15, 16, 24, 31} {
+	for _, count := range []int{2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 24, 31} {
 		t.Run(fmt.Sprintf("rows%d", count), func(t *testing.T) {
 			control, cb := newSession(false, true, 0)
 			want, outcome, err := control.v41RoutedExpertCohort(0, "ffn.experts.0", inputs[:count], weights[:count])
@@ -340,7 +342,18 @@ func TestV41ExpertGateUpTailConsumer(t *testing.T) {
 							t.Fatalf("row%d differs", row)
 						}
 					}
-					wide := count > 8 && tc.grid && tc.down && tc.decline == 0
+					gridCount := count > 2 && count != 4 && count != 8
+					wide := gridCount && tc.grid && tc.down && tc.decline == 0
+					wantProbes := []int(nil)
+					if gridCount && tc.down {
+						wantProbes = []int{count}
+						if tc.grid && tc.decline != 1 {
+							wantProbes = append(wantProbes, count)
+						}
+					}
+					if !reflect.DeepEqual(b.gridProbeRows, wantProbes) {
+						t.Fatalf("grid probes=%v want=%v", b.gridProbeRows, wantProbes)
+					}
 					wantTiles, wantUploads, wantScalarUploads := cb.tileRows, cb.uploads, cb.scalarUploads
 					if wide {
 						wantTiles, wantUploads, wantScalarUploads = []int{count, count}, 1, 0
