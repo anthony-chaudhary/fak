@@ -1259,3 +1259,10 @@ Supplied invocation, receipt digest, finished/joined flags, exit code, and outpu
 Reports one authenticated EP loader invocation's returned Session/coordinator, error, separately flagged panic payload, ownership transfer, and construction-owned retirement observation.
 
 **Distinct from:** A construction outcome, not a runtime Session or scheduler fresh/restored origin. Successful transfer leaves factory retirement unavailable/not applicable and ownership with the caller. Unsuccessful opaque constructors leave hidden cleanup unknown unless an observed outer-release failure proves incomplete retirement. The additive result API returns this evidence; the compatibility wrapper rethrows the original primary panic. Group/backend remain borrowed; no field proves device execution.
+
+
+### v41SharedAttentionBinding
+
+Private immutable identity container pairing one ordinary shared-attention callback with optional canonical Session, Model, and Backend provenance. Reconstructing or wrapping the callback creates an ordinary-only binding, so function identity does not transfer canonical provenance.
+
+**Distinct from:** Unlike v41SharedAttentionRows, which describes borrowed KV input slices, this binding describes callback origin and identity. Unlike V41SharedAttentionPlain, it selects no numerical mode. In this foundation provenance is dormant, raw-field adapters discard it, and every validation scan remains strict; the binding grants no independent lifetime authority or validation bypass.

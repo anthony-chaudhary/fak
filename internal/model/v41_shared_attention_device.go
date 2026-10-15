@@ -331,11 +331,19 @@ func v41SharedAttentionCause(layer int, p v41SharedAttentionPayload, cause error
 // only the rows the mirror lacks, and reads its sink from the tensor named by
 // sinkKey; sink residency is never inferred from a layer/cache key.
 func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
-	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
-		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
+	return s.v41BindSharedAttention().attentionFunc()
+}
+
+func (s *Session) v41BindSharedAttention() *v41SharedAttentionBinding {
+	if s == nil {
 		return nil
 	}
-	operation, ok := s.Backend.(compute.V41SharedAttentionBackend)
+	model, backend := s.M, s.Backend
+	if model == nil || backend == nil || !backend.Caps().DeviceMemory ||
+		!compute.BackendSupportsDeviceWeightDtype(backend, compute.F32) {
+		return nil
+	}
+	operation, ok := backend.(compute.V41SharedAttentionBackend)
 	if !ok || !operation.SupportsV41SharedAttention() {
 		return nil
 	}
@@ -344,7 +352,7 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 	// fault attribution; reentrant calls get independent descriptors instead.
 	var sourceRows []int
 	selectionInUse := false
-	return func(layer int, request v41SharedAttentionRequest) (result []float32, cause error) {
+	ordinary := func(layer int, request v41SharedAttentionRequest) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		reuseSelection := !selectionInUse
 		if reuseSelection {
@@ -523,4 +531,5 @@ func (s *Session) v41SharedAttentionFunc() v41SharedAttentionFunc {
 		}
 		return result, nil
 	}
+	return &v41SharedAttentionBinding{ordinary: ordinary, native: v41BoundSharedAttention{owner: s, model: model, backend: backend}}
 }
