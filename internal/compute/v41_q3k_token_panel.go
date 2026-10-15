@@ -30,22 +30,24 @@ func v41Q3KTokenPanelOptedIn() bool {
 
 // V41Q3KTokenPanelPlan is the exact three-int32 push ABI and bounded storage
 // geometry of v41_q3k_token_panel.comp. Each of 64 lanes owns one output
-// column for every token, retaining the scalar Q3_K accumulation order.
+// column for up to eight tokens; workgroup Y tiles the full panel while
+// retaining the scalar Q3_K accumulation order.
 type V41Q3KTokenPanelPlan struct {
 	Out, In, Rows                        int
 	PayloadBytes                         int
 	WeightBytes, InputBytes, OutputBytes int
-	WorkgroupsX                          uint32
+	WorkgroupsX, WorkgroupsY             uint32
 }
 
-// PlanV41Q3KTokenPanel admits only 2/4/8 rows. A single-token decode cannot
+// PlanV41Q3KTokenPanel admits 2..64 rows in at-most-eight-token workgroups.
+// A single-token decode cannot
 // accidentally select this candidate. Signed 32-bit byte extents also keep
 // host int arithmetic safe on supported 32-bit software-test hosts.
 func PlanV41Q3KTokenPanel(out, in, rows int) (V41Q3KTokenPanelPlan, error) {
 	bad := func() (V41Q3KTokenPanelPlan, error) {
-		return V41Q3KTokenPanelPlan{}, fmt.Errorf("compute: Q3_K token panel requires bounded [out,in] with in divisible by 256 and exactly 2, 4 or 8 rows")
+		return V41Q3KTokenPanelPlan{}, fmt.Errorf("compute: Q3_K token panel requires bounded [out,in] with in divisible by 256 and 2 through 64 rows")
 	}
-	if (rows != 2 && rows != 4 && rows != 8) || out <= 0 || in <= 0 || in%256 != 0 || uint64(out) > 0x7fffffff || uint64(in) > 0x7fffffff {
+	if (rows < 2 || rows > 64) || out <= 0 || in <= 0 || in%256 != 0 || uint64(out) > 0x7fffffff || uint64(in) > 0x7fffffff {
 		return bad()
 	}
 	payload := uint64(out) * uint64(in/256) * 110
@@ -58,7 +60,7 @@ func PlanV41Q3KTokenPanel(out, in, rows int) (V41Q3KTokenPanelPlan, error) {
 	}
 	return V41Q3KTokenPanelPlan{Out: out, In: in, Rows: rows,
 		PayloadBytes: int(payload), WeightBytes: int(wb), InputBytes: int(xb), OutputBytes: int(yb),
-		WorkgroupsX: uint32((uint64(out) + 63) / 64)}, nil
+		WorkgroupsX: uint32((uint64(out) + 63) / 64), WorkgroupsY: uint32((rows + 7) / 8)}, nil
 }
 
 func validateV41Q3KTokenPanel(weight, input Tensor, rows int) (V41Q3KTokenPanelPlan, error) {

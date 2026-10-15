@@ -2,11 +2,15 @@
 
 // Same-expert Q3_K token tile, derived from fak's q3k_matmul.comp packed
 // layout and scalar accumulation order. Decode each quant weight once, then
-// reuse it across 2/4/8 independent token accumulators. This primitive performs
+// reuse it across at most eight independent token accumulators per workgroup.
+// Workgroup Y partitions a bounded 2..64-token panel without extra copies. This primitive performs
 // no route weighting or BF16 publication: the existing caller owns those
 // ordered boundaries before and after the down projection.
 layout(local_size_x = 64) in;
 
+// Kept in optimized SPIR-V as the loaded-module grid ABI discriminator.
+// An unmarked legacy module is admitted only for its original 2/4/8 tokens.
+layout(constant_id = 31) const uint Q3_TOKEN_GRID_ABI = 0x51334731u;
 const uint MAX_TOKENS = 8u;
 layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
 layout(std430, set = 0, binding = 1) readonly buffer X { vec4 x4[]; };
@@ -56,9 +60,12 @@ float decodedLane(uint quantBytes, uint highBytes, uint shift, uint mask, uint c
 }
 
 void main() {
+    if (Q3_TOKEN_GRID_ABI != 0x51334731u) return;
     uint row = gl_GlobalInvocationID.x;
-    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), tokens = uint(pc.tokens);
-    if (row >= outDim) return;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), totalTokens = uint(pc.tokens);
+    uint tokenBase = gl_WorkGroupID.y * MAX_TOKENS;
+    if (row >= outDim || tokenBase >= totalTokens) return;
+    uint tokens = min(MAX_TOKENS, totalTokens - tokenBase);
     uint blocks = inDim / 256u;
     float sums[MAX_TOKENS];
     for (uint token = 0u; token < tokens; ++token) sums[token] = 0.0;
@@ -97,7 +104,7 @@ void main() {
                         float decoded3 = decodedLane(quantBytes, highBytes, shift, mask, 3u, dl);
                         uint col4 = (sb * 256u + halfBase + j * 32u + laneBase) >> 2u;
                         for (uint token = 0u; token < tokens; ++token) {
-                            vec4 xv = x4[token * (inDim >> 2u) + col4];
+                            vec4 xv = x4[(tokenBase + token) * (inDim >> 2u) + col4];
                             float sum0 = sums[token] + decoded0 * xv.x;
                             float sum1 = sum0 + decoded1 * xv.y;
                             float sum2 = sum1 + decoded2 * xv.z;
@@ -112,5 +119,5 @@ void main() {
             qi += 32u;
         }
     }
-    for (uint token = 0u; token < tokens; ++token) y[token * outDim + row] = sums[token];
+    for (uint token = 0u; token < tokens; ++token) y[(tokenBase + token) * outDim + row] = sums[token];
 }

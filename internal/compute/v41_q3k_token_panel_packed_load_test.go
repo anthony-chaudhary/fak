@@ -23,6 +23,17 @@ func TestV41Q3KTokenPanelPackedLoads(t *testing.T) {
 	if err := v41Q3PackedLoadSource(string(source)); err != nil {
 		t.Fatal(err)
 	}
+	for _, replacement := range [][2]string{
+		{"min(MAX_TOKENS, totalTokens - tokenBase)", "MAX_TOKENS"},
+		{"0x51334731u", "0x51334732u"},
+		{"x4[(tokenBase + token)", "x4[token"},
+		{"y[(tokenBase + token)", "y[token"},
+	} {
+		broken := strings.Replace(string(source), replacement[0], replacement[1], 1)
+		if broken == string(source) || v41Q3PackedLoadSource(broken) == nil {
+			t.Fatal("negative control accepted an unmasked tail or missing token-tile offset")
+		}
+	}
 	// A wrong straddling shift must fail the source-bound contract, even when
 	// aligned blocks would still decode correctly.
 	broken := strings.Replace(string(source), "32u - shift", "8u", 1)
@@ -236,6 +247,19 @@ func v41Q3PackedLoadSource(source string) error {
 		return strings.Join(strings.Fields(comments.ReplaceAllString(s, "")), "")
 	}
 	source = normalize(source)
+	for _, replacement := range [][2]string{
+		{"layout(constant_id = 31) const uint Q3_TOKEN_GRID_ABI = 0x51334731u;", ""},
+		{"if (Q3_TOKEN_GRID_ABI != 0x51334731u) return;", ""},
+		{v41Q3TokenGridPreludeAfter, v41Q3TokenGridPreludeBefore},
+		{"x4[(tokenBase + token) * (inDim >> 2u) + col4]", "x4[token * (inDim >> 2u) + col4]"},
+		{"y[(tokenBase + token) * outDim + row] = sums[token]", "y[token * outDim + row] = sums[token]"},
+	} {
+		after, before := normalize(replacement[0]), normalize(replacement[1])
+		if strings.Count(source, after) != 1 {
+			return fmt.Errorf("bounded token grid, masked tail or global token address changed")
+		}
+		source = strings.Replace(source, after, before, 1)
+	}
 	metadataAfter, metadataBefore := normalize(v41Q3MetadataWordsAfter), normalize(v41Q3MetadataWordsBefore)
 	if strings.Count(source, metadataAfter) != 1 {
 		return fmt.Errorf("metadata word sharing or half-scale extraction changed")
@@ -409,3 +433,13 @@ const v41Q3MetadataWordsAfter = `        // Four enclosing words cover all twelv
             scaleHigh = (metadata2 >> metadataShift) | (metadata3 << (32u - metadataShift));
         }
         float d = unpackHalf2x16((metadata3 >> metadataShift) & 65535u).x;`
+
+const v41Q3TokenGridPreludeBefore = `    uint row = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), tokens = uint(pc.tokens);
+    if (row >= outDim) return;`
+
+const v41Q3TokenGridPreludeAfter = `    uint row = gl_GlobalInvocationID.x;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim), totalTokens = uint(pc.tokens);
+    uint tokenBase = gl_WorkGroupID.y * MAX_TOKENS;
+    if (row >= outDim || tokenBase >= totalTokens) return;
+    uint tokens = min(MAX_TOKENS, totalTokens - tokenBase);`

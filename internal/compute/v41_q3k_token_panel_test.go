@@ -2,13 +2,16 @@ package compute
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"math"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -87,7 +90,7 @@ func TestV41Q3KTokenPanelOptInSource(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=50ms
+// fak-test:runtime fast est=500ms
 // CPU indexing, scalar-order and decode-sharing witness only. Native shader
 // compilation, device parity, occupancy and bandwidth remain unqualified.
 func TestV41Q3KTokenPanelContract(t *testing.T) {
@@ -99,9 +102,9 @@ func TestV41Q3KTokenPanelContract(t *testing.T) {
 	for off := 0; off < len(raw); off += 110 {
 		binary.LittleEndian.PutUint16(raw[off+108:], 0x1800)
 	}
-	for _, rows := range []int{2, 4, 8} {
+	for _, rows := range []int{2, 4, 8, 9, 31, 64} {
 		plan, err := PlanV41Q3KTokenPanel(out, in, rows)
-		if err != nil || plan.PayloadBytes != len(raw) || plan.WeightBytes != len(raw)+2 || plan.InputBytes != rows*in*4 || plan.OutputBytes != rows*out*4 || plan.WorkgroupsX != 2 {
+		if err != nil || plan.PayloadBytes != len(raw) || plan.WeightBytes != len(raw)+2 || plan.InputBytes != rows*in*4 || plan.OutputBytes != rows*out*4 || plan.WorkgroupsX != 2 || plan.WorkgroupsY != uint32((rows+7)/8) {
 			t.Fatalf("rows=%d plan=%+v err=%v", rows, plan, err)
 		}
 		x := make([]float32, rows*in)
@@ -111,8 +114,8 @@ func TestV41Q3KTokenPanelContract(t *testing.T) {
 			}
 		}
 		got, decodes := v41Q3KTokenPanelScalar(raw, x, out, in, rows)
-		if decodes != out*in {
-			t.Fatalf("rows=%d decodes=%d, want token-independent %d", rows, decodes, out*in)
+		if decodes != out*in*int(plan.WorkgroupsY) {
+			t.Fatalf("rows=%d decodes=%d, want one decode per eight-token tile %d", rows, decodes, out*in*int(plan.WorkgroupsY))
 		}
 		for token := 0; token < rows; token++ {
 			for row := 0; row < out; row++ {
@@ -126,15 +129,64 @@ func TestV41Q3KTokenPanelContract(t *testing.T) {
 			}
 		}
 	}
-	for _, rows := range []int{2, 4, 8} {
+	for _, rows := range []int{2, 4, 8, 9, 31, 64} {
 		if plan, err := PlanV41Q3KTokenPanel(5120, 2304, rows); err != nil || plan.WeightBytes != 5068800 {
 			t.Fatalf("published down geometry rows=%d plan=%+v err=%v", rows, plan, err)
 		}
 	}
-	for _, dims := range [][3]int{{65, 768, 1}, {65, 768, 3}, {65, 768, 9}, {0, 256, 2}, {65, 767, 2}, {1 << 30, 256, 8}, {65, 1 << 30, 8}} {
+	for _, dims := range [][3]int{{65, 768, 1}, {65, 768, 0}, {65, 768, 65}, {0, 256, 2}, {65, 767, 2}, {1 << 30, 256, 8}, {65, 1 << 30, 8}} {
 		if _, err := PlanV41Q3KTokenPanel(dims[0], dims[1], dims[2]); err == nil {
 			t.Fatalf("invalid geometry %v admitted", dims)
 		}
+	}
+	// Every admitted total maps each token once, including 1..7-token tails.
+	// No inactive lane may name storage beyond the full input/output extent.
+	for rows := 2; rows <= 64; rows++ {
+		plan, err := PlanV41Q3KTokenPanel(out, in, rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		visits := make([]int, rows)
+		for group := uint32(0); group < plan.WorkgroupsY; group++ {
+			base := int(group) * 8
+			count := min(8, rows-base)
+			if count < 1 || count > 8 {
+				t.Fatal("invalid local token count")
+			}
+			for local := 0; local < count; local++ {
+				token := base + local
+				if token < 0 || token >= rows || (token+1)*in*4 > plan.InputBytes || (token+1)*out*4 > plan.OutputBytes {
+					t.Fatal("tile crossed full-panel storage")
+				}
+				visits[token]++
+			}
+		}
+		for _, count := range visits {
+			if count != 1 {
+				t.Fatal("token omitted or duplicated")
+			}
+		}
+	}
+	native, err := os.ReadFile("vulkan_shim.cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v41Q3TokenGridNativeSource(string(native)); err != nil {
+		t.Fatal(err)
+	}
+	for _, replacement := range [][2]string{
+		{"!g_v41Q3TokenGridModule && tokens != 2", "false && tokens != 2"},
+		{"g_v41Q3TokenGridModule = q3GridABI == 1", "g_v41Q3TokenGridModule = true"},
+		{"if (q3GridABI < 0) return false;", ""},
+	} {
+		broken := strings.Replace(string(native), replacement[0], replacement[1], 1)
+		if broken == string(native) || v41Q3TokenGridNativeSource(broken) == nil {
+			t.Fatal("negative control accepted unsafe loaded-module grid admission")
+		}
+	}
+	broken := strings.Replace(string(native), "uint32_t((uint64_t(tokens) + 7u) / 8u), true)", "uint32_t((uint64_t(tokens) + 7u) / 4u), true)", 1)
+	if broken == string(native) || v41Q3TokenGridNativeSource(broken) == nil {
+		t.Fatal("negative control accepted wrong native token grid")
 	}
 	shader, err := os.ReadFile("shaders/v41_q3k_token_panel.comp")
 	if err != nil {
@@ -150,38 +202,117 @@ func TestV41Q3KTokenPanelContract(t *testing.T) {
 func v41Q3KTokenPanelScalar(raw []byte, x []float32, out, in, rows int) ([]float32, int) {
 	y := make([]float32, rows*out)
 	decodes := 0
-	for row := 0; row < out; row++ {
-		for sb := 0; sb < in/256; sb++ {
-			base := (row*(in/256) + sb) * 110
-			d := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(raw[base+108:])))
-			scales := unpackQ3KScales(raw[base+96 : base+108])
-			qi, si, mask := 0, 0, byte(1)
-			for half := 0; half < 256; half += 128 {
-				shift := uint(0)
-				for j := 0; j < 4; j++ {
-					for sub := 0; sub < 2; sub++ {
-						dl := d * float32(scales[si]-32)
-						si++
-						for l := 0; l < 16; l++ {
-							lane := sub*16 + l
-							code := int((raw[base+32+qi+lane] >> shift) & 3)
-							if raw[base+lane]&mask == 0 {
-								code -= 4
-							}
-							decoded := dl * float32(code)
-							decodes++
-							col := sb*256 + half + j*32 + lane
-							for token := 0; token < rows; token++ {
-								y[token*out+row] += decoded * x[token*in+col]
+	for tokenBase := 0; tokenBase < rows; tokenBase += 8 {
+		tokenEnd := min(tokenBase+8, rows)
+		for row := 0; row < out; row++ {
+			for sb := 0; sb < in/256; sb++ {
+				base := (row*(in/256) + sb) * 110
+				d := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(raw[base+108:])))
+				scales := unpackQ3KScales(raw[base+96 : base+108])
+				qi, si, mask := 0, 0, byte(1)
+				for half := 0; half < 256; half += 128 {
+					shift := uint(0)
+					for j := 0; j < 4; j++ {
+						for sub := 0; sub < 2; sub++ {
+							dl := d * float32(scales[si]-32)
+							si++
+							for l := 0; l < 16; l++ {
+								lane := sub*16 + l
+								code := int((raw[base+32+qi+lane] >> shift) & 3)
+								if raw[base+lane]&mask == 0 {
+									code -= 4
+								}
+								decoded := dl * float32(code)
+								decodes++
+								col := sb*256 + half + j*32 + lane
+								for token := tokenBase; token < tokenEnd; token++ {
+									y[token*out+row] += decoded * x[token*in+col]
+								}
 							}
 						}
+						shift += 2
+						mask <<= 1
 					}
-					shift += 2
-					mask <<= 1
+					qi += 32
 				}
-				qi += 32
 			}
 		}
 	}
 	return y, decodes
+}
+
+func v41Q3TokenGridNativeSource(source string) error {
+	comments := regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`)
+	source = comments.ReplaceAllString(source, "")
+	normalize := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	for _, text := range []string{
+		"uint32_t g_maxComputeWorkGroupCountY = 0;",
+		"bool g_v41Q3TokenGridModule = false;",
+		"g_maxComputeWorkGroupCountY = props2.properties.limits.maxComputeWorkGroupCount[1];",
+	} {
+		if strings.Count(normalize(source), text) != 1 {
+			return fmt.Errorf("missing actual device Y limit: %s", text)
+		}
+	}
+	extract := func(name string) (string, error) {
+		start := strings.Index(source, name)
+		if start < 0 {
+			return "", fmt.Errorf("missing native Q3 function %s", name)
+		}
+		brace := strings.Index(source[start:], "{")
+		if brace < 0 {
+			return "", fmt.Errorf("missing native Q3 body %s", name)
+		}
+		depth, end := 1, start+brace+1
+		for ; end < len(source) && depth != 0; end++ {
+			if source[end] == '{' {
+				depth++
+			}
+			if source[end] == '}' {
+				depth--
+			}
+		}
+		if depth != 0 {
+			return "", fmt.Errorf("unterminated native Q3 body %s", name)
+		}
+		return normalize(source[start:end]), nil
+	}
+	// Pin actual loaded-byte classification and its publication only after a
+	// successful pipeline build. A filename or mere framing is insufficient.
+	for name, want := range map[string]string{
+		"static int v41Q3TokenGridModuleABI(": "a51964f749798eba24e3873da474c85195bace2cc9543922dcae1f2b19e9ec9a",
+		"bool buildKernel(":                   "5c840f558f8bbc86cafcf659f44fd86d3644dcd7f96b9cf15524e3f7a8a8e992",
+	} {
+		body, err := extract(name)
+		if err != nil {
+			return err
+		}
+		if fmt.Sprintf("%x", sha256.Sum256([]byte(body))) != want {
+			return fmt.Errorf("loaded-module ABI admission changed: %s", name)
+		}
+	}
+	var native string
+	for _, name := range []string{"fvk_have_v41_q3k_token_panel", "fvk_v41_q3k_token_panel_shape", "fvk_v41_q3k_token_panel_f32"} {
+		body, err := extract("int " + name + "(")
+		if err != nil {
+			return err
+		}
+		native += body
+	}
+	for _, replacement := range [][2]string{
+		{"if (!g_v41Q3TokenGridModule && tokens != 2 && tokens != 4 && tokens != 8) return 0; ", ""},
+		{"(tokens < 2 || tokens > 64)", "(tokens != 2 && tokens != 4 && tokens != 8)"},
+		{"const uint64_t tokenGroups = (uint64_t(tokens) + 7u) / 8u; ", ""},
+		{" && g_maxComputeWorkGroupCountY != 0 && tokenGroups <= g_maxComputeWorkGroupCountY", ""},
+		{"uint32_t((uint64_t(tokens) + 7u) / 8u), true)", "1, true)"},
+	} {
+		if strings.Count(native, replacement[0]) != 1 {
+			return fmt.Errorf("native token bounds or dispatch grid changed")
+		}
+		native = strings.Replace(native, replacement[0], replacement[1], 1)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(native))); got != "2a20749e4a80d35419135a616cdd17375aa3fb4245ec6a44d10b4f16d43e291b" {
+		return fmt.Errorf("native Q3 availability/storage/state contract changed: %s", got)
+	}
+	return nil
 }
