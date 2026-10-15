@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/systembaseline"
@@ -32,7 +33,7 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 }
 
 type systemBaselineCommandAttributor interface {
-	Configure(*exec.Cmd) bool
+	ConfigureSysProcAttr(*syscall.SysProcAttr) (*syscall.SysProcAttr, bool)
 	Active() bool
 	Started(int) error
 	LaunchFailed(error)
@@ -97,7 +98,8 @@ func runBenchSystemBaselineWithAttributor(stdout, stderr io.Writer, argv []strin
 	}
 	attributor := newAttributor()
 	cmd := newCommand()
-	configured := attributor.Configure(cmd)
+	var configured bool
+	cmd.SysProcAttr, configured = attributor.ConfigureSysProcAttr(cmd.SysProcAttr)
 	if err := cmd.Start(); err != nil {
 		if configured {
 			attributor.LaunchFailed(err)

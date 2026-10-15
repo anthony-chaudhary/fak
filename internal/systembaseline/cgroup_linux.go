@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -213,17 +212,17 @@ func (l *linuxCommandAttributor) active() bool {
 	return l != nil && !l.finished && l.path != "" && l.dir != nil
 }
 
-func (l *linuxCommandAttributor) configure(cmd *exec.Cmd) bool {
-	if !l.active() || cmd == nil {
-		return false
+func (l *linuxCommandAttributor) configureSysProcAttr(attr *syscall.SysProcAttr) (*syscall.SysProcAttr, bool) {
+	if !l.active() {
+		return attr, false
 	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	if attr == nil {
+		attr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.UseCgroupFD = true
-	cmd.SysProcAttr.CgroupFD = int(l.dir.Fd())
+	attr.UseCgroupFD = true
+	attr.CgroupFD = int(l.dir.Fd())
 	l.configured = true
-	return true
+	return attr, true
 }
 
 func (l *linuxCommandAttributor) started(pid int) error {

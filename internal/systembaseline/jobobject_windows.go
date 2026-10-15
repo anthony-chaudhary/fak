@@ -5,7 +5,6 @@ package systembaseline
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -151,16 +150,16 @@ func (w *windowsCommandAttributor) active() bool {
 	return w != nil && !w.finished && w.job != 0 && (!w.startProcessed || w.exact)
 }
 
-func (w *windowsCommandAttributor) configure(cmd *exec.Cmd) bool {
-	if w == nil || w.finished || w.job == 0 || cmd == nil {
-		return false
+func (w *windowsCommandAttributor) configureSysProcAttr(attr *syscall.SysProcAttr) (*syscall.SysProcAttr, bool) {
+	if w == nil || w.finished || w.job == 0 {
+		return attr, false
 	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	if attr == nil {
+		attr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.CreationFlags |= createSuspended
+	attr.CreationFlags |= createSuspended
 	w.configured = true
-	return true
+	return attr, true
 }
 
 func (w *windowsCommandAttributor) started(pid int) error {
