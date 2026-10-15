@@ -7,14 +7,12 @@ package compute
 */
 import "C"
 
-import "os"
-
 var _ V41Q3KTokenPanelBackend = (*vulkanBackend)(nil)
 
-// The candidate shares the Q2 token-panel opt-in and needs a live optional V19
+// The candidate accepts an independent Q3 or legacy Q2 opt-in and needs a live optional V19
 // pipeline. A missing module leaves the historical scalar/batched path alone.
 func (v *vulkanBackend) SupportsV41Q3KTokenPanel(weight Tensor, rows int) bool {
-	if v == nil || os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") != "1" || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2 {
+	if v == nil || !v41Q3KTokenPanelOptedIn() || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2 {
 		return false
 	}
 	plan, err := PlanV41Q3KTokenPanel(weight.Shape[0], weight.Shape[1], rows)
@@ -34,7 +32,7 @@ func (v *vulkanBackend) V41Q3KTokenPanel(weight, input Tensor, rows int) (out Te
 	if invalid != nil {
 		return Tensor{}, vulkanV41RoutedIDError(site, 2, invalid.Error())
 	}
-	if v == nil || os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") != "1" {
+	if v == nil || !v41Q3KTokenPanelOptedIn() {
 		return Tensor{}, vulkanV41RoutedIDError(site, 3, "experimental token panel is not enabled")
 	}
 	vulkanMu.Lock()

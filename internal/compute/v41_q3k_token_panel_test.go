@@ -1,7 +1,12 @@
 package compute
 
 import (
+	"bytes"
 	"encoding/binary"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"math"
 	"os"
 	"strings"
@@ -9,6 +14,78 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/kquantbits"
 )
+
+// fak-test:runtime fast est=10ms
+func TestV41Q3KTokenPanelOptIn(t *testing.T) {
+	for _, q2 := range []string{"", "0", "1", "true", " 1", "1 "} {
+		for _, q3 := range []string{"", "0", "1", "true", " 1", "1 "} {
+			t.Setenv("FAK_V41_Q2K_TOKEN_PANEL", q2)
+			t.Setenv("FAK_V41_Q3K_TOKEN_PANEL", q3)
+			if got, want := v41Q3KTokenPanelOptedIn(), q2 == "1" || q3 == "1"; got != want {
+				t.Fatalf("Q2=%q Q3=%q: got %v want %v", q2, q3, got, want)
+			}
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms
+// Bind the real tagged native guards without claiming Vulkan execution.
+func TestV41Q3KTokenPanelOptInSource(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "vulkan_v41_q3k_token_panel.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := func(n ast.Node) string {
+		var b bytes.Buffer
+		if err := format.Node(&b, fset, n); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	guards := map[string]struct {
+		index     int
+		condition string
+	}{
+		"SupportsV41Q3KTokenPanel": {0, "v == nil || !v41Q3KTokenPanelOptedIn() || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2"},
+		"V41Q3KTokenPanel":         {3, "v == nil || !v41Q3KTokenPanelOptedIn()"},
+	}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		want, ok := guards[fn.Name.Name]
+		if !ok {
+			continue
+		}
+		if fn.Body == nil || len(fn.Body.List) <= want.index+1 {
+			t.Fatalf("missing guard in %s", fn.Name.Name)
+		}
+		guard, ok := fn.Body.List[want.index].(*ast.IfStmt)
+		if !ok || text(guard.Cond) != want.condition || len(guard.Body.List) != 1 {
+			t.Fatalf("%s lost its early shared policy guard", fn.Name.Name)
+		}
+		if _, ok := guard.Body.List[0].(*ast.ReturnStmt); !ok {
+			t.Fatalf("%s policy guard no longer rejects", fn.Name.Name)
+		}
+		if fn.Name.Name == "V41Q3KTokenPanel" &&
+			(text(fn.Body.List[1]) != "plan, invalid := validateV41Q3KTokenPanel(weight, input, rows)" || text(fn.Body.List[4]) != "vulkanMu.Lock()") {
+			t.Fatal("selected validation/policy/lock order changed")
+		}
+		delete(guards, fn.Name.Name)
+	}
+	if len(guards) != 0 {
+		t.Fatal("missing native Q3 methods")
+	}
+	q2, err := os.ReadFile("vulkan_v41_q2k_token_panel.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(q2), "FAK_V41_Q3K_TOKEN_PANEL") || strings.Contains(string(q2), "v41Q3KTokenPanelOptedIn") || strings.Count(string(q2), `os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") != "1"`) != 2 {
+		t.Fatal("Q2 must retain its exclusive legacy policy")
+	}
+}
 
 // fak-test:runtime fast est=50ms
 // CPU indexing, scalar-order and decode-sharing witness only. Native shader

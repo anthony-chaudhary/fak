@@ -1,11 +1,17 @@
 package compute
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // V41Q3KTokenPanelBackend contracts several rows through ONE expert's packed
 // Q3_K matrix. It is separate from the routed-ID ABI: tokens share a weight,
 // rather than selecting independent weights from an eight-slot table.
-// Availability is experimental and default-off. A selected error is fatal;
+// Availability is experimental and default-off. FAK_V41_Q3K_TOKEN_PANEL=1
+// opts into Q3 panels independently; the legacy Q2 flag still enables both.
+// This applies to every eligible Q3 panel caller, not only expert down.
+// A selected error is fatal;
 // callers may choose their scalar arm only before calling the contraction.
 type V41Q3KTokenPanelBackend interface {
 	SupportsV41Q3KTokenPanel(weight Tensor, rows int) bool
@@ -14,6 +20,12 @@ type V41Q3KTokenPanelBackend interface {
 	// publication nor host readback; the caller retains its ordered deferred
 	// activation/publication checks before publishing any result or state.
 	V41Q3KTokenPanel(weight, input Tensor, rows int) (Tensor, error)
+}
+
+func v41Q3KTokenPanelOptedIn() bool {
+	// Keep exact legacy "1" semantics. Q3=0 must not veto Q2=1, and this
+	// separate Q3 request never enables the Q2 panel family.
+	return os.Getenv("FAK_V41_Q3K_TOKEN_PANEL") == "1" || os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") == "1"
 }
 
 // V41Q3KTokenPanelPlan is the exact three-int32 push ABI and bounded storage
