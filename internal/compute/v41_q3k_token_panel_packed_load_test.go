@@ -33,6 +33,10 @@ func TestV41Q3KTokenPanelPackedLoads(t *testing.T) {
 	if brokenActivation == string(source) || v41Q3PackedLoadSource(brokenActivation) == nil {
 		t.Fatal("negative control accepted a missing prior scalar addition")
 	}
+	brokenMetadata := strings.Replace(string(source), "metadata3 >> metadataShift", "metadata2 >> metadataShift", 1)
+	if brokenMetadata == string(source) || v41Q3PackedLoadSource(brokenMetadata) == nil {
+		t.Fatal("negative control accepted the wrong half-scale word")
+	}
 	brokenScale := strings.Replace(string(source), "(index >> 2u) * 2u", "(index >> 2u)", 1)
 	if brokenScale == string(source) || v41Q3PackedLoadSource(brokenScale) == nil {
 		t.Fatal("negative control accepted a corrupt scale high-bit selector")
@@ -155,13 +159,25 @@ func TestV41Q3KTokenPanelPackedLoads(t *testing.T) {
 				}
 				return lo>>shift | read(word+1)<<(32-shift)
 			}
-			low0, low1, high := packed(base+96), packed(base+100), packed(base+104)
-			wantScaleLoads := 3
-			if base&3 != 0 {
-				wantScaleLoads = 6
+			word, metadataShift := (base+96)/4, uint(base&3)*8
+			var metadata [4]uint32
+			for i := range metadata {
+				if (word+i)*4+4 > len(raw) {
+					t.Fatal("metadata word load crossed the padded extent")
+				}
+				metadata[i] = binary.LittleEndian.Uint32(raw[(word+i)*4:])
+				loads++
 			}
-			if loads != wantScaleLoads {
-				t.Fatalf("block=%d scale loads=%d want=%d", sb, loads, wantScaleLoads)
+			low0, low1, high := metadata[0], metadata[1], metadata[2]
+			if metadataShift != 0 {
+				low0 = metadata[0]>>metadataShift | metadata[1]<<(32-metadataShift)
+				low1 = metadata[1]>>metadataShift | metadata[2]<<(32-metadataShift)
+				high = metadata[2]>>metadataShift | metadata[3]<<(32-metadataShift)
+			}
+			if loads != 4 || low0 != binary.LittleEndian.Uint32(raw[base+96:]) ||
+				low1 != binary.LittleEndian.Uint32(raw[base+100:]) || high != binary.LittleEndian.Uint32(raw[base+104:]) ||
+				uint16(metadata[3]>>metadataShift) != binary.LittleEndian.Uint16(raw[base+108:]) {
+				t.Fatalf("block=%d metadata extraction changed or used %d word loads", sb, loads)
 			}
 			wantScales := legacyScales(binary.LittleEndian.Uint32(raw[base+96:]), binary.LittleEndian.Uint32(raw[base+100:]), binary.LittleEndian.Uint32(raw[base+104:]))
 			for i := uint(0); i < 16; i++ {
@@ -220,6 +236,11 @@ func v41Q3PackedLoadSource(source string) error {
 		return strings.Join(strings.Fields(comments.ReplaceAllString(s, "")), "")
 	}
 	source = normalize(source)
+	metadataAfter, metadataBefore := normalize(v41Q3MetadataWordsAfter), normalize(v41Q3MetadataWordsBefore)
+	if strings.Count(source, metadataAfter) != 1 {
+		return fmt.Errorf("metadata word sharing or half-scale extraction changed")
+	}
+	source = strings.Replace(source, metadataAfter, metadataBefore, 1)
 	activationHelper := normalize(v41Q3ActivationQuartetHelper)
 	if strings.Count(source, activationHelper) != 1 {
 		return fmt.Errorf("quartet weight decoder changed")
@@ -367,3 +388,24 @@ const v41Q3ActivationQuartetAfter = `                    for (uint l = 0u; l < 1
                             sums[token] = sum3;
                         }
                     }`
+
+const v41Q3MetadataWordsBefore = `        float d = unpackHalf2x16(byteAt(base + 108u) | (byteAt(base + 109u) << 8u)).x;
+        uint scaleLow0 = packedFourBytes(base + 96u);
+        uint scaleLow1 = packedFourBytes(base + 100u);
+        uint scaleHigh = packedFourBytes(base + 104u);`
+
+const v41Q3MetadataWordsAfter = `        // Four enclosing words cover all twelve scale bytes and the half scale.
+        // Blocks start at byte alignment zero or two; no fifth word is needed.
+        uint metadataWord = (base + 96u) >> 2u;
+        uint metadataShift = (base & 3u) * 8u;
+        uint metadata0 = raw[metadataWord];
+        uint metadata1 = raw[metadataWord + 1u];
+        uint metadata2 = raw[metadataWord + 2u];
+        uint metadata3 = raw[metadataWord + 3u];
+        uint scaleLow0 = metadata0, scaleLow1 = metadata1, scaleHigh = metadata2;
+        if (metadataShift != 0u) {
+            scaleLow0 = (metadata0 >> metadataShift) | (metadata1 << (32u - metadataShift));
+            scaleLow1 = (metadata1 >> metadataShift) | (metadata2 << (32u - metadataShift));
+            scaleHigh = (metadata2 >> metadataShift) | (metadata3 << (32u - metadataShift));
+        }
+        float d = unpackHalf2x16((metadata3 >> metadataShift) & 65535u).x;`

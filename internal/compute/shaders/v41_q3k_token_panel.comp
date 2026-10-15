@@ -64,10 +64,21 @@ void main() {
     for (uint token = 0u; token < tokens; ++token) sums[token] = 0.0;
     for (uint sb = 0u; sb < blocks; ++sb) {
         uint base = (row * blocks + sb) * 110u;
-        float d = unpackHalf2x16(byteAt(base + 108u) | (byteAt(base + 109u) << 8u)).x;
-        uint scaleLow0 = packedFourBytes(base + 96u);
-        uint scaleLow1 = packedFourBytes(base + 100u);
-        uint scaleHigh = packedFourBytes(base + 104u);
+        // Four enclosing words cover all twelve scale bytes and the half scale.
+        // Blocks start at byte alignment zero or two; no fifth word is needed.
+        uint metadataWord = (base + 96u) >> 2u;
+        uint metadataShift = (base & 3u) * 8u;
+        uint metadata0 = raw[metadataWord];
+        uint metadata1 = raw[metadataWord + 1u];
+        uint metadata2 = raw[metadataWord + 2u];
+        uint metadata3 = raw[metadataWord + 3u];
+        uint scaleLow0 = metadata0, scaleLow1 = metadata1, scaleHigh = metadata2;
+        if (metadataShift != 0u) {
+            scaleLow0 = (metadata0 >> metadataShift) | (metadata1 << (32u - metadataShift));
+            scaleLow1 = (metadata1 >> metadataShift) | (metadata2 << (32u - metadataShift));
+            scaleHigh = (metadata2 >> metadataShift) | (metadata3 << (32u - metadataShift));
+        }
+        float d = unpackHalf2x16((metadata3 >> metadataShift) & 65535u).x;
         uint qi = 0u, mask = 1u;
         int si = 0;
         for (uint halfBase = 0u; halfBase < 256u; halfBase += 128u) {
