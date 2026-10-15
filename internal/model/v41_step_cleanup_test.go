@@ -120,20 +120,28 @@ func TestV41StepCohortCleanupPreservesPrimary(t *testing.T) {
 			got := recoverError(func() {
 				owner.Lock()
 				defer owner.Unlock()
-				defer v41AbortStepCohort(txs, results, &returned)
-				defer v41FinishStepCohort(func() error {
-					ends++
-					if kind != "standalone cleanup panic" {
-						panic(endFault)
+				complete := false
+				defer func() { v41AbortStepCohort(txs, results, &returned, complete) }()
+				func() {
+					windowComplete := false
+					defer func() {
+						v41FinishStepCohort(func() error {
+							ends++
+							if kind != "standalone cleanup panic" {
+								panic(endFault)
+							}
+							return nil
+						}, &returned, windowComplete)
+					}()
+					if kind == "operation panic" {
+						panic(primary)
 					}
-					return nil
-				}, &returned)
-				if kind == "operation panic" {
-					panic(primary)
-				}
-				if kind == "returned error" {
-					returned = primary
-				}
+					if kind == "returned error" {
+						returned = primary
+					}
+					windowComplete = true
+				}()
+				complete = true
 			})
 			want := primary
 			switch kind {

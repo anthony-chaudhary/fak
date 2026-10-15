@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -373,5 +374,165 @@ func TestGGUFExpertPageCacheConcurrentDefaultOff(t *testing.T) {
 	wg.Wait()
 	if src.PageCacheEnabled() {
 		t.Fatal("default-off source reported page cache enabled")
+	}
+}
+
+// TestExpertCheckpointPageCacheRetainedExtent distinguishes the logical charge
+// from the actual ReadAt allocation. mappedOwnedReader deliberately retains the
+// supplied buffer as an identity witness; production ReaderAt implementations
+// must not retain it. No GC timing or process-memory claim follows from this test.
+// fak-test:runtime fast est=100ms lane=default
+func TestExpertCheckpointPageCacheRetainedExtent(t *testing.T) {
+	t.Parallel()
+	for _, quant := range []ExpertCheckpointQuant{ExpertCheckpointQ2K, ExpertCheckpointQ3K, ExpertCheckpointQ4K, ExpertCheckpointQ5K, ExpertCheckpointQ6K} {
+		t.Run(quant.String(), func(t *testing.T) {
+			_, stride, _ := quant.blockGeometry()
+			page := cachedPageSize()
+			if page <= 2*stride {
+				t.Fatal("fixture requires a page larger than two packed blocks")
+			}
+			for _, tc := range []struct {
+				name                               string
+				mapped, warm, exact, refuse, evict bool
+				budget                             int64
+			}{
+				{name: "cold-exact-fit-compacts", mapped: true, budget: int64(stride)},
+				{name: "cold-roomy-pool-compacts", mapped: true, budget: int64(2 * page)},
+				{name: "cold-eviction-keeps-logical-bound", mapped: true, evict: true, budget: int64(stride)},
+				{name: "cold-refusal-keeps-logical-operands", mapped: true, refuse: true, budget: int64(stride - 1)},
+				{name: "warm-view-keeps-source-identity", mapped: true, warm: true, budget: int64(stride)},
+				{name: "zero-budget-keeps-owned-identity", mapped: true},
+				{name: "unmapped-keeps-owned-identity", budget: int64(stride)},
+				{name: "exact-owned-extent-keeps-identity", mapped: true, exact: true, budget: int64(stride)},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					offset, size := 17, page+23
+					if tc.exact {
+						offset, size = 0, stride
+					} else if tc.evict {
+						size = 2*page + 23
+					}
+					data := make([]byte, size)
+					for i := range data {
+						data[i] = byte(i*13 + 7)
+					}
+					reader := &mappedOwnedReader{data: data}
+					tier := NewExpertCheckpointTier(tc.budget)
+					var mapped []byte
+					if tc.mapped {
+						mapped = data
+					}
+					const fused = "extent-gate"
+					descriptions := []FusedExpertTensor{{Name: fused, Layer: 0, Proj: "gate_proj", Quant: quant, Offset: int64(offset), Experts: 1, Rows: 1, Cols: qkK}}
+					if tc.evict {
+						descriptions = append(descriptions, FusedExpertTensor{Name: "extent-up", Layer: 0, Proj: "up_proj", Quant: quant, Offset: int64(page + offset), Experts: 1, Rows: 1, Cols: qkK})
+					}
+					err := tier.AddShardData(reader, int64(size), mapped, descriptions)
+					if err != nil {
+						t.Fatal(err)
+					}
+					name := expertName(0, 0, "gate_proj.weight")
+					if tc.warm {
+						if _, warm, err := tier.shards[0].readExpertPageCache(fused, 0); err != nil || warm {
+							t.Fatalf("prime cold mapping: warm=%v err=%v", warm, err)
+						}
+						reader.last = nil
+					}
+					weight, err := tier.fault(name)
+					if tc.refuse {
+						var refusal *ExpertCheckpointBudgetError
+						if !errors.Is(err, ErrExpertCheckpointBudget) || !errors.As(err, &refusal) || refusal.Tensor != name || refusal.Bytes != int64(stride) || refusal.Budget != tc.budget {
+							t.Fatalf("logical budget refusal changed: %v", err)
+						}
+						stats := tier.Stats()
+						if stats.Reads != 1 || stats.BytesRead != int64(stride) || stats.Failures != 1 || stats.ResidentBytes != 0 || stats.ResidentCount != 0 || stats.PeakBytes != 0 || len(reader.last) != page {
+							t.Fatalf("refusal changed source/retention accounting: stats=%+v read=%d", stats, len(reader.last))
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					raw := mappedCheckpointRaw(weight)
+					if len(raw) != stride || cap(raw) != stride || !bytes.Equal(raw, data[offset:offset+stride]) {
+						t.Fatal("payload shape, capacity or bytes changed")
+					}
+					if tc.warm {
+						if reader.last != nil || &raw[0] != &data[offset] {
+							t.Fatal("warm mapped view was read or copied")
+						}
+					} else {
+						readBytes, relative := stride, 0
+						if tc.mapped && !tc.exact {
+							readBytes, relative = page, offset
+						}
+						if len(reader.last) != readBytes {
+							t.Fatalf("ReadAt length=%d, want %d", len(reader.last), readBytes)
+						}
+						aliasesRead := &raw[0] == &reader.last[relative]
+						wantAlias := tc.budget == 0 || !tc.mapped || tc.exact
+						if aliasesRead != wantAlias {
+							t.Fatalf("retained payload aliases aligned ReadAt allocation=%v, want %v (payload=%d backing=%d budget=%d)", aliasesRead, wantAlias, stride, len(reader.last), tc.budget)
+						}
+					}
+					stats := tier.Stats()
+					wantResident, wantCount := int64(0), 0
+					if tc.budget > 0 {
+						wantResident, wantCount = int64(stride), 1
+					}
+					if stats.Reads != 1 || stats.BytesRead != int64(stride) || stats.ResidentBytes != wantResident || stats.PeakBytes != wantResident || stats.ResidentCount != wantCount || stats.Failures != 0 {
+						t.Fatalf("logical ledger changed: %+v", stats)
+					}
+					cache, enabled := tier.shards[0].pageCacheSession()
+					if enabled != tc.mapped {
+						t.Fatal("page-cache admission changed")
+					}
+					if tc.mapped {
+						physical := page
+						if tc.exact {
+							physical = stride
+						}
+						wantWarm := int64(0)
+						if tc.warm {
+							wantWarm = 1
+						}
+						if cache.BytesFromDevice != int64(physical) || cache.ExpertsRead != 1 || int64(cache.WarmHits) != wantWarm || cache.AdvantageBytes != int64(physical-stride) {
+							t.Fatalf("page-cache I/O ledger changed: %+v", cache)
+						}
+					}
+					again, err := tier.fault(name)
+					if err != nil {
+						t.Fatal(err)
+					}
+					againRaw := mappedCheckpointRaw(again)
+					if !bytes.Equal(raw, againRaw) {
+						t.Fatal("repeat payload changed")
+					}
+					if tc.budget > 0 {
+						if &againRaw[0] != &raw[0] || tier.Stats().Hits != 1 || tier.Stats().Reads != 1 {
+							t.Fatal("retained hit changed ownership or reread the source")
+						}
+					} else if &againRaw[0] != &data[offset] || tier.Stats().ResidentBytes != 0 {
+						t.Fatal("zero-budget warm view was copied or retained")
+					}
+					if tc.evict {
+						secondName := expertName(0, 0, "up_proj.weight")
+						second, err := tier.fault(secondName)
+						if err != nil {
+							t.Fatal(err)
+						}
+						secondRaw := mappedCheckpointRaw(second)
+						if len(reader.last) != page || !bytes.Equal(secondRaw, data[page+offset:page+offset+stride]) || &secondRaw[0] == &reader.last[offset] {
+							t.Fatal("second cold entry retained aligned slack or changed bytes")
+						}
+						st := tier.Stats()
+						if st.Evictions != 1 || st.Reads != 2 || st.BytesRead != int64(2*stride) || st.Hits != 1 || st.ResidentCount != 1 || st.ResidentBytes != int64(stride) || st.PeakBytes != int64(stride) {
+							t.Fatalf("mapped eviction changed logical accounting: %+v", st)
+						}
+					}
+
+				})
+			}
+		})
 	}
 }

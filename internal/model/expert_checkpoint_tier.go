@@ -959,17 +959,28 @@ func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, ent
 	// I/O stays outside the bookkeeping lock; ownership/publication below is shared.
 	var err error
 	var borrowed bool
+	var ownedBytes int64
 	if (entry.quant == ExpertCheckpointQ2K || entry.quant == ExpertCheckpointQ3K) && t.pool.Budget() == 0 && overlay == nil && !src.PageCacheEnabled() {
 		_, borrowed = src.r.(ggufReadOnlyRange)
 		raw, err = src.readExpertReadOnly(entry.fused, entry.expert)
 	} else {
-		raw, _, err = src.readExpertPageCache(entry.fused, entry.expert)
+		raw, _, ownedBytes, err = src.readExpertPageCacheOwned(entry.fused, entry.expert)
 	}
 	if err != nil {
 		t.mu.Lock()
 		t.failures, t.lastErr = t.failures+1, err
 		t.mu.Unlock()
 		return expertWeight{}, err
+	}
+	// The pool charges logical projection bytes. A cold mapped read can own a
+	// larger aligned buffer behind its capped slice; do not retain that slack
+	// off-ledger. Compact only retainable positive-budget owned reads. Warm
+	// mapped views, exact-size reads and stream-through keep their identities.
+	// The temporary buffers coexist during copy; this is no peak-RSS bound.
+	if budget := t.pool.Budget(); budget > 0 && int64(len(raw)) <= budget && ownedBytes > int64(len(raw)) {
+		compact := make([]byte, len(raw))
+		copy(compact, raw)
+		raw = compact
 	}
 	w := entry.weight(name, raw)
 	w.borrowed = borrowed
