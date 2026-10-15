@@ -1402,6 +1402,36 @@
           "category": "incidental",
           "reason": "Helper that sets the existing Session attachment-retirement latch and removes only that Session's registry association under the mutex; it neither frees nor clears the caller-owned cache and leaves no registry tombstone.",
           "token": "retireBranchCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed missing-attribution label declaring that the saved profile ledger cannot establish OS cache or expert-ring residency state; names an absent observation and introduces no cache mechanism.",
+          "token": "os_cache_and_expert_ring_state"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger prefix-state value for a validated zero restored-token count, explicitly leaving OS cache state unknown; a receipt interpretation label, not evidence of physically cold storage or a new cache.",
+          "token": "prefix_cold_os_cache_unknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed validation diagnostic for a historical modelbench restored-token count below zero or above the prompt-token count; a bounds-check result, not a cache mechanism.",
+          "token": "invalid_modelbench_cache_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed missing-data diagnostic for absent fields in the already-positioned NativeCacheAccounting receipt or missing prompt usage; the diagnostic does not define a new accounting or cache concept.",
+          "token": "missing_prefix_cache_accounting"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed validation diagnostic for negative or inconsistent total, restored and computed token counts in the existing NativeCacheAccounting receipt, including prompt-usage mismatch; names a failed conservation check.",
+          "token": "invalid_prefix_cache_accounting"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger prefix-state value for validated positive restored-token accounting, explicitly leaving OS cache state unknown; reports existing receipt evidence without defining another reuse mechanism.",
+          "token": "prefix_reused_os_cache_unknown"
         }
       ],
       "exclude": [
@@ -1656,6 +1686,8 @@
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",
+        "invalid_modelbench_cache_count",
+        "invalid_prefix_cache_accounting",
         "knownKeyCache",
         "lastcacherd",
         "liveMatrixPrefixCache",
@@ -1671,6 +1703,7 @@
         "microCacheWitness",
         "microCacheWitnessSchema",
         "minCacheRun",
+        "missing_prefix_cache_accounting",
         "newCache",
         "newDeadlineCacheTicket",
         "no_cache_state_delta",
@@ -1680,11 +1713,14 @@
         "numCacheTiers",
         "observeTurnCache",
         "observecachettlupgrade",
+        "os_cache_and_expert_ring_state",
         "parseCacheSeats",
         "persistMicroCacheWitness",
         "persistVCacheCalibration",
         "postureVCacheCalibration",
         "postureVCacheSignals",
+        "prefix_cold_os_cache_unknown",
+        "prefix_reused_os_cache_unknown",
         "prefixcachehits",
         "prefixcachequeries",
         "promptcachehittokens",
@@ -9307,6 +9343,96 @@
           "category": "incidental",
           "reason": "Private cleanup helper preserving a primary failure while running local session and lifetime-pin cleanup; not another gateway or engine interface.",
           "token": "finishInKernelCleanup"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local profile ledger input field holding a saved before-snapshot of the existing native engine observation schema; a DTO projection, not a distinct engine or lifecycle abstraction.",
+          "token": "EngineBefore"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local decoding DTO for the existing fak-observation-engine/1 and fak-engine-steps/1 snapshots, retaining selected phase totals and recent records; introduces no engine implementation or scheduler.",
+          "token": "profileLedgerEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local profile ledger input field holding a saved after-snapshot of the existing native engine observation schema; a DTO projection, not a distinct engine or lifecycle abstraction.",
+          "token": "EngineAfter"
+        },
+        {
+          "category": "incidental",
+          "reason": "Profile ledger serialization label for the existing native inference receipt ttft_seconds value converted to milliseconds; preserves producer timing and does not establish client TTFT or a new timing boundary.",
+          "token": "engine_ttft_ms"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local profile ledger output field reporting whether saved recent engine records are contiguous under caller-declared isolation and publication-clock checks; observation sufficiency metadata, not an engine capability or a new ring implementation.",
+          "token": "EngineRingCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for an absent before or after saved engine snapshot; missing-input validation, not a new engine concept.",
+          "token": "missing_engine_snapshots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for a saved snapshot with an unsupported schema, non-native producer marker or oversized recent-record list; envelope validation, not a distinct engine.",
+          "token": "invalid_engine_snapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for absent observation time or active-request fields in a saved engine snapshot; missing-field validation of an existing schema.",
+          "token": "missing_engine_window_fields"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for absent sequence, duration or publication timestamp fields in an existing engine recent record; missing-field validation, not a new record abstraction.",
+          "token": "missing_engine_record_fields"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for invalid sequence ordering, duration, timestamp, token or lane values in saved engine recent records; a validation outcome for existing observations.",
+          "token": "invalid_engine_record"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic when the saved after-snapshot time does not advance past the before-snapshot time; rejects the captured window and defines no clock synchronization or engine mechanism.",
+          "token": "engine_snapshot_clock_reversed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic when an empty before-snapshot recent list provides no sequence baseline for checking new engine records; reports missing evidence only.",
+          "token": "unknown_engine_start_sequence"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic when the saved engine record window has a sequence gap or no new records; a continuity-check outcome, not a new ring or engine capability.",
+          "token": "engine_ring_gap_or_no_new_records"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for unbound caller capture identity or nonzero active-request counts at the saved engine window boundaries; an evidence limitation, not an isolation mechanism.",
+          "token": "engine_window_not_isolated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic when saved request-phase counters cannot establish exactly one request in the captured engine window; validates existing counters rather than defining admission or scheduling semantics.",
+          "token": "engine_request_count_not_one"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for absent count or duration-sum fields in a saved before or after engine phase observation; missing-data validation of existing cumulative counters.",
+          "token": "missing_engine_phase_counter"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic for regressing or out-of-range cumulative phase counts or duration sums in saved engine observations; validates existing measurements and adds no timing mechanism.",
+          "token": "engine_phase_counter_invalid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger metric label for the difference of existing before/after engine phase SumSeconds observations converted to nanoseconds. Phase totals overlap; the ledger forms no interval union or wall residual and this label establishes neither exclusive request decomposition nor GPU duration.",
+          "token": "engine_phase_wall"
         }
       ],
       "exclude": [
@@ -9319,7 +9445,9 @@
         "AffinitySelection",
         "BaselineEngineCalls",
         "DeniedEngineCalls",
+        "EngineAfter",
         "EngineBash",
+        "EngineBefore",
         "EngineEdit",
         "EngineEvidence",
         "EngineFetchWeb",
@@ -9328,6 +9456,7 @@
         "EngineGrep",
         "EngineRead",
         "EngineReductionPct",
+        "EngineRingCoverage",
         "EngineWebSearch",
         "EngineWrite",
         "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
@@ -9372,7 +9501,14 @@
         "engineFor",
         "engineNS",
         "engineTokensPerCall",
+        "engine_phase_counter_invalid",
+        "engine_phase_wall",
+        "engine_request_count_not_one",
+        "engine_ring_gap_or_no_new_records",
+        "engine_snapshot_clock_reversed",
         "engine_source",
+        "engine_ttft_ms",
+        "engine_window_not_isolated",
         "engineer",
         "engineered",
         "engineering",
@@ -9421,6 +9557,8 @@
         "inkernelforcedtoolname",
         "inkernelincremental",
         "inkernelresponseformatinstruction",
+        "invalid_engine_record",
+        "invalid_engine_snapshot",
         "kernel32",
         "kernelSession",
         "kernelValue",
@@ -9435,11 +9573,16 @@
         "microCacheMovefileWriteThrough",
         "microcache",
         "microcachedemo",
+        "missing_engine_phase_counter",
+        "missing_engine_record_fields",
+        "missing_engine_snapshots",
+        "missing_engine_window_fields",
         "nativeReasonMessageRoleUnsupported",
         "native_engine_substitution",
         "newInKernelPrefixPressureBridge",
         "normalizeInKernelToolCalls",
         "pgKernel32",
+        "profileLedgerEngine",
         "publicGatewayURL",
         "query_public_policy",
         "recordVDSOServeMeasured",
@@ -9455,6 +9598,7 @@
         "selectorGateway",
         "serviceOpsEngine",
         "shrinkWireInKernel",
+        "unknown_engine_start_sequence",
         "webSearchEngine",
         "writeEngine"
       ],
@@ -13614,6 +13758,16 @@
           "category": "incidental",
           "reason": "Named per-step scalar fallback reason for a generic batch configuration that uses Session.Step; not a product support-maturity or hardware qualification claim.",
           "token": "unsupported_config"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local profile ledger output field describing sequence-gap and isolation sufficiency for captured engine records; coverage here is observation completeness, not product support, maturity or hardware qualification.",
+          "token": "EngineRingCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed profile ledger diagnostic withholding forward-versus-remainder decomposition when saved forward events do not establish complete single-lane coverage; evidence sufficiency, not a product support or maturity classification.",
+          "token": "forward_coverage_not_single_lane"
         }
       ],
       "exclude": [
@@ -13649,6 +13803,7 @@
         "DescriptionCoverage",
         "DispositionSupportQuestion",
         "DomainCoverage",
+        "EngineRingCoverage",
         "ErrKVHostSnapshotUnsupported",
         "ErrQwen35GDNSequenceUnsupported",
         "ErrUnsupported",
@@ -13803,6 +13958,7 @@
         "fak_parity_ratio",
         "fak_parity_value",
         "formatParityValue",
+        "forward_coverage_not_single_lane",
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",
         "goalCoverageThreshold",
