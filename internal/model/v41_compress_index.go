@@ -19,9 +19,10 @@ package model
 // normalized index keys) and ends at the selected row IDs.
 
 import (
+	"cmp"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 )
 
 // V41CompressorPool owns the causal partial-group state for one sequence and one
@@ -453,7 +454,7 @@ func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candida
 	}
 	sortV41Scores(ranked)
 	ranked = ranked[:min(topK, len(ranked))]
-	sort.Slice(ranked, func(i, j int) bool { return ranked[i].index < ranked[j].index })
+	slices.SortFunc(ranked, func(a, b v41RankedScore) int { return cmp.Compare(a.index, b.index) })
 
 	rows := make([]int32, len(ranked))
 	for i, selected := range ranked {
@@ -467,10 +468,10 @@ func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candida
 }
 
 func sortV41Scores(scores []v41RankedScore) {
-	sort.Slice(scores, func(i, j int) bool {
-		if scores[i].score == scores[j].score {
-			return scores[i].index < scores[j].index
+	slices.SortFunc(scores, func(a, b v41RankedScore) int {
+		if a.score == b.score {
+			return cmp.Compare(a.index, b.index)
 		}
-		return scores[i].score > scores[j].score
+		return cmp.Compare(b.score, a.score)
 	})
 }
