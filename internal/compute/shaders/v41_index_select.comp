@@ -3,8 +3,8 @@ layout(local_size_x = 256) in;
 
 // One workgroup selects the DeepSeek-V4.1 index rows for one query. Scores are
 // compared as order-preserving integer keys, never as floats, so no driver float
-// mode can change a decision. Every phase is an exact rank count: a higher score
-// ranks first, an equal score ranks the lower position first, and -0 equals +0.
+// mode can change a decision. Partial coverage uses exact rank counts: a higher
+// score ranks first, ties rank lower positions first, and -0 equals +0.
 layout(std430, binding = 0) readonly buffer ScoreBuf { uint Score[]; };
 // Scratch: [blocks] block keys, [blocks] block keep flags, [rows] selected flags.
 // coherent: later phases read Scratch written by other waves of this workgroup;
@@ -60,6 +60,11 @@ void main() {
     phaseBarrier();
     if (Status[0] != 0u) return;
 
+    // With full block coverage, only all--Inf blocks would be excluded.
+    // Their effective row keys are already KEY_NEG_INF, so masking is a no-op.
+    // Keep the original scratch offsets; this decision is workgroup-uniform.
+    if (masked && uint(pc.topKBlocks) >= blocks) masked = false;
+
     if (masked) {
         uint pinned = (rows - 1u) / blockSize;
         for (uint b = lane; b < blocks; b += 256u) {
@@ -79,6 +84,17 @@ void main() {
             Scratch[keepBase + b] = (rank < uint(pc.topKBlocks) && mine != KEY_NEG_INF) ? 1u : 0u;
         }
         phaseBarrier();
+    }
+
+    // Every rank is below rows. With full row coverage, all membership flags
+    // would be nonzero and the position-prefix slot is exactly i, not rank.
+    // Preserve any restrictive block mask and its -1 sentinel positions.
+    if (uint(pc.topK) >= rows) {
+        for (uint i = lane; i < rows; i += 256u) {
+            uint mine = (!masked || Scratch[keepBase + i / blockSize] != 0u) ? orderKey(Score[i]) : KEY_NEG_INF;
+            Out[i] = mine == KEY_NEG_INF ? -1.0 : float(i);
+        }
+        return; // uniform: no lane skips a barrier required by another lane
     }
 
     for (uint i = lane; i < rows; i += 256u) {
