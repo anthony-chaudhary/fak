@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:2e46ca470409f15b722f73d3142d166d5563de5cc5521b7c3ad8781c371dbf8e",
-  "tracked_files": 25471,
-  "tracked_bytes": 511789036,
+  "content_root": "sha256:b25f859f4b55e6a790eef5dd49b32371a087cc60952be3178f20fa47feb0b62d",
+  "tracked_files": 25474,
+  "tracked_bytes": 511828557,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -32018,11 +32018,20 @@
     },
     {
       "path": "cmd/modelbench/raw_decode.go",
-      "content_sha256": "sha256:c0627c90ee20fe4f9c9d9d1eab7ccef66417ebd4848276e0367131d9adf4c99b",
-      "bytes": 30300,
+      "content_sha256": "sha256:55c72b30bad645b6dd5cfc0fff0bde779b26ad99d4cc5f25211dd22f0e047a99",
+      "bytes": 33375,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
+      ]
+    },
+    {
+      "path": "cmd/modelbench/raw_decode_shards_test.go",
+      "content_sha256": "sha256:71bb6c1cd1299870a2e142e13e575ae1c27393614f6b15718a6f36bba3e3c245",
+      "bytes": 9558,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
       ]
     },
     {
@@ -45575,7 +45584,7 @@
     },
     {
       "path": "docs/concept-disambiguation-scorecard/README.md",
-      "content_sha256": "sha256:ee93886ed80c169cbdc649fa2f55d2e5fa9973492650348aa8ac5cc81bc3edd1",
+      "content_sha256": "sha256:e0d34eada3e483aabca84b7a23e2981d632129c43d0b077f2fcebdc958102b37",
       "bytes": 922127,
       "classification": "documentation",
       "source_classes": [
@@ -162890,8 +162899,8 @@
     },
     {
       "path": "internal/model/v41_compressed_publication_rope_device.go",
-      "content_sha256": "sha256:7a1cda53f18fcd13c5e634f6502072bbf56a9f6c2abdca90377844728710809d",
-      "bytes": 8469,
+      "content_sha256": "sha256:e62750bb239b036934b348e8a40c5816a4f4146e39d4aef64c911efe32420aea",
+      "bytes": 11684,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -162899,8 +162908,8 @@
     },
     {
       "path": "internal/model/v41_compressed_publication_rope_device_test.go",
-      "content_sha256": "sha256:e37e7c09f424cafd8aefb484d0a917d8b71ec0640c11a6eb6a2db7c646a77ad5",
-      "bytes": 35103,
+      "content_sha256": "sha256:018329e29d1286bbd304f1121edf745d26a56d7093bbc44584f66bbfeaf4f12b",
+      "bytes": 41282,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -164457,8 +164466,8 @@
     },
     {
       "path": "internal/model/v41_indexer_projection.go",
-      "content_sha256": "sha256:430d99e17792d0ba1391fb5b2ad06d203b2bfb07ee9d82373c858ac003dd655d",
-      "bytes": 14346,
+      "content_sha256": "sha256:b6c50b34eee0b96baf22342488e4ac638f8935b48582dad6144539fbd0432908",
+      "bytes": 14955,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -164486,6 +164495,15 @@
       "path": "internal/model/v41_indexer_publication_test.go",
       "content_sha256": "sha256:47252be70e9728f9efd85988939bf27bddc3e6fbd88d5922c50d9c1339bf67e8",
       "bytes": 5800,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/model/v41_indexer_rope_owned_table_test.go",
+      "content_sha256": "sha256:ed0481cbbaf3423ec93ae5578a3bbc2fd6bc1be14e00c5ae7a6b96e23fc2154e",
+      "bytes": 6105,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -164540,6 +164558,15 @@
       "path": "internal/model/v41_indexer_score_session_test.go",
       "content_sha256": "sha256:a8eb182bc836130dbe8758fa9f9d55abf55b23f24105c92a2d71debd8fb2c3b1",
       "bytes": 13527,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/model/v41_indexer_tail_alloc_test.go",
+      "content_sha256": "sha256:da4e58a7557cc115f90cc8aa960bfff74dfd5348baf8fab8958066987ad689e6",
+      "bytes": 3873,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -165582,8 +165609,8 @@
     },
     {
       "path": "internal/model/v41_routed_expert_tile.go",
-      "content_sha256": "sha256:208a9ff20185fcdceaf9035af2a3294b8ffe7d12cb1f8ebe62212c2c745b7db7",
-      "bytes": 4529,
+      "content_sha256": "sha256:384e80093ab06f8d195fb6e6ffad7c61a5219185dc3d005b6f31369bf358bb7e",
+      "bytes": 4700,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -165591,8 +165618,8 @@
     },
     {
       "path": "internal/model/v41_routed_expert_tile_test.go",
-      "content_sha256": "sha256:a110e797c65e4db8d4e2e3f876018a5bd6a11cf6ffd8ab09e96f5157a74b2b5f",
-      "bytes": 11652,
+      "content_sha256": "sha256:759e41ff4e8e1ef420fa47068223d0348852e3ea195a4837548689f5fe4519f9",
+      "bytes": 18054,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -215368,8 +215395,8 @@
     },
     {
       "path": "tools/concept_disambiguation_scorecard.data/_meta.json",
-      "content_sha256": "sha256:981ef760ce24b54556c6d70017e81df2d9bf5fc3379f1d2774ffeb80ab89fc78",
-      "bytes": 834203,
+      "content_sha256": "sha256:1490ecad5a2cc358b6ce9a7385df55b5e3ca8b512159c01d5ced600edb1c82bf",
+      "bytes": 834537,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
