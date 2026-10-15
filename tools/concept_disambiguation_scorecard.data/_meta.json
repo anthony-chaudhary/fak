@@ -13935,6 +13935,11 @@
           "category": "incidental",
           "reason": "Optional backend capability predicate for the existing routed SwiGLU operation over a borrowed panel row; it is not an independent support-maturity policy.",
           "token": "SupportsV41RoutedSwiGLUPanelRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional backend capability predicate for one exact borrowed down-panel row; not a project support or maturity claim.",
+          "token": "SupportsV41RoutedDownPanelRow"
         }
       ],
       "exclude": [
@@ -14066,6 +14071,7 @@
         "SupportsBorrowedExpertUploads",
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
+        "SupportsV41RoutedDownPanelRow",
         "SupportsV41RoutedSwiGLUPanelRow",
         "TensorCoverageArchSchema",
         "TensorCoverageCanonicalMap",

@@ -523,6 +523,14 @@ int fvk_have_v41_routed_swiglu_panel_row(void);
 int fvk_v41_routed_swiglu_panel_row_shape(int rows, int count, int row);
 int fvk_v41_routed_swiglu_panel_row_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                                        int rows, int count, int row, float limit, float weight);
+/* Optional marked row-addressed ordinary RoutedDown (site 21) publication.
+ * Input is borrowed F32 [rows,count], output is one fresh count-wide row;
+ * status is one 16-byte checked BF16 record with row-local fault index.
+ * No allocation ownership transfer or host readback occurs here. */
+int fvk_have_v41_routed_down_panel_row(void);
+int fvk_v41_routed_down_panel_row_shape(int rows, int count, int row);
+int fvk_v41_routed_down_panel_row_f32(const void *dInput, void *dOut, void *dStatus,
+                                   int rows, int count, int row);
 /* Ordinary V4.1 attention BF16 publication, registry V9/current68. The
  * unchanged integer checked module accepts only sites 3 (attention input)
  * and 4 (attention output) through this entrypoint. Input/output/status are
