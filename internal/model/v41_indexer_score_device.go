@@ -561,155 +561,169 @@ func (s *Session) v41BindIndexerScore() v41BoundIndexerScore {
 			s.closeBackendOwned()
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		var primary any
+		complete := false
+		func() {
+			defer func() { primary = recover() }()
+			result, cause = func() (result []float32, cause error) {
+				validate := func() error { return v41ValidateIndexerScoreInputs(q, keys, weights, heads, headDim, rows) }
+				if resident != nil {
+					validate = func() error { return resident.validate(q, keys, weights, heads, headDim, rows) }
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				if err := validate(); err != nil {
+					return nil, closeFailure(err)
+				}
+				stage = "admission"
+				if admissionErr != nil {
+					return nil, closeFailure(admissionErr)
+				}
+				if _, err := operation.V41IndexerScoreAdmission(); err != nil {
+					return nil, closeFailure(err)
+				}
+				if rows == 0 {
+					return make([]float32, 0), nil
+				}
+				run := func() (result []float32, cause error) {
+					var owned []compute.Tensor
+					complete := false
+					defer func() {
+						failed := !complete || cause != nil
+						pending := owned
+						owned = nil
+						var cleanup any
+						present := false
+						for i := len(pending) - 1; i >= 0; i-- {
+							func() {
+								returned := false
+								defer func() {
+									value := recover()
+									if !returned && !present {
+										cleanup, present = value, true
+									}
+								}()
+								s.Backend.Free(pending[i])
+								returned = true
+							}()
+						}
+						if present && !failed {
+							panic(cleanup)
+						}
+					}()
+					result, cause = func() (result []float32, cause error) {
+						fresh := func(x compute.Tensor) bool {
+							if x.Buf() == nil || x.Backend() != s.Backend {
+								return false
+							}
+							if resident != nil && resident.cache.protected(x) {
+								return false
+							}
+							for _, previous := range owned {
+								if previous.Buf() == x.Buf() {
+									return false
+								}
+							}
+							owned = append(owned, x)
+							return true
+						}
+						shapeOK := func(x compute.Tensor, shape []int) bool {
+							return x.Dtype == compute.F32 && x.Layout == compute.RowMajor && x.Quant == nil && slices.Equal(x.Shape, shape)
+						}
+						upload := func(name string, shape []int, values []float32) (compute.Tensor, error) {
+							stage = name + " upload"
+							x := s.uploadHostF32(shape, values, compute.MemoryActivation, "V4.1 indexer score "+name)
+							if !fresh(x) || !shapeOK(x, shape) {
+								return compute.Tensor{}, errV41IndexerScoreResult
+							}
+							return x, nil
+						}
+						qt, err := upload("query", []int{heads, headDim}, q)
+						if err != nil {
+							return nil, err
+						}
+						var kt compute.Tensor
+						if resident == nil {
+							// Revalidate after the existing admission and query upload, just
+							// before dynamic backend use of the frozen host key operand.
+							keys = keyInput.beforeUpload(keys)
+							kt, err = upload("keys", []int{rows, headDim}, keys)
+						} else {
+							stage = "resident keys"
+							kt, err = resident.acquire(qt)
+						}
+						if err != nil {
+							return nil, err
+						}
+						wt, err := upload("weights", []int{heads}, weights)
+						if err != nil {
+							return nil, err
+						}
+						stage = "score"
+						out, err := operation.V41IndexerScore(qt, kt, wt, rows, heads, headDim)
+						ownedOutput := fresh(out) // release a fresh partial output even on error
+						if err != nil {
+							return nil, err
+						}
+						stage = "output validation"
+						if !ownedOutput || !shapeOK(out, []int{rows}) {
+							return nil, errV41IndexerScoreResult
+						}
+						stage = "readback"
+						// The native score primitive marks this tensor for checked Read.
+						values := s.Backend.Read(out)
+						if len(values) != rows {
+							return nil, errV41IndexerScoreResult
+						}
+						// Finite inputs may produce +/-Inf or NaN. Do not clamp, rescale,
+						// round, or reject here: the unchanged selector owns that policy.
+						result = append([]float32(nil), values...)
+						if resident != nil {
+							// Checked Read is the completion boundary for both the score
+							// and every prefix/staging copy feeding its exact-sized input.
+							resident.commit()
+						}
+						return result, nil
+					}()
+					complete = true
+					return result, cause
+				}
+				result, cause = run()
+				if cause != nil {
+					return nil, closeFailure(cause)
+				}
+				return result, nil
+			}()
+			complete = true
+		}()
+		if !complete {
+			r := primary
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
+				}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				if !s.halClosed {
-					err, ok := r.(error)
-					if !ok {
-						err = fmt.Errorf("unclassified backend panic: %v", r)
-					}
-					closeFailure(err)
-				}
-				panic(r)
 			}
-		}()
-		validate := func() error { return v41ValidateIndexerScoreInputs(q, keys, weights, heads, headDim, rows) }
-		if resident != nil {
-			validate = func() error { return resident.validate(q, keys, weights, heads, headDim, rows) }
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
+				}
+				result, cause = nil, closeFailure(err)
+				return
+			}
+			if !s.halClosed {
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
+			}
+			panic(r)
 		}
-		if err := validate(); err != nil {
-			return nil, closeFailure(err)
-		}
-		stage = "admission"
-		if admissionErr != nil {
-			return nil, closeFailure(admissionErr)
-		}
-		if _, err := operation.V41IndexerScoreAdmission(); err != nil {
-			return nil, closeFailure(err)
-		}
-		if rows == 0 {
-			return make([]float32, 0), nil
-		}
-		run := func() (result []float32, cause error) {
-			var owned []compute.Tensor
-			defer func() {
-				// Cleanup must not replace the selected operation's error or
-				// original panic. Still attempt every owned release.
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						s.Backend.Free(owned[i])
-					}()
-				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
-				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
-			}()
-			fresh := func(x compute.Tensor) bool {
-				if x.Buf() == nil || x.Backend() != s.Backend {
-					return false
-				}
-				if resident != nil && resident.cache.protected(x) {
-					return false
-				}
-				for _, previous := range owned {
-					if previous.Buf() == x.Buf() {
-						return false
-					}
-				}
-				owned = append(owned, x)
-				return true
-			}
-			shapeOK := func(x compute.Tensor, shape []int) bool {
-				return x.Dtype == compute.F32 && x.Layout == compute.RowMajor && x.Quant == nil && slices.Equal(x.Shape, shape)
-			}
-			upload := func(name string, shape []int, values []float32) (compute.Tensor, error) {
-				stage = name + " upload"
-				x := s.uploadHostF32(shape, values, compute.MemoryActivation, "V4.1 indexer score "+name)
-				if !fresh(x) || !shapeOK(x, shape) {
-					return compute.Tensor{}, errV41IndexerScoreResult
-				}
-				return x, nil
-			}
-			qt, err := upload("query", []int{heads, headDim}, q)
-			if err != nil {
-				return nil, err
-			}
-			var kt compute.Tensor
-			if resident == nil {
-				// Revalidate after the existing admission and query upload, just
-				// before dynamic backend use of the frozen host key operand.
-				keys = keyInput.beforeUpload(keys)
-				kt, err = upload("keys", []int{rows, headDim}, keys)
-			} else {
-				stage = "resident keys"
-				kt, err = resident.acquire(qt)
-			}
-			if err != nil {
-				return nil, err
-			}
-			wt, err := upload("weights", []int{heads}, weights)
-			if err != nil {
-				return nil, err
-			}
-			stage = "score"
-			out, err := operation.V41IndexerScore(qt, kt, wt, rows, heads, headDim)
-			ownedOutput := fresh(out) // release a fresh partial output even on error
-			if err != nil {
-				return nil, err
-			}
-			stage = "output validation"
-			if !ownedOutput || !shapeOK(out, []int{rows}) {
-				return nil, errV41IndexerScoreResult
-			}
-			stage = "readback"
-			// The native score primitive marks this tensor for checked Read.
-			values := s.Backend.Read(out)
-			if len(values) != rows {
-				return nil, errV41IndexerScoreResult
-			}
-			// Finite inputs may produce +/-Inf or NaN. Do not clamp, rescale,
-			// round, or reject here: the unchanged selector owns that policy.
-			result = append([]float32(nil), values...)
-			if resident != nil {
-				// Checked Read is the completion boundary for both the score
-				// and every prefix/staging copy feeding its exact-sized input.
-				resident.commit()
-			}
-			return result, nil
-		}
-		result, cause = run()
-		if cause != nil {
-			return nil, closeFailure(cause)
-		}
-		return result, nil
+		return result, cause
 	}
 	ordinary := func(layer int, q, keys, weights []float32, heads, headDim, rows int) ([]float32, error) {
 		return core(layer, q, keys, weights, heads, headDim, rows, v41IndexerScoreKeys{})
