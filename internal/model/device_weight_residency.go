@@ -92,7 +92,8 @@ func (r *modelHALWeightResidency) close() {
 
 func (resident *backendHALWeightResidency) close() {
 	scope := beginBackendExecution(resident.be)
-	defer scope.finish()
+	complete := false
+	defer scope.finishCompleted(&complete)
 	resident.mu.Lock()
 	defer resident.mu.Unlock()
 	if !resident.closed {
@@ -102,6 +103,9 @@ func (resident *backendHALWeightResidency) close() {
 			delete(resident.weights, key)
 		}
 	}
+	// A failed Free leaves retirement uncertain. Preserve its unwind, including
+	// legacy panic(nil), rather than allowing the checkpoint owner to unmap.
+	complete = true
 }
 
 // immutableDeviceWeights returns model-lifetime residency only for a genuine device
