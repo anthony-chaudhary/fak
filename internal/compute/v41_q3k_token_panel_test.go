@@ -184,7 +184,8 @@ func TestV41Q3KTokenPanelContract(t *testing.T) {
 			t.Fatal("negative control accepted unsafe loaded-module grid admission")
 		}
 	}
-	broken := strings.Replace(string(native), "uint32_t((uint64_t(tokens) + 7u) / 8u), true)", "uint32_t((uint64_t(tokens) + 7u) / 4u), true)", 1)
+	const q3Dispatch = "dispatch(g_kern[K_V41_Q3K_TOKEN_PANEL], bufs, &pc, sizeof(pc), uint32_t((uint64_t(out) + 63u) / 64u), uint32_t((uint64_t(tokens) + 7u) / 8u), true)"
+	broken := strings.Replace(string(native), q3Dispatch, strings.Replace(q3Dispatch, "/ 8u)", "/ 4u)", 1), 1)
 	if broken == string(native) || v41Q3TokenGridNativeSource(broken) == nil {
 		t.Fatal("negative control accepted wrong native token grid")
 	}
@@ -280,8 +281,8 @@ func v41Q3TokenGridNativeSource(source string) error {
 	// Pin actual loaded-byte classification and its publication only after a
 	// successful pipeline build. A filename or mere framing is insufficient.
 	for name, want := range map[string]string{
-		"static int v41Q3TokenGridModuleABI(": "a51964f749798eba24e3873da474c85195bace2cc9543922dcae1f2b19e9ec9a",
-		"bool buildKernel(":                   "5c840f558f8bbc86cafcf659f44fd86d3644dcd7f96b9cf15524e3f7a8a8e992",
+		"static int v41TokenGridModuleABI(": "1de863aa99e27cc08a870eef8e21dde6eb65babdb907531e998bd0e5b9f6ef98",
+		"bool buildKernel(":                 "c79c275b55af1a0ef9eb66c265ecdda2cb6d3cb71d1834b0544d042e6329b41b",
 	} {
 		body, err := extract(name)
 		if err != nil {

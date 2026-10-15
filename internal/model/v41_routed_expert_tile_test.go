@@ -147,3 +147,125 @@ func TestV41ExpertTokenTileConsumer(t *testing.T) {
 		t.Fatalf("selected failure replay/precedence/cleanup: outcome=%v err=%v matmuls=%d pending=%d owners=%d fences=%d", outcome, err, len(b.matmulInputs), len(b.pending), len(b.ownedTiles), b.fences)
 	}
 }
+
+// The wide consumer witness exercises the real cold cohort with CPU arithmetic.
+// It measures orchestration counts only, never native parity or elapsed speed.
+type v41ExpertGateUp32Witness struct {
+	*v41ExpertDownTileWitness
+	grid                               bool
+	gridChecks, declineGridAt, uploads int
+}
+
+func (b *v41ExpertGateUp32Witness) SupportsV41Q2KTokenPanel(w compute.Tensor, rows int) bool {
+	if rows == 32 {
+		b.gridChecks++
+		return b.grid && b.gridChecks != b.declineGridAt && w.Dtype == compute.Q2_K
+	}
+	return b.v41ExpertTileWitness.SupportsV41Q2KTokenPanel(w, rows)
+}
+
+func (b *v41ExpertGateUp32Witness) UploadClass(x compute.Tensor, dt compute.Dtype, _ compute.MemoryClass, site string) compute.Tensor {
+	if site == "V4.1 same-expert token tile" {
+		b.uploads++
+	}
+	return b.Backend.Upload(x, dt)
+}
+
+// fak-test:runtime medium est=10s lane=default
+func TestV41ExpertGateUp32Consumer(t *testing.T) {
+	t.Setenv(v41DeferredBF16PublishEnv, "1")
+	t.Setenv(v41RoutedIDEnv, "0")
+	t.Setenv(v41PrefillExpertPanelEnv, "0")
+	m := v41PinnedSlateFixture(t, false)
+	inputs, weights := make([][]float32, 32), make([]float32, 32)
+	for row := range inputs {
+		inputs[row] = make([]float32, m.Cfg.HiddenSize)
+		for i := range inputs[row] {
+			inputs[row][i] = float32((row*3+i)%13-6) / 16
+		}
+		weights[row] = float32(row+1) / 64
+	}
+	newSession := func(grid, down bool, decline int) (*Session, *v41ExpertGateUp32Witness) {
+		b := &v41ExpertGateUp32Witness{
+			v41ExpertDownTileWitness: &v41ExpertDownTileWitness{
+				v41ExpertTileWitness: &v41ExpertTileWitness{
+					v41ScalarCohortWitness: &v41ScalarCohortWitness{v41RoutedLayerTestBackend: newV41RoutedLayerTestBackend(), enabled: true},
+					tiles:                  true, ownedTiles: map[compute.Buffer]bool{},
+				}, downTiles: down,
+			}, grid: grid, declineGridAt: decline,
+		}
+		s, err := m.NewBackendSessionChecked(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(s.Close)
+		return s, b
+	}
+	control, cb := newSession(false, true, 0)
+	want, oldOutcome, oldErr := control.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
+	if oldOutcome != v41RoutedExpertHandled || oldErr != nil {
+		t.Fatalf("control: %v/%v", oldOutcome, oldErr)
+	}
+	for _, tc := range []struct {
+		name       string
+		grid, down bool
+		decline    int
+		wide       bool
+	}{
+		{"qualified", true, true, 0, true},
+		{"legacy", false, true, 0, false},
+		{"gate_refuses", true, true, 1, false},
+		{"up_refuses", true, true, 2, false},
+		{"down_unavailable", true, false, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, b := newSession(tc.grid, tc.down, tc.decline)
+			got, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
+			if outcome != v41RoutedExpertHandled || err != nil || len(got) != 32 {
+				t.Fatalf("%v/%v rows=%d", outcome, err, len(got))
+			}
+			for row := range got {
+				if !v41SameBits(got[row], want[row]) {
+					t.Fatalf("row%d differs", row)
+				}
+			}
+			wantTiles, wantUploads := []int{8, 8, 8, 8, 8, 8, 8, 8}, 4
+			if tc.wide {
+				wantTiles, wantUploads = []int{32, 32}, 1
+			}
+			if !reflect.DeepEqual(b.tileRows, wantTiles) || b.uploads != wantUploads {
+				t.Fatalf("tiles=%v uploads=%d", b.tileRows, b.uploads)
+			}
+			if tc.down {
+				if !reflect.DeepEqual(b.downRows, []int{8, 8, 8, 8}) || b.publishes != 32 || len(b.matmulInputs) != 0 || b.gathers != cb.gathers {
+					t.Fatalf("down schedule changed: rows=%v publishes=%d scalar=%d gathers=%d/%d", b.downRows, b.publishes, len(b.matmulInputs), b.gathers, cb.gathers)
+				}
+			} else if len(b.downRows) != 0 || len(b.matmulInputs) != 32 || b.gridChecks != 0 {
+				t.Fatal("missing Q3 capability enabled wide route")
+			}
+			if b.fences != 1 || len(b.pending) != 0 || len(b.ownedTiles) != 0 {
+				t.Fatal("wide cohort fence/ownership leak")
+			}
+		})
+	}
+	t.Run("selected_up_failure_is_fatal", func(t *testing.T) {
+		s, b := newSession(true, true, 0)
+		failure := &compute.BackendError{Backend: "test", Site: "wide up", Err: errors.New("selected failure")}
+		b.failTileAt, b.tileFailure = 2, failure
+		out, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
+		if out != nil || outcome != v41RoutedExpertError || !errors.Is(err, failure) || !s.BackendSessionClosed() || !reflect.DeepEqual(b.tileRows, []int{32, 32}) || len(b.downRows) != 0 || len(b.matmulInputs) != 0 || len(b.pending) != 0 || len(b.ownedTiles) != 0 || b.fences != 0 {
+			t.Fatalf("selected wide failure replay/cleanup: %v", err)
+		}
+	})
+	t.Run("earlier_down_verdict_survives_later_down_failure", func(t *testing.T) {
+		s, b := newSession(true, true, 0)
+		b.publishFaultAt = map[int]bool{1: true}
+		b.failDownAt = 2
+		b.downFailure = &compute.BackendError{Backend: "test", Site: "second down tile", Err: errors.New("later failure")}
+		out, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
+		var numeric *V41ExpertOperationError
+		if out != nil || outcome != v41RoutedExpertError || !errors.As(err, &numeric) || numeric.Stage != "down" || !s.BackendSessionClosed() || !reflect.DeepEqual(b.downRows, []int{8, 8}) || b.publishes != 8 || len(b.matmulInputs) != 0 || len(b.pending) != 0 || len(b.ownedTiles) != 0 || b.fences != 1 {
+			t.Fatalf("wide status priority changed: %v", err)
+		}
+	})
+}

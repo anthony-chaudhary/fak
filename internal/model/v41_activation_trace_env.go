@@ -11,7 +11,7 @@ package model
 // artifact -- with the consumed token ids in InputTokens -- to <path>,
 // replacing the previous capture. Incremental Session.Step uses its own recorder
 // and publishes its absolute-position checkpoints after committing or aborting.
-// Suffix-prefill routes do not emit these activation checkpoints.
+// Incremental suffix-prefill transactions use the same per-token recorder.
 //
 // The env recorder retains only v41.activation events. Other backend events
 // cannot consume its event/sample budget; global observers still receive them.
@@ -88,6 +88,9 @@ type v41StepActivationCapture struct {
 	layers   int
 	receipt  V41ActivationCaptureReceipt
 	finished bool
+	// Set only by a successful no-logits transaction commit. Activation
+	// checkpoints describe layer state, independently of sampling-logit evidence.
+	stateOnlyCommit bool
 }
 
 func (m *Model) beginV41StepActivationCapture(id int, state *v41ForwardState) *v41StepActivationCapture {
@@ -129,13 +132,23 @@ func (m *Model) beginV41StepActivationCapture(id int, state *v41ForwardState) *v
 	return c
 }
 
+func (c *v41StepActivationCapture) committedOutcome(committed bool) bool {
+	if !committed {
+		return false
+	}
+	if c.stateOnlyCommit {
+		return true
+	}
+	coverage := c.state.forwardCoverage
+	return coverage != nil && coverage.Validate() == nil && coverage.LogitsSource == NativeForwardLogitsSourceV41Incremental
+}
+
 func (c *v41StepActivationCapture) finish(committed bool) {
 	if c == nil || c.finished {
 		return
 	}
 	c.finished = true
-	coverage := c.state.forwardCoverage
-	if committed && coverage != nil && coverage.Validate() == nil && coverage.LogitsSource == NativeForwardLogitsSourceV41Incremental {
+	if c.committedOutcome(committed) {
 		c.receipt.Outcome = computetrace.ActivationCaptureCommitted
 	}
 	v41ActivationTracePublicationMu.Lock()

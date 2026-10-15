@@ -124,17 +124,16 @@ func v41TokenPanelNativeFixture(dtype Dtype, out, in, rows int, exact bool) (Ten
 	return NewQ3K(Default(), []int{out, in}, raw), x
 }
 
-// Both shader pairs express the scalar evaluation order, but their sources
-// lack precise and provide no NoContraction proof for compiled modules.
-// There is no declared tile-specific ULP
-// allowance. Exact fixtures have |integer numerator| <= 5120*105*15 < 2^24
+// These native cases independently require scalar/tile bit equality; compiled
+// arithmetic-order evidence does not replace physical parity. There is no
+// declared tile-specific ULP allowance. Exact fixtures have |integer numerator| <= 5120*105*15 < 2^24
 // (Q2) or 2304*128*15 < 2^24 (Q3), on the common 1/8192 grid. Every
 // intermediate is representable, including either contraction choice.
 // BF16-input fixtures additionally require observed scalar/tile bit equality;
 // a mismatch is an unqualified model route, not an Approx-tolerance pass.
 // Passing these finite fixtures does not prove universal kernel equivalence.
 // The ordinary MatMul Approx contract does not qualify this model route.
-// fak-test:runtime integration est=15s lane=optin
+// fak-test:runtime integration est=20s lane=optin
 func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 	if v41TokenPanelNativeStartup(t, "1", "0") {
 		return
@@ -146,7 +145,12 @@ func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 			fullOut, fullIn = 5120, 2304
 		}
 		for _, shape := range [][2]int{{1, 256}, {65, 1280}, {fullOut, fullIn}} {
-			for _, rows := range []int{2, 4, 8} {
+			for _, rows := range []int{2, 4, 8, 9, 64} {
+				// Keep the grid additions bounded while covering an odd output
+				// tail, a masked token tail and the full admitted token extent.
+				if rows > 8 && shape != [2]int{65, 1280} {
+					continue
+				}
 				for _, exact := range []bool{true, false} {
 					t.Run(fmt.Sprintf("%s/out%d_in%d_rows%d/exact_%t", dtype, shape[0], shape[1], rows, exact), func(t *testing.T) {
 						out, in := shape[0], shape[1]
@@ -154,6 +158,9 @@ func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 						w := v.Upload(hw, dtype)
 						defer v.Free(w)
 						if !v41TokenPanelNativeSupports(v, w, rows) {
+							if rows > 8 {
+								t.Skip("UNQUALIFIED: loaded module or device does not admit this grid extent; grid parity did not execute")
+							}
 							t.Fatal("UNQUALIFIED: tile module, float controls, or actual device geometry unavailable")
 						}
 						wb, ok := w.buf.(*vulkanBuf)
@@ -182,10 +189,10 @@ func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 							}()
 						}
 						v41TokenPanelNativeDispatches(t, dtype, beforeScalar, v.VulkanDebugDispatchProfileSnapshot(), uint64(rows))
-						got := v41TokenPanelNativeRead(t, v, dtype, w, x, rows, rows == 8)
+						got := v41TokenPanelNativeRead(t, v, dtype, w, x, rows, rows >= 8)
 						v41TokenPanelNativeEqual(t, got, want)
 						assertBitIdentical(t, "input remains unchanged", values, v.Read(x))
-						t.Logf("NATIVE_TOKEN_PANEL_PARITY dtype=%s out=%d in=%d rows=%d exact_fixture=%t step_batch=%t scalar_dispatches=%d tile_dispatches=1 bit_equal=%d", dtype, out, in, rows, exact, rows == 8, rows, len(got))
+						t.Logf("NATIVE_TOKEN_PANEL_PARITY dtype=%s out=%d in=%d rows=%d exact_fixture=%t step_batch=%t scalar_dispatches=%d tile_dispatches=1 bit_equal=%d", dtype, out, in, rows, exact, rows >= 8, rows, len(got))
 					})
 				}
 			}
@@ -319,11 +326,18 @@ func TestVulkanV41TokenPanelNativeRefusalCleanup(t *testing.T) {
 					t.Fatal("pre-dispatch refusal changed native counters or live allocation bytes")
 				}
 			}
-			for _, n := range []int{1, 3, 9} {
+			for _, n := range []int{0, 1, 65} {
 				if v41TokenPanelNativeSupports(v, w, n) {
 					t.Fatalf("unsupported row count %d admitted", n)
 				}
 				refuse(w, x, n, ErrVulkanInvalidGeometry)
+			}
+			// Legacy modules decline these widths; grid modules admit them.
+			// A capability refusal must retain the same no-output/no-work path.
+			for _, n := range []int{3, 9} {
+				if !v41TokenPanelNativeSupports(v, w, n) {
+					refuse(w, x, n, ErrVulkanInvalidGeometry)
+				}
 			}
 			badW, badX := w, x
 			badW.Layout, badX.Layout = ColMajor, ColMajor

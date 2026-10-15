@@ -1141,8 +1141,8 @@ func (s *Session) prefillNoLogitsOwned(ids []int) {
 			defer rel()
 		}
 		// V4.1 owns its continuation state outside the generic KV cache. Its
-		// forward still computes the head; only the returned logits are discarded.
-		s.prefillV41(ids)
+		// forward preserves checked input boundaries without projecting discarded logits.
+		s.prefillV41WithLogits(ids, false)
 		return
 	}
 	s.cacheGeometryMu.RLock()

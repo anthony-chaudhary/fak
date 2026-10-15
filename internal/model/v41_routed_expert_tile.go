@@ -15,6 +15,7 @@ type v41ExpertTile struct {
 	up      compute.Tensor
 	start   int
 	end     int
+	wide    bool
 	note    func()
 }
 
@@ -49,6 +50,16 @@ func newV41ExpertTile(be compute.Backend, gate, up compute.Tensor, count int) *v
 	return &v41ExpertTile{backend: tile, copies: copies, gateW: gate, upW: up}
 }
 
+// qualifyColdGrid widens only the complete cold cohort after the existing Q3
+// down schedule has qualified. Both exact Q2 weight bindings must admit 32
+// rows before any upload; legacy modules keep their original 8/4/2 schedule.
+// This does not change down batching or the ordered deferred-status window.
+func (p *v41ExpertTile) qualifyColdGrid(count int) {
+	if p != nil && count == 32 && p.backend.SupportsV41Q2KTokenPanel(p.gateW, 32) && p.backend.SupportsV41Q2KTokenPanel(p.upW, 32) {
+		p.wide = true
+	}
+}
+
 // project transfers every fresh allocation to the cohort's existing row owner,
 // including outputs returned alongside a selected error. Panel owners survive
 // until the cohort's final status read and cleanup. A selected error never
@@ -59,6 +70,9 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 	}
 	if row >= p.end {
 		rows := v41ExpertTileSize(len(inputs) - row)
+		if p.wide && len(inputs)-row == 32 {
+			rows = 32
+		}
 		packed := make([]float32, rows*hidden)
 		for r := 0; r < rows; r++ {
 			copy(packed[r*hidden:(r+1)*hidden], inputs[row+r])

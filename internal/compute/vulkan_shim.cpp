@@ -89,6 +89,7 @@ VkDeviceSize      g_maxBufferBytes = 0;
 uint32_t          g_maxComputeWorkGroupCountX = 0;
 uint32_t          g_maxComputeWorkGroupCountY = 0;
 bool              g_v41Q3TokenGridModule = false;
+bool              g_v41Q2TokenGridModule = false;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
 bool              g_batching = false;
@@ -2821,11 +2822,11 @@ static bool spirvModuleFraming(const std::vector<char>& code) {
     return magic == 0x07230203u || magic == 0x03022307u;
 }
 
-// Return 0 for an unmarked legacy module, 1 for the Q3G1 grid ABI, and -1
+// Return 0 for an unmarked legacy module, 1 for the expected grid ABI, and -1
 // for malformed or unknown marked modules. This identifies the exact loaded
 // bytes, not a filename or source freshness assumption. No specialization
 // override is supplied by buildKernel, so the encoded default is authoritative.
-static int v41Q3TokenGridModuleABI(const std::vector<char>& code) {
+static int v41TokenGridModuleABI(const std::vector<char>& code, uint32_t expectedMarker) {
     if (code.size() < 20 || code.size() % 4 != 0) return -1;
     const size_t words = code.size() / 4;
     const auto word = [&](size_t i) {
@@ -2852,9 +2853,9 @@ static int v41Q3TokenGridModuleABI(const std::vector<char>& code) {
     uint32_t type = 0;
     for (size_t i = 5; i < words; i += word(i) >> 16) {
         const uint32_t n = word(i) >> 16, op = word(i) & 65535u;
-        // OpSpecConstant <uint32 type> <marker id> Q3G1.
+        // OpSpecConstant <uint32 type> <marker id> family-specific grid ABI.
         if (op == 50u && n >= 3u && word(i + 2) == marker) {
-            if (type != 0 || n != 4u || word(i + 3) != 0x51334731u ||
+            if (type != 0 || n != 4u || word(i + 3) != expectedMarker ||
                 word(i + 1) == 0 || word(i + 1) >= word(3)) return -1;
             type = word(i + 1);
         }
@@ -2875,8 +2876,11 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
     const bool fixedV41 = &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (&k == &g_kern[K_V41_Q3K_TOKEN_PANEL]) g_v41Q3TokenGridModule = false;
+    if (&k == &g_kern[K_V41_Q2K_TOKEN_PANEL]) g_v41Q2TokenGridModule = false;
     if (!spirvModuleFraming(code)) return false;
-    const int q3GridABI = &k == &g_kern[K_V41_Q3K_TOKEN_PANEL] ? v41Q3TokenGridModuleABI(code) : 0;
+    const int q3GridABI = &k == &g_kern[K_V41_Q3K_TOKEN_PANEL] ? v41TokenGridModuleABI(code, 0x51334731u) : 0;
+    const int q2GridABI = &k == &g_kern[K_V41_Q2K_TOKEN_PANEL] ? v41TokenGridModuleABI(code, 0x51324731u) : 0;
+    if (q2GridABI < 0) return false;
     if (q3GridABI < 0) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
         (nbuf != 2 || pcsize != 4 || !v41BF16BoundaryABI(code))) {
@@ -2976,6 +2980,7 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
     k.nbuf = nbuf;
     k.pcsize = pcsize;
     if (&k == &g_kern[K_V41_Q3K_TOKEN_PANEL]) g_v41Q3TokenGridModule = q3GridABI == 1;
+    if (&k == &g_kern[K_V41_Q2K_TOKEN_PANEL]) g_v41Q2TokenGridModule = q2GridABI == 1;
 #ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
     if (&k == &g_kern[K_V41_TAIL_ROPE_QK]) g_v41TailRoPEExactModule = true;
 #endif
@@ -5891,13 +5896,17 @@ int fvk_have_v41_q2k_token_panel(void) {
 }
 
 int fvk_v41_q2k_token_panel_shape(int out, int in, int tokens) {
-    if ((tokens != 2 && tokens != 4 && tokens != 8) || out <= 0 || in <= 0 || in % 256 != 0) return 0;
+    // Legacy optional modules ignore Y and own only eight token slots.
+    if (!g_v41Q2TokenGridModule && tokens != 2 && tokens != 4 && tokens != 8) return 0;
+    if ((tokens < 2 || tokens > 64) || out <= 0 || in <= 0 || in % 256 != 0) return 0;
     const uint64_t wBytes = uint64_t(out) * uint64_t(in / 256) * 84u;
     const uint64_t xBytes = uint64_t(tokens) * uint64_t(in) * 4u;
     const uint64_t yBytes = uint64_t(tokens) * uint64_t(out) * 4u;
     const uint64_t groups = (uint64_t(out) + 1u) / 2u;
+    const uint64_t tokenGroups = (uint64_t(tokens) + 7u) / 8u;
     return wBytes <= INT32_MAX && xBytes <= INT32_MAX && yBytes <= INT32_MAX &&
-        g_maxComputeWorkGroupCountX != 0 && groups <= g_maxComputeWorkGroupCountX;
+        g_maxComputeWorkGroupCountX != 0 && groups <= g_maxComputeWorkGroupCountX &&
+        g_maxComputeWorkGroupCountY != 0 && tokenGroups <= g_maxComputeWorkGroupCountY;
 }
 
 int fvk_v41_q2k_token_panel_f32(const void* dW, const void* dX, void* dY, int out, int in, int tokens) {
@@ -5914,7 +5923,7 @@ int fvk_v41_q2k_token_panel_f32(const void* dW, const void* dX, void* dY, int ou
     struct Push { int32_t outDim, inDim, tokens; } pc{out, in, tokens};
     static_assert(sizeof(Push) == 12 && offsetof(Push, inDim) == 4 && offsetof(Push, tokens) == 8,
                   "Q2_K token-panel push ABI must be three int32 values");
-    if (!dispatch(g_kern[K_V41_Q2K_TOKEN_PANEL], bufs, &pc, sizeof(pc), uint32_t((uint64_t(out) + 1u) / 2u), 1, true)) {
+    if (!dispatch(g_kern[K_V41_Q2K_TOKEN_PANEL], bufs, &pc, sizeof(pc), uint32_t((uint64_t(out) + 1u) / 2u), uint32_t((uint64_t(tokens) + 7u) / 8u), true)) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

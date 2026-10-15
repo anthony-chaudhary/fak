@@ -296,6 +296,9 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 				groupStart, groupEnd, chunkStart = current, options.tileEnd(current, count), current
 				tile = newV41ExpertTile(s.Backend, gate, up, groupEnd-groupStart)
 				downTile = newV41ExpertDownTile(s.Backend, down, groupEnd-groupStart)
+				if options == nil && downTile != nil {
+					tile.qualifyColdGrid(groupEnd - groupStart)
+				}
 				usedDownTile = usedDownTile || downTile != nil
 				if options == nil || options.note != nil {
 					if tile != nil {

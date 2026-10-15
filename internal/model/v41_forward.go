@@ -331,6 +331,12 @@ func (m *Model) forwardV41(ids []int, st *v41ForwardState) (act *Activations, er
 }
 
 func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, lastHeadOnly bool) (act *Activations, err error) {
+	return m.forwardV41WithHeadMode(ids, st, lastHeadOnly, true)
+}
+
+// No-logits prefill retains every checked head-input boundary, but does not
+// project or scale a distribution that the caller explicitly discards.
+func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (act *Activations, err error) {
 	if m.v41EPRequested() && (st == nil || st.callbackOwner == nil || st.routedLayer == nil || st.routedPrefill == nil) {
 		return nil, fmt.Errorf("%w: requires the bound Session forward", ErrV41ExpertParallel)
 	}
@@ -550,8 +556,12 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		if full {
 			headInput = act.Hidden[len(act.Hidden)-1][t*H : (t+1)*H]
 		}
-		if lastHeadOnly && t != len(seq)-1 {
-			if _, err := m.v41PrepareHeadInput(headInput, finalNorm, bf16Boundary); err != nil {
+		if !wantLogits || (lastHeadOnly && t != len(seq)-1) {
+			row, err := m.v41PrepareHeadInput(headInput, finalNorm, bf16Boundary)
+			if err != nil {
+				return nil, err
+			}
+			if err := v41ValidateDiscardedHeadInput(row); err != nil {
 				return nil, err
 			}
 			continue
@@ -575,7 +585,9 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		} else {
 			st.attn = nil
 		}
-		st.forwardCoverage = newNativeV41ForwardCoverage(cfg, executedLayers, NativeForwardLogitsSourceV41Full)
+		if wantLogits {
+			st.forwardCoverage = newNativeV41ForwardCoverage(cfg, executedLayers, NativeForwardLogitsSourceV41Full)
+		}
 		committed = true
 	}
 	return act, nil
@@ -683,6 +695,17 @@ func (m *Model) v41ProjectHeadInput(xf []float32, project v41DenseProjectionFunc
 	return m.v41ProjectionRows(-1, m.headName(), xf, m.Cfg.VocabSize, m.Cfg.HiddenSize, rows, project)
 }
 
+// Skipping a projection must not skip its host finite-input refusal. Selected
+// normalization and BF16 operations have already checked their own boundaries.
+func v41ValidateDiscardedHeadInput(row []float32) error {
+	for _, v := range row {
+		if !finite32(v) {
+			return v41StageErr(v41StageHead, -1, errV41ProjectionResult)
+		}
+	}
+	return nil
+}
+
 // v41FullFinalNorm owns the reference's BF16 -> learned F32 RMSNorm -> BF16
 // boundary before ParallelHead widens to F32. The callback itself remains F32;
 // generic norm flags belong to the reduced compatibility path, not this graph.
@@ -756,6 +779,10 @@ func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41F
 // the physical `fed6a6a37` rung's 0.1 tok/s prefill is exactly the case this
 // turns from a 492 s wedge into a named, pre-emptive "no".
 func (s *Session) prefillV41(ids []int) []float32 {
+	return s.prefillV41WithLogits(ids, true)
+}
+
+func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 	s.ensureOpenBackendSession()
 	return s.v41IndexerScoreRecovering(func() []float32 {
 		if err := s.M.v41ForwardAdmitted(); err != nil {
@@ -775,7 +802,7 @@ func (s *Session) prefillV41(ids []int) []float32 {
 		// historical full-prefill path byte-for-byte, so the first request still
 		// seeds the cache and a failed step never claims a cache hit.
 		if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
-			return s.prefillV41Suffix(ids)
+			return s.prefillV41Suffix(ids, wantLogits)
 		}
 		var act *Activations
 		var err error
@@ -787,7 +814,7 @@ func (s *Session) prefillV41(ids []int) []float32 {
 					act = nil
 				}
 			}()
-			act, err = s.M.forwardV41WithHeadSelection(ids, s.v41State(), true)
+			act, err = s.M.forwardV41WithHeadMode(ids, s.v41State(), true, wantLogits)
 		}()
 		if err != nil {
 			panic(err)
@@ -815,7 +842,7 @@ var v41PrefillStepProbe func()
 // full history. A selected device failure is fatal even if it wraps that stage
 // sentinel, so it never authorizes host replay. The failing token is rolled
 // back; earlier successful suffix tokens retain their per-token commits.
-func (s *Session) prefillV41Suffix(ids []int) []float32 {
+func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 	st := s.v41State()
 	startLen := len(st.history)
 	var logits []float32
@@ -830,7 +857,7 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 					got = nil
 				}
 			}()
-			got, _, err = s.M.forwardV41Step(id, st, &v41ProjScratch{})
+			got, _, err = s.M.forwardV41StepCore(id, st, &v41ProjScratch{}, false, wantLogits && i == len(ids)-1)
 		}()
 		if err != nil {
 			var batchErr *v41StepBatchError
@@ -855,7 +882,7 @@ func (s *Session) prefillV41Suffix(ids []int) []float32 {
 						act = nil
 					}
 				}()
-				act, ferr = s.M.forwardV41(ids, st)
+				act, ferr = s.M.forwardV41WithHeadMode(ids, st, true, wantLogits)
 			}()
 			if ferr != nil {
 				panic(ferr)
