@@ -668,6 +668,9 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 		t.pool.Touch(id)
 		t.hits++
 		t.mu.Unlock()
+		// The retained slab may already back another consumer's upload. Mark
+		// only this returned value; the cache keeps its original provenance.
+		w.borrowed = true
 		return w, nil
 	}
 	if r, ok := t.ready[id]; ok {
@@ -681,7 +684,13 @@ func (t *ExpertCheckpointTier) fault(name string) (w expertWeight, err error) {
 		load.waiters++
 		t.mu.Unlock()
 		<-load.done
-		return load.weight, load.err
+		w := load.weight
+		if load.err == nil {
+			// Publication is complete, but the owner and other waiters may
+			// still use this slab. Each unsafe consumer needs its own copy.
+			w.borrowed = true
+		}
+		return w, load.err
 	}
 	load := &expertCheckpointLoad{done: make(chan struct{})}
 	if t.loading == nil {
