@@ -7,16 +7,16 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // gathers are fresh device copies, not aliases or host readbacks. Native tile
 // availability includes its explicit opt-in; no additional default is enabled.
 type v41ExpertTile struct {
-	backend compute.V41Q2KTokenPanelBackend
-	copies  compute.V41RowLogBackend
-	gateW   compute.Tensor
-	upW     compute.Tensor
-	gate    compute.Tensor
-	up      compute.Tensor
-	start   int
-	end     int
-	wide    bool
-	note    func()
+	backend  compute.V41Q2KTokenPanelBackend
+	copies   compute.V41RowLogBackend
+	gateW    compute.Tensor
+	upW      compute.Tensor
+	gate     compute.Tensor
+	up       compute.Tensor
+	start    int
+	end      int
+	gridRows int
+	note     func()
 }
 
 func v41ExpertTileSize(remaining int) int {
@@ -50,13 +50,14 @@ func newV41ExpertTile(be compute.Backend, gate, up compute.Tensor, count int) *v
 	return &v41ExpertTile{backend: tile, copies: copies, gateW: gate, upW: up}
 }
 
-// qualifyColdGrid widens only the complete cold cohort after the existing Q3
-// down schedule has qualified. Both exact Q2 weight bindings must admit 32
-// rows before any upload; legacy modules keep their original 8/4/2 schedule.
+// qualifyColdGrid widens a cold cohort after the existing Q3 down schedule
+// has qualified. Both exact Q2 weight bindings must admit the complete
+// row extent before any upload; legacy modules keep their 8/4/2 schedule.
+// Counts 2/4/8 already use one tile and need no additional capability probe.
 // This does not change down batching or the ordered deferred-status window.
 func (p *v41ExpertTile) qualifyColdGrid(count int) {
-	if p != nil && count == 32 && p.backend.SupportsV41Q2KTokenPanel(p.gateW, 32) && p.backend.SupportsV41Q2KTokenPanel(p.upW, 32) {
-		p.wide = true
+	if p != nil && count > 2 && count != 4 && count != 8 && count <= v41ExpertCohortRows && p.backend.SupportsV41Q2KTokenPanel(p.gateW, count) && p.backend.SupportsV41Q2KTokenPanel(p.upW, count) {
+		p.gridRows = count
 	}
 }
 
@@ -70,8 +71,8 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 	}
 	if row >= p.end {
 		rows := v41ExpertTileSize(len(inputs) - row)
-		if p.wide && len(inputs)-row == 32 {
-			rows = 32
+		if p.gridRows > 0 && len(inputs)-row == p.gridRows {
+			rows = p.gridRows
 		}
 		packed := make([]float32, rows*hidden)
 		for r := 0; r < rows; r++ {

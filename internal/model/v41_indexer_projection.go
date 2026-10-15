@@ -200,7 +200,8 @@ func (m *Model) v41CompressedPublicationRoPEWithDevice(l, pos int, latent, index
 			tails = append(tails, indexKey[len(indexKey)-rd:]...)
 		}
 		tails = append(tails, latent[len(latent)-rd:]...)
-		finished, err := rotate(l, tails, append([]float32(nil), cos...), append([]float32(nil), sin...), rows, rd)
+		// This call owns the fresh tables and never uses them after dispatch.
+		finished, err := rotate(l, tails, cos, sin, rows, rd)
 		if err == nil && len(finished) != len(tails) {
 			err = errV41TailRoPEResult
 		}
@@ -250,7 +251,8 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 		fail := func(cause error) error {
 			return &V41ProjectionOperationError{Layer: l, Leaf: "indexer.wq_b.weight", Stage: string(v41StageIndexer), Cause: v41StageErr(v41StageIndexer, l, cause)}
 		}
-		rotated, err := rotate(l, append([]float32(nil), values...), append([]float32(nil), cos...), append([]float32(nil), sin...), heads, dim, rd)
+		// Transfer fresh call-owned tables; caller-owned values still need a copy.
+		rotated, err := rotate(l, append([]float32(nil), values...), cos, sin, heads, dim, rd)
 		if err != nil {
 			return fail(err)
 		}
@@ -271,10 +273,11 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 	}
 
 	if publish == nil {
+		rounded := make([]float32, rd)
 		for h := 0; h < heads; h++ {
 			head := values[h*dim : (h+1)*dim]
 			applyRopeTailInterleaved(head, cos, sin, rd)
-			tail, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", head[dim-rd:])
+			tail, err := v41IndexBF16CopybackInto(l, "indexer.wq_b.weight", "rotary", head[dim-rd:], rounded)
 			if err != nil {
 				return err
 			}
@@ -290,12 +293,17 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 
 // v41IndexTailsBF16 publishes every head's rotary tail as one row and writes the
 // results back only after the whole publication succeeds. Without a bound
-// publication each tail keeps its own host copy, as before.
+// publication one call-local scratch is reused across heads. Each head copies
+// back only after its complete tail validates, preserving partial-error state.
 func v41IndexTailsBF16(l int, values []float32, heads, dim, rd int, publish v41BF16BoundaryFunc) error {
 	if publish == nil {
+		var scratch []float32
 		for h := 0; h < heads; h++ {
 			tail := values[(h+1)*dim-rd : (h+1)*dim]
-			rounded, err := v41IndexBF16Copyback(l, "indexer.wq_b.weight", "rotary", tail)
+			if h == 0 {
+				scratch = make([]float32, len(tail))
+			}
+			rounded, err := v41IndexBF16CopybackInto(l, "indexer.wq_b.weight", "rotary", tail, scratch)
 			if err != nil {
 				return err
 			}
@@ -331,6 +339,12 @@ func v41IndexBF16Publish(l int, leaf, phase string, values []float32, publish v4
 // overflow BF16. Neither failure can be repaired by replaying token history.
 func v41IndexBF16Copyback(l int, leaf, phase string, values []float32) ([]float32, error) {
 	out := make([]float32, len(values))
+	return v41IndexBF16CopybackInto(l, leaf, phase, values, out)
+}
+
+// out is private scratch with len(values) elements and must not alias values.
+// Keeping writes private until success preserves the caller's error boundary.
+func v41IndexBF16CopybackInto(l int, leaf, phase string, values, out []float32) ([]float32, error) {
 	for i, value := range values {
 		if finite32(value) {
 			out[i] = v41RoundBF16(value)
