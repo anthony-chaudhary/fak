@@ -525,3 +525,100 @@ func v41EngramBatchRunConcurrent(t *testing.T, workers ...func() error) {
 		}
 	}
 }
+
+// All APIs exercised here exist on the parent; the parent must fail the
+// same-storage assertion at runtime, rather than fail to compile the witness.
+// fak-test:justify why=regression when=changed:internal/model/**
+// fak-test:runtime fast est=100ms lane=default
+func TestV41EngramOwnedPanel(t *testing.T) {
+	for _, rowBytes := range []int{v41EngramQ2KEncodedRowBytes, V41EngramPackedRowBytes, V41EngramF32RowBytes} {
+		t.Run(fmt.Sprint(rowBytes), func(t *testing.T) {
+			src := newV41EngramBatchSource(8, rowBytes, 0)
+			cache := v41EngramBatchCache(t, src, 2*rowBytes)
+			stage := &v41EngramStage{caches: []*V41EngramRowCache{cache}, rowBytes: rowBytes}
+			geometry := v41EngramGeometry{stage: stage, cols: 1, dim: 256, qNorm: []float32{1}, kNorm: []float32{1}}
+			var m Model
+			ids := []uint32{2, 0, 2}
+			gathered, err := m.v41EngramGatherRows(1, len(ids), ids, 1e-6, geometry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v41EngramBatchCheckRows(t, gathered.rows, ids, []*v41EngramBatchSource{src}, 1)
+			panel, ok := gathered.stored()
+			if !ok || len(panel) != len(ids)*rowBytes || &panel[0] != &gathered.rows[0][0] {
+				t.Fatal("resident stored rows made a second encoded-panel copy")
+			}
+			for i, row := range gathered.rows {
+				if cap(row) != len(row) || &row[0] != &panel[i*rowBytes] {
+					t.Fatalf("row %d is not a width-capped view of its own panel slot", i)
+				}
+			}
+			if allocs := testing.AllocsPerRun(16, func() {
+				encoded, valid := gathered.stored()
+				if !valid || len(encoded) != len(ids)*rowBytes {
+					panic("invalid resident panel")
+				}
+				runtime.KeepAlive(encoded)
+			}); allocs != 0 {
+				t.Fatalf("stored resident panel allocations=%g, want zero", allocs)
+			}
+			before := append([]byte(nil), panel...)
+			grown := append(gathered.rows[0], 99)
+			grown[0] ^= 0xff
+			if !bytes.Equal(panel, before) {
+				t.Fatal("appending to one row mutated the owned panel")
+			}
+			gathered.rows[0][0] ^= 0xff
+			resident, exists := cache.inner.Get(0, 2)
+			if !exists || resident[0] != before[0] || gathered.rows[2][0] != before[2*rowBytes] {
+				t.Fatal("duplicate row slots or cached payload alias one another")
+			}
+			gathered.rows[0][0] ^= 0xff
+			cache.invalidateRows()
+			if _, err := m.v41EngramGatherRows(1, 3, []uint32{7, 6, 5}, 1e-6, geometry); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(panel, before) {
+				t.Fatal("a later gather or eviction overwrote retained encoded rows")
+			}
+			// A reordered private fixture must concatenate in its new row order.
+			reordered := *gathered
+			reordered.rows = append([][]byte(nil), gathered.rows...)
+			reordered.rows[0], reordered.rows[1] = reordered.rows[1], reordered.rows[0]
+			fallback, ok := reordered.stored()
+			if !ok || !bytes.Equal(fallback, bytes.Join(reordered.rows, nil)) || &fallback[0] == &reordered.rows[0][0] {
+				t.Fatal("noncontiguous fixture did not preserve concatenation semantics")
+			}
+			publicRows, err := GatherV41EngramRows([]*V41EngramRowCache{cache}, ids, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy := &v41EngramGatheredRows{stage: stage, rows: publicRows, dim: 256}
+			fallback, ok = legacy.stored()
+			if !ok || !bytes.Equal(fallback, before) || &fallback[0] == &publicRows[0][0] {
+				t.Fatal("public gather fixture lost its independent concatenated payload")
+			}
+			empty, err := m.v41EngramGatherRows(1, 0, nil, 1e-6, geometry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if encoded, valid := empty.stored(); !valid || encoded == nil || len(encoded) != 0 {
+				t.Fatal("empty gather lost its valid empty stored payload")
+			}
+			reads := len(src.reads)
+			for _, invalid := range []struct{ positions, cols int }{{-1, 1}, {0, 0}, {2, math.MaxInt}} {
+				bad := geometry
+				bad.cols = invalid.cols
+				if _, err := m.v41EngramGatherRows(1, invalid.positions, nil, 1e-6, bad); err == nil {
+					t.Fatal("invalid or overflowing panel geometry was accepted")
+				}
+			}
+			if _, err := m.v41EngramGatherRows(1, 1, []uint32{8}, 1e-6, geometry); err == nil {
+				t.Fatal("out-of-range resident row was accepted")
+			}
+			if len(src.reads) != reads {
+				t.Fatal("invalid resident panel geometry issued source I/O")
+			}
+		})
+	}
+}
