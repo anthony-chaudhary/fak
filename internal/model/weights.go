@@ -139,7 +139,7 @@ func layerName(layer int, suffix string) string {
 		layerNames.m = make(map[layerNameKey]string)
 	}
 	if len(layerNames.m) < layerNameCacheMax {
-		layerNames.m[k] = name
+		layerNames.m[layerNameKey{layer, name[len(name)-len(suffix):]}] = name
 	}
 	layerNames.mu.Unlock()
 	return name
