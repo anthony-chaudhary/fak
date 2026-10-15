@@ -523,3 +523,52 @@ func normalReferenceServer(t *testing.T, contextTokens int) (*httptest.Server, *
 	}))
 	return server, &chats, caps, &preconditions, &shallowProbes
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestNormalBurstFitsFourRequestBudget(t *testing.T) {
+	for _, capacity := range []int{1, 2, 4, 8} {
+		t.Run(fmt.Sprintf("C%d", capacity), func(t *testing.T) {
+			plan, err := profileplan.Build(profileplan.Options{Profile: "normal", PreferredConcurrency: capacity})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cells, err := compileNormalSchedule(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var burst normalCell
+			turns := map[string]int{}
+			for _, cell := range cells {
+				turns[cell.Phase] += cell.Sessions * cell.TurnsPerSession
+				if cell.Name == "tool-completion-burst" {
+					burst = cell
+				}
+			}
+			if turns["probe"] != 64 || turns["steady"] != 96 || turns["controls"] != 24 {
+				t.Fatalf("normal workload changed: %v", turns)
+			}
+			wantConcurrency := min(capacity, 4)
+			if burst.Concurrency != wantConcurrency || burst.Sessions != wantConcurrency || burst.TurnsPerSession != 4/wantConcurrency {
+				t.Fatalf("burst geometry cannot witness its overlap: %+v", burst)
+			}
+			base := normalCell{Name: burst.Name, Phase: "controls", Concurrency: 2, Sessions: 2, TurnsPerSession: 2, OutputTokens: 256}
+			if runtime := normalCellAtConcurrency(base, capacity); runtime != burst {
+				t.Fatalf("runtime geometry=%+v differs from plan=%+v", runtime, burst)
+			}
+			known := true
+			events := make([]lifecycleEvent, burst.Sessions*burst.TurnsPerSession)
+			for i := range events {
+				events[i] = lifecycleEvent{Rung: burst.Name, Event: "end", Status: "completed", ModelIdentityStatus: "observed", UsageKnown: &known}
+			}
+			if err := validateNormalCells([]normalCell{burst}, events, map[string]int{burst.Name: wantConcurrency}); err != nil {
+				t.Fatalf("complete burst rejected: %v", err)
+			}
+			if err := validateNormalCells([]normalCell{burst}, events, map[string]int{burst.Name: wantConcurrency - 1}); err == nil {
+				t.Fatal("burst without required overlap accepted")
+			}
+			if err := validateNormalCells([]normalCell{burst}, events[:len(events)-1], map[string]int{burst.Name: wantConcurrency}); err == nil {
+				t.Fatal("burst with a missing request accepted")
+			}
+		})
+	}
+}

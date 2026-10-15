@@ -2,11 +2,40 @@ package devcmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// companionLiveSkipReason reports why the companion live proxy tests must skip,
+// or "" when the sibling checkout is buildable and complete. Their precondition
+// is a *current, buildable* sibling, not merely a present one: a sibling left
+// missing a module or its tickets dir would otherwise fail the package red even
+// though the fak under test is fine. Probes the gate build (a `go list` cannot
+// detect a missing module; `go build` can) and the tickets directory. See
+// anthony-chaudhary/fak#13840.
+func companionLiveSkipReason(t *testing.T, privRoot string) string {
+	t.Helper()
+	if privRoot == "" {
+		return "companion fak-private not present"
+	}
+	if _, err := os.Stat(filepath.Join(privRoot, "docs", "tickets")); err != nil {
+		return "companion fak-private lacks docs/tickets"
+	}
+	out := filepath.Join(t.TempDir(), "fak-boundary-probe")
+	cmd := exec.Command("go", "-C", privRoot, "build", "-o", out, "./cmd/fak-boundary")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		detail := strings.TrimSpace(string(b))
+		if len(detail) > 300 {
+			detail = detail[:300]
+		}
+		return fmt.Sprintf("companion fak-private cmd/fak-boundary does not build: %v: %s", err, detail)
+	}
+	return ""
+}
 
 func TestCompanionBridge_RootResolution(t *testing.T) {
 	// 1. Explicit FAK_PRIVATE_ROOT environment variable pointing to a valid dir
@@ -198,8 +227,8 @@ func TestCompanionBridge_InvocationHelpers(t *testing.T) {
 
 func TestCompanionBridge_Live(t *testing.T) {
 	_, privRoot := ResolveCompanionRoots()
-	if privRoot == "" {
-		t.Skip("skipping live companion bridge tests: companion fak-private not present")
+	if reason := companionLiveSkipReason(t, privRoot); reason != "" {
+		t.Skip("skipping live companion bridge tests: " + reason)
 	}
 
 	// 1. Gate --help

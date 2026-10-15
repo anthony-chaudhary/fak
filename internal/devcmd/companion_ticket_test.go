@@ -361,8 +361,8 @@ func TestCompanionTicket_Fixture(t *testing.T) {
 
 func TestCompanionTicket_Live(t *testing.T) {
 	_, privRoot := ResolveCompanionRoots()
-	if privRoot == "" {
-		t.Skip("skipping live companion ticket tests: companion fak-private not present")
+	if reason := companionLiveSkipReason(t, privRoot); reason != "" {
+		t.Skip("skipping live companion ticket tests: " + reason)
 	}
 
 	// 1. ticket --help

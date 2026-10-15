@@ -36,5 +36,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "nativeperf-selected-candidate-id",
+      "canonical": "SelectedCandidateID (native-performance decision)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "NativePerfDecisionJournal.SelectedCandidateID identifies the selected obligation node promotion witness bound into one replayable native-performance gate decision.",
+      "distinction": "This is the immutable decision journal binding to a supplied graph candidate; Candidate is a scored resident span considered by the context planner. The journal identifier does not establish hardware execution or serving promotion.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "SelectedCandidateID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/experiment-decisions.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

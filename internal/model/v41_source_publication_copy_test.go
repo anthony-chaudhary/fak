@@ -9,8 +9,15 @@ import (
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime fast est=10ms lane=default
 func TestV41SourcePublicationCopyBoundary(t *testing.T) {
-	m := &Model{Cfg: Config{DeepSeekV41: &DeepSeekV41Config{IndexSourceLayerIDs: []int{0}}}}
+	m := &Model{Cfg: Config{DeepSeekV41: &DeepSeekV41Config{
+		CompressRatios:      []int{2},
+		IndexSourceLayerIDs: []int{0},
+	}}}
 	plan := V41AttentionPlan{Layer: 0, KVSourceLayer: 0, Ratio: 2}
+	// Index publication also requires an active ratio in the model schedule.
+	if !indexSourceAt(m.Cfg.DeepSeekV41, plan.Layer) || m.Cfg.DeepSeekV41.CompressRatios[plan.Layer] != plan.Ratio {
+		t.Fatal("fixture must admit the planned ratio-two index source")
+	}
 	newState := func(t *testing.T) *V41AttentionState {
 		t.Helper()
 		s, err := NewV41AttentionState(4, 8)

@@ -1,6 +1,11 @@
 package model
 
-import "testing"
+import (
+	"os"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
 
 func TestV41GroupedPanelDeclineCountsReasons(t *testing.T) {
 	v41GroupedPanelDeclineReset()
@@ -42,5 +47,49 @@ func TestV41GroupedPanelShapeDeclineIsCounted(t *testing.T) {
 	}
 	if got := v41GroupedPanelDeclineSummary(); got != "shape=1" {
 		t.Fatalf("summary = %q", got)
+	}
+}
+
+// Runtime environment edits must not disagree with the native startup gate.
+// fak-test:runtime fast est=10ms lane=default
+func TestV41GroupedPanelDeclineUsesNativeStartupProfile(t *testing.T) {
+	v41GroupedPanelDeclineReset()
+	t.Cleanup(v41GroupedPanelDeclineReset)
+	enabled := compute.VulkanDispatchProfileEnabled()
+	capture, err := os.CreateTemp(t.TempDir(), "decline-stderr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := os.Stderr
+	os.Stderr = capture
+	defer func() {
+		os.Stderr = stderr
+		if err := capture.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, setting := range []string{"", "1"} {
+		t.Setenv("FAK_VULKAN_DISPATCH_PROFILE", setting)
+		if compute.VulkanDispatchProfileEnabled() != enabled {
+			t.Fatal("native startup profile changed after an environment edit")
+		}
+		if got := v41GroupedPanelDecline(2, 8, "publish_count"); got != v41ProjectionDeclined {
+			t.Fatalf("outcome = %v, want declined", got)
+		}
+	}
+	if got := v41GroupedPanelDeclineSummary(); got != "publish_count=2" {
+		t.Fatalf("summary = %q, want both declines counted", got)
+	}
+	data, err := os.ReadFile(capture.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ""
+	if enabled {
+		want = "v41 grouped_output panel declined reason=publish_count layer=2 rows=8 count=1\n" +
+			"v41 grouped_output panel declined reason=publish_count layer=2 rows=8 count=2\n"
+	}
+	if string(data) != want {
+		t.Fatalf("decline log = %q, want %q for native startup profile=%v", data, want, enabled)
 	}
 }
