@@ -47,8 +47,30 @@ func v41EPPrefillResultStorageBound(tokens, width int) (v41EPPrefillResultStorag
 	return storage, nil
 }
 
+// v41EPPrefillGatherAdmitted preserves v41EPGatherPlan admission without building
+// a discarded counts/shard table for every prefill token. A validated ownership
+// plan covers each legal expert exactly once, so the final gather dimension is
+// world*header + picks*width regardless of skew or duplicate picks. Positive
+// headers and widths make its partial sums no larger than that final bound.
+func v41EPPrefillGatherAdmitted(picks []routePick, owners TPPlan, width int) error {
+	if err := owners.Validate(); err != nil || width <= 0 || width > v41EPMaxWords-v41EPHeaderWords || len(owners.Shards) > v41EPMaxWords/v41EPHeaderWords {
+		return fmt.Errorf("%w: invalid ownership or row width", ErrV41ExpertParallel)
+	}
+	for _, pick := range picks {
+		if pick.expert < 0 || pick.expert >= owners.Dim || !finite32(pick.weight) {
+			return fmt.Errorf("%w: invalid routed pick", ErrV41ExpertParallel)
+		}
+	}
+	remaining := v41EPMaxWords - len(owners.Shards)*v41EPHeaderWords
+	if len(picks) > remaining/width {
+		return fmt.Errorf("%w: gather dimensions overflow", ErrV41ExpertParallel)
+	}
+	return nil
+}
+
 // Shared deterministic window selection, used by execution and storage
 // witnesses. Callers preflight per-token shapes/routes before entering here.
+// Window admission matches v41EPPanelPlan without its discarded request table.
 func v41EPPrefillWindowEnd(owners TPPlan, picks [][]routePick, width, first int) int {
 	limit := min(v41EPOwnerPanelPicks, v41EPOwnerPanelMaxBytes/4/width)
 	last, count := first, 0
@@ -57,7 +79,7 @@ func v41EPPrefillWindowEnd(owners TPPlan, picks [][]routePick, width, first int)
 		last++
 	}
 	for last-first > 1 {
-		if _, cause := v41EPPanelPlan(owners, picks[first:last], width); cause == nil {
+		if _, cause := v41EPPanelAdmitted(owners, picks[first:last], width); cause == nil {
 			break
 		}
 		last--
@@ -118,7 +140,7 @@ func (m *Model) v41EPPrefillSum(c *v41ExpertParallelCollective, owners TPPlan, l
 		if len(row) > limit || len(inputs[token]) != H {
 			return nil, fmt.Errorf("%w: token %d exceeds owner panel bounds", ErrV41ExpertParallel, token)
 		}
-		if _, cause := v41EPGatherPlan(row, owners, H); cause != nil {
+		if cause := v41EPPrefillGatherAdmitted(row, owners, H); cause != nil {
 			return nil, cause
 		}
 		for _, value := range inputs[token] {

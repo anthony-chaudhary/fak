@@ -34,11 +34,34 @@ type v41EPPanelLayout struct {
 	liveBytes    uint64
 }
 
+// v41EPPanelPlan materializes the per-owner request lengths only for callers
+// that consume them. Window selection uses the same complete admission checks.
+func v41EPPanelPlan(owners TPPlan, picks [][]routePick, width int) (v41EPPanelLayout, error) {
+	plan, err := v41EPPanelAdmitted(owners, picks, width)
+	if err != nil {
+		return plan, err
+	}
+	base := v41EPPanelHeaderWords + len(picks)*v41EPHeaderWords
+	plan.requests = make([]int, len(owners.Shards))
+	for rank, band := range owners.Shards {
+		words := base
+		for _, row := range picks {
+			for _, pick := range row {
+				if pick.expert >= band.Lo && pick.expert < band.Hi {
+					words += width
+				}
+			}
+		}
+		plan.requests[rank] = words
+	}
+	return plan, nil
+}
+
 // Admission is entirely common geometry: even Qmax scans ALL owner bands.
 // No allocation, owner math or I/O precedes the byte checks. All arithmetic
 // below is uint64 with operands first bounded by small protocol constants, so
 // neither machine-int nor uint64 overflow can authorize an allocation.
-func v41EPPanelPlan(owners TPPlan, picks [][]routePick, width int) (v41EPPanelLayout, error) {
+func v41EPPanelAdmitted(owners TPPlan, picks [][]routePick, width int) (v41EPPanelLayout, error) {
 	var plan v41EPPanelLayout
 	n, world := len(picks), len(owners.Shards)
 	if owners.Validate() != nil || n < 2 || n > v41EPOwnerPanelTokens || width <= 0 || width > v41EPMaxWords || world > v41EPMaxWords/v41EPHeaderWords {
@@ -103,19 +126,7 @@ func v41EPPanelPlan(owners TPPlan, picks [][]routePick, width int) (v41EPPanelLa
 	if peak > v41EPPanelLiveBytes {
 		return plan, fmt.Errorf("panel live transport allowance exceeded")
 	}
-	plan = v41EPPanelLayout{requests: make([]int, world), payloadWords: int(P), replyWords: int(F), liveBytes: peak}
-	for rank, band := range owners.Shards {
-		words := int(base)
-		for _, row := range picks {
-			for _, pick := range row {
-				if pick.expert >= band.Lo && pick.expert < band.Hi {
-					words += width
-				}
-			}
-		}
-		plan.requests[rank] = words
-	}
-	return plan, nil
+	return v41EPPanelLayout{payloadWords: int(P), replyWords: int(F), liveBytes: peak}, nil
 }
 
 func (r v41EPPanelReduction) identity() [32]byte {
