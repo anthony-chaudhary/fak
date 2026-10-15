@@ -179,10 +179,12 @@ type v41ForwardState struct {
 	indexScoreHealth    v41IndexerScoreHealthFunc
 	sharedActivation    v41SharedActivationFunc
 	tailRoPE            v41TailRoPEFunc
-	sharedAttention     v41SharedAttentionFunc
-	routedSum           v41RoutedSumFunc
-	sharedAdd           v41SharedAddFunc
-	gatherOps           *v41DeviceGatherOps
+
+	sharedAttentionBinding *v41SharedAttentionBinding
+
+	routedSum v41RoutedSumFunc
+	sharedAdd v41SharedAddFunc
+	gatherOps *v41DeviceGatherOps
 	// routedExpert is the OPTIONAL fused device routed expert (gate/up, BF16
 	// clamp-SwiGLU route weight, down). The full profile offers each pick to it
 	// before expertGateUp/expertDown; nil keeps those seams unchanged.

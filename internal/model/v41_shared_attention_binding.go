@@ -2,7 +2,7 @@ package model
 
 import "github.com/anthony-chaudhary/fak/internal/compute"
 
-// A binding keeps an ordinary callback and its canonical provenance together.
+// An immutable binding keeps an ordinary callback and its canonical provenance together.
 // Reconstructing or wrapping the callback creates an ordinary-only binding;
 // function identity never transfers canonical authority. No validation bypass
 // is available through this binding or the ordinary callback.
@@ -12,6 +12,7 @@ type v41SharedAttentionBinding struct {
 }
 
 type v41BoundSharedAttention struct {
+	core    *v41SharedAttentionCore
 	owner   *Session
 	model   *Model
 	backend compute.Backend
@@ -35,34 +36,44 @@ func (st *v41ForwardState) sharedAttentionFunc() v41SharedAttentionFunc {
 	if st == nil {
 		return nil
 	}
-	return st.sharedAttention
+	return st.sharedAttentionBinding.attentionFunc()
 }
 
 func (scratch *v41ProjScratch) sharedAttentionFunc() v41SharedAttentionFunc {
 	if scratch == nil {
 		return nil
 	}
-	return scratch.sharedAttention
+	return scratch.sharedAttentionBinding.attentionFunc()
 }
 
+// Replacing a callback always revokes canonical provenance, even when the
+// replacement is the same ordinary function returned by sharedAttentionFunc.
 func (st *v41ForwardState) setSharedAttention(attend v41SharedAttentionFunc) {
-	st.sharedAttention = attend
+	st.sharedAttentionBinding = newV41SharedAttentionBinding(attend)
 }
 
-// The raw-field transition deliberately discards canonical provenance. It
-// cannot authorize a fast path while direct callback replacements still exist.
+// Canonical binding and trusted copies preserve the immutable binding identity.
+// Invocation still uses the ordinary callback and its full validation path.
 func (st *v41ForwardState) bindCanonicalSharedAttention(binding *v41SharedAttentionBinding) {
-	st.sharedAttention = binding.attentionFunc()
+	st.sharedAttentionBinding = binding
 }
 
 func (st *v41ForwardState) copySharedAttentionFrom(from *v41ForwardState) {
-	st.sharedAttention = from.sharedAttentionFunc()
+	if from == nil {
+		st.sharedAttentionBinding = nil
+		return
+	}
+	st.sharedAttentionBinding = from.sharedAttentionBinding
 }
 
 func (scratch *v41ProjScratch) copySharedAttentionFrom(from *v41ForwardState) {
-	scratch.sharedAttention = from.sharedAttentionFunc()
+	if from == nil {
+		scratch.sharedAttentionBinding = nil
+		return
+	}
+	scratch.sharedAttentionBinding = from.sharedAttentionBinding
 }
 
 func (scratch *v41ProjScratch) clearSharedAttention() {
-	scratch.sharedAttention = nil
+	scratch.sharedAttentionBinding = nil
 }

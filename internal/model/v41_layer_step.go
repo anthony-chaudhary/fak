@@ -563,6 +563,7 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 
 func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) (work *v41LayerStepWork, err error) {
 	cfg := m.Cfg
+	attentionContinuation := newV41SharedAttentionContinuation(m, l, pos, plan, layerState, registry, scratch)
 	if len(x) != cfg.HiddenSize {
 		return nil, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer role step hidden row has %d values, want %d", ErrV41ForwardStage, len(x), cfg.HiddenSize))
@@ -869,10 +870,10 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 	}
 	attentionOpened := m.v41NowNanos()
-	o, err := v41CombinedAttentionResident(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
+	o, err := v41CombinedAttentionWithContinuation(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
 		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: windowStart,
 		windowRows: len(window), compressedRows: len(sharedKV), sinkKey: layerName(l, "attn.sink"),
-	}, scratch.sharedAttentionFunc())
+	}, scratch.sharedAttentionFunc(), attentionContinuation)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return nil, v41StageErr(v41StageAttention, l, err)

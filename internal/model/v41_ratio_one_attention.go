@@ -23,6 +23,10 @@ func v41CombinedAttention(layer, pos, sourceRatio, heads, headDim int, q, sink [
 }
 
 func v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim int, q, sink []float32, window, compressed [][]float32, compressedIDs []int32, scale float32, resident *v41ResidentKVView, attend v41SharedAttentionFunc) ([]float32, error) {
+	return v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDim, q, sink, window, compressed, compressedIDs, scale, resident, attend, nil)
+}
+
+func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDim int, q, sink []float32, window, compressed [][]float32, compressedIDs []int32, scale float32, resident *v41ResidentKVView, attend v41SharedAttentionFunc, continuation *v41SharedAttentionContinuation) ([]float32, error) {
 	fail := func(message string) ([]float32, error) {
 		return nil, v41StageErr(v41StageAttention, layer, fmt.Errorf("%w: combined attention %s", ErrV41ForwardStage, message))
 	}
@@ -87,11 +91,25 @@ func v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim int, q
 	var out []float32
 	var err error
 	if attend != nil && resident != nil && !v41ResidentKVDisabled {
-		out, err = v41SelectedSharedAttention(layer, v41SharedAttentionRequest{
+		request := v41SharedAttentionRequest{
 			mode: compute.V41SharedAttentionPlain, q: q, sink: sink, idx: idx, plain: opt,
 			rowKV:    &v41SharedAttentionRows{window: window, compressed: compressed},
 			resident: resident, sinkKey: resident.sinkKey,
-		}, attend)
+		}
+		c := continuation
+		if c != nil && !c.used && c.layer == layer && c.pos == pos && c.sourceRatio == sourceRatio &&
+			c.heads == heads && c.headDim == headDim && c.scale == scale && c.live() {
+			// All original rows were checked above. Nothing can call user code
+			// between sealing this local request and the private preparation.
+			validation := &v41SharedAttentionValidation{continuation: c, request: &request, rows: request.rowKV,
+				window: window, compressed: compressed}
+			out, err = c.binding.native.core.validated(layer, &request, validation)
+			if err != nil {
+				err = &V41SharedAttentionOperationError{Layer: layer, Cause: v41StageErr(v41StageAttention, layer, err)}
+			}
+		} else {
+			out, err = v41SelectedSharedAttention(layer, request, attend)
+		}
 	} else {
 		flat := make([]float32, 0, kvCount)
 		for _, stream := range [][][]float32{window, compressed} {

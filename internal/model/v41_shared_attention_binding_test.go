@@ -18,7 +18,8 @@ func TestV41SharedAttentionBinding(t *testing.T) {
 		s := &Session{M: &Model{}, Backend: b}
 		t.Cleanup(s.Close)
 		binding := s.v41BindSharedAttention()
-		if binding == nil || binding.attentionFunc() == nil || binding.native.owner != s || binding.native.model != s.M || binding.native.backend != b {
+		if binding == nil || binding.attentionFunc() == nil || binding.native.core == nil || binding.native.core.run == nil ||
+			binding.native.owner != s || binding.native.model != s.M || binding.native.backend != b {
 			t.Fatal("canonical factory lost its callback or provenance")
 		}
 		return s, b, binding
@@ -47,7 +48,14 @@ func TestV41SharedAttentionBinding(t *testing.T) {
 		st.bindCanonicalSharedAttention(binding)
 		copied.copySharedAttentionFrom(st)
 		scratch.copySharedAttentionFrom(st)
+		if st.sharedAttentionBinding != binding || copied.sharedAttentionBinding != binding || scratch.sharedAttentionBinding != binding {
+			t.Fatal("trusted bind or copy changed canonical binding identity")
+		}
 		st.setSharedAttention(wrapped)
+		if st.sharedAttentionBinding == nil || st.sharedAttentionBinding == binding || st.sharedAttentionBinding.native != (v41BoundSharedAttention{}) ||
+			copied.sharedAttentionBinding != binding || scratch.sharedAttentionBinding != binding {
+			t.Fatal("wrapper replacement retained authority or changed a trusted copy")
+		}
 		request := v41SharedAttentionRequest{mode: compute.V41SharedAttentionPlain,
 			q: []float32{0, 0}, kv: []float32{2, 4}, idx: []int32{0},
 			plain: V41SparseAttentionSinkOptions{B: 1, M: 1, Heads: 1, HeadDim: 2, N: 1, TopK: 1, Softmax: 1}}
@@ -60,11 +68,60 @@ func TestV41SharedAttentionBinding(t *testing.T) {
 		if wrappedCalls != 1 || len(b.calls) != 3 || len(b.allocations) != 0 {
 			t.Fatal("copy/replacement changed dispatch or retained transient storage")
 		}
+		st.bindCanonicalSharedAttention(binding)
+		st.setSharedAttention(st.sharedAttentionFunc())
+		if st.sharedAttentionBinding == nil || st.sharedAttentionBinding == binding || st.sharedAttentionBinding.native != (v41BoundSharedAttention{}) {
+			t.Fatal("same-callback replacement retained canonical provenance")
+		}
+		copied.copySharedAttentionFrom(st)
+		scratch.copySharedAttentionFrom(st)
+		if copied.sharedAttentionBinding != st.sharedAttentionBinding || scratch.sharedAttentionBinding != st.sharedAttentionBinding {
+			t.Fatal("trusted copy changed ordinary-only binding identity")
+		}
+		scratch.copySharedAttentionFrom(nil)
+		if scratch.sharedAttentionBinding != nil {
+			t.Fatal("nil-source scratch copy retained a binding")
+		}
+		scratch.copySharedAttentionFrom(st)
 		st.setSharedAttention(nil)
 		copied.copySharedAttentionFrom(nil)
 		scratch.clearSharedAttention()
-		if st.sharedAttentionFunc() != nil || copied.sharedAttentionFunc() != nil || scratch.sharedAttentionFunc() != nil {
+		if st.sharedAttentionBinding != nil || copied.sharedAttentionBinding != nil || scratch.sharedAttentionBinding != nil ||
+			st.sharedAttentionFunc() != nil || copied.sharedAttentionFunc() != nil || scratch.sharedAttentionFunc() != nil {
 			t.Fatal("reset retained a callback")
+		}
+		st.bindCanonicalSharedAttention(binding)
+		st.bindCanonicalSharedAttention(nil)
+		if st.sharedAttentionBinding != nil {
+			t.Fatal("nil canonical bind retained a binding")
+		}
+	})
+
+	t.Run("dormant-core-remains-strict", func(t *testing.T) {
+		for _, entry := range []string{"ordinary", "private-core"} {
+			t.Run(entry, func(t *testing.T) {
+				s, b, binding := fixture(t)
+				attend := binding.attentionFunc()
+				if entry == "private-core" {
+					attend = binding.native.core.run
+				}
+				request := v41SharedAttentionRequest{mode: compute.V41SharedAttentionPlain,
+					q: []float32{0, 0}, idx: []int32{0, -1},
+					rowKV: &v41SharedAttentionRows{window: [][]float32{{2, 4}}, compressed: [][]float32{{6, 8}}},
+					plain: V41SparseAttentionSinkOptions{B: 1, M: 1, Heads: 1, HeadDim: 2, N: 2, TopK: 2, Softmax: 1}}
+				out, err := v41SelectedSharedAttention(0, request, attend)
+				if err != nil || !reflect.DeepEqual(out, []float32{2, 4}) || len(b.calls) != 1 || b.uploads != 3 || len(b.allocations) != 0 {
+					t.Fatalf("strict entry changed output or lifecycle: out=%v err=%v calls=%d uploads=%d", out, err, len(b.calls), b.uploads)
+				}
+				request.rowKV.compressed[0][1] = float32(math.NaN())
+				out, err = v41SelectedSharedAttention(0, request, attend)
+				var selected *V41SharedAttentionOperationError
+				var closed *BackendForwardOperationError
+				if out != nil || !errors.As(err, &selected) || !errors.As(err, &closed) || !errors.Is(err, ErrV41ForwardStage) ||
+					!s.halClosed || s.halFailure == nil || len(b.calls) != 1 || b.uploads != 3 || len(b.allocations) != 0 {
+					t.Fatalf("strict entry hid a masked nonfinite row: out=%v err=%v calls=%d uploads=%d closed=%v", out, err, len(b.calls), b.uploads, s.halClosed)
+				}
+			})
 		}
 	})
 

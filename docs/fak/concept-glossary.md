@@ -1265,4 +1265,18 @@ Reports one authenticated EP loader invocation's returned Session/coordinator, e
 
 Private immutable identity container pairing one ordinary shared-attention callback with optional canonical Session, Model, and Backend provenance. Reconstructing or wrapping the callback creates an ordinary-only binding, so function identity does not transfer canonical provenance.
 
-**Distinct from:** Unlike v41SharedAttentionRows, which describes borrowed KV input slices, this binding describes callback origin and identity. Unlike V41SharedAttentionPlain, it selects no numerical mode. In this foundation provenance is dormant, raw-field adapters discard it, and every validation scan remains strict; the binding grants no independent lifetime authority or validation bypass.
+**Distinct from:** Unlike v41SharedAttentionRows, which describes borrowed KV input slices, this binding records callback origin and identity and selects no numerical mode. Forward state and scratch preserve the binding identity; any ordinary callback replacement creates a fresh ordinary-only binding. The binding alone proves neither current ownership nor row validation: only a revalidated v41SharedAttentionContinuation together with a one-use v41SharedAttentionValidation permits the private core to omit the duplicate row-finiteness scan.
+
+
+### v41SharedAttentionContinuation
+
+Private call-local eligibility record for one canonical shared-attention operation during a serial single-token continuation. It captures binding, Session, Model, Backend, forward-state, scratch, execution-owner, KV-owner, position, cache epoch, geometry and role-plan identities, and rechecks that they remain live before consumption.
+
+**Distinct from:** Unlike v41SharedAttentionBinding, this record establishes current execution-context eligibility rather than callback origin alone. Unlike v41SharedAttentionRows, it owns no borrowed row storage and proves no row finiteness. Unlike V41SharedAttentionPlain, it selects no numerical mode. Its one-use validation witness is created separately only after the composer checks all original rows.
+
+
+### v41SharedAttentionValidation
+
+Private one-use, exact-request witness created after the combined-attention composer validates every original window and compressed row and selection ID before masking. It is tied to the live continuation, exact request and row-descriptor identities, is consumed once by that canonical private core, and permits omission only of the duplicate row-finiteness scan.
+
+**Distinct from:** Unlike v41SharedAttentionContinuation, this witness records that the original inputs were validated for this exact invocation, not merely that the execution context is eligible. Unlike v41SharedAttentionBinding, it is call-local and single-use, not reusable provenance. Unlike v41SharedAttentionRows, it owns no KV data; unlike V41SharedAttentionPlain, it selects no numerical mode. It never travels through an ordinary callback request, and it does not replace geometry, shape, ID, Q, sink, selected-error or lifetime checks.

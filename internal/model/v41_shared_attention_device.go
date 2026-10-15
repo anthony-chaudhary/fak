@@ -12,6 +12,123 @@ import (
 // callback has no decline outcome and must be rebound after clone or restore.
 type v41SharedAttentionFunc func(layer int, request v41SharedAttentionRequest) ([]float32, error)
 
+// Both entries share one selected-operation lifecycle. Ordinary calls always
+// validate every row; only the synchronous composer can supply validated rows.
+type v41SharedAttentionCore struct {
+	run       v41SharedAttentionFunc
+	validated func(int, *v41SharedAttentionRequest, *v41SharedAttentionValidation) ([]float32, error)
+}
+
+// A continuation captures ownership before projections and other callbacks.
+// It is local to one role step, including each serial incremental suffix token.
+// Cold/full prefill and ordinary callback reconstruction never receive it.
+type v41SharedAttentionContinuation struct {
+	binding                                 *v41SharedAttentionBinding
+	rowOwner                                *V41AttentionState
+	layer, pos, sourceRatio, heads, headDim int
+	ringRows, firstKey                      int
+	scale                                   float32
+	live                                    func() bool // private metadata checks only
+	used                                    bool
+}
+
+func newV41SharedAttentionContinuation(m *Model, layer, pos int, plan V41AttentionPlan, layerState, registry *V41AttentionState, scratch *v41ProjScratch) *v41SharedAttentionContinuation {
+	if m == nil || scratch == nil || layerState == nil || registry == nil {
+		return nil
+	}
+	binding := scratch.sharedAttentionBinding
+	if binding == nil || binding.native.core == nil || binding.native.core.validated == nil {
+		return nil
+	}
+	s := binding.native.owner
+	if s == nil || !backendHasComparableIdentity(s.Backend) || s.M != m || binding.native.model != m || binding.native.backend != s.Backend {
+		return nil
+	}
+	state, scope, epoch, backend := s.v41Forward, s.backendExecutionScope, s.cacheGeometryEpoch, s.Backend
+	if state == nil || scope == nil || scope.owner == nil {
+		return nil
+	}
+	cfg, owner, ringRows := m.Cfg, scope.owner, layerState.windowSize
+	window := cfg.windowForLayer(layer)
+	c := &v41SharedAttentionContinuation{binding: binding, layer: layer, pos: pos,
+		rowOwner: layerState, ringRows: ringRows,
+		sourceRatio: plan.kvGroupSize(cfg), heads: cfg.NumHeads, headDim: cfg.HeadDim, scale: cfg.attnScale()}
+	if window > 0 {
+		c.firstKey = max(0, pos-window+1)
+	}
+	c.live = func() bool {
+		if s.M != m || !backendHasComparableIdentity(s.Backend) || s.Backend != backend ||
+			s.halClosed || s.halFailure != nil || !s.modelWeightsHeld || s.v41Forward != state || state.callbackOwner != s ||
+			state.sharedAttentionBinding != binding || scratch.sharedAttentionBinding != binding || state.attn != registry || state.layerState(layer) != layerState ||
+			s.cacheGeometryEpoch != epoch || s.backendExecutionScope != scope || !scope.live || scope.owner != owner ||
+			len(scope.sessions) != 1 || scope.sessions[0] != s || len(state.history) != pos || layerState.nextWindowPos != pos ||
+			layerState.windowSize != ringRows || layerState.headDim != c.headDim {
+			return false
+		}
+		current := m.Cfg
+		if layer < 0 || layer >= current.NumLayers || current.DeepSeekV41 != cfg.DeepSeekV41 || current.NumLayers != cfg.NumLayers || current.NumHeads != c.heads ||
+			current.HeadDim != c.headDim || current.windowForLayer(layer) != window || current.attnScale() != c.scale {
+			return false
+		}
+		// For an in-range nonzero layer, nearest-source identity gives exactly
+		// v41AttentionRoles' role without allocating a whole-layer map. Recheck
+		// current metadata rather than trusting the memoized plan after callbacks.
+		resolved, err := v41AttentionPlanFor(current, layer, nil)
+		if err != nil || resolved.Ratio <= 0 {
+			return false
+		}
+		if resolved.KVSourceLayer == layer {
+			resolved.Role = V41AttentionRoleKVSource
+		} else if resolved.KVSourceLayer >= 0 {
+			resolved.Role = V41AttentionRoleReader
+		}
+		return resolved == plan && resolved.kvGroupSize(current) == c.sourceRatio
+	}
+	if !c.live() {
+		return nil
+	}
+	return c
+}
+
+// The proof never travels in the ordinary request. It names the exact local
+// request and borrowed stream descriptors, and is consumed even on mismatch.
+// Between the composer's original-row validation and consumption there are no
+// arbitrary callbacks; session ownership excludes concurrent row mutation.
+type v41SharedAttentionValidation struct {
+	continuation       *v41SharedAttentionContinuation
+	request            *v41SharedAttentionRequest
+	rows               *v41SharedAttentionRows
+	window, compressed [][]float32
+	used               bool
+	accepted           bool
+}
+
+func (v *v41SharedAttentionValidation) consume(core *v41SharedAttentionCore, layer int, request *v41SharedAttentionRequest) bool {
+	if v == nil || v.used {
+		return false
+	}
+	v.used = true
+	c := v.continuation
+	if c == nil || c.used {
+		return false
+	}
+	c.used = true
+	if c.binding == nil || c.live == nil || request == nil || c.binding.native.core != core || layer != c.layer || v.request != request || request.rowKV != v.rows || v.rows == nil ||
+		request.mode != compute.V41SharedAttentionPlain || request.kv != nil || request.plain.Heads != c.heads || request.plain.HeadDim != c.headDim || request.plain.Softmax != c.scale {
+		return false
+	}
+	view := request.resident
+	if view == nil || view.owner != c.rowOwner || view.pos != c.pos || view.ringRows != c.ringRows || view.firstKey != c.firstKey ||
+		view.windowRows != len(v.window) || view.compressedRows != len(v.compressed) {
+		return false
+	}
+	same := func(a, b [][]float32) bool {
+		return len(a) == len(b) && cap(a) == cap(b) && (len(a) == 0 || &a[0] == &b[0])
+	}
+	v.accepted = same(v.window, v.rows.window) && same(v.compressed, v.rows.compressed) && c.live()
+	return v.accepted
+}
+
 // Rows borrow the host window and append-only compressed log only for the
 // synchronous callback. Neither the callback nor the mirror retains or mutates
 // these slices; device uploads own their storage before the callback returns.
@@ -124,6 +241,10 @@ func v41PrepareSharedAttention(request v41SharedAttentionRequest) (v41SharedAtte
 // Only selection descriptors borrow scratch. The caller must finish consuming
 // the payload, including fault attribution, before reusing these descriptors.
 func v41PrepareSharedAttentionWithRows(request v41SharedAttentionRequest, sourceRows []int) (v41SharedAttentionPayload, error) {
+	return v41PrepareSharedAttentionRows(request, sourceRows, false)
+}
+
+func v41PrepareSharedAttentionRows(request v41SharedAttentionRequest, sourceRows []int, rowsValidated bool) (v41SharedAttentionPayload, error) {
 	p := v41SharedAttentionPayload{mode: request.mode, sourceRows: sourceRows[:0]}
 	bad := func(format string, args ...any) (v41SharedAttentionPayload, error) {
 		return p, fmt.Errorf("%w: shared attention %s", ErrV41ForwardStage, fmt.Sprintf(format, args...))
@@ -173,8 +294,10 @@ func v41PrepareSharedAttentionWithRows(request v41SharedAttentionRequest, source
 				if len(row) != p.headDim {
 					return bad("row KV width %d, want %d", len(row), p.headDim)
 				}
-				if err := finiteRow32(row, "shared attention row KV"); err != nil {
-					return bad("%v", err)
+				if !rowsValidated {
+					if err := finiteRow32(row, "shared attention row KV"); err != nil {
+						return bad("%v", err)
+					}
 				}
 			}
 		}
@@ -352,7 +475,7 @@ func (s *Session) v41BindSharedAttention() *v41SharedAttentionBinding {
 	// fault attribution; reentrant calls get independent descriptors instead.
 	var sourceRows []int
 	selectionInUse := false
-	ordinary := func(layer int, request v41SharedAttentionRequest) (result []float32, cause error) {
+	run := func(layer int, request v41SharedAttentionRequest, rowsValidated bool) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		reuseSelection := !selectionInUse
 		if reuseSelection {
@@ -400,7 +523,7 @@ func (s *Session) v41BindSharedAttention() *v41SharedAttentionBinding {
 		var p v41SharedAttentionPayload
 		var err error
 		if reuseSelection {
-			p, err = v41PrepareSharedAttentionWithRows(request, sourceRows)
+			p, err = v41PrepareSharedAttentionRows(request, sourceRows, rowsValidated)
 			sourceRows = p.sourceRows[:0]
 		} else {
 			p, err = v41PrepareSharedAttention(request)
@@ -531,5 +654,19 @@ func (s *Session) v41BindSharedAttention() *v41SharedAttentionBinding {
 		}
 		return result, nil
 	}
-	return &v41SharedAttentionBinding{ordinary: ordinary, native: v41BoundSharedAttention{owner: s, model: model, backend: backend}}
+	core := &v41SharedAttentionCore{}
+	core.run = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+		return run(layer, request, false)
+	}
+	core.validated = func(layer int, request *v41SharedAttentionRequest, validation *v41SharedAttentionValidation) ([]float32, error) {
+		rowsValidated := validation.consume(core, layer, request)
+		if selectionInUse && validation != nil {
+			rowsValidated, validation.accepted = false, false
+		}
+		return run(layer, *request, rowsValidated)
+	}
+	ordinary := func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+		return core.run(layer, request)
+	}
+	return &v41SharedAttentionBinding{ordinary: ordinary, native: v41BoundSharedAttention{core: core, owner: s, model: model, backend: backend}}
 }

@@ -54,10 +54,12 @@ type v41ProjScratch struct {
 	indexScoreHealth    v41IndexerScoreHealthFunc
 	sharedActivation    v41SharedActivationFunc
 	tailRoPE            v41TailRoPEFunc
-	sharedAttention     v41SharedAttentionFunc
-	routedSum           v41RoutedSumFunc
-	sharedAdd           v41SharedAddFunc
-	gatherOps           *v41DeviceGatherOps
+
+	sharedAttentionBinding *v41SharedAttentionBinding
+
+	routedSum v41RoutedSumFunc
+	sharedAdd v41SharedAddFunc
+	gatherOps *v41DeviceGatherOps
 
 	// exp1/exp3/exp2 are the REUSED materialization targets for one routed
 	// expert's three projections (ffn.experts.<e>.w1/w3/w2.weight). They were

@@ -1970,7 +1970,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Private forward-state/scratch migration accessor for the existing ordinary shared-attention callback; the raw-field transition carries no canonical authority.",
+          "reason": "Private nil-safe forward-state/scratch accessor for the ordinary callback held by v41SharedAttentionBinding; reading the callback does not export its canonical provenance or invocation witness.",
           "token": "sharedAttentionFunc"
         },
         {
@@ -1980,12 +1980,12 @@
         },
         {
           "category": "incidental",
-          "reason": "Private migration installation adapter for v41SharedAttentionBinding; this raw-field foundation deliberately discards canonical provenance and grants no bypass.",
+          "reason": "Private installation adapter preserving a canonical v41SharedAttentionBinding identity in forward state; it neither acquires live execution ownership nor supplies the one-use row-validation witness.",
           "token": "bindCanonicalSharedAttention"
         },
         {
           "category": "incidental",
-          "reason": "Private forward-state/scratch migration copy adapter for the existing ordinary callback; it adds no attention computation, ownership domain, or storage model.",
+          "reason": "Private forward-state/scratch copy adapter copying the same immutable v41SharedAttentionBinding pointer; it does not clone authority, acquire ownership, or establish that borrowed rows were validated.",
           "token": "copySharedAttentionFrom"
         },
         {
@@ -1995,8 +1995,38 @@
         },
         {
           "category": "incidental",
-          "reason": "Private factory creating v41SharedAttentionBinding around one existing strict native callback closure; backend/model provenance is subordinate to that binding, with no new kernel or validation bypass.",
+          "reason": "Private factory pairing the ordinary callback and private core under one selected-operation lifecycle and optional backend/model provenance; the binding alone supplies no live continuation or one-use row-validation evidence.",
           "token": "v41BindSharedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private holder of the ordinary and validated entries of one selected shared-attention operation; it shares their lifecycle and acquires no independent provenance, ownership, or validation authority.",
+          "token": "v41SharedAttentionCore"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constructor for the positioned v41SharedAttentionContinuation; it captures and rechecks canonical binding, owner, state, geometry and role-plan identities rather than defining a separate attention operation.",
+          "token": "newV41SharedAttentionContinuation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private shared row-preparation implementation; its strict entry validates every original row, while only the checked private validation-witness path may omit the redundant row-finiteness loop. Geometry, shapes, IDs, Q, sink and other input guards remain independent.",
+          "token": "v41PrepareSharedAttentionRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private composition helper for the existing combined attention operation; after validating all original rows before masks, it creates the positioned one-use validation witness for an eligible live continuation. Ordinary callbacks retain strict preparation.",
+          "token": "v41CombinedAttentionWithContinuation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private forward-state and scratch field holding the positioned immutable v41SharedAttentionBinding identity; the field defines no separate attention operation or independent invocation authority.",
+          "token": "sharedAttentionBinding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private role-step local holding the positioned v41SharedAttentionContinuation for this call; construction and use retain the positioned live-context and one-use validation-witness checks, with no separate semantic authority.",
+          "token": "attentionContinuation"
         }
       ],
       "exclude": [
@@ -2014,6 +2044,7 @@
         "PrefillAttentionTiming",
         "TreeAttentionMask",
         "ValidateTreeAttentionMask",
+        "attentionContinuation",
         "attentionFunc",
         "attentions",
         "attentive",
@@ -2036,17 +2067,22 @@
         "mg_prefill_attn",
         "mg_prefill_attn_supported",
         "newV41SharedAttentionBinding",
+        "newV41SharedAttentionContinuation",
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
         "qwenfullattentionlayers",
         "seenAttention",
         "setSharedAttention",
+        "sharedAttentionBinding",
         "sharedAttentionFunc",
         "tattn",
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
+        "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
-        "v41PrepareSharedAttentionWithRows"
+        "v41PrepareSharedAttentionRows",
+        "v41PrepareSharedAttentionWithRows",
+        "v41SharedAttentionCore"
       ],
       "known_tokens": [],
       "min_files": 3,
