@@ -27,31 +27,31 @@ type v41GroupedPanelStatus struct {
 // every failure retires the owner and is never replayed by the scalar arm.
 func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads, headDim, groups, rank, dim int) ([][]float32, v41DenseProjectionOutcome, error) {
 	if s == nil || s.M == nil || s.Backend == nil || rows <= 1 || heads <= 0 || headDim <= 0 || groups <= 0 || rank <= 0 || dim <= 0 || heads%groups != 0 {
-		return nil, v41ProjectionDeclined, nil
+		return nil, v41GroupedPanelDecline(layer, rows, "shape"), nil
 	}
 	totalIn, ok := checkedMulInt(heads, headDim)
 	panelN, panelOK := checkedMulInt(rows, totalIn)
 	joined, joinedOK := checkedMulInt(groups, rank)
 	if !ok || !panelOK || !joinedOK || len(panel) != panelN {
-		return nil, v41ProjectionDeclined, nil
+		return nil, v41GroupedPanelDecline(layer, rows, "panel_size"), nil
 	}
 	for _, v := range panel {
 		if !finite32(v) {
-			return nil, v41ProjectionDeclined, nil
+			return nil, v41GroupedPanelDecline(layer, rows, "non_finite"), nil
 		}
 	}
 	rowOps, rowOK := s.Backend.(compute.V41RowLogBackend)
 	pub, pubOK := s.Backend.(compute.V41BF16PublishBackend)
 	deferred, deferredOK := s.Backend.(compute.V41DeferredStatusBackend)
 	if !rowOK || !rowOps.V41RowLogAvailable() || !pubOK || !deferredOK {
-		return nil, v41ProjectionDeclined, nil
+		return nil, v41GroupedPanelDecline(layer, rows, "backend_caps"), nil
 	}
 	groupIn := totalIn / groups
 	aName, bName := layerName(layer, "attn.wo_a.weight"), layerName(layer, "attn.wo_b.weight")
 	ar, ac, ap := s.M.residentShape(aName)
 	br, bc, bp := s.M.residentShape(bName)
 	if !ap || !bp || !((ar == joined && ac == groupIn) || (ar == rank && ac == totalIn)) || br != dim || bc != joined {
-		return nil, v41ProjectionDeclined, nil
+		return nil, v41GroupedPanelDecline(layer, rows, "resident_shape"), nil
 	}
 	aSource, aOK, aErr := s.v41GroupedWeight(aName, groupIn)
 	bSource, bOK, bErr := s.v41GroupedWeight(bName, joined)
@@ -59,16 +59,16 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 		return nil, v41ProjectionError, errors.Join(aErr, bErr)
 	}
 	if !aOK || !bOK {
-		return nil, v41ProjectionDeclined, nil
+		return nil, v41GroupedPanelDecline(layer, rows, "weight_unsupported"), nil
 	}
 	tiles := v41GroupedPanelTiles(rows)
 	for _, n := range tiles {
 		for _, count := range []int{n * groupIn, n * rank, n * dim} {
 			if !pub.SupportsV41BF16Publish(count) {
-				return nil, v41ProjectionDeclined, nil
+				return nil, v41GroupedPanelDecline(layer, rows, "publish_count"), nil
 			}
 			if _, supported := v41DeferredBF16Publisher(s.Backend, count); !supported {
-				return nil, v41ProjectionDeclined, nil
+				return nil, v41GroupedPanelDecline(layer, rows, "deferred_count"), nil
 			}
 		}
 	}
@@ -102,11 +102,11 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 		}
 		for _, w := range weights.a {
 			if !v41GroupedPanelWeightSupports(s.Backend, w, n) {
-				return nil, v41ProjectionDeclined, nil
+				return nil, v41GroupedPanelDecline(layer, rows, "tile_weight_a"), nil
 			}
 		}
 		if !v41GroupedPanelWeightSupports(s.Backend, weights.b, n) {
-			return nil, v41ProjectionDeclined, nil
+			return nil, v41GroupedPanelDecline(layer, rows, "tile_weight_b"), nil
 		}
 	}
 
