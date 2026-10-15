@@ -338,8 +338,11 @@ func (sh *SharedExpertRing) Close() (err error) {
 		return nil
 	}
 	scope := beginBackendExecution(sh.be)
-	defer scope.finishError(&err)
-	return sh.closeOwned()
+	complete := false
+	defer scope.finishCompleted(&complete)
+	err = sh.closeOwned()
+	complete = err == nil // Preserve a returned error over queued cleanup failure.
+	return err
 }
 
 func (sh *SharedExpertRing) closeOwned() error {
