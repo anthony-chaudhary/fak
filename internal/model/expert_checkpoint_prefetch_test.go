@@ -141,6 +141,113 @@ func TestExpertCheckpointPrefetchDropsUnconsumedHandoffs(t *testing.T) {
 	}
 }
 
+// TestExpertCheckpointPrefetchBoundedOwnership pins the ownership contract Prefetch owes the
+// checkpoint: speculative work is bounded in aggregate, declined outright on an allocation path
+// whose true extent is not the projection stride, and settled exactly once even when the read
+// panics. Each subcase is deterministic and channel/ledger gated -- no timing is the oracle.
+// fak-test:runtime fast est=500ms lane=default
+func TestExpertCheckpointPrefetchBoundedOwnership(t *testing.T) {
+	// The aggregate bound is on ADMITTED jobs, not on one call's readers: a single call offering
+	// more names than the cap admits exactly the cap and declines the rest, so the tier's
+	// speculative read set cannot grow with the caller's input length.
+	t.Run("aggregate-job-bound", func(t *testing.T) {
+		const n = 2 * fakExpertPrefetchJobs
+		tier, src, _, _ := oneCopyGateTier(t, n, 0, 17)
+		names := make([]string, 0, n)
+		for e := 0; e < n; e++ {
+			names = append(names, expertName(0, e, "gate_proj.weight"))
+		}
+		if got := tier.Prefetch(names); got != fakExpertPrefetchJobs {
+			t.Fatalf("Prefetch of %d names admitted %d jobs, want the aggregate cap %d", n, got, fakExpertPrefetchJobs)
+		}
+		waitPrefetchSettled(t, tier)
+		offsets, _ := src.recorded()
+		if len(offsets) != fakExpertPrefetchJobs {
+			t.Fatalf("admitted %d reads, want %d", len(offsets), fakExpertPrefetchJobs)
+		}
+		// Exactly-once settlement: every admitted job released its share of the aggregate bound.
+		tier.mu.Lock()
+		jobs := tier.prefetchJobs
+		tier.mu.Unlock()
+		if jobs != 0 {
+			t.Fatalf("aggregate prefetch jobs after settlement = %d, want 0", jobs)
+		}
+	})
+
+	// A page-cache cold read allocates a page-aligned buffer and returns a stride-length subslice,
+	// so charging the stride would undercount the backing allocation. Prefetch declines that path
+	// rather than silently assuming its extent; demand serving is untouched.
+	t.Run("declines-page-cache-accounting", func(t *testing.T) {
+		tier, reader, name, stride := mappedCheckpointFixture(t, ExpertCheckpointQ4K, 0, true, false)
+		if got := tier.Prefetch([]string{name}); got != 0 {
+			t.Fatalf("Prefetch on a page-cache source admitted %d jobs, want 0", got)
+		}
+		if calls := reader.reads.Load(); calls != 0 {
+			t.Fatalf("declined prefetch moved %d payload reads, want 0", calls)
+		}
+		w, err := tier.fault(name)
+		if err != nil || !bytes.Equal(mappedCheckpointRaw(w), reader.data[:stride]) {
+			t.Fatalf("declining the hint changed demand serving: %v", err)
+		}
+	})
+
+	// A sparse overlay read has its own allocation path, so the same decline applies.
+	t.Run("declines-sparse-overlay", func(t *testing.T) {
+		tier, reader, name, stride := mappedCheckpointFixture(t, ExpertCheckpointQ4K, 0, false, true)
+		if got := tier.Prefetch([]string{name}); got != 0 {
+			t.Fatalf("Prefetch with a registered overlay admitted %d jobs, want 0", got)
+		}
+		if calls := reader.reads.Load(); calls != 0 {
+			t.Fatalf("declined prefetch moved %d payload reads, want 0", calls)
+		}
+		w, err := tier.fault(name)
+		if err != nil || !bytes.Equal(mappedCheckpointRaw(w), reader.data[:stride]) {
+			t.Fatalf("declining the hint changed demand serving: %v", err)
+		}
+	})
+
+	// A zero budget is the documented stream-through default, not a decline: the faulted slab is
+	// handed to the caller and dropped, so a hint on a zero-budget tier still starts its read.
+	t.Run("zero-budget-still-prefetches", func(t *testing.T) {
+		tier, src, _, _ := oneCopyGateTier(t, 1, 0, 23)
+		name := expertName(0, 0, "gate_proj.weight")
+		if got := tier.Prefetch([]string{name}); got != 1 {
+			t.Fatalf("Prefetch on a zero-budget tier admitted %d jobs, want 1", got)
+		}
+		waitPrefetchSettled(t, tier)
+		if offsets, _ := src.recorded(); len(offsets) != 1 {
+			t.Fatalf("zero-budget prefetch recorded %d reads, want 1", len(offsets))
+		}
+	})
+
+	// A background panic must not terminate the process, must release the loading owner and the
+	// aggregate job counter, and must leave the key retryable.
+	t.Run("panic-settles-ownership-once", func(t *testing.T) {
+		tier, reader, stride := checkpointFlightFixture(t, 0)
+		name := expertName(0, 0, "gate_proj.weight")
+		reader.panicValue = &struct{}{}
+		reader.unblock()
+		if got := tier.Prefetch([]string{name}); got != 1 {
+			t.Fatalf("Prefetch admitted %d jobs, want 1", got)
+		}
+		waitPrefetchSettled(t, tier)
+		tier.mu.Lock()
+		jobs, _, loading := tier.prefetchJobs, len(tier.ready), len(tier.loading)
+		tier.mu.Unlock()
+		if jobs != 0 || loading != 0 {
+			t.Fatalf("after a panicking prefetch: jobs=%d loading=%d, want 0 and 0", jobs, loading)
+		}
+		if st := tier.Stats(); st.Failures != 1 || st.Reads != 0 {
+			t.Fatalf("panicking prefetch: failures=%d reads=%d, want 1 and 0", st.Failures, st.Reads)
+		}
+		reader.panicValue = nil
+		w, err := tier.fault(name)
+		if err != nil || w.q4 == nil || !bytes.Equal(w.q4.raw, reader.data[:stride]) {
+			t.Fatalf("retry after a panicking prefetch: %v", err)
+		}
+	})
+}
+
 // fak-test:runtime fast est=100ms lane=default
 func TestExpertCheckpointPrefetchDelayedGeneration(t *testing.T) {
 	for _, tc := range []struct {
