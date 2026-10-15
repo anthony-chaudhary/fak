@@ -303,6 +303,73 @@ func (v *vulkanBackend) VulkanDRMRenderNode() (major, minor uint64, available bo
 	return uint64(drmMajor), uint64(drmMinor), true
 }
 
+// vulkanBeginUploadAttributionLocked brackets only uploadClass. Specialized
+// native uploads outside that call remain in the snapshot's residual. Class
+// labels describe the caller's allocation category, not immutable tensor roles.
+// Native counters include recorded batch work; completion requires a successful,
+// quiescent execution window. Neither sample adds a flush or a device wait.
+func vulkanBeginUploadAttributionLocked(class MemoryClass) func() {
+	before := vulkanUploadCounterLocked()
+	return func() {
+		after := vulkanUploadCounterLocked()
+		if vulkanUploadAttribution.err == nil {
+			vulkanUploadAttribution.err = vulkanUploadAttribution.bytes.record(string(class), before, after)
+		}
+	}
+}
+
+func vulkanUploadCounterLocked() uint64 {
+	var h2dCount, h2dBytes, d2hCount, d2hBytes, d2dCount, d2dBytes C.uint64_t
+	if C.fvk_transfer_counters(&h2dCount, &h2dBytes, &d2hCount, &d2hBytes, &d2dCount, &d2dBytes) == 0 {
+		if vulkanUploadAttribution.err == nil {
+			vulkanUploadAttribution.err = fmt.Errorf("compute: Vulkan upload attribution counters are unavailable")
+		}
+		return 0
+	}
+	if vulkanUploadAttribution.err == nil {
+		vulkanUploadAttribution.err = validateBackendTransferCounterPairs(BackendCounterSnapshot{
+			H2DCount: uint64(h2dCount), H2DBytes: uint64(h2dBytes),
+			D2HCount: uint64(d2hCount), D2HBytes: uint64(d2hBytes),
+			D2DCopies: uint64(d2dCount), D2DBytes: uint64(d2dBytes),
+		})
+	}
+	vulkanObserveUploadTotalLocked(uint64(h2dBytes))
+	return uint64(h2dBytes)
+}
+
+func vulkanObserveUploadTotalLocked(total uint64) {
+	if vulkanUploadAttribution.err != nil {
+		return
+	}
+	if total < vulkanUploadAttribution.lastTotal {
+		vulkanUploadAttribution.err = fmt.Errorf("compute: Vulkan H2D counter reset or wrapped")
+		return
+	}
+	vulkanUploadAttribution.lastTotal = total
+}
+
+func vulkanUploadAttributionSnapshotLocked(total uint64) (BackendH2DAttribution, bool, error) {
+	if !vulkanUploadAttribution.enabled {
+		return BackendH2DAttribution{}, false, nil
+	}
+	vulkanObserveUploadTotalLocked(total)
+	if vulkanUploadAttribution.err != nil {
+		return BackendH2DAttribution{}, false, vulkanUploadAttribution.err
+	}
+	direct := uint64(C.fvk_direct_h2d_bytes())
+	if direct < vulkanUploadAttribution.lastDirect {
+		vulkanUploadAttribution.err = fmt.Errorf("compute: Vulkan direct H2D counter reset or wrapped")
+		return BackendH2DAttribution{}, false, vulkanUploadAttribution.err
+	}
+	vulkanUploadAttribution.lastDirect = direct
+	attribution, err := vulkanUploadAttribution.bytes.withTotals(total, direct)
+	if err != nil {
+		vulkanUploadAttribution.err = err
+		return BackendH2DAttribution{}, false, err
+	}
+	return attribution, true, nil
+}
+
 // BackendExecutionSnapshot reports identity and cumulative counters from the
 // selected Vulkan backend. Callers must bracket one execution and subtract via
 // BackendExecutionDelta; this process-global snapshot is never a receipt.
@@ -333,6 +400,10 @@ func (v *vulkanBackend) backendExecutionSnapshotLocked() (BackendExecutionSnapsh
 	var h2dCount, h2dBytes, d2hCount, d2hBytes, d2dCount, d2dBytes C.uint64_t
 	if C.fvk_transfer_counters(&h2dCount, &h2dBytes, &d2hCount, &d2hBytes, &d2dCount, &d2dBytes) == 0 {
 		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan transfer counters are unavailable")
+	}
+	attribution, attributionObserved, err := vulkanUploadAttributionSnapshotLocked(uint64(h2dBytes))
+	if err != nil {
+		return BackendExecutionSnapshot{}, err
 	}
 	var allocationLive C.uint64_t
 	if C.fvk_device_allocation_snapshot(&allocationLive) == 0 {
@@ -382,6 +453,7 @@ func (v *vulkanBackend) backendExecutionSnapshotLocked() (BackendExecutionSnapsh
 		TensorHomeEntries: uint64(entries), TensorHomeResidentBytes: uint64(residentBytes),
 		DeviceMemoryTotalBytes: uint64(total), DeviceMemoryFreeBytes: uint64(free), DeviceMemoryObserved: memoryObserved,
 		TransferCountersObserved: true, DeviceAllocationLiveBytes: uint64(allocationLive), DeviceAllocationObserved: true,
+		H2DAttribution: attribution, H2DAttributionObserved: attributionObserved,
 	}, nil
 }
 

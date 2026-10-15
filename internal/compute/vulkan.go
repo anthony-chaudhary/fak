@@ -66,6 +66,17 @@ import (
 
 var vulkanMu sync.Mutex
 
+// Match the native dispatch profiler's startup-only opt-in. The accumulator
+// shares the process lifetime of the native H2D counters, including uploads
+// through different backend wrappers. All fields are protected by vulkanMu.
+var vulkanUploadAttribution = struct {
+	enabled    bool
+	bytes      BackendH2DAttribution
+	lastTotal  uint64
+	lastDirect uint64
+	err        error
+}{enabled: os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1"}
+
 type vulkanQ4KHomeKey struct {
 	src   unsafe.Pointer
 	bytes int
@@ -971,6 +982,11 @@ func (v *vulkanBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, what 
 func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what string) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	if vulkanUploadAttribution.enabled {
+		// Register after Unlock so partial native-accounted uploads are recorded
+		// before releasing the lock, including when an upload panics.
+		defer vulkanBeginUploadAttributionLocked(class)()
+	}
 	hb, ok := t.buf.(HostBuffer)
 	if !ok {
 		panic("compute: vulkan Upload expects host data")
