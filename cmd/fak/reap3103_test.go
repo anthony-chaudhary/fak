@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,13 +90,105 @@ func TestRunReleaseShipCommandTimeoutReapsGrandchild3103(t *testing.T) {
 	// The grandchild must have been reaped along with the child: its heartbeat must go
 	// stale. Under the pre-#3103 single-PID kill it is orphaned and keeps beating,
 	// which fails here. (Negative control: reverting release_ship.go:1473 to a bare
-	// cmd.Process.Kill() makes this loop time out with the orphaned-subtree message.)
+	// cmd.Process.Kill() makes this loop time out with the advancing-heartbeat failure.)
 	deadline := time.Now().Add(10 * time.Second)
+	var observation releaseShipHeartbeatObservation
 	for time.Now().Before(deadline) {
-		if fi, err := os.Stat(hb); err == nil && time.Since(fi.ModTime()) > 1*time.Second {
+		fi, err := os.Stat(hb)
+		var modified time.Time
+		if err == nil {
+			modified = fi.ModTime()
+		}
+		observation.observe(modified, err)
+		if observation.stale(time.Now()) {
 			return // heartbeat went stale -> grandchild dead -> descendant subtree reaped
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatalf("grandchild heartbeat %s kept advancing after the timeout — the descendant subtree was orphaned (the #3103 bug)", hb)
+	t.Fatal(observation.failure(hb))
+}
+
+// A missing heartbeat does not establish that the descendant survived cleanup:
+// the timeout may have fired before the fixture could create it. Keep that failure
+// distinct from a heartbeat observed advancing after the timeout.
+type releaseShipHeartbeatObservation struct {
+	seen     bool
+	advanced bool
+	modified time.Time
+	err      error
+}
+
+func (o *releaseShipHeartbeatObservation) observe(modified time.Time, err error) {
+	o.err = err
+	if err != nil {
+		return
+	}
+	if o.seen && modified.After(o.modified) {
+		o.advanced = true
+	}
+	o.seen = true
+	o.modified = modified
+}
+
+func (o releaseShipHeartbeatObservation) stale(now time.Time) bool {
+	return o.seen && o.err == nil && now.Sub(o.modified) > time.Second
+}
+
+func (o releaseShipHeartbeatObservation) failure(path string) string {
+	switch {
+	case !o.seen:
+		return fmt.Sprintf("grandchild heartbeat %s was never observed; fixture startup/write readiness is unproven (last stat error: %v)", path, o.err)
+	case o.err != nil:
+		return fmt.Sprintf("grandchild heartbeat %s was observed but is now unreadable; descendant cleanup is unproven (last stat error: %v)", path, o.err)
+	case o.advanced:
+		return fmt.Sprintf("grandchild heartbeat %s advanced after the timeout and did not go stale; descendant cleanup failed (the #3103 bug)", path)
+	default:
+		return fmt.Sprintf("grandchild heartbeat %s was observed but did not go stale; no advancing heartbeat was witnessed and descendant cleanup is unproven", path)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestReleaseShipHeartbeatObservation(t *testing.T) {
+	now := time.Unix(100, 0)
+	t.Run("never_observed", func(t *testing.T) {
+		var o releaseShipHeartbeatObservation
+		o.observe(time.Time{}, os.ErrNotExist)
+		if o.stale(now) || !strings.Contains(o.failure("heartbeat"), "never observed") || !strings.Contains(o.failure("heartbeat"), os.ErrNotExist.Error()) {
+			t.Fatalf("missing heartbeat misclassified: %+v: %s", o, o.failure("heartbeat"))
+		}
+	})
+	t.Run("observed_then_unreadable", func(t *testing.T) {
+		var o releaseShipHeartbeatObservation
+		o.observe(now.Add(-2*time.Second), nil)
+		o.observe(time.Time{}, os.ErrPermission)
+		if o.stale(now) || !strings.Contains(o.failure("heartbeat"), "now unreadable") || !strings.Contains(o.failure("heartbeat"), os.ErrPermission.Error()) {
+			t.Fatalf("unreadable heartbeat misclassified: %+v: %s", o, o.failure("heartbeat"))
+		}
+	})
+	t.Run("recent_without_advance", func(t *testing.T) {
+		var o releaseShipHeartbeatObservation
+		o.observe(now, nil)
+		o.observe(now, nil)
+		if o.stale(now) || o.advanced || !strings.Contains(o.failure("heartbeat"), "no advancing heartbeat was witnessed") {
+			t.Fatalf("recent heartbeat misclassified: %+v: %s", o, o.failure("heartbeat"))
+		}
+	})
+	t.Run("advancing", func(t *testing.T) {
+		var o releaseShipHeartbeatObservation
+		o.observe(now.Add(-time.Millisecond), nil)
+		o.observe(now, nil)
+		if o.stale(now) || !strings.Contains(o.failure("heartbeat"), "advanced after the timeout") || !strings.Contains(o.failure("heartbeat"), "cleanup failed") {
+			t.Fatalf("advancing heartbeat misclassified: %+v: %s", o, o.failure("heartbeat"))
+		}
+	})
+	t.Run("strict_stale_boundary", func(t *testing.T) {
+		var o releaseShipHeartbeatObservation
+		o.observe(now.Add(-time.Second), nil)
+		if o.stale(now) {
+			t.Fatal("exactly one second must not establish a stale heartbeat")
+		}
+		if !o.stale(now.Add(time.Nanosecond)) {
+			t.Fatal("a readable heartbeat older than one second must retain the original success condition")
+		}
+	})
 }
