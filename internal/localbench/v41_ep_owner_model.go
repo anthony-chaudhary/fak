@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/version"
-	"os"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -22,6 +22,7 @@ import (
 // and one execution. The lifecycle joins operations before reading snapshots.
 // No native command installs this binding until its separate admission exists.
 type v41EPOwnerModelAdapter struct {
+	panicMode    v41EPOwnerPanicModeInput
 	loadCalled   bool
 	loadReturned bool
 	loadResult   ggufload.V41ExpertParallelSessionResult
@@ -46,8 +47,18 @@ type v41EPOwnerModelState struct {
 	followerResult                     model.EPFollowerResult
 }
 
-func bindV41EPOwnerModelDeps(base v41EPOwnerLifecycleDeps) (v41EPOwnerLifecycleDeps, *v41EPOwnerModelAdapter) {
-	a := &v41EPOwnerModelAdapter{}
+// v41EPOwnerPanicModeInput is a trusted caller's observed raw GODEBUG value,
+// including an observed empty value. It is copied at bind time. The caller must
+// keep the process setting stable from capture through root completion. This
+// private input is not authenticated configuration or native admission; current
+// callers are tests. Future runtime activation needs an authoritative capture.
+type v41EPOwnerPanicModeInput struct {
+	environment string
+	observed    bool
+}
+
+func bindV41EPOwnerModelDeps(base v41EPOwnerLifecycleDeps, panicMode v41EPOwnerPanicModeInput) (v41EPOwnerLifecycleDeps, *v41EPOwnerModelAdapter) {
+	a := &v41EPOwnerModelAdapter{panicMode: panicMode}
 	base.Load, base.LoadRetirement = a.load, a.loadRetirement
 	base.Root, base.Follower, base.Shutdown = a.root, a.follower, a.shutdown
 	return base, a
@@ -182,7 +193,7 @@ func (a *v41EPOwnerModelAdapter) root(ctx context.Context, req V41EPOwnerRequest
 	}
 	s.executionCalled = true
 	defer func() { s.executionReturned = true }()
-	if err := v41EPOwnerRootPanicMode(); err != nil {
+	if err := v41EPOwnerRootPanicMode(a.panicMode); err != nil {
 		return nil, err
 	}
 	// This exact invocation is the only source of Execution/Run below. It owns
@@ -279,9 +290,14 @@ func (a *v41EPOwnerModelAdapter) shutdown(ctx context.Context, loaded *v41EPOwne
 
 // A normal successful rawdecode return proves Close returned only under the
 // modern panic(nil) semantics. Its opaque cleanup helpers cannot distinguish a
-// recovered nil payload in compatibility mode. Trusted synchronous callers must
-// keep GODEBUG stable during execution; this is admission, not a process lock.
-func v41EPOwnerRootPanicMode() error {
+// recovered nil payload in compatibility mode. Require the caller's observed
+// settings and probe the actual runtime as well: stale or forged modern input
+// cannot admit a live compatibility mode. The probe is point-in-time only, not
+// retirement evidence or a replacement for the caller's stability contract.
+func v41EPOwnerRootPanicMode(input v41EPOwnerPanicModeInput) error {
+	if !input.observed {
+		return errors.New("v41 EP model: observed runtime panic settings unavailable")
+	}
 	build, ok := debug.ReadBuildInfo()
 	if !ok || !version.IsValid(build.GoVersion) || version.Compare(build.GoVersion, "go1.21") < 0 {
 		return errors.New("v41 EP model: runtime panic semantics unavailable")
@@ -292,7 +308,18 @@ func v41EPOwnerRootPanicMode() error {
 			defaults = setting.Value
 		}
 	}
-	return v41EPOwnerCheckPanicnil(defaults, os.Getenv("GODEBUG"))
+	if err := v41EPOwnerCheckPanicnil(defaults, input.environment); err != nil {
+		return err
+	}
+	if !v41EPOwnerModernPanicnil() {
+		return errors.New("v41 EP model: live panicnil compatibility refuses root execution")
+	}
+	return nil
+}
+
+func v41EPOwnerModernPanicnil() (modern bool) {
+	defer func() { _, modern = recover().(*runtime.PanicNilError) }()
+	panic(nil)
 }
 
 func v41EPOwnerCheckPanicnil(defaults, environment string) error {

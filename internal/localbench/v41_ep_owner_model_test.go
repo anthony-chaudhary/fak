@@ -56,7 +56,7 @@ func TestV41EPOwnerModelAdapterLoad(t *testing.T) {
 			f.backend.Identity.Device = f.req.Owners[1].ExpectedDevice
 			f.group.StopIO = func(error) error { return conn.Close() }
 			f.group.Close = group.Close
-			deps, adapter := bindV41EPOwnerModelDeps(f.deps)
+			deps, adapter := bindV41EPOwnerModelDeps(f.deps, v41EPOwnerPanicModeInput{environment: os.Getenv("GODEBUG"), observed: true})
 			load := deps.Load
 			if mode == "preflight-cancel" {
 				deps.Load = func(ctx context.Context, req V41EPOwnerRequest, be *v41EPOwnerLifecycleBackend, g *v41EPOwnerLifecycleGroup) (*v41EPOwnerLifecycleLoaded, error) {
@@ -111,13 +111,18 @@ func (b *v41EPModelLoadBackend) Caps() compute.Caps {
 
 // fak-test:runtime integration est=100ms lane=default
 func TestV41EPOwnerModelAdapterBinding(t *testing.T) {
-	for _, mode := range []string{"healthy", "report-budget", "cancel-after-close", "constructor-panic", "cancel-before-root", "panicnil-refusal", "second-factory"} {
+	for _, mode := range []string{"healthy", "report-budget", "cancel-after-close", "constructor-panic", "cancel-before-root", "panicnil-refusal", "missing-panic-settings", "malformed-panic-settings", "stale-modern-settings", "second-factory"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("FAK_PAGED_KV", "off")
 			// Explicitly reset modern semantics after the separate scoped loader test.
 			t.Setenv("GODEBUG", "panicnil=0")
 			if mode == "panicnil-refusal" {
 				t.Setenv("GODEBUG", "panicnil=0,panicnil=1")
+			}
+			if mode == "malformed-panic-settings" {
+				// Invalid dynamic input leaves the prior modern setting in place,
+				// but the captured ambiguity must still refuse execution.
+				t.Setenv("GODEBUG", "panicnil=0,panicnil=bad")
 			}
 			fixture := newV41EPGroupTCPFixture(t, 3)
 			var joins [3]<-chan v41EPOwnerPhaseResult
@@ -157,6 +162,14 @@ func TestV41EPOwnerModelAdapterBinding(t *testing.T) {
 			}
 			if mode == "constructor-panic" {
 				root.backend.interrupted = true // Arm only after the initial Close completed.
+			}
+			if mode == "missing-panic-settings" {
+				root.adapter.panicMode = v41EPOwnerPanicModeInput{}
+			}
+			if mode == "stale-modern-settings" {
+				// Deliberately violate capture stability: the live probe must still
+				// refuse before a fresh Session can produce retirement evidence.
+				t.Setenv("GODEBUG", "panicnil=1")
 			}
 			var follower [3]<-chan v41EPOwnerPhaseResult
 			var entered [3]chan struct{}
@@ -242,9 +255,15 @@ func TestV41EPOwnerModelAdapterBinding(t *testing.T) {
 					retired.Available || retired.Completed || retired.Err != nil || root.backend.cleanupAttempts != 1 || root.backend.cleanupCompletions != 0 {
 					t.Fatalf("opaque failed retirement was credited: result=%+v retirement=%+v", rootResult, retired)
 				}
-			case "panicnil-refusal":
-				if rootResult.err() == nil || !strings.Contains(rootResult.err().Error(), "panicnil compatibility") || retired.Available || len(root.backend.kv) != 1 {
-					t.Fatalf("compatibility mode entered opaque execution: %+v %+v", rootResult, retired)
+			case "panicnil-refusal", "missing-panic-settings", "malformed-panic-settings", "stale-modern-settings":
+				want := "panicnil compatibility or ambiguous runtime setting"
+				if mode == "missing-panic-settings" {
+					want = "observed runtime panic settings unavailable"
+				} else if mode == "stale-modern-settings" {
+					want = "live panicnil compatibility refuses root execution"
+				}
+				if rootResult.err() == nil || !strings.Contains(rootResult.err().Error(), want) || retired.Available || retired.Completed || retired.Err != nil || len(root.backend.kv) != 1 || root.backend.constructors != 1 || root.adapter.state.rootComplete {
+					t.Fatalf("unproven panic mode entered opaque execution: %+v %+v", rootResult, retired)
 				}
 			case "cancel-before-root":
 				if !errors.Is(rootResult.err(), context.Canceled) || retired.Available || len(root.backend.kv) != 1 {
@@ -257,7 +276,8 @@ func TestV41EPOwnerModelAdapterBinding(t *testing.T) {
 				if err != nil || !r.Available || !peer.adapter.state.executionReturned {
 					t.Fatalf("rank %d result was not joined: %+v %v", rank, r, err)
 				}
-				accepted := mode != "constructor-panic" && mode != "cancel-before-root" && mode != "panicnil-refusal"
+				accepted := mode != "constructor-panic" && mode != "cancel-before-root" && mode != "panicnil-refusal" &&
+					mode != "missing-panic-settings" && mode != "malformed-panic-settings" && mode != "stale-modern-settings"
 				if accepted {
 					if peer.claims != 1 || r.AcceptedSessions != 1 || r.CloseAttempts != 1 || r.CloseCompletions != 1 || peer.backend.kv[0].frees != 1 {
 						t.Fatalf("rank %d handoff/Close changed: claims=%d retirement=%+v", rank, peer.claims, r)
@@ -339,7 +359,7 @@ func newV41EPModelPeer(t *testing.T, f *v41EPGroupTCPFixture, rank int, req V41E
 		}
 		p.model.SetEPDecodeCoordinator(coordinator)
 	}
-	p.deps, p.adapter = bindV41EPOwnerModelDeps(v41EPOwnerLifecycleDeps{})
+	p.deps, p.adapter = bindV41EPOwnerModelDeps(v41EPOwnerLifecycleDeps{}, v41EPOwnerPanicModeInput{environment: os.Getenv("GODEBUG"), observed: true})
 	p.loaded, err = p.adapter.bindLoaded(req, p.backend, g, initial, coordinator)
 	t.Cleanup(func() {
 		f.close() // Join every fixture user before emergency ownership checks.
@@ -418,8 +438,24 @@ func TestV41EPOwnerModelAdapterPanicMode(t *testing.T) {
 		})
 	}
 	t.Setenv("GODEBUG", "panicnil=0")
-	if err := v41EPOwnerRootPanicMode(); err != nil {
-		t.Fatalf("current modern runtime is not inspectable: %v", err)
+	input := v41EPOwnerPanicModeInput{environment: os.Getenv("GODEBUG"), observed: true}
+	_, adapter := bindV41EPOwnerModelDeps(v41EPOwnerLifecycleDeps{}, input)
+	input.environment, input.observed = "panicnil=1", false
+	if err := v41EPOwnerRootPanicMode(adapter.panicMode); err != nil {
+		t.Fatalf("current modern runtime or copied input changed: %v", err)
+	}
+	if err := v41EPOwnerRootPanicMode(input); err == nil {
+		t.Fatal("missing observation was accepted")
+	}
+	t.Setenv("GODEBUG", "panicnil=1")
+	if err := v41EPOwnerRootPanicMode(adapter.panicMode); err == nil {
+		t.Fatal("stale or forged modern input admitted live compatibility mode")
+	}
+	t.Setenv("GODEBUG", "panicnil=0")
+	t.Setenv("GODEBUG", "panicnil=0,panicnil=bad")
+	input = v41EPOwnerPanicModeInput{environment: os.Getenv("GODEBUG"), observed: true}
+	if !v41EPOwnerModernPanicnil() || v41EPOwnerRootPanicMode(input) == nil {
+		t.Fatal("modern runtime probe bypassed ambiguous captured settings")
 	}
 }
 
@@ -443,7 +479,7 @@ func TestV41EPOwnerModelAdapterPartialBinding(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close(); _ = group.Close() })
 	req := v41EPOwnerRequestFixture()
 	req.Repetitions = 2 // Reporting/binding validation fails after actual adoption.
-	_, adapter := bindV41EPOwnerModelDeps(v41EPOwnerLifecycleDeps{})
+	_, adapter := bindV41EPOwnerModelDeps(v41EPOwnerLifecycleDeps{}, v41EPOwnerPanicModeInput{environment: os.Getenv("GODEBUG"), observed: true})
 	loaded, err := adapter.bindLoaded(req, be, group, initial, nil)
 	if loaded == nil {
 		initial.Close()
