@@ -1452,6 +1452,11 @@
           "category": "incidental",
           "reason": "Escaped newline followed by Cache in a renderer string yields this exact lexical token, not a cache mechanism; exact-token ignore preserves existing uncached identifiers.",
           "token": "ncache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private page-cache read helper that carries existing read ownership and requested allocation extent for retained-buffer accounting; it introduces no distinct cache policy or abstraction.",
+          "token": "readExpertPageCacheOwned"
         }
       ],
       "exclude": [
@@ -1758,6 +1763,7 @@
         "qwen38_cache_report",
         "qwenhybridkvcachefromhost",
         "qwenhybridkvcachetohost",
+        "readExpertPageCacheOwned",
         "reasonbuildcachecleanrace",
         "registerCacheLevers",
         "renderinkernelchatmlrequest",

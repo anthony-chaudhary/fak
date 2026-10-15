@@ -225,35 +225,45 @@ func (s *ggufExpertSource) enablePageCache(data []byte) bool {
 // read books BytesFromDevice += aligned length, ExpertsRead++, and AdvantageBytes += alignedLen -
 // stride (the alignment over-read); a warm read books WarmHits++ and BytesFromMapping += stride.
 func (s *ggufExpertSource) readExpertPageCache(name string, e int) ([]byte, bool, error) {
+	raw, warm, _, err := s.readExpertPageCacheOwned(name, e)
+	return raw, warm, err
+}
+
+// readExpertPageCacheOwned reports the requested backing allocation separately
+// from the logical payload. A warm mapped view owns no new buffer. Cold mapped
+// reads own alignedLen bytes even though the returned slice has stride capacity.
+// Ordinary reads own exactly their payload length. This is allocation identity
+// evidence for retention, not a change to the logical-byte or page-cache ledgers.
+func (s *ggufExpertSource) readExpertPageCacheOwned(name string, e int) ([]byte, bool, int64, error) {
 	entry, ok := s.tensors[name]
 	if !ok {
-		return nil, false, fmt.Errorf("%w: %s", ErrGGUFExpertNotFound, name)
+		return nil, false, 0, fmt.Errorf("%w: %s", ErrGGUFExpertNotFound, name)
 	}
 	if e < 0 || e >= entry.desc.Experts {
-		return nil, false, fmt.Errorf("%w: expert %d of %s outside [0,%d)", ErrGGUFExpertOutOfRange, e, name, entry.desc.Experts)
+		return nil, false, 0, fmt.Errorf("%w: expert %d of %s outside [0,%d)", ErrGGUFExpertOutOfRange, e, name, entry.desc.Experts)
 	}
 	maxInt := int64(^uint(0) >> 1)
 	if entry.stride > maxInt {
-		return nil, false, fmt.Errorf("%w: %s expert stride %d exceeds addressable buffer size", ErrGGUFExpertMetadata, name, entry.stride)
+		return nil, false, 0, fmt.Errorf("%w: %s expert stride %d exceeds addressable buffer size", ErrGGUFExpertMetadata, name, entry.stride)
 	}
 	st := s.state()
 	if st == nil {
 		buf, err := s.readExpert(name, e)
-		return buf, false, err
+		return buf, false, int64(len(buf)), err
 	}
 	st.mu.Lock()
 	mode, data := st.mode, st.data
 	st.mu.Unlock()
 	if mode != PageCacheMapped || data == nil {
 		buf, err := s.readExpert(name, e)
-		return buf, false, err
+		return buf, false, int64(len(buf)), err
 	}
 	stride := entry.stride
 	start := entry.desc.Offset + int64(e)*stride
 	if start < 0 || stride > int64(len(data)) || start > int64(len(data))-stride {
 		// The mapping does not cover this expert (should be impossible after enablePageCache's
 		// length gate, but a concurrent truncation must fail loudly, never slice out of range).
-		return nil, false, fmt.Errorf("%w: %s expert %d range [%d,%d) outside mapping [0,%d)",
+		return nil, false, 0, fmt.Errorf("%w: %s expert %d range [%d,%d) outside mapping [0,%d)",
 			ErrGGUFExpertMetadata, name, e, start, start+stride, len(data))
 	}
 
@@ -282,7 +292,7 @@ func (s *ggufExpertSource) readExpertPageCache(name string, e int) ([]byte, bool
 		st.stats.BytesFromMapping += stride
 		st.mu.Unlock()
 		rel := start - alignedStart
-		return data[alignedStart+rel : alignedStart+rel+stride : alignedStart+rel+stride], true, nil
+		return data[alignedStart+rel : alignedStart+rel+stride : alignedStart+rel+stride], true, 0, nil
 	}
 	st.mu.Unlock()
 
@@ -290,11 +300,11 @@ func (s *ggufExpertSource) readExpertPageCache(name string, e int) ([]byte, bool
 	// so a repeat read of this expert - or an expert sharing one of these pages - is a warm hit.
 	alignedLen := alignedEnd - alignedStart
 	if alignedLen > maxInt {
-		return nil, false, fmt.Errorf("%w: %s aligned length %d exceeds addressable buffer size", ErrGGUFExpertMetadata, name, alignedLen)
+		return nil, false, 0, fmt.Errorf("%w: %s aligned length %d exceeds addressable buffer size", ErrGGUFExpertMetadata, name, alignedLen)
 	}
 	buf := make([]byte, alignedLen)
 	if _, err := s.r.ReadAt(buf, alignedStart); err != nil {
-		return nil, false, fmt.Errorf("model: gguf expert page-cache read %s[%d]: %w", name, e, err)
+		return nil, false, 0, fmt.Errorf("model: gguf expert page-cache read %s[%d]: %w", name, e, err)
 	}
 	rel := start - alignedStart
 	out := buf[rel : rel+stride : rel+stride]
@@ -312,7 +322,7 @@ func (s *ggufExpertSource) readExpertPageCache(name string, e int) ([]byte, bool
 	// not a kernel pin - see markFillPin.
 	st.stats.FillPins++
 	st.mu.Unlock()
-	return out, false, nil
+	return out, false, alignedLen, nil
 }
 
 // pageCacheSession returns a snapshot of the page-cache ledger plus whether the page cache is
