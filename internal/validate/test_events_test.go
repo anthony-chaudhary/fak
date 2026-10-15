@@ -332,13 +332,15 @@ func eventID(action, pkg, test string) validateEventIdentity {
 
 func TestValidateEventDecoderRejectsTerminalOrdering(t *testing.T) {
 	for name, events := range map[string][]validateEventIdentity{
-		"premature-package":       {eventID("run", "p", "TestX"), eventID("pass", "p", ""), eventID("pass", "p", "TestX")},
-		"run-after-package":       {eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("pass", "p", ""), eventID("run", "p", "TestY"), eventID("pass", "p", "TestY")},
-		"output-after-test":       {eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("output", "p", "TestX"), eventID("pass", "p", "")},
-		"premature-parent":        {eventID("run", "p", "TestParent"), eventID("run", "p", "TestParent/Child"), eventID("pass", "p", "TestParent"), eventID("pass", "p", "TestParent/Child"), eventID("pass", "p", "")},
-		"child-after-parent":      {eventID("run", "p", "TestParent"), eventID("pass", "p", "TestParent"), eventID("run", "p", "TestParent/Child"), eventID("pass", "p", "TestParent/Child"), eventID("pass", "p", "")},
-		"orphan-subtest":          {eventID("run", "p", "TestParent/Child"), eventID("pass", "p", "TestParent/Child"), eventID("pass", "p", "")},
-		"cross-package-premature": {eventID("run", "p", "TestX"), eventID("run", "q", "TestY"), eventID("pass", "p", ""), eventID("pass", "q", "TestY"), eventID("pass", "p", "TestX"), eventID("pass", "q", "")},
+		"duplicate-run":              {eventID("run", "p", "TestX"), eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("pass", "p", "")},
+		"duplicate-test-terminal":    {eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("pass", "p", "")},
+		"wrong-package-terminal":     {eventID("run", "p", "TestX"), eventID("pass", "q", "TestX"), eventID("pass", "p", "")},
+		"duplicate-package-terminal": {eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("pass", "p", ""), eventID("pass", "p", "")},
+		"different-slash-identity":   {eventID("run", "p", "TestNames"), eventID("run", "p", "TestNames/step"), eventID("pass", "p", "TestNames/step/host-activation"), eventID("pass", "p", "TestNames"), eventID("pass", "p", "")},
+		"premature-package":          {eventID("run", "p", "TestX"), eventID("pass", "p", ""), eventID("pass", "p", "TestX")},
+		"run-after-package":          {eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("pass", "p", ""), eventID("run", "p", "TestY"), eventID("pass", "p", "TestY")},
+		"output-after-test":          {eventID("run", "p", "TestX"), eventID("pass", "p", "TestX"), eventID("output", "p", "TestX"), eventID("pass", "p", "")},
+		"cross-package-premature":    {eventID("run", "p", "TestX"), eventID("run", "q", "TestY"), eventID("pass", "p", ""), eventID("pass", "q", "TestY"), eventID("pass", "p", "TestX"), eventID("pass", "q", "")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			packages := []string{"p"}
@@ -358,6 +360,71 @@ func TestValidateEventDecoderAcceptsOrderedInterleavedSubtests(t *testing.T) {
 		t.Fatalf("ordered interleaving rejected: %v %v", tests, err)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestValidateEventDecoderAcceptsLiteralSlashSiblings(t *testing.T) {
+	for _, lateSibling := range []bool{false, true} {
+		for _, terminal := range []string{"pass", "fail"} {
+			t.Run(fmt.Sprintf("late=%t/%s", lateSibling, terminal), func(t *testing.T) {
+				// These names can be siblings created by t.Run("step", ...) and
+				// t.Run("step/host-activation", ...). JSON has no parent field.
+				prefix := "TestNames/step"
+				sibling := prefix + "/host-activation"
+				input := []validateEventIdentity{
+					eventID("run", "p", "TestNames"),
+					eventID("run", "p", prefix),
+					eventID("run", "q", "TestNames"),
+					eventID("run", "q", prefix),
+					eventID("pass", "q", prefix),
+					eventID("pass", "q", "TestNames"),
+					eventID("pass", "q", ""),
+				}
+				if !lateSibling {
+					input = append(input, eventID("run", "p", sibling))
+				}
+				input = append(input, eventID(terminal, "p", prefix))
+				if lateSibling {
+					input = append(input, eventID("run", "p", sibling))
+				}
+				input = append(input, eventID("pass", "p", sibling), eventID(terminal, "p", "TestNames"), eventID(terminal, "p", ""))
+				events, tests, err := decodeValidateTestEvents(eventSequence(input...), []string{"p", "q"})
+				if err != nil || len(events) != len(input) {
+					t.Fatalf("literal-slash sibling stream rejected: events=%d want=%d err=%v", len(events), len(input), err)
+				}
+				want := []validateTestTerminal{
+					{Package: "q", Test: prefix, Action: "pass"},
+					{Package: "q", Test: "TestNames", Action: "pass"},
+					{Package: "p", Test: prefix, Action: terminal},
+					{Package: "p", Test: sibling, Action: "pass"},
+					{Package: "p", Test: "TestNames", Action: terminal},
+				}
+				if len(tests) != len(want) {
+					t.Fatalf("terminals=%v want=%v", tests, want)
+				}
+				for i := range want {
+					if tests[i] != want[i] {
+						t.Fatalf("terminal[%d]=%v want=%v", i, tests[i], want[i])
+					}
+				}
+				for i, raw := range events {
+					var got validateEventIdentity
+					if err := json.Unmarshal(raw, &got); err != nil || got != input[i] {
+						t.Fatalf("event[%d] changed: %v err=%v", i, got, err)
+					}
+				}
+				// Complete identities cannot replace missing package/EOF evidence.
+				if _, _, err := decodeValidateTestEvents(eventSequence(input[:len(input)-1]...), []string{"p", "q"}); err == nil {
+					t.Fatal("missing final package terminal accepted")
+				}
+				if _, _, err := decodeValidateTestEvents(append(eventSequence(input...), '{'), []string{"p", "q"}); err == nil {
+					t.Fatal("truncated trailing event accepted")
+				}
+			})
+		}
+	}
+
+}
+
 func TestValidateEventCaptureBinaryRoundtrip(t *testing.T) {
 	t.Setenv("FAK_VALIDATE_EVENTS_FIXTURE", "binary")
 	executable, err := os.Executable()

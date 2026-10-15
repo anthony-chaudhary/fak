@@ -363,24 +363,8 @@ func decodeValidateTestEvents(stdout []byte, packages []string) ([]json.RawMessa
 			if running[key] || terminals[key] {
 				return events, tests, fmt.Errorf("duplicate test run: %s", event.Test)
 			}
-			if strings.Contains(event.Test, "/") {
-				ancestor := event.Test
-				found := false
-				for strings.Contains(ancestor, "/") {
-					ancestor = ancestor[:strings.LastIndex(ancestor, "/")]
-					parentKey := event.Package + "\x00" + ancestor
-					if running[parentKey] {
-						if terminals[parentKey] {
-							return events, tests, fmt.Errorf("subtest after parent terminal: %s", event.Test)
-						}
-						found = true
-						break
-					}
-				}
-				if !found {
-					return events, tests, fmt.Errorf("subtest without running parent: %s", event.Test)
-				}
-			}
+			// A literal slash in t.Run names is indistinguishable from a nesting
+			// separator in Go JSON. Track exact identities, not inferred parents.
 			running[key] = true
 		}
 		if event.Action == "pass" || event.Action == "skip" || event.Action == "fail" {
@@ -398,11 +382,6 @@ func decodeValidateTestEvents(stdout []byte, packages []string) ([]json.RawMessa
 			}
 			if !running[key] || terminals[key] {
 				return events, tests, fmt.Errorf("test terminal without unique run: %s", event.Test)
-			}
-			for active := range running {
-				if strings.HasPrefix(active, key+"/") && !terminals[active] {
-					return events, tests, fmt.Errorf("parent terminal before subtest terminal: %s", active)
-				}
 			}
 			terminals[key] = true
 			tests = append(tests, validateTestTerminal{Package: event.Package, Test: event.Test, Action: event.Action})
