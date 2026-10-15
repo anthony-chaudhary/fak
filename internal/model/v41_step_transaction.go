@@ -45,18 +45,9 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	var resident *v41MHCResident
 	ready := false
 	defer func() {
-		if ready {
-			return
-		}
-		if primary := recover(); primary != nil {
+		if !ready {
 			tx.abortAfterFailure()
-			panic(primary)
 		}
-		if err != nil {
-			tx.abortAfterFailure()
-			return
-		}
-		tx.abort()
 	}()
 	if st == nil {
 		return tx, v41StageErr(v41StageEmbedding, -1,
