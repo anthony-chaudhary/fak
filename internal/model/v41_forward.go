@@ -757,43 +757,44 @@ func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41F
 // turns from a 492 s wedge into a named, pre-emptive "no".
 func (s *Session) prefillV41(ids []int) []float32 {
 	s.ensureOpenBackendSession()
-	defer s.v41IndexerScoreGuard()
-	if err := s.M.v41ForwardAdmitted(); err != nil {
-		panic(err)
-	}
-	if err := s.M.v41PrefillFirstTokenAdmitted(len(ids)); err != nil {
-		panic(err)
-	}
-	s.M.v41SetExpertFaultPhase(V41PhasePrefill)
-	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
-	// Suffix-prefill cache reuse (#13346): when the session already holds a
-	// seeded, plain-layer continuation state, append the incoming tokens through
-	// the same transactional incremental step Session.Step uses (#13313) instead
-	// of re-folding the entire committed history. Each suffix token advances one
-	// position; only the final token's logits are returned (Prefill's contract).
-	// A cold session (no state, or a non-plain/compressed plan) keeps the
-	// historical full-prefill path byte-for-byte, so the first request still
-	// seeds the cache and a failed step never claims a cache hit.
-	if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
-		return s.prefillV41Suffix(ids)
-	}
-	var act *Activations
-	var err error
-	func() {
-		endBatch := s.v41BeginStepBatch()
-		defer func() {
-			v41FinishStepBatch(endBatch, &err)
-			if err != nil {
-				act = nil
-			}
+	return s.v41IndexerScoreRecovering(func() []float32 {
+		if err := s.M.v41ForwardAdmitted(); err != nil {
+			panic(err)
+		}
+		if err := s.M.v41PrefillFirstTokenAdmitted(len(ids)); err != nil {
+			panic(err)
+		}
+		s.M.v41SetExpertFaultPhase(V41PhasePrefill)
+		defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
+		// Suffix-prefill cache reuse (#13346): when the session already holds a
+		// seeded, plain-layer continuation state, append the incoming tokens through
+		// the same transactional incremental step Session.Step uses (#13313) instead
+		// of re-folding the entire committed history. Each suffix token advances one
+		// position; only the final token's logits are returned (Prefill's contract).
+		// A cold session (no state, or a non-plain/compressed plan) keeps the
+		// historical full-prefill path byte-for-byte, so the first request still
+		// seeds the cache and a failed step never claims a cache hit.
+		if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
+			return s.prefillV41Suffix(ids)
+		}
+		var act *Activations
+		var err error
+		func() {
+			endBatch := s.v41BeginStepBatch()
+			defer func() {
+				v41FinishStepBatch(endBatch, &err)
+				if err != nil {
+					act = nil
+				}
+			}()
+			act, err = s.M.forwardV41WithHeadSelection(ids, s.v41State(), true)
 		}()
-		act, err = s.M.forwardV41WithHeadSelection(ids, s.v41State(), true)
-	}()
-	if err != nil {
-		panic(err)
-	}
-	s.M.v41NoteExpertFaultToken(len(ids))
-	return lastLogits(act)
+		if err != nil {
+			panic(err)
+		}
+		s.M.v41NoteExpertFaultToken(len(ids))
+		return lastLogits(act)
+	})
 }
 
 // v41PrefillStepProbe is an optional test-only observer invoked once per suffix
@@ -938,51 +939,52 @@ func (s *Session) v41IncrementalEligible() bool {
 // state, the whole-history recompute on the fallback).
 func (s *Session) stepV41(id int) []float32 {
 	s.ensureOpenBackendSession()
-	defer s.v41IndexerScoreGuard()
-	if err := s.M.v41ForwardAdmitted(); err != nil {
-		panic(err)
-	}
-	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
-	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
-	if s.v41IncrementalEligible() {
-		var logits []float32
-		var err error
-		func() {
-			endBatch := s.v41BeginStepBatch()
-			defer func() {
-				v41FinishStepBatch(endBatch, &err)
-				if err != nil {
-					logits = nil
-				}
-			}()
-			logits, _, err = s.M.forwardV41StepAdmitted(id, s.v41State(), &v41ProjScratch{})
-		}()
-		if err == nil {
-			s.M.v41NoteExpertFaultToken(1)
-			if v41IncrementalStepProbe != nil {
-				v41IncrementalStepProbe()
-			}
-			return logits
-		}
-		var batchErr *v41StepBatchError
-		var selectedRoPE *V41TailRoPEOperationError
-		var selectedAttention *V41SharedAttentionOperationError
-		var selectedScore *V41IndexerScoreOperationError
-		var selectedMHC *V41MHCOperationError
-		if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || s.M.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage) {
+	return s.v41IndexerScoreRecovering(func() []float32 {
+		if err := s.M.v41ForwardAdmitted(); err != nil {
 			panic(err)
 		}
-		// A typed stage refusal the eligibility check could not foresee (e.g. the
-		// step position does not match the retained cursor). The seam rolled the
-		// step back, so history is untouched; fall through to the reference path,
-		// which re-folds the token into the committed history.
-	}
-	act, err := s.M.forwardV41([]int{id}, s.v41State())
-	if err != nil {
-		panic(err)
-	}
-	s.M.v41NoteExpertFaultToken(1)
-	return lastLogits(act)
+		s.M.v41SetExpertFaultPhase(V41PhaseDecode)
+		defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
+		if s.v41IncrementalEligible() {
+			var logits []float32
+			var err error
+			func() {
+				endBatch := s.v41BeginStepBatch()
+				defer func() {
+					v41FinishStepBatch(endBatch, &err)
+					if err != nil {
+						logits = nil
+					}
+				}()
+				logits, _, err = s.M.forwardV41StepAdmitted(id, s.v41State(), &v41ProjScratch{})
+			}()
+			if err == nil {
+				s.M.v41NoteExpertFaultToken(1)
+				if v41IncrementalStepProbe != nil {
+					v41IncrementalStepProbe()
+				}
+				return logits
+			}
+			var batchErr *v41StepBatchError
+			var selectedRoPE *V41TailRoPEOperationError
+			var selectedAttention *V41SharedAttentionOperationError
+			var selectedScore *V41IndexerScoreOperationError
+			var selectedMHC *V41MHCOperationError
+			if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || s.M.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage) {
+				panic(err)
+			}
+			// A typed stage refusal the eligibility check could not foresee (e.g. the
+			// step position does not match the retained cursor). The seam rolled the
+			// step back, so history is untouched; fall through to the reference path,
+			// which re-folds the token into the committed history.
+		}
+		act, err := s.M.forwardV41([]int{id}, s.v41State())
+		if err != nil {
+			panic(err)
+		}
+		s.M.v41NoteExpertFaultToken(1)
+		return lastLogits(act)
+	})
 }
 
 // v41State lazily installs the session's V4.1 continuation state. When the

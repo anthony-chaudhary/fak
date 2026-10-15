@@ -337,21 +337,44 @@ func v41IndexerScoreOperationErr(layer int, cause error) error {
 // host selectors retain their rejection policy; close the selected session at
 // its public boundary after the normal forward rollback, without replay.
 func (s *Session) v41IndexerScoreGuard() {
-	if r := recover(); r != nil {
-		if err, ok := r.(error); ok && !s.halClosed {
-			var selected *V41IndexerScoreOperationError
-			if errors.As(err, &selected) {
-				closed := &BackendForwardOperationError{
-					Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"),
-					Path: "v41-indexer-score", Layer: selected.Layer, Stage: "selection", Cause: err,
-				}
-				s.halFailure = closed
-				s.closeBackendOwned()
-				panic(v41IndexerScoreOperationErr(selected.Layer, closed))
-			}
-		}
-		panic(r)
+	if primary := recover(); primary != nil {
+		panic(s.v41IndexerScorePanic(primary))
 	}
+}
+
+// Keep the selected-error policy shared with the legacy batch adapter. Unknown
+// payloads retain their identity; only the selected score marker retires here.
+func (s *Session) v41IndexerScorePanic(primary any) any {
+	if err, ok := primary.(error); ok && !s.halClosed {
+		var selected *V41IndexerScoreOperationError
+		if errors.As(err, &selected) {
+			closed := &BackendForwardOperationError{
+				Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"),
+				Path: "v41-indexer-score", Layer: selected.Layer, Stage: "selection", Cause: err,
+			}
+			s.halFailure = closed
+			s.closeBackendOwned()
+			return v41IndexerScoreOperationErr(selected.Layer, closed)
+		}
+	}
+	return primary
+}
+
+// Conversion runs only after the owned forward and its defers finish. A nil
+// panic remains present even in legacy mode; Goexit never returns from the
+// inner call and therefore cannot become an ordinary result or conversion.
+func (s *Session) v41IndexerScoreRecovering(forward func() []float32) (result []float32) {
+	completed := false
+	var primary any
+	func() {
+		defer func() { primary = recover() }()
+		result = forward()
+		completed = true
+	}()
+	if !completed {
+		panic(s.v41IndexerScorePanic(primary))
+	}
+	return result
 }
 
 // Keep the existing publication/selection code on the nil path. The selected
