@@ -57,11 +57,11 @@ func (m *Model) AcquireV41BatchEligibility(ctx context.Context, be compute.Backe
 	}
 	e := &V41BatchEligibility{model: m}
 	defer func() {
-		primary := recover()
 		if eligibility == nil {
-			finishModelCleanup(primary, &err, func() { e.once.Do(m.releaseWeightSession) })
-		} else if primary != nil {
-			panic(primary)
+			// No eligibility was transferred. Preserve the acquisition unwind
+			// or returned error while suppressing only rollback cleanup panics.
+			defer func() { _ = recover() }()
+			e.once.Do(m.releaseWeightSession)
 		}
 	}()
 	if err = ctx.Err(); err != nil {
