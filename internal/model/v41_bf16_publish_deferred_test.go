@@ -439,7 +439,7 @@ func TestV41ResidentBF16DeferredCallers(t *testing.T) {
 		if len(b.publishSites) != 0 || !slices.Equal(b.deferredSites, []uint32{compute.V41BF16PublishTailRoPEOutput}) || b.deferredFences != 1 || len(b.deferredPending) != 0 {
 			t.Fatalf("synchronous=%v deferred=%v fences=%d, want one deferred tail-RoPE output publication", b.publishSites, b.deferredSites, b.deferredFences)
 		}
-		v41PublicationRoPECensus(t, b, false)
+		v41PublicationRoPECensus(t, s, b, false)
 		for _, fault := range []string{"index-nonfinite", "latent-overflow"} {
 			_, _, syncErr, _, _ := run(false, fault)
 			_, _, deferErr, deferSession, b := run(true, fault)
@@ -455,7 +455,7 @@ func TestV41ResidentBF16DeferredCallers(t *testing.T) {
 			if !deferSession.BackendSessionClosed() || len(b.deferredPending) != 0 || len(b.publishSites) != 0 {
 				t.Fatalf("%s: closed=%t pending=%d synchronous=%v", fault, deferSession.BackendSessionClosed(), len(b.deferredPending), b.publishSites)
 			}
-			v41PublicationRoPECensus(t, b, false)
+			v41PublicationRoPECensus(t, deferSession, b, false)
 		}
 	})
 	t.Run("index-weight-scale", func(t *testing.T) {
