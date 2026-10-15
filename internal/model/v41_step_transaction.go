@@ -459,31 +459,41 @@ func (tx *v41StepTransaction) prepareLayer() (err error) {
 	if tx.closed || tx.pendingLayer != nil || tx.nextLayer >= tx.layers {
 		return fmt.Errorf("%w: incremental transaction has no next layer", ErrV41ForwardStage)
 	}
-	defer tx.abortOnPanic()
-	tx.pendingLayer, err = tx.layer(tx.nextLayer)
-	if err != nil {
-		return tx.abortLayerError(err)
-	}
-	return nil
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	err = func() error {
+		tx.pendingLayer, err = tx.layer(tx.nextLayer)
+		if err != nil {
+			return tx.abortLayerError(err)
+		}
+		return nil
+	}()
+	complete = true
+	return err
 }
 
 func (tx *v41StepTransaction) finishLayer(routed []float32) (err error) {
 	if tx.closed || tx.pendingLayer == nil {
 		return fmt.Errorf("%w: incremental transaction has no prepared layer", ErrV41ForwardStage)
 	}
-	defer tx.abortOnPanic()
-	work := tx.pendingLayer
-	if err = work.complete(routed); err != nil {
-		return tx.abortLayerError(err)
-	}
-	if tx.afterLayer != nil {
-		if err = tx.afterLayer(tx.nextLayer); err != nil {
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	err = func() error {
+		work := tx.pendingLayer
+		if err = work.complete(routed); err != nil {
 			return tx.abortLayerError(err)
 		}
-	}
-	tx.pendingLayer = nil
-	tx.nextLayer++
-	return nil
+		if tx.afterLayer != nil {
+			if err = tx.afterLayer(tx.nextLayer); err != nil {
+				return tx.abortLayerError(err)
+			}
+		}
+		tx.pendingLayer = nil
+		tx.nextLayer++
+		return nil
+	}()
+	complete = true
+	return err
 }
 
 func (tx *v41StepTransaction) abortLayerError(err error) error {
@@ -502,13 +512,18 @@ func (tx *v41StepTransaction) prepareHead() (row []float32, err error) {
 	if tx.closed || tx.pendingLayer != nil || tx.headPrepared || tx.nextLayer != tx.layers {
 		return nil, fmt.Errorf("%w: incremental transaction is not ready for head", ErrV41ForwardStage)
 	}
-	defer tx.abortOnPanic()
-	row, err = tx.headInput()
-	if err != nil {
-		return nil, tx.abortHeadError(err)
-	}
-	tx.headPrepared = true
-	return row, nil
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	row, err = func() ([]float32, error) {
+		row, err = tx.headInput()
+		if err != nil {
+			return nil, tx.abortHeadError(err)
+		}
+		tx.headPrepared = true
+		return row, nil
+	}()
+	complete = true
+	return row, err
 }
 
 // finishHead scales exactly this lane's projected row before committing its
@@ -517,26 +532,36 @@ func (tx *v41StepTransaction) finishHead(projected []float32, beforeCommit func(
 	if tx.closed || !tx.headPrepared {
 		return nil, fmt.Errorf("%w: incremental transaction has no prepared head", ErrV41ForwardStage)
 	}
-	defer tx.abortOnPanic()
-	logits, err = tx.headFinish(projected, beforeCommit)
-	if err != nil {
-		return nil, tx.abortHeadError(err)
-	}
-	tx.close()
-	return logits, nil
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	logits, err = func() ([]float32, error) {
+		logits, err = tx.headFinish(projected, beforeCommit)
+		if err != nil {
+			return nil, tx.abortHeadError(err)
+		}
+		tx.close()
+		return logits, nil
+	}()
+	complete = true
+	return logits, err
 }
 
 func (tx *v41StepTransaction) finalize() (logits []float32, err error) {
-	defer tx.abortOnPanic()
-	row, err := tx.prepareHead()
-	if err != nil {
-		return nil, err
-	}
-	logits, err = tx.headProject(row)
-	if err != nil {
-		return nil, tx.abortHeadError(err)
-	}
-	return tx.finishHead(logits, nil)
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	logits, err = func() ([]float32, error) {
+		row, err := tx.prepareHead()
+		if err != nil {
+			return nil, err
+		}
+		logits, err = tx.headProject(row)
+		if err != nil {
+			return nil, tx.abortHeadError(err)
+		}
+		return tx.finishHead(logits, nil)
+	}()
+	complete = true
+	return logits, err
 }
 
 func (tx *v41StepTransaction) abortHeadError(err error) error {
@@ -548,10 +573,9 @@ func (tx *v41StepTransaction) abortHeadError(err error) error {
 	return err
 }
 
-func (tx *v41StepTransaction) abortOnPanic() {
-	if r := recover(); r != nil {
+func (tx *v41StepTransaction) abortIncomplete(complete bool) {
+	if !complete {
 		tx.abortAfterFailure()
-		panic(r)
 	}
 }
 
