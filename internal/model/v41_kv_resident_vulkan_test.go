@@ -45,7 +45,7 @@ func TestV41DecodeResidentH2DVulkan(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer s.Close()
-		if s.v41State().sharedAttention == nil {
+		if s.v41State().sharedAttentionFunc() == nil {
 			t.Fatal("Vulkan session bound no shared attention")
 		}
 		label := fmt.Sprintf("resident compressed=%t ctx=%d mirror=%t", compressed, ctx, !disabled)

@@ -84,7 +84,7 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 			projectPos[layer]++
 			return make([]float32, len(q)), windowRow(layer, pos), nil
 		}
-		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+		st.setSharedAttention(func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 			pos := attendPos[layer]
 			attendPos[layer]++
@@ -191,7 +191,7 @@ func TestV41CompressedWindowComposition(t *testing.T) {
 				sourceIDs[pos] = append([]int32(nil), st.attn.topk[0]...)
 			}
 			return out, nil
-		}
+		})
 		st.groupedOutput = func(layer int, out []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error) {
 			if projected[layer] >= len(expected[layer]) {
 				t.Fatalf("layer %d extra projection %d with %d expected rows", layer, projected[layer], len(expected[layer]))

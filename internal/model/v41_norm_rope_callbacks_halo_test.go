@@ -165,7 +165,8 @@ func v41NormRoPEHaloIsolate(st *v41ForwardState) {
 	st.setDenseProjection(nil)
 	st.groupedOutput, st.engramProjection = nil, nil
 	st.mhcProjection, st.mhcFFNProjection = nil, nil
-	st.sharedActivation, st.sharedAttention = nil, nil
+	st.sharedActivation = nil
+	st.setSharedAttention(nil)
 	st.compressorNorm, st.indexKeyNorm = nil, nil
 	st.setIndexerScore(nil)
 	st.indexScoreHealth = nil

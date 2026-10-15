@@ -81,7 +81,7 @@ func TestV41RatioOneForwardParity(t *testing.T) {
 					}
 					return nil, v41ProjectionDeclined, nil
 				})
-				st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+				st.setSharedAttention(func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 					r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 					at := pos[layer]
 					pos[layer]++
@@ -105,7 +105,7 @@ func TestV41RatioOneForwardParity(t *testing.T) {
 						out:       append([]float32(nil), out...), ids: ids,
 					}
 					return out, nil
-				}
+				})
 			}
 
 			prefix := []int{1, 2, 3, 4}

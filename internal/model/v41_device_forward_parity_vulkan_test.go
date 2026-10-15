@@ -87,7 +87,7 @@ func v41DeviceParitySeams(st *v41ForwardState) (bound, host []string) {
 		{"query_norm", st.queryNorm != nil}, {"kv_norm", st.kvNorm != nil}, {"ffn_norm", st.ffnNorm != nil},
 		{"compressor_norm", st.compressorNorm != nil}, {"index_key_norm", st.indexKeyNorm != nil},
 		{"indexer_score", st.indexerScore() != nil}, {"shared_activation", st.sharedActivation != nil},
-		{"tail_rope", st.tailRoPE != nil}, {"shared_attention", st.sharedAttention != nil},
+		{"tail_rope", st.tailRoPE != nil}, {"shared_attention", st.sharedAttentionFunc() != nil},
 		{"router_topk", st.routerTopK() != nil}, {"routed_sum", st.routedSum != nil},
 		{"shared_add", st.sharedAdd != nil}, {"gather_ops", st.gatherOps != nil},
 		{"mhc_device", st.mhcDevice != nil}, {"routed_expert", st.routedExpert != nil},

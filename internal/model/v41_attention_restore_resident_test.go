@@ -104,8 +104,8 @@ func TestV41SameLengthPrefixRestoreResident(t *testing.T) {
 				call                       v41SharedAttentionTestCall
 			}
 			var authoritative []operand
-			selected := source.v41Forward.sharedAttention
-			source.v41Forward.sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+			selected := source.v41Forward.sharedAttentionFunc()
+			source.v41Forward.setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 				view := request.resident
 				if view == nil {
 					t.Fatal("reference source lost residency")
@@ -119,7 +119,7 @@ func TestV41SameLengthPrefixRestoreResident(t *testing.T) {
 					authoritative = append(authoritative, a)
 				}
 				return out, err
-			}
+			})
 			tokens := []int{next, (next + 1) % m.Cfg.VocabSize}
 			var logits [][]float32
 			var states []*v41ForwardSnapshot
@@ -137,9 +137,9 @@ func TestV41SameLengthPrefixRestoreResident(t *testing.T) {
 			previousGroups := make([]int, m.Cfg.NumLayers)
 			newRing, newLog := make([]compute.Tensor, m.Cfg.NumLayers), make([]compute.Tensor, m.Cfg.NumLayers)
 			restoredOwners := append([]*V41AttentionState(nil), target.v41Forward.layers...)
-			selected = target.v41Forward.sharedAttention
+			selected = target.v41Forward.sharedAttentionFunc()
 			at := 0
-			target.v41Forward.sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+			target.v41Forward.setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 				if at >= len(authoritative) {
 					t.Fatal("restored callback dispatched an extra layer")
 				}
@@ -192,7 +192,7 @@ func TestV41SameLengthPrefixRestoreResident(t *testing.T) {
 				at++
 				t.Logf("restored layer=%d pos=%d first=%t actual KV rows=%d attention H2D bytes=%d gathers=1; sink identity retained", layer, view.pos, first, (delta-4*len(request.q))/(4*m.Cfg.HeadDim), delta)
 				return out, nil
-			}
+			})
 			for step, token := range tokens {
 				got := target.Step(token)
 				v41SharedAttentionSessionBits(t, "restored full-vocabulary logits", got, logits[step])

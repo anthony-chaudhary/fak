@@ -177,7 +177,7 @@ func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 			scores[layer]++
 			return V41IndexerScore(q, flat, weights, heads, dim, rows)
 		})
-		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+		st.setSharedAttention(func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			store := storeFor(layer)
 			if r.kv != nil || r.rowKV == nil || len(r.rowKV.compressed) != 2 ||
 				len(store.publicationPrefix.kv[oldKey]) != m.Cfg.HeadDim || len(store.kvPublications[newKey]) != m.Cfg.HeadDim {
@@ -200,7 +200,7 @@ func TestV41CombinedResidentBorrowedRows(t *testing.T) {
 				return nil, failure
 			}
 			return out, err
-		}
+		})
 		_, stats, err := m.forwardV41Step(4, st, nil)
 		var selected *V41SharedAttentionOperationError
 		if !errors.Is(err, failure) || !errors.As(err, &selected) || selected.Layer != 1 || stats.Committed ||
@@ -489,7 +489,7 @@ func v41ResidentKVDecode(t *testing.T, build func(*testing.T) *Model, ctx int, d
 	b := newV41ResidentKVTestBackend()
 	s := v41DenseTestSession(t, m, b)
 	v41SharedAttentionOnly(s)
-	if s.v41State().sharedAttention == nil {
+	if s.v41State().sharedAttentionFunc() == nil {
 		t.Fatal("shared attention was not bound")
 	}
 	var run v41ResidentKVRun

@@ -147,14 +147,14 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 			defer host.Close()
 			v41SharedAttentionOnly(s)
 			st := s.v41State()
-			selected := st.sharedAttention
+			selected := st.sharedAttentionFunc()
 			if selected == nil {
 				t.Fatal("normal session failed to select the real operation")
 			}
 			calls, nonempty, readerCalls := 0, 0, 0
 			var positions [2]int
 			var lastOutput, lastCopy []float32
-			st.sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+			st.setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 				pos := positions[layer]
 				positions[layer]++
 				calls++
@@ -228,7 +228,7 @@ func TestV41SharedAttentionVulkan(t *testing.T) {
 				// The caller owns its row and inverse-rotates it in place (model.py:781);
 				// keep the adapter's buffer private so only device work can change it.
 				return slices.Clone(out), nil
-			}
+			})
 			for phase, ids := range [][]int{{1, 2}, {3}, {4}} {
 				openingCalls, openingNonempty := calls, nonempty
 				attemptsBefore := m.V41ExpertFaultAttribution()

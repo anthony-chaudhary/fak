@@ -147,7 +147,7 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 		var oracles []projectionOracle
 		projections := 0
 		changed := false
-		st.sharedAttention = func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+		st.setSharedAttention(func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
 			r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
 			out, err := V41SparseAttentionSink(r.q, r.kv, r.sink, r.idx, r.plain)
 			if err != nil {
@@ -162,7 +162,7 @@ func TestV41RotaryTripleRegression(t *testing.T) {
 			want := v41LatentNormOracleBF16(rotateTail(v41LatentNormOracleBF16(raw), hd, rd, pos, compressedTheta, -1))
 			oracles = append(oracles, projectionOracle{layer: layer, position: pos, raw: raw, expected: want})
 			return out, nil
-		}
+		})
 		st.groupedOutput = func(layer int, out []float32, h, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error) {
 			if projections >= len(oracles) {
 				t.Fatal("grouped projection has no matching contraction row")

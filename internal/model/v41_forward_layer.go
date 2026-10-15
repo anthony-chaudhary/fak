@@ -70,7 +70,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	scratch.indexScoreHealth = nil
 	scratch.sharedActivation = nil
 	scratch.tailRoPE = nil
-	scratch.sharedAttention = nil
+	scratch.clearSharedAttention()
 	scratch.routedSum = nil
 	scratch.sharedAdd = nil
 	scratch.gatherOps = nil
@@ -91,7 +91,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.indexScoreHealth = st.indexScoreHealth
 		scratch.sharedActivation = st.sharedActivation
 		scratch.tailRoPE = st.tailRoPE
-		scratch.sharedAttention = st.sharedAttention
+		scratch.copySharedAttentionFrom(st)
 		scratch.routedSum = st.routedSum
 		scratch.sharedAdd = st.sharedAdd
 		scratch.gatherOps = st.gatherOps
@@ -113,7 +113,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		scratch.indexScoreHealth = nil
 		scratch.sharedActivation = nil
 		scratch.tailRoPE = nil
-		scratch.sharedAttention = nil
+		scratch.clearSharedAttention()
 		scratch.routedSum = nil
 		scratch.sharedAdd = nil
 		scratch.gatherOps = nil
@@ -582,7 +582,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	// Keep the exact seeded owner that a successful forward commits for Step.
 	// Decline the whole cold layer before device effects if its window or bank
 	// would exceed the existing mirror's capacity or increase KV upload volume.
-	coldAttentionOwner := v41ColdAttentionResidentOwner(st.layerState(l), seq, cfg.windowForLayer(l), len(sharedKV), scratch.sharedAttention)
+	coldAttentionOwner := v41ColdAttentionResidentOwner(st.layerState(l), seq, cfg.windowForLayer(l), len(sharedKV), scratch.sharedAttentionFunc())
 	scale := cfg.attnScale()
 	attnOut := make([][]float32, seq)
 	attnProjectionInput := make([][]float32, seq)
@@ -610,7 +610,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 			}
 			attentionOpened := m.v41NowNanos()
 			o, err := v41CombinedAttentionResident(l, t, plan.kvGroupSize(cfg), nH, hd, qHeads[t], sink, window, sharedKV, ids, scale,
-				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttention)
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttentionFunc())
 			m.v41NoteAttentionContraction(attentionOpened)
 			if err != nil {
 				return v41StageErr(v41StageAttention, l, err)
@@ -636,10 +636,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		opt := V41SparseAttentionSinkOptions{
 			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
 		}
-		flatKV, borrowedWindow := v41ColdPlainAttentionInput(qHeads[t], sink, kvRows, keys, idx, opt, coldAttentionOwner, scratch.sharedAttention)
+		flatKV, borrowedWindow := v41ColdPlainAttentionInput(qHeads[t], sink, kvRows, keys, idx, opt, coldAttentionOwner, scratch.sharedAttentionFunc())
 		attentionOpened := m.v41NowNanos()
 		o, err := v41ColdPlainAttentionSink(l, qHeads[t], flatKV, sink, borrowedWindow, idx, opt,
-			v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), scratch.sharedAttention)
+			v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), scratch.sharedAttentionFunc())
 		m.v41NoteAttentionContraction(attentionOpened)
 		if err != nil {
 			return v41StageErr(v41StageAttention, l, err)

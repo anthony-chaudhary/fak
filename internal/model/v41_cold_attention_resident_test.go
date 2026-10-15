@@ -142,7 +142,7 @@ func v41ColdAttentionSessionRun(t *testing.T, m *Model, seq int, step, rowLog, d
 	}
 	s := v41DenseTestSession(t, m, backend)
 	v41SharedAttentionOnly(s)
-	selected := s.v41State().sharedAttention
+	selected := s.v41State().sharedAttentionFunc()
 	if selected == nil {
 		t.Fatal("selected attention missing")
 	}
@@ -156,7 +156,7 @@ func v41ColdAttentionSessionRun(t *testing.T, m *Model, seq int, step, rowLog, d
 		}
 		return rows.gathers
 	}
-	s.v41State().sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+	s.v41State().setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 		pos := positions[layer]
 		positions[layer]++
 		width := pos + 1
@@ -217,7 +217,7 @@ func v41ColdAttentionSessionRun(t *testing.T, m *Model, seq int, step, rowLog, d
 		run.outputs = append(run.outputs, append([]float32(nil), out...))
 		previousGroups[layer] = groups
 		return out, nil
-	}
+	})
 	prefix, next := v41IncrementalPrefix(m.Cfg, seq)
 	run.logits = append(run.logits, append([]float32(nil), s.Prefill(prefix)...))
 	run.states = append(run.states, captureV41ForwardSnapshot(s.v41State()))

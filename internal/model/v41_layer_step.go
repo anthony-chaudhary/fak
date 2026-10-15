@@ -372,7 +372,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 	}, &v41ResidentKVView{
 		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: int(visibleKeys[0]),
 		windowRows: len(visibleKeys), sinkKey: layerName(l, "attn.sink"),
-	}, scratch.sharedAttention)
+	}, scratch.sharedAttentionFunc())
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return nil, v41StageErr(v41StageAttention, l, err)
@@ -872,7 +872,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	o, err := v41CombinedAttentionResident(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
 		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: windowStart,
 		windowRows: len(window), compressedRows: len(sharedKV), sinkKey: layerName(l, "attn.sink"),
-	}, scratch.sharedAttention)
+	}, scratch.sharedAttentionFunc())
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return nil, v41StageErr(v41StageAttention, l, err)

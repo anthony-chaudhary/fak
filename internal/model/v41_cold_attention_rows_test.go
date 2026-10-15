@@ -329,11 +329,11 @@ func TestV41ColdPlainAttentionSessionParity(t *testing.T) {
 				}
 				s := v41DenseTestSession(t, m, backend)
 				v41SharedAttentionOnly(s)
-				selected := s.v41State().sharedAttention
+				selected := s.v41State().sharedAttentionFunc()
 				var result v41ColdAttentionRun
 				var owner *V41AttentionState
 				pos := 0
-				s.v41State().sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+				s.v41State().setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 					if request.resident == nil || (owner != nil && request.resident.owner != owner) {
 						t.Fatal("cold/Step owner missing or changed")
 					}
@@ -355,7 +355,7 @@ func TestV41ColdPlainAttentionSessionParity(t *testing.T) {
 					result.outputs = append(result.outputs, append([]float32(nil), out...))
 					pos++
 					return out, err
-				}
+				})
 				prefix, next := v41IncrementalPrefix(m.Cfg, tc.seq)
 				result.logits = append(result.logits, append([]float32(nil), s.Prefill(prefix)...))
 				result.states = append(result.states, captureV41ForwardSnapshot(s.v41State()))

@@ -65,11 +65,11 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 			bind := func(session *Session) {
 				v41SharedAttentionOnly(session)
 				st := session.v41State()
-				selected := st.sharedAttention
+				selected := st.sharedAttentionFunc()
 				if selected == nil {
 					t.Fatal("shared-attention operation was not selected")
 				}
-				st.sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+				st.setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 					wantLayer, pos := requests/2, requests%2
 					// Cold prefill contracts both rows before projecting that layer;
 					// incremental calls still contract and project one row at a time.
@@ -107,7 +107,7 @@ func TestV41InverseAttentionOutput(t *testing.T) {
 					oracles = append(oracles, projectionOracle{layer: layer, position: pos, expected: expected, unrotated: unrotated})
 					requests++
 					return out, nil
-				}
+				})
 				st.groupedOutput = func(layer int, out []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error) {
 					if projections >= len(oracles) || len(oracles) != requests {
 						t.Fatal("grouped projection has no matching contraction row")

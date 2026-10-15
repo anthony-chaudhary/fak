@@ -69,7 +69,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 		b := newV41SharedAttentionTestBackend()
 		s := v41DenseTestSession(t, m, b)
 		v41SharedAttentionOnly(s)
-		if s.v41State().sharedAttention == nil {
+		if s.v41State().sharedAttentionFunc() == nil {
 			t.Fatal("available shared attention was not bound")
 		}
 		return s, b
@@ -91,9 +91,9 @@ func TestV41SharedAttentionSession(t *testing.T) {
 			s, b := newSession(t, m)
 			host := m.NewSession()
 			t.Cleanup(host.Close)
-			selected := s.v41State().sharedAttention
+			selected := s.v41State().sharedAttentionFunc()
 			requests := 0
-			s.v41State().sharedAttention = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
+			s.v41State().setSharedAttention(func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 				// Cold Prefill is layer-major; Step and suffix are position-major.
 				wantLayer, pos := requests/2, requests%2
 				if requests >= 4 {
@@ -182,7 +182,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 				}
 				v41SharedAttentionSessionBits(t, "ordered gathered KV", call.kv, wantKV)
 				return out, nil
-			}
+			})
 
 			got := s.Prefill([]int{1, 2})
 			if calls := m.V41ExpertFaultAttribution().Prefill.AttentionContractionCalls; calls != 4 {
@@ -244,9 +244,10 @@ func TestV41SharedAttentionSession(t *testing.T) {
 		// Empty retained state still contracts its own first window row before
 		// any compressed group exists.
 		s.v41State().setLayerState(0, 1, state)
-		scratch := &v41ProjScratch{sharedAttention: s.v41State().sharedAttention}
+		scratch := &v41ProjScratch{}
+		scratch.copySharedAttentionFrom(s.v41State())
 		got, stats, err := m.forwardV41Step(1, s.v41State(), scratch)
-		if err != nil || !stats.Committed || stats.LayerCalls != 1 || len(b.calls) != 1 || b.calls[0].rows != 1 || b.uploads != 3 || scratch.sharedAttention != nil {
+		if err != nil || !stats.Committed || stats.LayerCalls != 1 || len(b.calls) != 1 || b.calls[0].rows != 1 || b.uploads != 3 || scratch.sharedAttentionFunc() != nil {
 			t.Fatalf("incomplete group lost its window or scratch semantics: stats=%+v err=%v", stats, err)
 		}
 		v41SharedAttentionSessionNear(t, got, lastLogits(m.Forward([]int{1})))
@@ -262,7 +263,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 		source.Prefill([]int{1, 2, 3}) // snapshot includes an incomplete source group
 		want := captureV41ForwardSnapshot(source.v41Forward)
 		unbound := want.clone().restore()
-		if unbound.sharedAttention != nil || unbound.callbackOwner != nil {
+		if unbound.sharedAttentionFunc() != nil || unbound.callbackOwner != nil {
 			t.Fatal("continuation snapshot captured the source callback")
 		}
 		snap, err := source.PrefixSnapshot()
@@ -284,7 +285,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			st := item.session.v41Forward
-			if st == nil || st.callbackOwner != item.session || st.sharedAttention == nil || !reflect.DeepEqual(captureV41ForwardSnapshot(st), want) {
+			if st == nil || st.callbackOwner != item.session || st.sharedAttentionFunc() == nil || !reflect.DeepEqual(captureV41ForwardSnapshot(st), want) {
 				t.Fatalf("restore %d failed eager owner binding or changed continuation", i)
 			}
 			v41SharedAttentionOnly(item.session)
@@ -321,7 +322,7 @@ func TestV41SharedAttentionSession(t *testing.T) {
 			}
 			s := v41DenseTestSession(t, m, backend)
 			v41SharedAttentionOnly(s)
-			if s.v41State().sharedAttention != nil {
+			if s.v41State().sharedAttentionFunc() != nil {
 				t.Fatal("declined capability bound a selected callback")
 			}
 			host := m.NewSession()
@@ -407,12 +408,13 @@ func TestV41SharedAttentionSession(t *testing.T) {
 		// second token completes a source group, then fails at the reader; only
 		// that token's ring/group/publication changes must roll back.
 		expected := captureV41ForwardSnapshot(s.v41Forward).restore()
-		scratch := &v41ProjScratch{sharedAttention: s.v41State().sharedAttention}
+		scratch := &v41ProjScratch{}
+		scratch.copySharedAttentionFrom(s.v41State())
 		before := len(b.calls)
 		if _, _, err := m.forwardV41Step(3, expected, scratch); err != nil {
 			t.Fatal(err)
 		}
-		if scratch.sharedAttention != nil || len(b.calls) != before {
+		if scratch.sharedAttentionFunc() != nil || len(b.calls) != before {
 			t.Fatal("detached host state reused or retained the prior owner's callback")
 		}
 		b.fault, b.failCall = "dispatch", before+2*m.Cfg.NumLayers

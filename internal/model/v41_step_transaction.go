@@ -84,7 +84,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	scratch.indexScoreHealth = st.indexScoreHealth
 	scratch.sharedActivation = st.sharedActivation
 	scratch.tailRoPE = st.tailRoPE
-	scratch.sharedAttention = st.sharedAttention
+	scratch.copySharedAttentionFrom(st)
 	scratch.routedSum = st.routedSum
 	scratch.sharedAdd = st.sharedAdd
 	scratch.gatherOps = st.gatherOps
@@ -110,7 +110,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			scratch.indexScoreHealth = nil
 			scratch.sharedActivation = nil
 			scratch.tailRoPE = nil
-			scratch.sharedAttention = nil
+			scratch.clearSharedAttention()
 			scratch.routedSum = nil
 			scratch.sharedAdd = nil
 			scratch.gatherOps = nil
