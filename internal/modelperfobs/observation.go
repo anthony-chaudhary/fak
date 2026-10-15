@@ -17,6 +17,10 @@ type Observation struct {
 	OverlappingObservedRequests int       `json:"overlapping_observed_requests"`
 	Model                       string    `json:"model,omitempty"`
 	Backend                     string    `json:"backend"`
+	CacheState                  string    `json:"cache_state,omitempty"`
+	CacheStateSource            string    `json:"cache_state_source,omitempty"`
+	Warmup                      bool      `json:"warmup,omitempty"`
+	AttributionUnavailable      string    `json:"attribution_unavailable,omitempty"`
 	Status                      int       `json:"status"`
 	Streaming                   bool      `json:"streaming"`
 	PromptTokens                int64     `json:"prompt_tokens,omitempty"`
