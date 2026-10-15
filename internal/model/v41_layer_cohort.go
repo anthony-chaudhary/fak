@@ -100,14 +100,18 @@ func closeV41LayerExpertGroups(groups []v41LayerExpertGroup) {
 	}
 }
 
-func finishV41LayerExpertGroups(groups *[]v41LayerExpertGroup, err *error, receipt *v41StepCohortReceipt) {
-	primary := recover()
+func finishV41LayerExpertGroups(groups *[]v41LayerExpertGroup, err *error, receipt *v41StepCohortReceipt, complete bool) {
+	failed := !complete || *err != nil
 	owned := *groups
 	*groups = nil
-	if primary == nil && *err == nil {
+	if !failed {
 		receipt.atLane(-1)
+	} else {
+		// Preserve the caller's unwind and lane attribution. This recovery
+		// handles only secondary group-cleanup panics, never the caller.
+		defer func() { _ = recover() }()
 	}
-	finishModelCleanup(primary, err, func() { closeV41LayerExpertGroups(owned) })
+	closeV41LayerExpertGroups(owned)
 }
 
 // All lanes prepare before expert selection. This intentionally changes when a
@@ -194,26 +198,88 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 		return fallback()
 	}
 	var groups []v41LayerExpertGroup
-	defer finishV41LayerExpertGroups(&groups, &err, receipt)
-	for _, expert := range experts {
-		rows := make([]v41RoutedCohortRow, 0, len(active))
-		group := v41LayerExpertGroup{lanes: make([]int, 0, len(active)), slots: make([]int, 0, len(active))}
-		for row, lane := range active {
-			work := txs[lane].pendingLayer
-			slot, participates := slots[row][expert]
-			if !participates {
-				continue
+	complete := false
+	defer func() { finishV41LayerExpertGroups(&groups, &err, receipt, complete) }()
+	err = func() error {
+		for _, expert := range experts {
+			rows := make([]v41RoutedCohortRow, 0, len(active))
+			group := v41LayerExpertGroup{lanes: make([]int, 0, len(active)), slots: make([]int, 0, len(active))}
+			for row, lane := range active {
+				work := txs[lane].pendingLayer
+				slot, participates := slots[row][expert]
+				if !participates {
+					continue
+				}
+				group.lanes = append(group.lanes, lane)
+				group.slots = append(group.slots, slot)
+				rows = append(rows, v41RoutedCohortRow{Lane: lane, Session: lanes[lane].session, Input: work.input, Weight: work.picks[slot].weight})
 			}
-			group.lanes = append(group.lanes, lane)
-			group.slots = append(group.slots, slot)
-			rows = append(rows, v41RoutedCohortRow{Lane: lane, Session: lanes[lane].session, Input: work.input, Weight: work.picks[slot].weight})
+			receipt.atLane(-1)
+			lease, outcome, fault, cause := prepareV41RoutedExpertCohortOwned(scope, first.layer, "ffn.experts."+itoa(expert), rows)
+			if lease != nil {
+				group.lease = lease
+				groups = append(groups, group)
+			}
+			if cause != nil {
+				receipt.atLane(fault)
+				if fault >= 0 && fault < len(results) {
+					results[fault].err = cause
+				}
+				return cause
+			}
+			if outcome == v41RoutedExpertDeclined {
+				// Failed preselection cleanup is a failure, never fallback consent.
+				owned := groups
+				groups = nil
+				receipt.atLane(-1)
+				closeV41LayerExpertGroups(owned)
+				return fallback()
+			}
+			if outcome != v41RoutedExpertHandled || lease == nil {
+				return v41ExpertOperationErr(first.layer, "cohort admission", errV41ExpertResult)
+			}
+		}
+		// If membership changes before selection, retire every prepared lease and
+		// preserve the ordinary whole-lane path for the remaining requests.
+		for _, lane := range active {
+			if cancelled(lane) {
+				owned := groups
+				groups = nil
+				receipt.atLane(-1)
+				closeV41LayerExpertGroups(owned)
+				return fallback()
+			}
+		}
+		leases := make([]*v41RoutedCohortLease, len(groups))
+		flatSlots := make([][]int, len(lanes))
+		for _, lane := range active {
+			flatSlots[lane] = make([]int, len(first.picks))
+			for slot := range flatSlots[lane] {
+				flatSlots[lane][slot] = -1
+			}
+		}
+		flat := 0
+		for i, group := range groups {
+			leases[i] = group.lease
+			for row, lane := range group.lanes {
+				flatSlots[lane][group.slots[row]] = flat
+				flat++
+			}
+		}
+		sums := make([]v41RoutedCohortSum, len(active))
+		for row, lane := range active {
+			order := v41RoutedSumOrder(txs[lane].pendingLayer.picks)
+			sums[row] = v41RoutedCohortSum{Lane: lane, Rows: make([]int, len(order))}
+			for i, slot := range order {
+				flatRow := flatSlots[lane][slot]
+				if flatRow < 0 {
+					return v41ExpertOperationErr(first.layer, "cohort admission", errV41ExpertResult)
+				}
+				sums[row].Rows[i] = flatRow
+			}
 		}
 		receipt.atLane(-1)
-		lease, outcome, fault, cause := prepareV41RoutedExpertCohortOwned(scope, first.layer, "ffn.experts."+itoa(expert), rows)
-		if lease != nil {
-			group.lease = lease
-			groups = append(groups, group)
-		}
+		routed, fault, cause := runV41RoutedCohortLeases(leases, sums)
 		if cause != nil {
 			receipt.atLane(fault)
 			if fault >= 0 && fault < len(results) {
@@ -221,84 +287,27 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 			}
 			return cause
 		}
-		if outcome == v41RoutedExpertDeclined {
-			// Failed preselection cleanup is a failure, never fallback consent.
-			owned := groups
-			groups = nil
-			receipt.atLane(-1)
-			closeV41LayerExpertGroups(owned)
-			return fallback()
+		if len(routed) != len(active) {
+			return v41ExpertOperationErr(first.layer, "cohort sums", errV41ExpertResult)
 		}
-		if outcome != v41RoutedExpertHandled || lease == nil {
-			return v41ExpertOperationErr(first.layer, "cohort admission", errV41ExpertResult)
-		}
-	}
-	// If membership changes before selection, retire every prepared lease and
-	// preserve the ordinary whole-lane path for the remaining requests.
-	for _, lane := range active {
-		if cancelled(lane) {
-			owned := groups
-			groups = nil
-			receipt.atLane(-1)
-			closeV41LayerExpertGroups(owned)
-			return fallback()
-		}
-	}
-	leases := make([]*v41RoutedCohortLease, len(groups))
-	flatSlots := make([][]int, len(lanes))
-	for _, lane := range active {
-		flatSlots[lane] = make([]int, len(first.picks))
-		for slot := range flatSlots[lane] {
-			flatSlots[lane][slot] = -1
-		}
-	}
-	flat := 0
-	for i, group := range groups {
-		leases[i] = group.lease
-		for row, lane := range group.lanes {
-			flatSlots[lane][group.slots[row]] = flat
-			flat++
-		}
-	}
-	sums := make([]v41RoutedCohortSum, len(active))
-	for row, lane := range active {
-		order := v41RoutedSumOrder(txs[lane].pendingLayer.picks)
-		sums[row] = v41RoutedCohortSum{Lane: lane, Rows: make([]int, len(order))}
-		for i, slot := range order {
-			flatRow := flatSlots[lane][slot]
-			if flatRow < 0 {
-				return v41ExpertOperationErr(first.layer, "cohort admission", errV41ExpertResult)
+		// The selected contraction includes each lane's original device sum and a
+		// single shared fence. Cancellation discards its speculative row; selected
+		// experts are never replayed and no per-expert host readback is introduced.
+		for row, lane := range active {
+			if cancelled(lane) {
+				continue
 			}
-			sums[row].Rows[i] = flatRow
+			receipt.atLane(lane)
+			if len(routed[row]) != m.Cfg.HiddenSize {
+				return v41ExpertOperationErr(first.layer, "cohort sum", errV41ExpertResult)
+			}
+			if cause = txs[lane].finishLayer(routed[row]); cause != nil {
+				results[lane].err = cause
+				return cause
+			}
 		}
-	}
-	receipt.atLane(-1)
-	routed, fault, cause := runV41RoutedCohortLeases(leases, sums)
-	if cause != nil {
-		receipt.atLane(fault)
-		if fault >= 0 && fault < len(results) {
-			results[fault].err = cause
-		}
-		return cause
-	}
-	if len(routed) != len(active) {
-		return v41ExpertOperationErr(first.layer, "cohort sums", errV41ExpertResult)
-	}
-	// The selected contraction includes each lane's original device sum and a
-	// single shared fence. Cancellation discards its speculative row; selected
-	// experts are never replayed and no per-expert host readback is introduced.
-	for row, lane := range active {
-		if cancelled(lane) {
-			continue
-		}
-		receipt.atLane(lane)
-		if len(routed[row]) != m.Cfg.HiddenSize {
-			return v41ExpertOperationErr(first.layer, "cohort sum", errV41ExpertResult)
-		}
-		if cause = txs[lane].finishLayer(routed[row]); cause != nil {
-			results[lane].err = cause
-			return cause
-		}
-	}
-	return nil
+		return nil
+	}()
+	complete = true
+	return err
 }
