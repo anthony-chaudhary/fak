@@ -119,6 +119,9 @@ const (
 	// VulkanBuildReceiptSchemaV19 binds V18/82 plus the Q3_K token panel.
 	VulkanBuildReceiptSchemaV19 = "fak.vulkan-build-receipt.v19"
 
+	// VulkanBuildReceiptSchemaV20 binds V19/83 plus optional row-addressed routed SwiGLU.
+	VulkanBuildReceiptSchemaV20 = "fak.vulkan-build-receipt.v20"
+
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
 

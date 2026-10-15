@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -12,15 +14,18 @@ import (
 
 type v41IndexRoPERecorder struct {
 	*v41InverseRowsTestBackend
-	failure      string
-	exact        bool
-	cleanupStage string
-	cleanupCalls int
-	cleanupArmed bool
-	resources    map[compute.Buffer]*v41IndexRoPEResource
-	foreign      compute.Buffer
-	foreignReads int
-	foreignFrees int
+	failure                 string
+	exact                   bool
+	cleanupStage            string
+	cleanupCalls            int
+	cleanupArmed            bool
+	resources               map[compute.Buffer]*v41IndexRoPEResource
+	foreign                 compute.Buffer
+	foreignReads            int
+	foreignFrees            int
+	tableUploads, tablePeak int
+	tables                  map[compute.Buffer]bool
+	cacheAlias              compute.Tensor
 }
 
 type v41IndexRoPEResource struct {
@@ -80,6 +85,8 @@ func TestV41IndexRoPEExactSelection(t *testing.T) {
 				if len(exact.calls) != 1 {
 					t.Fatal("qualified subnormal query did not dispatch exactly once")
 				}
+				v41IndexRoPECheckCachedTable(t, s, exact)
+				s.Close()
 				v41IndexRoPECheckResources(t, exact, false)
 				return
 			}
@@ -124,11 +131,12 @@ func (b *v41IndexRoPERecorder) Free(x compute.Tensor) {
 	if owned != nil {
 		owned.attempts++
 	}
-	if owned != nil && b.cleanupArmed && b.cleanupStage == "free" && b.cleanupCalls == 0 {
+	if owned != nil && b.cleanupArmed && (b.cleanupStage == "free" || b.cleanupStage == "cache-free" && b.tables[x.Buf()]) && b.cleanupCalls == 0 {
 		b.cleanupCalls++
 		panic(errors.New("secondary free failure"))
 	}
 	b.v41InverseRowsTestBackend.Free(x)
+	delete(b.tables, x.Buf())
 	if owned != nil {
 		owned.released = true
 	}
@@ -157,7 +165,31 @@ func (b *v41IndexRoPERecorder) UploadClass(x compute.Tensor, dt compute.Dtype, c
 	if class != compute.MemoryActivation || dt != compute.F32 {
 		return b.v41InverseRowsTestBackend.UploadClass(x, dt, class, site)
 	}
+	isTable := site == "V4.1 indexer query RoPE table"
+	if isTable {
+		b.tableUploads++
+	}
+	if (isTable && b.failure == "table-cache-alias") || (site == "V4.1 indexer query RoPE" && b.failure == "query-cache-alias") {
+		return b.cacheAlias
+	}
+	if isTable && b.failure == "table-upload" {
+		b.cleanupArmed = true
+		panic(b.cause)
+	}
 	out := compute.NewF32(b, append([]int(nil), x.Shape...), append([]float32(nil), b.Backend.Read(x)...))
+	if isTable {
+		if b.tables == nil {
+			b.tables = make(map[compute.Buffer]bool)
+		}
+		b.tables[out.Buf()] = true
+		if len(b.tables) > b.tablePeak {
+			b.tablePeak = len(b.tables)
+		}
+		if b.failure == "table-shape" {
+			out.Shape = []int{1, 1}
+		}
+	}
+
 	b.resources[out.Buf()] = &v41IndexRoPEResource{}
 	return out
 }
@@ -321,6 +353,8 @@ func TestV41IndexRoPEDeviceReachability(t *testing.T) {
 				}
 			}
 		}
+		v41IndexRoPECheckCachedTable(t, s, b)
+		s.Close()
 		v41IndexRoPECheckResources(t, b, false)
 	})
 	for _, fault := range []string{"error", "panic", "length", "prefix", "nonfinite", "alias-query", "alias-table", "foreign"} {
@@ -505,10 +539,10 @@ func TestV41IndexRoPERestoredGatherOwnership(t *testing.T) {
 		len(b.outputs) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(target.v41Forward), captureV41ForwardSnapshot(host.v41Forward)) {
 		t.Fatal("restored step lost target ownership, omitted a callback, leaked, or changed continuation")
 	}
-	// Inverse tables are session-owned; all other recorded activations remain
-	// transient. A restored target must retain only its own two live tables.
+	// Two inverse tables and one query table are session-owned; every other
+	// recorded activation remains transient. None may belong to the source session.
 	liveTables := map[compute.Buffer]bool{}
-	for _, key := range []string{"v41-inverse-rope-table:0", "v41-inverse-rope-table:1"} {
+	for _, key := range []string{"v41-inverse-rope-table:0", "v41-inverse-rope-table:1", "v41-indexer-query-rope-table:0"} {
 		table, present := target.halW[key]
 		resource := b.resources[table.Buf()]
 		if !present || table.Buf() == nil || table.Backend() != b || resource == nil ||
@@ -598,5 +632,290 @@ func TestV41IndexRoPEWrappedPrimary(t *testing.T) {
 				v41IndexRoPECheckResources(t, b, cleanup == "free")
 			})
 		}
+	}
+}
+
+func v41IndexRoPECheckCachedTable(t *testing.T, s *Session, b *v41IndexRoPERecorder) {
+	t.Helper()
+	table, present := s.halW["v41-indexer-query-rope-table:0"]
+	resource := b.resources[table.Buf()]
+	if !present || table.Buf() == nil || table.Backend() != b || resource == nil || resource.attempts != 0 || resource.released || !b.tables[table.Buf()] || len(b.tables) != 1 {
+		t.Fatal("query cache is absent, foreign, released, or exceeds its one-slot bound")
+	}
+	for buffer, r := range b.resources {
+		if buffer != table.Buf() && (r.attempts != 1 || !r.released) {
+			t.Fatal("query cache hid a lost transient owner")
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41IndexRoPETableCache(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	newOwner := func() (*Session, *v41IndexRoPERecorder, v41IndexRoPEFunc) {
+		m := &Model{Cfg: Config{HeadDim: 64, IndexHeadDim: 64, QKRopeHeadDim: 64, DeepSeekV41: &DeepSeekV41Config{CompressRatios: append([]int(nil), v41PublishedCompressRatios...), CompressRopeTheta: v41PublishedCompressRopeTheta}}}
+		b := newV41IndexRoPERecorder()
+		s := &Session{M: m, Backend: b}
+		t.Cleanup(s.Close)
+		return s, b, s.v41IndexRoPEFunc()
+	}
+	input := make([]float32, 64)
+	for i := range input {
+		input[i] = float32(i%7-3) / 8
+	}
+	call := func(s *Session, rotate v41IndexRoPEFunc, layer, pos int) error {
+		cos, sin := v41RopeTableForLayer(s.M.Cfg, layer, pos)
+		got, err := rotate(layer, input, cos, sin, 1, 64, 64)
+		if err == nil {
+			table := v41TailRoPEHostTable(cos, sin, [2][]float32{})
+			v41TailRoPECheckBits(t, "cached query parity", got, v41TailRoPEExactOracle(input, table, 64, 64))
+		}
+		return err
+	}
+	t.Run("published_decode_source_trace", func(t *testing.T) {
+		s, b, rotate := newOwner()
+		// Replay the published same-position query sources, not a full model run.
+		sources := v41PublishedIndexSourceLayerIDs
+		for pos := 0; pos < 64; pos++ {
+			for _, layer := range sources {
+				if err := call(s, rotate, layer, pos); err != nil {
+					t.Fatal(err)
+				}
+				if len(b.tables) > 1 || b.tablePeak > 2 {
+					t.Fatal("query table bound exceeded")
+				}
+			}
+		}
+		if len(b.calls) != 512 || b.tableUploads != 64 || len(b.tables) != 1 || b.tablePeak != 2 {
+			t.Fatalf("calls=%d uploads=%d live=%d peak=%d", len(b.calls), b.tableUploads, len(b.tables), b.tablePeak)
+		}
+		v41IndexRoPECheckCachedTable(t, s, b)
+		s.Close()
+		v41IndexRoPECheckResources(t, b, false)
+	})
+	t.Run("identity_and_exact_bits", func(t *testing.T) {
+		s, b, rotate := newOwner()
+		cos, sin := v41RopeTableForLayer(s.M.Cfg, 2, 0)
+		invoke := func() {
+			if _, err := rotate(2, input, cos, sin, 1, 64, 64); err != nil {
+				t.Fatal(err)
+			}
+		}
+		invoke()
+		invoke()
+		if b.tableUploads != 1 {
+			t.Fatal("exact table missed")
+		}
+		sin[0] = math.Float32frombits(0x80000000)
+		invoke()
+		if b.tableUploads != 2 {
+			t.Fatal("signed zero falsely reused")
+		}
+		s.cacheGeometryEpoch++
+		invoke()
+		if b.tableUploads != 3 {
+			t.Fatal("stale epoch reused")
+		}
+		model := *s.M
+		s.M = &model
+		invoke()
+		if b.tableUploads != 4 {
+			t.Fatal("stale model reused")
+		}
+		rebound := s.v41IndexRoPEFunc()
+		if _, err := rebound(2, input, cos, sin, 1, 64, 64); err != nil {
+			t.Fatal(err)
+		}
+		invoke()
+		if b.tableUploads != 6 {
+			t.Fatal("old callback reused replaced live handle")
+		}
+		v41IndexRoPECheckCachedTable(t, s, b)
+		s.Close()
+		v41IndexRoPECheckResources(t, b, false)
+	})
+	for _, fault := range []string{"table-upload", "table-shape", "table-cache-alias", "query-cache-alias"} {
+		t.Run(fault, func(t *testing.T) {
+			s, b, rotate := newOwner()
+			if err := call(s, rotate, 2, 0); err != nil {
+				t.Fatal(err)
+			}
+			b.cacheAlias = s.halW["v41-indexer-query-rope-table:0"]
+			failure := &compute.BackendError{Backend: "test", Site: fault, Err: errors.New("selected table failure")}
+			b.failure, b.cause = fault, failure
+			err := call(s, rotate, 2, 1)
+			if err == nil || !s.BackendSessionClosed() || len(b.tables) != 0 {
+				t.Fatalf("cache failure left live owner: %v", err)
+			}
+			calls, uploads := len(b.calls), b.tableUploads
+			if retry := recoverError(func() { _ = call(s, rotate, 2, 1) }); retry != s.halFailure || len(b.calls) != calls || b.tableUploads != uploads {
+				t.Fatal("cache failure replayed")
+			}
+			v41IndexRoPECheckResources(t, b, false)
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestV41RoPETableCrossConsumerClose(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	for _, cleanupKind := range []string{"flush", "cache-free"} {
+		for _, failed := range []string{"query", "publication", "other"} {
+			t.Run(cleanupKind+"/"+failed, func(t *testing.T) {
+				b := newV41IndexRoPERecorder()
+				s := &Session{M: &Model{Cfg: Config{HeadDim: 64, QKRopeHeadDim: 64}}, Backend: b}
+				q, p := s.v41IndexRoPEFunc(), s.v41CompressedPublicationRoPEFunc()
+				cos, sin := make([]float32, 32), make([]float32, 32)
+				for i := range cos {
+					cos[i] = 1
+				}
+				if _, e := q(2, make([]float32, 64), cos, sin, 1, 64, 64); e != nil {
+					t.Fatal(e)
+				}
+				if _, e := p(2, make([]float32, 64), cos, sin, 1, 64); e != nil {
+					t.Fatal(e)
+				}
+				sin[0] = .125
+				if _, e := p(2, make([]float32, 64), cos, sin, 1, 64); e != nil {
+					t.Fatal(e)
+				}
+				if len(s.halW) != 3 {
+					t.Fatal("both cache consumers not warm")
+				}
+				primary := &BackendForwardOperationError{Cause: errors.New("selected primary")}
+				b.cleanupStage = cleanupKind
+				if cleanupKind == "cache-free" {
+					sentinel := compute.NewF32(b, []int{1}, []float32{7})
+					b.resources[sentinel.Buf()] = &v41IndexRoPEResource{}
+					s.halW["unrelated-close-sentinel"] = sentinel
+				}
+				b.failure, b.failCall, b.cause = "panic", len(b.calls)+1, primary
+				var got error
+				switch failed {
+				case "query":
+					got = recoverError(func() { _, _ = q(2, make([]float32, 64), cos, sin, 1, 64, 64) })
+				case "publication":
+					got = recoverError(func() { _, _ = p(2, make([]float32, 64), cos, sin, 1, 64) })
+				case "other":
+					s.halFailure = primary
+					b.cleanupArmed = true
+					s.closeBackendOwned()
+					got = s.halFailure
+				}
+				if got != primary || s.halFailure != primary || !s.BackendSessionClosed() || len(s.halW) != 0 || b.cleanupCalls != 1 {
+					t.Fatalf("cross teardown: primary=%v keys=%d flushes=%d", got, len(s.halW), b.cleanupCalls)
+				}
+				v41IndexRoPECheckResources(t, b, cleanupKind == "cache-free")
+				s.Close()
+				v41IndexRoPECheckResources(t, b, cleanupKind == "cache-free")
+			})
+		}
+	}
+}
+
+type v41RoPETableCloseBackend struct {
+	compute.Backend
+	attempts   map[compute.Buffer]int
+	fault      func()
+	flush      func()
+	flushCalls int
+	calls      int
+}
+
+func (b *v41RoPETableCloseBackend) Free(t compute.Tensor) {
+	b.attempts[t.Buf()]++
+	b.calls++
+	if b.calls == 1 {
+		b.fault()
+	}
+	b.Backend.Free(t)
+}
+
+func (b *v41RoPETableCloseBackend) BeginBatch() {}
+func (b *v41RoPETableCloseBackend) FlushBatch() {
+	b.flushCalls++
+	if b.flush != nil {
+		b.flush()
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestV41RoPETableCloseCompletion(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	for _, nilMode := range []string{"0", "1"} {
+		t.Run("panicnil="+nilMode, func(t *testing.T) {
+			t.Setenv("GODEBUG", os.Getenv("GODEBUG")+",panicnil="+nilMode)
+			for _, kind := range []string{"panic", "nil", "goexit"} {
+				t.Run(kind, func(t *testing.T) {
+					primary := errors.New("rotary retirement incomplete")
+					b := &v41RoPETableCloseBackend{Backend: compute.Default(), attempts: map[compute.Buffer]int{}}
+					b.fault = func() {
+						switch kind {
+						case "panic":
+							panic(primary)
+						case "nil":
+							panic(nil)
+						case "goexit":
+							runtime.Goexit()
+						}
+					}
+					s := &Session{Backend: b, halW: map[string]compute.Tensor{}}
+					for _, key := range v41RoPETableKeys {
+						s.halW[key] = compute.NewF32(b, []int{1, 2}, []float32{0, 1})
+					}
+					done := make(chan struct{})
+					returned, boundary := false, false
+					var payload any
+					go func() {
+						defer close(done)
+						func() { defer func() { payload = recover() }(); s.Close(); returned = true }()
+						boundary = true
+					}()
+					<-done
+					if returned || boundary == (kind == "goexit") || !s.branchCacheRetired || !s.halClosed || len(s.halW) != 0 || b.calls != 3 {
+						t.Fatalf("returned=%v boundary=%v calls=%d keys=%d", returned, boundary, b.calls, len(s.halW))
+					}
+					if kind == "panic" && payload != primary {
+						t.Fatal("primary replaced")
+					}
+					if kind == "nil" && nilMode == "0" {
+						if _, ok := payload.(*runtime.PanicNilError); !ok {
+							t.Fatalf("nil panic=%T", payload)
+						}
+					}
+					if kind == "nil" && nilMode == "1" && payload != nil {
+						t.Fatal("legacy nil changed")
+					}
+					s.Close()
+					for _, n := range b.attempts {
+						if n != 1 {
+							t.Fatal("retirement retried")
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestV41RoPETableCloseLaterFailure(t *testing.T) {
+	v41PublicationRoPERequireCPU(t)
+	tableFault, flushFault := errors.New("table cleanup"), errors.New("later flush")
+	b := &v41RoPETableCloseBackend{Backend: compute.Default(), attempts: map[compute.Buffer]int{}, fault: func() { panic(tableFault) }, flush: func() { panic(flushFault) }}
+	s := &Session{Backend: b, halW: map[string]compute.Tensor{}}
+	for _, key := range v41RoPETableKeys {
+		s.halW[key] = compute.NewF32(b, []int{1, 2}, []float32{0, 1})
+	}
+	sentinel := compute.NewF32(b, []int{1}, []float32{7})
+	s.halW["later-sentinel"] = sentinel
+	if got := recoverError(s.Close); got != flushFault || b.flushCalls != 1 || !s.branchCacheRetired || !s.halClosed || b.calls != 3 || len(s.halW) != 1 {
+		t.Fatalf("later failure precedence or sticky close changed: %v", got)
+	}
+	// The original body stops at flush failure; that unrelated owner is not
+	// claimed retired, and neither it nor an attempted table is retried later.
+	s.Close()
+	if b.calls != 3 || b.attempts[sentinel.Buf()] != 0 {
+		t.Fatal("interrupted close retried")
 	}
 }

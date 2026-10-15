@@ -65,9 +65,9 @@ func (p *v41ExpertTile) qualifyColdGrid(count int) {
 // including outputs returned alongside a selected error. Panel owners survive
 // until the cohort's final status read and cleanup. A selected error never
 // declines; only a nil helper or singleton uses the historical scalar path.
-func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, inter int, own func(compute.Tensor) bool, valid func(compute.Tensor, int) bool) (gate, up compute.Tensor, handled bool, err error) {
+func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, inter int, allowPanelRow bool, own func(compute.Tensor) bool, valid func(compute.Tensor, int) bool) (gate, up compute.Tensor, handled bool, panelRow compute.V41RoutedSwiGLUPanelRowBackend, err error) {
 	if p == nil || (row >= p.end && len(inputs)-row == 1) {
-		return compute.Tensor{}, compute.Tensor{}, false, nil
+		return compute.Tensor{}, compute.Tensor{}, false, nil, nil
 	}
 	if row >= p.end {
 		rows := v41ExpertTileSize(len(inputs) - row)
@@ -80,7 +80,7 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 		}
 		x := s.uploadHostF32([]int{len(packed)}, packed, compute.MemoryActivation, "V4.1 same-expert token tile")
 		if !own(x) || !valid(x, len(packed)) {
-			return gate, up, true, errV41ExpertResult
+			return gate, up, true, nil, errV41ExpertResult
 		}
 		project := func(weight compute.Tensor) (compute.Tensor, error) {
 			out, e := p.backend.V41Q2KTokenPanel(weight, x, rows)
@@ -98,12 +98,20 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 			p.note()
 		}
 		if p.gate, err = project(p.gateW); err != nil {
-			return gate, up, true, err
+			return gate, up, true, nil, err
 		}
 		if p.up, err = project(p.upW); err != nil {
-			return gate, up, true, err
+			return gate, up, true, nil, err
 		}
 		p.start, p.end = row, row+rows
+	}
+	// Both panels already belong to the cohort owner. Refusal happens before
+	// either row gather or activation is issued. A selected row call remains
+	// fatal on error; the caller must never replay it through the scalar path.
+	if allowPanelRow {
+		if direct, ok := p.backend.(compute.V41RoutedSwiGLUPanelRowBackend); ok && direct.SupportsV41RoutedSwiGLUPanelRow(p.gate, p.up, row-p.start) {
+			return p.gate, p.up, true, direct, nil
+		}
 	}
 	copyRow := func(panel compute.Tensor) (compute.Tensor, error) {
 		out, e := p.copies.V41RowLogGather([]compute.V41RowSpan{{Src: panel, Row: row - p.start, Rows: 1}}, inter)
@@ -121,8 +129,8 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 		return out, nil
 	}
 	if gate, err = copyRow(p.gate); err != nil {
-		return gate, up, true, err
+		return gate, up, true, nil, err
 	}
 	up, err = copyRow(p.up)
-	return gate, up, true, err
+	return gate, up, true, nil, err
 }

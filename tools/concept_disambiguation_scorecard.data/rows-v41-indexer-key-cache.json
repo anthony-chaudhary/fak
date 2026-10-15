@@ -9,7 +9,8 @@
       "distinction": "Separate from attention KV state and model-owned immutable weight staging. It owns indexer score inputs, charges retained plus replacement/staging peak, and retires replaced storage only after checked score read; append still incurs O(history) device copies. No production default or hardware-performance qualification.",
       "distinct_from": [
         "kv-cache",
-        "v41-grouped-cached-immutable-weight"
+        "v41-grouped-cached-immutable-weight",
+        "v41-rope-table-cache"
       ],
       "aliases": [
         "indexerKeys"

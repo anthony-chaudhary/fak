@@ -27,7 +27,7 @@ type v41DeviceGatherOps struct {
 	compressedPublicationRoPE v41CompressedPublicationRoPEFunc
 	engramGate                v41EngramGateFunc
 	compressorPool            v41CompressorPoolFunc
-	bf16Publish               v41BF16BoundaryFunc
+	bf16Publish               *v41BF16PublicationBinding
 	indexWeightScale          v41IndexWeightScaleFunc
 }
 
@@ -38,7 +38,7 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 		return nil
 	}
 	ops := &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
-	ops.bf16Publish = s.v41BF16PublishFunc()
+	ops.bf16Publish = s.v41BindBF16Publication()
 	ops.indexWeightScale = s.v41IndexWeightScaleFunc()
 	return ops
 }
@@ -49,12 +49,19 @@ func (o *v41DeviceGatherOps) bf16PublishFunc() v41BF16BoundaryFunc {
 	if o == nil {
 		return nil
 	}
-	if o.bf16Publish == nil && o.owner.v41DeviceOnlyPolicy() {
+	publish := o.bf16Publish.publicationFunc()
+	if publish == nil && o.owner.v41DeviceOnlyPolicy() {
 		return func(layer int, _ string, _ []float32) ([]float32, error) {
 			return nil, o.owner.v41DeviceOnlyMissingOp(layer, "bf16-boundary")
 		}
 	}
-	return o.bf16Publish
+	return publish
+}
+
+// setBF16Publication replaces ordinary behavior without inheriting native
+// authority. The prior product remains immutable for an in-flight observer.
+func (o *v41DeviceGatherOps) setBF16Publication(publish v41BF16BoundaryFunc) {
+	o.bf16Publish = o.bf16Publish.withPublication(publish)
 }
 
 // indexWeightScaleFunc returns the device index weight scale; under device-only

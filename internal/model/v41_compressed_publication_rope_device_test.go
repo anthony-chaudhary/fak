@@ -1077,8 +1077,10 @@ func TestV41CompressedPublicationRoPECachedFreeClosesSession(t *testing.T) {
 						t.Fatalf("cached Free fault=%q returned=%t closed=%t primary=%t", fault, returned, s.BackendSessionClosed(), s.halFailure == primary)
 					}
 					if fault == "goexit" {
-						if recovered != nil || b.cachedFreeCalls != 1 || s.halW[keys[1]].Buf() != tables[1].Buf() || b.resources[tables[1].Buf()].attempts != 0 {
-							t.Fatal("Goexit was recovered, drained the second table, or changed its ownership")
+						// Session retirement detaches every table and schedules every Free
+						// before the first attempt, so Goexit still runs the second defer.
+						if recovered != nil || b.cachedFreeCalls != 2 || len(s.halW) != 0 || b.resources[tables[1].Buf()].attempts != 1 || !b.resources[tables[1].Buf()].released {
+							t.Fatal("Goexit was recovered or skipped detached deferred table cleanup")
 						}
 					} else if recovered != primary || b.cachedFreeCalls != 2 || len(s.halW) != 0 || b.resources[tables[1].Buf()].attempts != 1 {
 						t.Fatal("cached cleanup changed the selected primary or ordinary cleanup progress")

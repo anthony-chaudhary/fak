@@ -163,6 +163,17 @@ func (s *Session) closeOwned(scope *backendExecutionScope) {
 	}
 	s.closeOnce.Do(func() {
 		retireBranchCache(s)
+		// Retire both rotary-table consumers before any close callback can
+		// interrupt teardown. Selected callers preserve their primary failure.
+		cleanup := s.retireV41RoPETables()
+		closeCompleted := false
+		defer func() {
+			// A table cleanup failure must not skip unrelated owners. Preserve
+			// any interrupted close body; surface cleanup-only failure afterward.
+			if closeCompleted && cleanup.present {
+				panic(cleanup.value)
+			}
+		}()
 		if stats := s.q4kMLPOutputSlabStats; stats.Calls != 0 {
 			fmt.Fprintf(os.Stderr, "{\"schema\":%q,\"engine\":\"fak-native\",\"backend\":\"metal\",\"quant\":\"q4_k\",\"calls\":%d,\"allocations\":%d,\"reuses\":%d,\"high_water_bytes\":%d}\n",
 				q4kMLPOutputSlabReceiptSchema, stats.Calls, stats.Allocations, stats.Reuses, stats.HighWaterBytes)
@@ -228,6 +239,7 @@ func (s *Session) closeOwned(scope *backendExecutionScope) {
 			s.modelWeightsHeld = false
 			scope.afterRelease(s.M.releaseWeightSession)
 		}
+		closeCompleted = true
 	})
 }
 

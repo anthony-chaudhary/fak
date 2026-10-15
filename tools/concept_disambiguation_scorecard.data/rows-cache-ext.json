@@ -241,7 +241,8 @@
       "definition": "model.cachedInvFreq returns the memoized RoPE inverse-frequency table for a config/layer so the rotation base is computed once and reused.",
       "distinction": "It is a memoized rotation-table cache for RoPE, not kv-cache which stores per-position key/value tensors.",
       "distinct_from": [
-        "kv-cache"
+        "kv-cache",
+        "v41-rope-table-cache"
       ],
       "aliases": [],
       "grounding": "cachedinvfreq",

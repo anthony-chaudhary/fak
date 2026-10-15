@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "id": "v41-rope-table-cache",
+      "canonical": "v41RoPETableCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Session-owned bounded exact F32 rotary sin/cos device tables. One query slot or two compressed-publication slots reuse only matching values, model, epoch, backend, geometry and live session handles; replacement retains one transient upload.",
+      "distinction": "Caches uploaded rotary coefficients, not inverse-frequency host memoization, attention KV state or resident indexer-key history. Session closure detaches all rotary owners before fallible teardown and schedules each backend release attempt; physical retirement remains backend-owned.",
+      "distinct_from": [
+        "x-cache-cachedinvfreq",
+        "kv-cache",
+        "v41-indexer-key-cache",
+        "v41-rope-table-cache-constructor"
+      ],
+      "aliases": [
+        "newV41RoPETableCache"
+      ],
+      "grounding": "v41RoPETableCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41-rope-table-cache-constructor",
+      "canonical": "newV41RoPETableCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Constructs the bounded rotary-table owner metadata for one or two fixed session keys, copying the key list and capturing the backend. It does not upload device tables; lookup and installation occur through the returned owner.",
+      "distinction": "Constructor operation rather than the retained rotary-table ownership state. v41RoPETableCache holds exact host values and live session tensor identity and participates in table replacement and session retirement.",
+      "distinct_from": [
+        "v41-rope-table-cache"
+      ],
+      "aliases": [],
+      "grounding": "newV41RoPETableCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

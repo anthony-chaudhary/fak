@@ -1,0 +1,74 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// v41_routed_swiglu_panel_row.comp - one addressed row of the same routed activation
+// between the gate/up and down projections (Ref #13815). Per lane: BF16 RNE of
+// the gate and up GEMM outputs, the asymmetric clamp (gate upper bound only, up
+// both bounds), F32 silu(g)*u, the F32 route-weight product, and BF16 RNE of the
+// down-projection operand. Binary32 DenormPreserve, SignedZeroInfNanPreserve and
+// RoundingModeRTE are explicit, as in v41_exact_rmsnorm.comp.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly  buffer Gbuf { uint gateBits[]; };
+layout(std430, binding = 1) readonly  buffer Ubuf { uint upBits[]; };
+layout(std430, binding = 2) writeonly buffer Ybuf { uint outBits[]; };
+// Native ownership fills all four words with UINT32_MAX in the same command
+// before this dispatch. Words: magic, count, lowest activation-stage fault
+// index, lowest down-operand-stage fault index (UINT32_MAX = none).
+layout(std430, binding = 3) buffer Status { uint status[]; };
+// The loader rejects absent, unknown or malformed encoded ABI markers.
+layout(constant_id = 31) const uint ROUTED_PANEL_ROW_ABI = 0x52535231u;
+layout(push_constant) uniform Push { uint count; uint rowOffset; float limit; float weight; } pc;
+
+const uint kExponent = 0x7f800000u;
+
+uint roundBF16(uint bits) { return (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u; }
+bool nonfinite(uint bits) { return (bits & kExponent) == kExponent; }
+
+void main() {
+    if (ROUTED_PANEL_ROW_ABI != 0x52535231u) return;
+    uint first = gl_GlobalInvocationID.x;
+    if (first == 0u) {
+        status[0] = 0x52535731u;
+        status[1] = pc.count;
+    }
+    // Native groups <= ceil(count/64) and count <= INT32_MAX, so the
+    // grid-stride increment cannot wrap.
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = first; i < pc.count; i += stride) {
+        uint gb = gateBits[pc.rowOffset + i];
+        uint ub = upBits[pc.rowOffset + i];
+        uint gr = roundBF16(gb);
+        uint ur = roundBF16(ub);
+        if (nonfinite(gb) || nonfinite(ub) || nonfinite(gr) || nonfinite(ur)) {
+            atomicMin(status[2], i);
+            outBits[i] = 0x7fc00000u;
+            continue;
+        }
+        precise float g = uintBitsToFloat(gr);
+        precise float u = uintBitsToFloat(ur);
+        if (pc.limit > 0.0) {
+            g = min(g, pc.limit);
+            u = max(-pc.limit, min(u, pc.limit));
+        }
+        precise float t = 1.0 + exp(-g);
+        precise float f = (g / t) * u;
+        uint fb = floatBitsToUint(f);
+        if (nonfinite(fb)) {
+            atomicMin(status[2], i);
+            outBits[i] = 0x7fc00000u;
+            continue;
+        }
+        precise float w = f * pc.weight;
+        uint wb = floatBitsToUint(w);
+        uint wr = roundBF16(wb);
+        if (nonfinite(wb) || nonfinite(wr)) {
+            atomicMin(status[3], i);
+            wr = 0x7fc00000u;
+        }
+        outBits[i] = wr;
+    }
+}

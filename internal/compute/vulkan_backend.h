@@ -513,6 +513,16 @@ int fvk_v41_routed_down_sum_f32(void *const *dDown, int slots, const void *dMid,
 int fvk_have_v41_routed_swiglu(void);
 int fvk_v41_routed_swiglu_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                               int count, float limit, float weight);
+/* Experimental borrowed-panel row activation. Exact opt-in
+ * FAK_V41_ROUTED_PANEL_ROW=1 and a marked optional module are required.
+ * The four bindings are unchanged; push is count,rowOffset,limit,weight.
+ * Gate/up contain rows*count F32 values; output contains one count-wide row.
+ * Status remains one scalar-operation record with row-local fault indices.
+ * No allocation ownership transfers and no host readback occurs here. */
+int fvk_have_v41_routed_swiglu_panel_row(void);
+int fvk_v41_routed_swiglu_panel_row_shape(int rows, int count, int row);
+int fvk_v41_routed_swiglu_panel_row_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
+                                       int rows, int count, int row, float limit, float weight);
 /* Ordinary V4.1 attention BF16 publication, registry V9/current68. The
  * unchanged integer checked module accepts only sites 3 (attention input)
  * and 4 (attention output) through this entrypoint. Input/output/status are
