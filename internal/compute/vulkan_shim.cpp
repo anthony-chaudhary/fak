@@ -4453,6 +4453,100 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
     }
 }
 
+// A fresh gather output has no read/write dependency between its disjoint
+// destination regions. Source regions may repeat (VUID 00117/12482): only
+// destination overlap and source/destination memory overlap are forbidden.
+// Fixed metadata bounds avoid an allocation failure after recording starts.
+int fvk_v41_d2d_gather(void* dstHandle, int count, void* const* srcs,
+                       const size_t* srcOffsets, const size_t* bytes) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!g_ready) return 1;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (count <= 0 || count > FVK_V41_GATHER_MAX_REGIONS || !srcs || !srcOffsets || !bytes) return 2;
+    Buffer* dst = B(dstHandle);
+    const auto live = [](const Buffer* b) {
+        return b && b->buf != VK_NULL_HANDLE && b->mem != VK_NULL_HANDLE && b->bytes > 0 &&
+            b->bytes <= std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset;
+    };
+    if (!live(dst)) return 2;
+
+    Buffer* sources[FVK_V41_GATHER_MAX_REGIONS];
+    int groups[FVK_V41_GATHER_MAX_REGIONS];
+    uint32_t sizes[FVK_V41_GATHER_MAX_REGIONS]{};
+    uint32_t starts[FVK_V41_GATHER_MAX_REGIONS];
+    VkBufferCopy ordered[FVK_V41_GATHER_MAX_REGIONS];
+    int sourceCount = 0;
+    size_t total = 0;
+    for (int i = 0; i < count; ++i) {
+        Buffer* src = B(srcs[i]);
+        if (!live(src) || bytes[i] == 0 || ((srcOffsets[i] | bytes[i]) & 3u) != 0 || srcOffsets[i] > src->bytes ||
+            bytes[i] > src->bytes - srcOffsets[i] || total > dst->bytes || bytes[i] > dst->bytes - total) return 2;
+        // Require the entire fresh output allocation to be disjoint, including
+        // distinct VkBuffer objects bound into one VkDeviceMemory allocation.
+        if (src == dst || src->buf == dst->buf ||
+            (src->mem == dst->mem && src->memoryOffset < dst->memoryOffset + dst->bytes &&
+             dst->memoryOffset < src->memoryOffset + src->bytes)) return 2;
+        int group = 0;
+        while (group < sourceCount && sources[group]->buf != src->buf) ++group;
+        if (group == sourceCount) sources[sourceCount++] = src;
+        groups[i] = group;
+        ++sizes[group];
+        total += bytes[i];
+    }
+    if (total != dst->bytes || (g_batching && (g_batchCmd == VK_NULL_HANDLE ||
+        g_batchOps > std::numeric_limits<int>::max() - sourceCount))) return 2;
+    uint32_t at = 0;
+    for (int group = 0; group < sourceCount; ++group) {
+        starts[group] = at;
+        at += sizes[group];
+        sizes[group] = 0;
+    }
+    size_t destination = 0;
+    for (int i = 0; i < count; ++i) {
+        const int group = groups[i];
+        ordered[starts[group] + sizes[group]++] = VkBufferCopy{srcOffsets[i], destination, bytes[i]};
+        destination += bytes[i];
+    }
+
+    const bool recording = g_batching;
+    VkCommandBuffer cmd = recording ? g_batchCmd : v41BeginCmdChecked();
+    if (cmd == VK_NULL_HANDLE) return (int)g_submissionStatus;
+    // This must not trust a single-operation hazard-elision verdict: the
+    // aggregate reads several sources. The next ordinary consumer keeps its
+    // existing transfer-write dependency barrier after the whole gather.
+    recordComputeBarrier(cmd);
+    if (recording) g_batchHasV41 = true;
+    for (int group = 0; group < sourceCount; ++group) {
+        vkCmdCopyBuffer(cmd, sources[group]->buf, dst->buf, sizes[group], ordered + starts[group]);
+        dp_inc(g_dp.d2d); // physical copy commands, not logical regions
+        if (recording) {
+            tsAfterDispatch(cmd, (uint32_t)K_COUNT, 0, 0);
+            ++g_batchOps;
+        }
+    }
+    if (recording) {
+        // Preserve existing transfer accounting: a logical span remains one
+        // region, even though native dispatch profiling counts fewer commands.
+        if (uint64_t(count) > std::numeric_limits<uint64_t>::max() - g_batchD2DCount ||
+            total > std::numeric_limits<uint64_t>::max() - g_batchD2DBytes) {
+            g_batchD2DValid = false;
+        } else {
+            g_batchD2DCount += uint64_t(count);
+            g_batchD2DBytes += total;
+        }
+    } else {
+        // A later unbatched consumer may start without a batch predecessor.
+        // Publish transfer writes for both shader and transfer reads now.
+        recordComputeBarrier(cmd);
+        dpOneShot(g_dp.oneShotD2D);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
+        if (!checkedCounterAdd(g_d2dCount, uint64_t(count)) || !checkedCounterAdd(g_d2dBytes, total)) {
+            g_transferCountersValid = false;
+        }
+    }
+    return (int)g_submissionStatus;
+}
+
 void fvk_d2d(void* dst, const void* src, size_t bytes) {
     fvk_d2d_range(dst, 0, src, 0, bytes);
 }

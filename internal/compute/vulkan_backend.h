@@ -82,6 +82,14 @@ void fvk_d2d_off(void *dst, size_t dst_off, const void *src, size_t bytes);
 /* General device->device range copy. Both handles are opaque Buffer* values; offsets are
  * byte offsets into those buffers, never pointer arithmetic on the handles themselves. */
 void fvk_d2d_range(void *dst, size_t dst_off, const void *src, size_t src_off, size_t bytes);
+/* Bounded V4.1 gather into fresh, disjoint destination storage. Destination
+ * offsets are implicit, in input order. Repeated source regions are allowed.
+ * Every region is checked before commands are recorded. Outside a batch this
+ * uses one checked submission; inside it preserves the existing owner fence.
+ * Returns 2 for invalid geometry, otherwise the checked submission status. */
+#define FVK_V41_GATHER_MAX_REGIONS 1024
+int fvk_v41_d2d_gather(void *dst, int count, void *const *srcs,
+                       const size_t *src_offsets, const size_t *bytes);
 void fvk_sync(void);
 /* Drop all currently recycled device buffers. Safe after a session has closed and flushed. */
 void fvk_trim_pool(void);
