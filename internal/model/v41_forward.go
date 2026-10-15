@@ -456,7 +456,11 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		return nil, err
 	}
 
-	act = &Activations{Seq: len(seq), Hidden: [][]float32{flatten(x)}}
+	act = &Activations{Seq: len(seq)}
+	// Preserve the historical embedding-only head for empty hand-built stacks.
+	if !lastHeadOnly || full && cfg.NumLayers <= 0 {
+		act.Hidden = [][]float32{flatten(x)}
+	}
 	// One scratch for the whole forward: the grouped output projections are read
 	// as whole f32 blocks but the layer loop is sequential, so a single reused
 	// buffer bounds the wo_a/wo_b term to one layer's worth instead of the
@@ -483,27 +487,45 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 		if err := trace.recordLayerStreams(l, streams, resident); err != nil {
 			return nil, err
 		}
-		hidden := flatten(x)
+		retainHidden := !lastHeadOnly || l == cfg.NumLayers-1
+		var hidden []float32
 		if resident != nil {
 			rows, err := resident.hiddenRows(l)
 			if err != nil {
 				return nil, err
 			}
-			hidden = make([]float32, 0, len(seq)*H)
-			for _, row := range rows {
-				hidden = append(hidden, row...)
+			if retainHidden {
+				hidden = make([]float32, 0, len(seq)*H)
+				for _, row := range rows {
+					hidden = append(hidden, row...)
+				}
 			}
 		} else if full {
-			hidden = make([]float32, 0, len(seq)*H)
+			if retainHidden {
+				hidden = make([]float32, 0, len(seq)*H)
+			}
 			for t := range streams {
 				row, err := v41MHCPreBF16On(scratch.mhcCarry.device, l, streams[t], scratch.mhcCarry.pre[t])
 				if err != nil {
 					return nil, err
 				}
-				hidden = append(hidden, row...)
+				if retainHidden {
+					hidden = append(hidden, row...)
+				}
 			}
+		} else if !lastHeadOnly {
+			hidden = flatten(x)
 		}
-		act.Hidden = append(act.Hidden, hidden)
+		// Session.Prefill consumes only the last logits row. Keep every full
+		// collapse and checked read at its original boundary, including their
+		// finite-value checks, but retain only the final panel needed by the
+		// head. Model.Forward still returns every hidden panel, and activation
+		// tracing above remains independent of this diagnostic retention.
+		if !lastHeadOnly {
+			act.Hidden = append(act.Hidden, hidden)
+		} else if full && l == cfg.NumLayers-1 {
+			act.Hidden = [][]float32{hidden}
+		}
 	}
 
 	var headProjection v41DenseProjectionFunc
