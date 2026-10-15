@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -331,4 +332,185 @@ func q2PreciseHasArg(instruction q2PreciseSPIRVInstruction, id string) bool {
 		}
 	}
 	return false
+}
+
+// This source contract pins both row roles, the guarded odd tail, the single
+// activation prelude, and the complete ordered accumulation/reduction body.
+// It is not compiled arithmetic or hardware parity evidence. The compiler test
+// above finds one term and cannot by itself qualify both paired-row paths.
+// fak-test:runtime fast est=1ms lane=default
+func TestVulkanQ2TokenPanelActivationReuseSource(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("shaders", "v41_q2k_token_panel.comp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	if err := q2TokenPanelActivationReuseSourceContract(source); err != nil {
+		t.Fatal(err)
+	}
+	// A complete precise chain can still be wrong if it uses the other row's
+	// quant. The negative control must reject this otherwise plausible mutation.
+	const row1Product = "qvRow1.y * xv.y"
+	if strings.Count(source, row1Product) != 1 {
+		t.Fatal("negative-control row-1 product is not unique")
+	}
+	mutated := strings.Replace(source, row1Product, "qvRow0.y * xv.y", 1)
+	if err := q2TokenPanelActivationReuseSourceContract(mutated); err == nil {
+		t.Fatal("source contract accepted a row-0 quant in the row-1 term")
+	}
+}
+
+func q2TokenPanelActivationReuseSourceContract(source string) error {
+	compact := func(text string) string { return strings.Join(strings.Fields(text), " ") }
+	// Compare active text, so a comment cannot stand in for a declaration.
+	// Exact preamble equality also rejects extra preprocessor directives.
+	source = regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`).ReplaceAllString(source, " ")
+	const main = "void main() {"
+	start := strings.Index(source, main)
+	if start < 0 || strings.Count(source, main) != 1 {
+		return fmt.Errorf("paired-row shader must have one main body")
+	}
+	const preamble = `
+#version 450
+layout(local_size_x = 64) in;
+const uint OUT_ROWS = 2u;
+const uint LANES = 64u;
+const uint MAX_TOKENS = 8u;
+layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X { vec4 x4[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+shared float red[MAX_TOKENS * OUT_ROWS * LANES];
+vec4 bytesOf(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+`
+	if compact(source[:start]) != compact(preamble) {
+		return fmt.Errorf("paired-row shader version, geometry, bindings, or quant-byte decode changed")
+	}
+	// Only the row suffix changes this scalar-order chain. Sharing xv/xsum
+	// must not share any quant, scale, term, or per-j sum between output rows.
+	rowTerm := func(row string) string {
+		return strings.ReplaceAll(`
+precise float q0ROW = qvROW.x * xv.x;
+precise float q1ROW = qvROW.y * xv.y;
+precise float q2ROW = qvROW.z * xv.z;
+precise float q3ROW = qvROW.w * xv.w;
+precise float q01ROW = q0ROW + q1ROW;
+precise float q012ROW = q01ROW + q2ROW;
+precise float qdotROW = q012ROW + q3ROW;
+precise float scaledDotROW = dlROW * qdotROW;
+precise float minTermROW = mlROW * xsum;
+precise float termROW = scaledDotROW - minTermROW;
+precise float nextSumROW = sumROW[t] + termROW;
+sumROW[t] = nextSumROW;
+`, "ROW", row)
+	}
+	want := `
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint rowBase = gl_WorkGroupID.x * OUT_ROWS;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim);
+    bool hasRow1 = rowBase + 1u < outDim;
+    uint tokens = uint(pc.tokens), nsb = inDim / 256u;
+    uint wordsPerRow = nsb * 21u;
+    uint t16 = tid & 15u, h = t16 >> 3u, s = (t16 >> 2u) & 1u;
+    uint lq = (t16 & 3u) * 4u;
+    precise float acc[MAX_TOKENS * OUT_ROWS];
+    for (uint t = 0u; t < tokens; ++t) {
+        for (uint r = 0u; r < OUT_ROWS; ++r) acc[t * OUT_ROWS + r] = 0.0;
+    }
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
+        if (rowBase >= outDim) break;
+        uint baseRow0 = rowBase * wordsPerRow + sb * 21u;
+        uint qRow0 = raw[baseRow0 + 4u + t16];
+        uint sc0Row0 = raw[baseRow0 + h * 2u];
+        uint sc1Row0 = raw[baseRow0 + h * 2u + 1u];
+        vec2 ddRow0 = unpackHalf2x16(raw[baseRow0 + 20u]);
+        uint scjRow0[4];
+        scjRow0[0] = (sc0Row0 >> (s * 8u)) & 255u;
+        scjRow0[1] = (sc0Row0 >> ((2u + s) * 8u)) & 255u;
+        scjRow0[2] = (sc1Row0 >> (s * 8u)) & 255u;
+        scjRow0[3] = (sc1Row0 >> ((2u + s) * 8u)) & 255u;
+        uint qRow1;
+        vec2 ddRow1;
+        uint scjRow1[4];
+        if (hasRow1) {
+            uint baseRow1 = (rowBase + 1u) * wordsPerRow + sb * 21u;
+            qRow1 = raw[baseRow1 + 4u + t16];
+            uint sc0Row1 = raw[baseRow1 + h * 2u];
+            uint sc1Row1 = raw[baseRow1 + h * 2u + 1u];
+            ddRow1 = unpackHalf2x16(raw[baseRow1 + 20u]);
+            scjRow1[0] = (sc0Row1 >> (s * 8u)) & 255u;
+            scjRow1[1] = (sc0Row1 >> ((2u + s) * 8u)) & 255u;
+            scjRow1[2] = (sc1Row1 >> (s * 8u)) & 255u;
+            scjRow1[3] = (sc1Row1 >> ((2u + s) * 8u)) & 255u;
+        }
+        precise float sumRow0[MAX_TOKENS];
+        precise float sumRow1[MAX_TOKENS];
+        for (uint t = 0u; t < tokens; ++t) {
+            sumRow0[t] = 0.0;
+            sumRow1[t] = 0.0;
+        }
+        for (uint j = 0u; j < 4u; ++j) {
+            vec4 qvRow0 = bytesOf((qRow0 >> (2u * j)) & 0x03030303u);
+            precise float dlRow0 = ddRow0.x * float(scjRow0[j] & 15u);
+            precise float mlRow0 = ddRow0.y * float(scjRow0[j] >> 4u);
+            vec4 qvRow1;
+            precise float dlRow1;
+            precise float mlRow1;
+            if (hasRow1) {
+                qvRow1 = bytesOf((qRow1 >> (2u * j)) & 0x03030303u);
+                dlRow1 = ddRow1.x * float(scjRow1[j] & 15u);
+                mlRow1 = ddRow1.y * float(scjRow1[j] >> 4u);
+            }
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
+            for (uint t = 0u; t < tokens; ++t) {
+                vec4 xv = x4[t * (inDim >> 2u) + idx];
+                precise float x01 = xv.x + xv.y;
+                precise float x012 = x01 + xv.z;
+                precise float xsum = x012 + xv.w;
+` + rowTerm("Row0") + `
+                if (hasRow1) {
+` + rowTerm("Row1") + `
+                }
+            }
+        }
+        for (uint t = 0u; t < tokens; ++t) {
+            uint accIdxRow0 = t * OUT_ROWS;
+            precise float nextAccRow0 = acc[accIdxRow0] + sumRow0[t];
+            acc[accIdxRow0] = nextAccRow0;
+            if (hasRow1) {
+                uint accIdxRow1 = t * OUT_ROWS + 1u;
+                precise float nextAccRow1 = acc[accIdxRow1] + sumRow1[t];
+                acc[accIdxRow1] = nextAccRow1;
+            }
+        }
+    }
+    for (uint t = 0u; t < tokens; ++t) {
+        for (uint r = 0u; r < OUT_ROWS; ++r) red[(t * OUT_ROWS + r) * LANES + tid] = acc[t * OUT_ROWS + r];
+    }
+    barrier();
+    for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) {
+            for (uint t = 0u; t < tokens; ++t) {
+                for (uint r = 0u; r < OUT_ROWS; ++r) {
+                    uint off = (t * OUT_ROWS + r) * LANES + tid;
+                    precise float reduced = red[off] + red[off + stride];
+                    red[off] = reduced;
+                }
+            }
+        }
+        barrier();
+    }
+    if (tid < OUT_ROWS && rowBase + tid < outDim) {
+        for (uint t = 0u; t < tokens; ++t) y[t * outDim + rowBase + tid] = red[(t * OUT_ROWS + tid) * LANES];
+    }
+}
+`
+	if compact(source[start:]) != compact(want) {
+		return fmt.Errorf("paired-row activation reuse lost its source arithmetic, guard, or reduction contract")
+	}
+	return nil
 }
