@@ -12,6 +12,7 @@ type v41IndexRoPEFunc func(layer int, values, cos, sin []float32, heads, headDim
 
 func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
+		!backendHasComparableIdentity(s.Backend) ||
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
 		return nil
 	}
@@ -21,6 +22,11 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 	if !ok || !operation.V41TailRoPEExactAvailable() || !operation.V41TailRoPERowsAvailable() {
 		return nil
 	}
+	backend := s.Backend
+	// Eight published index sources share one exact position table during decode.
+	// One R-float table stays live; upload-before-retire briefly holds two tables:
+	// 4*R bytes steady and 8*R replacement payload, plus native allocation/staging.
+	cache := newV41RoPETableCache(s, backend, "v41-indexer-query-rope-table:0")
 	return func(layer int, out, cos, sin []float32, heads, headDim, rotaryDim int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
@@ -44,7 +50,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				closeSelected(s.halFailure)
 				return s.halFailure
 			}
-			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-indexer-query-rope", Layer: layer, Stage: stage, Cause: err}
+			closed := &BackendForwardOperationError{Backend: backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-indexer-query-rope", Layer: layer, Stage: stage, Cause: err}
 			closeSelected(closed)
 			return closed
 		}
@@ -89,10 +95,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				}
 			}
 		}
-		table := make([]float32, rotaryDim)
-		for j := range sin {
-			table[2*j], table[2*j+1] = sin[j], cos[j]
-		}
+		table := cache.hostTable(cos, sin)
 		run := func() (row []float32, runErr error) {
 			var owners []compute.Tensor
 			defer func() {
@@ -105,7 +108,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 								cleanupPanic = r
 							}
 						}()
-						s.Backend.Free(owners[i])
+						backend.Free(owners[i])
 					}()
 				}
 				if primaryPanic != nil {
@@ -124,14 +127,28 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				owners = append(owners, t)
 			}
 			stage = "query upload"
-			xt := s.uploadHostF32([]int{heads, headDim}, append([]float32(nil), out...), compute.MemoryActivation, "V4.1 indexer query RoPE")
+			xt := uploadHostF32Class(backend, []int{heads, headDim}, append([]float32(nil), out...), compute.MemoryActivation, "V4.1 indexer query RoPE")
+			if xt.Buf() == nil || xt.Backend() != backend || cache.owns(xt) {
+				return nil, errV41TailRoPEResult
+			}
 			retain(xt)
 			stage = "table upload"
-			tt := s.uploadHostF32([]int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 indexer query RoPE table")
-			retain(tt)
+			tt := cache.lookup(table, rotaryDim)
+			if tt.Buf() == nil {
+				tt = uploadHostF32Class(backend, []int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 indexer query RoPE table")
+				fresh := tt.Buf() != nil && tt.Backend() == backend && tt.Buf() != xt.Buf() && !cache.owns(tt)
+				if fresh {
+					retain(tt)
+				}
+				if !fresh || s.Backend != backend || tt.Dtype != compute.F32 || tt.Layout != compute.RowMajor || tt.Quant != nil || len(tt.Shape) != 2 || tt.Shape[0] != rotaryDim/2 || tt.Shape[1] != 2 {
+					return nil, errV41TailRoPEResult
+				}
+				cache.install(tt, table)
+				owners = owners[:len(owners)-1]
+			}
 			stage = "index-rope"
 			rotated, err := operation.V41TailRoPERows(xt, tt, heads, headDim, rotaryDim)
-			fresh := rotated.Buf() != nil && rotated.Backend() == s.Backend && rotated.Buf() != xt.Buf() && rotated.Buf() != tt.Buf()
+			fresh := rotated.Buf() != nil && rotated.Backend() == backend && rotated.Buf() != xt.Buf() && !cache.owns(rotated)
 			if fresh {
 				retain(rotated)
 			}
@@ -143,7 +160,7 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				return nil, errV41TailRoPEResult
 			}
 			stage = "query readback"
-			values := s.Backend.Read(rotated)
+			values := backend.Read(rotated)
 			if len(values) != width {
 				return nil, errV41TailRoPEResult
 			}

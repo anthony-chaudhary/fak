@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -34,15 +33,7 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 	// changes. Native quarantine after uncertain completion is not recycled.
 	// Payload and output tensors remain transient. Cold layer-major prefill may
 	// miss this bounded cache; no position-keyed or model-global storage is kept.
-	keys := [2]string{"v41-compressed-publication-rope-table:0", "v41-compressed-publication-rope-table:1"}
-	type tableEntry struct {
-		values []float32
-		tensor compute.Tensor
-		model  *Model
-		epoch  uint64
-	}
-	var tables [2]tableEntry
-	next := 0
+	cache := newV41RoPETableCache(s, backend, "v41-compressed-publication-rope-table:0", "v41-compressed-publication-rope-table:1")
 	return func(layer int, out, cos, sin []float32, rows, rotaryDim int) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
@@ -52,16 +43,6 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 			}
 			if s.halClosed {
 				return
-			}
-			// Detach once before Close's flush: a secondary flush panic must not
-			// strand these owners. Backend.Free retains its normal deferred-release
-			// contract (Vulkan parks uncertain submissions in native quarantine).
-			// A failed Free is never retried or represented as physical retirement.
-			for _, key := range keys {
-				if table, present := s.halW[key]; present {
-					delete(s.halW, key)
-					func() { defer func() { _ = recover() }(); backend.Free(table) }()
-				}
 			}
 			// Cleanup can panic before Close marks the session closed; retain the
 			// selected primary and prohibit reuse even when cleanup is incomplete.
@@ -121,7 +102,7 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 				}
 			}
 		}
-		table := v41TailRoPEHostTable(cos, sin, [2][]float32{tables[0].values, tables[1].values})
+		table := cache.hostTable(cos, sin)
 		run := func() (row []float32, runErr error) {
 			var owners []compute.Tensor
 			defer func() {
@@ -152,50 +133,17 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 				}
 				owners = append(owners, t)
 			}
-			cacheOwned := func(t compute.Tensor) bool {
-				for _, key := range keys {
-					if table, present := s.halW[key]; present && t.Buf() == table.Buf() {
-						return true
-					}
-				}
-				return false
-			}
 			stage = "tail upload"
 			xt := uploadHostF32Class(backend, []int{rows, rotaryDim}, append([]float32(nil), out...), compute.MemoryActivation, "V4.1 compressed publication RoPE")
-			if xt.Buf() == nil || xt.Backend() != backend || cacheOwned(xt) {
+			if xt.Buf() == nil || xt.Backend() != backend || cache.owns(xt) {
 				return nil, errV41TailRoPEResult
 			}
 			retain(xt)
 			stage = "table upload"
-			var tt compute.Tensor
-			for i, entry := range tables {
-				live, present := s.halW[keys[i]]
-				if !present || live.Buf() == nil || live.Buf() != entry.tensor.Buf() ||
-					live.Backend() != backend || s.Backend != backend || entry.model != s.M || entry.epoch != s.cacheGeometryEpoch ||
-					live.Dtype != compute.F32 || live.Layout != compute.RowMajor || live.Quant != nil ||
-					len(live.Shape) != 2 || live.Shape[0] != rotaryDim/2 || live.Shape[1] != 2 || len(entry.values) != len(table) {
-					continue
-				}
-				equal := true
-				for j, value := range table {
-					if math.Float32bits(value) != math.Float32bits(entry.values[j]) {
-						equal = false
-						break
-					}
-				}
-				if equal {
-					tt = live
-					break
-				}
-			}
+			tt := cache.lookup(table, rotaryDim)
 			if tt.Buf() == nil {
 				tt = uploadHostF32Class(backend, []int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 compressed publication RoPE table")
-				fresh := tt.Buf() != nil && tt.Backend() == backend && tt.Buf() != xt.Buf()
-				for _, key := range keys {
-					if prior, present := s.halW[key]; present && prior.Buf() == tt.Buf() {
-						fresh = false
-					}
-				}
+				fresh := tt.Buf() != nil && tt.Backend() == backend && tt.Buf() != xt.Buf() && !cache.owns(tt)
 				if fresh {
 					retain(tt)
 				}
@@ -203,24 +151,12 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 					len(tt.Shape) != 2 || tt.Shape[0] != rotaryDim/2 || tt.Shape[1] != 2 {
 					return nil, errV41TailRoPEResult
 				}
-				if s.halW == nil {
-					s.halW = make(map[string]compute.Tensor)
-				}
-				key := keys[next]
-				if prior, present := s.halW[key]; present {
-					// The new table is still transient if retirement panics. Delete
-					// the old owner first so session failure cannot free it twice.
-					delete(s.halW, key)
-					backend.Free(prior)
-				}
-				s.halW[key] = tt
-				tables[next] = tableEntry{values: table, tensor: tt, model: s.M, epoch: s.cacheGeometryEpoch}
-				next = (next + 1) % len(tables)
+				cache.install(tt, table)
 				owners = owners[:len(owners)-1] // transfer the validated new table to the session
 			}
 			stage = "tail rotation"
 			rotated, err := operation.V41TailRoPERows(xt, tt, rows, rotaryDim, rotaryDim)
-			fresh := rotated.Buf() != nil && rotated.Backend() == backend && rotated.Buf() != xt.Buf() && !cacheOwned(rotated)
+			fresh := rotated.Buf() != nil && rotated.Backend() == backend && rotated.Buf() != xt.Buf() && !cache.owns(rotated)
 			if fresh {
 				retain(rotated)
 			}

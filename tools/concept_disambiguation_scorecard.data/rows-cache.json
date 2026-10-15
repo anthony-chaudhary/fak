@@ -14,7 +14,8 @@
         "c4681-kvcached",
         "x3-cache-gocache",
         "v41-grouped-cached-immutable-weight",
-        "v41-indexer-key-cache"
+        "v41-indexer-key-cache",
+        "v41-rope-table-cache"
       ],
       "aliases": [
         "model KV",

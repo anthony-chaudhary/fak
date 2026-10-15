@@ -1280,3 +1280,17 @@ Private call-local eligibility record for one canonical shared-attention operati
 Private one-use, exact-request witness created after the combined-attention composer validates every original window and compressed row and selection ID before masking. It is tied to the live continuation, exact request and row-descriptor identities, is consumed once by that canonical private core, and permits omission only of the duplicate row-finiteness scan.
 
 **Distinct from:** Unlike v41SharedAttentionContinuation, this witness records that the original inputs were validated for this exact invocation, not merely that the execution context is eligible. Unlike v41SharedAttentionBinding, it is call-local and single-use, not reusable provenance. Unlike v41SharedAttentionRows, it owns no KV data; unlike V41SharedAttentionPlain, it selects no numerical mode. It never travels through an ordinary callback request, and it does not replace geometry, shape, ID, Q, sink, selected-error or lifetime checks.
+
+
+### v41RoPETableCache
+
+Session-owned bounded exact F32 rotary sin/cos device tables. One query slot or two compressed-publication slots reuse only matching values, model, epoch, backend, geometry and live session handles; replacement retains one transient upload.
+
+**Distinct from:** Caches uploaded rotary coefficients, not inverse-frequency host memoization, attention KV state or resident indexer-key history. Session closure detaches all rotary owners before fallible teardown and schedules each backend release attempt; physical retirement remains backend-owned.
+
+
+### newV41RoPETableCache
+
+Constructs the bounded rotary-table owner metadata for one or two fixed session keys, copying the key list and capturing the backend. It does not upload device tables; lookup and installation occur through the returned owner.
+
+**Distinct from:** Constructor operation rather than the retained rotary-table ownership state. v41RoPETableCache holds exact host values and live session tensor identity and participates in table replacement and session retirement.
