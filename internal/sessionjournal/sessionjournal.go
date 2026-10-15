@@ -368,6 +368,59 @@ func FoldEvents(events []Event) []Session {
 	return out
 }
 
+// Refusal is the bounded, content-free projection of one KindRefuse audit row. It carries
+// only the fields Append already persisted on a refusal — a session id, timestamp, boot id,
+// the closed refusal reason, and the denied-source digest — never the denied CWD, source
+// text, model, or argv. It exists so `fak sessionjournal report` can distinguish a producer
+// whose write was refused by policy from a producer that never ran, without disclosing
+// anything the containment contract (#5910) keeps out of the journal.
+type Refusal struct {
+	ID           string `json:"id"`
+	TS           string `json:"ts"`
+	Boot         string `json:"boot,omitempty"`
+	Reason       string `json:"reason"`
+	SourceDigest string `json:"source_digest,omitempty"`
+}
+
+// RefusalCount tallies the content-free refusal audit rows in a parsed event set. It is the
+// scalar an operator reads to tell "policy refused this source" from "no producer ran".
+func RefusalCount(events []Event) int {
+	n := 0
+	for _, ev := range events {
+		if ev.Kind == KindRefuse {
+			n++
+		}
+	}
+	return n
+}
+
+// Refusals projects the refusal audit rows into bounded report rows. sessionID, when
+// non-empty, keeps only refusals for that exact session id; limit > 0 caps the result. Rows
+// are newest-first (matching the report's session ordering) so a bounded limit surfaces the
+// most recent refusals. A limit <= 0 yields every matching row.
+func Refusals(events []Event, sessionID string, limit int) []Refusal {
+	want := strings.TrimSpace(sessionID)
+	matched := make([]Event, 0, len(events))
+	for _, ev := range events {
+		if ev.Kind != KindRefuse {
+			continue
+		}
+		if want != "" && strings.TrimSpace(ev.ID) != want {
+			continue
+		}
+		matched = append(matched, ev)
+	}
+	sort.SliceStable(matched, func(i, j int) bool { return eventTime(matched[i]).After(eventTime(matched[j])) })
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	out := make([]Refusal, len(matched))
+	for i, ev := range matched {
+		out[i] = Refusal{ID: ev.ID, TS: ev.TS, Boot: ev.Boot, Reason: ev.Reason, SourceDigest: ev.SourceDigest}
+	}
+	return out
+}
+
 // applyProvenance copies the non-empty provenance fields of an event onto the session, so
 // a later beat carrying a refreshed pid or the open's rich fields both land.
 func applyProvenance(s *Session, ev Event) {

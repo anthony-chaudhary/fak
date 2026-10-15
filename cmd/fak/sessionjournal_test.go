@@ -172,6 +172,64 @@ func firstReportSession(t *testing.T, envelope string) reportEnvelopeSession {
 	return env.Sessions[0]
 }
 
+// TestSessionJournalReportRefusals: a denied-source open writes only a content-free refusal
+// row, and `report --refusals --json` surfaces it — counts.refusals distinguishes a policy
+// refusal from absent producer data — without disclosing the denied source or payload.
+func TestSessionJournalReportRefusals(t *testing.T) {
+	j := filepath.Join(t.TempDir(), "j.jsonl")
+	denied := filepath.Join(t.TempDir(), "fak-private", "LAB-13865")
+	payload := "DENIED-13865-PAYLOAD"
+
+	// A denied open is refused; a normal open folds as LIVE.
+	if _, e, code := runSJ(t, j, "open", "--id", "SR1", "--cwd", denied, "--model", payload); code == 0 {
+		t.Fatalf("denied source open should not exit 0, stderr=%s", e)
+	}
+	if _, e, code := runSJ(t, j, "open", "--id", "SOK", "--cwd", "C:/work/fak"); code != 0 {
+		t.Fatalf("ordinary open exit %d, stderr=%s", code, e)
+	}
+
+	// JSON: refusal count and the bounded projection are present.
+	outJSON, e, code := runSJ(t, j, "report", "--no-guard-sessions", "--json")
+	if code != 0 {
+		t.Fatalf("json report exit %d, stderr=%s", code, e)
+	}
+	var env struct {
+		Counts struct {
+			Refusals int `json:"refusals"`
+		} `json:"counts"`
+		Refusals []struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason"`
+		} `json:"refusals"`
+	}
+	if err := json.Unmarshal([]byte(outJSON), &env); err != nil {
+		t.Fatalf("report envelope is not valid JSON: %v\n%s", err, outJSON)
+	}
+	if env.Counts.Refusals != 1 {
+		t.Fatalf("counts.refusals = %d, want 1:\n%s", env.Counts.Refusals, outJSON)
+	}
+	if len(env.Refusals) != 1 || env.Refusals[0].ID != "SR1" || env.Refusals[0].Reason != "SECRET_EXFIL" {
+		t.Fatalf("refusal projection wrong: %+v in:\n%s", env.Refusals, outJSON)
+	}
+	for _, bad := range []string{denied, payload} {
+		if strings.Contains(outJSON, bad) {
+			t.Fatalf("report leaked denied content %q:\n%s", bad, outJSON)
+		}
+	}
+
+	// --refusals renders only the refusal projection; the LIVE session is absent.
+	out, e, code := runSJ(t, j, "report", "--no-guard-sessions", "--refusals")
+	if code != 0 {
+		t.Fatalf("--refusals report exit %d, stderr=%s", code, e)
+	}
+	if !strings.Contains(out, "refusals=1") || !strings.Contains(out, "SECRET_EXFIL") {
+		t.Fatalf("human refusal report missing count/reason:\n%s", out)
+	}
+	if strings.Contains(out, "SOK") {
+		t.Fatalf("--refusals must suppress lifecycle rows:\n%s", out)
+	}
+}
+
 func TestSessionJournalReportJSON(t *testing.T) {
 	j := filepath.Join(t.TempDir(), "j.jsonl")
 	runSJ(t, j, "open", "--id", "S4")
