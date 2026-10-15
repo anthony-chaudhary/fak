@@ -44,13 +44,35 @@
       "family": "attention",
       "kind": "symbol",
       "definition": "The projection-free update value used by the corresponding internal/model and internal/model/v41 attention-state APIs: a V41AttentionStateRef plus optional Latent and IndexKey slices for a completed compressor group. The state validates updates before publication and copies each supplied row into its own registry.",
-      "distinction": "This carries caller-produced row data and its layer descriptor for publication; it does not itself perform projection or own the mutable session registry. Its Ref identifies the source role, while the internal model's publication-range key identifies where a completed row is stored.",
+      "distinction": "This carries caller-produced row data and its layer descriptor for publication; it does not itself perform projection or own the mutable session registry. Its Ref identifies the source role, while the internal model's publication-range key identifies where a completed row is stored. The attention_projected activation checkpoint samples post-projection output instead of publishing these completed compressor rows.",
       "distinct_from": [
         "v41-attention-publication-range-key",
-        "v41-attention-layer-publication-ref"
+        "v41-attention-layer-publication-ref",
+        "attention-projected-activation-stage"
       ],
       "aliases": [],
       "grounding": "V41AttentionStateUpdate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "attention-projected-activation-stage",
+      "canonical": "attention_projected (post-projection activation checkpoint)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "attention_projected identifies bounded activation samples of one layer/token attention-block output after learned output projection; the V4.1 producer uses v41TraceStageAttnOut at the post-grouped-projection boundary in both full forward and incremental Step.",
+      "distinction": "This is sampled diagnostic output, not attention execution, parity proof, or completed KV/index-row publication. V41AttentionStateUpdate carries completed compressor rows into the attention registry; a checkpoint stage alone establishes neither committed Step identity nor complete capture coverage.",
+      "distinct_from": [
+        "v41-attention-completed-row-update"
+      ],
+      "aliases": [
+        "attention_projected",
+        "v41TraceStageAttnOut"
+      ],
+      "grounding": "v41TraceStageAttnOut",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

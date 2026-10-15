@@ -11,7 +11,150 @@ package computetrace
 // identity, a duplicate identity, a conflicting provenance, or an incompatible
 // shape -- fails closed to INCOMPARABLE rather than being reported as a match.
 
-import "math"
+import (
+	"errors"
+	"fmt"
+	"math"
+	"slices"
+	"strings"
+)
+
+var ErrActivationCaptureInvalid = errors.New("computetrace: activation capture invalid")
+
+var activationCaptureStages = [...]string{"q_latent", "kv_latent", "attention_projected", "moe_sum", "residual_streams"}
+
+// ValidateActivationCapture admits complete incremental captures. A legacy
+// artifact without this metadata remains eligible only for numerical comparison.
+func ValidateActivationCapture(a Artifact) error {
+	c := a.ActivationCapture
+	if c == nil {
+		return nil
+	}
+	if a.nullActivationElements {
+		return activationCaptureError("capture contains a null numeric array element")
+	}
+	if a.Schema != Schema || strings.TrimSpace(c.ID) == "" || c.Kind != ActivationCaptureIncrementalStep || c.Outcome != ActivationCaptureCommitted {
+		return activationCaptureError("capture identity or committed incremental outcome is missing")
+	}
+	if c.Token < 0 || len(a.InputTokens) == 0 || c.Token != len(a.InputTokens)-1 {
+		return activationCaptureError("absolute token does not identify the full input prefix")
+	}
+	for _, token := range a.InputTokens {
+		if token < 0 {
+			return activationCaptureError("input token identity is invalid")
+		}
+	}
+	if len(c.ExpectedStages) != len(activationCaptureStages) {
+		return activationCaptureError("expected stage set is incomplete")
+	}
+	stages := make(map[string]bool, len(c.ExpectedStages))
+	for _, stage := range c.ExpectedStages {
+		if !slices.Contains(activationCaptureStages[:], stage) || stages[stage] {
+			return activationCaptureError("expected stage set is invalid or repeated")
+		}
+		stages[stage] = true
+	}
+	if a.Dropped != 0 || a.DroppedSampleValues != 0 {
+		return activationCaptureError("capture dropped activation evidence")
+	}
+	return validateActivationCaptureEvents(a, c.ExpectedLayers, c.Token, c.ID)
+}
+
+// ProjectActivationReference selects the requested absolute token from a
+// matching full-prefix reference. It retains the reference's own provenance.
+func ProjectActivationReference(ref, actual Artifact) (Artifact, error) {
+	if actual.ActivationCapture == nil {
+		return Artifact{}, activationCaptureError("actual trace has no incremental capture identity")
+	}
+	if err := ValidateActivationCapture(actual); err != nil {
+		return Artifact{}, err
+	}
+	if ref.nullActivationElements {
+		return Artifact{}, activationCaptureError("reference contains a null numeric array element")
+	}
+	if ref.Schema != Schema || !slices.Equal(ref.InputTokens, actual.InputTokens) {
+		return Artifact{}, activationCaptureError("reference does not identify the same full input prefix")
+	}
+	if err := ValidateActivationCapture(ref); err != nil {
+		return Artifact{}, err
+	}
+	if ref.Dropped != 0 || ref.DroppedSampleValues != 0 {
+		return Artifact{}, activationCaptureError("reference dropped activation evidence")
+	}
+	c := actual.ActivationCapture
+	out := ref
+	out.InputTokens = slices.Clone(ref.InputTokens)
+	out.Events = nil
+	out.RetainedSampleValues = 0
+	if ref.ActivationCapture != nil {
+		capture := *ref.ActivationCapture
+		capture.ExpectedStages = slices.Clone(capture.ExpectedStages)
+		out.ActivationCapture = &capture
+	}
+	for _, event := range ref.Events {
+		if event.Token != c.Token || !slices.Contains(activationCaptureStages[:], stageOf(event)) {
+			continue
+		}
+		event.Shapes = cloneShapes(event.Shapes)
+		event.SampleIndices = slices.Clone(event.SampleIndices)
+		event.SampleValues = slices.Clone(event.SampleValues)
+		event.ExcludedSampleIndices = slices.Clone(event.ExcludedSampleIndices)
+		out.Events = append(out.Events, event)
+		out.RetainedSampleValues += uint64(len(event.SampleValues))
+	}
+	if err := validateActivationCaptureEvents(out, c.ExpectedLayers, c.Token, ""); err != nil {
+		return Artifact{}, err
+	}
+	return out, nil
+}
+
+func validateActivationCaptureEvents(a Artifact, layers, token int, captureID string) error {
+	if layers <= 0 || len(a.Events)%len(activationCaptureStages) != 0 || layers != len(a.Events)/len(activationCaptureStages) {
+		return activationCaptureError("configured layers and complete stage coverage disagree")
+	}
+	seen := make(map[ActivationIdentity]bool, len(a.Events))
+	var input, weight string
+	var samples uint64
+	for _, event := range a.Events {
+		id := ActivationIdentity{Layer: event.Layer, Token: event.Token, Stage: stageOf(event)}
+		if id.Layer < 0 || id.Layer >= layers || id.Token != token || !slices.Contains(activationCaptureStages[:], id.Stage) || seen[id] {
+			return activationCaptureError("activation identity is missing, extra or repeated")
+		}
+		seen[id] = true
+		if captureID != "" && (event.RunID != captureID || event.Operation != "v41.activation") {
+			return activationCaptureError("activation event belongs to another capture")
+		}
+		if event.InputDigest == "" || event.WeightDigest == "" || event.ProvenanceDigest == "" {
+			return activationCaptureError("activation provenance is missing")
+		}
+		if input == "" {
+			input, weight = event.InputDigest, event.WeightDigest
+		} else if event.InputDigest != input || event.WeightDigest != weight {
+			return activationCaptureError("activation provenance changed within the capture")
+		}
+		if len(event.Shapes) != 1 || len(event.Shapes[0]) != 1 || event.Shapes[0][0] <= 0 || len(event.SampleValues) == 0 || len(event.SampleValues) > MaxActivationSamplesPerEvent || (len(event.SampleIndices) != 0 && len(event.SampleIndices) != len(event.SampleValues)) || (captureID != "" && (len(event.SampleIndices) == 0 || len(event.ExcludedSampleIndices) != 0)) || (event.Status != "" && event.Status != "ok") {
+			return activationCaptureError("activation samples are incomplete or invalid")
+		}
+		values, ok := indexedValues(event)
+		if !ok {
+			return activationCaptureError("activation sample indices repeat")
+		}
+		for index, value := range values {
+			if index < 0 || index >= event.Shapes[0][0] || (!finite(value) && (captureID != "" || !slices.Contains(event.ExcludedSampleIndices, index))) {
+				return activationCaptureError("activation sample is out of range or non-finite")
+			}
+		}
+		samples += uint64(len(event.SampleValues))
+	}
+	if samples != a.RetainedSampleValues {
+		return activationCaptureError("retained activation sample accounting disagrees")
+	}
+	return nil
+}
+
+func activationCaptureError(reason string) error {
+	return fmt.Errorf("%w: %s", ErrActivationCaptureInvalid, reason)
+}
 
 // Verdict is the closed result of a trace comparison.
 type Verdict string
@@ -192,6 +335,9 @@ func itoa(n int) string {
 // rejecting duplicate identities. Events without samples are ignored so a mixed
 // trace (some stages sampled, some not) is still comparable on the sampled set.
 func sampleIndex(a Artifact) (map[ActivationIdentity]Event, string) {
+	if err := ValidateActivationCapture(a); err != nil {
+		return nil, err.Error()
+	}
 	out := make(map[ActivationIdentity]Event)
 	for _, e := range a.Events {
 		if len(e.SampleValues) == 0 {

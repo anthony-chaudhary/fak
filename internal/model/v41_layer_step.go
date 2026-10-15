@@ -277,6 +277,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 			}
 		}
 	}
+	scratch.activationTrace.record(l, pos, v41TraceStageQLatent, qLat)
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection())
 	if err != nil {
 		return nil, err
@@ -304,6 +305,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		}
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
+	scratch.activationTrace.record(l, pos, v41TraceStageKVLatent, kv)
 	q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return nil, err
@@ -385,6 +387,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 	if err != nil {
 		return nil, v41StageErr(v41StageAttention, l, err)
 	}
+	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, attnOut)
 
 	// ---- MoE for the one position ----
 	routeCfg, err := v41RouterConfigFullGeometry(cfg)
@@ -475,6 +478,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		if err != nil {
 			return err
 		}
+		scratch.activationTrace.record(l, pos, v41TraceStageMoESum, moe)
 		var next [][]float32
 		if resident != nil {
 			if !posted {
@@ -725,6 +729,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 			return nil, err
 		}
 	}
+	scratch.activationTrace.record(l, pos, v41TraceStageQLatent, qLat)
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection())
 	if err != nil {
 		return nil, err
@@ -742,6 +747,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		return nil, err
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
+	scratch.activationTrace.record(l, pos, v41TraceStageKVLatent, kv)
 	q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
 		return nil, err
@@ -885,6 +891,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	if err != nil {
 		return nil, v41StageErr(v41StageAttention, l, err)
 	}
+	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, attnProjected)
 
 	work, err = m.prepareV41LayerStepRoleFinish(l, pos, x, streams, mix, attnProjected, scratch)
 	if err != nil {
@@ -1002,6 +1009,7 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 		if err != nil {
 			return err
 		}
+		scratch.activationTrace.record(l, pos, v41TraceStageMoESum, moe)
 		if resident != nil {
 			if !posted {
 				if err := resident.finishLayer(l, [][]float32{moe}); err != nil {

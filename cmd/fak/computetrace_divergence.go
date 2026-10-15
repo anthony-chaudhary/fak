@@ -69,12 +69,14 @@ func runComputeTraceFirstDivergence(stdout, stderr io.Writer, args []string) int
 	rtol := fs.Float64("rtol", 1e-2, "element-wise relative tolerance for the strict cross-check")
 	prompt := fs.Int("prompt", 0, "oracle prompt index whose trace_ref is the reference")
 	adopt := fs.Bool("adopt-digests", false, "adopt the actual trace's input/weight digests into the reference after its token ids match")
+	stepID := fs.String("step-capture-id", "", "expected committed incremental capture ID from the current caller receipt")
+	stepToken := fs.Int("step-token", -1, "expected absolute token position of the incremental capture")
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *refPath == "" || *gotPath == "" {
-		fmt.Fprintln(stderr, "usage: fak compute-trace first-divergence --ref <oracle|trace> --got <trace> [--tol <rel_l2>] [--min-cos c] [--prompt n] [--adopt-digests] [--json]")
+	if *refPath == "" || *gotPath == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak compute-trace first-divergence --ref <oracle|trace> --got <trace> [--step-capture-id ID --step-token N] [--tol <rel_l2>] [--min-cos c] [--prompt n] [--adopt-digests] [--json]")
 		return 2
 	}
 	ref, _, err := loadDivergenceReference(*refPath, *prompt)
@@ -87,6 +89,37 @@ func runComputeTraceFirstDivergence(stdout, stderr io.Writer, args []string) int
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	scope := "sampled_numerical"
+	var captureID string
+	var captureToken *int
+	var stepIDSet, stepTokenSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "step-capture-id":
+			stepIDSet = true
+		case "step-token":
+			stepTokenSet = true
+		}
+	})
+	wantsStep := stepIDSet || stepTokenSet
+	if wantsStep || got.ActivationCapture != nil {
+		capture := got.ActivationCapture
+		if !stepIDSet || !stepTokenSet || strings.TrimSpace(*stepID) == "" || *stepToken < 0 || capture == nil || capture.ID != *stepID || capture.Token != *stepToken {
+			fmt.Fprintln(stderr, "incremental comparison requires matching --step-capture-id and --step-token")
+			return 1
+		}
+		if err := computetrace.ValidateActivationCapture(got); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		ref, err = computetrace.ProjectActivationReference(ref, got)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scope, captureID = "committed_step_capture", capture.ID
+		captureToken = &capture.Token
+	}
 	if *adopt {
 		if err := computetrace.AdoptActivationDigests(&ref, got); err != nil {
 			fmt.Fprintln(stderr, err)
@@ -97,7 +130,13 @@ func runComputeTraceFirstDivergence(stdout, stderr io.Writer, args []string) int
 		computetrace.DivergenceTolerance{RelL2: *tol, MinCosine: *minCos},
 		computetrace.ActivationTolerance{Atol: *atol, Rtol: *rtol})
 	if *asJSON {
-		if err := json.NewEncoder(stdout).Encode(r); err != nil {
+		out := struct {
+			computetrace.DivergenceReport
+			EvidenceScope string `json:"evidence_scope"`
+			CaptureID     string `json:"capture_id,omitempty"`
+			CaptureToken  *int   `json:"capture_token,omitempty"`
+		}{r, scope, captureID, captureToken}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -112,6 +151,11 @@ func runComputeTraceFirstDivergence(stdout, stderr io.Writer, args []string) int
 		}
 		fmt.Fprintf(stdout, "verdict=%s first_divergent_layer=%s first_divergent_stage=%s parity_layers=%d layers=%d missing=%d extra=%d strict=%s %s\n",
 			r.Verdict, layer, stage, r.ParityLayers, len(r.Layers), r.Missing, r.Extra, r.Strict.Verdict, r.Reason)
+		fmt.Fprintf(stdout, "scope=%s", scope)
+		if captureToken != nil {
+			fmt.Fprintf(stdout, " capture_id=%s capture_token=%d", captureID, *captureToken)
+		}
+		fmt.Fprintln(stdout)
 	}
 	if r.Verdict != computetrace.TraceEqual {
 		return 1

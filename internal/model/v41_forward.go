@@ -131,7 +131,8 @@ type v41ForwardState struct {
 	layers  []*V41AttentionState
 	// forwardCoverage is replaced only after a successful logits-producing
 	// traversal and is intentionally absent from prefix snapshots.
-	forwardCoverage *NativeForwardCoverage
+	forwardCoverage   *NativeForwardCoverage
+	activationCapture V41ActivationCaptureReceipt
 
 	// indexKeyMemo is the session's per-index-source-layer memo of the last
 	// committed fold; indexKeyPrior is the read-only copy a re-fold run reuses.

@@ -13,6 +13,7 @@
 package computetrace
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,12 @@ import (
 )
 
 const Schema = "fak.compute_trace.v1"
+
+const (
+	ActivationCaptureIncrementalStep = "incremental_step"
+	ActivationCaptureCommitted       = "committed"
+	ActivationCaptureAborted         = "aborted"
+)
 
 // Bounds on optional activation-sample capture. Sampling is a diagnostic aid,
 // never a tensor dump: each event may carry at most MaxActivationSamplesPerEvent
@@ -82,6 +89,34 @@ type Event struct {
 	ExcludedSampleIndices []int `json:"excluded_sample_indices,omitempty"`
 }
 
+// ActivationCapture identifies one incremental token transaction, including an
+// aborted attempt whose retained samples cannot establish completed execution.
+type ActivationCapture struct {
+	ID             string   `json:"id"`
+	Kind           string   `json:"kind"`
+	Outcome        string   `json:"outcome"`
+	Token          int      `json:"token"`
+	ExpectedLayers int      `json:"expected_layers"`
+	ExpectedStages []string `json:"expected_stages"`
+}
+
+func (c *ActivationCapture) UnmarshalJSON(data []byte) error {
+	type captureJSON ActivationCapture
+	var decoded struct {
+		captureJSON
+		Token *int `json:"token"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.Token == nil {
+		return activationCaptureError("absolute token position is absent or null")
+	}
+	decoded.captureJSON.Token = *decoded.Token
+	*c = ActivationCapture(decoded.captureJSON)
+	return nil
+}
+
 type Artifact struct {
 	Schema             string  `json:"schema"`
 	Events             []Event `json:"events"`
@@ -98,6 +133,45 @@ type Artifact struct {
 	// so AdoptActivationDigests can prove two traces saw the same input before a
 	// reference adopts the other trace's provenance digests.
 	InputTokens []int `json:"input_tokens,omitempty"`
+
+	ActivationCapture *ActivationCapture `json:"activation_capture,omitempty"`
+
+	// Preserve unknown wire values when a legacy reference enters Step admission.
+	nullActivationElements bool
+}
+
+func (a *Artifact) UnmarshalJSON(data []byte) error {
+	type artifactJSON Artifact
+	var decoded artifactJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw struct {
+		InputTokens []json.RawMessage `json:"input_tokens"`
+		Events      []struct {
+			SampleValues  []json.RawMessage `json:"sample_values"`
+			SampleIndices []json.RawMessage `json:"sample_indices"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	arrays := [][]json.RawMessage{raw.InputTokens}
+	for _, event := range raw.Events {
+		arrays = append(arrays, event.SampleValues, event.SampleIndices)
+	}
+	for _, values := range arrays {
+		for _, value := range values {
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+				decoded.nullActivationElements = true
+			}
+		}
+	}
+	if decoded.ActivationCapture != nil && decoded.nullActivationElements {
+		return activationCaptureError("capture contains a null numeric array element")
+	}
+	*a = Artifact(decoded)
+	return nil
 }
 
 type Recorder struct {
@@ -235,8 +309,12 @@ func (r *Recorder) Artifact() Artifact {
 func (r *Recorder) Write(w io.Writer) error { return json.NewEncoder(w).Encode(r.Artifact()) }
 func Read(rd io.Reader) (Artifact, error) {
 	var a Artifact
-	if err := json.NewDecoder(rd).Decode(&a); err != nil {
+	d := json.NewDecoder(rd)
+	if err := d.Decode(&a); err != nil {
 		return Artifact{}, err
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return Artifact{}, errors.New("compute trace must contain one JSON object")
 	}
 	if a.Schema != Schema {
 		return Artifact{}, errors.New("unsupported compute trace schema")
