@@ -739,7 +739,8 @@
         "x-attention-v41sharedattentionplain",
         "v41sharedattentionbinding",
         "v41sharedattentioncontinuation",
-        "v41sharedattentionvalidation"
+        "v41sharedattentionvalidation",
+        "v41sharedattentionresult"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionRows",
@@ -761,7 +762,8 @@
         "x-attention-v41sharedattentionrows",
         "x-attention-v41sharedattentionplain",
         "v41sharedattentioncontinuation",
-        "v41sharedattentionvalidation"
+        "v41sharedattentionvalidation",
+        "v41sharedattentionresult"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionBinding",
@@ -783,7 +785,8 @@
         "v41sharedattentionbinding",
         "x-attention-v41sharedattentionrows",
         "x-attention-v41sharedattentionplain",
-        "v41sharedattentionvalidation"
+        "v41sharedattentionvalidation",
+        "v41sharedattentionresult"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionContinuation",
@@ -805,10 +808,33 @@
         "v41sharedattentioncontinuation",
         "v41sharedattentionbinding",
         "x-attention-v41sharedattentionrows",
-        "x-attention-v41sharedattentionplain"
+        "x-attention-v41sharedattentionplain",
+        "v41sharedattentionresult"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionValidation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41sharedattentionresult",
+      "canonical": "v41SharedAttentionResult",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private canonical shared-attention host output ownership carrier. A successful private core invocation returns a fresh zero row or a validated readback clone allocated before tensor retirement; failure returns no output ownership.",
+      "distinction": "Unlike v41SharedAttentionBinding this value owns one completed host output rather than callback provenance. Unlike v41SharedAttentionContinuation and v41SharedAttentionValidation it grants no input validation or execution eligibility. Unlike v41SharedAttentionRows it is fresh output, not borrowed KV descriptors. Ordinary callbacks and borrowed resident outputs cannot acquire this carrier; final composer width and finite checks remain mandatory.",
+      "distinct_from": [
+        "v41sharedattentionbinding",
+        "v41sharedattentioncontinuation",
+        "v41sharedattentionvalidation",
+        "x-attention-v41sharedattentionrows"
+      ],
+      "aliases": [],
+      "grounding": "v41SharedAttentionResult",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

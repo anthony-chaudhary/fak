@@ -88,7 +88,7 @@ func TestV41SharedAttentionValidatedContinuation(t *testing.T) {
 			core := binding.native.core
 			validated, consumed := core.validated, 0
 			// Test-only observation happens after the unmodified private entry.
-			core.validated = func(layer int, request *v41SharedAttentionRequest, proof *v41SharedAttentionValidation) ([]float32, error) {
+			core.validated = func(layer int, request *v41SharedAttentionRequest, proof *v41SharedAttentionValidation) (v41SharedAttentionResult, error) {
 				out, err := validated(layer, request, proof)
 				if !proof.used || !proof.accepted || !proof.continuation.used || proof.consume(core, layer, request) {
 					t.Fatal("private proof was not consumed exactly once")

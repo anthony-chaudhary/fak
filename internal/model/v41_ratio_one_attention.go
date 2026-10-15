@@ -89,6 +89,7 @@ func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDi
 		B: 1, M: 1, Heads: heads, HeadDim: headDim, N: rows, TopK: len(idx), Softmax: scale,
 	}
 	var out []float32
+	var ownedOutput bool
 	var err error
 	if attend != nil && resident != nil && !v41ResidentKVDisabled {
 		request := v41SharedAttentionRequest{
@@ -103,7 +104,9 @@ func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDi
 			// between sealing this local request and the private preparation.
 			validation := &v41SharedAttentionValidation{continuation: c, request: &request, rows: request.rowKV,
 				window: window, compressed: compressed}
-			out, err = c.binding.native.core.validated(layer, &request, validation)
+			var result v41SharedAttentionResult
+			result, err = c.binding.native.core.validated(layer, &request, validation)
+			out, ownedOutput = result.values, err == nil
 			if err != nil {
 				err = &V41SharedAttentionOperationError{Layer: layer, Cause: v41StageErr(v41StageAttention, layer, err)}
 			}
@@ -132,6 +135,9 @@ func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDi
 			return nil, &V41SharedAttentionOperationError{Layer: layer, Cause: err}
 		}
 		return nil, err
+	}
+	if ownedOutput {
+		return out, nil
 	}
 	return append([]float32(nil), out...), nil
 }
