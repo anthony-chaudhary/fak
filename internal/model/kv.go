@@ -980,8 +980,11 @@ func ropeRowQKInto(q, k, cos, sin []float32, hd, nH, nKV int) {
 // absolute position (Cache.Len()), so a prior Evict() compaction shifts these down.
 func (s *Session) Prefill(ids []int) []float32 {
 	scope := s.beginBackendExecution()
-	defer scope.finish()
-	return s.prefillOwned(ids)
+	complete := false
+	defer scope.finishCompleted(&complete)
+	logits := s.prefillOwned(ids)
+	complete = true
+	return logits
 }
 
 func (s *Session) prefillOwned(ids []int) []float32 {
