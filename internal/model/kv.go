@@ -1266,8 +1266,11 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
 	scope := s.beginBackendExecution()
-	defer scope.finish()
-	return s.stepOwned(id)
+	complete := false
+	defer scope.finishCompleted(&complete)
+	logits := s.stepOwned(id)
+	complete = true
+	return logits
 }
 
 func (s *Session) stepOwned(id int) []float32 {
