@@ -37,6 +37,10 @@ type BackendCounterSnapshot struct {
 	TensorHomeCopiedBytes uint64
 }
 
+func validateBackendH2DAttribution(s BackendExecutionSnapshot) error {
+	return s.H2DAttribution.validate(s.Counters.H2DBytes, s.H2DAttributionObserved, s.TransferCountersObserved)
+}
+
 // BackendExecutionSnapshot is one backend-owned cumulative observation plus
 // current gauges. It is not a receipt and must not be emitted directly.
 type BackendExecutionSnapshot struct {
@@ -48,6 +52,8 @@ type BackendExecutionSnapshot struct {
 	DeviceMemoryFreeBytes     uint64
 	DeviceMemoryObserved      bool
 	TransferCountersObserved  bool
+	H2DAttribution            BackendH2DAttribution
+	H2DAttributionObserved    bool
 	DeviceAllocationLiveBytes uint64
 	DeviceAllocationObserved  bool
 }
@@ -63,6 +69,8 @@ type BackendExecutionObservation struct {
 	DeviceMemoryFreeBytes     uint64
 	DeviceMemoryObserved      bool
 	TransferCountersObserved  bool
+	H2DAttribution            BackendH2DAttribution
+	H2DAttributionObserved    bool
 	DeviceAllocationLiveBytes uint64
 	DeviceAllocationPeakBytes uint64
 	DeviceAllocationObserved  bool
@@ -139,6 +147,15 @@ func BackendExecutionDelta(before, after BackendExecutionSnapshot) (BackendExecu
 	if before.TransferCountersObserved != after.TransferCountersObserved {
 		return BackendExecutionObservation{}, errors.New("compute: backend transfer-counter availability changed during observation")
 	}
+	if before.H2DAttributionObserved != after.H2DAttributionObserved {
+		return BackendExecutionObservation{}, errors.New("compute: backend H2D attribution availability changed during observation")
+	}
+	if err := validateBackendH2DAttribution(before); err != nil {
+		return BackendExecutionObservation{}, fmt.Errorf("compute: invalid opening H2D attribution: %w", err)
+	}
+	if err := validateBackendH2DAttribution(after); err != nil {
+		return BackendExecutionObservation{}, fmt.Errorf("compute: invalid closing H2D attribution: %w", err)
+	}
 	if before.DeviceAllocationObserved != after.DeviceAllocationObserved {
 		return BackendExecutionObservation{}, errors.New("compute: backend device-allocation availability changed during observation")
 	}
@@ -153,6 +170,16 @@ func BackendExecutionDelta(before, after BackendExecutionSnapshot) (BackendExecu
 	delta, err := subtractBackendCounters(before.Counters, after.Counters)
 	if err != nil {
 		return BackendExecutionObservation{}, err
+	}
+	attribution, err := subtractBackendH2DAttribution(before.H2DAttribution, after.H2DAttribution)
+	if err != nil {
+		return BackendExecutionObservation{}, err
+	}
+	if err := validateBackendH2DAttribution(BackendExecutionSnapshot{
+		Counters: delta, TransferCountersObserved: after.TransferCountersObserved,
+		H2DAttribution: attribution, H2DAttributionObserved: after.H2DAttributionObserved,
+	}); err != nil {
+		return BackendExecutionObservation{}, fmt.Errorf("compute: invalid H2D attribution delta: %w", err)
 	}
 	if before.TransferCountersObserved {
 		if err := validateBackendTransferCounterPairs(delta); err != nil {
@@ -171,6 +198,7 @@ func BackendExecutionDelta(before, after BackendExecutionSnapshot) (BackendExecu
 		DeviceMemoryFreeBytes:    after.DeviceMemoryFreeBytes,
 		DeviceMemoryObserved:     after.DeviceMemoryObserved,
 		TransferCountersObserved: after.TransferCountersObserved,
+		H2DAttribution:           attribution, H2DAttributionObserved: after.H2DAttributionObserved,
 	}, nil
 }
 
