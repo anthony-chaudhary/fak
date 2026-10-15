@@ -200,7 +200,8 @@ func (m *Model) v41CompressedPublicationRoPEWithDevice(l, pos int, latent, index
 			tails = append(tails, indexKey[len(indexKey)-rd:]...)
 		}
 		tails = append(tails, latent[len(latent)-rd:]...)
-		finished, err := rotate(l, tails, append([]float32(nil), cos...), append([]float32(nil), sin...), rows, rd)
+		// This call owns the fresh tables and never uses them after dispatch.
+		finished, err := rotate(l, tails, cos, sin, rows, rd)
 		if err == nil && len(finished) != len(tails) {
 			err = errV41TailRoPEResult
 		}
@@ -250,7 +251,8 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 		fail := func(cause error) error {
 			return &V41ProjectionOperationError{Layer: l, Leaf: "indexer.wq_b.weight", Stage: string(v41StageIndexer), Cause: v41StageErr(v41StageIndexer, l, cause)}
 		}
-		rotated, err := rotate(l, append([]float32(nil), values...), append([]float32(nil), cos...), append([]float32(nil), sin...), heads, dim, rd)
+		// Transfer fresh call-owned tables; caller-owned values still need a copy.
+		rotated, err := rotate(l, append([]float32(nil), values...), cos, sin, heads, dim, rd)
 		if err != nil {
 			return fail(err)
 		}
