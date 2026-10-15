@@ -808,13 +808,15 @@ func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 		var err error
 		func() {
 			endBatch := s.v41BeginStepBatch()
+			bodyComplete := false
 			defer func() {
-				v41FinishStepBatch(endBatch, &err)
+				v41FinishStepBatch(endBatch, &err, bodyComplete)
 				if err != nil {
 					act = nil
 				}
 			}()
 			act, err = s.M.forwardV41WithHeadMode(ids, s.v41State(), true, wantLogits)
+			bodyComplete = true
 		}()
 		if err != nil {
 			panic(err)
@@ -851,13 +853,15 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 		var err error
 		func() {
 			endBatch := s.v41BeginStepBatch()
+			bodyComplete := false
 			defer func() {
-				v41FinishStepBatch(endBatch, &err)
+				v41FinishStepBatch(endBatch, &err, bodyComplete)
 				if err != nil {
 					got = nil
 				}
 			}()
 			got, _, err = s.M.forwardV41StepCore(id, st, &v41ProjScratch{}, false, wantLogits && i == len(ids)-1)
+			bodyComplete = true
 		}()
 		if err != nil {
 			var batchErr *v41StepBatchError
@@ -876,13 +880,15 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 			var ferr error
 			func() {
 				endBatch := s.v41BeginStepBatch()
+				bodyComplete := false
 				defer func() {
-					v41FinishStepBatch(endBatch, &ferr)
+					v41FinishStepBatch(endBatch, &ferr, bodyComplete)
 					if ferr != nil {
 						act = nil
 					}
 				}()
 				act, ferr = s.M.forwardV41WithHeadMode(ids, st, true, wantLogits)
+				bodyComplete = true
 			}()
 			if ferr != nil {
 				panic(ferr)
@@ -977,13 +983,15 @@ func (s *Session) stepV41(id int) []float32 {
 			var err error
 			func() {
 				endBatch := s.v41BeginStepBatch()
+				bodyComplete := false
 				defer func() {
-					v41FinishStepBatch(endBatch, &err)
+					v41FinishStepBatch(endBatch, &err, bodyComplete)
 					if err != nil {
 						logits = nil
 					}
 				}()
 				logits, _, err = s.M.forwardV41StepAdmitted(id, s.v41State(), &v41ProjScratch{})
+				bodyComplete = true
 			}()
 			if err == nil {
 				s.M.v41NoteExpertFaultToken(1)
