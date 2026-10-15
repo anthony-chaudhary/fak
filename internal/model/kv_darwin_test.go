@@ -3,6 +3,7 @@
 package model
 
 import (
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -219,9 +220,14 @@ func TestAsyncKVBlockBoundaryStallElimination(t *testing.T) {
 		stats.ZeroStallClaims, stats.BoundaryHits, stats.BoundaryStalls)
 }
 
-// TestAsyncKVBlockITLJitterReduction verifies Scoped Acceptance Criteria 3:
-// P99 inter-token latency variance drops by >= 40% in multi-token generation benchmarks.
+// TestAsyncKVBlockITLJitterReduction optionally measures host ITL population variance.
+// The 40% threshold compares variance across all token samples.
+// Wall-clock qualification follows the package's FAK_PERF opt-in convention.
+// fak-test:runtime medium est=2s lane=default
 func TestAsyncKVBlockITLJitterReduction(t *testing.T) {
+	if os.Getenv("FAK_PERF") == "" {
+		t.Skip("set FAK_PERF=1 to run the wall-clock KV jitter qualification")
+	}
 	cfg := Config{
 		NumLayers:  16,
 		NumKVHeads: 8,
