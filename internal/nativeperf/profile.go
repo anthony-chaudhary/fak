@@ -201,8 +201,12 @@ func validateProfileFieldPresence(data []byte) error {
 
 func requireJSONFields(label string, object map[string]json.RawMessage, fields ...string) error {
 	for _, field := range fields {
-		if _, ok := object[field]; !ok {
+		raw, ok := object[field]
+		if !ok {
 			return fmt.Errorf("%s is missing required field %q", label, field)
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("%s required field %q must not be null", label, field)
 		}
 	}
 	return nil

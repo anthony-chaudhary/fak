@@ -34,6 +34,8 @@ func runExperiments(stdout, stderr io.Writer, argv []string) int {
 		return experimentsRecord(stdout, stderr, rest)
 	case "lookup":
 		return experimentsLookup(stdout, stderr, rest)
+	case "native-performance":
+		return runExperimentsNativePerformance(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		experimentsUsage(stdout)
 		return 0
@@ -56,6 +58,8 @@ usage:
                                             append a scoped result receipt
   fak experiments lookup --file <identity.json> [--ledger <path>] [--json]
                                             look up an exact hypothesis + identity
+  fak experiments native-performance evaluate|replay|decisions [flags]
+                                            evaluate and replay supplied native-performance evidence
 
 Start here:
   fak experiments list                              see all experiments across all hosts

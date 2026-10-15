@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,13 +33,13 @@ type DefaultReadback struct {
 // NativePerfTransactionRequest binds one accepted profile and compiled graph to
 // one matched baseline/candidate gate request.
 type NativePerfTransactionRequest struct {
-	Profile               nativeperf.ProfileBundle
-	ObligationGraph       newmodel.NativeObligationGraph
-	ObligationGraphDigest string
-	ObligationID          string
-	CandidateID           string
-	GateRequest           nativeperf.GateRequest
-	DefaultReadback       DefaultReadback
+	Profile               nativeperf.ProfileBundle       `json:"profile"`
+	ObligationGraph       newmodel.NativeObligationGraph `json:"obligation_graph"`
+	ObligationGraphDigest string                         `json:"obligation_graph_digest"`
+	ObligationID          string                         `json:"obligation_id"`
+	CandidateID           string                         `json:"candidate_id"`
+	GateRequest           nativeperf.GateRequest         `json:"gate_request"`
+	DefaultReadback       DefaultReadback                `json:"default_readback"`
 }
 
 // NativePerfDecisionJournal is the immutable, replayable result of one transaction.
@@ -179,7 +180,7 @@ func ParseNativePerfDecisionLedger(content string) ([]NativePerfDecisionJournal,
 		if err := dec.Decode(&row); err != nil {
 			return nil, fmt.Errorf("line %d: %w", line, err)
 		}
-		if dec.More() {
+		if err := dec.Decode(&struct{}{}); err != io.EOF {
 			return nil, fmt.Errorf("line %d: trailing JSON", line)
 		}
 		if err := validateDecision(row); err != nil {
