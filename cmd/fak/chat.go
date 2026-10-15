@@ -35,6 +35,7 @@ type chatFlags struct {
 	task                  *string
 	taskFile              *string
 	effort                *string
+	completionTokenField  *string
 	tools                 *string
 	codeTools             *bool
 	codeWorkspace         *string
@@ -70,6 +71,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
 	cf.taskFile = fs.String("task-file", "", "read a non-interactive UTF-8 task from a file (mutually exclusive with --task)")
 	cf.effort = fs.String("effort", "", "reasoning effort for the native task")
+	cf.completionTokenField = fs.String("completion-token-field", "", "OpenAI chat output cap field: max_tokens (default) or max_completion_tokens")
 	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo, or none")
 	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
 	cf.codeWorkspace = fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
@@ -240,6 +242,9 @@ func cmdChat(argv []string) {
 	if *cf.effort != "" {
 		runOpts = append(runOpts, agent.WithRunReasoningEffort(*cf.effort))
 	}
+	if !validChatCompletionTokenField(*cf.completionTokenField) || (*cf.completionTokenField != "" && *cf.provider != "openai" && *cf.provider != "xai") {
+		must(fmt.Errorf("fak chat: unsupported completion token field or provider"))
+	}
 	var catalog []agent.ToolDef
 	hasCustomCatalog := false
 	root := strings.TrimSpace(*cf.codeWorkspace)
@@ -329,6 +334,13 @@ func cmdChat(argv []string) {
 			must(fmt.Errorf("fak chat: --codex-auth requires the native HTTP planner"))
 		}
 		must(configureChatCodexSubscription(httpPlanner, *cf.codexHome))
+	}
+	if *cf.completionTokenField != "" {
+		httpPlanner, ok := planner.(*agent.HTTPPlanner)
+		if !ok {
+			must(fmt.Errorf("fak chat: --completion-token-field requires the HTTP planner"))
+		}
+		httpPlanner.CompletionTokenField = *cf.completionTokenField
 	}
 	if *cf.task != "" {
 		receiptContext := nativeAgentReceiptContext{}

@@ -68,17 +68,19 @@ type adapterRequest struct {
 	ServiceTier     modelroute.ServiceMode
 	// OmitMaxOutputTokens suppresses max_output_tokens for provider variants that reject
 	// it, again scoped to Codex's ChatGPT subscription backend.
-	OmitMaxOutputTokens bool
-	MaxTokens           int
-	TopP                *float64 // nil => omit from the wire (planner/provider default)
-	TopK                *int     // nil => omit; only the providers with a native top-k field carry it
-	FrequencyPenalty    *float64 // nil => omit; OpenAI-compatible chat wire only
-	PresencePenalty     *float64 // nil => omit; OpenAI-compatible chat wire only
-	ChatWireTopK        *int     // nil => omit; a client top_k relayed on the OpenAI-compatible chat wire
-	MinP                *float64 // nil => omit; OpenAI-compatible chat wire only
-	ChatTemplateKwargs  json.RawMessage
-	SpeculativeNMax     *int     // nil => omit; ProviderOpenAI chat wire only (llama-server)
-	Stop                []string // empty => omit from the wire
+	OmitMaxOutputTokens  bool
+	MaxTokens            int
+	CompletionTokenField string
+	ToolChoice           json.RawMessage
+	TopP                 *float64 // nil => omit from the wire (planner/provider default)
+	TopK                 *int     // nil => omit; only the providers with a native top-k field carry it
+	FrequencyPenalty     *float64 // nil => omit; OpenAI-compatible chat wire only
+	PresencePenalty      *float64 // nil => omit; OpenAI-compatible chat wire only
+	ChatWireTopK         *int     // nil => omit; a client top_k relayed on the OpenAI-compatible chat wire
+	MinP                 *float64 // nil => omit; OpenAI-compatible chat wire only
+	ChatTemplateKwargs   json.RawMessage
+	SpeculativeNMax      *int     // nil => omit; ProviderOpenAI chat wire only (llama-server)
+	Stop                 []string // empty => omit from the wire
 	// ResponseFormat / LogitBias are the OpenAI structured/guided-decode carriers
 	// (#560). They ride on the wire ONLY where the provider has a native field
 	// (OpenAI/xAI chat-completions); other providers omit them (their path is
@@ -181,25 +183,27 @@ func openAIWireMessages(messages []Message) []Message {
 }
 
 type openAIRequest struct {
-	ServiceTier        string               `json:"service_tier,omitempty"`
-	Model              string               `json:"model"`
-	Messages           []Message            `json:"messages"`
-	Tools              []ToolDef            `json:"tools,omitempty"`
-	ToolChoice         string               `json:"tool_choice,omitempty"`
-	Temperature        *float64             `json:"temperature,omitempty"`
-	MaxTokens          int                  `json:"max_tokens,omitempty"`
-	TopP               *float64             `json:"top_p,omitempty"`
-	FrequencyPenalty   *float64             `json:"frequency_penalty,omitempty"`
-	PresencePenalty    *float64             `json:"presence_penalty,omitempty"`
-	TopK               *int                 `json:"top_k,omitempty"`
-	MinP               *float64             `json:"min_p,omitempty"`
-	ChatTemplateKwargs json.RawMessage      `json:"chat_template_kwargs,omitempty"` // llama.cpp/vLLM, verbatim
-	SpeculativeNMax    *int                 `json:"speculative.n_max,omitempty"`    // llama-server draft-length cap
-	Stop               []string             `json:"stop,omitempty"`
-	ResponseFormat     json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
-	LogitBias          map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
-	Stream             bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
-	StreamOptions      *openAIStreamOptions `json:"stream_options,omitempty"`
+	ServiceTier         string               `json:"service_tier,omitempty"`
+	Model               string               `json:"model"`
+	Messages            []Message            `json:"messages"`
+	Tools               []ToolDef            `json:"tools,omitempty"`
+	ToolChoice          any                  `json:"tool_choice,omitempty"`
+	Temperature         *float64             `json:"temperature,omitempty"`
+	MaxTokens           int                  `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
+	TopP                *float64             `json:"top_p,omitempty"`
+	FrequencyPenalty    *float64             `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64             `json:"presence_penalty,omitempty"`
+	TopK                *int                 `json:"top_k,omitempty"`
+	MinP                *float64             `json:"min_p,omitempty"`
+	ChatTemplateKwargs  json.RawMessage      `json:"chat_template_kwargs,omitempty"` // llama.cpp/vLLM, verbatim
+	SpeculativeNMax     *int                 `json:"speculative.n_max,omitempty"`    // llama-server draft-length cap
+	Stop                []string             `json:"stop,omitempty"`
+	ResponseFormat      json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
+	LogitBias           map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
+	Stream              bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
+	StreamOptions       *openAIStreamOptions `json:"stream_options,omitempty"`
 }
 
 // openAIStreamOptions carries the OpenAI/vLLM/SGLang stream control that asks the
@@ -226,9 +230,12 @@ type openAIResponse struct {
 // /logit_bias), opting into a usage-bearing SSE stream when r.Stream is set, and
 // merging any provider ExtraBody.
 func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
-	toolChoice := ""
+	var toolChoice any
 	if len(r.Tools) > 0 {
 		toolChoice = "auto"
+	}
+	if len(r.ToolChoice) > 0 {
+		toolChoice = r.ToolChoice
 	}
 	messages := foldLateSystemMessages(r.Messages)
 	if r.OpenAIToolMessagesAsText {
@@ -247,6 +254,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		ToolChoice:         toolChoice,
 		Temperature:        temp,
 		MaxTokens:          r.MaxTokens,
+		ReasoningEffort:    r.ReasoningEffort,
 		TopP:               r.TopP,
 		FrequencyPenalty:   unlessExtra(r.FrequencyPenalty, r.ExtraBody, "frequency_penalty"),
 		PresencePenalty:    unlessExtra(r.PresencePenalty, r.ExtraBody, "presence_penalty"),
@@ -256,6 +264,22 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		ResponseFormat:     r.ResponseFormat,
 		LogitBias:          r.LogitBias,
 		ChatTemplateKwargs: kwargs,
+	}
+	switch r.CompletionTokenField {
+	case "", "max_tokens":
+	case "max_completion_tokens":
+		req.MaxTokens = 0
+		req.MaxCompletionTokens = r.MaxTokens
+	default:
+		return nil, fmt.Errorf("unsupported completion token field %q", r.CompletionTokenField)
+	}
+	var extraFields map[string]json.RawMessage
+	if len(extra) > 0 && json.Unmarshal(extra, &extraFields) == nil {
+		for _, key := range []string{"max_tokens", "max_completion_tokens"} {
+			if _, exists := extraFields[key]; exists {
+				return nil, fmt.Errorf("provider extra body must not override %q", key)
+			}
+		}
 	}
 	if r.Stream {
 		// Ask for usage on the terminal chunk so a streamed turn still reports token

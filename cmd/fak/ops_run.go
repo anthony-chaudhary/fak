@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -23,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
@@ -286,10 +286,16 @@ const (
 )
 
 type opsRunInferencePreflightReceipt struct {
-	Schema     string `json:"schema"`
-	ReceiptRef string `json:"receipt_ref"`
-	Status     string `json:"status"`
-	Reason     string `json:"reason,omitempty"`
+	Schema               string `json:"schema"`
+	ReceiptRef           string `json:"receipt_ref"`
+	Status               string `json:"status"`
+	Reason               string `json:"reason,omitempty"`
+	RequestRef           string `json:"request_ref,omitempty"`
+	ExpectedModel        string `json:"expected_model,omitempty"`
+	ObservedModel        string `json:"observed_model,omitempty"`
+	FinishReason         string `json:"finish_reason,omitempty"`
+	ResponseDigest       string `json:"response_digest,omitempty"`
+	CompletionTokenField string `json:"completion_token_field,omitempty"`
 }
 
 type opsRunInferenceProbeCacheEntry struct {
@@ -304,48 +310,102 @@ var opsRunInferenceProbeCache = struct {
 }{entries: make(map[string]opsRunInferenceProbeCacheEntry)}
 
 func opsRunInferencePreflight(ctx context.Context, baseURL, model string, apiKeyEnv ...string) (opsRunInferencePreflightReceipt, error) {
+	keyEnv := ""
+	if len(apiKeyEnv) > 0 {
+		keyEnv = apiKeyEnv[0]
+	}
+	return opsRunConfiguredInferencePreflight(ctx, baseURL, model, keyEnv, "", "", 32)
+}
+
+func opsRunConfiguredInferencePreflight(ctx context.Context, baseURL, model, keyEnv, effort, tokenField string, maxTokens int) (opsRunInferencePreflightReceipt, error) {
 	apiKey := ""
-	if len(apiKeyEnv) > 0 && strings.TrimSpace(apiKeyEnv[0]) != "" {
-		apiKey = os.Getenv(strings.TrimSpace(apiKeyEnv[0]))
+	if strings.TrimSpace(keyEnv) != "" {
+		apiKey = os.Getenv(strings.TrimSpace(keyEnv))
 		if strings.TrimSpace(apiKey) == "" {
-			receipt := opsRunInferenceRefusal("", baseURL, model, "missing_explicit_api_key")
+			receipt := opsRunInferenceRefusal("openai", baseURL, model, "missing_explicit_api_key")
 			return receipt, errors.New(receipt.Reason)
 		}
 	}
-	configSum := sha256.Sum256([]byte(strings.TrimSpace(baseURL) + "\x00" + strings.TrimSpace(model)))
-	configKey := hex.EncodeToString(configSum[:])
-	// Credential identity isolates cached evidence in memory only. Receipts keep
-	// their configuration identity and never contain a credential fingerprint.
-	authSum := sha256.Sum256([]byte(apiKey))
-	cacheKey := configKey + "\x00" + hex.EncodeToString(authSum[:])
-	now := time.Now().UTC()
+	p := agent.NewHTTPPlanner(strings.TrimRight(strings.TrimSpace(baseURL), "/"), model, apiKey)
+	p.MaxTokens = maxTokens
+	p.CompletionTokenField = tokenField
+	return opsRunPlannerInferencePreflight(ctx, p, effort)
+}
 
-	// Holding the lock across the one bounded request is deliberate: concurrent
-	// launches with identical configuration share one witnessed probe per TTL.
+func opsRunPlannerInferencePreflight(ctx context.Context, p *agent.HTTPPlanner, effort string) (opsRunInferencePreflightReceipt, error) {
+	endpoint, err := url.Parse(p.BaseURL)
+	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		receipt := opsRunInferenceRefusal(string(p.Provider), p.BaseURL, p.ModelID, "invalid_endpoint")
+		return receipt, errors.New(receipt.Reason)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, opsRunInferenceProbeTimeout)
+	defer cancel()
+	messages, tools, choice := opsRunInferenceProbeInput()
+	req, release, err := p.PrepareRequest(requestCtx, messages, tools, true, agent.WithReasoningEffort(effort), agent.WithToolChoice(choice))
+	if err != nil {
+		receipt := opsRunInferenceRefusal(string(p.Provider), p.BaseURL, p.ModelID, "request_encoding")
+		return receipt, errors.New(receipt.Reason)
+	}
+	defer release()
+	defer req.Body.Close()
+	replay, err := req.GetBody()
+	if err != nil {
+		receipt := opsRunInferenceRefusal(string(p.Provider), p.BaseURL, p.ModelID, "request_encoding")
+		return receipt, errors.New(receipt.Reason)
+	}
+	var body any
+	decoder := json.NewDecoder(replay)
+	decoder.UseNumber()
+	err = decoder.Decode(&body)
+	_ = replay.Close()
+	if err != nil {
+		receipt := opsRunInferenceRefusal(string(p.Provider), p.BaseURL, p.ModelID, "request_encoding")
+		return receipt, errors.New(receipt.Reason)
+	}
+	config, err := json.Marshal(struct {
+		Provider agent.Provider
+		Endpoint string
+		Body     any
+	}{p.Provider, req.URL.String(), body})
+	if err != nil {
+		receipt := opsRunInferenceRefusal(string(p.Provider), p.BaseURL, p.ModelID, "request_encoding")
+		return receipt, errors.New(receipt.Reason)
+	}
+	configSum := sha256.Sum256(config)
+	configKey := hex.EncodeToString(configSum[:])
+	// Headers, including credentials, bind memory-only cache reuse and never receipts.
+	headers, _ := json.Marshal(req.Header)
+	authSum := sha256.Sum256(headers)
+	cacheKey := configKey + "\x00" + hex.EncodeToString(authSum[:])
 	opsRunInferenceProbeCache.Lock()
 	defer opsRunInferenceProbeCache.Unlock()
-	if cached, ok := opsRunInferenceProbeCache.entries[cacheKey]; ok && now.Sub(cached.RecordedAt) < opsRunInferenceProbeTTL {
+	if cached, ok := opsRunInferenceProbeCache.entries[cacheKey]; ok && time.Since(cached.RecordedAt) < opsRunInferenceProbeTTL {
 		if cached.Failure != "" {
 			return cached.Receipt, errors.New(cached.Failure)
 		}
 		return cached.Receipt, nil
 	}
-
-	reason := opsRunProbeInferenceRoute(ctx, baseURL, model, apiKey)
+	evidence := opsRunProbeInferenceRequest(req, p.ModelID)
 	status := "qualified"
-	if reason != "" {
+	if evidence.Reason != "" {
 		status = "failed"
 	}
-	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + configKey + "\x00" + status + "\x00" + reason))
+	refSum := sha256.Sum256([]byte(opsRunInferencePreflightSchema + "\x00" + configKey + "\x00" + status + "\x00" + evidence.Reason + "\x00" + evidence.ResponseDigest))
+	tokenField := p.CompletionTokenField
+	if tokenField == "" {
+		tokenField = "max_tokens"
+	}
 	receipt := opsRunInferencePreflightReceipt{
 		Schema:     opsRunInferencePreflightSchema,
 		ReceiptRef: "sha256:" + hex.EncodeToString(refSum[:]),
-		Status:     status,
-		Reason:     reason,
+		Status:     status, Reason: evidence.Reason,
+		RequestRef: "sha256:" + configKey, ExpectedModel: p.ModelID,
+		ObservedModel: evidence.ObservedModel, FinishReason: evidence.FinishReason,
+		ResponseDigest: evidence.ResponseDigest, CompletionTokenField: tokenField,
 	}
-	opsRunInferenceProbeCache.entries[cacheKey] = opsRunInferenceProbeCacheEntry{RecordedAt: now, Receipt: receipt, Failure: reason}
-	if reason != "" {
-		return receipt, errors.New(reason)
+	opsRunInferenceProbeCache.entries[cacheKey] = opsRunInferenceProbeCacheEntry{RecordedAt: time.Now().UTC(), Receipt: receipt, Failure: evidence.Reason}
+	if evidence.Reason != "" {
+		return receipt, errors.New(evidence.Reason)
 	}
 	return receipt, nil
 }
@@ -378,167 +438,40 @@ func failOpsRunInferencePreflight(stderr io.Writer, receiptPath string, receipt 
 	return 1
 }
 
-func opsRunProbeInferenceRoute(ctx context.Context, baseURL, model, apiKey string) string {
-	endpoint, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
-		return "invalid_endpoint"
-	}
-	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/chat/completions"
-	endpoint.RawQuery = ""
-	endpoint.Fragment = ""
-	payload := map[string]any{
-		"model":  model,
-		"stream": true,
-		"messages": []map[string]string{{
-			"role":    "user",
-			"content": "Return exactly one fak_inference_preflight tool call with {\"ok\":true}; do not execute any tool.",
-		}},
-		"tools": []map[string]any{{
-			"type": "function",
-			"function": map[string]any{
-				"name":        opsRunInferenceProbeTool,
-				"description": "Non-mutating inference route readiness witness.",
-				"parameters": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{"ok": map[string]string{"type": "boolean"}},
-					"required":   []string{"ok"},
-				},
-			},
-		}},
-		"tool_choice": map[string]any{"type": "function", "function": map[string]string{"name": opsRunInferenceProbeTool}},
-		"max_tokens":  32,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "request_encoding"
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, opsRunInferenceProbeTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
-	if err != nil {
-		return "request_build"
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	// A client-level Timeout mirrors the context deadline so the probe stays bounded
-	// even if a future caller drops the context (MISSING_HTTP_TIMEOUT).
+func opsRunInferenceProbeInput() ([]agent.Message, []agent.ToolDef, json.RawMessage) {
+	return []agent.Message{{Role: agent.RoleUser, Content: "Return exactly one fak_inference_preflight tool call with {\"ok\":true}; do not execute any tool."}},
+		[]agent.ToolDef{{Type: "function", Function: agent.ToolDefFunction{
+			Name: opsRunInferenceProbeTool, Description: "Non-mutating inference route readiness witness.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`),
+		}}},
+		json.RawMessage(`{"type":"function","function":{"name":"fak_inference_preflight"}}`)
+}
+
+func opsRunProbeInferenceRequest(req *http.Request, model string) opsRunProbeEvidence {
 	client := &http.Client{Timeout: opsRunInferenceProbeTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		if requestCtx.Err() != nil {
-			return "timeout"
+		reason := "transport"
+		if req.Context().Err() != nil {
+			reason = "timeout"
 		}
-		return "transport"
+		return opsRunProbeEvidence{Reason: reason}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Sprintf("http_status_%d", resp.StatusCode)
+		return opsRunProbeEvidence{Reason: fmt.Sprintf("http_status_%d", resp.StatusCode)}
 	}
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		return "malformed_sse"
+		return opsRunProbeEvidence{Reason: "malformed_sse"}
 	}
-
-	type streamedToolCall struct {
-		ID        string
-		Type      string
-		Name      string
-		Arguments strings.Builder
-	}
-	toolCalls := make(map[int]*streamedToolCall)
-	seenModel, finishReason, done := false, "", false
-	limited := io.LimitReader(resp.Body, opsRunInferenceProbeMaxBytes+1)
-	scanner := bufio.NewScanner(limited)
-	scanner.Buffer(make([]byte, 4096), opsRunInferenceProbeMaxBytes+1)
-	readBytes := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		readBytes += len(line) + 1
-		if readBytes > opsRunInferenceProbeMaxBytes {
-			return "response_too_large"
-		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			done = true
-			continue
-		}
-		var chunk struct {
-			Model   string `json:"model"`
-			Choices []struct {
-				Delta struct {
-					ToolCalls []struct {
-						Index    int    `json:"index"`
-						ID       string `json:"id"`
-						Type     string `json:"type"`
-						Function struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
-					} `json:"tool_calls"`
-				} `json:"delta"`
-				FinishReason string `json:"finish_reason"`
-			} `json:"choices"`
-		}
-		if data == "" || json.Unmarshal([]byte(data), &chunk) != nil || len(chunk.Choices) == 0 {
-			return "malformed_sse"
-		}
-		if chunk.Model != "" {
-			if chunk.Model != model {
-				return "model_mismatch"
-			}
-			seenModel = true
-		}
-		for _, choice := range chunk.Choices {
-			if choice.FinishReason != "" {
-				finishReason = choice.FinishReason
-			}
-			for _, delta := range choice.Delta.ToolCalls {
-				call := toolCalls[delta.Index]
-				if call == nil {
-					call = &streamedToolCall{}
-					toolCalls[delta.Index] = call
-				}
-				if delta.ID != "" {
-					call.ID = delta.ID
-				}
-				if delta.Type != "" {
-					call.Type = delta.Type
-				}
-				if delta.Function.Name != "" {
-					call.Name = delta.Function.Name
-				}
-				call.Arguments.WriteString(delta.Function.Arguments)
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		if requestCtx.Err() != nil {
-			return "timeout"
-		}
-		return "malformed_sse"
-	}
-	if !done || !seenModel || finishReason != "tool_calls" || len(toolCalls) != 1 {
-		return "incomplete_sse"
-	}
-	call := toolCalls[0]
-	if call == nil || call.ID == "" || call.Type != "function" || call.Name != opsRunInferenceProbeTool {
-		return "malformed_tool_call"
-	}
-	var arguments struct {
-		OK bool `json:"ok"`
-	}
-	if json.Unmarshal([]byte(call.Arguments.String()), &arguments) != nil || !arguments.OK {
-		return "malformed_tool_call"
-	}
-	return ""
+	return opsRunReadInferenceProbe(req.Context(), resp.Body, model)
 }
 
 const maxOpsRunLifecycleRecords = 16
+
+func validChatCompletionTokenField(field string) bool {
+	return field == "" || field == "max_tokens" || field == "max_completion_tokens"
+}
 
 type opsRunLifecycleRecord struct {
 	Reason            string `json:"reason"`
