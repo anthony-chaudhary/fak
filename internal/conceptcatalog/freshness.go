@@ -238,15 +238,89 @@ func materializeGitTree(root, treeish string) (string, func(), error) {
 	return tmp, cleanup, nil
 }
 
+var gitArchiveCommand = func(treeish string) *exec.Cmd {
+	return exec.Command("git", "archive", "--format=tar", treeish)
+}
+
 func extractGitTree(root, treeish, tmp string) error {
-	cmd := exec.Command("git", "archive", "--format=tar", treeish)
+	cmd := gitArchiveCommand(treeish)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
-	raw, err := cmd.Output()
+	var stderr gitArchiveStderr
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("git archive %s: %w", treeish, err)
 	}
-	tr := tar.NewReader(bytes.NewReader(raw))
+	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		return fmt.Errorf("git archive %s: %w", treeish, err)
+	}
+
+	extractErr := extractGitTar(stdout, tmp)
+	var drainErr error
+	if extractErr == nil {
+		// tar.Reader stops at its end marker; consume the remaining padding so
+		// the producer can finish even when its output exceeds the pipe buffer.
+		_, drainErr = io.Copy(io.Discard, stdout)
+	}
+	_ = stdout.Close()
+	if extractErr != nil || drainErr != nil {
+		// Extraction may fail before git has finished writing. Reap it without
+		// waiting for the rest of an archive that can no longer be consumed.
+		_ = cmd.Process.Kill()
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			exitErr.Stderr = stderr.Bytes()
+		}
+		waitErr = fmt.Errorf("git archive %s: %w", treeish, waitErr)
+	}
+	// Keep a consumer failure first, including when stopping git induced a
+	// second error, without hiding a genuine producer failure on a partial tar.
+	return errors.Join(extractErr, drainErr, waitErr)
+}
+
+// gitArchiveStderr retains the same bounded prefix/suffix diagnostics as
+// exec.Cmd.Output without retaining the archive itself.
+type gitArchiveStderr struct {
+	prefix, suffix []byte
+	total          int64
+}
+
+func (w *gitArchiveStderr) Write(p []byte) (int, error) {
+	const half = 32 << 10
+	n := len(p)
+	w.total += int64(n)
+	if remaining := half - len(w.prefix); remaining > 0 {
+		keep := min(remaining, len(p))
+		w.prefix = append(w.prefix, p[:keep]...)
+		p = p[keep:]
+	}
+	if len(p) >= half {
+		w.suffix = append(w.suffix[:0], p[len(p)-half:]...)
+	} else {
+		if overflow := len(w.suffix) + len(p) - half; overflow > 0 {
+			w.suffix = w.suffix[:copy(w.suffix, w.suffix[overflow:])]
+		}
+		w.suffix = append(w.suffix, p...)
+	}
+	return n, nil
+}
+
+func (w *gitArchiveStderr) Bytes() []byte {
+	var out bytes.Buffer
+	out.Write(w.prefix)
+	if omitted := w.total - int64(len(w.prefix)+len(w.suffix)); omitted > 0 {
+		fmt.Fprintf(&out, "\n... omitting %d bytes ...\n", omitted)
+	}
+	out.Write(w.suffix)
+	return out.Bytes()
+}
+
+func extractGitTar(archive io.Reader, tmp string) error {
+	tr := tar.NewReader(archive)
 	for {
 		h, e := tr.Next()
 		if errors.Is(e, io.EOF) {

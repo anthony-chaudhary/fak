@@ -3,6 +3,7 @@ package conceptcatalog
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +13,133 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+// fak-test:runtime fast est=1s
+func TestExtractGitTreeStreamsAndReapsArchive(t *testing.T) {
+	if mode := os.Getenv("FAK_TEST_GIT_ARCHIVE_MODE"); mode != "" {
+		writeGitArchiveHelper(t, mode)
+		return
+	}
+	old := gitArchiveCommand
+	t.Cleanup(func() { gitArchiveCommand = old })
+	for _, mode := range []string{"stream", "producer-failure", "truncated-failure", "extraction-failure", "start-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			dst := t.TempDir()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var cmd *exec.Cmd
+			gitArchiveCommand = func(string) *exec.Cmd {
+				if mode == "start-failure" {
+					cmd = exec.CommandContext(ctx, filepath.Join(t.TempDir(), "missing-git"))
+				} else {
+					cmd = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestExtractGitTreeStreamsAndReapsArchive$")
+					cmd.Env = append(os.Environ(), "FAK_TEST_GIT_ARCHIVE_MODE="+mode, "FAK_TEST_GIT_ARCHIVE_DEST="+dst)
+				}
+				return cmd
+			}
+			err := extractGitTree(t.TempDir(), "fixture-tree", dst)
+			if ctx.Err() != nil {
+				t.Fatalf("archive producer did not finish or get reaped promptly: %v", err)
+			}
+			if mode != "start-failure" && cmd.ProcessState == nil {
+				t.Fatal("archive producer was not reaped before return")
+			}
+			switch mode {
+			case "stream":
+				if err != nil {
+					t.Fatal(err)
+				}
+				if body, err := os.ReadFile(filepath.Join(dst, "first.txt")); err != nil || string(body) != "first body\n" {
+					t.Fatalf("extracted file = %q, %v", body, err)
+				}
+			case "producer-failure", "truncated-failure":
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 || !strings.Contains(err.Error(), "git archive fixture-tree") {
+					t.Fatalf("producer failure = %v, want wrapped exit 7", err)
+				}
+				wantStderr := "archive producer failed\n"
+				if mode == "producer-failure" {
+					wantStderr = strings.Repeat("a", 32<<10) + "\n... omitting 131072 bytes ...\n" + strings.Repeat("c", 32<<10)
+				} else if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("partial archive lost its extraction error: %v", err)
+				}
+				if string(exitErr.Stderr) != wantStderr {
+					t.Fatalf("producer stderr did not preserve its bounded prefix/suffix: got %d bytes, want %d", len(exitErr.Stderr), len(wantStderr))
+				}
+			case "extraction-failure":
+				if err == nil || !strings.HasPrefix(err.Error(), `unsafe archive path "../escaped.txt"`) {
+					t.Fatalf("extraction failure was lost to producer termination: %v", err)
+				}
+			case "start-failure":
+				if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "git archive fixture-tree") {
+					t.Fatalf("start failure = %v, want wrapped missing executable", err)
+				}
+			}
+		})
+	}
+}
+
+func writeGitArchiveHelper(t *testing.T, mode string) {
+	t.Helper()
+	name := "first.txt"
+	if mode == "extraction-failure" {
+		name = "../escaped.txt"
+	}
+	const body = "first body\n"
+	tw := tar.NewWriter(os.Stdout)
+	size := int64(len(body))
+	if mode == "truncated-failure" {
+		size++
+		fmt.Fprintln(os.Stderr, "archive producer failed")
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(tw, body); err != nil {
+		t.Fatal(err)
+	}
+	if mode == "truncated-failure" {
+		os.Exit(7)
+	}
+	if err := tw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if mode == "extraction-failure" {
+		// A failed consumer must stop and reap a producer that has not exited.
+		time.Sleep(10 * time.Second)
+		os.Exit(8)
+	}
+	if mode == "stream" {
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			got, err := os.ReadFile(filepath.Join(os.Getenv("FAK_TEST_GIT_ARCHIVE_DEST"), name))
+			if err == nil && string(got) == body {
+				break
+			}
+			if time.Now().After(deadline) {
+				fmt.Fprintln(os.Stderr, "file was not extracted before producer completion")
+				os.Exit(9)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Output beyond the tar end marker must be drained before waiting for git.
+	if _, err := os.Stdout.Write(make([]byte, 128<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if mode == "producer-failure" {
+		fmt.Fprint(os.Stderr, strings.Repeat("a", 32<<10), strings.Repeat("b", 128<<10), strings.Repeat("c", 32<<10))
+		os.Exit(7)
+	}
+	os.Exit(0)
+}
 
 func TestCheckFreshDetectsHeadlineFamilyAndNoop(t *testing.T) {
 	root := fixtureRepo(t)
