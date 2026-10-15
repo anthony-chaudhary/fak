@@ -652,6 +652,9 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 
 	panelHandled := false
+	if seq > 1 && !(full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m) {
+		v41GroupedPanelDecline(l, seq, v41GroupedPanelCallerReason(full, st != nil, st != nil && st.callbackOwner != nil, st != nil && st.callbackOwner != nil && st.callbackOwner.M == m))
+	}
 	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m {
 		totalIn, valid := checkedMulInt(nH, hd)
 		panelN, panelValid := checkedMulInt(seq, totalIn)
