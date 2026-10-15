@@ -9,7 +9,7 @@ import (
 
 // fak-test:runtime fast est=5ms lane=default
 // Source-only witness: literal bindings replace per-load switches without
-// changing either quantized reduction body. Compiler/device parity and fused
+// changing either quantized reduction order. Compiler/device parity and fused
 // performance still require the existing Vulkan witnesses on physical silicon.
 func TestV41RoutedFusedSlotHoistSourceContract(t *testing.T) {
 	t.Parallel()
@@ -52,11 +52,13 @@ func TestV41RoutedFusedSlotHoistSourceContract(t *testing.T) {
 			t.Errorf("%s must have exactly one outer slot switch", name)
 		}
 	}
-	// Compare the entire Q3_K row macro and scale decoder, not selected terms.
-	refRow := section(q3, "#define Q3K_SLOT", "Q3K_SLOT(q3kRow0")
+	// The down kernel hoists packed words; its independent packed-layout witness
+	// binds that integer decoder. Keep the complete floating-point loop nest
+	// identical to routed-id, not merely a few selected accumulation terms.
+	refRow := section(q3, "        uint qi = 0u;", "Q3K_SLOT(q3kRow0")
 	refRow = strings.NewReplacer("xPick", "midBase", " * x[", " * mid[").Replace(refRow)
-	if canonical(section(down, "#define Q3K_SLOT", "Q3K_SLOT(q3kRow0")) != canonical(refRow) {
-		t.Error("down row no longer matches routed-id Q3_K arithmetic and byte addressing")
+	if canonical(section(down, "        uint qi = 0u;", "Q3K_SLOT(q3kRow0")) != canonical(refRow) {
+		t.Error("down row no longer matches routed-id Q3_K floating-point loop order")
 	}
 	if canonical(section(down, "void q3kScales", "// Q3K_SLOT")) != canonical(section(q3, "void q3kScales", "// Q3K_SLOT")) {
 		t.Error("down scale decoder differs from routed-id")

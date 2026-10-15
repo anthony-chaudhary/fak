@@ -11,7 +11,7 @@ spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [44
 // ADAPT (MIT, Copyright (c) 2025-2026 antirez): antirez/ds4 ds4_cuda.cu
 // moe_down_sum_qwarp32_kernel @fc80bd695da76ee14bcb86820bf900a5cdfda806:23869 and
 // moe_down_q4K_sum6_qwarp32_kernel:24099 do the down projection plus the six-expert
-// sum. Here the Q3_K body and per-row accumulation order are
+// sum. Here the Q3_K coefficients and per-row accumulation order are
 // v41_q3k_matvec_id.comp's term for term, so each pick's down row is bitwise the id
 // path's, and the publication/sum terms are v41_routed_publish_sum.comp's, so each
 // pick's 16-byte status record and the summed `[hidden]` row are bitwise the id
@@ -44,6 +44,13 @@ layout(push_constant) uniform PC {
     uint picks;
 } pc;
 
+// Invocation-private storage, never shared between rows. A 110-byte block starts
+// at byte lead 0 or 2, so exactly 28 aligned words cover it. Every ROW replaces
+// this entire bank before any BYTE read; no bank value escapes that block.
+// Keep packed integers rather than changing the floating-point reduction.
+uint q3kPackedWords[28];
+uint q3kPackedLead;
+
 // q3kScales expands the 12 packed 6-bit sub-scale bytes (three LE words) into 16
 // signed scales, byte-for-byte unpackQ3KScales in q3k_matmul.comp.
 void q3kScales(uint aux0, uint aux1, uint aux2, out int scales[16]) {
@@ -61,22 +68,24 @@ void q3kScales(uint aux0, uint aux1, uint aux2, out int scales[16]) {
     }
 }
 
-// Q3K_SLOT stamps one row body per slot binding, so the slot is selected once per
-// pick in main and every byte load below indexes a single buffer. The slot is
-// uniform across active rows for a pick, but can change between routed picks.
-// Arithmetic and byte addressing match v41_q3k_matvec_id.comp term for term.
+// Q3K_SLOT selects one literal weight binding per pick. Hoist its packed words
+// out of the coefficient loops; BYTE now addresses relative block bytes in the
+// invocation-private bank. The FP loop and pick publication order stay intact.
 #define Q3K_SLOT(ROW, BYTE, RAW) \
 uint BYTE(uint offset) { \
-    return (RAW[offset >> 2u] >> ((offset & 3u) * 8u)) & 255u; \
+    uint at = q3kPackedLead + offset; \
+    return (q3kPackedWords[at >> 2u] >> ((at & 3u) * 8u)) & 255u; \
 } \
 float ROW(uint row, uint blocks, uint midBase) { \
     float sum = 0.0; \
     for (uint sb = 0u; sb < blocks; ++sb) { \
         uint base = (row * blocks + sb) * 110u; \
-        float d = unpackHalf2x16(BYTE(base + 108u) | (BYTE(base + 109u) << 8u)).x; \
-        uint hmBase = base; \
-        uint qBase  = base + 32u; \
-        uint scBase = base + 96u; \
+        q3kPackedLead = base & 3u; \
+        for (uint word = 0u; word < 28u; ++word) q3kPackedWords[word] = RAW[(base >> 2u) + word]; \
+        float d = unpackHalf2x16((q3kPackedWords[27] >> (q3kPackedLead * 8u)) & 0xffffu).x; \
+        uint hmBase = 0u; \
+        uint qBase  = 32u; \
+        uint scBase = 96u; \
         uint xBlock = midBase + sb * 256u; \
         int scales[16]; \
         q3kScales( \
