@@ -4,6 +4,9 @@
 // FAK_VULKAN_SPIRV="$PWD/internal/compute/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 go test -tags vulkan ./internal/model -run '^TestV41DecodeSubmits$' -count=1 -v -timeout=30m
 // Add FAK_V41_DECODE_SUBMITS_CONTEXTS=256,512 for longer contexts (minutes per fixture).
 // Synthetic fixtures; per-step counters and wall time are logged, never bounded.
+// H2D classes are native-accounted MemoryClass uploads, not tensor roles or
+// completed-device traffic. Physical completed-run evidence still requires a
+// successful enclosing quiescent execution window.
 
 package model
 
@@ -59,6 +62,9 @@ func TestV41DecodeSubmits(t *testing.T) {
 	snap, available, err := compute.CaptureBackendExecutionSnapshot(be)
 	if err != nil || !available {
 		t.Fatalf("backend execution snapshot unavailable: available=%t err=%v", available, err)
+	}
+	if !snap.H2DAttributionObserved {
+		t.Fatal("startup-profiled native witness requires observed H2D attribution")
 	}
 	if expected := os.Getenv("FAK_VULKAN_EXPECT_DEVICE"); expected != "" && snap.Identity.Device != expected {
 		t.Fatalf("physical device=%q want=%q", snap.Identity.Device, expected)
