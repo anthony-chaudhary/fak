@@ -17,6 +17,7 @@ package compute
 #cgo v41_tail_rope_exact_witness,!v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness LDFLAGS: -L${SRCDIR} -lfakvulkan_v41_tail_rope_exact_witness
 #include <stdlib.h>
 #include "vulkan_backend.h"
+int fvk_dispatch_profile_enabled(void);
 // Issue-local adapter while the shared Vulkan C ABI remains stable: the fused Q2_K
 // tail reuses the required q2k_matmul pipeline rather than adding an optional module.
 void fvk_swiglu_q2k_matmul_add_f32(const void *dW, const void *dG, const void *dU,
@@ -66,16 +67,15 @@ import (
 
 var vulkanMu sync.Mutex
 
-// Match the native dispatch profiler's startup-only opt-in. The accumulator
-// shares the process lifetime of the native H2D counters, including uploads
-// through different backend wrappers. All fields are protected by vulkanMu.
+// The accumulator shares the native profiler's immutable startup gate and process
+// lifetime across backend wrappers. All fields are protected by vulkanMu.
 var vulkanUploadAttribution = struct {
 	enabled    bool
 	bytes      BackendH2DAttribution
 	lastTotal  uint64
 	lastDirect uint64
 	err        error
-}{enabled: os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1"}
+}{enabled: C.fvk_dispatch_profile_enabled() != 0}
 
 type vulkanQ4KHomeKey struct {
 	src   unsafe.Pointer
