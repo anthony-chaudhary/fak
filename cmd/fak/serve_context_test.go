@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +60,113 @@ func TestResolveServeNativeContext(t *testing.T) {
 				t.Fatalf("context plan = %+v, want exact plan for resolved %d tokens %+v", gotPlan, tt.want, wantPlan)
 			}
 		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestServeExplicitContextClampLog(t *testing.T) {
+	t.Parallel()
+	csc := compute.ContextSizeConfig{
+		KV:                 compute.KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 8},
+		MaxContext:         4096,
+		PoolSharedWithHost: true,
+	}
+	weights := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Bytes: 1 << 20, Scope: compute.MemoryScopeDevice},
+		{Class: compute.MemoryWeights, Bytes: 3 << 20, Scope: compute.MemoryScopeHost},
+	}
+	avail := weights.Total() + csc.KVBytes(1024)
+	if got := compute.LargestFittingContextTokens(csc, weights, avail); got != 1024 {
+		t.Fatalf("fixture fitted bound=%d, want 1024", got)
+	}
+	wantClamp := func(tokens int, budget int64) string {
+		return fmt.Sprintf("fak: native context sizing clamped requested=4096 resolved=%d fitted_bound=%d source=explicit (kv=%s, weights=%s, fit_budget=%s, headroom=%s)\n",
+			tokens, tokens, bytesText(uint64(csc.KVBytes(tokens))), bytesText(uint64(weights.Total())), bytesText(uint64(budget)), bytesText(uint64(budget)))
+	}
+	for _, tc := range []struct {
+		name      string
+		max       int
+		avail     int64
+		requested int
+		resolved  int
+		want      string
+	}{
+		{name: "shared-pool explicit clamp", max: 4096, avail: avail, requested: 4096, resolved: 1024, want: wantClamp(1024, avail)},
+		{name: "weights-overflow floor clamp", max: 4096, avail: weights.Total() - 1, requested: 4096, resolved: 512, want: wantClamp(512, weights.Total()-1)},
+		{name: "honored explicit request", max: 4096, avail: avail, requested: 1024, resolved: 1024},
+		{name: "unknown capacity", max: 4096, requested: 4096, resolved: 512},
+		{name: "unknown model window", avail: avail, requested: 4096, resolved: 512},
+		{name: "unproven smaller resolution", max: 4096, avail: avail, requested: 4096, resolved: 512},
+		{name: "auto sizing uses its existing logger", max: 4096, avail: avail, resolved: 1024},
+		{name: "auto full window remains silent", max: 4096, avail: weights.Total() + csc.KVBytes(4096), resolved: 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := csc
+			cfg.MaxContext = tc.max
+			fit := serveFitBudget{Base: 2 * tc.avail, Headroom: 0.5}
+			var out bytes.Buffer
+			logServeExplicitContextClamp(&out, cfg, weights, fit, tc.avail, tc.requested, tc.resolved)
+			if got := out.String(); got != tc.want {
+				t.Fatalf("context sizing log=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestResolveServeNativeContextEmitsClampDiagnostic(t *testing.T) {
+	const (
+		childEnv    = "FAK_TEST_SERVE_NATIVE_CONTEXT_CLAMP_DIAGNOSTIC"
+		weightBytes = int64(1 << 30)
+		availBytes  = int64(1 << 20)
+	)
+	if os.Getenv(childEnv) == "1" {
+		t.Setenv("FAK_HYBRID_KV", "0")
+		t.Setenv("FAK_UP_KV_PRECISION", "f32")
+		ws := serveSynthWideWindowWeightSource(t)
+		weights := compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: weightBytes, Scope: compute.MemoryScopeDevice}}
+		fit := serveFitBudget{Base: 2 * availBytes, Headroom: 0.5}
+		// The real resolver writes its diagnostic to this child's original stderr.
+		// This resolver call needs no backend/host probes: its backend is nil and fit fixed.
+		got, _, err := resolveServeNativeContext(ws, nil, weights, fit, 4096)
+		want := serveNativeContextResolution{RequestedTokens: 4096, ModelDeclaredTokens: 4096, ResolvedTokens: 512, Source: "explicit"}
+		if err != nil || got != want {
+			t.Fatalf("actual resolver result=%+v err=%v, want %+v", got, err, want)
+		}
+		return
+	}
+	t.Parallel()
+	// Capture at the process boundary; never replace os.Stderr while peer tests run.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestResolveServeNativeContextEmitsClampDiagnostic$", "-test.count=1", "-test.timeout=8s")
+	cmd.Env = append(os.Environ(), childEnv+"=1")
+	cmd.WaitDelay = time.Second
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("resolver diagnostic child failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	const prefix = "fak: native context sizing clamped "
+	if strings.Contains(stdout.String(), prefix) {
+		t.Fatalf("resolver diagnostic leaked to stdout: %s", stdout.String())
+	}
+	if count := strings.Count(stderr.String(), prefix); count != 1 {
+		t.Fatalf("actual resolver emitted %d clamp diagnostics, want exactly one: %s", count, stderr.String())
+	}
+	var diagnostic string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			diagnostic = line
+		}
+	}
+	for _, want := range []string{
+		" requested=4096 ", " resolved=512 ", " fitted_bound=512 ", " source=explicit ",
+		" weights=" + bytesText(uint64(weightBytes)) + ",", " fit_budget=" + bytesText(uint64(availBytes)) + ",", " headroom=" + bytesText(uint64(availBytes)) + ")",
+	} {
+		if !strings.Contains(diagnostic, want) {
+			t.Errorf("actual resolver diagnostic %q lacks %q", diagnostic, want)
+		}
 	}
 }
 

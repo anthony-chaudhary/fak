@@ -12047,6 +12047,11 @@
           "category": "incidental",
           "reason": "Private helper selecting the earlier of the caller context deadline and an existing cap for the owner handoff, or the cap when no caller deadline exists; it introduces no context abstraction or execution authority.",
           "token": "v41EPHContextDeadline"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private diagnostic helper for existing explicit native context sizing; it logs the existing sizing snapshot with delimited fields without defining a distinct context, changing admission or allocation arithmetic, or adding a public schema.",
+          "token": "logServeExplicitContextClamp"
         }
       ],
       "exclude": [
@@ -12174,6 +12179,7 @@
         "laneCtx",
         "latestGuardCompactionWitness",
         "liveCtx",
+        "logServeExplicitContextClamp",
         "lookupCtx",
         "lookupReceiptContextKey",
         "lookupReceiptFromContext",

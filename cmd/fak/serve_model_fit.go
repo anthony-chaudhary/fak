@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -141,7 +142,9 @@ func resolveServeNativeContext(ws *ggufload.WeightSource, be compute.Backend, we
 	if csc.PoolSharedWithHost {
 		sizingFit = serveSharedPoolSizingFit(be, fit)
 	}
-	resolution.ResolvedTokens, _ = compute.AutoSizeContextPlan(csc, weights, sizingFit.avail(), override)
+	avail := sizingFit.avail()
+	resolution.ResolvedTokens, _ = compute.AutoSizeContextPlan(csc, weights, avail, override)
+	logServeExplicitContextClamp(os.Stderr, csc, weights, sizingFit, avail, requested, resolution.ResolvedTokens)
 	return resolution, csc.PerContextMemoryPlan(resolution.ResolvedTokens), nil
 }
 
@@ -997,6 +1000,27 @@ func appendServeGGUFDevicePlan(ws *ggufload.WeightSource, be compute.Backend, pl
 	tokens, ctxPlan := compute.AutoSizeContextPlan(csc, plan, avail, serveContextTokenOverride(contextBudgetTokens))
 	logServeAutoSizedContext(csc, plan, fit, avail, contextBudgetTokens, tokens)
 	return append(plan, ctxPlan...)
+}
+
+// logServeExplicitContextClamp names only a proven explicit clamp (#13863), using
+// the resolver's existing sizing snapshot. It never probes memory or changes admission.
+func logServeExplicitContextClamp(w io.Writer, csc compute.ContextSizeConfig, weights compute.MemoryPlan, fit serveFitBudget, avail int64, requested, resolved int) {
+	if requested <= 0 || avail <= 0 || csc.MaxContext <= 0 || resolved >= requested {
+		return
+	}
+	fitted := compute.LargestFittingContextTokens(csc, weights, avail)
+	if resolved != fitted {
+		return // a smaller result alone does not prove this sizer clamped it
+	}
+	weightScoped := weights.DeviceTotal()
+	if csc.PoolSharedWithHost {
+		weightScoped = weights.Total()
+	}
+	// fitted includes the sizer's minimum floor; it is not a load-admission verdict.
+	fmt.Fprintf(w,
+		"fak: native context sizing clamped requested=%d resolved=%d fitted_bound=%d source=explicit (kv=%s, weights=%s, fit_budget=%s, headroom=%s)\n",
+		requested, resolved, fitted, bytesText(uint64(max(csc.KVBytes(resolved), 0))), bytesText(uint64(max(weightScoped, 0))),
+		bytesText(uint64(avail)), bytesText(uint64(max(fit.Base-avail, 0))))
 }
 
 // logServeAutoSizedContext prints the #1046 one-line auto-size record when the boot path DERIVED a
