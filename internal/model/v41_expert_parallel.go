@@ -231,20 +231,21 @@ func v41EPUnpack(gathered []float32, plan, owners TPPlan, digest [32]byte, picks
 // Public Close calls this after releasing backend execution ownership. Internal
 // selected-operation cleanup must not take the coordinator mutex while its
 // forward holds it. A cleanup failure also invalidates the distributed group.
-func (s *Session) finishV41EPOwner() {
-	primary := recover()
+func (s *Session) finishV41EPOwner(complete bool) {
+	if !complete {
+		// The original panic or Goexit is still unwinding in Close. Discard
+		// only a secondary transport-cleanup panic, including panic(nil).
+		defer func() { _ = recover() }()
+	}
 	if s != nil && s.M != nil && s.M.Cfg.IsDeepSeekV41() && s.M.epCoord != nil {
 		c := s.M.epCoord
 		c.mu.Lock()
+		defer c.mu.Unlock()
 		if c.v41Owner == s {
 			c.v41Owner = nil
-			if primary != nil {
+			if !complete {
 				c.g.abortV41EP()
 			}
 		}
-		c.mu.Unlock()
-	}
-	if primary != nil {
-		panic(primary)
 	}
 }

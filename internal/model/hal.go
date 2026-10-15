@@ -130,10 +130,18 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 
 // Close releases session-owned device state and its model-weight lifetime reference.
 func (s *Session) Close() {
-	defer s.finishV41EPOwner()
-	scope := s.beginBackendExecution()
-	defer scope.finish()
-	s.closeOwned(scope)
+	complete := false
+	defer func() { s.finishV41EPOwner(complete) }()
+	func() {
+		scope := s.beginBackendExecution()
+		bodyComplete := false
+		defer scope.finishCompleted(&bodyComplete)
+		s.closeOwned(scope)
+		bodyComplete = true
+	}()
+	// Include deferred scope retirement in this boundary: only its normal
+	// return permits the EP owner to be retired without an abort attempt.
+	complete = true
 }
 
 func (s *Session) closeOwned(scope *backendExecutionScope) {
