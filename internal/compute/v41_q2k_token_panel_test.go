@@ -213,7 +213,7 @@ func v41Q2TokenGridNativeSource(source string) error {
 	// successful pipeline build. A filename or mere framing is insufficient.
 	for name, want := range map[string]string{
 		"static int v41TokenGridModuleABI(": "1de863aa99e27cc08a870eef8e21dde6eb65babdb907531e998bd0e5b9f6ef98",
-		"bool buildKernel(":                 "c79c275b55af1a0ef9eb66c265ecdda2cb6d3cb71d1834b0544d042e6329b41b",
+		"bool buildKernel(":                 "773b9ee122e12ebbd56c615a23c4df02bb24b8ee891189396f2b07e4ee19a57b",
 	} {
 		body, err := extract(name)
 		if err != nil {
