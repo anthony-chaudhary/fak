@@ -6,12 +6,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41GroupedPanelDeclines counts why the batched prefill grouped-output panel
 // fell back to the per-row path (#13864). Every decline is counted; with
-// FAK_VULKAN_DISPATCH_PROFILE=1 each decline (at most one per layer per
-// prefill) is printed with its running count next to the dispatch profile.
+// native dispatch profiling enabled at startup, each decline (at most one per
+// layer per prefill) is printed with its running count next to the profile.
 var v41GroupedPanelDeclines = struct {
 	sync.Mutex
 	counts map[string]int
@@ -22,7 +24,7 @@ func v41GroupedPanelDecline(layer, rows int, reason string) v41DenseProjectionOu
 	v41GroupedPanelDeclines.counts[reason]++
 	count := v41GroupedPanelDeclines.counts[reason]
 	v41GroupedPanelDeclines.Unlock()
-	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" {
+	if compute.VulkanDispatchProfileEnabled() {
 		fmt.Fprintf(os.Stderr, "v41 grouped_output panel declined reason=%s layer=%d rows=%d count=%d\n", reason, layer, rows, count)
 	}
 	return v41ProjectionDeclined

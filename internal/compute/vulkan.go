@@ -168,13 +168,13 @@ func (v *vulkanBackend) q4kHomeLocked(wb *vulkanBuf) (unsafe.Pointer, bool) {
 	return ptr, true
 }
 func init() {
+	nativeVulkanDispatchProfileEnabled = vulkanUploadAttribution.enabled
 	spirv := resolveVulkanSPIRVDir(os.Getenv("FAK_VULKAN_SPIRV"), os.Executable, filepath.EvalSymlinks, os.Stat)
 	if spirv == "" {
 		return
 	}
 	cdir := C.CString(spirv)
 	defer C.free(unsafe.Pointer(cdir))
-
 	var name [256]C.char
 	var discrete C.int
 	if C.fvk_init(&name[0], 256, &discrete, cdir) != 0 {
