@@ -156,6 +156,9 @@ func openAIResponsesSSEOutputItem(raw []byte, event string, fallbackIndex int) (
 }
 
 func openAIResponsesSSEFillOutput(final []byte, outputItems []responsesSSEOutputItem) ([]byte, error) {
+	if bytes.Equal(bytes.TrimSpace(final), []byte("null")) {
+		return nil, fmt.Errorf("response.completed payload is null")
+	}
 	if len(outputItems) == 0 {
 		return final, nil
 	}
