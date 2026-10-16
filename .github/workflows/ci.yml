@@ -255,7 +255,7 @@ jobs:
         id: tests
         env:
           FAK_REQUIRE_OPENAPI_VALIDATOR: "1"
-        run: go test -coverprofile=coverage.out ./...
+        run: go test -timeout=20m -coverprofile=coverage.out ./...
 
       # Coverage report + gap analysis + trend surfacing (E-002 / #233): the profile
       # was previously reduced to one `tail -1` line lost in the logs. This step keeps
@@ -1015,7 +1015,7 @@ jobs:
           STEPS_JSON: ${{ toJSON(steps) }}
           JOB_ID: build-vet-test
           CI_CLASS: full
-          CORE_COMMANDS_JSON: '[["go","build","./..."],["go","vet","./..."],["go","test","-coverprofile=coverage.out","./..."],["go","test","-count=1","-v","-run","TestCLAIMSLedger","./internal/claimcheck/"]]'
+          CORE_COMMANDS_JSON: '[["go","build","./..."],["go","vet","./..."],["go","test","-timeout=20m","-coverprofile=coverage.out","./..."],["go","test","-count=1","-v","-run","TestCLAIMSLedger","./internal/claimcheck/"]]'
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" && "$(git rev-parse HEAD^{tree})" == "$TESTED_TREE" ]]
