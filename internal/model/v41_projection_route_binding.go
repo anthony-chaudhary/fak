@@ -125,6 +125,14 @@ func (st *v41ForwardState) liftDeviceOnlyDense(s *Session) {
 var errV41RouterProjectionScope = errors.New("model: V4.1 router projection scope changed")
 
 type v41ProjectionContinuation struct {
+	// indexQuery is a closed purpose; the zero value retains router behavior.
+	indexQuery      bool
+	selected        bool
+	rawValidated    bool
+	raw             []float32
+	cleanup         v41ProjectionCleanup
+	projectionCause error
+
 	consume      func(compute.Tensor, *v41ProjectionLoan)
 	valid        func() bool
 	cause        error
@@ -170,6 +178,33 @@ type v41ProjectionCleanup struct {
 	value   any
 	present bool
 	legacy  any
+}
+
+// releaseIndexCleanup detaches first and schedules every owner before any
+// callback executes. Goexit in one Free still runs the remaining defers, and
+// completion is written through out even when this function cannot return.
+// Router cleanup keeps its existing behavior; only the closed index purpose
+// uses this stronger all-releases-scheduled retirement.
+func (l *v41ProjectionLoan) releaseIndexCleanup(out *v41ProjectionCleanup) {
+	owned := l.owned
+	l.owned = nil
+	for i := 0; i < len(owned); i++ {
+		tensor := owned[i]
+		defer func() {
+			complete := false
+			defer func() {
+				value := recover()
+				if !complete && !out.present {
+					out.value, out.present = value, true
+				}
+				if value != nil && out.legacy == nil {
+					out.legacy = value
+				}
+			}()
+			l.backend.Free(tensor)
+			complete = true
+		}()
+	}
 }
 
 func (l *v41ProjectionLoan) releaseCleanup() (out v41ProjectionCleanup) {

@@ -1333,6 +1333,14 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 					if continuation != nil {
 						loan = &v41ProjectionLoan{backend: s.Backend}
 						defer func() {
+							if continuation.indexQuery {
+								// Store the body fault before cleanup can Goexit. The
+								// composer has an outer completion fence and keeps
+								// the projection as sole owner of x/y on every path.
+								continuation.projectionCause = err
+								loan.releaseIndexCleanup(&continuation.cleanup)
+								return
+							}
 							if !bodyReturned || continuation.panicPresent {
 								// Recover only secondary release faults; leave the body's
 								// panic or Goexit active.
@@ -1412,14 +1420,21 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 							defer s.Backend.Free(y)
 						}
 						if continuation != nil {
-							if rows != 1 || leaf != "ffn.gate.weight" || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
+							allowedLeaf := leaf == "ffn.gate.weight" && !continuation.indexQuery || leaf == "indexer.wq_b.weight" && continuation.indexQuery && out == 8192 && s.M.lora == nil && s.M.prism == nil
+							if rows != 1 || !allowedLeaf || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
 								return nil, errV41ProjectionResult
 							}
 							continuation.invoke(y, loan)
-							return nil, nil
+							if !continuation.indexQuery || continuation.panicPresent || continuation.cause != nil {
+								return nil, nil
+							}
 						}
 						opStage = "readback"
-						values = s.Backend.Read(y)
+						if continuation != nil && continuation.indexQuery && continuation.selected {
+							values = continuation.raw
+						} else {
+							values = s.Backend.Read(y)
+						}
 						readback = int64(len(values)) * 4
 						want, ok := checkedMulInt(rows, out)
 						if !ok || len(values) != want {
@@ -1443,6 +1458,9 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 								}
 							}
 						}
+						if continuation != nil && continuation.indexQuery && continuation.selected {
+							continuation.rawValidated = true
+						}
 						return values, nil
 					}()
 					bodyReturned = true
@@ -1453,7 +1471,7 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 				if err != nil {
 					return nil, v41ProjectionError, closeFailure(err)
 				}
-				if continuation == nil || continuation.completed {
+				if continuation == nil || continuation.completed || (continuation.indexQuery && continuation.cause == nil && !continuation.panicPresent && !continuation.cleanup.present) {
 					successfulRows = rows
 				}
 				return result, v41ProjectionHandled, nil

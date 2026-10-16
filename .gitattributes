@@ -83,3 +83,7 @@ internal/compute/v41_routed_swiglu_chunk_spirv.h text eol=lf
 # Canonical routed down chunk packaging hashes these reviewed bytes.
 internal/compute/shaders/v41_routed_down_panel_chunk.comp text eol=lf
 internal/compute/v41_routed_down_chunk_spirv.h text eol=lf
+
+# Canonical paired-Q2 source/header are byte-attested across checkouts.
+internal/compute/shaders/v41_q2k_token_pair.comp text eol=lf
+internal/compute/v41_q2k_token_pair_spirv.h text eol=lf
