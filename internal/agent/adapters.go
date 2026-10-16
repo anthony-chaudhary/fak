@@ -915,7 +915,8 @@ type openAIResponsesResponse struct {
 		PromptTokensDetails *UsageTokenDetails           `json:"prompt_tokens_details,omitempty"`
 		OutputTokensDetails *UsageCompletionTokenDetails `json:"output_tokens_details,omitempty"`
 	} `json:"usage"`
-	Error *apiError `json:"error"`
+	Error             *apiError       `json:"error"`
+	IncompleteDetails json.RawMessage `json:"incomplete_details"`
 }
 
 // MarshalRequest encodes the canonical request as a Responses-API body: messages
@@ -1100,6 +1101,11 @@ func (a openAIResponsesAdapter) parseResponseFields(raw []byte) (*Completion, er
 	}
 	if rr.Error != nil {
 		return nil, fmt.Errorf("api error: %s", rr.Error.Message)
+	}
+	// An output item is not completion authority for its enclosing response.
+	// Keep omitted status compatible with existing Responses-style endpoints.
+	if rr.Status != "" && rr.Status != "completed" {
+		return nil, fmt.Errorf("response status %q is not completed: incomplete_details=%s", rr.Status, rr.IncompleteDetails)
 	}
 	var content []string
 	var reasoning []string
