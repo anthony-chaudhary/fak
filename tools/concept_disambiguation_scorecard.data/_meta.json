@@ -1462,6 +1462,11 @@
           "category": "incidental",
           "reason": "Function-local buffer identity predicate in compressed publication RoPE; it tests whether either already-owned table slot aliases a tensor and introduces no independently addressable cache mechanism.",
           "token": "cacheOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "External Ruff tooling directory literal in the exact generator skip-directory set; copied unchanged for filesystem selection parity, with no FAK cache allocation, ownership, or reusable cache concept.",
+          "token": "ruff_cache"
         }
       ],
       "exclude": [
@@ -1778,6 +1783,7 @@
         "resetClaudeKeychainCache",
         "retireBranchCache",
         "reuseRatio",
+        "ruff_cache",
         "runCacheValueGateScore",
         "runCachevalueQwen38Campaign",
         "runDisambiguationCacheSourceSelfTest",
