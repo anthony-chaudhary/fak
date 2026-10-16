@@ -54,18 +54,27 @@ func (p *v41ExpertDownTile) project(activations []compute.Tensor, inter, hidden 
 	if !valid(x, x.Shape[0]) {
 		return compute.Tensor{}, errV41ExpertResult
 	}
+	return p.projectPacked(x, len(activations), inter, hidden, own, valid)
+}
+
+// The packed activation has already transferred to the cohort owner. It is
+// borrowed here and must not be registered or released a second time.
+func (p *v41ExpertDownTile) projectPacked(x compute.Tensor, rows, inter, hidden int, own func(compute.Tensor) bool, valid func(compute.Tensor, int) bool) (compute.Tensor, error) {
+	if !valid(x, rows*inter) {
+		return compute.Tensor{}, errV41ExpertResult
+	}
 	if p.note != nil {
 		p.note()
 	}
-	y, err := p.backend.V41Q3KTokenPanel(p.weight, x, len(activations))
-	fresh = own(y)
+	y, err := p.backend.V41Q3KTokenPanel(p.weight, x, rows)
+	fresh := own(y)
 	if err != nil {
 		return compute.Tensor{}, err
 	}
-	if !fresh || !valid(y, len(activations)*hidden) {
+	if !fresh || !valid(y, rows*hidden) {
 		return compute.Tensor{}, errV41ExpertResult
 	}
-	y.Shape = []int{len(activations), hidden}
+	y.Shape = []int{rows, hidden}
 	return y, nil
 }
 

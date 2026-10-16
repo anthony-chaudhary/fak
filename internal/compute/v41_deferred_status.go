@@ -19,7 +19,7 @@ const (
 // device so several kernels can be verified behind one host fence (#13820).
 // Record is backend-owned storage; V41ReadDeferred consumes and frees it.
 //
-// Records > 1 marks a routed id status (V41RoutedIDBackend): Record holds that
+// Records > 1 marks a routed id or activation-chunk status: Record holds that
 // many consecutive 16-byte records, one per pick, each of Count lanes.
 type V41DeferredStatus struct {
 	Kind    V41DeferredStatusKind

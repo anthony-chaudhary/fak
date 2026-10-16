@@ -62,6 +62,8 @@ const (
 	VulkanShaderRegistryV22ID = "fak.vulkan-shader-registry.v22.current86"
 	// VulkanShaderRegistryV23ID preserves V22 membership and binds canonical materialization.
 	VulkanShaderRegistryV23ID = "fak.vulkan-shader-registry.v23.current86"
+	// VulkanShaderRegistryV24ID adds the canonical routed activation chunk.
+	VulkanShaderRegistryV24ID = "fak.vulkan-shader-registry.v24.current87"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -109,9 +111,11 @@ var (
 	vulkanRegistryV23 = &vulkanSuccessorRegistry{version: "V23", schema: VulkanBuildReceiptSchemaV23, id: VulkanShaderRegistryV23ID, count: 86, parent: vulkanRegistryV22}
 
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23}
+	vulkanRegistryV24 = &vulkanSuccessorRegistry{version: "V24", schema: VulkanBuildReceiptSchemaV24, id: VulkanShaderRegistryV24ID, count: 87, parent: vulkanRegistryV23, added: []string{"v41_routed_swiglu_panel_chunk"}}
+
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV23
+	vulkanCurrentRegistry = vulkanRegistryV24
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

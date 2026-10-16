@@ -66,7 +66,7 @@ func TestVulkanReceiptV21DownRowBoundary(t *testing.T) {
 // Pins only packaging policy; no native archive or hardware qualification is implied.
 func TestVulkanReceiptV22IndexScaleBoundary(t *testing.T) {
 	want := append(CurrentVulkanShaderRegistryV21(), "v41_index_scale_bf16")
-	if len(want) != 86 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV22(), want) || !reflect.DeepEqual(VulkanShaders, want) || !reflect.DeepEqual(CurrentVulkanShaderRegistryLatest(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
+	if len(want) != 86 || !reflect.DeepEqual(CurrentVulkanShaderRegistryV22(), want) { //boundarylint:ignore CHANGE_DETECTOR_TEST a versioned receipt registry is immutable by design; the count is its identity
 		t.Fatal("current builder must add exactly the optional fused index-scale module to historical V21")
 	}
 	identity, err := vulkanRegistryV22.identity()
@@ -79,7 +79,8 @@ func TestVulkanReceiptV22IndexScaleBoundary(t *testing.T) {
 	if vulkanRegistryV21.validateStems(want) == nil || vulkanRegistryV22.validateStems(CurrentVulkanShaderRegistryV21()) == nil {
 		t.Fatal("historical V21 and index-scale V22 must not be interchangeable")
 	}
-	schema, current, err := CurrentVulkanBuildIdentity()
+	schema, current, err := vulkanRegistryV23.schema, VulkanShaderRegistryIdentity{}, error(nil)
+	current, err = vulkanRegistryV23.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV23 || current.ID != VulkanShaderRegistryV23ID || current.SHA256 != identity.SHA256 || current.ModuleCount != identity.ModuleCount || vulkanSuccessorForSchema(schema) != vulkanRegistryV23 || vulkanSuccessorForSchema(VulkanBuildReceiptSchemaV21) != vulkanRegistryV21 {
 		t.Fatalf("current receipt does not select V23 or historical V21 is unavailable: %q %+v %v", schema, current, err)
 	}

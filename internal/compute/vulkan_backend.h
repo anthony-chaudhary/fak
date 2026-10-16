@@ -601,6 +601,12 @@ int fvk_v41_routed_swiglu_f32(const void *dGate, const void *dUp, void *dOut, vo
  * Status remains one scalar-operation record with row-local fault indices.
  * No allocation ownership transfers and no host readback occurs here. */
 int fvk_have_v41_routed_swiglu_panel_row(void);
+int fvk_have_v41_routed_swiglu_panel_chunk(void);
+int fvk_v41_routed_swiglu_panel_chunk_shape(int rows, int count, int row, int chunk);
+int fvk_v41_routed_swiglu_panel_chunk_f32(const void* gate, const void* up, void* out, void* status,
+                                       int rows, int count, int row, int chunk, float limit, const float* weights);
+int fvk_v41_routed_swiglu_panel_chunk_module_abi(const void* data, size_t bytes);
+
 int fvk_v41_routed_swiglu_panel_row_shape(int rows, int count, int row);
 int fvk_v41_routed_swiglu_panel_row_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                                        int rows, int count, int row, float limit, float weight);
