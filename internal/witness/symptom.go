@@ -60,6 +60,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/buildwitness"
 )
 
 // SymptomFlagEnv opts the EXECUTION rung in. The structural rung runs regardless.
@@ -79,7 +80,8 @@ func SymptomExecEnabled() bool {
 // case where the tag derivation from the changed test files' //go:build constraints is unsafe or
 // incomplete. The tags are normalized (trimmed, empties dropped, de-duplicated, sorted) and
 // stored on the Resolver; resolveSymptomExec unions them with the derived set — explicit tags
-// never remove a derived tag. The empty default keeps the untagged behavior byte-identical.
+// never remove a derived feature tag. Platform constraints remain owned by GOOS/GOARCH.
+// The empty default keeps the untagged behavior byte-identical.
 func (r *Resolver) WithSymptomTags(tags []string) *Resolver {
 	r.symptomTags = normalizeTags(tags)
 	return r
@@ -109,13 +111,21 @@ func normalizeTags(tags []string) []string {
 	return out
 }
 
-// mergeTags returns the UNION of a and b: trimmed, empties dropped, de-duplicated, sorted.
+// mergeTags unions feature tags; GOOS/GOARCH constraints must never be forced with -tags.
 // Either side may be nil; both nil yields nil so the caller's untagged path stays byte-identical.
 func mergeTags(a, b []string) []string {
 	if len(a) == 0 && len(b) == 0 {
 		return nil
 	}
-	return normalizeTags(append(append([]string{}, a...), b...))
+	var features []string
+	for _, tag := range normalizeTags(append(append([]string{}, a...), b...)) {
+		platform := buildwitness.FilenamePlatformTags("witness_" + tag + ".go")
+		if len(platform) == 1 && platform[0] == tag {
+			continue
+		}
+		features = append(features, tag)
+	}
+	return features
 }
 
 // ResolveSymptom adjudicates a `symptom:<ref>` claim: does the fix at <ref> carry a witness that
@@ -300,7 +310,7 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	// (`//go:build vulkan`, `metal`, `cuda`, …) is excluded from a bare `go test`, so without
 	// this the package passes trivially at BOTH refs and a genuine witness is falsely refuted.
 	// An explicit caller hint (WithSymptomTags) is UNIONED with the derived truth — the hint
-	// can add a tag the derivation missed but never remove one a test file declares.
+	// can add a feature tag the derivation missed; GOOS/GOARCH remain target constraints.
 	tags := mergeTags(resolveGoBuildTags(ctx, r.run, r.dir, commit, tests), r.symptomTags)
 
 	// Materialize the candidate first, preserving the established verdict order:

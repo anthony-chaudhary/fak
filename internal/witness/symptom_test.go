@@ -1,13 +1,17 @@
 package witness
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -1027,4 +1031,59 @@ func TestWorkspaceNeedsSiblingTopology(t *testing.T) {
 			t.Fatalf("no go.work = true, want false")
 		}
 	})
+}
+
+// fak-test:runtime medium est=3s lane=default
+// fak-test:justify Executes the real symptom Go argv against a tiny module; no device work.
+func TestSymptomExecForeignPlatformTags(t *testing.T) {
+	foreign := "linux"
+	if runtime.GOOS == foreign {
+		foreign = "windows"
+	}
+	derived := buildTagsFromTestSources([]string{"//go:build " + foreign + " && symptom_feature\n\npackage fixture\n"})
+	tags := mergeTags(derived, []string{"amd64", "symptom_feature"})
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":           "module symptomfixture\n\ngo 1.26\n",
+		"platform_test.go": "//go:build symptom_feature\n\npackage fixture\nimport \"testing\"\nfunc TestPlatformWitness(t *testing.T) {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	argv := goTestArgvSelected([]string{"."}, tags, "^TestPlatformWitness$")
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("native symptom argv %v: %v\n%s", argv, err, output)
+	}
+	for _, tag := range []string{foreign, "amd64"} {
+		for _, actual := range tags {
+			if actual == tag {
+				t.Fatalf("platform constraint forced as feature tag: %s", tag)
+			}
+		}
+	}
+	custom := []string{"amd64.v3", "custom_linux", "linux.foo", "purego", "vulkan"}
+	if actual := mergeTags(custom, nil); !reflect.DeepEqual(actual, custom) {
+		t.Fatalf("custom feature tags changed: %v", actual)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	executed := false
+	for decoder.More() {
+		var event struct{ Action, Test string }
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Test == "TestPlatformWitness" && event.Action == "pass" {
+			executed = true
+		}
+	}
+	if !executed {
+		t.Fatal("custom-tagged symptom test did not execute")
+	}
 }
