@@ -128,6 +128,19 @@ func TestV41PlannerPrefixGate(t *testing.T) {
 			t.Fatal("an unqualified backend V4.1 planner built a radix tree it cannot safely serve")
 		}
 	})
+
+	// fak-private#3432: the strix3 serve runs V4.1 on Vulkan. Before the Vulkan witness
+	// (TestV41BackendPrefixSnapshotVulkan) qualified it, this planner built no tree, so
+	// every repeated-prefix request reported cached_tokens=0.
+	t.Run("witnessed Vulkan identity builds the serving tree", func(t *testing.T) {
+		vulkan := &v41GateBackend{Backend: cpuRef, name: "vulkan"}
+		if !inKernelPlannerPrefixReuseSupported(m, vulkan) {
+			t.Fatal("witnessed Vulkan backend was refused for the V4.1 planner route")
+		}
+		if p := NewInKernelPlanner(m, nil, "v41-vulkan", false, vulkan, false); p.tree == nil {
+			t.Fatal("a Vulkan V4.1 planner built no radix tree, so no prefix can be reused")
+		}
+	})
 }
 
 // v41CountingBackend is the CW-28 counting capability fixture. It wraps a real backend and

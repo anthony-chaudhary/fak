@@ -111,16 +111,20 @@ func (p *PrefixSnapshot) v41BackendSnapshotSupported() bool {
 	if p.v41DeviceIdentity.Name() == "" {
 		return false
 	}
-	return p.v41DeviceIdentity.Name() == v41QualifiedBackendName
+	return v41QualifiedBackend(p.v41DeviceIdentity.Name())
 }
 
-// v41QualifiedBackendName is the exact backend identity whose complete V4.1
-// continuation contract is witnessed in-tree (fak#13337). It is a single
-// explicit name rather than a capability inference: "owns a KVStore" is not
-// evidence that a backend owns the V4.1 shared/publication state, so admission
-// is by named qualification and every other backend stays refused until it is
-// witnessed on its own.
-const v41QualifiedBackendName = "cpu-ref"
+// v41QualifiedBackend admits the exact backend identities whose complete V4.1
+// continuation contract is witnessed (fak#13337). Admission is by explicit name
+// rather than capability inference: "owns a KVStore" is not evidence that a
+// backend owns the V4.1 shared/publication state, so every other backend stays
+// refused until it is witnessed on its own. cpu-ref is witnessed by
+// TestV41BackendPrefixSnapshot; vulkan by TestV41BackendPrefixSnapshotVulkan on
+// the physical device, whose resident KV mirror and bindings rebuild from the
+// restored host continuation state (fak-private#3432).
+func v41QualifiedBackend(name string) bool {
+	return name == "cpu-ref" || name == "vulkan"
+}
 
 // v41ForwardSnapshot owns a session's writable V4.1 continuation state. It
 // mirrors exactly the mutable continuation fields the arithmetic

@@ -1252,7 +1252,7 @@ func (c Config) InKernelBackendPrefixReuseSupported() bool {
 //   - a nil backend is refused -- "reuse on the device" without a device is not a
 //     statement about anything;
 //   - the backend-aware contract is currently witnessed for V4.1 only, on the
-//     single named identity v41QualifiedBackendName. Every other architecture
+//     named identities v41QualifiedBackend admits. Every other architecture
 //     keeps answering through InKernelBackendPrefixReuseSupported, so this leaf
 //     changes no existing admission;
 //   - the legacy Config.InKernelBackendPrefixReuseSupported blanket V4.1 refusal
@@ -1264,7 +1264,7 @@ func (c Config) InKernelBackendPrefixReuseSupportedFor(be compute.Backend) bool 
 		return false
 	}
 	if c.IsDeepSeekV41() {
-		return be.Name() == v41QualifiedBackendName
+		return v41QualifiedBackend(be.Name())
 	}
 	return c.InKernelBackendPrefixReuseSupported()
 }
