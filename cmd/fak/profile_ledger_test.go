@@ -113,8 +113,25 @@ func TestProfileLedgerContract(t *testing.T) {
 	t.Run("historical_partial", func(t *testing.T) {
 		in := `{"schema":"fak-profile-ledger-bundle/1","historical_modelbench":{"schema":"fak.strix-fullmodel-witness-receipt/1","cold_prefill_report":{"smoke_prefill_tokens":512,"smoke_prefill_ms":224628.245012,"smoke_prefill_kv_reused_tokens":0,"smoke_decode_ms":1005.655237,"smoke_prefill_backend_execution":{"status":"observed","counters":{"h2d_bytes":139251104832,"dispatch_submits":678264}}}}}`
 		r := buildProfileLedger([]byte(in))
-		if r.Status != "PARTIAL" || r.EvidenceKind != "historical_modelbench" || r.Decode.WallNS != nil || len(r.Counters) != 5 || *r.PrefillMS != 224628.245012 {
+		dispatches, h2dBytes := int64(678264), int64(139251104832)
+		wantCounters := []profileLedgerCounter{
+			{Phase: "prefill", Metric: "compute_dispatches", Unit: "count"},
+			{Phase: "prefill", Metric: "dispatch_submits", Unit: "count", Delta: &dispatches},
+			{Phase: "prefill", Metric: "h2d_bytes", Unit: "bytes", Delta: &h2dBytes},
+			{Phase: "prefill", Metric: "d2h_bytes", Unit: "bytes"},
+			{Phase: "prefill", Metric: "d2d_bytes", Unit: "bytes"},
+		}
+		if r.Status != "PARTIAL" || r.EvidenceKind != "historical_modelbench" || r.Decode.WallNS != nil || len(r.Counters) != len(wantCounters) || *r.PrefillMS != 224628.245012 {
 			t.Fatalf("historical report = %+v", r)
+		}
+		for i, want := range wantCounters {
+			got := r.Counters[i]
+			if got.Phase != want.Phase || got.Metric != want.Metric || got.Unit != want.Unit || (got.Delta == nil) != (want.Delta == nil) {
+				t.Fatalf("historical counter %d = %+v, want %+v", i, got, want)
+			}
+			if want.Delta != nil && *got.Delta != *want.Delta {
+				t.Fatalf("historical counter %q = %d, want %d", want.Metric, *got.Delta, *want.Delta)
+			}
 		}
 		bad := strings.Replace(in, `"schema":"fak-profile-ledger-bundle/1"`, `"schema":"fak-profile-ledger-bundle/1","client_wall_ns":-1`, 1)
 		r = buildProfileLedger([]byte(bad))

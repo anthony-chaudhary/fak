@@ -228,8 +228,9 @@ func TestV41RouterResidentBinding(t *testing.T) {
 			return picks, e
 		})
 		scratch.projectionRoute = st.projectionRoute
-		got, err := m.v41RouterPicksForStep(0, x, m.Cfg.HiddenSize, v41DefaultRouterConfig(), true, scratch, bias)
-		if err != nil || pc != 1 || rc != 1 || len(got) != 6 || got[0].weight < 3 || b.nativeInputs != 0 || b.outputReads != 1 || b.logitUploads != 1 {
+		cfg := v41DefaultRouterConfig()
+		got, err := m.v41RouterPicksForStep(0, x, m.Cfg.HiddenSize, cfg, true, scratch, bias)
+		if err != nil || pc != 1 || rc != 1 || len(got) != cfg.TopK || got[0].weight < 3 || b.nativeInputs != 0 || b.outputReads != 1 || b.logitUploads != 1 {
 			t.Fatalf("wrapper result=%v err=%v pc=%d rc=%d native=%d", got, err, pc, rc, b.nativeInputs)
 		}
 	})
@@ -242,7 +243,8 @@ func TestV41RouterResidentBinding(t *testing.T) {
 				scratch.projectionRoute = s.v41Forward.projectionRoute
 			}
 			before := b.probes
-			got, err := m.v41RouterPicksForStep(0, x, m.Cfg.HiddenSize, v41DefaultRouterConfig(), true, scratch, bias)
+			cfg := v41DefaultRouterConfig()
+			got, err := m.v41RouterPicksForStep(0, x, m.Cfg.HiddenSize, cfg, true, scratch, bias)
 			if b.probes-before != 1 || b.matmuls != 0 || b.nativeInputs != 0 {
 				t.Fatal("declined projection was invoked twice or selected native work")
 			}
@@ -250,7 +252,7 @@ func TestV41RouterResidentBinding(t *testing.T) {
 				if err == nil || got != nil || !s.halClosed || !s.hostFallbackObserved || b.routerCalls != 0 {
 					t.Fatal("DeviceOnly decline escaped")
 				}
-			} else if err != nil || len(got) != 6 || b.routerCalls != 1 || b.logitUploads != 1 {
+			} else if err != nil || len(got) != cfg.TopK || b.routerCalls != 1 || b.logitUploads != 1 {
 				t.Fatalf("decline continuation=%v err=%v", got, err)
 			}
 		}

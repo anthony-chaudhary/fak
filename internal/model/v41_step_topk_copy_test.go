@@ -116,7 +116,7 @@ func TestV41StepTopKCopyAllocations(t *testing.T) {
 	var result []int32
 	before := testing.AllocsPerRun(100, func() { result, _ = v41StepTopKCopyOracle(m, state, 3, plan, 1024) })
 	after := testing.AllocsPerRun(100, func() { result, _ = m.v41RoleStepIndex(state, 3, 1023, plan, nil, nil, 1024) })
-	if len(result) != 512 || before-after != 1 || after != 1 {
+	if len(result) != plan.TopKWidth || before-after != 1 || after != 1 {
 		t.Fatalf("allocations before=%g after=%g", before, after)
 	}
 	t.Logf("reader allocations %g -> %g, published 30-reader trace saves %g allocations and %d payload bytes/token", before, after, 30*(before-after), 30*512*4)

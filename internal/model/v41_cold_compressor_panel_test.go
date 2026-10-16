@@ -205,46 +205,63 @@ func TestV41ColdCompressorPanelSession(t *testing.T) {
 			}
 		}
 		before := v41CompressorTestPhase(t, m, "prefill")
-		got, want := s.Prefill([]int{1, 2, 3, 4, 5}), serial.Prefill([]int{1, 2, 3, 4, 5})
+		ids := []int{1, 2, 3, 4, 5}
+		ratio := m.Cfg.DeepSeekV41.CompressRatios[0]
+		if ratio != 2 {
+			t.Fatal("fixture must exercise ratio-two complete groups and odd tail")
+		}
+		leaves := len(v41ColdCompressorLeaves)
+		groups, tail := len(ids)/ratio, len(ids)%ratio
+		var expectedRows []int
+		var expectedOrder []string
+		for start := 0; start < len(ids); start += ratio {
+			rows := min(ratio, len(ids)-start)
+			for _, leaf := range v41ColdCompressorLeaves {
+				expectedRows = append(expectedRows, rows)
+				expectedOrder = append(expectedOrder, layerName(0, leaf))
+			}
+		}
+		logicalRows := len(ids) * leaves
+		uploadRows := groups*ratio + tail*leaves
+		got, want := s.Prefill(ids), serial.Prefill(ids)
 		if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), captureV41ForwardSnapshot(serial.v41Forward)) || !reflect.DeepEqual(s.v41Forward.indexKeyMemo, serial.v41Forward.indexKeyMemo) {
 			t.Fatal("paired cold Session changed logits or retained source/index/window/partial state")
 		}
-		if b.pairs != 2 || len(b.reads) != 2 || len(b.compressor) != 6 || len(scalar.compressor) != 10 || scalar.pairs != 0 {
+		if b.pairs != groups || len(b.reads) != groups || len(b.compressor) != len(expectedRows) || len(scalar.compressor) != logicalRows || scalar.pairs != 0 {
 			t.Fatalf("pair/scalar dispatch mismatch: pairs=%d reads=%d calls=%d scalar=%d", b.pairs, len(b.reads), len(b.compressor), len(scalar.compressor))
 		}
-		if norms != 2 || scalarNorms != 2 {
+		if norms != groups || scalarNorms != groups {
 			t.Fatalf("pool/norm boundary count=%d scalar=%d", norms, scalarNorms)
 		}
 		for i, op := range b.compressor {
-			if !strings.Contains(b.order[i], "layers.0.") {
+			if b.order[i] != expectedOrder[i] {
 				t.Fatalf("reader dispatched private compressor: %s", b.order[i])
 			}
-			wantRows := 2
-			if i >= 4 {
-				wantRows = 1
-			}
-			if op.rows != wantRows || op.batch != (wantRows == 2) {
+			wantRows := expectedRows[i]
+			if op.rows != wantRows || op.batch != (wantRows == ratio) {
 				t.Fatal("complete pairs or odd tail changed dispatch shape")
 			}
-			if i < 4 && i%2 == 1 && op.input != b.compressor[i-1].input {
+			if i < groups*leaves && i%leaves != 0 && op.input != b.compressor[i-1].input {
 				t.Fatal("paired leaves did not share their activation upload")
 			}
 		}
 		for _, read := range b.reads {
-			if len(read) != 2 {
+			if len(read) != leaves {
 				t.Fatal("successful pair did not use one two-output read")
 			}
 		}
 		delta := v41DenseTestDelta(v41CompressorTestPhase(t, m, "prefill"), before)
-		if delta["compressor_projection_device_calls"] != 6 || delta["compressor_projection_device_rows"] != 10 ||
-			delta["compressor_projection_activation_upload_bytes"] != float64(6*m.Cfg.HiddenSize*4) || delta["compressor_projection_readback_bytes"] != float64(10*m.Cfg.HeadDim*4) || delta["compressor_projection_host_calls"] != 0 {
+		if delta["compressor_projection_device_calls"] != float64(len(expectedRows)) || delta["compressor_projection_device_rows"] != float64(logicalRows) ||
+			delta["compressor_projection_activation_upload_bytes"] != float64(uploadRows*m.Cfg.HiddenSize*4) || delta["compressor_projection_readback_bytes"] != float64(logicalRows*m.Cfg.HeadDim*4) || delta["compressor_projection_host_calls"] != 0 {
 			t.Fatalf("compressor pair accounting changed: %v", delta)
 		}
+		stepRows := ((len(ids)+1)/ratio - len(ids)/ratio) * ratio
+		wantStepCalls := len(expectedRows) + stepRows*leaves
 		got, want = s.Step(6), serial.Step(6)
 		if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), captureV41ForwardSnapshot(serial.v41Forward)) || !reflect.DeepEqual(s.v41Forward.indexKeyMemo, serial.v41Forward.indexKeyMemo) {
 			t.Fatal("Prefill-to-Step continuation changed")
 		}
-		if b.pairs != 2 || len(b.reads) != 2 || len(b.compressor) != 10 {
+		if b.pairs != groups || len(b.reads) != groups || len(b.compressor) != wantStepCalls {
 			t.Fatal("Step no longer uses its historical complete-group scalar projections")
 		}
 		b.assertNoTransients(t)
@@ -279,12 +296,14 @@ func TestV41ColdCompressorPanelSession(t *testing.T) {
 					inputs[row][i] = float32((i+row*3)%17-8) * .02
 				}
 			}
+			wantCalls := len(inputs) * len(v41ColdCompressorLeaves) // cold invocation
+			wantCalls += len(inputs) * len(v41ColdCompressorLeaves) // scalar reference invocation
 			got, err := m.v41ColdCompressedRows(0, 2, nil, inputs, true, st, scratch)
 			if err != nil {
 				t.Fatal(err)
 			}
 			want, err := m.v41CompressedRowsWithDeviceOps(0, 2, nil, inputs, st.denseProjection(), st.compressorNorm, st.gatherOps.compressorPoolFunc())
-			if err != nil || !reflect.DeepEqual(got, want) || b.pairs != 0 || len(b.reads) != 0 || len(b.compressor) != 8 {
+			if err != nil || !reflect.DeepEqual(got, want) || b.pairs != 0 || len(b.reads) != 0 || len(b.compressor) != wantCalls {
 				t.Fatalf("unqualified packed pair did not retain canonical scalar fallback: %v", err)
 			}
 		})
@@ -349,16 +368,18 @@ func TestV41ColdCompressorPanelSession(t *testing.T) {
 					return nil, v41ProjectionDeclined, nil
 				})
 			}
-			s.Prefill([]int{1, 2, 3, 4, 5})
+			ids := []int{1, 2, 3, 4, 5}
+			wantCalls := len(ids) * len(v41ColdCompressorLeaves)
+			s.Prefill(ids)
 			if b.pairs != 0 || len(b.reads) != 0 {
 				t.Fatal("ordinary callback inherited native authority")
 			}
 			if mode == "ordinary" || mode == "wrapped" {
-				if len(calls) != 10 {
+				if len(calls) != wantCalls {
 					t.Fatalf("scalar callback count=%d", len(calls))
 				}
 				for i, leaf := range calls {
-					if leaf != v41ColdCompressorLeaves[i%2] {
+					if leaf != v41ColdCompressorLeaves[i%len(v41ColdCompressorLeaves)] {
 						t.Fatal("scalar callback order changed")
 					}
 				}

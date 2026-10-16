@@ -41,6 +41,7 @@ type v41ColdSharedRecorder struct {
 	batchedRows                                 []int
 	batchedDtypes                               []compute.Dtype
 	sharedBatchedRows                           []int
+	sharedBatchedRoles                          []int
 	panel, rejectPanelDtype, rejectPanelRows    bool
 	rejectedPanelDtype                          compute.Dtype
 	rejectedPanelRowCount                       int
@@ -143,8 +144,9 @@ func (b *v41ColdSharedRecorder) MatMul(w, x compute.Tensor) compute.Tensor {
 func (b *v41ColdSharedRecorder) BatchedMatMul(w, x compute.Tensor, rows int) compute.Tensor {
 	b.batchedRows = append(b.batchedRows, rows)
 	b.batchedDtypes = append(b.batchedDtypes, w.Dtype)
-	if _, ok := b.sharedWeights[w.Buf()]; ok {
+	if role, ok := b.sharedWeights[w.Buf()]; ok {
 		b.sharedBatchedRows = append(b.sharedBatchedRows, rows)
+		b.sharedBatchedRoles = append(b.sharedBatchedRoles, role)
 	}
 	y := b.Backend.BatchedMatMul(w, x, rows)
 	return b.tensor(y.Shape, b.Backend.Read(y))
@@ -616,9 +618,23 @@ func TestV41ColdSharedResidentPrefillBridge(t *testing.T) {
 	}
 }
 
+// The test oracle fixes the promised chunk boundary independently of production.
+// Roles follow the fixture's w1 (gate), w3 (up), w2 (down) registration.
+func v41ExpectedSharedPanelSchedule(rows int) (counts, roles []int) {
+	const chunkRows = 64
+	for start := 0; start < rows; start += chunkRows {
+		for _, role := range []int{0, 1, 2} {
+			counts = append(counts, min(chunkRows, rows-start))
+			roles = append(roles, role)
+		}
+	}
+	return counts, roles
+}
+
 // fak-test:runtime medium est=4s lane=default
 func TestV41ColdSharedResidentPanelChunksAndParity(t *testing.T) {
 	const rows = 65
+	wantRows, wantRoles := v41ExpectedSharedPanelSchedule(rows)
 	orderedSites := []uint32{
 		compute.V41BF16PublishSharedExpertProjection,
 		compute.V41BF16PublishSharedExpertProjection,
@@ -663,10 +679,14 @@ func TestV41ColdSharedResidentPanelChunksAndParity(t *testing.T) {
 					t.Fatalf("row %d moved or changed", row)
 				}
 			}
-			if !reflect.DeepEqual(backend.sharedBatchedRows, []int{64, 64, 64, 1, 1, 1}) {
+			if !reflect.DeepEqual(backend.sharedBatchedRows, wantRows) || !reflect.DeepEqual(backend.sharedBatchedRoles, wantRoles) {
 				t.Fatalf("shared batch rows=%v", backend.sharedBatchedRows)
 			}
-			if !reflect.DeepEqual(backend.batchedDtypes, []compute.Dtype{dtype, dtype, dtype, dtype, dtype, dtype}) || backend.matmuls != 0 {
+			wantDtypes := make([]compute.Dtype, len(wantRows))
+			for i := range wantDtypes {
+				wantDtypes[i] = dtype
+			}
+			if !reflect.DeepEqual(backend.batchedDtypes, wantDtypes) || backend.matmuls != 0 {
 				t.Fatalf("batch dtypes=%v scalar matmuls=%d", backend.batchedDtypes, backend.matmuls)
 			}
 			if backend.activationUploads != 2 || backend.deferredFences != 2 || backend.dataReads != 2 {
@@ -993,10 +1013,11 @@ func TestV41ColdSharedResidentPanelPrefillBridge(t *testing.T) {
 	for i := range ids {
 		ids[i] = 1 + i%3
 	}
+	wantRows, wantRoles := v41ExpectedSharedPanelSchedule(len(ids))
 	got := s.Prefill(ids)
 	want := lastLogits(m.Forward(ids))
 	v41GroupedParity(t, got, want, 1e-4)
-	if !reflect.DeepEqual(b.sharedBatchedRows, []int{64, 64, 64, 1, 1, 1}) || len(b.sharedReads) != 0 {
+	if !reflect.DeepEqual(b.sharedBatchedRows, wantRows) || !reflect.DeepEqual(b.sharedBatchedRoles, wantRoles) || len(b.sharedReads) != 0 {
 		t.Fatalf("prefill batches=%v scalar reads=%v", b.sharedBatchedRows, b.sharedReads)
 	}
 	beforeBatches := len(b.sharedBatchedRows)

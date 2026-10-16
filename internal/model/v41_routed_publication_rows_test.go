@@ -53,10 +53,11 @@ func TestV41RoutedLayerPublicationRows(t *testing.T) {
 				}
 			}
 
+			const allocationPicks = 6
 			var retained []compute.Tensor
 			measure := func(allocate func(int, bool, bool) []compute.Tensor) float64 {
 				return testing.AllocsPerRun(100, func() {
-					retained = allocate(6, mode.useID, mode.useFused)
+					retained = allocate(allocationPicks, mode.useID, mode.useFused)
 				})
 			}
 			old, current := measure(legacy), measure(v41RoutedLayerPublicationRows)
@@ -66,7 +67,7 @@ func TestV41RoutedLayerPublicationRows(t *testing.T) {
 				if retained != nil {
 					t.Fatal("allocation witness retained an unused table")
 				}
-			} else if len(retained) != 6 || cap(retained) != 6 || !reflect.DeepEqual(retained, legacy(6, false, false)) {
+			} else if len(retained) != allocationPicks || cap(retained) != allocationPicks || !reflect.DeepEqual(retained, legacy(allocationPicks, false, false)) {
 				t.Fatal("allocation witness did not retain six zeroed publication rows")
 			}
 			t.Logf("top-6 publication table allocs/op: unconditional control=%g conditional=%g", old, current)

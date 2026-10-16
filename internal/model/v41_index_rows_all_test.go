@@ -115,12 +115,12 @@ func TestV41IndexRowsAllParity(t *testing.T) {
 func TestV41IndexRowsAllAllocations(t *testing.T) {
 	scores := make([]float32, 512)
 	for i := range scores {
-		scores[i] = float32(512 - i)
+		scores[i] = float32(len(scores) - i)
 	}
 	var out []int32
-	before := testing.AllocsPerRun(100, func() { out, _ = v41IndexRowsAllSortedOracle(scores, 512, 512, 0, nil) })
-	after := testing.AllocsPerRun(100, func() { out, _ = V41SelectIndexRows(scores, 512, 512, 0, nil) })
-	if len(out) != 512 || before-after != 1 {
+	before := testing.AllocsPerRun(100, func() { out, _ = v41IndexRowsAllSortedOracle(scores, len(scores), len(scores), 0, nil) })
+	after := testing.AllocsPerRun(100, func() { out, _ = V41SelectIndexRows(scores, len(scores), len(scores), 0, nil) })
+	if len(out) != len(scores) || before-after != 1 {
 		t.Fatalf("sorted=%g direct=%g", before, after)
 	}
 	t.Logf("all-selected allocations sorted=%g direct=%g", before, after)

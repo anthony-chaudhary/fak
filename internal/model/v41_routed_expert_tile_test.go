@@ -237,7 +237,7 @@ func TestV41ExpertGateUp32Consumer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, b := newSession(tc.grid, tc.down, tc.decline)
 			got, outcome, err := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
-			if outcome != v41RoutedExpertHandled || err != nil || len(got) != 32 {
+			if outcome != v41RoutedExpertHandled || err != nil || len(got) != len(inputs) {
 				t.Fatalf("%v/%v rows=%d", outcome, err, len(got))
 			}
 			for row := range got {
@@ -256,7 +256,7 @@ func TestV41ExpertGateUp32Consumer(t *testing.T) {
 				if !reflect.DeepEqual(b.downRows, []int{8, 8, 8, 8}) || b.publishes != 32 || len(b.matmulInputs) != 0 || b.gathers != cb.gathers {
 					t.Fatalf("down schedule changed: rows=%v publishes=%d scalar=%d gathers=%d/%d", b.downRows, b.publishes, len(b.matmulInputs), b.gathers, cb.gathers)
 				}
-			} else if len(b.downRows) != 0 || len(b.matmulInputs) != 32 || b.gridChecks != 0 {
+			} else if len(b.downRows) != 0 || len(b.matmulInputs) != len(inputs) || b.gridChecks != 0 {
 				t.Fatal("missing Q3 capability enabled wide route")
 			}
 			if b.fences != 1 || len(b.pending) != 0 || len(b.ownedTiles) != 0 {

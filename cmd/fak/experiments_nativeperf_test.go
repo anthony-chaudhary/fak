@@ -202,7 +202,11 @@ func TestExperimentsNativePerformanceDecisionReaderBoundsAndUnknownTail(t *testi
 	latestRevision := "synthetic-candidate" + strconv.Itoa(rowCount-1)
 	var defaults nativeperfCLIResponse
 	nativeperfCLIRun(t, 0, &defaults, "decisions", "--ledger", ledger, "--json")
-	if len(defaults.Decisions) != 20 || defaults.Decisions[0].DefaultStateReadback.Revision != "synthetic-candidate3" || defaults.Decisions[19].DefaultStateReadback.Revision != latestRevision {
+	if defaults.RowLimit != 20 {
+		t.Fatalf("default decision row limit = %d, want 20", defaults.RowLimit)
+	}
+	firstRevision := "synthetic-candidate" + strconv.Itoa(rowCount-defaults.RowLimit)
+	if len(defaults.Decisions) != defaults.RowLimit || defaults.Decisions[0].DefaultStateReadback.Revision != firstRevision || defaults.Decisions[defaults.RowLimit-1].DefaultStateReadback.Revision != latestRevision {
 		t.Fatalf("default reader hid the latest decisions or reordered the retained tail: returned=%d rows_read=%d", defaults.Returned, defaults.RowsRead)
 	}
 	var countBound nativeperfCLIResponse

@@ -116,6 +116,7 @@ func TestV41ExpertParallelRootSumObservation(t *testing.T) {
 				r := full
 				r.picks, r.digests, r.sum = full.picks[:32], full.digests[:32], observed
 				rows := v41EPPanelTestOwner(r, rank, all[:32])
+				wantRows := len(r.picks)
 				got, err := c.reducePanel(rows, r)
 				if !healthy {
 					stats := v41EPPanelTestStats(c)
@@ -157,7 +158,7 @@ func TestV41ExpertParallelRootSumObservation(t *testing.T) {
 					}
 					return nil
 				}
-				if len(got) != 32 {
+				if len(got) != wantRows {
 					return errors.New("first observed panel lost rows")
 				}
 				if err := check(got, 0); err != nil {

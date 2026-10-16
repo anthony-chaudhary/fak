@@ -18,6 +18,7 @@ type v41PairedRoPERecorder struct {
 	groupFault                         string
 	shared                             []float32
 	owned                              map[compute.Buffer]int
+	callOwners                         []compute.Buffer
 }
 
 func newV41PairedRoPERecorder() *v41PairedRoPERecorder {
@@ -58,6 +59,8 @@ func (b *v41PairedRoPERecorder) V41TailRoPEQK(q, kv, table compute.Tensor, heads
 	b.calls = append(b.calls, call)
 	qo := compute.NewF32(b, []int{heads, headDim}, append([]float32(nil), call.qOut...))
 	ko := compute.NewF32(b, []int{headDim}, append([]float32(nil), call.kvOut...))
+	// Enumerate the independent operation roles, not the allocation ledger.
+	b.callOwners = []compute.Buffer{q.Buf(), kv.Buf(), table.Buf(), qo.Buf(), ko.Buf()}
 	b.owned[qo.Buf()], b.owned[ko.Buf()] = 0, 0
 	b.transients[qo.Buf()], b.transients[ko.Buf()] = true, true
 	b.outputs[qo.Buf()], b.outputs[ko.Buf()] = "query", "kv"
@@ -172,7 +175,17 @@ func TestV41TailRoPEPairedReadback(t *testing.T) {
 					t.Fatalf("selected call/fence contract: paired=%d reads=%d regions=%d bytes=%d probes=%d calls=%d live=%d", b.paired, b.readCount, b.regions, b.pairBytes, b.probes, len(b.calls), len(b.transients))
 				}
 				s.Close()
-				if len(b.owned) != 5 || len(b.tables) != 0 {
+				expectedOwners := make(map[compute.Buffer]bool, len(b.callOwners))
+				for _, owner := range b.callOwners {
+					if expectedOwners[owner] {
+						t.Fatal("paired operation roles alias the same owner")
+					}
+					expectedOwners[owner] = true
+					if _, ok := b.owned[owner]; !ok {
+						t.Fatal("paired operation role missing from owned allocations")
+					}
+				}
+				if len(b.owned) != len(expectedOwners) || len(b.tables) != 0 {
 					t.Fatalf("owned allocations=%d tables=%d", len(b.owned), len(b.tables))
 				}
 				for _, frees := range b.owned {

@@ -126,20 +126,21 @@ func TestV41DownPanelRowConsumer(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			s, b := makeSession(true, -1)
 			failure := &compute.BackendError{Backend: "test", Site: "down panel row", Err: errors.New("selected failure")}
-			b.failAt, b.failure = 12, failure
+			const faultCall = 12
+			b.failAt, b.failure = faultCall, failure
 			if kind == "output-alias" {
 				b.failAt = 0
-				b.aliasAt = 12
+				b.aliasAt = faultCall
 			}
 			if kind == "status-alias" {
 				b.failAt = 0
-				b.statusAliasAt = 12
+				b.statusAliasAt = faultCall
 			}
 			if kind == "earlier-down" {
 				b.publishFaultAt = map[int]bool{1: true}
 			}
 			out, o, e := s.v41RoutedExpertCohort(0, "ffn.experts.0", inputs, weights)
-			if out != nil || o != v41RoutedExpertError || e == nil || !s.BackendSessionClosed() || len(b.directDown) != 12 || b.ordinaryDown != 0 {
+			if out != nil || o != v41RoutedExpertError || e == nil || !s.BackendSessionClosed() || len(b.directDown) != faultCall || b.ordinaryDown != 0 {
 				t.Fatalf("selected failure replay/result %v/%v", o, e)
 			}
 			if kind == "partial" && !errors.Is(e, failure) {

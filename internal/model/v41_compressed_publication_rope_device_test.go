@@ -881,7 +881,12 @@ func TestV41CompressedPublicationRoPETableCache(t *testing.T) {
 		// Replay only the published compressor-finalization call sequence, not
 		// model execution: ratio-two sources emit at odd positions and pass
 		// groupLo; ratio-one emits every position. All use compressed theta.
-		for pos := 0; pos < 64; pos++ {
+		const positions = 64
+		wantCalls := 0
+		for _, layer := range v41PublishedKVSourceLayerIDs {
+			wantCalls += positions / v41CompressRatioAt(s.M.Cfg, layer)
+		}
+		for pos := 0; pos < positions; pos++ {
 			for _, layer := range v41PublishedKVSourceLayerIDs {
 				ratio := v41CompressRatioAt(s.M.Cfg, layer)
 				if (pos+1)%ratio != 0 {
@@ -895,7 +900,7 @@ func TestV41CompressedPublicationRoPETableCache(t *testing.T) {
 				}
 			}
 		}
-		if len(b.calls) != 160 || b.tableUploads != 64 || len(b.tables) != 2 || b.tablePeak != 3 {
+		if len(b.calls) != wantCalls || b.tableUploads != positions || len(b.tables) != 2 || b.tablePeak != 3 {
 			t.Fatalf("calls=%d table uploads=%d live=%d peak=%d", len(b.calls), b.tableUploads, len(b.tables), b.tablePeak)
 		}
 		v41PublicationRoPECensus(t, s, b, false)

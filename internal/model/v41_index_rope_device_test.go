@@ -676,7 +676,8 @@ func TestV41IndexRoPETableCache(t *testing.T) {
 		s, b, rotate := newOwner()
 		// Replay the published same-position query sources, not a full model run.
 		sources := v41PublishedIndexSourceLayerIDs
-		for pos := 0; pos < 64; pos++ {
+		const positions = 64
+		for pos := 0; pos < positions; pos++ {
 			for _, layer := range sources {
 				if err := call(s, rotate, layer, pos); err != nil {
 					t.Fatal(err)
@@ -686,7 +687,7 @@ func TestV41IndexRoPETableCache(t *testing.T) {
 				}
 			}
 		}
-		if len(b.calls) != 512 || b.tableUploads != 64 || len(b.tables) != 1 || b.tablePeak != 2 {
+		if len(b.calls) != positions*len(sources) || b.tableUploads != positions || len(b.tables) != 1 || b.tablePeak != 2 {
 			t.Fatalf("calls=%d uploads=%d live=%d peak=%d", len(b.calls), b.tableUploads, len(b.tables), b.tablePeak)
 		}
 		v41IndexRoPECheckCachedTable(t, s, b)

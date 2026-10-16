@@ -203,8 +203,9 @@ func TestV41AttentionNormColdPanel(t *testing.T) {
 	})
 	t.Run("bounded rows", func(t *testing.T) {
 		m, s, b := fixture(t)
-		got, handled, err := panel(m, s, 65)
-		if err != nil || !handled || len(got) != 65 || !reflect.DeepEqual(b.shapes, [][]int{{64, m.Cfg.HiddenSize}, {1, m.Cfg.HiddenSize}}) || b.reads != 2 || b.publications != 65 || len(b.transient) != 0 || b.publicationBeforeNormFree {
+		const rows = 65
+		got, handled, err := panel(m, s, rows)
+		if err != nil || !handled || len(got) != rows || !reflect.DeepEqual(b.shapes, [][]int{{64, m.Cfg.HiddenSize}, {1, m.Cfg.HiddenSize}}) || b.reads != 2 || b.publications != rows || len(b.transient) != 0 || b.publicationBeforeNormFree {
 			t.Fatalf("panel shapes=%v reads=%d publications=%d live=%d handled=%t err=%v", b.shapes, b.reads, b.publications, len(b.transient), handled, err)
 		}
 		st := s.v41State()

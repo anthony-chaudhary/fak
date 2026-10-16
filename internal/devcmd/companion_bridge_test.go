@@ -325,6 +325,8 @@ func TestCompanionBridge_Live(t *testing.T) {
 	}
 }
 
+const companionProbeOutputLimit = 300
+
 var companionProbeSlot = make(chan struct{}, 1)
 
 func companionProbeEnv(tmp string) []string {
@@ -343,7 +345,7 @@ func (w *companionProbeOutput) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	n := len(p)
-	if room := 300 - len(w.data); room > 0 {
+	if room := companionProbeOutputLimit - len(w.data); room > 0 {
 		w.data = append(w.data, p[:min(room, n)]...)
 	}
 	return n, nil
@@ -429,7 +431,7 @@ func companionProbeFixture(mode, address, ready string) error {
 func TestCompanionProbeBounds(t *testing.T) {
 	// Re-exec the native test binary; this regression never launches a compiler.
 	var out companionProbeOutput
-	if n, err := out.Write([]byte(strings.Repeat("x", 4096))); n != 4096 || err != nil || len(out.data) != 300 {
+	if n, err := out.Write([]byte(strings.Repeat("x", 4096))); n != 4096 || err != nil || len(out.data) != companionProbeOutputLimit {
 		t.Fatalf("bounded writer: n=%d err=%v bytes=%d", n, err, len(out.data))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -444,7 +446,7 @@ func TestCompanionProbeBounds(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("probe cancellation took %s", elapsed)
 	}
-	if len(detail) != 300 {
+	if len(detail) != companionProbeOutputLimit {
 		t.Fatalf("probe child did not exercise capped output: %d bytes", len(detail))
 	}
 	if cmd.ProcessState == nil {
