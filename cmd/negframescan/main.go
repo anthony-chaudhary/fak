@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -13,12 +14,10 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
-func main() {
-	root, _ := os.Getwd()
-	paths := os.Args[1:]
+func run(root string, paths []string, stdout io.Writer) int {
 	if len(paths) == 0 {
 		paths = negframe.ResolveTargets(root)
-		fmt.Printf("# default corpus: %d file(s)\n", len(paths))
+		fmt.Fprintf(stdout, "# default corpus: %d file(s)\n", len(paths))
 	}
 	mech, judge := 0, 0
 	for _, rel := range paths {
@@ -27,16 +26,22 @@ func main() {
 		if d.Negatives() == 0 {
 			continue
 		}
-		fmt.Printf("\n== %s  (mechanical=%d judgement=%d, %d prose lines) ==\n", rel, d.Mechanical, d.Judgement, d.Sentences)
+		fmt.Fprintf(stdout, "\n== %s  (mechanical=%d judgement=%d, %d prose lines) ==\n", rel, d.Mechanical, d.Judgement, d.Sentences)
 		for _, f := range d.Findings {
 			if f.Mechanical() {
 				mech++
-				fmt.Printf("  L%-4d [%s] MECH\n     - %s\n     + %s\n", f.Line, f.Category, f.Text, f.Suggest)
+				fmt.Fprintf(stdout, "  L%-4d [%s] MECH\n     - %s\n     + %s\n", f.Line, f.Category, f.Text, f.Suggest)
 			} else {
 				judge++
-				fmt.Printf("  L%-4d [%s] soft: %s\n     %s\n", f.Line, f.Category, f.Hint, f.Text)
+				fmt.Fprintf(stdout, "  L%-4d [%s] soft: %s\n     %s\n", f.Line, f.Category, f.Hint, f.Text)
 			}
 		}
 	}
-	fmt.Printf("\n# TOTAL mechanical=%d judgement=%d across %d path(s)\n", mech, judge, len(paths))
+	fmt.Fprintf(stdout, "\n# TOTAL mechanical=%d judgement=%d across %d path(s)\n", mech, judge, len(paths))
+	return 0
+}
+
+func main() {
+	root, _ := os.Getwd()
+	os.Exit(run(root, os.Args[1:], os.Stdout))
 }
