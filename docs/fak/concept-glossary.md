@@ -1336,3 +1336,10 @@ serveGGUFMemoryPlanForArm derives classed weight, scratch and context memory dem
 serveFullPlanFitTooBig recognizes a typed compute FitError whose verdict is FitTooBig, enabling the activated-expert fallback only after a full-residency capacity refusal.
 
 **Distinct from:** This predicate recognizes an existing typed refusal and produces no memory plan; serveGGUFMemoryPlanForArm produces the demands that a fit guard judges.
+
+
+### VulkanMemoryGuardSnapshot
+
+Bounded current-state projection of the Vulkan explicit-memory reservation cap: configured limit, live and successful-allocation peak bytes, refusal count, and configuration/accounting validity across every memory heap.
+
+**Distinct from:** Observes the allocator reservation ledger; it is neither an admission decision nor readiness, physical residency, driver-overhead accounting, or proof of target cgroup fit. C ABI, Go value and debug label project this same state.

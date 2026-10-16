@@ -4420,6 +4420,16 @@
           "category": "incidental",
           "reason": "Exact helper-digest linker pin referenced by the build descriptor and checked by existing handoff code; identity data rather than a separate guard. The digest alone does not establish live supervision or artifact qualification.",
           "token": "v41EPOwnerGuardBinarySHA256"
+        },
+        {
+          "category": "incidental",
+          "reason": "C ABI serialization alias of positioned VulkanMemoryGuardSnapshot (vulkan-memory-reservation-snapshot); projects the same allocator ledger and introduces no independent guard decision.",
+          "token": "fvk_memory_guard_snapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Debug serialization label for positioned VulkanMemoryGuardSnapshot (vulkan-memory-reservation-snapshot); projects the same allocator ledger and introduces no independent guard decision.",
+          "token": "memory_guard"
         }
       ],
       "exclude": [
@@ -4592,6 +4602,7 @@
         "formatGuardCompactionWitness",
         "fullAggregates",
         "full_tree_gate_retry",
+        "fvk_memory_guard_snapshot",
         "gateCommentQuality",
         "gateDir",
         "gateGitHygieneBypass",
@@ -4830,6 +4841,7 @@
         "mcp__fak_guard__sandbox_reset",
         "mcp__fak_guard__sandbox_state",
         "mcp__fak_guard__sandbox_write",
+        "memory_guard",
         "nativeAdmissionAggregate",
         "nativeAdmissionPolicyForBudget",
         "nativeReasonMessageRoleUnsupported",

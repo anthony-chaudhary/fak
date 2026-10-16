@@ -22,6 +22,7 @@
 // The default `go build` excludes this; only `-tags vulkan` links it.
 
 #include "vulkan_backend.h"
+#include "vulkan_memory_guard.h"
 
 #include <vulkan/vulkan.h>
 
@@ -170,6 +171,41 @@ bool environmentFlagEnabled(const char* name) {
 const bool g_preferCachedTransferStage =
     environmentFlagEnabled("FAK_VULKAN_STAGE_HOST_CACHED");
 
+VulkanMemoryGuard g_memoryGuard;
+
+bool configureMemoryGuard() {
+    return g_memoryGuard.configure(std::getenv("FAK_VULKAN_MEMORY_LIMIT_BYTES"));
+}
+
+VkResult allocateGuardedMemory(const VkMemoryAllocateInfo* info, VkDeviceMemory* memory) {
+    if (!configureMemoryGuard() || !g_memoryGuard.reserve(info->allocationSize)) {
+        *memory = VK_NULL_HANDLE;
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    VkResult result = vkAllocateMemory(g_dev, info, nullptr, memory);
+    if (result != VK_SUCCESS) {
+        g_memoryGuard.release(info->allocationSize);
+        *memory = VK_NULL_HANDLE;
+    } else {
+        g_memoryGuard.committed();
+    }
+    return result;
+}
+
+void freeGuardedMemory(VkDeviceMemory memory, VkDeviceSize bytes) {
+    vkFreeMemory(g_dev, memory, nullptr);
+    g_memoryGuard.release(bytes);
+}
+
+void reportMemoryGuard() {
+    if (g_memoryGuard.configured && g_memoryGuard.configurationValid) {
+        fprintf(stderr, "fak-vulkan-memory-guard: {\"scope\":\"all_vk_device_memory\",\"limit_bytes\":%llu,\"live_bytes\":%llu,\"peak_bytes\":%llu,\"refused_allocations\":%llu,\"configured\":true,\"configuration_valid\":true,\"accounting_valid\":%s}\n",
+            (unsigned long long)g_memoryGuard.limit, (unsigned long long)g_memoryGuard.live,
+            (unsigned long long)g_memoryGuard.peak, (unsigned long long)g_memoryGuard.refused,
+            g_memoryGuard.accountingValid ? "true" : "false");
+    }
+}
+
 bool memoryTypeUsesDeviceLocalHeap(uint32_t memoryType) {
     if (memoryType >= g_memprops.memoryTypeCount) return false;
     uint32_t heap = g_memprops.memoryTypes[memoryType].heapIndex;
@@ -269,7 +305,7 @@ void releaseWeightArena() {
     for (WeightArenaBlock& block : g_weightArena) {
         if (block.mem) {
             untrackDeviceAllocation(block.capacity, block.allocationDeviceLocal);
-            vkFreeMemory(g_dev, block.mem, nullptr);
+            freeGuardedMemory(block.mem, block.capacity);
         }
     }
     g_weightArena.clear();
@@ -696,7 +732,7 @@ void destroyBuffer(Buffer* b) {
     } else if (b->mem) {
         untrackDeviceAllocation(b->allocationBytes, b->allocationDeviceLocal);
         if (b->ownsMapping) vkUnmapMemory(g_dev, b->mem);
-        vkFreeMemory(g_dev, b->mem, nullptr);
+        freeGuardedMemory(b->mem, b->allocationBytes);
     }
     delete b;
     releaseWeightArena();
@@ -812,7 +848,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
                 VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
                 ai.allocationSize = req.size;
                 ai.memoryTypeIndex = index;
-                return vkAllocateMemory(g_dev, &ai, nullptr, candidate);
+                return allocateGuardedMemory(&ai, candidate);
             }, out, selectedType, &allocationAttempted);
     };
 
@@ -858,7 +894,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     VkResult br = vkBindBufferMemory(g_dev, b->buf, b->mem, 0);
     if (br != VK_SUCCESS) {
         fprintf(stderr, "fak-vulkan: vkBindBufferMemory(%zu bytes) failed VkResult=%d\n", bytes, (int)br);
-        vkFreeMemory(g_dev, b->mem, nullptr);
+        freeGuardedMemory(b->mem, req.size);
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
         return nullptr;
@@ -1002,7 +1038,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
             VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
             ai.allocationSize = blockBytes;
             ai.memoryTypeIndex = index;
-            return vkAllocateMemory(g_dev, &ai, nullptr, candidate);
+            return allocateGuardedMemory(&ai, candidate);
         };
         // Preserve the UMA first choice. Heap eligibility uses the entire block;
         // retry only allocation pressure, with fresh private output per attempt.
@@ -1027,7 +1063,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     }
     VkResult br = vkBindBufferMemory(g_dev, b->buf, memory, 0);
     if (br != VK_SUCCESS) {
-        vkFreeMemory(g_dev, memory, nullptr);
+        freeGuardedMemory(memory, blockBytes);
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
         return nullptr;
@@ -3527,6 +3563,18 @@ extern "C" int fvk_debug_memory_type_selection(uint32_t typeBits, uint32_t want,
 // ---- C ABI ----------------------------------------------------------------------
 extern "C" {
 
+void fvk_memory_guard_snapshot(uint64_t* limit, uint64_t* live, uint64_t* peak,
+                               uint64_t* refused, int* configured, int* configuration_valid,
+                               int* accounting_valid) {
+    *limit = g_memoryGuard.limit;
+    *live = g_memoryGuard.live;
+    *peak = g_memoryGuard.peak;
+    *refused = g_memoryGuard.refused;
+    *configured = g_memoryGuard.configured;
+    *configuration_valid = g_memoryGuard.configurationValid;
+    *accounting_valid = g_memoryGuard.accountingValid;
+}
+
 int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
                         uint32_t* device_id, uint32_t* driver_version,
                         uint32_t* api_version) {
@@ -3572,6 +3620,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // A re-init is not a device teardown and cannot establish quiescence. Keep
     // the poisoned context and its loaded capability bound until process exit.
     if (g_v41SubmissionPendingFailure) return 9;
+    if (!configureMemoryGuard()) {
+        fprintf(stderr, "fak-vulkan: invalid FAK_VULKAN_MEMORY_LIMIT_BYTES (expected 1..INT64_MAX)\n");
+        return 10;
+    }
+    reportMemoryGuard();
     discardIdleBatchCommand(); // release against the old owning device/pool before re-init
     beginMemoryDeviceGeneration();
     g_have_v41_tail_rope_qk = 0;

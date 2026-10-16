@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **664** (clarity 0 + coverage 664) |
-| **Crystal-clear concepts (and climbing)** | **1250** crystal of 3049 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3136 / 3800** (82.5% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1251** crystal of 3050 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3137 / 3801** (82.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **88** of 4306 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **88** of 4309 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3049 concepts - score 88.6/100 (grade B) - disambiguation-debt 664
+concept-disambiguation chart - 3050 concepts - score 88.6/100 (grade B) - disambiguation-debt 664
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1250
+  * crystal       ###################......... 1251
   o defined       ############################ 1799
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
   gateway-engine   **********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 70 crystal)
-  guard-gate       ********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (454 concept(s); 212 crystal)
+  guard-gate       *********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (455 concept(s); 213 crystal)
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             ***************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (415 concept(s); 171 crystal)
@@ -66,7 +66,7 @@ coverage by family (positioned / discovered):
   session-runtime  ######################...... 288/359
   cache            #######################..... 341/411
   gateway-engine   #######################..... 238/293
-  guard-gate       ##########################.. 514/561
+  guard-gate       ##########################.. 515/562
   context-ctx      ########################.... 267/311
   attention        #####################....... 129/172
   pool             ##############.............. 42/84
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.5%  (3136/3800 confusable tokens positioned)
+namespace coverage  [##########################......] 82.5%  (3137/3801 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4306 lookup name(s) -> 3049 concept(s), 88 ambiguous
+name index: 4309 lookup name(s) -> 3050 concept(s), 88 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2372 / 5594 |
+| Boundaries drawn (mutual / total) | 2374 / 5596 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4306 over 3049 concepts |
+| Lookup names indexed | 4309 over 3050 concepts |
 | Lookup names landing on several concepts | 88 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3049 |
+| Concepts carrying a contrast set | 3050 |
 
 ## The concepts (best verdict first)
 
@@ -727,6 +727,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **disaggregatedStore** - Fold predicate reporting whether an artifact ref points at a disaggregated store, which makes a digest-shaped deletion witness mandatory on removal. |
 | * | crystal | symbol | guard-gate | **disaggregatedBodyRef** - Fold predicate reporting whether a note or task body ref is disaggregated and therefore requires a digest-shaped deletion witness on removal. |
 | * | crystal | symbol | guard-gate | **V41RoutedGateUpSwiGLUDeferred (fused routed gate/up + SwiGLU dispatch)** - The deferred device entrypoint that dispatches the fused routed gate/up module once over all picks of a step: it reads the shared device ids image, applies the SwiGLU activation in-kernel, and writes the gated mid rows for the down stage to consume. |
+| * | crystal | symbol | guard-gate | **VulkanMemoryGuardSnapshot** - Bounded current-state projection of the Vulkan explicit-memory reservation cap: configured limit, live and successful-allocation peak bytes, refusal count, and configuration/accounting validity across every memory heap. |
 | * | crystal | symbol | layout | **layout implementation surface for qwen38mtptensorlayout** - `qwen38MTPTensorLayout` is the layout symbol declared or used at `internal/model/qwen35_mtp_forward.go:58`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | layout | **layout implementation surface for inputlayout** - `inputlayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | layout | **layout implementation surface for refusalunknownnativelayout** - `refusalunknownnativelayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -3329,8 +3330,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3222/5594 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3049 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3222/5596 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3050 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3339,7 +3340,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4306 lookup name(s) resolves - 88 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4309 lookup name(s) resolves - 88 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3350,7 +3351,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | session-runtime | 288 | 359 | 71 |
 | cache | 341 | 411 | 70 |
 | gateway-engine | 238 | 293 | 55 |
-| guard-gate | 514 | 561 | 47 |
+| guard-gate | 515 | 562 | 47 |
 | context-ctx | 267 | 311 | 44 |
 | attention | 129 | 172 | 43 |
 | pool | 42 | 84 | 42 |

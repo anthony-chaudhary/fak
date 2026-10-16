@@ -14,6 +14,8 @@ package compute
 
 // Issue-local restore transaction ABI. The stable public header remains owned by
 // the arena/recovery leaves; this adapter is intentionally private to the Go shim.
+void fvk_memory_guard_snapshot(uint64_t* limit, uint64_t* live, uint64_t* peak,
+    uint64_t* refused, int* configured, int* configuration_valid, int* accounting_valid);
 void *fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes);
 int fvk_restore_begin(size_t max_bytes, size_t max_entries);
 int fvk_restore_add(void *dst, size_t dst_offset, const void *src, size_t bytes);
@@ -38,6 +40,7 @@ int fvk_debug_select_iq_matvec(int fmt, int enabled);
 import "C"
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -1484,5 +1487,31 @@ func (v *vulkanBackend) VulkanRetainedReleaseSnapshot(capacity int) VulkanRetain
 // VulkanRetainedReleaseSummary is the bounded optional text reporter used by the
 // serving planner on explicit debug scrapes. Detailed callers may use the typed API.
 func (v *vulkanBackend) VulkanRetainedReleaseSummary() string {
-	return v.VulkanRetainedReleaseSnapshot(128).Summary()
+	guard, _ := json.Marshal(v.VulkanMemoryGuardSnapshot())
+	return v.VulkanRetainedReleaseSnapshot(128).Summary() + "; memory_guard=" + string(guard)
+}
+
+// VulkanMemoryGuardSnapshot reports actual all-heap reservations, including idle
+// native pools and deferred releases. It excludes driver and CPU allocations.
+type VulkanMemoryGuardSnapshot struct {
+	Scope              string `json:"scope"`
+	LimitBytes         uint64 `json:"limit_bytes"`
+	LiveBytes          uint64 `json:"live_bytes"`
+	PeakBytes          uint64 `json:"peak_bytes"`
+	RefusedAllocations uint64 `json:"refused_allocations"`
+	Configured         bool   `json:"configured"`
+	ConfigurationValid bool   `json:"configuration_valid"`
+	AccountingValid    bool   `json:"accounting_valid"`
+}
+
+func (v *vulkanBackend) VulkanMemoryGuardSnapshot() VulkanMemoryGuardSnapshot {
+	if v == nil {
+		return VulkanMemoryGuardSnapshot{}
+	}
+	var limit, live, peak, refused C.uint64_t
+	var configured, configurationValid, accountingValid C.int
+	vulkanMu.Lock()
+	C.fvk_memory_guard_snapshot(&limit, &live, &peak, &refused, &configured, &configurationValid, &accountingValid)
+	vulkanMu.Unlock()
+	return VulkanMemoryGuardSnapshot{"all_vk_device_memory", uint64(limit), uint64(live), uint64(peak), uint64(refused), configured != 0, configurationValid != 0, accountingValid != 0}
 }
