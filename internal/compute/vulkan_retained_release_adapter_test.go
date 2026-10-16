@@ -104,3 +104,27 @@ func TestVulkanRetainedReleaseAdapterDistinctions(t *testing.T) {
 		t.Fatalf("reuse: %+v", got)
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestVulkanRetainedReleaseNativeCheckoutScope(t *testing.T) {
+	for _, generation := range []uint64{0, 1, 2, ^uint64(0)} {
+		s := retainedAdapterFixture()
+		s.Records[0].NativeCheckoutGeneration = generation
+		got := validateVulkanRetainedReleaseSnapshot(s, 2, 2, 0, 1)
+		if got.Status != VulkanRetainedOK || got.Records[0].NativeCheckoutGeneration != generation || got.Records[0].LogicalLeaseGeneration != 0 {
+			t.Fatalf("native checkout evidence: %+v", got)
+		}
+		for _, label := range []string{"native_checkout_scope=native-pool-only", "Go-transient-ownership=excluded", "stale-alias-validation=unavailable", "logical_lease_generation=unavailable"} {
+			if !strings.Contains(got.Summary(), label) {
+				t.Fatal(got.Summary())
+			}
+		}
+		counts := "native_checkout_known_bindings=1 native_checkout_unavailable_bindings=1"
+		if generation == 0 {
+			counts = "native_checkout_known_bindings=0 native_checkout_unavailable_bindings=2"
+		}
+		if !strings.Contains(got.Summary(), counts) {
+			t.Fatal(got.Summary())
+		}
+	}
+}

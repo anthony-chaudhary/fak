@@ -219,12 +219,23 @@ struct Buffer {
     VkDeviceSize   allocationBytes = 0;
     uint64_t       allocationID = 0;
     uint64_t       deviceGeneration = 0;
+    uint64_t       nativeCheckoutGeneration = 0; // diagnostic native checkout only; zero unavailable
     bool           allocationDeviceLocal = false;
     void*          mapped = nullptr; // host view of a direct-upload weight arena binding
     bool           ownsMapping = false; // mapped is this buffer's own map of mem, unmapped on destroy
     bool           offloadPage = false; // mapped host-visible expert-ring page, recycled via g_hvOffloadPool
     bool           offloadPristine = false; // handed out by fvk_malloc_offload_weight, not written since
 };
+
+// Called only at native pool checkout, under the existing external allocator lock.
+// Exhaustion is sticky unavailable rather than wrapping into an old checkout ID.
+// Go transient-pool ownership changes do not pass through this seam.
+static void advanceNativeCheckoutGeneration(Buffer* b) {
+    if (b->nativeCheckoutGeneration != 0) {
+        b->nativeCheckoutGeneration = b->nativeCheckoutGeneration == std::numeric_limits<uint64_t>::max()
+            ? 0 : b->nativeCheckoutGeneration + 1;
+    }
+}
 
 // Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
 // bounded set of VkDeviceMemory blocks. This is the issue-local #12217 adapter pending the
@@ -857,6 +868,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     b->allocationBytes = req.size;
     b->allocationID = nextMemoryAllocationID();
     b->deviceGeneration = g_memoryDeviceGeneration;
+    b->nativeCheckoutGeneration = 1;
     b->allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(selectedMemoryType);
     trackDeviceAllocation(req.size, selectedMemoryType);
     return b;
@@ -957,6 +969,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
             b->mapped = block.mapped ? (char*)block.mapped + offset : nullptr;
             b->weightArenaBound = true;
             b->weightArenaBlock = i;
+            b->nativeCheckoutGeneration = 1;
             ++g_weightArenaBufferBindings;
             g_weightArenaLiveBytes += bytes;
             return b;
@@ -1044,6 +1057,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     b->mapped = block.mapped;
     b->weightArenaBound = true;
     b->weightArenaBlock = g_weightArena.size() - 1;
+    b->nativeCheckoutGeneration = 1;
     ++g_weightArenaMemoryAllocations;
     ++g_weightArenaBufferBindings;
     g_weightArenaReservedBytes += blockBytes;
@@ -4075,6 +4089,7 @@ void* fvk_malloc(size_t bytes) {
     if (it != g_pool.end() && !it->second.empty()) {
         Buffer* b = it->second.back();
         it->second.pop_back();
+        advanceNativeCheckoutGeneration(b);
         if (g_poolCount > 0) --g_poolCount;
         return b;
     }
@@ -4096,6 +4111,7 @@ static Buffer* mallocHostVisibleOffloadPage(size_t bytes) {
     if (it != g_hvOffloadPool.end() && !it->second.empty()) {
         Buffer* b = it->second.back();
         it->second.pop_back();
+        advanceNativeCheckoutGeneration(b);
         ++g_offloadWeightReused;
         b->offloadPristine = true;
         return b;
@@ -4134,6 +4150,7 @@ void* fvk_malloc_offload_weight(size_t bytes) {
     if (it != g_pool.end() && !it->second.empty()) {
         Buffer* b = it->second.back();
         it->second.pop_back();
+        advanceNativeCheckoutGeneration(b);
         if (g_poolCount > 0) --g_poolCount;
         ++g_offloadWeightReused;
         return b;
@@ -4913,7 +4930,17 @@ int fvk_buffer_reservation(const void* d, fvk_buffer_reservation_info* out) {
 
 // Read only authoritative retained containers. No global allocation registry or
 // event log is needed; scan and duplicate checks are bounded even for large queues.
-int fvk_retained_release_snapshot(fvk_retained_release_record* rows, uint32_t capacity,
+extern "C++" {
+static void setRetainedCheckout(fvk_retained_release_record&, const Buffer*) {}
+static void setRetainedCheckout(fvk_retained_release_record_v2& row, const Buffer* b) {
+    row.native_checkout_generation = b->nativeCheckoutGeneration;
+}
+static bool retainedCheckoutMatches(const fvk_retained_release_record&, const Buffer*) { return true; }
+static bool retainedCheckoutMatches(const fvk_retained_release_record_v2& row, const Buffer* b) {
+    return row.native_checkout_generation == b->nativeCheckoutGeneration;
+}
+template <typename Record>
+static int retainedReleaseSnapshot(Record* rows, uint32_t capacity,
                                   fvk_retained_release_summary* summary) {
     if (!summary) return FVK_RETAINED_INVALID;
     *summary = {};
@@ -4970,7 +4997,8 @@ int fvk_retained_release_snapshot(fvk_retained_release_record* rows, uint32_t ca
                 failure = FVK_RETAINED_INVALID; stopped = true; return;
             }
             if (prior.reservation.binding_offset == reservation.binding_offset) {
-                if (prior.reservation.buffer_bytes != reservation.buffer_bytes || prior.container != container) {
+                if (prior.reservation.buffer_bytes != reservation.buffer_bytes || prior.container != container ||
+                    !retainedCheckoutMatches(prior, b)) {
                     failure = FVK_RETAINED_INVALID; stopped = true;
                 }
                 return; // exact duplicate binding in the same authoritative container
@@ -4992,6 +5020,7 @@ int fvk_retained_release_snapshot(fvk_retained_release_record* rows, uint32_t ca
         auto& row = rows[summary->returned_records++];
         row.reservation = reservation;
         row.device_generation = generation;
+        setRetainedCheckout(row, b);
         row.release_state = FVK_RELEASE_REQUESTED;
         row.container = container;
         row.backing_state = g_v41SubmissionPendingFailure ? FVK_BACKING_QUARANTINED :
@@ -5011,6 +5040,17 @@ int fvk_retained_release_snapshot(fvk_retained_release_record* rows, uint32_t ca
     if (failure) return fail(failure);
     summary->status = FVK_RETAINED_OK;
     return FVK_RETAINED_OK;
+}
+} // extern "C++": preserve legacy C linkage while sharing bounded enumeration.
+
+int fvk_retained_release_snapshot(fvk_retained_release_record* rows, uint32_t capacity,
+                                  fvk_retained_release_summary* summary) {
+    return retainedReleaseSnapshot(rows, capacity, summary);
+}
+
+int fvk_retained_release_snapshot_v2(fvk_retained_release_record_v2* rows, uint32_t capacity,
+                                     fvk_retained_release_summary* summary) {
+    return retainedReleaseSnapshot(rows, capacity, summary);
 }
 
 int fvk_transfer_stage_backing(uint64_t* buffer_bytes, fvk_buffer_backing_info* out) {
