@@ -53,122 +53,146 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 			closeSelected(closed)
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						closeSelected(err)
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
-				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
-					result, cause = nil, closeFailure(err)
-					return
-				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
-				}
-				closeFailure(err)
-				panic(r)
-			}
-		}()
-		width, valid := checkedMulInt(heads, headDim)
-		if !valid || heads <= 0 || headDim <= 0 || rotaryDim <= 0 || rotaryDim > headDim || rotaryDim%2 != 0 ||
-			len(out) != width || len(cos) != rotaryDim/2 || len(sin) != rotaryDim/2 {
-			return nil, closeFailure(errV41TailRoPEResult)
-		}
-		for _, row := range [][]float32{out, cos, sin} {
-			for _, value := range row {
-				if !finite32(value) {
+		var recovered any
+		completed := false
+		func() {
+			defer func() { recovered = recover() }()
+			result, cause = func() ([]float32, error) {
+				width, valid := checkedMulInt(heads, headDim)
+				if !valid || heads <= 0 || headDim <= 0 || rotaryDim <= 0 || rotaryDim > headDim || rotaryDim%2 != 0 ||
+					len(out) != width || len(cos) != rotaryDim/2 || len(sin) != rotaryDim/2 {
 					return nil, closeFailure(errV41TailRoPEResult)
 				}
-			}
-		}
-		table := cache.hostTable(cos, sin)
-		run := func() (row []float32, runErr error) {
-			var owners []compute.Tensor
-			defer func() {
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owners) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						backend.Free(owners[i])
-					}()
-				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
-				}
-				if runErr == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
-			}()
-			retain := func(t compute.Tensor) {
-				for _, owned := range owners {
-					if owned.Buf() == t.Buf() {
-						return
+				for _, row := range [][]float32{out, cos, sin} {
+					for _, value := range row {
+						if !finite32(value) {
+							return nil, closeFailure(errV41TailRoPEResult)
+						}
 					}
 				}
-				owners = append(owners, t)
-			}
-			stage = "query upload"
-			xt := uploadHostF32Class(backend, []int{heads, headDim}, append([]float32(nil), out...), compute.MemoryActivation, "V4.1 indexer query RoPE")
-			if xt.Buf() == nil || xt.Backend() != backend || cache.owns(xt) {
-				return nil, errV41TailRoPEResult
-			}
-			retain(xt)
-			stage = "table upload"
-			tt := cache.lookup(table, rotaryDim)
-			if tt.Buf() == nil {
-				tt = uploadHostF32Class(backend, []int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 indexer query RoPE table")
-				fresh := tt.Buf() != nil && tt.Backend() == backend && tt.Buf() != xt.Buf() && !cache.owns(tt)
-				if fresh {
-					retain(tt)
+				table := cache.hostTable(cos, sin)
+				run := func() (row []float32, runErr error) {
+					var owners []compute.Tensor
+					bodyComplete := false
+					defer func() {
+						failed := !bodyComplete || runErr != nil
+						var cleanup any
+						cleanupPresent := false
+						drainReturned := false
+						func() {
+							// Register every acquired transient before invoking Free, retaining
+							// LIFO attempts even if one callback exits the goroutine.
+							for _, tensor := range owners {
+								defer func(tensor compute.Tensor) {
+									returned := false
+									defer func() {
+										value := recover()
+										if !returned && !cleanupPresent {
+											cleanup, cleanupPresent = value, true
+										}
+									}()
+									backend.Free(tensor)
+									returned = true
+								}(tensor)
+							}
+						}()
+						drainReturned = true
+						// Goexit never completes the drain. A saved cleanup panic can
+						// replace only a normally returned, successful body.
+						if drainReturned && cleanupPresent && !failed {
+							panic(cleanup)
+						}
+					}()
+					row, runErr = func() ([]float32, error) {
+						retain := func(t compute.Tensor) {
+							for _, owned := range owners {
+								if owned.Buf() == t.Buf() {
+									return
+								}
+							}
+							owners = append(owners, t)
+						}
+						stage = "query upload"
+						xt := uploadHostF32Class(backend, []int{heads, headDim}, append([]float32(nil), out...), compute.MemoryActivation, "V4.1 indexer query RoPE")
+						if xt.Buf() == nil || xt.Backend() != backend || cache.owns(xt) {
+							return nil, errV41TailRoPEResult
+						}
+						retain(xt)
+						stage = "table upload"
+						tt := cache.lookup(table, rotaryDim)
+						if tt.Buf() == nil {
+							tt = uploadHostF32Class(backend, []int{rotaryDim / 2, 2}, table, compute.MemoryActivation, "V4.1 indexer query RoPE table")
+							fresh := tt.Buf() != nil && tt.Backend() == backend && tt.Buf() != xt.Buf() && !cache.owns(tt)
+							if fresh {
+								retain(tt)
+							}
+							if !fresh || s.Backend != backend || tt.Dtype != compute.F32 || tt.Layout != compute.RowMajor || tt.Quant != nil || len(tt.Shape) != 2 || tt.Shape[0] != rotaryDim/2 || tt.Shape[1] != 2 {
+								return nil, errV41TailRoPEResult
+							}
+							cache.install(tt, table)
+							owners = owners[:len(owners)-1]
+						}
+						stage = "index-rope"
+						rotated, err := operation.V41TailRoPERows(xt, tt, heads, headDim, rotaryDim)
+						fresh := rotated.Buf() != nil && rotated.Backend() == backend && rotated.Buf() != xt.Buf() && !cache.owns(rotated)
+						if fresh {
+							retain(rotated)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if !fresh || rotated.Dtype != compute.F32 || rotated.Layout != compute.RowMajor || rotated.Quant != nil ||
+							len(rotated.Shape) != 2 || rotated.Shape[0] != heads || rotated.Shape[1] != headDim {
+							return nil, errV41TailRoPEResult
+						}
+						stage = "query readback"
+						values, valid := compute.ReadV41IndexRoPEOutput(backend, rotated, out, headDim, rotaryDim)
+						if !valid {
+							return nil, errV41TailRoPEResult
+						}
+						return values, nil
+					}()
+					bodyComplete = true
+					return row, runErr
 				}
-				if !fresh || s.Backend != backend || tt.Dtype != compute.F32 || tt.Layout != compute.RowMajor || tt.Quant != nil || len(tt.Shape) != 2 || tt.Shape[0] != rotaryDim/2 || tt.Shape[1] != 2 {
-					return nil, errV41TailRoPEResult
+				result, cause = run()
+				if cause != nil {
+					return nil, closeFailure(cause)
 				}
-				cache.install(tt, table)
-				owners = owners[:len(owners)-1]
-			}
-			stage = "index-rope"
-			rotated, err := operation.V41TailRoPERows(xt, tt, heads, headDim, rotaryDim)
-			fresh := rotated.Buf() != nil && rotated.Backend() == backend && rotated.Buf() != xt.Buf() && !cache.owns(rotated)
-			if fresh {
-				retain(rotated)
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !fresh || rotated.Dtype != compute.F32 || rotated.Layout != compute.RowMajor || rotated.Quant != nil ||
-				len(rotated.Shape) != 2 || rotated.Shape[0] != heads || rotated.Shape[1] != headDim {
-				return nil, errV41TailRoPEResult
-			}
-			stage = "query readback"
-			values, valid := compute.ReadV41IndexRoPEOutput(backend, rotated, out, headDim, rotaryDim)
-			if !valid {
-				return nil, errV41TailRoPEResult
-			}
-			return values, nil
+				return result, nil
+			}()
+			completed = true
+		}()
+		if completed {
+			return result, cause
 		}
-		result, cause = run()
-		if cause != nil {
-			return nil, closeFailure(cause)
+		// A legacy nil panic returns through capture without completing it;
+		// Goexit never returns here. Preserve the captured backend attribution.
+		r := recovered
+		if err, ok := r.(error); ok {
+			var closed *BackendForwardOperationError
+			if errors.As(err, &closed) {
+				closeSelected(err)
+				panic(r)
+			}
+			var backend *compute.BackendError
+			if errors.As(err, &backend) {
+				result, cause = nil, closeFailure(err)
+				return
+			}
 		}
-		return result, nil
+		if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+			if original, ok := r.(error); ok {
+				err = original
+			}
+			result, cause = nil, closeFailure(err)
+			return
+		}
+		err, ok := r.(error)
+		if !ok {
+			err = fmt.Errorf("unclassified backend panic: %v", r)
+		}
+		closeFailure(err)
+		panic(r)
 	}
 }
