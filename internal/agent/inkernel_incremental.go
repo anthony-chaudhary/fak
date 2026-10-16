@@ -15,12 +15,15 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ContextKey is the stable, namespaced identity of one independently refreshable
@@ -443,5 +446,324 @@ func replaceObservation(entries []observedEntry, previous ContextSnapshot) (Reco
 		Kind:       ReconcileReplacementReady,
 		Snapshot:   generation.Snapshot,
 		Generation: generation,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Layer memo: reuse the unchanged context layers across consecutive requests.
+//
+// The registry above models a session's system context as independently
+// refreshable typed sources. This section is the sibling seam the ticket asks
+// for: it decomposes ONE rendered request into the three layers the upstream
+// opencode port names, holds the stable ones between consecutive requests, and
+// re-renders / re-tokenizes only the layer that actually changed.
+//
+//   - Source   layer: the leading system block — every RoleSystem message joined
+//     by "\n" plus the folded tool-spec block. It changes only when the system
+//     prompt or the advertised tool list changes.
+//   - Registry layer: the accumulated non-system transcript (user / assistant /
+//     tool turns). It grows by the newest turn between requests.
+//   - Snapshot layer: the rendered, tokenized form actually fed to the model —
+//     the open assistant turn (and any thinking seed) that closes the transcript.
+//
+// The memo NEVER emits an assembly it cannot prove byte-identical to a full
+// rebuild: the mandatory guard below compares the incrementally assembled prompt
+// (and its token ids) against the real full render, and falls back to the full
+// rebuild when they differ. That is the quarantined fallback the ticket's spec
+// line 165 requires.
+// ---------------------------------------------------------------------------
+
+// ContextLayerKind names one of the three context layers a session holds. The
+// names are load-bearing: the ticket's done-condition requires the incremental
+// path to NAME the Source, Registry and Snapshot layers it holds and reuses.
+type ContextLayerKind string
+
+const (
+	// LayerSource is the stable leading system block (system text + tool spec).
+	LayerSource ContextLayerKind = "source"
+	// LayerRegistry is the accumulated non-system transcript (the growing turns).
+	LayerRegistry ContextLayerKind = "registry"
+	// LayerSnapshot is the rendered / tokenized form fed to the model (the open
+	// assistant turn and any thinking seed that closes the transcript).
+	LayerSnapshot ContextLayerKind = "snapshot"
+)
+
+// contextLayerAll is the full-rebuild layer set, in render order.
+func contextLayerAll() []ContextLayerKind {
+	return []ContextLayerKind{LayerSource, LayerRegistry, LayerSnapshot}
+}
+
+// ContextLayerStats records which layers this render re-rendered and which it
+// reused. FellBack is true exactly when the memo was already warm and the reuse
+// path could not be proven byte-identical to a full rebuild, so the full rebuild
+// was emitted instead.
+type ContextLayerStats struct {
+	Rendered []ContextLayerKind
+	Reused   []ContextLayerKind
+	FellBack bool
+}
+
+// ContextLayerPlan is one memo render: the assembled prompt, its token ids, and
+// the layer accounting that says which layers were re-rendered vs reused.
+type ContextLayerPlan struct {
+	Prompt string
+	IDs    []int
+	Stats  ContextLayerStats
+}
+
+// ContextLayerMemo holds the Source and Registry layers of one session between
+// consecutive requests so only the changed layer is re-rendered and re-tokenized.
+//
+// It is safe for concurrent use (all held state is behind mu), but it models ONE
+// conversation: two interleaved conversations sharing a memo will simply fail the
+// prefix/fingerprint checks and fall back to a full rebuild, never emit a wrong
+// prompt.
+type ContextLayerMemo struct {
+	mu sync.Mutex
+
+	// rendererProbe is the identity probe of the FULL renderer the memo was last
+	// used with: that renderer's output for an empty request, full(nil, nil). Go
+	// function values are not comparable, so the memo cannot compare the closure
+	// itself; it compares this cheap, deterministic probe instead. A memo whose
+	// held probe differs from the caller's is treated as a failed reuse and takes
+	// the full-rebuild fallback rather than silently mixing two renderers.
+	rendererProbe string
+
+	// ready is true once the memo holds a provably reusable prefix. A memo that
+	// could not derive a tail (a non-ChatML renderer) stays not-ready so every
+	// later call also falls back.
+	ready bool
+
+	// sourceFingerprint is sha256 over the Source layer inputs (system messages +
+	// tools). It deliberately excludes the model cfg and the BOS id: BOS is an
+	// id-only prefix, never text, so it can never change the rendered bytes.
+	sourceFingerprint [32]byte
+	// sourceText is renderTranscriptTools(sysMsgs, tools): the held Source layer.
+	sourceText string
+	// registryMsgs is a COPY of the held non-system transcript prefix.
+	registryMsgs []Message
+	// registryText is renderTranscriptTools(registryMsgs, nil): the held Registry
+	// layer rendered WITHOUT tools (the tool spec lives in the Source layer).
+	registryText string
+	// prefixIDs is the tokenization of sourceText+registryText (the reusable
+	// prefix, excluding the Snapshot tail).
+	prefixIDs []int
+	// tailIDs is the tokenization of the Snapshot layer: the suffix of the full
+	// render after the transcript (the open assistant turn and any thinking seed).
+	tailIDs []int
+}
+
+// NewContextLayerMemo returns an empty, cold layer memo.
+func NewContextLayerMemo() *ContextLayerMemo { return &ContextLayerMemo{} }
+
+// contextLayerSep separates the fields folded into the Source fingerprint. It is
+// a byte that cannot appear in a role name, so two different field splits cannot
+// collide.
+const contextLayerSep = "\x00"
+
+// contextSourceFingerprint hashes the Source layer inputs: each system message's
+// role, content, reasoning content and name, then the tools' JSON.
+func contextSourceFingerprint(sysMsgs []Message, tools []ToolDef) [32]byte {
+	h := sha256.New()
+	for _, m := range sysMsgs {
+		h.Write([]byte(m.Role))
+		h.Write([]byte(contextLayerSep))
+		h.Write([]byte(m.Content))
+		h.Write([]byte(contextLayerSep))
+		h.Write([]byte(m.ReasoningContent))
+		h.Write([]byte(contextLayerSep))
+		h.Write([]byte(m.Name))
+		h.Write([]byte(contextLayerSep))
+	}
+	toolsJSON, err := json.Marshal(tools)
+	if err != nil {
+		// A tool list that cannot be marshaled still has to fingerprint
+		// deterministically; the error text is stable for a given value.
+		toolsJSON = []byte("!json-error:" + err.Error())
+	}
+	h.Write(toolsJSON)
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// contextMessagesPrefix reports whether held is an exact prefix of rest.
+func contextMessagesPrefix(held, rest []Message) bool {
+	if len(held) > len(rest) {
+		return false
+	}
+	for i := range held {
+		if !reflect.DeepEqual(held[i], rest[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// contextTokenIDsEqual reports whether two token id slices are identical.
+func contextTokenIDsEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// PlanContextLayers renders messages/tools through the layer memo.
+//
+// full is the canonical full renderer (inKernelRenderPrompt on the planner path);
+// encode is the tokenizer (p.tok.Encode). A nil full or nil encode is refused with
+// an error rather than a panic. A nil memo is inert: it returns the full rebuild
+// with every layer marked rendered and FellBack=false.
+//
+// On the reuse path only the Registry layer is re-rendered and re-tokenized; the
+// Source and Snapshot layers are reused. The mandatory guard proves the assembled
+// prompt and its ids are byte-identical to the full rebuild before returning them,
+// and falls back to the full rebuild otherwise.
+func (m *ContextLayerMemo) PlanContextLayers(
+	messages []Message,
+	tools []ToolDef,
+	full func([]Message, []ToolDef) string,
+	encode func(string) ([]int, error),
+) (ContextLayerPlan, error) {
+	if full == nil || encode == nil {
+		return ContextLayerPlan{}, errors.New("context layer memo requires a full renderer and an encoder")
+	}
+	if m == nil {
+		fullText := full(messages, tools)
+		ids, err := encode(fullText)
+		if err != nil {
+			return ContextLayerPlan{}, err
+		}
+		return ContextLayerPlan{
+			Prompt: fullText,
+			IDs:    ids,
+			Stats:  ContextLayerStats{Rendered: contextLayerAll()},
+		}, nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Split the incoming messages into the Source layer (system messages, in
+	// order) and the Registry layer (everything else, in order).
+	var sysMsgs, rest []Message
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			sysMsgs = append(sysMsgs, msg)
+		} else {
+			rest = append(rest, msg)
+		}
+	}
+	fp := contextSourceFingerprint(sysMsgs, tools)
+
+	// Renderer identity probe: Go function values are not comparable, so the memo
+	// identifies its bound renderer by that renderer's output for an empty request
+	// (cheap and deterministic for every renderer this seam drives). A memo whose
+	// held probe differs from the caller's is refused rather than silently mixed.
+	probe := full(nil, nil)
+
+	// The full render is the authority. Derive the Snapshot tail as the suffix of
+	// the full render after the transcript; a renderer whose output does not start
+	// with the transcript (raw V4.1, Ornith, a prepended synthetic system
+	// instruction) has no derivable tail and can never be proven, so it falls back.
+	fullText := full(messages, tools)
+	transcript := renderTranscriptTools(messages, tools)
+	tail, tailOK := strings.CutPrefix(fullText, transcript)
+
+	wasReady := m.ready
+	canReuse := wasReady &&
+		probe == m.rendererProbe &&
+		fp == m.sourceFingerprint &&
+		tailOK &&
+		contextMessagesPrefix(m.registryMsgs, rest)
+
+	if canReuse {
+		delta := rest[len(m.registryMsgs):]
+		deltaText := renderTranscriptTools(delta, nil)
+		assembly := m.sourceText + m.registryText + deltaText + tail
+		deltaIDs, err := encode(deltaText)
+		if err != nil {
+			return ContextLayerPlan{}, err
+		}
+		ids := append(append([]int(nil), m.prefixIDs...), deltaIDs...)
+		ids = append(ids, m.tailIDs...)
+
+		// MANDATORY GUARD. The assembly must be byte-identical to the full
+		// rebuild, and the incrementally assembled ids must equal the full
+		// tokenization. The token half is what catches a BPE merge spanning the
+		// reused-prefix / delta boundary, which byte equality alone cannot see.
+		if assembly == fullText {
+			fullIDs, err := encode(fullText)
+			if err != nil {
+				return ContextLayerPlan{}, err
+			}
+			idsProven := contextTokenIDsEqual(ids, fullIDs)
+			if idsProven {
+				m.registryMsgs = append([]Message(nil), rest...)
+				m.registryText += deltaText
+				m.prefixIDs = append(append([]int(nil), m.prefixIDs...), deltaIDs...)
+				return ContextLayerPlan{
+					Prompt: assembly,
+					IDs:    ids,
+					Stats: ContextLayerStats{
+						Rendered: []ContextLayerKind{LayerRegistry},
+						Reused:   []ContextLayerKind{LayerSource, LayerSnapshot},
+					},
+				}, nil
+			}
+		}
+	}
+
+	// Fallback: cold memo, changed Source, non-prefix Registry, or a failed guard.
+	// Emit the full rebuild — never a prompt that differs from it.
+	fullIDs, err := encode(fullText)
+	if err != nil {
+		return ContextLayerPlan{}, err
+	}
+	sourceText := renderTranscriptTools(sysMsgs, tools)
+	registryText := renderTranscriptTools(rest, nil)
+	prefixIDs, err := encode(sourceText + registryText)
+	if err != nil {
+		return ContextLayerPlan{}, err
+	}
+	// Derive every value that can fail BEFORE mutating held state, so a failed
+	// encode leaves the memo exactly as it was (all-or-nothing state update).
+	var tailIDs []int
+	if tailOK {
+		tailIDs, err = encode(tail)
+		if err != nil {
+			return ContextLayerPlan{}, err
+		}
+	}
+	m.sourceFingerprint = fp
+	m.sourceText = sourceText
+	// A plain append over []Message copies the struct values. Message may carry
+	// slices (ToolCalls, RedactedThinking); those are shared with the caller, so
+	// the caller must not mutate a message concurrently with a render.
+	m.registryMsgs = append([]Message(nil), rest...)
+	m.registryText = registryText
+	m.prefixIDs = prefixIDs
+	m.rendererProbe = probe
+	if tailOK {
+		m.tailIDs = tailIDs
+		m.ready = true
+	} else {
+		// No derivable tail: this renderer can never be proven, so stay not-ready
+		// and let every later call fall back too.
+		m.tailIDs = nil
+		m.ready = false
+	}
+	return ContextLayerPlan{
+		Prompt: fullText,
+		IDs:    fullIDs,
+		Stats: ContextLayerStats{
+			Rendered: contextLayerAll(),
+			FellBack: wasReady,
+		},
 	}, nil
 }

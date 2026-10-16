@@ -9625,6 +9625,11 @@
           "category": "incidental",
           "reason": "Closed profile ledger metric label for the difference of existing before/after engine phase SumSeconds observations converted to nanoseconds. Phase totals overlap; the ledger forms no interval union or wall residual and this label establishes neither exclusive request decomposition nor GPU duration.",
           "token": "engine_phase_wall"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported helper prepending the GGUF BOS id for raw V4.1 completions",
+          "token": "applyInKernelBOS"
         }
       ],
       "exclude": [
@@ -9679,6 +9684,7 @@
         "ThisPeriodTotalKernelTime",
         "TotalKernelTime",
         "WithAffinity",
+        "applyInKernelBOS",
         "bashEngine",
         "cacheEmitter",
         "collectDogfoodKernelValue",
@@ -12196,6 +12202,76 @@
           "category": "incidental",
           "reason": "Private diagnostic helper for existing explicit native context sizing; it logs the existing sizing snapshot with delimited fields without defining a distinct context, changing admission or allocation arithmetic, or adding a public schema.",
           "token": "logServeExplicitContextClamp"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal layer-kind enum naming the Source/Registry/Snapshot layers",
+          "token": "ContextLayerKind"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported helper returning the full-rebuild layer set in render order",
+          "token": "contextLayerAll"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal per-render accounting of which layers were rendered vs reused",
+          "token": "ContextLayerStats"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal memo render result: prompt, token ids, and layer stats",
+          "token": "ContextLayerPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal per-session Source/Registry layer memo for the incremental seam",
+          "token": "ContextLayerMemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "constructor for the internal layer memo",
+          "token": "NewContextLayerMemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported NUL separator constant for the source fingerprint fields",
+          "token": "contextLayerSep"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported sha256 of the Source layer inputs (system msgs + tools)",
+          "token": "contextSourceFingerprint"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported helper testing whether held messages are a prefix of rest",
+          "token": "contextMessagesPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported helper comparing two token id slices",
+          "token": "contextTokenIDsEqual"
+        },
+        {
+          "category": "incidental",
+          "reason": "memo method rendering messages/tools through the layer memo",
+          "token": "PlanContextLayers"
+        },
+        {
+          "category": "incidental",
+          "reason": "planner field holding the optional per-session layer memo",
+          "token": "ctxLayerMemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "planner setter installing the optional layer memo",
+          "token": "SetContextLayerMemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "planner method rendering through the installed layer memo",
+          "token": "RenderIncrementalContext"
         }
       ],
       "exclude": [
@@ -12213,6 +12289,10 @@
         "CompactionRestoredTurns",
         "ContextGeneration",
         "ContextKey",
+        "ContextLayerKind",
+        "ContextLayerMemo",
+        "ContextLayerPlan",
+        "ContextLayerStats",
         "ContextLimit",
         "ContextSeconds",
         "ContextShedding",
@@ -12238,9 +12318,12 @@
         "MechanismStaleContext",
         "MetricFactRecall",
         "NativeCompactionObservation",
+        "NewContextLayerMemo",
         "PackedContextSource",
+        "PlanContextLayers",
         "ReconcileIncrementalContext",
         "ReconcileIncrementalContextNow",
+        "RenderIncrementalContext",
         "RenderInvariantPrefix",
         "ReplaceIncrementalContext",
         "RestoreCalls",
@@ -12249,6 +12332,7 @@
         "ScopedContextInputTokens",
         "SearchRecall",
         "SensitiveContext",
+        "SetContextLayerMemo",
         "SetIncrementalContext",
         "SystemContext",
         "TerminationContextLimit",
@@ -12286,7 +12370,12 @@
         "context",
         "contextBucket",
         "contextKeyPattern",
+        "contextLayerAll",
+        "contextLayerSep",
+        "contextMessagesPrefix",
         "contextSource",
+        "contextSourceFingerprint",
+        "contextTokenIDsEqual",
         "context_buckets",
         "context_cancelled",
         "context_changed",
@@ -12298,6 +12387,7 @@
         "ctx",
         "ctxAdviceNote",
         "ctxAdviceNoteOnce",
+        "ctxLayerMemo",
         "ctxMu",
         "ctxSnapshot",
         "ctxThrashConsecutiveRefills",
@@ -15523,6 +15613,16 @@
           "category": "incidental",
           "reason": "Local closure decoding already-read packed float32 bytes into independent logical host rows within the deferred reader; no rendering or independent materialization pipeline.",
           "token": "materializePanelRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported identity probe of the full renderer held by the memo",
+          "token": "rendererProbe"
+        },
+        {
+          "category": "incidental",
+          "reason": "same planner render method, flagged under the render-materialize family",
+          "token": "RenderIncrementalContext"
         }
       ],
       "id": "render-materialize",
@@ -15547,6 +15647,7 @@
         "RenderFidelity",
         "RenderFreshness",
         "RenderHistoryStatus",
+        "RenderIncrementalContext",
         "RenderIndexHealth",
         "RenderInvariantPrefix",
         "RenderKind",
@@ -15629,6 +15730,7 @@
         "rendercanonicalentry",
         "renderdeepseek41attentiondiagnostics",
         "rendered",
+        "rendererProbe",
         "renderidentitypage",
         "rendering",
         "renderinkernelchatmlrequest",
@@ -16863,6 +16965,16 @@
           "category": "incidental",
           "reason": "Effect-free geometry constructor for fixed site21 routed down publication chunks; no resource reservation or independently executable plan.",
           "token": "PlanV41RoutedDownPanelChunk"
+        },
+        {
+          "category": "incidental",
+          "reason": "same internal memo render result, flagged under the plan family",
+          "token": "ContextLayerPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "same memo render method, flagged under the plan family",
+          "token": "PlanContextLayers"
         }
       ],
       "exclude": [
@@ -16896,6 +17008,7 @@
         "CandidateTopology",
         "Candidates",
         "CleanupCandidate",
+        "ContextLayerPlan",
         "ControlPlaneOwner",
         "DecodeInterleavePlan",
         "EventPlanUpdated",
@@ -16936,6 +17049,7 @@
         "PLAN_SCHEMA_INCOMPATIBLE",
         "PlanClassifyMany",
         "PlanComponents",
+        "PlanContextLayers",
         "PlanDecodeInterleave",
         "PlanEviction",
         "PlanGoTmp",

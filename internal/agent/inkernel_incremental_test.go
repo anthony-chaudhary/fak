@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -638,5 +639,767 @@ func TestInKernelConfigIncrementalContextOptIn(t *testing.T) {
 	}
 	if bareGen.Baseline != "" || len(bareGen.Snapshot) != 0 {
 		t.Fatalf("bare planner generation = %+v, want zero", bareGen)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Layer-memo tests (TICKET-06, oss-port-p0-incremental-context).
+//
+// These are the ticket's own witness: the incrementally assembled prompt must be
+// byte-identical to a full rebuild, and a change confined to one layer must
+// re-render only that layer — naming the reuse path, not merely counting calls.
+// ---------------------------------------------------------------------------
+
+// newIncrementalContextPlanner builds a tiny in-kernel planner over the synthetic
+// model and the byte-level probe tokenizer (the same fixtures the warm/prefix
+// witnesses use). It needs no checkpoint, no GPU and no network.
+func newIncrementalContextPlanner(t *testing.T) *InKernelPlanner {
+	t.Helper()
+	return &InKernelPlanner{
+		m:       model.NewSynthetic(warmCfg()),
+		modelID: "incremental-context",
+		tok:     loadProbeTok(t),
+	}
+}
+
+// incrementalContextTools is a one-tool surface so the Source layer carries a
+// non-empty tool spec (the folded tool block is part of the Source fingerprint).
+func incrementalContextTools() []ToolDef {
+	return []ToolDef{{
+		Type: "function",
+		Function: ToolDefFunction{
+			Name:        "lookup",
+			Description: "look up a value",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"key":{"type":"string"}}}`),
+		},
+	}}
+}
+
+// TestInKernelIncrementalContextPromptMatchesFullRebuild is the ticket's named
+// witness. Request 1 is cold (full rebuild). Request 2 appends ONE user turn: the
+// memo must reuse the Source and Snapshot layers, re-render only the Registry
+// layer, and produce a prompt (and token ids) byte-identical to a full rebuild.
+// The reuse path is asserted explicitly — the delta render and the reassembled
+// source+registry+delta+tail string — not by counting calls.
+func TestInKernelIncrementalContextPromptMatchesFullRebuild(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	p.SetContextLayerMemo(NewContextLayerMemo())
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+
+	sys := Message{Role: RoleSystem, Content: "You are a careful helper."}
+	user1 := Message{Role: RoleUser, Content: "first turn"}
+	msgs1 := []Message{sys, user1}
+
+	prompt1, ids1, stats1, err := p.RenderIncrementalContext(msgs1, tools, sp)
+	if err != nil {
+		t.Fatalf("request 1 RenderIncrementalContext: %v", err)
+	}
+	want1 := inKernelRenderPrompt(msgs1, tools, p.m.Cfg, sp)
+	if prompt1 != want1 {
+		t.Fatalf("request 1 prompt differs from the full rebuild:\n got %q\nwant %q", prompt1, want1)
+	}
+	wantIDs1, err := p.tok.Encode(want1)
+	if err != nil {
+		t.Fatalf("encode full rebuild 1: %v", err)
+	}
+	if !reflect.DeepEqual(ids1, wantIDs1) {
+		t.Fatalf("request 1 ids differ from the full tokenization: got %v want %v", ids1, wantIDs1)
+	}
+	if stats1.FellBack {
+		t.Fatal("request 1 (cold memo) must not report FellBack")
+	}
+	if !reflect.DeepEqual(stats1.Rendered, contextLayerAll()) {
+		t.Fatalf("request 1 Rendered = %v, want all three layers", stats1.Rendered)
+	}
+	if len(stats1.Reused) != 0 {
+		t.Fatalf("request 1 Reused = %v, want none on a cold memo", stats1.Reused)
+	}
+
+	user2 := Message{Role: RoleUser, Content: "second turn"}
+	msgs2 := []Message{sys, user1, user2}
+
+	prompt2, ids2, stats2, err := p.RenderIncrementalContext(msgs2, tools, sp)
+	if err != nil {
+		t.Fatalf("request 2 RenderIncrementalContext: %v", err)
+	}
+	want2 := inKernelRenderPrompt(msgs2, tools, p.m.Cfg, sp)
+	if prompt2 != want2 {
+		t.Fatalf("request 2 prompt differs from the full rebuild:\n got %q\nwant %q", prompt2, want2)
+	}
+	wantIDs2, err := p.tok.Encode(want2)
+	if err != nil {
+		t.Fatalf("encode full rebuild 2: %v", err)
+	}
+	if !reflect.DeepEqual(ids2, wantIDs2) {
+		t.Fatalf("request 2 ids differ from the full tokenization: got %v want %v", ids2, wantIDs2)
+	}
+	if stats2.FellBack {
+		t.Fatal("request 2 (pure append) must not report FellBack")
+	}
+	if !reflect.DeepEqual(stats2.Rendered, []ContextLayerKind{LayerRegistry}) {
+		t.Fatalf("request 2 Rendered = %v, want exactly [registry]", stats2.Rendered)
+	}
+	if !reflect.DeepEqual(stats2.Reused, []ContextLayerKind{LayerSource, LayerSnapshot}) {
+		t.Fatalf("request 2 Reused = %v, want [source snapshot]", stats2.Reused)
+	}
+
+	// Explicit reuse-path assertion: the assembled prompt is exactly the reused
+	// Source layer + reused Registry layer + the re-rendered delta + the reused
+	// Snapshot tail. This names the reuse path rather than counting calls.
+	sourceText := renderTranscriptTools([]Message{sys}, tools)
+	registryText := renderTranscriptTools([]Message{user1}, nil)
+	deltaText := renderTranscriptTools([]Message{user2}, nil)
+	transcript2 := renderTranscriptTools(msgs2, tools)
+	tail, ok := strings.CutPrefix(want2, transcript2)
+	if !ok {
+		t.Fatalf("full rebuild does not start with the transcript; cannot derive the Snapshot tail")
+	}
+	if tail == "" {
+		t.Fatal("Snapshot tail is empty; the reuse path would be vacuous")
+	}
+	reassembled := sourceText + registryText + deltaText + tail
+	if reassembled != prompt2 {
+		t.Fatalf("reassembled reuse path differs from the returned prompt:\n got %q\nwant %q", reassembled, prompt2)
+	}
+	if reassembled != want2 {
+		t.Fatalf("reassembled reuse path differs from the full rebuild:\n got %q\nwant %q", reassembled, want2)
+	}
+}
+
+// TestInKernelIncrementalContextFallsBackWhenSourceChanges proves a changed
+// Source layer (a different system message) refuses the reuse path: FellBack is
+// reported, nothing is reused, and the prompt is still the full rebuild.
+func TestInKernelIncrementalContextFallsBackWhenSourceChanges(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	p.SetContextLayerMemo(NewContextLayerMemo())
+	sp := SampleParams{}
+
+	msgs1 := []Message{
+		{Role: RoleSystem, Content: "system A"},
+		{Role: RoleUser, Content: "hello"},
+	}
+	if _, _, _, err := p.RenderIncrementalContext(msgs1, nil, sp); err != nil {
+		t.Fatalf("request 1 RenderIncrementalContext: %v", err)
+	}
+
+	msgs2 := []Message{
+		{Role: RoleSystem, Content: "system B"},
+		{Role: RoleUser, Content: "hello"},
+		{Role: RoleUser, Content: "again"},
+	}
+	prompt2, ids2, stats2, err := p.RenderIncrementalContext(msgs2, nil, sp)
+	if err != nil {
+		t.Fatalf("request 2 RenderIncrementalContext: %v", err)
+	}
+	if !stats2.FellBack {
+		t.Fatalf("changed Source layer: FellBack = false, want true (stats=%+v)", stats2)
+	}
+	if len(stats2.Reused) != 0 {
+		t.Fatalf("changed Source layer: Reused = %v, want none", stats2.Reused)
+	}
+	want2 := inKernelRenderPrompt(msgs2, nil, p.m.Cfg, sp)
+	if prompt2 != want2 {
+		t.Fatalf("changed Source layer prompt differs from the full rebuild:\n got %q\nwant %q", prompt2, want2)
+	}
+	wantIDs2, err := p.tok.Encode(want2)
+	if err != nil {
+		t.Fatalf("encode full rebuild 2: %v", err)
+	}
+	if !reflect.DeepEqual(ids2, wantIDs2) {
+		t.Fatalf("changed Source layer ids differ from the full tokenization: got %v want %v", ids2, wantIDs2)
+	}
+}
+
+// TestInKernelIncrementalContextFallsBackWhenRegistryNotPrefix proves a Registry
+// layer that is not an exact extension of the held one (a dropped turn) refuses
+// the reuse path and still emits the full rebuild.
+func TestInKernelIncrementalContextFallsBackWhenRegistryNotPrefix(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	p.SetContextLayerMemo(NewContextLayerMemo())
+	sp := SampleParams{}
+
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	user1 := Message{Role: RoleUser, Content: "turn one"}
+	user2 := Message{Role: RoleUser, Content: "turn two"}
+	if _, _, _, err := p.RenderIncrementalContext([]Message{sys, user1, user2}, nil, sp); err != nil {
+		t.Fatalf("request 1 RenderIncrementalContext: %v", err)
+	}
+
+	// Drop the last turn: the held registry is no longer a prefix of the request.
+	msgs2 := []Message{sys, user1}
+	prompt2, ids2, stats2, err := p.RenderIncrementalContext(msgs2, nil, sp)
+	if err != nil {
+		t.Fatalf("request 2 RenderIncrementalContext: %v", err)
+	}
+	if !stats2.FellBack {
+		t.Fatalf("non-prefix Registry: FellBack = false, want true (stats=%+v)", stats2)
+	}
+	if len(stats2.Reused) != 0 {
+		t.Fatalf("non-prefix Registry: Reused = %v, want none", stats2.Reused)
+	}
+	want2 := inKernelRenderPrompt(msgs2, nil, p.m.Cfg, sp)
+	if prompt2 != want2 {
+		t.Fatalf("non-prefix Registry prompt differs from the full rebuild:\n got %q\nwant %q", prompt2, want2)
+	}
+	wantIDs2, err := p.tok.Encode(want2)
+	if err != nil {
+		t.Fatalf("encode full rebuild 2: %v", err)
+	}
+	if !reflect.DeepEqual(ids2, wantIDs2) {
+		t.Fatalf("non-prefix Registry ids differ from the full tokenization: got %v want %v", ids2, wantIDs2)
+	}
+}
+
+// TestInKernelIncrementalContextNilMemoIsInert proves the seam is inert without a
+// memo: a nil planner and a zero-value planner error instead of panicking, a
+// planner with no memo returns the full rebuild with every layer rendered, and a
+// nil *ContextLayerMemo passed straight to PlanContextLayers does the same.
+func TestInKernelIncrementalContextNilMemoIsInert(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleSystem, Content: "system"},
+		{Role: RoleUser, Content: "hello"},
+	}
+	sp := SampleParams{}
+
+	var nilPlanner *InKernelPlanner
+	nilPlanner.SetContextLayerMemo(nil) // must not panic
+	if _, _, _, err := nilPlanner.RenderIncrementalContext(msgs, nil, sp); err == nil {
+		t.Fatal("nil planner: got nil error, want a refusal")
+	}
+
+	zero := &InKernelPlanner{}
+	if _, _, _, err := zero.RenderIncrementalContext(msgs, nil, sp); err == nil {
+		t.Fatal("zero-value planner: got nil error, want a refusal")
+	}
+
+	p := newIncrementalContextPlanner(t)
+	prompt, ids, stats, err := p.RenderIncrementalContext(msgs, nil, sp)
+	if err != nil {
+		t.Fatalf("no memo installed: %v", err)
+	}
+	want := inKernelRenderPrompt(msgs, nil, p.m.Cfg, sp)
+	if prompt != want {
+		t.Fatalf("no memo installed prompt differs from the full rebuild:\n got %q\nwant %q", prompt, want)
+	}
+	wantIDs, err := p.tok.Encode(want)
+	if err != nil {
+		t.Fatalf("encode full rebuild: %v", err)
+	}
+	if !reflect.DeepEqual(ids, wantIDs) {
+		t.Fatalf("no memo installed ids differ from the full tokenization: got %v want %v", ids, wantIDs)
+	}
+	if stats.FellBack {
+		t.Fatal("no memo installed must not report FellBack")
+	}
+	if !reflect.DeepEqual(stats.Rendered, contextLayerAll()) {
+		t.Fatalf("no memo installed Rendered = %v, want all three layers", stats.Rendered)
+	}
+
+	// A nil memo used directly is inert too.
+	full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
+	plan, err := (*ContextLayerMemo)(nil).PlanContextLayers(msgs, nil, full, p.tok.Encode)
+	if err != nil {
+		t.Fatalf("nil memo PlanContextLayers: %v", err)
+	}
+	if plan.Prompt != want {
+		t.Fatalf("nil memo prompt differs from the full rebuild:\n got %q\nwant %q", plan.Prompt, want)
+	}
+	if plan.Stats.FellBack {
+		t.Fatal("nil memo must not report FellBack")
+	}
+	if !reflect.DeepEqual(plan.Stats.Rendered, contextLayerAll()) {
+		t.Fatalf("nil memo Rendered = %v, want all three layers", plan.Stats.Rendered)
+	}
+
+	// A nil renderer or encoder is refused, never a panic.
+	if _, err := NewContextLayerMemo().PlanContextLayers(msgs, nil, nil, p.tok.Encode); err == nil {
+		t.Fatal("nil full renderer: got nil error, want a refusal")
+	}
+	if _, err := NewContextLayerMemo().PlanContextLayers(msgs, nil, full, nil); err == nil {
+		t.Fatal("nil encoder: got nil error, want a refusal")
+	}
+}
+
+// TestInKernelIncrementalContextThreeConsecutiveTurns proves the reuse holds
+// across a run: turns 2 and 3 each reuse the Source and Snapshot layers, re-render
+// only the Registry layer, and stay byte-identical to their full rebuilds.
+func TestInKernelIncrementalContextThreeConsecutiveTurns(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	p.SetContextLayerMemo(NewContextLayerMemo())
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	base := []Message{sys, {Role: RoleUser, Content: "turn one"}}
+
+	for turn := 1; turn <= 3; turn++ {
+		msgs := append([]Message(nil), base...)
+		for i := 2; i <= turn; i++ {
+			msgs = append(msgs, Message{Role: RoleUser, Content: "turn " + itoa(i)})
+		}
+		prompt, ids, stats, err := p.RenderIncrementalContext(msgs, tools, sp)
+		if err != nil {
+			t.Fatalf("turn %d RenderIncrementalContext: %v", turn, err)
+		}
+		want := inKernelRenderPrompt(msgs, tools, p.m.Cfg, sp)
+		if prompt != want {
+			t.Fatalf("turn %d prompt differs from the full rebuild:\n got %q\nwant %q", turn, prompt, want)
+		}
+		wantIDs, err := p.tok.Encode(want)
+		if err != nil {
+			t.Fatalf("turn %d encode full rebuild: %v", turn, err)
+		}
+		if !reflect.DeepEqual(ids, wantIDs) {
+			t.Fatalf("turn %d ids differ from the full tokenization: got %v want %v", turn, ids, wantIDs)
+		}
+		if stats.FellBack {
+			t.Fatalf("turn %d: FellBack = true, want false", turn)
+		}
+		if turn == 1 {
+			if !reflect.DeepEqual(stats.Rendered, contextLayerAll()) {
+				t.Fatalf("turn 1 Rendered = %v, want all three layers (cold memo)", stats.Rendered)
+			}
+			continue
+		}
+		if !reflect.DeepEqual(stats.Rendered, []ContextLayerKind{LayerRegistry}) {
+			t.Fatalf("turn %d Rendered = %v, want exactly [registry]", turn, stats.Rendered)
+		}
+		if !reflect.DeepEqual(stats.Reused, []ContextLayerKind{LayerSource, LayerSnapshot}) {
+			t.Fatalf("turn %d Reused = %v, want [source snapshot]", turn, stats.Reused)
+		}
+	}
+}
+
+// TestInKernelIncrementalContextToolResultDeltaGuarded proves the mandatory guard
+// covers the toolByID hazard: a Registry holding an assistant tool_call whose id a
+// LATER tool result references cannot be re-rendered from the delta alone (the
+// delta render has no tool_call to build the id->name map from). The guard must
+// either prove the assembly byte-identical to the full rebuild, or fall back with
+// FellBack=true. A prompt that differs from the full rebuild is a FAIL.
+func TestInKernelIncrementalContextToolResultDeltaGuarded(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	p.SetContextLayerMemo(NewContextLayerMemo())
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	user1 := Message{Role: RoleUser, Content: "please look it up"}
+	assistant := Message{
+		Role:    RoleAssistant,
+		Content: "",
+		ToolCalls: []ToolCall{{
+			ID:       "call_1",
+			Type:     "function",
+			Function: Func{Name: "lookup", Arguments: `{"key":"x"}`},
+		}},
+	}
+	msgs1 := []Message{sys, user1, assistant}
+	if _, _, _, err := p.RenderIncrementalContext(msgs1, tools, sp); err != nil {
+		t.Fatalf("request 1 RenderIncrementalContext: %v", err)
+	}
+
+	// The tool result carries only the call id: its rendered name comes from the
+	// assistant tool_call in the HELD registry, which the delta render cannot see.
+	toolResult := Message{Role: RoleTool, ToolCallID: "call_1", Content: "42"}
+	msgs2 := []Message{sys, user1, assistant, toolResult}
+
+	prompt2, ids2, stats2, err := p.RenderIncrementalContext(msgs2, tools, sp)
+	if err != nil {
+		t.Fatalf("request 2 RenderIncrementalContext: %v", err)
+	}
+	want2 := inKernelRenderPrompt(msgs2, tools, p.m.Cfg, sp)
+	if prompt2 != want2 {
+		t.Fatalf("tool-result delta prompt differs from the full rebuild:\n got %q\nwant %q", prompt2, want2)
+	}
+	wantIDs2, err := p.tok.Encode(want2)
+	if err != nil {
+		t.Fatalf("encode full rebuild 2: %v", err)
+	}
+	if !reflect.DeepEqual(ids2, wantIDs2) {
+		t.Fatalf("tool-result delta ids differ from the full tokenization: got %v want %v", ids2, wantIDs2)
+	}
+	// The guard ALWAYS falls back for this scenario, deterministically: the delta
+	// render has an empty toolByID, so the tool result renders as bare content,
+	// while the full render resolves call_1 -> lookup from the HELD assistant
+	// tool_call and wraps it in <tool_response>. The two assemblies can never be
+	// byte-identical, so the reuse branch is unreachable here.
+	if !stats2.FellBack {
+		t.Fatalf("tool-result delta: FellBack = false, want true (stats=%+v)", stats2)
+	}
+	if len(stats2.Reused) != 0 {
+		t.Fatalf("FellBack with Reused = %v, want none", stats2.Reused)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fresh-context adversarial layer-memo tests (spec-only author; the
+// implementation's internal choices were not consulted).
+// ---------------------------------------------------------------------------
+
+// incLayerContains reports whether kinds names want.
+func incLayerContains(kinds []ContextLayerKind, want ContextLayerKind) bool {
+	for _, k := range kinds {
+		if k == want {
+			return true
+		}
+	}
+	return false
+}
+
+// incAssertMatchesFull renders through the planner and asserts invariant A: the
+// returned prompt is byte-identical to the full rebuild and the ids are exactly
+// the tokenization of that prompt.
+func incAssertMatchesFull(t *testing.T, p *InKernelPlanner, msgs []Message, tools []ToolDef, sp SampleParams, label string) ContextLayerStats {
+	t.Helper()
+	prompt, ids, stats, err := p.RenderIncrementalContext(msgs, tools, sp)
+	if err != nil {
+		t.Fatalf("%s: RenderIncrementalContext: %v", label, err)
+	}
+	want := inKernelRenderPrompt(msgs, tools, p.m.Cfg, sp)
+	if prompt != want {
+		t.Fatalf("%s: prompt differs from the full rebuild:\n got %q\nwant %q", label, prompt, want)
+	}
+	wantIDs, err := p.tok.Encode(want)
+	if err != nil {
+		t.Fatalf("%s: encode full rebuild: %v", label, err)
+	}
+	if !reflect.DeepEqual(ids, wantIDs) {
+		t.Fatalf("%s: ids differ from the full tokenization:\n got %v\nwant %v", label, ids, wantIDs)
+	}
+	return stats
+}
+
+// TestInKernelIncrementalContextAdversarialByteIdentity is invariant A over a
+// spread of message shapes: cold and pure-append renders must both equal the full
+// rebuild byte-for-byte (and token-for-token).
+func TestInKernelIncrementalContextAdversarialByteIdentity(t *testing.T) {
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+
+	shapes := []struct {
+		name  string
+		msgs  []Message
+		tools []ToolDef
+	}{
+		{"system-only", []Message{sys}, nil},
+		{"system+1user", []Message{sys, {Role: RoleUser, Content: "u1"}}, nil},
+		{"system+2users", []Message{sys, {Role: RoleUser, Content: "u1"}, {Role: RoleUser, Content: "u2"}}, nil},
+		{"no-system", []Message{{Role: RoleUser, Content: "u1"}}, nil},
+		{"empty-system", []Message{{Role: RoleSystem, Content: ""}, {Role: RoleUser, Content: "u1"}}, nil},
+		{"multi-system", []Message{{Role: RoleSystem, Content: "s1"}, {Role: RoleSystem, Content: "s2"}, {Role: RoleUser, Content: "u1"}}, nil},
+		{"tools-present", []Message{sys, {Role: RoleUser, Content: "u1"}}, tools},
+		{"assistant-toolcall-then-result", []Message{
+			sys,
+			{Role: RoleUser, Content: "look"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Type: "function", Function: Func{Name: "lookup", Arguments: `{"key":"x"}`}}}},
+			{Role: RoleTool, ToolCallID: "c1", Content: "42"},
+		}, tools},
+		{"assistant-reasoning", []Message{sys, {Role: RoleUser, Content: "u1"}, {Role: RoleAssistant, Content: "answer", ReasoningContent: "step by step"}}, nil},
+		{"empty-user-content", []Message{sys, {Role: RoleUser, Content: ""}}, nil},
+		{"whitespace", []Message{{Role: RoleSystem, Content: "  padded  "}, {Role: RoleUser, Content: "\n lead and trail \t"}}, nil},
+	}
+
+	for _, sh := range shapes {
+		sh := sh
+		t.Run(sh.name, func(t *testing.T) {
+			p := newIncrementalContextPlanner(t)
+			p.SetContextLayerMemo(NewContextLayerMemo())
+			incAssertMatchesFull(t, p, sh.msgs, sh.tools, sp, sh.name+" cold")
+			appended := append(append([]Message(nil), sh.msgs...), Message{Role: RoleUser, Content: "appended turn"})
+			incAssertMatchesFull(t, p, appended, sh.tools, sp, sh.name+" append")
+		})
+	}
+}
+
+// TestInKernelIncrementalContextAdversarialReuseAccounting is invariant B: a pure
+// append reuses Source and Snapshot, re-renders only Registry, and stays
+// byte-identical.
+func TestInKernelIncrementalContextAdversarialReuseAccounting(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	p.SetContextLayerMemo(NewContextLayerMemo())
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	msgs1 := []Message{sys, {Role: RoleUser, Content: "turn one"}}
+
+	stats1 := incAssertMatchesFull(t, p, msgs1, tools, sp, "request 1")
+	if !reflect.DeepEqual(stats1.Rendered, contextLayerAll()) {
+		t.Fatalf("request 1 Rendered = %v, want all three layers", stats1.Rendered)
+	}
+	if len(stats1.Reused) != 0 {
+		t.Fatalf("request 1 Reused = %v, want none on a cold memo", stats1.Reused)
+	}
+
+	msgs2 := append(append([]Message(nil), msgs1...), Message{Role: RoleUser, Content: "turn two"})
+	stats2 := incAssertMatchesFull(t, p, msgs2, tools, sp, "request 2")
+	if stats2.FellBack {
+		t.Fatalf("pure append: FellBack = true, want false (stats=%+v)", stats2)
+	}
+	if !incLayerContains(stats2.Reused, LayerSource) || !incLayerContains(stats2.Reused, LayerSnapshot) {
+		t.Fatalf("pure append Reused = %v, want it to contain source and snapshot", stats2.Reused)
+	}
+	if !incLayerContains(stats2.Rendered, LayerRegistry) {
+		t.Fatalf("pure append Rendered = %v, want it to contain registry", stats2.Rendered)
+	}
+	if incLayerContains(stats2.Rendered, LayerSource) || incLayerContains(stats2.Rendered, LayerSnapshot) {
+		t.Fatalf("pure append Rendered = %v, must NOT contain source or snapshot", stats2.Rendered)
+	}
+}
+
+// TestInKernelIncrementalContextAdversarialFallback is invariant C: a changed
+// Source, or a Registry that is not a pure append (removed / reordered / edited
+// turn), must fall back — full rebuild, FellBack=true, nothing reused.
+func TestInKernelIncrementalContextAdversarialFallback(t *testing.T) {
+	sp := SampleParams{}
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	u1 := Message{Role: RoleUser, Content: "turn one"}
+	u2 := Message{Role: RoleUser, Content: "turn two"}
+
+	cases := []struct {
+		name string
+		next []Message
+	}{
+		{"source-changed", []Message{{Role: RoleSystem, Content: "DIFFERENT system"}, u1, u2}},
+		{"turn-removed", []Message{sys, u1}},
+		{"turn-reordered", []Message{sys, u2, u1}},
+		{"turn-edited", []Message{sys, u1, {Role: RoleUser, Content: "turn two EDITED"}}},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			p := newIncrementalContextPlanner(t)
+			p.SetContextLayerMemo(NewContextLayerMemo())
+			incAssertMatchesFull(t, p, []Message{sys, u1, u2}, nil, sp, c.name+" request 1")
+			stats := incAssertMatchesFull(t, p, c.next, nil, sp, c.name+" request 2")
+			if !stats.FellBack {
+				t.Fatalf("%s: FellBack = false, want true (stats=%+v)", c.name, stats)
+			}
+			if len(stats.Reused) != 0 {
+				t.Fatalf("%s: Reused = %v, want none", c.name, stats.Reused)
+			}
+		})
+	}
+}
+
+// TestInKernelIncrementalContextAdversarialNilSafety is invariant D: nil planner,
+// zero-value planner, nil memo, and nil renderer/encoder are all refusals or full
+// rebuilds — never a panic.
+func TestInKernelIncrementalContextAdversarialNilSafety(t *testing.T) {
+	sp := SampleParams{}
+	msgs := []Message{{Role: RoleSystem, Content: "system"}, {Role: RoleUser, Content: "hello"}}
+
+	var nilPlanner *InKernelPlanner
+	nilPlanner.SetContextLayerMemo(nil) // must not panic
+	if _, _, _, err := nilPlanner.RenderIncrementalContext(msgs, nil, sp); err == nil {
+		t.Fatal("nil planner: got nil error, want a refusal")
+	}
+
+	zero := &InKernelPlanner{}
+	if _, _, _, err := zero.RenderIncrementalContext(msgs, nil, sp); err == nil {
+		t.Fatal("zero-value planner (nil model): got nil error, want a refusal")
+	}
+
+	p := newIncrementalContextPlanner(t)
+	stats := incAssertMatchesFull(t, p, msgs, nil, sp, "no memo installed")
+	if stats.FellBack {
+		t.Fatal("no memo installed: FellBack = true, want false")
+	}
+	if !reflect.DeepEqual(stats.Rendered, contextLayerAll()) {
+		t.Fatalf("no memo installed Rendered = %v, want all three layers", stats.Rendered)
+	}
+	if len(stats.Reused) != 0 {
+		t.Fatalf("no memo installed Reused = %v, want none", stats.Reused)
+	}
+
+	full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
+	want := full(msgs, nil)
+	plan, err := (*ContextLayerMemo)(nil).PlanContextLayers(msgs, nil, full, p.tok.Encode)
+	if err != nil {
+		t.Fatalf("nil memo PlanContextLayers: %v", err)
+	}
+	if plan.Prompt != want {
+		t.Fatalf("nil memo prompt differs from the full rebuild:\n got %q\nwant %q", plan.Prompt, want)
+	}
+	if plan.Stats.FellBack {
+		t.Fatal("nil memo: FellBack = true, want false")
+	}
+	if !reflect.DeepEqual(plan.Stats.Rendered, contextLayerAll()) {
+		t.Fatalf("nil memo Rendered = %v, want all three layers", plan.Stats.Rendered)
+	}
+
+	if _, err := NewContextLayerMemo().PlanContextLayers(msgs, nil, nil, p.tok.Encode); err == nil {
+		t.Fatal("nil full renderer: got nil error, want a refusal")
+	}
+	if _, err := NewContextLayerMemo().PlanContextLayers(msgs, nil, full, nil); err == nil {
+		t.Fatal("nil encoder: got nil error, want a refusal")
+	}
+}
+
+// incMergeEncode is a deterministic, boundary-sensitive encoder: two adjacent
+// ASCII letters collapse into ONE id. A naive layer-concatenation of ids will
+// therefore disagree with encoding the whole prompt whenever a merge spans a
+// layer boundary — exactly the case the memo must detect and fall back on.
+func incMergeEncode(s string) ([]int, error) {
+	rs := []rune(s)
+	ids := make([]int, 0, len(rs))
+	isLetter := func(r rune) bool { return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') }
+	for i := 0; i < len(rs); {
+		if i+1 < len(rs) && isLetter(rs[i]) && isLetter(rs[i+1]) {
+			ids = append(ids, 100000+int(rs[i])*256+int(rs[i+1]))
+			i += 2
+			continue
+		}
+		ids = append(ids, int(rs[i]))
+		i++
+	}
+	return ids, nil
+}
+
+// TestInKernelIncrementalContextAdversarialTokenizer is invariant E: a surprising
+// encoder must never yield a prompt that differs from the full rebuild, and a
+// non-fallback result must carry ids equal to encoding that prompt.
+func TestInKernelIncrementalContextAdversarialTokenizer(t *testing.T) {
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	msgs1 := []Message{sys, {Role: RoleUser, Content: "turn one"}}
+	msgs2 := append(append([]Message(nil), msgs1...), Message{Role: RoleUser, Content: "turn two"})
+
+	t.Run("merge-encode", func(t *testing.T) {
+		p := newIncrementalContextPlanner(t)
+		memo := NewContextLayerMemo()
+		full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
+		for i, msgs := range [][]Message{msgs1, msgs2} {
+			plan, err := memo.PlanContextLayers(msgs, tools, full, incMergeEncode)
+			if err != nil {
+				t.Fatalf("call %d: PlanContextLayers: %v", i+1, err)
+			}
+			want := full(msgs, tools)
+			if plan.Prompt != want {
+				t.Fatalf("call %d: prompt differs from the full rebuild:\n got %q\nwant %q", i+1, plan.Prompt, want)
+			}
+			if !plan.Stats.FellBack {
+				wantIDs, err := incMergeEncode(want)
+				if err != nil {
+					t.Fatalf("call %d: merge encode: %v", i+1, err)
+				}
+				if !reflect.DeepEqual(plan.IDs, wantIDs) {
+					t.Fatalf("call %d: non-fallback ids differ from the merge tokenization of the prompt:\n got %v\nwant %v", i+1, plan.IDs, wantIDs)
+				}
+			} else if len(plan.Stats.Reused) != 0 {
+				t.Fatalf("call %d: FellBack with Reused = %v, want none", i+1, plan.Stats.Reused)
+			}
+		}
+	})
+
+	t.Run("stateful-length-changing-encode", func(t *testing.T) {
+		p := newIncrementalContextPlanner(t)
+		memo := NewContextLayerMemo()
+		full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
+		calls := 0
+		stateful := func(s string) ([]int, error) {
+			calls++
+			ids := make([]int, 0, len(s)+calls)
+			for i := 0; i < len(s); i++ {
+				ids = append(ids, int(s[i]))
+			}
+			for i := 0; i < calls; i++ {
+				ids = append(ids, -calls)
+			}
+			return ids, nil
+		}
+		for i, msgs := range [][]Message{msgs1, msgs2} {
+			plan, err := memo.PlanContextLayers(msgs, tools, full, stateful)
+			if err != nil {
+				t.Fatalf("call %d: PlanContextLayers: %v", i+1, err)
+			}
+			want := full(msgs, tools)
+			if plan.Prompt != want {
+				t.Fatalf("call %d: prompt differs from the full rebuild:\n got %q\nwant %q", i+1, plan.Prompt, want)
+			}
+			if plan.Stats.FellBack && len(plan.Stats.Reused) != 0 {
+				t.Fatalf("call %d: FellBack with Reused = %v, want none", i+1, plan.Stats.Reused)
+			}
+		}
+	})
+}
+
+// TestInKernelIncrementalContextAdversarialFullRenderer is invariant F: a `full`
+// renderer that appends an open-assistant-turn tail must be reproduced exactly,
+// including on the reuse path.
+func TestInKernelIncrementalContextAdversarialFullRenderer(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+	sys := Message{Role: RoleSystem, Content: "stable system"}
+	msgs1 := []Message{sys, {Role: RoleUser, Content: "turn one"}}
+	msgs2 := append(append([]Message(nil), msgs1...), Message{Role: RoleUser, Content: "turn two"})
+
+	const suffix = "\x00<<open-assistant-turn>>"
+	full := func(ms []Message, ts []ToolDef) string {
+		return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) + suffix
+	}
+	memo := NewContextLayerMemo()
+	for i, msgs := range [][]Message{msgs1, msgs2} {
+		plan, err := memo.PlanContextLayers(msgs, tools, full, p.tok.Encode)
+		if err != nil {
+			t.Fatalf("call %d: PlanContextLayers: %v", i+1, err)
+		}
+		want := full(msgs, tools)
+		if plan.Prompt != want {
+			t.Fatalf("call %d: prompt differs from the adversarial full renderer:\n got %q\nwant %q", i+1, plan.Prompt, want)
+		}
+		if !strings.HasSuffix(plan.Prompt, suffix) {
+			t.Fatalf("call %d: prompt %q lost the open-turn suffix", i+1, plan.Prompt)
+		}
+	}
+}
+
+// TestInKernelIncrementalContextAdversarialConcurrent is invariant G: one memo
+// shared by ~8 goroutines must never panic and every returned prompt must equal
+// the full rebuild. Each goroutine gets its own tokenizer so the tokenizer itself
+// is not the shared mutable state under test.
+func TestInKernelIncrementalContextAdversarialConcurrent(t *testing.T) {
+	p := newIncrementalContextPlanner(t)
+	sp := SampleParams{}
+	tools := incrementalContextTools()
+	memo := NewContextLayerMemo()
+
+	type encoder interface{ Encode(string) ([]int, error) }
+	const n = 8
+	toks := make([]encoder, n)
+	for i := range toks {
+		toks[i] = loadProbeTok(t)
+	}
+
+	type result struct {
+		label  string
+		prompt string
+		want   string
+		err    error
+	}
+	ch := make(chan result, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			msgs := []Message{
+				{Role: RoleSystem, Content: "stable system"},
+				{Role: RoleUser, Content: "turn " + itoa(i)},
+			}
+			full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
+			plan, err := memo.PlanContextLayers(msgs, tools, full, toks[i].Encode)
+			ch <- result{label: "goroutine " + itoa(i), prompt: plan.Prompt, want: full(msgs, tools), err: err}
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		r := <-ch
+		if r.err != nil {
+			t.Fatalf("%s: PlanContextLayers: %v", r.label, r.err)
+		}
+		if r.prompt != r.want {
+			t.Fatalf("%s: prompt differs from the full rebuild:\n got %q\nwant %q", r.label, r.prompt, r.want)
+		}
 	}
 }
