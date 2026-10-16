@@ -1032,6 +1032,14 @@ func NewUSB4DualAPUAllReduceEngine(interconnect *DualStrixHaloInterconnect, loca
 		slotIndex:    0,
 	}
 
+	complete := false
+	defer func() {
+		if !complete {
+			// Close releases only slots acquired by this engine, never the borrowed slab.
+			_ = engine.Close()
+		}
+	}()
+
 	for i := 0; i < TBV2_NSLOTS; i++ {
 		sendAlloc, err := slab.Allocate(slotBytes)
 		if err != nil {
@@ -1068,6 +1076,7 @@ func NewUSB4DualAPUAllReduceEngine(interconnect *DualStrixHaloInterconnect, loca
 		engine.peerRecvSlots[i] = peerRecvAlloc
 	}
 
+	complete = true
 	return engine, nil
 }
 
