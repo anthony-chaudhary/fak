@@ -53,21 +53,22 @@ const sevFail = "fail"
 // field is a plain measured fact so the classification stays pure and tests can
 // drive any green/yellow/red combination without real hardware.
 type serveHostFacts struct {
-	Arch          string  `json:"arch"`        // GOARCH: "amd64", "arm64", …
-	ISA           string  `json:"isa"`         // best detected SIMD feature: "amx","avx512","avx2","sse","neon","asimd","scalar",""
-	ModelBytes    int64   `json:"model_bytes"` // resident weight bytes the target model needs (0 = unknown)
-	FreeBytes     int64   `json:"free_bytes"`  // free device/host memory the model would load into
-	MemKnown      bool    `json:"mem_known"`   // whether FreeBytes was actually probeable
-	NUMANodes     int     `json:"numa_nodes"`  // online NUMA node count (0 = topology unreadable)
-	Headroom      float64 `json:"headroom"`    // fit headroom fraction reserved for KV/activations (0..1)
-	TotalBytes    int64   `json:"total_bytes,omitempty"`
-	Pressure      string  `json:"pressure,omitempty"`
-	WiredBytes    int64   `json:"wired_bytes,omitempty"`
-	CompBytes     int64   `json:"compressed_bytes,omitempty"`
-	ReservedBytes int64   `json:"reserved_bytes,omitempty"`
-	ActiveLeases  int     `json:"active_leases,omitempty"`
-	GPULeaseHeld  bool    `json:"gpu_lease_held,omitempty"`
-	GPULeasePath  string  `json:"gpu_lease_path,omitempty"`
+	Arch               string  `json:"arch"`        // GOARCH: "amd64", "arm64", …
+	ISA                string  `json:"isa"`         // best detected SIMD feature: "amx","avx512","avx2","sse","neon","asimd","scalar",""
+	ModelBytes         int64   `json:"model_bytes"` // resident weight bytes the target model needs (0 = unknown)
+	FreeBytes          int64   `json:"free_bytes"`  // free device/host memory the model would load into
+	MemKnown           bool    `json:"mem_known"`   // whether FreeBytes was actually probeable
+	NUMANodes          int     `json:"numa_nodes"`  // online NUMA node count (0 = topology unreadable)
+	Headroom           float64 `json:"headroom"`    // fit headroom fraction reserved for KV/activations (0..1)
+	TotalBytes         int64   `json:"total_bytes,omitempty"`
+	Pressure           string  `json:"pressure,omitempty"`
+	WiredBytes         int64   `json:"wired_bytes,omitempty"`
+	CompBytes          int64   `json:"compressed_bytes,omitempty"`
+	ReservedBytes      int64   `json:"reserved_bytes,omitempty"`
+	ReservedBytesError string  `json:"reserved_bytes_error,omitempty"`
+	ActiveLeases       int     `json:"active_leases,omitempty"`
+	GPULeaseHeld       bool    `json:"gpu_lease_held,omitempty"`
+	GPULeasePath       string  `json:"gpu_lease_path,omitempty"`
 	// GPULeaseHolderVerdict is the typed holder-progress verdict (#13131):
 	// LIVE_PROGRESSING / STALLED / DEAD / UNKNOWN. It is only meaningful when
 	// GPULeaseHeld is true; empty means the lease was free or the probe could not
@@ -299,7 +300,7 @@ func servePressureRow(f serveHostFacts) *serveReadinessRow {
 }
 
 func serveReservationsRow(f serveHostFacts) *serveReadinessRow {
-	if f.TotalBytes <= 0 && f.ReservedBytes <= 0 && !f.GPULeaseHeld {
+	if f.TotalBytes <= 0 && f.ReservedBytes <= 0 && !f.GPULeaseHeld && f.ReservedBytesError == "" {
 		return nil
 	}
 	row := &serveReadinessRow{Check: "local-leases"}
@@ -326,6 +327,10 @@ func serveReservationsRow(f serveHostFacts) *serveReadinessRow {
 			}
 			row.Remediation = "wait for the active serve process to exit or release the GPU lease"
 		}
+	} else if f.ReservedBytesError != "" {
+		row.Status = sevWarn
+		row.Finding = "active local memory reservations are unknown: " + f.ReservedBytesError
+		row.Remediation = "inspect the local reservation ledger error and retry the probe before relying on its capacity report"
 	} else if f.ReservedBytes > 0 {
 		row.Status = sevWarn
 		row.Finding = fmt.Sprintf("%s active local memory reservation across peer process(es)", serveHumanBytes(f.ReservedBytes))
@@ -333,6 +338,9 @@ func serveReservationsRow(f serveHostFacts) *serveReadinessRow {
 	} else {
 		row.Status = sevOK
 		row.Finding = "none — zero active local memory reservations or GPU leases"
+	}
+	if f.GPULeaseHeld && f.ReservedBytesError != "" {
+		row.Finding += "; active local memory reservations are unknown: " + f.ReservedBytesError
 	}
 	row.Tier = serveTierLabel(row.Status)
 	return row
@@ -430,6 +438,18 @@ func buildServeReadiness(f serveHostFacts) serveReadinessReport {
 	return rep
 }
 
+// observeReservations keeps an unreadable ledger distinct from a measured zero.
+func (facts *serveHostFacts) observeReservations(ctx context.Context, store *localadmission.ReservationStore) {
+	reserved, err := store.TotalReservedBytes(ctx)
+	facts.ReservedBytes = 0
+	facts.ReservedBytesError = ""
+	if err != nil {
+		facts.ReservedBytesError = err.Error()
+		return
+	}
+	facts.ReservedBytes = reserved
+}
+
 // probeServeHost is the live, best-effort host probe. It reads the arch and CPU
 // SIMD feature bits (via golang.org/x/sys/cpu) and the online NUMA node count (via
 // the compute package's shared accessor). It probes live host memory, ambient
@@ -470,9 +490,7 @@ func probeServeHost(modelBytes int64, headroom float64) serveHostFacts {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	store := localadmission.NewReservationStore(defaultLocalReservationDir())
-	if reserved, err := store.TotalReservedBytes(ctx); err == nil {
-		facts.ReservedBytes = reserved
-	}
+	facts.observeReservations(ctx, store)
 
 	leasePath := gpulease.DefaultPath()
 	facts.GPULeasePath = leasePath
