@@ -43,7 +43,7 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
 		chunkStart := time.Now()
 		logits := s.Prefill(ids)
-		enginestep.Default.ObservePrefillChunk(len(ids), time.Since(chunkStart))
+		enginestep.Default.ObservePrefillChunkContext(ctx, len(ids), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -54,7 +54,7 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 		chunk := ids[:chunkTokens]
 		chunkStart := time.Now()
 		s.PrefillNoLogits(chunk)
-		enginestep.Default.ObservePrefillChunk(len(chunk), time.Since(chunkStart))
+		enginestep.Default.ObservePrefillChunkContext(ctx, len(chunk), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(chunk))
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -63,7 +63,7 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 	}
 	chunkStart := time.Now()
 	logits := s.Prefill(ids)
-	enginestep.Default.ObservePrefillChunk(len(ids), time.Since(chunkStart))
+	enginestep.Default.ObservePrefillChunkContext(ctx, len(ids), time.Since(chunkStart))
 	recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 	if err := ctx.Err(); err != nil {
 		return nil, err
