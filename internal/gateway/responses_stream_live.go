@@ -8,7 +8,7 @@ package gateway
 // schema authority: this file emits the SAME event names, reuses the SAME JSON
 // envelope structs (responsesResponse / responsesOutputItem / responsesContentPart)
 // and the SAME sequence-number discipline (running count from 0, terminal
-// response.completed, no [DONE]).
+// response.completed or response.incomplete, no [DONE]).
 //
 // The kernel's adjudication invariant is preserved by construction even when tools
 // ARE offered, exactly as on the chat wire: the liftGuard withholds any text-form
@@ -506,7 +506,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// (constant-model SSE, #5399) even when the planner reports its served name.
 	respModel := s.responseModel(comp.Model, reqModel, reqModel, "#5399")
 	// Open the stream even for an empty turn so the client always gets a
-	// well-formed created → completed sequence.
+	// well-formed created → terminal sequence.
 	start()
 	if writeFailure != nil {
 		return true
@@ -524,6 +524,8 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	}
 	if comp.FinishReason == "length" {
 		resp.IncompleteDetails = &responsesIncomplete{Reason: "max_output_tokens"}
+	} else if comp.FinishReason == "content_filter" {
+		resp.IncompleteDetails = &responsesIncomplete{Reason: "content_filter"}
 	}
 	if itemOpened {
 		resp.Output = append(resp.Output, messageItem)
@@ -555,8 +557,12 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// Publish the finalized continuation state before response.completed reveals the
 	// ID (the buffered path persists before writeResponsesStream for the same reason).
 	persistResponse(createdID, agent.Message{Role: agent.RoleAssistant, Content: fullText, ToolCalls: kept})
-	send("response.completed", responseEvent{
-		Type:           "response.completed",
+	terminalEvent := "response.completed"
+	if resp.Status == "incomplete" {
+		terminalEvent = "response.incomplete"
+	}
+	send(terminalEvent, responseEvent{
+		Type:           terminalEvent,
 		SequenceNumber: nextSeq,
 		Response:       resp,
 	})

@@ -583,7 +583,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// finishReason drives both the logged turn classification and the Responses
-	// status: a length-truncated turn is `incomplete`, everything else `completed`.
+	// status: output-limited or provider-filtered turns are `incomplete`.
 	finish := comp.FinishReason
 	if len(kept) > 0 {
 		finish = "tool_calls"
@@ -625,6 +625,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		// distinction between "the model is done" and "the guard stopped this turn".
 		resp.Status = "incomplete"
 		resp.IncompleteDetails = &responsesIncomplete{Reason: deniedGuardIncompleteReason}
+	} else if comp.FinishReason == "content_filter" {
+		resp.IncompleteDetails = &responsesIncomplete{Reason: "content_filter"}
 	}
 	if restoreContinuation.blocked {
 		resp.Status = "incomplete"
@@ -1149,10 +1151,10 @@ func lowInfoReceiptFuseNote(adms []ResultAdmission) string {
 }
 
 // responsesStatusFor maps the planner finish reason to a Responses status. A turn
-// truncated by the output-token ceiling is `incomplete`; everything else (a normal
-// stop, an end-of-turn, a tool-call turn) is `completed`.
+// truncated by the output-token ceiling or provider content filter is `incomplete`;
+// other finish reasons retain their existing `completed` mapping.
 func responsesStatusFor(finishReason string) string {
-	if finishReason == "length" {
+	if finishReason == "length" || finishReason == "content_filter" {
 		return "incomplete"
 	}
 	return "completed"

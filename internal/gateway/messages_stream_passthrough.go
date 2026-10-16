@@ -41,6 +41,10 @@ var errPassthroughResponded = errors.New("gateway: anthropic passthrough respons
 // non-start and falls back to the buffered path instead of surfacing an invented status.
 var errUpstreamInBandRefusal = errors.New("gateway: upstream refused the stream in-band before message_start")
 
+// errUpstreamStreamRefusal ends a started turn after its provider error frame has
+// been relayed. It is a terminal failure, not a worker death eligible for replay.
+var errUpstreamStreamRefusal = errors.New("gateway: upstream refused the started stream in-band")
+
 // sseToolAccum buffers one upstream tool_use content block while its input streams in,
 // so the full call can be reconstructed and adjudicated before the client sees it.
 type sseToolAccum struct {
@@ -66,6 +70,8 @@ type anthropicPassthrough struct {
 	send       func(string, any)
 	started    bool
 	wroteError bool
+	// relayedError prevents a second synthetic error after the provider frame.
+	relayedError bool
 	// wroteErrCause is the REAL failure behind the terminal HTTP error wroteError marks.
 	// onEvent can only hand the caller the errPassthroughResponded sentinel — "a response
 	// was already written" is a control-flow fact, not a failure kind — so the cause is
@@ -435,7 +441,8 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 	case "error":
 		if p.started {
 			p.send("error", ev.Data)
-			return nil
+			p.relayedError = true
+			return errUpstreamStreamRefusal
 		}
 		// Pre-start: the client still has nothing, so the response is STILL OURS to choose —
 		// which is exactly what writing a hardcoded 502 here used to throw away (#5491). The
@@ -536,10 +543,12 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 					boundPolicy = "max-duration=5s"
 				}
 			}
-			p.send("error", map[string]any{
-				"type":  "error",
-				"error": map[string]any{"type": errType, "message": "upstream model error"},
-			})
+			if !p.relayedError {
+				p.send("error", map[string]any{
+					"type":  "error",
+					"error": map[string]any{"type": errType, "message": "upstream model error"},
+				})
+			}
 
 			// Write partial-output checkpoint (#10672): capture the exact assistant text
 			// already relayed to the client so a resume can continue from the last good state.

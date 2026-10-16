@@ -39,9 +39,10 @@ type StreamSink func(contentDelta string) error
 type streamHeldActivityKey struct{}
 
 // WithStreamHeldActivity attaches a callback CompleteStream invokes on every upstream
-// delta it HOLDS off the sink (tool-call fragments, reasoning). The payload stays held;
-// the caller learns only that the turn is advancing, so it can commit its response and
-// keep the socket warm while a long tool call is generated.
+// delta it HOLDS off the sink (tool-call fragments, reasoning), and qualified
+// opt-in prompt-processing progress. The payload stays held; the caller learns
+// only that the turn is advancing, so it can commit its response and keep the
+// socket warm while prefill or a long tool call is processed.
 func WithStreamHeldActivity(ctx context.Context, f func()) context.Context {
 	if f == nil {
 		return ctx
@@ -79,6 +80,11 @@ type StreamingPlanner interface {
 // the gateway can distinguish "this wire can't stream, fall back cleanly" from a real
 // upstream failure.
 var ErrStreamingUnsupported = errors.New("agent: streaming not supported for this provider wire")
+
+// ErrUpstreamIncompleteStream means EOF arrived without a terminal marker or
+// completion of every requested choice. Content already sent to the sink remains
+// partial output; held tool calls are not returned as an executable Completion.
+var ErrUpstreamIncompleteStream = errors.New("agent: upstream stream ended before completion")
 
 // ErrUpstreamStreamError is the sentinel a streaming read returns when the upstream
 // (typically a routing proxy) reports a failure IN-BAND as an SSE `data:` frame carrying
@@ -648,6 +654,7 @@ func (p *HTTPPlanner) StreamingSupported() bool {
 type openAIStreamChunk struct {
 	Model   string `json:"model"`
 	Choices []struct {
+		Index *int `json:"index"`
 		Delta struct {
 			Role             string `json:"role"`
 			Content          string `json:"content"`
@@ -664,9 +671,54 @@ type openAIStreamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage   *Usage          `json:"usage"`
-	Timings json.RawMessage `json:"timings,omitempty"`
-	Error   json.RawMessage `json:"error,omitempty"`
+	Usage          *Usage          `json:"usage"`
+	Timings        json.RawMessage `json:"timings,omitempty"`
+	Error          json.RawMessage `json:"error,omitempty"`
+	PromptProgress json.RawMessage `json:"prompt_progress,omitempty"`
+}
+
+// streamCompletionProof tracks only observed finish indices, never allocating
+// from the operator-supplied n. Unknown request cardinality needs explicit DONE.
+type streamCompletionProof struct {
+	choices  int
+	finished map[int]struct{}
+	done     bool
+}
+
+func newStreamCompletionProof(request []byte) streamCompletionProof {
+	var body struct {
+		N json.RawMessage `json:"n"`
+	}
+	proof := streamCompletionProof{choices: 1}
+	if json.Unmarshal(request, &body) != nil {
+		proof.choices = 0
+	} else if len(body.N) != 0 {
+		proof.choices = 0
+		if json.Unmarshal(body.N, &proof.choices) != nil || proof.choices <= 0 {
+			proof.choices = 0
+		}
+	}
+	return proof
+}
+
+func (p *streamCompletionProof) finish(index *int) {
+	i := 0
+	if index != nil {
+		i = *index
+	} else if p.choices != 1 {
+		return // Omitted indices are compatible only with a single-choice stream.
+	}
+	if i < 0 || i >= p.choices {
+		return
+	}
+	if p.finished == nil {
+		p.finished = make(map[int]struct{})
+	}
+	p.finished[i] = struct{}{}
+}
+
+func (p *streamCompletionProof) complete() bool {
+	return p.done || (p.choices > 0 && len(p.finished) == p.choices)
 }
 
 // CompleteStream performs one streamed chat-completions round-trip on the
@@ -872,6 +924,8 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		timings   *Timings
 		model     string
 		finish    string
+		selected  bool
+		choiceErr error
 	)
 	// Idle-read deadline: an upstream that opens the stream then goes silent (a transient
 	// overload / "API issue") fails in ≤streamStallTimeout() rather than blocking the
@@ -889,6 +943,8 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// leaves the stream RUNNING — a slow-but-alive turn still gets every chance to finish.
 	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return call.attemptsUsed }, p.SoftStallNotify)
 	held := streamHeldActivity(ctx)
+	completionProof := newStreamCompletionProof(call.body)
+	promptProgress := newStreamPromptProgress(call.body)
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
 	// scanner ceiling well past the 64 KiB default so a big chunk is never truncated.
@@ -907,17 +963,58 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			continue
 		}
 		if data == "[DONE]" {
+			completionProof.done = true
 			break
 		}
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// Keep heartbeat tolerance, but a valid choice envelope with an invalid
+			// index must not disappear and let a later DONE certify partial output.
+			var envelope struct {
+				Choices []struct {
+					Index json.RawMessage `json:"index"`
+				} `json:"choices"`
+			}
+			if json.Unmarshal([]byte(data), &envelope) == nil {
+				for _, ch := range envelope.Choices {
+					var index *int
+					if len(ch.Index) > 0 && json.Unmarshal(ch.Index, &index) != nil && choiceErr == nil {
+						choiceErr = fmt.Errorf("planner: %s: %w: invalid choice index", call.adapter.Provider(), ErrUpstreamIncompleteStream)
+					}
+				}
+			}
 			continue // tolerate a keep-alive or non-JSON heartbeat line
 		}
 		if serr := parseStreamErrorFrame(chunk.Error); serr != nil {
 			return nil, serr
 		}
+		// A Completion represents choice zero, never a concatenation of alternatives.
+		// Validate the entire frame before releasing any selected fragment. Keep a
+		// schema refusal latched while retaining provider/read error precedence.
+		seen := make(map[int]bool, len(chunk.Choices))
+		for _, ch := range chunk.Choices {
+			i := 0 // Legacy singleton chunks may omit the index.
+			if ch.Index != nil {
+				i = *ch.Index
+			}
+			if i < 0 || (completionProof.choices > 0 && i >= completionProof.choices) || seen[i] || (ch.Index == nil && len(chunk.Choices) > 1) {
+				if choiceErr == nil {
+					choiceErr = fmt.Errorf("planner: %s: %w: invalid or ambiguous choice index", call.adapter.Provider(), ErrUpstreamIncompleteStream)
+				}
+			}
+			seen[i] = true
+		}
+		if choiceErr != nil {
+			continue
+		}
 		if openAIChunkAdvancesTurn(chunk) {
-			sr.noteProgress() // real content/tool/finish — the TURN moved, not just the socket
+			promptProgress.enabled = false // prefill evidence cannot extend generation
+			sr.noteProgress()              // real content/tool/finish — the TURN moved, not just the socket
+		} else if promptProgress.advance(chunk.PromptProgress) {
+			sr.noteProgress() // configured upstream reports newly processed prompt tokens
+			if held != nil {
+				held()
+			}
 		}
 		if chunk.Model != "" {
 			model = chunk.Model
@@ -929,6 +1026,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			timings = parsed
 		}
 		for _, ch := range chunk.Choices {
+			if ch.FinishReason != "" {
+				completionProof.finish(ch.Index)
+			}
+			if ch.Index != nil && *ch.Index != 0 {
+				continue
+			}
+			selected = true
 			if ch.FinishReason != "" {
 				finish = ch.FinishReason
 			}
@@ -971,6 +1075,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			return nil, &UpstreamStalledError{Idle: window, Kind: kind, Err: err}
 		}
 		return nil, fmt.Errorf("planner: %s: stream read: %w", call.adapter.Provider(), err)
+	}
+
+	if choiceErr != nil {
+		return nil, choiceErr
+	}
+	if !selected || !completionProof.complete() {
+		return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), ErrUpstreamIncompleteStream)
 	}
 
 	calls := make([]ToolCall, 0, len(toolAcc))

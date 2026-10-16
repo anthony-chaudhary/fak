@@ -105,6 +105,7 @@ type geminiResponseContent struct {
 }
 
 type geminiResponsePart struct {
+	Thought          bool   `json:"thought,omitempty"`
 	Text             string `json:"text,omitempty"`
 	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 	FunctionCall     *struct {
@@ -455,7 +456,10 @@ func (a geminiAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 	var reasoning []string
 	var calls []ToolCall
 	for _, p := range c.Content.Parts {
-		if p.Text != "" {
+		if p.Text != "" && p.Thought {
+			// The provider explicitly classifies this text as a thought summary.
+			reasoning = append(reasoning, p.Text)
+		} else if p.Text != "" {
 			cText, rText := extractThinking(p.Text)
 			if cText != "" {
 				content = append(content, cText)
@@ -481,6 +485,9 @@ func (a geminiAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 		}
 	}
 	finish := strings.ToLower(c.FinishReason)
+	if finish == "max_tokens" {
+		finish = "length"
+	}
 	if len(calls) > 0 {
 		finish = "tool_calls"
 	}

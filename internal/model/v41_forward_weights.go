@@ -1448,13 +1448,17 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 							}
 						}
 						opStage = "lora"
-						for row := 0; row < rows; row++ {
-							s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
-						}
-						if head || guarded {
-							for _, v := range values {
-								if !finite32(v) {
-									return nil, errV41ProjectionResult
+						// SetLoRA/ClearLoRA switch adapters between steps. With no set,
+						// loraApply cannot change the already-validated projection.
+						if s.M.lora != nil {
+							for row := 0; row < rows; row++ {
+								s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
+							}
+							if head || guarded {
+								for _, v := range values {
+									if !finite32(v) {
+										return nil, errV41ProjectionResult
+									}
 								}
 							}
 						}

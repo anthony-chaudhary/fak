@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// ErrNoFinalAnswer marks a finished model turn that supplied only reasoning.
+// The message deliberately contains no provider text.
+var ErrNoFinalAnswer = errors.New("agent: model ended without a final answer")
+
 // Termination describes a client-safe, closed classification of a failed owned turn.
 type Termination struct {
 	Cause    string `json:"cause"`
@@ -13,13 +17,14 @@ type Termination struct {
 }
 
 const (
-	TerminationCanceled     = "canceled"
-	TerminationRateLimited  = "rate_limited"
-	TerminationContextLimit = "context_limit"
-	TerminationAuth         = "authentication"
-	TerminationRefused      = "refused"
-	TerminationProvider     = "provider_error"
-	TerminationUnknown      = "unknown"
+	TerminationNoFinalAnswer = "no_final_answer"
+	TerminationCanceled      = "canceled"
+	TerminationRateLimited   = "rate_limited"
+	TerminationContextLimit  = "context_limit"
+	TerminationAuth          = "authentication"
+	TerminationRefused       = "refused"
+	TerminationProvider      = "provider_error"
+	TerminationUnknown       = "unknown"
 )
 
 // ClassifyTermination deliberately uses only stable error signals and bounded,
@@ -30,6 +35,9 @@ func ClassifyTermination(err error) Termination {
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return Termination{Cause: TerminationCanceled, Evidence: "request context ended"}
+	}
+	if errors.Is(err, ErrNoFinalAnswer) {
+		return Termination{Cause: TerminationNoFinalAnswer, Evidence: "model ended without a final answer"}
 	}
 	s := strings.ToLower(err.Error())
 	switch {

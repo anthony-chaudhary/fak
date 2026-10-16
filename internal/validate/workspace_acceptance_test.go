@@ -179,3 +179,58 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// fak-test:runtime medium est=30s lane=default
+func TestRunPreservesThreeModuleWorkspaceAndTestsCandidate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	t.Setenv("GOWORK", "")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOPROXY", "off")
+	parent := t.TempDir()
+	publicRoot := filepath.Join(parent, "fak")
+	privateRoot := filepath.Join(parent, "private")
+	companionRoot := filepath.Join(parent, "companion")
+	commitFixture(t, publicRoot, map[string]string{
+		"go.mod":         "module github.com/anthony-chaudhary/fak\n\ngo 1.26\n",
+		"value/value.go": "package value\nfunc Number() int { return 20 }\n",
+	})
+	commitFixture(t, companionRoot, map[string]string{
+		"go.mod":   "module fixture.test/companion\n\ngo 1.26\n",
+		"value.go": "package companion\nfunc Number() int { return 22 }\n",
+	})
+	commitFixture(t, privateRoot, map[string]string{
+		"go.mod":          "module fixture.test/private\n\ngo 1.26\nrequire (\n github.com/anthony-chaudhary/fak v0.0.0\n fixture.test/companion v0.0.0\n)\n",
+		"app/app.go":      "package app\nimport (\n \"github.com/anthony-chaudhary/fak/value\"\n companion \"fixture.test/companion\"\n)\nfunc Got() int { return value.Number()+companion.Number() }\n",
+		"app/app_test.go": "package app\nimport \"testing\"\nfunc TestCandidate(t *testing.T) { if Got()!=42 { t.Fatalf(\"candidate got %d\", Got()) } }\n",
+	})
+	originalWork := "go 1.26\nuse (\n ./private\n ./fak\n ./companion\n)\n"
+	writeFixtureFile(t, filepath.Join(parent, "go.work"), originalWork)
+	// The committed candidate is healthy; the source worktree's unowned file
+	// deliberately fails. A workspace still pointing at sourceRoot cannot pass.
+	writeFixtureFile(t, filepath.Join(privateRoot, "app", "app.go"), "package app\nfunc Got() int { return -1 }\n")
+	var stdout, stderr bytes.Buffer
+	code := validate.Run(&stdout, &stderr, []string{
+		"--root", privateRoot, "--mine", "app/app_test.go", "--wsl-tests=false", "--progress=false", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("Run code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var got validationReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || !got.OK {
+		t.Fatalf("receipt: %v %+v", err, got)
+	}
+	if !containsString(got.Tested, "fixture.test/private/app") {
+		t.Fatalf("candidate package not tested: %v", got.Tested)
+	}
+	for _, name := range []string{"build", "vet", "test"} {
+		if status, present := phaseStatus(got, name); !present || status != "ok" {
+			t.Fatalf("phase %s: %s present=%v", name, status, present)
+		}
+	}
+	work, err := os.ReadFile(filepath.Join(parent, "go.work"))
+	if err != nil || string(work) != originalWork {
+		t.Fatal("source workspace changed")
+	}
+}

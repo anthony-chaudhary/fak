@@ -316,6 +316,9 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	if ar.Error != nil {
 		return nil, fmt.Errorf("api error: %s", ar.Error.Message)
 	}
+	if ar.Content == nil {
+		return nil, fmt.Errorf("missing or null content array")
+	}
 	var content []string
 	var calls []ToolCall
 	var thinking []string

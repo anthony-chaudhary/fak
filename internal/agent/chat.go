@@ -64,12 +64,14 @@ type Func struct {
 func (f *Func) UnmarshalJSON(raw []byte) error {
 	var aux struct {
 		Name      string          `json:"name"`
+		Namespace string          `json:"namespace,omitempty"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return err
 	}
 	f.Name = aux.Name
+	f.Namespace = aux.Namespace
 	f.Arguments = ""
 	arg := bytes.TrimSpace(aux.Arguments)
 	if len(arg) == 0 || bytes.Equal(arg, []byte("null")) {
@@ -395,18 +397,27 @@ func (u Usage) UncachedPromptTokens() int {
 // those counters are added back so the budget reflects the full context the model
 // attended to.
 func (u Usage) ContextWindowTokens() int {
+	// Provider counts remain untouched. A positive sum beyond int capacity
+	// must exhaust a finite context budget, not wrap negative and skip its debit.
+	add := func(a, b int) int {
+		maxInt := int(^uint(0) >> 1)
+		if b > 0 && a > maxInt-b {
+			return maxInt
+		}
+		return a + b
+	}
 	n := u.PromptTokens
 	// DeepSeek folds hit + miss INTO prompt_tokens (like OpenAI), so its cache counters
 	// are NOT added again — that would double-count the resident context. Only when a
 	// wire omits prompt_tokens entirely do the two counters reconstruct it.
 	if n == 0 && (u.PromptCacheHitTokens > 0 || u.PromptCacheMissTokens > 0) {
-		n = u.PromptCacheHitTokens + u.PromptCacheMissTokens
+		n = add(u.PromptCacheHitTokens, u.PromptCacheMissTokens)
 	}
 	if u.CacheReadInputTokens > 0 {
-		n += u.CacheReadInputTokens
+		n = add(n, u.CacheReadInputTokens)
 	}
 	if u.CacheCreationInputTokens > 0 {
-		n += u.CacheCreationInputTokens
+		n = add(n, u.CacheCreationInputTokens)
 	}
 	return n
 }

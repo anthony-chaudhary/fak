@@ -13,6 +13,7 @@ func openAIResponsesSSEFinalResponse(raw []byte) ([]byte, error) {
 		event       string
 		data        []string
 		final       []byte
+		firstError  []byte
 		outputItems []responsesSSEOutputItem
 	)
 	flush := func() error {
@@ -39,6 +40,15 @@ func openAIResponsesSSEFinalResponse(raw []byte) ([]byte, error) {
 			return err
 		}
 		if ok {
+			var envelope struct {
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(resp, &envelope) == nil && len(envelope.Error) > 0 &&
+				!bytes.Equal(bytes.TrimSpace(envelope.Error), []byte("null")) && firstError == nil {
+				// Keep the first provider failure even if a later event claims success.
+				// Returning its envelope preserves the adapter's existing API error path.
+				firstError = resp
+			}
 			final = resp
 		}
 		return nil
@@ -61,6 +71,9 @@ func openAIResponsesSSEFinalResponse(raw []byte) ([]byte, error) {
 	if err := flush(); err != nil {
 		return nil, err
 	}
+	if firstError != nil {
+		return firstError, nil
+	}
 	if len(final) > 0 {
 		return openAIResponsesSSEFillOutput(final, outputItems)
 	}
@@ -72,7 +85,8 @@ func openAIResponsesSSEPayloadResponse(raw []byte, event string) ([]byte, bool, 
 	if err := json.Unmarshal(raw, &top); err != nil {
 		return nil, false, fmt.Errorf("decode SSE data: %w (data: %s)", err, truncate(raw, 200))
 	}
-	typ := strings.Trim(string(top["type"]), `"`)
+	var typ string
+	_ = json.Unmarshal(top["type"], &typ)
 	for _, terminal := range []string{"response.failed", "response.incomplete"} {
 		if event != terminal && typ != terminal {
 			continue
@@ -87,6 +101,16 @@ func openAIResponsesSSEPayloadResponse(raw []byte, event string) ([]byte, bool, 
 			return nil, false, fmt.Errorf("%s: decode response: %w", terminal, err)
 		}
 		return nil, false, fmt.Errorf("%s: error=%s incomplete_details=%s", terminal, response.Error, response.IncompleteDetails)
+	}
+	if apiError := top["error"]; len(apiError) > 0 && !bytes.Equal(bytes.TrimSpace(apiError), []byte("null")) {
+		return append([]byte(nil), raw...), true, nil
+	}
+	if event == "error" || typ == "error" {
+		// The Responses error event puts code/message/param at the top level.
+		// Wrap it in the existing adapter envelope without releasing any output.
+		wrapped := append([]byte(`{"error":`), raw...)
+		wrapped = append(wrapped, '}')
+		return wrapped, true, nil
 	}
 	if resp := top["response"]; len(resp) > 0 && (event == "response.completed" || typ == "response.completed") {
 		return append([]byte(nil), resp...), true, nil
@@ -124,7 +148,8 @@ func openAIResponsesSSEOutputItem(raw []byte, event string, fallbackIndex int) (
 	index := fallbackIndex
 	if rawIndex := top["output_index"]; len(rawIndex) > 0 {
 		var n int
-		if err := json.Unmarshal(rawIndex, &n); err == nil {
+		index = -1 // Defer malformed-index refusal until fragments are needed.
+		if err := json.Unmarshal(rawIndex, &n); err == nil && !bytes.Equal(bytes.TrimSpace(rawIndex), []byte("null")) {
 			index = n
 		}
 	}
@@ -132,6 +157,9 @@ func openAIResponsesSSEOutputItem(raw []byte, event string, fallbackIndex int) (
 }
 
 func openAIResponsesSSEFillOutput(final []byte, outputItems []responsesSSEOutputItem) ([]byte, error) {
+	if bytes.Equal(bytes.TrimSpace(final), []byte("null")) {
+		return nil, fmt.Errorf("response.completed payload is null")
+	}
 	if len(outputItems) == 0 {
 		return final, nil
 	}
@@ -144,6 +172,19 @@ func openAIResponsesSSEFillOutput(final []byte, outputItems []responsesSSEOutput
 		if err := json.Unmarshal(existing, &out); err == nil && len(out) > 0 {
 			return final, nil
 		}
+	}
+	// A populated final output is authoritative above. Only reconstructed
+	// fragments need an unambiguous position; do not turn one repeated item into
+	// separate tool actions when later normalization generates distinct call IDs.
+	seen := make(map[int]bool, len(outputItems))
+	for _, item := range outputItems {
+		if item.index < 0 {
+			return nil, fmt.Errorf("response.output_item.done invalid output_index")
+		}
+		if seen[item.index] {
+			return nil, fmt.Errorf("response.output_item.done duplicate output_index %d", item.index)
+		}
+		seen[item.index] = true
 	}
 	sort.SliceStable(outputItems, func(i, j int) bool {
 		return outputItems[i].index < outputItems[j].index

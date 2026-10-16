@@ -53,7 +53,12 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 	cur.Cost = cur.Cost.push(TurnCost{OutputTokens: u.OutputTokens, ContextTokens: u.ContextTokens})
 	changed = true
 	if u.OutputTokens > 0 && !cur.Budget.tokensUnbounded() {
-		cur.Budget.TokensLeft -= u.OutputTokens
+		// A finite budget must never cross into the negative unbounded sentinel.
+		if u.OutputTokens >= cur.Budget.TokensLeft {
+			cur.Budget.TokensLeft = 0
+		} else {
+			cur.Budget.TokensLeft -= u.OutputTokens
+		}
 		changed = true
 	}
 	// Spend ceiling FIRST: money is the hardest ceiling, so when one turn crosses
