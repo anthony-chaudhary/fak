@@ -33,11 +33,18 @@ func v41TypedReadbackLayout(sizes []int, rows int, littleEndian bool) (prefix, t
 	if !littleEndian || rows != 1 || len(sizes) == 0 || len(sizes) > v41ReadbackRetainedPrefixMax/16+1 {
 		return 0, 0, false
 	}
+	// Index selection has exactly one 4-byte status word. Its row remains
+	// float32-aligned; the shared layout pads this prefix to 16 bytes.
+	indexStatus := len(sizes) == 2 && sizes[0] == 4
 	for _, n := range sizes[:len(sizes)-1] {
-		if n <= 0 || n%16 != 0 || n > v41ReadbackRetainedPrefixMax-prefix {
+		if n <= 0 || (n%16 != 0 && !indexStatus) || n > v41ReadbackRetainedPrefixMax-prefix {
 			return 0, 0, false
 		}
-		prefix += n
+		if indexStatus {
+			prefix += 16 // v41DeferredLayout aligns the following row to 16 bytes.
+		} else {
+			prefix += n
+		}
 	}
 	payload := sizes[len(sizes)-1]
 	if payload <= 0 || payload%4 != 0 || prefix > payload || payload > math.MaxInt-prefix {

@@ -36,19 +36,52 @@ func (s *Session) v41IndexSelectFunc() v41IndexSelectFunc {
 		!compute.BackendSupportsDeviceWeightDtype(s.Backend, compute.F32) {
 		return nil
 	}
-	operation, ok := s.Backend.(v41IndexSelectBackend)
+	backend := s.Backend
+	operation, ok := backend.(v41IndexSelectBackend)
 	if !ok || !operation.V41IndexSelectAvailable() {
 		return nil
 	}
 	return func(layer int, scores []float32, topK, topKBlocks, blockSize int) (result []int32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
-		closeFailure := func(err error) error {
-			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-index-select", Layer: layer, Stage: stage, Cause: err}
-			s.halFailure = closed
+		closeSelected := func(primary error) {
+			if s.halFailure == nil {
+				s.halFailure = primary
+			}
+			if s.halClosed {
+				return
+			}
+			// A secondary Close panic must not replace the selected failure
+			// or leave this session eligible for another operation.
+			defer func() { s.halClosed = true; _ = recover() }()
 			s.closeBackendOwned()
+		}
+		closeFailure := func(err error) error {
+			if s.halFailure != nil {
+				closeSelected(s.halFailure)
+				return s.halFailure
+			}
+			closed := &BackendForwardOperationError{Backend: backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-index-select", Layer: layer, Stage: stage, Cause: err}
+			closeSelected(closed)
 			return closed
 		}
+		ownedReadStarted, ownedReadReturned, ownedReadCompleted := false, false, false
+		var ownedReadPrimary error
+		// This outer completion fence runs after run's transient cleanup. Goexit
+		// does not return the backend error; it must still retire the selected
+		// session without closing it before input cleanup has been attempted.
+		defer func() {
+			if ownedReadStarted && !ownedReadCompleted {
+				result = nil
+				if cause == nil {
+					cause = ownedReadPrimary
+				}
+				if cause == nil {
+					cause = errV41IndexSelectResult
+				}
+				cause = closeFailure(cause)
+			}
+		}()
 		defer func() {
 			if r := recover(); r != nil {
 				if err, ok := r.(error); ok {
@@ -93,45 +126,78 @@ func (s *Session) v41IndexSelectFunc() v41IndexSelectFunc {
 		run := func() (result []int32, cause error) {
 			var owned []compute.Tensor
 			defer func() {
-				// Preserve the selected operation's error or original panic,
-				// while still attempting every owned release.
 				primaryPanic := recover()
+				// Preserve the selected primary if cleanup itself calls Goexit,
+				// which prevents run's return values reaching the outer frame.
+				if ownedReadStarted && !ownedReadCompleted {
+					ownedReadPrimary = cause
+					if ownedReadPrimary == nil && primaryPanic != nil {
+						if err, ok := primaryPanic.(error); ok {
+							ownedReadPrimary = err
+						} else {
+							ownedReadPrimary = fmt.Errorf("unclassified backend panic: %v", primaryPanic)
+						}
+					}
+					if ownedReadPrimary == nil && !ownedReadReturned {
+						ownedReadPrimary = errV41IndexSelectResult
+						cause = ownedReadPrimary
+					}
+				}
 				var cleanupPanic any
+				cleanupInterrupted := false
 				for i := len(owned) - 1; i >= 0; i-- {
 					func() {
+						released := false
 						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
+							r := recover()
+							if !released && !cleanupInterrupted {
+								cleanupPanic, cleanupInterrupted = r, true
 							}
 						}()
 						s.Backend.Free(owned[i])
+						released = true
 					}()
 				}
 				if primaryPanic != nil {
 					panic(primaryPanic)
 				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
+				if cause == nil && cleanupInterrupted {
+					if cleanupPanic != nil {
+						panic(cleanupPanic)
+					}
+					cause = errV41IndexSelectResult
 				}
 			}()
 			stage = "score upload"
 			st := s.uploadHostF32([]int{rows}, scores, compute.MemoryActivation, "V4.1 index-select scores")
 			owned = append(owned, st)
 			stage = "index-select"
-			selected, err := operation.V41IndexSelect(st, rows, topK, topKBlocks, blockSize)
-			fresh := selected.Buf() != nil && selected.Backend() == s.Backend && selected.Buf() != st.Buf()
-			if fresh {
-				owned = append(owned, selected)
+			ownedReadStarted = true
+			values, chosen, readErr := compute.TryV41IndexSelectReadOwned(backend, st, rows, topK, topKBlocks, blockSize)
+			ownedReadReturned = true
+			if chosen || readErr != nil {
+				if readErr != nil {
+					return nil, readErr
+				}
+				stage = "selection readback"
+			} else {
+				ownedReadCompleted = true
+				selected, err := operation.V41IndexSelect(st, rows, topK, topKBlocks, blockSize)
+				fresh := selected.Buf() != nil && selected.Backend() == s.Backend && selected.Buf() != st.Buf()
+				if fresh {
+					owned = append(owned, selected)
+				}
+				if err != nil {
+					return nil, err
+				}
+				if !fresh || selected.Dtype != compute.F32 || selected.Layout != compute.RowMajor || selected.Quant != nil ||
+					len(selected.Shape) != 1 || selected.Shape[0] != want {
+					return nil, errV41IndexSelectResult
+				}
+				stage = "selection readback"
+				values = s.Backend.Read(selected)
 			}
-			if err != nil {
-				return nil, err
-			}
-			if !fresh || selected.Dtype != compute.F32 || selected.Layout != compute.RowMajor || selected.Quant != nil ||
-				len(selected.Shape) != 1 || selected.Shape[0] != want {
-				return nil, errV41IndexSelectResult
-			}
-			stage = "selection readback"
-			values := s.Backend.Read(selected)
+
 			if len(values) != want {
 				return nil, errV41IndexSelectResult
 			}
@@ -154,6 +220,9 @@ func (s *Session) v41IndexSelectFunc() v41IndexSelectFunc {
 			return out, nil
 		}
 		result, cause = run()
+		if ownedReadReturned {
+			ownedReadCompleted = true
+		}
 		if cause != nil {
 			return nil, closeFailure(cause)
 		}
