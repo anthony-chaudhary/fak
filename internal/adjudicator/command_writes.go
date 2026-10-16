@@ -203,7 +203,7 @@ func commandWrites(cmd string) bool {
 // whose target is a real file, as opposed to an fd-duplication (`2>&1`, `>&2`,
 // `1>&2`) or a redirect to the null device (`2>/dev/null`, `>/dev/null`) — neither
 // of which writes a named file. It keeps commandWrites true to its documented
-// "a read is allowed; only a write is refused" contract: the pervasive trailing
+// "a read is allowed; only a write is refused" contract, so the pervasive trailing
 // `… 2>/dev/null` / `… 2>&1` stderr idiom on an otherwise read-only command no
 // longer marks it write-shaped, while a genuine `> path` (including
 // `>> internal/kernel/x.go` or `> ~/.ssh/id_rsa`) still does. Conservative on the
