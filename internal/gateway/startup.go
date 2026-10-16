@@ -240,6 +240,11 @@ type ModelLoadMemoryCapacity struct {
 // fak_model_load_* metric entirely, so an empty series never masquerades as a 0ms
 // load.
 type ModelLoadProfile struct {
+	// LoadID identifies this profile installation, not a model path or cache state.
+	LoadID string
+	// RecordedUnixMS is the profile installation time, not measured load completion.
+	RecordedUnixMS      int64
+	requestOrdinal      uint64
 	Source              string
 	Mode                string
 	TotalSeconds        float64
@@ -561,5 +566,33 @@ func (s *Server) writeModelLoadMetrics(b *strings.Builder) {
 			fmt.Fprintf(b, "fak_model_load_memory_fit_bytes{scope=\"%s\",kind=\"margin\"} %d\n",
 				promQuote(row.Scope), row.MarginBytes)
 		}
+	}
+}
+
+type modelLoadLifecycle struct {
+	LoadID         string
+	RecordedUnixMS int64
+	LoadSeconds    float64
+	RequestOrdinal uint64
+}
+
+// captureModelLoadLifecycle counts model-facing admissions, including probes and
+// failed requests. Cache warmth and successful completion are separate facts.
+func (s *Server) captureModelLoadLifecycle() modelLoadLifecycle {
+	if s == nil {
+		return modelLoadLifecycle{}
+	}
+	s.modelLoadMu.Lock()
+	defer s.modelLoadMu.Unlock()
+	if s.modelLoad == nil {
+		return modelLoadLifecycle{}
+	}
+	p := s.modelLoad
+	p.requestOrdinal++
+	return modelLoadLifecycle{
+		LoadID:         p.LoadID,
+		RecordedUnixMS: p.RecordedUnixMS,
+		LoadSeconds:    p.TotalSeconds,
+		RequestOrdinal: p.requestOrdinal,
 	}
 }

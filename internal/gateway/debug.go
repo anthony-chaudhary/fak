@@ -327,6 +327,8 @@ type debugMetricsVars struct {
 }
 
 type debugModelLoadVars struct {
+	LoadID              string                         `json:"load_id"`
+	RecordedUnixMS      int64                          `json:"recorded_unix_ms"`
 	Source              string                         `json:"source"`
 	Mode                string                         `json:"mode"`
 	TotalSeconds        float64                        `json:"total_seconds"`
@@ -1183,6 +1185,8 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 		return nil
 	}
 	out := &debugModelLoadVars{
+		LoadID:              p.LoadID,
+		RecordedUnixMS:      p.RecordedUnixMS,
 		Source:              p.Source,
 		Mode:                p.Mode,
 		TotalSeconds:        p.TotalSeconds,

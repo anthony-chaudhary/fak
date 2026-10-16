@@ -932,6 +932,11 @@ func (s *Server) SetModelLoadProfile(p *ModelLoadProfile) {
 	}
 	s.modelLoadMu.Lock()
 	s.modelLoad = p.clone()
+	if s.modelLoad != nil {
+		s.modelLoad.LoadID = randomHex(16)
+		s.modelLoad.RecordedUnixMS = time.Now().UnixMilli()
+		s.modelLoad.requestOrdinal = 0
+	}
 	s.modelLoadMu.Unlock()
 }
 
