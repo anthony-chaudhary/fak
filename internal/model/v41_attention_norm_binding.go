@@ -1,6 +1,9 @@
 package model
 
-import "github.com/anthony-chaudhary/fak/internal/compute"
+import (
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
+)
 
 // v41AttentionNormBinding keeps both ordinary attention-input norm edges with
 // their optional canonical owner. Replacing either edge discards panel authority;
@@ -76,6 +79,9 @@ func (s *v41ProjScratch) attentionBF16Func() v41BF16BoundaryFunc {
 // Within a selected chunk, numerical checks and output publications retain that
 // order; physical dispatch and cleanup timing intentionally become chunk-local.
 func (b *v41AttentionNormBinding) coldPanel(m *Model, st *v41ForwardState, scratch *v41ProjScratch, resident *v41MHCResident, layer int, input [][]float32, eps float32) ([][]float32, bool, error) {
+	if scratch != nil {
+		scratch.attentionInputPanel = nil
+	}
 	if b == nil || b.native == nil || len(input) <= 1 {
 		return nil, false, nil
 	}
@@ -102,10 +108,18 @@ func (b *v41AttentionNormBinding) coldPanel(m *Model, st *v41ForwardState, scrat
 			return nil, false, nil
 		}
 	}
+	// A loan is eligible only before any normalized storage exists. Canonical
+	// Read returns fresh storage; canonical publication/upload neither exposes
+	// nor retains it. Observers, clocks and replacement callbacks retain the
+	// snapshot path. Pointer equality below checks identity, not ownership.
+	loan := b.newInputPanel(m, st, scratch, layer, width, len(input))
 	output := make([][]float32, len(input))
 	for lo := 0; lo < len(input); lo += v41ProjPanelRowChunk {
 		if !valid() {
 			return nil, true, n.failBinding()
+		}
+		if loan != nil && !loan.valid(scratch) {
+			loan = nil
 		}
 		hi := min(lo+v41ProjPanelRowChunk, len(input))
 		count, ok := checkedMulInt(hi-lo, width)
@@ -131,10 +145,23 @@ func (b *v41AttentionNormBinding) coldPanel(m *Model, st *v41ForwardState, scrat
 		if !valid() {
 			return nil, true, n.failBinding()
 		}
+		if loan != nil {
+			if loan.valid(scratch) {
+				loan.chunks = append(loan.chunks, values)
+			} else {
+				loan = nil
+			}
+		}
 		for row := lo; row < hi; row++ {
 			start := (row - lo) * width
 			output[row] = values[start : start+width : start+width]
 		}
+	}
+	// Publish only after the complete norm panel succeeds. This scratch belongs
+	// to forwardV41's stack-local continuation; neither chunks nor row headers
+	// enter Session state before QKV has consumed both projections.
+	if loan != nil && loan.valid(scratch) && loan.matches(layer, width, output) {
+		scratch.attentionInputPanel = loan
 	}
 	return output, true, nil
 }
@@ -191,4 +218,125 @@ func v41ReleaseNormPanelTensors(backend compute.Backend, owned *[]compute.Tensor
 			returned = true
 		}(tensor)
 	}
+}
+
+// v41AttentionInputPanel is a private synchronous loan from coldPanel to QKV.
+// It is not a generic slice-admission API: only the canonical producer mints it,
+// before its fresh rows can escape. The forward remains exclusive and its
+// configuration, adapters and callback bindings remain immutable until return.
+type v41AttentionInputPanel struct {
+	owner              *Session
+	model              *Model
+	backend            compute.Backend
+	state              *v41ForwardState
+	norm               *v41AttentionNormBinding
+	route              *v41ProjectionRouteBinding
+	query              *v41QueryNormBinding
+	gather             *v41DeviceGatherOps
+	publication        *v41BF16PublicationBinding
+	scope              *backendExecutionScope
+	epoch              uint64
+	layer, width, rows int
+	chunks             [][]float32
+}
+
+func (b *v41AttentionNormBinding) newInputPanel(m *Model, st *v41ForwardState, scratch *v41ProjScratch, layer, width, rows int) *v41AttentionInputPanel {
+	if b == nil || b.native == nil || b.native.owner == nil || scratch == nil || rows <= 1 {
+		return nil
+	}
+	s := b.native.owner
+	p := &v41AttentionInputPanel{owner: s, model: m, backend: b.native.backend, state: st, norm: b,
+		route: scratch.projectionRoute, query: scratch.queryNorm, gather: scratch.gatherOps,
+		scope: s.backendExecutionScope, epoch: s.cacheGeometryEpoch, layer: layer, width: width, rows: rows}
+	if p.query != nil {
+		p.publication = p.query.publication
+	}
+	if !p.valid(scratch) {
+		return nil
+	}
+	p.chunks = make([][]float32, 0, 1+(rows-1)/v41ProjPanelRowChunk)
+	return p
+}
+
+func (p *v41AttentionInputPanel) valid(scratch *v41ProjScratch) bool {
+	return p != nil && compute.V41HostInputBorrowSafe(p.backend) && p.scopeValid(scratch)
+}
+
+// scopeValid alone grants no borrow authority; valid also requires the sealed
+// exact backend. Keeping the metadata predicate separate permits CPU-only
+// regression checks without forging a canonical device backend.
+func (p *v41AttentionInputPanel) scopeValid(scratch *v41ProjScratch) bool {
+	if p == nil || p.owner == nil || p.model == nil || scratch == nil || p.state == nil ||
+		p.norm == nil || p.norm.native == nil || p.route == nil || p.query == nil || p.gather == nil || p.publication == nil ||
+		scratch.activationTrace != nil || computetrace.Emitting() {
+		return false
+	}
+	s, m, state := p.owner, p.model, p.state
+	n, dense, query, publication := p.norm.native, p.route.nativeProjection, p.query, p.publication
+	if s.M != m || s.Backend != p.backend || s.halClosed || s.halFailure != nil || !s.modelWeightsHeld ||
+		s.v41Forward != state || state.callbackOwner != s || s.backendExecutionScope != p.scope || s.cacheGeometryEpoch != p.epoch ||
+		p.scope == nil || !p.scope.live || p.scope.owner == nil || m.lora != nil || m.prism != nil ||
+		p.layer < 0 || p.layer >= m.Cfg.NumLayers || p.width != m.Cfg.HiddenSize ||
+		n.owner != s || n.model != m || n.backend != p.backend || p.norm.normalize == nil || p.norm.publish == nil ||
+		state.attentionNormBinding != p.norm || scratch.attentionNormBinding != p.norm ||
+		state.projectionRoute != p.route || scratch.projectionRoute != p.route || dense.core == nil || dense.ordinary == nil ||
+		dense.owner != s || dense.model != m || dense.backend != p.backend || (p.route.deviceOnly != nil && p.route.deviceOnly != s) ||
+		state.queryNorm != query || scratch.queryNorm != query || query.ordinary == nil || query.owner != s || query.model != m || query.backend != p.backend ||
+		query.publication != publication || publication.core == nil || publication.ordinary == nil || publication.owner != s || publication.model != m || publication.backend != p.backend ||
+		state.gatherOps != p.gather || scratch.gatherOps != p.gather || p.gather.owner != s || p.gather.bf16Publish != publication {
+		return false
+	}
+	member := false
+	for _, candidate := range p.scope.sessions {
+		if candidate == s {
+			member = true
+			break
+		}
+	}
+	if !member {
+		return false
+	}
+	// The normal ledger is harmless. An injected clock is a callback and may
+	// mutate captured rows, so it must keep the original snapshot semantics.
+	if ledger := v41ExpertFaultLedgerOf(m, false); ledger != nil {
+		ledger.mu.Lock()
+		custom := ledger.nowNanos != nil
+		ledger.mu.Unlock()
+		if custom {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *v41AttentionInputPanel) matches(layer, width int, rows [][]float32) bool {
+	if p == nil || p.layer != layer || p.width != width || width <= 0 || p.rows != len(rows) || len(rows) <= 1 ||
+		len(p.chunks) != 1+(len(rows)-1)/v41ProjPanelRowChunk {
+		return false
+	}
+	for lo, chunk := range p.chunks {
+		start := lo * v41ProjPanelRowChunk
+		hi := min(start+v41ProjPanelRowChunk, len(rows))
+		count, ok := checkedMulInt(hi-start, width)
+		if !ok || len(chunk) != count {
+			return false
+		}
+		for row := start; row < hi; row++ {
+			if len(rows[row]) != width || cap(rows[row]) != width || &rows[row][0] != &chunk[(row-start)*width] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (p *v41AttentionInputPanel) fail() error {
+	s := p.owner
+	if s.halFailure == nil {
+		s.halFailure = &BackendForwardOperationError{Backend: p.backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-attention-input-panel", Layer: p.layer, Stage: "panel binding", Cause: errV41ProjectionResult}
+	}
+	if !s.halClosed {
+		func() { defer func() { s.halClosed = true; _ = recover() }(); s.closeBackendOwned() }()
+	}
+	return s.halFailure
 }

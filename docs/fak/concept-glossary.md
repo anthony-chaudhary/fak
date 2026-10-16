@@ -1434,3 +1434,10 @@ Gateway gauges labeled by backend and kind for request-transient device buffers 
 Gateway gauge labeled by backend for the current count of request-transient device buffers parked for reuse. It is emitted only when the optional backend pool reporter supplies an observation.
 
 **Distinct from:** Counts parked buffers rather than gateway operation latency or bytes; unlike fak_gateway_device_transient_pool_bytes it does not describe buffer size and cannot be used as a memory budget.
+
+
+### v41AttentionInputPanel
+
+Private call-scoped loan of freshly normalized cold-prefill activation chunks to the Q and KV projections. It captures canonical Session, Model, Backend, binding, execution-scope and cache-epoch identities; the attentionInputPanel scratch field carries the same loan only until synchronous QKV completion.
+
+**Distinct from:** Unlike v41SharedAttentionRows, this holds normalized projection inputs rather than borrowed attention KV rows. Unlike v41SharedAttentionContinuation, it governs a multi-row cold-prefill input lifetime rather than single-token attention eligibility. It neither owns persistent KV state nor grants general zero-copy or device authority.

@@ -58,13 +58,28 @@ func (m *Model) v41ProjPanel(l int, leaf string, panel []float32, out, in, seq i
 	return m.v41ProjPanelWithProjection(l, leaf, panel, out, in, seq, nil)
 }
 func (m *Model) v41ProjPanelWithProjection(l int, leaf string, panel []float32, out, in, seq int, project v41DenseProjectionFunc) ([]float32, error) {
+	return m.v41ProjPanelWithInput(l, leaf, panel, out, in, seq, project, nil, nil)
+}
+
+// A nonnil loan is selected by QKV before its first projection. It retains the
+// same chunking, projection calls, output copies and error order; a scope fault
+// after selection is fatal and never retries with a newly copied input.
+func (m *Model) v41ProjPanelWithInput(l int, leaf string, panel []float32, out, in, seq int, project v41DenseProjectionFunc, loan *v41AttentionInputPanel, scratch *v41ProjScratch) ([]float32, error) {
 	if seq <= 0 {
 		return nil, nil
 	}
 	inputN, ok := checkedMulInt(seq, in)
 	outputN, outputOK := checkedMulInt(seq, out)
 	_, weightOK := checkedMulInt(out, in)
-	if in <= 0 || out <= 0 || !ok || !outputOK || !weightOK || len(panel) != inputN {
+	inputOK := len(panel) == inputN
+	if loan != nil {
+		if !loan.valid(scratch) || loan.model != m || loan.layer != l || loan.width != in || loan.rows != seq ||
+			(leaf != "attn.wq_a.weight" && leaf != "attn.wkv.weight") || len(loan.chunks) != 1+(seq-1)/v41ProjPanelRowChunk {
+			return nil, v41ProjectionOperationErr(l, leaf, loan.fail())
+		}
+		inputOK = true
+	}
+	if in <= 0 || out <= 0 || !ok || !outputOK || !weightOK || !inputOK {
 		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid projection panel dimensions", ErrV41ForwardStage))
 	}
 	name := layerName(l, leaf)
@@ -82,9 +97,21 @@ func (m *Model) v41ProjPanelWithProjection(l int, leaf string, panel []float32, 
 		if n > 1 {
 			v41PanelInvocationCount.Add(1)
 		}
-		batch, err := m.v41ProjectionRows(l, leaf, panel[lo*in:hi*in], out, in, n, project)
+		var input []float32
+		if loan == nil {
+			input = panel[lo*in : hi*in]
+		} else {
+			if !loan.valid(scratch) || scratch.attentionInputPanel != loan || len(loan.chunks[lo/v41ProjPanelRowChunk]) != n*in {
+				return nil, v41ProjectionOperationErr(l, leaf, loan.fail())
+			}
+			input = loan.chunks[lo/v41ProjPanelRowChunk]
+		}
+		batch, err := m.v41ProjectionRows(l, leaf, input, out, in, n, project)
 		if err != nil {
 			return nil, err
+		}
+		if loan != nil && (!loan.valid(scratch) || scratch.attentionInputPanel != loan) {
+			return nil, v41ProjectionOperationErr(l, leaf, loan.fail())
 		}
 		copy(y[lo*out:hi*out], batch)
 		lo = hi

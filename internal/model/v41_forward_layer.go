@@ -119,6 +119,7 @@ func (scratch *v41ProjScratch) clearLayerSessionBindings() {
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil
 	scratch.mhcFFNProjection = nil
+	scratch.attentionInputPanel = nil
 	scratch.attentionNormBinding = nil
 	scratch.queryNorm = nil
 	scratch.queryPrefix = nil
@@ -240,6 +241,7 @@ func (m *Model) v41LayerRequireProjectionWeights(l int) error {
 // byte-identical to pre-#13009.
 func (m *Model) v41LayerMHCPre(l int, x [][]float32, streams [][][]float32, full bool, H int, eps float32, hcIters int, hcEps float32, attnNorm, mixBase, mixScale []float32, mhcDevice *v41MHCDevice, resident *v41MHCResident, st *v41ForwardState, scratch *v41ProjScratch) ([]v41MHCMix, [][]float32, error) {
 	cfg := m.Cfg
+	scratch.attentionInputPanel = nil
 	seq := len(x)
 	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
 	if !mhcOK {
@@ -356,6 +358,7 @@ type v41LayerQKV struct {
 // is byte-for-byte the per-token v41ProjMatRows path; seq==1 (decode) stays
 // entirely on that scalar path.
 func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, hd, nH, H int, eps float32, scratch *v41ProjScratch, trace *v41ActivationTraceState) (v41LayerQKV, error) {
+	defer func() { scratch.attentionInputPanel = nil }()
 	cfg := m.Cfg
 	out := v41LayerQKV{
 		qHeads:   make([][]float32, seq),
@@ -371,11 +374,21 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 		return out, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
-	preFlat := make([]float32, seq*H)
-	for t := 0; t < seq; t++ {
-		copy(preFlat[t*H:(t+1)*H], preByPos[t])
+	// The old joined panel is a snapshot reused after query-normalization and
+	// wq_b callbacks. Borrow only the private canonical producer's chunks and
+	// only when that entire interval cannot expose or mutate their host rows.
+	loan := scratch.attentionInputPanel
+	if !full || trace != nil || seq != len(preByPos) || !loan.valid(scratch) || !loan.matches(l, H, preByPos) {
+		loan = nil
 	}
-	qLatPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq, scratch.denseProjection())
+	var preFlat []float32
+	if loan == nil {
+		preFlat = make([]float32, seq*H)
+		for t := 0; t < seq; t++ {
+			copy(preFlat[t*H:(t+1)*H], preByPos[t])
+		}
+	}
+	qLatPanel, err := m.v41ProjPanelWithInput(l, "attn.wq_a.weight", preFlat, cfg.QLoraRank, H, seq, scratch.denseProjection(), loan, scratch)
 	if err != nil {
 		return out, err
 	}
@@ -419,7 +432,7 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 		}
 		kvRank = v41KVLoraRank
 	}
-	kvPanel, err := m.v41ProjPanelWithProjection(l, "attn.wkv.weight", preFlat, kvRank, H, seq, scratch.denseProjection())
+	kvPanel, err := m.v41ProjPanelWithInput(l, "attn.wkv.weight", preFlat, kvRank, H, seq, scratch.denseProjection(), loan, scratch)
 	if err != nil {
 		return out, err
 	}

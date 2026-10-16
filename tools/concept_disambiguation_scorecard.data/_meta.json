@@ -2083,6 +2083,11 @@
           "category": "incidental",
           "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
           "token": "v41AttentionBF16OwnedRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Scratch field carrying the already-positioned v41AttentionInputPanel loan during synchronous QKV projection; it introduces no separate attention operation, ownership authority or lifetime.",
+          "token": "attentionInputPanel"
         }
       ],
       "exclude": [
@@ -2102,6 +2107,7 @@
         "ValidateTreeAttentionMask",
         "attentionContinuation",
         "attentionFunc",
+        "attentionInputPanel",
         "attentionRows",
         "attentions",
         "attentive",

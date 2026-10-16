@@ -43,6 +43,7 @@ type v41ProjScratch struct {
 	mhcProjection        v41MHCProjectionFunc
 	mhcFFNProjection     v41MHCProjectionFunc
 	mhcCarry             *v41MHCCarry
+	attentionInputPanel  *v41AttentionInputPanel
 	attentionNormBinding *v41AttentionNormBinding
 	queryNorm            *v41QueryNormBinding
 	queryPrefix          v41QueryPrefixFunc

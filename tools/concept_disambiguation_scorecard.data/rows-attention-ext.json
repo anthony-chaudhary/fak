@@ -740,7 +740,8 @@
         "v41sharedattentionbinding",
         "v41sharedattentioncontinuation",
         "v41sharedattentionvalidation",
-        "v41sharedattentionresult"
+        "v41sharedattentionresult",
+        "v41attentioninputpanel"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionRows",
@@ -786,7 +787,8 @@
         "x-attention-v41sharedattentionrows",
         "x-attention-v41sharedattentionplain",
         "v41sharedattentionvalidation",
-        "v41sharedattentionresult"
+        "v41sharedattentionresult",
+        "v41attentioninputpanel"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionContinuation",
@@ -835,6 +837,28 @@
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionResult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41attentioninputpanel",
+      "canonical": "v41AttentionInputPanel",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private call-scoped loan of freshly normalized cold-prefill activation chunks to the Q and KV projections. It captures canonical Session, Model, Backend, binding, execution-scope and cache-epoch identities; the attentionInputPanel scratch field carries the same loan only until synchronous QKV completion.",
+      "distinction": "Unlike v41SharedAttentionRows, this holds normalized projection inputs rather than borrowed attention KV rows. Unlike v41SharedAttentionContinuation, it governs a multi-row cold-prefill input lifetime rather than single-token attention eligibility. It neither owns persistent KV state nor grants general zero-copy or device authority.",
+      "distinct_from": [
+        "x-attention-v41sharedattentionrows",
+        "v41sharedattentioncontinuation"
+      ],
+      "aliases": [
+        "attentionInputPanel"
+      ],
+      "grounding": "v41AttentionInputPanel",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
