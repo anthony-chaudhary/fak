@@ -23,7 +23,7 @@ type ownedDeferredReadResultRecorder struct{ *deferredReadResultRecorder }
 
 func (b *ownedDeferredReadResultRecorder) v41ReadDeferredOwned([]V41DeferredStatus, []Tensor) ([]error, V41DeferredReadResult, error) {
 	b.calls++
-	return b.verdicts, V41DeferredReadResult{state: &v41DeferredReadState{rows: b.values, independent: true}}, b.err
+	return b.verdicts, V41DeferredReadResult{count: len(b.values), state: &v41DeferredReadState{rows: b.values, independent: true}}, b.err
 }
 
 // fak-test:runtime fast est=100ms lane=default
@@ -36,7 +36,7 @@ func TestV41DeferredReadResultLegacyAndSingleConsumption(t *testing.T) {
 			backend = &ownedDeferredReadResultRecorder{b}
 		}
 		verdicts, result, err := ReadV41DeferredResult(backend, nil, []Tensor{{}, {}})
-		if err != nil || b.calls != 1 || len(verdicts) != 2 || verdicts[1] != numeric {
+		if result.RowCount() != 2 || err != nil || b.calls != 1 || len(verdicts) != 2 || verdicts[1] != numeric {
 			t.Fatal("read/order changed")
 		}
 		copiedResult := result
@@ -52,7 +52,7 @@ func TestV41DeferredReadResultLegacyAndSingleConsumption(t *testing.T) {
 		if copied, claimed := copiedResult.TakeRows(); copied != nil || claimed {
 			t.Fatal("copied result consumed twice")
 		}
-		if again != nil || owned {
+		if result.RowCount() != 2 || copiedResult.RowCount() != 2 || again != nil || owned {
 			t.Fatal("result consumed twice")
 		}
 	}
@@ -73,7 +73,7 @@ func TestV41DeferredReadResultTransportDropsPartialRows(t *testing.T) {
 		}
 		verdicts, result, err := ReadV41DeferredResult(backend, nil, []Tensor{{}, {}})
 		rows, owned := result.TakeRows()
-		if err != failure || verdicts != nil || rows != nil || owned || b.calls != 1 {
+		if result.RowCount() != 0 || err != failure || verdicts != nil || rows != nil || owned || b.calls != 1 {
 			t.Fatal("partial error escaped or replayed")
 		}
 	}
@@ -104,7 +104,7 @@ func TestV41DeferredMultirowImageStorageIndependent(t *testing.T) {
 // fak-test:runtime fast est=100ms lane=default
 func TestV41DeferredReadResultConcurrentCopiesConsumeOnce(t *testing.T) {
 	source := [][]float32{{1, 2}, {3, 4}}
-	result := V41DeferredReadResult{state: &v41DeferredReadState{rows: source, independent: true}}
+	result := V41DeferredReadResult{count: len(source), state: &v41DeferredReadState{rows: source, independent: true}}
 	var wg sync.WaitGroup
 	winners := make(chan [][]float32, 32)
 	start := make(chan struct{})
@@ -118,6 +118,9 @@ func TestV41DeferredReadResultConcurrentCopiesConsumeOnce(t *testing.T) {
 		go func(r *V41DeferredReadResult) {
 			defer wg.Done()
 			<-start
+			if r.RowCount() != 2 {
+				t.Error("immutable row count")
+			}
 			rows, owned := r.TakeRows()
 			if owned {
 				winners <- rows
