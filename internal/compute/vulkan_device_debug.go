@@ -1325,3 +1325,152 @@ func vulkanDebugMemoryTypeSelection(typeBits, want, preferred uint32, flags []ui
 	}
 	return status, attempts, uint32(chosen), handle != 0
 }
+
+// VulkanRetainedReleaseLimit bounds both output capacity and native inspection work.
+const VulkanRetainedReleaseLimit = 1024
+
+type VulkanRetainedReleaseStatus uint32
+
+const (
+	VulkanRetainedOK              VulkanRetainedReleaseStatus = 1
+	VulkanRetainedUnavailable     VulkanRetainedReleaseStatus = 2
+	VulkanRetainedInvalid         VulkanRetainedReleaseStatus = 3
+	VulkanRetainedStaleGeneration VulkanRetainedReleaseStatus = 4
+)
+
+// VulkanRetainedReleaseRecord identifies a retained binding, never a usable handle.
+// LogicalLeaseGeneration is always zero (unavailable); allocation reuse is not ABA tracking.
+// ReleaseState 1 means release requested. BackingState is 1 deferred, 2 pool-retained,
+// or 3 quarantined. Container is 1 deferred batch, 2 device pool, or 3 offload pool.
+type VulkanRetainedReleaseRecord struct {
+	AllocationID, BindingOffset, BufferBytes, ReservationBytes uint64
+	DeviceGeneration, LogicalLeaseGeneration                   uint64
+	ReleaseState, BackingState, Container                      uint32
+}
+
+// VulkanRetainedReleaseSnapshot covers only a bounded prefix of native deferred and
+// pool containers. It excludes active owners, Go pools, stages and driver overhead.
+// Totals deduplicate only returned allocations; never add them to owner totals.
+// Truncated may be true with no records. Absence never proves physical release.
+type VulkanRetainedReleaseSnapshot struct {
+	Status                         VulkanRetainedReleaseStatus
+	DeviceGeneration               uint64
+	Records                        []VulkanRetainedReleaseRecord
+	ReturnedUniqueAllocations      uint32
+	ReturnedUniqueReservationBytes uint64
+	Truncated                      bool
+}
+
+// validateVulkanRetainedReleaseSnapshot rejects malformed ABI evidence before publication.
+func validateVulkanRetainedReleaseSnapshot(s VulkanRetainedReleaseSnapshot, capacity int, returned, truncated uint32, result int) VulkanRetainedReleaseSnapshot {
+	invalid := VulkanRetainedReleaseSnapshot{Status: VulkanRetainedInvalid, DeviceGeneration: s.DeviceGeneration}
+	if capacity < 0 || capacity > VulkanRetainedReleaseLimit || result != int(s.Status) ||
+		s.Status < VulkanRetainedOK || s.Status > VulkanRetainedStaleGeneration || truncated > 1 ||
+		returned > uint32(capacity) || int(returned) != len(s.Records) {
+		return invalid
+	}
+	if s.Status != VulkanRetainedOK {
+		if returned != 0 || truncated != 0 || s.ReturnedUniqueAllocations != 0 || s.ReturnedUniqueReservationBytes != 0 {
+			return invalid
+		}
+		return VulkanRetainedReleaseSnapshot{Status: s.Status, DeviceGeneration: s.DeviceGeneration}
+	}
+	if s.DeviceGeneration == 0 {
+		return invalid
+	}
+	allocations := make(map[uint64]uint64, len(s.Records))
+	bindings := make(map[[2]uint64]bool, len(s.Records))
+	var total uint64
+	for _, r := range s.Records {
+		if r.AllocationID == 0 || r.DeviceGeneration != s.DeviceGeneration || r.LogicalLeaseGeneration != 0 ||
+			r.ReservationBytes == 0 || r.BindingOffset > r.ReservationBytes || r.BufferBytes > r.ReservationBytes-r.BindingOffset ||
+			r.ReleaseState != 1 || r.Container < 1 || r.Container > 3 || r.BackingState < 1 || r.BackingState > 3 ||
+			(r.BackingState != 3 && ((r.Container == 1 && r.BackingState != 1) || (r.Container != 1 && r.BackingState != 2))) {
+			return invalid
+		}
+		key := [2]uint64{r.AllocationID, r.BindingOffset}
+		if bindings[key] {
+			return invalid
+		}
+		bindings[key] = true
+		if prior, ok := allocations[r.AllocationID]; ok {
+			if prior != r.ReservationBytes {
+				return invalid
+			}
+		} else {
+			if r.ReservationBytes > ^uint64(0)-total {
+				return invalid
+			}
+			allocations[r.AllocationID] = r.ReservationBytes
+			total += r.ReservationBytes
+		}
+	}
+	if uint32(len(allocations)) != s.ReturnedUniqueAllocations || total != s.ReturnedUniqueReservationBytes {
+		return invalid
+	}
+	s.Truncated = truncated != 0
+	return s
+}
+
+// Summary labels prefix accounting and unavailable evidence for operator diagnostics.
+func (s VulkanRetainedReleaseSnapshot) Summary() string {
+	status := "invalid"
+	switch s.Status {
+	case VulkanRetainedOK:
+		status = "ok"
+	case VulkanRetainedUnavailable:
+		status = "unavailable"
+	case VulkanRetainedStaleGeneration:
+		status = "stale-generation"
+	}
+	counts := "returned_bindings=unavailable returned_unique_allocations=unavailable returned_prefix_reserved_bytes=unavailable"
+	if s.Status == VulkanRetainedOK {
+		var deferred, pooled, quarantined int
+		for _, r := range s.Records {
+			switch r.BackingState {
+			case 1:
+				deferred++
+			case 2:
+				pooled++
+			case 3:
+				quarantined++
+			}
+		}
+		counts = fmt.Sprintf("returned_bindings=%d returned_unique_allocations=%d returned_prefix_reserved_bytes=%d deferred_bindings=%d pool-retained bindings=%d quarantined_bindings=%d", len(s.Records), s.ReturnedUniqueAllocations, s.ReturnedUniqueReservationBytes, deferred, pooled, quarantined)
+	}
+	return fmt.Sprintf("retained_release: status=%s device_generation=%d truncated=%t %s; partial_scope=native-deferred+native-pools; logical_lease_generation=unavailable physical_release=unknown; prefix totals must not be added to owner totals", status, s.DeviceGeneration, s.Truncated, counts)
+}
+
+// VulkanRetainedReleaseSnapshot performs one pull query under vulkanMu. It does not
+// fence, drain, free, or sample automatically on requests/tokens. Formatting and
+// validation happen after unlocking. A caller may invoke it after a request, but
+// the result alone cannot establish that request's completion or physical residency.
+func (v *vulkanBackend) VulkanRetainedReleaseSnapshot(capacity int) VulkanRetainedReleaseSnapshot {
+	if capacity < 0 || capacity > VulkanRetainedReleaseLimit {
+		return VulkanRetainedReleaseSnapshot{Status: VulkanRetainedInvalid}
+	}
+	if v == nil {
+		return VulkanRetainedReleaseSnapshot{Status: VulkanRetainedUnavailable}
+	}
+	rows := make([]C.fvk_retained_release_record, capacity)
+	var ptr *C.fvk_retained_release_record
+	if capacity != 0 {
+		ptr = &rows[0]
+	}
+	var summary C.fvk_retained_release_summary
+	vulkanMu.Lock()
+	result := C.fvk_retained_release_snapshot(ptr, C.uint32_t(capacity), &summary)
+	vulkanMu.Unlock()
+	s := VulkanRetainedReleaseSnapshot{Status: VulkanRetainedReleaseStatus(summary.status), DeviceGeneration: uint64(summary.device_generation), ReturnedUniqueAllocations: uint32(summary.returned_unique_allocations), ReturnedUniqueReservationBytes: uint64(summary.returned_unique_reservation_bytes)}
+	// Validate the count before allocating/copying or slicing native output.
+	count := uint32(summary.returned_records)
+	if count > uint32(capacity) {
+		return VulkanRetainedReleaseSnapshot{Status: VulkanRetainedInvalid, DeviceGeneration: s.DeviceGeneration}
+	}
+	s.Records = make([]VulkanRetainedReleaseRecord, int(count))
+	for i := range s.Records {
+		r := rows[i]
+		s.Records[i] = VulkanRetainedReleaseRecord{AllocationID: uint64(r.reservation.allocation_id), BindingOffset: uint64(r.reservation.binding_offset), BufferBytes: uint64(r.reservation.buffer_bytes), ReservationBytes: uint64(r.reservation.reservation_bytes), DeviceGeneration: uint64(r.device_generation), LogicalLeaseGeneration: uint64(r.logical_lease_generation), ReleaseState: uint32(r.release_state), BackingState: uint32(r.backing_state), Container: uint32(r.container)}
+	}
+	return validateVulkanRetainedReleaseSnapshot(s, capacity, count, uint32(summary.truncated), int(result))
+}

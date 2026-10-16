@@ -20,6 +20,10 @@ type serveVulkanReservationReader interface {
 	VulkanTransferStageBufferReservations() ([]compute.VulkanBufferReservation, bool)
 }
 
+type serveVulkanRetainedReleaseReader interface {
+	VulkanRetainedReleaseSnapshot(int) compute.VulkanRetainedReleaseSnapshot
+}
+
 type serveVulkanH2DUploadReader interface {
 	VulkanH2DUploadBytes() (direct, total uint64)
 }
@@ -134,6 +138,11 @@ func serveVulkanPostLoadReservations(m *fakmodel.Model, be compute.Backend, plan
 	if plannedOK {
 		plannedText = fmt.Sprint(planned)
 	}
-	return fmt.Sprintf("phase=post-load-before-serving planned_device_bytes=%s; %s; owners_available: model_weights=%t q4k_homes=%t q4k_stage=%t transfer_stage=%t; physical_vram_observed_bytes=unknown; scope=model-owned immutable tensors+Q4K homes+Q4K stage+global transfer stage; excludes=session tensors,expert rings,KV,restore staging,scratch,pools,driver overhead; separate metadata reads, not atomic; reservation/backing flags do not prove physical residency",
-		plannedText, totals.text(), weightsOK, homesOK, stageOK, transferOK), true
+	// Independent native prefix query, never folded into the owner totals above.
+	retained := "retained_release: status=unsupported partial_scope=native-deferred+native-pools"
+	if reader, ok := be.(serveVulkanRetainedReleaseReader); ok {
+		retained = reader.VulkanRetainedReleaseSnapshot(128).Summary()
+	}
+	return fmt.Sprintf("phase=post-load-before-serving planned_device_bytes=%s; %s; owners_available: model_weights=%t q4k_homes=%t q4k_stage=%t transfer_stage=%t; physical_vram_observed_bytes=unknown; scope=model-owned immutable tensors+Q4K homes+Q4K stage+global transfer stage; excludes=session tensors,expert rings,KV,restore staging,scratch,pools,driver overhead; separate metadata reads, not atomic; reservation/backing flags do not prove physical residency; %s",
+		plannedText, totals.text(), weightsOK, homesOK, stageOK, transferOK, retained), true
 }
