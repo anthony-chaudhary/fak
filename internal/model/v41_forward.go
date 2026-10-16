@@ -170,7 +170,7 @@ type v41ForwardState struct {
 	bf16Boundary         v41BF16BoundaryFunc
 	logitScale           v41LogitScaleFunc
 	attentionNormBinding *v41AttentionNormBinding
-	queryNorm            v41QueryNormFunc
+	queryNorm            *v41QueryNormBinding
 	queryPrefix          v41QueryPrefixFunc
 	kvNorm               v41KVNormFunc
 	ffnNorm              *v41FFNNormBinding
@@ -901,7 +901,6 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.bf16Boundary = s.v41FinalNormBF16CheckedFunc()
 		s.v41Forward.logitScale = s.v41LogitScaleFunc()
 		s.v41Forward.attentionNormBinding = s.v41BindAttentionNorm()
-		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
 		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()
@@ -915,6 +914,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.routedSumBinding = s.v41CanonicalRoutedSumBinding()
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
+		s.v41Forward.queryNorm = s.v41BindQueryNorm()
 		s.v41Forward.ffnNorm = s.v41BindFFNNorm()
 		if s.v41Forward.bf16Boundary == nil {
 			s.v41Forward.bf16Boundary = s.v41Forward.gatherOps.bf16PublishFunc()

@@ -272,7 +272,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 			return nil, err
 		}
 		if full {
-			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm.normFunc(), scratch.gatherOps.bf16PublishFunc()); err != nil {
 				return nil, err
 			}
 		}
@@ -726,7 +726,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		if err != nil {
 			return nil, err
 		}
-		if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+		if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm.normFunc(), scratch.gatherOps.bf16PublishFunc()); err != nil {
 			return nil, err
 		}
 	}

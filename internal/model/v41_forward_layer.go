@@ -379,22 +379,33 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 	if err != nil {
 		return out, err
 	}
-	for t := 0; t < seq; t++ {
-		qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
-		if full {
-			// Reference: qr = self.q_norm(self.wq_a(x)). The RMSNorm over the
-			// q-lora latent keeps its magnitude O(1) before the wq_b projection;
-			// omitting it lets ~1e18 activations reach the 512-term attention
-			// accumulation and overflow it to +Inf at HeadDim=512 (#13290).
-			// Artifact-only: the reduced fixture carries no q_norm leaf and its
-			// pre-#13009 arithmetic is unchanged. Written back into the panel row
-			// so the batched wq_b panel reads the normed latents.
-			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
-				return out, err
-			}
+	queryHandled := false
+	if full {
+		queryHandled, err = scratch.queryNorm.panel(m, scratch, l, qLatPanel, seq, eps, func(row int, values []float32) {
+			trace.record(l, row, v41TraceStageQLatent, values)
+		})
+		if err != nil {
+			return out, err
 		}
-		// #13325 q_latent: captured BEFORE the wq_b panel consumes it.
-		trace.record(l, t, v41TraceStageQLatent, qLat)
+	}
+	if !queryHandled {
+		for t := 0; t < seq; t++ {
+			qLat := qLatPanel[t*cfg.QLoraRank : (t+1)*cfg.QLoraRank]
+			if full {
+				// Reference: qr = self.q_norm(self.wq_a(x)). The RMSNorm over the
+				// q-lora latent keeps its magnitude O(1) before the wq_b projection;
+				// omitting it lets ~1e18 activations reach the 512-term attention
+				// accumulation and overflow it to +Inf at HeadDim=512 (#13290).
+				// Artifact-only: the reduced fixture carries no q_norm leaf and its
+				// pre-#13009 arithmetic is unchanged. Written back into the panel row
+				// so the batched wq_b panel reads the normed latents.
+				if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm.normFunc(), scratch.gatherOps.bf16PublishFunc()); err != nil {
+					return out, err
+				}
+			}
+			// #13325 q_latent: captured BEFORE the wq_b panel consumes it.
+			trace.record(l, t, v41TraceStageQLatent, qLat)
+		}
 	}
 	qPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq, scratch.denseProjection())
 	if err != nil {

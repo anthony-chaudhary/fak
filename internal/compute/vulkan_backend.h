@@ -73,6 +73,8 @@ int fvk_d2h(void *h, const void *d, size_t bytes);
 int fvk_v41_try_pool_norm_panel(float* host, const void* gain, int rows, int width, float eps, int* status);
 // probe!=0 checks existing capacity without claims; caller serializes probe/allocation/commit.
 int fvk_v41_try_ffn_norm_publication(float* host, float* published, const void* gain, int rows, int width, float eps, int probe, int* status);
+// Query-only: two heterogeneous existing pool buffers, unchanged capacity keys.
+int fvk_v41_try_query_norm_publication(float* host, float* published, const void* gain, int rows, int width, int capacityRows, float eps, int probe, int* status);
 int fvk_v41_d2h(void *h, const void *d, size_t bytes);
 /* fvk_v41_d2h for count ordered, disjoint regions of one host image behind one
  * checked host fence: srcs[i] (bytes[i]) lands at host + offsets[i]. */
