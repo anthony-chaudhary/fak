@@ -2,6 +2,28 @@ package model
 
 import "testing"
 
+// fak-test:runtime fast est=10ms lane=default
+func TestModelMetalFallbackLiveTallyAllRoutes(t *testing.T) {
+	m := &Model{}
+	for _, route := range metalFallbackRouteOrder {
+		m.recordMetalFallbackLive(route)
+	}
+	snap := m.MetalFallbackSnapshot()
+	if !snap.Observed || snap.Total != len(metalFallbackRouteOrder) || len(snap.ByRoute) != len(metalFallbackRouteOrder) {
+		t.Fatalf("canonical route tally = %+v, want every route exactly once", snap)
+	}
+	for _, route := range metalFallbackRouteOrder {
+		if snap.ByRoute[string(route)] != 1 {
+			t.Fatalf("route %q count = %d, want 1", route, snap.ByRoute[string(route)])
+		}
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		m.recordMetalFallbackLive(MetalFallbackPrefillAttentionCPU)
+	}); allocations != 0 {
+		t.Fatalf("initialized fallback recording allocates %g times, want zero", allocations)
+	}
+}
+
 // TestMetalFallbackRouteIndexRoundTrip pins the stable slot mapping (#12875): every route in the
 // order vector round-trips through index→route, and an unknown route is reported absent rather
 // than silently aliasing slot 0.
