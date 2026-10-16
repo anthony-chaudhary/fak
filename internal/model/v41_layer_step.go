@@ -402,7 +402,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		if rerr != nil {
 			return nil, rerr
 		}
-		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 	} else if full {
 		projectFFN, ferr := m.v41FFNMHCProjector(l, scratch)
 		if ferr != nil {
@@ -410,7 +410,7 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 		}
 		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
 	} else {
-		ffnX, err = m.v41FFNNormWithPublish(l, x, eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+		ffnX, err = m.v41FFNNormWithPublish(l, x, eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 	}
 	if err != nil {
 		return nil, err
@@ -952,7 +952,7 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 		if rerr != nil {
 			return nil, rerr
 		}
-		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], float32(cfg.RMSNormEps), scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], float32(cfg.RMSNormEps), scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 	} else {
 		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
 	}

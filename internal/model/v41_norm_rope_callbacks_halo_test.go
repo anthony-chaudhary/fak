@@ -278,7 +278,7 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 		t.Fatal("five-callback witness did not isolate adjacent normalization seams")
 	}
 	hs.queryNorm, hs.kvNorm, hs.ffnNorm, hs.finalNorm, hs.tailRoPE = nil, nil, nil, nil, nil
-	query, kv, ffn, final, rope := st.queryNorm, st.kvNorm, st.ffnNorm, st.finalNorm, st.tailRoPE
+	query, kv, ffn, final, rope := st.queryNorm, st.kvNorm, st.ffnNorm.normFunc(), st.finalNorm, st.tailRoPE
 	if query == nil || kv == nil || ffn == nil || final == nil || rope == nil {
 		t.Fatal("one of five required native callbacks is unbound")
 	}
@@ -289,9 +289,9 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 	st.kvNorm = func(l int, x []float32) ([]float32, error) {
 		return w.norm(s, layerName(l, "attn.kv_norm.weight"), "kv_norm", x, func() ([]float32, error) { return kv(l, x) })
 	}
-	st.ffnNorm = func(l int, x []float32) ([]float32, error) {
+	st.ffnNorm = &v41FFNNormBinding{ordinary: func(l int, x []float32) ([]float32, error) {
 		return w.norm(s, layerName(l, "ffn_norm.weight"), "ffn_norm", x, func() ([]float32, error) { return ffn(l, x) })
-	}
+	}}
 	st.finalNorm = func(x []float32) ([]float32, error) {
 		return w.norm(s, "model.norm.weight", "final_norm", x, func() ([]float32, error) { return final(x) })
 	}

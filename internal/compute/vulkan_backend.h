@@ -68,6 +68,9 @@ int fvk_d2h(void *h, const void *d, size_t bytes);
  * records a shader/transfer memory barrier, then checks allocation/begin/end/
  * submit/wait. A failed submit or wait quarantines resources until process exit.
  * Used for attention status and that operation's fresh device output only. */
+/* Synchronous exclusive host loan: 0 MISS unchanged, 1 success in place,
+ * -1 selected fatal with status. Reuses existing pool/staging backing only. */
+int fvk_v41_try_pool_norm_panel(float* host, const void* gain, int rows, int width, float eps, int* status);
 int fvk_v41_d2h(void *h, const void *d, size_t bytes);
 /* fvk_v41_d2h for count ordered, disjoint regions of one host image behind one
  * checked host fence: srcs[i] (bytes[i]) lands at host + offsets[i]. */

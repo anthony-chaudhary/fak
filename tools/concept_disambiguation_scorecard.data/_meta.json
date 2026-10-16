@@ -17404,6 +17404,31 @@
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
           "token": "writePoolMemberLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private interface, implementation or C ABI facet of the positioned TryV41PoolNormPanel operation (pool-v41-ffn-norm-panel); it grants no independently addressable pool, persistent owner or allocation budget.",
+          "token": "v41PoolNormPanelBackend"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private interface, implementation or C ABI facet of the positioned TryV41PoolNormPanel operation (pool-v41-ffn-norm-panel); it grants no independently addressable pool, persistent owner or allocation budget.",
+          "token": "v41TryPoolNormPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private interface, implementation or C ABI facet of the positioned TryV41PoolNormPanel operation (pool-v41-ffn-norm-panel); it grants no independently addressable pool, persistent owner or allocation budget.",
+          "token": "fvk_v41_try_pool_norm_panel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local bounded row-count constant for the positioned TryV41PoolNormPanel operation; it sizes an existing-buffer attempt and is neither a pool owner nor an allocation authority.",
+          "token": "v41FFNPoolPanelRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local bounded row-count constant for the positioned TryV41PoolNormPanel operation; it sizes an existing-buffer attempt and is neither a pool owner nor an allocation authority.",
+          "token": "v41FFNPoolPanelFallbackRows"
         }
       ],
       "exclude": [
@@ -17430,6 +17455,7 @@
         "PooledSpeedupPct",
         "canonicalPoolLane",
         "defaultPoolCap",
+        "fvk_v41_try_pool_norm_panel",
         "indexer_k_pooled",
         "kvpoolbytes",
         "leasePooled",
@@ -17477,6 +17503,10 @@
         "unpoolable",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
+        "v41FFNPoolPanelFallbackRows",
+        "v41FFNPoolPanelRows",
+        "v41PoolNormPanelBackend",
+        "v41TryPoolNormPanel",
         "validPoolOperands",
         "validPoolState",
         "withPoolLaneLock",
@@ -18051,6 +18081,11 @@
           "category": "incidental",
           "reason": "Nullable elapsed nanosecond metric including sampling and bookkeeping; not loop control or kernel-only timing.",
           "token": "DecodeLoopNS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private atomic one-use state of the owned FFN normalization carrier; records whether that single logical loop has consumed its input, not a general execution loop or independently scheduled loop controller.",
+          "token": "loopClaimed"
         }
       ],
       "id": "loop",
@@ -18101,6 +18136,7 @@
         "findcodexlooparchivemanifest",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",
+        "loopClaimed",
         "loopHealthAlert",
         "loopHealthCost",
         "loopRegionDequeue",

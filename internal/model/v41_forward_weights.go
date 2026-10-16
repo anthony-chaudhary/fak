@@ -47,7 +47,7 @@ type v41ProjScratch struct {
 	queryNorm            v41QueryNormFunc
 	queryPrefix          v41QueryPrefixFunc
 	kvNorm               v41KVNormFunc
-	ffnNorm              v41FFNNormFunc
+	ffnNorm              *v41FFNNormBinding
 	compressorNorm       v41CompressorNormFunc
 	indexKeyNorm         v41IndexKeyNormFunc
 	indexerScoreBinding  *v41IndexerScoreBinding

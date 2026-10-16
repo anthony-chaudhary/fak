@@ -274,6 +274,6 @@ func (m *Model) v41FullFFNInput(layer int, streams [][]float32, attnMix v41MHCMi
 	if err != nil {
 		return nil, v41MHCMix{}, nil, err
 	}
-	normalized, err := m.v41FFNNormWithPublish(layer, collapsed, float32(m.Cfg.RMSNormEps), scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+	normalized, err := m.v41FFNNormWithPublish(layer, collapsed, float32(m.Cfg.RMSNormEps), scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 	return updated, mix, normalized, err
 }

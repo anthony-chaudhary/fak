@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "pool-v41-ffn-norm-panel",
+      "canonical": "TryV41PoolNormPanel",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Bounded canonical Vulkan FFN normalization operation that atomically borrows already-free exact-size native buffers and existing staging capacity, sharing scalar-required gain preparation and refusing before side effects when capacity is unavailable.",
+      "distinction": "An exclusive temporary allocator-buffer execution loan with selected-failure no-replay semantics; distinct from Pool (session), which owns bounded LRU session state. This operation creates neither a new persistent pool nor a device-memory budget grant.",
+      "distinct_from": [
+        "pool-session"
+      ],
+      "aliases": [],
+      "grounding": "TryV41PoolNormPanel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

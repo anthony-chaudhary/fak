@@ -1301,3 +1301,10 @@ Constructs the bounded rotary-table owner metadata for one or two fixed session 
 Private canonical shared-attention host output ownership carrier. A successful private core invocation returns a fresh zero row or a validated readback clone allocated before tensor retirement; failure returns no output ownership.
 
 **Distinct from:** Unlike v41SharedAttentionBinding this value owns one completed host output rather than callback provenance. Unlike v41SharedAttentionContinuation and v41SharedAttentionValidation it grants no input validation or execution eligibility. Unlike v41SharedAttentionRows it is fresh output, not borrowed KV descriptors. Ordinary callbacks and borrowed resident outputs cannot acquire this carrier; final composer width and finite checks remain mandatory.
+
+
+### TryV41PoolNormPanel
+
+Bounded canonical Vulkan FFN normalization operation that atomically borrows already-free exact-size native buffers and existing staging capacity, sharing scalar-required gain preparation and refusing before side effects when capacity is unavailable.
+
+**Distinct from:** An exclusive temporary allocator-buffer execution loan with selected-failure no-replay semantics; distinct from Pool (session), which owns bounded LRU session state. This operation creates neither a new persistent pool nor a device-memory budget grant.

@@ -172,7 +172,7 @@ type v41ForwardState struct {
 	queryNorm            v41QueryNormFunc
 	queryPrefix          v41QueryPrefixFunc
 	kvNorm               v41KVNormFunc
-	ffnNorm              v41FFNNormFunc
+	ffnNorm              *v41FFNNormBinding
 	compressorNorm       v41CompressorNormFunc
 	indexKeyNorm         v41IndexKeyNormFunc
 	indexerScoreBinding  *v41IndexerScoreBinding
@@ -900,7 +900,6 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.queryNorm = s.v41QueryNormFunc()
 		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
 		s.v41Forward.kvNorm = s.v41KVNormFunc()
-		s.v41Forward.ffnNorm = s.v41FFNNormFunc()
 		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()
 		s.v41Forward.indexKeyNorm = s.v41IndexKeyNormFunc()
 		s.v41Forward.bindCanonicalIndexerScore(s.v41BindIndexerScore())
@@ -912,6 +911,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.routedSumBinding = s.v41CanonicalRoutedSumBinding()
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
+		s.v41Forward.ffnNorm = s.v41BindFFNNorm()
 		if s.v41Forward.bf16Boundary == nil {
 			s.v41Forward.bf16Boundary = s.v41Forward.gatherOps.bf16PublishFunc()
 		}
@@ -1154,6 +1154,12 @@ func (s *Session) v41RMSNormFunc() v41RMSNormFunc {
 // A private canonical panel may supply a row finisher; no panel result escapes
 // until every row and its output publication have succeeded.
 func (s *Session) v41RMSNormRows(name string, input []float32, width, rows int, path string, layer int, finish func([]float32) ([]float32, error)) (result []float32, cause error) {
+	return s.v41RMSNormPrepared(name, input, width, rows, path, layer, finish, nil, nil)
+}
+
+// prepared and attempt are private synchronous FFN continuations. A selected
+// attempt owns its result validation; a miss continues this exact scalar body.
+func (s *Session) v41RMSNormPrepared(name string, input []float32, width, rows int, path string, layer int, finish func([]float32) ([]float32, error), prepared *compute.Tensor, attempt func(compute.Tensor) ([]float32, bool, error)) (result []float32, cause error) {
 	s.ensureOpenBackendSession()
 	stage := "payload"
 	panelComplete := false
@@ -1232,7 +1238,21 @@ func (s *Session) v41RMSNormRows(name string, input []float32, width, rows int, 
 			}
 			body := func() (values []float32, err error) {
 				stage = "weight upload"
-				weight := s.weightHAL(name)
+				var weight compute.Tensor
+				if prepared != nil && prepared.Buf() != nil {
+					weight = *prepared
+				} else {
+					weight = s.weightHAL(name)
+					if prepared != nil {
+						*prepared = weight
+					}
+				}
+				if attempt != nil {
+					stage = "panel transport"
+					if values, selected, err := attempt(weight); selected || err != nil {
+						return values, err
+					}
+				}
 				stage = "activation upload"
 				shape := []int{width}
 				if finish != nil {

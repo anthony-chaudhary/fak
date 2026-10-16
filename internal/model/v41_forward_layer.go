@@ -745,19 +745,39 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 	var ffnCollapsed [][]float32
+	var ffnOwned *v41OwnedFFNCollapse
 	if resident != nil {
-		if ffnCollapsed, err = resident.ffnInput(l, attnOut, hcIters, hcEps, eps); err != nil {
+		if seq > 1 {
+			ffnOwned, err = resident.ffnInputOwned(l, attnOut, hcIters, hcEps, eps)
+			if err == nil {
+				ffnCollapsed = ffnOwned.rows
+			}
+		} else {
+			ffnCollapsed, err = resident.ffnInput(l, attnOut, hcIters, hcEps, eps)
+		}
+		if err != nil {
 			return err
 		}
 	}
-	for t := 0; t < seq; t++ {
+	panelDone := false
+	if ffnOwned != nil {
+		var panel [][]float32
+		panel, panelDone, err = scratch.ffnNorm.panel(m, st, scratch, resident, l, ffnOwned, eps)
+		if err != nil {
+			return err
+		}
+		if panelDone {
+			copy(ffnInputs, panel)
+		}
+	}
+	for t := 0; !panelDone && t < seq; t++ {
 		var xn []float32
 		if resident != nil {
-			xn, err = m.v41FFNNormWithPublish(l, ffnCollapsed[t], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+			xn, err = m.v41FFNNormWithPublish(l, ffnCollapsed[t], eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 		} else if full {
 			ffnResidual[t], ffnMixes[t], xn, err = m.v41FullFFNInput(l, streams[t], hcByPos[t], attnOut[t], projectFFN, scratch)
 		} else {
-			xn, err = m.v41FFNNormWithPublish(l, x[t], eps, scratch.ffnNorm, scratch.gatherOps.bf16PublishFunc())
+			xn, err = m.v41FFNNormWithPublish(l, x[t], eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 		}
 		if err != nil {
 			return err
