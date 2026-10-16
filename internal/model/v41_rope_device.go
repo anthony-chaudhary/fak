@@ -214,7 +214,7 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				len(qo.Shape) != 2 || qo.Shape[0] != heads || qo.Shape[1] != headDim || len(ko.Shape) != 1 || ko.Shape[0] != headDim {
 				return nil, nil, errV41TailRoPEResult
 			}
-			own := func(values, input []float32) ([]float32, error) {
+			own := func(values, input []float32, independent bool) ([]float32, error) {
 				if len(values) != len(input) {
 					return nil, errV41TailRoPEResult
 				}
@@ -225,6 +225,9 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				}
 				// Read may expose reusable backend memory. Own Q before reading
 				// KV, and own both rows before their device allocations are freed.
+				if independent {
+					return values, nil
+				}
 				return append([]float32(nil), values...), nil
 			}
 			if grouped, ok := s.Backend.(compute.V41DeferredStatusBackend); ok {
@@ -233,29 +236,35 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				// Both outputs share one checked host fence. A transport error
 				// can precede Q's numeric validation; never retry with Read.
 				stage = "paired readback"
-				verdicts, rows, err := grouped.V41ReadDeferred(nil, []compute.Tensor{qo, ko})
+				verdicts, result, err := compute.ReadV41DeferredResult(grouped, nil, []compute.Tensor{qo, ko})
 				if err != nil {
 					return nil, nil, err
 				}
-				if len(verdicts) != 0 || len(rows) != 2 {
+				if len(verdicts) != 0 || result.RowCount() != 2 {
 					return nil, nil, errV41TailRoPEResult
 				}
+				// Taking ownership here remains private to this callback. Both
+				// rows must validate before either is published to its caller.
+				rows, independent := result.TakeRows()
 				stage = "query readback"
-				qValues, err := own(rows[0], q)
+				qValues, err := own(rows[0], q, independent)
 				if err != nil {
 					return nil, nil, err
 				}
 				stage = "kv readback"
-				kvValues, err := own(rows[1], kv)
-				return qValues, kvValues, err
+				kvValues, err := own(rows[1], kv, independent)
+				if err != nil {
+					return nil, nil, err
+				}
+				return qValues, kvValues, nil
 			}
 			stage = "query readback"
-			qValues, err := own(s.Backend.Read(qo), q)
+			qValues, err := own(s.Backend.Read(qo), q, false)
 			if err != nil {
 				return nil, nil, err
 			}
 			stage = "kv readback"
-			kvValues, err := own(s.Backend.Read(ko), kv)
+			kvValues, err := own(s.Backend.Read(ko), kv, false)
 			return qValues, kvValues, err
 		}
 		qResult, kvResult, cause = run()
