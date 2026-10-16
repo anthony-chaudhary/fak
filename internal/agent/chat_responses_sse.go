@@ -148,7 +148,8 @@ func openAIResponsesSSEOutputItem(raw []byte, event string, fallbackIndex int) (
 	index := fallbackIndex
 	if rawIndex := top["output_index"]; len(rawIndex) > 0 {
 		var n int
-		if err := json.Unmarshal(rawIndex, &n); err == nil {
+		index = -1 // Defer malformed-index refusal until fragments are needed.
+		if err := json.Unmarshal(rawIndex, &n); err == nil && !bytes.Equal(bytes.TrimSpace(rawIndex), []byte("null")) {
 			index = n
 		}
 	}
@@ -171,6 +172,19 @@ func openAIResponsesSSEFillOutput(final []byte, outputItems []responsesSSEOutput
 		if err := json.Unmarshal(existing, &out); err == nil && len(out) > 0 {
 			return final, nil
 		}
+	}
+	// A populated final output is authoritative above. Only reconstructed
+	// fragments need an unambiguous position; do not turn one repeated item into
+	// separate tool actions when later normalization generates distinct call IDs.
+	seen := make(map[int]bool, len(outputItems))
+	for _, item := range outputItems {
+		if item.index < 0 {
+			return nil, fmt.Errorf("response.output_item.done invalid output_index")
+		}
+		if seen[item.index] {
+			return nil, fmt.Errorf("response.output_item.done duplicate output_index %d", item.index)
+		}
+		seen[item.index] = true
 	}
 	sort.SliceStable(outputItems, func(i, j int) bool {
 		return outputItems[i].index < outputItems[j].index
