@@ -4564,6 +4564,114 @@ int fvk_v41_try_pool_norm_panel(float* host, const void* gain, int rows, int wid
     return 1;
 }
 
+int fvk_v41_try_ffn_norm_publication(float* host, float* published, const void* gain, int rows, int width,
+                                     float eps, int probe, int* status) {
+    if (!status) return -1;
+    *status = VK_SUCCESS;
+    auto fail = [&]() {
+        *status = g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+        return -1;
+    };
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return fail();
+    if (!g_ready || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return fail();
+    if (!host || rows < 2 || rows > 64 || width <= 0 || !std::isfinite(eps) || eps <= 0 ||
+        (size_t)width > std::numeric_limits<size_t>::max() / (4u * (size_t)rows)) return fail();
+    const size_t bytes = 4u * (size_t)rows * (size_t)width;
+    // Explicit host cost bound, not a memory reservation. A miss allocates nothing.
+    if (bytes > 1310720u || !fvk_have_v41_attention_bf16() ||
+        !fvk_v41_attention_bf16_count_supported((int)(bytes / 4))) return 0;
+    if (!probe && !published) return fail();
+    Buffer* w = B(gain);
+    if (!v41NormPanelLive(w) || w->bytes < 4u * (size_t)width) return fail();
+    const bool step = stepBatchRecording();
+    if (g_batching && !step) return 0;
+    auto it = g_pool.find(bytes);
+    if (it == g_pool.end() || it->second.size() < 2 || it->second.size() > POOL_BUCKET_CAP || g_poolCount < 2) return 0;
+    auto sit = g_pool.find(16);
+    if (sit == g_pool.end() || sit == it || sit->second.empty() ||
+        sit->second.size() > POOL_BUCKET_CAP || g_poolCount < 3) return 0;
+    auto& statusBucket = sit->second;
+    Buffer* verdict = statusBucket.back();
+    auto& bucket = it->second;
+    Buffer* x = bucket[bucket.size()-1];
+    Buffer* y = bucket[bucket.size()-2];
+    auto eligible = [&](Buffer* b, size_t required) {
+        return v41NormPanelLive(b) && b->bytes == required && b->allocationBytes >= required &&
+            b->allocationID != 0 && b->allocationDeviceLocal && !b->weightArenaBound &&
+            !b->offloadPage && !b->mapped && b->nativeCheckoutGeneration != 0 &&
+            b->nativeCheckoutGeneration != std::numeric_limits<uint64_t>::max();
+    };
+    if (!eligible(x, bytes) || !eligible(y, bytes) || !eligible(verdict, 16) || x == y || x->buf == y->buf || x->mem == y->mem || verdict == x || verdict == y ||
+        verdict->buf == x->buf || verdict->buf == y->buf || verdict->mem == x->mem || verdict->mem == y->mem ||
+        !v41NormPanelLive(g_stage) || !g_stageMapped || g_stageCap < bytes + 16u) return 0;
+    size_t aligned = 0;
+    if (step) {
+        aligned = (g_upArenaUsed + 15u) & ~(size_t)15u;
+        if (!v41NormPanelLive(g_upArena) || !g_upArenaMapped || aligned < g_upArenaUsed ||
+            aligned > g_upArenaCap || bytes > g_upArenaCap - aligned) return 0;
+    }
+    // Ordinary pooled buffers own whole allocations. Conservative distinct memory
+    // rejects physical aliasing with all protected operands without guessing ranges.
+    Buffer* protectedBuffers[] = {w, g_stage, step ? g_upArena : nullptr};
+    for (Buffer* p : protectedBuffers) {
+        if (p && (x == p || y == p || verdict == p || x->buf == p->buf || y->buf == p->buf || verdict->buf == p->buf ||
+                  x->mem == p->mem || y->mem == p->mem || verdict->mem == p->mem)) return 0;
+    }
+    auto aliasesLoan = [&](Buffer* other) {
+        if (!other) return false;
+        for (Buffer* claimed : {x, y, verdict}) {
+            if (other == claimed || other->buf == claimed->buf || other->mem == claimed->mem) return true;
+        }
+        return false;
+    };
+    for (size_t i = 0; i + 2 < bucket.size(); ++i) {
+        if (aliasesLoan(bucket[i])) return 0;
+    }
+    for (size_t i = 0; i + 1 < statusBucket.size(); ++i) {
+        if (aliasesLoan(statusBucket[i])) return 0;
+    }
+    // Probe and commit run under the same caller lock. The probe changes no owner,
+    // generation, counters or payload, permitting bounded host allocation afterward.
+    if (probe) return 1;
+    // All refusal predicates precede this atomic triple claim. The three pops cannot
+    // allocate or fail, so a partial claim never escapes and no rollback allocates.
+    bucket.pop_back(); bucket.pop_back(); statusBucket.pop_back(); g_poolCount -= 3;
+    advanceNativeCheckoutGeneration(x); advanceNativeCheckoutGeneration(y); advanceNativeCheckoutGeneration(verdict);
+    struct Loan {
+        Buffer* x; Buffer* y; Buffer* verdict;
+        ~Loan() { fvk_free(x); fvk_free(y); fvk_free(verdict); }
+    } loan{x,y,verdict};
+    if (step) {
+        if (!stepRecordUpload(x, host, bytes)) return fail();
+    } else {
+        memcpy(g_stageMapped, host, bytes);
+        VkCommandBuffer cmd = v41BeginCmdChecked();
+        if (cmd == VK_NULL_HANDLE) return fail();
+        VkBufferCopy region{0,0,bytes};
+        vkCmdCopyBuffer(cmd, g_stage->buf, x->buf, 1, &region);
+        dpOneShot(g_dp.oneShotH2D);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return fail();
+        if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes)) g_transferCountersValid = false;
+    }
+    struct { int rows, n; float eps; } pc{rows,width,eps};
+    Buffer* bufs[] = {x,w,y};
+    if (!dispatch(g_kern[K_RMSNORM], bufs, &pc, sizeof(pc), (uint32_t)rows, 1, true)) return fail();
+    const int publishStatus = fvk_v41_bf16_publish_f32(y, x, verdict, (int)(bytes / 4), 10);
+    if (publishStatus != VK_SUCCESS) { *status = publishStatus; return -1; }
+    const int readStatus = fvk_v41_d2h(host, y, bytes);
+    if (readStatus != VK_SUCCESS) { *status = readStatus; return -1; }
+    // Readback resumes a step batch. A failed resume must not publish a result.
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    void* sources[] = {verdict, x};
+    const size_t offsets[] = {0, 16};
+    const size_t lengths[] = {16, bytes};
+    const int publicationRead = fvk_v41_d2h_many(published, bytes + 16, 2, sources, offsets, lengths);
+    if (publicationRead != VK_SUCCESS) { *status = publicationRead; return -1; }
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    return 1;
+}
+
 // fvk_v41_d2h for several regions behind one host fence (#13820): each copy
 // lands at its caller-chosen staging offset, so k status records and rows cost
 // one submit instead of k. Regions are ordered and disjoint in the host image.

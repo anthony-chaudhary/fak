@@ -170,16 +170,28 @@ func (b *v41FFNNormBinding) panel(m *Model, st *v41ForwardState, scratch *v41Pro
 				break
 			}
 			selected := false
+			var published *compute.V41FFNNormPublication
 			flat := input.state.flat[lo*width : hi*width : hi*width]
 			attempt := func(gain compute.Tensor) ([]float32, bool, error) {
 				var err error
-				selected, err = compute.TryV41PoolNormPanel(b.backend, gain, flat, hi-lo, width, eps)
-				// Only an untouched native MISS may choose the smaller existing
-				// pair. A selected/error result never replays at another size.
+				try := func() {
+					published, selected, err = compute.TryV41FFNNormPublication(b.backend, gain, flat, hi-lo, width, eps)
+					if published != nil && err == nil && v41HostBF16Witness.Load() {
+						v41BF16PublishCalls.Add(1)
+						v41BF16PanelCalls.Add(1)
+						v41BF16PanelRows.Add(int64(hi - lo))
+					}
+					if selected || err != nil {
+						return
+					}
+					selected, err = compute.TryV41PoolNormPanel(b.backend, gain, flat, hi-lo, width, eps)
+				}
+				try()
+				// Only a pre-effect miss of both routes can choose 32 rows.
 				if !selected && err == nil && hi-lo > v41FFNPoolPanelFallbackRows {
 					hi = lo + v41FFNPoolPanelFallbackRows
 					flat = input.state.flat[lo*width : hi*width : hi*width]
-					selected, err = compute.TryV41PoolNormPanel(b.backend, gain, flat, hi-lo, width, eps)
+					try()
 				}
 				if selected || err != nil {
 					return flat, true, err
@@ -225,7 +237,18 @@ func (b *v41FFNNormBinding) panel(m *Model, st *v41ForwardState, scratch *v41Pro
 				if cause != nil {
 					break
 				}
-				out[row], err = v41LatentNormBF16Publish(layer, leaf, "normalization", values, publish)
+				if published != nil {
+					// Raw finiteness above precedes every rounding fault in this
+					// row. Global device minimum is translated to a row-local index.
+					out[row], err = published.Row(row - lo)
+					if err != nil {
+						err = s.v41CloseBF16PublicationFailure(b.backend, layer, leaf+" normalization", "checked publication", err)
+					} else if !v41BF16Widened(out[row]) {
+						err = s.v41CloseBF16PublicationFailure(b.backend, layer, leaf+" normalization", "checked publication readback", errV41BF16BoundaryResult)
+					}
+				} else {
+					out[row], err = v41LatentNormBF16Publish(layer, leaf, "normalization", values, publish)
+				}
 				if err != nil {
 					cause = err
 					break
