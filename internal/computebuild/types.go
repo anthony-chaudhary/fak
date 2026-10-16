@@ -133,6 +133,8 @@ const (
 
 	// VulkanBuildReceiptSchemaV24 adds canonical routed activation chunks.
 	VulkanBuildReceiptSchemaV24 = "fak.vulkan-build-receipt.v24"
+	// VulkanBuildReceiptSchemaV25 adds canonical down publication chunks.
+	VulkanBuildReceiptSchemaV25 = "fak.vulkan-build-receipt.v25"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

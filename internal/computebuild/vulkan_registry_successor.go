@@ -64,6 +64,8 @@ const (
 	VulkanShaderRegistryV23ID = "fak.vulkan-shader-registry.v23.current86"
 	// VulkanShaderRegistryV24ID adds the canonical routed activation chunk.
 	VulkanShaderRegistryV24ID = "fak.vulkan-shader-registry.v24.current87"
+	// VulkanShaderRegistryV25ID adds canonical row-local down publication chunks.
+	VulkanShaderRegistryV25ID = "fak.vulkan-shader-registry.v25.current88"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -113,9 +115,11 @@ var (
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
 	vulkanRegistryV24 = &vulkanSuccessorRegistry{version: "V24", schema: VulkanBuildReceiptSchemaV24, id: VulkanShaderRegistryV24ID, count: 87, parent: vulkanRegistryV23, added: []string{"v41_routed_swiglu_panel_chunk"}}
 
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24}
+	vulkanRegistryV25 = &vulkanSuccessorRegistry{version: "V25", schema: VulkanBuildReceiptSchemaV25, id: VulkanShaderRegistryV25ID, count: 88, parent: vulkanRegistryV24, added: []string{"v41_routed_down_panel_chunk"}}
+
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV24
+	vulkanCurrentRegistry = vulkanRegistryV25
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

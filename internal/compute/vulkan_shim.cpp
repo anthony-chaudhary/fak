@@ -336,7 +336,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -367,7 +367,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_V41_ROUTED_DOWN_PANEL_ROW: case K_V41_INDEX_SCALE_BF16: case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
+    case K_V41_ROUTED_DOWN_PANEL_CHUNK: case K_V41_ROUTED_DOWN_PANEL_ROW: case K_V41_INDEX_SCALE_BF16: case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
     case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL: case K_V41_SCALE_EXACT: case K_V41_ENGRAM_ROW_DECODE: case K_V41_ROUTED_PUBLISH_SUM:
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_V41_Q2K_TOKEN_PANEL: case K_COUNT:
         return g_dp.otherUnclassified;
@@ -1529,7 +1529,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2967,6 +2967,7 @@ static int v41TokenGridModuleABI(const std::vector<char>& code, uint32_t expecte
 // Exact immutable module attestation; ordinary scalar/BF16 admission is unchanged.
 #include "v41_index_scale_bf16_spirv.h"
 #include "v41_routed_swiglu_chunk_spirv.h"
+#include "v41_routed_down_chunk_spirv.h"
 
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
     const bool fixedV41 = &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
@@ -2986,6 +2987,8 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
         (nbuf != 3 || pcsize != 8 || !g_v41IndexerFloatControls || !v41IndexScaleBF16ABI(code))) return false;
     if (&k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] &&
         (nbuf != 4 || pcsize != 48 || !g_v41IndexerFloatControls || !v41RoutedSwiGLUChunkABI(code))) return false;
+    if (&k == &g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK] &&
+        (nbuf != 3 || pcsize != 16 || !v41RoutedDownChunkABI(code))) return false;
     if (q2GridABI < 0) return false;
     if (q3GridABI < 0) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
@@ -3133,13 +3136,14 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     // Only these concrete synchronous kernels may request the bounded status
     // initialization. They never flush a batch; they record only into a V4.1 step batch.
     const bool routedChunk = &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK];
+    const bool downChunk = &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK];
     const bool routedID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] ||
         &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
-    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedID || routedChunk) && initializedStatus == nullptr) return false;
+    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedID || routedChunk || downChunk) && initializedStatus == nullptr) return false;
     if (initializedStatus != nullptr) {
         // The status binding is the last one of each status-owning kernel. Only
-        // routed id and activation chunks can own multiple 16-byte records.
-        const bool checkedBF16 = (&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16]) && k.nbuf == 3;
+        // routed id, activation and down chunks can own multiple 16-byte records.
+        const bool checkedBF16 = (&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || downChunk) && k.nbuf == 3;
         const bool routedSwiGLU = (&k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedChunk) && k.nbuf == 4;
         const bool routedSwiGLUID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] && k.nbuf == 5;
         const bool routedPublishSum = &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] && k.nbuf == 4;
@@ -3147,8 +3151,8 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         const bool routedFusedDownSum = &k == &g_kern[K_V41_ROUTED_DOWN_SUM] && k.nbuf == 12;
         if ((!checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum && !routedFusedGateUp && !routedFusedDownSum) || !forceChecked || (g_batching && !g_stepBatch) ||
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
-            statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID && !routedChunk) ||
-            (routedChunk && ((groupsY != 2 && groupsY != 4 && groupsY != 8) || statusBytes != 16u * groupsY)) ||
+            statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID && !routedChunk && !downChunk) ||
+            ((routedChunk || downChunk) && ((groupsY != 2 && groupsY != 4 && groupsY != 8) || statusBytes != 16u * groupsY)) ||
             initializedStatus->bytes < statusBytes) return false;
     }
     // Ordinary scalar kernels inside a checked step also fail closed on
@@ -3945,6 +3949,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     const char* routedChunkEnv = std::getenv("FAK_V41_ROUTED_PANEL_CHUNK");
     if (routedChunkEnv && routedChunkEnv[0] == '1' && routedChunkEnv[1] == '\0' && g_v41IndexerFloatControls) {
         buildKernel(g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK], P("v41_routed_swiglu_panel_chunk.spv"), 4, 48);
+    }
+    const char* downChunkEnv = std::getenv("FAK_V41_ROUTED_DOWN_CHUNK");
+    if (downChunkEnv && downChunkEnv[0] == '1' && downChunkEnv[1] == '\0') {
+        buildKernel(g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK], P("v41_routed_down_panel_chunk.spv"), 3, 16);
     }
     const char* indexScaleBF16Env = std::getenv("FAK_V41_INDEX_SCALE_BF16");
     if (indexScaleBF16Env && indexScaleBF16Env[0] == '1' && indexScaleBF16Env[1] == '\0' && g_v41IndexerFloatControls) {
@@ -6895,6 +6903,55 @@ int fvk_v41_routed_down_panel_row_f32(const void* dInput, void* dOut, void* dSta
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_routed_down_panel_chunk(void) {
+    const char* enabled = std::getenv("FAK_V41_ROUTED_DOWN_CHUNK");
+    return enabled && enabled[0] == '1' && enabled[1] == '\0' && g_ready && v41HaveBF16Checked() &&
+        g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK].pipe != VK_NULL_HANDLE &&
+        g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK].nbuf == 3 && g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK].pcsize == 16;
+}
+
+int fvk_v41_routed_down_panel_chunk_shape(int rows, int count, int row, int chunk) {
+    if (rows < 1 || rows > 64 || row < 0 || (chunk != 2 && chunk != 4 && chunk != 8) || row > rows - chunk || uint32_t(chunk) > g_maxComputeWorkGroupCountY || !v41BF16CheckedCountSupported(count)) return 0;
+    const uint64_t bytes = uint64_t(rows) * uint64_t(count) * 4u;
+    return bytes <= INT32_MAX && bytes <= g_maxStorageBufferRange && (g_maxBufferBytes == 0 || bytes <= g_maxBufferBytes);
+}
+
+int fvk_v41_routed_down_panel_chunk_f32(const void* dInput, void* dOut, void* dStatus, int rows, int count, int row, int chunk) {
+    const int state = fvk_v41_attention_bf16_state();
+    if (state != 0) return state;
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_routed_down_panel_chunk()) return 3;
+    if (!fvk_v41_routed_down_panel_chunk_shape(rows, count, row, chunk)) return 2;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    Buffer* bufs[3] = {B(dInput), B(dOut), B(dStatus)};
+    const uint64_t required[3] = {uint64_t(rows) * bytes, uint64_t(chunk) * bytes, uint64_t(chunk) * 16u};
+    for (int i = 0; i < 3; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            required[i] > bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    for (int i = 0; i < 3; ++i) for (int j = i + 1; j < 3; ++j) {
+        if (bufs[i] == bufs[j] || bufs[i]->buf == bufs[j]->buf ||
+            (bufs[i]->mem == bufs[j]->mem && bufs[i]->memoryOffset < bufs[j]->memoryOffset + bufs[j]->bytes &&
+             bufs[j]->memoryOffset < bufs[i]->memoryOffset + bufs[i]->bytes)) return 2;
+    }
+    // Site 21 is the existing ordinary RoutedDown policy, never caller-controlled.
+    struct Push { uint32_t count, site, rowOffset, rows; } pc{uint32_t(count), 21u, uint32_t(uint64_t(row) * uint64_t(count)), uint32_t(chunk)};
+    static_assert(sizeof(Push) == 16 && offsetof(Push, count) == 0 && offsetof(Push, site) == 4 && offsetof(Push, rowOffset) == 8 && offsetof(Push, rows) == 12,
+                  "routed down chunk push ABI is count, site, row offset and rows");
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK], bufs, &pc, sizeof(pc), groups, uint32_t(chunk), true, bufs[2], uint32_t(chunk) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_v41_routed_down_panel_chunk_module_abi(const void* data, size_t bytes) {
+    if (!data || bytes == 0 || bytes % 4 != 0) return 0;
+    const char* first = static_cast<const char*>(data);
+    return v41RoutedDownChunkABI(std::vector<char>(first, first + bytes)) ? 1 : 0;
 }
 
 // Optional fixed-site 25 strict multiply plus checked BF16 publication.

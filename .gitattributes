@@ -79,3 +79,7 @@ internal/compute/v41_index_scale_bf16_spirv.h text eol=lf
 # Canonical routed activation chunk packaging hashes these reviewed bytes.
 internal/compute/shaders/v41_routed_swiglu_panel_chunk.comp text eol=lf
 internal/compute/v41_routed_swiglu_chunk_spirv.h text eol=lf
+
+# Canonical routed down chunk packaging hashes these reviewed bytes.
+internal/compute/shaders/v41_routed_down_panel_chunk.comp text eol=lf
+internal/compute/v41_routed_down_chunk_spirv.h text eol=lf

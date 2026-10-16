@@ -182,6 +182,16 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	var sums []compute.Tensor
 	usedDownTile := false
 	usedActivationChunk := false
+	usedPublicationChunk := false
+	var publicationRows []int
+	var panelRead compute.V41DeferredPanelReader
+	panelReadChecked := false
+	appendPublication := func(t compute.Tensor, rows int) {
+		published = append(published, t)
+		if usedPublicationChunk {
+			publicationRows = append(publicationRows, rows)
+		}
+	}
 	uploads := map[int]compute.Tensor{}
 	faultRow, current := count, 0
 	var primary any
@@ -256,7 +266,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		if err = record(p, st, H, compute.V41DeferredBF16Publish, compute.V41BF16PublishRoutedDown, err); err != nil {
 			return err
 		}
-		published = append(published, p)
+		appendPublication(p, 1)
 		return nil
 	}
 	opened := s.M.v41NowNanos()
@@ -390,6 +400,31 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 				if cause = err; cause != nil {
 					break
 				}
+				if chunks, ok := s.Backend.(compute.V41RoutedDownPanelChunkBackend); options == nil && ok &&
+					(handoff == nil || handoff.canCompleteUnretained(count)) && chunks.SupportsV41RoutedDownPanelChunk(panel, 0, last-chunkStart+1) {
+					if !panelReadChecked {
+						panelRead = compute.BindV41DeferredPanelReader(deferred)
+						panelReadChecked = true
+					}
+					if panelRead != nil {
+						if !usedPublicationChunk {
+							publicationRows = make([]int, len(published))
+							for i := range publicationRows {
+								publicationRows[i] = 1
+							}
+							usedPublicationChunk = true
+						}
+						current = chunkStart // Grouped publication/cleanup belongs to chunk start.
+						rows := last - chunkStart + 1
+						p, st, err := chunks.V41RoutedDownPanelChunkDeferred(panel, 0, rows)
+						if cause = recordMany(p, st, H, rows, compute.V41DeferredBF16Publish, compute.V41BF16PublishRoutedDown, err); cause != nil {
+							break recordRows
+						}
+						appendPublication(p, rows)
+						current, chunkStart, activations = last, last+1, activations[:0]
+						continue
+					}
+				}
 				for row := chunkStart; row <= last; row++ {
 					current = row
 					if rows, ok := s.Backend.(compute.V41RoutedDownPanelRowBackend); options == nil && ok && rows.SupportsV41RoutedDownPanelRow(panel, row-chunkStart) {
@@ -397,7 +432,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 						if cause = record(p, st, H, compute.V41DeferredBF16Publish, compute.V41BF16PublishRoutedDown, err); cause != nil {
 							break recordRows
 						}
-						published = append(published, p)
+						appendPublication(p, 1)
 					} else {
 						d, err := downTile.row(panel, row-chunkStart, H, own, valid)
 						if cause = err; cause != nil {
@@ -459,7 +494,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	var logicalKinds []compute.V41DeferredStatusKind
 	var verdictOrder []int
 	expectedVerdicts := len(statuses)
-	if usedActivationChunk {
+	if usedActivationChunk || usedPublicationChunk {
 		for i, st := range statuses {
 			n := st.Records
 			if n == 0 {
@@ -473,7 +508,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		}
 		expectedVerdicts = len(verdictOrder)
 		for i := 1; i < len(verdictOrder); i++ {
-			for j := i; j > 0 && logicalRows[verdictOrder[j]] < logicalRows[verdictOrder[j-1]]; j-- {
+			for j := i; j > 0 && (logicalRows[verdictOrder[j]] < logicalRows[verdictOrder[j-1]] || logicalRows[verdictOrder[j]] == logicalRows[verdictOrder[j-1]] && logicalKinds[verdictOrder[j]] == compute.V41DeferredRoutedSwiGLU && logicalKinds[verdictOrder[j-1]] == compute.V41DeferredBF16Publish); j-- {
 				verdictOrder[j], verdictOrder[j-1] = verdictOrder[j-1], verdictOrder[j]
 			}
 		}
@@ -492,7 +527,16 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	var values [][]float32
 	var readErr error
 	var readResult compute.V41DeferredReadResult
-	ownedRead := options == nil && len(readRows) >= 2
+	expectedReadRows := len(readRows)
+	readLayout := publicationRows
+	if usedPublicationChunk {
+		expectedReadRows = count
+		if cause != nil || primary != nil {
+			expectedReadRows = 0
+			readLayout = nil
+		}
+	}
+	ownedRead := options == nil && (usedPublicationChunk || len(readRows) >= 2)
 	readCount := 0
 	func() {
 		defer func() {
@@ -500,7 +544,10 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 				primary, cause, faultRow, *stage = p, nil, statusRows[0], "readback"
 			}
 		}()
-		if ownedRead {
+		if usedPublicationChunk {
+			verdicts, readResult, readErr = panelRead(statuses, readRows, readLayout, H)
+			readCount = readResult.RowCount()
+		} else if ownedRead {
 			verdicts, readResult, readErr = compute.ReadV41DeferredResult(deferred, statuses, readRows)
 			readCount = readResult.RowCount()
 		} else {
@@ -513,7 +560,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		cause, primary, faultRow, *stage = readErr, nil, statusRows[0], "readback"
 		return nil, cause
 	}
-	if len(verdicts) != expectedVerdicts || readCount != len(readRows) {
+	if len(verdicts) != expectedVerdicts || readCount != expectedReadRows {
 		if cause == nil && primary == nil {
 			cause, faultRow, *stage = errV41ExpertResult, 0, "readback"
 		}
@@ -521,7 +568,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	}
 	for position, verdict := range verdicts {
 		row, kind := 0, compute.V41DeferredRoutedSwiGLU
-		if usedActivationChunk {
+		if usedActivationChunk || usedPublicationChunk {
 			i := verdictOrder[position]
 			verdict = verdicts[i]
 			row, kind = logicalRows[i], logicalKinds[i]
@@ -589,6 +636,13 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		}
 	}
 	if handoff != nil {
+		if usedPublicationChunk {
+			if err := handoff.completeUnretained(count); err != nil {
+				faultRow, *stage, *recordingFailed = 0, "readback", true
+				return nil, err
+			}
+			return result, nil
+		}
 		n, err := handoff.adopt(published)
 		if err != nil {
 			faultRow, *stage, *recordingFailed = 0, "readback", true

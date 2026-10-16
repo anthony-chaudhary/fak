@@ -13980,6 +13980,11 @@
           "category": "incidental",
           "reason": "Optional backend capability predicate for the immutable-module-qualified routed activation chunk; it is not a product support or maturity claim.",
           "token": "SupportsV41RoutedSwiGLUPanelChunk"
+        },
+        {
+          "category": "incidental",
+          "reason": "Effect-free optional backend capability predicate for exact routed down chunk operands, not a maturity assessment or persistent support state.",
+          "token": "SupportsV41RoutedDownPanelChunk"
         }
       ],
       "exclude": [
@@ -14112,6 +14117,7 @@
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
         "SupportsV41IndexScaleBF16",
+        "SupportsV41RoutedDownPanelChunk",
         "SupportsV41RoutedDownPanelRow",
         "SupportsV41RoutedSwiGLUPanelChunk",
         "SupportsV41RoutedSwiGLUPanelRow",
@@ -15494,6 +15500,11 @@
           "category": "incidental",
           "reason": "Private text presentation helper for existing content-free session-journal refusal records; it formats bounded rows without materializing a new runtime artifact or introducing a separate rendering contract.",
           "token": "renderSessionJournalRefusals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local closure decoding already-read packed float32 bytes into independent logical host rows within the deferred reader; no rendering or independent materialization pipeline.",
+          "token": "materializePanelRows"
         }
       ],
       "id": "render-materialize",
@@ -15539,6 +15550,7 @@
         "incumbentRenderSpec",
         "incumbentRenderSummary",
         "indexrenderhits",
+        "materializePanelRows",
         "materializeRows",
         "materializeSessionMoveCheckpoint",
         "materialized",
@@ -16823,6 +16835,16 @@
           "category": "incidental",
           "reason": "Pure bounded geometry constructor for the existing routed SwiGLU activation chunk; it does not introduce an independent planner or scheduling policy.",
           "token": "PlanV41RoutedSwiGLUPanelChunk"
+        },
+        {
+          "category": "incidental",
+          "reason": "Validated scalar geometry and byte extents for the fixed site21 routed down publication chunk, with no retained state or independent scheduling policy.",
+          "token": "V41RoutedDownPanelChunkPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Effect-free geometry constructor for fixed site21 routed down publication chunks; no resource reservation or independently executable plan.",
+          "token": "PlanV41RoutedDownPanelChunk"
         }
       ],
       "exclude": [
@@ -16911,6 +16933,7 @@
         "PlanUnits",
         "PlanUnregisteredResidue",
         "PlanV41EPOwnerBuild",
+        "PlanV41RoutedDownPanelChunk",
         "PlanV41RoutedSwiGLUPanelChunk",
         "PlanV41RoutedSwiGLUPanelRow",
         "PlanningEffect",
@@ -16938,6 +16961,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "UncoveredCandidateClasses",
+        "V41RoutedDownPanelChunkPlan",
         "V41RoutedSwiGLUPanelChunkPlan",
         "V41RoutedSwiGLUPanelRowPlan",
         "ValidateListPlan",
@@ -17640,6 +17664,16 @@
           "category": "incidental",
           "reason": "Private predicate checking existing backend dtype capabilities against copied head metadata after the metadata lock is released.",
           "token": "v41HeadLayoutSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private shared deferred status reader implementation parameterized by bounded physical-to-logical row geometry; no independent layout authority or persistent state.",
+          "token": "v41ReadDeferredLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Call-local physical-output row-count descriptors used by the routed cohort deferred read; no persistent layout owner or independent layout algorithm.",
+          "token": "readLayout"
         }
       ],
       "id": "layout",
@@ -17658,11 +17692,13 @@
         "gitDailyDayLayout",
         "imageLayoutVersion",
         "layouts",
+        "readLayout",
         "usesmlamoelayout",
         "v41DeferredLayout",
         "v41HeadLayout",
         "v41HeadLayoutSnapshot",
         "v41HeadLayoutSupported",
+        "v41ReadDeferredLayout",
         "v41TypedReadbackLayout"
       ],
       "known_tokens": [],
