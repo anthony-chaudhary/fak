@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:a2b81324250323a6579b7e1660fdaa47187eb9879e4f4e49418e7db4c97c463f",
-  "tracked_files": 25544,
-  "tracked_bytes": 512217736,
+  "content_root": "sha256:5fd3bc4f01bb1dc30f4e73cdbd915ec83119a9d62dd593c1db15dcac2485275b",
+  "tracked_files": 25548,
+  "tracked_bytes": 512233121,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -102108,6 +102108,24 @@
       ]
     },
     {
+      "path": "internal/compute/v41_index_rope_read.go",
+      "content_sha256": "sha256:4d8f7a3c3fc4345ee7fd02982c7b5a4d7ef3dc5e459c7aa6ee8c04d8b49d6923",
+      "bytes": 1744,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/compute/v41_index_rope_read_test.go",
+      "content_sha256": "sha256:3d294775d38258ed4458e5e8e56fab6dbdacc1041b389160aa8a368208bbcdd3",
+      "bytes": 2911,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/compute/v41_index_scale_bf16.go",
       "content_sha256": "sha256:08a5d8da9733573d8770e29375e037982b1d26fa5a841930892d9ced7ab45651",
       "bytes": 932,
@@ -102190,8 +102208,8 @@
     },
     {
       "path": "internal/compute/v41_indexer_read.go",
-      "content_sha256": "sha256:28458d0f710dcc489af40ff85ae42a5caa4c1c04ae82e61cc89fb40c585c2ccd",
-      "bytes": 1052,
+      "content_sha256": "sha256:6ee79f412ea366d5b6ca1a62b5b625e7208c3a026633c91b9d245f5485b6b51b",
+      "bytes": 1368,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -102363,6 +102381,24 @@
       "path": "internal/compute/v41_query_prefix_test.go",
       "content_sha256": "sha256:c67b1df889661dbe424f7eefbade918e850a1e0aa6b577401fed716b85082139",
       "bytes": 12949,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/compute/v41_rmsnorm_read.go",
+      "content_sha256": "sha256:dc557b043a165a5f3f6d17f29846c99e61cf4943f84d10cf9671fb4912fbcabe",
+      "bytes": 567,
+      "classification": "runtime_source",
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "internal/compute/v41_rmsnorm_read_test.go",
+      "content_sha256": "sha256:d4b9b95128cafdae4cf8439539c0f99a6ca81cff0259e0d78d19da4111337d59",
+      "bytes": 1353,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -102721,8 +102757,8 @@
     },
     {
       "path": "internal/compute/vulkan_backend.h",
-      "content_sha256": "sha256:b8a8e9c4345369fe1fbc07512a55ea9c601e91ceee2ae39e97af30543db380ab",
-      "bytes": 53192,
+      "content_sha256": "sha256:5f7a6f59d72a911cfc3a1685aa1bf6aa1c6fc6138970cbf767192ad11382e729",
+      "bytes": 54422,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -102820,8 +102856,8 @@
     },
     {
       "path": "internal/compute/vulkan_device_debug.go",
-      "content_sha256": "sha256:bd860ed17f0dc123099ade2a5f0595e8abd4b4845a2ecd9898ffd8d53f75269d",
-      "bytes": 63807,
+      "content_sha256": "sha256:3a2d9b5fe1a5dfa3a078eefc7452f379698e74452b38144e7a70ebb9a04f1057",
+      "bytes": 64433,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -103567,8 +103603,8 @@
     },
     {
       "path": "internal/compute/vulkan_retained_release_adapter_test.go",
-      "content_sha256": "sha256:85272cefc31cedeeb2fa27420847847cc206a529de48227a19a2f96f8bd40402",
-      "bytes": 5469,
+      "content_sha256": "sha256:22065759887d7cd2670dca406a6e5e0b5d19bb89d23e72524e9b987b0e1fa76b",
+      "bytes": 6540,
       "classification": "test_fixture",
       "source_classes": [
         "history_changelog_releases",
@@ -103577,8 +103613,8 @@
     },
     {
       "path": "internal/compute/vulkan_retained_release_snapshot_test.go",
-      "content_sha256": "sha256:d18ce2709c65bdadcc69c7c680467d915dd74d70eadadcbc54b2a25c23d2e3ae",
-      "bytes": 9735,
+      "content_sha256": "sha256:80c6e317c8024469ac75135830dfc619bd9e9465c2cfb264b49ca891b8ffcea2",
+      "bytes": 13593,
       "classification": "test_fixture",
       "source_classes": [
         "history_changelog_releases",
@@ -103587,8 +103623,8 @@
     },
     {
       "path": "internal/compute/vulkan_shim.cpp",
-      "content_sha256": "sha256:ee62a6d8d0d14bc8a957d148f2596a2b71d591fd6c34bbf6bdcbad7ca8b94cba",
-      "bytes": 395085,
+      "content_sha256": "sha256:8510da7c3ea1f3ca8185d21b5d9f973049b32e597971ce68f9b6fede9a2e93e0",
+      "bytes": 397115,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -164363,8 +164399,8 @@
     },
     {
       "path": "internal/model/v41_forward.go",
-      "content_sha256": "sha256:2fe104f67015332c33b0c18adbf7eae3195fb4d17e8b1c3671d4df7bf76db349",
-      "bytes": 60473,
+      "content_sha256": "sha256:a100f5af6bba5a9f86286692b8548ead34f67dfa6f31ad4b185a0d6e3d7e6432",
+      "bytes": 60469,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -164804,8 +164840,8 @@
     },
     {
       "path": "internal/model/v41_index_rope_device.go",
-      "content_sha256": "sha256:119792cac0e075e444dd163f1136221d57b25ede2a0370381dc23a34cc146fa9",
-      "bytes": 6070,
+      "content_sha256": "sha256:b063d5a62e3026be4fe02ef4ab002670f828825c8020b47ca40dc9ef642f9418",
+      "bytes": 5753,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
