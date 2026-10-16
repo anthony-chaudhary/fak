@@ -299,6 +299,9 @@ func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
 			rec.Model = sb.Model
 		}
 	}
+	if rec.GPUBusyPercent == nil {
+		rec.GPUBusyPercent = sampleGPUBusy()
+	}
 	m.perfMu.Lock()
 	m.appendPerfLocked(rec)
 	m.perfMu.Unlock()

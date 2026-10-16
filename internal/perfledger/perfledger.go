@@ -56,8 +56,12 @@ const (
 // PrefillTPS needs at least MinPrefillRateTokens uncached tokens. DecodeTPS is the
 // inter-token rate after the first token: (completion-1) / (e2e-ttft).
 type Record struct {
-	RequestID            string         `json:"request_id,omitempty"`
-	TraceID              string         `json:"trace_id,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	// InboundRequestID is the caller's own id for this attempt (X-Request-ID, else
+	// the traceparent trace id): the key a router journal row and usage receipt
+	// carry, so a slow turn joins to them. RequestID stays fak-minted and unique.
+	InboundRequestID     string         `json:"inbound_request_id,omitempty"`
 	WorkloadSHA256       string         `json:"workload_sha256,omitempty"`
 	WorkloadIdentityMode string         `json:"workload_identity_mode,omitempty"`
 	ConfigSHA256         string         `json:"config_sha256,omitempty"`
@@ -98,6 +102,9 @@ type Record struct {
 	// Both are absent on rows written before they existed.
 	Client    string `json:"client,omitempty"`
 	Synthetic bool   `json:"synthetic,omitempty"`
+	// GPUBusyPercent is the device busy share when the row was committed; absent
+	// (never 0) when no busy counter was readable.
+	GPUBusyPercent *int `json:"gpu_busy_percent,omitempty"`
 	Identity
 
 	BenchEvidence *BenchEvidence `json:"bench_evidence,omitempty"`
@@ -363,6 +370,18 @@ type Summary struct {
 	// planners, backends, hosts or builds.
 	ServedBy   *ServedBy `json:"served_by,omitempty"`
 	Identities int       `json:"identities,omitempty"`
+	// GPUBusy* fold Record.GPUBusyPercent over the rows that carry one.
+	GPUBusyMeasured int     `json:"gpu_busy_measured,omitempty"`
+	GPUBusyP50      float64 `json:"gpu_busy_p50,omitempty"`
+	// Slowest names the window's slowest served turn so it can be joined to its
+	// router attempt and usage receipt.
+	Slowest *SlowestTurn `json:"slowest,omitempty"`
+}
+
+type SlowestTurn struct {
+	RequestID        string  `json:"request_id,omitempty"`
+	InboundRequestID string  `json:"inbound_request_id,omitempty"`
+	E2EMS            float64 `json:"e2e_ms"`
 }
 
 type PathSummary struct {
@@ -437,7 +456,7 @@ func BuildReport(recs []Record, n int, capped bool, droppedWrites uint64) Report
 // cached / (uncached + cached) prompt tokens.
 func Summarize(recs []Record) Summary {
 	s := Summary{}
-	var ttft, prefill, decode, e2e []float64
+	var ttft, prefill, decode, e2e, gpuBusy []float64
 	var prompt, cached, prefillTok int64
 	var prefillMS float64
 	var nativePrefillMS, nativeDecodeMS, nativePrefillTPS, nativeDecodeTPS []float64
@@ -495,6 +514,12 @@ func Summarize(recs []Record) Summary {
 		}
 		if r.E2EMS > 0 {
 			e2e = append(e2e, r.E2EMS)
+			if s.Slowest == nil || r.E2EMS > s.Slowest.E2EMS {
+				s.Slowest = &SlowestTurn{RequestID: r.RequestID, InboundRequestID: r.InboundRequestID, E2EMS: r.E2EMS}
+			}
+		}
+		if g := r.GPUBusyPercent; g != nil {
+			gpuBusy = append(gpuBusy, float64(*g))
 		}
 		prompt += int64(r.PromptTokens)
 		cached += int64(r.CachedTokens)
@@ -570,6 +595,8 @@ func Summarize(recs []Record) Summary {
 	s.DecodeTPSP50 = quantile(decode, 0.50)
 	s.E2EP50MS = quantile(e2e, 0.50)
 	s.E2EP99MS = quantile(e2e, 0.99)
+	s.GPUBusyMeasured = len(gpuBusy)
+	s.GPUBusyP50 = quantile(gpuBusy, 0.50)
 	if total := prompt + cached; total > 0 {
 		s.CacheHitShare = roundTo(float64(cached)/float64(total), 10000)
 	}
@@ -745,6 +772,9 @@ func RenderCompact(rep Report) string {
 	fmt.Fprintf(&b, " | prefill p50=%s weighted=%s | decode p50=%s", fmtTPS(s.PrefillTPSP50), fmtTPS(s.PrefillTPSWeighted), fmtTPS(s.DecodeTPSP50))
 	fmt.Fprintf(&b, " | e2e p50=%s p99=%s", fmtMS(s.E2EP50MS), fmtMS(s.E2EP99MS))
 	fmt.Fprintf(&b, " | cache=%.1f%%", s.CacheHitShare*100)
+	if s.GPUBusyMeasured > 0 {
+		fmt.Fprintf(&b, " | gpu busy p50=%.0f%% (measured %d/%d)", s.GPUBusyP50, s.GPUBusyMeasured, s.Count)
+	}
 	if n := s.NativeTiming; n != nil {
 		fmt.Fprintf(&b, " | native phases=%d prefill p50=%s/%s weighted=%s (measured %d/%d) decode p50=%s/%s weighted=%s (measured %d/%d)",
 			n.Count, fmtMS(n.PrefillP50MS), fmtTPS(n.PrefillTPSP50), fmtTPS(n.PrefillTPSWeighted), n.PrefillMeasured, n.Count,
@@ -821,6 +851,11 @@ func RenderCompact(rep Report) string {
 		if s.Identities > 1 {
 			fmt.Fprintf(&b, " (window mixes %d)", s.Identities)
 		}
+	}
+	if sl := s.Slowest; sl != nil && (sl.RequestID != "" || sl.InboundRequestID != "") {
+		fmt.Fprintf(&b, " | slowest e2e=%s", fmtMS(sl.E2EMS))
+		writeField(&b, "request_id", sl.RequestID)
+		writeField(&b, "inbound_request_id", sl.InboundRequestID)
 	}
 	if rep.Window.Capped {
 		b.WriteString(" | capped")
