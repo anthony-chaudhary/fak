@@ -302,17 +302,20 @@ func (m *Model) ClearLoRA() { m.lora = nil }
 // is the decode-time seam residentMatRows calls: a guarded no-op when no set is
 // installed or no active adapter targets this projection, so the unadapted path
 // pays one nil check and nothing else.
-func (m *Model) loraApply(name string, x, y []float32) {
+// The result reports selection of a non-nil delta, including an all-zero
+// delta. Callers that do not need this distinction may ignore it.
+func (m *Model) loraApply(name string, x, y []float32) bool {
 	if m.lora == nil {
-		return
+		return false
 	}
 	d := m.lora.Delta(name, x)
 	if d == nil {
-		return
+		return false
 	}
 	for o := range y {
 		y[o] += d[o]
 	}
+	return true
 }
 
 // LoRAConfig is the subset of PEFT's adapter_config.json this loader reads.
