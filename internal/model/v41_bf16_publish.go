@@ -70,7 +70,17 @@ func v41BF16PublishFault(values []float32) (int, bool) {
 // widened row is copied unchanged; otherwise a bound publication rounds on the
 // device and a nil publication keeps the caller's host rounding.
 func v41PublishBF16(layer int, site string, values []float32, publish v41BF16BoundaryFunc, host func([]float32) ([]float32, error)) ([]float32, error) {
+	return v41PublishBF16Input(layer, site, values, publish, host, false)
+}
+
+// v41PublishBF16Input may transfer the input only when it is already widened
+// and the caller exclusively owns that fresh allocation. Ordinary callers
+// retain defensive copies; selected publication callbacks are unchanged.
+func v41PublishBF16Input(layer int, site string, values []float32, publish v41BF16BoundaryFunc, host func([]float32) ([]float32, error), owned bool) ([]float32, error) {
 	if v41BF16Widened(values) {
+		if owned {
+			return values, nil
+		}
 		out := make([]float32, len(values))
 		copy(out, values)
 		return out, nil
