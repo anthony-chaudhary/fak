@@ -7420,11 +7420,14 @@ void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOu
 }
 
 int fvk_argmax_f32(const void* dLogits, int n) {
-    if (g_batching) batchFlush(); // host fence: the logits must be materialized first
     Buffer* idx = (Buffer*)fvk_malloc(sizeof(int));
     struct { int n; } pc{n};
     Buffer* bufs[2] = {B((void*)dLogits), idx};
-    dispatch(g_kern[K_ARGMAX], bufs, &pc, sizeof(pc), 1); // not batching now → submits
+    // The logits producer and reduction share the active command buffer. The
+    // ordinary dispatch dependency orders their accesses; only the host index
+    // read needs a fence. Flush still ends the batch, as this entrypoint did before.
+    dispatch(g_kern[K_ARGMAX], bufs, &pc, sizeof(pc), 1);
+    if (g_batching) batchFlush();
     int h = 0;
     copyDeviceToHost(&h, idx, sizeof(int));
     fvk_free(idx);
