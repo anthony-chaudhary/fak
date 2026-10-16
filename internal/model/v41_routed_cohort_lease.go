@@ -258,7 +258,7 @@ func runV41RoutedCohortLeases(leases []*v41RoutedCohortLease, sums []v41RoutedCo
 		return nil, -1, err
 	}
 	for range flat {
-		first.leader.M.v41NoteExpertContraction()
+		first.leader.M.v41NoteDeviceExpertContraction()
 	}
 	return outputs, -1, nil
 }

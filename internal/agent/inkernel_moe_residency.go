@@ -56,7 +56,8 @@ type MoEResidencyLedger struct {
 	PageIns   int64 `json:"page_ins"`
 	Evictions int64 `json:"evictions"`
 	Refusals  int64 `json:"refusals"`
-	// PageInBytes is the device bytes cold uploads actually moved — the numerator of the
+	// PageInBytes counts H2D ring uploads, independently of OS page faults,
+	// checkpoint physical reads, and host f32 dequantization. It is the numerator of the
 	// bytes-per-token an operator sizes a budget against, and not recoverable from PageIns because
 	// routed projections differ in size and quantization.
 	PageInBytes int64 `json:"page_in_bytes"`
@@ -111,13 +112,32 @@ type CheckpointResidencySnapshot struct {
 
 // V41PhaseLifetimeSnapshot is the bounded model-lifetime view of V4.1 work.
 type V41PhaseLifetimeSnapshot struct {
-	Scope       string                             `json:"scope"`
-	Prefill     V41PhaseSnapshot                   `json:"prefill"`
-	Decode      V41PhaseSnapshot                   `json:"decode"`
-	Projections V41ProjectionPhaseLifetimeSnapshot `json:"projections"`
-	Compressor  V41CompressorPhaseLifetimeSnapshot `json:"compressor"`
-	Indexer     V41IndexerPhaseLifetimeSnapshot    `json:"indexer"`
-	Routed      V41RoutedPhaseLifetimeSnapshot     `json:"routed"`
+	Scope string `json:"scope"`
+	// Availability qualifies the complete snapshot when a nonblocking source
+	// read is busy. Stale snapshots retain the last successfully read counters.
+	Availability       string                             `json:"availability,omitempty"`
+	AvailabilityReason string                             `json:"availability_reason,omitempty"`
+	Prefill            V41PhaseSnapshot                   `json:"prefill"`
+	Decode             V41PhaseSnapshot                   `json:"decode"`
+	Projections        V41ProjectionPhaseLifetimeSnapshot `json:"projections"`
+	Compressor         V41CompressorPhaseLifetimeSnapshot `json:"compressor"`
+	Indexer            V41IndexerPhaseLifetimeSnapshot    `json:"indexer"`
+	Routed             V41RoutedPhaseLifetimeSnapshot     `json:"routed"`
+	ExpertCoverage     V41ExpertCoverageLifetimeSnapshot  `json:"expert_coverage"`
+}
+
+// V41ExpertCoverageLifetimeSnapshot adds qualified expert timing while keeping
+// the legacy prefill/decode numeric projection shape stable.
+type V41ExpertCoverageLifetimeSnapshot struct {
+	Prefill V41ExpertCoverageSnapshot `json:"prefill"`
+	Decode  V41ExpertCoverageSnapshot `json:"decode"`
+}
+
+type V41ExpertCoverageSnapshot struct {
+	Coverage                       model.V41ExpertPhaseCoverage `json:"coverage"`
+	IncrementalDeviceDispatchNanos int64                        `json:"incremental_device_dispatch_nanos"`
+	IncrementalDeviceGateUpCalls   int                          `json:"incremental_device_gate_up_calls"`
+	IncrementalDeviceDownCalls     int                          `json:"incremental_device_down_calls"`
 }
 
 // V41RoutedPhaseLifetimeSnapshot attributes batched routed-expert layers and
@@ -136,7 +156,7 @@ type V41RoutedPhaseSnapshot struct {
 	RoutedIDLayers        int `json:"routed_id_layers"`
 }
 
-// V41PhaseSnapshot deliberately contains only fixed-shape numeric counters.
+// V41PhaseSnapshot preserves the legacy fixed-shape numeric counters.
 type V41PhaseSnapshot struct {
 	Tokens                               int   `json:"tokens"`
 	AttentionContractionCalls            int   `json:"attention_contraction_calls"`
@@ -306,8 +326,37 @@ func (p *InKernelPlanner) noteMoEResidency(s *model.Session, tokens int64) {
 }
 
 func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution) {
+	// TryLock contention is an unavailable read, never a new zero-valued
+	// lifetime observation. Preserve every prior numeric subsystem while making
+	// the busy read explicit; a successful later read still replaces all totals.
+	busy := func(c model.V41ExpertPhaseCoverage) bool {
+		return c.Scope == "unavailable" && c.RequestIsolationReason == "ledger_busy"
+	}
+	if busy(at.Prefill.Coverage) && busy(at.Decode.Coverage) {
+		previous := p.moeResidency.V41Phases
+		snapshot := V41PhaseLifetimeSnapshot{Scope: "model_lifetime", Availability: "unavailable", AvailabilityReason: "ledger_busy"}
+		if previous != nil {
+			snapshot = *previous
+			snapshot.Availability, snapshot.AvailabilityReason = "stale", "ledger_busy"
+		}
+		snapshot.ExpertCoverage.Prefill.Coverage, snapshot.ExpertCoverage.Decode.Coverage = at.Prefill.Coverage, at.Decode.Coverage
+		p.moeResidency.V41Phases = &snapshot
+		return
+	}
 	prefill := v41PhaseSnapshot(at.Prefill)
 	decode := v41PhaseSnapshot(at.Decode)
+	expertCoverage := V41ExpertCoverageLifetimeSnapshot{
+		Prefill: v41ExpertCoverageSnapshot(at.Prefill), Decode: v41ExpertCoverageSnapshot(at.Decode),
+	}
+	// Keep the raw model's untouched phase zero for compatibility. Only the
+	// debug view qualifies an unobserved opposite phase; it inherits scope
+	// semantics, never samples or work from the observed phase.
+	if at.Prefill == (model.V41ExpertFaultAttributionPhase{}) && at.Decode.Coverage.Scope != "" {
+		expertCoverage.Prefill.Coverage = v41UnobservedPhaseCoverage(at.Decode.Coverage)
+	}
+	if at.Decode == (model.V41ExpertFaultAttributionPhase{}) && at.Prefill.Coverage.Scope != "" {
+		expertCoverage.Decode.Coverage = v41UnobservedPhaseCoverage(at.Prefill.Coverage)
+	}
 	projections := V41ProjectionPhaseLifetimeSnapshot{
 		Prefill: v41ProjectionPhaseSnapshot(at.Prefill),
 		Decode:  v41ProjectionPhaseSnapshot(at.Decode),
@@ -318,11 +367,11 @@ func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution
 	}
 	indexer := V41IndexerPhaseLifetimeSnapshot{Prefill: v41IndexerPhaseSnapshot(at.Prefill), Decode: v41IndexerPhaseSnapshot(at.Decode)}
 	routed := V41RoutedPhaseLifetimeSnapshot{Prefill: v41RoutedPhaseSnapshot(at.Prefill), Decode: v41RoutedPhaseSnapshot(at.Decode)}
-	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) && routed == (V41RoutedPhaseLifetimeSnapshot{}) {
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) && routed == (V41RoutedPhaseLifetimeSnapshot{}) && expertCoverage == (V41ExpertCoverageLifetimeSnapshot{}) {
 		return
 	}
 	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
-		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor, Indexer: indexer, Routed: routed,
+		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor, Indexer: indexer, Routed: routed, ExpertCoverage: expertCoverage,
 	}
 }
 
@@ -355,6 +404,24 @@ func v41PhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41PhaseSnapshot 
 		MHCProjectionNanos:                   in.MHCProjectionNanos,
 		MHCProjectionActivationUploadBytes:   in.MHCProjectionActivationUploadBytes,
 		MHCProjectionReadbackBytes:           in.MHCProjectionReadbackBytes,
+	}
+}
+
+func v41ExpertCoverageSnapshot(in model.V41ExpertFaultAttributionPhase) V41ExpertCoverageSnapshot {
+	return V41ExpertCoverageSnapshot{
+		Coverage: in.Coverage, IncrementalDeviceDispatchNanos: in.IncrementalDeviceDispatchNanos,
+		IncrementalDeviceGateUpCalls: in.IncrementalDeviceGateUpCalls, IncrementalDeviceDownCalls: in.IncrementalDeviceDownCalls,
+	}
+}
+
+func v41UnobservedPhaseCoverage(sibling model.V41ExpertPhaseCoverage) model.V41ExpertPhaseCoverage {
+	unavailable := model.V41PhaseFieldCoverage{Status: "unavailable", Reason: "phase_not_observed"}
+	return model.V41ExpertPhaseCoverage{
+		Scope: sibling.Scope, RequestIsolation: sibling.RequestIsolation,
+		RequestIsolationReason: sibling.RequestIsolationReason, Dependency: sibling.Dependency,
+		RingPageInSemantics: sibling.RingPageInSemantics,
+		HostMaterialization: unavailable, FaultTime: unavailable, DequantTime: unavailable,
+		ContractionTime: unavailable, DeviceDispatchTime: unavailable, DeviceActivationTime: unavailable,
 	}
 }
 

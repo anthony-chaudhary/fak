@@ -98,7 +98,7 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 			if err != nil {
 				return nil, err
 			}
-			m.v41NoteExpertContraction()
+			m.v41NoteDeviceExpertContraction()
 			return output, nil
 		case v41RoutedExpertError:
 			if cause == nil {

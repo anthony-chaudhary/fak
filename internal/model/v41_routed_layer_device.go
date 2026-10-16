@@ -389,7 +389,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				}
 				return nil, v41RoutedExpertError, closeFailure(err)
 			}
-			s.M.v41NoteExpertContraction()
+			s.M.v41NoteDeviceExpertContraction()
 		}
 		path, stage = "v41-routed-sum", "readback"
 		sum := rows[0]
