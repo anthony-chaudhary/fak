@@ -51,12 +51,13 @@ func TestV41StepActivationTrace(t *testing.T) {
 		t.Fatal("step did not commit its token exactly once")
 	}
 
-	f, err := os.Open(path)
+	// Hold no handle on the artifact: Windows refuses to rename the next
+	// publication over an open file.
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	a, err := computetrace.Read(f)
+	a, err := computetrace.Read(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestV41StepActivationTrace(t *testing.T) {
 	secondID, _, secondOutcome, secondToken, _, _ := readMetadata(t, path)
 	secondReceipt := s.LastV41ActivationCapture()
 	if secondReceipt.ID != secondID || !secondReceipt.Current || !secondReceipt.Published || secondReceipt.PublicationError != "" {
-		t.Fatal("continuation receipt did not advance to the new published capture")
+		t.Fatalf("continuation receipt did not advance to the new published capture: %+v", secondReceipt)
 	}
 	if secondID == "" || secondID == id || secondOutcome != "committed" || secondToken != len(full) {
 		t.Fatal("later step retained the previous capture identity")
