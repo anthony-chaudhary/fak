@@ -272,17 +272,17 @@ func (v AdmissionVerdict) HTTPStatus() int {
 // the running/waiting counts (and admitted/rejected) the L2 serving-metrics schema exports
 // so a fleet router / autoscaler can read per-worker load.
 type AdmissionStats struct {
-	Running       int   // running-set size right now (gauge)
-	Waiting       int   // waiting-queue depth right now (gauge)
-	TokensInUse   int   // token budget held by the running set right now (gauge)
-	QueuedTokens  int   // token volume across currently waiting requests right now (gauge)
-	MaxWaitRounds int64 // oldest current waiter's age in rounds (starvation visibility, gauge)
-	Admitted      int64 // cumulative requests promoted into the running set (counter)
-	Queued        int64 // cumulative requests placed on the waiting queue (counter)
-	Shed          int64 // cumulative requests shed under overload — 429 (counter)
-	Denied        int64 // cumulative requests rejected by a trust verdict (counter)
-	Expired       int64 // cumulative requests expired by DecodeTTL (counter)
-	Refused       int64 // cumulative requests refused for impossible envelopes (counter)
+	Running       int
+	Waiting       int
+	TokensInUse   int
+	QueuedTokens  int
+	MaxWaitRounds int64
+	Admitted      int64
+	Queued        int64
+	Shed          int64
+	Denied        int64
+	Expired       int64
+	Refused       int64
 }
 
 // admissionDecisionHistory is the fixed bound on retained per-trace admission decisions —
@@ -317,16 +317,11 @@ type AdmissionDecisionReceipt struct {
 	// Priority is the request's raw priority (lower is higher, Priority-ascending).
 	Priority int
 	// Verdict is the outcome token (AdmissionVerdict.String()).
-	Verdict string
-	// Admitted reports whether this decision granted a running-set slot to the request.
+	Verdict  string
 	Admitted bool
-	// Budget names the policy/budget axis that decided a refusal ("tokens",
-	// "fleet_tokens", "max_num_seqs", ...); empty when nothing refused it.
-	Budget string
-	// Reason carries the rejection reason when refused/shed/denied; empty otherwise.
-	Reason string
-	// At is the decision time from the controller's injectable clock.
-	At time.Time
+	Budget   string
+	Reason   string
+	At       time.Time
 	// Reservations is the estimated reservation by scope. Today the token axis is the only
 	// exact one, so it carries at most the token scope; it is empty when the controller
 	// holds no exact per-scope basis rather than guessing bytes.
