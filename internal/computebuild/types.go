@@ -125,6 +125,9 @@ const (
 	// VulkanBuildReceiptSchemaV21 binds V20/84 plus optional row-addressed down publication.
 	VulkanBuildReceiptSchemaV21 = "fak.vulkan-build-receipt.v21"
 
+	// VulkanBuildReceiptSchemaV22 binds V21/85 plus optional fused index-scale BF16 publication.
+	VulkanBuildReceiptSchemaV22 = "fak.vulkan-build-receipt.v22"
+
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
 

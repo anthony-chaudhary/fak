@@ -192,6 +192,7 @@ function Build-Shaders {
     $shaders += "v41_q3k_token_panel"
     $shaders += "v41_routed_swiglu_panel_row"
     $shaders += "v41_routed_down_panel_row"
+    $shaders += "v41_index_scale_bf16"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

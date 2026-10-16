@@ -58,6 +58,8 @@ const (
 	VulkanShaderRegistryV20ID = "fak.vulkan-shader-registry.v20.current84"
 	// VulkanShaderRegistryV21ID adds optional row-addressed routed down publication.
 	VulkanShaderRegistryV21ID = "fak.vulkan-shader-registry.v21.current85"
+	// VulkanShaderRegistryV22ID adds optional fused index-scale BF16 publication.
+	VulkanShaderRegistryV22ID = "fak.vulkan-shader-registry.v22.current86"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -100,10 +102,12 @@ var (
 
 	vulkanRegistryV21 = &vulkanSuccessorRegistry{version: "V21", schema: VulkanBuildReceiptSchemaV21, id: VulkanShaderRegistryV21ID, count: 85, parent: vulkanRegistryV20, added: []string{"v41_routed_down_panel_row"}}
 
+	vulkanRegistryV22 = &vulkanSuccessorRegistry{version: "V22", schema: VulkanBuildReceiptSchemaV22, id: VulkanShaderRegistryV22ID, count: 86, parent: vulkanRegistryV21, added: []string{"v41_index_scale_bf16"}}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV21
+	vulkanCurrentRegistry = vulkanRegistryV22
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {
@@ -212,6 +216,9 @@ func CurrentVulkanShaderRegistryV20() []string { return vulkanRegistryV20.stems(
 
 // CurrentVulkanShaderRegistryV21 returns the exact optional down-row bundle.
 func CurrentVulkanShaderRegistryV21() []string { return vulkanRegistryV21.stems() }
+
+// CurrentVulkanShaderRegistryV22 returns the exact optional index-scale bundle.
+func CurrentVulkanShaderRegistryV22() []string { return vulkanRegistryV22.stems() }
 
 // CurrentVulkanShaderRegistryLatest returns an owned copy of the set the
 // builder compiles and stamps today.
