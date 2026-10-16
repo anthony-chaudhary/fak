@@ -1,25 +1,24 @@
 #version 450
-#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
-#extension GL_EXT_shader_8bit_storage : require
+#extension GL_KHR_shader_subgroup_shuffle : require
 
 // Decode-only Q8_0 input projection for Qwen3.5/3.8 Gated-DeltaNet. The four
 // logical matrices share one dispatch and one output-row address space. Eight
 // output rows share each workgroup; activation quantization is windowed so the
-// shader supports hidden dimensions larger than its 2,048-element LDS tile.
+// shader supports hidden dimensions larger than its 8,192-element LDS tile.
 layout(local_size_x = 256) in;
 
 const uint BLOCK = 32u;
-const uint SHARED_CAP = 2048u;
+const uint SHARED_CAP = 8192u;
 const uint WIN_BLOCKS = SHARED_CAP / BLOCK;
-const uint PARTIAL_STRIDE = WIN_BLOCKS + 2u; // Pad-2 avoids 64-column bank aliasing.
+const uint PARTIAL_STRIDE = WIN_BLOCKS + 2u; // Pad-2 avoids bank aliasing.
 
-layout(std430, binding = 0) readonly buffer W0q { int8_t W0codes[]; };
+layout(std430, binding = 0) readonly buffer W0q { uint W0codes[]; };
 layout(std430, binding = 1) readonly buffer W0s { float W0scale[]; };
-layout(std430, binding = 2) readonly buffer W1q { int8_t W1codes[]; };
+layout(std430, binding = 2) readonly buffer W1q { uint W1codes[]; };
 layout(std430, binding = 3) readonly buffer W1s { float W1scale[]; };
-layout(std430, binding = 4) readonly buffer W2q { int8_t W2codes[]; };
+layout(std430, binding = 4) readonly buffer W2q { uint W2codes[]; };
 layout(std430, binding = 5) readonly buffer W2s { float W2scale[]; };
-layout(std430, binding = 6) readonly buffer W3q { int8_t W3codes[]; };
+layout(std430, binding = 6) readonly buffer W3q { uint W3codes[]; };
 layout(std430, binding = 7) readonly buffer W3s { float W3scale[]; };
 layout(std430, binding = 8) readonly buffer Xb { float X[]; };
 layout(std430, binding = 9) writeonly buffer Y0b { float Y0[]; };
@@ -35,15 +34,22 @@ layout(push_constant) uniform Push {
     int inDim;
 } pc;
 
-shared int8_t Xq[SHARED_CAP];
+shared uint Xq[SHARED_CAP / 4u];
 shared float Xs[WIN_BLOCKS];
 shared float partial[8u * PARTIAL_STRIDE];
 
-int8_t q8round(float x) {
+uint q8round(float x) {
     int t = int(x);
     float f = x - float(t);
     if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
-    return int8_t(clamp(t, -127, 127));
+    return uint(clamp(t, -127, 127)) & 0xFFu;
+}
+
+int dot4(uint a, uint b) {
+    return bitfieldExtract(int(a), 0, 8) * bitfieldExtract(int(b), 0, 8) +
+           bitfieldExtract(int(a), 8, 8) * bitfieldExtract(int(b), 8, 8) +
+           bitfieldExtract(int(a), 16, 8) * bitfieldExtract(int(b), 16, 8) +
+           bitfieldExtract(int(a), 24, 8) * bitfieldExtract(int(b), 24, 8);
 }
 
 void main() {
@@ -59,71 +65,66 @@ void main() {
     uint nblk = in_ / BLOCK;
     float acc = 0.0;
 
+    uint mat = 3u;
+    uint localRow = outputRow - out0 - out1 - out2;
+    if (outputRow < out0) {
+        mat = 0u; localRow = outputRow;
+    } else if (outputRow < out0 + out1) {
+        mat = 1u; localRow = outputRow - out0;
+    } else if (outputRow < out0 + out1 + out2) {
+        mat = 2u; localRow = outputRow - out0 - out1;
+    }
+
     for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
         uint winBlocks = min(WIN_BLOCKS, nblk - wb);
-        for (uint b = tid; b < winBlocks; b += 256u) {
-            uint base = b * BLOCK;
-            uint gbase = (wb + b) * BLOCK;
-            float amax = 0.0;
-            for (uint i = 0u; i < BLOCK; ++i)
-                amax = max(amax, abs(X[gbase + i]));
+        // Eight threads quantize one 32-element block from four floats each.
+        // Groups of eight stay converged: the bound and stride are multiples of eight.
+        for (uint v = tid; v < winBlocks * 8u; v += 256u) {
+            uint g = wb * BLOCK + v * 4u;
+            float x0 = X[g], x1 = X[g + 1u], x2 = X[g + 2u], x3 = X[g + 3u];
+            float amax = max(max(abs(x0), abs(x1)), max(abs(x2), abs(x3)));
+            amax = max(amax, subgroupShuffleXor(amax, 1u));
+            amax = max(amax, subgroupShuffleXor(amax, 2u));
+            amax = max(amax, subgroupShuffleXor(amax, 4u));
             float d = amax / 127.0;
-            Xs[b] = d;
             float inv = d > 0.0 ? 1.0 / d : 0.0;
-            for (uint i = 0u; i < BLOCK; ++i)
-                Xq[base + i] = d > 0.0 ? q8round(X[gbase + i] * inv) : int8_t(0);
+            uint q = 0u;
+            if (d > 0.0)
+                q = q8round(x0 * inv) | (q8round(x1 * inv) << 8) |
+                    (q8round(x2 * inv) << 16) | (q8round(x3 * inv) << 24);
+            Xq[v] = q;
+            if ((v & 7u) == 0u) Xs[v >> 3] = d;
         }
         barrier();
 
         if (outputRow < totalOut) {
-            uint localRow;
             for (uint lb = lane; lb < winBlocks; lb += BLOCK) {
                 uint block = wb + lb;
-                uint cb;
+                uint cw = (localRow * in_ + block * BLOCK) >> 2;
+                uint sw = localRow * nblk + block;
+                uint c0, c1, c2, c3, c4, c5, c6, c7;
                 float ws;
-                if (outputRow < out0) {
-                    localRow = outputRow;
-                    cb = localRow * in_ + block * BLOCK;
-                    ws = W0scale[localRow * nblk + block];
-                } else if (outputRow < out0 + out1) {
-                    localRow = outputRow - out0;
-                    cb = localRow * in_ + block * BLOCK;
-                    ws = W1scale[localRow * nblk + block];
-                } else if (outputRow < out0 + out1 + out2) {
-                    localRow = outputRow - out0 - out1;
-                    cb = localRow * in_ + block * BLOCK;
-                    ws = W2scale[localRow * nblk + block];
+                if (mat == 0u) {
+                    ws = W0scale[sw];
+                    c0 = W0codes[cw]; c1 = W0codes[cw + 1u]; c2 = W0codes[cw + 2u]; c3 = W0codes[cw + 3u];
+                    c4 = W0codes[cw + 4u]; c5 = W0codes[cw + 5u]; c6 = W0codes[cw + 6u]; c7 = W0codes[cw + 7u];
+                } else if (mat == 1u) {
+                    ws = W1scale[sw];
+                    c0 = W1codes[cw]; c1 = W1codes[cw + 1u]; c2 = W1codes[cw + 2u]; c3 = W1codes[cw + 3u];
+                    c4 = W1codes[cw + 4u]; c5 = W1codes[cw + 5u]; c6 = W1codes[cw + 6u]; c7 = W1codes[cw + 7u];
+                } else if (mat == 2u) {
+                    ws = W2scale[sw];
+                    c0 = W2codes[cw]; c1 = W2codes[cw + 1u]; c2 = W2codes[cw + 2u]; c3 = W2codes[cw + 3u];
+                    c4 = W2codes[cw + 4u]; c5 = W2codes[cw + 5u]; c6 = W2codes[cw + 6u]; c7 = W2codes[cw + 7u];
                 } else {
-                    localRow = outputRow - out0 - out1 - out2;
-                    cb = localRow * in_ + block * BLOCK;
-                    ws = W3scale[localRow * nblk + block];
+                    ws = W3scale[sw];
+                    c0 = W3codes[cw]; c1 = W3codes[cw + 1u]; c2 = W3codes[cw + 2u]; c3 = W3codes[cw + 3u];
+                    c4 = W3codes[cw + 4u]; c5 = W3codes[cw + 5u]; c6 = W3codes[cw + 6u]; c7 = W3codes[cw + 7u];
                 }
-                uint xb = lb * BLOCK;
-                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
-                for (uint i = 0u; i < BLOCK; i += 4u) {
-                    if (outputRow < out0) {
-                        s0 += int(W0codes[cb + i]) * int(Xq[xb + i]);
-                        s1 += int(W0codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
-                        s2 += int(W0codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
-                        s3 += int(W0codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
-                    } else if (outputRow < out0 + out1) {
-                        s0 += int(W1codes[cb + i]) * int(Xq[xb + i]);
-                        s1 += int(W1codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
-                        s2 += int(W1codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
-                        s3 += int(W1codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
-                    } else if (outputRow < out0 + out1 + out2) {
-                        s0 += int(W2codes[cb + i]) * int(Xq[xb + i]);
-                        s1 += int(W2codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
-                        s2 += int(W2codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
-                        s3 += int(W2codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
-                    } else {
-                        s0 += int(W3codes[cb + i]) * int(Xq[xb + i]);
-                        s1 += int(W3codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
-                        s2 += int(W3codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
-                        s3 += int(W3codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
-                    }
-                }
-                partial[row * PARTIAL_STRIDE + lb] = float((s0 + s1) + (s2 + s3)) * ws;
+                uint xb = lb * 8u;
+                int s = (dot4(c0, Xq[xb]) + dot4(c1, Xq[xb + 1u])) + (dot4(c2, Xq[xb + 2u]) + dot4(c3, Xq[xb + 3u])) +
+                        (dot4(c4, Xq[xb + 4u]) + dot4(c5, Xq[xb + 5u])) + (dot4(c6, Xq[xb + 6u]) + dot4(c7, Xq[xb + 7u]));
+                partial[row * PARTIAL_STRIDE + lb] = float(s) * ws;
             }
         }
         barrier();
@@ -145,4 +146,3 @@ void main() {
         Y3[outputRow - out0 - out1 - out2] = acc;
     }
 }
-
