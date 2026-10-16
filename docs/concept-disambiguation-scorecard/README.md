@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **664** (clarity 0 + coverage 664) |
-| **Crystal-clear concepts (and climbing)** | **1245** crystal of 3044 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3130 / 3794** (82.5% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1246** crystal of 3045 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3132 / 3796** (82.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **88** of 4301 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **88** of 4302 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3044 concepts - score 88.6/100 (grade B) - disambiguation-debt 664
+concept-disambiguation chart - 3045 concepts - score 88.6/100 (grade B) - disambiguation-debt 664
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1245
+  * crystal       ###################......... 1246
   o defined       ############################ 1799
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,7 +39,7 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        *********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (137 concept(s); 33 crystal)
+  attention        **********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (138 concept(s); 34 crystal)
   cache            **********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (300 concept(s); 118 crystal)
   context-ctx      *************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (244 concept(s); 85 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -68,7 +68,7 @@ coverage by family (positioned / discovered):
   gateway-engine   #######################..... 238/293
   guard-gate       ##########################.. 514/561
   context-ctx      ########################.... 265/309
-  attention        #####################....... 127/170
+  attention        #####################....... 129/172
   pool             ##############.............. 42/84
   policy-capability ########################.... 225/266
   support-maturity ###################......... 82/119
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.5%  (3130/3794 confusable tokens positioned)
+namespace coverage  [##########################......] 82.5%  (3132/3796 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4301 lookup name(s) -> 3044 concept(s), 88 ambiguous
+name index: 4302 lookup name(s) -> 3045 concept(s), 88 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2362 / 5584 |
+| Boundaries drawn (mutual / total) | 2364 / 5586 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,15 +127,16 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4301 over 3044 concepts |
+| Lookup names indexed | 4302 over 3045 concepts |
 | Lookup names landing on several concepts | 88 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3044 |
+| Concepts carrying a contrast set | 3045 |
 
 ## The concepts (best verdict first)
 
 | | Verdict | Kind | Family | Canonical - definition |
 |---|---|---|---|---|
+| * | crystal | symbol | attention | **TryV41AttentionBF16ReadOwned** - Optional identity-bound ordinary attention BF16 publication that groups the exact closed site3/4 status and output read into one transfer and returns an owned host row only after status and backend health acceptance. |
 | * | crystal | symbol | attention | **attention implementation surface for externalinvalidateattentionindex** - `ExternalInvalidateAttentionIndex` is the attention symbol declared or used at `internal/cachemeta/external_invalidation.go:11` as `ExternalInvalidateAttentionIndex ExternalInvalidationKind = "attention_index"`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | attention | **attention implementation surface for planeattentionindex** - `PlaneAttentionIndex` is the attention symbol declared or used at `internal/cachemeta/attention_index.go:95` as `Plane: PlaneAttentionIndex,`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | config | attention | **V41SharedAttentionPlain (V4.1 softmax mode)** - V41SharedAttentionPlain is the V4.1 shared-attention native/shader ABI mode value 0. It selects a negative-infinity softmax maximum seed. |
@@ -3324,8 +3325,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3222/5584 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3044 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3222/5586 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3045 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3334,7 +3335,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4301 lookup name(s) resolves - 88 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4302 lookup name(s) resolves - 88 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3347,7 +3348,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | gateway-engine | 238 | 293 | 55 |
 | guard-gate | 514 | 561 | 47 |
 | context-ctx | 265 | 309 | 44 |
-| attention | 127 | 170 | 43 |
+| attention | 129 | 172 | 43 |
 | pool | 42 | 84 | 42 |
 | policy-capability | 225 | 266 | 41 |
 | support-maturity | 82 | 119 | 37 |

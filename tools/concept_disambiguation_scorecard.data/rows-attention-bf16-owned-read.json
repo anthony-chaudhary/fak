@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "v41-attention-bf16-owned-read",
+      "canonical": "TryV41AttentionBF16ReadOwned",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Optional identity-bound ordinary attention BF16 publication that groups the exact closed site3/4 status and output read into one transfer and returns an owned host row only after status and backend health acceptance.",
+      "distinction": "Unlike V41AttentionBF16, which returns a device tensor after a separate status read, this operation returns owned host values and owns its output/status cleanup. It adds no attention arithmetic, shader, persistent allocation authority or resident continuation.",
+      "distinct_from": [
+        "v41-attention-bf16-operation"
+      ],
+      "aliases": [],
+      "grounding": "TryV41AttentionBF16ReadOwned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

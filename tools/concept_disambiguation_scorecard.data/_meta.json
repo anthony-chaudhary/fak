@@ -2068,6 +2068,21 @@
           "category": "incidental",
           "reason": "tree speculative attention mask validator",
           "token": "ValidateTreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
+          "token": "v41AttentionBF16OwnedReader"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
+          "token": "v41AttentionBF16ReadOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
+          "token": "v41AttentionBF16OwnedRow"
         }
       ],
       "exclude": [
@@ -2076,6 +2091,15 @@
       ],
       "id": "attention",
       "ignore": [
+        "BuildTreeAttentionMask",
+        "EstimatedAttention",
+        "EstimatedAttentionSeconds",
+        "ExecutionPrefillAttention",
+        "MetalFallbackPrefillAttentionCPU",
+        "PrefillAttentionSupported",
+        "PrefillAttentionTiming",
+        "TreeAttentionMask",
+        "ValidateTreeAttentionMask",
         "attentionContinuation",
         "attentionFunc",
         "attentionRows",
@@ -2090,24 +2114,17 @@
         "attn_q_normed",
         "attnkvanorm",
         "bindCanonicalSharedAttention",
-        "BuildTreeAttentionMask",
         "clearSharedAttention",
         "coldAttentionOwner",
         "copySharedAttentionFrom",
         "estimated_attention_s",
-        "EstimatedAttention",
-        "EstimatedAttentionSeconds",
         "executevulkanattentionwithdequantonce",
-        "ExecutionPrefillAttention",
         "linear_attn_out",
         "linear_attn_qkv_mixed",
-        "MetalFallbackPrefillAttentionCPU",
         "mg_prefill_attn",
         "mg_prefill_attn_supported",
         "newV41SharedAttentionBinding",
         "newV41SharedAttentionContinuation",
-        "PrefillAttentionSupported",
-        "PrefillAttentionTiming",
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
         "qwenfullattentionlayers",
@@ -2116,15 +2133,16 @@
         "sharedAttentionBinding",
         "sharedAttentionFunc",
         "tattn",
-        "TreeAttentionMask",
+        "v41AttentionBF16OwnedReader",
+        "v41AttentionBF16OwnedRow",
+        "v41AttentionBF16ReadOwned",
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
         "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
         "v41PrepareSharedAttentionRows",
         "v41PrepareSharedAttentionWithRows",
-        "v41SharedAttentionCore",
-        "ValidateTreeAttentionMask"
+        "v41SharedAttentionCore"
       ],
       "known_tokens": [],
       "min_files": 3,
