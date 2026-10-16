@@ -11,6 +11,12 @@ type v41IndexerOwnedReader interface {
 // Arbitrary backends retain their ordinary Read invocation and defensive copy.
 // A false result means a malformed row count; transport panics are unchanged.
 func ReadV41IndexerScores(backend Backend, tensor Tensor, expectedRows int) ([]float32, bool) {
+	return readV41OwnedF32Row(backend, tensor, expectedRows)
+}
+
+// readV41OwnedF32Row only validates shape and storage ownership. Callers retain
+// their operation-specific finite checks, publication order and error mapping.
+func readV41OwnedF32Row(backend Backend, tensor Tensor, expectedRows int) ([]float32, bool) {
 	var values []float32
 	independent := false
 	if reader, ok := backend.(v41IndexerOwnedReader); ok {

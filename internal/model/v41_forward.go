@@ -1265,14 +1265,14 @@ func (s *Session) v41RMSNormRows(name string, input []float32, width, rows int, 
 					return nil, errV41ProjectionResult
 				}
 				stage = "readback"
-				values = s.Backend.Read(y)
-				if len(values) != count {
+				var valid bool
+				values, valid = compute.ReadV41RMSNormOutput(s.Backend, y, count)
+				if !valid {
 					return nil, errV41ProjectionResult
 				}
-				// Copy the complete read before releasing this chunk's device tensors.
+				// Own the complete read before releasing this chunk's device tensors.
 				// A BF16 publication may retire the backend, so it must run only after
 				// these transient tensors have been released.
-				values = append([]float32(nil), values...)
 				if finish == nil {
 					for _, v := range values {
 						if !finite32(v) {
