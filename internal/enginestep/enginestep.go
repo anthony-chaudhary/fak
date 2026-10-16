@@ -18,6 +18,7 @@
 package enginestep
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -25,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -168,15 +170,20 @@ func stepObservers() StepObserver {
 
 // StepRecord is one entry of the recent-step ring.
 type StepRecord struct {
-	Seq        uint64 `json:"seq"`
-	AtUnixNano int64  `json:"at_unix_nano"`
-	Kind       string `json:"kind"`
-	Phase      string `json:"phase,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Reason     string `json:"reason,omitempty"` // named scalar fallback, absent for other steps
-	Lanes      int    `json:"lanes,omitempty"`
-	Tokens     int    `json:"tokens,omitempty"`
-	DurationNS int64  `json:"duration_ns"`
+	RequestID          string  `json:"request_id,omitempty"`
+	LoadID             string  `json:"load_id,omitempty"`
+	ChunkOrdinal       *uint64 `json:"chunk_ordinal,omitempty"`
+	ComputedTokenStart *uint64 `json:"computed_token_start,omitempty"`
+	TokenRangeOrigin   string  `json:"token_range_origin,omitempty"`
+	Seq                uint64  `json:"seq"`
+	AtUnixNano         int64   `json:"at_unix_nano"`
+	Kind               string  `json:"kind"`
+	Phase              string  `json:"phase,omitempty"`
+	Path               string  `json:"path,omitempty"`
+	Reason             string  `json:"reason,omitempty"` // named scalar fallback, absent for other steps
+	Lanes              int     `json:"lanes,omitempty"`
+	Tokens             int     `json:"tokens,omitempty"`
+	DurationNS         int64   `json:"duration_ns"`
 	// Proposed and Accepted are set on speculative decode steps only.
 	Proposed int `json:"proposed,omitempty"`
 	Accepted int `json:"accepted,omitempty"`
@@ -405,8 +412,45 @@ func (r *Recorder) ObserveSpeculativeRound(proposed, accepted, emitted int, d ti
 	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: PathSpeculative, Lanes: 1, Tokens: emitted, Proposed: proposed, Accepted: accepted, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
 }
 
+type requestObservationKey struct{}
+type requestObservation struct {
+	requestID, loadID string
+	chunks            atomic.Uint64
+	tokens            atomic.Uint64
+}
+
+// WithRequestObservation carries gateway-owned request and model-load identity.
+func WithRequestObservation(ctx context.Context, requestID, loadID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(requestID) > 128 {
+		requestID = ""
+	}
+	if len(loadID) > 128 {
+		loadID = ""
+	}
+	return context.WithValue(ctx, requestObservationKey{}, &requestObservation{requestID: requestID, loadID: loadID})
+}
+
+// RequestObservationFromContext returns producer identity without minting a fallback.
+func RequestObservationFromContext(ctx context.Context) (requestID, loadID string) {
+	if ctx == nil {
+		return "", ""
+	}
+	if v, ok := ctx.Value(requestObservationKey{}).(*requestObservation); ok && v != nil {
+		return v.requestID, v.loadID
+	}
+	return "", ""
+}
+
 // ObservePrefillChunk records one prefill forward over `tokens` prompt tokens.
 func (r *Recorder) ObservePrefillChunk(tokens int, d time.Duration) {
+	r.ObservePrefillChunkContext(nil, tokens, d)
+}
+
+// ObservePrefillChunkContext retains completed work in the computed prompt stream.
+func (r *Recorder) ObservePrefillChunkContext(ctx context.Context, tokens int, d time.Duration) {
 	if r == nil || tokens <= 0 {
 		return
 	}
@@ -415,7 +459,20 @@ func (r *Recorder) ObservePrefillChunk(tokens int, d time.Duration) {
 	r.prefillTokens += uint64(tokens)
 	r.prefillChunks++
 	r.lastStep = r.now()
-	r.appendLocked(StepRecord{Kind: KindPrefillChunk, Tokens: tokens, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
+	rec := StepRecord{Kind: KindPrefillChunk, Tokens: tokens, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()}
+	if ctx != nil {
+		if identity, ok := ctx.Value(requestObservationKey{}).(*requestObservation); ok && identity != nil {
+			rec.RequestID, rec.LoadID = identity.requestID, identity.loadID
+			if identity.requestID != "" {
+				ordinal := identity.chunks.Add(1)
+				start := identity.tokens.Add(uint64(tokens)) - uint64(tokens)
+				rec.ChunkOrdinal = &ordinal
+				rec.ComputedTokenStart = &start
+				rec.TokenRangeOrigin = "computed_prompt_stream"
+			}
+		}
+	}
+	r.appendLocked(rec)
 }
 
 // ObservePrefixMatched records prompt tokens served from the KV prefix cache.
@@ -507,19 +564,21 @@ type SpecStat struct {
 
 // Snapshot is the bounded agent-facing view of the recorder.
 type Snapshot struct {
-	Schema             string               `json:"schema"`
-	NowUnixNano        int64                `json:"now_unix_nano"`
-	LastStepUnixNano   int64                `json:"last_step_unix_nano,omitempty"`
-	RequestsActive     int64                `json:"requests_active"`
-	CoalesceQueueDepth int64                `json:"coalesce_queue_depth"`
-	Phases             map[string]PhaseStat `json:"phases"`
-	Decode             map[string]PathStat  `json:"decode"`
-	Cohorts            PathStat             `json:"cohorts"`
-	Speculative        *SpecStat            `json:"speculative,omitempty"`
-	PrefillTokens      uint64               `json:"prefill_tokens"`
-	PrefillChunks      uint64               `json:"prefill_chunks"`
-	PrefixMatched      uint64               `json:"prefix_matched_tokens"`
-	Recent             []StepRecord         `json:"recent"`
+	RingCapacity           int                  `json:"ring_capacity"`
+	RingRecordsOverwritten uint64               `json:"ring_records_overwritten"`
+	Schema                 string               `json:"schema"`
+	NowUnixNano            int64                `json:"now_unix_nano"`
+	LastStepUnixNano       int64                `json:"last_step_unix_nano,omitempty"`
+	RequestsActive         int64                `json:"requests_active"`
+	CoalesceQueueDepth     int64                `json:"coalesce_queue_depth"`
+	Phases                 map[string]PhaseStat `json:"phases"`
+	Decode                 map[string]PathStat  `json:"decode"`
+	Cohorts                PathStat             `json:"cohorts"`
+	Speculative            *SpecStat            `json:"speculative,omitempty"`
+	PrefillTokens          uint64               `json:"prefill_tokens"`
+	PrefillChunks          uint64               `json:"prefill_chunks"`
+	PrefixMatched          uint64               `json:"prefix_matched_tokens"`
+	Recent                 []StepRecord         `json:"recent"`
 }
 
 // SnapshotSchema versions the Snapshot JSON shape.
@@ -546,6 +605,10 @@ func (r *Recorder) Snapshot(recent int, kind string) Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s.NowUnixNano = r.now().UnixNano()
+	s.RingCapacity = len(r.ring)
+	if r.next > uint64(len(r.ring)) {
+		s.RingRecordsOverwritten = r.next - uint64(len(r.ring))
+	}
 	if !r.lastStep.IsZero() {
 		s.LastStepUnixNano = r.lastStep.UnixNano()
 	}
