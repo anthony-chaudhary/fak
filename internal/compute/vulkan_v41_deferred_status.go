@@ -250,5 +250,5 @@ func (v *vulkanBackend) v41ReadDeferredOwned(statuses []V41DeferredStatus, rows 
 	if err != nil {
 		return nil, V41DeferredReadResult{}, err
 	}
-	return verdicts, V41DeferredReadResult{state: &v41DeferredReadState{rows: values, independent: len(rows) >= 2 && len(values) == len(rows)}}, nil
+	return verdicts, V41DeferredReadResult{count: len(values), state: &v41DeferredReadState{rows: values, independent: len(rows) >= 2 && len(values) == len(rows)}}, nil
 }

@@ -438,20 +438,29 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	var verdicts []error
 	var values [][]float32
 	var readErr error
+	var readResult compute.V41DeferredReadResult
+	ownedRead := options == nil && len(readRows) >= 2
+	readCount := 0
 	func() {
 		defer func() {
 			if p := recover(); p != nil {
 				primary, cause, faultRow, *stage = p, nil, statusRows[0], "readback"
 			}
 		}()
-		verdicts, values, readErr = deferred.V41ReadDeferred(statuses, readRows)
+		if ownedRead {
+			verdicts, readResult, readErr = compute.ReadV41DeferredResult(deferred, statuses, readRows)
+			readCount = readResult.RowCount()
+		} else {
+			verdicts, values, readErr = deferred.V41ReadDeferred(statuses, readRows)
+			readCount = len(values)
+		}
 	}()
 	closeColdDispatch()
 	if readErr != nil {
 		cause, primary, faultRow, *stage = readErr, nil, statusRows[0], "readback"
 		return nil, cause
 	}
-	if len(verdicts) != len(statuses) || len(values) != len(readRows) {
+	if len(verdicts) != len(statuses) || readCount != len(readRows) {
 		if cause == nil && primary == nil {
 			cause, faultRow, *stage = errV41ExpertResult, 0, "readback"
 		}
@@ -485,6 +494,11 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	if cause != nil || primary != nil {
 		return nil, cause
 	}
+	// Ownership is consumed only after the complete original verdict loop.
+	independent := false
+	if ownedRead {
+		values, independent = readResult.TakeRows()
+	}
 	result = make([][]float32, len(values))
 	for r, row := range values {
 		validRow := len(row) == H
@@ -503,7 +517,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 			}
 			return nil, errV41ExpertResult
 		}
-		result[r] = append([]float32(nil), row...)
+		result[r] = v41CohortHostRow(row, independent)
 		if options == nil || options.sums == nil {
 			s.M.v41NoteExpertActivation(1, 0, 16, v41FirstOpened(r, opened))
 		}
@@ -524,4 +538,13 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		}
 	}
 	return result, nil
+}
+
+// Only the canonical typed read result can authorize this transfer. Legacy
+// readers and owned decode paths retain their independent defensive copy.
+func v41CohortHostRow(row []float32, independent bool) []float32 {
+	if independent {
+		return row
+	}
+	return append([]float32(nil), row...)
 }

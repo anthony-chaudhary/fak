@@ -8,6 +8,7 @@ import "sync/atomic"
 // A zero result has neither rows nor ownership. Copies share one consumption state.
 // Concurrent takers, including copied result values, share the same atomic latch.
 type V41DeferredReadResult struct {
+	count int
 	state *v41DeferredReadState
 }
 
@@ -16,6 +17,10 @@ type v41DeferredReadState struct {
 	rows        [][]float32
 	independent bool
 }
+
+// RowCount is the immutable returned row extent, available before consumption.
+// It carries no ownership authority; zero/error results report zero.
+func (r V41DeferredReadResult) RowCount() int { return r.count }
 
 // TakeRows consumes this result once. Callers must first resolve all numeric
 // verdicts and validate the returned row count/geometry as on the legacy path.
@@ -54,5 +59,5 @@ func ReadV41DeferredResult(backend V41DeferredStatusBackend, statuses []V41Defer
 	if err != nil {
 		return nil, V41DeferredReadResult{}, err
 	}
-	return verdicts, V41DeferredReadResult{state: &v41DeferredReadState{rows: values}}, nil
+	return verdicts, V41DeferredReadResult{count: len(values), state: &v41DeferredReadState{rows: values}}, nil
 }
