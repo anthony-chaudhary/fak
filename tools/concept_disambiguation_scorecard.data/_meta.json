@@ -13957,6 +13957,11 @@
           "category": "incidental",
           "reason": "SupportsV41IndexScaleBF16 is a concrete optional compute capability predicate for the immutable-module-qualified fixed-site index weight scaling operation, not a product support maturity claim.",
           "token": "SupportsV41IndexScaleBF16"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional backend capability predicate for the immutable-module-qualified routed activation chunk; it is not a product support or maturity claim.",
+          "token": "SupportsV41RoutedSwiGLUPanelChunk"
         }
       ],
       "exclude": [
@@ -14090,6 +14095,7 @@
         "SupportsV41DeferredStatus",
         "SupportsV41IndexScaleBF16",
         "SupportsV41RoutedDownPanelRow",
+        "SupportsV41RoutedSwiGLUPanelChunk",
         "SupportsV41RoutedSwiGLUPanelRow",
         "TensorCoverageArchSchema",
         "TensorCoverageCanonicalMap",
@@ -16789,6 +16795,16 @@
           "category": "incidental",
           "reason": "Pure geometry and overflow validator for one routed SwiGLU panel row; it introduces no scheduling or independent planning mechanism.",
           "token": "PlanV41RoutedSwiGLUPanelRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded geometry result containing panel extent, row offset and byte counts for the existing routed SwiGLU arithmetic; it is not a separate planning mechanism.",
+          "token": "V41RoutedSwiGLUPanelChunkPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure bounded geometry constructor for the existing routed SwiGLU activation chunk; it does not introduce an independent planner or scheduling policy.",
+          "token": "PlanV41RoutedSwiGLUPanelChunk"
         }
       ],
       "exclude": [
@@ -16877,6 +16893,7 @@
         "PlanUnits",
         "PlanUnregisteredResidue",
         "PlanV41EPOwnerBuild",
+        "PlanV41RoutedSwiGLUPanelChunk",
         "PlanV41RoutedSwiGLUPanelRow",
         "PlanningEffect",
         "PressuredSnapshotCandidates",
@@ -16903,6 +16920,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "UncoveredCandidateClasses",
+        "V41RoutedSwiGLUPanelChunkPlan",
         "V41RoutedSwiGLUPanelRowPlan",
         "ValidateListPlan",
         "WalkPlanners",

@@ -181,6 +181,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 	var published []compute.Tensor
 	var sums []compute.Tensor
 	usedDownTile := false
+	usedActivationChunk := false
 	uploads := map[int]compute.Tensor{}
 	faultRow, current := count, 0
 	var primary any
@@ -195,6 +196,8 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		owned[current] = append(owned[current], t)
 		return true
 	}
+	// Chunk output/status allocations belong to the chunk-start row. Their
+	// cleanup boundary is grouped, unlike independent per-row activation frees.
 	// Always attempt every owned release. The last panic in a row's reverse
 	// traversal is what nested Go defers in the scalar owner would propagate.
 	defer func() {
@@ -228,9 +231,9 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 			result = nil
 		}
 	}()
-	record := func(t compute.Tensor, status compute.V41DeferredStatus, n int, kind compute.V41DeferredStatusKind, site uint32, err error) error {
+	recordMany := func(t compute.Tensor, status compute.V41DeferredStatus, n, records int, kind compute.V41DeferredStatusKind, site uint32, err error) error {
 		fresh, recordFresh := own(t), own(status.Record)
-		recordOK := recordFresh && valid(status.Record, 4) && status.Kind == kind && status.Count == n && status.Site == site && status.Records >= 0 && status.Records <= 1
+		recordOK := recordFresh && valid(status.Record, 4*records) && status.Kind == kind && status.Count == n && status.Site == site && (status.Records == records || records == 1 && status.Records == 0)
 		if err != nil {
 			// A record returned with a selected operation error remains owned
 			// for cleanup, but cannot replace that same operation's error.
@@ -240,10 +243,13 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 			statuses = append(statuses, status)
 			statusRows = append(statusRows, current)
 		}
-		if !fresh || !valid(t, n) || !recordOK {
+		if !fresh || !valid(t, n*records) || !recordOK {
 			return errV41ExpertResult
 		}
 		return nil
+	}
+	record := func(t compute.Tensor, status compute.V41DeferredStatus, n int, kind compute.V41DeferredStatusKind, site uint32, err error) error {
+		return recordMany(t, status, n, 1, kind, site, err)
 	}
 	publishDown := func(d compute.Tensor) error {
 		p, st, err := deferred.V41BF16PublishDeferred(d, compute.V41BF16PublishRoutedDown)
@@ -309,7 +315,11 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 					}
 				}
 			}
-			g, u, tiled, panelRow, err := tile.project(s, inputs[groupStart:groupEnd], current-groupStart, H, I, options == nil, own, valid)
+			chunkRows := 0
+			if options == nil && downTile != nil && current == chunkStart {
+				chunkRows = v41ExpertTileSize(groupEnd - current)
+			}
+			g, u, tiled, panelRow, panelChunk, err := tile.project(s, inputs[groupStart:groupEnd], current-groupStart, H, I, options == nil, chunkRows, own, valid)
 			if cause = err; cause != nil {
 				break
 			}
@@ -343,22 +353,40 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 			*stage = "activation"
 			var a compute.Tensor
 			var st compute.V41DeferredStatus
-			if panelRow != nil {
+			if panelChunk != nil {
+				usedActivationChunk = true
+				a, st, err = panelChunk.V41RoutedSwiGLUPanelChunkDeferred(g, u, current-groupStart-tile.start, limit, weights[current:current+chunkRows])
+			} else if panelRow != nil {
 				a, st, err = panelRow.V41RoutedSwiGLUPanelRowDeferred(g, u, current-groupStart-tile.start, limit, weights[current])
 			} else {
 				a, st, err = deferred.V41RoutedSwiGLUDeferred(g, u, limit, weights[current])
 			}
-			if cause = record(a, st, I, compute.V41DeferredRoutedSwiGLU, 0, err); cause != nil {
+			records := 1
+			if panelChunk != nil {
+				records = chunkRows
+			}
+			if cause = recordMany(a, st, I, records, compute.V41DeferredRoutedSwiGLU, 0, err); cause != nil {
 				break
 			}
+			if panelChunk != nil {
+				current += chunkRows - 1
+			}
+
 			*stage = "down"
 			if downTile != nil && groupEnd-chunkStart > 1 {
-				activations = append(activations, a)
-				if len(activations) < v41ExpertTileSize(groupEnd-chunkStart) {
-					continue
+				if panelChunk == nil {
+					activations = append(activations, a)
+					if len(activations) < v41ExpertTileSize(groupEnd-chunkStart) {
+						continue
+					}
 				}
 				last := current
-				panel, err := downTile.project(activations, I, H, own, valid)
+				var panel compute.Tensor
+				if panelChunk != nil {
+					panel, err = downTile.projectPacked(a, chunkRows, I, H, own, valid)
+				} else {
+					panel, err = downTile.project(activations, I, H, own, valid)
+				}
 				if cause = err; cause != nil {
 					break
 				}
@@ -425,6 +453,31 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 			}
 		}
 	}
+	// Physical descriptors remain unique owners. Only the logical verdict
+	// mapping expands multi-record statuses; no repeated tensor is read or freed.
+	var logicalRows []int
+	var logicalKinds []compute.V41DeferredStatusKind
+	var verdictOrder []int
+	expectedVerdicts := len(statuses)
+	if usedActivationChunk {
+		for i, st := range statuses {
+			n := st.Records
+			if n == 0 {
+				n = 1
+			}
+			for j := 0; j < n; j++ {
+				logicalRows = append(logicalRows, statusRows[i]+j)
+				logicalKinds = append(logicalKinds, st.Kind)
+				verdictOrder = append(verdictOrder, len(verdictOrder))
+			}
+		}
+		expectedVerdicts = len(verdictOrder)
+		for i := 1; i < len(verdictOrder); i++ {
+			for j := i; j > 0 && logicalRows[verdictOrder[j]] < logicalRows[verdictOrder[j-1]]; j-- {
+				verdictOrder[j], verdictOrder[j-1] = verdictOrder[j-1], verdictOrder[j]
+			}
+		}
+	}
 	readRows := published
 	if options != nil && options.sums != nil {
 		readRows = sums
@@ -460,19 +513,27 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		cause, primary, faultRow, *stage = readErr, nil, statusRows[0], "readback"
 		return nil, cause
 	}
-	if len(verdicts) != len(statuses) || readCount != len(readRows) {
+	if len(verdicts) != expectedVerdicts || readCount != len(readRows) {
 		if cause == nil && primary == nil {
 			cause, faultRow, *stage = errV41ExpertResult, 0, "readback"
 		}
 		return nil, cause
 	}
-	for i, verdict := range verdicts {
-		if verdict == nil || !usedDownTile && statusRows[i] > faultRow {
+	for position, verdict := range verdicts {
+		row, kind := 0, compute.V41DeferredRoutedSwiGLU
+		if usedActivationChunk {
+			i := verdictOrder[position]
+			verdict = verdicts[i]
+			row, kind = logicalRows[i], logicalKinds[i]
+		} else {
+			row, kind = statusRows[position], statuses[position].Kind
+		}
+		if verdict == nil || !usedDownTile && row > faultRow {
 			continue
 		}
 		// Under tiled scheduling every retained status was issued before a
 		// recording failure, even if its row follows the failed down row.
-		r := statusRows[i]
+		r := row
 		*stage = "activation"
 		var activation *compute.V41RoutedSwiGLUFault
 		var publication *compute.V41BF16CheckedArithmeticError
@@ -482,7 +543,7 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 				name = "down"
 			}
 			verdict = v41ExpertOperationErr(layer, name, errV41ExpertResult)
-		} else if statuses[i].Kind == compute.V41DeferredBF16Publish {
+		} else if kind == compute.V41DeferredBF16Publish {
 			*stage = "down"
 			if errors.As(verdict, &publication) {
 				verdict = v41ExpertOperationErr(layer, "down", errV41ExpertResult)
