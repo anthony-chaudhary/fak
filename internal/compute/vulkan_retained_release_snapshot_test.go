@@ -67,12 +67,36 @@ func TestVulkanRetainedReleaseSnapshot(t *testing.T) {
 			t.Fatalf("missing generation lifecycle seam: %s", seam)
 		}
 	}
+	// Fresh IDs are assigned after a successful native binding, never in Buffer's
+	// default initializer. These structural checks supplement the synthetic driver
+	// fixture; they are not an executed Vulkan allocation-failure test.
+	if strings.Count(source, "b->nativeCheckoutGeneration = 1;") != 3 ||
+		strings.Count(source, "advanceNativeCheckoutGeneration(b);") != 3 {
+		t.Fatal("unexpected native checkout mutation seams")
+	}
+	for _, start := range []string{"Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage,\n                    VkMemoryPropertyFlags preferred) {", "Buffer* allocWeightArenaBuffer("} {
+		body := extract(start, false)
+		bind := strings.Index(body, "VkResult br = vkBindBufferMemory")
+		stamp := strings.Index(body, "b->nativeCheckoutGeneration = 1;")
+		if bind < 0 || stamp < bind || !strings.Contains(body[bind:stamp], "br != VK_SUCCESS") {
+			t.Fatalf("checkout published before bind validation: %s", start)
+		}
+	}
 	fixture := retainedSnapshotPreamble + extract("struct Buffer {", true) + "\n" + extract("struct WeightArenaBlock {", true) + retainedSnapshotGlobals +
+		extract("static void advanceNativeCheckoutGeneration(Buffer* b) {", false) + "\n" +
 		extract("void beginMemoryDeviceGeneration() {", false) + "\n" +
 		extract("int fvk_buffer_reservation(const void* d,", false) + "\n" +
+		extract("static void setRetainedCheckout(fvk_retained_release_record&", false) + "\n" +
+		extract("static void setRetainedCheckout(fvk_retained_release_record_v2&", false) + "\n" +
+		extract("static bool retainedCheckoutMatches(const fvk_retained_release_record&", false) + "\n" +
+		extract("static bool retainedCheckoutMatches(const fvk_retained_release_record_v2&", false) + "\n" +
+		extract("template <typename Record>\nstatic int retainedReleaseSnapshot", false) + "\n" +
 		extract("int fvk_retained_release_snapshot(fvk_retained_release_record* rows,", false) + "\n" +
+		extract("int fvk_retained_release_snapshot_v2(fvk_retained_release_record_v2* rows,", false) + "\n" +
 		extract("void fvk_free(void* d) {", false) + "\n" +
-		extract("void* fvk_malloc(size_t bytes) {", false) + retainedSnapshotMain
+		extract("void* fvk_malloc(size_t bytes) {", false) + "\n" +
+		extract("static Buffer* mallocHostVisibleOffloadPage(size_t bytes) {", false) + "\n" +
+		extract("void* fvk_malloc_offload_weight(size_t bytes) {", false) + retainedSnapshotMain
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +131,7 @@ using VkMemoryPropertyFlags = uint32_t;
 #define VK_NULL_HANDLE 0
 #define VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT 1
 #define VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT 2
+#define VK_MEMORY_PROPERTY_HOST_COHERENT_BIT 4
 #define STORAGE_USAGE 0
 `
 const retainedSnapshotGlobals = `
@@ -120,6 +145,9 @@ bool g_batching = false, g_v41SubmissionPendingFailure = false;
 uintptr_t g_dev = 1;
 uint64_t g_memoryDeviceGeneration = 1;
 int destroyed = 0;
+bool g_offloadHostVisible = false;
+uint64_t g_offloadWeightReused = 0, g_offloadWeightFresh = 0, g_offloadHostVisiblePages = 0;
+void mapHostVisibleWeight(Buffer*) {}
 Buffer* B(void* p) { return static_cast<Buffer*>(p); }
 int fvk_buffer_backing(const void* p, fvk_buffer_backing_info* out) {
  *out = {};
@@ -136,9 +164,14 @@ Buffer* makeBuffer(uint64_t id, uint64_t bytes = 16) {
  b->buf = id; b->mem = id; b->bytes = bytes;
  b->allocationBytes = 128; b->allocationID = id;
  b->deviceGeneration = g_memoryDeviceGeneration; b->memoryTypeIndex = 0;
+ b->nativeCheckoutGeneration = 1;
  return b;
 }
 int main() {
+ Buffer unbound{};
+ assert(unbound.nativeCheckoutGeneration == 0);
+ advanceNativeCheckoutGeneration(&unbound); assert(unbound.nativeCheckoutGeneration == 0);
+ fvk_retained_release_record_v2 rows2[4]{};
  fvk_retained_release_record rows[4]{};
  fvk_retained_release_summary s{};
  auto query = [&] { return fvk_retained_release_snapshot(rows, 4, &s); };
@@ -149,19 +182,33 @@ int main() {
  assert(rows[0].release_state == FVK_RELEASE_REQUESTED && rows[0].backing_state == FVK_BACKING_DEFERRED);
  assert(rows[0].logical_lease_generation == 0 && rows[0].device_generation == 1);
  assert(s.returned_unique_reservation_bytes == 128);
+ assert(fvk_retained_release_snapshot_v2(rows2,4,&s) == FVK_RETAINED_OK);
+ assert(rows2[0].native_checkout_generation == 1 && rows2[0].logical_lease_generation == 0);
  // Model the already-established completion boundary, not a GPU completion proof.
  g_batching = false; g_batchFreed.clear(); fvk_free(b);
  assert(query() == FVK_RETAINED_OK && rows[0].backing_state == FVK_BACKING_POOL_RETAINED);
- auto reused = static_cast<Buffer*>(fvk_malloc(16)); assert(reused == b);
+ assert(b->nativeCheckoutGeneration == 1); // Deferred-to-pool is the same checkout.
+ auto reused = static_cast<Buffer*>(fvk_malloc(16)); assert(reused == b && b->nativeCheckoutGeneration == 2);
  assert(query() == FVK_RETAINED_OK && s.returned_records == 0 && destroyed == 0);
  fvk_free(reused); assert(query() == FVK_RETAINED_OK && rows[0].reservation.allocation_id == 7);
+ assert(fvk_retained_release_snapshot_v2(rows2,4,&s) == FVK_RETAINED_OK);
+ assert(rows2[0].native_checkout_generation == 2 && rows2[0].reservation.allocation_id == 7);
+ // Device offload uses the same native pool, advancing once per checkout.
+ reused = static_cast<Buffer*>(fvk_malloc_offload_weight(16));
+ assert(reused == b && b->nativeCheckoutGeneration == 3); fvk_free(reused);
+ b->nativeCheckoutGeneration = std::numeric_limits<uint64_t>::max() - 1;
+ reused = static_cast<Buffer*>(fvk_malloc(16)); assert(b->nativeCheckoutGeneration == std::numeric_limits<uint64_t>::max());
+ fvk_free(reused); reused = static_cast<Buffer*>(fvk_malloc(16)); assert(b->nativeCheckoutGeneration == 0);
+ fvk_free(reused); reused = static_cast<Buffer*>(fvk_malloc(16)); assert(b->nativeCheckoutGeneration == 0);
+ fvk_free(reused);
+ assert(fvk_retained_release_snapshot_v2(rows2,4,&s) == FVK_RETAINED_OK && rows2[0].native_checkout_generation == 0);
  // Physical allocation identity survives reuse; logical lease generation is unknown.
  assert(rows[0].logical_lease_generation == 0);
  g_v41SubmissionPendingFailure = true;
  auto uncertain = makeBuffer(8); fvk_free(uncertain);
  assert(query() == FVK_RETAINED_OK && s.returned_records == 2);
  for (uint32_t i=0; i<s.returned_records; ++i) assert(rows[i].backing_state == FVK_BACKING_QUARANTINED);
- assert(fvk_malloc(16) == nullptr && destroyed == 0);
+ assert(fvk_malloc(16) == nullptr && destroyed == 0 && b->nativeCheckoutGeneration == 0);
  g_v41SubmissionPendingFailure = false; g_pool.clear(); g_batchFreed.clear();
  delete b; delete uncertain;
  // Shared arena backing is charged once despite distinct logical bindings.
@@ -191,6 +238,12 @@ int main() {
  g_batchFreed.clear(); delete a; delete c; g_weightArena.clear();
  auto offload = makeBuffer(33); offload->offloadPage = true; fvk_free(offload);
  assert(query() == FVK_RETAINED_OK && rows[0].container == FVK_RETAINED_OFFLOAD_POOL);
+ assert(offload->nativeCheckoutGeneration == 1);
+ g_offloadHostVisible = true;
+ assert(fvk_malloc_offload_weight(16) == offload && offload->nativeCheckoutGeneration == 2);
+ fvk_free(offload);
+ assert(fvk_retained_release_snapshot_v2(rows2,4,&s) == FVK_RETAINED_OK && rows2[0].native_checkout_generation == 2);
+ g_offloadHostVisible = false;
  g_hvOffloadPool.clear(); delete offload;
  auto huge = makeBuffer(44), small = makeBuffer(45);
  huge->allocationBytes = std::numeric_limits<uint64_t>::max() - 8;

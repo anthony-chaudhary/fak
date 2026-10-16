@@ -1339,13 +1339,16 @@ const (
 )
 
 // VulkanRetainedReleaseRecord identifies a retained binding, never a usable handle.
-// LogicalLeaseGeneration is always zero (unavailable); allocation reuse is not ABA tracking.
+// NativeCheckoutGeneration compares native pool checkouts of the same device/allocation/
+// binding across snapshots; zero means unavailable, including counter exhaustion.
+// Go transient-pool ownership changes are excluded. This cannot validate stale aliases.
+// LogicalLeaseGeneration is always zero (unavailable).
 // ReleaseState 1 means release requested. BackingState is 1 deferred, 2 pool-retained,
 // or 3 quarantined. Container is 1 deferred batch, 2 device pool, or 3 offload pool.
 type VulkanRetainedReleaseRecord struct {
-	AllocationID, BindingOffset, BufferBytes, ReservationBytes uint64
-	DeviceGeneration, LogicalLeaseGeneration                   uint64
-	ReleaseState, BackingState, Container                      uint32
+	AllocationID, BindingOffset, BufferBytes, ReservationBytes         uint64
+	DeviceGeneration, LogicalLeaseGeneration, NativeCheckoutGeneration uint64
+	ReleaseState, BackingState, Container                              uint32
 }
 
 // VulkanRetainedReleaseSnapshot covers only a bounded prefix of native deferred and
@@ -1425,8 +1428,11 @@ func (s VulkanRetainedReleaseSnapshot) Summary() string {
 	}
 	counts := "returned_bindings=unavailable returned_unique_allocations=unavailable returned_prefix_reserved_bytes=unavailable"
 	if s.Status == VulkanRetainedOK {
-		var deferred, pooled, quarantined int
+		var deferred, pooled, quarantined, checkoutKnown int
 		for _, r := range s.Records {
+			if r.NativeCheckoutGeneration != 0 {
+				checkoutKnown++
+			}
 			switch r.BackingState {
 			case 1:
 				deferred++
@@ -1436,9 +1442,9 @@ func (s VulkanRetainedReleaseSnapshot) Summary() string {
 				quarantined++
 			}
 		}
-		counts = fmt.Sprintf("returned_bindings=%d returned_unique_allocations=%d returned_prefix_reserved_bytes=%d deferred_bindings=%d pool-retained bindings=%d quarantined_bindings=%d", len(s.Records), s.ReturnedUniqueAllocations, s.ReturnedUniqueReservationBytes, deferred, pooled, quarantined)
+		counts = fmt.Sprintf("returned_bindings=%d returned_unique_allocations=%d returned_prefix_reserved_bytes=%d deferred_bindings=%d pool-retained bindings=%d quarantined_bindings=%d native_checkout_known_bindings=%d native_checkout_unavailable_bindings=%d", len(s.Records), s.ReturnedUniqueAllocations, s.ReturnedUniqueReservationBytes, deferred, pooled, quarantined, checkoutKnown, len(s.Records)-checkoutKnown)
 	}
-	return fmt.Sprintf("retained_release: status=%s device_generation=%d truncated=%t %s; partial_scope=native-deferred+native-pools; logical_lease_generation=unavailable physical_release=unknown; prefix totals must not be added to owner totals", status, s.DeviceGeneration, s.Truncated, counts)
+	return fmt.Sprintf("retained_release: status=%s device_generation=%d truncated=%t %s; partial_scope=native-deferred+native-pools; logical_lease_generation=unavailable native_checkout_scope=native-pool-only Go-transient-ownership=excluded stale-alias-validation=unavailable physical_release=unknown; prefix totals must not be added to owner totals", status, s.DeviceGeneration, s.Truncated, counts)
 }
 
 // VulkanRetainedReleaseSnapshot performs one pull query under vulkanMu. It does not
@@ -1452,14 +1458,14 @@ func (v *vulkanBackend) VulkanRetainedReleaseSnapshot(capacity int) VulkanRetain
 	if v == nil {
 		return VulkanRetainedReleaseSnapshot{Status: VulkanRetainedUnavailable}
 	}
-	rows := make([]C.fvk_retained_release_record, capacity)
-	var ptr *C.fvk_retained_release_record
+	rows := make([]C.fvk_retained_release_record_v2, capacity)
+	var ptr *C.fvk_retained_release_record_v2
 	if capacity != 0 {
 		ptr = &rows[0]
 	}
 	var summary C.fvk_retained_release_summary
 	vulkanMu.Lock()
-	result := C.fvk_retained_release_snapshot(ptr, C.uint32_t(capacity), &summary)
+	result := C.fvk_retained_release_snapshot_v2(ptr, C.uint32_t(capacity), &summary)
 	vulkanMu.Unlock()
 	s := VulkanRetainedReleaseSnapshot{Status: VulkanRetainedReleaseStatus(summary.status), DeviceGeneration: uint64(summary.device_generation), ReturnedUniqueAllocations: uint32(summary.returned_unique_allocations), ReturnedUniqueReservationBytes: uint64(summary.returned_unique_reservation_bytes)}
 	// Validate the count before allocating/copying or slicing native output.
@@ -1470,7 +1476,7 @@ func (v *vulkanBackend) VulkanRetainedReleaseSnapshot(capacity int) VulkanRetain
 	s.Records = make([]VulkanRetainedReleaseRecord, int(count))
 	for i := range s.Records {
 		r := rows[i]
-		s.Records[i] = VulkanRetainedReleaseRecord{AllocationID: uint64(r.reservation.allocation_id), BindingOffset: uint64(r.reservation.binding_offset), BufferBytes: uint64(r.reservation.buffer_bytes), ReservationBytes: uint64(r.reservation.reservation_bytes), DeviceGeneration: uint64(r.device_generation), LogicalLeaseGeneration: uint64(r.logical_lease_generation), ReleaseState: uint32(r.release_state), BackingState: uint32(r.backing_state), Container: uint32(r.container)}
+		s.Records[i] = VulkanRetainedReleaseRecord{AllocationID: uint64(r.reservation.allocation_id), BindingOffset: uint64(r.reservation.binding_offset), BufferBytes: uint64(r.reservation.buffer_bytes), ReservationBytes: uint64(r.reservation.reservation_bytes), DeviceGeneration: uint64(r.device_generation), LogicalLeaseGeneration: uint64(r.logical_lease_generation), NativeCheckoutGeneration: uint64(r.native_checkout_generation), ReleaseState: uint32(r.release_state), BackingState: uint32(r.backing_state), Container: uint32(r.container)}
 	}
 	return validateVulkanRetainedReleaseSnapshot(s, capacity, count, uint32(summary.truncated), int(result))
 }

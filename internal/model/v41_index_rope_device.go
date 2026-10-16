@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -160,18 +159,11 @@ func (s *Session) v41IndexRoPEFunc() v41IndexRoPEFunc {
 				return nil, errV41TailRoPEResult
 			}
 			stage = "query readback"
-			values := backend.Read(rotated)
-			if len(values) != width {
+			values, valid := compute.ReadV41IndexRoPEOutput(backend, rotated, out, headDim, rotaryDim)
+			if !valid {
 				return nil, errV41TailRoPEResult
 			}
-			for i, value := range values {
-				if !finite32(value) || (i%headDim < headDim-rotaryDim && math.Float32bits(value) != math.Float32bits(out[i])) ||
-					(i%headDim >= headDim-rotaryDim && v41BF16Overflows(value)) {
-					return nil, errV41TailRoPEResult
-				}
-			}
-			// Own the row before the device allocation is released.
-			return append([]float32(nil), values...), nil
+			return values, nil
 		}
 		result, cause = run()
 		if cause != nil {

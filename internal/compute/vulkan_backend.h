@@ -202,6 +202,27 @@ typedef struct fvk_retained_release_summary {
 int fvk_retained_release_snapshot(fvk_retained_release_record *rows, uint32_t capacity,
                                   fvk_retained_release_summary *summary);
 
+/* V2 preserves the legacy record/function ABI above. A rebuilt shim exporting the
+ * new symbol is required. All bounded-prefix/status/locking contracts still apply.
+ * native_checkout_generation starts at 1 after successful native binding and
+ * advances only when a native idle pool hands that Buffer out again. Zero means
+ * unavailable (including exhaustion); it never wraps or restarts on a pooled move.
+ * Compare only the same device_generation/allocation_id/binding_offset across
+ * snapshots. This is not an expected-generation token or stale-alias validation.
+ * Go transient-pool reuse is excluded, so logical_lease_generation remains zero.
+ * Deferred-to-pool moves, quarantine and ordinary writes do not advance checkout. */
+typedef struct fvk_retained_release_record_v2 {
+    fvk_buffer_reservation_info reservation;
+    uint64_t device_generation;
+    uint64_t logical_lease_generation;
+    uint64_t native_checkout_generation;
+    uint32_t release_state;
+    uint32_t backing_state;
+    uint32_t container;
+} fvk_retained_release_record_v2;
+int fvk_retained_release_snapshot_v2(fvk_retained_release_record_v2 *rows, uint32_t capacity,
+                                     fvk_retained_release_summary *summary);
+
 /* Observe the one shim-global, persistently mapped ordinary H2D/D2H stage.
  * Returns 1 for a coherent empty owner (buffer_bytes = 0) or a retained stage;
  * returns 0 for uninitialized, inconsistent or unavailable ownership/backing.
