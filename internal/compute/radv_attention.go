@@ -491,6 +491,12 @@ func Float32ToFloat16Bits(f float32) uint16 {
 	exp := int((bits>>23)&0xff) - 127 + 15
 	mant := bits & 0x007fffff
 
+	// Preserve NaN as a quiet NaN, including payloads lost by narrowing.
+	// Finite overflow and actual infinities retain the existing path below.
+	if bits&0x7f800000 == 0x7f800000 && mant != 0 {
+		return sign | 0x7c00 | uint16(mant>>13) | 0x0200
+	}
+
 	if exp <= 0 {
 		if exp < -10 {
 			return sign
