@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -43,7 +45,7 @@ func TestVulkanQualifiedActivationChunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(module) != 6052 || !vulkanQualifiedHash(module, "6bb4c0d03199686cafb9efa5faa37e4ae14b567f6f2308f687ec5e3b926ed72c") {
+	if !bytes.Equal(module, qualifiedHeaderBytesForRelation(t, header)) || !vulkanQualifiedHash(module, "6bb4c0d03199686cafb9efa5faa37e4ae14b567f6f2308f687ec5e3b926ed72c") {
 		t.Fatal("qualified module differs")
 	}
 	for _, pair := range [][2][]byte{{bytes.ReplaceAll(source, []byte("\n"), []byte("\r\n")), header}, {source, bytes.ReplaceAll(header, []byte("\n"), []byte("\r\n"))}, {append(append([]byte(nil), source...), 0), header}, {source, header[:len(header)-1]}, {source, bytes.Replace(header, []byte("0x03"), []byte("0x02"), 1)}} {
@@ -81,13 +83,19 @@ func TestVulkanQualifiedActivationChunk(t *testing.T) {
 
 // fak-test:runtime fast est=5ms
 func TestVulkanReceiptV24ActivationChunk(t *testing.T) {
-	want := append(vulkanRegistryV23.stems(), "v41_routed_swiglu_panel_chunk")
-	if len(want) != 87 || !reflect.DeepEqual(want, vulkanRegistryV24.stems()) {
+	previous := vulkanRegistryV23.stems()
+	for _, existing := range previous {
+		if existing == "v41_routed_swiglu_panel_chunk" {
+			t.Fatal("new qualified module already in predecessor registry")
+		}
+	}
+	want := append(previous, "v41_routed_swiglu_panel_chunk")
+	if !reflect.DeepEqual(want, vulkanRegistryV24.stems()) {
 		t.Fatal("V24 membership differs")
 	}
 	schema := vulkanRegistryV24.schema
 	id, err := vulkanRegistryV24.identity()
-	if err != nil || schema != VulkanBuildReceiptSchemaV24 || id.ID != VulkanShaderRegistryV24ID || id.ModuleCount != 87 {
+	if err != nil || schema != VulkanBuildReceiptSchemaV24 || id.ID != VulkanShaderRegistryV24ID || id.ModuleCount != len(want) {
 		t.Fatal("V24 identity differs")
 	}
 	if vulkanRegistryV23.validateStems(want) == nil || vulkanRegistryV24.validateStems(vulkanRegistryV23.stems()) == nil {
@@ -201,4 +209,29 @@ func TestVulkanReceiptV24CanonicalEvidence(t *testing.T) {
 	if _, _, _, _, err := vulkanRegistryV24.finalizeBinary(cfg, observed.Source, evidence.BinaryPath, observed.Toolchain, observed.ToolchainSHA256); err == nil || !strings.Contains(err.Error(), "differs from qualified artifact") {
 		t.Fatalf("finalization accepted corruption: %v", err)
 	}
+}
+
+// qualifiedHeaderBytesForRelation reads the canonical initializer independently
+// of the production decoder's comma tokenizer and fixed allocation size.
+func qualifiedHeaderBytesForRelation(t *testing.T, header []byte) []byte {
+	t.Helper()
+	frames := regexp.MustCompile(`(?s)static const unsigned char qualified\[\] = \{(.*?)\};`).FindAllSubmatch(header, -1)
+	if len(frames) != 1 {
+		t.Fatal("canonical qualified initializer missing or repeated")
+	}
+	body := frames[0][1]
+	tokens := regexp.MustCompile(`0x[0-9a-fA-F]{2}`).FindAll(body, -1)
+	remainder := regexp.MustCompile(`0x[0-9a-fA-F]{2}`).ReplaceAll(body, nil)
+	if strings.TrimSpace(strings.ReplaceAll(string(remainder), ",", "")) != "" || len(tokens) == 0 {
+		t.Fatal("canonical initializer contains non-byte content")
+	}
+	want := make([]byte, len(tokens))
+	for i, token := range tokens {
+		value, err := strconv.ParseUint(string(token), 0, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[i] = byte(value)
+	}
+	return want
 }

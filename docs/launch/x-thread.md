@@ -56,9 +56,9 @@ Fence: the deletion certificate is ed25519-signed but self-signed v1, and Evicte
 
 The perf claim, with its fence inline:
 
-On real WebVoyager (643 tasks): 8.8x→9.7x less prefill vs a **naive re-prefill** baseline.
+WebVoyager is a closed-form prefill-token geometry model over a real 643-task dataset with difficulty-derived turns and zero live-model runs. Across 1–8 workers it gives 8.8–9.7x versus naive re-prefill and 1.0–1.1x versus per-agent KV; these are not measured latency, cost or throughput gains.
 
-But nobody runs naive. Vs a **tuned warm-cache** stack (vLLM/SGLang prefix sharing) the honest gain is **~1.5–4x** (conservative headline: 4.1x).
+Other experiments must retain their own baseline and metric; a 4.1x ratio from the separate Qwen session artifact is not the tuned counterpart of this geometry model.
 
 fak is *not* a faster token engine — vLLM/SGLang win raw throughput. And the reuse win is self-host + read-heavy only; ~1% writes can flip it negative.
 
@@ -114,7 +114,7 @@ We cut a poisoned tool result out of the *middle* of a live model's KV cache and
 
 It's an agent kernel: one ~13MB static Go binary, treat the tool call like a syscall, default-deny gate the model can't talk past.
 
-Perf, fenced: 8.8–9.7x less prefill vs naive re-prefill; ~1.5–4x vs a tuned warm-cache stack (conservative headline 4.1x). Not a faster token engine — the win is operational surface + self-host read-heavy reuse only.
+WebVoyager is a closed-form prefill-token geometry model over a real 643-task dataset with difficulty-derived turns and zero live-model runs. Across 1–8 workers it gives 8.8–9.7x versus naive re-prefill and 1.0–1.1x versus per-agent KV; these are not measured latency, cost or throughput gains.
 
 github.com/anthony-chaudhary/fak
 
@@ -209,12 +209,12 @@ Draft: `refund_payment → DENY (POLICY_BLOCK)`. The keyless default-deny path a
 **P3 — Truncated `--explain` winner line. Post 7.**
 Draft: `DENY DEFAULT_DENY <- winner`. Actual: `=> [7] adjudicator.Adjudicator DENY DEFAULT_DENY by=monitor <- winner (rank 100)`. Minor, but the copy quotes a terminal string verbatim; quote it as it prints.
 
-**P4 — Range presented as "~1.5–4.1x" hides the conservative headline rule. Post 5, Bluesky.**
-Ledger: tuned gain is "~1.5–4x, the conservative headline number is 4.1x." Writing the band as "~1.5–4.1x" is defensible but reads as if 4.1x is the top of a measured spread rather than *the* conservative headline. The ledger's instruction is to show the tuned number; cleaner to state "~1.5–4x (conservative headline: 4.1x)" so a skeptic can't claim 4.1x was smuggled in as a max. Tightened.
+**P4 — Preserve the modeled WebVoyager comparison and keep other experiments separate.**
+WebVoyager is a closed-form prefill-token geometry model over a real 643-task dataset with difficulty-derived turns and zero live-model runs. Across 1–8 workers it gives 8.8–9.7x versus naive re-prefill and 1.0–1.1x versus per-agent KV; these are not measured latency, cost or throughput gains. The separate Qwen2.5-1.5B Q8 50-turn × 5-agent artifact records a 4.1x total-time ratio versus per-agent KV: arms B and C are marked live, while the naive arm A is modeled. That experiment is not WebVoyager and its ratio is not a WebVoyager prefill ratio.
 
 **P5 — "8-rung ladder" / `deletioncert -selfcheck` — VERIFIED, no change.** The 8-rung count is real, and `go run ./cmd/deletioncert -selfcheck` is a real flag. Kept.
 
-Everything else (max|Δ|=0, no mid-run eviction in shipped engines, two gates, detector ~100% evadable, 8.8→9.7x naive paired with tuned, ~13MB / two-golang.org/x-deps / 4-line go.sum, 0/29 novel, self-host + read-heavy fence, not-a-token-engine fence, no projections, no simulated power) traces to the ledger and survives unchanged. All tagged visuals exist on disk.
+Everything else (max|Δ|=0, no mid-run eviction in shipped engines, two gates, detector ~100% evadable, modeled WebVoyager ratios with their scope corrected above, ~13MB / two-golang.org/x-deps / 4-line go.sum, 0/29 novel, self-host + read-heavy fence, not-a-token-engine fence, no projections, no simulated power) traces to the ledger and survives unchanged. All tagged visuals exist on disk.
 
 ---
 
@@ -227,9 +227,9 @@ The draft was **not** clean — it shipped a proof command that the binary refus
 - **Broken command (P1, fatal):** added the mandatory `--tool` flag everywhere the proof command appears (Post 7, Post 8, Bluesky reply). The draft's `preflight refund_payment` / `preflight --explain refund_payment` exits with `fak preflight: --tool is required` (exit 2). Verified the corrected form `preflight --explain --tool refund_payment` runs and prints the DENY ladder.
 - **Wrong DENY reason (P2):** changed `DENY (POLICY_BLOCK)` → `DENY (DEFAULT_DENY)` in Post 7 and the Bluesky reply. The keyless path prints `reason=DEFAULT_DENY`; `POLICY_BLOCK` is a real code but fires on configured policy violations, not the un-wired-tool default-deny the copy tells people to run. Verified live: `refund_payment` → `DENY reason=DEFAULT_DENY`, `search_kb` → `ALLOW reason=NONE`.
 - **Truncated winner line (P3):** quoted the actual `--explain` terminal string `=> [7] adjudicator.Adjudicator DENY DEFAULT_DENY by=monitor <- winner` instead of the draft's paraphrase.
-- **Tuned-gain band (P4):** rewrote "~1.5–4.1x" → "~1.5–4x (conservative headline: 4.1x)" in Post 5 and Bluesky, so 4.1x reads as the conservative single number the ledger names, not the max of a spread.
+- **Experiment attribution (P4):** replaced the mixed tuned-gain band with the canonical WebVoyager modeled comparison, its 1–8-worker scope and zero-live-run status.
 
-Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; 8.8x→9.7x naive **always** paired with the tuned ~1.5–4x; ~13MB / two-golang.org/x-deps / 4-line go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-kernel-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
+Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; WebVoyager modeled 8.8–9.7x naive /1.0–1.1x per-agent KV across1–8 workers, zero live-model runs; ~13MB / two-golang.org/x-deps / 4-line go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-kernel-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
 
 ### Fanrun thread (added 2026-06-27) — fact-check
 

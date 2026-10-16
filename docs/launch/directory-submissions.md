@@ -10,7 +10,7 @@ are copy-paste ready. The programmatic ones are already handled in the repo and 
 form:
 
 - **Glama** — auto-indexes from [`glama.json`](https://github.com/anthony-chaudhary/fak/blob/main/glama.json) (committed; approves in minutes).
-- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.51.0** (the `server.json` `version` and its `oci` `identifier` both pin `ghcr.io/anthony-chaudhary/fak:0.51.0`; `release-container.yml` pushes `:{version,latest}` on each `v*` tag). The remaining steps are owner-only and interactive — see Fresh leads #6 below.
+- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, with its checked-in manifest at **0.56.0** (the `server.json` `version` and its `oci` `identifier` both pin `ghcr.io/anthony-chaudhary/fak:0.56.0`; `release-container.yml` pushes `:{version,latest}` on each `v*` tag). The official registry supports GitHub OAuth and GitHub OIDC publishing; this repository’s publishing configuration, permissions and current registry entry remain unverified — see Fresh leads #6 below.
 - **Awesome-list PRs** — already submitted across ~12 lists (don't duplicate).
 
 Reusable description (≈140 chars): *Agent kernel for AI agents: one Go binary that fronts OpenAI/Anthropic/MCP wires, keeps long sessions cache-efficient, routes per call, and audits every tool-call verdict.*
@@ -95,16 +95,16 @@ project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github
   ```
 - **README-install confirmation (required checkbox):** TRUE. The repo README + [`examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) give a README-alone install (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`, then `fak serve --stdio` / a project `.mcp.json`). Test it with Cline first, then tick the box.
 
-### 6. Official MCP Registry — the final publish is now unblocked
+### 6. Official MCP Registry — publishing capability and readiness are separate
 
-The blocker the old notes flagged (no OCI artifact) is **gone**: `release-container.yml` builds + pushes `ghcr.io/anthony-chaudhary/fak:{version,latest}` on each `v*` tag (the v0.34.0 image was confirmed anonymously pullable via an anonymous ghcr token when this was first wired on 2026-06-27). `server.json` now tracks the current release — **0.51.0** — with its `oci` `identifier` pinned to `ghcr.io/anthony-chaudhary/fak:0.51.0`. Remaining steps (owner-only, can't be automated; re-confirm the `:0.51.0` image is anonymously pullable before publishing):
+The repository includes an OCI release workflow: `release-container.yml` builds + pushes `ghcr.io/anthony-chaudhary/fak:{version,latest}` on each `v*` tag (the v0.34.0 image was confirmed anonymously pullable via an anonymous ghcr token when this was first wired on 2026-06-27). The checked-in `server.json` declares **0.56.0**, with its `oci` `identifier` pinned to `ghcr.io/anthony-chaudhary/fak:0.56.0`. This source declaration does not verify that the image or registry entry is published. The [official registry API documentation](https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/api/official-registry-api.md) supports GitHub OAuth and GitHub OIDC authentication for publishing, so publishing is not inherently limited to an interactive flow. This does not establish that this repository has automation configured, that the required permissions are available, or that any publication is approved or complete. The existing manual-route notes below are not an authorization to act; current package visibility and publication readiness must be verified first:
 
 1. **Make the ghcr `fak` package public** (first publish only) — repo *Packages* tab → set visibility to public.
 2. `brew install mcp-publisher` (or the release tarball — see [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md)).
 3. `mcp-publisher login github` — interactive GitHub device flow that claims the `io.github.anthony-chaudhary/*` namespace.
 4. `mcp-publisher publish` from the repo root (reads `server.json`).
 
-Future releases now keep `server.json` current automatically (`release_bump.py`'s `dist_manifests` target), so step 2-4 is the only recurring cost.
+Future releases update `server.json` through `release_bump.py`'s `dist_manifests` target. Updating that source declaration does not publish a registry entry or establish the recurring operational requirements of either the manual or automated route.
 
 ### 7. Claude Code plugin — SHIPPED, just announce + smoke-test
 

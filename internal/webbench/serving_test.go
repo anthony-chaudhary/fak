@@ -181,6 +181,7 @@ func TestServingOursVsSGLangTaxReportsDeltaAndRatio(t *testing.T) {
 			Track:  TrackOurs,
 			Status: "measured",
 			Stats: ServingStats{
+				TokenCountBasis:   "usage.completion_tokens",
 				TTFTMillis:        QuantileMetric{Status: "measured", Unit: "ms", P50: &oursTTFT},
 				ThroughputTokensS: ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &oursThroughput},
 			},
@@ -189,6 +190,7 @@ func TestServingOursVsSGLangTaxReportsDeltaAndRatio(t *testing.T) {
 			Track:  TrackSGLang,
 			Status: "measured",
 			Stats: ServingStats{
+				TokenCountBasis:   "usage.completion_tokens",
 				TTFTMillis:        QuantileMetric{Status: "measured", Unit: "ms", P50: &rawTTFT},
 				ThroughputTokensS: ScalarMetric{Status: "measured", Unit: "usage.completion_tokens/s", Value: &rawThroughput},
 			},

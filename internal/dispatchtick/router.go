@@ -23,11 +23,12 @@ type dispatchContractReview struct {
 }
 
 const (
-	reasonScopeIncomplete = "ISSUE_SCOPE_INCOMPLETE"
-	reasonUnrouted        = "ISSUE_UNROUTED"
-	reasonPrivateBoundary = "ISSUE_PRIVATE_BOUNDARY"
-	reasonNotDispatchLeaf = "ISSUE_NOT_DISPATCH_LEAF"
-	reasonOversizedSteps  = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	reasonScopeIncomplete  = "ISSUE_SCOPE_INCOMPLETE"
+	reasonUnrouted         = "ISSUE_UNROUTED"
+	reasonPrivateBoundary  = "ISSUE_PRIVATE_BOUNDARY"
+	reasonNotDispatchLeaf  = "ISSUE_NOT_DISPATCH_LEAF"
+	reasonOversizedSteps   = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	reasonUnresolvedPrereq = "ISSUE_PREREQUISITE_UNRESOLVED"
 )
 
 var dispatchPrivateCues = []string{
@@ -212,7 +213,8 @@ type IssueRoute struct {
 	// surfaced for a consumer to read, not a queue silo or a priority override.
 	Generation string `json:"generation,omitempty"`
 	// BlockedBy is the issue-number prerequisites this issue declares in its body via a
-	// "depends-on:/blocked-by: #N" marker (CandidateBlockedBy), as bare-numeric IDs. omitempty
+	// "depends-on:/blocked-by: #N" marker (CandidateBlockedBy). Qualified identities
+	// remain owner/repo#N; the router refuses them pending resolver support. omitempty
 	// keeps an edge-free issue's route payload byte-identical to before the field existed. A live
 	// dependency soft-hold (holdOpenPrereqForRoute) reads this to keep a leaf out of the pick
 	// while a prerequisite it names is still an open candidate this tick.
@@ -985,6 +987,9 @@ func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 	case !review.OK:
 		reason = firstIssueContractReason(review)
 		next = issueContractNextAction(reason)
+		if reason == reasonUnresolvedPrereq {
+			next += ": " + strings.Join(unresolvedStartPrerequisites(issue.Body), ", ")
+		}
 	}
 	return SkippedIssue{
 		Number:        issue.Number,
@@ -1210,6 +1215,9 @@ func reviewDispatchContract(issue Issue) dispatchContractReview {
 	if dispatchPrivateBoundary(issue.Body) {
 		return dispatchContractReview{Reasons: []string{reasonPrivateBoundary}}
 	}
+	if len(unresolvedStartPrerequisites(issue.Body)) > 0 {
+		return dispatchContractReview{Reasons: []string{reasonUnresolvedPrereq}}
+	}
 	return dispatchContractReview{OK: true}
 }
 func firstIssueContractReason(review dispatchContractReview) string {
@@ -1221,6 +1229,8 @@ func firstIssueContractReason(review dispatchContractReview) string {
 
 func issueContractNextAction(reason string) string {
 	switch reason {
+	case reasonUnresolvedPrereq:
+		return "hold dispatch: correct malformed start-blockers or obtain repository-aware prerequisite resolution before pickup"
 	case reasonScopeIncomplete:
 		return "add current state, scope, done condition, witness, likely files, and acceptance gate before dispatch"
 	case reasonUnrouted:

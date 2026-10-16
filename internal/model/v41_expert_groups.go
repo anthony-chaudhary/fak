@@ -239,7 +239,22 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 		var (
 			w1, w3, w2  []float32
 			tripleReady bool
+			downReady   bool
 		)
+		// The group consumes one immutable expert before scratch is reused for
+		// the next. Keep its host-down fallback live even when the layer cache
+		// is disabled or cannot retain this projection.
+		hostDown := func() ([]float32, error) {
+			if !downReady {
+				var err error
+				w2, err = m.hostExpertDown(l, stem, scratch)
+				if err != nil {
+					return nil, err
+				}
+				downReady = true
+			}
+			return w2, nil
+		}
 		if full && st != nil && st.callbackOwner != nil && !v41PrefillExpertPanelOptedIn() {
 			cohortHandled := false
 			for first := 0; first < len(g.Rows); {
@@ -346,7 +361,7 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 							tripleReady = true
 						}
 						return w1, w3, w2, nil
-					}, func() ([]float32, error) { return m.hostExpertDown(l, stem, scratch) }, true, publish)
+					}, hostDown, true, publish)
 				if cause != nil {
 					return cause
 				}
@@ -390,7 +405,7 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 							continue
 						}
 					}
-					wd, err := m.hostExpertDown(l, stem, scratch)
+					wd, err := hostDown()
 					if err != nil {
 						return err
 					}

@@ -82,150 +82,197 @@ func (s *Session) v41IndexSelectFunc() v41IndexSelectFunc {
 				cause = closeFailure(cause)
 			}
 		}()
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		convertPanic := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, cause = nil, closeFailure(err)
+				return
 			}
-		}()
-		rows := len(scores)
-		if topK < 0 || topKBlocks < 0 || (topKBlocks > 0 && blockSize <= 0) || rows > v41IndexSelectMaxRows {
-			return nil, closeFailure(errV41IndexSelectResult)
-		}
-		for i, value := range scores {
-			if math.IsNaN(float64(value)) {
-				return nil, closeFailure(fmt.Errorf("%w: score %d is NaN", errV41IndexSelectResult, i))
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
 			}
+			closeFailure(err)
+			panic(r)
 		}
-		if rows == 0 || topK == 0 {
-			return []int32{}, nil
-		}
-		want := min(topK, rows)
-		run := func() (result []int32, cause error) {
-			var owned []compute.Tensor
-			defer func() {
-				primaryPanic := recover()
-				// Preserve the selected primary if cleanup itself calls Goexit,
-				// which prevents run's return values reaching the outer frame.
-				if ownedReadStarted && !ownedReadCompleted {
-					ownedReadPrimary = cause
-					if ownedReadPrimary == nil && primaryPanic != nil {
-						if err, ok := primaryPanic.(error); ok {
-							ownedReadPrimary = err
-						} else {
-							ownedReadPrimary = fmt.Errorf("unclassified backend panic: %v", primaryPanic)
-						}
-					}
-					if ownedReadPrimary == nil && !ownedReadReturned {
-						ownedReadPrimary = errV41IndexSelectResult
-						cause = ownedReadPrimary
+		ordinaryFallback := false
+		var recovered any
+		completed := false
+		func() {
+			defer func() { recovered = recover() }()
+			result, cause = func() ([]int32, error) {
+				rows := len(scores)
+				if topK < 0 || topKBlocks < 0 || (topKBlocks > 0 && blockSize <= 0) || rows > v41IndexSelectMaxRows {
+					return nil, closeFailure(errV41IndexSelectResult)
+				}
+				for i, value := range scores {
+					if math.IsNaN(float64(value)) {
+						return nil, closeFailure(fmt.Errorf("%w: score %d is NaN", errV41IndexSelectResult, i))
 					}
 				}
-				var cleanupPanic any
-				cleanupInterrupted := false
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						released := false
-						defer func() {
-							r := recover()
-							if !released && !cleanupInterrupted {
-								cleanupPanic, cleanupInterrupted = r, true
+				if rows == 0 || topK == 0 {
+					return []int32{}, nil
+				}
+				want := min(topK, rows)
+				run := func() (result []int32, cause error) {
+					var owned []compute.Tensor
+					bodyComplete := false
+					defer func() {
+						if ordinaryFallback {
+							failed := !bodyComplete || cause != nil
+							var cleanup any
+							cleanupPresent := false
+							drainReturned := false
+							func() {
+								// Register every owner before the first Free so Goexit still
+								// attempts the remaining releases in reverse acquisition order.
+								for _, tensor := range owned {
+									defer func(tensor compute.Tensor) {
+										returned := false
+										defer func() {
+											value := recover()
+											if !returned && !cleanupPresent {
+												cleanup, cleanupPresent = value, true
+											}
+										}()
+										s.Backend.Free(tensor)
+										returned = true
+									}(tensor)
+								}
+							}()
+							drainReturned = true
+							// A primary unwind or returned error wins. Cleanup Goexit never
+							// returns here and must not become an invented nil panic.
+							if drainReturned && cleanupPresent && !failed {
+								panic(cleanup)
 							}
-						}()
-						s.Backend.Free(owned[i])
-						released = true
+							return
+						}
+						primaryPanic := recover()
+						// Preserve the selected primary if cleanup itself calls Goexit,
+						// which prevents run's return values reaching the outer frame.
+						if ownedReadStarted && !ownedReadCompleted {
+							ownedReadPrimary = cause
+							if ownedReadPrimary == nil && primaryPanic != nil {
+								if err, ok := primaryPanic.(error); ok {
+									ownedReadPrimary = err
+								} else {
+									ownedReadPrimary = fmt.Errorf("unclassified backend panic: %v", primaryPanic)
+								}
+							}
+							if ownedReadPrimary == nil && !ownedReadReturned {
+								ownedReadPrimary = errV41IndexSelectResult
+								cause = ownedReadPrimary
+							}
+						}
+						var cleanupPanic any
+						cleanupInterrupted := false
+						for i := len(owned) - 1; i >= 0; i-- {
+							func() {
+								released := false
+								defer func() {
+									r := recover()
+									if !released && !cleanupInterrupted {
+										cleanupPanic, cleanupInterrupted = r, true
+									}
+								}()
+								s.Backend.Free(owned[i])
+								released = true
+							}()
+						}
+						if primaryPanic != nil {
+							panic(primaryPanic)
+						}
+						if cause == nil && cleanupInterrupted {
+							if cleanupPanic != nil {
+								panic(cleanupPanic)
+							}
+							cause = errV41IndexSelectResult
+						}
 					}()
-				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
-				}
-				if cause == nil && cleanupInterrupted {
-					if cleanupPanic != nil {
-						panic(cleanupPanic)
-					}
-					cause = errV41IndexSelectResult
-				}
-			}()
-			stage = "score upload"
-			st := s.uploadHostF32([]int{rows}, scores, compute.MemoryActivation, "V4.1 index-select scores")
-			owned = append(owned, st)
-			stage = "index-select"
-			ownedReadStarted = true
-			values, chosen, readErr := compute.TryV41IndexSelectReadOwned(backend, st, rows, topK, topKBlocks, blockSize)
-			ownedReadReturned = true
-			if chosen || readErr != nil {
-				if readErr != nil {
-					return nil, readErr
-				}
-				stage = "selection readback"
-			} else {
-				ownedReadCompleted = true
-				selected, err := operation.V41IndexSelect(st, rows, topK, topKBlocks, blockSize)
-				fresh := selected.Buf() != nil && selected.Backend() == s.Backend && selected.Buf() != st.Buf()
-				if fresh {
-					owned = append(owned, selected)
-				}
-				if err != nil {
-					return nil, err
-				}
-				if !fresh || selected.Dtype != compute.F32 || selected.Layout != compute.RowMajor || selected.Quant != nil ||
-					len(selected.Shape) != 1 || selected.Shape[0] != want {
-					return nil, errV41IndexSelectResult
-				}
-				stage = "selection readback"
-				values = s.Backend.Read(selected)
-			}
+					result, cause = func() ([]int32, error) {
+						stage = "score upload"
+						st := s.uploadHostF32([]int{rows}, scores, compute.MemoryActivation, "V4.1 index-select scores")
+						owned = append(owned, st)
+						stage = "index-select"
+						ownedReadStarted = true
+						values, chosen, readErr := compute.TryV41IndexSelectReadOwned(backend, st, rows, topK, topKBlocks, blockSize)
+						ownedReadReturned = true
+						if chosen || readErr != nil {
+							if readErr != nil {
+								return nil, readErr
+							}
+							stage = "selection readback"
+						} else {
+							ownedReadCompleted = true
+							ordinaryFallback = true
+							selected, err := operation.V41IndexSelect(st, rows, topK, topKBlocks, blockSize)
+							fresh := selected.Buf() != nil && selected.Backend() == s.Backend && selected.Buf() != st.Buf()
+							if fresh {
+								owned = append(owned, selected)
+							}
+							if err != nil {
+								return nil, err
+							}
+							if !fresh || selected.Dtype != compute.F32 || selected.Layout != compute.RowMajor || selected.Quant != nil ||
+								len(selected.Shape) != 1 || selected.Shape[0] != want {
+								return nil, errV41IndexSelectResult
+							}
+							stage = "selection readback"
+							values = s.Backend.Read(selected)
+						}
 
-			if len(values) != want {
-				return nil, errV41IndexSelectResult
-			}
-			out := make([]int32, want)
-			last := -1
-			for i, value := range values {
-				row := int(value)
-				if float32(row) != value || row < -1 || row >= rows {
-					return nil, errV41IndexSelectResult
+						if len(values) != want {
+							return nil, errV41IndexSelectResult
+						}
+						out := make([]int32, want)
+						last := -1
+						for i, value := range values {
+							row := int(value)
+							if float32(row) != value || row < -1 || row >= rows {
+								return nil, errV41IndexSelectResult
+							}
+							// Published rows are position-sorted and distinct.
+							if row >= 0 {
+								if row <= last {
+									return nil, errV41IndexSelectResult
+								}
+								last = row
+							}
+							out[i] = int32(row)
+						}
+						return out, nil
+					}()
+					bodyComplete = true
+					return result, cause
 				}
-				// Published rows are position-sorted and distinct.
-				if row >= 0 {
-					if row <= last {
-						return nil, errV41IndexSelectResult
-					}
-					last = row
+				result, cause = run()
+				if ownedReadReturned {
+					ownedReadCompleted = true
 				}
-				out[i] = int32(row)
-			}
-			return out, nil
+				if cause != nil {
+					return nil, closeFailure(cause)
+				}
+				return result, nil
+			}()
+			completed = true
+		}()
+		if !completed && (recovered != nil || ordinaryFallback) {
+			convertPanic(recovered)
 		}
-		result, cause = run()
-		if ownedReadReturned {
-			ownedReadCompleted = true
-		}
-		if cause != nil {
-			return nil, closeFailure(cause)
-		}
-		return result, nil
+		return result, cause
 	}
 }

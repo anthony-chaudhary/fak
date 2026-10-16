@@ -1,8 +1,8 @@
-The draft is mostly clean and the fences are unusually well-handled, but there is one fabricated number, one unverifiable command, one structural claim that overreaches the ledger, and one false self-congratulation in the closing line. Here is each problem, the fix, then the full corrected asset.
+The draft is mostly clean and the fences are unusually well-handled, but there is one fabricated number, one incorrect command-existence claim, one structural claim that overreaches the ledger, and one false self-congratulation in the closing line. Here is each problem, the fix, then the full corrected asset.
 
 **Problems found**
 
-1. **`go run ./cmd/deletioncert -selfcheck` is not in the ledger.** The ledger's only proof-of-deletion command is the 60-second preflight/agent demo; `deletioncert -selfcheck` is invented and appears three times (cold open, CTA twice). I cannot verify that binary or flag exists. Replaced with the ledger-verified offline command (`go run ./cmd/fak agent --offline`) which actually demonstrates the injection/destructive-op flips, and routed the deletion-cert claim to its proven artifact phrasing ("proven against a HuggingFace oracle") without inventing a runner.
+1. **The deletion self-check command exists in source.** `cmd/deletioncert/main.go` declares `-selfcheck` and constructs a tiny synthetic model for its eviction-versus-never-seen comparison. `go run ./cmd/deletioncert -selfcheck` is therefore a source-backed command, not an invented flag. This source review does not establish a fresh successful run, HuggingFace parity, hardware behavior, or elapsed time. The script below still displays `go run ./cmd/fak agent --offline`, which demonstrates tool-policy behavior and must not be presented as the deletion numerical witness.
 
 2. **"resolves in ~1s" / "run the deletion proof yourself, offline, in about a second."** The ledger says "60-second proof," not one second. The ~1s figure is fabricated. Changed to "in about a minute, offline."
 
@@ -16,7 +16,7 @@ The draft is mostly clean and the fences are unusually well-handled, but there i
 
 7. **CTA command `go run ./cmd/fak preflight refund_payment`** — the ledger's exact preflight invocation is `go run ./cmd/fak preflight --policy …readonly… --tool refund_payment`. Minor, but I aligned it to the ledger form so a skeptic copy-pasting it isn't surprised by the missing args placeholder.
 
-Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`, `0/29 novel`, two-gate framing, "~100% evadable by design," self-host + read-heavy fence, design-target labeling of ~60×, simulated-power disclosure — traces cleanly and survives.
+The WebVoyager comparison below is modeled prefill geometry, not measured speedup. Other claims, including binary size, detector results, capture provenance and competitor comparisons, still require their own evidence before publication.
 
 ---
 
@@ -50,11 +50,11 @@ Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`
 | **B-ROLL** | The live browser demo animating call-by-call. One counter climbs next to one that won't move. |
 | **COMMAND VISIBLE** | `go run ./cmd/turntaxdemo` |
 
-**Spoken fence (the load-bearing honesty):** "But nine is the win over the *naive* baseline — and nobody runs naive in production. Against a *tuned* warm-cache stack like vLLM or SGLang, the honest number is about one-and-a-half to four times less prefill. Four-point-one at the conservative end. And the reuse only pays off self-hosted, on read-heavy fleets."
+**Spoken fence (the load-bearing honesty):** "These are modeled prefill-token counts over the 643-task WebVoyager dataset, with difficulty-derived turn geometry and no live-model runs. Across the 1–8-worker sweep, the model gives 8.8 to 9.7 times less work than naive re-prefill, and 1.0 to 1.1 times versus per-agent KV reuse. This is not a measured latency, cost or throughput improvement."
 
 | | |
 |---|---|
-| **ON-SCREEN TEXT** (under the race) | `8.8–9.7× vs NAIVE  ·  ~1.5–4.1× vs TUNED warm-cache` <br> `self-host + read-heavy only` |
+| **ON-SCREEN TEXT** (under the race) | `MODELED PREFILL GEOMETRY · 8.8–9.7× vs NAIVE · 1.0–1.1× vs PER-AGENT KV` <br> `0 live-model runs · no latency/cost/throughput measurement` |
 
 ---
 
@@ -85,7 +85,7 @@ Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`
 
 > Disclosure: I wrote fak. The honest fences, since a short can't hold all of them:
 > - **Not a faster token engine.** vLLM/SGLang/llama.cpp win raw single-stream throughput; fak doesn't target it. The contrast is *operational surface* — one binary vs a multi-GB Python/CUDA stack — not tok/s.
-> - **Perf number:** 8.8–9.7× less prefill is vs a *naive* re-prefill baseline nobody runs. vs a tuned warm-cache SOTA stack it's ~1.5–4.1×. Reuse is **self-host + read-heavy only** — even ~1% writes can flip it negative.
+> - **Geometry model:** WebVoyager uses a real 643-task dataset with derived turn geometry and zero live-model runs. Across the 1–8-worker sweep, its modeled prefill-token ratios are 8.8–9.7× versus naive re-prefill and 1.0–1.1× versus per-agent KV. These are not measured latency, billing, task-cost or throughput gains. Other experiments must retain their own evidence and must not be attributed to WebVoyager.
 > - **The ~60× / "agent city" numbers are DESIGN TARGETS, not measured.** Not in this video for that reason.
 > - **Deletion cert** is self-signed v1 and EvictedCount is self-reported; the `max|Δ|=0` parity is the real proof (checked against an HF oracle).
 > - **Detector is ~100% evadable by design.** The floor is the capability lock + result quarantine, not detection.
@@ -96,7 +96,7 @@ Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`
 
 **Pre-publish blocker (verify before posting):** the OG social-preview image on the published demos page (`anthony-chaudhary.github.io/fak/demos.html`) points at `raw.githubusercontent.com/.../visuals/social-preview.png`; confirm it resolves with `python tools/demo_live_links.py --published` before the link is posted.
 
-**Total runtime:** ~68s of content, ~85s with the b-roll breathing room. Spoken numbers: `max|Δ|=0`, `8.8–9.7× naive`, `~1.5–4.1× tuned`, `~13MB`, `0/29 novel`, `~1-minute` offline proof.
+**Total runtime:** ~68s of content, ~85s with the b-roll breathing room. Spoken numbers: `max|Δ|=0`, `8.8–9.7× naive`, `1.0–1.1× per-agent KV (modeled)`, `~13MB`, `0/29 novel`, `~1-minute` offline proof.
 
 ---
 
@@ -111,7 +111,7 @@ Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`
 
 What I changed:
 
-1. **Removed the fabricated `deletioncert -selfcheck` command** (appeared 3×). Not in the ledger; no such binary/flag is verified. Replaced with the ledger's actual offline proof `go run ./cmd/fak agent --offline`, which demonstrably shows the injection/destructive-op YES→no flips.
+1. **Correction to the earlier command-existence note:** `go run ./cmd/deletioncert -selfcheck` is implemented in source and uses a synthetic model. The earlier description of it as fabricated was incorrect. The displayed `go run ./cmd/fak agent --offline` remains a separate tool-policy demonstration; a matching deletion capture and its scope must be verified before publication.
 2. **Fixed "~1s" → "about a minute."** Ledger says "60-second proof." The one-second claim was invented.
 3. **Stripped the literal token `109`** from the cold-open b-roll. The ledger proves `max|Δ|=0`; it specifies no token value. Kept the visual (poisoned span vanishes, runs match) without an unsourced on-screen number.
 4. **Removed "8-rung ladder"** → "per-rung decision ladder." Rung count isn't in the ledger (ledger only confirms `--explain/--json` per-rung trace).
@@ -119,6 +119,6 @@ What I changed:
 6. **Rewrote the pre-publish blocker** to reference the published page instead of a local absolute path, and folded in the ledger's `text/plain` raw-serving caveat.
 7. **Trimmed the closing self-grade** ("No naive-only lead, every fence spoken aloud") to a plain number recap — a self-certifying claim isn't evidence.
 
-Every remaining number traces to the VERIFIED ledger: `max|Δ|=0` (KV-eviction parity, SHIPPED); `8.8–9.7×` (WebVoyager 643 tasks vs naive, SHIPPED); `~1.5–4.1×` (vs tuned warm-cache, conservative headline 4.1×); `~13MB` (distroless/static container); `0/29 novel` (prior-art audit); two-gate framing, "~100% evadable by design," self-host + read-heavy fence, and the ~60×/"agent city" design-target labeling all match the ledger verbatim. The naive number is never led with, and every fence (not-a-token-engine, self-host-only, simulated power, self-signed cert) survives into both the spoken track and the pinned comment.
+The corrected WebVoyager ranges come from `docs/webbench-real-measurements-summary.md`: the 1–8-worker sweep models prefill-token geometry over 643 tasks, with zero live-model runs. Its 8.8–9.7× naive and 1.0–1.1× per-agent-KV ratios are not measured speedup. The earlier blanket verification paragraph did not establish those distinctions. Other numerical, capture, timing and capability claims in this asset remain subject to their own evidence checks before publication.
 
 <!-- Freshness review 2026-08-24: commands, links, channel constraints, and product claims rechecked against the current repository; publish only after a final live channel-rule check. -->

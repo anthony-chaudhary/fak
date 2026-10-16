@@ -51,7 +51,7 @@ func initGDNBatchedPrefill() bool {
 // the per-token residentMatRows(name, X[t]), so callers stay bit-identical whatever the format.
 func (m *Model) residentMatMulBatch(name string, X []float32, out, in, P int) []float32 {
 	if m.has(name) && m.lora == nil {
-		return matMulBatch(m.tensor(name), X, out, in, P)
+		return matMulBatch(m.tensor(name), m.prismProjectPanel(name, X, P), out, in, P)
 	}
 	Y := make([]float32, P*out)
 	for t := 0; t < P; t++ {

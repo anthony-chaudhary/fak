@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -135,23 +134,6 @@ func PlanCompile(pkg string, variant Variant, target ReleaseTarget, outPath stri
 		Command: args,
 		Env:     env,
 	}
-}
-
-// RunCompileCheck executes the plan using the go toolchain.
-func RunCompileCheck(goBin, root string, plan MatrixCompilePlan) (string, error) {
-	if goBin == "" {
-		var err error
-		goBin, err = exec.LookPath("go")
-		if err != nil {
-			return "", fmt.Errorf("go toolchain not on PATH: %w", err)
-		}
-	}
-	cmd := exec.Command(goBin, plan.Command...)
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), plan.Env...)
-
-	out, err := cmd.CombinedOutput()
-	return string(out), err
 }
 
 // GHAMatrixEntry represents an item in GitHub Actions matrix include list.

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -112,9 +113,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return result, fmt.Errorf("codexresume: baseline rollout: %w", err)
 	}
 	cmd := windowgate.Command(cfg.Command[0], cfg.Command[1:]...)
-	cmd.Dir = cfg.Dir
-	if cfg.Env != nil {
-		cmd.Env = cfg.Env
+	cmd.Dir, cmd.Env, err = childprocess.WorkdirEnv(cfg.Dir, cfg.Env)
+	if err != nil {
+		return result, fmt.Errorf("codexresume: working directory: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

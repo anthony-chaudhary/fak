@@ -159,97 +159,112 @@ func (s *Session) v41EngramProjectionFunc() v41EngramProjectionFunc {
 			s.closeBackendOwned()
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
-						return
-					}
+		convert := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
 					return
 				}
-				// ROCm and other backends may panic with a plain error. Retire
-				// the selected session while preserving that panic's identity.
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+				return
 			}
-		}()
-		key := fmt.Sprintf("v41-engram:%s:%v:%d:%d", name, descriptor.dtype, out, in)
-		var source compute.Tensor
-		if _, cached := s.lookupImmutableWeight(key, key); !cached {
-			var err error
-			source, err = descriptor.host(0, out, in)
-			if err != nil {
-				return nil, v41ProjectionError, closeFailure(err)
+			// ROCm and other backends may panic with a plain error. Retire
+			// the selected session while preserving that panic's identity.
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
 			}
+			closeFailure(err)
+			panic(r)
 		}
-		stage = "weight upload"
-		weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(source, descriptor.dtype) })
-		run := func() (result []float32, cause error) {
-			var owned []compute.Tensor
-			defer func() {
-				// Both releases are still attempted. Cleanup must not replace
-				// the operation's returned error or original panic; after a
-				// successful operation, retain the first cleanup-only panic.
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						s.Backend.Free(owned[i])
+		callCompleted := false
+		var primary any
+		func() {
+			defer func() { primary = recover() }()
+			result, outcome, cause = func() ([]float32, v41DenseProjectionOutcome, error) {
+				key := fmt.Sprintf("v41-engram:%s:%v:%d:%d", name, descriptor.dtype, out, in)
+				var source compute.Tensor
+				if _, cached := s.lookupImmutableWeight(key, key); !cached {
+					var err error
+					source, err = descriptor.host(0, out, in)
+					if err != nil {
+						return nil, v41ProjectionError, closeFailure(err)
+					}
+				}
+				stage = "weight upload"
+				weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(source, descriptor.dtype) })
+				run := func() (result []float32, cause error) {
+					var owned []compute.Tensor
+					bodyCompleted := false
+					defer func() {
+						// Cleanup observes only its own failures, never the active body unwind.
+						// A successful body selects the first present release panic, even nil.
+						failed := !bodyCompleted || cause != nil
+						var cleanupPanic any
+						cleanupPresent := false
+						for i := len(owned) - 1; i >= 0; i-- {
+							returned := false
+							func() {
+								defer func() {
+									r := recover()
+									if !returned && !cleanupPresent {
+										cleanupPanic, cleanupPresent = r, true
+									}
+								}()
+								s.Backend.Free(owned[i])
+								returned = true
+							}()
+						}
+						if !failed && cleanupPresent {
+							panic(cleanupPanic)
+						}
 					}()
+					result, cause = func() ([]float32, error) {
+						stage = "activation upload"
+						x := s.uploadHostF32([]int{in}, row, compute.MemoryActivation, "V4.1 Engram projection activation")
+						owned = append(owned, x)
+						upload += int64(len(row)) * 4
+						stage = "matmul"
+						calls++
+						y := s.Backend.MatMul(weight, x)
+						owned = append(owned, y)
+						stage = "readback"
+						values := s.Backend.Read(y)
+						readback += int64(len(values)) * 4
+						if len(values) != out {
+							return nil, errV41ProjectionResult
+						}
+						if _, bad := v41BF16PublishFault(values); bad {
+							return nil, errV41ProjectionResult
+						}
+						return values, nil
+					}()
+					bodyCompleted = true
+					return result, cause
 				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
+				var err error
+				result, err = run()
+				if err != nil {
+					return nil, v41ProjectionError, closeFailure(err)
 				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
+				completed = 1
+				return result, v41ProjectionHandled, nil
 			}()
-			stage = "activation upload"
-			x := s.uploadHostF32([]int{in}, row, compute.MemoryActivation, "V4.1 Engram projection activation")
-			owned = append(owned, x)
-			upload += int64(len(row)) * 4
-			stage = "matmul"
-			calls++
-			y := s.Backend.MatMul(weight, x)
-			owned = append(owned, y)
-			stage = "readback"
-			values := s.Backend.Read(y)
-			readback += int64(len(values)) * 4
-			if len(values) != out {
-				return nil, errV41ProjectionResult
-			}
-			if _, bad := v41BF16PublishFault(values); bad {
-				return nil, errV41ProjectionResult
-			}
-			return values, nil
+			callCompleted = true
+		}()
+		if !callCompleted {
+			convert(primary)
 		}
-		var err error
-		result, err = run()
-		if err != nil {
-			return nil, v41ProjectionError, closeFailure(err)
-		}
-		completed = 1
-		return result, v41ProjectionHandled, nil
+		return result, outcome, cause
 	}
 }

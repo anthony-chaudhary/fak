@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -149,7 +150,7 @@ func RunBuildMatrix(stdout, stderr io.Writer, argv []string) int {
 				res.Verdict = "PLAN"
 				res.ElapsedMS = 0
 			} else {
-				out, err := buildwitness.RunCompileCheck("", root, plan)
+				out, err := runBuildMatrixCompileCheck("", root, plan)
 				res.ElapsedMS = time.Since(start).Milliseconds()
 				if err != nil {
 					res.Output = strings.TrimSpace(out)
@@ -201,4 +202,21 @@ func RunBuildMatrix(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// runBuildMatrixCompileCheck keeps process execution in this build-only package.
+func runBuildMatrixCompileCheck(goBin, root string, plan buildwitness.MatrixCompilePlan) (string, error) {
+	if goBin == "" {
+		var err error
+		goBin, err = exec.LookPath("go")
+		if err != nil {
+			return "", fmt.Errorf("go toolchain not on PATH: %w", err)
+		}
+	}
+	cmd := exec.Command(goBin, plan.Command...)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), plan.Env...)
+
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }

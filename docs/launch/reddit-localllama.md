@@ -30,7 +30,7 @@ Deterministic results reproduce byte-for-byte across 4 hardware platforms (Apple
 
 ## On the performance number (the honest version)
 
-You'll see "8.8–9.7x" somewhere in the repo. That is **less prefill vs a naive re-prefill baseline** on real WebVoyager (643 tasks) — and a naive re-prefill is a strawman nobody runs in production, so I won't lead with it. Against a **tuned warm-cache stack (vLLM/SGLang prefix sharing)** the honest gain is **~1.5–4x**, conservative headline **4.1x**.
+WebVoyager is a closed-form prefill-token geometry model over a real 643-task dataset with difficulty-derived turns and zero live-model runs. Across 1–8 workers it gives 8.8–9.7x versus naive re-prefill and 1.0–1.1x versus per-agent KV; these are not measured latency, cost or throughput gains. The separate Qwen2.5-1.5B Q8 50-turn × 5-agent artifact records a 4.1x total-time ratio versus per-agent KV: arms B and C are marked live, while the naive arm A is modeled. That experiment is not WebVoyager and its ratio is not a WebVoyager prefill ratio.
 
 And it only helps if you **self-host and your fleet is read-heavy** — an app that just calls a frontier API gets the safety floor, not the savings, and even ~1% writes can flip the reuse math negative. Any power/energy/$ numbers in the repo are **simulated** (no power meter on the box). The ~60x "frontier" numbers are design targets, not measurements — labeled as such.
 
@@ -52,9 +52,9 @@ Prosecuting my own claims so you don't have to dig:
 - SmolLM2-135M forward pass vs HF oracle: per-layer `cos=1.000000`, final logits `max|Δ|≈4.4e-5`
 - RadixAttention parity rebuilt over the kernel-owned cache: 77.2–88.2% hit rate; reuse-through-edge-split bit-identical to recompute (`max|Δ|=0`). SGLang baseline numbers checked against the NeurIPS 2024 paper.
 
-**The speedup, both denominators (don't quote the first alone):**
-- vs naive re-prefill: 8.8x (1 worker) → 9.7x (8 workers) less prefill on real WebVoyager (643 tasks) — strawman baseline, stated only for completeness
-- vs tuned warm-cache SOTA (vLLM/SGLang prefix sharing): **~1.5–4x, conservative headline 4.1x** — this is the real number
+**Modeled prefill ratios, both denominators (don't quote the first alone):**
+- Modeled WebVoyager, 1–8 workers: 8.8–9.7x versus naive re-prefill.
+- The same geometry model: 1.0–1.1x versus per-agent KV. Zero live-model runs; no latency, cost or throughput measurement.
 
 **Where it does nothing for you:** if you call a hosted API instead of serving the model, you get the capability lock + quarantine (security floor) and zero reuse savings. Reuse is a self-host, read-heavy-fleet win only.
 
@@ -75,7 +75,7 @@ What I changed:
 
 4. **Engine name not in ledger.** Changed "fronts Ollama/vLLM/llama.cpp" to "fronts your self-hosted engine (vLLM/llama.cpp/etc.)" — Ollama isn't in the ledger, and the ledger's operational-surface fence (one binary vs a Python/CUDA stack) was missing from the "not a faster engine" paragraph, so I added it.
 
-Every remaining number traces to the ledger and was confirmed in-repo: ~13MB / two golang.org/x deps / 4-line go.sum; SmolLM2-135M `cos=1.000000`, final-logits `max|Δ|≈4.4e-5`, KV-decode token-for-token identical; CUDA = llama.cpp Q8_0 ~120 tok/s on RTX 4070; mid-run eviction `max|Δ|=0` vs HF oracle; RadixAttention 77.2–88.2% hit rate, reuse-through-edge-split `max|Δ|=0`, SGLang vs NeurIPS 2024; WebVoyager 643 tasks, 8.8x (1 worker)→9.7x (8 workers) vs naive (confirmed in `docs/webbench-baselines.md`, `docs/FAQ.md`, `v0.27.0` release notes); tuned ~1.5–4x, conservative headline 4.1x (confirmed in `README.md`, `docs/HARDWARE-MATRIX.md`); 4 platforms / 2 CPU ISAs / 4 GPU backends / 4 OSes; ed25519 self-signed v1 cert with self-reported `EvictedCount`; detector ~100% evadable by design; 0/29 prior-art audit; simulated power/$ and ~60x labeled as design targets. The two structural fences the draft already had right — tuned-baseline-first and self-host/read-heavy-only — were preserved unchanged.
+Every remaining number traces to the ledger and was confirmed in-repo: ~13MB / two golang.org/x deps / 4-line go.sum; SmolLM2-135M `cos=1.000000`, final-logits `max|Δ|≈4.4e-5`, KV-decode token-for-token identical; CUDA = llama.cpp Q8_0 ~120 tok/s on RTX 4070; mid-run eviction `max|Δ|=0` vs HF oracle; RadixAttention 77.2–88.2% hit rate, reuse-through-edge-split `max|Δ|=0`, SGLang vs NeurIPS 2024; WebVoyager is a closed-form prefill-token geometry model over a real 643-task dataset with difficulty-derived turns and zero live-model runs. Across 1–8 workers it gives 8.8–9.7x versus naive re-prefill and 1.0–1.1x versus per-agent KV; these are not measured latency, cost or throughput gains; 4 platforms / 2 CPU ISAs / 4 GPU backends / 4 OSes; ed25519 self-signed v1 cert with self-reported `EvictedCount`; detector ~100% evadable by design; 0/29 prior-art audit; simulated power/$ and ~60x labeled as design targets. The two structural fences the draft already had right — tuned-baseline-first and self-host/read-heavy-only — were preserved unchanged.
 
 
 ---
@@ -84,7 +84,7 @@ Every remaining number traces to the ledger and was confirmed in-repo: ~13MB / t
 
 > **Provenance & fact-check.** This asset was drafted from the repo's honesty ledger (`CLAIMS.md`) and then run through an adversarial fact-check against that ledger. The reviewer's notes are preserved below as an audit trail. Every CLI command was additionally re-verified against the live `fak` binary on 2026-06-22 and normalized to the one runnable form (`preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"` → `DENY (POLICY_BLOCK)`; `search_kb` → `ALLOW`).
 
-All headline numbers (643 tasks, 8.8-9.7x naive, 4.1x tuned, ~1.5-4x range) match the ledger. Now I have everything I need. Let me assess the draft.
+The earlier pairing of WebVoyager and the 4.1x tuned headline conflated experiments. WebVoyager is a closed-form prefill-token geometry model over a real 643-task dataset with difficulty-derived turns and zero live-model runs. Across 1–8 workers it gives 8.8–9.7x versus naive re-prefill and 1.0–1.1x versus per-agent KV; these are not measured latency, cost or throughput gains. The separate Qwen2.5-1.5B Q8 50-turn × 5-agent artifact records a 4.1x total-time ratio versus per-agent KV: arms B and C are marked live, while the naive arm A is modeled. That experiment is not WebVoyager and its ratio is not a WebVoyager prefill ratio.
 
 The draft is mostly clean and honest — it leads with the tuned baseline, keeps every fence, labels projections. But there are **three real defects**, one of them launch-killing:
 

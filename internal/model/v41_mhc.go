@@ -190,7 +190,13 @@ func v41MHCMixLeaf(leaf string) bool {
 // The pinned model's residuals, sublayer results and hc_pre/hc_post publications
 // are BF16. Keep coefficients and arithmetic F32; own every rounded publication.
 func v41MHCBF16(layer int, values []float32) ([]float32, error) {
-	out := make([]float32, len(values))
+	return v41MHCBF16Into(layer, make([]float32, len(values)), values)
+}
+
+// v41MHCBF16Into may round in place only when its caller owns the entire row.
+// out must have len(values). The allocating wrapper above retains the
+// borrowed-input publication contract.
+func v41MHCBF16Into(layer int, out, values []float32) ([]float32, error) {
 	for i, v := range values {
 		out[i] = v41RoundBF16(v)
 		if !finite32(v) || !finite32(out[i]) {
@@ -206,7 +212,10 @@ func v41FullInitialStreams(x []float32) ([][]float32, error) {
 		return nil, err
 	}
 	streams := make([][]float32, 4)
-	for h := range streams {
+	if len(row) != 0 {
+		streams[0] = row
+	}
+	for h := 1; h < len(streams); h++ {
 		streams[h] = append([]float32(nil), row...)
 	}
 	return streams, nil
@@ -217,7 +226,7 @@ func v41MHCPreBF16(layer int, streams [][]float32, pre []float32) ([]float32, er
 	if err != nil {
 		return nil, v41StageErr(v41StageMHC, layer, err)
 	}
-	return v41MHCBF16(layer, row)
+	return v41MHCBF16Into(layer, row, row)
 }
 
 func v41MHCPostBF16(layer int, x []float32, streams [][]float32, mix v41MHCMix) ([][]float32, error) {
@@ -230,7 +239,7 @@ func v41MHCPostBF16(layer int, x []float32, streams [][]float32, mix v41MHCMix) 
 		return nil, v41StageErr(v41StageMHC, layer, err)
 	}
 	for h := range next {
-		next[h], err = v41MHCBF16(layer, next[h])
+		next[h], err = v41MHCBF16Into(layer, next[h], next[h])
 		if err != nil {
 			return nil, err
 		}

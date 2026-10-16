@@ -43,7 +43,7 @@ func TestVulkanArgmaxBatchFlush(t *testing.T) {
 			t.Fatal(err)
 		}
 		digest := sha256.Sum256(raw)
-		if len(os.Getenv(file.env)) != 64 || hex.EncodeToString(digest[:]) != os.Getenv(file.env) {
+		if len(os.Getenv(file.env)) != hex.EncodedLen(len(digest)) || hex.EncodeToString(digest[:]) != os.Getenv(file.env) {
 			t.Fatalf("unpinned native source: %s", file.name)
 		}
 		if err := os.WriteFile(filepath.Join(tmp, file.name), raw, 0600); err != nil {

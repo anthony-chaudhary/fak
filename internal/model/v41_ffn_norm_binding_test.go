@@ -7,21 +7,25 @@ import (
 
 // fak-test:runtime fast est=1ms lane=default
 func TestV41OwnedFFNCollapseSingleConsumption(t *testing.T) {
-	flat := make([]float32, 64)
-	carrier := newV41OwnedFFNCollapse(nil, flat, 4, 16)
+	const rows, width = 4, 16
+	flat := make([]float32, rows*width)
+	carrier := newV41OwnedFFNCollapse(nil, flat, rows, width)
 	copied := *carrier
-	if &carrier.rows[0][0] != &flat[0] || &carrier.rows[3][0] != &flat[48] {
-		t.Fatal("carrier copied/reconstructed storage")
+	if len(carrier.rows) != rows {
+		t.Fatal("carrier row count differs from requested shape")
 	}
-	for _, row := range carrier.rows {
-		if len(row) != 16 || cap(row) != 16 {
+	for i, row := range carrier.rows {
+		if len(row) != width || cap(row) != width {
 			t.Fatal("uncapped row")
+		}
+		if &row[0] != &flat[i*width] {
+			t.Fatal("carrier copied/reconstructed storage")
 		}
 	}
 	if !carrier.state.loopClaimed.CompareAndSwap(false, true) || copied.state.loopClaimed.CompareAndSwap(false, true) {
 		t.Fatal("copied carrier granted second consumption")
 	}
-	carrier.state.flat[16] = 7
+	carrier.state.flat[width] = 7
 	if copied.rows[1][0] != 7 || carrier.rows[0][0] != 0 || carrier.rows[2][0] != 0 {
 		t.Fatal("chunk view not isolated")
 	}

@@ -39,6 +39,15 @@ type serveSizingTierRollup struct {
 	VRAMBytes int64 `json:"vram_bytes"`
 }
 
+// serveSizingStartup is a header-derived weights-load estimate, separate from
+// the steady demand rollup. It is neither measured RSS nor the optional complete
+// session-state reservation envelope. Other load arms leave this projection absent.
+type serveSizingStartup struct {
+	Scope       string `json:"scope"`
+	SteadyBytes int64  `json:"steady_bytes"`
+	PeakBytes   int64  `json:"peak_bytes"`
+}
+
 // serveSizingPool reports one finite capacity pool and the usable budget the fit
 // check would size against (the same BudgetAfterHeadroom number, so an emitted
 // usable_bytes provably matches a later admission). CapacityKnown=false means the
@@ -68,6 +77,7 @@ type serveSizingArtifact struct {
 	NativeContextSource         string                 `json:"native_context_source"`
 	Demands                     []serveSizingDemandRow `json:"demands"`
 	Tiers                       serveSizingTierRollup  `json:"tiers"`
+	Startup                     *serveSizingStartup    `json:"startup,omitempty"`
 	Pools                       []serveSizingPool      `json:"pools"`
 	Warnings                    []string               `json:"warnings"`
 }
@@ -219,6 +229,14 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		Headroom:      serveGGUFHostHeadroom,
 		UsableBytes:   max(hostFit.avail(), 0),
 	})
+	var startup *serveSizingStartup
+	if useMetal && selectedArm == serveLoadArmQuantProfileQ8 && os.Getenv("FAK_STREAM_Q4K") != "1" && os.Getenv("FAK_METAL_STREAM_Q4K") != "1" {
+		// The native weights reservation uses this same selected Q8 plan total
+		// and shared peak estimator. Streaming has a separately qualified policy.
+		var startupWarnings []string
+		startup, startupWarnings = serveSizingMetalQ8Startup(weights.Total(), hostTotal, hostKnown, hostFit)
+		warnings = append(warnings, startupWarnings...)
+	}
 
 	armLabel := serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm)
 	if pq2Checkpoint && be == nil && selectedArm == serveLoadArmResidentQ4K {
@@ -235,9 +253,26 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		NativeContextSource:         resolution.Source,
 		Demands:                     rows,
 		Tiers:                       tiers,
+		Startup:                     startup,
 		Pools:                       pools,
 		Warnings:                    warnings,
 	}, nil
+}
+
+func serveSizingMetalQ8Startup(steady, hostTotal int64, hostKnown bool, fit serveFitBudget) (*serveSizingStartup, []string) {
+	peak, _ := metalServeStartupPeakBytes(serveLoadArmQuantProfileQ8, steady, 0, false)
+	if peak <= 0 {
+		return nil, []string{"Metal Q8 weights startup estimate unavailable; inspect the native startup plan before loading"}
+	}
+	startup := &serveSizingStartup{Scope: "metal-q8-weights-only", SteadyBytes: steady, PeakBytes: peak}
+	var warnings []string
+	if hostKnown && hostTotal > 0 && peak > hostTotal {
+		warnings = append(warnings, fmt.Sprintf("Metal Q8 weights startup peak %d bytes exceeds host capacity %d bytes; select another load arm or a larger-memory host", peak, hostTotal))
+	}
+	if fit.Base > 0 && peak > fit.avail() {
+		warnings = append(warnings, fmt.Sprintf("Metal Q8 weights startup peak %d bytes exceeds usable host budget %d bytes; steady RAM alone does not establish startup fit", peak, fit.avail()))
+	}
+	return startup, warnings
 }
 
 // runServeSizingJSON is the --plan-json early-exit body: resolve the backend the way
