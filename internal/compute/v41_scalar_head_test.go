@@ -147,7 +147,7 @@ func TestV41ScalarHeadCompositionContract(t *testing.T) {
 	}
 	shim := read("vulkan_shim.cpp")
 	require(shim,
-		"g_batchCmd = g_stepBatch ? v41BeginCmdChecked() : beginCmd();\n\tif (g_batchCmd == VK_NULL_HANDLE) return;",
+		"g_batchCmd = g_batchIdleCmd != VK_NULL_HANDLE ? beginReusedBatchCommand() :\n        (g_stepBatch ? v41BeginCmdChecked() : beginCmd());\n\tif (g_batchCmd == VK_NULL_HANDLE) return;",
 		"const bool checkedV41 = forceChecked || g_stepBatch ||",
 		"DescriptorSetRecord rec = acquireDescriptorSet(k, checkedV41);",
 		"g_submissionStatus = allocated < VK_SUCCESS ? allocated : VK_ERROR_UNKNOWN;",

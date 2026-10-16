@@ -1280,9 +1280,11 @@ void submitWait(VkCommandBuffer cmd) {
     VKCHECK(vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX));
 }
 
+// Only a completed batch may transfer its command to the batch-local idle slot.
+bool retainCompletedBatchCommand(VkCommandBuffer cmd);
 void endSubmitWait(VkCommandBuffer cmd) {
     submitWait(cmd);
-    vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    if (!retainCompletedBatchCommand(cmd)) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
 }
 
 VkCommandBuffer v41BeginCmdChecked() {
@@ -1325,7 +1327,10 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
             if (r != VK_SUCCESS) g_v41SubmissionPendingFailure = true;
         }
     }
-    if (!g_v41SubmissionPendingFailure) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    if (!g_v41SubmissionPendingFailure &&
+        !(r == VK_SUCCESS && submit && retainCompletedBatchCommand(cmd))) {
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    }
     if (r != VK_SUCCESS) {
         // Positive VkResult values (notably VK_TIMEOUT=2) must not collide with
         // this entrypoint's positive geometry/capability statuses.
@@ -1386,6 +1391,60 @@ void restoreCleanup() {
 // in g_batchSets and freed after the single submit. g_batchOps counts recorded ops so an
 // empty flush is a cheap no-op.
 VkCommandBuffer               g_batchCmd  = VK_NULL_HANDLE;
+// Drained command reuse, adapted from ggml's completed command-pool recycling:
+// ggml-org/llama.cpp 5e03a1ff450cae37a774684de55d14fb48b1f90b,
+// ggml/src/ggml-vulkan/ggml-vulkan.cpp:1114-1137 (MIT).
+// Copyright (c) 2023-2026 The ggml authors. See THIRD_PARTY_NOTICES.md.
+// Reset one buffer, never the shared pool: restore and one-shot commands have
+// independent ownership. This slot is separate from the active batch census.
+VkCommandBuffer g_batchIdleCmd = VK_NULL_HANDLE;
+VkDevice g_batchIdleDevice = VK_NULL_HANDLE;
+VkCommandPool g_batchIdlePool = VK_NULL_HANDLE;
+bool retainCompletedBatchCommand(VkCommandBuffer cmd) {
+    if (!g_batching || cmd != g_batchCmd || g_v41SubmissionPendingFailure ||
+        g_batchIdleCmd != VK_NULL_HANDLE) return false;
+    // batchFlush clears the active alias before any subsequent batchBegin.
+    g_batchIdleCmd = cmd;
+    g_batchIdleDevice = g_dev;
+    g_batchIdlePool = g_cmdpool;
+    return true;
+}
+void discardIdleBatchCommand() {
+    if (g_v41SubmissionPendingFailure) return;
+    if (g_batchIdleCmd != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(g_batchIdleDevice, g_batchIdlePool, 1, &g_batchIdleCmd);
+    }
+    g_batchIdleCmd = VK_NULL_HANDLE;
+    g_batchIdleDevice = VK_NULL_HANDLE;
+    g_batchIdlePool = VK_NULL_HANDLE;
+}
+VkCommandBuffer beginReusedBatchCommand() {
+    // The slot has a successful fence proof, but belongs only to its original
+    // device and pool. Observation-generation metadata is not execution policy.
+    if (g_batchIdleDevice != g_dev || g_batchIdlePool != g_cmdpool) {
+        g_submissionStatus = VK_ERROR_UNKNOWN;
+        return VK_NULL_HANDLE;
+    }
+    VkResult r = vkResetCommandBuffer(g_batchIdleCmd, 0);
+    if (r == VK_SUCCESS) {
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        r = vkBeginCommandBuffer(g_batchIdleCmd, &bi);
+    }
+    if (r != VK_SUCCESS) {
+        g_submissionStatus = r < VK_SUCCESS ? r : VK_ERROR_UNKNOWN;
+        if (r == VK_ERROR_DEVICE_LOST) g_v41SubmissionPendingFailure = true;
+        // Ordinary errors cannot make this unsubmitted command pending. Device
+        // loss instead retains the handle with all context owners until exit.
+        discardIdleBatchCommand();
+        return VK_NULL_HANDLE;
+    }
+    const VkCommandBuffer cmd = g_batchIdleCmd;
+    g_batchIdleCmd = VK_NULL_HANDLE;
+    g_batchIdleDevice = VK_NULL_HANDLE;
+    g_batchIdlePool = VK_NULL_HANDLE;
+    return cmd;
+}
 std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
 int                           g_batchOps  = 0;
@@ -1577,10 +1636,11 @@ void tsBatchCollect() {
 }
 
 void batchBegin() {
-	if (g_v41SubmissionPendingFailure) return;
+	if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return;
 	if (g_batching) return;          // already recording — the model brackets each token
 	// A V4.1 window must latch command allocation/begin failures, not abort.
-	g_batchCmd = g_stepBatch ? v41BeginCmdChecked() : beginCmd();
+	g_batchCmd = g_batchIdleCmd != VK_NULL_HANDLE ? beginReusedBatchCommand() :
+        (g_stepBatch ? v41BeginCmdChecked() : beginCmd());
 	if (g_batchCmd == VK_NULL_HANDLE) return;
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
@@ -1750,7 +1810,7 @@ int stepRecordReadback(void* host, Buffer* src, size_t bytes) {
         g_transferCountersValid = false;
     }
     batchBegin();
-    return VK_SUCCESS;
+    return (int)g_submissionStatus;
 }
 
 // An operation that owns its own command buffer never joins a batch. Inside a
@@ -3503,6 +3563,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // A re-init is not a device teardown and cannot establish quiescence. Keep
     // the poisoned context and its loaded capability bound until process exit.
     if (g_v41SubmissionPendingFailure) return 9;
+    discardIdleBatchCommand(); // release against the old owning device/pool before re-init
     beginMemoryDeviceGeneration();
     g_have_v41_tail_rope_qk = 0;
 #ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
@@ -4741,7 +4802,7 @@ int fvk_batch_flush_status(void) {
     fvk_batch_flush();
     const int status = (int)g_submissionStatus;
     if (status == VK_SUCCESS && g_stepBatch) batchBegin();
-    return status;
+    return (int)g_submissionStatus;
 }
 bool fvk_batch_foreign_active(void) { return g_batching && !g_stepBatch; }
 int fvk_v41_step_batch_begin(void) {
@@ -4751,7 +4812,10 @@ int fvk_v41_step_batch_begin(void) {
     g_stepBatch = true;
     g_batchHazardsArmed = 0;
     batchBegin();
-    if (!g_batching) { g_stepBatch = false; return 1; }
+    if (!g_batching) {
+        g_stepBatch = false;
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 1;
+    }
     return 0;
 }
 int fvk_v41_step_batch_end(void) {
