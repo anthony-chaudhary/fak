@@ -166,26 +166,31 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 // Both session hits and model-owned borrowed hits have already staged these bytes.
 func (s *Session) v41GroupedPanelWeight(key string, source v41GroupedWeight, offset, out, in int) (weight compute.Tensor, err error) {
 	var payload error
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			if recovered == &payload {
-				weight, err = compute.Tensor{}, payload
-				return
+	var recovered any
+	completed := false
+	func() {
+		defer func() { recovered = recover() }()
+		weight = s.cachedImmutableWeight(key, key, func() compute.Tensor {
+			host, cause := source.host(offset, out, in)
+			if cause != nil {
+				// The staging callback cannot return an error. Unwind its cache
+				// lock without publishing a failed handle, then return the original
+				// error to the selected-call boundary. Backend panics pass through.
+				payload = cause
+				panic(&payload)
 			}
-			panic(recovered)
-		}
+			return s.Backend.Upload(host, source.dtype)
+		})
+		completed = true
 	}()
-	weight = s.cachedImmutableWeight(key, key, func() compute.Tensor {
-		host, cause := source.host(offset, out, in)
-		if cause != nil {
-			// The staging callback cannot return an error. Unwind its cache
-			// lock without publishing a failed handle, then return the original
-			// error to the selected-call boundary. Backend panics pass through.
-			payload = cause
-			panic(&payload)
+	if !completed {
+		if recovered == &payload {
+			return compute.Tensor{}, payload
 		}
-		return s.Backend.Upload(host, source.dtype)
-	})
+		// Only the private error sentinel is converted. A legacy nil panic
+		// must reach the selected boundary; Goexit never returns from capture.
+		panic(recovered)
+	}
 	return weight, nil
 }
 
