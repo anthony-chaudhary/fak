@@ -715,12 +715,18 @@ func RDNA35_GEMV(M, K int, A_bf16 []uint16, x_f32 []float32) ([]float32, error) 
 
 // VerifyNumericalParity checks that candidate matches reference with cosine similarity >= minCosine.
 func VerifyNumericalParity(reference []float32, candidate []float32, minCosine float64) (similarity float64, ok bool, err error) {
+	if math.IsNaN(minCosine) || math.IsInf(minCosine, 0) {
+		return 0, false, fmt.Errorf("%w: minimum cosine must be finite", ErrCosineParityViolation)
+	}
 	if minCosine <= 0 {
 		minCosine = 0.9999
 	}
 	sim, err := CosineSimilarity(reference, candidate)
 	if err != nil {
 		return 0, false, err
+	}
+	if math.IsNaN(sim) || math.IsInf(sim, 0) {
+		return 0, false, fmt.Errorf("%w: achieved cosine is nonfinite", ErrCosineParityViolation)
 	}
 	if sim < minCosine {
 		return sim, false, fmt.Errorf("%w: achieved %.6f, minimum required %.6f", ErrCosineParityViolation, sim, minCosine)

@@ -344,3 +344,44 @@ func TestComputeHAL_RooflineAndStreamingAnalytics(t *testing.T) {
 		t.Errorf("expected ErrBusSaturation when exceeding 256 GB/s ceiling, got %v", err)
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestComputeHAL_NumericalParityRejectsNonfinite(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		reference, candidate []float32
+		threshold            float64
+	}{
+		{"reference_nan", []float32{float32(math.NaN())}, []float32{1}, .9999},
+		{"candidate_nan", []float32{1}, []float32{float32(math.NaN())}, .9999},
+		{"equal_positive_infinity", []float32{float32(math.Inf(1))}, []float32{float32(math.Inf(1))}, .9999},
+		{"candidate_negative_infinity", []float32{1}, []float32{float32(math.Inf(-1))}, .9999},
+		{"threshold_nan", []float32{1}, []float32{-1}, math.NaN()},
+		{"threshold_positive_infinity", []float32{1}, []float32{1}, math.Inf(1)},
+		{"threshold_negative_infinity", []float32{1}, []float32{1}, math.Inf(-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sim, ok, err := VerifyNumericalParity(tc.reference, tc.candidate, tc.threshold)
+			if ok || !errors.Is(err, ErrCosineParityViolation) || math.IsNaN(sim) || math.IsInf(sim, 0) {
+				t.Fatalf("similarity=%g ok=%v error=%v; want finite failed parity", sim, ok, err)
+			}
+		})
+	}
+	t.Run("finite_controls", func(t *testing.T) {
+		for _, threshold := range []float64{1, .9999, 0, -1} {
+			sim, ok, err := VerifyNumericalParity([]float32{1}, []float32{1}, threshold)
+			if err != nil || !ok || sim != 1 {
+				t.Fatalf("threshold=%g similarity=%g ok=%v error=%v", threshold, sim, ok, err)
+			}
+		}
+		if _, ok, err := VerifyNumericalParity([]float32{1}, []float32{-1}, .9999); ok || !errors.Is(err, ErrCosineParityViolation) {
+			t.Fatalf("finite mismatch ok=%v error=%v", ok, err)
+		}
+		if _, ok, err := VerifyNumericalParity([]float32{1}, nil, .9999); ok || !errors.Is(err, ErrDimensionMismatch) {
+			t.Fatalf("length mismatch ok=%v error=%v", ok, err)
+		}
+		if _, ok, err := VerifyNumericalParity(nil, nil, .9999); ok || !errors.Is(err, ErrInvalidDimensions) {
+			t.Fatalf("empty input ok=%v error=%v", ok, err)
+		}
+	})
+}
