@@ -539,7 +539,12 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 				for i := 0; i < H; i++ {
 					// Keep the product F32 until after residual addition, then publish BF16.
 					delta := float32(gate * value[i])
-					stream[i] = v41BF16(float32(stream[i] + delta))
+					published := v41BF16(float32(stream[i] + delta))
+					if !finite32(published) {
+						return gatheredRows, v41StageErr(v41StageEngram, l,
+							fmt.Errorf("%w: Engram full residual [%d][%d][%d] is non-finite", ErrV41NativeUnsupported, t, s, i))
+					}
+					stream[i] = published
 				}
 			} else {
 				for i := 0; i < H; i++ {
@@ -552,7 +557,12 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 			copy(x[t], streams[t][0])
 		} else {
 			for i := 0; i < H; i++ {
-				h[i] += acc[i]
+				published := h[i] + acc[i]
+				if !finite32(published) {
+					return gatheredRows, v41StageErr(v41StageEngram, l,
+						fmt.Errorf("%w: Engram reduced residual [%d][%d] is non-finite", ErrV41NativeUnsupported, t, i))
+				}
+				h[i] = published
 			}
 		}
 	}
