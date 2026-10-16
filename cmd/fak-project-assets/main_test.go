@@ -99,10 +99,11 @@ func TestRunParityThenSyncClosesGaps(t *testing.T) {
 		t.Fatalf("parity after sync: exit = %d, want 0", code)
 	}
 	lines := strings.Split(strings.TrimSpace(text.String()), "\n")
-	if len(lines) != 5 || !strings.HasPrefix(lines[0], "PROJECT_ASSETS zero_unexplained_gaps=true ") {
+	wantHarnesses := []string{"claude", "codex", "fak-native", "opencode"}
+	if len(lines) != 1+len(wantHarnesses) || !strings.HasPrefix(lines[0], "PROJECT_ASSETS zero_unexplained_gaps=true ") {
 		t.Fatalf("text receipt shape:\n%s", text.String())
 	}
-	for i, h := range []string{"claude", "codex", "fak-native", "opencode"} {
+	for i, h := range wantHarnesses {
 		if !strings.HasPrefix(lines[i+1], h+" canonical=") {
 			t.Fatalf("line %d = %q, want %s harness row", i+1, lines[i+1], h)
 		}

@@ -43,7 +43,7 @@ func TestVulkanQualifiedDownChunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(module) != 2768 || !vulkanQualifiedHash(module, "a73eb3056a058e058556825254ce9de65e92eba7f3aec946718e272d978ec674") {
+	if !bytes.Equal(module, qualifiedHeaderBytesForRelation(t, header)) || !vulkanQualifiedHash(module, "a73eb3056a058e058556825254ce9de65e92eba7f3aec946718e272d978ec674") {
 		t.Fatal("qualified module differs")
 	}
 	for _, pair := range [][2][]byte{{bytes.ReplaceAll(source, []byte("\n"), []byte("\r\n")), header}, {source, bytes.ReplaceAll(header, []byte("\n"), []byte("\r\n"))}, {append(append([]byte(nil), source...), 0), header}, {source, header[:len(header)-1]}, {source, bytes.Replace(header, []byte("0x03"), []byte("0x02"), 1)}} {
@@ -81,13 +81,19 @@ func TestVulkanQualifiedDownChunk(t *testing.T) {
 
 // fak-test:runtime fast est=5ms
 func TestVulkanReceiptV25DownChunk(t *testing.T) {
-	want := append(vulkanRegistryV24.stems(), "v41_routed_down_panel_chunk")
-	if len(want) != 88 || !reflect.DeepEqual(want, vulkanRegistryV25.stems()) {
+	previous := vulkanRegistryV24.stems()
+	for _, existing := range previous {
+		if existing == "v41_routed_down_panel_chunk" {
+			t.Fatal("new qualified module already in predecessor registry")
+		}
+	}
+	want := append(previous, "v41_routed_down_panel_chunk")
+	if !reflect.DeepEqual(want, vulkanRegistryV25.stems()) {
 		t.Fatal("V25 membership differs")
 	}
 	id, err := vulkanRegistryV25.identity()
 	schema := VulkanBuildReceiptSchemaV25
-	if err != nil || schema != VulkanBuildReceiptSchemaV25 || id.ID != VulkanShaderRegistryV25ID || id.ModuleCount != 88 {
+	if err != nil || schema != VulkanBuildReceiptSchemaV25 || id.ID != VulkanShaderRegistryV25ID || id.ModuleCount != len(want) {
 		t.Fatal("V25 identity differs")
 	}
 	if vulkanRegistryV24.validateStems(want) == nil || vulkanRegistryV25.validateStems(vulkanRegistryV24.stems()) == nil {

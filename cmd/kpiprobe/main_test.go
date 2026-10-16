@@ -4,7 +4,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/rsiloop"
@@ -36,12 +35,15 @@ func TestRunDumpPrintsSixteenPointCurve(t *testing.T) {
 	if code := run([]string{"--dump"}, &out, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 17 || !strings.HasPrefix(lines[0], "# lru_hit_rate") {
-		t.Fatalf("dump shape = %d lines, header %q", len(lines), lines[0])
+	var want bytes.Buffer
+	fmt.Fprintf(&want, "# lru_hit_rate over %d accesses\n", rsiloop.TraceLen())
+	// The advertised dump domain is sizes 1..16. Require every measured row,
+	// including its order and formatting, rather than freezing the line count.
+	for size := 1; size <= 16; size++ {
+		fmt.Fprintf(&want, "size=%2d KPI=%.6f\n", size, rsiloop.HitRate(size))
 	}
-	if want := fmt.Sprintf("size=16 KPI=%.6f", rsiloop.HitRate(16)); lines[16] != want {
-		t.Fatalf("last row = %q, want %q", lines[16], want)
+	if out.String() != want.String() {
+		t.Fatalf("dump = %q, want %q", out.String(), want.String())
 	}
 }
 
