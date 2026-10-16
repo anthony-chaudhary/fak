@@ -50,10 +50,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// maxInt is used by the attention option builders below; it is defined in
-// v41_forward.go for the full-sequence path and reused here so the two call
-// sites cannot drift.
-
 // v41LayerStep advances one plain layer by exactly one position. x is the SINGLE
 // current hidden row (length cfg.HiddenSize) and is updated in place. streams is
 // the position's four persistent mHC streams and is updated in place. pos is the
@@ -80,31 +76,17 @@ func (m *Model) v41LayerStepWithRegistry(l int, x []float32, streams [][]float32
 	return work.complete(nil)
 }
 
-func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) (work *v41LayerStepWork, err error) {
+func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) (*v41LayerStepWork, error) {
 	cfg := m.Cfg
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
-	if len(x) != cfg.HiddenSize {
-		return nil, v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: layer step hidden row has %d values, want %d", ErrV41ForwardStage, len(x), cfg.HiddenSize))
+	if err := v41CheckLayerStepRows(cfg, l, x, streams); err != nil {
+		return nil, err
 	}
-	if len(streams) != 4 {
-		return nil, v41StageErr(v41StageMHC, l,
-			fmt.Errorf("%w: layer step carries %d mHC streams, want 4", ErrV41ForwardStage, len(streams)))
-	}
-	for s := range streams {
-		if len(streams[s]) != cfg.HiddenSize {
-			return nil, v41StageErr(v41StageMHC, l,
-				fmt.Errorf("%w: layer step stream %d has %d values, want %d", ErrV41ForwardStage, s, len(streams[s]), cfg.HiddenSize))
-		}
-	}
-
-	// Resolve the layer's execution plan and refuse everything that is not a
-	// plain per-layer contraction BEFORE touching any state. A compressed ratio
-	// (CED/CSA2 pooling) or a shared-source/readere role contracts a different KV
-	// stream; silently running the per-layer window path for those would emit
-	// logits for a schedule the checkpoint never declared.
+	// A compressed ratio or a shared-source/reader role contracts a different KV
+	// stream; running the per-layer window path for it would emit logits for a
+	// schedule the checkpoint never declared.
 	plan, err := v41AttentionPlanFor(cfg, l, m.v41AttentionRolesCached())
 	if err != nil {
 		return nil, err
@@ -119,420 +101,30 @@ func (m *Model) prepareV41LayerStepWithRegistry(l int, x []float32, streams [][]
 	if plan.Role != V41AttentionRolePerLayer || plan.Ratio > 0 {
 		return m.prepareV41LayerStepRole(l, plan, x, streams, pos, layerState, registry, scratch)
 	}
-	// Append-only: the step position must be the next retained position. This
-	// refuses a caller that skipped or replayed history instead of silently
-	// producing a token from a wrong causal context.
 	if pos != layerState.nextWindowPos {
 		return nil, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d step position %d is not the next retained position %d",
 				ErrV41ForwardStage, l, pos, layerState.nextWindowPos))
 	}
+	return m.prepareV41PlainLayerStep(l, x, streams, pos, layerState, scratch)
+}
 
-	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
-	eps := float32(cfg.RMSNormEps)
-	full, err := v41ForwardGeometry(cfg)
-	if err != nil {
-		return nil, err
+func v41CheckLayerStepRows(cfg Config, l int, x []float32, streams [][]float32) error {
+	if len(x) != cfg.HiddenSize {
+		return v41StageErr(v41StageAttention, l,
+			fmt.Errorf("%w: layer step hidden row has %d values, want %d", ErrV41ForwardStage, len(x), cfg.HiddenSize))
 	}
-
-	var mhcDevice *v41MHCDevice
-	if full {
-		if err := scratch.mhcCarry.validate(l, 1); err != nil {
-			return nil, err
-		}
-		if err := m.v41AdmitMHC(l); err != nil {
-			return nil, err
-		}
-		mhcDevice = scratch.mhcCarry.device
+	if len(streams) != 4 {
+		return v41StageErr(v41StageMHC, l,
+			fmt.Errorf("%w: layer step carries %d mHC streams, want 4", ErrV41ForwardStage, len(streams)))
 	}
-	var resident *v41MHCResident
-	if full {
-		resident = scratch.mhcCarry.resident
-	}
-	if resident != nil {
-		defer func() {
-			if work == nil {
-				resident.abort()
-			}
-		}()
-	}
-	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
-	mixBase := m.tensor(layerName(l, "mhc.base"))
-	mixScale := m.tensor(layerName(l, "mhc.scale"))
-	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
-	for _, leaf := range []string{
-		"attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight",
-		"ffn.gate.weight",
-		"ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight",
-		"ffn.shared_experts.w2.weight",
-	} {
-		if !m.hasResidentWeight(layerName(l, leaf)) {
-			return nil, v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, layerName(l, leaf)))
+	for s := range streams {
+		if len(streams[s]) != cfg.HiddenSize {
+			return v41StageErr(v41StageMHC, l,
+				fmt.Errorf("%w: layer step stream %d has %d values, want %d", ErrV41ForwardStage, s, len(streams[s]), cfg.HiddenSize))
 		}
 	}
-	sink := m.tensor(layerName(l, "attn.sink"))
-	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
-
-	// ---- mHC coefficient split (one position) ----
-	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
-	if !mhcOK {
-		return nil, v41StageErr(v41StageMHC, l,
-			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
-	}
-	var xn []float32
-	var mix v41MHCMix
-	var collapsed []float32
-	if resident != nil {
-		rows, rerr := resident.beginLayer(l, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
-		if rerr != nil {
-			return nil, rerr
-		}
-		collapsed = rows[0]
-	} else {
-		if !full {
-			xn = rmsnormCfg(x, attnNorm, eps, cfg)
-		}
-		input := xn
-		if mhcFlat {
-			width, ok := checkedMulInt(4, H)
-			if !ok || len(streams) != 4 {
-				return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
-			}
-			input = make([]float32, 0, width)
-			for _, stream := range streams {
-				if len(stream) != H {
-					return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
-				}
-				input = append(input, stream...)
-			}
-		}
-		projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
-		mixes, err := projectMHC(input)
-		if err != nil {
-			return nil, err
-		}
-		mix, err = v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
-		if err != nil {
-			return nil, err
-		}
-		// The pre-collapse reads the four DISTINCT persistent streams on the full
-		// path and the reduced stand-in (four identical copies of the normalized
-		// input) on the reduced path -- byte-identical to v41Layer's seq==1 branch.
-		streams4 := streams
-		if !full {
-			streams4 = [][]float32{xn, xn, xn, xn}
-		}
-		pre := mix.pre
-		if full {
-			pre = scratch.mhcCarry.pre[0]
-		}
-		if mhcDevice != nil {
-			collapsed, err = mhcDevice.preBF16(l, streams4, pre)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			collapsed, err = v41MHCPre(streams4, pre)
-			if err != nil {
-				return nil, v41StageErr(v41StageMHC, l, err)
-			}
-		}
-	}
-	var qLat []float32
-	prefixHandled := false
-	if full {
-		if scratch.queryPrefix != nil {
-			var nextCollapsed []float32
-			nextCollapsed, qLat, prefixHandled, err = scratch.queryPrefix(l, collapsed)
-			if err != nil {
-				return nil, err
-			}
-			if prefixHandled {
-				collapsed = nextCollapsed
-			}
-		}
-		if !prefixHandled {
-			collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNormFunc(), scratch.attentionBF16Func())
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// ---- attention for the one position ----
-	ropeDim := cfg.QKRopeHeadDim
-	if ropeDim <= 0 || ropeDim%2 != 0 || ropeDim > hd {
-		return nil, v41StageErr(v41StageAttention, l,
-			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
-	}
-	if !prefixHandled {
-		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection())
-		if err != nil {
-			return nil, err
-		}
-		if full {
-			if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm.normFunc(), scratch.gatherOps.bf16PublishFunc()); err != nil {
-				return nil, err
-			}
-		}
-	}
-	scratch.activationTrace.record(l, pos, v41TraceStageQLatent, qLat)
-	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection())
-	if err != nil {
-		return nil, err
-	}
-	var kv []float32
-	if full {
-		if hd > v41KVLoraRank {
-			return nil, v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
-		}
-		kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection())
-		if err != nil {
-			return nil, err
-		}
-		kv = kvFull[:hd]
-	} else {
-		kv, err = m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, hd, H, scratch.denseProjection())
-		if err != nil {
-			return nil, err
-		}
-	}
-	if full {
-		if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
-			return nil, err
-		}
-	}
-	cos, sin := v41RopeTableForLayer(cfg, l, pos)
-	scratch.activationTrace.record(l, pos, v41TraceStageKVLatent, kv)
-	q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
-	if err != nil {
-		return nil, err
-	}
-
-	// The ordered absolute key-row IDs this position attends under leaf 13's
-	// configured-window semantics, intersected with what the retained ring
-	// actually holds. The ring is a fixed `windowSize`-row circular buffer and
-	// `nextWindowPos` is the count of appended rows, so the populated tail after
-	// any number of Prefill/Step calls is exactly min(nextWindowPos, windowSize)
-	// rows ending at nextWindowPos. That tail is derived HERE from the ring
-	// occupancy rather than from V41AttentionState.retainedWindowRows (which
-	// seedTemporal sets but the incremental Step does not grow), so a
-	// multi-step decode sees the correct retained prefix.
-	windowKeys := v41PlainWindowKeys(pos, cfg.windowForLayer(l))
-	retainedRows := layerState.retainedTailRowCount()
-	// Fail closed whenever the configured visible key set is not fully retained.
-	// That covers a GLOBAL (non-positive-window) layer whose causal prefix has
-	// outgrown the fixed ring, AND a LOCAL layer configured with a window wider
-	// than the ring. In either case the oldest visible keys are gone, and
-	// silently contracting the surviving tail would emit logits from a truncated
-	// context the checkpoint never declared. Refuse before the KV row is
-	// committed. `windowKeys` is [lo..pos], so its oldest key is windowKeys[0];
-	// if that key predates the retained tail's first row the window is not
-	// covered.
-	if len(windowKeys) > 0 {
-		retainedLoKey := pos - retainedRows
-		if firstVisible := int(windowKeys[0]); firstVisible < retainedLoKey {
-			return nil, v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: layer %d cannot step position %d from a %d-row retained ring: visible keys [%d,%d] are not fully retained (oldest %d < %d)",
-					ErrV41ForwardStage, l, pos, retainedRows, firstVisible, int(windowKeys[len(windowKeys)-1]), firstVisible, retainedLoKey))
-		}
-	}
-	// Build the ordered visible key set: because pos is append-only, retained
-	// rows are exactly the suffix of windowKeys already available, in ascending
-	// order, followed by the current position.
-	visibleKeys := make([]int32, 0, len(windowKeys))
-	retainedLo := pos - retainedRows
-	for _, k := range windowKeys {
-		if int(k) < pos {
-			if int(k) < retainedLo {
-				continue
-			}
-			visibleKeys = append(visibleKeys, k)
-		} else {
-			// pos itself, appended below.
-			visibleKeys = append(visibleKeys, int32(pos))
-		}
-	}
-	if len(visibleKeys) == 0 {
-		// Defensive: a non-negative pos always yields at least itself.
-		visibleKeys = append(visibleKeys, int32(pos))
-	}
-
-	// Copy directly from the live ring into one owned payload. The ring is not
-	// advanced until this layer succeeds; no borrowed row reaches a callback.
-	flatKV, err := layerState.stepWindowKV(l, pos, visibleKeys, kv)
-	if err != nil {
-		return nil, err
-	}
-	idx := v41PlainWindowIndexList(visibleKeys)
-	scale := cfg.attnScale()
-	attentionOpened := m.v41NowNanos()
-	o, err := v41SparseAttentionSinkResident(l, q, flatKV, sink, idx, V41SparseAttentionSinkOptions{
-		B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: len(visibleKeys) + 1, N: len(visibleKeys), Softmax: scale,
-	}, &v41ResidentKVView{
-		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: int(visibleKeys[0]),
-		windowRows: len(visibleKeys), sinkKey: layerName(l, "attn.sink"),
-	}, scratch.sharedAttentionFunc())
-	m.v41NoteAttentionContraction(attentionOpened)
-	if err != nil {
-		return nil, v41StageErr(v41StageAttention, l, err)
-	}
-	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
-	if err != nil {
-		return nil, err
-	}
-	attnOut, err := projectOutput(o)
-	if err != nil {
-		return nil, v41StageErr(v41StageAttention, l, err)
-	}
-	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, attnOut)
-
-	// ---- MoE for the one position ----
-	routeCfg, err := v41RouterConfigFullGeometry(cfg)
-	if err != nil {
-		return nil, err
-	}
-	var ffnX []float32
-	var ffnResidual [][]float32
-	var ffnMix v41MHCMix
-	if resident != nil {
-		rows, rerr := resident.ffnInput(l, [][]float32{attnOut}, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
-		if rerr != nil {
-			return nil, rerr
-		}
-		ffnX, err = m.v41FFNNormWithPublish(l, rows[0], eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
-	} else if full {
-		projectFFN, ferr := m.v41FFNMHCProjector(l, scratch)
-		if ferr != nil {
-			return nil, ferr
-		}
-		ffnResidual, ffnMix, ffnX, err = m.v41FullFFNInput(l, streams, mix, attnOut, projectFFN, scratch)
-	} else {
-		ffnX, err = m.v41FFNNormWithPublish(l, x, eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
-	}
-	if err != nil {
-		return nil, err
-	}
-	picks, err := m.v41RouterPicksForStep(l, ffnX, H, routeCfg, full, scratch, func() []float32 { return gateBias })
-	if err != nil {
-		return nil, err
-	}
-	m.emitExpertRouteAt(l, pos, picks)
-	work = &v41LayerStepWork{layer: l, input: ffnX, picks: picks, full: full, scratch: scratch}
-	work.scalar = func() ([]float32, error) {
-		var routed []float32
-		batched := false
-		if full {
-			routed, batched, err = m.v41RoutedLayerStep(l, picks, ffnX, scratch)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if !batched {
-			routed = make([]float32, H)
-			var fullOutputs [][]float32
-			if full {
-				fullOutputs = make([][]float32, len(picks))
-			}
-			for slot, pick := range picks {
-				stem := "ffn.experts." + itoa(pick.expert)
-				y, err := m.v41IncrementalExpert(l, stem, ffnX, pick.weight, scratch)
-				if err != nil {
-					return nil, err
-				}
-				if full {
-					fullOutputs[slot] = y
-					continue
-				}
-				for i := range routed {
-					routed[i] += pick.weight * y[i]
-				}
-			}
-			if full {
-				routed, err = v41FullRoutedSumWith(l, picks, fullOutputs, H, scratch.routedSumFunc())
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-
-		return routed, nil
-	}
-	work.finish = func(routed []float32) error {
-		posted := false
-		var owner *Session
-		var post func(compute.Tensor) error
-		if resident != nil {
-			owner = resident.d.s
-			post = func(sum compute.Tensor) error {
-				if err := resident.finishLayerChecked(l, sum); err != nil {
-					return v41StageErr(v41StageMHC, l, err)
-				}
-				posted = true
-				return nil
-			}
-		}
-		moe, err := m.v41SharedExpertAddThenForStep(l, ffnX, routed, cfg, routeCfg, scratch, owner, post)
-		if err != nil {
-			return err
-		}
-		scratch.activationTrace.record(l, pos, v41TraceStageMoESum, moe)
-		var next [][]float32
-		if resident != nil {
-			if !posted {
-				err = resident.finishLayer(l, [][]float32{moe})
-			}
-		} else if full {
-			next, err = v41MHCPostBF16On(mhcDevice, l, moe, ffnResidual, ffnMix)
-		} else {
-			delta := make([]float32, H)
-			for i := range delta {
-				delta[i] = attnOut[i] + moe[i]
-			}
-			residual := [][]float32{collapsed, collapsed, collapsed, collapsed}
-			next, err = v41MHCPost(delta, residual, mix.post, mix.comb)
-		}
-		if err != nil {
-			return v41StageErr(v41StageMHC, l, err)
-		}
-
-		// Commit the position: append the one projected KV row to the retained
-		// temporal state. At position 0 there is no prefix to step from, so the
-		// first row seeds the empty state through Prefill; every later position
-		// appends through Step. Both are atomic, so a failure here leaves the state
-		// unchanged and the caller's x/streams writes below are not reached.
-		var commitErr error
-		if pos == 0 {
-			commitErr = layerState.Prefill([][]float32{kv}, nil)
-		} else {
-			commitErr = layerState.Step(kv, nil)
-		}
-		if commitErr != nil {
-			return v41StageErr(v41StageAttention, l, commitErr)
-		}
-		if resident != nil {
-			if err := resident.publish(l); err != nil {
-				return err
-			}
-			scratch.mhcCarry.nextLayer++
-		} else if full {
-			for h := 0; h < 4; h++ {
-				copy(streams[h], next[h])
-			}
-			copy(x, next[0])
-			scratch.mhcCarry.pre[0] = ffnMix.pre
-			scratch.mhcCarry.nextLayer++
-		} else {
-			copy(x, next[0])
-		}
-		return nil
-	}
-	if resident != nil {
-		work.cleanup = resident.abort
-	}
-	return work, nil
+	return nil
 }
 
 // v41LayerStepRole advances ONE position of a compressed / shared-source / reader
