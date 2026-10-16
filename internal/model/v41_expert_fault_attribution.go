@@ -47,6 +47,36 @@ import (
 // V41ExpertPhase is the forward phase the attribution attributes faults to.
 type V41ExpertPhase int
 
+// V41PhaseFieldCoverage qualifies legacy numeric totals. For timing fields,
+// MeasuredSamples counts clock pairs, including a measured zero; for host
+// materialization it counts resolution producer observations (not timers).
+// Unavailable samples carry no elapsed time. Fixed value types keep debug
+// snapshots bounded and comparable.
+type V41PhaseFieldCoverage struct {
+	Status             string `json:"status"`
+	Reason             string `json:"reason,omitempty"`
+	Boundary           string `json:"boundary,omitempty"`
+	Overlap            string `json:"overlap,omitempty"`
+	Outcome            string `json:"outcome,omitempty"`
+	MeasuredSamples    int    `json:"measured_samples"`
+	UnavailableSamples int    `json:"unavailable_samples"`
+}
+
+type V41ExpertPhaseCoverage struct {
+	HostMaterialization      V41PhaseFieldCoverage `json:"host_materialization"`
+	FaultTime                V41PhaseFieldCoverage `json:"fault_time"`
+	DequantTime              V41PhaseFieldCoverage `json:"dequant_time"`
+	ContractionTime          V41PhaseFieldCoverage `json:"contraction_time"`
+	DeviceDispatchTime       V41PhaseFieldCoverage `json:"device_dispatch_time"`
+	DeviceActivationTime     V41PhaseFieldCoverage `json:"device_activation_time"`
+	Scope                    string                `json:"scope"`
+	RequestIsolation         string                `json:"request_isolation"`
+	RequestIsolationReason   string                `json:"request_isolation_reason"`
+	Dependency               string                `json:"dependency"`
+	RingPageInSemantics      string                `json:"ring_page_in_semantics"`
+	DeviceBypassContractions int                   `json:"device_bypass_contractions"`
+}
+
 const (
 	// V41PhaseUnknown is the zero value: no phase was ever set on this model,
 	// so the ledger is inert and V41ExpertFaultAttribution returns zero costs.
@@ -84,8 +114,9 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
-	AttentionContractionCalls int   `json:"attention_contraction_calls"`
-	AttentionContractionNanos int64 `json:"attention_contraction_nanos"`
+	Coverage                  V41ExpertPhaseCoverage `json:"coverage"`
+	AttentionContractionCalls int                    `json:"attention_contraction_calls"`
+	AttentionContractionNanos int64                  `json:"attention_contraction_nanos"`
 
 	MHCProjectionDeviceCalls           int   `json:"mhc_projection_device_calls"`
 	MHCProjectionHostCalls             int   `json:"mhc_projection_host_calls"`
@@ -263,6 +294,7 @@ func (l *v41ExpertFaultLedger) noteTierFault(raw, dequant int64) {
 	if led == nil {
 		return
 	}
+	led.Coverage.HostMaterialization.MeasuredSamples++
 	led.Faults++
 	led.FaultedBytes += raw
 	led.DequantBytes += dequant
@@ -281,6 +313,7 @@ func (l *v41ExpertFaultLedger) noteResidentHit() {
 	if led == nil {
 		return
 	}
+	led.Coverage.HostMaterialization.MeasuredSamples++
 	led.ResidentHits++
 }
 
@@ -330,6 +363,7 @@ func (l *v41ExpertFaultLedger) nowLocked() int64 {
 // checkpoint range read. A phase-less ledger routes nowhere and drops the note.
 func (l *v41ExpertFaultLedger) noteFaultDoor(nanos int64) {
 	l.noteDuration(nanos, func(led *v41ExpertFaultPhaseLedger) {
+		led.Coverage.FaultTime.MeasuredSamples++
 		led.FaultDoorNanos += nanos
 		led.FaultNanosLog2Buckets[v41FaultLatencyBucket(nanos)]++
 	})
@@ -352,13 +386,16 @@ func v41FaultLatencyBucket(nanos int64) int {
 // noteDequant records one f32 materialization's wall-clock cost under the
 // CURRENT phase. A phase-less ledger routes nowhere.
 func (l *v41ExpertFaultLedger) noteDequant(nanos int64) {
-	l.noteDuration(nanos, func(led *v41ExpertFaultPhaseLedger) { led.DequantNanos += nanos })
+	l.noteDuration(nanos, func(led *v41ExpertFaultPhaseLedger) {
+		led.DequantNanos += nanos
+		led.Coverage.DequantTime.MeasuredSamples++
+	})
 }
 
 // noteContraction records one routed-pick contraction under the CURRENT phase:
 // its wall-clock cost and the backend that ran it. A phase-less ledger routes
 // nowhere.
-func (l *v41ExpertFaultLedger) noteContraction(nanos int64) {
+func (l *v41ExpertFaultLedger) noteContraction(nanos int64, measured ...bool) {
 	if l == nil {
 		return
 	}
@@ -369,6 +406,11 @@ func (l *v41ExpertFaultLedger) noteContraction(nanos int64) {
 		return
 	}
 	led.Contractions++
+	if len(measured) > 0 && measured[0] && nanos >= 0 {
+		led.Coverage.ContractionTime.MeasuredSamples++
+	} else {
+		led.Coverage.ContractionTime.UnavailableSamples++
+	}
 	if nanos > 0 {
 		led.ContractionNanos += nanos
 	}
@@ -436,7 +478,16 @@ func (l *v41ExpertFaultLedger) snapshot() V41ExpertFaultAttribution {
 	if l == nil {
 		return out
 	}
-	l.mu.Lock()
+	if !l.mu.TryLock() {
+		// A debug read must not wait behind model work. Counters omitted in
+		// this snapshot are unavailable, never measured zero.
+		c := V41ExpertPhaseCoverage{Scope: "unavailable", RequestIsolation: "unsupported", RequestIsolationReason: "ledger_busy", Dependency: "halo-request-observation-context-20261015"}
+		busy := V41PhaseFieldCoverage{Status: "unavailable", Reason: "ledger_busy"}
+		c.HostMaterialization, c.FaultTime, c.DequantTime = busy, busy, busy
+		c.ContractionTime, c.DeviceDispatchTime, c.DeviceActivationTime = busy, busy, busy
+		out.Prefill.Coverage, out.Decode.Coverage = c, c
+		return out
+	}
 	defer l.mu.Unlock()
 	out.Prefill = l.deriveLocked(l.pre)
 	out.Decode = l.deriveLocked(l.dec)
@@ -446,6 +497,49 @@ func (l *v41ExpertFaultLedger) snapshot() V41ExpertFaultAttribution {
 // deriveLocked copies one phase ledger and fills the derived per-token rates
 // and the resident hit fraction. The caller must hold l.mu.
 func (l *v41ExpertFaultLedger) deriveLocked(led v41ExpertFaultPhaseLedger) v41ExpertFaultPhaseLedger {
+	if led != (v41ExpertFaultPhaseLedger{}) {
+		c := &led.Coverage
+		c.Scope = "model_lifetime_serialized_forwards_only"
+		c.RequestIsolation = "unsupported"
+		c.RequestIsolationReason = "shared_model_phase_selector_can_misattribute_overlapping_forwards"
+		c.Dependency = "halo-request-observation-context-20261015;fak#13869"
+		c.RingPageInSemantics = "H2D_upload_bytes_not_OS_faults_physical_disk_reads_or_host_f32_dequant"
+		v41DeriveFieldCoverage(&c.ContractionTime, "count_only_or_invalid_clock_pair")
+		c.ContractionTime.Boundary = "host_observed_routed_contraction_excludes_weight_materialization"
+		c.ContractionTime.Outcome = "successful_contractions"
+		v41DeriveFieldCoverage(&c.DeviceDispatchTime, "no_completed_clock_pair")
+		c.DeviceDispatchTime.Boundary = "host_observed_attempt_submission_through_return_or_failure_completion_not_guaranteed"
+		c.DeviceDispatchTime.Overlap = "overlaps_device_activation_do_not_sum"
+		c.DeviceDispatchTime.Outcome = "attempted_work_including_failed_attempts_not_success_qualified"
+		v41DeriveFieldCoverage(&c.DeviceActivationTime, "no_completed_clock_pair")
+		c.DeviceActivationTime.Boundary = "host_observed_activation_attempt_envelope_including_copy_validation_and_host_fallback"
+		c.DeviceActivationTime.Overlap = "may_enclose_device_dispatch_and_copy_validation_do_not_sum"
+		c.DeviceActivationTime.Outcome = "attempted_activation_including_failed_attempts_not_success_qualified"
+		for _, timing := range []*V41PhaseFieldCoverage{&c.FaultTime, &c.DequantTime} {
+			if missing := led.Faults - timing.MeasuredSamples; missing > 0 {
+				timing.UnavailableSamples = missing
+			}
+			v41DeriveFieldCoverage(timing, "host_timing_producer_not_observed")
+			if timing.MeasuredSamples == 0 && led.Faults == 0 && (c.DeviceBypassContractions > 0 || led.ResidentHits > 0) {
+				timing.Status, timing.Reason = "not_applicable", "host_tier_materialization_not_used_by_observed_resolutions"
+			}
+			timing.Outcome = "attempted_materialization_including_failed_attempts"
+		}
+		c.FaultTime.Boundary = "host_checkpoint_fault_door_not_OS_fault_or_physical_disk_latency"
+		c.DequantTime.Boundary = "host_f32_weight_materialization"
+		h := &c.HostMaterialization
+		h.Boundary = "host_weight_resolution_only_not_OS_fault_or_physical_disk_measurement"
+		switch {
+		case h.MeasuredSamples > 0 && c.DeviceBypassContractions > 0:
+			h.Status, h.Reason = "partial", "mixed_host_resolution_and_device_bypass"
+		case h.MeasuredSamples > 0:
+			h.Status, h.Reason = "measured", "host_resolution_producer_observed"
+		case c.DeviceBypassContractions > 0:
+			h.Status, h.Reason = "not_applicable", "device_contractions_bypass_host_materialization_producers"
+		default:
+			h.Status, h.Reason = "unavailable", "host_materialization_producer_not_observed"
+		}
+	}
 	if led.Tokens > 0 {
 		ft := float64(led.Tokens)
 		led.FaultsPerToken = float64(led.Faults) / ft
@@ -466,6 +560,17 @@ func (l *v41ExpertFaultLedger) deriveLocked(led v41ExpertFaultPhaseLedger) v41Ex
 		led.ContractionBackend = v41ContractionBackendHost
 	}
 	return led
+}
+
+func v41DeriveFieldCoverage(c *V41PhaseFieldCoverage, reason string) {
+	switch {
+	case c.MeasuredSamples > 0 && c.UnavailableSamples > 0:
+		c.Status, c.Reason = "partial", reason
+	case c.MeasuredSamples > 0:
+		c.Status, c.Reason = "measured", ""
+	default:
+		c.Status, c.Reason = "unavailable", reason
+	}
 }
 
 // v41ExpertFaultLedgerOf returns the model's ledger, inserting one ONLY when
@@ -611,7 +716,24 @@ func (m *Model) v41NoteExpertContraction() {
 // v41NoteExpertContractionNanos records one routed-pick contraction with its
 // wall-clock cost under the currently-set phase. nil-safe.
 func (m *Model) v41NoteExpertContractionNanos(nanos int64) {
-	v41ExpertFaultLedgerOf(m, false).noteContraction(nanos)
+	v41ExpertFaultLedgerOf(m, false).noteContraction(nanos, true)
+}
+
+// Device success bypasses the host materialization producers; it does not
+// measure device kernel elapsed time or imply any physical disk activity.
+func (m *Model) v41NoteDeviceExpertContraction() {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if led := l.ledgerLocked(); led != nil {
+		led.Contractions++
+		led.ContractionBackend = l.backendNameLocked()
+		led.Coverage.ContractionTime.UnavailableSamples++
+		led.Coverage.DeviceBypassContractions++
+	}
 }
 
 // v41NoteAttentionContraction records one attempted plain or compressed
@@ -657,8 +779,11 @@ func (m *Model) v41NoteIncrementalDeviceDispatch(gateUp bool, opened int64) {
 		led.IncrementalDeviceDownCalls++
 	}
 	if opened != 0 {
-		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+		if elapsed := l.nowLocked() - opened; elapsed >= 0 {
 			led.IncrementalDeviceDispatchNanos += elapsed
+			led.Coverage.DeviceDispatchTime.MeasuredSamples++
+		} else {
+			led.Coverage.DeviceDispatchTime.UnavailableSamples++
 		}
 	}
 }
@@ -676,8 +801,11 @@ func (m *Model) v41NoteIncrementalDeviceDispatchElapsed(opened int64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if led := l.ledgerLocked(); led != nil {
-		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+		if elapsed := l.nowLocked() - opened; elapsed >= 0 {
 			led.IncrementalDeviceDispatchNanos += elapsed
+			led.Coverage.DeviceDispatchTime.MeasuredSamples++
+		} else {
+			led.Coverage.DeviceDispatchTime.UnavailableSamples++
 		}
 	}
 }
@@ -716,8 +844,11 @@ func (m *Model) v41NoteExpertActivation(device, host int, readbackBytes int64, o
 	led.ExpertActivationHostCalls += host
 	led.ExpertActivationReadbackBytes += readbackBytes
 	if opened != 0 {
-		if elapsed := l.nowLocked() - opened; elapsed > 0 {
+		if elapsed := l.nowLocked() - opened; elapsed >= 0 {
 			led.ExpertActivationNanos += elapsed
+			led.Coverage.DeviceActivationTime.MeasuredSamples++
+		} else {
+			led.Coverage.DeviceActivationTime.UnavailableSamples++
 		}
 	}
 }

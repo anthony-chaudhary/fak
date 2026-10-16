@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -20,6 +21,7 @@ func requireV41PhaseSnapshot(t *testing.T, got, want V41PhaseSnapshot) {
 
 func v41AttributionFixture(base int) model.V41ExpertFaultAttributionPhase {
 	return model.V41ExpertFaultAttributionPhase{
+		IncrementalDeviceDispatchNanos: int64(base + 32), IncrementalDeviceGateUpCalls: base + 33, IncrementalDeviceDownCalls: base + 34,
 		Tokens: base + 1, AttentionContractionCalls: base + 2, AttentionContractionNanos: int64(base + 3),
 		Faults: base + 4, FaultedBytes: int64(base + 5), FaultDoorNanos: int64(base + 6),
 		DequantBytes: int64(base + 7), DequantNanos: int64(base + 8),
@@ -117,5 +119,162 @@ func TestV41PhaseAttributionZeroSourceIsInert(t *testing.T) {
 	p.foldV41PhasesLocked(model.V41ExpertFaultAttribution{})
 	if got := p.MoEResidencyStats().V41Phases; got != nil {
 		t.Fatalf("zero V4.1 source produced scope %q, want nil", got.Scope)
+	}
+}
+
+// TestV41PhaseCoverageDebugExport preserves timed zero versus unavailable at
+// the existing reader/JSON boundary, without summing lifetime observations.
+// fak-test:runtime fast est=1ms lane=default
+func TestV41PhaseCoverageDebugExport(t *testing.T) {
+	coverage := model.V41ExpertPhaseCoverage{
+		Scope: "model_lifetime", RequestIsolation: "unsupported",
+		RequestIsolationReason: "shared_model_phase", Dependency: "request_scoped_phase_ledger",
+		RingPageInSemantics:  "h2d_upload_bytes_not_os_faults_disk_reads_or_host_f32_dequant",
+		HostMaterialization:  model.V41PhaseFieldCoverage{Status: "not_applicable", Reason: "device_handled"},
+		ContractionTime:      model.V41PhaseFieldCoverage{Status: "measured", Boundary: "host_contraction", MeasuredSamples: 1},
+		DeviceDispatchTime:   model.V41PhaseFieldCoverage{Status: "unavailable", Reason: "no_completion_timer", Boundary: "submission", UnavailableSamples: 2},
+		DeviceActivationTime: model.V41PhaseFieldCoverage{Status: "measured", Boundary: "completion", Overlap: "included_in_dispatch", MeasuredSamples: 3},
+	}
+	prefill := v41AttributionFixture(10)
+	prefill.ContractionNanos = 0 // An observed timer sample may have zero resolution.
+	prefill.Coverage = coverage
+	decode := model.V41ExpertFaultAttributionPhase{Contractions: 2, Coverage: coverage}
+	decode.Coverage.ContractionTime = model.V41PhaseFieldCoverage{
+		Status: "unavailable", Reason: "device_contraction_not_timed", UnavailableSamples: 2,
+	}
+	p := &InKernelPlanner{}
+	source := model.V41ExpertFaultAttribution{Prefill: prefill, Decode: decode}
+	p.foldV41PhasesLocked(source)
+	p.foldV41PhasesLocked(source)
+	got := p.MoEResidencyStats()
+	wantPrefill := v41SnapshotFixture(10)
+	wantPrefill.ContractionNanos = 0
+	requireV41PhaseSnapshot(t, got.V41Phases.Prefill, wantPrefill)
+	if got.V41Phases.ExpertCoverage.Prefill != (V41ExpertCoverageSnapshot{Coverage: coverage, IncrementalDeviceDispatchNanos: 42, IncrementalDeviceGateUpCalls: 43, IncrementalDeviceDownCalls: 44}) {
+		t.Fatalf("prefill expert coverage lost timing or dispatch totals: %+v", got.V41Phases.ExpertCoverage.Prefill)
+	}
+	if got.V41Phases.ExpertCoverage.Decode.Coverage != decode.Coverage || got.V41Phases.Decode.ContractionNanos != 0 || got.V41Phases.Decode.Contractions != 2 {
+		t.Fatalf("decode lost unavailable timing or replaced numeric counters: %+v", got.V41Phases.Decode)
+	}
+	encoded, err := json.Marshal(got.V41Phases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 16*1024 {
+		t.Fatalf("fixed phase export exceeded 16KiB: %d bytes", len(encoded))
+	}
+	var roundtrip V41PhaseLifetimeSnapshot
+	if err := json.Unmarshal(encoded, &roundtrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundtrip != *got.V41Phases {
+		t.Fatalf("JSON lost phase counters or coverage: %s", encoded)
+	}
+	var wire struct {
+		Prefill        map[string]json.RawMessage `json:"prefill"`
+		Decode         map[string]json.RawMessage `json:"decode"`
+		ExpertCoverage struct {
+			Prefill map[string]json.RawMessage `json:"prefill"`
+			Decode  map[string]json.RawMessage `json:"decode"`
+		} `json:"expert_coverage"`
+	}
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []map[string]json.RawMessage{wire.Prefill, wire.Decode} {
+		if string(phase["contraction_nanos"]) != "0" || len(phase) != 31 {
+			t.Fatalf("zero elapsed requires exported coverage: %s", encoded)
+		}
+	}
+	for _, phase := range []map[string]json.RawMessage{wire.ExpertCoverage.Prefill, wire.ExpertCoverage.Decode} {
+		if len(phase["coverage"]) == 0 {
+			t.Fatalf("zero elapsed requires separate exported coverage: %s", encoded)
+		}
+	}
+	got.V41Phases.ExpertCoverage.Prefill.Coverage.ContractionTime.Status = "reader_mutation"
+	if p.MoEResidencyStats().V41Phases.ExpertCoverage.Prefill.Coverage != coverage {
+		t.Fatal("reader mutation altered retained coverage")
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestV41PhaseAttributionBusyReadRetainsLastCounters(t *testing.T) {
+	p := &InKernelPlanner{}
+	source := model.V41ExpertFaultAttribution{Prefill: v41AttributionFixture(10), Decode: v41AttributionFixture(100)}
+	source.Prefill.HeadProjectionDeviceCalls = 7
+	source.Decode.RoutedLayerDispatches = 9
+	p.foldV41PhasesLocked(source)
+	previous := *p.MoEResidencyStats().V41Phases
+	coverage := model.V41ExpertPhaseCoverage{Scope: "unavailable", RequestIsolationReason: "ledger_busy"}
+	busy := model.V41ExpertFaultAttribution{
+		Prefill: model.V41ExpertFaultAttributionPhase{Coverage: coverage},
+		Decode:  model.V41ExpertFaultAttributionPhase{Coverage: coverage},
+	}
+	p.foldV41PhasesLocked(busy)
+	stale := p.MoEResidencyStats().V41Phases
+	if stale.Availability != "stale" || stale.AvailabilityReason != "ledger_busy" || stale.ExpertCoverage.Prefill.Coverage != coverage || stale.ExpertCoverage.Decode.Coverage != coverage {
+		t.Fatalf("busy availability absent: %+v", stale)
+	}
+	// Normalize only metadata: every numeric subsystem must still match.
+	retained := *stale
+	retained.Availability, retained.AvailabilityReason = "", ""
+	retained.ExpertCoverage.Prefill.Coverage, retained.ExpertCoverage.Decode.Coverage = previous.ExpertCoverage.Prefill.Coverage, previous.ExpertCoverage.Decode.Coverage
+	if retained != previous {
+		t.Fatalf("busy read replaced prior cumulative counters: got %+v want %+v", retained, previous)
+	}
+	// A valid smaller observation can indicate a genuine source reset. It must
+	// replace the cache and clear stale metadata rather than being clamped.
+	p.foldV41PhasesLocked(model.V41ExpertFaultAttribution{Prefill: v41AttributionFixture(1)})
+	latest := p.MoEResidencyStats().V41Phases
+	if latest.Availability != "" || latest.AvailabilityReason != "" || latest.Prefill.Tokens != 2 || latest.Decode.Tokens != 0 || latest.Projections.Prefill.HeadProjectionDeviceCalls != 0 {
+		t.Fatalf("successful source reset did not replace stale snapshot: %+v", latest)
+	}
+	fresh := &InKernelPlanner{}
+	fresh.foldV41PhasesLocked(busy)
+	if unavailable := fresh.MoEResidencyStats().V41Phases; unavailable.Availability != "unavailable" || unavailable.AvailabilityReason != "ledger_busy" {
+		t.Fatalf("first busy read claimed a measured snapshot: %+v", unavailable)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestV41PhaseCoverageUnobservedOppositeDebugOnly(t *testing.T) {
+	for _, prefillObserved := range []bool{true, false} {
+		source := model.V41ExpertFaultAttribution{}
+		observed := v41AttributionFixture(10)
+		observed.Coverage = model.V41ExpertPhaseCoverage{
+			Scope: "model_lifetime", RequestIsolation: "unsupported",
+			RequestIsolationReason: "shared_model_phase", Dependency: "request_scoped_phase_ledger",
+			RingPageInSemantics:      "h2d_upload_bytes_not_os_faults_disk_reads_or_host_f32_dequant",
+			ContractionTime:          model.V41PhaseFieldCoverage{Status: "measured", MeasuredSamples: 7},
+			DeviceBypassContractions: 9,
+		}
+		if prefillObserved {
+			source.Prefill = observed
+		} else {
+			source.Decode = observed
+		}
+		p := &InKernelPlanner{}
+		p.foldV41PhasesLocked(source)
+		phases := p.MoEResidencyStats().V41Phases
+		unobserved, raw := phases.ExpertCoverage.Decode, source.Decode
+		if !prefillObserved {
+			unobserved, raw = phases.ExpertCoverage.Prefill, source.Prefill
+		}
+		if raw != (model.V41ExpertFaultAttributionPhase{}) {
+			t.Fatal("debug projection changed untouched raw model phase")
+		}
+		coverage := unobserved.Coverage
+		if coverage.Scope != observed.Coverage.Scope || coverage.RequestIsolation != "unsupported" || coverage.RequestIsolationReason != observed.Coverage.RequestIsolationReason || coverage.Dependency != observed.Coverage.Dependency || coverage.RingPageInSemantics != observed.Coverage.RingPageInSemantics || coverage.DeviceBypassContractions != 0 {
+			t.Fatalf("unobserved scope semantics lost or copied work: %+v", coverage)
+		}
+		for _, field := range []model.V41PhaseFieldCoverage{coverage.HostMaterialization, coverage.FaultTime, coverage.DequantTime, coverage.ContractionTime, coverage.DeviceDispatchTime, coverage.DeviceActivationTime} {
+			if field != (model.V41PhaseFieldCoverage{Status: "unavailable", Reason: "phase_not_observed"}) {
+				t.Fatalf("unobserved phase claimed a sample: %+v", field)
+			}
+		}
+		unobserved.Coverage = model.V41ExpertPhaseCoverage{}
+		if unobserved != (V41ExpertCoverageSnapshot{}) {
+			t.Fatalf("debug qualification copied numeric work: %+v", unobserved)
+		}
 	}
 }
