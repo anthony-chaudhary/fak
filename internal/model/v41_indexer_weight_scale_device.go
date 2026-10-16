@@ -85,179 +85,195 @@ func (s *Session) v41IndexWeightScaleFunc() v41IndexWeightScaleFunc {
 			closeSelected(closed)
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						closeSelected(err)
-						panic(r)
-					}
-					var backendErr *compute.BackendError
-					if errors.As(err, &backendErr) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		convertPanic := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					closeSelected(err)
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backendErr *compute.BackendError
+				if errors.As(err, &backendErr) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
-				}
-				closeFailure(err)
-				panic(r)
 			}
-		}()
-		// The projection boundary already published finite widened BF16; any
-		// other payload is outside this seam and is never multiplied.
-		if len(weights) != heads || !finite32(scale) || !v41BF16Widened(weights) {
-			return nil, closeFailure(errV41IndexWeightScaleResult)
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
+				}
+				result, cause = nil, closeFailure(err)
+				return
+			}
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
 		}
-		run := func() (result []float32, cause error) {
-			var owned []compute.Tensor
-			defer func() {
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						backend.Free(owned[i])
+		var primary any
+		complete := false
+		func() {
+			defer func() { primary = recover() }()
+			result, cause = func() (result []float32, cause error) {
+				// The projection boundary already published finite widened BF16; any
+				// other payload is outside this seam and is never multiplied.
+				if len(weights) != heads || !finite32(scale) || !v41BF16Widened(weights) {
+					return nil, closeFailure(errV41IndexWeightScaleResult)
+				}
+				run := func() (result []float32, cause error) {
+					var owned []compute.Tensor
+					bodyComplete := false
+					defer func() {
+						failed := !bodyComplete || cause != nil
+						var cleanupPanic any
+						cleanupPresent := false
+						for i := len(owned) - 1; i >= 0; i-- {
+							func() {
+								returned := false
+								defer func() {
+									value := recover()
+									if !returned && !cleanupPresent {
+										cleanupPanic, cleanupPresent = value, true
+									}
+								}()
+								backend.Free(owned[i])
+								returned = true
+							}()
+						}
+						if cleanupPresent && !failed {
+							panic(cleanupPanic)
+						}
 					}()
-				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
-				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
-			}()
-			stage = "input upload"
-			input := uploadHostF32Class(backend, []int{heads}, weights, compute.MemoryActivation, "V4.1 index weight scale input")
-			if input.Buf() == nil || input.Backend() != backend {
-				return nil, errV41IndexWeightScaleResult
-			}
-			owned = append(owned, input)
-			if input.Dtype != compute.F32 || input.Layout != compute.RowMajor || input.Quant != nil ||
-				len(input.Shape) != 1 || input.Shape[0] != heads {
-				return nil, errV41IndexWeightScaleResult
-			}
-			// The optional combined operation retains this callback's existing
-			// scalar/publication admission and the ordinary deferred-read policy.
-			// A refusal precedes its dispatch; selected errors never replay.
-			if fused, ok := backend.(compute.V41IndexScaleBF16Backend); ok {
-				if deferred, admitted := v41DeferredBF16Publisher(backend, heads); admitted && fused.SupportsV41IndexScaleBF16(input, scale) {
-					stage = "exact multiply and scaled weight publication"
-					published, status, err := fused.V41IndexScaleBF16Deferred(input, scale)
-					freshOutput := published.Buf() != nil && published.Backend() == backend && published.Buf() != input.Buf()
-					if freshOutput {
-						owned = append(owned, published)
-					}
-					freshStatus := status.Record.Buf() != nil && status.Record.Backend() == backend && status.Record.Buf() != input.Buf() && status.Record.Buf() != published.Buf()
-					if freshStatus {
-						owned = append(owned, status.Record)
-					}
-					if err != nil {
-						return nil, err
-					}
-					if !freshOutput || published.Dtype != compute.F32 || published.Layout != compute.RowMajor || published.Quant != nil ||
-						len(published.Shape) != 1 || published.Shape[0] != heads || !freshStatus ||
-						status.Kind != compute.V41DeferredBF16Publish || status.Count != heads || status.Site != compute.V41BF16PublishIndexerScaledWeight ||
-						(status.Records != 0 && status.Records != 1) || status.Record.Dtype != compute.F32 || status.Record.Layout != compute.RowMajor || status.Record.Quant != nil ||
-						len(status.Record.Shape) != 1 || status.Record.Shape[0] != 4 {
-						return nil, errV41IndexWeightScaleResult
-					}
-					if v41HostBF16Witness.Load() {
-						v41BF16ResidentCalls.Add(1)
-						v41BF16DeferredCalls.Add(1)
-					}
-					// The validated status is the last owned allocation. The read
-					// consumes it even on transport failure; do not retry its Free.
-					owned = owned[:len(owned)-1]
-					stage = "scaled weight readback"
-					read, verdict, err := v41ReadDeferredBF16(deferred, published, status)
-					if err != nil {
-						return nil, err
-					}
-					if verdict != nil {
+					result, cause = func() (result []float32, cause error) {
+						stage = "input upload"
+						input := uploadHostF32Class(backend, []int{heads}, weights, compute.MemoryActivation, "V4.1 index weight scale input")
+						if input.Buf() == nil || input.Backend() != backend {
+							return nil, errV41IndexWeightScaleResult
+						}
+						owned = append(owned, input)
+						if input.Dtype != compute.F32 || input.Layout != compute.RowMajor || input.Quant != nil ||
+							len(input.Shape) != 1 || input.Shape[0] != heads {
+							return nil, errV41IndexWeightScaleResult
+						}
+						// The optional combined operation retains this callback's existing
+						// scalar/publication admission and the ordinary deferred-read policy.
+						// A refusal precedes its dispatch; selected errors never replay.
+						if fused, ok := backend.(compute.V41IndexScaleBF16Backend); ok {
+							if deferred, admitted := v41DeferredBF16Publisher(backend, heads); admitted && fused.SupportsV41IndexScaleBF16(input, scale) {
+								stage = "exact multiply and scaled weight publication"
+								published, status, err := fused.V41IndexScaleBF16Deferred(input, scale)
+								freshOutput := published.Buf() != nil && published.Backend() == backend && published.Buf() != input.Buf()
+								if freshOutput {
+									owned = append(owned, published)
+								}
+								freshStatus := status.Record.Buf() != nil && status.Record.Backend() == backend && status.Record.Buf() != input.Buf() && status.Record.Buf() != published.Buf()
+								if freshStatus {
+									owned = append(owned, status.Record)
+								}
+								if err != nil {
+									return nil, err
+								}
+								if !freshOutput || published.Dtype != compute.F32 || published.Layout != compute.RowMajor || published.Quant != nil ||
+									len(published.Shape) != 1 || published.Shape[0] != heads || !freshStatus ||
+									status.Kind != compute.V41DeferredBF16Publish || status.Count != heads || status.Site != compute.V41BF16PublishIndexerScaledWeight ||
+									(status.Records != 0 && status.Records != 1) || status.Record.Dtype != compute.F32 || status.Record.Layout != compute.RowMajor || status.Record.Quant != nil ||
+									len(status.Record.Shape) != 1 || status.Record.Shape[0] != 4 {
+									return nil, errV41IndexWeightScaleResult
+								}
+								if v41HostBF16Witness.Load() {
+									v41BF16ResidentCalls.Add(1)
+									v41BF16DeferredCalls.Add(1)
+								}
+								// The validated status is the last owned allocation. The read
+								// consumes it even on transport failure; do not retry its Free.
+								owned = owned[:len(owned)-1]
+								stage = "scaled weight readback"
+								read, verdict, err := v41ReadDeferredBF16(deferred, published, status)
+								if err != nil {
+									return nil, err
+								}
+								if verdict != nil {
+									stage = "scaled weight publication"
+									return nil, verdict
+								}
+								if len(read) != heads || !v41BF16Widened(read) {
+									return nil, errV41IndexWeightScaleResult
+								}
+								if v41HostBF16Witness.Load() {
+									v41IndexWeightScaleCalls.Add(1)
+								}
+								return read, nil
+							}
+						}
+						stage = "exact multiply"
+						product, err := multiply.V41ScaleExact(input, scale)
+						fresh := product.Buf() != nil && product.Backend() == backend && product.Buf() != input.Buf()
+						if fresh {
+							owned = append(owned, product)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if !fresh || product.Dtype != compute.F32 || product.Layout != compute.RowMajor || product.Quant != nil ||
+							len(product.Shape) != 1 || product.Shape[0] != heads {
+							return nil, errV41IndexWeightScaleResult
+						}
+						// The scaled weight publishes while still resident, so the F32
+						// product never reaches the host unrounded.
 						stage = "scaled weight publication"
-						return nil, verdict
-					}
-					if len(read) != heads || !v41BF16Widened(read) {
-						return nil, errV41IndexWeightScaleResult
-					}
-					if v41HostBF16Witness.Load() {
-						v41IndexWeightScaleCalls.Add(1)
-					}
-					return read, nil
+						published, status, deferred, err := s.v41PublishResidentBF16Deferred(product, compute.V41BF16PublishIndexerScaledWeight)
+						if err != nil {
+							return nil, err
+						}
+						var read []float32
+						if deferred {
+							owned = append(owned, published)
+							stage = "scaled weight readback"
+							row, verdict, err := s.v41ReadResidentBF16(published, status)
+							if err != nil {
+								return nil, err
+							}
+							if verdict != nil {
+								stage = "scaled weight publication"
+								return nil, verdict
+							}
+							read = row
+						} else {
+							published, selected, err := s.v41PublishResidentBF16(product, compute.V41BF16PublishIndexerScaledWeight)
+							if err != nil {
+								return nil, err
+							}
+							if !selected {
+								return nil, errV41IndexWeightScaleResult
+							}
+							owned = append(owned, published)
+							stage = "scaled weight readback"
+							read = append([]float32(nil), backend.Read(published)...)
+						}
+						if len(read) != heads || !v41BF16Widened(read) {
+							return nil, errV41IndexWeightScaleResult
+						}
+						if v41HostBF16Witness.Load() {
+							v41IndexWeightScaleCalls.Add(1)
+						}
+						return read, nil
+					}()
+					bodyComplete = true
+					return result, cause
 				}
-			}
-			stage = "exact multiply"
-			product, err := multiply.V41ScaleExact(input, scale)
-			fresh := product.Buf() != nil && product.Backend() == backend && product.Buf() != input.Buf()
-			if fresh {
-				owned = append(owned, product)
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !fresh || product.Dtype != compute.F32 || product.Layout != compute.RowMajor || product.Quant != nil ||
-				len(product.Shape) != 1 || product.Shape[0] != heads {
-				return nil, errV41IndexWeightScaleResult
-			}
-			// The scaled weight publishes while still resident, so the F32
-			// product never reaches the host unrounded.
-			stage = "scaled weight publication"
-			published, status, deferred, err := s.v41PublishResidentBF16Deferred(product, compute.V41BF16PublishIndexerScaledWeight)
-			if err != nil {
-				return nil, err
-			}
-			var read []float32
-			if deferred {
-				owned = append(owned, published)
-				stage = "scaled weight readback"
-				row, verdict, err := s.v41ReadResidentBF16(published, status)
-				if err != nil {
-					return nil, err
+				result, cause = run()
+				if cause != nil {
+					return nil, closeFailure(cause)
 				}
-				if verdict != nil {
-					stage = "scaled weight publication"
-					return nil, verdict
-				}
-				read = row
-			} else {
-				published, selected, err := s.v41PublishResidentBF16(product, compute.V41BF16PublishIndexerScaledWeight)
-				if err != nil {
-					return nil, err
-				}
-				if !selected {
-					return nil, errV41IndexWeightScaleResult
-				}
-				owned = append(owned, published)
-				stage = "scaled weight readback"
-				read = append([]float32(nil), backend.Read(published)...)
-			}
-			if len(read) != heads || !v41BF16Widened(read) {
-				return nil, errV41IndexWeightScaleResult
-			}
-			if v41HostBF16Witness.Load() {
-				v41IndexWeightScaleCalls.Add(1)
-			}
-			return read, nil
+				return result, nil
+			}()
+			complete = true
+		}()
+		if !complete {
+			convertPanic(primary)
 		}
-		result, cause = run()
-		if cause != nil {
-			return nil, closeFailure(cause)
-		}
-		return result, nil
+		return result, cause
 	}
 }
