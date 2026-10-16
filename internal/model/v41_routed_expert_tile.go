@@ -97,11 +97,26 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 		if p.note != nil {
 			p.note()
 		}
-		if p.gate, err = project(p.gateW); err != nil {
-			return gate, up, true, nil, nil, err
-		}
-		if p.up, err = project(p.upW); err != nil {
-			return gate, up, true, nil, nil, err
+		if pair, ok := p.backend.(compute.V41Q2KTokenPairBackend); allowPanelRow && ok && pair.SupportsV41Q2KTokenPair(p.gateW, p.upW, rows) {
+			// One selected gate/up transport boundary. Both physical outputs
+			// enter the existing owner before any selected error is returned.
+			g, u, selectedErr := pair.V41Q2KTokenPair(p.gateW, p.upW, x, rows)
+			freshG, freshU := own(g), own(u)
+			if selectedErr != nil {
+				return gate, up, true, nil, nil, selectedErr
+			}
+			if !freshG || !valid(g, rows*inter) || !freshU || !valid(u, rows*inter) {
+				return gate, up, true, nil, nil, errV41ExpertResult
+			}
+			g.Shape, u.Shape = []int{rows, inter}, []int{rows, inter}
+			p.gate, p.up = g, u
+		} else {
+			if p.gate, err = project(p.gateW); err != nil {
+				return gate, up, true, nil, nil, err
+			}
+			if p.up, err = project(p.upW); err != nil {
+				return gate, up, true, nil, nil, err
+			}
 		}
 		p.start, p.end = row, row+rows
 	}

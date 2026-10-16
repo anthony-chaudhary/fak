@@ -136,6 +136,9 @@ const (
 	// VulkanBuildReceiptSchemaV25 adds canonical down publication chunks.
 	VulkanBuildReceiptSchemaV25 = "fak.vulkan-build-receipt.v25"
 
+	// VulkanBuildReceiptSchemaV26 adds canonical paired Q2 gate/up contraction.
+	VulkanBuildReceiptSchemaV26 = "fak.vulkan-build-receipt.v26"
+
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
 

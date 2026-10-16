@@ -1,0 +1,62 @@
+{
+  "rows": [
+    {
+      "id": "v41q2ktokenpairplan",
+      "canonical": "V41Q2KTokenPairPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Immutable paired Q2_K launch geometry embedding validated single-panel geometry and a doubled X workgroup range for two independent output banks using the same three-int32 push ABI.",
+      "distinction": "Describes paired launch arithmetic only, unlike the single-output V41Q2KTokenPanelPlan or the constructor that validates and creates this result. It does not record commands or qualify device execution.",
+      "distinct_from": [
+        "v41q2ktokenpanelplan",
+        "planv41q2ktokenpair",
+        "supportsv41q2ktokenpair"
+      ],
+      "aliases": [],
+      "grounding": "V41Q2KTokenPairPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "planv41q2ktokenpair",
+      "canonical": "PlanV41Q2KTokenPair",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure constructor reusing Q2_K token-panel shape, row-count and signed byte-bound validation before returning paired geometry with twice the single-panel X workgroup count.",
+      "distinction": "Constructs host geometry rather than executing a contraction or checking actual device limits; the paired capability query separately determines native availability.",
+      "distinct_from": [
+        "v41q2ktokenpairplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanV41Q2KTokenPair",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "supportsv41q2ktokenpair",
+      "canonical": "SupportsV41Q2KTokenPair",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Effect-free optional backend capability query for two same-shape Q2_K contractions sharing one input token panel and producing two independent output panels with unchanged per-workgroup arithmetic.",
+      "distinction": "Checks selected provider availability and bounded geometry before effects; unlike pure plan construction, it reflects native opt-in, exact module availability and device dispatch limits. It grants no residency, memory budget or speed guarantee.",
+      "distinct_from": [
+        "v41q2ktokenpairplan"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41Q2KTokenPair",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

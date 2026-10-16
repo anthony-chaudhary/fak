@@ -304,6 +304,11 @@ func (r *vulkanSuccessorRegistry) observeEvidence(ctx context.Context, evidence 
 	if !validLowerSHA256(evidence.ExpectedBinarySHA256) || artifactSHA != evidence.ExpectedBinarySHA256 || artifactSize != evidence.ExpectedBinarySize || artifactSize <= 0 {
 		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("sealed mapped executable identity mismatch")
 	}
+	if r.usesQualifiedQ2TokenPair() {
+		if err := verifyVulkanQualifiedQ2TokenPair(evidence.SourceRoot, evidence.SPIRVRoot); err != nil {
+			return observedVulkanReceiptSuccessorIdentity{}, err
+		}
+	}
 	if r.usesQualifiedDownChunk() {
 		if err := verifyVulkanQualifiedDownChunk(evidence.SourceRoot, evidence.SPIRVRoot); err != nil {
 			return observedVulkanReceiptSuccessorIdentity{}, err
@@ -525,6 +530,11 @@ func (r *vulkanSuccessorRegistry) finalizeBinary(cfg *VulkanConfig, source Build
 	binarySHA, binarySize, err := stableRegularFileSHA256(outBinPath, "Vulkan output binary")
 	if err != nil {
 		return nil, nil, nil, nil, err
+	}
+	if r.usesQualifiedQ2TokenPair() {
+		if err := verifyVulkanQualifiedQ2TokenPair(cfg.RepoRoot, filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv")); err != nil {
+			return nil, nil, nil, nil, err
+		}
 	}
 	if r.usesQualifiedDownChunk() {
 		if err := verifyVulkanQualifiedDownChunk(cfg.RepoRoot, filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv")); err != nil {

@@ -96,6 +96,14 @@ func (m *Model) v41IndexRowsWithPreparedKeys(l, pos int, qLat, hidden []float32,
 // Native borrowing requires the same immutable binding that supplies the
 // invoked scorer. Ordinary callers cannot inherit this synchronous authority.
 func (m *Model) v41IndexRowsWithPreparedBinding(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, views ...*v41IndexerKeyView) ([]int32, error) {
+	return m.v41IndexRowsWithPreparedProjection(l, pos, qLat, hidden, keys, project, binding, health, ops, prepared, borrow, nil, views...)
+}
+
+func (m *Model) v41IndexRowsWithPreparedProjection(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, projection *v41ProjectionRouteBinding, views ...*v41IndexerKeyView) ([]int32, error) {
+	if projection != nil {
+		project = projection.projectionFunc()
+	}
+
 	score := binding.scoreFunc()
 	if borrow == nil || borrow.binding != binding || !borrow.valid() {
 		borrow = nil
@@ -136,16 +144,18 @@ func (m *Model) v41IndexRowsWithPreparedBinding(l, pos int, qLat, hidden []float
 			flat = append(flat, key...)
 		}
 	}
-	q, err := m.v41ProjMatRowsWithProjection(l, "indexer.wq_b.weight", qLat, width, cfg.QLoraRank, project)
+	q, published, err := m.v41IndexQueryProjection(l, qLat, width, cfg.QLoraRank, project, projection, ops)
 	if err != nil {
 		return nil, err
 	}
 	// Both the BF16 linear and the reference's FP8 GEMM return BF16 in the
 	// pinned BF16 execution profile. This does not emulate FP8 input quantization.
 	publish := ops.bf16PublishFunc()
-	q, err = v41IndexBF16Publish(l, "indexer.wq_b.weight", "projection", q, publish)
-	if err != nil {
-		return nil, err
+	if !published {
+		q, err = v41IndexBF16Publish(l, "indexer.wq_b.weight", "projection", q, publish)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := m.v41IndexRoPEPublished(l, pos, q, nHeads, ops.indexRoPEFunc(), publish); err != nil {
 		return nil, err
