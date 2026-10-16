@@ -7069,6 +7069,11 @@
           "category": "incidental",
           "reason": "Private constructor body for the existing backend session, extracted to preserve rollback ownership and completion evidence across panic or Goexit; it does not define a distinct session abstraction or lifecycle policy.",
           "token": "newBackendSessionOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported precondition helper for the existing Gemma4 forward route: checks CPU execution wiring and raises ResidentQuantUnsupportedError for unsupported HAL, Metal or dynamic-precision modes. Like requireminimaxsession, it is internal admission plumbing, not a separate Session or scheduler entity; the new caller changes reference cardinality, not the concept.",
+          "token": "requireGemma4Session"
         }
       ],
       "exclude": [
@@ -7359,6 +7364,7 @@
         "repairMalformedLooseSessionRef",
         "reportFromSessions",
         "repository-read",
+        "requireGemma4Session",
         "requiredForbiddenPair",
         "requireminimaxsession",
         "resolveServeSessionState",
