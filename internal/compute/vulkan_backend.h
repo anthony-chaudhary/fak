@@ -68,6 +68,13 @@ int fvk_d2h(void *h, const void *d, size_t bytes);
  * records a shader/transfer memory barrier, then checks allocation/begin/end/
  * submit/wait. A failed submit or wait quarantines resources until process exit.
  * Used for attention status and that operation's fresh device output only. */
+/* Synchronous exclusive host loan: 0 MISS unchanged, 1 success in place,
+ * -1 selected fatal with status. Reuses existing pool/staging backing only. */
+int fvk_v41_try_pool_norm_panel(float* host, const void* gain, int rows, int width, float eps, int* status);
+// probe!=0 checks existing capacity without claims; caller serializes probe/allocation/commit.
+int fvk_v41_try_ffn_norm_publication(float* host, float* published, const void* gain, int rows, int width, float eps, int probe, int* status);
+// Query-only: two heterogeneous existing pool buffers, unchanged capacity keys.
+int fvk_v41_try_query_norm_publication(float* host, float* published, const void* gain, int rows, int width, int capacityRows, float eps, int probe, int* status);
 int fvk_v41_d2h(void *h, const void *d, size_t bytes);
 /* fvk_v41_d2h for count ordered, disjoint regions of one host image behind one
  * checked host fence: srcs[i] (bytes[i]) lands at host + offsets[i]. */
@@ -598,6 +605,12 @@ int fvk_v41_routed_swiglu_f32(const void *dGate, const void *dUp, void *dOut, vo
  * Status remains one scalar-operation record with row-local fault indices.
  * No allocation ownership transfers and no host readback occurs here. */
 int fvk_have_v41_routed_swiglu_panel_row(void);
+int fvk_have_v41_routed_swiglu_panel_chunk(void);
+int fvk_v41_routed_swiglu_panel_chunk_shape(int rows, int count, int row, int chunk);
+int fvk_v41_routed_swiglu_panel_chunk_f32(const void* gate, const void* up, void* out, void* status,
+                                       int rows, int count, int row, int chunk, float limit, const float* weights);
+int fvk_v41_routed_swiglu_panel_chunk_module_abi(const void* data, size_t bytes);
+
 int fvk_v41_routed_swiglu_panel_row_shape(int rows, int count, int row);
 int fvk_v41_routed_swiglu_panel_row_f32(const void *dGate, const void *dUp, void *dOut, void *dStatus,
                                        int rows, int count, int row, float limit, float weight);
@@ -612,6 +625,12 @@ int fvk_v41_index_scale_bf16_module_abi(const void *data, size_t bytes);
  * Input is borrowed F32 [rows,count], output is one fresh count-wide row;
  * status is one 16-byte checked BF16 record with row-local fault index.
  * No allocation ownership transfer or host readback occurs here. */
+// Optional fixed-site21 2/4/8-row publication. One row-local status per row.
+int fvk_have_v41_routed_down_panel_chunk(void);
+int fvk_v41_routed_down_panel_chunk_shape(int rows, int count, int first, int chunk);
+int fvk_v41_routed_down_panel_chunk_f32(const void *dInput, void *dOut, void *dStatus,
+                                      int rows, int count, int first, int chunk);
+int fvk_v41_routed_down_panel_chunk_module_abi(const void *data, size_t bytes);
 int fvk_have_v41_routed_down_panel_row(void);
 int fvk_v41_routed_down_panel_row_shape(int rows, int count, int row);
 int fvk_v41_routed_down_panel_row_f32(const void *dInput, void *dOut, void *dStatus,

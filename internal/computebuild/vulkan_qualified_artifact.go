@@ -170,6 +170,17 @@ func (r *vulkanSuccessorRegistry) normalizedBuildCommand(cfg *VulkanConfig) ([]s
 	commands[0] = "glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered-except-v41_index_scale_bf16}.comp|-o|$REPO/internal/compute/spirv/{registered-except-v41_index_scale_bf16}.spv"
 	materialize := "qualified-header|" + vulkanQualifiedIndexScaleStem + "|source_sha256=" + vulkanQualifiedIndexScaleSourceSHA + "|header=$REPO/" + vulkanQualifiedIndexScaleHeader + "|header_sha256=" + vulkanQualifiedIndexScaleHeaderSHA + "|module_sha256=" + vulkanQualifiedIndexScaleModuleSHA + "|bytes=2836|output=$REPO/internal/compute/spirv/" + vulkanQualifiedIndexScaleStem + ".spv"
 	commands = append([]string{commands[0], materialize}, commands[1:]...)
+	if r.usesQualifiedActivationChunk() {
+		commands[0] = "glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered-except-v41_index_scale_bf16-and-v41_routed_swiglu_panel_chunk}.comp|-o|$REPO/internal/compute/spirv/{registered-except-v41_index_scale_bf16-and-v41_routed_swiglu_panel_chunk}.spv"
+		chunk := "qualified-header|" + vulkanQualifiedActivationChunkStem + "|source_sha256=" + vulkanQualifiedActivationChunkSourceSHA + "|header=$REPO/" + vulkanQualifiedActivationChunkHeader + "|header_sha256=" + vulkanQualifiedActivationChunkHeaderSHA + "|module_sha256=" + vulkanQualifiedActivationChunkModuleSHA + "|bytes=6052|output=$REPO/internal/compute/spirv/" + vulkanQualifiedActivationChunkStem + ".spv"
+		commands = append(commands[:2:2], append([]string{chunk}, commands[2:]...)...)
+	}
+	if r.usesQualifiedDownChunk() {
+		commands[0] = "glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered-except-v41_index_scale_bf16-and-v41_routed_swiglu_panel_chunk-and-v41_routed_down_panel_chunk}.comp|-o|$REPO/internal/compute/spirv/{registered-except-v41_index_scale_bf16-and-v41_routed_swiglu_panel_chunk-and-v41_routed_down_panel_chunk}.spv"
+		down := "qualified-header|" + vulkanQualifiedDownChunkStem + "|source_sha256=" + vulkanQualifiedDownChunkSourceSHA + "|header=$REPO/" + vulkanQualifiedDownChunkHeader + "|header_sha256=" + vulkanQualifiedDownChunkHeaderSHA + "|module_sha256=" + vulkanQualifiedDownChunkModuleSHA + "|bytes=2768|output=$REPO/internal/compute/spirv/" + vulkanQualifiedDownChunkStem + ".spv"
+		commands = append(commands[:3:3], append([]string{down}, commands[3:]...)...)
+	}
+
 	hash, err = hashJSON(commands)
 	return commands, hash, err
 }

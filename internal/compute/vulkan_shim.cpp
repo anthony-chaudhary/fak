@@ -22,6 +22,7 @@
 // The default `go build` excludes this; only `-tags vulkan` links it.
 
 #include "vulkan_backend.h"
+#include "vulkan_memory_guard.h"
 
 #include <vulkan/vulkan.h>
 
@@ -170,6 +171,41 @@ bool environmentFlagEnabled(const char* name) {
 const bool g_preferCachedTransferStage =
     environmentFlagEnabled("FAK_VULKAN_STAGE_HOST_CACHED");
 
+VulkanMemoryGuard g_memoryGuard;
+
+bool configureMemoryGuard() {
+    return g_memoryGuard.configure(std::getenv("FAK_VULKAN_MEMORY_LIMIT_BYTES"));
+}
+
+VkResult allocateGuardedMemory(const VkMemoryAllocateInfo* info, VkDeviceMemory* memory) {
+    if (!configureMemoryGuard() || !g_memoryGuard.reserve(info->allocationSize)) {
+        *memory = VK_NULL_HANDLE;
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    VkResult result = vkAllocateMemory(g_dev, info, nullptr, memory);
+    if (result != VK_SUCCESS) {
+        g_memoryGuard.release(info->allocationSize);
+        *memory = VK_NULL_HANDLE;
+    } else {
+        g_memoryGuard.committed();
+    }
+    return result;
+}
+
+void freeGuardedMemory(VkDeviceMemory memory, VkDeviceSize bytes) {
+    vkFreeMemory(g_dev, memory, nullptr);
+    g_memoryGuard.release(bytes);
+}
+
+void reportMemoryGuard() {
+    if (g_memoryGuard.configured && g_memoryGuard.configurationValid) {
+        fprintf(stderr, "fak-vulkan-memory-guard: {\"scope\":\"all_vk_device_memory\",\"limit_bytes\":%llu,\"live_bytes\":%llu,\"peak_bytes\":%llu,\"refused_allocations\":%llu,\"configured\":true,\"configuration_valid\":true,\"accounting_valid\":%s}\n",
+            (unsigned long long)g_memoryGuard.limit, (unsigned long long)g_memoryGuard.live,
+            (unsigned long long)g_memoryGuard.peak, (unsigned long long)g_memoryGuard.refused,
+            g_memoryGuard.accountingValid ? "true" : "false");
+    }
+}
+
 bool memoryTypeUsesDeviceLocalHeap(uint32_t memoryType) {
     if (memoryType >= g_memprops.memoryTypeCount) return false;
     uint32_t heap = g_memprops.memoryTypes[memoryType].heapIndex;
@@ -269,7 +305,7 @@ void releaseWeightArena() {
     for (WeightArenaBlock& block : g_weightArena) {
         if (block.mem) {
             untrackDeviceAllocation(block.capacity, block.allocationDeviceLocal);
-            vkFreeMemory(g_dev, block.mem, nullptr);
+            freeGuardedMemory(block.mem, block.capacity);
         }
     }
     g_weightArena.clear();
@@ -336,7 +372,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -354,7 +390,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK: case K_V41_TAIL_ROPE_EXACT:
         return g_dp.otherRope;
     case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
-    case K_SWIGLU_Q4K_MATMUL_ADD: case K_V41_ROUTED_SWIGLU: case K_V41_ROUTED_SWIGLU_ID: case K_V41_ROUTED_SWIGLU_PANEL_ROW:
+    case K_SWIGLU_Q4K_MATMUL_ADD: case K_V41_ROUTED_SWIGLU: case K_V41_ROUTED_SWIGLU_ID: case K_V41_ROUTED_SWIGLU_PANEL_ROW: case K_V41_ROUTED_SWIGLU_PANEL_CHUNK:
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
@@ -367,7 +403,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_VERIFY_TILED:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_V41_ROUTED_DOWN_PANEL_ROW: case K_V41_INDEX_SCALE_BF16: case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
+    case K_V41_ROUTED_DOWN_PANEL_CHUNK: case K_V41_ROUTED_DOWN_PANEL_ROW: case K_V41_INDEX_SCALE_BF16: case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
     case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL: case K_V41_SCALE_EXACT: case K_V41_ENGRAM_ROW_DECODE: case K_V41_ROUTED_PUBLISH_SUM:
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_V41_Q2K_TOKEN_PANEL: case K_COUNT:
         return g_dp.otherUnclassified;
@@ -696,7 +732,7 @@ void destroyBuffer(Buffer* b) {
     } else if (b->mem) {
         untrackDeviceAllocation(b->allocationBytes, b->allocationDeviceLocal);
         if (b->ownsMapping) vkUnmapMemory(g_dev, b->mem);
-        vkFreeMemory(g_dev, b->mem, nullptr);
+        freeGuardedMemory(b->mem, b->allocationBytes);
     }
     delete b;
     releaseWeightArena();
@@ -812,7 +848,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
                 VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
                 ai.allocationSize = req.size;
                 ai.memoryTypeIndex = index;
-                return vkAllocateMemory(g_dev, &ai, nullptr, candidate);
+                return allocateGuardedMemory(&ai, candidate);
             }, out, selectedType, &allocationAttempted);
     };
 
@@ -858,7 +894,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     VkResult br = vkBindBufferMemory(g_dev, b->buf, b->mem, 0);
     if (br != VK_SUCCESS) {
         fprintf(stderr, "fak-vulkan: vkBindBufferMemory(%zu bytes) failed VkResult=%d\n", bytes, (int)br);
-        vkFreeMemory(g_dev, b->mem, nullptr);
+        freeGuardedMemory(b->mem, req.size);
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
         return nullptr;
@@ -1002,7 +1038,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
             VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
             ai.allocationSize = blockBytes;
             ai.memoryTypeIndex = index;
-            return vkAllocateMemory(g_dev, &ai, nullptr, candidate);
+            return allocateGuardedMemory(&ai, candidate);
         };
         // Preserve the UMA first choice. Heap eligibility uses the entire block;
         // retry only allocation pressure, with fresh private output per attempt.
@@ -1027,7 +1063,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     }
     VkResult br = vkBindBufferMemory(g_dev, b->buf, memory, 0);
     if (br != VK_SUCCESS) {
-        vkFreeMemory(g_dev, memory, nullptr);
+        freeGuardedMemory(memory, blockBytes);
         vkDestroyBuffer(g_dev, b->buf, nullptr);
         delete b;
         return nullptr;
@@ -1280,9 +1316,11 @@ void submitWait(VkCommandBuffer cmd) {
     VKCHECK(vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX));
 }
 
+// Only a completed batch may transfer its command to the batch-local idle slot.
+bool retainCompletedBatchCommand(VkCommandBuffer cmd);
 void endSubmitWait(VkCommandBuffer cmd) {
     submitWait(cmd);
-    vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    if (!retainCompletedBatchCommand(cmd)) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
 }
 
 VkCommandBuffer v41BeginCmdChecked() {
@@ -1325,7 +1363,10 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
             if (r != VK_SUCCESS) g_v41SubmissionPendingFailure = true;
         }
     }
-    if (!g_v41SubmissionPendingFailure) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    if (!g_v41SubmissionPendingFailure &&
+        !(r == VK_SUCCESS && submit && retainCompletedBatchCommand(cmd))) {
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    }
     if (r != VK_SUCCESS) {
         // Positive VkResult values (notably VK_TIMEOUT=2) must not collide with
         // this entrypoint's positive geometry/capability statuses.
@@ -1386,6 +1427,60 @@ void restoreCleanup() {
 // in g_batchSets and freed after the single submit. g_batchOps counts recorded ops so an
 // empty flush is a cheap no-op.
 VkCommandBuffer               g_batchCmd  = VK_NULL_HANDLE;
+// Drained command reuse, adapted from ggml's completed command-pool recycling:
+// ggml-org/llama.cpp 5e03a1ff450cae37a774684de55d14fb48b1f90b,
+// ggml/src/ggml-vulkan/ggml-vulkan.cpp:1114-1137 (MIT).
+// Copyright (c) 2023-2026 The ggml authors. See THIRD_PARTY_NOTICES.md.
+// Reset one buffer, never the shared pool: restore and one-shot commands have
+// independent ownership. This slot is separate from the active batch census.
+VkCommandBuffer g_batchIdleCmd = VK_NULL_HANDLE;
+VkDevice g_batchIdleDevice = VK_NULL_HANDLE;
+VkCommandPool g_batchIdlePool = VK_NULL_HANDLE;
+bool retainCompletedBatchCommand(VkCommandBuffer cmd) {
+    if (!g_batching || cmd != g_batchCmd || g_v41SubmissionPendingFailure ||
+        g_batchIdleCmd != VK_NULL_HANDLE) return false;
+    // batchFlush clears the active alias before any subsequent batchBegin.
+    g_batchIdleCmd = cmd;
+    g_batchIdleDevice = g_dev;
+    g_batchIdlePool = g_cmdpool;
+    return true;
+}
+void discardIdleBatchCommand() {
+    if (g_v41SubmissionPendingFailure) return;
+    if (g_batchIdleCmd != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(g_batchIdleDevice, g_batchIdlePool, 1, &g_batchIdleCmd);
+    }
+    g_batchIdleCmd = VK_NULL_HANDLE;
+    g_batchIdleDevice = VK_NULL_HANDLE;
+    g_batchIdlePool = VK_NULL_HANDLE;
+}
+VkCommandBuffer beginReusedBatchCommand() {
+    // The slot has a successful fence proof, but belongs only to its original
+    // device and pool. Observation-generation metadata is not execution policy.
+    if (g_batchIdleDevice != g_dev || g_batchIdlePool != g_cmdpool) {
+        g_submissionStatus = VK_ERROR_UNKNOWN;
+        return VK_NULL_HANDLE;
+    }
+    VkResult r = vkResetCommandBuffer(g_batchIdleCmd, 0);
+    if (r == VK_SUCCESS) {
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        r = vkBeginCommandBuffer(g_batchIdleCmd, &bi);
+    }
+    if (r != VK_SUCCESS) {
+        g_submissionStatus = r < VK_SUCCESS ? r : VK_ERROR_UNKNOWN;
+        if (r == VK_ERROR_DEVICE_LOST) g_v41SubmissionPendingFailure = true;
+        // Ordinary errors cannot make this unsubmitted command pending. Device
+        // loss instead retains the handle with all context owners until exit.
+        discardIdleBatchCommand();
+        return VK_NULL_HANDLE;
+    }
+    const VkCommandBuffer cmd = g_batchIdleCmd;
+    g_batchIdleCmd = VK_NULL_HANDLE;
+    g_batchIdleDevice = VK_NULL_HANDLE;
+    g_batchIdlePool = VK_NULL_HANDLE;
+    return cmd;
+}
 std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
 int                           g_batchOps  = 0;
@@ -1470,7 +1565,7 @@ const char* const kKernelNames[] = {
     "q6k_matmul", "q5k_matmul", "q3k_matmul", "rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add", "q2k_matmul",
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
-    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16",
+    "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -1577,10 +1672,11 @@ void tsBatchCollect() {
 }
 
 void batchBegin() {
-	if (g_v41SubmissionPendingFailure) return;
+	if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return;
 	if (g_batching) return;          // already recording — the model brackets each token
 	// A V4.1 window must latch command allocation/begin failures, not abort.
-	g_batchCmd = g_stepBatch ? v41BeginCmdChecked() : beginCmd();
+	g_batchCmd = g_batchIdleCmd != VK_NULL_HANDLE ? beginReusedBatchCommand() :
+        (g_stepBatch ? v41BeginCmdChecked() : beginCmd());
 	if (g_batchCmd == VK_NULL_HANDLE) return;
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
@@ -1750,7 +1846,7 @@ int stepRecordReadback(void* host, Buffer* src, size_t bytes) {
         g_transferCountersValid = false;
     }
     batchBegin();
-    return VK_SUCCESS;
+    return (int)g_submissionStatus;
 }
 
 // An operation that owns its own command buffer never joins a batch. Inside a
@@ -2906,9 +3002,11 @@ static int v41TokenGridModuleABI(const std::vector<char>& code, uint32_t expecte
 
 // Exact immutable module attestation; ordinary scalar/BF16 admission is unchanged.
 #include "v41_index_scale_bf16_spirv.h"
+#include "v41_routed_swiglu_chunk_spirv.h"
+#include "v41_routed_down_chunk_spirv.h"
 
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    const bool fixedV41 = &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
+    const bool fixedV41 = &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (&k == &g_kern[K_V41_Q3K_TOKEN_PANEL]) g_v41Q3TokenGridModule = false;
     if (&k == &g_kern[K_V41_Q2K_TOKEN_PANEL]) g_v41Q2TokenGridModule = false;
@@ -2923,6 +3021,10 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
         (nbuf != 3 || pcsize != 12 || v41TokenGridModuleABI(code, 0x52445031u) != 1)) return false;
     if (&k == &g_kern[K_V41_INDEX_SCALE_BF16] &&
         (nbuf != 3 || pcsize != 8 || !g_v41IndexerFloatControls || !v41IndexScaleBF16ABI(code))) return false;
+    if (&k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] &&
+        (nbuf != 4 || pcsize != 48 || !g_v41IndexerFloatControls || !v41RoutedSwiGLUChunkABI(code))) return false;
+    if (&k == &g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK] &&
+        (nbuf != 3 || pcsize != 16 || !v41RoutedDownChunkABI(code))) return false;
     if (q2GridABI < 0) return false;
     if (q3GridABI < 0) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
@@ -3069,21 +3171,24 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
     // initialization. They never flush a batch; they record only into a V4.1 step batch.
+    const bool routedChunk = &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK];
+    const bool downChunk = &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK];
     const bool routedID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] ||
         &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
-    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedID) && initializedStatus == nullptr) return false;
+    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedID || routedChunk || downChunk) && initializedStatus == nullptr) return false;
     if (initializedStatus != nullptr) {
         // The status binding is the last one of each status-owning kernel. Only
-        // the routed id pair owns more than one 16-byte record (one per pick).
-        const bool checkedBF16 = (&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16]) && k.nbuf == 3;
-        const bool routedSwiGLU = (&k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW]) && k.nbuf == 4;
+        // routed id, activation and down chunks can own multiple 16-byte records.
+        const bool checkedBF16 = (&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || downChunk) && k.nbuf == 3;
+        const bool routedSwiGLU = (&k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedChunk) && k.nbuf == 4;
         const bool routedSwiGLUID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] && k.nbuf == 5;
         const bool routedPublishSum = &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] && k.nbuf == 4;
         const bool routedFusedGateUp = &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] && k.nbuf == 20;
         const bool routedFusedDownSum = &k == &g_kern[K_V41_ROUTED_DOWN_SUM] && k.nbuf == 12;
         if ((!checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum && !routedFusedGateUp && !routedFusedDownSum) || !forceChecked || (g_batching && !g_stepBatch) ||
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
-            statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID) ||
+            statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID && !routedChunk && !downChunk) ||
+            ((routedChunk || downChunk) && ((groupsY != 2 && groupsY != 4 && groupsY != 8) || statusBytes != 16u * groupsY)) ||
             initializedStatus->bytes < statusBytes) return false;
     }
     // Ordinary scalar kernels inside a checked step also fail closed on
@@ -3458,6 +3563,18 @@ extern "C" int fvk_debug_memory_type_selection(uint32_t typeBits, uint32_t want,
 // ---- C ABI ----------------------------------------------------------------------
 extern "C" {
 
+void fvk_memory_guard_snapshot(uint64_t* limit, uint64_t* live, uint64_t* peak,
+                               uint64_t* refused, int* configured, int* configuration_valid,
+                               int* accounting_valid) {
+    *limit = g_memoryGuard.limit;
+    *live = g_memoryGuard.live;
+    *peak = g_memoryGuard.peak;
+    *refused = g_memoryGuard.refused;
+    *configured = g_memoryGuard.configured;
+    *configuration_valid = g_memoryGuard.configurationValid;
+    *accounting_valid = g_memoryGuard.accountingValid;
+}
+
 int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
                         uint32_t* device_id, uint32_t* driver_version,
                         uint32_t* api_version) {
@@ -3503,6 +3620,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // A re-init is not a device teardown and cannot establish quiescence. Keep
     // the poisoned context and its loaded capability bound until process exit.
     if (g_v41SubmissionPendingFailure) return 9;
+    if (!configureMemoryGuard()) {
+        fprintf(stderr, "fak-vulkan: invalid FAK_VULKAN_MEMORY_LIMIT_BYTES (expected 1..INT64_MAX)\n");
+        return 10;
+    }
+    reportMemoryGuard();
+    discardIdleBatchCommand(); // release against the old owning device/pool before re-init
     beginMemoryDeviceGeneration();
     g_have_v41_tail_rope_qk = 0;
 #ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
@@ -3875,6 +3998,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // Integer-only publication needs no floating-point execution modes.
     if (routedRowEnv && routedRowEnv[0] == '1' && routedRowEnv[1] == '\0') {
         buildKernel(g_kern[K_V41_ROUTED_DOWN_PANEL_ROW], P("v41_routed_down_panel_row.spv"), 3, 12);
+    }
+    const char* routedChunkEnv = std::getenv("FAK_V41_ROUTED_PANEL_CHUNK");
+    if (routedChunkEnv && routedChunkEnv[0] == '1' && routedChunkEnv[1] == '\0' && g_v41IndexerFloatControls) {
+        buildKernel(g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK], P("v41_routed_swiglu_panel_chunk.spv"), 4, 48);
+    }
+    const char* downChunkEnv = std::getenv("FAK_V41_ROUTED_DOWN_CHUNK");
+    if (downChunkEnv && downChunkEnv[0] == '1' && downChunkEnv[1] == '\0') {
+        buildKernel(g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK], P("v41_routed_down_panel_chunk.spv"), 3, 16);
     }
     const char* indexScaleBF16Env = std::getenv("FAK_V41_INDEX_SCALE_BF16");
     if (indexScaleBF16Env && indexScaleBF16Env[0] == '1' && indexScaleBF16Env[1] == '\0' && g_v41IndexerFloatControls) {
@@ -4405,6 +4536,316 @@ int fvk_v41_d2h(void* h, const void* d, size_t bytes) {
     return VK_SUCCESS;
 }
 
+// A synchronous loan of existing pool backing. MISS has no allocator/transport
+// effects. Host input/output may alias: staging copies all input before readback.
+static bool v41NormPanelLive(const Buffer* b) {
+    if (!b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE) return false;
+    if (b->weightArenaBound) {
+        return b->weightArenaBlock < g_weightArena.size() &&
+            g_weightArena[b->weightArenaBlock].deviceGeneration == g_memoryDeviceGeneration &&
+            g_weightArena[b->weightArenaBlock].mem == b->mem;
+    }
+    return b->deviceGeneration == g_memoryDeviceGeneration;
+}
+
+int fvk_v41_try_pool_norm_panel(float* host, const void* gain, int rows, int width,
+                                float eps, int* status) {
+    if (!status) return -1;
+    *status = VK_SUCCESS;
+    auto fail = [&]() {
+        *status = g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+        return -1;
+    };
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return fail();
+    if (!g_ready || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return fail();
+    if (!host || rows < 2 || rows > 64 || width <= 0 || !std::isfinite(eps) || eps <= 0 ||
+        (size_t)width > std::numeric_limits<size_t>::max() / (4u * (size_t)rows)) return fail();
+    const size_t bytes = 4u * (size_t)rows * (size_t)width;
+    Buffer* w = B(gain);
+    if (!v41NormPanelLive(w) || w->bytes < 4u * (size_t)width) return fail();
+    const bool step = stepBatchRecording();
+    if (g_batching && !step) return 0;
+    auto it = g_pool.find(bytes);
+    if (it == g_pool.end() || it->second.size() < 2 || it->second.size() > POOL_BUCKET_CAP || g_poolCount < 2) return 0;
+    auto& bucket = it->second;
+    Buffer* x = bucket[bucket.size()-1];
+    Buffer* y = bucket[bucket.size()-2];
+    auto eligible = [&](Buffer* b) {
+        return v41NormPanelLive(b) && b->bytes == bytes && b->allocationBytes >= bytes &&
+            b->allocationID != 0 && b->allocationDeviceLocal && !b->weightArenaBound &&
+            !b->offloadPage && !b->mapped && b->nativeCheckoutGeneration != 0 &&
+            b->nativeCheckoutGeneration != std::numeric_limits<uint64_t>::max();
+    };
+    if (!eligible(x) || !eligible(y) || x == y || x->buf == y->buf || x->mem == y->mem ||
+        !v41NormPanelLive(g_stage) || !g_stageMapped || g_stageCap < bytes) return 0;
+    size_t aligned = 0;
+    if (step) {
+        aligned = (g_upArenaUsed + 15u) & ~(size_t)15u;
+        if (!v41NormPanelLive(g_upArena) || !g_upArenaMapped || aligned < g_upArenaUsed ||
+            aligned > g_upArenaCap || bytes > g_upArenaCap - aligned) return 0;
+    }
+    // Ordinary pooled buffers own whole allocations. Conservative distinct memory
+    // rejects physical aliasing with all protected operands without guessing ranges.
+    Buffer* protectedBuffers[] = {w, g_stage, step ? g_upArena : nullptr};
+    for (Buffer* p : protectedBuffers) {
+        if (p && (x == p || y == p || x->buf == p->buf || y->buf == p->buf ||
+                  x->mem == p->mem || y->mem == p->mem)) return 0;
+    }
+    for (size_t i = 0; i + 2 < bucket.size(); ++i) {
+        if (bucket[i] == x || bucket[i] == y) return 0;
+    }
+    // All refusal predicates precede this atomic pair claim. The two pops cannot
+    // allocate or fail, so a partial claim never escapes and no rollback allocates.
+    bucket.pop_back(); bucket.pop_back(); g_poolCount -= 2;
+    advanceNativeCheckoutGeneration(x); advanceNativeCheckoutGeneration(y);
+    struct Loan {
+        Buffer* x; Buffer* y;
+        ~Loan() { fvk_free(x); fvk_free(y); }
+    } loan{x,y};
+    if (step) {
+        if (!stepRecordUpload(x, host, bytes)) return fail();
+    } else {
+        memcpy(g_stageMapped, host, bytes);
+        VkCommandBuffer cmd = v41BeginCmdChecked();
+        if (cmd == VK_NULL_HANDLE) return fail();
+        VkBufferCopy region{0,0,bytes};
+        vkCmdCopyBuffer(cmd, g_stage->buf, x->buf, 1, &region);
+        dpOneShot(g_dp.oneShotH2D);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return fail();
+        if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes)) g_transferCountersValid = false;
+    }
+    struct { int rows, n; float eps; } pc{rows,width,eps};
+    Buffer* bufs[] = {x,w,y};
+    if (!dispatch(g_kern[K_RMSNORM], bufs, &pc, sizeof(pc), (uint32_t)rows, 1, true)) return fail();
+    const int readStatus = fvk_v41_d2h(host, y, bytes);
+    if (readStatus != VK_SUCCESS) { *status = readStatus; return -1; }
+    // Readback resumes a step batch. A failed resume must not publish a result.
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    return 1;
+}
+
+int fvk_v41_try_ffn_norm_publication(float* host, float* published, const void* gain, int rows, int width,
+                                     float eps, int probe, int* status) {
+    if (!status) return -1;
+    *status = VK_SUCCESS;
+    auto fail = [&]() {
+        *status = g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+        return -1;
+    };
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return fail();
+    if (!g_ready || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return fail();
+    if (!host || rows < 2 || rows > 64 || width <= 0 || !std::isfinite(eps) || eps <= 0 ||
+        (size_t)width > std::numeric_limits<size_t>::max() / (4u * (size_t)rows)) return fail();
+    const size_t bytes = 4u * (size_t)rows * (size_t)width;
+    // Explicit host cost bound, not a memory reservation. A miss allocates nothing.
+    if (bytes > 1310720u || !fvk_have_v41_attention_bf16() ||
+        !fvk_v41_attention_bf16_count_supported((int)(bytes / 4))) return 0;
+    if (!probe && !published) return fail();
+    Buffer* w = B(gain);
+    if (!v41NormPanelLive(w) || w->bytes < 4u * (size_t)width) return fail();
+    const bool step = stepBatchRecording();
+    if (g_batching && !step) return 0;
+    auto it = g_pool.find(bytes);
+    if (it == g_pool.end() || it->second.size() < 2 || it->second.size() > POOL_BUCKET_CAP || g_poolCount < 2) return 0;
+    auto sit = g_pool.find(16);
+    if (sit == g_pool.end() || sit == it || sit->second.empty() ||
+        sit->second.size() > POOL_BUCKET_CAP || g_poolCount < 3) return 0;
+    auto& statusBucket = sit->second;
+    Buffer* verdict = statusBucket.back();
+    auto& bucket = it->second;
+    Buffer* x = bucket[bucket.size()-1];
+    Buffer* y = bucket[bucket.size()-2];
+    auto eligible = [&](Buffer* b, size_t required) {
+        return v41NormPanelLive(b) && b->bytes == required && b->allocationBytes >= required &&
+            b->allocationID != 0 && b->allocationDeviceLocal && !b->weightArenaBound &&
+            !b->offloadPage && !b->mapped && b->nativeCheckoutGeneration != 0 &&
+            b->nativeCheckoutGeneration != std::numeric_limits<uint64_t>::max();
+    };
+    if (!eligible(x, bytes) || !eligible(y, bytes) || !eligible(verdict, 16) || x == y || x->buf == y->buf || x->mem == y->mem || verdict == x || verdict == y ||
+        verdict->buf == x->buf || verdict->buf == y->buf || verdict->mem == x->mem || verdict->mem == y->mem ||
+        !v41NormPanelLive(g_stage) || !g_stageMapped || g_stageCap < bytes + 16u) return 0;
+    size_t aligned = 0;
+    if (step) {
+        aligned = (g_upArenaUsed + 15u) & ~(size_t)15u;
+        if (!v41NormPanelLive(g_upArena) || !g_upArenaMapped || aligned < g_upArenaUsed ||
+            aligned > g_upArenaCap || bytes > g_upArenaCap - aligned) return 0;
+    }
+    // Ordinary pooled buffers own whole allocations. Conservative distinct memory
+    // rejects physical aliasing with all protected operands without guessing ranges.
+    Buffer* protectedBuffers[] = {w, g_stage, step ? g_upArena : nullptr};
+    for (Buffer* p : protectedBuffers) {
+        if (p && (x == p || y == p || verdict == p || x->buf == p->buf || y->buf == p->buf || verdict->buf == p->buf ||
+                  x->mem == p->mem || y->mem == p->mem || verdict->mem == p->mem)) return 0;
+    }
+    auto aliasesLoan = [&](Buffer* other) {
+        if (!other) return false;
+        for (Buffer* claimed : {x, y, verdict}) {
+            if (other == claimed || other->buf == claimed->buf || other->mem == claimed->mem) return true;
+        }
+        return false;
+    };
+    for (size_t i = 0; i + 2 < bucket.size(); ++i) {
+        if (aliasesLoan(bucket[i])) return 0;
+    }
+    for (size_t i = 0; i + 1 < statusBucket.size(); ++i) {
+        if (aliasesLoan(statusBucket[i])) return 0;
+    }
+    // Probe and commit run under the same caller lock. The probe changes no owner,
+    // generation, counters or payload, permitting bounded host allocation afterward.
+    if (probe) return 1;
+    // All refusal predicates precede this atomic triple claim. The three pops cannot
+    // allocate or fail, so a partial claim never escapes and no rollback allocates.
+    bucket.pop_back(); bucket.pop_back(); statusBucket.pop_back(); g_poolCount -= 3;
+    advanceNativeCheckoutGeneration(x); advanceNativeCheckoutGeneration(y); advanceNativeCheckoutGeneration(verdict);
+    struct Loan {
+        Buffer* x; Buffer* y; Buffer* verdict;
+        ~Loan() { fvk_free(x); fvk_free(y); fvk_free(verdict); }
+    } loan{x,y,verdict};
+    if (step) {
+        if (!stepRecordUpload(x, host, bytes)) return fail();
+    } else {
+        memcpy(g_stageMapped, host, bytes);
+        VkCommandBuffer cmd = v41BeginCmdChecked();
+        if (cmd == VK_NULL_HANDLE) return fail();
+        VkBufferCopy region{0,0,bytes};
+        vkCmdCopyBuffer(cmd, g_stage->buf, x->buf, 1, &region);
+        dpOneShot(g_dp.oneShotH2D);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return fail();
+        if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes)) g_transferCountersValid = false;
+    }
+    struct { int rows, n; float eps; } pc{rows,width,eps};
+    Buffer* bufs[] = {x,w,y};
+    if (!dispatch(g_kern[K_RMSNORM], bufs, &pc, sizeof(pc), (uint32_t)rows, 1, true)) return fail();
+    const int publishStatus = fvk_v41_bf16_publish_f32(y, x, verdict, (int)(bytes / 4), 10);
+    if (publishStatus != VK_SUCCESS) { *status = publishStatus; return -1; }
+    const int readStatus = fvk_v41_d2h(host, y, bytes);
+    if (readStatus != VK_SUCCESS) { *status = readStatus; return -1; }
+    // Readback resumes a step batch. A failed resume must not publish a result.
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    void* sources[] = {verdict, x};
+    const size_t offsets[] = {0, 16};
+    const size_t lengths[] = {16, bytes};
+    const int publicationRead = fvk_v41_d2h_many(published, bytes + 16, 2, sources, offsets, lengths);
+    if (publicationRead != VK_SUCCESS) { *status = publicationRead; return -1; }
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    return 1;
+}
+
+// Query-only heterogeneous pool loan: preserves both original capacity keys.
+int fvk_v41_try_query_norm_publication(float* host, float* published, const void* gain, int rows, int width, int capacityRows,
+                                     float eps, int probe, int* status) {
+    if (!status) return -1;
+    *status = VK_SUCCESS;
+    auto fail = [&]() {
+        *status = g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+        return -1;
+    };
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return fail();
+    if (!g_ready || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return fail();
+    if (!host || rows < 2 || rows > 64 || width != 1280 || capacityRows < rows || capacityRows > 64 || !std::isfinite(eps) || eps <= 0 ||
+        (size_t)width > std::numeric_limits<size_t>::max() / (4u * (size_t)rows)) return fail();
+    const size_t bytes = 4u * (size_t)rows * (size_t)width;
+    // Explicit host cost bound, not a memory reservation. A miss allocates nothing.
+    if (bytes > 327680u || !fvk_have_v41_attention_bf16() ||
+        !fvk_v41_attention_bf16_count_supported((int)(bytes / 4))) return 0;
+    if (!probe && !published) return fail();
+    Buffer* w = B(gain);
+    if (!v41NormPanelLive(w) || w->bytes < 4u * (size_t)width) return fail();
+    const bool step = stepBatchRecording();
+    if (!step) return 0; // Cold serving Prefill owns this checked recording window.
+    const size_t smallBytes = 4u * (size_t)capacityRows * 1280u;
+    const size_t largeBytes = 4u * (size_t)capacityRows * 5120u;
+    auto it = g_pool.find(smallBytes);
+    auto lit = g_pool.find(largeBytes);
+    if (it == g_pool.end() || lit == g_pool.end() || it == lit || it->second.empty() || lit->second.empty() ||
+        it->second.size() > POOL_BUCKET_CAP || lit->second.size() > POOL_BUCKET_CAP) return 0;
+    auto sit = g_pool.find(16);
+    if (sit == g_pool.end() || sit == it || sit == lit || sit->second.empty() ||
+        sit->second.size() > POOL_BUCKET_CAP || g_poolCount < 3) return 0;
+    auto& statusBucket = sit->second;
+    Buffer* verdict = statusBucket.back();
+    auto& bucket = it->second;
+    auto& largeBucket = lit->second;
+    Buffer* x = bucket.back();
+    Buffer* y = largeBucket.back();
+    auto eligible = [&](Buffer* b, size_t required) {
+        return v41NormPanelLive(b) && b->bytes == required && b->allocationBytes >= required &&
+            b->allocationID != 0 && b->allocationDeviceLocal && !b->weightArenaBound &&
+            !b->offloadPage && !b->mapped && b->nativeCheckoutGeneration != 0 &&
+            b->nativeCheckoutGeneration != std::numeric_limits<uint64_t>::max();
+    };
+    if (!eligible(x, smallBytes) || !eligible(y, largeBytes) || !eligible(verdict, 16) || x == y || x->buf == y->buf || x->mem == y->mem || verdict == x || verdict == y ||
+        verdict->buf == x->buf || verdict->buf == y->buf || verdict->mem == x->mem || verdict->mem == y->mem ||
+        !v41NormPanelLive(g_stage) || !g_stageMapped || g_stageCap < bytes + 16u) return 0;
+    size_t aligned = 0;
+    if (step) {
+        aligned = (g_upArenaUsed + 15u) & ~(size_t)15u;
+        if (!v41NormPanelLive(g_upArena) || !g_upArenaMapped || aligned < g_upArenaUsed ||
+            aligned > g_upArenaCap || bytes > g_upArenaCap - aligned) return 0;
+    }
+    // Ordinary pooled buffers own whole allocations. Conservative distinct memory
+    // rejects physical aliasing with all protected operands without guessing ranges.
+    Buffer* protectedBuffers[] = {w, g_stage, step ? g_upArena : nullptr};
+    for (Buffer* p : protectedBuffers) {
+        if (p && (x == p || y == p || verdict == p || x->buf == p->buf || y->buf == p->buf || verdict->buf == p->buf ||
+                  x->mem == p->mem || y->mem == p->mem || verdict->mem == p->mem)) return 0;
+    }
+    auto aliasesLoan = [&](Buffer* other) {
+        if (!other) return false;
+        for (Buffer* claimed : {x, y, verdict}) {
+            if (other == claimed || other->buf == claimed->buf || other->mem == claimed->mem) return true;
+        }
+        return false;
+    };
+    for (size_t i = 0; i + 1 < bucket.size(); ++i) {
+        if (aliasesLoan(bucket[i])) return 0;
+    }
+    for (size_t i = 0; i + 1 < largeBucket.size(); ++i) {
+        if (aliasesLoan(largeBucket[i])) return 0;
+    }
+    for (size_t i = 0; i + 1 < statusBucket.size(); ++i) {
+        if (aliasesLoan(statusBucket[i])) return 0;
+    }
+    // Probe and commit run under the same caller lock. The probe changes no owner,
+    // generation, counters or payload, permitting bounded host allocation afterward.
+    if (probe) return 1;
+    // All refusal predicates precede this atomic triple claim. The three pops cannot
+    // allocate or fail, so a partial claim never escapes and no rollback allocates.
+    bucket.pop_back(); largeBucket.pop_back(); statusBucket.pop_back(); g_poolCount -= 3;
+    advanceNativeCheckoutGeneration(x); advanceNativeCheckoutGeneration(y); advanceNativeCheckoutGeneration(verdict);
+    struct Loan {
+        Buffer* x; Buffer* y; Buffer* verdict;
+        ~Loan() { fvk_free(x); fvk_free(y); fvk_free(verdict); }
+    } loan{x,y,verdict};
+    if (!stepRecordUpload(x, host, bytes)) return fail();
+    const int inputDispatch = fvk_v41_bf16_publish_f32(x, y, verdict, (int)(bytes / 4), 5);
+    if (inputDispatch != VK_SUCCESS) { *status = inputDispatch; return -1; }
+    // Preserve the input envelope before the output kernel resets the same status.
+    // Numeric verdicts are consumed row-first by the owner after all transport.
+    const int inputRead = fvk_v41_d2h(published, verdict, 16);
+    if (inputRead != VK_SUCCESS) { *status = inputRead; return -1; }
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || !stepBatchRecording()) return fail();
+    struct { int rows, n; float eps; } pc{rows,width,eps};
+    Buffer* bufs[] = {y,w,x};
+    if (!dispatch(g_kern[K_RMSNORM], bufs, &pc, sizeof(pc), (uint32_t)rows, 1, true)) return fail();
+    const int publishStatus = fvk_v41_bf16_publish_f32(x, y, verdict, (int)(bytes / 4), 6);
+    if (publishStatus != VK_SUCCESS) { *status = publishStatus; return -1; }
+    const int readStatus = fvk_v41_d2h(host, x, bytes);
+    if (readStatus != VK_SUCCESS) { *status = readStatus; return -1; }
+    // Readback resumes a step batch. A failed resume must not publish a result.
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    void* sources[] = {verdict, y};
+    const size_t offsets[] = {0, 16};
+    const size_t lengths[] = {16, bytes};
+    const int publicationRead = fvk_v41_d2h_many(published + 4, bytes + 16, 2, sources, offsets, lengths);
+    if (publicationRead != VK_SUCCESS) { *status = publicationRead; return -1; }
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || (step && !stepBatchRecording())) return fail();
+    return 1;
+}
+
 // fvk_v41_d2h for several regions behind one host fence (#13820): each copy
 // lands at its caller-chosen staging offset, so k status records and rows cost
 // one submit instead of k. Regions are ordered and disjoint in the host image.
@@ -4652,7 +5093,7 @@ int fvk_batch_flush_status(void) {
     fvk_batch_flush();
     const int status = (int)g_submissionStatus;
     if (status == VK_SUCCESS && g_stepBatch) batchBegin();
-    return status;
+    return (int)g_submissionStatus;
 }
 bool fvk_batch_foreign_active(void) { return g_batching && !g_stepBatch; }
 int fvk_v41_step_batch_begin(void) {
@@ -4662,7 +5103,10 @@ int fvk_v41_step_batch_begin(void) {
     g_stepBatch = true;
     g_batchHazardsArmed = 0;
     batchBegin();
-    if (!g_batching) { g_stepBatch = false; return 1; }
+    if (!g_batching) {
+        g_stepBatch = false;
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 1;
+    }
     return 0;
 }
 int fvk_v41_step_batch_end(void) {
@@ -6089,6 +6533,62 @@ int fvk_v41_routed_swiglu_panel_row_f32(const void* dGate, const void* dUp, void
     }
     return (int)g_submissionStatus;
 }
+int fvk_have_v41_routed_swiglu_panel_chunk(void) {
+    const char* enabled = std::getenv("FAK_V41_ROUTED_PANEL_CHUNK");
+    return enabled && enabled[0] == '1' && enabled[1] == '\0' && g_ready && g_v41IndexerFloatControls &&
+        g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK].pipe != VK_NULL_HANDLE &&
+        g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK].nbuf == 4 && g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK].pcsize == 48;
+}
+
+int fvk_v41_routed_swiglu_panel_chunk_shape(int rows, int count, int row, int chunk) {
+    if (rows < 1 || rows > 64 || count <= 0 || row < 0 || (chunk != 2 && chunk != 4 && chunk != 8) || row > rows - chunk || uint32_t(chunk) > g_maxComputeWorkGroupCountY || g_maxComputeWorkGroupCountX == 0) return 0;
+    const uint64_t bytes = uint64_t(rows) * uint64_t(count) * 4u;
+    return bytes <= INT32_MAX && bytes <= g_maxStorageBufferRange;
+}
+
+int fvk_v41_routed_swiglu_panel_chunk_f32(const void* dGate, const void* dUp, void* dOut, void* dStatus,
+                              int rows, int count, int row, int chunk, float limit, const float* weights) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_routed_swiglu_panel_chunk()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if ((g_batching && !g_stepBatch) || !fvk_v41_routed_swiglu_panel_chunk_shape(rows, count, row, chunk) || !std::isfinite(limit) || !weights ||
+        g_maxComputeWorkGroupCountX == 0) return 2;
+    for (int i = 0; i < chunk; ++i) if (!std::isfinite(weights[i])) return 2;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    if (bytes > std::numeric_limits<size_t>::max() || bytes > std::numeric_limits<VkDeviceSize>::max()) return 2;
+    Buffer* bufs[4] = {B(dGate), B(dUp), B(dOut), B(dStatus)};
+    const uint64_t required[4] = {uint64_t(rows) * bytes, uint64_t(rows) * bytes, uint64_t(chunk) * bytes, uint64_t(chunk) * 16u};
+    for (int i = 0; i < 4; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            required[i] > bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    // Conservative whole-allocation ranges; every addition is checked above.
+    for (int i = 0; i < 4; ++i) for (int j = i + 1; j < 4; ++j) {
+        if (bufs[i] == bufs[j] || bufs[i]->buf == bufs[j]->buf ||
+            (bufs[i]->mem == bufs[j]->mem && bufs[i]->memoryOffset < bufs[j]->memoryOffset + bufs[j]->bytes &&
+             bufs[j]->memoryOffset < bufs[i]->memoryOffset + bufs[i]->bytes)) return 2;
+    }
+    struct Push { uint32_t count, rowOffset, rows; float limit; float weights[8]; } pc{};
+    pc.count = uint32_t(count); pc.rowOffset = uint32_t(uint64_t(row) * uint64_t(count));
+    pc.rows = uint32_t(chunk); pc.limit = limit;
+    std::memcpy(pc.weights, weights, size_t(chunk) * sizeof(float));
+    static_assert(sizeof(Push) == 48 && offsetof(Push, rowOffset) == 4 && offsetof(Push, rows) == 8 &&
+                  offsetof(Push, limit) == 12 && offsetof(Push, weights) == 16,
+                  "V4.1 chunk push ABI requires eight contiguous binary32 route weights");
+    // groups <= ceil(INT32_MAX/64), so every active grid-stride index stays below 2^31.
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK], bufs, &pc, sizeof(pc), groups, uint32_t(chunk), true, bufs[3], uint32_t(chunk) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+int fvk_v41_routed_swiglu_panel_chunk_module_abi(const void* data, size_t bytes) {
+    if (!data || bytes == 0 || bytes % 4 != 0) return 0;
+    const char* first = static_cast<const char*>(data);
+    return v41RoutedSwiGLUChunkABI(std::vector<char>(first, first + bytes)) ? 1 : 0;
+}
 // V4.1 routed-expert id dispatch (fak#13820): one dispatch per stage over every
 // routed pick of a layer. ADAPT (MIT, Copyright (c) 2023-2026 The ggml authors):
 // llama.cpp ggml-vulkan mul_mat_vec_id @ccdbe290533f68154ede46e0618622eebcb6c070
@@ -6571,6 +7071,55 @@ int fvk_v41_routed_down_panel_row_f32(const void* dInput, void* dOut, void* dSta
     return (int)g_submissionStatus;
 }
 
+int fvk_have_v41_routed_down_panel_chunk(void) {
+    const char* enabled = std::getenv("FAK_V41_ROUTED_DOWN_CHUNK");
+    return enabled && enabled[0] == '1' && enabled[1] == '\0' && g_ready && v41HaveBF16Checked() &&
+        g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK].pipe != VK_NULL_HANDLE &&
+        g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK].nbuf == 3 && g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK].pcsize == 16;
+}
+
+int fvk_v41_routed_down_panel_chunk_shape(int rows, int count, int row, int chunk) {
+    if (rows < 1 || rows > 64 || row < 0 || (chunk != 2 && chunk != 4 && chunk != 8) || row > rows - chunk || uint32_t(chunk) > g_maxComputeWorkGroupCountY || !v41BF16CheckedCountSupported(count)) return 0;
+    const uint64_t bytes = uint64_t(rows) * uint64_t(count) * 4u;
+    return bytes <= INT32_MAX && bytes <= g_maxStorageBufferRange && (g_maxBufferBytes == 0 || bytes <= g_maxBufferBytes);
+}
+
+int fvk_v41_routed_down_panel_chunk_f32(const void* dInput, void* dOut, void* dStatus, int rows, int count, int row, int chunk) {
+    const int state = fvk_v41_attention_bf16_state();
+    if (state != 0) return state;
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_routed_down_panel_chunk()) return 3;
+    if (!fvk_v41_routed_down_panel_chunk_shape(rows, count, row, chunk)) return 2;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    Buffer* bufs[3] = {B(dInput), B(dOut), B(dStatus)};
+    const uint64_t required[3] = {uint64_t(rows) * bytes, uint64_t(chunk) * bytes, uint64_t(chunk) * 16u};
+    for (int i = 0; i < 3; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            required[i] > bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    for (int i = 0; i < 3; ++i) for (int j = i + 1; j < 3; ++j) {
+        if (bufs[i] == bufs[j] || bufs[i]->buf == bufs[j]->buf ||
+            (bufs[i]->mem == bufs[j]->mem && bufs[i]->memoryOffset < bufs[j]->memoryOffset + bufs[j]->bytes &&
+             bufs[j]->memoryOffset < bufs[i]->memoryOffset + bufs[i]->bytes)) return 2;
+    }
+    // Site 21 is the existing ordinary RoutedDown policy, never caller-controlled.
+    struct Push { uint32_t count, site, rowOffset, rows; } pc{uint32_t(count), 21u, uint32_t(uint64_t(row) * uint64_t(count)), uint32_t(chunk)};
+    static_assert(sizeof(Push) == 16 && offsetof(Push, count) == 0 && offsetof(Push, site) == 4 && offsetof(Push, rowOffset) == 8 && offsetof(Push, rows) == 12,
+                  "routed down chunk push ABI is count, site, row offset and rows");
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK], bufs, &pc, sizeof(pc), groups, uint32_t(chunk), true, bufs[2], uint32_t(chunk) * 16u)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_v41_routed_down_panel_chunk_module_abi(const void* data, size_t bytes) {
+    if (!data || bytes == 0 || bytes % 4 != 0) return 0;
+    const char* first = static_cast<const char*>(data);
+    return v41RoutedDownChunkABI(std::vector<char>(first, first + bytes)) ? 1 : 0;
+}
+
 // Optional fixed-site 25 strict multiply plus checked BF16 publication.
 int fvk_have_v41_index_scale_bf16(void) {
     const char* enabled = std::getenv("FAK_V41_INDEX_SCALE_BF16");
@@ -7037,11 +7586,14 @@ void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOu
 }
 
 int fvk_argmax_f32(const void* dLogits, int n) {
-    if (g_batching) batchFlush(); // host fence: the logits must be materialized first
     Buffer* idx = (Buffer*)fvk_malloc(sizeof(int));
     struct { int n; } pc{n};
     Buffer* bufs[2] = {B((void*)dLogits), idx};
-    dispatch(g_kern[K_ARGMAX], bufs, &pc, sizeof(pc), 1); // not batching now → submits
+    // The logits producer and reduction share the active command buffer. The
+    // ordinary dispatch dependency orders their accesses; only the host index
+    // read needs a fence. Flush still ends the batch, as this entrypoint did before.
+    dispatch(g_kern[K_ARGMAX], bufs, &pc, sizeof(pc), 1);
+    if (g_batching) batchFlush();
     int h = 0;
     copyDeviceToHost(&h, idx, sizeof(int));
     fvk_free(idx);

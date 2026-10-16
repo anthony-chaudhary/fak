@@ -57,7 +57,7 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention`)
 		sort.Strings(sortedWant)
 		sort.Strings(windows)
 		if !reflect.DeepEqual(windows, sortedWant) {
-			t.Fatalf("Windows current shader names = %v, want current exact86 names", windows)
+			t.Fatalf("Windows current shader names = %v, want current exact87 names", windows)
 		}
 		copy := CurrentVulkanShaderRegistryV4()
 		copy[0] = "forged"

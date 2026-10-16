@@ -112,7 +112,7 @@ func TestV41QueryNormDeviceDispatch(t *testing.T) {
 			// Direct output parity is non-vacuous even when later attention hides
 			// a normalization error. Free poisoning also exercises owned readback.
 			input := append([]float32(nil), b.input...)
-			got, err := s.v41State().queryNorm(0, input)
+			got, err := s.v41State().queryNorm.normFunc()(0, input)
 			if err != nil {
 				t.Fatal(err)
 			}

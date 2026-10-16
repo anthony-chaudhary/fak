@@ -18,6 +18,11 @@ var (
 	v41BF16PublishCalls  atomic.Int64
 	v41BF16ResidentCalls atomic.Int64
 	v41BF16DeferredCalls atomic.Int64
+	// Panel calls/rows count completed transport with a valid status envelope,
+	// including attributed numeric faults. They are a subset of PublishCalls,
+	// not an additional publication total or a count of attempted dispatches.
+	v41BF16PanelCalls atomic.Int64
+	v41BF16PanelRows  atomic.Int64
 )
 
 // v41DeferredBF16PublishEnv keeps every ordinary publication on its synchronous
@@ -32,6 +37,8 @@ func enableV41BF16Witness() (stop func()) {
 	v41BF16PublishCalls.Store(0)
 	v41BF16ResidentCalls.Store(0)
 	v41BF16DeferredCalls.Store(0)
+	v41BF16PanelCalls.Store(0)
+	v41BF16PanelRows.Store(0)
 	v41IndexWeightScaleCalls.Store(0)
 	v41HostBF16Witness.Store(true)
 	return func() { v41HostBF16Witness.Store(false) }
@@ -182,18 +189,7 @@ func (s *Session) v41BindBF16Publication() *v41BF16PublicationBinding {
 	core := func(layer int, site string, values []float32, resident *v41BF16ResidentInput) (result []float32, cause error) {
 		s.ensureOpenBackendSession()
 		stage := "payload"
-		closeSelected := func(primary error) {
-			if s.halFailure == nil {
-				s.halFailure = primary
-			}
-			if s.halClosed {
-				return
-			}
-			// A secondary Close panic must not replace the selected failure
-			// or leave this session eligible for another operation.
-			defer func() { s.halClosed = true; _ = recover() }()
-			s.closeBackendOwned()
-		}
+		closeSelected := s.v41CloseSelectedBF16Failure
 		closeFailure := func(err error) error {
 			if s.halFailure != nil {
 				closeSelected(s.halFailure)
@@ -204,10 +200,7 @@ func (s *Session) v41BindBF16Publication() *v41BF16PublicationBinding {
 				closeSelected(err)
 				return err
 			}
-			selected := &V41BF16BoundaryOperationError{Layer: layer, Site: site, Cause: err}
-			closed := &BackendForwardOperationError{Backend: backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-bf16-publish", Layer: layer, Stage: stage, Cause: selected}
-			closeSelected(closed)
-			return closed
+			return s.v41CloseBF16PublicationFailure(backend, layer, site, stage, err)
 		}
 		defer func() {
 			if r := recover(); r != nil {
@@ -489,4 +482,28 @@ func v41DeviceOnlyBF16Bound(s *Session) bool {
 		return false
 	}
 	return !full || s.v41AttentionBF16Func() != nil
+}
+
+// Shared by ordinary row publication and the sealed panel result. The typed
+// boundary, stage, sticky failure and completion-safe close stay identical.
+func (s *Session) v41CloseSelectedBF16Failure(primary error) {
+	if s.halFailure == nil {
+		s.halFailure = primary
+	}
+	if s.halClosed {
+		return
+	}
+	defer func() { s.halClosed = true; _ = recover() }()
+	s.closeBackendOwned()
+}
+
+func (s *Session) v41CloseBF16PublicationFailure(backend compute.Backend, layer int, site, stage string, err error) error {
+	if s.halFailure != nil {
+		s.v41CloseSelectedBF16Failure(s.halFailure)
+		return s.halFailure
+	}
+	selected := &V41BF16BoundaryOperationError{Layer: layer, Site: site, Cause: err}
+	closed := &BackendForwardOperationError{Backend: backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-bf16-publish", Layer: layer, Stage: stage, Cause: selected}
+	s.v41CloseSelectedBF16Failure(closed)
+	return closed
 }

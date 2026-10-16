@@ -134,18 +134,74 @@ func (v *vulkanBackend) V41BF16PublishDeferred(input Tensor, site uint32) (out T
 
 // V41ReadDeferred reads every status record and row with one fvk_v41_d2h_many
 // and frees every record, on success and failure alike.
-func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Tensor) (verdicts []error, values [][]float32, err error) {
+func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Tensor) ([]error, [][]float32, error) {
+	return v.v41ReadDeferredLayout(statuses, rows, nil, 0, false)
+}
+
+// An explicit mode selects the packed-panel layout. Invalid width cannot fall
+// back to legacy typed-arena materialization or obtain an independence grant.
+func (v *vulkanBackend) v41ReadDeferredLayout(statuses []V41DeferredStatus, rows []Tensor, panelRows []int, width int, packed bool) (verdicts []error, values [][]float32, err error) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	records := make([]*vulkanBuf, 0, len(statuses))
+	bodyComplete := false
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = ClassifyVulkanPanic(recovered, "V41ReadDeferred")
+		if !packed {
+			// Preserve the legacy reader's cleanup and panic behavior.
+			if recovered := recover(); recovered != nil {
+				err = ClassifyVulkanPanic(recovered, "V41ReadDeferred")
+			}
+			v.freeDeferredLocked(records...)
+			if err != nil {
+				verdicts, values = nil, nil
+			}
+			return
 		}
-		v.freeDeferredLocked(records...)
-		if err != nil {
-			verdicts, values = nil, nil
+		recovered := recover()
+		failIncomplete := func(p any) {
+			if err != nil {
+				return
+			}
+			if primary, ok := p.(error); ok && primary != nil {
+				err = primary
+				return
+			}
+			if p == nil {
+				p = "incomplete packed deferred read or retirement"
+			}
+			err = ClassifyVulkanPanic(p, "V41ReadDeferred")
 		}
+		if !bodyComplete || recovered != nil {
+			failIncomplete(recovered)
+		}
+		cleanupComplete := false
+		defer func() {
+			if !cleanupComplete {
+				failIncomplete(nil)
+			}
+			if err != nil {
+				verdicts, values = nil, nil
+			}
+		}()
+		release := func(b *vulkanBuf) {
+			done := false
+			defer func() {
+				p := recover()
+				if !done {
+					failIncomplete(p)
+				}
+			}()
+			v.freeDeferredLocked(b)
+			done = true
+		}
+		func() {
+			// Register every physical release before invoking any of them.
+			// Reverse registration preserves the ordinary release order.
+			for i := len(records) - 1; i >= 0; i-- {
+				defer release(records[i])
+			}
+		}()
+		cleanupComplete = true
 	}()
 	invalid := func(reason string) error {
 		return &BackendError{Backend: "vulkan", Site: "V41ReadDeferred", Class: VulkanClassInvalidGeometry, Err: ErrVulkanInvalidGeometry, Message: reason}
@@ -153,11 +209,26 @@ func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Ten
 	for _, st := range statuses {
 		b, ok := st.Record.buf.(*vulkanBuf)
 		if ok && b != nil && b.ptr != nil && st.Record.be == v {
+			if packed {
+				duplicate := false
+				for _, accepted := range records {
+					if accepted.ptr == b.ptr {
+						duplicate = true
+						break
+					}
+				}
+				if duplicate {
+					continue
+				}
+			}
 			records = append(records, b)
 		}
 	}
 	if v == nil || len(records) != len(statuses) || len(statuses)+len(rows) == 0 {
 		return nil, nil, invalid("every status record must be live storage owned by this backend")
+	}
+	if packed && (len(statuses) > 64 || len(rows) > 32) {
+		return nil, nil, invalid("packed deferred descriptor count exceeds cohort bounds")
 	}
 	srcs := make([]*vulkanBuf, 0, len(statuses)+len(rows))
 	sizes := make([]int, 0, cap(srcs))
@@ -178,7 +249,35 @@ func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Ten
 		}
 		srcs, sizes = append(srcs, b), append(sizes, n*4)
 	}
-	image, readErr := vulkanV41ReadImage("V41ReadDeferred", srcs, sizes, len(rows))
+	logicalRows := len(rows)
+	if packed {
+		var ok bool
+		logicalRows, ok = v41DeferredPanelRows(rows, panelRows, width)
+		if !ok || len(statuses) > 64 || verdictCount > 64 {
+			return nil, nil, invalid("packed deferred logical row layout exceeds cohort bounds")
+		}
+		// A physical owner appears at most once, including status/output aliases.
+		seen := make(map[unsafe.Pointer]bool, len(srcs))
+		for _, b := range srcs {
+			if seen[b.ptr] {
+				return nil, nil, invalid("packed deferred storage aliases another physical region")
+			}
+			seen[b.ptr] = true
+		}
+		// Independently check aggregate transfer alignment/addition before allocation.
+		total := 0
+		for _, size := range sizes {
+			if size <= 0 || total > math.MaxInt-15 {
+				return nil, nil, invalid("packed deferred transfer extent overflow")
+			}
+			total = (total + 15) &^ 15
+			if size > math.MaxInt-total {
+				return nil, nil, invalid("packed deferred transfer extent overflow")
+			}
+			total += size
+		}
+	}
+	image, readErr := vulkanV41ReadImage("V41ReadDeferred", srcs, sizes, logicalRows)
 	if readErr != nil {
 		return nil, nil, readErr
 	}
@@ -188,7 +287,12 @@ func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Ten
 			verdicts = append(verdicts, v41DeferredVerdict("vulkan", st, image.region(i, sizes[i])[16*r:16*r+16]))
 		}
 	}
-	values = image.materializeRows(sizes, len(statuses))
+	if packed {
+		values = image.materializePanelRows(sizes, len(statuses), panelRows, width, logicalRows)
+	} else {
+		values = image.materializeRows(sizes, len(statuses))
+	}
+	bodyComplete = true
 	return verdicts, values, nil
 }
 
@@ -251,4 +355,24 @@ func (v *vulkanBackend) v41ReadDeferredOwned(statuses []V41DeferredStatus, rows 
 		return nil, V41DeferredReadResult{}, err
 	}
 	return verdicts, V41DeferredReadResult{count: len(values), state: &v41DeferredReadState{rows: values, independent: len(rows) >= 2 && len(values) == len(rows)}}, nil
+}
+
+// The original interface must contain this exact concrete backend pointer.
+// A wrapper's promoted private method does not qualify its overridden reader.
+func (v *vulkanBackend) v41BindDeferredPanelReader(original V41DeferredStatusBackend) V41DeferredPanelReader {
+	canonical, ok := original.(*vulkanBackend)
+	if !ok || canonical != v || v == nil {
+		return nil
+	}
+	return v.v41ReadDeferredPanels
+}
+
+func (v *vulkanBackend) v41ReadDeferredPanels(statuses []V41DeferredStatus, panels []Tensor, rows []int, width int) ([]error, V41DeferredReadResult, error) {
+	verdicts, values, err := v.v41ReadDeferredLayout(statuses, panels, rows, width, true)
+	if err != nil {
+		return nil, V41DeferredReadResult{}, err
+	}
+	// Panel materialization always allocates independent rows, including singleton
+	// regions mixed with chunks. Mint only after physical status cleanup succeeds.
+	return verdicts, V41DeferredReadResult{count: len(values), state: &v41DeferredReadState{rows: values, independent: true}}, nil
 }

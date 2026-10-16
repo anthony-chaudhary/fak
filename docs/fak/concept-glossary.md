@@ -1301,3 +1301,45 @@ Constructs the bounded rotary-table owner metadata for one or two fixed session 
 Private canonical shared-attention host output ownership carrier. A successful private core invocation returns a fresh zero row or a validated readback clone allocated before tensor retirement; failure returns no output ownership.
 
 **Distinct from:** Unlike v41SharedAttentionBinding this value owns one completed host output rather than callback provenance. Unlike v41SharedAttentionContinuation and v41SharedAttentionValidation it grants no input validation or execution eligibility. Unlike v41SharedAttentionRows it is fresh output, not borrowed KV descriptors. Ordinary callbacks and borrowed resident outputs cannot acquire this carrier; final composer width and finite checks remain mandatory.
+
+
+### TryV41PoolNormPanel
+
+Bounded canonical Vulkan FFN normalization operation that atomically borrows already-free exact-size native buffers and existing staging capacity, sharing scalar-required gain preparation and refusing before side effects when capacity is unavailable.
+
+**Distinct from:** An exclusive temporary allocator-buffer execution loan with selected-failure no-replay semantics; distinct from Pool (session), which owns bounded LRU session state. This operation creates neither a new persistent pool nor a device-memory budget grant.
+
+
+### RequestedContextTokens
+
+RequestedContextTokens preserves the caller requested native context token count in a header-derived memory projection, including unknown and refused results.
+
+**Distinct from:** This is the caller input before memory resolution; native-context-resolution derives the fitting runtime token count.
+
+
+### ResolvedContextTokens
+
+ResolvedContextTokens is the native context token count derived by the runtime context resolver for the activated-ring memory projection snapshot; zero with UNKNOWN means unresolved.
+
+**Distinct from:** This is the resolved model window after sizing, while RequestedContextTokens preserves the caller input even when resolution cannot run.
+
+
+### serveGGUFMemoryPlanForArm
+
+serveGGUFMemoryPlanForArm derives classed weight, scratch and context memory demands from a GGUF header for the selected native serve load arm.
+
+**Distinct from:** This function produces byte demands for a chosen arm; native-context-resolution derives a token window from sizing inputs and the activated-ring fallback may replace the resulting full-residency plan.
+
+
+### serveFullPlanFitTooBig
+
+serveFullPlanFitTooBig recognizes a typed compute FitError whose verdict is FitTooBig, enabling the activated-expert fallback only after a full-residency capacity refusal.
+
+**Distinct from:** This predicate recognizes an existing typed refusal and produces no memory plan; serveGGUFMemoryPlanForArm produces the demands that a fit guard judges.
+
+
+### VulkanMemoryGuardSnapshot
+
+Bounded current-state projection of the Vulkan explicit-memory reservation cap: configured limit, live and successful-allocation peak bytes, refusal count, and configuration/accounting validity across every memory heap.
+
+**Distinct from:** Observes the allocator reservation ledger; it is neither an admission decision nor readiness, physical residency, driver-overhead accounting, or proof of target cgroup fit. C ABI, Go value and debug label project this same state.

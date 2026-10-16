@@ -56,9 +56,10 @@ type perfDetail struct {
 // perfSource carries the HTTP-edge observation: arrival time, closed client
 // class, and whether the sender marked a readiness canary or health probe.
 type perfSource struct {
-	client    string
-	synthetic bool
-	began     time.Time
+	observation *requestObservation
+	client      string
+	synthetic   bool
+	began       time.Time
 }
 
 type perfSourceKey struct{}
@@ -92,6 +93,7 @@ func (src perfSource) elapsed(fallback time.Duration) time.Duration {
 
 func (src perfSource) apply(rec *perfledger.Record) {
 	rec.Client, rec.Synthetic = src.client, src.synthetic
+	applyRequestObservation(src.observation, rec)
 }
 
 // perfDetailFromCompletion lifts the planner-reported model and native decode

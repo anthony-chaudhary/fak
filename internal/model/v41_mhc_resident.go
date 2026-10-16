@@ -307,15 +307,22 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 // collapse returns the BF16 hc_pre rows sum_h pre[h]*stream[h] of streams under
 // coeffs, owned on the host for the sublayer that consumes them.
 func (r *v41MHCResident) collapse(layer int, streams *v41DeviceStreams, coeffs compute.Tensor) ([][]float32, error) {
-	return r.collapseWithRetention(layer, streams, coeffs, true)
+	rows, _, err := r.collapseRetained(layer, streams, coeffs, true, false)
+	return rows, err
 }
 
 // collapseWithRetention keeps the selected dispatch, readback and validation
 // boundary even when no host consumer needs an independently owned copy.
 func (r *v41MHCResident) collapseWithRetention(layer int, streams *v41DeviceStreams, coeffs compute.Tensor, retain bool) ([][]float32, error) {
+	rows, _, err := r.collapseRetained(layer, streams, coeffs, retain, false)
+	return rows, err
+}
+
+func (r *v41MHCResident) collapseRetained(layer int, streams *v41DeviceStreams, coeffs compute.Tensor, retain, wantOwned bool) ([][]float32, *v41OwnedFFNCollapse, error) {
 	s := r.d.s
 	rows, H := streams.Rows(), streams.Hidden()
 	var out [][]float32
+	var owned *v41OwnedFFNCollapse
 	err := r.d.guard(layer, "pre-collapse", func(stage *string) error {
 		*stage = "pre-collapse"
 		t, err := r.d.op.V41MHCPre(streams.Tensor(), coeffs, rows, H)
@@ -335,9 +342,14 @@ func (r *v41MHCResident) collapseWithRetention(layer int, streams *v41DeviceStre
 			if !valid {
 				return errV41MHCResult
 			}
-			out = make([][]float32, rows)
-			for row := range out {
-				out[row] = flat[row*H : (row+1)*H : (row+1)*H]
+			if wantOwned {
+				owned = newV41OwnedFFNCollapse(r, flat, rows, H)
+				out = owned.rows
+			} else {
+				out = make([][]float32, rows)
+				for row := range out {
+					out[row] = flat[row*H : (row+1)*H : (row+1)*H]
+				}
 			}
 			return nil
 		}
@@ -358,7 +370,7 @@ func (r *v41MHCResident) collapseWithRetention(layer int, streams *v41DeviceStre
 
 		return nil
 	})
-	return out, err
+	return out, owned, err
 }
 
 // post uploads the sublayer rows and returns the fresh BF16 post-mixed panel
@@ -530,25 +542,33 @@ func (r *v41MHCResident) beginLayer(layer, iters int, hcEps, rmsEps float32) ([]
 }
 
 func (r *v41MHCResident) ffnInput(layer int, attnOut [][]float32, iters int, hcEps, rmsEps float32) ([][]float32, error) {
+	rows, _, err := r.ffnInputRetained(layer, attnOut, iters, hcEps, rmsEps, false)
+	return rows, err
+}
+func (r *v41MHCResident) ffnInputOwned(layer int, attnOut [][]float32, iters int, hcEps, rmsEps float32) (*v41OwnedFFNCollapse, error) {
+	_, owned, err := r.ffnInputRetained(layer, attnOut, iters, hcEps, rmsEps, true)
+	return owned, err
+}
+func (r *v41MHCResident) ffnInputRetained(layer int, attnOut [][]float32, iters int, hcEps, rmsEps float32, wantOwned bool) ([][]float32, *v41OwnedFFNCollapse, error) {
 	updated, err := r.post(layer, attnOut, r.streams, r.layer.attn)
 	if err != nil {
 		r.abort()
-		return nil, err
+		return nil, nil, err
 	}
 	if r.layer.updated, err = newV41DeviceStreams(r.d.s.Backend, updated); err != nil {
 		r.d.s.Backend.Free(updated)
 		r.abort()
-		return nil, r.d.fail(layer, "post-mix", "result", err)
+		return nil, nil, r.d.fail(layer, "post-mix", "result", err)
 	}
 	if r.layer.ffn, err = r.mixes(layer, r.layer.updated, "mhc.ffn_mixes.weight", "mhc.ffn_scale", "mhc.ffn_base", iters, hcEps, rmsEps); err != nil {
 		r.abort()
-		return nil, err
+		return nil, nil, err
 	}
-	rows, err := r.collapse(layer, r.layer.updated, r.layer.attn)
+	rows, owned, err := r.collapseRetained(layer, r.layer.updated, r.layer.attn, true, wantOwned)
 	if err != nil {
 		r.abort()
 	}
-	return rows, err
+	return rows, owned, err
 }
 
 func (r *v41MHCResident) finishLayer(layer int, moe [][]float32) error {

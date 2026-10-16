@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "vulkan-memory-reservation-snapshot",
+      "canonical": "VulkanMemoryGuardSnapshot",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Bounded current-state projection of the Vulkan explicit-memory reservation cap: configured limit, live and successful-allocation peak bytes, refusal count, and configuration/accounting validity across every memory heap.",
+      "distinction": "Observes the allocator reservation ledger; it is neither an admission decision nor readiness, physical residency, driver-overhead accounting, or proof of target cgroup fit. C ABI, Go value and debug label project this same state.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [
+        "fvk_memory_guard_snapshot",
+        "memory_guard"
+      ],
+      "grounding": "VulkanMemoryGuardSnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -10,39 +10,40 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: glmcfgdiag <gguf-shard>")
-		os.Exit(2)
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "usage: glmcfgdiag <gguf-shard>")
+		return 2
 	}
-	path := os.Args[1]
-	f, err := ggufload.Open(path)
+	f, err := ggufload.Open(args[0])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "open:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "open:", err)
+		return 1
 	}
 	cfg, err := f.Config()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "config:", err)
+		return 1
 	}
-	fmt.Printf("ModelType=%s\n", cfg.ModelType)
-	fmt.Printf("NumLayers=%d NumHeads=%d HiddenSize=%d\n", cfg.NumLayers, cfg.NumHeads, cfg.HiddenSize)
-	fmt.Printf("QKNopeHeadDim=%d VHeadDim=%d QKRopeHeadDim=%d\n", cfg.QKNopeHeadDim, cfg.VHeadDim, cfg.QKRopeHeadDim)
-	fmt.Printf("KVLoraRank=%d QLoraRank=%d\n", cfg.KVLoraRank, cfg.QLoraRank)
-	fmt.Printf("NumExperts=%d NumExpertsPerTok=%d\n", cfg.NumExperts, cfg.NumExpertsPerTok)
+	fmt.Fprintf(stdout, "ModelType=%s\n", cfg.ModelType)
+	fmt.Fprintf(stdout, "NumLayers=%d NumHeads=%d HiddenSize=%d\n", cfg.NumLayers, cfg.NumHeads, cfg.HiddenSize)
+	fmt.Fprintf(stdout, "QKNopeHeadDim=%d VHeadDim=%d QKRopeHeadDim=%d\n", cfg.QKNopeHeadDim, cfg.VHeadDim, cfg.QKRopeHeadDim)
+	fmt.Fprintf(stdout, "KVLoraRank=%d QLoraRank=%d\n", cfg.KVLoraRank, cfg.QLoraRank)
+	fmt.Fprintf(stdout, "NumExperts=%d NumExpertsPerTok=%d\n", cfg.NumExperts, cfg.NumExpertsPerTok)
 
 	// The dim fix (c8f3606): per-head MLA dims must resolve to 192/256, NOT 512/512.
-	ok := cfg.QKNopeHeadDim == 192 && cfg.VHeadDim == 256
-	if ok {
-		fmt.Println("DIMS_OK qkNope=192 vHead=256")
-	} else {
-		fmt.Printf("DIMS_WRONG want qkNope=192 vHead=256 got %d/%d\n", cfg.QKNopeHeadDim, cfg.VHeadDim)
-		os.Exit(3)
+	if cfg.QKNopeHeadDim == 192 && cfg.VHeadDim == 256 {
+		fmt.Fprintln(stdout, "DIMS_OK qkNope=192 vHead=256")
+		return 0
 	}
+	fmt.Fprintf(stdout, "DIMS_WRONG want qkNope=192 vHead=256 got %d/%d\n", cfg.QKNopeHeadDim, cfg.VHeadDim)
+	return 3
 }
+
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }

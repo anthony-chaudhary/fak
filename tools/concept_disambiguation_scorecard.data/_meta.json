@@ -1462,6 +1462,11 @@
           "category": "incidental",
           "reason": "Function-local buffer identity predicate in compressed publication RoPE; it tests whether either already-owned table slot aliases a tensor and introduces no independently addressable cache mechanism.",
           "token": "cacheOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "External Ruff tooling directory literal in the exact generator skip-directory set; copied unchanged for filesystem selection parity, with no FAK cache allocation, ownership, or reusable cache concept.",
+          "token": "ruff_cache"
         }
       ],
       "exclude": [
@@ -1778,6 +1783,7 @@
         "resetClaudeKeychainCache",
         "retireBranchCache",
         "reuseRatio",
+        "ruff_cache",
         "runCacheValueGateScore",
         "runCachevalueQwen38Campaign",
         "runDisambiguationCacheSourceSelfTest",
@@ -2062,6 +2068,21 @@
           "category": "incidental",
           "reason": "tree speculative attention mask validator",
           "token": "ValidateTreeAttentionMask"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
+          "token": "v41AttentionBF16OwnedReader"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
+          "token": "v41AttentionBF16ReadOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability, adapter or status-to-owned-row materialization facet of the positioned TryV41AttentionBF16ReadOwned operation (v41-attention-bf16-owned-read); no independent attention algorithm, owner or persistent state.",
+          "token": "v41AttentionBF16OwnedRow"
         }
       ],
       "exclude": [
@@ -2070,6 +2091,15 @@
       ],
       "id": "attention",
       "ignore": [
+        "BuildTreeAttentionMask",
+        "EstimatedAttention",
+        "EstimatedAttentionSeconds",
+        "ExecutionPrefillAttention",
+        "MetalFallbackPrefillAttentionCPU",
+        "PrefillAttentionSupported",
+        "PrefillAttentionTiming",
+        "TreeAttentionMask",
+        "ValidateTreeAttentionMask",
         "attentionContinuation",
         "attentionFunc",
         "attentionRows",
@@ -2084,24 +2114,17 @@
         "attn_q_normed",
         "attnkvanorm",
         "bindCanonicalSharedAttention",
-        "BuildTreeAttentionMask",
         "clearSharedAttention",
         "coldAttentionOwner",
         "copySharedAttentionFrom",
         "estimated_attention_s",
-        "EstimatedAttention",
-        "EstimatedAttentionSeconds",
         "executevulkanattentionwithdequantonce",
-        "ExecutionPrefillAttention",
         "linear_attn_out",
         "linear_attn_qkv_mixed",
-        "MetalFallbackPrefillAttentionCPU",
         "mg_prefill_attn",
         "mg_prefill_attn_supported",
         "newV41SharedAttentionBinding",
         "newV41SharedAttentionContinuation",
-        "PrefillAttentionSupported",
-        "PrefillAttentionTiming",
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
         "qwenfullattentionlayers",
@@ -2110,15 +2133,16 @@
         "sharedAttentionBinding",
         "sharedAttentionFunc",
         "tattn",
-        "TreeAttentionMask",
+        "v41AttentionBF16OwnedReader",
+        "v41AttentionBF16OwnedRow",
+        "v41AttentionBF16ReadOwned",
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
         "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
         "v41PrepareSharedAttentionRows",
         "v41PrepareSharedAttentionWithRows",
-        "v41SharedAttentionCore",
-        "ValidateTreeAttentionMask"
+        "v41SharedAttentionCore"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -4396,6 +4420,16 @@
           "category": "incidental",
           "reason": "Exact helper-digest linker pin referenced by the build descriptor and checked by existing handoff code; identity data rather than a separate guard. The digest alone does not establish live supervision or artifact qualification.",
           "token": "v41EPOwnerGuardBinarySHA256"
+        },
+        {
+          "category": "incidental",
+          "reason": "C ABI serialization alias of positioned VulkanMemoryGuardSnapshot (vulkan-memory-reservation-snapshot); projects the same allocator ledger and introduces no independent guard decision.",
+          "token": "fvk_memory_guard_snapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Debug serialization label for positioned VulkanMemoryGuardSnapshot (vulkan-memory-reservation-snapshot); projects the same allocator ledger and introduces no independent guard decision.",
+          "token": "memory_guard"
         }
       ],
       "exclude": [
@@ -4568,6 +4602,7 @@
         "formatGuardCompactionWitness",
         "fullAggregates",
         "full_tree_gate_retry",
+        "fvk_memory_guard_snapshot",
         "gateCommentQuality",
         "gateDir",
         "gateGitHygieneBypass",
@@ -4806,6 +4841,7 @@
         "mcp__fak_guard__sandbox_reset",
         "mcp__fak_guard__sandbox_state",
         "mcp__fak_guard__sandbox_write",
+        "memory_guard",
         "nativeAdmissionAggregate",
         "nativeAdmissionPolicyForBudget",
         "nativeReasonMessageRoleUnsupported",
@@ -13951,6 +13987,16 @@
           "category": "incidental",
           "reason": "SupportsV41IndexScaleBF16 is a concrete optional compute capability predicate for the immutable-module-qualified fixed-site index weight scaling operation, not a product support maturity claim.",
           "token": "SupportsV41IndexScaleBF16"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional backend capability predicate for the immutable-module-qualified routed activation chunk; it is not a product support or maturity claim.",
+          "token": "SupportsV41RoutedSwiGLUPanelChunk"
+        },
+        {
+          "category": "incidental",
+          "reason": "Effect-free optional backend capability predicate for exact routed down chunk operands, not a maturity assessment or persistent support state.",
+          "token": "SupportsV41RoutedDownPanelChunk"
         }
       ],
       "exclude": [
@@ -14083,7 +14129,9 @@
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
         "SupportsV41IndexScaleBF16",
+        "SupportsV41RoutedDownPanelChunk",
         "SupportsV41RoutedDownPanelRow",
+        "SupportsV41RoutedSwiGLUPanelChunk",
         "SupportsV41RoutedSwiGLUPanelRow",
         "TensorCoverageArchSchema",
         "TensorCoverageCanonicalMap",
@@ -15464,6 +15512,11 @@
           "category": "incidental",
           "reason": "Private text presentation helper for existing content-free session-journal refusal records; it formats bounded rows without materializing a new runtime artifact or introducing a separate rendering contract.",
           "token": "renderSessionJournalRefusals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local closure decoding already-read packed float32 bytes into independent logical host rows within the deferred reader; no rendering or independent materialization pipeline.",
+          "token": "materializePanelRows"
         }
       ],
       "id": "render-materialize",
@@ -15509,6 +15562,7 @@
         "incumbentRenderSpec",
         "incumbentRenderSummary",
         "indexrenderhits",
+        "materializePanelRows",
         "materializeRows",
         "materializeSessionMoveCheckpoint",
         "materialized",
@@ -16783,6 +16837,26 @@
           "category": "incidental",
           "reason": "Pure geometry and overflow validator for one routed SwiGLU panel row; it introduces no scheduling or independent planning mechanism.",
           "token": "PlanV41RoutedSwiGLUPanelRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded geometry result containing panel extent, row offset and byte counts for the existing routed SwiGLU arithmetic; it is not a separate planning mechanism.",
+          "token": "V41RoutedSwiGLUPanelChunkPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure bounded geometry constructor for the existing routed SwiGLU activation chunk; it does not introduce an independent planner or scheduling policy.",
+          "token": "PlanV41RoutedSwiGLUPanelChunk"
+        },
+        {
+          "category": "incidental",
+          "reason": "Validated scalar geometry and byte extents for the fixed site21 routed down publication chunk, with no retained state or independent scheduling policy.",
+          "token": "V41RoutedDownPanelChunkPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Effect-free geometry constructor for fixed site21 routed down publication chunks; no resource reservation or independently executable plan.",
+          "token": "PlanV41RoutedDownPanelChunk"
         }
       ],
       "exclude": [
@@ -16871,6 +16945,8 @@
         "PlanUnits",
         "PlanUnregisteredResidue",
         "PlanV41EPOwnerBuild",
+        "PlanV41RoutedDownPanelChunk",
+        "PlanV41RoutedSwiGLUPanelChunk",
         "PlanV41RoutedSwiGLUPanelRow",
         "PlanningEffect",
         "PressuredSnapshotCandidates",
@@ -16897,6 +16973,8 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "UncoveredCandidateClasses",
+        "V41RoutedDownPanelChunkPlan",
+        "V41RoutedSwiGLUPanelChunkPlan",
         "V41RoutedSwiGLUPanelRowPlan",
         "ValidateListPlan",
         "WalkPlanners",
@@ -17398,6 +17476,31 @@
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
           "token": "writePoolMemberLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private interface, implementation or C ABI facet of the positioned TryV41PoolNormPanel operation (pool-v41-ffn-norm-panel); it grants no independently addressable pool, persistent owner or allocation budget.",
+          "token": "v41PoolNormPanelBackend"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private interface, implementation or C ABI facet of the positioned TryV41PoolNormPanel operation (pool-v41-ffn-norm-panel); it grants no independently addressable pool, persistent owner or allocation budget.",
+          "token": "v41TryPoolNormPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private interface, implementation or C ABI facet of the positioned TryV41PoolNormPanel operation (pool-v41-ffn-norm-panel); it grants no independently addressable pool, persistent owner or allocation budget.",
+          "token": "fvk_v41_try_pool_norm_panel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local bounded row-count constant for the positioned TryV41PoolNormPanel operation; it sizes an existing-buffer attempt and is neither a pool owner nor an allocation authority.",
+          "token": "v41FFNPoolPanelRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local bounded row-count constant for the positioned TryV41PoolNormPanel operation; it sizes an existing-buffer attempt and is neither a pool owner nor an allocation authority.",
+          "token": "v41FFNPoolPanelFallbackRows"
         }
       ],
       "exclude": [
@@ -17424,6 +17527,7 @@
         "PooledSpeedupPct",
         "canonicalPoolLane",
         "defaultPoolCap",
+        "fvk_v41_try_pool_norm_panel",
         "indexer_k_pooled",
         "kvpoolbytes",
         "leasePooled",
@@ -17471,6 +17575,10 @@
         "unpoolable",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
+        "v41FFNPoolPanelFallbackRows",
+        "v41FFNPoolPanelRows",
+        "v41PoolNormPanelBackend",
+        "v41TryPoolNormPanel",
         "validPoolOperands",
         "validPoolState",
         "withPoolLaneLock",
@@ -17568,6 +17676,16 @@
           "category": "incidental",
           "reason": "Private predicate checking existing backend dtype capabilities against copied head metadata after the metadata lock is released.",
           "token": "v41HeadLayoutSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private shared deferred status reader implementation parameterized by bounded physical-to-logical row geometry; no independent layout authority or persistent state.",
+          "token": "v41ReadDeferredLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Call-local physical-output row-count descriptors used by the routed cohort deferred read; no persistent layout owner or independent layout algorithm.",
+          "token": "readLayout"
         }
       ],
       "id": "layout",
@@ -17586,11 +17704,13 @@
         "gitDailyDayLayout",
         "imageLayoutVersion",
         "layouts",
+        "readLayout",
         "usesmlamoelayout",
         "v41DeferredLayout",
         "v41HeadLayout",
         "v41HeadLayoutSnapshot",
         "v41HeadLayoutSupported",
+        "v41ReadDeferredLayout",
         "v41TypedReadbackLayout"
       ],
       "known_tokens": [],
@@ -18045,6 +18165,11 @@
           "category": "incidental",
           "reason": "Nullable elapsed nanosecond metric including sampling and bookkeeping; not loop control or kernel-only timing.",
           "token": "DecodeLoopNS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private atomic one-use state of the owned FFN normalization carrier; records whether that single logical loop has consumed its input, not a general execution loop or independently scheduled loop controller.",
+          "token": "loopClaimed"
         }
       ],
       "id": "loop",
@@ -18095,6 +18220,7 @@
         "findcodexlooparchivemanifest",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",
+        "loopClaimed",
         "loopHealthAlert",
         "loopHealthCost",
         "loopRegionDequeue",

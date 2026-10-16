@@ -2,42 +2,55 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/portabilitylab"
 )
 
-func main() {
-	out := flag.String("out", "", "write authoritative JSON report")
-	work := flag.String("work", "", "clean-room directory (default: temporary)")
-	flag.Parse()
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("portability-lab", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("out", "", "write authoritative JSON report")
+	work := fs.String("work", "", "clean-room directory (default: temporary)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	fail := func(err error) int {
+		fmt.Fprintln(stderr, "portability-lab:", err)
+		return 1
+	}
 	root := *work
-	cleanup := func() {}
 	if root == "" {
 		var err error
 		root, err = os.MkdirTemp("", "fak-portability-lab-")
 		if err != nil {
-			fatal(err)
+			return fail(err)
 		}
-		cleanup = func() { os.RemoveAll(root) }
+		defer os.RemoveAll(root)
 	}
-	defer cleanup()
 	r, err := portabilitylab.Run(root)
 	if *out != "" {
 		if e := os.MkdirAll(filepath.Dir(*out), 0755); e != nil {
-			fatal(e)
+			return fail(e)
 		}
 		if e := portabilitylab.WriteReport(*out, r); e != nil {
-			fatal(e)
+			return fail(e)
 		}
 	}
 	b, _ := json.MarshalIndent(r, "", "  ")
-	fmt.Println(string(b))
+	fmt.Fprintln(stdout, string(b))
 	if err != nil {
-		fatal(err)
+		return fail(err)
 	}
+	return 0
 }
-func fatal(err error) { fmt.Fprintln(os.Stderr, "portability-lab:", err); os.Exit(1) }

@@ -56,19 +56,28 @@ const (
 // PrefillTPS needs at least MinPrefillRateTokens uncached tokens. DecodeTPS is the
 // inter-token rate after the first token: (completion-1) / (e2e-ttft).
 type Record struct {
-	Schema           string        `json:"schema"`
-	UnixMS           int64         `json:"unix_ms"`
-	FinishReason     string        `json:"finish_reason,omitempty"`
-	Locality         string        `json:"locality,omitempty"`
-	PromptTokens     int           `json:"prompt_tokens"`
-	CompletionTokens int           `json:"completion_tokens"`
-	CachedTokens     int           `json:"cached_tokens"`
-	CacheRegime      string        `json:"cache_regime,omitempty"`
-	E2EMS            float64       `json:"e2e_ms"`
-	TTFTMS           float64       `json:"ttft_ms,omitempty"`
-	PrefillTPS       float64       `json:"prefill_tps,omitempty"`
-	DecodeTPS        float64       `json:"decode_tps,omitempty"`
-	NativeTiming     *NativeTiming `json:"native_timing,omitempty"`
+	RequestID            string         `json:"request_id,omitempty"`
+	TraceID              string         `json:"trace_id,omitempty"`
+	WorkloadSHA256       string         `json:"workload_sha256,omitempty"`
+	WorkloadIdentityMode string         `json:"workload_identity_mode,omitempty"`
+	ConfigSHA256         string         `json:"config_sha256,omitempty"`
+	ConfigIdentityMode   string         `json:"config_identity_mode,omitempty"`
+	LoadLifecycle        *LoadLifecycle `json:"load_lifecycle,omitempty"`
+	Schema               string         `json:"schema"`
+	UnixMS               int64          `json:"unix_ms"`
+	FinishReason         string         `json:"finish_reason,omitempty"`
+	Locality             string         `json:"locality,omitempty"`
+	PromptTokens         int            `json:"prompt_tokens"`
+	CompletionTokens     int            `json:"completion_tokens"`
+	CachedTokens         int            `json:"cached_tokens"`
+	CacheRegime          string         `json:"cache_regime,omitempty"`
+	E2EMS                float64        `json:"e2e_ms"`
+	TTFTMS               float64        `json:"ttft_ms,omitempty"`
+	PrefillTPS           float64        `json:"prefill_tps,omitempty"`
+	DecodeTPS            float64        `json:"decode_tps,omitempty"`
+	NativeTiming         *NativeTiming  `json:"native_timing,omitempty"`
+
+	PartialNativePhases *PartialNativePhases `json:"partial_native_phases,omitempty"`
 	// Error is the failure class of a turn that did not complete (one of the Error*
 	// constants); empty on a served turn. Status is the HTTP status the client got:
 	// 200 when the failure came after the stream was committed, 499 for a client cancel,
@@ -92,6 +101,17 @@ type Record struct {
 	Identity
 
 	BenchEvidence *BenchEvidence `json:"bench_evidence,omitempty"`
+}
+
+// LoadLifecycle binds a request admission to one installed model profile.
+// InitialAfterLoad names the first admission, including probes and failures;
+// it does not assert cache warmth or include load cost in request latency.
+type LoadLifecycle struct {
+	LoadID           string  `json:"load_id"`
+	RecordedUnixMS   int64   `json:"recorded_unix_ms"`
+	LoadMS           float64 `json:"load_ms,omitempty"`
+	RequestOrdinal   uint64  `json:"request_ordinal"`
+	InitialAfterLoad bool    `json:"initial_after_load"`
 }
 
 // Identity names the server that wrote a row, so a window spanning a planner
@@ -134,6 +154,19 @@ type Engine struct {
 	SpecRounds         int    `json:"spec_rounds,omitempty"`
 	SpecDraftTokens    int    `json:"spec_draft_tokens,omitempty"`
 	SpecAcceptedTokens int    `json:"spec_accepted_tokens,omitempty"`
+}
+
+// PartialNativePhases preserves request-owned phase observations even when
+// generation fails. Accumulated request-owned elapsed measurements may include
+// CPU work, waits and incomplete phases; they are not GPU compute time, complete
+// phase times or throughput measurements. A nil duration is unobserved;
+// a nonnil zero is an observed zero-duration phase.
+type PartialNativePhases struct {
+	Scope               string   `json:"scope"`
+	PrefillMS           *float64 `json:"prefill_ms,omitempty"`
+	DecodeMS            *float64 `json:"decode_ms,omitempty"`
+	PrefillObservations uint64   `json:"prefill_observations,omitempty"`
+	DecodeObservations  uint64   `json:"decode_observations,omitempty"`
 }
 
 // NativeTiming is the engine-measured phase split for a native request. It is

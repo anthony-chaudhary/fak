@@ -8,8 +8,6 @@ import (
 	"runtime"
 	"testing"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 type v41GroupedWeightCompletionReader struct {

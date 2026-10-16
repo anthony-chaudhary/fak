@@ -107,6 +107,8 @@ func BlockDiagonalWHTRotate(vec []float32, blockSize int) error {
 // BlockDiagonalWHTInverse is the inverse block-diagonal Walsh-Hadamard transform alias.
 // Because the normalized Walsh-Hadamard transform is involutory (H^2 = I), the inverse
 // is identical to the forward transform.
+// This alias is unsigned only. For explicit sign vectors, use SignedBlockWHT.Inverse,
+// which applies the signs after the transform.
 func BlockDiagonalWHTInverse(vec []float32, blockSize int) error {
 	return BlockDiagonalWHT(vec, blockSize)
 }

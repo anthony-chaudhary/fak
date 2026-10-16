@@ -676,3 +676,39 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Vulkan drained batch command-buffer reuse
+
+`internal/compute/vulkan_shim.cpp` adapts the completed-command reuse pattern from
+`ggml/src/ggml-vulkan/ggml-vulkan.cpp` lines 1114–1137 in llama.cpp at revision
+`5e03a1ff450cae37a774684de55d14fb48b1f90b`:
+https://github.com/ggml-org/llama.cpp/blob/5e03a1ff450cae37a774684de55d14fb48b1f90b/ggml/src/ggml-vulkan/ggml-vulkan.cpp#L1114-L1137
+
+Changed for Fak: one batch-only idle slot, individual command-buffer reset, and
+successful-fence-only retention with checked failure quarantine. Restore and
+one-shot commands keep their own ownership. No upstream runtime is included.
+The upstream MIT license follows.
+
+```
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

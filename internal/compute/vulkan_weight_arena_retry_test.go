@@ -136,6 +136,8 @@ void resetFixture() {
     assert(g_poolCount == 0 && g_batchFreed.empty());
     assert(fixture.mapped.empty());
     fixture = {};
+    g_memoryGuard = {};
+    assert(g_memoryGuard.configure(nullptr));
     g_umaDirectWeights = false;
     g_pool.clear();
     g_memprops = {};
@@ -193,6 +195,8 @@ void pressureReuseAndLifetime() {
     recycled->allocationDeviceLocal = true;
     g_pool[16].push_back(recycled);
     g_poolCount = 1;
+    assert(g_memoryGuard.reserve(16));
+    g_memoryGuard.committed();
     trackDeviceAllocation(16, 0);
 
     Buffer* first = allocWeightArenaBuffer(60, WEIGHT_ARENA_BLOCK_BYTES);

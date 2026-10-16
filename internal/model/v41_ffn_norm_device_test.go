@@ -68,7 +68,7 @@ func TestV41FFNNormDeviceDispatch(t *testing.T) {
 			// A direct oracle catches a wrong norm even if later projections mask
 			// it. Free poisoning detects borrowed, rather than owned, readback.
 			input := append([]float32(nil), b.input...)
-			got, err := s.v41State().ffnNorm(0, input)
+			got, err := s.v41State().ffnNorm.normFunc()(0, input)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,12 +212,12 @@ func TestV41FFNNormGraphOwner(t *testing.T) {
 	gain := cpuOracleTensor(t, m, layerName(0, "ffn_norm.weight"))
 	var callbackInput, callbackOutput []float32
 	calls := 0
-	scratch := &v41ProjScratch{ffnNorm: func(layer int, input []float32) ([]float32, error) {
+	scratch := &v41ProjScratch{ffnNorm: &v41FFNNormBinding{ordinary: func(layer int, input []float32) ([]float32, error) {
 		calls++
 		callbackInput = append([]float32(nil), input...)
 		callbackOutput = cpuOracleRMSNorm(input, gain, float32(m.Cfg.RMSNormEps))
 		return callbackOutput, nil
-	}}
+	}}}
 	projected := false
 	residual, _, got, err := m.v41FullFFNInput(0, streams, mix, attn, func(flat []float32) ([]float32, error) {
 		projected = true

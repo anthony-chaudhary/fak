@@ -217,257 +217,16 @@ func (p *Qwen38CompositeDraftPolicy) SelectDraftSource(input Qwen38DraftPolicyIn
 
 	allSources := []DraftSource{DraftSourceMTP, DraftSourcePromptLookup, DraftSourceNGram}
 
-	// 1. Operator Policy Gate
 	if !input.OperatorEnabled {
-		rejected := make([]RejectedDraftSource, 0, len(allSources))
-		for _, src := range allSources {
-			rejected = append(rejected, RejectedDraftSource{
-				Source: src,
-				Reason: DraftRejectionPolicyDisabled,
-				Detail: "operator policy disabled drafting",
-			})
-		}
-		return Qwen38DraftPolicyReceipt{
-			SchemaVersion:     Qwen38DraftPolicyReceiptSchema,
-			ChosenSource:      DraftSourceNone,
-			Engine:            Qwen38EngineTargetDecode,
-			AllowStacked:      effectiveAllowStacked,
-			Rejected:          rejected,
-			DowngradeReason:   Qwen38MTPDisabledByPolicy,
-			DecisionLatencyNS: uint64(time.Since(start).Nanoseconds()),
-		}
+		return qwen38PolicyDisabledReceipt(allSources, effectiveAllowStacked, start)
 	}
 
-	type evaluation struct {
-		eligible  bool
-		rejection *RejectedDraftSource
-	}
-	evals := make(map[DraftSource]evaluation, len(allSources))
+	evals := make(map[DraftSource]qwen38DraftEvaluation, len(allSources))
+	evals[DraftSourceMTP] = evaluateQwen38MTPCandidate(input, minAcceptance)
+	evals[DraftSourcePromptLookup] = evaluateQwen38PromptLookupCandidate(input, minAcceptance)
+	evals[DraftSourceNGram] = evaluateQwen38NGramCandidate(input, minAcceptance)
 
-	// Evaluate MTP
-	mtpState, hasMTPState := input.Candidates[DraftSourceMTP]
-	if input.MTPEligibility != nil && !input.MTPEligibility.Eligible {
-		evals[DraftSourceMTP] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceMTP,
-				Reason: DraftRejectionUnsupportedEnvelope,
-				Detail: string(input.MTPEligibility.DowngradeReason),
-			},
-		}
-	} else if hasMTPState && !mtpState.Eligible {
-		evals[DraftSourceMTP] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceMTP,
-				Reason: DraftRejectionUnsupportedEnvelope,
-				Detail: "mtp candidate marked ineligible",
-			},
-		}
-	} else if hasMTPState && !mtpState.Health.Healthy {
-		evals[DraftSourceMTP] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceMTP,
-				Reason: DraftRejectionSourceUnhealthy,
-				Detail: mtpState.Health.Detail,
-			},
-		}
-	} else if hasMTPState && mtpState.Performance.ProposedTokens > 0 && mtpState.Performance.AcceptanceRate < minAcceptance {
-		evals[DraftSourceMTP] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceMTP,
-				Reason: DraftRejectionLowAcceptance,
-				Detail: fmt.Sprintf("acceptance rate %.2f < threshold %.2f", mtpState.Performance.AcceptanceRate, minAcceptance),
-			},
-		}
-	} else if (input.MTPEligibility != nil && input.MTPEligibility.Eligible) || (hasMTPState && mtpState.Eligible) {
-		evals[DraftSourceMTP] = evaluation{eligible: true}
-	} else {
-		evals[DraftSourceMTP] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceMTP,
-				Reason: DraftRejectionUnsupportedEnvelope,
-				Detail: "mtp eligibility not established",
-			},
-		}
-	}
-
-	// Evaluate PromptLookup
-	plState, hasPLState := input.Candidates[DraftSourcePromptLookup]
-	if !hasPLState || !plState.Eligible {
-		evals[DraftSourcePromptLookup] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourcePromptLookup,
-				Reason: DraftRejectionUnsupportedEnvelope,
-				Detail: "prompt lookup candidate not eligible",
-			},
-		}
-	} else if !plState.Health.Healthy {
-		evals[DraftSourcePromptLookup] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourcePromptLookup,
-				Reason: DraftRejectionSourceUnhealthy,
-				Detail: plState.Health.Detail,
-			},
-		}
-	} else if !input.Prompt.HasLookupMatch && !input.Prompt.Repetitive {
-		evals[DraftSourcePromptLookup] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourcePromptLookup,
-				Reason: DraftRejectionPromptIneligible,
-				Detail: "prompt lacks repeated tokens or matching lookup candidate spans",
-			},
-		}
-	} else if !input.Cache.PrefixCacheReady && input.Prompt.TokenCount < 16 {
-		evals[DraftSourcePromptLookup] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourcePromptLookup,
-				Reason: DraftRejectionCacheInsufficient,
-				Detail: "cold cache and short prompt insufficient for lookup retrieval",
-			},
-		}
-	} else if plState.Performance.ProposedTokens > 0 && plState.Performance.AcceptanceRate < minAcceptance {
-		evals[DraftSourcePromptLookup] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourcePromptLookup,
-				Reason: DraftRejectionLowAcceptance,
-				Detail: fmt.Sprintf("acceptance rate %.2f < threshold %.2f", plState.Performance.AcceptanceRate, minAcceptance),
-			},
-		}
-	} else {
-		evals[DraftSourcePromptLookup] = evaluation{eligible: true}
-	}
-
-	// Evaluate NGram
-	ngState, hasNGState := input.Candidates[DraftSourceNGram]
-	if !hasNGState || !ngState.Eligible {
-		evals[DraftSourceNGram] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceNGram,
-				Reason: DraftRejectionUnsupportedEnvelope,
-				Detail: "ngram candidate not eligible",
-			},
-		}
-	} else if !ngState.Health.Healthy {
-		evals[DraftSourceNGram] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceNGram,
-				Reason: DraftRejectionSourceUnhealthy,
-				Detail: ngState.Health.Detail,
-			},
-		}
-	} else if !input.Prompt.HasNGramMatch && !input.Prompt.Repetitive {
-		evals[DraftSourceNGram] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceNGram,
-				Reason: DraftRejectionPromptIneligible,
-				Detail: "prompt lacks n-gram match patterns or repetitive structure",
-			},
-		}
-	} else if ngState.Performance.ProposedTokens > 0 && ngState.Performance.AcceptanceRate < minAcceptance {
-		evals[DraftSourceNGram] = evaluation{
-			eligible: false,
-			rejection: &RejectedDraftSource{
-				Source: DraftSourceNGram,
-				Reason: DraftRejectionLowAcceptance,
-				Detail: fmt.Sprintf("acceptance rate %.2f < threshold %.2f", ngState.Performance.AcceptanceRate, minAcceptance),
-			},
-		}
-	} else {
-		evals[DraftSourceNGram] = evaluation{eligible: true}
-	}
-
-	var eligibleSources []DraftSource
-	for _, src := range allSources {
-		if evals[src].eligible {
-			eligibleSources = append(eligibleSources, src)
-		}
-	}
-
-	var chosenSource DraftSource = DraftSourceNone
-	var engine Qwen38MTPEngine = Qwen38EngineTargetDecode
-	var downgradeReason Qwen38MTPDowngradeReason
-	var stackedSources []DraftSource
-	var rejected []RejectedDraftSource
-
-	if len(eligibleSources) == 0 {
-		// All candidate sources were rejected.
-		chosenSource = DraftSourceNone
-		engine = Qwen38EngineTargetDecode
-		downgradeReason = Qwen38MTPQualityOutsideEnvelope
-
-		for _, src := range allSources {
-			if evals[src].rejection != nil {
-				rejected = append(rejected, *evals[src].rejection)
-				if src == DraftSourceMTP && evals[src].rejection.Reason == DraftRejectionLowAcceptance {
-					downgradeReason = Qwen38MTPQualityOutsideEnvelope
-				} else if src == DraftSourceMTP && evals[src].rejection.Reason == DraftRejectionUnsupportedEnvelope {
-					downgradeReason = Qwen38MTPModelUnsupported
-				}
-			}
-		}
-	} else {
-		// When multiple sources are eligible, evaluate stacking vs mutual exclusion.
-		canStack := effectiveAllowStacked && input.ExplicitStackAuth
-
-		if canStack && evals[DraftSourcePromptLookup].eligible && evals[DraftSourceNGram].eligible && !evals[DraftSourceMTP].eligible {
-			// Compatible lexical stacking explicitly authorized.
-			chosenSource = DraftSourcePromptLookup
-			engine = Qwen38EngineTargetDecode
-			stackedSources = []DraftSource{DraftSourcePromptLookup, DraftSourceNGram}
-			if evals[DraftSourceMTP].rejection != nil {
-				rejected = append(rejected, *evals[DraftSourceMTP].rejection)
-			}
-		} else {
-			// Mutual exclusion: deterministically select primary according to priority ladder:
-			// Priority 1: MTP (neural model-native)
-			// Priority 2: PromptLookup (retrieval-assisted)
-			// Priority 3: NGram (statistical lexical)
-			if evals[DraftSourceMTP].eligible {
-				chosenSource = DraftSourceMTP
-				engine = Qwen38EngineMTP
-			} else if evals[DraftSourcePromptLookup].eligible {
-				chosenSource = DraftSourcePromptLookup
-				engine = Qwen38EngineTargetDecode
-			} else if evals[DraftSourceNGram].eligible {
-				chosenSource = DraftSourceNGram
-				engine = Qwen38EngineTargetDecode
-			}
-
-			// Reject non-chosen alternatives under mutual exclusion or prior rejection.
-			for _, src := range allSources {
-				if src == chosenSource {
-					continue
-				}
-				if evals[src].eligible {
-					reason := DraftRejectionMutualExclusion
-					detail := fmt.Sprintf("%s selected as primary; mutual exclusion forbids concurrent drafting", chosenSource)
-					if effectiveAllowStacked && !input.ExplicitStackAuth {
-						reason = DraftRejectionIncompatibleStacking
-						detail = "stacking disallowed without explicit stacking authorization"
-					}
-					rejected = append(rejected, RejectedDraftSource{
-						Source: src,
-						Reason: reason,
-						Detail: detail,
-					})
-				} else if evals[src].rejection != nil {
-					rejected = append(rejected, *evals[src].rejection)
-				}
-			}
-		}
-	}
+	sel := resolveQwen38DraftSelection(evals, allSources, effectiveAllowStacked, input.ExplicitStackAuth)
 
 	lat := uint64(time.Since(start).Nanoseconds())
 	if lat == 0 {
@@ -476,12 +235,182 @@ func (p *Qwen38CompositeDraftPolicy) SelectDraftSource(input Qwen38DraftPolicyIn
 
 	return Qwen38DraftPolicyReceipt{
 		SchemaVersion:     Qwen38DraftPolicyReceiptSchema,
-		ChosenSource:      chosenSource,
-		Engine:            engine,
+		ChosenSource:      sel.chosenSource,
+		Engine:            sel.engine,
 		AllowStacked:      effectiveAllowStacked,
-		StackedSources:    stackedSources,
-		Rejected:          rejected,
-		DowngradeReason:   downgradeReason,
+		StackedSources:    sel.stackedSources,
+		Rejected:          sel.rejected,
+		DowngradeReason:   sel.downgradeReason,
 		DecisionLatencyNS: lat,
 	}
+}
+
+type qwen38DraftEvaluation struct {
+	eligible  bool
+	rejection *RejectedDraftSource
+}
+
+func qwen38DraftRejected(src DraftSource, reason DraftRejectionReason, detail string) qwen38DraftEvaluation {
+	return qwen38DraftEvaluation{
+		eligible: false,
+		rejection: &RejectedDraftSource{
+			Source: src,
+			Reason: reason,
+			Detail: detail,
+		},
+	}
+}
+
+func qwen38LowAcceptanceDetail(rate, threshold float64) string {
+	return fmt.Sprintf("acceptance rate %.2f < threshold %.2f", rate, threshold)
+}
+
+func qwen38PolicyDisabledReceipt(allSources []DraftSource, allowStacked bool, start time.Time) Qwen38DraftPolicyReceipt {
+	rejected := make([]RejectedDraftSource, 0, len(allSources))
+	for _, src := range allSources {
+		rejected = append(rejected, RejectedDraftSource{
+			Source: src,
+			Reason: DraftRejectionPolicyDisabled,
+			Detail: "operator policy disabled drafting",
+		})
+	}
+	return Qwen38DraftPolicyReceipt{
+		SchemaVersion:     Qwen38DraftPolicyReceiptSchema,
+		ChosenSource:      DraftSourceNone,
+		Engine:            Qwen38EngineTargetDecode,
+		AllowStacked:      allowStacked,
+		Rejected:          rejected,
+		DowngradeReason:   Qwen38MTPDisabledByPolicy,
+		DecisionLatencyNS: uint64(time.Since(start).Nanoseconds()),
+	}
+}
+
+func evaluateQwen38MTPCandidate(input Qwen38DraftPolicyInput, minAcceptance float64) qwen38DraftEvaluation {
+	mtpState, hasMTPState := input.Candidates[DraftSourceMTP]
+	switch {
+	case input.MTPEligibility != nil && !input.MTPEligibility.Eligible:
+		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionUnsupportedEnvelope, string(input.MTPEligibility.DowngradeReason))
+	case hasMTPState && !mtpState.Eligible:
+		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionUnsupportedEnvelope, "mtp candidate marked ineligible")
+	case hasMTPState && !mtpState.Health.Healthy:
+		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionSourceUnhealthy, mtpState.Health.Detail)
+	case hasMTPState && mtpState.Performance.ProposedTokens > 0 && mtpState.Performance.AcceptanceRate < minAcceptance:
+		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionLowAcceptance, qwen38LowAcceptanceDetail(mtpState.Performance.AcceptanceRate, minAcceptance))
+	case (input.MTPEligibility != nil && input.MTPEligibility.Eligible) || (hasMTPState && mtpState.Eligible):
+		return qwen38DraftEvaluation{eligible: true}
+	default:
+		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionUnsupportedEnvelope, "mtp eligibility not established")
+	}
+}
+
+func evaluateQwen38PromptLookupCandidate(input Qwen38DraftPolicyInput, minAcceptance float64) qwen38DraftEvaluation {
+	plState, hasPLState := input.Candidates[DraftSourcePromptLookup]
+	switch {
+	case !hasPLState || !plState.Eligible:
+		return qwen38DraftRejected(DraftSourcePromptLookup, DraftRejectionUnsupportedEnvelope, "prompt lookup candidate not eligible")
+	case !plState.Health.Healthy:
+		return qwen38DraftRejected(DraftSourcePromptLookup, DraftRejectionSourceUnhealthy, plState.Health.Detail)
+	case !input.Prompt.HasLookupMatch && !input.Prompt.Repetitive:
+		return qwen38DraftRejected(DraftSourcePromptLookup, DraftRejectionPromptIneligible, "prompt lacks repeated tokens or matching lookup candidate spans")
+	case !input.Cache.PrefixCacheReady && input.Prompt.TokenCount < 16:
+		return qwen38DraftRejected(DraftSourcePromptLookup, DraftRejectionCacheInsufficient, "cold cache and short prompt insufficient for lookup retrieval")
+	case plState.Performance.ProposedTokens > 0 && plState.Performance.AcceptanceRate < minAcceptance:
+		return qwen38DraftRejected(DraftSourcePromptLookup, DraftRejectionLowAcceptance, qwen38LowAcceptanceDetail(plState.Performance.AcceptanceRate, minAcceptance))
+	default:
+		return qwen38DraftEvaluation{eligible: true}
+	}
+}
+
+func evaluateQwen38NGramCandidate(input Qwen38DraftPolicyInput, minAcceptance float64) qwen38DraftEvaluation {
+	ngState, hasNGState := input.Candidates[DraftSourceNGram]
+	switch {
+	case !hasNGState || !ngState.Eligible:
+		return qwen38DraftRejected(DraftSourceNGram, DraftRejectionUnsupportedEnvelope, "ngram candidate not eligible")
+	case !ngState.Health.Healthy:
+		return qwen38DraftRejected(DraftSourceNGram, DraftRejectionSourceUnhealthy, ngState.Health.Detail)
+	case !input.Prompt.HasNGramMatch && !input.Prompt.Repetitive:
+		return qwen38DraftRejected(DraftSourceNGram, DraftRejectionPromptIneligible, "prompt lacks n-gram match patterns or repetitive structure")
+	case ngState.Performance.ProposedTokens > 0 && ngState.Performance.AcceptanceRate < minAcceptance:
+		return qwen38DraftRejected(DraftSourceNGram, DraftRejectionLowAcceptance, qwen38LowAcceptanceDetail(ngState.Performance.AcceptanceRate, minAcceptance))
+	default:
+		return qwen38DraftEvaluation{eligible: true}
+	}
+}
+
+type qwen38DraftSelection struct {
+	chosenSource    DraftSource
+	engine          Qwen38MTPEngine
+	downgradeReason Qwen38MTPDowngradeReason
+	stackedSources  []DraftSource
+	rejected        []RejectedDraftSource
+}
+
+func resolveQwen38DraftSelection(evals map[DraftSource]qwen38DraftEvaluation, allSources []DraftSource, allowStacked, explicitStackAuth bool) qwen38DraftSelection {
+	sel := qwen38DraftSelection{chosenSource: DraftSourceNone, engine: Qwen38EngineTargetDecode}
+
+	var eligibleSources []DraftSource
+	for _, src := range allSources {
+		if evals[src].eligible {
+			eligibleSources = append(eligibleSources, src)
+		}
+	}
+
+	if len(eligibleSources) == 0 {
+		sel.downgradeReason = Qwen38MTPQualityOutsideEnvelope
+		for _, src := range allSources {
+			if evals[src].rejection != nil {
+				sel.rejected = append(sel.rejected, *evals[src].rejection)
+				if src == DraftSourceMTP && evals[src].rejection.Reason == DraftRejectionLowAcceptance {
+					sel.downgradeReason = Qwen38MTPQualityOutsideEnvelope
+				} else if src == DraftSourceMTP && evals[src].rejection.Reason == DraftRejectionUnsupportedEnvelope {
+					sel.downgradeReason = Qwen38MTPModelUnsupported
+				}
+			}
+		}
+		return sel
+	}
+
+	canStack := allowStacked && explicitStackAuth
+	if canStack && evals[DraftSourcePromptLookup].eligible && evals[DraftSourceNGram].eligible && !evals[DraftSourceMTP].eligible {
+		// Compatible lexical stacking explicitly authorized.
+		sel.chosenSource = DraftSourcePromptLookup
+		sel.stackedSources = []DraftSource{DraftSourcePromptLookup, DraftSourceNGram}
+		if evals[DraftSourceMTP].rejection != nil {
+			sel.rejected = append(sel.rejected, *evals[DraftSourceMTP].rejection)
+		}
+		return sel
+	}
+
+	// Mutual exclusion priority ladder: MTP (neural model-native), then
+	// PromptLookup (retrieval-assisted), then NGram (statistical lexical).
+	if evals[DraftSourceMTP].eligible {
+		sel.chosenSource = DraftSourceMTP
+		sel.engine = Qwen38EngineMTP
+	} else if evals[DraftSourcePromptLookup].eligible {
+		sel.chosenSource = DraftSourcePromptLookup
+	} else if evals[DraftSourceNGram].eligible {
+		sel.chosenSource = DraftSourceNGram
+	}
+
+	for _, src := range allSources {
+		if src == sel.chosenSource {
+			continue
+		}
+		if evals[src].eligible {
+			reason := DraftRejectionMutualExclusion
+			detail := fmt.Sprintf("%s selected as primary; mutual exclusion forbids concurrent drafting", sel.chosenSource)
+			if allowStacked && !explicitStackAuth {
+				reason = DraftRejectionIncompatibleStacking
+				detail = "stacking disallowed without explicit stacking authorization"
+			}
+			sel.rejected = append(sel.rejected, RejectedDraftSource{
+				Source: src,
+				Reason: reason,
+				Detail: detail,
+			})
+		} else if evals[src].rejection != nil {
+			sel.rejected = append(sel.rejected, *evals[src].rejection)
+		}
+	}
+	return sel
 }

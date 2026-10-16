@@ -461,6 +461,7 @@ func TestVulkanV41BF16CheckedOrchestration(t *testing.T) {
 	for _, file := range []struct{ name, env string }{
 		{"vulkan_shim.cpp", "FAK_V41_BF16_CHECKED_WITNESS_SHIM_SHA256"},
 		{"vulkan_backend.h", "FAK_V41_BF16_CHECKED_WITNESS_HEADER_SHA256"},
+		{"v41_index_scale_bf16_spirv.h", "FAK_V41_BF16_CHECKED_WITNESS_INDEX_SCALE_SHA256"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(sourceDir, file.name))
 		if err != nil {
@@ -480,7 +481,7 @@ func TestVulkanV41BF16CheckedOrchestration(t *testing.T) {
 		sourceText.WriteByte('\n')
 	}
 	allowed := map[string]bool{}
-	for _, name := range strings.Fields(`vkAllocateDescriptorSets vkUpdateDescriptorSets vkAllocateCommandBuffers vkBeginCommandBuffer vkEndCommandBuffer vkFreeCommandBuffers vkResetFences vkQueueSubmit vkWaitForFences vkCmdBindPipeline vkCmdBindDescriptorSets vkCmdPushConstants vkCmdFillBuffer vkCmdPipelineBarrier vkCmdDispatch vkCmdCopyBuffer`) {
+	for _, name := range strings.Fields(`vkAllocateDescriptorSets vkUpdateDescriptorSets vkAllocateCommandBuffers vkResetCommandBuffer vkBeginCommandBuffer vkEndCommandBuffer vkFreeCommandBuffers vkResetFences vkQueueSubmit vkWaitForFences vkCmdBindPipeline vkCmdBindDescriptorSets vkCmdPushConstants vkCmdFillBuffer vkCmdPipelineBarrier vkCmdDispatch vkCmdCopyBuffer`) {
 		allowed[name] = true
 	}
 	names := map[string]bool{}
@@ -575,13 +576,14 @@ void require(bool ok, const char* why) { if (!ok) die(why); }
 template<class T> T handle(uintptr_t id) { return (T)id; }
 struct Op { int kind; VkBuffer source{}, dest{}; uint32_t count{}, site{}; };
 struct Command {
-    bool begun = false, ended = false, filled = false, dependency = false;
+    bool begun = false, ended = false, filled = false, dependency = false, completed = false;
     VkPipeline pipeline{};
     std::vector<VkBuffer> bindings;
     std::vector<uint32_t> push;
     std::vector<Op> ops;
 };
 std::map<VkCommandBuffer, Command> commands;
+std::map<VkCommandBuffer, std::pair<VkDevice,VkCommandPool>> commandOwners;
 std::map<VkDescriptorSet, std::vector<VkBuffer>> descriptors;
 std::map<VkBuffer, std::array<uint32_t, 4>> memory;
 std::map<std::string, int> calls;
@@ -646,12 +648,19 @@ static VKAPI_ATTR void VKAPI_CALL checked_vkUpdateDescriptorSets(VkDevice, uint3
         bindings[i] = w.pBufferInfo->buffer;
     }
 }
-static VKAPI_ATTR VkResult VKAPI_CALL checked_vkAllocateCommandBuffers(VkDevice, const VkCommandBufferAllocateInfo* info, VkCommandBuffer* out) {
+static VKAPI_ATTR VkResult VKAPI_CALL checked_vkAllocateCommandBuffers(VkDevice device, const VkCommandBufferAllocateInfo* info, VkCommandBuffer* out) {
     using namespace checked_fixture;
     require(info && out && info->commandBufferCount == 1, "command allocation shape");
     const VkResult r = call("vkAllocateCommandBuffers");
     *out = r == VK_SUCCESS ? handle<VkCommandBuffer>(++nextHandle) : VK_NULL_HANDLE;
-    if (r == VK_SUCCESS) commands[*out] = {};
+    if (r == VK_SUCCESS) { commands[*out] = {}; commandOwners[*out] = {device,info->commandPool}; }
+    return r;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL checked_vkResetCommandBuffer(VkCommandBuffer id, VkCommandBufferResetFlags flags) {
+    using namespace checked_fixture;
+    require(flags == 0 && command(id).completed, "reset without successful fence");
+    const VkResult r = call("vkResetCommandBuffer");
+    if (r == VK_SUCCESS) command(id) = {};
     return r;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL checked_vkBeginCommandBuffer(VkCommandBuffer id, const VkCommandBufferBeginInfo*) {
@@ -667,10 +676,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL checked_vkEndCommandBuffer(VkCommandBuffer
     if (r == VK_SUCCESS) command(id).ended = true;
     return r;
 }
-static VKAPI_ATTR void VKAPI_CALL checked_vkFreeCommandBuffers(VkDevice, VkCommandPool, uint32_t n, const VkCommandBuffer* ids) {
+static VKAPI_ATTR void VKAPI_CALL checked_vkFreeCommandBuffers(VkDevice device, VkCommandPool pool, uint32_t n, const VkCommandBuffer* ids) {
     using namespace checked_fixture;
     call("vkFreeCommandBuffers");
-    require(n == 1 && ids && commands.erase(ids[0]) == 1, "command release identity");
+    require(n == 1 && ids && commandOwners.at(ids[0]) == std::make_pair(device,pool) &&
+            commands.erase(ids[0]) == 1 && commandOwners.erase(ids[0]) == 1, "command release identity/owner");
 }
 static VKAPI_ATTR VkResult VKAPI_CALL checked_vkResetFences(VkDevice, uint32_t n, const VkFence*) {
     using namespace checked_fixture;
@@ -691,7 +701,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL checked_vkQueueSubmit(VkQueue, uint32_t n,
 static VKAPI_ATTR VkResult VKAPI_CALL checked_vkWaitForFences(VkDevice, uint32_t n, const VkFence*, VkBool32 all, uint64_t timeout) {
     using namespace checked_fixture;
     require(n == 1 && all == VK_TRUE && timeout == UINT64_MAX && submitted != VK_NULL_HANDLE, "wait shape");
-    return call("vkWaitForFences");
+    const VkResult r = call("vkWaitForFences");
+    if (r == VK_SUCCESS) command(submitted).completed = true;
+    return r;
 }
 static VKAPI_ATTR void VKAPI_CALL checked_vkCmdBindPipeline(VkCommandBuffer id, VkPipelineBindPoint point, VkPipeline pipeline) {
     using namespace checked_fixture;
@@ -756,11 +768,13 @@ Buffer input{}, output{}, status{}, staging{};
 void reset() {
     // Fixture-only teardown of synthetic handles AFTER each case's assertions.
     // This is not production recovery or evidence of real driver quiescence.
-    commands.clear(); descriptors.clear(); memory.clear(); calls.clear();
+    commands.clear(); commandOwners.clear(); descriptors.clear(); memory.clear(); calls.clear();
     failure.clear(); failureOrdinal = 1; failureResult = VK_ERROR_OUT_OF_HOST_MEMORY;
     submitted = VK_NULL_HANDLE; fills = dispatches = copies = barriers = 0;
     g_pool.clear(); g_poolCount = 0; g_batchFreed.clear(); g_batchSets.clear(); g_descSetPool.clear();
     g_batching = false; g_batchCmd = VK_NULL_HANDLE; g_batchOps = 0; g_batchHasV41 = false;
+    g_stepBatch = false; g_batchIdleCmd = VK_NULL_HANDLE;
+    g_batchIdleDevice = VK_NULL_HANDLE; g_batchIdlePool = VK_NULL_HANDLE;
     g_v41SubmissionPendingFailure = false; g_submissionStatus = VK_SUCCESS;
     g_restore = RestoreTransaction{}; g_debugD2HStagingFailureOnce = false;
     g_d2hCount = 0; g_d2hBytes = 0; g_transferCountersValid = true;
@@ -889,11 +903,83 @@ void failures() {
         std::printf("D2H failure %s withheld\n",api);
     }
 }
+// Exercise the real batch owner; mocked API counts are not GPU latency evidence.
+void batchReuseCases() {
+    reset(); g_stepBatch = true;
+    for (int i = 0; i < 4; ++i) {
+        batchBegin(); require(g_batching, "batch begin");
+        g_batchOps = 1; batchFlush();
+        require(!g_batching && g_batchCmd == VK_NULL_HANDLE && g_batchIdleCmd != VK_NULL_HANDLE,
+                "completed batch did not transfer to idle ownership");
+        require(commands.size() == 1 && calls["vkAllocateCommandBuffers"] == 1 &&
+                calls["vkFreeCommandBuffers"] == 0 && calls["vkResetCommandBuffer"] == i,
+                "steady-state command allocation/free traffic");
+    }
+    require(calls["vkQueueSubmit"] == 4 && calls["vkWaitForFences"] == 4,
+            "reuse changed submission/fence count");
+    batchBegin(); batchFlush(); // An empty recording has no new completion proof.
+    require(commands.empty() && g_batchIdleCmd == VK_NULL_HANDLE, "empty batch retained");
+    g_stepBatch = false;
+    require(v41EndSubmitWaitChecked(v41BeginCmdChecked(), true) && commands.empty(),
+            "one-shot ownership changed");
+    for (const char* api : {"vkResetCommandBuffer", "vkBeginCommandBuffer"}) {
+        for (VkResult result : {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_DEVICE_LOST}) {
+            reset(); g_stepBatch = true; batchBegin(); g_batchOps = 1; batchFlush();
+            failure = api; failureOrdinal = failure == "vkBeginCommandBuffer" ? 2 : 1;
+            failureResult = result;
+            batchBegin();
+            const bool lost = result == VK_ERROR_DEVICE_LOST;
+            require(!g_batching && g_submissionStatus == result &&
+                    g_v41SubmissionPendingFailure == lost && commands.size() == (lost ? 1u : 0u),
+                    "reuse error status/ownership");
+            const int attempts = calls[api]; batchBegin();
+            require(calls[api] == attempts, "sticky failure silently retried");
+        }
+    }
+    for (const char* api : {"vkEndCommandBuffer", "vkResetFences", "vkQueueSubmit", "vkWaitForFences"}) {
+        reset(); g_stepBatch = true; batchBegin(); g_batchOps = 1;
+        failure = api; failureResult = failure == "vkWaitForFences" ? VK_TIMEOUT : VK_ERROR_OUT_OF_HOST_MEMORY;
+        batchFlush();
+        const bool pending = failure == "vkQueueSubmit" || failure == "vkWaitForFences";
+        require(g_batchIdleCmd == VK_NULL_HANDLE && g_v41SubmissionPendingFailure == pending &&
+                commands.size() == (pending ? 1u : 0u), "failed batch recycled command");
+        const int callsBefore = calls[api]; batchFlush(); batchBegin();
+        require(calls[api] == callsBefore, "uncertain batch retried");
+    }
+    reset(); g_stepBatch = true; batchBegin(); g_batchOps = 1;
+    failure = "vkResetCommandBuffer";
+    require(fvk_batch_flush_status() == VK_ERROR_OUT_OF_HOST_MEMORY,
+            "flush status hid resumed reset failure");
+    reset(); g_stepBatch = true; batchBegin();
+    memory[statusHandle] = {0x42463143,1,UINT32_MAX,64};
+    std::array<uint32_t,4> host{}; failure = "vkResetCommandBuffer";
+    require(stepRecordReadback(host.data(), &status, 16) == VK_ERROR_OUT_OF_HOST_MEMORY,
+            "readback hid resumed reset failure");
+    reset(); g_stepBatch = true; batchBegin(); g_batchOps = 1; batchFlush();
+    g_dev = handle<VkDevice>(901); g_cmdpool = handle<VkCommandPool>(902);
+    discardIdleBatchCommand();
+    require(commands.empty() && g_batchIdleCmd == VK_NULL_HANDLE &&
+            g_batchIdleDevice == VK_NULL_HANDLE && g_batchIdlePool == VK_NULL_HANDLE,
+            "old device/pool idle ownership retained");
+    reset(); // legacy batches retain only after submitWait returns successfully.
+    batchBegin(); g_batchOps = 1; batchFlush();
+    batchBegin(); g_batchOps = 1; batchFlush();
+    require(calls["vkAllocateCommandBuffers"] == 1 && calls["vkResetCommandBuffer"] == 1 &&
+            calls["vkWaitForFences"] == 2 && calls["vkFreeCommandBuffers"] == 0,
+            "legacy batch reuse changed completion ownership");
+    discardIdleBatchCommand();
+    reset(); g_stepBatch = true; batchBegin(); g_batchOps = 1; batchFlush();
+    g_stepBatch = false; failure = "vkResetCommandBuffer";
+    require(fvk_v41_step_batch_begin() == VK_ERROR_OUT_OF_HOST_MEMORY,
+            "step begin hid reused-command failure");
+    reset(); // isolated fixture teardown only
+}
 } // namespace checked_fixture
 int main() {
     checked_fixture::geometryCases();
     checked_fixture::successCases();
     checked_fixture::failures();
+    checked_fixture::batchReuseCases();
     std::puts("PASS real checked owner: initialization, dependency, refusal, transport and quarantine; no physical/numerical claim");
     return 0;
 }

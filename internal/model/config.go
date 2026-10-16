@@ -566,6 +566,31 @@ func (c *Config) promoteLongRope(kind string) bool {
 }
 
 func (c *Config) deriveConfigAxes(h configJSONHints) error {
+	if err := c.deriveHeadAndLoopAxes(h); err != nil {
+		return err
+	}
+	if c.HiddenActivation == "" {
+		c.HiddenActivation = h.HiddenActivation
+	}
+	if c.HiddenAct == "" {
+		c.HiddenAct = h.HiddenAct
+	}
+	family := c.archFamilyKey()
+
+	c.deriveKVHeadAndRopeAxes(h, family)
+	c.deriveBiasNormActivationAxes(h, family)
+	if err := c.deriveBlockTopologyAxis(h, family); err != nil {
+		return err
+	}
+	c.deriveGemmaAndQKNormAxes(h, family)
+	c.deriveMoEAxes(h, family)
+	c.deriveLayerNormFamilyAxes(h, family)
+	return nil
+}
+
+// deriveHeadAndLoopAxes resolves HeadDim and NumLoops, then refuses an
+// unsupported Nanbeige variant.
+func (c *Config) deriveHeadAndLoopAxes(h configJSONHints) error {
 	// MLA (DeepSeek-V2/V3, GLM-5.2) heads are NOT hidden_size/num_heads wide. HF's
 	// DeepseekV2Config declares no head_dim at all; DeepseekV2Attention builds
 	// q_head_dim = qk_nope_head_dim + qk_rope_head_dim and cuts every per-head width from
@@ -591,71 +616,72 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 		c.NumLoops = *h.RecurrentLoopsAlt
 	}
 	if c.isNanbeige() {
-		if c.NumLoops == 0 {
-			c.NumLoops = 2
-		}
-		sharedCache := c.SharedCache || (h.SharedCache != nil && *h.SharedCache)
-		if sharedCache {
-			return &UnsupportedNanbeigeVariantError{
-				Reason:      "shared_cache=true is not supported",
-				NumLayers:   c.NumLayers,
-				NumLoops:    c.NumLoops,
-				HeadDim:     c.HeadDim,
-				SharedCache: true,
-			}
-		}
-		if h.LoopShareKV != nil && *h.LoopShareKV {
-			return &UnsupportedNanbeigeVariantError{
-				Reason:    "loop_share_kv=true is not supported",
-				NumLayers: c.NumLayers,
-				NumLoops:  c.NumLoops,
-				HeadDim:   c.HeadDim,
-			}
-		}
-		if h.SkipLoopFinalNorm != nil && *h.SkipLoopFinalNorm {
-			return &UnsupportedNanbeigeVariantError{
-				Reason:    "skip_loop_final_norm=true is not supported",
-				NumLayers: c.NumLayers,
-				NumLoops:  c.NumLoops,
-				HeadDim:   c.HeadDim,
-			}
-		}
-		if c.NumLayers != 22 {
-			return &UnsupportedNanbeigeVariantError{
-				Reason:      fmt.Sprintf("num_hidden_layers must be 22, got %d", c.NumLayers),
-				NumLayers:   c.NumLayers,
-				NumLoops:    c.NumLoops,
-				HeadDim:     c.HeadDim,
-				SharedCache: sharedCache,
-			}
-		}
-		if c.NumLoops != 2 {
-			return &UnsupportedNanbeigeVariantError{
-				Reason:      fmt.Sprintf("num_loops must be 2, got %d", c.NumLoops),
-				NumLayers:   c.NumLayers,
-				NumLoops:    c.NumLoops,
-				HeadDim:     c.HeadDim,
-				SharedCache: sharedCache,
-			}
-		}
-		if c.HeadDim != 128 {
-			return &UnsupportedNanbeigeVariantError{
-				Reason:      fmt.Sprintf("head_dim must be 128, got %d", c.HeadDim),
-				NumLayers:   c.NumLayers,
-				NumLoops:    c.NumLoops,
-				HeadDim:     c.HeadDim,
-				SharedCache: sharedCache,
-			}
-		}
+		return c.validateNanbeigeVariant(h)
 	}
-	if c.HiddenActivation == "" {
-		c.HiddenActivation = h.HiddenActivation
-	}
-	if c.HiddenAct == "" {
-		c.HiddenAct = h.HiddenAct
-	}
-	family := c.archFamilyKey()
+	return nil
+}
 
+func (c *Config) validateNanbeigeVariant(h configJSONHints) error {
+	if c.NumLoops == 0 {
+		c.NumLoops = 2
+	}
+	sharedCache := c.SharedCache || (h.SharedCache != nil && *h.SharedCache)
+	if sharedCache {
+		return &UnsupportedNanbeigeVariantError{
+			Reason:      "shared_cache=true is not supported",
+			NumLayers:   c.NumLayers,
+			NumLoops:    c.NumLoops,
+			HeadDim:     c.HeadDim,
+			SharedCache: true,
+		}
+	}
+	if h.LoopShareKV != nil && *h.LoopShareKV {
+		return &UnsupportedNanbeigeVariantError{
+			Reason:    "loop_share_kv=true is not supported",
+			NumLayers: c.NumLayers,
+			NumLoops:  c.NumLoops,
+			HeadDim:   c.HeadDim,
+		}
+	}
+	if h.SkipLoopFinalNorm != nil && *h.SkipLoopFinalNorm {
+		return &UnsupportedNanbeigeVariantError{
+			Reason:    "skip_loop_final_norm=true is not supported",
+			NumLayers: c.NumLayers,
+			NumLoops:  c.NumLoops,
+			HeadDim:   c.HeadDim,
+		}
+	}
+	if c.NumLayers != 22 {
+		return &UnsupportedNanbeigeVariantError{
+			Reason:      fmt.Sprintf("num_hidden_layers must be 22, got %d", c.NumLayers),
+			NumLayers:   c.NumLayers,
+			NumLoops:    c.NumLoops,
+			HeadDim:     c.HeadDim,
+			SharedCache: sharedCache,
+		}
+	}
+	if c.NumLoops != 2 {
+		return &UnsupportedNanbeigeVariantError{
+			Reason:      fmt.Sprintf("num_loops must be 2, got %d", c.NumLoops),
+			NumLayers:   c.NumLayers,
+			NumLoops:    c.NumLoops,
+			HeadDim:     c.HeadDim,
+			SharedCache: sharedCache,
+		}
+	}
+	if c.HeadDim != 128 {
+		return &UnsupportedNanbeigeVariantError{
+			Reason:      fmt.Sprintf("head_dim must be 128, got %d", c.HeadDim),
+			NumLayers:   c.NumLayers,
+			NumLoops:    c.NumLoops,
+			HeadDim:     c.HeadDim,
+			SharedCache: sharedCache,
+		}
+	}
+	return nil
+}
+
+func (c *Config) deriveKVHeadAndRopeAxes(h configJSONHints, family string) {
 	if c.RMSNormEps == 0 && h.LayerNormEps != nil {
 		c.RMSNormEps = *h.LayerNormEps
 	}
@@ -709,6 +735,9 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			c.RopeTheta = rp.RopeTheta
 		}
 	}
+}
+
+func (c *Config) deriveBiasNormActivationAxes(h configJSONHints, family string) {
 	if h.AttentionBias == nil && strings.Contains(family, "qwen2") {
 		// Qwen2/Qwen2.5 checkpoints historically omitted attention_bias while still
 		// carrying q/k/v projection bias tensors. Newer Qwen3.5/Qwen3.6 hybrid configs
@@ -729,24 +758,29 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	} else if act == "gelu" && h.ActGeluErf == nil {
 		c.ActGeluErf = true
 	}
+}
 
+func (c *Config) deriveBlockTopologyAxis(h configJSONHints, family string) error {
 	if h.BlockTopology != "" {
 		topo, ok := parseBlockTopology(h.BlockTopology)
 		if !ok {
 			return fmt.Errorf("block_topology: unknown %q", h.BlockTopology)
 		}
 		c.BlockTopology = topo
-	} else {
-		switch {
-		case strings.Contains(family, "gemma2") || strings.Contains(family, "gemma3"):
-			c.BlockTopology = SandwichNorm
-		case strings.Contains(family, "olmo2"):
-			c.BlockTopology = PostNorm
-		case strings.Contains(family, "gptneox") || strings.Contains(family, "cohere") || (strings.Contains(family, "falcon") && c.ParallelAttention):
-			c.BlockTopology = ParallelResidual
-		}
+		return nil
 	}
+	switch {
+	case strings.Contains(family, "gemma2") || strings.Contains(family, "gemma3"):
+		c.BlockTopology = SandwichNorm
+	case strings.Contains(family, "olmo2"):
+		c.BlockTopology = PostNorm
+	case strings.Contains(family, "gptneox") || strings.Contains(family, "cohere") || (strings.Contains(family, "falcon") && c.ParallelAttention):
+		c.BlockTopology = ParallelResidual
+	}
+	return nil
+}
 
+func (c *Config) deriveGemmaAndQKNormAxes(h configJSONHints, family string) {
 	if strings.Contains(family, "gemma") {
 		if h.NormGain1p == nil {
 			c.NormGain1p = true
@@ -767,6 +801,9 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			c.QKNorm = true
 		}
 	}
+}
+
+func (c *Config) deriveMoEAxes(h configJSONHints, family string) {
 	// Ornith / Qwen3.5-MoE serialize the expert count under "num_experts" and the
 	// shared-expert width under "shared_expert_intermediate_size". Fold the alts into
 	// the canonical fields only when the canonical key was absent (the alt pointer is
@@ -814,6 +851,9 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			c.NSharedExperts = 1
 		}
 	}
+}
+
+func (c *Config) deriveLayerNormFamilyAxes(h configJSONHints, family string) {
 	if strings.Contains(family, "cohere") && h.LogitScale == nil && c.LogitScale == 0 {
 		c.LogitScale = 0.0625
 	}
@@ -860,7 +900,6 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if strings.Contains(family, "stablelm") && h.LayerNorm == nil {
 		c.LayerNorm = true
 	}
-	return nil
 }
 
 // gemmaSlidingWindowPattern is the published local/global cadence PERIOD for a Gemma

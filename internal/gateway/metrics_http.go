@@ -198,6 +198,8 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 			// table; discovery is a single context read, no hot-path allocation.
 			src := perfSourceFromRequest(r)
 			src.began = start
+			src.observation = newRequestObservation(r)
+			w.Header().Set("X-Fak-Request-Id", src.observation.requestID)
 			r = r.WithContext(withPerfSource(withInflightID(r.Context(), liveID), src))
 		}
 		traceID := ensureHTTPTrace(s, w, r)

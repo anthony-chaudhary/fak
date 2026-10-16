@@ -23,7 +23,7 @@
       "kind": "concept",
       "definition": "One decision point inside a guard, splitting by WHEN it fires: pre-call adjudicators, post-call result admitters, and git-hook gates.",
       "distinction": "A POINT, not the system - NOT the guard (the whole kernel) and NOT any single gate kind (adjudicator vs admitter vs hook).",
-      "distinct_from": ["guard-kernel", "result-admitter", "git-hook-gate", "issue9181-guard-gate-check-and-emit-report", "issue9181-guard-gate-launch-plan", "issue9181-guard-gate-upstream-posture", "issue9181-guard-gate-allow-overlay-version", "issue9181-guard-gate-info-cache-observed", "issue9181-guard-gate-dispatch-gate-check"],
+      "distinct_from": ["guard-kernel", "result-admitter", "git-hook-gate", "issue9181-guard-gate-check-and-emit-report", "issue9181-guard-gate-launch-plan", "issue9181-guard-gate-upstream-posture", "issue9181-guard-gate-allow-overlay-version", "issue9181-guard-gate-info-cache-observed", "issue9181-guard-gate-dispatch-gate-check", "vulkan-memory-reservation-snapshot"],
       "aliases": [],
       "grounding": "gate",
       "grounding_kind": "symbol",

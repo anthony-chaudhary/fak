@@ -44,10 +44,10 @@ type v41ProjScratch struct {
 	mhcFFNProjection     v41MHCProjectionFunc
 	mhcCarry             *v41MHCCarry
 	attentionNormBinding *v41AttentionNormBinding
-	queryNorm            v41QueryNormFunc
+	queryNorm            *v41QueryNormBinding
 	queryPrefix          v41QueryPrefixFunc
 	kvNorm               v41KVNormFunc
-	ffnNorm              v41FFNNormFunc
+	ffnNorm              *v41FFNNormBinding
 	compressorNorm       v41CompressorNormFunc
 	indexKeyNorm         v41IndexKeyNormFunc
 	indexerScoreBinding  *v41IndexerScoreBinding

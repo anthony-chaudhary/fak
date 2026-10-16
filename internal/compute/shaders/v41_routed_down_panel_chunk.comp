@@ -1,0 +1,39 @@
+#version 450
+layout(local_size_x = 64) in;
+// Separate optional 2/4/8-row chunk ABI; no specialization override is accepted.
+layout(constant_id = 31) const uint routedDownChunkABI = 0x52444331u;
+
+// Separate finite-only publication. The raw all-bit boundary remains unchanged.
+// Native ownership fills all four status words with UINT32_MAX and establishes
+// transfer/shader-write -> shader-read/write visibility before this dispatch.
+layout(std430, binding = 0) readonly buffer Input { uint inputBits[]; };
+layout(std430, binding = 1) writeonly buffer Output { uint outputBits[]; };
+layout(std430, binding = 2) buffer CheckedStatus { uint status[]; };
+layout(push_constant) uniform Push { uint count; uint site; uint rowOffset; uint rows; } pc;
+
+void main() {
+    if (routedDownChunkABI != 0x52444331u) return;
+    uint row = gl_GlobalInvocationID.y;
+    if (row >= pc.rows) return;
+    uint base = row * 4u;
+    uint first = gl_GlobalInvocationID.x;
+    if (first == 0u) {
+        status[base] = 0x42463143u;
+        status[base + 1u] = pc.site;
+        status[base + 3u] = pc.count;
+    }
+    // Native groups <= ceil(count/64), count <= INT32_MAX, so stride <= 2^31
+    // and active i + stride <= 2^32-2. The grid-stride increment cannot wrap.
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = first; i < pc.count; i += stride) {
+        uint bits = inputBits[pc.rowOffset + row * pc.count + i];
+        uint rounded = (bits + 0x7fffu + ((bits >> 16u) & 1u)) & 0xffff0000u;
+        if ((bits & 0x7f800000u) == 0x7f800000u ||
+            (rounded & 0x7f800000u) == 0x7f800000u) {
+            atomicMin(status[base + 2u], i);
+        }
+        // These bytes are unpublished on any fault. Raw bit arithmetic is
+        // preserved; no NaN can disappear before its input was checked above.
+        outputBits[row * pc.count + i] = rounded;
+    }
+}

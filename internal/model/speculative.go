@@ -467,6 +467,36 @@ func ParallelVerifyKernel(
 		}, nil
 	}
 
+	var penaltyScratch []float32
+	penalizedLast := lastLogitsCopy
+	if sanitizer.penalizes(counts) {
+		penaltyScratch = sanitizer.ApplyPenaltyInto(penaltyScratch, lastLogitsCopy, counts)
+		penalizedLast = penaltyScratch
+	}
+	boundaryRejectOK := target.Cache != nil && !target.halClosed && target.halFailure == nil &&
+		len(lastLogitsCopy) == target.M.Cfg.VocabSize
+	for _, tok := range draft {
+		if tok < 0 || tok >= target.M.Cfg.VocabSize {
+			boundaryRejectOK = false
+			break
+		}
+	}
+	if boundaryRejectOK {
+		for i, value := range lastLogitsCopy {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) ||
+				math.IsNaN(float64(penalizedLast[i])) || math.IsInf(float64(penalizedLast[i]), 0) {
+				return VerificationResult{}, ErrSpeculativeNonFiniteLogits
+			}
+		}
+	}
+	boundaryArgmax := argmaxF32(penalizedLast)
+	if boundaryRejectOK && draft[0] != boundaryArgmax {
+		target.admitSpeculativeBoundaryReject()
+		return VerificationResult{
+			CorrectionToken: boundaryArgmax,
+		}, nil
+	}
+
 	tBase := target.Cache.Len()
 
 	// Single target forward pass for all K draft tokens (cloning row buffers to avoid aliasing in quantized modes)
@@ -490,14 +520,8 @@ func ParallelVerifyKernel(
 
 	// Compute penalized argmax array: [0..K]. Each penalized row is consumed by argmax
 	// before the next is built, so one per-round scratch row serves all of them.
-	var penaltyScratch []float32
 	targetArgmax := make([]int, len(draft)+1)
-	penalizedLast := lastLogitsCopy
-	if sanitizer.penalizes(counts) {
-		penaltyScratch = sanitizer.ApplyPenaltyInto(penaltyScratch, lastLogitsCopy, counts)
-		penalizedLast = penaltyScratch
-	}
-	targetArgmax[0] = argmaxF32(penalizedLast)
+	targetArgmax[0] = boundaryArgmax
 
 	// Simulate running count for speculative steps to properly penalize each draft step
 	simCounts := append([]int32(nil), counts...)
@@ -532,6 +556,37 @@ func ParallelVerifyKernel(
 		RollbackKVCount: rollbackCount,
 		TargetLogits:    rows,
 	}, nil
+}
+
+// Admission may retire a device-only session, so a no-forward rejection still owns the backend domain.
+func (s *Session) admitSpeculativeBoundaryReject() {
+	scope := s.beginBackendExecution()
+	defer scope.finish()
+	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
+		panic(err)
+	}
+	s.validateDeviceOnlyExecution("decode")
+	if s.M.Cfg.IsDeepSeekV41() {
+		s.ensureOpenBackendSession()
+		if err := s.M.v41ForwardAdmitted(); err != nil {
+			panic(err)
+		}
+		return
+	}
+	s.cacheGeometryMu.RLock()
+	defer s.cacheGeometryMu.RUnlock()
+	s.validateDenseGPULayers()
+	switch {
+	case s.M.Cfg.usesMLAMoELayout():
+		s.requireGLMDsaSession()
+	case s.M.Cfg.isMiniMaxSparseAttn():
+		s.requireMiniMaxSession()
+	case s.M.Cfg.isGemma4():
+		s.requireGemma4Session()
+	}
+	if s.Backend != nil {
+		s.ensureOpenBackendSession()
+	}
 }
 
 func parallelVerifyTree(

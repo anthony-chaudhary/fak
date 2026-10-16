@@ -61,6 +61,23 @@ func (s *Session) v41AttentionBF16WithProvenance() (v41BF16BoundaryFunc, *Model,
 			closeSelected(closed)
 			return closed
 		}
+		ownedReadStarted, ownedReadReturned, ownedReadCompleted := false, false, false
+		var ownedReadPrimary error
+		// This outer completion fence runs after run's transient cleanup. Goexit
+		// does not return the backend error; it must still retire the selected
+		// session without closing it before input cleanup has been attempted.
+		defer func() {
+			if ownedReadStarted && !ownedReadCompleted {
+				result = nil
+				if cause == nil {
+					cause = ownedReadPrimary
+				}
+				if cause == nil {
+					cause = errV41BF16BoundaryResult
+				}
+				cause = closeFailure(cause)
+			}
+		}()
 		defer func() {
 			if r := recover(); r != nil {
 				if err, ok := r.(error); ok {
@@ -114,22 +131,45 @@ func (s *Session) v41AttentionBF16WithProvenance() (v41BF16BoundaryFunc, *Model,
 			var owned []compute.Tensor
 			defer func() {
 				primaryPanic := recover()
+				// Preserve the selected primary if cleanup itself calls Goexit,
+				// which prevents run's return values reaching the outer frame.
+				if ownedReadStarted && !ownedReadCompleted {
+					ownedReadPrimary = cause
+					if ownedReadPrimary == nil && primaryPanic != nil {
+						if err, ok := primaryPanic.(error); ok {
+							ownedReadPrimary = err
+						} else {
+							ownedReadPrimary = fmt.Errorf("unclassified backend panic: %v", primaryPanic)
+						}
+					}
+					if ownedReadPrimary == nil && !ownedReadReturned {
+						ownedReadPrimary = errV41BF16BoundaryResult
+						cause = ownedReadPrimary
+					}
+				}
 				var cleanupPanic any
+				cleanupInterrupted := false
 				for i := len(owned) - 1; i >= 0; i-- {
 					func() {
+						released := false
 						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
+							r := recover()
+							if !released && !cleanupInterrupted {
+								cleanupPanic, cleanupInterrupted = r, true
 							}
 						}()
 						backend.Free(owned[i])
+						released = true
 					}()
 				}
 				if primaryPanic != nil {
 					panic(primaryPanic)
 				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
+				if cause == nil && cleanupInterrupted {
+					if cleanupPanic != nil {
+						panic(cleanupPanic)
+					}
+					cause = errV41BF16BoundaryResult
 				}
 			}()
 			stage = "input upload"
@@ -143,6 +183,21 @@ func (s *Session) v41AttentionBF16WithProvenance() (v41BF16BoundaryFunc, *Model,
 				return nil, errV41BF16BoundaryResult
 			}
 			stage = "checked publication"
+			ownedReadStarted = true
+			read, selected, readErr := compute.TryV41AttentionBF16ReadOwned(backend, input, siteID)
+			ownedReadReturned = true
+			if selected || readErr != nil {
+				err := readErr
+				if err != nil {
+					return nil, err
+				}
+				stage = "checked publication readback"
+				if len(read) != len(values) || !v41BF16Widened(read) {
+					return nil, errV41BF16BoundaryResult
+				}
+				return read, nil
+			}
+			ownedReadCompleted = true // Genuine decline preserves the ordinary fallback.
 			out, err := operation.V41AttentionBF16(input, siteID)
 			fresh := out.Buf() != nil && out.Backend() == backend && out.Buf() != input.Buf()
 			if fresh {
@@ -156,7 +211,7 @@ func (s *Session) v41AttentionBF16WithProvenance() (v41BF16BoundaryFunc, *Model,
 				return nil, errV41BF16BoundaryResult
 			}
 			stage = "checked publication readback"
-			read := backend.Read(out)
+			read = backend.Read(out)
 			if len(read) != len(values) {
 				return nil, errV41BF16BoundaryResult
 			}
@@ -170,6 +225,9 @@ func (s *Session) v41AttentionBF16WithProvenance() (v41BF16BoundaryFunc, *Model,
 			return append([]float32(nil), read...), nil
 		}
 		result, cause = run()
+		if ownedReadReturned {
+			ownedReadCompleted = true
+		} // Includes deferred input cleanup.
 		if cause != nil {
 			return nil, closeFailure(cause)
 		}

@@ -96,13 +96,17 @@ func RelevantPath(path string) bool {
 
 // CheckFresh regenerates in scratch space and compares every tracked generated artifact.
 func CheckFresh(root string) (FreshnessResult, error) {
+	return checkFreshProfile(root, nil)
+}
+
+func checkFreshProfile(root string, profile *conceptTreeProfile) (FreshnessResult, error) {
 	out, err := os.MkdirTemp("", "fak-concept-fresh-*")
 	if err != nil {
 		return FreshnessResult{}, err
 	}
 	defer os.RemoveAll(out)
 	generated := filepath.Join(out, "generated")
-	if err := generate(root, generated); err != nil {
+	if err := generateProfile(root, generated, profile); err != nil {
 		return FreshnessResult{}, err
 	}
 	return compareGeneratedFreshness(root, generated)
@@ -160,7 +164,7 @@ func CheckGitTree(root, treeish string) (FreshnessResult, error) {
 		return FreshnessResult{}, err
 	}
 	defer cleanup()
-	res, err := CheckFresh(tree)
+	res, err := checkFreshProfile(tree.root, tree.profile)
 	res.Regenerate = RegenerateStagedCommandFor(resolved)
 	return res, err
 }
@@ -221,21 +225,46 @@ func RegenerateFromGitTree(root, treeish, dest string) ([]string, error) {
 // Deliberately NOT merged with CheckFresh: callers hand CheckFresh the extraction root,
 // never the repo, and collapsing the two roots is how the peer-dirty bug this export
 // exists to prevent gets reintroduced.
-func materializeGitTree(root, treeish string) (string, func(), error) {
+func materializeGitTree(root, treeish string) (conceptGitTree, func(), error) {
 	treeish, err := resolveTreeish(root, treeish)
 	if err != nil {
-		return "", func() {}, err
+		return conceptGitTree{}, func() {}, err
+	}
+	// Freeze the archive object without losing commit export-subst context.
+	pinned, err := git(root, "rev-parse", "--verify", treeish)
+	if err != nil {
+		return conceptGitTree{}, func() {}, err
+	}
+	treeish = strings.TrimSpace(string(pinned))
+	qualifiedTree, err := git(root, "rev-parse", "--verify", treeish+"^{tree}")
+	if err != nil {
+		return conceptGitTree{}, func() {}, err
+	}
+	profile, err := qualifyConceptTreeProfile(root, strings.TrimSpace(string(qualifiedTree)))
+	if err != nil {
+		return conceptGitTree{}, func() {}, err
 	}
 	tmp, err := os.MkdirTemp("", "fak-concept-tree-*")
 	if err != nil {
-		return "", func() {}, err
+		return conceptGitTree{}, func() {}, err
 	}
 	cleanup := func() { os.RemoveAll(tmp) }
-	if err := extractGitTree(root, treeish, tmp); err != nil {
-		cleanup()
-		return "", func() {}, err
+	extract := extractGitTar
+	if profile != nil {
+		extract = extractConceptProfileTar
 	}
-	return tmp, cleanup, nil
+	if err = extractGitTreeUsing(root, treeish, tmp, extract); err != nil {
+		cleanup()
+		return conceptGitTree{}, func() {}, err
+	}
+	if profile != nil {
+		h, e := conceptFileDigest(filepath.Join(tmp, "tools/concept_disambiguation_scorecard.py"))
+		if e != nil || h != conceptScriptSHA {
+			cleanup()
+			return conceptGitTree{}, func() {}, fmt.Errorf("qualified archived generator identity")
+		}
+	}
+	return conceptGitTree{root: tmp, profile: profile}, cleanup, nil
 }
 
 var gitArchiveCommand = func(treeish string) *exec.Cmd {
@@ -243,6 +272,10 @@ var gitArchiveCommand = func(treeish string) *exec.Cmd {
 }
 
 func extractGitTree(root, treeish, tmp string) error {
+	return extractGitTreeUsing(root, treeish, tmp, extractGitTar)
+}
+
+func extractGitTreeUsing(root, treeish, tmp string, extract func(io.Reader, string) error) error {
 	cmd := gitArchiveCommand(treeish)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
@@ -257,7 +290,7 @@ func extractGitTree(root, treeish, tmp string) error {
 		return fmt.Errorf("git archive %s: %w", treeish, err)
 	}
 
-	extractErr := extractGitTar(stdout, tmp)
+	extractErr := extract(stdout, tmp)
 	var drainErr error
 	if extractErr == nil {
 		// tar.Reader stops at its end marker; consume the remaining padding so
@@ -417,12 +450,22 @@ func ResolvePython() (string, error) {
 }
 
 func generate(root, out string) error {
+	return generateProfile(root, out, nil)
+}
+
+func generateProfile(root, out string, profile *conceptTreeProfile) error {
 	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
 	python, err := ResolvePython()
 	if err != nil {
 		return fmt.Errorf("generate scorecard: %w", err)
 	}
 	cmd := exec.Command(python, script, "--workspace", root, "--markdown-dir", out)
+	if profile != nil {
+		cmd, err = profile.command(root, out, false)
+		if err != nil {
+			return err
+		}
+	}
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
 	var stderr bytes.Buffer

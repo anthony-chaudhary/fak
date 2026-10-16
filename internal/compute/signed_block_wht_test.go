@@ -157,35 +157,38 @@ func TestSignedBlockWHTRoundTrip(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestSignedBlockWHTForwardTwiceNotIdentity(t *testing.T) {
-	widths := []int{5120}
+	widths := []int{5120, 6144, 17408}
 	wht, _ := signedWHTCase(t, PrismWHTBlock, widths)
 	rng := rand.New(rand.NewSource(11))
-	x := make([]float32, widths[0])
-	for i := range x {
-		x[i] = float32(rng.NormFloat64())
-	}
-	orig := append([]float32(nil), x...)
-	if err := wht.Forward(x); err != nil {
-		t.Fatal(err)
-	}
-	if err := wht.Forward(x); err != nil {
-		t.Fatal(err)
-	}
-	// With explicit signs, fwd(fwd(x)) != x.
-	if vectorsClose(x, orig, 1e-3) {
-		t.Fatalf("Forward(Forward(x)) unexpectedly equals x; the signed forward is not involutory")
-	}
-	// And the unsigned inverse alias does not undo the signed forward.
-	y := append([]float32(nil), orig...)
-	if err := wht.Forward(y); err != nil {
-		t.Fatal(err)
-	}
-	if err := BlockDiagonalWHTInverse(y, PrismWHTBlock); err != nil {
-		t.Fatal(err)
-	}
-	if vectorsClose(y, orig, 1e-3) {
-		t.Fatalf("BlockDiagonalWHTInverse(signed Forward(x)) equals x; the unsigned alias must not undo the signed forward")
+	for _, w := range widths {
+		x := make([]float32, w)
+		for i := range x {
+			x[i] = float32(rng.NormFloat64())
+		}
+		orig := append([]float32(nil), x...)
+		if err := wht.Forward(x); err != nil {
+			t.Fatal(err)
+		}
+		if err := wht.Forward(x); err != nil {
+			t.Fatal(err)
+		}
+		// With explicit signs, fwd(fwd(x)) != x.
+		if vectorsClose(x, orig, 1e-3) {
+			t.Fatalf("width %d: Forward(Forward(x)) unexpectedly equals x; the signed forward is not involutory", w)
+		}
+		// And the unsigned inverse alias does not undo the signed forward.
+		y := append([]float32(nil), orig...)
+		if err := wht.Forward(y); err != nil {
+			t.Fatal(err)
+		}
+		if err := BlockDiagonalWHTInverse(y, PrismWHTBlock); err != nil {
+			t.Fatal(err)
+		}
+		if vectorsClose(y, orig, 1e-3) {
+			t.Fatalf("width %d: BlockDiagonalWHTInverse(signed Forward(x)) equals x; the unsigned alias must not undo the signed forward", w)
+		}
 	}
 }
 
@@ -201,6 +204,8 @@ func vectorsClose(a, b []float32, tol float64) bool {
 	return true
 }
 
+// The oracle evaluates dense 1024-by-1024 blocks without allocating a full-width matrix.
+// fak-test:runtime medium est=1s lane=default
 func TestSignedBlockWHTMatchesDenseOracle(t *testing.T) {
 	widths := []int{5120, 6144, 17408}
 	wht, signs := signedWHTCase(t, PrismWHTBlock, widths)
@@ -225,6 +230,22 @@ func TestSignedBlockWHTMatchesDenseOracle(t *testing.T) {
 		for i := range xf {
 			if !almostEqual(xf[i], float32(want[i]), 1e-4, 1e-4) {
 				t.Fatalf("width %d: Forward[%d] = %g, oracle = %g", w, i, xf[i], want[i])
+			}
+		}
+
+		// Test Inverse on the original input, not the output of Forward: its
+		// independent oracle is D * H_block * x, with signs applied last.
+		want = denseBlockWHT64(x, PrismWHTBlock)
+		for i := range xf {
+			xf[i] = float32(x[i])
+			want[i] *= float64(signs[wi][i])
+		}
+		if err := wht.Inverse(xf); err != nil {
+			t.Fatalf("Inverse(width=%d): %v", w, err)
+		}
+		for i := range xf {
+			if !almostEqual(xf[i], float32(want[i]), 1e-4, 1e-4) {
+				t.Fatalf("width %d: Inverse[%d] = %g, oracle = %g", w, i, xf[i], want[i])
 			}
 		}
 	}

@@ -10,24 +10,37 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/rsiloop"
 )
 
-func main() {
-	size := flag.Int("size", rsiloop.DefaultCacheSize, "LRU cache size to probe (defaults to the committed DefaultCacheSize)")
-	dump := flag.Bool("dump", false, "print the hit-rate curve for sizes 1..16 (for picking real candidate sizes)")
-	flag.Parse()
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("kpiprobe", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	size := fs.Int("size", rsiloop.DefaultCacheSize, "LRU cache size to probe (defaults to the committed DefaultCacheSize)")
+	dump := fs.Bool("dump", false, "print the hit-rate curve for sizes 1..16 (for picking real candidate sizes)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
 	if *dump {
-		fmt.Printf("# lru_hit_rate over %d accesses\n", rsiloop.TraceLen())
+		fmt.Fprintf(stdout, "# lru_hit_rate over %d accesses\n", rsiloop.TraceLen())
 		for n := 1; n <= 16; n++ {
-			fmt.Printf("size=%2d KPI=%.6f\n", n, rsiloop.HitRate(n))
+			fmt.Fprintf(stdout, "size=%2d KPI=%.6f\n", n, rsiloop.HitRate(n))
 		}
-		return
+		return 0
 	}
 	// The load-bearing line the worktree Measurer parses.
-	fmt.Printf("KPI=%.6f\n", rsiloop.HitRate(*size))
+	fmt.Fprintf(stdout, "KPI=%.6f\n", rsiloop.HitRate(*size))
+	return 0
 }
+
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }

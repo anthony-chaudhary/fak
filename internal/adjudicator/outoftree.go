@@ -339,7 +339,7 @@ func readRedirectToken(src string, i int) (string, int) {
 }
 
 // targetContained reports whether a canonicalised write target resolves strictly
-// under ws or one of scratch (or is a null device). Fail-closed: an empty target,
+// under ws or one of scratch (or is a null device). It fails closed: an empty target,
 // an unresolved variable/glob ($ * ?), or an empty ws for a relative target all
 // return false (not contained -> the caller keeps the deny). Absolute targets are
 // checked directly; relative targets are joined to ws.

@@ -24,7 +24,7 @@ func renderFromGitTree(root, treeish string, overlay map[string][]byte) (map[str
 	}
 	defer cleanup()
 	if len(overlay) > 0 {
-		dir := filepath.Join(tree, filepath.FromSlash(DataRel))
+		dir := filepath.Join(tree.root, filepath.FromSlash(DataRel))
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, err
 		}
@@ -42,7 +42,7 @@ func renderFromGitTree(root, treeish string, overlay map[string][]byte) (map[str
 		return nil, err
 	}
 	defer os.RemoveAll(out)
-	if err := generate(tree, out); err != nil {
+	if err := generateProfile(tree.root, out, tree.profile); err != nil {
 		return nil, err
 	}
 	rendered := make(map[string][]byte, len(generatedArtifacts))

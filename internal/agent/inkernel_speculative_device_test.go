@@ -689,3 +689,123 @@ func TestSpeculativeOptInDoesNotBypassContextLimit(t *testing.T) {
 		t.Fatalf("context error = %+v, want %+v", contextErr, want)
 	}
 }
+
+// fak-test:justify why=regression when=changed:internal/model/**
+// fak-test:runtime fast est=100ms
+func TestGenericSpeculativeBoundaryRejectUsesNoTargetWork(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		k    int
+	}{{"one", 1}, {"two", 2}, {"four", 4}} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, ok := compute.Lookup("cpu-ref")
+			if !ok {
+				t.Fatal("cpu-ref backend unavailable")
+			}
+			m := model.NewSynthetic(tinyConcurrencyConfig())
+			newSession := func(b compute.Backend) *model.Session {
+				s, err := m.NewBackendSessionChecked(b)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(s.Close)
+				return s
+			}
+			probe := &speculativeStepCountBackend{Backend: base}
+			target := newSession(probe)
+			prompt := []int{3, 7, 11}
+			boundary := append([]float32(nil), target.Prefill(prompt)...)
+			oracle := newSession(base)
+			oracle.Prefill(prompt)
+			correction := model.ArgmaxF32(boundary)
+			wrong := (correction + 1) % m.Cfg.VocabSize
+			draft := make([]int, tc.k)
+			for i := range draft {
+				draft[i] = wrong
+			}
+			baselineProbe := &speculativeStepCountBackend{Backend: base}
+			baseline := newSession(baselineProbe)
+			baseline.Prefill(prompt)
+			baseMuls, baseReads := baselineProbe.matMulCalls, baselineProbe.readCalls
+			for _, tok := range draft {
+				before := baselineProbe.matMulCalls
+				baseline.Step(tok)
+				if baselineProbe.matMulCalls <= before {
+					t.Fatal("serial baseline did not execute a target forward")
+				}
+			}
+			if baselineProbe.matMulCalls <= baseMuls || baselineProbe.readCalls <= baseReads {
+				t.Fatal("serial K-step baseline performed no measured backend work")
+			}
+			if qwen35DeviceVerifierAvailable(target) {
+				t.Fatal("fixture entered the architecture-specific device verifier")
+			}
+			muls, reads := probe.matMulCalls, probe.readCalls
+			cacheLen := target.Cache.Len()
+			priorLogits := append([]float32(nil), target.LastLogits()...)
+			got, receipt, err := verifyGreedySpeculativeRoundObserved(context.Background(), target, prompt,
+				model.NewLinearProposal(draft, nil), boundary, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if probe.matMulCalls != muls || probe.readCalls != reads {
+				t.Fatalf("known rejection executed target work: matmuls=%d reads=%d; serial baseline used %d/%d for K=%d",
+					probe.matMulCalls-muls, probe.readCalls-reads, baselineProbe.matMulCalls-baseMuls, baselineProbe.readCalls-baseReads, tc.k)
+			}
+			if receipt != nil || got.NumAccepted != 0 || len(got.AcceptedTokens) != 0 || got.CorrectionToken != correction ||
+				got.RollbackKVCount != 0 || got.TargetLogits != nil || got.LastAcceptedLogits != nil {
+				t.Fatal("generic known rejection exposed speculative work or a device qualification receipt")
+			}
+			if target.Cache.Len() != cacheLen || !reflect.DeepEqual(target.LastLogits(), priorLogits) {
+				t.Fatal("known rejection changed the target boundary")
+			}
+			if _, err := target.VerifyTokenLineage(prompt); err != nil {
+				t.Fatalf("target lineage changed: %v", err)
+			}
+			if !reflect.DeepEqual(target.Step(correction), oracle.Step(correction)) {
+				t.Fatal("ordinary continuation after rejection differs from untouched serial target")
+			}
+		})
+	}
+
+	t.Run("ordinary_planner_emission", func(t *testing.T) {
+		proposal := &speculativeRequestProbe{}
+		p, prompt, backend := speculativeBackendPlanner(t, proposal)
+		ref, err := p.m.NewBackendSessionChecked(backend.Backend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(ref.Close)
+		correct := model.ArgmaxF32(ref.Prefill(prompt))
+		wrong := (correct + 1) % p.m.Cfg.VocabSize
+		proposal.tokens = []int{wrong, wrong, wrong, wrong}
+		muls, reads, proposalObserved := 0, 0, false
+		proposal.after = func() {
+			muls, reads, proposalObserved = backend.matMulCalls, backend.readCalls, true
+		}
+		var emitted []int
+		res, err := p.generateReusedRecovering(context.Background(), prompt, 4, 0, 0, 0, nil, 0, 0, nil, func(token int) bool {
+			if !proposalObserved {
+				t.Fatal("ordinary request did not invoke its proposal source")
+			}
+			if backend.matMulCalls != muls || backend.readCalls != reads {
+				t.Fatalf("ordinary correction emission required target work: matmuls=%d reads=%d", backend.matMulCalls-muls, backend.readCalls-reads)
+			}
+			emitted = append(emitted, token)
+			return true
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.stopped || res.gen != 1 || !reflect.DeepEqual(emitted, []int{correct}) ||
+			proposal.calls != 1 || !reflect.DeepEqual(proposal.maxDrafts, []int{4}) {
+			t.Fatal("ordinary request changed correction output, proposal budget, or stop semantics")
+		}
+		stats := p.SpeculativeEngine().Stats()
+		if stats.VerificationRounds != 1 || stats.DraftTokensGenerated != 4 || stats.DraftTokensAccepted != 0 ||
+			stats.BonusTokensEmitted != 1 || stats.RollbackTokensCount != 0 {
+			t.Fatal("ordinary correction emission changed speculative accounting")
+		}
+		assertSpeculativeRequestStateReleased(t, p, prompt, proposal)
+	})
+}

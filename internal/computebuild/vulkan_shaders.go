@@ -34,6 +34,14 @@ func buildVulkanShaders(repoRoot string, stdout io.Writer, compile func(src, dst
 	if err != nil {
 		return err
 	}
+	chunk, err := readVulkanQualifiedActivationChunk(repoRoot)
+	if err != nil {
+		return err
+	}
+	downChunk, err := readVulkanQualifiedDownChunk(repoRoot)
+	if err != nil {
+		return err
+	}
 	compiledCount := 0
 	for _, s := range vulkanCurrentRegistry.stems() {
 		src := filepath.Join(shaderSrc, s+".comp")
@@ -43,6 +51,20 @@ func buildVulkanShaders(repoRoot string, stdout io.Writer, compile func(src, dst
 			return fmt.Errorf("required shader source missing: %s", src)
 		}
 
+		if s == vulkanQualifiedDownChunkStem {
+			if err := writeVulkanQualifiedDownChunk(dst, downChunk); err != nil {
+				return err
+			}
+			compiledCount++
+			continue
+		}
+		if s == vulkanQualifiedActivationChunkStem {
+			if err := writeVulkanQualifiedActivationChunk(dst, chunk); err != nil {
+				return err
+			}
+			compiledCount++
+			continue
+		}
 		if s == vulkanQualifiedIndexScaleStem {
 			if err := writeVulkanQualifiedModule(dst, qualified); err != nil {
 				return err

@@ -108,6 +108,26 @@ func (o *v41RoutedOutputOwner) handoff(rows []v41ExpertRow) *v41RoutedOutputHand
 	return &v41RoutedOutputHandoff{owner: o, rows: rows}
 }
 
+// canCompleteUnretained authorizes only a zero-transfer continuation after the
+// existing retained prefix is full. Keep this handoff attached: prior retained
+// buffers remain excluded from new ownership and every failure still retires
+// the original owner. A cohort crossing the cap stays on the row publication
+// path. Recheck at completion; this predicate alone transfers no authority.
+func (h *v41RoutedOutputHandoff) canCompleteUnretained(rows int) bool {
+	return h != nil && h.owner.live() && len(h.rows) == rows &&
+		h.owner.capRows > 0 && len(h.owner.rows) == h.owner.capRows
+}
+
+// completeUnretained is the explicit equivalent of adopt's n==0 branch, without
+// pretending packed panels are independent retained row tensors. It neither
+// changes the retained prefix nor suppresses layer/session cleanup obligations.
+func (h *v41RoutedOutputHandoff) completeUnretained(rows int) error {
+	if !h.canCompleteUnretained(rows) {
+		return errV41ExpertResult
+	}
+	return nil
+}
+
 func (h *v41RoutedOutputHandoff) adopt(published []compute.Tensor) (int, error) {
 	if h == nil {
 		return 0, nil

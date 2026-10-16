@@ -99,8 +99,10 @@ func TestVulkanQualifiedArtifact(t *testing.T) {
 // fak-test:runtime fast est=20ms
 func TestVulkanQualifiedBuilder(t *testing.T) {
 	root, _, _ := qualifiedIndexScaleFixture(t)
+	installQualifiedChunkFixture(t, root)
+	installQualifiedDownChunkFixture(t, root)
 	for _, stem := range vulkanCurrentRegistry.stems() {
-		if stem != vulkanQualifiedIndexScaleStem {
+		if stem != vulkanQualifiedIndexScaleStem && stem != vulkanQualifiedActivationChunkStem && stem != vulkanQualifiedDownChunkStem {
 			if err := os.WriteFile(filepath.Join(root, "internal/compute/shaders", stem+".comp"), []byte("fixture"), 0644); err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +111,7 @@ func TestVulkanQualifiedBuilder(t *testing.T) {
 	calls := 0
 	compile := func(src, dst string) error {
 		calls++
-		if strings.Contains(src, vulkanQualifiedIndexScaleStem) {
+		if strings.Contains(src, vulkanQualifiedIndexScaleStem) || strings.Contains(src, vulkanQualifiedActivationChunkStem) || strings.Contains(src, vulkanQualifiedDownChunkStem) {
 			t.Fatal("canonical module reached local compiler")
 		}
 		return os.WriteFile(dst, []byte("ordinary compiler fixture"), 0644)
@@ -117,7 +119,7 @@ func TestVulkanQualifiedBuilder(t *testing.T) {
 	if err := buildVulkanShaders(root, io.Discard, compile); err != nil {
 		t.Fatal(err)
 	}
-	if calls != len(vulkanCurrentRegistry.stems())-1 {
+	if calls != len(vulkanCurrentRegistry.stems())-3 {
 		t.Fatalf("ordinary compiler calls=%d", calls)
 	}
 	if err := verifyVulkanQualifiedIndexScale(root, filepath.Join(root, "internal/compute/spirv")); err != nil {
@@ -156,7 +158,7 @@ func TestVulkanReceiptV23Materialization(t *testing.T) {
 			t.Fatal("canonical materialization provenance missing")
 		}
 		for _, r := range vulkanSuccessorRegistries {
-			if r != vulkanRegistryV23 && r.usesQualifiedIndexScale() {
+			if r != vulkanRegistryV23 && r != vulkanRegistryV24 && r != vulkanRegistryV25 && r.usesQualifiedIndexScale() {
 				t.Fatal("historical schema acquired materialization claim")
 			}
 		}

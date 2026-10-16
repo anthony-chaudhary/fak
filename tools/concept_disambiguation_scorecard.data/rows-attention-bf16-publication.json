@@ -64,7 +64,8 @@
       "definition": "The selected synchronous backend method for finite BF16 publication at site 3 or 4. The Vulkan implementation owns fresh output and status buffers, dispatches the checked integer module, reads and validates status, and only then returns the output tensor.",
       "distinction": "This applies BF16 round-to-nearest-even and finite-publication checks, not the learned RMSNorm between these two edges. Failure has no decline or host-replay outcome.",
       "distinct_from": [
-        "v41-attention-bf16-backend"
+        "v41-attention-bf16-backend",
+        "v41-attention-bf16-owned-read"
       ],
       "aliases": [],
       "grounding": "V41AttentionBF16",
