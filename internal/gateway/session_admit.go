@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
@@ -73,6 +74,9 @@ func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (con
 	// enumerates — the join the /debug/vars request_admission block needs (#13120
 	// reachability). No-op on an empty trace.
 	ctx = agent.WithRequestTraceID(ctx, trace)
+	s.admitRequestObservation(r, trace)
+	requestID, loadID := requestObservationContext(r)
+	ctx = enginestep.WithRequestObservation(ctx, requestID, loadID)
 	// Carry the harness launch session id for prefix-reuse attribution on every wire.
 	ctx = withPrefixReuseSession(ctx, harnessSessionID(r))
 	if principalFromContext(ctx) == "" {
