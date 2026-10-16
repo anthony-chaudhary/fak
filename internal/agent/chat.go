@@ -64,12 +64,14 @@ type Func struct {
 func (f *Func) UnmarshalJSON(raw []byte) error {
 	var aux struct {
 		Name      string          `json:"name"`
+		Namespace string          `json:"namespace,omitempty"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return err
 	}
 	f.Name = aux.Name
+	f.Namespace = aux.Namespace
 	f.Arguments = ""
 	arg := bytes.TrimSpace(aux.Arguments)
 	if len(arg) == 0 || bytes.Equal(arg, []byte("null")) {

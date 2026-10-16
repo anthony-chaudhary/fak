@@ -872,6 +872,7 @@ type openAIResponsesItem struct {
 	ID        string `json:"id,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Output    string `json:"output,omitempty"`
 	Summary   any    `json:"summary,omitempty"`
@@ -1048,6 +1049,7 @@ func openAIResponsesInput(messages []Message) []openAIResponsesItem {
 					Type:      "function_call",
 					CallID:    callID,
 					Name:      tc.Function.Name,
+					Namespace: tc.Function.Namespace,
 					Arguments: tc.Function.Arguments,
 				})
 			}
