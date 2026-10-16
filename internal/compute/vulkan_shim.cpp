@@ -123,6 +123,20 @@ uint64_t              g_allocationWindowPeakBytes = 0;
 // Tokens name VkDeviceMemory allocations, not Buffer wrappers, arena indices or
 // addresses. Retention/pooling keeps the token; a new allocation never reuses it.
 // No cross-device-lifetime contract is provided. Exhaustion affects metadata only.
+// Observation identity only. Init attempts invalidate old observation generations;
+// exhaustion disables this inventory rather than wrapping or changing allocation policy.
+uint64_t g_memoryDeviceGeneration = 0;
+bool g_memoryDeviceGenerationReady = false;
+void beginMemoryDeviceGeneration() {
+    g_memoryDeviceGenerationReady = false;
+    static bool exhausted = false;
+    if (exhausted || g_memoryDeviceGeneration == std::numeric_limits<uint64_t>::max()) {
+        exhausted = true;
+        g_memoryDeviceGeneration = 0;
+    } else {
+        ++g_memoryDeviceGeneration;
+    }
+}
 uint64_t g_nextMemoryAllocationID = 1;
 uint64_t nextMemoryAllocationID() {
     uint64_t id = g_nextMemoryAllocationID;
@@ -204,6 +218,7 @@ struct Buffer {
     size_t         weightArenaBlock = std::numeric_limits<size_t>::max();
     VkDeviceSize   allocationBytes = 0;
     uint64_t       allocationID = 0;
+    uint64_t       deviceGeneration = 0;
     bool           allocationDeviceLocal = false;
     void*          mapped = nullptr; // host view of a direct-upload weight arena binding
     bool           ownsMapping = false; // mapped is this buffer's own map of mem, unmapped on destroy
@@ -221,6 +236,7 @@ struct WeightArenaBlock {
     VkDeviceMemory mem = VK_NULL_HANDLE;
     VkDeviceSize capacity = 0;
     uint64_t allocationID = 0;
+    uint64_t deviceGeneration = 0;
     VkDeviceSize used = 0;
     uint32_t memoryTypeIndex = UINT32_MAX;
     size_t liveBuffers = 0;
@@ -840,6 +856,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     b->memoryTypeIndex = selectedMemoryType;
     b->allocationBytes = req.size;
     b->allocationID = nextMemoryAllocationID();
+    b->deviceGeneration = g_memoryDeviceGeneration;
     b->allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(selectedMemoryType);
     trackDeviceAllocation(req.size, selectedMemoryType);
     return b;
@@ -1007,6 +1024,7 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     block.mem = memory;
     block.capacity = blockBytes;
     block.allocationID = nextMemoryAllocationID();
+    block.deviceGeneration = g_memoryDeviceGeneration;
     block.used = req.size;
     block.memoryTypeIndex = memoryType;
     block.liveBuffers = 1;
@@ -3471,6 +3489,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // A re-init is not a device teardown and cannot establish quiescence. Keep
     // the poisoned context and its loaded capability bound until process exit.
     if (g_v41SubmissionPendingFailure) return 9;
+    beginMemoryDeviceGeneration();
     g_have_v41_tail_rope_qk = 0;
 #ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
     g_v41TailRoPEExactModule = false;
@@ -4020,6 +4039,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
 
     g_ready = true;
+    g_memoryDeviceGenerationReady = g_memoryDeviceGeneration != 0;
     g_have_v41_tail_rope_qk = 1;
     g_have_v41_shared_attention = 1;
     g_have_v41_shared_attention_fast = v41SharedAttentionFastBuilt ? 1 : 0;
@@ -4889,6 +4909,108 @@ int fvk_buffer_reservation(const void* d, fvk_buffer_reservation_info* out) {
     out->allocation_id = id;
     out->binding_offset = static_cast<uint64_t>(b->memoryOffset);
     return 1;
+}
+
+// Read only authoritative retained containers. No global allocation registry or
+// event log is needed; scan and duplicate checks are bounded even for large queues.
+int fvk_retained_release_snapshot(fvk_retained_release_record* rows, uint32_t capacity,
+                                  fvk_retained_release_summary* summary) {
+    if (!summary) return FVK_RETAINED_INVALID;
+    *summary = {};
+    summary->device_generation = g_memoryDeviceGeneration;
+    auto fail = [&](uint32_t status) {
+        if (rows && capacity <= FVK_RETAINED_RELEASE_LIMIT) {
+            for (uint32_t i = 0; i < capacity; ++i) rows[i] = {};
+        }
+        *summary = {};
+        summary->device_generation = g_memoryDeviceGeneration;
+        summary->status = status;
+        return static_cast<int>(status);
+    };
+    if (capacity > FVK_RETAINED_RELEASE_LIMIT || (capacity && !rows))
+        return fail(FVK_RETAINED_INVALID);
+    for (uint32_t i = 0; i < capacity; ++i) rows[i] = {};
+    if (!g_ready || !g_dev || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration)
+        return fail(FVK_RETAINED_UNAVAILABLE);
+    uint32_t inspected = 0;
+    uint32_t failure = 0;
+    bool stopped = false;
+    auto visit = [&]() {
+        if (inspected == FVK_RETAINED_RELEASE_LIMIT) {
+            summary->truncated = 1;
+            stopped = true;
+            return false;
+        }
+        ++inspected;
+        return true;
+    };
+    auto observe = [&](Buffer* b, uint32_t container) {
+        if (stopped || !visit()) return;
+        if (!b) { failure = FVK_RETAINED_INVALID; stopped = true; return; }
+        uint64_t generation = b->deviceGeneration;
+        if (b->weightArenaBound) {
+            if (b->weightArenaBlock >= g_weightArena.size()) {
+                failure = FVK_RETAINED_INVALID; stopped = true; return;
+            }
+            generation = g_weightArena[b->weightArenaBlock].deviceGeneration;
+        }
+        if (generation != g_memoryDeviceGeneration || !generation) {
+            failure = FVK_RETAINED_STALE_GENERATION; stopped = true; return;
+        }
+        fvk_buffer_reservation_info reservation{};
+        if (!fvk_buffer_reservation(b, &reservation)) {
+            failure = FVK_RETAINED_INVALID; stopped = true; return;
+        }
+        bool seenAllocation = false;
+        for (uint32_t i = 0; i < summary->returned_records; ++i) {
+            const auto& prior = rows[i];
+            if (prior.reservation.allocation_id != reservation.allocation_id) continue;
+            seenAllocation = true;
+            if (prior.reservation.reservation_bytes != reservation.reservation_bytes) {
+                failure = FVK_RETAINED_INVALID; stopped = true; return;
+            }
+            if (prior.reservation.binding_offset == reservation.binding_offset) {
+                if (prior.reservation.buffer_bytes != reservation.buffer_bytes || prior.container != container) {
+                    failure = FVK_RETAINED_INVALID; stopped = true;
+                }
+                return; // exact duplicate binding in the same authoritative container
+            }
+        }
+        if (summary->returned_records == capacity) {
+            summary->truncated = 1;
+            stopped = true;
+            return;
+        }
+        if (!seenAllocation) {
+            if (reservation.reservation_bytes > std::numeric_limits<uint64_t>::max() -
+                summary->returned_unique_reservation_bytes) {
+                failure = FVK_RETAINED_INVALID; stopped = true; return;
+            }
+            summary->returned_unique_reservation_bytes += reservation.reservation_bytes;
+            ++summary->returned_unique_allocations;
+        }
+        auto& row = rows[summary->returned_records++];
+        row.reservation = reservation;
+        row.device_generation = generation;
+        row.release_state = FVK_RELEASE_REQUESTED;
+        row.container = container;
+        row.backing_state = g_v41SubmissionPendingFailure ? FVK_BACKING_QUARANTINED :
+            (container == FVK_RETAINED_DEFERRED ? FVK_BACKING_DEFERRED : FVK_BACKING_POOL_RETAINED);
+    };
+    for (Buffer* b : g_batchFreed) { observe(b, FVK_RETAINED_DEFERRED); if (stopped) break; }
+    if (!stopped) for (const auto& bucket : g_pool) {
+        if (!visit()) break; // Empty historical buckets must also consume work budget.
+        for (Buffer* b : bucket.second) { observe(b, FVK_RETAINED_DEVICE_POOL); if (stopped) break; }
+        if (stopped) break;
+    }
+    if (!stopped) for (const auto& bucket : g_hvOffloadPool) {
+        if (!visit()) break;
+        for (Buffer* b : bucket.second) { observe(b, FVK_RETAINED_OFFLOAD_POOL); if (stopped) break; }
+        if (stopped) break;
+    }
+    if (failure) return fail(failure);
+    summary->status = FVK_RETAINED_OK;
+    return FVK_RETAINED_OK;
 }
 
 int fvk_transfer_stage_backing(uint64_t* buffer_bytes, fvk_buffer_backing_info* out) {
