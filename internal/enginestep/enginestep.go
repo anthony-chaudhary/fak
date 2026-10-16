@@ -414,9 +414,12 @@ func (r *Recorder) ObserveSpeculativeRound(proposed, accepted, emitted int, d ti
 
 type requestObservationKey struct{}
 type requestObservation struct {
-	requestID, loadID string
-	chunks            atomic.Uint64
-	tokens            atomic.Uint64
+	requestID, loadID             string
+	chunks                        atomic.Uint64
+	tokens                        atomic.Uint64
+	phaseMu                       sync.Mutex
+	prefill, decode               RequestPhaseObservation
+	prefillInvalid, decodeInvalid bool
 }
 
 // WithRequestObservation carries gateway-owned request and model-load identity.
@@ -442,6 +445,78 @@ func RequestObservationFromContext(ctx context.Context) (requestID, loadID strin
 		return v.requestID, v.loadID
 	}
 	return "", ""
+}
+
+// RequestPhaseObservation measures elapsed phase time, including partial work.
+type RequestPhaseObservation struct {
+	DurationNS int64  `json:"duration_ns"`
+	Count      uint64 `json:"count"`
+}
+
+// RequestPhaseObservations leaves phases that were never reached absent.
+type RequestPhaseObservations struct {
+	Prefill *RequestPhaseObservation `json:"prefill,omitempty"`
+	Decode  *RequestPhaseObservation `json:"decode,omitempty"`
+}
+
+// RequestPhaseObservationsFromContext returns a coherent copy owned by one request.
+func RequestPhaseObservationsFromContext(ctx context.Context) RequestPhaseObservations {
+	var result RequestPhaseObservations
+	if ctx == nil {
+		return result
+	}
+	identity, _ := ctx.Value(requestObservationKey{}).(*requestObservation)
+	if identity == nil || identity.requestID == "" {
+		return result
+	}
+	identity.phaseMu.Lock()
+	defer identity.phaseMu.Unlock()
+	if identity.prefill.Count > 0 && !identity.prefillInvalid {
+		value := identity.prefill
+		result.Prefill = &value
+	}
+	if identity.decode.Count > 0 && !identity.decodeInvalid {
+		value := identity.decode
+		result.Decode = &value
+	}
+	return result
+}
+
+// ObservePhaseContext preserves the global observation and its request-owned elapsed time.
+func (r *Recorder) ObservePhaseContext(ctx context.Context, p Phase, d time.Duration) {
+	r.ObservePhase(p, d)
+	recordRequestPhase(ctx, p, d)
+}
+
+// ObservePartialPhaseContext retains elapsed work without completing the global phase.
+func (r *Recorder) ObservePartialPhaseContext(ctx context.Context, p Phase, d time.Duration) {
+	recordRequestPhase(ctx, p, d)
+}
+func recordRequestPhase(ctx context.Context, p Phase, d time.Duration) {
+	if ctx == nil || d < 0 || (p != PhasePrefill && p != PhaseDecode) {
+		return
+	}
+	identity, _ := ctx.Value(requestObservationKey{}).(*requestObservation)
+	if identity == nil || identity.requestID == "" {
+		return
+	}
+	identity.phaseMu.Lock()
+	defer identity.phaseMu.Unlock()
+	phase := &identity.prefill
+	invalid := &identity.prefillInvalid
+	if p == PhaseDecode {
+		phase = &identity.decode
+		invalid = &identity.decodeInvalid
+	}
+	if *invalid {
+		return
+	}
+	if phase.DurationNS > math.MaxInt64-d.Nanoseconds() || phase.Count == math.MaxUint64 {
+		*invalid = true
+		return
+	}
+	phase.DurationNS += d.Nanoseconds()
+	phase.Count++
 }
 
 // ObservePrefillChunk records one prefill forward over `tokens` prompt tokens.

@@ -482,6 +482,12 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	logits := cachedLogits
 	if logits == nil {
 		tp := time.Now()
+		prefillObserved := false
+		defer func() {
+			if !prefillObserved {
+				enginestep.Default.ObservePartialPhaseContext(ctx, enginestep.PhasePrefill, time.Since(tp))
+			}
+		}()
 		s.ResetQ4KPrefillGEMMObservation()
 		flightPrefilled := false
 		if p.cpuPrefixFlightEligible(reuse, matched) && s.Cache != nil && s.Cache.CanEvict() == nil {
@@ -570,7 +576,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			}
 		}
 		prefillS = time.Since(tp).Seconds()
-		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
+		prefillObserved = true
+		enginestep.Default.ObservePhaseContext(ctx, enginestep.PhasePrefill, time.Since(tp))
 		// Snapshot the Q4_K GEMM route this prefill observed before decode (an MTP
 		// verify panel can dispatch the same GEMM) so the summary line attributes it.
 		p.prefillQ4KGEMM.Store(s.Q4KPrefillGEMMObservation())
@@ -724,7 +731,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		err = coalescedErr
 	}
 	decodeS = time.Since(td).Seconds()
-	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
+	enginestep.Default.ObservePhaseContext(ctx, enginestep.PhaseDecode, time.Since(td))
 	if err == nil && ctx.Err() == nil && len(ln.forwarded) > 0 {
 		// Output has already been emitted successfully. Snapshot/admission is a
 		// best-effort acceleration for the next turn and must not turn that response
