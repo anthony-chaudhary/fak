@@ -55,6 +55,9 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "config" {
 		return runOpencodeConfig(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "free-models" {
+		return runOpencodeFreeModels(stdout, stderr, argv[1:])
+	}
 
 	fs := flag.NewFlagSet("opencode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
