@@ -8009,7 +8009,11 @@ extern "C" void fvk_set_q4k_arm_mode(int mode) {
     g_q4k_arm_mode = mode;
 }
 
-static inline bool useQ4KWave32(int P) {
+// Wide single-token Q4_K GEMVs (the LM head) default to Wave32: on gfx1151 the scalar
+// thread-per-row path reads a 248320x5120 head at ~24 GB/s (29.9 ms/token) vs 6.7 ms.
+static const int kQ4KWave32WideRows = 65536;
+
+static inline bool useQ4KWave32(int P, int out) {
     if (!g_have_q4k_wave32 || P != 1) return false;
     if (g_q4k_arm_mode == 1) return true;
     if (g_q4k_arm_mode == 2) return false;
@@ -8023,8 +8027,9 @@ static inline bool useQ4KWave32(int P) {
         if (strcmp(w32, "0") == 0 || strcmp(w32, "false") == 0) return false;
         if (strcmp(w32, "1") == 0 || strcmp(w32, "true") == 0) return true;
     }
-    // Physical A/B on gfx1151 resulted in REJECT_RETAIN_SCALAR (0.63x and 0.76x); default retains scalar.
-    return false;
+    // Physical A/B on gfx1151 resulted in REJECT_RETAIN_SCALAR (0.63x and 0.76x) on narrow
+    // rows; default retains scalar below kQ4KWave32WideRows.
+    return out >= kQ4KWave32WideRows;
 }
 
 extern "C" int fvk_have_q4k_wave32(void) {
@@ -8064,7 +8069,7 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
         dispatch(g_kern[K_Q4K_MATMUL_COOPMAT], bufs, &pc, sizeof(pc), gx, gy);
         return;
     }
-    if (useQ4KWave32(P)) {
+    if (useQ4KWave32(P, out)) {
         struct PC { int out, in, p; } pc{out, in, P};
         Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
         uint32_t groups = (uint32_t)(((size_t)out + 1) / 2);

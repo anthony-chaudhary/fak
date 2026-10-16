@@ -21,6 +21,7 @@ func TestSelectVulkanQ4KWave32RequiresExactDeviceAndCapabilities(t *testing.T) {
 		name        string
 		device      vulkanQ4KWave32Device
 		tokens      int
+		outRows     int
 		optIn       bool
 		forceScalar bool
 		want        bool
@@ -33,7 +34,11 @@ func TestSelectVulkanQ4KWave32RequiresExactDeviceAndCapabilities(t *testing.T) {
 			return d
 		}(), tokens: 1, optIn: true, want: true},
 		{name: "default scalar", device: admitted, tokens: 1},
+		{name: "default scalar below wide rows", device: admitted, tokens: 1, outRows: vulkanQ4KWave32WideRows - 1},
+		{name: "default Wave32 for wide rows", device: admitted, tokens: 1, outRows: 248320, want: true},
 		{name: "explicit scalar override", device: admitted, tokens: 1, optIn: true, forceScalar: true},
+		{name: "explicit scalar override wide rows", device: admitted, tokens: 1, outRows: 248320, forceScalar: true},
+		{name: "wide rows P greater than one", device: admitted, tokens: 2, outRows: 248320},
 		{name: "P greater than one", device: admitted, tokens: 4, optIn: true},
 		{name: "wrong vendor", device: func() vulkanQ4KWave32Device {
 			d := admitted
@@ -63,7 +68,7 @@ func TestSelectVulkanQ4KWave32RequiresExactDeviceAndCapabilities(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := selectVulkanQ4KWave32(tc.device, tc.tokens, tc.optIn, tc.forceScalar); got != tc.want {
+			if got := selectVulkanQ4KWave32(tc.device, tc.tokens, tc.outRows, tc.optIn, tc.forceScalar); got != tc.want {
 				t.Fatalf("selectVulkanQ4KWave32() = %t, want %t", got, tc.want)
 			}
 		})
@@ -83,7 +88,9 @@ func TestVulkanQ4KWave32NativeGateMatchesSelectorContract(t *testing.T) {
 		"VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
 		"effectiveSubgroup32 || requiredSubgroup32",
 		"if (!g_have_q4k_wave32 || P != 1) return false",
-		"default retains scalar",
+		"default retains scalar below kQ4KWave32WideRows",
+		"static const int kQ4KWave32WideRows = 65536;",
+		"return out >= kQ4KWave32WideRows;",
 	} {
 		if !strings.Contains(source, required) {
 			t.Errorf("native Wave32 gate missing %q", required)
