@@ -1425,6 +1425,8 @@ func (s VulkanRetainedReleaseSnapshot) Summary() string {
 		status = "unavailable"
 	case VulkanRetainedStaleGeneration:
 		status = "stale-generation"
+	case VulkanRetainedInvalid:
+		status = "invalid"
 	}
 	counts := "returned_bindings=unavailable returned_unique_allocations=unavailable returned_prefix_reserved_bytes=unavailable"
 	if s.Status == VulkanRetainedOK {
