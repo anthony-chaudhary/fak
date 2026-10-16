@@ -5,14 +5,24 @@ import (
 	"testing"
 )
 
+// i8CopyForTest is the byte-by-byte copy oracle. It lives only in tests so production code
+// reads weights through i8View instead of copying them per call.
+func i8CopyForTest(s []int8) []byte {
+	b := make([]byte, len(s))
+	for i, v := range s {
+		b[i] = byte(v)
+	}
+	return b
+}
+
 // fak-test:runtime fast est=1ms lane=default
 func TestI8ViewMatchesCopyWithoutAllocating(t *testing.T) {
 	src := make([]int8, 256)
 	for i := range src {
 		src[i] = int8(i - 128)
 	}
-	if got, want := i8View(src), i8AsBytes(src); !bytes.Equal(got, want) {
-		t.Fatalf("i8View bytes differ from i8AsBytes")
+	if got, want := i8View(src), i8CopyForTest(src); !bytes.Equal(got, want) {
+		t.Fatalf("i8View bytes differ from the byte copy")
 	}
 	view := i8View(src)
 	src[7] = 42

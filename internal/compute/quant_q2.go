@@ -37,7 +37,7 @@ func q2Code(packed []byte, i int) int32 {
 }
 
 // bytesAsI8 reinterprets packed code bytes as the int8 slice a hostBuf carries (the
-// two's-complement bit pattern is preserved), the inverse of i8AsBytes.
+// two's-complement bit pattern is preserved), the inverse of i8View.
 func bytesAsI8(b []byte) []int8 {
 	s := make([]int8, len(b))
 	for i, v := range b {

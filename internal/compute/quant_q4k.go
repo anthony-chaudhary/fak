@@ -36,7 +36,9 @@ const q4kSuper = 256
 // raw[o*nblk*144:], super-block b within a row at +b*144) as a host Tensor of dtype Q4_K. shape is
 // [out, in] with in a multiple of 256; len(raw) must be out*(in/256)*144. The bytes ride in the
 // HostBuffer.I8() view (one int8 per byte, value-preserving two's-complement reinterpret) — the
-// same layout cpuBackend.MatMul reads and the cuda backend's Upload(_, Q4_K) copies resident.`r`n// The byte/int8 reinterpretation is zero-copy: both element types are one byte, and the immutable`r`n// checkpoint payload stays reachable through the host buffer until the synchronous upload returns.
+// same layout cpuBackend.MatMul reads and the cuda backend's Upload(_, Q4_K) copies resident.
+// The byte/int8 reinterpretation is zero-copy: both element types are one byte, and the immutable
+// checkpoint payload stays reachable through the host buffer until the synchronous upload returns.
 func NewQ4K(be Backend, shape []int, raw []byte) Tensor {
 	var i8 []int8
 	if len(raw) > 0 {
@@ -68,8 +70,7 @@ func newRawKQuant(be Backend, dt Dtype, bits, blockBytes int, shape []int, raw [
 	return makeTensor(be, dt, RowMajor, append([]int(nil), shape...), q, &hostBuf{i8: i8})
 }
 
-// i8AsBytes reinterprets the Q4_K HostBuffer's int8 view back to the raw super-block bytes
-// (value-preserving: NewQ4K stored each byte as int8(b), so byte(i8) recovers it).
+// rawKRowDot is the Q5_K/Q6_K row dot over the raw super-block bytes of one weight row.
 func rawKRowDot(dt Dtype, raw []byte, x []float32, scratch []float32) float32 {
 	bs := 176
 	if dt == Q6_K {
@@ -140,7 +141,7 @@ func dequantQ6K(dst []float32, b []byte) {
 	}
 }
 
-// i8View is i8AsBytes without the copy: the returned bytes alias s, so a caller
+// i8View reads an int8 host buffer as its raw bytes without copying: they alias s, so a caller
 // must only read them. Device uploads use it because a per-byte copy of every
 // streamed expert page-in dominated V4.1 decode host time.
 func i8View(s []int8) []byte {
@@ -148,14 +149,6 @@ func i8View(s []int8) []byte {
 		return nil
 	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(&s[0])), len(s))
-}
-
-func i8AsBytes(s []int8) []byte {
-	b := make([]byte, len(s))
-	for i, v := range s {
-		b[i] = byte(v)
-	}
-	return b
 }
 
 // q4kDequantBlock writes the 256 weights of one 144-byte super-block into dst (len >= 256) — the

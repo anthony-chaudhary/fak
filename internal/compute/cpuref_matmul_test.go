@@ -71,14 +71,51 @@ func BenchmarkCPURefBatchedMatMulQ4K(b *testing.B) {
 	}
 }
 
+// cpuRefPackedWeights builds one host weight for every packed dtype cpu-ref MatMul admits.
+func cpuRefPackedWeights(out, in int) map[Dtype]Tensor {
+	be := &cpuBackend{}
+	shape := []int{out, in}
+	raw := func(blockBytes int) []byte {
+		b := make([]byte, out*(in/q4kSuper)*blockBytes)
+		rand.New(rand.NewSource(int64(blockBytes))).Read(b)
+		return b
+	}
+	w := make([]float32, out*in)
+	for i := range w {
+		w[i] = float32(i%7) - 3
+	}
+	ws := map[Dtype]Tensor{
+		Q4_K:    NewQ4K(be, shape, raw(q4kSuperBlock)),
+		Q5_K:    NewQ5K(be, shape, raw(176)),
+		Q6_K:    NewQ6K(be, shape, raw(210)),
+		Q2_K:    NewQ2K(be, shape, raw(q2kSuperBlock)),
+		Q3_K:    NewQ3K(be, shape, raw(q3kSuperBlock)),
+		IQ2_XXS: NewIQ2XXS(be, shape, raw(iq2xxsSuperBlock)),
+		Q2_0:    QuantizeQ2(be, shape, w, q2Block),
+	}
+	for dt, f := range rawIQFormats {
+		if _, ok := ws[dt]; !ok {
+			ws[dt] = NewRawIQ(be, dt, shape, raw(f.blockBytes))
+		}
+	}
+	return ws
+}
+
 // fak-test:runtime fast est=1s
 func TestCPURefMatMulKQuantReadsWeightInPlace(t *testing.T) {
+	const out, in, p = 64, 512, 2
 	be := &cpuBackend{}
-	x := cpuRefBenchX(cpuRefBenchIn)
-	for name, w := range cpuRefBenchWeights() {
-		allocs := testing.AllocsPerRun(5, func() { be.MatMul(w, x) })
-		if allocs > 3 {
-			t.Errorf("%s MatMul allocs/op = %v, want <= 3 (output row + tensor only)", name, allocs)
+	x := cpuRefBenchX(in)
+	xb := cpuRefBenchX(p * in)
+	for dt, w := range cpuRefPackedWeights(out, in) {
+		if !be.SupportsDeviceWeightDtype(dt) {
+			t.Fatalf("%s built but not admitted by SupportsDeviceWeightDtype", dt)
+		}
+		if allocs := testing.AllocsPerRun(5, func() { be.MatMul(w, x) }); allocs > 3 {
+			t.Errorf("%s MatMul allocs/op = %v, want <= 3 (output row + tensor only)", dt, allocs)
+		}
+		if allocs := testing.AllocsPerRun(5, func() { be.BatchedMatMul(w, xb, p) }); allocs > 3 {
+			t.Errorf("%s BatchedMatMul allocs/op = %v, want <= 3 (output panel + tensor only)", dt, allocs)
 		}
 	}
 }
