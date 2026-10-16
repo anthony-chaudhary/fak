@@ -55,6 +55,8 @@ type InKernelPlanner struct {
 	metal                  bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
 	cpuOffloadExperts      bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
 	requireDeviceExecution bool
+	deviceOnlyBypass       string
+	deviceOnlyBypassHolder atomic.Pointer[model.Session]
 	// kvPrecision is the realized storage tier installed on every session this planner
 	// builds (model.KVPrecisionFP32 default; Q8_0 for the dense mixed layout). Fixed at
 	// construction from InKernelPlannerConfig.KVPrecision.
@@ -2454,8 +2456,8 @@ func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
 
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s",
-		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel())
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s",
+		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause())
 }
 
 // prefillQ4KGEMMLabel is the gemm= value of the execution summary: the Q4_K prefill GEMM

@@ -44,6 +44,8 @@ func (p *InKernelPlanner) cpuPrefixFlightEligible(reuse bool, matched int) bool 
 func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 	if p.requireDeviceExecution {
 		s.SetExecutionPolicy(model.ExecutionPolicyDeviceOnly)
+	} else if p.deviceOnlyBypass != "" {
+		p.applyDeviceOnlyBypass(s)
 	}
 	s.Quant = p.quant
 	// Realize the planner's KV storage tier before any prefill/decode append. The

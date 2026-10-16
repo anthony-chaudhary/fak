@@ -67,7 +67,7 @@ func (s *Session) deviceOnlyForward() ForwardPathKind {
 }
 
 func (s *Session) refuseHostFallback(stage string) {
-	s.refuseHostFallbackCause(stage, fmt.Errorf("device-only execution policy forbids host model compute"))
+	s.refuseHostFallbackCause(stage, fmt.Errorf("%w: device-only execution policy forbids host model compute", ErrDeviceOnlyHostStage))
 }
 
 func (s *Session) refuseHostFallbackCause(stage string, cause error) {
@@ -93,8 +93,10 @@ func (s *Session) refuseHostFallbackCause(stage string, cause error) {
 	panic(err)
 }
 
-// validateDeviceOnlyExecution rejects known host-compute branches before callers
-// acquire cacheGeometryMu, so fail-closed teardown cannot strand an entry lock.
+// validateDeviceOnlyExecution refuses session shapes that cannot keep the forward
+// on the device before callers acquire cacheGeometryMu, so fail-closed teardown
+// cannot strand an entry lock. It is a pre-check, not the allow-list: any host
+// stage that still runs later refuses through admitHostStage.
 func (s *Session) validateDeviceOnlyExecution(stage string) {
 	if s == nil || s.executionPolicy != ExecutionPolicyDeviceOnly {
 		return

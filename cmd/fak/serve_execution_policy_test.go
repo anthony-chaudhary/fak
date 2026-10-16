@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
@@ -162,5 +163,33 @@ func TestServeDryAdmitExecutionPolicyVerdict(t *testing.T) {
 	extra = "--qwen38-runtime llama-mtp"
 	if out, stderr, code := run("production", ""); code != 2 || !strings.Contains(stderr, DryAdmitDelegatedRuntime) || strings.Contains(out, serveDryAdmitAdmit) {
 		t.Fatalf("delegated runtime: code=%d stderr=%s, want exit 2 %s", code, stderr, DryAdmitDelegatedRuntime)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestServeExecutionPolicyBringupBypassIsSessionScoped(t *testing.T) {
+	prod, err := resolveServeExecutionPolicy("production", "m", "m", nil)
+	if err != nil || prod.sessionBypass() != "" || (*serveExecutionPolicy)(nil).sessionBypass() != "" {
+		t.Fatalf("production: err=%v bypass=%q, want none", err, prod.sessionBypass())
+	}
+	var log bytes.Buffer
+	p, err := resolveServeExecutionPolicy("bringup", "m", "m", &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.requireDeviceExecution(true) || p.sessionBypass() != "" {
+		t.Fatalf("bringup with nothing lifted: bypass=%q, want device-only kept", p.sessionBypass())
+	}
+	if err := p.admit(validateServeHaloCPUOffload(true, true, "", "")); err != nil {
+		t.Fatal(err)
+	}
+	if p.requireDeviceExecution(true) {
+		t.Fatal("bringup must lift the serve-wide device-only load policy")
+	}
+	if got := p.sessionBypass(); got != executionPolicyBypassDeviceOnlySession {
+		t.Fatalf("session bypass=%q, want %s handed to the planner", got, executionPolicyBypassDeviceOnlySession)
+	}
+	if !strings.Contains(log.String(), agent.HostPathDegradedToken) {
+		t.Fatalf("bypass log does not name the perf-line token:\n%s", log.String())
 	}
 }

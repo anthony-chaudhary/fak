@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
@@ -110,10 +111,11 @@ func (p *serveExecutionPolicy) bypass(token, detail string) {
 	}
 }
 
-// requireDeviceExecution is the session device-only decision for a halo host.
+// requireDeviceExecution is the serve-wide device-only decision for a halo host.
 // An admitted bringup policy lifts it only once it lifted a host or offload
 // refusal, so a device-backend bringup serve keeps the device-only path and
-// its activated-expert ring.
+// its activated-expert ring. The lift is not serve-wide for sessions:
+// sessionBypass hands it to one native session at a time.
 func (p *serveExecutionPolicy) requireDeviceExecution(halo bool) bool {
 	if !halo {
 		return false
@@ -121,8 +123,17 @@ func (p *serveExecutionPolicy) requireDeviceExecution(halo bool) bool {
 	if p == nil || !p.Admitted || len(p.Bypassed) == 0 {
 		return true
 	}
-	p.bypass(executionPolicyBypassDeviceOnlySession, "native sessions may execute on the host")
+	p.bypass(executionPolicyBypassDeviceOnlySession, "one native session at a time may execute on the host; perf lines carry "+agent.HostPathDegradedToken)
 	return false
+}
+
+// sessionBypass is the planner's one-session device-only bypass token, or ""
+// when no bypass lifted the device-only session policy.
+func (p *serveExecutionPolicy) sessionBypass() string {
+	if p == nil || !p.Admitted || !slices.Contains(p.Bypassed, executionPolicyBypassDeviceOnlySession) {
+		return ""
+	}
+	return executionPolicyBypassDeviceOnlySession
 }
 
 // report is the /healthz execution_policy block; production reports nothing so
