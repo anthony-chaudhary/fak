@@ -55,7 +55,7 @@ func TestV41KVNormDeviceDispatch(t *testing.T) {
 			// A direct oracle catches a wrong norm even if later attention masks
 			// it. Free poisoning detects borrowed, rather than owned, readback.
 			input := append([]float32(nil), b.input...)
-			got, err := s.v41State().kvNorm(0, input)
+			got, err := s.v41State().kvNorm.normFunc()(0, input)
 			if err != nil {
 				t.Fatal(err)
 			}

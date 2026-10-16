@@ -74,6 +74,8 @@ int fvk_v41_try_pool_norm_panel(float* host, const void* gain, int rows, int wid
 // probe!=0 checks existing capacity without claims; caller serializes probe/allocation/commit.
 int fvk_v41_try_ffn_norm_publication(float* host, float* published, const void* gain, int rows, int width, float eps, int probe, int* status);
 // Query-only: two heterogeneous existing pool buffers, unchanged capacity keys.
+// Pool-only scalar KV chain; selected transport is fatal and never replayable.
+int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void* gain, float eps, int probe, int* status);
 int fvk_v41_try_query_norm_publication(float* host, float* published, const void* gain, int rows, int width, int capacityRows, float eps, int probe, int* status);
 int fvk_v41_d2h(void *h, const void *d, size_t bytes);
 /* fvk_v41_d2h for count ordered, disjoint regions of one host image behind one

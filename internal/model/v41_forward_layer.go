@@ -437,7 +437,7 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 		// the 512-term attention accumulation to +Inf at HeadDim=512 (#13290).
 		// Artifact-only, so the reduced fixture's pre-#13009 arithmetic is unchanged.
 		if full {
-			if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+			if err := m.v41KVNormWithBinding(l, kv, eps, scratch.kvNorm, scratch.gatherOps); err != nil {
 				return out, err
 			}
 		}
