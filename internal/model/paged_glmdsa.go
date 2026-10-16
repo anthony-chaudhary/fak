@@ -327,9 +327,9 @@ func (p *pagedGLMDsaKVCache) Evict(from, n int) int {
 	if p == nil || from < 0 || n <= 0 || from >= p.nTokens {
 		return 0
 	}
-	end := from + n
-	if end > p.nTokens {
-		end = p.nTokens
+	end := p.nTokens
+	if n < p.nTokens-from {
+		end = from + n
 	}
 	survivors := make([]int, 0, p.nTokens-(end-from))
 	for pos := 0; pos < from; pos++ {

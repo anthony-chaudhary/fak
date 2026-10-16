@@ -188,9 +188,9 @@ func (c *KVCache) evictSupported(from, n int) int {
 	if from < 0 || n <= 0 || from >= len(c.pos) {
 		return 0
 	}
-	end := from + n
-	if end > len(c.pos) {
-		end = len(c.pos)
+	end := len(c.pos)
+	if n < len(c.pos)-from {
+		end = from + n
 	}
 	if c.cfg.usesMLAMoELayout() {
 		return c.evictGLMDsa(from, end)

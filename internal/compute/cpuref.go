@@ -550,9 +550,9 @@ func (k *cpuKV) Evict(from, n int) int {
 	if from < 0 || n <= 0 || from >= len(k.pos) {
 		return 0
 	}
-	end := from + n
-	if end > len(k.pos) {
-		end = len(k.pos)
+	end := len(k.pos)
+	if n < len(k.pos)-from {
+		end = from + n
 	}
 	w := k.stride()
 	hd, nKV := k.cfg.HeadDim, k.cfg.NumKVHeads
