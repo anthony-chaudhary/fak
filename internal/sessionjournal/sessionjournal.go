@@ -22,6 +22,7 @@ package sessionjournal
 
 import (
 	"bufio"
+	"container/heap"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -394,29 +395,74 @@ func RefusalCount(events []Event) int {
 	return n
 }
 
-// Refusals projects the refusal audit rows into bounded report rows. sessionID, when
-// non-empty, keeps only refusals for that exact session id; limit > 0 caps the result. Rows
-// are newest-first (matching the report's session ordering) so a bounded limit surfaces the
-// most recent refusals. A limit <= 0 yields every matching row.
+// DefaultRefusalLimit bounds reports whose caller does not specify a positive limit.
+const DefaultRefusalLimit = 100
+
+// MaxRefusalLimit bounds both the retained projection and the sorting work per row.
+const MaxRefusalLimit = 1000
+
+type refusalRow struct {
+	row   Refusal
+	at    time.Time
+	order int
+}
+
+// refusalHeap keeps the oldest retained row first; ties evict later journal rows.
+// It stores only the safe projection, never an Event's captured metadata.
+type refusalHeap []refusalRow
+
+func (h refusalHeap) Len() int { return len(h) }
+func (h refusalHeap) Less(i, j int) bool {
+	if h[i].at.Equal(h[j].at) {
+		return h[i].order > h[j].order
+	}
+	return h[i].at.Before(h[j].at)
+}
+func (h refusalHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *refusalHeap) Push(v any)   { *h = append(*h, v.(refusalRow)) }
+func (h *refusalHeap) Pop() any {
+	i := len(*h) - 1
+	v := (*h)[i]
+	(*h)[i] = refusalRow{}
+	*h = (*h)[:i]
+	return v
+}
+
+// Refusals returns at most MaxRefusalLimit safe report rows, newest-first with
+// journal order breaking timestamp ties. A nonempty sessionID matches exact bytes.
+// Nonpositive limits use DefaultRefusalLimit; oversized limits use MaxRefusalLimit.
+// Selection retains O(limit) rows and takes O(len(events)*log(limit)) work, without
+// copying or sorting all matching events. The caller still owns the input journal.
 func Refusals(events []Event, sessionID string, limit int) []Refusal {
-	want := strings.TrimSpace(sessionID)
-	matched := make([]Event, 0, len(events))
-	for _, ev := range events {
-		if ev.Kind != KindRefuse {
+	if limit <= 0 {
+		limit = DefaultRefusalLimit
+	} else if limit > MaxRefusalLimit {
+		limit = MaxRefusalLimit
+	}
+	retained := make(refusalHeap, 0, min(limit, len(events)))
+	for i, ev := range events {
+		if ev.Kind != KindRefuse || (sessionID != "" && ev.ID != sessionID) {
 			continue
 		}
-		if want != "" && strings.TrimSpace(ev.ID) != want {
+		at := eventTime(ev)
+		if len(retained) == limit && !at.After(retained[0].at) {
 			continue
 		}
-		matched = append(matched, ev)
+		row := refusalRow{
+			row: Refusal{ID: ev.ID, TS: ev.TS, Boot: ev.Boot, Reason: ev.Reason, SourceDigest: ev.SourceDigest},
+			at:  at, order: i,
+		}
+		if len(retained) < limit {
+			heap.Push(&retained, row)
+		} else {
+			retained[0] = row
+			heap.Fix(&retained, 0)
+		}
 	}
-	sort.SliceStable(matched, func(i, j int) bool { return eventTime(matched[i]).After(eventTime(matched[j])) })
-	if limit > 0 && len(matched) > limit {
-		matched = matched[:limit]
-	}
-	out := make([]Refusal, len(matched))
-	for i, ev := range matched {
-		out[i] = Refusal{ID: ev.ID, TS: ev.TS, Boot: ev.Boot, Reason: ev.Reason, SourceDigest: ev.SourceDigest}
+	sort.Sort(sort.Reverse(retained))
+	out := make([]Refusal, len(retained))
+	for i, row := range retained {
+		out[i] = row.row
 	}
 	return out
 }

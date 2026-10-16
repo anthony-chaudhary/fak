@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -239,5 +241,98 @@ func TestSessionJournalReportJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, "fak.sessionjournal.report.v1") || !strings.Contains(out, "\"counts\"") {
 		t.Fatalf("json report missing schema/counts, got:\n%s", out)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestSessionJournalReportRefusalBounds(t *testing.T) {
+	const total, defaultLimit, maximumLimit = 1005, 100, 1000
+	j := filepath.Join(t.TempDir(), "j.jsonl")
+	var journal bytes.Buffer
+	enc := json.NewEncoder(&journal)
+	base := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprint(i)
+		if i == 0 {
+			id = "A"
+		} else if i == 1 {
+			id = " A "
+		}
+		if err := enc.Encode(map[string]any{
+			"schema": "fak.sessionjournal.v1", "kind": "refuse", "id": id,
+			"ts":   base.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+			"boot": "boot-1", "reason": "SECRET_EXFIL", "source_digest": "digest",
+			"cwd": "DENIED-CWD", "model": "DENIED-MODEL", "argv": []string{"DENIED-ARGV"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(j, journal.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+		id   string
+	}{
+		{"default", nil, defaultLimit, ""},
+		{"finite", []string{"--refusal-limit", "3"}, 3, ""},
+		{"maximum", []string{"--refusal-limit", strconv.Itoa(maximumLimit)}, maximumLimit, ""},
+		{"exact", []string{"--refusal-id", "A"}, 1, "A"},
+		{"spaced", []string{"--refusal-id", " A "}, 1, " A "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"report", "--no-guard-sessions", "--json"}, tc.args...)
+			out, stderr, code := runSJ(t, j, args...)
+			if code != 0 || stderr != "" {
+				t.Fatalf("report exit=%d stderr=%s", code, stderr)
+			}
+			var env struct {
+				Schema string `json:"schema"`
+				Counts struct {
+					Refusals int `json:"refusals"`
+				} `json:"counts"`
+				Refusals []map[string]any  `json:"refusals"`
+				Sessions []json.RawMessage `json:"sessions"`
+			}
+			if err := json.Unmarshal([]byte(out), &env); err != nil {
+				t.Fatal(err)
+			}
+			if env.Schema != "fak.sessionjournal.report.v1" || env.Counts.Refusals != total || len(env.Refusals) != tc.want || len(env.Sessions) != 0 {
+				t.Fatalf("schema=%q count=%d rows=%d sessions=%d; want total=%d rows=%d and no sessions", env.Schema, env.Counts.Refusals, len(env.Refusals), len(env.Sessions), total, tc.want)
+			}
+			fields := []string{"id", "ts", "boot", "reason", "source_digest"}
+			for i, row := range env.Refusals {
+				for _, field := range fields {
+					if _, ok := row[field]; !ok {
+						t.Fatalf("row %d omits safe field %q: %+v", i, field, row)
+					}
+				}
+				wantID := tc.id
+				if wantID == "" {
+					wantID = strconv.Itoa(total - 1 - i)
+				}
+				if len(row) != len(fields) || row["id"] != wantID || row["reason"] != "SECRET_EXFIL" || row["boot"] != "boot-1" || row["source_digest"] != "digest" {
+					t.Fatalf("row %d contains unexpected fields or order: %+v", i, row)
+				}
+			}
+			if strings.Contains(out, "DENIED-") {
+				t.Fatal("report retained captured fields outside the safe projection")
+			}
+		})
+	}
+	for _, limit := range []string{"0", "-1", strconv.Itoa(maximumLimit + 1)} {
+		t.Run("invalid="+limit, func(t *testing.T) {
+			out, stderr, code := runSJ(t, j, "report", "--no-guard-sessions", "--json", "--refusal-limit", limit, "--boot-time", "invalid")
+			if code != 2 || out != "" || !strings.Contains(stderr, "--refusal-limit must be between") || strings.Contains(stderr, "--boot-time") {
+				t.Fatalf("invalid limit must fail before report work: code=%d stdout=%q stderr=%q", code, out, stderr)
+			}
+		})
+	}
+	var help bytes.Buffer
+	sessionJournalUsage(&help)
+	if !strings.Contains(help.String(), fmt.Sprintf("default %d, range 1..%d", defaultLimit, maximumLimit)) || strings.Contains(help.String(), "0 = all") {
+		t.Fatalf("help omits finite refusal bounds: %s", help.String())
 	}
 }
