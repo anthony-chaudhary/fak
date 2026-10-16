@@ -54,14 +54,20 @@ func (u TokenUsage) Normalize() TokenUsage {
 	)
 }
 
-// Add returns the normalized sum of two usage records.
+// Add returns the normalized sum of two usage records, saturating output overflow.
 func (u TokenUsage) Add(v TokenUsage) TokenUsage {
 	u = u.Normalize()
 	v = v.Normalize()
+	// Both output counts are nonnegative after normalization. Do not let a
+	// completed provider charge wrap and reopen a saturated admission window.
+	output := int64(math.MaxInt64)
+	if u.OutputTokens <= math.MaxInt64-v.OutputTokens {
+		output = u.OutputTokens + v.OutputTokens
+	}
 	return NewTokenUsage(
 		u.InputTokens+v.InputTokens,
 		u.CachedInputTokens+v.CachedInputTokens,
-		u.OutputTokens+v.OutputTokens,
+		output,
 	)
 }
 
