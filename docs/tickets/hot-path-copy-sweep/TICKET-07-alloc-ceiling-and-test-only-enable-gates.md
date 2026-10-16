@@ -91,7 +91,7 @@ Estimate: 3 points (small) - about 1 day.
 
 ## Overall completion contribution
 
-3/26 points of the hot-path copy sweep (process control that keeps the other fixes fixed).
+3/28 points of the hot-path copy sweep (process control that keeps the other fixes fixed).
 
 ## Completion standard
 

@@ -91,7 +91,7 @@ Estimate: 2 points (small) - about half a day.
 
 ## Overall completion contribution
 
-2/26 points of the hot-path copy sweep.
+2/28 points of the hot-path copy sweep.
 
 ## Completion standard
 

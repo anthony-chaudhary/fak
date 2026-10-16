@@ -99,7 +99,7 @@ Estimate: 5 points (medium) - about 1-2 days.
 
 ## Overall completion contribution
 
-5/26 points of the hot-path copy sweep.
+5/28 points of the hot-path copy sweep.
 
 ## Completion standard
 
