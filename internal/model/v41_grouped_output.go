@@ -363,193 +363,205 @@ func (s *Session) v41GroupedOutputFunc() v41GroupedOutputFunc {
 			s.closeBackendOwned()
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
-						return
-					}
+		convertPanic := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
 					return
 				}
-				// Retire selected plain-error backends (including ROCm), but
-				// retain the original error or programming panic identity.
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+				return
 			}
-		}()
-		// Immutable hits were validated when staged. Validate all misses across A
-		// and B before staging any of them, including a partially warm model.
-		sourceA := make([]compute.Tensor, groups)
-		aKeys := make([]string, groups)
-		for g := 0; g < groups; g++ {
-			aKeys[g] = fmt.Sprintf("v41-grouped:%s:%v:%d:%d:%d", aName, a.dtype, g, rank, groupIn)
-			if _, present := s.lookupImmutableWeight(aKeys[g], aKeys[g]); present {
-				continue
+			// Retire selected plain-error backends (including ROCm), but
+			// retain the original error or programming panic identity.
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
 			}
-			var err error
-			sourceA[g], err = a.host(g*groupElems, rank, groupIn)
-			if err != nil {
-				return nil, v41ProjectionError, closeFailure(err)
-			}
+			closeFailure(err)
+			panic(r)
 		}
-		bKey := fmt.Sprintf("v41-grouped:%s:%v:%d:%d", bName, b.dtype, dim, joinedWidth)
-		var sourceB compute.Tensor
-		if _, present := s.lookupImmutableWeight(bKey, bKey); !present {
-			var err error
-			sourceB, err = b.host(0, dim, joinedWidth)
-			if err != nil {
-				return nil, v41ProjectionError, closeFailure(err)
-			}
-		}
-		// Capabilities choose the resident chain before it uploads or records
-		// anything. Unsupported backends retain the existing synchronous seam.
-		if resident, supported := v41GroupedResidentCapabilities(s.Backend, rank, dim); full && supported && compute.ValidateV41RowLogAlloc(groups, rank) == nil {
-			weights := make([]func() compute.Tensor, groups)
-			// Protect future cached operands without staging them or scanning
-			// the whole session weight map for every temporary tensor.
-			protected := make([]compute.Tensor, 0, groups+1)
-			for g := range weights {
-				if cached, ok := s.halW[aKeys[g]]; ok {
-					protected = append(protected, cached)
+		var recovered any
+		callCompleted := false
+		func() {
+			defer func() { recovered = recover() }()
+			result, outcome, cause = func() ([]float32, v41DenseProjectionOutcome, error) {
+				// Immutable hits were validated when staged. Validate all misses across A
+				// and B before staging any of them, including a partially warm model.
+				sourceA := make([]compute.Tensor, groups)
+				aKeys := make([]string, groups)
+				for g := 0; g < groups; g++ {
+					aKeys[g] = fmt.Sprintf("v41-grouped:%s:%v:%d:%d:%d", aName, a.dtype, g, rank, groupIn)
+					if _, present := s.lookupImmutableWeight(aKeys[g], aKeys[g]); present {
+						continue
+					}
+					var err error
+					sourceA[g], err = a.host(g*groupElems, rank, groupIn)
+					if err != nil {
+						return nil, v41ProjectionError, closeFailure(err)
+					}
 				}
-				weights[g] = func() compute.Tensor {
-					key := aKeys[g]
-					return s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceA[g], a.dtype) })
+				bKey := fmt.Sprintf("v41-grouped:%s:%v:%d:%d", bName, b.dtype, dim, joinedWidth)
+				var sourceB compute.Tensor
+				if _, present := s.lookupImmutableWeight(bKey, bKey); !present {
+					var err error
+					sourceB, err = b.host(0, dim, joinedWidth)
+					if err != nil {
+						return nil, v41ProjectionError, closeFailure(err)
+					}
 				}
-			}
-			if cached, ok := s.halW[bKey]; ok {
-				protected = append(protected, cached)
-			}
-			weight := func() compute.Tensor {
-				return s.cachedImmutableWeight(bKey, bKey, func() compute.Tensor { return s.Backend.Upload(sourceB, b.dtype) })
-			}
-			var stats v41GroupedResidentStats
-			defer func() {
-				calls += stats.calls
-				upload += stats.upload
-				readback += stats.readback
-			}()
-			var err error
-			result, err = s.v41GroupedResident(resident, weights, weight, o, rank, dim, protected, &stage, &stats)
-			if err != nil {
-				return nil, v41ProjectionError, closeFailure(err)
-			}
-			completed = 1
-			return result, v41ProjectionHandled, nil
-		}
+				// Capabilities choose the resident chain before it uploads or records
+				// anything. Unsupported backends retain the existing synchronous seam.
+				if resident, supported := v41GroupedResidentCapabilities(s.Backend, rank, dim); full && supported && compute.ValidateV41RowLogAlloc(groups, rank) == nil {
+					weights := make([]func() compute.Tensor, groups)
+					// Protect future cached operands without staging them or scanning
+					// the whole session weight map for every temporary tensor.
+					protected := make([]compute.Tensor, 0, groups+1)
+					for g := range weights {
+						if cached, ok := s.halW[aKeys[g]]; ok {
+							protected = append(protected, cached)
+						}
+						weights[g] = func() compute.Tensor {
+							key := aKeys[g]
+							return s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceA[g], a.dtype) })
+						}
+					}
+					if cached, ok := s.halW[bKey]; ok {
+						protected = append(protected, cached)
+					}
+					weight := func() compute.Tensor {
+						return s.cachedImmutableWeight(bKey, bKey, func() compute.Tensor { return s.Backend.Upload(sourceB, b.dtype) })
+					}
+					var stats v41GroupedResidentStats
+					defer func() {
+						calls += stats.calls
+						upload += stats.upload
+						readback += stats.readback
+					}()
+					var err error
+					result, err = s.v41GroupedResident(resident, weights, weight, o, rank, dim, protected, &stage, &stats)
+					if err != nil {
+						return nil, v41ProjectionError, closeFailure(err)
+					}
+					completed = 1
+					return result, v41ProjectionHandled, nil
+				}
 
-		run := func(weight compute.Tensor, input []float32, out int) ([]float32, error) {
-			stage = "activation upload"
-			x := s.uploadHostF32([]int{len(input)}, input, compute.MemoryActivation, "V4.1 grouped output activation")
-			defer s.Backend.Free(x)
-			upload += int64(len(input)) * 4
-			stage = "matmul"
-			calls++
-			y := s.Backend.MatMul(weight, x)
-			defer s.Backend.Free(y)
-			published, fenced := false, false
-			var values []float32
-			if full {
-				// Full V4.1 publishes each projection as BF16 on the device before its
-				// one readback; a backend without the ordinary publication rounds below.
-				stage = "BF16 publication"
-				p, status, deferred, err := s.v41PublishResidentBF16Deferred(y, compute.V41BF16PublishGroupedOutputProjection)
-				if err != nil {
-					return nil, err
-				}
-				if deferred {
-					// The publication's status shares this projection's one fence.
-					defer s.Backend.Free(p)
-					stage = "readback"
-					row, verdict, err := s.v41ReadResidentBF16(p, status)
-					if err != nil {
-						return nil, err
-					}
-					if verdict != nil {
+				run := func(weight compute.Tensor, input []float32, out int) ([]float32, error) {
+					stage = "activation upload"
+					x := s.uploadHostF32([]int{len(input)}, input, compute.MemoryActivation, "V4.1 grouped output activation")
+					defer s.Backend.Free(x)
+					upload += int64(len(input)) * 4
+					stage = "matmul"
+					calls++
+					y := s.Backend.MatMul(weight, x)
+					defer s.Backend.Free(y)
+					published, fenced := false, false
+					var values []float32
+					if full {
+						// Full V4.1 publishes each projection as BF16 on the device before its
+						// one readback; a backend without the ordinary publication rounds below.
 						stage = "BF16 publication"
-						return nil, verdict
+						p, status, deferred, err := s.v41PublishResidentBF16Deferred(y, compute.V41BF16PublishGroupedOutputProjection)
+						if err != nil {
+							return nil, err
+						}
+						if deferred {
+							// The publication's status shares this projection's one fence.
+							defer s.Backend.Free(p)
+							stage = "readback"
+							row, verdict, err := s.v41ReadResidentBF16(p, status)
+							if err != nil {
+								return nil, err
+							}
+							if verdict != nil {
+								stage = "BF16 publication"
+								return nil, verdict
+							}
+							values, published, fenced = row, true, true
+						} else {
+							p, ok, err := s.v41PublishResidentBF16(y, compute.V41BF16PublishGroupedOutputProjection)
+							if err != nil {
+								return nil, err
+							}
+							if ok {
+								defer s.Backend.Free(p)
+								y, published = p, true
+							} else if s.v41DeviceOnlyPolicy() {
+								return nil, s.v41DeviceOnlyMissingOp(l, "bf16-boundary")
+							}
+						}
 					}
-					values, published, fenced = row, true, true
-				} else {
-					p, ok, err := s.v41PublishResidentBF16(y, compute.V41BF16PublishGroupedOutputProjection)
-					if err != nil {
-						return nil, err
+					if !fenced {
+						stage = "readback"
+						values = s.Backend.Read(y)
 					}
-					if ok {
-						defer s.Backend.Free(p)
-						y, published = p, true
-					} else if s.v41DeviceOnlyPolicy() {
-						return nil, s.v41DeviceOnlyMissingOp(l, "bf16-boundary")
-					}
-				}
-			}
-			if !fenced {
-				stage = "readback"
-				values = s.Backend.Read(y)
-			}
-			readback += int64(len(values)) * 4
-			if len(values) != out {
-				return nil, errV41ProjectionResult
-			}
-			for _, v := range values {
-				if !finite32(v) {
-					return nil, errV41ProjectionResult
-				}
-			}
-			// Read may borrow tensor storage. Own it before deferred Free in both
-			// modes; only full V4.1 narrows each projection publication to BF16.
-			if full && !published {
-				owned := make([]float32, len(values))
-				for i, v := range values {
-					owned[i] = v41RoundBF16(v)
-					if !finite32(owned[i]) {
+					readback += int64(len(values)) * 4
+					if len(values) != out {
 						return nil, errV41ProjectionResult
 					}
+					for _, v := range values {
+						if !finite32(v) {
+							return nil, errV41ProjectionResult
+						}
+					}
+					// Read may borrow tensor storage. Own it before deferred Free in both
+					// modes; only full V4.1 narrows each projection publication to BF16.
+					if full && !published {
+						owned := make([]float32, len(values))
+						for i, v := range values {
+							owned[i] = v41RoundBF16(v)
+							if !finite32(owned[i]) {
+								return nil, errV41ProjectionResult
+							}
+						}
+						return owned, nil
+					}
+					if fenced {
+						return values, nil
+					}
+					return append([]float32(nil), values...), nil
 				}
-				return owned, nil
-			}
-			if fenced {
-				return values, nil
-			}
-			return append([]float32(nil), values...), nil
+				joined := make([]float32, joinedWidth)
+				for g := 0; g < groups; g++ {
+					stage = "weight upload"
+					key := aKeys[g]
+					weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceA[g], a.dtype) })
+					values, err := run(weight, o[g*groupIn:(g+1)*groupIn], rank)
+					if err != nil {
+						return nil, v41ProjectionError, closeFailure(err)
+					}
+					copy(joined[g*rank:(g+1)*rank], values)
+				}
+				stage = "weight upload"
+				key := bKey
+				weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceB, b.dtype) })
+				var err error
+				result, err = run(weight, joined, dim)
+				if err != nil {
+					return nil, v41ProjectionError, closeFailure(err)
+				}
+				completed = 1
+				return result, v41ProjectionHandled, nil
+			}()
+			callCompleted = true
+		}()
+		if !callCompleted {
+			// The selected body and its cleanup must finish before it can decline.
+			// Goexit never returns from capture; legacy nil is a present panic.
+			convertPanic(recovered)
 		}
-		joined := make([]float32, joinedWidth)
-		for g := 0; g < groups; g++ {
-			stage = "weight upload"
-			key := aKeys[g]
-			weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceA[g], a.dtype) })
-			values, err := run(weight, o[g*groupIn:(g+1)*groupIn], rank)
-			if err != nil {
-				return nil, v41ProjectionError, closeFailure(err)
-			}
-			copy(joined[g*rank:(g+1)*rank], values)
-		}
-		stage = "weight upload"
-		key := bKey
-		weight := s.cachedImmutableWeight(key, key, func() compute.Tensor { return s.Backend.Upload(sourceB, b.dtype) })
-		var err error
-		result, err = run(weight, joined, dim)
-		if err != nil {
-			return nil, v41ProjectionError, closeFailure(err)
-		}
-		completed = 1
-		return result, v41ProjectionHandled, nil
+		return result, outcome, cause
 	}
 }
 
