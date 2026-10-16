@@ -78,6 +78,8 @@ int fvk_v41_try_query_norm_publication(float* host, float* published, const void
 int fvk_v41_d2h(void *h, const void *d, size_t bytes);
 /* fvk_v41_d2h for count ordered, disjoint regions of one host image behind one
  * checked host fence: srcs[i] (bytes[i]) lands at host + offsets[i]. */
+int fvk_v41_try_index_query_publication(float* raw, float* published, const void* source,
+                                        const void* weight, const void* input, int probe, int* status);
 int fvk_v41_d2h_many(void *host, size_t host_bytes, int count, void *const *srcs,
                      const size_t *offsets, const size_t *bytes);
 /* One-shot deterministic failure injection for backend tests. */

@@ -566,7 +566,7 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 				end := groups * cfg.IndexHeadDim
 				prefix = keyPanel[:end:end]
 			}
-			localIdx, err := m.v41IndexRowsWithPreparedBinding(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow)
+			localIdx, err := m.v41IndexRowsWithPreparedProjection(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute)
 			if borrow.revoked {
 				keyPanel = nil
 			}

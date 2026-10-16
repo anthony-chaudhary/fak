@@ -4856,6 +4856,97 @@ int fvk_v41_try_query_norm_publication(float* host, float* published, const void
 // fvk_v41_d2h for several regions behind one host fence (#13820): each copy
 // lands at its caller-chosen staging offset, so k status records and rows cost
 // one submit instead of k. Regions are ordered and disjoint in the host image.
+// Fixed single-row index projection publication. The caller holds vulkanMu
+// across probe, bounded Go allocation and commit. No stage growth or allocation.
+int fvk_v41_try_index_query_publication(float* raw, float* published, const void* source,
+                                        const void* weight, const void* input, int probe, int* status) {
+    if (!status) return -1;
+    *status = VK_SUCCESS;
+    auto fail = [&]() {
+        *status = g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
+        return -1;
+    };
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return fail();
+    if (!g_ready || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return fail();
+    constexpr size_t bytes = 32768u, hostBytes = 65552u;
+    if (!stepBatchRecording() || !fvk_have_v41_attention_bf16() ||
+        !fvk_v41_attention_bf16_count_supported(8192)) return 0;
+    Buffer* y = B(source); Buffer* w = B(weight); Buffer* x = B(input);
+    if (!v41NormPanelLive(y) || !v41NormPanelLive(w) || !v41NormPanelLive(x) ||
+        y->bytes < bytes || !y->nativeCheckoutGeneration ||
+        !v41NormPanelLive(g_stage) || !g_stageMapped || g_stageCap < hostBytes ||
+        g_stage->bytes < hostBytes) return 0;
+    auto aliases = [](Buffer* a, Buffer* b) {
+        return a == b || a->buf == b->buf || a->mem == b->mem;
+    };
+    Buffer* protectedBuffers[] = {y,w,x,g_stage};
+    for (size_t i=0;i<4;++i) for (size_t j=0;j<i;++j)
+        if (aliases(protectedBuffers[i],protectedBuffers[j])) return 0;
+    auto it=g_pool.find(bytes), sit=g_pool.find(16u);
+    if (it==g_pool.end() || sit==g_pool.end() || it->second.empty() || sit->second.empty() ||
+        it->second.size()>POOL_BUCKET_CAP || sit->second.size()>POOL_BUCKET_CAP || g_poolCount<2) return 0;
+    Buffer* out=it->second.back(); Buffer* verdict=sit->second.back();
+    auto eligible=[](Buffer* b,size_t n) {
+        return v41NormPanelLive(b) && b->bytes==n && b->allocationBytes>=n && b->allocationID &&
+            b->allocationDeviceLocal && !b->weightArenaBound && !b->offloadPage && !b->mapped &&
+            b->nativeCheckoutGeneration && b->nativeCheckoutGeneration!=std::numeric_limits<uint64_t>::max();
+    };
+    if (!eligible(out,bytes) || !eligible(verdict,16u) || aliases(out,verdict)) return 0;
+    for (Buffer* p:protectedBuffers) if (aliases(out,p) || aliases(verdict,p)) return 0;
+    if (g_upArena && (aliases(out,g_upArena) || aliases(verdict,g_upArena))) return 0;
+    // A bounded ownership census includes empty historical buckets. Refuse if
+    // the complete census cannot fit; no partial census grants a pool claim.
+    size_t visits=0, outSeen=0, verdictSeen=0;
+    auto inspect=[&](Buffer* p,bool pool) {
+        if (++visits>1024 || !p) return false;
+        for (Buffer* protectedBuffer:protectedBuffers) if (aliases(p,protectedBuffer)) return false;
+        if (aliases(p,out)) { if (!pool || p!=out || ++outSeen!=1) return false; }
+        if (aliases(p,verdict)) { if (!pool || p!=verdict || ++verdictSeen!=1) return false; }
+        return true;
+    };
+    for (const auto& bucket:g_pool) {
+        if (++visits>1024) return 0;
+        for (Buffer* p:bucket.second) if (!inspect(p,true)) return 0;
+    }
+    for (const auto& bucket:g_hvOffloadPool) {
+        if (++visits>1024) return 0;
+        for (Buffer* p:bucket.second) if (!inspect(p,false)) return 0;
+    }
+    for (Buffer* p:g_batchFreed) if (!inspect(p,false)) return 0;
+    if (outSeen!=1 || verdictSeen!=1) return 0;
+    if (probe) return 1;
+    if (!raw || !published || raw==published) return fail();
+    it->second.pop_back(); sit->second.pop_back(); g_poolCount-=2;
+    advanceNativeCheckoutGeneration(out); advanceNativeCheckoutGeneration(verdict);
+    struct Loan { Buffer* out; Buffer* verdict; ~Loan(){ fvk_free(out); fvk_free(verdict); } } loan{out,verdict};
+    const int publishStatus=fvk_v41_bf16_publish_f32(y,out,verdict,8192,22);
+    if (publishStatus!=VK_SUCCESS) { *status=publishStatus; return -1; }
+    if (!stepBatchRecording()) return fail();
+    // Same stage layout and synchronization as d2h_many, with a fixed scatter
+    // into two independent host owners instead of a retained combined slab.
+    recordComputeBarrier(g_batchCmd);
+    Buffer* sources[]={verdict,y,out};
+    const size_t offsets[]={0u,16u,16u+bytes};
+    const size_t lengths[]={16u,bytes,bytes};
+    for (size_t i=0;i<3;++i) {
+        VkBufferCopy region{0,offsets[i],lengths[i]};
+        vkCmdCopyBuffer(g_batchCmd,sources[i]->buf,g_stage->buf,1,&region);
+    }
+    g_batchOps+=3;
+    batchFlush();
+    if (g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS || g_batching) return fail();
+    batchBegin();
+    if (g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS || !stepBatchRecording()) return fail();
+    memcpy(raw,(const char*)g_stageMapped+16,bytes);
+    memcpy(published,g_stageMapped,16);
+    memcpy(published+4,(const char*)g_stageMapped+16+bytes,bytes);
+    for (size_t n:lengths) {
+        if (!checkedCounterAdd(g_d2hCount,1) || !checkedCounterAdd(g_d2hBytes,n)) g_transferCountersValid=false;
+    }
+    return 1;
+}
+
 int fvk_v41_d2h_many(void* host, size_t hostBytes, int count, void* const* srcs,
                      const size_t* offsets, const size_t* bytes) {
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
