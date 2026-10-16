@@ -81,6 +81,8 @@ func HadamardRotate(vec []float32) error { return HadamardTransform(vec) }
 // HadamardInverse is the un-rotation applied after dequant to restore the original row.
 // Because the normalized transform is involutory, it is the same operation as the
 // forward rotation; the distinct name documents intent at the two call sites.
+// This alias is unsigned only. For explicit sign vectors, use compute.SignedBlockWHT.Inverse
+// in internal/compute, which applies the signs after the transform.
 func HadamardInverse(vec []float32) error { return HadamardTransform(vec) }
 
 // MaxAbs returns the largest absolute value in vec, the crude peak that low-bit quant
