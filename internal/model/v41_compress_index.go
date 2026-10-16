@@ -442,6 +442,24 @@ func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candida
 		return nil, fmt.Errorf("v41 index rows: offset %d cannot represent visible rows as int32", offset)
 	}
 
+	// Selecting every position makes both score ranking and the subsequent
+	// index sort redundant. Still inspect every original score for NaN before
+	// returning, including masked and causal-invisible positions.
+	if topK >= len(logits) {
+		rows := make([]int32, len(logits))
+		for position, score := range logits {
+			if math.IsNaN(float64(score)) {
+				return nil, fmt.Errorf("v41 index rows: score %d is NaN", position)
+			}
+			if position >= compressLen || (candidates != nil && !candidates[position]) || math.IsInf(float64(score), -1) {
+				rows[position] = -1
+			} else {
+				rows[position] = int32(offset + position)
+			}
+		}
+		return rows, nil
+	}
+
 	ranked := make([]v41RankedScore, len(logits))
 	for position, score := range logits {
 		if math.IsNaN(float64(score)) {

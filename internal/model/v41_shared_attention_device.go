@@ -12,11 +12,18 @@ import (
 // callback has no decline outcome and must be rebound after clone or restore.
 type v41SharedAttentionFunc func(layer int, request v41SharedAttentionRequest) ([]float32, error)
 
+// v41SharedAttentionResult carries a fresh host allocation from the canonical
+// core, after readback validation and before tensor retirement. Ordinary
+// callbacks and any future borrowed resident outputs cannot mint this result.
+type v41SharedAttentionResult struct {
+	values []float32
+}
+
 // Both entries share one selected-operation lifecycle. Ordinary calls always
 // validate every row; only the synchronous composer can supply validated rows.
 type v41SharedAttentionCore struct {
 	run       v41SharedAttentionFunc
-	validated func(int, *v41SharedAttentionRequest, *v41SharedAttentionValidation) ([]float32, error)
+	validated func(int, *v41SharedAttentionRequest, *v41SharedAttentionValidation) (v41SharedAttentionResult, error)
 }
 
 // A continuation captures ownership before projections and other callbacks.
@@ -658,12 +665,18 @@ func (s *Session) v41BindSharedAttention() *v41SharedAttentionBinding {
 	core.run = func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 		return run(layer, request, false)
 	}
-	core.validated = func(layer int, request *v41SharedAttentionRequest, validation *v41SharedAttentionValidation) ([]float32, error) {
+	core.validated = func(layer int, request *v41SharedAttentionRequest, validation *v41SharedAttentionValidation) (v41SharedAttentionResult, error) {
 		rowsValidated := validation.consume(core, layer, request)
 		if selectionInUse && validation != nil {
 			rowsValidated, validation.accepted = false, false
 		}
-		return run(layer, *request, rowsValidated)
+		values, err := run(layer, *request, rowsValidated)
+		if err != nil {
+			return v41SharedAttentionResult{}, err
+		}
+		// run returns a fresh zero row or clones checked readback before freeing
+		// its tensors. The ownership grant is never attached to partial results.
+		return v41SharedAttentionResult{values: values}, nil
 	}
 	ordinary := func(layer int, request v41SharedAttentionRequest) ([]float32, error) {
 		return core.run(layer, request)

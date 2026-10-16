@@ -13935,6 +13935,16 @@
           "category": "incidental",
           "reason": "Optional backend capability predicate for the existing routed SwiGLU operation over a borrowed panel row; it is not an independent support-maturity policy.",
           "token": "SupportsV41RoutedSwiGLUPanelRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional backend capability predicate for one exact borrowed down-panel row; not a project support or maturity claim.",
+          "token": "SupportsV41RoutedDownPanelRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "SupportsV41IndexScaleBF16 is a concrete optional compute capability predicate for the immutable-module-qualified fixed-site index weight scaling operation, not a product support maturity claim.",
+          "token": "SupportsV41IndexScaleBF16"
         }
       ],
       "exclude": [
@@ -14066,6 +14076,8 @@
         "SupportsBorrowedExpertUploads",
         "SupportsRoutedExpertKQuant",
         "SupportsV41DeferredStatus",
+        "SupportsV41IndexScaleBF16",
+        "SupportsV41RoutedDownPanelRow",
         "SupportsV41RoutedSwiGLUPanelRow",
         "TensorCoverageArchSchema",
         "TensorCoverageCanonicalMap",

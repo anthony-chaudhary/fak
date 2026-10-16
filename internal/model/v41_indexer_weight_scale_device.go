@@ -151,6 +151,56 @@ func (s *Session) v41IndexWeightScaleFunc() v41IndexWeightScaleFunc {
 				len(input.Shape) != 1 || input.Shape[0] != heads {
 				return nil, errV41IndexWeightScaleResult
 			}
+			// The optional combined operation retains this callback's existing
+			// scalar/publication admission and the ordinary deferred-read policy.
+			// A refusal precedes its dispatch; selected errors never replay.
+			if fused, ok := backend.(compute.V41IndexScaleBF16Backend); ok {
+				if deferred, admitted := v41DeferredBF16Publisher(backend, heads); admitted && fused.SupportsV41IndexScaleBF16(input, scale) {
+					stage = "exact multiply and scaled weight publication"
+					published, status, err := fused.V41IndexScaleBF16Deferred(input, scale)
+					freshOutput := published.Buf() != nil && published.Backend() == backend && published.Buf() != input.Buf()
+					if freshOutput {
+						owned = append(owned, published)
+					}
+					freshStatus := status.Record.Buf() != nil && status.Record.Backend() == backend && status.Record.Buf() != input.Buf() && status.Record.Buf() != published.Buf()
+					if freshStatus {
+						owned = append(owned, status.Record)
+					}
+					if err != nil {
+						return nil, err
+					}
+					if !freshOutput || published.Dtype != compute.F32 || published.Layout != compute.RowMajor || published.Quant != nil ||
+						len(published.Shape) != 1 || published.Shape[0] != heads || !freshStatus ||
+						status.Kind != compute.V41DeferredBF16Publish || status.Count != heads || status.Site != compute.V41BF16PublishIndexerScaledWeight ||
+						(status.Records != 0 && status.Records != 1) || status.Record.Dtype != compute.F32 || status.Record.Layout != compute.RowMajor || status.Record.Quant != nil ||
+						len(status.Record.Shape) != 1 || status.Record.Shape[0] != 4 {
+						return nil, errV41IndexWeightScaleResult
+					}
+					if v41HostBF16Witness.Load() {
+						v41BF16ResidentCalls.Add(1)
+						v41BF16DeferredCalls.Add(1)
+					}
+					// The validated status is the last owned allocation. The read
+					// consumes it even on transport failure; do not retry its Free.
+					owned = owned[:len(owned)-1]
+					stage = "scaled weight readback"
+					read, verdict, err := v41ReadDeferredBF16(deferred, published, status)
+					if err != nil {
+						return nil, err
+					}
+					if verdict != nil {
+						stage = "scaled weight publication"
+						return nil, verdict
+					}
+					if len(read) != heads || !v41BF16Widened(read) {
+						return nil, errV41IndexWeightScaleResult
+					}
+					if v41HostBF16Witness.Load() {
+						v41IndexWeightScaleCalls.Add(1)
+					}
+					return read, nil
+				}
+			}
 			stage = "exact multiply"
 			product, err := multiply.V41ScaleExact(input, scale)
 			fresh := product.Buf() != nil && product.Backend() == backend && product.Buf() != input.Buf()

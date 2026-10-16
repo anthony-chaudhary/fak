@@ -768,7 +768,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	// registry only. This mirrors v41Layer's source-then-consumer ordering (#12896)
 	// at seq == 1.
 	var sharedKV, indexKeys [][]float32
-	var sourceIdx []int32
+	var sourceIdx, sourceRows []int32
 	var indexView *v41IndexerKeyView
 	if scratch.indexerScore() != nil && scratch.gatherOps != nil && scratch.gatherOps.indexerKeyBudgetBytes > 0 {
 		indexView = &v41IndexerKeyView{owner: registry, source: plan.KVSourceLayer}
@@ -841,21 +841,23 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		if err != nil {
 			return nil, err
 		}
-		row, err := m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(indexKeys))
+		sourceRows, err = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(indexKeys))
 		if err != nil {
 			return nil, err
 		}
-		if err := registry.PublishTopK(plan.Ratio, [][]int32{row}); err != nil {
+		if err := registry.PublishTopK(plan.Ratio, [][]int32{sourceRows}); err != nil {
 			return nil, err
 		}
 	}
 	// Canonical compressed IDs remain unoffset until the common composer adds
 	// this layer's window width. Padding and repeated selections are preserved.
+	// PublishTopK copied the source selection. Its fresh normalized row is
+	// still private here; no callback ran between publication and attention.
 	var ids []int32
 	if plan.TopKWidth > 0 {
 		var ierr error
 		if indexSourceAt(cfg.DeepSeekV41, l) {
-			ids, ierr = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(sharedKV))
+			ids = sourceRows
 		} else {
 			ids, ierr = m.v41RoleStepIndex(registry, l, pos, plan, qLat, collapsed, len(sharedKV))
 		}
@@ -1058,13 +1060,14 @@ func (m *Model) v41RoleStepIndex(state *V41AttentionState, l, pos int, plan V41A
 		}
 		return m.v41RoleStepNormalizeIndex(l, plan, idx, groups)
 	}
-	published, _, ok := state.TopK()
-	if !ok || len(published) == 0 {
+	if state == nil || !state.topkSet || len(state.topk) == 0 {
 		return nil, v41StageErr(v41StageIndexer, l,
 			fmt.Errorf("%w: layer %d reads index source %d but no top-k selection was published", ErrV41ForwardStage, l, plan.IndexSourceLayer))
 	}
-	// The newest published row is the causal superset for this position.
-	return m.v41RoleStepNormalizeIndex(l, plan, published[len(published)-1], groups)
+	// The newest publication is immutable owned state. Normalize copies it
+	// synchronously into the attention-owned row before any callback can run;
+	// avoid the public TopK snapshot that would be copied again immediately.
+	return m.v41RoleStepNormalizeIndex(l, plan, state.topk[len(state.topk)-1], groups)
 }
 
 // v41RoleStepNormalizeIndex validates one selection row against the compressed

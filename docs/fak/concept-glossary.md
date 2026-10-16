@@ -1294,3 +1294,10 @@ Session-owned bounded exact F32 rotary sin/cos device tables. One query slot or 
 Constructs the bounded rotary-table owner metadata for one or two fixed session keys, copying the key list and capturing the backend. It does not upload device tables; lookup and installation occur through the returned owner.
 
 **Distinct from:** Constructor operation rather than the retained rotary-table ownership state. v41RoPETableCache holds exact host values and live session tensor identity and participates in table replacement and session retirement.
+
+
+### v41SharedAttentionResult
+
+Private canonical shared-attention host output ownership carrier. A successful private core invocation returns a fresh zero row or a validated readback clone allocated before tensor retirement; failure returns no output ownership.
+
+**Distinct from:** Unlike v41SharedAttentionBinding this value owns one completed host output rather than callback provenance. Unlike v41SharedAttentionContinuation and v41SharedAttentionValidation it grants no input validation or execution eligibility. Unlike v41SharedAttentionRows it is fresh output, not borrowed KV descriptors. Ordinary callbacks and borrowed resident outputs cannot acquire this carrier; final composer width and finite checks remain mandatory.

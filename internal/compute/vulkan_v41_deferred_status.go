@@ -240,3 +240,15 @@ func (v *vulkanBackend) freeDeferredLocked(bufs ...*vulkanBuf) {
 		}
 	}
 }
+
+// Only successful multirow materialization owns independent host allocations.
+// The one-row typed image may retain a status prefix and receives no grant.
+// V41ReadDeferred remains the sole status owner and the sole native read call;
+// its transport/panic cleanup must finish successfully before minting a result.
+func (v *vulkanBackend) v41ReadDeferredOwned(statuses []V41DeferredStatus, rows []Tensor) ([]error, V41DeferredReadResult, error) {
+	verdicts, values, err := v.V41ReadDeferred(statuses, rows)
+	if err != nil {
+		return nil, V41DeferredReadResult{}, err
+	}
+	return verdicts, V41DeferredReadResult{state: &v41DeferredReadState{rows: values, independent: len(rows) >= 2 && len(values) == len(rows)}}, nil
+}

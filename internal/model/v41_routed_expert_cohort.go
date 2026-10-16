@@ -364,12 +364,20 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 				}
 				for row := chunkStart; row <= last; row++ {
 					current = row
-					d, err := downTile.row(panel, row-chunkStart, H, own, valid)
-					if cause = err; cause != nil {
-						break recordRows
-					}
-					if cause = publishDown(d); cause != nil {
-						break recordRows
+					if rows, ok := s.Backend.(compute.V41RoutedDownPanelRowBackend); options == nil && ok && rows.SupportsV41RoutedDownPanelRow(panel, row-chunkStart) {
+						p, st, err := rows.V41RoutedDownPanelRowDeferred(panel, row-chunkStart)
+						if cause = record(p, st, H, compute.V41DeferredBF16Publish, compute.V41BF16PublishRoutedDown, err); cause != nil {
+							break recordRows
+						}
+						published = append(published, p)
+					} else {
+						d, err := downTile.row(panel, row-chunkStart, H, own, valid)
+						if cause = err; cause != nil {
+							break recordRows
+						}
+						if cause = publishDown(d); cause != nil {
+							break recordRows
+						}
 					}
 				}
 				current, chunkStart, activations = last, last+1, activations[:0]
