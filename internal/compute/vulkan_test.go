@@ -3171,17 +3171,26 @@ func TestStrixCoreParityEmitterContract(t *testing.T) {
 	})
 }
 
-// TestVulkanWave32CoopMatValidation witnesses the complete Vulkan cooperative matrix
-// (VK_KHR_cooperative_matrix) validation pipeline on AMD Strix Halo (gfx1151) (#12187):
+// TestVulkanWave32CoopMatValidation exercises the software validation contract
+// using synthetic properties and observations (#12187). It does not query a
+// physical device or witness hardware throughput:
 //  1. Validates native Wave32 WMMA primitives (16x16x16 and 16x16x32) in subgroup scope.
 //  2. Enforces Pad-2 LDS stride alignment (32 -> 34), expanding bank coverage from 8 to 16
 //     and eliminating 8-bank conflict stalls for a +13% compute speedup.
 //  3. Verifies numerical bit-identity against CPU reference.
-//  4. Validates whole-sequence prefill throughput reaching >= 350.0 tok/s for Q4_K / Q8_0 models.
+//  4. Checks explicit finite prefill observations against the existing threshold.
 //  5. Fail-closed rejection of Wave64, missing extensions, missing primitives, and foreign architectures.
 func TestVulkanWave32CoopMatValidation(t *testing.T) {
 	// 1. Canonical Strix Halo (gfx1151) Wave32 validation
 	props := DefaultStrixHaloVulkanDeviceProperties()
+	if props.MeasuredPrefillTokPerSec != 0 {
+		t.Fatal("reference properties must not fabricate a throughput observation")
+	}
+	if report, err := ValidateVulkanWave32CoopMat(props); err == nil || report.Validated || report.WholeSequencePrefillOK {
+		t.Fatalf("unmeasured defaults accepted: report=%+v err=%v", report, err)
+	}
+	// Explicit synthetic input exercises the contract; this is not a hardware measurement.
+	props.MeasuredPrefillTokPerSec = 352.8
 	report, err := ValidateVulkanWave32CoopMat(props)
 	if err != nil {
 		t.Fatalf("ValidateVulkanWave32CoopMat failed on canonical Strix Halo properties: %v", err)
@@ -3218,6 +3227,9 @@ func TestVulkanWave32CoopMatValidation(t *testing.T) {
 	}
 	if !report.BitIdentical {
 		t.Errorf("report.BitIdentical = false, want true")
+	}
+	if report.PrefillTokPerSec != props.MeasuredPrefillTokPerSec {
+		t.Fatalf("observation rewritten: got %v, want %v", report.PrefillTokPerSec, props.MeasuredPrefillTokPerSec)
 	}
 	if report.PrefillTokPerSec < 350.0 {
 		t.Errorf("report.PrefillTokPerSec = %.1f, want >= 350.0 tok/s", report.PrefillTokPerSec)
@@ -3308,6 +3320,34 @@ func TestVulkanWave32CoopMatValidation(t *testing.T) {
 		t.Errorf("ValidateVulkanWave32CoopMat should fail when prefill throughput < 350.0 tok/s")
 	}
 
+	for _, tc := range []struct {
+		name string
+		rate float64
+	}{
+		{"missing", 0},
+		{"negative", -1},
+		{"nan", math.NaN()},
+		{"positive-infinity", math.Inf(1)},
+		{"negative-infinity", math.Inf(-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invalid := props
+			invalid.MeasuredPrefillTokPerSec = tc.rate
+			report, err := ValidateVulkanWave32CoopMat(invalid)
+			if err == nil || report.Validated || report.WholeSequencePrefillOK || report.PrefillTokPerSec != 0 {
+				t.Fatalf("invalid observation accepted: report=%+v err=%v", report, err)
+			}
+			if report.Reason != "prefill throughput observation must be finite and positive" {
+				t.Fatalf("wrong refusal: %q", report.Reason)
+			}
+		})
+	}
+	thresholdProps := props
+	thresholdProps.MeasuredPrefillTokPerSec = StrixHaloMinPrefillTokPerSec
+	if report, err := ValidateVulkanWave32CoopMat(thresholdProps); err != nil || !report.Validated || report.PrefillTokPerSec != StrixHaloMinPrefillTokPerSec {
+		t.Fatalf("exact threshold rejected or rewritten: report=%+v err=%v", report, err)
+	}
+
 	// 4. Numerical bit-identity check
 	M, N, K := 16, 16, 32
 	A := make([]float32, M*K)
@@ -3334,16 +3374,22 @@ func TestVulkanWave32CoopMatValidation(t *testing.T) {
 
 	// 5. Backend method integration
 	vStrix := &vulkanBackend{name: "vulkan", tier: "integrated:AMD Radeon 8060S Graphics (gfx1151)"}
-	vReport, err := vStrix.ValidateWave32CooperativeMatrix(nil)
+	vReport, err := vStrix.ValidateWave32CooperativeMatrix(&props)
 	if err != nil {
-		t.Fatalf("vStrix.ValidateWave32CooperativeMatrix(nil) failed: %v", err)
+		t.Fatalf("vStrix.ValidateWave32CooperativeMatrix(explicit props) failed: %v", err)
 	}
 	if !vReport.Validated {
 		t.Errorf("vReport.Validated = false, want true")
 	}
 
+	for _, backend := range []*vulkanBackend{nil, vStrix} {
+		if report, err := backend.ValidateWave32CooperativeMatrix(nil); err == nil || report.Validated || report.WholeSequencePrefillOK || report.PrefillTokPerSec != 0 {
+			t.Fatalf("missing properties accepted: report=%+v err=%v", report, err)
+		}
+	}
+
 	vBad := &vulkanBackend{name: "vulkan", tier: "discrete:NVIDIA GeForce RTX 4090"}
 	if _, err := vBad.ValidateWave32CooperativeMatrix(nil); err == nil {
-		t.Errorf("vBad.ValidateWave32CooperativeMatrix should fail for non-Strix tier")
+		t.Errorf("vBad.ValidateWave32CooperativeMatrix should fail without explicit properties")
 	}
 }

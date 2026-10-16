@@ -889,3 +889,40 @@ func TestFlashAttnDequant_ScratchpadIntegration(t *testing.T) {
 func TestFlashAttn_Ticket515_Scratchpad(t *testing.T) {
 	TestRADV_Ticket515_FlashAttnDequantOnceScratchpad(t)
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestAttentionParityRejectsNonfiniteOutputs(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		left, right []float32
+	}{
+		{"left-nan", []float32{float32(math.NaN())}, []float32{0}},
+		{"right-nan", []float32{0}, []float32{float32(math.NaN())}},
+		{"left-positive-infinity", []float32{float32(math.Inf(1))}, []float32{0}},
+		{"right-negative-infinity", []float32{0}, []float32{float32(math.Inf(-1))}},
+		{"equal-positive-infinities", []float32{float32(math.Inf(1))}, []float32{float32(math.Inf(1))}},
+		{"equal-negative-infinities", []float32{float32(math.Inf(-1))}, []float32{float32(math.Inf(-1))}},
+		{"later-nan", []float32{1, float32(math.NaN())}, []float32{0, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diff, err := ComputeAttentionParityLInfinity(tc.left, tc.right)
+			if err == nil || diff != 0 || !strings.Contains(err.Error(), "nonfinite attention output at index") {
+				t.Fatalf("nonfinite parity must refuse: diff=%v err=%v", diff, err)
+			}
+		})
+	}
+	t.Run("finite-controls", func(t *testing.T) {
+		if diff, err := ComputeAttentionParityLInfinity([]float32{-2, 4, 1}, []float32{1, 2, 1}); err != nil || diff != 3 {
+			t.Fatalf("finite maximum changed: diff=%v err=%v", diff, err)
+		}
+		if diff, err := ComputeAttentionParityLInfinity(nil, nil); err != nil || diff != 0 {
+			t.Fatalf("empty parity changed: diff=%v err=%v", diff, err)
+		}
+		if _, err := ComputeAttentionParityLInfinity([]float32{1}, nil); err == nil {
+			t.Fatal("unequal lengths accepted")
+		}
+		if diff, err := ComputeAttentionParityLInfinity([]float32{math.MaxFloat32}, []float32{-math.MaxFloat32}); err != nil || !math.IsInf(float64(diff), 1) {
+			t.Fatalf("finite subtraction overflow must remain a mismatch: diff=%v err=%v", diff, err)
+		}
+	})
+}

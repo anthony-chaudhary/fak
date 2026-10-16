@@ -195,13 +195,13 @@ func verifyVulkanBinaryReceiptV3IdentityWithRunners(ctx context.Context, evidenc
 	if gitRun == nil || (evidence.Comparison != nil && comparisonGitRun == nil) {
 		return nil, fmt.Errorf("verify Vulkan receipt identity: pinned Git runner is required")
 	}
-	raw, err := readStableRegularFile(evidence.ReceiptPath, "Vulkan receipt")
+	raw, err := readStableVulkanReceipt(evidence.ReceiptPath, "Vulkan receipt")
 	if err != nil {
 		return nil, err
 	}
 	var comparisonRaw []byte
 	if evidence.Comparison != nil {
-		comparisonRaw, err = readStableRegularFile(evidence.Comparison.ReceiptPath, "comparison Vulkan receipt")
+		comparisonRaw, err = readStableVulkanReceipt(evidence.Comparison.ReceiptPath, "comparison Vulkan receipt")
 		if err != nil {
 			return nil, err
 		}
@@ -430,7 +430,7 @@ func compareVulkanBuildReceiptV3(path string, artifact *BuildArtifact, provenanc
 	if err != nil {
 		return &BuildReproducibility{Status: "invalid"}, err
 	}
-	raw, err := readStableRegularFile(path, "comparison Vulkan V3 receipt")
+	raw, err := readStableVulkanReceipt(path, "comparison Vulkan V3 receipt")
 	if err != nil {
 		return &BuildReproducibility{Status: "invalid"}, err
 	}

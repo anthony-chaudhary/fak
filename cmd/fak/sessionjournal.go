@@ -69,7 +69,7 @@ func sessionJournalUsage(w io.Writer) {
 	fmt.Fprintln(w, "  report   classify recorded sessions (LIVE/CRASHED/STALE/CLOSED) against the boot epoch")
 	fmt.Fprintln(w, "           --refusals        only the content-free capture-refusal audit rows")
 	fmt.Fprintln(w, "           --refusal-id <id> filter refusal rows to one exact session id")
-	fmt.Fprintln(w, "           --refusal-limit N cap the refusal projection at N rows (0 = all)")
+	fmt.Fprintf(w, "           --refusal-limit N cap refusal rows (default %d, range 1..%d)\n", sessionjournal.DefaultRefusalLimit, sessionjournal.MaxRefusalLimit)
 	fmt.Fprintln(w, "           a refusal row (KindRefuse) never becomes a lifecycle verdict; JSON adds counts.refusals")
 	fmt.Fprintln(w, "  open     register a session at start (boot-stamped)   --id <sid> [--cwd --model --account ...]")
 	fmt.Fprintln(w, "  beat     heartbeat                                    --id <sid>")
@@ -155,11 +155,15 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 	crashedOnly := fs.Bool("crashed", false, "only the CRASHED (resume-candidate) set")
 	refusalsOnly := fs.Bool("refusals", false, "only the content-free capture-refusal audit rows")
 	refusalID := fs.String("refusal-id", "", "filter refusal rows to this exact session id")
-	refusalLimit := fs.Int("refusal-limit", 0, "cap the refusal projection at N rows (0 = all)")
+	refusalLimit := fs.Int("refusal-limit", sessionjournal.DefaultRefusalLimit, fmt.Sprintf("cap refusal rows (1..%d)", sessionjournal.MaxRefusalLimit))
 	causes := fs.Bool("causes", false, "correlate CRASHED rows with Windows Event-1000 causes")
 	causeSince := fs.Duration("cause-since", 24*time.Hour, "Windows event-log lookback for crash causes")
 	bootOverride := fs.String("boot-time", "", "override the machine boot instant (RFC3339) — for folding a journal copied from a crashed box")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *refusalLimit < 1 || *refusalLimit > sessionjournal.MaxRefusalLimit {
+		fmt.Fprintf(stderr, "fak sessionjournal: --refusal-limit must be between 1 and %d\n", sessionjournal.MaxRefusalLimit)
 		return 2
 	}
 
