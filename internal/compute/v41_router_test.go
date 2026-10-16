@@ -95,12 +95,15 @@ func TestV41RouterTopKSourceContract(t *testing.T) {
 	}
 	src := string(raw)
 	for _, want := range []string{
-		"layout(local_size_x = 1) in;",
+		"layout(local_size_x = 64) in;", "uint row = gl_WorkGroupID.x;",
 		"if (c > selectedValues[slot])", // strict > keeps the lower expert on ties
-		"int filled = min(e, pc.topK);",
+		"return value > otherValue || (value == otherValue && expert < otherExpert);",
+		"int filled = held;",
 		"selectedScores[insert] = s;",
-		"fault(row, 1u, e, z)", "fault(row, 2u, e, s)", "fault(row, 3u, e, b)", "fault(row, 4u, e, c)",
-		"fault(row, 5u, -1, sum)", "fault(row, 6u, picked[slot], w)",
+		"faultStage = 1u; faultValue = z;", "faultStage = 2u; faultValue = s;", "faultStage = 3u; faultValue = b;", "faultStage = 4u; faultValue = c;",
+		"sFaultExpert[lane + stride] < sFaultExpert[lane]",
+		"if (lane == 0u) fault(row, sFaultStage[0], sFaultExpert[0], sFaultValue[0]);",
+		"fault(row, 5u, -1, sum)", "fault(row, 6u, rowPicked[slot], w)",
 		"(pc.full == 0 && sum == 0.0)",
 		"precise float d = sum + 1e-20;",
 		"precise float q = s / denominator;", "precise float w = q * pc.routeScale;",
@@ -110,7 +113,7 @@ func TestV41RouterTopKSourceContract(t *testing.T) {
 			t.Errorf("router shader lost contract fragment %q", want)
 		}
 	}
-	if strings.Count(src, "routerScore(") != 2 || strings.Count(src, "precise float s = selectedScores[slot];") != 2 {
+	if strings.Count(src, "routerScore(") != 2 || strings.Count(src, "precise float s = rowScores[slot];") != 2 {
 		t.Fatal("router must evaluate each expert score once and reuse selected raw scores for sum and weights")
 	}
 	if V41RouterTopKStageLogit != 1 || V41RouterTopKStageWeight != 6 || V41RouterTopKMaxK != 8 {

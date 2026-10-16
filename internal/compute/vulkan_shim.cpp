@@ -6272,8 +6272,8 @@ int fvk_v41_router_topk_f32(const void* dLogits, const void* dBias,
     } pc{rows, experts, topK, full, hasBias, routeScale};
     static_assert(sizeof(int) == 4 && sizeof(float) == 4 && sizeof(Push) == 24,
                   "V4.1 router push ABI must be five int32 values and one float32");
-    // One scalar invocation per row initializes its status and pick slots,
-    // then owns that row's first fault. There is no atomic winner race.
+    // One 64-lane workgroup per row; lane 0 alone writes status and picks,
+    // after an exact-compare merge, so there is no atomic winner race.
     if (!dispatch(g_kern[K_V41_ROUTER_TOPK], bufs, &pc, sizeof(pc), uint32_t(rows))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }

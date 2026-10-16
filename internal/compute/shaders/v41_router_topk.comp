@@ -1,7 +1,10 @@
 #version 450
-layout(local_size_x = 1) in;
+layout(local_size_x = 64) in;
 
-// One invocation owns one token row: scalar order is deliberate, not a reduction.
+// One workgroup owns one token row. Each lane scores a strided expert subset and
+// keeps its own top-k with the serial insertion rule; k exact-compare tree
+// rounds then merge the lane heads. Only comparisons cross lanes, so picks,
+// weights and the first fault are bit-identical to one scalar pass over the row.
 // score = sqrt(softplus(z)); select topK of score+bias, descending, lower expert
 // first on ties; weight = score / (in-order sum [+1e-20 when full]) * scale.
 layout(std430, binding = 0) readonly buffer LogitBuf { float Logits[]; };
@@ -20,6 +23,16 @@ layout(push_constant) uniform Push {
 } pc;
 
 const int MAX_K = 8;
+const uint LANES = 64u;
+const int NO_FAULT = 0x7fffffff;
+
+shared int sFaultExpert[LANES];
+shared uint sFaultStage[LANES];
+shared float sFaultValue[LANES];
+shared float sValue[LANES];
+shared float sScore[LANES];
+shared int sExpert[LANES];
+shared uint sLane[LANES];
 
 bool finiteValue(float x) {
     return !isnan(x) && !isinf(x);
@@ -58,46 +71,58 @@ float routerScore(float z) {
     return s;
 }
 
+// Selection order: larger value first, lower expert first on equal values.
+bool ranksBefore(float value, int expert, float otherValue, int otherExpert) {
+    return value > otherValue || (value == otherValue && expert < otherExpert);
+}
+
 void main() {
-    uint row = gl_GlobalInvocationID.x;
+    uint row = gl_WorkGroupID.x;
+    uint lane = gl_LocalInvocationID.x;
     if (row >= uint(pc.rows)) return;
     uint base = row * 4u;
-    Status[base] = 0u;
-    Status[base + 1u] = 0u;
-    Status[base + 2u] = 0u;
-    Status[base + 3u] = 0u;
     uint pickBase = row * uint(pc.topK);
-    for (int slot = 0; slot < pc.topK; ++slot) {
-        Experts[pickBase + uint(slot)] = 0u;
-        Weights[pickBase + uint(slot)] = 0.0;
+    if (lane == 0u) {
+        Status[base] = 0u;
+        Status[base + 1u] = 0u;
+        Status[base + 2u] = 0u;
+        Status[base + 3u] = 0u;
+        for (int slot = 0; slot < pc.topK; ++slot) {
+            Experts[pickBase + uint(slot)] = 0u;
+            Weights[pickBase + uint(slot)] = 0.0;
+        }
     }
 
     int picked[MAX_K];
     precise float selectedValues[MAX_K];
     precise float selectedScores[MAX_K];
-    // Host order: per expert ascending, logit, score, bias, then selection score.
-    // Keep only the best MAX_K scores; every expert is still validated.
-    for (int e = 0; e < pc.experts; ++e) {
+    int held = 0;
+    int faultExpert = NO_FAULT;
+    uint faultStage = 0u;
+    float faultValue = 0.0;
+    // Host order per expert: logit, score, bias, then selection score. A lane
+    // walks its experts ascending, so its first fault is its lowest one.
+    for (int e = int(lane); e < pc.experts; e += int(LANES)) {
         float z = Logits[row * uint(pc.experts) + uint(e)];
-        if (!finiteValue(z)) { fault(row, 1u, e, z); return; }
+        if (!finiteValue(z)) { faultExpert = e; faultStage = 1u; faultValue = z; break; }
         precise float s = routerScore(z);
-        if (!finiteValue(s)) { fault(row, 2u, e, s); return; }
+        if (!finiteValue(s)) { faultExpert = e; faultStage = 2u; faultValue = s; break; }
         precise float c = s;
         if (pc.hasBias != 0) {
             float b = Bias[e];
-            if (!finiteValue(b)) { fault(row, 3u, e, b); return; }
+            if (!finiteValue(b)) { faultExpert = e; faultStage = 3u; faultValue = b; break; }
             c = s + b;
-            if (!finiteValue(c)) { fault(row, 4u, e, c); return; }
+            if (!finiteValue(c)) { faultExpert = e; faultStage = 4u; faultValue = c; break; }
         }
 
-        int filled = min(e, pc.topK);
+        int filled = held;
         int insert = filled;
         for (int slot = 0; slot < filled; ++slot) {
             // Strict > keeps earlier (lower) experts first on corrected ties.
             if (c > selectedValues[slot]) { insert = slot; break; }
         }
         if (insert < pc.topK) {
-            for (int slot = min(e, pc.topK - 1); slot > insert; --slot) {
+            for (int slot = min(held, pc.topK - 1); slot > insert; --slot) {
                 picked[slot] = picked[slot - 1];
                 selectedValues[slot] = selectedValues[slot - 1];
                 selectedScores[slot] = selectedScores[slot - 1];
@@ -105,12 +130,59 @@ void main() {
             picked[insert] = e;
             selectedValues[insert] = c;
             selectedScores[insert] = s;
+            held = min(held + 1, pc.topK);
         }
     }
 
+    // The row's first fault is the lowest faulting expert across all lanes.
+    sFaultExpert[lane] = faultExpert;
+    sFaultStage[lane] = faultStage;
+    sFaultValue[lane] = faultValue;
+    barrier();
+    for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+        if (lane < stride && sFaultExpert[lane + stride] < sFaultExpert[lane]) {
+            sFaultExpert[lane] = sFaultExpert[lane + stride];
+            sFaultStage[lane] = sFaultStage[lane + stride];
+            sFaultValue[lane] = sFaultValue[lane + stride];
+        }
+        barrier();
+    }
+    if (sFaultExpert[0] != NO_FAULT) {
+        if (lane == 0u) fault(row, sFaultStage[0], sFaultExpert[0], sFaultValue[0]);
+        return;
+    }
+
+    // Merge: every global pick is some lane's next held entry, so k rounds of an
+    // exact-compare tree over the lane heads reproduce the scalar order.
+    int rowPicked[MAX_K];
+    precise float rowScores[MAX_K];
+    int head = 0;
+    for (int round = 0; round < pc.topK; ++round) {
+        barrier();
+        bool has = head < held;
+        sValue[lane] = has ? selectedValues[head] : uintBitsToFloat(0xff800000u);
+        sScore[lane] = has ? selectedScores[head] : 0.0;
+        sExpert[lane] = has ? picked[head] : NO_FAULT;
+        sLane[lane] = lane;
+        barrier();
+        for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+            if (lane < stride && ranksBefore(sValue[lane + stride], sExpert[lane + stride], sValue[lane], sExpert[lane])) {
+                sValue[lane] = sValue[lane + stride];
+                sScore[lane] = sScore[lane + stride];
+                sExpert[lane] = sExpert[lane + stride];
+                sLane[lane] = sLane[lane + stride];
+            }
+            barrier();
+        }
+        if (sLane[0] == lane) head++;
+        rowPicked[round] = sExpert[0];
+        rowScores[round] = sScore[0];
+    }
+    if (lane != 0u) return;
+
     precise float sum = 0.0;
     for (int slot = 0; slot < pc.topK; ++slot) {
-        precise float s = selectedScores[slot];
+        precise float s = rowScores[slot];
         precise float next = sum + s;
         sum = next;
     }
@@ -121,11 +193,11 @@ void main() {
         denominator = d;
     }
     for (int slot = 0; slot < pc.topK; ++slot) {
-        precise float s = selectedScores[slot];
+        precise float s = rowScores[slot];
         precise float q = s / denominator;
         precise float w = q * pc.routeScale;
-        if (!finiteValue(w)) { fault(row, 6u, picked[slot], w); return; }
-        Experts[pickBase + uint(slot)] = uint(picked[slot]);
+        if (!finiteValue(w)) { fault(row, 6u, rowPicked[slot], w); return; }
+        Experts[pickBase + uint(slot)] = uint(rowPicked[slot]);
         Weights[pickBase + uint(slot)] = w;
     }
 }
