@@ -169,17 +169,11 @@ func (s *Session) v41InverseOutputRoPEFunc() v41InverseOutputRoPEFunc {
 				return nil, errV41TailRoPEResult
 			}
 			stage = "output readback"
-			values := s.Backend.Read(rotated)
-			if len(values) != width {
+			values, valid := compute.ReadV41InverseRoPEOutput(s.Backend, rotated, out, headDim, rotaryDim)
+			if !valid {
 				return nil, errV41TailRoPEResult
 			}
-			for i, value := range values {
-				if !finite32(value) || (i%headDim < headDim-rotaryDim && math.Float32bits(value) != math.Float32bits(out[i])) {
-					return nil, errV41TailRoPEResult
-				}
-			}
-			// Own the row before the device allocation is released.
-			return append([]float32(nil), values...), nil
+			return values, nil
 		}
 		result, cause = run()
 		if cause != nil {

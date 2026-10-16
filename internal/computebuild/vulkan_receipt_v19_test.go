@@ -80,7 +80,7 @@ func TestVulkanReceiptV22IndexScaleBoundary(t *testing.T) {
 		t.Fatal("historical V21 and index-scale V22 must not be interchangeable")
 	}
 	schema, current, err := CurrentVulkanBuildIdentity()
-	if err != nil || schema != VulkanBuildReceiptSchemaV22 || !reflect.DeepEqual(current, identity) || vulkanSuccessorForSchema(schema) != vulkanRegistryV22 || vulkanSuccessorForSchema(VulkanBuildReceiptSchemaV21) != vulkanRegistryV21 {
-		t.Fatalf("current receipt does not select V22 or historical V21 is unavailable: %q %+v %v", schema, current, err)
+	if err != nil || schema != VulkanBuildReceiptSchemaV23 || current.ID != VulkanShaderRegistryV23ID || current.SHA256 != identity.SHA256 || current.ModuleCount != identity.ModuleCount || vulkanSuccessorForSchema(schema) != vulkanRegistryV23 || vulkanSuccessorForSchema(VulkanBuildReceiptSchemaV21) != vulkanRegistryV21 {
+		t.Fatalf("current receipt does not select V23 or historical V21 is unavailable: %q %+v %v", schema, current, err)
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // VulkanShaders is a compatibility snapshot of the current shader registry.
@@ -43,6 +45,7 @@ func strictFileSHA256(path string) (string, int64, error) {
 func gitOutput(ctx context.Context, root string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", root}, args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
+	sysproc.ConfigureBackground(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -65,6 +68,7 @@ func cleanGitState(ctx context.Context, root string) error {
 
 func hashGitArchive(ctx context.Context, root, commit string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", commit)
+	sysproc.ConfigureBackground(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	h := sha256.New()
@@ -1097,6 +1101,13 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 		return fmt.Errorf("glslc not found — set VULKAN_SDK or install Vulkan SDK")
 	}
 
+	return buildVulkanShaders(repoRoot, stdout, func(src, dst string) error {
+		args := []string{"-O", "--target-env=vulkan1.2", "-fshader-stage=comp", src, "-o", dst}
+		return RunCmd(ctx, tc.GLSLC, args, filepath.Join(repoRoot, "internal", "compute"), nil, stdout, os.Stderr)
+	})
+}
+
+func buildVulkanShaders(repoRoot string, stdout io.Writer, compile func(src, dst string) error) error {
 	pkgDir := filepath.Join(repoRoot, "internal", "compute")
 	shaderSrc := filepath.Join(pkgDir, "shaders")
 	spvOut := filepath.Join(pkgDir, "spirv")
@@ -1105,6 +1116,11 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 		return fmt.Errorf("creating spirv output directory: %w", err)
 	}
 
+	// Validate canonical source before compiling or replacing any module.
+	qualified, err := readVulkanQualifiedIndexScale(repoRoot)
+	if err != nil {
+		return err
+	}
 	compiledCount := 0
 	for _, s := range vulkanCurrentRegistry.stems() {
 		src := filepath.Join(shaderSrc, s+".comp")
@@ -1114,11 +1130,21 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 			return fmt.Errorf("required shader source missing: %s", src)
 		}
 
+		if s == vulkanQualifiedIndexScaleStem {
+			if err := writeVulkanQualifiedModule(dst, qualified); err != nil {
+				return err
+			}
+			if stdout != nil {
+				fmt.Fprintf(stdout, "[vulkan] qualified artifact %s -> %s.spv\n", vulkanQualifiedIndexScaleHeader, s)
+			}
+			compiledCount++
+			continue
+		}
+
 		if stdout != nil {
 			fmt.Fprintf(stdout, "[vulkan] glslc %s.comp -> %s.spv\n", s, s)
 		}
-		args := []string{"-O", "--target-env=vulkan1.2", "-fshader-stage=comp", src, "-o", dst}
-		if err := RunCmd(ctx, tc.GLSLC, args, pkgDir, nil, stdout, os.Stderr); err != nil {
+		if err := compile(src, dst); err != nil {
 			return fmt.Errorf("glslc failed on %s.comp: %w", s, err)
 		}
 		compiledCount++
@@ -1129,7 +1155,7 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 	}
 
 	if stdout != nil {
-		fmt.Fprintf(stdout, "[vulkan] compiled %d SPIR-V modules to %s\n", compiledCount, spvOut)
+		fmt.Fprintf(stdout, "[vulkan] prepared %d SPIR-V modules to %s\n", compiledCount, spvOut)
 	}
 	return nil
 }

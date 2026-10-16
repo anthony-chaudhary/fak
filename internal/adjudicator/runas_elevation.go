@@ -43,6 +43,21 @@ func isRunAsArgRule(pr *ArgPredicate) bool {
 	}
 }
 
+// commandMentionsRunAsElevation reports whether cmd NAMES the Windows elevation
+// verb family at all. It is a NECESSARY condition for commandInvokesRunAsElevation
+// to find a genuine elevation: that walk only ever reports true for a statement
+// whose resolved command word is `Start-Process`, so a command that does not
+// contain the substring cannot be a real elevation that the walk would discover —
+// only its fail-closed branch could fire on it.
+//
+// It exists so a caller that has NOT first matched the shipped deny_regex — the
+// gotcha compendium, which has no rule of its own (#13867) — can establish a
+// trigger before consulting the fail-closed walk. Over-matching is safe here: a
+// false positive only runs the walk, whose verdict is unchanged.
+func commandMentionsRunAsElevation(cmd string) bool {
+	return strings.Contains(strings.ToLower(cmd), "start-process")
+}
+
 // commandInvokesRunAsElevation reports whether cmd actually INVOKES an elevated
 // launch — `Start-Process` resolved at a statement's command-word position, carrying
 // `-Verb RunAs` in that same statement's argv — as opposed to merely naming the

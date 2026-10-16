@@ -128,6 +128,9 @@ const (
 	// VulkanBuildReceiptSchemaV22 binds V21/85 plus optional fused index-scale BF16 publication.
 	VulkanBuildReceiptSchemaV22 = "fak.vulkan-build-receipt.v22"
 
+	// VulkanBuildReceiptSchemaV23 binds canonical fused-scale materialization with the unchanged 86-module registry.
+	VulkanBuildReceiptSchemaV23 = "fak.vulkan-build-receipt.v23"
+
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
 

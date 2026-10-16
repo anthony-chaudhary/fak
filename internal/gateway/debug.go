@@ -19,7 +19,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/runtimeobs"
 )
 
+// debugRetainedReleaseVars is sampled only on an explicitly opted-in debug scrape. The observation
+// interval bounds the query; it is not a request/session completion receipt.
+type debugRetainedReleaseVars struct {
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+	Summary     string    `json:"summary"`
+	Comparison  string    `json:"comparison"`
+}
+
 type debugVarsResponse struct {
+	RetainedRelease  *debugRetainedReleaseVars  `json:"retained_release,omitempty"`
 	Gateway          debugGatewayVars           `json:"gateway"`
 	Runtime          debugRuntimeVars           `json:"runtime"`
 	Kernel           debugKernelVars            `json:"kernel"`
@@ -666,7 +676,13 @@ func (s *Server) handleDebugVars(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.debugVarsContext(r.Context(), time.Now()))
+	response := s.debugVarsContext(r.Context(), time.Now())
+	// Default/UI polling never takes the backend mutex. Collection requires an
+	// explicit opt-in on this existing authenticated route: ?retained_release=1.
+	if r.URL.Query().Get("retained_release") == "1" {
+		response.RetainedRelease = debugRetainedRelease(s.planner)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) debugVars(now time.Time) debugVarsResponse {
@@ -1426,4 +1442,34 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 		L3StageFaults:         st.L3StageFaults,
 		L3RestoreFaults:       st.L3RestoreFaults,
 	}
+}
+
+// debugRetainedRelease uses the existing optional planner reporter route. No
+// gateway lock is held across the backend's native mutex. Owner totals are untouched.
+func debugRetainedRelease(p agent.Planner) *debugRetainedReleaseVars {
+	reporter, ok := p.(agent.RetainedReleaseReporter)
+	if !ok {
+		return nil
+	}
+	started := time.Now()
+	summary, supported := reporter.RetainedReleaseSummary()
+	completed := time.Now()
+	if !supported {
+		return nil
+	}
+	return &debugRetainedReleaseVars{StartedAt: started, CompletedAt: completed, Summary: summary,
+		Comparison: "partial native retained prefix; sampled on explicit opt-in; not atomic with other debug fields; independent of request completion; never add prefix totals to owner totals"}
+}
+
+// RetainedReleaseSummary selects only the local serving side of a dual planner.
+// Proxy metadata cannot establish native ownership or backing state.
+func (d *DualPlanner) RetainedReleaseSummary() (string, bool) {
+	if d == nil {
+		return "", false
+	}
+	reporter, ok := d.local.(agent.RetainedReleaseReporter)
+	if !ok {
+		return "", false
+	}
+	return reporter.RetainedReleaseSummary()
 }

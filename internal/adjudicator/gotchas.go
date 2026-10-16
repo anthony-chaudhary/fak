@@ -223,6 +223,19 @@ func extractSrmTargets(args []string) []string {
 }
 
 func matchRawDiskDestruction(cmd string) (bool, string) {
+	// Establish the device TRIGGER first (#13867). commandPerformsDeviceOperation
+	// is built to be consulted only AFTER a rule has already matched: it decides
+	// under BOTH dialects and is fail-closed, so a payload that merely fails the
+	// OTHER dialect's lexer — a read-only Python here-doc whose apostrophes leave an
+	// unterminated PowerShell quoted span — reads as a device operation even though
+	// it names no device verb at all. The arg-predicate caller gates on the rule's
+	// own raw regex; this caller has no rule, so it gates on the family's own
+	// mention check. A command that names none of these verbs or the raw-device path
+	// has no device trigger to decide and is not a raw-disk operation; anything that
+	// does name one is handed to the unmodified fail-closed walk below.
+	if !deviceOpMentionRe.MatchString(cmd) {
+		return false, ""
+	}
 	if commandPerformsDeviceOperation(cmd) {
 		return true, "raw block device or storage operation"
 	}
@@ -303,14 +316,27 @@ func matchPrivilegeEscalation(cmd string) (bool, string) {
 	if word, ok := commandLocalEscalationWord(cmd); ok {
 		return true, word
 	}
-	if commandInvokesRunAsElevation(cmd) {
+	// Establish the Windows elevation TRIGGER before consulting its fail-closed
+	// walk (#13867). commandInvokesRunAsElevation is built to run only AFTER the
+	// shipped `Start-Process … -Verb RunAs` deny_regex has matched, and its walk is
+	// fail-closed: an unterminated PowerShell quoted span returns true. Handed a
+	// payload that never names the verb at all — an ordinary Python here-doc whose
+	// apostrophes leave an unterminated PS span — that branch reads as an elevation.
+	// commandLocalEscalationWord above needs no such gate: it resolves real command
+	// words and returns false when it finds none, so it cannot false-positive.
+	if commandMentionsRunAsElevation(cmd) && commandInvokesRunAsElevation(cmd) {
 		return true, "Start-Process -Verb RunAs"
 	}
 	return false, ""
 }
 
 func matchCloudInfraTeardown(cmd string) (bool, string) {
-	if commandAppliesTerraformDestroy(cmd) {
+	// Establish the terraform TRIGGER before consulting its fail-closed walk
+	// (#13867), for the same reason as the elevation branch above: the walk only
+	// reports a real teardown for a `terraform` command word, and is fail-closed on
+	// an unreadable payload. A command naming no terraform cannot be a teardown the
+	// walk would find — only its fail-closed branch could fire on it.
+	if commandMentionsTerraformDestroy(cmd) && commandAppliesTerraformDestroy(cmd) {
 		return true, "terraform destroy"
 	}
 	for _, src := range rceShellSources(cmd) {

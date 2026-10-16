@@ -669,13 +669,13 @@ func (s *Session) v41BindIndexerScore() v41BoundIndexerScore {
 						}
 						stage = "readback"
 						// The native score primitive marks this tensor for checked Read.
-						values := s.Backend.Read(out)
-						if len(values) != rows {
+						values, validRead := compute.ReadV41IndexerScores(s.Backend, out, rows)
+						if !validRead {
 							return nil, errV41IndexerScoreResult
 						}
 						// Finite inputs may produce +/-Inf or NaN. Do not clamp, rescale,
 						// round, or reject here: the unchanged selector owns that policy.
-						result = append([]float32(nil), values...)
+						result = values
 						if resident != nil {
 							// Checked Read is the completion boundary for both the score
 							// and every prefix/staging copy feeding its exact-sized input.

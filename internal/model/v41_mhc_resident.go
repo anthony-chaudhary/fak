@@ -330,6 +330,17 @@ func (r *v41MHCResident) collapseWithRetention(layer int, streams *v41DeviceStre
 			return errV41MHCResult
 		}
 		*stage = "readback"
+		if retain {
+			flat, valid := compute.ReadV41MHCCollapse(s.Backend, t, rows*H)
+			if !valid {
+				return errV41MHCResult
+			}
+			out = make([][]float32, rows)
+			for row := range out {
+				out[row] = flat[row*H : (row+1)*H : (row+1)*H]
+			}
+			return nil
+		}
 		values := s.Backend.Read(t)
 		if len(values) != rows*H {
 			return errV41MHCResult
@@ -344,17 +355,7 @@ func (r *v41MHCResident) collapseWithRetention(layer int, streams *v41DeviceStre
 			}
 			return nil
 		}
-		flat := make([]float32, len(values))
-		for i, v := range values {
-			if !finite32(v) {
-				return errV41MHCResult
-			}
-			flat[i] = v
-		}
-		out = make([][]float32, rows)
-		for row := range out {
-			out[row] = flat[row*H : (row+1)*H : (row+1)*H]
-		}
+
 		return nil
 	})
 	return out, err

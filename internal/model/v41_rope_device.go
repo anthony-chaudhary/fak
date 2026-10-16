@@ -289,7 +289,13 @@ func v41AttentionQKRoPE(cfg Config, layer int, q, kv, cos, sin []float32, heads,
 func v41RoPEBF16Pair(layer int, site string, q, kv []float32, publish v41BF16BoundaryFunc) ([]float32, []float32, error) {
 	joined := make([]float32, 0, len(q)+len(kv))
 	joined = append(append(joined, q...), kv...)
-	published, err := v41RoPEBF16Publish(layer, site, joined, publish)
+	// joined is freshly allocated and never exposed before publication.
+	published, err := v41PublishBF16Input(layer, site, joined, publish, func(values []float32) ([]float32, error) {
+		return v41RoPEBF16Copy(layer, values)
+	}, true)
+	if err != nil && publish != nil {
+		err = v41RoPEPublicationErr(layer, err)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

@@ -145,6 +145,63 @@ typedef struct fvk_buffer_reservation_info {
  * Additive ABI: existing structs and symbols are unchanged; rebuild the shim. */
 int fvk_buffer_reservation(const void *d, fvk_buffer_reservation_info *out);
 
+/* Partial, pull-only inventory of native release-requested bindings. The caller
+ * holds the allocation/free/init lock (Go: vulkanMu) throughout this call. No
+ * Vulkan calls, fences, transfers, owner changes or allocations occur here.
+ * Only deferred frees and the two native idle pools are covered; active owners,
+ * Go transient pools, stages, scratch, commands and descriptors are excluded.
+ * A successful empty result never proves physical release or device health.
+ * Capacity and inspection are bounded by FVK_RETAINED_RELEASE_LIMIT. Inspection
+ * charges both bucket visits (even empty buckets) and buffer entries. A truncated
+ * empty prefix does not establish that the covered containers are empty. Order is
+ * unspecified. Truncation means only a returned prefix was observed; totals
+ * deduplicate backing AllocationIDs in that prefix, never the whole backend.
+ * reservation_bytes is requested VkDeviceMemory bytes, not physical residency.
+ * Identical binding/container duplicates are coalesced; conflicting ownership or
+ * metadata fails closed. Valid-capacity rows clear on failure; status explains unavailable,
+ * stale-generation, or invalid metadata. Old-generation entries are not hidden.
+ * Generation identifies an initialization attempt, not a reusable logical lease.
+ * logical_lease_generation is always zero (unavailable), including after pool reuse.
+ * No handle is accepted or returned; this cannot validate borrowed/stale tensors.
+ * Outputs must be non-overlapping, with rows pointing to capacity writable records;
+ * rows may be null only at capacity zero. Capacity above the limit is invalid
+ * and rows are not accessed; a null summary is invalid and outputs are untouched.
+ * A rebuilt shim is required. Existing reservation ABI and allocator policy stay
+ * unchanged. Quarantine supersedes pool/deferred usability; container still says
+ * where the retained owner was observed. No physically-freed state is inferred. */
+#define FVK_RETAINED_RELEASE_LIMIT 1024u
+enum fvk_retained_snapshot_status {
+    FVK_RETAINED_OK = 1, FVK_RETAINED_UNAVAILABLE = 2,
+    FVK_RETAINED_INVALID = 3, FVK_RETAINED_STALE_GENERATION = 4
+};
+enum fvk_retained_container {
+    FVK_RETAINED_DEFERRED = 1, FVK_RETAINED_DEVICE_POOL = 2,
+    FVK_RETAINED_OFFLOAD_POOL = 3
+};
+enum fvk_retained_backing_state {
+    FVK_BACKING_DEFERRED = 1, FVK_BACKING_POOL_RETAINED = 2,
+    FVK_BACKING_QUARANTINED = 3
+};
+enum fvk_retained_release_state { FVK_RELEASE_REQUESTED = 1 };
+typedef struct fvk_retained_release_record {
+    fvk_buffer_reservation_info reservation;
+    uint64_t device_generation;
+    uint64_t logical_lease_generation; /* unavailable, always zero */
+    uint32_t release_state;
+    uint32_t backing_state;
+    uint32_t container;
+} fvk_retained_release_record;
+typedef struct fvk_retained_release_summary {
+    uint64_t device_generation;
+    uint64_t returned_unique_reservation_bytes;
+    uint32_t returned_records;
+    uint32_t returned_unique_allocations;
+    uint32_t truncated;
+    uint32_t status;
+} fvk_retained_release_summary;
+int fvk_retained_release_snapshot(fvk_retained_release_record *rows, uint32_t capacity,
+                                  fvk_retained_release_summary *summary);
+
 /* Observe the one shim-global, persistently mapped ordinary H2D/D2H stage.
  * Returns 1 for a coherent empty owner (buffer_bytes = 0) or a retained stage;
  * returns 0 for uninitialized, inconsistent or unavailable ownership/backing.
