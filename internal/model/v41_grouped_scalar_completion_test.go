@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 type v41GroupedScalarCompletionBackend struct {
@@ -86,6 +87,35 @@ func (b *v41GroupedScalarCompletionBackend) Free(x compute.Tensor) {
 	}
 }
 
+// v41GroupedScalarCPUExpected matches the selected F32 CPU-ref MatMul reduction,
+// without invoking the backend or callback under test. The host fallback uses a
+// different float32 accumulation order and remains the exact decline oracle.
+func v41GroupedScalarCPUExpected(t *testing.T, input []float32, a [][]float32, b []float32, rank, dim int) []float32 {
+	t.Helper()
+	if len(a) == 0 || len(input)%len(a) != 0 || rank <= 0 || dim <= 0 {
+		t.Fatal("invalid grouped scalar CPU oracle geometry")
+	}
+	groupIn := len(input) / len(a)
+	joined := make([]float32, len(a)*rank)
+	for g, weights := range a {
+		if len(weights) != rank*groupIn {
+			t.Fatal("invalid grouped scalar CPU oracle A shape")
+		}
+		x := input[g*groupIn : (g+1)*groupIn]
+		for row := 0; row < rank; row++ {
+			joined[g*rank+row] = mathx.FDot(weights[row*groupIn:(row+1)*groupIn], x)
+		}
+	}
+	if len(b) != dim*len(joined) {
+		t.Fatal("invalid grouped scalar CPU oracle B shape")
+	}
+	want := make([]float32, dim)
+	for row := range want {
+		want[row] = mathx.FDot(b[row*len(joined):(row+1)*len(joined)], joined)
+	}
+	return want
+}
+
 // A selected scalar fault must not turn into Declined and replay the real host
 // projector. This reduced ordinary path deliberately excludes resident-panel
 // recovery and preserves that lower boundary's separate contract.
@@ -130,6 +160,10 @@ func TestV41GroupedScalarCompletion(t *testing.T) {
 					want, err := oracle(input)
 					if err != nil || len(want) != c.HiddenSize || len(want) == 0 {
 						t.Fatalf("host oracle: %v", err)
+					}
+					wantResult := want
+					if fault == "healthy" {
+						wantResult = v41GroupedScalarCPUExpected(t, input, b.a, b.b, c.OLoraRank, c.HiddenSize)
 					}
 					before := v41GroupedPhase(t, m, "prefill")
 					callback := s.v41GroupedOutputFunc()
@@ -177,7 +211,7 @@ func TestV41GroupedScalarCompletion(t *testing.T) {
 						if fault == "decline" {
 							wantCalls, hostRows, deviceRows = 0, 1, 0
 						}
-						if !returned || !boundaryReturned || cause != nil || recovered != nil || !reflect.DeepEqual(got, want) || b.calls != wantCalls || delta["grouped_output_host_rows"] != hostRows || delta["grouped_output_device_rows"] != deviceRows || s.halClosed || s.halFailure != nil {
+						if !returned || !boundaryReturned || cause != nil || recovered != nil || !reflect.DeepEqual(got, wantResult) || b.calls != wantCalls || delta["grouped_output_host_rows"] != hostRows || delta["grouped_output_device_rows"] != deviceRows || s.halClosed || s.halFailure != nil {
 							diagnostic()
 						}
 						return
