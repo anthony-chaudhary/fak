@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -22,6 +24,7 @@ type requestObservation struct {
 	admitted           bool
 	lifecycle          modelLoadLifecycle
 	configSHA          string
+	phaseContext       context.Context
 }
 
 type observationBody struct {
@@ -86,6 +89,33 @@ func requestObservationContext(r *http.Request) (string, string) {
 	return o.requestID, o.lifecycle.LoadID
 }
 
+func bindRequestPhaseContext(r *http.Request, ctx context.Context) {
+	o := perfSourceFrom(r.Context()).observation
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	o.phaseContext = ctx
+	o.mu.Unlock()
+}
+
+func requestPartialNativePhases(ctx context.Context) *perfledger.PartialNativePhases {
+	phases := enginestep.RequestPhaseObservationsFromContext(ctx)
+	out := &perfledger.PartialNativePhases{Scope: "request_phase_elapsed"}
+	if p := phases.Prefill; p != nil && p.Count > 0 && p.DurationNS >= 0 {
+		ms := float64(p.DurationNS) / 1e6
+		out.PrefillMS, out.PrefillObservations = &ms, p.Count
+	}
+	if p := phases.Decode; p != nil && p.Count > 0 && p.DurationNS >= 0 {
+		ms := float64(p.DurationNS) / 1e6
+		out.DecodeMS, out.DecodeObservations = &ms, p.Count
+	}
+	if out.PrefillMS == nil && out.DecodeMS == nil {
+		return nil
+	}
+	return out
+}
+
 func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 	if o == nil || rec == nil {
 		return
@@ -93,6 +123,7 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	rec.RequestID, rec.TraceID = o.requestID, o.traceID
+	rec.PartialNativePhases = requestPartialNativePhases(o.phaseContext)
 	if o.complete && !o.failed && o.read > 0 {
 		rec.WorkloadSHA256 = hex.EncodeToString(o.digest.Sum(nil))
 		rec.WorkloadIdentityMode = "raw_request_body_sha256_v1"

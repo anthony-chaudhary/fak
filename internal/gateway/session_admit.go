@@ -77,6 +77,7 @@ func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (con
 	s.admitRequestObservation(r, trace)
 	requestID, loadID := requestObservationContext(r)
 	ctx = enginestep.WithRequestObservation(ctx, requestID, loadID)
+	bindRequestPhaseContext(r, ctx)
 	// Carry the harness launch session id for prefix-reuse attribution on every wire.
 	ctx = withPrefixReuseSession(ctx, harnessSessionID(r))
 	if principalFromContext(ctx) == "" {
