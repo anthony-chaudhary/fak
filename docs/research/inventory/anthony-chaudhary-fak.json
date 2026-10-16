@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:78be9d0072c7006bd277f78b2d184031dbe9e6c46d6db53ac274b56b13f8c39c",
+  "content_root": "sha256:a4bda8764ee39c2706e597edc8bc0ab60ee5a374149364a8bd000781059d9d7a",
   "tracked_files": 25544,
-  "tracked_bytes": 512217059,
+  "tracked_bytes": 512217100,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -1491,8 +1491,8 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "content_sha256": "sha256:0c1700e1a7c91702d646375a7c3bf104d55768f6f0ae44bf434544667f2bac53",
-      "bytes": 77511,
+      "content_sha256": "sha256:a4452532ca316c3044b278654c3dbd6c7b6362e15179219e34bb44ebe718c54e",
+      "bytes": 77539,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -184326,8 +184326,8 @@
     },
     {
       "path": "internal/releasereadiness/ci_fast_observability_test.go",
-      "content_sha256": "sha256:e1ecf108ff97b411e7f3c46e71c22d1b5cfd8ede1bc74dd3a82890c7699e7f9e",
-      "bytes": 39027,
+      "content_sha256": "sha256:b6f9854d16509cde3793a51f6961b14579cbb425e124df8f8af8da19b7b7c267",
+      "bytes": 39040,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
