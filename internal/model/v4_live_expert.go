@@ -107,8 +107,11 @@ func (o *v4ExpertOwner) free() (err error) {
 		return nil
 	}
 	scope := beginBackendExecution(o.be)
-	defer scope.finishError(&err)
-	return o.freeOwned()
+	complete := false
+	defer scope.finishCompleted(&complete)
+	err = o.freeOwned()
+	complete = err == nil // Preserve a returned error over queued cleanup failure.
+	return err
 }
 
 func (o *v4ExpertOwner) freeOwned() error {

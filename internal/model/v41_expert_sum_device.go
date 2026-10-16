@@ -102,40 +102,50 @@ func v41SelectedDeviceCall[T any](s *Session, layer int, path string, run func(s
 		closeSelected(closed)
 		return closed
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			if err, ok := r.(error); ok {
-				var closed *BackendForwardOperationError
-				if errors.As(err, &closed) {
-					closeSelected(err)
-					panic(r)
-				}
-				var backend *compute.BackendError
-				if errors.As(err, &backend) {
-					result, cause = zero, closeFailure(err)
-					return
-				}
+	var recovered any
+	completed := false
+	func() {
+		defer func() { recovered = recover() }()
+		result, cause = func() (T, error) {
+			result, cause = run(&stage)
+			if cause != nil {
+				return zero, closeFailure(cause)
 			}
-			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-				if original, ok := r.(error); ok {
-					err = original
-				}
-				result, cause = zero, closeFailure(err)
-				return
-			}
-			err, ok := r.(error)
-			if !ok {
-				err = fmt.Errorf("unclassified backend panic: %v", r)
-			}
-			closeFailure(err)
+			return result, nil
+		}()
+		completed = true
+	}()
+	if completed {
+		return result, cause
+	}
+	// The capture returns after panic(nil), including its legacy nil payload.
+	// Goexit never returns through it and cannot become an operation result.
+	r := recovered
+	if err, ok := r.(error); ok {
+		var closed *BackendForwardOperationError
+		if errors.As(err, &closed) {
+			closeSelected(err)
 			panic(r)
 		}
-	}()
-	result, cause = run(&stage)
-	if cause != nil {
-		return zero, closeFailure(cause)
+		var backend *compute.BackendError
+		if errors.As(err, &backend) {
+			result, cause = zero, closeFailure(err)
+			return
+		}
 	}
-	return result, nil
+	if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+		if original, ok := r.(error); ok {
+			err = original
+		}
+		result, cause = zero, closeFailure(err)
+		return
+	}
+	err, ok := r.(error)
+	if !ok {
+		err = fmt.Errorf("unclassified backend panic: %v", r)
+	}
+	closeFailure(err)
+	panic(r)
 }
 
 // v41DeviceSumReadback owns a checked copy of a device row. Read may expose

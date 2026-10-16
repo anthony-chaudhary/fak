@@ -214,97 +214,6 @@ func (c Config) V41TransientResidentBytes(cacheBudget int64) int64 {
 	return total
 }
 
-// v41LayerCacheGet returns a retained f32 block for name, or nil on a miss.
-//
-// A HIT refreshes the key's recency (it is moved to the most-recently-used end
-// of layerExpertFIFO) so v41LayerCachePut's eviction becomes LRU rather than
-// FIFO. This is the #13294 frontier lever: the prefill's routed-expert reads are
-// interleaved across the token dimension, so the key re-read last pass is the
-// one FIFO had evicted first. Re-touching on the read that just used it keeps
-// the hot set resident, which is exactly the "raise the bounded resident hit
-// fraction" the first-token throughput seam names. The map lookup and promotion
-// are observation-only w.r.t. arithmetic: the RETURNED block is the same bytes.
-func (s *v41ProjScratch) v41LayerCacheGet(name string) ([]float32, bool) {
-	if s == nil || s.layerExperts == nil {
-		return nil, false
-	}
-	w, ok := s.layerExperts[name]
-	if !ok {
-		return nil, false
-	}
-	s.v41LayerCacheTouch(name)
-	return w, true
-}
-
-// v41LayerCacheTouch moves name to the most-recently-used end of the eviction
-// queue. It is O(len) over the layer's resident keys (bounded by the cache
-// budget / block size, i.e. small) and is called on a cache hit and on the
-// insertion path, so the queue always reflects recency, never bare insertion
-// order. A name absent from the queue is a no-op (defensive: the map and queue
-// are only ever mutated together under the sequential MoE loop).
-func (s *v41ProjScratch) v41LayerCacheTouch(name string) {
-	if s == nil || len(s.layerExpertFIFO) == 0 {
-		return
-	}
-	// The common case is a touch of a key already at the MRU end (the
-	// immediately preceding insert); skip the rebuild then.
-	if s.layerExpertFIFO[len(s.layerExpertFIFO)-1] == name {
-		return
-	}
-	for i, v := range s.layerExpertFIFO {
-		if v == name {
-			s.layerExpertFIFO = append(s.layerExpertFIFO[:i], s.layerExpertFIFO[i+1:]...)
-			s.layerExpertFIFO = append(s.layerExpertFIFO, name)
-			return
-		}
-	}
-}
-
-// v41LayerCachePut retains name's f32 block, evicting the LEAST-RECENTLY-USED
-// entry until the declared byte budget admits it (a hit refreshes recency
-// through v41LayerCacheGet, so a re-read key is never evicted ahead of a colder
-// one). A block larger than the whole budget is not cached (the caller still
-// holds its own copy).
-func (s *v41ProjScratch) v41LayerCachePut(name string, w []float32) {
-	if s == nil || s.expertLayerCacheBytes <= 0 || len(w) == 0 {
-		return
-	}
-	sz := int64(len(w)) * 4
-	if sz > s.expertLayerCacheBytes {
-		return
-	}
-	if s.layerExperts == nil {
-		s.layerExperts = map[string][]float32{}
-	}
-	if _, dup := s.layerExperts[name]; dup {
-		// Already resident: refresh recency, do not double-count bytes.
-		s.v41LayerCacheTouch(name)
-		return
-	}
-	for s.layerExpertBytes+sz > s.expertLayerCacheBytes && len(s.layerExpertFIFO) > 0 {
-		old := s.layerExpertFIFO[0]
-		s.layerExpertFIFO = s.layerExpertFIFO[1:]
-		if prev, ok := s.layerExperts[old]; ok {
-			s.layerExpertBytes -= int64(len(prev)) * 4
-			delete(s.layerExperts, old)
-		}
-	}
-	s.layerExperts[name] = w
-	s.layerExpertFIFO = append(s.layerExpertFIFO, name)
-	s.layerExpertBytes += sz
-}
-
-// v41LayerCacheReset drops every retained block. Called at the top of a layer so
-// the cache's working set is exactly one layer's routed experts.
-func (s *v41ProjScratch) v41LayerCacheReset() {
-	if s == nil {
-		return
-	}
-	s.layerExperts = nil
-	s.layerExpertFIFO = nil
-	s.layerExpertBytes = 0
-}
-
 // v41ProjF32Into is the caller-buffer twin of v41ProjF32: it resolves a named
 // V4.1 per-layer projection and writes its f32 block into dst, growing dst when
 // needed, rather than allocating a fresh whole-tensor block on every call. The
@@ -1375,164 +1284,180 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 			}
 			return s.v41HeadCloseFailure(opStage, err)
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if payload, ok := r.(v41HeadPayloadError); ok {
-					if !guarded {
-						opStage = "payload"
-					}
-					result, outcome, cause = nil, v41ProjectionError, closeFailure(payload.cause)
+		convert := func(r any) {
+			if payload, ok := r.(v41HeadPayloadError); ok {
+				if !guarded {
+					opStage = "payload"
+				}
+				result, outcome, cause = nil, v41ProjectionError, closeFailure(payload.cause)
+				return
+			}
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
+				}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
 					return
 				}
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
+			}
+			if head || guarded {
+				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+					if original, ok := r.(error); ok {
+						err = original
 					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
-						return
-					}
+					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+					return
 				}
-				if head || guarded {
-					if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-						if original, ok := r.(error); ok {
-							err = original
+				// Plain backend errors (including ROCm) and programming panics
+				// retain their identity, but cannot leave this selected owner live.
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
+			}
+			panic(r)
+		}
+		var recovered any
+		complete := false
+		func() {
+			defer func() { recovered = recover() }()
+			result, outcome, cause = func() ([]float32, v41DenseProjectionOutcome, error) {
+				run := func() (values []float32, err error) {
+					var owned []compute.Tensor
+					var loan *v41ProjectionLoan
+					if continuation != nil {
+						loan = &v41ProjectionLoan{backend: s.Backend}
+						defer func() {
+							if continuation.panicPresent {
+								// Recover only secondary release faults, never the active Goexit.
+								defer func() { _ = recover() }()
+								loan.release()
+								return
+							}
+							primary := recover()
+							cleanup := loan.release()
+							if primary != nil {
+								panic(primary)
+							}
+							if err == nil && continuation.cause == nil && continuation.panicValue == nil && cleanup != nil {
+								panic(cleanup)
+							}
+						}()
+					}
+					if head {
+						defer v41ReleaseHeadTensors(s.Backend, &owned, &err)
+					}
+					weight := stage()
+					if loan != nil {
+						loan.protected = weight.Buf()
+					}
+					if guarded && dtype == compute.Q4_K {
+						q := s.M.q4kw[name]
+						if q4kHostCopyReleasable(s, q, weight.Ready()) {
+							q.raw = nil
 						}
-						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
-						return
 					}
-					// Plain backend errors (including ROCm) and programming panics
-					// retain their identity, but cannot leave this selected owner live.
-					err, ok := r.(error)
-					if !ok {
-						err = fmt.Errorf("unclassified backend panic: %v", r)
+					input := panel
+					if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
+						input = make([]float32, len(panel))
+						for row := 0; row < rows; row++ {
+							copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
+						}
 					}
-					closeFailure(err)
+					if head || guarded {
+						for _, v := range input {
+							if !finite32(v) {
+								opStage = "payload"
+								return nil, errV41ProjectionResult
+							}
+						}
+					}
+					shape := []int{in}
+					if rows > 1 {
+						shape = []int{rows, in}
+					}
+					opStage = "activation upload"
+					x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
+					if loan != nil {
+						if !loan.own(x) {
+							return nil, errV41ProjectionResult
+						}
+					} else if head {
+						owned = append(owned, x)
+					} else {
+						defer s.Backend.Free(x)
+					}
+					uploaded = int64(len(input)) * 4
+					opStage = "matmul"
+					var y compute.Tensor
+					if rows == 1 {
+						y = s.Backend.MatMul(weight, x)
+					} else {
+						y = s.Backend.BatchedMatMul(weight, x, rows)
+					}
+					if loan != nil {
+						if !loan.own(y) {
+							return nil, errV41ProjectionResult
+						}
+					} else if head {
+						owned = append(owned, y)
+					} else {
+						defer s.Backend.Free(y)
+					}
+					if continuation != nil {
+						if rows != 1 || leaf != "ffn.gate.weight" || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
+							return nil, errV41ProjectionResult
+						}
+						continuation.invoke(y, loan)
+						return nil, nil
+					}
+					opStage = "readback"
+					values = s.Backend.Read(y)
+					readback = int64(len(values)) * 4
+					want, ok := checkedMulInt(rows, out)
+					if !ok || len(values) != want {
+						return nil, errV41ProjectionResult
+					}
+					if head || guarded {
+						for _, v := range values {
+							if !finite32(v) {
+								return nil, errV41ProjectionResult
+							}
+						}
+					}
+					opStage = "lora"
+					for row := 0; row < rows; row++ {
+						s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
+					}
+					if head || guarded {
+						for _, v := range values {
+							if !finite32(v) {
+								return nil, errV41ProjectionResult
+							}
+						}
+					}
+					return values, nil
 				}
-				panic(r)
-			}
+				var err error
+				result, err = run()
+				if err != nil {
+					return nil, v41ProjectionError, closeFailure(err)
+				}
+				if continuation == nil || continuation.completed {
+					successfulRows = rows
+				}
+				return result, v41ProjectionHandled, nil
+			}()
+			complete = true
 		}()
-		run := func() (values []float32, err error) {
-			var owned []compute.Tensor
-			var loan *v41ProjectionLoan
-			if continuation != nil {
-				loan = &v41ProjectionLoan{backend: s.Backend}
-				defer func() {
-					primary := recover()
-					cleanup := loan.release()
-					if primary != nil {
-						panic(primary)
-					}
-					if err == nil && continuation.cause == nil && continuation.panicValue == nil && cleanup != nil {
-						panic(cleanup)
-					}
-				}()
-			}
-			if head {
-				defer v41ReleaseHeadTensors(s.Backend, &owned, &err)
-			}
-			weight := stage()
-			if loan != nil {
-				loan.protected = weight.Buf()
-			}
-			if guarded && dtype == compute.Q4_K {
-				q := s.M.q4kw[name]
-				if q4kHostCopyReleasable(s, q, weight.Ready()) {
-					q.raw = nil
-				}
-			}
-			input := panel
-			if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
-				input = make([]float32, len(panel))
-				for row := 0; row < rows; row++ {
-					copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
-				}
-			}
-			if head || guarded {
-				for _, v := range input {
-					if !finite32(v) {
-						opStage = "payload"
-						return nil, errV41ProjectionResult
-					}
-				}
-			}
-			shape := []int{in}
-			if rows > 1 {
-				shape = []int{rows, in}
-			}
-			opStage = "activation upload"
-			x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
-			if loan != nil {
-				if !loan.own(x) {
-					return nil, errV41ProjectionResult
-				}
-			} else if head {
-				owned = append(owned, x)
-			} else {
-				defer s.Backend.Free(x)
-			}
-			uploaded = int64(len(input)) * 4
-			opStage = "matmul"
-			var y compute.Tensor
-			if rows == 1 {
-				y = s.Backend.MatMul(weight, x)
-			} else {
-				y = s.Backend.BatchedMatMul(weight, x, rows)
-			}
-			if loan != nil {
-				if !loan.own(y) {
-					return nil, errV41ProjectionResult
-				}
-			} else if head {
-				owned = append(owned, y)
-			} else {
-				defer s.Backend.Free(y)
-			}
-			if continuation != nil {
-				if rows != 1 || leaf != "ffn.gate.weight" || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
-					return nil, errV41ProjectionResult
-				}
-				continuation.invoke(y, loan)
-				return nil, nil
-			}
-			opStage = "readback"
-			values = s.Backend.Read(y)
-			readback = int64(len(values)) * 4
-			want, ok := checkedMulInt(rows, out)
-			if !ok || len(values) != want {
-				return nil, errV41ProjectionResult
-			}
-			if head || guarded {
-				for _, v := range values {
-					if !finite32(v) {
-						return nil, errV41ProjectionResult
-					}
-				}
-			}
-			opStage = "lora"
-			for row := 0; row < rows; row++ {
-				s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
-			}
-			if head || guarded {
-				for _, v := range values {
-					if !finite32(v) {
-						return nil, errV41ProjectionResult
-					}
-				}
-			}
-			return values, nil
+		if !complete {
+			convert(recovered)
 		}
-		var err error
-		result, err = run()
-		if err != nil {
-			return nil, v41ProjectionError, closeFailure(err)
-		}
-		if continuation == nil || continuation.completed {
-			successfulRows = rows
-		}
-		return result, v41ProjectionHandled, nil
+		return
 	}
 	ordinary := func(l int, leaf string, panel []float32, out, in, rows int) ([]float32, v41DenseProjectionOutcome, error) {
 		return core(l, leaf, panel, out, in, rows, nil)

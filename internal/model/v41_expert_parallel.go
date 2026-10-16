@@ -142,8 +142,9 @@ func (m *Model) v41EPOwnerSum(c *v41ExpertParallelCollective, owners TPPlan, dig
 	part := make([]float32, plan.Shards[rank].Width())
 	band := owners.Shards[rank]
 	localErr := func() (cause error) {
+		complete := false
 		defer func() {
-			if r := recover(); r != nil {
+			if r := recover(); !complete {
 				if e, ok := r.(error); ok {
 					cause = e
 				} else {
@@ -151,30 +152,34 @@ func (m *Model) v41EPOwnerSum(c *v41ExpertParallelCollective, owners TPPlan, dig
 				}
 			}
 		}()
-		if len(input) != H {
-			return fmt.Errorf("invalid hidden width")
-		}
-		offset := v41EPHeaderWords
-		for _, pick := range picks {
-			if pick.expert < band.Lo || pick.expert >= band.Hi {
-				continue
+		cause = func() error {
+			if len(input) != H {
+				return fmt.Errorf("invalid hidden width")
 			}
-			stem := "ffn.experts." + itoa(pick.expert)
-			row, cause := m.v41FullRoutedExpertPublished(layer, stem, input, pick.weight, m.Cfg, st.routedExpert, st.expertGateUp, st.expertDown,
-				func() ([]float32, []float32, []float32, error) {
-					return m.v41ExpertTripleInto(layer, stem, scratch, false)
-				},
-				func() ([]float32, error) { return m.hostExpertDown(layer, stem, scratch) }, false, st.gatherOps.bf16PublishFunc())
-			if cause != nil {
-				return cause
+			offset := v41EPHeaderWords
+			for _, pick := range picks {
+				if pick.expert < band.Lo || pick.expert >= band.Hi {
+					continue
+				}
+				stem := "ffn.experts." + itoa(pick.expert)
+				row, cause := m.v41FullRoutedExpertPublished(layer, stem, input, pick.weight, m.Cfg, st.routedExpert, st.expertGateUp, st.expertDown,
+					func() ([]float32, []float32, []float32, error) {
+						return m.v41ExpertTripleInto(layer, stem, scratch, false)
+					},
+					func() ([]float32, error) { return m.hostExpertDown(layer, stem, scratch) }, false, st.gatherOps.bf16PublishFunc())
+				if cause != nil {
+					return cause
+				}
+				if len(row) != H {
+					return errV41ExpertResult
+				}
+				copy(part[offset:offset+H], row)
+				offset += H
 			}
-			if len(row) != H {
-				return errV41ExpertResult
-			}
-			copy(part[offset:offset+H], row)
-			offset += H
-		}
-		return nil
+			return nil
+		}()
+		complete = true
+		return cause
 	}()
 	v41EPHeader(part, digest, localErr != nil)
 	sum, err = c.reduce(part, v41EPReduction{owners: owners, digest: digest, layer: layer, picks: picks, width: H, sum: st.routedSumFunc()})

@@ -606,157 +606,6 @@ func newNativeV41ForwardCoverage(cfg Config, executedLayers int, source NativeFo
 	}
 }
 
-// v41Head retains the host final norm and resident LM head for callers without
-// a session-owned projection callback.
-func (m *Model) v41Head(x []float32) ([]float32, error) {
-	return m.v41HeadWithProjection(x, nil)
-}
-
-func (m *Model) v41HeadWithProjection(x []float32, project v41DenseProjectionFunc) ([]float32, error) {
-	return m.v41HeadWithFinalNorm(x, project, nil)
-}
-
-func (m *Model) v41HeadWithFinalNorm(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc) ([]float32, error) {
-	return m.v41HeadWithBF16Boundary(x, project, normalize, nil)
-}
-
-func (m *Model) v41HeadWithBF16Boundary(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
-	return m.v41HeadWithLogitScale(x, project, normalize, round, nil, nil)
-}
-
-func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
-	xf, err := m.v41PrepareHeadInput(x, normalize, round)
-	if err != nil {
-		return nil, err
-	}
-	logits, err := m.v41ProjectHeadInput(xf, project, 1)
-	if err != nil {
-		return nil, err
-	}
-	return v41ScaleHeadLogits(logits, m.Cfg, scale, refuse)
-}
-
-// v41PrepareHeadInput retains the serial final-normalization and BF16 boundaries.
-// A cohort prepares each row separately; normalization never crosses sessions.
-func (m *Model) v41PrepareHeadInput(x []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
-	if !m.has("model.norm.weight") {
-		return nil, v41StageErr(v41StageFinalNorm, -1,
-			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
-	}
-	if len(x) != m.Cfg.HiddenSize {
-		return nil, v41StageErr(v41StageFinalNorm, -1,
-			fmt.Errorf("%w: final norm width %d, want %d", ErrV41ForwardStage, len(x), m.Cfg.HiddenSize))
-	}
-	if !m.hasWeight("lm_head.weight") && !m.hasWeight("model.embed_tokens.weight") {
-		return nil, v41StageErr(v41StageHead, -1,
-			fmt.Errorf("%w: no lm_head.weight and no tied embedding", ErrV41ForwardStage))
-	}
-	full, err := v41ForwardGeometry(m.Cfg)
-	if err != nil {
-		return nil, err
-	}
-	var xf []float32
-	if full {
-		xf, err = m.v41FullFinalNormWithBF16Boundary(x, normalize, round)
-		if err != nil {
-			return nil, err
-		}
-	} else if normalize == nil {
-		xf = m.finalNorm(x)
-	} else {
-		var err error
-		xf, err = normalize(x)
-		if err == nil && len(xf) != m.Cfg.HiddenSize {
-			err = errV41ProjectionResult
-		}
-		if err == nil {
-			for _, v := range xf {
-				if !finite32(v) {
-					err = errV41ProjectionResult
-					break
-				}
-			}
-		}
-		if err != nil {
-			return nil, &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, err)}
-		}
-	}
-	return xf, nil
-}
-
-func (m *Model) v41ProjectHeadInput(xf []float32, project v41DenseProjectionFunc, rows int) ([]float32, error) {
-	if project == nil {
-		for _, v := range xf {
-			if !finite32(v) {
-				return nil, v41StageErr(v41StageHead, -1, errV41ProjectionResult)
-			}
-		}
-	}
-	return m.v41ProjectionRows(-1, m.headName(), xf, m.Cfg.VocabSize, m.Cfg.HiddenSize, rows, project)
-}
-
-// Skipping a projection must not skip its host finite-input refusal. Selected
-// normalization and BF16 operations have already checked their own boundaries.
-func v41ValidateDiscardedHeadInput(row []float32) error {
-	for _, v := range row {
-		if !finite32(v) {
-			return v41StageErr(v41StageHead, -1, errV41ProjectionResult)
-		}
-	}
-	return nil
-}
-
-// v41FullFinalNorm owns the reference's BF16 -> learned F32 RMSNorm -> BF16
-// boundary before ParallelHead widens to F32. The callback itself remains F32;
-// generic norm flags belong to the reduced compatibility path, not this graph.
-func (m *Model) v41FullFinalNorm(input []float32, normalize v41FinalNormFunc) ([]float32, error) {
-	return m.v41FullFinalNormWithBF16Boundary(input, normalize, nil)
-}
-
-func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
-	fail := func(cause error) error {
-		return &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, cause)}
-	}
-	gain := m.tensor("model.norm.weight")
-	eps := float32(m.Cfg.RMSNormEps)
-	if len(input) == 0 || len(input) != m.Cfg.HiddenSize || len(gain) != len(input) || !finite32(eps) || eps <= 0 {
-		return nil, fail(errV41ProjectionResult)
-	}
-	for _, value := range gain {
-		if !finite32(value) {
-			return nil, fail(errV41ProjectionResult)
-		}
-	}
-	staged, err := v41BF16BoundaryCopy(-1, "model.norm.weight input", input, round)
-	if err != nil {
-		if round == nil {
-			return nil, fail(errV41ProjectionResult)
-		}
-		return nil, fail(err)
-	}
-	var values []float32
-	if normalize == nil {
-		values = rmsnorm(staged, gain, eps)
-	} else {
-		var err error
-		values, err = normalize(staged)
-		if err != nil {
-			return nil, fail(err)
-		}
-	}
-	if len(values) != len(input) {
-		return nil, fail(errV41ProjectionResult)
-	}
-	out, err := v41BF16BoundaryCopy(-1, "model.norm.weight output", values, round)
-	if err != nil {
-		if round == nil {
-			return nil, fail(errV41ProjectionResult)
-		}
-		return nil, fail(err)
-	}
-	return out, nil
-}
-
 // ---- session entry points --------------------------------------------------
 
 // prefillV41 is the DeepSeek V4.1 branch of Session.Prefill. It fails closed
@@ -1329,151 +1178,170 @@ func (s *Session) v41RMSNormRows(name string, input []float32, width, rows int, 
 		closeSelected(closed)
 		return closed
 	}
-	defer func() {
-		r := recover()
-		if finish != nil && !panelComplete && r == nil {
-			// Goexit keeps unwinding; legacy panic(nil) must not become a
-			// successful panel return after a cleanup recovered its payload.
-			if cause == nil {
-				cause = errV41ProjectionResult
+	convert := func(r any) {
+		if err, ok := r.(error); ok {
+			var closed *BackendForwardOperationError
+			if errors.As(err, &closed) {
+				closeSelected(err)
+				panic(r)
 			}
-			result, cause = nil, closeFailure(cause)
-			return
-		}
-		if r != nil {
-			if err, ok := r.(error); ok {
-				var closed *BackendForwardOperationError
-				if errors.As(err, &closed) {
-					closeSelected(err)
-					panic(r)
-				}
-				var backend *compute.BackendError
-				if errors.As(err, &backend) {
-					result, cause = nil, closeFailure(err)
-					return
-				}
-			}
-			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-				if original, ok := r.(error); ok {
-					err = original
-				}
+			var backend *compute.BackendError
+			if errors.As(err, &backend) {
 				result, cause = nil, closeFailure(err)
 				return
 			}
-			// Some backends report plain errors. Preserve an unclassified
-			// panic's identity, but never leave its selected session reusable.
-			err, ok := r.(error)
-			if !ok {
-				err = fmt.Errorf("unclassified backend panic: %v", r)
-			}
-			closeFailure(err)
-			panic(r)
 		}
-	}()
-	eps := float32(s.M.Cfg.RMSNormEps)
-	meta, present := s.M.manifest[name]
-	count, countOK := checkedMulInt(rows, width)
-	if rows <= 0 || rows > 64 || width <= 0 || !countOK || len(input) != count || !finite32(eps) || eps <= 0 ||
-		!present || len(meta.Shape) != 1 || meta.Shape[0] != width {
-		return nil, closeFailure(errV41ProjectionResult)
+		if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+			if original, ok := r.(error); ok {
+				err = original
+			}
+			result, cause = nil, closeFailure(err)
+			return
+		}
+		// Some backends report plain errors. Preserve an unclassified
+		// panic's identity, but never leave its selected session reusable.
+		err, ok := r.(error)
+		if !ok {
+			err = fmt.Errorf("unclassified backend panic: %v", r)
+		}
+		closeFailure(err)
+		panic(r)
 	}
-	gain := s.M.tensor(name)
-	if len(gain) != width {
-		return nil, closeFailure(errV41ProjectionResult)
-	}
-	for i, v := range input {
-		if !finite32(v) || !finite32(gain[i%width]) {
+	body := func() ([]float32, error) {
+		eps := float32(s.M.Cfg.RMSNormEps)
+		meta, present := s.M.manifest[name]
+		count, countOK := checkedMulInt(rows, width)
+		if rows <= 0 || rows > 64 || width <= 0 || !countOK || len(input) != count || !finite32(eps) || eps <= 0 ||
+			!present || len(meta.Shape) != 1 || meta.Shape[0] != width {
 			return nil, closeFailure(errV41ProjectionResult)
 		}
-	}
-	run := func() (values []float32, err error) {
-		var owned []compute.Tensor
-		completed := false
-		if finish != nil {
-			defer v41ReleaseNormPanelTensors(s.Backend, &owned, &err, &completed)
+		gain := s.M.tensor(name)
+		if len(gain) != width {
+			return nil, closeFailure(errV41ProjectionResult)
 		}
-		body := func() (values []float32, err error) {
-			stage = "weight upload"
-			weight := s.weightHAL(name)
-			stage = "activation upload"
-			shape := []int{width}
+		for i, v := range input {
+			if !finite32(v) || !finite32(gain[i%width]) {
+				return nil, closeFailure(errV41ProjectionResult)
+			}
+		}
+		run := func() (values []float32, err error) {
+			var owned []compute.Tensor
+			completed := false
 			if finish != nil {
-				shape = []int{rows, width}
+				defer v41ReleaseNormPanelTensors(s.Backend, &owned, &err, &completed)
 			}
-			x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
-			if finish == nil {
-				defer s.Backend.Free(x)
-			} else {
-				if x.Buf() == nil || x.Backend() != s.Backend || x.Buf() == weight.Buf() {
-					return nil, errV41ProjectionResult
+			body := func() (values []float32, err error) {
+				stage = "weight upload"
+				weight := s.weightHAL(name)
+				stage = "activation upload"
+				shape := []int{width}
+				if finish != nil {
+					shape = []int{rows, width}
 				}
-				owned = append(owned, x)
-				if !v41MHCFreshOutput(s, x, shape, weight) {
-					return nil, errV41ProjectionResult
-				}
-			}
-			stage = "rmsnorm"
-			y := s.Backend.RMSNorm(x, weight, eps)
-			if finish == nil {
-				defer s.Backend.Free(y)
-			} else if y.Buf() != nil && y.Backend() == s.Backend && y.Buf() != x.Buf() && y.Buf() != weight.Buf() {
-				owned = append(owned, y)
-			}
-			if finish == nil {
-				if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
-					return nil, errV41ProjectionResult
-				}
-			} else if !v41MHCFreshOutput(s, y, shape, x, weight) {
-				return nil, errV41ProjectionResult
-			}
-			stage = "readback"
-			values = s.Backend.Read(y)
-			if len(values) != count {
-				return nil, errV41ProjectionResult
-			}
-			// Copy the complete read before releasing this chunk's device tensors.
-			// A BF16 publication may retire the backend, so it must run only after
-			// these transient tensors have been released.
-			values = append([]float32(nil), values...)
-			if finish == nil {
-				for _, v := range values {
-					if !finite32(v) {
+				x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
+				if finish == nil {
+					defer s.Backend.Free(x)
+				} else {
+					if x.Buf() == nil || x.Backend() != s.Backend || x.Buf() == weight.Buf() {
+						return nil, errV41ProjectionResult
+					}
+					owned = append(owned, x)
+					if !v41MHCFreshOutput(s, x, shape, weight) {
 						return nil, errV41ProjectionResult
 					}
 				}
+				stage = "rmsnorm"
+				y := s.Backend.RMSNorm(x, weight, eps)
+				if finish == nil {
+					defer s.Backend.Free(y)
+				} else if y.Buf() != nil && y.Backend() == s.Backend && y.Buf() != x.Buf() && y.Buf() != weight.Buf() {
+					owned = append(owned, y)
+				}
+				if finish == nil {
+					if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
+						return nil, errV41ProjectionResult
+					}
+				} else if !v41MHCFreshOutput(s, y, shape, x, weight) {
+					return nil, errV41ProjectionResult
+				}
+				stage = "readback"
+				values = s.Backend.Read(y)
+				if len(values) != count {
+					return nil, errV41ProjectionResult
+				}
+				// Copy the complete read before releasing this chunk's device tensors.
+				// A BF16 publication may retire the backend, so it must run only after
+				// these transient tensors have been released.
+				values = append([]float32(nil), values...)
+				if finish == nil {
+					for _, v := range values {
+						if !finite32(v) {
+							return nil, errV41ProjectionResult
+						}
+					}
+				}
+				return values, nil
 			}
-			return values, nil
+			values, err = body()
+			completed = true
+			return values, err
 		}
-		values, err = body()
-		completed = true
-		return values, err
-	}
-	result, cause = run()
-	if cause != nil {
-		return nil, closeFailure(cause)
-	}
-	if finish != nil {
-		// Validate and publish in logical row order. A later invalid norm must
-		// not precede an earlier output-publication failure.
-		for row := 0; row < rows; row++ {
-			current := result[row*width : (row+1)*width : (row+1)*width]
-			for _, v := range current {
-				if !finite32(v) {
+		result, cause = run()
+		if cause != nil {
+			return nil, closeFailure(cause)
+		}
+		if finish != nil {
+			// Validate and publish in logical row order. A later invalid norm must
+			// not precede an earlier output-publication failure.
+			for row := 0; row < rows; row++ {
+				current := result[row*width : (row+1)*width : (row+1)*width]
+				for _, v := range current {
+					if !finite32(v) {
+						return nil, closeFailure(errV41ProjectionResult)
+					}
+				}
+				published, err := finish(current)
+				if err != nil {
+					return nil, err
+				}
+				if len(published) != width {
 					return nil, closeFailure(errV41ProjectionResult)
 				}
+				copy(current, published)
 			}
-			published, err := finish(current)
-			if err != nil {
-				return nil, err
-			}
-			if len(published) != width {
-				return nil, closeFailure(errV41ProjectionResult)
-			}
-			copy(current, published)
 		}
+		panelComplete = true
+		return result, nil
 	}
-	panelComplete = true
-	return result, nil
+	if finish != nil {
+		defer func() {
+			r := recover()
+			if finish != nil && !panelComplete && r == nil {
+				// Goexit keeps unwinding; legacy panic(nil) must not become a
+				// successful panel return after a cleanup recovered its payload.
+				if cause == nil {
+					cause = errV41ProjectionResult
+				}
+				result, cause = nil, closeFailure(cause)
+				return
+			}
+			if r != nil {
+				convert(r)
+			}
+		}()
+		return body()
+	}
+	var primary any
+	complete := false
+	func() {
+		defer func() { primary = recover() }()
+		result, cause = body()
+		complete = true
+	}()
+	if !complete {
+		convert(primary)
+	}
+	return
 }
 
 // v41ExpertGateUpFunc binds the shared device gate/up operation (#13357) onto the

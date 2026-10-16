@@ -125,16 +125,23 @@ func (st *v41ForwardState) liftDeviceOnlyDense(s *Session) {
 var errV41RouterProjectionScope = errors.New("model: V4.1 router projection scope changed")
 
 type v41ProjectionContinuation struct {
-	consume    func(compute.Tensor, *v41ProjectionLoan)
-	valid      func() bool
-	cause      error
-	panicValue any
-	completed  bool
+	consume      func(compute.Tensor, *v41ProjectionLoan)
+	valid        func() bool
+	cause        error
+	panicValue   any
+	panicPresent bool
+	completed    bool
 }
 
 func (c *v41ProjectionContinuation) invoke(t compute.Tensor, loan *v41ProjectionLoan) {
-	defer func() { c.panicValue = recover() }()
+	complete := false
+	defer func() {
+		if !complete {
+			c.panicValue, c.panicPresent = recover(), true
+		}
+	}()
 	c.consume(t, loan)
+	complete = true
 }
 
 // The projection remains the owner. Only its synchronous router continuation
@@ -158,22 +165,51 @@ func (l *v41ProjectionLoan) own(t compute.Tensor) bool {
 	l.owned = append(l.owned, t)
 	return true
 }
-func (l *v41ProjectionLoan) release() (first any) {
+
+type v41ProjectionCleanup struct {
+	value   any
+	present bool
+	legacy  any
+}
+
+func (l *v41ProjectionLoan) releaseCleanup() (out v41ProjectionCleanup) {
 	for i := len(l.owned) - 1; i >= 0; i-- {
 		func() {
+			complete := false
 			defer func() {
-				if r := recover(); r != nil && first == nil {
-					first = r
+				value := recover()
+				if !complete && !out.present {
+					out.value, out.present = value, true
+				}
+				if value != nil && out.legacy == nil {
+					out.legacy = value
 				}
 			}()
 			l.backend.Free(l.owned[i])
+			complete = true
 		}()
 	}
 	l.owned = nil
+	return out
+}
+
+func (l *v41ProjectionLoan) release() (first any) {
+	first = l.releaseCleanup().legacy
 	if first == nil && l.valid != nil && !l.valid() {
 		first = errV41RouterProjectionScope
 	}
 	return first
+}
+
+func (l *v41ProjectionLoan) releasePresent() (any, bool) {
+	out := l.releaseCleanup()
+	if out.present {
+		return out.value, true
+	}
+	if l.valid != nil && !l.valid() {
+		return errV41RouterProjectionScope, true
+	}
+	return nil, false
 }
 
 type v41RouterResidentInput struct {
@@ -280,7 +316,7 @@ func (m *Model) v41RouterPicksForStep(layer int, input []float32, hidden int, cf
 		}
 		return nil, v41ProjectionOperationErr(layer, "ffn.gate.weight", cause)
 	}
-	if c.panicValue != nil {
+	if c.panicPresent {
 		panic(c.panicValue)
 	}
 	if c.cause != nil {
