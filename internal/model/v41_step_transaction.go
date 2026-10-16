@@ -5,6 +5,215 @@ import (
 	"fmt"
 )
 
+var errV41StepRoundState = errors.New("model: invalid V4.1 step round state")
+
+type v41StepRound struct {
+	model                    *Model
+	state                    *v41ForwardState
+	layers                   []*V41AttentionState
+	entries                  []*v41StepRoundEntry
+	pending                  *v41StepRoundEntry
+	baseHistoryLen, capacity int
+	failed, closed, poisoned bool
+}
+
+type v41StepRoundEntry struct {
+	round                        *v41StepRound
+	tx                           *v41StepTransaction
+	ordinal, token, historyLen   int
+	coverage                     *NativeForwardCoverage
+	undo                         func()
+	committed, closed, cleanupOK bool
+}
+
+func (m *Model) beginV41StepRound(st *v41ForwardState, capacity int) (*v41StepRound, error) {
+	if m == nil || st == nil || st.activeStepRound != nil || capacity < 1 || capacity > 32 ||
+		len(st.history) == 0 || m.Cfg.NumLayers < 1 || v41ActivationTraceEnvPath() != "" {
+		return nil, errV41StepRoundState
+	}
+	if err := m.v41ForwardAdmitted(); err != nil {
+		return nil, err
+	}
+	roles := m.v41AttentionRolesCached()
+	layers := make([]*V41AttentionState, m.Cfg.NumLayers)
+	seen := make(map[*V41AttentionState]bool, len(layers)+1)
+	if st.attn != nil {
+		seen[st.attn] = true
+	}
+	for layer := range layers {
+		state := st.layerState(layer)
+		plan, err := v41AttentionPlanFor(m.Cfg, layer, roles)
+		if err != nil || state == nil || seen[state] || state.nextWindowPos != len(st.history) ||
+			state.windowSize <= 0 || len(state.window) != state.windowSize ||
+			(plan.Role != V41AttentionRolePerLayer && plan.Ratio <= 1 && plan.KVSourceLayer < 0) {
+			return nil, errV41StepRoundState
+		}
+		seen[state] = true
+		layers[layer] = state
+	}
+	r := &v41StepRound{model: m, state: st, layers: layers, capacity: capacity,
+		baseHistoryLen: len(st.history), entries: make([]*v41StepRoundEntry, 0, capacity)}
+	st.activeStepRound = r
+	return r, nil
+}
+
+func (r *v41StepRound) ownsState() bool {
+	if r == nil || r.closed || r.model == nil || r.state == nil || r.state.activeStepRound != r {
+		return false
+	}
+	for layer, state := range r.layers {
+		if r.state.layerState(layer) != state {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *v41StepRound) committedCount() int {
+	n := 0
+	for _, entry := range r.entries {
+		if entry.committed {
+			n++
+		}
+	}
+	return n
+}
+
+func (r *v41StepRound) atCommittedBoundary() bool {
+	if len(r.state.history) != r.baseHistoryLen+r.committedCount() {
+		return false
+	}
+	for _, state := range r.layers {
+		if state.nextWindowPos != len(r.state.history) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *v41StepRound) beginStep(id int, scratch *v41ProjScratch) (*v41StepTransaction, error) {
+	if !r.ownsState() || r.failed || r.poisoned || r.pending != nil ||
+		len(r.entries) >= r.capacity || !r.atCommittedBoundary() ||
+		id < 0 || id >= r.model.Cfg.VocabSize || v41ActivationTraceEnvPath() != "" ||
+		(scratch != nil && scratch.activationTrace != nil) {
+		return nil, errV41StepRoundState
+	}
+	entry := &v41StepRoundEntry{round: r, ordinal: len(r.entries), token: id,
+		historyLen: len(r.state.history), coverage: r.state.forwardCoverage}
+	r.entries = append(r.entries, entry)
+	r.pending = entry
+	return r.model.beginV41StepCore(id, r.state, scratch, false, entry)
+}
+
+func (r *v41StepRound) finish(keep int) error {
+	if !r.ownsState() || r.pending != nil || keep < 0 || keep > r.committedCount() ||
+		((r.failed || r.poisoned) && keep != 0) {
+		return errV41StepRoundState
+	}
+	if !r.atCommittedBoundary() {
+		r.poisoned = true
+		return errV41StepRoundState
+	}
+	return r.drain(keep)
+}
+
+// A direct defer r.abort() preserves a non-nil active panic. A wrapping defer must
+// preserve its own primary because recover does not cross that wrapper.
+func (r *v41StepRound) abort() (err error) {
+	primary := recover()
+	if primary != nil {
+		defer func() {
+			_ = recover()
+			panic(primary)
+		}()
+	}
+	if r == nil {
+		return errV41StepRoundState
+	}
+	if r.closed {
+		if r.poisoned {
+			return errV41StepRoundState
+		}
+		return nil
+	}
+	if !r.ownsState() {
+		r.poisoned = true
+		return errV41StepRoundState
+	}
+	return r.drain(0)
+}
+
+func (r *v41StepRound) drain(keep int) (err error) {
+	st, entries, pending := r.state, r.entries, r.pending
+	poisoned, incomplete := r.poisoned, false
+	r.closed, r.poisoned = true, true
+	defer func() {
+		for _, entry := range entries {
+			if !entry.closed || !entry.cleanupOK {
+				poisoned = true
+			}
+			*entry = v41StepRoundEntry{}
+		}
+		r.entries, r.layers, r.pending = nil, nil, nil
+		r.model, r.state = nil, nil
+		if st.activeStepRound != r {
+			poisoned = true
+		}
+		r.poisoned = poisoned
+		if poisoned {
+			err = errV41StepRoundState
+		} else {
+			st.activeStepRound = nil
+		}
+	}()
+	attempt := func(fn func()) {
+		complete := false
+		defer func() {
+			if !complete {
+				incomplete, poisoned = true, true
+			}
+		}()
+		if incomplete {
+			func() {
+				defer func() { _ = recover() }()
+				fn()
+			}()
+		} else {
+			fn()
+		}
+		complete = true
+	}
+	for i := keep; i < len(entries); i++ {
+		entry := entries[i]
+		defer attempt(func() {
+			defer func() {
+				if len(st.history) < entry.historyLen {
+					poisoned = true
+				} else {
+					clear(st.history[entry.historyLen:])
+					st.history = st.history[:entry.historyLen]
+				}
+				st.forwardCoverage = entry.coverage
+			}()
+			if entry.undo != nil {
+				entry.undo()
+			} else if entry.committed {
+				poisoned = true
+			}
+		})
+	}
+	if pending != nil && pending.tx != nil {
+		tx := pending.tx
+		defer attempt(func() {
+			if !tx.closed {
+				tx.close()
+			}
+		})
+		defer attempt(tx.abort)
+	}
+	return nil
+}
+
 // v41StepTransaction is a single-session, single-token continuation. The caller
 // owns the session and its scratch exclusively until finalize or abort. Distinct
 // transactions may be advanced in layer-major order by one device owner; this
@@ -24,12 +233,13 @@ type v41StepTransaction struct {
 	rollback, cleanup func()
 	afterLayer        func(int) error
 	activationCapture *v41StepActivationCapture
+	roundEntry        *v41StepRoundEntry
 }
 
 // beginV41Step performs admission, embedding and journal setup in serial order.
 // Even on failure it returns a closed transaction carrying the rollback stats.
 func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratch) (*v41StepTransaction, error) {
-	return m.beginV41StepCore(id, st, scratch, false)
+	return m.beginV41StepCore(id, st, scratch, false, nil)
 }
 
 // beginV41StepAdmitted reuses full-model admission only within one owned cohort
@@ -37,11 +247,14 @@ func (m *Model) beginV41Step(id int, st *v41ForwardState, scratch *v41ProjScratc
 // retained state, cursor, and transaction checks still run for every lane.
 // It must not be used as a successful-admission cache across calls.
 func (m *Model) beginV41StepAdmitted(id int, st *v41ForwardState, scratch *v41ProjScratch) (*v41StepTransaction, error) {
-	return m.beginV41StepCore(id, st, scratch, true)
+	return m.beginV41StepCore(id, st, scratch, true, nil)
 }
 
-func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjScratch, admitted bool) (tx *v41StepTransaction, err error) {
-	tx = &v41StepTransaction{}
+func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjScratch, admitted bool, entry *v41StepRoundEntry) (tx *v41StepTransaction, err error) {
+	tx = &v41StepTransaction{roundEntry: entry}
+	if entry != nil {
+		entry.tx = tx
+	}
 	stats := &tx.stats
 	var resident *v41MHCResident
 	ready := false
@@ -53,6 +266,12 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	if st == nil {
 		return tx, v41StageErr(v41StageEmbedding, -1,
 			fmt.Errorf("%w: forwardV41Step requires a seeded session state", ErrV41ForwardStage))
+	}
+	if st.activeStepRound != nil && (entry == nil || entry.round != st.activeStepRound || entry.round.model != m || entry.round.state != st || entry.round.pending != entry || entry.ordinal != len(entry.round.entries)-1 || entry.token != id || entry.historyLen != len(st.history)) {
+		return tx, errV41StepRoundState
+	}
+	if entry != nil && (st.activeStepRound != entry.round || entry.round.closed || entry.round.poisoned) {
+		return tx, errV41StepRoundState
 	}
 	st.forwardCoverage = nil
 	if scratch == nil {
@@ -256,6 +475,9 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		rolledBack = true
 	}
 	tx.rollback = rollback
+	if entry != nil {
+		entry.undo = rollback
+	}
 
 	// roleSession reports whether any configured layer resolves to a non-plain
 	// role. A plain-only session keeps the historical post-step release of the
@@ -434,6 +656,9 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			st.attn = nil
 		}
 		stats.Committed = true
+		if entry != nil {
+			entry.committed = true
+		}
 		if tx.activationCapture != nil {
 			tx.activationCapture.stateOnlyCommit = !withLogits
 		}
@@ -634,6 +859,22 @@ func (tx *v41StepTransaction) abort() {
 
 func (tx *v41StepTransaction) close() {
 	tx.closed = true
+	cleanupOK := false
+	defer func() {
+		if entry := tx.roundEntry; entry != nil {
+			entry.closed, entry.cleanupOK, entry.tx = true, cleanupOK, nil
+			if !entry.committed {
+				entry.round.failed = true
+			}
+			if !cleanupOK {
+				entry.round.failed, entry.round.poisoned = true, true
+			}
+			if entry.round.pending == entry {
+				entry.round.pending = nil
+			}
+			tx.roundEntry = nil
+		}
+	}()
 	defer func() {
 		if tx.activationCapture != nil {
 			tx.activationCapture.finish(tx.stats.Committed)
@@ -649,4 +890,5 @@ func (tx *v41StepTransaction) close() {
 	if tx.cleanup != nil {
 		tx.cleanup()
 	}
+	cleanupOK = true
 }
