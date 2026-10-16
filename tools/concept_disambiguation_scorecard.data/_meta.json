@@ -4430,6 +4430,11 @@
           "category": "incidental",
           "reason": "Debug serialization label for positioned VulkanMemoryGuardSnapshot (vulkan-memory-reservation-snapshot); projects the same allocator ledger and introduces no independent guard decision.",
           "token": "memory_guard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local fresh gate-projection output handle inside the paired Q2_K adapter; gate names the expert projection bank, not an admission guard or independent gating policy.",
+          "token": "gateOut"
         }
       ],
       "exclude": [
@@ -4607,6 +4612,7 @@
         "gateDir",
         "gateGitHygieneBypass",
         "gateMicroharnessWitness",
+        "gateOut",
         "gateProse",
         "gateSkew",
         "gateSourcePaths",

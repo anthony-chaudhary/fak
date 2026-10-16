@@ -180,6 +180,11 @@ func (r *vulkanSuccessorRegistry) normalizedBuildCommand(cfg *VulkanConfig) ([]s
 		down := "qualified-header|" + vulkanQualifiedDownChunkStem + "|source_sha256=" + vulkanQualifiedDownChunkSourceSHA + "|header=$REPO/" + vulkanQualifiedDownChunkHeader + "|header_sha256=" + vulkanQualifiedDownChunkHeaderSHA + "|module_sha256=" + vulkanQualifiedDownChunkModuleSHA + "|bytes=2768|output=$REPO/internal/compute/spirv/" + vulkanQualifiedDownChunkStem + ".spv"
 		commands = append(commands[:3:3], append([]string{down}, commands[3:]...)...)
 	}
+	if r.usesQualifiedQ2TokenPair() {
+		commands[0] = "glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered-except-v41_index_scale_bf16-and-v41_routed_swiglu_panel_chunk-and-v41_routed_down_panel_chunk-and-v41_q2k_token_pair}.comp|-o|$REPO/internal/compute/spirv/{registered-except-v41_index_scale_bf16-and-v41_routed_swiglu_panel_chunk-and-v41_routed_down_panel_chunk-and-v41_q2k_token_pair}.spv"
+		pair := "qualified-header|" + vulkanQualifiedQ2TokenPairStem + "|source_sha256=" + vulkanQualifiedQ2TokenPairSourceSHA + "|header=$REPO/" + vulkanQualifiedQ2TokenPairHeader + "|header_sha256=" + vulkanQualifiedQ2TokenPairHeaderSHA + "|module_sha256=" + vulkanQualifiedQ2TokenPairModuleSHA + "|bytes=11796|output=$REPO/internal/compute/spirv/" + vulkanQualifiedQ2TokenPairStem + ".spv"
+		commands = append(commands[:4:4], append([]string{pair}, commands[4:]...)...)
+	}
 
 	hash, err = hashJSON(commands)
 	return commands, hash, err

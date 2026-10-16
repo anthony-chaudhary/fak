@@ -1343,3 +1343,24 @@ serveFullPlanFitTooBig recognizes a typed compute FitError whose verdict is FitT
 Bounded current-state projection of the Vulkan explicit-memory reservation cap: configured limit, live and successful-allocation peak bytes, refusal count, and configuration/accounting validity across every memory heap.
 
 **Distinct from:** Observes the allocator reservation ledger; it is neither an admission decision nor readiness, physical residency, driver-overhead accounting, or proof of target cgroup fit. C ABI, Go value and debug label project this same state.
+
+
+### V41Q2KTokenPairPlan
+
+Immutable paired Q2_K launch geometry embedding validated single-panel geometry and a doubled X workgroup range for two independent output banks using the same three-int32 push ABI.
+
+**Distinct from:** Describes paired launch arithmetic only, unlike the single-output V41Q2KTokenPanelPlan or the constructor that validates and creates this result. It does not record commands or qualify device execution.
+
+
+### PlanV41Q2KTokenPair
+
+Pure constructor reusing Q2_K token-panel shape, row-count and signed byte-bound validation before returning paired geometry with twice the single-panel X workgroup count.
+
+**Distinct from:** Constructs host geometry rather than executing a contraction or checking actual device limits; the paired capability query separately determines native availability.
+
+
+### SupportsV41Q2KTokenPair
+
+Effect-free optional backend capability query for two same-shape Q2_K contractions sharing one input token panel and producing two independent output panels with unchanged per-workgroup arithmetic.
+
+**Distinct from:** Checks selected provider availability and bounded geometry before effects; unlike pure plan construction, it reflects native opt-in, exact module availability and device dispatch limits. It grants no residency, memory budget or speed guarantee.

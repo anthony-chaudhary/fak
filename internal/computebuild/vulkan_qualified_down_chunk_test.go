@@ -82,10 +82,11 @@ func TestVulkanQualifiedDownChunk(t *testing.T) {
 // fak-test:runtime fast est=5ms
 func TestVulkanReceiptV25DownChunk(t *testing.T) {
 	want := append(vulkanRegistryV24.stems(), "v41_routed_down_panel_chunk")
-	if len(want) != 88 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) {
+	if len(want) != 88 || !reflect.DeepEqual(want, vulkanRegistryV25.stems()) {
 		t.Fatal("V25 membership differs")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	id, err := vulkanRegistryV25.identity()
+	schema := VulkanBuildReceiptSchemaV25
 	if err != nil || schema != VulkanBuildReceiptSchemaV25 || id.ID != VulkanShaderRegistryV25ID || id.ModuleCount != 88 {
 		t.Fatal("V25 identity differs")
 	}

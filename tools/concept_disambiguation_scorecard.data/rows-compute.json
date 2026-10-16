@@ -29,7 +29,8 @@
       "distinct_from": [
         "x2-plan-vulkanplan",
         "planv41q2ktokenpanel",
-        "v41q3ktokenpanelplan"
+        "v41q3ktokenpanelplan",
+        "v41q2ktokenpairplan"
       ],
       "aliases": [],
       "grounding": "V41Q2KTokenPanelPlan",

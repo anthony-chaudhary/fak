@@ -42,6 +42,10 @@ func buildVulkanShaders(repoRoot string, stdout io.Writer, compile func(src, dst
 	if err != nil {
 		return err
 	}
+	q2Pair, err := readVulkanQualifiedQ2TokenPair(repoRoot)
+	if err != nil {
+		return err
+	}
 	compiledCount := 0
 	for _, s := range vulkanCurrentRegistry.stems() {
 		src := filepath.Join(shaderSrc, s+".comp")
@@ -51,6 +55,13 @@ func buildVulkanShaders(repoRoot string, stdout io.Writer, compile func(src, dst
 			return fmt.Errorf("required shader source missing: %s", src)
 		}
 
+		if s == vulkanQualifiedQ2TokenPairStem {
+			if err := writeVulkanQualifiedQ2TokenPair(dst, q2Pair); err != nil {
+				return err
+			}
+			compiledCount++
+			continue
+		}
 		if s == vulkanQualifiedDownChunkStem {
 			if err := writeVulkanQualifiedDownChunk(dst, downChunk); err != nil {
 				return err

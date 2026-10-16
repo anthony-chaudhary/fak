@@ -506,6 +506,12 @@ from an ids buffer) from `ggml/src/ggml-vulkan/ggml-vulkan.cpp` and
 `ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl` at llama.cpp revision
 `ccdbe290533f68154ede46e0618622eebcb6c070`:
 https://github.com/ggml-org/llama.cpp/blob/ccdbe290533f68154ede46e0618622eebcb6c070/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl
+The optional paired gate/up token kernel
+`internal/compute/shaders/v41_q2k_token_pair.comp` reuses the existing
+`v41_q2k_token_panel.comp` quantized decode, ordered accumulation and reduction
+from this same pinned MIT prior art. Its two workgroup-X banks select separate
+weight and output buffers without changing the per-workgroup arithmetic.
+
 The ids carry ring slots remapped through a per-layer slot map, after
 `src/llama-moe-cache.h` from llama.cpp PR #29887 (merge
 `d6cf9acb25e6c657d6c6a4645ab7b69fce119995`).

@@ -1,0 +1,164 @@
+#version 450
+
+// Optional paired gate/up same-expert token tile.
+// Concatenated workgroup-X banks retain identical per-workgroup arithmetic,
+// accumulator count and shared-memory size; no cross-bank reduction or fusion.
+// Experimental same-expert token tile. Adapted from fak's q2k_matvec mode 0
+// and v41_q2k_matvec_id Q2K_BANK arithmetic. Prior art: llama.cpp multi-column
+// GEMV, MIT, ggml authors, pinned ccdbe290533f68154ede46e0618622eebcb6c070:
+// ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec.comp and mul_mat_vec_base.glsl.
+// Quant decode is outside the token loop; each activation and its ordered sum
+// are shared by the two output rows. Each row/token retains its own ordered
+// sums and the same 64-lane reduction tree. The paired sums and weight metadata
+// increase register liveness; no full four-plane activation panel is retained.
+// Select each ordered scale byte directly from its row's packed words instead
+// of keeping two private four-element scale arrays.
+// No activation/BF16/status policy is changed by this contraction primitive.
+layout(local_size_x = 64) in;
+
+const uint OUT_ROWS = 2u;
+const uint LANES = 64u;
+const uint MAX_TOKENS = 8u;
+// Loaded-module marker: only this bounded Y-grid ABI may admit larger panels.
+layout(constant_id = 31) const uint Q2_TOKEN_PAIR_ABI = 0x51325031u;
+layout(std430, set = 0, binding = 0) readonly buffer W { uint raw[]; };
+layout(std430, set = 0, binding = 3) readonly buffer W1 { uint raw1[]; };
+layout(std430, set = 0, binding = 4) writeonly buffer Y1 { float y1[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X { vec4 x4[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+
+shared float red[MAX_TOKENS * OUT_ROWS * LANES];
+
+vec4 bytesOf(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+
+uint weightWord(bool second, uint index) { return second ? raw1[index] : raw[index]; }
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint bankGroups = (uint(pc.outDim) + OUT_ROWS - 1u) / OUT_ROWS;
+    bool second = gl_WorkGroupID.x >= bankGroups;
+    uint rowBase = (gl_WorkGroupID.x - (second ? bankGroups : 0u)) * OUT_ROWS;
+    uint outDim = uint(pc.outDim), inDim = uint(pc.inDim);
+    bool hasRow1 = rowBase + 1u < outDim;
+    uint totalTokens = uint(pc.tokens);
+    uint tokenBase = gl_WorkGroupID.y * MAX_TOKENS;
+    if (Q2_TOKEN_PAIR_ABI != 0x51325031u || totalTokens < 2u || totalTokens > 64u || tokenBase >= totalTokens) return;
+    uint tokens = min(MAX_TOKENS, totalTokens - tokenBase), nsb = inDim / 256u;
+    uint wordsPerRow = nsb * 21u;
+    uint t16 = tid & 15u, h = t16 >> 3u, s = (t16 >> 2u) & 1u;
+    uint lq = (t16 & 3u) * 4u;
+    precise float acc[MAX_TOKENS * OUT_ROWS];
+    for (uint t = 0u; t < tokens; ++t) {
+        for (uint r = 0u; r < OUT_ROWS; ++r) acc[t * OUT_ROWS + r] = 0.0;
+    }
+    for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
+        if (rowBase >= outDim) break;
+        uint baseRow0 = rowBase * wordsPerRow + sb * 21u;
+        uint qRow0 = weightWord(second, baseRow0 + 4u + t16);
+        uint sc0Row0 = weightWord(second, baseRow0 + h * 2u);
+        uint sc1Row0 = weightWord(second, baseRow0 + h * 2u + 1u);
+        vec2 ddRow0 = unpackHalf2x16(weightWord(second, baseRow0 + 20u));
+        uint qRow1;
+        vec2 ddRow1;
+        uint sc0Row1;
+        uint sc1Row1;
+        if (hasRow1) {
+            uint baseRow1 = (rowBase + 1u) * wordsPerRow + sb * 21u;
+            qRow1 = weightWord(second, baseRow1 + 4u + t16);
+            sc0Row1 = weightWord(second, baseRow1 + h * 2u);
+            sc1Row1 = weightWord(second, baseRow1 + h * 2u + 1u);
+            ddRow1 = unpackHalf2x16(weightWord(second, baseRow1 + 20u));
+        }
+        precise float sumRow0[MAX_TOKENS];
+        precise float sumRow1[MAX_TOKENS];
+        for (uint t = 0u; t < tokens; ++t) {
+            sumRow0[t] = 0.0;
+            sumRow1[t] = 0.0;
+        }
+        for (uint j = 0u; j < 4u; ++j) {
+            uint scaleShift = ((j & 1u) * 2u + s) * 8u;
+            uint scjRow0 = ((j < 2u ? sc0Row0 : sc1Row0) >> scaleShift) & 255u;
+            vec4 qvRow0 = bytesOf((qRow0 >> (2u * j)) & 0x03030303u);
+            precise float dlRow0 = ddRow0.x * float(scjRow0 & 15u);
+            precise float mlRow0 = ddRow0.y * float(scjRow0 >> 4u);
+            vec4 qvRow1;
+            precise float dlRow1;
+            precise float mlRow1;
+            if (hasRow1) {
+                uint scjRow1 = ((j < 2u ? sc0Row1 : sc1Row1) >> scaleShift) & 255u;
+                qvRow1 = bytesOf((qRow1 >> (2u * j)) & 0x03030303u);
+                dlRow1 = ddRow1.x * float(scjRow1 & 15u);
+                mlRow1 = ddRow1.y * float(scjRow1 >> 4u);
+            }
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
+            for (uint t = 0u; t < tokens; ++t) {
+                vec4 xv = x4[(tokenBase + t) * (inDim >> 2u) + idx];
+                precise float x01 = xv.x + xv.y;
+                precise float x012 = x01 + xv.z;
+                precise float xsum = x012 + xv.w;
+                precise float q0Row0 = qvRow0.x * xv.x;
+                precise float q1Row0 = qvRow0.y * xv.y;
+                precise float q2Row0 = qvRow0.z * xv.z;
+                precise float q3Row0 = qvRow0.w * xv.w;
+                precise float q01Row0 = q0Row0 + q1Row0;
+                precise float q012Row0 = q01Row0 + q2Row0;
+                precise float qdotRow0 = q012Row0 + q3Row0;
+                precise float scaledDotRow0 = dlRow0 * qdotRow0;
+                precise float minTermRow0 = mlRow0 * xsum;
+                precise float termRow0 = scaledDotRow0 - minTermRow0;
+                precise float nextSumRow0 = sumRow0[t] + termRow0;
+                sumRow0[t] = nextSumRow0;
+                if (hasRow1) {
+                    precise float q0Row1 = qvRow1.x * xv.x;
+                    precise float q1Row1 = qvRow1.y * xv.y;
+                    precise float q2Row1 = qvRow1.z * xv.z;
+                    precise float q3Row1 = qvRow1.w * xv.w;
+                    precise float q01Row1 = q0Row1 + q1Row1;
+                    precise float q012Row1 = q01Row1 + q2Row1;
+                    precise float qdotRow1 = q012Row1 + q3Row1;
+                    precise float scaledDotRow1 = dlRow1 * qdotRow1;
+                    precise float minTermRow1 = mlRow1 * xsum;
+                    precise float termRow1 = scaledDotRow1 - minTermRow1;
+                    precise float nextSumRow1 = sumRow1[t] + termRow1;
+                    sumRow1[t] = nextSumRow1;
+                }
+            }
+        }
+        for (uint t = 0u; t < tokens; ++t) {
+            uint accIdxRow0 = t * OUT_ROWS;
+            precise float nextAccRow0 = acc[accIdxRow0] + sumRow0[t];
+            acc[accIdxRow0] = nextAccRow0;
+            if (hasRow1) {
+                uint accIdxRow1 = t * OUT_ROWS + 1u;
+                precise float nextAccRow1 = acc[accIdxRow1] + sumRow1[t];
+                acc[accIdxRow1] = nextAccRow1;
+            }
+        }
+    }
+    for (uint t = 0u; t < tokens; ++t) {
+        for (uint r = 0u; r < OUT_ROWS; ++r) red[(t * OUT_ROWS + r) * LANES + tid] = acc[t * OUT_ROWS + r];
+    }
+    barrier();
+    for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) {
+            for (uint t = 0u; t < tokens; ++t) {
+                for (uint r = 0u; r < OUT_ROWS; ++r) {
+                    uint off = (t * OUT_ROWS + r) * LANES + tid;
+                    precise float reduced = red[off] + red[off + stride];
+                    red[off] = reduced;
+                }
+            }
+        }
+        barrier();
+    }
+    if (tid < OUT_ROWS && rowBase + tid < outDim) {
+        for (uint t = 0u; t < tokens; ++t) {
+            uint outputIndex = (tokenBase + t) * outDim + rowBase + tid;
+            if (second) y1[outputIndex] = red[(t * OUT_ROWS + tid) * LANES];
+            else y[outputIndex] = red[(t * OUT_ROWS + tid) * LANES];
+        }
+    }
+}

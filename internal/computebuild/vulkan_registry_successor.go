@@ -66,6 +66,7 @@ const (
 	VulkanShaderRegistryV24ID = "fak.vulkan-shader-registry.v24.current87"
 	// VulkanShaderRegistryV25ID adds canonical row-local down publication chunks.
 	VulkanShaderRegistryV25ID = "fak.vulkan-shader-registry.v25.current88"
+	VulkanShaderRegistryV26ID = "fak.vulkan-shader-registry.v26.current89"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -117,9 +118,11 @@ var (
 
 	vulkanRegistryV25 = &vulkanSuccessorRegistry{version: "V25", schema: VulkanBuildReceiptSchemaV25, id: VulkanShaderRegistryV25ID, count: 88, parent: vulkanRegistryV24, added: []string{"v41_routed_down_panel_chunk"}}
 
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25}
+	vulkanRegistryV26 = &vulkanSuccessorRegistry{version: "V26", schema: VulkanBuildReceiptSchemaV26, id: VulkanShaderRegistryV26ID, count: 89, parent: vulkanRegistryV25, added: []string{"v41_q2k_token_pair"}}
+
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV25
+	vulkanCurrentRegistry = vulkanRegistryV26
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

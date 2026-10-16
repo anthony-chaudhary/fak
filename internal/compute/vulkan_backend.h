@@ -565,6 +565,9 @@ int fvk_have_v41_routed_id(void);
 /* Experimental V18 Q2_K same-weight 2/4/8-token panel. Three disjoint output
  * bindings W/X/Y, push ABI int32 out,in,tokens. No numeric status or host read:
  * the caller retains its activation/publication checks. Optional and default-off. */
+int fvk_have_v41_q2k_token_pair(void);
+int fvk_v41_q2k_token_pair_shape(int out, int in, int tokens);
+int fvk_v41_q2k_token_pair_f32(const void* gate, const void* up, const void* input, void* gateOut, void* upOut, int out, int in, int tokens);
 int fvk_have_v41_q2k_token_panel(void);
 int fvk_v41_q2k_token_panel_shape(int out, int in, int tokens);
 int fvk_v41_q2k_token_panel_f32(const void *dW, const void *dX, void *dY, int out, int in, int tokens);
