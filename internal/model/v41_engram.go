@@ -134,6 +134,13 @@ func (s *V41EngramHashState) Hash(tokens []int, mask []bool) ([]uint32, error) {
 	if s == nil {
 		return nil, fmt.Errorf("model: nil V4.1 Engram hash state")
 	}
+	return s.hashLayers(tokens, mask, 0, len(s.layout.Rows))
+}
+
+// hashLayers computes only the requested contiguous layer range. Cold forwards
+// consume one layer at a time; hashing other layers here would repeat all-layer
+// work at every Engram injection. Hash retains the public all-layer contract.
+func (s *V41EngramHashState) hashLayers(tokens []int, mask []bool, first, end int) ([]uint32, error) {
 	layout := s.layout
 	if mask != nil && len(mask) != len(tokens) {
 		return nil, fmt.Errorf("model: V4.1 Engram mask length %d != token length %d", len(mask), len(tokens))
@@ -144,11 +151,16 @@ func (s *V41EngramHashState) Hash(tokens []int, mask []bool) ([]uint32, error) {
 		}
 	}
 
+	if first < 0 || first >= end || end > len(layout.Rows) {
+		return nil, fmt.Errorf("model: invalid V4.1 Engram hash layer range [%d,%d)", first, end)
+	}
+
 	cols := (layout.MaxNgramSize - 1) * layout.HeadsPerNgram
-	if len(tokens) > math.MaxInt/len(layout.Rows) || len(tokens)*len(layout.Rows) > math.MaxInt/cols {
+	layers := end - first
+	if len(tokens) > math.MaxInt/layers || len(tokens)*layers > math.MaxInt/cols {
 		return nil, fmt.Errorf("model: V4.1 Engram output geometry overflows")
 	}
-	out := make([]uint32, 0, len(tokens)*len(layout.Rows)*cols)
+	out := make([]uint32, 0, len(tokens)*layers*cols)
 	for pos, token := range tokens {
 		current := int64(layout.TokenMap[token])
 		if mask != nil && !mask[pos] {
@@ -168,7 +180,7 @@ func (s *V41EngramHashState) Hash(tokens []int, mask []bool) ([]uint32, error) {
 				ids[shift] = uint32(id)
 			}
 		}
-		for layer := range layout.Rows {
+		for layer := first; layer < end; layer++ {
 			hash := uint64(ids[0]) * layout.Multipliers[layer][0]
 			var offset uint64
 			for ngram := 1; ngram < layout.MaxNgramSize; ngram++ {

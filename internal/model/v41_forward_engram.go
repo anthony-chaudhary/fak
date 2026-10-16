@@ -344,15 +344,9 @@ func (m *Model) v41EngramLayerRows(l int, seq []int) (v41EngramGeometry, []uint3
 		return v41EngramGeometry{}, nil, err
 	}
 	stage, cacheIdx := geometry.stage, geometry.cacheIdx
-	allRows, err := stage.hashPrototype.Clone().Hash(seq, nil)
+	layerRows, err := stage.hashPrototype.Clone().hashLayers(seq, nil, cacheIdx, cacheIdx+1)
 	if err != nil {
 		return v41EngramGeometry{}, nil, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
-	}
-	cols, layers := stage.columns, len(stage.layout.Rows)
-	layerRows := make([]uint32, 0, len(seq)*cols)
-	for t := range seq {
-		base := t*layers*cols + cacheIdx*cols
-		layerRows = append(layerRows, allRows[base:base+cols]...)
 	}
 	return geometry, layerRows, nil
 }
@@ -529,14 +523,13 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 			if full {
 				hs = streams[t][s]
 			}
-			key := make([]float32, H)
 			var h2, k2, dotSum float32
 			for i := 0; i < H; i++ {
-				key[i] = v41BF16(projected[s*H+i])
+				key := v41BF16(projected[s*H+i])
 				hi := hs[i]
 				h2 += float32(hi * hi)
-				k2 += float32(key[i] * key[i])
-				dotSum += float32(float32(hi*(qNorm[s*H+i]*kNorm[s*H+i])) * key[i])
+				k2 += float32(key * key)
+				dotSum += float32(float32(hi*(qNorm[s*H+i]*kNorm[s*H+i])) * key)
 			}
 			dot := dotSum * rsqrtf(h2/float32(H)+eps) * rsqrtf(k2/float32(H)+eps) * rsqrtf(float32(H))
 			gate := float32(1) / (1 + expf(-copysignf(sqrtf(maxf(absf(dot), 1e-6)), dot)))
