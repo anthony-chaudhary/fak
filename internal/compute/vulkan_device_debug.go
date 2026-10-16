@@ -1474,3 +1474,9 @@ func (v *vulkanBackend) VulkanRetainedReleaseSnapshot(capacity int) VulkanRetain
 	}
 	return validateVulkanRetainedReleaseSnapshot(s, capacity, count, uint32(summary.truncated), int(result))
 }
+
+// VulkanRetainedReleaseSummary is the bounded optional text reporter used by the
+// serving planner on explicit debug scrapes. Detailed callers may use the typed API.
+func (v *vulkanBackend) VulkanRetainedReleaseSummary() string {
+	return v.VulkanRetainedReleaseSnapshot(128).Summary()
+}
