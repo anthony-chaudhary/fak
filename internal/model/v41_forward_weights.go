@@ -1327,13 +1327,15 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 			defer func() { recovered = recover() }()
 			result, outcome, cause = func() ([]float32, v41DenseProjectionOutcome, error) {
 				run := func() (values []float32, err error) {
+					bodyReturned := false
 					var owned []compute.Tensor
 					var loan *v41ProjectionLoan
 					if continuation != nil {
 						loan = &v41ProjectionLoan{backend: s.Backend}
 						defer func() {
-							if continuation.panicPresent {
-								// Recover only secondary release faults, never the active Goexit.
+							if !bodyReturned || continuation.panicPresent {
+								// Recover only secondary release faults; leave the body's
+								// panic or Goexit active.
 								defer func() { _ = recover() }()
 								loan.release()
 								return
@@ -1348,99 +1350,103 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 							}
 						}()
 					}
-					if head {
-						defer v41ReleaseHeadTensors(s.Backend, &owned, &err)
-					}
-					weight := stage()
-					if loan != nil {
-						loan.protected = weight.Buf()
-					}
-					if guarded && dtype == compute.Q4_K {
-						q := s.M.q4kw[name]
-						if q4kHostCopyReleasable(s, q, weight.Ready()) {
-							q.raw = nil
+					values, err = func() (values []float32, err error) {
+						if head {
+							defer v41ReleaseHeadTensors(s.Backend, &owned, &err)
 						}
-					}
-					input := panel
-					if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
-						input = make([]float32, len(panel))
+						weight := stage()
+						if loan != nil {
+							loan.protected = weight.Buf()
+						}
+						if guarded && dtype == compute.Q4_K {
+							q := s.M.q4kw[name]
+							if q4kHostCopyReleasable(s, q, weight.Ready()) {
+								q.raw = nil
+							}
+						}
+						input := panel
+						if s.M.prism != nil && s.M.prism.weightWidth[name] != 0 {
+							input = make([]float32, len(panel))
+							for row := 0; row < rows; row++ {
+								copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
+							}
+						}
+						if head || guarded {
+							for _, v := range input {
+								if !finite32(v) {
+									opStage = "payload"
+									return nil, errV41ProjectionResult
+								}
+							}
+						}
+						shape := []int{in}
+						if rows > 1 {
+							shape = []int{rows, in}
+						}
+						opStage = "activation upload"
+						x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
+						if loan != nil {
+							if !loan.own(x) {
+								return nil, errV41ProjectionResult
+							}
+						} else if head {
+							owned = append(owned, x)
+						} else {
+							defer s.Backend.Free(x)
+						}
+						uploaded = int64(len(input)) * 4
+						opStage = "matmul"
+						var y compute.Tensor
+						if rows == 1 {
+							y = s.Backend.MatMul(weight, x)
+						} else {
+							y = s.Backend.BatchedMatMul(weight, x, rows)
+						}
+						if loan != nil {
+							if !loan.own(y) {
+								return nil, errV41ProjectionResult
+							}
+						} else if head {
+							owned = append(owned, y)
+						} else {
+							defer s.Backend.Free(y)
+						}
+						if continuation != nil {
+							if rows != 1 || leaf != "ffn.gate.weight" || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
+								return nil, errV41ProjectionResult
+							}
+							continuation.invoke(y, loan)
+							return nil, nil
+						}
+						opStage = "readback"
+						values = s.Backend.Read(y)
+						readback = int64(len(values)) * 4
+						want, ok := checkedMulInt(rows, out)
+						if !ok || len(values) != want {
+							return nil, errV41ProjectionResult
+						}
+						if head || guarded {
+							for _, v := range values {
+								if !finite32(v) {
+									return nil, errV41ProjectionResult
+								}
+							}
+						}
+						opStage = "lora"
 						for row := 0; row < rows; row++ {
-							copy(input[row*in:(row+1)*in], s.M.prismProjectInput(name, panel[row*in:(row+1)*in]))
+							s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
 						}
-					}
-					if head || guarded {
-						for _, v := range input {
-							if !finite32(v) {
-								opStage = "payload"
-								return nil, errV41ProjectionResult
+						if head || guarded {
+							for _, v := range values {
+								if !finite32(v) {
+									return nil, errV41ProjectionResult
+								}
 							}
 						}
-					}
-					shape := []int{in}
-					if rows > 1 {
-						shape = []int{rows, in}
-					}
-					opStage = "activation upload"
-					x := s.uploadHostF32(shape, input, compute.MemoryActivation, "V4.1 dense projection activation")
-					if loan != nil {
-						if !loan.own(x) {
-							return nil, errV41ProjectionResult
-						}
-					} else if head {
-						owned = append(owned, x)
-					} else {
-						defer s.Backend.Free(x)
-					}
-					uploaded = int64(len(input)) * 4
-					opStage = "matmul"
-					var y compute.Tensor
-					if rows == 1 {
-						y = s.Backend.MatMul(weight, x)
-					} else {
-						y = s.Backend.BatchedMatMul(weight, x, rows)
-					}
-					if loan != nil {
-						if !loan.own(y) {
-							return nil, errV41ProjectionResult
-						}
-					} else if head {
-						owned = append(owned, y)
-					} else {
-						defer s.Backend.Free(y)
-					}
-					if continuation != nil {
-						if rows != 1 || leaf != "ffn.gate.weight" || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
-							return nil, errV41ProjectionResult
-						}
-						continuation.invoke(y, loan)
-						return nil, nil
-					}
-					opStage = "readback"
-					values = s.Backend.Read(y)
-					readback = int64(len(values)) * 4
-					want, ok := checkedMulInt(rows, out)
-					if !ok || len(values) != want {
-						return nil, errV41ProjectionResult
-					}
-					if head || guarded {
-						for _, v := range values {
-							if !finite32(v) {
-								return nil, errV41ProjectionResult
-							}
-						}
-					}
-					opStage = "lora"
-					for row := 0; row < rows; row++ {
-						s.M.loraApply(name, panel[row*in:(row+1)*in], values[row*out:(row+1)*out])
-					}
-					if head || guarded {
-						for _, v := range values {
-							if !finite32(v) {
-								return nil, errV41ProjectionResult
-							}
-						}
-					}
-					return values, nil
+						return values, nil
+					}()
+					bodyReturned = true
+					return
 				}
 				var err error
 				result, err = run()
