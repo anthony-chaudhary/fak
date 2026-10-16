@@ -873,8 +873,8 @@ func servingOursVsSGLangTax(tracks []ServingTrackResult) ServingTaxReport {
 		"itl_ms":           servingTaxFromQuantile(ours.Stats.ITLMillis, raw.Stats.ITLMillis, "ms", "p50 latency missing"),
 		"tpot_ms":          servingTaxFromQuantile(ours.Stats.TPOTMillis, raw.Stats.TPOTMillis, "ms", "p50 latency missing"),
 		"end_to_end_ms":    servingTaxFromQuantile(ours.Stats.EndToEndMillis, raw.Stats.EndToEndMillis, "ms", "p50 latency missing"),
-		"throughput_tok_s": servingTaxFromScalar(ours.Stats.ThroughputTokensS, raw.Stats.ThroughputTokensS, "throughput missing"),
-		"goodput_rps":      servingTaxFromScalar(ours.Stats.GoodputRPS, raw.Stats.GoodputRPS, "goodput missing"),
+		"throughput_tok_s": servingThroughputTax(ours.Stats, raw.Stats),
+		"goodput_rps":      servingTaxFromScalar(ours.Stats.GoodputRPS, raw.Stats.GoodputRPS, "requests/s", "goodput missing"),
 	}
 	for _, metric := range report.Metrics {
 		if metric.Status == "measured" {
@@ -899,10 +899,25 @@ func servingTaxFromQuantile(ours, raw QuantileMetric, unit, reason string) Servi
 	return servingTaxValues(ours.P50, raw.P50, unit, reason)
 }
 
-func servingTaxFromScalar(ours, raw ScalarMetric, reason string) ServingTaxMetric {
-	unit := ours.Unit
-	if unit == "" {
-		unit = raw.Unit
+// servingThroughputTax shares the sweep evaluator's unit/basis contract. Raw
+// track observations remain available even when their comparison is unavailable.
+func servingThroughputTax(ours, raw ServingStats) ServingTaxMetric {
+	if !validServingSweepThroughputPair(ours.ThroughputTokensS.Unit, ours.TokenCountBasis) ||
+		!validServingSweepThroughputPair(raw.ThroughputTokensS.Unit, raw.TokenCountBasis) {
+		return ServingTaxMetric{Status: "not_measured", Reason: "throughput requires a recognized unit and matching non-mixed token count basis"}
+	}
+	if ours.ThroughputTokensS.Unit != raw.ThroughputTokensS.Unit || ours.TokenCountBasis != raw.TokenCountBasis {
+		return ServingTaxMetric{Status: "not_measured", Reason: "throughput unit or token count basis differs between tracks"}
+	}
+	return servingTaxFromScalar(ours.ThroughputTokensS, raw.ThroughputTokensS, ours.ThroughputTokensS.Unit, "throughput missing")
+}
+
+func servingTaxFromScalar(ours, raw ScalarMetric, unit, reason string) ServingTaxMetric {
+	if unit == "" || ours.Unit != unit || raw.Unit != unit {
+		return ServingTaxMetric{Status: "not_measured", Reason: "scalar metric unit is missing or incompatible"}
+	}
+	if ours.Status != "measured" || raw.Status != "measured" {
+		return ServingTaxMetric{Status: "not_measured", Unit: unit, Reason: reason}
 	}
 	return servingTaxValues(ours.Value, raw.Value, unit, reason)
 }
