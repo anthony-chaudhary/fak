@@ -7,7 +7,10 @@
 
 package compute
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // --- Wave32 Cooperative Matrix (VK_KHR_cooperative_matrix) Validation on gfx1151 ---
 
@@ -75,8 +78,9 @@ type VulkanWave32CoopMatValidationReport struct {
 	Reason                 string  `json:"reason,omitempty"`
 }
 
-// DefaultStrixHaloVulkanDeviceProperties constructs canonical Vulkan device properties
-// for AMD Strix Halo (gfx1151, Radeon 8060S) in Wave32 mode.
+// DefaultStrixHaloVulkanDeviceProperties constructs a reference capability description
+// for AMD Strix Halo (gfx1151, Radeon 8060S) in Wave32 mode. It does not observe a
+// device or supply measured throughput; validation requires an explicit observation.
 func DefaultStrixHaloVulkanDeviceProperties() VulkanDeviceProperties {
 	return VulkanDeviceProperties{
 		DeviceName:           "AMD Radeon 8060S Graphics (gfx1151)",
@@ -107,8 +111,7 @@ func DefaultStrixHaloVulkanDeviceProperties() VulkanDeviceProperties {
 				Scope:                  VulkanScopeSubgroupKHR,
 			},
 		},
-		LDSBanks:                 StrixHaloLDSBanks,
-		MeasuredPrefillTokPerSec: 352.8,
+		LDSBanks: StrixHaloLDSBanks,
 	}
 }
 
@@ -228,15 +231,14 @@ func ValidateVulkanWave32CoopMat(props VulkanDeviceProperties) (*VulkanWave32Coo
 	}
 	rep.BitIdentical = true
 
-	// 7. Whole-sequence prefill throughput check (>= 350.0 tok/s on bare metal)
-	// On AMD Strix Halo (gfx1151, 40 CUs) at Wave32 WMMA with Pad-2 LDS alignment:
-	// Measured baseline is 352.8 tok/s for Q4_K / Q8_0 models.
-	const benchmarkPrefillTokPerSec = 352.8
-	if props.MeasuredPrefillTokPerSec > 0 {
-		rep.PrefillTokPerSec = props.MeasuredPrefillTokPerSec
-	} else {
-		rep.PrefillTokPerSec = benchmarkPrefillTokPerSec
+	// 7. Check the supplied observation, never a reference benchmark substituted
+	// for missing evidence. This validates the number, not its physical provenance.
+	measured := props.MeasuredPrefillTokPerSec
+	if math.IsNaN(measured) || math.IsInf(measured, 0) || measured <= 0 {
+		rep.Reason = "prefill throughput observation must be finite and positive"
+		return rep, fmt.Errorf("vulkan: %s", rep.Reason)
 	}
+	rep.PrefillTokPerSec = measured
 	rep.WholeSequencePrefillOK = rep.PrefillTokPerSec >= StrixHaloMinPrefillTokPerSec
 	if !rep.WholeSequencePrefillOK {
 		rep.Reason = fmt.Sprintf("prefill throughput %.1f tok/s below minimum threshold %.1f tok/s", rep.PrefillTokPerSec, StrixHaloMinPrefillTokPerSec)
@@ -252,12 +254,6 @@ func (v *vulkanBackend) ValidateWave32CooperativeMatrix(props *VulkanDevicePrope
 	if props != nil {
 		return ValidateVulkanWave32CoopMat(*props)
 	}
-	p := DefaultStrixHaloVulkanDeviceProperties()
-	if v != nil && v.tier != "" {
-		p.DeviceName = v.tier
-		if !isStrixHaloArch(v.tier) {
-			p.Arch = v.tier
-		}
-	}
-	return ValidateVulkanWave32CoopMat(p)
+	rep := &VulkanWave32CoopMatValidationReport{Reason: "explicit device properties and throughput observation required"}
+	return rep, fmt.Errorf("vulkan: %s", rep.Reason)
 }
