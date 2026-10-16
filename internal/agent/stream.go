@@ -924,6 +924,8 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		timings   *Timings
 		model     string
 		finish    string
+		selected  bool
+		choiceErr error
 	)
 	// Idle-read deadline: an upstream that opens the stream then goes silent (a transient
 	// overload / "API issue") fails in ≤streamStallTimeout() rather than blocking the
@@ -966,10 +968,44 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		}
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// Keep heartbeat tolerance, but a valid choice envelope with an invalid
+			// index must not disappear and let a later DONE certify partial output.
+			var envelope struct {
+				Choices []struct {
+					Index json.RawMessage `json:"index"`
+				} `json:"choices"`
+			}
+			if json.Unmarshal([]byte(data), &envelope) == nil {
+				for _, ch := range envelope.Choices {
+					var index *int
+					if len(ch.Index) > 0 && json.Unmarshal(ch.Index, &index) != nil && choiceErr == nil {
+						choiceErr = fmt.Errorf("planner: %s: %w: invalid choice index", call.adapter.Provider(), ErrUpstreamIncompleteStream)
+					}
+				}
+			}
 			continue // tolerate a keep-alive or non-JSON heartbeat line
 		}
 		if serr := parseStreamErrorFrame(chunk.Error); serr != nil {
 			return nil, serr
+		}
+		// A Completion represents choice zero, never a concatenation of alternatives.
+		// Validate the entire frame before releasing any selected fragment. Keep a
+		// schema refusal latched while retaining provider/read error precedence.
+		seen := make(map[int]bool, len(chunk.Choices))
+		for _, ch := range chunk.Choices {
+			i := 0 // Legacy singleton chunks may omit the index.
+			if ch.Index != nil {
+				i = *ch.Index
+			}
+			if i < 0 || (completionProof.choices > 0 && i >= completionProof.choices) || seen[i] || (ch.Index == nil && len(chunk.Choices) > 1) {
+				if choiceErr == nil {
+					choiceErr = fmt.Errorf("planner: %s: %w: invalid or ambiguous choice index", call.adapter.Provider(), ErrUpstreamIncompleteStream)
+				}
+			}
+			seen[i] = true
+		}
+		if choiceErr != nil {
+			continue
 		}
 		if openAIChunkAdvancesTurn(chunk) {
 			promptProgress.enabled = false // prefill evidence cannot extend generation
@@ -992,6 +1028,12 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		for _, ch := range chunk.Choices {
 			if ch.FinishReason != "" {
 				completionProof.finish(ch.Index)
+			}
+			if ch.Index != nil && *ch.Index != 0 {
+				continue
+			}
+			selected = true
+			if ch.FinishReason != "" {
 				finish = ch.FinishReason
 			}
 			if ch.Delta.Content != "" {
@@ -1035,7 +1077,10 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		return nil, fmt.Errorf("planner: %s: stream read: %w", call.adapter.Provider(), err)
 	}
 
-	if !completionProof.complete() {
+	if choiceErr != nil {
+		return nil, choiceErr
+	}
+	if !selected || !completionProof.complete() {
 		return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), ErrUpstreamIncompleteStream)
 	}
 
