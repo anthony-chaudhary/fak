@@ -60,102 +60,112 @@ func (s *Session) v41RoutedExpertFunc() v41RoutedExpertFunc {
 		}
 		// Admission stages native expert weights, so its failures belong to this
 		// selected callback, like the GEMM, activation and readback failures.
-		defer func() {
-			if r := recover(); r != nil {
-				err, isErr := r.(error)
-				if isErr {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41RoutedExpertError, closeFailure(err)
-						return
-					}
+		convertPanic := func(r any) {
+			err, isErr := r.(error)
+			if isErr {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
 				}
-				if converted, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if isErr {
-						converted = err
-					}
-					result, outcome, cause = nil, v41RoutedExpertError, closeFailure(converted)
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
+					result, outcome, cause = nil, v41RoutedExpertError, closeFailure(err)
 					return
 				}
-				if !isErr {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if converted, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if isErr {
+					converted = err
 				}
-				closeFailure(err)
-				panic(r)
+				result, outcome, cause = nil, v41RoutedExpertError, closeFailure(converted)
+				return
 			}
+			if !isErr {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
+		}
+		var recovered any
+		completed := false
+		func() {
+			defer func() { recovered = recover() }()
+			result, outcome, cause = func() ([]float32, v41RoutedExpertOutcome, error) {
+				if H <= 0 || I <= 0 || len(x) != H || !finite32(weight) {
+					return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+				}
+				gateName := layerName(layer, stem+".w1.weight")
+				upName := layerName(layer, stem+".w3.weight")
+				downName := layerName(layer, stem+".w2.weight")
+				if s.M.has(downName[:len(downName)-len("weight")] + "bias") {
+					return nil, v41RoutedExpertDeclined, nil
+				}
+				gateW, releaseGate, upW, releaseUp, input, ok := expertInputDeviceAdmitted(s, gateName, upName, x, H)
+				if !ok {
+					return nil, v41RoutedExpertDeclined, nil
+				}
+				defer releaseGate()
+				defer releaseUp()
+				downW, releaseDown, ok := s.q4kExpertDownDeviceWeight(downName)
+				if !ok {
+					return nil, v41RoutedExpertDeclined, nil
+				}
+				defer releaseDown()
+				opened := s.M.v41NowNanos()
+				xd := s.uploadHostF32([]int{H}, input, compute.MemoryActivation, "moe expert gate/up activation")
+				defer s.Backend.Free(xd)
+				g := s.Backend.MatMul(gateW, xd)
+				defer s.Backend.Free(g)
+				u := s.Backend.MatMul(upW, xd)
+				defer s.Backend.Free(u)
+				stage = "activation"
+				activation, err := op.V41RoutedSwiGLU(g, u, limit, weight)
+				var fault *compute.V41RoutedSwiGLUFault
+				if errors.As(err, &fault) {
+					// A numeric verdict on the projections, typed exactly as the host
+					// publication would report it. Nothing was published.
+					faultStage := "gate/up"
+					if fault.Stage == compute.V41RoutedSwiGLUStageDownOperand {
+						faultStage = "down"
+					}
+					return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, faultStage, errV41ExpertResult)
+				}
+				if err != nil {
+					return nil, v41RoutedExpertError, closeFailure(err)
+				}
+				defer s.Backend.Free(activation)
+				s.M.v41NoteExpertActivation(1, 0, 16, opened)
+				stage = "down"
+				out := s.Backend.MatMul(downW, activation)
+				defer s.Backend.Free(out)
+				// The down output is published as BF16 on the device before its one
+				// readback; a backend without the ordinary publication keeps the caller's
+				// host rounding. An overflow is the same numeric verdict the host reports.
+				read := out
+				if published, ok, err := s.v41PublishResidentBF16(out, compute.V41BF16PublishRoutedDown); ok {
+					var numeric *compute.V41BF16CheckedArithmeticError
+					if errors.As(err, &numeric) {
+						return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+					}
+					if err != nil {
+						return nil, v41RoutedExpertError, closeFailure(err)
+					}
+					defer s.Backend.Free(published)
+					read = published
+				}
+				// Read may return borrowed scratch; own it before any deferred Free.
+				values := append([]float32(nil), s.Backend.Read(read)...)
+				if len(values) != H {
+					return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+				}
+				return values, v41RoutedExpertHandled, nil
+			}()
+			completed = true
 		}()
-		if H <= 0 || I <= 0 || len(x) != H || !finite32(weight) {
-			return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+		if !completed {
+			convertPanic(recovered)
 		}
-		gateName := layerName(layer, stem+".w1.weight")
-		upName := layerName(layer, stem+".w3.weight")
-		downName := layerName(layer, stem+".w2.weight")
-		if s.M.has(downName[:len(downName)-len("weight")] + "bias") {
-			return nil, v41RoutedExpertDeclined, nil
-		}
-		gateW, releaseGate, upW, releaseUp, input, ok := expertInputDeviceAdmitted(s, gateName, upName, x, H)
-		if !ok {
-			return nil, v41RoutedExpertDeclined, nil
-		}
-		defer releaseGate()
-		defer releaseUp()
-		downW, releaseDown, ok := s.q4kExpertDownDeviceWeight(downName)
-		if !ok {
-			return nil, v41RoutedExpertDeclined, nil
-		}
-		defer releaseDown()
-		opened := s.M.v41NowNanos()
-		xd := s.uploadHostF32([]int{H}, input, compute.MemoryActivation, "moe expert gate/up activation")
-		defer s.Backend.Free(xd)
-		g := s.Backend.MatMul(gateW, xd)
-		defer s.Backend.Free(g)
-		u := s.Backend.MatMul(upW, xd)
-		defer s.Backend.Free(u)
-		stage = "activation"
-		activation, err := op.V41RoutedSwiGLU(g, u, limit, weight)
-		var fault *compute.V41RoutedSwiGLUFault
-		if errors.As(err, &fault) {
-			// A numeric verdict on the projections, typed exactly as the host
-			// publication would report it. Nothing was published.
-			faultStage := "gate/up"
-			if fault.Stage == compute.V41RoutedSwiGLUStageDownOperand {
-				faultStage = "down"
-			}
-			return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, faultStage, errV41ExpertResult)
-		}
-		if err != nil {
-			return nil, v41RoutedExpertError, closeFailure(err)
-		}
-		defer s.Backend.Free(activation)
-		s.M.v41NoteExpertActivation(1, 0, 16, opened)
-		stage = "down"
-		out := s.Backend.MatMul(downW, activation)
-		defer s.Backend.Free(out)
-		// The down output is published as BF16 on the device before its one
-		// readback; a backend without the ordinary publication keeps the caller's
-		// host rounding. An overflow is the same numeric verdict the host reports.
-		read := out
-		if published, ok, err := s.v41PublishResidentBF16(out, compute.V41BF16PublishRoutedDown); ok {
-			var numeric *compute.V41BF16CheckedArithmeticError
-			if errors.As(err, &numeric) {
-				return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
-			}
-			if err != nil {
-				return nil, v41RoutedExpertError, closeFailure(err)
-			}
-			defer s.Backend.Free(published)
-			read = published
-		}
-		// Read may return borrowed scratch; own it before any deferred Free.
-		values := append([]float32(nil), s.Backend.Read(read)...)
-		if len(values) != H {
-			return nil, v41RoutedExpertError, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
-		}
-		return values, v41RoutedExpertHandled, nil
+		return
 	}
 }
 
