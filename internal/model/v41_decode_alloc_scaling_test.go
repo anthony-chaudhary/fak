@@ -1,7 +1,7 @@
 package model
 
-// v41_decode_alloc_test.go — hot-path allocation regression guard for the V4.1
-// Flash incremental decode step (hot-path copy sweep TICKET-03, issue #13877).
+// v41_decode_alloc_scaling_test.go — hot-path allocation regression guard for the V4.1
+// Flash incremental decode step (hot-path copy sweep TICKET-03, issue #13872).
 //
 // The dense decode step reused a Session-scoped decodeScores scratch and was
 // pinned by TestDecodeStepAllocationStaysBounded. The V4.1 Flash compressed
