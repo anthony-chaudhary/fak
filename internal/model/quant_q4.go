@@ -279,6 +279,7 @@ type sessionQ4Kernel struct{ s *Session }
 func (k sessionQ4Kernel) prep(x []float32) any { return x }
 
 func (k sessionQ4Kernel) mul(name string, x any, out, in int) []float32 {
+	k.s.admitHostStage(HostStageHostMatmul)
 	return q4MatRows(k.s.M.q4(name), x.([]float32))
 }
 

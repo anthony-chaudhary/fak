@@ -21,7 +21,7 @@ import "sync/atomic"
 // metalFallbackRoutes is the fixed size of the per-route counter vector. It is indexed by
 // metalFallbackRouteIndex, which maps each MetalFallbackRoute to a stable slot. Keeping it a
 // fixed array (not a map) means an increment is an atomic add with no allocation or lock.
-const metalFallbackRoutes = 16
+const metalFallbackRoutes = len(metalFallbackRouteOrder)
 
 // metalLiveState is the lock-free live routing tally for one *Model.
 type metalLiveState struct {
@@ -52,7 +52,7 @@ func (m *Model) metalLive() *metalLiveState {
 	// a duplicate allocation would only mean a counter increment lands in a discarded state,
 	// never a wrong value reported for the winning state. Callers reach this only from the
 	// single-owner generation path plus request-time health reads, and Go's atomic ops on
-	// [16]atomic.Int64 are pointer-stable.
+	// the fixed atomic counter array are pointer-stable.
 	if m.metalObs == nil {
 		m.metalObs = &metalLiveState{}
 	}

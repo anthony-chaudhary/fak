@@ -323,7 +323,7 @@ func CPUOffloadExpertWeight(name string) bool {
 // CPUOffloadExperts gates the split; with no Backend it costs nothing and proves the split is a pure
 // placement decision (it computes the identical bytes the plain host forward does).
 func (s *Session) glmDsaMatKernel() matKernel {
-	host := matKernel(residentKernel{s.M})
+	host := matKernel(sessionResidentKernel{s})
 	device := host
 	if s.Backend != nil {
 		device = backendKernel{s}

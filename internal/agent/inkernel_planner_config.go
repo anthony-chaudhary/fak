@@ -40,9 +40,13 @@ type InKernelPlannerConfig struct {
 	// cache. Its zero value (and "") is model.KVPrecisionFP32: byte-for-byte the
 	// historical f32 cache. model.KVPrecisionQ8_0 realizes the dense mixed layout
 	// (Kraw f32 + q8_0 K/V) the planner's compute.KVPrecisionQ8 tier charges.
-	KVPrecision               model.KVPrecision
-	CPUOffloadExperts         bool
-	RequireDeviceExecution    bool
+	KVPrecision            model.KVPrecision
+	CPUOffloadExperts      bool
+	RequireDeviceExecution bool
+	// DeviceOnlyBypass is the admitted bring-up bypass token. When set and
+	// RequireDeviceExecution is false, one native session at a time runs host
+	// stages; every other session stays device-only.
+	DeviceOnlyBypass          string
 	QwenQ4KPrefillChunkTokens int
 	Qwen35MetalGDNSequence    bool
 	Q4KGateUpOutputSlab       bool
@@ -92,6 +96,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		metal:                        metal,
 		cpuOffloadExperts:            cfg.CPUOffloadExperts,
 		requireDeviceExecution:       cfg.RequireDeviceExecution,
+		deviceOnlyBypass:             cfg.DeviceOnlyBypass,
 		kvPrecision:                  cfg.KVPrecision,
 		contextTokens:                cfg.ContextTokens,
 		denseGPULayers:               cfg.DenseGPULayers,
@@ -187,6 +192,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		KVPrecision:               p.kvPrecision,
 		CPUOffloadExperts:         p.cpuOffloadExperts,
 		RequireDeviceExecution:    p.requireDeviceExecution,
+		DeviceOnlyBypass:          p.deviceOnlyBypass,
 		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,
 		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,
 		Q4KGateUpOutputSlab:       p.q4kGateUpOutputSlab,

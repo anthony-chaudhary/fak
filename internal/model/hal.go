@@ -143,6 +143,7 @@ func (m *Model) newBackendSessionOwned(scope *backendExecutionScope, be compute.
 
 // Close releases session-owned device state and its model-weight lifetime reference.
 func (s *Session) Close() {
+	defer s.releaseHostPathBypass()
 	complete := false
 	defer func() { s.finishV41EPOwner(complete) }()
 	func() {
@@ -916,8 +917,10 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			if err := m.Q2KEmbedding.GatherRow(id, buf, 1.0); err != nil {
 				panic(err)
 			}
+			s.admitHostStage(HostStageEmbeddingRowUpload)
 			x = s.uploadHostF32([]int{H}, buf, compute.MemoryActivation, "hal-token-input")
 		} else {
+			s.admitHostStage(HostStageEmbeddingRowUpload)
 			x = s.uploadHostF32([]int{H}, append([]float32(nil), m.embedRows()[id*H:(id+1)*H]...), compute.MemoryActivation, "hal-token-input")
 		}
 	}
@@ -1218,6 +1221,7 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 func (s *Session) tokenHAL(id, pos int) []float32 {
 	be := s.Backend
 	logits, _ := s.tokenHALOutput(id, pos, halFullLogits)
+	s.admitHostStage(HostStageLogitsReadback)
 	out := be.Read(logits)
 	if out == nil {
 		panic(fmt.Sprintf("model: compute backend %s returned unreadable logits", be.Name()))

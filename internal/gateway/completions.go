@@ -68,11 +68,21 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
 		return
 	}
+	decodeTraceRequested := req.FakDecodeTrace
+	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
+	if msg := validateCompletionDecodeTrace(req); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
 	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {
 		return
 	}
 	if s.refuseNativeModelMismatch(w, r, req.Model, "") {
+		return
+	}
+	if decodeTraceRequested && !s.chatDecodeTraceSupported(req.Model) {
+		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a fak-native model route")
 		return
 	}
 	if !releaseEPFanout(r) {
@@ -127,6 +137,8 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
 		agent.WithRawPrompt(),
+		agent.WithDecodeTrace(decodeTraceRequested),
+		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 	)
 	finishOutcome(comp, err)
 	if err != nil {
@@ -144,6 +156,14 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		s.writeUpstreamErr(w, err)
 		return
 	}
+	if decodeTraceRequested && comp.DecodeTrace == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
+		return
+	}
+	if decodeTokenIDsRequested && comp.NativeDecodeTokenIDs == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
+		return
+	}
 
 	finish := comp.FinishReason
 	if finish == "" {
@@ -159,6 +179,12 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		Model:   respModel,
 		Choices: []CompletionChoice{{Index: 0, Text: comp.Message.Content, FinishReason: &finish}},
 		Usage:   comp.Usage,
+	}
+	if decodeTraceRequested {
+		resp.Fak = &FakExt{DecodeTrace: comp.DecodeTrace}
+		if decodeTokenIDsRequested {
+			resp.Fak.NativeDecodeTokenIDs = comp.NativeDecodeTokenIDs
+		}
 	}
 	if stream != nil {
 		writeCompletionStream(stream, resp)
@@ -184,6 +210,22 @@ func validateCompletionSampling(req CompletionRequest) string {
 		return "max_tokens: must be a positive integer"
 	}
 	return validateSamplingRanges(req.Temperature, req.TopP)
+}
+
+// validateCompletionDecodeTrace applies the chat route's decode-trace floor to the
+// legacy wire. The legacy wire has no native inference receipt or input trigger, so
+// those fak fields are refused rather than silently ignored.
+func validateCompletionDecodeTrace(req CompletionRequest) string {
+	if req.Fak != nil && (req.Fak.NativeInferenceReceipt || req.Fak.InputTrigger != nil) {
+		return "fak: only native_decode_token_ids is supported on /v1/completions"
+	}
+	if req.Fak != nil && req.Fak.NativeDecodeTokenIDs && !req.FakDecodeTrace {
+		return "native decode token IDs require fak_decode_trace"
+	}
+	if req.FakDecodeTrace && req.Stream {
+		return "fak_decode_trace requires a buffered fak-native request"
+	}
+	return ""
 }
 
 // normalizePrompt folds the legacy `prompt` field (a bare string, an array of

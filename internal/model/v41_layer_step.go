@@ -336,7 +336,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		return nil, err
 	}
 	kv := kvFull[:hd]
-	if err := m.v41KVNormInPlaceWithPublish(l, kv, eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+	if err := m.v41KVNormWithBinding(l, kv, eps, scratch.kvNorm, scratch.gatherOps); err != nil {
 		return nil, err
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)

@@ -1,0 +1,193 @@
+{
+  "rows": [
+    {
+      "id": "pool-device-transient-observation",
+      "canonical": "DeviceTransientPoolStats",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Optional backend observation of request-transient buffers currently parked for reuse: backend name, current parked buffer count and bytes, and parked-byte high-water mark since backend start. Unsupported planners report absence; the counters do not grant memory capacity.",
+      "distinction": "Observes reusable backend allocation storage after live tensor ownership ends; unlike pool-session it does not hold session state, and unlike an allocation reservation it neither admits nor owns future memory.",
+      "distinct_from": [
+        "pool-session"
+      ],
+      "aliases": [],
+      "grounding": "DeviceTransientPoolStats",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "pool-cpu-reference-dequant-scratch",
+      "canonical": "cpuRefScratchPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The CPU reference backend's sync.Pool of fixed 256-element float32 dequantization panels, borrowed by quantized MatMul/BatchedMatMul row-dot work and returned after use to avoid a fresh panel allocation per call.",
+      "distinction": "Reuses small host arithmetic scratch, unlike pool-session's bounded LRU session container. It is not device storage, model weight residency, or a hard memory reservation; sync.Pool may discard cached panels.",
+      "distinct_from": [
+        "pool-session"
+      ],
+      "aliases": [],
+      "grounding": "cpuRefScratchPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-go-memory-classes",
+      "canonical": "fak_gateway_go_memory_bytes",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway process-memory gauges labeled by kind: Go heap objects/unused/free/released, heap/OS stacks, runtime-mapped bytes, and whole-process RSS. Values come from the runtime observation receipt; unavailable axes are omitted.",
+      "distinction": "Measures memory quantities, unlike the gateway operation-latency histogram. Its kinds are overlapping accounting views, not additive independent budgets; RSS minus runtime-mapped bytes is only an approximation of outside-runtime mappings.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_go_memory_bytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-go-gc-heap-targets",
+      "canonical": "fak_gateway_go_gc_heap_bytes",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway gauges for the Go GC heap: kind=live is the heap marked live by the last completed collection, and kind=goal is the heap size target for the next collection. Unavailable kinds are omitted.",
+      "distinction": "Reports GC live/goal byte quantities rather than operation latency, total process RSS, or the configured soft memory limit. A goal is not an enforced allocation grant.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_go_gc_heap_bytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-go-soft-memory-limit",
+      "canonical": "fak_gateway_go_memory_limit_bytes",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway gauge exposing the Go runtime's configured GOMEMLIMIT soft memory limit in bytes, omitted when the runtime reports it as unlimited or unavailable.",
+      "distinction": "A configured soft runtime target, unlike gateway operation latency or observed resident memory. It is neither an OS hard limit nor a whole-process/device memory guarantee.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_go_memory_limit_bytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-go-gc-cycle-count",
+      "canonical": "fak_gateway_go_gc_cycles_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway counter of completed Go garbage-collection cycles since process start, taken from the runtime observation receipt and omitted when unavailable.",
+      "distinction": "Counts collection events; unlike gateway operation latency and GC pause duration it carries no timing or memory-size claim.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_go_gc_cycles_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-go-gc-pause-p99",
+      "canonical": "fak_gateway_go_gc_pause_p99_seconds",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway gauge of the process-lifetime 99th-percentile stop-the-world GC pause, estimated from the runtime pause histogram using the selected bucket's upper bound; omitted when the quantile cannot be read.",
+      "distinction": "A lifetime GC-pause percentile estimate, unlike the gateway per-operation latency histogram. It is not a recent-window request-latency percentile or an exact individual pause duration.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_go_gc_pause_p99_seconds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-go-live-goroutines",
+      "canonical": "fak_gateway_go_goroutines",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway gauge of live Go goroutines in the gateway process from the runtime scheduler observation; omitted when unavailable.",
+      "distinction": "Counts runtime goroutines, unlike gateway operation latency or request/session counts. It does not imply parallel CPU execution or available worker capacity.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_go_goroutines",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-device-transient-pool-bytes",
+      "canonical": "fak_gateway_device_transient_pool_bytes",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway gauges labeled by backend and kind for request-transient device buffers parked for reuse: kind=pooled is current parked bytes, kind=peak is the high-water mark since backend start. Backends without the optional pool reporter emit no series.",
+      "distinction": "Measures reusable device allocation bytes rather than gateway operation latency, live tensor bytes, or host RSS. The peak is historical, not an additional allocation, and the observation is not a reservation grant.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_device_transient_pool_bytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-device-transient-pool-count",
+      "canonical": "fak_gateway_device_transient_pool_buffers",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "Gateway gauge labeled by backend for the current count of request-transient device buffers parked for reuse. It is emitted only when the optional backend pool reporter supplies an observation.",
+      "distinction": "Counts parked buffers rather than gateway operation latency or bytes; unlike fak_gateway_device_transient_pool_bytes it does not describe buffer size and cannot be used as a memory budget.",
+      "distinct_from": [
+        "x2-gateway-engine-fakgatewayoperationdurationseconds"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_device_transient_pool_buffers",
+      "grounding_kind": "metric",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

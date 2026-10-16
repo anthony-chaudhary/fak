@@ -4856,6 +4856,73 @@ int fvk_v41_try_query_norm_publication(float* host, float* published, const void
 // fvk_v41_d2h for several regions behind one host fence (#13820): each copy
 // lands at its caller-chosen staging offset, so k status records and rows cost
 // one submit instead of k. Regions are ordered and disjoint in the host image.
+// Single-row KV chain. Claims only existing pool capacity; no allocator calls.
+int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void* gain, float eps, int probe, int* status) {
+    if (!status) return -1;
+    *status=VK_SUCCESS;
+    auto fail=[&]() { *status=g_submissionStatus!=VK_SUCCESS?(int)g_submissionStatus:(int)VK_ERROR_UNKNOWN; return -1; };
+    if (g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS) return fail();
+    if (!g_ready || !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration || g_restore.stage || g_restore.cmd!=VK_NULL_HANDLE) return fail();
+    constexpr size_t bytes=2048u, hostBytes=4128u;
+    if (!host || !std::isfinite(eps) || eps<=0) return fail();
+    if (!stepBatchRecording() || !fvk_have_v41_attention_bf16() || !fvk_v41_attention_bf16_count_supported(512)) return 0;
+    Buffer* w=B(gain);
+    size_t aligned=(g_upArenaUsed+15u)&~(size_t)15u;
+    if (!v41NormPanelLive(w) || w->bytes<bytes || !v41NormPanelLive(g_stage) || !g_stageMapped || g_stageCap<hostBytes || g_stage->bytes<hostBytes ||
+        !v41NormPanelLive(g_upArena) || !g_upArenaMapped || aligned<g_upArenaUsed || aligned>g_upArenaCap || bytes>g_upArenaCap-aligned) return 0;
+    auto aliases=[](Buffer* a,Buffer* b){return a==b || a->buf==b->buf || a->mem==b->mem;};
+    Buffer* protectedBuffers[]={w,g_stage,g_upArena};
+    for(size_t i=0;i<3;++i) for(size_t j=0;j<i;++j) if(aliases(protectedBuffers[i],protectedBuffers[j])) return 0;
+    auto it=g_pool.find(bytes),sit=g_pool.find(16u);
+    if(it==g_pool.end() || sit==g_pool.end() || it->second.size()<2 || sit->second.empty() || it->second.size()>POOL_BUCKET_CAP || sit->second.size()>POOL_BUCKET_CAP || g_poolCount<3) return 0;
+    Buffer* x=it->second.back(); Buffer* y=it->second[it->second.size()-2]; Buffer* verdict=sit->second.back();
+    Buffer* claims[]={x,y,verdict};
+    auto eligible=[](Buffer* b,size_t n){return v41NormPanelLive(b) && b->bytes==n && b->allocationBytes>=n && b->allocationID && b->allocationDeviceLocal && !b->weightArenaBound && !b->offloadPage && !b->mapped && b->nativeCheckoutGeneration && b->nativeCheckoutGeneration!=std::numeric_limits<uint64_t>::max();};
+    if(!eligible(x,bytes) || !eligible(y,bytes) || !eligible(verdict,16u)) return 0;
+    for(size_t i=0;i<3;++i){for(size_t j=0;j<i;++j) if(aliases(claims[i],claims[j])) return 0; for(Buffer* p:protectedBuffers) if(aliases(claims[i],p)) return 0;}
+    size_t visits=0,seen[3]={0,0,0};
+    auto inspect=[&](Buffer* p,bool pool){
+        if(++visits>1024 || !p) return false;
+        for(Buffer* q:protectedBuffers) if(aliases(p,q)) return false;
+        for(size_t i=0;i<3;++i) if(aliases(p,claims[i]) && (!pool || p!=claims[i] || ++seen[i]!=1)) return false;
+        return true;
+    };
+    for(const auto& bucket:g_pool){if(++visits>1024)return 0;for(Buffer* p:bucket.second)if(!inspect(p,true))return 0;}
+    for(const auto& bucket:g_hvOffloadPool){if(++visits>1024)return 0;for(Buffer* p:bucket.second)if(!inspect(p,false))return 0;}
+    for(Buffer* p:g_batchFreed)if(!inspect(p,false))return 0;
+    for(size_t n:seen)if(n!=1)return 0;
+    if(probe)return 1;
+    if(!image)return fail();
+    it->second.pop_back();it->second.pop_back();sit->second.pop_back();g_poolCount-=3;
+    for(Buffer* b:claims)advanceNativeCheckoutGeneration(b);
+    struct Loan{Buffer* x;Buffer* y;Buffer* verdict;~Loan(){fvk_free(x);fvk_free(y);fvk_free(verdict);}}loan{x,y,verdict};
+    if(!stepRecordUpload(x,host,bytes))return fail();
+    int rc=fvk_v41_bf16_publish_f32(x,y,verdict,512,7);
+    if(rc!=VK_SUCCESS){*status=rc;return -1;}
+    if(!stepBatchRecording())return fail();
+    // Preserve the first envelope before reusing the status allocation. This
+    // transfer is in the same submission, with an explicit WAR dependency.
+    recordComputeBarrier(g_batchCmd);
+    VkBufferCopy first{0,0,16};vkCmdCopyBuffer(g_batchCmd,verdict->buf,g_stage->buf,1,&first);++g_batchOps;
+    recordTransferBarrier(g_batchCmd);
+    struct{int rows,n;float eps;}pc{1,512,eps};Buffer* normBuffers[]={y,w,x};
+    if(!dispatch(g_kern[K_RMSNORM],normBuffers,&pc,sizeof(pc),1,1,true))return fail();
+    rc=fvk_v41_bf16_publish_f32(x,y,verdict,512,8);
+    if(rc!=VK_SUCCESS){*status=rc;return -1;}
+    if(!stepBatchRecording())return fail();
+    recordComputeBarrier(g_batchCmd);
+    Buffer* sources[]={x,verdict,y};const size_t offsets[]={16u,2064u,2080u},lengths[]={bytes,16u,bytes};
+    for(size_t i=0;i<3;++i){VkBufferCopy region{0,offsets[i],lengths[i]};vkCmdCopyBuffer(g_batchCmd,sources[i]->buf,g_stage->buf,1,&region);}
+    g_batchOps+=3;batchFlush();
+    if(g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS || g_batching)return fail();
+    batchBegin();
+    if(g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS || !stepBatchRecording())return fail();
+    memcpy(image,g_stageMapped,hostBytes);
+    const size_t copied[]={16u,bytes,16u,bytes};
+    for(size_t n:copied)if(!checkedCounterAdd(g_d2hCount,1)||!checkedCounterAdd(g_d2hBytes,n))g_transferCountersValid=false;
+    return 1;
+}
+
 // Fixed single-row index projection publication. The caller holds vulkanMu
 // across probe, bounded Go allocation and commit. No stage growth or allocation.
 int fvk_v41_try_index_query_publication(float* raw, float* published, const void* source,

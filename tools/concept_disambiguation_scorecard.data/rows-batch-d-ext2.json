@@ -105,7 +105,15 @@
       "distinct_from": [
         "fak_gateway_operations_total",
         "gateway",
-        "stepobs-planner-step-family-prefix"
+        "stepobs-planner-step-family-prefix",
+        "gateway-go-memory-classes",
+        "gateway-go-gc-heap-targets",
+        "gateway-go-soft-memory-limit",
+        "gateway-go-gc-cycle-count",
+        "gateway-go-gc-pause-p99",
+        "gateway-go-live-goroutines",
+        "gateway-device-transient-pool-bytes",
+        "gateway-device-transient-pool-count"
       ],
       "aliases": [
         "gatewaylatencybuckets"

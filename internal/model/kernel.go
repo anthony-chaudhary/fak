@@ -60,6 +60,7 @@ type sessionQ8Kernel struct{ s *Session }
 
 func (k sessionQ8Kernel) prep(x []float32) any { return k.s.quantizeVecQ8(x) }
 func (k sessionQ8Kernel) mul(name string, x any, out, in int) []float32 {
+	k.s.admitHostStage(HostStageHostMatmul)
 	return qMatRows(k.s.M.q8(name), x.(q8Vec))
 }
 
@@ -72,6 +73,16 @@ type residentKernel struct{ m *Model }
 func (k residentKernel) prep(x []float32) any { return x }
 func (k residentKernel) mul(name string, x any, out, in int) []float32 {
 	return k.m.residentMatRows(name, x.([]float32), out, in)
+}
+
+// sessionResidentKernel is residentKernel for a session-owned forward: each GEMV is
+// a host stage the session's execution policy must admit.
+type sessionResidentKernel struct{ s *Session }
+
+func (k sessionResidentKernel) prep(x []float32) any { return x }
+func (k sessionResidentKernel) mul(name string, x any, out, in int) []float32 {
+	k.s.admitHostStage(HostStageHostMatmul)
+	return k.s.M.residentMatRows(name, x.([]float32), out, in)
 }
 
 // backendKernel routes matKernel GEMMs through a compute.Backend (the GPU pure kernels) instead of
@@ -102,6 +113,7 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 		// device via glmDsaWeightHAL below; every other backend keeps the host k-quant GEMV
 		// (its FAK_KQ_INT8 int8 path when enabled) — bit-identical to before this seam (#5111).
 		if !s.supportsRoutedExpertKQuant() || !SupportsHALKQuant(qt.kind) {
+			s.admitHostStage(HostStageHostMatmul)
 			return kQuantMatRows(qt, xf)
 		}
 	}

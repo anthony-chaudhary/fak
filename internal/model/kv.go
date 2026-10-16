@@ -162,6 +162,10 @@ type Session struct {
 	halFailure           error
 	executionPolicy      ExecutionPolicy
 	hostFallbackObserved bool
+	// hostPathBypass is the admitted bring-up bypass this session holds; release
+	// returns that one-session grant on Close.
+	hostPathBypass        string
+	hostPathBypassRelease func()
 
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
 	glmDsaHeadNameLogged bool
@@ -492,6 +496,7 @@ func (s *Session) validatePackedQ2KEmbeddingGuards() {
 }
 
 func (s *Session) hostMatKernel() matKernel {
+	s.admitHostStage(HostStageHostMatKernel)
 	m, cfg := s.M, s.M.Cfg
 	if s.Q4 && m.q4w != nil {
 		return sessionQ4Kernel{s: s}

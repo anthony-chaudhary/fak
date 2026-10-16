@@ -240,7 +240,7 @@ func (st *v41PlainLayerStep) projectQKV(qLat []float32, prefixHandled bool) ([]f
 			return nil, err
 		}
 		kv = kvFull[:hd]
-		if err := m.v41KVNormInPlaceWithPublish(l, kv, st.eps, scratch.kvNorm, scratch.gatherOps.bf16PublishFunc()); err != nil {
+		if err := m.v41KVNormWithBinding(l, kv, st.eps, scratch.kvNorm, scratch.gatherOps); err != nil {
 			return nil, err
 		}
 	} else {

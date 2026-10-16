@@ -19,8 +19,11 @@ var (
 	v41BF16ResidentCalls atomic.Int64
 	v41BF16DeferredCalls atomic.Int64
 	// Panel calls/rows count completed transport with a valid status envelope,
-	// including attributed numeric faults. They are a subset of PublishCalls,
-	// not an additional publication total or a count of attempted dispatches.
+	// including attributed numeric faults. The fused scalar KV chain counts its
+	// two completed BF16 dispatches immediately after successful transport,
+	// including malformed-envelope and later raw faults; scalar short-circuit
+	// counts can therefore differ. These measure work, not accepted publications.
+	// PanelCalls is a subset of PublishCalls, never an additional total.
 	v41BF16PanelCalls atomic.Int64
 	v41BF16PanelRows  atomic.Int64
 )

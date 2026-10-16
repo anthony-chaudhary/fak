@@ -946,6 +946,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
 	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
 	nativePlannerConfig.RequireDeviceExecution = rt.requireDeviceExecution
+	nativePlannerConfig.DeviceOnlyBypass = rt.executionPolicy.sessionBypass()
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
 	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than

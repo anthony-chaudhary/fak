@@ -556,6 +556,9 @@ type sessionQ4KKernel struct{ s *Session }
 func (k sessionQ4KKernel) prep(x []float32) any { return x }
 
 func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
+	if !k.s.MetalQ4K {
+		k.s.admitHostStage(HostStageHostMatmul)
+	}
 	xf := k.s.M.prismProjectInput(name, x.([]float32))
 	if qt := k.s.M.q4kw[name]; qt != nil {
 		// Resident raw Q4_K matmul weight (the q4_k_m majority): inline-dequant GEMV on CPU,

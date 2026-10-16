@@ -4435,6 +4435,46 @@
           "category": "incidental",
           "reason": "Local fresh gate-projection output handle inside the paired Q2_K adapter; gate names the expert projection bank, not an admission guard or independent gating policy.",
           "token": "gateOut"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-go-memory-classes; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_go_memory_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-go-gc-heap-targets; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_go_gc_heap_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-go-soft-memory-limit; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_go_memory_limit_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-go-gc-cycle-count; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_go_gc_cycles_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-go-gc-pause-p99; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_go_gc_pause_p99_seconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-go-live-goroutines; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_go_goroutines"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-device-transient-pool-bytes; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_device_transient_pool_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus observation positioned under gateway-engine as gateway-device-transient-pool-count; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
+          "token": "fak_gateway_device_transient_pool_buffers"
         }
       ],
       "exclude": [
@@ -4582,10 +4622,18 @@
         "exposureGated",
         "extensionFixtureCells",
         "fak_gateway_device_paged_weight_page_ins_total",
+        "fak_gateway_device_transient_pool_buffers",
+        "fak_gateway_device_transient_pool_bytes",
         "fak_gateway_device_weight_arena_live_bytes",
         "fak_gateway_device_weight_arena_memory_allocations_total",
         "fak_gateway_device_weight_arena_peak_reserved_bytes",
         "fak_gateway_device_weight_arena_reserved_bytes",
+        "fak_gateway_go_gc_cycles_total",
+        "fak_gateway_go_gc_heap_bytes",
+        "fak_gateway_go_gc_pause_p99_seconds",
+        "fak_gateway_go_goroutines",
+        "fak_gateway_go_memory_bytes",
+        "fak_gateway_go_memory_limit_bytes",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
@@ -14093,6 +14141,16 @@
           "category": "incidental",
           "reason": "Effect-free optional backend capability predicate for exact routed down chunk operands, not a maturity assessment or persistent support state.",
           "token": "SupportsV41RoutedDownPanelChunk"
+        },
+        {
+          "category": "incidental",
+          "reason": "The imported pkg/logprobparity package implements a named endpoint log-probability comparison; this use is an implementation package name, not a support-maturity rung or a declaration of hardware parity.",
+          "token": "logprobparity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment-variable spelling for the candidate endpoint bearer-key input to the log-probability comparison command; it names authentication configuration, not a support-maturity or parity verdict.",
+          "token": "FAK_PARITY_API_KEY"
         }
       ],
       "exclude": [
@@ -14135,6 +14193,7 @@
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
         "ExcludedUnsupportedProvider",
+        "FAK_PARITY_API_KEY",
         "FormatUnsupported",
         "GuideCoverage",
         "HOLD_CANCELLATION_UNSUPPORTED",
@@ -14297,6 +14356,7 @@
         "immaturity",
         "joinCoverageScores",
         "lifecycleCoverage",
+        "logprobparity",
         "manageParityPosture",
         "marshalWorkCoverageForTest",
         "maturityBaselineRunWitness",
@@ -17621,6 +17681,61 @@
           "category": "incidental",
           "reason": "Local bounded row-count constant for the positioned TryV41PoolNormPanel operation; it sizes an existing-buffer attempt and is neither a pool owner nor an allocation authority.",
           "token": "v41FFNPoolPanelFallbackRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Current parked-buffer count field of the positioned DeviceTransientPoolStats observation; it is a quantity, not another pool or capacity grant.",
+          "token": "PooledBuffers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Current parked-byte field of the positioned DeviceTransientPoolStats observation; it measures the same reuse pool, not a separate allocator.",
+          "token": "PooledBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Historical parked-byte high-water field of the positioned DeviceTransientPoolStats observation; it is not current occupancy, a second pool, or an allocation limit.",
+          "token": "PeakPooledBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional planner interface exposing the positioned DeviceTransientPoolStats observation; unsupported reporting is represented by ok=false, not by another pool implementation.",
+          "token": "DeviceTransientPoolReporter"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method returning the positioned DeviceTransientPoolStats observation and availability flag; it does not create, allocate from, or own a new pool.",
+          "token": "DeviceTransientPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Primitive-returning compute-backend adapter interface for the positioned DeviceTransientPoolStats observation, used to avoid an agent-package dependency; it is not a distinct allocator.",
+          "token": "TransientPoolBackend"
+        },
+        {
+          "category": "incidental",
+          "reason": "Primitive-returning method for current parked buffer/byte counts and historical peak in the positioned DeviceTransientPoolStats observation; it is not a separate pool concept.",
+          "token": "TransientPoolStats"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private atomic counter implementation feeding the positioned DeviceTransientPoolStats observation; its independent loads are diagnostics, not a coherent reservation or pool ownership mechanism.",
+          "token": "transientPoolGauge"
+        },
+        {
+          "category": "incidental",
+          "reason": "Renderer of the positioned device-transient pool byte/count Prometheus gauges; it exposes existing observations and performs no allocation or admission.",
+          "token": "writeDeviceTransientPoolMetrics"
+        },
+        {
+          "category": "incidental",
+          "reason": "Metric wire name positioned under gateway-engine as gateway-device-transient-pool-bytes for the DeviceTransientPoolStats observation; it measures the existing transient reuse pool and defines no additional pool or allocator.",
+          "token": "fak_gateway_device_transient_pool_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Metric wire name positioned under gateway-engine as gateway-device-transient-pool-count for the DeviceTransientPoolStats observation; it measures the existing transient reuse pool and defines no additional pool or allocator.",
+          "token": "fak_gateway_device_transient_pool_buffers"
         }
       ],
       "exclude": [
@@ -17628,6 +17743,8 @@
       ],
       "id": "pool",
       "ignore": [
+        "DeviceTransientPool",
+        "DeviceTransientPoolReporter",
         "ErrNotPoolable",
         "FAK_EXPERT_RING_POOL_FRACTION",
         "FLEET_WORKER_WORKTREE_POOL",
@@ -17636,6 +17753,7 @@
         "NewPagePool",
         "NewSeatPool",
         "PagePool",
+        "PeakPooledBytes",
         "PoolCapBytes",
         "PoolFraction",
         "PoolID",
@@ -17644,9 +17762,15 @@
         "PoolUpdatedAt",
         "Poolable",
         "Pooled",
+        "PooledBuffers",
+        "PooledBytes",
         "PooledSpeedupPct",
+        "TransientPoolBackend",
+        "TransientPoolStats",
         "canonicalPoolLane",
         "defaultPoolCap",
+        "fak_gateway_device_transient_pool_buffers",
+        "fak_gateway_device_transient_pool_bytes",
         "fvk_v41_try_pool_norm_panel",
         "indexer_k_pooled",
         "kvpoolbytes",
@@ -17692,6 +17816,7 @@
         "serveExpertRingPoolFractionMax",
         "serveExpertRingSharedPool",
         "spoolsv",
+        "transientPoolGauge",
         "unpoolable",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
@@ -17702,6 +17827,7 @@
         "validPoolOperands",
         "validPoolState",
         "withPoolLaneLock",
+        "writeDeviceTransientPoolMetrics",
         "writePoolMemberLocked"
       ],
       "known_tokens": [],
