@@ -105,6 +105,7 @@ type SliceDescriptor struct {
 type TensorView struct {
 	parent      *UMABuffer
 	parentView  *TensorView
+	hostBacking []byte // retains Go-owned host storage; uintptr alone is not a GC root
 	hostPtr     uintptr
 	devPtr      uintptr
 	byteOffset  int

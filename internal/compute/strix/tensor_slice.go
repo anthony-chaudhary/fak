@@ -142,6 +142,7 @@ func NewTensorViewFromHostSlice(b []byte, dtype DataType, shape []int) (*TensorV
 
 	ptr := uintptr(unsafe.Pointer(&b[0]))
 	return &TensorView{
+		hostBacking: b,
 		hostPtr:     ptr,
 		devPtr:      ptr,
 		byteOffset:  0,
@@ -273,6 +274,7 @@ func (v *TensorView) KeepAlive() {
 	if v == nil {
 		return
 	}
+	runtime.KeepAlive(v.hostBacking)
 	if v.parent != nil {
 		runtime.KeepAlive(v.parent)
 	}
