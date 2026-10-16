@@ -216,7 +216,7 @@ type openAIResponse struct {
 	ServiceTier string `json:"service_tier,omitempty"`
 	Model       string `json:"model"` // the model the upstream reports it served (#82 echo)
 	Choices     []struct {
-		Message      Message  `json:"message"`
+		Message      *Message `json:"message"`
 		Delta        *Message `json:"delta,omitempty"`
 		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
@@ -649,7 +649,13 @@ func (a openAIAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("no choices (body: %s)", truncate(raw, 200))
 	}
-	msg := cr.Choices[0].Message
+	if cr.Choices[0].Message == nil && cr.Choices[0].Delta == nil {
+		return nil, fmt.Errorf("missing or null message and delta")
+	}
+	var msg Message
+	if cr.Choices[0].Message != nil {
+		msg = *cr.Choices[0].Message
+	}
 	if cr.Choices[0].Delta != nil {
 		if msg.Role == "" && msg.Content == "" && len(msg.ToolCalls) == 0 && msg.FunctionCall == nil {
 			msg = *cr.Choices[0].Delta
