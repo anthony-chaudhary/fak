@@ -1364,3 +1364,73 @@ Pure constructor reusing Q2_K token-panel shape, row-count and signed byte-bound
 Effect-free optional backend capability query for two same-shape Q2_K contractions sharing one input token panel and producing two independent output panels with unchanged per-workgroup arithmetic.
 
 **Distinct from:** Checks selected provider availability and bounded geometry before effects; unlike pure plan construction, it reflects native opt-in, exact module availability and device dispatch limits. It grants no residency, memory budget or speed guarantee.
+
+
+### DeviceTransientPoolStats
+
+Optional backend observation of request-transient buffers currently parked for reuse: backend name, current parked buffer count and bytes, and parked-byte high-water mark since backend start. Unsupported planners report absence; the counters do not grant memory capacity.
+
+**Distinct from:** Observes reusable backend allocation storage after live tensor ownership ends; unlike pool-session it does not hold session state, and unlike an allocation reservation it neither admits nor owns future memory.
+
+
+### cpuRefScratchPool
+
+The CPU reference backend's sync.Pool of fixed 256-element float32 dequantization panels, borrowed by quantized MatMul/BatchedMatMul row-dot work and returned after use to avoid a fresh panel allocation per call.
+
+**Distinct from:** Reuses small host arithmetic scratch, unlike pool-session's bounded LRU session container. It is not device storage, model weight residency, or a hard memory reservation; sync.Pool may discard cached panels.
+
+
+### fak_gateway_go_memory_bytes
+
+Gateway process-memory gauges labeled by kind: Go heap objects/unused/free/released, heap/OS stacks, runtime-mapped bytes, and whole-process RSS. Values come from the runtime observation receipt; unavailable axes are omitted.
+
+**Distinct from:** Measures memory quantities, unlike the gateway operation-latency histogram. Its kinds are overlapping accounting views, not additive independent budgets; RSS minus runtime-mapped bytes is only an approximation of outside-runtime mappings.
+
+
+### fak_gateway_go_gc_heap_bytes
+
+Gateway gauges for the Go GC heap: kind=live is the heap marked live by the last completed collection, and kind=goal is the heap size target for the next collection. Unavailable kinds are omitted.
+
+**Distinct from:** Reports GC live/goal byte quantities rather than operation latency, total process RSS, or the configured soft memory limit. A goal is not an enforced allocation grant.
+
+
+### fak_gateway_go_memory_limit_bytes
+
+Gateway gauge exposing the Go runtime's configured GOMEMLIMIT soft memory limit in bytes, omitted when the runtime reports it as unlimited or unavailable.
+
+**Distinct from:** A configured soft runtime target, unlike gateway operation latency or observed resident memory. It is neither an OS hard limit nor a whole-process/device memory guarantee.
+
+
+### fak_gateway_go_gc_cycles_total
+
+Gateway counter of completed Go garbage-collection cycles since process start, taken from the runtime observation receipt and omitted when unavailable.
+
+**Distinct from:** Counts collection events; unlike gateway operation latency and GC pause duration it carries no timing or memory-size claim.
+
+
+### fak_gateway_go_gc_pause_p99_seconds
+
+Gateway gauge of the process-lifetime 99th-percentile stop-the-world GC pause, estimated from the runtime pause histogram using the selected bucket's upper bound; omitted when the quantile cannot be read.
+
+**Distinct from:** A lifetime GC-pause percentile estimate, unlike the gateway per-operation latency histogram. It is not a recent-window request-latency percentile or an exact individual pause duration.
+
+
+### fak_gateway_go_goroutines
+
+Gateway gauge of live Go goroutines in the gateway process from the runtime scheduler observation; omitted when unavailable.
+
+**Distinct from:** Counts runtime goroutines, unlike gateway operation latency or request/session counts. It does not imply parallel CPU execution or available worker capacity.
+
+
+### fak_gateway_device_transient_pool_bytes
+
+Gateway gauges labeled by backend and kind for request-transient device buffers parked for reuse: kind=pooled is current parked bytes, kind=peak is the high-water mark since backend start. Backends without the optional pool reporter emit no series.
+
+**Distinct from:** Measures reusable device allocation bytes rather than gateway operation latency, live tensor bytes, or host RSS. The peak is historical, not an additional allocation, and the observation is not a reservation grant.
+
+
+### fak_gateway_device_transient_pool_buffers
+
+Gateway gauge labeled by backend for the current count of request-transient device buffers parked for reuse. It is emitted only when the optional backend pool reporter supplies an observation.
+
+**Distinct from:** Counts parked buffers rather than gateway operation latency or bytes; unlike fak_gateway_device_transient_pool_bytes it does not describe buffer size and cannot be used as a memory budget.

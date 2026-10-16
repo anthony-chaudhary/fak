@@ -159,7 +159,7 @@ func TestQuantizeQ2Absmax(t *testing.T) {
 	if q.Dtype != Q2_0 {
 		t.Fatalf("QuantizeQ2 dtype %s, want q2_0", q.Dtype)
 	}
-	packed := i8AsBytes(q.buf.(HostBuffer).I8())
+	packed := i8CopyForTest(q.buf.(HostBuffer).I8())
 	dense := dequantQ2Weight(packed, q.Quant.Scale, out, in, q2Block)
 	for i := range w {
 		if w[i] > 0 && dense[i] < 0 || w[i] < 0 && dense[i] > 0 {

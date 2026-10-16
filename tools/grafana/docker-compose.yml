@@ -14,8 +14,16 @@
 #   cd tools/grafana && docker compose up -d
 # Open http://<host>:3000  (anonymous Viewer)
 #
+# Static addressing: every service has a fixed ipv4_address on a fixed subnet.
+# Docker Desktop's port forwarder (vpnkit) caches the container IP behind each
+# published port; when containers restart in a different order and swap IPs,
+# the cache goes stale and host requests to :3000/:9091 get an empty reply while
+# the containers report healthy (seen 2026-10-16). Pinned IPs cannot swap.
+# Override the /24 with FAK_OBS_SUBNET_PREFIX (e.g. 10.77.5) if it collides
+# with a LAN or VPN route; changing it requires `docker compose down` first.
+#
 # Linux / DGX (host networking): uncomment every "network_mode: host" line, comment
-# out the ports/extra_hosts blocks, and update:
+# out the ports/extra_hosts/networks blocks, and update:
 #   - prometheus.yml: targets → "localhost:9095" and "localhost:8080"
 #   - provisioning/datasources/datasource.yml: Prometheus url → "http://localhost:9091"
 
@@ -47,6 +55,9 @@ services:
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
       - "--web.listen-address=:9091"
+    networks:
+      default:
+        ipv4_address: ${FAK_OBS_SUBNET_PREFIX:-172.30.90}.10
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -65,6 +76,9 @@ services:
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--web.listen-address=:9093"
+    networks:
+      default:
+        ipv4_address: ${FAK_OBS_SUBNET_PREFIX:-172.30.90}.11
 
   grafana:
     image: grafana/grafana:11.5.2
@@ -115,6 +129,16 @@ services:
       - ./provisioning:/etc/grafana/provisioning:ro
       - ./dashboards:/var/lib/grafana/dashboards:ro
       - fleet-grafana-data:/var/lib/grafana
+    networks:
+      default:
+        ipv4_address: ${FAK_OBS_SUBNET_PREFIX:-172.30.90}.12
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${FAK_OBS_SUBNET_PREFIX:-172.30.90}.0/24
+          gateway: ${FAK_OBS_SUBNET_PREFIX:-172.30.90}.1
 
 volumes:
   fleet-prometheus-data:

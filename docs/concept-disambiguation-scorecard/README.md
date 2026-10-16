@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **667** (clarity 0 + coverage 667) |
-| **Crystal-clear concepts (and climbing)** | **1254** crystal of 3053 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3140 / 3807** (82.5% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **668** (clarity 0 + coverage 668) |
+| **Crystal-clear concepts (and climbing)** | **1264** crystal of 3063 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3150 / 3818** (82.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 230 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **88** of 4312 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **88** of 4322 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3053 concepts - score 88.6/100 (grade B) - disambiguation-debt 667
+concept-disambiguation chart - 3063 concepts - score 88.6/100 (grade B) - disambiguation-debt 668
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1254
+  * crystal       ####################........ 1264
   o defined       ############################ 1799
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -46,13 +46,13 @@ clarity mix by family (each cell = one concept):
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
-  gateway-engine   **********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 70 crystal)
+  gateway-engine   ******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 78 crystal)
   guard-gate       *********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (455 concept(s); 213 crystal)
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             *****************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (417 concept(s); 173 crystal)
   policy-capability *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 101 crystal)
-  pool             ********oooooooooooooooooooooooooooooooo (40 concept(s); 8 crystal)
+  pool             **********oooooooooooooooooooooooooooooooo (42 concept(s); 10 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  **********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (267 concept(s); 94 crystal)
@@ -65,11 +65,11 @@ coverage by family (positioned / discovered):
   plan             #######################..... 480/585
   session-runtime  ######################...... 288/359
   cache            #######################..... 341/411
-  gateway-engine   #######################..... 238/293
+  gateway-engine   #######################..... 246/301
   guard-gate       ##########################.. 515/562
   context-ctx      ########################.... 267/312
-  attention        #####################....... 129/172
-  pool             ##############.............. 42/84
+  attention        #####################....... 129/173
+  pool             ##############.............. 44/86
   policy-capability ########################.... 225/266
   support-maturity ###################......... 83/120
   render-materialize ########################.... 217/251
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.5%  (3140/3807 confusable tokens positioned)
+namespace coverage  [##########################......] 82.5%  (3150/3818 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 230
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 230/230
 
-name index: 4312 lookup name(s) -> 3053 concept(s), 88 ambiguous
+name index: 4322 lookup name(s) -> 3063 concept(s), 88 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **230 / 230** (230 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2380 / 5602 |
+| Boundaries drawn (mutual / total) | 2400 / 5622 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4312 over 3053 concepts |
+| Lookup names indexed | 4322 over 3063 concepts |
 | Lookup names landing on several concepts | 88 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3053 |
+| Concepts carrying a contrast set | 3063 |
 
 ## The concepts (best verdict first)
 
@@ -515,6 +515,14 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | gateway-engine | **inkernel_expert_spill.go (served graded expert-spill seam)** - inkernel_expert_spill.go is the agent planner seam that resolves a loaded model’s graded MoE expert-spill placement once from operator intent and measured device budget, then applies that placement to each request session. |
 | * | crystal | symbol | gateway-engine | **InKernelQwenQ4KPrefillChunkConfigError (deferred native-prefill bounds error)** - InKernelQwenQ4KPrefillChunkConfigError is the typed error retained when an explicit resident-Qwen Q4_K prefill chunk size lies outside 128..8192; a targeted request returns it before tokenization or model execution. |
 | * | crystal | metric | gateway-engine | **fak_gateway_inference_output_tokens_per_second (blended generation throughput)** - fak_gateway_inference_output_tokens_per_second is the gateway Prometheus gauge for cumulative completion tokens divided by full inference wall-clock across served turns, including prefill time. |
+| * | crystal | metric | gateway-engine | **fak_gateway_go_memory_bytes** - Gateway process-memory gauges labeled by kind: Go heap objects/unused/free/released, heap/OS stacks, runtime-mapped bytes, and whole-process RSS. Values come from the runtime observation receipt; unavailable axes are omitted. |
+| * | crystal | metric | gateway-engine | **fak_gateway_go_gc_heap_bytes** - Gateway gauges for the Go GC heap: kind=live is the heap marked live by the last completed collection, and kind=goal is the heap size target for the next collection. Unavailable kinds are omitted. |
+| * | crystal | metric | gateway-engine | **fak_gateway_go_memory_limit_bytes** - Gateway gauge exposing the Go runtime's configured GOMEMLIMIT soft memory limit in bytes, omitted when the runtime reports it as unlimited or unavailable. |
+| * | crystal | metric | gateway-engine | **fak_gateway_go_gc_cycles_total** - Gateway counter of completed Go garbage-collection cycles since process start, taken from the runtime observation receipt and omitted when unavailable. |
+| * | crystal | metric | gateway-engine | **fak_gateway_go_gc_pause_p99_seconds** - Gateway gauge of the process-lifetime 99th-percentile stop-the-world GC pause, estimated from the runtime pause histogram using the selected bucket's upper bound; omitted when the quantile cannot be read. |
+| * | crystal | metric | gateway-engine | **fak_gateway_go_goroutines** - Gateway gauge of live Go goroutines in the gateway process from the runtime scheduler observation; omitted when unavailable. |
+| * | crystal | metric | gateway-engine | **fak_gateway_device_transient_pool_bytes** - Gateway gauges labeled by backend and kind for request-transient device buffers parked for reuse: kind=pooled is current parked bytes, kind=peak is the high-water mark since backend start. Backends without the optional pool reporter emit no series. |
+| * | crystal | metric | gateway-engine | **fak_gateway_device_transient_pool_buffers** - Gateway gauge labeled by backend for the current count of request-transient device buffers parked for reuse. It is emitted only when the optional backend pool reporter supplies an observation. |
 | * | crystal | symbol | guard-gate | **inKernelDeviceGate** - Owns the planner-owned single native forward slot shared by ordinary requests and decode cohorts, supporting cancellation-aware waiters without detached lock-acquisition goroutines. |
 | * | crystal | symbol | guard-gate | **INSUFFICIENT_AGGREGATE_HBM** - The bench.AdmissionVerdict wire value a sanctioned node earns when its AGGREGATE device HBM across every rank is below the pinned artifact size: a physical-ceiling placement refusal that no reservation, scheduler change or peer eviction can lift. Only a smaller artifact (quantization) or more nodes close the ShortfallBytes it records, and admitNode derives it before any transfer begins. |
 | * | crystal | symbol | guard-gate | **AggregateHBMBytes** - A NodeCapacity accessor returning the node's total device memory across every rank (GPUCount x HBMBytesPerGPU) — the hard physical ceiling, reachable only by evicting peers. |
@@ -1066,6 +1074,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **supervision policy** - Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation. |
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **FakExpertRingPoolFractionEnv (auto expert-ring host-memory fraction)** - FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 < f <= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound. |
+| * | crystal | symbol | pool | **DeviceTransientPoolStats** - Optional backend observation of request-transient buffers currently parked for reuse: backend name, current parked buffer count and bytes, and parked-byte high-water mark since backend start. Unsupported planners report absence; the counters do not grant memory capacity. |
+| * | crystal | symbol | pool | **cpuRefScratchPool** - The CPU reference backend's sync.Pool of fixed 256-element float32 dequantization panels, borrowed by quantized MatMul/BatchedMatMul row-dot work and returned after use to avoid a fresh panel allocation per call. |
 | * | crystal | symbol | pool | **TryV41PoolNormPanel** - Bounded canonical Vulkan FFN normalization operation that atomically borrows already-free exact-size native buffers and existing staging capacity, sharing scalar-required gain preparation and refusing before side effects when capacity is unavailable. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
@@ -3333,8 +3343,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3222/5602 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3053 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3222/5622 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3063 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3343,7 +3353,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4312 lookup name(s) resolves - 88 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4322 lookup name(s) resolves - 88 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3353,11 +3363,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | plan | 480 | 585 | 105 |
 | session-runtime | 288 | 359 | 71 |
 | cache | 341 | 411 | 70 |
-| gateway-engine | 238 | 293 | 55 |
+| gateway-engine | 246 | 301 | 55 |
 | guard-gate | 515 | 562 | 47 |
 | context-ctx | 267 | 312 | 45 |
-| attention | 129 | 172 | 43 |
-| pool | 42 | 84 | 42 |
+| attention | 129 | 173 | 44 |
+| pool | 44 | 86 | 42 |
 | policy-capability | 225 | 266 | 41 |
 | support-maturity | 83 | 120 | 37 |
 | render-materialize | 217 | 251 | 34 |

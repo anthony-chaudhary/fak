@@ -124,7 +124,7 @@ func TestV41GeneratedPrefixPosition(t *testing.T) {
 	if removed := p.tree.EvictPrefix(tokens); removed != len(tokens) || len(b.live) != 0 {
 		t.Fatalf("retirement removed=%d live KV=%d, want %d and zero", removed, len(b.live), len(tokens))
 	}
-	if (m.Cfg.InKernelBackendPrefixReuseSupportedFor(&v41GateBackend{Backend: ref, name: "vulkan"})) {
-		t.Fatal("position metadata qualified an unwitnessed Vulkan backend")
+	if (m.Cfg.InKernelBackendPrefixReuseSupportedFor(&v41GateBackend{Backend: ref, name: "rocm"})) {
+		t.Fatal("position metadata qualified an unwitnessed ROCm backend")
 	}
 }

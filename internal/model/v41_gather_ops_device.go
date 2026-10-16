@@ -1,6 +1,10 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
 
 // v41DeviceGatherOps carries the session's slice-3 device bindings (Ref #13668):
 // the inverse output rotation, the attention index selection and the
@@ -31,13 +35,43 @@ type v41DeviceGatherOps struct {
 	indexWeightScale          v41IndexWeightScaleFunc
 }
 
+// v41IndexerKeyHeadroom is the fraction of live device headroom kept off the
+// resident indexer-key allowance, so the KV cache, activations and per-op
+// scratch that do not pass through this budget still have room to grow.
+const v41IndexerKeyHeadroom = 0.5
+
+// v41IndexerKeyAdmissionBytes derives the device-resident indexer-key allowance
+// from the backend's own device-memory admission (Ref #13870). It returns 0 —
+// preserving the historical per-token host repack — unless the backend both
+// reports a device capacity AND implements the resident row-log primitive the
+// scorer needs. Unknown or exhausted capacity fails open to the host path,
+// never to an unbounded device reservation: the score caller keeps its host
+// fallback with the named reason "no admitted indexer-key budget".
+func (s *Session) v41IndexerKeyAdmissionBytes() int64 {
+	if s == nil || s.Backend == nil {
+		return 0
+	}
+	rows, ok := s.Backend.(compute.V41RowLogBackend)
+	if !ok || !rows.V41RowLogAvailable() {
+		return 0
+	}
+	_, free, known := compute.DeviceMemoryInfo(s.Backend)
+	if !known || free <= 0 {
+		return 0
+	}
+	return compute.BudgetAfterHeadroom(free, v41IndexerKeyHeadroom)
+}
+
 // v41DeviceGatherOpsFunc binds every available slice-3 operation. The policy is
 // read at call time, because a session may enter device-only after binding.
+// The indexer-key allowance is fixed here, before the owner is enabled, from
+// device admission; a backend that cannot report capacity keeps the zero
+// (host-repack) default.
 func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	if s == nil {
 		return nil
 	}
-	ops := &v41DeviceGatherOps{owner: s, inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
+	ops := &v41DeviceGatherOps{owner: s, indexerKeyBudgetBytes: s.v41IndexerKeyAdmissionBytes(), inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
 	ops.bf16Publish = s.v41BindBF16Publication()
 	ops.indexWeightScale = s.v41IndexWeightScaleFunc()
 	return ops

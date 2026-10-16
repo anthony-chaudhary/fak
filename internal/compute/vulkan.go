@@ -421,6 +421,7 @@ type vulkanBackend struct {
 	haveAttention   bool
 	transient       []*vulkanBuf
 	freeTransient   map[int][]*vulkanBuf
+	transientPoolGauge
 	// Strix Halo (GFX1151) preflight subsystems, handed over by the serve runtime
 	// when Strix silicon is detected. Retained for the backend's zero-copy UMA and
 	// 32MB MALL allocation paths; nil on every discrete/CPU/non-Strix build.
@@ -870,6 +871,7 @@ func (v *vulkanBackend) dallocTransient(nbytes int) *vulkanBuf {
 		if len(bucket) > 0 {
 			b := bucket[len(bucket)-1]
 			v.freeTransient[nbytes] = bucket[:len(bucket)-1]
+			v.reused(nbytes)
 			if !v.debugBufferDeviceLocal(b) {
 				C.fvk_free(b.ptr)
 				return v.dallocFor(nbytes, "transient storage buffer")
@@ -896,6 +898,7 @@ func (v *vulkanBackend) recycleTransientLocked(b *vulkanBuf) {
 	owner := &vulkanBuf{ptr: b.ptr, n: b.n, class: b.class}
 	if len(bucket) < vulkanGoPoolBucketCap {
 		v.freeTransient[b.n] = append(bucket, owner)
+		v.parked(b.n)
 	} else {
 		C.fvk_free(owner.ptr)
 	}
@@ -912,6 +915,7 @@ func (v *vulkanBackend) trimTransientLocked() {
 		}
 	}
 	clear(v.freeTransient)
+	v.drained()
 }
 
 func (v *vulkanBackend) dev(shape []int, dt Dtype) (Tensor, *vulkanBuf) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute/strix"
@@ -21,11 +22,14 @@ import (
 // is that the loop reaches the kernel through an interface method instead of a direct
 // call.
 //
-// It is deliberately pure Go, scalar, stdlib-only — no unsafe, no asm, no cgo, no
-// os.Getenv — so it is ALSO the portable floor every other backend degrades to (it
-// compiles to wasm unchanged). A real CPU backend may later expose the model's x86
-// AVX2/AVX-512 Q8 kernels through Tier(); that is a private acceleration of this same
-// reference contract, selected by the registry, not a fork of the loop.
+// It is deliberately pure Go, scalar, stdlib-only — no asm, no cgo, no os.Getenv — so it
+// is ALSO the portable floor every other backend degrades to (it compiles to wasm
+// unchanged). Its one unsafe use is i8View: quantized weights are read through a zero-copy
+// byte view of their int8 host buffer (the inverse of NewQ4K's view), because copying the
+// whole weight on every MatMul dominated the K-quant/IQ reference path. A real CPU backend
+// may later expose the model's x86 AVX2/AVX-512 Q8 kernels through Tier(); that is a
+// private acceleration of this same reference contract, selected by the registry, not a
+// fork of the loop.
 
 func init() { Register(&cpuBackend{}) }
 
@@ -135,7 +139,15 @@ func (c *cpuBackend) result(shape []int, data []float32) Tensor {
 // q4kRows views a Q4_K weight tensor's codes as raw bytes and returns the per-output-row
 // byte stride — the shared preamble of the MatMul/BatchedMatMul Q4_K row-dot loops.
 func (c *cpuBackend) q4kRows(w Tensor, in int) (raw []byte, rowBytes int) {
-	return i8AsBytes(c.i8(w)), (in / q4kSuper) * q4kSuperBlock
+	return i8View(c.i8(w)), (in / q4kSuper) * q4kSuperBlock
+}
+
+// cpuRefScratchPool holds the one-super-block (256-weight) dequant panel the k-quant and IQ
+// row dots share, so a MatMul does not allocate it per call.
+var cpuRefScratchPool = sync.Pool{New: func() any { return new([q4kSuper]float32) }}
+
+func (c *cpuBackend) traceMatMul(w, x Tensor, started time.Time) {
+	computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel", Backend: c.Name(), Device: "host", Kernel: w.Dtype.String() + "_matmul", StartedAt: started.UTC(), DurationNS: time.Since(started).Nanoseconds(), TimerDomain: "host_monotonic", Bytes: int64((w.Numel() + x.Numel()) * w.Dtype.Bytes()), Shapes: [][]int{w.Shape, x.Shape}, ProvenanceDigest: computetrace.Digest(c.Name(), w.Dtype.String(), "matmul")})
 }
 
 // ---- matmul family (dtype-dispatched on the WEIGHT — the f32/Q8 twin collapse) -----
@@ -174,13 +186,15 @@ func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 }
 
 func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
-	started := time.Now()
-	defer func() {
-		computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel", Backend: c.Name(), Device: "host", Kernel: w.Dtype.String() + "_matmul", StartedAt: started.UTC(), DurationNS: time.Since(started).Nanoseconds(), TimerDomain: "host_monotonic", Bytes: int64((w.Numel() + x.Numel()) * w.Dtype.Bytes()), Shapes: [][]int{w.Shape, x.Shape}, ProvenanceDigest: computetrace.Digest(c.Name(), w.Dtype.String(), "matmul")})
-	}()
+	if computetrace.Emitting() {
+		defer c.traceMatMul(w, x, time.Now())
+	}
 	out, in := w.Shape[0], w.Shape[1]
 	xf := c.f32(x)
 	y := make([]float32, out)
+	scratch := cpuRefScratchPool.Get().(*[q4kSuper]float32)
+	defer cpuRefScratchPool.Put(scratch)
+	buf := scratch[:]
 	switch w.Dtype {
 	case F32:
 		wf := c.f32(w)
@@ -197,45 +211,40 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		}
 	case Q4_K:
 		raw, rowBytes := c.q4kRows(w, in)
-		buf := make([]float32, q4kSuper)
 		for o := 0; o < out; o++ {
 			y[o] = q4kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
 	case Q5_K, Q6_K:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		bs := 176
 		if w.Dtype == Q6_K {
 			bs = 210
 		}
 		rowBytes := (in / 256) * bs
-		buf := make([]float32, 256)
 		for o := 0; o < out; o++ {
 			y[o] = rawKRowDot(w.Dtype, raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
 	case Q2_K:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / q2kSuper) * q2kSuperBlock
-		buf := make([]float32, q2kSuper)
 		for o := 0; o < out; o++ {
 			y[o] = q2kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
 	case Q3_K:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / q3kSuper) * q3kSuperBlock
-		buf := make([]float32, q3kSuper)
 		for o := 0; o < out; o++ {
 			y[o] = q3kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
 	case IQ2_XXS:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / iq2xxsSuper) * iq2xxsSuperBlock
-		buf := make([]float32, iq2xxsSuper)
 		for o := 0; o < out; o++ {
 			y[o] = iq2xxsRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
 	case Q2_0:
 		blk := w.Quant.Block
-		raw := i8AsBytes(c.i8(w))
+		raw := i8View(c.i8(w))
 		rowBytes := in / 4 // 2-bit codes, 4 per byte
 		ws := w.Quant.Scale
 		nblk := in / blk
@@ -247,9 +256,8 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		if !ok {
 			panic("compute: cpu-ref MatMul unsupported weight dtype " + w.Dtype.String())
 		}
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / rawIQSuper) * f.blockBytes
-		buf := make([]float32, rawIQSuper)
 		for o := 0; o < out; o++ {
 			y[o] = rawIQRowDot(f, raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
 		}
@@ -263,6 +271,9 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	out, in := w.Shape[0], w.Shape[1]
 	Xf := c.f32(X)
 	Y := make([]float32, P*out)
+	scratch := cpuRefScratchPool.Get().(*[q4kSuper]float32)
+	defer cpuRefScratchPool.Put(scratch)
+	buf := scratch[:]
 	switch w.Dtype {
 	case F32:
 		wf := c.f32(w)
@@ -292,7 +303,6 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		// Per-(o,t) GEMV — bit-identical to MatMul's Q4_K row dot for each row t, which is the
 		// q4kGemm correctness contract (Y[t,o] == q4kMatRows(X_t)[o]).
 		raw, rowBytes := c.q4kRows(w, in)
-		buf := make([]float32, q4kSuper)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
@@ -300,13 +310,12 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			}
 		}
 	case Q5_K, Q6_K:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		bs := 176
 		if w.Dtype == Q6_K {
 			bs = 210
 		}
 		rowBytes := (in / 256) * bs
-		buf := make([]float32, 256)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
@@ -314,9 +323,8 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			}
 		}
 	case Q2_K:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / q2kSuper) * q2kSuperBlock
-		buf := make([]float32, q2kSuper)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
@@ -324,9 +332,8 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			}
 		}
 	case Q3_K:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / q3kSuper) * q3kSuperBlock
-		buf := make([]float32, q3kSuper)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
@@ -334,9 +341,8 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			}
 		}
 	case IQ2_XXS:
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / iq2xxsSuper) * iq2xxsSuperBlock
-		buf := make([]float32, iq2xxsSuper)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {
@@ -346,7 +352,7 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q2_0:
 		// Per-(o,t) ternary GEMV — bit-identical to MatMul's Q2_0 row dot for each row t.
 		blk := w.Quant.Block
-		raw := i8AsBytes(c.i8(w))
+		raw := i8View(c.i8(w))
 		rowBytes := in / 4
 		ws := w.Quant.Scale
 		nblk := in / blk
@@ -362,9 +368,8 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		if !ok {
 			panic("compute: cpu-ref BatchedMatMul unsupported weight dtype " + w.Dtype.String())
 		}
-		raw := i8AsBytes(w.buf.(HostBuffer).I8())
+		raw := i8View(w.buf.(HostBuffer).I8())
 		rowBytes := (in / rawIQSuper) * f.blockBytes
-		buf := make([]float32, rawIQSuper)
 		for o := 0; o < out; o++ {
 			row := raw[o*rowBytes : (o+1)*rowBytes]
 			for t := 0; t < P; t++ {

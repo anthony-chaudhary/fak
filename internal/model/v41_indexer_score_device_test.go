@@ -729,3 +729,68 @@ func TestV41IndexerScorePrimaryFailureSurvivesCleanup(t *testing.T) {
 		}
 	}
 }
+
+// v41IndexerKeyAdmissionBackend advertises a device-memory capacity so the
+// production admission helper can be witnessed without a physical device.
+type v41IndexerKeyAdmissionBackend struct {
+	*v41ScoreTestBackend
+	free, total int64
+	known       bool
+}
+
+func (b *v41IndexerKeyAdmissionBackend) Caps() compute.Caps {
+	c := b.v41ScoreTestBackend.Caps()
+	c.CapacityProbe = true
+	return c
+}
+
+func (b *v41IndexerKeyAdmissionBackend) DeviceMemory() (int64, int64, bool) {
+	return b.total, b.free, b.known
+}
+
+// fak-test:runtime fast est=5ms lane=default
+// TestV41IndexerKeyProductionAdmission pins #13870: production code (not only a
+// test) turns device admission into a resident-indexer-key allowance, and the
+// allowance reaches the gather ops the decode step reads. Every non-admitted
+// backend keeps the zero budget, so the host repack path is preserved.
+func TestV41IndexerKeyProductionAdmission(t *testing.T) {
+	fixture := func(t *testing.T) (*Model, *v41IndexerKeyAdmissionBackend) {
+		m := v41IndexerTestFixture(t)
+		b := &v41IndexerKeyAdmissionBackend{v41ScoreTestBackend: newV41ScoreTestBackend(), total: 1 << 30, free: 1 << 20, known: true}
+		b.rowLog = true
+		return m, b
+	}
+	t.Run("admitted budget reaches gather ops", func(t *testing.T) {
+		m, b := fixture(t)
+		s := v41DenseTestSession(t, m, b)
+		v41ScoreOnly(s)
+		want := compute.BudgetAfterHeadroom(b.free, v41IndexerKeyHeadroom)
+		if want <= 0 {
+			t.Fatalf("fixture headroom yielded non-positive budget %d", want)
+		}
+		if got := s.v41IndexerKeyAdmissionBytes(); got != want {
+			t.Fatalf("admission bytes = %d want %d", got, want)
+		}
+		if got := s.v41DeviceGatherOpsFunc().indexerKeyBudgetBytes; got != want {
+			t.Fatalf("production gather ops budget = %d want %d (production never wired the resident path)", got, want)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		mutate func(*v41IndexerKeyAdmissionBackend)
+	}{
+		{"host capacity", func(b *v41IndexerKeyAdmissionBackend) { b.known = false }},
+		{"exhausted free", func(b *v41IndexerKeyAdmissionBackend) { b.free = 0 }},
+		{"no row-log primitive", func(b *v41IndexerKeyAdmissionBackend) { b.rowLog = false }},
+	} {
+		t.Run("fallback "+tc.name, func(t *testing.T) {
+			m, b := fixture(t)
+			tc.mutate(b)
+			s := v41DenseTestSession(t, m, b)
+			v41ScoreOnly(s)
+			if got := s.v41DeviceGatherOpsFunc().indexerKeyBudgetBytes; got != 0 {
+				t.Fatalf("%s: budget = %d want 0 (host fallback must stay available)", tc.name, got)
+			}
+		})
+	}
+}

@@ -334,7 +334,13 @@ type InKernelPlanner struct {
 	// snapshot advance.
 	incrementalContext *IncrementalContext
 	ctxSnapshot        ContextSnapshot
-	ctxMu              sync.Mutex
+	// ctxLayerMemo is the OPTIONAL per-session Source/Registry/Snapshot layer memo
+	// (inkernel_incremental.go). nil — the default and every planner that never calls
+	// SetContextLayerMemo — leaves RenderIncrementalContext on the historical full
+	// rebuild. It is guarded by ctxMu alongside the registry fields above; its own
+	// internal state is guarded by the memo's own mutex.
+	ctxLayerMemo *ContextLayerMemo
+	ctxMu        sync.Mutex
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -951,6 +957,67 @@ func (p *InKernelPlanner) ApplyIncrementalContextUpdate() (string, bool, error) 
 		return "", false, err
 	}
 	return res.Text, res.Kind == ReconcileReplacementReady, nil
+}
+
+// SetContextLayerMemo installs the per-session Source/Registry/Snapshot layer memo
+// (inkernel_incremental.go). nil leaves the planner on the historical full-render path,
+// so a planner that never calls this is byte-for-byte unchanged. It is nil-receiver safe.
+func (p *InKernelPlanner) SetContextLayerMemo(m *ContextLayerMemo) {
+	if p == nil {
+		return
+	}
+	p.ctxMu.Lock()
+	defer p.ctxMu.Unlock()
+	p.ctxLayerMemo = m
+}
+
+// RenderIncrementalContext renders messages/tools through the installed layer memo and
+// returns the prompt plus its token ids. With no memo installed (or a nil planner, model,
+// or tokenizer) it returns the full rebuild and an all-rendered stats record.
+//
+// The memo reuses the Source and Snapshot layers and re-renders only the Registry layer
+// when the request is a pure append of the previous one; its own mandatory guard falls
+// back to the full rebuild whenever the incremental assembly cannot be proven
+// byte-identical to it. The DeepSeek V4.1 raw-completion BOS rule (preparePrompt) is
+// applied here to the returned ids exactly once — BOS is an id-only prefix, never text,
+// so it is deliberately absent from the memo's fingerprint.
+func (p *InKernelPlanner) RenderIncrementalContext(messages []Message, tools []ToolDef, sp SampleParams) (string, []int, ContextLayerStats, error) {
+	if p == nil || p.m == nil || p.tok == nil {
+		return "", nil, ContextLayerStats{}, errors.New("native incremental context requires a model and tokenizer")
+	}
+	full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
+	encode := p.tok.Encode
+
+	p.ctxMu.Lock()
+	memo := p.ctxLayerMemo
+	p.ctxMu.Unlock()
+
+	if memo == nil {
+		fullText := full(messages, tools)
+		ids, err := encode(fullText)
+		if err != nil {
+			return "", nil, ContextLayerStats{}, err
+		}
+		return fullText, p.applyInKernelBOS(ids, sp), ContextLayerStats{Rendered: contextLayerAll()}, nil
+	}
+
+	plan, err := memo.PlanContextLayers(messages, tools, full, encode)
+	if err != nil {
+		return "", nil, ContextLayerStats{}, err
+	}
+	return plan.Prompt, p.applyInKernelBOS(plan.IDs, sp), plan.Stats, nil
+}
+
+// applyInKernelBOS prepends the GGUF-declared BOS id for a raw DeepSeek V4.1 completion
+// request, mirroring preparePrompt. It is a no-op for every other renderer.
+func (p *InKernelPlanner) applyInKernelBOS(ids []int, sp SampleParams) []int {
+	if p == nil || p.m == nil {
+		return ids
+	}
+	if inKernelRawV41Prompt(p.m.Cfg, sp) && p.m.Cfg.BOSTokenID != nil {
+		return append([]int{*p.m.Cfg.BOSTokenID}, ids...)
+	}
+	return ids
 }
 
 // ApplyPromptShrink evaluates the configured or request-level prompt-shrink levers
@@ -2795,4 +2862,18 @@ func (p *InKernelPlanner) ReleaseStartupWarm() {
 		return
 	}
 	p.warmState.Release()
+}
+
+// DeviceTransientPool reports the backend's request-transient reuse pool; ok is
+// false when the backend keeps none (CPU, CUDA, or a non-pooling build).
+func (p *InKernelPlanner) DeviceTransientPool() (DeviceTransientPoolStats, bool) {
+	if p == nil || p.backend == nil {
+		return DeviceTransientPoolStats{}, false
+	}
+	pool, ok := p.backend.(TransientPoolBackend)
+	if !ok {
+		return DeviceTransientPoolStats{}, false
+	}
+	buffers, bytes, peak := pool.TransientPoolStats()
+	return DeviceTransientPoolStats{Backend: p.backend.Name(), PooledBuffers: buffers, PooledBytes: bytes, PeakPooledBytes: peak}, true
 }
