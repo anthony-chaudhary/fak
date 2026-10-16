@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -56,6 +57,113 @@ func TestServeSizingArtifactCPUArm(t *testing.T) {
 	}
 	if len(art.Pools) != 1 || art.Pools[0].Pool != "host" {
 		t.Fatalf("CPU arm pools = %+v, want exactly the host pool", art.Pools)
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestServeSizingMetalQ8StartupMatchesNativeWeightsPlan(t *testing.T) {
+	original := serveMetalAvailable
+	t.Cleanup(func() { serveMetalAvailable = original })
+	t.Setenv("FAK_Q4K", "0")
+	t.Setenv("FAK_STREAM_Q4K", "")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "")
+	t.Setenv("FAK_TEST_STARTUP_PEAK_BYTES", "")
+	t.Setenv("FAK_TEST_STEADY_BYTES", "")
+	t.Setenv("FAK_ADMISSION_STATE_ENVELOPE", "")
+	path := writeServePackedEmbeddingFixture(t, "startup-q8.gguf", false)
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	serveMetalAvailable = func() bool { return true }
+	art, err := buildServeSizingArtifact(ws, nil, false, 16, path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded serveSizingArtifact
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	native, err := estimateMetalWeightsMemoryBounds(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Arm != "device-lean-q8" || decoded.Startup == nil {
+		t.Fatalf("selected Q8 JSON has no startup projection: %s", wire)
+	}
+	if decoded.Startup.Scope != "metal-q8-weights-only" || decoded.Startup.SteadyBytes != native.SteadyBytes || decoded.Startup.PeakBytes != native.StartupPeakBytes || decoded.Startup.PeakBytes <= decoded.Startup.SteadyBytes {
+		t.Fatalf("JSON startup=%+v native weights plan=%+v", decoded.Startup, native)
+	}
+	// A CPU Q8 selection retains exactly the same steady demands and totals,
+	// but must not acquire a Metal startup estimate.
+	serveMetalAvailable = func() bool { return false }
+	cpu, err := buildServeSizingArtifact(ws, nil, false, 16, path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cpu.Startup != nil || !reflect.DeepEqual(cpu.Tiers, art.Tiers) || !reflect.DeepEqual(cpu.Demands, art.Demands) {
+		t.Fatalf("startup projection changed steady sizing: CPU=%+v Metal=%+v", cpu, art)
+	}
+	for _, stream := range []string{"FAK_STREAM_Q4K", "FAK_METAL_STREAM_Q4K"} {
+		t.Run(stream, func(t *testing.T) {
+			t.Setenv(stream, "1")
+			serveMetalAvailable = func() bool { return true }
+			streamed, err := buildServeSizingArtifact(ws, nil, false, 16, path, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if streamed.Startup != nil {
+				t.Fatal("separate streamed reservation acquired nonstreamed Q8 estimate")
+			}
+		})
+	}
+	serveMetalAvailable = func() bool { return true }
+	t.Setenv("FAK_Q4K", "1")
+	resident, err := buildServeSizingArtifact(ws, nil, false, 16, path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resident.Arm != "device-resident-q4k" || resident.Startup != nil {
+		t.Fatal("resident selection acquired a legacy Q8 startup estimate")
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestServeSizingMetalQ8StartupBudgetWarnings(t *testing.T) {
+	const steady int64 = 1024
+	peak, _ := metalServeStartupPeakBytes(serveLoadArmQuantProfileQ8, steady, 0, false)
+	for _, tc := range []struct {
+		name       string
+		total      int64
+		known      bool
+		fit        serveFitBudget
+		wantBudget bool
+		wantTotal  bool
+	}{
+		{"fits-exactly", peak, true, serveFitBudget{Base: peak}, false, false},
+		{"host-total-short", peak - 1, true, serveFitBudget{Base: peak}, false, true},
+		{"usable-budget-short", peak, true, serveFitBudget{Base: peak - 1}, true, false},
+		{"headroom-budget-short", peak, true, serveFitBudget{Base: peak, Headroom: 0.1}, true, false},
+		{"unknown-host", 0, false, serveFitBudget{}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			startup, warnings := serveSizingMetalQ8Startup(steady, tc.total, tc.known, tc.fit)
+			if startup == nil || startup.PeakBytes != peak || startup.SteadyBytes != steady {
+				t.Fatalf("startup=%+v warnings=%v", startup, warnings)
+			}
+			text := strings.Join(warnings, "\n")
+			if strings.Contains(text, "host capacity") != tc.wantTotal || strings.Contains(text, "usable host budget") != tc.wantBudget {
+				t.Fatalf("unexpected startup warnings: %v", warnings)
+			}
+		})
+	}
+	if startup, warnings := serveSizingMetalQ8Startup(0, 0, false, serveFitBudget{}); startup != nil || len(warnings) == 0 {
+		t.Fatal("unavailable startup estimate must not appear as zero-cost success")
 	}
 }
 
