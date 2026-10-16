@@ -81,6 +81,11 @@ type StreamingPlanner interface {
 // upstream failure.
 var ErrStreamingUnsupported = errors.New("agent: streaming not supported for this provider wire")
 
+// ErrUpstreamIncompleteStream means EOF arrived without a terminal marker or
+// completion of every requested choice. Content already sent to the sink remains
+// partial output; held tool calls are not returned as an executable Completion.
+var ErrUpstreamIncompleteStream = errors.New("agent: upstream stream ended before completion")
+
 // ErrUpstreamStreamError is the sentinel a streaming read returns when the upstream
 // (typically a routing proxy) reports a failure IN-BAND as an SSE `data:` frame carrying
 // an `error` object, e.g. {"error":{"code":"upstream_truncated",...}} followed by
@@ -649,6 +654,7 @@ func (p *HTTPPlanner) StreamingSupported() bool {
 type openAIStreamChunk struct {
 	Model   string `json:"model"`
 	Choices []struct {
+		Index *int `json:"index"`
 		Delta struct {
 			Role             string `json:"role"`
 			Content          string `json:"content"`
@@ -669,6 +675,50 @@ type openAIStreamChunk struct {
 	Timings        json.RawMessage `json:"timings,omitempty"`
 	Error          json.RawMessage `json:"error,omitempty"`
 	PromptProgress json.RawMessage `json:"prompt_progress,omitempty"`
+}
+
+// streamCompletionProof tracks only observed finish indices, never allocating
+// from the operator-supplied n. Unknown request cardinality needs explicit DONE.
+type streamCompletionProof struct {
+	choices  int
+	finished map[int]struct{}
+	done     bool
+}
+
+func newStreamCompletionProof(request []byte) streamCompletionProof {
+	var body struct {
+		N json.RawMessage `json:"n"`
+	}
+	proof := streamCompletionProof{choices: 1}
+	if json.Unmarshal(request, &body) != nil {
+		proof.choices = 0
+	} else if len(body.N) != 0 {
+		proof.choices = 0
+		if json.Unmarshal(body.N, &proof.choices) != nil || proof.choices <= 0 {
+			proof.choices = 0
+		}
+	}
+	return proof
+}
+
+func (p *streamCompletionProof) finish(index *int) {
+	i := 0
+	if index != nil {
+		i = *index
+	} else if p.choices != 1 {
+		return // Omitted indices are compatible only with a single-choice stream.
+	}
+	if i < 0 || i >= p.choices {
+		return
+	}
+	if p.finished == nil {
+		p.finished = make(map[int]struct{})
+	}
+	p.finished[i] = struct{}{}
+}
+
+func (p *streamCompletionProof) complete() bool {
+	return p.done || (p.choices > 0 && len(p.finished) == p.choices)
 }
 
 // CompleteStream performs one streamed chat-completions round-trip on the
@@ -891,6 +941,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// leaves the stream RUNNING — a slow-but-alive turn still gets every chance to finish.
 	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return call.attemptsUsed }, p.SoftStallNotify)
 	held := streamHeldActivity(ctx)
+	completionProof := newStreamCompletionProof(call.body)
 	promptProgress := newStreamPromptProgress(call.body)
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
@@ -910,6 +961,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			continue
 		}
 		if data == "[DONE]" {
+			completionProof.done = true
 			break
 		}
 		var chunk openAIStreamChunk
@@ -939,6 +991,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		}
 		for _, ch := range chunk.Choices {
 			if ch.FinishReason != "" {
+				completionProof.finish(ch.Index)
 				finish = ch.FinishReason
 			}
 			if ch.Delta.Content != "" {
@@ -980,6 +1033,10 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			return nil, &UpstreamStalledError{Idle: window, Kind: kind, Err: err}
 		}
 		return nil, fmt.Errorf("planner: %s: stream read: %w", call.adapter.Provider(), err)
+	}
+
+	if !completionProof.complete() {
+		return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), ErrUpstreamIncompleteStream)
 	}
 
 	calls := make([]ToolCall, 0, len(toolAcc))
