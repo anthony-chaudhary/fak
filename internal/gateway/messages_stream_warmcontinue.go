@@ -101,9 +101,10 @@ func requestEnablesThinking(raw []byte) bool {
 // reset or an idle stall — rather than a definite HTTP status. A status error (e.g. a 400 the
 // prefill itself provoked, or an exhausted 429) will not be fixed by replaying on another
 // worker, so it is surfaced instead of retried. Request cancellation/deadline
-// errors are terminal too; typed idle/no-progress watchdog stalls remain eligible.
+// errors and already-relayed provider error frames are terminal too; typed
+// idle/no-progress watchdog stalls remain eligible.
 func warmContinuableErr(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errUpstreamStreamRefusal) {
 		return false
 	}
 	var se *agent.UpstreamStatusError
