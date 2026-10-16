@@ -39,9 +39,10 @@ type StreamSink func(contentDelta string) error
 type streamHeldActivityKey struct{}
 
 // WithStreamHeldActivity attaches a callback CompleteStream invokes on every upstream
-// delta it HOLDS off the sink (tool-call fragments, reasoning). The payload stays held;
-// the caller learns only that the turn is advancing, so it can commit its response and
-// keep the socket warm while a long tool call is generated.
+// delta it HOLDS off the sink (tool-call fragments, reasoning), and qualified
+// opt-in prompt-processing progress. The payload stays held; the caller learns
+// only that the turn is advancing, so it can commit its response and keep the
+// socket warm while prefill or a long tool call is processed.
 func WithStreamHeldActivity(ctx context.Context, f func()) context.Context {
 	if f == nil {
 		return ctx
@@ -664,9 +665,10 @@ type openAIStreamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage   *Usage          `json:"usage"`
-	Timings json.RawMessage `json:"timings,omitempty"`
-	Error   json.RawMessage `json:"error,omitempty"`
+	Usage          *Usage          `json:"usage"`
+	Timings        json.RawMessage `json:"timings,omitempty"`
+	Error          json.RawMessage `json:"error,omitempty"`
+	PromptProgress json.RawMessage `json:"prompt_progress,omitempty"`
 }
 
 // CompleteStream performs one streamed chat-completions round-trip on the
@@ -889,6 +891,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	// leaves the stream RUNNING — a slow-but-alive turn still gets every chance to finish.
 	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return call.attemptsUsed }, p.SoftStallNotify)
 	held := streamHeldActivity(ctx)
+	promptProgress := newStreamPromptProgress(call.body)
 	sc := bufio.NewScanner(sr)
 	// A single SSE data line can carry a large tool-call argument fragment; raise the
 	// scanner ceiling well past the 64 KiB default so a big chunk is never truncated.
@@ -917,7 +920,13 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			return nil, serr
 		}
 		if openAIChunkAdvancesTurn(chunk) {
-			sr.noteProgress() // real content/tool/finish — the TURN moved, not just the socket
+			promptProgress.enabled = false // prefill evidence cannot extend generation
+			sr.noteProgress()              // real content/tool/finish — the TURN moved, not just the socket
+		} else if promptProgress.advance(chunk.PromptProgress) {
+			sr.noteProgress() // configured upstream reports newly processed prompt tokens
+			if held != nil {
+				held()
+			}
 		}
 		if chunk.Model != "" {
 			model = chunk.Model
