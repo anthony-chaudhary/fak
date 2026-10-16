@@ -133,6 +133,7 @@ type v41ForwardState struct {
 	// traversal and is intentionally absent from prefix snapshots.
 	forwardCoverage   *NativeForwardCoverage
 	activationCapture V41ActivationCaptureReceipt
+	activeStepRound   *v41StepRound
 
 	// indexKeyMemo is the session's per-index-source-layer memo of the last
 	// committed fold; indexKeyPrior is the read-only copy a re-fold run reuses.
@@ -337,6 +338,9 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 // No-logits prefill retains every checked head-input boundary, but does not
 // project or scale a distribution that the caller explicitly discards.
 func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (act *Activations, err error) {
+	if st != nil && st.activeStepRound != nil {
+		return nil, errV41StepRoundState
+	}
 	if m.v41EPRequested() && (st == nil || st.callbackOwner == nil || st.routedLayer == nil || st.routedPrefill == nil) {
 		return nil, fmt.Errorf("%w: requires the bound Session forward", ErrV41ExpertParallel)
 	}
