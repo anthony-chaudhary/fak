@@ -46,6 +46,8 @@ func TestTokenCapComparisonBoundaries(t *testing.T) {
 		{"request_overflow", 10, 1, math.MaxInt64, false},
 		{"unlimited_zero", 0, math.MaxInt64, math.MaxInt64, true},
 		{"unlimited_negative", -1, math.MaxInt64, math.MaxInt64, true},
+		// Unsupported negative comparison operands retain their existing policy.
+		{"legacy_negative_used", math.MaxInt64, -2, 1, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := checkTokenCap(TokenCapInputTokens, tc.limit, tc.used, tc.requested)
@@ -60,22 +62,47 @@ func TestTokenCapComparisonBoundaries(t *testing.T) {
 }
 
 // fak-test:runtime fast est=1ms
-func TestTokenCapsPreserveDerivedInvalidTotalPolicy(t *testing.T) {
-	// TotalTokens' separate unchecked aggregation can still produce a negative
-	// operand. This comparator repair deliberately does not change that policy.
-	invalid := NewTokenUsage(math.MaxInt64, 0, math.MaxInt64)
+func TestTokenCapsDerivedTotalOverflow(t *testing.T) {
+	oversized := NewTokenUsage(math.MaxInt64, 0, math.MaxInt64)
 	for _, tc := range []struct {
 		name          string
 		used, request TokenUsage
 	}{
-		{"negative_used", invalid, NewTokenUsage(1, 0, 0)},
-		{"negative_request", NewTokenUsage(1, 0, 0), invalid},
-		{"both_negative", invalid, invalid},
+		{"overflowed_used", oversized, NewTokenUsage(1, 0, 0)},
+		{"overflowed_request", NewTokenUsage(1, 0, 0), oversized},
+		{"both_overflowed", oversized, oversized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := (TokenCaps{MaxTotalTokens: math.MaxInt64}).Decide(TokenLoad{Tokens: tc.used}, tc.request)
-			if !got.Admit {
-				t.Fatalf("legacy invalid-total policy changed: %+v", got)
+			if got.Admit || got.Cap != TokenCapTotalTokens || got.Used != tc.used.TotalTokens() || got.Requested != tc.request.TotalTokens() {
+				t.Fatalf("derived total overflow admitted usage: %+v", got)
+			}
+			if room := (TokenCaps{MaxTotalTokens: 1}).Headroom(TokenLoad{Tokens: tc.used}); room.TotalTokens != 0 {
+				t.Fatalf("derived total exposed false headroom: %+v", room)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestTokenUsageTotalTokensBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage TokenUsage
+		want  int64
+	}{
+		{"zero", TokenUsage{}, 0},
+		{"ordinary", NewTokenUsage(3, 1, 2), 5},
+		{"exact_boundary", NewTokenUsage(math.MaxInt64-1, 0, 1), math.MaxInt64},
+		{"overflow", NewTokenUsage(math.MaxInt64, 0, 1), math.MaxInt64},
+		{"existing_negative_normalization", TokenUsage{InputTokens: -1, OutputTokens: 3}, 3},
+		// The separate invalid split-normalization policy is unchanged by derived-total saturation.
+		{"existing_split_overflow", TokenUsage{CachedInputTokens: math.MaxInt64, UncachedInputTokens: math.MaxInt64}, -2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := tc.usage
+			if got := tc.usage.TotalTokens(); got != tc.want || tc.usage != before {
+				t.Fatalf("derived total=%d want=%d raw=%+v before=%+v", got, tc.want, tc.usage, before)
 			}
 		})
 	}

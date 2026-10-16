@@ -65,9 +65,13 @@ func (u TokenUsage) Add(v TokenUsage) TokenUsage {
 	)
 }
 
-// TotalTokens is the provider-visible input+output total.
+// TotalTokens returns input+output, saturating positive overflow at MaxInt64.
+// The individual usage dimensions are unchanged.
 func (u TokenUsage) TotalTokens() int64 {
 	u = u.Normalize()
+	if u.InputTokens > math.MaxInt64-u.OutputTokens {
+		return math.MaxInt64
+	}
 	return u.InputTokens + u.OutputTokens
 }
 
