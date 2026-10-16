@@ -649,6 +649,10 @@ type CompletionRequest struct {
 	TopP        *float64        `json:"top_p,omitempty"`
 	Stop        json.RawMessage `json:"stop,omitempty"`
 	Stream      bool            `json:"stream,omitempty"`
+	// FakDecodeTrace and Fak.NativeDecodeTokenIDs are the same opt-in pair the
+	// chat route honors; only native_decode_token_ids is read from Fak here.
+	FakDecodeTrace bool           `json:"fak_decode_trace,omitempty"`
+	Fak            *FakRequestExt `json:"fak,omitempty"`
 }
 
 // CompletionResponse is the legacy `text_completion` object: choices carry a bare
@@ -660,6 +664,7 @@ type CompletionResponse struct {
 	Model   string             `json:"model"`
 	Choices []CompletionChoice `json:"choices"`
 	Usage   agent.Usage        `json:"usage"`
+	Fak     *FakExt            `json:"fak,omitempty"`
 }
 
 // CompletionChoice is one legacy completion choice (text, not a message).

@@ -15,7 +15,9 @@ import (
 
 // Endpoint APIs a Client speaks.
 const (
-	// APIOpenAI is POST /v1/completions with a raw text prompt; text only.
+	// APIOpenAI is POST /v1/completions with a raw text prompt. It asks for fak's
+	// native decode token ids and falls back to text when the endpoint refuses or
+	// omits them.
 	APIOpenAI = "openai"
 	// APILlama is llama-server's POST /completion with n_probs: token ids and
 	// top-k log-probabilities.
@@ -24,6 +26,8 @@ const (
 
 // ErrEndpoint wraps every transport, status and decode failure of a Client.
 var ErrEndpoint = errors.New("logprobparity: endpoint")
+
+var errBadRequest = errors.New("bad request")
 
 // Client is one greedy-decoding endpoint.
 type Client struct {
@@ -80,7 +84,8 @@ func (c Client) Generate(ctx context.Context, prompt string, maxTokens, topK int
 		}
 		return g, nil
 	case APIOpenAI, "":
-		body := map[string]any{"prompt": prompt, "max_tokens": maxTokens, "temperature": 0, "seed": 42}
+		body := map[string]any{"prompt": prompt, "max_tokens": maxTokens, "temperature": 0, "seed": 42,
+			"fak_decode_trace": true, "fak": map[string]any{"native_decode_token_ids": true}}
 		if m := strings.TrimSpace(c.Model); m != "" {
 			body["model"] = m
 		}
@@ -91,14 +96,33 @@ func (c Client) Generate(ctx context.Context, prompt string, maxTokens, topK int
 			Usage struct {
 				PromptTokens int `json:"prompt_tokens"`
 			} `json:"usage"`
+			Fak *struct {
+				TokenIDs *struct {
+					TokenIDs []int `json:"token_ids"`
+				} `json:"native_decode_token_ids"`
+			} `json:"fak"`
 		}
-		if err := c.post(ctx, base+"/v1/completions", body, &out); err != nil {
+		err := c.post(ctx, base+"/v1/completions", body, &out)
+		if errors.Is(err, errBadRequest) {
+			// A non-native route or a strict OpenAI server refuses the extension.
+			delete(body, "fak_decode_trace")
+			delete(body, "fak")
+			err = c.post(ctx, base+"/v1/completions", body, &out)
+		}
+		if err != nil {
 			return Generation{}, err
 		}
 		if len(out.Choices) == 0 {
 			return Generation{}, fmt.Errorf("%w: %s returned no choices", ErrEndpoint, base)
 		}
-		return Generation{Text: out.Choices[0].Text, PromptTokens: out.Usage.PromptTokens}, nil
+		g := Generation{Text: out.Choices[0].Text, PromptTokens: out.Usage.PromptTokens}
+		if out.Fak != nil && out.Fak.TokenIDs != nil {
+			g.Positions = make([]Position, 0, len(out.Fak.TokenIDs.TokenIDs))
+			for _, id := range out.Fak.TokenIDs.TokenIDs {
+				g.Positions = append(g.Positions, Position{ID: id})
+			}
+		}
+		return g, nil
 	}
 	return Generation{}, fmt.Errorf("%w: unknown api %q", ErrEndpoint, c.API)
 }
@@ -133,6 +157,9 @@ func (c Client) post(ctx context.Context, url string, body any, out any) error {
 		snippet := strings.TrimSpace(string(data))
 		if len(snippet) > 240 {
 			snippet = snippet[:240]
+		}
+		if resp.StatusCode == http.StatusBadRequest {
+			return fmt.Errorf("%w: %w: %s: HTTP %d: %s", ErrEndpoint, errBadRequest, url, resp.StatusCode, snippet)
 		}
 		return fmt.Errorf("%w: %s: HTTP %d: %s", ErrEndpoint, url, resp.StatusCode, snippet)
 	}
