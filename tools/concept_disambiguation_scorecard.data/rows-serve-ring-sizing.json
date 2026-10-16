@@ -1,0 +1,81 @@
+{
+  "rows": [
+    {
+      "id": "serve-requested-context-tokens",
+      "canonical": "RequestedContextTokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "RequestedContextTokens preserves the caller requested native context token count in a header-derived memory projection, including unknown and refused results.",
+      "distinction": "This is the caller input before memory resolution; native-context-resolution derives the fitting runtime token count.",
+      "distinct_from": [
+        "native-context-resolution",
+        "serve-resolved-context-tokens"
+      ],
+      "aliases": [],
+      "grounding": "RequestedContextTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "serve-resolved-context-tokens",
+      "canonical": "ResolvedContextTokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ResolvedContextTokens is the native context token count derived by the runtime context resolver for the activated-ring memory projection snapshot; zero with UNKNOWN means unresolved.",
+      "distinction": "This is the resolved model window after sizing, while RequestedContextTokens preserves the caller input even when resolution cannot run.",
+      "distinct_from": [
+        "serve-requested-context-tokens"
+      ],
+      "aliases": [],
+      "grounding": "ResolvedContextTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "serve-ring-arm-memory-plan",
+      "canonical": "serveGGUFMemoryPlanForArm",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "serveGGUFMemoryPlanForArm derives classed weight, scratch and context memory demands from a GGUF header for the selected native serve load arm.",
+      "distinction": "This function produces byte demands for a chosen arm; native-context-resolution derives a token window from sizing inputs and the activated-ring fallback may replace the resulting full-residency plan.",
+      "distinct_from": [
+        "native-context-resolution",
+        "serve-full-plan-fit-too-big"
+      ],
+      "aliases": [],
+      "grounding": "serveGGUFMemoryPlanForArm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "serve-full-plan-fit-too-big",
+      "canonical": "serveFullPlanFitTooBig",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "serveFullPlanFitTooBig recognizes a typed compute FitError whose verdict is FitTooBig, enabling the activated-expert fallback only after a full-residency capacity refusal.",
+      "distinction": "This predicate recognizes an existing typed refusal and produces no memory plan; serveGGUFMemoryPlanForArm produces the demands that a fit guard judges.",
+      "distinct_from": [
+        "serve-ring-arm-memory-plan"
+      ],
+      "aliases": [],
+      "grounding": "serveFullPlanFitTooBig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

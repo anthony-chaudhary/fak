@@ -5,7 +5,10 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // TestSpeculativeDecodingSubstrate is the unified witness verifying the multi-architecture
@@ -696,4 +699,295 @@ func TestSpeculativePenaltyScratchReuseMatchesClone(t *testing.T) {
 	if extra := penalized - plain; extra > 1 {
 		t.Fatalf("penalty allocs/round = %v over plain, want at most 1 scratch row (k=%d)", extra, k)
 	}
+}
+
+type speculativeBoundaryOwnerBackend struct {
+	compute.Backend
+	owner   sync.Mutex
+	queries int
+}
+
+func (b *speculativeBoundaryOwnerBackend) ForwardExecutionOwner() *sync.Mutex {
+	b.queries++
+	return &b.owner
+}
+
+// fak-test:justify why=regression when=changed:internal/model/**
+// fak-test:runtime fast est=100ms
+func TestParallelVerifyKnownBoundaryReject(t *testing.T) {
+	ctx := context.Background()
+	cfg := syntheticDecodeCfg()
+	prompt := []int{3, 7, 11}
+	makeBoundary := func() []float32 {
+		row := make([]float32, cfg.VocabSize)
+		for i := range row {
+			row[i] = -10
+		}
+		row[7], row[8] = 9, 8
+		return row
+	}
+	sameBits := func(a, b []float32) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if math.Float32bits(a[i]) != math.Float32bits(b[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, tc := range []struct {
+		name    string
+		tie     bool
+		penalty bool
+		want    int
+		draft   int
+	}{
+		{name: "raw", want: 7, draft: 9},
+		{name: "lowest_index_tie", tie: true, want: 7, draft: 8},
+		{name: "penalty_changes_correction", penalty: true, want: 8, draft: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewSynthetic(cfg)
+			target, oracle := m.NewSession(), m.NewSession()
+			t.Cleanup(target.Close)
+			t.Cleanup(oracle.Close)
+			target.Prefill(prompt)
+			oracle.Prefill(prompt)
+			boundary := makeBoundary()
+			if tc.tie {
+				boundary[8] = 9
+			}
+			counts := make([]int32, cfg.VocabSize)
+			var sanitizer *RepetitionPenaltySanitizer
+			if tc.penalty {
+				counts[7] = 2
+				sanitizer = NewRepetitionPenaltySanitizer(1, 0.5)
+			}
+			beforeBoundary := append([]float32(nil), boundary...)
+			beforeCounts := append([]int32(nil), counts...)
+			beforeKV := target.Cache.Clone()
+			beforeLogits := append([]float32(nil), target.LastLogits()...)
+			draft := []int{tc.draft, 9, 10}
+			beforeDraft := append([]int(nil), draft...)
+			res, err := ParallelVerifyKernel(ctx, target, prompt, NewLinearProposal(draft, nil), boundary, sanitizer, counts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.NumAccepted != 0 || len(res.AcceptedTokens) != 0 || res.CorrectionToken != tc.want ||
+				res.RollbackKVCount != 0 || res.TargetLogits != nil || res.LastAcceptedLogits != nil {
+				t.Fatal("known boundary rejection did not return only the independently scored correction")
+			}
+			if !sameBits(boundary, beforeBoundary) || !reflect.DeepEqual(counts, beforeCounts) || !reflect.DeepEqual(draft, beforeDraft) {
+				t.Fatal("verification mutated caller-owned input")
+			}
+			if target.Cache.Len() != beforeKV.Len() || !reflect.DeepEqual(target.Cache.K, beforeKV.K) ||
+				!reflect.DeepEqual(target.Cache.V, beforeKV.V) || !sameBits(target.LastLogits(), beforeLogits) {
+				t.Fatal("known rejection changed target state")
+			}
+			if !reflect.DeepEqual(target.Step(tc.want), oracle.Step(tc.want)) {
+				t.Fatal("correction continuation differs from untouched target")
+			}
+		})
+	}
+	t.Run("nonfinite_boundary", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			raw       float32
+			frequency float64
+			penalty   bool
+		}{
+			{name: "raw_nan", raw: float32(math.NaN())},
+			{name: "raw_positive_infinity", raw: float32(math.Inf(1))},
+			{name: "raw_negative_infinity", raw: float32(math.Inf(-1))},
+			{name: "effective_nan", raw: -10, frequency: math.NaN(), penalty: true},
+			{name: "effective_float32_overflow", raw: -10, frequency: math.MaxFloat64, penalty: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				target := NewSynthetic(cfg).NewSession()
+				t.Cleanup(target.Close)
+				target.Prefill(prompt)
+				boundary := makeBoundary()
+				boundary[len(boundary)-1] = tc.raw
+				counts := make([]int32, cfg.VocabSize)
+				var sanitizer *RepetitionPenaltySanitizer
+				if tc.penalty {
+					counts[len(counts)-1] = 1
+					sanitizer = NewRepetitionPenaltySanitizer(tc.frequency, 0)
+				}
+				before := append([]float32(nil), boundary...)
+				prior := target.Cache.Len()
+				_, err := ParallelVerifyKernel(ctx, target, prompt, NewLinearProposal([]int{9, 10}, nil), boundary, sanitizer, counts)
+				if !errors.Is(err, ErrSpeculativeNonFiniteLogits) {
+					t.Fatalf("nonfinite boundary error = %v", err)
+				}
+				if target.Cache.Len() != prior || !sameBits(boundary, before) {
+					t.Fatal("invalid boundary mutated state or input")
+				}
+			})
+		}
+	})
+	t.Run("matching_first_still_verifies", func(t *testing.T) {
+		m := NewSynthetic(cfg)
+		target, oracle := m.NewSession(), m.NewSession()
+		t.Cleanup(target.Close)
+		t.Cleanup(oracle.Close)
+		boundary := append([]float32(nil), target.Prefill(prompt)...)
+		refBoundary := oracle.Prefill(prompt)
+		first := argmaxF32(refBoundary)
+		next := argmaxF32(oracle.Step(first))
+		res, err := ParallelVerifyKernel(ctx, target, prompt,
+			NewLinearProposal([]int{first, (next + 1) % cfg.VocabSize}, nil), boundary, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.NumAccepted != 1 || !reflect.DeepEqual(res.AcceptedTokens, []int{first}) ||
+			res.CorrectionToken != next || len(res.TargetLogits) != 2 || res.RollbackKVCount != 1 {
+			t.Fatal("matching first token bypassed target verification or changed partial acceptance")
+		}
+		assertCommittedStateParity(t, "matching-first", target, append(append([]int(nil), prompt...), first))
+	})
+	t.Run("malformed_input_does_not_shortcut", func(t *testing.T) {
+		for _, tc := range []struct {
+			name        string
+			short       bool
+			invalidTail bool
+		}{
+			{name: "wrong_boundary_width", short: true},
+			{name: "invalid_later_token", invalidTail: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				target := NewSynthetic(cfg).NewSession()
+				t.Cleanup(target.Close)
+				target.Prefill(prompt)
+				boundary, draft := makeBoundary(), []int{9, 10}
+				if tc.short {
+					boundary = boundary[:len(boundary)-1]
+				}
+				if tc.invalidTail {
+					draft[1] = cfg.VocabSize
+				}
+				var res VerificationResult
+				var err error
+				var fault any
+				func() {
+					defer func() { fault = recover() }()
+					res, err = ParallelVerifyKernel(ctx, target, prompt, NewLinearProposal(draft, nil), boundary, nil, nil)
+				}()
+				if fault == nil && err == nil && res.TargetLogits == nil {
+					t.Fatal("malformed input received a successful no-work rejection")
+				}
+			})
+		}
+	})
+	t.Run("preserves_session_admission", func(t *testing.T) {
+		base, ok := compute.Lookup("cpu-ref")
+		if !ok {
+			t.Fatal("cpu-ref backend unavailable")
+		}
+		sticky := errors.New("test backend failure")
+		for _, name := range []string{"closed", "sticky", "device_only", "compressed_v4"} {
+			t.Run(name, func(t *testing.T) {
+				var target *Session
+				var want error
+				probe := &speculativeBoundaryOwnerBackend{Backend: base}
+				if name == "compressed_v4" {
+					target = NewSynthetic(v4FlashTracerConfig([]int{0, 4})).NewSession()
+					want = ErrV4FlashAttentionUnimplemented
+				} else {
+					var err error
+					target, err = NewSynthetic(cfg).NewBackendSessionChecked(probe)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if name == "device_only" {
+						target.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+					} else {
+						target.Close()
+						if name == "sticky" {
+							target.halFailure = sticky
+							want = sticky
+						}
+					}
+				}
+				t.Cleanup(target.Close)
+				boundary := make([]float32, target.M.Cfg.VocabSize)
+				boundary[7] = 1
+				beforeQueries := probe.queries
+				var got error
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							var ok bool
+							got, ok = r.(error)
+							if !ok {
+								t.Fatalf("non-error admission panic: %T", r)
+							}
+						}
+					}()
+					_, got = ParallelVerifyKernel(ctx, target, nil, NewLinearProposal([]int{9}, nil), boundary, nil, nil)
+				}()
+				if name != "compressed_v4" {
+					if probe.queries <= beforeQueries {
+						t.Fatal("admission did not enter the backend owner domain")
+					}
+					if !probe.owner.TryLock() {
+						probe.owner.Unlock()
+						t.Fatal("admission failure leaked the backend owner")
+					}
+					probe.owner.Unlock()
+				}
+				if got == nil {
+					t.Fatal("known rejection bypassed session admission")
+				}
+				if want != nil && !errors.Is(got, want) {
+					t.Fatalf("admission error = %v, want closed sentinel", got)
+				}
+				if name == "device_only" {
+					var typed *BackendForwardOperationError
+					if !errors.As(got, &typed) || typed.Path != "device-only" || !target.BackendSessionClosed() || !target.HostFallbackObserved() {
+						t.Fatal("device-only refusal lost typed fail-closed state")
+					}
+				}
+				if (name == "closed" || name == "sticky") && !target.BackendSessionClosed() {
+					t.Fatal("closed target reopened")
+				}
+				if target.Cache.Len() != 0 {
+					t.Fatal("refused target advanced its cache")
+				}
+			})
+		}
+	})
+
+	t.Run("success_releases_backend_owner", func(t *testing.T) {
+		base, ok := compute.Lookup("cpu-ref")
+		if !ok {
+			t.Fatal("cpu-ref backend unavailable")
+		}
+		probe := &speculativeBoundaryOwnerBackend{Backend: base}
+		target, err := NewSynthetic(cfg).NewBackendSessionChecked(probe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(target.Close)
+		boundary := append([]float32(nil), target.Prefill(prompt)...)
+		beforeQueries := probe.queries
+		wrong := (argmaxF32(boundary) + 1) % cfg.VocabSize
+		res, err := ParallelVerifyKernel(ctx, target, prompt, NewLinearProposal([]int{wrong}, nil), boundary, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if probe.queries <= beforeQueries {
+			t.Fatal("known rejection did not enter the backend owner domain")
+		}
+		if !probe.owner.TryLock() {
+			probe.owner.Unlock()
+			t.Fatal("known rejection leaked the backend owner")
+		}
+		probe.owner.Unlock()
+		if res.NumAccepted != 0 || res.TargetLogits != nil || res.RollbackKVCount != 0 {
+			t.Fatal("owner-scoped known rejection performed speculative work")
+		}
+	})
 }

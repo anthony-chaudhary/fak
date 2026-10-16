@@ -57,6 +57,7 @@ type serveSizingPool struct {
 // the selected serve arm would admit against, plus the warnings a live boot would
 // print or refuse on. Warnings never empty-marshal to null (always an array).
 type serveSizingArtifact struct {
+	ActivatedExpertRing         *serveSizingRing       `json:"activated_expert_ring,omitempty"`
 	Version                     string                 `json:"version"`
 	Model                       string                 `json:"model"`
 	Arm                         string                 `json:"arm"`
@@ -276,6 +277,7 @@ func runServeSizingJSON(sf *serveFlags) {
 		fmt.Fprintln(os.Stderr, "fak serve: --plan-json:", err)
 		os.Exit(1)
 	}
+	art.ActivatedExpertRing = buildServeSizingRingForFlags(ws, be, sf)
 	// The #1062 slow-load-path advisory rides in warnings[] too: on NFS/CIFS weights the
 	// multi-minute load tax is exactly what a pre-load reader wants to know about.
 	if w := compute.WarnSlowLoadPath(compute.ProbeLoadPath(*sf.ggufPath)); w != "" {
