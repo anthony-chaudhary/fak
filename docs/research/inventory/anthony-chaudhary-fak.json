@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:10afca3182f05cf2533de56cd7c56d5019ead7097be301ead0fe2e689a9b4a32",
-  "tracked_files": 25522,
-  "tracked_bytes": 512091826,
+  "content_root": "sha256:76039b52ac1173789dc3807de547332a7f26c38945eb99810c7b416cc67abbf6",
+  "tracked_files": 25524,
+  "tracked_bytes": 512107800,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -164277,8 +164277,8 @@
     },
     {
       "path": "internal/model/v41_forward_weights.go",
-      "content_sha256": "sha256:01f118220e61d623fb1cf65c85f3b8e03667a016c28807469e1f0ec6d10674c9",
-      "bytes": 60229,
+      "content_sha256": "sha256:d0ff31f84b851df2019a1c26c4d14c71b0084bfa4cbc65d15a814056d88daa0b",
+      "bytes": 60497,
       "classification": "runtime_source",
       "source_classes": [
         "runtime_source"
@@ -164897,6 +164897,15 @@
       ]
     },
     {
+      "path": "internal/model/v41_indexer_weight_scale_fused_vulkan_test.go",
+      "content_sha256": "sha256:a3741e5d6a949142e0fbad13877c5a8db19aee13bd6ec2b9d7c5e692a4096374",
+      "bytes": 4680,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
       "path": "internal/model/v41_indexer_weight_scale_retirement_test.go",
       "content_sha256": "sha256:9b2c2f4438d9ac34c5b283d6adc58fe288d31df7a3ccb074f30ad4cca5ffec8f",
       "bytes": 11238,
@@ -164907,8 +164916,8 @@
     },
     {
       "path": "internal/model/v41_indexer_weight_scale_vulkan_test.go",
-      "content_sha256": "sha256:a9fd15c0e0b78d09811057cf7dc95599454c3823f96005af42712745a7867a77",
-      "bytes": 8044,
+      "content_sha256": "sha256:ec166eff2ab913d9f1916fa127b2a4687f6bf25d2a807db59a9ad25662d5d5a1",
+      "bytes": 9811,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
@@ -165350,6 +165359,15 @@
       "path": "internal/model/v41_moe_dispatch_bench_test.go",
       "content_sha256": "sha256:3c00450c932e251b3a635016efc3ff8a860de8b3fa2de62d94e4d2ca67963c96",
       "bytes": 12851,
+      "classification": "test_fixture",
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "internal/model/v41_native_projection_loan_completion_test.go",
+      "content_sha256": "sha256:3d533e0a58e0cc6c9ee334b3cba44ff9101bfcf3797686a6d70e686894ef00e3",
+      "bytes": 9259,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
