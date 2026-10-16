@@ -87,8 +87,11 @@ func (s *Session) v41GroupedResident(ops v41GroupedResidentOps, weights []func()
 		}
 		return values, nil
 	}
+	var primary any
+	var primaryPresent, bodyReturned bool
 	defer func() {
-		p := recover()
+		p := primary
+		present := bodyReturned && primaryPresent
 		defer func() {
 			for i := len(owned) - 1; i >= 0; i-- {
 				s.Backend.Free(owned[i])
@@ -100,104 +103,117 @@ func (s *Session) v41GroupedResident(ops v41GroupedResidentOps, weights []func()
 				err = errors.Join(earlier, err)
 				if panicErr, ok := p.(error); ok {
 					err = errors.Join(err, panicErr)
-					p = nil
+					present = false
 				}
 			}
 		}
 		if err != nil {
 			result = nil
 		}
-		if p != nil {
+		if present {
 			panic(p)
 		}
 	}()
-	valid := func(t compute.Tensor, n int) bool {
-		return t.Backend() == s.Backend && t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && t.Numel() == n
-	}
-	publish := func(x compute.Tensor, n int) (compute.Tensor, error) {
-		*stage = "BF16 publication"
-		x.Shape = []int{n}
-		p, status, cause := ops.status.V41BF16PublishDeferred(x, compute.V41BF16PublishGroupedOutputProjection)
-		fresh := own(p)
-		// A malformed or aliased record cannot be passed to the consuming
-		// reader. Claim only distinct storage owned by this backend for cleanup.
-		recordFresh := own(status.Record)
-		recordValid := recordFresh && status.Kind == compute.V41DeferredBF16Publish && status.Count == n && status.Site == compute.V41BF16PublishGroupedOutputProjection && status.Records <= 1 && valid(status.Record, 4)
-		if recordValid {
-			owned = owned[:len(owned)-1] // status ownership transfers to read().
-			statuses = append(statuses, status)
-		}
-		if cause != nil {
-			return compute.Tensor{}, cause
-		}
-		if !fresh || !valid(p, n) || !recordValid {
-			return compute.Tensor{}, errV41BF16BoundaryResult
-		}
-		return p, nil
-	}
-	if len(weights) == 0 || rank <= 0 || dim <= 0 || len(input) == 0 || len(input)%len(weights) != 0 {
-		return nil, errV41ProjectionResult
-	}
-	groupIn := len(input) / len(weights)
-	spans := make([]compute.V41RowSpan, len(weights))
-	for g, resolve := range weights {
-		*stage = "weight upload"
-		weight := resolve()
-		borrowed = append(borrowed, weight)
-		*stage = "activation upload"
-		x := s.uploadHostF32([]int{groupIn}, input[g*groupIn:(g+1)*groupIn], compute.MemoryActivation, "V4.1 grouped resident activation")
-		if !own(x) || !valid(x, groupIn) {
-			return nil, errV41ProjectionResult
-		}
-		stats.upload += int64(groupIn) * 4
-		*stage = "matmul"
-		stats.calls++
-		y := s.Backend.MatMul(weight, x)
-		if !own(y) || !valid(y, rank) {
-			return nil, errV41ProjectionResult
-		}
-		p, cause := publish(y, rank)
-		if cause != nil {
-			return nil, cause
-		}
-		p.Shape = []int{1, rank}
-		spans[g] = compute.V41RowSpan{Src: p, Rows: 1}
-	}
-	*stage = "BF16 publication readback"
-	if _, err = read(nil); err != nil {
-		return nil, err
-	}
-	*stage = "weight upload"
-	output := outputWeight()
-	borrowed = append(borrowed, output)
-	*stage = "device concat"
-	joined, cause := ops.rows.V41RowLogGather(spans, rank)
-	fresh := own(joined)
-	if cause != nil {
-		return nil, cause
-	}
-	if !fresh || !valid(joined, len(weights)*rank) {
-		return nil, errV41ProjectionResult
-	}
-	joined.Shape = []int{len(weights) * rank}
-	*stage = "matmul"
-	stats.calls++
-	y := s.Backend.MatMul(output, joined)
-	if !own(y) || !valid(y, dim) {
-		return nil, errV41ProjectionResult
-	}
-	p, cause := publish(y, dim)
-	if cause != nil {
-		return nil, cause
-	}
-	*stage = "readback"
-	values, cause := read([]compute.Tensor{p})
-	if cause != nil {
-		return nil, cause
-	}
-	stats.readback += int64(len(values[0])) * 4
-	if len(values[0]) != dim || !v41BF16Widened(values[0]) {
-		return nil, errV41ProjectionResult
-	}
-	return append([]float32(nil), values[0]...), nil
+	func() {
+		complete := false
+		defer func() {
+			if !complete {
+				primary, primaryPresent = recover(), true
+			}
+		}()
+		result, err = func() ([]float32, error) {
+			valid := func(t compute.Tensor, n int) bool {
+				return t.Backend() == s.Backend && t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && t.Numel() == n
+			}
+			publish := func(x compute.Tensor, n int) (compute.Tensor, error) {
+				*stage = "BF16 publication"
+				x.Shape = []int{n}
+				p, status, cause := ops.status.V41BF16PublishDeferred(x, compute.V41BF16PublishGroupedOutputProjection)
+				fresh := own(p)
+				// A malformed or aliased record cannot be passed to the consuming
+				// reader. Claim only distinct storage owned by this backend for cleanup.
+				recordFresh := own(status.Record)
+				recordValid := recordFresh && status.Kind == compute.V41DeferredBF16Publish && status.Count == n && status.Site == compute.V41BF16PublishGroupedOutputProjection && status.Records <= 1 && valid(status.Record, 4)
+				if recordValid {
+					owned = owned[:len(owned)-1] // status ownership transfers to read().
+					statuses = append(statuses, status)
+				}
+				if cause != nil {
+					return compute.Tensor{}, cause
+				}
+				if !fresh || !valid(p, n) || !recordValid {
+					return compute.Tensor{}, errV41BF16BoundaryResult
+				}
+				return p, nil
+			}
+			if len(weights) == 0 || rank <= 0 || dim <= 0 || len(input) == 0 || len(input)%len(weights) != 0 {
+				return nil, errV41ProjectionResult
+			}
+			groupIn := len(input) / len(weights)
+			spans := make([]compute.V41RowSpan, len(weights))
+			for g, resolve := range weights {
+				*stage = "weight upload"
+				weight := resolve()
+				borrowed = append(borrowed, weight)
+				*stage = "activation upload"
+				x := s.uploadHostF32([]int{groupIn}, input[g*groupIn:(g+1)*groupIn], compute.MemoryActivation, "V4.1 grouped resident activation")
+				if !own(x) || !valid(x, groupIn) {
+					return nil, errV41ProjectionResult
+				}
+				stats.upload += int64(groupIn) * 4
+				*stage = "matmul"
+				stats.calls++
+				y := s.Backend.MatMul(weight, x)
+				if !own(y) || !valid(y, rank) {
+					return nil, errV41ProjectionResult
+				}
+				p, cause := publish(y, rank)
+				if cause != nil {
+					return nil, cause
+				}
+				p.Shape = []int{1, rank}
+				spans[g] = compute.V41RowSpan{Src: p, Rows: 1}
+			}
+			*stage = "BF16 publication readback"
+			if _, err = read(nil); err != nil {
+				return nil, err
+			}
+			*stage = "weight upload"
+			output := outputWeight()
+			borrowed = append(borrowed, output)
+			*stage = "device concat"
+			joined, cause := ops.rows.V41RowLogGather(spans, rank)
+			fresh := own(joined)
+			if cause != nil {
+				return nil, cause
+			}
+			if !fresh || !valid(joined, len(weights)*rank) {
+				return nil, errV41ProjectionResult
+			}
+			joined.Shape = []int{len(weights) * rank}
+			*stage = "matmul"
+			stats.calls++
+			y := s.Backend.MatMul(output, joined)
+			if !own(y) || !valid(y, dim) {
+				return nil, errV41ProjectionResult
+			}
+			p, cause := publish(y, dim)
+			if cause != nil {
+				return nil, cause
+			}
+			*stage = "readback"
+			values, cause := read([]compute.Tensor{p})
+			if cause != nil {
+				return nil, cause
+			}
+			stats.readback += int64(len(values[0])) * 4
+			if len(values[0]) != dim || !v41BF16Widened(values[0]) {
+				return nil, errV41ProjectionResult
+			}
+			return append([]float32(nil), values[0]...), nil
+		}()
+		complete = true
+	}()
+	bodyReturned = true
+	return result, err
 }
