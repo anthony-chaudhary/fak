@@ -2796,3 +2796,17 @@ func (p *InKernelPlanner) ReleaseStartupWarm() {
 	}
 	p.warmState.Release()
 }
+
+// DeviceTransientPool reports the backend's request-transient reuse pool; ok is
+// false when the backend keeps none (CPU, CUDA, or a non-pooling build).
+func (p *InKernelPlanner) DeviceTransientPool() (DeviceTransientPoolStats, bool) {
+	if p == nil || p.backend == nil {
+		return DeviceTransientPoolStats{}, false
+	}
+	pool, ok := p.backend.(TransientPoolBackend)
+	if !ok {
+		return DeviceTransientPoolStats{}, false
+	}
+	buffers, bytes, peak := pool.TransientPoolStats()
+	return DeviceTransientPoolStats{Backend: p.backend.Name(), PooledBuffers: buffers, PooledBytes: bytes, PeakPooledBytes: peak}, true
+}

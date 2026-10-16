@@ -334,6 +334,8 @@ func (s *Server) renderMetrics() string {
 	s.writeInKernelPressureTrimMetrics(&b)
 	s.writeMoEResidencyMetrics(&b) // #5617: activated-expert residency for a serve that declared an expert budget
 	s.writeDeviceWeightMemoryMetrics(&b)
+	s.writeDeviceTransientPoolMetrics(&b)
+	writeGoRuntimeMemoryMetrics(&b, goRuntimeMetricsSample())
 	m.writeCompactionMetrics(&b)
 	writeLlamaSoftSlotMetrics(&b)
 	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses

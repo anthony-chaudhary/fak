@@ -166,6 +166,26 @@ type InKernelMemoryPressureTrimReporter interface {
 	InKernelMemoryPressureTrimStats() InKernelMemoryPressureTrimStats
 }
 
+// DeviceTransientPoolStats is the device backend's request-transient reuse pool.
+type DeviceTransientPoolStats struct {
+	Backend         string
+	PooledBuffers   int64
+	PooledBytes     int64
+	PeakPooledBytes int64
+}
+
+// DeviceTransientPoolReporter is implemented by local planners; ok is false when
+// the planner's backend keeps no transient pool, which surfaces render as absent.
+type DeviceTransientPoolReporter interface {
+	DeviceTransientPool() (DeviceTransientPoolStats, bool)
+}
+
+// TransientPoolBackend is the optional compute-backend side of the reporter. It
+// returns primitives so internal/compute need not import this package.
+type TransientPoolBackend interface {
+	TransientPoolStats() (pooledBuffers, pooledBytes, peakPooledBytes int64)
+}
+
 // MoEResidencyReporter is implemented by local planners that can report activated-expert
 // residency across the requests they served (R6, #5617). Proxy planners do not implement it, so
 // the gateway emits no local MoE-residency series for upstream providers.

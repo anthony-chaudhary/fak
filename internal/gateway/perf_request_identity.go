@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
@@ -18,6 +19,7 @@ import (
 type requestObservation struct {
 	mu                 sync.Mutex
 	requestID, traceID string
+	inboundRequestID   string
 	digest             hash.Hash
 	read, expected     int64
 	complete, failed   bool
@@ -52,7 +54,7 @@ func (b *observationBody) Read(p []byte) (int, error) {
 }
 
 func newRequestObservation(r *http.Request) *requestObservation {
-	o := &requestObservation{requestID: randomHex(16), digest: sha256.New(), expected: r.ContentLength}
+	o := &requestObservation{requestID: randomHex(16), inboundRequestID: inboundRequestID(r.Header), digest: sha256.New(), expected: r.ContentLength}
 	if r.Body != nil && r.Body != http.NoBody {
 		r.Body = &observationBody{ReadCloser: r.Body, observation: o}
 	}
@@ -122,7 +124,7 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	rec.RequestID, rec.TraceID = o.requestID, o.traceID
+	rec.RequestID, rec.TraceID, rec.InboundRequestID = o.requestID, o.traceID, o.inboundRequestID
 	rec.PartialNativePhases = requestPartialNativePhases(o.phaseContext)
 	if o.complete && !o.failed && o.read > 0 {
 		rec.WorkloadSHA256 = hex.EncodeToString(o.digest.Sum(nil))
@@ -137,4 +139,28 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 			rec.LoadLifecycle.LoadMS = v.LoadSeconds * 1000
 		}
 	}
+}
+
+const maxInboundRequestIDLen = 128
+
+// inboundRequestID reads the caller's id before ensureHTTPTrace rewrites the
+// trace headers: X-Request-ID when it is a bounded printable token, else the
+// W3C traceparent trace id.
+func inboundRequestID(h http.Header) string {
+	if id := strings.TrimSpace(h.Get("X-Request-ID")); id != "" && len(id) <= maxInboundRequestIDLen && printableToken(id) {
+		return id
+	}
+	if tp, err := parseTraceparent(h.Get(traceparentHeader)); err == nil {
+		return tp.TraceID
+	}
+	return ""
+}
+
+func printableToken(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c <= ' ' || c > '~' || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }
