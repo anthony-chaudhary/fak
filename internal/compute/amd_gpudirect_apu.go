@@ -431,6 +431,13 @@ func (k *APUKVCacheRegion) WritePromptSequenceKV(layer int, isValue bool, startT
 			startToken, startToken+len(tokensData), k.Config.MaxTokens)
 	}
 
+	// Validate every row before publishing any part of the sequence.
+	for i, data := range tokensData {
+		if uint64(len(data)) > k.TokenStride {
+			return fmt.Errorf("amddirect: sequence token %d data size %d exceeds token stride %d", i, len(data), k.TokenStride)
+		}
+	}
+
 	base := uint64(layer) * k.LayerStride
 	if isValue {
 		base += uint64(k.Config.MaxTokens) * k.TokenStride
