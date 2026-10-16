@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log"
+	"math"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -146,13 +147,29 @@ func (p *InKernelPlanner) hostRequestDemand(promptTokens, maxNew int) (session, 
 	}
 	cs := p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision))
 	_, plan = compute.AutoSizeContextPlan(cs, nil, compute.FreeUnknown, planned)
-	session = plan.Total() + p.hostPrefillPanelBytes(promptTokens)
+	session = hostDemandAdd(plan.Total(), p.hostPrefillPanelBytes(promptTokens))
 	if p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
-		if perCopy := compute.EstimateKVStoreBytes(cs.KV, planned) + cs.SessionState.Total(); perCopy > 0 {
-			retained = perCopy * inKernelHostAdmissionCopies
+		if perCopy := hostDemandAdd(compute.EstimateKVStoreBytes(cs.KV, planned), cs.SessionState.Total()); perCopy > 0 {
+			retained = hostDemandMul(perCopy, inKernelHostAdmissionCopies)
 		}
 	}
 	return session, retained, plan
+}
+
+// hostDemandAdd and hostDemandMul preserve the memory-plan contract: an
+// unrepresentable nonnegative byte demand saturates instead of looking cheap.
+func hostDemandAdd(a, b int64) int64 {
+	if a > 0 && b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}
+
+func hostDemandMul(a, b int64) int64 {
+	if a > 0 && b > 0 && a > math.MaxInt64/b {
+		return math.MaxInt64
+	}
+	return a * b
 }
 
 // hostSharedBoundaryDemand prices the optional shared-prefix boundary snapshot
@@ -162,7 +179,7 @@ func (p *InKernelPlanner) hostSharedBoundaryDemand(boundary int) int64 {
 		return 0
 	}
 	cs := p.m.Cfg.ContextSizeConfigWithPrecision(computeKVPrecisionFor(p.kvPrecision))
-	if perCopy := compute.EstimateKVStoreBytes(cs.KV, boundary) + cs.SessionState.Total(); perCopy > 0 {
+	if perCopy := hostDemandAdd(compute.EstimateKVStoreBytes(cs.KV, boundary), cs.SessionState.Total()); perCopy > 0 {
 		return perCopy
 	}
 	return 0
@@ -184,11 +201,18 @@ func (p *InKernelPlanner) hostPrefillPanelBytes(promptTokens int) int64 {
 			panel = chunk
 		}
 	}
-	width := int64(3*p.m.Cfg.HiddenSize + 2*p.m.Cfg.IntermediateSize)
+	var width int64
+	if p.m.Cfg.HiddenSize >= 0 && p.m.Cfg.IntermediateSize >= 0 {
+		width = hostDemandAdd(hostDemandMul(int64(p.m.Cfg.HiddenSize), 3), hostDemandMul(int64(p.m.Cfg.IntermediateSize), 2))
+	} else {
+		// Preserve the existing invalid-axis handling; only nonnegative byte
+		// demands gain saturation here.
+		width = int64(3*p.m.Cfg.HiddenSize + 2*p.m.Cfg.IntermediateSize)
+	}
 	if width <= 0 {
 		return 0
 	}
-	return int64(panel) * width * 4
+	return hostDemandMul(hostDemandMul(int64(panel), width), 4)
 }
 
 // admitHostMemory is the host-session capacity admission. It runs before any session,
@@ -216,7 +240,7 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 	if retained > 0 {
 		// The shared system/tools boundary snapshot is one more retained copy, priced at
 		// its own (shorter) prefix length.
-		retained += p.hostSharedBoundaryDemand(inKernelSharedPrefixBoundaryFromContext(ctx))
+		retained = hostDemandAdd(retained, p.hostSharedBoundaryDemand(inKernelSharedPrefixBoundaryFromContext(ctx)))
 	}
 	if session <= 0 {
 		return ctx, noop, nil
@@ -231,7 +255,7 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 	if !known {
 		return ctx, noop, nil
 	}
-	if session+retained > avail {
+	if hostDemandAdd(session, retained) > avail {
 		runtime.GC()
 		debug.FreeOSMemory()
 		if avail, known = b.available(); !known {
@@ -251,7 +275,7 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 			return ctx, noop, nil
 		}
 	}
-	want := session + retained
+	want := hostDemandAdd(session, retained)
 	switch {
 	case want <= avail && !trimmed:
 	case session <= avail:
