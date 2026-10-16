@@ -356,6 +356,7 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 	archivePath := filepath.Join(repo, "internal", "compute", "libfakvulkan.a")
 	archiveRaw := []byte("inert native archive identity\n")
 	writeVulkanVerifyTestFile(t, archivePath, archiveRaw, 0644)
+	qualifiedModule, qualifiedCommand := vulkanVerifyQualifiedIndexScaleFixture(t, repo)
 
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
@@ -399,6 +400,8 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		raw := []byte("spirv:" + stem + "\n")
 		if stem == "v41_indexer_score" {
 			raw = vulkanVerifyIndexerFixture()
+		} else if stem == "v41_index_scale_bf16" {
+			raw = qualifiedModule
 		}
 		writeVulkanVerifyTestFile(t, filepath.Join(spirvRoot, stem+".spv"), raw, 0644)
 	}
@@ -417,7 +420,8 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		IsWindows  bool                             `json:"is_windows"`
 	}{toolchain, "-lstdc++", false})
 	normalized := []string{
-		"glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered}.comp|-o|$REPO/internal/compute/spirv/{registered}.spv",
+		"glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered-except-v41_index_scale_bf16}.comp|-o|$REPO/internal/compute/spirv/{registered-except-v41_index_scale_bf16}.spv",
+		qualifiedCommand,
 		"cxx|-O3,-std=c++17,-fPIC|-c|$REPO/internal/compute/vulkan_shim.cpp|-o|$REPO/internal/compute/vulkan_shim.o",
 		"ar|rcs|$REPO/internal/compute/libfakvulkan.a|$REPO/internal/compute/vulkan_shim.o",
 		"go|build|-tags|vulkan|-o|$OUT|cmd/fak",
@@ -495,6 +499,46 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		commandSHA: commandSHA, stableIdentity: stableSHA, baselineSHA: baselineSHA,
 		marker: marker, argv: argv,
 	}
+}
+
+// Copy the real source and attestation into the fixture before its source commit.
+// These bytes still pass through the production verifier's independent pins;
+// this only supplies the canonical module instead of an inert compiler stand-in.
+func vulkanVerifyQualifiedIndexScaleFixture(t *testing.T, repo string) ([]byte, string) {
+	t.Helper()
+	const stem = "v41_index_scale_bf16"
+	const headerRel = "internal/compute/v41_index_scale_bf16_spirv.h"
+	source := readVulkanVerifyTestFile(t, filepath.Join("..", "compute", "shaders", stem+".comp"))
+	header := readVulkanVerifyTestFile(t, filepath.Join("..", "compute", "v41_index_scale_bf16_spirv.h"))
+	writeVulkanVerifyTestFile(t, filepath.Join(repo, "internal", "compute", "shaders", stem+".comp"), source, 0644)
+	writeVulkanVerifyTestFile(t, filepath.Join(repo, filepath.FromSlash(headerRel)), header, 0644)
+	const prefix = "static const unsigned char qualified[] = {"
+	if bytes.Count(header, []byte(prefix)) != 1 {
+		t.Fatal("qualified module fixture array framing")
+	}
+	_, body, _ := strings.Cut(string(header), prefix)
+	body, _, ok := strings.Cut(body, "};")
+	if !ok {
+		t.Fatal("qualified module fixture array terminator")
+	}
+	tokens := strings.Split(body, ",")
+	if strings.TrimSpace(tokens[len(tokens)-1]) != "" {
+		t.Fatal("qualified module fixture final byte separator")
+	}
+	var module []byte
+	for _, token := range tokens[:len(tokens)-1] {
+		token = strings.TrimSpace(token)
+		if len(token) != 4 || !strings.HasPrefix(token, "0x") {
+			t.Fatalf("qualified module fixture byte %q", token)
+		}
+		value, err := hex.DecodeString(token[2:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		module = append(module, value...)
+	}
+	command := fmt.Sprintf("qualified-header|%s|source_sha256=%s|header=$REPO/%s|header_sha256=%s|module_sha256=%s|bytes=%d|output=$REPO/internal/compute/spirv/%s.spv", stem, vulkanVerifyTestSHA256Hex(source), headerRel, vulkanVerifyTestSHA256Hex(header), vulkanVerifyTestSHA256Hex(module), len(module), stem)
+	return module, command
 }
 
 func vulkanVerifyIndexerFixture() []byte {
