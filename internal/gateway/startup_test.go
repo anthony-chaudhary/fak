@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -368,5 +369,52 @@ func TestAuthenticatedAgentRequestMarksChildUsable(t *testing.T) {
 	phases := s.startup.snapshot().phases
 	if len(phases) != 1 || phases[0].Name != "child-spawn-to-first-usable" || phases[0].Provenance != "observed" || phases[0].Dur <= 0 {
 		t.Fatalf("first authenticated request phase = %+v", phases)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestModelLoadLifecycleIdentityAndAdmissions(t *testing.T) {
+	srv := newTestServer(t)
+	if got := srv.captureModelLoadLifecycle(); got != (modelLoadLifecycle{}) {
+		t.Fatal("missing profile must remain unknown")
+	}
+	profile := &ModelLoadProfile{LoadID: "caller-id", RecordedUnixMS: 1, TotalSeconds: 1.5}
+	before := time.Now().UnixMilli()
+	srv.SetModelLoadProfile(profile)
+	first := srv.captureModelLoadLifecycle()
+	if len(first.LoadID) != 32 || first.LoadID == profile.LoadID || first.RecordedUnixMS < before || first.LoadSeconds != 1.5 || first.RequestOrdinal != 1 {
+		t.Fatalf("invalid first admission: %+v", first)
+	}
+	debug := debugModelLoadProfile(srv.modelLoadProfile())
+	if debug.LoadID != first.LoadID || debug.RecordedUnixMS != first.RecordedUnixMS {
+		t.Fatal("startup projection lost lifecycle identity")
+	}
+	const admissions = 32
+	rows := make(chan modelLoadLifecycle, admissions)
+	var wg sync.WaitGroup
+	for range admissions {
+		wg.Add(1)
+		go func() { defer wg.Done(); rows <- srv.captureModelLoadLifecycle() }()
+	}
+	wg.Wait()
+	close(rows)
+	seen := map[uint64]bool{1: true}
+	for row := range rows {
+		if row.LoadID != first.LoadID || row.RecordedUnixMS != first.RecordedUnixMS || row.RequestOrdinal < 2 || row.RequestOrdinal > admissions+1 || seen[row.RequestOrdinal] {
+			t.Fatalf("invalid later admission: %+v", row)
+		}
+		seen[row.RequestOrdinal] = true
+	}
+	srv.SetModelLoadProfile(profile)
+	replacement := srv.captureModelLoadLifecycle()
+	if replacement.LoadID == first.LoadID || replacement.RequestOrdinal != 1 {
+		t.Fatal("profile replacement must reset incarnation and ordinal")
+	}
+	if profile.LoadID != "caller-id" || profile.RecordedUnixMS != 1 {
+		t.Fatal("setter mutated caller profile")
+	}
+	srv.SetModelLoadProfile(nil)
+	if got := srv.captureModelLoadLifecycle(); got != (modelLoadLifecycle{}) {
+		t.Fatal("cleared profile must remain unknown")
 	}
 }
