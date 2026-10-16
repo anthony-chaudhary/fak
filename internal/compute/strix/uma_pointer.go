@@ -19,6 +19,9 @@ var (
 	// ErrInvalidDevPtr is returned when a device pointer is 0 or invalid.
 	ErrInvalidDevPtr = errors.New("strix/uma: invalid device pointer")
 
+	// ErrBufferNotOwned is returned when a manager is asked to release another owner's buffer.
+	ErrBufferNotOwned = errors.New("strix/uma: buffer is not owned by this pointer manager")
+
 	// ErrInvalidAlignment is returned when alignment is not a positive power of 2.
 	ErrInvalidAlignment = errors.New("strix/uma: alignment must be a positive power of 2")
 )
@@ -126,10 +129,12 @@ func (m *UMAPointerManager) FreeUMABuffer(buf *UMABuffer) error {
 
 	if m != nil {
 		m.mu.Lock()
-		if _, ok := m.buffers[buf]; ok {
-			delete(m.buffers, buf)
-			atomic.AddInt64(&m.activeAllocations, -1)
+		if _, ok := m.buffers[buf]; !ok {
+			m.mu.Unlock()
+			return ErrBufferNotOwned
 		}
+		delete(m.buffers, buf)
+		atomic.AddInt64(&m.activeAllocations, -1)
 		m.mu.Unlock()
 	}
 
