@@ -472,7 +472,7 @@ func runBenchSubagentFanout(stdout, stderr io.Writer, argv []string) int {
 			ut.TokPerSec, ut.MinTokPerSec)
 	}
 
-	// The measured-reuse and SLO verdicts gate the exit code through one pure
+	// The cell, measured-reuse and SLO verdicts gate the exit code through one pure
 	// function so a server-free test can witness each failure mode.
 	if code := fanoutGateExitCode(receipt); code != 0 {
 		return code
@@ -487,7 +487,7 @@ func runBenchSubagentFanout(stdout, stderr io.Writer, argv []string) int {
 // fanoutGateExitCode is the pure, deterministic exit verdict for a completed
 // receipt (issue #13076): it separates the measured-reuse and unified-throughput
 // gates from the byte-emitting run so a server-free test can witness each one
-// without a running server or a host timer. It returns 1 when a shared-prefix
+// without a running server or a host timer. It returns 1 when any cell failed, a shared-prefix
 // reuse claim was not corroborated by server telemetry, or when an armed
 // unified-throughput SLO floor was missed; 0 otherwise. A nil UnifiedThroughput
 // (no measured wall) is not a gate failure — an unmeasured sweep cannot be
@@ -495,6 +495,11 @@ func runBenchSubagentFanout(stdout, stderr io.Writer, argv []string) int {
 func fanoutGateExitCode(receipt *SubagentFanoutReceipt) int {
 	if receipt == nil {
 		return 1
+	}
+	for _, result := range receipt.Results {
+		if result.Error != "" {
+			return 1
+		}
 	}
 	if len(receipt.ReuseDivergenceArms) > 0 {
 		return 1
@@ -1161,16 +1166,52 @@ func (h *SubagentFanoutHarness) executeLiveCell(ctx context.Context, arm string,
 		var prevTokenTime time.Time
 		firstToken := true
 
+		// Requests select one choice (n is omitted). A clean EOF is complete
+		// only after that choice finishes; [DONE] is an explicit terminal frame.
+		finished := false
 		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				break
+			line, readErr := reader.ReadString('\n')
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				recordErr(fmt.Errorf("read completion stream: %w", readErr))
+				return
 			}
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "data: [DONE]") {
-				break
+			if strings.HasPrefix(line, "data:") {
+				data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if data == "[DONE]" {
+					return
+				}
+				var event struct {
+					Error   json.RawMessage `json:"error"`
+					Choices json.RawMessage `json:"choices"`
+				}
+				if json.Unmarshal([]byte(data), &event) == nil {
+					if len(event.Error) > 0 && !bytes.Equal(bytes.TrimSpace(event.Error), []byte("null")) {
+						recordErr(errors.New("completion stream reported an error"))
+						return
+					}
+					var choices []struct {
+						Index        int    `json:"index"`
+						FinishReason string `json:"finish_reason"`
+					}
+					if json.Unmarshal(event.Choices, &choices) == nil {
+						for _, choice := range choices {
+							if choice.Index == 0 && choice.FinishReason != "" {
+								finished = true
+							}
+						}
+					}
+				}
 			}
-			if !strings.HasPrefix(line, "data: ") {
+			// ReadString can return the final frame together with EOF. Examine
+			// that frame before deciding whether the stream completed.
+			if errors.Is(readErr, io.EOF) {
+				if !finished {
+					recordErr(errors.New("completion stream ended before a terminal frame"))
+				}
+				return
+			}
+			if !strings.HasPrefix(line, "data:") {
 				continue
 			}
 

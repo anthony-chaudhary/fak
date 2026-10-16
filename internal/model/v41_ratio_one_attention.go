@@ -136,7 +136,9 @@ func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDi
 		}
 		return nil, err
 	}
-	if ownedOutput {
+	// The nil callback uses the host primitive, which owns its fresh result.
+	// Ordinary callbacks can return borrowed storage and still need a copy.
+	if ownedOutput || attend == nil {
 		return out, nil
 	}
 	return append([]float32(nil), out...), nil

@@ -50,102 +50,118 @@ func (s *Session) v41SharedActivationFunc() v41SharedActivationFunc {
 			closeSelected(closed)
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						closeSelected(err)
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
-						return
-					}
+		convert := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					closeSelected(err)
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, outcome, cause = nil, v41ProjectionError, closeFailure(err)
+				return
 			}
-		}()
-		width := s.M.Cfg.MoEIntermediateSize
-		if width <= 0 || len(gate) != width || len(up) != width {
-			return nil, v41ProjectionError, closeFailure(errV41ProjectionResult)
-		}
-		for i := range gate {
-			if !finite32(gate[i]) || !finite32(up[i]) {
-				return nil, v41ProjectionError, closeFailure(errV41ProjectionResult)
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
 			}
+			closeFailure(err)
+			panic(r)
 		}
-		run := func() (result []float32, cause error) {
-			var owned []compute.Tensor
-			defer func() {
-				// Preserve the selected operation's cause while attempting every
-				// owned release. A cleanup-only failure still retires the session.
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						s.Backend.Free(owned[i])
+		completed := false
+		var primary any
+		func() {
+			defer func() { primary = recover() }()
+			result, outcome, cause = func() ([]float32, v41DenseProjectionOutcome, error) {
+				width := s.M.Cfg.MoEIntermediateSize
+				if width <= 0 || len(gate) != width || len(up) != width {
+					return nil, v41ProjectionError, closeFailure(errV41ProjectionResult)
+				}
+				for i := range gate {
+					if !finite32(gate[i]) || !finite32(up[i]) {
+						return nil, v41ProjectionError, closeFailure(errV41ProjectionResult)
+					}
+				}
+				run := func() (result []float32, cause error) {
+					var owned []compute.Tensor
+					bodyCompleted := false
+					defer func() {
+						// Cleanup recovery is local: an incomplete body keeps its active
+						// panic or Goexit. On success, retain the first present Free panic.
+						failed := !bodyCompleted || cause != nil
+						var cleanupPanic any
+						cleanupPresent := false
+						for i := len(owned) - 1; i >= 0; i-- {
+							returned := false
+							func() {
+								defer func() {
+									r := recover()
+									if !returned && !cleanupPresent {
+										cleanupPanic, cleanupPresent = r, true
+									}
+								}()
+								s.Backend.Free(owned[i])
+								returned = true
+							}()
+						}
+						if !failed && cleanupPresent {
+							panic(cleanupPanic)
+						}
 					}()
+					result, cause = func() ([]float32, error) {
+						stage = "gate upload"
+						g := s.uploadHostF32([]int{width}, gate, compute.MemoryActivation, "V4.1 shared expert gate")
+						owned = append(owned, g)
+						stage = "up upload"
+						u := s.uploadHostF32([]int{width}, up, compute.MemoryActivation, "V4.1 shared expert up")
+						owned = append(owned, u)
+						stage = "swiglu"
+						var y compute.Tensor
+						if limit > 0 {
+							stage = "limited swiglu"
+							y = limited.SwiGLUWithLimit(g, u, limit)
+						} else {
+							y = s.Backend.SwiGLU(g, u)
+						}
+						owned = append(owned, y)
+						if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
+							return nil, errV41ProjectionResult
+						}
+						stage = "readback"
+						values := s.Backend.Read(y)
+						if len(values) != width {
+							return nil, errV41ProjectionResult
+						}
+						for _, v := range values {
+							if !finite32(v) {
+								return nil, errV41ProjectionResult
+							}
+						}
+						return append([]float32(nil), values...), nil
+					}()
+					bodyCompleted = true
+					return result, cause
 				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
+				result, cause = run()
+				if cause != nil {
+					return nil, v41ProjectionError, closeFailure(cause)
 				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
+				return result, v41ProjectionHandled, nil
 			}()
-			stage = "gate upload"
-			g := s.uploadHostF32([]int{width}, gate, compute.MemoryActivation, "V4.1 shared expert gate")
-			owned = append(owned, g)
-			stage = "up upload"
-			u := s.uploadHostF32([]int{width}, up, compute.MemoryActivation, "V4.1 shared expert up")
-			owned = append(owned, u)
-			stage = "swiglu"
-			var y compute.Tensor
-			if limit > 0 {
-				stage = "limited swiglu"
-				y = limited.SwiGLUWithLimit(g, u, limit)
-			} else {
-				y = s.Backend.SwiGLU(g, u)
-			}
-			owned = append(owned, y)
-			if y.Buf() == nil || y.Dtype != compute.F32 || len(y.Shape) != 1 || y.Shape[0] != width {
-				return nil, errV41ProjectionResult
-			}
-			stage = "readback"
-			values := s.Backend.Read(y)
-			if len(values) != width {
-				return nil, errV41ProjectionResult
-			}
-			for _, v := range values {
-				if !finite32(v) {
-					return nil, errV41ProjectionResult
-				}
-			}
-			return append([]float32(nil), values...), nil
+			completed = true
+		}()
+		if !completed {
+			convert(primary)
 		}
-		result, cause = run()
-		if cause != nil {
-			return nil, v41ProjectionError, closeFailure(cause)
-		}
-		return result, v41ProjectionHandled, nil
+		return result, outcome, cause
 	}
 }

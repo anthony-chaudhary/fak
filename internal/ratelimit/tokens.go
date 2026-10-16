@@ -54,20 +54,30 @@ func (u TokenUsage) Normalize() TokenUsage {
 	)
 }
 
-// Add returns the normalized sum of two usage records.
+// Add returns the normalized sum of two usage records, saturating output overflow.
 func (u TokenUsage) Add(v TokenUsage) TokenUsage {
 	u = u.Normalize()
 	v = v.Normalize()
+	// Both output counts are nonnegative after normalization. Do not let a
+	// completed provider charge wrap and reopen a saturated admission window.
+	output := int64(math.MaxInt64)
+	if u.OutputTokens <= math.MaxInt64-v.OutputTokens {
+		output = u.OutputTokens + v.OutputTokens
+	}
 	return NewTokenUsage(
 		u.InputTokens+v.InputTokens,
 		u.CachedInputTokens+v.CachedInputTokens,
-		u.OutputTokens+v.OutputTokens,
+		output,
 	)
 }
 
-// TotalTokens is the provider-visible input+output total.
+// TotalTokens returns input+output, saturating positive overflow at MaxInt64.
+// The individual usage dimensions are unchanged.
 func (u TokenUsage) TotalTokens() int64 {
 	u = u.Normalize()
+	if u.InputTokens > math.MaxInt64-u.OutputTokens {
+		return math.MaxInt64
+	}
 	return u.InputTokens + u.OutputTokens
 }
 
@@ -261,7 +271,18 @@ func (c TokenCaps) targetUtilization() float64 {
 }
 
 func checkTokenCap(name string, limit, used, requested int64) TokenAdmission {
-	if limit <= 0 || used+requested <= limit {
+	if limit <= 0 {
+		return TokenAdmission{Admit: true}
+	}
+	var fits bool
+	if used < 0 || requested < 0 {
+		// Preserve the existing policy for derived invalid totals. Their
+		// aggregation is separate from comparing nonnegative cap operands.
+		fits = used+requested <= limit
+	} else {
+		fits = used <= limit && requested <= limit-used
+	}
+	if fits {
 		return TokenAdmission{Admit: true}
 	}
 	return denyTokenAdmission(name, limit, used, requested)

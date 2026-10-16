@@ -318,14 +318,11 @@ func NewV41IndexerPublication(layer int, q, keys, weights []float32, nHeads, hea
 	if err != nil {
 		return nil, err
 	}
-	pub := &V41IndexerPublication{layer: layer, compressLen: compressLen}
-	if mask != nil {
-		pub.candidates = make([]bool, len(mask))
-		copy(pub.candidates, mask)
-	}
-	pub.rows = make([]int32, len(rows))
-	copy(pub.rows, rows)
-	return pub, nil
+	// Both selectors return fresh storage owned only by this constructor.
+	// Adopt it here; the public getters still copy for every reader.
+	return &V41IndexerPublication{
+		layer: layer, compressLen: compressLen, candidates: mask, rows: rows,
+	}, nil
 }
 
 // Candidates returns a copy of the published candidate mask, or nil when the

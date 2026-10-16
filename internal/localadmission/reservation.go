@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -168,8 +169,9 @@ func (s *ReservationStore) Reserve(ctx context.Context, req ReservationRequest) 
 		return d, err
 	}
 	ledger.Reservations, d.Reaped = s.reap(ledger.Reservations)
-	for _, r := range ledger.Reservations {
-		d.ReservedBytes += r.HeldBytes
+	d.ReservedBytes, err = reservationHeldBytes(ledger.Reservations)
+	if err != nil {
+		return d, err
 	}
 	if req.Plan.StartupPeakBytes > req.Host.AllocatableBytes-d.ReservedBytes {
 		d.Reason = "aggregate_capacity"
@@ -276,8 +278,21 @@ func (s *ReservationStore) TotalReservedBytes(ctx context.Context) (int64, error
 	if err != nil {
 		return 0, err
 	}
+	return reservationHeldBytes(active)
+}
+
+// reservationHeldBytes validates the live ledger's byte arithmetic before it can
+// create apparent admission headroom. Keep this after reaping so an invalid
+// dead-owner entry does not prevent normal capacity recovery.
+func reservationHeldBytes(active []Reservation) (int64, error) {
 	var total int64
 	for _, r := range active {
+		if r.HeldBytes < 0 {
+			return 0, fmt.Errorf("localadmission: negative held bytes in live reservation %q", r.ID)
+		}
+		if r.HeldBytes > math.MaxInt64-total {
+			return 0, fmt.Errorf("localadmission: live reservation held-byte total overflows int64")
+		}
 		total += r.HeldBytes
 	}
 	return total, nil

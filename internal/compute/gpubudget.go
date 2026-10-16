@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -19,7 +20,8 @@ const gpuBudgetAutoPercent = 90
 //   - ""  / invalid / <= 0        -> 0 (unbounded; the prior behavior, byte-identical)
 //   - "auto" + known capacity > 0 -> gpuBudgetAutoPercent% of totalDeviceLocal
 //   - "auto" + unknown capacity   -> 0 (fail open to unbounded — never worse than today)
-//   - a positive integer N        -> N MiB
+//   - a positive integer N        -> N MiB, if representable as int64 bytes
+//   - an overflowing MiB value     -> 0 (the invalid-input unbounded policy)
 //
 // capacityKnown lets a backend distinguish "capacity queried as 0/overflow" from "capacity not
 // probeable"; both resolve auto to unbounded, but keeping the flag explicit documents the fail-open.
@@ -36,7 +38,7 @@ func resolveGPUBudgetBytes(raw string, totalDeviceLocal int64, capacityKnown boo
 		return totalDeviceLocal / 100 * gpuBudgetAutoPercent
 	}
 	mb, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || mb <= 0 {
+	if err != nil || mb <= 0 || mb > math.MaxInt64/(1024*1024) {
 		return 0
 	}
 	return mb * 1024 * 1024

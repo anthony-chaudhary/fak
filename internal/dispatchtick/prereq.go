@@ -1,21 +1,78 @@
 package dispatchtick
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
+)
 
 var (
-	startBlockedByMarkerRE    = regexp.MustCompile(`(?im)\b(?:start[ -]?blocked[ -]?by)\b[:\s]*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)`)
-	coordinatesWithMarkerRE   = regexp.MustCompile(`(?im)\b(?:coordinates[ -]?with)\b[:\s]*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)`)
-	promotionRequiresMarkerRE = regexp.MustCompile(`(?im)\b(?:promotion[ -]?requires|promotes[ -]?after)\b[:\s]*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)`)
-	legacyPrereqMarkerRE      = regexp.MustCompile(`(?im)\b(?:depends[ -]?on|blocked[ -]?by)\b[:\s]*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)`)
+	startBlockedByMarkerRE    = regexp.MustCompile(`(?im)\b(?:start[ -]?blocked[ -]?by)\b[:\s]*([^\r\n]*)`)
+	coordinatesWithMarkerRE   = regexp.MustCompile(`(?im)\b(?:coordinates[ -]?with)\b[:\s]*([^\r\n]*)`)
+	promotionRequiresMarkerRE = regexp.MustCompile(`(?im)\b(?:promotion[ -]?requires|promotes[ -]?after)\b[:\s]*([^\r\n]*)`)
+	legacyPrereqMarkerRE      = regexp.MustCompile(`(?im)\b(?:depends[ -]?on|blocked[ -]?by)\b[:\s]*([^\r\n]*)`)
 	prereqMarkerRE            = legacyPrereqMarkerRE
-	issueRefRE                = regexp.MustCompile(`#(\d+)`)
 
 	dependenciesSectionHeaderRE = regexp.MustCompile(`(?im)^#{1,6}\s*(?:Dependencies|Dependency markers)\b`)
 	shiftLeftSectionHeaderRE    = regexp.MustCompile(`(?im)^#{1,6}\s*(?:Scope\s*/\s*tree|Witness\s*/\s*proof|Placement)\b`)
 	markdownHeadingRE           = regexp.MustCompile(`(?m)^#{1,6}\s+`)
-	explicitBlockedByRE         = regexp.MustCompile(`(?im)(?:^|[^\w-])(?:blocked[ -]?by)\b[:\s]*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)`)
-	legacyOrStartPrereqRE       = regexp.MustCompile(`(?im)\b(?:start[ -]?blocked[ -]?by|depends[ -]?on|blocked[ -]?by)\b[:\s]*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)`)
+	explicitBlockedByRE         = regexp.MustCompile(`(?im)(?:^|[^\w-])(?:blocked[ -]?by)\b[:\s]*([^\r\n]*)`)
+	legacyOrStartPrereqRE       = regexp.MustCompile(`(?im)\b(?:start[ -]?blocked[ -]?by|depends[ -]?on|blocked[ -]?by)\b[:\s]*([^\r\n]*)`)
 )
+
+// Check the entire atom before the canonical parser sees it: its prose extractor
+// must not turn a malformed qualified reference into a bare same-number issue.
+const dependencyOwnerAtom = `[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?`
+const dependencyRepositoryAtom = dependencyOwnerAtom + `/[A-Za-z0-9_.-]+`
+
+var dependencyAtomRE = regexp.MustCompile(`^(?:#[1-9][0-9]*|` + dependencyRepositoryAtom + `#[1-9][0-9]*|https?://github\.com/` + dependencyRepositoryAtom + `/issues/[1-9][0-9]*)$`)
+
+func prerequisiteRefs(value string) (refs []string, malformed string) {
+	rest := strings.TrimSpace(value)
+	if rest == "" {
+		return nil, "missing reference"
+	}
+	if strings.EqualFold(rest, "none") || strings.EqualFold(rest, "none.") {
+		return nil, ""
+	}
+	for rest != "" {
+		end := strings.IndexAny(rest, " \t,&")
+		if end < 0 {
+			end = len(rest)
+		}
+		if end == 0 {
+			return refs, "unexpected reference separator"
+		}
+		atom := strings.TrimSuffix(strings.TrimSuffix(rest[:end], "."), ";")
+		if !dependencyAtomRE.MatchString(strings.ToLower(atom)) {
+			return refs, rest[:end]
+		}
+		parsed := issuepolicy.CandidatePickupBlockedBy(issuepolicy.ParseIssueDependencies("Start blocked by: " + strings.ToLower(atom)))
+		if len(parsed) != 1 {
+			return refs, atom
+		}
+		refs = append(refs, parsed[0])
+		rest = strings.TrimSpace(rest[end:])
+		if rest == "" {
+			break
+		}
+		if strings.EqualFold(rest, "and") {
+			return refs, "missing reference after separator"
+		}
+		if rest[0] == ',' || rest[0] == '&' {
+			rest = strings.TrimSpace(rest[1:])
+		} else if len(rest) > 3 && strings.EqualFold(rest[:3], "and") && (rest[3] == ' ' || rest[3] == '\t') {
+			rest = strings.TrimSpace(rest[3:])
+		} else if !strings.HasPrefix(rest, "#") && !strings.Contains(strings.Fields(rest)[0], "/") {
+			break // Ordinary explanation after a completed reference is not another edge.
+		}
+		if rest == "" {
+			return refs, "missing reference after separator"
+		}
+	}
+	return refs, ""
+}
 
 // DependencyEdges represents the standardized three-way dependency relations parsed
 // from an issue body.
@@ -29,13 +86,54 @@ func extractRefs(re *regexp.Regexp, text string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, marker := range re.FindAllStringSubmatch(text, -1) {
-		for _, ref := range issueRefRE.FindAllStringSubmatch(marker[1], -1) {
-			num := ref[1]
+		refs, _ := prerequisiteRefs(marker[1])
+		for _, num := range refs {
 			if seen[num] {
 				continue
 			}
 			seen[num] = true
 			out = append(out, num)
+		}
+	}
+	return out
+}
+
+func blockingMarkerValues(body string) []string {
+	var values []string
+	add := func(re *regexp.Regexp, text string) {
+		for _, marker := range re.FindAllStringSubmatch(text, -1) {
+			values = append(values, marker[1])
+		}
+	}
+	if isNewContract(body) {
+		add(startBlockedByMarkerRE, body)
+		add(explicitBlockedByRE, extractDependenciesSection(body))
+	} else {
+		add(legacyOrStartPrereqRE, body)
+	}
+	return values
+}
+
+// The live consumer has only local numeric identities. Until repository-aware
+// resolution exists, do not mistake an absent qualified ID for a closed issue.
+func unresolvedStartPrerequisites(body string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(ref string) {
+		if !seen[ref] {
+			seen[ref] = true
+			out = append(out, ref)
+		}
+	}
+	for _, ref := range CandidateBlockedBy(body) {
+		if strings.Contains(ref, "#") {
+			add(ref)
+		}
+	}
+	for _, value := range blockingMarkerValues(body) {
+		refs, malformed := prerequisiteRefs(value)
+		if malformed != "" && (isNewContract(body) || len(refs) > 0 || strings.ContainsAny(value, "#/")) {
+			add(truncateRunes(malformed, 100))
 		}
 	}
 	return out
@@ -84,7 +182,8 @@ func CandidateDependencyEdges(body string) DependencyEdges {
 }
 
 // CandidateBlockedBy is the dispatchorder Candidate.BlockedBy list an issue earns from its body:
-// the issue numbers that block starting/picking up this issue.
+// the canonical references that block starting/picking up this issue. Bare #N
+// retains its numeric form; a qualified reference retains owner/repo#N.
 //
 // In newly authored contracts (containing startBlockedByMarkerRE, coordinatesWithMarkerRE,
 // promotionRequiresMarkerRE, a Dependencies section, or shift-left sections), only 'Start blocked by:'
@@ -125,10 +224,8 @@ func CandidateBlockedBy(body string) []string {
 			}
 		}
 	} else {
-		for _, marker := range legacyOrStartPrereqRE.FindAllStringSubmatch(body, -1) {
-			for _, ref := range issueRefRE.FindAllStringSubmatch(marker[1], -1) {
-				add(ref[1])
-			}
+		for _, num := range extractRefs(legacyOrStartPrereqRE, body) {
+			add(num)
 		}
 	}
 	return out

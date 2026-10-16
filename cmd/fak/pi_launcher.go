@@ -148,7 +148,7 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 	adoptedDetected := false
 
 	// Probe backend to verify reachability and auto-detect the served model + context window
-	detectedModel, reachable, _, resolvedBaseURL, advertisedModels, advertisedWindows := probePiBackendWithCatalog(targetBaseURL, 1500*time.Millisecond)
+	detectedModel, reachable, _, resolvedBaseURL, advertisedModels, advertisedWindows, advertisedHalo := probePiBackendWithCatalog(targetBaseURL, 1500*time.Millisecond)
 	if reachable {
 		backendActive = true
 		// Adopt the origin that answered: a loopback literal can be refused while
@@ -198,6 +198,9 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		servedWindow = piAdvertisedModelWindow(targetModel, advertisedWindows)
 	}
 	budget := projectassets.PiModelContextBudget(targetModel, servedWindow)
+	if piAdvertisedModelUsesHalo(targetModel, advertisedHalo) {
+		budget = projectassets.PiContextBudgetFor(budget.ServedWindow, projectassets.HaloPiColdAdmission.MaxTrigger())
+	}
 
 	if *printEnv {
 		fmt.Fprintln(stdout, "# Environment configuration for Pi with fak serve backend on Mac")
@@ -385,6 +388,22 @@ func piAdvertisedModelWindow(model string, windows map[string]int) int {
 	return window
 }
 
+// piAdvertisedModelUsesHalo keeps ownership scoped to the selected route. An
+// exact advertised ID wins over aliases, including an unknown or non-Halo owner.
+// Duplicate exact IDs and otherwise ambiguous aliases cap conservatively if any
+// matching route is Halo, just as their advertised windows use the smaller bound.
+func piAdvertisedModelUsesHalo(model string, halo map[string]bool) bool {
+	if isHalo, exact := halo[model]; exact {
+		return isHalo
+	}
+	for id, isHalo := range halo {
+		if isHalo && projectassets.IsPiModelAdvertised(model, []string{id}) {
+			return true
+		}
+	}
+	return false
+}
+
 // configuredPiProviderBaseURL returns the persisted Fak provider endpoint when
 // it is readable and valid. The launcher treats a missing or malformed config as
 // absent so an explicit flag, FAK_SERVE_ADDR, or the fresh-install default remains usable.
@@ -558,25 +577,26 @@ func probePiBackend(baseURL string, timeout time.Duration) (model string, ok boo
 // resident target from the real window instead of an assumed prior (see
 // projectassets.PiSafeContextBudget).
 func probePiBackendWithWindow(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string) {
-	model, ok, window, resolved, _, _ := probePiBackendWithCatalog(baseURL, timeout)
+	model, ok, window, resolved, _, _, _ := probePiBackendWithCatalog(baseURL, timeout)
 	return model, ok, window, resolved
 }
 
 // probePiBackendWithCatalog is probePiBackendWithWindow plus the backend's advertised model
 // catalog from /v1/models, so the caller can tell a real, servable default from a stale
 // placeholder id (see projectassets.PiDefaultModelIsDeliberate) and size the selected model.
-// Model ids and positive per-model windows come from whichever origin answered the probe.
-func probePiBackendWithCatalog(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string, advertised []string, windows map[string]int) {
+// Model ids, positive per-model windows and Halo ownership come from whichever
+// origin answered the probe; no second catalog request is needed for admission.
+func probePiBackendWithCatalog(baseURL string, timeout time.Duration) (model string, ok bool, window int, resolvedBaseURL string, advertised []string, windows map[string]int, halo map[string]bool) {
 	client := &http.Client{Timeout: timeout}
-	if m, ok, w, ids, windows := probePiBackendWindowFull(client, baseURL); ok {
-		return m, true, w, baseURL, ids, windows
+	if m, ok, w, ids, windows, halo := probePiBackendWindowFull(client, baseURL); ok {
+		return m, true, w, baseURL, ids, windows, halo
 	}
 	if fallback, ok := fakclient.LoopbackFallbackURL(baseURL); ok {
-		if m, ok, w, ids, windows := probePiBackendWindowFull(client, fallback); ok {
-			return m, true, w, fallback, ids, windows
+		if m, ok, w, ids, windows, halo := probePiBackendWindowFull(client, fallback); ok {
+			return m, true, w, fallback, ids, windows, halo
 		}
 	}
-	return "", false, 0, baseURL, nil, nil
+	return "", false, 0, baseURL, nil, nil, nil
 }
 
 // probePiBackendOnce probes a single backend base URL for the served model id.
@@ -589,14 +609,14 @@ func probePiBackendOnce(client *http.Client, baseURL string) (string, bool) {
 // <base>/models for the served model id AND its advertised context_length (the window the safe
 // budget is derived from).
 func probePiBackendWindow(client *http.Client, baseURL string) (model string, ok bool, window int) {
-	model, ok, window, _, _ = probePiBackendWindowFull(client, baseURL)
+	model, ok, window, _, _, _ = probePiBackendWindowFull(client, baseURL)
 	return model, ok, window
 }
 
 // probePiBackendWindowFull is probePiBackendWindow plus every advertised model id in the
-// /v1/models catalog and its positive per-model windows, so a caller can validate and
+// /v1/models catalog, its positive per-model windows and Halo ownership, so a caller can validate and
 // size a configured default against what the backend actually serves.
-func probePiBackendWindowFull(client *http.Client, baseURL string) (model string, ok bool, window int, advertised []string, windows map[string]int) {
+func probePiBackendWindowFull(client *http.Client, baseURL string) (model string, ok bool, window int, advertised []string, windows map[string]int, halo map[string]bool) {
 	healthy := false
 	healthURL := strings.TrimRight(strings.TrimSuffix(baseURL, "/v1"), "/") + "/healthz"
 	resp, err := client.Get(healthURL)
@@ -620,15 +640,20 @@ func probePiBackendWindowFull(client *http.Client, baseURL string) (model string
 		defer mResp.Body.Close()
 		var catalog struct {
 			Data []struct {
-				ID            string `json:"id"`
-				ContextLength int    `json:"context_length"`
+				ID            string          `json:"id"`
+				ContextLength int             `json:"context_length"`
+				OwnedBy       json.RawMessage `json:"owned_by"`
 			} `json:"data"`
 		}
 		if json.NewDecoder(mResp.Body).Decode(&catalog) == nil && len(catalog.Data) > 0 {
 			windows = make(map[string]int)
+			halo = make(map[string]bool)
 			for _, row := range catalog.Data {
 				if row.ID != "" {
 					advertised = append(advertised, row.ID)
+					var ownedBy string
+					_ = json.Unmarshal(row.OwnedBy, &ownedBy)
+					halo[row.ID] = halo[row.ID] || projectassets.PiServedByHalo(ownedBy)
 					if row.ContextLength > 0 && (windows[row.ID] == 0 || row.ContextLength < windows[row.ID]) {
 						windows[row.ID] = row.ContextLength
 					}
@@ -646,14 +671,14 @@ func probePiBackendWindowFull(client *http.Client, baseURL string) (model string
 			if window == 0 {
 				window = catalog.Data[0].ContextLength
 			}
-			return model, true, window, advertised, windows
+			return model, true, window, advertised, windows, halo
 		}
-		return model, healthy, 0, advertised, windows
+		return model, healthy, 0, advertised, windows, halo
 	}
 	if healthy {
-		return model, true, 0, advertised, windows
+		return model, true, 0, advertised, windows, halo
 	}
-	return "", false, 0, nil, nil
+	return "", false, 0, nil, nil, nil
 }
 
 func buildPiLaunchArgv(opts piLaunchOptions) []string {

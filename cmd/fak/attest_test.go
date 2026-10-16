@@ -11,8 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
 func sha256Hex(b []byte) string {
@@ -20,30 +22,58 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// attestTestProbeTools names every tool the attest tests in this file probe.
-var attestTestProbeTools = []string{"delete_all", "read_record", "run_read_query", "x", "__fak_attest_unmatched__"}
-
-// resetAttestProbeTraces clears the adjudicator circuit-breaker history on the
-// per-tool traces runProbe folds under ("fak-attest/<tool>"). The breaker turns
-// the third consecutive identical deny on one trace into DOOM_LOOP; a `fak
-// attest` process runs one attestation, but this package runs several, so in
-// full-suite order TestRunAttestJSONShape read DOOM_LOOP instead of the floor.
-func resetAttestProbeTraces() {
-	for _, tool := range attestTestProbeTools {
-		adjudicator.Default.ResetCircuitBreaker("fak-attest/" + tool)
-	}
-}
-
 // restorePolicy resets the global adjudicator + IFC policy an `applyPolicy` call
-// mutates, so one attest run cannot leak its floor into a sibling test, and
-// isolates the probe traces' circuit-breaker history on both sides of the test.
+// mutates, so one attest run cannot leak its floor into a sibling test.
 func restorePolicy(t *testing.T) {
-	resetAttestProbeTraces()
 	t.Cleanup(func() {
 		adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy())
 		ifc.ConfigureDefaultPolicy(ifc.Policy{})
-		resetAttestProbeTraces()
 	})
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestRunAttestIndependentProbeIdentity(t *testing.T) {
+	restorePolicy(t)
+	const tool = "attest_identity_deny"
+	policyPath := writeTemp(t, "floor.json", `{"deny":{"attest_identity_deny":"POLICY_BLOCK"}}`)
+	probes := make([]probe, 4)
+	for i := range probes {
+		probes[i] = probe{Tool: tool, Args: "{}", Expect: "deny", ExpectReason: "POLICY_BLOCK"}
+	}
+	raw, err := json.Marshal(probes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probesPath := writeTemp(t, "probes.json", string(raw))
+	// No state reset between proofs or between repeated cases in one proof.
+	for invocation := 0; invocation < 4; invocation++ {
+		var out, errb bytes.Buffer
+		code := runAttest(&out, &errb, []string{"--policy", policyPath, "--probes", probesPath, "--json", "--quiet"})
+		if code != 0 {
+			t.Fatalf("invocation %d: exit=%d stderr=%s attestation=%s", invocation, code, errb.String(), out.String())
+		}
+		var got attestation
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Summary.Pass || got.Summary.Probes != len(probes) || got.Summary.Passed != len(probes) || got.Summary.Failed != 0 || len(got.Probes) != len(probes) {
+			t.Fatalf("invocation %d: incomplete proof %+v, rows=%d", invocation, got.Summary, len(got.Probes))
+		}
+		for i, result := range got.Probes {
+			if result.Tool != tool || !result.Pass || result.Actual != "DENY" || result.ActualReason != "POLICY_BLOCK" {
+				t.Fatalf("invocation %d probe %d inherited state: %+v", invocation, i, result)
+			}
+		}
+	}
+	// Independence belongs to proof probes only. A caller's repeated refusal
+	// on one trace still reaches the unchanged circuit breaker through the fold.
+	tc := &abi.ToolCall{TraceID: "attest-caller-control/" + t.TempDir(), Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte("{}")}}
+	for i, want := range []string{"POLICY_BLOCK", "POLICY_BLOCK", "DOOM_LOOP"} {
+		v := kernel.Fold(ctx(), abi.AdjudicatorsFor(tc), tc)
+		if v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != want {
+			t.Fatalf("same-trace call %d: verdict=%v reason=%s want DENY/%s", i, v.Kind, abi.ReasonName(v.Reason), want)
+		}
+	}
 }
 
 func writeTemp(t *testing.T, name, content string) string {

@@ -97,76 +97,90 @@ func (s *Session) v41EmbeddingGatherSelected(key string, check func() error, sta
 			s.closeBackendOwned()
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		convertPanic := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, cause = nil, closeFailure(err)
+				return
 			}
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			closeFailure(err)
+			panic(r)
+		}
+		completed, present := false, false
+		var payload any
+		func() {
+			defer func() {
+				if !completed {
+					payload, present = recover(), true
+				}
+			}()
+			result, cause = func() ([]float32, error) {
+				cfg := s.M.Cfg
+				hidden, vocab := cfg.HiddenSize, cfg.VocabSize
+				width, widthOK := checkedMulInt(len(ids), hidden)
+				if !widthOK || len(ids) == 0 {
+					return nil, closeFailure(errV41EmbeddingGatherResult)
+				}
+				for _, id := range ids {
+					if id < 0 || id >= vocab {
+						return nil, closeFailure(errV41EmbeddingGatherResult)
+					}
+				}
+				run := func() ([]float32, error) {
+					stage = "table upload"
+					if err := check(); err != nil {
+						return nil, err
+					}
+					weight := s.cachedImmutableWeight(key, key, stageTable)
+					stage = "embedding-gather"
+					panel, err := gather(weight, ids, hidden)
+					fresh := panel.Buf() != nil && panel.Backend() == s.Backend && panel.Buf() != weight.Buf()
+					if fresh {
+						defer s.Backend.Free(panel)
+					}
+					if err != nil {
+						return nil, err
+					}
+					if !fresh || panel.Dtype != compute.F32 || panel.Layout != compute.RowMajor || panel.Quant != nil ||
+						len(panel.Shape) != 2 || panel.Shape[0] != len(ids) || panel.Shape[1] != hidden {
+						return nil, errV41EmbeddingGatherResult
+					}
+					stage = "panel readback"
+					values := s.Backend.Read(panel)
+					if len(values) != width {
+						return nil, errV41EmbeddingGatherResult
+					}
+					return append([]float32(nil), values...), nil
+				}
+				result, cause = run()
+				if cause != nil {
+					return nil, closeFailure(cause)
+				}
+				return result, nil
+			}()
+			completed = true
 		}()
-		cfg := s.M.Cfg
-		hidden, vocab := cfg.HiddenSize, cfg.VocabSize
-		width, widthOK := checkedMulInt(len(ids), hidden)
-		if !widthOK || len(ids) == 0 {
-			return nil, closeFailure(errV41EmbeddingGatherResult)
+		if present {
+			convertPanic(payload)
 		}
-		for _, id := range ids {
-			if id < 0 || id >= vocab {
-				return nil, closeFailure(errV41EmbeddingGatherResult)
-			}
-		}
-		run := func() ([]float32, error) {
-			stage = "table upload"
-			if err := check(); err != nil {
-				return nil, err
-			}
-			weight := s.cachedImmutableWeight(key, key, stageTable)
-			stage = "embedding-gather"
-			panel, err := gather(weight, ids, hidden)
-			fresh := panel.Buf() != nil && panel.Backend() == s.Backend && panel.Buf() != weight.Buf()
-			if fresh {
-				defer s.Backend.Free(panel)
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !fresh || panel.Dtype != compute.F32 || panel.Layout != compute.RowMajor || panel.Quant != nil ||
-				len(panel.Shape) != 2 || panel.Shape[0] != len(ids) || panel.Shape[1] != hidden {
-				return nil, errV41EmbeddingGatherResult
-			}
-			stage = "panel readback"
-			values := s.Backend.Read(panel)
-			if len(values) != width {
-				return nil, errV41EmbeddingGatherResult
-			}
-			return append([]float32(nil), values...), nil
-		}
-		result, cause = run()
-		if cause != nil {
-			return nil, closeFailure(cause)
-		}
-		return result, nil
+		return result, cause
 	}
 }
 

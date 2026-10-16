@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -242,10 +243,12 @@ var errAnthropicInBandRefusal = errors.New("agent: anthropic refused the stream 
 //
 // The three outcomes are disjoint:
 //
-//   - (0, nil, nil) — the turn was relayed to a clean end.
+//   - (0, nil, nil) — framing reached message_stop or a relayed error frame,
+//     or no message_start arrived. The caller owns the latter two outcomes.
 //   - (0, nil, err) — a real failure the caller cannot retry away: the wire cannot be framed
 //     as SSE (ErrStreamingUnsupported), the upstream went silent (UpstreamStalledError), the
-//     read failed, or onEvent itself asked to stop.
+//     read failed, a started response ended without a terminal frame, or onEvent
+//     itself asked to stop.
 //   - (status, frame, nil) — the upstream answered 200 + text/event-stream and then refused
 //     IN-BAND with an SSE `error` frame BEFORE any message_start (#5491). Nothing was handed
 //     to onEvent, so the caller still owns the response: it re-sends a transient refusal under
@@ -288,10 +291,15 @@ func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, attemptsUsed int
 	// thing that ends it.
 	sr.armSoftProgress(p.streamSoftProgressWindow(progressWindow), func() int { return attemptsUsed }, p.SoftStallNotify)
 	started := false
+	terminal := false
 	var frame []byte
 	onProgressingEvent := func(ev AnthropicSSEEvent) error {
 		if ev.Event == "message_start" {
-			started = true
+			started, terminal = true, false
+		} else if started && (ev.Event == "message_stop" || ev.Event == "error") {
+			// Error frames are deliberately relayed to the caller as before;
+			// they end framing, without establishing a successful message.
+			terminal = true
 		}
 		if !started && ev.Event == "error" {
 			if status, ok := anthropicInBandErrorStatus(ev.Data); ok {
@@ -316,6 +324,9 @@ func (p *HTTPPlanner) relayAnthropicStream(resp *http.Response, attemptsUsed int
 			return 0, nil, &UpstreamStalledError{Idle: window, Kind: kind, Err: perr}
 		}
 		return 0, nil, perr
+	}
+	if started && !terminal {
+		return 0, nil, fmt.Errorf("anthropic stream ended before message_stop: %w", io.ErrUnexpectedEOF)
 	}
 	return 0, nil, nil
 }

@@ -69,114 +69,124 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 			s.closeBackendOwned()
 			return v41CompressorNormOperationErr(layer, closed)
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		convertPanic := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				// The common RMSNorm helper may already have closed the session
-				// before rethrowing an unknown panic. Keep that original latch.
-				if !s.halClosed {
-					err, ok := r.(error)
-					if !ok {
-						err = fmt.Errorf("unclassified backend panic: %v", r)
-					}
-					closeFailure(err)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				panic(r)
+				result, cause = nil, closeFailure(err)
+				return
 			}
-		}()
-		if len(pooled) != width {
-			return nil, closeFailure(errV41ProjectionResult)
-		}
-		for _, value := range pooled {
-			if !finite32(value) {
-				return nil, closeFailure(errV41ProjectionResult)
+			// The common RMSNorm helper may already have closed the session
+			// before rethrowing an unknown panic. Keep that original latch.
+			if !s.halClosed {
+				err, ok := r.(error)
+				if !ok {
+					err = fmt.Errorf("unclassified backend panic: %v", r)
+				}
+				closeFailure(err)
 			}
+			panic(r)
 		}
-
-		// The common helper resolves its gain and epsilon from the model. Do
-		// not let that silently substitute different operands for the pool's.
-		stage = "canonical operands"
-		name := layerName(layer, "attn.compressor.norm.weight")
-		meta, present := s.M.manifest[name]
-		if v41CompressorWidth(s.M.Cfg) != width || s.M.Cfg.LayerNorm || s.M.Cfg.NormGain1p ||
-			!finite32(suppliedEps) || suppliedEps <= 0 ||
-			math.Float32bits(suppliedEps) != math.Float32bits(eps) ||
-			math.Float32bits(float32(s.M.Cfg.RMSNormEps)) != math.Float32bits(eps) ||
-			!present || len(meta.Shape) != 1 || meta.Shape[0] != width || len(gain) != width {
-			return nil, closeFailure(errV41ProjectionResult)
-		}
-		canonical := s.M.tensor(name)
-		if len(canonical) != width {
-			return nil, closeFailure(errV41ProjectionResult)
-		}
-		for i, value := range gain {
-			if !finite32(value) || !finite32(canonical[i]) || math.Float32bits(value) != math.Float32bits(canonical[i]) {
-				return nil, closeFailure(errV41ProjectionResult)
-			}
-		}
-
-		stage = "BF16 input"
-		var input []float32
-		if publish != nil {
-			// The selected publication closes this session itself on failure.
-			published, err := v41PublishBF16(layer, "attn.compressor.norm.weight input", pooled, publish, nil)
-			if err != nil {
-				return nil, v41CompressorNormOperationErr(layer, err)
-			}
-			input = published
-		} else {
-			input = append([]float32(nil), pooled...)
-			for i, value := range input {
-				input[i] = v41RoundBF16(value)
-				if !finite32(input[i]) {
+		var recovered any
+		completed := false
+		func() {
+			defer func() { recovered = recover() }()
+			result, cause = func() ([]float32, error) {
+				if len(pooled) != width {
 					return nil, closeFailure(errV41ProjectionResult)
 				}
-			}
+				for _, value := range pooled {
+					if !finite32(value) {
+						return nil, closeFailure(errV41ProjectionResult)
+					}
+				}
+
+				// The common helper resolves its gain and epsilon from the model. Do
+				// not let that silently substitute different operands for the pool's.
+				stage = "canonical operands"
+				name := layerName(layer, "attn.compressor.norm.weight")
+				meta, present := s.M.manifest[name]
+				if v41CompressorWidth(s.M.Cfg) != width || s.M.Cfg.LayerNorm || s.M.Cfg.NormGain1p ||
+					!finite32(suppliedEps) || suppliedEps <= 0 ||
+					math.Float32bits(suppliedEps) != math.Float32bits(eps) ||
+					math.Float32bits(float32(s.M.Cfg.RMSNormEps)) != math.Float32bits(eps) ||
+					!present || len(meta.Shape) != 1 || meta.Shape[0] != width || len(gain) != width {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
+				canonical := s.M.tensor(name)
+				if len(canonical) != width {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
+				for i, value := range gain {
+					if !finite32(value) || !finite32(canonical[i]) || math.Float32bits(value) != math.Float32bits(canonical[i]) {
+						return nil, closeFailure(errV41ProjectionResult)
+					}
+				}
+
+				stage = "BF16 input"
+				var input []float32
+				if publish != nil {
+					// The selected publication closes this session itself on failure.
+					published, err := v41PublishBF16(layer, "attn.compressor.norm.weight input", pooled, publish, nil)
+					if err != nil {
+						return nil, v41CompressorNormOperationErr(layer, err)
+					}
+					input = published
+				} else {
+					input = append([]float32(nil), pooled...)
+					for i, value := range input {
+						input[i] = v41RoundBF16(value)
+						if !finite32(input[i]) {
+							return nil, closeFailure(errV41ProjectionResult)
+						}
+					}
+				}
+				stage = "rmsnorm"
+				values, err := normalize(name, input, width, "v41-compressor-norm", layer)
+				if err != nil {
+					// The common helper closed/latches its exact device failure phase;
+					// only add the selected compress marker required by token rollback.
+					return nil, v41CompressorNormOperationErr(layer, err)
+				}
+				stage = "BF16 output"
+				if len(values) != width {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
+				if publish != nil {
+					published, err := v41PublishBF16(layer, "attn.compressor.norm.weight output", values, publish, nil)
+					if err != nil {
+						return nil, v41CompressorNormOperationErr(layer, err)
+					}
+					return published, nil
+				}
+				for i, value := range values {
+					if !finite32(value) {
+						return nil, closeFailure(errV41ProjectionResult)
+					}
+					values[i] = v41RoundBF16(value)
+					if !finite32(values[i]) || math.Float32bits(values[i])&0xffff != 0 {
+						return nil, closeFailure(errV41ProjectionResult)
+					}
+				}
+				return values, nil
+			}()
+			completed = true
+		}()
+		if !completed {
+			convertPanic(recovered)
 		}
-		stage = "rmsnorm"
-		values, err := normalize(name, input, width, "v41-compressor-norm", layer)
-		if err != nil {
-			// The common helper closed/latches its exact device failure phase;
-			// only add the selected compress marker required by token rollback.
-			return nil, v41CompressorNormOperationErr(layer, err)
-		}
-		stage = "BF16 output"
-		if len(values) != width {
-			return nil, closeFailure(errV41ProjectionResult)
-		}
-		if publish != nil {
-			published, err := v41PublishBF16(layer, "attn.compressor.norm.weight output", values, publish, nil)
-			if err != nil {
-				return nil, v41CompressorNormOperationErr(layer, err)
-			}
-			return published, nil
-		}
-		for i, value := range values {
-			if !finite32(value) {
-				return nil, closeFailure(errV41ProjectionResult)
-			}
-			values[i] = v41RoundBF16(value)
-			if !finite32(values[i]) || math.Float32bits(values[i])&0xffff != 0 {
-				return nil, closeFailure(errV41ProjectionResult)
-			}
-		}
-		return values, nil
+		return result, cause
 	}
 }

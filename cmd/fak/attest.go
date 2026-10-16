@@ -35,6 +35,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -291,17 +292,22 @@ func validateProbe(p probe) error {
 	return nil
 }
 
-// runProbe runs one probe through the real preflight fold and records the result.
+// attestProbeSequence separates independent floor probes from process-local
+// refusal and IFC history. It is not a cross-process proof identity.
+var attestProbeSequence atomic.Uint64
+
+// runProbe runs one independent probe through the real preflight fold.
 func runProbe(ctx context.Context, p probe) probeResult {
 	res := abi.ActiveResolver()
 	ref, err := res.Put(ctx, []byte(p.Args))
 	if err != nil {
 		return probeResult{probe: p, Actual: "ERROR", By: "resolver", Pass: false}
 	}
-	// Attestation is a proof run, not a continuation of the caller's ambient
-	// session. Use a non-empty trace id so process-local IFC ledger state from a
-	// prior command/test that touched the empty trace cannot contaminate the probe.
-	tc := &abi.ToolCall{TraceID: "fak-attest/" + p.Tool, Tool: p.Tool, Args: ref}
+	// A probe describes an independent floor case, not a caller continuation.
+	// Repeated cases in one file and later attestations must not inherit another
+	// probe's refusal streak or IFC state. Ordinary same-trace calls still do.
+	trace := fmt.Sprintf("fak-attest/%d/%s", attestProbeSequence.Add(1), p.Tool)
+	tc := &abi.ToolCall{TraceID: trace, Tool: p.Tool, Args: ref}
 	v := kernel.Fold(ctx, abi.AdjudicatorsFor(tc), tc)
 	return probeResult{
 		probe:        p,

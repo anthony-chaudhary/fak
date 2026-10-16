@@ -216,7 +216,7 @@ type openAIResponse struct {
 	ServiceTier string `json:"service_tier,omitempty"`
 	Model       string `json:"model"` // the model the upstream reports it served (#82 echo)
 	Choices     []struct {
-		Message      Message  `json:"message"`
+		Message      *Message `json:"message"`
 		Delta        *Message `json:"delta,omitempty"`
 		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
@@ -649,7 +649,13 @@ func (a openAIAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("no choices (body: %s)", truncate(raw, 200))
 	}
-	msg := cr.Choices[0].Message
+	if cr.Choices[0].Message == nil && cr.Choices[0].Delta == nil {
+		return nil, fmt.Errorf("missing or null message and delta")
+	}
+	var msg Message
+	if cr.Choices[0].Message != nil {
+		msg = *cr.Choices[0].Message
+	}
 	if cr.Choices[0].Delta != nil {
 		if msg.Role == "" && msg.Content == "" && len(msg.ToolCalls) == 0 && msg.FunctionCall == nil {
 			msg = *cr.Choices[0].Delta
@@ -872,6 +878,7 @@ type openAIResponsesItem struct {
 	ID        string `json:"id,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Output    string `json:"output,omitempty"`
 	Summary   any    `json:"summary,omitempty"`
@@ -915,7 +922,8 @@ type openAIResponsesResponse struct {
 		PromptTokensDetails *UsageTokenDetails           `json:"prompt_tokens_details,omitempty"`
 		OutputTokensDetails *UsageCompletionTokenDetails `json:"output_tokens_details,omitempty"`
 	} `json:"usage"`
-	Error *apiError `json:"error"`
+	Error             *apiError       `json:"error"`
+	IncompleteDetails json.RawMessage `json:"incomplete_details"`
 }
 
 // MarshalRequest encodes the canonical request as a Responses-API body: messages
@@ -1047,6 +1055,7 @@ func openAIResponsesInput(messages []Message) []openAIResponsesItem {
 					Type:      "function_call",
 					CallID:    callID,
 					Name:      tc.Function.Name,
+					Namespace: tc.Function.Namespace,
 					Arguments: tc.Function.Arguments,
 				})
 			}
@@ -1100,6 +1109,11 @@ func (a openAIResponsesAdapter) parseResponseFields(raw []byte) (*Completion, er
 	}
 	if rr.Error != nil {
 		return nil, fmt.Errorf("api error: %s", rr.Error.Message)
+	}
+	// An output item is not completion authority for its enclosing response.
+	// Keep omitted status compatible with existing Responses-style endpoints.
+	if rr.Status != "" && rr.Status != "completed" {
+		return nil, fmt.Errorf("response status %q is not completed: incomplete_details=%s", rr.Status, rr.IncompleteDetails)
 	}
 	var content []string
 	var reasoning []string
