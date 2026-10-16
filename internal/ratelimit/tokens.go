@@ -261,7 +261,18 @@ func (c TokenCaps) targetUtilization() float64 {
 }
 
 func checkTokenCap(name string, limit, used, requested int64) TokenAdmission {
-	if limit <= 0 || used+requested <= limit {
+	if limit <= 0 {
+		return TokenAdmission{Admit: true}
+	}
+	var fits bool
+	if used < 0 || requested < 0 {
+		// Preserve the existing policy for derived invalid totals. Their
+		// aggregation is separate from comparing nonnegative cap operands.
+		fits = used+requested <= limit
+	} else {
+		fits = used <= limit && requested <= limit-used
+	}
+	if fits {
 		return TokenAdmission{Admit: true}
 	}
 	return denyTokenAdmission(name, limit, used, requested)
