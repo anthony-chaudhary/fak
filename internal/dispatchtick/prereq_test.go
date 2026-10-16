@@ -1,7 +1,9 @@
 package dispatchtick
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
@@ -34,6 +36,95 @@ func TestCandidateBlockedBy(t *testing.T) {
 			got := CandidateBlockedBy(tc.body)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("CandidateBlockedBy(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestRepositoryQualifiedPrerequisiteParsing(t *testing.T) {
+	tests := []struct {
+		name, body string
+		want       DependencyEdges
+	}{
+		{"qualified", "Start blocked by: Owner/Engine#77, owner/ops#77 AND HTTPS://GitHub.com/owner/engine/issues/77 & #77", DependencyEdges{StartBlockedBy: []string{"owner/engine#77", "owner/ops#77", "77"}}},
+		{"dot_repository", "Start blocked by: Owner/.github#77, https://github.com/owner/.github/issues/77", DependencyEdges{StartBlockedBy: []string{"owner/.github#77"}}},
+		{"repository_suffix", "Start blocked by: owner/repo-#77 and owner/repo_#78", DependencyEdges{StartBlockedBy: []string{"owner/repo-#77", "owner/repo_#78"}}},
+		{"legacy", "Depends on owner/engine#77 and #78.\nAlso blocked by https://github.com/owner/ops/issues/77", DependencyEdges{StartBlockedBy: []string{"owner/engine#77", "78", "owner/ops#77"}}},
+		{"relations", "Start blocked by: owner/engine#77\nCoordinates with: owner/ops#77\nPromotion requires: https://github.com/owner/release/issues/77", DependencyEdges{StartBlockedBy: []string{"owner/engine#77"}, CoordinatesWith: []string{"owner/ops#77"}, PromotionRequires: []string{"owner/release#77"}}},
+		{"advisory_precedence", "Start blocked by: Owner/Engine#77 and #77\nCoordinates with: owner/engine#77", DependencyEdges{StartBlockedBy: []string{"77"}, CoordinatesWith: []string{"owner/engine#77"}}},
+		{"modern_prose", "## Scope / tree\ninternal/gateway/**\nDepends on owner/engine#77 for background.\nCoordinates with: owner/ops#78", DependencyEdges{CoordinatesWith: []string{"owner/ops#78"}}},
+		{"explicit_dependency_section", "## Dependencies\nBlocked by: https://github.com/owner/engine/issues/77\n## Witness\nOther prose", DependencyEdges{StartBlockedBy: []string{"owner/engine#77"}}},
+		{"malformed_not_local", "Start blocked by: owner//engine#77", DependencyEdges{}},
+		{"wrong_url_not_local", "Start blocked by: https://example.test/owner/engine/issues/77", DependencyEdges{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CandidateDependencyEdges(tc.body)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("edges = %+v, want %+v", got, tc.want)
+			}
+			wire, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var round DependencyEdges
+			if err := json.Unmarshal(wire, &round); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(round, got) {
+				t.Fatal("wire round trip changed dependency identity")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestRouterHoldsUnresolvedStartPrerequisites(t *testing.T) {
+	tests := []struct{ name, marker, unresolved string }{
+		{"qualified", "Start blocked by: owner/engine#77", "owner/engine#77"},
+		{"same_repo_still_unresolved", "Start blocked by: anthony-chaudhary/fak#77", "anthony-chaudhary/fak#77"},
+		{"url", "Start blocked by: https://github.com/owner/engine/issues/77", "owner/engine#77"},
+		{"dot_repository_url", "Start blocked by: https://github.com/owner/.github/issues/77", "owner/.github#77"},
+		{"repository_suffix", "Start blocked by: owner/repo-#77", "owner/repo-#77"},
+		{"malformed_owner", "Start blocked by: owner//engine#77", "owner//engine#77"},
+		{"suffix", "Start blocked by: owner/engine#77suffix", "owner/engine#77suffix"},
+		{"wrong_url", "Start blocked by: https://example.test/owner/engine/issues/77", "https://example.test/owner/engine/issues/77"},
+		{"missing_number", "Start blocked by: owner/engine#", "owner/engine#"},
+		{"malformed_after_valid", "Start blocked by: #77, owner//engine#78", "owner//engine#78"},
+		{"overflow", "Start blocked by: #99999999999999999999999999999999999999", "#99999999999999999999999999999999999999"},
+		{"leading_separator", "Start blocked by: , owner/engine#77", "unexpected reference separator"},
+		{"trailing_and", "Start blocked by: #77 and", "missing reference after separator"},
+		{"empty", "Start blocked by:", "missing reference"},
+		{"bare_local", "Start blocked by: #77", ""},
+		{"none", "Start blocked by: none", ""},
+		{"advisory", "Coordinates with: owner/engine#77", ""},
+		{"promotion", "Promotion requires: owner/engine#77", ""},
+		{"malformed_advisory", "Coordinates with: owner//engine#77", ""},
+		{"unmarked", "Background reference owner/engine#77", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			issue := routerIssue(200, "fix(gateway): bound the request", nil, scopedGatewayIssueBody("2")+"\n"+tc.marker)
+			payload := RouteIssues(RouterInput{Injected: true, Issues: []Issue{issue}, Taxonomy: routerTestTaxonomy})
+			if tc.unresolved != "" {
+				if len(payload.Issues) != 0 || len(payload.SkippedHumanBlocked) != 1 {
+					t.Fatalf("unresolved prerequisite remained routable: %+v", payload)
+				}
+				skipped := payload.SkippedHumanBlocked[0]
+				if skipped.Reason != "ISSUE_PREREQUISITE_UNRESOLVED" || !strings.Contains(skipped.NextAction, tc.unresolved) {
+					t.Fatalf("refusal lost unresolved identity: %+v", skipped)
+				}
+				return
+			}
+			if len(payload.Issues) != 1 || len(payload.SkippedHumanBlocked) != 0 || payload.Issues[0].Lane != "gateway" {
+				t.Fatalf("supported/nonblocking control stopped routing: %+v", payload)
+			}
+			if tc.name == "bare_local" {
+				candidates := []dispatchorder.Candidate{{ID: "77"}, {ID: "200", BlockedBy: payload.Issues[0].BlockedBy}}
+				if !reflect.DeepEqual(dispatchorder.BlockedByOpenPrereq(candidates)["200"], []string{"77"}) {
+					t.Fatal("bare local prerequisite no longer reaches existing hold engine")
+				}
 			}
 		})
 	}
