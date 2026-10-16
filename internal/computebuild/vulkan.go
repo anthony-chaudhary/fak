@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // VulkanShaders is a compatibility snapshot of the current shader registry.
@@ -43,6 +45,7 @@ func strictFileSHA256(path string) (string, int64, error) {
 func gitOutput(ctx context.Context, root string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", root}, args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
+	sysproc.ConfigureBackground(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -65,6 +68,7 @@ func cleanGitState(ctx context.Context, root string) error {
 
 func hashGitArchive(ctx context.Context, root, commit string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", commit)
+	sysproc.ConfigureBackground(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	h := sha256.New()
