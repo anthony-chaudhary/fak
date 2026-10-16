@@ -7,7 +7,7 @@ expected_steps: 6
 
 # perf(model): wire the resident V4.1 indexer-key path so decode stops repacking O(context) keys every token
 
-GitHub: pending mirror.
+GitHub: [#13870](https://github.com/anthony-chaudhary/fak/issues/13870)
 
 Process cause: verification-gap
 
@@ -95,12 +95,14 @@ Close with the landing commit, the scaling test name, and the Halo receipt path.
 
 ## Work estimate
 
-About 1-2 days, including the budget policy and the Halo A/B.
+Estimate: 5 points (medium) - about 1-2 days, including the budget policy and the Halo A/B.
 
 ## Overall completion contribution
 
-3/11 points of the hot-path copy sweep.
+5/26 points of the hot-path copy sweep.
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13870

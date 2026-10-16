@@ -7,7 +7,7 @@ expected_steps: 7
 
 # perf(model): borrow the mapped GGUF on every routed-expert fault path, not only Q2_K/Q3_K with host budget 0
 
-GitHub: pending mirror.
+GitHub: [#13871](https://github.com/anthony-chaudhary/fak/issues/13871)
 
 Process cause: scoping-failure
 
@@ -98,12 +98,14 @@ Close with the landing commit, ceiling test names, and the A/B receipt path.
 
 ## Work estimate
 
-About 2 days.
+Estimate: 5 points (medium) - about 2 days.
 
 ## Overall completion contribution
 
-2/11 points of the hot-path copy sweep.
+5/26 points of the hot-path copy sweep.
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13871

@@ -7,7 +7,7 @@ expected_steps: 7
 
 # perf(model): add a V4.1 decode-step allocation ceiling and remove the per-token pools and window copies it exposes
 
-GitHub: pending mirror.
+GitHub: [#13872](https://github.com/anthony-chaudhary/fak/issues/13872)
 
 Process cause: verification-gap
 
@@ -95,12 +95,14 @@ Close with the landing commit and the ceiling test name.
 
 ## Work estimate
 
-About 1-2 days.
+Estimate: 5 points (medium) - about 1-2 days.
 
 ## Overall completion contribution
 
-2/11 points of the hot-path copy sweep.
+5/26 points of the hot-path copy sweep.
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13872

@@ -7,7 +7,7 @@ expected_steps: 6
 
 # perf(compute): read dispatch env flags once and decode deferred-panel readbacks without per-row copies
 
-GitHub: pending mirror.
+GitHub: [#13874](https://github.com/anthony-chaudhary/fak/issues/13874)
 
 Process cause: verification-gap
 
@@ -92,12 +92,14 @@ Close with the landing commit and ceiling names.
 
 ## Work estimate
 
-About half a day to one day.
+Estimate: 3 points (small) - about half a day to one day.
 
 ## Overall completion contribution
 
-1/11 points of the hot-path copy sweep.
+3/26 points of the hot-path copy sweep.
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13874

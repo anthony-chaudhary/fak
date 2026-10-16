@@ -7,7 +7,7 @@ expected_steps: 6
 
 # fix(compute): retire or repair latent per-call weight paths, starting with AttentionDequantOnce's layer-shared scratchpad
 
-GitHub: pending mirror.
+GitHub: [#13875](https://github.com/anthony-chaudhary/fak/issues/13875)
 
 Process cause: verification-gap
 
@@ -91,12 +91,14 @@ Close with the landing commit listing each entrypoint's disposition.
 
 ## Work estimate
 
-About 1 day.
+Estimate: 3 points (small) - about 1 day.
 
 ## Overall completion contribution
 
-1/11 points of the hot-path copy sweep.
+3/26 points of the hot-path copy sweep.
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13875

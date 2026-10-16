@@ -7,7 +7,7 @@ expected_steps: 5
 
 # perf(agent): make the in-kernel sampler allocation-free and partial-select instead of sorting the full vocabulary every token
 
-GitHub: pending mirror.
+GitHub: [#13873](https://github.com/anthony-chaudhary/fak/issues/13873)
 
 Process cause: verification-gap
 
@@ -87,12 +87,14 @@ Close with the landing commit and the benchmark delta.
 
 ## Work estimate
 
-About half a day.
+Estimate: 2 points (small) - about half a day.
 
 ## Overall completion contribution
 
-1/11 points of the hot-path copy sweep.
+2/26 points of the hot-path copy sweep.
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13873

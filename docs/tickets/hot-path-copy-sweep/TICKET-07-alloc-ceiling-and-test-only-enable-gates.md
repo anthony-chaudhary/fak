@@ -7,7 +7,7 @@ expected_steps: 6
 
 # test(compute): gate the hot-path copy class with a per-dtype allocation ceiling and a test-only-enable detector
 
-GitHub: pending mirror.
+GitHub: [#13876](https://github.com/anthony-chaudhary/fak/issues/13876)
 
 Process cause: verification-gap
 
@@ -87,12 +87,14 @@ Close with the landing commit and both test names.
 
 ## Work estimate
 
-About 1 day.
+Estimate: 3 points (small) - about 1 day.
 
 ## Overall completion contribution
 
-1/11 points of the hot-path copy sweep (process control that keeps the other fixes fixed).
+3/26 points of the hot-path copy sweep (process control that keeps the other fixes fixed).
 
 ## Completion standard
 
 development
+
+github_issue: anthony-chaudhary/fak#13876
