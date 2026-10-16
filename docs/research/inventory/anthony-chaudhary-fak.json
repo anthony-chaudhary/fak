@@ -2,9 +2,9 @@
   "schema": "fak-study-self-inventory/1",
   "repository": "anthony-chaudhary/fak",
   "authority": "committed_git_tree",
-  "content_root": "sha256:373eaffa81d957fc5466115e0d71a25cd15a7786d90ffdbb66275cd1040b80f4",
+  "content_root": "sha256:a9235d7c5f9ac7f9299e11daebf800d8918966b76a00f91d4f0d883e9d292f45",
   "tracked_files": 25544,
-  "tracked_bytes": 512210438,
+  "tracked_bytes": 512212674,
   "excluded_paths": [
     "docs/research/inventory/anthony-chaudhary-fak.json"
   ],
@@ -110285,8 +110285,8 @@
     },
     {
       "path": "internal/devcmd/build_vulkan_verify_test.go",
-      "content_sha256": "sha256:74b6395c83f2a652a160cc56286ee9f9a0d4d22ba4ca687ba5f0c646f8f08149",
-      "bytes": 27177,
+      "content_sha256": "sha256:153eb1b13e596201fe871066f77a4983a279e9ed77a4ab59ca5523ada5488304",
+      "bytes": 29413,
       "classification": "test_fixture",
       "source_classes": [
         "tests_fixtures"
