@@ -69,110 +69,125 @@ func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
 			closeSelected(closed)
 			return closed
 		}
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					var closed *BackendForwardOperationError
-					if errors.As(err, &closed) {
-						closeSelected(err)
-						panic(r)
-					}
-					var backend *compute.BackendError
-					if errors.As(err, &backend) {
-						result, cause = nil, closeFailure(err)
-						return
-					}
+		convert := func(r any) {
+			if err, ok := r.(error); ok {
+				var closed *BackendForwardOperationError
+				if errors.As(err, &closed) {
+					closeSelected(err)
+					panic(r)
 				}
-				if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
-					if original, ok := r.(error); ok {
-						err = original
-					}
+				var backend *compute.BackendError
+				if errors.As(err, &backend) {
 					result, cause = nil, closeFailure(err)
 					return
 				}
-				err, ok := r.(error)
-				if !ok {
-					err = fmt.Errorf("unclassified backend panic: %v", r)
+			}
+			if err, ok := compute.ConvertCUDAPanic(r, "", ""); ok {
+				if original, ok := r.(error); ok {
+					err = original
 				}
-				closeFailure(err)
-				panic(r)
+				result, cause = nil, closeFailure(err)
+				return
 			}
-		}()
-		meta, present := s.M.manifest[name]
-		if w != width || len(input) != width || !present || len(meta.Shape) != 1 || meta.Shape[0] != width {
-			return nil, closeFailure(errV41ProjectionResult)
-		}
-		gain := s.M.tensor(name)
-		if len(gain) != width {
-			return nil, closeFailure(errV41ProjectionResult)
-		}
-		for i, v := range input {
-			if !finite32(v) || !finite32(gain[i]) {
-				return nil, closeFailure(errV41ProjectionResult)
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("unclassified backend panic: %v", r)
 			}
+			closeFailure(err)
+			panic(r)
 		}
-		run := func() (result []float32, cause error) {
-			var owned []compute.Tensor
-			defer func() {
-				// Preserve the operation's returned error or panic if release
-				// also fails. Existing defers already attempted both releases;
-				// retain the first cleanup-only panic after a successful run.
-				primaryPanic := recover()
-				var cleanupPanic any
-				for i := len(owned) - 1; i >= 0; i-- {
-					func() {
-						defer func() {
-							if r := recover(); r != nil && cleanupPanic == nil {
-								cleanupPanic = r
-							}
-						}()
-						s.Backend.Free(owned[i])
+		completed := false
+		var primary any
+		func() {
+			defer func() { primary = recover() }()
+			result, cause = func() ([]float32, error) {
+				meta, present := s.M.manifest[name]
+				if w != width || len(input) != width || !present || len(meta.Shape) != 1 || meta.Shape[0] != width {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
+				gain := s.M.tensor(name)
+				if len(gain) != width {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
+				for i, v := range input {
+					if !finite32(v) || !finite32(gain[i]) {
+						return nil, closeFailure(errV41ProjectionResult)
+					}
+				}
+				run := func() (result []float32, cause error) {
+					var owned []compute.Tensor
+					bodyCompleted := false
+					defer func() {
+						// Recover only each cleanup attempt, never the active body unwind.
+						// On success, the first present release panic also includes nil.
+						failed := !bodyCompleted || cause != nil
+						var cleanupPanic any
+						cleanupPresent := false
+						for i := len(owned) - 1; i >= 0; i-- {
+							returned := false
+							func() {
+								defer func() {
+									r := recover()
+									if !returned && !cleanupPresent {
+										cleanupPanic, cleanupPresent = r, true
+									}
+								}()
+								s.Backend.Free(owned[i])
+								returned = true
+							}()
+						}
+						if !failed && cleanupPresent {
+							panic(cleanupPanic)
+						}
 					}()
+					result, cause = func() ([]float32, error) {
+						stage = "weight upload"
+						weight := s.weightHAL(name)
+						stage = "activation upload"
+						x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
+						owned = append(owned, x)
+						stage = "rmsnorm"
+						y, err := operation.V41ExactRMSNorm(x, weight, eps)
+						// Only a fresh output on this backend transfers transient ownership.
+						// Aliases retain their existing activation/model owner; a foreign
+						// tensor must never be read or freed through this backend.
+						fresh := y.Buf() != nil && y.Backend() == s.Backend && y.Buf() != x.Buf() && y.Buf() != weight.Buf()
+						if fresh {
+							owned = append(owned, y)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if !fresh || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != width {
+							return nil, errV41ProjectionResult
+						}
+						stage = "readback"
+						values := s.Backend.Read(y)
+						if len(values) != width {
+							return nil, errV41ProjectionResult
+						}
+						for _, v := range values {
+							if !finite32(v) {
+								return nil, errV41ProjectionResult
+							}
+						}
+						return append([]float32(nil), values...), nil
+					}()
+					bodyCompleted = true
+					return result, cause
 				}
-				if primaryPanic != nil {
-					panic(primaryPanic)
+				result, cause = run()
+				if cause != nil {
+					return nil, closeFailure(cause)
 				}
-				if cause == nil && cleanupPanic != nil {
-					panic(cleanupPanic)
-				}
+				return result, nil
 			}()
-			stage = "weight upload"
-			weight := s.weightHAL(name)
-			stage = "activation upload"
-			x := s.uploadHostF32([]int{width}, input, compute.MemoryActivation, "V4.1 RMSNorm activation "+name)
-			owned = append(owned, x)
-			stage = "rmsnorm"
-			y, err := operation.V41ExactRMSNorm(x, weight, eps)
-			// Only a fresh output on this backend transfers transient ownership.
-			// Aliases retain their existing activation/model owner; a foreign
-			// tensor must never be read or freed through this backend.
-			fresh := y.Buf() != nil && y.Backend() == s.Backend && y.Buf() != x.Buf() && y.Buf() != weight.Buf()
-			if fresh {
-				owned = append(owned, y)
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !fresh || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != width {
-				return nil, errV41ProjectionResult
-			}
-			stage = "readback"
-			values := s.Backend.Read(y)
-			if len(values) != width {
-				return nil, errV41ProjectionResult
-			}
-			for _, v := range values {
-				if !finite32(v) {
-					return nil, errV41ProjectionResult
-				}
-			}
-			return append([]float32(nil), values...), nil
+			completed = true
+		}()
+		if !completed {
+			convert(primary)
 		}
-		result, cause = run()
-		if cause != nil {
-			return nil, closeFailure(cause)
-		}
-		return result, nil
+		return result, cause
 	}
 }
 
