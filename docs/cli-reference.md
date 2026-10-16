@@ -72,6 +72,18 @@ fak compute-trace summary --in step.json
 fak compute-trace first-divergence --ref reference.json --got step.json --step-capture-id ID --step-token N --json
 ```
 
+Token-level parity against a runnable reference uses vLLM's
+`check_logprobs_close` rule: greedy tokens must agree until the first divergence,
+and there each side's token must sit in the other's top-k. The reference is a
+recorded `fak.reference_oracle.v1` (or legacy per-model oracle) file or a live
+llama-server; a text-only `/v1/completions` candidate is segmented against the
+reference's pieces (`method: text_pieces`).
+
+```text
+fak compute-trace logprobs --endpoint http://node:8080 --ref oracle.json --topk 5 --json
+fak compute-trace logprobs --endpoint http://127.0.0.1:8080 --ref http://127.0.0.1:8091 --api openai
+```
+
 Retain the ID and absolute token from `Session.LastV41ActivationCapture()` for
 the desired Step, and check its `Published`, `Current`, and `PublicationError`
 fields before comparing. The bounded summary inspects the supplied artifact;
