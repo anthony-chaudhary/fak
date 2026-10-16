@@ -485,6 +485,9 @@ func (a geminiAdapter) parseResponseFields(raw []byte) (*Completion, error) {
 		}
 	}
 	finish := strings.ToLower(c.FinishReason)
+	if finish == "max_tokens" {
+		finish = "length"
+	}
 	if len(calls) > 0 {
 		finish = "tool_calls"
 	}
