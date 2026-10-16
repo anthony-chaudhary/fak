@@ -124,6 +124,15 @@ type v41EntryPointCohortWitness struct {
 	now, opened int64
 	weights     []compute.Buffer
 	batches     []v41EntryPointCohortBatch
+	routedRead  func([]compute.V41DeferredStatus, []compute.Tensor, []error, [][]float32, error) ([]error, [][]float32, error)
+	afterFree   func(compute.Tensor)
+}
+
+func (b *v41EntryPointCohortWitness) Free(x compute.Tensor) {
+	b.v41ScalarCohortWitness.Free(x)
+	if b.afterFree != nil {
+		b.afterFree(x)
+	}
 }
 
 // Ordinary publication belongs to the Session backend; routed expert tensors
@@ -176,6 +185,9 @@ func (b *v41EntryPointCohortWitness) V41ReadDeferred(st []compute.V41DeferredSta
 	batch.completed = b.now
 	b.batches = append(b.batches, batch)
 	b.weights = nil
+	if b.routedRead != nil {
+		return b.routedRead(st, rows, verdicts, values, err)
+	}
 	return verdicts, values, err
 }
 
