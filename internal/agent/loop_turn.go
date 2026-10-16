@@ -261,6 +261,9 @@ func (r *armRunner) runSynthesisTurn(ctx context.Context, turn int) error {
 	asst := comp.Message
 	asst.Role = RoleAssistant
 	r.messages = append(r.messages, asst)
+	if err := r.reasoningOnlyFinal(ctx, asst); err != nil {
+		return err
+	}
 	r.metrics.FinalAnswer = asst.Content
 	r.metrics.SynthesizedFinalTurn = true
 	if r.cfg != nil {
@@ -591,12 +594,34 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 		return Message{}, armTurnContinue, nil
 	}
+	if err := r.reasoningOnlyFinal(ctx, asst); err != nil {
+		return Message{}, armTurnStop, err
+	}
 	// A final answer cannot confirm a pending speculation, so squash it before returning.
 	r.speculation.resolve(ctx, nil, r.metrics)
 	r.metrics.FinalAnswer = asst.Content
 	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	r.finalizeFak()
 	return Message{}, armTurnStop, nil
+}
+
+// reasoningOnlyFinal refuses only an otherwise-final reasoning-only turn. Callers
+// have already debited usage and applied any stop-gate continuation. This is a
+// terminal outcome, not a recoverable infrastructure failure or an empty-turn ban.
+func (r *armRunner) reasoningOnlyFinal(ctx context.Context, asst Message) error {
+	if asst.Content != "" || asst.ReasoningContent == "" || len(asst.ToolCalls) != 0 {
+		return nil
+	}
+	r.speculation.resolve(ctx, nil, r.metrics)
+	// The error bypasses runTurn's successful-stop branch, so retire its
+	// provisional streaming work here as well.
+	if r.streamingFSM != nil && r.streamingFSM.IsDispatched() {
+		r.streamingFSM.Squash("turn ended without a final answer")
+		if r.metrics != nil {
+			r.metrics.SpecSquashed++
+		}
+	}
+	return ErrNoFinalAnswer
 }
 
 // isToolResultFailure determines whether a tool execution outcome constitutes an
