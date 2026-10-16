@@ -71,3 +71,7 @@ internal/model/testdata/** text eol=lf
 # core.autocrlf=true a Windows checkout rewrites it to CRLF and the byte compare
 # fails locally while passing on LF CI (#freshness, same class as *.golden).
 internal/devhandoff/commands_gen.go text eol=lf
+
+# Canonical fused-scale packaging hashes these exact reviewed checkout bytes.
+internal/compute/shaders/v41_index_scale_bf16.comp text eol=lf
+internal/compute/v41_index_scale_bf16_spirv.h text eol=lf

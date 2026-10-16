@@ -822,6 +822,21 @@ func newVulkanFixture(t *testing.T) (string, string, *Toolchain) {
 		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", shader+".spv"), "fak-fixture-output\n")
 	}
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", "v41_indexer_score.spv"), string(vulkanV5StructuralFixture()))
+	// The native builder materializes this exact attested module rather than
+	// accepting the fixture compiler's arbitrary bytes.
+	for _, rel := range []string{"shaders/v41_index_scale_bf16.comp", "v41_index_scale_bf16_spirv.h"} {
+		data, err := os.ReadFile(filepath.Join("..", "compute", filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", filepath.FromSlash(rel)), string(data))
+	}
+	canonical, err := readVulkanQualifiedIndexScale(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", "v41_index_scale_bf16.spv"), string(canonical))
+
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "vulkan_shim.o"), "fak-fixture-output\n")
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "libfakvulkan.a"), "fak-fixture-output\n")
 	runFixtureGit(t, root, "init", "-q", repo)

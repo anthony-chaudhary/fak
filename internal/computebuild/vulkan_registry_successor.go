@@ -60,6 +60,8 @@ const (
 	VulkanShaderRegistryV21ID = "fak.vulkan-shader-registry.v21.current85"
 	// VulkanShaderRegistryV22ID adds optional fused index-scale BF16 publication.
 	VulkanShaderRegistryV22ID = "fak.vulkan-shader-registry.v22.current86"
+	// VulkanShaderRegistryV23ID preserves V22 membership and binds canonical materialization.
+	VulkanShaderRegistryV23ID = "fak.vulkan-shader-registry.v23.current86"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -104,10 +106,12 @@ var (
 
 	vulkanRegistryV22 = &vulkanSuccessorRegistry{version: "V22", schema: VulkanBuildReceiptSchemaV22, id: VulkanShaderRegistryV22ID, count: 86, parent: vulkanRegistryV21, added: []string{"v41_index_scale_bf16"}}
 
+	vulkanRegistryV23 = &vulkanSuccessorRegistry{version: "V23", schema: VulkanBuildReceiptSchemaV23, id: VulkanShaderRegistryV23ID, count: 86, parent: vulkanRegistryV22}
+
 	// vulkanSuccessorRegistries is every successor schema a receipt may name.
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22}
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV22
+	vulkanCurrentRegistry = vulkanRegistryV23
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

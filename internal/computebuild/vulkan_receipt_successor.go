@@ -304,6 +304,11 @@ func (r *vulkanSuccessorRegistry) observeEvidence(ctx context.Context, evidence 
 	if !validLowerSHA256(evidence.ExpectedBinarySHA256) || artifactSHA != evidence.ExpectedBinarySHA256 || artifactSize != evidence.ExpectedBinarySize || artifactSize <= 0 {
 		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("sealed mapped executable identity mismatch")
 	}
+	if r.usesQualifiedIndexScale() {
+		if err := verifyVulkanQualifiedIndexScale(evidence.SourceRoot, evidence.SPIRVRoot); err != nil {
+			return observedVulkanReceiptSuccessorIdentity{}, err
+		}
+	}
 	spirvSHA, spirvCount, score, err := r.hashBundle(evidence.SPIRVRoot)
 	if err != nil {
 		return observedVulkanReceiptSuccessorIdentity{}, err
@@ -324,7 +329,7 @@ func (r *vulkanSuccessorRegistry) observeEvidence(ctx context.Context, evidence 
 		return observedVulkanReceiptSuccessorIdentity{}, fmt.Errorf("trusted Vulkan package directory must be source-root/internal/compute")
 	}
 	tc := evidence.Tools.toolchain()
-	commands, commandSHA, err := normalizedVulkanBuildCommand(&VulkanConfig{
+	commands, commandSHA, err := r.normalizedBuildCommand(&VulkanConfig{
 		RepoRoot:  repoRoot,
 		PkgDir:    evidence.BuildPlan.PackageDir,
 		OutPkg:    evidence.BuildPlan.OutPackage,
@@ -511,6 +516,11 @@ func (r *vulkanSuccessorRegistry) finalizeBinary(cfg *VulkanConfig, source Build
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	if r.usesQualifiedIndexScale() {
+		if err := verifyVulkanQualifiedIndexScale(cfg.RepoRoot, filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv")); err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 	spirvSHA, spirvCount, score, err := r.hashBundle(filepath.Join(cfg.RepoRoot, "internal", "compute", "spirv"))
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -526,7 +536,7 @@ func (r *vulkanSuccessorRegistry) finalizeBinary(cfg *VulkanConfig, source Build
 	if toolchainSHA != expectedToolchainSHA || !sameToolIdentities(tools, expectedTools) {
 		return nil, nil, nil, nil, fmt.Errorf("Vulkan toolchain changed during build")
 	}
-	commands, commandSHA, err := normalizedVulkanBuildCommand(cfg)
+	commands, commandSHA, err := r.normalizedBuildCommand(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
