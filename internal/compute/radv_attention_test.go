@@ -926,3 +926,32 @@ func TestAttentionParityRejectsNonfiniteOutputs(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1s
+func TestFloat32ToFloat16PreservesSpecialClasses(t *testing.T) {
+	for _, bits := range []uint32{0x7fc00000, 0xffc00000, 0x7f800001, 0xff800001, 0x7fffffff, 0xffffffff} {
+		half := Float32ToFloat16Bits(math.Float32frombits(bits))
+		if half&0x8000 != uint16(bits>>16)&0x8000 || half&0x7c00 != 0x7c00 || half&0x0200 == 0 {
+			t.Fatalf("NaN bits %#08x narrowed to %#04x, want signed quiet NaN", bits, half)
+		}
+		if restored := Float16BitsToFloat32(half); !math.IsNaN(float64(restored)) || math.Signbit(float64(restored)) != (bits>>31 != 0) {
+			t.Fatalf("NaN bits %#08x lost class/sign on round trip: %#08x", bits, math.Float32bits(restored))
+		}
+	}
+	for _, tc := range []struct {
+		bits uint32
+		want uint16
+	}{
+		{0x00000000, 0x0000}, {0x80000000, 0x8000},
+		{0x3f800000, 0x3c00}, {0xc0000000, 0xc000},
+		{0x3f801fff, 0x3c00}, // Existing finite truncation, not round-to-nearest.
+		{0x33800000, 0x0001}, {0x33000000, 0x0000},
+		{0x387fc000, 0x03ff}, {0x38800000, 0x0400},
+		{0x477fe000, 0x7bff}, {0x7f7fffff, 0x7c00},
+		{0xff7fffff, 0xfc00}, {0x7f800000, 0x7c00}, {0xff800000, 0xfc00},
+	} {
+		if got := Float32ToFloat16Bits(math.Float32frombits(tc.bits)); got != tc.want {
+			t.Fatalf("bits %#08x narrowed to %#04x, want unchanged %#04x", tc.bits, got, tc.want)
+		}
+	}
+}

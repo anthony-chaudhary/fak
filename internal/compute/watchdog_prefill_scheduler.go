@@ -154,6 +154,9 @@ type ChunkingProfile struct {
 
 // Validate checks that the chunking profile configuration is logically sound.
 func (p ChunkingProfile) Validate() error {
+	if math.IsNaN(p.SafetyMarginRatio) || math.IsInf(p.SafetyMarginRatio, 0) {
+		return fmt.Errorf("%w: safety margin ratio must be finite", ErrInvalidChunkingProfile)
+	}
 	if p.DefaultChunkTokens <= 0 {
 		return fmt.Errorf("%w: default chunk tokens (%d) must be positive", ErrInvalidChunkingProfile, p.DefaultChunkTokens)
 	}
@@ -166,10 +169,10 @@ func (p ChunkingProfile) Validate() error {
 	if p.MinChunkTokens > p.DefaultChunkTokens {
 		return fmt.Errorf("%w: min chunk tokens (%d) cannot be greater than default (%d)", ErrInvalidChunkingProfile, p.MinChunkTokens, p.DefaultChunkTokens)
 	}
-	if p.MaxExecutionCeilingMs <= 0 {
+	if p.MaxExecutionCeilingMs <= 0 || math.IsNaN(p.MaxExecutionCeilingMs) || math.IsInf(p.MaxExecutionCeilingMs, 0) {
 		return fmt.Errorf("%w: max execution ceiling ms (%.2f) must be positive", ErrInvalidChunkingProfile, p.MaxExecutionCeilingMs)
 	}
-	if p.WatchdogTimeoutMs <= 0 {
+	if p.WatchdogTimeoutMs <= 0 || math.IsNaN(p.WatchdogTimeoutMs) || math.IsInf(p.WatchdogTimeoutMs, 0) {
 		return fmt.Errorf("%w: watchdog timeout ms (%.2f) must be positive", ErrInvalidChunkingProfile, p.WatchdogTimeoutMs)
 	}
 	if p.MaxExecutionCeilingMs > p.WatchdogTimeoutMs {
@@ -287,7 +290,7 @@ func (g ModelGeometry) Validate() error {
 	if g.IntermediateDim <= 0 {
 		return fmt.Errorf("%w: intermediate dim (%d) must be positive", ErrInvalidModelGeometry, g.IntermediateDim)
 	}
-	if g.WeightBytesPerParam <= 0 {
+	if g.WeightBytesPerParam <= 0 || math.IsNaN(g.WeightBytesPerParam) || math.IsInf(g.WeightBytesPerParam, 0) {
 		return fmt.Errorf("%w: weight bytes per param (%.4f) must be positive", ErrInvalidModelGeometry, g.WeightBytesPerParam)
 	}
 	if g.KVBytesPerElement <= 0 {
@@ -433,19 +436,19 @@ func (h APUHardwareProfile) Validate() error {
 	if h.ComputeUnits <= 0 {
 		return fmt.Errorf("%w: compute units (%d) must be positive", ErrInvalidHardwareProfile, h.ComputeUnits)
 	}
-	if h.PeakTFLOPS <= 0 {
+	if h.PeakTFLOPS <= 0 || math.IsNaN(h.PeakTFLOPS) || math.IsInf(h.PeakTFLOPS, 0) {
 		return fmt.Errorf("%w: peak TFLOPS (%.2f) must be positive", ErrInvalidHardwareProfile, h.PeakTFLOPS)
 	}
-	if h.SustainedComputeEff <= 0 || h.SustainedComputeEff > 1.0 {
+	if h.SustainedComputeEff <= 0 || h.SustainedComputeEff > 1.0 || math.IsNaN(h.SustainedComputeEff) {
 		return fmt.Errorf("%w: sustained compute eff (%.2f) must be in (0, 1]", ErrInvalidHardwareProfile, h.SustainedComputeEff)
 	}
-	if h.TheoreticalPeakBWGBps <= 0 {
+	if h.TheoreticalPeakBWGBps <= 0 || math.IsNaN(h.TheoreticalPeakBWGBps) || math.IsInf(h.TheoreticalPeakBWGBps, 0) {
 		return fmt.Errorf("%w: theoretical peak BW (%.2f GB/s) must be positive", ErrInvalidHardwareProfile, h.TheoreticalPeakBWGBps)
 	}
-	if h.SustainedMemoryEff <= 0 || h.SustainedMemoryEff > 1.0 {
+	if h.SustainedMemoryEff <= 0 || h.SustainedMemoryEff > 1.0 || math.IsNaN(h.SustainedMemoryEff) {
 		return fmt.Errorf("%w: sustained memory eff (%.2f) must be in (0, 1]", ErrInvalidHardwareProfile, h.SustainedMemoryEff)
 	}
-	if h.KernelLaunchOverheadMs < 0 {
+	if h.KernelLaunchOverheadMs < 0 || math.IsNaN(h.KernelLaunchOverheadMs) || math.IsInf(h.KernelLaunchOverheadMs, 0) {
 		return fmt.Errorf("%w: kernel launch overhead ms (%.2f) cannot be negative", ErrInvalidHardwareProfile, h.KernelLaunchOverheadMs)
 	}
 	return nil

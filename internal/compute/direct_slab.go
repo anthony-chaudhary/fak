@@ -146,6 +146,12 @@ func NewDirectSlabAllocator(cfg DirectSlabConfig) (*DirectSlabAllocator, error) 
 		return nil, fmt.Errorf("compute: alignment %d must be a positive power of 2", alignment)
 	}
 
+	// Both the backing slice length and its alignment headroom must fit in int.
+	maxInt := int64(int(^uint(0) >> 1))
+	if cfg.TotalBytes > maxInt-int64(alignment) {
+		return nil, fmt.Errorf("compute: slab capacity %d plus alignment %d exceeds addressable size", cfg.TotalBytes, alignment)
+	}
+
 	direct := (cfg.DirectInterconnect && cfg.DeviceAccessible) || isDirectEnvEnabled()
 	registered := cfg.PinMemory || cfg.DirectInterconnect || direct
 
@@ -205,13 +211,15 @@ func (d *DirectSlabAllocator) Allocate(size int64) (*SlabAllocation, error) {
 		return nil, fmt.Errorf("compute: direct slab allocator is closed")
 	}
 
-	align := int64(d.alignment)
-	alignedSize := (size + align - 1) &^ (align - 1)
-
-	if d.usedBytes+size > d.totalCapacity {
+	// Check by subtraction before rounding, so oversized requests cannot wrap
+	// into a negative block span and mutate the free list.
+	if size > d.totalCapacity-d.usedBytes {
 		return nil, fmt.Errorf("compute: direct slab exhausted: requested %d bytes, available %d bytes",
 			size, d.totalCapacity-d.usedBytes)
 	}
+
+	align := int64(d.alignment)
+	alignedSize := (size + align - 1) &^ (align - 1)
 
 	// First-fit search for a free block with sufficient capacity.
 	curr := d.head

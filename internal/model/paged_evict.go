@@ -98,9 +98,9 @@ func (s *PagedKV) Evict(from, n int, cfg Config) int {
 	if from < 0 || n <= 0 || from >= s.nTokens {
 		return 0
 	}
-	end := from + n
-	if end > s.nTokens {
-		end = s.nTokens
+	end := s.nTokens
+	if n < s.nTokens-from {
+		end = from + n
 	}
 	nL, stride := s.pool.nLayers, s.pool.stride
 
