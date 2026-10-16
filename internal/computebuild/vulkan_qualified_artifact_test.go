@@ -41,11 +41,26 @@ func qualifiedIndexScaleFixture(t *testing.T) (string, []byte, []byte) {
 // fak-test:runtime fast est=10ms
 func TestVulkanQualifiedArtifact(t *testing.T) {
 	root, source, header := qualifiedIndexScaleFixture(t)
+	const arrayStart = "static const unsigned char qualified[] = {"
+	if bytes.Count(header, []byte(arrayStart)) != 1 {
+		t.Fatal("canonical header array framing differs")
+	}
+	_, encoded, _ := bytes.Cut(header, []byte(arrayStart))
+	encoded, _, terminated := bytes.Cut(encoded, []byte("};"))
+	if !terminated {
+		t.Fatal("canonical header array terminator missing")
+	}
+	// Materialization must preserve every byte entry in the canonical input.
+	// The independent hash below continues to pin the exact module contents.
+	wantBytes := bytes.Count(encoded, []byte("0x"))
+	if wantBytes == 0 {
+		t.Fatal("canonical header array is empty")
+	}
 	module, err := decodeVulkanQualifiedIndexScale(source, header)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(module) != 2836 || !vulkanQualifiedHash(module, "b67ed132187bde41131d355d9d493f56e5063ab87aa0a6a53ea66c8743136500") {
+	if len(module) != wantBytes || !vulkanQualifiedHash(module, "b67ed132187bde41131d355d9d493f56e5063ab87aa0a6a53ea66c8743136500") {
 		t.Fatal("canonical module differs")
 	}
 	for _, pair := range [][2][]byte{{bytes.ReplaceAll(source, []byte("\n"), []byte("\r\n")), header}, {source, bytes.ReplaceAll(header, []byte("\n"), []byte("\r\n"))}, {append(append([]byte(nil), source...), '\n'), header}, {source, append(append([]byte(nil), header...), '\n')}, {source, header[:len(header)-1]}, {source, bytes.Replace(header, []byte("0x03"), []byte("0x02"), 1)}} {
