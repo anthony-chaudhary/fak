@@ -859,6 +859,10 @@ type decodeLane struct {
 	presPenalty float64
 	maxNew      int
 	measurement *nativeInferenceMeasurement
+	// sampling is the per-lane sampler scratch (#13873). Held for the lane's whole
+	// life so every served token reuses the size-V probability row, index permutation
+	// and sort/heap buffers instead of allocating them per token.
+	sampling samplerWorkspace
 	// forwardCoverageSource is an injected observation seam for the token/coverage
 	// pairing witness. Production leaves it nil and reads the live Session.
 	forwardCoverageSource nativeForwardCoverageSource
@@ -1120,7 +1124,7 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		}
 	}
 	if !forced {
-		next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
+		next = sampleLogitsWithPenaltyWS(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
 	if ln.firstDraw != nil {

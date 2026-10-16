@@ -539,6 +539,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	gen := 0
 	stopped := false
 	curLogits := logits
+	// A single workspace for the whole speculative run keeps the serial fallback draw
+	// (#13873) allocation-free across every token.
+	var samplingWS samplerWorkspace
 	maxDraft := eng.Config().MaxDraft
 	if maxDraft <= 0 {
 		maxDraft = 4
@@ -599,7 +602,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 				mtpExecution.DowngradeReason = vulkanMTPDowngradeEmptyProposal
 				proposalGenerator = nil
 			}
-			next := sampleLogitsWithPenalty(curLogits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng)
+			next := sampleLogitsWithPenaltyWS(curLogits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng, &samplingWS)
 			if next < 0 || stops[next] {
 				stopped = true
 				break

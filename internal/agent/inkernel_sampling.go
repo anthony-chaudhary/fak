@@ -47,19 +47,102 @@ func selectSamplingTruncationPath(vocabSize int, topP float64, topK int, env sam
 	return samplingTruncationCPU
 }
 
+// samplerWorkspace is the per-session scratch the in-kernel sampler reuses so a
+// served token never allocates: the size-V probability row, the index permutation the
+// truncation sorts consume, the concrete sort.Interface that sorts that permutation
+// without the closure allocation sort.Slice pays, the top-k heap scratch and its key
+// backup, and the float32 effective-logits row the bias/penalty paths build on. One
+// workspace is owned per decode lane; it grows monotonically to the widest vocabulary
+// it has seen and is then reused allocation-free for every subsequent token.
+type samplerWorkspace struct {
+	probs  []float64
+	order  []int
+	heap   []int
+	vals   []float64
+	eff    []float32
+	sorter probSorter
+}
+
+func (w *samplerWorkspace) resize(vocab int) {
+	if cap(w.probs) < vocab {
+		w.probs = make([]float64, vocab)
+	}
+	w.probs = w.probs[:vocab]
+}
+
+func (w *samplerWorkspace) orderBuf(n int) []int {
+	if cap(w.order) < n {
+		w.order = make([]int, n)
+	}
+	return w.order[:n]
+}
+
+func (w *samplerWorkspace) heapBuf(k int) []int {
+	if cap(w.heap) < k {
+		w.heap = make([]int, k)
+	}
+	return w.heap[:k]
+}
+
+func (w *samplerWorkspace) valBuf(k int) []float64 {
+	if cap(w.vals) < k {
+		w.vals = make([]float64, k)
+	}
+	return w.vals[:k]
+}
+
+func (w *samplerWorkspace) effBuf(n int) []float32 {
+	if cap(w.eff) < n {
+		w.eff = make([]float32, n)
+	}
+	return w.eff[:n]
+}
+
+// probSorter is the concrete sort.Interface over an index permutation. Unlike the
+// sort.Slice closure it replaces, constructing and sorting it allocates nothing once
+// its probs/idx slices are wired to a workspace buffer. tieByIndex selects the top-k
+// tie-break (equal probability keeps the lower index) versus the nucleus tie-break
+// (equal probability is left in sort order), matching descProbOrder's two comparators
+// exactly — pdqsort's output is byte-identical whether it is driven by sort.Slice or
+// by this interface, because both dispatch the same Less semantics into the same
+// algorithm.
+type probSorter struct {
+	probs      []float64
+	idx        []int
+	tieByIndex bool
+}
+
+func (s *probSorter) Len() int { return len(s.idx) }
+func (s *probSorter) Less(a, b int) bool {
+	ia, ib := s.idx[a], s.idx[b]
+	pa, pb := s.probs[ia], s.probs[ib]
+	if pa != pb {
+		return pa > pb
+	}
+	if s.tieByIndex {
+		return ia < ib
+	}
+	return false
+}
+func (s *probSorter) Swap(a, b int) { s.idx[a], s.idx[b] = s.idx[b], s.idx[a] }
+
 // applyCPUSamplingTruncation is the explicit host oracle/fallback. The current
 // sampler always uses it because its probability row is host-resident; a future
 // device caller may use selectSamplingTruncationPath before choosing a device
 // implementation without weakening this fallback.
 func applyCPUSamplingTruncation(probs []float64, sum, topP float64, topK int) float64 {
+	return (&samplerWorkspace{}).applyCPUSamplingTruncation(probs, sum, topP, topK)
+}
+
+func (w *samplerWorkspace) applyCPUSamplingTruncation(probs []float64, sum, topP float64, topK int) float64 {
 	// Host softmax materializes probs here, so the zero capability envelope must
 	// fail closed to the existing CPU oracle/fallback.
 	_ = selectSamplingTruncationPath(len(probs), topP, topK, samplingTruncationEnvelope{})
 	if topK > 0 && topK < len(probs) {
-		sum = topKTruncate(probs, sum, topK)
+		sum = w.topKTruncate(probs, sum, topK)
 	}
 	if topP > 0 && topP < 1 {
-		sum = nucleusTruncate(probs, sum, topP)
+		sum = w.nucleusTruncate(probs, sum, topP)
 	}
 	return sum
 }
@@ -73,7 +156,17 @@ func applyCPUSamplingTruncation(probs []float64, sum, topP float64, topK int) fl
 // behavior. The single most-probable token is always kept so neither cutoff can
 // empty the candidate set. Both shape only the stochastic path: temp<=0 stays pure
 // argmax (top-k/top-p never change the argmax winner).
+//
+// The package-level entry point allocates a one-shot workspace; a caller that samples
+// every token (the served decode lane) holds a samplerWorkspace and calls
+// sampleLogitsWS instead, reusing its buffers allocation-free.
 func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand) int {
+	return sampleLogitsWS(logits, temp, topP, topK, rng, &samplerWorkspace{})
+}
+
+// sampleLogitsWS is sampleLogits over a caller-owned reusable workspace. After the
+// first call sizes the workspace to the vocabulary, repeated calls allocate nothing.
+func sampleLogitsWS(logits []float32, temp, topP float64, topK int, rng *rand.Rand, w *samplerWorkspace) int {
 	if temp <= 0 {
 		best, bi := float32(-math.MaxFloat32), 0
 		for i, x := range logits {
@@ -89,14 +182,15 @@ func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand
 			maxL = x
 		}
 	}
+	w.resize(len(logits))
+	probs := w.probs
 	var sum float64
-	probs := make([]float64, len(logits))
 	for i, x := range logits {
 		p := math.Exp(float64(x-maxL) / temp)
 		probs[i] = p
 		sum += p
 	}
-	sum = applyCPUSamplingTruncation(probs, sum, topP, topK)
+	sum = w.applyCPUSamplingTruncation(probs, sum, topP, topK)
 	r := rng.Float64() * sum
 	for i, p := range probs {
 		r -= p
@@ -118,12 +212,17 @@ func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand
 // stochastic path byte-for-byte. Biases are clamped to the same [-100, 100] bound the
 // native model constraint sink uses.
 func sampleLogitsWithBias(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand) int {
+	return sampleLogitsWithBiasWS(logits, temp, topP, topK, bias, rng, &samplerWorkspace{})
+}
+
+func sampleLogitsWithBiasWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand, w *samplerWorkspace) int {
 	if len(bias) == 0 {
-		return sampleLogits(logits, temp, topP, topK, rng)
+		return sampleLogitsWS(logits, temp, topP, topK, rng, w)
 	}
-	eff := append([]float32(nil), logits...)
+	eff := w.effBuf(len(logits))
+	copy(eff, logits)
 	applyLogitBias(eff, bias)
-	return sampleLogits(eff, temp, topP, topK, rng)
+	return sampleLogitsWS(eff, temp, topP, topK, rng, w)
 }
 
 // applyLogitBias adds the OpenAI logit_bias map into logits IN PLACE. Out-of-range
@@ -156,10 +255,15 @@ func applyLogitBias(logits []float32, bias model.LogitBias) {
 // penalty term is skipped entirely, not just multiplied by zero), so an
 // unset/zero-valued request reproduces the exact pre-penalty output.
 func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand) int {
+	return sampleLogitsWithPenaltyWS(logits, temp, topP, topK, bias, frequencyPenalty, presencePenalty, counts, rng, &samplerWorkspace{})
+}
+
+func sampleLogitsWithPenaltyWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand, w *samplerWorkspace) int {
 	if frequencyPenalty == 0 && presencePenalty == 0 {
-		return sampleLogitsWithBias(logits, temp, topP, topK, bias, rng)
+		return sampleLogitsWithBiasWS(logits, temp, topP, topK, bias, rng, w)
 	}
-	eff := append([]float32(nil), logits...)
+	eff := w.effBuf(len(logits))
+	copy(eff, logits)
 	if len(bias) > 0 {
 		applyLogitBias(eff, bias)
 	}
@@ -170,7 +274,7 @@ func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bia
 		penalty := frequencyPenalty*float64(c) + presencePenalty
 		eff[tok] -= float32(penalty)
 	}
-	return sampleLogits(eff, temp, topP, topK, rng)
+	return sampleLogitsWS(eff, temp, topP, topK, rng, w)
 }
 
 // nucleusTruncate zeroes every probability outside the top-p nucleus in place and
@@ -179,10 +283,21 @@ func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bia
 // the single most-probable token is always kept so the nucleus is never empty.
 // probs is unsorted on entry and stays index-aligned to the caller's logits.
 func nucleusTruncate(probs []float64, sum, topP float64) float64 {
+	return (&samplerWorkspace{}).nucleusTruncate(probs, sum, topP)
+}
+
+func (w *samplerWorkspace) nucleusTruncate(probs []float64, sum, topP float64) float64 {
 	if len(probs) == 0 {
 		return 0
 	}
-	order := descProbOrder(probs, func(i, j int) bool { return probs[i] > probs[j] })
+	order := w.orderBuf(len(probs))
+	for i := range order {
+		order[i] = i
+	}
+	w.sorter.probs = probs
+	w.sorter.idx = order
+	w.sorter.tieByIndex = false
+	sort.Sort(&w.sorter)
 	target := topP * sum
 	var cum float64
 	cutoff := len(order)
@@ -208,9 +323,9 @@ func nucleusTruncate(probs []float64, sum, topP float64) float64 {
 
 // descProbOrder returns the indices of probs ordered by the caller's less comparator, which
 // ranks two ELEMENT indices (not positions in the returned slice). It is the shared
-// highest-probability-first index permutation nucleusTruncate and topKTruncate sort on; each
-// passes its own tie-break (nucleus leaves equal masses in arbitrary order; topK breaks ties by
-// the lower index for a stable kept set).
+// highest-probability-first index permutation the correctness references sort on. The
+// sampler hot path no longer calls it (it drives probSorter directly to stay
+// allocation-free); it remains the golden oracle in the parity tests.
 func descProbOrder(probs []float64, less func(i, j int) bool) []int {
 	order := make([]int, len(probs))
 	for i := range order {
@@ -221,7 +336,7 @@ func descProbOrder(probs []float64, less func(i, j int) bool) []int {
 }
 
 // maskKept zeroes every probability whose index is not in kept (in place) and returns the
-// surviving mass (the new normalization sum) — the renormalization tail of topKTruncate.
+// surviving mass (the new normalization sum) — the renormalization oracle for topKTruncate.
 func maskKept(probs []float64, kept map[int]bool) float64 {
 	var newSum float64
 	for i := range probs {
@@ -321,6 +436,10 @@ func topKTruncateSmallK(probs []float64, k int) float64 {
 // a no-op handled before the call so the full distribution stays byte-for-byte the
 // pre-seam draw.
 func topKTruncate(probs []float64, sum float64, k int) float64 {
+	return (&samplerWorkspace{}).topKTruncate(probs, sum, k)
+}
+
+func (w *samplerWorkspace) topKTruncate(probs []float64, sum float64, k int) float64 {
 	if k <= 0 || len(probs) == 0 {
 		clear(probs)
 		return 0
@@ -331,17 +450,51 @@ func topKTruncate(probs []float64, sum float64, k int) float64 {
 	if k <= topKSmallKThreshold {
 		return topKTruncateSmallK(probs, k)
 	}
+	return w.topKHeap(probs, k)
+}
 
-	// Fall back to full sort for larger k (> 64).
-	order := descProbOrder(probs, func(i, j int) bool {
-		if probs[i] != probs[j] {
-			return probs[i] > probs[j]
-		}
-		return i < j
-	})
-	kept := make(map[int]bool, k)
-	for rank := 0; rank < k; rank++ {
-		kept[order[rank]] = true
+// topKHeap is the >64 generalization of topKTruncateSmallK over a workspace-backed
+// bounded min-heap: O(V log k) time, no full sort and no map. It preserves the exact
+// kept-set tie-break (lower index wins) and the ascending-index renormalization order
+// of the small-k path and of the reference full-sort oracle.
+func (w *samplerWorkspace) topKHeap(probs []float64, k int) float64 {
+	heap := w.heapBuf(k)
+	for i := 0; i < k; i++ {
+		heap[i] = i
 	}
-	return maskKept(probs, kept)
+	for i := k/2 - 1; i >= 0; i-- {
+		topKSiftDown(heap, probs, i, k)
+	}
+
+	rootProb := probs[heap[0]]
+	for i := k; i < len(probs); i++ {
+		if p := probs[i]; p > rootProb {
+			heap[0] = i
+			topKSiftDown(heap, probs, 0, k)
+			rootProb = probs[heap[0]]
+		}
+	}
+
+	for i := 1; i < k; i++ {
+		key := heap[i]
+		j := i - 1
+		for j >= 0 && heap[j] > key {
+			heap[j+1] = heap[j]
+			j--
+		}
+		heap[j+1] = key
+	}
+
+	vals := w.valBuf(k)
+	var newSum float64
+	for j := 0; j < k; j++ {
+		idx := heap[j]
+		vals[j] = probs[idx]
+		newSum += vals[j]
+	}
+	clear(probs)
+	for j := 0; j < k; j++ {
+		probs[heap[j]] = vals[j]
+	}
+	return newSum
 }
