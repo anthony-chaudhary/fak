@@ -59,6 +59,20 @@ func isTerraformDestroyArgRule(pr *ArgPredicate) bool {
 	}
 }
 
+// commandMentionsTerraformDestroy reports whether cmd NAMES terraform at all. It is
+// a NECESSARY condition for commandAppliesTerraformDestroy to find a real destroy:
+// that walk only reports true for a statement whose resolved command word is
+// `terraform`, so a command that does not contain the substring cannot be a real
+// teardown the walk would discover — only its fail-closed branch could fire on it.
+//
+// It exists so a caller that has NOT first matched the shipped deny_regex — the
+// gotcha compendium, which has no rule of its own (#13867) — can establish a
+// trigger before consulting the fail-closed walk. Over-matching is safe: a false
+// positive only runs the walk, whose verdict is unchanged.
+func commandMentionsTerraformDestroy(cmd string) bool {
+	return strings.Contains(strings.ToLower(cmd), "terraform")
+}
+
 // commandAppliesTerraformDestroy reports whether cmd actually APPLIES a terraform
 // destroy — `terraform` resolved at a statement's command-word position, whose
 // SUBCOMMAND tears infrastructure down — as opposed to merely naming the word.
