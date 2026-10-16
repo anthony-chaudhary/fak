@@ -98,7 +98,7 @@ const (
 	rungReversibility             // preview-confirm for irreversible / outward-facing dispatch
 	rungTransform                 // redact a secret-shaped arg before dispatch
 	rungAllow                     // affirmative allow + AllowPrefix (terminal)
-	rungDefaultDeny               // fail-closed default deny (terminal)
+	rungDefaultDeny               // default deny, fail-closed (terminal)
 	numRungs
 )
 
@@ -143,7 +143,7 @@ func (pr *RungProfile) elide(cl class, rs ...rung) *RungProfile {
 	return pr
 }
 
-// mustRun is the floor invariant: it reports whether sub-rung r is MANDATORY for risk
+// mustRun reports whether sub-rung r is MANDATORY (the non-elidable floor) for risk
 // class cl and so may not be elided by any RungProfile. The write-shaped refusal rungs
 // (self-modify, the shell + synth-tool write floor, the lint-write grammar) are
 // mandatory for the write/self-modify-adjacent class — a profile may narrow the floor

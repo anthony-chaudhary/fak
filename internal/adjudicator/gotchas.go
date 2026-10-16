@@ -319,7 +319,7 @@ func matchPrivilegeEscalation(cmd string) (bool, string) {
 	// Establish the Windows elevation TRIGGER before consulting its fail-closed
 	// walk (#13867). commandInvokesRunAsElevation is built to run only AFTER the
 	// shipped `Start-Process … -Verb RunAs` deny_regex has matched, and its walk is
-	// fail-closed: an unterminated PowerShell quoted span returns true. Handed a
+	// fail-closed, so an unterminated PowerShell quoted span returns true. Handed a
 	// payload that never names the verb at all — an ordinary Python here-doc whose
 	// apostrophes leave an unterminated PS span — that branch reads as an elevation.
 	// commandLocalEscalationWord above needs no such gate: it resolves real command
