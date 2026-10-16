@@ -464,13 +464,18 @@ func ComputeContiguizedAttention(q, kContig, vContig []float32, nQ, nKV, nPos, h
 }
 
 // ComputeAttentionParityLInfinity measures the maximum absolute difference (L_infinity norm)
-// between strided and contiguized attention outputs.
+// between finite strided and contiguized attention outputs. Nonfinite operands
+// are refused because NaN differences cannot establish numerical parity.
 func ComputeAttentionParityLInfinity(outStrided, outContig []float32) (float32, error) {
 	if len(outStrided) != len(outContig) {
 		return 0, fmt.Errorf("compute: output lengths differ (%d vs %d)", len(outStrided), len(outContig))
 	}
 	var maxDiff float32
 	for i := 0; i < len(outStrided); i++ {
+		if math.IsNaN(float64(outStrided[i])) || math.IsInf(float64(outStrided[i]), 0) ||
+			math.IsNaN(float64(outContig[i])) || math.IsInf(float64(outContig[i]), 0) {
+			return 0, fmt.Errorf("compute: nonfinite attention output at index %d", i)
+		}
 		diff := float32(math.Abs(float64(outStrided[i] - outContig[i])))
 		if diff > maxDiff {
 			maxDiff = diff
