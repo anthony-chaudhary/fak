@@ -14,8 +14,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// The indexer weight scale runs on the ordinary build's strict scalar module
-// and the checked BF16 publication (#13826). Scaled weights are bit-identical
+// The indexer weight scale runs on the strict scalar module and checked BF16
+// publication, or their admitted fused operation. Scaled weights are bit-identical
 // to the host arm across the V4.1 Flash geometry (dim 128, 64 heads) and the
 // fixture geometries; a default session routes every index weight scale
 // through the seam with logits bit-identical to the host-arm session; and with
@@ -34,6 +34,7 @@ func TestV41IndexWeightScaleVulkan(t *testing.T) {
 	}
 	t.Run("seam", func(t *testing.T) {
 		lanes, calls := 0, 0
+		fusedCalls, scalarCalls := 0, 0
 		for _, tc := range []struct{ dim, heads int }{{128, 64}, {128, 1}, {3, 4}, {64, 2}} {
 			m := v41IndexerTestFixture(t)
 			m.Cfg.IndexNHeads = tc.heads
@@ -52,16 +53,56 @@ func TestV41IndexWeightScaleVulkan(t *testing.T) {
 				}
 				var got []float32
 				var rounds int64
-				n := v41SeamDispatches(t, be, func() {
-					rounds = v41BF16PublishHostRounds(t, func() {
-						got, err = v41IndexWeightsBF16Device(0, row, tc.dim, tc.heads, publish, scaled)
+				var n uint64
+				fusedSelected := false
+				func() {
+					scope := s.beginBackendExecution()
+					complete := false
+					defer scope.finishCompleted(&complete)
+					if scope == nil || !scope.live || scope.owner != backendExecutionOwner(be) || s.backendExecutionScope != scope {
+						t.Fatal("index weight scale witness requires the actual live execution owner")
+					}
+					// Probe the exact BF16 projection and scalar before measuring.
+					// Admission alone is insufficient: the dispatch count below
+					// must also distinguish fused execution from scalar fallback.
+					if fused, ok := be.(compute.V41IndexScaleBF16Backend); ok {
+						if _, admitted := v41DeferredBF16Publisher(be, tc.heads); admitted {
+							projected, projectionErr := v41IndexBF16Copyback(0, "indexer.weights_proj.weight", "projection", row)
+							if projectionErr != nil {
+								t.Fatal(projectionErr)
+							}
+							func() {
+								input := uploadHostF32Class(be, []int{tc.heads}, projected, compute.MemoryActivation, "index weight scale witness admission")
+								defer be.Free(input)
+								fusedSelected = fused.SupportsV41IndexScaleBF16(input, v41IndexWeightScale(tc.dim, tc.heads))
+							}()
+						}
+					}
+					n = v41SeamDispatches(t, be, func() {
+						rounds = v41BF16PublishHostRounds(t, func() {
+							got, err = v41IndexWeightsBF16Device(0, row, tc.dim, tc.heads, publish, scaled)
+						})
 					})
-				})
+					complete = true
+				}()
 				if err != nil || rounds != 0 {
 					t.Fatalf("dim=%d heads=%d row=%d: err=%v host_rounds=%d", tc.dim, tc.heads, r, err, rounds)
 				}
-				if n < 2 {
-					t.Fatalf("dim=%d heads=%d row=%d issued %d native dispatches, want the multiply and the publication", tc.dim, tc.heads, r, n)
+				wantDispatches := uint64(2) // strict multiply plus scaled publication
+				if fusedSelected {
+					wantDispatches = 1
+					fusedCalls++
+				} else {
+					scalarCalls++
+				}
+				if !v41BF16Widened(row) {
+					wantDispatches++ // the initial projection also needs publication
+				}
+				if n != wantDispatches {
+					t.Fatalf("dim=%d heads=%d row=%d fused=%t issued %d native dispatches, want %d", tc.dim, tc.heads, r, fusedSelected, n, wantDispatches)
+				}
+				if len(got) != len(want) {
+					t.Fatalf("dim=%d heads=%d row=%d width=%d want=%d", tc.dim, tc.heads, r, len(got), len(want))
 				}
 				for i := range want {
 					if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
@@ -79,7 +120,7 @@ func TestV41IndexWeightScaleVulkan(t *testing.T) {
 				t.Error(err)
 			}
 		}
-		t.Logf("V41_INDEX_WEIGHT_SCALE_SEAM calls=%d lanes=%d bit_exact=%d", calls, lanes, lanes)
+		t.Logf("V41_INDEX_WEIGHT_SCALE_SEAM calls=%d lanes=%d bit_exact=%d fused=%d scalar=%d", calls, lanes, lanes, fusedCalls, scalarCalls)
 	})
 	t.Run("default-session", func(t *testing.T) {
 		v41IndexWeightScaleVulkanForward(t, be, "compressor-fixture", func() *Model { return v41IndexerTestFixture(t) }, false)
