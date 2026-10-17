@@ -292,6 +292,7 @@ func (s *Server) renderMetrics() string {
 	writeCounter(&b, "fak_kernel_quarantines_total", "Kernel result admissions quarantined by the result-side stack.", c.Quarantines)
 	writeCounter(&b, "fak_kernel_result_denies_total", "Kernel result admissions hard-refused by the result-side stack.", c.ResultDenies)
 	writeCounter(&b, "fak_kernel_admitted_total", "Kernel result admissions that were accepted or transformed.", c.Admitted)
+	writeComputeWorkMetrics(&b)
 	s.writeRungMetrics(&b)
 	writeHelpType(&b, "fak_gateway_vdso_hit_ratio", "Current cumulative vDSO hit ratio over kernel submissions.", "gauge")
 	ratio := 0.0

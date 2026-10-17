@@ -476,6 +476,7 @@ func New(cfg Config) (*Server, error) {
 		s.metalMTPCoord = s.activeMetalMTPCoordinator()
 	}
 	s.metrics.setPerfIdentity(s.model, s.perfIdentity())
+	s.metrics.nativePhases = s.nativeReceiptMetrics
 
 	return s, nil
 }

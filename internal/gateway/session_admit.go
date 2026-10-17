@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionledger"
@@ -77,6 +78,7 @@ func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (con
 	s.admitRequestObservation(r, trace)
 	requestID, loadID := requestObservationContext(r)
 	ctx = enginestep.WithRequestObservation(ctx, requestID, loadID)
+	ctx, _ = nativeperf.WithDecodeHostWork(ctx)
 	bindRequestPhaseContext(r, ctx)
 	// Carry the harness launch session id for prefix-reuse attribution on every wire.
 	ctx = withPrefixReuseSession(ctx, harnessSessionID(r))

@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -276,7 +277,23 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		rec.BenchEvidence = completionBenchEvidence(detail.completion)
 	}
 	detail.src.apply(&rec)
+	m.observeDecodeWindowReceipt(detail.src)
 	m.commitPerf(rec)
+}
+
+// observeDecodeWindowReceipt books one request's decode-window kernel/decode split
+// into the native phase counters, once per request, in memory only.
+func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) {
+	o := src.observation
+	if m.nativePhases == nil || o == nil {
+		return
+	}
+	o.mu.Lock()
+	ctx := o.phaseContext
+	o.mu.Unlock()
+	if receipt, ok := nativeperf.RequestDecodeHostWork(ctx).ClaimPhaseReceipt(); ok {
+		m.nativePhases.ObservePhases(receipt, time.Now())
+	}
 }
 
 // recordPerfFailure emits the perf row for a turn that failed before completing.

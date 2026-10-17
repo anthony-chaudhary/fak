@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
@@ -25,6 +26,9 @@ var gatewayLatencyBuckets = []float64{
 }
 
 type gatewayMetrics struct {
+	// nativePhases receives the decode-window kernel phase split; it is the
+	// server's receipt projection, shared so /metrics renders one family.
+	nativePhases *nativeperf.ReceiptMetrics
 	// requestOutcomes is a bounded, lossy memory-only terminal view.
 	requestOutcomes    requestOutcomeStore
 	featureActivations featureActivationMetrics

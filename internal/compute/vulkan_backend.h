@@ -787,6 +787,9 @@ uint64_t fvk_h2d_bytes(void);
 /* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */
 uint64_t fvk_direct_h2d_bytes(void);
 uint64_t fvk_d2h_bytes(void);
+/* Always-on cumulative device-work counters: recorded compute dispatches, D2H
+ * payload bytes, and host wall nanoseconds from queue submit to fence signal. */
+void fvk_device_work_counters(uint64_t *dispatches, uint64_t *d2h_bytes, uint64_t *submit_wait_ns);
 /* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
  * before initialization; all six outputs are mandatory. Observed zero directions
  * are returned as zero values with success=1. */

@@ -63,6 +63,14 @@ extern "C" int fvk_dispatch_profile_enabled(void) {
     return g_dp_on ? 1 : 0;
 }
 static inline void dp_inc(std::atomic<uint64_t>& v) { if (g_dp_on) v.fetch_add(1, std::memory_order_relaxed); }
+// Always-on device-work counters, independent of FAK_VULKAN_DISPATCH_PROFILE: every
+// recorded compute dispatch, and host wall from queue submit to fence signal.
+static std::atomic<uint64_t> g_deviceDispatches{0};
+static std::atomic<uint64_t> g_submitWaitNs{0};
+static inline uint64_t submitWaitNow() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 #define VKCHECK(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { \
   fprintf(stderr, "fak-vulkan: %s:%d VkResult=%d\n", __FILE__, __LINE__, (int)_r); abort(); } } while (0)
@@ -412,6 +420,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
 }
 
 static inline void dpDispatch(const Kernel& k) {
+    g_deviceDispatches.fetch_add(1, std::memory_order_relaxed);
     if (!g_dp_on) return;
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
@@ -1312,8 +1321,10 @@ void submitWait(VkCommandBuffer cmd) {
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
     VKCHECK(vkResetFences(g_dev, 1, &g_submitFence));
+    const uint64_t submitted = submitWaitNow();
     VKCHECK(vkQueueSubmit(g_queue, 1, &si, g_submitFence));
     VKCHECK(vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX));
+    g_submitWaitNs.fetch_add(submitWaitNow() - submitted, std::memory_order_relaxed);
 }
 
 // Only a completed batch may transfer its command to the batch-local idle slot.
@@ -1352,6 +1363,7 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount = 1;
         si.pCommandBuffers = &cmd;
+        const uint64_t submitted = submitWaitNow();
         r = vkQueueSubmit(g_queue, 1, &si, g_submitFence);
         if (r != VK_SUCCESS) {
             // In particular VK_ERROR_DEVICE_LOST is equivalent to successful
@@ -1361,6 +1373,7 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
         } else {
             r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
             if (r != VK_SUCCESS) g_v41SubmissionPendingFailure = true;
+            else g_submitWaitNs.fetch_add(submitWaitNow() - submitted, std::memory_order_relaxed);
         }
     }
     if (!g_v41SubmissionPendingFailure &&
@@ -5285,6 +5298,11 @@ int fvk_v41_step_batch_active(void) { return g_stepBatch ? 1 : 0; }
 uint64_t fvk_h2d_bytes(void) { return g_h2dBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_direct_h2d_bytes(void) { return g_directH2DBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed); }
+void fvk_device_work_counters(uint64_t* dispatches, uint64_t* d2h_bytes, uint64_t* submit_wait_ns) {
+    if (dispatches) *dispatches = g_deviceDispatches.load(std::memory_order_relaxed);
+    if (d2h_bytes) *d2h_bytes = g_d2hBytes.load(std::memory_order_relaxed);
+    if (submit_wait_ns) *submit_wait_ns = g_submitWaitNs.load(std::memory_order_relaxed);
+}
 int fvk_transfer_counters(uint64_t* h2d_count, uint64_t* h2d_bytes,
                            uint64_t* d2h_count, uint64_t* d2h_bytes,
                            uint64_t* d2d_count, uint64_t* d2d_bytes) {

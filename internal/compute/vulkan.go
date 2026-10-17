@@ -206,10 +206,19 @@ func init() {
 	vulkanDev.haveQ4KFusedRMSNormMatMul2 = errR == nil
 	vulkanDev.haveQ4KFusedSwiGLUMatMulAdd = errS == nil
 	Register(vulkanDev)
+	RegisterDeviceWorkReader("vulkan", readVulkanDeviceWork)
 	carveout, known := vulkanDev.DedicatedVRAMCarveout()
 	if vulkanOffloadPagesHostVisible(discrete == 0, carveout, known) {
 		C.fvk_set_offload_host_visible(1)
 	}
+}
+
+// readVulkanDeviceWork reads the shim's always-on atomics without vulkanMu, so a
+// scrape or decode-loop sample never waits behind an in-flight submit.
+func readVulkanDeviceWork() DeviceWork {
+	var dispatches, readback, submitWait C.uint64_t
+	C.fvk_device_work_counters(&dispatches, &readback, &submitWait)
+	return DeviceWork{Dispatches: uint64(dispatches), ReadbackBytes: uint64(readback), SubmitWaitNS: uint64(submitWait)}
 }
 
 // VulkanDebugSetOffloadHostVisible forces the expert-ring page placement for a test and returns
