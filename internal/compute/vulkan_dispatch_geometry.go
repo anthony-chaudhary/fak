@@ -92,11 +92,5 @@ func (v *vulkanBackend) selectQ2KFusionLocked(P int) bool {
 	if P != 1 {
 		return false
 	}
-	optIn := strings.TrimSpace(strings.ToLower(computeEnvValue("FAK_VULKAN_Q2K_FUSION")))
-	switch optIn {
-	case "candidate", "fusion", "fused", "1", "true", "on", "yes":
-		return true
-	default:
-		return false
-	}
+	return q2kFusionOptIn()
 }

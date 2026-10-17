@@ -337,10 +337,15 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		y0, _ := v.devTr([]int{out0}, F32)
 		y1, _ := v.devTr([]int{out1}, F32)
-		if w0.Dtype == Q2_K && w1.Dtype == Q2_K && v.selectQ2KFusionLocked(P) {
+		bothQ2K := w0.Dtype == Q2_K && w1.Dtype == Q2_K
+		if bothQ2K && v.selectQ2KFusionLocked(P) {
+			CountFusedDispatch(FusedOpQ2KRMSNormMatMul2, true)
 			C.fvk_rmsnorm_q2k_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
 				C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
 			return y0, y1
+		}
+		if bothQ2K {
+			CountFusedDispatch(FusedOpQ2KRMSNormMatMul2, false)
 		}
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
@@ -376,12 +381,14 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		if v.selectQ4KFusionLocked(P) {
 			v.q4kFusionRMSNormCalls++
+			CountFusedDispatch(FusedOpQ4KRMSNormMatMul2, true)
 			C.fvk_rmsnorm_q4k_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
 				C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
 			return y0, y1
 		}
 		// Unchanged Q4_K composition: RMSNorm + 2 Q4_K GEMVs (three dispatches)
 		v.q4kComposedRMSNormCalls++
+		CountFusedDispatch(FusedOpQ4KRMSNormMatMul2, false)
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
 		v.q4kMatMulLocked(w0, xn, y0, out0, in, P)
@@ -540,12 +547,14 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 		}
 		if w.Dtype == Q4_K && v.selectQ4KFusionLocked(P) {
 			v.q4kFusionSwiGLUCalls++
+			CountFusedDispatch(FusedOpQ4KSwiGLUMatMulAdd, true)
 			C.fvk_swiglu_q4k_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 			return
 		}
 		if w.Dtype == Q4_K {
 			// Unchanged Q4_K composition: SwiGLU + Q4_K GEMV + Add (three dispatches)
 			v.q4kComposedSwiGLUCalls++
+			CountFusedDispatch(FusedOpQ4KSwiGLUMatMulAdd, false)
 		}
 		sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))

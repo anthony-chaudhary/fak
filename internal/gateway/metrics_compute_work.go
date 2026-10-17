@@ -22,6 +22,10 @@ func writeComputeWorkMetrics(b *strings.Builder) {
 	for _, c := range compute.HostFallbackCounts() {
 		fmt.Fprintf(b, "fak_compute_host_fallback_total{stage=\"%s\"} %d\n", promQuote(c.Stage), c.Count)
 	}
+	writeHelpType(b, "fak_compute_fused_total", "Optional fused-kernel dispatches by op, through the fused kernel or its composed fallback.", "counter")
+	for _, c := range compute.FusedCounts() {
+		fmt.Fprintf(b, "fak_compute_fused_total{op=\"%s\",mode=\"%s\"} %d\n", promQuote(c.Op), promQuote(c.Mode), c.Count)
+	}
 	writeHelpType(b, "fak_compute_readback_bytes_total", "Device-to-host readback payload bytes across device backends since process start.", "counter")
 	if len(devices) > 0 {
 		var total uint64

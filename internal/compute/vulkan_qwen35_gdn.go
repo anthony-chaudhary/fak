@@ -75,6 +75,7 @@ func (v *vulkanBackend) tryQwen35GDNQ8InputProjections(
 	weights := [...]Tensor{w0, w1, w2, w3}
 	if !v.haveQ8 || !v.haveQ8GDNInProj || len(x.Shape) != 1 || x.Dtype != F32 {
 		v.q8GDNComposedInProjCalls++
+		CountFusedDispatch(FusedOpGDNQ8InProj, false)
 		return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false, nil
 	}
 	in := x.Numel()
@@ -85,6 +86,7 @@ func (v *vulkanBackend) tryQwen35GDNQ8InputProjections(
 			len(weight.Shape) != 2 || weight.Shape[1] != in || in%32 != 0 ||
 			buf.ptr == nil || buf.scalePtr == nil || len(buf.q8Chunks) != 0 {
 			v.q8GDNComposedInProjCalls++
+			CountFusedDispatch(FusedOpGDNQ8InProj, false)
 			return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false, nil
 		}
 		bufs[i] = buf
@@ -115,6 +117,7 @@ func (v *vulkanBackend) tryQwen35GDNQ8InputProjections(
 			fmt.Errorf("compute: vulkan Qwen GDN fused Q8 input projection failed closed (code %d)", status)
 	}
 	v.q8GDNFusedInProjCalls++
+	CountFusedDispatch(FusedOpGDNQ8InProj, true)
 	return y0, y1, y2, y3, true, nil
 }
 

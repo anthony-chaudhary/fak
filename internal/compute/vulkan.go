@@ -199,13 +199,12 @@ func init() {
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
 	}
-	spvRMSNorm := filepath.Join(spirv, "rmsnorm_q4k_matmul2.spv")
-	spvSwiGLU := filepath.Join(spirv, "swiglu_q4k_matmul_add.spv")
-	_, errR := os.Stat(spvRMSNorm)
-	_, errS := os.Stat(spvSwiGLU)
-	vulkanDev.haveQ4KFusedRMSNormMatMul2 = errR == nil
-	vulkanDev.haveQ4KFusedSwiGLUMatMulAdd = errS == nil
+	fusedPresent, fusedMissing := probeFusedShaders(spirv, os.Stat)
+	recordFusedShaderWarnings(fusedMissing, log.Printf)
+	vulkanDev.haveQ4KFusedRMSNormMatMul2 = fusedPresent[FusedOpQ4KRMSNormMatMul2]
+	vulkanDev.haveQ4KFusedSwiGLUMatMulAdd = fusedPresent[FusedOpQ4KSwiGLUMatMulAdd]
 	Register(vulkanDev)
+	DeclareFusedOps()
 	RegisterDeviceWorkReader("vulkan", readVulkanDeviceWork)
 	carveout, known := vulkanDev.DedicatedVRAMCarveout()
 	if vulkanOffloadPagesHostVisible(discrete == 0, carveout, known) {
@@ -261,19 +260,7 @@ func (v *vulkanBackend) selectQ4KFusionLocked(P int) bool {
 	if !v.haveQ4KFusedRMSNormMatMul2 || !v.haveQ4KFusedSwiGLUMatMulAdd {
 		return false
 	}
-	optIn := os.Getenv("FAK_VULKAN_Q4K_FUSION")
-	if optIn == "" {
-		optIn = os.Getenv("FAK_VULKAN_Q4K_ARM")
-	}
-	optIn = strings.TrimSpace(strings.ToLower(optIn))
-	if optIn == "scalar" || optIn == "0" || optIn == "false" || optIn == "off" || optIn == "no" || optIn == "" {
-		return false
-	}
-	if optIn == "candidate" || optIn == "fusion" || optIn == "fused" || optIn == "1" || optIn == "true" || optIn == "on" || optIn == "yes" {
-		return true
-	}
-	// Unset/false/unknown selects unchanged Q4_K composition.
-	return false
+	return q4kFusionOptIn()
 }
 
 func (v *vulkanBackend) VulkanDebugTransientSnapshot() (buffers int, bytes int64) {
