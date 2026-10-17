@@ -16,6 +16,7 @@ import (
 	computestrix "github.com/anthony-chaudhary/fak/internal/compute/strix"
 	"github.com/anthony-chaudhary/fak/internal/logitoracle"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 const computeTraceLogitsUsage = "usage: fak compute-trace logits dump --gguf <model.gguf> --prompts <prompts.json> --out <dir> [--teacher <ref-dump>] | compare --ref <dump> --cand <dump> [--json]"
@@ -54,6 +55,7 @@ func runComputeTraceLogitsDump(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" || *promptsPath == "" || *out == "" || *positions < 1 || *chunk < 1 || *topK < 1 {
 		fmt.Fprintln(stderr, computeTraceLogitsUsage)
 		return 2
