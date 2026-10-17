@@ -181,44 +181,74 @@ func (h *HostPrefixSnapshot) restoreOwned(scope *backendExecutionScope) (out *Pr
 	if h.cache.cfg.IsDeepSeekV41() {
 		return nil, ErrHostPrefixSnapshotState
 	}
+	// Keep attempt ownership separate from the published result. Every successful
+	// allocation is recorded before the next backend call; rollback must attempt
+	// all releases even if one backend cleanup callback panics.
+	var kv compute.KVStore
+	var tensors []compute.Tensor
+	if h.qwen35 != nil {
+		tensors = make([]compute.Tensor, 0, 2*len(h.qwen35.layers))
+	}
+	installed := false
 	defer func() {
-		if r := recover(); r != nil {
-			if out != nil {
-				out.closeOwned(scope)
-			}
-			out = nil
+		r := recover()
+		if installed {
+			return
+		}
+		out = nil
+		if r != nil {
 			err = fmt.Errorf("model: restore prefix snapshot from host: %v", r)
+		} else if err == nil {
+			err = errors.New("model: interrupted prefix snapshot restore")
+		}
+		release := func(f func()) {
+			defer func() { _ = recover() }()
+			f()
+		}
+		if kv != nil {
+			release(kv.Free)
+		}
+		for _, tensor := range tensors {
+			release(func() { h.backend.Free(tensor) })
 		}
 	}()
 
-	kv, err := compute.RestoreKVFromHost(h.backend, h.kv)
+	kv, err = compute.RestoreKVFromHost(h.backend, h.kv)
 	if err != nil {
 		return nil, fmt.Errorf("model: restore prefix attention KV from host: %w", err)
 	}
-	out = &PrefixSnapshot{
+	candidate := &PrefixSnapshot{
 		Cache:      h.cache.Clone(),
 		halKV:      kv,
 		halLineage: h.halLineage.clone(0),
 		Backend:    h.backend,
 		Tokens:     h.tokens,
 	}
+	restoreTensor := func(t hostTensor, site string) compute.Tensor {
+		tensor := hostTensorRestore(h.backend, t, site)
+		if tensor.Buf() != nil {
+			tensors = append(tensors, tensor)
+		}
+		return tensor
+	}
 	if h.qwen35 != nil {
-		out.qwen35 = &qwen35HALState{
+		candidate.qwen35 = &qwen35HALState{
 			backend: h.qwen35.backend,
 			layers:  make([]qwen35HALLayerState, len(h.qwen35.layers)),
 		}
 		for layer := range h.qwen35.layers {
-			out.qwen35.layers[layer].conv = hostTensorRestore(
-				h.backend, h.qwen35.layers[layer].conv,
+			candidate.qwen35.layers[layer].conv = restoreTensor(
+				h.qwen35.layers[layer].conv,
 				"qwen35-gdn-conv-host-restore layer "+itoa(layer),
 			)
-			out.qwen35.layers[layer].recurrent = hostTensorRestore(
-				h.backend, h.qwen35.layers[layer].recurrent,
+			candidate.qwen35.layers[layer].recurrent = restoreTensor(
+				h.qwen35.layers[layer].recurrent,
 				"qwen35-gdn-recurrent-host-restore layer "+itoa(layer),
 			)
 		}
 	}
-	return out, nil
+	installed = true
+	return candidate, nil
 }
 
 func hostTensorRestore(be compute.Backend, t hostTensor, site string) compute.Tensor {
