@@ -1,6 +1,10 @@
 package model
 
-import "github.com/anthony-chaudhary/fak/internal/compute"
+import (
+	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
 
 const hostPositionBytes = 8
 
@@ -21,8 +25,7 @@ func (p *PrefixSnapshot) ResidentBytes() int64 {
 			bytes += tensorResidentBytes(p.qwen35.layers[i].recurrent)
 		}
 	}
-	bytes += p.v41ResidentBytes()
-	return bytes
+	return v41SatAdd(math.MaxInt64, bytes, p.v41ResidentBytes())
 }
 
 // v41ResidentBytes reports the deterministic payload held by this snapshot's
@@ -35,10 +38,12 @@ func (p *PrefixSnapshot) v41ResidentBytes() int64 {
 	if p == nil || p.v41 == nil {
 		return 0
 	}
-	bytes := int64(len(p.v41.history)) * hostPositionBytes
-	bytes += p.v41.attn.residentBytes()
+	// Keep an unrepresentable continuation charge conservative through every
+	// aggregate, including the final complete-snapshot receipt.
+	bytes := v41SatMul(math.MaxInt64, int64(len(p.v41.history)), hostPositionBytes)
+	bytes = v41SatAdd(math.MaxInt64, bytes, p.v41.attn.residentBytes())
 	for _, layer := range p.v41.layers {
-		bytes += layer.residentBytes()
+		bytes = v41SatAdd(math.MaxInt64, bytes, layer.residentBytes())
 	}
 	return bytes
 }
