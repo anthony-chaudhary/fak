@@ -365,7 +365,9 @@ func (v *vulkanBackend) qwen35VulkanSequenceMatMulLocked(w, x Tensor, tokens int
 	case Q4_K:
 		v.q4kMatMulLocked(w, x, y, out, in, tokens)
 	case Q2_K:
-		v.q2kMatMulLocked(w, x, y, out, in, tokens)
+		if !v.mmCM1MatMulLocked(w, x, y, out, in, tokens, "q2k_matmul") {
+			v.q2kMatMulLocked(w, x, y, out, in, tokens)
+		}
 	case Q6_K:
 		v.q6kMatMulLocked(w, x, y, tokens)
 	case Q5_K:
@@ -376,7 +378,9 @@ func (v *vulkanBackend) qwen35VulkanSequenceMatMulLocked(w, x Tensor, tokens int
 		if !isRawIQ(w.Dtype) {
 			panic(fmt.Errorf("%w %s", ErrQwen35SequenceUnsupportedMatrixDtype, w.Dtype))
 		}
-		v.iqMatVecLocked(w, x, y, out, in, tokens)
+		if !v.mmCM1MatMulLocked(w, x, y, out, in, tokens, "iq_matvec") {
+			v.iqMatVecLocked(w, x, y, out, in, tokens)
+		}
 	}
 	return y
 }

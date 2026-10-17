@@ -1,0 +1,198 @@
+//go:build vulkan && (windows || linux) && cgo
+
+package compute
+
+// fak-test:runtime slow est=7s
+
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	"os"
+	"sort"
+	"testing"
+)
+
+// mmCM1RoundF16 rounds to the nearest binary16 value (ties to even), the conversion the
+// GEMM applies to both dequantized weights and activations before the fp16 multiply.
+func mmCM1RoundF16(f float32) float32 {
+	a := math.Abs(float64(f))
+	if a == 0 || math.IsInf(a, 0) || math.IsNaN(a) {
+		return f
+	}
+	ulp := 0x1p-24
+	if a >= 0x1p-14 {
+		_, exp := math.Frexp(a)
+		ulp = math.Ldexp(1, exp-11)
+	}
+	return float32(math.RoundToEven(float64(f)/ulp) * ulp)
+}
+
+func mmCM1Weight(t *testing.T, dt Dtype, seed int64, out, in int) (Tensor, []float32) {
+	t.Helper()
+	switch dt {
+	case Q2_K:
+		rng := rand.New(rand.NewSource(seed))
+		raw := make([]byte, out*(in/q2kSuper)*q2kSuperBlock)
+		rng.Read(raw)
+		deq := make([]float32, out*in)
+		for b := 0; b < len(raw)/q2kSuperBlock; b++ {
+			blk := raw[b*q2kSuperBlock : (b+1)*q2kSuperBlock]
+			binaryPutFloat16(blk[80:82], float32(0.005+rng.Float64()*0.02))
+			binaryPutFloat16(blk[82:84], float32(0.002+rng.Float64()*0.01))
+			q2kDequantSuperBlock(deq[b*q2kSuper:(b+1)*q2kSuper], blk)
+		}
+		return NewQ2K(Default(), []int{out, in}, raw), deq
+	case Q4_K:
+		rng := rand.New(rand.NewSource(seed))
+		raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
+		deq := make([]float32, out*in)
+		for b := 0; b < len(raw)/q4kSuperBlock; b++ {
+			blk := raw[b*q4kSuperBlock : (b+1)*q4kSuperBlock]
+			randQ4KBlockC(rng, blk)
+			q4kDequantBlock(deq[b*q4kSuper:(b+1)*q4kSuper], blk)
+		}
+		return NewQ4K(Default(), []int{out, in}, raw), deq
+	}
+	if isRawIQ(dt) {
+		return rawIQParityWeight(dt, seed, out, in)
+	}
+	t.Fatalf("no mm_cm1 fixture for %v", dt)
+	return Tensor{}, nil
+}
+
+func mmCM1Oracle(deq, x []float32, out, in, tokens int, roundF16 bool) []float32 {
+	w, xs := deq, x
+	if roundF16 {
+		w, xs = make([]float32, len(deq)), make([]float32, len(x))
+		for i, v := range deq {
+			w[i] = mmCM1RoundF16(v)
+		}
+		for i, v := range x {
+			xs[i] = mmCM1RoundF16(v)
+		}
+	}
+	y := make([]float32, tokens*out)
+	for p := 0; p < tokens; p++ {
+		xr := xs[p*in : (p+1)*in]
+		for o := 0; o < out; o++ {
+			wr := w[o*in : (o+1)*in]
+			var s float64
+			for i := range wr {
+				s += float64(wr[i]) * float64(xr[i])
+			}
+			y[p*out+o] = float32(s)
+		}
+	}
+	return y
+}
+
+// mmCM1SequenceMatMul runs the Qwen3.5 sequence-prefill matmul switch, the production
+// caller of the route, and reads the [tokens, out] panel back.
+func mmCM1SequenceMatMul(v *vulkanBackend, w, x Tensor, tokens int) []float32 {
+	vulkanMu.Lock()
+	y := v.qwen35VulkanSequenceMatMulLocked(w, x, tokens)
+	vulkanMu.Unlock()
+	return copyRead(v, y)
+}
+
+func mmCM1Dtypes() []Dtype {
+	dts := make([]Dtype, 0, len(vulkanMMCM1Formats))
+	for dt := range vulkanMMCM1Formats {
+		dts = append(dts, dt)
+	}
+	sort.Slice(dts, func(i, j int) bool { return dts[i] < dts[j] })
+	return dts
+}
+
+func requireMMCM1(t *testing.T, dt Dtype) {
+	t.Helper()
+	if err := vulkanMMCM1DeviceStatus(dt); err != nil {
+		if os.Getenv("FAK_VULKAN_REQUIRE_MM_CM1") == "1" {
+			t.Fatalf("required mm_cm1 %v kernel unavailable: %v", dt, err)
+		}
+		t.Skipf("mm_cm1 %v kernel unavailable: %v", dt, err)
+	}
+}
+
+// TestVulkanMMCM1QuantMatchesCPU proves each GEMM variant, reached through the sequence
+// matmul switch, against the CPU dequant of the same verbatim block bytes: tightly against an
+// fp16-rounded-input oracle (only reduction order differs) and loosely against the exact f32
+// oracle. Shapes cover full tiles, partial row/token tiles and an output width that forces
+// the staged (unaligned) store.
+// fak-test:runtime slow est=5s
+func TestVulkanMMCM1QuantMatchesCPU(t *testing.T) {
+	v := vk(t)
+	prev := vulkanMMCM1SetConfig(VulkanMMCM1Config{Enabled: true, MinTokens: 8})
+	t.Cleanup(func() { vulkanMMCM1SetConfig(prev) })
+	for _, dt := range mmCM1Dtypes() {
+		t.Run(dt.String(), func(t *testing.T) {
+			requireMMCM1(t, dt)
+			for _, sh := range []struct{ out, in int }{{256, 512}, {200, 1024}, {37, 256}} {
+				seed := int64(0x05f0 + sh.out*31 + sh.in + int(dt)*7919)
+				hw, deq := mmCM1Weight(t, dt, seed, sh.out, sh.in)
+				dw := v.Upload(hw, dt)
+				if dw.Dtype != dt {
+					v.Free(dw)
+					t.Skipf("native %v upload unavailable (uploaded as %v)", dt, dw.Dtype)
+				}
+				for _, tokens := range []int{9, 64, 512} {
+					t.Run(fmt.Sprintf("out%d_in%d_p%d", sh.out, sh.in, tokens), func(t *testing.T) {
+						s := lcg(uint64(seed) + uint64(tokens))
+						x := randVec(&s, tokens*sh.in)
+						dx := v.Upload(NewF32(Default(), []int{tokens, sh.in}, x), F32)
+						defer func() { v.Free(dx); v.Recycle() }()
+						before := VulkanMMCM1Snapshot()
+						got := mmCM1SequenceMatMul(v, dw, dx, tokens)
+						after := VulkanMMCM1Snapshot()
+						if after.GEMM != before.GEMM+1 || after.Unavailable != before.Unavailable {
+							t.Fatalf("route counters before %+v after %+v: GEMM did not serve the call", before, after)
+						}
+						rawIQAssertClose(t, "GEMM vs fp16-input oracle", mmCM1Oracle(deq, x, sh.out, sh.in, tokens, true), got, 5e-4)
+						rawIQAssertClose(t, "GEMM vs exact oracle", mmCM1Oracle(deq, x, sh.out, sh.in, tokens, false), got, 8e-3)
+					})
+				}
+				v.Free(dw)
+				v.Recycle()
+			}
+		})
+	}
+}
+
+// TestVulkanMMCM1SequenceRouteMatchesMatvec runs the Qwen3.5 sequence-prefill matmul switch
+// with the GEMM on and off over the same operands and holds both routes to the CPU oracle.
+// fak-test:runtime slow est=2s
+func TestVulkanMMCM1SequenceRouteMatchesMatvec(t *testing.T) {
+	v := vk(t)
+	const out, in, tokens = 192, 768, 33
+	for _, dt := range mmCM1Dtypes() {
+		t.Run(dt.String(), func(t *testing.T) {
+			requireMMCM1(t, dt)
+			hw, deq := mmCM1Weight(t, dt, 0x5e0+int64(dt), out, in)
+			dw := v.Upload(hw, dt)
+			if dw.Dtype != dt {
+				v.Free(dw)
+				t.Skipf("native %v upload unavailable (uploaded as %v)", dt, dw.Dtype)
+			}
+			s := lcg(0x5e1)
+			x := randVec(&s, tokens*in)
+			dx := v.Upload(NewF32(Default(), []int{tokens, in}, x), F32)
+			defer func() { v.Free(dw); v.Free(dx); v.Recycle() }()
+			run := func(enabled bool) []float32 {
+				prev := vulkanMMCM1SetConfig(VulkanMMCM1Config{Enabled: enabled, MinTokens: 8})
+				defer vulkanMMCM1SetConfig(prev)
+				return mmCM1SequenceMatMul(v, dw, dx, tokens)
+			}
+			before := VulkanMMCM1Snapshot()
+			gemm := run(true)
+			matvec := run(false)
+			after := VulkanMMCM1Snapshot()
+			if after.GEMM != before.GEMM+1 || after.Disabled != before.Disabled+1 {
+				t.Fatalf("route counters before %+v after %+v: want one GEMM and one disabled fallback", before, after)
+			}
+			want := mmCM1Oracle(deq, x, out, in, tokens, false)
+			rawIQAssertClose(t, "GEMM route vs exact oracle", want, gemm, 8e-3)
+			rawIQAssertClose(t, "matvec route vs exact oracle", want, matvec, 1e-4)
+		})
+	}
+}

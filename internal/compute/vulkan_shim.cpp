@@ -380,7 +380,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -390,6 +390,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
     case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q5K_MATMUL: case K_Q3K_MATMUL: case K_V41_Q3K_MATVEC_ID: case K_V41_Q3K_TOKEN_PANEL:
     case K_IQ4XS_MATVEC: case K_IQ1S_MATVEC: case K_IQ2XS_MATVEC: case K_IQ2XXS_MATVEC: case K_IQ3S_MATVEC: case K_IQ2S_MATVEC: case K_IQ3XXS_MATVEC:
+    case K_MM_CM1_Q2K: case K_MM_CM1_IQ2XXS: case K_MM_CM1_IQ2XS: case K_MM_CM1_IQ2S: case K_MM_CM1_IQ3XXS: case K_MM_CM1_IQ3S: case K_MM_CM1_IQ1S: case K_MM_CM1_IQ4XS: case K_MM_CM1_Q4K:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
@@ -555,6 +556,19 @@ int g_have_coopmat = 0;
 // Candidate Q4_K cooperative-matrix prefill arm (2D block-tiled). Requires the native
 // cooperative-matrix capability AND a 2D-grid shader that built; default retains scalar.
 int g_have_q4k_coopmat = 0;
+// Prefill fp16 cooperative-matrix GEMM over packed K-quant / i-quant weights (mm_cm1_*.spv).
+// g_mmcm1Status[f] is 0 when format f is servable, else the first failed requirement
+// (FVK_MM_CM1_* status codes in vulkan_backend.h) so a refused route names its reason.
+enum { FVK_MMCM1_Q2K = 0, FVK_MMCM1_IQ2XXS, FVK_MMCM1_IQ2XS, FVK_MMCM1_IQ2S, FVK_MMCM1_IQ3XXS, FVK_MMCM1_IQ3S, FVK_MMCM1_IQ1S, FVK_MMCM1_IQ4XS, FVK_MMCM1_Q4K, FVK_MMCM1_FORMATS };
+const KId kMMCM1Kernel[FVK_MMCM1_FORMATS] = {K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K};
+const char* const kMMCM1Spv[FVK_MMCM1_FORMATS] = {"mm_cm1_q2k.spv", "mm_cm1_iq2xxs.spv", "mm_cm1_iq2xs.spv", "mm_cm1_iq2s.spv", "mm_cm1_iq3xxs.spv", "mm_cm1_iq3s.spv", "mm_cm1_iq1s.spv", "mm_cm1_iq4xs.spv", "mm_cm1_q4k.spv"};
+const uint32_t kMMCM1TileRows = 128;   // BM in mm_cm1_quant.glsl
+const uint32_t kMMCM1TileTokens = 128; // BN in mm_cm1_quant.glsl
+int g_mmcm1Status[FVK_MMCM1_FORMATS] = {FVK_MM_CM1_NOT_INITIALIZED, FVK_MM_CM1_NOT_INITIALIZED, FVK_MM_CM1_NOT_INITIALIZED,
+    FVK_MM_CM1_NOT_INITIALIZED, FVK_MM_CM1_NOT_INITIALIZED, FVK_MM_CM1_NOT_INITIALIZED, FVK_MM_CM1_NOT_INITIALIZED,
+    FVK_MM_CM1_NOT_INITIALIZED, FVK_MM_CM1_NOT_INITIALIZED};
+bool g_have_shader_f16 = false;
+bool g_have_coopmat_f16_16 = false;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
 int g_have_q5k_matmul = 0;
@@ -1594,6 +1608,7 @@ const char* const kKernelNames[] = {
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
     "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk", "v41_q2k_token_pair",
+    "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -3167,6 +3182,30 @@ static int v41TokenGridModuleABI(const std::vector<char>& code, uint32_t expecte
 #include "v41_routed_down_chunk_spirv.h"
 #include "v41_q2k_token_pair_spirv.h"
 
+// mm_cm1_quant.glsl multiplies 16x16x16 fp16 A/B into fp32 C at subgroup scope; the
+// device must list that exact combination, not merely expose the extension.
+static bool coopMatF16Shape16Supported() {
+#ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
+    auto query = reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+        vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+    if (!query) return false;
+    uint32_t n = 0;
+    if (query(g_phys, &n, nullptr) != VK_SUCCESS || n == 0) return false;
+    std::vector<VkCooperativeMatrixPropertiesKHR> props(n, {VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR});
+    if (query(g_phys, &n, props.data()) != VK_SUCCESS) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+        const VkCooperativeMatrixPropertiesKHR& p = props[i];
+        if (p.MSize == 16 && p.NSize == 16 && p.KSize == 16 &&
+            p.AType == VK_COMPONENT_TYPE_FLOAT16_KHR && p.BType == VK_COMPONENT_TYPE_FLOAT16_KHR &&
+            p.CType == VK_COMPONENT_TYPE_FLOAT32_KHR && p.ResultType == VK_COMPONENT_TYPE_FLOAT32_KHR &&
+            p.scope == VK_SCOPE_SUBGROUP_KHR) {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
     const bool fixedV41 = &k == &g_kern[K_V41_Q2K_TOKEN_PAIR] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
@@ -3943,6 +3982,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     feat2.pNext = &f8;
     vkGetPhysicalDeviceFeatures2(g_phys, &feat2);
     g_have_q8 = (f8.storageBuffer8BitAccess && fi8.shaderInt8) ? 1 : 0;
+    g_have_shader_f16 = fi8.shaderFloat16 == VK_TRUE;
 
     std::vector<const char*> enabledDeviceExts;
 #ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
@@ -4042,6 +4082,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     if (g_have_q8) {
         e8.storageBuffer8BitAccess = VK_TRUE;
         ei8.shaderInt8 = VK_TRUE;
+        ei8.shaderFloat16 = (g_have_coopmat && g_have_shader_f16) ? VK_TRUE : VK_FALSE;
         e8.pNext = &ei8;
         dci.pNext = &e8;
     }
@@ -4324,6 +4365,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         bool off = sw && sw[0] == '0' && sw[1] == '\0';
         g_have_iq[f] = (!off && haveSubgroupArithmetic &&
                         buildKernel(g_kern[kIQKernel[f]], P(kIQSpv[f]), 7, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
+    }
+    g_have_coopmat_f16_16 = g_have_coopmat && coopMatF16Shape16Supported();
+    for (int f = 0; f < FVK_MMCM1_FORMATS; ++f) {
+        if (!g_have_coopmat) g_mmcm1Status[f] = FVK_MM_CM1_NO_COOPMAT;
+        else if (!g_have_shader_f16) g_mmcm1Status[f] = FVK_MM_CM1_NO_SHADER_F16;
+        else if (!g_have_coopmat_f16_16) g_mmcm1Status[f] = FVK_MM_CM1_NO_F16_SHAPE;
+        else if (!buildKernel(g_kern[kMMCM1Kernel[f]], P(kMMCM1Spv[f]), 3, 3 * sizeof(int), 32)) g_mmcm1Status[f] = FVK_MM_CM1_NO_MODULE;
+        else g_mmcm1Status[f] = FVK_MM_CM1_OK;
     }
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
@@ -8420,6 +8469,25 @@ extern "C" void fvk_iq_matvec_f32(int fmt, const void* dW0, const void* dX, void
     // codebook setup while still filling the device.
     if (groups > kIQMatvecMaxGroups) groups = kIQMatvecMaxGroups;
     dispatch(g_kern[kIQKernel[fmt]], bufs, &pc, sizeof(pc), groups, mode == 0 ? (uint32_t)tokens : 1u);
+}
+// Prefill GEMM over a packed weight: Y[t] = W X[t] for t < tokens (mm_cm1_*.spv). Returns
+// FVK_MM_CM1_OK after recording the dispatch, else the status that refused it; a refusal
+// records nothing, so the caller's fallback kernel sees untouched buffers.
+extern "C" int fvk_mm_cm1_status(int fmt) {
+    if (fmt < 0 || fmt >= FVK_MMCM1_FORMATS) return FVK_MM_CM1_BAD_FORMAT;
+    return g_mmcm1Status[fmt];
+}
+extern "C" int fvk_mm_cm1_f32(int fmt, const void* dW, const void* dX, void* dY, int out, int in, int tokens) {
+    int st = fvk_mm_cm1_status(fmt);
+    if (st != FVK_MM_CM1_OK) return st;
+    if (!dW || !dX || !dY || out <= 0 || in <= 0 || (in % 256) != 0 || tokens <= 0) return FVK_MM_CM1_BAD_SHAPE;
+    uint32_t gx = ((uint32_t)out + kMMCM1TileRows - 1u) / kMMCM1TileRows;
+    uint32_t gy = ((uint32_t)tokens + kMMCM1TileTokens - 1u) / kMMCM1TileTokens;
+    if (gx > g_maxComputeWorkGroupCountX || gy > g_maxComputeWorkGroupCountY) return FVK_MM_CM1_BAD_SHAPE;
+    struct PC { int out, in, p; } pc{out, in, tokens};
+    Buffer* bufs[3] = {B((void*)dW), B((void*)dX), B(dY)};
+    if (!dispatch(g_kern[kMMCM1Kernel[fmt]], bufs, &pc, sizeof(pc), gx, gy)) return FVK_MM_CM1_DISPATCH_FAILED;
+    return FVK_MM_CM1_OK;
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;

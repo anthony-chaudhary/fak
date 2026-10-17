@@ -846,6 +846,20 @@ void fvk_swiglu_q4k_matmul_add_f32(const void *dW, const void *dG, const void *d
 void fvk_q2k_matmul_f32(const void *dQ2K, const void *dX, void *dY, int out, int in, int P);
 /* Native IQ-quant matvec (ticket 05f); fmt is the fvk IQ format id (vulkan_iq.go).
  * mode 0: Y[t] = W0 X[t] for t < tokens; mode 1: Y += W0 x; mode 2: Y = W0 x, Y1 = W1 x. */
+/* Prefill fp16 cooperative-matrix GEMM over packed weights (mm_cm1_*.spv). fmt: 0 Q2_K,
+ * 1 IQ2_XXS, 2 IQ2_XS, 3 IQ2_S, 4 IQ3_XXS, 5 IQ3_S, 6 IQ1_S, 7 IQ4_XS, 8 Q4_K. fvk_mm_cm1_f32 returns FVK_MM_CM1_OK after recording Y[t] = W X[t] for every
+ * t < tokens, else the status that refused the call without recording anything. */
+#define FVK_MM_CM1_OK 0
+#define FVK_MM_CM1_NOT_INITIALIZED 1
+#define FVK_MM_CM1_NO_COOPMAT 2
+#define FVK_MM_CM1_NO_SHADER_F16 3
+#define FVK_MM_CM1_NO_F16_SHAPE 4
+#define FVK_MM_CM1_NO_MODULE 5
+#define FVK_MM_CM1_BAD_FORMAT 6
+#define FVK_MM_CM1_BAD_SHAPE 7
+#define FVK_MM_CM1_DISPATCH_FAILED 8
+int fvk_mm_cm1_status(int fmt);
+int fvk_mm_cm1_f32(int fmt, const void *dW, const void *dX, void *dY, int out, int in, int tokens);
 int fvk_iq_matvec_available(int fmt);
 void fvk_iq_matvec_f32(int fmt, const void *dW0, const void *dX, void *dY, const void *dW1, void *dY1,
                        int out0, int out1, int in, int tokens, int mode);

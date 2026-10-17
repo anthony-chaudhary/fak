@@ -1619,6 +1619,9 @@ func (v *vulkanBackend) q4kMatMulLocked(w, x, y Tensor, out, in, P int) {
 			v.q4kStagedBytes += int64(wb.n)
 		}
 	}
+	if v.mmCM1MatMulPtrLocked(Q4_K, weight, x, y, out, in, P, "q4k_matmul") {
+		return
+	}
 	_, _, _ = v.Q4KMatMul2DDispatchGrid(out, P)
 	C.fvk_q4k_matmul_f32(weight, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
 }

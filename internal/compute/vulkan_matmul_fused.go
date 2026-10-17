@@ -148,12 +148,16 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q3_K:
 		v.q3kMatMulLocked(w, X, y, P)
 	case Q2_K:
-		v.q2kMatMulLocked(w, X, y, out, in, P)
+		if !v.mmCM1MatMulLocked(w, X, y, out, in, P, "q2k_matmul") {
+			v.q2kMatMulLocked(w, X, y, out, in, P)
+		}
 	default:
 		if !isRawIQ(w.Dtype) {
 			panic("compute: vulkan BatchedMatMul unsupported weight dtype " + w.Dtype.String())
 		}
-		v.iqMatVecLocked(w, X, y, out, in, P)
+		if !v.mmCM1MatMulLocked(w, X, y, out, in, P, "iq_matvec") {
+			v.iqMatVecLocked(w, X, y, out, in, P)
+		}
 	}
 	return y
 }
