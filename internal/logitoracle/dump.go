@@ -2,11 +2,13 @@ package logitoracle
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"io"
 	"math"
 	"os"
@@ -187,6 +189,9 @@ func dumpPrompt(spec PromptSpec, opts DumpOptions, index int) (PromptDump, int, 
 		if !equalInts(tp.PromptIDs, spec.IDs) {
 			return pd, 0, ErrTeacherMismatch
 		}
+		if err := validateHistory(tp, opts.Teacher.Vocab); err != nil {
+			return pd, 0, fmt.Errorf("%w: %v", ErrTeacherMismatch, err)
+		}
 		pd.Positions, forced, pd.Forced = tp.Positions, tp.Fed, true
 	}
 	if len(pd.PromptIDs) == 0 {
@@ -249,10 +254,7 @@ func dumpPrompt(spec PromptSpec, opts DumpOptions, index int) (PromptDump, int, 
 	started = time.Now()
 	for pos := 1; pos < pd.Positions; pos++ {
 		next := pd.Argmax[pos-1]
-		if forced != nil {
-			if pos-1 >= len(forced) {
-				return pd, 0, ErrTeacherMismatch
-			}
+		if pd.Forced {
 			next = forced[pos-1]
 		}
 		pd.Fed = append(pd.Fed, next)
@@ -296,6 +298,23 @@ func equalInts(a, b []int) bool {
 	return true
 }
 
+// validateHistory requires evidence of every token consumed before a recorded
+// position. A missing history must not make unknown inputs look comparable.
+func validateHistory(pd *PromptDump, vocab int) error {
+	if pd.Positions < 1 {
+		return fmt.Errorf("%w: positions=%d, want at least 1", ErrInvalidHistory, pd.Positions)
+	}
+	if len(pd.Fed) != pd.Positions-1 {
+		return fmt.Errorf("%w: fed=%d, want %d", ErrInvalidHistory, len(pd.Fed), pd.Positions-1)
+	}
+	for i, id := range pd.Fed {
+		if id < 0 || id >= vocab {
+			return fmt.Errorf("%w: fed[%d]=%d outside vocabulary [0,%d)", ErrInvalidHistory, i, id, vocab)
+		}
+	}
+	return nil
+}
+
 // ReadManifest loads a dump manifest from its directory or manifest path.
 func ReadManifest(path string) (*Manifest, error) {
 	dir := path
@@ -321,13 +340,19 @@ func ReadManifest(path string) (*Manifest, error) {
 
 // logitRows reads fixed-width float32 rows from a dump file.
 type logitRows struct {
-	f     *os.File
-	r     *bufio.Reader
-	vocab int
-	raw   []byte
+	f      *os.File
+	r      *bufio.Reader
+	vocab  int
+	raw    []byte
+	digest hash.Hash
+	want   []byte
 }
 
 func openRows(dir string, pd *PromptDump, vocab int) (*logitRows, error) {
+	want, err := hex.DecodeString(pd.LogitsSHA256)
+	if err != nil || len(want) != sha256.Size {
+		return nil, fmt.Errorf("%w: %s", ErrLogitsChecksum, pd.LogitsFile)
+	}
 	f, err := os.Open(filepath.Join(dir, pd.LogitsFile))
 	if err != nil {
 		return nil, err
@@ -341,7 +366,9 @@ func openRows(dir string, pd *PromptDump, vocab int) (*logitRows, error) {
 		f.Close()
 		return nil, fmt.Errorf("%w: %s holds %d bytes, want %d", ErrLengthMismatch, pd.LogitsFile, info.Size(), want)
 	}
-	return &logitRows{f: f, r: bufio.NewReaderSize(f, 1<<20), vocab: vocab, raw: make([]byte, vocab*4)}, nil
+	h := sha256.New()
+	return &logitRows{f: f, r: bufio.NewReaderSize(io.TeeReader(f, h), 1<<20), vocab: vocab,
+		raw: make([]byte, vocab*4), digest: h, want: want}, nil
 }
 
 func (l *logitRows) next(dst []float32) error {
@@ -355,6 +382,18 @@ func (l *logitRows) next(dst []float32) error {
 }
 
 func (l *logitRows) close() error { return l.f.Close() }
+
+// verify consumes excluded rows too: the checksum binds the entire file, not
+// just the common-history prefix used for numerical comparison.
+func (l *logitRows) verify() error {
+	if _, err := io.Copy(io.Discard, l.r); err != nil {
+		return err
+	}
+	if !bytes.Equal(l.digest.Sum(nil), l.want) {
+		return fmt.Errorf("%w: %s", ErrLogitsChecksum, l.f.Name())
+	}
+	return nil
+}
 
 // CompareManifests compares every reference prompt against the candidate
 // prompt of the same name. Positions after the first fed-token difference are
@@ -391,10 +430,16 @@ func comparePrompt(ref, cand *Manifest, rp, cp *PromptDump, th Thresholds) (Prom
 	if !equalInts(rp.PromptIDs, cp.PromptIDs) {
 		return PromptReport{}, ErrPromptMismatch
 	}
+	if err := validateHistory(rp, ref.Vocab); err != nil {
+		return PromptReport{}, fmt.Errorf("reference: %w", err)
+	}
+	if err := validateHistory(cp, cand.Vocab); err != nil {
+		return PromptReport{}, fmt.Errorf("candidate: %w", err)
+	}
 	positions := min(rp.Positions, cp.Positions)
 	comparable := positions
 	var firstDiverge *int
-	for j := 0; j+1 < positions && j < len(rp.Fed) && j < len(cp.Fed); j++ {
+	for j := 0; j+1 < positions; j++ {
 		if rp.Fed[j] != cp.Fed[j] {
 			at := j
 			firstDiverge = &at
@@ -427,6 +472,12 @@ func comparePrompt(ref, cand *Manifest, rp, cp *PromptDump, th Thresholds) (Prom
 		}
 		st.Position = pos
 		acc.Add(st)
+	}
+	if err := rr.verify(); err != nil {
+		return PromptReport{}, err
+	}
+	if err := cr.verify(); err != nil {
+		return PromptReport{}, err
 	}
 	pr := acc.Fold(max(rp.Positions, cp.Positions), max(rp.Positions, cp.Positions)-comparable, th)
 	pr.FirstFedDiverge = firstDiverge

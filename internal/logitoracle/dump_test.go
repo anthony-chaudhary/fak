@@ -1,13 +1,25 @@
 package logitoracle
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"math"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 const fakeVocab = 16
+
+// Error categories are matched as public text so these complete regression
+// tests also compile against the pre-fix production package.
+const (
+	checksumErrorText = "logitoracle: logits checksum"
+	historyErrorText  = "logitoracle: invalid fed-token history"
+)
 
 // fakeSession is a deterministic history-dependent model. perturb adds a
 // candidate-side offset to the logits at a given decode position.
@@ -189,5 +201,203 @@ func TestDumpRejectsTeacherPromptMismatch(t *testing.T) {
 	}
 	if _, err := CompareManifests(ref, ref, Thresholds{TopK: 0}); !errors.Is(err, ErrBadThresholds) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestCompareManifestsVerifiesWholeLogitsFiles(t *testing.T) {
+	cases := []struct {
+		name      string
+		mutate    func(*testing.T, *Manifest)
+		wantText  string
+		wantError error
+	}{
+		{"missing checksum", func(t *testing.T, m *Manifest) { m.Prompts[0].LogitsSHA256 = "" }, checksumErrorText, nil},
+		{"invalid checksum", func(t *testing.T, m *Manifest) { m.Prompts[0].LogitsSHA256 = strings.Repeat("z", 64) }, checksumErrorText, nil},
+		{"short checksum", func(t *testing.T, m *Manifest) { m.Prompts[0].LogitsSHA256 = "ab" }, checksumErrorText, nil},
+		{"wrong checksum", func(t *testing.T, m *Manifest) { m.Prompts[0].LogitsSHA256 = strings.Repeat("0", 64) }, checksumErrorText, nil},
+		{"changed bytes", corruptLastLogit, checksumErrorText, nil},
+		{"truncated file", func(t *testing.T, m *Manifest) {
+			p := &m.Prompts[0]
+			if err := os.Truncate(filepath.Join(m.Dir(), p.LogitsFile), int64(p.Positions*m.Vocab*4-1)); err != nil {
+				t.Fatal(err)
+			}
+		}, "", ErrLengthMismatch},
+	}
+	for _, side := range []string{"reference", "candidate"} {
+		for _, tc := range cases {
+			t.Run(side+"/"+tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				ref, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "ref"), NewSession: factory(nil, nil)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cand, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "cand"), NewSession: factory(nil, nil)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if side == "reference" {
+					tc.mutate(t, ref)
+				} else {
+					tc.mutate(t, cand)
+				}
+				_, err = CompareManifests(ref, cand, FlipThresholds)
+				if tc.wantError != nil {
+					if !errors.Is(err, tc.wantError) {
+						t.Fatalf("got %v, want %v", err, tc.wantError)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), tc.wantText) {
+					t.Fatalf("got %v, want error containing %q", err, tc.wantText)
+				}
+			})
+		}
+	}
+}
+
+// fak-test:runtime fast est=30ms lane=default
+func TestCompareManifestsVerifiesExcludedSuffix(t *testing.T) {
+	for _, side := range []string{"reference", "candidate"} {
+		t.Run(side, func(t *testing.T) {
+			dir := t.TempDir()
+			ref, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "ref"), NewSession: factory(nil, nil)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cand, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "cand"), NewSession: factory(nil, nil)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := cand
+			if side == "reference" {
+				m = ref
+			}
+			p := &m.Prompts[0]
+			path := filepath.Join(m.Dir(), p.LogitsFile)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The excluded suffix extends beyond openRows' 1 MiB read-ahead.
+			rowBytes := m.Vocab * 4
+			data = bytes.Repeat(data[:rowBytes], (1<<20)/rowBytes+2)
+			firstFed := p.Fed[0]
+			p.Positions = len(data) / rowBytes
+			p.Fed = make([]int, p.Positions-1)
+			p.Fed[0] = (firstFed + 1) % m.Vocab
+			sum := sha256.Sum256(data)
+			p.LogitsSHA256 = hex.EncodeToString(sum[:])
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			rep, err := CompareManifests(ref, cand, FlipThresholds)
+			if err != nil || rep.Verdict != VerdictIncomplete || rep.StrictVerdict != VerdictIncomplete || rep.Prompts[0].Compared != 1 {
+				t.Fatalf("valid excluded suffix: report=%+v err=%v", rep, err)
+			}
+			corruptLastLogit(t, m)
+			if _, err := CompareManifests(ref, cand, FlipThresholds); err == nil || !strings.Contains(err.Error(), checksumErrorText) {
+				t.Fatalf("corrupt excluded suffix: got %v, want error containing %q", err, checksumErrorText)
+			}
+		})
+	}
+}
+
+func corruptLastLogit(t *testing.T, m *Manifest) {
+	t.Helper()
+	path := filepath.Join(m.Dir(), m.Prompts[0].LogitsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Change only a mantissa bit, preserving length and finite float32 values.
+	data[len(data)-4] ^= 1
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestDumpAndCompareRequireCompleteFedHistory(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*PromptDump)
+	}{
+		{"missing", func(p *PromptDump) { p.Fed = nil }},
+		{"short", func(p *PromptDump) { p.Fed = p.Fed[:len(p.Fed)-1] }},
+		{"long", func(p *PromptDump) { p.Fed = append(p.Fed, 0) }},
+		{"zero positions", func(p *PromptDump) { p.Positions = 0 }},
+		{"negative positions", func(p *PromptDump) { p.Positions = -1 }},
+		{"negative token", func(p *PromptDump) { p.Fed[0] = -1 }},
+		{"out-of-vocabulary token", func(p *PromptDump) { p.Fed[0] = fakeVocab }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ref, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "ref"), NewSession: factory(nil, nil)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cand, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "cand"), NewSession: factory(nil, nil)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(&cand.Prompts[0])
+			for _, pair := range [][2]*Manifest{{ref, cand}, {cand, ref}, {cand, cand}} {
+				if _, err := CompareManifests(pair[0], pair[1], FlipThresholds); err == nil || !strings.Contains(err.Error(), historyErrorText) {
+					t.Fatalf("got %v, want error containing %q", err, historyErrorText)
+				}
+			}
+			started := false
+			_, err = Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "forced"), Teacher: cand,
+				NewSession: func() (Session, func(), error) {
+					started = true
+					return &fakeSession{}, nil, nil
+				}})
+			if !errors.Is(err, ErrTeacherMismatch) || started {
+				t.Fatalf("invalid teacher must fail before session creation: started=%t err=%v", started, err)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestDumpTeacherAcceptsFedTokenBounds(t *testing.T) {
+	dir := t.TempDir()
+	specs := []PromptSpec{{Name: "bounds", IDs: []int{1, 2}, Positions: 3}}
+	ref, err := Dump(specs, DumpOptions{Dir: filepath.Join(dir, "ref"), NewSession: factory(nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref.Prompts[0].Fed = []int{0, fakeVocab - 1}
+	cand, err := Dump(specs, DumpOptions{Dir: filepath.Join(dir, "cand"), Teacher: ref, NewSession: factory(nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalInts(cand.Prompts[0].Fed, ref.Prompts[0].Fed) {
+		t.Fatalf("boundary tokens were not consumed: %+v", cand.Prompts[0])
+	}
+	rep, err := CompareManifests(cand, cand, FlipThresholds)
+	if err != nil || rep.Verdict != VerdictPass || rep.StrictVerdict != VerdictPass {
+		t.Fatalf("valid token bounds: report=%+v err=%v", rep, err)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestDumpSinglePositionNeedsNoFedTokens(t *testing.T) {
+	dir := t.TempDir()
+	specs := []PromptSpec{{Name: "one", IDs: []int{1, 2}, Positions: 1}}
+	ref, err := Dump(specs, DumpOptions{Dir: filepath.Join(dir, "ref"), NewSession: factory(nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cand, err := Dump(specs, DumpOptions{Dir: filepath.Join(dir, "cand"), Teacher: ref, NewSession: factory(nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ref.Prompts[0].Fed) != 0 || len(cand.Prompts[0].Fed) != 0 || !cand.Prompts[0].Forced {
+		t.Fatalf("single-position history: ref=%+v cand=%+v", ref.Prompts[0], cand.Prompts[0])
+	}
+	rep, err := CompareManifests(ref, cand, FlipThresholds)
+	if err != nil || rep.Verdict != VerdictPass || rep.StrictVerdict != VerdictPass || rep.Prompts[0].Compared != 1 {
+		t.Fatalf("single-position compare: report=%+v err=%v", rep, err)
 	}
 }

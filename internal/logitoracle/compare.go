@@ -23,6 +23,8 @@ var (
 	ErrNoPrompts       = errors.New("logitoracle: no prompts")
 	ErrBadThresholds   = errors.New("logitoracle: invalid thresholds")
 	ErrTeacherMismatch = errors.New("logitoracle: teacher prompt differs from requested prompt")
+	ErrInvalidHistory  = errors.New("logitoracle: invalid fed-token history")
+	ErrLogitsChecksum  = errors.New("logitoracle: logits checksum missing, invalid or mismatched")
 )
 
 // Thresholds is the declared gate. A divergent greedy token counts as a tie only
