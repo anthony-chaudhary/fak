@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -342,6 +345,29 @@ func TestVulkanRawIQKillSwitchFallsBackToQ8(t *testing.T) {
 	}
 }
 
+type rawIQBenchShape struct{ out, in int }
+
+// rawIQBenchShapes reads FAK_RAWIQ_BENCH_SHAPES ("OUTxIN,...", e.g. the model
+// shapes `fak-dev kernel-oracle shapes` lists) so the per-op oracle can time fak at
+// the exact shapes ggml is timed at; unset keeps the two FFN shapes.
+func rawIQBenchShapes(b *testing.B) []rawIQBenchShape {
+	env := strings.TrimSpace(os.Getenv("FAK_RAWIQ_BENCH_SHAPES"))
+	if env == "" {
+		return []rawIQBenchShape{{17408, 5120}, {5120, 17408}}
+	}
+	var out []rawIQBenchShape
+	for _, tok := range strings.Split(env, ",") {
+		o, i, ok := strings.Cut(strings.TrimSpace(tok), "x")
+		on, err1 := strconv.Atoi(o)
+		in, err2 := strconv.Atoi(i)
+		if !ok || err1 != nil || err2 != nil || on <= 0 || in <= 0 || in%256 != 0 {
+			b.Fatalf("FAK_RAWIQ_BENCH_SHAPES: bad shape %q (want OUTxIN, IN a multiple of 256)", tok)
+		}
+		out = append(out, rawIQBenchShape{on, in})
+	}
+	return out
+}
+
 // BenchmarkVulkanRawIQMatvec times single-token MatMul on each raw i-quant's native
 // kernel versus the Q8_0 fallback representation of the same weight, reporting
 // effective weight GB/s (sub-benchmarks <dtype>/<shape>/{native,native_stream,q8}).
@@ -353,7 +379,7 @@ func BenchmarkVulkanRawIQMatvec(b *testing.B) {
 	v := be.(*vulkanBackend)
 	for _, dt := range rawIQParityDtypes() {
 		blockBytes, _ := RawIQBlockBytes(dt)
-		for _, sh := range []struct{ out, in int }{{17408, 5120}, {5120, 17408}} {
+		for _, sh := range rawIQBenchShapes(b) {
 			hw, _ := rawIQParityWeight(dt, int64(sh.out+sh.in), sh.out, sh.in)
 			s := lcg(uint64(sh.out))
 			x := randVec(&s, sh.in)

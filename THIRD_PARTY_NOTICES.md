@@ -404,6 +404,12 @@ the backend graph node-comparison and sentinel process from
 https://github.com/ggml-org/llama.cpp/blob/fd55cb98fe29d3df0054d3f3e6e6f15958ea72ab/tests/test-backend-ops.cpp
 That upstream source uses the same MIT license below.
 
+`fak-dev kernel-oracle` (`cmd/fak-dev/kernel_oracle_parse.go`) runs no ggml code: it
+parses the console perf rows of an externally built `test-backend-ops` binary
+(`print_perf_console`, `test_generic_op` parameter strings and `--test-file`
+input written by `tests/test-export-graph-ops.cpp`), as read at revision
+`dff600487` (2026-09-09).
+
 MIT License
 
 Copyright (c) 2023-2026 The ggml authors

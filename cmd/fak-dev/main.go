@@ -170,6 +170,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCompanionTicket(stdout, stderr, argv[1:])
 	case "strix":
 		return devcmd.RunCompanionStrix(stdout, stderr, argv[1:])
+	case "kernel-oracle":
+		return runKernelOracle(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -257,6 +259,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  customization-index [flags]            inspect agent customization research")
 	fmt.Fprintln(w, "  factory-migrate [status|list|next|audit-boundary|scaffold] [flags] audit and track autonomous dev factory Python to Go migration")
 	fmt.Fprintln(w, "  bench-subagent-fanout [flags]          apples-to-apples subagent fanout benchmark harness (SGLang/vLLM/FAK)")
+	fmt.Fprintln(w, "  kernel-oracle <shapes|rank> [flags]    rank fak Vulkan kernels against ggml test-backend-ops per op and shape")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "companion tooling (when fak-private is present):")

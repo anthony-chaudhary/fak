@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/anthony-chaudhary/fak/internal/compute
+cpu: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S
+BenchmarkVulkanRawIQMatvec/iq2_xxs/out10240_in5120/native-32         	   20000	     60000 ns/op	       350.0 GB/s
+BenchmarkVulkanRawIQMatvec/iq2_xxs/out10240_in5120/native_stream-32  	   10000	    150000 ns/op	       144.4 GB/s
+BenchmarkVulkanRawIQMatvec/iq2_xxs/out10240_in5120/native_stream-32  	   10000	    140000 ns/op	       154.7 GB/s
+BenchmarkVulkanRawIQMatvec/iq2_xxs/out10240_in5120/q8-32             	    2000	    400000 ns/op	       139.3 GB/s
+BenchmarkVulkanRawIQMatvec/iq4_xs/out17408_in5120/native_stream-32   	    5000	    219000 ns/op	       217.1 GB/s
+PASS
+ok  	github.com/anthony-chaudhary/fak/internal/compute	12.345s

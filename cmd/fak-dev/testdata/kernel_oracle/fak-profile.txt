@@ -1,0 +1,10 @@
+fak-vulkan ts-profile batches=32 ops/batch=812.0 gpu_ms/batch=3.300 wall_ms/batch=4.100 truncated=0
+fak-vulkan ts-stage kernel=iq2xxs_matvec groups=384x1 calls/batch=24.00 ms/batch=4.800 us/call=200.00 share=10.0%
+fak-vulkan ts-stage kernel=iq2xxs_matvec groups=640x1 calls/batch=48.00 ms/batch=7.200 us/call=150.00 share=20.0%
+other stderr noise
+fak-vulkan ts-profile batches=64 ops/batch=812.0 gpu_ms/batch=3.279 wall_ms/batch=4.050 truncated=0
+fak-vulkan ts-stage kernel=qwen35_gdn_q8_in_proj groups=640x1 calls/batch=48.00 ms/batch=20.928 us/call=436.00 share=19.6%
+fak-vulkan ts-stage kernel=iq2xxs_matvec groups=640x1 calls/batch=48.00 ms/batch=7.200 us/call=150.00 share=20.0%
+fak-vulkan ts-stage kernel=iq2xxs_matvec groups=384x1 calls/batch=24.00 ms/batch=2.496 us/call=104.00 share=7.6%
+fak-vulkan ts-stage kernel=iq2xxs_matvec groups=320x1 calls/batch=48.00 ms/batch=4.800 us/call=100.00 share=6.0%
+fak-vulkan ts-stage kernel=iq4xs_matvec groups=1088x2 calls/batch=1.00 ms/batch=0.219 us/call=219.00 share=1.0%
