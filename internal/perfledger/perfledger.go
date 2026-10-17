@@ -207,6 +207,9 @@ type NativeTiming struct {
 	// the decode loop. Nil is unmeasured; a nonnil zero is a measured zero.
 	CPUMSPerToken *float64 `json:"cpu_ms_per_token,omitempty"`
 	HostShare     *float64 `json:"host_share,omitempty"`
+	// Kernels is the decode window's per-kernel GPU time; absent unless the
+	// backend's timestamp profile was on and every decode window measured it.
+	Kernels *NativeKernels `json:"kernels,omitempty"`
 }
 
 // WithHostWork returns a copy carrying the decode-window CPU split. Values that
@@ -452,6 +455,14 @@ type NativeTimingSummary struct {
 	HostWorkMeasured   int     `json:"host_work_measured,omitempty"`
 	CPUMSPerTokenP50   float64 `json:"cpu_ms_per_token_p50,omitempty"`
 	HostShareP50       float64 `json:"host_share_p50,omitempty"`
+	// Kernels* fold NativeTiming.Kernels over the rows that carry one.
+	// TopKernels is the three kernels with the largest mean GPU-time share.
+	KernelsMeasured  int           `json:"kernels_measured,omitempty"`
+	KernelsComplete  int           `json:"kernels_complete,omitempty"`
+	GPUMSPerTokenP50 float64       `json:"gpu_ms_per_token_p50,omitempty"`
+	CoverageP50      float64       `json:"kernel_coverage_p50,omitempty"`
+	DeviceBusyP50    float64       `json:"device_busy_p50,omitempty"`
+	TopKernels       []KernelShare `json:"top_kernels,omitempty"`
 }
 
 // ClientSummary is one client's served turns: its prompt-cache hit share over
@@ -509,6 +520,7 @@ func Summarize(recs []Record) Summary {
 	var nativePrefillMS, nativeDecodeMS, nativePrefillTPS, nativeDecodeTPS, nativeCPUMSPerToken, nativeHostShare []float64
 	var nativePrefillTokens, nativeDecodeTokens int64
 	var nativePrefillTotalMS, nativeDecodeTotalMS float64
+	var kernels kernelFold
 	nativePrefillWeighted, nativeDecodeWeighted := true, true
 	regimeTTFT := map[string][]float64{}
 	regimeE2E := map[string][]float64{}
@@ -577,6 +589,9 @@ func Summarize(recs []Record) Summary {
 					s.NativeTiming = &NativeTimingSummary{}
 				}
 				s.NativeTiming.Count++
+				if kernels.add(stored.Kernels) {
+					s.NativeTiming.KernelsMeasured++
+				}
 				if c, h := stored.CPUMSPerToken, stored.HostShare; c != nil && h != nil {
 					if cv, ok := finiteNonnegativeHostWork(*c, true); ok {
 						if hv, ok := finiteNonnegativeHostWork(*h, true); ok {
@@ -663,6 +678,13 @@ func Summarize(recs []Record) Summary {
 		n.DecodeTPSP50 = quantile(nativeDecodeTPS, 0.50)
 		n.CPUMSPerTokenP50 = quantile(nativeCPUMSPerToken, 0.50)
 		n.HostShareP50 = quantile(nativeHostShare, 0.50)
+		if n.KernelsMeasured > 0 {
+			n.KernelsComplete = kernels.complete
+			n.GPUMSPerTokenP50 = quantile(kernels.gpuMSPerToken, 0.50)
+			n.CoverageP50 = quantile(kernels.coverage, 0.50)
+			n.DeviceBusyP50 = quantile(kernels.deviceBusy, 0.50)
+			n.TopKernels = kernels.top(n.KernelsMeasured)
+		}
 		if nativePrefillWeighted && nativePrefillTotalMS > 0 && nativePrefillTokens > 0 {
 			n.PrefillTPSWeighted = roundTo(float64(nativePrefillTokens)/(nativePrefillTotalMS/1000), 100)
 		}
@@ -839,6 +861,17 @@ func RenderCompact(rep Report) string {
 			fmtMS(n.DecodeP50MS), fmtTPS(n.DecodeTPSP50), fmtTPS(n.DecodeTPSWeighted), n.DecodeMeasured, n.Count)
 		if n.HostWorkMeasured > 0 {
 			fmt.Fprintf(&b, " host share p50=%.3f cpu p50=%.2fms/tok (measured %d/%d)", n.HostShareP50, n.CPUMSPerTokenP50, n.HostWorkMeasured, n.Count)
+		}
+		if n.KernelsMeasured > 0 {
+			fmt.Fprintf(&b, " kern gpu p50=%.2fms/tok cov=%.0f%% dev_busy=%.0f%%", n.GPUMSPerTokenP50, n.CoverageP50*100, n.DeviceBusyP50*100)
+			for i, k := range n.TopKernels {
+				sep := ","
+				if i == 0 {
+					sep = " top="
+				}
+				fmt.Fprintf(&b, "%s%s:%.0f%%", sep, k.Kernel, k.Share*100)
+			}
+			fmt.Fprintf(&b, " (measured %d/%d complete %d)", n.KernelsMeasured, n.Count, n.KernelsComplete)
 		}
 	}
 	if s.Errors > 0 {

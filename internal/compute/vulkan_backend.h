@@ -891,6 +891,23 @@ typedef struct fvk_dispatch_profile {
 void fvk_dispatch_profile_snapshot(fvk_dispatch_profile *out);
 void fvk_dispatch_profile_reset(void);
 
+/* GPU timestamp profile (FAK_VULKAN_TIMESTAMP_PROFILE=1). Rows are cumulative per
+ * (kid, groups) shape; untimed_* count submits outside a timed batch and
+ * barriers_elided counts dispatches recorded without their barrier. */
+typedef struct fvk_ts_row {
+    uint32_t kid, gx, gy, pad;
+    uint64_t calls;
+    double ns;
+} fvk_ts_row;
+typedef struct fvk_ts_totals {
+    int32_t enabled, usable, init_tried, pad;
+    uint64_t batches, ops, truncated, untimed_compute, untimed_transfer, barriers_elided;
+    double gpu_ns, wall_ns;
+} fvk_ts_totals;
+int fvk_ts_enabled(void);
+int fvk_ts_snapshot(fvk_ts_totals *tot, fvk_ts_row *rows, int cap);
+const char *fvk_ts_kernel_name(uint32_t kid);
+
 #ifdef __cplusplus
 }
 #endif

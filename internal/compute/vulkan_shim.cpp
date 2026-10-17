@@ -450,7 +450,20 @@ static inline void dpDispatch(const Kernel& k) {
     }
 }
 
+// FAK_VULKAN_TIMESTAMP_PROFILE gate, read once at load; the profile itself is below.
+const bool g_tsOn = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
+// Work submitted outside a timed batch is in no timestamp row, so the profile counts
+// it rather than silently reporting full coverage.
+std::atomic<uint64_t> g_tsUntimedCompute{0}, g_tsUntimedTransfer{0};
+// A dispatch recorded without its barrier overlaps its predecessor, so its delta is not its own time.
+uint64_t g_tsBarriersElided = 0;
+static inline void tsCountUntimed(bool compute) {
+    if (!g_tsOn) return;
+    (compute ? g_tsUntimedCompute : g_tsUntimedTransfer).fetch_add(1, std::memory_order_relaxed);
+}
+
 static inline void dpOneShot(std::atomic<uint64_t>& family) {
+    tsCountUntimed(&family == &g_dp.oneShotCompute);
     if (!g_dp_on) return;
     family.fetch_add(1, std::memory_order_relaxed);
     g_dp.oneShotSubmits.fetch_add(1, std::memory_order_relaxed);
@@ -1584,6 +1597,7 @@ bool nextHazardSync(int ordinal) {
 void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
     if (g_batchHazardsArmed && !nextHazardSync(ordinal)) {
         dp_inc(g_dp.barriersElided);
+        if (g_tsOn) ++g_tsBarriersElided;
         return;
     }
     recordComputeBarrier(cmd);
@@ -1614,7 +1628,21 @@ const char* const kKernelNames[] = {
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
-const bool g_tsOn = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
+// Pseudo-kernel ids for the transfer and fill commands a timed batch records.
+enum TsPseudoKernel : uint32_t {
+    kTsD2DCopy = (uint32_t)K_COUNT, kTsH2DUpload, kTsD2DGather, kTsFill, kTsReadback
+};
+const char* tsKernelName(uint32_t kid) {
+    if (kid < (uint32_t)K_COUNT) return kKernelNames[kid];
+    switch (kid) {
+    case kTsD2DCopy: return "d2d_copy";
+    case kTsH2DUpload: return "h2d_upload";
+    case kTsD2DGather: return "d2d_gather";
+    case kTsFill: return "fill";
+    case kTsReadback: return "readback";
+    default: return "unknown";
+    }
+}
 const uint32_t kTsMax = 8192;
 VkQueryPool g_tsPool = VK_NULL_HANDLE;
 bool g_tsUsable = false, g_tsInitTried = false;
@@ -1689,9 +1717,16 @@ void tsReport() {
         if (shown++ >= 40) break;
         uint32_t kid = (uint32_t)(r.first >> 48), gx = (uint32_t)((r.first >> 20) & 0xFFFFFFF), gy = (uint32_t)(r.first & 0xFFFFF);
         fprintf(stderr, "fak-vulkan ts-stage kernel=%s groups=%ux%u calls/batch=%.2f ms/batch=%.3f us/call=%.2f share=%.1f%%\n",
-            kid < K_COUNT ? kKernelNames[kid] : "d2d_copy", gx, gy, r.second.n * perBatch, r.second.ns * perBatch / 1e6,
+            tsKernelName(kid), gx, gy, r.second.n * perBatch, r.second.ns * perBatch / 1e6,
             r.second.n ? r.second.ns / (double)r.second.n / 1e3 : 0, g_tsGpuNs > 0 ? 100.0 * r.second.ns / g_tsGpuNs : 0);
     }
+}
+
+// A recorded batch whose timestamps are never read (failed query, failed or skipped
+// submit) counts its slots as truncated, so its lost GPU time cannot pass as complete.
+void tsBatchLost() {
+    if (g_tsOn && g_tsUsable && g_tsUsed >= 2) g_tsTruncated += g_tsUsed - 1;
+    g_tsUsed = 0;
 }
 
 void tsBatchCollect() {
@@ -1699,6 +1734,7 @@ void tsBatchCollect() {
     std::vector<uint64_t> ts(g_tsUsed);
     if (vkGetQueryPoolResults(g_dev, g_tsPool, 0, g_tsUsed, ts.size() * sizeof(uint64_t), ts.data(),
             sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS) {
+        tsBatchLost();
         return;
     }
     double wall = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - g_tsBatchStart).count();
@@ -1874,6 +1910,7 @@ void batchFlush() {
         drainInflight();
         if (hadWork) dp_inc(g_dp.batchSubmits);
         const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);
+        if (!completed || !hadWork || g_v41SubmissionPendingFailure) tsBatchLost();
         if (g_v41SubmissionPendingFailure) return; // retain command, sets and parked buffers
         if (completed && hadWork) tsBatchCollect();
         if (completed && hadWork && (!g_batchD2DValid ||
@@ -1892,6 +1929,7 @@ void batchFlush() {
     } else {
         VKCHECK(vkEndCommandBuffer(g_batchCmd));
         vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_batchCmd);
+        tsBatchLost();
         drainInflight();
     }
     // Push back in reverse dispatch order. The pool is LIFO, so the next token's first
@@ -1990,7 +2028,7 @@ bool stepRecordUpload(Buffer* dst, const void* host, size_t bytes) {
     if (g_batchOps > 0) recordTransferBarrier(g_batchCmd);
     VkBufferCopy region{offset, 0, bytes};
     vkCmdCopyBuffer(g_batchCmd, g_upArena->buf, dst->buf, 1, &region);
-    tsAfterDispatch(g_batchCmd, (uint32_t)K_COUNT, 0, 0);
+    tsAfterDispatch(g_batchCmd, kTsH2DUpload, 0, 0);
     ++g_batchOps;
     g_upArenaUsed = offset + bytes;
     if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes)) {
@@ -2014,6 +2052,7 @@ int stepRecordReadback(void* host, Buffer* src, size_t bytes) {
     recordComputeBarrier(g_batchCmd);
     VkBufferCopy region{0, 0, bytes};
     vkCmdCopyBuffer(g_batchCmd, src->buf, stage->buf, 1, &region);
+    tsAfterDispatch(g_batchCmd, kTsReadback, 0, 0);
     ++g_batchOps;
     batchFlush();
     if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || g_batching) {
@@ -3454,6 +3493,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
             // as the one-shot path, recorded; the status readback submits it.
             if (g_batchOps > 0) recordTransferBarrier(g_batchCmd);
             vkCmdFillBuffer(g_batchCmd, initializedStatus->buf, 0, statusBytes, UINT32_MAX);
+            tsAfterDispatch(g_batchCmd, kTsFill, 0, 0);
             recordComputeBarrier(g_batchCmd);
         } else if (g_batchOps > 0) {
             recordDispatchBarrier(g_batchCmd, g_batchOps);
@@ -4684,6 +4724,7 @@ int fvk_restore_submit(void) {
     VkCommandBuffer cmd = g_restore.cmd;
     // The checked helper frees only commands known not to be pending. Keep all
     // restore ownership and accounting intact if submit/wait completion is uncertain.
+    // ts-untimed: counted by dpOneShot after a completed submit.
     const bool completed = v41EndSubmitWaitChecked(cmd, true);
     if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     g_restore.cmd = VK_NULL_HANDLE;
@@ -5122,7 +5163,7 @@ int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void*
     // Preserve the first envelope before reusing the status allocation. This
     // transfer is in the same submission, with an explicit WAR dependency.
     recordComputeBarrier(g_batchCmd);
-    VkBufferCopy first{0,0,16};vkCmdCopyBuffer(g_batchCmd,verdict->buf,g_stage->buf,1,&first);++g_batchOps;
+    VkBufferCopy first{0,0,16};vkCmdCopyBuffer(g_batchCmd,verdict->buf,g_stage->buf,1,&first);tsAfterDispatch(g_batchCmd,kTsReadback,0,0);++g_batchOps;
     recordTransferBarrier(g_batchCmd);
     struct{int rows,n;float eps;}pc{1,512,eps};Buffer* normBuffers[]={y,w,x};
     if(!dispatch(g_kern[K_RMSNORM],normBuffers,&pc,sizeof(pc),1,1,true))return fail();
@@ -5131,7 +5172,7 @@ int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void*
     if(!stepBatchRecording())return fail();
     recordComputeBarrier(g_batchCmd);
     Buffer* sources[]={x,verdict,y};const size_t offsets[]={16u,2064u,2080u},lengths[]={bytes,16u,bytes};
-    for(size_t i=0;i<3;++i){VkBufferCopy region{0,offsets[i],lengths[i]};vkCmdCopyBuffer(g_batchCmd,sources[i]->buf,g_stage->buf,1,&region);}
+    for(size_t i=0;i<3;++i){VkBufferCopy region{0,offsets[i],lengths[i]};vkCmdCopyBuffer(g_batchCmd,sources[i]->buf,g_stage->buf,1,&region);tsAfterDispatch(g_batchCmd,kTsReadback,0,0);}
     g_batchOps+=3;batchFlush();
     if(g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS || g_batching)return fail();
     batchBegin();
@@ -5218,6 +5259,7 @@ int fvk_v41_try_index_query_publication(float* raw, float* published, const void
     for (size_t i=0;i<3;++i) {
         VkBufferCopy region{0,offsets[i],lengths[i]};
         vkCmdCopyBuffer(g_batchCmd,sources[i]->buf,g_stage->buf,1,&region);
+        tsAfterDispatch(g_batchCmd,kTsReadback,0,0);
     }
     g_batchOps+=3;
     batchFlush();
@@ -5267,6 +5309,7 @@ int fvk_v41_d2h_many(void* host, size_t hostBytes, int count, void* const* srcs,
     for (int i = 0; i < count; ++i) {
         VkBufferCopy region{0, offsets[i], bytes[i]};
         vkCmdCopyBuffer(cmd, B(srcs[i])->buf, stage->buf, 1, &region);
+        if (recording) tsAfterDispatch(cmd, kTsReadback, 0, 0);
     }
     if (recording) {
         g_batchOps += count;
@@ -5323,7 +5366,7 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
         VkBufferCopy region{src_off, dst_off, bytes};
         dp_inc(g_dp.d2d);
         vkCmdCopyBuffer(g_batchCmd, B((void*)src)->buf, B(dst)->buf, 1, &region);
-        tsAfterDispatch(g_batchCmd, (uint32_t)K_COUNT, 0, 0);
+        tsAfterDispatch(g_batchCmd, kTsD2DCopy, 0, 0);
         if (g_batchD2DCount == std::numeric_limits<uint64_t>::max() ||
             bytes > std::numeric_limits<uint64_t>::max() - g_batchD2DBytes) {
             g_batchD2DValid = false;
@@ -5412,7 +5455,7 @@ int fvk_v41_d2d_gather(void* dstHandle, int count, void* const* srcs,
         vkCmdCopyBuffer(cmd, sources[group]->buf, dst->buf, sizes[group], ordered + starts[group]);
         dp_inc(g_dp.d2d); // physical copy commands, not logical regions
         if (recording) {
-            tsAfterDispatch(cmd, (uint32_t)K_COUNT, 0, 0);
+            tsAfterDispatch(cmd, kTsD2DGather, 0, 0);
             ++g_batchOps;
         }
     }
@@ -7770,6 +7813,7 @@ int fvk_v41_query_prefix_f32(const float* hostCollapse, const fvk_v41_query_pref
     }
     *failedStage = 9;
     dp_inc(g_dp.batchSubmits); // one combined H2D+compute submission, not two
+    tsCountUntimed(true);
     const bool completed = v41EndSubmitWaitChecked(cmd, true);
     // The helper owns command freeing on success/known-pre-submit failure.
     // On uncertainty neither command nor descriptors nor staging may be reused.
@@ -8516,6 +8560,41 @@ extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     out->one_shot_h2d_submits = g_dp.oneShotH2D.load();
     out->one_shot_d2h_submits = g_dp.oneShotD2H.load();
     out->one_shot_d2d_submits = g_dp.oneShotD2D.load();
+}
+extern "C" int fvk_ts_enabled(void) { return g_tsOn ? 1 : 0; }
+extern "C" const char* fvk_ts_kernel_name(uint32_t kid) { return tsKernelName(kid); }
+// The fold is plain state mutated by recording and batch collection; the caller serializes
+// this against every other shim call (Go holds vulkanMu). Returns the row count, which may
+// exceed cap: size with cap 0, then fill.
+extern "C" int fvk_ts_snapshot(fvk_ts_totals* tot, fvk_ts_row* rows, int cap) {
+    if (tot) {
+        tot->enabled = g_tsOn ? 1 : 0;
+        tot->usable = g_tsUsable ? 1 : 0;
+        tot->init_tried = g_tsInitTried ? 1 : 0;
+        tot->pad = 0;
+        tot->batches = g_tsBatches;
+        tot->ops = g_tsOps;
+        tot->truncated = g_tsTruncated;
+        tot->untimed_compute = g_tsUntimedCompute.load();
+        tot->untimed_transfer = g_tsUntimedTransfer.load();
+        tot->barriers_elided = g_tsBarriersElided;
+        tot->gpu_ns = g_tsGpuNs;
+        tot->wall_ns = g_tsWallNs;
+    }
+    int i = 0;
+    if (rows) {
+        for (const auto& r : g_tsAgg) {
+            if (i >= cap) break;
+            rows[i].kid = (uint32_t)(r.first >> 48);
+            rows[i].gx = (uint32_t)((r.first >> 20) & 0xFFFFFFF);
+            rows[i].gy = (uint32_t)(r.first & 0xFFFFF);
+            rows[i].pad = 0;
+            rows[i].calls = r.second.n;
+            rows[i].ns = r.second.ns;
+            ++i;
+        }
+    }
+    return (int)g_tsAgg.size();
 }
 extern "C" void fvk_dispatch_profile_reset(void) {
     g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.q2k.store(0); g_dp.other.store(0);

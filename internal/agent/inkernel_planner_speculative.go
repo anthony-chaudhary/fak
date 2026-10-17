@@ -310,6 +310,8 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	if err = ctx.Err(); err != nil {
 		return inKernelGenerateResult{}, err
 	}
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 
 	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 	var s *model.Session
@@ -529,6 +531,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 	// Speculative decoding loop
 	measurement.startDecodeTrace()
+	nonDecode.End()
 	hostSpan := nativeperf.StartDecodeSpan()
 	defer hostSpan.Abandon()
 	td := time.Now()
@@ -796,6 +799,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	round.close(gen)
 	decodeS := time.Since(td).Seconds()
 	hostSpan.Finish(ctx, max(gen-1, 0))
+	nonDecode = nativeperf.BeginNonDecodeWork()
 	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)
@@ -996,6 +1000,8 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	}
 	p.metalMTPMu.Lock()
 	defer p.metalMTPMu.Unlock()
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 
 	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 	var s *model.Session
@@ -1072,6 +1078,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		p.noteKVPrefixAdmitted()
 	}
 
+	nonDecode.End()
 	hostSpan := nativeperf.StartDecodeSpan()
 	defer hostSpan.Abandon()
 	td := time.Now()
@@ -1165,6 +1172,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 	round.close(gen)
 	decodeS := time.Since(td).Seconds()
 	hostSpan.Finish(ctx, max(gen-1, 0))
+	nonDecode = nativeperf.BeginNonDecodeWork()
 	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)

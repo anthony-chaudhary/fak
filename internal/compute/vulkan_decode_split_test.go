@@ -1,13 +1,18 @@
 //go:build vulkan && (windows || linux) && cgo
 
+// Run on a Vulkan host with libfakvulkan built:
+// go test -tags vulkan -run 'VulkanDecodeLayouts|VulkanV41MHCRMSSplit|VulkanTsSnapshot' ./internal/compute/
+
 package compute
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -192,4 +197,109 @@ func TestVulkanDecodeLayoutsTimestampBench(t *testing.T) {
 			v.Free(tensor)
 		}
 	}
+}
+
+// The timestamp profile gate is read once at library load, so each mode runs in
+// its own child process.
+func runVulkanTsSnapshotChild(t *testing.T, mode string, env ...string) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestVulkanTsSnapshotChild$", "-test.count=1", "-test.v")
+	cmd.Env = append(append(os.Environ(), env...), "FAK_VULKAN_TS_SNAPSHOT_CHILD="+mode)
+	out, err := cmd.CombinedOutput()
+	if bytes.Contains(out, []byte("--- SKIP")) {
+		t.Skipf("child skipped: %s", out)
+	}
+	if err != nil {
+		t.Fatalf("child failed: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+}
+
+// fak-test:runtime medium est=6s lane=default
+func TestVulkanTsSnapshotTelescopes(t *testing.T) {
+	runVulkanTsSnapshotChild(t, "on", "FAK_VULKAN_TIMESTAMP_PROFILE=1", "FAK_VULKAN_TIMESTAMP_PROFILE_EVERY=1000000000")
+}
+
+// fak-test:runtime medium est=4s lane=default
+func TestVulkanTsSnapshotDisabled(t *testing.T) {
+	runVulkanTsSnapshotChild(t, "off", "FAK_VULKAN_TIMESTAMP_PROFILE=0")
+}
+
+// fak-test:runtime fast est=2s lane=default
+func TestVulkanTsSnapshotChild(t *testing.T) {
+	mode := os.Getenv("FAK_VULKAN_TS_SNAPSHOT_CHILD")
+	if mode == "" {
+		t.Skip("child of TestVulkanTsSnapshotTelescopes and TestVulkanTsSnapshotDisabled")
+	}
+	v := vk(t)
+	switch mode {
+	case "on":
+		vulkanTsSnapshotTelescopes(t, v)
+	case "off":
+		if vulkanTimestampProfileEnabled() {
+			t.Fatal("timestamp profile on with FAK_VULKAN_TIMESTAMP_PROFILE=0")
+		}
+		if KernelProfileReaderRegistered() || KernelProfileSnapshot() != nil {
+			t.Fatal("kernel profile reader registered with the timestamp profile off")
+		}
+		if p, ok := readVulkanKernelProfile(); ok || len(p.Rows) != 0 {
+			t.Fatalf("disabled snapshot ok=%v rows=%d, want false and 0", ok, len(p.Rows))
+		}
+	default:
+		t.Fatalf("unknown child mode %q", mode)
+	}
+}
+
+func vulkanTsSnapshotTelescopes(t *testing.T, v *vulkanBackend) {
+	if !vulkanTimestampProfileEnabled() || !KernelProfileReaderRegistered() {
+		t.Fatal("timestamp profile on but no kernel profile reader registered")
+	}
+	const calls, out, in = 48, 512, 256
+	x := v.UploadClass(NewF32(Default(), []int{in}, make([]float32, in)), F32, MemoryActivation, "ts snapshot input")
+	defer v.Free(x)
+	w := v.Upload(NewF32(Default(), []int{out, in}, make([]float32, out*in)), F32)
+	defer v.Free(w)
+	before := KernelProfileSnapshot()
+	if before == nil {
+		t.Fatal("kernel profile unusable before the timed batch")
+	}
+	v.BeginBatch()
+	outs := make([]Tensor, 0, calls)
+	for i := 0; i < calls; i++ {
+		outs = append(outs, v.MatMul(w, x))
+	}
+	v.FlushBatch()
+	for _, o := range outs {
+		v.Free(o)
+	}
+	d := KernelProfileDelta(before, KernelProfileSnapshot())
+	if d == nil {
+		t.Fatal("kernel profile delta unusable across one timed batch")
+	}
+	if d.Batches == 0 || d.Ops == 0 || d.Truncated != 0 || d.GPUNS <= 0 || d.WallNS <= 0 {
+		t.Fatalf("delta totals = %+v", d)
+	}
+	var sumCalls, matmulCalls uint64
+	var sumNS float64
+	for _, r := range d.Rows {
+		if r.Kernel == "" || r.Kernel == "unknown" {
+			t.Fatalf("unresolved kernel name in row %+v", r)
+		}
+		sumCalls += r.Calls
+		sumNS += r.NS
+		if KernelOpClass(r.Kernel) == KernelOpMatmul {
+			matmulCalls += r.Calls
+		}
+	}
+	if sumCalls != d.Ops {
+		t.Fatalf("row calls %d != timed ops %d", sumCalls, d.Ops)
+	}
+	if math.Abs(sumNS-d.GPUNS) > 1e-6*d.GPUNS+1 {
+		t.Fatalf("rows sum to %.0f ns, batch spans %.0f ns: deltas must telescope", sumNS, d.GPUNS)
+	}
+	if matmulCalls < calls {
+		t.Fatalf("matmul calls %d, want at least %d", matmulCalls, calls)
+	}
+	t.Logf("ts snapshot: batches=%d ops=%d rows=%d gpu_ns=%.0f wall_ns=%.0f untimed_compute=%d untimed_transfer=%d",
+		d.Batches, d.Ops, len(d.Rows), d.GPUNS, d.WallNS, d.UntimedCompute, d.UntimedTransfer)
 }

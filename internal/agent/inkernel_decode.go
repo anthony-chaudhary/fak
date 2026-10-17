@@ -150,6 +150,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if err = ctx.Err(); err != nil {
 		return
 	}
+	// Prefill, restore and admission share the process-wide kernel profile with
+	// any concurrent decode window, which must not book them as decode kernels.
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 	// CW-03 (#13351): when this run is a cache-POPULATE, the caller has asked only
 	// for the production lookup -> suffix prefill -> full-state admission to happen.
 	// The purpose exits at the step-4 seam below, BEFORE the decode lane is built, so
@@ -718,6 +722,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		ln.forwarded = make([]int, 0, min(max(0, maxNew-1), inKernelSnapshotCheckpointTokens))
 	}
 	measurement.startDecodeTrace()
+	nonDecode.End()
 	hostSpan := nativeperf.StartDecodeSpan()
 	defer hostSpan.Abandon()
 	td := time.Now()
@@ -737,6 +742,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	decodeS = time.Since(td).Seconds()
 	hostSpan.Finish(ctx, max(gen-1, 0))
+	nonDecode = nativeperf.BeginNonDecodeWork()
 	enginestep.Default.ObservePhaseContext(ctx, enginestep.PhaseDecode, time.Since(td))
 	if err == nil && ctx.Err() == nil && len(ln.forwarded) > 0 {
 		// Output has already been emitted successfully. Snapshot/admission is a

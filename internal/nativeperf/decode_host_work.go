@@ -17,6 +17,35 @@ var processCPUTime = readProcessCPUTime
 // cannot be attributed to one request and its host measurement is dropped.
 var decodeSpansInFlight, decodeSpanStarts atomic.Int64
 
+// nonDecodeWorkInFlight and nonDecodeWorkStarts detect device work that is not
+// a decode step (prefill, restore, admission) running inside a decode window.
+// The kernel profile is process-wide, so such a window's kernels are dropped.
+var nonDecodeWorkInFlight, nonDecodeWorkStarts atomic.Int64
+
+// NonDecodeWork marks one stretch of non-decode device work. The zero value is
+// inert, and so is every mark while no kernel profile is kept.
+type NonDecodeWork struct{ active bool }
+
+// BeginNonDecodeWork marks non-decode device work as in flight until End.
+func BeginNonDecodeWork() NonDecodeWork {
+	if !compute.KernelProfileReaderRegistered() {
+		return NonDecodeWork{}
+	}
+	nonDecodeWorkInFlight.Add(1)
+	nonDecodeWorkStarts.Add(1)
+	return NonDecodeWork{active: true}
+}
+
+// End closes the mark; calling it again, or deferring it after an explicit
+// End, is safe.
+func (w *NonDecodeWork) End() {
+	if w == nil || !w.active {
+		return
+	}
+	w.active = false
+	nonDecodeWorkInFlight.Add(-1)
+}
+
 // DecodeSpan samples process CPU time and device-work counters around one
 // request's decode loop. The zero value is inert.
 type DecodeSpan struct {
@@ -28,15 +57,28 @@ type DecodeSpan struct {
 	startSeq  int64
 	finished  bool
 	measuring bool
+	kernels   *compute.KernelProfile
+	// nonDecodeSeq and nonDecodeBusy are read before the kernel snapshot, so
+	// work that starts between the two reads still drops the window.
+	nonDecodeSeq  int64
+	nonDecodeBusy bool
 }
 
-// StartDecodeSpan begins one decode-window sample. Cost is one process CPU
-// syscall plus lock-free counter reads; it never blocks on device work.
+// StartDecodeSpan begins one decode-window sample. By default the cost is one
+// process CPU syscall plus lock-free counter reads and it never blocks on
+// device work. With a kernel profile reader registered (the backend's
+// timestamp profile is on) it also snapshots that profile, which takes the
+// backend's device lock: it must not be called while that lock is held.
 func StartDecodeSpan() DecodeSpan {
 	s := DecodeSpan{measuring: true}
 	s.inFlight = decodeSpansInFlight.Add(1)
 	s.startSeq = decodeSpanStarts.Add(1)
 	s.device = compute.DeviceWorkSnapshot()
+	if compute.KernelProfileReaderRegistered() {
+		s.nonDecodeSeq = nonDecodeWorkStarts.Load()
+		s.nonDecodeBusy = nonDecodeWorkInFlight.Load() > 0
+		s.kernels = compute.KernelProfileSnapshot()
+	}
 	s.cpu, s.cpuOK = processCPUTime()
 	s.started = time.Now()
 	return s
@@ -57,15 +99,20 @@ func (s *DecodeSpan) Abandon() {
 // Kernel is nil unless the selected backend explicitly reports complete
 // host submit-to-fence timing coverage. This compatibility field is host wall
 // elapsed time, never GPU event time or device-active execution time.
+// Kernels is the window's per-kernel GPU timestamp delta: nil unless a kernel
+// profile was kept, the window had steps, and neither another decode nor
+// non-decode device work (NonDecodeOverlap) ran inside it.
 type DecodeHostWork struct {
-	Wall       time.Duration
-	Steps      int
-	CPU        *time.Duration
-	Kernel     *time.Duration
-	Backend    string
-	Dispatches uint64
-	Readback   uint64
-	Overlapped bool
+	Wall             time.Duration
+	Steps            int
+	CPU              *time.Duration
+	Kernel           *time.Duration
+	Backend          string
+	Dispatches       uint64
+	Readback         uint64
+	Overlapped       bool
+	Kernels          *compute.KernelProfile
+	NonDecodeOverlap bool
 }
 
 // Finish closes the span. steps counts decode steps inside the window (the
@@ -115,6 +162,17 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 			}
 		}
 	}
+	if s.kernels != nil {
+		after := compute.KernelProfileSnapshot()
+		w.NonDecodeOverlap = s.nonDecodeBusy || nonDecodeWorkStarts.Load() != s.nonDecodeSeq
+		// The closing snapshot can wait on the device lock while a decode span
+		// that started after the Overlapped verdict runs its first batches, so the
+		// decode sequence is read again once the snapshot is in hand.
+		decodeOverlap := w.Overlapped || decodeSpanStarts.Load() != s.startSeq
+		if !decodeOverlap && !w.NonDecodeOverlap && w.Steps > 0 {
+			w.Kernels = compute.KernelProfileDelta(s.kernels, after)
+		}
+	}
 	if acc := decodeHostWorkFrom(ctx); acc != nil {
 		acc.add(w)
 	}
@@ -136,6 +194,9 @@ type DecodeHostWorkAccumulator struct {
 	submitWaitGap bool
 	backend       string
 	claimed       bool
+	kernels       *compute.KernelProfile
+	kernelWindows int
+	kernelGap     bool
 }
 
 // WithDecodeHostWork installs a per-request accumulator on ctx.
@@ -179,6 +240,20 @@ func (a *DecodeHostWorkAccumulator) add(w DecodeHostWork) {
 	if w.Backend != "" {
 		a.backend = w.Backend
 	}
+	switch {
+	case w.Kernels == nil:
+		a.kernelGap = true
+	case a.kernelWindows == 0:
+		k := *w.Kernels
+		k.Rows = append([]compute.KernelRow(nil), w.Kernels.Rows...)
+		a.kernels = &k
+		a.kernelWindows++
+	default:
+		if a.kernels = compute.KernelProfileAdd(a.kernels, w.Kernels); a.kernels == nil {
+			a.kernelGap = true
+		}
+		a.kernelWindows++
+	}
 }
 
 // DecodeHostWorkTotals is a request's folded decode windows. A field is set
@@ -190,6 +265,7 @@ type DecodeHostWorkTotals struct {
 	CPU     *time.Duration
 	Kernel  *time.Duration
 	Backend string
+	Kernels *compute.KernelProfile
 }
 
 // Totals returns a coherent copy; ok is false when no decode window ran.
@@ -210,6 +286,11 @@ func (a *DecodeHostWorkAccumulator) Totals() (DecodeHostWorkTotals, bool) {
 	if !a.submitWaitGap {
 		kernel := a.kernel
 		t.Kernel = &kernel
+	}
+	if !a.kernelGap && a.kernelWindows == a.windows && a.kernels != nil {
+		k := *a.kernels
+		k.Rows = append([]compute.KernelRow(nil), a.kernels.Rows...)
+		t.Kernels = &k
 	}
 	return t, true
 }

@@ -29,7 +29,9 @@ var deviceWorkReaders struct {
 
 // RegisterDeviceWorkReader installs the counter reader for an initialized
 // backend. A backend that never registers has no dispatch series: absent, not 0.
-// read must be lock-free; it runs on scrapes and around every decode loop.
+// read must not take a backend device lock; it runs on scrapes and around
+// every decode loop. Per-kernel GPU time, which does need that lock, goes
+// through RegisterKernelProfileReader instead.
 // The returned func removes the reader (tests; a live backend never does).
 func RegisterDeviceWorkReader(backend string, read func() DeviceWork) (unregister func()) {
 	if backend == "" || read == nil {
@@ -57,6 +59,7 @@ func DeviceBackendRegistered() bool {
 }
 
 // DeviceWorkSnapshot reads every registered backend, sorted by backend name.
+// It never waits on device work.
 func DeviceWorkSnapshot() []DeviceWork {
 	deviceWorkReaders.mu.RLock()
 	out := make([]DeviceWork, 0, len(deviceWorkReaders.byBackend))

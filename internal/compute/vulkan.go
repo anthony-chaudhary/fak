@@ -206,6 +206,9 @@ func init() {
 	Register(vulkanDev)
 	DeclareFusedOps()
 	RegisterDeviceWorkReader("vulkan", readVulkanDeviceWork)
+	if vulkanTimestampProfileEnabled() {
+		RegisterKernelProfileReader("vulkan", readVulkanKernelProfile)
+	}
 	carveout, known := vulkanDev.DedicatedVRAMCarveout()
 	if vulkanOffloadPagesHostVisible(discrete == 0, carveout, known) {
 		C.fvk_set_offload_host_visible(1)
@@ -213,11 +216,54 @@ func init() {
 }
 
 // readVulkanDeviceWork reads the shim's always-on atomics without vulkanMu, so a
-// scrape or decode-loop sample never waits behind an in-flight submit.
+// scrape or decode-loop sample never waits behind an in-flight submit. The
+// per-kernel timestamp profile is the one decode-loop read that does take
+// vulkanMu, and it is registered only when that profile is on.
 func readVulkanDeviceWork() DeviceWork {
 	var dispatches, readback, submitWait C.uint64_t
 	C.fvk_device_work_counters(&dispatches, &readback, &submitWait)
 	return DeviceWork{Dispatches: uint64(dispatches), ReadbackBytes: uint64(readback), SubmitWaitNS: uint64(submitWait)}
+}
+
+func vulkanTimestampProfileEnabled() bool { return C.fvk_ts_enabled() != 0 }
+
+// readVulkanKernelProfile holds vulkanMu: the shim's timestamp fold is plain
+// state that recording and batch collection mutate, so both snapshot calls must
+// see one quiescent fold. A fold that has not yet timed its first batch is a
+// valid zero baseline; one whose timestamp pool failed is unusable.
+func readVulkanKernelProfile() (KernelProfile, bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var tot C.fvk_ts_totals
+	n := int(C.fvk_ts_snapshot(&tot, nil, 0))
+	if tot.enabled == 0 || (tot.usable == 0 && tot.init_tried != 0) || n < 0 {
+		return KernelProfile{}, false
+	}
+	rows := make([]C.fvk_ts_row, n)
+	if n > 0 && int(C.fvk_ts_snapshot(&tot, &rows[0], C.int(n))) != n {
+		return KernelProfile{}, false
+	}
+	p := KernelProfile{
+		Batches:         uint64(tot.batches),
+		Ops:             uint64(tot.ops),
+		Truncated:       uint64(tot.truncated),
+		UntimedCompute:  uint64(tot.untimed_compute),
+		UntimedTransfer: uint64(tot.untimed_transfer),
+		BarriersElided:  uint64(tot.barriers_elided),
+		GPUNS:           float64(tot.gpu_ns),
+		WallNS:          float64(tot.wall_ns),
+		Rows:            make([]KernelRow, 0, n),
+	}
+	for _, r := range rows {
+		p.Rows = append(p.Rows, KernelRow{
+			Kernel: C.GoString(C.fvk_ts_kernel_name(r.kid)),
+			GX:     uint32(r.gx),
+			GY:     uint32(r.gy),
+			Calls:  uint64(r.calls),
+			NS:     float64(r.ns),
+		})
+	}
+	return p, true
 }
 
 // VulkanDebugSetOffloadHostVisible forces the expert-ring page placement for a test and returns

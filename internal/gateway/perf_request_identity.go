@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
@@ -132,6 +133,7 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 			cpu, cpuOK := totals.CPUMSPerToken()
 			share, shareOK := totals.HostShare()
 			rec.NativeTiming = rec.NativeTiming.WithHostWork(cpu, cpuOK, share, shareOK)
+			rec.NativeTiming = rec.NativeTiming.WithKernels(nativeKernels(totals))
 		}
 	}
 	if o.complete && !o.failed && o.read > 0 {
@@ -147,6 +149,30 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 			rec.LoadLifecycle.LoadMS = v.LoadSeconds * 1000
 		}
 	}
+}
+
+// nativeKernels converts the request's folded decode-window kernel delta into
+// the ledger's per-token table; nil when no window carried one.
+func nativeKernels(totals nativeperf.DecodeHostWorkTotals) *perfledger.NativeKernels {
+	k := totals.Kernels
+	if k == nil || totals.Steps <= 0 {
+		return nil
+	}
+	samples := make([]perfledger.KernelSample, 0, len(k.Rows))
+	for _, r := range k.Rows {
+		samples = append(samples, perfledger.KernelSample{Kernel: r.Kernel, Op: compute.KernelOpClass(r.Kernel), GX: r.GX, GY: r.GY, Calls: r.Calls, NS: r.NS})
+	}
+	return perfledger.NewNativeKernels(perfledger.KernelWindow{
+		Backend:         k.Backend,
+		Steps:           totals.Steps,
+		GPUNS:           k.GPUNS,
+		WindowWallNS:    float64(totals.Wall),
+		Truncated:       k.Truncated,
+		UntimedCompute:  k.UntimedCompute,
+		UntimedTransfer: k.UntimedTransfer,
+		BarriersElided:  k.BarriersElided,
+		Samples:         samples,
+	})
 }
 
 const maxInboundRequestIDLen = 128

@@ -9684,6 +9684,31 @@
           "category": "incidental",
           "reason": "unexported helper prepending the GGUF BOS id for raw V4.1 completions",
           "token": "applyInKernelBOS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-kernel GPU timestamp fold returned by the internal/compute timestamp-profile reader; 'kernel' is a GPU compute shader dispatch (as in ProfiledKernelActiveTime), not the fak coordinator kernel, engine seam or vDSO.",
+          "token": "KernelProfile"
+        },
+        {
+          "category": "incidental",
+          "reason": "One per-Vulkan-shader timing row inside the native decode perf receipt; a GPU compute kernel measurement record, not a fak coordinator kernel concept.",
+          "token": "KernelRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fraction of the timed GPU window spent in one Vulkan compute shader on a KernelRow; a derived measurement field, not a coordinator kernel concept.",
+          "token": "KernelShare"
+        },
+        {
+          "category": "incidental",
+          "reason": "native_timing.kernels block of the perf ledger row listing measured GPU compute shaders for native decode; names Vulkan compute kernels, not the fak coordinator kernel or engine seam.",
+          "token": "NativeKernels"
+        },
+        {
+          "category": "incidental",
+          "reason": "Registration hook that lets the Vulkan backend supply the GPU timestamp-profile reader to internal/compute; plumbing for compute-shader timing, with no coordinator kernel, engine or vDSO role.",
+          "token": "RegisterKernelProfileReader"
         }
       ],
       "exclude": [
@@ -9717,11 +9742,15 @@
         "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
+        "KernelProfile",
         "KernelRevision",
+        "KernelRow",
+        "KernelShare",
         "KernelTurns",
         "MigrationEngine",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
+        "NativeKernels",
         "NewEngine",
         "NewSessionAffinityGateway",
         "NewSpeculativeEngine",
@@ -9731,6 +9760,7 @@
         "Qwen38NativeEngine",
         "RecordVDSOServe",
         "RegisterEngines",
+        "RegisterKernelProfileReader",
         "RemotePlacement",
         "SessionAffinityGateway",
         "SetDirectorEngine",

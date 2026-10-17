@@ -7,6 +7,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
 // PoisonEvictor is the narrow seam the gateway drives on a tool-result QUARANTINE: the
@@ -113,6 +114,8 @@ func (p *InKernelPlanner) withSegmentBridge(messages []Message, throughIdx int, 
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 	sess, bridge, ok := p.newSegmentBridge(segs)
 	if !ok {
 		return 0, false
@@ -354,6 +357,8 @@ func (p *InKernelPlanner) refLogitsExact(cache *model.Session, refIDs []int) boo
 	if len(refIDs) == 0 || cache.Cache.Len() != len(refIDs) {
 		return false
 	}
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 	ref := p.m.NewSession()
 	ref.Quant, ref.Q4K = p.quant, p.q4k
 	ref.Q4KGateUpOutputSlab = p.q4kGateUpOutputSlab

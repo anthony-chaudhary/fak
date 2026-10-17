@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
@@ -299,6 +300,8 @@ func (r WarmReceipt) Usable() bool {
 // continuation-capability chain (fak#13342 / #13338 / #13334) owns that admission, and a
 // warm must never claim readiness for a state the runtime cannot restore.
 func (p *InKernelPlanner) WarmPrefix(ctx context.Context, spec WarmPrefixSpec) (result WarmReceipt, err error) {
+	nonDecode := nativeperf.BeginNonDecodeWork()
+	defer nonDecode.End()
 	started := time.Now()
 	receipt := WarmReceipt{
 		Status:            WarmStatusUnsupported,
