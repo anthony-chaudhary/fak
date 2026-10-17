@@ -127,7 +127,7 @@ func TestV41AttentionInputPanelSnapshot(t *testing.T) {
 		t.Run("mutating "+site+" keeps snapshot", func(t *testing.T) {
 			m := &Model{Cfg: Config{NumLayers: 1, HiddenSize: 4, QLoraRank: 2, QKRopeHeadDim: 2, RMSNormEps: 1e-5}, manifest: map[string]tensorMeta{
 				layerName(0, "attn.wq_a.weight"): {Shape: []int{2, 4}},
-				layerName(0, "attn.wq_b.weight"): {Shape: []int{2, 2}},
+				layerName(0, "attn.wq_b.weight"): {Shape: []int{v41KVLoraRank, 2}},
 				layerName(0, "attn.wkv.weight"):  {Shape: []int{v41KVLoraRank, 4}},
 			}}
 			rows := [][]float32{{1, 2, 3, 4}, {5, 6, 7, 8}}
@@ -173,7 +173,7 @@ func TestV41AttentionInputPanelSnapshot(t *testing.T) {
 				}
 				return x, nil
 			}}, kvNorm: &v41KVNormBinding{ordinary: func(int, []float32) ([]float32, error) { return nil, stop }}}
-			_, err := m.v41LayerProjectQKV(0, 2, rows, true, 2, 1, 4, 1e-5, scratch, nil)
+			_, err := m.v41LayerProjectQKV(0, 2, rows, true, v41KVLoraRank, 1, 4, 1e-5, scratch, nil)
 			if !errors.Is(err, stop) || !seenKV || !mutated || scratch.attentionInputPanel != nil {
 				t.Fatalf("err=%v seenKV=%t mutated=%t", err, seenKV, mutated)
 			}
