@@ -434,7 +434,7 @@ static inline void dpDispatch(const Kernel& k) {
     uint64_t n = g_dp.compute.fetch_add(1, std::memory_order_relaxed) + 1;
     if ((n & 255) == 0) {
         fprintf(stderr,
-            "fak-vulkan profile compute=%llu q4k=%llu other=%llu other_ops=matmul:%llu,norm:%llu,rope:%llu,swiglu:%llu,add:%llu,attention:%llu,argmax:%llu,gdn:%llu,unclassified:%llu barriers=%llu d2d=%llu batch_submits=%llu batch_flushes=%llu one_shot_submits=%llu one_shot_calls=compute:%llu,h2d:%llu,d2h:%llu,d2d:%llu\n",
+            "fak-vulkan profile compute=%llu q4k=%llu other=%llu other_ops=matmul:%llu,norm:%llu,rope:%llu,swiglu:%llu,add:%llu,attention:%llu,argmax:%llu,gdn:%llu,unclassified:%llu barriers=%llu d2d=%llu batch_submits=%llu batch_flushes=%llu one_shot_submits=%llu one_shot_calls=compute:%llu,h2d:%llu,d2h:%llu,d2d:%llu h2d_bytes=%llu d2h_bytes=%llu\n",
             (unsigned long long)n, (unsigned long long)g_dp.q4k.load(), (unsigned long long)g_dp.other.load(),
             (unsigned long long)g_dp.otherMatmul.load(), (unsigned long long)g_dp.otherNorm.load(),
             (unsigned long long)g_dp.otherRope.load(), (unsigned long long)g_dp.otherSwiGLU.load(),
@@ -444,7 +444,8 @@ static inline void dpDispatch(const Kernel& k) {
             (unsigned long long)g_dp.d2d.load(), (unsigned long long)g_dp.batchSubmits.load(),
             (unsigned long long)g_dp.batchFlushes.load(), (unsigned long long)g_dp.oneShotSubmits.load(),
             (unsigned long long)g_dp.oneShotCompute.load(), (unsigned long long)g_dp.oneShotH2D.load(),
-            (unsigned long long)g_dp.oneShotD2H.load(), (unsigned long long)g_dp.oneShotD2D.load());
+            (unsigned long long)g_dp.oneShotD2H.load(), (unsigned long long)g_dp.oneShotD2D.load(),
+            (unsigned long long)g_h2dBytes.load(), (unsigned long long)g_d2hBytes.load());
     }
 }
 

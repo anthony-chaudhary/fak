@@ -163,6 +163,11 @@ type BatchSession struct {
 	// lastStepSharedPanels counts operations where one weight served at least two lanes.
 	lastStepSharedPanels int
 
+	// greedy marks lanes whose caller takes the logits argmax (StepBatchActiveGreedy);
+	// the per-lane serial route steps them with Session.StepGreedy into greedyNext.
+	greedy     []bool
+	greedyNext []int
+
 	// ObserveSerialStep optionally observes each actual Session.Step fallback.
 	// It runs synchronously after that lane's forward, with only the forward's
 	// elapsed time. Ragged sub-sessions retain this caller-owned observer.
