@@ -11,7 +11,9 @@ package envconfiglint
 // baseline "may only be EXTENDED with an explicit, reviewed reason, never to re-admit
 // [something] a cleaner default could retire."
 //
-// This list may only SHRINK. Each entry is behavioral configuration that genuinely belongs
+// This list may only SHRINK, except for the explicit two-name compatibility decision
+// recorded below on 2026-10-17. That exception authorizes no further admissions.
+// Each entry is behavioral configuration that genuinely belongs
 // on a config surface; none can move there yet because that surface does not exist — it is
 // #2862's deliverable. When #2862 lands, each read relocates and its line is deleted here.
 // That makes this list the ratchet's own debt ledger: an empty admittedPostFreeze means the
@@ -48,6 +50,20 @@ package envconfiglint
 // it, not because it migrated to explicit configuration. The #13605/#13616 migration
 // remains outstanding; deleting this ledger entry does not retire that runtime input.
 var admittedPostFreeze = []string{
+	// COMPATIBILITY EXCEPTION (2026-10-17): explicitly approved to preserve the existing
+	// operator rollback interface in internal/ggufload/qwen35_native_rows.go. These are
+	// behavioral settings, not credentials. Only the exact value "0" disables the named
+	// row class; other values retain the default. WithNativeLinearAttnRows(false) still
+	// disables both classes. No runtime reads, defaults, or option precedence change here.
+	// Introduced by 334b04505369a8438c8c5a9186762d22514eb858 (GDN) and
+	// 261ff83ba423a0b4f3e89a016433d271d993bacb (QK). At public eecb3d5be24e77830018f72efee8a81ba4fd0227,
+	// their unwatched ages were 84 and 89 trunk advances respectively. Admission resolves
+	// the current offenses; it does not erase that historical liveness failure or pay the
+	// migration debt. Relocate to explicit per-class loader options through a separately
+	// reviewed compatibility migration covering direct API callers and load/estimate paths.
+	"FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS",
+	"FAK_QWEN35_NATIVE_QK_ROWS",
+
 	// cmd/fak/dispatch_tick_lease_beat.go — overrides os.Hostname() as the identity stamped on
 	// the DOS lane leases the dispatch tick beats, so two workers on one box can hold distinct
 	// lanes. A machine label, not a credential: it authenticates nothing, and its siblings

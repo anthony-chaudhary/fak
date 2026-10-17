@@ -330,3 +330,45 @@ func repoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// fak-test:runtime fast est=10ms
+func TestQwenRollbackCompatibilityAdmissions(t *testing.T) {
+	const file = "internal/ggufload/qwen35_native_rows.go"
+	src, err := os.ReadFile(filepath.Join(repoRoot(t), file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := ScanGoEnvReads(string(src))
+	for _, name := range []string{"FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS", "FAK_QWEN35_NATIVE_QK_ROWS"} {
+		if IsSecretName(name) {
+			t.Errorf("compatibility admission %s must remain non-secret", name)
+		}
+		count := 0
+		for _, admitted := range admittedPostFreeze {
+			if admitted == name {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s admission count = %d, want exactly one", name, count)
+		}
+		visible := false
+		for _, read := range reads {
+			visible = visible || read == name
+		}
+		if !visible {
+			t.Errorf("%s must remain a visible literal read", name)
+		}
+		if off := Classify([]string{name}, file, baselineSet()); len(off) != 0 {
+			t.Errorf("approved compatibility read refused: %v", off)
+		}
+	}
+	const unapproved = "FAK_QWEN35_NATIVE_NEW_ROWS"
+	off := Classify([]string{unapproved}, file, baselineSet())
+	if len(off) != 1 || off[0].Name != unapproved {
+		t.Fatalf("nearby unapproved name must remain refused: %v", off)
+	}
+	if v := ClassifyLiveness(off, func(Offense) int { return UnwatchedTolerance + 1 }); v.Watched() {
+		t.Fatal("compatibility admissions must not relax stale unadmitted read detection")
+	}
+}
