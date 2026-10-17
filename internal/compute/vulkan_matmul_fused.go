@@ -539,7 +539,10 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	switch w.Dtype {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
-	case Q4_K, Q2_K:
+	case Q4_K, Q2_K, Q6_K:
+		if w.Dtype == Q6_K {
+			v.validateQ6KMatMulInputs(w, gate, P)
+		}
 		if w.Dtype == Q2_K && P == 1 {
 			wb := w.buf.(*vulkanBuf)
 			C.fvk_swiglu_q2k_matmul_add_f32(wb.ptr, v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
@@ -563,9 +566,12 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 			projShape = []int{out}
 		}
 		proj, _ := v.devTr(projShape, F32)
-		if w.Dtype == Q2_K {
+		switch w.Dtype {
+		case Q2_K:
 			v.q2kMatMulLocked(w, sw, proj, out, in, P)
-		} else {
+		case Q6_K:
+			v.q6kMatMulLocked(w, sw, proj, P)
+		default:
 			v.q4kMatMulLocked(w, sw, proj, out, in, P)
 		}
 		C.fvk_add_f32(v.vp(dst), v.vp(proj), C.int(dst.Numel()))
