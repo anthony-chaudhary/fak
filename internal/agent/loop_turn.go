@@ -265,6 +265,8 @@ func (r *armRunner) runSynthesisTurn(ctx context.Context, turn int) error {
 		return err
 	}
 	r.metrics.FinalAnswer = asst.Content
+	r.metrics.FinalFinishReason = comp.FinishReason
+	r.metrics.FinalAnswerTruncated = comp.FinishReason == "length"
 	r.metrics.SynthesizedFinalTurn = true
 	if r.cfg != nil {
 		r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
@@ -600,6 +602,8 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	// A final answer cannot confirm a pending speculation, so squash it before returning.
 	r.speculation.resolve(ctx, nil, r.metrics)
 	r.metrics.FinalAnswer = asst.Content
+	r.metrics.FinalFinishReason = comp.FinishReason
+	r.metrics.FinalAnswerTruncated = comp.FinishReason == "length"
 	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	r.finalizeFak()
 	return Message{}, armTurnStop, nil
