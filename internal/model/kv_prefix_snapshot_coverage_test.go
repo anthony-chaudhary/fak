@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -131,6 +132,65 @@ func TestV41PrefixSnapshotOwnsForwardCoverage(t *testing.T) {
 	}
 	if branch.NativeForwardCoverage() != nil {
 		t.Fatal("snapshot fabricated coverage for a no-logits prefill")
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+// fak-test:usefulness protects=v41-failed-step-continuation-and-cached-logit-provenance
+func TestV41PrefixCoverageSurvivesFailedStep(t *testing.T) {
+	s := prefixCoverageSession(t)
+	t.Cleanup(s.Close)
+	want := s.NativeForwardCoverage()
+	if want == nil || want.Validate() != nil {
+		t.Fatalf("real prefill did not produce valid coverage: %+v", want)
+	}
+	snapshot, err := s.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(snapshot.Close)
+	before := captureV41ForwardSnapshot(s.v41Forward)
+	sentinel := errors.New("selected final norm failure after all decoder layers")
+	calls, advancedLayers := 0, 0
+	s.v41Forward.finalNorm = func([]float32) ([]float32, error) {
+		calls++
+		for _, layer := range s.v41Forward.layers {
+			if layer.nextWindowPos == len(before.history)+1 {
+				advancedLayers++
+			}
+		}
+		return nil, sentinel
+	}
+	var fault any
+	returned := false
+	func() {
+		defer func() { fault = recover() }()
+		_, _, _ = s.M.forwardV41Step(7, s.v41Forward, nil)
+		returned = true
+	}()
+	cause, ok := fault.(error)
+	var selected *V41ProjectionOperationError
+	if returned || !ok || !errors.Is(cause, sentinel) || !errors.As(cause, &selected) || calls != 1 || advancedLayers != s.M.Cfg.NumLayers {
+		t.Fatalf("real failed Step did not roll back its selected head failure: returned=%t calls=%d advancedLayers=%d panic=%v", returned, calls, advancedLayers, fault)
+	}
+	// Rollback restores arithmetic continuation, but a failed attempt must not
+	// advertise old logits as its result. These are deliberately separate owners.
+	if s.NativeForwardCoverage() != nil || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {
+		t.Fatal("failed Step changed retained continuation or retained stale coverage")
+	}
+	branch, err := s.M.NewBackendSessionChecked(s.Backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(branch.Close)
+	if err := snapshot.Restore(branch); err != nil {
+		t.Fatal(err)
+	}
+	if got := branch.NativeForwardCoverage(); got == nil || *got != *want {
+		t.Fatalf("failed source Step changed independently cached logits provenance: got %+v want %+v", got, want)
+	}
+	if !reflect.DeepEqual(captureV41ForwardSnapshot(branch.v41Forward), before) {
+		t.Fatal("prefix restore changed the cached arithmetic continuation")
 	}
 }
 

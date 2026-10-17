@@ -67,6 +67,10 @@ type PrefixSnapshot struct {
 	// not carry it, so restoring a V4.1 prefix from Cache is incomplete; this
 	// field is what makes the clone a COMPLETE V4.1 prefix (fak#13342).
 	v41 *v41ForwardSnapshot
+	// coverage describes the logits saved beside this exact prefix.
+	// It is cache provenance, not arithmetic continuation or newly executed work.
+	// Capture and clone own this value independently of every live session.
+	coverage *NativeForwardCoverage
 	// v41DeviceIdentity records the exact backend this snapshot's V4.1 state was
 	// captured on. It is the snapshot-side half of the backend-prefix contract:
 	// a V4.1 continuation restored onto a DIFFERENT backend has no continuity
@@ -138,10 +142,6 @@ type v41ForwardSnapshot struct {
 	history []int
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
-	// forwardCoverage describes the logits saved beside this exact prefix. It
-	// preserves their producing traversal, not work executed by a cache hit.
-	// Capture and clone own this value independently of every live session.
-	forwardCoverage *NativeForwardCoverage
 	// hadState records whether the owner session held a live v41ForwardState at
 	// capture. A snapshot of a session that never ran a V4.1 forward carries the
 	// nil-state contract, so restoring it leaves the target session's V4.1 state
@@ -205,6 +205,10 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	// session has one; a session that never ran a V4.1 forward keeps the absent
 	// contract.
 	out.v41 = captureV41ForwardSnapshotWithPublications(s.v41Forward, true)
+	if s.v41Forward != nil && s.v41Forward.forwardCoverage != nil {
+		coverage := *s.v41Forward.forwardCoverage
+		out.coverage = &coverage
+	}
 	// A V4.1 prefix is not portable across backends and its position authority is
 	// the committed history, not the generic cache. Record both at capture so
 	// Restore can fail closed on a mismatched backend or token count instead of
@@ -332,6 +336,10 @@ func (p *PrefixSnapshot) cloneOwnedWithPublications(scope *backendExecutionScope
 		v41Tokens:            p.v41Tokens,
 		hasV41Tokens:         p.hasV41Tokens,
 	}
+	if p.coverage != nil {
+		coverage := *p.coverage
+		out.coverage = &coverage
+	}
 	if p.Backend == nil {
 		return out, nil
 	}
@@ -380,8 +388,8 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 	if p.Backend != s.Backend {
 		return fmt.Errorf("model: prefix snapshot backend mismatch")
 	}
-	if p.v41 != nil && p.v41.forwardCoverage != nil {
-		coverage := p.v41.forwardCoverage
+	if p.coverage != nil {
+		coverage := p.coverage
 		if p.owner == nil || p.owner.M != s.M {
 			return fmt.Errorf("%w: prefix snapshot model identity mismatch", ErrNativeForwardCoverageInvalid)
 		}
@@ -457,12 +465,14 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 	if p.v41 != nil {
 		if p.v41.hadState {
 			s.v41Forward = p.v41.restore()
+			s.v41Forward.forwardCoverage = p.coverage
 			s.v41State()
 		} else {
 			s.v41Forward = nil
 		}
 		p.v41 = nil
 	}
+	p.coverage = nil
 	return nil
 }
 
@@ -499,7 +509,7 @@ func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 	p.halLineage = tokenLineage{}
 	p.Cache = nil
 	p.targetHidden, p.targetHiddenTokens = nil, nil
-	p.v41 = nil
+	p.v41, p.coverage = nil, nil
 	p.closed = true
 	p.mu.Unlock()
 	if kv != nil {
@@ -533,6 +543,8 @@ func snapshotResidentPositions(s *Session) int {
 // snapshot owns them independently of the session; the expertGateUp callback is
 // deliberately NOT captured (it is a per-session device binding, not
 // continuation data), matching the step-local run state the assembly builds.
+// Last-logits coverage is also excluded: failed attempts clear it while restoring
+// arithmetic continuation. PrefixSnapshot owns cached-logit provenance separately.
 func captureV41ForwardSnapshot(st *v41ForwardState) *v41ForwardSnapshot {
 	return captureV41ForwardSnapshotWithPublications(st, false)
 }
@@ -548,10 +560,6 @@ func captureV41ForwardSnapshotWithPublications(st *v41ForwardState, shareSealed 
 		history:  append([]int(nil), st.history...),
 		attn:     st.attn.cloneWithPublications(shareSealed),
 		hadState: true,
-	}
-	if st.forwardCoverage != nil {
-		coverage := *st.forwardCoverage
-		out.forwardCoverage = &coverage
 	}
 	if len(st.layers) > 0 {
 		out.layers = make([]*V41AttentionState, len(st.layers))
@@ -577,10 +585,6 @@ func (n *v41ForwardSnapshot) cloneWithPublications(shareSealed bool) *v41Forward
 		attn:     n.attn.cloneWithPublications(shareSealed),
 		hadState: n.hadState,
 	}
-	if n.forwardCoverage != nil {
-		coverage := *n.forwardCoverage
-		out.forwardCoverage = &coverage
-	}
 	if len(n.layers) > 0 {
 		out.layers = make([]*V41AttentionState, len(n.layers))
 		for i, layer := range n.layers {
@@ -601,12 +605,11 @@ func (n *v41ForwardSnapshot) restore() *v41ForwardState {
 		return nil
 	}
 	out := &v41ForwardState{
-		history:         n.history,
-		attn:            n.attn,
-		layers:          n.layers,
-		forwardCoverage: n.forwardCoverage,
+		history: n.history,
+		attn:    n.attn,
+		layers:  n.layers,
 	}
-	n.history, n.attn, n.layers, n.forwardCoverage = nil, nil, nil, nil
+	n.history, n.attn, n.layers = nil, nil, nil
 	return out
 }
 
