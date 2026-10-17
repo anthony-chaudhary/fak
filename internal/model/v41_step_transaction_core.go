@@ -111,13 +111,19 @@ type v41StepJournal struct {
 	stats            *v41StepStats
 	previousRegistry *V41AttentionState
 	registry         v41StepRegistryUndo
-	pos, compress    []int
-	copies, rows     []int
-	ring             [][]float32
-	inputs           [][][]float32
-	inputPos         [][]int
-	kv, index        []v41StepPublicationUndo
+	layers           []v41StepLayerUndo
 	rolledBack       bool
+}
+
+// Keep per-layer undo data together so each token allocates one ledger rather
+// than a backing array for each field. Ring rows still own their backups.
+type v41StepLayerUndo struct {
+	pos, compress int
+	copies, rows  int
+	ring          []float32
+	inputs        [][]float32
+	inputPos      []int
+	kv, index     v41StepPublicationUndo
 }
 
 func newV41StepJournal(st *v41ForwardState, stats *v41StepStats, previousRegistry, registry *V41AttentionState, layers int) *v41StepJournal {
@@ -128,31 +134,22 @@ func newV41StepJournal(st *v41ForwardState, stats *v41StepStats, previousRegistr
 		// The live registry is append-only per source during this call. Journal
 		// one prospective KV/index entry per layer, never the retained prefix.
 		registry: stageV41StepRegistry(registry, layers),
-		pos:      make([]int, 0, layers),
-		compress: make([]int, 0, layers),
-		ring:     make([][]float32, 0, layers),
-		inputs:   make([][][]float32, 0, layers),
-		inputPos: make([][]int, 0, layers),
-		copies:   make([]int, 0, layers),
-		rows:     make([]int, 0, layers),
-		kv:       make([]v41StepPublicationUndo, 0, layers),
-		index:    make([]v41StepPublicationUndo, 0, layers),
+		layers:   make([]v41StepLayerUndo, 0, layers),
 	}
 }
 
 func (j *v41StepJournal) stage(l int, state *V41AttentionState) {
-	j.pos = append(j.pos, state.nextWindowPos)
-	j.compress = append(j.compress, state.nextCompressRow)
 	// The compressor appends a fresh owned input or releases a completed group;
 	// append only writes beyond the old lengths, even with spare capacity, so the
 	// headers suffice for this exclusively owned transaction. External snapshots
 	// still deep-copy partial groups in kv_prefix_snapshot.go.
-	j.inputs = append(j.inputs, state.partialInputs)
-	j.inputPos = append(j.inputPos, state.partialPositions)
-	j.copies = append(j.copies, state.retainedCopies)
-	j.rows = append(j.rows, state.retainedWindowRows)
-	j.kv = append(j.kv, stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, l))
-	j.index = append(j.index, stageV41StepPublication(state.indexPublications, state.indexPublishedEnd, l))
+	undo := v41StepLayerUndo{
+		pos: state.nextWindowPos, compress: state.nextCompressRow,
+		inputs: state.partialInputs, inputPos: state.partialPositions,
+		copies: state.retainedCopies, rows: state.retainedWindowRows,
+		kv:    stageV41StepPublication(state.kvPublications, state.kvPublishedEnd, l),
+		index: stageV41StepPublication(state.indexPublications, state.indexPublishedEnd, l),
+	}
 	// Capture the ring slot even at position zero: an internal empty-state role
 	// step can commit its first window row before a later layer fails.
 	var rowBackup []float32
@@ -162,30 +159,32 @@ func (j *v41StepJournal) stage(l int, state *V41AttentionState) {
 			rowBackup = append([]float32(nil), state.window[slot]...)
 		}
 	}
-	j.ring = append(j.ring, rowBackup)
+	undo.ring = rowBackup
+	j.layers = append(j.layers, undo)
 }
 
 func (j *v41StepJournal) rollback() {
 	if j.rolledBack {
 		return
 	}
-	for i := len(j.pos) - 1; i >= 0; i-- {
+	for i := len(j.layers) - 1; i >= 0; i-- {
+		undo := &j.layers[i]
 		state := j.st.layerState(i)
-		state.nextWindowPos = j.pos[i]
-		state.nextCompressRow = j.compress[i]
+		state.nextWindowPos = undo.pos
+		state.nextCompressRow = undo.compress
 		// Append may reuse the saved backing array. Drop failed rows beyond its
 		// old length so rollback does not keep their allocations alive.
-		if n := len(j.inputs[i]); n < len(state.partialInputs) {
+		if n := len(undo.inputs); n < len(state.partialInputs) {
 			clear(state.partialInputs[n:])
 		}
-		state.partialInputs = j.inputs[i]
-		state.partialPositions = j.inputPos[i]
-		state.retainedCopies = j.copies[i]
-		state.retainedWindowRows = j.rows[i]
-		j.kv[i].restore()
-		j.index[i].restore()
-		if row := j.ring[i]; row != nil && state.windowSize > 0 {
-			slot := j.pos[i] % state.windowSize
+		state.partialInputs = undo.inputs
+		state.partialPositions = undo.inputPos
+		state.retainedCopies = undo.copies
+		state.retainedWindowRows = undo.rows
+		undo.kv.restore()
+		undo.index.restore()
+		if row := undo.ring; row != nil && state.windowSize > 0 {
+			slot := undo.pos % state.windowSize
 			if slot >= 0 && slot < len(state.window) && len(state.window[slot]) == len(row) {
 				copy(state.window[slot], row)
 			}
@@ -193,7 +192,7 @@ func (j *v41StepJournal) rollback() {
 	}
 	j.registry.restore()
 	j.st.attn = j.previousRegistry
-	j.stats.LayersRolledBack = len(j.pos)
+	j.stats.LayersRolledBack = len(j.layers)
 	j.rolledBack = true
 }
 

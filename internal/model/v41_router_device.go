@@ -58,8 +58,12 @@ func v41DeviceRouteCore(op compute.V41RouterTopKBackend, logits, bias compute.Te
 		return nil, completed, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
 	}
 	out := make([][]routePick, rows)
+	// Keep one owned slab per publication; capped row views preserve append
+	// isolation while avoiding one allocation per token in a prefill panel.
+	picks := make([]routePick, len(got.Experts))
 	for row := range out {
-		out[row] = make([]routePick, cfg.TopK)
+		start, end := row*cfg.TopK, (row+1)*cfg.TopK
+		out[row] = picks[start:end:end]
 		for slot := range out[row] {
 			i := row*cfg.TopK + slot
 			e, w := int(got.Experts[i]), got.Weights[i]
