@@ -27,8 +27,10 @@ Discovery is implemented in:
   - `ParseOpenCodeFreeModels(lines, suffix)` — filters to `*-free` suffix, parses
     `provider/model`, runs the quality gate.
   - `SplitOpenCodeFreeModels` — partitions survivors vs rejected.
-- `fak opencode free-models [--json] [--suffix] [--provider] [--all]` — runs
+- `fak opencode free-models [--json] [--suffix] [--provider] [--all] [--check] [--write PATH]` — runs
   `opencode models`, applies the gate, prints survivors (plain) or full JSON.
+  - `--check`: freshness gate; exit non-zero on any rejected free model or empty discovery.
+  - `--write PATH`: persist the discovered survivor roster as JSON for downstream apply tools.
 - Tests: `internal/modelroute/opencode_free_models_test.go` (PASS).
 
 Quality gate reuse: `FreeQualityReason` (deny tokens `compound/whisper/tts/embed/1b/tiny/nano`,
