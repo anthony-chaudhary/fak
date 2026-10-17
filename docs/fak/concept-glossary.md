@@ -1483,3 +1483,10 @@ The modelbench suffix receipt field and JSON alias describing the declared exten
 Serialized JSON field in the suffix-prefill receipt that exposes the ArtifactCoverage value for checkpoint identity verification; currently input-file-only.
 
 **Distinct from:** This is the wire key for the declared identity boundary, unlike the Go ArtifactCoverage field or general test coverage. It does not verify a complete shard set, GPU execution or model correctness.
+
+
+### loadBenchOwnedQ4KContext
+
+Modelbench Q4K loader adapter that accepts cancellation context and retains the loader-owned checkpoint backing for the resulting model session until terminal cleanup.
+
+**Distinct from:** Unlike the hierarchical quant loader cancellation budget, this benchmark adapter governs retained backing ownership and cleanup across successful execution, load errors and panic; it does not add a new context scheduler or change device timing.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"math"
 	"os"
 	"path/filepath"
@@ -308,4 +309,145 @@ func TestSuffixPrefillCLIReceiptAndExclusiveOutput(t *testing.T) {
 	if err = json.Unmarshal(raw, &report); err != nil || report.Error == "" || report.Reference.Error == "" {
 		t.Fatalf("failure receipt missing: %s %v", raw, err)
 	}
+}
+
+// suffixCountedSource observes real checkpoint ownership without replacing loading.
+type suffixCountedSource struct {
+	*ggufload.WeightSource
+	closes int
+}
+
+func (s *suffixCountedSource) Close() error { s.closes++; return s.WeightSource.Close() }
+
+// fak-test:justify why=regression when=changed:cmd/modelbench/main.go,cmd/modelbench/load_helpers.go
+// fak-test:runtime medium est=3s lane=default
+func TestSuffixPrefillOwnedQ4KLifecycle(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	path := engProjGGUF(t)
+	for _, fail := range []bool{false, true} {
+		ws, err := ggufload.OpenWeights(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ws.Close() })
+		counted := &suffixCountedSource{WeightSource: ws}
+		ctx, cancel := context.WithCancel(context.Background())
+		if fail {
+			cancel()
+		}
+		m, err := loadBenchOwnedQ4KSource(ctx, counted, nil)
+		cancel()
+		if fail {
+			if err == nil || counted.closes != 1 {
+				t.Fatalf("failed load: err=%v closes=%d", err, counted.closes)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = m.CloseWeights() })
+		if counted.closes != 0 {
+			t.Fatal("checkpoint closed before forward")
+		}
+		f := testCompleteBenchFlags()
+		f.bindWeightCloser(m.CloseWeights)
+		session := m.NewSession()
+		t.Cleanup(session.Close)
+		if len(session.Prefill([]int{1, 2})) == 0 || len(session.Prefill([]int{3, 4})) == 0 || len(session.Step(5)) == 0 {
+			t.Fatal("missing real Engram forward")
+		}
+		if err := f.closeTransferredWeights(); err == nil {
+			t.Fatal("active session must defer teardown")
+		}
+		if counted.closes != 0 {
+			t.Fatal("reader closed before final session")
+		}
+		session.Close()
+		if counted.closes != 1 {
+			t.Fatalf("final session closes=%d", counted.closes)
+		}
+		exits := 0
+		f.processExit = func(code int) {
+			exits++
+			if code != 1 {
+				t.Fatalf("pending teardown error exit=%d", code)
+			}
+		}
+		f.exit(1) // Later setup/report failure shares the same once-only terminal guard.
+		_ = f.closeTransferredWeights()
+		_ = m.CloseWeights()
+		if exits != 1 || counted.closes != 1 {
+			t.Fatalf("double cleanup: exits=%d closes=%d", exits, counted.closes)
+		}
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/modelbench/main.go,cmd/modelbench/load_helpers.go
+// fak-test:runtime medium est=3s lane=default
+func TestSuffixPrefillOwnedQ4KTerminalCleanup(t *testing.T) {
+	path := engProjGGUF(t)
+	for _, code := range []int{0, 1} {
+		ws, err := ggufload.OpenWeights(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ws.Close() })
+		counted := &suffixCountedSource{WeightSource: ws}
+		m, err := loadBenchOwnedQ4KSource(context.Background(), counted, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = m.CloseWeights() })
+		f := testCompleteBenchFlags()
+		f.bindWeightCloser(m.CloseWeights)
+		if code == 0 {
+			if err := f.closeTransferredWeights(); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			exits := 0
+			f.processExit = func(got int) {
+				exits++
+				if got != code {
+					t.Fatalf("exit=%d want%d", got, code)
+				}
+			}
+			f.exit(code)
+			if exits != 1 {
+				t.Fatal("missing report-failure exit")
+			}
+		}
+		_ = f.closeTransferredWeights()
+		_ = m.CloseWeights()
+		if counted.closes != 1 {
+			t.Fatalf("terminal %d closes=%d", code, counted.closes)
+		}
+	}
+}
+
+type suffixPanickingSource struct {
+	closes int
+	fault  any
+}
+
+func (s *suffixPanickingSource) QuantModelQ4KProfileOptionsContext(context.Context, *ggufload.LoadProfiler, ...ggufload.Q4KLoadOption) (*model.Model, error) {
+	panic(s.fault)
+}
+func (s *suffixPanickingSource) Close() error { s.closes++; return nil }
+
+// fak-test:justify why=regression when=changed:cmd/modelbench/main.go
+// fak-test:runtime short est=1s lane=default
+func TestSuffixPrefillOwnedQ4KLoadPanic(t *testing.T) {
+	fault := &struct{ message string }{"quant loader panic"}
+	source := &suffixPanickingSource{fault: fault}
+	completed := false
+	defer func() {
+		got := recover()
+		if completed || got != fault || source.closes != 1 {
+			t.Fatalf("panic ownership: completed=%v got=%v closes=%d", completed, got, source.closes)
+		}
+	}()
+	_, _ = loadBenchOwnedQ4KSource(context.Background(), source, nil)
+	completed = true
 }

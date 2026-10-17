@@ -95,7 +95,8 @@
       "distinct_from": [
         "x-goal25b-plan-estimateexpertparallelloadmemoryplan",
         "x2-context-ctx-commandcontext",
-        "context-ctx-quantmodelq4kprofileoptionscontext"
+        "context-ctx-quantmodelq4kprofileoptionscontext",
+        "loadbenchownedq4kcontext"
       ],
       "aliases": [],
       "grounding": "parallelQuantLoadContextBudget",

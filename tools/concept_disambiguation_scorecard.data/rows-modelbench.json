@@ -78,5 +78,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "loadbenchownedq4kcontext",
+      "canonical": "loadBenchOwnedQ4KContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Modelbench Q4K loader adapter that accepts cancellation context and retains the loader-owned checkpoint backing for the resulting model session until terminal cleanup.",
+      "distinction": "Unlike the hierarchical quant loader cancellation budget, this benchmark adapter governs retained backing ownership and cleanup across successful execution, load errors and panic; it does not add a new context scheduler or change device timing.",
+      "distinct_from": [
+        "context-ctx-parallelquantloadcontextbudget"
+      ],
+      "aliases": [],
+      "grounding": "loadBenchOwnedQ4KContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

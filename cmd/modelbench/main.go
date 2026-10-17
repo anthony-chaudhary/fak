@@ -66,7 +66,7 @@ func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfi
 					opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
 				}
 			}
-			loader := ggufload.LoadModelQ4KProfileOptionsContext
+			loader := loadBenchOwnedQ4KContext
 			if streamedExpertsEnabled(f) {
 				ws, err := ggufload.OpenWeightsMapped(*f.gguf)
 				if err != nil {
@@ -110,6 +110,40 @@ func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfi
 	}
 	m, err := model.Load(*f.dir)
 	return m, filepath.Base(*f.dir), err
+}
+
+// benchQ4KSource retains all reader-backed stages, including V4.1 Engram.
+// QuantModel does not install a weight closer; successful ownership transfers here.
+type benchQ4KSource interface {
+	QuantModelQ4KProfileOptionsContext(context.Context, *ggufload.LoadProfiler, ...ggufload.Q4KLoadOption) (*model.Model, error)
+	Close() error
+}
+
+func loadBenchOwnedQ4KContext(ctx context.Context, path string, p *ggufload.LoadProfiler, opts ...ggufload.Q4KLoadOption) (*model.Model, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return nil, err
+	}
+	return loadBenchOwnedQ4KSource(ctx, ws, p, opts...)
+}
+
+func loadBenchOwnedQ4KSource(ctx context.Context, ws benchQ4KSource, p *ggufload.LoadProfiler, opts ...ggufload.Q4KLoadOption) (*model.Model, error) {
+	transferred := false
+	defer func() {
+		if !transferred {
+			_ = ws.Close()
+		}
+	}()
+	m, err := ws.QuantModelQ4KProfileOptionsContext(ctx, p, opts...)
+	if err != nil {
+		return nil, err
+	}
+	m.SetWeightCloser(ws)
+	transferred = true
+	return m, nil
 }
 
 func q2kEmbeddingEligible(path string) bool {
@@ -1051,7 +1085,11 @@ func main() {
 		return
 	}
 	m, modelName, loadStart := loadBenchModel(f, ggufLoadProfiler)
-	if bindLoadedModelWeights(f, m) {
+	if *f.q4k {
+		// Engram can retain checkpoint readers even without streamed-weight flags.
+		f.bindWeightCloser(m.CloseWeights)
+		defer f.closeTransferredWeights()
+	} else if bindLoadedModelWeights(f, m) {
 		defer f.closeTransferredWeights()
 	}
 	numaReq := ""
