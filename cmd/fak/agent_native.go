@@ -226,6 +226,8 @@ func newHeadlessAgentReceiptWithContext(task, model string, metrics agent.ArmMet
 		status = "stopped_circuit_breaker"
 	} else if metrics.HitTurnCap {
 		status = "turn_cap_exceeded"
+	} else if metrics.FinalAnswerTruncated {
+		status = "final_answer_truncated"
 	} else {
 		status = "completed"
 	}

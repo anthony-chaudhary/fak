@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -167,7 +168,7 @@ func (m *Model) prepareMultimodalRows(req MultimodalRequest) ([][]float32, Multi
 		return nil, verdict, fmt.Errorf("%w: %s", ErrMultimodalDenied, verdict.Reason)
 	}
 	embed := m.embedRows()
-	rows := make([][]float32, 0, len(req.Parts))
+	// Validate every part in the historical order before allocating output rows.
 	for i, part := range req.Parts {
 		hasText := len(part.TokenIDs) > 0
 		hasImage := part.Image != nil
@@ -183,29 +184,58 @@ func (m *Model) prepareMultimodalRows(req MultimodalRequest) ([][]float32, Multi
 					verdict.Reason = fmt.Sprintf("token id %d outside vocab size %d", id, m.Cfg.VocabSize)
 					return nil, verdict, fmt.Errorf("%w: %s", ErrMultimodalDenied, verdict.Reason)
 				}
-				row := append([]float32(nil), embed[id*H:(id+1)*H]...)
-				scaleEmbedInPlace(row, m.Cfg)
-				rows = append(rows, row)
 			}
 			continue
 		}
 		if err := admitVisionEmbedding(part.Image, policy, &verdict, H); err != nil {
 			return nil, verdict, err
 		}
-		for _, vec := range part.Image.Vectors {
-			rows = append(rows, append([]float32(nil), vec...))
-		}
-	}
-	if len(rows) == 0 {
-		verdict.Decision = MultimodalDeny
-		verdict.Reason = "empty prompt"
-		return nil, verdict, fmt.Errorf("%w: %s", ErrMultimodalDenied, verdict.Reason)
 	}
 	if verdict.Images > 0 && policy.Mode != MultimodalModeQuarantine {
 		verdict.Decision = MultimodalQuarantine
 		verdict.Reason = "multimodal input requires explicit quarantine opt-in"
 		verdict.QuarantineID = multimodalQuarantineID(req.Parts)
 		return nil, verdict, fmt.Errorf("%w: %s", ErrMultimodalQuarantined, verdict.Reason)
+	}
+	// Bound the byte-sized slab before multiplying. This runs after all input
+	// admission/quarantine checks, preserving their error and verdict ordering.
+	maxRows := int(^uint(0)>>1) / 4 / H
+	// The outer slice also allocates three machine words per row header.
+	if headerLimit := int(^uint(0)>>1) / (3 * (strconv.IntSize / 8)); headerLimit < maxRows {
+		maxRows = headerLimit
+	}
+	totalRows := 0
+	for _, part := range req.Parts {
+		n := len(part.TokenIDs)
+		if part.Image != nil {
+			n = len(part.Image.Vectors)
+		}
+		if n > maxRows-totalRows {
+			err := denyMultimodal(&verdict, "multimodal row storage exceeds addressable size")
+			return nil, verdict, err
+		}
+		totalRows += n
+	}
+	rows := make([][]float32, totalRows)
+	storage := make([]float32, totalRows*H)
+	for i := range rows {
+		// A full slice prevents appending to one row from overwriting its neighbor.
+		rows[i] = storage[i*H : (i+1)*H : (i+1)*H]
+	}
+	at := 0
+	for _, part := range req.Parts {
+		if part.Image != nil {
+			for _, vec := range part.Image.Vectors {
+				copy(rows[at], vec)
+				at++
+			}
+			continue
+		}
+		for _, id := range part.TokenIDs {
+			copy(rows[at], embed[id*H:(id+1)*H])
+			scaleEmbedInPlace(rows[at], m.Cfg)
+			at++
+		}
 	}
 	return rows, verdict, nil
 }
