@@ -268,10 +268,30 @@
       "definition": "Synchronous cold plain attention dispatch through borrowed rows with original flat reconstruction when dispatch guards change.",
       "distinction": "Timed dispatch and guard recheck rather than pre-dispatch borrowing predicate.",
       "distinct_from": [
-        "v41coldplainattentioncanborrow"
+        "v41coldplainattentioncanborrow",
+        "v41sparseattentionsinkchecked"
       ],
       "aliases": [],
       "grounding": "v41ColdPlainAttentionSink",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41sparseattentionsinkchecked",
+      "canonical": "v41SparseAttentionSinkChecked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Synchronous sparse sink contraction over an already validated flat or split-row host view, preserving arithmetic order without flattening the cold KV bank.",
+      "distinction": "Unlike v41ColdPlainAttentionSink, which chooses and dispatches a contiguous plain-attention window, this contracts selected sparse rows only after its caller validates every original row and canonical index.",
+      "distinct_from": [
+        "v41coldplainattentionsink"
+      ],
+      "aliases": [],
+      "grounding": "v41SparseAttentionSinkChecked",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

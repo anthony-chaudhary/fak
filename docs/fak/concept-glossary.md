@@ -1448,3 +1448,10 @@ Private call-scoped loan of freshly normalized cold-prefill activation chunks to
 Private one-lane suspended plain-attention operation between contraction/rotation and grouped output projection. Its shared per-layer lifecycle permits one resume or abandon cleanup, and successful resume transfers resident cleanup to the returned layer work.
 
 **Distinct from:** Unlike v41SharedAttentionContinuation, this owns suspended computation and resource transfer rather than proving live execution eligibility. Unlike v41AttentionInputPanel, it carries one lane's output-projection input rather than a multi-row cold-prefill normalized-input loan. It owns neither the transaction journal nor persistent KV state and grants no batching or device capability.
+
+
+### v41SparseAttentionSinkChecked
+
+Synchronous sparse sink contraction over an already validated flat or split-row host view, preserving arithmetic order without flattening the cold KV bank.
+
+**Distinct from:** Unlike v41ColdPlainAttentionSink, which chooses and dispatches a contiguous plain-attention window, this contracts selected sparse rows only after its caller validates every original row and canonical index.

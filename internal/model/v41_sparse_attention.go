@@ -148,6 +148,33 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 		}
 	}
 
+	return v41SparseAttentionSinkChecked(q, sink, idx, opt, v41SparseSinkRows{flat: kv})
+}
+
+// v41SparseSinkRows is a synchronous read-only view. Flat storage is used only
+// after the public primitive has validated it; split rows are used only by the
+// combined host caller after it validates every original row and canonical ID.
+// No callback runs between that validation and this contraction; no view escapes.
+type v41SparseSinkRows struct {
+	flat               []float32
+	window, compressed [][]float32
+}
+
+func (r v41SparseSinkRows) row(batch, index, count, width int) []float32 {
+	if r.flat != nil {
+		lo := (batch*count + index) * width
+		return r.flat[lo : lo+width : lo+width]
+	}
+	if index < len(r.window) {
+		return r.window[index]
+	}
+	return r.compressed[index-len(r.window)]
+}
+
+// v41SparseAttentionSinkChecked contains only the shared numerical contraction.
+// Callers must finish the full public or combined validation before constructing
+// its local row view. It is not an admission flag or a retained validation cache.
+func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows) ([]float32, error) {
 	negInf := float32(math.Inf(-1))
 	o := make([]float32, opt.B*opt.M*opt.Heads*opt.HeadDim)
 	for b := 0; b < opt.B; b++ {
@@ -171,10 +198,10 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					if row < 0 {
 						continue
 					}
-					kvBase := (b*opt.N + row) * opt.HeadDim
+					values := rows.row(b, row, opt.N, opt.HeadDim)
 					var dot float32
 					for d := 0; d < opt.HeadDim; d++ {
-						dot += float32(q[qBase+d] * kv[kvBase+d])
+						dot += float32(q[qBase+d] * values[d])
 					}
 					dot *= opt.Softmax
 					if !finite32(dot) {
@@ -199,10 +226,10 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					if row < 0 {
 						continue
 					}
-					kvBase := (b*opt.N + row) * opt.HeadDim
+					values := rows.row(b, row, opt.N, opt.HeadDim)
 					var dot float32
 					for d := 0; d < opt.HeadDim; d++ {
-						dot += float32(q[qBase+d] * kv[kvBase+d])
+						dot += float32(q[qBase+d] * values[d])
 					}
 					// Match the rounded float32 score used by the maximum pass.
 					// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
@@ -225,17 +252,17 @@ func V41SparseAttentionSink(q, kv []float32, sink []float32, idx []int32, opt V4
 					if row < 0 {
 						continue
 					}
-					kvBase := (b*opt.N + row) * opt.HeadDim
+					values := rows.row(b, row, opt.N, opt.HeadDim)
 					var dot float32
 					for d := 0; d < opt.HeadDim; d++ {
-						dot += float32(q[qBase+d] * kv[kvBase+d])
+						dot += float32(q[qBase+d] * values[d])
 					}
 					weight := exp32(float32(dot*opt.Softmax)-maxScore) / sum
 					if !finite32(weight) {
 						return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
 					}
 					for d := 0; d < opt.HeadDim; d++ {
-						o[oBase+d] += float32(weight * kv[kvBase+d])
+						o[oBase+d] += float32(weight * values[d])
 						if !finite32(o[oBase+d]) {
 							return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
 						}
