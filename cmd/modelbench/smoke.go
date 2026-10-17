@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -177,7 +179,20 @@ func loadSource(hf, gguf, dir string, lean, q4k, streamQ4K bool) string {
 }
 
 func writeReport(f *benchFlags, report map[string]any) {
-	b, _ := benchcli.MarshalReport(report)
+	b, err := benchcli.MarshalReport(report)
+	if _, smoke := report["smoke_status"]; smoke && err == nil {
+		// Smoke receipts share the appliance's 16 KiB transport budget. Compact
+		// only after stamping so every phase field and both provenance envelopes
+		// survive without spending the budget on nested indentation.
+		var compact bytes.Buffer
+		err = json.Compact(&compact, b)
+		b = compact.Bytes()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "marshal report:", err)
+		f.exit(1)
+		return
+	}
 	if *f.out != "" {
 		if err := os.WriteFile(*f.out, b, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write:", err)

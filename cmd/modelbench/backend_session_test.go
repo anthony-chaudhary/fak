@@ -17,6 +17,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -1218,16 +1219,26 @@ func TestModelbenchV41InitialPrefillAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(raw) > 16<<10 {
-		t.Fatalf("real V4.1 smoke report is %d bytes, exceeds appliance 16 KiB transport cap", len(raw))
-	}
 	if receipt := os.Getenv("FAK_MODELBENCH_V41_FIXTURE_OUT"); receipt != "" {
 		if err := os.WriteFile(receipt, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+	t.Logf("real V4.1 smoke report: %d bytes (16 KiB cap)", len(raw))
+	if len(raw) > 16<<10 {
+		t.Fatalf("real V4.1 smoke report is %d bytes, exceeds appliance 16 KiB transport cap", len(raw))
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, compact.Bytes()) {
+		t.Fatal("smoke report spends the transport budget on JSON whitespace")
+	}
 	var report struct {
-		Status      string `json:"smoke_status"`
+		Lineage     benchcli.Lineage           `json:"lineage"`
+		Artifact    benchcli.BenchmarkArtifact `json:"benchmark_artifact"`
+		Status      string                     `json:"smoke_status"`
 		Observation struct {
 			Status      string                    `json:"status"`
 			Counters    map[string]any            `json:"counters"`
@@ -1236,6 +1247,9 @@ func TestModelbenchV41InitialPrefillAttribution(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &report); err != nil {
 		t.Fatal(err)
+	}
+	if report.Lineage.Schema != benchcli.LineageSchema || report.Artifact.Schema != benchcli.BenchmarkArtifactSchema || report.Artifact.FAKCommit != report.Lineage.GitCommit {
+		t.Fatal("compact smoke report lost its lineage or benchmark artifact")
 	}
 	if exitCode != 0 || report.Status != smokeStatusOK || report.Observation.Status != "observed" || report.Observation.Counters == nil {
 		t.Fatalf("optional model observation changed smoke/backend status: exit=%d report=%+v", exitCode, report)
@@ -1260,5 +1274,62 @@ func TestModelbenchV41InitialPrefillAttribution(t *testing.T) {
 	final := m.V41ExpertFaultAttribution()
 	if !reflect.DeepEqual(a.After, final.Prefill) || final.Decode.Tokens <= primed.Decode.Tokens {
 		t.Fatal("real smoke decode did not occur outside the captured Prefill interval")
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestModelbenchReportFormattingAndMarshalFailure(t *testing.T) {
+	t.Setenv("FAK_BENCH_UTC", "2026-10-17T00:00:00Z")
+	t.Setenv("FAK_BENCH_COMMIT", "fixture-report-commit")
+	dir := t.TempDir()
+	stderr, err := os.Create(filepath.Join(dir, "stderr.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = stderr
+	t.Cleanup(func() {
+		os.Stderr = originalStderr
+		if err := stderr.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	f := testCompleteBenchFlags()
+	*f.out = filepath.Join(dir, "report.json")
+	exitCalls, exitCode := 0, 0
+	f.processExit = func(code int) {
+		exitCalls++
+		exitCode = code
+	}
+	report := map[string]any{"model": "fixture", "results": map[string]any{"tokens": 1}}
+	want, err := benchcli.MarshalReport(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReport(f, report)
+	raw, err := os.ReadFile(*f.out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, want) || !bytes.Contains(raw, []byte("\n")) {
+		t.Fatal("non-smoke report changed its stamped, indented JSON format")
+	}
+	writeReport(f, map[string]any{"smoke_status": smokeStatusOK, "invalid": math.NaN()})
+	if exitCalls != 1 || exitCode != 1 {
+		t.Fatalf("marshal failure exit: calls=%d code=%d, want one exit with code 1", exitCalls, exitCode)
+	}
+	after, err := os.ReadFile(*f.out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, raw) {
+		t.Fatal("marshal failure replaced the existing report")
+	}
+	diagnostic, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(diagnostic, []byte("marshal report: json: unsupported value: NaN")) {
+		t.Fatalf("marshal failure diagnostic missing: %s", diagnostic)
 	}
 }
