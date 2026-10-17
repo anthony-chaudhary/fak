@@ -874,6 +874,17 @@ func (s *V41AttentionState) Candidates() ([]bool, int, bool) {
 	return append([]bool(nil), s.candidates...), s.candidateRatio, true
 }
 
+// topKReadOnly borrows the latest publication for synchronous, read-only use
+// within the session-owned sequential attention stack. Callers must not mutate
+// or retain either slice level. PublishTopK replaces owned rows rather than
+// mutating published payloads; public snapshots must still use TopK.
+func (s *V41AttentionState) topKReadOnly() ([][]int32, int, bool) {
+	if s == nil || !s.topkSet {
+		return nil, 0, false
+	}
+	return s.topk, s.topkRatio, true
+}
+
 // TopK returns a copy of the latest source-published top-k selection, and the
 // ratio of the layer that published it.
 func (s *V41AttentionState) TopK() ([][]int32, int, bool) {
