@@ -18,6 +18,7 @@ int fvk_debug_gdn_verify_tiled_verdict(float* deviation);
 int fvk_debug_gdn_tiled_verdict(float* deviation);
 int fvk_debug_gdn_verify_tiled_checked(void);
 void fvk_debug_gdn_verify_tiled_force_disagree(int enabled);
+uint64_t fvk_debug_gdn_optout_calls(void);
 */
 import "C"
 
@@ -55,6 +56,15 @@ func (v *vulkanBackend) VulkanDebugGDNTiledPrefillProfileSnapshot() (tiledCalls,
 	var tiled, scalar C.uint64_t
 	C.fvk_debug_gdn_prefill_tiled_snapshot(&tiled, &scalar)
 	return int64(tiled), int64(scalar)
+}
+
+// VulkanDebugGDNOptOutCalls counts production-geometry GDN calls that
+// FAK_VULKAN_GDN_PREFILL_TILED=0 kept on the stock kernel since the last
+// VulkanDebugResetGDNTiledPrefillProfile.
+func (v *vulkanBackend) VulkanDebugGDNOptOutCalls() int64 {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return int64(C.fvk_debug_gdn_optout_calls())
 }
 
 // VulkanDebugGDNVerifyTiledAvailable reports whether the verify-width (1..7

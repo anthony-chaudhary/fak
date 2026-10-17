@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // kernel-oracle joins llama.cpp `test-backend-ops perf` rows with fak's Vulkan
@@ -180,6 +181,9 @@ func runKernelOracleShapes(stdout, stderr io.Writer, argv []string) error {
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
+	*ggufPath = pathutil.ExpandTilde(*ggufPath)
+	*metaPath = pathutil.ExpandTilde(*metaPath)
+	*out = pathutil.ExpandTilde(*out)
 	if (*ggufPath == "") == (*metaPath == "") {
 		fmt.Fprintln(stderr, "kernel-oracle shapes: exactly one of --gguf or --metadata-json is required")
 		return errKernelOracleUsage
@@ -291,13 +295,33 @@ func oracleIsMatmulWeight(t ggufload.TensorExport) bool {
 	if len(t.Dims) != 2 || !strings.HasSuffix(t.Name, ".weight") {
 		return false
 	}
-	if strings.HasPrefix(t.Name, "token_embd") || strings.Contains(t.Name, "conv1d") {
+	if strings.HasPrefix(t.Name, "token_embd") || strings.Contains(t.Name, "conv1d") || oracleIsEngramTable(t.Name) {
 		return false
 	}
 	if strings.EqualFold(t.Type, "F32") {
 		return false
 	}
 	return t.Dims[0] >= 32 && t.Dims[1] >= 1
+}
+
+// Engram tables are gathered row-wise, not consumed as dense matmul weights.
+// Match ggufload's table names without excluding the Engram projections.
+func oracleIsEngramTable(name string) bool {
+	if !strings.HasPrefix(name, "blk.") {
+		return false
+	}
+	layer, suffix, ok := strings.Cut(strings.TrimPrefix(name, "blk."), ".")
+	if !ok {
+		return false
+	}
+	if _, err := strconv.Atoi(layer); err != nil {
+		return false
+	}
+	switch strings.TrimSuffix(suffix, ".weight") {
+	case "engram_table", "engram_embd":
+		return true
+	}
+	return false
 }
 
 func oracleTensorRole(name string) string {
@@ -345,6 +369,11 @@ func runKernelOracleRank(stdout, stderr io.Writer, argv []string) error {
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
+	*shapesPath = pathutil.ExpandTilde(*shapesPath)
+	*ggmlPath = pathutil.ExpandTilde(*ggmlPath)
+	*benchPath = pathutil.ExpandTilde(*benchPath)
+	*profilePath = pathutil.ExpandTilde(*profilePath)
+	*out = pathutil.ExpandTilde(*out)
 	if *shapesPath == "" || (*ggmlPath == "" && *benchPath == "" && *profilePath == "") {
 		fmt.Fprintln(stderr, "kernel-oracle rank: --shapes and at least one of --ggml, --fak-bench, --fak-profile are required")
 		return errKernelOracleUsage

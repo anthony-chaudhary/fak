@@ -619,7 +619,7 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 	if err != nil {
 		return nil, v41StageErr(v41StageIndexer, plan.Layer, err)
 	}
-	published, _, ok := attn.TopK()
+	published, _, ok := attn.topKReadOnly()
 	if !ok || len(published) == 0 {
 		return nil, v41StageErr(v41StageIndexer, plan.Layer,
 			fmt.Errorf("%w: layer %d reads index source %d but no top-k selection was published", ErrV41ForwardStage, plan.Layer, plan.IndexSourceLayer))

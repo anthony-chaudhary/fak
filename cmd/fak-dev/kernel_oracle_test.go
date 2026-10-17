@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +120,49 @@ func TestKernelOracleShapesFromModelTensorDirectory(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleShapesExcludeEngramTables(t *testing.T) {
+	// Directory metadata only: the published Q2_K Engram table has this shape,
+	// but its rows are gathered on demand, never multiplied as a dense matrix.
+	const metadata = `{"metadata":[{"key":"general.architecture","value":"deepseek41"}],"tensors":[
+		{"name":"blk.1.engram_embd.weight","type":"Q2_K","dims":[256,384006168]},
+		{"name":"blk.2.engram_table.weight","type":"Q2_K","dims":[256,384006168]},
+		{"name":"blk.1.engram_wkv.weight","type":"Q2_K","dims":[256,512]},
+		{"name":"blk.1.engram_q.weight","type":"Q2_K","dims":[256,512]},
+		{"name":"blk.1.engram_k.weight","type":"Q2_K","dims":[256,512]},
+		{"name":"blk.1.engram_kv.weight","type":"Q2_K","dims":[256,512]}
+	]}`
+	path := filepath.Join(t.TempDir(), "engram-metadata.json")
+	if err := os.WriteFile(path, []byte(metadata), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runKernelOracle(&stdout, &stderr, []string{"shapes", "--metadata-json", path, "--n", "1,512"}); code != 0 {
+		t.Fatalf("shapes exit %d: %s", code, stderr.String())
+	}
+	var list oracleShapeList
+	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Shapes) != 2 {
+		t.Fatalf("shapes = %+v, want only projection shapes for n=1,512", list.Shapes)
+	}
+	for i, n := range []int64{1, 512} {
+		s := list.Shapes[i]
+		if s.Op != "MUL_MAT" || s.Dtype != "q2_k" || s.M != 512 || s.K != 256 || s.N != n || s.Count != 4 {
+			t.Fatalf("projection shape for n=%d = %+v", n, s)
+		}
+		if len(s.Tensors) != 4 {
+			t.Fatalf("projection roles = %v, want four", s.Tensors)
+		}
+		for _, role := range []string{"engram_wkv", "engram_q", "engram_k", "engram_kv"} {
+			if !containsString(s.Tensors, role) {
+				t.Errorf("projection %q missing from %v", role, s.Tensors)
+			}
+		}
+	}
+}
+
 // fak-test:runtime fast est=20ms lane=default
 func TestKernelOracleRankJoinsRanksAndNeverZeroFills(t *testing.T) {
 	var rec oracleReceipt
@@ -207,5 +252,141 @@ func TestKernelOracleUsageExitCodes(t *testing.T) {
 		if code := run(&out, &errb, argv); code != 2 {
 			t.Fatalf("%v exit %d, want 2", argv, code)
 		}
+	}
+}
+
+func kernelOracleTempHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleShapesExpandsGGUFTilde(t *testing.T) {
+	home := kernelOracleTempHome(t)
+	var model bytes.Buffer
+	write := func(v any) {
+		t.Helper()
+		if err := binary.Write(&model, binary.LittleEndian, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A complete GGUF v3 file with one 32x1 F16 tensor, read through ggufload.Open.
+	model.WriteString("GGUF")
+	write(uint32(3))
+	write(uint64(1)) // tensor count
+	write(uint64(0)) // metadata count
+	const name = "output.weight"
+	write(uint64(len(name)))
+	model.WriteString(name)
+	write(uint32(2)) // dimensions
+	write(uint64(32))
+	write(uint64(1))
+	write(uint32(1)) // F16
+	write(uint64(0)) // tensor data offset
+	for model.Len()%32 != 0 {
+		model.WriteByte(0)
+	}
+	model.Write(make([]byte, 64))
+	path := filepath.Join(home, "model.gguf")
+	if err := os.WriteFile(path, model.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(&stdout, &stderr, []string{"kernel-oracle", "shapes", "--gguf", "~/model.gguf", "--n", "1"}); code != 0 {
+		t.Fatalf("shapes exit %d: %s", code, stderr.String())
+	}
+	var list oracleShapeList
+	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Model != path || len(list.Shapes) != 1 {
+		t.Fatalf("model=%q shapes=%+v", list.Model, list.Shapes)
+	}
+	if s := list.Shapes[0]; s.Dtype != "f16" || s.M != 1 || s.K != 32 || s.N != 1 || s.Count != 1 {
+		t.Fatalf("shape=%+v", s)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleShapesExpandsMetadataAndOutputTilde(t *testing.T) {
+	home := kernelOracleTempHome(t)
+	path := filepath.Join(home, "metadata.json")
+	if err := os.WriteFile(path, []byte(kernelOracleFixture(t, "qwen-metadata.json")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(&stdout, &stderr, []string{"kernel-oracle", "shapes", "--metadata-json", "~/metadata.json", "--out", "~/shapes.json"}); code != 0 {
+		t.Fatalf("shapes exit %d: %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("--out wrote stdout: %s", stdout.String())
+	}
+	b, err := os.ReadFile(filepath.Join(home, "shapes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list oracleShapeList
+	if err := json.Unmarshal(b, &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Model != path || len(list.Shapes) == 0 {
+		t.Fatalf("model=%q shapes=%d", list.Model, len(list.Shapes))
+	}
+	if code := run(&stdout, &stderr, []string{"kernel-oracle", "shapes", "--metadata-json", path}); code != 0 {
+		t.Fatalf("absolute shapes exit %d: %s", code, stderr.String())
+	}
+	if !bytes.Equal(b, stdout.Bytes()) {
+		t.Fatal("tilde file output differs from absolute-path stdout")
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestKernelOracleRankExpandsInputAndOutputTilde(t *testing.T) {
+	home := kernelOracleTempHome(t)
+	shapes, err := os.ReadFile(kernelOracleShapesFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "shapes.json"), shapes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ggml-perf.txt", "fak-bench.txt", "fak-profile.txt"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(kernelOracleFixture(t, name)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, flags := range [][]string{{"ggml", "fak-bench", "fak-profile"}, {"ggml"}, {"fak-bench"}, {"fak-profile"}} {
+		t.Run(strings.Join(flags, "_"), func(t *testing.T) {
+			tildeArgs := []string{"kernel-oracle", "rank", "--shapes", "~/shapes.json", "--out", "~/rank.json"}
+			absArgs := []string{"kernel-oracle", "rank", "--shapes", filepath.Join(home, "shapes.json")}
+			for _, flag := range flags {
+				name := flag + ".txt"
+				if flag == "ggml" {
+					name = "ggml-perf.txt"
+				}
+				tildeArgs = append(tildeArgs, "--"+flag, "~/"+name)
+				absArgs = append(absArgs, "--"+flag, filepath.Join(home, name))
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(&stdout, &stderr, tildeArgs); code != 0 {
+				t.Fatalf("rank exit %d: %s", code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("--out wrote stdout: %s", stdout.String())
+			}
+			b, err := os.ReadFile(filepath.Join(home, "rank.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code := run(&stdout, &stderr, absArgs); code != 0 {
+				t.Fatalf("absolute rank exit %d: %s", code, stderr.String())
+			}
+			if !bytes.Equal(b, stdout.Bytes()) {
+				t.Fatal("tilde file output differs from absolute-path stdout")
+			}
+		})
 	}
 }
