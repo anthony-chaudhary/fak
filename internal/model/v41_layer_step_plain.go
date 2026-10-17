@@ -279,7 +279,9 @@ func (st *v41PlainLayerStep) visibleKeys() ([]int32, error) {
 					ErrV41ForwardStage, l, pos, retainedRows, firstVisible, int(windowKeys[len(windowKeys)-1]), firstVisible, retainedLo))
 		}
 	}
-	visibleKeys := make([]int32, 0, len(windowKeys))
+	// The window list is freshly owned; filtering writes only at or behind the
+	// current read index, so no second decode-layer key buffer is needed.
+	visibleKeys := windowKeys[:0]
 	for _, k := range windowKeys {
 		if int(k) < pos {
 			if int(k) < retainedLo {
