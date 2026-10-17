@@ -185,9 +185,9 @@ func TestV41GroupedOutputPanelParityAndInvocation(t *testing.T) {
 			if err != nil || outcome != v41ProjectionHandled || !reflect.DeepEqual(got, want) {
 				t.Fatalf("rows=%d outcome=%d err=%v\ngot=%v\nwant=%v", rows, outcome, err, got, want)
 			}
-			wantCalls := len(v41GroupedPanelTiles(rows)) * (c.OGroups + 1)
-			if b.matmuls != wantCalls || b.gathers != len(v41GroupedPanelTiles(rows)) || b.rowReads != len(v41GroupedPanelTiles(rows)) {
-				t.Fatalf("rows=%d matmuls/gathers/reads=%d/%d/%d want %d/%d/%d", rows, b.matmuls, b.gathers, b.rowReads, wantCalls, len(v41GroupedPanelTiles(rows)), len(v41GroupedPanelTiles(rows)))
+			wantCalls := c.OGroups + 1
+			if b.matmuls != wantCalls || b.gathers != 1 || b.rowReads != 1 {
+				t.Fatalf("rows=%d matmuls/gathers/reads=%d/%d/%d want %d/1/1", rows, b.matmuls, b.gathers, b.rowReads, wantCalls)
 			}
 			s.Close()
 			live := 0

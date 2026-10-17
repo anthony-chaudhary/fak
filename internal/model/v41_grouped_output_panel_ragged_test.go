@@ -201,6 +201,9 @@ func TestV41GroupedOutputPanelPackedRagged(t *testing.T) {
 					t.Fatalf("ragged refusal outcome=%d err=%v closed=%t uploads=%d matmuls=%d gathers=%d publications=%d", outcome, err, s.BackendSessionClosed(), b.uploads, b.matmuls, b.gathers, b.deferredPublishes)
 				}
 			} else {
+				// The first Q2 weight refuses the exact tail before publication;
+				// Q3 is not probed and the legacy 8+2+1 route remains selected.
+				wantOps = append(wantOps, v41GroupedRaggedOp{"support", compute.Q2_K, rows})
 				for _, n := range []int{8, 2, 1} {
 					if mode == "scalar-tail-failure" && n == 1 {
 						wantOps = append(wantOps, v41GroupedRaggedOp{"publish", compute.F32, groupIn}, v41GroupedRaggedOp{"project", compute.Q2_K, 1}, v41GroupedRaggedOp{"read", compute.F32, 0})
