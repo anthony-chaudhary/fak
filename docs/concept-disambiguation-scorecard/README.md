@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **675** (clarity 0 + coverage 675) |
-| **Crystal-clear concepts (and climbing)** | **1272** crystal of 3071 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3158 / 3833** (82.4% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1280** crystal of 3079 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3166 / 3841** (82.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 230 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4331 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4339 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3071 concepts - score 88.6/100 (grade B) - disambiguation-debt 675
+concept-disambiguation chart - 3079 concepts - score 88.6/100 (grade B) - disambiguation-debt 675
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1272
+  * crystal       ####################........ 1280
   o defined       ############################ 1799
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,7 +39,7 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        *************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (141 concept(s); 37 crystal)
+  attention        *********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (149 concept(s); 45 crystal)
   cache            **********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (300 concept(s); 118 crystal)
   context-ctx      ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (247 concept(s); 88 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -67,7 +67,7 @@ coverage by family (positioned / discovered):
   cache            #######################..... 341/410
   gateway-engine   #######################..... 247/305
   guard-gate       ##########################.. 515/563
-  attention        #####################....... 132/177
+  attention        #####################....... 140/185
   context-ctx      ########################.... 268/313
   policy-capability ########################.... 225/267
   pool             ##############.............. 44/86
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.4%  (3158/3833 confusable tokens positioned)
+namespace coverage  [##########################......] 82.4%  (3166/3841 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 230
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 230/230
 
-name index: 4331 lookup name(s) -> 3071 concept(s), 89 ambiguous
+name index: 4339 lookup name(s) -> 3079 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **230 / 230** (230 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2420 / 5642 |
+| Boundaries drawn (mutual / total) | 2436 / 5658 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4331 over 3071 concepts |
+| Lookup names indexed | 4339 over 3079 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3071 |
+| Concepts carrying a contrast set | 3079 |
 
 ## The concepts (best verdict first)
 
@@ -172,6 +172,14 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | attention | **v41ColdPlainAttentionCanBorrow** - Pure shape, finite-value and index predicate for safe contiguous cold plain KV-row borrowing. |
 | * | crystal | symbol | attention | **v41ColdPlainAttentionSink** - Synchronous cold plain attention dispatch through borrowed rows with original flat reconstruction when dispatch guards change. |
 | * | crystal | symbol | attention | **v41SparseAttentionSinkChecked** - Synchronous sparse sink contraction over an already validated flat or split-row host view, preserving arithmetic order without flattening the cold KV bank. |
+| * | crystal | symbol | attention | **v41RoleAttentionContinuation** - Private one-lane suspended source or shared-reader attention operation retaining its output-projection input and one-shot resident cleanup until resume or abandon. |
+| * | crystal | symbol | attention | **v41RoleAttentionState** - Shared one-shot lifecycle discriminator for a role-attention continuation: pending, resuming, transferred or closed, stored in its existing layer-work holder. |
+| * | crystal | symbol | attention | **prepareV41RoleAttention** - Constructs a source or shared-reader attention continuation after attention contraction and before output projection, leaving registry rollback to the caller transaction. |
+| * | crystal | symbol | attention | **roleAttentionState** - The role-attention lifecycle field in the shared layer-work holder, consulted by every copied continuation before resume or cleanup. |
+| * | crystal | symbol | attention | **v41RoleAttentionPending** - The role-attention lifecycle value before a suspended continuation begins its single resume. |
+| * | crystal | symbol | attention | **v41RoleAttentionResuming** - The role-attention lifecycle value set before executing the one resume attempt. |
+| * | crystal | symbol | attention | **v41RoleAttentionTransferred** - The role-attention lifecycle value after successful resume transfers resident cleanup to returned layer work. |
+| * | crystal | symbol | attention | **v41RoleAttentionClosed** - The role-attention lifecycle value after abandon or failed resume closes the suspended operation. |
 | * | crystal | symbol | attention | **V41AttentionRoleReader (V4.1 shared-source consumer role)** - The V4.1 decoder role assigned to a layer that consumes the nearest preceding declared KV source's published compressed rows. Its resolved plan also identifies the index source whose published selection it consumes unless the layer owns that index selection. A ratio-greater-than-one reader still advances its own compressor and private history while contracting the resolved shared KV stream. |
 | * | crystal | symbol | cache | **PromptCacheKey** - The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186). |
 | * | crystal | symbol | cache | **SilentCacheInvalidation** - The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent). |
@@ -3351,8 +3359,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3222/5642 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3071 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3222/5658 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3079 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3361,7 +3369,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4331 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4339 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3373,7 +3381,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cache | 341 | 410 | 69 |
 | gateway-engine | 247 | 305 | 58 |
 | guard-gate | 515 | 563 | 48 |
-| attention | 132 | 177 | 45 |
+| attention | 140 | 185 | 45 |
 | context-ctx | 268 | 313 | 45 |
 | policy-capability | 225 | 267 | 42 |
 | pool | 44 | 86 | 42 |

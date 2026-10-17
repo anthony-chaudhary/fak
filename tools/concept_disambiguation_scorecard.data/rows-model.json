@@ -298,5 +298,164 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "v41roleattentioncontinuation",
+      "canonical": "v41RoleAttentionContinuation",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private one-lane suspended source or shared-reader attention operation retaining its output-projection input and one-shot resident cleanup until resume or abandon.",
+      "distinction": "Unlike v41PlainAttentionContinuation, this resumes a source or shared-reader role whose registry publication remains journaled by the caller; it is not a cross-request cohort, transaction journal, or persistent KV owner.",
+      "distinct_from": [
+        "v41plainattentioncontinuation",
+        "v41roleattentionstate",
+        "preparev41roleattention"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionContinuation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionstate",
+      "canonical": "v41RoleAttentionState",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Shared one-shot lifecycle discriminator for a role-attention continuation: pending, resuming, transferred or closed, stored in its existing layer-work holder.",
+      "distinction": "Unlike v41RoleAttentionContinuation, this is only the lifecycle discriminator shared by copied continuation values; it owns no tensors, callback, transaction or persistent KV state.",
+      "distinct_from": [
+        "v41roleattentioncontinuation",
+        "roleattentionstate",
+        "v41roleattentionpending",
+        "v41roleattentionresuming",
+        "v41roleattentiontransferred",
+        "v41roleattentionclosed"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "preparev41roleattention",
+      "canonical": "prepareV41RoleAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Constructs a source or shared-reader attention continuation after attention contraction and before output projection, leaving registry rollback to the caller transaction.",
+      "distinction": "Unlike v41RoleAttentionContinuation, this is the preparation operation that returns the suspended holder; it neither resumes output projection nor grants batching or device capability.",
+      "distinct_from": [
+        "v41roleattentioncontinuation"
+      ],
+      "aliases": [],
+      "grounding": "prepareV41RoleAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "roleattentionstate",
+      "canonical": "roleAttentionState",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle field in the shared layer-work holder, consulted by every copied continuation before resume or cleanup.",
+      "distinction": "Unlike v41RoleAttentionState, this is the per-work stored instance of that discriminator, not the enum type or a separate ownership token.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "roleAttentionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionpending",
+      "canonical": "v41RoleAttentionPending",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value before a suspended continuation begins its single resume.",
+      "distinction": "Unlike v41RoleAttentionState, this is its pending value; it allows the one resume attempt and has not transferred resident cleanup.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionPending",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionresuming",
+      "canonical": "v41RoleAttentionResuming",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value set before executing the one resume attempt.",
+      "distinction": "Unlike v41RoleAttentionState, this is its in-progress value; reentrant resume is rejected and failure still requires cleanup.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionResuming",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentiontransferred",
+      "canonical": "v41RoleAttentionTransferred",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value after successful resume transfers resident cleanup to returned layer work.",
+      "distinction": "Unlike v41RoleAttentionState, this is its successful transfer value; continuation close must no longer abort the transferred resident.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionTransferred",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionclosed",
+      "canonical": "v41RoleAttentionClosed",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value after abandon or failed resume closes the suspended operation.",
+      "distinction": "Unlike v41RoleAttentionState, this is its terminal closed value; repeated close is idempotent and resume is rejected.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionClosed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

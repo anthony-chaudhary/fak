@@ -1490,3 +1490,59 @@ Serialized JSON field in the suffix-prefill receipt that exposes the ArtifactCov
 Modelbench Q4K loader adapter that accepts cancellation context and retains the loader-owned checkpoint backing for the resulting model session until terminal cleanup.
 
 **Distinct from:** Unlike the hierarchical quant loader cancellation budget, this benchmark adapter governs retained backing ownership and cleanup across successful execution, load errors and panic; it does not add a new context scheduler or change device timing.
+
+
+### v41RoleAttentionContinuation
+
+Private one-lane suspended source or shared-reader attention operation retaining its output-projection input and one-shot resident cleanup until resume or abandon.
+
+**Distinct from:** Unlike v41PlainAttentionContinuation, this resumes a source or shared-reader role whose registry publication remains journaled by the caller; it is not a cross-request cohort, transaction journal, or persistent KV owner.
+
+
+### v41RoleAttentionState
+
+Shared one-shot lifecycle discriminator for a role-attention continuation: pending, resuming, transferred or closed, stored in its existing layer-work holder.
+
+**Distinct from:** Unlike v41RoleAttentionContinuation, this is only the lifecycle discriminator shared by copied continuation values; it owns no tensors, callback, transaction or persistent KV state.
+
+
+### prepareV41RoleAttention
+
+Constructs a source or shared-reader attention continuation after attention contraction and before output projection, leaving registry rollback to the caller transaction.
+
+**Distinct from:** Unlike v41RoleAttentionContinuation, this is the preparation operation that returns the suspended holder; it neither resumes output projection nor grants batching or device capability.
+
+
+### roleAttentionState
+
+The role-attention lifecycle field in the shared layer-work holder, consulted by every copied continuation before resume or cleanup.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is the per-work stored instance of that discriminator, not the enum type or a separate ownership token.
+
+
+### v41RoleAttentionPending
+
+The role-attention lifecycle value before a suspended continuation begins its single resume.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its pending value; it allows the one resume attempt and has not transferred resident cleanup.
+
+
+### v41RoleAttentionResuming
+
+The role-attention lifecycle value set before executing the one resume attempt.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its in-progress value; reentrant resume is rejected and failure still requires cleanup.
+
+
+### v41RoleAttentionTransferred
+
+The role-attention lifecycle value after successful resume transfers resident cleanup to returned layer work.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its successful transfer value; continuation close must no longer abort the transferred resident.
+
+
+### v41RoleAttentionClosed
+
+The role-attention lifecycle value after abandon or failed resume closes the suspended operation.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its terminal closed value; repeated close is idempotent and resume is rejected.

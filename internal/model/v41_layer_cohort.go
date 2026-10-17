@@ -9,15 +9,16 @@ import (
 // Attention/router preparation may change journaled source state, but hidden
 // state/window publication and the final token commit remain with this lane.
 type v41LayerStepWork struct {
-	layer   int
-	input   []float32
-	picks   []routePick
-	full    bool
-	scratch *v41ProjScratch
-	scalar  func() ([]float32, error)
-	finish  func([]float32) error
-	cleanup func()
-	closed  bool
+	layer              int
+	input              []float32
+	picks              []routePick
+	full               bool
+	roleAttentionState v41RoleAttentionState
+	scratch            *v41ProjScratch
+	scalar             func() ([]float32, error)
+	finish             func([]float32) error
+	cleanup            func()
+	closed             bool
 	// publishKV commits this position's attention window row before the MoE
 	// finish, so a later position of the same session can attend to it while
 	// this position's experts are still pending. finish skips the commit once
