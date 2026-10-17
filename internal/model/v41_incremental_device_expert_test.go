@@ -185,10 +185,15 @@ func TestV41IncrementalDeviceExpertSessionRoutes(t *testing.T) {
 				before := len(b.matmulWeights)
 				phase := "decode"
 				ids := []int{4}
-				var got []float32
 				if suffix {
 					phase = "prefill"
 					ids = []int{4, 5}
+				}
+				// Phase ledgers are model-lifetime totals; cold full-geometry
+				// prefill already records the seeded prefix's device callbacks.
+				phaseBefore := v41IncrementalExpertPhase(t, m, phase)
+				var got []float32
+				if suffix {
 					got = s.Prefill(ids)
 				} else {
 					got = s.Step(4)
@@ -200,11 +205,11 @@ func TestV41IncrementalDeviceExpertSessionRoutes(t *testing.T) {
 				oracle := v41IncrementalExpertFixture(t, role, false).Forward(append([]int{1, 2, 3}, ids...))
 				assertV41LogitsClose(t, got, lastLogits(oracle), "incremental device expert session vs cold host oracle")
 				p := v41IncrementalExpertPhase(t, m, phase)
-				if p["incremental_device_gate_up_calls"] != float64(rows) || p["incremental_device_down_calls"] != float64(rows) {
-					t.Errorf("handled callback counts = %v, want %d per operation", p, rows)
+				if p["incremental_device_gate_up_calls"]-phaseBefore["incremental_device_gate_up_calls"] != float64(rows) || p["incremental_device_down_calls"]-phaseBefore["incremental_device_down_calls"] != float64(rows) {
+					t.Errorf("handled callback counts before=%v after=%v, want delta %d per operation", phaseBefore, p, rows)
 				}
-				if p["incremental_device_dispatch_nanos"] <= 0 {
-					t.Error("incremental callback dispatch elapsed absent")
+				if p["incremental_device_dispatch_nanos"]-phaseBefore["incremental_device_dispatch_nanos"] <= 0 {
+					t.Error("incremental callback dispatch elapsed did not advance")
 				}
 				continuedBefore := len(b.matmulWeights)
 				continued := s.Step(6)
