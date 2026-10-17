@@ -3,6 +3,7 @@ package envconfiglint
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -75,6 +76,74 @@ func TestDiffMode(t *testing.T) {
 	addMixed := "+++ b/mix.go\n@@\n+\tk := os.Getenv(\"API_KEY\")\n+\tlvl, _ := os.LookupEnv(\"LOG_LEVEL\")\n"
 	if off := ClassifyDiff(addMixed, "mix.go"); len(off) != 1 || off[0].Name != "LOG_LEVEL" {
 		t.Fatalf("ClassifyDiff(mixed) = %v, want one offense LOG_LEVEL", off)
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestKnownComputeEnvWrapperScope(t *testing.T) {
+	const file = "internal/compute/example.go"
+	const src = `package compute
+func f() {
+ computeEnvValue("FAK_NEW_COMPUTE_KNOB")
+ computeEnvValue("FAK_NEW_COMPUTE_KNOB")
+ computeEnvValue(dynamicName)
+ computeEnvValue("FAK_" + "COMPUTED")
+ other.computeEnvValue("FAK_SELECTOR")
+ otherComputeEnvValue("FAK_LOOKALIKE")
+ // computeEnvValue("FAK_COMMENT")
+ _ = "computeEnvValue(\"FAK_STRING\")"
+ {
+  computeEnvValue := func(string) string { return "local" }
+  computeEnvValue("FAK_LOCAL")
+ }
+}
+func shadow(computeEnvValue func(string) string) {
+ computeEnvValue("FAK_PARAMETER")
+}`
+	got, err := scanComputeEnvReads(file, src)
+	if err != nil || !reflect.DeepEqual(got, []string{"FAK_NEW_COMPUTE_KNOB"}) {
+		t.Fatalf("known wrapper scan = %v, %v", got, err)
+	}
+	if off := Classify(got, file, baselineSet()); len(off) != 1 || off[0].Name != "FAK_NEW_COMPUTE_KNOB" {
+		t.Fatalf("new wrapper knob must remain refused: %v", off)
+	}
+	if got := ScanGoEnvReads(src); len(got) != 0 {
+		t.Fatalf("public direct-call scanner contract changed: %v", got)
+	}
+	for _, file := range []string{"internal/other/example.go", "internal/compute/sub/example.go", "internal/compute/example_test.go"} {
+		if got, err := scanComputeEnvReads(file, src); err != nil || len(got) != 0 {
+			t.Errorf("out-of-scope %s = %v, %v", file, got, err)
+		}
+	}
+	for _, src := range []string{
+		`package other; func f() { computeEnvValue("FAK_OTHER_PACKAGE") }`,
+		`package compute; func computeEnvValue(string) string { return "local" }; func f() { computeEnvValue("FAK_OTHER_FUNCTION") }`,
+	} {
+		if got, err := scanComputeEnvReads(file, src); err != nil || len(got) != 0 {
+			t.Errorf("unrelated function/package = %v, %v", got, err)
+		}
+	}
+	if _, err := scanComputeEnvReads(file, "package compute; func {"); err == nil {
+		t.Error("invalid known-wrapper source must report a parse error")
+	}
+}
+
+// fak-test:runtime fast est=500ms
+func TestCommittedComputeEnvWrapperAdmissionsRemainVisible(t *testing.T) {
+	matches, err := committedEnvReadMatches(repoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := map[string]bool{}
+	for _, m := range matches {
+		for _, name := range m.names {
+			live[name] = true
+		}
+	}
+	for _, name := range []string{"FAK_DISABLE_VECTOR_GDN", "FAK_VECTOR_GDN", "FAK_VECTORIZED_DELTANET", "FAK_VULKAN_COOPMAT", "FAK_VULKAN_Q2K_FUSION"} {
+		if !live[name] {
+			t.Errorf("live compute wrapper admission %s became invisible", name)
+		}
 	}
 }
 
@@ -228,7 +297,7 @@ func TestAdmittedPostFreezeStaysHonest(t *testing.T) {
 	}
 	live := map[string]bool{}
 	for _, m := range matches {
-		for _, n := range ScanGoEnvReads(m.text) {
+		for _, n := range m.names {
 			live[n] = true
 		}
 	}

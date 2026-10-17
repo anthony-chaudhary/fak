@@ -41,6 +41,13 @@
 //   - ScanTree is the CI gate: it reads committed content at HEAD via `git grep` (never the
 //     working tree) so only source that would actually ship counts and a peer's uncommitted
 //     WIP can never red your run. TestNoNewNonSecretEnvReads is the trunk guard.
+//     It also parses committed internal/compute package files for literal calls to the
+//     known computeEnvValue cache wrapper. Those reads remain subject to the SAME frozen
+//     baseline and admissions; wrapping a live read does not retire its configuration debt.
+//     Comments, strings, selector calls, local shadows, and same-named helpers outside that
+//     package are not treated as wrapper reads. This is a bounded known-wrapper rule, not
+//     general interprocedural analysis. ScanGoEnvReads and diff mode retain their direct
+//     os.Getenv/os.LookupEnv-only contract; arbitrary wrappers remain a visibility limit.
 //   - ClassifyDiff is the issue's literal spine — judge only the env reads on ADDED lines of
 //     a unified diff. It is the shape a pre-commit / CI shell wraps around `git diff`, and
 //     needs no baseline: added-line filtering already restricts the verdict to new reads.
