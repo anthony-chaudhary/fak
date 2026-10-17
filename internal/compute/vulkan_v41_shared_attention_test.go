@@ -75,6 +75,9 @@ func TestVulkanV41SharedAttentionPhysical(t *testing.T) {
 		if strings.Contains(string(output), "--- SKIP:") || !strings.Contains(string(output), "V41_ATTENTION_PHYSICAL_COMPLETE") {
 			t.Fatal("child did not complete a nonempty physical operation")
 		}
+		if !strings.Contains(string(output), "mode=serialized_batches timing=bottom_of_pipe_intervals coverage=batched_commands_only") {
+			t.Fatal("timestamp report omitted its scheduling mode and partial interval coverage")
+		}
 		timestamp := regexp.MustCompile(`fak-vulkan ts-stage kernel=v41_shared_attention groups=\d+x\d+ calls/batch=([0-9.]+) ms/batch=([0-9.]+) us/call=([0-9.]+)`)
 		measured := false
 		for _, match := range timestamp.FindAllStringSubmatch(string(output), -1) {

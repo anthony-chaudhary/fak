@@ -396,3 +396,114 @@ func TestNativeInferenceReceiptCarriesCumulativeCUDAUploadDelta(t *testing.T) {
 		t.Fatalf("CUDA immutable-weight upload window = %+v, want zero before and exact 1/4096/2048 after+delta", got)
 	}
 }
+
+// Terminal sampling is not an emitted-token interval: EOS can require one
+// more real forward than the same non-stop output truncated by max length.
+// fak-test:runtime fast est=300ms lane=default
+func TestInKernelDecodeTraceTerminalForwardCardinality(t *testing.T) {
+	cfg := tinyCfg()
+	cfg.EOSTokenID = -1
+	m := model.NewSynthetic(cfg)
+	t.Cleanup(func() {
+		if err := m.CloseWeights(); err != nil {
+			t.Errorf("close model weights: %v", err)
+		}
+	})
+	prompt := synthIDs(cfg.VocabSize, 12, 9071)
+	// Exercise the ordinary host-sampled target loop with the same production
+	// presence-penalty policy in every arm. This avoids relying on a tied-head
+	// greedy model spontaneously changing tokens. It is not an external API
+	// penalty-range or device-greedy eligibility witness.
+	newLane := func(maxNew int) (*decodeLane, *batchLaneSink) {
+		ln, sink := newDecodeLaneOver(m, prompt, maxNew, 0)
+		ln.presPenalty = 64
+		ln.counts = make([]int32, cfg.VocabSize)
+		return ln, sink
+	}
+	ref, refSink := newLane(3)
+	t.Cleanup(ref.s.Close)
+	inKernelDecodeSerial(context.Background(), ref)
+	if ref.err != nil || len(refSink.toks) != 3 {
+		t.Fatalf("fixture reference err/tokens = %v/%v, want three model-produced tokens", ref.err, refSink.toks)
+	}
+	const generated = 2
+	stopID := refSink.toks[generated]
+	if stopID == refSink.toks[0] || stopID == refSink.toks[1] {
+		t.Fatalf("fixture reference stop ID repeats before its terminal position: %v", refSink.toks)
+	}
+	for _, batched := range []bool{false, true} {
+		for _, tc := range []struct {
+			name                          string
+			maxNew, wantGen, wantForwards int
+			stops                         map[int]bool
+			emitStop, stopped             bool
+		}{
+			{name: "max_length", maxNew: generated, wantGen: generated, wantForwards: generated - 1},
+			{name: "token_id_stop", maxNew: generated + 1, wantGen: generated, wantForwards: generated, stops: map[int]bool{stopID: true}, stopped: true},
+			{name: "prefill_stop", maxNew: generated + 1, stops: map[int]bool{refSink.toks[0]: true}, stopped: true},
+			{name: "emit_stop", maxNew: generated + 1, wantGen: generated, wantForwards: generated - 1, emitStop: true, stopped: true},
+		} {
+			t.Run(tc.name+map[bool]string{false: "/serial", true: "/singleton_batch"}[batched], func(t *testing.T) {
+				ln, sink := newLane(tc.maxNew)
+				t.Cleanup(ln.s.Close)
+				ln.stops = tc.stops
+				if tc.emitStop {
+					ln.emit = func(id int) bool {
+						sink.emit(id)
+						return len(sink.toks) == tc.wantGen
+					}
+				}
+				clockCalls := int64(0)
+				ln.measurement = &nativeInferenceMeasurement{
+					inferenceDisabled:     true,
+					decodeTokenIDsEnabled: true,
+					traceNow:              func() time.Time { clockCalls++; return time.Unix(0, clockCalls) },
+				}
+				ln.measurement.startDecodeTrace()
+				if batched {
+					inKernelDecodeLanesBatched(context.Background(), []*decodeLane{ln}, m, false)
+				} else {
+					inKernelDecodeSerial(context.Background(), ln)
+				}
+				if ln.err != nil || ln.gen != tc.wantGen || ln.stopped != tc.stopped {
+					t.Fatalf("terminal err/gen/stopped = %v/%d/%v, want nil/%d/%v", ln.err, ln.gen, ln.stopped, tc.wantGen, tc.stopped)
+				}
+				wantIDs := refSink.toks[:tc.wantGen]
+				if !eqInts(sink.toks, wantIDs) || !eqInts(ln.measurement.decodeTokenIDs, wantIDs) || len(ln.measurement.traceEvents) != tc.wantGen {
+					t.Fatalf("emitted/trace IDs/events = %v/%v/%v, want %v", sink.toks, ln.measurement.decodeTokenIDs, ln.measurement.traceEvents, wantIDs)
+				}
+				// KV advancement witnesses real model forwards independently of
+				// how many optional trace-forward records the observer retained.
+				if got := ln.s.Cache.Len() - len(prompt); got != tc.wantForwards {
+					t.Fatalf("actual KV forward count = %d, want %d", got, tc.wantForwards)
+				}
+				forwards := 0
+				for i, event := range ln.measurement.traceEvents {
+					if event.TokenIndex != i+1 {
+						t.Fatalf("event index = %d, want %d", event.TokenIndex, i+1)
+					}
+					if got, want := event.Forward != nil, i < tc.wantForwards; got != want {
+						t.Fatalf("event %d forward presence = %v, want %v", i+1, got, want)
+					}
+					if event.Forward == nil {
+						continue
+					}
+					forwards++
+					wantKind := NativeForwardSessionStep
+					if batched {
+						wantKind = NativeForwardStepBatchActive
+					}
+					if event.Forward.Kind != wantKind || event.Forward.ActiveLanes != 1 || event.Forward.DurationNS != 1 {
+						t.Fatalf("event %d forward = %+v, want %s/one lane/one synthetic ns", i+1, event.Forward, wantKind)
+					}
+				}
+				if forwards != tc.wantForwards {
+					t.Fatalf("trace forwards = %d, want %d (emitted intervals=%d)", forwards, tc.wantForwards, max(tc.wantGen-1, 0))
+				}
+				if tc.name == "token_id_stop" && ln.measurement.traceEvents[tc.wantGen-1].Forward == nil {
+					t.Fatal("EOS-producing final forward was discarded")
+				}
+			})
+		}
+	}
+}

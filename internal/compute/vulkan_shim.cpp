@@ -1590,12 +1590,14 @@ void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
 }
 
 // ---- GPU timestamp stage profile (FAK_VULKAN_TIMESTAMP_PROFILE=1, default off) ----------
-// Diagnostic only: a bottom-of-pipe timestamp is written at batch start and after every
-// recorded dispatch, so (with the recorder's inter-dispatch barriers) the delta between
-// consecutive timestamps is that dispatch's device time. Deltas are folded per
-// (kernel id, groupsX, groupsY) shape key and printed to stderr every
-// FAK_VULKAN_TIMESTAMP_PROFILE_EVERY batches (default 32). Unset, the recorder emits no
-// query commands and the recorded command stream is byte-identical to the unprofiled one.
+// Serialized diagnostic only: enabling this disables pipelined batch cycles, even if
+// timestamp queries are unavailable. The single query pool must not be reset while a
+// prior batch is in flight. Bottom-of-pipe intervals include intervening barriers/copies;
+// they are not isolated kernel-active time or the production pipeline's critical path.
+// Only instrumented batched commands are covered; one-shot dispatches are omitted.
+// Cumulative intervals are folded per (kernel id, groupsX, groupsY) shape and printed
+// every FAK_VULKAN_TIMESTAMP_PROFILE_EVERY batches (default 32). Unset, no query commands
+// are emitted and the command stream is byte-identical to the unprofiled one.
 const char* const kKernelNames[] = {
     "matmul", "matmul_add", "matmul_argmax", "matmul_argmax_blocks", "matmul2", "matmul3",
     "rmsnorm", "rmsnorm_matmul", "rmsnorm_matmul2", "rmsnorm_matmul3", "rmsnorm_matmul_argmax_blocks",
@@ -1630,6 +1632,7 @@ uint64_t g_tsEvery = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROF
 
 void tsInit() {
     g_tsInitTried = true;
+    fprintf(stderr, "fak-vulkan ts-profile mode=serialized_batches timing=bottom_of_pipe_intervals coverage=batched_commands_only pipeline_cycles=disabled\n");
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(g_phys, &props);
     uint32_t qn = 0;
@@ -1678,7 +1681,7 @@ void tsReport() {
     std::vector<std::pair<uint64_t, TsAgg>> rows(g_tsAgg.begin(), g_tsAgg.end());
     std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second.ns > b.second.ns; });
     double perBatch = g_tsBatches ? 1.0 / (double)g_tsBatches : 0;
-    fprintf(stderr, "fak-vulkan ts-profile batches=%llu ops/batch=%.1f gpu_ms/batch=%.3f wall_ms/batch=%.3f truncated=%llu\n",
+    fprintf(stderr, "fak-vulkan ts-profile batches=%llu ops/batch=%.1f gpu_ms/batch=%.3f wall_ms/batch=%.3f truncated=%llu mode=serialized_batches timing=bottom_of_pipe_intervals coverage=batched_commands_only\n",
         (unsigned long long)g_tsBatches, g_tsOps * perBatch, g_tsGpuNs * perBatch / 1e6, g_tsWallNs * perBatch / 1e6,
         (unsigned long long)g_tsTruncated);
     size_t shown = 0;
