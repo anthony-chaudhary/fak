@@ -238,6 +238,7 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			return fail("state-preflight", "GDN state aliases an attention cache")
 		}
 	}
+	kquants := qwen35SequenceKQuantPipelines{q6k: C.fvk_have_q6k_matmul() != 0, q5k: C.fvk_have_q5k_matmul() != 0, q3k: C.fvk_have_q3k_matmul() != 0}
 	for _, op := range operands {
 		bad := func(reason string) (*vulkanKV, error) {
 			return nil, qwen35VulkanSequenceError("tensor-preflight", op.layer, op.name+": "+reason)
@@ -257,6 +258,11 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 		}
 		bytes := int64(n) * 4
 		if op.matrix {
+			if !isRawIQ(op.t.Dtype) {
+				if err := qwen35VulkanSequenceMatrixDtypeErr(op.t.Dtype, kquants); err != nil {
+					return nil, &Qwen35SequenceError{Stage: "tensor-preflight", Layer: op.layer, Reason: op.name + ": unsupported matrix dtype", Cause: fmt.Errorf("%s: %w", op.name, err)}
+				}
+			}
 			rows := int64(len(req.TokenIDs))
 			if op.name == "output" {
 				rows = 1
@@ -268,7 +274,7 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			switch op.t.Dtype {
 			case Q8_0:
 				groups *= (int64(op.shape[0]) + 255) / 256
-			case Q4_K, Q2_K:
+			case Q4_K, Q2_K, Q6_K, Q5_K, Q3_K:
 				groups = (rows*int64(op.shape[0]) + 63) / 64
 			}
 			if isRawIQ(op.t.Dtype) {
@@ -280,14 +286,11 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			}
 			switch op.t.Dtype {
 			case F32:
-			case Q4_K, Q2_K:
+			case Q4_K, Q2_K, Q6_K, Q5_K, Q3_K:
 				if op.shape[1]%256 != 0 {
 					return bad("K-quant input width must be divisible by 256")
 				}
-				blockBytes := int64(144)
-				if op.t.Dtype == Q2_K {
-					blockBytes = 84
-				}
+				blockBytes, _ := qwen35SequenceKQuantBlockBytes(op.t.Dtype)
 				bytes = int64(n/256) * blockBytes
 			case Q8_0:
 				if !v.haveQ8 || op.t.Quant == nil || op.t.Quant.Block != 32 || op.shape[1]%32 != 0 {
@@ -322,8 +325,11 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 				}
 			default:
 				blockBytes, ok := RawIQBlockBytes(op.t.Dtype)
-				if !ok || !v.iqNativeLocked(op.t.Dtype) || op.shape[1]%256 != 0 {
-					return bad("unsupported matrix dtype")
+				if !ok || !v.iqNativeLocked(op.t.Dtype) {
+					return nil, &Qwen35SequenceError{Stage: "tensor-preflight", Layer: op.layer, Reason: op.name + ": unsupported matrix dtype", Cause: fmt.Errorf("%s: %w %s", op.name, ErrQwen35SequenceUnsupportedMatrixDtype, op.t.Dtype)}
+				}
+				if op.shape[1]%256 != 0 {
+					return bad("i-quant input width must be divisible by 256")
 				}
 				bytes = int64(n/256) * int64(blockBytes)
 			}
@@ -360,10 +366,17 @@ func (v *vulkanBackend) qwen35VulkanSequenceMatMulLocked(w, x Tensor, tokens int
 		v.q4kMatMulLocked(w, x, y, out, in, tokens)
 	case Q2_K:
 		v.q2kMatMulLocked(w, x, y, out, in, tokens)
+	case Q6_K:
+		v.q6kMatMulLocked(w, x, y, tokens)
+	case Q5_K:
+		v.q5kMatMulLocked(w, x, y, tokens)
+	case Q3_K:
+		v.q3kMatMulLocked(w, x, y, tokens)
 	default:
-		if isRawIQ(w.Dtype) {
-			v.iqMatVecLocked(w, x, y, out, in, tokens)
+		if !isRawIQ(w.Dtype) {
+			panic(fmt.Errorf("%w %s", ErrQwen35SequenceUnsupportedMatrixDtype, w.Dtype))
 		}
+		v.iqMatVecLocked(w, x, y, out, in, tokens)
 	}
 	return y
 }
