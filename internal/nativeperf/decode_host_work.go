@@ -54,7 +54,9 @@ func (s *DecodeSpan) Abandon() {
 
 // DecodeHostWork is one decode window's host/device split. CPU fields are nil
 // when the platform cannot read process CPU time or another decode overlapped;
-// Kernel is nil when no device backend reported submit-to-fence time.
+// Kernel is nil unless the selected backend explicitly reports complete
+// host submit-to-fence timing coverage. This compatibility field is host wall
+// elapsed time, never GPU event time or device-active execution time.
 type DecodeHostWork struct {
 	Wall       time.Duration
 	Steps      int
@@ -98,11 +100,17 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 			continue
 		}
 		w.Backend, w.Dispatches = after.Backend, dispatches
+		// Each candidate owns its values. A later backend with unavailable or
+		// reset counters must not inherit the prior backend's measurement.
+		w.Readback, w.Kernel = 0, nil
 		if after.ReadbackBytes >= prev.ReadbackBytes {
 			w.Readback = after.ReadbackBytes - prev.ReadbackBytes
 		}
-		if !w.Overlapped && after.SubmitWaitNS >= prev.SubmitWaitNS {
-			if k := time.Duration(after.SubmitWaitNS - prev.SubmitWaitNS); k <= w.Wall {
+		if !w.Overlapped && prev.SubmitWaitObserved && after.SubmitWaitObserved && after.SubmitWaitNS >= prev.SubmitWaitNS {
+			// Bound before converting to signed Duration so overflow cannot mint
+			// a negative, apparently valid sample. An observed zero stays valid.
+			if delta := after.SubmitWaitNS - prev.SubmitWaitNS; delta <= uint64(w.Wall) {
+				k := time.Duration(delta)
 				w.Kernel = &k
 			}
 		}
@@ -118,16 +126,16 @@ type decodeHostWorkKey struct{}
 // DecodeHostWorkAccumulator sums every decode window of one served request
 // (an agent loop may decode several times).
 type DecodeHostWorkAccumulator struct {
-	mu        sync.Mutex
-	windows   int
-	wall      time.Duration
-	steps     int
-	cpu       time.Duration
-	cpuGap    bool
-	kernel    time.Duration
+	mu            sync.Mutex
+	windows       int
+	wall          time.Duration
+	steps         int
+	cpu           time.Duration
+	cpuGap        bool
+	kernel        time.Duration
 	submitWaitGap bool
-	backend   string
-	claimed   bool
+	backend       string
+	claimed       bool
 }
 
 // WithDecodeHostWork installs a per-request accumulator on ctx.

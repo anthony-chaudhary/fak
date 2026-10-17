@@ -44,7 +44,7 @@ func (hostWorkPlanner) Complete(ctx context.Context, _ []agent.Message, _ []agen
 // fak-test:runtime fast est=3s lane=default
 func TestDeviceDispatchAndHostShareReachMetricsAndPerfRow(t *testing.T) {
 	t.Cleanup(compute.RegisterDeviceWorkReader("host-work-test", func() compute.DeviceWork {
-		return compute.DeviceWork{Dispatches: hostWorkTestDispatches.Load(), ReadbackBytes: 1 << 20, SubmitWaitNS: hostWorkTestSubmitWait.Load()}
+		return compute.DeviceWork{Dispatches: hostWorkTestDispatches.Load(), ReadbackBytes: 1 << 20, SubmitWaitNS: hostWorkTestSubmitWait.Load(), SubmitWaitObserved: true}
 	}))
 	h := newPerfServedHarness(t, hostWorkPlanner{})
 	h.chat("host-work-model", "decode", false)

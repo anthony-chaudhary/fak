@@ -15,6 +15,11 @@ type DeviceWork struct {
 	Dispatches    uint64
 	ReadbackBytes uint64
 	SubmitWaitNS  uint64
+	// SubmitWaitObserved is true only when this reader accounts for every
+	// relevant submission path throughout the counter lifetime. False means
+	// unavailable, even when SubmitWaitNS is nonzero. The current Vulkan reader
+	// leaves this false: its pipelined submits/fence waits are not all covered.
+	SubmitWaitObserved bool
 }
 
 var deviceWorkReaders struct {

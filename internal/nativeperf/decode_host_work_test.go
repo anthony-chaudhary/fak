@@ -76,7 +76,7 @@ func TestDeviceDispatchKernelPhaseReachesReceiptMetrics(t *testing.T) {
 	fakeProcessCPU(t, &cpu, true)
 	var dispatches, submitWait atomic.Uint64
 	t.Cleanup(compute.RegisterDeviceWorkReader("vulkan", func() compute.DeviceWork {
-		return compute.DeviceWork{Dispatches: dispatches.Load(), SubmitWaitNS: submitWait.Load()}
+		return compute.DeviceWork{Dispatches: dispatches.Load(), SubmitWaitNS: submitWait.Load(), SubmitWaitObserved: true}
 	}))
 	ctx, acc := WithDecodeHostWork(context.Background())
 	span := StartDecodeSpan()
@@ -99,4 +99,67 @@ func TestDeviceDispatchKernelPhaseReachesReceiptMetrics(t *testing.T) {
 	if out := m.Prometheus(time.Now()); !strings.Contains(out, `phase="kernel",kind="wall"} 0.001`+"\n") {
 		t.Fatalf("kernel phase missing from receipt metrics:\n%s", out)
 	}
+}
+
+// fak-test:runtime fast est=2ms lane=default
+func TestDecodeSubmitWaitCoverageNeverFabricatesZero(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		before, after compute.DeviceWork
+		observed      bool
+	}{
+		{"unobserved_zero", compute.DeviceWork{}, compute.DeviceWork{Dispatches: 1}, false},
+		{"unobserved_nonzero", compute.DeviceWork{}, compute.DeviceWork{Dispatches: 1, SubmitWaitNS: 1}, false},
+		{"observed_zero", compute.DeviceWork{SubmitWaitObserved: true}, compute.DeviceWork{Dispatches: 1, SubmitWaitObserved: true}, true},
+		{"coverage_disappears", compute.DeviceWork{SubmitWaitObserved: true}, compute.DeviceWork{Dispatches: 1}, false},
+		{"coverage_appears", compute.DeviceWork{}, compute.DeviceWork{Dispatches: 1, SubmitWaitObserved: true}, false},
+		{"wait_counter_reset", compute.DeviceWork{SubmitWaitNS: 2, SubmitWaitObserved: true}, compute.DeviceWork{Dispatches: 1, SubmitWaitNS: 1, SubmitWaitObserved: true}, false},
+		{"dispatch_counter_reset", compute.DeviceWork{Dispatches: 2, SubmitWaitObserved: true}, compute.DeviceWork{Dispatches: 1, SubmitWaitObserved: true}, false},
+		{"wait_duration_overflow", compute.DeviceWork{SubmitWaitObserved: true}, compute.DeviceWork{Dispatches: 1, SubmitWaitNS: ^uint64(0), SubmitWaitObserved: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := tc.before
+			unregister := compute.RegisterDeviceWorkReader("coverage-fixture", func() compute.DeviceWork { return current })
+			defer unregister()
+			ctx, acc := WithDecodeHostWork(context.Background())
+			span := StartDecodeSpan()
+			defer span.Abandon()
+			current = tc.after
+			w := span.Finish(ctx, 1)
+			if (w.Kernel != nil) != tc.observed || (w.Kernel != nil && *w.Kernel != 0) {
+				t.Fatalf("submit wait=%v, observed=%v", w.Kernel, tc.observed)
+			}
+			totals, _ := acc.Totals()
+			if _, ok := totals.DecodeWindowReceipt(); ok != tc.observed {
+				t.Fatalf("phase receipt available=%v, want %v", ok, tc.observed)
+			}
+		})
+	}
+	t.Run("backend_switch", func(t *testing.T) {
+		unregister := compute.RegisterDeviceWorkReader("coverage-before", func() compute.DeviceWork { return compute.DeviceWork{SubmitWaitObserved: true} })
+		defer unregister()
+		span := StartDecodeSpan()
+		defer span.Abandon()
+		unregister()
+		unregisterAfter := compute.RegisterDeviceWorkReader("coverage-after", func() compute.DeviceWork { return compute.DeviceWork{Dispatches: 1, SubmitWaitObserved: true} })
+		defer unregisterAfter()
+		if w := span.Finish(context.Background(), 1); w.Kernel != nil {
+			t.Fatal("different backend identities produced a submit-wait delta")
+		}
+	})
+	t.Run("selected_backend_does_not_inherit_previous_values", func(t *testing.T) {
+		a := compute.DeviceWork{SubmitWaitObserved: true}
+		z := compute.DeviceWork{ReadbackBytes: 2}
+		unregisterA := compute.RegisterDeviceWorkReader("coverage-a", func() compute.DeviceWork { return a })
+		defer unregisterA()
+		unregisterZ := compute.RegisterDeviceWorkReader("coverage-z", func() compute.DeviceWork { return z })
+		defer unregisterZ()
+		span := StartDecodeSpan()
+		defer span.Abandon()
+		a.Dispatches, a.ReadbackBytes = 1, 4
+		z.Dispatches, z.ReadbackBytes = 1, 1
+		if w := span.Finish(context.Background(), 1); w.Backend != "coverage-z" || w.Kernel != nil || w.Readback != 0 {
+			t.Fatalf("selected backend inherited foreign values: %+v", w)
+		}
+	})
 }
