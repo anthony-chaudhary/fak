@@ -104,6 +104,10 @@ func prepareV41RoutedExpertCohortOwned(scope *backendExecutionScope, layer int, 
 			return nil, v41RoutedExpertDeclined, -1, nil
 		}
 	}
+	// Preserve this demand's warm projections while an earlier cold one stages.
+	// Ordinary lease holds take over before these acquisition-only holds end.
+	releaseResident := leader.v41HoldResidentExpertTriple(gateName, upName, downName)
+	defer releaseResident()
 	var releaseGate, releaseUp func()
 	l.gate, releaseGate, l.up, releaseUp, _, ok = expertInputDeviceAdmitted(leader, gateName, upName, rows[0].Input, H)
 	if !ok {
