@@ -203,7 +203,7 @@ func TestRunPreservesThreeModuleWorkspaceAndTestsCandidate(t *testing.T) {
 	commitFixture(t, privateRoot, map[string]string{
 		"go.mod":          "module fixture.test/private\n\ngo 1.26\nrequire (\n github.com/anthony-chaudhary/fak v0.0.0\n fixture.test/companion v0.0.0\n)\n",
 		"app/app.go":      "package app\nimport (\n \"github.com/anthony-chaudhary/fak/value\"\n companion \"fixture.test/companion\"\n)\nfunc Got() int { return value.Number()+companion.Number() }\n",
-		"app/app_test.go": "package app\nimport \"testing\"\nfunc TestCandidate(t *testing.T) { if Got()!=42 { t.Fatalf(\"candidate got %d\", Got()) } }\n",
+		"app/app_test.go": "package app\n\nimport \"testing\"\n\nfunc TestCandidate(t *testing.T) {\n\tif Got() != 42 {\n\t\tt.Fatalf(\"candidate got %d\", Got())\n\t}\n}\n",
 	})
 	originalWork := "go 1.26\nuse (\n ./private\n ./fak\n ./companion\n)\n"
 	writeFixtureFile(t, filepath.Join(parent, "go.work"), originalWork)
