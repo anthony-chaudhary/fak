@@ -43,7 +43,9 @@ func TestQwen35DeviceQKNativeRowsAdmission(t *testing.T) {
 		{"Q4_K q_proj", q, TensorQ4_K, qShape, iq, true},
 		{"i-quant the backend does not retain", q, TensorIQ3_S, qShape, iq, false},
 		{"no raw i-quant backend", q, TensorQ4_K, qShape, q4kLoadOptions{residentDenseQ2K: true}, false},
-		{"GDN in_proj stays on its owner path", "model.layers.0.linear_attn.in_proj_qkv.weight", TensorIQ2_S, []int{512, 256}, iq, false},
+		{"GDN in_proj_qkv", "model.layers.0.linear_attn.in_proj_qkv.weight", TensorIQ2_S, []int{512, 256}, iq, true},
+		{"GDN in_proj_z", "model.layers.0.linear_attn.in_proj_z.weight", TensorIQ2_S, []int{256, 256}, iq, true},
+		{"GDN in_proj_b stays Q8", "model.layers.0.linear_attn.in_proj_b.weight", TensorIQ2_S, []int{4, 256}, iq, false},
 		{"native rows forced off", q, TensorIQ2_S, qShape, q4kLoadOptions{residentDenseIQ: iq.residentDenseIQ, nativeRowsOff: true}, false},
 	}
 	for _, tc := range cases {
@@ -51,9 +53,17 @@ func TestQwen35DeviceQKNativeRowsAdmission(t *testing.T) {
 			t.Errorf("%s: qwen35NativeRowResident = %v, want %v", tc.name, got, tc.want)
 		}
 	}
+	qkv := "model.layers.0.linear_attn.in_proj_qkv.weight"
 	t.Setenv("FAK_QWEN35_NATIVE_QK_ROWS", "0")
 	if qwen35NativeRowResident(cfg, q, TensorIQ2_S, qShape, iq) {
 		t.Error("FAK_QWEN35_NATIVE_QK_ROWS=0 did not restore the Q8 route")
+	}
+	if !qwen35NativeRowResident(cfg, qkv, TensorIQ2_S, []int{512, 256}, iq) {
+		t.Error("q/k kill switch also disabled the GDN in-proj class")
+	}
+	t.Setenv("FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS", "0")
+	if qwen35NativeRowResident(cfg, qkv, TensorIQ2_S, []int{512, 256}, iq) {
+		t.Error("FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS=0 did not restore the Q8 route")
 	}
 }
 

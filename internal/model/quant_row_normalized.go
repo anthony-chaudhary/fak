@@ -131,7 +131,17 @@ func Qwen35FullAttentionQKProjection(cfg Config, canon string) bool {
 	return strings.HasSuffix(name, ".self_attn.q_proj.weight") || strings.HasSuffix(name, ".self_attn.k_proj.weight")
 }
 
-// AddCanonicalRowNormalizedDeviceQK stores a canonical-row full-attention q/k projection in its
+// Qwen35GDNInProjQKVZProjection reports whether canon is a row-normalized GDN in_proj_qkv or
+// in_proj_z (the large in-proj pair a raw-i-quant device backend keeps native; in_proj_a/b stay Q8).
+func Qwen35GDNInProjQKVZProjection(cfg Config, canon string) bool {
+	if !Qwen35RowNormalizedProjection(cfg, canon) {
+		return false
+	}
+	name, _ := quantSourceTensorName(cfg, canon)
+	return strings.HasSuffix(name, ".linear_attn.in_proj_qkv.weight") || strings.HasSuffix(name, ".linear_attn.in_proj_z.weight")
+}
+
+// AddCanonicalRowNormalizedDeviceQK stores a canonical-row full-attention q/k or GDN qkv/z projection in its
 // native quant (quant is the GGUF type name: Q4_K, Q6_K, Q2_K or a raw i-quant) for a device
 // backend with native kernels for it. It admits the exact Qwen3.8 topology: that topology's Q8
 // requirement is the Metal runtime's, and the loader routes here only for raw-i-quant backends.
@@ -139,8 +149,8 @@ func (b *QuantBuilder) AddCanonicalRowNormalizedDeviceQK(canon string, shape []i
 	if b == nil || b.m == nil {
 		return fmt.Errorf("model: nil QuantBuilder")
 	}
-	if !Qwen35FullAttentionQKProjection(b.m.Cfg, canon) {
-		return fmt.Errorf("model: device q/k row-normalized tensor %q is not a Qwen3.5 full-attention q/k projection", canon)
+	if !Qwen35FullAttentionQKProjection(b.m.Cfg, canon) && !Qwen35GDNInProjQKVZProjection(b.m.Cfg, canon) {
+		return fmt.Errorf("model: device row-normalized tensor %q is not a Qwen3.5 full-attention q/k or GDN qkv/z projection", canon)
 	}
 	if quant == "Q4_K" {
 		name, err := b.canonicalRowNormalizedTarget(canon, shape, raw, q4kBlockBytes, quant, true)
