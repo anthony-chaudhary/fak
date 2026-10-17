@@ -492,14 +492,14 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	if err != nil {
 		return nil, err
 	}
-	finish := work.finish
-	work.finish = func(routed []float32) error {
-		if err := finish(routed); err != nil {
-			return err
+	windowCommitted := false
+	commitWindow := func() error {
+		if windowCommitted {
+			return nil
 		}
-		// No error-returning operation remains. State.Step would advance an owner's
-		// already-committed compressor cursor twice. Retain this layer's own row,
-		// including on reader layers and before the first completed source group.
+		// State.Step would advance an owner's already-committed compressor cursor
+		// twice. Retain this layer's own row, including on reader layers and
+		// before the first completed source group.
 		copy(layerState.window[pos%layerState.windowSize], kv)
 		layerState.nextWindowPos, layerState.nextCompressRow = pos+1, pos+1
 		retained := min(layerState.retainedWindowRows+1, layerState.windowSize)
@@ -508,8 +508,17 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		}
 		layerState.retainedCopies += retained - layerState.retainedWindowRows
 		layerState.retainedWindowRows = retained
+		windowCommitted = true
 		return nil
 	}
+	finish := work.finish
+	work.finish = func(routed []float32) error {
+		if err := finish(routed); err != nil {
+			return err
+		}
+		return commitWindow()
+	}
+	work.publishKV = commitWindow
 	if resident != nil {
 		work.cleanup = resident.abort
 	}

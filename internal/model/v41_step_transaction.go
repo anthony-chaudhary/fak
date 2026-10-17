@@ -483,6 +483,21 @@ func (tx *v41StepTransaction) finishLayer(routed []float32) (err error) {
 	return err
 }
 
+// publishPendingKV commits the prepared layer's window row before its finish so
+// the next position of the same session can be prepared at this layer.
+func (tx *v41StepTransaction) publishPendingKV() (err error) {
+	if tx.closed || tx.pendingLayer == nil {
+		return fmt.Errorf("%w: incremental transaction has no prepared layer", ErrV41ForwardStage)
+	}
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	if err = tx.pendingLayer.publishEarly(); err != nil {
+		err = tx.abortLayerError(err)
+	}
+	complete = true
+	return err
+}
+
 func (tx *v41StepTransaction) abortLayerError(err error) error {
 	tx.abortAfterFailure()
 	var operation *V41ExpertOperationError

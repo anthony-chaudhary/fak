@@ -18,6 +18,26 @@ type v41LayerStepWork struct {
 	finish  func([]float32) error
 	cleanup func()
 	closed  bool
+	// publishKV commits this position's attention window row before the MoE
+	// finish, so a later position of the same session can attend to it while
+	// this position's experts are still pending. finish skips the commit once
+	// it ran; nil means the work cannot publish early.
+	publishKV   func() error
+	kvPublished bool
+}
+
+func (w *v41LayerStepWork) publishEarly() error {
+	if w == nil || w.closed || w.publishKV == nil {
+		return fmt.Errorf("%w: layer continuation cannot publish its window row early", ErrV41ForwardStage)
+	}
+	if w.kvPublished {
+		return nil
+	}
+	if err := w.publishKV(); err != nil {
+		return err
+	}
+	w.kvPublished = true
+	return nil
 }
 
 func (w *v41LayerStepWork) close() {

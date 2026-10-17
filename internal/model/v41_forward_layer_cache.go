@@ -90,3 +90,16 @@ func (s *v41ProjScratch) v41LayerCacheReset() {
 	s.layerExpertFIFO = nil
 	s.layerExpertBytes = 0
 }
+
+// v41SizeExpertLayerBudget sizes the layer-scoped expert budget once per
+// scratch from the model's budget (or the test override).
+func (s *v41ProjScratch) v41SizeExpertLayerBudget(m *Model) {
+	if s.expertLayerCacheBytes != 0 {
+		return
+	}
+	if v41TestLayerCacheBudgetOverride > 0 {
+		s.expertLayerCacheBytes = v41TestLayerCacheBudgetOverride
+	} else {
+		s.expertLayerCacheBytes = m.v41LayerExpertCacheBudget()
+	}
+}
