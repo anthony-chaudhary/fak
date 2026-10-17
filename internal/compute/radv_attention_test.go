@@ -239,15 +239,9 @@ func TestContiguizeF16KVCacheParity(t *testing.T) {
 		t.Errorf("attention parity failed: L_inf = %e (want < 1e-5)", diff)
 	}
 
-	// 4. Verify ExecuteHIPAttentionWithContiguization integrates contiguization seamlessly
-	hipOut, contiguized, err := ExecuteHIPAttentionWithContiguization(
-		q, kStrided, vStrided, "gfx1151", ContiguizationMinContext, nQ, nKV, headDim, KVPrecisionF32,
-	)
-	if err != nil {
-		// Context size was artificial for test, but test ExecuteHIP with actual threshold
-	}
-	_ = hipOut
-	_ = contiguized
+	// 4. ExecuteHIPAttentionWithContiguization was retired (fak#13875); the
+	// contiguization math it wrapped is exercised directly above via
+	// ContiguizeF32KVCache / ComputeContiguizedAttention / ComputeStridedAttention.
 }
 
 func BenchmarkStridedVsContiguizedThroughput(b *testing.B) {
@@ -462,10 +456,16 @@ func TestRADV_Ticket515_FlashAttnDequantOnceScratchpad(t *testing.T) {
 				t.Errorf("medium context speedup multiplier = %f, want >= 1.34 (+35%%)", mult)
 			}
 
-			// 8. Verify HIP integration
-			hipOut, hipScratch, err := ExecuteHIPAttentionWithDequantOnce(q, rawK, rawV, "gfx1151", nPos, nQ, nKV, headDim, fmtType)
+			// 8. HIP integration: ExecuteHIPAttentionWithDequantOnce was retired
+			// (fak#13875) as an unwired per-call scratchpad allocator; the retained
+			// calibrated pipeline is FlashAttnDequantScratchpad used directly.
+			hipScratch, err := NewFlashAttnDequantScratchpad("gfx1151", fmtType, nPos, nKV, headDim)
 			if err != nil {
-				t.Fatalf("ExecuteHIPAttentionWithDequantOnce failed: %v", err)
+				t.Fatalf("NewFlashAttnDequantScratchpad: %v", err)
+			}
+			hipOut, err := hipScratch.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
+			if err != nil {
+				t.Fatalf("ExecuteAttentionWithDequantOnce failed: %v", err)
 			}
 			if len(hipOut) != nQ*headDim {
 				t.Fatalf("len(hipOut) = %d, want %d", len(hipOut), nQ*headDim)

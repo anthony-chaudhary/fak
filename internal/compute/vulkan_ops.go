@@ -152,41 +152,6 @@ func DequantizeKVScratchpad(scratch *VulkanKVScratchpad, rawK, rawV []byte) erro
 	return nil
 }
 
-// DequantizeAndTransposeKVScratchpad dequantizes quantized KV blocks into scratchpad memory,
-// transposing strided [nPos, nKV, headDim] layout into head-contiguous [nKV, nPos, headDim] when isStrided is true.
-func DequantizeAndTransposeKVScratchpad(scratch *VulkanKVScratchpad, rawK, rawV []byte, isStrided bool) error {
-	if scratch == nil {
-		return fmt.Errorf("vulkan_ops: nil scratchpad")
-	}
-	if !isStrided {
-		return DequantizeKVScratchpad(scratch, rawK, rawV)
-	}
-
-	totalElems := scratch.NumPos * scratch.NumKVHeads * scratch.HeadDim
-	tempK := make([]float32, totalElems)
-	tempV := make([]float32, totalElems)
-
-	if err := DequantizeQuantizedKV(tempK, rawK, totalElems, scratch.Format); err != nil {
-		return fmt.Errorf("vulkan_ops: dequantize strided K: %w", err)
-	}
-	if err := DequantizeQuantizedKV(tempV, rawV, totalElems, scratch.Format); err != nil {
-		return fmt.Errorf("vulkan_ops: dequantize strided V: %w", err)
-	}
-
-	// Transpose [nPos, nKV, headDim] -> [nKV, nPos, headDim]
-	for p := 0; p < scratch.NumPos; p++ {
-		for h := 0; h < scratch.NumKVHeads; h++ {
-			srcOff := (p*scratch.NumKVHeads + h) * scratch.HeadDim
-			dstOff := (h*scratch.NumPos + p) * scratch.HeadDim
-			copy(scratch.ScratchK[dstOff:dstOff+scratch.HeadDim], tempK[srcOff:srcOff+scratch.HeadDim])
-			copy(scratch.ScratchV[dstOff:dstOff+scratch.HeadDim], tempV[srcOff:srcOff+scratch.HeadDim])
-		}
-	}
-
-	scratch.DequantCount++
-	return nil
-}
-
 // ExecuteVulkanAttentionWithDequantOnce executes multi-head attention across all nQ query heads
 // (e.g. 40 query heads on AMD Strix Halo gfx1151) over quantized KV caches using the dequant-once
 // scratchpad pipeline in vulkan_ops.go.

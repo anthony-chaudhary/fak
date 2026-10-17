@@ -581,3 +581,57 @@ func TestGEMMFP16F32PerCallWeightPathsRetired(t *testing.T) {
 		}
 	}
 }
+
+// TestHIPAndVulkanPerCallKVStagingRetired pins the fak#13875 retirement of the
+// unwired per-call whole-KV staging paths. ExecuteHIPAttentionWithContiguization and
+// ExecuteHIPAttentionWithDequantOnce each allocated and copied the entire KV cache on
+// every call (the hip_attention.go per-call-copy defect) and HIPContiguizeF16KVCache /
+// HIPFlashAttnDequantScratchpad were zero-caller pass-throughs; DequantizeAndTransposeKVScratchpad
+// (vulkan_ops.go) allocated two whole f32 KV buffers per call and had zero callers repo-wide.
+// All were unwired: a wiring would have re-introduced the latent per-call weight trap.
+// The calibrated pipeline (FlashAttnDequantScratchpad, ContiguizeF16KVCache,
+// ComputeContiguizedAttention) stays test-pinned. This source contract runs with no
+// ROCm/Vulkan device and no cgo.
+func TestHIPAndVulkanPerCallKVStagingRetired(t *testing.T) {
+	hip, err := os.ReadFile("hip_attention.go")
+	if err != nil {
+		t.Fatalf("failed to read hip_attention.go: %v", err)
+	}
+	hipStr := string(hip)
+	for _, gone := range []string{
+		"func HIPContiguizeF16KVCache(",
+		"func ExecuteHIPAttentionWithContiguization(",
+		"type HIPFlashAttnDequantScratchpad struct",
+		"func ExecuteHIPAttentionWithDequantOnce(",
+	} {
+		if strings.Contains(hipStr, gone) {
+			t.Errorf("hip_attention.go still declares retired per-call KV path %q; it must not return without a caller and an allocation ceiling", gone)
+		}
+	}
+	// The library math stays: it is exercised directly by radv_attention_test.go.
+	for _, keep := range []string{
+		"func ShouldHIPContiguizeF16KV(",
+		"func DiagnoseHIPChannelCamping(",
+	} {
+		if !strings.Contains(hipStr, keep) {
+			t.Errorf("hip_attention.go lost %q; the retirement was supposed to leave the calibrated helpers intact", keep)
+		}
+	}
+
+	ops, err := os.ReadFile("vulkan_ops.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops.go: %v", err)
+	}
+	if strings.Contains(string(ops), "func DequantizeAndTransposeKVScratchpad(") {
+		t.Error("vulkan_ops.go still declares retired per-call KV staging DequantizeAndTransposeKVScratchpad; it allocated two whole f32 KV buffers per call with zero callers")
+	}
+	// The single-pass dequant pipeline must remain.
+	for _, keep := range []string{
+		"func DequantizeKVScratchpad(",
+		"func ExecuteVulkanAttentionWithDequantOnce(",
+	} {
+		if !strings.Contains(string(ops), keep) {
+			t.Errorf("vulkan_ops.go lost %q; the retirement was supposed to leave the calibrated dequant-once pipeline intact", keep)
+		}
+	}
+}

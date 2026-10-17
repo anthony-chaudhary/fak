@@ -36,51 +36,16 @@ func (p *HIPF16KVContiguizationPass) Execute(kStrided, vStrided []uint16) ([]uin
 	return p.base.Execute(kStrided, vStrided)
 }
 
-// HIPContiguizeF16KVCache linearizes strided [nPos, nKV, hd] into head-contiguous [nKV, nPos, hd].
-func HIPContiguizeF16KVCache(src, dst []uint16, nPos, nKV, headDim int) ([]uint16, error) {
-	return ContiguizeF16KVCache(src, dst, nPos, nKV, headDim)
-}
-
 // ShouldHIPContiguizeF16KV is a convenience helper for ROCm/HIP pipelines.
 func ShouldHIPContiguizeF16KV(arch string, nPos int, precision KVPrecision) bool {
 	return ShouldContiguizeF16KV(arch, nPos, precision)
 }
 
-// ExecuteHIPAttentionWithContiguization dispatches attention execution, automatically
-// inserting the pre-attention contiguization pass when gating criteria are met.
-// Returns the attention output, a boolean indicating whether contiguization was applied, and any error.
-func ExecuteHIPAttentionWithContiguization(
-	q, kStrided, vStrided []float32,
-	arch string,
-	nPos, nQ, nKV, headDim int,
-	precision KVPrecision,
-) (out []float32, contiguized bool, err error) {
-	if ShouldContiguizeF16KV(arch, nPos, precision) {
-		// Linearize into head-contiguous scratch buffers
-		kContig, err := ContiguizeF32KVCache(kStrided, nil, nPos, nKV, headDim)
-		if err != nil {
-			return nil, false, fmt.Errorf("hip: failed to contiguize K: %w", err)
-		}
-		vContig, err := ContiguizeF32KVCache(vStrided, nil, nPos, nKV, headDim)
-		if err != nil {
-			return nil, false, fmt.Errorf("hip: failed to contiguize V: %w", err)
-		}
-
-		// Execute contiguized attention kernel
-		out, err = ComputeContiguizedAttention(q, kContig, vContig, nQ, nKV, nPos, headDim)
-		if err != nil {
-			return nil, false, fmt.Errorf("hip: contiguized attention failed: %w", err)
-		}
-		return out, true, nil
-	}
-
-	// Baseline path: direct strided attention
-	out, err = ComputeStridedAttention(q, kStrided, vStrided, nQ, nKV, nPos, headDim)
-	if err != nil {
-		return nil, false, fmt.Errorf("hip: strided attention failed: %w", err)
-	}
-	return out, false, nil
-}
+// NOTE: HIPContiguizeF16KVCache (a zero-caller pass-through) and
+// ExecuteHIPAttentionWithContiguization (a per-call whole-KV f32 copy with no
+// production caller) were retired here (fak#13875). The library math they wrapped
+// is still held directly by ContiguizeF32KVCache / ComputeContiguizedAttention /
+// ComputeStridedAttention and radv_attention_test.go.
 
 // DiagnoseHIPChannelCamping simulates and diagnoses whether memory accesses will suffer
 // from LPDDR5X channel camping on the target architecture.
@@ -113,65 +78,8 @@ func DiagnoseHIPChannelCamping(
 	return true, diagnosis, report
 }
 
-// HIPFlashAttnDequantScratchpad wraps FlashAttnDequantScratchpad for HIP / ROCm execution graphs.
-type HIPFlashAttnDequantScratchpad struct {
-	base *FlashAttnDequantScratchpad
-}
-
-// NewHIPFlashAttnDequantScratchpad allocates a HIP dequant-once scratchpad for quantized KV caches.
-func NewHIPFlashAttnDequantScratchpad(arch string, format QuantizedKVType, nPos, nKV, headDim int) (*HIPFlashAttnDequantScratchpad, error) {
-	s, err := NewFlashAttnDequantScratchpad(arch, format, nPos, nKV, headDim)
-	if err != nil {
-		return nil, err
-	}
-	return &HIPFlashAttnDequantScratchpad{base: s}, nil
-}
-
-// ScratchBytes reports total allocated bytes.
-func (p *HIPFlashAttnDequantScratchpad) ScratchBytes() int64 {
-	return p.base.ScratchBytes()
-}
-
-// FitsInMALLCache reports whether scratchpad fits in 32 MiB Infinity Cache.
-func (p *HIPFlashAttnDequantScratchpad) FitsInMALLCache() bool {
-	return p.base.FitsInMALLCache()
-}
-
-// DequantizeOnce decodes quantized KV caches into scratchpad memory once.
-func (p *HIPFlashAttnDequantScratchpad) DequantizeOnce(rawK, rawV []byte) error {
-	return p.base.DequantizeOnce(rawK, rawV)
-}
-
-// ResetReuse resets reuse tracking without deallocating buffers.
-func (p *HIPFlashAttnDequantScratchpad) ResetReuse() {
-	p.base.ResetReuse()
-}
-
-// SpeedupMultiplier returns the dequant-once throughput boost (+35% to 3.26x).
-func (p *HIPFlashAttnDequantScratchpad) SpeedupMultiplier(nQHeads int) float64 {
-	return p.base.SpeedupMultiplier(nQHeads)
-}
-
-// ExecuteAttention executes attention across nQ query heads using the dequantized scratchpad.
-func (p *HIPFlashAttnDequantScratchpad) ExecuteAttention(q []float32, rawK, rawV []byte, nQ int) ([]float32, error) {
-	return p.base.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
-}
-
-// ExecuteHIPAttentionWithDequantOnce executes attention over quantized KV caches using single-pass dequantization.
-func ExecuteHIPAttentionWithDequantOnce(
-	q []float32,
-	rawK, rawV []byte,
-	arch string,
-	nPos, nQ, nKV, headDim int,
-	format QuantizedKVType,
-) ([]float32, *FlashAttnDequantScratchpad, error) {
-	scratch, err := NewFlashAttnDequantScratchpad(arch, format, nPos, nKV, headDim)
-	if err != nil {
-		return nil, nil, fmt.Errorf("hip: failed to create dequant scratchpad: %w", err)
-	}
-	out, err := scratch.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
-	if err != nil {
-		return nil, nil, fmt.Errorf("hip: dequant-once attention failed: %w", err)
-	}
-	return out, scratch, nil
-}
+// NOTE: HIPFlashAttnDequantScratchpad (a zero-caller pass-through wrapper) and
+// ExecuteHIPAttentionWithDequantOnce (an unwired per-call scratchpad allocator,
+// the same latent per-call weight path class as fak#13875's dequant-once
+// entrypoints) were retired here. The underlying single-pass dequantization is
+// still held directly by FlashAttnDequantScratchpad and the radv/vulkan witnesses.
