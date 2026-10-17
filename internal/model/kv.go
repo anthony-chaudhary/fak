@@ -368,6 +368,9 @@ type Session struct {
 	// decodeSplitK is attnDecodeStep's partial/merge scratch, reused across layers
 	// and steps like decodeScores (#13693).
 	decodeSplitK splitKDecodeScratch
+	// linearDecode is transient CPU GDN workspace, shared by this serial session
+	// across layers and tokens. It is not recurrent state or part of a prefix snapshot.
+	linearDecode linearDecodeScratch
 	v4Expert     v4LiveExpertRuntime
 	// v4ExpertOwner is the (Model, Backend)-scoped owner this session attached to for its V4
 	// routed-expert runtime (fak#13479). Session.Close DETACHES without freeing resident pages;
