@@ -10,6 +10,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"math"
 	"math/rand"
@@ -60,6 +62,9 @@ func TestV41RouterTopKVulkan(t *testing.T) {
 	}
 	const rows = 256
 	worst := 0.0
+	// The digest binds every device pick bit, so two router builds compare exactly.
+	digest := sha256.New()
+	word := func(v uint32) { _ = binary.Write(digest, binary.LittleEndian, v) }
 	for _, full := range []bool{false, true} {
 		for _, withBias := range []bool{false, true} {
 			panel := make([]float32, 0, rows*cfg.Experts)
@@ -78,6 +83,10 @@ func TestV41RouterTopKVulkan(t *testing.T) {
 					}
 				case 1: // extremes across every score branch
 					logits[3], logits[4], logits[5], logits[6] = -100, -30, -19.5, 60
+				case 3: // an all-equal row ties across every lane
+					for i := range logits {
+						logits[i] = 1
+					}
 				}
 				rowsLogits[r] = logits
 				panel = append(panel, logits...)
@@ -95,6 +104,13 @@ func TestV41RouterTopKVulkan(t *testing.T) {
 				t.Fatalf("full=%t bias=%t: %v", full, withBias, err)
 			}
 			for r := range rowsLogits {
+				for _, p := range got[r] {
+					word(uint32(p.expert))
+					word(math.Float32bits(p.weight))
+				}
+				if !withBias && r == 3 && (got[r][0].expert != 0 || got[r][cfg.TopK-1].expert != cfg.TopK-1) {
+					t.Fatalf("all-equal row picked %+v, want experts 0..%d in order", got[r], cfg.TopK-1)
+				}
 				want, err := v41RouteForGeometry(rowsLogits[r], bias, cfg, full)
 				if err != nil {
 					t.Fatal(err)
@@ -121,5 +137,45 @@ func TestV41RouterTopKVulkan(t *testing.T) {
 	if !errors.As(err, &route) || route.Field != "logits" || !s.BackendSessionClosed() {
 		t.Fatalf("non-finite logit: %v", err)
 	}
-	t.Logf("V41_ROUTER_TOPK_COMPLETE rows=%d max_abs_weight_delta=%.3g", rows, worst)
+	// Two faults in different lanes: the lower expert's earlier stage wins.
+	two, twoBias := v41RouterFixture(rng)
+	two[300], two[77] = float32(math.NaN()), float32(math.Inf(1))
+	lt := uploadHostF32Class(be, []int{1, cfg.Experts}, two, compute.MemoryActivation, "V4.1 router witness")
+	bt := uploadHostF32Class(be, []int{cfg.Experts}, twoBias, compute.MemoryActivation, "V4.1 router witness")
+	_, err = op.V41RouterTopK(lt, bt, 1, cfg.Experts, cfg.TopK, cfg.RouteScale, true, true)
+	be.Free(lt)
+	be.Free(bt)
+	var fault *compute.V41RouterTopKFault
+	if !errors.As(err, &fault) || fault.Stage != compute.V41RouterTopKStageLogit || fault.Expert != 77 {
+		t.Fatalf("two-fault row: %v, want logit fault at expert 77", err)
+	}
+	word(uint32(fault.Stage))
+	word(uint32(fault.Expert))
+	word(fault.Bits)
+	t.Logf("V41_ROUTER_TOPK_COMPLETE rows=%d max_abs_weight_delta=%.3g picks_sha256=%x", rows, worst, digest.Sum(nil))
+}
+
+// BenchmarkV41RouterTopKVulkanDecodeRow times one decode-shape route (rows=1),
+// including its submit and pick readback, on an actual Vulkan device.
+func BenchmarkV41RouterTopKVulkanDecodeRow(b *testing.B) {
+	be, ok := compute.Lookup("vulkan")
+	if !ok || be == nil || be.Name() != "vulkan" || !be.Caps().DeviceMemory {
+		b.Skip("actual Vulkan device unavailable")
+	}
+	op, ok := be.(compute.V41RouterTopKBackend)
+	if !ok || !op.V41RouterTopKAvailable() {
+		b.Skip("optional router module unavailable")
+	}
+	cfg := v41DefaultRouterConfig()
+	logits, bias := v41RouterFixture(rand.New(rand.NewSource(13668)))
+	lt := uploadHostF32Class(be, []int{1, cfg.Experts}, logits, compute.MemoryActivation, "V4.1 router bench")
+	bt := uploadHostF32Class(be, []int{cfg.Experts}, bias, compute.MemoryActivation, "V4.1 router bench")
+	defer be.Free(lt)
+	defer be.Free(bt)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := op.V41RouterTopK(lt, bt, 1, cfg.Experts, cfg.TopK, cfg.RouteScale, true, true); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
