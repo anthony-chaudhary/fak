@@ -101,7 +101,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"gpudirect-overflow",
 		"native-admission-token-budget", "kv-precision",
 		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",
-		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
+		"native-q4k-gateup-slab", "native-v41-prefill-sum-readback", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
 		"codex-config", "codex-home", "approve-for-me", "codex-loop-gate", "codex-loop-gate-limit",
