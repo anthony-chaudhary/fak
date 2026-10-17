@@ -11,12 +11,14 @@ import (
 // batched host-expert primitive (hostBatchedGLMExperts) the bare resident kernel does, instead of
 // falling through to the ~3*K-dispatch per-expert loop.
 //
-// The split the live GLM-DSA forward builds is splitKernel{host: residentKernel, device: ...,
-// onHost: isExpertWeight}. Its host side IS a residentKernel, but the concrete type threaded
-// through apply is splitKernel, so the bare `mat.(residentKernel)` gate (glmMoeFFN.apply) and the
-// type switch (moeFFN.apply) both MISS it and the per-expert loop runs. splitHostResidentExperts
-// closes that gap — and, critically, only for an ALL-host-routed pick set, so a GRADED split
-// (ExpertSpillLayers) that keeps some experts on the device declines rather than stealing them.
+// The split the live GLM-DSA forward builds is splitKernel{host: sessionResidentKernel, device: ...,
+// onHost: expertSpillOnHost()}. Its host side IS a resident host kernel (the session-owned
+// sessionResidentKernel since a85073d76c9, the bare residentKernel before it), but the concrete type
+// threaded through apply is splitKernel, so the bare `mat.(residentKernel)` gate (glmMoeFFN.apply)
+// and the type switch (moeFFN.apply) both MISS it and the per-expert loop runs.
+// splitHostResidentExperts closes that gap — and, critically, only for an ALL-host-routed pick set,
+// so a GRADED split (ExpertSpillLayers) that keeps some experts on the device declines rather than
+// stealing them.
 //
 // WITNESS SPLIT (why there are two assertions per test): the batched delta and the per-expert
 // loop are BIT-IDENTICAL by design, so the numeric max|Δ|==0 check is the bit-identity witness
@@ -76,18 +78,26 @@ func TestGLMMoeFFNSplitHostBatchedMatchesLoop(t *testing.T) {
 	}
 
 	// The offload-hybrid split, driven through the REAL production seam: glmDsaMatKernel builds
-	// splitKernel{host: residentKernel, device, onHost: expertSpillOnHost()} for `--n-cpu-moe`
-	// (no device attached here -> device==host==residentKernel). Constructing it via the session
-	// (not by hand) pins that the PRODUCTION predicate — expertSpillOnHost, whose default grade is
-	// isExpertWeight — is what the batch admits, the exact bug class #12972 fixes.
+	// splitKernel{host: sessionResidentKernel, device, onHost: expertSpillOnHost()} for
+	// `--n-cpu-moe` (no device attached here -> device==host==sessionResidentKernel). Constructing
+	// it via the session (not by hand) pins that the PRODUCTION predicate — expertSpillOnHost,
+	// whose default grade is isExpertWeight — is what the batch admits, the exact bug class #12972
+	// fixes.
+	//
+	// The host side is the SESSION-owned resident kernel, not the bare residentKernel: a85073d76c9
+	// made glmDsaMatKernel thread sessionResidentKernel{s} so every host GEMV is admitted as a host
+	// stage under the session's execution policy. It computes the identical residentMatRows bytes
+	// and differs only in that admission, so splitHostResidentExperts must accept BOTH types — the
+	// bare-type gate it replaced silently declined the production split and left the batched
+	// host-expert path unreachable on the hybrid.
 	s := &Session{M: m, CPUOffloadExperts: true}
 	mat := s.glmDsaMatKernel()
 	sk, ok := mat.(splitKernel)
 	if !ok {
 		t.Fatalf("glmDsaMatKernel returned %T, want splitKernel for CPUOffloadExperts", mat)
 	}
-	if _, ok := sk.host.(residentKernel); !ok {
-		t.Fatalf("glmDsaMatKernel split host is %T, want residentKernel", sk.host)
+	if _, ok := sk.host.(sessionResidentKernel); !ok {
+		t.Fatalf("glmDsaMatKernel split host is %T, want sessionResidentKernel", sk.host)
 	}
 	if sk.onHost == nil {
 		t.Fatalf("glmDsaMatKernel split carries a nil onHost predicate")
@@ -267,6 +277,14 @@ func TestSplitHostResidentExpertsDeclinesGradedSpill(t *testing.T) {
 	// Every pick host-routed -> admitted.
 	if !splitHostResidentExperts(splitKernel{host: residentKernel{m}, device: residentKernel{m}, onHost: allHost}, 0, picks) {
 		t.Fatalf("all-host picks declined; want admitted")
+	}
+
+	// The production host side is the session-owned sessionResidentKernel (a85073d76c9), which
+	// computes the identical residentMatRows bytes and differs only in admitting each GEMV as a
+	// host stage. It must be admitted exactly like the bare residentKernel, or the hybrid silently
+	// declines the batched path.
+	if !splitHostResidentExperts(splitKernel{host: sessionResidentKernel{&Session{M: m}}, device: residentKernel{m}, onHost: allHost}, 0, picks) {
+		t.Fatalf("session-owned resident host declined; want admitted")
 	}
 
 	// Graded: expert 1 is device-kept, so the split declines (and the loop runs).
