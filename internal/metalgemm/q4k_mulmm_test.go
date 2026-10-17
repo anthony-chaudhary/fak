@@ -15,18 +15,18 @@ import (
 // The control arms (scalar Q4_K, naive Q6_K) compute in f32 end to end, so they keep the strict
 // bounds every pre-#13692 Q4_K parity witness uses: cosine >= 0.999999 and maxRel <= 5e-3.
 //
-// mul_mm keeps f32 activations and f32 accumulators but rounds every dequantized weight to half
-// before the simdgroup MMA. Round-to-nearest half has unit roundoff u = 2^-11 ~= 4.9e-4, so each
-// weight carries an independent relative error of at most u (uniform, std u/sqrt(3) ~= 2.8e-4).
-// For an output y = sum_i w_i*x_i the induced error is sum_i dw_i*x_i, whose standard deviation is
-// ~2.8e-4 * ||w o x||_2, while |y| itself is ~||w o x||_2 for these mixed-sign activations. The
-// maxRel metric (q4kTestCosineMaxRel) only scores outputs with |y| >= rms(y), so a typical scored
-// element sits near 2.8e-4 relative error and the largest of up to ~2e5 scored elements (P=2048)
-// is ~5 sigma, about 1.5e-3. That leaves the strict 5e-3 bound only ~3x headroom, so mul_mm gets an
-// explicit 1e-2 maxRel (~35 sigma of the half-rounding model: a real indexing or scale bug lands at
-// O(1) relative error, three orders of magnitude above it). Cosine follows the same model:
-// 1 - cos ~= (rel)^2/2 ~= 4e-8, so 0.99999 is a 250x margin and still rejects any mis-tiled or
-// mis-scaled block (a single wrong 16-weight chunk in a 512-wide row already costs > 1e-3).
+// mul_mm keeps f32 accumulators but rounds every dequantized weight and every staged activation to
+// half before the simdgroup MMA. Round-to-nearest half has unit roundoff u = 2^-11 ~= 4.9e-4, so
+// each operand carries an independent relative error of at most u (uniform, std u/sqrt(3) ~=
+// 2.8e-4), ~4e-4 per product with both rounded. For an output y = sum_i w_i*x_i the induced error
+// has standard deviation ~4e-4 * ||w o x||_2, while |y| itself is ~||w o x||_2 for these
+// mixed-sign activations. The maxRel metric (q4kTestCosineMaxRel) only scores outputs with
+// |y| >= rms(y), so a typical scored element sits near 4e-4 relative error and the largest of up to
+// ~2e5 scored elements (P=2048) is ~5 sigma, about 2e-3. That leaves the strict 5e-3 bound only
+// ~2.5x headroom, so mul_mm gets an explicit 1e-2 maxRel (~25 sigma of the half-rounding model: a
+// real indexing or scale bug lands at O(1) relative error, far above it). Cosine follows the same
+// model: 1 - cos ~= (rel)^2/2 ~= 8e-8, so 0.99999 is a >100x margin and still rejects any
+// mis-tiled or mis-scaled block (a single wrong 16-weight chunk in a 512-wide row costs > 1e-3).
 const (
 	kquantStrictMinCosine = 0.999999
 	kquantStrictMaxRel    = 5e-3
@@ -549,4 +549,41 @@ func TestKQuantMulMMEncodesIntoGraphCommandBuffer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestKQuantMulMMQ4KRealisticSuperScales holds Q4_K mul_mm to the strict cosine bound with
+// super-block scales in the range real Q4_K_M weights carry (d, dmin in [2^-14, 2^-12), median
+// d ~6e-5 on Qwen3.5), where d/16 is subnormal in f16. q4kTestRaw keeps d in [1/64, 1/4), far from
+// that grid, so only this fixture sees a high-nibble scale divided in half precision: that
+// skews every chunk il&3 >= 2 by a shared 0.1-1% and costs 1-cos ~5e-6, against ~1e-7 from
+// per-operand half rounding.
+//
+// fak-test:runtime integration est=1s lane=default
+func TestKQuantMulMMQ4KRealisticSuperScales(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	if bits := kquantMulMMBits(); bits&1 == 0 {
+		t.Fatalf("Q4_K mul_mm pipeline unavailable on a Metal host: ready bits=%b", bits)
+	}
+	defer ResetQ4K()
+	const out, in, P = 128, 2560, 128
+	raw := q4kTestRaw(out, in, 0x5ca1e)
+	for base := 0; base < len(raw); base += q4kTestBlockBytes {
+		raw[base+1] = 0x04 | raw[base+1]&0x03
+		raw[base+3] = 0x04 | raw[base+3]&0x03
+	}
+	w := UploadQ4K(raw, out, in)
+	if w == nil {
+		t.Fatalf("UploadQ4K(%d,%d) returned nil", out, in)
+	}
+	defer w.Release()
+	x := kquantTestPanel(P, in)
+	ref := kquantReferencePanel(func(xr []float32) []float32 { return q4kVectorizedReference(raw, out, in, xr) }, x, P, in, out)
+	got := make([]float32, P*out)
+	want := Q4KGEMMIdentity{Requested: Q4KGEMMExecutedMulMM, Executed: Q4KGEMMExecutedMulMM}
+	if id := w.GEMMWithEventsMode(x, P, got, nil, Q4KGEMMModeMulMM); id != want {
+		t.Fatalf("Q4_K mul_mm identity=%+v want %+v", id, want)
+	}
+	kquantAssertParity(t, "Q4_K mul_mm realistic scales vs CPU oracle", ref, got, kquantStrictMinCosine, kquantMulMMMaxRel)
 }

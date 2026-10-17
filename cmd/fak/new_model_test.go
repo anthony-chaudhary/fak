@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/newmodel"
@@ -43,5 +44,17 @@ func TestNewModelManifestCLIEmitsPacketAndTypedRefusal(t *testing.T) {
 	stderr.Reset()
 	if code := runNewModel(&stdout, &stderr, []string{"--family", "fixture", "--json"}); code != 0 {
 		t.Fatalf("legacy scaffold exit=%d stderr=%s", code, stderr.String())
+	}
+	var scaffold newmodel.Result
+	if err := json.Unmarshal(stdout.Bytes(), &scaffold); err != nil {
+		t.Fatal(err)
+	}
+	if len(scaffold.NextSteps) == 0 || !strings.HasPrefix(scaffold.NextSteps[0], "P0 prerequisite:") || !strings.Contains(scaffold.NextSteps[0], "--from-manifest release.json --json") || !strings.Contains(scaffold.NextSteps[0], "pretrained_drafter") {
+		t.Fatalf("legacy JSON scaffold hid the P0 pinned intake: %+v", scaffold)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNewModel(&stdout, &stderr, []string{"--family", "fixture"}); code != 0 || !strings.Contains(stdout.String(), scaffold.NextSteps[0]) {
+		t.Fatalf("legacy text scaffold lost the same P0 prerequisite: exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 }

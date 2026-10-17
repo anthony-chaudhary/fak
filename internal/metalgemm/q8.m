@@ -226,8 +226,7 @@ kernel void q8_gemm(device const char*  W    [[buffer(0)]],  // out*in int8 code
 // 541bf376229d6c5cb61e4eb59b3c7629755b8271 (b8200), MIT; Copyright
 // (c) 2023-2026 The ggml authors), in the same tile topology as q4k.m's q4k_mul_mm: a 64-row x
 // 32-token output tile over 4 simdgroups, one 32-wide K step per Q8_0 block, weights staged as half
-// 8x8 tiles, activations as f32, f32 accumulators. Upstream stages both operands as half;
-// this adaptation keeps activations as f32 after their int8 dequantization.
+// 8x8 tiles, activations dequantized from int8 and staged as half like upstream, f32 accumulators.
 // It reads FAK's split resident layout (int8 codes
 // + f32 block scales) and the same int8 activation panel as q8_gemm, so the bindings are q8_gemm's
 // minus the t0/nt token loop: one dispatch covers the GEMM. Weights round to half after scaling,
@@ -237,6 +236,7 @@ kernel void q8_gemm(device const char*  W    [[buffer(0)]],  // out*in int8 code
 #define Q8MM_TPR 2
 #define Q8MM_TPC 4
 #define Q8MM_TG 128
+#define Q8MM_UNROLL _Pragma("clang loop unroll(full)")
 kernel void q8_mul_mm(device const char*  W    [[buffer(0)]],
                       device const float* WD   [[buffer(1)]],
                       device const char*  X    [[buffer(2)]],
@@ -249,8 +249,8 @@ kernel void q8_mul_mm(device const char*  W    [[buffer(0)]],
                       ushort tiitg [[thread_index_in_threadgroup]],
                       ushort sgitg [[simdgroup_index_in_threadgroup]]) {
     threadgroup float shmem[Q8MM_BM * Q8MM_BN];
-    threadgroup half*  sa = (threadgroup half*)shmem;
-    threadgroup float* sb = shmem + Q8MM_BM * 32 / 2;
+    threadgroup half* sa = (threadgroup half*)shmem;
+    threadgroup half* sb = (threadgroup half*)shmem + Q8MM_BM * 32;
     const int r1 = (int)tg.x;
     const int r0 = (int)tg.y;
     const int in = nblk * 32;
@@ -262,7 +262,7 @@ kernel void q8_mul_mm(device const char*  W    [[buffer(0)]],
     const short kc = (short)(tiitg % Q8MM_TPC);
 
     simdgroup_half8x8  ma[4];
-    simdgroup_float8x8 mb[2];
+    simdgroup_half8x8  mb[2];
     simdgroup_float8x8 mc[8];
     for (short i = 0; i < 8; i++) mc[i] = make_filled_simdgroup_matrix<float, 8>(0.0f);
 
@@ -280,25 +280,27 @@ kernel void q8_mul_mm(device const char*  W    [[buffer(0)]],
         const float dy = yd[b];
         const char4 c0 = *(device const char4*)(y);
         const char4 c1 = *(device const char4*)(y + 4);
-        float2x4 temp_b = float2x4(float4(c0) * dy, float4(c1) * dy);
+        half2x4 temp_b = half2x4(half4(float4(c0) * dy), half4(float4(c1) * dy));
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (short i = 0; i < 16; i++) {
+        Q8MM_UNROLL for (short i = 0; i < 16; i++) {
             sa[64 * ((tiitg / Q8MM_TPR / 8) + il * 16 + (i / 8) * 8) + (tiitg / Q8MM_TPR) % 8 + (i & 7) * 8] = temp_a[i / 4][i % 4];
         }
-        *(threadgroup float2x4*)(sb + kc * 8 * 32 + 8 * (tiitg / Q8MM_TPC)) = temp_b;
+        *(threadgroup half2x4*)(sb + kc * 8 * 32 + 8 * (tiitg / Q8MM_TPC)) = temp_b;
         x += 32;
         y += 32;
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        threadgroup const half*  lsma = sa + 4 * 64 * (sgitg % 2);
-        threadgroup const float* lsmb = sb + 2 * 64 * (sgitg / 2);
-        for (short ik = 0; ik < 4; ik++) {
-            for (short i = 0; i < 4; i++) simdgroup_load(ma[i], lsma + 64 * i);
+        threadgroup const half* lsma = sa + 4 * 64 * (sgitg % 2);
+        threadgroup const half* lsmb = sb + 2 * 64 * (sgitg / 2);
+        Q8MM_UNROLL for (short ik = 0; ik < 4; ik++) {
             simdgroup_barrier(mem_flags::mem_none);
-            for (short i = 0; i < 2; i++) simdgroup_load(mb[i], lsmb + 64 * i);
+            Q8MM_UNROLL for (short i = 0; i < 4; i++) simdgroup_load(ma[i], lsma + 64 * i);
+            simdgroup_barrier(mem_flags::mem_none);
+            Q8MM_UNROLL for (short i = 0; i < 2; i++) simdgroup_load(mb[i], lsmb + 64 * i);
+            simdgroup_barrier(mem_flags::mem_none);
+            Q8MM_UNROLL for (short i = 0; i < 8; i++) simdgroup_multiply_accumulate(mc[i], mb[i / 4], ma[i % 4], mc[i]);
             lsma += Q8MM_BM / 8 * 64;
             lsmb += Q8MM_BN / 8 * 64;
-            for (short i = 0; i < 8; i++) simdgroup_multiply_accumulate(mc[i], mb[i / 4], ma[i % 4], mc[i]);
         }
     }
 

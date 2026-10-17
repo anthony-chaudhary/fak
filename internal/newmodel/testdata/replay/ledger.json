@@ -17,18 +17,27 @@
       "architecture_family": "deepseek_v3",
       "model_type": "deepseek_v3",
       "outcome": "packet",
-      "outcome_sha256": "8ccfdd1019acff60e99b4d61a8665e217fc2dbe568986d2340a3cf31f646b11d",
+      "outcome_sha256": "bfb595028badb4781d4eeae9234195e0e316bac6a4ae4c82b16098218e83dc46",
       "byte_identical": true,
       "semantic_gaps": [
+        "obligation:pretrained-drafter-artifact-availability-and-pins",
+        "obligation:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "obligation:verify-upstream-semantics"
       ],
       "obligations": [
         "backend:implement-native-backend",
+        "backend:pretrained-drafter-native-forward-and-state-cache",
+        "backend:pretrained-drafter-serving-activation-and-defaults",
+        "backend:pretrained-drafter-tensor-inventory-and-loader",
         "docs:update-support-status",
         "oracle:capture-quality-oracle",
         "performance:measure-after-support",
+        "performance:pretrained-drafter-measured-end-to-end-benefit",
+        "semantic:pretrained-drafter-artifact-availability-and-pins",
+        "semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "semantic:verify-upstream-semantics",
-        "test:add-conformance-witness"
+        "test:add-conformance-witness",
+        "test:pretrained-drafter-exact-verification-rollback-stop"
       ],
       "manual_corrections": 0,
       "execution": "not-run",
@@ -50,18 +59,27 @@
       "architecture_family": "deepseek_v3",
       "model_type": "deepseek_v3",
       "outcome": "packet",
-      "outcome_sha256": "c1569d42165dd5331a3c9c67e98f69e7b903e56d4c090d50ccc37dc69a69a613",
+      "outcome_sha256": "f543f6f48c4117d5341e329b1f0f75b5bb212278e9bbacc702567dcda3635897",
       "byte_identical": true,
       "semantic_gaps": [
+        "obligation:pretrained-drafter-artifact-availability-and-pins",
+        "obligation:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "obligation:verify-upstream-semantics"
       ],
       "obligations": [
         "backend:implement-native-backend",
+        "backend:pretrained-drafter-native-forward-and-state-cache",
+        "backend:pretrained-drafter-serving-activation-and-defaults",
+        "backend:pretrained-drafter-tensor-inventory-and-loader",
         "docs:update-support-status",
         "oracle:capture-quality-oracle",
         "performance:measure-after-support",
+        "performance:pretrained-drafter-measured-end-to-end-benefit",
+        "semantic:pretrained-drafter-artifact-availability-and-pins",
+        "semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "semantic:verify-upstream-semantics",
-        "test:add-conformance-witness"
+        "test:add-conformance-witness",
+        "test:pretrained-drafter-exact-verification-rollback-stop"
       ],
       "manual_corrections": 0,
       "execution": "not-run",
@@ -227,18 +245,27 @@
       "architecture_family": "qwen3_5_moe",
       "model_type": "qwen3_5_moe",
       "outcome": "packet",
-      "outcome_sha256": "a407410a9b8e5dc59786a52cfbd37e62005be4b29aa20834df0423849a8ce639",
+      "outcome_sha256": "1e4256d03a28f420e8c935ad75378d693e95216ee0aa258318cc7659a3cf9b7a",
       "byte_identical": true,
       "semantic_gaps": [
+        "obligation:pretrained-drafter-artifact-availability-and-pins",
+        "obligation:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "obligation:verify-upstream-semantics"
       ],
       "obligations": [
         "backend:implement-native-backend",
+        "backend:pretrained-drafter-native-forward-and-state-cache",
+        "backend:pretrained-drafter-serving-activation-and-defaults",
+        "backend:pretrained-drafter-tensor-inventory-and-loader",
         "docs:update-support-status",
         "oracle:capture-quality-oracle",
         "performance:measure-after-support",
+        "performance:pretrained-drafter-measured-end-to-end-benefit",
+        "semantic:pretrained-drafter-artifact-availability-and-pins",
+        "semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "semantic:verify-upstream-semantics",
-        "test:add-conformance-witness"
+        "test:add-conformance-witness",
+        "test:pretrained-drafter-exact-verification-rollback-stop"
       ],
       "manual_corrections": 0,
       "execution": "not-run",
@@ -260,18 +287,27 @@
       "architecture_family": "qwen3_5",
       "model_type": "qwen3_5",
       "outcome": "packet",
-      "outcome_sha256": "d949ffbcf9bcd3bf201745e32625ce4cd5f86ae8cd264febac7c7d4679863c77",
+      "outcome_sha256": "496483521d6cd99f0eace5578a526ce7368c221bfff686b51b404b22b74dafae",
       "byte_identical": true,
       "semantic_gaps": [
+        "obligation:pretrained-drafter-artifact-availability-and-pins",
+        "obligation:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "obligation:verify-upstream-semantics"
       ],
       "obligations": [
         "backend:implement-native-backend",
+        "backend:pretrained-drafter-native-forward-and-state-cache",
+        "backend:pretrained-drafter-serving-activation-and-defaults",
+        "backend:pretrained-drafter-tensor-inventory-and-loader",
         "docs:update-support-status",
         "oracle:capture-quality-oracle",
         "performance:measure-after-support",
+        "performance:pretrained-drafter-measured-end-to-end-benefit",
+        "semantic:pretrained-drafter-artifact-availability-and-pins",
+        "semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "semantic:verify-upstream-semantics",
-        "test:add-conformance-witness"
+        "test:add-conformance-witness",
+        "test:pretrained-drafter-exact-verification-rollback-stop"
       ],
       "manual_corrections": 0,
       "execution": "not-run",
@@ -294,18 +330,27 @@
       "model_type": "qwen3_5",
       "compatibility_exception": "Qwen3.6 compatibility replay: the official pinned config declares qwen3_5 model_type; no official public Qwen3.8 checkpoint was observed on 2026-08-27",
       "outcome": "packet",
-      "outcome_sha256": "c93473f663e503b0f388e8944f41fced0e7820ff6b1699c511b038d868cbe751",
+      "outcome_sha256": "3cdde573845f622012c0c45eea967e8639446442e4a4e5eb169aadd50aff8d74",
       "byte_identical": true,
       "semantic_gaps": [
+        "obligation:pretrained-drafter-artifact-availability-and-pins",
+        "obligation:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "obligation:verify-upstream-semantics"
       ],
       "obligations": [
         "backend:implement-native-backend",
+        "backend:pretrained-drafter-native-forward-and-state-cache",
+        "backend:pretrained-drafter-serving-activation-and-defaults",
+        "backend:pretrained-drafter-tensor-inventory-and-loader",
         "docs:update-support-status",
         "oracle:capture-quality-oracle",
         "performance:measure-after-support",
+        "performance:pretrained-drafter-measured-end-to-end-benefit",
+        "semantic:pretrained-drafter-artifact-availability-and-pins",
+        "semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "semantic:verify-upstream-semantics",
-        "test:add-conformance-witness"
+        "test:add-conformance-witness",
+        "test:pretrained-drafter-exact-verification-rollback-stop"
       ],
       "manual_corrections": 1,
       "execution": "not-run",
@@ -328,18 +373,27 @@
       "model_type": "qwen3_5_moe",
       "compatibility_exception": "Qwen3.6 compatibility replay: the official pinned config declares qwen3_5_moe model_type; no official public Qwen3.8 checkpoint was observed on 2026-08-27",
       "outcome": "packet",
-      "outcome_sha256": "adefe5d94c8203eaa4c0b838b66c2e8bbcccfba10f0ea79cdfff2fc1b165571a",
+      "outcome_sha256": "4f924a0d8dd4b81cfcdd7dd7e8daad7c771bf7a61acc071c7d546f4e60e938e9",
       "byte_identical": true,
       "semantic_gaps": [
+        "obligation:pretrained-drafter-artifact-availability-and-pins",
+        "obligation:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "obligation:verify-upstream-semantics"
       ],
       "obligations": [
         "backend:implement-native-backend",
+        "backend:pretrained-drafter-native-forward-and-state-cache",
+        "backend:pretrained-drafter-serving-activation-and-defaults",
+        "backend:pretrained-drafter-tensor-inventory-and-loader",
         "docs:update-support-status",
         "oracle:capture-quality-oracle",
         "performance:measure-after-support",
+        "performance:pretrained-drafter-measured-end-to-end-benefit",
+        "semantic:pretrained-drafter-artifact-availability-and-pins",
+        "semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
         "semantic:verify-upstream-semantics",
-        "test:add-conformance-witness"
+        "test:add-conformance-witness",
+        "test:pretrained-drafter-exact-verification-rollback-stop"
       ],
       "manual_corrections": 1,
       "execution": "not-run",

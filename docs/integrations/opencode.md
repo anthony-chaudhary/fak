@@ -75,9 +75,26 @@ fak opencode --dry-run                  # preview the guarded command
 fak opencode --probe "Use bash to echo ok" # one-shot probe turn
 fak opencode --local                    # auto-detect local model server (Ollama, LM Studio, Qwen3.6)
 fak opencode --base-url http://127.0.0.1:8001/v1  # point at a custom /v1 upstream
+fak opencode --dir DIR                  # launch another workspace
+fak opencode --guard --dir DIR -- run -- "Review the workspace"
 ```
 
 `fak opencode` injects `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1` into the child process only, enforces the capability floor over OpenCode's tool dialect (`bash`, `read`, `write`, `edit`, `grep`, `glob`, `todowrite`, `task`, `question`, `skill`), and records an audit journal.
+
+Place `--dir DIR` before the first `--`. It is a `fak opencode` launcher option:
+fak resolves workspace configuration from `DIR`, launches OpenCode there, and
+consumes the option instead of forwarding it. When `--dir` is omitted, the
+current working directory remains the workspace.
+
+With `--guard`, fak also resolves Router credentials from `DIR` and passes the
+selected credential to the guard through the launcher environment. OpenCode's
+gateway config uses an `OPENAI_API_KEY` placeholder; the guard supplies the
+selected upstream authentication when forwarding.
+
+Arguments after the first `--` are OpenCode arguments; start them with `run` for
+a headless turn. A second `--` ends the OpenCode `run` flags, so the remaining
+prompt is passed through unchanged; text in that prompt is never reinterpreted
+as a fak launcher option.
 
 ## Path 2 — Dogfood scripts
 

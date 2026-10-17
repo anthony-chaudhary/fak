@@ -146,20 +146,54 @@ type CouplingDeclaration struct {
 }
 
 type Packet struct {
-	Schema                  string              `json:"schema"`
-	ManifestDigest          string              `json:"manifest_digest"`
-	Engine                  string              `json:"engine"`
-	ExternalRuntimeFallback bool                `json:"external_runtime_fallback"`
-	Release                 ReleaseIdentity     `json:"release"`
-	Rollback                string              `json:"rollback"`
-	Source                  SourcePin           `json:"source"`
-	Artifact                ArtifactPin         `json:"artifact"`
-	Descriptor              DescriptorPacket    `json:"descriptor"`
-	SemanticDeltas          []SemanticDelta     `json:"semantic_deltas"`
-	SupportLadder           []SupportRung       `json:"support_ladder"`
-	Obligations             []Obligation        `json:"obligations"`
-	RegistrationClosure     RegistrationClosure `json:"registration_closure"`
-	Coupling                CouplingReport      `json:"coupling"`
+	Schema                  string                     `json:"schema"`
+	ManifestDigest          string                     `json:"manifest_digest"`
+	Engine                  string                     `json:"engine"`
+	ExternalRuntimeFallback bool                       `json:"external_runtime_fallback"`
+	Release                 ReleaseIdentity            `json:"release"`
+	Rollback                string                     `json:"rollback"`
+	Source                  SourcePin                  `json:"source"`
+	Artifact                ArtifactPin                `json:"artifact"`
+	Descriptor              DescriptorPacket           `json:"descriptor"`
+	SemanticDeltas          []SemanticDelta            `json:"semantic_deltas"`
+	SupportLadder           []SupportRung              `json:"support_ladder"`
+	Obligations             []Obligation               `json:"obligations"`
+	RegistrationClosure     RegistrationClosure        `json:"registration_closure"`
+	Coupling                CouplingReport             `json:"coupling"`
+	PretrainedDrafter       PretrainedDrafterInventory `json:"pretrained_drafter"`
+}
+
+// PretrainedDrafterInventory makes trained-drafter intake an unavoidable P0
+// part of every model packet (#9628; visibility coordinates with #9630).
+// It records missing evidence, not runtime eligibility. A release pin, study,
+// ticket, or scaffold cannot establish implementation, testing, or hardware
+// qualification. Compilation never admits execution or enables a default.
+type PretrainedDrafterInventory struct {
+	Schema                string                   `json:"schema"`
+	Priority              string                   `json:"priority"`
+	TargetID              string                   `json:"target_id"`
+	TargetRevision        string                   `json:"target_revision"`
+	TargetArtifactSHA256  string                   `json:"target_artifact_sha256"`
+	TargetTokenizerSHA256 string                   `json:"target_tokenizer_sha256"`
+	ArtifactAvailability  string                   `json:"artifact_availability"`
+	Implementation        string                   `json:"implementation"`
+	SoftwareVerification  string                   `json:"software_verification"`
+	HardwareQualification string                   `json:"hardware_qualification"`
+	ServingActivation     string                   `json:"serving_activation"`
+	ExecutionAdmitted     bool                     `json:"execution_admitted"`
+	DefaultEnabled        bool                     `json:"default_enabled"`
+	Checks                []PretrainedDrafterCheck `json:"checks"`
+}
+
+// PretrainedDrafterCheck joins a mandatory evidence checklist to the existing
+// obligations, support ladder, and registration closure; it is not a second
+// completion tracker. Status is always pending in an intake packet.
+type PretrainedDrafterCheck struct {
+	ObligationID     string   `json:"obligation_id"`
+	Kind             string   `json:"kind"`
+	Status           string   `json:"status"`
+	Description      string   `json:"description"`
+	EvidenceRequired []string `json:"evidence_required"`
 }
 
 type CouplingReport struct {
@@ -307,9 +341,73 @@ func CompileManifest(raw []byte) (Packet, error) {
 		Descriptor: descriptorPacket(descriptor), SemanticDeltas: manifest.SemanticDeltas,
 		Obligations: manifest.Obligations, Coupling: couplingPacket(report),
 	}
+	addPretrainedDrafterInventory(&packet)
 	packet.SupportLadder = supportLadder(packet.Obligations)
 	packet.RegistrationClosure = closure(packet.Obligations)
 	return packet, nil
+}
+
+// addPretrainedDrafterInventory deliberately does not infer availability or
+// qualification from a model family, source release, descriptor readiness tag,
+// or a generic speculative loop. Every new model needs its own pinned evidence.
+func addPretrainedDrafterInventory(packet *Packet) {
+	checks := []PretrainedDrafterCheck{
+		{
+			ObligationID: "pretrained-drafter-artifact-availability-and-pins", Kind: "semantic", Status: "pending",
+			Description:      "Survey published sidecars and bundled trained heads; pin the exact artifacts or record a dated, source-pinned no-artifact finding.",
+			EvidenceRequired: []string{"availability", "source_uri", "source_revision", "source_manifest_sha256", "weight_shard_sha256", "tokenizer_sha256", "chat_template_sha256", "license", "local_digest_verification"},
+		},
+		{
+			ObligationID: "pretrained-drafter-model-tokenizer-tap-quant-compatibility", Kind: "semantic", Status: "pending",
+			Description:      "Bind the trained draft to exact target bytes, vocabulary, hidden-state tap convention, and independent target/draft quantization.",
+			EvidenceRequired: []string{"training_target_revision", "loaded_target_artifact_sha256", "tokenizer_id_mapping", "shared_embedding_and_head", "hidden_state_tap_indices_and_convention", "target_quantization", "draft_quantization", "conversion_provenance"},
+		},
+		{
+			ObligationID: "pretrained-drafter-tensor-inventory-and-loader", Kind: "backend", Status: "pending",
+			Description:      "Enumerate and load every draft tensor, including bundled namespaces omitted by the target loader; reject incomplete or incompatible payloads.",
+			EvidenceRequired: []string{"tensor_names", "shapes", "dtypes", "scale_layouts", "payload_bounds", "loader_entry_point", "real_header_witness", "missing_or_extra_tensor_refusal"},
+		},
+		{
+			ObligationID: "pretrained-drafter-native-forward-and-state-cache", Kind: "backend", Status: "pending",
+			Description:      "Execute the trained draft forward inside fak-native with feature capture and transactional, bounded draft/target state.",
+			EvidenceRequired: []string{"native_forward_call_path", "target_feature_capture", "draft_state_cache", "state_identity", "snapshot_restore_trim", "memory_bound", "independent_forward_oracle"},
+		},
+		{
+			ObligationID: "pretrained-drafter-exact-verification-rollback-stop", Kind: "test", Status: "pending",
+			Description:      "Prove exact target verification, anchor/bonus accounting, rejection rollback, EOS/stop handling, cancellation, and reusable state for the declared sampling policy.",
+			EvidenceRequired: []string{"greedy_token_parity", "sampling_distribution_or_explicit_refusal", "anchor_and_bonus_accounting", "rejection_at_each_position", "rollback", "eos_and_stop", "cancellation_and_session_reuse"},
+		},
+		{
+			ObligationID: "pretrained-drafter-serving-activation-and-defaults", Kind: "backend", Status: "pending",
+			Description:      "Witness the normal serving entry point, selection receipt, kill switch, and qualification-bound default; preserve explicit unsupported refusal and native-only execution.",
+			EvidenceRequired: []string{"serving_entry_point", "executed_route_receipt", "eligibility_envelope", "default_policy", "kill_switch_drill", "unsupported_refusal", "external_runtime_fallback_zero"},
+		},
+		{
+			ObligationID: "pretrained-drafter-measured-end-to-end-benefit", Kind: "performance", Status: "pending",
+			Description:      "Measure matched target-only and trained-draft arms on physical hardware with quality constraints and inclusive startup, draft, verification, and recovery costs.",
+			EvidenceRequired: []string{"accepted_tokens_per_round", "proposed_tokens_and_round_count", "acceptance_by_position", "draft_cost_ms", "verify_cost_ms", "quality_parity", "end_to_end_throughput", "ttft_and_latency", "hardware_and_workload_pins", "repeated_trials", "memory_and_startup_cost"},
+		},
+	}
+	packet.PretrainedDrafter = PretrainedDrafterInventory{
+		Schema: "fak.new-model-pretrained-drafter/1", Priority: "P0",
+		TargetID: packet.Release.ID, TargetRevision: packet.Release.Revision,
+		TargetArtifactSHA256: packet.Artifact.SHA256, TargetTokenizerSHA256: packet.Artifact.TokenizerSHA256,
+		ArtifactAvailability: "not-surveyed", Implementation: "unassessed",
+		SoftwareVerification: "not-established", HardwareQualification: "not-established",
+		ServingActivation: "not-admitted", ExecutionAdmitted: false, DefaultEnabled: false,
+		Checks: checks,
+	}
+	for _, check := range checks {
+		packet.Obligations = append(packet.Obligations, Obligation{
+			ID: check.ObligationID, Kind: check.Kind, Description: "P0 pretrained drafter: " + check.Description,
+		})
+	}
+	sort.Slice(packet.Obligations, func(i, j int) bool {
+		if packet.Obligations[i].Kind == packet.Obligations[j].Kind {
+			return packet.Obligations[i].ID < packet.Obligations[j].ID
+		}
+		return packet.Obligations[i].Kind < packet.Obligations[j].Kind
+	})
 }
 
 func CompileManifestJSON(raw []byte) ([]byte, error) {
@@ -398,6 +496,9 @@ func validateObligations(obligations []Obligation) error {
 	for _, obligation := range obligations {
 		if obligation.ID == "" || obligation.Description == "" || !contains(obligationKinds, obligation.Kind) {
 			return refuse(RefusalObligationsIncomplete, obligation.Kind, "every obligation needs a unique id, a known kind, and a description")
+		}
+		if strings.HasPrefix(obligation.ID, "pretrained-drafter-") {
+			return refuse(RefusalObligationsIncomplete, obligation.ID, "pretrained-drafter- IDs are compiler-owned P0 obligations")
 		}
 		if seenIDs[obligation.ID] {
 			return refuse(RefusalObligationsIncomplete, obligation.ID, "duplicate obligation id")

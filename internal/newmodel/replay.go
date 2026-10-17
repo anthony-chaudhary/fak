@@ -154,6 +154,17 @@ func Replay(corpus ReplayCorpus) (ReplayLedger, error) {
 		if outcome == "refusal" && refusal.Reason != replayCase.ExpectedReason {
 			return ReplayLedger{}, fmt.Errorf("newmodel replay %s: refusal %s, want %s", replayCase.ID, refusal.Reason, replayCase.ExpectedReason)
 		}
+		// Accepted rows expose the compiler's complete obligation inventory,
+		// including generated P0 draft checks. Refusals have no packet and
+		// retain the original manifest's obligations and semantic gaps.
+		effectiveManifest := manifest
+		if outcome == "packet" {
+			var packet Packet
+			if err := json.Unmarshal(first, &packet); err != nil {
+				return ReplayLedger{}, fmt.Errorf("newmodel replay %s packet: %w", replayCase.ID, err)
+			}
+			effectiveManifest.Obligations = packet.Obligations
+		}
 		sum := sha256.Sum256(first)
 		row := ReplayRow{
 			ID: replayCase.ID, Repository: replayCase.Repository, Revision: replayCase.Revision,
@@ -163,7 +174,7 @@ func Replay(corpus ReplayCorpus) (ReplayLedger, error) {
 			Architecture: replayCase.Architecture, ArchitectureFamily: replayCase.ArchitectureFamily,
 			ModelType: replayCase.ModelType, CompatibilityException: replayCase.CompatibilityException,
 			Outcome: outcome, OutcomeSHA256: hex.EncodeToString(sum[:]), ByteIdentical: true,
-			SemanticGaps: semanticReplayGaps(manifest, refusal), Obligations: replayObligations(manifest),
+			SemanticGaps: semanticReplayGaps(effectiveManifest, refusal), Obligations: replayObligations(effectiveManifest),
 			ManualCorrections: replayCase.ManualCorrections, Execution: "not-run",
 		}
 		if refusal != nil {

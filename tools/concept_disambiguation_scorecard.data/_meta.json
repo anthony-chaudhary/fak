@@ -1467,6 +1467,11 @@
           "category": "incidental",
           "reason": "External Ruff tooling directory literal in the exact generator skip-directory set; copied unchanged for filesystem selection parity, with no FAK cache allocation, ownership, or reusable cache concept.",
           "token": "ruff_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required draft-state cache evidence in an intake checklist; it implements no cache and establishes no ownership, reuse, or correctness guarantee.",
+          "token": "draft_state_cache"
         }
       ],
       "exclude": [
@@ -1691,6 +1696,7 @@
         "detectCacheWarmReplay",
         "dogfoodCacheLedgerRow",
         "dogfoodCacheWitnessMaxAge",
+        "draft_state_cache",
         "droppedcachedtokens",
         "evalBuildCacheCleanArgRule",
         "fak_fleet_canonical_goal_cache_read_tokens_total",
@@ -2138,6 +2144,11 @@
           "category": "incidental",
           "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
           "token": "attentionInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned DFlash2 checkpoint tensor-group spelling for the existing pre/post attention convolution; no separate attention backend or attention policy is defined by the field name.",
+          "token": "attention_conv"
         }
       ],
       "exclude": [
@@ -2161,6 +2172,7 @@
         "attentionInputPanel",
         "attentionInputRun",
         "attentionRows",
+        "attention_conv",
         "attentions",
         "attentive",
         "attn_core",
@@ -7230,6 +7242,16 @@
           "category": "incidental",
           "reason": "Unexported precondition helper for the existing Gemma4 forward route: checks CPU execution wiring and raises ResidentQuantUnsupportedError for unsupported HAL, Metal or dynamic-precision modes. Like requireminimaxsession, it is internal admission plumbing, not a separate Session or scheduler entity; the new caller changes reference cardinality, not the concept.",
           "token": "requireGemma4Session"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required cancellation and session-reuse evidence in an intake checklist; it introduces no runtime session mechanism or completed reuse claim.",
+          "token": "cancellation_and_session_reuse"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 internal validator for the existing model Session feature-transaction contract; this helper introduces no separate session type or lifecycle.",
+          "token": "validateQwen35TargetFeatureSession"
         }
       ],
       "exclude": [
@@ -7394,6 +7416,7 @@
         "blankSessionOpen",
         "boolInt",
         "bumpSessionHandoffBlocks",
+        "cancellation_and_session_reuse",
         "capability_digest",
         "chooseSessionID",
         "classifyGuardCodexSessionStart",
@@ -7655,6 +7678,7 @@
         "tuisessionrow",
         "v41ActivationTraceEnvStageSlots",
         "validSessionRelayURL",
+        "validateQwen35TargetFeatureSession",
         "verifiedSlotMetadata",
         "verifiedSlotSchema",
         "verifyFilterToolScheduler",
@@ -8738,6 +8762,11 @@
           "category": "incidental",
           "reason": "Wire value of the existing hardware-witnessed evidence rung on the SSD restart receipt; it is not a separate proof concept.",
           "token": "HW_WITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names the required real checkpoint-header evidence for the existing tensor-loader obligation; it does not create a proof artifact or claim that the header has been verified.",
+          "token": "real_header_witness"
         }
       ],
       "id": "witness-proof",
@@ -8907,6 +8936,7 @@
         "proxyFillWitnesses",
         "readDurableDispatchWitnesses",
         "readGuardCompactionWitnesses",
+        "real_header_witness",
         "recordGuardCompactionWitness",
         "refut",
         "refutations",
@@ -9784,6 +9814,16 @@
           "category": "incidental",
           "reason": "Private iteration-local scratch extracted from the existing fixed-cohort decode loop; no new engine or serving policy.",
           "token": "inKernelDecodeIteration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned DFlash2 tensor-key spelling for the dynamic convolution weight projection; the kernel substring describes numerical filter coefficients rather than a gateway or execution engine.",
+          "token": "kernel_projection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned DFlash2 tensor-key spelling for base convolution coefficients; an upstream checkpoint field rather than a gateway or execution engine.",
+          "token": "base_kernel"
         }
       ],
       "exclude": [
@@ -9844,6 +9884,7 @@
         "TotalKernelTime",
         "WithAffinity",
         "applyInKernelBOS",
+        "base_kernel",
         "bashEngine",
         "cacheEmitter",
         "collectDogfoodKernelValue",
@@ -9923,6 +9964,7 @@
         "kernelValue",
         "kernel_100ns",
         "kernel_completion_timing",
+        "kernel_projection",
         "kernels",
         "kernelwiki",
         "markInKernelDroppedToolCalls",
@@ -12434,6 +12476,16 @@
           "category": "incidental",
           "reason": "planner method rendering through the installed layer memo",
           "token": "RenderIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 private per-layer key/value slices for the existing drafter context representation; this storage helper does not define a separate request or cancellation context.",
+          "token": "dflash2ContextKV"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 integer argument carrying the existing target-prefix offset into the draft reference constructor; an implementation coordinate rather than a new context abstraction.",
+          "token": "firstContextPosition"
         }
       ],
       "exclude": [
@@ -12554,9 +12606,11 @@
         "ctxSnapshot",
         "ctxThrashConsecutiveRefills",
         "ctxsleep",
+        "dflash2ContextKV",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
         "featureActivationContextKey",
+        "firstContextPosition",
         "formatGuardCompactionWitness",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
@@ -14265,6 +14319,16 @@
           "category": "incidental",
           "reason": "Environment-variable spelling for the candidate endpoint bearer-key input to the log-probability comparison command; it names authentication configuration, not a support-maturity or parity verdict.",
           "token": "FAK_PARITY_API_KEY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required target-token parity evidence for the existing exact-verification obligation; it records missing evidence and asserts no verified support maturity.",
+          "token": "greedy_token_parity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names the required unsupported-refusal evidence for the serving-activation obligation; it adds no refusal implementation and asserts no admitted model support.",
+          "token": "unsupported_refusal"
         }
       ],
       "exclude": [
@@ -14465,6 +14529,7 @@
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",
         "goalCoverageThreshold",
+        "greedy_token_parity",
         "guardClaudeRecordSupported",
         "guardKeychainSupported",
         "immaturity",
@@ -14531,6 +14596,7 @@
         "unsupported_extension",
         "unsupported_packing",
         "unsupported_recipe",
+        "unsupported_refusal",
         "unsupported_runtime_fusion",
         "unsupported_scale",
         "unsupported_variant_count",
@@ -17149,6 +17215,11 @@
           "category": "incidental",
           "reason": "same memo render method, flagged under the plan family",
           "token": "PlanContextLayers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 internal method selecting draft token candidates using the trained Markov selector; this numerical helper does not define a work plan or planning lifecycle.",
+          "token": "selectCandidates"
         }
       ],
       "exclude": [
@@ -17387,6 +17458,7 @@
         "scanCodexMarketplaceCandidates",
         "seedCandidate",
         "seen_candidates",
+        "selectCandidates",
         "select_candidate_blocks",
         "selfUpdateCandidateCacheDisabled",
         "selfUpdateCandidateCacheDisposition",
@@ -18046,6 +18118,11 @@
           "category": "incidental",
           "reason": "Call-local physical-output row-count descriptors used by the routed cohort deferred read; no persistent layout owner or independent layout algorithm.",
           "token": "readLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required quantization scale arrangement evidence in a pretrained-drafter intake checklist; it declares no new layout implementation or compatibility claim.",
+          "token": "scale_layouts"
         }
       ],
       "id": "layout",
@@ -18065,6 +18142,7 @@
         "imageLayoutVersion",
         "layouts",
         "readLayout",
+        "scale_layouts",
         "usesmlamoelayout",
         "v41DeferredLayout",
         "v41HeadLayout",
