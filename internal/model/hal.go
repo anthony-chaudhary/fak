@@ -891,12 +891,17 @@ const (
 	halNoLogits halOutputMode = iota
 	halFullLogits
 	halArgmax
+	// halRetainedArgmax preserves the full-logit projection while reducing its
+	// token before tokenHALOutput closes the backend batch.
+	halRetainedArgmax
 )
 
 // tokenHALOutput is the f32 decode/prefill step expressed through compute.Backend whole-op
 // calls. With cpu-ref it must be byte-identical to tokenHidden+head; with a future Approx
 // backend it is held to that backend's argmax/cosine gate, never the exact rungs. The output
 // mode lets prompt ingestion skip discarded logits and greedy decode use a device argmax.
+// A retained greedy distribution uses the same full-logit projection, then reduces it
+// after any graph launch and before the deferred batch flush.
 func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tensor, int) {
 	s.ensureOpenBackendSession()
 	finishLineage := s.beginHALTokenLineageWrite([]int{id})
@@ -1199,6 +1204,8 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 // argmax paths stay gated on !capturing and an explicitly supported head dtype. Q2_K
 // bypasses the F32-only fused-norm path so its packed resident head reaches MatMulArgmax;
 // every fused-norm path otherwise stays gated on !useQ8Weights, exactly as before.
+// halRetainedArgmax uses the full-logit path, never an argmax-only fused projection:
+// continuation snapshots still need those exact logits after the token was selected.
 func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing, useQ8Weights bool, finishGraph func()) (compute.Tensor, int) {
 	be := s.Backend
 	eps := float32(s.M.Cfg.RMSNormEps)
@@ -1219,6 +1226,9 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 		if fused, ok := be.(rmsNormMatMulBackend); ok && !useQ8Weights {
 			logits := fused.RMSNormMatMul(s.lmHeadHAL(), x, finalNorm, eps)
 			finishGraph()
+			if mode == halRetainedArgmax {
+				return logits, be.Argmax(logits)
+			}
 			return logits, 0
 		}
 	}
@@ -1237,6 +1247,9 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 	}
 	logits := be.MatMul(head, hidden)
 	finishGraph()
+	if mode == halRetainedArgmax {
+		return logits, be.Argmax(logits)
+	}
 	return logits, 0
 }
 

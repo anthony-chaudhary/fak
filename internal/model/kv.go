@@ -561,7 +561,7 @@ func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
 // and keeps an owned device clone of them; a backend that cannot clone on the device
 // returns those host logits instead.
 func (s *Session) tokenGreedy(id, pos int) ([]float32, int) {
-	s.validateDenseGPULayers()
+	_, isSplit := s.validateDenseGPULayers()
 	s.requirePreNorm("HAL decode")
 	if !s.retainGreedyLogits {
 		return nil, s.tokenHALArgmax(id, pos)
@@ -570,8 +570,17 @@ func (s *Session) tokenGreedy(id, pos int) ([]float32, int) {
 	if !ok {
 		return s.tappedLogitsAt(pos, s.tokenHAL(id, pos)), 0
 	}
-	logits, _ := s.tokenHALOutput(id, pos, halFullLogits)
-	next := s.Backend.Argmax(logits)
+	// Keep reduction in the fully backend-resident token's open batch. The
+	// mixed CPU/GPU split already closed that batch to run its host suffix;
+	// preserve its existing full-logit upload and backend reduction sequence.
+	mode := halRetainedArgmax
+	if isSplit {
+		mode = halFullLogits
+	}
+	logits, next := s.tokenHALOutput(id, pos, mode)
+	if isSplit {
+		next = s.Backend.Argmax(logits)
+	}
 	kept, err := cloner.CloneTensor(logits)
 	if err != nil {
 		panic(err)
