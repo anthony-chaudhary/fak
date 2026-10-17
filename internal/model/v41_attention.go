@@ -598,6 +598,11 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 		if err != nil {
 			return nil, err
 		}
+		// Cold prefill resolves each source query separately. The normalized
+		// row already owns its storage; a single position needs no second copy.
+		if seq == 1 {
+			return row, nil
+		}
 		flat := make([]int32, 0, seq*plan.TopKWidth)
 		for t := 0; t < seq; t++ {
 			flat = append(flat, row...)
