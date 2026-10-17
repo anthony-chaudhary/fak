@@ -763,3 +763,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## ggml-vulkan cooperative-matrix prefill GEMM
+
+The prefill GEMM `internal/compute/shaders/mm_cm1_quant.glsl` (compiled once per weight
+format by the `mm_cm1_q2k.comp`, `mm_cm1_q4k.comp`, `mm_cm1_iq1s.comp`, `mm_cm1_iq2xxs.comp`,
+`mm_cm1_iq2xs.comp`, `mm_cm1_iq2s.comp`, `mm_cm1_iq3xxs.comp`, `mm_cm1_iq3s.comp` and
+`mm_cm1_iq4xs.comp` wrappers) adapts the cooperative-matrix path of
+`ggml/src/ggml-vulkan/vulkan-shaders/mul_mm.comp` (shared A/B tiles, row-major A and
+column-major B `coopMatLoad`, per-subgroup accumulator grid, staged edge store) and the
+dequantize-into-shared-memory structure of `mul_mm_funcs.glsl` and `dequant_funcs.glsl`, at
+llama.cpp revision `f74e2fa6a31cc33ab4ee4ae516641cfe62df3924`:
+https://github.com/ggml-org/llama.cpp/tree/f74e2fa6a31cc33ab4ee4ae516641cfe62df3924/ggml/src/ggml-vulkan/vulkan-shaders
+
+The i-quant codebooks in `mm_cm1_iq_tables.glsl` are copied from the i-quant
+matrix-vector kernels above. Changed for Fak: fixed 128x128x32 tiles instead of
+specialization constants, scalar fp16 shared tiles, the Fak three-binding ABI and push
+constants, and a per-format 16-weight decode that follows the matching `iq*_matvec.comp`.
+No upstream runtime is included. The upstream license is the MIT license reproduced in the
+section above.

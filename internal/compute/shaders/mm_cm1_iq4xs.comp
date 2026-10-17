@@ -1,0 +1,6 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// mm_cm1_iq4xs.comp - IQ4_XS prefill GEMM; see mm_cm1_quant.glsl.
+#define MM_CM1_IQ4_XS 1
+#include "mm_cm1_quant.glsl"

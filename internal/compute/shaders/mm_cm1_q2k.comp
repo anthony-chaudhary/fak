@@ -1,0 +1,6 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// mm_cm1_q2k.comp - Q2_K prefill GEMM; see mm_cm1_quant.glsl.
+#define MM_CM1_Q2_K 1
+#include "mm_cm1_quant.glsl"
