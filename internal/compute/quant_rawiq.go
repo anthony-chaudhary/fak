@@ -8,7 +8,6 @@ import (
 )
 
 // quant_rawiq.go — native-format llama.cpp i-quant weights for the device matvec path
-// (ticket halo-qwen-default-perf 05f).
 //
 // A raw i-quant tensor is the verbatim GGUF super-block stream (row-major: row o at
 // raw[o*nblk*blockBytes:]) carried in the HostBuffer.I8() view exactly like Q2_K/Q4_K. Each
