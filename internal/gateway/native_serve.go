@@ -760,9 +760,10 @@ func sendAnthropicTerminalWithNativeArm(send func(string, any), stop string, usa
 // nativeFinishReason maps the owned loop's outcome to a planner-style finish reason for
 // the Anthropic stop-reason projection: a session-boundary stop is reported as "stop"
 // (a clean end_turn carrying the reason on the ArmMetrics witness), as is a normal final
-// answer; only a turn-cap hit reports "length".
+// answer; a turn-cap hit or a truncated final answer reports "length" while
+// retaining the partial answer and usage on both buffered and streamed wires.
 func nativeFinishReason(m agent.ArmMetrics) string {
-	if m.HitTurnCap {
+	if m.HitTurnCap || m.FinalAnswerTruncated {
 		return "length"
 	}
 	return "stop"
