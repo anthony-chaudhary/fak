@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -384,6 +385,12 @@ func (s *TaskState) finishTask(taskID string, result any, runErr error) error {
 	if runErr != nil {
 		item.State = TaskStateFailed
 		item.Error = runErr.Error()
+		// A truncated native answer is useful partial output, never a completed
+		// child. Keep it visible in wait/status receipts without retaining results
+		// from unrelated failures or copying model text into the error channel.
+		if errors.Is(runErr, ErrNativeChildTruncated) {
+			item.Result = result
+		}
 	} else {
 		item.State = TaskStateCompleted
 		item.Result = result
