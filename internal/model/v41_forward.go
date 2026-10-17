@@ -737,15 +737,17 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 }
 
 // v41SuffixFailureIsSelected reports a suffix failure that must surface: a
-// selected device operation or a non-structural fault is never replayed on the
-// reference path.
+// selected operation, a retired backend session, or a non-structural fault is
+// never replayed on the reference path.
 func v41SuffixFailureIsSelected(m *Model, err error) bool {
+	var closedBackend *BackendForwardOperationError
+	var selectedExpert *V41ExpertOperationError
 	var batchErr *v41StepBatchError
 	var selectedRoPE *V41TailRoPEOperationError
 	var selectedAttention *V41SharedAttentionOperationError
 	var selectedScore *V41IndexerScoreOperationError
 	var selectedMHC *V41MHCOperationError
-	return errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || m.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage)
+	return errors.As(err, &closedBackend) || errors.As(err, &selectedExpert) || errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || m.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage)
 }
 
 // prefillV41Refold rolls the suffix back to startLen and re-folds the whole
