@@ -344,7 +344,7 @@ func TestVulkanRawIQKillSwitchFallsBackToQ8(t *testing.T) {
 
 // BenchmarkVulkanRawIQMatvec times single-token MatMul on each raw i-quant's native
 // kernel versus the Q8_0 fallback representation of the same weight, reporting
-// effective weight GB/s (sub-benchmarks <dtype>/<shape>/{native,q8}).
+// effective weight GB/s (sub-benchmarks <dtype>/<shape>/{native,native_stream,q8}).
 func BenchmarkVulkanRawIQMatvec(b *testing.B) {
 	be, ok := Lookup("vulkan")
 	if !ok {
@@ -362,17 +362,26 @@ func BenchmarkVulkanRawIQMatvec(b *testing.B) {
 				native    bool
 				wantDtype Dtype
 				bytes     float64
+				copies    int
 			}{
-				{"native", true, dt, float64(sh.out) * float64(sh.in) / 256 * float64(blockBytes)},
-				{"q8", false, Q8_0, float64(sh.out) * float64(sh.in) * 34 / 32},
+				{"native", true, dt, float64(sh.out) * float64(sh.in) / 256 * float64(blockBytes), 1},
+				// Rotating copies stream from DRAM; a single copy stays in the 32 MB MALL on gfx1151.
+				{"native_stream", true, dt, float64(sh.out) * float64(sh.in) / 256 * float64(blockBytes), 4},
+				{"q8", false, Q8_0, float64(sh.out) * float64(sh.in) * 34 / 32, 1},
 			} {
 				b.Run(fmt.Sprintf("%s/out%d_in%d/%s", dt, sh.out, sh.in, mode.name), func(b *testing.B) {
 					prev := vulkanDebugSelectIQMatvec(dt, mode.native)
-					dw := v.Upload(hw, dt)
+					dws := make([]Tensor, mode.copies)
+					for c := range dws {
+						dws[c] = v.Upload(hw, dt)
+					}
+					dw := dws[0]
 					vulkanDebugSelectIQMatvec(dt, prev)
 					dx := rawIQUploadF32(v, []int{sh.in}, x)
 					defer func() {
-						v.Free(dw)
+						for _, t := range dws {
+							v.Free(t)
+						}
 						v.Free(dx)
 						v.Recycle()
 					}()
@@ -397,7 +406,7 @@ func BenchmarkVulkanRawIQMatvec(b *testing.B) {
 						}
 						v.BeginBatch()
 						for j := 0; j < n; j++ {
-							y = v.MatMul(dw, dx)
+							y = v.MatMul(dws[(i+j)%mode.copies], dx)
 						}
 						v.FlushBatch()
 						i += n

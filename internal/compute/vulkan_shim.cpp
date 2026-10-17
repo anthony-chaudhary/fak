@@ -518,8 +518,10 @@ const KId kIQKernel[FVK_IQ_FORMATS] = {K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_M
 const char* const kIQSpv[FVK_IQ_FORMATS] = {"iq4xs_matvec.spv", "iq3xxs_matvec.spv", "iq2s_matvec.spv", "iq3s_matvec.spv", "iq2xxs_matvec.spv", "iq2xs_matvec.spv", "iq1s_matvec.spv"};
 const char* const kIQEnv[FVK_IQ_FORMATS] = {"FAK_VULKAN_IQ4XS", "FAK_VULKAN_IQ3XXS", "FAK_VULKAN_IQ2S", "FAK_VULKAN_IQ3S", "FAK_VULKAN_IQ2XXS", "FAK_VULKAN_IQ2XS", "FAK_VULKAN_IQ1S"};
 int g_have_iq[FVK_IQ_FORMATS] = {};
-const uint32_t kIQMatvecRows = 2; // must match ROWS in every iq*_matvec.comp shader
-const uint32_t kIQMatvecMaxGroups = 1024;
+// Rows per 64-lane workgroup: every iq*_matvec.comp gives each subgroup NR = 8 rows, so a
+// Wave32 workgroup covers 16 (a Wave64 one strides over the rest).
+const uint32_t kIQMatvecRows = 16;
+const uint32_t kIQMatvecMaxGroups = 4096;
 bool g_q4k_wave32_required_subgroup = false;
 // Optional, default-off recurrent prefill variant. All access is serialized by
 // the Go Vulkan mutex, including debug mode/counter operations.
@@ -4174,7 +4176,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     for (int f = 0; f < FVK_IQ_FORMATS; ++f) {
         const char* sw = std::getenv(kIQEnv[f]);
         bool off = sw && sw[0] == '0' && sw[1] == '\0';
-        g_have_iq[f] = (!off && buildKernel(g_kern[kIQKernel[f]], P(kIQSpv[f]), 7, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
+        g_have_iq[f] = (!off && haveSubgroupArithmetic &&
+                        buildKernel(g_kern[kIQKernel[f]], P(kIQSpv[f]), 7, 4 * sizeof(int) + sizeof(float))) ? 1 : 0;
     }
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
