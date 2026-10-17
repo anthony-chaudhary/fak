@@ -571,12 +571,14 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 	// one validates a resolved selection row against the compressed stream and
 	// normalizes it to the published stride, padding a short top-k with -1 (the
 	// reference's empty-slot marker) when fewer groups are visible than top-k.
-	one := func(row []int32) ([]int32, error) {
+	one := func(row, normalized []int32) ([]int32, error) {
 		if len(row) > plan.TopKWidth {
 			return nil, v41StageErr(v41StageIndexer, plan.Layer,
 				fmt.Errorf("%w: layer %d index row width %d exceeds stride %d", ErrV41ForwardStage, plan.Layer, len(row), plan.TopKWidth))
 		}
-		normalized := make([]int32, plan.TopKWidth)
+		if normalized == nil {
+			normalized = make([]int32, plan.TopKWidth)
+		}
 		for i := range normalized {
 			normalized[i] = -1
 		}
@@ -594,7 +596,7 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 		if localIdx == nil && !(plan.Ratio > 0 && groups == 0) {
 			return nil, nil
 		}
-		row, err := one(localIdx)
+		row, err := one(localIdx, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -624,13 +626,14 @@ func (m *Model) v41AttentionIndexList(plan V41AttentionPlan, st *v41ForwardState
 		return nil, v41StageErr(v41StageIndexer, plan.Layer,
 			fmt.Errorf("%w: layer %d reads index source %d but no top-k selection was published", ErrV41ForwardStage, plan.Layer, plan.IndexSourceLayer))
 	}
-	flat := make([]int32, 0, len(published)*plan.TopKWidth)
-	for _, row := range published {
-		normalized, err := one(row)
-		if err != nil {
+	// Normalize directly into the owned result. Each row has a bounded view;
+	// no temporary normalized row or publication storage escapes to the caller.
+	flat := make([]int32, len(published)*plan.TopKWidth)
+	for i, row := range published {
+		lo, hi := i*plan.TopKWidth, (i+1)*plan.TopKWidth
+		if _, err := one(row, flat[lo:hi:hi]); err != nil {
 			return nil, err
 		}
-		flat = append(flat, normalized...)
 	}
 	return flat, nil
 }
