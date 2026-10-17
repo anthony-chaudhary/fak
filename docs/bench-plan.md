@@ -72,7 +72,7 @@ _The planner guarantees all four operator intents are surfaced._
 
 ### Prevent regression
 - **workstation-a → model-benchmark** (score 0.4307): workstation-a/model-benchmark has a recorded 31.02 tok/s baseline aged 50.2d (re-check every 7d) -- re-measure to catch drift.
-- **node-macos-a → parity** (score 0.2008): node-macos-a/parity has a recorded 7.61 tok/s baseline aged 0.02d (re-check every 30d) -- re-measure to catch drift.
+- **node-macos-a → parity** (historical score 0.2008): the recorded 7.61 tok/s input comes from the [simulated #2723 fixture](notes/MAC-THREEWAY-BENCH-2026-09-03.md), not a physical regression baseline. Capture an actual matched run before using this cell for drift detection; the old 0.02d age is not a current observation.
 - **node-macos-a → model-benchmark** (score 0.1164): node-macos-a/model-benchmark has a recorded 38.07 tok/s baseline aged 0.02d (re-check every 7d) -- re-measure to catch drift.
 
 ### Fill coverage gaps

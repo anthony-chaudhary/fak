@@ -34,7 +34,7 @@ Pi is an extensible, minimal terminal coding harness featuring an interactive TU
 **Key benefits of the Pi + fak serve combination:**
 
 - **Native Apple Silicon Metal performance:** Zero-copy unified memory model execution with Metal 4 compute kernels on Apple Silicon (M1/M2/M3/M4).
-- **In-kernel prefix caching:** Automatically reuses previous turns' KV-cache tokens across conversation trees, slashing time-to-first-token (>190× TTFT speedup).
+- **In-kernel prefix caching:** Reuses compatible previous turns' KV-cache tokens across conversation trees. Actual time-to-first-token depends on the workload; the historical >190× figure belongs to a [simulated comparison fixture](../notes/MAC-THREEWAY-BENCH-2026-09-03.md), not a measured Pi integration result.
 - **One-touch configuration:** `fak serve --pi` or `fak pi config --write` automatically registers the `fak` provider in `~/.pi/agent/models.json` without clobbering any existing providers.
 - **Raw direct connection:** Direct connection between Pi and the serving engine without guard interception overhead.
 

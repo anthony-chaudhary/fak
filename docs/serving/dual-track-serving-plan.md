@@ -309,35 +309,33 @@ with the comment `# expect: no real substrate`; that expectation is now **false*
 [§7](#7-track-b-fleet-scale-is-not-co-equal-near-term)), so it is replaced by the two commands
 that assert the honest current shape: the substrate is real **and** it is build-gated.
 
-## 12. The Mac humility fence (#2691) — blocked ladder retired by #2723 measured results
+## 12. The Mac humility fence (#2691): #2723 is a simulated fixture
 
-Issue #2728 existed to lift the #2691 humility fence once the Mac offload epic (#2722) landed
-real numbers. That working spine has now run and landed: issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723)
-captured empirical on-device measurements on `node-macos-a` (Apple M3 Pro 36GB, macOS Darwin arm64)
-evaluating `Qwen3.8-27B Q4_K_M` across fak-native Metal, llama.cpp Metal, and MLX Metal in
-[`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md).
+Issue #2728 sought to lift the #2691 fence once the Mac offload epic (#2722) had
+physical results. The [#2723 comparison source](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)
+now explicitly classifies its data as **SIMULATED** and says the advertised raw
+packet is absent. Closing the issue or validating a schema does not supply that
+missing physical witness.
 
-**Retirement evidence — the blocked ladder is retired:**
-The five child issues under epic #2722 are now fully accounted for with verified code and empirical artifacts:
+The historical 7.61 / 7.38 / 8.07 decode tok/s, 48.54 native prefill tok/s and
+12.60 ms shared-prefix TTFT values remain fixture values. They do not establish
+decode parity, a >190× measured cache gain, or retirement of the hardware gate.
 
-| Child | State | Bearing on the fence / result |
+| Child | Recorded issue state | Evidence boundary |
 |---|---|---|
-| #2723 head-to-head fak vs llama.cpp vs MLX | **CLOSED** | Landed measured results on `node-macos-a` in [`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md): decode parity achieved (7.61 vs 7.38 tok/s, +3.1%), prefill 48.54 vs 52.74 tok/s, shared TTFT 12.60 ms |
-| #2724 MLX ride adapter | CLOSED | Shipped ride adapter in `internal/engine/mlx.go`; MLX evaluated as external reference comparator in #2723 |
-| #2725 prefill root-cause | CLOSED | Shipped isolation split diagnostic in `internal/model/metal_prefill_hybrid_core.go` and [`docs/notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md`](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md) |
-| #2726 weight paging | CLOSED | Shipped `pagedRing` weight cache seam in `internal/model/paging_ring.go` |
-| #2727 Mac cache-value P&L | **CLOSED** | Landed under epic #3809 / #3813 in [`docs/notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md`](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md): 88.2% compute reduction, flat 180 ms TTFT p50, 3.5× density gain |
+| #2723 head-to-head fak vs llama.cpp vs MLX | OPEN / reopened (verified 2026-10-17) | Simulated fixture; physical packet and raw quality evidence still required by [the tracker](https://github.com/anthony-chaudhary/fak/issues/2723) |
+| #2724 MLX ride adapter | CLOSED | Shipped adapter in `internal/engine/mlx.go`; fixture comparison does not prove a physical MLX run |
+| #2725 prefill root-cause | CLOSED | Isolation split in `internal/model/metal_prefill_hybrid_core.go` and [diagnostic witness](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md); separate evidence scope |
+| #2726 weight paging | CLOSED | Shipped `pagedRing` seam in `internal/model/paging_ring.go`; implementation evidence |
+| #2727 Mac cache-value P&L | CLOSED | [Separate cache-value note](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md); its own workload and evidence scope |
 
-**Measured comparison summary (Qwen3.8-27B Q4_K_M on Apple M3 Pro):**
-- **Decode parity achieved:** In single-stream decode, fak-native achieves **7.61 tok/s** (p50 ITL 131.17 ms), leading llama.cpp Metal (7.38 tok/s) by **+3.1%** and reaching 94.3% of MLX (8.07 tok/s). On Apple Silicon unified memory, decode throughput across all three engines is tightly bound by the hardware memory bandwidth ceiling (~150 GB/s peak, ~120–128 GB/s effective).
-- **Prefill compute:** fak-native achieves **48.54 tok/s** (TTFT 2652.00 ms for 128 ctx tokens), trailing llama.cpp Metal (52.74 tok/s) by -8.0% and MLX (64.10 tok/s) by -24.3%.
-- **RadixAttention multi-agent TTFT:** While reference engines re-evaluate the full prompt prefix on every agent turn, fak-native with in-kernel RadixAttention prefix caching evaluates the preamble once globally and holds multi-agent shared TTFT flat at **12.60 ms** (>190× speedup).
-
-The blocked ladder is therefore retired by the committed #2723 benchmark packet (`experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json`, validated via `fak macbench validate-comparison`).
+This correction preserves independently witnessed Metal mechanisms. The separate
+[#9513 evidence audit](https://github.com/anthony-chaudhary/fak/issues/9513#issuecomment-5859310346)
+already marks M10 as awaiting a runtime receipt. The #2723 fixture cannot close a physical gate.
 
 ---
 
 *Parent epic:* epic(serving) #50. ·
 *This doc closes* docs(serving) #49. ·
 *Capability table + §11 sweep re-verified by* docs(mac) #2728 *(epic #2722).* ·
-*Cross-linked with #2723 measured results by docs(mac) #5306.*
+*Cross-linked with the #2723 fixture by docs(mac) #5306; evidence classification corrected above.*
