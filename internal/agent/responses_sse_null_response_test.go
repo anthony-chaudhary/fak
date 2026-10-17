@@ -33,7 +33,9 @@ func TestHTTPPlannerResponsesSSENullEnvelope(t *testing.T) {
 		{name: "null_without_item", body: null, wantError: "response.completed payload is null"},
 		{name: "empty_object_fill", body: item + emptyObject, wantTool: true},
 		{name: "empty_output_fill", body: item + emptyOutput, wantTool: true},
-		{name: "empty_output_without_items", body: emptyOutput},
+		// Without fragments there is still no output for the adapter to return;
+		// preserve its empty-response error and the pending turn checkpoint.
+		{name: "empty_output_without_items", body: emptyOutput, wantError: "no output items"},
 		{name: "populated_output_preserved", body: item + text, wantContent: "done"},
 		{name: "provider_error_before_null", body: item + providerError + null, wantError: "api error: provider failure"},
 		{name: "provider_error_after_null", body: item + null + providerError, wantError: "api error: provider failure"},
