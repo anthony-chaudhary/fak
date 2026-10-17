@@ -781,85 +781,110 @@ kernel void q4k_gemm_m5_cooperative_smem(device const uchar* W [[buffer(0)]],
 // ---- mul_mm port (fak#13692) ----
 // q4k_mul_mm / q6k_mul_mm adapt the tile and staging topology of llama.cpp's ggml-metal mul_mm kernel template
 // (ggml-metal.metal, MIT; Copyright (c) 2023-2026 The ggml authors) to FAK's resident raw
-// Q4_K / Q6_K rows and f32 token-major activations. What differs from the earlier FAK simdgroup
+// Q4_K / Q5_K / Q6_K rows and f32 token-major activations. What differs from the earlier FAK simdgroup
 // candidates (q4k_gemm_mm32 / q4k_gemm_m5_cooperative_smem, measured 1.31-1.44x over scalar):
 //
 //   • Each thread dequantizes one 16-weight chunk per 32-wide K step and decodes that chunk's
 //     super-block scale ONCE, instead of re-decoding d/dmin/scale_min for every staged element.
 //   • Weights are staged as HALF in threadgroup memory already laid out as 8x8 simdgroup tiles
-//     ([kblock][rowblock][k][row]); activations stay f32 ([kblock][token][k]); the MMA multiplies
-//     simdgroup_float8x8 (tokens x k) by simdgroup_half8x8 (k x rows) into f32 accumulators.
+//     ([kblock][rowblock][k][row]); activations are converted to half on staging
+//     ([kblock][token][k]), as upstream does; the MMA multiplies simdgroup_half8x8 (tokens x k)
+//     by simdgroup_half8x8 (k x rows) into f32 accumulators.
 //   • The output tile is 64 rows x 32 tokens over 4 simdgroups (128 threads), each simdgroup
 //     owning 32 rows x 16 tokens = eight 8x8 accumulators, with one barrier pair per 32-wide K step.
 //   • One dispatch covers the whole GEMM: tokens on grid.x, rows on grid.y.
 //
 // The result is token-major Y[t*out + o], the same contract as q4k_gemm. Weights are rounded to
 // half before the MMA (as upstream does), so parity is cosine-tight rather than bit-close to the
-// f32 scalar kernel; activations and accumulation stay f32.
+// f32 scalar kernel; accumulation stays f32.
 #define MM_BM 64   // output rows per threadgroup
 #define MM_BN 32   // tokens per threadgroup
 #define MM_BK 32   // K step
 #define MM_TPR 2   // threads per weight row (each dequantizes one 16-weight chunk)
 #define MM_TPC 4   // threads per token column (each loads 8 activations)
 #define MM_TG 128  // 4 simdgroups
+#define MM_UNROLL _Pragma("clang loop unroll(full)")
 
-// q4k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 144-B Q4_K super-block.
-// Chunk il lives in 64-weight group il>>2; within the group, chunks 0/1 are the low nibbles of
-// bytes 0-15/16-31 (sub-block 2g) and chunks 2/3 the high nibbles (sub-block 2g+1).
+// q4k_scale_min_just2 is llama.cpp get_scale_min_k4_just2 (ggml/src/ggml-metal/ggml-metal.metal
+// @ 541bf376, MIT): the 6-bit (scale, min) pair of sub-block j+k, where j is even so j<4 picks the arm.
+inline uchar2 q4k_scale_min_just2(int j, int k, device const uchar* q) {
+    return j < 4 ? uchar2{uchar(q[j + 0 + k] & 63), uchar(q[j + 4 + k] & 63)}
+                 : uchar2{uchar((q[j + 4 + k] & 0xF) | ((q[j - 4 + k] & 0xc0) >> 2)),
+                          uchar((q[j + 4 + k] >> 4) | ((q[j - 0 + k] & 0xc0) >> 2))};
+}
+
+// q4k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 144-B Q4_K super-block, after
+// llama.cpp dequantize_q4_K (ggml/src/ggml-metal/ggml-metal.metal @ 541bf376, MIT). Chunk il
+// lives in 64-weight group il>>2; chunks 0/1 are the low nibbles of bytes 0-15/16-31 (sub-block
+// 2g) and chunks 2/3 the high nibbles (sub-block 2g+1), masked in place with d pre-divided by 16,
+// so the inner loop has no per-element select. The divide is f32: upstream's d/16.h lands on the
+// f16 subnormal grid for real Q4_K_M super-scales (median d ~6e-5) and skews half the weights.
 inline void q4k_dequant_chunk16(device const uchar* blk, short il, thread half4x4& reg) {
-    float d  = (float)(*(device const half*)(blk + 0));
-    float dm = (float)(*(device const half*)(blk + 2));
     device const uchar* q = blk + 16 + (il >> 2) * 32 + 16 * (il & 1);
-    float2 sm = q4k_scale_min((il >> 2) * 2 + ((il >> 1) & 1), blk + 4);
-    float dl = d * sm.x, ml = dm * sm.y;
-    bool hi = (il & 2) != 0;
+    const short is = (il >> 2) * 2;
+    il = il & 3;
+    const uchar2 sc = q4k_scale_min_just2(is, il / 2, blk + 4);
+    const half dh = *(device const half*)(blk + 0);
+    const float d  = il < 2 ? (float)dh : (float)dh / 16.f;
+    const float dl = d * sc[0];
+    const float ml = (float)(*(device const half*)(blk + 2)) * sc[1];
+    const ushort mask = il < 2 ? 0x0F : 0xF0;
     for (short i = 0; i < 16; i++) {
-        uchar b = q[i];
-        float nib = hi ? (float)(b >> 4) : (float)(b & 0x0f);
-        reg[i / 4][i % 4] = (half)(dl * nib - ml);
+        reg[i / 4][i % 4] = (half)(dl * (q[i] & mask) - ml);
     }
 }
 
-// q6k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 210-B Q6_K super-block, the
-// chunked twin of q6k_block_dot: half h=il>>3 (128 weights), quarter qq=(il>>1)&3 selects the
-// ql nibble / qh bit pair, and the SIGNED scale index is 8h + 2qq + (il&1).
+// q6k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 210-B Q6_K super-block
+// (ql[128]@0, qh[64]@128, scales[16]@192, d@208), after llama.cpp dequantize_q6_K
+// (ggml/src/ggml-metal/ggml-metal.metal @ 541bf376, MIT): half il>>3 (128 weights), quarter
+// (il>>1)&3 selects the ql nibble / qh bit pair, and the SIGNED scale index is il. Four weights are assembled per
+// 32-bit word with masks and shifts, and each byte lane is rescaled by its 256^k place value.
 inline void q6k_dequant_chunk16(device const uchar* blk, short il, thread half4x4& reg) {
-    float d = (float)(*(device const half*)(blk + 208));
-    short h = il >> 3;
-    short qq = (il >> 1) & 3;
-    short l0 = (il & 1) * 16;
-    float ds = d * (float)((device const char*)(blk + 192))[8 * h + 2 * qq + (il & 1)];
-    device const uchar* ql = blk + 64 * h + 32 * (qq & 1) + l0;
-    device const uchar* qh = blk + 128 + 32 * h + l0;
-    short shift = 2 * qq;
-    bool hi = qq >= 2;
-    for (short i = 0; i < 16; i++) {
-        uchar b = ql[i];
-        int nib = hi ? (int)(b >> 4) : (int)(b & 0x0f);
-        int code = (nib | (((int)(qh[i] >> shift) & 3) << 4)) - 32;
-        reg[i / 4][i % 4] = (half)(ds * (float)code);
+    const float d_all = (float)(*(device const half*)(blk + 208));
+    device const ushort* ql = (device const ushort*)blk + 32 * (il / 8) + 16 * ((il / 2) & 1) + 8 * (il & 1);
+    device const ushort* qh = (device const ushort*)(blk + 128) + 16 * (il / 8) + 8 * (il & 1);
+    const float sc = (float)((device const char*)(blk + 192))[il];
+    il = (il / 2) & 3;
+    const uint kmask1 = il > 1 ? (il > 2 ? 0xC0C0C0C0 : 0x30303030) : (il > 0 ? 0x0C0C0C0C : 0x03030303);
+    const uint kmask2 = il > 1 ? 0xF0F0F0F0 : 0x0F0F0F0F;
+    const float ml  = d_all * sc * 32.f;
+    const float dl0 = d_all * sc;
+    const float dl1 = dl0 / 256.f;
+    const float dl2 = dl0 / (256.f * 256.f);
+    const float dl3 = dl0 / (256.f * 256.f * 256.f);
+    const uchar shr_h = il > 2 ? 2 : 0;
+    const uchar shl_h = il > 1 ? 0 : (il > 0 ? 2 : 4);
+    const uchar shr_l = il > 1 ? 4 : 0;
+    for (short i = 0; i < 4; i++) {
+        const uint low  = (ql[2 * i] | (uint)(ql[2 * i + 1] << 16)) & kmask2;
+        const uint high = (qh[2 * i] | (uint)(qh[2 * i + 1] << 16)) & kmask1;
+        const uint q = ((high << shl_h) >> shr_h) | (low >> shr_l);
+        reg[i][0] = (half)(dl0 * (float)(q & 0xFF) - ml);
+        reg[i][1] = (half)(dl1 * (float)(q & 0xFF00) - ml);
+        reg[i][2] = (half)(dl2 * (float)(q & 0xFF0000) - ml);
+        reg[i][3] = (half)(dl3 * (float)(q & 0xFF000000) - ml);
     }
 }
 
 // q5k_dequant_chunk16 decodes weights [il*16, il*16+16) of one 176-B Q5_K super-block
-// (d@0, dmin@2, scales[12]@4, qh[32]@16, qs[128]@48). Chunk il lives in 64-weight group j=il>>2:
-// chunks 0/1 are the low nibbles of qs[32j + 0..15 / 16..31] (sub-block 2j, high bit 1<<2j of
-// qh[l]); chunks 2/3 the high nibbles (sub-block 2j+1, high bit 2<<2j).
+// (d@0, dmin@2, scales[12]@4, qh[32]@16, qs[128]@48), after llama.cpp dequantize_q5_K
+// (ggml/src/ggml-metal/ggml-metal.metal @ 541bf376, MIT). Chunk il lives in 64-weight group
+// il>>2: chunks 0/1 are the low nibbles of qs[32j + 0..15 / 16..31] (sub-block 2j), chunks 2/3
+// the high nibbles (sub-block 2j+1), masked in place with d pre-divided by 16; the fifth bit is qh bit il>>1.
 inline void q5k_dequant_chunk16(device const uchar* blk, short il, thread half4x4& reg) {
-    float d  = (float)(*(device const half*)(blk + 0));
-    float dm = (float)(*(device const half*)(blk + 2));
-    short j = il >> 2;
-    bool hi = (il & 2) != 0;
-    short l0 = 16 * (il & 1);
-    device const uchar* q  = blk + 48 + 32 * j + l0;
-    device const uchar* qh = blk + 16 + l0;
-    float2 sm = q4k_scale_min(2 * j + (hi ? 1 : 0), blk + 4);
-    float dl = d * sm.x, ml = dm * sm.y;
-    uchar mask = (uchar)((hi ? 2 : 1) << (2 * j));
+    device const uchar* q  = blk + 48 + 32 * (il >> 2) + 16 * (il & 1);
+    device const uchar* qh = blk + 16 + 16 * (il & 1);
+    const uchar ul = (uchar)(1 << (il / 2));
+    const short is = (il >> 2) * 2;
+    il = il & 3;
+    const uchar2 sc = q4k_scale_min_just2(is, il / 2, blk + 4);
+    const float d  = (float)(*(device const half*)(blk + 0));
+    const float dl = (il < 2 ? d : d / 16.f) * sc[0];
+    const float ml = (float)(*(device const half*)(blk + 2)) * sc[1];
+    const ushort mask  = il < 2 ? 0x0F : 0xF0;
+    const float  qhval = il < 2 ? 16.f : 256.f;
     for (short i = 0; i < 16; i++) {
-        uchar b = q[i];
-        float nib = (float)(hi ? (b >> 4) : (b & 0x0f)) + ((qh[i] & mask) ? 16.0f : 0.0f);
-        reg[i / 4][i % 4] = (half)(dl * nib - ml);
+        reg[i / 4][i % 4] = (half)(dl * ((q[i] & mask) + (qh[i] & ul ? qhval : 0.f)) - ml);
     }
 }
 
@@ -867,8 +892,8 @@ template <int BLOCK_BYTES, int KIND>
 inline void kquant_mul_mm(device const uchar* W, device const float* X, device float* Y,
                           int nblk, int out, int P, threadgroup float* shmem,
                           uint2 tg, ushort tiitg, ushort sgitg) {
-    threadgroup half*  sa = (threadgroup half*)shmem;      // 64 rows x 32 k (half)  = 4 KB
-    threadgroup float* sb = shmem + MM_BM * MM_BK / 2;     // 32 tokens x 32 k (f32) = 4 KB
+    threadgroup half* sa = (threadgroup half*)shmem;                 // 64 rows x 32 k (half)   = 4 KB
+    threadgroup half* sb = (threadgroup half*)shmem + MM_BM * MM_BK; // 32 tokens x 32 k (half) = 2 KB
     const int r1 = (int)tg.x;  // token tile
     const int r0 = (int)tg.y;  // row tile
     const int in = nblk * 256;
@@ -879,7 +904,7 @@ inline void kquant_mul_mm(device const uchar* W, device const float* X, device f
     const short thread_col = min((short)(tiitg / MM_TPC), (short)(n_cols - 1));
 
     simdgroup_half8x8  ma[4];
-    simdgroup_float8x8 mb[2];
+    simdgroup_half8x8  mb[2];
     simdgroup_float8x8 mc[8];
     for (short i = 0; i < 8; i++) mc[i] = make_filled_simdgroup_matrix<float, 8>(0.0f);
 
@@ -897,25 +922,27 @@ inline void kquant_mul_mm(device const uchar* W, device const float* X, device f
             q6k_dequant_chunk16(x, il, temp_a);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (short i = 0; i < 16; i++) {
+        MM_UNROLL for (short i = 0; i < 16; i++) {
             sa[64 * ((tiitg / MM_TPR / 8) + (tiitg % MM_TPR) * 16 + (i / 8) * 8)
                + (tiitg / MM_TPR) % 8 + (i & 7) * 8] = temp_a[i / 4][i % 4];
         }
-        *(threadgroup float2x4*)(sb + (tiitg % MM_TPC) * 8 * 32 + 8 * (tiitg / MM_TPC)) = *((device const float2x4*)y);
+        *(threadgroup half2x4*)(sb + (tiitg % MM_TPC) * 8 * 32 + 8 * (tiitg / MM_TPC)) = (half2x4)(*((device const float2x4*)y));
         il = (il + 2 < 16) ? il + 2 : il % 2;
         x = (il < 2) ? x + BLOCK_BYTES : x;
         y += MM_BK;
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        threadgroup const half*  lsma = sa + 4 * 64 * (sgitg % 2);
-        threadgroup const float* lsmb = sb + 2 * 64 * (sgitg / 2);
-        for (short ik = 0; ik < MM_BK / 8; ik++) {
-            for (short i = 0; i < 4; i++) simdgroup_load(ma[i], lsma + 64 * i);
+        threadgroup const half* lsma = sa + 4 * 64 * (sgitg % 2);
+        threadgroup const half* lsmb = sb + 2 * 64 * (sgitg / 2);
+        MM_UNROLL for (short ik = 0; ik < MM_BK / 8; ik++) {
             simdgroup_barrier(mem_flags::mem_none);
-            for (short i = 0; i < 2; i++) simdgroup_load(mb[i], lsmb + 64 * i);
+            MM_UNROLL for (short i = 0; i < 4; i++) simdgroup_load(ma[i], lsma + 64 * i);
+            simdgroup_barrier(mem_flags::mem_none);
+            MM_UNROLL for (short i = 0; i < 2; i++) simdgroup_load(mb[i], lsmb + 64 * i);
+            simdgroup_barrier(mem_flags::mem_none);
+            MM_UNROLL for (short i = 0; i < 8; i++) simdgroup_multiply_accumulate(mc[i], mb[i / 4], ma[i % 4], mc[i]);
             lsma += MM_BM / 8 * 64;
             lsmb += MM_BN / 8 * 64;
-            for (short i = 0; i < 8; i++) simdgroup_multiply_accumulate(mc[i], mb[i / 4], ma[i % 4], mc[i]);
         }
     }
 
