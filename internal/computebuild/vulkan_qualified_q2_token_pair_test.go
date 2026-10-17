@@ -82,10 +82,11 @@ func TestVulkanQualifiedQ2TokenPair(t *testing.T) {
 // fak-test:runtime fast est=5ms
 func TestVulkanReceiptV26Q2TokenPair(t *testing.T) {
 	want := append(vulkanRegistryV25.stems(), "v41_q2k_token_pair")
-	if len(want) != 89 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) {
+	if len(want) != 89 || !reflect.DeepEqual(want, vulkanRegistryV26.stems()) {
 		t.Fatal("V26 membership differs")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV26.schema
+	id, err := vulkanRegistryV26.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV26 || id.ID != VulkanShaderRegistryV26ID || id.ModuleCount != 89 {
 		t.Fatal("V26 identity differs")
 	}

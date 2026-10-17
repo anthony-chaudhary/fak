@@ -195,7 +195,16 @@ function Build-Shaders {
     $shaders += "v41_index_scale_bf16",
     "v41_routed_swiglu_panel_chunk",
     "v41_routed_down_panel_chunk",
-    "v41_q2k_token_pair"
+    "v41_q2k_token_pair",
+    "mm_cm1_q2k",
+    "mm_cm1_iq2xxs",
+    "mm_cm1_iq2xs",
+    "mm_cm1_iq2s",
+    "mm_cm1_iq3xxs",
+    "mm_cm1_iq3s",
+    "mm_cm1_iq1s",
+    "mm_cm1_iq4xs",
+    "mm_cm1_q4k"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

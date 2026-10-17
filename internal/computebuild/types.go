@@ -138,6 +138,8 @@ const (
 
 	// VulkanBuildReceiptSchemaV26 adds canonical paired Q2 gate/up contraction.
 	VulkanBuildReceiptSchemaV26 = "fak.vulkan-build-receipt.v26"
+	// VulkanBuildReceiptSchemaV27 adds the nine K-quant/i-quant prefill coopmat GEMM modules.
+	VulkanBuildReceiptSchemaV27 = "fak.vulkan-build-receipt.v27"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
