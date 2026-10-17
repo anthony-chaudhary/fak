@@ -1,0 +1,268 @@
+#version 450
+// attention_split_kv.comp: grouped-query split-KV (flash-decoding) attention for
+// one decode query position.
+//
+// Adapted from ggml-vulkan (MIT, Copyright (c) 2023-2026 The ggml authors), pinned at
+// llama.cpp f74e2fa6a31cc33ab4ee4ae516641cfe62df3924:
+//   ggml/src/ggml-vulkan/vulkan-shaders/flash_attn.comp                (scalar split-k path)
+//   ggml/src/ggml-vulkan/vulkan-shaders/flash_attn_split_k_reduce.comp (split combine)
+// License text: THIRD_PARTY_NOTICES.md.
+//
+// fak changes: F32 row-major KV [nPos, nKV*hd] bound directly (no mask, no
+// dequant, no sinks, no softcap); the query heads of one KV head are the packed
+// rows of one workgroup; one workgroup per (KV chunk, KV head); fixed geometry of
+// 16 lanes per key, 32 keys per tile and up to 8 rows and 256 dims; the partial
+// and reduce passes share this module through pc.mode; one chunk writes the
+// normalized output directly.
+//
+// mode 0: partial. Workgroup (split, kvh) attends keys [split*chunk, +chunk).
+//   splits == 1: writes Outp. Otherwise writes the unnormalized accumulator to
+//   Scratch[(split*nH + h)*hd + d] and (m, l) to Scratch[mlBase + (split*nH + h)*2].
+// mode 1: reduce. Workgroup h combines the splits of query head h into Outp.
+
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+#extension GL_EXT_control_flow_attributes : enable
+
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly buffer Qbuf { vec4 Q4[]; };
+layout(std430, binding = 1) readonly buffer Kbuf { vec4 K4[]; };
+layout(std430, binding = 2) readonly buffer Vbuf { vec4 V4[]; };
+layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
+layout(std430, binding = 4) buffer ScratchBuf { float Scratch[]; };
+
+layout(push_constant) uniform Push {
+    int nPos; int nH; int nKV; int hd; float scale; int mode; int splits; int chunk;
+} pc;
+
+const uint WG = 128u;
+const uint DS = 16u;
+const uint CPI = WG / DS;
+const uint BC = 32u;
+const uint CPT = BC / CPI;
+const uint ROWS = 8u;
+const uint HV4 = 4u;
+const uint HD4_MAX = HV4 * DS;
+const uint QSTRIDE = HD4_MAX + 1u;
+const uint MAX_SPLITS = 128u;
+// -FLT_MAX/2 as upstream: keeps M_old - M_new finite when a lane saw no key.
+const float NEG_HALF_MAX = -1.7014117e38;
+
+shared vec4 Qs[ROWS * QSTRIDE];
+shared float redM[CPI * ROWS];
+shared float redL[CPI * ROWS];
+shared vec4 redO[CPI * HD4_MAX];
+shared float splitWeight[MAX_SPLITS];
+
+void partialPass() {
+    const uint tid = gl_LocalInvocationID.x;
+    const uint dTid = tid % DS;
+    const uint colTid = tid / DS;
+    const uint split = gl_WorkGroupID.x;
+    const uint kvh = gl_WorkGroupID.y;
+    const uint nH = uint(pc.nH);
+    const uint grp = nH / uint(pc.nKV);
+    const uint hd = uint(pc.hd);
+    const uint hd4 = hd / 4u;
+    const uint nI = hd4 / DS;
+    const uint w4 = uint(pc.nKV) * hd4;
+    const uint kvBase = kvh * hd4 + dTid;
+    const uint h0 = kvh * grp;
+
+    for (uint idx = tid; idx < grp * hd4; idx += WG) {
+        uint r = idx / hd4;
+        uint d = idx - r * hd4;
+        Qs[r * QSTRIDE + d] = Q4[(h0 + r) * hd4 + d] * pc.scale;
+    }
+    barrier();
+
+    float M[ROWS];
+    float L[ROWS];
+    vec4 O[ROWS][HV4];
+    [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+        M[r] = NEG_HALF_MAX;
+        L[r] = 0.0;
+        [[unroll]] for (uint i = 0u; i < HV4; ++i) {
+            O[r][i] = vec4(0.0);
+        }
+    }
+
+    const uint start = split * uint(pc.chunk);
+    const uint end = min(uint(pc.nPos), start + uint(pc.chunk));
+
+    for (uint tile = start; tile < end; tile += BC) {
+        float S[ROWS][CPT];
+        [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+            [[unroll]] for (uint c = 0u; c < CPT; ++c) {
+                S[r][c] = 0.0;
+            }
+        }
+
+        [[unroll]] for (uint i = 0u; i < HV4; ++i) {
+            if (i < nI) {
+                vec4 qc[ROWS];
+                [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+                    qc[r] = r < grp ? Qs[r * QSTRIDE + i * DS + dTid] : vec4(0.0);
+                }
+                [[unroll]] for (uint c = 0u; c < CPT; ++c) {
+                    uint j = tile + c * CPI + colTid;
+                    if (j < end) {
+                        vec4 k = K4[j * w4 + kvBase + i * DS];
+                        [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+                            if (r < grp) {
+                                S[r][c] += dot(qc[r], k);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Every lane of a key's 16-lane group ends with the full Q.K score.
+        [[unroll]] for (uint c = 0u; c < CPT; ++c) {
+            [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+                if (r < grp) {
+                    [[unroll]] for (uint s = DS / 2u; s > 0u; s >>= 1u) {
+                        S[r][c] += subgroupShuffleXor(S[r][c], s);
+                    }
+                }
+            }
+        }
+
+        [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+            if (r < grp) {
+                float rowMax = NEG_HALF_MAX;
+                [[unroll]] for (uint c = 0u; c < CPT; ++c) {
+                    if (tile + c * CPI + colTid < end) {
+                        rowMax = max(rowMax, S[r][c]);
+                    }
+                }
+                float mNew = max(M[r], rowMax);
+                float eM = exp(M[r] - mNew);
+                M[r] = mNew;
+                L[r] *= eM;
+                [[unroll]] for (uint i = 0u; i < HV4; ++i) {
+                    O[r][i] *= eM;
+                }
+            }
+        }
+
+        [[unroll]] for (uint c = 0u; c < CPT; ++c) {
+            uint j = tile + c * CPI + colTid;
+            if (j < end) {
+                float P[ROWS];
+                [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+                    P[r] = 0.0;
+                    if (r < grp) {
+                        P[r] = exp(S[r][c] - M[r]);
+                        L[r] += P[r];
+                    }
+                }
+                [[unroll]] for (uint i = 0u; i < HV4; ++i) {
+                    if (i < nI) {
+                        vec4 v = V4[j * w4 + kvBase + i * DS];
+                        [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+                            if (r < grp) {
+                                O[r][i] += P[r] * v;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Combine the eight key groups once: identical (M, L) live in every lane of a group.
+    if (dTid == 0u) {
+        [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+            redM[colTid * ROWS + r] = M[r];
+            redL[colTid * ROWS + r] = L[r];
+        }
+    }
+    barrier();
+
+    const uint mlBase = uint(pc.splits) * nH * hd;
+    [[unroll]] for (uint r = 0u; r < ROWS; ++r) {
+        if (r < grp) {
+            float gMax = NEG_HALF_MAX;
+            for (uint g = 0u; g < CPI; ++g) {
+                gMax = max(gMax, redM[g * ROWS + r]);
+            }
+            float gL = 0.0;
+            for (uint g = 0u; g < CPI; ++g) {
+                gL += redL[g * ROWS + r] * exp(redM[g * ROWS + r] - gMax);
+            }
+            float eM = exp(M[r] - gMax);
+            [[unroll]] for (uint i = 0u; i < HV4; ++i) {
+                if (i < nI) {
+                    redO[colTid * HD4_MAX + i * DS + dTid] = O[r][i] * eM;
+                }
+            }
+            barrier();
+            if (tid < hd4) {
+                vec4 o = vec4(0.0);
+                for (uint g = 0u; g < CPI; ++g) {
+                    o += redO[g * HD4_MAX + tid];
+                }
+                uint h = h0 + r;
+                if (pc.splits == 1) {
+                    vec4 y = gL > 0.0 ? o / gL : vec4(0.0);
+                    uint ob = h * hd + 4u * tid;
+                    Outp[ob] = y.x;
+                    Outp[ob + 1u] = y.y;
+                    Outp[ob + 2u] = y.z;
+                    Outp[ob + 3u] = y.w;
+                } else {
+                    uint sb = (split * nH + h) * hd + 4u * tid;
+                    Scratch[sb] = o.x;
+                    Scratch[sb + 1u] = o.y;
+                    Scratch[sb + 2u] = o.z;
+                    Scratch[sb + 3u] = o.w;
+                    if (tid == 0u) {
+                        Scratch[mlBase + (split * nH + h) * 2u] = gMax;
+                        Scratch[mlBase + (split * nH + h) * 2u + 1u] = gL;
+                    }
+                }
+            }
+            barrier();
+        }
+    }
+}
+
+void reducePass() {
+    const uint tid = gl_LocalInvocationID.x;
+    const uint h = gl_WorkGroupID.x;
+    const uint nH = uint(pc.nH);
+    const uint hd = uint(pc.hd);
+    const uint splits = uint(pc.splits);
+    const uint mlBase = splits * nH * hd;
+
+    float gMax = NEG_HALF_MAX;
+    for (uint s = 0u; s < splits; ++s) {
+        gMax = max(gMax, Scratch[mlBase + (s * nH + h) * 2u]);
+    }
+    for (uint s = tid; s < splits; s += WG) {
+        splitWeight[s] = exp(Scratch[mlBase + (s * nH + h) * 2u] - gMax);
+    }
+    barrier();
+    float gL = 0.0;
+    for (uint s = 0u; s < splits; ++s) {
+        gL += Scratch[mlBase + (s * nH + h) * 2u + 1u] * splitWeight[s];
+    }
+    for (uint d = tid; d < hd; d += WG) {
+        float o = 0.0;
+        for (uint s = 0u; s < splits; ++s) {
+            o += Scratch[(s * nH + h) * hd + d] * splitWeight[s];
+        }
+        Outp[h * hd + d] = gL > 0.0 ? o / gL : 0.0;
+    }
+}
+
+void main() {
+    if (pc.mode == 1) {
+        reducePass();
+    } else {
+        partialPass();
+    }
+}

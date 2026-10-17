@@ -140,6 +140,8 @@ const (
 	VulkanBuildReceiptSchemaV26 = "fak.vulkan-build-receipt.v26"
 	// VulkanBuildReceiptSchemaV27 adds the nine K-quant/i-quant prefill coopmat GEMM modules.
 	VulkanBuildReceiptSchemaV27 = "fak.vulkan-build-receipt.v27"
+	// VulkanBuildReceiptSchemaV28 adds the grouped-query split-KV decode attention module.
+	VulkanBuildReceiptSchemaV28 = "fak.vulkan-build-receipt.v28"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
