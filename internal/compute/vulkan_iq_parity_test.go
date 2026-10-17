@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-// Native raw i-quant device-matvec parity witnesses (ticket halo-qwen-default-perf 05f),
+// Native raw i-quant device-matvec parity witnesses,
 // table-driven over every dtype registered in rawIQFormats so a new format is covered
 // without a test edit. The oracle is CPU float64 math over DequantRawIQ weights; the
 // target is the format's Vulkan iq*_matvec kernel on the verbatim super-block bytes. Both read the same f32

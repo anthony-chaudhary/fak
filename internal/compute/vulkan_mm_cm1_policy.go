@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 )
 
-// Prefill GEMM route (mm_cm1_*.spv, halo-qwen-default-perf ticket 05o): a multi-token
+// Prefill GEMM route (mm_cm1_*.spv): a multi-token
 // matmul over a packed Q2_K or i-quant weight runs one tiled fp16 cooperative-matrix GEMM
 // instead of one weight-streaming matvec per token. Every call that does not take the GEMM
 // names its reason with one of these sentinels and is counted, so a fallback is never silent.
