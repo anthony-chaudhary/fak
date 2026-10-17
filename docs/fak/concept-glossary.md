@@ -1441,3 +1441,10 @@ Gateway gauge labeled by backend for the current count of request-transient devi
 Private call-scoped loan of freshly normalized cold-prefill activation chunks to the Q and KV projections. It captures canonical Session, Model, Backend, binding, execution-scope and cache-epoch identities; the attentionInputPanel scratch field carries the same loan only until synchronous QKV completion.
 
 **Distinct from:** Unlike v41SharedAttentionRows, this holds normalized projection inputs rather than borrowed attention KV rows. Unlike v41SharedAttentionContinuation, it governs a multi-row cold-prefill input lifetime rather than single-token attention eligibility. It neither owns persistent KV state nor grants general zero-copy or device authority.
+
+
+### v41PlainAttentionContinuation
+
+Private one-lane suspended plain-attention operation between contraction/rotation and grouped output projection. Its shared per-layer lifecycle permits one resume or abandon cleanup, and successful resume transfers resident cleanup to the returned layer work.
+
+**Distinct from:** Unlike v41SharedAttentionContinuation, this owns suspended computation and resource transfer rather than proving live execution eligibility. Unlike v41AttentionInputPanel, it carries one lane's output-projection input rather than a multi-row cold-prefill normalized-input loan. It owns neither the transaction journal nor persistent KV state and grants no batching or device capability.

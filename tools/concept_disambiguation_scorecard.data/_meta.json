@@ -2103,6 +2103,41 @@
           "category": "incidental",
           "reason": "Private constructor for the source/run/Session identity proof used by the positioned v41AttentionInputPanel. It verifies the live canonical source and empty endpoint slots, without selecting an attention algorithm or granting independent borrow authority.",
           "token": "beginAttentionInputRun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "v41PlainAttentionState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "prepareV41PlainAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "v41PlainAttentionPending"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "v41PlainAttentionResuming"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "v41PlainAttentionTransferred"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "v41PlainAttentionClosed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
+          "token": "attentionInput"
         }
       ],
       "exclude": [
@@ -2122,6 +2157,7 @@
         "ValidateTreeAttentionMask",
         "attentionContinuation",
         "attentionFunc",
+        "attentionInput",
         "attentionInputPanel",
         "attentionInputRun",
         "attentionRows",
@@ -2150,6 +2186,7 @@
         "newV41SharedAttentionContinuation",
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
+        "prepareV41PlainAttention",
         "qwenfullattentionlayers",
         "seenAttention",
         "setSharedAttention",
@@ -2164,6 +2201,11 @@
         "v41BoundSharedAttention",
         "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
+        "v41PlainAttentionClosed",
+        "v41PlainAttentionPending",
+        "v41PlainAttentionResuming",
+        "v41PlainAttentionState",
+        "v41PlainAttentionTransferred",
         "v41PrepareSharedAttentionRows",
         "v41PrepareSharedAttentionWithRows",
         "v41SharedAttentionCore"

@@ -10,16 +10,17 @@ import (
 // through its deferred MoE finish, so each phase can stay a small method while
 // the work's scalar and finish callbacks see the same values the prepare built.
 type v41PlainLayerStep struct {
-	m          *Model
-	l, pos     int
-	x          []float32
-	streams    [][]float32
-	layerState *V41AttentionState
-	scratch    *v41ProjScratch
-	full       bool
-	eps        float32
-	mhcDevice  *v41MHCDevice
-	resident   *v41MHCResident
+	m              *Model
+	l, pos         int
+	x              []float32
+	streams        [][]float32
+	layerState     *V41AttentionState
+	scratch        *v41ProjScratch
+	full           bool
+	attentionState v41PlainAttentionState
+	eps            float32
+	mhcDevice      *v41MHCDevice
+	resident       *v41MHCResident
 
 	mix         v41MHCMix
 	collapsed   []float32
@@ -34,25 +35,75 @@ type v41PlainLayerStep struct {
 }
 
 func (m *Model) prepareV41PlainLayerStep(l int, x []float32, streams [][]float32, pos int, layerState *V41AttentionState, scratch *v41ProjScratch) (work *v41LayerStepWork, err error) {
+	attention, err := m.prepareV41PlainAttention(l, x, streams, pos, layerState, scratch)
+	if err != nil {
+		return nil, err
+	}
+	// Preserve the scalar entrypoint's historical cleanup-panic precedence.
+	defer func() {
+		if work == nil {
+			attention.close()
+		}
+	}()
+	projected, err := attention.project(attention.input)
+	if err != nil {
+		return nil, v41StageErr(v41StageAttention, l, err)
+	}
+	work, err = attention.resumeProjected(projected, false)
+	return work, err
+}
+
+// v41PlainAttentionContinuation owns one lane's suspended attention work. It
+// does not own the transaction journal or publish the window. A successful
+// resume transfers resident cleanup to the returned layer work; close after
+// that transfer cannot retire the work's resources. Lifecycle lives in the
+// already-allocated lane state, so value copies cannot duplicate ownership.
+type v41PlainAttentionContinuation struct {
+	st       *v41PlainLayerStep
+	input    []float32
+	project  func([]float32) ([]float32, error)
+	gateBias []float32
+}
+
+type v41PlainAttentionState uint8
+
+const (
+	v41PlainAttentionPending v41PlainAttentionState = iota
+	v41PlainAttentionResuming
+	v41PlainAttentionTransferred
+	v41PlainAttentionClosed
+)
+
+func (a *v41PlainAttentionContinuation) close() {
+	if a == nil || a.st == nil || a.st.attentionState == v41PlainAttentionTransferred || a.st.attentionState == v41PlainAttentionClosed {
+		return
+	}
+	a.st.attentionState = v41PlainAttentionClosed
+	if a.st.resident != nil {
+		a.st.resident.abort()
+	}
+}
+
+func (m *Model) prepareV41PlainAttention(l int, x []float32, streams [][]float32, pos int, layerState *V41AttentionState, scratch *v41ProjScratch) (attention v41PlainAttentionContinuation, err error) {
 	cfg := m.Cfg
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
-		return nil, err
+		return v41PlainAttentionContinuation{}, err
 	}
 	st := &v41PlainLayerStep{m: m, l: l, pos: pos, x: x, streams: streams, layerState: layerState, scratch: scratch, full: full, eps: float32(cfg.RMSNormEps)}
 	if full {
 		if err := scratch.mhcCarry.validate(l, 1); err != nil {
-			return nil, err
+			return v41PlainAttentionContinuation{}, err
 		}
 		if err := m.v41AdmitMHC(l); err != nil {
-			return nil, err
+			return v41PlainAttentionContinuation{}, err
 		}
 		st.mhcDevice = scratch.mhcCarry.device
 		st.resident = scratch.mhcCarry.resident
 	}
 	if st.resident != nil {
 		defer func() {
-			if work == nil {
+			if attention.st == nil {
 				st.resident.abort()
 			}
 		}()
@@ -63,33 +114,63 @@ func (m *Model) prepareV41PlainLayerStep(l int, x []float32, streams [][]float32
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
 	if err := m.v41RequirePlainLayerStepWeights(l); err != nil {
-		return nil, err
+		return v41PlainAttentionContinuation{}, err
 	}
 	sink := m.tensor(layerName(l, "attn.sink"))
 	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
 
 	if err := st.collapseMHC(attnNorm, mixScale, mixBase); err != nil {
-		return nil, err
+		return v41PlainAttentionContinuation{}, err
 	}
 	qLat, prefixHandled, err := st.queryInput()
 	if err != nil {
-		return nil, err
+		return v41PlainAttentionContinuation{}, err
 	}
 	q, err := st.projectQKV(qLat, prefixHandled)
 	if err != nil {
-		return nil, err
+		return v41PlainAttentionContinuation{}, err
 	}
 	visibleKeys, err := st.visibleKeys()
 	if err != nil {
-		return nil, err
+		return v41PlainAttentionContinuation{}, err
 	}
-	if err := st.attend(q, sink, visibleKeys, projectOutput); err != nil {
-		return nil, err
+	input, err := st.attentionInput(q, sink, visibleKeys)
+	if err != nil {
+		return v41PlainAttentionContinuation{}, err
 	}
+	return v41PlainAttentionContinuation{st: st, input: input, project: projectOutput, gateBias: gateBias}, nil
+}
+
+// resume consumes a projected row exactly once. It preserves the original
+// trace, FFN-input and routing order, before the original layer work can commit.
+func (a *v41PlainAttentionContinuation) resume(projected []float32) (work *v41LayerStepWork, err error) {
+	return a.resumeProjected(projected, true)
+}
+
+func (a *v41PlainAttentionContinuation) resumeProjected(projected []float32, validate bool) (work *v41LayerStepWork, err error) {
+	if a == nil || a.st == nil || a.st.attentionState != v41PlainAttentionPending {
+		return nil, fmt.Errorf("%w: plain attention continuation is not pending", ErrV41ForwardStage)
+	}
+	a.st.attentionState = v41PlainAttentionResuming
+	defer func() {
+		if work == nil {
+			a.close()
+		}
+	}()
+	st := a.st
+	m, l, pos, scratch, full := st.m, st.l, st.pos, st.scratch, st.full
+	if validate && len(projected) != m.Cfg.HiddenSize {
+		return nil, v41StageErr(v41StageAttention, l, errV41ProjectionResult)
+	}
+	st.attnOut = projected
+	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, st.attnOut)
 	if err := st.ffnInput(); err != nil {
 		return nil, err
 	}
-	st.picks, err = m.v41RouterPicksForStep(l, st.ffnX, H, st.routeCfg, full, scratch, func() []float32 { return gateBias })
+	// Capture the immutable bias slice, not the continuation's address: the
+	// router can retain its callback through the projection continuation.
+	gateBias := a.gateBias
+	st.picks, err = m.v41RouterPicksForStep(l, st.ffnX, m.Cfg.HiddenSize, st.routeCfg, full, scratch, func() []float32 { return gateBias })
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +182,7 @@ func (m *Model) prepareV41PlainLayerStep(l int, x []float32, streams [][]float32
 	if st.resident != nil {
 		work.cleanup = st.resident.abort
 	}
+	a.st.attentionState = v41PlainAttentionTransferred
 	return work, nil
 }
 
@@ -298,14 +380,14 @@ func (st *v41PlainLayerStep) visibleKeys() ([]int32, error) {
 	return visibleKeys, nil
 }
 
-func (st *v41PlainLayerStep) attend(q, sink []float32, visibleKeys []int32, projectOutput func([]float32) ([]float32, error)) error {
+func (st *v41PlainLayerStep) attentionInput(q, sink []float32, visibleKeys []int32) ([]float32, error) {
 	m, l, pos, cfg, scratch, layerState := st.m, st.l, st.pos, st.m.Cfg, st.scratch, st.layerState
 	hd, nH := cfg.HeadDim, cfg.NumHeads
 	// The ring is not advanced until this layer succeeds; no borrowed row
 	// reaches a callback.
 	flatKV, err := layerState.stepWindowKV(l, pos, visibleKeys, st.kv)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	idx := v41PlainWindowIndexList(visibleKeys)
 	opened := m.v41NowNanos()
@@ -317,18 +399,13 @@ func (st *v41PlainLayerStep) attend(q, sink []float32, visibleKeys []int32, proj
 	}, scratch.sharedAttentionFunc())
 	m.v41NoteAttentionContraction(opened)
 	if err != nil {
-		return v41StageErr(v41StageAttention, l, err)
+		return nil, v41StageErr(v41StageAttention, l, err)
 	}
 	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	st.attnOut, err = projectOutput(o)
-	if err != nil {
-		return v41StageErr(v41StageAttention, l, err)
-	}
-	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, st.attnOut)
-	return nil
+	return o, nil
 }
 
 func (st *v41PlainLayerStep) ffnInput() error {

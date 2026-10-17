@@ -788,7 +788,8 @@
         "x-attention-v41sharedattentionplain",
         "v41sharedattentionvalidation",
         "v41sharedattentionresult",
-        "v41attentioninputpanel"
+        "v41attentioninputpanel",
+        "v41plainattentioncontinuation"
       ],
       "aliases": [],
       "grounding": "v41SharedAttentionContinuation",
@@ -853,12 +854,33 @@
       "distinction": "Unlike v41SharedAttentionRows, this holds normalized projection inputs rather than borrowed attention KV rows. Unlike v41SharedAttentionContinuation, it governs a multi-row cold-prefill input lifetime rather than single-token attention eligibility. It neither owns persistent KV state nor grants general zero-copy or device authority.",
       "distinct_from": [
         "x-attention-v41sharedattentionrows",
-        "v41sharedattentioncontinuation"
+        "v41sharedattentioncontinuation",
+        "v41plainattentioncontinuation"
       ],
       "aliases": [
         "attentionInputPanel"
       ],
       "grounding": "v41AttentionInputPanel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41plainattentioncontinuation",
+      "canonical": "v41PlainAttentionContinuation",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private one-lane suspended plain-attention operation between contraction/rotation and grouped output projection. Its shared per-layer lifecycle permits one resume or abandon cleanup, and successful resume transfers resident cleanup to the returned layer work.",
+      "distinction": "Unlike v41SharedAttentionContinuation, this owns suspended computation and resource transfer rather than proving live execution eligibility. Unlike v41AttentionInputPanel, it carries one lane's output-projection input rather than a multi-row cold-prefill normalized-input loan. It owns neither the transaction journal nor persistent KV state and grants no batching or device capability.",
+      "distinct_from": [
+        "v41sharedattentioncontinuation",
+        "v41attentioninputpanel"
+      ],
+      "aliases": [],
+      "grounding": "v41PlainAttentionContinuation",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
