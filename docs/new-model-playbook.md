@@ -10,8 +10,10 @@ new model architecture. It does **not** cover fronting a model through the gatew
 upstream serves is already fronted unchanged (see [supported models](supported/models.md), Layer 1).
 This is Layer 2: the pure-Go forward pass.
 
-Start every release with the deterministic intake below. Only an accepted packet reaches the
-architecture decision; refusal is a result, not a prompt to guess or fall back.
+Start every release with the deterministic intake below. **Pretrained-drafter integration is a P0
+onboarding item for every new model**, including aliases and checkpoints with bundled draft heads.
+Only an accepted packet reaches the architecture decision; refusal is a result, not a prompt to
+guess or fall back.
 
 ## Compile the pinned release first
 
@@ -51,6 +53,160 @@ The packet always names `engine: "fak-native"` and
 `external_runtime_fallback: false`. Compatibility evidence from Transformers, vLLM, SGLang, or
 llama.cpp can inform an obligation, benchmark, or oracle; it cannot become an automatic execution
 path or close a fak-native rung.
+
+## P0: inventory the pretrained drafter on every intake
+
+Every accepted packet now includes `pretrained_drafter` with schema
+`fak.new-model-pretrained-drafter/1`, `priority: "P0"`, and the exact target release,
+artifact digest, and tokenizer digest. This is an additive output of the existing
+`fak.new-model-manifest/1` compiler; existing manifests need no new input field.
+The compiler owns seven `pretrained-drafter-*` obligation IDs and adds them to the
+same `obligations`, `support_ladder`, and `registration_closure.open` surfaces as
+all other model work. A manifest cannot replace these IDs or mark them complete.
+Accepted replay rows carry the same generated obligations and semantic gaps; refused
+rows retain their input obligations. Legacy `--family` scaffold output begins with
+a P0 prerequisite directing callers to this pinned intake; a scaffold is preparation
+and cannot bypass it. There is no separate completion tracker. Scope owner:
+[#9628](https://github.com/anthony-chaudhary/fak/issues/9628); visibility coordinates
+with [#9630](https://github.com/anthony-chaudhary/fak/issues/9630).
+
+The intake is read-only: `artifact_availability: "not-surveyed"`,
+`implementation: "unassessed"`, `software_verification: "not-established"`,
+`hardware_qualification: "not-established"`, `serving_activation: "not-admitted"`,
+`execution_admitted: false`, and `default_enabled: false`. These are the evidence
+limits of compilation, not a claim that a particular model has no existing code.
+Descriptor readiness labels, another model's receipts, published weights, a study,
+a ticket, or a generated scaffold cannot promote this inventory. The original
+manifest digest continues to identify the input; packet bytes and replay outcome
+digests also depend on the compiler revision.
+
+### Mandatory evidence checklist
+
+Each check emits its stable obligation ID, kind, `pending` status, description,
+and machine-readable `evidence_required` fields. Address these before optional
+performance polishing; start with available trained artifacts rather than
+mistaking an algorithm scaffold for a compatible pretrained drafter.
+
+| Obligation suffix | Required evidence |
+|---|---|
+| `artifact-availability-and-pins` | Survey official sidecars **and bundled tensor namespaces**. Record source revision, manifest and every shard digest, tokenizer/template identity, license, and locally verified bytes. If none is published, preserve a dated, source-pinned search and explicit target-only disposition; do not invent an artifact or implicitly authorize training. |
+| `model-tokenizer-tap-quant-compatibility` | Exact training-target revision when available, actual loaded target identity, vocabulary/ID mapping, shared embedding/head contract, ordered hidden-state tap indices and pre/post-block convention, independent target/draft quantization, and conversion provenance. An unknown training pin stays unknown. Model names or equal hidden width do not establish compatibility. |
+| `tensor-inventory-and-loader` | Names, shapes, dtypes, scale layouts, payload bounds, missing/extra-tensor refusal, exact loader entry point, and a real checkpoint-header witness. A source-derived shape table is not a header-verified loader. |
+| `native-forward-and-state-cache` | Reachable fak-native trained forward, target-feature capture, state identity, bounded draft/cache memory, snapshot/restore/trim behavior, and an independent forward oracle. Metadata recognition or a generic speculative loop is insufficient. |
+| `exact-verification-rollback-stop` | Greedy target-token parity; exact sampling-distribution proof or explicit unsupported refusal; anchor/proposal/bonus accounting; rejection at every position; rollback; EOS/stop; cancellation and safe session reuse. |
+| `serving-activation-and-defaults` | Normal serve/agent entry-point execution, emitted executed-route receipt, qualified model/device envelope, kill-switch drill, unsupported refusal, zero foreign-runtime fallback, and the actual default policy. A flag default or callable helper is not serving activation. |
+| `measured-end-to-end-benefit` | Accepted tokens per round **with proposed-token and round denominators**, acceptance by position, draft cost and verify cost separately, quality parity, end-to-end throughput, TTFT/latency, repeated trials, startup/recovery/memory costs, and exact source/artifact/hardware/workload pins against matched target-only execution. |
+
+### Keep status dimensions separate
+
+Use the existing [product/evidence/queue axes](progress-state-defaults.md) on the
+owning issue. For its drafter evidence, distinguish:
+
+- **Artifact availability:** unreviewed, published sidecar, bundled weights, or
+  not found by a dated pinned search. Published metadata is distinct from local
+  digest/header verification.
+- **Preparation:** study, ticket, and scaffold are individually named work
+  artifacts. None means a trained forward is implemented.
+- **Implementation:** identify the landed native loader/forward/state/serving
+  slice and its commit. A loader-only slice earns only loader credit.
+- **Tested:** name the passing test and exact source/artifact envelope; tests
+  authored but not run remain unverified. Synthetic tests do not prove real
+  checkpoint execution.
+- **Hardware-qualified:** retain an actual physical execution receipt for the
+  claimed backend, model/quantization, workload, quality, and inclusive costs.
+  Upstream numbers and another drafter's receipt cannot supply this status.
+- **Activation/default:** record disabled, opt-in, or qualified default-on only
+  from the exercised serving route and qualification policy.
+
+The survey and applicability assessment are always P0. An evidence-backed
+`no-artifact` or `not-applicable` disposition (for example, a model that does not
+perform autoregressive token generation) belongs against these same obligation IDs
+on the owning issue. It earns no implemented/tested/hardware-qualified credit and
+must not be inferred from a readiness label. There is no manifest-supplied skip flag.
+
+Qualification applies to a specific trained drafter and target combination.
+Keep the target-only path's independent support status; a P0 draft gap neither
+licenses a foreign engine fallback nor turns target-only evidence into speculative
+performance credit. Intake packets remain immutable; reconcile progress and
+receipts on the existing owning issues, then regenerate the inventory when needed.
+
+### Known P0 gaps: source snapshot, 2026-10-17
+
+This dated inventory was checked against
+`internal/model@77774015fdb5f42957508dce6a2759ab1de2a983` and the pinned upstream
+sources below. It records the baseline before subsequent loader candidates;
+re-read those files before promoting a row. No hardware performance or default-on
+claim is made by this checklist.
+
+#### Qwen3.8-27B + DFlash2
+
+- **Published weights:**
+  [`z-lab/Qwen3.8-27B-DFlash2@50307d4c4cde6860d4eee73e2547cd786fe8e8a4`](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2/tree/50307d4c4cde6860d4eee73e2547cd786fe8e8a4),
+  Apache-2.0. `model.safetensors` is published as 3,848,817,896 bytes with SHA-256
+  `67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`.
+  This published digest has not been recomputed from local weights by this inventory;
+  actual header names, dtypes, offsets, and non-overlap remain to be witnessed.
+- **Compatibility:** the stock five-layer draft uses block size 8 (one anchor plus
+  at most seven proposals), hidden width 5120, vocabulary 248320, mask ID 248070,
+  shared target embeddings/head, and ordered zero-based **post-block** target taps
+  `[5, 19, 33, 47, 61]` from a 64-layer target. Reference math:
+  [`dflash/model_mlx.py@07ebd93db9f472af339b644bb70221ad8428328a`](https://github.com/z-lab/dflash/blob/07ebd93db9f472af339b644bb70221ad8428328a/dflash/model_mlx.py)
+  (MIT). The observed
+  [`Qwen/Qwen3.8-27B` config revision](https://huggingface.co/Qwen/Qwen3.8-27B/blob/72a217afab8029b39e4af1c7273a829995a3dbaf/config.json)
+  does not pin the actual loaded target's 18 shards, tokenizer, template, or the
+  training-target revision; those remain unresolved. Target quantization does not
+  automatically qualify the draft's precision or shared projections.
+- **Study/tickets/scaffold:** the [DFlash2 study](notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md)
+  and [#12541](https://github.com/anthony-chaudhary/fak/issues/12541) /
+  [#12580](https://github.com/anthony-chaudhary/fak/issues/12580) artifact/admission
+  work establish preparation, not a native pretrained engine. Source at this
+  baseline still has the explicit `dflash2-algorithmic-candidate-rejected-no-trained-layer`
+  selector in `internal/model/adaptive_draft_depth.go`.
+- **Missing native integration:** exact trained tensor loader, five-layer forward,
+  feature/state cache and transactional rollback, target verifier and stop behavior,
+  and reachable serving activation. Native execution is owned by
+  [#12727](https://github.com/anthony-chaudhary/fak/issues/12727); optimized hybrid
+  rollback/panel work coordinates with
+  [#13548](https://github.com/anthony-chaudhary/fak/issues/13548). CPU feature-capture
+  or loader candidates alone do not close it.
+- **Tested / hardware / default:** no pinned full-DFlash2 native serving/quality/
+  throughput receipt in this snapshot. Accepted-per-round, draft cost, verify cost,
+  quality, and inclusive throughput are unmeasured here. Keep activation unqualified;
+  first join the real header and exact target pins to native execution witnesses.
+
+#### DeepSeek-V4.1-Flash + bundled DSpark
+
+- **Bundled trained stages:**
+  [`deepseek-ai/DeepSeek-V4.1-Flash@dba1be0a40aa45a94ad051997016db3960a90277`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/tree/dba1be0a40aa45a94ad051997016db3960a90277)
+  (MIT) carries DSpark `mtp.0`, `mtp.1`, and `mtp.2` stages. The pinned FAK config
+  retains `num_nextn_predict_layers=3`, block size 5, target layers `[37, 38, 39]`,
+  Markov rank 256, noise token ID 128799, 128 draft routed experts, and top-3 routing.
+  These are trained DSpark stages, not interchangeable generic MTP heads.
+- **Compatibility/pins:** preserve the draft's original MXFP4 expert and FP8 dense
+  format independently of a converted/NVFP4 target. Individual draft shard digests,
+  exact header dtypes and offsets, tokenizer/template identities, and load provenance
+  remain missing from this inventory. Do not clone the target inventory's norm/head
+  dtypes and call them checkpoint truth. A pinned architecture reference is
+  [`vLLM dspark.py@763e3f7c911308fa609fb9437642929efe955798`](https://github.com/vllm-project/vllm/blob/763e3f7c911308fa609fb9437642929efe955798/vllm/models/deepseek_v41/nvidia/dspark.py);
+  it supplies semantics, not a FAK execution route. The Qwen DFlash2 sidecar is not
+  a compatible substitute merely because a dimension matches.
+- **Current omission:** `DeepSeekV41Inventory` in `internal/model/v41_inventory.go`
+  enumerates embeddings, `layers.0..NumLayers-1`, norm, and head; it omits every
+  `mtp.*` tensor. `openV41PackedShardWith` in `internal/model/v41_weights.go`
+  ignores names whose inventory lookup fails. Thus a readable bundled checkpoint
+  is not evidence that FAK loaded its draft stages.
+- **Explicit refusal:** `RefuseDeepSeekV41DSpark` in
+  `internal/model/v41_dspark.go` returns `ErrV41DSparkUnsupported`. The separate
+  `V41SpecDecodeConfig.Validate` static layout/length gate explicitly does not prove
+  losslessness and does not supersede that refusal. Preserve the refusal until
+  feature taps, three-stage forward, draft state/cache, anchored verification,
+  rollback/stop, and the serving route are qualified.
+- **Next slice / qualification:** under the existing V4.1 parent
+  [#12640](https://github.com/anthony-chaudhary/fak/issues/12640), enumerate and
+  header-validate `mtp.0/1/2` with an explicit draft opener while keeping target
+  loading unchanged. Credit such a slice as inventory/loader only. Full native
+  DSpark execution, default activation, accepted-per-round, draft/verify cost,
+  quality, and end-to-end hardware throughput remain separate required witnesses.
 
 ### Support ladder and closure
 

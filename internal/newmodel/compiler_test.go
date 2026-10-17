@@ -212,3 +212,114 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestManifestAlwaysInventoriesPretrainedDrafterAsP0(t *testing.T) {
+	t.Parallel()
+	var manifest ReleaseManifest
+	if err := json.Unmarshal(fixture(t, "qwen38-valid.json"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	// Self-reported readiness must not pre-close the draft checks. The compiler
+	// must discover the same obligations for a future, previously unseen family.
+	manifest.Descriptor.Readiness = []string{"implemented", "tested", "hardware-qualified"}
+	for _, family := range []string{"qwen38", "deepseek-v41", "unseen-family"} {
+		t.Run(family, func(t *testing.T) {
+			manifest.Release.ID = "synthetic-" + family
+			manifest.Release.Family = family
+			raw, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := CompileManifestJSON(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Decode the wire contract independently so this regression also builds
+			// against the old compiler and fails on its missing inventory field.
+			var got struct {
+				PretrainedDrafter struct {
+					Schema                string `json:"schema"`
+					Priority              string `json:"priority"`
+					TargetID              string `json:"target_id"`
+					TargetRevision        string `json:"target_revision"`
+					TargetArtifactSHA256  string `json:"target_artifact_sha256"`
+					TargetTokenizerSHA256 string `json:"target_tokenizer_sha256"`
+					ArtifactAvailability  string `json:"artifact_availability"`
+					Implementation        string `json:"implementation"`
+					SoftwareVerification  string `json:"software_verification"`
+					HardwareQualification string `json:"hardware_qualification"`
+					ServingActivation     string `json:"serving_activation"`
+					ExecutionAdmitted     bool   `json:"execution_admitted"`
+					DefaultEnabled        bool   `json:"default_enabled"`
+					Checks                []struct {
+						ObligationID     string   `json:"obligation_id"`
+						Kind             string   `json:"kind"`
+						Status           string   `json:"status"`
+						Description      string   `json:"description"`
+						EvidenceRequired []string `json:"evidence_required"`
+					} `json:"checks"`
+				} `json:"pretrained_drafter"`
+			}
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			inv := got.PretrainedDrafter
+			if inv.Schema != "fak.new-model-pretrained-drafter/1" || inv.Priority != "P0" {
+				t.Fatalf("missing mandatory P0 inventory: %+v", inv)
+			}
+			if inv.TargetID != manifest.Release.ID || inv.TargetRevision != manifest.Release.Revision || inv.TargetArtifactSHA256 != manifest.Artifact.SHA256 || inv.TargetTokenizerSHA256 != manifest.Artifact.TokenizerSHA256 {
+				t.Fatalf("inventory lost exact target identity: %+v", inv)
+			}
+			if inv.ArtifactAvailability != "not-surveyed" || inv.Implementation != "unassessed" || inv.SoftwareVerification != "not-established" || inv.HardwareQualification != "not-established" || inv.ServingActivation != "not-admitted" || inv.ExecutionAdmitted || inv.DefaultEnabled {
+				t.Fatalf("intake promoted unverified draft support: %+v", inv)
+			}
+			var packet Packet
+			if err := json.Unmarshal(encoded, &packet); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{
+				"pretrained-drafter-artifact-availability-and-pins":          "weight_shard_sha256",
+				"pretrained-drafter-model-tokenizer-tap-quant-compatibility": "hidden_state_tap_indices_and_convention",
+				"pretrained-drafter-tensor-inventory-and-loader":             "real_header_witness",
+				"pretrained-drafter-native-forward-and-state-cache":          "independent_forward_oracle",
+				"pretrained-drafter-exact-verification-rollback-stop":        "eos_and_stop",
+				"pretrained-drafter-serving-activation-and-defaults":         "executed_route_receipt",
+				"pretrained-drafter-measured-end-to-end-benefit":             "accepted_tokens_per_round",
+			}
+			if len(inv.Checks) != len(want) {
+				t.Fatalf("draft checklist has %d checks, want %d", len(inv.Checks), len(want))
+			}
+			rungs := map[string]string{"semantic": "semantic-reference", "backend": "fak-native", "test": "fak-native", "performance": "optimized"}
+			for _, check := range inv.Checks {
+				evidence, exists := want[check.ObligationID]
+				if !exists || check.Status != "pending" || check.Description == "" || !contains(check.EvidenceRequired, evidence) {
+					t.Fatalf("incomplete or duplicate draft check: %+v", check)
+				}
+				delete(want, check.ObligationID)
+				if !contains(packet.RegistrationClosure.Open, check.Kind+":"+check.ObligationID) || packet.RegistrationClosure.Closed {
+					t.Fatalf("closure hid P0 obligation %q", check.ObligationID)
+				}
+				rung := requireSupportRung(t, packet.SupportLadder, rungs[check.Kind])
+				if rung.Status != "pending" || !contains(rung.Obligations, check.ObligationID) {
+					t.Fatalf("support ladder hid P0 obligation %q", check.ObligationID)
+				}
+			}
+		})
+	}
+	for _, id := range []string{"pretrained-drafter-artifact-availability-and-pins", "PRETRAINED_DRAFTER_ARTIFACT_AVAILABILITY_AND_PINS"} {
+		spoofed := manifest
+		spoofed.Obligations = append(append([]Obligation(nil), manifest.Obligations...), Obligation{
+			ID: id, Kind: "semantic", Description: "already complete",
+		})
+		raw, err := json.Marshal(spoofed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = CompileManifest(raw)
+		var refusal *Refusal
+		if !errors.As(err, &refusal) || refusal.Reason != RefusalObligationsIncomplete || refusal.Axis != "pretrained-drafter-artifact-availability-and-pins" {
+			t.Fatalf("manifest replaced a compiler-owned P0 check via %q: refusal=%+v err=%v", id, refusal, err)
+		}
+	}
+}

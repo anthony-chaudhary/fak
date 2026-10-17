@@ -71,6 +71,7 @@ func Run(s Scaffold) (*Result, error) {
 		Topology: s.Topology,
 		Edits:    edits,
 		NextSteps: []string{
+			"P0 prerequisite: run fak new-model --from-manifest release.json --json and assess the pretrained_drafter inventory in docs/new-model-playbook.md before support promotion. This scaffold does not establish native execution, testing, or hardware qualification.",
 			fmt.Sprintf("1. Add the isMyFamily() helper to internal/model/config.go:\n\n%s\n", configHelper),
 			fmt.Sprintf("2. Add the resolverSpec function to internal/model/tensor_resolver.go:\n\n%s\n", resolverSpec),
 			fmt.Sprintf("3. Add the case to resolveSpecFor() switch in internal/model/tensor_resolver.go:\n\n%s\n", resolverCase),

@@ -68,7 +68,7 @@ func TestPinnedReleaseReplayLedger(t *testing.T) {
 			t.Fatalf("row crossed the evidence boundary: %+v", row)
 		}
 		manifest := replayManifestForCase(t, corpus, row.ID)
-		if row.LicenseDisposition != ReplayLicenseDisposition || !rowCoversManifestObligations(row, manifest) || len(row.SemanticGaps) == 0 {
+		if row.LicenseDisposition != ReplayLicenseDisposition || !rowCoversEffectiveObligations(row, manifest) || len(row.SemanticGaps) == 0 {
 			t.Fatalf("row lost license, obligation, or gap evidence: %+v", row)
 		}
 		if strings.Contains(row.Repository, "Qwen3.6") && (row.CompatibilityException == "" || row.ManualCorrections != 1) {
@@ -97,7 +97,7 @@ func TestReplayRecordsTypedSemanticRefusal(t *testing.T) {
 			t.Fatalf("typed refusal was not retained: %+v", row)
 		}
 		manifest := replayManifestForCase(t, corpus, row.ID)
-		if !contains(row.SemanticGaps, "attention:deepseek-sparse-attention") || !rowCoversManifestObligations(row, manifest) {
+		if !contains(row.SemanticGaps, "attention:deepseek-sparse-attention") || !rowCoversEffectiveObligations(row, manifest) {
 			t.Fatalf("refusal lost semantic gap or open obligations: %+v", row)
 		}
 		return
@@ -163,14 +163,50 @@ func replayManifestForCase(t *testing.T, corpus ReplayCorpus, id string) Release
 	return ReleaseManifest{}
 }
 
-func rowCoversManifestObligations(row ReplayRow, manifest ReleaseManifest) bool {
-	if len(row.Obligations) != len(manifest.Obligations) {
+func rowCoversEffectiveObligations(row ReplayRow, manifest ReleaseManifest) bool {
+	want := make([]string, 0, len(manifest.Obligations))
+	for _, obligation := range manifest.Obligations {
+		want = append(want, obligation.Kind+":"+obligation.ID)
+	}
+	if row.Outcome == "packet" {
+		want = append(want,
+			"semantic:pretrained-drafter-artifact-availability-and-pins",
+			"semantic:pretrained-drafter-model-tokenizer-tap-quant-compatibility",
+			"backend:pretrained-drafter-tensor-inventory-and-loader",
+			"backend:pretrained-drafter-native-forward-and-state-cache",
+			"test:pretrained-drafter-exact-verification-rollback-stop",
+			"backend:pretrained-drafter-serving-activation-and-defaults",
+			"performance:pretrained-drafter-measured-end-to-end-benefit",
+		)
+	}
+	if len(row.Obligations) != len(want) {
 		return false
 	}
-	for _, obligation := range manifest.Obligations {
-		if !contains(row.Obligations, obligation.Kind+":"+obligation.ID) {
+	for _, obligation := range want {
+		if !contains(row.Obligations, obligation) {
+			return false
+		}
+		if strings.HasPrefix(obligation, "semantic:") && !contains(row.SemanticGaps, "obligation:"+strings.TrimPrefix(obligation, "semantic:")) {
 			return false
 		}
 	}
 	return true
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestReplayIncludesGeneratedDrafterObligations(t *testing.T) {
+	t.Parallel()
+	corpus, err := ParseReplayCorpus(replayFixture(t, "corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := Replay(corpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range ledger.Rows {
+		if !rowCoversEffectiveObligations(row, replayManifestForCase(t, corpus, row.ID)) {
+			t.Fatalf("%s: accepted packet lost P0 checks or refusal obligations changed: %+v", row.ID, row)
+		}
+	}
 }

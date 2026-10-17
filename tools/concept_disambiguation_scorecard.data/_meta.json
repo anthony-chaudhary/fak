@@ -1467,6 +1467,11 @@
           "category": "incidental",
           "reason": "External Ruff tooling directory literal in the exact generator skip-directory set; copied unchanged for filesystem selection parity, with no FAK cache allocation, ownership, or reusable cache concept.",
           "token": "ruff_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required draft-state cache evidence in an intake checklist; it implements no cache and establishes no ownership, reuse, or correctness guarantee.",
+          "token": "draft_state_cache"
         }
       ],
       "exclude": [
@@ -1691,6 +1696,7 @@
         "detectCacheWarmReplay",
         "dogfoodCacheLedgerRow",
         "dogfoodCacheWitnessMaxAge",
+        "draft_state_cache",
         "droppedcachedtokens",
         "evalBuildCacheCleanArgRule",
         "fak_fleet_canonical_goal_cache_read_tokens_total",
@@ -7230,6 +7236,11 @@
           "category": "incidental",
           "reason": "Unexported precondition helper for the existing Gemma4 forward route: checks CPU execution wiring and raises ResidentQuantUnsupportedError for unsupported HAL, Metal or dynamic-precision modes. Like requireminimaxsession, it is internal admission plumbing, not a separate Session or scheduler entity; the new caller changes reference cardinality, not the concept.",
           "token": "requireGemma4Session"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required cancellation and session-reuse evidence in an intake checklist; it introduces no runtime session mechanism or completed reuse claim.",
+          "token": "cancellation_and_session_reuse"
         }
       ],
       "exclude": [
@@ -7394,6 +7405,7 @@
         "blankSessionOpen",
         "boolInt",
         "bumpSessionHandoffBlocks",
+        "cancellation_and_session_reuse",
         "capability_digest",
         "chooseSessionID",
         "classifyGuardCodexSessionStart",
@@ -8738,6 +8750,11 @@
           "category": "incidental",
           "reason": "Wire value of the existing hardware-witnessed evidence rung on the SSD restart receipt; it is not a separate proof concept.",
           "token": "HW_WITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names the required real checkpoint-header evidence for the existing tensor-loader obligation; it does not create a proof artifact or claim that the header has been verified.",
+          "token": "real_header_witness"
         }
       ],
       "id": "witness-proof",
@@ -8907,6 +8924,7 @@
         "proxyFillWitnesses",
         "readDurableDispatchWitnesses",
         "readGuardCompactionWitnesses",
+        "real_header_witness",
         "recordGuardCompactionWitness",
         "refut",
         "refutations",
@@ -14265,6 +14283,16 @@
           "category": "incidental",
           "reason": "Environment-variable spelling for the candidate endpoint bearer-key input to the log-probability comparison command; it names authentication configuration, not a support-maturity or parity verdict.",
           "token": "FAK_PARITY_API_KEY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required target-token parity evidence for the existing exact-verification obligation; it records missing evidence and asserts no verified support maturity.",
+          "token": "greedy_token_parity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names the required unsupported-refusal evidence for the serving-activation obligation; it adds no refusal implementation and asserts no admitted model support.",
+          "token": "unsupported_refusal"
         }
       ],
       "exclude": [
@@ -14465,6 +14493,7 @@
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",
         "goalCoverageThreshold",
+        "greedy_token_parity",
         "guardClaudeRecordSupported",
         "guardKeychainSupported",
         "immaturity",
@@ -14531,6 +14560,7 @@
         "unsupported_extension",
         "unsupported_packing",
         "unsupported_recipe",
+        "unsupported_refusal",
         "unsupported_runtime_fusion",
         "unsupported_scale",
         "unsupported_variant_count",
@@ -18046,6 +18076,11 @@
           "category": "incidental",
           "reason": "Call-local physical-output row-count descriptors used by the routed cohort deferred read; no persistent layout owner or independent layout algorithm.",
           "token": "readLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Names required quantization scale arrangement evidence in a pretrained-drafter intake checklist; it declares no new layout implementation or compatibility claim.",
+          "token": "scale_layouts"
         }
       ],
       "id": "layout",
@@ -18065,6 +18100,7 @@
         "imageLayoutVersion",
         "layouts",
         "readLayout",
+        "scale_layouts",
         "usesmlamoelayout",
         "v41DeferredLayout",
         "v41HeadLayout",
