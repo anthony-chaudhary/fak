@@ -3,6 +3,7 @@ package compute
 import (
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // capacity.go — the eighth assumption the HAL lifts, at the type level.
@@ -742,6 +743,14 @@ func HostMemoryInfo(b Backend) (total, free int64, known bool) {
 func HostSystemMemoryInfo() (total, free int64, known bool) {
 	return hostSystemMemory()
 }
+
+// hostMemoryProbeKnown reports whether this host's memory can be probed at all.
+// It is fixed for the process, so Caps reads it once instead of parsing
+// /proc/meminfo on every call from the decode path.
+var hostMemoryProbeKnown = sync.OnceValue(func() bool {
+	_, _, known := hostSystemMemory()
+	return known
+})
 
 // HostSystemMemory reports process-host physical memory without requiring a backend.
 // It is an alias for HostSystemMemoryInfo.

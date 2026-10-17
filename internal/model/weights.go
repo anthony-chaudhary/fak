@@ -445,6 +445,12 @@ type Model struct {
 	// then; the field is never written by a caller and never consulted off the
 	// V4.1 path, so every non-V4.1 model is byte-identical with it present (#12896).
 	v41Roles map[int]V41AttentionRole
+
+	// v41ExpertsAdmitted holds the inputs of the last successful routed-expert
+	// admission loop, so a decode step on unchanged stores skips the per-expert
+	// name walk. It is an atomically accessed *v41ExpertAdmitKey; a plain pointer
+	// keeps Model copyable.
+	v41ExpertsAdmitted unsafe.Pointer
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

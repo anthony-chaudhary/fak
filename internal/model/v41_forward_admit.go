@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
+	"unsafe"
 )
 
 // v41KVLoraRankReduced is the reduced-model KV latent width. The published V4.1
@@ -614,6 +616,9 @@ func (m *Model) v41ForwardAdmitted() error {
 	if err != nil {
 		return err
 	}
+	expertKey := m.v41ExpertAdmitKeyNow(expertLo, expertHi)
+	last := (*v41ExpertAdmitKey)(atomic.LoadPointer(&m.v41ExpertsAdmitted))
+	expertsAdmitted := last != nil && *last == expertKey
 	for l := 0; l < cfg.NumLayers; l++ {
 		if err := m.v41AdmitShape(layerName(l, "attn_norm.weight"), v41StageLayer, l, H); err != nil {
 			return err
@@ -675,7 +680,7 @@ func (m *Model) v41ForwardAdmitted() error {
 		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w2.weight"), v41StageMoE, l, H, I); err != nil {
 			return err
 		}
-		for e := expertLo; e < expertHi; e++ {
+		for e := expertLo; e < expertHi && !expertsAdmitted; e++ {
 			stem := "ffn.experts." + itoa(e)
 			if err := m.v41AdmitShape(layerName(l, stem+".w1.weight"), v41StageMoE, l, I, H); err != nil {
 				return err
@@ -689,7 +694,29 @@ func (m *Model) v41ForwardAdmitted() error {
 		}
 	}
 	_ = hd
+	if !expertsAdmitted {
+		admitted := expertKey
+		atomic.StorePointer(&m.v41ExpertsAdmitted, unsafe.Pointer(&admitted))
+	}
 	return nil
+}
+
+// v41ExpertAdmitKey is every input of the routed-expert admission loop: the
+// expert geometry, this rank's expert band, the size of each resident weight
+// store and the streamed-expert tier. Stores are filled at load, so an unchanged
+// key means the 3*experts*layers name walk would find the same tensors again.
+type v41ExpertAdmitKey struct {
+	layers, hidden, inter, lo, hi             int
+	manifest, q8w, q4w, q4kw, kqw, q2w, gptqw int
+	expertCheckpoint                          *ExpertCheckpointTier
+}
+
+func (m *Model) v41ExpertAdmitKeyNow(lo, hi int) v41ExpertAdmitKey {
+	return v41ExpertAdmitKey{
+		layers: m.Cfg.NumLayers, hidden: m.Cfg.HiddenSize, inter: m.Cfg.MoEIntermediateSize, lo: lo, hi: hi,
+		manifest: len(m.manifest), q8w: len(m.q8w), q4w: len(m.q4w), q4kw: len(m.q4kw),
+		kqw: len(m.kqw), q2w: len(m.q2w), gptqw: len(m.gptqw), expertCheckpoint: m.expertCheckpoint,
+	}
 }
 
 // v41AdmitMHC admits the attention mHC trio for reduced geometry, preserving

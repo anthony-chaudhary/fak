@@ -255,7 +255,7 @@ func (c *cudaBackend) Caps() Caps {
 	// CapacityProbe (capacity.go): the backend can REPORT its VRAM ceiling (DeviceMemory),
 	// the report half of the hardware-capacity bridge. It is the one number this backend has
 	// always held (totalGlobalMem) but used to discard.
-	_, _, hostKnown := hostSystemMemory()
+	hostKnown := hostMemoryProbeKnown()
 	// Collective is advertised true ONLY once a real NCCL communicator is up (fcuda_nccl_init
 	// succeeded over >1 device, recorded in cudaNCCLWorld). Until then it stays false so a host
 	// never picks the device collective path before it can actually all-reduce across GPUs — the
