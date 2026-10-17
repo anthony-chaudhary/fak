@@ -395,29 +395,30 @@ func V41AttentionCompressedForward(q []float32, values [][]float32, opt V41Atten
 	out := make([]float32, len(q))
 	for t := 0; t < seq; t++ {
 		qBase := t * opt.Heads * opt.HeadDim
-		for h := 0; h < opt.Heads; h++ {
-			hBase := qBase + h*opt.HeadDim
-			// Resolve this position's visible groups. When the caller supplied
-			// an index list, a group is visible only if it is both selected (-1
-			// means empty) and causally complete; otherwise the causal mask is
-			// the visibility authority.
-			var visible []int
-			if opt.Idx != nil {
-				idxBase := t * opt.IndexTopK
-				for i := 0; i < opt.IndexTopK; i++ {
-					row := int(opt.Idx[idxBase+i])
-					if row < 0 || !mask[t][row] {
-						continue
-					}
-					visible = append(visible, row)
+		// Resolve this position's visible groups. When the caller supplied
+		// an index list, a group is visible only if it is both selected (-1
+		// means empty) and causally complete; otherwise the causal mask is
+		// the visibility authority.
+		var visible []int
+		if opt.Idx != nil {
+			idxBase := t * opt.IndexTopK
+			for i := 0; i < opt.IndexTopK; i++ {
+				row := int(opt.Idx[idxBase+i])
+				if row < 0 || !mask[t][row] {
+					continue
 				}
-			} else {
-				for g := 0; g < opt.Groups; g++ {
-					if mask[t][g] {
-						visible = append(visible, g)
-					}
+				visible = append(visible, row)
+			}
+		} else {
+			for g := 0; g < opt.Groups; g++ {
+				if mask[t][g] {
+					visible = append(visible, g)
 				}
 			}
+		}
+
+		for h := 0; h < opt.Heads; h++ {
+			hBase := qBase + h*opt.HeadDim
 
 			maxScore := float32(negInf32)
 			if opt.Sink != nil {
