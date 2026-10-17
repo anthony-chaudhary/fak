@@ -957,6 +957,17 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	if useDeviceEmbed {
 		x = embedder.EmbeddingRow(embedTable, id)
 	}
+	featureResidualReleased := false
+	if s.qwen35TargetFeatureTxn != nil {
+		defer func() {
+			if !featureResidualReleased {
+				if batch != nil {
+					batch.FlushBatch()
+				}
+				be.Free(x)
+			}
+		}()
+	}
 	rope := func(x compute.Tensor, pos, nHeads, headDim int, theta float64) compute.Tensor {
 		if r, ok := be.(ropeInPlaceBackend); ok {
 			return r.RoPEInPlace(x, pos, nHeads, headDim, theta)
@@ -1017,6 +1028,7 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			runtime.UnlockOSThread()
 			capturing = false
 		}
+		featureResidualReleased = true
 		be.Free(x) // per-token input/residual buffer; weights and KV are owned elsewhere.
 		s.halStep++
 		if mode != halNoLogits {
@@ -1117,6 +1129,9 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 				ff := be.SwiGLU(g, u)
 				addMatMul(x, s.matWeightHAL(p("mlp.down_proj.weight")), ff)
 			}
+		}
+		if s.qwen35TargetLayerCapture != nil {
+			s.captureQwen35TargetLayerHAL(id, pos, l, x, batch)
 		}
 		if useQ8Weights && batch != nil && halQ8BatchLayers > 0 && (l+1)%halQ8BatchLayers == 0 && l+1 < cfg.NumLayers {
 			if cycler, ok := batch.(batchCycler); ok {
@@ -1255,6 +1270,9 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 
 // tokenHAL preserves the public Step/Prefill contract: return the full host logits.
 func (s *Session) tokenHAL(id, pos int) []float32 {
+	if s.qwen35TargetFeatureTxn != nil {
+		return s.tokenHALTargetFeatures(id, pos)
+	}
 	be := s.Backend
 	logits, _ := s.tokenHALOutput(id, pos, halFullLogits)
 	s.admitHostStage(HostStageLogitsReadback)

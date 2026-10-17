@@ -401,6 +401,12 @@ type Session struct {
 	targetHidden        [][]float32
 	targetHiddenTokens  []int
 
+	// Target-feature staging is opt-in and owned by one exclusive caller. The
+	// capture pointer exists only during a native f32 step; committed features
+	// leave the Session in independently owned rows. Ordinary sessions stay nil.
+	qwen35TargetLayerCapture *qwen35TargetLayerCapture
+	qwen35TargetFeatureTxn   *qwen35TargetFeatureTransaction
+
 	// v41Forward is the session-owned continuation state for the DeepSeek V4.1 text
 	// forward (v41_forward.go, #12901). It carries the committed token history and a
 	// lazily-built V41AttentionState; the assembly is cacheless, so Prefill followed by
@@ -863,6 +869,9 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 	for l := 0; l < cfg.NumLayers; l++ {
 		cos, sin := ropeRowForLayer(cfg, l, pos)
 		x = s.blockStep(l, pos, x, cos, sin, f32Kernel{m})
+		if capture := s.qwen35TargetLayerCapture; capture != nil {
+			capture.record(id, pos, l, x)
+		}
 	}
 	s.Cache.appendPosition(pos, id)
 	if tap != nil {

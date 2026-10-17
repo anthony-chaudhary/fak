@@ -2144,6 +2144,11 @@
           "category": "incidental",
           "reason": "Private implementation mechanic of the positioned v41PlainAttentionContinuation owner; does not define a separate attention mode, capability, or state owner.",
           "token": "attentionInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned DFlash2 checkpoint tensor-group spelling for the existing pre/post attention convolution; no separate attention backend or attention policy is defined by the field name.",
+          "token": "attention_conv"
         }
       ],
       "exclude": [
@@ -2167,6 +2172,7 @@
         "attentionInputPanel",
         "attentionInputRun",
         "attentionRows",
+        "attention_conv",
         "attentions",
         "attentive",
         "attn_core",
@@ -7241,6 +7247,11 @@
           "category": "incidental",
           "reason": "Names required cancellation and session-reuse evidence in an intake checklist; it introduces no runtime session mechanism or completed reuse claim.",
           "token": "cancellation_and_session_reuse"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 internal validator for the existing model Session feature-transaction contract; this helper introduces no separate session type or lifecycle.",
+          "token": "validateQwen35TargetFeatureSession"
         }
       ],
       "exclude": [
@@ -7667,6 +7678,7 @@
         "tuisessionrow",
         "v41ActivationTraceEnvStageSlots",
         "validSessionRelayURL",
+        "validateQwen35TargetFeatureSession",
         "verifiedSlotMetadata",
         "verifiedSlotSchema",
         "verifyFilterToolScheduler",
@@ -9802,6 +9814,16 @@
           "category": "incidental",
           "reason": "Private iteration-local scratch extracted from the existing fixed-cohort decode loop; no new engine or serving policy.",
           "token": "inKernelDecodeIteration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned DFlash2 tensor-key spelling for the dynamic convolution weight projection; the kernel substring describes numerical filter coefficients rather than a gateway or execution engine.",
+          "token": "kernel_projection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned DFlash2 tensor-key spelling for base convolution coefficients; an upstream checkpoint field rather than a gateway or execution engine.",
+          "token": "base_kernel"
         }
       ],
       "exclude": [
@@ -9862,6 +9884,7 @@
         "TotalKernelTime",
         "WithAffinity",
         "applyInKernelBOS",
+        "base_kernel",
         "bashEngine",
         "cacheEmitter",
         "collectDogfoodKernelValue",
@@ -9941,6 +9964,7 @@
         "kernelValue",
         "kernel_100ns",
         "kernel_completion_timing",
+        "kernel_projection",
         "kernels",
         "kernelwiki",
         "markInKernelDroppedToolCalls",
@@ -12452,6 +12476,16 @@
           "category": "incidental",
           "reason": "planner method rendering through the installed layer memo",
           "token": "RenderIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 private per-layer key/value slices for the existing drafter context representation; this storage helper does not define a separate request or cancellation context.",
+          "token": "dflash2ContextKV"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 integer argument carrying the existing target-prefix offset into the draft reference constructor; an implementation coordinate rather than a new context abstraction.",
+          "token": "firstContextPosition"
         }
       ],
       "exclude": [
@@ -12572,9 +12606,11 @@
         "ctxSnapshot",
         "ctxThrashConsecutiveRefills",
         "ctxsleep",
+        "dflash2ContextKV",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
         "featureActivationContextKey",
+        "firstContextPosition",
         "formatGuardCompactionWitness",
         "guardCompactionAnchorFirst",
         "guardCompactionAnchorHead",
@@ -17179,6 +17215,11 @@
           "category": "incidental",
           "reason": "same memo render method, flagged under the plan family",
           "token": "PlanContextLayers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 internal method selecting draft token candidates using the trained Markov selector; this numerical helper does not define a work plan or planning lifecycle.",
+          "token": "selectCandidates"
         }
       ],
       "exclude": [
@@ -17417,6 +17458,7 @@
         "scanCodexMarketplaceCandidates",
         "seedCandidate",
         "seen_candidates",
+        "selectCandidates",
         "select_candidate_blocks",
         "selfUpdateCandidateCacheDisabled",
         "selfUpdateCandidateCacheDisposition",
