@@ -19,12 +19,12 @@ The run completes in a few seconds and returns exit code 0 only if every invaria
 ## What You See
 
 ```text
-fak a2achan - in-kernel agent-to-agent message channel (no key, no model)
+fak a2achan — in-kernel agent-to-agent message channel (no key, no model)
     alpha SEND shared -> work                    -> ALLOW
-    alpha SEND private -> another agent's channel -> DENY
+    alpha SEND private -> another agent's channel -> DENY (<reason>)
     coordinator PUBLISH (fanout=2)               -> ALLOW
 
-a2ademo: OK - adjudicated A2A delivery across in-kernel / session / window locales + pub/sub
+a2ademo: OK — adjudicated A2A delivery across in-kernel / session / window locales + pub/sub
 ```
 
 ## What This Does Not Claim
