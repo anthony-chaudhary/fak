@@ -138,6 +138,10 @@ type v41ForwardSnapshot struct {
 	history []int
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
+	// forwardCoverage describes the logits saved beside this exact prefix. It
+	// preserves their producing traversal, not work executed by a cache hit.
+	// Capture and clone own this value independently of every live session.
+	forwardCoverage *NativeForwardCoverage
 	// hadState records whether the owner session held a live v41ForwardState at
 	// capture. A snapshot of a session that never ran a V4.1 forward carries the
 	// nil-state contract, so restoring it leaves the target session's V4.1 state
@@ -376,6 +380,18 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 	if p.Backend != s.Backend {
 		return fmt.Errorf("model: prefix snapshot backend mismatch")
 	}
+	if p.v41 != nil && p.v41.forwardCoverage != nil {
+		coverage := p.v41.forwardCoverage
+		if p.owner == nil || p.owner.M != s.M {
+			return fmt.Errorf("%w: prefix snapshot model identity mismatch", ErrNativeForwardCoverageInvalid)
+		}
+		if err := coverage.Validate(); err != nil {
+			return err
+		}
+		if coverage.ModelType != s.M.Cfg.ModelType || coverage.ConfiguredLayers != s.M.Cfg.NumLayers || coverage.HeadDim != s.M.Cfg.HeadDim {
+			return fmt.Errorf("%w: prefix snapshot model geometry mismatch", ErrNativeForwardCoverageInvalid)
+		}
+	}
 	scope.bind(s)
 	// A V4.1 continuation is a backend-session prefix, not a portable host blob:
 	// the arithmetic reads state bound to the device it was prepared on, so a
@@ -533,6 +549,10 @@ func captureV41ForwardSnapshotWithPublications(st *v41ForwardState, shareSealed 
 		attn:     st.attn.cloneWithPublications(shareSealed),
 		hadState: true,
 	}
+	if st.forwardCoverage != nil {
+		coverage := *st.forwardCoverage
+		out.forwardCoverage = &coverage
+	}
 	if len(st.layers) > 0 {
 		out.layers = make([]*V41AttentionState, len(st.layers))
 		for i, layer := range st.layers {
@@ -557,6 +577,10 @@ func (n *v41ForwardSnapshot) cloneWithPublications(shareSealed bool) *v41Forward
 		attn:     n.attn.cloneWithPublications(shareSealed),
 		hadState: n.hadState,
 	}
+	if n.forwardCoverage != nil {
+		coverage := *n.forwardCoverage
+		out.forwardCoverage = &coverage
+	}
 	if len(n.layers) > 0 {
 		out.layers = make([]*V41AttentionState, len(n.layers))
 		for i, layer := range n.layers {
@@ -577,11 +601,12 @@ func (n *v41ForwardSnapshot) restore() *v41ForwardState {
 		return nil
 	}
 	out := &v41ForwardState{
-		history: n.history,
-		attn:    n.attn,
-		layers:  n.layers,
+		history:         n.history,
+		attn:            n.attn,
+		layers:          n.layers,
+		forwardCoverage: n.forwardCoverage,
 	}
-	n.history, n.attn, n.layers = nil, nil, nil
+	n.history, n.attn, n.layers, n.forwardCoverage = nil, nil, nil, nil
 	return out
 }
 
