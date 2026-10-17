@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -92,13 +93,14 @@ type prefixHitInfo struct {
 }
 
 type nativePrefixState struct {
-	mu            sync.RWMutex
-	tree          *radixkv.Tree
-	prefixTree    PrefixTree
-	deterministic bool
-	stats         PrefixStats
-	holderLookups map[*model.Session]*prefixHitInfo
-	laneLookups   map[*schedLane]*prefixHitInfo
+	mu                 sync.RWMutex
+	tree               *radixkv.Tree
+	prefixTree         PrefixTree
+	deterministic      bool
+	stats              PrefixStats
+	chunkedExactReuses uint64
+	holderLookups      map[*model.Session]*prefixHitInfo
+	laneLookups        map[*schedLane]*prefixHitInfo
 }
 
 func (s *NativeScheduler) getPrefixState() *nativePrefixState {
@@ -212,6 +214,18 @@ func (s *NativeScheduler) PrefixStats() PrefixStats {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	return st.stats
+}
+
+// ChunkedExactPrefillReuses counts completed full-prompt copies between running
+// host Qwen lanes. It is separate from synchronous prefix-flight role counters.
+func (s *NativeScheduler) ChunkedExactPrefillReuses() uint64 {
+	st := s.getPrefixState()
+	if st == nil {
+		return 0
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.chunkedExactReuses
 }
 
 func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node, *radixkv.Tree) {
@@ -653,10 +667,12 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	// promptLen doubles as the existing preemption accountant's live token count.
 	// It reaches the full input length only as chunks become resident in KV.
 	ln.promptLen = end
+	var exactTwins []*schedLane
 	if final {
 		ln.logits = logits
 		ln.state = schedLaneDecode
 		s.maybeInsertRadixKV(ln.prompt, ln.sess, logits)
+		exactTwins = s.reuseExactQwenPrefillLocked(ln)
 	}
 	s.mu.Unlock()
 
@@ -668,6 +684,19 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		ChunkStart: start,
 		ChunkLen:   len(chunk),
 	})
+
+	for _, twin := range exactTwins {
+		s.mu.Lock()
+		live := s.liveDecodeLaneLocked(twin)
+		if live && twin.ctx.Err() != nil {
+			twin.finish(nil, twin.ctx.Err())
+			live = false
+		}
+		s.mu.Unlock()
+		if live {
+			s.observeEvent(nativeSchedulerEvent{Iteration: iteration, Kind: nativeSchedulerEventTransition, Lane: twin, State: schedLaneDecode})
+		}
+	}
 
 	// A test observer or Close may cancel immediately after the chunk publication.
 	// Retire under the same lock used to publish sess so cleanup owns it exactly once.
@@ -695,6 +724,62 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		Lane:      ln,
 		State:     schedLaneDecode,
 	})
+
+}
+
+// reuseExactQwenPrefillLocked publishes detached full-cache copies only at the
+// donor's successful final-chunk boundary, before any decode can advance it.
+// executor and s.mu are held. No recurrent cache is ever truncated.
+func (s *NativeScheduler) reuseExactQwenPrefillLocked(donor *schedLane) []*schedLane {
+	if !s.inBatchDedup || s.captureQwenState || donor == nil || donor.ctx.Err() != nil ||
+		donor.terminal || donor.state != schedLaneDecode || donor.preemptRound != 0 ||
+		donor.promptCursor != len(donor.prompt) || len(donor.logits) == 0 ||
+		donor.prefillChunkTokens < nativeQwenPrefillMinChunkTokens || s.getPrefixHitInfo(donor) != nil {
+		return nil
+	}
+	host := func(ln *schedLane) bool {
+		if ln == nil || ln.sess == nil || ln.inflightSess != nil || !ln.q4k {
+			return false
+		}
+		sess := ln.sess
+		return sess.M == s.m && sess.Cache != nil && sess.Backend == nil && sess.Q4K &&
+			!sess.Quant && !sess.Q4 && !sess.GPTQ && !sess.Metal && !sess.MetalQ4K &&
+			!sess.Q4KGateUpOutputSlab && sess.PrecisionPolicy == nil
+	}
+	if !host(donor) || donor.sess.Cache.Len() != len(donor.prompt) {
+		return nil
+	}
+	var copied []*schedLane
+	blocks := s.laneKVBlocksLocked(donor)
+	for _, twin := range s.lanes {
+		if twin == donor || !host(twin) || twin.terminal || twin.ctx.Err() != nil ||
+			twin.state != schedLanePrefilling || twin.promptCursor != 0 || twin.preemptRound != 0 ||
+			twin.sess.Cache.Len() != 0 || twin.prefillChunkTokens != donor.prefillChunkTokens ||
+			!slices.Equal(twin.prompt, donor.prompt) || s.getPrefixHitInfo(twin) != nil {
+			continue
+		}
+		used := s.usedKVBlocksLocked()
+		added := blocks - s.laneKVBlocksLocked(twin)
+		if s.preemption.MaxBlocks > 0 && (added > s.preemption.MaxBlocks || used > s.preemption.MaxBlocks-added) {
+			continue
+		}
+		twin.sess.Cache = donor.sess.Cache.Clone()
+		twin.logits = copyF32(donor.logits)
+		twin.promptCursor = len(twin.prompt)
+		twin.promptLen = len(twin.prompt)
+		twin.state = schedLaneDecode
+		copied = append(copied, twin)
+		if used+added > s.maxObservedKVBlocks {
+			s.maxObservedKVBlocks = used + added
+		}
+	}
+	if len(copied) > 0 {
+		st := s.getOrCreatePrefixState()
+		st.mu.Lock()
+		st.chunkedExactReuses += uint64(len(copied))
+		st.mu.Unlock()
+	}
+	return copied
 }
 
 func (s *NativeScheduler) livePrefillLaneLocked(ln *schedLane) bool {
