@@ -208,6 +208,7 @@ var maintainerDevCommands = []string{
 	"issue-stats",
 	"issues-recent",
 	"issues-solved",
+	"kernel-oracle",
 	"knownbad",
 	"kvbm",
 	"l3-serve",

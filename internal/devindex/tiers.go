@@ -324,6 +324,7 @@ var verbTiers = map[string]VerbTier{
 	"issue-stats":                   TierDev,
 	"issues-recent":                 TierDev,
 	"issues-solved":                 TierDev,
+	"kernel-oracle":                 TierDev,
 	"knownbad":                      TierDev,
 	"kvbm":                          TierDev,
 	"l3-serve":                      TierDev,

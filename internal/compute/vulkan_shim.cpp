@@ -557,6 +557,9 @@ int g_gdn_verify_checked = 0;
 float g_gdn_verify_deviation = 0.0f;
 uint64_t g_gdn_verify_tiled_calls = 0;
 uint64_t g_gdn_verify_scalar_calls = 0;
+// GDN calls on the production geometry that FAK_VULKAN_GDN_PREFILL_TILED=0 kept
+// on the stock kernel.
+uint64_t g_gdn_optout_calls = 0;
 // Test-only forced-disagreement hook: when nonzero the self-check reports failure
 // and the route must fall back to the stock kernel.
 int g_gdn_verify_force_disagree = 0;
@@ -8124,6 +8127,11 @@ extern "C" void fvk_debug_gdn_prefill_tiled_reset(void) {
     g_gdn_prefill_tiled_calls = 0;
     g_gdn_prefill_scalar_calls = 0;
     g_gdn_verify_tiled_calls = 0;
+    g_gdn_optout_calls = 0;
+}
+
+extern "C" uint64_t fvk_debug_gdn_optout_calls(void) {
+    return g_gdn_optout_calls;
 }
 
 extern "C" void fvk_debug_gdn_prefill_tiled_snapshot(uint64_t* tiled, uint64_t* scalar) {
@@ -8146,25 +8154,22 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
     const bool requestedByEnv = optIn && optIn[0] == '1' && optIn[1] == '\0';
     const bool optOut = optIn && optIn[0] == '0' && optIn[1] == '\0';
     const bool productionGeometry = n_k == 16 && n_v == 48 && k_hd == 128 && v_hd == 128 && conv_dim == 10240;
-    // Prefill-class (>=8) route. The explicit request path (debug mode 1 or env
-    // "1") requires a true self-check verdict. An unset variable stays stock until a
-    // default flip is earned; `=0` also stays stock.
-    constexpr bool kGdnTiledDefaultFlipEarned = false; // pending the [HW-WITNESSED] Strix A/B, #12735, #12098
-    const bool tiledRequested = g_gdn_prefill_mode == 1 ||
-        (g_gdn_prefill_mode == -1 && (requestedByEnv || kGdnTiledDefaultFlipEarned));
+    // Prefill-class (>=8) route. Every candidate selection requires a true
+    // self-check verdict. The default follows the flip constant; `=0` forces stock.
+    constexpr bool kGdnTiledDefaultFlipEarned = false; // pending the whole-model logit oracle and Strix A/B, halo-gdn-prefill-tiled
+    const bool tiledRequested = !optOut && (g_gdn_prefill_mode == 1 ||
+        (g_gdn_prefill_mode == -1 && (requestedByEnv || kGdnTiledDefaultFlipEarned)));
     const bool tiled = tiledRequested && g_have_gdn_prefill_tiled && g_gdn_tiled_verdict != 0 &&
         tokens >= 8 && (uint32_t)tokens <= g_gdn_prefill_max_groups_y && productionGeometry;
     // Verify-width (1..7 token) route. `FAK_VULKAN_GDN_PREFILL_TILED=0` forces the
-    // stock kernel; an explicit request (debug mode 1 or env "1") selects the
-    // candidate but still requires a true self-check verdict. With the variable
-    // unset the route follows the verdict only once the default flip is earned for
-    // the width class; until then the default stays stock.
-    constexpr bool kGdnVerifyDefaultFlipEarned = false; // pending the [HW-WITNESSED] Strix A/B, #12735, #12098
+    // stock kernel; otherwise the candidate still requires a true self-check verdict.
+    constexpr bool kGdnVerifyDefaultFlipEarned = false; // pending the whole-model logit oracle and Strix A/B, halo-gdn-prefill-tiled
     const bool verifyRequested = !optOut && g_gdn_verify_mode != 0 &&
         (g_gdn_prefill_mode == 1 || g_gdn_verify_mode == 1 || requestedByEnv ||
          kGdnVerifyDefaultFlipEarned);
     const bool verify = verifyRequested && g_have_gdn_verify_tiled && g_gdn_verify_verdict &&
         tokens >= 1 && tokens < 8 && productionGeometry;
+    if (optOut && productionGeometry) ++g_gdn_optout_calls;
     Buffer* readout = nullptr;
     if (tiled || verify) {
         readout = gdnPrefillReadoutScratch((size_t)tokens * n_v * v_hd * sizeof(float));
