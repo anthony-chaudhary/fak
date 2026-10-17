@@ -287,6 +287,14 @@ type WeightResidency struct {
 	// LMHead is the LIVE head route (metal-q6k, cpu-q6k, cpu-q8, ...). It is re-read on
 	// every report because a later Metal residency promotion can move the head.
 	LMHead string `json:"lm_head"`
+	// The resident-vs-file receipt (model.WeightResidencyReceipt): weight bytes resident
+	// on the serving backend against the GGUF payload, and the requantizations behind any
+	// gap. Omitted when the serve recorded no file size.
+	FileWeightBytes     int64   `json:"file_weight_bytes,omitempty"`
+	ResidentWeightBytes int64   `json:"resident_weight_bytes,omitempty"`
+	ResidentToFileRatio float64 `json:"resident_to_file_ratio,omitempty"`
+	RequantizedTypes    string  `json:"requantized_types,omitempty"` // comma-joined; keeps the struct comparable
+	RequantizedDegraded bool    `json:"requantized_degraded,omitempty"`
 }
 
 // WeightResidencyReporter is implemented by local planners that hold a loaded model and

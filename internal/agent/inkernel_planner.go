@@ -2456,8 +2456,8 @@ func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
 
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s",
-		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause())
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s%s",
+		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause())
 }
 
 // prefillQ4KGEMMLabel is the gemm= value of the execution summary: the Q4_K prefill GEMM

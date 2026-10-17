@@ -849,6 +849,10 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 		rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
 	}
 	rt.inKernelModel, rt.inKernelQ4K, rt.loadProfile, rt.inKernelTok = inKernelModel, inKernelQ4K, loadProfile, inKernelTok
+	if err := rt.admitWeightResidency(inKernelModel, *sf.ggufPath); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v; serve with --%s=%s on a node dedicated to this model to admit it\n", err, serveExecutionPolicyFlag, serveExecutionPolicyBringup)
+		os.Exit(2)
+	}
 	rt.warmDiskModelIdentity = artifactStamp.identityAfterLoad(*sf.ggufPath)
 }
 

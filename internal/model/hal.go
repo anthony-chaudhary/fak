@@ -748,8 +748,10 @@ func (s *Session) weightHALRawIQExpanded(name string, qt *kQuantTensor) compute.
 		}
 		f := compute.DequantRawIQ(dt, qt.out, qt.in, raw)
 		if q8 {
+			compute.RecordWeightRequant(dt, compute.Q8_0, len(raw), int(compute.Q8ResidentBytes(qt.out, qt.in, qBlk)))
 			return compute.QuantizeQ8(compute.Default(), []int{qt.out, qt.in}, f, qBlk)
 		}
+		compute.RecordWeightRequant(dt, compute.F32, len(raw), 4*len(f))
 		return compute.NewF32(compute.Default(), []int{qt.out, qt.in}, f)
 	}, as)
 }

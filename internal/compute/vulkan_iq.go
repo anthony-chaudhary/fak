@@ -22,6 +22,15 @@ func (v *vulkanBackend) iqNativeLocked(dt Dtype) bool {
 	return ok && C.fvk_iq_matvec_available(C.int(f.vulkanID)) != 0
 }
 
+// RequantizesWeightDtype reports Q8_0 for a raw i-quant whose native kernel is not built:
+// Upload expands it on the host, so it is resident at ~1.125 B/weight, not its file size.
+func (v *vulkanBackend) RequantizesWeightDtype(dt Dtype) (Dtype, bool) {
+	if !isRawIQ(dt) || v.iqNativeLocked(dt) {
+		return dt, false
+	}
+	return Q8_0, true
+}
+
 func (v *vulkanBackend) uploadRawIQLocked(t Tensor) Tensor {
 	f := rawIQFormats[t.Dtype]
 	hb, ok := t.buf.(HostBuffer)
@@ -37,6 +46,7 @@ func (v *vulkanBackend) uploadRawIQLocked(t Tensor) Tensor {
 		deq := DequantRawIQ(t.Dtype, t.Shape[0], t.Shape[1], raw)
 		q := QuantizeQ8(Default(), t.Shape, deq, 32)
 		qh := q.buf.(HostBuffer)
+		RecordWeightRequant(t.Dtype, Q8_0, len(raw), len(qh.I8())+4*len(q.Quant.Scale))
 		return v.uploadQ8Locked(q.Shape, qh.I8(), q.Quant.Scale, q.Quant.Block)
 	}
 	buf := v.dallocWeightFor(len(raw), t.Dtype.String()+" weight buffer "+shapeText(t.Shape))

@@ -245,6 +245,9 @@ type Model struct {
 	// q4kResidency owns the once-only streamed upload evidence for this model. Keeping the state
 	// on the model gives it the same lifetime without a global pointer-key retention map.
 	q4kResidency *q4kResidencyState
+	// fileWeightBytes is the loaded file's weight payload size (SetFileWeightBytes), the
+	// denominator of the resident-vs-file receipt (resident_bytes.go).
+	fileWeightBytes int64
 
 	// numaInterleaveLabel caches the verdict of the last ApplyDecodeNUMAInterleave call
 	// (#4974) so a later NUMAInterleaveLabel() — e.g. a decode-witness RESULT line — can

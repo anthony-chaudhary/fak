@@ -38,6 +38,7 @@ func (p *InKernelPlanner) WeightResidency() (WeightResidency, bool) {
 	}
 	out := c.snap
 	out.LMHead = p.m.LMHeadRoute()
+	p.fillRequantizedWeights(&out)
 	return out, true
 }
 
