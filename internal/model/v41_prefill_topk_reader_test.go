@@ -102,8 +102,8 @@ func TestV41PrefillTopKReaderCopy(t *testing.T) {
 		t.Fatal("invalid reader allocation workload")
 	}
 	t.Logf("snapshot oracle %.0f allocations; reader %.0f; removed %.0f", oldAllocs, newAllocs, oldAllocs-newAllocs)
-	if oldAllocs-newAllocs != float64(len(rows)+1) {
-		t.Fatalf("want removal of outer snapshot and %d copied rows", len(rows))
+	if oldAllocs-newAllocs != float64(2*len(rows)+1) {
+		t.Fatalf("want removal of outer snapshot plus copied and normalized storage for %d rows", len(rows))
 	}
 }
 
