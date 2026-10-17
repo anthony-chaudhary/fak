@@ -35,7 +35,9 @@ func TestChildPWDProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	_, err = fmt.Fprintln(f, `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"pwd-helper"}}`)
+	// Run requires a post-launch start witness before accepting completion.
+	_, err = fmt.Fprintln(f, `{"type":"event_msg","payload":{"type":"task_started","turn_id":"pwd-helper"}}`+"\n"+
+		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"pwd-helper"}}`)
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
 		fmt.Fprintln(os.Stderr, err, closeErr)
@@ -78,7 +80,7 @@ func TestChildPWDRun(t *testing.T) {
 				Dir:     tc.dir, Env: tc.env, RolloutPath: rollout, Deadline: 10 * time.Second,
 				PollInterval: 10 * time.Millisecond, Drain: 2 * time.Second, Stdout: &stdout, Stderr: &stderr,
 			})
-			if err != nil || r.Outcome != OutcomeCompleted || !r.ProcessExit || r.ExitCode != 0 || r.ForcedReclaim {
+			if err != nil || r.Outcome != OutcomeCompleted || !r.ProcessExit || r.ExitCode != 0 || r.ForcedReclaim || !r.TaskStarted || !r.TaskCompleted {
 				t.Fatalf("result=%+v err=%v stderr=%s", r, err, stderr.String())
 			}
 			var got struct {
@@ -232,4 +234,34 @@ func TestRunRequiresInputs(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	_ = fmt.Sprint(e)
+}
+
+// Completion without a start in the observed suffix is not a successful task.
+func TestScanRolloutRejectsOrphanCompletion(t *testing.T) {
+	const start = `{"type":"event_msg","payload":{"type":"task_started","turn_id":"orphan-helper"}}` + "\n"
+	const complete = `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"orphan-helper"}}` + "\n"
+	for _, tc := range []struct {
+		name, contents string
+		offset         int64
+	}{
+		{"no-start", complete, 0},
+		{"start-before-baseline", start + complete, int64(len(start))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rollout.jsonl")
+			if err := os.WriteFile(path, []byte(tc.contents), 0600); err != nil {
+				t.Fatal(err)
+			}
+			state, err := scanRollout(path, tc.offset)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.started || state.completed || state.terminal {
+				t.Fatalf("orphan completion accepted: %+v", state)
+			}
+			if got := outcomeFromState(state, false); got != OutcomeExited {
+				t.Fatalf("outcome=%q want %q", got, OutcomeExited)
+			}
+		})
+	}
 }
