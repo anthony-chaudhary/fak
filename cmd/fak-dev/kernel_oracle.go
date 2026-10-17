@@ -291,13 +291,33 @@ func oracleIsMatmulWeight(t ggufload.TensorExport) bool {
 	if len(t.Dims) != 2 || !strings.HasSuffix(t.Name, ".weight") {
 		return false
 	}
-	if strings.HasPrefix(t.Name, "token_embd") || strings.Contains(t.Name, "conv1d") {
+	if strings.HasPrefix(t.Name, "token_embd") || strings.Contains(t.Name, "conv1d") || oracleIsEngramTable(t.Name) {
 		return false
 	}
 	if strings.EqualFold(t.Type, "F32") {
 		return false
 	}
 	return t.Dims[0] >= 32 && t.Dims[1] >= 1
+}
+
+// Engram tables are gathered row-wise, not consumed as dense matmul weights.
+// Match ggufload's table names without excluding the Engram projections.
+func oracleIsEngramTable(name string) bool {
+	if !strings.HasPrefix(name, "blk.") {
+		return false
+	}
+	layer, suffix, ok := strings.Cut(strings.TrimPrefix(name, "blk."), ".")
+	if !ok {
+		return false
+	}
+	if _, err := strconv.Atoi(layer); err != nil {
+		return false
+	}
+	switch strings.TrimSuffix(suffix, ".weight") {
+	case "engram_table", "engram_embd":
+		return true
+	}
+	return false
 }
 
 func oracleTensorRole(name string) string {

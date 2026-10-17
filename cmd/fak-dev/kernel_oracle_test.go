@@ -118,6 +118,49 @@ func TestKernelOracleShapesFromModelTensorDirectory(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleShapesExcludeEngramTables(t *testing.T) {
+	// Directory metadata only: the published Q2_K Engram table has this shape,
+	// but its rows are gathered on demand, never multiplied as a dense matrix.
+	const metadata = `{"metadata":[{"key":"general.architecture","value":"deepseek41"}],"tensors":[
+		{"name":"blk.1.engram_embd.weight","type":"Q2_K","dims":[256,384006168]},
+		{"name":"blk.2.engram_table.weight","type":"Q2_K","dims":[256,384006168]},
+		{"name":"blk.1.engram_wkv.weight","type":"Q2_K","dims":[256,512]},
+		{"name":"blk.1.engram_q.weight","type":"Q2_K","dims":[256,512]},
+		{"name":"blk.1.engram_k.weight","type":"Q2_K","dims":[256,512]},
+		{"name":"blk.1.engram_kv.weight","type":"Q2_K","dims":[256,512]}
+	]}`
+	path := filepath.Join(t.TempDir(), "engram-metadata.json")
+	if err := os.WriteFile(path, []byte(metadata), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runKernelOracle(&stdout, &stderr, []string{"shapes", "--metadata-json", path, "--n", "1,512"}); code != 0 {
+		t.Fatalf("shapes exit %d: %s", code, stderr.String())
+	}
+	var list oracleShapeList
+	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Shapes) != 2 {
+		t.Fatalf("shapes = %+v, want only projection shapes for n=1,512", list.Shapes)
+	}
+	for i, n := range []int64{1, 512} {
+		s := list.Shapes[i]
+		if s.Op != "MUL_MAT" || s.Dtype != "q2_k" || s.M != 512 || s.K != 256 || s.N != n || s.Count != 4 {
+			t.Fatalf("projection shape for n=%d = %+v", n, s)
+		}
+		if len(s.Tensors) != 4 {
+			t.Fatalf("projection roles = %v, want four", s.Tensors)
+		}
+		for _, role := range []string{"engram_wkv", "engram_q", "engram_k", "engram_kv"} {
+			if !containsString(s.Tensors, role) {
+				t.Errorf("projection %q missing from %v", role, s.Tensors)
+			}
+		}
+	}
+}
+
 // fak-test:runtime fast est=20ms lane=default
 func TestKernelOracleRankJoinsRanksAndNeverZeroFills(t *testing.T) {
 	var rec oracleReceipt
