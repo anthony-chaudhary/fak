@@ -822,20 +822,31 @@ func newVulkanFixture(t *testing.T) (string, string, *Toolchain) {
 		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", shader+".spv"), "fak-fixture-output\n")
 	}
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", "v41_indexer_score.spv"), string(vulkanV5StructuralFixture()))
-	// The native builder materializes this exact attested module rather than
-	// accepting the fixture compiler's arbitrary bytes.
-	for _, rel := range []string{"shaders/v41_index_scale_bf16.comp", "v41_index_scale_bf16_spirv.h"} {
-		data, err := os.ReadFile(filepath.Join("..", "compute", filepath.FromSlash(rel)))
+	// The native builder materializes these exact attested modules rather than
+	// accepting the fixture compiler's arbitrary bytes. Keep the committed source
+	// and prebuilt bundle consistent with the current qualified receipt policy.
+	for _, qualified := range []struct {
+		stem, header string
+		read         func(string) ([]byte, error)
+	}{
+		{vulkanQualifiedIndexScaleStem, vulkanQualifiedIndexScaleHeader, readVulkanQualifiedIndexScale},
+		{vulkanQualifiedActivationChunkStem, vulkanQualifiedActivationChunkHeader, readVulkanQualifiedActivationChunk},
+		{vulkanQualifiedDownChunkStem, vulkanQualifiedDownChunkHeader, readVulkanQualifiedDownChunk},
+		{vulkanQualifiedQ2TokenPairStem, vulkanQualifiedQ2TokenPairHeader, readVulkanQualifiedQ2TokenPair},
+	} {
+		for _, rel := range []string{"internal/compute/shaders/" + qualified.stem + ".comp", qualified.header} {
+			data, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(rel)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFixtureFile(t, filepath.Join(repo, filepath.FromSlash(rel)), string(data))
+		}
+		canonical, err := qualified.read(repo)
 		if err != nil {
 			t.Fatal(err)
 		}
-		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", filepath.FromSlash(rel)), string(data))
+		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", qualified.stem+".spv"), string(canonical))
 	}
-	canonical, err := readVulkanQualifiedIndexScale(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", "v41_index_scale_bf16.spv"), string(canonical))
 
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "vulkan_shim.o"), "fak-fixture-output\n")
 	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "libfakvulkan.a"), "fak-fixture-output\n")
