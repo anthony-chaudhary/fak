@@ -665,7 +665,8 @@ func (m *Model) v41LayerPublishAttentionState(l, seq, hd int, src v41LayerSource
 	if indexSourceAt(cfg.DeepSeekV41, l) && indexList != nil && plan.TopKWidth > 0 {
 		rows := make([][]int32, seq)
 		for t := range rows {
-			rows[t] = append([]int32(nil), indexList[t*plan.TopKWidth:(t+1)*plan.TopKWidth]...)
+			// PublishTopK synchronously copies each row into registry-owned storage.
+			rows[t] = indexList[t*plan.TopKWidth : (t+1)*plan.TopKWidth : (t+1)*plan.TopKWidth]
 		}
 		if err := registry.PublishTopK(plan.Ratio, rows); err != nil {
 			return v41StageErr(v41StageIndexer, l, err)

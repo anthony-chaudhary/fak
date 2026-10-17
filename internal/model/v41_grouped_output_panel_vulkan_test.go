@@ -37,15 +37,17 @@ type v41GroupedPanelPhysicalBackend interface {
 // go test -tags vulkan ./internal/model -run '^TestV41GroupedOutputPanelVulkan$' -count=1 -timeout=5m
 //
 // Four isolated, serial children each own one packed fixture and two sequential
-// Sessions. Eleven tokens exercise 8+2+1 tiles; full A=[1024,4096] x8 and
+// Sessions. Eleven tokens exercise one admitted 11-row chunk; legacy 8+2+1
+// refusal coverage remains in TestV41GroupedOutputPanelPackedRagged.
+// Full A=[1024,4096] x8 and
 // B=[5120,8192], or odd B=[65,256] with A=[128,512] x2. A is Q2_K; B
 // covers Q2_K and Q3_K. Both graphs use full=true BF16 publication semantics.
-// Total: 336 matmuls, 44 compared rows, 60s/child. Runtime is unmeasured.
+// Total: 288 matmuls, 44 compared rows, 60s/child. Runtime is unmeasured.
 // The four-row composition tile is not covered by this bounded witness.
 //
 // Largest packed payload is 29,032,448 bytes, shared once between the arms.
 // Device planning also includes the 256 MiB weight-arena block, <=32 MiB
-// transfer staging, 3,211,536 bytes retained by the largest tile, smaller-tile
+// transfer staging, 4,415,760 bytes retained by the largest tile, scalar-tile
 // pools, scalar publication/readback, Q3 word padding and buffer alignment.
 // Tile bytes = 4*n*(2*totalIn+3*joined+2*dim)+(2*groups+1)*16.
 // Host planning includes packed bytes, input/snapshot, scalar and panel outputs,
@@ -322,6 +324,13 @@ func v41GroupedPanelPhysicalCase(t *testing.T, name string) {
 	if len(weights) != c.OGroups+1 {
 		t.Fatalf("cached grouped weights=%d want=%d", len(weights), c.OGroups+1)
 	}
+	// A fresh same-source bundle must admit the exact 11-row contraction.
+	// The measured dispatch and ledger deltas below independently require it.
+	for key, w := range scalar.halW {
+		if !v41GroupedPanelWeightSupports(be, w, rows) {
+			t.Fatalf("UNQUALIFIED: weight %q does not admit the %d-row panel", key, rows)
+		}
+	}
 	resident := m.immutableDeviceWeights(be)
 	if resident == nil {
 		t.Fatal("model weight owner missing after scalar staging")
@@ -343,7 +352,7 @@ func v41GroupedPanelPhysicalCase(t *testing.T, name string) {
 			t.Fatalf("UNQUALIFIED: actual panel declined/failed outcome=%v error=%v", outcome, err)
 		}
 	})
-	v41GroupedPanelPhysicalDispatches(t, before, device.VulkanDebugDispatchProfileSnapshot(), 3, c.OGroups, q3)
+	v41GroupedPanelPhysicalDispatches(t, before, device.VulkanDebugDispatchProfileSnapshot(), 1, c.OGroups, q3)
 	physicalDelta, err := compute.BackendExecutionDelta(physicalBefore, v41GroupedPanelPhysicalSnapshot(t, be))
 	if err != nil || physicalDelta.Counters.H2DCount == 0 || physicalDelta.Counters.D2HCount == 0 {
 		t.Fatalf("native panel transfer evidence: %+v error=%v", physicalDelta, err)
@@ -352,7 +361,7 @@ func v41GroupedPanelPhysicalCase(t *testing.T, name string) {
 	for field, want := range map[string]float64{
 		"grouped_output_device_calls": 1, "grouped_output_device_rows": rows,
 		"grouped_output_host_calls": 0, "grouped_output_host_rows": 0,
-		"grouped_output_matmul_calls":            float64(3 * (c.OGroups + 1)),
+		"grouped_output_matmul_calls":            float64(c.OGroups + 1),
 		"grouped_output_activation_upload_bytes": float64(rows * width * 4),
 		"grouped_output_readback_bytes":          float64(rows * c.HiddenSize * 4),
 		"grouped_output_host_weight_f32_bytes":   0,
