@@ -205,6 +205,11 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	// session has one; a session that never ran a V4.1 forward keeps the absent
 	// contract.
 	out.v41 = captureV41ForwardSnapshotWithPublications(s.v41Forward, true)
+	if out.v41 == nil && s.M != nil && s.M.Cfg.IsDeepSeekV41() {
+		// Preserve absence explicitly: Restore must clear any target continuation,
+		// rather than replacing generic KV while leaving stale V4.1 history live.
+		out.v41 = &v41ForwardSnapshot{}
+	}
 	if s.v41Forward != nil && s.v41Forward.forwardCoverage != nil {
 		coverage := *s.v41Forward.forwardCoverage
 		out.coverage = &coverage
