@@ -960,6 +960,10 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			if err := builder.AddCanonicalMTPFCQ8(pt.name, pt.shape, pt.raw); err != nil {
 				return err
 			}
+		case pt.canonicalRows && pt.deviceQKRows:
+			if err := builder.AddCanonicalRowNormalizedDeviceQK(pt.name, pt.shape, pt.raw, pt.residentType.String()); err != nil {
+				return err
+			}
 		case pt.canonicalRows:
 			add := builder.AddCanonicalRowNormalizedQ4K
 			switch pt.residentType {
@@ -1438,7 +1442,8 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 			tw.err = err
 			return tw
 		}
-		tw.pending = []pendingTensor{{resident: true, canonicalRows: true, residentType: info.Type, name: canon, shape: shape, raw: normalized}}
+		deviceQK := qwen35DeviceQKNativeRow(cfg, canon, info.Type, shape, loadOpts)
+		tw.pending = []pendingTensor{{resident: true, canonicalRows: true, deviceQKRows: deviceQK, residentType: info.Type, name: canon, shape: shape, raw: normalized}}
 		tw.acctResident = true
 		return tw
 	}
