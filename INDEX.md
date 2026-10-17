@@ -315,7 +315,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Concept Study: MindLab-Research/ferrite — GLM-5.3-Flash Native Inference Engine](docs/notes/CONCEPT-STUDY-FERRITE-GLM53-2026-09-03.md) -- auto-indexed dated note.
 - [Concept Study: hasso5703/dgx-spark-qwen38 — High-Performance Qwen3.8 GB10 Serving Stack](docs/notes/CONCEPT-STUDY-HASSO5703-DGX-SPARK-2026-09-03.md) -- auto-indexed dated note.
 - [Concept Study: vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe — Single-Spark 128 GB UMA Serving & CUDA Kernel Forensics](docs/notes/CONCEPT-STUDY-VCRUZ305-GLM53-EXL3-2026-09-03.md) -- auto-indexed dated note.
-- [Mac head-to-head benchmark: fak vs llama.cpp vs MLX](docs/notes/MAC-BENCH-FAK-LLAMACPP-MLX-2026-09-03.md) -- auto-indexed dated note.
+- [Simulated Mac three-way comparison redirect](docs/notes/MAC-BENCH-FAK-LLAMACPP-MLX-2026-09-03.md) -- historical fixture; physical comparison remains pending.
 - [Simulated Mac three-way comparison fixture](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) -- historical fixture; physical comparison remains pending.
 - [Modeled Mac agentic shared-cache projection](docs/notes/MAC-AGENTIC-4X-QWEN38-2026-09-05.md) -- analytical projection, not a physical end-to-end speedup.
 - [`docs/notes/CONCEPT-HOT-SWAPPABLE-SERVING-ARCHITECTURE-2026-09-03.md`](docs/notes/CONCEPT-HOT-SWAPPABLE-SERVING-ARCHITECTURE-2026-09-03.md) — hot-swappable AI inference serving architecture, dynamic zero-downtime reconfiguration of serving parameters, shift-left validation, monotonic epochs, and transient sweep APIs for autonomous RSI agents.

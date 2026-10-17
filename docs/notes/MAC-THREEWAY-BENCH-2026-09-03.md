@@ -11,8 +11,8 @@ date: 2026-09-03
 > `experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/`.
 > Schema validation proves internal consistency, not engine execution. Follow the
 > [simulated-results discipline](../standards/simulated-results-discipline.md). Issue
-> [#2723](https://github.com/anthony-chaudhary/fak/issues/2723) is closed, but its requested
-> physical comparison remains unproven by this page.
+> [#2723](https://github.com/anthony-chaudhary/fak/issues/2723) is reopened (checked
+> 2026-10-17); its requested physical comparison remains unproven by this page.
 >
 > **Physical promotion gate:** capture on the named Apple host and commit `packet.json`, the
 > manifest, and digest-bound raw and quality files for all three engines; bind identical
@@ -37,13 +37,14 @@ date: 2026-09-03
 
 ## Executive Summary
 
-This benchmark records the first head-to-head comparison across the three primary Apple Silicon
-inference runtimes on identical hardware (`node-macos-a`) evaluating `Qwen3.8-27B Q4_K_M`:
+This deterministic fixture models a proposed comparison across three Apple Silicon
+inference runtimes for `Qwen3.8-27B Q4_K_M`. The listed hardware and runtimes are
+intended capture settings, not proof that these arms executed:
 1. **fak-native (Metal)**: In-kernel Go + Metal compute HAL (`inkernel`).
 2. **llama.cpp (Metal)**: Reference Metal runtime (`reference`, b3600).
 3. **MLX (Metal)**: Reference Apple MLX framework runtime (`reference`, v0.22.1).
 
-### Key Takeaways
+### Simulated fixture summary
 
 | Axis | fak-native (Metal) | llama.cpp (Metal) | MLX (Metal) | Comparison Summary |
 |---|---:|---:|---:|---|
@@ -57,7 +58,8 @@ inference runtimes on identical hardware (`node-macos-a`) evaluating `Qwen3.8-27
 
 ## Experimental Setup & Matched Comparison Envelope
 
-To ensure rigorous parity, every dimension of the comparison envelope was strictly matched:
+The fixture specifies the following intended comparison envelope. A future physical
+capture must independently establish matching controls and quality:
 
 1. **Model Weights & Geometry**:
    - Model ID: `Qwen3.8-27B` (source revision `f1bfb127c64f7072bdd2cad55f258b9c8b2910fe`).
@@ -113,9 +115,12 @@ Every millisecond of request execution is accounted for under `ComparisonRequest
 
 ---
 
-## Architectural & Performance Analysis
+## Modeled interpretation of the fixture
 
-### Why Decode Speeds Are Clustered (7.38 – 8.07 tok/s)
+### Hypothesis behind the fixture decode range (7.38 – 8.07 tok/s)
+
+The arithmetic below is a model. These fixture values cannot establish engine
+bandwidth utilization, dispatch overhead, or the cause of a measured performance gap.
 
 In single-stream autoregressive generation, each generated token requires streaming the entire
 $15.5\text{ GB}$ model parameter set from unified memory to the GPU compute units.
@@ -125,17 +130,20 @@ $$\text{Maximum Theoretical Decode Ceiling} = \frac{150\text{ GB/s}}{15.5\text{ 
 
 With realistic DRAM efficiency ($\sim 80\text{--}85\%$), the effective bandwidth ceiling is $\sim 120\text{--}128\text{ GB/s}$,
 yielding an upper bound of $\sim 7.7\text{--}8.2\text{ tok/s}$.
-- **fak-native (7.61 tok/s)**: In-kernel command buffer encoding keeps weight activations resident on-GPU across GEMV stages, avoiding host round-trips and achieving $94.3\%$ of MLX's throughput.
-- **llama.cpp (7.38 tok/s)**: Metal backend performs well but carries slight per-step dispatch overhead.
-- **MLX (8.07 tok/s)**: Highly optimized Metal shader pipeline reaches near-optimal memory bandwidth saturation ($83.3\%$ of theoretical peak).
+- **fak-native fixture (7.61 tok/s)**: the modeled rate is $94.3\%$ of the MLX fixture value; it does not witness command-buffer residency or host-round-trip savings.
+- **llama.cpp fixture (7.38 tok/s)**: no physical per-step dispatch overhead is measured here.
+- **MLX fixture (8.07 tok/s)**: the modeled value implies $83.3\%$ of the assumed theoretical peak; it is not observed bandwidth saturation.
 
 ### Prefill Trade-Offs & Multi-Agent Concurrency
 
-In raw single-stream prefill, MLX leads with $64.10\text{ tok/s}$ due to optimized grouped GEMM tiling.
-fak-native achieves $48.54\text{ tok/s}$ on pure compute. However, when deployed in realistic agentic fleet
-scenarios sharing system preambles (as established in [`docs/notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md`](MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md)):
-- Stateless reference engines must re-evaluate the full prefix on every turn ($2000\text{--}2600\text{ ms}$).
-- fak-native with RadixAttention prefix caching evaluates the preamble once globally; all subsequent agent turns hit the cache, holding TTFT flat at **$12.60\text{ ms}$** ($>190\times$ faster TTFT).
+The fixture assigns prefill rates of $64.10\text{ tok/s}$ to MLX and
+$48.54\text{ tok/s}$ to fak-native. Its shared-prefix model assigns fak-native
+$12.60\text{ ms}$ TTFT versus $2000\text{--}2600\text{ ms}$ for the reference
+arms. These inputs illustrate a cache-reuse scenario, not a measured $>190\times$
+advantage or evidence that reference engines cannot cache prefixes. A physical
+comparison must match prefix/cache policy and record actual reuse in each arm.
+See the separate [many-agent cache-value study](MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md)
+for its own evidence scope.
 
 ---
 

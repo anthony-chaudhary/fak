@@ -1,12 +1,14 @@
 ---
-title: "Mac Head-to-Head Benchmark: fak vs llama.cpp vs MLX (2026-09-03)"
-description: "Canonical three-way head-to-head benchmark of fak-native vs llama.cpp vs MLX on Apple Silicon Metal."
+title: "[SIMULATED] Mac Three-Way Comparison Fixture (2026-09-03)"
+description: "Historical deterministic three-way fixture; no accepted physical comparison is established by this page."
 date: 2026-09-03
 ---
 
-# Mac head-to-head benchmark: fak vs llama.cpp vs MLX
+# [SIMULATED] Mac three-way comparison fixture
 
-The canonical benchmark documentation, methodology, measured results, and reproduction lineage
-for the three-way head-to-head comparison on `node-macos-a` (Apple M3 Pro) are recorded in:
+The historical deterministic fixture and intended capture methodology for a
+three-way comparison on `node-macos-a` (Apple M3 Pro) are recorded below. Its
+7.61 / 7.38 / 8.07 tok/s figures are simulated values, not measured engine results.
+The physical comparison remains pending under [#2723](https://github.com/anthony-chaudhary/fak/issues/2723):
 
 👉 [`MAC-THREEWAY-BENCH-2026-09-03.md`](MAC-THREEWAY-BENCH-2026-09-03.md)

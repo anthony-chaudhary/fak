@@ -134,6 +134,6 @@ for the 7-9B ramp.
 
 ## 7. Cross-References & Latest Metal Benchmarks
 
-- Apple Silicon Metal 3-Way head-to-head (fak-native vs llama.cpp vs MLX): [`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)
+- Historical simulated Apple Silicon Metal three-way fixture (fak-native vs llama.cpp vs MLX; physical comparison pending): [`docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md`](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)
 - Shift-Left Mac Dev Gate (`make mac-perf`): [`docs/dev-tooling.md`](../dev-tooling.md) & [`AGENTS.md`](../../AGENTS.md)
 - Canonical Benchmark Authority: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)
