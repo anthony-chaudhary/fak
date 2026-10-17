@@ -1298,111 +1298,135 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 	if len(lanes) == 0 {
 		return
 	}
+	d := newInKernelDecodeIteration(lanes, m, quant)
+	for d.step(ctx) {
+	}
+	return d.sharedPanels, d.sharedMACs
+}
+
+// inKernelDecodeIteration retains one fixed cohort's scratch across iteration
+// boundaries. It neither admits nor retires sessions; its caller owns every lane
+// until draining completes. The full-drain wrapper preserves existing scheduling.
+type inKernelDecodeIteration struct {
+	lanes          []*decodeLane
+	bs             *model.BatchSession
+	ids            []int
+	active, greedy []bool
+	serialSteps    int
+	sharedPanels   int
+	sharedMACs     int64
+}
+
+func newInKernelDecodeIteration(lanes []*decodeLane, m *model.Model, quant bool) *inKernelDecodeIteration {
+	d := &inKernelDecodeIteration{lanes: lanes, ids: make([]int, len(lanes)), active: make([]bool, len(lanes)), greedy: make([]bool, len(lanes))}
 	seqs := make([]*model.Session, len(lanes))
 	for i, ln := range lanes {
 		seqs[i] = ln.s
 	}
-	bs := &model.BatchSession{M: m, Seqs: seqs, Quant: quant}
-	serialSteps := 0
-	bs.ObserveSerialStep = func(reason string, d time.Duration) {
-		serialSteps++
-		enginestep.Default.ObserveSerialFallback(reason, d)
+	d.bs = &model.BatchSession{M: m, Seqs: seqs, Quant: quant}
+	d.bs.ObserveSerialStep = func(reason string, duration time.Duration) {
+		d.serialSteps++
+		enginestep.Default.ObserveSerialFallback(reason, duration)
 	}
-	ids := make([]int, len(lanes))
-	active := make([]bool, len(lanes))
-	greedy := make([]bool, len(lanes))
-	for {
-		anyActive := false
+	return d
+}
+
+// step completes at most one shared forward. False means all lanes are terminal;
+// sampling the final emitted token may finish a lane without forwarding it.
+func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
+	lanes, bs, ids, active, greedy := d.lanes, d.bs, d.ids, d.active, d.greedy
+	anyActive := false
+	for i, ln := range lanes {
+		active[i] = false
+		if ln.done || ln.gen >= ln.maxNew {
+			continue // finished lane: dropped from the active set, never re-stepped.
+		}
+		laneCtx := ctx
+		if ln.ctx != nil {
+			laneCtx = ln.ctx
+		}
+		next, advance := ln.decodeOne(laneCtx)
+		if !advance {
+			continue
+		}
+		ids[i] = next
+		active[i] = true
+		anyActive = true
+	}
+	if !anyActive {
+		return false
+	}
+	activeLanes := 0
+	var forwardNow func() time.Time
+	for i, isActive := range active {
+		if !isActive {
+			continue
+		}
+		activeLanes++
+		if forwardNow == nil && lanes[i].measurement != nil {
+			forwardNow = lanes[i].measurement.traceNow
+		}
+	}
+	var forwardStarted time.Time
+	if forwardNow != nil {
+		forwardStarted = forwardNow()
+	}
+	stepStart := time.Now()
+	d.serialSteps = 0
+	var next []int
+	out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
+	if !probed {
+		anyGreedy := false
 		for i, ln := range lanes {
-			active[i] = false
-			if ln.done || ln.gen >= ln.maxNew {
-				continue // finished lane: dropped from the active set, never re-stepped.
+			greedy[i] = active[i] && ln.deviceGreedy()
+			if greedy[i] {
+				ln.retainGreedyLogits()
 			}
-			laneCtx := ctx
-			if ln.ctx != nil {
-				laneCtx = ln.ctx
-			}
-			next, advance := ln.decodeOne(laneCtx)
-			if !advance {
-				continue
-			}
-			ids[i] = next
-			active[i] = true
-			anyActive = true
+			anyGreedy = anyGreedy || greedy[i]
 		}
-		if !anyActive {
-			return
+		if anyGreedy {
+			out, next = bs.StepBatchActiveGreedy(ids, active, greedy)
+		} else {
+			out = bs.StepBatchActive(ids, active)
 		}
-		activeLanes := 0
-		var forwardNow func() time.Time
+		panels = bs.LastStepSharedPanels()
+		macs = bs.LastStepMACs()
+	}
+	if d.serialSteps == 0 {
+		enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
+	}
+	if forwardNow != nil {
+		// This trace preserves outer call provenance and duration even when
+		// the execution recorder above reports individual scalar fallbacks.
+		duration := forwardNow().Sub(forwardStarted)
 		for i, isActive := range active {
 			if !isActive {
 				continue
 			}
-			activeLanes++
-			if forwardNow == nil && lanes[i].measurement != nil {
-				forwardNow = lanes[i].measurement.traceNow
-			}
-		}
-		var forwardStarted time.Time
-		if forwardNow != nil {
-			forwardStarted = forwardNow()
-		}
-		stepStart := time.Now()
-		serialSteps = 0
-		var next []int
-		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
-		if !probed {
-			anyGreedy := false
-			for i, ln := range lanes {
-				greedy[i] = active[i] && ln.deviceGreedy()
-				if greedy[i] {
-					ln.retainGreedyLogits()
-				}
-				anyGreedy = anyGreedy || greedy[i]
-			}
-			if anyGreedy {
-				out, next = bs.StepBatchActiveGreedy(ids, active, greedy)
-			} else {
-				out = bs.StepBatchActive(ids, active)
-			}
-			panels = bs.LastStepSharedPanels()
-			macs = bs.LastStepMACs()
-		}
-		if serialSteps == 0 {
-			enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
-		}
-		if forwardNow != nil {
-			// This trace preserves outer call provenance and duration even when
-			// the execution recorder above reports individual scalar fallbacks.
-			duration := forwardNow().Sub(forwardStarted)
-			for i, isActive := range active {
-				if !isActive {
-					continue
-				}
-				if err := lanes[i].measurement.recordForwardTiming(lanes[i].gen, NativeForwardStepBatchActive, activeLanes, duration); err != nil {
-					lanes[i].err, lanes[i].done = err, true
-				}
-			}
-		}
-		sharedPanels += panels
-		sharedMACs += macs
-		for i, ln := range lanes {
-			if active[i] {
-				if ln.logits != nil {
-					ln.vocab = len(ln.logits)
-				}
-				ln.logits = out[i]
-				ln.greedyReady = next != nil && greedy[i] && out[i] == nil
-				if ln.greedyReady {
-					ln.greedyNext = next[i]
-				}
-				if lanes[i].forwarded != nil {
-					lanes[i].forwarded = append(lanes[i].forwarded, ids[i])
-				}
+			if err := lanes[i].measurement.recordForwardTiming(lanes[i].gen, NativeForwardStepBatchActive, activeLanes, duration); err != nil {
+				lanes[i].err, lanes[i].done = err, true
 			}
 		}
 	}
+	d.sharedPanels += panels
+	d.sharedMACs += macs
+	for i, ln := range lanes {
+		if active[i] {
+			if ln.logits != nil {
+				ln.vocab = len(ln.logits)
+			}
+			ln.logits = out[i]
+			ln.greedyReady = next != nil && greedy[i] && out[i] == nil
+			if ln.greedyReady {
+				ln.greedyNext = next[i]
+			}
+			if lanes[i].forwarded != nil {
+				lanes[i].forwarded = append(lanes[i].forwarded, ids[i])
+			}
+		}
+	}
+
+	return true
 }
 
 // inKernelPerTokenStreamEnabled reports whether CompleteStream forwards each

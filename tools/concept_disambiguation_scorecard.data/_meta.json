@@ -9732,6 +9732,16 @@
           "category": "incidental",
           "reason": "Private mutex-protected storage for the exact computetrace observer registration installed by stepobs.Recorder.Attach for the positioned stepobs-kernel-registry. It preserves sink identity across replacement; it is not a kernel execution, metric family, or reusable observer-trust API.",
           "token": "kernelObservation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constructor for fixed-cohort decode loop state; no new engine, routing mode, capability or product concept.",
+          "token": "newInKernelDecodeIteration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private iteration-local scratch extracted from the existing fixed-cohort decode loop; no new engine or serving policy.",
+          "token": "inKernelDecodeIteration"
         }
       ],
       "exclude": [
@@ -9853,6 +9863,7 @@
         "inKernelCoalesceRequest",
         "inKernelCoalesceResult",
         "inKernelDecodeCohortMax",
+        "inKernelDecodeIteration",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
         "inKernelRawV41Prompt",
@@ -9885,6 +9896,7 @@
         "missing_engine_window_fields",
         "nativeReasonMessageRoleUnsupported",
         "native_engine_substitution",
+        "newInKernelDecodeIteration",
         "newInKernelPrefixPressureBridge",
         "normalizeInKernelToolCalls",
         "pgKernel32",
