@@ -743,7 +743,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// best-effort acceleration for the next turn and must not turn that response
 		// into a failure. forwarded excludes every sampled token that did not receive
 		// a Step (maxNew, emit-stop, and token-ID stop terminals).
-		p.admitGeneratedContinuation(ctx, s, ids, ln.forwarded, ln.logits)
+		p.admitGeneratedContinuation(ctx, s, ids, ln.forwarded, ln.continuationLogits())
 	}
 	// 5) R6/#5617: fold this request's activated-expert residency into the serve-scoped ledger while
 	// the session is still alive — the `defer finishInKernelCleanup(&err, s.Close)` above takes the ring, and with it every
@@ -883,6 +883,11 @@ type decodeLane struct {
 	// forwarded contains generated tokens whose Session.Step (or active batched
 	// equivalent) completed. A non-nil empty slice arms continuation tracking.
 	forwarded []int
+	// greedyNext holds the device-selected token when the last serial forward returned
+	// no host logits (greedyReady); vocab keeps the logits width for the thinking budget.
+	greedyNext  int
+	greedyReady bool
+	vocab       int
 
 	gen     int
 	stopped bool
@@ -1123,13 +1128,15 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	forced := false
 	if ln.thinking != nil {
 		var err error
-		next, forced, err = ln.thinking.closingToken(len(ln.logits))
+		next, forced, err = ln.thinking.closingToken(ln.vocabSize())
 		if err != nil {
 			ln.err, ln.done = err, true
 			return 0, false
 		}
 	}
-	if !forced {
+	if !forced && ln.greedyReady {
+		next = ln.greedyNext
+	} else if !forced {
 		next = sampleLogitsWithPenaltyWS(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
@@ -1188,6 +1195,55 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	return next, true
 }
 
+func (ln *decodeLane) vocabSize() int {
+	if ln.logits != nil {
+		return len(ln.logits)
+	}
+	return ln.vocab
+}
+
+// deviceGreedy reports whether the next token is the plain argmax of the next logits, so
+// the forward may select it on the device: temperature 0 with no logit bias, no penalty and
+// no per-token logprob receipt reading the full distribution. A forced thinking-close token
+// is chosen before sampling and composes unchanged.
+func (ln *decodeLane) deviceGreedy() bool {
+	return ln.temp <= 0 && len(ln.logitBias) == 0 && ln.freqPenalty == 0 && ln.presPenalty == 0 &&
+		(ln.measurement == nil || ln.measurement.inferenceDisabled)
+}
+
+// step is the serial forward. A greedy lane asks the session for the token only; a
+// session that cannot select on the device returns host logits and the lane samples them
+// exactly as before.
+func (ln *decodeLane) step(id int) {
+	if !ln.deviceGreedy() {
+		ln.logits = ln.s.Step(id)
+		return
+	}
+	if ln.logits != nil {
+		ln.vocab = len(ln.logits)
+	}
+	ln.retainGreedyLogits()
+	ln.greedyNext, ln.logits = ln.s.StepGreedy(id)
+	ln.greedyReady = ln.logits == nil
+}
+
+// retainGreedyLogits keeps a tracked continuation's latest distribution device-resident:
+// the snapshot admitted after decode replays it on an exact later hit.
+func (ln *decodeLane) retainGreedyLogits() {
+	if ln.forwarded != nil {
+		ln.s.SetRetainGreedyLogits(true)
+	}
+}
+
+// continuationLogits returns the distribution after the last forwarded token, reading a
+// device-selected step's retained logits back once.
+func (ln *decodeLane) continuationLogits() []float32 {
+	if ln.logits == nil && ln.greedyReady {
+		return ln.s.TakeGreedyLogits()
+	}
+	return ln.logits
+}
+
 // inKernelDecodeSerial is the DEFAULT per-request decode: one lane advanced by Session.Step,
 // byte-identical to the pre-seam decode loop (the gen<maxNew guard preserves the maxNew<=0
 // no-token contract). It is the path an unset FAK_INKERNEL_BATCH takes.
@@ -1203,7 +1259,7 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		}
 		stepStart := time.Now()
 		if ln.measurement == nil || ln.measurement.traceNow == nil {
-			ln.logits = ln.s.Step(next)
+			ln.step(next)
 			enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 			if ln.forwarded != nil {
 				ln.forwarded = append(ln.forwarded, next)
@@ -1211,7 +1267,7 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 			continue
 		}
 		started := ln.measurement.traceNow()
-		ln.logits = ln.s.Step(next)
+		ln.step(next)
 		enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 		if ln.forwarded != nil {
 			ln.forwarded = append(ln.forwarded, next)
@@ -1248,6 +1304,7 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 	}
 	ids := make([]int, len(lanes))
 	active := make([]bool, len(lanes))
+	greedy := make([]bool, len(lanes))
 	for {
 		anyActive := false
 		for i, ln := range lanes {
@@ -1287,9 +1344,22 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		}
 		stepStart := time.Now()
 		serialSteps = 0
+		var next []int
 		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
 		if !probed {
-			out = bs.StepBatchActive(ids, active)
+			anyGreedy := false
+			for i, ln := range lanes {
+				greedy[i] = active[i] && ln.deviceGreedy()
+				if greedy[i] {
+					ln.retainGreedyLogits()
+				}
+				anyGreedy = anyGreedy || greedy[i]
+			}
+			if anyGreedy {
+				out, next = bs.StepBatchActiveGreedy(ids, active, greedy)
+			} else {
+				out = bs.StepBatchActive(ids, active)
+			}
 			panels = bs.LastStepSharedPanels()
 			macs = bs.LastStepMACs()
 		}
@@ -1311,9 +1381,16 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		}
 		sharedPanels += panels
 		sharedMACs += macs
-		for i := range lanes {
+		for i, ln := range lanes {
 			if active[i] {
-				lanes[i].logits = out[i]
+				if ln.logits != nil {
+					ln.vocab = len(ln.logits)
+				}
+				ln.logits = out[i]
+				ln.greedyReady = next != nil && greedy[i] && out[i] == nil
+				if ln.greedyReady {
+					ln.greedyNext = next[i]
+				}
 				if lanes[i].forwarded != nil {
 					lanes[i].forwarded = append(lanes[i].forwarded, ids[i])
 				}

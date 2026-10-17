@@ -33,13 +33,20 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 func (bs *BatchSession) stepBatchSerial(ids []int, reason string) [][]float32 {
 	out := make([][]float32, len(ids))
 	observe := bs.ObserveSerialStep
+	step := func(b, id int) {
+		if b < len(bs.greedy) && bs.greedy[b] {
+			bs.greedyNext[b], out[b] = bs.Seqs[b].StepGreedy(id)
+			return
+		}
+		out[b] = bs.Seqs[b].Step(id)
+	}
 	for b, id := range ids {
 		if observe == nil {
-			out[b] = bs.Seqs[b].Step(id)
+			step(b, id)
 			continue
 		}
 		started := time.Now()
-		out[b] = bs.Seqs[b].Step(id)
+		step(b, id)
 		// Neither another lane's forward nor observer overhead belongs to this
 		// scalar execution. Never replicate the enclosing batch-call duration.
 		observe(reason, time.Since(started))
@@ -137,12 +144,23 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 		dbuf:              bs.dbuf,
 		ObserveSerialStep: bs.ObserveSerialStep,
 	}
+	if bs.greedy != nil {
+		sub.greedy, sub.greedyNext = make([]bool, len(idx)), make([]int, len(idx))
+	}
 	subIDs := make([]int, len(idx))
 	for i, b := range idx {
 		sub.Seqs[i] = bs.Seqs[b]
 		subIDs[i] = ids[b]
+		if sub.greedy != nil {
+			sub.greedy[i] = bs.greedy[b]
+		}
 	}
 	subLogits := sub.StepBatch(subIDs)
+	for i, b := range idx {
+		if sub.greedy != nil {
+			bs.greedyNext[b] = sub.greedyNext[i]
+		}
+	}
 	// Propagate any grown/shared buffers + the active-step MAC count back to the parent session
 	// so a following StepBatch / StepBatchActive reuses them and LastStepMACs reflects this step.
 	bs.scratch = sub.scratch
@@ -154,6 +172,20 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 		out[b] = subLogits[i]
 	}
 	return out
+}
+
+// StepBatchActiveGreedy is StepBatchActive where greedy[b] marks a lane whose caller takes
+// the argmax of its logits. A greedy lane the per-lane serial route decodes goes through
+// Session.StepGreedy: next[b] holds its selected token and out[b] is nil when the device
+// chose it. Shared batched routes return logits exactly as StepBatchActive.
+func (bs *BatchSession) StepBatchActiveGreedy(ids []int, active, greedy []bool) (out [][]float32, next []int) {
+	if len(greedy) != len(bs.Seqs) {
+		panic("model: StepBatchActiveGreedy greedy-mask length != batch size")
+	}
+	bs.greedy, bs.greedyNext = greedy, make([]int, len(bs.Seqs))
+	defer func() { bs.greedy, bs.greedyNext = nil, nil }()
+	out = bs.StepBatchActive(ids, active)
+	return out, bs.greedyNext
 }
 
 // GenerateBatch greedily decodes up to n tokens for every user in lockstep after their

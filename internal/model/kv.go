@@ -158,8 +158,12 @@ type Session struct {
 	// halClosed makes Close idempotent and prevents an operation failure from falling
 	// through to the legacy CPU path on a later request. halFailure is the witnessed
 	// backend error re-raised by any attempted reuse of that failed session.
-	halClosed            bool
-	halFailure           error
+	halClosed  bool
+	halFailure error
+	// retainGreedyLogits keeps each device-selected StepGreedy distribution as the owned
+	// device clone greedyLogits until the next step, TakeGreedyLogits or Close.
+	retainGreedyLogits   bool
+	greedyLogits         compute.Tensor
 	executionPolicy      ExecutionPolicy
 	hostFallbackObserved bool
 	// hostPathBypass is the admitted bring-up bypass this session holds; release
@@ -549,6 +553,62 @@ func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
 		tap.dumpLogits(pos, logits)
 	}
 	return logits
+}
+
+// tokenGreedy is token's device-backend branch for a greedy caller: only the argmax
+// token id crosses the host boundary. A retaining session reduces Step's exact logits
+// and keeps an owned device clone of them; a backend that cannot clone on the device
+// returns those host logits instead.
+func (s *Session) tokenGreedy(id, pos int) ([]float32, int) {
+	s.validateDenseGPULayers()
+	s.requirePreNorm("HAL decode")
+	if !s.retainGreedyLogits {
+		return nil, s.tokenHALArgmax(id, pos)
+	}
+	cloner, ok := s.Backend.(compute.TensorCloner)
+	if !ok {
+		return s.tappedLogitsAt(pos, s.tokenHAL(id, pos)), 0
+	}
+	logits, _ := s.tokenHALOutput(id, pos, halFullLogits)
+	next := s.Backend.Argmax(logits)
+	kept, err := cloner.CloneTensor(logits)
+	if err != nil {
+		panic(err)
+	}
+	s.greedyLogits = kept
+	s.recycleHALToken()
+	return nil, next
+}
+
+// SetRetainGreedyLogits arms StepGreedy to keep the latest device-selected distribution
+// resident, for a caller that may still need it once (a continuation snapshot).
+func (s *Session) SetRetainGreedyLogits(on bool) {
+	s.retainGreedyLogits = on
+	if !on {
+		s.releaseGreedyLogits()
+	}
+}
+
+// TakeGreedyLogits reads back the distribution of the most recent retained StepGreedy
+// and releases its device copy. It returns nil when no distribution is retained.
+func (s *Session) TakeGreedyLogits() []float32 {
+	if s == nil || s.greedyLogits.Buf() == nil {
+		return nil
+	}
+	scope := s.beginBackendExecution()
+	complete := false
+	defer scope.finishCompleted(&complete)
+	logits := s.Backend.Read(s.greedyLogits)
+	s.releaseGreedyLogits()
+	complete = true
+	return logits
+}
+
+func (s *Session) releaseGreedyLogits() {
+	if s.greedyLogits.Buf() != nil {
+		s.Backend.Free(s.greedyLogits)
+		s.greedyLogits = compute.Tensor{}
+	}
 }
 
 func (s *Session) token(id, pos int) []float32 {
@@ -1294,7 +1354,29 @@ func (s *Session) Step(id int) []float32 {
 	return logits
 }
 
+// StepGreedy is Step for a caller that selects the greedy argmax. A device-backend
+// session keeps the logits resident, reduces them on the device and reads back only the
+// token id (logits == nil). Every other path returns Step's host logits unchanged
+// (next == 0) for the caller to select from.
+func (s *Session) StepGreedy(id int) (next int, logits []float32) {
+	scope := s.beginBackendExecution()
+	complete := false
+	defer scope.finishCompleted(&complete)
+	logits, next = s.stepOwnedMode(id, true)
+	if logits != nil && s.Backend != nil && s.Backend.Caps().DeviceMemory {
+		compute.CountHostFallback(hostFallbackGreedyArgmax)
+	}
+	complete = true
+	return next, logits
+}
+
 func (s *Session) stepOwned(id int) []float32 {
+	logits, _ := s.stepOwnedMode(id, false)
+	return logits
+}
+
+func (s *Session) stepOwnedMode(id int, greedy bool) ([]float32, int) {
+	s.releaseGreedyLogits()
 	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
 		panic(err)
 	}
@@ -1310,7 +1392,7 @@ func (s *Session) stepOwned(id int) []float32 {
 			return s.stepV41(id)
 		}()
 		completed = true
-		return logits
+		return logits, 0
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
@@ -1321,23 +1403,26 @@ func (s *Session) stepOwned(id int) []float32 {
 	}
 	if s.M.Cfg.usesMLAMoELayout() {
 		s.requireGLMDsaSession()
-		return s.glmDsaHead(s.tokenHiddenGLMDsa(id, s.Cache.Len()))
+		return s.glmDsaHead(s.tokenHiddenGLMDsa(id, s.Cache.Len())), 0
 	}
 	if s.M.Cfg.isMiniMaxSparseAttn() {
 		s.requireMiniMaxSession()
-		return s.head(s.tokenHiddenMiniMax(id, s.Cache.Len()))
+		return s.head(s.tokenHiddenMiniMax(id, s.Cache.Len())), 0
 	}
 	if s.M.Cfg.isGemma4() {
-		return s.stepGemma4(id) // #5495 — see Prefill
+		return s.stepGemma4(id), 0 // #5495 — see Prefill
 	}
 	if s.Backend != nil {
 		s.ensureOpenBackendSession()
-		return s.token(id, s.halKV.Len())
+		if greedy && s.activeTap() == nil {
+			return s.tokenGreedy(id, s.halKV.Len())
+		}
+		return s.token(id, s.halKV.Len()), 0
 	}
 	if s.PrecisionPolicy != nil {
-		return s.stepDynamic(id)
+		return s.stepDynamic(id), 0
 	}
-	return s.token(id, s.Cache.Len())
+	return s.token(id, s.Cache.Len()), 0
 }
 
 // Generate greedily decodes n tokens after the prompt and returns their ids.

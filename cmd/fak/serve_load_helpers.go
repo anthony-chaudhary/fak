@@ -246,14 +246,21 @@ func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, r
 }
 
 // serveQwen38Q2KEmbeddingResident limits packed Q2_K embedding residency to the
-// exact Qwen3.8-27B UD-Q2_K_XL artifact on the native Metal resident-Q4_K path.
-// The UD-Q2_K_XL token embedding is Q2_K (417,177,600 packed bytes) and would
-// otherwise expand to ~5.09 GB of F32 at startup (#11961). Other artifacts and
-// explicit backends retain the loader's default F32 embedding; the loader's own
+// exact Qwen3.8-27B UD-Q2_K_XL artifact on the native Metal resident-Q4_K path,
+// or on a Vulkan backend that gathers decode rows from the packed table on the
+// device. The UD-Q2_K_XL token embedding is Q2_K (417,177,600 packed bytes) and
+// would otherwise expand to ~5.09 GB of F32 at startup (#11961). Other artifacts
+// and backends retain the loader's default F32 embedding; the loader's own
 // validateResidentQ2KEmbedding gate refuses any artifact whose token_embd.weight
 // is not Q2_K rather than mislabeling it.
 func serveQwen38Q2KEmbeddingResident(backend compute.Backend, ggufPath string, residentQ4K bool) bool {
-	return backend == nil && residentQ4K && serveMetalAvailable() && isWitnessedQwen38UDQ2KXL(ggufPath)
+	native := backend == nil && serveMetalAvailable() || serveVulkanQ2KEmbeddingGather(backend)
+	return residentQ4K && native && isWitnessedQwen38UDQ2KXL(ggufPath)
+}
+
+func serveVulkanQ2KEmbeddingGather(backend compute.Backend) bool {
+	gather, ok := backend.(interface{ V41Q2KEmbeddingGatherAvailable() bool })
+	return ok && backend.Name() == "vulkan" && gather.V41Q2KEmbeddingGatherAvailable()
 }
 
 func serveQuantProvenance(artifact ggufload.ArtifactQuant, residentQ4K bool) gateway.StartupMessage {

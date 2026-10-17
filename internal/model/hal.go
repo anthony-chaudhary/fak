@@ -191,6 +191,7 @@ func (s *Session) closeOwned(scope *backendExecutionScope) {
 			if b, ok := s.Backend.(batchBackend); ok {
 				b.FlushBatch()
 			}
+			s.releaseGreedyLogits()
 			if s.halW != nil {
 				for name, t := range s.halW {
 					if _, borrowed := s.borrowedHALW[name]; !borrowed {
@@ -915,9 +916,19 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	if m.Q2KEmbedding != nil {
 		useDeviceEmbed = false
 	}
+	var q2kEmbedRow func(int) compute.Tensor
+	if !useDeviceEmbed {
+		q2kEmbedRow = s.q2kEmbeddingRowGatherHAL()
+	}
 	if useDeviceEmbed {
 		embedTable = s.weightHAL("model.embed_tokens.weight")
+	} else if q2kEmbedRow != nil {
+		// The gather fences its own dispatch, so it runs before the token's batch opens.
+		x = q2kEmbedRow(id)
 	} else {
+		if be.Caps().DeviceMemory {
+			compute.CountHostFallback(hostFallbackEmbedRowUpload)
+		}
 		if m.Q2KEmbedding != nil {
 			buf := make([]float32, H)
 			if err := m.Q2KEmbedding.GatherRow(id, buf, 1.0); err != nil {
