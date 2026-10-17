@@ -432,6 +432,38 @@ func TestGuardOpenCodeConfigInjection(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=5ms
+func TestGuardOpenCodeConfigUsesRouterProviderNamespace(t *testing.T) {
+	injected, install := installGuardOpenCodeConfig(
+		[]string{"opencode", "run", "--standalone", "--model", "fak-router/deepseek-ai/DeepSeek-V4.1-Flash"},
+		"http://127.0.0.1:54321",
+		"deepseek-ai/DeepSeek-V4.1-Flash",
+		nil,
+	)
+	if install.ProviderID != "fak-router" || install.Model != "fak-router/deepseek-ai/DeepSeek-V4.1-Flash" {
+		t.Fatalf("guard route = %s/%s, want fak-router/deepseek-ai/DeepSeek-V4.1-Flash", install.ProviderID, strings.TrimPrefix(install.Model, install.ProviderID+"/"))
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(injected[0][1]), &config); err != nil {
+		t.Fatal(err)
+	}
+	providers := config["provider"].(map[string]any)
+	routerProvider, ok := providers["fak-router"].(map[string]any)
+	if !ok {
+		t.Fatal("session config does not declare the routed provider allowed by project policy")
+	}
+	if _, ok := providers["fak"]; ok {
+		t.Fatal("session config declared the policy-denied legacy fak provider")
+	}
+	models := routerProvider["models"].(map[string]any)
+	if len(models) != 1 || models["deepseek-ai/DeepSeek-V4.1-Flash"] == nil {
+		t.Fatalf("routed provider models = %#v, want only the exact requested upstream model", models)
+	}
+	if got := strings.Join(install.Command, " "); got != "opencode run --standalone --model fak-router/deepseek-ai/DeepSeek-V4.1-Flash" {
+		t.Fatalf("guarded command = %q", got)
+	}
+}
+
 func TestGuardOpenCodeConfigPreservesExplicitModelLimits(t *testing.T) {
 	existing := `{"provider":{"fak":{"options":{"custom":"kept"},"models":{"qwen38":{"name":"Custom Qwen","limit":{"context":8192,"output":512},"custom":"kept"}}}}}`
 	injected, install := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", func(key string) string {
@@ -539,7 +571,7 @@ func TestGuardOpenCodeExistingConfigContentPreserved(t *testing.T) {
 
 // TestGuardOpenCodeSubagentOverlayRepointsChildPins is the guard-escape witness:
 // OpenCode gives agent.<name>.model precedence over the session default, so a
-// child left on its own pinned model (hosted or local `fak/`) would bypass the
+// child left on its own pinned model (hosted or local router) would bypass the
 // guarded provider. Every explicit child pin must be rewritten onto the guarded
 // model, while an agent with no model stays free to inherit the parent.
 func TestGuardOpenCodeSubagentOverlayRepointsChildPins(t *testing.T) {

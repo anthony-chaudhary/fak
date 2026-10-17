@@ -10,7 +10,11 @@ import (
 // wire shape, so the assertion does not depend on Go field names.
 func guardOpenCodeInstallCommand(t *testing.T, command []string) ([]string, bool) {
 	t.Helper()
-	_, install := installGuardOpenCodeConfig(command, "http://127.0.0.1:54321", "qwen38", nil)
+	model := extractModelFromCommand(command)
+	if model == "" {
+		model = "qwen38"
+	}
+	_, install := installGuardOpenCodeConfig(command, "http://127.0.0.1:54321", model, nil)
 	raw, err := json.Marshal(install)
 	if err != nil {
 		t.Fatalf("marshal install: %v", err)
@@ -35,8 +39,13 @@ func TestGuardOpenCodeRunLaunchesStandalone(t *testing.T) {
 		want []string
 	}{
 		{"bare run gains standalone", []string{"opencode", "run", "-m", "fak/x", "hi"}, []string{"opencode", "run", "--standalone", "-m", "fak/x", "hi"}},
+		{"raw model gains legacy provider", []string{"opencode", "run", "--model", "x", "hi"}, []string{"opencode", "run", "--standalone", "--model", "fak/x", "hi"}},
+		{"router model stays router qualified", []string{"opencode", "run", "--model", "fak-router/x", "hi"}, []string{"opencode", "run", "--standalone", "--model", "fak-router/x", "hi"}},
+		{"model equals form", []string{"opencode", "run", "--model=fak-router/x", "hi"}, []string{"opencode", "run", "--standalone", "--model=fak-router/x", "hi"}},
+		{"short model equals form", []string{"opencode", "run", "-m=fak-router/x", "hi"}, []string{"opencode", "run", "--standalone", "-m=fak-router/x", "hi"}},
+		{"duplicate pins cannot escape", []string{"opencode", "run", "--model", "fak/x", "--model=fak-router/y", "hi", "--", "--model", "opaque"}, []string{"opencode", "run", "--standalone", "--model", "fak-router/y", "--model=fak-router/y", "hi", "--", "--model", "opaque"}},
 		{"windows launcher path", []string{`C:\Users\u\.opencode\bin\opencode.exe`, "run", "hi"}, []string{`C:\Users\u\.opencode\bin\opencode.exe`, "run", "--standalone", "hi"}},
-		{"flag after -- is positional", []string{"opencode", "run", "--", "--server"}, []string{"opencode", "run", "--standalone", "--", "--server"}},
+		{"flags after -- are positional", []string{"opencode", "run", "--", "--model", "opaque", "--server"}, []string{"opencode", "run", "--standalone", "--", "--model", "opaque", "--server"}},
 		{"standalone already present", []string{"opencode", "run", "--standalone", "hi"}, []string{"opencode", "run", "--standalone", "hi"}},
 		{"standalone= form present", []string{"opencode", "run", "--standalone=true", "hi"}, []string{"opencode", "run", "--standalone=true", "hi"}},
 		{"explicit server", []string{"opencode", "run", "--server", "http://127.0.0.1:4096", "hi"}, []string{"opencode", "run", "--server", "http://127.0.0.1:4096", "hi"}},
@@ -54,6 +63,13 @@ func TestGuardOpenCodeRunLaunchesStandalone(t *testing.T) {
 				t.Fatalf("launch argv = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExtractModelFromCommandUsesLastPinBeforePromptBoundary(t *testing.T) {
+	command := []string{"run", "--model", "first", "-m=second", "--", "--model", "opaque"}
+	if got := extractModelFromCommand(command); got != "second" {
+		t.Fatalf("model = %q, want final pre-boundary pin", got)
 	}
 }
 

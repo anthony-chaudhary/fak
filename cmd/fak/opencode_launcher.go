@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -42,10 +44,13 @@ type opencodeLaunchOptions struct {
 	tokenizerPath   string
 	auto            bool
 	skipPermissions bool
+	workspaceDir    string
 	passthrough     []string
 }
 
 var opencodeLaunchRun = execOpencodeLaunchChild
+
+const opencodeLaunchWorkingDirEnv = "FAK_OPENCODE_LAUNCH_WORKING_DIR"
 
 func cmdOpencode(argv []string) {
 	os.Exit(runOpencode(os.Stdout, os.Stderr, argv))
@@ -72,6 +77,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a bottom strip or right column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: fak-info refresh interval")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: guard's embedded floor)")
+	workDir := fs.String("dir", ".", "workspace directory to run guard and OpenCode in")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the upstream OpenAI API key (default: OPENAI_API_KEY)")
 	baseURL := fs.String("base-url", "", "upstream provider base URL; advanced override passed to fak guard")
 	remoteServe := fs.String("remote-serve", "", "send inference to a remote fak serve (HOST or HOST:PORT), while this local guard adjudicates")
@@ -104,6 +110,12 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak opencode: %v\n", err)
 		return 2
 	}
+	*workDir = pathutil.ExpandTilde(*workDir)
+	resolvedWorkDir, err := resolveOpencodeWorkspaceDir(*workDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak opencode: --dir: %v\n", err)
+		return 2
+	}
 
 	if *halo || *strix {
 		if *baseURL == "" {
@@ -123,7 +135,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 			*baseURL = host
 		}
 		if *model == "" {
-			*model = projectassets.ResolveDynamicHaloModel(".")
+			*model = projectassets.ResolveDynamicHaloModel(resolvedWorkDir)
 		}
 		if !*quiet {
 			fmt.Fprintf(stderr, "fak opencode: targeting local Halo server at %s (model: %s)\n", *baseURL, *model)
@@ -169,7 +181,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 					}
 				} else {
 					if *model == "" {
-						*model = projectassets.ResolveDynamicHaloModel(".")
+						*model = projectassets.ResolveDynamicHaloModel(resolvedWorkDir)
 					}
 				}
 			}
@@ -202,8 +214,17 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		skipPermissions: (*guard || flagSet(fs, "skip-permissions")) && *skipPermissions,
 		passthrough:     fs.Args(),
 	}
+	launch.workspaceDir = resolvedWorkDir
+	launchEnv := opencodeUpsertEnv(os.Environ(), opencodeLaunchWorkingDirEnv, resolvedWorkDir)
+	if launch.guard {
+		var err error
+		launch, launchEnv, err = prepareOpencodeRouterCredential(launch, launchEnv)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak opencode: %v\n", err)
+			return 2
+		}
+	}
 	argvOut := buildOpencodeLaunchArgv(fakBin, launch)
-	launchEnv := os.Environ()
 	if !launch.guard {
 		argvOut = buildOpencodeDirectArgv(launch)
 		directBase := launch.baseURL
@@ -244,11 +265,11 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		// Read project assets for launch policy only; a guarded launch must not
 		// materialize or update repository adapter assets. Explicit writers remain
 		// `fak project-assets sync` and the OpenCode config verbs.
-		if _, err := projectassets.Build(".", false); err != nil && !launch.quiet {
+		if _, err := projectassets.Build(launch.workspaceDir, false); err != nil && !launch.quiet {
 			fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
 		}
 	}
-	if err := projectassets.VerifyOpenCodeSnapshot("."); err != nil && !launch.quiet {
+	if err := projectassets.VerifyOpenCodeSnapshot(launch.workspaceDir); err != nil && !launch.quiet {
 		fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
 	}
 
@@ -263,6 +284,60 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak opencode: OpenCode completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
 	}
 	return code
+}
+
+func prepareOpencodeRouterCredential(o opencodeLaunchOptions, env []string) (opencodeLaunchOptions, []string, error) {
+	if explicit := strings.TrimSpace(o.apiKeyEnv); explicit != "" {
+		if !validOpencodeEnvName(explicit) {
+			return o, env, fmt.Errorf("--api-key-env must name a valid environment variable")
+		}
+		if key := strings.TrimSpace(opencodeEnvValue(env, explicit)); key == "" || isTemplateCredential(key) {
+			return o, env, fmt.Errorf("--api-key-env %s is empty or invalid", explicit)
+		}
+		o.apiKeyEnv = explicit
+		return o, env, nil
+	}
+	if !isRegisteredFakRouterURL(o.baseURL, o.workspaceDir) {
+		return o, env, nil
+	}
+	key := resolveOpencodeRouterAPIKey(o.baseURL, o.workspaceDir, env)
+	if key == "" {
+		return o, env, fmt.Errorf("registered fak router credential unavailable or rejected; set %s, pair this router with `fak node use`, or pass --api-key-env VAR", guardRouterKeyEnv)
+	}
+	o.apiKeyEnv = guardRouterKeyEnv
+	return o, opencodeUpsertEnv(env, guardRouterKeyEnv, key), nil
+}
+
+func validOpencodeEnvName(name string) bool {
+	for i, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return name != ""
+}
+
+func opencodeEnvValue(env []string, name string) string {
+	prefix := name + "="
+	value := ""
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			value = strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return value
+}
+
+func opencodeUpsertEnv(env []string, name, value string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return append(out, prefix+value)
 }
 
 func buildOpencodeDirectArgv(o opencodeLaunchOptions) []string {
@@ -283,8 +358,14 @@ func opencodeChildArgs(o opencodeLaunchOptions) []string {
 		return append([]string(nil), rest...)
 	}
 	args := []string{"run"}
-	if childModel := strings.TrimPrefix(strings.TrimSpace(o.model), "fak/"); childModel != "" {
-		args = append(args, "--model", "fak/"+childModel)
+	guardedModel := ""
+	if childModel := guardOpenCodeModelName(strings.TrimSpace(o.model)); childModel != "" {
+		providerID := guardOpenCodeLegacyProviderID
+		if o.guard && isRegisteredFakRouterURL(o.baseURL, o.workspaceDir) {
+			providerID = guardOpenCodeRouterProviderID
+		}
+		guardedModel = providerID + "/" + childModel
+		args = append(args, "--model", guardedModel)
 	}
 	if o.probePrompt != "" {
 		args = append(args, "--format", "json")
@@ -293,7 +374,107 @@ func opencodeChildArgs(o opencodeLaunchOptions) []string {
 		}
 		args = append(args, o.probePrompt)
 	}
-	return append(args, rest...)
+	args = append(args, rest...)
+	if guardedModel != "" {
+		args = pinOpenCodeModelArgs(args, 1, guardedModel)
+	}
+	return args
+}
+
+func resolveOpencodeWorkspaceDir(raw string) (string, error) {
+	dir := pathutil.ExpandTilde(strings.TrimSpace(raw))
+	if dir == "" {
+		return "", fmt.Errorf("workspace directory is empty")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", abs)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func isRegisteredFakRouterURL(baseURL string, workspaceDirs ...string) bool {
+	base, baseOK := normalizedOpenCodeRouterOrigin(baseURL)
+	if !baseOK {
+		return false
+	}
+	workspaceDir := "."
+	if len(workspaceDirs) > 0 && strings.TrimSpace(workspaceDirs[0]) != "" {
+		workspaceDir = workspaceDirs[0]
+	}
+	candidates := []string{os.Getenv("FAK_AGENT_ROUTER_ORIGIN"), workspaceOpenCodeRouterOrigin(workspaceDir)}
+	if cfg, err := nodeReadCfg(); err == nil {
+		candidates = append(candidates, cfg.URL)
+	}
+	for _, candidate := range candidates {
+		if registered, ok := normalizedOpenCodeRouterOrigin(candidate); ok && base == registered {
+			return true
+		}
+	}
+	return false
+}
+
+type opencodeRouterOptions struct {
+	APIKey  string `json:"apiKey"`
+	BaseURL string `json:"baseURL"`
+}
+
+func workspaceOpenCodeRouterOptions(dir string) opencodeRouterOptions {
+	data, err := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		return opencodeRouterOptions{}
+	}
+	var cfg struct {
+		Provider map[string]struct {
+			Options opencodeRouterOptions `json:"options"`
+		} `json:"provider"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return opencodeRouterOptions{}
+	}
+	return cfg.Provider[guardOpenCodeRouterProviderID].Options
+}
+
+func workspaceOpenCodeRouterOrigin(dir string) string {
+	return workspaceOpenCodeRouterOptions(dir).BaseURL
+}
+
+func resolveOpencodeRouterAPIKey(baseURL, workspaceDir string, env []string) string {
+	origin := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+	if key := opencodeEnvValue(env, guardRouterKeyEnv); key != "" {
+		return verifiedRouterCredential(origin, key)
+	}
+	if key, paired := pairedNodeRouterAPIKey(origin); paired {
+		return key
+	}
+	options := workspaceOpenCodeRouterOptions(workspaceDir)
+	base, baseOK := normalizedOpenCodeRouterOrigin(baseURL)
+	registered, registeredOK := normalizedOpenCodeRouterOrigin(options.BaseURL)
+	key := strings.TrimSpace(options.APIKey)
+	if !baseOK || !registeredOK || base != registered || isTemplateCredential(key) {
+		return ""
+	}
+	return key
+}
+
+func normalizedOpenCodeRouterOrigin(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" {
+		return "", false
+	}
+	switch strings.TrimRight(u.EscapedPath(), "/") {
+	case "", "/v1":
+	default:
+		return "", false
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), true
 }
 
 func validateOpencodeLaunchSplit(mode, where string) error {
@@ -328,7 +509,7 @@ func buildOpencodeLaunchArgv(fakBin string, o opencodeLaunchOptions) []string {
 	appendKV("--api-key-env", o.apiKeyEnv)
 	appendKV("--base-url", o.baseURL)
 	appendKV("--remote-serve", o.remoteServe)
-	appendKV("--model", o.model)
+	appendKV("--model", guardOpenCodeModelName(o.model))
 	appendKV("--audit", o.auditPath)
 	if o.noAudit {
 		argv = append(argv, "--audit", "off")
@@ -365,7 +546,8 @@ func execOpencodeLaunchChildContext(ctx context.Context, stdout, stderr io.Write
 		return 2
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = env
+	cmd.Dir = opencodeEnvValue(env, opencodeLaunchWorkingDirEnv)
+	cmd.Env = opencodeRemoveEnv(env, opencodeLaunchWorkingDirEnv)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
@@ -382,6 +564,17 @@ func execOpencodeLaunchChildContext(ctx context.Context, stdout, stderr io.Write
 		return code
 	}
 	return 0
+}
+
+func opencodeRemoveEnv(env []string, name string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 func opencodeConfigModeLabel(mode projectassets.OpenCodeConfigMode) string {

@@ -11,6 +11,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
+const (
+	guardOpenCodeLegacyProviderID = "fak"
+	guardOpenCodeRouterProviderID = "fak-router"
+)
+
 type openCodeConfigInstall struct {
 	Applied    bool   `json:"applied"`
 	ProviderID string `json:"provider_id"`
@@ -55,20 +60,25 @@ func guardOpenCodeStandaloneCommand(command []string) []string {
 }
 
 func extractModelFromCommand(command []string) string {
+	model := ""
 	for i := 0; i < len(command); i++ {
 		arg := command[i]
+		if arg == "--" {
+			break
+		}
 		switch {
 		case arg == "-m" || arg == "--model":
-			if i+1 < len(command) {
-				return command[i+1]
+			if i+1 < len(command) && command[i+1] != "--" {
+				model = command[i+1]
+				i++
 			}
 		case strings.HasPrefix(arg, "-m="):
-			return strings.TrimPrefix(arg, "-m=")
+			model = strings.TrimPrefix(arg, "-m=")
 		case strings.HasPrefix(arg, "--model="):
-			return strings.TrimPrefix(arg, "--model=")
+			model = strings.TrimPrefix(arg, "--model=")
 		}
 	}
-	return ""
+	return model
 }
 
 func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv func(string) string, advertised ...guardOpenCodeModelLimits) ([][2]string, openCodeConfigInstall) {
@@ -84,13 +94,20 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 	}
 
 	targetModel := strings.TrimSpace(modelID)
+	commandModel := strings.TrimSpace(extractModelFromCommand(command))
 	if targetModel == "" {
-		targetModel = strings.TrimSpace(extractModelFromCommand(command))
+		targetModel = commandModel
 	}
 	if targetModel == "" {
 		targetModel = projectassets.DefaultOpenCodeModelID
 	}
-	cleanModel := strings.TrimPrefix(targetModel, "fak/")
+	providerID := guardOpenCodeLegacyProviderID
+	if commandProvider, ok := guardOpenCodeProviderPrefix(commandModel); ok {
+		providerID = commandProvider
+	} else if targetProvider, ok := guardOpenCodeProviderPrefix(targetModel); ok {
+		providerID = targetProvider
+	}
+	cleanModel := guardOpenCodeModelName(targetModel)
 	if cleanModel == "" {
 		cleanModel = projectassets.DefaultOpenCodeModelID
 	}
@@ -113,7 +130,7 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 	}
 
 	var fakProvider map[string]any
-	if existing, ok := providerMap["fak"].(map[string]any); ok && existing != nil {
+	if existing, ok := providerMap[providerID].(map[string]any); ok && existing != nil {
 		fakProvider = existing
 	} else {
 		fakProvider = make(map[string]any)
@@ -136,14 +153,18 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 		"glm-5.2",
 		"glm-5.3-flash",
 	}
-	for _, alias := range defaultAliases {
-		mergeOpenCodeModel(modelsMap, alias)
+	if providerID == guardOpenCodeLegacyProviderID {
+		for _, alias := range defaultAliases {
+			mergeOpenCodeModel(modelsMap, alias)
+		}
 	}
 
-	if cmdModel := strings.TrimSpace(extractModelFromCommand(command)); cmdModel != "" {
-		cleanCmd := strings.TrimPrefix(cmdModel, "fak/")
-		if cleanCmd != "" {
-			mergeOpenCodeModel(modelsMap, cleanCmd)
+	if providerID == guardOpenCodeLegacyProviderID {
+		if cmdModel := strings.TrimSpace(extractModelFromCommand(command)); cmdModel != "" {
+			cleanCmd := guardOpenCodeModelName(cmdModel)
+			if cleanCmd != "" {
+				mergeOpenCodeModel(modelsMap, cleanCmd)
+			}
 		}
 	}
 
@@ -180,15 +201,15 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 	options["apiKey"] = "{env:OPENAI_API_KEY}"
 	fakProvider["options"] = options
 	fakProvider["models"] = modelsMap
-	providerMap["fak"] = fakProvider
+	providerMap[providerID] = fakProvider
 	config["provider"] = providerMap
 
-	guardedModel := "fak/" + cleanModel
+	guardedModel := providerID + "/" + cleanModel
 	config["model"] = guardedModel
 	config["small_model"] = guardedModel
 	// The guard owns the child model plane. OpenCode gives agent.<name>.model
 	// precedence over the session default, so a subagent left on its own pin
-	// (especially a local `fak/` opt-in) would clear the guarded provider and
+	// (especially a local router opt-in) would clear the guarded provider and
 	// escape the kernel adjudication. Rewrite every explicit child pin onto the
 	// guarded model; an agent with no model still inherits the guarded parent.
 	guardOpenCodeSubagentOverlay(config, guardedModel)
@@ -207,11 +228,66 @@ func installGuardOpenCodeConfig(command []string, gwURL, modelID string, getenv 
 
 	return injected, openCodeConfigInstall{
 		Applied:    true,
-		ProviderID: "fak",
-		Model:      "fak/" + cleanModel,
+		ProviderID: providerID,
+		Model:      guardedModel,
 		BaseURL:    baseURL,
-		Command:    guardOpenCodeStandaloneCommand(command),
+		Command:    guardOpenCodeCommand(command, guardedModel),
 	}
+}
+
+func guardOpenCodeModelName(model string) string {
+	model = strings.TrimSpace(model)
+	if _, ok := guardOpenCodeProviderPrefix(model); ok {
+		return model[strings.IndexByte(model, '/')+1:]
+	}
+	return model
+}
+
+func guardOpenCodeProviderPrefix(model string) (string, bool) {
+	model = strings.TrimSpace(model)
+	for _, providerID := range []string{guardOpenCodeRouterProviderID, guardOpenCodeLegacyProviderID} {
+		if strings.HasPrefix(model, providerID+"/") {
+			return providerID, true
+		}
+	}
+	return "", false
+}
+
+func guardOpenCodeCommand(command []string, guardedModel string) []string {
+	out := guardOpenCodeStandaloneCommand(command)
+	return pinOpenCodeModelArgs(out, 2, guardedModel)
+}
+
+func pinOpenCodeModelArgs(args []string, start int, guardedModel string) []string {
+	out := args
+	cloned := false
+	clone := func() {
+		if !cloned {
+			out = append([]string(nil), args...)
+			cloned = true
+		}
+	}
+	for i := start; i < len(out); i++ {
+		arg := out[i]
+		if arg == "--" {
+			break
+		}
+		switch {
+		case arg == "-m" || arg == "--model":
+			if i+1 < len(out) && out[i+1] != "--" {
+				clone()
+				out[i+1] = guardedModel
+				i++
+			}
+		case strings.HasPrefix(arg, "-m="):
+			clone()
+			out[i] = "-m=" + guardedModel
+		case strings.HasPrefix(arg, "--model="):
+			clone()
+			out[i] = "--model=" + guardedModel
+		}
+	}
+	return out
 }
 
 func discoverGuardOpenCodeModelLimits(gwURL, modelID string) guardOpenCodeModelLimits {
@@ -243,8 +319,8 @@ func discoverGuardOpenCodeModelLimits(gwURL, modelID string) guardOpenCodeModelL
 
 // guardOpenCodeSubagentOverlay forces every explicitly pinned OpenCode subagent
 // onto the guard-selected model. Unlike the private failover repair (which
-// preserves local `fak/` opt-ins), the guard overlay is a security boundary and
-// must repoint local pins too: a child session that kept a `fak/` pin would
+// preserves local router opt-ins), the guard overlay is a security boundary and
+// must repoint local pins too: a child session that kept a local pin would
 // speak to a different endpoint than the guarded gateway. Agents with no model
 // are left to inherit the guarded parent model.
 func guardOpenCodeSubagentOverlay(config map[string]any, guardedModel string) {
