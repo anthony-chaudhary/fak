@@ -384,7 +384,7 @@ func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) str
 		"backend", "metal", "gpu-layers", "native-gpu-layers", "cpu-offload-experts", "n-cpu-moe", serveExpertRingBytesFlag,
 		"expert-parallel", "tensor-parallel", "cuda-graph", "native-context-tokens", "native-admission-token-budget",
 		"native-compact-history-budget", nativeQwenQ4KPrefillChunkFlag, "native-qwen35-metal-gdn-sequence",
-		"native-q4k-gateup-slab", "kv-precision", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
+		"native-q4k-gateup-slab", "native-v41-prefill-sum-readback", "kv-precision", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",
 	} {
 		if sf.isExplicitFlag(name) {
 			return false, nil
@@ -402,7 +402,7 @@ func (rt *serveRuntime) proxyOnlyCompute(sf *serveFlags, getenv func(string) str
 	if strings.TrimSpace(*sf.backendName) != "" || *sf.metal || *sf.cpuOffloadExperts || strings.TrimSpace(*sf.nCPUMoE) != "" || *sf.expertParallel != 1 || *sf.tensorParallel != 1 || *sf.cudaGraph || *sf.nativeContextTokens != 0 || *sf.nativeGPULayers != 0 {
 		return false, nil
 	}
-	controls := []*bool{sf.nativeQwen35MetalGDNSequence, sf.nativeQ4KGateUpOutputSlab, sf.vulkanQ4KProfile, sf.vulkanStageQ4K}
+	controls := []*bool{sf.nativeQwen35MetalGDNSequence, sf.nativeQ4KGateUpOutputSlab, sf.nativeV41PrefillSumReadback, sf.vulkanQ4KProfile, sf.vulkanStageQ4K}
 	for _, value := range controls {
 		if value == nil {
 			return false, errors.New("serve: proxy compute selection lacks native controls")

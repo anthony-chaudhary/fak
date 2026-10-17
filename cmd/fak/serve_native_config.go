@@ -13,37 +13,41 @@ import (
 )
 
 var (
-	configureNativePrefixProfile = model.SetPrefixProfilePath
-	configureNativeVulkanQ4K     = compute.ConfigureVulkanQ4K
-	configureNativeQ4KSlab       = modelengine.SetQ4KGateUpOutputSlab
+	configureNativePrefixProfile         = model.SetPrefixProfilePath
+	configureNativeVulkanQ4K             = compute.ConfigureVulkanQ4K
+	configureNativeQ4KSlab               = modelengine.SetQ4KGateUpOutputSlab
+	configureNativeV41PrefillSumReadback = model.SetV41PrefillSumReadback
 )
 
 type nativeControlFlags struct {
-	prefillChunk      *int
-	qwen35GDNSequence *bool
-	q4kGateUpSlab     *bool
-	kvPrecision       *string
-	prefixProfile     *string
-	vulkanQ4KProfile  *bool
-	vulkanStageQ4K    *bool
+	prefillChunk          *int
+	qwen35GDNSequence     *bool
+	q4kGateUpSlab         *bool
+	v41PrefillSumReadback *bool
+	kvPrecision           *string
+	prefixProfile         *string
+	vulkanQ4KProfile      *bool
+	vulkanStageQ4K        *bool
 }
 
 type nativeControlConfig struct {
-	Planner          agent.InKernelPlannerConfig
-	PrefixProfile    string
-	VulkanQ4KProfile bool
-	VulkanStageQ4K   bool
+	Planner               agent.InKernelPlannerConfig
+	PrefixProfile         string
+	VulkanQ4KProfile      bool
+	VulkanStageQ4K        bool
+	V41PrefillSumReadback bool
 }
 
 func registerNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
 	return nativeControlFlags{
-		prefillChunk:      fs.Int(nativeQwenQ4KPrefillChunkFlag, defaultNativeQwenQ4KPrefillChunk, "Qwen Q4_K prefill chunk ceiling in tokens (128..8192; default 512). Validated before model load and stamped into native receipts."),
-		qwen35GDNSequence: fs.Bool("native-qwen35-metal-gdn-sequence", false, "enable the experimental Qwen3.5 Metal GDN preprojected sequence path"),
-		q4kGateUpSlab:     fs.Bool("native-q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each native session"),
-		kvPrecision:       fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
-		prefixProfile:     fs.String("native-prefix-profile", "", "write native prefix-cache operation profiles to this JSONL path"),
-		vulkanQ4KProfile:  fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires a Vulkan backend)"),
-		vulkanStageQ4K:    fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires a Vulkan backend)"),
+		prefillChunk:          fs.Int(nativeQwenQ4KPrefillChunkFlag, defaultNativeQwenQ4KPrefillChunk, "Qwen Q4_K prefill chunk ceiling in tokens (128..8192; default 512). Validated before model load and stamped into native receipts."),
+		qwen35GDNSequence:     fs.Bool("native-qwen35-metal-gdn-sequence", false, "enable the experimental Qwen3.5 Metal GDN preprojected sequence path"),
+		q4kGateUpSlab:         fs.Bool("native-q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each native session"),
+		v41PrefillSumReadback: fs.Bool("native-v41-prefill-sum-readback", false, "enable experimental bounded DeepSeek V4.1 prefill routed-expert sum readback"),
+		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
+		prefixProfile:         fs.String("native-prefix-profile", "", "write native prefix-cache operation profiles to this JSONL path"),
+		vulkanQ4KProfile:      fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires a Vulkan backend)"),
+		vulkanStageQ4K:        fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires a Vulkan backend)"),
 	}
 }
 
@@ -60,15 +64,17 @@ func (f nativeControlFlags) config() nativeControlConfig {
 			Q4KGateUpOutputSlab:       *f.q4kGateUpSlab,
 			KVPrecision:               prec,
 		},
-		PrefixProfile:    *f.prefixProfile,
-		VulkanQ4KProfile: *f.vulkanQ4KProfile,
-		VulkanStageQ4K:   *f.vulkanStageQ4K,
+		V41PrefillSumReadback: *f.v41PrefillSumReadback,
+		PrefixProfile:         *f.prefixProfile,
+		VulkanQ4KProfile:      *f.vulkanQ4KProfile,
+		VulkanStageQ4K:        *f.vulkanStageQ4K,
 	}
 }
 
 func applyNativeControls(backend compute.Backend, cfg nativeControlConfig) error {
 	configureNativePrefixProfile(cfg.PrefixProfile)
 	configureNativeQ4KSlab(cfg.Planner.Q4KGateUpOutputSlab)
+	configureNativeV41PrefillSumReadback(cfg.V41PrefillSumReadback)
 	if !cfg.VulkanQ4KProfile && !cfg.VulkanStageQ4K {
 		return nil
 	}
@@ -110,9 +116,10 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 			// and a non-eligible model falls back to the byte-identical serial loop.
 			BatchDecode: true,
 		},
-		PrefixProfile:    *sf.nativePrefixProfile,
-		VulkanQ4KProfile: *sf.vulkanQ4KProfile,
-		VulkanStageQ4K:   *sf.vulkanStageQ4K,
+		V41PrefillSumReadback: sf.nativeV41PrefillSumReadback != nil && *sf.nativeV41PrefillSumReadback,
+		PrefixProfile:         *sf.nativePrefixProfile,
+		VulkanQ4KProfile:      *sf.vulkanQ4KProfile,
+		VulkanStageQ4K:        *sf.vulkanStageQ4K,
 	}
 }
 

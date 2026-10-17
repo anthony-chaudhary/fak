@@ -201,6 +201,7 @@ type serveFlags struct {
 	nativeQwenQ4KPrefillChunk    *int
 	nativeQwen35MetalGDNSequence *bool
 	nativeQ4KGateUpOutputSlab    *bool
+	nativeV41PrefillSumReadback  *bool
 	kvPrecision                  *string
 	nativePrefixProfile          *string
 	vulkanQ4KProfile             *bool
@@ -305,6 +306,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
 	sf.nativeQ4KGateUpOutputSlab = nativeControls.q4kGateUpSlab
+	sf.nativeV41PrefillSumReadback = nativeControls.v41PrefillSumReadback
 	sf.kvPrecision = nativeControls.kvPrecision
 	sf.nativePrefixProfile = nativeControls.prefixProfile
 	sf.vulkanQ4KProfile = nativeControls.vulkanQ4KProfile
