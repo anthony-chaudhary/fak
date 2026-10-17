@@ -60,6 +60,11 @@ type ArmMetrics struct {
 	TaskCompleted       bool   `json:"task_completed"`       // the booking actually succeeded (the goal)
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
+	// FinalFinishReason preserves the canonical Completion reason for the accepted final
+	// prose turn, including graceful synthesis. Empty means not reported. Partial
+	// text remains in FinalAnswer; a nonempty answer alone is not proof of completion.
+	FinalFinishReason    string `json:"final_finish_reason,omitempty"`
+	FinalAnswerTruncated bool   `json:"final_answer_truncated,omitempty"`
 
 	GracefulDrained         bool `json:"graceful_drained,omitempty"`
 	SynthesizedFinalTurn    bool `json:"synthesized_final_turn,omitempty"`

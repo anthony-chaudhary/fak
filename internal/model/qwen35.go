@@ -417,6 +417,26 @@ func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 	return out
 }
 
+// linearDecodeScratch belongs to one serial Session, not to a layer's persistent
+// state. Head-indexed recurrence slices remain disjoint under parFor work stealing.
+// No projection output returned to the caller aliases this workspace.
+type linearDecodeScratch struct {
+	convOut, core, qNorm, kNorm []float32
+	kvmem, delta                []float32
+}
+
+func (w *linearDecodeScratch) prepare(keyDim, valDim, convDim int) {
+	w.convOut = grow(w.convOut, convDim)
+	w.core = grow(w.core, valDim)
+	w.qNorm = grow(w.qNorm, keyDim)
+	w.kNorm = grow(w.kNorm, keyDim)
+	w.kvmem = grow(w.kvmem, valDim)
+	w.delta = grow(w.delta, valDim)
+	// ScalarHeadStep accumulates into od. All other buffers are overwritten
+	// before use (the head kernel clears kvmem and overwrites delta).
+	clear(w.core)
+}
+
 // linearAttnStep is the Session.Prefill/Step twin of linearAttnSeq: it consumes one
 // already-normalized token, updates the persistent per-layer conv window and Gated-DeltaNet
 // recurrent state, and returns this token's output projection.
@@ -467,7 +487,9 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		return out
 	}
 
-	convOut := make([]float32, convDim)
+	w := &s.linearDecode
+	w.prepare(keyDim, valDim, convDim)
+	convOut := w.convOut
 	t = s.phaseStart()
 	for c := 0; c < convDim; c++ {
 		var acc float32
@@ -493,9 +515,7 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
 	repeat := nV / nK
-	core := make([]float32, valDim)
-	qNorm := make([]float32, keyDim)
-	kNorm := make([]float32, keyDim)
+	core, qNorm, kNorm := w.core, w.qNorm, w.kNorm
 	q := convOut[0:keyDim]
 	k := convOut[keyDim : 2*keyDim]
 	v := convOut[2*keyDim : 2*keyDim+valDim]
@@ -512,12 +532,15 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	t = s.phaseStart()
 	// Each value head's Gated-DeltaNet update is self-contained — it reads the shared (now
 	// read-only) qNorm/kNorm and v, mutates only its OWN recurrent state lst.recurrent[h], and
-	// writes the disjoint core[h*vHd:(h+1)*vHd]. The kvmem/delta scratch is the only shared
-	// hazard, so each worker takes its own. The arithmetic per head is identical to the serial
+	// writes the disjoint core[h*vHd:(h+1)*vHd]. The kvmem/delta scratch is also
+	// indexed by head, so stolen chunks never share mutable scratch. The arithmetic per
+	// head is identical to the serial
 	// loop, so the result is BIT-IDENTICAL regardless of worker count (pinned by the bit-exact
 	// hybrid split-prefill/decode witness in qwen35_test.go) — this just spreads the nV
 	// independent heads across cores, the per-token decode lever for the 75%-of-layers GDN scan.
-	headStep := func(h int, kvmem, delta []float32) {
+	headStep := func(h int) {
+		kvmem := w.kvmem[h*vHd : (h+1)*vHd]
+		delta := w.delta[h*vHd : (h+1)*vHd]
 		kh := h / repeat
 		qn := qNorm[kh*kHd : (kh+1)*kHd]
 		kn := kNorm[kh*kHd : (kh+1)*kHd]
@@ -535,17 +558,13 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		}
 	}
 	if dispatchWorkers <= 1 || nV*kHd*vHd < parThreshold {
-		kvmem := make([]float32, vHd)
-		delta := make([]float32, vHd)
 		for h := 0; h < nV; h++ {
-			headStep(h, kvmem, delta)
+			headStep(h)
 		}
 	} else {
 		parFor(nV, dispatchWorkers, func(lo, hi int) {
-			kvmem := make([]float32, vHd) // per-worker scratch (the only cross-head hazard)
-			delta := make([]float32, vHd)
 			for h := lo; h < hi; h++ {
-				headStep(h, kvmem, delta)
+				headStep(h)
 			}
 		})
 	}

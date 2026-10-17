@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,10 @@ import (
 )
 
 const maxNativeChildTurns = 10
+
+// ErrNativeChildTruncated marks an incomplete final answer whose partial text
+// remains available as the child result. It never includes model output.
+var ErrNativeChildTruncated = errors.New("native child task: final answer truncated by the output-token limit")
 
 type nativeChildCompletionFilter struct {
 	Planner
@@ -67,6 +72,9 @@ func NewNativeChildTaskRunner(planner Planner, maxTurns int, baseOpts []RunOptio
 		}
 		if metrics.GracefulDrained {
 			return nil, fmt.Errorf("native child task: graceful drain synthesized a summary without completion")
+		}
+		if metrics.FinalAnswerTruncated {
+			return metrics.FinalAnswer, ErrNativeChildTruncated
 		}
 		if strings.TrimSpace(metrics.FinalAnswer) == "" {
 			return nil, fmt.Errorf("native child task: ended without a final answer")
