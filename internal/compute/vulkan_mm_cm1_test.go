@@ -196,3 +196,55 @@ func TestVulkanMMCM1SequenceRouteMatchesMatvec(t *testing.T) {
 		})
 	}
 }
+
+// fak-test:runtime slow est=15s
+// TestVulkanMMCM1LargePromptMatchesCPU checks each GEMM variant at production prefill
+// geometry (a 5120x5120 projection at P=512 and an ffn_down-width 17408 reduction at a
+// P=777 token tail) against the CPU dequant on a fixed sample of output elements, so the
+// oracle stays bounded while every row tile, token tile and K block is exercised.
+func TestVulkanMMCM1LargePromptMatchesCPU(t *testing.T) {
+	v := vk(t)
+	prev := vulkanMMCM1SetConfig(VulkanMMCM1Config{Enabled: true, MinTokens: 8})
+	t.Cleanup(func() { vulkanMMCM1SetConfig(prev) })
+	for _, dt := range mmCM1Dtypes() {
+		t.Run(dt.String(), func(t *testing.T) {
+			requireMMCM1(t, dt)
+			for _, sh := range []struct{ out, in, tokens int }{{5120, 5120, 512}, {640, 17408, 777}} {
+				t.Run(fmt.Sprintf("out%d_in%d_p%d", sh.out, sh.in, sh.tokens), func(t *testing.T) {
+					seed := int64(0x1a5e + sh.out + sh.in + int(dt)*7919)
+					hw, deq := mmCM1Weight(t, dt, seed, sh.out, sh.in)
+					dw := v.Upload(hw, dt)
+					if dw.Dtype != dt {
+						v.Free(dw)
+						t.Skipf("native %v upload unavailable (uploaded as %v)", dt, dw.Dtype)
+					}
+					s := lcg(uint64(seed))
+					x := randVec(&s, sh.tokens*sh.in)
+					dx := v.Upload(NewF32(Default(), []int{sh.tokens, sh.in}, x), F32)
+					defer func() { v.Free(dw); v.Free(dx); v.Recycle() }()
+					before := VulkanMMCM1Snapshot()
+					got := mmCM1SequenceMatMul(v, dw, dx, sh.tokens)
+					if after := VulkanMMCM1Snapshot(); after.GEMM != before.GEMM+1 {
+						t.Fatalf("route counters before %+v after %+v: GEMM did not serve the call", before, after)
+					}
+					rng := rand.New(rand.NewSource(seed))
+					const samples = 2048
+					want, gotS := make([]float32, samples), make([]float32, samples)
+					for i := 0; i < samples; i++ {
+						tok, row := rng.Intn(sh.tokens), rng.Intn(sh.out)
+						if i < 4 {
+							tok, row = []int{0, sh.tokens - 1, 0, sh.tokens - 1}[i], []int{0, 0, sh.out - 1, sh.out - 1}[i]
+						}
+						wr, xr := deq[row*sh.in:(row+1)*sh.in], x[tok*sh.in:(tok+1)*sh.in]
+						var acc float64
+						for k := range wr {
+							acc += float64(mmCM1RoundF16(wr[k])) * float64(mmCM1RoundF16(xr[k]))
+						}
+						want[i], gotS[i] = float32(acc), got[tok*sh.out+row]
+					}
+					rawIQAssertClose(t, "GEMM vs fp16-input oracle (sampled)", want, gotS, 5e-4)
+				})
+			}
+		})
+	}
+}
