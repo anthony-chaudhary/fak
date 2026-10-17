@@ -261,6 +261,11 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 	if wantTTFTMeasured < 2 {
 		t.Fatalf("ordinary cohort lost measured TTFT: measured=%d", wantTTFTMeasured)
 	}
+	// Preserve the full live timing for the durable round-trip comparison.
+	liveStrictTimingJSON, err := json.Marshal(rep.Records[2].NativeTiming)
+	if err != nil {
+		t.Fatalf("marshal full live strict row timing: %v", err)
+	}
 	// Host-work fields sample process CPU, which is not receipt-derived.
 	strictTiming := *rep.Records[2].NativeTiming
 	strictTiming.CPUMSPerToken, strictTiming.HostShare = nil, nil
@@ -328,8 +333,8 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 		t.Fatalf("durable rows = %+v, want all three native rows with engine anatomy on disk", recs)
 	}
 	durableStrictTimingJSON, err := json.Marshal(recs[2].NativeTiming)
-	if err != nil || string(durableStrictTimingJSON) != string(strictTimingJSON) {
-		t.Fatalf("durable strict timing=%s err=%v, want live timing=%s", durableStrictTimingJSON, err, strictTimingJSON)
+	if err != nil || string(durableStrictTimingJSON) != string(liveStrictTimingJSON) {
+		t.Fatalf("durable strict timing=%s err=%v, want live timing=%s", durableStrictTimingJSON, err, liveStrictTimingJSON)
 	}
 	offline := perfledger.BuildReport(recs, len(recs), false, 0)
 	if offline.Summary.TTFTMeasured != wantTTFTMeasured {
