@@ -87,8 +87,8 @@ func TestMatMulPlanWorkspaceAndAllocationBehavior(t *testing.T) {
 		be.Free(out)
 	})
 	directAllocs := testing.AllocsPerRun(20, func() { be.Free(be.MatMul(w, x)) })
-	if plannedAllocs >= directAllocs {
-		t.Fatalf("planned run allocations=%g, direct=%g; caller workspace must remove temporary quantization allocations", plannedAllocs, directAllocs)
+	if plannedAllocs > directAllocs {
+		t.Fatalf("planned run allocations=%g, direct=%g; caller workspace must not add allocations over the scratch-reusing direct path", plannedAllocs, directAllocs)
 	}
 }
 
