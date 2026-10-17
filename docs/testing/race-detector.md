@@ -1,4 +1,4 @@
-# Race detector (`go test -race`) — requirements & race-free guarantee
+# Race detector (`go test -race`) — requirements and qualification
 
 > Tracking issue: [E-001 · Go Race Detector Support](https://github.com/anthony-chaudhary/fak/issues/12).
 
@@ -8,15 +8,32 @@ cache, the gateway, and the decode loop all run under multiple goroutines. Go's
 that turns a benign-looking concurrent read/write into a hard, reproducible
 failure, so it is a first-class part of this module's test story.
 
-## The guarantee
+## CI requirement and current evidence
 
-**The full `fak` suite passes under `-race` with zero data races**, and CI
-enforces it on every push and pull request (the `race detector · go test -race
-./...` job in [`.github/workflows/ci.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/ci.yml)). A
-change that introduces a data race in any package — hot path or not — fails that
-required check.
+**The requirement is a complete module run under `-race` with zero detected
+races.** CI selects that run on every push and pull request through the
+`race detector · go test -race ./...` job in
+[`.github/workflows/ci.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/ci.yml).
+A detected data race fails the check; merely configuring the job does not prove
+that a particular revision completed it.
 
-Packages with explicit concurrency/leak coverage that the `-race` run exercises:
+### Qualification update: 2026-10-17
+
+The race jobs for
+[`67e01ad` (job 117359716043)](https://github.com/anthony-chaudhary/fak/actions/runs/39019987759/job/117359716043)
+and
+[`10989c` (job 117373923243)](https://github.com/anthony-chaudhary/fak/actions/runs/39024923066/job/117373923243)
+were **cancelled** at the 30-minute job deadline. Neither supplies a complete
+race-suite pass, and cancellation alone is not a detected-race finding. The
+[`5db875bd` race job](https://github.com/anthony-chaudhary/fak/actions/runs/39027761609/job/117382014214)
+was still running at the earlier 11:28 UTC check, then was **cancelled**
+at 11:44:03 UTC on the same date. It also supplies no complete race-suite
+pass. Current full-race qualification remains open pending a completed,
+source-bound run and its actual results.
+These observations do not revoke any legitimately dated historical pass for
+its own source, environment and exercised paths.
+
+The full-module selection includes these explicit concurrency/leak tests:
 
 | Package | What the race run guards |
 |---|---|
@@ -25,8 +42,8 @@ Packages with explicit concurrency/leak coverage that the `-race` run exercises:
 | `internal/gateway` | request fan-in / streaming under concurrent sessions (`leak_test.go`) |
 | `internal/model` | decode-loop allocation + KV access (`decode_alloc_test.go`) |
 
-The whole module is run under `-race`, not just these — they are simply the
-packages where concurrency is the point of the test.
+The job selects the whole module under `-race`, not just these packages. A
+partial or cancelled run does not establish that every selected test executed.
 
 ## Requirement: cgo + a C compiler
 
@@ -86,7 +103,8 @@ Windows checkout.
 The `race-detector` job in `.github/workflows/ci.yml` runs on `ubuntu-latest`,
 which ships `gcc` and defaults `CGO_ENABLED=1`. It runs `go test -race -count=1
 -timeout=25m ./...` — `-count=1` forces a real, uncached run so a green check is
-always a *fresh* read-back of the race-free claim, never a stale cache hit.
+a fresh test execution on that source rather than a cached test-result hit.
+Its terminal result and logs are still needed to establish completion.
 `CGO_ENABLED` is set explicitly in the job so it fails loudly if it ever lands on
 a cgo-less image rather than silently building a race-blind binary.
 
@@ -96,7 +114,7 @@ a cgo-less image rather than silently building a race-blind binary.
 > wall-clock — it does not change which tests run or relax any assertion. Use the
 > same `-timeout` when running `-race` locally.
 
-## Maintaining the guarantee
+## Maintaining the race requirement
 
 - New concurrent code: add a test that actually exercises the concurrency (spawn
   goroutines, hit the shared state from several at once). The detector only sees
