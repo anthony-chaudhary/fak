@@ -210,6 +210,10 @@ func (m *Model) v41LayerRoutedContraction(in v41LayerMoEInput, ffnInputs [][]flo
 		}
 		return routedByToken, nil
 	}
+	if in.full {
+		st = m.v41ColdDispatchState(st)
+		in.st = st
+	}
 	if seq > 1 && !v41ForceTokenMajor {
 		// #13511: thread the session's optional device gate/up callback into the
 		// grouped (expert-major) contraction too, so a multi-token prefill offers
