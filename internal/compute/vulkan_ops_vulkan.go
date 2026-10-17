@@ -159,14 +159,13 @@ func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, 
 	return out
 }
 
-// SpecVerifyAttention on vulkanBackend falls back to the CPU reference (#11100).
+// SpecVerifyAttention on vulkanBackend has no verify kernel yet: it runs the CPU
+// reference, counted as a host fallback (#11100).
 func (be *vulkanBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
-	ref, ok := Default().(SpecVerifyBackend)
-	if !ok {
-		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")
-	}
-	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+	return specVerifyOnHost(q, k, v, out, qLen, kvLen, nH, nHkv, d)
 }
+
+func (*vulkanBackend) specVerifyRunsOnHost() {}
 
 var _ BatchedPrefillBackend = (*vulkanBackend)(nil)
 

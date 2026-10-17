@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // HostStage names one host-side operation a Session can run during a forward.
@@ -21,7 +24,21 @@ const (
 	HostStageHostMatKernel HostStage = "host-mat-kernel"
 	// HostStageHostMatmul runs one projection GEMV on the host.
 	HostStageHostMatmul HostStage = "host-matmul"
+	// HostStageMTPDraftHostForward runs one MTP draft position (decoder layer,
+	// Q8 quantize and head matmuls) on the host.
+	HostStageMTPDraftHostForward HostStage = "mtp-draft-host-forward"
 )
+
+var unsanctionedHostStages = []HostStage{HostStageHostMatKernel, HostStageHostMatmul, HostStageMTPDraftHostForward}
+
+func init() {
+	for _, stage := range unsanctionedHostStages {
+		compute.DeclareHostFallbackStage(hostFallbackLabel(stage))
+	}
+}
+
+// hostFallbackLabel maps a HostStage onto compute's snake_case stage grammar.
+func hostFallbackLabel(stage HostStage) string { return strings.ReplaceAll(string(stage), "-", "_") }
 
 // ErrDeviceOnlyHostStage is the sentinel under every device-only host refusal.
 var ErrDeviceOnlyHostStage = errors.New("model: device-only execution refuses an unsanctioned host stage")
@@ -43,8 +60,8 @@ func DeviceOnlyHostStageAllowed(stage HostStage) bool {
 
 // observeUnsanctionedHostStage is the counting seam for an unsanctioned host
 // stage that either refused (device-only) or ran under a host-path bypass.
-// TICKET-02's fak_compute_host_fallback_total{stage} increments here.
-var observeUnsanctionedHostStage = func(HostStage) {}
+// It feeds fak_compute_host_fallback_total{stage}.
+var observeUnsanctionedHostStage = func(stage HostStage) { compute.CountHostFallback(hostFallbackLabel(stage)) }
 
 // SetHostPathBypass marks a session that runs host stages under an admitted
 // bring-up bypass; token names the bypass and release runs once on Close.

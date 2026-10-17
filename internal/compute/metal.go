@@ -702,14 +702,13 @@ func (c *metalBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, g
 	return out
 }
 
-// SpecVerifyAttention on metalBackend falls back to the CPU reference (#11100).
+// SpecVerifyAttention on metalBackend has no verify kernel yet: it runs the CPU
+// reference, counted as a host fallback (#11100).
 func (c *metalBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
-	ref, ok := Default().(SpecVerifyBackend)
-	if !ok {
-		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")
-	}
-	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+	return specVerifyOnHost(q, k, v, out, qLen, kvLen, nH, nHkv, d)
 }
+
+func (*metalBackend) specVerifyRunsOnHost() {}
 
 // PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on Metal GPU (#11036).
 func (c *metalBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {

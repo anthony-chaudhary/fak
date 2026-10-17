@@ -1,9 +1,26 @@
 package compute
 
 import (
+	"errors"
 	"fmt"
 	"math"
 )
+
+// HostFallbackStageSpecVerify labels a device backend's spec-verify attention
+// that ran on the CPU reference because the backend has no verify kernel.
+const HostFallbackStageSpecVerify = "spec_verify_attention"
+
+// ErrSpecVerifyDeviceOnly is the sentinel under a device-only spec-verify call
+// whose backend would hand the attention to the CPU reference.
+var ErrSpecVerifyDeviceOnly = errors.New("compute: device-only spec-verify refuses the CPU reference")
+
+// specVerifyHostReferenceBackend marks a device backend whose SpecVerifyAttention
+// is the CPU reference, not a device kernel.
+type specVerifyHostReferenceBackend interface {
+	specVerifyRunsOnHost()
+}
+
+func init() { DeclareHostFallbackStage(HostFallbackStageSpecVerify) }
 
 // SpecVerifyBackend is the optional capability interface a backend implements
 // to run split-KV multi-query speculative verify attention (#11100).
@@ -116,9 +133,20 @@ func (c *cpuBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, 
 }
 
 // SpecVerifyAttention executes split-KV multi-query speculative verify attention (#11100).
-// If the backend owning q implements SpecVerifyBackend, it dispatches to that backend;
-// otherwise it falls back to the CPU reference.
+// If the backend owning q has a verify kernel it dispatches there; otherwise the
+// CPU reference runs, counted as a host fallback when q lives on a device backend.
 func SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	return specVerifyAttention(false, q, k, v, out, qLen, kvLen, nH, nHkv, d)
+}
+
+// SpecVerifyAttentionDeviceOnly is SpecVerifyAttention for a device-only session:
+// a device backend with no verify kernel refuses with ErrSpecVerifyDeviceOnly
+// instead of running the CPU reference.
+func SpecVerifyAttentionDeviceOnly(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	return specVerifyAttention(true, q, k, v, out, qLen, kvLen, nH, nHkv, d)
+}
+
+func specVerifyAttention(deviceOnly bool, q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
 	if q == nil {
 		return fmt.Errorf("compute: SpecVerifyAttention nil q tensor")
 	}
@@ -126,9 +154,28 @@ func SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) err
 	if be == nil {
 		be = Default()
 	}
-	if svb, ok := be.(SpecVerifyBackend); ok {
+	_, hostReference := be.(specVerifyHostReferenceBackend)
+	svb, ok := be.(SpecVerifyBackend)
+	if ok && !hostReference {
 		return svb.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
 	}
+	if !be.Caps().DeviceMemory && !hostReference {
+		return specVerifyReference(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+	}
+	if deviceOnly {
+		CountHostFallback(HostFallbackStageSpecVerify)
+		return fmt.Errorf("%w: backend %s has no verify kernel", ErrSpecVerifyDeviceOnly, be.Name())
+	}
+	return specVerifyOnHost(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+}
+
+// specVerifyOnHost is a device backend's counted hand-off to the CPU reference.
+func specVerifyOnHost(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	CountHostFallback(HostFallbackStageSpecVerify)
+	return specVerifyReference(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+}
+
+func specVerifyReference(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
 	ref, ok := Default().(SpecVerifyBackend)
 	if !ok {
 		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")

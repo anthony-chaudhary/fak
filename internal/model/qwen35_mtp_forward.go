@@ -321,6 +321,9 @@ func (f *Qwen35MTPForward) forwardOwned(pos int, priorHidden, currentEmbedding [
 		_, logits, err := f.residentForwardFeedback(pos, priorHidden, currentEmbedding)
 		return logits, err
 	}
+	if err := f.admitHostDraftPosition(); err != nil {
+		return nil, err
+	}
 
 	x, err := f.qwen38MTPFuse(priorHidden, currentEmbedding)
 	if err != nil {
@@ -331,6 +334,26 @@ func (f *Qwen35MTPForward) forwardOwned(pos int, priorHidden, currentEmbedding [
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
 	return f.projectHeadOwned(f.draft.M.finalNorm(x)), nil
+}
+
+// admitHostDraftPosition counts a host-run draft position when it is not the
+// session's purpose (a device backend is live or a bypass is admitted) and
+// refuses it under device-only before any host matmul runs.
+func (f *Qwen35MTPForward) admitHostDraftPosition() error {
+	s := f.draft
+	stage := HostStageMTPDraftHostForward
+	switch {
+	case s.executionPolicy == ExecutionPolicyDeviceOnly:
+		observeUnsanctionedHostStage(stage)
+		s.hostFallbackObserved = true
+		return &BackendForwardOperationError{
+			Forward: s.deviceOnlyForward(), Path: "device-only", Layer: -1, Stage: string(stage),
+			Cause: fmt.Errorf("%w: %s", ErrDeviceOnlyHostStage, stage),
+		}
+	case s.hostPathBypass != "" || compute.DeviceBackendRegistered():
+		observeUnsanctionedHostStage(stage)
+	}
+	return nil
 }
 
 // SetDraftVocabFilter configures the empirical draft vocabulary filter on the forward head.

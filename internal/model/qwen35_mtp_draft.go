@@ -534,6 +534,9 @@ func qwen35MTPForwardFeedbackOwned(f *Qwen35MTPForward, pos int, priorHidden, cu
 	if f.resident != nil {
 		return f.residentForwardFeedback(pos, priorHidden, currentEmbedding)
 	}
+	if err := f.admitHostDraftPosition(); err != nil {
+		return nil, nil, err
+	}
 
 	x, err := f.qwen38MTPFuse(priorHidden, currentEmbedding)
 	if err != nil {
