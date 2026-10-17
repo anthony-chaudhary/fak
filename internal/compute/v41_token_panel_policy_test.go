@@ -40,6 +40,7 @@ func TestV41TokenPanelDefaultOnPolicy(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				ResetComputeEnvCache()
 				if got := gate.enabled(); got != tc.want {
 					t.Fatalf("%s=%s: enabled=%v want %v", gate.env, label, got, tc.want)
 				}

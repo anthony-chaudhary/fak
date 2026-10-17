@@ -178,6 +178,7 @@ func TestVulkanQ2KFusedRMSNormMatMul2(t *testing.T) {
 			fusedQ2 := pair[0] == Q2_K && pair[1] == Q2_K
 			if fusedQ2 {
 				t.Setenv("FAK_VULKAN_Q2K_FUSION", "candidate")
+				ResetComputeEnvCache()
 			}
 			w0, w1 := q2FusedWeight(pair[0], 8, 256), q2FusedWeight(pair[1], 12, 256)
 			x, norm := q2FusedInput(256, 0), q2FusedInput(256, 1)

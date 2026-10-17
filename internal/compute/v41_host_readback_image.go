@@ -79,6 +79,27 @@ func (image v41HostReadbackImage) region(index, size int) []byte {
 	return image.host[start : start+size : start+size]
 }
 
+// v41DecodeF32Row materializes one independent full-cap float32 row from a raw
+// little-endian byte region. On a little-endian host the float32 bit pattern is
+// the raw bytes, so one bulk copy replaces the per-element decode loop; a
+// big-endian host keeps the explicit decode. The row is always a fresh
+// allocation: callers may retain any single row, so rows must never alias the
+// shared image or a peer row.
+func v41DecodeF32Row(raw []byte, n int) []float32 {
+	row := make([]float32, n)
+	if n == 0 {
+		return row
+	}
+	if v41NativeLittleEndian() {
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(row))), 4*n), raw[:4*n])
+		return row
+	}
+	for j := range row {
+		row[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[4*j:]))
+	}
+	return row
+}
+
 // materializeRows is called only after the unchanged status-verdict loop.
 // The typed arm exposes exactly one full-cap row; all other layouts decode
 // into independent allocations, preserving their original retention behavior.
@@ -92,11 +113,7 @@ func (image v41HostReadbackImage) materializeRows(sizes []int, first int) [][]fl
 			continue
 		}
 		raw := image.region(index, sizes[index])
-		row := make([]float32, n)
-		for j := range row {
-			row[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[4*j:]))
-		}
-		values[i] = row
+		values[i] = v41DecodeF32Row(raw, n)
 	}
 	return values
 }

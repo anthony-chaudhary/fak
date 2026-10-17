@@ -2507,14 +2507,17 @@ func TestVulkanVectorGDNDisableSetting(t *testing.T) {
 
 		// 3. FAK_DISABLE_VECTOR_GDN environment variable
 		t.Setenv("FAK_DISABLE_VECTOR_GDN", "1")
+		ResetComputeEnvCache()
 		if !v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be disabled with FAK_DISABLE_VECTOR_GDN=1")
 		}
 		t.Setenv("FAK_DISABLE_VECTOR_GDN", "true")
+		ResetComputeEnvCache()
 		if !v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be disabled with FAK_DISABLE_VECTOR_GDN=true")
 		}
 		t.Setenv("FAK_DISABLE_VECTOR_GDN", "0")
+		ResetComputeEnvCache()
 		if v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be enabled with FAK_DISABLE_VECTOR_GDN=0")
 		}
@@ -2522,14 +2525,17 @@ func TestVulkanVectorGDNDisableSetting(t *testing.T) {
 		// 4. FAK_VECTORIZED_DELTANET=0 environment variable
 		t.Setenv("FAK_DISABLE_VECTOR_GDN", "")
 		t.Setenv("FAK_VECTORIZED_DELTANET", "0")
+		ResetComputeEnvCache()
 		if !v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be disabled with FAK_VECTORIZED_DELTANET=0")
 		}
 		t.Setenv("FAK_VECTORIZED_DELTANET", "false")
+		ResetComputeEnvCache()
 		if !v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be disabled with FAK_VECTORIZED_DELTANET=false")
 		}
 		t.Setenv("FAK_VECTORIZED_DELTANET", "1")
+		ResetComputeEnvCache()
 		if v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be enabled with FAK_VECTORIZED_DELTANET=1")
 		}
@@ -2537,10 +2543,12 @@ func TestVulkanVectorGDNDisableSetting(t *testing.T) {
 		// 5. FAK_VECTOR_GDN=0 environment variable
 		t.Setenv("FAK_VECTORIZED_DELTANET", "")
 		t.Setenv("FAK_VECTOR_GDN", "0")
+		ResetComputeEnvCache()
 		if !v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be disabled with FAK_VECTOR_GDN=0")
 		}
 		t.Setenv("FAK_VECTOR_GDN", "1")
+		ResetComputeEnvCache()
 		if v.IsVectorGDNDisabled() {
 			t.Fatal("expected vector GDN to be enabled with FAK_VECTOR_GDN=1")
 		}

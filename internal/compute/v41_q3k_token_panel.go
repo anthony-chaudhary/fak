@@ -3,7 +3,38 @@ package compute
 import (
 	"fmt"
 	"os"
+	"sync"
 )
+
+// computeEnvCache memoizes process-constant environment lookups on the hot
+// dispatch path. os.Getenv costs a syscall plus a UTF-16 conversion on Windows,
+// and the V4.1 decode path re-reads these flags on every dispatch, so each name
+// is read at most once per cache generation.
+//
+// The cache is deliberately not self-invalidating: a caller that mutates the
+// environment at runtime (notably a test using t.Setenv) must call
+// ResetComputeEnvCache afterwards, or the next read returns the stale value.
+var computeEnvCache sync.Map // name -> string
+
+// computeEnvValue returns the memoized value of name, reading the process
+// environment only on a cache miss.
+func computeEnvValue(name string) string {
+	if v, ok := computeEnvCache.Load(name); ok {
+		return v.(string)
+	}
+	v := os.Getenv(name)
+	computeEnvCache.Store(name, v)
+	return v
+}
+
+// ResetComputeEnvCache drops every memoized lookup so the next read observes the
+// current process environment.
+func ResetComputeEnvCache() {
+	computeEnvCache.Range(func(k, _ any) bool {
+		computeEnvCache.Delete(k)
+		return true
+	})
+}
 
 // V41Q3KTokenPanelBackend contracts several rows through ONE expert's packed
 // Q3_K matrix. It is separate from the routed-ID ABI: tokens share a weight,
@@ -25,7 +56,7 @@ type V41Q3KTokenPanelBackend interface {
 // v41TokenPanelEnvEnabled is the default-on panel policy: unset or any value
 // other than exactly "0" enables the family.
 func v41TokenPanelEnvEnabled(name string) bool {
-	return os.Getenv(name) != "0"
+	return computeEnvValue(name) != "0"
 }
 
 func v41Q2KTokenPanelEnabled() bool {

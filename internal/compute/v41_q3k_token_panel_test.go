@@ -26,6 +26,7 @@ func TestV41Q3KTokenPanelOptIn(t *testing.T) {
 		for _, q3 := range []string{"", "0", "1", "true", " 0", "0 ", "00"} {
 			t.Setenv("FAK_V41_Q2K_TOKEN_PANEL", q2)
 			t.Setenv("FAK_V41_Q3K_TOKEN_PANEL", q3)
+			ResetComputeEnvCache()
 			if got, want := v41Q2KTokenPanelEnabled(), q2 != "0"; got != want {
 				t.Fatalf("Q2 gate Q2=%q Q3=%q: got %v want %v", q2, q3, got, want)
 			}
