@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // writeComputeWorkMetrics renders where native work ran: device dispatches per
@@ -28,5 +29,9 @@ func writeComputeWorkMetrics(b *strings.Builder) {
 			total += d.ReadbackBytes
 		}
 		fmt.Fprintf(b, "fak_compute_readback_bytes_total %d\n", total)
+	}
+	writeHelpType(b, "fak_prefill_fallback_total", "Whole-sequence prefill calls that declined to the scalar token-replay route, by stable decline reason.", "counter")
+	for _, c := range model.PrefillFallbackCounts() {
+		fmt.Fprintf(b, "fak_prefill_fallback_total{reason=\"%s\"} %d\n", promQuote(c.Reason), c.Count)
 	}
 }

@@ -80,6 +80,9 @@ type Record struct {
 	PrefillTPS           float64        `json:"prefill_tps,omitempty"`
 	DecodeTPS            float64        `json:"decode_tps,omitempty"`
 	NativeTiming         *NativeTiming  `json:"native_timing,omitempty"`
+	// PrefillRoute is the request's whole-sequence prefill route decision when the
+	// native engine made one; absent on a proxied, mock or non-Qwen turn.
+	PrefillRoute *PrefillRoute `json:"prefill_route,omitempty"`
 
 	PartialNativePhases *PartialNativePhases `json:"partial_native_phases,omitempty"`
 	// Error is the failure class of a turn that did not complete (one of the Error*
@@ -174,6 +177,19 @@ type PartialNativePhases struct {
 	DecodeMS            *float64 `json:"decode_ms,omitempty"`
 	PrefillObservations uint64   `json:"prefill_observations,omitempty"`
 	DecodeObservations  uint64   `json:"decode_observations,omitempty"`
+}
+
+// PrefillRoute is one request's whole-sequence prefill route decision, when the
+// native engine made one. EffectivePath is the route that actually ran; on a
+// decline it is the scalar token-replay fallback and DeclineReason names why, in
+// the same stable vocabulary the model receipt carries. Absent means no eligible
+// decision was observed, never a measured native route.
+type PrefillRoute struct {
+	RequestedPath               string `json:"requested_path,omitempty"`
+	EffectivePath               string `json:"effective_path,omitempty"`
+	DeclineReason               string `json:"decline_reason,omitempty"`
+	FallbackActive              bool   `json:"fallback_active,omitempty"`
+	NativePerformanceQualifying bool   `json:"native_performance_qualifying,omitempty"`
 }
 
 // NativeTiming is the engine-measured phase split for a native request. It is
