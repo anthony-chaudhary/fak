@@ -204,7 +204,11 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 	case Q8_0:
 		blk := w.Quant.Block
 		nblk := in / blk
-		qx, dx := quantizeVecQ8(xf, blk)
+		act := cpuRefQ8ActPool.Get().(*cpuRefQ8Act)
+		defer cpuRefQ8ActPool.Put(act)
+		qx := act.codes(in)
+		dx := act.scales(nblk)
+		quantizeVecQ8Into(xf, blk, qx, dx)
 		wc, ws := c.i8(w), w.Quant.Scale
 		for o := 0; o < out; o++ {
 			y[o] = qdot8scalar(wc[o*in:o*in+in], ws[o*nblk:o*nblk+nblk], qx, dx, blk)
@@ -287,12 +291,12 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		blk := w.Quant.Block
 		nblk := in / blk
 		wc, ws := c.i8(w), w.Quant.Scale
-		qx := make([]int8, P*in)
-		dx := make([]float32, P*nblk)
+		act := cpuRefQ8ActPool.Get().(*cpuRefQ8Act)
+		defer cpuRefQ8ActPool.Put(act)
+		qx := act.codes(P * in)
+		dx := act.scales(P * nblk)
 		for t := 0; t < P; t++ {
-			qxr, dxr := quantizeVecQ8(Xf[t*in:t*in+in], blk)
-			copy(qx[t*in:], qxr)
-			copy(dx[t*nblk:], dxr)
+			quantizeVecQ8Into(Xf[t*in:t*in+in], blk, qx[t*in:(t+1)*in], dx[t*nblk:(t+1)*nblk])
 		}
 		for o := 0; o < out; o++ {
 			for t := 0; t < P; t++ {
@@ -412,7 +416,7 @@ func (c *cpuBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 func (c *cpuBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Tensor {
 	xf := c.f32(x)
 	out := append([]float32(nil), xf...)
-	cos, sin := ropeRow(theta, headDim, pos)
+	cos, sin := cpuRefRopeTables.row(theta, headDim, pos)
 	for h := 0; h < nHeads; h++ {
 		applyRope(out[h*headDim:(h+1)*headDim], cos, sin)
 	}
@@ -463,10 +467,12 @@ func (c *cpuBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp
 	V := c.f32(kv.ValuesView(layer))
 	nPos := len(K) / w
 	out := make([]float32, nH*hd)
+	// One scores buffer, reused across every query head: softmaxInPlace is applied in place and
+	// every entry is overwritten before use, so reuse is bit-identical to a fresh buffer per head.
+	scores := make([]float32, nPos)
 	for h := 0; h < nH; h++ {
 		kvh := h / grp
 		qh := qf[h*hd : (h+1)*hd]
-		scores := make([]float32, nPos)
 		for j := 0; j < nPos; j++ {
 			kh := K[j*w+kvh*hd : j*w+(kvh+1)*hd]
 			scores[j] = dot(qh, kh) * scale
@@ -569,7 +575,7 @@ func (k *cpuKV) Evict(from, n int) int {
 	k.pos = append(k.pos[:from], k.pos[end:]...)
 	for i := range k.pos {
 		if k.pos[i] != i {
-			cos, sin := ropeRow(k.cfg.RopeTheta, hd, i)
+			cos, sin := cpuRefRopeTables.row(k.cfg.RopeTheta, hd, i)
 			for l := 0; l < k.cfg.NumLayers; l++ {
 				for h := 0; h < nKV; h++ {
 					dst := k.K[l][i*w+h*hd : i*w+(h+1)*hd]
@@ -673,6 +679,44 @@ func applyRope(hv, cos, sin []float32) {
 	}
 }
 
+// cpuRefRopeCache caches the cos/sin table per (theta, headDim) with a per-position row, so the
+// Q and K rotations at the same position (and every decode step reusing a position) share one
+// transcendental computation instead of recomputing it per call. It is keyed on the full
+// (theta, headDim) pair, so a different geometry just starts a new row rather than returning a
+// stale table. The values are bit-identical to ropeRow: the same loop, written into cached rows.
+type cpuRefRopeCache struct {
+	mu   sync.Mutex
+	rows map[cpuRefRopeKey][][]float32 // [pos] -> {cos, sin}
+}
+
+type cpuRefRopeKey struct {
+	theta float64
+	dim   int
+}
+
+var cpuRefRopeTables = &cpuRefRopeCache{rows: map[cpuRefRopeKey][][]float32{}}
+
+// row returns the cached (cos, sin) for a (theta, headDim, pos) triple. Callers MUST NOT mutate
+// the returned slices; applyRope only reads them.
+func (rc *cpuRefRopeCache) row(theta float64, headDim, pos int) (cos, sin []float32) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	key := cpuRefRopeKey{theta: theta, dim: headDim}
+	tbl := rc.rows[key]
+	if pos >= len(tbl) {
+		grown := make([][]float32, pos+1)
+		copy(grown, tbl)
+		tbl = grown
+		rc.rows[key] = tbl
+	}
+	if tbl[pos] == nil {
+		c, s := ropeRow(theta, headDim, pos)
+		tbl[pos] = append(c, s...)
+	}
+	full := tbl[pos]
+	return full[:headDim/2], full[headDim/2:]
+}
+
 // q8round: truncate-then-exact-fractional round, half away from zero — byte-identical to
 // model.q8round (and to math.Round over the int8 code range).
 func q8round(x float32) int8 {
@@ -693,11 +737,21 @@ func q8round(x float32) int8 {
 }
 
 // quantizeVecQ8 quantizes one activation vector to Q8_0 (per-block d=amax/127), matching
-// model.quantizeVecQ8.
+// model.quantizeVecQ8. It allocates fresh q/d; callers on the hot path quantize into a reused
+// buffer with quantizeVecQ8Into instead.
 func quantizeVecQ8(x []float32, block int) (q []int8, d []float32) {
-	nblk := len(x) / block
 	q = make([]int8, len(x))
-	d = make([]float32, nblk)
+	d = make([]float32, len(x)/block)
+	quantizeVecQ8Into(x, block, q, d)
+	return
+}
+
+// quantizeVecQ8Into is quantizeVecQ8 writing into caller-owned q and d (len(q)==len(x),
+// len(d)==len(x)/block), so the hot path reuses one activation buffer. Every code slot is
+// written on every call — a zero block is explicitly cleared — so reuse is bit-identical to a
+// fresh allocation.
+func quantizeVecQ8Into(x []float32, block int, q []int8, d []float32) {
+	nblk := len(x) / block
 	for b := 0; b < nblk; b++ {
 		blk := x[b*block : b*block+block]
 		var amax float32
@@ -709,6 +763,9 @@ func quantizeVecQ8(x []float32, block int) (q []int8, d []float32) {
 		dd := amax / 127
 		d[b] = dd
 		if dd == 0 {
+			for i := 0; i < block; i++ {
+				q[b*block+i] = 0
+			}
 			continue
 		}
 		inv := 1.0 / dd
@@ -716,7 +773,30 @@ func quantizeVecQ8(x []float32, block int) (q []int8, d []float32) {
 			q[b*block+i] = q8round(blk[i] * inv)
 		}
 	}
-	return
+}
+
+// cpuRefQ8Act holds the quantized-activation scratch (int8 codes + per-block scales) the Q8_0
+// MatMul/BatchedMatMul share, so the activation is quantized into a reused buffer rather than
+// fresh slices per call. Each pooled entry grows to the largest activation it has seen.
+type cpuRefQ8Act struct {
+	q []int8
+	d []float32
+}
+
+var cpuRefQ8ActPool = sync.Pool{New: func() any { return new(cpuRefQ8Act) }}
+
+func (a *cpuRefQ8Act) codes(n int) []int8 {
+	if cap(a.q) < n {
+		a.q = make([]int8, n)
+	}
+	return a.q[:n]
+}
+
+func (a *cpuRefQ8Act) scales(n int) []float32 {
+	if cap(a.d) < n {
+		a.d = make([]float32, n)
+	}
+	return a.d[:n]
 }
 
 // qdot8scalar: Q8_0 inner product, 4 int32 accumulators per block, fixed float combine —
