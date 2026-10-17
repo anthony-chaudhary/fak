@@ -124,6 +124,7 @@ var tier = map[string]int{
 	"skillvalue":             2, // durable, append-only per-skill outcome-value ledger (#2873) read by `fak skill value report`; JSONL persistence via jsonlledger(1), imports nothing else internal, off the hot path.
 	"benchcli":               2, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
 	"benchids":               1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
+	"logitoracle":            1, // stdlib-only full-logit dump integrity and numerical comparison primitives; imports nothing internal.
 	"benchscore":             2, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":              1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"turnavoid":              1, // pure offline whole-model-turn replay/accounting primitive; stdlib-only, folded by CLI.
