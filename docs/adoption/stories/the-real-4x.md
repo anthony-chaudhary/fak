@@ -67,22 +67,21 @@ levers stacked together: **prefix reuse** (the 2048-token preamble is prefilled 
 times) and **decode batching** (one weight stream serves all five agents instead of five serial
 streams), while each agent keeps ownership of its own KV span.
 
-## What the 4.1x is *not* (and the September 2026 resolution)
+## What the 4.1x is *not* (and the September 2026 evidence correction)
 
-- **Historically, it was not a throughput win over llama.cpp (now resolved on Metal).**
+- **It was not a throughput win over llama.cpp.**
   In the initial July 2026 CPU benchmarks, a tuned `llama-server` with parallel slots was
   *ahead* of fak's pure-Go CPU forward pass on raw single-stream tok/s (decode ≈0.46x, prefill
   ≈0.15x on M3 Q8_0, per `M3-LLAMACPP-RESULTS.md`), so the 4.1x was strictly a *work-elimination*
   ratio inside one engine.
   
-  **September 2026 Resolution:** The single-stream decode deficit has been eliminated. With the
-  in-kernel Apple Silicon Metal HAL for `Qwen3.8-27B Q4_K_M` (Issue #2723 / Issue #9513),
-  **baseline single-stream decode is at parity (7.61 tok/s fak-native vs 7.38 tok/s llama.cpp, +3.1%)**.
-  Because single-stream decode is no longer a bottleneck, the $4\times$ reduction in redundant prefill
-  work + in-kernel co-batching translates directly into a **TRUE 4.20× end-to-end wall-clock speedup
-  and throughput win over llama.cpp** on agentic shared cache workloads (412.5 s vs 1,732.5 s;
-  12.41 vs 2.96 effective tok/s; validated in `experiments/benchmark/runs/by-machine/node-macos-a/20260905T120000Z-agentic-4x/packet.json`).
-  See [`docs/notes/MAC-AGENTIC-4X-QWEN38-2026-09-05.md`](../../notes/MAC-AGENTIC-4X-QWEN38-2026-09-05.md).
+  **September 2026 evidence correction:** The cited 7.61 versus 7.38 tok/s row is a
+  [SIMULATED #2723 fixture](../../notes/MAC-THREEWAY-BENCH-2026-09-03.md), not physical Metal parity.
+  The independent #9513 packet has its own lineage. Neither that single-stream claim nor
+  schema validation establishes the previously advertised 4.20× end-to-end result
+  (412.5 versus 1,732.5 seconds). The [agentic comparison note](../../notes/MAC-AGENTIC-4X-QWEN38-2026-09-05.md)
+  classifies the multi-turn results as analytical projections, not a physical session.
+  The original work-elimination measurements above retain their stated scope.
 - **It is not a hosted-API win.** If you just call a hosted endpoint you get fak's safety floor
   and none of these savings — the reuse win is a self-hosted, read-heavy-fleet property.
 - **It is not "less work" across the whole scaling sweep at 4x.** On the smaller SmolLM2-135M

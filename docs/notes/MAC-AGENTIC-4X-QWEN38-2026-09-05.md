@@ -1,18 +1,18 @@
 ---
-title: "Mac Agentic Shared-Cache Head-to-Head: fak-native vs llama.cpp Calibrated 1.86x Speedup on Qwen3.8-27B (2026-09-05)"
-description: "Empirical head-to-head comparison demonstrating a calibrated 1.86x wall-clock speedup (~2.51x at 20k context) and throughput gain for fak-native (inkernel Metal) over llama.cpp (Metal multi-slot reference) on Qwen3.8-27B agentic shared-prefix workloads post-#11855."
+title: "[MODELED] Mac Agentic Shared-Cache Projection: fak-native vs llama.cpp on Qwen3.8-27B (2026-09-05)"
+description: "Analytical shared-prefix workload projection, not a physical end-to-end comparison. The #2723 input rates are simulated fixture values; the independent #9513 packet has its own evidence lineage."
 date: 2026-09-05
 ---
 
-# Mac Agentic Shared-Cache Head-to-Head: fak-native vs llama.cpp Calibrated 1.86x Speedup on Qwen3.8-27B
+# [MODELED] Mac Agentic Shared-Cache Projection: fak-native vs llama.cpp on Qwen3.8-27B
 
-> **Honesty header (`docs/proofs/00-METHOD.md`).** Measured on `node-macos-a`
+> **Honesty header (`docs/proofs/00-METHOD.md`).** Modeled for `node-macos-a`
 > (Apple M3 Pro / Mac15,7, 12 CPU cores = 6P+6E, 18-core Metal 4 GPU, 36 GiB unified memory,
 > macOS 26.6.2 Darwin arm64). Fulfills GitHub issue [#3809](https://github.com/anthony-chaudhary/fak/issues/3809)
 > as the agentic multi-agent benchmark companion to issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723)
 > (the single-stream baseline parity benchmark) and Issue [#9513](https://github.com/anthony-chaudhary/fak/issues/9513)
 > (the M10 exact parity close-out).
-> **[MODELED PROJECTION]:** All multi-agent session-level figures (wall-clock time, speedup ratio, TTFT under concurrency) in this document are analytical workload models grounded in the physically measured single-stream Metal rates on Apple M3 Pro (Issue #2723: 7.61 vs 7.38 tok/s decode; Issue #9513: 6.86 vs 6.97 tok/s) and prefix-sharing mechanics (Issue #3813). Zero bytes of the full 30-minute 80-turn session ran end-to-end on physical silicon in this comparison. These numbers represent achievable workload projections, not physically witnessed multi-turn completions. Calibrated post-#11855 and #11860 (eliminating unphysical queue-wait double-counting and slot penalties in reference baseline). See `docs/standards/simulated-results-discipline.md`.
+> **[MODELED PROJECTION]:** All multi-agent session-level figures (wall-clock time, speedup ratio, TTFT under concurrency) in this document are analytical workload models. Issue #2723's 7.61 versus 7.38 tok/s input rates are [SIMULATED fixture values](MAC-THREEWAY-BENCH-2026-09-03.md), not physical measurements. Issue #9513 separately reports 6.86 versus 6.97 tok/s and must be assessed from its own packet; prefix-sharing mechanics belong to issue #3813. Zero bytes of the full 30-minute 80-turn session ran end-to-end on physical silicon in this comparison. These numbers are conditional workload projections, not established achievable performance or physically witnessed multi-turn completions. Calibrated post-#11855 and #11860 (eliminating unphysical queue-wait double-counting and slot penalties in reference baseline). See `docs/standards/simulated-results-discipline.md`.
 
 ---
 
@@ -37,14 +37,11 @@ In July 2026, `docs/adoption/stories/the-real-4x.md` documented that `fak` achie
 on a multi-agent session, but conceded an essential limitation:
 > *"It is not a throughput win over llama.cpp... On raw single-stream tok/s it is ahead of fak's pure-Go forward pass (decode ≈0.46x, prefill ≈0.15x on M3 Q8_0)... The 4.1x is a reuse-vs-redo ratio inside one fixed engine, not an engine-vs-engine race."*
 
-**The single-stream decode deficit is now closed.** In September 2026, `fak-native` Metal reached performant parity
-with `llama.cpp` on `Qwen3.8-27B Q4_K_M`:
-- **Issue #2723**: `fak-native` decode reached **7.61 tok/s** (+3.1% vs `llama.cpp` 7.38 tok/s).
-- **Issue #9513**: `fak-native` decode reached **6.86 tok/s** vs `llama.cpp` 6.97 tok/s (**98.52% parity ratio**, $\ge 95.0\%$ required gate).
+**Baseline evidence must be separated.** The two cited September records have different evidence lineages:
+- **Issue #2723**: the **SIMULATED** fixture contains **7.61 tok/s** versus 7.38 tok/s (+3.1% arithmetic); it does not establish physical parity.
+- **Issue #9513**: the independent packet reports `fak-native` decode **6.86 tok/s** vs `llama.cpp` 6.97 tok/s (**98.52% parity ratio**, $\ge 95.0\%$ required gate). The [subsequent evidence audit](https://github.com/anthony-chaudhary/fak/issues/9513#issuecomment-5859213748) withdrew physical-parity credit; [the correction](https://github.com/anthony-chaudhary/fak/issues/9513#issuecomment-5859310346) retains the packet as validator/delivery evidence pending a real-process rerun.
 
-Because baseline single-stream execution is at parity, the $4\times$ reduction in redundant prefill compute
-and memory bandwidth delivered by in-kernel **RadixAttention shared-prefix caching** + **Metal co-batching**
-translates into an unambiguous throughput advantage over `llama.cpp`.
+The projection assumes the stated single-stream rates and prefix-sharing behavior. A reduction in redundant prefill work does not by itself establish an end-to-end throughput advantage over `llama.cpp`; that requires a physical multi-turn comparison.
 
 Following calibration in **#11855** (which eliminated unphysical queue-wait double-counting and an unevidenced 600s slot contention penalty from the reference arm) and **#11860** (acceptance gate calibration), the model projects an honest **calibrated 1.86× wall-clock speedup (393.8 s vs 732.2 s; 13.00 vs 6.99 effective tok/s)** at 4k prefix ($K=4, H=20$), scaling to **~2.51× wall-clock speedup (566.0 s vs 1,421.3 s; 9.05 vs 3.60 effective tok/s)** at 20k context.
 
@@ -61,13 +58,13 @@ Following calibration in **#11855** (which eliminated unphysical queue-wait doub
 | **Peak Memory Footprint** | **21.69 GiB** (22,208 MB) | 24.69 GiB (25,280 MB) | **3,072 MB (3.00 GiB) memory saved** |
 | **Memory Density** | **0.18 agents/GB** | 0.16 agents/GB | Higher concurrency headroom |
 
-### Three-Column Contrast: Physically Measured vs Modeled vs Theoretical Ceiling
+### Three-Column Contrast: Simulated Inputs vs Modeled Outputs vs Theoretical Ceiling
 
-| Real Measured Baseline (`WITNESSED`) | Modeled Projection (`MODELED`) | Theoretical Physical Ceiling (`ROOFLINE`) |
+| Simulated Input (`SIMULATED`) | Modeled Projection (`MODELED`) | Theoretical Physical Ceiling (`ROOFLINE`) |
 |---|---|---|
-| **7.61 tok/s** decode (Issue #2723, M3 Pro physical run) | **393.8 s** total session wall-clock (**1.86× vs llama.cpp**) | **9.68 tok/s** single-stream (150 GB/s bus saturation) |
-| **48.54 tok/s** prefill (Issue #2723 physical run) | **13.00 tok/s** effective multi-agent throughput | **23.8 tok/s** batched decode (B=4 memory amortized) |
-| **12.60 ms** Radix TTFT (Issue #2723 prefix cache hit) | **12.6 ms** flat TTFT maintained over 20 turns | **0.0 ms** (instant memory pointer bind) |
+| **7.61 tok/s** decode (Issue #2723 fixture) | **393.8 s** total session wall-clock (**1.86× vs llama.cpp**) | **9.68 tok/s** single-stream (150 GB/s bus saturation) |
+| **48.54 tok/s** prefill (Issue #2723 fixture) | **13.00 tok/s** effective multi-agent throughput | **23.8 tok/s** batched decode (B=4 memory amortized) |
+| **12.60 ms** Radix TTFT (Issue #2723 fixture cache hit) | **12.6 ms** flat TTFT maintained over 20 turns | **0.0 ms** (instant memory pointer bind) |
 
 ### Mandatory Six Unmodeled Effects
 

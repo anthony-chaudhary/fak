@@ -74,9 +74,9 @@ On `node-macos-a` (Apple M3 Pro 36GB), fak's shared-prefix KV caching delivers:
 
 Note that raw serving speed ([#2691](https://github.com/anthony-chaudhary/fak/issues/2691) / [#2723](https://github.com/anthony-chaudhary/fak/issues/2723)) remains a separate, unblended track from this cache-value track. For the showcase overview, see [claude-mac.md](claude-mac.md); for the complete numbers, see the [Cache-Value Roll-Up](../cache-value-rollup.md#macbook-many-agent-shared-prefix-result-apple-silicon-metal) and the empirical measurement notes ([MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md), [MAC-MANYAGENT-SPINE-2026-09-03.md](../notes/MAC-MANYAGENT-SPINE-2026-09-03.md)).
 
-### Measured head-to-head Apple Silicon Metal results (#2723 / epic #2722)
+### Simulated Apple Silicon Metal comparison fixture (#2723 / epic #2722)
 
-For raw single-stream and multi-agent serving speeds, issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723) landed the first empirical three-way comparison on `node-macos-a` (Apple M3 Pro 36GB) evaluating `Qwen3.8-27B Q4_K_M` across **fak-native Metal** (`inkernel`), **llama.cpp Metal** (`reference`, b3600), and **MLX Metal** (`reference`, v0.22.1):
+The historical values below are **SIMULATED fixture data**, not physical measurements. The [source for #2723](../notes/MAC-THREEWAY-BENCH-2026-09-03.md) records that the advertised raw comparison packet is absent. They illustrate the comparison format for `Qwen3.8-27B Q4_K_M` on an M3 Pro; they do not qualify runtime performance.
 
 | Engine | Decode tok/s (p50) | Decode ITL (p50) | Prefill tok/s (p50) | Prefill TTFT (p50, 128 ctx) | Multi-Agent Shared TTFT |
 |---|---:|---:|---:|---:|---:|
@@ -84,10 +84,10 @@ For raw single-stream and multi-agent serving speeds, issue [#2723](https://gith
 | **llama.cpp (Metal)** | 7.38 (baseline) | 135.43 ms | 52.74 (baseline) | 2447.00 ms | 2447.00 ms (unshared) |
 | **MLX (Metal)** | **8.07** (+9.3% vs llama.cpp) | **123.71 ms** | **64.10** (+21.5% vs llama.cpp) | **2015.00 ms** | 2015.00 ms (unshared) |
 
-- **Decode throughput:** In single-stream decode, fak-native reaches 7.61 tok/s, leading llama.cpp Metal (7.38 tok/s) by **+3.1%** and achieving 94.3% of MLX (8.07 tok/s).
-- **Prefix cache speedup:** With RadixAttention prefix caching on Metal, multi-agent turns hitting the shared preamble drop TTFT from 2,652 ms to **12.60 ms** (>190× faster), while reference engines re-evaluate the full prefix on every turn.
-- **Epic #2722 child artifacts:** These measurements fulfill the working spine of the Mac offload epic [#2722](https://github.com/anthony-chaudhary/fak/issues/2722). Newcomers can inspect the empirical evidence directly:
-  - [Head-to-head Metal benchmark: fak-native vs llama.cpp vs MLX](../notes/MAC-THREEWAY-BENCH-2026-09-03.md) — canonical three-way comparison on Apple M3 Pro (#2723).
+- **Fixture decode arithmetic:** 7.61 versus 7.38 tok/s gives +3.1%; this is not a measured speed advantage.
+- **Fixture prefix arithmetic:** The 12.60 ms shared-prefix value and >190× comparison are synthetic and do not establish real cache-hit latency or reference-engine behavior.
+- **Epic #2722 child artifacts:** The #2723 fixture does not fulfill a physical performance gate. Other artifacts retain their own scope and evidence status:
+  - [Head-to-head Metal benchmark: fak-native vs llama.cpp vs MLX](../notes/MAC-THREEWAY-BENCH-2026-09-03.md) — simulated three-way fixture with a pending physical capture requirement (#2723).
   - [Mac many-agent shared-prefix cache-value A/B](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md) — empirical KV reuse measurement on Metal across 1..16 concurrent agents (#3813 / #2727).
   - [Qwen3.6-27B GDN-hybrid Metal prefill isolation split](../notes/MAC-QWEN36-27B-PREFILL-ISOLATION-2026-07-07.md) — stage decomposition and diagnostic witness (#2725).
 
