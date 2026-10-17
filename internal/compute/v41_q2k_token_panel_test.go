@@ -243,7 +243,7 @@ func v41Q2TokenGridNativeSource(source string) error {
 		}
 		native = strings.Replace(native, replacement[0], replacement[1], 1)
 	}
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(native))); got != "226a83ea071cc8fcc29e7b7d174b28b1da10ccf595bca597056c9dd4b31c1e6d" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(native))); got != "f9b5272a969e7d43a1189592145941692277bd572ba5fd8013c5033a5878d8fd" {
 		return fmt.Errorf("native Q2 availability/storage/state contract changed: %s", got)
 	}
 	return nil

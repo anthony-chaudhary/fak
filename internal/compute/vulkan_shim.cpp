@@ -3632,6 +3632,12 @@ int fvk_device_drm_render_node(uint64_t* major, uint64_t* minor) {
 #endif
 }
 
+// V4.1 token panels are default-on: exactly "0" is each family's off switch.
+static bool v41TokenPanelEnvEnabled(const char* name) {
+    const char* value = std::getenv(name);
+    return !(value && value[0] == '0' && value[1] == '\0');
+}
+
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // A re-init is not a device teardown and cannot establish quiescence. Keep
     // the poisoned context and its loaded capability bound until process exit.
@@ -4067,17 +4073,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         buildKernel(g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID], P("v41_routed_gate_up_swiglu_id.spv"), 20, 20)) {
         buildKernel(g_kern[K_V41_ROUTED_DOWN_SUM], P("v41_routed_down_sum.spv"), 12, 16);
     }
-    // Experimental token tiles require an exact opt-in before initialization.
-    // Q3 accepts its independent opt-in or the legacy Q2 opt-in; Q3 alone must
-    // not build Q2. Missing optional modules leave the existing paths alone.
-    const char* q2TokenEnv = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
-    const char* q3TokenEnv = std::getenv("FAK_V41_Q3K_TOKEN_PANEL");
-    const bool q2TokenOptedIn = q2TokenEnv && q2TokenEnv[0] == '1' && q2TokenEnv[1] == '\0';
-    const bool q3TokenOptedIn = q3TokenEnv && q3TokenEnv[0] == '1' && q3TokenEnv[1] == '\0';
-    if (q2TokenOptedIn && g_v41IndexerFloatControls) {
+    // Token tiles are default-on and built before first use; each family's
+    // exact "0" skips only its own pipeline. Missing optional modules leave
+    // the existing paths alone.
+    const bool q2TokenEnabled = v41TokenPanelEnvEnabled("FAK_V41_Q2K_TOKEN_PANEL");
+    const bool q3TokenEnabled = v41TokenPanelEnvEnabled("FAK_V41_Q3K_TOKEN_PANEL");
+    if (q2TokenEnabled && g_v41IndexerFloatControls) {
         buildKernel(g_kern[K_V41_Q2K_TOKEN_PANEL], P("v41_q2k_token_panel.spv"), 3, 12);
     }
-    if ((q2TokenOptedIn || q3TokenOptedIn) && g_v41IndexerFloatControls) {
+    if (q3TokenEnabled && g_v41IndexerFloatControls) {
         buildKernel(g_kern[K_V41_Q3K_TOKEN_PANEL], P("v41_q3k_token_panel.spv"), 3, 12);
     }
     const char* q2PairEnv = std::getenv("FAK_V41_Q2K_TOKEN_PAIR");
@@ -6849,8 +6853,7 @@ int fvk_v41_q2k_token_pair_f32(const void* dG, const void* dU, const void* dX, v
 }
 
 int fvk_have_v41_q2k_token_panel(void) {
-    const char* enabled = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
-    return enabled && enabled[0] == '1' && enabled[1] == '\0' && g_ready && g_v41IndexerFloatControls &&
+    return v41TokenPanelEnvEnabled("FAK_V41_Q2K_TOKEN_PANEL") && g_ready && g_v41IndexerFloatControls &&
         g_kern[K_V41_Q2K_TOKEN_PANEL].pipe != VK_NULL_HANDLE && g_kern[K_V41_Q2K_TOKEN_PANEL].nbuf == 3;
 }
 
@@ -6889,11 +6892,7 @@ int fvk_v41_q2k_token_panel_f32(const void* dW, const void* dX, void* dY, int ou
 }
 
 int fvk_have_v41_q3k_token_panel(void) {
-    const char* q2Enabled = std::getenv("FAK_V41_Q2K_TOKEN_PANEL");
-    const char* q3Enabled = std::getenv("FAK_V41_Q3K_TOKEN_PANEL");
-    return ((q2Enabled && q2Enabled[0] == '1' && q2Enabled[1] == '\0') ||
-            (q3Enabled && q3Enabled[0] == '1' && q3Enabled[1] == '\0')) &&
-        g_ready && g_v41IndexerFloatControls &&
+    return v41TokenPanelEnvEnabled("FAK_V41_Q3K_TOKEN_PANEL") && g_ready && g_v41IndexerFloatControls &&
         g_kern[K_V41_Q3K_TOKEN_PANEL].pipe != VK_NULL_HANDLE && g_kern[K_V41_Q3K_TOKEN_PANEL].nbuf == 3;
 }
 

@@ -8,8 +8,8 @@ import (
 // V41Q3KTokenPanelBackend contracts several rows through ONE expert's packed
 // Q3_K matrix. It is separate from the routed-ID ABI: tokens share a weight,
 // rather than selecting independent weights from an eight-slot table.
-// Availability is experimental and default-off. FAK_V41_Q3K_TOKEN_PANEL=1
-// opts into Q3 panels independently; the legacy Q2 flag still enables both.
+// Availability is default-on. FAK_V41_Q3K_TOKEN_PANEL=0 turns Q3 panels off
+// and FAK_V41_Q2K_TOKEN_PANEL=0 turns Q2 panels off, independently.
 // This applies to every eligible Q3 panel caller, not only expert down.
 // A selected error is fatal;
 // callers may choose their scalar arm only before calling the contraction.
@@ -22,10 +22,20 @@ type V41Q3KTokenPanelBackend interface {
 	V41Q3KTokenPanel(weight, input Tensor, rows int) (Tensor, error)
 }
 
-func v41Q3KTokenPanelOptedIn() bool {
-	// Keep exact legacy "1" semantics. Q3=0 must not veto Q2=1, and this
-	// separate Q3 request never enables the Q2 panel family.
-	return os.Getenv("FAK_V41_Q3K_TOKEN_PANEL") == "1" || os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") == "1"
+// v41TokenPanelEnvEnabled is the default-on panel policy: unset or any value
+// other than exactly "0" enables the family.
+func v41TokenPanelEnvEnabled(name string) bool {
+	return os.Getenv(name) != "0"
+}
+
+func v41Q2KTokenPanelEnabled() bool {
+	return v41TokenPanelEnvEnabled("FAK_V41_Q2K_TOKEN_PANEL")
+}
+
+// Q2 no longer gates Q3: with both families default-on, the legacy Q2 flag
+// adds nothing, and only an explicit Q3=0 turns Q3 panels off.
+func v41Q3KTokenPanelEnabled() bool {
+	return v41TokenPanelEnvEnabled("FAK_V41_Q3K_TOKEN_PANEL")
 }
 
 // V41Q3KTokenPanelPlan is the exact three-int32 push ABI and bounded storage

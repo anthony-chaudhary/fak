@@ -19,13 +19,18 @@ import (
 )
 
 // fak-test:runtime fast est=10ms
+// Each family is on unless its own variable is exactly "0"; the other
+// family's value never changes the answer.
 func TestV41Q3KTokenPanelOptIn(t *testing.T) {
-	for _, q2 := range []string{"", "0", "1", "true", " 1", "1 "} {
-		for _, q3 := range []string{"", "0", "1", "true", " 1", "1 "} {
+	for _, q2 := range []string{"", "0", "1", "true", " 0", "0 ", "00"} {
+		for _, q3 := range []string{"", "0", "1", "true", " 0", "0 ", "00"} {
 			t.Setenv("FAK_V41_Q2K_TOKEN_PANEL", q2)
 			t.Setenv("FAK_V41_Q3K_TOKEN_PANEL", q3)
-			if got, want := v41Q3KTokenPanelOptedIn(), q2 == "1" || q3 == "1"; got != want {
-				t.Fatalf("Q2=%q Q3=%q: got %v want %v", q2, q3, got, want)
+			if got, want := v41Q2KTokenPanelEnabled(), q2 != "0"; got != want {
+				t.Fatalf("Q2 gate Q2=%q Q3=%q: got %v want %v", q2, q3, got, want)
+			}
+			if got, want := v41Q3KTokenPanelEnabled(), q3 != "0"; got != want {
+				t.Fatalf("Q3 gate Q2=%q Q3=%q: got %v want %v", q2, q3, got, want)
 			}
 		}
 	}
@@ -50,8 +55,8 @@ func TestV41Q3KTokenPanelOptInSource(t *testing.T) {
 		index     int
 		condition string
 	}{
-		"SupportsV41Q3KTokenPanel": {0, "v == nil || !v41Q3KTokenPanelOptedIn() || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2"},
-		"V41Q3KTokenPanel":         {3, "v == nil || !v41Q3KTokenPanelOptedIn()"},
+		"SupportsV41Q3KTokenPanel": {0, "v == nil || !v41Q3KTokenPanelEnabled() || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2"},
+		"V41Q3KTokenPanel":         {3, "v == nil || !v41Q3KTokenPanelEnabled()"},
 	}
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -85,8 +90,9 @@ func TestV41Q3KTokenPanelOptInSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(q2), "FAK_V41_Q3K_TOKEN_PANEL") || strings.Contains(string(q2), "v41Q3KTokenPanelOptedIn") || strings.Count(string(q2), `os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") != "1"`) != 2 {
-		t.Fatal("Q2 must retain its exclusive legacy policy")
+	if strings.Contains(string(q2), "FAK_V41_Q3K_TOKEN_PANEL") || strings.Contains(string(q2), "v41Q3KTokenPanelEnabled") ||
+		strings.Contains(string(q2), "os.Getenv") || strings.Count(string(q2), "!v41Q2KTokenPanelEnabled()") != 2 {
+		t.Fatal("Q2 must keep its own single shared policy in both native guards")
 	}
 }
 
@@ -312,7 +318,7 @@ func v41Q3TokenGridNativeSource(source string) error {
 		}
 		native = strings.Replace(native, replacement[0], replacement[1], 1)
 	}
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(native))); got != "2a20749e4a80d35419135a616cdd17375aa3fb4245ec6a44d10b4f16d43e291b" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(native))); got != "692317643d96b4d6881618ffca525d569b7ac87075cd2f0c5edea15b8f4cf0bd" {
 		return fmt.Errorf("native Q3 availability/storage/state contract changed: %s", got)
 	}
 	return nil

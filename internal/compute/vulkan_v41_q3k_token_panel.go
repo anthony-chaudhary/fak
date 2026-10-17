@@ -9,10 +9,10 @@ import "C"
 
 var _ V41Q3KTokenPanelBackend = (*vulkanBackend)(nil)
 
-// The candidate accepts an independent Q3 or legacy Q2 opt-in and needs a live optional V19
+// The candidate is default-on unless FAK_V41_Q3K_TOKEN_PANEL=0 and needs a live optional V19
 // pipeline. A missing module leaves the historical scalar/batched path alone.
 func (v *vulkanBackend) SupportsV41Q3KTokenPanel(weight Tensor, rows int) bool {
-	if v == nil || !v41Q3KTokenPanelOptedIn() || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2 {
+	if v == nil || !v41Q3KTokenPanelEnabled() || weight.Dtype != Q3_K || weight.Layout != RowMajor || len(weight.Shape) != 2 {
 		return false
 	}
 	plan, err := PlanV41Q3KTokenPanel(weight.Shape[0], weight.Shape[1], rows)
@@ -32,8 +32,8 @@ func (v *vulkanBackend) V41Q3KTokenPanel(weight, input Tensor, rows int) (out Te
 	if invalid != nil {
 		return Tensor{}, vulkanV41RoutedIDError(site, 2, invalid.Error())
 	}
-	if v == nil || !v41Q3KTokenPanelOptedIn() {
-		return Tensor{}, vulkanV41RoutedIDError(site, 3, "experimental token panel is not enabled")
+	if v == nil || !v41Q3KTokenPanelEnabled() {
+		return Tensor{}, vulkanV41RoutedIDError(site, 3, "token panel is disabled by FAK_V41_Q3K_TOKEN_PANEL=0")
 	}
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
