@@ -383,25 +383,28 @@ func (s *Server) logGatewayOperation(operation, traceID, tool string, v WireVerd
 	if opErr != nil && verdict == "" {
 		verdict = "ERROR"
 	}
-	ev := map[string]any{
-		"event":       "gateway_operation",
-		"operation":   operation,
-		"tool":        tool,
-		"trace_id":    strings.TrimSpace(traceID),
-		"verdict":     verdict,
-		"duration_ms": float64(dur.Microseconds()) / 1000.0,
-	}
-	if v.Reason != "" {
-		ev["reason"] = v.Reason
-	}
-	if v.By != "" {
-		ev["by"] = v.By
-	}
-	if v.Disposition != "" {
-		ev["disposition"] = v.Disposition
+	// Declaration order matches encoding/json's sorted legacy map keys.
+	ev := struct {
+		By          string  `json:"by,omitempty"`
+		Disposition string  `json:"disposition,omitempty"`
+		DurationMS  float64 `json:"duration_ms"`
+		Error       *string `json:"error,omitempty"`
+		Event       string  `json:"event"`
+		Operation   string  `json:"operation"`
+		Reason      string  `json:"reason,omitempty"`
+		Tool        string  `json:"tool"`
+		TraceID     string  `json:"trace_id"`
+		Verdict     string  `json:"verdict"`
+	}{
+		By: v.By, Disposition: v.Disposition,
+		DurationMS: float64(dur.Microseconds()) / 1000.0,
+		Event:      "gateway_operation", Operation: operation, Reason: v.Reason,
+		Tool: tool, TraceID: strings.TrimSpace(traceID), Verdict: verdict,
 	}
 	if opErr != nil {
-		ev["error"] = opErr.Error()
+		// A nonnil error with an empty message still emits the error key.
+		message := opErr.Error()
+		ev.Error = &message
 	}
 	b, err := json.Marshal(ev)
 	if err != nil {
