@@ -7,6 +7,7 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // gathers are fresh device copies, not aliases or host readbacks. Native tile
 // availability includes its explicit opt-in; no additional default is enabled.
 type v41ExpertTile struct {
+	input    func(row, rows int) (compute.Tensor, error)
 	backend  compute.V41Q2KTokenPanelBackend
 	copies   compute.V41RowLogBackend
 	gateW    compute.Tensor
@@ -74,12 +75,22 @@ func (p *v41ExpertTile) project(s *Session, inputs [][]float32, row, hidden, int
 		if p.gridRows > 0 && len(inputs)-row == p.gridRows {
 			rows = p.gridRows
 		}
-		packed := make([]float32, rows*hidden)
-		for r := 0; r < rows; r++ {
-			copy(packed[r*hidden:(r+1)*hidden], inputs[row+r])
+		var x compute.Tensor
+		var inputErr error
+		if p.input != nil {
+			x, inputErr = p.input(row, rows)
+		} else {
+			packed := make([]float32, rows*hidden)
+			for r := 0; r < rows; r++ {
+				copy(packed[r*hidden:(r+1)*hidden], inputs[row+r])
+			}
+			x = s.uploadHostF32([]int{len(packed)}, packed, compute.MemoryActivation, "V4.1 same-expert token tile")
 		}
-		x := s.uploadHostF32([]int{len(packed)}, packed, compute.MemoryActivation, "V4.1 same-expert token tile")
-		if !own(x) || !valid(x, len(packed)) {
+		fresh := own(x)
+		if inputErr != nil {
+			return gate, up, true, nil, nil, inputErr
+		}
+		if !fresh || !valid(x, rows*hidden) {
 			return gate, up, true, nil, nil, errV41ExpertResult
 		}
 		project := func(weight compute.Tensor) (compute.Tensor, error) {

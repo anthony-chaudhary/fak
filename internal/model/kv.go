@@ -22,6 +22,7 @@ type Session struct {
 	// Public entrypoints acquire their domain regardless of this binding.
 	backendExecutionScope *backendExecutionScope
 	// One active cold grouped layer; drained before any selected retirement.
+	v41RoutedInputs     *v41RoutedInputOwner
 	v41RoutedOutputs    *v41RoutedOutputOwner
 	cacheGeometryMu     sync.RWMutex
 	cacheGeometryFailed bool

@@ -20,6 +20,13 @@ func (s *Session) v41RoutedExpertCohort(layer int, stem string, inputs [][]float
 // A retained call transfers only checked publications. The layer owner remains
 // responsible even if a later cohort-temporary or weight-release cleanup fails.
 func (s *Session) v41RoutedExpertCohortRetained(layer int, stem string, inputs [][]float32, weights []float32, handoff *v41RoutedOutputHandoff) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
+	return s.v41RoutedExpertCohortInputs(layer, stem, inputs, weights, handoff, nil)
+}
+
+func (s *Session) v41RoutedExpertCohortInputs(layer int, stem string, inputs [][]float32, weights []float32, handoff *v41RoutedOutputHandoff, input *v41RoutedInputHandoff) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
+	if input != nil && !input.valid(s, layer, inputs) {
+		return nil, v41RoutedExpertDeclined, nil
+	}
 	if handoff != nil && (!handoff.owner.live() || handoff.owner.session != s || handoff.owner.layer != layer || len(handoff.rows) != len(inputs)) {
 		return nil, v41RoutedExpertDeclined, nil
 	}
@@ -108,7 +115,7 @@ func (s *Session) v41RoutedExpertCohortRetained(layer int, stem string, inputs [
 	defer releaseDown()
 	outcome = v41RoutedExpertError
 	recordingFailed := false
-	result, cause = s.v41RunExpertCohortRetained(deferred, gate, up, down, inputs, weights, float32(s.M.Cfg.SwigluLimit), layer, &stage, &recordingFailed, nil, handoff)
+	result, cause = s.v41RunExpertCohortInputs(deferred, gate, up, down, inputs, weights, float32(s.M.Cfg.SwigluLimit), layer, &stage, &recordingFailed, nil, handoff, input)
 	if cause != nil {
 		var numeric *V41ExpertOperationError
 		if !errors.As(cause, &numeric) {
@@ -147,9 +154,16 @@ func (s *Session) v41RunExpertCohortSelected(deferred compute.V41DeferredStatusB
 }
 
 func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool, options *v41ExpertCohortOptions, handoff *v41RoutedOutputHandoff) (result [][]float32, cause error) {
+	return s.v41RunExpertCohortInputs(deferred, gateW, upW, downW, inputs, weights, limit, layer, stage, recordingFailed, options, handoff, nil)
+}
+
+func (s *Session) v41RunExpertCohortInputs(deferred compute.V41DeferredStatusBackend, gateW, upW, downW compute.Tensor, inputs [][]float32, weights []float32, limit float32, layer int, stage *string, recordingFailed *bool, options *v41ExpertCohortOptions, handoff *v41RoutedOutputHandoff, input *v41RoutedInputHandoff) (result [][]float32, cause error) {
 	H, I, count := s.M.Cfg.HiddenSize, s.M.Cfg.MoEIntermediateSize, len(inputs)
 	if handoff != nil && (options != nil || !handoff.owner.live() || handoff.owner.session != s ||
 		handoff.owner.layer != layer || handoff.owner.width != H || handoff.owner.inner != I || handoff.owner.limit != limit || len(handoff.rows) != count) {
+		return nil, errV41ExpertResult
+	}
+	if input != nil && (options != nil || !input.valid(s, layer, inputs)) {
 		return nil, errV41ExpertResult
 	}
 	owners := count
@@ -199,11 +213,18 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 		return t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && len(t.Shape) == 1 && t.Shape[0] == n
 	}
 	own := func(t compute.Tensor) bool {
-		if t.Buf() == nil || t.Backend() != gateW.Backend() || seen[t.Buf()] || handoff != nil && handoff.owner.owns(t.Buf()) {
+		if t.Buf() == nil || t.Backend() != gateW.Backend() || seen[t.Buf()] || s.v41RoutedInputs.owns(t.Buf()) || handoff != nil && handoff.owner.owns(t.Buf()) {
 			return false
 		}
 		seen[t.Buf()] = true
 		owned[current] = append(owned[current], t)
+		return true
+	}
+	borrow := func(t compute.Tensor) bool {
+		if t.Buf() == nil || t.Backend() != gateW.Backend() || seen[t.Buf()] || handoff != nil && handoff.owner.owns(t.Buf()) {
+			return false
+		}
+		seen[t.Buf()] = true
 		return true
 	}
 	// Chunk output/status allocations belong to the chunk-start row. Their
@@ -311,6 +332,10 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 			if current == groupEnd {
 				groupStart, groupEnd, chunkStart = current, options.tileEnd(current, count), current
 				tile = newV41ExpertTile(s.Backend, gate, up, groupEnd-groupStart)
+				if tile != nil && input != nil {
+					start := groupStart
+					tile.input = func(row, rows int) (compute.Tensor, error) { return input.gather(start+row, rows, borrow) }
+				}
 				downTile = newV41ExpertDownTile(s.Backend, down, groupEnd-groupStart)
 				if options == nil && downTile != nil {
 					tile.qualifyColdGrid(groupEnd - groupStart)
@@ -339,8 +364,18 @@ func (s *Session) v41RunExpertCohortRetained(deferred compute.V41DeferredStatusB
 					x = uploads[options.inputKeys[current]]
 				}
 				if x.Buf() == nil {
-					x = s.uploadHostF32([]int{H}, inputs[current], compute.MemoryActivation, "moe expert gate/up activation")
-					if !own(x) || !valid(x, H) {
+					var inputErr error
+					if input != nil {
+						x, inputErr = input.gather(current, 1, borrow)
+					} else {
+						x = s.uploadHostF32([]int{H}, inputs[current], compute.MemoryActivation, "moe expert gate/up activation")
+					}
+					fresh := own(x)
+					if inputErr != nil {
+						cause = inputErr
+						break
+					}
+					if !fresh || !valid(x, H) {
 						cause = errV41ExpertResult
 						break
 					}
@@ -662,4 +697,187 @@ func v41CohortHostRow(row []float32, independent bool) []float32 {
 		return row
 	}
 	return append([]float32(nil), row...)
+}
+
+// The first candidate admits one bounded cold panel. Larger prompts retain the
+// historical route; no cache or device tensor survives this grouped layer.
+const (
+	v41RoutedInputMaxBytes = 30 << 20
+	v41RoutedInputMaxRows  = 1536
+)
+
+type v41RoutedInputOwner struct {
+	session      *Session
+	model        *Model
+	backend      compute.Backend
+	scope        *backendExecutionScope
+	layer, width int
+	inputs       [][]float32
+	copies       compute.V41RowLogBackend
+	tensor       compute.Tensor
+	closed       bool
+}
+
+func newV41RoutedInputOwner(s *Session, layer int, inputs [][]float32) *v41RoutedInputOwner {
+	if s == nil || s.M == nil || s.Backend == nil || !backendHasComparableIdentity(s.Backend) || s.v41RoutedInputs != nil || s.halClosed || s.halFailure != nil || len(inputs) < 2 || len(inputs) > v41RoutedInputMaxRows || layer < 0 || layer >= s.M.Cfg.NumLayers {
+		return nil
+	}
+	scope := s.backendExecutionScope
+	if scope == nil || !scope.live || scope.owner == nil || backendExecutionOwner(s.Backend) != scope.owner {
+		return nil
+	}
+	width := s.M.Cfg.HiddenSize
+	if width <= 0 || width > v41RoutedInputMaxBytes/4/len(inputs) {
+		return nil
+	}
+	copies, ok := s.Backend.(compute.V41RowLogBackend)
+	if !ok || !copies.V41RowLogAvailable() {
+		return nil
+	}
+	for _, row := range inputs {
+		if len(row) != width || !v41BF16Widened(row) {
+			return nil
+		}
+	}
+	o := &v41RoutedInputOwner{session: s, model: s.M, backend: s.Backend, scope: scope, layer: layer, width: width, inputs: inputs, copies: copies}
+	s.v41RoutedInputs = o
+	return o
+}
+
+func (o *v41RoutedInputOwner) live() bool {
+	return o != nil && !o.closed && o.session.v41RoutedInputs == o && o.session.M == o.model && o.session.Backend == o.backend && o.session.backendExecutionScope == o.scope && o.scope.live && !o.session.halClosed && o.session.halFailure == nil && o.model.Cfg.HiddenSize == o.width
+}
+func (o *v41RoutedInputOwner) owns(buf compute.Buffer) bool {
+	return o != nil && buf != nil && o.tensor.Buf() == buf
+}
+
+type v41RoutedInputHandoff struct {
+	owner *v41RoutedInputOwner
+	rows  []v41ExpertRow
+}
+
+func (o *v41RoutedInputOwner) handoff(rows []v41ExpertRow) *v41RoutedInputHandoff {
+	if o == nil {
+		return nil
+	}
+	return &v41RoutedInputHandoff{owner: o, rows: rows}
+}
+func (h *v41RoutedInputHandoff) valid(s *Session, layer int, inputs [][]float32) bool {
+	if h == nil || !h.owner.live() || h.owner.session != s || h.owner.layer != layer || len(h.rows) != len(inputs) {
+		return false
+	}
+	for i, row := range h.rows {
+		if row.Token < 0 || row.Token >= len(h.owner.inputs) || len(inputs[i]) != h.owner.width || &inputs[i][0] != &h.owner.inputs[row.Token][0] {
+			return false
+		}
+	}
+	return true
+}
+
+// claim excludes weight/output aliases before ownership moves to the layer.
+// The gather allocation belongs to the calling row even on a selected error.
+func (h *v41RoutedInputHandoff) gather(first, count int, claim func(compute.Tensor) bool) (compute.Tensor, error) {
+	o := h.owner
+	if !o.live() || first < 0 || count <= 0 || first > len(h.rows)-count {
+		return compute.Tensor{}, errV41ExpertResult
+	}
+	if o.tensor.Buf() == nil {
+		packed := make([]float32, len(o.inputs)*o.width)
+		for i, row := range o.inputs {
+			copy(packed[i*o.width:(i+1)*o.width], row)
+		}
+		t := o.session.uploadHostF32([]int{len(o.inputs), o.width}, packed, compute.MemoryActivation, "V4.1 layer routed input")
+		if !claim(t) {
+			return compute.Tensor{}, errV41ExpertResult
+		}
+		o.tensor = t
+		if t.Dtype != compute.F32 || t.Layout != compute.RowMajor || t.Quant != nil || len(t.Shape) != 2 || t.Shape[0] != len(o.inputs) || t.Shape[1] != o.width {
+			return compute.Tensor{}, errV41ExpertResult
+		}
+	}
+	spans := make([]compute.V41RowSpan, count)
+	for i, row := range h.rows[first : first+count] {
+		spans[i] = compute.V41RowSpan{Src: o.tensor, Row: row.Token, Rows: 1}
+	}
+	x, err := o.copies.V41RowLogGather(spans, o.width)
+	if err != nil {
+		return x, err
+	}
+	if len(x.Shape) != 2 || x.Shape[0] != count || x.Shape[1] != o.width {
+		return x, errV41ExpertResult
+	}
+	x.Shape = []int{count * o.width}
+	return x, nil
+}
+
+// Detach before invoking backend code. A single buffer needs one release even
+// when Free panics; selected retirement and normal layer finish are idempotent.
+func (o *v41RoutedInputOwner) release() (cleanup v41RoutedOutputCleanup) {
+	if o == nil || o.closed {
+		return cleanup
+	}
+	o.closed = true
+	if o.session.v41RoutedInputs == o {
+		o.session.v41RoutedInputs = nil
+	}
+	t := o.tensor
+	o.tensor, o.inputs = compute.Tensor{}, nil
+	if t.Buf() == nil {
+		return cleanup
+	}
+	complete := false
+	defer func() {
+		p := recover()
+		if !complete {
+			cleanup = v41RoutedOutputCleanup{value: p, present: true}
+			// Goexit cannot return the cleanup receipt to finish/drain.
+			// The detached owner must retire while unwinding instead.
+			if p == nil {
+				if o.session.halFailure == nil {
+					o.session.halFailure = &BackendForwardOperationError{Backend: o.backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-input", Layer: o.layer, Stage: "cleanup", Cause: errors.New("model: incomplete routed input release")}
+				}
+				func() { defer func() { o.session.halClosed = true; _ = recover() }(); o.session.closeBackendOwned() }()
+			}
+		}
+	}()
+	o.backend.Free(t)
+	complete = true
+	return cleanup
+}
+
+func (o *v41RoutedInputOwner) finish(err *error, completed *bool) {
+	primary := recover()
+	cleanup := o.release()
+	if cleanup.present || !*completed {
+		cause := *err
+		known := true
+		if cause == nil {
+			if primary != nil {
+				cause = v41RoutedCohortUnknownPanic(primary)
+			} else if cleanup.present {
+				cause, known = v41RoutedCohortPanicCause(cleanup.value)
+				if !known {
+					cause = v41RoutedCohortUnknownPanic(cleanup.value)
+				}
+			} else {
+				cause = errors.New("model: incomplete routed input owner")
+			}
+		}
+		if o.session.halFailure == nil {
+			o.session.halFailure = &BackendForwardOperationError{Backend: o.backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-input", Layer: o.layer, Stage: "cleanup", Cause: cause}
+		}
+		func() { defer func() { o.session.halClosed = true; _ = recover() }(); o.session.closeBackendOwned() }()
+		if primary != nil {
+			panic(primary)
+		}
+		if *err == nil {
+			if cleanup.present && !known {
+				panic(cleanup.value)
+			}
+			*err = o.session.halFailure
+		}
+	}
+	if primary != nil {
+		panic(primary)
+	}
 }

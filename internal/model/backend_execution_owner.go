@@ -184,6 +184,20 @@ func (s *Session) closeBackendOwned() {
 		(scope == nil || !scope.live || scope.owner != owner) {
 		panic("model: selected teardown has no matching execution scope")
 	}
+	if s.v41RoutedInputs != nil {
+		o := s.v41RoutedInputs
+		if cleanup := o.release(); cleanup.present && s.halFailure == nil {
+			cause, known := v41RoutedCohortPanicCause(cleanup.value)
+			if !known {
+				cause = v41RoutedCohortUnknownPanic(cleanup.value)
+			}
+			s.halFailure = &BackendForwardOperationError{Backend: o.backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-input", Layer: o.layer, Stage: "cleanup", Cause: cause}
+			if known {
+				cleanup.value = s.halFailure
+			}
+			defer func() { panic(cleanup.value) }()
+		}
+	}
 	if cleanup := s.drainV41RoutedOutputs(); cleanup.present {
 		// A cleanup-only failure escapes after teardown. An existing selected
 		// primary stays authoritative; the drain has already attempted all rows.

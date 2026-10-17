@@ -203,6 +203,11 @@ func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTo
 			defer resident.finish(&err, &completed)
 		}
 	}
+	if full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m && cfg.HiddenSize == m.Cfg.HiddenSize && !v41PrefillExpertPanelOptedIn() {
+		if inputs := newV41RoutedInputOwner(st.callbackOwner, l, xnByToken); inputs != nil {
+			defer inputs.finish(&err, &completed)
+		}
+	}
 	err = m.v41ContractRoutedGroupedOwned(l, xnByToken, perTokenPicks, scratch, cfg, out, st, freshOutput, full, resident)
 	completed = true
 	return err
@@ -268,7 +273,7 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 					inputs[p] = xnByToken[row.Token]
 					weights[p] = perTokenPicks[row.Token][row.Slot].weight
 				}
-				rows, outcome, cause := st.callbackOwner.v41RoutedExpertCohortRetained(l, stem, inputs, weights, resident.handoff(g.Rows[first:last]))
+				rows, outcome, cause := st.callbackOwner.v41RoutedExpertCohortInputs(l, stem, inputs, weights, resident.handoff(g.Rows[first:last]), st.callbackOwner.v41RoutedInputs.handoff(g.Rows[first:last]))
 				if outcome == v41RoutedExpertDeclined && !cohortHandled {
 					break
 				}
