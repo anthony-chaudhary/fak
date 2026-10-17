@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,8 +14,42 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/zaitask"
 )
 
+var (
+	errUsage          = errors.New("usage")
+	errUnsuitable     = errors.New("task not suitable for bounded GLM-5")
+	errFlashOnlyFlags = errors.New("flag requires the GLM-5.3-Flash model")
+)
+
+type classedError struct {
+	class error
+	msg   string
+}
+
+func (e classedError) Error() string { return e.msg }
+func (e classedError) Unwrap() error { return e.class }
+
 func main() {
-	fs := flag.NewFlagSet("zaitask", flag.ExitOnError)
+	err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv)
+	if err != nil && !errors.Is(err, errUsage) && !errors.Is(err, flag.ErrHelp) {
+		fmt.Fprintln(os.Stderr, "zaitask:", err)
+	}
+	os.Exit(exitCode(err))
+}
+
+func exitCode(err error) int {
+	switch {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+		return 0
+	case errors.Is(err, errUsage):
+		return 2
+	default:
+		return 1
+	}
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) error {
+	fs := flag.NewFlagSet("zaitask", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	model := fs.String("model", zaitask.DefaultModel, "Z.AI model")
 	base := fs.String("base-url", zaitask.DefaultBaseURL, "Z.AI API base URL (GLM-5.3-Flash resolves the direct general endpoint)")
 	reasoningEffort := fs.String("reasoning-effort", "max", "GLM-5.3-Flash reasoning effort: low, high, or max")
@@ -24,22 +59,27 @@ func main() {
 	jsonOut := fs.Bool("json", false, "emit content plus usage receipt as JSON")
 	taskClass := fs.String("task-class", "auto", "routing class: auto, light, gardening, tier3, hard, engineering, or apex")
 	force := fs.Bool("force", false, "run even when fleet classification says the task is unsuitable")
-	_ = fs.Parse(os.Args[1:])
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
 	prompt := strings.Join(fs.Args(), " ")
 	if prompt == "" {
-		raw, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20))
+		raw, err := io.ReadAll(io.LimitReader(stdin, 2<<20))
 		if err != nil {
-			fail(err)
+			return err
 		}
 		prompt = string(raw)
 	}
 	classification := zaitask.Classify(prompt, *taskClass)
 	if !classification.Suitable && !*force {
-		fail(fmt.Errorf("task is %s/tier%d, not suitable for bounded GLM-5: %s (use --force to override)", classification.Class, classification.TargetTier, classification.Reason))
+		return classedError{errUnsuitable, fmt.Sprintf("task is %s/tier%d, not suitable for bounded GLM-5: %s (use --force to override)", classification.Class, classification.TargetTier, classification.Reason)}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	client := zaitask.Client{BaseURL: *base, APIKey: os.Getenv("ZAI_API_KEY")}
+	client := zaitask.Client{BaseURL: *base, APIKey: getenv("ZAI_API_KEY")}
 	var got zaitask.Result
 	var err error
 	if *model == zaitask.GLM53FlashModel {
@@ -49,24 +89,21 @@ func main() {
 		})
 	} else {
 		if *stream || *reasoningEffort != "max" {
-			fail(fmt.Errorf("--stream and --reasoning-effort are supported only with --model %s", zaitask.GLM53FlashModel))
+			return classedError{errFlashOnlyFlags, "--stream and --reasoning-effort are supported only with --model " + zaitask.GLM53FlashModel}
 		}
 		got, err = client.Run(ctx, prompt, *model, *max)
 	}
 	if err != nil {
-		fail(err)
+		return err
 	}
 	if *jsonOut {
 		payload := struct {
 			zaitask.Result
 			Routing zaitask.Suitability `json:"routing"`
 		}{got, classification}
-		if err := json.NewEncoder(os.Stdout).Encode(payload); err != nil {
-			fail(err)
-		}
-		return
+		return json.NewEncoder(stdout).Encode(payload)
 	}
-	fmt.Print(got.Content)
+	fmt.Fprint(stdout, got.Content)
 	receipt := struct {
 		Model     string        `json:"model"`
 		Provider  string        `json:"provider"`
@@ -77,6 +114,6 @@ func main() {
 		LatencyMS int64         `json:"latency_ms"`
 	}{got.Model, got.Provider, got.Engine, got.FakNative, got.RequestID, got.Usage, got.LatencyMS}
 	raw, _ := json.Marshal(receipt)
-	fmt.Fprintf(os.Stderr, "\n[zaitask receipt] %s\n", raw)
+	fmt.Fprintf(stderr, "\n[zaitask receipt] %s\n", raw)
+	return nil
 }
-func fail(err error) { fmt.Fprintln(os.Stderr, "zaitask:", err); os.Exit(1) }
