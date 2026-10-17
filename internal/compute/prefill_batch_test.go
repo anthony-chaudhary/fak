@@ -491,3 +491,61 @@ func TestPrefillBatchValidation(t *testing.T) {
 		t.Error("expected error for Wq shape mismatch")
 	}
 }
+
+// TestVulkanDequantOnceEntrypointsRetired pins the fak#13875 removal so the latent
+// per-call weight trap cannot silently return. AttentionDequantOnce and
+// AttentionQuantizedKV had zero non-test callers and shared one per-KV scratchpad
+// cache keyed only on (nPos, format): a second layer at the same nPos would reuse
+// layer 0's dequantized K/V. The calibrated free-function pipeline
+// (NewVulkanKVScratchpad / ExecuteVulkanAttentionWithDequantOnce, pinned by
+// vulkan_kv_test.go) is kept; only the unowned backend entrypoints and their cache
+// were removed. This source contract runs without cgo or a Vulkan device.
+func TestVulkanDequantOnceEntrypointsRetired(t *testing.T) {
+	opsVulkan, err := os.ReadFile("vulkan_ops_vulkan.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops_vulkan.go: %v", err)
+	}
+	opsStr := string(opsVulkan)
+	for _, gone := range []string{
+		"func (v *vulkanBackend) AttentionDequantOnce(",
+		"func (v *vulkanBackend) AttentionQuantizedKV(",
+		"readHostF32Locked",
+	} {
+		if strings.Contains(opsStr, gone) {
+			t.Errorf("vulkan_ops_vulkan.go still declares retired entrypoint %q; the layer-shared scratchpad cache must not return without a per-layer parity test", gone)
+		}
+	}
+
+	kvVulkan, err := os.ReadFile("vulkan_kv_vulkan.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_kv_vulkan.go: %v", err)
+	}
+	kvStr := string(kvVulkan)
+	for _, gone := range []string{
+		"scratchpad *VulkanKVScratchpad",
+		"func (k *vulkanKV) InitScratchpad(",
+		"func (k *vulkanKV) EnsureScratchpad(",
+		"func (k *vulkanKV) ResetScratchpad(",
+	} {
+		if strings.Contains(kvStr, gone) {
+			t.Errorf("vulkan_kv_vulkan.go still declares retired per-KV scratchpad surface %q", gone)
+		}
+	}
+
+	// The dequant-once free-function pipeline must remain: it is the calibrated,
+	// test-pinned replacement for the retired entrypoints.
+	kvGo, err := os.ReadFile("vulkan_kv.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_kv.go: %v", err)
+	}
+	if !strings.Contains(string(kvGo), "func NewVulkanKVScratchpad(") {
+		t.Error("vulkan_kv.go lost NewVulkanKVScratchpad; the retired entrypoints were supposed to leave the calibrated pipeline intact")
+	}
+	opsGo, err := os.ReadFile("vulkan_ops.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops.go: %v", err)
+	}
+	if !strings.Contains(string(opsGo), "func ExecuteVulkanAttentionWithDequantOnce(") {
+		t.Error("vulkan_ops.go lost ExecuteVulkanAttentionWithDequantOnce; the retired entrypoints were supposed to leave the calibrated pipeline intact")
+	}
+}

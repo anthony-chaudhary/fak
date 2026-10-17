@@ -123,13 +123,12 @@ func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int
 }
 
 type vulkanKV struct {
-	be         *vulkanBackend
-	cfg        KVConfig
-	K          []vslice
-	Kraw       []vslice
-	V          []vslice
-	pos        []int
-	scratchpad *VulkanKVScratchpad
+	be   *vulkanBackend
+	cfg  KVConfig
+	K    []vslice
+	Kraw []vslice
+	V    []vslice
+	pos  []int
 }
 
 func (k *vulkanKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
@@ -332,62 +331,10 @@ func (k *vulkanKV) Clone() KVStore {
 func (k *vulkanKV) Free() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
-	if k.scratchpad != nil {
-		if k.scratchpad.DeviceBufK != nil {
-			if b, ok := k.scratchpad.DeviceBufK.(*vulkanBuf); ok && b != nil && b.ptr != nil {
-				C.fvk_free(b.ptr)
-			}
-			k.scratchpad.DeviceBufK = nil
-		}
-		if k.scratchpad.DeviceBufV != nil {
-			if b, ok := k.scratchpad.DeviceBufV.(*vulkanBuf); ok && b != nil && b.ptr != nil {
-				C.fvk_free(b.ptr)
-			}
-			k.scratchpad.DeviceBufV = nil
-		}
-		k.scratchpad = nil
-	}
 	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *vslice) {
 		d.releaseBacking()
 		d.len = 0
 	})
-}
-
-// InitScratchpad initializes or reconfigures the dequant-once scratchpad for this KV cache.
-func (k *vulkanKV) InitScratchpad(arch string, format QuantizedKVType, nPos int) (*VulkanKVScratchpad, error) {
-	vulkanMu.Lock()
-	defer vulkanMu.Unlock()
-	if k.scratchpad != nil && k.scratchpad.NumPos == nPos && k.scratchpad.Format == format {
-		k.scratchpad.ResetReuse()
-		return k.scratchpad, nil
-	}
-	if k.scratchpad != nil {
-		k.scratchpad.Free()
-		k.scratchpad = nil
-	}
-	sp, err := NewVulkanKVScratchpad(k.be, arch, format, nPos, k.cfg.NumKVHeads, k.cfg.HeadDim)
-	if err != nil {
-		return nil, err
-	}
-	k.scratchpad = sp
-	return sp, nil
-}
-
-// EnsureScratchpad returns the cached scratchpad or allocates a new one if dimensions or format changed.
-func (k *vulkanKV) EnsureScratchpad(arch string, format QuantizedKVType, nPos int) (*VulkanKVScratchpad, error) {
-	return k.InitScratchpad(arch, format, nPos)
-}
-
-// Scratchpad returns the currently allocated scratchpad, or nil if none.
-func (k *vulkanKV) Scratchpad() *VulkanKVScratchpad {
-	return k.scratchpad
-}
-
-// ResetScratchpad resets usage counters on the cached scratchpad.
-func (k *vulkanKV) ResetScratchpad() {
-	if k.scratchpad != nil {
-		k.scratchpad.ResetReuse()
-	}
 }
 
 func (k *vulkanKV) readVS(d *vslice) []float32 {
