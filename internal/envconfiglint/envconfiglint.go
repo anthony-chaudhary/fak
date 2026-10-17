@@ -3,9 +3,14 @@ package envconfiglint
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os/exec"
+	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -46,6 +51,49 @@ func ScanGoEnvReads(src string) []string {
 		}
 	}
 	return out
+}
+
+// scanComputeEnvReads recognizes the known package-local cache wrapper without
+// treating same-named helpers in other packages, selectors, or shadowed locals as
+// environment reads. Parsing the complete file excludes comments and string data.
+// This adds visibility, never an admission: callers still classify every name.
+func scanComputeEnvReads(file, src string) ([]string, error) {
+	if path.Dir(file) != "internal/compute" || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+		return nil, nil
+	}
+	f, err := parser.ParseFile(token.NewFileSet(), file, src, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse compute env wrapper calls in %s: %w", file, err)
+	}
+	if f.Name.Name != "compute" {
+		return nil, nil
+	}
+	var names []string
+	seen := map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return true
+		}
+		name, ok := call.Fun.(*ast.Ident)
+		if !ok || name.Name != "computeEnvValue" {
+			return true
+		}
+		if name.Obj != nil && (name.Obj.Kind != ast.Fun || file != "internal/compute/v41_q3k_token_panel.go") {
+			return true
+		}
+		arg, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || arg.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(arg.Value)
+		if err == nil && !seen[value] {
+			seen[value] = true
+			names = append(names, value)
+		}
+		return true
+	})
+	return names, nil
 }
 
 // Offense is one non-secret environment read that should relocate to the config surface.
@@ -134,7 +182,7 @@ func scanTree(repoRoot string, baseline map[string]bool) ([]Offense, error) {
 	firstFile := map[string]string{}
 	var names []string
 	for _, m := range matches {
-		for _, n := range ScanGoEnvReads(m.text) {
+		for _, n := range m.names {
 			if _, seen := firstFile[n]; seen {
 				continue
 			}
@@ -153,15 +201,15 @@ func scanTree(repoRoot string, baseline map[string]bool) ([]Offense, error) {
 	return offenses, nil
 }
 
-// envReadMatch is one `git grep -o` hit: the file it came from and the matched call text.
+// envReadMatch binds recognized environment names to their committed source file.
 type envReadMatch struct {
-	file string
-	text string
+	file  string
+	names []string
 }
 
-// committedEnvReadMatches shells to git for the authoritative COMMITTED matches. The ERE
-// handed to git is only a coarse prefilter; envReadRe (Go) stays the authoritative extractor,
-// so there is exactly one source of truth for what counts as an env read.
+// committedEnvReadMatches shells to git for authoritative COMMITTED source.
+// envReadRe extracts direct reads; scanComputeEnvReads recognizes the one known
+// package-local wrapper. Git's patterns only prefilter candidate source.
 //
 // _test.go is EXCLUDED. The rule is about the shipped CONFIGURATION surface — what an
 // operator must set to run fak — and a test-harness switch (FAK_NEGBENCH_MODEL,
@@ -172,26 +220,32 @@ type envReadMatch struct {
 // the internal/boundarylint precedent — Scan skips _test.go, ScanTests walks only _test.go,
 // so a rule runs over exactly the file class its tell is about.
 func committedEnvReadMatches(repoRoot string) ([]envReadMatch, error) {
+	// One immutable commit binds every subprocess, even if a peer advances HEAD
+	// between candidate discovery and reading the complete wrapper files.
+	revision, err := gitOutput(repoRoot, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return nil, fmt.Errorf("resolve committed env scan revision: %w", err)
+	}
+	revision = strings.TrimSpace(revision)
 	cmd := exec.Command("git", "grep", "-o", "-E",
-		`os\.(Getenv|LookupEnv)\("[A-Za-z_][A-Za-z0-9_]*"\)`, "HEAD", "--", "*.go", ":(exclude)*_test.go")
+		`os\.(Getenv|LookupEnv)\("[A-Za-z_][A-Za-z0-9_]*"\)`, revision, "--", "*.go", ":(exclude)*_test.go")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
 		// git grep exits 1 with no output when nothing matches — an empty tree, not a failure.
 		var ee *exec.ExitError
-		if errors.As(err, &ee) && ee.ExitCode() == 1 && len(out) == 0 {
-			return nil, nil
+		if !(errors.As(err, &ee) && ee.ExitCode() == 1 && len(out) == 0) {
+			return nil, fmt.Errorf("git grep env reads in %s: %w", repoRoot, err)
 		}
-		return nil, fmt.Errorf("git grep env reads in %s: %w", repoRoot, err)
 	}
 	var matches []envReadMatch
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
 		}
-		// `git grep <tree-ish>` emits "HEAD:<path>:<matched text>".
-		rest, ok := strings.CutPrefix(line, "HEAD:")
+		// `git grep <tree-ish>` emits "<revision>:<path>:<matched text>".
+		rest, ok := strings.CutPrefix(line, revision+":")
 		if !ok {
 			continue
 		}
@@ -199,7 +253,35 @@ func committedEnvReadMatches(repoRoot string) ([]envReadMatch, error) {
 		if !ok {
 			continue
 		}
-		matches = append(matches, envReadMatch{file: strings.ReplaceAll(file, "\\", "/"), text: text})
+		matches = append(matches, envReadMatch{file: strings.ReplaceAll(file, "\\", "/"), names: ScanGoEnvReads(text)})
+	}
+	// Read complete committed files for AST-based wrapper recognition. The direct
+	// call regex and its public API remain unchanged; this known package-local
+	// wrapper is not a global exception for arbitrary helper names.
+	cmd = exec.Command("git", "grep", "-l", "-z", "computeEnvValue", revision, "--", "internal/compute/*.go", ":(exclude)*_test.go")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = repoRoot
+	out, err = cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if !(errors.As(err, &ee) && ee.ExitCode() == 1 && len(out) == 0) {
+			return nil, fmt.Errorf("git grep compute env wrapper in %s: %w", repoRoot, err)
+		}
+	}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		file, ok := strings.CutPrefix(entry, revision+":")
+		if !ok {
+			continue
+		}
+		src, err := gitOutput(repoRoot, "show", revision+":"+file)
+		if err != nil {
+			return nil, fmt.Errorf("read committed wrapper source %s: %w", file, err)
+		}
+		names, err := scanComputeEnvReads(file, src)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, envReadMatch{file: file, names: names})
 	}
 	return matches, nil
 }

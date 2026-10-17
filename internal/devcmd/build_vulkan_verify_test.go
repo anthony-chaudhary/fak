@@ -177,6 +177,8 @@ func TestBuildVulkanVerifyCurrentProjectionAndRefusals(t *testing.T) {
 	baselineBinaryRaw := readVulkanVerifyTestFile(t, fixture.baselineBinary)
 	spirvPath := filepath.Join(fixture.spirvRoot, fixture.spirvModules[0]+".spv")
 	spirvRaw := readVulkanVerifyTestFile(t, spirvPath)
+	qualifiedPath := filepath.Join(fixture.spirvRoot, "v41_q2k_token_pair.spv")
+	qualifiedRaw := readVulkanVerifyTestFile(t, qualifiedPath)
 	toolRaw := readVulkanVerifyTestFile(t, fixture.toolPath)
 	zeroCommit := strings.Repeat("0", 40)
 
@@ -203,6 +205,13 @@ func TestBuildVulkanVerifyCurrentProjectionAndRefusals(t *testing.T) {
 			mutate: func(t *testing.T) func() {
 				writeVulkanVerifyTestFile(t, spirvPath, append(append([]byte(nil), spirvRaw...), 'x'), 0644)
 				return func() { writeVulkanVerifyTestFile(t, spirvPath, spirvRaw, 0644) }
+			},
+		},
+		{
+			name: "altered qualified token-pair SPIR-V",
+			mutate: func(t *testing.T) func() {
+				writeVulkanVerifyTestFile(t, qualifiedPath, append(append([]byte(nil), qualifiedRaw...), 'x'), 0644)
+				return func() { writeVulkanVerifyTestFile(t, qualifiedPath, qualifiedRaw, 0644) }
 			},
 		},
 		{
@@ -356,7 +365,23 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 	archivePath := filepath.Join(repo, "internal", "compute", "libfakvulkan.a")
 	archiveRaw := []byte("inert native archive identity\n")
 	writeVulkanVerifyTestFile(t, archivePath, archiveRaw, 0644)
-	qualifiedModule, qualifiedCommand := vulkanVerifyQualifiedIndexScaleFixture(t, repo)
+	// V27 retains all four qualified artifacts inherited from V23 through V26.
+	// Keep their recipe order explicit, independently of the production builder.
+	qualified := []struct{ stem, header string }{
+		{"v41_index_scale_bf16", "v41_index_scale_bf16_spirv.h"},
+		{"v41_routed_swiglu_panel_chunk", "v41_routed_swiglu_chunk_spirv.h"},
+		{"v41_routed_down_panel_chunk", "v41_routed_down_chunk_spirv.h"},
+		{"v41_q2k_token_pair", "v41_q2k_token_pair_spirv.h"},
+	}
+	qualifiedModules := make(map[string][]byte, len(qualified))
+	var qualifiedStems []string
+	var qualifiedCommands []string
+	for _, artifact := range qualified {
+		module, command := vulkanVerifyQualifiedModuleFixture(t, repo, artifact.stem, artifact.header)
+		qualifiedModules[artifact.stem] = module
+		qualifiedStems = append(qualifiedStems, artifact.stem)
+		qualifiedCommands = append(qualifiedCommands, command)
+	}
 
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
@@ -400,8 +425,8 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		raw := []byte("spirv:" + stem + "\n")
 		if stem == "v41_indexer_score" {
 			raw = vulkanVerifyIndexerFixture()
-		} else if stem == "v41_index_scale_bf16" {
-			raw = qualifiedModule
+		} else if module, ok := qualifiedModules[stem]; ok {
+			raw = module
 		}
 		writeVulkanVerifyTestFile(t, filepath.Join(spirvRoot, stem+".spv"), raw, 0644)
 	}
@@ -419,15 +444,18 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 		CXXRuntime string                           `json:"cxx_runtime"`
 		IsWindows  bool                             `json:"is_windows"`
 	}{toolchain, "-lstdc++", false})
+	exclusion := "{registered-except-" + strings.Join(qualifiedStems, "-and-") + "}"
 	normalized := []string{
-		"glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered-except-v41_index_scale_bf16}.comp|-o|$REPO/internal/compute/spirv/{registered-except-v41_index_scale_bf16}.spv",
-		qualifiedCommand,
+		"glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/" + exclusion + ".comp|-o|$REPO/internal/compute/spirv/" + exclusion + ".spv",
+	}
+	normalized = append(normalized, qualifiedCommands...)
+	normalized = append(normalized, []string{
 		"cxx|-O3,-std=c++17,-fPIC|-c|$REPO/internal/compute/vulkan_shim.cpp|-o|$REPO/internal/compute/vulkan_shim.o",
 		"ar|rcs|$REPO/internal/compute/libfakvulkan.a|$REPO/internal/compute/vulkan_shim.o",
 		"go|build|-tags|vulkan|-o|$OUT|cmd/fak",
 		"pkg_dir=$REPO/internal/compute",
 		"smoke=false",
-	}
+	}...)
 	commandSHA := hashVulkanVerifyTestJSON(t, normalized)
 
 	source := computebuild.BuildSourceProvenance{
@@ -504,12 +532,11 @@ func newVulkanVerifyFixture(t *testing.T) *vulkanVerifyFixture {
 // Copy the real source and attestation into the fixture before its source commit.
 // These bytes still pass through the production verifier's independent pins;
 // this only supplies the canonical module instead of an inert compiler stand-in.
-func vulkanVerifyQualifiedIndexScaleFixture(t *testing.T, repo string) ([]byte, string) {
+func vulkanVerifyQualifiedModuleFixture(t *testing.T, repo, stem, headerName string) ([]byte, string) {
 	t.Helper()
-	const stem = "v41_index_scale_bf16"
-	const headerRel = "internal/compute/v41_index_scale_bf16_spirv.h"
+	headerRel := "internal/compute/" + headerName
 	source := readVulkanVerifyTestFile(t, filepath.Join("..", "compute", "shaders", stem+".comp"))
-	header := readVulkanVerifyTestFile(t, filepath.Join("..", "compute", "v41_index_scale_bf16_spirv.h"))
+	header := readVulkanVerifyTestFile(t, filepath.Join("..", "compute", headerName))
 	writeVulkanVerifyTestFile(t, filepath.Join(repo, "internal", "compute", "shaders", stem+".comp"), source, 0644)
 	writeVulkanVerifyTestFile(t, filepath.Join(repo, filepath.FromSlash(headerRel)), header, 0644)
 	const prefix = "static const unsigned char qualified[] = {"

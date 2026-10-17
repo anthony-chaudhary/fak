@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -211,5 +212,136 @@ func TestGatewayOperationLogSkippedWithoutSink(t *testing.T) {
 				t.Fatalf("Error() called %d times with no sink: the event was BUILT and then discarded, not skipped", p.n)
 			}
 		})
+	}
+}
+
+// Exact baseline operation method; includes the same guards, audit and sink call.
+func (s *Server) legacyGatewayOperationLog(operation, traceID, tool string, v WireVerdict, opErr error, dur time.Duration) {
+	if s == nil {
+		return
+	}
+	if operation == "adjudicate" && s.orgAudit != nil {
+		verdict := v.Kind
+		if opErr != nil {
+			verdict = "ERROR"
+		}
+		s.orgAudit.Emit(tool, verdict, v.Reason, map[string]int64{})
+	}
+	if s.logf == nil {
+		return
+	}
+	verdict := v.Kind
+	if opErr != nil && verdict == "" {
+		verdict = "ERROR"
+	}
+	ev := map[string]any{
+		"event":       "gateway_operation",
+		"operation":   operation,
+		"tool":        tool,
+		"trace_id":    strings.TrimSpace(traceID),
+		"verdict":     verdict,
+		"duration_ms": float64(dur.Microseconds()) / 1000.0,
+	}
+	if v.Reason != "" {
+		ev["reason"] = v.Reason
+	}
+	if v.By != "" {
+		ev["by"] = v.By
+	}
+	if v.Disposition != "" {
+		ev["disposition"] = v.Disposition
+	}
+	if opErr != nil {
+		ev["error"] = opErr.Error()
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	s.logf("%s", b)
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestGatewayOperationLogEncodingEdges(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		duration time.Duration
+	}{
+		{"empty_error", errors.New(""), 0},
+		{"negative_fraction", nil, -1234 * time.Microsecond},
+		{"negative_sub_microsecond", nil, -time.Nanosecond},
+		{"zero", nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			probe := &countingError{}
+			var logged []byte
+			srv := &Server{logf: func(format string, args ...any) {
+				calls++
+				if format != "%s" || len(args) != 1 {
+					t.Fatalf("sink call %q %#v", format, args)
+				}
+				b, ok := args[0].([]byte)
+				if !ok {
+					t.Fatalf("sink payload %T", args[0])
+				}
+				logged = append([]byte(nil), b...)
+			}}
+			verdict := WireVerdict{Reason: "<&\"\xff", By: "", Disposition: ""}
+			srv.logGatewayOperation("", " \t", "<&\"\xff", verdict, tc.err, tc.duration)
+			want := legacyGatewayOperationJSON("", " \t", "<&\"\xff", verdict, tc.err, tc.duration)
+			if calls != 1 || string(logged) != string(want) {
+				t.Fatalf("calls=%d got=%s want=%s", calls, logged, want)
+			}
+			srv.logGatewayOperation("syscall", "t", "x", WireVerdict{Kind: "ALLOW"}, probe, tc.duration)
+			if probe.n != 1 {
+				t.Fatalf("Error called %d times, want one", probe.n)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestGatewayOperationLogEncodingAllocations(t *testing.T) {
+	srv := &Server{logf: func(string, ...any) {}}
+	v := WireVerdict{Kind: "ALLOW", By: "test"}
+	legacy := testing.AllocsPerRun(100, func() {
+		srv.legacyGatewayOperationLog("syscall", "serve-bench", "get_doc", v, nil, 25*time.Microsecond)
+	})
+	candidate := testing.AllocsPerRun(100, func() { srv.logGatewayOperation("syscall", "serve-bench", "get_doc", v, nil, 25*time.Microsecond) })
+	t.Logf("actual logging method with nonnil discard sink: legacy=%g candidate=%g allocations/op", legacy, candidate)
+	if candidate >= legacy {
+		t.Fatalf("candidate allocations=%g must be less than exact legacy=%g", candidate, legacy)
+	}
+}
+
+// fak-test:runtime medium est=10s lane=optin
+func TestGatewayOperationLogEncodingTiming(t *testing.T) {
+	if os.Getenv("FAK_GATEWAY_LOG_TIMING") != "1" {
+		t.Skip("set FAK_GATEWAY_LOG_TIMING=1 for paired method timing")
+	}
+	srv := &Server{logf: func(string, ...any) {}}
+	v := WireVerdict{Kind: "ALLOW", By: "test"}
+	run := func(legacy bool) testing.BenchmarkResult {
+		return testing.Benchmark(func(b *testing.B) {
+			b.ReportAllocs()
+			if legacy {
+				for i := 0; i < b.N; i++ {
+					srv.legacyGatewayOperationLog("syscall", "serve-bench", "get_doc", v, nil, 25*time.Microsecond)
+				}
+			} else {
+				for i := 0; i < b.N; i++ {
+					srv.logGatewayOperation("syscall", "serve-bench", "get_doc", v, nil, 25*time.Microsecond)
+				}
+			}
+		})
+	}
+	for pair := 0; pair < 8; pair++ {
+		for arm := 0; arm < 2; arm++ {
+			legacy := (pair+arm)%2 == 0
+			result := run(legacy)
+			t.Logf("pair=%d arm=%d legacy=%t N=%d ns/op=%d B/op=%d allocs/op=%d", pair, arm, legacy, result.N, result.NsPerOp(), result.AllocedBytesPerOp(), result.AllocsPerOp())
+		}
 	}
 }

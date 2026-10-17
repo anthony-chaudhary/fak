@@ -105,6 +105,7 @@ func TestSelectVulkanQ4KFusionRequiresExactConditions(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1ms lane=default
 func TestVulkanQ4KFusionNativeGateMatchesSelectorContract(t *testing.T) {
 	raw, err := os.ReadFile("vulkan.go")
 	if err != nil {
@@ -116,8 +117,7 @@ func TestVulkanQ4KFusionNativeGateMatchesSelectorContract(t *testing.T) {
 		"haveQ4KFusedRMSNormMatMul2",
 		"haveQ4KFusedSwiGLUMatMulAdd",
 		"forceScalarQ4K",
-		"FAK_VULKAN_Q4K_FUSION",
-		"FAK_VULKAN_Q4K_ARM",
+		"return q4kFusionOptIn()",
 		"selectQ4KFusionLocked",
 		"unchanged Q4_K composition",
 	}
@@ -125,6 +125,39 @@ func TestVulkanQ4KFusionNativeGateMatchesSelectorContract(t *testing.T) {
 		if !strings.Contains(source, clause) {
 			t.Errorf("vulkan.go missing required selector contract clause %q", clause)
 		}
+	}
+
+	// The native selector delegates environment admission to this production
+	// helper. Only an empty primary value may consult ARM; an explicit refusal
+	// (including unknown or whitespace-only input) must not enable fusion via ARM.
+	for _, tc := range []struct {
+		name, fusion, arm string
+		want              bool
+	}{
+		{name: "default off"},
+		{name: "ARM fallback", arm: "fused", want: true},
+		{name: "primary opt-in", fusion: "candidate", arm: "scalar", want: true},
+		{name: "normalized primary", fusion: "  FUSION  ", want: true},
+		{name: "numeric opt-in", fusion: "1", want: true},
+		{name: "boolean opt-in", fusion: "true", want: true},
+		{name: "on opt-in", fusion: "on", want: true},
+		{name: "yes opt-in", fusion: "yes", want: true},
+		{name: "scalar overrides ARM", fusion: "scalar", arm: "candidate"},
+		{name: "zero overrides ARM", fusion: "0", arm: "candidate"},
+		{name: "false overrides ARM", fusion: "false", arm: "candidate"},
+		{name: "off overrides ARM", fusion: "off", arm: "candidate"},
+		{name: "no overrides ARM", fusion: "no", arm: "candidate"},
+		{name: "unknown overrides ARM", fusion: "unknown", arm: "candidate"},
+		{name: "whitespace overrides ARM", fusion: "   ", arm: "candidate"},
+		{name: "unknown ARM", arm: "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_VULKAN_Q4K_FUSION", tc.fusion)
+			t.Setenv("FAK_VULKAN_Q4K_ARM", tc.arm)
+			if got := q4kFusionOptIn(); got != tc.want {
+				t.Fatalf("q4kFusionOptIn() = %t, want %t (fusion=%q arm=%q)", got, tc.want, tc.fusion, tc.arm)
+			}
+		})
 	}
 }
 
