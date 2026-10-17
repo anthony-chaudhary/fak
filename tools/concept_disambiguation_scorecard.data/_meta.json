@@ -12486,6 +12486,11 @@
           "category": "incidental",
           "reason": "Issue #12727 integer argument carrying the existing target-prefix offset into the draft reference constructor; an implementation coordinate rather than a new context abstraction.",
           "token": "firstContextPosition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private DSpark reference row holding existing target layer positions and hidden-state values; this immutable numerical data record introduces no request, cancellation, or independent runtime context owner.",
+          "token": "v41DSparkContextRow"
         }
       ],
       "exclude": [
@@ -12673,6 +12678,7 @@
         "shedOldContext",
         "takeCompactionContract",
         "traceContext",
+        "v41DSparkContextRow",
         "v41EPHContextDeadline",
         "waiterContexts",
         "waiterCtx",
