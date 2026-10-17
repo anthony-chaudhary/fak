@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -23,6 +24,8 @@ func runOpencodeFreeModels(stdout, stderr io.Writer, argv []string) int {
 	suffix := fs.String("suffix", "-free", "model-name suffix that marks a free-tier model")
 	providerFilter := fs.String("provider", "", "only include models from this provider prefix (empty = all)")
 	all := fs.Bool("all", false, "include quality-rejected candidates (default: survivors only)")
+	check := fs.Bool("check", false, "freshness gate: exit non-zero if any discovered free model fails the quality gate or discovery is empty")
+	writePath := fs.String("write", "", "write the discovered survivor roster as JSON to this file (for piping into apply tools)")
 	opencodeBin := fs.String("opencode-bin", "opencode", "opencode CLI binary to invoke for discovery")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak opencode free-models [--json] [--suffix SUFFIX] [--provider PROVIDER] [--all]")
@@ -59,6 +62,42 @@ func runOpencodeFreeModels(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	survivors, rejected := modelroute.SplitOpenCodeFreeModels(cands)
+
+	// Freshness gate: fail loud on drift so operators/cron catch it before a
+	// spawn dies with provider.no-route.
+	if *check {
+		if len(cands) == 0 {
+			fmt.Fprintln(stderr, "fak opencode free-models --check: no free models discovered (opencode CLI may be unavailable or roster empty)")
+			return 1
+		}
+		if len(rejected) > 0 {
+			for _, c := range rejected {
+				fmt.Fprintf(stderr, "fak opencode free-models --check: REJECTED %s: %s\n", c.ID, c.Reason)
+			}
+			return 1
+		}
+		fmt.Fprintf(stdout, "fak opencode free-models --check: OK (%d quality-gated free model(s))\n", len(survivors))
+		return 0
+	}
+
+	// Optional: persist the discovered roster for downstream apply tools.
+	if *writePath != "" {
+		type payload struct {
+			Survivors []modelroute.OpenCodeFreeModel `json:"survivors"`
+		}
+		f, err := os.Create(*writePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak opencode free-models: write %s: %v\n", *writePath, err)
+			return 1
+		}
+		defer f.Close()
+		enc := json.NewEncoder(f)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(payload{Survivors: survivors}); err != nil {
+			fmt.Fprintf(stderr, "fak opencode free-models: write %s: %v\n", *writePath, err)
+			return 1
+		}
+	}
 
 	if *jsonOut {
 		type payload struct {
