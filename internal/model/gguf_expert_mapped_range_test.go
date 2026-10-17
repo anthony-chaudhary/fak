@@ -28,6 +28,59 @@ func (r *mappedExpertReader) ReadOnlyRange(off, size int64) ([]byte, error) {
 	return r.data[off : off+size : off+size], nil
 }
 
+// TestExpertCheckpointFaultAllocationCeilingPerQuant pins that EVERY admitted
+// k-quant's mapped routed-expert fault owns no projection-heap copy, not only
+// Q2_K/Q3_K (fak#13871). A mapped reader plus a borrow-safe backend at host
+// budget 0 must take the alias path, so its fault allocates exactly one fewer
+// buffer than the byte-identical owned (non-mapped) fault - the stride-sized
+// copy itself. On the pre-fix parent the Q4_K/Q5_K/Q6_K rows were red: both
+// paths copied, so the difference collapsed to zero.
+// fak-test:runtime fast est=100ms lane=model
+func TestExpertCheckpointFaultAllocationCeilingPerQuant(t *testing.T) {
+	const runs = 50
+	for _, quant := range []ExpertCheckpointQuant{ExpertCheckpointQ2K, ExpertCheckpointQ3K, ExpertCheckpointQ4K, ExpertCheckpointQ5K, ExpertCheckpointQ6K} {
+		t.Run(quant.String(), func(t *testing.T) {
+			_, stride, ok := quant.blockGeometry()
+			if !ok {
+				t.Fatal("unknown quant geometry")
+			}
+			data := make([]byte, 2*stride)
+			for i := range data {
+				data[i] = byte(i*7 + 11)
+			}
+			const fused = "blk.0.ffn_gate_exps.weight"
+			desc := []FusedExpertTensor{{Name: fused, Layer: 0, Proj: "gate_proj", Quant: quant, Experts: 2, Rows: 1, Cols: 256}}
+			name := expertName(0, 0, "gate_proj.weight")
+
+			borrowTier := NewExpertCheckpointTier(0)
+			if err := borrowTier.AddShard(&mappedExpertReader{data: data}, int64(len(data)), desc); err != nil {
+				t.Fatal(err)
+			}
+			ownedTier := NewExpertCheckpointTier(0)
+			if err := ownedTier.AddShard(bytes.NewReader(data), int64(len(data)), desc); err != nil {
+				t.Fatal(err)
+			}
+
+			var w expertWeight
+			var err error
+			borrowAllocs := testing.AllocsPerRun(runs, func() { w, err = borrowTier.fault(name) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if raw := mappedCheckpointRaw(w); len(raw) != stride || &raw[0] != &data[0] {
+				t.Fatalf("borrow fixture did not alias the mapped source (len=%d)", len(raw))
+			}
+			ownedAllocs := testing.AllocsPerRun(runs, func() { w, err = ownedTier.fault(name) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if borrowAllocs != ownedAllocs-1 {
+				t.Fatalf("%s fault allocations borrow=%g owned=%g, want owned exactly one larger (the stride buffer)", quant, borrowAllocs, ownedAllocs)
+			}
+		})
+	}
+}
+
 // fak-test:runtime fast est=100ms
 func TestGGUFExpertReadOnlyRangeBorrowCopyAndValidation(t *testing.T) {
 	const prefix, stride = 9, 84

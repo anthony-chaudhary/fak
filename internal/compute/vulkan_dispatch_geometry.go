@@ -3,7 +3,6 @@
 package compute
 
 import (
-	"os"
 	"strings"
 )
 
@@ -20,7 +19,7 @@ func (v *vulkanBackend) HasCooperativeMatrix() bool {
 	if v == nil {
 		return false
 	}
-	if env := os.Getenv("FAK_VULKAN_COOPMAT"); env != "" {
+	if env := computeEnvValue("FAK_VULKAN_COOPMAT"); env != "" {
 		return env == "1" || env == "true"
 	}
 	lower := strings.ToLower(v.tier)
@@ -93,7 +92,7 @@ func (v *vulkanBackend) selectQ2KFusionLocked(P int) bool {
 	if P != 1 {
 		return false
 	}
-	optIn := strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q2K_FUSION")))
+	optIn := strings.TrimSpace(strings.ToLower(computeEnvValue("FAK_VULKAN_Q2K_FUSION")))
 	switch optIn {
 	case "candidate", "fusion", "fused", "1", "true", "on", "yes":
 		return true

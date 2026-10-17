@@ -30,6 +30,7 @@ type v41PlainLayerStep struct {
 	ffnResidual [][]float32
 	ffnMix      v41MHCMix
 	picks       []routePick
+	kvCommitted bool
 }
 
 func (m *Model) prepareV41PlainLayerStep(l int, x []float32, streams [][]float32, pos int, layerState *V41AttentionState, scratch *v41ProjScratch) (work *v41LayerStepWork, err error) {
@@ -96,6 +97,7 @@ func (m *Model) prepareV41PlainLayerStep(l int, x []float32, streams [][]float32
 	work = &v41LayerStepWork{layer: l, input: st.ffnX, picks: st.picks, full: full, scratch: scratch}
 	work.scalar = st.routed
 	work.finish = st.finish
+	work.publishKV = st.commitKV
 	if st.resident != nil {
 		work.cleanup = st.resident.abort
 	}
@@ -435,10 +437,12 @@ func (st *v41PlainLayerStep) postMix(moe []float32, posted bool) ([][]float32, e
 	return v41MHCPost(delta, residual, st.mix.post, st.mix.comb)
 }
 
-// commit appends the projected KV row: position 0 seeds the empty state through
-// Prefill, later positions append through Step. Both are atomic, so a failure
-// leaves the state unchanged and the caller's x/streams are not written.
-func (st *v41PlainLayerStep) commit(next [][]float32) error {
+// commitKV appends the projected KV row once: position 0 seeds the empty state
+// through Prefill, later positions append through Step. Both are atomic.
+func (st *v41PlainLayerStep) commitKV() error {
+	if st.kvCommitted {
+		return nil
+	}
 	var err error
 	if st.pos == 0 {
 		err = st.layerState.Prefill([][]float32{st.kv}, nil)
@@ -447,6 +451,16 @@ func (st *v41PlainLayerStep) commit(next [][]float32) error {
 	}
 	if err != nil {
 		return v41StageErr(v41StageAttention, st.l, err)
+	}
+	st.kvCommitted = true
+	return nil
+}
+
+// commit appends the KV row unless it was published early, then writes the
+// caller's x/streams. A failure leaves the state unchanged.
+func (st *v41PlainLayerStep) commit(next [][]float32) error {
+	if err := st.commitKV(); err != nil {
+		return err
 	}
 	switch {
 	case st.resident != nil:

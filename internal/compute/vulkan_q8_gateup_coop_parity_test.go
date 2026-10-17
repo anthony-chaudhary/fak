@@ -221,6 +221,7 @@ func TestVulkanQ2KMatvecParity(t *testing.T) {
 
 	t.Run("rmsnorm_matmul2_fused", func(t *testing.T) {
 		t.Setenv("FAK_VULKAN_Q2K_FUSION", "candidate")
+		ResetComputeEnvCache()
 		const out1 = 45
 		s := lcg(0x3b3b)
 		hw0, hw1 := q2kParityWeight(7002, out, in), q2kParityWeight(7003, out1, in)

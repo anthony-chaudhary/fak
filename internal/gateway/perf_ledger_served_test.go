@@ -261,7 +261,10 @@ func TestPerfLedgerServedNativeTurnsCarryEngineAnatomy(t *testing.T) {
 	if wantTTFTMeasured < 2 {
 		t.Fatalf("ordinary cohort lost measured TTFT: measured=%d", wantTTFTMeasured)
 	}
-	strictTimingJSON, err := json.Marshal(rep.Records[2].NativeTiming)
+	// Host-work fields sample process CPU, which is not receipt-derived.
+	strictTiming := *rep.Records[2].NativeTiming
+	strictTiming.CPUMSPerToken, strictTiming.HostShare = nil, nil
+	strictTimingJSON, err := json.Marshal(&strictTiming)
 	if err != nil {
 		t.Fatalf("marshal strict row timing: %v", err)
 	}

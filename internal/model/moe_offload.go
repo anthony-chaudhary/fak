@@ -69,7 +69,15 @@ func splitHostResidentExperts(mat matKernel, layer int, picks []routePick) bool 
 	if k.onHost == nil {
 		return false
 	}
-	if _, ok := k.host.(residentKernel); !ok {
+	// The host side must be a resident host kernel. glmDsaMatKernel threads the
+	// session-owned sessionResidentKernel (a85073d76c9) so every host GEMV is admitted
+	// as a host stage under device-only; it computes the identical residentMatRows bytes
+	// as the bare residentKernel and differs only in that admission. Gating on the bare
+	// type alone silently declined the production split and made the batched host-expert
+	// path unreachable on the --n-cpu-moe hybrid (#12972).
+	switch k.host.(type) {
+	case residentKernel, sessionResidentKernel:
+	default:
 		return false
 	}
 	for _, pk := range picks {

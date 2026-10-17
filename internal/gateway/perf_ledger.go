@@ -15,6 +15,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -41,6 +43,7 @@ type perfDetail struct {
 	model        string
 	engine       *perfledger.Engine
 	nativeTiming *perfledger.NativeTiming
+	prefillRoute *perfledger.PrefillRoute
 	completion   *agent.Completion
 	nativeLoop   bool
 	// upstreamDraft / upstreamAccepted are a proxied upstream's own speculative
@@ -103,6 +106,7 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 		return perfDetail{}
 	}
 	d := perfDetail{model: comp.Model, completion: comp}
+	d.prefillRoute = prefillRouteFromReceipt(comp.NativeInference)
 	if t := comp.Timings; t != nil && t.CacheN > 0 {
 		d.kvCacheN = t.CacheN
 	}
@@ -120,6 +124,24 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 		d.upstreamAccepted = min(max(t.DraftNAccepted, 0), t.DraftN)
 	}
 	return d
+}
+
+// prefillRouteFromReceipt lifts the request's whole-sequence prefill route
+// decision off a native receipt. A receipt with no route block (a non-Qwen turn,
+// or a turn that made no eligible decision) yields nil, so the perf row omits the
+// field rather than fabricating a route.
+func prefillRouteFromReceipt(receipt *model.NativeInferenceReceipt) *perfledger.PrefillRoute {
+	if receipt == nil || receipt.Qwen35SequencePrefillRoute == nil || receipt.Qwen35SequencePrefillRoute.Status == nil {
+		return nil
+	}
+	status := receipt.Qwen35SequencePrefillRoute.Status
+	return &perfledger.PrefillRoute{
+		RequestedPath:               status.RequestedPath,
+		EffectivePath:               status.EffectivePath,
+		DeclineReason:               status.DeclineReason,
+		FallbackActive:              status.FallbackActive,
+		NativePerformanceQualifying: status.NativePerformanceQualifying,
+	}
 }
 
 func completionBenchEvidence(comp *agent.Completion) *perfledger.BenchEvidence {
@@ -271,12 +293,29 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	rec.Model = strings.TrimSpace(detail.model)
 	rec.Engine = detail.engine
 	rec.NativeTiming = detail.nativeTiming
+	rec.PrefillRoute = detail.prefillRoute
 	rec.UpstreamSpecDraftTokens, rec.UpstreamSpecAcceptedTokens = detail.upstreamDraft, detail.upstreamAccepted
 	if rec.Error == "" {
 		rec.BenchEvidence = completionBenchEvidence(detail.completion)
 	}
 	detail.src.apply(&rec)
+	m.observeDecodeWindowReceipt(detail.src)
 	m.commitPerf(rec)
+}
+
+// observeDecodeWindowReceipt books one request's decode-window kernel/decode split
+// into the native phase counters, once per request, in memory only.
+func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) {
+	o := src.observation
+	if m.nativePhases == nil || o == nil {
+		return
+	}
+	o.mu.Lock()
+	ctx := o.phaseContext
+	o.mu.Unlock()
+	if receipt, ok := nativeperf.RequestDecodeHostWork(ctx).ClaimPhaseReceipt(); ok {
+		m.nativePhases.ObservePhases(receipt, time.Now())
+	}
 }
 
 // recordPerfFailure emits the perf row for a turn that failed before completing.

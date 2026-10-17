@@ -797,6 +797,12 @@ type batchBackend interface {
 	FlushBatch()
 }
 
+// batchCycler closes one batch window and opens the next without waiting for the
+// closed one to execute.
+type batchCycler interface {
+	CycleBatch()
+}
+
 type ropeInPlaceBackend interface {
 	RoPEInPlace(x compute.Tensor, pos, nHeads, headDim int, theta float64) compute.Tensor
 }
@@ -1095,8 +1101,12 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			}
 		}
 		if useQ8Weights && batch != nil && halQ8BatchLayers > 0 && (l+1)%halQ8BatchLayers == 0 && l+1 < cfg.NumLayers {
-			batch.FlushBatch()
-			batch.BeginBatch()
+			if cycler, ok := batch.(batchCycler); ok {
+				cycler.CycleBatch()
+			} else {
+				batch.FlushBatch()
+				batch.BeginBatch()
+			}
 		}
 	}
 

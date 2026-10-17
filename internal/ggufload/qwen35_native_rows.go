@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -38,6 +39,9 @@ var metalQ5KNativeRows = func() bool {
 func qwen35NativeRowResident(cfg model.Config, canon string, t TensorType, shape []int, o q4kLoadOptions) bool {
 	if o.nativeRowsOff {
 		return false
+	}
+	if qwen35DeviceQKNativeRow(cfg, canon, t, shape, o) {
+		return true
 	}
 	switch t {
 	case TensorQ4_K:
@@ -130,4 +134,32 @@ func normalizeQwen35NativeRows(canon string, shape []int, raw []byte, cfg model.
 		return nil, err
 	}
 	return permuteRawRows(canon, raw, src)
+}
+
+// qwen35DeviceQKNativeRow admits the full-attention q_proj/k_proj rows and the GDN
+// in_proj_qkv/in_proj_z rows of a raw-i-quant device backend (Vulkan iq*_matvec, ticket 05f) in
+// their native format, including the exact Qwen3.8 topology: its Q8 requirement belongs to the
+// Metal runtime, which never retains raw i-quants. The type must be one the backend already keeps
+// packed; a raw in-proj makes the fused Q8 GDN in-proj decline to its composed MatMul path.
+// FAK_QWEN35_NATIVE_QK_ROWS=0 / FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS=0 restore Q8 per class.
+func qwen35DeviceQKNativeRow(cfg model.Config, canon string, t TensorType, shape []int, o q4kLoadOptions) bool {
+	if len(o.residentDenseIQ) == 0 {
+		return false
+	}
+	if t != TensorQ4_K && !denseKQuantRetained(o, t) {
+		return false
+	}
+	if bw, _, ok := residentExpertBlockGeometry(t); !ok || bw != qkK {
+		return false
+	}
+	if len(shape) != 2 || shape[0] <= 0 || shape[1] != cfg.HiddenSize || shape[1]%qkK != 0 {
+		return false
+	}
+	switch {
+	case model.Qwen35FullAttentionQKProjection(cfg, canon):
+		return os.Getenv("FAK_QWEN35_NATIVE_QK_ROWS") != "0"
+	case model.Qwen35GDNInProjQKVZProjection(cfg, canon):
+		return os.Getenv("FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS") != "0"
+	}
+	return false
 }

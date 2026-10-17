@@ -1303,6 +1303,7 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 			PackedEmbeddingRows: packedRows,
 			EmbeddingPanelBytes: panelBytes,
 		}
+		s.notePrefillFallback(s.qwen35HAL.prefillRoute)
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
 	if useEmbeddingRows && !packedRows && !s.qwen35SequenceOutputHeadFits() {
@@ -1313,6 +1314,7 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 			FallbackActive:      true,
 			EmbeddingPanelBytes: panelBytes,
 		}
+		s.notePrefillFallback(s.qwen35HAL.prefillRoute)
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
 	if useEmbeddingRows {
@@ -1327,6 +1329,7 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 				DeclineReason: declineReason, FallbackActive: true,
 				PackedEmbeddingRows: packedRows, EmbeddingPanelBytes: panelBytes,
 			}
+			s.notePrefillFallback(s.qwen35HAL.prefillRoute)
 			return compute.Qwen35SequencePrefillResult{}, false, nil
 		}
 		if rows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {

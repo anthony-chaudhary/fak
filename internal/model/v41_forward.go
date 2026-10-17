@@ -655,6 +655,9 @@ func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 		// historical full-prefill path byte-for-byte, so the first request still
 		// seeds the cache and a failed step never claims a cache hit.
 		if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
+			if logits, ok := s.prefillV41SuffixBatched(ids, wantLogits); ok {
+				return logits
+			}
 			return s.prefillV41Suffix(ids, wantLogits)
 		}
 		var act *Activations
@@ -717,37 +720,10 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 			bodyComplete = true
 		}()
 		if err != nil {
-			var batchErr *v41StepBatchError
-			var selectedRoPE *V41TailRoPEOperationError
-			var selectedAttention *V41SharedAttentionOperationError
-			var selectedScore *V41IndexerScoreOperationError
-			var selectedMHC *V41MHCOperationError
-			if errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || s.M.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage) {
+			if v41SuffixFailureIsSelected(s.M, err) {
 				panic(err)
 			}
-			// Roll the suffix back to the pre-call boundary and re-fold the
-			// whole suffix on the reference path so the session state and the
-			// returned logits are exactly what a cold prefill would produce.
-			st.history = st.history[:startLen]
-			var act *Activations
-			var ferr error
-			func() {
-				endBatch := s.v41BeginStepBatch()
-				bodyComplete := false
-				defer func() {
-					v41FinishStepBatch(endBatch, &ferr, bodyComplete)
-					if ferr != nil {
-						act = nil
-					}
-				}()
-				act, ferr = s.M.forwardV41WithHeadMode(ids, st, true, wantLogits)
-				bodyComplete = true
-			}()
-			if ferr != nil {
-				panic(ferr)
-			}
-			s.M.v41NoteExpertFaultToken(len(ids))
-			return lastLogits(act)
+			return s.prefillV41Refold(st, startLen, ids, wantLogits)
 		}
 		if v41PrefillStepProbe != nil {
 			v41PrefillStepProbe()
@@ -758,6 +734,44 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 	}
 	s.M.v41NoteExpertFaultToken(len(ids))
 	return logits
+}
+
+// v41SuffixFailureIsSelected reports a suffix failure that must surface: a
+// selected device operation or a non-structural fault is never replayed on the
+// reference path.
+func v41SuffixFailureIsSelected(m *Model, err error) bool {
+	var batchErr *v41StepBatchError
+	var selectedRoPE *V41TailRoPEOperationError
+	var selectedAttention *V41SharedAttentionOperationError
+	var selectedScore *V41IndexerScoreOperationError
+	var selectedMHC *V41MHCOperationError
+	return errors.As(err, &batchErr) || errors.As(err, &selectedRoPE) || errors.As(err, &selectedAttention) || errors.As(err, &selectedScore) || errors.As(err, &selectedMHC) || errors.Is(err, ErrV41BF16BoundaryOperation) || errors.Is(err, ErrV41LogitScaleOperation) || errors.Is(err, ErrV41IndexWeightScaleOperation) || errors.Is(err, ErrV41QueryPrefixOperation) || m.v41EPRequested() || errors.Is(err, ErrV41ExpertParallel) || !errors.Is(err, ErrV41ForwardStage)
+}
+
+// prefillV41Refold rolls the suffix back to startLen and re-folds the whole
+// history on the reference path, so the session state and the returned logits
+// are exactly what a cold prefill would produce.
+func (s *Session) prefillV41Refold(st *v41ForwardState, startLen int, ids []int, wantLogits bool) []float32 {
+	st.history = st.history[:startLen]
+	var act *Activations
+	var ferr error
+	func() {
+		endBatch := s.v41BeginStepBatch()
+		bodyComplete := false
+		defer func() {
+			v41FinishStepBatch(endBatch, &ferr, bodyComplete)
+			if ferr != nil {
+				act = nil
+			}
+		}()
+		act, ferr = s.M.forwardV41WithHeadMode(ids, st, true, wantLogits)
+		bodyComplete = true
+	}()
+	if ferr != nil {
+		panic(ferr)
+	}
+	s.M.v41NoteExpertFaultToken(len(ids))
+	return lastLogits(act)
 }
 
 // v41IncrementalStepProbe is an optional test-only observer invoked after

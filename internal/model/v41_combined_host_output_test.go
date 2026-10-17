@@ -55,14 +55,22 @@ func (f v41CombinedHostFixture) compose(attend v41SharedAttentionFunc) ([]float3
 // Independent fixture packing includes the same necessary index/row ownership
 // as the composer. The literal index schedule covers duplicate, padding and
 // future groups; this does not call the composer or add a synthetic clone.
+//
+// The control enters through the SAME v41SparseAttentionSinkResident seam the
+// composer's nil-callback arm uses (with a nil callback and nil resident view),
+// so the allocation comparison is apples-to-apples: both sides pay the identical
+// index/row packing and the identical host primitive. Comparing against the bare
+// V41SparseAttentionSink entry point instead measured a different call shape —
+// it skips the seam's request struct — and so reported a phantom +1 allocation
+// that was the seam boundary, not a redundant composer copy.
 func (f v41CombinedHostFixture) control() ([]float32, error) {
 	idx := make([]int32, len(f.wantIdx))
 	copy(idx, f.wantIdx)
 	flat := v41CombinedHostPack(f.window, f.compressed, f.dim)
-	return V41SparseAttentionSink(f.q, flat, f.sink, idx, V41SparseAttentionSinkOptions{
+	return v41SparseAttentionSinkResident(0, f.q, flat, f.sink, idx, V41SparseAttentionSinkOptions{
 		B: 1, M: 1, Heads: f.heads, HeadDim: f.dim,
 		N: len(f.window) + len(f.compressed), TopK: len(idx), Softmax: .125,
-	})
+	}, nil, nil)
 }
 
 func v41CombinedHostBits(t *testing.T, got, want []float32) {

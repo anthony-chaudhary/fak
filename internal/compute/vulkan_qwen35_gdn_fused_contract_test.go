@@ -36,7 +36,8 @@ func TestQwen35GDNQ8InputProjectionShaderContract(t *testing.T) {
 	}
 	for _, token := range []string{
 		"layout(local_size_x = 256) in;",
-		"const uint SHARED_CAP = 2048u;",
+		"const uint SHARED_CAP = 8192u;",
+		"subgroupShuffleXor(amax, 4u)",
 		"for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS)",
 		"uint totalOut = out0 + out1 + out2 + uint(pc.out3);",
 		"Y0[outputRow] = acc;",

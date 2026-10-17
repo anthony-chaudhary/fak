@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
@@ -126,6 +127,13 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 	defer o.mu.Unlock()
 	rec.RequestID, rec.TraceID, rec.InboundRequestID = o.requestID, o.traceID, o.inboundRequestID
 	rec.PartialNativePhases = requestPartialNativePhases(o.phaseContext)
+	if rec.NativeTiming != nil {
+		if totals, ok := nativeperf.RequestDecodeHostWork(o.phaseContext).Totals(); ok {
+			cpu, cpuOK := totals.CPUMSPerToken()
+			share, shareOK := totals.HostShare()
+			rec.NativeTiming = rec.NativeTiming.WithHostWork(cpu, cpuOK, share, shareOK)
+		}
+	}
 	if o.complete && !o.failed && o.read > 0 {
 		rec.WorkloadSHA256 = hex.EncodeToString(o.digest.Sum(nil))
 		rec.WorkloadIdentityMode = "raw_request_body_sha256_v1"

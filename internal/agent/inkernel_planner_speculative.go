@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
@@ -528,6 +529,8 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 	// Speculative decoding loop
 	measurement.startDecodeTrace()
+	hostSpan := nativeperf.StartDecodeSpan()
+	defer hostSpan.Abandon()
 	td := time.Now()
 	committed := append([]int(nil), ids...)
 	var counts []int32
@@ -792,6 +795,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 	round.close(gen)
 	decodeS := time.Since(td).Seconds()
+	hostSpan.Finish(ctx, max(gen-1, 0))
 	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)
@@ -1068,6 +1072,8 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		p.noteKVPrefixAdmitted()
 	}
 
+	hostSpan := nativeperf.StartDecodeSpan()
+	defer hostSpan.Abandon()
 	td := time.Now()
 	// metalMTPMu is already held for the duration of generateReusedMetalMTP
 	// (locked above), so read the field directly rather than via the locking
@@ -1158,6 +1164,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 
 	round.close(gen)
 	decodeS := time.Since(td).Seconds()
+	hostSpan.Finish(ctx, max(gen-1, 0))
 	enginestep.Default.ObservePhase(enginestep.PhaseDecode, time.Since(td))
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseDecode, td, time.Since(td), err == nil)
 	p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, err == nil)

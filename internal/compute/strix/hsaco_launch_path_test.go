@@ -172,6 +172,7 @@ func TestStrixHSACO_FailClosedInvariantSurvives(t *testing.T) {
 
 	// The operator env seam stays fail-closed: 'none'/empty never admit.
 	t.Setenv(EnvStrixGEMVLaunchPath, "none")
+	ResetStrixEnvCache()
 	if StrixGEMVLaunchPath() != "" {
 		t.Fatal("'none' must normalize to the unproven empty launch path")
 	}
@@ -186,6 +187,7 @@ func TestStrixHSACO_LaunchPathIsNotOperatorAsserted(t *testing.T) {
 	t.Setenv(EnvStrixWave32GEMVDecode, "1")
 	t.Setenv(EnvStrixGEMVLaunchPath, LaunchPathHSACOAQL)
 	t.Setenv(EnvStrixGEMVHSACOPath, "")
+	ResetStrixEnvCache()
 
 	toggle, kernel := ResolveStrixDecodeGEMVDevice()
 	if toggle.Admitted || kernel.Available() {
@@ -216,6 +218,7 @@ func TestStrixHSACO_OperatorPathEndToEnd(t *testing.T) {
 	t.Setenv(EnvStrixWave32GEMVDecode, "1")
 	t.Setenv(EnvStrixGEMVLaunchPath, LaunchPathHSACOAQL)
 	t.Setenv(EnvStrixGEMVHSACOPath, path)
+	ResetStrixEnvCache()
 
 	toggle, kernel := ResolveStrixDecodeGEMVDevice()
 	if !toggle.Admitted || !kernel.Available() {
@@ -242,6 +245,7 @@ func TestStrixHSACO_OperatorPathEndToEnd(t *testing.T) {
 		t.Fatalf("write wrong-target code object: %v", err)
 	}
 	t.Setenv(EnvStrixGEMVHSACOPath, wrongPath)
+	ResetStrixEnvCache()
 	toggle, kernel = ResolveStrixDecodeGEMVDevice()
 	if toggle.Admitted || kernel.Available() {
 		t.Fatal("a gfx1150 code object must not admit the gfx1151 kernel")

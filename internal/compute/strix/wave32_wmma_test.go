@@ -788,6 +788,7 @@ func TestStrixWave32GEMVDecode_FailClosed(t *testing.T) {
 func TestStrixDecodeGEMVDevice_ToggleEnv(t *testing.T) {
 	t.Setenv(EnvStrixWave32GEMVDecode, "")
 	t.Setenv(EnvStrixGEMVLaunchPath, "")
+	ResetStrixEnvCache()
 	if StrixDecodeGEMVDeviceRequested() {
 		t.Fatal("decode GEMV must be opt-in only")
 	}
@@ -798,6 +799,7 @@ func TestStrixDecodeGEMVDevice_ToggleEnv(t *testing.T) {
 
 	t.Setenv(EnvStrixWave32GEMVDecode, "1")
 	t.Setenv(EnvStrixGEMVLaunchPath, "none")
+	ResetStrixEnvCache()
 	if !StrixDecodeGEMVDeviceRequested() {
 		t.Fatal("explicit opt-in not recognized")
 	}
@@ -810,6 +812,7 @@ func TestStrixDecodeGEMVDevice_ToggleEnv(t *testing.T) {
 	// The decode GEMV admits only once a real gfx1151 hsaco code object has been
 	// validated, so the operator string alone must still refuse.
 	t.Setenv(EnvStrixGEMVLaunchPath, "hsaco-aql")
+	ResetStrixEnvCache()
 	assertedToggle, assertedKernel := ResolveStrixDecodeGEMVDevice()
 	if assertedToggle.Admitted || assertedKernel.Available() {
 		t.Fatalf("an asserted launch path with no validated code object must not admit, got %+v", assertedToggle)

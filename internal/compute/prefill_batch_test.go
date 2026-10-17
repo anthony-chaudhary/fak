@@ -491,3 +491,147 @@ func TestPrefillBatchValidation(t *testing.T) {
 		t.Error("expected error for Wq shape mismatch")
 	}
 }
+
+// TestVulkanDequantOnceEntrypointsRetired pins the fak#13875 removal so the latent
+// per-call weight trap cannot silently return. AttentionDequantOnce and
+// AttentionQuantizedKV had zero non-test callers and shared one per-KV scratchpad
+// cache keyed only on (nPos, format): a second layer at the same nPos would reuse
+// layer 0's dequantized K/V. The calibrated free-function pipeline
+// (NewVulkanKVScratchpad / ExecuteVulkanAttentionWithDequantOnce, pinned by
+// vulkan_kv_test.go) is kept; only the unowned backend entrypoints and their cache
+// were removed. This source contract runs without cgo or a Vulkan device.
+func TestVulkanDequantOnceEntrypointsRetired(t *testing.T) {
+	opsVulkan, err := os.ReadFile("vulkan_ops_vulkan.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops_vulkan.go: %v", err)
+	}
+	opsStr := string(opsVulkan)
+	for _, gone := range []string{
+		"func (v *vulkanBackend) AttentionDequantOnce(",
+		"func (v *vulkanBackend) AttentionQuantizedKV(",
+		"readHostF32Locked",
+	} {
+		if strings.Contains(opsStr, gone) {
+			t.Errorf("vulkan_ops_vulkan.go still declares retired entrypoint %q; the layer-shared scratchpad cache must not return without a per-layer parity test", gone)
+		}
+	}
+
+	kvVulkan, err := os.ReadFile("vulkan_kv_vulkan.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_kv_vulkan.go: %v", err)
+	}
+	kvStr := string(kvVulkan)
+	for _, gone := range []string{
+		"scratchpad *VulkanKVScratchpad",
+		"func (k *vulkanKV) InitScratchpad(",
+		"func (k *vulkanKV) EnsureScratchpad(",
+		"func (k *vulkanKV) ResetScratchpad(",
+	} {
+		if strings.Contains(kvStr, gone) {
+			t.Errorf("vulkan_kv_vulkan.go still declares retired per-KV scratchpad surface %q", gone)
+		}
+	}
+
+	// The dequant-once free-function pipeline must remain: it is the calibrated,
+	// test-pinned replacement for the retired entrypoints.
+	kvGo, err := os.ReadFile("vulkan_kv.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_kv.go: %v", err)
+	}
+	if !strings.Contains(string(kvGo), "func NewVulkanKVScratchpad(") {
+		t.Error("vulkan_kv.go lost NewVulkanKVScratchpad; the retired entrypoints were supposed to leave the calibrated pipeline intact")
+	}
+	opsGo, err := os.ReadFile("vulkan_ops.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops.go: %v", err)
+	}
+	if !strings.Contains(string(opsGo), "func ExecuteVulkanAttentionWithDequantOnce(") {
+		t.Error("vulkan_ops.go lost ExecuteVulkanAttentionWithDequantOnce; the retired entrypoints were supposed to leave the calibrated pipeline intact")
+	}
+}
+
+// TestGEMMFP16F32PerCallWeightPathsRetired pins the fak#13875 retirement of the
+// unwired arm64 per-call weight paths. GEMMFP16F32 and PrefillGEMMFP16 converted the
+// whole f32 operand (weights included) to f16 on every call and had zero non-test
+// callers repo-wide: the same latent per-call weight trap class as the dequant-once
+// entrypoints. The underlying NEON microkernels (GEMMFP16 / GEMMFP16TN) remain, held
+// by gemm_test.go; only the unowned f32-converting adapters were removed. This source
+// contract runs without arm64 or cgo.
+func TestGEMMFP16F32PerCallWeightPathsRetired(t *testing.T) {
+	src, err := os.ReadFile("gemm_arm64.go")
+	if err != nil {
+		t.Fatalf("failed to read gemm_arm64.go: %v", err)
+	}
+	s := string(src)
+	for _, gone := range []string{
+		"func GEMMFP16F32(",
+		"func PrefillGEMMFP16(",
+	} {
+		if strings.Contains(s, gone) {
+			t.Errorf("gemm_arm64.go still declares retired per-call weight path %q; it must not return without a caller and an allocation ceiling", gone)
+		}
+	}
+	// The NEON microkernels must remain: they are the calibrated, test-pinned kernels.
+	for _, keep := range []string{
+		"func GEMMFP16(",
+		"func GEMMFP16TN(",
+	} {
+		if !strings.Contains(s, keep) {
+			t.Errorf("gemm_arm64.go lost %q; the retirement was supposed to leave the calibrated microkernels intact", keep)
+		}
+	}
+}
+
+// TestHIPAndVulkanPerCallKVStagingRetired pins the fak#13875 retirement of the
+// unwired per-call whole-KV staging paths. ExecuteHIPAttentionWithContiguization and
+// ExecuteHIPAttentionWithDequantOnce each allocated and copied the entire KV cache on
+// every call (the hip_attention.go per-call-copy defect) and HIPContiguizeF16KVCache /
+// HIPFlashAttnDequantScratchpad were zero-caller pass-throughs; DequantizeAndTransposeKVScratchpad
+// (vulkan_ops.go) allocated two whole f32 KV buffers per call and had zero callers repo-wide.
+// All were unwired: a wiring would have re-introduced the latent per-call weight trap.
+// The calibrated pipeline (FlashAttnDequantScratchpad, ContiguizeF16KVCache,
+// ComputeContiguizedAttention) stays test-pinned. This source contract runs with no
+// ROCm/Vulkan device and no cgo.
+func TestHIPAndVulkanPerCallKVStagingRetired(t *testing.T) {
+	hip, err := os.ReadFile("hip_attention.go")
+	if err != nil {
+		t.Fatalf("failed to read hip_attention.go: %v", err)
+	}
+	hipStr := string(hip)
+	for _, gone := range []string{
+		"func HIPContiguizeF16KVCache(",
+		"func ExecuteHIPAttentionWithContiguization(",
+		"type HIPFlashAttnDequantScratchpad struct",
+		"func ExecuteHIPAttentionWithDequantOnce(",
+	} {
+		if strings.Contains(hipStr, gone) {
+			t.Errorf("hip_attention.go still declares retired per-call KV path %q; it must not return without a caller and an allocation ceiling", gone)
+		}
+	}
+	// The library math stays: it is exercised directly by radv_attention_test.go.
+	for _, keep := range []string{
+		"func ShouldHIPContiguizeF16KV(",
+		"func DiagnoseHIPChannelCamping(",
+	} {
+		if !strings.Contains(hipStr, keep) {
+			t.Errorf("hip_attention.go lost %q; the retirement was supposed to leave the calibrated helpers intact", keep)
+		}
+	}
+
+	ops, err := os.ReadFile("vulkan_ops.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops.go: %v", err)
+	}
+	if strings.Contains(string(ops), "func DequantizeAndTransposeKVScratchpad(") {
+		t.Error("vulkan_ops.go still declares retired per-call KV staging DequantizeAndTransposeKVScratchpad; it allocated two whole f32 KV buffers per call with zero callers")
+	}
+	// The single-pass dequant pipeline must remain.
+	for _, keep := range []string{
+		"func DequantizeKVScratchpad(",
+		"func ExecuteVulkanAttentionWithDequantOnce(",
+	} {
+		if !strings.Contains(string(ops), keep) {
+			t.Errorf("vulkan_ops.go lost %q; the retirement was supposed to leave the calibrated dequant-once pipeline intact", keep)
+		}
+	}
+}

@@ -532,12 +532,14 @@ func (t *ExpertCheckpointTier) staging(name string) (*checkpointStaging, bool) {
 	return t.stagingForBackend(name, nil)
 }
 
-// borrowedExpertUploadBackend explicitly admits immutable Q2_K/Q3_K source
+// borrowedExpertUploadBackend explicitly admits immutable k-quant source
 // views. Every selected upload entry point (Upload, UploadClass, or UploadAsync)
 // must consume/copy every source byte before returning, even if device completion
 // is deferred, and must not mutate or retain the source. Returned tensors require
 // independent ownership: freeing one cannot invalidate another upload of the same
-// host range.
+// host range. The capability is kind-agnostic: it certifies the synchronous-copy
+// contract, and the staging path relies on it for every admitted quant (Q4_K/Q5_K/
+// Q6_K included), not only the narrow Q2_K/Q3_K forms (fak#13871).
 // Unknown backends, including host-pointer-interning backends, keep owned bytes.
 type borrowedExpertUploadBackend interface {
 	SupportsBorrowedExpertUploads() bool
@@ -554,8 +556,7 @@ func (t *ExpertCheckpointTier) stagingForBackend(name string, be compute.Backend
 		return nil, false
 	}
 	capability, capable := be.(borrowedExpertUploadBackend)
-	borrowSafe := capable && capability.SupportsBorrowedExpertUploads() &&
-		(entry.quant == ExpertCheckpointQ2K || entry.quant == ExpertCheckpointQ3K)
+	borrowSafe := capable && capability.SupportsBorrowedExpertUploads()
 	return &checkpointStaging{
 		key: entry.halKey(name),
 		mk: func() compute.Tensor {
@@ -967,16 +968,18 @@ func (t *ExpertCheckpointTier) faultOwned(name string, id polymodel.ModelID, ent
 		}
 	}
 
-	// The narrow Q2_K/Q3_K stream-through path can borrow immutable checkpoint
-	// bytes under the model/session lifetime. Staging separately requires an
-	// explicit borrow-safe upload capability or makes a consumer-owned copy.
-	// Retained caches, overlays (including absent
+	// The stream-through path can borrow immutable checkpoint bytes under the
+	// model/session lifetime for EVERY admitted quant, not only Q2_K/Q3_K: the
+	// mapped reader capability is kind-agnostic and stages verbatim super-blocks,
+	// so a Q4_K/Q5_K/Q6_K miss needs no owned projection copy either. Staging
+	// separately requires an explicit borrow-safe upload capability or makes a
+	// consumer-owned copy. Retained caches, overlays (including absent
 	// rows), and page-cache accounting keep their existing read contract. Source
 	// I/O stays outside the bookkeeping lock; ownership/publication below is shared.
 	var err error
 	var borrowed bool
 	var ownedBytes int64
-	if (entry.quant == ExpertCheckpointQ2K || entry.quant == ExpertCheckpointQ3K) && t.pool.Budget() == 0 && overlay == nil && !src.PageCacheEnabled() {
+	if t.pool.Budget() == 0 && overlay == nil && !src.PageCacheEnabled() {
 		_, borrowed = src.r.(ggufReadOnlyRange)
 		raw, err = src.readExpertReadOnly(entry.fused, entry.expert)
 	} else {

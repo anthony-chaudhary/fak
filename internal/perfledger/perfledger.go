@@ -80,6 +80,9 @@ type Record struct {
 	PrefillTPS           float64        `json:"prefill_tps,omitempty"`
 	DecodeTPS            float64        `json:"decode_tps,omitempty"`
 	NativeTiming         *NativeTiming  `json:"native_timing,omitempty"`
+	// PrefillRoute is the request's whole-sequence prefill route decision when the
+	// native engine made one; absent on a proxied, mock or non-Qwen turn.
+	PrefillRoute *PrefillRoute `json:"prefill_route,omitempty"`
 
 	PartialNativePhases *PartialNativePhases `json:"partial_native_phases,omitempty"`
 	// Error is the failure class of a turn that did not complete (one of the Error*
@@ -176,6 +179,19 @@ type PartialNativePhases struct {
 	DecodeObservations  uint64   `json:"decode_observations,omitempty"`
 }
 
+// PrefillRoute is one request's whole-sequence prefill route decision, when the
+// native engine made one. EffectivePath is the route that actually ran; on a
+// decline it is the scalar token-replay fallback and DeclineReason names why, in
+// the same stable vocabulary the model receipt carries. Absent means no eligible
+// decision was observed, never a measured native route.
+type PrefillRoute struct {
+	RequestedPath               string `json:"requested_path,omitempty"`
+	EffectivePath               string `json:"effective_path,omitempty"`
+	DeclineReason               string `json:"decline_reason,omitempty"`
+	FallbackActive              bool   `json:"fallback_active,omitempty"`
+	NativePerformanceQualifying bool   `json:"native_performance_qualifying,omitempty"`
+}
+
 // NativeTiming is the engine-measured phase split for a native request. It is
 // independent of client TTFT and request wall time, which can include agent-loop
 // tool turns. A zero phase is unknown and omitted.
@@ -186,6 +202,34 @@ type NativeTiming struct {
 	DecodeTokens  int     `json:"decode_tokens,omitempty"`
 	PrefillTPS    float64 `json:"prefill_tps,omitempty"`
 	DecodeTPS     float64 `json:"decode_tps,omitempty"`
+	// CPUMSPerToken is process CPU milliseconds per decode step and HostShare is
+	// process CPU over decode wall in cores (can exceed 1), both sampled around
+	// the decode loop. Nil is unmeasured; a nonnil zero is a measured zero.
+	CPUMSPerToken *float64 `json:"cpu_ms_per_token,omitempty"`
+	HostShare     *float64 `json:"host_share,omitempty"`
+}
+
+// WithHostWork returns a copy carrying the decode-window CPU split. Values that
+// are negative, NaN or infinite stay absent rather than becoming measurements.
+func (n *NativeTiming) WithHostWork(cpuMSPerToken float64, cpuOK bool, hostShare float64, shareOK bool) *NativeTiming {
+	if n == nil {
+		return nil
+	}
+	out := *n
+	if v, ok := finiteNonnegativeHostWork(cpuMSPerToken, cpuOK); ok {
+		out.CPUMSPerToken = &v
+	}
+	if v, ok := finiteNonnegativeHostWork(hostShare, shareOK); ok {
+		out.HostShare = &v
+	}
+	return &out
+}
+
+func finiteNonnegativeHostWork(v float64, ok bool) (float64, bool) {
+	if !ok || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false
+	}
+	return roundTo(v, 1e6), true
 }
 
 // NewNativeTiming keeps only finite, positive engine-authored phases. Missing
@@ -405,6 +449,9 @@ type NativeTimingSummary struct {
 	DecodeTPSP50       float64 `json:"decode_tps_p50,omitempty"`
 	PrefillTPSWeighted float64 `json:"prefill_tps_weighted,omitempty"`
 	DecodeTPSWeighted  float64 `json:"decode_tps_weighted,omitempty"`
+	HostWorkMeasured   int     `json:"host_work_measured,omitempty"`
+	CPUMSPerTokenP50   float64 `json:"cpu_ms_per_token_p50,omitempty"`
+	HostShareP50       float64 `json:"host_share_p50,omitempty"`
 }
 
 // ClientSummary is one client's served turns: its prompt-cache hit share over
@@ -459,7 +506,7 @@ func Summarize(recs []Record) Summary {
 	var ttft, prefill, decode, e2e, gpuBusy []float64
 	var prompt, cached, prefillTok int64
 	var prefillMS float64
-	var nativePrefillMS, nativeDecodeMS, nativePrefillTPS, nativeDecodeTPS []float64
+	var nativePrefillMS, nativeDecodeMS, nativePrefillTPS, nativeDecodeTPS, nativeCPUMSPerToken, nativeHostShare []float64
 	var nativePrefillTokens, nativeDecodeTokens int64
 	var nativePrefillTotalMS, nativeDecodeTotalMS float64
 	nativePrefillWeighted, nativeDecodeWeighted := true, true
@@ -530,6 +577,15 @@ func Summarize(recs []Record) Summary {
 					s.NativeTiming = &NativeTimingSummary{}
 				}
 				s.NativeTiming.Count++
+				if c, h := stored.CPUMSPerToken, stored.HostShare; c != nil && h != nil {
+					if cv, ok := finiteNonnegativeHostWork(*c, true); ok {
+						if hv, ok := finiteNonnegativeHostWork(*h, true); ok {
+							s.NativeTiming.HostWorkMeasured++
+							nativeCPUMSPerToken = append(nativeCPUMSPerToken, cv)
+							nativeHostShare = append(nativeHostShare, hv)
+						}
+					}
+				}
 				if n.PrefillMS > 0 {
 					s.NativeTiming.PrefillMeasured++
 					nativePrefillMS = append(nativePrefillMS, n.PrefillMS)
@@ -605,6 +661,8 @@ func Summarize(recs []Record) Summary {
 		n.DecodeP50MS = quantile(nativeDecodeMS, 0.50)
 		n.PrefillTPSP50 = quantile(nativePrefillTPS, 0.50)
 		n.DecodeTPSP50 = quantile(nativeDecodeTPS, 0.50)
+		n.CPUMSPerTokenP50 = quantile(nativeCPUMSPerToken, 0.50)
+		n.HostShareP50 = quantile(nativeHostShare, 0.50)
 		if nativePrefillWeighted && nativePrefillTotalMS > 0 && nativePrefillTokens > 0 {
 			n.PrefillTPSWeighted = roundTo(float64(nativePrefillTokens)/(nativePrefillTotalMS/1000), 100)
 		}
@@ -779,6 +837,9 @@ func RenderCompact(rep Report) string {
 		fmt.Fprintf(&b, " | native phases=%d prefill p50=%s/%s weighted=%s (measured %d/%d) decode p50=%s/%s weighted=%s (measured %d/%d)",
 			n.Count, fmtMS(n.PrefillP50MS), fmtTPS(n.PrefillTPSP50), fmtTPS(n.PrefillTPSWeighted), n.PrefillMeasured, n.Count,
 			fmtMS(n.DecodeP50MS), fmtTPS(n.DecodeTPSP50), fmtTPS(n.DecodeTPSWeighted), n.DecodeMeasured, n.Count)
+		if n.HostWorkMeasured > 0 {
+			fmt.Fprintf(&b, " host share p50=%.3f cpu p50=%.2fms/tok (measured %d/%d)", n.HostShareP50, n.CPUMSPerTokenP50, n.HostWorkMeasured, n.Count)
+		}
 	}
 	if s.Errors > 0 {
 		classes := make([]string, 0, len(s.ByError))

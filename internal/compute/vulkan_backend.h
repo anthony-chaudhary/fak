@@ -752,6 +752,12 @@ int fvk_argmax_f32(const void *dLogits, int n);
  * begin() when already batching is a no-op; the model loop brackets each token. */
 void fvk_batch_begin(void);
 void fvk_batch_flush(void);
+/* fvk_batch_cycle() closes the open batch and opens the next without waiting on it: the
+ * device runs the closed batch while the host records the next, and only the batch before
+ * it is retired. Every host fence, one-shot command and buffer destruction drains the
+ * in-flight batch first. FAK_VULKAN_PIPELINE_FLUSH=0 restores flush+begin. */
+void fvk_batch_cycle(void);
+int fvk_batch_inflight(void);
 bool fvk_batch_active(void);
 /* ---- exact batch resource hazards (#12218) -------------------------------------
  * The default batched recorder fences every recorded dispatch against its predecessor
@@ -787,6 +793,9 @@ uint64_t fvk_h2d_bytes(void);
 /* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */
 uint64_t fvk_direct_h2d_bytes(void);
 uint64_t fvk_d2h_bytes(void);
+/* Always-on cumulative device-work counters: recorded compute dispatches, D2H
+ * payload bytes, and host wall nanoseconds from queue submit to fence signal. */
+void fvk_device_work_counters(uint64_t *dispatches, uint64_t *d2h_bytes, uint64_t *submit_wait_ns);
 /* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
  * before initialization; all six outputs are mandatory. Observed zero directions
  * are returned as zero values with success=1. */

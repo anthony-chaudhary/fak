@@ -55,9 +55,9 @@ func TestExpertCheckpointMappedRangeEligibility(t *testing.T) {
 	}{
 		{name: "q2", quant: ExpertCheckpointQ2K, borrow: true},
 		{name: "q3", quant: ExpertCheckpointQ3K, borrow: true},
-		{name: "q4", quant: ExpertCheckpointQ4K},
-		{name: "q5", quant: ExpertCheckpointQ5K},
-		{name: "q6", quant: ExpertCheckpointQ6K},
+		{name: "q4", quant: ExpertCheckpointQ4K, borrow: true},
+		{name: "q5", quant: ExpertCheckpointQ5K, borrow: true},
+		{name: "q6", quant: ExpertCheckpointQ6K, borrow: true},
 		{name: "retained", quant: ExpertCheckpointQ2K, budget: 4096},
 		{name: "overlay_missing_row", quant: ExpertCheckpointQ2K, overlay: true},
 		{name: "page_cache", quant: ExpertCheckpointQ3K, page: true},
@@ -515,7 +515,7 @@ func TestExpertCheckpointWarmMappedConsumerOwnership(t *testing.T) {
 							first, second := mappedBackendSession(t, m, backend), mappedBackendSession(t, m, backend)
 							one, two := mappedSessionStage(first, name), mappedSessionStage(second, name)
 							mapped := uintptr(unsafe.Pointer(&r.data[0]))
-							mayBorrow := policy == "admitted" && (quant == ExpertCheckpointQ2K || quant == ExpertCheckpointQ3K)
+							mayBorrow := policy == "admitted"
 							if len(rec.inputs) != 2 || (rec.inputs[0] == mapped) != mayBorrow || (rec.inputs[1] == mapped) != mayBorrow || (policy != "admitted" && rec.inputs[0] == rec.inputs[1]) || one.Buf() == two.Buf() {
 								t.Fatalf("warm mapping lost per-consumer ownership: inputs=%v mapped=%d mayBorrow=%t sharedOutput=%t", rec.inputs, mapped, mayBorrow, one.Buf() == two.Buf())
 							}
@@ -726,7 +726,7 @@ func TestExpertCheckpointSharedOwnedConsumerOwnership(t *testing.T) {
 								}
 							}
 							wantOriginal := 1 // the exclusive cold owner keeps its existing identity
-							if policy == "admitted" && (quant == ExpertCheckpointQ2K || quant == ExpertCheckpointQ3K) {
+							if policy == "admitted" {
 								wantOriginal = 2
 							}
 							if len(rec.inputs) != 2 || originalInputs != wantOriginal || got[0].Buf() == got[1].Buf() {

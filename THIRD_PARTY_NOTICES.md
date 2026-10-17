@@ -718,3 +718,42 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## ggml-vulkan i-quant matrix-vector kernels
+
+The native i-quant decode kernels `internal/compute/shaders/iq1s_matvec.comp`,
+`iq2s_matvec.comp`, `iq2xs_matvec.comp`, `iq2xxs_matvec.comp`, `iq3s_matvec.comp`,
+`iq3xxs_matvec.comp` and `iq4xs_matvec.comp` port the codebook tables, block layouts
+and grid/sign/scale decode from `ggml/src/ggml-vulkan/vulkan-shaders/types.glsl`,
+`dequant_funcs.glsl` and the `mul_mat_vec_iq*.comp` shaders, and the per-row
+`subgroupAdd` reduction from `mul_mat_vec_base.glsl`, at llama.cpp revision
+`dff60048744f99cb0af68d02be2314456b3269dc`:
+https://github.com/ggml-org/llama.cpp/tree/dff60048744f99cb0af68d02be2314456b3269dc/ggml/src/ggml-vulkan/vulkan-shaders
+
+Changed for Fak: the bindings, push constants and residual/gate-up modes follow
+`q2k_matvec.comp`, and each subgroup owns a group of rows and strides over row
+groups. No upstream runtime is included. The upstream MIT license follows.
+
+```
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

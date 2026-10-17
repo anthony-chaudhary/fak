@@ -20,7 +20,7 @@ func TestVulkanQwen35GDNQ8InputProjectionMatchesComposition(t *testing.T) {
 		t.Skip("optional fused Q8 GDN input-projection pipeline unavailable")
 	}
 
-	const hidden = 2112 // Crosses the shader's 2,048-element activation window.
+	const hidden = 8256 // Crosses the shader's 8,192-element activation window.
 	outputs := []int{32, 16, 2, 2}
 	rng := rand.New(rand.NewSource(416))
 	xHost := make([]float32, hidden)

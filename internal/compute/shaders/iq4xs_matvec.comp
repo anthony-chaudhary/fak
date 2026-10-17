@@ -1,4 +1,6 @@
 #version 450
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 // iq4xs_matvec.comp - GGML IQ4_XS matrix-vector product on the packed weights.
 //
@@ -7,6 +9,7 @@
 //   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:1703-1728   (block_iq4_xs layout)
 //   ggml/src/ggml-vulkan/vulkan-shaders/types.glsl:1807-1822   (kvalues_iq4nl table in LDS)
 //   ggml/src/ggml-vulkan/vulkan-shaders/dequant_funcs.glsl:450-478 (scale/nibble decode)
+//   ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_base.glsl  (subgroupAdd row reduction)
 //
 // MIT License. Copyright (c) 2023-2026 The ggml authors.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this
@@ -35,14 +38,15 @@
 // dl = d * (ls - 32); weight ib*32 + j is kvalues[qs[16*ib + j] & 15] and weight
 // ib*32 + 16 + j is kvalues[qs[16*ib + j] >> 4], j in 0..15.
 //
-// Work split: a 64-lane workgroup owns ROWS consecutive rows at a time and strides over
-// row groups (the dispatch is capped, so the per-workgroup table setup is amortized).
-// Sixteen lanes cover one superblock: lane = 32-weight sub-block * 2 + half, each lane
-// owning 16 consecutive weights, so four superblocks are in flight per row per step. The
-// activation slice is loaded once per step and reused for every row. LDS reduction.
+// Work split: each subgroup owns NR consecutive rows at a time and strides over row groups.
+// Sixteen lanes cover one superblock: lane = 32-weight sub-block * 2 + half, each lane owning
+// 16 consecutive weights, so gl_SubgroupSize/16 superblocks are in flight per row per step.
+// The activation slice is loaded once per step and reused for all NR rows; each row is
+// reduced with one subgroupAdd, so a row group pays no workgroup barrier. laneDot is called
+// with a constant buffer selector so each load reads one binding.
 layout(local_size_x = 64) in;
 
-const uint ROWS = 2u;
+const uint NR = 8u;
 const uint LANES = 64u;
 const uint BLOCK_BYTES = 136u;
 
@@ -61,8 +65,6 @@ layout(push_constant) uniform PC {
     int auxOutDim;
     float eps;
 } pc;
-
-shared float red[ROWS * LANES];
 
 // Byte-addressed reads of the packed stream (every IQ block size is even, so a 16-bit
 // field never straddles a 32-bit word).
@@ -106,55 +108,54 @@ float laneDot(bool s, uint b, uint ib, uint hf, vec4 xv[4]) {
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
+    int mode = pc.auxOutDim > 0 ? 2 : (pc.auxOutDim < 0 ? 1 : 0);
+    uint rows0 = uint(pc.outDim);
+    uint rows1 = mode == 2 ? uint(pc.auxOutDim) : 0u;
+    uint rg0 = (rows0 + NR - 1u) / NR;
+    uint rgTotal = rg0 + (rows1 + NR - 1u) / NR;
+    uint nsg = gl_NumSubgroups;
+    if (gl_WorkGroupID.x * nsg >= rgTotal) return;
     if (tid < 16u) kv[tid] = KVALUES[tid];
     barrier();
 
-    int mode = pc.auxOutDim > 0 ? 2 : (pc.auxOutDim < 0 ? 1 : 0);
     uint tok = gl_WorkGroupID.y;
-    uint rg0 = (uint(pc.outDim) + ROWS - 1u) / ROWS;
-    uint rgTotal = rg0 + (mode == 2 ? (uint(pc.auxOutDim) + ROWS - 1u) / ROWS : 0u);
-    uint inDim = uint(pc.inDim);
-    uint nsb = inDim / 256u;
-    uint xBase = tok * (inDim >> 2u);
-    uint t16 = tid & 15u;
+    uint nsb = uint(pc.inDim) / 256u;
+    uint xBase = tok * (uint(pc.inDim) >> 2u);
+    uint lane = gl_SubgroupInvocationID;
+    uint t16 = lane & 15u;
     uint ib32 = t16 >> 1u;
     uint hf = t16 & 1u;
+    uint sbStep = gl_SubgroupSize >> 4u;
 
-    for (uint rg = gl_WorkGroupID.x; rg < rgTotal; rg += gl_NumWorkGroups.x) {
+    for (uint rg = gl_WorkGroupID.x * nsg + gl_SubgroupID; rg < rgTotal; rg += gl_NumWorkGroups.x * nsg) {
         bool second = rg >= rg0;
-        uint rowBase = (second ? rg - rg0 : rg) * ROWS;
-        uint rowsOut = second ? uint(pc.auxOutDim) : uint(pc.outDim);
+        uint rowBase = (second ? rg - rg0 : rg) * NR;
+        uint rowsOut = second ? rows1 : rows0;
+        uint rowLast = rowsOut - 1u;
 
-        float acc[ROWS];
-        for (uint r = 0u; r < ROWS; ++r) acc[r] = 0.0;
-        for (uint sb = tid >> 4u; sb < nsb; sb += LANES / 16u) {
+        float acc[NR];
+        for (uint r = 0u; r < NR; ++r) acc[r] = 0.0;
+        for (uint sb = lane >> 4u; sb < nsb; sb += sbStep) {
             vec4 xv[4];
             uint xi = xBase + ((sb * 256u + ib32 * 32u + hf * 16u) >> 2u);
             for (uint k = 0u; k < 4u; ++k) xv[k] = x4[xi + k];
-            for (uint r = 0u; r < ROWS; ++r) {
-                uint row = rowBase + r;
-                if (row >= rowsOut) break;
-                acc[r] += laneDot(second, (row * nsb + sb) * BLOCK_BYTES, ib32, hf, xv);
+            if (second) {
+                for (uint r = 0u; r < NR; ++r)
+                    acc[r] += laneDot(true, (min(rowBase + r, rowLast) * nsb + sb) * BLOCK_BYTES, ib32, hf, xv);
+            } else {
+                for (uint r = 0u; r < NR; ++r)
+                    acc[r] += laneDot(false, (min(rowBase + r, rowLast) * nsb + sb) * BLOCK_BYTES, ib32, hf, xv);
             }
         }
 
-        for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] = acc[r];
-        barrier();
-        for (uint stride = LANES / 2u; stride > 0u; stride >>= 1u) {
-            if (tid < stride) {
-                for (uint r = 0u; r < ROWS; ++r) red[r * LANES + tid] += red[r * LANES + tid + stride];
-            }
-            barrier();
-        }
-        if (tid < ROWS) {
-            uint row = rowBase + tid;
-            if (row < rowsOut) {
-                float v = red[tid * LANES];
+        for (uint r = 0u; r < NR; ++r) {
+            float v = subgroupAdd(acc[r]);
+            uint row = rowBase + r;
+            if (lane == 0u && row < rowsOut) {
                 if (mode == 1) y[row] += v;
                 else if (second) y1[row] = v;
-                else y[tok * uint(pc.outDim) + row] = v;
+                else y[tok * rows0 + row] = v;
             }
         }
-        barrier();
     }
 }

@@ -1,7 +1,6 @@
 package compute
 
 import (
-	"encoding/binary"
 	"math"
 )
 
@@ -58,12 +57,7 @@ func (image v41HostReadbackImage) materializePanelRows(sizes []int, first int, r
 	for i, n := range rows {
 		raw := image.region(first+i, sizes[first+i])
 		for r := 0; r < n; r++ {
-			row := make([]float32, width)
-			start := r * width * 4
-			for j := range row {
-				row[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[start+4*j:]))
-			}
-			values[next] = row
+			values[next] = v41DecodeF32Row(raw[r*width*4:], width)
 			next++
 		}
 	}

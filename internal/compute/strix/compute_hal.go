@@ -191,10 +191,40 @@ const (
 	EnvStrixGEMVLaunchPath = "FAK_STRIX_GEMV_LAUNCH_PATH"
 )
 
+// strixEnvCache memoizes process-constant environment lookups on the decode
+// admission path. os.Getenv costs a syscall plus a UTF-16 conversion on Windows,
+// and the gfx1151 decode GEMV admission re-reads its flags on every dispatch, so
+// each name is read at most once per cache generation.
+//
+// The cache is deliberately not self-invalidating: a caller that mutates the
+// environment at runtime (notably a test using t.Setenv) must call
+// ResetStrixEnvCache afterwards, or the next read returns the stale value.
+var strixEnvCache sync.Map // name -> string
+
+// strixEnvValue returns the memoized value of name, reading the process
+// environment only on a cache miss.
+func strixEnvValue(name string) string {
+	if v, ok := strixEnvCache.Load(name); ok {
+		return v.(string)
+	}
+	v := os.Getenv(name)
+	strixEnvCache.Store(name, v)
+	return v
+}
+
+// ResetStrixEnvCache drops every memoized lookup so the next read observes the
+// current process environment.
+func ResetStrixEnvCache() {
+	strixEnvCache.Range(func(k, _ any) bool {
+		strixEnvCache.Delete(k)
+		return true
+	})
+}
+
 // StrixDecodeGEMVDeviceRequested reports whether the operator opted into the roofline decode
 // GEMV. Opt-in only: the default is false, so existing behaviour is byte-preserved.
 func StrixDecodeGEMVDeviceRequested() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvStrixWave32GEMVDecode))) {
+	switch strings.ToLower(strings.TrimSpace(strixEnvValue(EnvStrixWave32GEMVDecode))) {
 	case "1", "true", "yes", "on":
 		return true
 	default:
@@ -205,7 +235,7 @@ func StrixDecodeGEMVDeviceRequested() bool {
 // StrixGEMVLaunchPath returns the operator-asserted launch mechanism, normalized. Anything other
 // than a concrete non-"none" mechanism is treated as unproven ("").
 func StrixGEMVLaunchPath() string {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(EnvStrixGEMVLaunchPath)))
+	v := strings.ToLower(strings.TrimSpace(strixEnvValue(EnvStrixGEMVLaunchPath)))
 	switch v {
 	case "", "none", "0", "false", "no", "off":
 		return ""
@@ -258,7 +288,7 @@ func StrixGEMVHSACOLaunchProof() (HSACOLaunchProof, error) {
 		return HSACOLaunchProof{}, fmt.Errorf("%w: %s is not enabled",
 			ErrWave32GEMVDecodeUnavailable, EnvStrixWave32GEMVDecode)
 	}
-	path := strings.TrimSpace(os.Getenv(EnvStrixGEMVHSACOPath))
+	path := strings.TrimSpace(strixEnvValue(EnvStrixGEMVHSACOPath))
 	if path == "" {
 		return HSACOLaunchProof{}, fmt.Errorf("%w: no validated gfx1151 hsaco/AQL launch path (%s unset)",
 			ErrWave32GEMVDecodeUnavailable, EnvStrixGEMVHSACOPath)

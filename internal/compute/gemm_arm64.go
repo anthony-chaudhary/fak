@@ -398,39 +398,6 @@ func GEMMFP16TN(A, B []uint16, C []float32, M, N, K int) {
 	}
 }
 
-// GEMMFP16F32 computes matrix multiplication C = A * B in fp16 using float32 slices:
-// Converts inputs to fp16 halfwords and runs the NEON microkernel.
-func GEMMFP16F32(A, B []float32, C []float32, M, N, K int) {
-	aF16 := make([]uint16, M*K)
-	for i, v := range A[:M*K] {
-		aF16[i] = Float32ToFloat16Bits(v)
-	}
-	bF16 := make([]uint16, K*N)
-	for i, v := range B[:K*N] {
-		bF16[i] = Float32ToFloat16Bits(v)
-	}
-	GEMMFP16(aF16, bF16, C, M, N, K)
-}
-
-// PrefillGEMMFP16 computes prefill matrix multiplication Y = X * W^T:
-//
-//	X: [P, in] activations
-//	W: [out, in] weights
-//	Returns Y: [P, out]
-func PrefillGEMMFP16(X, W []float32, out, in, P int) []float32 {
-	xF16 := make([]uint16, P*in)
-	for i, v := range X[:P*in] {
-		xF16[i] = Float32ToFloat16Bits(v)
-	}
-	wF16 := make([]uint16, out*in)
-	for i, v := range W[:out*in] {
-		wF16[i] = Float32ToFloat16Bits(v)
-	}
-	Y := make([]float32, P*out)
-	GEMMFP16TN(xF16, wF16, Y, P, out, in)
-	return Y
-}
-
 // Reference scalar implementations for parity verification:
 
 // ReferenceGEMMInt8 computes exact C = A * B using un-tiled scalar arithmetic.

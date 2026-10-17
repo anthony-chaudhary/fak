@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
@@ -717,6 +718,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		ln.forwarded = make([]int, 0, min(max(0, maxNew-1), inKernelSnapshotCheckpointTokens))
 	}
 	measurement.startDecodeTrace()
+	hostSpan := nativeperf.StartDecodeSpan()
+	defer hostSpan.Abandon()
 	td := time.Now()
 	var coalescedErr error
 	if coordinated, coordinateErr := coalescedDecode(ctx, ln); coordinated {
@@ -733,6 +736,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		err = coalescedErr
 	}
 	decodeS = time.Since(td).Seconds()
+	hostSpan.Finish(ctx, max(gen-1, 0))
 	enginestep.Default.ObservePhaseContext(ctx, enginestep.PhaseDecode, time.Since(td))
 	if err == nil && ctx.Err() == nil && len(ln.forwarded) > 0 {
 		// Output has already been emitted successfully. Snapshot/admission is a

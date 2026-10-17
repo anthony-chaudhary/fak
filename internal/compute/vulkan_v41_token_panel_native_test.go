@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// Ref #12640. The existing subprocess harness sets the opt-in before init()
-// builds optional pipelines. Setting it with t.Setenv after vk(t) is too late.
+// Ref #12640. The existing subprocess harness sets the panel policy before
+// init() builds optional pipelines. Setting it with t.Setenv after vk(t) is too
+// late. An empty value is not "0", so it exercises the default-on startup.
 func v41TokenPanelNativeStartup(t *testing.T, q2, q3 string) bool {
 	t.Helper()
 	if _, ok := Lookup("vulkan"); !ok {
@@ -48,8 +49,8 @@ func v41TokenPanelNativePhysicalDevice(t *testing.T) *vulkanBackend {
 func v41TokenPanelNativeDevice(t *testing.T) *vulkanBackend {
 	t.Helper()
 	v := v41TokenPanelNativePhysicalDevice(t)
-	if os.Getenv("FAK_V41_Q2K_TOKEN_PANEL") != "1" || !v.SupportsQ3KMatMul() {
-		t.Fatal("UNQUALIFIED: token-panel opt-in or native Q3_K scalar pipeline unavailable")
+	if !v41Q2KTokenPanelEnabled() || !v41Q3KTokenPanelEnabled() || !v.SupportsQ3KMatMul() {
+		t.Fatal("UNQUALIFIED: default-on token panels disabled or native Q3_K scalar pipeline unavailable")
 	}
 	previous := vulkanDebugSelectQ2KMatvec(true)
 	t.Cleanup(func() { vulkanDebugSelectQ2KMatvec(previous) })
@@ -135,7 +136,7 @@ func v41TokenPanelNativeFixture(dtype Dtype, out, in, rows int, exact bool) (Ten
 // The ordinary MatMul Approx contract does not qualify this model route.
 // fak-test:runtime integration est=20s lane=optin
 func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
-	if v41TokenPanelNativeStartup(t, "1", "0") {
+	if v41TokenPanelNativeStartup(t, "", "") {
 		return
 	}
 	v := v41TokenPanelNativeDevice(t)
@@ -297,7 +298,7 @@ func v41TokenPanelNativeEqual(t *testing.T, got, want []float32) {
 // separate model cohort's status-ordering and session-retirement contract.
 // fak-test:runtime integration est=3s lane=optin
 func TestVulkanV41TokenPanelNativeRefusalCleanup(t *testing.T) {
-	if v41TokenPanelNativeStartup(t, "1", "0") {
+	if v41TokenPanelNativeStartup(t, "", "") {
 		return
 	}
 	v := v41TokenPanelNativeDevice(t)
@@ -390,8 +391,8 @@ func TestVulkanV41TokenPanelNativeRefusalCleanup(t *testing.T) {
 	}
 }
 
-// The independent Q3 opt-in must reach a real native dispatch while Q2 remains
-// unavailable. A late opt-in must not invent an unbuilt pipeline.
+// Default-on Q3 must reach a real native dispatch while Q2=0 keeps Q2
+// unavailable. A late re-enable must not invent an unbuilt pipeline.
 // fak-test:runtime integration est=3s lane=optin
 func TestVulkanV41TokenPanelNativeQ3Only(t *testing.T) {
 	for _, startupQ3 := range []string{"1", "0"} {

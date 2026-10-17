@@ -66,13 +66,7 @@ func (m *Model) v41LayerFFNInputs(in v41LayerMoEInput) (v41LayerFFNPanel, error)
 	seq := len(in.x)
 	var panel v41LayerFFNPanel
 	scratch.v41LayerCacheReset()
-	if scratch.expertLayerCacheBytes == 0 {
-		if v41TestLayerCacheBudgetOverride > 0 {
-			scratch.expertLayerCacheBytes = v41TestLayerCacheBudgetOverride
-		} else {
-			scratch.expertLayerCacheBytes = m.v41LayerExpertCacheBudget()
-		}
-	}
+	scratch.v41SizeExpertLayerBudget(m)
 	panel.inputs = make([][]float32, seq)
 	var projectFFN func([]float32) ([]float32, error)
 	var err error
