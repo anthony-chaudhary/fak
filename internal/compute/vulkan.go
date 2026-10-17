@@ -627,6 +627,21 @@ func (v *vulkanBackend) BeginBatch() {
 func (v *vulkanBackend) FlushBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	v.flushBatchLocked(false)
+}
+
+// CycleBatch ends the open window and opens the next one without waiting for the
+// closed window to execute (fvk_batch_cycle): the device runs it while the caller
+// records the next. An exact-hazard window keeps the synchronous flush.
+func (v *vulkanBackend) CycleBatch() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.flushBatchLocked(true)
+	v.batchNodeSeq = 0
+	vulkanBatchLedger().begin()
+}
+
+func (v *vulkanBackend) flushBatchLocked(cycle bool) {
 	armed := VulkanHazardLoweringArmed(os.Getenv)
 	plan, stats := vulkanBatchLedger().lower(armed)
 	vulkanBatchStatsGlobal.observe(stats)
@@ -646,7 +661,11 @@ func (v *vulkanBackend) FlushBatch() {
 	} else {
 		C.fvk_batch_hazards_arm(0)
 	}
-	C.fvk_batch_flush()
+	if cycle {
+		C.fvk_batch_cycle()
+	} else {
+		C.fvk_batch_flush()
+	}
 	C.fvk_batch_hazards_arm(0)
 	C.fvk_batch_hazards_reset()
 }
@@ -1523,6 +1542,12 @@ func (v *vulkanBackend) VulkanDebugBatchActive() bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	return bool(C.fvk_batch_active())
+}
+
+func (v *vulkanBackend) VulkanDebugBatchInflight() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_batch_inflight() != 0
 }
 
 func (v *vulkanBackend) VulkanDebugResetQ4KStage() {

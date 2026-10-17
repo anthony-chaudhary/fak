@@ -752,6 +752,12 @@ int fvk_argmax_f32(const void *dLogits, int n);
  * begin() when already batching is a no-op; the model loop brackets each token. */
 void fvk_batch_begin(void);
 void fvk_batch_flush(void);
+/* fvk_batch_cycle() closes the open batch and opens the next without waiting on it: the
+ * device runs the closed batch while the host records the next, and only the batch before
+ * it is retired. Every host fence, one-shot command and buffer destruction drains the
+ * in-flight batch first. FAK_VULKAN_PIPELINE_FLUSH=0 restores flush+begin. */
+void fvk_batch_cycle(void);
+int fvk_batch_inflight(void);
 bool fvk_batch_active(void);
 /* ---- exact batch resource hazards (#12218) -------------------------------------
  * The default batched recorder fences every recorded dispatch against its predecessor

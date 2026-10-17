@@ -724,10 +724,13 @@ bool queryDeviceLocalMemoryBudget(VkDeviceSize* budget, VkDeviceSize* usage) {
 #endif
 }
 
+void drainInflight();
+
 void destroyBuffer(Buffer* b) {
     if (g_v41SubmissionPendingFailure) return; // referenced scratch/arena may still be in flight
     if (!b) return;
     if (b->buf) {
+        drainInflight(); // a pipelined batch may still bind this buffer
         // Descriptor sets outlive temporary buffers; a recycled handle is not
         // proof that its old binding is still valid. Cover every destruction path.
         clearDescriptorBindingCache();
@@ -1304,7 +1307,14 @@ void freeGdnScratch() {
 }
 
 // ---- one-shot command buffer helper --------------------------------------------
+VkCommandBuffer allocBeginCmd();
+// A one-shot command is a host fence: the in-flight batch completes first.
 VkCommandBuffer beginCmd() {
+    drainInflight();
+    return allocBeginCmd();
+}
+
+VkCommandBuffer allocBeginCmd() {
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = g_cmdpool;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1337,6 +1347,7 @@ void endSubmitWait(VkCommandBuffer cmd) {
 }
 
 VkCommandBuffer v41BeginCmdChecked() {
+    drainInflight();
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = g_cmdpool;
@@ -1394,6 +1405,7 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
 VkResult restoreBeginCommand() {
     if (g_submissionStatus != VK_SUCCESS) return g_submissionStatus;
     if (g_restore.cmd != VK_NULL_HANDLE) return VK_SUCCESS;
+    drainInflight();
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = g_cmdpool;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1691,7 +1703,7 @@ void batchBegin() {
 	if (g_batching) return;          // already recording — the model brackets each token
 	// A V4.1 window must latch command allocation/begin failures, not abort.
 	g_batchCmd = g_batchIdleCmd != VK_NULL_HANDLE ? beginReusedBatchCommand() :
-        (g_stepBatch ? v41BeginCmdChecked() : beginCmd());
+        (g_stepBatch ? v41BeginCmdChecked() : allocBeginCmd());
 	if (g_batchCmd == VK_NULL_HANDLE) return;
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
@@ -1706,11 +1718,141 @@ void batchBegin() {
 	g_batchHazardSync.clear();
 }
 
+// ---- pipelined batch cycle (FAK_VULKAN_PIPELINE_FLUSH, default on) ----------------
+// A synchronous mid-token flush leaves the device idle while the host records the next
+// batch, then pays a submit and a fence wake. batchCycle submits the closed batch WITHOUT
+// waiting and retires only the batch before it, so the host records batch N+1 while the
+// device runs batch N. The in-flight batch keeps its command buffer, descriptor sets and
+// parked frees until its own fence; every host-sync path (one-shot command, host copy,
+// buffer destruction, flush) drains it first, so no caller can observe it.
+struct InflightBatch {
+    bool active = false;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    std::vector<DescriptorSetRecord> sets;
+    std::vector<Buffer*> freed;
+    uint64_t d2dCount = 0;
+    uint64_t d2dBytes = 0;
+    bool d2dValid = true;
+};
+InflightBatch g_inflight;
+VkFence g_pipeFences[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+const bool g_pipelineFlush = [] {
+    const char* v = std::getenv("FAK_VULKAN_PIPELINE_FLUSH");
+    return !(v && v[0] == '0' && v[1] == '\0');
+}();
+std::atomic<uint64_t> g_pipeCycles{0}, g_pipeFallbacks{0}, g_pipeDrains{0}, g_pipeWaitNs{0};
+
+void drainInflight() {
+    if (!g_inflight.active) return;
+    InflightBatch done = std::move(g_inflight);
+    g_inflight = InflightBatch{};
+    const auto t0 = std::chrono::steady_clock::now();
+    VKCHECK(vkWaitForFences(g_dev, 1, &done.fence, VK_TRUE, UINT64_MAX));
+    if (g_dp_on) {
+        g_pipeWaitNs.fetch_add((uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - t0).count(), std::memory_order_relaxed);
+        g_pipeDrains.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!done.d2dValid || !checkedCounterAdd(g_d2dCount, done.d2dCount) ||
+        !checkedCounterAdd(g_d2dBytes, done.d2dBytes)) {
+        g_transferCountersValid = false;
+    }
+    for (auto it = done.sets.rbegin(); it != done.sets.rend(); ++it) {
+        if (it->set) g_descSetPool[it->layout].push_back(*it);
+    }
+    if (g_batchIdleCmd == VK_NULL_HANDLE) {
+        g_batchIdleCmd = done.cmd;
+        g_batchIdleDevice = g_dev;
+        g_batchIdlePool = g_cmdpool;
+    } else {
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &done.cmd);
+    }
+    // Sets return to the pool before any release can clear the binding cache. The fence
+    // proved these frees complete, so they recycle now even while a batch records.
+    const bool batching = g_batching;
+    g_batching = false;
+    for (Buffer* b : done.freed) fvk_free(b);
+    g_batching = batching;
+}
+
+VkFence pipelineFence() {
+    const int slot = g_inflight.active && g_inflight.fence == g_pipeFences[0] ? 1 : 0;
+    if (g_pipeFences[slot] == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        if (vkCreateFence(g_dev, &fci, nullptr, &g_pipeFences[slot]) != VK_SUCCESS) {
+            g_pipeFences[slot] = VK_NULL_HANDLE;
+        }
+    }
+    return g_pipeFences[slot];
+}
+
+// Queue the closing batch behind the in-flight one before waiting on either.
+void submitBehindInflightWait(VkCommandBuffer cmd) {
+    VKCHECK(vkEndCommandBuffer(cmd));
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    VKCHECK(vkResetFences(g_dev, 1, &g_submitFence));
+    VKCHECK(vkQueueSubmit(g_queue, 1, &si, g_submitFence));
+    drainInflight();
+    VKCHECK(vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX));
+    if (!retainCompletedBatchCommand(cmd)) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+}
+
+void batchFlush();
+
+void batchCycle() {
+    if (g_v41SubmissionPendingFailure || !g_batching) return;
+    VkFence fence = VK_NULL_HANDLE;
+    const bool eligible = g_pipelineFlush && !g_batchHasV41 && !g_stepBatch && !g_tsOn &&
+        !g_batchHazardsArmed && g_submissionStatus == VK_SUCCESS;
+    if (eligible && g_batchOps == 0) return;
+    if (eligible) fence = pipelineFence();
+    if (fence == VK_NULL_HANDLE) {
+        if (g_dp_on) g_pipeFallbacks.fetch_add(1, std::memory_order_relaxed);
+        batchFlush();
+        batchBegin();
+        return;
+    }
+    dp_inc(g_dp.batchSubmits);
+    VKCHECK(vkEndCommandBuffer(g_batchCmd));
+    VKCHECK(vkResetFences(g_dev, 1, &fence));
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &g_batchCmd;
+    VKCHECK(vkQueueSubmit(g_queue, 1, &si, fence));
+    drainInflight();
+    g_inflight.active = true;
+    g_inflight.cmd = g_batchCmd;
+    g_inflight.fence = fence;
+    g_inflight.sets.swap(g_batchSets);
+    g_inflight.freed.swap(g_batchFreed);
+    g_inflight.d2dCount = g_batchD2DCount;
+    g_inflight.d2dBytes = g_batchD2DBytes;
+    g_inflight.d2dValid = g_batchD2DValid;
+    g_batchCmd = VK_NULL_HANDLE;
+    g_batching = false;
+    g_batchOps = 0;
+    g_batchD2DCount = 0;
+    g_batchD2DBytes = 0;
+    g_batchD2DValid = true;
+    if (g_dp_on && (g_pipeCycles.fetch_add(1, std::memory_order_relaxed) + 1) % 1024 == 0) {
+        fprintf(stderr, "fak-vulkan pipeline cycles=%llu fallbacks=%llu drains=%llu drain_wait_ms=%.3f\n",
+            (unsigned long long)g_pipeCycles.load(), (unsigned long long)g_pipeFallbacks.load(),
+            (unsigned long long)g_pipeDrains.load(), g_pipeWaitNs.load() / 1e6);
+    }
+    batchBegin();
+    // The new batch's first access must follow every access of the in-flight one.
+    if (g_batching) recordComputeBarrier(g_batchCmd);
+}
+
 void batchFlush() {
     if (g_v41SubmissionPendingFailure) return; // never retry an uncertain submit
-    if (!g_batching) return;
+    if (!g_batching) { drainInflight(); return; }
     bool hadWork = g_batchOps > 0;
     if (g_batchHasV41) {
+        drainInflight();
         if (hadWork) dp_inc(g_dp.batchSubmits);
         const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);
         if (g_v41SubmissionPendingFailure) return; // retain command, sets and parked buffers
@@ -1720,7 +1862,8 @@ void batchFlush() {
             !checkedCounterAdd(g_d2dBytes, g_batchD2DBytes))) g_transferCountersValid = false;
     } else if (hadWork) {
         dp_inc(g_dp.batchSubmits);
-        endSubmitWait(g_batchCmd);   // single submit + fence for the whole recorded chain
+        if (g_inflight.active) submitBehindInflightWait(g_batchCmd);
+        else endSubmitWait(g_batchCmd);   // single submit + fence for the whole recorded chain
         tsBatchCollect();
         if (!g_batchD2DValid ||
             !checkedCounterAdd(g_d2dCount, g_batchD2DCount) ||
@@ -1730,6 +1873,7 @@ void batchFlush() {
     } else {
         VKCHECK(vkEndCommandBuffer(g_batchCmd));
         vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_batchCmd);
+        drainInflight();
     }
     // Push back in reverse dispatch order. The pool is LIFO, so the next token's first
     // dispatch reuses the descriptor set that represented the previous token's first
@@ -1890,6 +2034,7 @@ void copyHostToMappedWeight(Buffer* dst, const void* host, size_t bytes) {
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     if (g_v41SubmissionPendingFailure) return;
     if (bytes == 0 || !dst || !host) return;
+    drainInflight();
     if (dst->mapped) {
         copyHostToMappedWeight(dst, host, bytes);
         return;
@@ -4374,6 +4519,7 @@ void fvk_free(void* d) {
     // Park it and recycle only after the batch flushes, so it can't be handed back out and
     // rebound mid-batch.
     if (g_batching || g_v41SubmissionPendingFailure) { g_batchFreed.push_back(b); return; }
+    drainInflight();
     if (b->weightArenaBound) {
         destroyBuffer(b);
         clearDescriptorBindingCache();
@@ -5251,6 +5397,8 @@ void fvk_d2d_off(void* dst, size_t dst_off, const void* src, size_t bytes) {
 // batch entry points (C ABI).
 void fvk_batch_begin(void) { batchBegin(); }
 void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }
+void fvk_batch_cycle(void) { dp_inc(g_dp.batchFlushes); batchCycle(); }
+int fvk_batch_inflight(void) { return g_inflight.active ? 1 : 0; }
 bool fvk_batch_active(void) { return g_batching; }
 void fvk_batch_hazards_arm(int armed) { g_batchHazardsArmed = armed != 0 ? 1 : 0; }
 int fvk_batch_hazards_armed(void) { return g_batchHazardsArmed; }
@@ -5337,7 +5485,7 @@ int fvk_device_allocation_snapshot(uint64_t* live_bytes) {
 }
 
 static bool backendObservationQuiescent() {
-    return !g_batching && g_batchCmd == VK_NULL_HANDLE && g_batchOps == 0 &&
+    return !g_batching && !g_inflight.active && g_batchCmd == VK_NULL_HANDLE && g_batchOps == 0 &&
         g_batchSets.empty() && g_batchFreed.empty() &&
         g_batchD2DCount == 0 && g_batchD2DBytes == 0 && g_batchD2DValid &&
         !g_restore.stage && !g_restore.mapped && g_restore.cmd == VK_NULL_HANDLE &&
@@ -5475,7 +5623,7 @@ int fvk_phase_counter_describe(int index, char* name, size_t name_len,
 }
 
 void fvk_sync(void) {
-    if (g_v41SubmissionPendingFailure) return; if (g_dev) vkDeviceWaitIdle(g_dev); }
+    if (g_v41SubmissionPendingFailure) return; drainInflight(); if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
 int fvk_have_qwen35_gdn_q8_in_proj(void) { return g_have_qwen35_gdn_q8_in_proj; }

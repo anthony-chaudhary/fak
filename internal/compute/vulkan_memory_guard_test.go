@@ -141,6 +141,7 @@ VkResult vkBindBufferMemory(uintptr_t,VkBuffer,VkDeviceMemory,uint64_t) {return 
 VkResult vkMapMemory(uintptr_t,VkDeviceMemory,uint64_t,uint64_t,int,void** out) {*out=nullptr;return -5;}
 void vkUnmapMemory(uintptr_t,VkDeviceMemory) {}
 void clearDescriptorBindingCache() {}
+void drainInflight() {}
 `
 const guardFixtureGlobals = `
 VulkanMemoryGuard g_memoryGuard;
