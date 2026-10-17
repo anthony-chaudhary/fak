@@ -4553,6 +4553,11 @@
           "category": "incidental",
           "reason": "Prometheus observation positioned under gateway-engine as gateway-device-transient-pool-count; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
           "token": "fak_gateway_device_transient_pool_buffers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation constant guardRouterKeyEnv names the already-positioned FAK_GATEWAY_KEY credential-holder environment variable (x-gateway-engine-fakgatewaykey) for guarded router launches. It is distinct from FAK_GUARD_API_KEY_ENV, which stores another credential variable name, and adds no guard or gate policy.",
+          "token": "guardrouterkeyenv"
         }
       ],
       "exclude": [
@@ -4944,6 +4949,7 @@
         "guardinjectedenv",
         "guardoperatordirectedeffectivemode",
         "guardrails",
+        "guardrouterkeyenv",
         "guards",
         "guardsessiontempdir",
         "guardskewbuildwarning",
