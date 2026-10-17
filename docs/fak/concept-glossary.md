@@ -1546,3 +1546,45 @@ The role-attention lifecycle value after successful resume transfers resident cl
 The role-attention lifecycle value after abandon or failed resume closes the suspended operation.
 
 **Distinct from:** Unlike v41RoleAttentionState, this is its terminal closed value; repeated close is idempotent and resume is rejected.
+
+
+### v41LayerAttentionSuspension
+
+Caller-held one-lane storage selecting a concrete plain or source/reader attention continuation; the transaction owns abandonment until successful resume transfers layer work.
+
+**Distinct from:** Unlike v41RoleAttentionContinuation, this dispatch holder can contain either plain or role attention; the concrete holder retains shared lifecycle ownership and this wrapper grants no cross-request or device authority.
+
+
+### prepareAttention
+
+Transaction method that registers caller-held attention suspension storage and prepares exactly the next layer, aborting incomplete preparation.
+
+**Distinct from:** Unlike v41LayerAttentionSuspension, this is the transaction admission and preparation operation; it rejects existing pending work and does not resume projection or commit the transaction.
+
+
+### resumeV41CohortAttention
+
+Coordinates projection and ordered resume of active one-lane attention suspensions, selecting grouped output only for two or four canonically bound participants within the live owner scope.
+
+**Distinct from:** Unlike v41LayerAttentionSuspension, this coordinates multiple lane holders; it uses scalar fallback only for a capability decline before activation/arithmetic selection; selected failures never replay scalar.
+
+
+### pendingAttention
+
+Transaction field referencing its currently suspended one-lane attention holder, cleared on successful resume or abort.
+
+**Distinct from:** Unlike v41LayerAttentionSuspension, this is the transaction reference that tracks abandonment responsibility, not independent suspension storage or persistent KV ownership.
+
+
+### resumeAttention
+
+Transaction method that resumes suspended attention using supplied grouped projection or its scalar projector and transfers successful output into pending layer work.
+
+**Distinct from:** Unlike prepareAttention, this consumes an existing suspension; failures abort incomplete work and successful resume clears the pending-attention reference without committing the layer.
+
+
+### prepareV41LayerAttention
+
+Model operation that checks layer rows and retained state then prepares either plain or source/reader attention into caller-provided suspension storage.
+
+**Distinct from:** Unlike prepareAttention, this chooses and constructs the concrete model continuation; transaction admission, rollback and pending-reference ownership remain with its caller.

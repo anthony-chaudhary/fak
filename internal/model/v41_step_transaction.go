@@ -226,6 +226,7 @@ type v41StepTransaction struct {
 	headPrepared      bool
 	layer             func(int) (*v41LayerStepWork, error)
 	pendingLayer      *v41LayerStepWork
+	pendingAttention  *v41LayerAttentionSuspension
 	headInput         func() ([]float32, error)
 	headProject       func([]float32) ([]float32, error)
 	headFinish        func([]float32, func() error) ([]float32, error)
@@ -365,6 +366,10 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 			return nil, err
 		}
 		stats.LayerCalls++
+		if tx.pendingAttention != nil {
+			err := m.prepareV41LayerAttention(tx.pendingAttention, l, x, streams, pos, state, registry, scratch)
+			return nil, err
+		}
 		work, lerr := m.prepareV41LayerStepWithRegistry(l, x, streams, pos, state, registry, scratch)
 		if lerr != nil {
 			return nil, tx.abortLayerError(lerr)
@@ -443,7 +448,7 @@ func (tx *v41StepTransaction) advanceLayer() error {
 // prepareLayer owns one lane's attention/router work and undo journal. It
 // yields before expert contraction; no peer may borrow its scratch or state.
 func (tx *v41StepTransaction) prepareLayer() (err error) {
-	if tx.closed || tx.pendingLayer != nil || tx.nextLayer >= tx.layers {
+	if tx.closed || tx.pendingLayer != nil || tx.pendingAttention != nil || tx.nextLayer >= tx.layers {
 		return fmt.Errorf("%w: incremental transaction has no next layer", ErrV41ForwardStage)
 	}
 	complete := false
@@ -619,6 +624,10 @@ func (tx *v41StepTransaction) abort() {
 	// A suspended resident layer must release its local epoch before journal
 	// rollback and transaction cleanup. Even a release panic cannot skip them.
 	var cleanup any
+	if attention := tx.pendingAttention; attention != nil {
+		tx.pendingAttention = nil
+		func() { defer func() { cleanup = recover() }(); attention.close() }()
+	}
 	if work := tx.pendingLayer; work != nil {
 		tx.pendingLayer = nil
 		func() { defer func() { cleanup = recover() }(); work.close() }()
@@ -666,4 +675,124 @@ func (tx *v41StepTransaction) close() {
 		tx.cleanup()
 	}
 	cleanupOK = true
+}
+
+// v41LayerAttentionSuspension is caller-held storage for exactly one lane.
+// The concrete continuations retain shared lifecycle ownership across copies;
+// the transaction owns abandonment until successful resume transfers the work.
+type v41LayerAttentionSuspension struct {
+	plain  v41PlainAttentionContinuation
+	role   v41RoleAttentionContinuation
+	isRole bool
+}
+
+func (a *v41LayerAttentionSuspension) close() {
+	if a == nil {
+		return
+	}
+	if a.isRole {
+		a.role.close()
+	} else {
+		a.plain.close()
+	}
+}
+func (a *v41LayerAttentionSuspension) input() []float32 {
+	if a.isRole {
+		return a.role.input
+	}
+	return a.plain.input
+}
+func (a *v41LayerAttentionSuspension) project() ([]float32, error) {
+	if a.isRole {
+		return a.role.project(a.role.input)
+	}
+	return a.plain.project(a.plain.input)
+}
+func (a *v41LayerAttentionSuspension) resume(output []float32, validate bool) (*v41LayerStepWork, error) {
+	if a.isRole {
+		return a.role.resumeProjected(output, validate)
+	}
+	return a.plain.resumeProjected(output, validate)
+}
+
+func (m *Model) prepareV41LayerAttention(a *v41LayerAttentionSuspension, l int, x []float32, streams [][]float32, pos int, state, registry *V41AttentionState, scratch *v41ProjScratch) (err error) {
+	cfg := m.Cfg
+	if scratch == nil {
+		scratch = &v41ProjScratch{}
+	}
+	if err = v41CheckLayerStepRows(cfg, l, x, streams); err != nil {
+		return err
+	}
+	plan, err := v41AttentionPlanFor(cfg, l, m.v41AttentionRolesCached())
+	if err != nil {
+		return err
+	}
+	if state == nil {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: layer %d step requires retained decode state", ErrV41ForwardStage, l))
+	}
+	a.isRole = plan.Role != V41AttentionRolePerLayer || plan.Ratio > 0
+	if a.isRole {
+		a.role, err = m.prepareV41RoleAttention(l, plan, x, streams, pos, state, registry, scratch)
+		return err
+	}
+	if pos != state.nextWindowPos {
+		return v41StageErr(v41StageAttention, l, fmt.Errorf("%w: layer %d step position %d is not the next retained position %d", ErrV41ForwardStage, l, pos, state.nextWindowPos))
+	}
+	a.plain, err = m.prepareV41PlainAttention(l, x, streams, pos, state, scratch)
+	return err
+}
+
+func (tx *v41StepTransaction) prepareAttention(a *v41LayerAttentionSuspension) (err error) {
+	if a == nil || tx.closed || tx.pendingLayer != nil || tx.pendingAttention != nil || tx.nextLayer >= tx.layers {
+		return fmt.Errorf("%w: incremental transaction has no next attention", ErrV41ForwardStage)
+	}
+	*a = v41LayerAttentionSuspension{}
+	tx.pendingAttention = a
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	work, err := tx.layer(tx.nextLayer)
+	if err != nil {
+		return tx.abortLayerError(err)
+	}
+	if work != nil {
+		work.close()
+		return tx.abortLayerError(fmt.Errorf("%w: attention suspension returned completed work", ErrV41ForwardStage))
+	}
+	complete = true
+	return nil
+}
+
+func (tx *v41StepTransaction) resumeAttention(output []float32, grouped bool) (err error) {
+	if tx.closed || tx.pendingAttention == nil || tx.pendingLayer != nil {
+		return fmt.Errorf("%w: incremental transaction has no suspended attention", ErrV41ForwardStage)
+	}
+	complete := false
+	defer func() { tx.abortIncomplete(complete) }()
+	a := tx.pendingAttention
+	if !grouped {
+		output, err = a.project()
+		if err != nil {
+			return tx.abortLayerError(v41StageErr(v41StageAttention, tx.nextLayer, err))
+		}
+	}
+	tx.pendingLayer, err = a.resume(output, grouped)
+	if err != nil {
+		return tx.abortLayerError(err)
+	}
+	tx.pendingAttention = nil
+	complete = true
+	return nil
+}
+
+func (a *v41LayerAttentionSuspension) plainScratch() *v41ProjScratch {
+	if a == nil {
+		return nil
+	}
+	if a.isRole {
+		return a.role.scratch
+	}
+	if a.plain.st == nil {
+		return nil
+	}
+	return a.plain.st.scratch
 }
