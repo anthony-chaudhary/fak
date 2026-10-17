@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // kernel-oracle joins llama.cpp `test-backend-ops perf` rows with fak's Vulkan
@@ -180,6 +181,9 @@ func runKernelOracleShapes(stdout, stderr io.Writer, argv []string) error {
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
+	*ggufPath = pathutil.ExpandTilde(*ggufPath)
+	*metaPath = pathutil.ExpandTilde(*metaPath)
+	*out = pathutil.ExpandTilde(*out)
 	if (*ggufPath == "") == (*metaPath == "") {
 		fmt.Fprintln(stderr, "kernel-oracle shapes: exactly one of --gguf or --metadata-json is required")
 		return errKernelOracleUsage
@@ -365,6 +369,11 @@ func runKernelOracleRank(stdout, stderr io.Writer, argv []string) error {
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
+	*shapesPath = pathutil.ExpandTilde(*shapesPath)
+	*ggmlPath = pathutil.ExpandTilde(*ggmlPath)
+	*benchPath = pathutil.ExpandTilde(*benchPath)
+	*profilePath = pathutil.ExpandTilde(*profilePath)
+	*out = pathutil.ExpandTilde(*out)
 	if *shapesPath == "" || (*ggmlPath == "" && *benchPath == "" && *profilePath == "") {
 		fmt.Fprintln(stderr, "kernel-oracle rank: --shapes and at least one of --ggml, --fak-bench, --fak-profile are required")
 		return errKernelOracleUsage
