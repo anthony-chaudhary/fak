@@ -22,7 +22,7 @@ func (s *Session) v41DeviceOnlyDeclined(layer int, op string) error {
 
 func (s *Session) v41BindDeviceOnlyDeclineRefusals(st *v41ForwardState) {
 	st.liftDeviceOnlyDense(s)
-	st.groupedOutput = v41DeviceOnlyGrouped(s, st.groupedOutput)
+	st.groupedOutput = v41DeviceOnlyGrouped(s, v41GroupedOutputCallback(st.groupedOutput))
 	st.engramProjection = v41DeviceOnlyEngram(s, st.engramProjection)
 	st.mhcProjection = v41DeviceOnlyMHCProjection(s, st.mhcProjection)
 	st.mhcFFNProjection = v41DeviceOnlyMHCProjection(s, st.mhcFFNProjection)

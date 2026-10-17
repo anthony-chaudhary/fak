@@ -32,6 +32,9 @@ import (
 
 type v41GroupedOutputFunc func(layer int, o []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error)
 
+// v41GroupedOutputCallback resolves the scalar behavior without constructing a new closure.
+func v41GroupedOutputCallback(route v41GroupedOutputFunc) v41GroupedOutputFunc { return route }
+
 func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim int, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
 	var woA, woB []float32
 	loaded := false
@@ -52,12 +55,12 @@ func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim i
 				return nil, err
 			}
 		}
-		if scratch.groupedOutput != nil {
+		if grouped := v41GroupedOutputCallback(scratch.groupedOutput); grouped != nil {
 			callbackInput := o
 			if full {
 				callbackInput = append([]float32(nil), o...)
 			}
-			y, outcome, err := scratch.groupedOutput(l, callbackInput, heads, headDim, groups, rank, dim)
+			y, outcome, err := grouped(l, callbackInput, heads, headDim, groups, rank, dim)
 			switch outcome {
 			case v41ProjectionHandled:
 				if err != nil || len(y) != dim {
