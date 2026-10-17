@@ -354,7 +354,7 @@ To verify Apple Silicon Metal performance on your Mac against committed baseline
 make mac-perf
 ```
 
-This runs on-device Metal GEMV/GEMM microbenchmarks and validates the 3-way Mac comparison packet (fak-native vs llama.cpp vs MLX). For full benchmark data and methodology, see:
-- [Three-way Mac benchmark (M3 Pro)](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)
+This runs on-device Metal GEMV/GEMM microbenchmarks and validates the 3-way Mac comparison packet (fak-native vs llama.cpp vs MLX). Packet validation checks internal consistency; it does not establish physical three-way engine execution. For the separate evidence classes and methodology, see:
+- [Simulated three-way Mac fixture (M3 Pro; physical comparison pending)](../notes/MAC-THREEWAY-BENCH-2026-09-03.md)
 - [Mac many-agent shared-prefix cache-value study](../notes/MAC-MANYAGENT-CACHE-VALUE-2026-09-03.md)
 - [Qwen3.8-27B latest benchmark details](../benchmarks/QWEN38-27B-LATEST.md)

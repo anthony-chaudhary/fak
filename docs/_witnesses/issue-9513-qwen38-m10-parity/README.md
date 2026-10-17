@@ -1,9 +1,25 @@
 ---
-title: "Issue 9513 — Exact M3 Pro P32/T64 Qwen3.8 Parity Close-Out"
-description: "Terminal M10 parity close-out bundle comparing fak-native Metal against pinned llama.cpp comparator on Apple M3 Pro with Qwen3.8-27B Q4_K_M."
+title: "[PHYSICAL CREDIT WITHDRAWN] Issue 9513 — Historical M10 Parity Packet"
+description: "Historical M10 delivery/validator packet. Physical performance credit was withdrawn on 2026-09-27; the matched real-process comparison remains pending."
 ---
 
-# Issue 9513 — Exact M3 Pro P32/T64 Qwen3.8 Parity Close-Out
+# Issue 9513 — Historical M10 parity packet
+
+**Current status, recorded 2026-10-17: physical performance credit withdrawn.**
+The [independent #9513 audit](https://github.com/anthony-chaudhary/fak/issues/9513#issuecomment-5859213748)
+reopened the close-out after finding that the measurement commands replayed committed
+JSON, source provenance was unresolved, and profile timing did not reconcile with
+the authored samples. [The 2026-09-27 correction](https://github.com/anthony-chaudhary/fak/issues/9513#issuecomment-5859310346)
+retains delivery/validator credit only. This packet does not establish current
+physical parity or a performance KEEP; #9513/#2723 still require the matched
+real-process recapture. The packet is not classified as simulated by this notice.
+
+The original report below is preserved as historical authored content, including
+its original PASS label and numerical claims. No JSON, raw file, or measurement
+value is changed by this notice; their delivery consistency is separate from
+runtime provenance and performance acceptance.
+
+## Original packet report (historical)
 
 **Verdict: PASS**
 
