@@ -782,3 +782,21 @@ specialization constants, scalar fp16 shared tiles, the Fak three-binding ABI an
 constants, and a per-format 16-weight decode that follows the matching `iq*_matvec.comp`.
 No upstream runtime is included. The upstream license is the MIT license reproduced in the
 section above.
+
+## ggml-vulkan split-k flash attention for grouped-query decode
+
+The decode attention kernel `internal/compute/shaders/attention_split_kv.comp` adapts the
+scalar path of `ggml/src/ggml-vulkan/vulkan-shaders/flash_attn.comp` (grouped-query heads
+packed as the rows of one workgroup, a fixed number of lanes per key with a shuffle-xor
+score reduction, per-lane online softmax over its own keys combined once per workgroup,
+split-k partial output with per-row max and sum) and the combine of
+`flash_attn_split_k_reduce.comp`, at llama.cpp revision
+`f74e2fa6a31cc33ab4ee4ae516641cfe62df3924`:
+https://github.com/ggml-org/llama.cpp/tree/f74e2fa6a31cc33ab4ee4ae516641cfe62df3924/ggml/src/ggml-vulkan/vulkan-shaders
+
+Changed for Fak: F32 row-major KV bound directly with no mask, dequantization, sinks or
+softcap; one workgroup per (KV chunk, KV head); fixed 16 lanes per key, 32-key tiles, up
+to 8 query rows and head dim 256 instead of specialization constants; the partial and
+reduce passes share one module selected by a push-constant mode; a single chunk writes
+the normalized output directly. No upstream runtime is included. The upstream license is
+the MIT license reproduced in the i-quant matrix-vector section above.
