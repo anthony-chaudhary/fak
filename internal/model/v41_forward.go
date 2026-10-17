@@ -129,8 +129,8 @@ type v41ForwardState struct {
 	history []int
 	attn    *V41AttentionState
 	layers  []*V41AttentionState
-	// forwardCoverage is replaced only after a successful logits-producing
-	// traversal and is intentionally absent from prefix snapshots.
+	// forwardCoverage names the last successful logits-producing traversal.
+	// Prefix snapshots preserve it as cached-logit provenance, not new execution.
 	forwardCoverage   *NativeForwardCoverage
 	activationCapture V41ActivationCaptureReceipt
 	activeStepRound   *v41StepRound

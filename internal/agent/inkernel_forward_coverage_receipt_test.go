@@ -4,9 +4,97 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
+
+// fak-test:runtime medium est=6s lane=default
+// fak-test:usefulness protects=v41-exact-prefix-receipt-first-token-provenance
+func TestV41PrefixHitReceiptPreservesForwardCoverage(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "0")
+	ref := compute.Default()
+	if ref == nil || ref.Name() != "cpu-ref" || ref.Caps().DeviceMemory {
+		t.Fatal("receipt witness requires the qualified CPU reference backend")
+	}
+	backend := &v41CompleteBackend{Backend: ref, available: true}
+	m := v41CompleteModel(t)
+	defer m.CloseWeights()
+	p := v41CompletePlanner(t, m, backend, false)
+	tree := radixkv.New(0)
+	p.tree = tree
+	prompt := []int{1, 3, 5}
+	defer tree.EvictPrefix(prompt)
+
+	run := func(ids []int, maxNew, wantMatched int) (*model.NativeInferenceReceipt, int) {
+		t.Helper()
+		measurement := &nativeInferenceMeasurement{startedAt: time.Now()}
+		var emitted []int
+		headsBefore := len(backend.headOutputs)
+		gen, promptTok, cacheable, matched, tier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(
+			t.Context(), ids, maxNew, 0, 0, 0, nil, 0, 0, map[int]bool{}, func(id int) bool {
+				emitted = append(emitted, id)
+				return false
+			}, measurement,
+		)
+		if err != nil || stopped || gen != maxNew || matched != wantMatched {
+			t.Fatalf("generated/stopped/matched/error = %d/%t/%d/%v, want %d/false/%d/nil", gen, stopped, matched, err, maxNew, wantMatched)
+		}
+		accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{
+			promptTokens: promptTok, cacheableTokens: cacheable, matchedTokens: matched,
+			sourceTier: tier, prefillSecs: prefillS, generated: gen,
+		})
+		receipt := p.buildNativeInferenceReceipt(measurement, prefillS, decodeS, accounting)
+		if err := validateNativeInferenceReceiptForwardCoverage(m.Cfg, receipt); err != nil {
+			t.Fatalf("prefix receipt matched=%d/%d generated=%d: %v", matched, promptTok, gen, err)
+		}
+		if err := accounting.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(receipt.TokenIDs, emitted) || len(receipt.ForwardCoverage) != len(emitted) ||
+			accounting.RestoredTokens != wantMatched || accounting.ComputedTokens != len(ids)-wantMatched {
+			t.Fatalf("receipt changed token or prompt-work accounting: %+v", receipt)
+		}
+		return receipt, len(backend.headOutputs) - headsBefore
+	}
+
+	cold, _ := run(prompt, 64, 0)
+	// Before the snapshot correction, this exact replay is rejected with the
+	// observed 63 coverage items for 64 generated outputs.
+	exact, heads := run(prompt, 64, len(prompt))
+	if heads != 63 || exact.PrefillSeconds != 0 || !reflect.DeepEqual(exact.TokenIDs, cold.TokenIDs) ||
+		!reflect.DeepEqual(exact.ForwardCoverage, cold.ForwardCoverage) {
+		t.Fatalf("exact 64-token hit must use cached first logits and 63 new heads: heads=%d receipt=%+v", heads, exact)
+	}
+	if exact.ForwardCoverage[0].LogitsSource != model.NativeForwardLogitsSourceV41Full {
+		t.Fatal("cached first-token logits lost their original prefill source")
+	}
+	for i, coverage := range exact.ForwardCoverage[1:] {
+		if coverage.LogitsSource != model.NativeForwardLogitsSourceV41Incremental {
+			t.Fatalf("output %d did not retain its actual incremental source", i+1)
+		}
+	}
+	one, heads := run(prompt, 1, len(prompt))
+	if heads != 0 || one.PrefillSeconds != 0 || !reflect.DeepEqual(one.TokenIDs, cold.TokenIDs[:1]) ||
+		one.ForwardCoverage[0] != cold.ForwardCoverage[0] {
+		t.Fatalf("exact one-token hit recomputed or lost cached-logit provenance: heads=%d receipt=%+v", heads, one)
+	}
+
+	// Diverge from the generated continuation so only the original prompt is a
+	// hit. The suffix must produce fresh logits before its first output is sampled.
+	suffix := append(append([]int(nil), prompt...), (cold.TokenIDs[0]+1)%m.Cfg.VocabSize)
+	partial, heads := run(suffix, 1, len(prompt))
+	if heads == 0 {
+		t.Fatal("partial hit sampled ancestor logits without forwarding the suffix")
+	}
+	p.tree = nil
+	partialCold, _ := run(suffix, 1, 0)
+	if !reflect.DeepEqual(partial.TokenIDs, partialCold.TokenIDs) {
+		t.Fatalf("partial-hit output %v differs from cold suffix control %v", partial.TokenIDs, partialCold.TokenIDs)
+	}
+}
 
 type sequenceNativeForwardCoverageSource struct {
 	coverage []model.NativeForwardCoverage
