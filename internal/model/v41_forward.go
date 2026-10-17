@@ -134,6 +134,7 @@ type v41ForwardState struct {
 	forwardCoverage   *NativeForwardCoverage
 	activationCapture V41ActivationCaptureReceipt
 	activeStepRound   *v41StepRound
+	attentionInputRun *v41AttentionInputRun
 
 	// indexKeyMemo is the session's per-index-source-layer memo of the last
 	// committed fold; indexKeyPrior is the read-only copy a re-fold run reuses.
@@ -366,6 +367,8 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 		// step-local continuation data and is never written back below.
 		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.copySharedAttentionFrom(st)
+		inputRun := st.beginAttentionInputRun(runState)
+		defer inputRun.close()
 		runState.indexKeyPrior = st.indexKeyMemo
 		runState.indexKeyMemo = map[int][]v41IndexKeyMemoRow{}
 		defer func() {

@@ -2088,6 +2088,21 @@
           "category": "incidental",
           "reason": "Scratch field carrying the already-positioned v41AttentionInputPanel loan during synchronous QKV projection; it introduces no separate attention operation, ownership authority or lifetime.",
           "token": "attentionInputPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private source/run/Session identity tuple subordinate to the positioned v41AttentionInputPanel loan. It only establishes the panel's current cold-forward lifetime; it owns no activation rows, acquires no execution lock, and grants no independent backend or borrow authority.",
+          "token": "v41AttentionInputRun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private forward-state field carrying the same live identity tuple at both endpoints of the positioned v41AttentionInputPanel loan. It is cleared at return and is never snapshot or continuation data; the field defines no separate attention operation.",
+          "token": "attentionInputRun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constructor for the source/run/Session identity proof used by the positioned v41AttentionInputPanel. It verifies the live canonical source and empty endpoint slots, without selecting an attention algorithm or granting independent borrow authority.",
+          "token": "beginAttentionInputRun"
         }
       ],
       "exclude": [
@@ -2108,6 +2123,7 @@
         "attentionContinuation",
         "attentionFunc",
         "attentionInputPanel",
+        "attentionInputRun",
         "attentionRows",
         "attentions",
         "attentive",
@@ -2119,6 +2135,7 @@
         "attn_q_full",
         "attn_q_normed",
         "attnkvanorm",
+        "beginAttentionInputRun",
         "bindCanonicalSharedAttention",
         "clearSharedAttention",
         "coldAttentionOwner",
@@ -2142,6 +2159,7 @@
         "v41AttentionBF16OwnedReader",
         "v41AttentionBF16OwnedRow",
         "v41AttentionBF16ReadOwned",
+        "v41AttentionInputRun",
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
         "v41CombinedAttentionWithContinuation",
@@ -9709,6 +9727,11 @@
           "category": "incidental",
           "reason": "Registration hook that lets the Vulkan backend supply the GPU timestamp-profile reader to internal/compute; plumbing for compute-shader timing, with no coordinator kernel, engine or vDSO role.",
           "token": "RegisterKernelProfileReader"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private mutex-protected storage for the exact computetrace observer registration installed by stepobs.Recorder.Attach for the positioned stepobs-kernel-registry. It preserves sink identity across replacement; it is not a kernel execution, metric family, or reusable observer-trust API.",
+          "token": "kernelObservation"
         }
       ],
       "exclude": [
@@ -9842,6 +9865,7 @@
         "invalid_engine_record",
         "invalid_engine_snapshot",
         "kernel32",
+        "kernelObservation",
         "kernelSession",
         "kernelValue",
         "kernel_100ns",

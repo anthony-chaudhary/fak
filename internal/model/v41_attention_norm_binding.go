@@ -3,6 +3,7 @@ package model
 import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/computetrace"
+	"github.com/anthony-chaudhary/fak/internal/stepobs"
 )
 
 // v41AttentionNormBinding keeps both ordinary attention-input norm edges with
@@ -110,8 +111,8 @@ func (b *v41AttentionNormBinding) coldPanel(m *Model, st *v41ForwardState, scrat
 	}
 	// A loan is eligible only before any normalized storage exists. Canonical
 	// Read returns fresh storage; canonical publication/upload neither exposes
-	// nor retains it. Observers, clocks and replacement callbacks retain the
-	// snapshot path. Pointer equality below checks identity, not ownership.
+	// nor retains it. Unknown observers, clocks and replacement callbacks retain
+	// the snapshot path. Pointer equality checks identity, not ownership.
 	loan := b.newInputPanel(m, st, scratch, layer, width, len(input))
 	output := make([][]float32, len(input))
 	for lo := 0; lo < len(input); lo += v41ProjPanelRowChunk {
@@ -229,6 +230,8 @@ type v41AttentionInputPanel struct {
 	model              *Model
 	backend            compute.Backend
 	state              *v41ForwardState
+	run                *v41AttentionInputRun
+	observation        *computetrace.Observation
 	norm               *v41AttentionNormBinding
 	route              *v41ProjectionRouteBinding
 	query              *v41QueryNormBinding
@@ -247,7 +250,11 @@ func (b *v41AttentionNormBinding) newInputPanel(m *Model, st *v41ForwardState, s
 	s := b.native.owner
 	p := &v41AttentionInputPanel{owner: s, model: m, backend: b.native.backend, state: st, norm: b,
 		route: scratch.projectionRoute, query: scratch.queryNorm, gather: scratch.gatherOps,
-		scope: s.backendExecutionScope, epoch: s.cacheGeometryEpoch, layer: layer, width: width, rows: rows}
+		observation: stepobs.CaptureHostInputObservation(),
+		scope:       s.backendExecutionScope, epoch: s.cacheGeometryEpoch, layer: layer, width: width, rows: rows}
+	if st != nil {
+		p.run = st.attentionInputRun
+	}
 	if p.query != nil {
 		p.publication = p.query.publication
 	}
@@ -268,16 +275,19 @@ func (p *v41AttentionInputPanel) valid(scratch *v41ProjScratch) bool {
 func (p *v41AttentionInputPanel) scopeValid(scratch *v41ProjScratch) bool {
 	if p == nil || p.owner == nil || p.model == nil || scratch == nil || p.state == nil ||
 		p.norm == nil || p.norm.native == nil || p.route == nil || p.query == nil || p.gather == nil || p.publication == nil ||
-		scratch.activationTrace != nil || computetrace.Emitting() {
+		scratch.activationTrace != nil || !p.observation.Unchanged() || !p.run.valid(p.owner, p.state) ||
+		!backendHasComparableIdentity(p.backend) || !backendHasComparableIdentity(p.owner.Backend) {
 		return false
 	}
 	s, m, state := p.owner, p.model, p.state
+	source := p.run.source
 	n, dense, query, publication := p.norm.native, p.route.nativeProjection, p.query, p.publication
 	if s.M != m || s.Backend != p.backend || s.halClosed || s.halFailure != nil || !s.modelWeightsHeld ||
-		s.v41Forward != state || state.callbackOwner != s || s.backendExecutionScope != p.scope || s.cacheGeometryEpoch != p.epoch ||
+		state.callbackOwner != s || s.backendExecutionScope != p.scope || s.cacheGeometryEpoch != p.epoch ||
 		p.scope == nil || !p.scope.live || p.scope.owner == nil || m.lora != nil || m.prism != nil ||
 		p.layer < 0 || p.layer >= m.Cfg.NumLayers || p.width != m.Cfg.HiddenSize ||
 		n.owner != s || n.model != m || n.backend != p.backend || p.norm.normalize == nil || p.norm.publish == nil ||
+		source.attentionNormBinding != p.norm || source.projectionRoute != p.route || source.queryNorm != query || source.gatherOps != p.gather ||
 		state.attentionNormBinding != p.norm || scratch.attentionNormBinding != p.norm ||
 		state.projectionRoute != p.route || scratch.projectionRoute != p.route || dense.core == nil || dense.ordinary == nil ||
 		dense.owner != s || dense.model != m || dense.backend != p.backend || (p.route.deviceOnly != nil && p.route.deviceOnly != s) ||
@@ -307,6 +317,46 @@ func (p *v41AttentionInputPanel) scopeValid(scratch *v41ProjScratch) bool {
 		}
 	}
 	return true
+}
+
+// v41AttentionInputRun binds a cold forward's temporary state to the live
+// Session source that minted it. It is never snapshot or continuation data.
+// Keeping both endpoints and the live token prevents copied/stale run states
+// from acquiring authority merely by carrying the same callback owner.
+type v41AttentionInputRun struct {
+	owner       *Session
+	source, run *v41ForwardState
+	live        bool
+}
+
+func (source *v41ForwardState) beginAttentionInputRun(run *v41ForwardState) *v41AttentionInputRun {
+	if source == nil || run == nil || source == run || source.callbackOwner == nil ||
+		source.callbackOwner.v41Forward != source || source.attentionNormBinding == nil || source.attentionNormBinding.native == nil ||
+		source.attentionInputRun != nil || run.attentionInputRun != nil {
+		return nil
+	}
+	r := &v41AttentionInputRun{owner: source.callbackOwner, source: source, run: run, live: true}
+	source.attentionInputRun, run.attentionInputRun = r, r
+	return r
+}
+
+func (r *v41AttentionInputRun) valid(owner *Session, run *v41ForwardState) bool {
+	return r != nil && r.live && r.owner == owner && r.run == run && r.source != nil && r.source != run &&
+		owner != nil && owner.v41Forward == r.source && r.source.callbackOwner == owner &&
+		r.source.attentionInputRun == r && run != nil && run.attentionInputRun == r
+}
+
+func (r *v41AttentionInputRun) close() {
+	if r == nil {
+		return
+	}
+	r.live = false
+	if r.source.attentionInputRun == r {
+		r.source.attentionInputRun = nil
+	}
+	if r.run.attentionInputRun == r {
+		r.run.attentionInputRun = nil
+	}
 }
 
 func (p *v41AttentionInputPanel) matches(layer, width int, rows [][]float32) bool {

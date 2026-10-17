@@ -95,6 +95,10 @@ func TestServerConstructionAttachesTheStepObservers(t *testing.T) {
 	if !stepobs.Default.Attached() {
 		t.Fatal("gateway.New did not attach the stepobs recorder")
 	}
+	observation := stepobs.CaptureHostInputObservation()
+	if observation == nil || !observation.Unchanged() || !computetrace.Emitting() || computetrace.Enabled() {
+		t.Fatal("normal serving metrics blocked the host-input observation scope")
+	}
 
 	// Prove the attachment is INVOKED, not merely present: feed the seam the compute
 	// backends actually call and require the kernel family to move.
@@ -121,6 +125,29 @@ func TestServerConstructionAttachesTheStepObservers(t *testing.T) {
 	if got := stepobs.Default.Snapshot().PlannerEvents[string(stepobs.StepKindSeat)]; got != seatBefore+1 {
 		t.Fatalf("seat legs after one device_wait on the process recorder = %d, want %d; gateway.New left the sub-planner seam unwired", got, seatBefore+1)
 	}
+	if !observation.Unchanged() {
+		t.Fatal("recording metrics changed the installed sink identity")
+	}
+	// Even the same method installed outside stepobs lacks its private token.
+	computetrace.SetObserver(stepobs.Default.ObserveKernel)
+	if observation.Unchanged() || stepobs.CaptureHostInputObservation() != nil {
+		t.Fatal("replacement callback inherited trusted metrics identity")
+	}
+	newStepobsTestServer(t)
+	fresh := stepobs.CaptureHostInputObservation()
+	if fresh == nil || !fresh.Unchanged() || observation.Unchanged() {
+		t.Fatal("server reconstruction did not repair the sink with a fresh identity")
+	}
+	_, disable := computetrace.Enable(4, "input-scope", "serving")
+	if fresh.Unchanged() || stepobs.CaptureHostInputObservation() != nil {
+		disable()
+		t.Fatal("artifact recorder admitted a host-input observation scope")
+	}
+	disable()
+	if fresh.Unchanged() || stepobs.CaptureHostInputObservation() == nil {
+		t.Fatal("recorder removal revived an old scope or prevented fresh capture")
+	}
+	t.Cleanup(attachStepObservation)
 }
 
 // TestComputeTraceObserverDoesNotChangeTraceSemantics pins that attaching an observer

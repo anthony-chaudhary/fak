@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/computetrace"
+	"github.com/anthony-chaudhary/fak/internal/stepobs"
 )
 
 // This is metadata-only fixture construction. The ordinary CPU backend cannot
@@ -36,14 +37,19 @@ func v41InputPanelScopeFixture() (*v41AttentionInputPanel, *v41ProjScratch) {
 	gather := &v41DeviceGatherOps{owner: s, bf16Publish: publication}
 	query := &v41QueryNormBinding{ordinary: func(_ int, x []float32) ([]float32, error) { return x, nil }, owner: s, model: m, backend: backend, publication: publication}
 	state.attentionNormBinding, state.projectionRoute, state.queryNorm, state.gatherOps = norm, route, query, gather
+	run := *state
+	inputRun := state.beginAttentionInputRun(&run)
 	scratch := &v41ProjScratch{attentionNormBinding: norm, projectionRoute: route, queryNorm: query, gatherOps: gather}
-	p := &v41AttentionInputPanel{owner: s, model: m, backend: backend, state: state, norm: norm, route: route, query: query, gather: gather, publication: publication, scope: scope, layer: 0, width: 4, rows: 2}
+	p := &v41AttentionInputPanel{owner: s, model: m, backend: backend, state: &run, run: inputRun,
+		observation: stepobs.CaptureHostInputObservation(), norm: norm, route: route, query: query, gather: gather, publication: publication, scope: scope, layer: 0, width: 4, rows: 2}
 	scratch.attentionInputPanel = p
 	return p, scratch
 }
 
 // fak-test:runtime fast est=10ms lane=default
 func TestV41AttentionInputPanelSnapshot(t *testing.T) {
+	computetrace.SetObserver(nil)
+	t.Cleanup(func() { computetrace.SetObserver(nil) })
 	t.Run("chunk identity and tails", func(t *testing.T) {
 		for _, count := range []int{2, 64, 65, 129} {
 			p := &v41AttentionInputPanel{layer: 2, width: 4, rows: count}
@@ -102,6 +108,7 @@ func TestV41AttentionInputPanelSnapshot(t *testing.T) {
 		if observed {
 			t.Fatal("observer-only route accepted")
 		}
+		p.observation = stepobs.CaptureHostInputObservation()
 		clockCalls := 0
 		p.model.v41SetExpertTimeClock(func() int64 { clockCalls++; return 0 })
 		if p.scopeValid(scratch) || clockCalls != 0 {
@@ -123,9 +130,40 @@ func TestV41AttentionInputPanelSnapshot(t *testing.T) {
 			t.Fatal("owner drift admitted")
 		}
 	})
+	t.Run("cold run identity and lifetime", func(t *testing.T) {
+		p, scratch := v41InputPanelScopeFixture()
+		if p.owner.v41Forward == p.state || !p.scopeValid(scratch) {
+			t.Fatal("temporary run is not bound to its Session source")
+		}
+		copy := *p.state
+		p.state = &copy
+		if p.scopeValid(scratch) {
+			t.Fatal("copied run inherited authority")
+		}
+		p.state = p.run.run
+		source := p.owner.v41Forward
+		replacement := *source
+		p.owner.v41Forward = &replacement
+		if p.scopeValid(scratch) {
+			t.Fatal("replaced source inherited authority")
+		}
+		p.owner.v41Forward = source
+		source.queryNorm = &v41QueryNormBinding{ordinary: p.query.ordinary}
+		if p.scopeValid(scratch) {
+			t.Fatal("source binding replacement accepted")
+		}
+		source.queryNorm = p.query
+		if !p.scopeValid(scratch) {
+			t.Fatal("restored source identity was refused")
+		}
+		p.run.close()
+		if p.scopeValid(scratch) || source.attentionInputRun != nil || p.state.attentionInputRun != nil {
+			t.Fatal("retired cold run retained authority")
+		}
+	})
 	for _, site := range []string{"query", "observer", "clock", "projection"} {
 		t.Run("mutating "+site+" keeps snapshot", func(t *testing.T) {
-			m := &Model{Cfg: Config{NumLayers: 1, HiddenSize: 4, QLoraRank: 2, QKRopeHeadDim: 2, RMSNormEps: 1e-5}, manifest: map[string]tensorMeta{
+			m := &Model{Cfg: Config{NumLayers: 1, HiddenSize: 4, HeadDim: v41KVLoraRank, QLoraRank: 2, QKRopeHeadDim: 2, RMSNormEps: 1e-5}, manifest: map[string]tensorMeta{
 				layerName(0, "attn.wq_a.weight"): {Shape: []int{2, 4}},
 				layerName(0, "attn.wq_b.weight"): {Shape: []int{v41KVLoraRank, 2}},
 				layerName(0, "attn.wkv.weight"):  {Shape: []int{v41KVLoraRank, 4}},

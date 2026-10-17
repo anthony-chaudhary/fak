@@ -169,6 +169,24 @@ func New() *Recorder {
 // renders on /metrics.
 var Default = New()
 
+// kernelObservation owns the identity of the exact metrics sink installed by
+// Attach. The token is private: other callers cannot designate their callback
+// as the metrics sink by passing a type, name, or self-declared safety flag.
+var kernelObservation struct {
+	sync.Mutex
+	registration *computetrace.ObserverRegistration
+}
+
+// CaptureHostInputObservation admits only no observer or Attach's direct
+// ObserveKernel sink. That sink consumes labels and durations without executing
+// user callbacks or retaining activation storage. Every observer or recorder
+// replacement invalidates the returned snapshot, even after restoration.
+func CaptureHostInputObservation() *computetrace.Observation {
+	kernelObservation.Lock()
+	defer kernelObservation.Unlock()
+	return computetrace.CaptureObservation(kernelObservation.registration)
+}
+
 // Attach wires this recorder to the production producer seams. It is idempotent and
 // safe to call from any server construction path: the setters below replace the
 // process seam with this recorder's sink rather than only installing once, so a
@@ -187,7 +205,9 @@ func (r *Recorder) Attach() {
 	r.mu.Lock()
 	r.attached = true
 	r.mu.Unlock()
-	computetrace.SetObserver(r.ObserveKernel)
+	kernelObservation.Lock()
+	kernelObservation.registration = computetrace.RegisterObserver(r.ObserveKernel)
+	kernelObservation.Unlock()
 	enginestep.SetPhaseObserver(r.ObserveEnginePhase)
 }
 

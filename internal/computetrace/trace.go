@@ -339,9 +339,11 @@ func cloneShapes(in [][]int) [][]int {
 
 var active struct {
 	sync.RWMutex
-	recorder     *Recorder
-	run, request string
-	observer     func(Event)
+	recorder             *Recorder
+	run, request         string
+	observer             func(Event)
+	observerRegistration *ObserverRegistration
+	observationEpoch     *observationEpoch
 }
 
 // Enable installs the process recorder. Calling the returned function disables it.
@@ -390,10 +392,12 @@ func install(r *Recorder, run, request string) (*Recorder, func()) {
 // installLocked requires active's write lock.
 func installLocked(r *Recorder, run, request string) (*Recorder, func()) {
 	active.recorder, active.run, active.request = r, run, request
+	active.observationEpoch = new(observationEpoch)
 	return r, func() {
 		active.Lock()
 		if active.recorder == r {
 			active.recorder = nil
+			active.observationEpoch = new(observationEpoch)
 		}
 		active.Unlock()
 	}
@@ -410,9 +414,56 @@ func installLocked(r *Recorder, run, request string) (*Recorder, func()) {
 // device backends keep gating their (more expensive) per-GEMM measurement on explicit
 // tracing rather than on a metrics observer happening to be attached.
 func SetObserver(fn func(Event)) {
+	RegisterObserver(fn)
+}
+
+// ObserverRegistration identifies one installation, not the callback's behavior.
+// Only its installer can associate the opaque handle with a known sink. Wrapping
+// or reinstalling the same function always creates a different registration.
+type ObserverRegistration struct{ identity byte }
+type observationEpoch struct{ identity byte }
+
+// RegisterObserver is SetObserver with an opaque installation identity. It does
+// not certify that fn is safe for borrowing or confer trust on arbitrary sinks.
+func RegisterObserver(fn func(Event)) *ObserverRegistration {
+	registration := new(ObserverRegistration)
 	active.Lock()
 	active.observer = fn
+	active.observerRegistration = registration
+	active.observationEpoch = new(observationEpoch)
 	active.Unlock()
+	return registration
+}
+
+// Observation is an immutable observation-configuration snapshot. Its zero value
+// is invalid. A replacement followed by restoration still invalidates it.
+type Observation struct {
+	epoch *observationEpoch
+	valid bool
+}
+
+// CaptureObservation captures an absent observer or the exact registration the
+// caller already knows. The caller, not this identity API, owns any assessment of
+// the sink's behavior. Any installed artifact recorder refuses capture, including
+// a zero-limit recorder, which still owns the tracing slot.
+func CaptureObservation(known *ObserverRegistration) *Observation {
+	active.RLock()
+	defer active.RUnlock()
+	if active.recorder != nil || (active.observer != nil && (known == nil || active.observerRegistration != known)) {
+		return nil
+	}
+	return &Observation{epoch: active.observationEpoch, valid: true}
+}
+
+// Unchanged reports whether no observer or recorder installation has changed
+// since capture. It never invokes a callback or claims one is safe.
+func (o *Observation) Unchanged() bool {
+	if o == nil || !o.valid {
+		return false
+	}
+	active.RLock()
+	defer active.RUnlock()
+	return active.recorder == nil && active.observationEpoch == o.epoch
 }
 
 // Observed reports whether a process observer is attached.
