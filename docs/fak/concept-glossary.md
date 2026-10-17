@@ -1455,3 +1455,31 @@ Private one-lane suspended plain-attention operation between contraction/rotatio
 Synchronous sparse sink contraction over an already validated flat or split-row host view, preserving arithmetic order without flattening the cold KV bank.
 
 **Distinct from:** Unlike v41ColdPlainAttentionSink, which chooses and dispatches a contiguous plain-attention window, this contracts selected sparse rows only after its caller validates every original row and canonical index.
+
+
+### suffixPrefillSession
+
+Modelbench interface for owned prefix prefill, suffix continuation, next-token step, between-call sequence position and terminal close in checkpoint replay comparisons.
+
+**Distinct from:** This is the narrow benchmark adapter contract, not the model Session implementation, transport conversation, or concurrent state snapshot; implementations retain their own checkpoint backing lifetime.
+
+
+### kernel_timestamp_delta
+
+Optional serialized modelbench receipt field containing the backend KernelProfile counter and timestamp delta across host-delimited prefix, suffix or next-step phases.
+
+**Distinct from:** This profile delta is process-global and may be partial or contaminated by concurrent work. It is not GPU utilization, device wall time or isolated kernel-active time; Vulkan timestamp profiling serializes diagnostic batches and includes barriers and copies.
+
+
+### ArtifactCoverage
+
+The modelbench suffix receipt field and JSON alias describing the declared extent of checkpoint artifact identity verification, currently input-file-only.
+
+**Distinct from:** This states an identity-check boundary, not test or model coverage. It does not establish a complete sharded checkpoint set, correctness, GPU execution or production readiness; identity hashing can warm the page cache outside timing.
+
+
+### artifact_identity_coverage
+
+Serialized JSON field in the suffix-prefill receipt that exposes the ArtifactCoverage value for checkpoint identity verification; currently input-file-only.
+
+**Distinct from:** This is the wire key for the declared identity boundary, unlike the Go ArtifactCoverage field or general test coverage. It does not verify a complete shard set, GPU execution or model correctness.

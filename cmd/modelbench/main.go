@@ -990,6 +990,12 @@ func main() {
 		f.exit(2)
 		return
 	}
+	suffixWorkload, suffixErr := prepareSuffixPrefill(f)
+	if suffixErr != nil {
+		fmt.Fprintln(os.Stderr, "suffix prefill:", suffixErr)
+		f.exit(2)
+		return
+	}
 	if maybeRunMTPComparison(f) {
 		return
 	}
@@ -1090,6 +1096,13 @@ func main() {
 	}
 	newSession := func() *model.Session {
 		return newBenchSession(m, f, be)
+	}
+	if suffixWorkload != nil {
+		if err := runSuffixPrefillCLI(f, m, modelName, suffixWorkload, newSession); err != nil {
+			fmt.Fprintln(os.Stderr, "suffix prefill:", err)
+			f.exit(1)
+		}
+		return
 	}
 	if *wholeTokenOut != "" {
 		if err := runWholeTokenCLI(f, m, loadStart, newSession); err != nil {
