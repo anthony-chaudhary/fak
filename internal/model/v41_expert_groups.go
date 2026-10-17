@@ -449,6 +449,9 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 			unweighted[row.Token][row.Slot] = y
 		}
 	}
+	if full && resident.sumReadbackEnabled() {
+		return resident.sumReadbackGroups(perTokenPicks, unweighted, out)
+	}
 	// Weighted replay in ORIGINAL SLOT ORDER, byte-identical to the token-major
 	// accumulation `routed[i] += pick.weight * y[i]` per slot.
 	for t, picks := range perTokenPicks {
