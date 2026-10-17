@@ -549,3 +549,35 @@ func TestVulkanDequantOnceEntrypointsRetired(t *testing.T) {
 		t.Error("vulkan_ops.go lost ExecuteVulkanAttentionWithDequantOnce; the retired entrypoints were supposed to leave the calibrated pipeline intact")
 	}
 }
+
+// TestGEMMFP16F32PerCallWeightPathsRetired pins the fak#13875 retirement of the
+// unwired arm64 per-call weight paths. GEMMFP16F32 and PrefillGEMMFP16 converted the
+// whole f32 operand (weights included) to f16 on every call and had zero non-test
+// callers repo-wide: the same latent per-call weight trap class as the dequant-once
+// entrypoints. The underlying NEON microkernels (GEMMFP16 / GEMMFP16TN) remain, held
+// by gemm_test.go; only the unowned f32-converting adapters were removed. This source
+// contract runs without arm64 or cgo.
+func TestGEMMFP16F32PerCallWeightPathsRetired(t *testing.T) {
+	src, err := os.ReadFile("gemm_arm64.go")
+	if err != nil {
+		t.Fatalf("failed to read gemm_arm64.go: %v", err)
+	}
+	s := string(src)
+	for _, gone := range []string{
+		"func GEMMFP16F32(",
+		"func PrefillGEMMFP16(",
+	} {
+		if strings.Contains(s, gone) {
+			t.Errorf("gemm_arm64.go still declares retired per-call weight path %q; it must not return without a caller and an allocation ceiling", gone)
+		}
+	}
+	// The NEON microkernels must remain: they are the calibrated, test-pinned kernels.
+	for _, keep := range []string{
+		"func GEMMFP16(",
+		"func GEMMFP16TN(",
+	} {
+		if !strings.Contains(s, keep) {
+			t.Errorf("gemm_arm64.go lost %q; the retirement was supposed to leave the calibrated microkernels intact", keep)
+		}
+	}
+}
