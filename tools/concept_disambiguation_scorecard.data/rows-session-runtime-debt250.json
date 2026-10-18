@@ -664,6 +664,25 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-releasesession",
+      "canonical": "ReleaseSession (ctxmmu fork-session teardown)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "ctxmmu ReleaseSession ends one forked context session and decrements the refcount of every physical KV page block it holds, reclaiming a block when its count reaches zero. The SessionForker interface declares it (internal/ctxmmu/fork.go:59); ForkManager (fork.go:504) also drops the session from its map, COWPageTable (internal/ctxmmu/cow_table.go:507) refuses a second release with ErrSessionReleased, and the MMU method (fork.go:992) delegates to its ForkManager. An empty ID returns ErrInvalidSessionID and an unknown one ErrSessionNotFound.",
+      "distinction": "It tears down a copy-on-write page-table session and frees shared KV blocks. It is not `issue9909-release-weight-session`, which releases a model-weight hold, and not `cov5303-session-fork`, an execution-route fork action.",
+      "distinct_from": [
+        "issue9909-release-weight-session",
+        "cov5303-session-fork"
+      ],
+      "aliases": [],
+      "grounding": "ReleaseSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

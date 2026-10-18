@@ -72,9 +72,10 @@ number — line numbers rot), and the single sharpest "it is not."
   turn by `session.Table.Decide`, dumpable to and restorable from a `recall` core
   image via `Table.Restore`. *It is not a turn* (it spans many), *and not identity*
   (the TraceID is only the key it is filed under).
-- **Identity.** The stable handle for *who* a task is: a deterministic signature
-  over `(project, cwd, canonical first directive)` from `internal/taskidentity`,
-  plus the share/taint provenance on `abi.Ref` (`ShareScope`, `TaintLabel`).
+- **Identity.** The stable handle for *who* a task is: a canonical work key
+  (`goal:<objective>`, `issue:#N` or `loop:--lane <lane>`) that `deriveWorkKey` in
+  `cmd/fak/resume_stopped.go` folds from a session's launch turns, plus the
+  share/taint provenance on `abi.Ref` (`ShareScope`, `TaintLabel`).
   *It is not the session* — fifteen re-homed sessions of one `/goal` collapse to
   one identity; fifteen distinct goals under a byte-identical preamble must not.
 
@@ -304,10 +305,10 @@ shipped and wired. The load-bearing gaps, stated plainly:
 - **Session drive state is consumed on the harness loop, not yet the served turn.**
   An operator `POST …/pause` records and reads back; the gateway's served passthrough
   turn does not yet gate on `Decide`. Priority is a field with no contended scheduler.
-- **Identity is a Go module, not an `abi` type.** `internal/taskidentity` answers
-  "who is this task"; `abi.ShareScope`/`Taint` answer "what may its results be shared
-  as." They are not wired into one principal, and the primitive is not yet the sole
-  consumer at every call site.
+- **Identity is a resume-side work key, not an `abi` type.** `deriveWorkKey` answers
+  "who is this task" for resume dedup; `abi.ShareScope`/`Taint` answer "what may its
+  results be shared as." They are not wired into one principal, and the work key is
+  read only by resume dedup.
 - **The agent communicator has no first-class Go type.** The zero-byte rank space is
   a lease-and-witness pattern in the dispatch loop, not an abstraction the way
   `DistComm` is.

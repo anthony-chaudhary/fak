@@ -66,8 +66,8 @@ PY_ISSUE_CREATE_ARGV_RE = re.compile(
 
 # Closure binding: this map plus test_issue_create_producers_are_contract_or_triage_gated
 # below satisfy #1461's ask in full -- every gh-issue-create-capable producer in the
-# repo (Go: internal/dogfoodissues, internal/issuecatalog, cmd/fak/taskmgr.go's
-# StrictScope handoff sync; cmd/fak/issue_create.go's trusted first-party wrapper;
+# repo (Go: internal/dogfoodissues, cmd/fak/taskmgr.go's StrictScope handoff sync;
+# cmd/fak/issue_create.go's trusted first-party wrapper;
 # Python: bench_signal.py, gate_signal.py, score_signal.py via
 # check_issue_contract/issue_contract_draft) is gated either by the shared
 # internal/issuecontract review, a hard triage-only label, or the trusted fak wrapper
@@ -101,10 +101,6 @@ ISSUE_CREATE_PRODUCERS = {
     "internal/ideascout/ideascout.go": [
         "TriageOnlyLabel = \"triage-only\"",
         "dispatchability: `triage_only`",
-    ],
-    "internal/issuecatalog/issuecatalog.go": [
-        "issuecontract.ReviewCandidate",
-        "IssueBody",
     ],
     "internal/learningdebt/learningdebt.go": [
         "defaultTriageLabels = []string{\"needs-triage\", \"triage-only\"}",

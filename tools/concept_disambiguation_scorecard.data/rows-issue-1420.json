@@ -573,7 +573,7 @@
       "canonical": "MTTRSessions (resume watchdog session metric)",
       "family": "session-runtime",
       "kind": "metric",
-      "definition": "MTTRSessions is the resume/operator-touches metric for the sessions included when estimating mean time to repair or recovery.",
+      "definition": "MTTRSessions is the resume watchdog metric for the sessions included when estimating mean time to repair or recovery.",
       "distinction": "It is an MTTR analysis metric over sessions, not the active session count or session list.",
       "distinct_from": [
         "x-ci-coverage-session-runtime-activesessions"

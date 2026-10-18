@@ -184,7 +184,6 @@ var tier = map[string]int{
 	"resumebackoff":         2,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
 	"resumeactuator":        1,                // stdlib-only managed continuation-command rendering primitive (#8060).
 	"commitlifecycle":       2,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
-	"wiplease":              2,                // live-WIP projection into laneadmit lease geometry; imports laneadmit(2)+wipattr(1), off the hot path.
 	"wipref":                2,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
 	"wipattr":               2,                // dirty-hunk-to-checkpoint attribution fold (#3874); imports pathutil(1), off the hot path.
 	"wiprecon":              1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
@@ -211,14 +210,12 @@ var tier = map[string]int{
 	"memoryindex":           2,                // stdlib-only memory-index reconciliation mechanism; off the hot path.
 	"memorystability":       1,                // stdlib-only fleet-memory stability governor over drift trajectories; off the hot path.
 	"memoryread":            1,                // read-only committed fleet-memory digest renderer; stdlib-only, off the hot path.
-	"fleetmemory":           1,                // cross-agent lessons ledger (#2141) + its write-time dedup guard (#2142): New/Match/Inject fold publishable lessons into a key-indexed Ledger and select by trigger for peer injection (freshness re-verify is the caller's job — the dos_recall discipline); stdlib-only, imports nothing internal, off the hot path.
 	"nodecompare":           1,                // stdlib-only cross-node benchmark result fold; off the hot path.
 	"planaudit":             1,                // stdlib-only plan-doc drift audit; off the hot path.
 	"sotacoverage":          2,                // SOTA prior-art coverage scorecard over sotamatrix + git tree scans; imports sotamatrix(1)+windowgate(1), off the hot path.
 	"testroute":             1,                // pure host test-route fold (native / WSL / CI) over caller-supplied probe data; stdlib-only, no I/O.
 	"mergepreview":          2,                // read-only shared-trunk merge preview over git merge-tree; stdlib-only, off the hot path.
 	"taskdecision":          1,                // task-scoped append-only decision log loaded into reset carryover; stdlib-only, off the hot path.
-	"taskidentity":          1,                // canonical task directive/signature derivation for session transcript heads; stdlib-only, off the hot path.
 	"sweepconfig":           2,                // agent sweep profile load/save/list helpers over JSON/YAML-lite config; stdlib-only, off the hot path.
 	"qwen36parity":          1,                // Qwen3.6 Mac parity witness grader/scrubber over JSON artifacts; stdlib-only, off the hot path.
 	"whatschanged":          2,                // read-only peer code-diff readout over git log/diff-tree; stdlib-only, off the hot path.
@@ -279,7 +276,6 @@ var tier = map[string]int{
 	"benchauthority":   2, // typed in-binary source of truth for the PRIMARY benchmark numbers fak claims (the "what" half of the benchmark discipline); imports benchcli(2)+stdlib, off the hot path.
 	"closureaudit":     1, // pure stdlib-only port of the issue_closure_audit grader (#1406): binds commits to issue numbers and grades each issue's closure; imports nothing internal, off the hot path.
 	"ctxplans":         1, // CONTEXT-PLAN-REQUIRED advisory lint (R4, #2202, epic #2198): the code form of doctrine law L7 — every surface declares its context plan; stdlib-only, off the hot path.
-	"fleetverify":      2, // throwaway compile-witness isolating the operator.go fleet helpers' loopfleet/loopmgr API usage from the churning cmd/fak; imports loopfleet(1)+loopmgr(1), off the hot path.
 	"issueownerprompt": 1, // stdlib-only canonical resolver lifecycle and drift validator (#6848).
 	"promptlint":       1, // durable freshness monitor for the dispatch worker-issue prompts (#3218): flags a rendered prompt whose `fak <verb>` / UPPER_SNAKE claims drift from the surface; stdlib-only, off the hot path.
 	"sensecheck":       1, // "does this actually make sense?" common-sense smell battery side-car; stdlib-only, imports nothing internal, off the hot path.
@@ -480,11 +476,9 @@ var tier = map[string]int{
 	"loopscore":           2, // pure loop scorecard: folds the loopmgr ledger + job registry into a durability/self-report/dogfood score for the agentic background loops; imports loopmgr(1), off the hot path.
 	"looptrigger":         2, // pure trigger-decision receipt classifier for meta/super loops; stdlib-only, read-only, and off the execution path (#10352).
 	"loopfleet":           2, // cross-ledger loop-health fold (#1196): pure read-only adapters over the loopmgr/nightrun/dojo/cadence/dispatch journals joined into one per-loop health view in loopmgr's HealthState vocabulary; imports loopmgr(1), off the hot path.
-	"loopunblock":         1, // the generic head-of-line UNBLOCKER for any worklist-draining loop/super loop: pure Decide fold over a worst-first candidate list + per-candidate admission status, into a closed {enter,clear-then-enter,bypass,wait,escalate,stand-down} action vocabulary. The always-on watchdog rung that clears an auto-releasable blocker in place or routes around a stalled head; stdlib-only, imports nothing internal, off the hot path.
 	"fleetpane":           5, // native fleet control-pane reader: shells to git/status helpers and folds loop/fleet/operator state for cmd/fak; command-facing integrator, off the hot path.
 	"trendreport":         2, // the generic trend-report substrate (#1437): the durable-JSONL ledger plumbing (ParseLedger/LatestBefore/AppendLedgerLine over a Row key), DirectionWord, the embeddable control-pane Envelope+Stamp, and the AdvisoryGate whose only failing finding is the caller's *_unmeasured token. Lifts the machinery cadencereport/milestonereport/the dojo board each re-declare; stdlib+generics only, imports nothing internal, off the hot path. Consumer migration is a documented follow-on.
 	"dispatchaudit":       2, // pure dispatch-worker outcome fold (#1454): classifies each .dispatch-runs worker (shipped/wasted-spawn/quota-walled/retry-storm/no-op/errored), rolls up wasted-spawn + wasted-wall-clock per backend, and emits fingerprinted findings; stdlib-only core + a thin I/O shell, off the hot path.
-	"issuecatalog":        4, // performance-enablement issue-catalog planner/syncer; reads curated rows, reviews them through issuecontract(1), and shells to gh only behind --live; off the hot path.
 	"safesync":            3, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
 	"hostfault":           2, // pure closed host-fault classification vocabulary; stdlib-only, off hot path.
 	"terminalrisk":        2, // pure Windows Terminal crash-risk assessment + settings rewrite.
@@ -502,10 +496,8 @@ var tier = map[string]int{
 	"fleettrend":          2, // fleet status JSONL history and sparkline trend fold; stdlib-only, off the hot path.
 	"workdelivery":        2, // independent record/admission/verification/integration/release contract (#7101); stdlib-only, off the hot path.
 	"workflowaudit":       2, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
-	"fleetsim":            2, // synthetic 400-issues/hour dry-run replay fixture: deterministic ledger generator + closes/hour fold; stdlib-only, off the hot path.
 	"fleetmetrics":        1, // pure worker-session duration percentiles (p50/p95) over a ledger; stdlib-only, off the hot path.
 	"fusedturn":           1, // executable "one turn spawns both": classifies each abi.ToolCall into its concept-family (classical / weight-based) + folds a FusedTurn (fused iff it spans both) whose Adjudicate proves both families cross ONE floor via an injected Decider (*kernel.Kernel.BatchDecide); imports only abi(0), off the hot path.
-	"workerenvelope":      1, // machine-readable worker-result envelope (sha/issue/tests/blocker/witness) + witness-gated validation; stdlib-only, off the hot path.
 	"workerworktree":      2, // native port of tools/worker_worktree.py (#3168): per-worker git worktree isolation (prepare detached-at-SHA / land diff onto trunk / reap) that the Go dispatch spawn wires in behind a default-off flag; imports windowgate(1) for the no-window git runner + stdlib, off the hot path.
 	"speedab":             1, // pure pinned fast-vs-standard manifest grader; stdlib-only, off the hot path.
 	"closurerate":         1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
@@ -513,7 +505,6 @@ var tier = map[string]int{
 	"mutationbudget":      1, // GitHub mutation throttle guard: holds close/comment bursts with an actionable reason when remaining API budget < reserve; stdlib-only, off the hot path.
 	"mutationefficacy":    2, // bounded SOFT mutation-testing probe (#3845): applies operator mutants over an allow-list, runs `go test`, counts survivors as SOFT KPI; imports pkg/scorecard + os/exec, off the hot path.
 	"completiondist":      2, // fold historical issue-closure durations into a distribution (median/p95/buckets) for the capacity model; reuses fleetmetrics+fleetcap; stdlib-only, off the hot path.
-	"fleetfreeze":         1, // operator freeze/dry-run gate: holds new spawns while allowing witness-close + status-refresh; stdlib-only, off the hot path.
 	"auditreason":         1, // closed vocabulary classifying commit-audit failures as transient (retryable) vs permanent unwitnessed claim; stdlib-only, off the hot path.
 	"commitissuelink":     1, // pure checker (#1812): flags a commit that carries this repo's ship-stamp trailer but whose subject omits a scannable #N, guessing the issue from a body Fixes/Closes/Resolves trailer when one exists; stdlib-only, off the hot path.
 	"committedtree":       2, // neutral committed git tree materialization shared by runtime and fak-dev; imports windowgate, no command ownership.
@@ -538,7 +529,6 @@ var tier = map[string]int{
 	"regionadmit":         3,
 	"toolprocgate":        5, // post-kill tool-result quarantine rung; declared once its leaf landed on the trunk (see the stale-row rule above)
 
-	"operatortouches":       2, // R1 babysitting counter (#2270): pure fold over loopmgr's loop-event ledger measuring human touches per witnessed shipped unit; mttr_sessions is fed by the R4 drain witness (#2273); imports loopmgr(1)+resume(1), off the hot path.
 	"popularizationtickets": 1, // embedded popularization-ticket curriculum (tickets.json) + pure fold/render over it; stdlib-only, off the hot path.
 	"qwen36nodereports":     3, // qwen36 node-report harvester: reads/unzips node artifacts and folds a versioned report; tool-shaped mechanism leaf, shells out off the hot path, imports nothing internal.
 	"trajctl":               2,
@@ -553,7 +543,6 @@ var tier = map[string]int{
 	"toolshape":             4, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.
 	"l3kv":                  3, // durable off-box L3 KV residency backend (#1472): routes span content through the storedrv(2) router (blobfs local stand-in + the FAK_BLOB_HTTP_URL remote pool) behind a durable span→content manifest, so it declares alongside storedrv; imports abi(0)+model(1)+blob/blobfs/blobhttp(1)+storedrv(2), off the hot path.
 	"l3server":              2, // pure L3 slab-allocated storage engine and protocol server (#11077); stdlib-only, off the hot path.
-	"worklog":               1, // unified agent-work change feed primitive (#3172): the outbox-insight applied to agent work — one append-only, Seq-ordered, principal-scoped CDC feed (commit / verdict-flip / lease events) drained by cursor with an idempotency+retention contract + a fold read-model; pure primitive, imports nothing internal (`import "sync"` only), off the hot path.
 	"conformance":           3, // standalone third-party-runnable fak safety-conformance suite (#453): pins the guarantees a fork/auditor must verify independently of the kernel's own tests; composes abi(0)+adjudicator(2)+policy(2), so it declares at the lowest layer its imports allow (tier 2, alongside shipgate), off the hot path.
 	"sessionreplay":         3, // per-turn regime-conditioned replay-regression fixture (#4425, epic #4107): the fak.sessionreplay.v1 golden format + a pure Replay that re-adjudicates a captured (turn, active_regime) through the REAL adjudicator(2) over an internal/policy(2) regime floor, freezing a mode/regime-conditioned verdict for regression. Composes abi(0)+adjudicator(2)+policy(2) (like conformance), so it declares tier 2; test-time only, mutates nothing, off the hot path.
 	"doomloop":              1, // two-axis doom-loop classifier (#doomloop): folds a live worker's effort-vs-verified-progress sample window into a closed verdict + a graduated, reversible-first correction (observe->nudge->escalate, never an auto-teardown); the missing enforcement half of fleetmon/trajctl/relay/loopmgr detection. Pure, stdlib-only, off the hot path.
@@ -607,7 +596,6 @@ var tier = map[string]int{
 	"guardcorpus":           3, // guarded-session corpus fold consumes journal semantics and emits durable analysis records; off the request hot path.
 	"stripeload":            1, // #4298: pure chunk-planner + striping io.ReaderAt that fans one logical read across N byte-identical mirrors proportionally to measured bandwidth (the same fan-out later stripes {NVMe, peer-RAM, S3}); stdlib-only, callers own I/O policy and bandwidth measurement.
 	"lookahead":             3, // #5204 (epic #5202): pure witness-gated Lesson core — distills a fork-rollout's outcome into a Lesson whose FACT/RISK authority is bounded by the witness rung its evidence earned (W3 may assert FACT, W2 only RISK, W1/W0 refused LESSON_OVERCLAIMS); injected model seam (decline discipline), stdlib + trajctl(1), off the hot path.
-	"escalation":            2, // #2271 (epic #2269, no-babysit R2): the fak.escalation.v1 typed packet schema — closed-token escalation object (reason/ids/state digest/evidence refs/bounded actions/safe default+expiry/cost-of-delay, NO free-text field by construction) + JSONL packet/ack ledger + the pure open/expired/acked fold R1's handling p50 reads. Deliberately imports nothing internal: waiting(1) and operatortouches(1) sit ABOVE it in the no-babysit stack. Off the hot path.
 	"servicespec":           2, // #4749 (parent #4748): the portable fak.service.v1 desired-state + restart-semantics contract — ONE versioned schema (identity, command, readiness, restart/backoff, checkpoint/resume, deps, intentional-stop) with DESIRED vs OBSERVED state kept strictly disjoint; platform supervisors render from it, never call SCM/systemd/launchd/cron themselves. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"servicelease":          2, // #4752 (parent #4748): lease/generation/incarnation fencing layer over fak.service.v1 — the four durable facts (Generation, Incarnation, Lease, FencingToken) plus the pure LocalRestartAllowed/RemoteReassignAllowed rules that keep two owners from ever being simultaneously valid across a partition. Imports only servicespec(1), off the hot path.
 	"serviceledger":         2, // #4753 (parent #4748): portable append-only observed-state event ledger (fak.service.events.v1) folding Windows Event/SCM, journald, launchd, and fak supervisor receipts into one schema correlated by servicespec identity + boot/incarnation/lease facts; exactly-once by (source, source_uid), secrets/private-host redaction before persist. Imports only servicespec(1), off the hot path.
@@ -769,7 +757,6 @@ var tier = map[string]int{
 	"cloudhandoff":               1, // stdlib-only cloud handoff contract and deterministic planner.
 	"composition":                1, // stdlib-only immutable composition identity and validation contract.
 	"docsearch":                  2, // shared documentation loader/search composite over trigram ranking.
-	"issuecheck":                 1, // stdlib-only issue-bound Top-5 review record contract.
 	"localadmission":             1, // stdlib-only local runtime admission state primitive.
 	"localappcontract":           1, // stdlib-only local application protocol contract.
 	"localappmetrics":            1, // stdlib-only local application metrics fold.
@@ -807,7 +794,6 @@ var tier = map[string]int{
 	"worktree":                   2, // ephemeral git worktree manager and janitor (#11169); imports leaseref(2), off the hot path.
 	"marketplace":                1,
 	"mtptune":                    1,
-	"dosadapter":                 1,
 	"interactivesession":         1,
 	"kimik3page":                 1,
 	"breathgate":                 1,
@@ -821,7 +807,6 @@ var tier = map[string]int{
 	"fakpack":                    2,
 	"allinone":                   5,
 	"airgaptest":                 5, // hermetic air-gapped harness integration contracts (#11387).
-	"harnesswarm":                2, // progressive non-blocking workspace warming engine (#10649).
 	"macobs":                     1, // Apple Silicon Mac & MLX observability leaf: hardware telemetry, headroom, metrics; stdlib-only, off hot path.
 	"capabilitymatrix":           1, // unified model capability registry (#11507); stdlib-only, off the hot path.
 	"containment":                1,

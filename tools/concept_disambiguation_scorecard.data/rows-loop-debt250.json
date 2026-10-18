@@ -218,6 +218,25 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-runhealthloop",
+      "canonical": "RunHealthLoop (replica fleet liveness driver)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "gateway.FleetMembership.RunHealthLoop (internal/gateway/fleet_membership.go:580) probes every replica worker at once and then once per interval until its context is cancelled. ProbeOnce is the testable body; this is the thin real-time driver. The serve gateway runs it from runFleetHealthLoop (internal/gateway/replica_membership.go:103), the continuous (Interval 0) fleet-health bgloop.Loop that arms the fleet router after its first probe.",
+      "distinction": "One self-paced probe loop over a replica fleet's worker health. It is not `bgloop`, the supervisor that starts, joins and reports every background loop including this one, and not `loophealth`, a folded health row for an agentic loop ledger.",
+      "distinct_from": [
+        "bgloop",
+        "loophealth"
+      ],
+      "aliases": [],
+      "grounding": "RunHealthLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

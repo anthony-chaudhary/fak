@@ -127,7 +127,6 @@ switch	internal/modelroute	ServingReport.verdict	ServingState	1
 switch	internal/modelroute	ZoneOfKind	ProviderKind	1
 switch	internal/modelroute	complexityRank	Complexity	1
 switch	internal/nightrun	TestBacklogNoDupIDsAndSourcesPresent	Source	1
-switch	internal/operatortouches	Fold	SourceClass	1
 switch	internal/orchestration	Resolve	WorkClass	1
 switch	internal/policy	TestAmendmentMatrixCentralChannel	AmendmentClass	1
 switch	internal/provenance	PinKind.String	PinKind	1

@@ -533,7 +533,7 @@
       "canonical": "SessionLedger (planned, #2392)",
       "family": "session-runtime",
       "kind": "concept",
-      "definition": "A not-yet-built append-only session-scoped ledger referenced only as a forward pointer (#2392) from atif/doc.go, session/scratch_lease.go, and worklog/worklog.go; those call sites deliberately stay silent on entry format pending that work.",
+      "definition": "A not-yet-built append-only session-scoped ledger referenced only as a forward pointer (#2392) from atif/doc.go and session/scratch_lease.go; those call sites deliberately stay silent on entry format pending that work.",
       "distinction": "A PLANNED future ledger, not yet implemented - not ScratchJournal (the append-only ledger scratch_lease.go actually implements today).",
       "distinct_from": ["x-session-runtime-scratchjournal"],
       "aliases": [],

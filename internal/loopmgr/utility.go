@@ -70,8 +70,7 @@ type EndOutcome string
 
 const (
 	// OutcomeFailure: the run ended failed or canceled — it did not complete.
-	// Canceled joins failed because a canceled run produced no result either, which
-	// is the same convention internal/operatortouches already reads ends with.
+	// Canceled joins failed because a canceled run produced no result either.
 	OutcomeFailure EndOutcome = "failure"
 	// OutcomeEffect: the run completed and declared >= 1 useful effect.
 	OutcomeEffect EndOutcome = "effect"

@@ -8,10 +8,10 @@ package headlesslint
 //
 //	There is no blocked state: name the next action (spawn / queue / route around / wait / hand off), never a terminal block.
 //
-// A worker facing an obstacle always has a disposition available, and internal/loopunblock
-// already fixes the closed vocabulary of them: enter, clear_then_enter, bypass, wait,
-// escalate, stand_down. That is why there is no blocked state to sit in — a block is not
-// an outcome, it is a prompt to route through one of those actions. So a final summary
+// A worker facing an obstacle always has a disposition available, and the rule above
+// already names the closed vocabulary of them: spawn, queue, route around, wait, hand
+// off. That is why there is no blocked state to sit in — a block is not an outcome, it
+// is a prompt to route through one of those actions. So a final summary
 // that says only "blocked", "cannot proceed", "stuck on", "waiting on a blocker" names no
 // disposition at all: it is a stop with nothing to execute, which is the unforced failure
 // the kernel already refuses elsewhere.

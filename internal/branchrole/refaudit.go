@@ -237,7 +237,6 @@ var refClassByExactPath = map[string]string{
 	"internal/releasestatus/releasestatus.go":     RefClassDevelopmentSource,
 	"internal/treedoctor/treedoctor.go":           RefClassDevelopmentSource,
 	"internal/treedoctor/reflocks.go":             RefClassDevelopmentSource,
-	"internal/workerenvelope/workerenvelope.go":   RefClassDevelopmentSource,
 	"internal/worktreewitness/worktreewitness.go": RefClassDevelopmentSource,
 	"tools/issue_resolve_witnessed.py":            RefClassDevelopmentSource,
 	"tools/auto_push_on_lag.py":                   RefClassDevelopmentSource,

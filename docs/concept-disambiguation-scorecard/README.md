@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **669** (clarity 0 + coverage 669) |
-| **Crystal-clear concepts (and climbing)** | **1283** crystal of 3086 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3170 / 3839** (82.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **666** (clarity 0 + coverage 666) |
+| **Crystal-clear concepts (and climbing)** | **1283** crystal of 3088 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3170 / 3836** (82.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4344 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4346 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3086 concepts - score 88.7/100 (grade B) - disambiguation-debt 669
+concept-disambiguation chart - 3088 concepts - score 88.7/100 (grade B) - disambiguation-debt 666
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####################........ 1283
-  o defined       ############################ 1803
+  o defined       ############################ 1805
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -55,15 +55,15 @@ clarity mix by family (each cell = one concept):
   pool             **********oooooooooooooooooooooooooooooooo (42 concept(s); 10 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
-  session-runtime  ***********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (268 concept(s); 95 crystal)
+  session-runtime  ***********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (269 concept(s); 95 crystal)
   support-maturity *****************************************************ooooooooooooooooooooooooooo (80 concept(s); 53 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (174 concept(s); 83 crystal)
+  witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
   plan             #######################..... 480/585
-  session-runtime  ######################...... 289/360
+  session-runtime  #######################..... 289/359
   cache            #######################..... 340/408
   gateway-engine   #######################..... 247/305
   guard-gate       ##########################.. 515/563
@@ -73,10 +73,10 @@ coverage by family (positioned / discovered):
   policy-capability ########################.... 225/265
   support-maturity ####################........ 85/122
   render-materialize ########################.... 217/251
-  witness-proof    ########################.... 172/199
+  witness-proof    ########################.... 172/198
   score-debt       #######################..... 114/139
   evict            ####################........ 57/79
-  loop             ########################.... 100/117
+  loop             ########################.... 100/116
   layout           #################........... 20/33
   decision         #########################... 60/66
   cross-cluster    ............................ 0/0
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.6%  (3170/3839 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.6%  (3170/3836 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4344 lookup name(s) -> 3086 concept(s), 89 ambiguous
+name index: 4346 lookup name(s) -> 3088 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2432 / 5657 |
+| Boundaries drawn (mutual / total) | 2432 / 5661 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4344 over 3086 concepts |
+| Lookup names indexed | 4346 over 3088 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3086 |
+| Concepts carrying a contrast set | 3088 |
 
 ## The concepts (best verdict first)
 
@@ -2307,7 +2307,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | loop | **KindLoop (superloop member kind: loop)** - KindLoop is the superloop.MemberKind constant tagging a super-loop Member as a ledgered loop id, whose status Walk/Drive reads from the cross-ledger loop-health fold. |
 | o | defined | symbol | loop | **KindSuperloop (superloop member kind: superloop)** - KindSuperloop is the superloop.MemberKind constant tagging a Member as ANOTHER super loop - the recursion case the composition graph (internal/superloop/graph.go) walks as a descend (out-)edge between intents, feeding the resolves/acyclic/root-rooted/once-only invariants. |
 | o | defined | symbol | loop | **loopDriveOptions (loop-drive config struct)** - loopDriveOptions is the cmd/fak struct bundling every `fak loop drive` run parameter - goal/ledger/policy paths, loop id, source, principal, iteration/token/deadline caps, the wrapped command, and the optional Lane/Region admission spec consumed by newLoopDriveRegionHold. |
-| o | defined | subsystem | loop | **loopunblock (head-of-line worklist watchdog)** - internal/loopunblock is a generic decision core that, given a worst-first worklist head a loop already selected plus its admission status, returns one closed Action (Enter/ClearThenEnter/Bypass/Wait/Escalate/StandDown) so a loop that selected a move it cannot make does not stall the whole queue behind it. |
 | o | defined | doc-term | loop | **MartinLoop (external field-borrow study)** - MartinLoop (github.com/Keesan12/martin-loop, Apache-2.0) is a third-party governed-agent-run project fak studied via /study-repo + /field-borrow on 2026-07-08, documented in docs/notes/CONCEPT-STUDY-MARTINLOOP-2026-07-08.md, comparing its trust-core modules (leash, test-integrity, grounding, red-blue probes, hash-chained receipts) against fak/DOS and filing 3 genuine gaps as issues #3362-#3364 under epic #2871. |
 | o | defined | symbol | loop | **newLoopDriveRegionHold (loop-drive region lease acquire)** - newLoopDriveRegionHold resolves a `fak loop drive` run's region config (lane/tree, from loopDriveOptions flag overrides or the GOAL.md lane:/region: spec) and acquires a fenced, renewed lease hold on the leaseref fabric, refusing on a live overlapping lease (COLLISION_RISK) instead of racing it. |
 | o | defined | concept | loop | **super-loop registry (Registry(), named super loops)** - The super-loop registry is the curated, data-only set of named super loops (internal/superloop's unexported var registry, exposed by func Registry()) - the full collection an operator intent name (e.g. 'tend', 'improve-quality') resolves against, in declaration order. |
@@ -2320,6 +2319,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | loop | **ReasonForegroundNetworkLoop (FOREGROUND_NETWORK_LOOP advisory token)** - The const string "FOREGROUND_NETWORK_LOOP" (internal/repoguard/foregroundloop.go, #4595) - the structured advisory reason stamped into each Violation.Reason produced by classifyForegroundNetworkLoop, consumed by severity.go (default SeverityWarn: the batch/background hint avoids a killed-mid-loop turn) and addressable by the per-reason override key FAK_REPO_GUARD_SEVERITY=FOREGROUND_NETWORK_LOOP=record|off, with FAK_REPO_GUARD=warn|off the master switch. |
 | o | defined | symbol | loop | **codexLoopDiagnosis (single codex session diagnosis struct)** - The cmd/fak session-diagnosis struct type (cmd/fak/sessions_codex_loop.go:40) carrying ONE Codex session's verdict plus its evidence: session id, parent/originator, provider, guard witness, git commit/branch, started/last-event timestamps, final status/tokens/time, abort reason/duration, tool_calls/tool_outputs counts, repeated_outcomes, livelock_notices, and the verdict+reason+next_action+observability_gaps triad consumed by diagnoseCurrentCodexLoop, renderCodexLoopDiagnosis, and the codex-loop gate (codexLoopDiagnosisGateReason / codexLoopDiagnosisUnguarded). |
 | o | defined | symbol | loop | **codexLoopRecentReport (codex-loop batch rollup struct)** - The cmd/fak batch-rollup struct type (cmd/fak/sessions_codex_loop.go:78) folding MANY recent codexLoopDiagnosis rows scanned under a codex-home (bounded by --since-hours/--limit) into one `--recent` report: counts (scanned/loop/action/ok/unguarded/guarded-loop/unguarded-loop/unknown-loop), provider_counts, tool_calls/tool_outputs totals, last_token_total_sum, top_repeated, and the verdict+reason+next_action aggregate consumed by diagnoseRecentCodexLoops, renderCodexLoopRecentReport, codexLoopFailOnRecentExitCode / codexLoopRecentGateReason, and the dispatch-tick codex gate. |
+| o | defined | symbol | loop | **RunHealthLoop (replica fleet liveness driver)** - gateway.FleetMembership.RunHealthLoop (internal/gateway/fleet_membership.go:580) probes every replica worker at once and then once per interval until its context is cancelled. ProbeOnce is the testable body; this is the thin real-time driver. The serve gateway runs it from runFleetHealthLoop (internal/gateway/replica_membership.go:103), the continuous (Interval 0) fleet-health bgloop.Loop that arms the fleet router after its first probe. |
 | o | defined | concept | loop | **loopaudit (loop ledger audit)** - The audit pass over a loop's ledger that checks a run's claimed outcome against its witnessed evidence (was a done actually witnessed). |
 | o | defined | symbol | loop | **loopsession (one loop run's session id)** - The identity binding one loop RUN to a work session, so a resumed or re-dispatched run keeps a stable session identity across the ledger. |
 | o | defined | symbol | loop | **defaultLoopPolicy (loop admission policy path)** - The resolver (defaultLoopPolicy) for where the loop admission policy lives: FAK_LOOP_POLICY, else .fak/loop-policy.json - the file loopmgr.LoadPolicies reads to brake a background loop. |
@@ -2416,7 +2416,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **CandidateScore (rsiloop fixture task field)** - CandidateScore is the SkillFixtureTask field holding one held task's outcome score measured WITH the proposed skill applied. |
 | o | defined | symbol | plan | **CausePlanning (vcacheobserve attribution cause)** - CausePlanning is the AttributionCause enum member (wire value "context_planning") JoinContext assigns when an observed cost swing is attributed to a deliberate context-window/planning change. |
 | o | defined | config | plan | **ClosedNotPlanned (closureaudit bucket)** - ClosedNotPlanned (wire value CLOSED_NOT_PLANNED) is the closureaudit closure-reason bucket for an issue that closed without ever being scheduled via a plan/roadmap reference. |
-| o | defined | symbol | plan | **CohortPlan (dogfoodissues/issuecatalog wave-partitioned batch plan)** - CohortPlan (defined in both internal/dogfoodissues and internal/issuecatalog) folds a batch of action items or catalog rows through issuecohort.Build, producing an issuecohort.Plan partitioned into concurrency-safe dispatch waves with collision_pairs counted up front. |
+| o | defined | symbol | plan | **CohortPlan (dogfoodissues wave-partitioned batch plan)** - CohortPlan (defined in internal/dogfoodissues) folds a batch of action items through issuecohort.Build, producing an issuecohort.Plan partitioned into concurrency-safe dispatch waves with collision_pairs counted up front. |
 | o | defined | config | plan | **ExitPlanMode (planning-family tool name)** - ExitPlanMode is the literal tool name fak's rung/preset policy lists as a member of the planning family (propose-only tools: ExitPlanMode, diff_infra, plan_deploy, validate_terraform) that a read-only or propose-only consequence rung permits by default. |
 | o | defined | config | plan | **FeatureCtxplanSeam (ablate ctxplan_seam sweep token)** - FeatureCtxplanSeam is the ablate sweep constant (wire value "ctxplan_seam") gating the CtxViewPlanner seam so a sweep run can isolate its effect from sibling ablate features. |
 | o | defined | symbol | plan | **foldPRPlanUnits (release prplan grouping fold)** - foldPRPlanUnits groups the commits fak release prplan discovered into one PR unit per (fak <leaf>) ship-stamp lane, biggest-first, returning unstamped commits separately as legibility debt. |
@@ -2982,7 +2982,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **SessionEnd (toolproc session boundary hook)** - SessionEnd is the Claude/toolproc hook event that marks the owning agent session ending, letting toolprocgate classify descendants as orphans. |
 | o | defined | symbol | session-runtime | **AggregateSessions (sessionaudit fold)** - AggregateSessions folds sessionaudit Session rows into aggregate totals, top-model summaries, and pressure inputs for reports. |
 | o | defined | symbol | session-runtime | **EvSessionEnd (toolproc journal event kind)** - EvSessionEnd is the internal/toolproc journal event kind for a session_end record emitted when the owning session ends. |
-| o | defined | metric | session-runtime | **MTTRSessions (resume watchdog session metric)** - MTTRSessions is the resume/operator-touches metric for the sessions included when estimating mean time to repair or recovery. |
+| o | defined | metric | session-runtime | **MTTRSessions (resume watchdog session metric)** - MTTRSessions is the resume watchdog metric for the sessions included when estimating mean time to repair or recovery. |
 | o | defined | symbol | session-runtime | **RecentSessions (vCache status session summary)** - RecentSessions is the optional compact session-audit report embedded in vCache status output to summarize recent guarded session behavior. |
 | o | defined | subsystem | session-runtime | **sessiondesc (session descriptor package)** - internal/sessiondesc holds helpers for writing and reading session descriptors, the small durable shape that points to a live guard session. |
 | o | defined | symbol | session-runtime | **llamaSlotStateFor** - The agent helper that retrieves or creates the shared llamaSlotState record for an exact upstream base URL in llamaSlotRegistry. The record holds an atomic discovered slot count and discovery coordination state. Retrieving the record performs no HTTP request and does not start discovery. |
@@ -3009,6 +3009,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | config | session-runtime | **FAK_SESSION_START_SHA (session base-ref env)** - cmd/fak/whats_changed.go + usage.go: env knob giving the git ref a session started from, used as the default 'since' base for `fak whats-changed` / usage diffs (falls back to HEAD when unset). |
 | o | defined | config | session-runtime | **WT_SESSION (Windows Terminal multiplexer marker)** - cmd/fak/guard_resolve.go + guard_split.go: the Windows Terminal environment marker fak's guard-split detection reads to decide whether an attended launch is inside a terminal multiplexer (so it can open the info pane). |
 | o | defined | doc-term | session-runtime | **unsloth (GGUF quant provider org)** - cmd/qwen35check/acceptance.go + internal/ggufload: the Unsloth HuggingFace org whose *-GGUF repos (e.g. unsloth/Qwen3.6-27B-GGUF) supply the acceptance-checkpoint quants, including UD mixes that use IQ3_XXS/IQ4_XS/Q8_0 beside the K-quants. |
+| o | defined | symbol | session-runtime | **ReleaseSession (ctxmmu fork-session teardown)** - ctxmmu ReleaseSession ends one forked context session and decrements the refcount of every physical KV page block it holds, reclaiming a block when its count reaches zero. The SessionForker interface declares it (internal/ctxmmu/fork.go:59); ForkManager (fork.go:504) also drops the session from its map, COWPageTable (internal/ctxmmu/cow_table.go:507) refuses a second release with ErrSessionReleased, and the MMU method (fork.go:992) delegates to its ForkManager. An empty ID returns ErrInvalidSessionID and an unknown one ErrSessionNotFound. |
 | o | defined | subsystem | session-runtime | **sessionbench (value-stack bench)** - cmd/sessionbench is the Go benchmark command that measures the net value-add of fak's fused agent kernel over a synthetic multi-agent, multi-turn session workload (its prefillTokens A/B/C formula). |
 | o | defined | symbol | session-runtime | **DurabilitySession (durability tier)** - DurabilitySession is the ctxplan/ctxmmu durability-tier constant ("session") that marks a stored context span as true only for the current session's lifetime. |
 | o | defined | symbol | session-runtime | **BatchSession (batched decode)** - model.BatchSession decodes B independent user sequences in lockstep over one shared weight stream (continuous-batching decode), built via NewBatchSession. |
@@ -3076,7 +3077,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **SessionEndpoints** - gateway.SessionEndpoints aggregates the roster `fak info`/guard-endpoints surfaces render: Accounts, Nodes, and an embedded Harness together. |
 | o | defined | symbol | session-runtime | **SessionFleetMachine** - gateway.SessionFleetMachine is one machine's row within the GATED-WIP SessionFleet aggregate, folded from a fleetpane.FleetDoc snapshot. |
 | o | defined | symbol | session-runtime | **SessionHarness** - gateway.SessionHarness is embedded in SessionEndpoints, describing the harness/runner surface (set via a SetSessionHarnessProvider hook) shown alongside accounts and nodes. |
-| o | defined | concept | session-runtime | **SessionLedger (planned, #2392)** - A not-yet-built append-only session-scoped ledger referenced only as a forward pointer (#2392) from atif/doc.go, session/scratch_lease.go, and worklog/worklog.go; those call sites deliberately stay silent on entry format pending that work. |
+| o | defined | concept | session-runtime | **SessionLedger (planned, #2392)** - A not-yet-built append-only session-scoped ledger referenced only as a forward pointer (#2392) from atif/doc.go and session/scratch_lease.go; those call sites deliberately stay silent on entry format pending that work. |
 | o | defined | symbol | session-runtime | **SessionNode** - gateway.SessionNode describes one machine/node entry within SessionEndpoints' roster. |
 | o | defined | symbol | session-runtime | **SessionRow** - sidecar.SessionRow is the census row type: one agent session joined across the four key data sources for `fak sidecar`. |
 | o | defined | symbol | session-runtime | **sessionsCodexLoop** - sessionsCodexLoop is the actuator behind `fak sessions codex-loop`, diagnosing repeated-goal-failure loops from a Codex TUI JSONL session's history. |
@@ -3198,6 +3199,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | subsystem | witness-proof | **worktreewitness (detached-trunk command harness)** - internal/worktreewitness runs an arbitrary command inside a transient, self-reaping detached git worktree pinned at the resolved origin/main SHA, so the verdict reflects the trunk tip and is never contaminated by a peer's dirty uncommitted WIP in the shared working tree. |
 | o | defined | symbol | witness-proof | **RequiredWitnesses (witnesses still owed)** - RequiredWitnesses names two declared lists of witnesses that must still be produced: corelockaudit.Finding.RequiredWitnesses (internal/corelockaudit/corelockaudit.go:96) holds the commands that would clear a core-lock warning on one lock class, and safesync.Packet.RequiredWitnesses (internal/safesync/packet.go:70) names the witness classes (tests, build check, remote containment) the safe-sync executor verifies before it pushes. |
 | o | defined | symbol | witness-proof | **EvaluateWitness (stop-gate completion-claim verdict)** - stopgate.EvaluateWitness (internal/stopgate/witness.go:23) turns one asserted completion claim into a stop decision: an unclaimed or witnessed claim is allowed, shadow mode only adds guidance, and enforce mode blocks an unwitnessed claim with exit 2 until the bounded block count (default 3) is spent, then stands down. The guard Stop hook (cmd/fak/guard_witnessed_done.go) and the stop-gate boundary (internal/stopgate/boundary.go) call it. |
+| o | defined | symbol | witness-proof | **WitnessBlockCount (stop-gate block budget spent)** - stopgate.BoundaryInput.WitnessBlockCount (internal/stopgate/types.go:185) is how many times this session's stop has already been blocked for a missing witness or a premature surrender. EvaluateBoundary passes it to EvaluateWitness and allows the stop once it reaches the bounded max (internal/stopgate/boundary.go:272 and :356). The agent loop increments its own count each time it feeds back a STOP_UNWITNESSED or PREMATURE_SURRENDER continuation (internal/agent/loop_turn.go:587). |
 | o | defined | symbol | witness-proof | **VerdictRequireWitness (abi verdict)** - abi.VerdictRequireWitness is the kernel verdict kind that leaves a gated call PENDING an independent read-back, so the kernel must corroborate the caller's claimed effect (carried in the WitnessPayload) before the call may dispatch. |
 | o | defined | symbol | witness-proof | **ReasonUnwitnessed (deny reason)** - abi.ReasonUnwitnessed is the deny reason-code the kernel attaches when a require-witness gate found no corroboration, so the fail-closed default turns the pending verdict into a DENY (also surfaced as looprecover's unwitnessed disposition). |
 | o | defined | symbol | witness-proof | **WitnessPayload (verdict claim carrier)** - abi.WitnessPayload is the typed bounded-disclosure verdict payload struct{Claim string} that an adjudicator attaches to a RequireWitness or Deny verdict to carry the single claim string the kernel must corroborate. |
@@ -3366,8 +3368,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3225/5657 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3086 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3229/5661 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3088 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3376,7 +3378,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4344 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4346 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3384,7 +3386,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | plan | 480 | 585 | 105 |
-| session-runtime | 289 | 360 | 71 |
+| session-runtime | 289 | 359 | 70 |
 | cache | 340 | 408 | 68 |
 | gateway-engine | 247 | 305 | 58 |
 | guard-gate | 515 | 563 | 48 |
@@ -3394,10 +3396,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | policy-capability | 225 | 265 | 40 |
 | support-maturity | 85 | 122 | 37 |
 | render-materialize | 217 | 251 | 34 |
-| witness-proof | 172 | 199 | 27 |
+| witness-proof | 172 | 198 | 26 |
 | score-debt | 114 | 139 | 25 |
 | evict | 57 | 79 | 22 |
-| loop | 100 | 117 | 17 |
+| loop | 100 | 116 | 16 |
 | layout | 20 | 33 | 13 |
 | decision | 60 | 66 | 6 |
 | cross-cluster | 0 | 0 | 0 |

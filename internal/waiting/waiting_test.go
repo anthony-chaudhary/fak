@@ -10,7 +10,7 @@ import (
 
 // ev is a minimal loop-event builder for fixture rows. Fold reads only the
 // fields set here (it does not validate the hash chain — that is loopmgr.Load's
-// job), mirroring how operatortouches/loopscore build their fold fixtures.
+// job), mirroring how loopscore builds its fold fixtures.
 func ev(kind loopmgr.EventKind, loop, run, reason string, ts time.Time, seq uint64) loopmgr.Event {
 	return loopmgr.Event{
 		Schema:     loopmgr.SchemaEvent,

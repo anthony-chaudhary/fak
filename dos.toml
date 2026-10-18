@@ -327,11 +327,11 @@ concurrent = [
   "dispatchdoa",
   "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
   "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim",
-  "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge", "escalation",
+  "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge",
   "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
-  "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
+  "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare",
   "fleetmetrics",
-  "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
+  "fleetmon", "fleetpane", "fleetreap", "fleetspine", "fleettrend",
   "flock", "focusscore", "frontierswe", "fusedturn", "gardenbundle",
   # reconciled 2026-09-01 (index-freshness refresh pass): six committed internal/ leaves the
   # `fak-dev index freshness` drift report flagged as holding Go files with NO [lanes.trees]
@@ -346,17 +346,17 @@ concurrent = [
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
   "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency", "papers",
   "incidentrsi",
-  "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
+  "intlist", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
   "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "lifebridge",
   "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
   "localbench", "looptrigger",
-  "looporphan", "looprecover", "loopscore", "loopunblock", "macbench", "maputil", "mathx",
+  "looporphan", "looprecover", "loopscore", "macbench", "maputil", "mathx",
   "mcpfootprint", "memgate", "memorycotravel", "memoryread", "memorystability", "memvaluescore",
   "memview", "mergepreview", "milestoneburndown", "milestonedoc", "milestonepost",
   "milestonereport", "modedebt", "modelladder", "modelperfobs", "modelscore", "modver", "mutationbudget",
   "mutationefficacy", "negframe", "newmodel", "nodecompare", "nodeusagepost", "numfmt",
-  "operatortouches", "orphanscan", "patchcommit", "planaudit", "popularizationtickets",
+  "orphanscan", "patchcommit", "planaudit", "popularizationtickets",
   "privatepath", "procguard", "projectcompletion", "projectreport", "promalert", "promptaudit",
   "promptlint", "propagationscore", "pythongate", "qaprocessscore", "quality", "questionledger",
   "qwen36nodereports", "qwen36parity", "randhex", "reachdelta", "readmevisualaudit",
@@ -373,14 +373,14 @@ concurrent = [
   "optsdefault",
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
   "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
-  "taskdecision", "taskgraph", "taskidentity", "terminalbench", "terminalrisk", "testroute",
+  "taskdecision", "taskgraph", "terminalbench", "terminalrisk", "testroute",
   "timeoutphase", "tokencache", "toolrollup", "toolsandbox", "toolseq",
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
   "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
   "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
   "vcachescore", "vcachesnapshot", "verattest", "verifierexposure",
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
-  "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
+  "workerworktree", "workflow", "workflowaudit", "workflowlint",
   "worktreewitness", "xenginekv", "xprobe",
   "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
   "corelockgate", # #5392: internal/corelockgate leaf -- see [lanes].concurrent note.
@@ -457,7 +457,7 @@ concurrent = [
   "harnesscreationreceipt", "harnesscreationstudy", "harnesscrossover", "harnessderive", "harnessdiscover", "harnessgallery",
   "harnesshost", "harnessinit", "harnessinspect", "harnessinstructions", "harnessmix", "harnessoverride",
   "harnesspreview", "harnessprotocol", "harnessrelease", "harnessresolve", "harnessselect", "harnessserve",
-  "harnessverify", "harnessweb", "interspersedflags", "issuecentrality", "issuecheck", "issueownerprompt",
+  "harnessverify", "harnessweb", "interspersedflags", "issuecentrality", "issueownerprompt",
   "issuepolicy", "kquantbits", "kvint2eval", "kvquantquality", "kvvectoreval", "lanebeat",
   "launchshim", "learningmesh", "learningobservation", "lifecycleadapter", "lightgapscore", "lightroteval",
   "linefmt", "llamacppinterop", "localadmission", "localappcert", "localappcontract", "localapphelper",
@@ -478,7 +478,7 @@ concurrent = [
   "subtractiveprofile", "suiteverify", "supervisionpolicy", "supportgraph", "terminalbarrier", "terminalrelief",
   "testenv", "testquality", "toolplugin", "toolpriorbench", "trajectoryassurance", "turnavoid",
   "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer", "usagepreflight",
-  "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplease", "wiplifecycle",
+  "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplifecycle",
   "wipreadiness",
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
   "workspin",
@@ -495,12 +495,10 @@ concurrent = [
   "promptcomp",
   "control",
   "agentopt",
-  "dosadapter",
   "interactivesession",
   "harnessbench",
   "workspaceslot",
   "agentsched",
-  "harnesswarm",
   "macobs",
   "researcharm",
   "toolgrammar",
@@ -747,7 +745,6 @@ autopick = [
   "promptcomp",
   "control",
   "agentopt",
-  "dosadapter",
   "interactivesession",
   "toolgrammar",
   "containment",
@@ -1170,7 +1167,6 @@ egressfloor = ["internal/egressfloor/**"]
 envconfiglint = ["internal/envconfiglint/**"]
 epicprogress = ["internal/epicprogress/**"]
 epochbridge = ["internal/epochbridge/**"]
-escalation = ["internal/escalation/**"]
 evebridge = ["internal/evebridge/**"]
 eveimport = ["internal/eveimport/**"]
 eveparity = ["internal/eveparity/**"]
@@ -1182,16 +1178,12 @@ fleetbottleneck = ["internal/fleetbottleneck/**"]
 fleetbus = ["internal/fleetbus/**"]
 fleetcap = ["internal/fleetcap/**"]
 fleetcompare = ["internal/fleetcompare/**"]
-fleetfreeze = ["internal/fleetfreeze/**"]
-fleetmemory = ["internal/fleetmemory/**"]
 fleetmetrics = ["internal/fleetmetrics/**"]
 fleetmon = ["internal/fleetmon/**"]
 fleetpane = ["internal/fleetpane/**"]
 fleetreap = ["internal/fleetreap/**"]
-fleetsim = ["internal/fleetsim/**"]
 fleetspine = ["internal/fleetspine/**"]
 fleettrend = ["internal/fleettrend/**"]
-fleetverify = ["internal/fleetverify/**"]
 flock = ["internal/flock/**"]
 focusscore = ["internal/focusscore/**"]
 frontierswe = ["internal/frontierswe/**"]
@@ -1239,7 +1231,6 @@ papers = ["internal/papers/**"]
 idempotency = ["internal/idempotency/**"]
 incidentrsi = ["internal/incidentrsi/**"]
 intlist = ["internal/intlist/**"]
-issuecatalog = ["internal/issuecatalog/**"]
 issuecohort = ["internal/issuecohort/**"]
 issuecontractrepair = ["internal/issuecontractrepair/**"]
 issuecost = ["internal/issuecost/**"]
@@ -1269,7 +1260,6 @@ looporphan = ["internal/looporphan/**"]
 looprecover = ["internal/looprecover/**"]
 looptrigger = ["internal/looptrigger/**"]
 loopscore = ["internal/loopscore/**"]
-loopunblock = ["internal/loopunblock/**"]
 macbench = ["internal/macbench/**"]
 maputil = ["internal/maputil/**"]
 mathx = ["internal/mathx/**"]
@@ -1298,7 +1288,6 @@ newmodel = ["internal/newmodel/**"]
 nodecompare = ["internal/nodecompare/**"]
 nodeusagepost = ["internal/nodeusagepost/**"]
 numfmt = ["internal/numfmt/**"]
-operatortouches = ["internal/operatortouches/**"]
 orphanscan = ["internal/orphanscan/**"]
 patchcommit = ["internal/patchcommit/**"]
 planaudit = ["internal/planaudit/**"]
@@ -1385,7 +1374,6 @@ syspromptmmu = ["internal/syspromptmmu/**"]
 systemservice = ["internal/systemservice/**"]
 taskdecision = ["internal/taskdecision/**"]
 taskgraph = ["internal/taskgraph/**"]
-taskidentity = ["internal/taskidentity/**"]
 terminalbench = ["internal/terminalbench/**", "cmd/terminalbench/**"]
 terminalrisk = ["internal/terminalrisk/**"]
 testroute = ["internal/testroute/**"]
@@ -1424,12 +1412,10 @@ wipattr = ["internal/wipattr/**"]
 wipfence = ["internal/wipfence/**"]
 wiprecon = ["internal/wiprecon/**"]
 wipref = ["internal/wipref/**"]
-workerenvelope = ["internal/workerenvelope/**"]
 workerworktree = ["internal/workerworktree/**"]
 workflow = ["internal/workflow/**"]
 workflowaudit = ["internal/workflowaudit/**"]
 workflowlint = ["internal/workflowlint/**"]
-worklog = ["internal/worklog/**"]
 worktreewitness = ["internal/worktreewitness/**"]
 xenginekv = ["internal/xenginekv/**"]
 xprobe = ["internal/xprobe/**"]
@@ -1581,7 +1567,6 @@ harnessverify = ["internal/harnessverify/**"]
 harnessweb = ["internal/harnessweb/**"]
 interspersedflags = ["internal/interspersedflags/**"]
 issuecentrality = ["internal/issuecentrality/**"]
-issuecheck = ["internal/issuecheck/**"]
 issueownerprompt = ["internal/issueownerprompt/**"]
 issuepolicy = ["internal/issuepolicy/**"]
 kquantbits = ["internal/kquantbits/**"]
@@ -1690,7 +1675,6 @@ vcachecalibration = ["internal/vcachecalibration/**"]
 vllmquant = ["internal/vllmquant/**"]
 wavefuel = ["internal/wavefuel/**"]
 wipinventory = ["internal/wipinventory/**"]
-wiplease = ["internal/wiplease/**"]
 wiplifecycle = ["internal/wiplifecycle/**"]
 wipreadiness = ["internal/wipreadiness/**"]
 witnessprocess = ["internal/witnessprocess/**"]
@@ -1714,12 +1698,10 @@ perfscout = ["internal/perfscout/**"]
 promptcomp = ["internal/promptcomp/**"]
 control = ["internal/control/**"]
 agentopt = ["internal/agentopt/**"]
-dosadapter = ["internal/dosadapter/**"]
 interactivesession = ["internal/interactivesession/**"]
 harnessbench = ["internal/harnessbench/**"]
 workspaceslot = ["internal/workspaceslot/**"]
 agentsched = ["internal/agentsched/**"]
-harnesswarm = ["internal/harnesswarm/**"]
 macobs = ["internal/macobs/**"]
 researcharm = ["internal/researcharm/**"]
 containment = ["internal/containment/**"]

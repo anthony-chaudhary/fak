@@ -250,8 +250,8 @@ func runLeaserefAnnounceView(stdout, stderr io.Writer, argv []string) int {
 }
 
 // postLeaserefAnnounce writes the rendered body to a temp file and posts it with
-// `gh issue comment N --body-file` — the same body-file discipline issuecatalog uses so a
-// multi-line body with special characters never hits an argv/quoting limit.
+// `gh issue comment N --body-file` so a multi-line body with special characters never
+// hits an argv/quoting limit.
 func postLeaserefAnnounce(dir, repo string, issue int, body string) error {
 	f, err := os.CreateTemp("", "fak-leaseref-announce-*.md")
 	if err != nil {

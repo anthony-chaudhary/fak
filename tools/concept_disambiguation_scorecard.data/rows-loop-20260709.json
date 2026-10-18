@@ -177,22 +177,6 @@
       "gaps": []
     },
     {
-      "id": "loop-loopunblock",
-      "canonical": "loopunblock (head-of-line worklist watchdog)",
-      "family": "loop",
-      "kind": "subsystem",
-      "definition": "internal/loopunblock is a generic decision core that, given a worst-first worklist head a loop already selected plus its admission status, returns one closed Action (Enter/ClearThenEnter/Bypass/Wait/Escalate/StandDown) so a loop that selected a move it cannot make does not stall the whole queue behind it.",
-      "distinction": "Not superloop's Walk/Drive, which SELECTS the worst-first head in the first place; loopunblock never selects a candidate, it only decides what to do when the already-selected head is blocked at admission.",
-      "distinct_from": ["superloop"],
-      "aliases": ["loopunblock", "loop-unblock"],
-      "grounding": "loopunblock",
-      "grounding_kind": "path",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "loop-martinloop",
       "canonical": "MartinLoop (external field-borrow study)",
       "family": "loop",

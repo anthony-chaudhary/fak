@@ -147,10 +147,10 @@
   },
   {
    "id": "plan-cohortplan",
-   "canonical": "CohortPlan (dogfoodissues/issuecatalog wave-partitioned batch plan)",
+   "canonical": "CohortPlan (dogfoodissues wave-partitioned batch plan)",
    "family": "plan",
    "kind": "symbol",
-   "definition": "CohortPlan (defined in both internal/dogfoodissues and internal/issuecatalog) folds a batch of action items or catalog rows through issuecohort.Build, producing an issuecohort.Plan partitioned into concurrency-safe dispatch waves with collision_pairs counted up front.",
+   "definition": "CohortPlan (defined in internal/dogfoodissues) folds a batch of action items through issuecohort.Build, producing an issuecohort.Plan partitioned into concurrency-safe dispatch waves with collision_pairs counted up front.",
    "distinction": "It is the WAVE-PARTITIONED structure for a whole cohort of items, not BuildPlan/BuildPlanWithOptions (the single-item action planner each row is folded through first).",
    "distinct_from": [
     "x-plan-buildplan",

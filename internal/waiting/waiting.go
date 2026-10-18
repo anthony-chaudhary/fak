@@ -118,7 +118,7 @@ type Queue struct {
 	OldestAgeSeconds float64        `json:"oldest_age_seconds,omitempty"` // the longest any active row has waited
 	PastDeadline     int            `json:"past_deadline"`                // active rows whose deadline elapsed
 
-	// AckClosureNotYet is the honesty fence (mirrors R1 / internal/operatortouches):
+	// AckClosureNotYet is the honesty fence:
 	// an active row closes today only on a terminal run end (source = run) or on
 	// expiry (the safe default). It NEVER closes on an explicit operator ack,
 	// because the R2 escalation packet's ack row does not exist yet (#2271,

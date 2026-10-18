@@ -225,7 +225,6 @@ var changeDetectorBaseline = []string{
 	"internal/superloop/superloop_test.go",
 	"internal/supportmaturity/supportmaturity_test.go",
 	"internal/syspromptmmu/style_test.go",
-	"internal/taskidentity/taskidentity_test.go",
 	"internal/toolcallcontrol/replay_test.go",
 	"internal/toolproc/toolproc_test.go",
 	"internal/tooltrend/tooltrend_test.go",

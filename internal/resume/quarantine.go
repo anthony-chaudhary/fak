@@ -30,8 +30,7 @@
 // (ReasonFleetTargetUnknown), and only a positive, explicitly DECLARED population admits.
 //
 // Read-only classes ([RecoveryStatusRead]) are never refused: the operator needs status
-// MOST while quarantined, and reporting cannot start work. This is the same
-// class-not-process line internal/fleetfreeze draws for its freeze.
+// MOST while quarantined, and reporting cannot start work.
 //
 // # Pure by construction
 //

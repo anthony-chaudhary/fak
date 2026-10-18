@@ -218,8 +218,6 @@ package name. One honest line each.
 | `internal/fleetspine` | Networking-aware self-discovery for the fleet-control pane: UDP-multicast heartbeats let machines find each other live on the LAN instead of only through the git-mediated machine-dir snapshot. |
 | `internal/fleetbottleneck` | Ranks which class is the fleet's binding constraint right now — seats, throttle, resume backlog, host load, or auth — from one fleet snapshot. |
 | `internal/fleetreap` | Bounded retention and footprint measurement for per-session fleet artifacts; never follows directories or removes a file outside the caller's explicit set. |
-| `internal/fleetmemory` | The cross-agent lessons ledger and its write-time duplicate guard: a workaround one agent learns is published once with a trigger context and injected to any peer whose session matches it. |
-| `internal/fleetverify` | A throwaway compile-verification of the `operator.go` fleet helpers, isolated from the churning `cmd/fak` so the loopfleet/loopmgr API usage type-checks with no duplicate-symbol risk. |
 | `internal/ghexec` | Builds deadlined `gh` invocations: every construction carries a context deadline, disables interactive prompting and the update notifier, and suppresses the Windows console window — so a wedged `gh` cannot wedge its caller. |
 | `internal/hostfault` | Names the HOST-level failure classes that destabilize the fleet without being a child tool process crashing: a failed Windows Update install, an orchestrator fault, a GPU live-kernel/TDR watchdog event, an app-termination dump. |
 | `internal/hostplacement` | Deterministic multi-host worker placement: a per-host headroom heartbeat registry plus a pure function that picks the least-saturated, non-stale host to spill a dispatch worker onto, or stays local when none is eligible. |
@@ -246,7 +244,6 @@ package name. One honest line each.
 | `internal/guardsessions` | The local, queryable index of `fak guard` sessions — one appended row per launch (handle, trace id, wrapped agent, pid, cwd, journal path, start time), and prefix resolution to the one session it names. |
 | `internal/lookahead` | The witness-gated Lesson core: a fork-rollout's outcome distilled into a lesson whose assertive authority is bounded by the witness rung its evidence earned — a self-report rollout may assert nothing at all. |
 | `internal/looporphan` | The pure duplicate-loop-supervisor reaper: folds a process census of loop and drainer supervisors into a closed keep/reap plan that never strands live work. |
-| `internal/loopunblock` | The generic head-of-line unblocker for any worklist-draining loop — the always-on rung that keeps a loop which has already selected its next move from stalling on a move it cannot make. |
 | `internal/microagent` | Hosts many agent loops in one process: a worker pool sharing one in-process kernel gateway. |
 | `internal/resumebackoff` | The pure resume-storm containment fold. |
 | `internal/resumemetrics` | The process-global expvar surface for the resume/heal watchdog, so a renamed or rotated status ledger can no longer read as "zero activity" and be mistaken for a healthy-but-idle watchdog. |
@@ -354,7 +351,6 @@ package name. One honest line each.
 | `internal/questionledger` | The deterministic labeling authority for the question-loop ledger: unambiguous ids, a closed category vocabulary, a closed status lifecycle, and no leaked host, path, or email — rules prose in a skill file cannot enforce. |
 | `internal/spendrollup` | Builds the cross-account `fak spend` rollup and gate-fails any figure that forgets its valuation basis or its WITNESSED/OBSERVED provenance label — the conflation card's discipline applied to money. |
 | `internal/steerpr` | Folds continuous-merge trunk commits into operator-legible PR-sized units banded by where operator attention is owed. |
-| `internal/worklog` | The unified agent-work change feed: the commit, the diff-witnessed verdict, the lease epoch, and a later verdict flip folded into ONE append-only, cursor-drained feed a consumer tails by offset. |
 
 #### G.7 — Context, cache, and token economics
 

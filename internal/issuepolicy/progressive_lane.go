@@ -81,9 +81,6 @@ var (
 		"sessionsignals": {
 			"sessionsignals", "session signals", "session monitor", "session health", "stall detector",
 		},
-		"workerenvelope": {
-			"workerenvelope", "worker envelope", "worker budget", "worker boundary", "subagent envelope",
-		},
 		"agent": {
 			"agent", "headless agent", "agent loop", "subagent", "autonomous agent",
 		},

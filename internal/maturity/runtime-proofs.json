@@ -1068,11 +1068,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/dosadapter",
-            "lane": "dosadapter"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/dosdecision",
             "lane": "dosdecision"
         },
@@ -1140,11 +1135,6 @@
             "command": "fak version modules",
             "output_contains": "internal/epochbridge",
             "lane": "epochbridge"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/escalation",
-            "lane": "escalation"
         },
         {
             "command": "fak version modules",
@@ -1248,16 +1238,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/fleetfreeze",
-            "lane": "fleetfreeze"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/fleetmemory",
-            "lane": "fleetmemory"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/fleetmetrics",
             "lane": "fleetmetrics"
         },
@@ -1283,11 +1263,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/fleetsim",
-            "lane": "fleetsim"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/fleetspine",
             "lane": "fleetspine"
         },
@@ -1295,11 +1270,6 @@
             "command": "fak version modules",
             "output_contains": "internal/fleettrend",
             "lane": "fleettrend"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/fleetverify",
-            "lane": "fleetverify"
         },
         {
             "command": "fak version modules",
@@ -1828,18 +1798,8 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/issuecatalog",
-            "lane": "issuecatalog"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/issuecentrality",
             "lane": "issuecentrality"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/issuecheck",
-            "lane": "issuecheck"
         },
         {
             "command": "fak version modules",
@@ -2185,11 +2145,6 @@
             "command": "fak version modules",
             "output_contains": "internal/looptrigger",
             "lane": "looptrigger"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/loopunblock",
-            "lane": "loopunblock"
         },
         {
             "command": "fak macbench watch-status --result non-existent.json",
@@ -2565,11 +2520,6 @@
             "command": "fak version modules",
             "output_contains": "internal/operatorresolve",
             "lane": "operatorresolve"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/operatortouches",
-            "lane": "operatortouches"
         },
         {
             "command": "fak version modules",
@@ -3677,11 +3627,6 @@
             "lane": "taskgraph"
         },
         {
-            "command": "fak dev devindex leaf taskidentity",
-            "output_contains": "taskidentity",
-            "lane": "taskidentity"
-        },
-        {
             "command": "fak dev devindex leaf taskmgr",
             "output_contains": "taskmgr",
             "lane": "taskmgr"
@@ -4103,11 +4048,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/wiplease",
-            "lane": "wiplease"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/wiplifecycle",
             "lane": "wiplifecycle"
         },
@@ -4153,11 +4093,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/workerenvelope",
-            "lane": "workerenvelope"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/workerworktree",
             "lane": "workerworktree"
         },
@@ -4185,11 +4120,6 @@
             "command": "fak version modules",
             "output_contains": "internal/workloadfit",
             "lane": "workloadfit"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/worklog",
-            "lane": "worklog"
         },
         {
             "command": "fak version modules",

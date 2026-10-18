@@ -327,6 +327,24 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-witnessblockcount",
+      "canonical": "WitnessBlockCount (stop-gate block budget spent)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "stopgate.BoundaryInput.WitnessBlockCount (internal/stopgate/types.go:185) is how many times this session's stop has already been blocked for a missing witness or a premature surrender. EvaluateBoundary passes it to EvaluateWitness and allows the stop once it reaches the bounded max (internal/stopgate/boundary.go:272 and :356). The agent loop increments its own count each time it feeds back a STOP_UNWITNESSED or PREMATURE_SURRENDER continuation (internal/agent/loop_turn.go:587).",
+      "distinction": "A per-session count of blocks already spent, not a verdict. Unlike `cov-debt250-witness-proof-evaluatewitness`, it decides nothing by itself; it only says how much of the bounded block budget is used.",
+      "distinct_from": [
+        "cov-debt250-witness-proof-evaluatewitness"
+      ],
+      "aliases": [],
+      "grounding": "WitnessBlockCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }
