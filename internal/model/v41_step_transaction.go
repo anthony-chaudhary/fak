@@ -231,6 +231,7 @@ type v41StepTransaction struct {
 	headProject       func([]float32) ([]float32, error)
 	headFinish        func([]float32, func() error) ([]float32, error)
 	commit            func(bool)
+	captureValidate   func() error
 	rollback, cleanup func()
 	afterLayer        func(int) error
 	activationCapture *v41StepActivationCapture
@@ -301,6 +302,9 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 	// This step consumes the NEXT token, so its absolute position is the current
 	// committed history length. The per-layer retained states must already match.
 	pos := len(st.history)
+	if capture := st.dsparkCapture; capture != nil {
+		tx.captureValidate = func() error { return capture.beforeCommit(pos) }
+	}
 	if err := v41CandidatePoolCovers(cfg, pos+1); err != nil {
 		return tx, err
 	}
@@ -365,6 +369,11 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		if err := m.v41StepInjectEngram(l, engram, st, x, streams, resident, scratch, rollback); err != nil {
 			return nil, err
 		}
+		if st.dsparkCapture != nil {
+			if err := st.dsparkCapture.captureStep(st, l, id, pos, streams, resident, full); err != nil {
+				return nil, tx.abortLayerError(err)
+			}
+		}
 		stats.LayerCalls++
 		if tx.pendingAttention != nil {
 			err := m.prepareV41LayerAttention(tx.pendingAttention, l, x, streams, pos, state, registry, scratch)
@@ -409,6 +418,11 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		}
 		if beforeCommit != nil {
 			if err := beforeCommit(); err != nil {
+				return nil, err
+			}
+		}
+		if tx.captureValidate != nil {
+			if err := tx.captureValidate(); err != nil {
 				return nil, err
 			}
 		}
@@ -585,6 +599,11 @@ func (tx *v41StepTransaction) finalizeNoLogits() (err error) {
 		if err = v41ValidateDiscardedHeadInput(row); err != nil {
 			return tx.abortHeadError(err)
 		}
+		if tx.captureValidate != nil {
+			if err := tx.captureValidate(); err != nil {
+				return tx.abortHeadError(err)
+			}
+		}
 		tx.commit(false)
 		tx.close()
 		return nil
@@ -670,6 +689,7 @@ func (tx *v41StepTransaction) close() {
 		tx.rollback, tx.cleanup = nil, nil
 		tx.afterLayer = nil
 		tx.commit = nil
+		tx.captureValidate = nil
 	}()
 	if tx.cleanup != nil {
 		tx.cleanup()

@@ -456,6 +456,9 @@ type Config struct {
 	// SPECULATIVE remain the operator override and still win when set. Every
 	// existing admissibility precondition is unchanged -- this threads the selector.
 	SpeculativeMode string
+	// DFlash2Target is an authenticated, externally owned diagnostic sidecar target.
+	// The caller must retain it for the server lifetime and close it after requests drain.
+	DFlash2Target *agent.DFlash2Target
 	// ExpertParallelRanks is the expert-parallel rank count for the in-kernel MoE forward:
 	// the number of expert shards the routed glm_moe_dsa MoE delta is reduced across
 	// (model.SetExpertParallelRanks; the EP twin glmMoeEPFFN). 0/1 leave the forward on the

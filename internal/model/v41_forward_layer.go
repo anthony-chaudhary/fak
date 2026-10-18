@@ -58,6 +58,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err := m.v41LayerEngramInject(l, tokens, x, streams, full, eps, st, scratch, resident); err != nil {
 		return err
 	}
+	if st != nil && st.dsparkCapture != nil {
+		if err := st.dsparkCapture.captureCold(st, l, tokens, streams, resident, full); err != nil {
+			return err
+		}
+	}
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))

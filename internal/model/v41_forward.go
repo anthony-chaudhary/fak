@@ -134,6 +134,7 @@ type v41ForwardState struct {
 	forwardCoverage   *NativeForwardCoverage
 	activationCapture V41ActivationCaptureReceipt
 	activeStepRound   *v41StepRound
+	dsparkCapture     *v41DSparkCapture
 	attentionInputRun *v41AttentionInputRun
 
 	// indexKeyMemo is the session's per-index-source-layer memo of the last
@@ -338,7 +339,18 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 
 // No-logits prefill retains every checked head-input boundary, but does not
 // project or scale a distribution that the caller explicitly discards.
-func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (act *Activations, err error) {
+func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (*Activations, error) {
+	if st != nil && st.dsparkCapture != nil {
+		return st.dsparkCapture.runCold(func() (*Activations, error) {
+			return m.forwardV41WithHeadModeCore(ids, st, lastHeadOnly, wantLogits)
+		})
+	}
+	return m.forwardV41WithHeadModeCore(ids, st, lastHeadOnly, wantLogits)
+}
+
+// The optional capture wrapper observes this whole call, including all deferred
+// trace/device cleanup. The ordinary nil-capture arithmetic body is unchanged.
+func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (act *Activations, err error) {
 	if st != nil && st.activeStepRound != nil {
 		return nil, errV41StepRoundState
 	}
@@ -376,6 +388,11 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 				st.history = st.history[:historyLen]
 			}
 		}()
+		if capture := st.dsparkCapture; capture != nil {
+			if err := capture.bindCold(runState); err != nil {
+				return nil, err
+			}
+		}
 	}
 	// A stateless cold forward still needs a transient cross-layer source registry.
 	if runState == nil && m.v41RoleSchedule() {
@@ -578,6 +595,11 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 			return nil, err
 		}
 		act.Logits[t] = logits
+	}
+	if st != nil && st.dsparkCapture != nil {
+		if err := st.dsparkCapture.beforeCommit(-1); err != nil {
+			return nil, err
+		}
 	}
 	if st != nil {
 		st.layers = runState.layers

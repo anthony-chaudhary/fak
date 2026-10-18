@@ -14371,6 +14371,11 @@
           "category": "incidental",
           "reason": "Names the required unsupported-refusal evidence for the serving-activation obligation; it adds no refusal implementation and asserts no admitted model support.",
           "token": "unsupported_refusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12640 side-effect-free backend capability probe declared by a private structural interface for bounded DSpark mean extraction. Its name is not a product support or maturity claim, and the interface explicitly requires separate implementation and hardware evidence.",
+          "token": "SupportsV41DSparkMeanRange"
         }
       ],
       "exclude": [
@@ -14502,6 +14507,7 @@
         "SupportedFeatures",
         "SupportsBorrowedExpertUploads",
         "SupportsRoutedExpertKQuant",
+        "SupportsV41DSparkMeanRange",
         "SupportsV41DeferredStatus",
         "SupportsV41IndexScaleBF16",
         "SupportsV41RoutedDownPanelChunk",
@@ -17262,6 +17268,11 @@
           "category": "incidental",
           "reason": "Issue #12727 internal method selecting draft token candidates using the trained Markov selector; this numerical helper does not define a work plan or planning lifecycle.",
           "token": "selectCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 private adapter for the existing agent Planner interface which retains and returns an authenticated DFlash2 binding error; this refusal wrapper introduces no work plan or planning lifecycle.",
+          "token": "dflash2RefusedPlanner"
         }
       ],
       "exclude": [
@@ -17436,6 +17447,7 @@
         "defaultsCheckPlanner",
         "deriveSelfUpdateCandidateCacheDisposition",
         "deviceTransientBytesInPlan",
+        "dflash2RefusedPlanner",
         "dispatchWaveExecutionPlanWithSize",
         "estimateqwen35runtimeextramemoryplan",
         "fitandplanserveggufexpertparallelpathondevice",
