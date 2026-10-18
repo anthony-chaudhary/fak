@@ -394,7 +394,6 @@ LANE_CLASS: dict[str, str] = {
     "dispatchauto": CLASS_INFRA,     # dispatch/supervisor automation
     "loopdrive": CLASS_INFRA,        # loop-driver plumbing
     "rsiloop": CLASS_INFRA,          # RSI loop engine (self-improvement machinery)
-    "tracesink": CLASS_INFRA,        # trace/telemetry sink
     "operatorbrief": CLASS_INFRA,    # operator-facing status plumbing
     # frontdoor — public release path (lane-level; cmd/docs stay signal-gated).
     "appversion": CLASS_FRONTDOOR,   # per-module derived versions (version-everything)

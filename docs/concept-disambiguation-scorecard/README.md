@@ -15,24 +15,24 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **671** (clarity 0 + coverage 671) |
-| **Crystal-clear concepts (and climbing)** | **1284** crystal of 3086 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3170 / 3841** (82.5% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **669** (clarity 0 + coverage 669) |
+| **Crystal-clear concepts (and climbing)** | **1283** crystal of 3086 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3170 / 3839** (82.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4345 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4344 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3086 concepts - score 88.6/100 (grade B) - disambiguation-debt 671
+concept-disambiguation chart - 3086 concepts - score 88.7/100 (grade B) - disambiguation-debt 669
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1284
-  o defined       ############################ 1802
+  * crystal       ####################........ 1283
+  o defined       ############################ 1803
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 51 crystal)
   cache            *********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (299 concept(s); 117 crystal)
-  context-ctx      ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (247 concept(s); 88 crystal)
+  context-ctx      ***************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (246 concept(s); 87 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -59,7 +59,7 @@ clarity mix by family (each cell = one concept):
   support-maturity *****************************************************ooooooooooooooooooooooooooo (80 concept(s); 53 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (173 concept(s); 83 crystal)
+  witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (174 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
   plan             #######################..... 480/585
@@ -70,10 +70,10 @@ coverage by family (positioned / discovered):
   attention        #####################....... 146/192
   context-ctx      ########################.... 268/314
   pool             ##############.............. 44/86
-  policy-capability ########################.... 225/266
+  policy-capability ########################.... 225/265
   support-maturity ####################........ 85/122
   render-materialize ########################.... 217/251
-  witness-proof    ########################.... 172/200
+  witness-proof    ########################.... 172/199
   score-debt       #######################..... 114/139
   evict            ####################........ 57/79
   loop             ########################.... 100/117
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.5%  (3170/3841 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.6%  (3170/3839 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4345 lookup name(s) -> 3086 concept(s), 89 ambiguous
+name index: 4344 lookup name(s) -> 3086 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2438 / 5662 |
+| Boundaries drawn (mutual / total) | 2432 / 5657 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,7 +127,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4345 over 3086 concepts |
+| Lookup names indexed | 4344 over 3086 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
 | Concepts carrying a contrast set | 3086 |
@@ -310,7 +310,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **CompactionJoinResult** - The outcome of attempting to bind one compaction fire to the provider usage record sharing its CompactionJoinKey: the joined sample plus whether the binding was PROVEN, left unstamped, or withdrawn because no single usage row matched. It reports the provenance of the provider counters, so an unproven join withdraws them rather than letting an unmatched number stand as evidence. |
 | * | crystal | symbol | context-ctx | **chatRouteFromContext** - chatRouteFromContext retrieves the admitted chat account binding from the current request context, or nil when the request uses the boot planner unchanged. |
 | * | crystal | symbol | context-ctx | **full_context_tokens** - Token count in the unscoped full-context counterfactual used as the conservation baseline. |
-| * | crystal | subsystem | context-ctx | **OpenViking REST adapter** - The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract. |
 | * | crystal | symbol | context-ctx | **ProofContext (pending-admission execution identity)** - pendingadmission.ProofContext is the neutral immutable identity of the companion commit and tree, Go executable and toolchain, test environment, workspace, and verifier used to prepare one pending candidate. |
 | * | crystal | symbol | context-ctx | **ContextDigest (pending-admission proof-context digest)** - pendingadmission.Binding.ContextDigest is the canonical JSON digest of that binding's ProofContext, checked so the stored execution identity cannot drift independently of the exact candidate binding. |
 | * | crystal | symbol | context-ctx | **parallelQuantLoadContextBudget (ggufload hierarchical quant load)** - The internal/ggufload WeightSource method that runs the production hierarchical, cancellable quantized tensor load: an outer tensor fan-out with a per-tensor inner worker budget, applying each computed tensor serially under the caller's context. |
@@ -3198,6 +3197,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **WitnessSource (concept-bench referee field)** - internal/conceptbench's Verdict.WitnessSource is a string field naming the exact real DOS tool that answered one concept-bench probe (e.g. dos_verify, dos_arbitrate, dos_check_reason), so a probe's verdict can be traced back to which referee produced it. |
 | o | defined | subsystem | witness-proof | **worktreewitness (detached-trunk command harness)** - internal/worktreewitness runs an arbitrary command inside a transient, self-reaping detached git worktree pinned at the resolved origin/main SHA, so the verdict reflects the trunk tip and is never contaminated by a peer's dirty uncommitted WIP in the shared working tree. |
 | o | defined | symbol | witness-proof | **RequiredWitnesses (witnesses still owed)** - RequiredWitnesses names two declared lists of witnesses that must still be produced: corelockaudit.Finding.RequiredWitnesses (internal/corelockaudit/corelockaudit.go:96) holds the commands that would clear a core-lock warning on one lock class, and safesync.Packet.RequiredWitnesses (internal/safesync/packet.go:70) names the witness classes (tests, build check, remote containment) the safe-sync executor verifies before it pushes. |
+| o | defined | symbol | witness-proof | **EvaluateWitness (stop-gate completion-claim verdict)** - stopgate.EvaluateWitness (internal/stopgate/witness.go:23) turns one asserted completion claim into a stop decision: an unclaimed or witnessed claim is allowed, shadow mode only adds guidance, and enforce mode blocks an unwitnessed claim with exit 2 until the bounded block count (default 3) is spent, then stands down. The guard Stop hook (cmd/fak/guard_witnessed_done.go) and the stop-gate boundary (internal/stopgate/boundary.go) call it. |
 | o | defined | symbol | witness-proof | **VerdictRequireWitness (abi verdict)** - abi.VerdictRequireWitness is the kernel verdict kind that leaves a gated call PENDING an independent read-back, so the kernel must corroborate the caller's claimed effect (carried in the WitnessPayload) before the call may dispatch. |
 | o | defined | symbol | witness-proof | **ReasonUnwitnessed (deny reason)** - abi.ReasonUnwitnessed is the deny reason-code the kernel attaches when a require-witness gate found no corroboration, so the fail-closed default turns the pending verdict into a DENY (also surfaced as looprecover's unwitnessed disposition). |
 | o | defined | symbol | witness-proof | **WitnessPayload (verdict claim carrier)** - abi.WitnessPayload is the typed bounded-disclosure verdict payload struct{Claim string} that an adjudicator attaches to a RequireWitness or Deny verdict to carry the single claim string the kernel must corroborate. |
@@ -3366,7 +3366,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3224/5662 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 3225/5657 boundaries drawn one-way only |
 | well-formed | `well_formed` | 100 | 0 | all 3086 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
@@ -3376,7 +3376,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4345 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4344 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3391,10 +3391,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | attention | 146 | 192 | 46 |
 | context-ctx | 268 | 314 | 46 |
 | pool | 44 | 86 | 42 |
-| policy-capability | 225 | 266 | 41 |
+| policy-capability | 225 | 265 | 40 |
 | support-maturity | 85 | 122 | 37 |
 | render-materialize | 217 | 251 | 34 |
-| witness-proof | 172 | 200 | 28 |
+| witness-proof | 172 | 199 | 27 |
 | score-debt | 114 | 139 | 25 |
 | evict | 57 | 79 | 22 |
 | loop | 100 | 117 | 17 |

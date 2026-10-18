@@ -309,6 +309,24 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-evaluatewitness",
+      "canonical": "EvaluateWitness (stop-gate completion-claim verdict)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "stopgate.EvaluateWitness (internal/stopgate/witness.go:23) turns one asserted completion claim into a stop decision: an unclaimed or witnessed claim is allowed, shadow mode only adds guidance, and enforce mode blocks an unwitnessed claim with exit 2 until the bounded block count (default 3) is spent, then stands down. The guard Stop hook (cmd/fak/guard_witnessed_done.go) and the stop-gate boundary (internal/stopgate/boundary.go) call it.",
+      "distinction": "It DECIDES whether a stop may proceed given a claim's witness state; it does not run or record a witness. Unlike `x2-witness-proof-witnessstatus`, its output is an allow, continue or stand-down action, not a witness status.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "EvaluateWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

@@ -57,7 +57,6 @@ var tier = map[string]int{
 	"bgloop":          2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
 	"cmdutil":         2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
 	"ops":             4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
-	"observability":   2,
 	"sandbox":         2, // multi-tier local execution sandbox (wazero WebAssembly, OS container, Job Object/cgroups).
 	"gym":             5, // sandbox evaluation gym, scenario runner, and closed-loop multi-turn harness simulation (#11652, #11666).
 	"observer":        1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
@@ -230,7 +229,6 @@ var tier = map[string]int{
 	"modelladder":           3,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":              3,                // model registry; imports hfhub(1)+stdlib, off the hot path.
 	"modelinventory":        1,                // deterministic local/provider candidate evidence normalization; primitive over standard-library records.
-	"modelsrc":              3,                // model-source URL registry; transports stay behind ReaderAt openers.
 	"nativebench":           1,                // stdlib-only native benchmark comparison obligations and report generation.
 	"nativeperf":            2,                // native performance evidence classification composes primitive attestations.
 	"nativeperfartifact":    2,                // Native-performance evidence locator and digest mechanism; orchestration remains outside.
@@ -319,7 +317,6 @@ var tier = map[string]int{
 	"stalework":   5, // Advisory repository-freshness discovery; imports docfreshrsi and never gates or mutates candidates (#6613).
 	"dojocal":     5, // dojo-RSI calibration worktree/proposer: imports rsiloop(4)+shipgate(2), so it belongs at the integrator tier.
 	"capindexgw":  5, // gateway-backed capindex resolvers (MCP tools / A2A methods): the adapter that couples capindex(2) to gateway(4). It lives at the higher tier so the capindex keystone itself stays tier-2 and importable by the tier-3 skill-loader.
-	"tracesink":   5, // imports agent/turnbench/registrations (tier 4) â€” tier forced to 4
 	"agenttest":   5, // public agent-workflow TEST harness (#238, D-008): deterministic fixtures + tool-call assertion library + mock tool responses + reproduce-from-transcript replay; imports agent(4), off the hot path.
 	"ablate":      5, // the N-arm self-ablation sweep: a bench sibling; imports bench(4)+registrations(4)+metrics(1), off the hot path.
 	"guardtrace":  5, // guard replay fixture harness plus session->ablate bridge; composes bench(4)+engine(2), off the hot path.
@@ -746,7 +743,6 @@ var tier = map[string]int{
 	"codexsession":               4, // local Codex app-server adapter projected into the public harness protocol (#8736).
 	"hostdiag":                   3,
 	"shellprov":                  2, // privacy-safe receipt store for fak-owned shell launch identity (#9086); composes flock for serialized broker receipt updates.
-	"qwenworkbudget":             5, // campaign-boundary adapter over canonical trajectory audit rollups and typed Qwen amplification policy; imports trajectory(4).
 	"ultracodetokenizer":         1,
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
 	"studydrift":                 2, // external source source refresh and supersession receipt primitive (#8611).
@@ -758,9 +754,7 @@ var tier = map[string]int{
 	"systembaseline":             1,
 	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
 	"archrank":                   3, // deterministic research-ranking method; no runtime kernel (#9145).
-	"qwenflashnext":              1, // stdlib-only pinned Flash-Next chat/channel/tool/stop contract (#9124).
 	"qwen4exp":                   1, // stdlib-only deterministic native four-layer correctness oracle (#9123).
-	"qwensemanticstop":           2, // deterministic experiment receipt gate; live exact-model cancellation remains hardware-witnessed (#8646).
 	"studyclass":                 2,
 	"studyadjacency":             2,
 	"studyprio":                  2,
@@ -768,7 +762,6 @@ var tier = map[string]int{
 	"placementtax":               1,
 	"localappcert":               1, // stdlib-only deterministic Mac certification-matrix validator (#9157).
 	"localapphelper":             2, // authenticated app-scoped helper admission boundary (#9149).
-	"openviking":                 1,
 	"agentdescriptor":            1, // stdlib-only agent descriptor identity and validation contract.
 	"agentic":                    2, // deterministic agentic-objective fold over native performance evidence.
 	"archfitness":                1, // stdlib-only architecture fitness report contract.
@@ -781,8 +774,6 @@ var tier = map[string]int{
 	"localappcontract":           1, // stdlib-only local application protocol contract.
 	"localappmetrics":            1, // stdlib-only local application metrics fold.
 	"localappux":                 1, // stdlib-only local application UX state renderer.
-	"modelpack":                  1, // stdlib-only signed model-pack artifact contract.
-	"openaiadapter":              1, // stdlib-only authenticated OpenAI-compatible adapter contract.
 	"opensweharder":              1, // stdlib-only OpenSWE-hardening evidence contract.
 	"perfrsiscore":               2, // deterministic performance-RSI scorecard over the shared scorecard kernel.
 	"providerjobaccounting":      1, // stdlib-only provider-job accounting contract.
@@ -798,11 +789,8 @@ var tier = map[string]int{
 	"stablejson":                 1, // stdlib-only canonical two-space-indented JSON rendering primitive.
 	"gitresource":                1, // stdlib-only typed Git resource-ownership and cleanup-admission contract; folded by lifecycle integrations (#10613).
 	"workspin":                   1, // stdlib-only deterministic busywork-trend classifier over bounded commit/issue observations; folded by the CLI (#10609).
-	"schemaadapter":              1,
 	"toolbound":                  1,
 	"overtonscore":               1,
-	"dataslot":                   1,
-	"cache":                      1,
 	"benchsnapshot":              1,
 	"promptcomp":                 1,
 	"orgdebt":                    1,
@@ -820,10 +808,7 @@ var tier = map[string]int{
 	"marketplace":                1,
 	"mtptune":                    1,
 	"dosadapter":                 1,
-	"framebus":                   1,
 	"interactivesession":         1,
-	"faultlab":                   1,
-	"gcpgpu":                     1,
 	"kimik3page":                 1,
 	"breathgate":                 1,
 	"kv":                         1,
@@ -1531,8 +1516,7 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // *entrenched* over time before it was deleted. `agent` owns the general outbound
 // planner (`HTTPPlanner`); `engine` owns the narrow vLLM EngineDriver adapter that
 // must speak vLLM's public OpenAI-compatible generation surface; `gateway` is the
-// inbound SERVER of that route (the adjudication proxy), not a client; `openaiadapter` is the
-// inbound authenticated app-migration compatibility server, not a client; and off-path
+// inbound SERVER of that route (the adjudication proxy), not a client; and off-path
 // witnesses may replay or benchmark the same wire. cmd/fak's help text also names it
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
@@ -1541,7 +1525,6 @@ var chatEndpointRole = map[string]string{
 	"engine":            "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
 	"gateway":           "the inbound /v1/chat/completions server route (adjudication proxy)",
 	"allinone":          "the inbound mock /v1/chat/completions server of the all-in-one supervisor (bounded deterministic envelope so the ready banner's advertised URL is truthful, issue #12616; not a live client/planner)",
-	"openaiadapter":     "the inbound authenticated app-migration compatibility server (not a live planner)",
 	"chatrelay":         "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
 	"webbench":          "the off-path serving-parity benchmark client (not a live planner)",
 	"h2hbench":          "the off-path engine head-to-head streaming benchmark client against explicitly selected OpenAI-compatible serving arms (not a live planner)",

@@ -633,8 +633,7 @@ func StrictGatedSinks() map[SinkClass]bool {
 
 // Gates reports whether the policy refuses sink class s when tainted data is in
 // flight. A nil GatedSinks uses DefaultGatedSinks (EXEC ungated unless
-// FAK_IFC_GATE_EXEC). SinkNone is never gated. Exported so the capture-replay mirror
-// (internal/tracesink) can stay byte-identical to the live gate.
+// FAK_IFC_GATE_EXEC). SinkNone is never gated.
 func (p Policy) Gates(s SinkClass) bool {
 	if s == SinkNone {
 		return false

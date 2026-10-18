@@ -12,7 +12,7 @@ import (
 // fetch_policy refund doc the ctx-MMU pages out at admission), a structural deny
 // (delete_account is refused by the capability floor in EVERY arm), plus benign served
 // calls. It is the engine-agnostic floor the fleet counterfactual reports on — the same
-// shape internal/tracesink would capture from a live run.
+// shape a recorded live-run trace has.
 func floorTrace(t *testing.T) *Trace {
 	return &Trace{
 		SliceID: "fleet-cf-floor",

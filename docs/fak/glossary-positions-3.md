@@ -152,13 +152,6 @@ newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of r
 **Distinct from:** It is native planning state-buffer organization, not checkpoint weight packing, not the model KV-cache algorithm/interface, and not ctxplan context layout.
 
 
-### OpenViking REST adapter
-
-The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract.
-
-**Distinct from:** An interoperability boundary only: it transports health, retrieval, session capture, and commit calls; it is not fak-native context storage, contextq materialization, ctxplan optimization, or recall persistence.
-
-
 ### execViaKernel (agent-loop syscall adapter)
 
 The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content.

@@ -1,10 +1,9 @@
-# feat(tracesink): gate every trace capture with bounded privacy and evidence policy
+# feat(traceabi): gate every trace capture with bounded privacy and evidence policy
 
 ```routing
-lane: tracesink
+lane: traceabi
 paths:
   - pkg/traceabi/**
-  - internal/tracesink/**
 expected_steps: 8
 ```
 
@@ -20,7 +19,7 @@ Adding more tracers before the common capture floor would multiply unbounded buf
 
 ## Problem
 
-For operators and agents, a trace is useful only if enabling it cannot leak protected content, silently change claim strength, or grow until it perturbs the workload being observed. Today individual tracers make separate choices: some are bounded and payload-free, while `TraceSink` retains a growing call slice and can carry raw tool arguments. Better because one capture policy makes byte/event limits, payload treatment, evidence basis, drops, retention, and export decisions explicit before data enters a sink. Witness: a secret-bearing, mixed-evidence event stream stays within exact count/byte bounds, contains no sentinel bytes, and cannot be promoted from modeled to measured by export.
+For operators and agents, a trace is useful only if enabling it cannot leak protected content, silently change claim strength, or grow until it perturbs the workload being observed. Today individual tracers make separate choices: some are bounded and payload-free, and nothing stops the next payload-bearing recorder from retaining a growing slice of raw tool arguments. Better because one capture policy makes byte/event limits, payload treatment, evidence basis, drops, retention, and export decisions explicit before data enters a sink. Witness: a secret-bearing, mixed-evidence event stream stays within exact count/byte bounds, contains no sentinel bytes, and cannot be promoted from modeled to measured by export.
 
 ## Centrality and P1-P4
 
@@ -35,9 +34,7 @@ For operators and agents, a trace is useful only if enabling it cannot leak prot
 
 At `f21eb416d92f03286747f84e888fb7dd1038c7a9`:
 
-- `internal/tracesink/tracesink.go:1-7` explicitly captures raw argument payloads for offline replay and applies IFC redaction only when tainted data flows to a sensitive sink.
-- `internal/tracesink/tracesink.go:45-61 (TraceSink)` keeps `calls []turnbench.Call` plus aggregate dropped/redacted counts but has no max-event or max-byte fields.
-- `internal/tracesink/tracesink.go:114-175 (Emit)` resolves the full args, then appends every accepted call; the slice has no retention bound and trusted content is copied raw at `:163-173`.
+- The payload-bearing `internal/tracesink` recorder cited at that revision (an unbounded `[]turnbench.Call` that copied trusted tool arguments raw) had no production caller and has since been removed, so no live recorder captures raw tool-argument payloads today.
 - `internal/privacy/privacy.go:33-60` already defines per-sink enablement, field redaction, retention count/age, and decision receipts.
 - `internal/privacy/privacy.go:84-98,100-154` validates policy and evaluates log/retain/export/telemetry, but classification is field-name based and has no trace evidence-basis or claim-ceiling rule.
 - `internal/computetrace/trace.go:1-7,64-93` is a positive local example: opt-in, max-event bounded, and reports dropped events and observer overhead.
@@ -47,7 +44,7 @@ The capability is **PARTIAL**: useful privacy, IFC, and bounded-recorder pieces 
 
 ## Core through-line
 
-Add data-only `CapturePolicy` and `CaptureReceipt` contracts to public `pkg/traceabi`, then enforce them in `internal/tracesink`:
+Add data-only `CapturePolicy` and `CaptureReceipt` contracts to public `pkg/traceabi`, with the admission and receipt helpers a recorder calls before it retains anything:
 
 - mandatory `max_events`, `max_total_bytes`, `max_event_bytes`, and optional max age;
 - payload mode (`none`, `digest`, `summary`, `full_local_opt_in`) with digest/summary as the safe defaults;
@@ -56,21 +53,21 @@ Add data-only `CapturePolicy` and `CaptureReceipt` contracts to public `pkg/trac
 - per-reason dropped/redacted/truncated counters, input/output bytes, observer overhead, and a policy digest;
 - privacy evaluation before retention/export and explicit refusal when full payload capture lacks local opt-in.
 
-Apply the policy to the existing `TraceSink` as the tracer bullet. Other public and private recorders adopt the same contract later through local adapters.
+The external consumer test in `pkg/traceabi` is the tracer bullet. The first payload-bearing recorder (the model/tool turn trace, #12267) and other public and private recorders adopt the same contract later through local adapters.
 
 ## Working spine
 
 1. Define closed payload/evidence/action vocabularies and strict policy parsing in `pkg/traceabi`.
 2. Require nonzero event, per-event byte, and total-byte limits.
 3. Evaluate privacy/IFC before appending any payload-bearing call.
-4. Add count and byte admission to `TraceSink`; never evict silently.
+4. Provide count and byte admission that a recorder calls before retaining; never evict silently.
 5. Emit deterministic receipts with offered/retained/dropped/redacted/truncated events and bytes by reason.
 6. Enforce evidence monotonicity and unknown-by-default behavior.
 7. Prove secret, oversize, exhaustion, modeled-evidence, and disabled/default fixtures.
 
 ## Gold-plating boundary
 
-Do not build a policy language, DLP scanner, encryption/key service, remote collector, sampling optimizer, or global retention daemon. Do not copy benchmark-specific evidence structs into the sink. Keep the exported contracts data-only and free of recorder/private dependencies. This issue supplies one small closed policy and applies it to `TraceSink`; domain adapters remain follow-ons.
+Do not build a policy language, DLP scanner, encryption/key service, remote collector, sampling optimizer, or global retention daemon. Do not copy benchmark-specific evidence structs into the sink. Keep the exported contracts data-only and free of recorder/private dependencies. This issue supplies one small closed policy with its admission and receipt helpers; domain adapters remain follow-ons.
 
 ## Dedupe
 
@@ -96,7 +93,7 @@ No issue found combines bounded capture, privacy decision receipts, and evidence
 
 ## Done condition
 
-The public trace ABI defines one bounded capture/evidence contract; `TraceSink` cannot retain or export a trace without it, and every capture produces a privacy- and evidence-aware receipt.
+The public trace ABI defines one bounded capture/evidence contract; a recorder that adopts it cannot retain or export a trace without it, and every capture produces a privacy- and evidence-aware receipt.
 
 ## Definition of done
 
@@ -108,19 +105,19 @@ The public trace ABI defines one bounded capture/evidence contract; `TraceSink` 
 - [ ] Receipt totals reconcile offered = retained + dropped and input bytes = retained/redacted/truncated/dropped accounting.
 - [ ] `unknown`, `modeled`, or `operator_supplied` evidence cannot become `direct_measurement` through projection/export.
 - [ ] Disabled/default operation adds no background goroutine.
-- [ ] Existing trace replay behavior remains available under explicit bounded full-local policy.
+- [ ] A replay-grade full payload remains expressible under explicit bounded full-local policy.
 
 ## Verifiable Witness
 
 ```bash
-go test ./pkg/traceabi ./internal/tracesink -run 'TestCapturePolicy|TestExternalCaptureConsumer|TestTraceSinkBounded|TestTraceSinkEvidenceMonotonicity' -count=1
+go test ./pkg/traceabi -run 'TestCapturePolicy|TestExternalCaptureConsumer|TestCaptureBounded|TestCaptureEvidenceMonotonicity' -count=1
 ```
 
 The adversarial fixture offers 1,000 events including a unique secret sentinel and oversize payloads under an 8-event/4-KiB budget. The retained artifact must remain within both limits, contain no sentinel, and reconcile every drop/redaction byte.
 
 ## Witness
 
-Run the deterministic `go test ./pkg/traceabi ./internal/tracesink -run 'TestCapturePolicy|TestExternalCaptureConsumer|TestTraceSinkBounded|TestTraceSinkEvidenceMonotonicity' -count=1` gate above.
+Run the deterministic `go test ./pkg/traceabi -run 'TestCapturePolicy|TestExternalCaptureConsumer|TestCaptureBounded|TestCaptureEvidenceMonotonicity' -count=1` gate above.
 
 ## Acceptance gate
 
@@ -130,13 +127,10 @@ Two runs of the adversarial fixture produce byte-identical receipts; retained ev
 
 - `pkg/traceabi/capture.go`
 - `pkg/traceabi/capture_external_test.go`
-- `internal/tracesink/policy.go`
-- `internal/tracesink/policy_test.go`
-- `internal/tracesink/tracesink.go`
 
 ## Lane
 
-tracesink
+traceabi
 
 Schedule after `typed-causal-envelope-v1` because both leaves extend `pkg/traceabi/**`.
 
@@ -146,7 +140,7 @@ Schedule after `typed-causal-envelope-v1` because both leaves extend `pkg/tracea
 
 ## Closure binding
 
-The resolving commit cites this issue and uses `(fak traceabi)`. Report `pkg/traceabi@rev`, `internal/tracesink@rev`, the capture-policy digest, and the adversarial receipt totals.
+The resolving commit cites this issue and uses `(fak traceabi)`. Report `pkg/traceabi@rev`, the capture-policy digest, and the adversarial receipt totals.
 
 ## Tracking
 

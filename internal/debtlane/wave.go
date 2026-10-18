@@ -41,7 +41,7 @@ type Wave struct {
 	Safety            WaveSafety     `json:"safety"`                   // pairwise_tree_disjoint or serial_singleton
 	Lanes             []DebtLane     `json:"lanes"`                    // Debt lanes allocated to this wave
 	LaneNames         []string       `json:"lane_names"`               // Slice of lane identifiers
-	Paths             []string       `json:"paths"`                    // Package paths (e.g. "internal/faultlab")
+	Paths             []string       `json:"paths"`                    // Package paths (e.g. "internal/debtlane")
 	WaveSize          int            `json:"wave_size"`                // Number of concurrent workers in this wave
 	TotalDebt         float64        `json:"total_debt"`               // Sum of TotalDebt across lanes in this wave
 	DebtPrincipal     float64        `json:"debt_principal"`           // Sum of DebtPrincipal across lanes

@@ -45,7 +45,7 @@ picked by hand per issue. `tools/issue_lane_router.py` routes every open issue t
    safer than a release-path issue leaking into the default dev stream.
 2. Else the lane's **seed class** decides (`LANE_CLASS` in the router): the hard-classed
    infra lanes (`ci`, `metrics`, `slackwire`, `slackoutbox`, `dispatchauto`,
-   `loopdrive`, `rsiloop`, `tracesink`, `operatorbrief`) and front-door lanes
+   `loopdrive`, `rsiloop`, `operatorbrief`) and front-door lanes
    (`appversion`, `shipgate`, `release`).
 3. Else, for a **mixed lane** (`tools`, `docs`, `cmd`) a fleet-plumbing cue
    (dispatch / observability / CI / slack / build) promotes it to `infra`.

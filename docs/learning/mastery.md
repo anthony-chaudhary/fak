@@ -415,12 +415,10 @@ compare provenance-bearing mechanisms across declared hardware, framework, engin
 baseline envelopes. A `COPY`, `ADAPT`, `BENCHMARK_ONLY`, `REJECT`, or `UNKNOWN` candidate
 is still a candidate, never permission to change the product execution path.
 
-Two discovery leaves support that route without becoming hidden authorities:
-`internal/docsearch` loads the curated documentation map used by repository discovery,
-while `internal/openviking` is an optional, bounded HTTP adapter for OpenViking search,
-message, and commit operations. The local documentation map remains usable offline, and
-an OpenViking result still needs the same study provenance and witness as any other
-external observation.
+A discovery leaf supports that route without becoming a hidden authority:
+`internal/docsearch` loads the curated documentation map used by repository discovery.
+The map stays usable offline, and a result found through it still needs the same study
+provenance and witness as any other observation.
 
 The runtime route starts with `fak runtime-capabilities`, whose `internal/runtimecap`
 fold separates “the binary runs,” “the governed control plane runs,” and “this requested
@@ -455,7 +453,7 @@ cmp /tmp/fak-learning-candidates.json docs/_witnesses/issue-9839/candidates.json
 go run ./cmd/fak runtime-capabilities
 go run ./cmd/fak up --help
 go run ./cmd/fak performance-rsi-scorecard --input internal/perfrsiscore/testdata/complete.json --json > /tmp/fak-learning-performance-rsi.json
-go test ./internal/agentic ./internal/dockerprocess ./internal/docsearch ./internal/harnessserve ./internal/learningmesh ./internal/nativeperfartifact ./internal/nativeperfbackend ./internal/nativeperfcorrelation ./internal/nativeperfcoverage ./internal/nativeperfobscontract ./internal/nativeperfslo ./internal/openviking ./internal/perfrsiscore ./internal/runtimecap ./internal/selfupdate ./internal/sweepcert -count=1
+go test ./internal/agentic ./internal/dockerprocess ./internal/docsearch ./internal/harnessserve ./internal/learningmesh ./internal/nativeperfartifact ./internal/nativeperfbackend ./internal/nativeperfcorrelation ./internal/nativeperfcoverage ./internal/nativeperfobscontract ./internal/nativeperfslo ./internal/perfrsiscore ./internal/runtimecap ./internal/selfupdate ./internal/sweepcert -count=1
 ```
 
 **Expected result:** The agentic plan reports `read_only=true` and `offline=true`; an

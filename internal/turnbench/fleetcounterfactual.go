@@ -177,8 +177,8 @@ func boundedResolveNote(replayability string) string {
 // RunFleetCounterfactual scores a recorded corpus against its candidate policies as
 // model-free replay and reports the per-policy SECURITY-FLOOR coverage across the whole
 // population (issue #502). Each corpus entry is a (trace, arms, refName) tuple — the same
-// DivHistInput shape divhist.go uses — so a corpus is simply a set of recorded traces
-// (e.g. from internal/tracesink) each paired with the candidate policies to score.
+// DivHistInput shape divhist.go uses — so a corpus is simply a set of recorded traces,
+// each paired with the candidate policies to score.
 //
 // For each trace it calls RunPolicyReplay (the blessed model-free replay path — a fresh
 // kernel.New per arm, real k.Syscall, no engine decode), then:

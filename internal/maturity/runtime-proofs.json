@@ -388,11 +388,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/cache",
-            "lane": "cache"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/cacheheadlines",
             "lane": "cacheheadlines"
         },
@@ -847,11 +842,6 @@
             "lane": "cvregress"
         },
         {
-            "command": "fak version modules",
-            "output_contains": "internal/dataslot",
-            "lane": "dataslot"
-        },
-        {
             "command": "fak dev devindex leaf deadlineadmit",
             "output_contains": "pkg/deadlineadmit",
             "lane": "deadlineadmit"
@@ -1223,11 +1213,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/faultlab",
-            "lane": "faultlab"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/findingsink",
             "lane": "findingsink"
         },
@@ -1338,11 +1323,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/framebus",
-            "lane": "framebus"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/framevisibility",
             "lane": "framevisibility"
         },
@@ -1380,11 +1360,6 @@
             "command": "fak version modules",
             "output_contains": "internal/gatewayusageledger",
             "lane": "gatewayusageledger"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/gcpgpu",
-            "lane": "gcpgpu"
         },
         {
             "command": "fak version modules",
@@ -2418,11 +2393,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/modelpack",
-            "lane": "modelpack"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/modelperfobs",
             "lane": "modelperfobs"
         },
@@ -2455,11 +2425,6 @@
             "command": "fak version modules",
             "output_contains": "internal/modelsetresolve",
             "lane": "modelsetresolve"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/modelsrc",
-            "lane": "modelsrc"
         },
         {
             "command": "fak version modules",
@@ -2573,11 +2538,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/observability",
-            "lane": "observability"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/observer",
             "lane": "observer"
         },
@@ -2588,18 +2548,8 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/openaiadapter",
-            "lane": "openaiadapter"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/opensweharder",
             "lane": "opensweharder"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/openviking",
-            "lane": "openviking"
         },
         {
             "command": "fak version modules",
@@ -2963,21 +2913,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/qwenflashnext",
-            "lane": "qwenflashnext"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/qwensemanticstop",
-            "lane": "qwensemanticstop"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/qwenworkbudget",
-            "lane": "qwenworkbudget"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/radixkv",
             "lane": "radixkv"
         },
@@ -3160,11 +3095,6 @@
             "command": "fak dev devindex leaf scdiff",
             "output_contains": "scdiff",
             "lane": "scdiff"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/schemaadapter",
-            "lane": "schemaadapter"
         },
         {
             "command": "fak dev devindex leaf scmbridge",
@@ -3900,11 +3830,6 @@
             "command": "fak version modules",
             "output_contains": "internal/toon",
             "lane": "toon"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/tracesink",
-            "lane": "tracesink"
         },
         {
             "command": "fak version modules",

@@ -84,7 +84,7 @@ concurrent = [
   "rulesynth", "wirescreen",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
-  "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
+  "ratelimit", "rsiloop", "swebench", "toollint", "urllint", "webbench",
   "answershape",
   "codelint",
   "headroom",
@@ -145,8 +145,6 @@ concurrent = [
   "tokenprofile",
   "generationctl",
   "mtptune",
-  "faultlab",
-  "gcpgpu",
   "superstream",
   "quantprov",
   "lightgapport",
@@ -316,14 +314,14 @@ concurrent = [
   "assumecheck", "astquery", "atif", "attemptbudget", "auditpane", "auditreason", "auditusage",
   "balance", "benchauthority", "benchcatalog", "benchckpt", "benchcli", "benchids",
   "benchlineagegate", "benchpost", "benchscore", "benchsnapshot", "bgloop", "binstamp", "blastradius",
-  "blockerpost", "brittleness", "browseraction", "buildwitness", "cache", "cacheobs", "cacheprice",
+  "blockerpost", "brittleness", "browseraction", "buildwitness", "cacheobs", "cacheprice",
   "cachesweep", "cachevalue", "cachevalueledger", "cachevaluepost", "cachevaluereport",
   "cachewitness", "cadencereport", "callavoid", "capindex", "capindexgw", "catchupscore",
   "chatops", "chatrelay", "checkpointscore", "claimcheck", "closebatch", "closureaudit",
   "closurerate", "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
   "commit-audit", "commitissuelink", "commitsubject", "compactcohere", "completiondist",
   "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
-  "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "dataslot", "deadlineadmit",
+  "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "deadlineadmit",
   "deepseekbench", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
   "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
   "dispatchdoa",
@@ -334,7 +332,7 @@ concurrent = [
   "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
   "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
-  "flock", "focusscore", "framebus", "frontierswe", "fusedturn", "gardenbundle",
+  "flock", "focusscore", "frontierswe", "fusedturn", "gardenbundle",
   # reconciled 2026-09-01 (index-freshness refresh pass): six committed internal/ leaves the
   # `fak-dev index freshness` drift report flagged as holding Go files with NO [lanes.trees]
   # entry -- the same empty-tree-overlaps-everything class the 2026-07-25 audit fixed at scale.
@@ -433,7 +431,6 @@ concurrent = [
   "studytickets",
   "sweepcert",
   "modeldescriptor",
-  "openviking",
   "dockerprocess",
   "nativebench",
   "selfupdate",
@@ -465,15 +462,15 @@ concurrent = [
   "launchshim", "learningmesh", "learningobservation", "lifecycleadapter", "lightgapscore", "lightroteval",
   "linefmt", "llamacppinterop", "localadmission", "localappcert", "localappcontract", "localapphelper",
   "localappmetrics", "localappux", "managedinventory", "markerblock",
-  "memoryindex", "modelloadplan", "modelpack", "modelsrc", "nativefirst",
+  "memoryindex", "modelloadplan", "nativefirst",
   "nativeperf", "nativeperfartifact", "nativeperfbackend", "nativeperfcorrelation", "nativeperfcoverage", "nativeperfobscontract",
-  "nativeperfslo", "numbermap", "openaiadapter", "opensweharder", "orchestration", "orientation",
+  "nativeperfslo", "numbermap", "opensweharder", "orchestration", "orientation",
   "pagespublish", "parentdir", "perfrsiscore", "portability", "portabilitycontract", "portabilitylab",
   "privacy", "processalive", "processforest", "processstart", "proctest", "projectionspine",
   "providercost", "providerjobaccounting", "quantbench",
   "quantmatrix", "quantmeta", "quantwatch",
-  "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp", "qwenflashnext", "qwensemanticstop",
-  "qwenworkbudget", "refid", "releasereadiness",
+  "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp",
+  "refid", "releasereadiness",
   "resumeactuator", "rolloutmode", "rotationmeta", "runtimecap", "scorecardportfolio", "scratchjanitor", "scratchquery",
   "serverartifact", "servicewatchdog", "sessiondiag", "sessionmine", "sessionrecovery", "sessionregistry",
   "shellprov", "shelltoken", "sortkeys", "speedab", "stackpreflight", "stackresolve",
@@ -488,7 +485,6 @@ concurrent = [
   "placementtax",
   "extensionfault",
   "timeaware",
-  "schemaadapter",
   "toolbound",
   "overtonscore",
   "walkfiles",
@@ -569,7 +565,6 @@ concurrent = [
   "breathgate",
   "cluster",
   "customizationindex",
-  "observability",
   "readmenext",
   "reflexagent",
   "vulkanregistry",
@@ -592,7 +587,7 @@ autopick = [
   "rulesynth", "wirescreen",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
-  "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
+  "ratelimit", "rsiloop", "swebench", "toollint", "urllint", "webbench",
   "answershape",
   "codelint",
   "headroom",
@@ -738,12 +733,10 @@ autopick = [
   "studyprio",
   "studytickets",
   "sweepcert",
-  "openviking",
   "dockerprocess",
   "nativebench",
   "selfupdate",
   "extensionfault",
-  "schemaadapter",
   "toolbound",
   "overtonscore",
   "walkfiles",
@@ -936,7 +929,6 @@ ratelimit = ["internal/ratelimit/**"]
 rsiloop = ["internal/rsiloop/**"]
 swebench = ["internal/swebench/**"]
 toollint = ["internal/toollint/**"]
-tracesink = ["internal/tracesink/**"]
 urllint = ["internal/urllint/**"]
 webbench = ["internal/webbench/**"]
 ailuminate = ["internal/ailuminate/**"]
@@ -1064,10 +1056,7 @@ executionroute = ["internal/executionroute/**"]
 market = ["internal/market/**"]
 marketplace = ["internal/marketplace/**"]
 mtptune = ["internal/mtptune/**", "cmd/tunemtp/**"]
-faultlab = ["internal/faultlab/**"]
-gcpgpu = ["internal/gcpgpu/**"]
 superstream = ["internal/superstream/**"]
-observability = ["internal/observability/**"]
 reflexagent = ["internal/reflexagent/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
@@ -1115,7 +1104,6 @@ brittleness = ["internal/brittleness/**"]
 breathgate = ["internal/breathgate/**"]
 browseraction = ["internal/browseraction/**"]
 buildwitness = ["internal/buildwitness/**"]
-cache = ["internal/cache/**"]
 cacheobs = ["internal/cacheobs/**"]
 cacheprice = ["internal/cacheprice/**"]
 cachesweep = ["internal/cachesweep/**"]
@@ -1155,7 +1143,6 @@ corelocks = ["internal/corelocks/**"]
 covmatrix = ["internal/covmatrix/**"]
 ctxknobs = ["internal/ctxknobs/**"]
 ctxplans = ["internal/ctxplans/**"]
-dataslot = ["internal/dataslot/**"]
 deadlineadmit = ["pkg/deadlineadmit/**"]
 deepseekbench = ["internal/deepseekbench/**"]
 deepseekv4moe = ["internal/deepseekv4moe/**"]
@@ -1207,7 +1194,6 @@ fleettrend = ["internal/fleettrend/**"]
 fleetverify = ["internal/fleetverify/**"]
 flock = ["internal/flock/**"]
 focusscore = ["internal/focusscore/**"]
-framebus = ["internal/framebus/**"]
 frontierswe = ["internal/frontierswe/**"]
 fusedturn = ["internal/fusedturn/**"]
 gardenbundle = ["internal/gardenbundle/**"]
@@ -1498,7 +1484,6 @@ studyprio = ["internal/studyprio/**"]
 studytickets = ["internal/studytickets/**"]
 sweepcert = ["internal/sweepcert/**"]
 modeldescriptor = ["internal/modeldescriptor/**"]
-openviking = ["internal/openviking/**"]
 dockerprocess = ["internal/dockerprocess/**"]
 selfupdate = ["internal/selfupdate/**"]
 # #9326: explicit ownership for the 228 package boundaries classified above.
@@ -1622,8 +1607,6 @@ managedinventory = ["internal/managedinventory/**"]
 markerblock = ["internal/markerblock/**"]
 memoryindex = ["internal/memoryindex/**"]
 modelloadplan = ["internal/modelloadplan/**"]
-modelpack = ["internal/modelpack/**"]
-modelsrc = ["internal/modelsrc/**"]
 nativefirst = ["internal/nativefirst/**"]
 nativeperf = ["internal/nativeperf/**"]
 nativeperfartifact = ["internal/nativeperfartifact/**"]
@@ -1633,7 +1616,6 @@ nativeperfcoverage = ["internal/nativeperfcoverage/**"]
 nativeperfobscontract = ["internal/nativeperfobscontract/**"]
 nativeperfslo = ["internal/nativeperfslo/**"]
 numbermap = ["internal/numbermap/**"]
-openaiadapter = ["internal/openaiadapter/**"]
 opensweharder = ["internal/opensweharder/**"]
 orchestration = ["internal/orchestration/**"]
 orientation = ["internal/orientation/**"]
@@ -1659,9 +1641,6 @@ qwen38ladder = ["internal/qwen38ladder/**"]
 qwen38quant = ["internal/qwen38quant/**"]
 qwen38quantrun = ["internal/qwen38quantrun/**"]
 qwen4exp = ["internal/qwen4exp/**"]
-qwenflashnext = ["internal/qwenflashnext/**"]
-qwensemanticstop = ["internal/qwensemanticstop/**"]
-qwenworkbudget = ["internal/qwenworkbudget/**"]
 refid = ["internal/refid/**"]
 releasereadiness = ["internal/releasereadiness/**"]
 resumeactuator = ["internal/resumeactuator/**"]
@@ -1725,7 +1704,6 @@ gitresource = ["internal/gitresource/**"]
 placementtax = ["internal/placementtax/**"]
 extensionfault = ["internal/extensionfault/**"]
 timeaware = ["internal/timeaware/**"]
-schemaadapter = ["internal/schemaadapter/**"]
 toolbound = ["internal/toolbound/**"]
 overtonscore = ["internal/overtonscore/**"]
 walkfiles = ["internal/walkfiles/**"]

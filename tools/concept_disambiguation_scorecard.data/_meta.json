@@ -7121,18 +7121,8 @@
         },
         {
           "category": "incidental",
-          "reason": "dataslot package",
+          "reason": "removed dataslot package, still named in a historical concept-note heading; not a live concept",
           "token": "dataslot"
-        },
-        {
-          "category": "incidental",
-          "reason": "dataslot descriptor struct",
-          "token": "DataSlotDescriptor"
-        },
-        {
-          "category": "incidental",
-          "reason": "dataslot status type",
-          "token": "SlotStatus"
         },
         {
           "category": "incidental",
@@ -7299,7 +7289,6 @@
         "ConfigureSessionMove",
         "CorrelationSession",
         "CoveredSessions",
-        "DataSlotDescriptor",
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
         "EvaluateLifecycleSession",
@@ -7419,7 +7408,6 @@
         "SessionTeardownNS",
         "SessionTerminalView",
         "SetSessionAffinity",
-        "SlotStatus",
         "SoftSlotStolen",
         "StoreVerifiedSlot",
         "UNSUPPORTED_SESSION_KIND",
@@ -9508,11 +9496,6 @@
         },
         {
           "category": "incidental",
-          "reason": "dataslot migration engine type",
-          "token": "MigrationEngine"
-        },
-        {
-          "category": "incidental",
           "reason": "speculative tool execution pipeline engine in agentopt",
           "token": "SpeculativeEngine"
         },
@@ -9888,7 +9871,6 @@
         "KernelRow",
         "KernelShare",
         "KernelTurns",
-        "MigrationEngine",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
         "NativeKernels",
@@ -10346,18 +10328,8 @@
         },
         {
           "category": "incidental",
-          "reason": "internal/framebus lock-held accessor returning the publish licence for one seat (live when attached, floor or off otherwise); it is not a capability policy in the kernel-adjudication sense",
-          "token": "policyLocked"
-        },
-        {
-          "category": "incidental",
           "reason": "Media-type constant local to OCI profile serialization; it does not introduce or rename a policy capability.",
           "token": "PolicyMediaType"
-        },
-        {
-          "category": "incidental",
-          "reason": "internal/framebus constructor helper that stamps a Mode and an interval into the package-local Policy struct (a publish licence for one seat's frame rate); it is not a capability policy in the kernel-adjudication sense",
-          "token": "policyOf"
         },
         {
           "category": "incidental",
@@ -11518,9 +11490,7 @@
         "policyDefects",
         "policyErr",
         "policyLabels",
-        "policyLocked",
         "policyOK",
-        "policyOf",
         "policyRel",
         "policyScore",
         "policy_admission",
@@ -14391,9 +14361,7 @@
         "FAK_PARITY_API_KEY",
         "FormatUnsupported",
         "GuideCoverage",
-        "HOLD_CANCELLATION_UNSUPPORTED",
         "HOLD_UNSUPPORTED_CANCELLATION",
-        "HoldUnsupported",
         "HostDequantSupported",
         "INVALID_EVIDENCE",
         "IngestResult",
@@ -15323,11 +15291,6 @@
         },
         {
           "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "formatTUIRenderStatus"
-        },
-        {
-          "category": "incidental",
           "reason": "digest field proving checkpoint readback, not a new rendering or materialization concept",
           "token": "MaterializedStateDigest"
         },
@@ -15468,11 +15431,6 @@
         },
         {
           "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "renderSeatCells"
-        },
-        {
-          "category": "incidental",
           "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
           "token": "RenderSegment"
         },
@@ -15530,36 +15488,6 @@
           "category": "incidental",
           "reason": "Literal upstream prompt identifier for React re-rendering, not a rendering subsystem symbol.",
           "token": "rerender"
-        },
-        {
-          "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "runTUIRender"
-        },
-        {
-          "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "runTUIRenderControl"
-        },
-        {
-          "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "runTUIRenderSeat"
-        },
-        {
-          "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "runTUIRenderServe"
-        },
-        {
-          "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "tuiRenderSchema"
-        },
-        {
-          "category": "incidental",
-          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
-          "token": "tuiRenderUsage"
         },
         {
           "category": "incidental",
@@ -15803,11 +15731,6 @@
         },
         {
           "category": "incidental",
-          "reason": "dataslot unmaterialized status const",
-          "token": "StatusUnmaterialized"
-        },
-        {
-          "category": "incidental",
           "reason": "internal helper for rendering launchd plist xml",
           "token": "renderPlistXML"
         },
@@ -15916,10 +15839,8 @@
         "RenderSystemDirective",
         "RenderUnrun",
         "RenderUserSplice",
-        "StatusUnmaterialized",
         "deepSeekV41ChatRendererID",
         "deepSeekV41RenderToolCall",
-        "formatTUIRenderStatus",
         "inKernelRenderPrompt",
         "incumbentRenderInput",
         "incumbentRenderSchema",
@@ -15972,7 +15893,6 @@
         "renderRunaway",
         "renderSchedLauncherTable",
         "renderSearchHuman",
-        "renderSeatCells",
         "renderSessionJournalAudit",
         "renderSessionJournalRefusals",
         "renderSessionOpen",
@@ -15996,13 +15916,7 @@
         "rendertuisessioncontrollegend",
         "rerender",
         "runModelIncumbentRender",
-        "runTUIRender",
-        "runTUIRenderControl",
-        "runTUIRenderSeat",
-        "runTUIRenderServe",
         "test_materialize",
-        "tuiRenderSchema",
-        "tuiRenderUsage",
         "tuioverviewsavingsrender",
         "unmaterialized",
         "wipAdmitRender",
