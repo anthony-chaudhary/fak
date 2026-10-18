@@ -92,8 +92,8 @@ call" (`batch.go:1147`). But that is **one model, many users**. The poly-model l
 - **Residency** is bounded by a weight-byte **budget**, not by an architectural cap.
   Admit past the budget → evict the coldest **unpinned** model (LRU). A hot working
   set of a few models stays warm; a long tail pages in/out. The budget itself is
-  **runtime-adjustable** — `polymodel.Pool.Resize` / `residency.Manager.SetBudget`
-  re-budget a live pool (shrink evicts the coldest **unpinned** residents LRU to fit
+  **runtime-adjustable** — `polymodel.Pool.Resize`
+  re-budgets a live pool (shrink evicts the coldest **unpinned** residents LRU to fit
   and hands their weight handles back for page-out; grow evicts nothing; a shrink
   below the pinned footprint refuses with `ErrPinnedNoRoom`, pool byte-for-byte
   unchanged), so a host adapts to memory pressure or hot-add without rebuilding the
@@ -214,9 +214,9 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Multi-model residency pool + serial decode lane + accept core | **[SHIPPED]** | `internal/polymodel/` (this work) |
 | Continuous-batching admit/evict loop | **[SEAM-ONLY]** | `internal/model/batch.go:1147` (comment); no scheduler |
 | Multiple models hosted in one process | **[GAP]** | single `modelengine.Default`, one `*model.Model` (`internal/modelengine/modelengine.go:54,226`); gateway binds one planner (`internal/gateway/gateway.go:253`) |
-| Multi-model weight residency — policy + *model.Model binding | **[SHIPPED]** | `internal/residency` — `Manager` hosts many `*model.Model` under one weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget + eviction policy and binding each residency descriptor to the weights it governs (off-defconfig, a library type like `polymodel`) |
-| Multi-model weight residency / whole-model eviction ON a backend | **[GAP]** | the policy + binding layer is shipped above; the real per-backend weight load/evict (per-weight budget `internal/compute/vulkan.go:164`; process-wide `gpulease` `lease.go:36`) is the deeper rung a future wiring drives through `Manager.Admit`/`Evict` |
-| Runtime resident-budget adapt (re-budget a live pool) | **[SHIPPED]** (off-defconfig) | `polymodel.Pool.Resize` + `residency.Manager.SetBudget` (#3999) — shrink evicts the coldest-unpinned residents (LRU) until it fits, handing the weight handles back for page-out; grow evicts nothing; a shrink below the pinned footprint refuses `ErrPinnedNoRoom` with the pool unchanged (Admit's all-or-nothing). The runtime knob for the `gpulease` memory-pressure cascade / hot-add, without rebuilding the pool |
+| Multi-model weight residency — policy + *model.Model binding | **[GAP]** (binding retired) | `polymodel.Pool` is the budget + eviction policy; the `internal/residency.Manager` that bound it to `*model.Model` was deleted as unwired (no caller), so nothing binds a residency descriptor to real weights today |
+| Multi-model weight residency / whole-model eviction ON a backend | **[GAP]** | the policy is `polymodel.Pool`; the real per-backend weight load/evict (per-weight budget `internal/compute/vulkan.go:164`; process-wide `gpulease` `lease.go:36`) is the deeper rung a future wiring drives through `Pool.Admit`/`Evict` |
+| Runtime resident-budget adapt (re-budget a live pool) | **[SHIPPED]** (off-defconfig) | `polymodel.Pool.Resize` (#3999) — shrink evicts the coldest-unpinned residents (LRU) until it fits, handing the weight handles back for page-out; grow evicts nothing; a shrink below the pinned footprint refuses `ErrPinnedNoRoom` with the pool unchanged (Admit's all-or-nothing). The runtime knob for the `gpulease` memory-pressure cascade / hot-add, without rebuilding the pool |
 | Cross-model prefill share (served) | **[PARTIAL]** (verdict-layer shipped; splice retired) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534) — SHIPPED, on main. The `KVCache.Clone` splice half lived in the now-retired `internal/spec` (`SplicePrefillShare`/`CrossModelPrefillShare`, removed as unwired in `f7083ed1d`); rebuild it when the substrate is wired (#3197). Live multi-model backend residency (#531) still [GAP] |
 | `ProvisionalSink` implementation / `internal/spec` | **[SEAM-ONLY]** (impl retired) | The `abi.ProvisionalSink` seam is frozen and present (`internal/abi/registry.go`), but the `internal/spec` implementation (Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; `SpeculativeGreedy`) was **retired as unwired** in `f7083ed1d` — the leaf and its `go test ./internal/spec` witness no longer exist on main. The accept DECISION (`polymodel.AcceptGreedy`) and the rollback (`model.KVCache.Evict`) survive; a native re-wiring is tracked in #3197 |
 | Single-pass verify EXECUTION — batched chain + tree-attention masks | **[SHIPPED]** (primitive; driver retired) | `internal/model.VerifyForward(ids, pos, allow)` — the rung-#533 execution primitive — SURVIVES on main. CHAIN (nil `pos`/nil `allow`): bit-identical to P sequential `Session.Step` calls (same logits + appended K/Kraw/V/pos); TREE (depth-based `pos`, ancestor `allow`): tree-attention masks — each node attends only to its ancestor chain + prefix, never siblings. Witness: `go test ./internal/model`. The `internal/spec` end-to-end drivers that consumed it (`SpeculativeGreedy`, `VerifyTree`/`SpeculativeTree`) were retired as unwired (`f7083ed1d`); native re-wiring is #3197. CPU PreNorm regime only — no GPU/tokens-per-sec (bench harness #535) |
@@ -237,14 +237,13 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
 2. **Caller-side decode-lane scheduler over `StepBatch`/`Session`** — **#530**. Wire
    `polymodel` to actually drive a multi-model decode loop (single backend) — the
    continuous-batching seam the `batch.go:1147` comment invites.
-3. **Multi-model residency on a backend** — **#531**. ✅ *policy + binding shipped.*
-   `internal/residency.Manager` lifts the single-`*model.Model` assumption
-   (`modelengine.Default` is one `*model.Model`): a pool of `*model.Model` under a
-   weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget +
-   eviction policy and binding each residency descriptor to the weights it governs
-   (off-defconfig; witness `go test ./internal/residency`). The real per-backend weight
-   load/evict (the compute-HAL per-weight budget, the process-wide `gpulease`) is the
-   deeper rung a future wiring drives through `Manager.Admit`/`Evict`.
+3. **Multi-model residency on a backend** — **#531**. *Binding retired.* An
+   `internal/residency.Manager` that bound `polymodel.Pool` to many `*model.Model`
+   handles was built and later deleted as unwired (no caller; `modelengine.Default`
+   is still one `*model.Model`). `polymodel.Pool` remains the budget + eviction policy.
+   The real per-backend weight load/evict (the compute-HAL per-weight budget, the
+   process-wide `gpulease`) is the deeper rung a future multi-model serve surface
+   drives through `polymodel.Pool`.
 4. **A `ProvisionalSink` + `internal/spec` implementation** — **#532**. ✅ *shipped.*
    `internal/spec` is the first `ProvisionalSink` registrant + the reserved
    `OpSpecCommit`/`OpSpecSquash` ops; its `Rollback` drives the bit-exact `KVCache.Evict`,

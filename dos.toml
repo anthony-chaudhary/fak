@@ -88,7 +88,6 @@ concurrent = [
   "answershape",
   "codelint",
   "headroom",
-  "residency",
   "ctxresidency",
   # reconciled 2026-06-23: real committed internal/ leaves that had NO lane, so a
   # `(fak <leaf>)` ship-stamp bound to a phantom unit and the arbiter could not detect a
@@ -323,7 +322,7 @@ concurrent = [
   "cachewitness", "cadencereport", "callavoid", "capindex", "capindexgw", "catchupscore",
   "chatops", "chatrelay", "checkpointscore", "claimcheck", "closebatch", "closureaudit",
   "closurerate", "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
-  "commit-audit", "commitissuelink", "commitsubject", "compactcohere", "completiondist", "computeadmit",
+  "commit-audit", "commitissuelink", "commitsubject", "compactcohere", "completiondist",
   "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
   "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "dataslot", "deadlineadmit",
   "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
@@ -352,7 +351,7 @@ concurrent = [
   "incidentrsi",
   "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
-  "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "launchlatency", "lifebridge",
+  "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "lifebridge",
   "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
   "localbench", "looptrigger",
   "looporphan", "looprecover", "loopscore", "loopunblock", "macbench", "maputil", "mathx",
@@ -364,7 +363,7 @@ concurrent = [
   "privatepath", "procguard", "projectcompletion", "projectreport", "promalert", "promptaudit",
   "promptlint", "propagationscore", "pythongate", "qaprocessscore", "quality", "questionledger",
   "qwen36nodereports", "qwen36parity", "randhex", "reachdelta", "readmevisualaudit",
-  "refactorverify", "refutil", "region", "rehydrate", "relay", "releasestale", "releasestatus",
+  "refactorverify", "refutil", "rehydrate", "relay", "releasestale", "releasestatus",
   "repoguard", "resumebackoff", "resumemetrics", "roofline", "safecommit", "savingsvector",
   "scdiff", "scmbridge", "scorecardpane", "scratchmark", "seatpark", "secretgate", "secretload", "selfinstall",
   "sensecheck", "seoaeoscore", "servicelease", "serviceledger", "servicespec", "sessionctl",
@@ -382,7 +381,7 @@ concurrent = [
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
   "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
   "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
-  "vcacheqa", "vcachescore", "vcachesnapshot", "vcachestar", "verattest", "verifierexposure", "vllmcompile",
+  "vcachescore", "vcachesnapshot", "verattest", "verifierexposure", "vllmcompile",
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
   "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
   "worktreewitness", "xenginekv", "xprobe",
@@ -477,7 +476,7 @@ concurrent = [
   "providercost", "providerjobaccounting", "qevicteval", "quantbench", "quantcompat", "quantfixture",
   "quantlicense", "quantmatrix", "quantmeta", "quantobs", "quantroute", "quantwatch",
   "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp", "qwenflashnext", "qwensemanticstop",
-  "qwenworkbudget", "refid", "releasereadiness", "requanteval", "residualquant", "resourcelifecycle",
+  "qwenworkbudget", "refid", "releasereadiness", "requanteval", "residualquant",
   "resumeactuator", "rolloutmode", "rotationmeta", "runtimecap", "scorecardportfolio", "scratchjanitor", "scratchquery",
   "serverartifact", "servicewatchdog", "sessiondiag", "sessionmine", "sessionrecovery", "sessionregistry",
   "shellprov", "shelltoken", "sortkeys", "speedab", "stackpreflight", "stackresolve",
@@ -490,8 +489,6 @@ concurrent = [
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
   "workspin",
   "placementtax",
-  "rollout",
-  "deployment",
   "extensionfault",
   "timeaware",
   "schemaadapter",
@@ -499,21 +496,16 @@ concurrent = [
   "overtonscore",
   "walkfiles",
   "reportledger",
-  "resulttier",
-  "servingsupervision",
   "tb4bench",
   "orgdebt",
   "perfscout",
   "promptcomp",
-  "servingsim",
   "control",
   "agentopt",
-  "decodemigrate",
   "dosadapter",
   "interactivesession",
   "harnessbench",
   "workspaceslot",
-  "schedcontract",
   "agentsched",
   "harnesswarm",
   "macobs",
@@ -607,7 +599,6 @@ autopick = [
   "answershape",
   "codelint",
   "headroom",
-  "residency",
   "ctxresidency",
   "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
@@ -756,24 +747,18 @@ autopick = [
   "dockerprocess",
   "nativebench",
   "selfupdate",
-  "rollout",
-  "deployment",
   "extensionfault",
   "schemaadapter",
   "toolbound",
   "overtonscore",
   "walkfiles",
   "reportledger",
-  "resulttier",
-  "servingsupervision",
   "tb4bench",
   "orgdebt",
   "perfscout",
   "promptcomp",
-  "servingsim",
   "control",
   "agentopt",
-  "decodemigrate",
   "dosadapter",
   "interactivesession",
   "toolgrammar",
@@ -962,7 +947,6 @@ webbench = ["internal/webbench/**"]
 ailuminate = ["internal/ailuminate/**"]
 codelint = ["internal/codelint/**"]
 headroom = ["internal/headroom/**"]
-residency = ["internal/residency/**"]
 ctxresidency = ["internal/ctxresidency/**"]
 # reconciled 2026-06-23: nine real committed internal/ leaves that had no lane (see the
 # matching note in [lanes].concurrent). Tiers per internal/architest: blobfs/blobhttp/
@@ -1167,7 +1151,6 @@ commitissuelink = ["internal/commitissuelink/**"]
 commitsubject = ["internal/commitsubject/**"]
 compactcohere = ["internal/compactcohere/**"]
 completiondist = ["internal/completiondist/**"]
-computeadmit = ["internal/computeadmit/**"]
 conceptbench = ["internal/conceptbench/**"]
 conceptcatalog = ["internal/conceptcatalog/**"]
 conceptusage = ["internal/conceptusage/**"]
@@ -1179,7 +1162,7 @@ covmatrix = ["internal/covmatrix/**"]
 ctxknobs = ["internal/ctxknobs/**"]
 ctxplans = ["internal/ctxplans/**"]
 dataslot = ["internal/dataslot/**"]
-deadlineadmit = ["internal/deadlineadmit/**", "pkg/deadlineadmit/**"]
+deadlineadmit = ["pkg/deadlineadmit/**"]
 deepseekbench = ["internal/deepseekbench/**"]
 deepseekv4kv = ["internal/deepseekv4kv/**"]
 deepseekv4moe = ["internal/deepseekv4moe/**"]
@@ -1296,7 +1279,6 @@ knownenv = ["internal/knownenv/**"]
 kv = ["internal/kv/**"]
 kvbudget = ["internal/kvbudget/**"]
 l3region = ["internal/l3region/**"]
-launchlatency = ["internal/launchlatency/**"]
 lifebridge = ["internal/lifebridge/**"]
 lifecycle = ["internal/lifecycle/**"]
 linkstate = ["internal/linkstate/**"]
@@ -1362,7 +1344,6 @@ reachdelta = ["internal/reachdelta/**"]
 readmevisualaudit = ["internal/readmevisualaudit/**"]
 refactorverify = ["internal/refactorverify/**"]
 refutil = ["internal/refutil/**"]
-region = ["internal/region/**"]
 rehydrate = ["internal/rehydrate/**"]
 relay = ["internal/relay/**"]
 releasestale = ["internal/releasestale/**"]
@@ -1455,10 +1436,8 @@ unwitnessedclaim = ["internal/unwitnessedclaim/**"]
 usagelog = ["internal/usagelog/**"]
 vcachecal = ["internal/vcachecal/**"]
 vcacheextract = ["internal/vcacheextract/**"]
-vcacheqa = ["internal/vcacheqa/**"]
 vcachescore = ["internal/vcachescore/**"]
 vcachesnapshot = ["internal/vcachesnapshot/**"]
-vcachestar = ["internal/vcachestar/**"]
 verattest = ["internal/verattest/**"]
 verifierexposure = ["internal/verifierexposure/**"]
 vllmcompile = ["internal/vllmcompile/**"]
@@ -1705,7 +1684,6 @@ refid = ["internal/refid/**"]
 releasereadiness = ["internal/releasereadiness/**"]
 requanteval = ["internal/requanteval/**"]
 residualquant = ["internal/residualquant/**"]
-resourcelifecycle = ["internal/resourcelifecycle/**"]
 resumeactuator = ["internal/resumeactuator/**"]
 rolloutmode = ["internal/rolloutmode/**"]
 rotationmeta = ["internal/rotationmeta/**"]
@@ -1765,8 +1743,6 @@ workshape = ["internal/workshape/**"]
 workspin = ["internal/workspin/**"]
 gitresource = ["internal/gitresource/**"]
 placementtax = ["internal/placementtax/**"]
-rollout = ["internal/rollout/**"]
-deployment = ["internal/deployment/**"]
 extensionfault = ["internal/extensionfault/**"]
 timeaware = ["internal/timeaware/**"]
 schemaadapter = ["internal/schemaadapter/**"]
@@ -1774,21 +1750,16 @@ toolbound = ["internal/toolbound/**"]
 overtonscore = ["internal/overtonscore/**"]
 walkfiles = ["internal/walkfiles/**"]
 reportledger = ["internal/reportledger/**"]
-resulttier = ["internal/resulttier/**"]
-servingsupervision = ["internal/servingsupervision/**"]
 tb4bench = ["internal/tb4bench/**"]
 orgdebt = ["internal/orgdebt/**"]
 perfscout = ["internal/perfscout/**"]
 promptcomp = ["internal/promptcomp/**"]
-servingsim = ["internal/servingsim/**"]
 control = ["internal/control/**"]
 agentopt = ["internal/agentopt/**"]
-decodemigrate = ["internal/decodemigrate/**"]
 dosadapter = ["internal/dosadapter/**"]
 interactivesession = ["internal/interactivesession/**"]
 harnessbench = ["internal/harnessbench/**"]
 workspaceslot = ["internal/workspaceslot/**"]
-schedcontract = ["internal/schedcontract/**"]
 agentsched = ["internal/agentsched/**"]
 harnesswarm = ["internal/harnesswarm/**"]
 macobs = ["internal/macobs/**"]

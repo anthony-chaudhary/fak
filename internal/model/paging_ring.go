@@ -20,8 +20,7 @@ import (
 // of the SOTA 3-tier (GPU / pinned-CPU / SSD) expert cache.
 //
 // Policy REUSE, not reinvention: the byte budget, the LRU victim choice, the pinned-exemption and
-// the all-or-nothing admit are ALL polymodel.Pool's — the SAME proven policy internal/residency's
-// Manager reuses for whole models, here bound to per-WEIGHT device handles instead. So every
+// the all-or-nothing admit are ALL polymodel.Pool's, here bound to per-WEIGHT device handles. So every
 // polymodel invariant its witness suite asserts (used<=budget, pinned-never-evicted,
 // admit-unchanged-on-error) holds here by construction; the ring adds only the name->handle binding
 // and the Upload-on-miss / Free-on-evict lifecycle.

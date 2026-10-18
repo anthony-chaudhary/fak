@@ -228,7 +228,6 @@ func TestNoBrittleSleepsInAuditedPackages(t *testing.T) {
 		"internal/childprocess",
 		"internal/vdso",
 		"internal/l3kv",
-		"internal/servingsupervision",
 		"internal/tb4bench",
 		"internal/agentopt",
 		"internal/metalgemm",

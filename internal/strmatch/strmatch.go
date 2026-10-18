@@ -2,7 +2,7 @@
 // containsAny copies converged on (slop de-dup #776): six identical bool
 // bodies and one first-match variant were duplicated across
 // internal/{attemptbudget,benchlineagegate,headroom,windowgate,
-// readmevisualaudit,terminalbench,vcacheqa}. Stdlib-only, off the hot path.
+// readmevisualaudit,terminalbench}. Stdlib-only, off the hot path.
 package strmatch
 
 import "strings"

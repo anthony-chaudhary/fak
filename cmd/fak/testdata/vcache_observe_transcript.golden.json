@@ -126,7 +126,7 @@
     },
     {
       "name": "M2 star anchors",
-      "package": "internal/vcachestar",
+      "package": "internal/vcachegov",
       "milestone": "M2 (#717)",
       "question": "does a warmed prefix pay for itself within a family?",
       "value": "saved 25.6% (31,000 token-equiv) across 1 families; first-positive turn 3",

@@ -45,10 +45,10 @@ var errUntrackedExpertResidency = errors.New("routed expert has permanent reside
 // ranks rather than bounding residency WITHIN one device (#3886) — see the plan's non-goals.
 //
 // Why it reuses rather than invents. The byte budget, the LRU victim choice, the pinned exemption and
-// the all-or-nothing admit are polymodel.Pool's — the same policy internal/residency uses for whole
-// models — so `used <= budget` and pinned-never-evicted hold here by construction. pagedRing already
-// witnesses that a ring-served GEMM is BIT-EQUAL to a resident one on both the hit and the miss path;
-// stage() is that same lifecycle with the GEMM removed, so bit-exactness transfers to the HAL.
+// the all-or-nothing admit are polymodel.Pool's, so `used <= budget` and pinned-never-evicted hold
+// here by construction. pagedRing already witnesses that a ring-served GEMM is BIT-EQUAL to a
+// resident one on both the hit and the miss path; stage() is that same lifecycle with the GEMM
+// removed, so bit-exactness transfers to the HAL.
 //
 // Default is OFF, byte-for-byte. ExpertRingBytes defaults to 0, routedExpertRing then returns nil,
 // and every weight takes the unchanged weightHALStaged path — so no existing session, witness or

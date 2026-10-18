@@ -34,7 +34,7 @@ func buildPanels(r Report) []Panel {
 		},
 		{
 			Name:       "M2 star anchors",
-			Pkg:        "internal/vcachestar",
+			Pkg:        "internal/vcachegov",
 			Milestone:  "M2 (#717)",
 			Question:   "does a warmed prefix pay for itself within a family?",
 			Value:      fmt.Sprintf("saved %.1f%% (%s token-equiv) across %d families; first-positive turn %d", r.Aggregate.SavedPct, commas(int64(r.Aggregate.SavedTokenEquiv)), r.FamilyCount, r.Aggregate.FirstPositiveRequest),

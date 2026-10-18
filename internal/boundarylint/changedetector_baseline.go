@@ -182,7 +182,6 @@ var changeDetectorBaseline = []string{
 	"internal/journal/rotate_test.go",
 	"internal/journal/witness_bound_test.go",
 	"internal/kvint2eval/contract_test.go",
-	"internal/launchlatency/compare_test.go",
 	"internal/learningdebt/learningdebt_test.go",
 	"internal/leaseref/reap_batch_test.go",
 	"internal/lightgapport/lightgapport_test.go",

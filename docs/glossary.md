@@ -211,7 +211,7 @@ A representative line:
 fak-turn trace=t1 ok prov=20.9k tok (85% of prompt) fak=0 tok cache=healthy compact=ok finish=end_turn
 ```
 
-The whole vocabulary rests on one accounting law, inherited from `internal/vcachestar`
+The whole vocabulary rests on one accounting law, inherited from `internal/vcachegov`
 and `internal/callavoid`: **cost is always booked at the full *uncached* price first, and a
 confirmed cache hit refunds part of it.** That refund is the rebate. The law's one-liner —
 *"an avoided call is a realized rebate, never a trust claim"* — is the discipline: a rebate
@@ -233,7 +233,7 @@ there is a token witness for a skipped call.
 
 | term | what it means | the catch that the word encodes |
 |------|---------------|----------------------------------|
-| **(cache) rebate** | the cost refunded by a confirmed cache hit, in input-token-equivalents | booked only on a telemetry-confirmed read; warmth belief alone never rebates. `internal/vcachestar: CostBooking.RebateTokens` |
+| **(cache) rebate** | the cost refunded by a confirmed cache hit, in input-token-equivalents | booked only on a telemetry-confirmed read; warmth belief alone never rebates. `internal/vcachegov: ProveTelemetrySavings` |
 | **read rebate** | the read axis of the rebate: each `cache_read` token billed at 0.1× base instead of 1× — a 0.9×/token refund | a read is the *only* axis that pays you back; on its own it overstates the value |
 | **write premium** | the first write to a cache costs *more* than uncached: 1.25× base at the 5-minute TTL, 2.0× at the 1-hour TTL | this is why caching is a net win only once reads accrue (break-even is 2 requests at 5m, 3 at 1h). `internal/gateway: CacheWrite5mMultiplier` |
 | **provider prompt-cache net / `prov=` (token-equiv)** | the provider-owned net prompt-cache number: **read rebate − write premium**, in input-token-equivalents | a fresh, cold-write turn reads **negative** (`prov=-25 tok`) — a real loss the writes haven't repaid, which a read-only number would have hidden. `internal/gateway: ProviderCacheNetSavings` |

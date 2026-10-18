@@ -703,11 +703,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/computeadmit",
-            "lane": "computeadmit"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/computebuild",
             "lane": "computebuild"
         },
@@ -857,19 +852,14 @@
             "lane": "dataslot"
         },
         {
-            "command": "fak version modules",
-            "output_contains": "internal/deadlineadmit",
+            "command": "fak dev devindex leaf deadlineadmit",
+            "output_contains": "pkg/deadlineadmit",
             "lane": "deadlineadmit"
         },
         {
             "command": "fak version modules",
             "output_contains": "internal/debtlane",
             "lane": "debtlane"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/decodemigrate",
-            "lane": "decodemigrate"
         },
         {
             "command": "fak version modules",
@@ -930,11 +920,6 @@
             "command": "fak version modules",
             "output_contains": "internal/deploymanifest",
             "lane": "deploymanifest"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/deployment",
-            "lane": "deployment"
         },
         {
             "command": "fak version modules",
@@ -2058,11 +2043,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/launchlatency",
-            "lane": "launchlatency"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/launchshim",
             "lane": "launchshim"
         },
@@ -3108,11 +3088,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/region",
-            "lane": "region"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/regionadmit",
             "lane": "regionadmit"
         },
@@ -3172,24 +3147,9 @@
             "lane": "requanteval"
         },
         {
-            "command": "fak dev devindex leaf residency",
-            "output_contains": "residency",
-            "lane": "residency"
-        },
-        {
             "command": "fak version modules",
             "output_contains": "internal/residualquant",
             "lane": "residualquant"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/resourcelifecycle",
-            "lane": "resourcelifecycle"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/resulttier",
-            "lane": "resulttier"
         },
         {
             "command": "fak help resume",
@@ -3210,11 +3170,6 @@
             "command": "fak dev devindex leaf resumemetrics",
             "output_contains": "resumemetrics",
             "lane": "resumemetrics"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/rollout",
-            "lane": "rollout"
         },
         {
             "command": "fak version modules",
@@ -3275,11 +3230,6 @@
             "command": "fak dev devindex leaf scdiff",
             "output_contains": "scdiff",
             "lane": "scdiff"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/schedcontract",
-            "lane": "schedcontract"
         },
         {
             "command": "fak version modules",
@@ -3395,16 +3345,6 @@
             "command": "fak version modules",
             "output_contains": "internal/servicewatchdog",
             "lane": "servicewatchdog"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/servingsim",
-            "lane": "servingsim"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/servingsupervision",
-            "lane": "servingsupervision"
         },
         {
             "command": "fak help session",
@@ -4213,11 +4153,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/vcacheqa",
-            "lane": "vcacheqa"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/vcachescore",
             "lane": "vcachescore"
         },
@@ -4225,11 +4160,6 @@
             "command": "fak version modules",
             "output_contains": "internal/vcachesnapshot",
             "lane": "vcachesnapshot"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/vcachestar",
-            "lane": "vcachestar"
         },
         {
             "command": "fak version modules",

@@ -114,7 +114,9 @@ var FeatureRoster = []Feature{
 	{ID: "cache-residency-tiers", Name: "Hardware-aware cache residency tiers (CXL/NUMA-far)", Family: FamilyCache, ClaimAnchor: "Hardware-aware cache placement & lifecycle"},
 	{ID: "cache-ddr-tiers", Name: "DDR cache tiers (engine cache-event visibility)", Family: FamilyCache, ClaimAnchor: "DDR cache tiers"},
 	{ID: "cache-kv-eviction-residency", Name: "Planned-elision → KV-eviction residency bridge", Family: FamilyCache, ClaimAnchor: "KV-eviction residency bridge"},
-	{ID: "cache-weight-residency", Name: "Multi-model weight-residency layer", Family: FamilyCache, ClaimAnchor: "Multi-model weight-residency layer"},
+	// The multi-model weight-residency Manager was deleted unwired, so no ledger line
+	// witnesses it; empty anchor ⇒ M0None until a real multi-model serve surface ships.
+	{ID: "cache-weight-residency", Name: "Multi-model weight-residency layer", Family: FamilyCache, ClaimAnchor: ""},
 	{ID: "cache-kv-residency-telemetry", Name: "KV-residency telemetry (token-per-watt)", Family: FamilyCache, ClaimAnchor: "metrics-service scrape adapter / KV-residency / token-per-watt"},
 
 	// Attention variants — softmax / linear / MLA / DSA / paged (the five the issue names).

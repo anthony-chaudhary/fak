@@ -1222,6 +1222,22 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x-plan-plannedbytes",
+      "canonical": "PlannedBytes (Metal reservation requested plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "MetalReservationReceipt.PlannedBytes (internal/localadmission/metal_reservation.go) records the MemoryPlan - startup-peak and steady bytes - that a fak-native Metal load asked local admission to reserve; cmd/fak/serve_memory_admission_receipt.go fills it from the serve memory plan.",
+      "distinction": "It is the REQUESTED plan, not ReservedBytes (what admission granted) and not PeakRSSBytes (a measurement that is never a plan value), and it is the receipt field that carries a compute MemoryPlan estimate rather than the estimate itself.",
+      "distinct_from": ["x-plan-memoryplan"],
+      "aliases": [],
+      "grounding": "PlannedBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

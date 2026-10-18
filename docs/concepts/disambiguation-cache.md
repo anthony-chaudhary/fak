@@ -14,7 +14,6 @@ This map positions the current `cache` coverage backlog. Each entry names the ex
 - **`reasonunsupportedactivecachecapability`** — the exact `cache` symbol `reasonunsupportedactivecachecapability`; use this spelling for that operation rather than the undifferentiated family name.
 - **`seencache`** — the exact `cache` symbol `seencache`; use this spelling for that operation rather than the undifferentiated family name.
 - **`armedcache`** — the exact `cache` symbol `armedcache`; use this spelling for that operation rather than the undifferentiated family name.
-- **`bookeduncachedtokens`** — the exact `cache` symbol `bookeduncachedtokens`; use this spelling for that operation rather than the undifferentiated family name.
 - **`cachedfile`** — the exact `cache` symbol `cachedfile`; use this spelling for that operation rather than the undifferentiated family name.
 - **`cachedinput`** — the exact `cache` symbol `cachedinput`; use this spelling for that operation rather than the undifferentiated family name.
 - **`cacheroot`** — the exact `cache` symbol `cacheroot`; use this spelling for that operation rather than the undifferentiated family name.

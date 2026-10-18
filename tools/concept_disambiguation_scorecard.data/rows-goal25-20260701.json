@@ -833,25 +833,6 @@
       "gaps": []
     },
     {
-      "id": "x-goal25-cache-vcacheqa",
-      "canonical": "vcacheqa",
-      "family": "cache",
-      "kind": "subsystem",
-      "definition": "Package vcacheqa (internal/vcacheqa) is the shared QA harness and witness contract every vCache gate runs through, folding gate results into a GateReport.",
-      "distinction": "The QA HARNESS for vCache gates, not the vCache accounting layer it tests.",
-      "distinct_from": [
-        "vcache",
-        "x-cache-vcachecal"
-      ],
-      "aliases": [],
-      "grounding": "vcacheqa",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-goal25-cache-vcachewarmth",
       "canonical": "vcacheWarmth",
       "family": "cache",
@@ -1043,7 +1024,7 @@
       "canonical": "GateReport",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "GateReport (internal/vcacheqa and internal/vllmcompile) is the structured result a QA gate returns, with an OK() fold over its checks.",
+      "definition": "GateReport (internal/vllmcompile) is the structured result a QA gate returns, folding its per-row verdicts into one pass/fail.",
       "distinction": "The RESULT shape a gate emits, not a gate mechanism.",
       "distinct_from": [
         "gate"

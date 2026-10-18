@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **677** (clarity 0 + coverage 677) |
-| **Crystal-clear concepts (and climbing)** | **1286** crystal of 3085 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3172 / 3849** (82.4% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 230 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4345 indexed names |
+| **Disambiguation-debt (drive to 0)** | **675** (clarity 0 + coverage 675) |
+| **Crystal-clear concepts (and climbing)** | **1285** crystal of 3085 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3171 / 3846** (82.4% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 228 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4344 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3085 concepts - score 88.6/100 (grade B) - disambiguation-debt 677
+concept-disambiguation chart - 3085 concepts - score 88.6/100 (grade B) - disambiguation-debt 675
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1286
-  o defined       ############################ 1799
+  * crystal       ####################........ 1285
+  o defined       ############################ 1800
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -40,7 +40,7 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 51 crystal)
-  cache            **********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (300 concept(s); 118 crystal)
+  cache            *********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (299 concept(s); 117 crystal)
   context-ctx      ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (247 concept(s); 88 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
@@ -50,7 +50,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       *********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (455 concept(s); 213 crystal)
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             *****************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (417 concept(s); 173 crystal)
+  plan             *****************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (418 concept(s); 173 crystal)
   policy-capability *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 101 crystal)
   pool             **********oooooooooooooooooooooooooooooooo (42 concept(s); 10 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
@@ -62,9 +62,9 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             #######################..... 480/586
+  plan             #######################..... 480/585
   session-runtime  ######################...... 289/360
-  cache            #######################..... 341/410
+  cache            #######################..... 340/408
   gateway-engine   #######################..... 247/305
   guard-gate       ##########################.. 515/563
   attention        #####################....... 146/192
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.4%  (3172/3849 confusable tokens positioned)
+namespace coverage  [##########################......] 82.4%  (3171/3846 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 230
+  mutual       ############################ 228
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 230/230
+  pairs separated   [################################] 228/228
 
-name index: 4345 lookup name(s) -> 3085 concept(s), 89 ambiguous
+name index: 4344 lookup name(s) -> 3085 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 230 |
-| **Separated from each other (drive to all)** | **230 / 230** (230 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 228 |
+| **Separated from each other (drive to all)** | **228 / 228** (228 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2448 / 5670 |
+| Boundaries drawn (mutual / total) | 2444 / 5666 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,7 +127,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4345 over 3085 concepts |
+| Lookup names indexed | 4344 over 3085 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
 | Concepts carrying a contrast set | 3085 |
@@ -208,7 +208,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **cache implementation surface for reasonunsupportedactivecachecapability** - `ReasonUnsupportedActiveCacheCapability` is the cache symbol declared or used at `internal/vcachescore/compare.go:75` as `unsupportedInput.ExternalEngine.Reason = string(vcachewarm.ReasonUnsupportedActiveCacheCapability)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for seencache** - `SeenCache` is the cache symbol declared or used at `cmd/fak/harness_debt_dispatch.go:124` as `type hddSeenCache = dogfoodissues.SeenCache[hddSeenRecord]`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for armedcache** - `ArmedCache` is the cache symbol declared or used at `internal/gateway/toolproc_reuse.go:8` as `// (ClassifyRepeats/Normalize), #5122 the armed byte cache (toolproc.ArmedCache),`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | cache | **cache implementation surface for bookeduncachedtokens** - `booked_uncached_tokens` is the cache symbol declared or used at `internal/nativebench/nativebench.go:575` as `Metrics: []string{"demotion_accuracy", "alarm_accuracy", "divergence_segment_error", "divergence_token_error", "divergence_byte_error", "booked_uncached_tokens", "rebate_tokens", "`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for cachedfile** - `cachedFile` is the cache symbol declared or used at `internal/hooks/gate_duplication.go:241` as `if e, ok := d.cachedFile(rel); ok {`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for cachedinput** - `CachedInput` is the cache symbol declared or used at `internal/bench/tokenweightcal.go:101` as `CachedInput TokenWeightRate `json:"cached_input"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | cache | **cache implementation surface for cacheroot** - `cacheRoot` is the cache symbol declared or used at `cmd/fak/dispatch_tick_preflight_host.go:1150` as `cacheRoot, head := dispatchTreeBuildKey(root)`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1562,9 +1561,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | cache | **ProviderPromptCacheTokenEq (provider savings token-equivalence)** - cachevaluereport.ProviderPromptCacheTokenEq (and ProviderPromptCacheTokenEquiv) is the token-equivalence count of provider-side prompt-cache savings - the tokens the provider's cache_read saved, normalized for the cache-value report's fleet-benefit track. |
 | o | defined | symbol | cache | **toolResultContentHasCacheControl (tool_result cache_control detector)** - agent.toolResultContentHasCacheControl reports whether a tool_result block's content array carries a cache_control breakpoint, the detector the elision shrinker and stale-span marker use alongside rawHasCacheControl. |
 | o | defined | subsystem | cache | **vcachecal (M1 calibrate)** - internal/vcachecal is the vCache M1 observe-and-calibrate decision layer (#716): the warmth-belief estimator plus the offline probe harness that fits the T/M_min/r warmth law and reports false-warm/false-cold prediction error, off the hot path. |
-| o | defined | subsystem | cache | **vcachescore (operator scorecard)** - internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachestar/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact. |
+| o | defined | subsystem | cache | **vcachescore (operator scorecard)** - internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachechain/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact. |
 | o | defined | subsystem | cache | **vcachewarm (M3 warming)** - internal/vcachewarm is the vCache M3 dedicated-warming decision layer (#718): the Anthropic max_tokens:0-vs-decode-1 gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. |
-| o | defined | subsystem | cache | **vcachestar (M2 star anchors)** - internal/vcachestar is the vCache M2 star-anchor decision layer (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. |
+| o | defined | subsystem | cache | **vcachestar (retired M2 star-anchor package)** - vcachestar was the vCache M2 star-anchor decision package (#717); it was deleted unwired. The live M2 star-anchor gate is the gateway's default-on anchor placement (Server.maybeAnchorAnthropicRaw), and realized savings are proven by vcachegov.ProveTelemetrySavings. |
 | o | defined | subsystem | cache | **vcacheobserve (fak vcache observe)** - internal/vcacheobserve backs `fak vcache observe`, ingesting REAL provider-cache transcripts/telemetry into a per-session and cross-session hit-rate report. |
 | o | defined | subsystem | cache | **cacheobs (observability tap)** - internal/cacheobs is the process-global observability tap that the in-kernel KV-prefix cache writes lifecycle events into for scraping. |
 | o | defined | symbol | cache | **CacheHit (vdso event)** - CacheHit is a vDSO CacheEventKind value naming a tier-2 cache lifecycle HIT event (a cacheable lookup that an entry served), emitted to the cache-event sink. |
@@ -1651,6 +1650,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **CacheWitnessPoint (folded per-interval witness point)** - frontierswe.CacheWitnessPoint is one folded point of a CacheWitnessSeries.Points series: the per-interval delta derived from two consecutive CacheSamples, threaded through cmd/fak/frontierswe_cachewitness.go and stamped into run.go's report. |
 | o | defined | config | cache | **CacheWitnessSchema (witness trace schema id)** - frontierswe.CacheWitnessSchema is the versioned schema-id string constant FoldCacheWitness stamps onto every folded CacheWitnessSeries, so a downstream reader can detect a schema change before parsing the trace. |
 | o | defined | symbol | cache | **CacheWitnessSeries (folded cache-witness trajectory)** - frontierswe.CacheWitnessSeries is the folded trajectory FoldCacheWitness produces: a Schema id, the per-interval Points ([]CacheWitnessPoint), and the realized cache-reuse rate for a frontierswe run, threaded through run.go's report. |
+| o | defined | metric | cache | **CacheHitRatio (per-surface cache hit ratio)** - CacheHitRatio names three different ratios: agentxbench's per-turn cached-prompt-token share (internal/agentxbench/types.go, CachedTokens/PromptTokens), ctxmmu EngramPager.CacheHitRatio (internal/ctxmmu/engram_pager.go, row-gather hits over hits plus misses), and the gateway gauge fak_gateway_inference_cached_prompt_hit_ratio (internal/gateway/metrics_render.go, served turns with a provider cache read over all served turns). |
 | o | defined | symbol | cache | **vBlock** - The unit of cacheable work in vCache: a cachemeta entry whose identity carries every axis that must match for provider reuse (content digest, model, tokenizer, endpoints, position in prefix DAG). |
 | o | defined | symbol | cache | **KVLayout** - The interface abstracting the per-position bytes a given attention variant caches and how to reconstruct per-head K/V from those bytes (standard vs MLA). |
 | o | defined | symbol | cache | **MLAConfig** - The low-rank MLA projection geometry (DeepSeek V2/V3): latent width, RoPE dim, and down/up projection matrices for compressing the K/V cache. |
@@ -1682,7 +1682,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **CacheBit** - Record.CacheBit (internal/cachewitness/cachewitness.go) is the single honest bit: did this run's provider usage show any cache read at all. |
 | o | defined | symbol | cache | **CacheBurstPaysBack** - CacheBurstPaysBack (internal/agent/anthropic_compact.go) is the pure predicate deciding whether a compaction's cache-invalidation burst pays back before the session ends, from turn counts and cache read/write multipliers. |
 | o | defined | symbol | cache | **observeUncachedTrim** - observeUncachedTrim (internal/gateway/metrics.go) records an uncached-tail trim outcome (agent.ElideOutcome) on the gateway metrics surface. |
-| o | defined | subsystem | cache | **vcacheqa** - Package vcacheqa (internal/vcacheqa) is the shared QA harness and witness contract every vCache gate runs through, folding gate results into a GateReport. |
 | o | defined | symbol | cache | **vcacheWarmth** - vcacheWarmth (internal/gateway/metrics.go) is the gateway journal of vCache warmth demotions - records of warm-prefix claims demoted to cold. |
 | o | defined | symbol | cache | **vcacheGovernor** - vcacheGovernor (internal/gateway/metrics.go) is the gateway journal of vCache governor decisions, surfaced at /debug/vars as vcache_governor_journal. |
 | o | defined | symbol | cache | **cacheKey** - cacheKey (internal/witness/cache.go) computes the witness Resolver's memo key for a (kind, arg) verification lookup. |
@@ -2124,7 +2123,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | guard-gate | **GateDisposition** - GateDisposition (internal/ctxmmu/disposition.go) grades an observed context disposition against the wanted disposition, given evidence, returning a DispositionOutcome. |
 | o | defined | symbol | guard-gate | **GateEphemeral** - GateEphemeral (internal/ctxmmu/ephemeral_gate.go) decides whether ephemeral text may be reclassified, returning an EphemeralGateOutcome. |
 | o | defined | symbol | guard-gate | **gatePriorArt** - gatePriorArt (internal/hooks/gate_priorart.go) is the staged-diff hook gate that emits prior-art findings for changes matching kernel globs. |
-| o | defined | symbol | guard-gate | **GateReport** - GateReport (internal/vcacheqa and internal/vllmcompile) is the structured result a QA gate returns, with an OK() fold over its checks. |
+| o | defined | symbol | guard-gate | **GateReport** - GateReport (internal/vllmcompile) is the structured result a QA gate returns, folding its per-row verdicts into one pass/fail. |
 | o | defined | symbol | guard-gate | **guardIsCodex** - guardIsCodex (cmd/fak/guard_codex.go) detects whether the guarded child command is a Codex CLI invocation, selecting the Codex install shape. |
 | o | defined | config | guard-gate | **guardDisabled** - guardDisabled (cmd/fak/dispatch_tick.go) reports whether dispatch must skip the fak guard wrapper (GUARD_DISABLED environment switch). |
 | o | defined | symbol | guard-gate | **ScoreTrendGate** - ScoreTrendGate (internal/cachevalueledger/ledger.go) grades a ledger's score trend and gates on regression (TrendGateResult). |
@@ -2529,6 +2528,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **dispatchLaunchPlanFromWaves (materializer)** - cmd/fak.dispatchLaunchPlanFromWaves is the shared helper that materializes dispatchLaunchWave rows from priced wave IDs and a target lookup function. |
 | o | defined | symbol | plan | **dispatchStablePlanID (digest helper)** - cmd/fak.dispatchStablePlanID hashes a JSON-serialized dispatch plan payload into the stable plan-* identifier used by price and wave reports. |
 | o | defined | doc-term | plan | **replan (recovery verb)** - In fak's refusal/routing vocabulary (cmd/fak/commit.go, internal/gateway/routing.go) to 'replan' is the recovery action when a commit or route is BLOCKED — discard the attempt and compute a fresh plan rather than retrying it verbatim. |
+| o | defined | symbol | plan | **PlannedBytes (Metal reservation requested plan)** - MetalReservationReceipt.PlannedBytes (internal/localadmission/metal_reservation.go) records the MemoryPlan - startup-peak and steady bytes - that a fak-native Metal load asked local admission to reserve; cmd/fak/serve_memory_admission_receipt.go fills it from the serve memory plan. |
 | o | defined | symbol | plan | **idxPlan (ctxplan index-bounded view)** - idxPlan is the local ctxplan.Plan produced by index.PlanCells in cmd/ctxplandemo and cmd/ctxplanbench, the O(1) resident view scored over only an index-bounded candidate set rather than the full transcript. |
 | o | defined | symbol | plan | **planAudit (ctxplan faithfulness witness)** - ctxplan.Audit(p Plan) returns the Witness that a planned resident view is faithful (no candidate span destroyed), the same plan-faithfulness check tools/plan_audit_test.py exercises. |
 | o | defined | symbol | plan | **PlanOf (syspromptmmu prompt-segment plan)** - syspromptmmu.PlanOf folds a base Segment list into the []cachemeta.PromptSegment system-prompt plan that BuildSystemValue realizes, and BaseContextPlan seeds the resident spine-plus-policy floor of that plan. |
@@ -3363,28 +3363,28 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 27 kind/grounding mismatch |
+| honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3222/5670 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 3222/5666 boundaries drawn one-way only |
 | well-formed | `well_formed` | 100 | 0 | all 3085 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 230 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 228 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4345 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4344 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 480 | 586 | 106 |
+| plan | 480 | 585 | 105 |
 | session-runtime | 289 | 360 | 71 |
-| cache | 341 | 410 | 69 |
+| cache | 340 | 408 | 68 |
 | gateway-engine | 247 | 305 | 58 |
 | guard-gate | 515 | 563 | 48 |
 | attention | 146 | 192 | 46 |

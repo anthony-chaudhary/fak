@@ -45,38 +45,36 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
-	"qwen38campaign":     3, // Qwen3.8 subagent fan-out multi-agent benchmark harness.
-	"factorymigrate":     1, // 5-Gate boundary and migration auditor across fak and fak-private.
-	"agentsched":         3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
-	"reflexagent":        3, // fast-dispatch micro-agent reflex loop (#11189).
-	"workspaceslot":      5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
-	"harnessbench":       5, // high-churn soak and thundering-herd saturation witness suite (#11183).
-	"effortbench":        5, // intra-model effort modulation and thinking budget benchmark (#11185).
-	"control":            2, // dynamic inference configuration control plane: shift-left validation, relational invariants, dry-run diff, and canary auto-rollback watchdog (#10869).
-	"agentquery":         2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
-	"bgloop":             2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
-	"cmdutil":            2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
-	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
-	"observability":      2,
-	"sandbox":            2, // multi-tier local execution sandbox (wazero WebAssembly, OS container, Job Object/cgroups).
-	"gym":                5, // sandbox evaluation gym, scenario runner, and closed-loop multi-turn harness simulation (#11652, #11666).
-	"observer":           1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
-	"director":           3, // autonomous multi-agent roll-up digest for zero-self-report supervisor steering (#11411).
-	"studyreceipt":       1,
-	"stopgate":           1, // unified lifecycle stop gates across fak guard and fak agent (#11253); stdlib-only, off the hot path.
-	"abi":                0,
-	"launchguard":        1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
-	"servingsupervision": 3, // serving failure-domain isolation and supervision; mechanism leaf, off the hot path.
-	"storagepressure":    3, // storage headroom and reclaim reporting; mechanism leaf, off the hot path.
-	"wipreadiness":       1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
-	"timeaware":          1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
-	"resulttier":         1, // standard bounded result tiers and cursor pagination; stdlib-only, off the hot path.
-	"resultstier":        1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
-	"power":              1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
-	"telemetry":          1, // live runtime telemetry aggregation and Prometheus exposition; stdlib-only, off the hot path.
-	"enginestep":         1, // bounded native serving-loop step recorder (phase/decode-step/cohort histograms + recent-step ring) rendered as fak_engine_*; stdlib-only, O(buckets) per observe.
-	"issuesolved":        3, // issue resolution and proof verification helper.
-	"rawdecode":          3, // standalone raw decode executor for Qwen models.
+	"qwen38campaign":  3, // Qwen3.8 subagent fan-out multi-agent benchmark harness.
+	"factorymigrate":  1, // 5-Gate boundary and migration auditor across fak and fak-private.
+	"agentsched":      3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
+	"reflexagent":     3, // fast-dispatch micro-agent reflex loop (#11189).
+	"workspaceslot":   5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
+	"harnessbench":    5, // high-churn soak and thundering-herd saturation witness suite (#11183).
+	"effortbench":     5, // intra-model effort modulation and thinking budget benchmark (#11185).
+	"control":         2, // dynamic inference configuration control plane: shift-left validation, relational invariants, dry-run diff, and canary auto-rollback watchdog (#10869).
+	"agentquery":      2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
+	"bgloop":          2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
+	"cmdutil":         2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
+	"ops":             4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
+	"observability":   2,
+	"sandbox":         2, // multi-tier local execution sandbox (wazero WebAssembly, OS container, Job Object/cgroups).
+	"gym":             5, // sandbox evaluation gym, scenario runner, and closed-loop multi-turn harness simulation (#11652, #11666).
+	"observer":        1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
+	"director":        3, // autonomous multi-agent roll-up digest for zero-self-report supervisor steering (#11411).
+	"studyreceipt":    1,
+	"stopgate":        1, // unified lifecycle stop gates across fak guard and fak agent (#11253); stdlib-only, off the hot path.
+	"abi":             0,
+	"launchguard":     1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
+	"storagepressure": 3, // storage headroom and reclaim reporting; mechanism leaf, off the hot path.
+	"wipreadiness":    1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
+	"timeaware":       1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
+	"resultstier":     1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
+	"power":           1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
+	"telemetry":       1, // live runtime telemetry aggregation and Prometheus exposition; stdlib-only, off the hot path.
+	"enginestep":      1, // bounded native serving-loop step recorder (phase/decode-step/cohort histograms + recent-step ring) rendered as fak_engine_*; stdlib-only, O(buckets) per observe.
+	"issuesolved":     3, // issue resolution and proof verification helper.
+	"rawdecode":       3, // standalone raw decode executor for Qwen models.
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
@@ -290,7 +288,6 @@ var tier = map[string]int{
 	"spendrollup":      2, // cross-account `fak spend` rollup with a WITNESSED/OBSERVED provenance gate that fails any figure missing its valuation basis or provenance label; imports fleetaccounts(1), off the hot path.
 	"worktreewitness":  1, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; stdlib-only, off the hot path.
 	"goalregistry":     2, // canonical cross-harness goal identity and bindings; foundation composite over the tier-0 flock primitive.
-	"schedcontract":    1, // scheduler contracts, constraints, and validation; stdlib-only primitive.
 	"serverartifact":   1, // stdlib-only local artifact identity, digest, and mutation verification; imports no internal package.
 	"serverproduct":    2, // independent local-server product contract and readiness receipts; foundation composite over protocol and artifact identities.
 	"serveradapter":    2, // independent llama-server invocation rendering and readiness probes; foundation composite over server product contracts.
@@ -336,7 +333,6 @@ var tier = map[string]int{
 	"polymodel":           1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
 	"reachdelta":          4, // typed policy reach-expansion referee (#4220): composes adjudicator policy sets with knownbad accepted-risk records; off the hot path.
 	"rulesynth":           4, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
-	"residency":           3,
 	"ctxresidency":        4,
 	"ctxplan":             1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
 	"relay":               2, // pure relay-baton value (#1870): the closed Baton schema + deterministic Parse/project round-trip for the handoff/resume relay; imports ctxplan(1)+stdlib, off the hot path.
@@ -357,17 +353,14 @@ var tier = map[string]int{
 	"trajhook":            4, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
 	"sessionimage":        5, // portable, model-agnostic SESSION image: composes recall(3)+session(1)+trajectory(3)+ctxplan(1) into one versioned, sha256-integrity bundle + a .faksession tar (dump/pack/unpack/rehydrate across hosts/users/VMs/model changes). Integrator: imports tier-3 composers, off the hot path.
 	"a2achan":             3, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
-	"region":              3, // typed one-sided shared Ref window: adjudicated Put/Get/Accumulate over abi.Resolver with ScopeFleet ceiling and vDSO coherence bumps.
 	"snapshot":            4, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
 	"rungobs":             3, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
-	"vcachegov":           3, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set â€” pin/lazy/evict (Â§5.4), rate-limit warm budget (Â§5.5), cross-shard affinity routing + rehash/burst guards (Â§9/D3), and the Law-D4 secret classifier. Classifier itself: imports cachemeta(1)+stdlib. The live loop (loop.go, journal.go, quality.go, #1492) additionally imports vcacheqa(2) from its own qa_test.go only; loop.go itself stays cachemeta(1)+stdlib. Blank-imported by internal/registrations (env-gated by FAK_VCACHE_GOVERNOR / --vcache-governor, default OFF) -- no longer "NOT registered".
+	"vcachegov":           3, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set â€” pin/lazy/evict (Â§5.4), rate-limit warm budget (Â§5.5), cross-shard affinity routing + rehash/burst guards (Â§9/D3), and the Law-D4 secret classifier. Classifier itself: imports cachemeta(1)+stdlib. Blank-imported by internal/registrations (env-gated by FAK_VCACHE_GOVERNOR / --vcache-governor, default OFF) -- no longer "NOT registered".
 	"vcachechain":         3, // vCache M4 chains & recall (#719): prefix DAG + topological replay (send-one-then-fan) + 20-block breakpoints + the Â§11.0 cost-gated rebuild (refuses single-unit chain rebuilds, allows amortized fan-out). Pure decision layer: imports cachemeta(1)+vcachegov(2)+stdlib, off the hot path (NOT registered; gated OFF by default).
 	"vcachecal":           3, // vCache M1 observe & calibrate (#716): the warmth-belief estimator (Â§7) over cachemeta.Lifecycle at TierProvider + the offline probe harness that fits T/M_min/r (Law D2) + the LRU probe budget (observer-perturbs-state) + the Zipf-s concentration gate (Â§5.2) + the false-warm/false-cold prediction-error report. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path (NOT registered; observe-only â€” no warming in M1).
 	"vcachecalibration":   3, // Dated provider/model warmth-prediction ledger and stale-status readout; imports vcacheobserve plus bounded JSONL persistence.
 	"vcachescore":         3, // vCache operator scorecard: composes vcachecal/vcachechain/vcachegov proof leaves into the offline 2x readiness gate and hot-anchor index artifact; pure off-path decision layer.
-	"vcachestar":          3, // vCache M2 star anchors (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path.
 	"vcachewarm":          3, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
-	"vcacheqa":            3, // vCache gate QA harness (#1495, child of #1490): the shared honesty-lint (Law A2 elision AST scan) + forced-cache-MISS helper (drives vcachestar.FoldTelemetry) + non-forgeable witness (journal.Row-shaped hash chain, verified via journal.VerifyRows) + provenance fence (OBSERVED/WITNESSED, cachewitness vocabulary) + determinism check every M1-M5 gate imports before flipping default-on. Imports journal(2)+guardrsi(1)+cachewitness(1)+vcachestar(2)+cachemeta(1)+stdlib, off the hot path, not registered.
 	"sessionreset":        3, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":             2, // process-local task/step/resource/ETA snapshot fold; imports witnessprocess + runtimeobs(1) for its STW-free default sampler, off the hot path.
 	"issuepolicy":         2, // pure spine-first GitHub issue candidate policy; stdlib-only, off the hot path.
@@ -518,7 +511,6 @@ var tier = map[string]int{
 	"workerenvelope":      1, // machine-readable worker-result envelope (sha/issue/tests/blocker/witness) + witness-gated validation; stdlib-only, off the hot path.
 	"workerworktree":      2, // native port of tools/worker_worktree.py (#3168): per-worker git worktree isolation (prepare detached-at-SHA / land diff onto trunk / reap) that the Go dispatch spawn wires in behind a default-off flag; imports windowgate(1) for the no-window git runner + stdlib, off the hot path.
 	"speedab":             1, // pure pinned fast-vs-standard manifest grader; stdlib-only, off the hot path.
-	"launchlatency":       2, // dispatch→heartbeat worker launch-latency histogram + p50/p95 (reuses fleetmetrics percentiles); stdlib-only, off the hot path.
 	"closurerate":         1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
 	"issuecost":           2, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
 	"mutationbudget":      1, // GitHub mutation throttle guard: holds close/comment bursts with an actionable reason when remaining API budget < reserve; stdlib-only, off the hot path.
@@ -628,10 +620,8 @@ var tier = map[string]int{
 	"sharedtask":            3, // in-memory reference fold for collaborative task records — patch, conflict, scope, event, and journal semantics adapters reuse instead of inventing per-adapter task-state contracts; rides the a2achan(2) mailbox for its live seam, hence mechanism. Off the hot path.
 	"loaddebounce":          1, // #3376 (parent #3365, scale-to-100 #1333): clean-room per-worker load publisher — a pure Coalescer state machine that publishes only on change (last==current dedup) and coalesces a rapid burst behind a reset-on-every-change debounce window so only the LATEST value emits. Clock is injected per call, so the debounce is exercised with zero goroutines/timers/wall-clock. Inspired by ai-dynamo worker_metrics.rs; stdlib-only (time), imports nothing internal, off the hot path. Intended landing: cmd/fak/dispatch_tick_preflight.go:45 (OSWorkerProcs); analog internal/gateway/serving_autoscaler.go:64.
 	"hostplacement":         1, // #3599: pure multi-host worker-placement primitive — a per-host headroom heartbeat {hostname, live_headroom, saturation, ts} + a Registry that folds the latest per host, and a deterministic Place over injected (now, TTL) that picks the least-saturated non-stale host below its saturation threshold or returns stay-local. No wall-clock, no ssh/exec, imports nothing internal; off the hot path. Intended landing: internal/dispatchtick worker-launch seam, deriving live_headroom from accounts_headroom + saturation from procguard.
-	"computeadmit":          2, // #3269 (parent #3259): the ONE shared admission kernel over the compute partitioners — the compute-plane twin of regionadmit/laneadmit.Decide. Pure Decide(Request, []Lease, Taxonomy) refusing with the closed vocabulary (COLLISION_RISK + RepartitionAdvice for a region contention via dispatchorder.ComputeClaimsContend, POLICY_BLOCK/out_of_taxonomy for an out-of-space claim = ExpertParallelPlan's [1,N] fail-closed in shared form), plus SubmitAdmitter, an abi.Adjudicator pricing compute-region contention at the Kernel.Submit seam (decision only, no scheduling; claim-less calls defer untouched). Imports abi(0)+dispatchorder(1), off the hot path.
 	"scmbridge":             2, // #4756 (parent #4748): the Windows supervision plane over fak.service.v1 — ONE desired-state/read-back contract for SCM LocalService services + S4U/InteractiveToken scheduled-task roles (placement + launch fencing + stop-cause + reconcile), and the pure deterministic SCM service-DEFINITION projection (start type incl. desired-stopped=installed-but-disabled, LocalService-only account, depends_on->native dependencies, RestartPolicy.Decide-replayed FailureActions ladder with circuit-open as terminal none, sc.exe rendering as data). No SCM/registry/sc.exe calls. Imports only servicespec(1), off the hot path.
 	"ghexec":                2, // #3473: deadline-bound `gh` invocation builder (Command/CommandTimeout + DefaultTimeout) — every gh call carries a context deadline, disables interactive prompting + the update notifier, and suppresses the Windows console via windowgate so a wedged gh can never wedge its caller. Imports windowgate(1)+stdlib, off the hot path.
-	"deadlineadmit":         1, // #5292 (parent #5289 mooncake-study): pure EDF admission-ordering + predicted-miss load-shedding policy — Order (Deadline asc, ties by ID) + Shed (degradable items whose predictedFinish overshoots Deadline by >= dropThreshold; non-degradable never shed) + Admit. Clean-room from Mooncake's admission queue; imports only stdlib (sort), nothing internal; off the hot path.
 	"taskvc":                2, // #3323 (reboot-survival audit): binds the fleet's live Windows Scheduled Tasks to the versioned installers that recreate them — the reboot-survival record `fak schedscan` cannot give (schedscan reports live task HEALTH, never whether a task is rebuildable at all). Pure literal-only parse of an installer's -TaskName defaults (an interpolated default is never treated as coverage) + Verify, which refuses a coverage claim the tree does not back (INSTALLER_NAME_DRIFT) or an unexplained gap (ORPHAN_FLEET_TASK); the declared Inventory carries the residual orphans with a named reason each. Imports windowgate(1)+stdlib for the `git ls-files` call, off the hot path. NOT pureRoot (it imports a sibling leaf).
 	"skilleffectiveness":    4, // skill-effectiveness scorecard pure core: probes every .claude/skills SKILL.md for the affordances that make a skill discoverable (frontmatter description), triggerable (an explicit use-when phrase), and affordable (per-load-tier word budgets), plus the queried loader's queryable/paging/in-sync health, and folds skill_debt through the shared kernel. Imports capindex(2)+pkg/scorecard+stdlib, off the hot path.
 	"skillfootprint":        4, // #5444 (epic #3229): the resident .claude/skills DESCRIPTION floor — the fold `fak skill footprint` renders (Fold/Measure over the shipped SkillResolver cards) PLUS the one-way ratchet gating it (SkillDescriptionBudgetBytes, SKILL_DESC_BUDGET_EXCEEDED / _STALE), held together so the scorecard and the gate can never become rival authorities on what the resident floor is. The userland twin of mcpfootprint's MCP ratchet. Imports capindex(2)+stdlib, off the hot path.
@@ -809,7 +799,6 @@ var tier = map[string]int{
 	"opensweharder":              1, // stdlib-only OpenSWE-hardening evidence contract.
 	"perfrsiscore":               2, // deterministic performance-RSI scorecard over the shared scorecard kernel.
 	"providerjobaccounting":      1, // stdlib-only provider-job accounting contract.
-	"resourcelifecycle":          1, // stdlib-only resource lifecycle state primitive.
 	"shelltoken":                 1, // stdlib-only shell-token parsing primitive.
 	"studyforge":                 1, // stdlib-only forge evidence collector; network and filesystem stay at its explicit boundary.
 	"sweepcert":                  1,
@@ -817,8 +806,6 @@ var tier = map[string]int{
 	"witnessprocess":             1, // stdlib-only process-witness classification contract.
 	"dockerprocess":              1, // static-literal Docker Compose launcher; stdlib-only, called only by off-path control flows.
 	"selfupdate":                 3,
-	"rollout":                    1,
-	"deployment":                 1,
 	"extensionfault":             1, // stdlib-only optional extension subprocess fault-isolation primitive.
 	"optsdefault":                1, // stdlib-only shared scorecard Options defaults (empty root, zero now).
 	"stablejson":                 1, // stdlib-only canonical two-space-indented JSON rendering primitive.
@@ -828,7 +815,6 @@ var tier = map[string]int{
 	"toolbound":                  1,
 	"overtonscore":               1,
 	"dataslot":                   1,
-	"servingsim":                 1, // trace-driven discrete-event LLM serving simulator; stdlib-only (#10841).
 	"cache":                      1,
 	"benchsnapshot":              1,
 	"promptcomp":                 1,
@@ -847,7 +833,6 @@ var tier = map[string]int{
 	"marketplace":                1,
 	"mtpeval":                    1,
 	"mtptune":                    1,
-	"decodemigrate":              1,
 	"dosadapter":                 1,
 	"framebus":                   1,
 	"interactivesession":         1,
@@ -1518,13 +1503,9 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // defconfig (internal/registrations). `agent` registers the "localtools" engine from its
 // init() and is pulled in directly by cmd/fak, never blank-imported. `gateway` registers
 // a per-Server metrics observer from New(), and the server itself is wired by cmd/fak.
-// `computeadmit` registers its COLLISION_RISK reason code lazily from NewSubmitAdmitter
-// (idempotent registerReasonOnce), i.e. when the Kernel.Submit adjudication fold constructs
-// the gate — never from init(), so a defconfig blank-import would not even fire it; it is
-// wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true, "observer": true, "trajhook": true, "gym": true, "policy": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "codetools": true, "systools": true, "observer": true, "trajhook": true, "gym": true, "policy": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig

@@ -9,8 +9,7 @@
       "distinction": "It only OBSERVES and calibrates cache-warmth belief; it is not vcachewarm, the M3 layer that actually issues warming requests.",
       "distinct_from": [
         "vcache",
-        "vcachewarm (M3 warming)",
-        "x-goal25-cache-vcacheqa"
+        "vcachewarm (M3 warming)"
       ],
       "aliases": [],
       "grounding": "vcachecal",
@@ -25,7 +24,7 @@
       "canonical": "vcachescore (operator scorecard)",
       "family": "cache",
       "kind": "subsystem",
-      "definition": "internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachestar/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact.",
+      "definition": "internal/vcachescore is the vCache operator scorecard that composes the vcachecal/vcachechain/vcachegov proof leaves into the offline 2x-readiness gate and the hot-anchor index artifact.",
       "distinction": "It is a pure off-path readiness gate over the other vCache leaves, not vcachecal which produces the calibration belief it consumes.",
       "distinct_from": [
         "vcache",
@@ -45,10 +44,10 @@
       "family": "cache",
       "kind": "subsystem",
       "definition": "internal/vcachewarm is the vCache M3 dedicated-warming decision layer (#718): the Anthropic max_tokens:0-vs-decode-1 gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting.",
-      "distinction": "It decides how to actively warm an anchor, unlike vcachestar which only decides which first natural request becomes the anchor.",
+      "distinction": "It decides how to actively warm an anchor, not vcachecal which only observes and calibrates warmth belief.",
       "distinct_from": [
         "vcache",
-        "vcachestar (M2 star anchors)",
+        "vcachecal (M1 calibrate)",
         "x-goal25-cache-vcachewarmth"
       ],
       "aliases": [],
@@ -61,18 +60,18 @@
     },
     {
       "id": "x-cache-vcachestar",
-      "canonical": "vcachestar (M2 star anchors)",
+      "canonical": "vcachestar (retired M2 star-anchor package)",
       "family": "cache",
       "kind": "subsystem",
-      "definition": "internal/vcachestar is the vCache M2 star-anchor decision layer (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking.",
-      "distinction": "It chooses and keys the anchor prefix, not vcacheobserve which ingests already-observed provider-cache telemetry after the fact.",
+      "definition": "vcachestar was the vCache M2 star-anchor decision package (#717); it was deleted unwired. The live M2 star-anchor gate is the gateway's default-on anchor placement (Server.maybeAnchorAnthropicRaw), and realized savings are proven by vcachegov.ProveTelemetrySavings.",
+      "distinction": "A retired package name kept only in historical notes, not the live VCacheAnchor gate posture that controls star-anchor placement today.",
       "distinct_from": [
         "vcache",
-        "vcacheobserve (fak vcache observe)"
+        "x4-cache-vcacheanchor"
       ],
       "aliases": [],
       "grounding": "vcachestar",
-      "grounding_kind": "path",
+      "grounding_kind": "doc",
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
@@ -84,10 +83,10 @@
       "family": "cache",
       "kind": "subsystem",
       "definition": "internal/vcacheobserve backs `fak vcache observe`, ingesting REAL provider-cache transcripts/telemetry into a per-session and cross-session hit-rate report.",
-      "distinction": "It is the read-only measurement of realized provider-cache reuse, not vcachestar which is the forward decision layer that places anchors.",
+      "distinction": "It is the read-only measurement of realized provider-cache reuse, not vcachewarm which is the forward decision layer that issues warming requests.",
       "distinct_from": [
         "vcache",
-        "vcachestar (M2 star anchors)"
+        "vcachewarm (M3 warming)"
       ],
       "aliases": ["vcachestatusreport"],
       "grounding": "vcacheobserve",

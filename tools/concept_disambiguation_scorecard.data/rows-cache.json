@@ -39,7 +39,6 @@
         "kv-cache",
         "prompt-cache",
         "cachemeta",
-        "x-goal25-cache-vcacheqa",
         "x3-cache-gocache"
       ],
       "aliases": [

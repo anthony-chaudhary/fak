@@ -219,7 +219,7 @@
    "family": "witness-proof",
    "kind": "symbol",
    "definition": "internal/modelroute.VerifyWitness (Verification = \"witness\") is the strongest model-route verification tier, meaning DOS confirmed the work from git evidence (dos verify / dos commit-audit); Trusted() and Witnessed() both gate on it above VerifyJudge.",
-   "distinction": "A named VERIFICATION-TIER constant on the model-route quality axis, not the three-valued WitnessOutcome gate verdict, and not the identically-named internal/vcacheqa.VerifyWitness function (a thin pass-through to the real QA-gate test).",
+   "distinction": "A named VERIFICATION-TIER constant on the model-route quality axis, not the three-valued WitnessOutcome gate verdict.",
    "distinct_from": [
     "witness-outcome"
    ],

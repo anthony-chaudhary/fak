@@ -363,8 +363,6 @@ package name. One honest line each.
 | `internal/cacheprice` | The one source of truth for the provider prompt-cache price multipliers — the cost of a cached-prefix read or write relative to a base input token — so no layer re-declares the literals and drifts. |
 | `internal/cachevalue` | Folds the persisted cache-savings ledger into per-session cache-efficiency metrics (hit rate, write amplification) and flags the churny sessions whose prefix keeps mutating. |
 | `internal/cvregress` | Per-session cache-efficiency (hit% + write-amp) regression flagging over the cache-savings ledger. |
-| `internal/computeadmit` | The one shared admission kernel over the compute partitioners — the compute-plane twin of the lane and region admitters, so a compute-region overflow refuses in the same closed vocabulary as a lane collision. |
-| `internal/deadlineadmit` | A pure admission policy that orders pending work earliest-deadline-first and sheds degradation-eligible items it predicts will miss, so the survivors keep their SLO instead of everything missing together. |
 | `internal/flowcredit` | The receiver-granted credit ledger for cross-node KV block transfer backpressure: a sender must reserve credit before transmitting, so a fast prefill node cannot overrun a slow decode node's KV-ingest buffers. |
 | `internal/guideddecode` | A sound, byte-level compiler that constrains a model's decode to a valid tool-call envelope. This slice constrains the tool-NAME enum and the fixed skeleton around it; full argument-schema enforcement is a later slice. |
 | `internal/kvbudget` | A pure, GPU-free calculator for the KV-cache VRAM budget of concurrent decode streams: the closed-form KV-bytes-per-token sizing math, with the hardware A/B left owed by a GPU node. |

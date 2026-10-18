@@ -151,24 +151,6 @@
       "gaps": []
     },
     {
-      "id": "cov-debt250-cache-bookeduncachedtokens",
-      "canonical": "cache implementation surface for bookeduncachedtokens",
-      "family": "cache",
-      "kind": "symbol",
-      "definition": "`booked_uncached_tokens` is the cache symbol declared or used at `internal/nativebench/nativebench.go:575` as `Metrics: []string{\"demotion_accuracy\", \"alarm_accuracy\", \"divergence_segment_error\", \"divergence_token_error\", \"divergence_byte_error\", \"booked_uncached_tokens\", \"rebate_tokens\", \"`. This row positions that concrete implementation surface, not merely the family label.",
-      "distinction": "Use `booked_uncached_tokens` for the operation evidenced at `internal/nativebench/nativebench.go:575`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
-      "distinct_from": [
-        "promptcachekey"
-      ],
-      "aliases": [],
-      "grounding": "bookeduncachedtokens",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
       "id": "cov-debt250-cache-cachedfile",
       "canonical": "cache implementation surface for cachedfile",
       "family": "cache",

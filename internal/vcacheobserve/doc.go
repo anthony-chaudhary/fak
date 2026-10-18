@@ -12,7 +12,7 @@
 //
 //   - base cache (OBSERVED): hit rate + cached tokens served, straight from the
 //     provider's own counters.
-//   - M2 star anchors (vcachestar): per-family realized economics + first-positive
+//   - M2 star anchors (vcachegov proof): per-family realized economics + first-positive
 //     turn — the within-family reuse win.
 //   - M1 concentration (vcachecal §5.2): the Zipf exponent s MEASURED from the
 //     account's family distribution, and the flat-workload (s<=1) "defeated" flag.
