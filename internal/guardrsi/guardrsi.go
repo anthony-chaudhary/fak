@@ -33,8 +33,7 @@ const (
 // reason AND the admitted verdict. Folding this host's real journals showed ADVISORY
 // is the DOMINANT verdict (~39 rows/session across 510 sessions), so the miscount was
 // large enough to pin WorstBucket on "unknown_verdict" and point the RSI lever at a
-// defect that does not exist. internal/guardcorpus already got this right and its
-// comment names this map as the one still carrying the bug; this closes it.
+// defect that does not exist.
 var KnownVerdicts = map[string]bool{
 	"ALLOW": true, "DENY": true, "TRANSFORM": true, "QUARANTINE": true,
 	"WITNESS": true, "DEFER": true, "INDETERMINATE": true, "ADVISORY": true,

@@ -65,7 +65,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `agentGoalLoop <br><small>agentGoalLoop (injected agent-loop seam for the goal endpoint)</small>` | **agentGoalLoop (injected agent-loop seam for the goal endpoint)** | loop / symbol | loop-ring, loopconstraint, loopobserve, looppark |
 |  | `agentHookDelegate` | **agentHookDelegate** | guard-gate / symbol | gate, repoguardargv |
 |  | `agent-readiness scorecard <br><small>agentreadinessscorecard</small>` | **agent-readiness scorecard** | score-debt / subsystem | control-pane, persona-readiness scorecard, scorecard |
-|  | `aggregateAnswers` | **aggregateAnswers** | guard-gate / symbol | c729-grade-candidates, cov5305-guard-corpus |
+|  | `aggregateAnswers` | **aggregateAnswers** | guard-gate / symbol | c729-grade-candidates |
 |  | `AggregateHBMBytes` | **AggregateHBMBytes** | guard-gate / symbol | insufficientaggregatehbm |
 |  | `AggregateSessions (sessionaudit fold) <br><small>aggregatesessions</small>` | **AggregateSessions (sessionaudit fold)** | session-runtime / symbol | list-sessions |
 |  | `allow overlay` | **guardAllowOverlay (allow-overlay schema)** | guard-gate / symbol | cov5300-guard-deny-overlay, gate, guard-kernel, t5411-guard-self-tighten-overlay, x-goal-guard-gate-guard-allow-overlay |
@@ -1692,11 +1692,11 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `guardApplyLocalProviderExtraBody <br><small>guardApplyLocalProviderExtraBody (local-model extra-body env setter)</small>` | **guardApplyLocalProviderExtraBody (local-model extra-body env setter)** | guard-gate / symbol | guard-gate-guarddetectlocalbackend, guard-gate-guardlocaldetectedbanner |
 |  | `guardApplySelfTightenOverlay` | **guardApplySelfTightenOverlay** | guard-gate / symbol | cov5300-guard-apply-deny-overlay, t5411-guard-admit-self-tighten-proposal |
 |  | `GuardAssumption <br><small>GuardAssumption (assume-check adjudication)</small>` | **GuardAssumption (assume-check adjudication)** | guard-gate / symbol | gate, guard-gate-guardaccuracy, guard-kernel |
-|  | `guard_audit <br><small>guard_audit (guard audit journal)</small>` | **guard_audit (guard audit journal)** | guard-gate / subsystem | cov5305-guard-audit-pruned, cov5305-guard-corpus |
+|  | `guard_audit <br><small>guard_audit (guard audit journal)</small>` | **guard_audit (guard audit journal)** | guard-gate / subsystem | cov5305-guard-audit-pruned |
 |  | `guardAuditDir <br><small>guardAuditDir (interactive decision-journal directory)</small>` | **guardAuditDir (interactive decision-journal directory)** | guard-gate / symbol | guard-gate-guardauditpath, guard-gate-guardpolicydigest |
 |  | `guardAuditPath <br><small>guardAuditPath (dispatch-worker journal path)</small>` | **guardAuditPath (dispatch-worker journal path)** | guard-gate / symbol | guard-gate-guardauditdir, x2-guard-gate-auditpath |
 |  | `guardAuditPlan <br><small>guardAuditPlan (audit-journal enable decision)</small>` | **guardAuditPlan (audit-journal enable decision)** | plan / symbol | c729-maybe-record-guard-session-index |
-|  | `guardAuditPruned <br><small>guardAuditPruned (audit-prune tick result)</small>` | **guardAuditPruned (audit-prune tick result)** | guard-gate / symbol | cov5305-guard-audit, cov5305-guard-corpus |
+|  | `guardAuditPruned <br><small>guardAuditPruned (audit-prune tick result)</small>` | **guardAuditPruned (audit-prune tick result)** | guard-gate / symbol | cov5305-guard-audit |
 |  | `guard auth-crash recovery (guardMaybeRecoverAuthCrash)` | **guard auth-crash recovery (guardMaybeRecoverAuthCrash)** | guard-gate / concept | x-goal-guard-gate-guard-cap-park |
 |  | `guardbanner` | **guard-gate implementation surface for guardbanner** | guard-gate / symbol | insufficientaggregatehbm |
 |  | `guardBannerAnimate <br><small>guardBannerAnimate (animate banner mode)</small>` | **guardBannerAnimate (animate banner mode)** | guard-gate / config | guard-gate-guardbannerfull, guard-gate-printguardcompactbanner |
@@ -1732,7 +1732,6 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `guardcomplaint <br><small>guardcomplaint (agent appeal channel)</small>` | **guardcomplaint (agent appeal channel)** | guard-gate / subsystem | guard-kernel, x2-guard-gate-guardroute |
 |  | `guardContinueFlagForAgent <br><small>guardContinueFlagForAgent (safe resume-flag lookup)</small>` | **guardContinueFlagForAgent (safe resume-flag lookup)** | guard-gate / symbol | guard-gate-guardappendcontinueflag, guard-gate-guardrestartrelaunchcommand |
 |  | `guard-control registry` | **machineGuardRegistryDir (machine-level guard registry path)** | guard-gate / symbol | gate, guard-kernel |
-|  | `guardcorpus <br><small>guardcorpus (GUARD-SESSION dataset)</small>` | **guardcorpus (GUARD-SESSION dataset)** | guard-gate / subsystem | aggregateanswers, cov5303-session-meta, cov5305-guard-audit |
 |  | `guardCrashRestartDelay <br><small>guardCrashRestartDelay (bounded child relaunch backoff)</small>` | **guardCrashRestartDelay (bounded child relaunch backoff)** | guard-gate / symbol | cov5305-guard-restart-limit-status, guard-gate-guardrestartrelaunchcommand, issue9335-guard-gate-same-trace-relaunch-hop |
 |  | `guarddebugstatstosharedstderr <br><small>guarddebugstatstosharedstderr (guard-gate identifier)</small>` | **guarddebugstatstosharedstderr (guard-gate identifier)** | guard-gate / symbol | x2-guard-gate-guardrsi |
 |  | `guardDefaultAuditPath (decision-journal path) <br><small>guarddefaultauditpath</small>` | **guardDefaultAuditPath (decision-journal path)** | guard-gate / config | gate, guard-kernel |
@@ -3817,7 +3816,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `sessionlistfunc` | **session-runtime implementation surface for sessionlistfunc** | session-runtime / symbol | x2-session-runtime-sessionobs |
 |  | `SessionListResponse (wire) <br><small>sessionlistresponse</small>` | **SessionListResponse (wire)** | session-runtime / symbol | list-sessions, session-state |
 |  | `sessionLive <br><small>sessionLive (live-process session probe)</small>` | **sessionLive (live-process session probe)** | session-runtime / symbol | cov5303-session-meta, session, x-goal25b-session-runtime-sessiontime, x-session-runtime-sessionfile |
-|  | `SessionMeta <br><small>SessionMeta (out-of-band session identity)</small>` | **SessionMeta (out-of-band session identity)** | session-runtime / symbol | cov5303-session-impact, cov5303-session-live |
+|  | `session_meta <br><small>session_meta (Codex rollout session identity)</small>` | **session_meta (Codex rollout session identity)** | session-runtime / symbol | cov5303-session-impact, cov5303-session-live |
 |  | `SessionNode` | **SessionNode** | session-runtime / symbol | x-session-runtime-sessionaccount, x-session-runtime-sessionfleetmachine |
 |  | `sessionobs <br><small>sessionobs (observability scorer)</small>` | **sessionobs (observability scorer)** | session-runtime / subsystem | Scheduler, Session, x-issue1420-session-runtime-sessionrows |
 | **!** | `SessionObsDebt (ladder-rung debt) <br><small>sessionobsdebt</small>` | **per-scorecard *_debt integer** | score-debt / metric | disambiguation-debt, scorecard control pane, x2-score-debt-gitdailyhealthdebtkey, x2-session-runtime-sessionobsdebt |
@@ -4479,6 +4478,7 @@ The **not to be confused with** column is the union of the boundaries the concep
 |  | `WitnessFor (support-maturity prover) <br><small>witnessfor</small>` | **WitnessFor (support-maturity prover)** | witness-proof / symbol | Claim, WitnessResolver, covg4719-witness-proof-witnessdir, x-issue1420-witness-proof-witnessok |
 |  | `WitnessFunc (vdso witness adapter) <br><small>witnessfunc</small>` | **WitnessFunc (vdso witness adapter)** | witness-proof / symbol | defaultWitnessOf (vdso extractor), trajctl-witness-rung, world-state-witness |
 |  | `WitnessGaps (TUI counter) <br><small>witnessgaps</small>` | **WitnessGaps (TUI counter)** | witness-proof / metric | ReasonUnwitnessed (deny reason) |
+|  | `WitnessGateConfig <br><small>WitnessGateConfig (stop-gate witness mode and block budget)</small>` | **WitnessGateConfig (stop-gate witness mode and block budget)** | guard-gate / symbol | cov-debt250-witness-proof-evaluatewitness |
 |  | `WitnessGrade <br><small>WitnessGrade (issue-contract forgeability readout), witness_grade, witnessgrade</small>` | **WitnessGrade (issue-contract forgeability readout)** | witness-proof / symbol | covg4719-witness-proof-witnessgradestrong, witness-outcome, witness-resolver |
 |  | `WitnessGradeStrong <br><small>WitnessGradeStrong (strong witness grade value), witnessgradestrong</small>` | **WitnessGradeStrong (strong witness grade value)** | witness-proof / symbol | covg4719-witness-proof-strictwitness, covg4719-witness-proof-witnessgrade, x-witness-proof-witnessconfirmed |
 |  | `WitnessHandoffSchema <br><small>WitnessHandoffSchema (concept-bench hook-protocol witness)</small>` | **WitnessHandoffSchema (concept-bench hook-protocol witness)** | witness-proof / symbol | covg-witness-proof-witnessdosarbitrate, witness-proof-witnessdosverify, witness-proof-witnesssource |

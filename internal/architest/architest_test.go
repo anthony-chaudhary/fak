@@ -48,7 +48,6 @@ var tier = map[string]int{
 	"qwen38campaign":  3, // Qwen3.8 subagent fan-out multi-agent benchmark harness.
 	"factorymigrate":  1, // 5-Gate boundary and migration auditor across fak and fak-private.
 	"agentsched":      3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
-	"reflexagent":     3, // fast-dispatch micro-agent reflex loop (#11189).
 	"workspaceslot":   5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
 	"harnessbench":    5, // high-churn soak and thundering-herd saturation witness suite (#11183).
 	"effortbench":     5, // intra-model effort modulation and thinking budget benchmark (#11185).
@@ -122,7 +121,6 @@ var tier = map[string]int{
 	"benchscore":             2, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":              1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"turnavoid":              1, // pure offline whole-model-turn replay/accounting primitive; stdlib-only, folded by CLI.
-	"cavemansafety":          1, // pure deterministic blinded safety judge; stdlib-only, offline benchmark evidence.
 	"cavemanpairwise":        1, // pure blinded pairwise benchmark judge and fail-closed evidence accounting; stdlib-only, off the product path.
 	"harnessartifact":        2, // immutable, content-addressed artifacts around harnessresolve locks (#7230).
 	"harnessres":             1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
@@ -191,7 +189,6 @@ var tier = map[string]int{
 	"releasestatus":         2,                // pure read-only release-posture fold (Compute over injected Facts) porting tools/release_status.py; the broader sibling of releasestale. Stdlib-only, imports nothing internal, off the hot path.
 	"affectedtests":         1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
 	"knownbad":              1,                // pure fold core of the fleet-wide known-bad signature ledger (#2713, epic #2712): sha256 signature derivation + stateless Match/liveness projection over records; the impure shell (ledger I/O, clock, flags) lives in cmd/fak/knownbad.go. Stdlib-only, imports nothing internal, off the hot path.
-	"knownenv":              1,                // pure core of the fleet-wide known-ENVIRONMENT-failure registry (#2144, epic #2136): matches TOOL OUTPUT (error-text needle + exit code) -> a not-your-fault verdict and annotates it inline; the output-fingerprint twin of knownbad's tree match. Stdlib-only, imports nothing internal, off the hot path.
 	"blastlease":            3,                // shared lease projection/fixture reader for known-bad runtime reporting and the development blast estimator; imports blastradius(2)+leaseref(2).
 	"blastradius":           2,                // pure JOIN for blast-radius containment (#2712 W3): broken package -> dependents (affectedtests.Select) -> the leases/issues whose tree intersects (knownbad.TreesIntersect); no I/O, no clock. Imports affectedtests(1)+knownbad(1), off the hot path.
 	"commitsubject":         2,                // commit-subject coverage fold over hooks.CommitMsgVerdict + recent git subjects; imports hooks(1)+windowgate(1), off the hot path.
@@ -227,7 +224,6 @@ var tier = map[string]int{
 	"nativeperfartifact":    2,                // Native-performance evidence locator and digest mechanism; orchestration remains outside.
 	"nativeperfbackend":     2,                // Native-performance backend vocabulary and bounded contract mechanism.
 	"nativeperfcorrelation": 2,                // Opaque evidence-correlation mechanism.
-	"nativeperfobscontract": 2,                // Native-performance observation contract mechanism.
 	"nativeperfslo":         2,                // Native-performance SLO contract mechanism.
 	"nativeperfcoverage":    3,                // Composes backend and SLO contracts into deterministic coverage evidence.
 	"skillenv":              5,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
@@ -328,7 +324,6 @@ var tier = map[string]int{
 	"sessionledger":       2, // content-addressed, hash-chained session event log with O(1) fork (#2416); stdlib-only value store, imports no internal package, off the hot path.
 	"sessionread":         1, // the read/query/observe-op VOCABULARY spine (#4176/#4191): the closed set of shipped session READ seams, each carrying its capability/disclosure/evidence/refusal contract; the outbound twin of sessionctl(3), but pure — stdlib-only, imports nothing internal, off the hot path.
 	"wirescreen":          3, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default â€” the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
-	"advmodel":            3,
 	"modelroute":          2, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
 	"modelscore":          1, // durable raw model-capability evidence registry (#3038): unbounded native-unit benchmark/cost/context rows with provenance; a Profile keeps raw evidence separate from any tier policy. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"toon":                1, // general JSON<->TOON codec (#3065): lossless, type-preserving Encode/Decode + TabularEligibility, the round-trip generalization of memview's flat-subset encoder. Pure, stdlib-only, imports nothing internal, off the hot path.
@@ -406,7 +401,6 @@ var tier = map[string]int{
 	"l3region":            1, // L3 disaggregated-cache child B Stage-1 seam (#77, epic #504): an abi.RegionBackend over a fake in-memory page-keyed L3 store â€” a Ref.Digest resolves to a page-key set (mget/mset), region round-trips bit-exact + verify-don't-trust. Imports only abi+stdlib; NOT registered (library leaf), off the hot path.
 	"lifecycle":           1, // canonical shared run-state vocabulary; stdlib-only, imported by session/loopmgr to avoid token drift.
 	"memview":             3, // typed virtual-view contract over canonical raw memory cells (#904): MemoryViewRecord binds a derived view (snippet/summary/qa/fact) to its source by a digest + byte span, inherits the source taint, and is invalidated when the source digest changes; a materialized view carries an abi.Verdict and re-enters adjudication before any effect. Mechanism: imports only abi(0)+stdlib, defines a RawPage interface so recall.Page adapts without an upward import; off the hot path, registers nothing.
-	"fakrpc":              1, // disaggregated agent-RPC contract (#930): the pure Request envelope + the FAKRES nonce/sha frame (encode/decode/verify) a resident worker (cmd/fakrpcd) and pluggable text-only bridges build on. stdlib-only, imports nothing internal, off the hot path â€” the same frame tools/dgx_witness_run.sh emits.
 	"resume":              2, // deterministic resume-cache decision (#745/#774 family): prices RESUME_FULL/CUT/RESET against the projected cold/warm prompt-cache posture at the resume boundary and recommends a cut-by-default re-entry; pure Plan(Input) Report, imports only cacheprice(1) for the canonical cache multipliers, off the hot path. The computable answer to "resume a 250k session â€” what happens to the cache".
 	"vcacheobserve":       3,
 	"vcacheextract":       3, // Codex session token-telemetry sanitizer: reads a Codex/`codex exec --json` JSONL and keeps ONLY token counters (drops all prompt/tool/response content), bridging them into the observed-window snapshot + score. Pure decision layer: imports vcacheobserve(2)+vcachesnapshot(2)+vcachescore(2)+stdlib, off the hot path.
@@ -506,7 +500,6 @@ var tier = map[string]int{
 	"portabilitycontract": 1, // versioned managed-agent portability object/package/transaction contract; stdlib-only, imports nothing internal, off the hot path.
 	"portability":         1, // personal-continuity discovery/export/apply/switch/rollback leaf; stdlib-only, imports nothing internal, off the hot path.
 	"ociartifact":         2, // activation-neutral OCI collection transport and MCP metadata bridge
-	"portabilityswitch":   2, // context-switch transaction coordinator; composes lifecycle/processforest authorities, off the hot path.
 	"fastintent":          3, // joins tier-2 orchestration, provider-tier, and benchmark receipts into one portable replay; off the serving hot path.
 	"coordination":        1, // pure cross-layer agentic-compute plan contract; stdlib-only, fail-closed, off the serving hot path.
 	"orchestration":       2, // pure portable workflow-plan/profile resolution contract; stdlib-only, no provider adapters, off the hot path.
@@ -575,12 +568,9 @@ var tier = map[string]int{
 	"modelops":              4,
 	"modelaccept":           4,
 	"executionroute":        4,
-	"market":                4,
 	"steerpr":               1, // #5015: pure fold of stamped trunk commits into operator-legible PR units + attention bands; the band is a VIEW over dispatchtick's witness verdicts (supplied by the caller), which is what keeps this leaf stdlib-only and off the hot path.
 	"tokencache":            2, // #4330: persisted, git-common-dir-anchored backing store for clonescan's per-file token windows (content-addressed under the tokenizer version); imports only tier-1 siblings (clonescan for the window contract, windowgate to suppress its one `git rev-parse` spawn), does its own disk I/O, off the hot path.
-	"guardcorpus":           3, // guarded-session corpus fold consumes journal semantics and emits durable analysis records; off the request hot path.
 	"stripeload":            1, // #4298: pure chunk-planner + striping io.ReaderAt that fans one logical read across N byte-identical mirrors proportionally to measured bandwidth (the same fan-out later stripes {NVMe, peer-RAM, S3}); stdlib-only, callers own I/O policy and bandwidth measurement.
-	"lookahead":             3, // #5204 (epic #5202): pure witness-gated Lesson core — distills a fork-rollout's outcome into a Lesson whose FACT/RISK authority is bounded by the witness rung its evidence earned (W3 may assert FACT, W2 only RISK, W1/W0 refused LESSON_OVERCLAIMS); injected model seam (decline discipline), stdlib + trajctl(1), off the hot path.
 	"servicespec":           2, // #4749 (parent #4748): the portable fak.service.v1 desired-state + restart-semantics contract — ONE versioned schema (identity, command, readiness, restart/backoff, checkpoint/resume, deps, intentional-stop) with DESIRED vs OBSERVED state kept strictly disjoint; platform supervisors render from it, never call SCM/systemd/launchd/cron themselves. Pure, stdlib-only, imports nothing internal, off the hot path.
 	"servicelease":          2, // #4752 (parent #4748): lease/generation/incarnation fencing layer over fak.service.v1 — the four durable facts (Generation, Incarnation, Lease, FencingToken) plus the pure LocalRestartAllowed/RemoteReassignAllowed rules that keep two owners from ever being simultaneously valid across a partition. Imports only servicespec(1), off the hot path.
 	"serviceledger":         2, // #4753 (parent #4748): portable append-only observed-state event ledger (fak.service.events.v1) folding Windows Event/SCM, journald, launchd, and fak supervisor receipts into one schema correlated by servicespec identity + boot/incarnation/lease facts; exactly-once by (source, source_uid), secrets/private-host redaction before persist. Imports only servicespec(1), off the hot path.
@@ -614,7 +604,6 @@ var tier = map[string]int{
 	"kvquantquality":        1, // KV quantization quality budgets and witness parser; stdlib-only leaf.
 	"kvvectoreval":          1, // attention-preserving KV vector quantization evaluation; stdlib-only leaf.
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
-	"lightgapport":          1,
 	"kvquantmeta":           1,
 	"ggufinterop":           2, // GGUF metadata adapter over ggufload into the neutral quantization contract (#6231).
 	"llamacppinterop":       2, // versioned external llama.cpp delegation adapter over quantization metadata (#6232).
@@ -707,7 +696,6 @@ var tier = map[string]int{
 	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
 	"agentqueue":                 2, // bounded agent desired-state planner and crash-safe store (#8875, #8876); composes flock for serialized durable state updates.
 	"supervisionpolicy":          2, // typed fault-domain, bounded restart, and epoch-fenced adoption policy (#8909, #9053); composes flock for cross-process child takeover.
-	"projectionspine":            2, // disposable projection restart and session reattach spine (#8912); composes supervisionpolicy restart budgets and fault domains.
 	"hostdiag":                   3,
 	"shellprov":                  2, // privacy-safe receipt store for fak-owned shell launch identity (#9086); composes flock for serialized broker receipt updates.
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
@@ -733,8 +721,6 @@ var tier = map[string]int{
 	"localadmission":             1, // stdlib-only local runtime admission state primitive.
 	"localappcontract":           1, // stdlib-only local application protocol contract.
 	"localappmetrics":            1, // stdlib-only local application metrics fold.
-	"localappux":                 1, // stdlib-only local application UX state renderer.
-	"opensweharder":              1, // stdlib-only OpenSWE-hardening evidence contract.
 	"perfrsiscore":               2, // deterministic performance-RSI scorecard over the shared scorecard kernel.
 	"providerjobaccounting":      1, // stdlib-only provider-job accounting contract.
 	"shelltoken":                 1, // stdlib-only shell-token parsing primitive.
@@ -767,7 +753,6 @@ var tier = map[string]int{
 	"marketplace":                1,
 	"mtptune":                    1,
 	"kimik3page":                 1,
-	"breathgate":                 1,
 	"kv":                         1,
 	"mcpbroker":                  1,
 	"issueorchestrator":          3,

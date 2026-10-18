@@ -797,10 +797,9 @@
       "family": "guard-gate",
       "kind": "subsystem",
       "definition": "cmd/dispatchworker/guard.go guardAuditPath + guard-audit.jsonl: the per-lane guard AUDIT journal recording each guarded run's admitted/refused decisions for later replay and complaint attach.",
-      "distinction": "The guard decision AUDIT LOG - NOT guardAuditPruned (a pruning tick over it) and NOT guardcorpus (the folded GUARD-SESSION dataset built from many sessions).",
+      "distinction": "The guard decision AUDIT LOG - NOT guardAuditPruned (a pruning tick over it).",
       "distinct_from": [
-        "cov5305-guard-audit-pruned",
-        "cov5305-guard-corpus"
+        "cov5305-guard-audit-pruned"
       ],
       "aliases": [],
       "grounding": "guard_audit",
@@ -816,10 +815,9 @@
       "family": "guard-gate",
       "kind": "symbol",
       "definition": "cmd/dispatchworker/main.go guardAuditPruned: the result of pruneGuardAuditTick - how many stale guard-audit entries were pruned on a dispatch tick to bound the journal.",
-      "distinction": "The PRUNE-tick outcome over the audit journal - NOT guard_audit (the journal itself) and NOT guardcorpus (the analysis dataset).",
+      "distinction": "The PRUNE-tick outcome over the audit journal - NOT guard_audit (the journal itself).",
       "distinct_from": [
-        "cov5305-guard-audit",
-        "cov5305-guard-corpus"
+        "cov5305-guard-audit"
       ],
       "aliases": [],
       "grounding": "guardAuditPruned",
@@ -830,19 +828,17 @@
       "gaps": []
     },
     {
-      "id": "cov5305-guard-corpus",
-      "canonical": "guardcorpus (GUARD-SESSION dataset)",
+      "id": "cov5305-witness-gate-config",
+      "canonical": "WitnessGateConfig (stop-gate witness mode and block budget)",
       "family": "guard-gate",
-      "kind": "subsystem",
-      "definition": "internal/guardcorpus: the folded GUARD-SESSION dataset - many guarded sessions' decisions assembled into one corpus for guard-accuracy scoring and RSI analysis.",
-      "distinction": "The folded multi-session DATASET - NOT guard_audit (one lane's raw journal) and NOT SessionMeta (a single session's identity within it).",
+      "kind": "symbol",
+      "definition": "stopgate.WitnessGateConfig (internal/stopgate/witness.go:9) is the witnessed-completion gate's setting: a Mode (off, shadow or enforce; default shadow) and a Max block budget (default 3). The guard Stop hook builds one from its flags (cmd/fak/guard_witnessed_done.go:163), the agent loop takes one through WithWitnessGateConfig (internal/agent/loop_session.go:144), and EvaluateBoundary raises shadow to enforce when the loop's FinalGate is unsatisfied (internal/stopgate/boundary.go:218).",
+      "distinction": "Configuration only: it decides nothing. Unlike `cov-debt250-witness-proof-evaluatewitness`, which turns a claim into an allow, continue or stand-down action, it only sets how strict that verdict is and how many blocks it may spend.",
       "distinct_from": [
-        "cov5305-guard-audit",
-        "cov5303-session-meta",
-        "aggregateanswers"
+        "cov-debt250-witness-proof-evaluatewitness"
       ],
       "aliases": [],
-      "grounding": "guardcorpus",
+      "grounding": "WitnessGateConfig",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

@@ -12,7 +12,7 @@
 //   - per-channel FIFO through internal/slackwire (the ONE transport), pacing ≤1 msg/s
 //     per channel — chat.postMessage's special tier, verified in the design note
 //     (docs/notes/SLACK-CONTROL-FOUNDATION-2026-07-02.md);
-//   - nonce idempotency as SPOOL STATE (the fakrpc #930 discipline): a nonce in a
+//   - nonce idempotency as SPOOL STATE (the #930 text-bridge discipline): a nonce in a
 //     terminal state is never re-sent, and the nonce rides in message metadata
 //     (slackwire.PostMessageIdem) so the one at-least-once window — a crash between
 //     post and record — is closed by probing recent History for the nonce before any

@@ -15,35 +15,17 @@ import (
 // links it. Such an import runs nothing; it only makes reachability readers count the
 // package as wired.
 //
-// The cmd/fak/registered_leaves.go entries are a burn-down list, not a reviewed keep.
-// Their "fak version modules lanes" reason never held: internal/modver.Snapshot scans the
-// git tree, so a runtime proof of the form `fak version modules` -> "internal/<pkg>"
-// passes whether or not the package is linked. Each entry leaves this list when its
-// package gains a production caller (wire), loses the blank import because its consumer
-// is a CI test (unlink), or is deleted (reap); none may be added.
+// cmd/fak carries no facade blank imports and none may be added (#12873): a
+// `fak version modules` -> "internal/<pkg>" runtime proof passes whether or not the
+// package is linked, so it never justifies one. Wire a production caller instead.
 //
 // Derivation contract (issue #12873): this list must stay in lockstep with the tree.
 // A leaf that grows a real init() registration graduates off this list automatically by
 // the test below re-deriving self-registration from the AST; a NEW leaf that blank-imports
 // without init() fails the build until it is listed here for a stated reason.
 var facadeOffList = map[string]string{
-	"advmodel":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"breathgate":            "reachability-roster entry for fak version modules lanes; no self-registration",
-	"cavemansafety":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fakrpc":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"guardcorpus":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"knownenv":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"lightgapport":          "reachability-roster entry for fak version modules lanes; no self-registration",
-	"localappux":            "reachability-roster entry for fak version modules lanes; no self-registration",
-	"lookahead":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"market":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfobscontract": "reachability-roster entry for fak version modules lanes; no self-registration",
-	"opensweharder":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"pkg/harnesssidecar":    "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
-	"pkg/managedharness":    "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
-	"portabilityswitch":     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"projectionspine":       "reachability-roster entry for fak version modules lanes; no self-registration",
-	"reflexagent":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"pkg/harnesssidecar": "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
+	"pkg/managedharness": "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
 
 	// fak-private#2609: internal/registrations is also a shipped registration surface.
 	// These imports are deliberate reachability-roster links and have no init side effects.

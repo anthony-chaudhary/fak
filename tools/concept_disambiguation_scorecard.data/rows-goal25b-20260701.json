@@ -2428,9 +2428,8 @@
       "family": "guard-gate",
       "kind": "symbol",
       "definition": "Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading.",
-      "distinction": "aggregateAnswers is the benchmark answer payload; guard-corpus is a policy-test corpus and grade-candidates are scorecard candidates, not expected benchmark facts.",
+      "distinction": "aggregateAnswers is the benchmark answer payload; grade-candidates are scorecard candidates, not expected benchmark facts.",
       "distinct_from": [
-        "cov5305-guard-corpus",
         "c729-grade-candidates"
       ],
       "aliases": [],

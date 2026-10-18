@@ -438,7 +438,7 @@ The native-performance route is another evidence pipeline, not one giant metric 
 
 | Stage | Owning contract and relationship |
 | --- | --- |
-| Define and collect | `internal/nativeperfobscontract` freezes the Qwen3.8, `fak-native` signal set and its cardinality/freshness rules; `internal/nativeperfbackend` defines bounded per-backend Prometheus snapshots where unavailable values remain absent rather than zero. |
+| Define and collect | `internal/nativeperfbackend` defines bounded per-backend Prometheus snapshots where unavailable values remain absent rather than zero; the frozen `fak_native_*` catalog is retired and none of its names is exported. |
 | Correlate and expose evidence | `internal/nativeperfcorrelation` replaces high-cardinality run, request, trace, and receipt IDs with a scrubbed bounded key; `internal/nativeperfartifact` maps that key to at most five public-safe, expiring receipt/profile/trace/report links. |
 | Decide operational health | `internal/nativeperfslo` compares only matched `module@rev` + benchmark + Qwen3.8 model + backend envelopes and preserves `missing_evidence`; `internal/nativeperfcoverage` proves dashboards, contracts, PromQL, fixtures, and live receipts agree. |
 | Select and learn | `internal/sweepcert` validates extrema, thresholds, censored edges, constraints, and point provenance across a declared sweep. `fak performance-rsi-scorecard` feeds versioned evidence to `internal/perfrsiscore`, which scores the complete improvement loop, names debt and the dominant bottleneck, and can compare a prior report; it does not claim raw model speed. |
@@ -453,7 +453,7 @@ cmp /tmp/fak-learning-candidates.json docs/_witnesses/issue-9839/candidates.json
 go run ./cmd/fak runtime-capabilities
 go run ./cmd/fak up --help
 go run ./cmd/fak performance-rsi-scorecard --input internal/perfrsiscore/testdata/complete.json --json > /tmp/fak-learning-performance-rsi.json
-go test ./internal/agentic ./internal/dockerprocess ./internal/docsearch ./internal/harnessserve ./internal/learningmesh ./internal/nativeperfartifact ./internal/nativeperfbackend ./internal/nativeperfcorrelation ./internal/nativeperfcoverage ./internal/nativeperfobscontract ./internal/nativeperfslo ./internal/perfrsiscore ./internal/runtimecap ./internal/selfupdate ./internal/sweepcert -count=1
+go test ./internal/agentic ./internal/dockerprocess ./internal/docsearch ./internal/harnessserve ./internal/learningmesh ./internal/nativeperfartifact ./internal/nativeperfbackend ./internal/nativeperfcorrelation ./internal/nativeperfcoverage ./internal/nativeperfslo ./internal/perfrsiscore ./internal/runtimecap ./internal/selfupdate ./internal/sweepcert -count=1
 ```
 
 **Expected result:** The agentic plan reports `read_only=true` and `offline=true`; an

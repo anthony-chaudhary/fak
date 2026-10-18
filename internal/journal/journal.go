@@ -599,8 +599,8 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 // row used to drop, leaving an audit unable to say WHICH glob/arg tripped a deny.
 //
 // The claim is bounded and scrubbed HERE (boundWitness) because the journal is
-// the SOLE scrubber on this wire: internal/guardcorpus copies row.Witness
-// verbatim into the exported dataset and is documented as never re-deriving
+// the SOLE scrubber on this wire: `fak audit dataset` (cmd/fak/audit_dataset.go)
+// copies row.Witness verbatim into the exported dataset and never re-derives
 // redaction. Both sources are untrusted for this purpose — Meta is a string map
 // any rung can write, and even the typed Payload.Claim is concatenated from
 // call-derived bytes by several live rungs (see boundWitness).
@@ -622,8 +622,8 @@ func witnessOf(v *abi.Verdict) string {
 
 // denyRuleOf extracts the refusing rung's closed-vocabulary rule id from the
 // verdict, or "" when the rung stamped none. The journal is the SOLE scrubber on
-// this wire (internal/guardcorpus copies these fields verbatim into the exported
-// dataset), so it never trusts Meta — a string map any rung, and in principle a
+// this wire (exports such as `fak audit dataset` copy row fields verbatim into
+// the dataset), so it never trusts Meta — a string map any rung, and in principle a
 // model-influenced one, can write. abi.DenyRuleID is a set-membership test over a
 // compile-time literal vocabulary: a non-member is dropped whole rather than
 // scrubbed down into the set, so this field cannot carry an arg value, a path, a
@@ -961,10 +961,9 @@ const (
 	redactedValue = "[redacted]"
 )
 
-// boundWitness makes the Witness field satisfy the contract internal/guardcorpus
-// states for it. That package copies row.Witness VERBATIM into the exported
-// GUARD-SESSION dataset under a comment asserting the journal "already bounded
-// and scrubbed" it — an assertion that was true of ArgsLabel and false of
+// boundWitness makes the Witness field safe to export: `fak audit dataset` copies
+// row.Witness VERBATIM into its exported dataset, trusting that the journal
+// already bounded and scrubbed it — which was true of ArgsLabel and false of
 // Witness, which reached the wire raw.
 //
 // The field is NOT rung-authored by construction, which is why a bound is needed

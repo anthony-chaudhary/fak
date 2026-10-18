@@ -113,7 +113,7 @@ Curated to the load-bearing innovations. The full leaf roster is in
 | Resident Q4_K/Q6_K/Q5_K + AWQ device GEMM | activation-aware + k-quant device kernels; kills mixed-quant Q8 fallback | `model`, `metalgemm` | MIXED (per-backend; some Apple/CUDA-gated) |
 | GGUF loader + tokenizer + grammar | load any GGUF; tokenizer-aware constrained decoding seam | `ggufload`, `tokenizer`, `grammar` | MIXED (schema→token compiler `[STUB]`) |
 | Multi-GPU tensor parallelism seam | Megatron column/row shard + 4-collective HAL; bit-exact vs single-device on CPU | `model` (dist) | MIXED (real device communicator hardware-gated) |
-| Run-by-name model registry | `fak run ornith:9b` friendly-name → model-ref | `modelreg`, `polymodel`, `advmodel` | SHIPPED |
+| Run-by-name model registry | `fak run ornith:9b` friendly-name → model-ref | `modelreg`, `polymodel` | SHIPPED |
 
 ### D. Serving / engine / routing / scheduling
 

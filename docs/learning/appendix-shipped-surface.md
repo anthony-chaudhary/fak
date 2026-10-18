@@ -240,7 +240,6 @@ package name. One honest line each.
 | `internal/executionroute` | Composes harness, model, and session routing into one inspectable execution decision. |
 | `internal/guardrotate` | The pure decision core for `fak guard`'s cooldown-aware seat selection: without it a bare `fak guard` launches against an account the launcher just watched bounce off its own cap. |
 | `internal/guardsessions` | The local, queryable index of `fak guard` sessions — one appended row per launch (handle, trace id, wrapped agent, pid, cwd, journal path, start time), and prefix resolution to the one session it names. |
-| `internal/lookahead` | The witness-gated Lesson core: a fork-rollout's outcome distilled into a lesson whose assertive authority is bounded by the witness rung its evidence earned — a self-report rollout may assert nothing at all. |
 | `internal/looporphan` | The pure duplicate-loop-supervisor reaper: folds a process census of loop and drainer supervisors into a closed keep/reap plan that never strands live work. |
 | `internal/microagent` | Hosts many agent loops in one process: a worker pool sharing one in-process kernel gateway. |
 | `internal/resumebackoff` | The pure resume-storm containment fold. |
@@ -289,10 +288,8 @@ package name. One honest line each.
 | `internal/guardaccuracy` | Folds a labeled command corpus through the real guard reversibility classifier and scores the boundary itself: the false-positive rate (benign calls escalated) and the false-negative rate (dangerous calls let through). |
 | `internal/guardaudit` | Bounds repo-local guard audit journals only after a verified logvault mirror proves durability. |
 | `internal/guardcompile` | Compiles one authoring-time model extraction into a review-only policy patch (data, not runtime enforcement). |
-| `internal/guardcorpus` | Folds a guarded session's decision journal into the durable, policy-attributable guard-session dataset: one record per session plus replayable, redacted example rows that survive the journal reaper. |
 | `internal/guardvars` | The canonical wire shapes shared by the `/debug/vars` producer (`internal/gateway`) and the `fak info` consumer, defined once so a new producer field can no longer drop silently on the floor. |
-| `internal/knownenv` | The fleet-wide known-ENVIRONMENT-failure registry: an error-text needle and/or exit code mapped to a not-your-fault verdict. It matches by tool OUTPUT where `knownbad` matches by TREE. |
-| `internal/market` | Validates discoverable extension descriptors without executing extension code. |
+| `internal/marketplace` | Validates discoverable extension descriptors without executing extension code. |
 | `internal/planresolve` | Oracle-driven plan-content adjudicator. |
 | `internal/reachdelta` | Categorizes what a policy change actually made REACHABLE: a newly permitted tool or tool prefix, a newly permitted egress host, a widened default posture, a removed explicit deny, a lost self-modify protection. |
 | `internal/rsl` | Git Reference State Log: a forge-independent, append-only, hash-chained record of trunk ref transitions — the offline no-force-push proof. |
@@ -521,7 +518,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/httptrust` | Resolves one declared corporate CA bundle source for outbound HTTP clients. |
 | `internal/kvquantmeta` | Defines provider-neutral KV-cache quantization descriptors and compatibility rules. |
 | `internal/leasequeue` | Queues region-admission waiters with explicit ownership instead of busy retry. |
-| `internal/lightgapport` | Audits claimed portability swap points against committed CI witnesses. |
 | `internal/managedocs` | Ratchets the canonical managed-agent documentation against its shipped surfaces. |
 | `internal/mixedprecision` | Defines deterministic layerwise mixed-precision policy and accounting contracts. |
 | `internal/modelinventory` | Normalizes model artifacts and runtime observations into one inventory. |
@@ -530,7 +526,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/modelsetreceipt` | Independently attests what harness model set was resolved and launched. |
 | `internal/modelsetresolve` | Deterministically binds harness roles to compatible model candidates. |
 | `internal/ociartifact` | Implements the activation-neutral OCI 1.1 collection profile. |
-| `internal/portabilityswitch` | Coordinates context changes with lifecycle state during a portability switch. |
 | `internal/projectassets` | Resolves canonical project assets and proves generated copies remain in parity. |
 | `internal/quantdetect` | Performs bounded, weight-free detection of quantization formats. |
 | `internal/quantprov` | Carries neutral provenance for quantized artifacts and their transformations. |

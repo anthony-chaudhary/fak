@@ -145,8 +145,7 @@ The gateway fronts any OpenAI-compatible upstream (a local engine or a cloud pro
 | Capacity engine adapter (PlanPlacement demote/spill executor) | Shipped | `internal/engine.CapacityAdapter.Execute` turns a `PlanPlacement` demote/spill into a real stage-to-the-colder-tier + eviction from the live KV cache, fail-safe (stage before evict) and recorded as a typed cache event (#708). |
 | metrics-service scrape / KV-residency / token-per-watt | Simulated | Labeled SIMULATED telemetry; there is no watt source on the build box. |
 | Zero-copy KV co-residence with an external engine | Stub | The `Ref`/`Resolver`/`RegionBackend` seam is frozen so it is a backend swap later, but the shipped path is copy-CAS. The in-kernel model owns its own KV cache. |
-| Advisory adjudication model (harvest-corpus consumer) | Shipped | A small fail-closed classifier (`internal/advmodel`, #580) trained over the floor-labeled `internal/harvest` corpus; it can only corroborate a deny, never weaken the floor. Held-out P/R/F1 vs the stock reference are committed in the artifact meta. |
-| Fine-tuned syscall/adjudication LLM + AsyncLM | Stub | The advisory model above is a logistic-regression bag-of-tokens model, NOT a fine-tune of the fused SmolLM2 forward pass; the tuned LLM head (GPU + weights + hours) and AsyncLM's interrupt behavior remain unbuilt. |
+| Fine-tuned syscall/adjudication LLM + AsyncLM | Stub | No fine-tune of the fused SmolLM2 forward pass exists; the tuned LLM head (GPU + weights + hours) and AsyncLM's interrupt behavior remain unbuilt. |
 
 ## Turn-tax and policy-replay benchmarks
 

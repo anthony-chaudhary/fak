@@ -232,7 +232,6 @@ func TestNoBrittleSleepsInAuditedPackages(t *testing.T) {
 		"internal/agentopt",
 		"internal/metalgemm",
 		"internal/power",
-		"internal/breathgate",
 		"internal/dropin",
 		"internal/fleetbus",
 		"internal/configguide",

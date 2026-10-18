@@ -73,7 +73,7 @@ pilot_development_branch = "dev"
 [lanes]
 concurrent = [
   "adjudicator", "agent", "agentdojo", "architest", "launchguard", "bench", "blob", "canon", "compute",
-  "cachemeta", "ociartifact", "fakpack", "portabilityswitch",
+  "cachemeta", "ociartifact", "fakpack",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "studymonitor", "studyreceipt", "turnbench",
@@ -138,21 +138,18 @@ concurrent = [
   "modelops",
   "modelaccept",
   "executionroute",
-  "market",
   "marketplace",
   "tokenprofile",
   "generationctl",
   "mtptune",
   "superstream",
   "quantprov",
-  "lightgapport",
   "kvquantmeta",
   "quantdetect",
   "codexresume",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
-  "advmodel",
   "modelroute",
   "capabilitymatrix",
   # #5619: internal/gitbroker, the resident git query broker. Declared BEFORE the package
@@ -192,7 +189,6 @@ concurrent = [
   # had NO declared lane -> it folded into `global`, so a `(fak loopmgr)` ship-stamp could not
   # bind and the arbiter could not detect a same-tree collision. Declared per #763's fence.
   "loopmgr",
-  "fakrpc",
   # reconciled 2026-06-26 (#825): internal/leaseref is a real committed leaf (the
   # cross-machine lease VISIBILITY substrate, refs/fak/locks/*) that landed by hand in
   # f0cf3f6 with NO declared lane -> a `(fak leaseref)` ship-stamp bound to a phantom unit
@@ -339,14 +335,14 @@ concurrent = [
   "generalizationdebt",
   "debtlane",
   "gatewayusageledger", "perfledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "goalsync", "godsplitplan",
-  "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
+  "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
   "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency", "papers",
   "intlist", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
-  "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region",
-  "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
+  "knobcensus", "knownbad", "kvbudget", "l3region",
+  "lifecycle", "linkstate", "loaddebounce", "logvault", "loopfleet", "loopmap",
   "localbench", "looptrigger",
   "looporphan", "looprecover", "loopscore", "macbench", "maputil", "mathx",
   "mcpfootprint", "memgate", "memorycotravel", "memoryread", "memorystability", "memvaluescore",
@@ -439,7 +435,7 @@ concurrent = [
   "agentdescriptor", "agentic", "agentquery", "agentqueue", "archfitness",
   "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
   "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
-  "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
+  "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
   "codexmcpdiag", "commitlifecycle", "committedbuildwitness", "committedtree",
   "computetrace", "computetune", "configguide", "configsurface", "coordination", "cubicquanteval",
   "cudaarch", "deliverystages", "demoassert", "dependencyquarantine", "devcheckpoint", "devcmd",
@@ -455,12 +451,12 @@ concurrent = [
   "issuepolicy", "kquantbits", "kvint2eval", "kvquantquality", "kvvectoreval", "lanebeat",
   "launchshim", "learningmesh", "learningobservation", "lifecycleadapter", "lightgapscore", "lightroteval",
   "linefmt", "llamacppinterop", "localadmission", "localappcert", "localappcontract", "localapphelper",
-  "localappmetrics", "localappux", "managedinventory", "markerblock",
+  "localappmetrics", "managedinventory", "markerblock",
   "memoryindex", "modelloadplan", "nativefirst",
-  "nativeperf", "nativeperfartifact", "nativeperfbackend", "nativeperfcorrelation", "nativeperfcoverage", "nativeperfobscontract",
-  "nativeperfslo", "numbermap", "opensweharder", "orchestration", "orientation",
+  "nativeperf", "nativeperfartifact", "nativeperfbackend", "nativeperfcorrelation", "nativeperfcoverage",
+  "nativeperfslo", "numbermap", "orchestration", "orientation",
   "pagespublish", "parentdir", "perfrsiscore", "portability", "portabilitycontract", "portabilitylab",
-  "privacy", "processalive", "processforest", "processstart", "proctest", "projectionspine",
+  "privacy", "processalive", "processforest", "processstart", "proctest",
   "providercost", "providerjobaccounting", "quantbench",
   "quantmatrix", "quantmeta", "quantwatch",
   "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp",
@@ -552,11 +548,9 @@ concurrent = [
   "pendingadmission",
   "worktreecheck",
   "benchingest",
-  "breathgate",
   "cluster",
   "customizationindex",
   "readmenext",
-  "reflexagent",
   "vulkanregistry",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
@@ -583,7 +577,6 @@ autopick = [
   "headroom",
   "ctxresidency",
   "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
-  "advmodel",
   "modelroute",
   "gitbroker", # #5619: internal/gitbroker leaf (the resident git query broker), see [lanes].concurrent note
   "modelreg", # #1029: internal/modelreg leaf (the run-by-name model registry), see [lanes].concurrent note
@@ -604,7 +597,6 @@ autopick = [
   "promptmmu",
   "session", # #756: internal/session leaf, see [lanes].concurrent note
   "loopmgr", # #763: internal/loopmgr leaf, see [lanes].concurrent note
-  "fakrpc",
   "vcacheobserve",
   "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
@@ -681,7 +673,6 @@ autopick = [
   "modelops",
   "modelaccept",
   "executionroute",
-  "market",
   "clonescan", # #5059: internal/clonescan leaf -- see [lanes].concurrent note.
   "egresslist", # #5130: internal/egresslist leaf -- see [lanes].concurrent note.
   "egressrefresh", # #5130: internal/egressrefresh leaf -- see [lanes].concurrent note.
@@ -690,7 +681,6 @@ autopick = [
   "streamrules",
   "generationctl",
   "quantprov",
-  "lightgapport",
   "kvquantmeta",
   "quantdetect",
   "codexresume",
@@ -764,7 +754,6 @@ architest = ["internal/architest/**"]
 ociartifact = ["internal/ociartifact/**"]
 fakpack = ["internal/fakpack/**"]
 allinone = ["internal/allinone/**"]
-portabilityswitch = ["internal/portabilityswitch/**"]
 windowgate = ["internal/windowgate/**"]
 worktype = ["internal/worktype/**"]
 choicetriage = ["internal/choicetriage/**"]
@@ -931,7 +920,6 @@ hfhub = ["internal/hfhub/**"]
 memq = ["internal/memq/**"]
 polymodel = ["internal/polymodel/**"]
 storedrv = ["internal/storedrv/**"]
-advmodel = ["internal/advmodel/**"]
 modelroute = ["internal/modelroute/**"]
 capabilitymatrix = ["internal/capabilitymatrix/**"]
 # reconciled 2026-06-28 (dos lint --strict LANE_WITHOUT_TREE): #1029 added the modelreg lane to
@@ -959,7 +947,6 @@ agenttopo = ["internal/agenttopo/**"]
 promptmmu = ["internal/promptmmu/**"]
 session = ["internal/session/**"] # #756 (Pillar 2 / #748): per-session DRIVE state + cost ring
 loopmgr = ["internal/loopmgr/**"] # #763 (#749 `fak cron` / #748): loop ledger + governor + recurring-job schedule
-fakrpc = ["internal/fakrpc/**"]
 vcacheobserve = ["internal/vcacheobserve/**"]
 leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)
 dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
@@ -1032,11 +1019,9 @@ planresolve = ["internal/planresolve/**"]
 modelops = ["internal/modelops/**"]
 modelaccept = ["internal/modelaccept/**"]
 executionroute = ["internal/executionroute/**"]
-market = ["internal/market/**"]
 marketplace = ["internal/marketplace/**"]
 mtptune = ["internal/mtptune/**", "cmd/tunemtp/**"]
 superstream = ["internal/superstream/**"]
-reflexagent = ["internal/reflexagent/**"]
 clonescan   = ["internal/clonescan/**"] # #5059: route the #4325/#4330 dup-cache cluster to a real internal/clonescan tree + runnable `go test ./internal/clonescan` gate, off the phantom ci/internal/ci lane.
 egresslist = ["internal/egresslist/**"] # #5130: bundled egress filter-list classifier (#4978); cmd/fak shims stay in the `cmd` lane
 egressrefresh = ["internal/egressrefresh/**"] # #5130: upstream filter-list refresh engine (#4978), maintenance twin of egresslist
@@ -1080,7 +1065,6 @@ binstamp = ["internal/binstamp/**"]
 blastradius = ["internal/blastradius/**"]
 blockerpost = ["internal/blockerpost/**"]
 brittleness = ["internal/brittleness/**"]
-breathgate = ["internal/breathgate/**"]
 browseraction = ["internal/browseraction/**"]
 buildwitness = ["internal/buildwitness/**"]
 cacheobs = ["internal/cacheobs/**"]
@@ -1181,7 +1165,6 @@ grafanapost = ["internal/grafanapost/**"]
 growthgate = ["internal/growthgate/**"]
 guard = ["internal/guard/**"]
 guardaccuracy = ["internal/guardaccuracy/**"]
-guardcorpus = ["internal/guardcorpus/**"]
 guardrotate = ["internal/guardrotate/**"]
 guardroute = ["internal/guardroute/**"]
 guardrsi = ["internal/guardrsi/**"]
@@ -1221,7 +1204,6 @@ jsonlledger = ["internal/jsonlledger/**"]
 kimik3page = ["internal/kimik3page/**"]
 knobcensus = ["internal/knobcensus/**"]
 knownbad = ["internal/knownbad/**"]
-knownenv = ["internal/knownenv/**"]
 kv = ["internal/kv/**"]
 kvbudget = ["internal/kvbudget/**"]
 l3region = ["internal/l3region/**"]
@@ -1229,7 +1211,6 @@ lifecycle = ["internal/lifecycle/**"]
 linkstate = ["internal/linkstate/**"]
 loaddebounce = ["internal/loaddebounce/**"]
 localbench = ["internal/localbench/**"]
-lookahead = ["internal/lookahead/**"]
 loopfleet = ["internal/loopfleet/**"]
 loopmap = ["internal/loopmap/**"]
 looporphan = ["internal/looporphan/**"]
@@ -1403,7 +1384,6 @@ archreport = ["internal/archreport/**"]
 archcheck = ["internal/archcheck/**"]
 generationctl = ["internal/generationctl/**"]
 quantprov = ["internal/quantprov/**"]
-lightgapport = ["internal/lightgapport/**"]
 kvquantmeta = ["internal/kvquantmeta/**"]
 quantdetect = ["internal/quantdetect/**"]
 codexresume = ["internal/codexresume/**"]
@@ -1459,7 +1439,6 @@ buildoverlay = ["internal/buildoverlay/**"]
 categorybaseline = ["internal/categorybaseline/**"]
 causalreceipt = ["internal/causalreceipt/**"]
 cavemanpairwise = ["internal/cavemanpairwise/**"]
-cavemansafety = ["internal/cavemansafety/**"]
 childprocess = ["internal/childprocess/**"]
 citeverify = ["internal/citeverify/**"]
 cloudhandoff = ["internal/cloudhandoff/**"]
@@ -1553,7 +1532,6 @@ localappcert = ["internal/localappcert/**"]
 localappcontract = ["internal/localappcontract/**"]
 localapphelper = ["internal/localapphelper/**"]
 localappmetrics = ["internal/localappmetrics/**"]
-localappux = ["internal/localappux/**"]
 managedinventory = ["internal/managedinventory/**"]
 markerblock = ["internal/markerblock/**"]
 memoryindex = ["internal/memoryindex/**"]
@@ -1564,10 +1542,8 @@ nativeperfartifact = ["internal/nativeperfartifact/**"]
 nativeperfbackend = ["internal/nativeperfbackend/**"]
 nativeperfcorrelation = ["internal/nativeperfcorrelation/**"]
 nativeperfcoverage = ["internal/nativeperfcoverage/**"]
-nativeperfobscontract = ["internal/nativeperfobscontract/**"]
 nativeperfslo = ["internal/nativeperfslo/**"]
 numbermap = ["internal/numbermap/**"]
-opensweharder = ["internal/opensweharder/**"]
 orchestration = ["internal/orchestration/**"]
 orientation = ["internal/orientation/**"]
 pagespublish = ["internal/pagespublish/**"]
@@ -1581,7 +1557,6 @@ processalive = ["internal/processalive/**"]
 processforest = ["internal/processforest/**"]
 processstart = ["internal/processstart/**"]
 proctest = ["internal/proctest/**"]
-projectionspine = ["internal/projectionspine/**"]
 providercost = ["internal/providercost/**"]
 providerjobaccounting = ["internal/providerjobaccounting/**"]
 quantbench = ["internal/quantbench/**"]
@@ -3019,8 +2994,8 @@ see_also = ["internal/gateway/a2a_pushnotify.go", "internal/gateway/a2a.go", "do
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "A distilled look-ahead Lesson asserted more authority than the witness rung its rollout evidence earned -- a FACT from below-W3 (structured-activity or weaker) evidence, or ANY lesson from a W1 (judge) / W0 (self-report) rollout. The kernel does not believe the supervisor's foresight either: opinion and self-report never masquerade as a witnessed fact."
-fix      = "Emit the lesson at the authority its evidence proves: a W2 rollout may flag a RISK (not a FACT); a W1/W0 rollout may assert nothing (fold it as a hypothesis, not a steer). Earn W3 (a witnessed commit / green suite / benchmark row) before asserting a FACT. Floor: internal/lookahead DistillLesson."
-see_also = ["internal/lookahead/lookahead.go", "internal/trajctl/trajctl.go", "docs/notes/CONCEPT-LOOKAHEAD-RESET-2026-07-17.md"]
+fix      = "Emit the lesson at the authority its evidence proves: a W2 rollout may flag a RISK (not a FACT); a W1/W0 rollout may assert nothing (fold it as a hypothesis, not a steer). Earn W3 (a witnessed commit / green suite / benchmark row) before asserting a FACT. Floor: internal/trajctl StampAuthority."
+see_also = ["internal/trajctl/authority.go", "internal/trajctl/trajctl.go", "docs/notes/CONCEPT-LOOKAHEAD-RESET-2026-07-17.md"]
 
 # The read-mostly overlay fence (#5032, epic #5015): the steer/prplan overlay
 # (internal/steerpr + `fak steer prs` + `fak release prplan`) rebuilds the operator's unit

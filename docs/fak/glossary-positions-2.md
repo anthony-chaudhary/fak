@@ -429,7 +429,7 @@ FakWitnessArgKey (internal/gateway/proxy_fill_witness.go) is the reserved wire k
 
 Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading.
 
-**Distinct from:** aggregateAnswers is the benchmark answer payload; guard-corpus is a policy-test corpus and grade-candidates are scorecard candidates, not expected benchmark facts.
+**Distinct from:** aggregateAnswers is the benchmark answer payload; grade-candidates are scorecard candidates, not expected benchmark facts.
 
 
 ### CompactionJoinKey

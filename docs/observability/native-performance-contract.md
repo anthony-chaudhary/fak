@@ -1,17 +1,15 @@
 ---
 title: "fak-native performance observability contract"
-description: "Frozen observability contract for fak-native performance metrics, labels, correlation identifiers, evidence handling, and compatibility."
+description: "Retired inventory of the frozen fak-native performance metric catalog: none of its names is exported, so dashboards must not query them as live signals."
 ---
 
 # fak-native performance observability contract
 
-Status: frozen catalog v1; unsupported export declarations retired
-Machine-readable source: `internal/nativeperfobscontract.Frozen()`  
-Validator: `go test ./internal/nativeperfobscontract`
+Status: retired. The Go catalog (`fak-native-performance-observability-contract/1`) and its validator were removed because nothing invoked them; this page keeps the retired inventory and rules.
 
-This contract answers one bounded question: **does every performance-relevant stage of a fak-native model run have a stable exported signal, or an explicit justified exclusion?** The validator treats `UNKNOWN` as debt and fails closed. It also fixes the engine to `fak-native`; this contract cannot silently relabel llama.cpp execution as native evidence.
+The contract asked one bounded question: **does every performance-relevant stage of a fak-native model run have a stable exported signal, or an explicit justified exclusion?** It fixed the engine to `fak-native`, so llama.cpp execution could not be relabeled as native evidence.
 
-All 14 surfaces are currently `excluded`, with an explicit `RETIRED` reason and no `metric` field. None of the 14 catalog metric names has an invoked Prometheus exporter. The definitions remain for schema v1 compatibility; catalog entries and receipt source references do not establish runtime emission. `fak_native_tokens_total` is a catalog entry covered by both prefill and decode exclusions. The existing `fak_native_phase_seconds_total` export is a different metric family and does not implement `fak_native_phase_seconds`.
+All 14 surfaces were `excluded` with an explicit `RETIRED` reason and no `metric` field. None of the 14 catalog metric names has an invoked Prometheus exporter; catalog entries and receipt source references never established runtime emission. `fak_native_tokens_total` is a catalog entry covered by both prefill and decode exclusions. The existing `fak_native_phase_seconds_total` export is a different metric family and does not implement `fak_native_phase_seconds`.
 
 New evidence defaults to **Qwen3.8**. Qwen3.6 remains valid only for explicit regression, compatibility, historical comparison, or hardware/artifact constraints, and historical Qwen3.6 artifacts keep their original identity.
 
@@ -47,7 +45,7 @@ Every row below is excluded from exported coverage. The names and intended fresh
 | Benchmark gates | `internal/nativebench/nativebench.go`, `internal/nativeperf/gate.go` | `fak_native_benchmark_gate_total` | Each gate decision |
 | Promotion / revert | native benchmark gate receipt | `fak_native_promotion_total` | Each promote, hold, or revert decision |
 
-The complete names, types, units, label sets, cardinality budgets, provenance, freshness, unsupported semantics, and exclusions live in the machine-readable Go contract. Dashboards must not query retired names as live signals. A surface may claim `exported` only after an actual invoked exporter and emitted-series witness exist.
+Dashboards must not query retired names as live signals. A surface may claim `exported` only after an actual invoked exporter and emitted-series witness exist.
 
 ## Existing receipts and dashboards
 
@@ -60,19 +58,3 @@ The contract cross-references the existing truth surfaces rather than replacing 
 - `docs/benchmarks/model-observability.md` documents the model observability receipt and dashboard interpretation.
 - `docs/_witnesses/native-performance-profile/README.md` indexes captured native performance profile evidence.
 - `docs/native-inference-goal.md` is authoritative for fak-native identity, matched envelopes, and the no-silent-fallback rule.
-
-## Deterministic proof
-
-Run:
-
-```bash
-go test ./internal/nativeperfobscontract
-```
-
-`TestFrozenCatalogDoesNotClaimUnsupportedExports` decodes the JSON matrix and verifies the 14 catalog names remain stable, all 14 required surfaces are explicitly retired without a metric, and every catalog name has a retirement reason. This checks declaration truth; it does not qualify runtime telemetry or hardware. `TestFrozenContractIsValidAndMachineReadable` serializes and decodes the deterministic JSON coverage matrix in-process. The negative witnesses prove that validation fails when:
-
-1. a required producer has neither a metric nor an exclusion;
-2. the engine changes from `fak-native` (including a llama.cpp fallback); or
-3. a high-cardinality label such as `request_id` enters the contract.
-
-Call `nativeperfobscontract.JSON(nativeperfobscontract.Frozen())` from audits or dashboards that need the canonical machine-readable matrix. Validation happens before JSON is returned.

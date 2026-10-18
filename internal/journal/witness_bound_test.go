@@ -57,12 +57,11 @@ func witnessRow(t *testing.T, claim string) Row {
 }
 
 // TestWitnessIsBoundedInTheJournal is the gap this file closes. witnessOf
-// returned WitnessPayload.Claim VERBATIM — no bound, no scrub — while
-// internal/guardcorpus copies row.Witness into the EXPORTED dataset under a
-// package comment asserting the field "the journal producer already bounded and
-// scrubbed". That assertion was false for Witness (it was only ever true for
-// ArgsLabel), so this is a demonstrated documentation/behaviour divergence, not
-// merely a regression guard.
+// returned WitnessPayload.Claim VERBATIM — no bound, no scrub — while dataset
+// exports copy row.Witness into the EXPORTED dataset trusting that the journal
+// producer already bounded and scrubbed it. That was false for Witness (it was
+// only ever true for ArgsLabel), so this is a demonstrated documentation/behaviour
+// divergence, not merely a regression guard.
 //
 // The claim is not rung-authored by construction: live producers concatenate
 // call-derived bytes into it — internal/adjudicator/egresslist.go builds
@@ -121,7 +120,7 @@ func TestWitnessScrubKeepsSecretExfilProse(t *testing.T) {
 
 // TestWitnessRedactsAssignedSecretValue is a REGRESSION GUARD, not a demonstrated
 // old bug: no row in this host's corpus carries a secretish assignment today. It
-// pins the half of the guardcorpus contract that says "scrubbed" — a rung that
+// pins the half of the export contract that says "scrubbed" — a rung that
 // concatenates an arg value behind a secret-shaped key must not put that value on
 // the exported wire. The payloads below are obviously-synthetic placeholders.
 func TestWitnessRedactsAssignedSecretValue(t *testing.T) {

@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **660** (clarity 0 + coverage 660) |
+| **Disambiguation-debt (drive to 0)** | **657** (clarity 0 + coverage 657) |
 | **Crystal-clear concepts (and climbing)** | **1281** crystal of 3090 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3167 / 3827** (82.8% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3166 / 3823** (82.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **89** of 4346 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3090 concepts - score 88.8/100 (grade B) - disambiguation-debt 660
+concept-disambiguation chart - 3090 concepts - score 88.8/100 (grade B) - disambiguation-debt 657
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####################........ 1281
@@ -65,16 +65,16 @@ coverage by family (positioned / discovered):
   plan             #######################..... 480/585
   session-runtime  #######################..... 286/355
   cache            #######################..... 340/408
-  gateway-engine   #######################..... 247/305
-  guard-gate       ##########################.. 515/562
+  gateway-engine   #######################..... 246/303
   attention        #####################....... 146/192
   context-ctx      ########################.... 268/314
+  guard-gate       ##########################.. 515/561
   pool             ##############.............. 44/85
   policy-capability ########################.... 225/264
   support-maturity ####################........ 85/121
   render-materialize ########################.... 217/250
-  witness-proof    ########################.... 172/198
   score-debt       #######################..... 114/139
+  witness-proof    #########################... 173/197
   evict            ####################........ 57/79
   loop             ########################.... 100/116
   layout           #################........... 20/33
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.8%  (3167/3827 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.8%  (3166/3823 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2432 / 5665 |
+| Boundaries drawn (mutual / total) | 2428 / 5660 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -2218,7 +2218,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | guard-gate | **SetTokenRateGate (install token-rate gate)** - internal/gateway/token_admission.go SetTokenRateGate: installs a TokenRateGate on the gateway server - the admission gate that throttles requests by token rate. |
 | o | defined | subsystem | guard-gate | **guard_audit (guard audit journal)** - cmd/dispatchworker/guard.go guardAuditPath + guard-audit.jsonl: the per-lane guard AUDIT journal recording each guarded run's admitted/refused decisions for later replay and complaint attach. |
 | o | defined | symbol | guard-gate | **guardAuditPruned (audit-prune tick result)** - cmd/dispatchworker/main.go guardAuditPruned: the result of pruneGuardAuditTick - how many stale guard-audit entries were pruned on a dispatch tick to bound the journal. |
-| o | defined | subsystem | guard-gate | **guardcorpus (GUARD-SESSION dataset)** - internal/guardcorpus: the folded GUARD-SESSION dataset - many guarded sessions' decisions assembled into one corpus for guard-accuracy scoring and RSI analysis. |
+| o | defined | symbol | guard-gate | **WitnessGateConfig (stop-gate witness mode and block budget)** - stopgate.WitnessGateConfig (internal/stopgate/witness.go:9) is the witnessed-completion gate's setting: a Mode (off, shadow or enforce; default shadow) and a Max block budget (default 3). The guard Stop hook builds one from its flags (cmd/fak/guard_witnessed_done.go:163), the agent loop takes one through WithWitnessGateConfig (internal/agent/loop_session.go:144), and EvaluateBoundary raises shadow to enforce when the loop's FinalGate is unsatisfied (internal/stopgate/boundary.go:218). |
 | o | defined | subsystem | guard-gate | **guardrsi (guard-verdict-RSI fold)** - The internal/guardrsi package that folds a guarded session's hash-chained decision journal and finds the dominant honesty-hole bucket (WorstBucket) to drive the guard-verdict RSI loop. |
 | o | defined | subsystem | guard-gate | **guardroute (RSI route decision)** - The internal/guardroute bridge that turns guardrsi's worst journal bucket into a routed, idempotent, escalating finding (a queue row and, for a real honesty-hole, a deduped GitHub issue), closing the guard RSI loop. |
 | o | defined | subsystem | guard-gate | **guardcomplaint (agent appeal channel)** - The internal/guardcomplaint package behind `fak complain`: the SUBJECTIVE appeal channel where an agent reports a false-positive DENY, the complement of guardroute's objective journal-fold routing. |
@@ -2999,7 +2999,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **slotResidency** - The optional upstreamCall field pointing to the llamaPreparedSlot binding installed from the request context after preparation. Before a POST attempt it supplies the bound admission state. |
 | o | defined | symbol | session-runtime | **SessionImpact (cache-value component impact)** - cmd/fak/cachevalue_status.go SessionImpact (json session_impact): a short human string describing how one cache-value component affects the current session's economics. |
 | o | defined | symbol | session-runtime | **sessionLive (live-process session probe)** - cmd/fak/resume_watchdog_cli.go sessionLive: reports whether any live OS process's command line names the given session id - the resume-watchdog's liveness check. |
-| o | defined | symbol | session-runtime | **SessionMeta (out-of-band session identity)** - internal/guardcorpus/guardcorpus.go SessionMeta: the out-of-band session identity the CLI shell resolves (session id, start info) and carries alongside a guard corpus record. |
+| o | defined | symbol | session-runtime | **session_meta (Codex rollout session identity)** - The session_meta record that opens a Codex rollout JSONL: the session's static identity (id, model provider, cwd; it also carries the base instructions). internal/codexlifecycle/corpus.go Meta reads only the FIRST session_meta record, so a subagent rollout is not mistaken for its parent, and internal/codexresume reads the session_meta id as the rollout's thread id (rehome.go, preflight.go). |
 | o | defined | symbol | session-runtime | **CompactSessionReport (per-rollout compaction health)** - internal/session/compactaudit.go CompactSessionReport: one rollout file's compaction health - the per-session summary of what a compaction dropped/kept during that session. |
 | o | defined | symbol | session-runtime | **CONTROL_SESSION_TERMINAL (terminal-session refuse reason)** - internal/session/ctlrefuse.go: the refuse-reason STRING VALUE ("CONTROL_SESSION_TERMINAL") returned when a control write is attempted against a session that has already reached a terminal state. |
 | o | defined | symbol | session-runtime | **ReasonControlSessionTerminal (const identifier)** - internal/session/ctlrefuse.go ReasonControlSessionTerminal: the Go const IDENTIFIER bound to the "CONTROL_SESSION_TERMINAL" refuse reason for control writes against a terminal session. |
@@ -3370,7 +3370,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3233/5665 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 3232/5660 boundaries drawn one-way only |
 | well-formed | `well_formed` | 100 | 0 | all 3090 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
@@ -3390,16 +3390,16 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | plan | 480 | 585 | 105 |
 | session-runtime | 286 | 355 | 69 |
 | cache | 340 | 408 | 68 |
-| gateway-engine | 247 | 305 | 58 |
-| guard-gate | 515 | 562 | 47 |
+| gateway-engine | 246 | 303 | 57 |
 | attention | 146 | 192 | 46 |
 | context-ctx | 268 | 314 | 46 |
+| guard-gate | 515 | 561 | 46 |
 | pool | 44 | 85 | 41 |
 | policy-capability | 225 | 264 | 39 |
 | support-maturity | 85 | 121 | 36 |
 | render-materialize | 217 | 250 | 33 |
-| witness-proof | 172 | 198 | 26 |
 | score-debt | 114 | 139 | 25 |
+| witness-proof | 173 | 197 | 24 |
 | evict | 57 | 79 | 22 |
 | loop | 100 | 116 | 16 |
 | layout | 20 | 33 | 13 |

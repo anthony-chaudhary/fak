@@ -183,7 +183,6 @@ var changeDetectorBaseline = []string{
 	"internal/kvint2eval/contract_test.go",
 	"internal/learningdebt/learningdebt_test.go",
 	"internal/leaseref/reap_batch_test.go",
-	"internal/lightgapport/lightgapport_test.go",
 	"internal/lightgapscore/score_test.go",
 	"internal/livecodebench/normalizeproblem_test.go",
 	"internal/llamacppinterop/contract_test.go",

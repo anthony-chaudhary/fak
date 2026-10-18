@@ -5,7 +5,7 @@ description: "fak-extension-descriptor/1 is inert discovery metadata; local Veri
 
 # Extension descriptor and local conformance
 
-`internal/market` defines `fak-extension-descriptor/1`, inert discovery metadata shared by the frozen ABI registry, compute backends, TUI panes, quality checks, and trajectory scorers. A descriptor carries a namespaced identity, `module@rev`, seam ABI range, artifact digest, trust class, error behavior, requested capabilities, and an optional required witness recipe/result digest.
+`internal/marketplace` defines `fak-extension-descriptor/1`, inert discovery metadata shared by the frozen ABI registry, compute backends, TUI panes, quality checks, and trajectory scorers. A descriptor carries a namespaced identity, `module@rev`, seam ABI range, artifact digest, trust class, error behavior, requested capabilities, and an optional required witness recipe/result digest.
 
 Parsing is deliberately non-executable: catalog enumeration does not import an artifact, call registration, or run a witness. Local `Verify` is the authority: it re-hashes the local artifact and, when required, re-runs the bounded witness and compares its result digest. Marketplace metadata is therefore discovery input, never proof.
 

@@ -81,9 +81,9 @@ For the broader deploy, observe, recover, and upgrade sequence, return to the
 Use these pages for fak-native performance evidence. They keep the metric,
 correlation, artifact, and dashboard boundaries separate:
 
-- [Native-performance signal contract](native-performance-contract.md) defines
-  the bounded metric inventory, label rules, provenance, freshness, and explicit
-  exclusions.
+- [Native-performance signal contract](native-performance-contract.md) keeps
+  the retired `fak_native_*` metric inventory and label rules; none of those
+  names is exported.
 - [Evidence correlation](native-performance-correlation.md) defines the opaque
   lookup key that joins a dashboard point to scrubbed run evidence without
   putting high-cardinality identities in metric labels.

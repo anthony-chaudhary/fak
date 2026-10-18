@@ -43,12 +43,11 @@ survives the reaper, travels across hosts, and is diffable in git. `auditusage` 
 a *rollup* (counts), not per-session records; `logvault` gives a *backup* (raw bytes,
 off-repo, unschematized); `guardrsi` gives a *score*, and reads the raw journals it
 scores. There is no "one row per session, with its tool-call sequence and outcome"
-artifact you can train on or replay. (`internal/advmodel/corpus.go` is an unrelated
-adversarial-prompt corpus — the name is taken but the concept is new here.)
+artifact you can train on or replay.
 
 **Gap 2 — verdicts are not policy-attributable once aggregated.** A journal `Row`
-records *which gate* decided (`by` = `secretgate` / `a2achan/gate` / `advmodel` /
-`vdso` / …) but **not which policy version was active**. The effective policy digest
+records *which gate* decided (`by` = `secretgate` / `a2achan/gate` / `vdso` / …)
+but **not which policy version was active**. The effective policy digest
 exists (`guardEffectivePolicyDigest`) but is stamped only into the **per-session
 spawn-metadata sidecar** (`.dispatch-runs/*.startup.json`), keyed by pid/trace. Once
 journals are mirrored to the vault or aggregated across hosts — away from their
@@ -153,13 +152,17 @@ round-trip test (`TestGoldenCorpusRoundTrip`) byte-locks a committed dataset fix
 so a fold change that silently flips a record fails CI. That is the A5 regression
 mechanism in miniature, seeded.
 
+**Status (2026-10-17):** the fold package and its golden harness were later removed
+because nothing called them: the A3 CLI that would read real journals was never built.
+Restore the spine from git history when A3 lands.
+
 **Finding surfaced by the real-data fold (A-advisory).** The dominant real verdict
 is `ADVISORY` (~39 rows/session, `kind: TOOL_DEFINITION_PRUNED`, `by:
 tool-definition-pruner`) — a legitimate non-blocking monitor verdict. But
 `guardrsi.KnownVerdicts` (`internal/guardrsi/guardrsi.go:25`) OMITS `ADVISORY`, so
 the guard-RSI **verdict-quality metric miscounts every advisory as an
 `unknown_verdict` honesty hole** (~20k phantom holes across 510 sessions), pinning
-its worst bucket on a false signal. `guardcorpus` does not inherit the bug
+its worst bucket on a false signal. `guardcorpus` did not inherit the bug
 (`TestFoldAdvisoryIsNotAnUnknownVerdict`); the fix to `guardrsi` is filed as a
 fan-out item because it moves a *ratcheted* scorecard number and needs its own
 witness. This is exactly the "understand how policies/verdicts actually behave"
@@ -181,7 +184,7 @@ payoff the dataset promised — it fell out of the first real fold.
 
 1. This plan doc (spine witness for the fan-out). ✅
 2. File epic + Track A children (`fak issue create`, milestone + labels at creation).
-3. Build + test the `internal/guardcorpus` fold spine (A1/A2), green `go test ./internal/guardcorpus`.
+3. Build + test the `internal/guardcorpus` fold spine (A1/A2), green `go test ./internal/guardcorpus` (built, later removed; see *Spine result*).
 4. Note the spine commit on the fold child; land A0 policy-attribution join next.
 
 ## Read next

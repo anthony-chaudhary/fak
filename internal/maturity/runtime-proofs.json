@@ -38,11 +38,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/advmodel",
-            "lane": "advmodel"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/affectedtests",
             "lane": "affectedtests"
         },
@@ -363,11 +358,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/breathgate",
-            "lane": "breathgate"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/brittleness",
             "lane": "brittleness"
         },
@@ -480,11 +470,6 @@
             "command": "fak version modules",
             "output_contains": "internal/cavemanpairwise",
             "lane": "cavemanpairwise"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/cavemansafety",
-            "lane": "cavemansafety"
         },
         {
             "command": "fak version modules",
@@ -1143,11 +1128,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/fakrpc",
-            "lane": "fakrpc"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/fastintent",
             "lane": "fastintent"
         },
@@ -1415,11 +1395,6 @@
             "command": "fak version modules",
             "output_contains": "internal/guardcomplaint",
             "lane": "guardcomplaint"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/guardcorpus",
-            "lane": "guardcorpus"
         },
         {
             "command": "fak version modules",
@@ -1818,11 +1793,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/knownenv",
-            "lane": "knownenv"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/kquantbits",
             "lane": "kquantbits"
         },
@@ -1938,11 +1908,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/lightgapport",
-            "lane": "lightgapport"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/lightgapscore",
             "lane": "lightgapscore"
         },
@@ -2003,11 +1968,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/localappux",
-            "lane": "localappux"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/localbench",
             "lane": "localbench"
         },
@@ -2015,11 +1975,6 @@
             "command": "fak version modules",
             "output_contains": "internal/logvault",
             "lane": "logvault"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/lookahead",
-            "lane": "lookahead"
         },
         {
             "command": "fak version modules",
@@ -2100,11 +2055,6 @@
             "command": "fak version modules",
             "output_contains": "internal/markerblock",
             "lane": "markerblock"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/market",
-            "lane": "market"
         },
         {
             "command": "fak version modules",
@@ -2363,11 +2313,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/nativeperfobscontract",
-            "lane": "nativeperfobscontract"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/nativeperfslo",
             "lane": "nativeperfslo"
         },
@@ -2425,11 +2370,6 @@
             "command": "fak version modules",
             "output_contains": "internal/ociartifact",
             "lane": "ociartifact"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/opensweharder",
-            "lane": "opensweharder"
         },
         {
             "command": "fak version modules",
@@ -2578,11 +2518,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/portabilityswitch",
-            "lane": "portabilityswitch"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/power",
             "lane": "power"
         },
@@ -2645,11 +2580,6 @@
             "command": "fak version modules",
             "output_contains": "internal/projectcompletion",
             "lane": "projectcompletion"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/projectionspine",
-            "lane": "projectionspine"
         },
         {
             "command": "fak version modules",
@@ -2825,11 +2755,6 @@
             "command": "fak version modules",
             "output_contains": "internal/refid",
             "lane": "refid"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/reflexagent",
-            "lane": "reflexagent"
         },
         {
             "command": "fak version modules",

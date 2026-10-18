@@ -4181,11 +4181,6 @@
         },
         {
           "category": "incidental",
-          "reason": "turn pacing jitter and burst cooldown gate",
-          "token": "breathgate"
-        },
-        {
-          "category": "incidental",
           "reason": "sandbox tool name",
           "token": "mcp__fak_guard__sandbox_exec"
         },
@@ -4695,7 +4690,6 @@
         "baseAggregates",
         "beginGuardProviderBoundary",
         "bindGuardRegistration",
-        "breathgate",
         "buildguardchild",
         "cacheValueGateFactsFromReport",
         "callGateProvider",

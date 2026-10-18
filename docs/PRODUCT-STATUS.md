@@ -145,18 +145,12 @@ is filed; **#582, #581, and #580 are resolved** (see *Resolved* below), leaving 
   device-backend decode path (`--backend`) also bypasses the tree today (CPU-session-only
   reuse). Front-of-prompt reuse shipped; the separate mid-run KV-quarantine wiring is #579.
 - **[#580](https://github.com/anthony-chaudhary/fak/issues/580)** — *resolved by the
-  issue's "Train (or fine-tune) a small … model" branch.* The harvest-corpus consumer edge
-  is wired: `internal/advmodel` is a small fail-closed advisory adjudication model that
-  trains (`internal/advmodel/train.py`, deterministic, numpy-only) over a frozen,
-  floor-labeled content-bearing harvest corpus (`testdata/corpus.jsonl`, every label
-  re-witnessed against the REAL adjudicator floor) and writes a model artifact
-  (`testdata/adjudicator.json`); held-out precision/recall/F1 vs the stock reference are
-  committed in its meta. It is an opt-in `abi.Adjudicator` that may return only `Deny`
-  (corroborate) or `Defer` — never `Allow` — so under the kernel fold it can only tighten
-  a decision, never weaken the deterministic floor; default-off, ABI untouched. HONEST
-  SCOPE: it is a logistic-regression bag-of-tokens classifier (the "small model"), not a
-  fine-tune of the fused SmolLM2 forward pass — training a tuned LLM head onto that model
-  (GPU + weights + hours) stays a tracked STUB, as does AsyncLM's interrupt behavior.
+  issue's "Train (or fine-tune) a small … model" branch.* A small fail-closed advisory
+  adjudication classifier was trained over a floor-labeled harvest corpus; it could only
+  corroborate a deny, never weaken the floor. It was later removed because no flag,
+  config, or manifest ever loaded it into a guard chain, so the harvest corpus has no
+  learned consumer today. A fine-tune of the fused SmolLM2 forward pass (GPU + weights +
+  hours) stays a tracked STUB, as does AsyncLM's interrupt behavior.
 
 ## Regenerate / verify
 

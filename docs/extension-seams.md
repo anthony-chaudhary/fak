@@ -106,4 +106,4 @@ hoc callback.
 
 ## Common descriptor and local proof
 
-The discovery envelope is `fak-extension-descriptor/1` in `internal/market`; see [`docs/integrations/extension-descriptors.md`](integrations/extension-descriptors.md). Its adapters cover ABI engines, compute backends, TUI panes, quality checks, and trajectory scorers. Enumeration is inert. Artifact and witness digests become evidence only after local re-verification; executable registrants remain `trusted-compiled`.
+The discovery envelope is `fak-extension-descriptor/1` in `internal/marketplace`; see [`docs/integrations/extension-descriptors.md`](integrations/extension-descriptors.md). Its adapters cover ABI engines, compute backends, TUI panes, quality checks, and trajectory scorers. Enumeration is inert. Artifact and witness digests become evidence only after local re-verification; executable registrants remain `trusted-compiled`.

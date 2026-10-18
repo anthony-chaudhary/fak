@@ -70,7 +70,7 @@ fak-dev index docs|leaves|verbs|claims 'harness ABI compatibility version skew'
 The lexical/index fallback found the exact seams:
 
 - [`internal/abi/types.go:32`](../../internal/abi/types.go#L32) defines additive
-  major/minor capability negotiation; [`internal/market/market.go:161`](../../internal/market/market.go#L161)
+  major/minor capability negotiation; [`internal/marketplace/market.go:195`](../../internal/marketplace/market.go#L195)
   validates extension ABI ranges.
 - [`pkg/harnesskit/protocol.go:9`](../../pkg/harnesskit/protocol.go#L9) owns the
   provider-neutral protocol and unknown-event behavior; [`pkg/harnesskit/contract.go:29`](../../pkg/harnesskit/contract.go#L29)
