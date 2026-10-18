@@ -358,3 +358,98 @@ func TestQwen35SequenceCleanupAttemptsEveryOwner(t *testing.T) {
 		})
 	}
 }
+
+// One probe implements the two independent checkpoint close contracts.
+type siblingTransactionResource struct{ close func() }
+
+func (*siblingTransactionResource) CommitPrefix(int, []compute.Qwen35SequenceState) error {
+	return nil
+}
+func (*siblingTransactionResource) Restore() error { return nil }
+func (r *siblingTransactionResource) Close()       { r.close() }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestQwen35TransactionFinishDetachesEverySibling(t *testing.T) {
+	t.Setenv("GODEBUG", "panicnil=1")
+	first, later := errors.New("replay close interrupted"), errors.New("checkpoint close interrupted")
+	for _, mode := range []string{"normal", "panic", "nil-panic", "goexit"} {
+		t.Run(mode, func(t *testing.T) {
+			b := &siblingBackend{Backend: compute.Default()}
+			snapshot := &PrefixSnapshot{Backend: b, qwen35: siblingState(b, 1)}
+			tx := &qwen35MTPTargetTransaction{
+				target: &Session{}, snapshot: snapshot,
+				lastLogits: []float32{1}, verifiedRows: [][]float32{{1}},
+			}
+			var order []int
+			detached := false
+			tx.prefixReplay = &siblingTransactionResource{close: func() {
+				order = append(order, 1)
+				detached = tx.closed && tx.closeCount == 1 && tx.prefixReplay == nil && tx.checkpoint == nil && tx.snapshot == nil && tx.lastLogits == nil && tx.verifiedRows == nil
+				if detached {
+					tx.finish() // reentry must not repeat a release
+				}
+				siblingFault(mode, first)
+			}}
+			tx.checkpoint = &siblingTransactionResource{close: func() {
+				order = append(order, 2)
+				if mode != "normal" {
+					panic(later)
+				}
+			}}
+			out := siblingRun(tx.finish)
+			if !detached || !snapshot.closed || snapshot.qwen35 != nil || len(b.freed) != 2 || !reflect.DeepEqual(order, []int{1, 2}) {
+				t.Fatalf("terminal sibling ownership: detached=%t snapshot=%t/%v frees=%d order=%v", detached, snapshot.closed, snapshot.qwen35, len(b.freed), order)
+			}
+			if tx.closeCount != 1 || tx.abortOwned() != nil || tx.closeCount != 1 || len(b.freed) != 2 {
+				t.Fatal("terminal Abort repeated cleanup")
+			}
+			switch mode {
+			case "normal":
+				if !out.returned || !out.resumed {
+					t.Fatalf("normal finish: %+v", out)
+				}
+			case "panic":
+				if out.returned || !out.resumed || out.value != first {
+					t.Fatalf("primary panic: %+v", out)
+				}
+			case "nil-panic":
+				if out.returned || !out.resumed || out.value != nil {
+					t.Fatalf("legacy nil panic: %+v", out)
+				}
+			case "goexit":
+				if out.returned || out.resumed || out.value != nil {
+					t.Fatalf("Goexit replaced: %+v", out)
+				}
+			}
+		})
+	}
+}
+
+// A finish-only test cannot detect commitOwned swallowing panic(nil) after it
+// has assigned the accepted logits. Exercise the public caller as well.
+func TestQwen35TransactionCommitInterruptedCloseCannotPublish(t *testing.T) {
+	t.Setenv("GODEBUG", "panicnil=1")
+	b := &siblingBackend{Backend: compute.Default()}
+	snapshot := &PrefixSnapshot{Backend: b, qwen35: siblingState(b, 1)}
+	tx := &qwen35MTPTargetTransaction{
+		target: &Session{}, snapshot: snapshot, draft: []int{1},
+		verifiedLive: true, lastLogits: []float32{2}, verifiedRows: [][]float32{{2}},
+	}
+	var order []int
+	tx.prefixReplay = &siblingTransactionResource{close: func() {
+		order = append(order, 1)
+		panic(nil)
+	}}
+	tx.checkpoint = &siblingTransactionResource{close: func() {
+		order = append(order, 2)
+	}}
+	var logits []float32
+	var err error
+	out := siblingRun(func() { logits, err = tx.Commit(1) })
+	if !out.returned || !out.resumed || err == nil || logits != nil {
+		t.Fatalf("interrupted Commit published success: outcome=%+v logits=%v err=%v", out, logits, err)
+	}
+	if !tx.closed || tx.closeCount != 1 || !snapshot.closed || len(b.freed) != 2 || !reflect.DeepEqual(order, []int{1, 2}) {
+		t.Fatalf("interrupted Commit stranded cleanup: closed=%t count=%d snapshot=%t frees=%d order=%v", tx.closed, tx.closeCount, snapshot.closed, len(b.freed), order)
+	}
+}

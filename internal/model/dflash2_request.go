@@ -22,6 +22,7 @@ import (
 // draft path does not itself admit artifacts, enable serving, or claim speedup.
 type Qwen38DFlash2Request struct {
 	mu                   sync.Mutex
+	options              Qwen38DFlash2RequestOptions
 	ref                  *dflash2Reference
 	logits               []float32
 	bootstrapped         bool
@@ -322,6 +323,10 @@ type Qwen38DFlash2Round struct {
 // selected from privately owned current logits; callers cannot supply a false
 // boundary. Until Commit or Abort, another Prepare/Bootstrap is refused.
 func (q *Qwen38DFlash2Request) Prepare(ctx context.Context, maxTokens int) (round *Qwen38DFlash2Round, err error) {
+	return q.prepare(ctx, maxTokens, nil)
+}
+
+func (q *Qwen38DFlash2Request) prepare(ctx context.Context, maxTokens int, timing *DFlash2PrepareTiming) (round *Qwen38DFlash2Round, err error) {
 	if q == nil {
 		return nil, errors.New("dflash2: nil request")
 	}
@@ -332,6 +337,14 @@ func (q *Qwen38DFlash2Request) Prepare(ctx context.Context, maxTokens int) (roun
 	}
 	if !q.bootstrapped || q.pending != nil || maxTokens < 1 || maxTokens > 8 || len(q.logits) != q.ref.g.vocab {
 		return nil, errors.New("dflash2: ready request and one-to-eight token budget required")
+	}
+	width, widthErr := q.options.panelWidth()
+	if widthErr != nil {
+		return nil, widthErr
+	}
+	maxTokens, err = q.options.blockBudget(maxTokens)
+	if err != nil {
+		return nil, err
 	}
 	if err = q.ref.proposalReady(ctx); err != nil {
 		return nil, err
@@ -354,20 +367,25 @@ func (q *Qwen38DFlash2Request) Prepare(ctx context.Context, maxTokens int) (roun
 	anchor := argmaxF32(q.logits)
 	proposal := []int{anchor}
 	if maxTokens > 1 && !q.ref.target.M.Cfg.IsEOS(anchor) {
+		proposalStart := timing.start()
 		draft, draftErr := q.ref.Propose(ctx, anchor, maxTokens-1)
 		if draftErr != nil {
 			return nil, draftErr
 		}
+		timing.finishProposal(proposalStart, len(draft))
 		proposal = append(proposal, draft...)
 	}
-	cp.tx, err = beginQwen35TargetFeatureTransaction(q.ref.target, q.logits, q.ref.g.taps)
+	cp.tx, err = q.beginVerification()
 	if err != nil {
 		return nil, err
 	}
+	verifyStart := timing.start()
 	verified, err := cp.tx.Verify(ctx, proposal)
 	if err != nil {
 		return nil, err
 	}
+	timing.finishVerify(verifyStart)
+	timing.recordVerification(cp.tx.tx.VerificationReceipt(), len(proposal), width)
 	accepted, current := 0, q.logits
 	for i, token := range proposal {
 		if token != argmaxF32(current) {

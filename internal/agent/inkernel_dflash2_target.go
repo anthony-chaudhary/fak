@@ -37,6 +37,7 @@ type DFlash2TargetSpec struct {
 // before requests start. Direct Session users are outside this serving contract.
 type DFlash2Target struct {
 	mu          sync.Mutex
+	options     DFlash2TargetOptions
 	spec        DFlash2TargetSpec
 	source      *ggufload.WeightSource
 	m           *model.Model
@@ -109,6 +110,14 @@ func NewDFlash2Target(ctx context.Context, spec DFlash2TargetSpec, backend compu
 
 func newDFlash2Target(ctx context.Context, spec DFlash2TargetSpec, backend compute.Backend,
 	open func(context.Context, []ggufload.ShardIdentity, string) (*ggufload.WeightSource, error)) (out *DFlash2Target, err error) {
+	return newDFlash2TargetWithOptions(ctx, spec, backend, DFlash2TargetOptions{}, open)
+}
+
+func newDFlash2TargetWithOptions(ctx context.Context, spec DFlash2TargetSpec, backend compute.Backend, options DFlash2TargetOptions,
+	open func(context.Context, []ggufload.ShardIdentity, string) (*ggufload.WeightSource, error)) (out *DFlash2Target, err error) {
+	if err = options.validate(backend); err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		return nil, errors.New("dflash2: context required")
 	}
@@ -128,7 +137,7 @@ func newDFlash2Target(ctx context.Context, spec DFlash2TargetSpec, backend compu
 	}
 	defer release()
 	spec.Shards = slices.Clone(spec.Shards)
-	target := &DFlash2Target{spec: spec, backend: backend, domain: domain, leases: make(map[*dflash2Lease]struct{})}
+	target := &DFlash2Target{spec: spec, backend: backend, domain: domain, options: options, leases: make(map[*dflash2Lease]struct{})}
 	completed, openEntered, openVerified := false, false, false
 	defer func() {
 		if !completed {
@@ -185,12 +194,12 @@ func newDFlash2Target(ctx context.Context, spec DFlash2TargetSpec, backend compu
 		completed = true
 		return nil, errors.New("dflash2: authenticated token embedding missing")
 	}
-	options, err := dflash2LoadOptions(embedding.Type)
+	loadOptions, err := dflash2LoadOptions(embedding.Type)
 	if err != nil {
 		completed = true
 		return nil, err
 	}
-	target.m, err = target.source.QuantModelQ4KProfileOptionsContext(ctx, nil, options...)
+	target.m, err = target.source.QuantModelQ4KProfileOptionsContext(ctx, nil, loadOptions...)
 	if err != nil {
 		completed = true
 		return nil, err
@@ -340,7 +349,7 @@ func (t *DFlash2Target) newRequest(ctx context.Context) (lease *dflash2Lease, er
 		if err == nil {
 			l.session.Q4K = true
 			var q *model.Qwen38DFlash2Request
-			q, err = model.NewQwen38DFlash2Request(ctx, l.session, t.spec.SidecarPath)
+			q, err = model.NewQwen38DFlash2RequestWithOptions(ctx, l.session, t.spec.SidecarPath, t.options.Request)
 			if err == nil {
 				l.request = dflash2NativeRequest{q}
 				l.session = nil

@@ -124,7 +124,8 @@ func TestDFlash2RequestBootstrapGenuineChunks(t *testing.T) {
 
 // fak-test:runtime medium est=2s lane=default
 func TestDFlash2RequestStopPrefixEveryCount(t *testing.T) {
-	for accepted := 0; accepted <= 8; accepted++ {
+	const requestedTokens = 8
+	for accepted := 0; accepted <= requestedTokens; accepted++ {
 		t.Run(fmt.Sprint(accepted), func(t *testing.T) {
 			q, plain := dflash2RequestFixture(t, true)
 			prompt := []int{3, 7, 11}
@@ -132,8 +133,8 @@ func TestDFlash2RequestStopPrefixEveryCount(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := dflash2RequestPlain(prompt, plain)
-			round, err := q.Prepare(context.Background(), 8)
-			if err != nil || len(round.Tokens()) != 8 {
+			round, err := q.Prepare(context.Background(), requestedTokens)
+			if err != nil || len(round.Tokens()) != requestedTokens {
 				t.Fatalf("must genuinely verify all eight: %v", err)
 			}
 			if _, err := q.Prepare(context.Background(), 1); err == nil {
@@ -245,6 +246,7 @@ func TestDFlash2RequestBootstrapRollback(t *testing.T) {
 
 // fak-test:runtime medium est=2s lane=default
 func TestDFlash2RequestLateCommitRollback(t *testing.T) {
+	const requestedTokens = 8
 	for _, fault := range []string{"read", "cancel", "invalid-count", "restore-failure"} {
 		t.Run(fault, func(t *testing.T) {
 			q, plain := dflash2RequestFixture(t, true)
@@ -255,8 +257,8 @@ func TestDFlash2RequestLateCommitRollback(t *testing.T) {
 			want := dflash2RequestPlain(prompt, plain)
 			beforeCache := q.ref.cache
 			f, target := q.ref, q.ref.target
-			round, err := q.Prepare(context.Background(), 8)
-			if err != nil || len(round.Tokens()) != 8 {
+			round, err := q.Prepare(context.Background(), requestedTokens)
+			if err != nil || len(round.Tokens()) != requestedTokens {
 				t.Fatalf("full block: %v", err)
 			}
 			reader := f.w.r
@@ -565,6 +567,7 @@ func TestDFlash2RequestActualEOSStop(t *testing.T) {
 
 // fak-test:runtime medium est=2s lane=default
 func TestDFlash2RequestPrepareAndCommitInterruptions(t *testing.T) {
+	const requestedTokens = 8
 	t.Setenv("GODEBUG", "panicnil=1")
 	for _, phase := range []string{"prepare", "commit"} {
 		for _, mode := range []string{"panic", "nil-panic", "goexit", "cancel"} {
@@ -578,8 +581,8 @@ func TestDFlash2RequestPrepareAndCommitInterruptions(t *testing.T) {
 				var round *Qwen38DFlash2Round
 				var err error
 				if phase == "commit" {
-					round, err = q.Prepare(context.Background(), 8)
-					if err != nil || len(round.Tokens()) != 8 {
+					round, err = q.Prepare(context.Background(), requestedTokens)
+					if err != nil || len(round.Tokens()) != requestedTokens {
 						t.Fatalf("full block: %v", err)
 					}
 				}

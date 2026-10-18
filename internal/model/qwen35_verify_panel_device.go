@@ -37,7 +37,16 @@ func (s *Session) verifyQwen35DevicePanel(ids []int, boundaryLogits []float32) (
 // owned prefix-replay checkpoint to the target transaction. An older backend
 // continues to use the exact restore plus full-Step commit path.
 func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits []float32, capturePrefixReplay bool) (rows [][]float32, prefixReplay compute.Qwen35SequencePrefixReplay, receipt TargetVerificationReceipt, err error) {
+	return s.verifyQwen35DeviceFeaturePanel(ids, boundaryLogits, capturePrefixReplay, nil)
+}
+
+// A feature transaction adopts replay ownership before any result validation or
+// host read. Its outer completion guard also covers request/scope retirement.
+func (s *Session) verifyQwen35DeviceFeaturePanel(ids []int, boundaryLogits []float32, capturePrefixReplay bool, features *qwen35TargetFeatureTransaction) (rows [][]float32, prefixReplay compute.Qwen35SequencePrefixReplay, receipt TargetVerificationReceipt, err error) {
 	defer func() {
+		if features != nil {
+			return // its transaction owns replay, including interrupted readback
+		}
 		if recovered := recover(); recovered != nil {
 			if prefixReplay != nil {
 				prefixReplay.Close()
@@ -59,10 +68,17 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	}
 	s.cacheGeometryMu.RLock()
 	defer s.cacheGeometryMu.RUnlock()
+	limit := qwen35DeviceVerifyMaxDraft
+	if features != nil {
+		if features.tx == nil || features.tx.target != s || features.panelValid == nil || !features.panelValid() {
+			return nil, nil, receipt, fmt.Errorf("model: feature panel requires its live transaction owner")
+		}
+		limit = features.panelWidth
+	}
 	if !s.M.Cfg.IsQwen35Hybrid() {
 		err = targetVerificationDowngrade("device target verification requires the Qwen3.8 hybrid architecture")
-	} else if len(ids) < 1 || len(ids) > qwen35DeviceVerifyMaxDraft {
-		err = targetVerificationDowngrade("device target verification requires 1..4 draft tokens")
+	} else if len(ids) < 1 || len(ids) > limit {
+		err = targetVerificationDowngrade("device target verification exceeds its admitted draft width")
 	} else if len(boundaryLogits) != s.M.Cfg.VocabSize {
 		err = targetVerificationDowngrade("device target boundary logits width differs from vocabulary")
 	}
@@ -134,8 +150,14 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	request.NeedAllLogits = true
 	request.CapturePrefixReplay = capturePrefixReplay && prefixCapabilityOK
 	request.CaptureRawHidden = s.captureTargetHidden
+	if features != nil {
+		request.FeatureLayers = append([]int(nil), features.layers...)
+	}
 	receipt.Accounting.Setup = measuredSpeculativeCost(setup)
 
+	if features != nil && !features.panelValid() {
+		return nil, nil, receipt, fmt.Errorf("model: feature panel owner changed before mutation")
+	}
 	startPos := s.halKV.Len()
 	finishLineage := s.beginHALTokenLineageWrite(ids)
 	defer finishLineage()
@@ -145,9 +167,18 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	receipt.TargetVerificationOperations = 1
 	result, callErr := s.qwen35HAL.mutateSequence(s.Backend, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
 		request.States = states
-		return seq.Qwen35SequencePrefill(request)
+		r, e := seq.Qwen35SequencePrefill(request)
+		if features != nil {
+			// mutateSequence may release old COW owners before returning. Adopt
+			// here so even an interrupted COW release cannot orphan this owner.
+			features.tx.prefixReplay = r.PrefixReplay
+		}
+		return r, e
 	})
 	prefixReplay = result.PrefixReplay
+	if features != nil {
+		features.tx.prefixReplay = prefixReplay // adopt before any fallible validation/read
+	}
 	if callErr != nil {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
 		return nil, prefixReplay, receipt, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "device target verification", Cause: callErr}
@@ -155,6 +186,15 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 	if request.CapturePrefixReplay && prefixReplay == nil {
 		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
 		return nil, nil, receipt, fmt.Errorf("model: Qwen3.8 device verification omitted its admitted prefix-replay checkpoint")
+	}
+	if features != nil {
+		if !features.panelValid() || result.LogitsRows.Dtype != compute.F32 || result.LogitsRows.Backend() != s.Backend || (request.CaptureRawHidden && (result.RawHiddenRows.Dtype != compute.F32 || result.RawHiddenRows.Backend() != s.Backend)) {
+			return nil, prefixReplay, receipt, fmt.Errorf("model: feature panel returned foreign or non-F32 outputs")
+		}
+		if err := features.readPanelFeatures(ids, startPos, result.FeatureRows); err != nil {
+			return nil, prefixReplay, receipt, err
+		}
+		receipt.Accounting.KnownMemoryBytes += int64(len(ids)*s.M.Cfg.HiddenSize*len(features.layers)) * 4
 	}
 	vocab := s.M.Cfg.VocabSize
 	if result.Tokens != len(ids) || s.halKV.Len() != startPos+len(ids) || result.LastHidden.Buf() == nil || !result.LastHidden.Ready() || result.LogitsRows.Buf() == nil || !result.LogitsRows.Ready() || len(result.LogitsRows.Shape) != 2 || result.LogitsRows.Shape[0] != len(ids) || result.LogitsRows.Shape[1] != vocab {
@@ -192,6 +232,9 @@ func (s *Session) verifyQwen35DevicePanelTransaction(ids []int, boundaryLogits [
 		prefixReplay = &qwen35TargetHiddenPrefixReplay{
 			inner: prefixReplay, target: s, base: startPos, tokens: append([]int(nil), ids...),
 		}
+	}
+	if features != nil {
+		features.tx.prefixReplay = prefixReplay // retain raw-hidden trimming wrapper too
 	}
 	receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
 	receipt.OneOperation = true

@@ -1472,6 +1472,11 @@
           "category": "incidental",
           "reason": "Names required draft-state cache evidence in an intake checklist; it implements no cache and establishes no ownership, reuse, or correctness guarantee.",
           "token": "draft_state_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Integer report field populated from the existing session SequencePosition and checked to require a fresh zero-token starting state in each measurement arm. It implements no new cache, reuse policy, or cache lifecycle.",
+          "token": "InitialCacheTokens"
         }
       ],
       "exclude": [
@@ -1534,6 +1539,7 @@
         "GoCacheLowBytes",
         "GoCacheMinAge",
         "INVALID_CACHE_EVIDENCE",
+        "InitialCacheTokens",
         "InputCached",
         "InputCachedPerMillion",
         "InputUncached",
@@ -4583,6 +4589,11 @@
           "category": "incidental",
           "reason": "Private argv composition helper combining the existing OpenCode standalone-mode and model-pinning helpers; it is not an independent guard, policy, or execution owner.",
           "token": "guardOpenCodeCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON key on the private benchmark report phase field DiagnosticOpen. It labels elapsed time and existing device-counter snapshots across the existing diagnostic session and sidecar open; it creates no new guard or admission mechanism.",
+          "token": "diagnostic_gate_session_sidecar_open_and_verification"
         }
       ],
       "exclude": [
@@ -4720,6 +4731,7 @@
         "coreLockLandGate",
         "demoteReservedGuardBanner",
         "diagnoseRecentCodexLoopsForGate",
+        "diagnostic_gate_session_sidecar_open_and_verification",
         "dispatchGateProvenance",
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
@@ -7288,6 +7300,16 @@
           "category": "incidental",
           "reason": "Issue #12727 internal validator for the existing model Session feature-transaction contract; this helper introduces no separate session type or lifecycle.",
           "token": "validateQwen35TargetFeatureSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON key on the private benchmark report phase field DiagnosticOpen. It labels observations of existing diagnostic session and sidecar opening, not a new session type or lifecycle.",
+          "token": "diagnostic_gate_session_sidecar_open_and_verification"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark phase report field holding duration and device-counter snapshots around existing session creation. It defines no new session implementation or runtime lifecycle.",
+          "token": "SessionOpen"
         }
       ],
       "exclude": [
@@ -7412,6 +7434,7 @@
         "SessionMoveSafePointRequested",
         "SessionMoveTransition",
         "SessionObjective",
+        "SessionOpen",
         "SessionOutcome",
         "SessionPanel",
         "SessionPlacement",
@@ -7474,6 +7497,7 @@
         "decodeSessionClientJSON",
         "defaultServeSessionStatePath",
         "defaultclaudesessionsperaccount",
+        "diagnostic_gate_session_sidecar_open_and_verification",
         "dispatchSessionPIDIdentity",
         "dispatchSessionStartedTime",
         "dispatchsessionsaudittest",
@@ -9860,6 +9884,11 @@
           "category": "incidental",
           "reason": "Pinned DFlash2 tensor-key spelling for base convolution coefficients; an upstream checkpoint field rather than a gateway or execution engine.",
           "token": "base_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean report field populated by the existing compute.KernelProfileReaderRegistered observation. It records reader availability, not a new gateway, engine, registry, or execution guarantee.",
+          "token": "KernelProfileRegistered"
         }
       ],
       "exclude": [
@@ -9894,6 +9923,7 @@
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
         "KernelProfile",
+        "KernelProfileRegistered",
         "KernelRevision",
         "KernelRow",
         "KernelShare",
@@ -14376,6 +14406,11 @@
           "category": "incidental",
           "reason": "Issue #12640 side-effect-free backend capability probe declared by a private structural interface for bounded DSpark mean extraction. Its name is not a product support or maturity claim, and the interface explicitly requires separate implementation and hardware evidence.",
           "token": "SupportsV41DSparkMeanRange"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean diagnostic result set only after the two measured token-ID sequences compare equal. It is a per-run observation, not a product support/maturity designation or a claim that this unrun benchmark has established parity.",
+          "token": "ExactTokenParity"
         }
       ],
       "exclude": [
@@ -14417,6 +14452,7 @@
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
+        "ExactTokenParity",
         "ExcludedUnsupportedProvider",
         "FAK_PARITY_API_KEY",
         "FormatUnsupported",
@@ -15911,6 +15947,11 @@
           "category": "incidental",
           "reason": "same planner render method, flagged under the render-materialize family",
           "token": "RenderIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Explanatory prose stating that the caller supplies prompt token IDs and that template rendering is outside the measurement. It introduces no renderer, materializer, or rendering phase.",
+          "token": "Prerendered"
         }
       ],
       "id": "render-materialize",
@@ -15920,6 +15961,7 @@
         "MaterializeOwned",
         "MaterializedStateDigest",
         "PrematureSurrender",
+        "Prerendered",
         "RenderAging",
         "RenderAnatomyPortfolioText",
         "RenderAnatomyText",

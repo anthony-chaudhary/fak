@@ -16,6 +16,7 @@ import (
 )
 
 var _ Qwen35SequenceRawHiddenBackend = (*vulkanBackend)(nil)
+var _ Qwen35SequenceFeatureRowsBackend = (*vulkanBackend)(nil)
 
 func (*vulkanBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
@@ -26,6 +27,8 @@ func (*vulkanBackend) Qwen35SequenceEmbeddingRowsPath() string {
 func (*vulkanBackend) Qwen35SequenceAllLogitsPath() string { return Qwen35SequenceAllLogitsPath }
 
 func (*vulkanBackend) Qwen35SequenceRawHiddenPath() string { return Qwen35SequenceRawHiddenPath }
+
+func (*vulkanBackend) Qwen35SequenceFeatureRowsPath() string { return Qwen35SequenceFeatureRowsPath }
 
 func qwen35VulkanSequenceError(stage string, layer int, reason string) error {
 	return &Qwen35SequenceError{Stage: stage, Layer: layer, Reason: reason}
@@ -58,8 +61,8 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	if req.Path != Qwen35SequencePrefillPath || len(req.TokenIDs) == 0 || len(req.TokenIDs) > math.MaxInt32 || req.StartPos < 0 || req.StartPos > math.MaxInt32-len(req.TokenIDs) {
 		return fail("request", "invalid capability, empty token panel, or invalid position range")
 	}
-	if req.CapturePrefixReplay && (!req.NeedAllLogits || len(req.TokenIDs) > 4) {
-		return fail("request", "prefix replay capture requires all-row logits and 1..4 tokens")
+	if err := qwen35SequenceFeatureContract(req); err != nil {
+		return nil, err
 	}
 	for _, d := range []int{req.Hidden, req.Intermediate, req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim, req.NumKeyHeads, req.NumValueHeads, req.KeyHeadDim, req.ValueHeadDim, req.ConvKernel} {
 		if d <= 0 || int64(d) > math.MaxInt32 {
@@ -511,7 +514,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	defer vulkanMu.Unlock()
 	start := len(v.transient)
 	stage, layerIndex := "request", -1
-	executing := false
+	executing, completed := false, false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			cause, ok := recovered.(error)
@@ -519,6 +522,11 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 				cause = fmt.Errorf("%v", recovered)
 			}
 			err = &Qwen35SequenceError{Stage: stage, Layer: layerIndex, Cause: cause}
+		}
+		// A nil-payload panic must not look like a successful empty result. A
+		// goroutine exit still unwinds, but releases every transient first.
+		if !completed && err == nil {
+			err = qwen35VulkanSequenceError(stage, layerIndex, "sequence execution interrupted")
 		}
 		if err != nil {
 			if executing {
@@ -586,6 +594,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	}
 	attention := 0
 	var replayProjections []vulkanQwen35ReplayProjection
+	var featureRows []Qwen35SequenceFeatureRows
 	for i, layer := range req.Layers {
 		layerIndex, stage = i, "input-norm"
 		C.fvk_batch_begin()
@@ -649,6 +658,13 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(activated), C.int(tokens*req.Intermediate))
 		delta := mul(layer.Down, activated)
 		C.fvk_add_f32(v.vp(x), v.vp(delta), C.int(tokens*req.Hidden))
+		if len(featureRows) < len(req.FeatureLayers) && i == req.FeatureLayers[len(featureRows)] {
+			// x is updated in place by later blocks; keep a distinct device copy.
+			stage = "feature-copy"
+			tap, _ := v.devTr([]int{tokens, req.Hidden}, F32)
+			C.fvk_d2d(v.vp(tap), v.vp(x), C.size_t(tokens*req.Hidden*4))
+			featureRows = append(featureRows, Qwen35SequenceFeatureRows{Layer: i, Rows: tap})
+		}
 		// Default: no per-layer submit/fence. The whole prefill is bracketed by the
 		// fvk_batch_begin() at the top of this loop and the single final-fence below.
 		// Mid-batch fvk_free parks scratch in g_batchFreed instead of recycling it, so
@@ -662,6 +678,9 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 			}
 		}
 		keep := append([]Tensor{x}, qwen35ReplayProjectionTensors(replayProjections)...)
+		for _, feature := range featureRows {
+			keep = append(keep, feature.Rows)
+		}
 		v.qwen35VulkanSequenceReleaseLocked(start, keep...)
 	}
 	layerIndex, stage = -1, "output-norm"
@@ -700,6 +719,9 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		keep = append(keep, rawHiddenRows)
 	}
 	keep = append(keep, qwen35ReplayProjectionTensors(replayProjections)...)
+	for _, feature := range featureRows {
+		keep = append(keep, feature.Rows)
+	}
 	v.qwen35VulkanSequenceReleaseLocked(start, keep...)
 	var prefixReplay Qwen35SequencePrefixReplay
 	if req.CapturePrefixReplay {
@@ -717,6 +739,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		checkpoint.owned = owned
 		prefixReplay = checkpoint
 	}
-	result = Qwen35SequencePrefillResult{LastHidden: last, RawHiddenRows: rawHiddenRows, Logits: logits, LogitsRows: logitsRows, PrefixReplay: prefixReplay, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
+	result = Qwen35SequencePrefillResult{LastHidden: last, RawHiddenRows: rawHiddenRows, Logits: logits, LogitsRows: logitsRows, FeatureRows: featureRows, PrefixReplay: prefixReplay, Tokens: tokens, Transfers: Qwen35SequenceTransferCounters{H2DBytes: h2d, D2HBytes: d2h, ActivationH2DBytes: h2d, ActivationD2HBytes: d2h}}
+	completed = true
 	return result, nil
 }

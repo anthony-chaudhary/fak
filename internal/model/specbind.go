@@ -256,17 +256,39 @@ func (tx *qwen35MTPTargetTransaction) commitOwned(accepted int) (logits []float3
 	if tx == nil || tx.closed || tx.snapshot == nil {
 		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
 	}
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		recovered := recover()
+		logits = nil
+		cause := errors.New("commit interrupted before completion")
+		if recovered != nil {
+			cause = fmt.Errorf("commit interrupted: %v", recovered)
+		}
+		err = cause
+		if !tx.closed {
+			// Restore can itself interrupt. Register terminal release first and
+			// preserve the original failure over a secondary cleanup panic.
+			suppressBackendCleanupPanic(func() {
+				defer func() { suppressBackendCleanupPanic(tx.finish) }()
+				err = tx.rollbackFailure("commit replay", cause)
+			})
+		}
+	}()
+	logits, err = tx.commitPreparedOwned(accepted)
+	completed = true
+	return logits, err
+}
+
+// Only commitOwned calls this body, after installing its completion guard.
+func (tx *qwen35MTPTargetTransaction) commitPreparedOwned(accepted int) (logits []float32, err error) {
 	if accepted < 0 || accepted > len(tx.draft) {
 		return nil, tx.rollbackFailure("commit", fmt.Errorf("accepted prefix %d outside draft length %d", accepted, len(tx.draft)))
 	}
 	tx.receipt.AcceptedTokens = accepted
 	tx.receipt.RejectedTokens = len(tx.draft) - accepted
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			logits = nil
-			err = tx.rollbackFailure("commit replay", fmt.Errorf("%v", recovered))
-		}
-	}()
 	if tx.verifiedLive && accepted == len(tx.draft) {
 		started := time.Now()
 		logits = tx.lastLogits
@@ -447,20 +469,28 @@ func (tx *qwen35MTPTargetTransaction) finish() {
 	if tx.closed {
 		return
 	}
-	if tx.prefixReplay != nil {
-		tx.prefixReplay.Close()
-		tx.prefixReplay = nil
-	}
-	if tx.checkpoint != nil {
-		tx.checkpoint.Close()
-		tx.checkpoint = nil
-	}
-	tx.snapshot.closeOwned(tx.target.backendExecutionScope)
-	tx.snapshot = nil
-	tx.lastLogits = nil
-	tx.verifiedRows = nil
+	// Publish terminal ownership before any callback: a release can reenter,
+	// panic after freeing, or exit its goroutine. None may strand a sibling or
+	// make a later Abort retry an already-released resource.
+	replay, checkpoint, snapshot := tx.prefixReplay, tx.checkpoint, tx.snapshot
+	scope := tx.target.backendExecutionScope
+	tx.prefixReplay, tx.checkpoint, tx.snapshot = nil, nil, nil
+	tx.lastLogits, tx.verifiedRows = nil, nil
 	tx.closed = true
 	tx.closeCount++
+	runBackendSiblingCleanup(
+		func() {
+			if replay != nil {
+				replay.Close()
+			}
+		},
+		func() {
+			if checkpoint != nil {
+				checkpoint.Close()
+			}
+		},
+		func() { snapshot.closeOwned(scope) },
+	)
 }
 
 // SpecDecodeGreedy runs greedy speculative decoding of the target Session using the drafter
