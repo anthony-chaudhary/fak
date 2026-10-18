@@ -193,6 +193,6 @@ on an EP-capable serving node.**
 
 - Native EP-sharded track (the side that must cite this floor):
   [GLM52-EXPERT-PARALLEL-MULTIGPU-2026-06-29](../notes/GLM52-EXPERT-PARALLEL-MULTIGPU-2026-06-29.md).
-- Serving-baseline tuned-gate provenance: [BENCHMARK-CONTRACT-MAP.md](BENCHMARK-CONTRACT-MAP.md#serving-baseline-provenance-the-vllm_compile-block-1731) (`internal/vllmcompile`).
+- Serving-baseline tuned-gate provenance: [BENCHMARK-CONTRACT-MAP.md](BENCHMARK-CONTRACT-MAP.md#serving-baseline-provenance-the-vllm_compile-block-1731).
 - Sibling vLLM plans: [GPU-SERVER-GLM52-VLLM-AGENTIC-BENCHMARKS.md](GPU-SERVER-GLM52-VLLM-AGENTIC-BENCHMARKS.md) (agentic/gateway-tax), [VLLM-HEADTOHEAD-RESULTS.md](VLLM-HEADTOHEAD-RESULTS.md) (engine-tax scaffold).
 - Authority ledger (the only place a number becomes authoritative): [`../../BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).

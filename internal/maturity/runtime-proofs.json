@@ -868,11 +868,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/deepseekv4kv",
-            "lane": "deepseekv4kv"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/deepseekv4moe",
             "lane": "deepseekv4moe"
         },
@@ -1095,11 +1090,6 @@
             "command": "fak version modules",
             "output_contains": "internal/dropin",
             "lane": "dropin"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/dsparity",
-            "lane": "dsparity"
         },
         {
             "command": "fak version modules",
@@ -1345,11 +1335,6 @@
             "command": "fak version modules",
             "output_contains": "internal/fp4meta",
             "lane": "fp4meta"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/fp4runtime",
-            "lane": "fp4runtime"
         },
         {
             "command": "fak version modules",
@@ -2358,11 +2343,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/microscaleeval",
-            "lane": "microscaleeval"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/milestoneburndown",
             "lane": "milestoneburndown"
         },
@@ -2485,11 +2465,6 @@
             "command": "fak version modules",
             "output_contains": "internal/modver",
             "lane": "modver"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/mtpeval",
-            "lane": "mtpeval"
         },
         {
             "command": "fak version modules",
@@ -2913,11 +2888,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/qevicteval",
-            "lane": "qevicteval"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/quality",
             "lane": "quality"
         },
@@ -2928,23 +2898,8 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/quantcompat",
-            "lane": "quantcompat"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/quantdetect",
             "lane": "quantdetect"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/quantfixture",
-            "lane": "quantfixture"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/quantlicense",
-            "lane": "quantlicense"
         },
         {
             "command": "fak version modules",
@@ -2958,23 +2913,8 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/quantobs",
-            "lane": "quantobs"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/quantpolicy",
-            "lane": "quantpolicy"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/quantprov",
             "lane": "quantprov"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/quantroute",
-            "lane": "quantroute"
         },
         {
             "command": "fak version modules",
@@ -3140,16 +3080,6 @@
             "command": "fak version modules",
             "output_contains": "internal/reportledger",
             "lane": "reportledger"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/requanteval",
-            "lane": "requanteval"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/residualquant",
-            "lane": "residualquant"
         },
         {
             "command": "fak help resume",
@@ -4185,11 +4115,6 @@
             "command": "fak version modules",
             "output_contains": "internal/versionskew",
             "lane": "versionskew"
-        },
-        {
-            "command": "fak dev devindex leaf vllmcompile",
-            "output_contains": "vllmcompile",
-            "lane": "vllmcompile"
         },
         {
             "command": "fak version modules",

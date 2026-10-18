@@ -68,8 +68,8 @@ var witnessSeeds = []witnessSeed{
 	{
 		ClusterID: "kernels_compilation:title:torch-compile",
 		Issue:     1731,
-		Paths:     []string{"internal/vllmcompile"},
-		Mode:      Landed,
+		Mode:      Partial,
+		Reason:    "issue #1731 closed, but its tuned-baseline gate package was removed with no caller; no live repository witness remains",
 		Source:    "docs/notes/VLLM-OPTIMIZATION-REUSE-TICKET-MAP-2026-06-30.md#ticket-map-row-11",
 	},
 	{

@@ -145,7 +145,6 @@ concurrent = [
   "tokenprofile",
   "generationctl",
   "mtptune",
-  "mtpeval",
   "faultlab",
   "gcpgpu",
   "superstream",
@@ -325,11 +324,11 @@ concurrent = [
   "commit-audit", "commitissuelink", "commitsubject", "compactcohere", "completiondist",
   "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
   "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "dataslot", "deadlineadmit",
-  "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
+  "deepseekbench", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
   "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
   "dispatchdoa",
   "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
-  "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim", "dsparity",
+  "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim",
   "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge", "escalation",
   "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
   "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
@@ -381,7 +380,7 @@ concurrent = [
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
   "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
   "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
-  "vcachescore", "vcachesnapshot", "verattest", "verifierexposure", "vllmcompile",
+  "vcachescore", "vcachesnapshot", "verattest", "verifierexposure",
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
   "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
   "worktreewitness", "xenginekv", "xprobe",
@@ -395,8 +394,6 @@ concurrent = [
   "streamrules", # #5920: pure streaming rule detection primitive; see [lanes.trees].
   "archreport",
   "archcheck",
-  "fp4runtime",
-  "quantpolicy",
   # #6407: internal/mixedprecision (shipped for #6254) had NO lane, so the lane-coverage
   # audit resolved it to an EMPTY tree -- and an empty tree conservatively overlaps every
   # live lease (internal/laneadmit/laneadmit.go), collapsing unrelated lease concurrency
@@ -468,15 +465,15 @@ concurrent = [
   "launchshim", "learningmesh", "learningobservation", "lifecycleadapter", "lightgapscore", "lightroteval",
   "linefmt", "llamacppinterop", "localadmission", "localappcert", "localappcontract", "localapphelper",
   "localappmetrics", "localappux", "managedinventory", "markerblock",
-  "memoryindex", "microscaleeval", "modelloadplan", "modelpack", "modelsrc", "nativefirst",
+  "memoryindex", "modelloadplan", "modelpack", "modelsrc", "nativefirst",
   "nativeperf", "nativeperfartifact", "nativeperfbackend", "nativeperfcorrelation", "nativeperfcoverage", "nativeperfobscontract",
   "nativeperfslo", "numbermap", "openaiadapter", "opensweharder", "orchestration", "orientation",
   "pagespublish", "parentdir", "perfrsiscore", "portability", "portabilitycontract", "portabilitylab",
   "privacy", "processalive", "processforest", "processstart", "proctest", "projectionspine",
-  "providercost", "providerjobaccounting", "qevicteval", "quantbench", "quantcompat", "quantfixture",
-  "quantlicense", "quantmatrix", "quantmeta", "quantobs", "quantroute", "quantwatch",
+  "providercost", "providerjobaccounting", "quantbench",
+  "quantmatrix", "quantmeta", "quantwatch",
   "qwen38ladder", "qwen38quant", "qwen38quantrun", "qwen4exp", "qwenflashnext", "qwensemanticstop",
-  "qwenworkbudget", "refid", "releasereadiness", "requanteval", "residualquant",
+  "qwenworkbudget", "refid", "releasereadiness",
   "resumeactuator", "rolloutmode", "rotationmeta", "runtimecap", "scorecardportfolio", "scratchjanitor", "scratchquery",
   "serverartifact", "servicewatchdog", "sessiondiag", "sessionmine", "sessionrecovery", "sessionregistry",
   "shellprov", "shelltoken", "sortkeys", "speedab", "stackpreflight", "stackresolve",
@@ -714,8 +711,6 @@ autopick = [
   "lightgapport",
   "kvquantmeta",
   "quantdetect",
-  "fp4runtime",
-  "quantpolicy",
   "codexresume",
   "depthadmit",
   "managedocs",
@@ -1069,7 +1064,6 @@ executionroute = ["internal/executionroute/**"]
 market = ["internal/market/**"]
 marketplace = ["internal/marketplace/**"]
 mtptune = ["internal/mtptune/**", "cmd/tunemtp/**"]
-mtpeval = ["internal/mtpeval/**"]
 faultlab = ["internal/faultlab/**"]
 gcpgpu = ["internal/gcpgpu/**"]
 superstream = ["internal/superstream/**"]
@@ -1164,7 +1158,6 @@ ctxplans = ["internal/ctxplans/**"]
 dataslot = ["internal/dataslot/**"]
 deadlineadmit = ["pkg/deadlineadmit/**"]
 deepseekbench = ["internal/deepseekbench/**"]
-deepseekv4kv = ["internal/deepseekv4kv/**"]
 deepseekv4moe = ["internal/deepseekv4moe/**"]
 defaultvaluescore = ["internal/defaultvaluescore/**"]
 demo = ["internal/demo/**"]
@@ -1185,7 +1178,6 @@ dojocal = ["internal/dojocal/**"]
 dojopost = ["internal/dojopost/**"]
 dormancy = ["internal/dormancy/**"]
 dormancysim = ["internal/dormancysim/**"]
-dsparity = ["internal/dsparity/**"]
 edittx = ["internal/edittx/**"]
 egressfloor = ["internal/egressfloor/**"]
 envconfiglint = ["internal/envconfiglint/**"]
@@ -1440,7 +1432,6 @@ vcachescore = ["internal/vcachescore/**"]
 vcachesnapshot = ["internal/vcachesnapshot/**"]
 verattest = ["internal/verattest/**"]
 verifierexposure = ["internal/verifierexposure/**"]
-vllmcompile = ["internal/vllmcompile/**"]
 watchdoghealth = ["internal/watchdoghealth/**"]
 whatschanged = ["internal/whatschanged/**"]
 wipattr = ["internal/wipattr/**"]
@@ -1472,8 +1463,6 @@ quantprov = ["internal/quantprov/**"]
 lightgapport = ["internal/lightgapport/**"]
 kvquantmeta = ["internal/kvquantmeta/**"]
 quantdetect = ["internal/quantdetect/**"]
-fp4runtime = ["internal/fp4runtime/**"]
-quantpolicy = ["internal/quantpolicy/**"]
 codexresume = ["internal/codexresume/**"]
 mixedprecision = ["internal/mixedprecision/**"] # #6407: see the [lanes].concurrent note.
 depthadmit = ["internal/depthadmit/**"]
@@ -1632,7 +1621,6 @@ localappux = ["internal/localappux/**"]
 managedinventory = ["internal/managedinventory/**"]
 markerblock = ["internal/markerblock/**"]
 memoryindex = ["internal/memoryindex/**"]
-microscaleeval = ["internal/microscaleeval/**"]
 modelloadplan = ["internal/modelloadplan/**"]
 modelpack = ["internal/modelpack/**"]
 modelsrc = ["internal/modelsrc/**"]
@@ -1663,15 +1651,9 @@ proctest = ["internal/proctest/**"]
 projectionspine = ["internal/projectionspine/**"]
 providercost = ["internal/providercost/**"]
 providerjobaccounting = ["internal/providerjobaccounting/**"]
-qevicteval = ["internal/qevicteval/**"]
 quantbench = ["internal/quantbench/**"]
-quantcompat = ["internal/quantcompat/**"]
-quantfixture = ["internal/quantfixture/**"]
-quantlicense = ["internal/quantlicense/**"]
 quantmatrix = ["internal/quantmatrix/**"]
 quantmeta = ["internal/quantmeta/**"]
-quantobs = ["internal/quantobs/**"]
-quantroute = ["internal/quantroute/**"]
 quantwatch = ["internal/quantwatch/**"]
 qwen38ladder = ["internal/qwen38ladder/**"]
 qwen38quant = ["internal/qwen38quant/**"]
@@ -1682,8 +1664,6 @@ qwensemanticstop = ["internal/qwensemanticstop/**"]
 qwenworkbudget = ["internal/qwenworkbudget/**"]
 refid = ["internal/refid/**"]
 releasereadiness = ["internal/releasereadiness/**"]
-requanteval = ["internal/requanteval/**"]
-residualquant = ["internal/residualquant/**"]
 resumeactuator = ["internal/resumeactuator/**"]
 rolloutmode = ["internal/rolloutmode/**"]
 rotationmeta = ["internal/rotationmeta/**"]

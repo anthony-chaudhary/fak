@@ -108,13 +108,13 @@ meaningless. So every serving row that quotes a vLLM (or vLLM-family) baseline �
 fak-fronted vLLM, and SGLang/llama rows **when comparable** — must carry a `vllm_compile`
 provenance block, recorded at benchmark start.
 
-The block and its tuned-baseline gate are defined in `internal/vllmcompile`
-(`vllmcompile.Block`), stdlib-only and off the request path. Each block records, per engine
-row: the engine commit/version, whether the compile-artifact cache was enabled (and its
+The block is a documented contract only: a Go classifier for it (`internal/vllmcompile`) had
+no producer or consumer in any serving bench and was removed, so no executable gate enforces it
+today. Each block records, per engine row: the engine commit/version, whether the compile-artifact cache was enabled (and its
 key/hash when exposed), the CUDA-graph mode and capture sizes, warmup completion, and whether
 any request triggered compilation during the measured window.
 
-`Block.Classify()` folds that state into one of three classes, and the gate **fails closed**:
+The classification folds that state into one of three classes, and it **fails closed**:
 
 - **`tuned`** — cache enabled, warmup complete, no request-time compilation. The only class a
   net-true-value serving claim may quote as a baseline.
@@ -124,17 +124,15 @@ any request triggered compilation during the measured window.
 - **`diagnostic`** — compile/warmup state was not observed, so the row cannot be *certified*
   tuned. Report it; do not quote it as tuned.
 
-`GateRows(...)` extends this across an A/B set: a comparison is tuned only when it has ≥1 row
-and **every** compared row is tuned — one cold raw-vLLM baseline poisons the whole compare even
-when the fak row is warm. The gate is the executable form of this issue's acceptance: a
-missing/disabled cache is labeled cold-start/diagnostic (not tuned), and a fixture with a
-request-time compilation event fails the tuned-baseline gate — witnessed by
-`TestClassifyAndGate` (`internal/vllmcompile/vllmcompile_test.go`).
+Across an A/B set, a comparison is tuned only when it has at least one row and **every**
+compared row is tuned: one cold raw-vLLM baseline poisons the whole compare even when the fak
+row is warm. A missing or disabled cache is labeled cold-start/diagnostic (not tuned), and a
+row with a request-time compilation event fails the tuned-baseline rule.
 
 This binds the serving batteries above (notably the [#870](https://github.com/anthony-chaudhary/fak/issues/870)
 GLM-5.2/vLLM battery): before any serving delta is attributed to fak, each quoted engine row
-records its `vllm_compile` block and passes the gate. Wiring the block into the per-producer
-serving-bench artifacts is tracked as the remaining `internal/**` step under #1731.
+records its `vllm_compile` block and is classified by these rules. No per-producer
+serving-bench artifact emits the block or runs an executable gate yet.
 
 ## Which fak value each row measures
 

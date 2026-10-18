@@ -160,10 +160,10 @@ var tier = map[string]int{
 	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachelayout": 1, "replayoracle": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "runtimecap": 3, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "researcharm": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 2, "benchingest": 2, "binstamp": 2, "cachewitness": 2, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "modeldescriptor": 1, "newleaf": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
-	"newmodel":      2,                                                        // deterministic onboarding compiler composed over the primitive modeldescriptor contract (#9421).
-	"reportledger":  2,                                                        // the (date, generated-at) ordering-key contract + LatestBefore binding the report packages' ledger shims each carried (#10405); composes jsonlledger(1) only, stdlib otherwise, off the hot path.
-	"sessiondiag":   2,                                                        // bounded redacted Codex SQLite/log and process-incident classifier (#5992); stdlib-only, off the hot path.
-	"deepseekbench": 1, "deepseekv4kv": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench/KV fixture cores (#3014/#3017), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
+	"newmodel":      2,                                     // deterministic onboarding compiler composed over the primitive modeldescriptor contract (#9421).
+	"reportledger":  2,                                     // the (date, generated-at) ordering-key contract + LatestBefore binding the report packages' ledger shims each carried (#10405); composes jsonlledger(1) only, stdlib otherwise, off the hot path.
+	"sessiondiag":   2,                                     // bounded redacted Codex SQLite/log and process-incident classifier (#5992); stdlib-only, off the hot path.
+	"deepseekbench": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench core (#3014), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
 	"deepseekv4moe": 2,              // DeepSeek V4 MoE fixture/bench core (#3018) is a foundation-composite, NOT a primitive: it assembles the shared offline eviction oracle (replayoracle(1)) and the shared numeric helpers (mathx(1)) into the expert-cache policy bench, so it imports two sibling primitives rather than "nothing internal"; off the hot path.
 	"guardvars":     1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
 	"glm52prefillsweep": 2, "turnkind": 1, // glm52prefillsweep: GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); imports windowgate(1) for hidden subprocesses. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
@@ -526,7 +526,6 @@ var tier = map[string]int{
 	"attemptbudget":       2, // pure per-issue attempt-budget fold (#1777): counts an issue's recorded failed attempts against a budget and holds it for triage once crossed, naming the last failure class; stdlib-only, off the hot path.
 	"timeoutphase":        1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
 	"vllmquant":           1, // pure vLLM quantization capability-contract adjudication; stdlib-only, off the hot path.
-	"vllmcompile":         1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":      1,
 	"managedinventory":    1, // public-safe managed-agent object registry + catalog validator/renderer; stdlib-only, imports nothing internal, off the hot path.
 	"portabilitycontract": 1, // versioned managed-agent portability object/package/transaction contract; stdlib-only, imports nothing internal, off the hot path.
@@ -550,7 +549,6 @@ var tier = map[string]int{
 	"waiting":               2, // R3 waiting-on-human queue (#2272, epic #2269): pure fold over loopmgr's loop-event ledger turning each blocked-on-operator notify into one kernel object with age, held resources, deadline, and the safe default that fires on expiry; ack-closure honestly fenced not_yet pending the R2 escalation packet (#2271); imports loopmgr(1), off the hot path.
 	"chatopsdetach":         1, // detached-execution decision kernel for chatops act verbs (#2265, epic #2259 C5): the pure fold that routes an inbound act verb + its guarded-dispatch admission verdict to dispatch-once / re-ack / structured-refuse over a command-nonce spool, plus the stall-to-blockers escalation judge. State in, decision out; imports nothing internal, off the hot path — the seam the (not-yet-landed) chatops door binds to.
 	"godfileceiling":        2,
-	"microscaleeval":        1,
 	"microagent":            5,
 	"sessionmine":           2, // offline normalization and ranking of local session telemetry; imports processalive(1), no runtime kernel.
 	"sessionsearch":         3, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
@@ -570,7 +568,6 @@ var tier = map[string]int{
 	"brittleness":           1,
 	"codegraph":             1,
 	"codesearch":            5, // composes selfquery(3)+trigram/astquery/codegraph(1) into the `fak dev codesearch` engine (#3434 dogfood wiring)
-	"dsparity":              1,
 	"shadowgit":             2,
 	"signals":               1,
 	"trajquery":             1,
@@ -648,33 +645,24 @@ var tier = map[string]int{
 	"cubicquanteval":        1, // pinned-codebook quantization evaluation; stdlib-only leaf.
 	"kvquantquality":        1, // KV quantization quality budgets and witness parser; stdlib-only leaf.
 	"kvvectoreval":          1, // attention-preserving KV vector quantization evaluation; stdlib-only leaf.
-	"qevicteval":            1, // recoverable KV eviction evaluation; stdlib-only leaf.
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
 	"kvquantmeta":           1,
 	"ggufinterop":           2, // GGUF metadata adapter over ggufload into the neutral quantization contract (#6231).
 	"llamacppinterop":       2, // versioned external llama.cpp delegation adapter over quantization metadata (#6232).
-	"quantcompat":           2, // artifact/runtime/hardware compatibility contract (#6224); imports quantmeta(1).
-	"quantroute":            2, // ordered quantization compatibility routing contract (#6225); imports quantcompat(2).
-	"quantfixture":          1, // stdlib-only synthetic redistributable artifact fixtures and verifier (#6230).
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"qwen38quant":           1, // stdlib-only evidence contract and validator for the Qwen3.8 quantization campaign (#8307).
 	"qwen38quantrun":        2, // endpoint runner depends on the tier-1 campaign evidence contract (#8343).
 	"modelperfobs":          3, // OpenAI-compatible request measurement and JSONL report leaf; stdlib-only, off the hot path (#8389).
 	"quantdetect":           1,
-	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
 	"bitnetruntime":         1, // stdlib-only BitNet runtime delegation and host-compatibility contract; discovers external runtimes but does not execute a model kernel.
-	"quantpolicy":           2, // stdlib-only structural quantization capability policy; no quantizer, conversion, runtime, or model kernel.
-	"requanteval":           1,
 	"lightroteval":          1,
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
 	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
-	"quantlicense":          1, // stdlib-only license-chain contract and evidence gate.
 	"codebookmeta":          1, // stdlib-only quantization codebook metadata and adjudication; no model kernel.
 	"mixedprecision":        1, // layerwise mixed-precision assignment and evidence contract; no runtime kernel.
 	"quantmatrix":           1, // stdlib-only public quantization support/delegation registry and docs parser; no model kernel.
-	"residualquant":         1, // stdlib-only RRQ metadata/research adjudication; no model kernel.
 	"rotationmeta":          1, // stdlib-only rotation-transform metadata and runtime capability adjudication; no model kernel.
 	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
 	"toolpriorbench":        1, // stdlib-only reproducible tool-name compatibility corpus and raw-call benchmark ledger (#6820).
@@ -704,7 +692,6 @@ var tier = map[string]int{
 	"harnessserve":          2, // bounded local-runtime supervisor composed over the processalive primitive.
 	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
 	"wavefuel":              1, // stdlib-only fleet-wave operator-receipt contract witness.
-	"quantobs":              1, // stdlib-only bounded quantization telemetry schema and encoder.
 	"bitnetmeta":            1, // stdlib-only low-bit artifact metadata contract and typed adjudication.
 	"workaccount":           1, // stdlib-only WORK DONE mechanism coverage registry and validator; off the runtime hot path.
 	"orientation":           2, // versioned temporal product-orientation snapshot; imports issue-free stdlib only, off the runtime hot path.
@@ -831,7 +818,6 @@ var tier = map[string]int{
 	"supervise":                  3, // contract reaper and stuck-loop detector (#11171); imports leaseref(2)+worktree(2), off the hot path.
 	"worktree":                   2, // ephemeral git worktree manager and janitor (#11169); imports leaseref(2), off the hot path.
 	"marketplace":                1,
-	"mtpeval":                    1,
 	"mtptune":                    1,
 	"dosadapter":                 1,
 	"framebus":                   1,

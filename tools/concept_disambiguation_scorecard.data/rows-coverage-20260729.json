@@ -1715,10 +1715,10 @@
     },
     {
       "id": "c729-valid-witness",
-      "canonical": "validWitness (two same-named witness membership tests)",
+      "canonical": "validWitness (trajctl witness-rung membership test)",
       "family": "witness-proof",
       "kind": "symbol",
-      "definition": "validWitness is a REUSED name for two different membership tests: internal/dsparity's map of accepted parity Witness values, and internal/trajctl's function over a WitnessRung. Both answer 'is this witness value in the closed set', over unrelated vocabularies.",
+      "definition": "validWitness (internal/trajctl/trajctl.go:333) reports whether a WitnessRung is one of trajctl's closed rungs (W0-W3); score and retention-summary validation refuse a value outside that set.",
       "distinction": "A per-package VOCABULARY check, not one shared validator - NOT a claim that a witness is TRUE of the tree; it only says the value is a known member.",
       "distinct_from": [
         "c729-discard-witnessed",

@@ -5,7 +5,8 @@ description: "Named work: Recurrent Residual Quantization: A Progressive Multi-P
 # Recurrent Residual Quantization evaluation
 
 **Named work:** *Recurrent Residual Quantization: A Progressive Multi-Precision Representation for LLMs*  
-**Disposition: ABSTAIN** from integration until a checkpoint and executable runtime are independently pinned. The metadata contract is suitable to **MONITOR** and can later **DELEGATE** execution to a pinned external runtime; fak does not claim an RRQ kernel.
+**Disposition: ABSTAIN** from integration until a checkpoint and executable runtime are independently pinned. **MONITOR** the source release; fak does not claim an RRQ kernel.  
+**Status:** research record only. The `internal/residualquant` metadata contract this page originally described had no caller in fak and was removed; it remains in git history.
 
 ## Pinned source and reproduction
 
@@ -24,10 +25,9 @@ Bounded public reproduction (PowerShell):
 ```powershell
 Invoke-WebRequest https://arxiv.org/pdf/2608.04048v1 -OutFile 2608.04048v1.pdf
 (Get-FileHash 2608.04048v1.pdf -Algorithm SHA256).Hash.ToLower()
-go test ./internal/residualquant -run 'TestNamedResearchWitness|TestResearchEvaluationSeparatesEvidence|TestResearchDocumentPinsContract'
 ```
 
-The expected hash is the pin above. The Go witness independently reads this document and exercises at least three outcomes, including unknown contract, invalid tier, absent executable artifact, and a fully pinned delegate fixture.
+The expected hash is the pin above.
 
 ## What the paper actually evaluates
 
@@ -42,9 +42,9 @@ The following boundaries are mandatory:
 
 No lab GPU run is warranted for the present acceptance gate: there is no independently identifiable RRQ artifact or runtime to execute. Hardware absence is not the blocker; missing public executable inputs are. Once those inputs exist, the run must use the sanctioned lab/private-comms route and record artifact digest, recipe ID, runtime/version, device, commands, raw outputs, and observed quality/performance separately.
 
-## Typed capability contract
+## Typed capability contract (retired)
 
-`internal/residualquant` exposes `fak.residualquant/v1` and never silently chooses another precision or kernel.
+The removed `internal/residualquant` package exposed `fak.residualquant/v1` and never silently chose another precision or kernel. Its outcomes, kept here as the design record:
 
 | Request | Outcome | Reason |
 |---|---|---|
@@ -54,7 +54,7 @@ No lab GPU run is warranted for the present acceptance gate: there is no indepen
 | Execute without runtime ID + version + device | `unsupported` | `RESIDUALQUANT_RUNTIME_UNPINNED` |
 | Execute with all artifact, recipe, and runtime pins | `delegate` | `RRQ_RUNTIME_HANDOFF` and the exact runtime ID |
 
-The delegate result says only that the request is sufficiently identified to hand to an external runtime. It does not say the runtime supports the tensors, that quality is preserved, or that performance improves.
+The delegate result said only that the request was sufficiently identified to hand to an external runtime. It does not say the runtime supports the tensors, that quality is preserved, or that performance improves.
 
 ## Artifact tiers and cache transport decision
 
@@ -79,6 +79,6 @@ Change the disposition from **ABSTAIN** to integration only when all are indepen
 5. observed quality results against named baselines and datasets; and
 6. observed construction/load/serve measurements from sanctioned compute, with raw evidence.
 
-Until then, monitor the source release and return typed unsupported/delegate outcomes rather than inferring support.
+Until then, monitor the source release; fak does not infer support.
 
 

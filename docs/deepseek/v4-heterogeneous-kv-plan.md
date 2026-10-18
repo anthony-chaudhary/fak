@@ -200,7 +200,9 @@ witness and belongs to a follow-on implementation ticket, not landed by this not
 an extension of `internal/l3kv` + `internal/cachemeta`; or a **new leaf** `internal/deepseekv4kv`
 owning the plane + fixture and importing the seams above. Recommendation: the new leaf, so the
 plane composition is testable in isolation immune to concurrent shared-tree WIP — but recorded as
-a recommendation for the follow-on ticket, not a decision this design note makes.
+a recommendation for the follow-on ticket, not a decision this design note makes. (Outcome: the
+normalized-unit `internal/deepseekv4kv` fixture landed but had no caller and was removed;
+checkpoint-driven compressed-KV planning geometry lives in `internal/compute/compressed_kv.go`.)
 
 ## 7. Honest fences (what is NOT decided or built)
 

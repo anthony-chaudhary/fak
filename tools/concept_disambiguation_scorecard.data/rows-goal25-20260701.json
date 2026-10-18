@@ -1024,7 +1024,7 @@
       "canonical": "GateReport",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "GateReport (internal/vllmcompile) is the structured result a QA gate returns, folding its per-row verdicts into one pass/fail.",
+      "definition": "GateReport is a reused result-shape name: cachevaluereport.GateReport (internal/cachevaluereport/audit.go:494) is the cache-savings SLO verdict whose Pass=false is the non-zero exit, skillvalue.GateReport (internal/skillvalue/skillvalue.go:86) lists active skills lacking a valuation basis, and cmd/fak's gateReport is one pre-commit gate's line in the hooks `gates` array.",
       "distinction": "The RESULT shape a gate emits, not a gate mechanism.",
       "distinct_from": [
         "gate"

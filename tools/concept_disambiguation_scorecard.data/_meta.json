@@ -705,11 +705,6 @@
         },
         {
           "category": "incidental",
-          "reason": "Bounded quantobs schema symbol, not a cache concept.",
-          "token": "CodeKVCache"
-        },
-        {
-          "category": "incidental",
           "reason": "Low-cardinality metric counter for #2789, not a separate cache mechanism concept.",
           "token": "inferCacheCreationTokensTierObserved"
         },
@@ -3618,11 +3613,6 @@
           "category": "incidental",
           "reason": "idea-scout local data structure holding conversion filing checks",
           "token": "ConversionGate"
-        },
-        {
-          "category": "incidental",
-          "reason": "Bounded quantobs schema symbol, not a guard-gate concept.",
-          "token": "CodeRuntimeDelegated"
         },
         {
           "category": "incidental",
@@ -10641,11 +10631,6 @@
         },
         {
           "category": "incidental",
-          "reason": "Bounded quantobs schema symbol, not a policy-capability concept.",
-          "token": "EvidenceAdjudication"
-        },
-        {
-          "category": "incidental",
           "reason": "Implementation symbol for #1365 durable serve state, not a separate policy-capability concept.",
           "token": "serveDurabilityPosture"
         },
@@ -11997,11 +11982,6 @@
           "category": "incidental",
           "reason": "Study comparison row identifier, not a contextual configuration concept",
           "token": "ContextualID"
-        },
-        {
-          "category": "incidental",
-          "reason": "Bounded quantobs schema symbol, not a context-ctx concept.",
-          "token": "SensitiveContext"
         },
         {
           "category": "incidental",
@@ -13906,11 +13886,6 @@
           "category": "incidental",
           "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
           "token": "unsupported_activation"
-        },
-        {
-          "category": "incidental",
-          "reason": "Bounded quantobs schema symbol, not a support-maturity concept.",
-          "token": "CodeUnsupportedCombination"
         },
         {
           "category": "incidental",

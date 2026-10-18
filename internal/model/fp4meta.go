@@ -26,15 +26,12 @@ package model
 // The fixed definitions this file adjudicates against are the published ones, not fak's
 // preferences: NVFP4 is E2M1 elements in 16-element blocks with an E4M3 per-block scale plus a
 // per-tensor scale (two scale levels); MXFP4 (OCP microscaling) is E2M1 elements in 32-element
-// blocks with a single E8M0 (power-of-two) per-block scale. Both accumulate in FP32 — the same
-// stance internal/fp4runtime's compatibility matrix takes, where an fp16-accumulate profile is
-// a refusal, because summing 4-bit products in fp16 throws away the block dynamic range the
-// shared scale was chosen to preserve.
+// blocks with a single E8M0 (power-of-two) per-block scale. Both accumulate in FP32; an
+// fp16-accumulate profile is a refusal, because summing 4-bit products in fp16 throws away the
+// block dynamic range the shared scale was chosen to preserve.
 //
-// Sibling packages, and why this one is separate: internal/fp4runtime negotiates a pinned
-// artifact/runtime/GPU/accumulator REQUEST against an external compatibility MATRIX (delegating
-// to TensorRT-LLM and friends); this file adjudicates a single self-describing metadata blob at
-// the point the model loader has the bytes in hand and no matrix.
+// This file adjudicates a single self-describing metadata blob at the point the model loader has
+// the bytes in hand; it does not negotiate against any external runtime/GPU compatibility matrix.
 
 import (
 	"bytes"
@@ -221,7 +218,7 @@ func AdjudicateFP4Metadata(m FP4Metadata) FP4Result {
 
 	// The accumulator is judged against the format, not against taste: a shared block scale
 	// exists to hold the block's dynamic range, and summing the products in fp16/bf16 discards
-	// the range it bought. internal/fp4runtime refuses the same combination from its matrix.
+	// the range it bought.
 	if m.Accumulator != FP4AccumulatorFP32 {
 		return fp4Verdict(FP4Refuse, FP4ReasonUnsupportedCombination, nil,
 			fmt.Sprintf("%s blocks accumulate in fp32, got %q: a 4-bit product summed in %s discards the dynamic range the shared scale was chosen to preserve", m.Format, m.Accumulator, m.Accumulator))

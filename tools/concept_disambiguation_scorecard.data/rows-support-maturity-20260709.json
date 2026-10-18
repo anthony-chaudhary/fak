@@ -1,37 +1,13 @@
 {
   "rows": [
     {
-      "id": "x-support-maturity-dsparity",
-      "canonical": "dsparity",
-      "family": "support-maturity",
-      "kind": "subsystem",
-      "definition": "Package dsparity (internal/dsparity) is the pure, offline, dependency-free parity-harness SPECIFICATION for future DeepSeek-V4 native kernels (#3021): it encodes the parity rows and expected fields (invariance axis, tolerance, witness kind) a batch-invariant kernel must satisfy before a speed claim can close, runnable without real weights or a GPU.",
-      "distinction": "It is a DEEPSEEK-KERNEL determinism/parity SPECIFICATION package (schema + offline synthetic check), not the fak-vs-raw eval-routing parity witness (eveparity) nor a model-quality parity grader (qwen36parity).",
-      "distinct_from": [
-        "x-support-maturity-eveparity",
-        "qwen36parity",
-        "parity"
-      ],
-      "aliases": [
-        "dsparity",
-        "DsParity"
-      ],
-      "grounding": "dsparity",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-support-maturity-eveparity",
       "canonical": "eveparity",
       "family": "support-maturity",
       "kind": "subsystem",
       "definition": "Package eveparity (internal/eveparity) is the CI-runnable witness for issue #2605: it runs a fixture Eve-shaped eval suite once raw and once fak-routed through the real gateway proxy, then Compare folds the two arms into a Witness proving fak never silently downgrades a hard Eve gate failure into a soft pass.",
-      "distinction": "It is the FAK-MEDIATION eval-agreement witness (raw arm vs fak-routed arm over one eval suite), not a DeepSeek kernel determinism specification (dsparity) nor a model-quality parity grader (qwen36parity).",
+      "distinction": "It is the FAK-MEDIATION eval-agreement witness (raw arm vs fak-routed arm over one eval suite), not a model-quality parity grader (qwen36parity).",
       "distinct_from": [
-        "x-support-maturity-dsparity",
         "qwen36parity"
       ],
       "aliases": [
@@ -109,6 +85,24 @@
       ],
       "grounding": "parityverdict",
       "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-support-maturity-cosineparity",
+      "canonical": "CosineParity (arm-vs-reference output cosine)",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "CosineParity is the cosine similarity between a candidate arm's output and its reference arm's output: the Strix ablation receipt records it per ablation row (internal/amdgpu/strix_receipt.go:739), the Strix candidate verdict marks a run REGRESSED when it is NaN or below the configured minimum (internal/amdgpu/strix_candidate.go), and the Qwen3.8 subagent packet requires it at or above MinCosineParity 0.9999 (internal/cachevalue/qwen38_subagent_packet.go).",
+      "distinction": "A measured similarity score, not a pass/fail parity verdict by itself: a gate turns it into PROMOTED or REGRESSED only against an explicit minimum, and it is not the qualitative `parity` concept.",
+      "distinct_from": [
+        "parity"
+      ],
+      "aliases": [],
+      "grounding": "CosineParity",
+      "grounding_kind": "metric",
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
