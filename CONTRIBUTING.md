@@ -120,6 +120,10 @@ from an old planning note when a current issue or authority disagrees.
 
 ## Set up and verify the checkout
 
+If authentication or transport blocks an authorized publication, use
+[contributor Git recovery](docs/contributor-git-recovery.md) to distinguish account,
+integration, and network failures and verify the actual remote result.
+
 > **Maintainers and in-repo agents only.** This section describes the shared `main` checkout.
 > If you are contributing from a fork, you have already done what you need — see
 > [What your PR needs to pass](#what-your-pr-needs-to-pass) — and can skip to
