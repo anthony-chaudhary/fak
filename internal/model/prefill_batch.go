@@ -1,5 +1,7 @@
 package model
 
+import "github.com/anthony-chaudhary/fak/internal/model/norm"
+
 // prefill_batch.go — the prefill performance lane: a BATCHED, parallel prefill that
 // fills the same kernel-owned KV cache as the per-token path, but processes all P prompt
 // tokens' projections as one GEMM (each weight row read once and reused across all P
@@ -71,7 +73,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for t := lo; t < hi; t++ {
-				copy(Xn[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wIn, bIn, eps, cfg))
+				prefillNormIntoDisjoint(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, bIn, eps, cfg)
 			}
 		})
 
@@ -144,7 +146,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
 			for t := lo; t < hi; t++ {
-				copy(Xn2[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wPost, bPost, eps, cfg))
+				prefillNormIntoDisjoint(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, bPost, eps, cfg)
 			}
 		})
 		Down := m.batchedGatedMLP(lp, Xn2, P, H, cfg.IntermediateSize, cfg)
@@ -162,4 +164,17 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 	// its optional bias, and eps are bound together, so this lane cannot drift from the
 	// per-token path again the way the hard-coded nil bias here did.
 	return m.finalNorm(last)
+}
+
+// The caller must provide dst disjoint from x and w. Both production callers
+// use rows of fresh Xn/Xn2 make allocations, separate from live X and weights.
+// prefillNormIntoDisjoint retains configured/bias-aware normalization unchanged. Only
+// ordinary RMSNorm uses the serial allocation-free destination path; the
+// fdot-based quant rmsnormInto has a different reduction order and is unsuitable.
+func prefillNormIntoDisjoint(dst, x, w, bias []float32, eps float32, cfg Config) {
+	if cfg.LayerNorm || cfg.NormGain1p {
+		copy(dst, normCfg(x, w, bias, eps, cfg))
+		return
+	}
+	norm.SerialRMSNormIntoDisjoint(dst, x, w, eps)
 }
