@@ -300,3 +300,17 @@ func TestPersistableTurnsReturnsEmptyNotNil(t *testing.T) {
 		t.Fatalf("harness-only history persisted %d turns", len(got))
 	}
 }
+
+// fak-test:justify why=regression when=changed:internal/gateway/role_alternation.go
+// fak-test:runtime fast est=1ms lane=default
+func TestMergeStackedRolesPreservesStructuredIntake(t *testing.T) {
+	for _, structuredFirst := range []bool{false, true} {
+		first, second := userMsg("first"), userMsg("second")
+		first.ContentWasStructured = structuredFirst
+		second.ContentWasStructured = !structuredFirst
+		got := mergeStackedRoles([]agent.Message{first, second})
+		if len(got) != 1 || got[0].Content != "first\n\nsecond" || !got[0].ContentWasStructured {
+			t.Fatalf("merged input lost original representation: %+v", got)
+		}
+	}
+}

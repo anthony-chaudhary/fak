@@ -27,11 +27,10 @@ package model
 // hard bound, and a trace that drops samples is reported INCOMPARABLE by
 // CompareActivationTraces rather than as agreement.
 //
-// Provenance: each event carries the pinned model@revision, a config-geometry
-// digest, the input token-ID digest, and a manifest (weight-set) digest. The
-// reduced fixture carries tensors in the f32 manifest, so the manifest identity is
-// the trustworthy weight identity available here; a full checkpoint identity is
-// left to the loader's LoadProvenance rather than invented.
+// Provenance: authenticated loads carry the verified whole-shard byte identity.
+// Unauthenticated loads retain a structure-only diagnostic identity, explicitly
+// domain-separated from authenticated evidence; it cannot establish checkpoint
+// membership. Neither path infers a release from the architecture or shape.
 
 import (
 	"fmt"
@@ -181,7 +180,7 @@ func (s *v41ActivationTraceState) emit(layer, token int, stage string, width int
 		Shapes:           [][]int{{width}},
 		SampleIndices:    idx,
 		SampleValues:     vals,
-		ProvenanceDigest: computetrace.Digest("v41-activation", DeepSeekV41FlashModelID+"@"+DeepSeekV41FlashRevision, stage),
+		ProvenanceDigest: computetrace.Digest("v41-activation", s.weightDigest, stage),
 		Status:           "ok",
 	}
 	if s.recorder != nil {
@@ -191,7 +190,7 @@ func (s *v41ActivationTraceState) emit(layer, token int, stage string, width int
 	computetrace.Record(event)
 }
 
-// v41ActivationInputIdentity binds the pinned source revision, the flat decoder
+// v41ActivationInputIdentity binds the architecture, the flat decoder
 // geometry, and the input token IDs into one digest, so a comparison refuses an
 // apples-to-oranges pair whose input or geometry differs.
 func (m *Model) v41ActivationInputIdentity(ids []int) string {
@@ -205,7 +204,7 @@ func (m *Model) v41ActivationInputIdentity(ids []int) string {
 	}
 	return computetrace.Digest(
 		"v41-input",
-		DeepSeekV41FlashModelID+"@"+DeepSeekV41FlashRevision,
+		"deepseek-v4.1",
 		m.v41ActivationConfigIdentity(),
 		b.String(),
 	)
@@ -230,11 +229,13 @@ func (m *Model) v41ActivationConfigIdentity() string {
 	}, ";")
 }
 
-// v41ActivationWeightIdentity is a deterministic digest of the loaded weight set:
-// every manifest tensor's canonical name and shape, sorted. It is the trustworthy
-// identity available to the reduced fixture, whose tensors live in the f32
-// manifest; a full checkpoint's byte identity stays with LoadProvenance.
+// v41ActivationWeightIdentity consumes the once-per-load authenticated receipt.
+// It never rereads weights. Without that receipt, the legacy structure-only
+// diagnostic digest remains available but cannot authenticate a release.
 func (m *Model) v41ActivationWeightIdentity() string {
+	if id, ok := m.AuthenticatedArtifactIdentity(); ok {
+		return computetrace.Digest("v41-authenticated-weights/v1", id.ShardSetSHA256)
+	}
 	names := make([]string, 0, len(m.manifest))
 	for name := range m.manifest {
 		names = append(names, name)
@@ -256,5 +257,5 @@ func (m *Model) v41ActivationWeightIdentity() string {
 			b.WriteString(strconv.Itoa(d))
 		}
 	}
-	return computetrace.Digest("v41-weights", DeepSeekV41FlashModelID+"@"+DeepSeekV41FlashRevision, b.String())
+	return computetrace.Digest("v41-unverified-manifest/v1", b.String())
 }

@@ -754,6 +754,11 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if p != nil {
 		p.EmitLoadPathSummary(p.Progress)
 	}
+	if s.authenticatedArtifact != nil {
+		if err := builder.BindAuthenticatedArtifactIdentity(*s.authenticatedArtifact); err != nil {
+			return nil, err
+		}
+	}
 	m, err := builder.Build()
 	if err != nil {
 		return nil, err

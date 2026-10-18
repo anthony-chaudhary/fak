@@ -228,6 +228,7 @@ func mergeStackedRoles(msgs []agent.Message) []agent.Message {
 			prev := &out[n-1]
 			if prev.Role == m.Role && (m.Role == agent.RoleUser || m.Role == agent.RoleAssistant) && foldable(*prev) && foldable(m) {
 				prev.Content = joinTurnContent(prev.Content, m.Content)
+				prev.ContentWasStructured = prev.ContentWasStructured || m.ContentWasStructured
 				continue
 			}
 		}

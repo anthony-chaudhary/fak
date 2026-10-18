@@ -91,6 +91,10 @@ func (f *Func) UnmarshalJSON(raw []byte) error {
 
 // Message is one chat-completions message (request or response).
 type Message struct {
+	// ContentWasStructured retains intake shape before text flattening. It is local
+	// provenance, not a wire field. Mergers must OR it across merged messages.
+	ContentWasStructured bool `json:"-"`
+
 	Role         string     `json:"role"`
 	Content      string     `json:"content,omitempty"`
 	ToolCalls    []ToolCall `json:"tool_calls,omitzero"`
@@ -139,6 +143,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	var aux struct {
 		Role              string          `json:"role"`
 		Content           json.RawMessage `json:"content"`
+		ContentBlocks     json.RawMessage `json:"content_blocks"`
 		ToolCalls         []ToolCall      `json:"tool_calls,omitempty"`
 		FunctionCall      *Func           `json:"function_call,omitempty"`
 		ToolCallID        string          `json:"tool_call_id,omitempty"`
@@ -157,6 +162,10 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	rawContent := bytes.TrimSpace(aux.Content)
+	blocks := bytes.TrimSpace(aux.ContentBlocks)
+	m.ContentWasStructured = (len(rawContent) > 0 && rawContent[0] != '"' && !bytes.Equal(rawContent, []byte("null"))) ||
+		(len(blocks) > 0 && !bytes.Equal(blocks, []byte("null")))
 	m.Role = aux.Role
 	m.Content = content
 	m.ToolCalls = aux.ToolCalls

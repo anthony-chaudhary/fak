@@ -4,6 +4,8 @@ package ggufload
 import (
 	"fmt"
 	"io"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 const (
@@ -247,8 +249,10 @@ type File struct {
 // each tensor to the shard file that actually contains it (single-file or split
 // checkpoint) and owning the open shard files so Close releases them all.
 type WeightSource struct {
-	File *File
-	r    io.ReaderAt
+	// Set only after every retained shard matches the trusted manifest.
+	authenticatedArtifact *model.AuthenticatedArtifactIdentity
+	File                  *File
+	r                     io.ReaderAt
 	// readerFor (parallel to File.Tensors) routes tensor i's bytes to the shard
 	// file that actually holds them. A nil entry falls back to r, which preserves
 	// the original single-file behaviour. sizeFor[i] is readerFor[i]'s file size,

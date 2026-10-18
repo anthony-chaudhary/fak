@@ -15880,6 +15880,11 @@
           "category": "incidental",
           "reason": "Explanatory prose stating that the caller supplies prompt token IDs and that template rendering is outside the measurement. It introduces no renderer, materializer, or rendering phase.",
           "token": "Prerendered"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private provenance-label accessor: returns the existing renderer identifier, optionally namespaced by the immutable admitted chat profile, for PromptEncoding and inference receipts. It does not render or materialize prompt content; rendering remains in inKernelRenderPrompt.",
+          "token": "promptRendererID"
         }
       ],
       "id": "render-materialize",
@@ -15935,6 +15940,7 @@
         "modelIncumbentRender",
         "printWorkflowConcepts",
         "priorwtrendercrash",
+        "promptRendererID",
         "renderAgentGroups",
         "renderAgents",
         "renderAxisPartition",

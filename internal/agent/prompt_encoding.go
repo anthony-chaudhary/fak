@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -66,7 +67,7 @@ func (p *InKernelPlanner) EncodePrompt(ctx context.Context, messages []Message, 
 	sum := sha256.Sum256([]byte(prepared.rendered))
 	return PromptEncoding{
 		ModelID:              p.modelID,
-		RendererID:           inKernelPromptRendererID(p.m.Cfg, sp),
+		RendererID:           p.promptRendererID(sp),
 		TokenizerID:          tokenizerID,
 		TokenIDs:             append([]int(nil), prepared.ids...),
 		PromptTokens:         len(prepared.ids),
@@ -78,6 +79,9 @@ func (p *InKernelPlanner) EncodePrompt(ctx context.Context, messages []Message, 
 
 func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, opts ...SampleOpt) (preparedPrompt, error) {
 	if err := ctx.Err(); err != nil {
+		return preparedPrompt{}, err
+	}
+	if err := p.admitDeepSeekV41ChatProfile(messages, sp); err != nil {
 		return preparedPrompt{}, err
 	}
 	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
@@ -123,4 +127,64 @@ func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {
 		return "ornith-qwen35-chatml-v1:" + thinking
 	}
 	return "qwen-chatml-v1:" + thinking
+}
+
+// DeepSeekV411017GGUFTextProfile selects only the pinned converter's text-only,
+// non-thinking contract. It does not select official Python encoding or admit
+// native numerical, vision, or draft-model execution.
+const DeepSeekV411017GGUFTextProfile = "deepseek41-1017-q4km-gguf-text-v1"
+
+// Pins mrfakename/DeepSeek-V4.1-Flash-1017-GGUF at
+// 1df54e7d1b1e442051ad393ce871870a929f243e, ordered Q4_K_M shards 1..10.
+// The shard digest uses the loader receipt's path-independent canonical encoding.
+const (
+	deepSeekV411017ShardSetSHA256 = "a353ea6e868ab8b91325da4952bec73c52824ac6287dc87cbc1b15e5861ab8c2"
+	deepSeekV411017TemplateSHA256 = "7bd4fbdf0c06cd7398ddb6913de6e4a5839b9d06569e74e5b2ec246b375ca9c9"
+)
+
+// ErrDeepSeekV41ChatProfile identifies refusal of an explicit prompt contract.
+var ErrDeepSeekV41ChatProfile = errors.New("native DeepSeek V4.1 chat profile not admitted")
+
+func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp SampleParams) error {
+	if p.deepSeekV41ChatProfile == "" {
+		return nil
+	}
+	if p.deepSeekV41ChatProfile != DeepSeekV411017GGUFTextProfile {
+		return fmt.Errorf("%w: unknown profile %q", ErrDeepSeekV41ChatProfile, p.deepSeekV41ChatProfile)
+	}
+	if p.m == nil || !p.m.Cfg.IsDeepSeekV41() || !p.q4k {
+		return fmt.Errorf("%w: requires the authenticated Q4_K_M target", ErrDeepSeekV41ChatProfile)
+	}
+	identity, known := p.m.AuthenticatedArtifactIdentity()
+	if !known || identity.ShardSetSHA256 != deepSeekV411017ShardSetSHA256 || identity.ChatTemplateSHA256 != deepSeekV411017TemplateSHA256 {
+		return fmt.Errorf("%w: artifact or converter template identity differs", ErrDeepSeekV41ChatProfile)
+	}
+	// Validate before shrink can discard the source representation. The zero
+	// profile remains compatible with legacy array-to-text decoding.
+	for _, message := range messages {
+		if message.ContentWasStructured {
+			return fmt.Errorf("%w: structured content requires a separate renderer", ErrDeepSeekV41ChatProfile)
+		}
+	}
+	if inKernelRawV41Prompt(p.m.Cfg, sp) {
+		return nil
+	}
+	if (sp.ReasoningEffort != "" && sp.ReasoningEffort != EffortTierNone) ||
+		(sp.ThinkingBudget != nil && *sp.ThinkingBudget != 0) || len(sp.ChatTemplateKwargs) != 0 {
+		return fmt.Errorf("%w: only the non-thinking converter contract is supported", ErrDeepSeekV41ChatProfile)
+	}
+	for _, message := range messages {
+		if message.Thinking != "" || message.ThinkingSignature != "" || len(message.RedactedThinking) != 0 || message.ReasoningContent != "" {
+			return fmt.Errorf("%w: reasoning history requires a separate renderer", ErrDeepSeekV41ChatProfile)
+		}
+	}
+	return nil
+}
+
+func (p *InKernelPlanner) promptRendererID(sp SampleParams) string {
+	legacy := inKernelPromptRendererID(p.m.Cfg, sp)
+	if p.deepSeekV41ChatProfile == "" || inKernelRawV41Prompt(p.m.Cfg, sp) {
+		return legacy
+	}
+	return p.deepSeekV41ChatProfile + ":" + legacy
 }

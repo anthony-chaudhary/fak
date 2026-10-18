@@ -175,13 +175,17 @@ func (p *InKernelPlanner) warmDiskExecutionIdentity() string {
 	if precision == "" {
 		precision = model.KVPrecisionFP32
 	}
-	return strings.Join([]string{
+	identity := strings.Join([]string{
 		"prefix-runtime-v1", runtime.GOOS, runtime.GOARCH, backend,
 		strconv.FormatBool(p.metal), strconv.FormatBool(p.q4k), strconv.FormatBool(p.quant),
 		strconv.FormatBool(p.requireDeviceExecution), strconv.Itoa(p.denseGPULayers),
 		strconv.FormatBool(p.qwen35MetalGDNSequence), strconv.FormatBool(p.q4kGateUpOutputSlab),
 		string(precision), strconv.FormatBool(p.cpuOffloadExperts),
 	}, ":")
+	if p.deepSeekV41ChatProfile != "" {
+		identity += ":chat-profile:" + p.deepSeekV41ChatProfile
+	}
+	return identity
 }
 
 func warmDiskKey(spec WarmPrefixSpec, modelIdentity, executionIdentity string) string {

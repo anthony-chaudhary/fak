@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // ShardIdentity describes one complete GGUF file in an ordered shard manifest.
@@ -66,6 +68,8 @@ var errAuthenticatedWeightCloseOverflow = errors.New("gguf: additional authentic
 
 func openWeightsAuthenticatedWithResult(ctx context.Context, shards []ShardIdentity, expectedSetSHA256 string, mmap bool,
 	open func(string, bool) (io.ReaderAt, int64, io.Closer, []byte, error)) (result authenticatedWeightOpenResult) {
+	// Own the descriptor list for the entire verification and receipt transfer.
+	shards = append([]ShardIdentity(nil), shards...)
 	var closers []io.Closer
 	opaqueIncomplete := false
 	defer func() {
@@ -185,6 +189,26 @@ func openWeightsAuthenticatedWithResult(ctx context.Context, shards []ShardIdent
 		ws.data = firstData
 	}
 	ws.closers = closers
+	// Fold only already authenticated whole-file digests. No payload reread,
+	// path identity, or encoded-extent hash substitution is involved.
+	content := make([]authenticatedShardContent, len(shards))
+	for i, shard := range shards {
+		content[i] = authenticatedShardContent{shard.Size, strings.ToLower(shard.RawFileSHA256)}
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return authenticatedWeightOpenResult{Err: err}
+	}
+	sum := sha256.Sum256(raw)
+	id := model.AuthenticatedArtifactIdentity{
+		ManifestSHA256: strings.ToLower(expectedSetSHA256),
+		ShardSetSHA256: hex.EncodeToString(sum[:]),
+	}
+	if template, ok := first.String("tokenizer.chat_template"); ok {
+		sum := sha256.Sum256([]byte(template))
+		id.ChatTemplateSHA256 = hex.EncodeToString(sum[:])
+	}
+	ws.authenticatedArtifact = &id
 	return authenticatedWeightOpenResult{Source: ws, OwnershipTransferred: true}
 }
 
@@ -245,4 +269,11 @@ func (r authenticatedReaderAt) ReadAt(p []byte, off int64) (int, error) {
 		return 0, err
 	}
 	return r.r.ReadAt(p, off)
+}
+
+// Field order is the portable authenticated shard-set identity contract.
+// This excludes paths and includes every shard in authenticated order.
+type authenticatedShardContent struct {
+	Size          int64  `json:"size"`
+	RawFileSHA256 string `json:"raw_file_sha256"`
 }

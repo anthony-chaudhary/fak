@@ -285,6 +285,7 @@ type InKernelPlanner struct {
 	// warmDisk fixes the local restart-cache policy and loaded artifact identity.
 	// Empty config selects the bounded per-user default; an empty model digest
 	// declines persistence because a filename is not a model-byte identity.
+	deepSeekV41ChatProfile string // immutable construction-time prompt contract
 	warmDiskConfig         WarmDiskConfig
 	warmDiskModelIdentity  string
 	warmDiskCapture        bool
@@ -2425,7 +2426,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				renderedSum := sha256.Sum256([]byte(prepared.rendered))
 				receipt.PromptTokenIDs = append([]int(nil), prepared.ids...)
 				receipt.TokenizerID = p.tok.Identity()
-				receipt.RendererID = inKernelPromptRendererID(p.m.Cfg, sp)
+				receipt.RendererID = p.promptRendererID(sp)
 				receipt.RenderedSHA256 = hex.EncodeToString(renderedSum[:])
 				comp.NativeInference = receipt
 			}

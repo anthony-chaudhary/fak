@@ -212,9 +212,11 @@ type NamedTensorF32 struct {
 // little-endian f32 bytes of every weight, kept in one buffer so a tensor view is
 // a zero-copy reinterpretation, not a copy.
 type Model struct {
-	Cfg      Config
-	manifest map[string]tensorMeta
-	raw      []byte // all tensors, f32 LE, at the manifest offsets
+	// Immutable loader receipt; absent for unauthenticated acquisition.
+	authenticatedArtifact *AuthenticatedArtifactIdentity
+	Cfg                   Config
+	manifest              map[string]tensorMeta
+	raw                   []byte // all tensors, f32 LE, at the manifest offsets
 
 	// q8w holds the optional Q8_0-quantized copy of the matmul weights, built once by
 	// Quantize() or on-demand by q8(), and consumed only by the opt-in quantized forward

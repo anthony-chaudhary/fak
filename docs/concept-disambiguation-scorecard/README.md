@@ -65,7 +65,7 @@ coverage by family (positioned / discovered):
   plan             #######################..... 480/585
   session-runtime  #######################..... 286/355
   cache            #######################..... 340/408
-  gateway-engine   #######################..... 247/305
+  gateway-engine   #######################..... 246/304
   attention        #####################....... 146/192
   context-ctx      ########################.... 268/314
   guard-gate       ##########################.. 515/561
@@ -3390,7 +3390,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | plan | 480 | 585 | 105 |
 | session-runtime | 286 | 355 | 69 |
 | cache | 340 | 408 | 68 |
-| gateway-engine | 247 | 305 | 58 |
+| gateway-engine | 246 | 304 | 58 |
 | attention | 146 | 192 | 46 |
 | context-ctx | 268 | 314 | 46 |
 | guard-gate | 515 | 561 | 46 |

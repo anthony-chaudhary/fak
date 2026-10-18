@@ -27,6 +27,10 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 // InKernelPlannerConfig carries settings that must be fixed at planner construction.
 // Empty/zero fields preserve NewInKernelPlanner's historical defaults.
 type InKernelPlannerConfig struct {
+	// DeepSeekV41ChatProfile opts into a pinned authenticated text contract.
+	// Empty preserves legacy rendering; unknown values refuse prompt admission.
+	DeepSeekV41ChatProfile string
+
 	// WarmDiskModelIdentity binds restart snapshots to the loaded weight artifact.
 	// Empty declines persistence because a display model ID is not a weight identity.
 	WarmDiskModelIdentity string
@@ -113,6 +117,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		deferColdTools:               cfg.DeferColdTools,
 		batchDecode:                  cfg.BatchDecode,
 		warmDiskModelIdentity:        strings.TrimSpace(cfg.WarmDiskModelIdentity),
+		deepSeekV41ChatProfile:       cfg.DeepSeekV41ChatProfile,
 	}
 	if cfg.IncrementalContext {
 		p.incrementalContext = EmptyIncrementalContext()
@@ -187,6 +192,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 	}
 	return InKernelPlannerConfig{
 		WarmDiskModelIdentity:     p.warmDiskModelIdentity,
+		DeepSeekV41ChatProfile:    p.deepSeekV41ChatProfile,
 		ContextTokens:             p.contextTokens,
 		CPUCacheBytes:             cpuBytes,
 		KVPrecision:               p.kvPrecision,
