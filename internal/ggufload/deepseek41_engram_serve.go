@@ -5,7 +5,7 @@ package ggufload
 // this file the Q4K builder refused any GGUF that DECLARED Engram (the interim
 // fence in quant_q4k_loader.go), because the row-source and forward pieces
 // existed but nothing wired them. This file wires them: each declared layer's
-// table is opened through the Q2_K (dequantizing) or raw-I8 Ge4 row source,
+// table is opened through the Q2_K/Q4_K (dequantizing) or raw-I8 Ge4 row source,
 // admitted only after its bytes match a verified artifact binding, assembled into
 // a model.V41EngramLayout from the artifact's own metadata, and attached to the
 // built model. The fence's job is then done by the attachment itself: a declared
@@ -106,10 +106,20 @@ func (w *v41EngramRowReaderAt) ReadAt(p []byte, off int64) (int, error) {
 }
 
 // openV41EngramRowSource resolves the row source for one declared Engram layer.
-// A raw-I8 (row264) table routes to V41EngramGGUFOpen; everything else goes
-// through the Q2_K dequantizing source, which names its own refusals.
+// Dispatch uses the actual tensor type, not the checkpoint quantization recipe.
+// Unknown types retain the Q2_K factory's typed refusal.
 func openV41EngramRowSource(ws *WeightSource, decoderLayer int) (model.V41EngramRowSource, int, int, error) {
 	name := fmt.Sprintf("blk.%d.%s", decoderLayer, v41EngramEmbdSuffix)
+	if ws == nil || ws.File == nil {
+		return nil, 0, 0, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Detail: "requires a parsed WeightSource"}
+	}
+	if info, ok := ws.Tensor(name); ok && info.Type == TensorQ4_K {
+		src, err := V41EngramQ4KOpen(ws, decoderLayer)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		return src, src.TableRows(), src.RowBytes(), nil
+	}
 	if info, ok := ws.Tensor(name); ok && info.Type == v41EngramRawI8Type {
 		src, err := V41EngramGGUFOpen(ws, decoderLayer)
 		if err != nil {
@@ -243,7 +253,7 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 		if err != nil {
 			return refuse(fmt.Errorf("layer %d: %w", id, err))
 		}
-		if uint32(tableRows) != layout.Rows[i] {
+		if uint64(tableRows) != uint64(layout.Rows[i]) {
 			return refuse(fmt.Errorf("layer %d table rows %d disagree with hash layout %d", id, tableRows, layout.Rows[i]))
 		}
 		if i == 0 {
@@ -263,7 +273,7 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 
 	// Admit only a source bound to the bytes of its exact extent: the verified
 	// route, never the unverified prepared reader. Each layer's extent is hashed
-	// once (the Q2_K blocks, not their f32 expansion), and the layers hash
+	// once (the K-quant blocks, not their f32 expansion), and the layers hash
 	// concurrently, each on a tree-digest leaf pool.
 	srcs := make([]model.V41EngramRowSource, len(pending))
 	errs := make([]error, len(pending))

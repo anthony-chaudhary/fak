@@ -35,6 +35,11 @@ import (
 // Engram row ([16 scale][64 q][f16 d][f16 min]).
 const V41EngramEncodingQ2K = "q2_k"
 
+// V41EngramEncodingQ4K names one 144-byte Q4_K super-block per 256-wide row.
+// Its encoded content address is distinct from Q2_K. The loader serves bounded
+// f32 rows; this tag does not enable the Q2_K-only packed cache/device decoder.
+const V41EngramEncodingQ4K = "q4_k"
+
 const (
 	v41EngramDigestFlat       = "sha256"
 	v41EngramDigestTreePrefix = "sha256t1-"
@@ -49,7 +54,10 @@ const (
 
 // v41EngramEncodedRowBytes is the closed set of encodings a tree digest may
 // cover, with the encoded width of one row.
-var v41EngramEncodedRowBytes = map[string]int{V41EngramEncodingQ2K: v41EngramQ2KEncodedRowBytes}
+var v41EngramEncodedRowBytes = map[string]int{
+	V41EngramEncodingQ2K: v41EngramQ2KEncodedRowBytes,
+	V41EngramEncodingQ4K: 144,
+}
 
 // V41EngramEncodedRows is implemented by a reader whose served rows are a
 // deterministic decode of an encoded extent. It returns the reader and the
