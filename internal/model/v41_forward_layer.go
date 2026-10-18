@@ -58,6 +58,11 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err := m.v41LayerEngramInject(l, tokens, x, streams, full, eps, st, scratch, resident); err != nil {
 		return err
 	}
+	if st != nil && st.dsparkCapture != nil {
+		if err := st.dsparkCapture.captureCold(st, l, tokens, streams, resident, full); err != nil {
+			return err
+		}
+	}
 
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
@@ -737,10 +742,19 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 		opt := V41SparseAttentionSinkOptions{
 			B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: rows + 1, N: rows, Softmax: scale,
 		}
-		flatKV, borrowedWindow := v41ColdPlainAttentionInput(qkv.qHeads[t], sink, qkv.kvRows, keys, idx, opt, coldAttentionOwner, scratch.sharedAttentionFunc())
-		attentionOpened := m.v41NowNanos()
-		o, err := v41ColdPlainAttentionSink(l, qkv.qHeads[t], flatKV, sink, borrowedWindow, idx, opt,
-			v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), scratch.sharedAttentionFunc())
+		var o []float32
+		var attentionOpened int64
+		var err error
+		host := false
+		if scratch.sharedAttentionFunc() == nil {
+			o, attentionOpened, host, err = m.v41ColdPlainHostAttention(qkv.qHeads[t], sink, qkv.kvRows, keys, idx, opt)
+		}
+		if !host {
+			flatKV, borrowedWindow := v41ColdPlainAttentionInput(qkv.qHeads[t], sink, qkv.kvRows, keys, idx, opt, coldAttentionOwner, scratch.sharedAttentionFunc())
+			attentionOpened = m.v41NowNanos()
+			o, err = v41ColdPlainAttentionSink(l, qkv.qHeads[t], flatKV, sink, borrowedWindow, idx, opt,
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), scratch.sharedAttentionFunc())
+		}
 		m.v41NoteAttentionContraction(attentionOpened)
 		if err != nil {
 			return nil, v41StageErr(v41StageAttention, l, err)

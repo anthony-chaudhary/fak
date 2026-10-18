@@ -254,8 +254,10 @@ func (w *v41AttentionBF16PhysicalObserver) normalization(s *Session, run v41Atte
 func v41AttentionBF16PhysicalIsolate(st *v41ForwardState) {
 	norm, publish := st.attentionNormFunc(), st.attentionBF16Func()
 	v41NormRoPEHaloIsolate(st)
-	st.queryNorm, st.kvNorm, st.ffnNorm, st.finalNorm, st.tailRoPE = nil, nil, nil, nil, nil
-	st.queryPrefix, st.bf16Boundary, st.logitScale = nil, nil, nil
+	st.queryNorm, st.kvNorm, st.ffnNorm, st.tailRoPE = nil, nil, nil, nil
+	st.setFinalNorm(nil)
+	st.queryPrefix, st.logitScale = nil, nil
+	st.setBF16Boundary(nil)
 	st.setRouterTopK(nil)
 	st.setRoutedSum(nil)
 	st.sharedAdd = nil

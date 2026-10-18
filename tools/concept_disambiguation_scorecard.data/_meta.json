@@ -1467,6 +1467,11 @@
           "category": "incidental",
           "reason": "Names required draft-state cache evidence in an intake checklist; it implements no cache and establishes no ownership, reuse, or correctness guarantee.",
           "token": "draft_state_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Integer report field populated from the existing session SequencePosition and checked to require a fresh zero-token starting state in each measurement arm. It implements no new cache, reuse policy, or cache lifecycle.",
+          "token": "InitialCacheTokens"
         }
       ],
       "exclude": [
@@ -1529,6 +1534,7 @@
         "GoCacheLowBytes",
         "GoCacheMinAge",
         "INVALID_CACHE_EVIDENCE",
+        "InitialCacheTokens",
         "InputCached",
         "InputCachedPerMillion",
         "InputUncached",
@@ -2144,6 +2150,11 @@
           "category": "incidental",
           "reason": "Pinned DFlash2 checkpoint tensor-group spelling for the existing pre/post attention convolution; no separate attention backend or attention policy is defined by the field name.",
           "token": "attention_conv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ownership-and-timing adapter for the existing checked sparse-attention contraction. It validates and borrows a callback-free host row window, then delegates unchanged numerical work to v41SparseAttentionSinkChecked; it introduces no separate attention algorithm, backend capability, or public attention contract.",
+          "token": "v41ColdPlainHostAttention"
         }
       ],
       "exclude": [
@@ -2206,6 +2217,7 @@
         "v41AttentionInputRun",
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
+        "v41ColdPlainHostAttention",
         "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
         "v41PlainAttentionClosed",
@@ -4568,6 +4580,31 @@
           "category": "incidental",
           "reason": "Private argv composition helper combining the existing OpenCode standalone-mode and model-pinning helpers; it is not an independent guard, policy, or execution owner.",
           "token": "guardOpenCodeCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON key on the private benchmark report phase field DiagnosticOpen. It labels elapsed time and existing device-counter snapshots across the existing diagnostic session and sidecar open; it creates no new guard or admission mechanism.",
+          "token": "diagnostic_gate_session_sidecar_open_and_verification"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only Boolean metadata copied from the existing Vulkan memory guard into a validated diagnostic snapshot; it does not create, disable or replace a guard or authorize allocation.",
+          "token": "guard_initialized"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only Boolean metadata copied from the existing Vulkan memory guard into a validated diagnostic snapshot; it does not create, disable or replace a guard or authorize allocation.",
+          "token": "guard_configured"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only Boolean metadata copied from the existing Vulkan memory guard into a validated diagnostic snapshot; it does not create, disable or replace a guard or authorize allocation.",
+          "token": "guard_configuration_valid"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only Boolean metadata copied from the existing Vulkan memory guard into a validated diagnostic snapshot; it does not create, disable or replace a guard or authorize allocation.",
+          "token": "guard_accounting_valid"
         }
       ],
       "exclude": [
@@ -4704,6 +4741,7 @@
         "coreLockLandGate",
         "demoteReservedGuardBanner",
         "diagnoseRecentCodexLoopsForGate",
+        "diagnostic_gate_session_sidecar_open_and_verification",
         "dispatchGateProvenance",
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
@@ -4946,7 +4984,11 @@
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
+        "guard_accounting_valid",
         "guard_bypass",
+        "guard_configuration_valid",
+        "guard_configured",
+        "guard_initialized",
         "guard_operator_question",
         "guard_output_style",
         "guard_receipt",
@@ -7262,6 +7304,16 @@
           "category": "incidental",
           "reason": "Issue #12727 internal validator for the existing model Session feature-transaction contract; this helper introduces no separate session type or lifecycle.",
           "token": "validateQwen35TargetFeatureSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON key on the private benchmark report phase field DiagnosticOpen. It labels observations of existing diagnostic session and sidecar opening, not a new session type or lifecycle.",
+          "token": "diagnostic_gate_session_sidecar_open_and_verification"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark phase report field holding duration and device-counter snapshots around existing session creation. It defines no new session implementation or runtime lifecycle.",
+          "token": "SessionOpen"
         }
       ],
       "exclude": [
@@ -7385,6 +7437,7 @@
         "SessionMoveSafePointRequested",
         "SessionMoveTransition",
         "SessionObjective",
+        "SessionOpen",
         "SessionOutcome",
         "SessionPanel",
         "SessionPlacement",
@@ -7446,6 +7499,7 @@
         "decodeSessionClientJSON",
         "defaultServeSessionStatePath",
         "defaultclaudesessionsperaccount",
+        "diagnostic_gate_session_sidecar_open_and_verification",
         "dispatchSessionPIDIdentity",
         "dispatchSessionStartedTime",
         "dispatchsessionsaudittest",
@@ -9826,6 +9880,11 @@
           "category": "incidental",
           "reason": "Pinned DFlash2 tensor-key spelling for base convolution coefficients; an upstream checkpoint field rather than a gateway or execution engine.",
           "token": "base_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean report field populated by the existing compute.KernelProfileReaderRegistered observation. It records reader availability, not a new gateway, engine, registry, or execution guarantee.",
+          "token": "KernelProfileRegistered"
         }
       ],
       "exclude": [
@@ -9860,6 +9919,7 @@
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
         "KernelProfile",
+        "KernelProfileRegistered",
         "KernelRevision",
         "KernelRow",
         "KernelShare",
@@ -14309,6 +14369,26 @@
           "category": "incidental",
           "reason": "Names the required unsupported-refusal evidence for the serving-activation obligation; it adds no refusal implementation and asserts no admitted model support.",
           "token": "unsupported_refusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12640 side-effect-free backend capability probe declared by a private structural interface for bounded DSpark mean extraction. Its name is not a product support or maturity claim, and the interface explicitly requires separate implementation and hardware evidence.",
+          "token": "SupportsV41DSparkMeanRange"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean diagnostic result set only after the two measured token-ID sequences compare equal. It is a per-run observation, not a product support/maturity designation or a claim that this unrun benchmark has established parity.",
+          "token": "ExactTokenParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional raw-F32 backend capability predicate for a bounded element count; it reports operation availability before selection and makes no product-support or maturity claim.",
+          "token": "SupportsV41F32Finite"
+        },
+        {
+          "category": "incidental",
+          "reason": "Native device-limit predicate used by the optional F32 capability check; it describes count feasibility, not support status or qualification.",
+          "token": "fvk_v41_f32_finite_count_supported"
         }
       ],
       "exclude": [
@@ -14350,6 +14430,7 @@
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
+        "ExactTokenParity",
         "ExcludedUnsupportedProvider",
         "FAK_PARITY_API_KEY",
         "FormatUnsupported",
@@ -14438,7 +14519,9 @@
         "SupportedFeatures",
         "SupportsBorrowedExpertUploads",
         "SupportsRoutedExpertKQuant",
+        "SupportsV41DSparkMeanRange",
         "SupportsV41DeferredStatus",
+        "SupportsV41F32Finite",
         "SupportsV41IndexScaleBF16",
         "SupportsV41RoutedDownPanelChunk",
         "SupportsV41RoutedDownPanelRow",
@@ -14504,6 +14587,7 @@
         "fak_parity_value",
         "formatParityValue",
         "forward_coverage_not_single_lane",
+        "fvk_v41_f32_finite_count_supported",
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",
         "goalCoverageThreshold",
@@ -15791,6 +15875,11 @@
           "category": "incidental",
           "reason": "same planner render method, flagged under the render-materialize family",
           "token": "RenderIncrementalContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Explanatory prose stating that the caller supplies prompt token IDs and that template rendering is outside the measurement. It introduces no renderer, materializer, or rendering phase.",
+          "token": "Prerendered"
         }
       ],
       "id": "render-materialize",
@@ -15800,6 +15889,7 @@
         "MaterializeOwned",
         "MaterializedStateDigest",
         "PrematureSurrender",
+        "Prerendered",
         "RenderAging",
         "RenderAnatomyPortfolioText",
         "RenderAnatomyText",
@@ -17134,6 +17224,11 @@
           "category": "incidental",
           "reason": "Issue #12727 internal method selecting draft token candidates using the trained Markov selector; this numerical helper does not define a work plan or planning lifecycle.",
           "token": "selectCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #12727 private adapter for the existing agent Planner interface which retains and returns an authenticated DFlash2 binding error; this refusal wrapper introduces no work plan or planning lifecycle.",
+          "token": "dflash2RefusedPlanner"
         }
       ],
       "exclude": [
@@ -17308,6 +17403,7 @@
         "defaultsCheckPlanner",
         "deriveSelfUpdateCandidateCacheDisposition",
         "deviceTransientBytesInPlan",
+        "dflash2RefusedPlanner",
         "dispatchWaveExecutionPlanWithSize",
         "estimateqwen35runtimeextramemoryplan",
         "fitandplanserveggufexpertparallelpathondevice",

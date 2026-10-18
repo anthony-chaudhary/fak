@@ -138,7 +138,7 @@ func TestV41ClampedDeviceSwiGLUHalo(t *testing.T) {
 		// readback. At H=256 that is two reads and 1120 bytes per token.
 		// Keep both on host rather than expanding the routed-expert budget.
 		s.v41State().mhcProjection = nil
-		s.v41State().finalNorm = nil
+		s.v41State().setFinalNorm(nil)
 		// The router, routed-sum and shared-add seams read back outside this
 		// routed-activation budget (one HiddenSize-F32 read per token).
 		s.v41State().setRouterTopK(nil)

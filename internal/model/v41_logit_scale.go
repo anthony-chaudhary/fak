@@ -83,7 +83,9 @@ func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc, r
 	// Head projection historically permits nonfinite raw results, including
 	// infinities that a later softcap maps to finite logits. Such a row is
 	// outside this primitive's finite-input domain, before any selection.
-	if !v41AllFinite32(logits) {
+	// A surviving device-only arm already checked this same row above. No
+	// callback or mutation intervenes, so only the permissive arm needs a scan.
+	if refuse == nil && !v41AllFinite32(logits) {
 		logitScaleInPlace(logits, cfg)
 		return logits, nil
 	}

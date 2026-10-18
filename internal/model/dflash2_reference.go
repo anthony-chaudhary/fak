@@ -162,25 +162,42 @@ func (f *dflash2Reference) Close() error {
 	return f.closeErr
 }
 
-// linear streams each BF16 matrix row once for every input row in the block.
-// It never expands a whole matrix; the largest stock row is fc's25,600 values.
+// linear streams bounded spans of complete BF16 matrix rows. Every output dot
+// keeps its original increasing-k accumulation order. Scratch is at most
+// 65,536 f32 values plus 131,072 BF16 bytes (384 KiB), independent of matrix
+// size; neither the scratch nor expanded weights survive this invocation.
 func (f *dflash2Reference) linear(ctx context.Context, name string, x []float32, in, out int) ([]float32, error) {
-	if in < 1 || out < 1 || len(x)%in != 0 {
+	if in < 1 || in > dflash2MaxReadElements || out < 1 || len(x)%in != 0 {
 		return nil, fmt.Errorf("dflash2: invalid linear input %s", name)
 	}
 	rows := len(x) / in
-	y, weight := make([]float32, rows*out), make([]float32, in)
-	for j := 0; j < out; j++ {
-		if err := f.w.ReadBF16(ctx, name, int64(j)*int64(in), weight); err != nil {
+	if rows > (int(^uint(0)>>1)/4)/out || int64(out) > math.MaxInt64/(2*int64(in)) {
+		return nil, fmt.Errorf("dflash2: linear output exceeds addressable storage %s", name)
+	}
+	blockRows := min(out, dflash2MaxReadElements/in)
+	weight := make([]float32, blockRows*in)
+	scratch := make([]byte, 2*len(weight))
+	y := make([]float32, rows*out)
+	for firstRow := 0; firstRow < out; {
+		count := min(blockRows, out-firstRow)
+		block := weight[:count*in]
+		if err := f.w.readBF16WithScratch(ctx, name, int64(firstRow)*int64(in), block, scratch); err != nil {
 			return nil, err
 		}
-		for row := 0; row < rows; row++ {
-			var sum float32
-			for k, v := range weight {
-				sum += v * x[row*in+k]
+		for j := 0; j < count; j++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
-			y[row*out+j] = sum
+			rowWeight := block[j*in : (j+1)*in]
+			for row := 0; row < rows; row++ {
+				var sum float32
+				for k, v := range rowWeight {
+					sum += v * x[row*in+k]
+				}
+				y[row*out+firstRow+j] = sum
+			}
 		}
+		firstRow += count
 	}
 	return y, nil
 }
@@ -377,20 +394,35 @@ func (f *dflash2Reference) attention(ctx context.Context, layer int, x []float32
 	return f.linear(ctx, name+".o_proj.weight", output, g.heads*g.headDim, g.hidden)
 }
 
-func (f *dflash2Reference) hidden(ctx context.Context, anchor, proposals int) ([]float32, error) {
+// inputEmbeddings gathers the anchor first, then one immutable mask row for
+// this proposal. Each output row owns its range; nothing is cached across calls.
+func (f *dflash2Reference) inputEmbeddings(anchor, proposals int) ([]float32, error) {
 	g := f.g
 	x := make([]float32, (proposals+1)*g.hidden)
+	var embedding []float32
 	for row := 0; row <= proposals; row++ {
-		token := g.mask
-		if row == 0 {
-			token = anchor
+		if row < 2 {
+			token := g.mask
+			if row == 0 {
+				token = anchor
+			}
+			var err error
+			embedding, err = f.target.TokenEmbedding(token)
+			if err != nil {
+				return nil, err
+			}
+			scaleEmbedInPlace(embedding, f.target.M.Cfg)
 		}
-		embedding, err := f.target.TokenEmbedding(token)
-		if err != nil {
-			return nil, err
-		}
-		scaleEmbedInPlace(embedding, f.target.M.Cfg)
 		copy(x[row*g.hidden:], embedding)
+	}
+	return x, nil
+}
+
+func (f *dflash2Reference) hidden(ctx context.Context, anchor, proposals int) ([]float32, error) {
+	g := f.g
+	x, err := f.inputEmbeddings(anchor, proposals)
+	if err != nil {
+		return nil, err
 	}
 	for layer := 0; layer < 5; layer++ {
 		name := fmt.Sprintf("layers.%d", layer)

@@ -46,6 +46,7 @@ import (
 // emit structured tool calls — the gateway's adjudication layer still runs on
 // whatever the caller proposed.
 type InKernelPlanner struct {
+	dflash2                *DFlash2Target
 	m                      *model.Model
 	tok                    *tokenizer.Tokenizer
 	modelID                string
@@ -428,6 +429,11 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 // sink with the post-decode projection (loop_project.go), so its emitted deltas land in
 // the client's view of Content.
 func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	if p.dflash2 != nil {
+		if err := validateDFlash2Stops(applySampleOpts(opts...).Stop); err != nil {
+			return nil, err
+		}
+	}
 	if sink == nil {
 		return p.Complete(ctx, messages, tools, opts...)
 	}
@@ -1999,6 +2005,11 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// today's crash/stack behavior for bugs.
 	return recoverDeviceCall(func() (comp *Completion, err error) {
 		defer enginestep.Default.RequestStart()()
+		releaseDFlash2Domain, domainErr := p.acquireDFlash2Domain(ctx)
+		if domainErr != nil {
+			return nil, domainErr
+		}
+		defer releaseDFlash2Domain()
 		if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
 			return nil, p.qwenQ4KPrefillChunkConfigErr
 		}
@@ -2060,6 +2071,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 		}
+		if err := p.validateDFlash2Request(sp, temp, freqPenalty, presPenalty); err != nil {
+			return nil, err
+		}
 		prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 		if err != nil {
 			return nil, err
@@ -2071,6 +2085,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 		stops := StopIDs(p.tok, p.m.Cfg)
+		if p.dflash2 != nil {
+			stops = dflash2StopIDs(p.tok, p.m.Cfg)
+		}
 		var turnContext []TurnAssessment
 		if ta, ok := AssessTranscriptTurn(messages); ok {
 			turnContext = append(turnContext, ta)
@@ -2078,6 +2095,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
 		startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
 		var thinking *nativeThinkingConstraint
+		if p.dflash2 != nil && effectiveBudget > 0 {
+			return nil, errors.New("dflash2: thinking constraints are not supported")
+		}
 		if effectiveBudget > 0 {
 			if sp.NativeInferenceReceipt {
 				return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "thinking budget constrains token selection"}
@@ -2130,7 +2150,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		// Flash is target-only and opt-in; unsupported exact layouts retain the
 		// lease through ordinary fallback, and never silently suppress speculation.
 		complete := false
-		coalesced := p.coalescesQwenDecode()
+		coalesced := p.dflash2 == nil && p.coalescesQwenDecode()
 		coalesceKind := inKernelCoalesceQwen
 		if !coalesced && p.batchDecode && p.backend != nil && p.m.Cfg.IsDeepSeekV41() &&
 			p.speculativeEngine == nil && !p.vulkanMTP && p.vulkanMTPDraftFactory == nil && p.MetalMTPCoordinator() == nil {
@@ -2211,6 +2231,34 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				}
 			}
 			generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
+				if p.dflash2 != nil {
+					return p.generateDFlash2(runCtx, ids, maxNew, func(tokens []int) (dflash2StopPreview, error) {
+						return previewDFlash2Stop(tokens, stops, scanner, p.tok.Decode)
+					}, func(plan dflash2StopPreview) error {
+						// Every piece and the exact stop prefix were decided before Commit.
+						// The existing stream projector owns cross-block suffix withholding.
+						for _, piece := range plan.pieces {
+							if err := runCtx.Err(); err != nil {
+								return err
+							}
+							sb.WriteString(piece)
+							if sp.DecodeTokenObserver != nil {
+								sp.DecodeTokenObserver(piece, "")
+							}
+						}
+						if plan.trim > 0 {
+							text := sb.String()
+							if plan.trim > len(text) {
+								return errors.New("dflash2: invalid committed stop trim")
+							}
+							text = text[:len(text)-plan.trim]
+							sb.Reset()
+							sb.WriteString(text)
+						}
+						scanner = plan.scanner
+						return runCtx.Err()
+					})
+				}
 				return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 					sb.Reset()
 					scanner.reset()
@@ -2271,7 +2319,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			if q8fused {
 				q8fusedMark = "+fused"
 			}
-			p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+			if p.dflash2 == nil {
+				p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+			}
 			// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
 			// /metrics, not just this log line — the live measurement of the frozen-trajectory
 			// cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md). #3390: BOTH halves —
@@ -2352,6 +2402,12 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				VulkanMTP:     genRes.vulkanMTP,
 				Timings:       NewTimings(promptTok, matched, gen, prefillS, decodeS),
 				NativeDecode:  newNativeDecodeSummary(genRes),
+			}
+			if p.dflash2 != nil {
+				// This diagnostic host draft path has no qualified performance counter
+				// mapping. Do not publish ordinary serial TPS or invented proposal counts.
+				comp.Timings = nil
+				comp.NativeDecode = &NativeDecodeSummary{Path: NativeDecodePathSpeculative}
 			}
 			if sp.NativeInferenceReceipt {
 				accounting := p.nativeCacheAccountingFor(nativeCacheAccountingFacts{

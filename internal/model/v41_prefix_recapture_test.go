@@ -30,7 +30,7 @@ func TestV41RecaptureImmutablePrefix(t *testing.T) {
 			t.Fatal(err)
 		}
 		if p.v41 != nil || p.Cache != nil || owned.history != nil || owned.attn != nil || owned.layers != nil ||
-			s.v41Forward.callbackOwner != s || s.v41Forward.finalNorm != nil {
+			s.v41Forward.callbackOwner != s || s.v41Forward.finalNorm() != nil {
 			t.Fatal("restore did not transfer ownership and bind destination callbacks")
 		}
 		p.Close()
@@ -62,11 +62,11 @@ func TestV41RecaptureImmutablePrefix(t *testing.T) {
 	parent.Step(4)
 	parent.Step(5) // Retain both a completed local publication and a partial group.
 	pristine := captureV41ForwardSnapshot(parent.v41Forward)
-	parent.v41Forward.finalNorm = func([]float32) ([]float32, error) {
+	parent.v41Forward.setFinalNorm(func([]float32) ([]float32, error) {
 		return nil, errors.New("source callback must not follow its snapshot")
-	}
+	})
 	recaptured := capture(parent)
-	parent.v41Forward.finalNorm = nil
+	parent.v41Forward.setFinalNorm(nil)
 	if !reflect.DeepEqual(recaptured.v41.clone(), pristine) ||
 		&recaptured.v41.history[0] == &parent.v41Forward.history[0] {
 		t.Fatal("recapture changed continuation or shared writable history")
@@ -146,10 +146,10 @@ func TestV41RecaptureImmutablePrefix(t *testing.T) {
 	}
 	failure := errors.New("late failure after recaptured source publication")
 	sawPublication := false
-	branch.v41Forward.finalNorm = func([]float32) ([]float32, error) {
+	branch.v41Forward.setFinalNorm(func([]float32) ([]float32, error) {
 		sawPublication = branch.v41Forward.attn.kvPublishedEnd[0] == 3 && len(branch.v41Forward.attn.kvPublications) == 1
 		return nil, failure
-	}
+	})
 	var stats v41StepStats
 	var returned error
 	panicked := recoverError(func() { _, stats, returned = m.forwardV41Step(6, branch.v41Forward, nil) })
@@ -158,7 +158,7 @@ func TestV41RecaptureImmutablePrefix(t *testing.T) {
 		!reflect.DeepEqual(captureV41ForwardSnapshot(branch.v41Forward), pristine) || !reflect.DeepEqual(peer.v41.clone(), pristine) {
 		t.Fatalf("recaptured branch rollback leaked: returned=%v panic=%v", returned, panicked)
 	}
-	branch.v41Forward.finalNorm = nil
+	branch.v41Forward.setFinalNorm(nil)
 	if got, want := branch.Step(6), control.Step(6); !reflect.DeepEqual(got, want) {
 		t.Fatal("recaptured continuation differs from its deep-owned control")
 	}

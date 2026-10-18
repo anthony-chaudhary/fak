@@ -20,6 +20,22 @@ const Qwen35SequenceAllLogitsPath = "qwen35-hybrid-sequence-all-logits-v1"
 // rerunning the complete model for its accepted tokens.
 const Qwen35SequencePrefixReplayPath = "qwen35-hybrid-sequence-prefix-replay-v1"
 
+// Qwen35SequenceFeatureRowsPath identifies independently retained post-FFN,
+// pre-final-normalization panels for one to five requested layers and 1..8 rows.
+// Advertising it does not select a request policy or change ordinary MTP depth.
+const Qwen35SequenceFeatureRowsPath = "qwen35-hybrid-sequence-feature-rows-v1"
+
+type Qwen35SequenceFeatureRowsBackend interface {
+	Qwen35SequenceFeatureRowsPath() string
+}
+
+// Qwen35SequenceFeatureRows binds one independent [tokens, hidden] F32 panel to
+// its executed layer. The caller consumes it before retiring request resources.
+type Qwen35SequenceFeatureRows struct {
+	Layer int
+	Rows  Tensor
+}
+
 // Qwen35SequencePrefixReplay owns request-detached projection tensors until its
 // transaction either commits a prefix or closes. Before is borrowed from the
 // caller's intact pre-round snapshot and remains caller-owned.
@@ -187,13 +203,16 @@ type Qwen35SequencePrefillRequest struct {
 	// rows stay device-resident; callers explicitly decide whether to read them.
 	NeedAllLogits bool
 	// CapturePrefixReplay retains only the GDN projection panels required to
-	// repair a partially accepted causal prefix. It is valid for 1..4 tokens
-	// together with NeedAllLogits.
+	// repair a partially accepted causal prefix. It is valid with NeedAllLogits
+	// for 1..4 ordinary tokens, or 1..8 with explicit FeatureLayers.
 	CapturePrefixReplay bool
 	// CaptureRawHidden retains the final [tokens, hidden] residual panel before
 	// output normalization. Callers must first verify the raw-hidden capability
 	// and consume the device tensor before retiring request resources.
 	CaptureRawHidden bool
+	// FeatureLayers requests independent post-FFN residual panels in increasing,
+	// distinct layer order. Verify the exact feature-rows capability first.
+	FeatureLayers []int
 }
 
 // Qwen35SequencePrefillResult returns only resident products. KV and recurrent
@@ -205,7 +224,28 @@ type Qwen35SequencePrefillResult struct {
 	RawHiddenRows Tensor
 	Logits        Tensor
 	LogitsRows    Tensor
+	FeatureRows   []Qwen35SequenceFeatureRows
 	PrefixReplay  Qwen35SequencePrefixReplay
 	Tokens        int
 	Transfers     Qwen35SequenceTransferCounters
+}
+
+// Validate the additive capture envelope before allocation or state mutation.
+func qwen35SequenceFeatureContract(req Qwen35SequencePrefillRequest) error {
+	limit := 4
+	if len(req.FeatureLayers) != 0 {
+		limit = 8
+		if len(req.FeatureLayers) > 5 || len(req.TokenIDs) < 1 || len(req.TokenIDs) > limit {
+			return &Qwen35SequenceError{Stage: "request", Layer: -1, Reason: "feature capture requires one to five taps and 1..8 tokens"}
+		}
+		for i, layer := range req.FeatureLayers {
+			if layer < 0 || layer >= len(req.Layers) || (i > 0 && layer <= req.FeatureLayers[i-1]) {
+				return &Qwen35SequenceError{Stage: "request", Layer: -1, Reason: "feature layers must be distinct, increasing and in range"}
+			}
+		}
+	}
+	if req.CapturePrefixReplay && (!req.NeedAllLogits || len(req.TokenIDs) < 1 || len(req.TokenIDs) > limit) {
+		return &Qwen35SequenceError{Stage: "request", Layer: -1, Reason: "prefix replay requires all-row logits and the admitted ordinary/feature token bound"}
+	}
+	return nil
 }

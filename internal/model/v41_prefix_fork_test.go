@@ -108,10 +108,10 @@ func TestV41ImmutablePrefixFork(t *testing.T) {
 		before := captureV41ForwardSnapshot(left.v41Forward)
 		failure := errors.New("late head after compressed source publication")
 		sawPublication := false
-		left.v41Forward.finalNorm = func([]float32) ([]float32, error) {
+		left.v41Forward.setFinalNorm(func([]float32) ([]float32, error) {
 			sawPublication = left.v41Forward.attn.kvPublishedEnd[0] == 2 && len(left.v41Forward.attn.kvPublications) == 1
 			return nil, failure
-		}
+		})
 		var stats v41StepStats
 		var returned error
 		panicked := recoverError(func() { _, stats, returned = m.forwardV41Step(4, left.v41Forward, nil) })
@@ -121,7 +121,7 @@ func TestV41ImmutablePrefixFork(t *testing.T) {
 			!reflect.DeepEqual(captureV41ForwardSnapshot(right.v41Forward), pristine) {
 			t.Fatalf("fork rollback changed a prefix or sibling: returned=%v panic=%v", returned, panicked)
 		}
-		left.v41Forward.finalNorm = nil
+		left.v41Forward.setFinalNorm(nil)
 		for _, pair := range []struct {
 			branch, control *Session
 			token           int

@@ -1,4 +1,4 @@
-package ggufload
+package ggufload_test
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -47,7 +48,7 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "2")
 
-	ws, err := OpenWeights(writeDeepSeek41ExpertHALFile(t))
+	ws, err := ggufload.OpenWeights(ggufload.CheckpointResidencyFixtureForTest(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 		t.Fatal(err)
 	}
 	const hostBudget = int64(64 << 20)
-	m, err := ws.QuantModelQ4KProfileOptionsContext(t.Context(), nil, WithStreamedExperts(hostBudget))
+	m, err := ws.QuantModelQ4KProfileOptionsContext(t.Context(), nil, ggufload.WithStreamedExperts(hostBudget))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +259,7 @@ func TestCheckpointResidencyHTTPReportsV41WithoutCheckpoint(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_INKERNEL_MAX_TOKENS", "2")
 
-	ws, err := OpenWeights(writeDeepSeek41ExpertHALFile(t))
+	ws, err := ggufload.OpenWeights(ggufload.CheckpointResidencyFixtureForTest(t))
 	if err != nil {
 		t.Fatal(err)
 	}

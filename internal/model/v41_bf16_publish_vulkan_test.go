@@ -87,7 +87,7 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		}
 		defer s.Close()
 		publish := s.v41BF16PublishFunc()
-		if publish == nil || s.v41State().gatherOps.bf16Publish == nil || s.v41State().bf16Boundary == nil {
+		if publish == nil || s.v41State().gatherOps.bf16Publish == nil || s.v41State().bf16Boundary() == nil {
 			t.Fatal("ordinary publication not bound on the Vulkan session")
 		}
 		type site struct {
@@ -205,7 +205,8 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		}
 		defer hostArm.Close()
 		hs := hostArm.v41State()
-		hs.gatherOps.bf16Publish, hs.bf16Boundary = nil, nil
+		hs.gatherOps.bf16Publish = nil
+		hs.setBF16Boundary(nil)
 		hs.setAttentionBF16(nil)
 		alt := v41DeviceParitySession(t, hostArm, prompt, v41DeviceParitySteps)
 		v41BF16PublishBitIdentical(t, "engram", got, alt)
@@ -303,7 +304,7 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		defer func() { v41DeviceOnlyHostOps = saved }()
 		sites := map[string]int{}
 		st := dev.v41State()
-		inner, final := st.gatherOps.bf16PublishFunc(), st.bf16Boundary
+		inner, final := st.gatherOps.bf16PublishFunc(), st.bf16Boundary()
 		if inner == nil || final == nil || st.attentionBF16Func() == nil {
 			t.Fatal("publication seams not bound on the device-only session")
 		}
@@ -314,7 +315,7 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 			}
 		}
 		st.gatherOps.setBF16Publication(count(inner))
-		st.bf16Boundary = count(final)
+		st.setBF16Boundary(count(final))
 		stop := enableV41BF16Witness()
 		var got v41DeviceParityRun
 		dispatches := v41SeamDispatches(t, be, func() { got = v41DeviceParitySession(t, dev, prompt, v41DeviceParitySteps) })
@@ -346,7 +347,8 @@ func TestV41BF16PublishVulkan(t *testing.T) {
 		}
 		defer hostArm.Close()
 		hs := hostArm.v41State()
-		hs.gatherOps.bf16Publish, hs.bf16Boundary = nil, nil
+		hs.gatherOps.bf16Publish = nil
+		hs.setBF16Boundary(nil)
 		hs.setAttentionBF16(nil)
 		alt := v41DeviceParitySession(t, hostArm, prompt, v41DeviceParitySteps)
 		v41BF16PublishBitIdentical(t, "device-only", got, alt)

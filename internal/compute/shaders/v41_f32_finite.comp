@@ -1,0 +1,25 @@
+#version 450
+
+// Raw binary32 finiteness only: integer loads preserve all finite bits, including
+// values that BF16 publication would round to infinity. No output is produced.
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Input { uint inputBits[]; };
+layout(std430, set = 0, binding = 1) buffer Status { uint status[]; };
+layout(push_constant) uniform PC { uint count; uint site; } pc;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    // Native admission requires count > 0. The checked native dispatch fills
+    // all four words with UINT32_MAX before the transfer-to-compute dependency.
+    if (index == 0u) {
+        status[0] = 0x46333243u;
+        status[1] = pc.site;
+        status[3] = pc.count;
+    }
+    uint stride = gl_NumWorkGroups.x * 64u;
+    for (uint i = index; i < pc.count; i += stride) {
+        if ((inputBits[i] & 0x7f800000u) == 0x7f800000u) {
+            atomicMin(status[2], i);
+        }
+    }
+}

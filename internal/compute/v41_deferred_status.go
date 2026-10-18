@@ -13,11 +13,13 @@ type V41DeferredStatusKind uint8
 const (
 	V41DeferredRoutedSwiGLU V41DeferredStatusKind = iota + 1
 	V41DeferredBF16Publish
+	V41DeferredF32Finite
 )
 
 // V41DeferredStatus is one checked kernel's 16-byte status record, left on the
 // device so several kernels can be verified behind one host fence (#13820).
 // Record is backend-owned storage; V41ReadDeferred consumes and frees it.
+// Raw F32 finite checks have no output tensor and contribute exactly one record.
 //
 // Records > 1 marks a routed id or activation-chunk status: Record holds that
 // many consecutive 16-byte records, one per pick, each of Count lanes.
@@ -30,16 +32,17 @@ type V41DeferredStatus struct {
 }
 
 // V41DeferredStatusBackend records the routed SwiGLU and the ordinary BF16
-// publication without their per-call status readbacks. Each deferred call
-// issues the same kernel as its synchronous form and returns the same output
-// tensor; the output is valid only once its status verdict is nil.
+// publication without their per-call status readbacks. Those two calls issue
+// the same kernel as their synchronous forms and return an output tensor;
+// the output is valid only once its status verdict is nil. The reader also
+// accepts finite-only records, which have no output tensor.
 //
 // V41ReadDeferred reads every status record and every row behind one host
 // fence, frees every record, and returns one verdict per record in order (a
 // status with Records n contributes n consecutive verdicts): nil,
 // or exactly the error the synchronous operation returns after its own
 // readback (*V41RoutedSwiGLUFault, or a *BackendError wrapping the checked
-// BF16 arithmetic or protocol error). A non-nil err is a transport or
+// BF16 or raw-F32 arithmetic/protocol error). A non-nil err is a transport or
 // submission failure and leaves every verdict unknown. No deferred kernel may
 // be replayed on the host.
 type V41DeferredStatusBackend interface {
@@ -49,8 +52,8 @@ type V41DeferredStatusBackend interface {
 	V41ReadDeferred(statuses []V41DeferredStatus, rows []Tensor) ([]error, [][]float32, error)
 }
 
-// v41DeferredVerdict decodes one status record into the error the synchronous
-// operation returns for the same record.
+// v41DeferredVerdict decodes one issued status record into its operation's
+// arithmetic or protocol verdict.
 func v41DeferredVerdict(backend string, status V41DeferredStatus, record []byte) error {
 	if len(record) != 16 {
 		return v41DeferredProtocolError(backend, status.Kind, "status record is not 16 bytes")
@@ -68,6 +71,14 @@ func v41DeferredVerdict(backend string, status V41DeferredStatus, record []byte)
 		}
 		if decodeErr != nil {
 			return &BackendError{Backend: backend, Site: "V41RoutedSwiGLU", Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: decodeErr.Error(), Recovered: decodeErr}
+		}
+		return nil
+	case V41DeferredF32Finite:
+		if status.Records < 0 || status.Records > 1 {
+			return v41DeferredProtocolError(backend, status.Kind, "raw F32 status must have one record")
+		}
+		if statusErr := decodeV41F32FiniteStatus(record, status.Count, status.Site); statusErr != nil {
+			return &BackendError{Backend: backend, Site: "V41F32Finite", Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: statusErr.Error(), Recovered: statusErr}
 		}
 		return nil
 	case V41DeferredBF16Publish:

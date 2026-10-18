@@ -14,7 +14,8 @@ func v41ScoreOnly(s *Session) {
 	st.expertGateUp, st.expertDown = nil, nil
 	st.setDenseProjection(nil)
 	st.groupedOutput, st.engramProjection = nil, nil
-	st.mhcProjection, st.mhcFFNProjection, st.finalNorm, st.queryNorm, st.kvNorm = nil, nil, nil, nil, nil
+	st.mhcProjection, st.mhcFFNProjection, st.queryNorm, st.kvNorm = nil, nil, nil, nil
+	st.setFinalNorm(nil)
 	st.ffnNorm, st.compressorNorm, st.indexKeyNorm = nil, nil, nil
 	st.sharedActivation, st.tailRoPE = nil, nil
 	st.setSharedAttention(nil)

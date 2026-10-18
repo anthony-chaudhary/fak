@@ -380,7 +380,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -1627,7 +1627,7 @@ const char* const kKernelNames[] = {
     "rmsnorm_q2k_matmul2", "qwen35_split_qg_panel", "qwen35_partial_rope_panel",
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
     "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk", "v41_q2k_token_pair",
-    "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k",
+    "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k", "v41_f32_finite",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -2992,6 +2992,131 @@ bool v41BF16CheckedABI(const std::vector<char>& code) {
     return seenBindings == 7;
 }
 
+// Optional finite-only ABI: two disjoint uint buffers, no output publication.
+// Structural admission is separate from registry/source identity and device qualification.
+bool v41F32FiniteABI(const std::vector<char>& code) {
+    if (code.size() < 20 || code.size() % 4 != 0) return false;
+    std::vector<uint32_t> w(code.size() / 4);
+    memcpy(w.data(), code.data(), code.size());
+    if (w[0] != 0x07230203 || w[3] == 0 || w[4] != 0) return false;
+    const uint32_t bound = w[3];
+    const uint32_t typeInt = 21, typeFloat = 22, typeRuntimeArray = 29;
+    const uint32_t typeStruct = 30, typePointer = 32, variable = 59;
+    const uint32_t block = 2, arrayStride = 6, binding = 33, descriptorSet = 34;
+    const uint32_t offset = 35, pushConstant = 9, storageBuffer = 12;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> defs;
+    std::unordered_map<uint64_t, uint32_t> decorations, memberOffsets;
+    std::unordered_map<uint64_t, bool> memberAccess;
+    std::vector<uint32_t> buffers;
+    uint32_t push = 0, entry = 0, localEntry = 0;
+    size_t pushCount = 0, entryCount = 0, localCount = 0, shaderCount = 0;
+    std::vector<uint32_t> atomicResultTypes;
+    auto validID = [bound](uint32_t id) { return id != 0 && id < bound; };
+    auto key = [](uint32_t id, uint32_t kind) { return (uint64_t(id) << 32) | kind; };
+    for (size_t p = 5; p < w.size();) {
+        const uint32_t count = w[p] >> 16, op = w[p] & 0xffff;
+        if (count == 0 || count > w.size() - p) return false;
+        const uint32_t* a = w.data() + p;
+        // Integer-only raw finiteness check: no floating or extended instruction.
+        // Exactly one unsigned atomic minimum reduces the invalid index.
+        if (op == typeFloat || op == 12) return false;
+        if ((op >= 227 && op <= 242 && op != 237) || op == 318 || op == 319) return false;
+        if (op == 237) { // OpAtomicUMin
+            if (count != 7) return false;
+            for (uint32_t i = 1; i < count; ++i) if (!validID(a[i])) return false;
+            atomicResultTypes.push_back(a[1]);
+        }
+        if (op == typeInt || op == typeRuntimeArray || op == typeStruct || op == typePointer || op == variable) {
+            if ((op == typeInt && count != 4) || (op == typeRuntimeArray && count != 3) ||
+                (op == typeStruct && count < 2) || (op == typePointer && count != 4) ||
+                (op == variable && count != 4 && count != 5)) return false;
+            const uint32_t id = a[op == variable ? 2 : 1];
+            if (!validID(id) || !defs.emplace(id, std::vector<uint32_t>(a, a + count)).second) return false;
+            if (op == typeInt && (a[2] != 32 || a[3] > 1)) return false;
+            if (op == variable) {
+                if (!validID(a[1])) return false;
+                if (a[3] == pushConstant) { push = a[1]; ++pushCount; }
+                else if (a[3] == storageBuffer) buffers.push_back(id);
+                else if (a[3] == 0 || a[3] == 2) return false;
+            }
+        } else if (op == 71) {
+            if (count < 3 || !validID(a[1])) return false;
+            const uint32_t kind = a[2];
+            if (kind == block || kind == 24 || kind == 25) {
+                if (count != 3 || !decorations.emplace(key(a[1], kind), 0).second) return false;
+            } else if (kind == arrayStride || kind == binding || kind == descriptorSet) {
+                if (count != 4 || !decorations.emplace(key(a[1], kind), a[3]).second) return false;
+            }
+        } else if (op == 72) {
+            if (count < 4 || !validID(a[1])) return false;
+            if (a[3] == offset) {
+                if (count != 5 || !memberOffsets.emplace(key(a[1], a[2]), a[4]).second) return false;
+            } else if (a[3] == 24 || a[3] == 25) {
+                if (count != 4 || a[2] != 0 || !memberAccess.emplace(key(a[1], a[3]), true).second) return false;
+            }
+        } else if (op == 15) {
+            if (count < 5 || a[1] != 5 || !validID(a[2]) || a[3] != 0x6e69616d || a[4] != 0) return false;
+            entry = a[2]; ++entryCount;
+        } else if (op == 16) {
+            if (count != 6 || !validID(a[1]) || a[2] != 17 || a[3] != 64 || a[4] != 1 || a[5] != 1) return false;
+            localEntry = a[1]; ++localCount;
+        } else if (op == 17) {
+            if (count != 2 || a[1] != 1) return false; // only Shader
+            ++shaderCount;
+        }
+        p += count;
+    }
+    auto definition = [&](uint32_t id, uint32_t op, size_t size) -> const std::vector<uint32_t>* {
+        auto it = defs.find(id);
+        return it != defs.end() && (it->second[0] & 0xffff) == op && it->second.size() == size ? &it->second : nullptr;
+    };
+    auto decorated = [&](uint32_t id, uint32_t kind, uint32_t value) {
+        auto it = decorations.find(key(id, kind));
+        return it != decorations.end() && it->second == value;
+    };
+    auto atOffset = [&](uint32_t id, uint32_t member, uint32_t value) {
+        auto it = memberOffsets.find(key(id, member));
+        return it != memberOffsets.end() && it->second == value;
+    };
+    if (entryCount != 1 || localCount != 1 || shaderCount != 1 || entry != localEntry || pushCount != 1 || buffers.size() != 2 || atomicResultTypes.size() != 1) return false;
+    const auto* atomicType = definition(atomicResultTypes[0], typeInt, 4);
+    if (!atomicType || (*atomicType)[2] != 32 || (*atomicType)[3] != 0) return false;
+    const auto* pointer = definition(push, typePointer, 4);
+    if (!pointer || (*pointer)[2] != pushConstant) return false;
+    const uint32_t pushStruct = (*pointer)[3];
+    const auto* structure = definition(pushStruct, typeStruct, 4);
+    if (!structure || !decorated(pushStruct, block, 0)) return false;
+    for (uint32_t member = 0; member < 2; ++member) {
+        const auto* scalar = definition((*structure)[member + 2], typeInt, 4);
+        if (!scalar || (*scalar)[2] != 32 || (*scalar)[3] != 0 ||
+            !atOffset(pushStruct, member, member * 4)) return false;
+    }
+    uint32_t seenBindings = 0;
+    for (uint32_t id : buffers) {
+        const auto* var = definition(id, variable, 4);
+        auto bind = decorations.find(key(id, binding));
+        if (!var || bind == decorations.end() || bind->second >= 2 || !decorated(id, descriptorSet, 0)) return false;
+        const uint32_t slot = bind->second, mask = 1u << slot;
+        if (seenBindings & mask) return false;
+        seenBindings |= mask;
+        const auto* ptr = definition((*var)[1], typePointer, 4);
+        if (!ptr || (*ptr)[2] != storageBuffer) return false;
+        const uint32_t structID = (*ptr)[3];
+        const auto* st = definition(structID, typeStruct, 3);
+        if (!st || !decorated(structID, block, 0) || !atOffset(structID, 0, 0)) return false;
+        const auto* array = definition((*st)[2], typeRuntimeArray, 3);
+        if (!array || !decorated((*st)[2], arrayStride, 4)) return false;
+        const auto* scalar = definition((*array)[2], typeInt, 4);
+        if (!scalar || (*scalar)[2] != 32 || (*scalar)[3] != 0) return false;
+        // SPIR-V may put access restrictions on the variable, its block
+        // member, or both. Enforce the effective role, including contradictions.
+        const bool nonWritable = decorated(id, 24, 0) || memberAccess.count(key(structID, 24)) != 0;
+        const bool nonReadable = decorated(id, 25, 0) || memberAccess.count(key(structID, 25)) != 0;
+        if (nonWritable != (slot == 0) || nonReadable) return false;
+    }
+    return seenBindings == 3;
+}
+
 // Witness-only scalar ABI and declared floating-mode admission. This parser
 // checks shape, one NoContraction FMul and the required binary32 controls;
 // it is not a general SPIR-V validator or an algorithm/provenance proof.
@@ -3252,7 +3377,7 @@ static bool coopMatF16Shape16Supported() {
 }
 
 bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
-    const bool fixedV41 = &k == &g_kern[K_V41_Q2K_TOKEN_PAIR] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
+    const bool fixedV41 = &k == &g_kern[K_V41_F32_FINITE] || &k == &g_kern[K_V41_Q2K_TOKEN_PAIR] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     std::vector<char> code = fixedV41 ? readV41TailRoPEModule(spvPath) : readFile(spvPath);
     if (&k == &g_kern[K_V41_Q3K_TOKEN_PANEL]) g_v41Q3TokenGridModule = false;
     if (&k == &g_kern[K_V41_Q2K_TOKEN_PANEL]) g_v41Q2TokenGridModule = false;
@@ -3275,6 +3400,8 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
         (nbuf != 5 || pcsize != 12 || !g_v41IndexerFloatControls || !v41Q2KTokenPairABI(code))) return false;
     if (q2GridABI < 0) return false;
     if (q3GridABI < 0) return false;
+    if (&k == &g_kern[K_V41_F32_FINITE] &&
+        (nbuf != 2 || pcsize != 8 || !v41F32FiniteABI(code))) return false;
     if (&k == &g_kern[K_V41_BF16_BOUNDARY] &&
         (nbuf != 2 || pcsize != 4 || !v41BF16BoundaryABI(code))) {
         fprintf(stderr, "fak-vulkan: incompatible integer BF16 boundary module in %s\n", spvPath.c_str());
@@ -3419,21 +3546,23 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
     // initialization. They never flush a batch; they record only into a V4.1 step batch.
+    const bool finiteOnly = &k == &g_kern[K_V41_F32_FINITE];
     const bool routedChunk = &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_CHUNK];
     const bool downChunk = &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_CHUNK];
     const bool routedID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] ||
         &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
-    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedID || routedChunk || downChunk) && initializedStatus == nullptr) return false;
+    if ((&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || &k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedID || routedChunk || downChunk || finiteOnly) && initializedStatus == nullptr) return false;
     if (initializedStatus != nullptr) {
         // The status binding is the last one of each status-owning kernel. Only
         // routed id, activation and down chunks can own multiple 16-byte records.
+        const bool checkedFinite = finiteOnly && k.nbuf == 2;
         const bool checkedBF16 = (&k == &g_kern[K_V41_BF16_CHECKED] || &k == &g_kern[K_V41_ROUTED_DOWN_PANEL_ROW] || &k == &g_kern[K_V41_INDEX_SCALE_BF16] || downChunk) && k.nbuf == 3;
         const bool routedSwiGLU = (&k == &g_kern[K_V41_ROUTED_SWIGLU] || &k == &g_kern[K_V41_ROUTED_SWIGLU_PANEL_ROW] || routedChunk) && k.nbuf == 4;
         const bool routedSwiGLUID = &k == &g_kern[K_V41_ROUTED_SWIGLU_ID] && k.nbuf == 5;
         const bool routedPublishSum = &k == &g_kern[K_V41_ROUTED_PUBLISH_SUM] && k.nbuf == 4;
         const bool routedFusedGateUp = &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] && k.nbuf == 20;
         const bool routedFusedDownSum = &k == &g_kern[K_V41_ROUTED_DOWN_SUM] && k.nbuf == 12;
-        if ((!checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum && !routedFusedGateUp && !routedFusedDownSum) || !forceChecked || (g_batching && !g_stepBatch) ||
+        if ((!checkedFinite && !checkedBF16 && !routedSwiGLU && !routedSwiGLUID && !routedPublishSum && !routedFusedGateUp && !routedFusedDownSum) || !forceChecked || (g_batching && !g_stepBatch) ||
             !bufs || bufs[k.nbuf - 1] != initializedStatus || initializedStatus->buf == VK_NULL_HANDLE ||
             statusBytes < 16 || statusBytes % 16 != 0 || (statusBytes != 16 && !routedID && !routedChunk && !downChunk) ||
             ((routedChunk || downChunk) && ((groupsY != 2 && groupsY != 4 && groupsY != 8) || statusBytes != 16u * groupsY)) ||
@@ -3822,6 +3951,160 @@ void fvk_memory_guard_snapshot(uint64_t* limit, uint64_t* live, uint64_t* peak,
     *configured = g_memoryGuard.configured;
     *configuration_valid = g_memoryGuard.configurationValid;
     *accounting_valid = g_memoryGuard.accountingValid;
+}
+
+
+int fvk_memory_capacity_snapshot_read(fvk_memory_capacity_snapshot* out) {
+    if (!out) return FVK_MEMORY_CAPACITY_INVALID;
+    *out = {};
+    if (!g_ready || !g_dev || !g_phys || !g_memoryDeviceGenerationReady ||
+        !g_memoryDeviceGeneration) return FVK_MEMORY_CAPACITY_UNAVAILABLE;
+
+    static_assert(VK_MAX_MEMORY_HEAPS == FVK_MEMORY_CAPACITY_MAX_HEAPS, "heap ABI");
+    static_assert(VK_MAX_MEMORY_TYPES == FVK_MEMORY_CAPACITY_MAX_TYPES, "type ABI");
+    VkPhysicalDeviceMemoryProperties memory = g_memprops;
+    bool budgetKnown = false;
+    uint64_t budgets[FVK_MEMORY_CAPACITY_MAX_HEAPS]{};
+    uint64_t usages[FVK_MEMORY_CAPACITY_MAX_HEAPS]{};
+#ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
+    if (g_haveMemoryBudget) {
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+        VkPhysicalDeviceMemoryProperties2 properties{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+        properties.pNext = &budget;
+        vkGetPhysicalDeviceMemoryProperties2(g_phys, &properties);
+        memory = properties.memoryProperties;
+        budgetKnown = true;
+        for (uint32_t i = 0; i < FVK_MEMORY_CAPACITY_MAX_HEAPS; ++i) {
+            budgets[i] = budget.heapBudget[i];
+            usages[i] = budget.heapUsage[i];
+        }
+    }
+#endif
+    if (!memory.memoryHeapCount || memory.memoryHeapCount > FVK_MEMORY_CAPACITY_MAX_HEAPS ||
+        !memory.memoryTypeCount || memory.memoryTypeCount > FVK_MEMORY_CAPACITY_MAX_TYPES ||
+        memory.memoryHeapCount != g_memprops.memoryHeapCount ||
+        memory.memoryTypeCount != g_memprops.memoryTypeCount) return FVK_MEMORY_CAPACITY_INVALID;
+
+    fvk_memory_capacity_snapshot result{};
+    for (uint32_t i = 0; i < memory.memoryHeapCount; ++i) {
+        const VkMemoryHeap& heap = memory.memoryHeaps[i];
+        if (!heap.size || heap.size != g_memprops.memoryHeaps[i].size ||
+            heap.flags != g_memprops.memoryHeaps[i].flags) return FVK_MEMORY_CAPACITY_INVALID;
+        result.heaps[i] = {heap.size, budgets[i], usages[i], heap.flags, budgetKnown ? 1u : 0u};
+    }
+    for (uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
+        const VkMemoryType& type = memory.memoryTypes[i];
+        if (type.heapIndex >= memory.memoryHeapCount ||
+            type.heapIndex != g_memprops.memoryTypes[i].heapIndex ||
+            type.propertyFlags != g_memprops.memoryTypes[i].propertyFlags)
+            return FVK_MEMORY_CAPACITY_INVALID;
+        result.types[i] = {type.propertyFlags, type.heapIndex};
+    }
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(g_phys, &properties);
+    result.device_generation = g_memoryDeviceGeneration;
+    result.limit_bytes = g_memoryGuard.limit;
+    result.live_bytes = g_memoryGuard.live;
+    result.peak_bytes = g_memoryGuard.peak;
+    result.refused_allocations = g_memoryGuard.refused;
+    result.guard_initialized = g_memoryGuard.initialized ? 1u : 0u;
+    result.guard_configured = g_memoryGuard.configured ? 1u : 0u;
+    result.guard_configuration_valid = g_memoryGuard.configurationValid ? 1u : 0u;
+    result.guard_accounting_valid = g_memoryGuard.accountingValid ? 1u : 0u;
+    result.max_buffer_bytes = g_maxBufferBytes;
+    result.max_storage_buffer_range = g_maxStorageBufferRange;
+    result.max_memory_allocation_size = g_maxMemoryAllocationSize;
+    result.max_memory_allocation_count = properties.limits.maxMemoryAllocationCount;
+    result.submission_status = static_cast<int32_t>(g_submissionStatus);
+    result.quarantined = g_v41SubmissionPendingFailure ? 1u : 0u;
+    result.batch_active = g_batching ? 1u : 0u;
+    result.inflight_active = g_inflight.active ? 1u : 0u;
+    result.restore_active = (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) ? 1u : 0u;
+    result.vendor_id = properties.vendorID;
+    result.device_id = properties.deviceID;
+    result.driver_version = properties.driverVersion;
+    result.api_version = properties.apiVersion;
+    result.device_type = static_cast<uint32_t>(properties.deviceType);
+    result.heap_count = memory.memoryHeapCount;
+    result.type_count = memory.memoryTypeCount;
+    memcpy(result.device_name, properties.deviceName, sizeof(result.device_name));
+    result.device_name[sizeof(result.device_name)-1] = 0;
+    *out = result;
+    return FVK_MEMORY_CAPACITY_OK;
+}
+
+
+int fvk_buffer_requirements_probe(const fvk_buffer_requirements_request* requests,
+    uint32_t count, fvk_buffer_requirements_snapshot* out, int32_t* driver_result) {
+    if (out) *out = {};
+    if (driver_result) *driver_result = static_cast<int32_t>(VK_SUCCESS);
+    if (!out || !driver_result || !requests || !count ||
+        count > FVK_BUFFER_REQUIREMENTS_MAX_PROBES) return FVK_BUFFER_REQUIREMENTS_INVALID;
+    if (!g_ready || !g_dev || !g_phys || !g_memoryDeviceGenerationReady ||
+        !g_memoryDeviceGeneration) return FVK_BUFFER_REQUIREMENTS_UNAVAILABLE;
+    if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS)
+        return FVK_BUFFER_REQUIREMENTS_QUARANTINED;
+    if (g_batching || g_stepBatch || g_inflight.active || g_restore.stage ||
+        g_restore.cmd != VK_NULL_HANDLE || g_allocationWindowActive)
+        return FVK_BUFFER_REQUIREMENTS_BUSY;
+    if (!g_maxBufferBytes || !g_memprops.memoryTypeCount || g_memprops.memoryTypeCount > 32)
+        return FVK_BUFFER_REQUIREMENTS_INVALID;
+
+    // Validate and copy the entire bounded descriptor set before driver calls.
+    // Both profiles conservatively use the existing single-resource cap, even
+    // though transfer-only buffers need not have a storage-range restriction.
+    fvk_buffer_requirements_request inputs[FVK_BUFFER_REQUIREMENTS_MAX_PROBES]{};
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto request = requests[i];
+        if (!request.size_bytes || request.size_bytes > uint64_t(INT64_MAX) ||
+            request.size_bytes > g_maxBufferBytes ||
+            (request.profile != FVK_BUFFER_REQUIREMENTS_STORAGE &&
+             request.profile != FVK_BUFFER_REQUIREMENTS_TRANSFER))
+            return FVK_BUFFER_REQUIREMENTS_INVALID;
+        inputs[i] = request;
+    }
+    fvk_buffer_requirements_snapshot result{};
+    result.device_generation = g_memoryDeviceGeneration;
+    result.memory_type_count = g_memprops.memoryTypeCount;
+    result.count = count;
+    const uint32_t validTypes = g_memprops.memoryTypeCount == 32 ? UINT32_MAX :
+        ((uint32_t(1) << g_memprops.memoryTypeCount) - 1);
+    for (uint32_t i = 0; i < count; ++i) {
+        VkBufferCreateInfo create{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        create.size = inputs[i].size_bytes;
+        create.usage = inputs[i].profile == FVK_BUFFER_REQUIREMENTS_STORAGE ?
+            STORAGE_USAGE : (VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkBuffer buffer = VK_NULL_HANDLE;
+        const VkResult status = vkCreateBuffer(g_dev, &create, nullptr, &buffer);
+        if (status != VK_SUCCESS) {
+            *driver_result = static_cast<int32_t>(status);
+            return FVK_BUFFER_REQUIREMENTS_DRIVER_FAILED;
+        }
+        VkMemoryDedicatedRequirements dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS};
+        VkMemoryRequirements2 requirements{VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+        requirements.pNext = &dedicated;
+        VkBufferMemoryRequirementsInfo2 info{VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2};
+        info.buffer = buffer;
+        vkGetBufferMemoryRequirements2(g_dev, &info, &requirements);
+        // Every successfully created object is destroyed before validation,
+        // a subsequent probe, or publication. It was never bound/submitted.
+        vkDestroyBuffer(g_dev, buffer, nullptr);
+        const VkMemoryRequirements& r = requirements.memoryRequirements;
+        if (r.size < inputs[i].size_bytes || !r.alignment ||
+            (r.alignment & (r.alignment - 1)) || !r.memoryTypeBits ||
+            (r.memoryTypeBits & ~validTypes) ||
+            dedicated.requiresDedicatedAllocation > VK_TRUE ||
+            dedicated.prefersDedicatedAllocation > VK_TRUE)
+            return FVK_BUFFER_REQUIREMENTS_INVALID;
+        result.rows[i] = {inputs[i].size_bytes, r.size, r.alignment,
+            inputs[i].profile, r.memoryTypeBits, dedicated.requiresDedicatedAllocation,
+            dedicated.prefersDedicatedAllocation};
+    }
+    *out = result;
+    return FVK_BUFFER_REQUIREMENTS_OK;
 }
 
 int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
@@ -4328,6 +4611,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // capability false unless mandatory initialization completes below.
     const bool v41BF16CheckedBuilt = buildKernel(g_kern[K_V41_BF16_CHECKED], P("v41_bf16_checked.spv"), 3, 8);
     ok &= v41BF16CheckedBuilt;
+    // Optional raw-finite status. Older bundles remain usable; no model selects it here.
+    buildKernel(g_kern[K_V41_F32_FINITE], P("v41_f32_finite.spv"), 2, 8);
     // The raw all-bit operation remains an isolated witness-only extra.
     bool v41BF16BoundaryBuilt = false;
 #ifdef FAK_V41_BF16_BOUNDARY_WITNESS
@@ -7497,6 +7782,57 @@ int fvk_v41_bf16_publish_f32(const void* dInput, void* dOut, void* dStatus, int 
     if (state != 0) return state;
     const bool validSite = site == 1 || site == 2 || (site >= 5 && site <= 27);
     return v41BF16CheckedDispatch(dInput, dOut, dStatus, count, site, validSite);
+}
+
+// Optional finite-only status uses the same serialized execution domain and
+// checked status fill/barrier/dispatch/completion as ordinary BF16 publication.
+int fvk_have_v41_f32_finite(void) {
+    return g_ready && g_kern[K_V41_F32_FINITE].pipe != VK_NULL_HANDLE &&
+        g_kern[K_V41_F32_FINITE].nbuf == 2 && g_kern[K_V41_F32_FINITE].pcsize == 8;
+}
+int fvk_v41_f32_finite_count_supported(int count) {
+    return v41BF16CheckedCountSupported(count) && g_maxStorageBufferRange >= 16 &&
+        uint64_t(count) * 4u <= g_maxStorageBufferRange;
+}
+int fvk_v41_f32_finite_module_abi(const void* data, size_t bytes) {
+    if (!data || bytes < 20 || bytes > 1024 * 1024 || bytes % 4 != 0) return 0;
+    std::vector<char> code(bytes);
+    memcpy(code.data(), data, bytes);
+    return v41F32FiniteABI(code) ? 1 : 0;
+}
+// Called only while the Go execution-owner mutex remains held, on interrupted
+// acquisition, recording or retirement. Never a reset or a quiescence claim:
+// fvk_free parks known handles; existing checked drain/context retirement owns
+// eventual destruction. The entire native execution domain remains poisoned.
+void fvk_v41_f32_finite_abandon(void) {
+    if (g_submissionStatus == VK_SUCCESS) g_submissionStatus = VK_ERROR_UNKNOWN;
+    g_v41SubmissionPendingFailure = true;
+}
+int fvk_v41_f32_finite(const void* dInput, void* dStatus, int count, uint32_t site) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_f32_finite()) return 3;
+    const int state = fvk_v41_attention_bf16_state();
+    if (state != 0) return state;
+    if ((site != 1 && site != 2) || !fvk_v41_f32_finite_count_supported(count)) return 2;
+    const uint64_t bytes = uint64_t(count) * 4u;
+    Buffer* bufs[2] = {B(dInput), B(dStatus)};
+    const uint64_t required[2] = {bytes, 16};
+    for (int i = 0; i < 2; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            required[i] > bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    if (bufs[0] == bufs[1] || bufs[0]->buf == bufs[1]->buf ||
+        (bufs[0]->mem == bufs[1]->mem && bufs[0]->memoryOffset < bufs[1]->memoryOffset + bufs[1]->bytes &&
+         bufs[1]->memoryOffset < bufs[0]->memoryOffset + bufs[0]->bytes)) return 2;
+    struct Push { uint32_t count, site; } pc{uint32_t(count), site};
+    static_assert(sizeof(Push) == 8 && offsetof(Push, count) == 0 && offsetof(Push, site) == 4,
+                  "finite status push ABI must contain count/site uint32 values");
+    const uint32_t groups = uint32_t(std::min<uint64_t>((uint64_t(count) + 63u) / 64u, g_maxComputeWorkGroupCountX));
+    if (!dispatch(g_kern[K_V41_F32_FINITE], bufs, &pc, sizeof(pc), groups, 1, true, bufs[1])) {
+        return g_submissionStatus != VK_SUCCESS ? int(g_submissionStatus) : 4;
+    }
+    return int(g_submissionStatus);
 }
 
 // One ordinary RoutedDown publication from a borrowed panel row. The existing

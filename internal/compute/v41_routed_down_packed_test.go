@@ -30,6 +30,9 @@ func TestV41RoutedDownPacked(t *testing.T) {
 		{"q3kPackedWords[27]", "q3kPackedWords[28]"},
 		{"uint qBase  = 32u;", "uint qBase  = base + 32u;"},
 		{"acc = acc + uintBitsToFloat(rounded);", "acc = uintBitsToFloat(rounded) + acc;"},
+		{"if (row == 0u) {", "if (row < 64u) {"},
+		{"if (row == 0u) {", "if (row == 1u) {"},
+		{"status[4u * p + 3u] = outDim;", "status[4u * p + 2u] = outDim;"},
 	} {
 		mutant := strings.Replace(source, change[0], change[1], 1)
 		if mutant == source || v41CheckDownPackedSource(mutant) == nil {
@@ -172,10 +175,12 @@ const v41DownPackedMain = `void main() {
     uint outDim = uint(pc.outDim);
     if (row >= outDim) return;
     uint picks = pc.picks;
-    for (uint p = 0u; p < picks; ++p) {
-        status[4u * p] = 0x42463143u;
-        status[4u * p + 1u] = pc.site;
-        status[4u * p + 3u] = outDim;
+    if (row == 0u) {
+        for (uint p = 0u; p < picks; ++p) {
+            status[4u * p] = 0x42463143u;
+            status[4u * p + 1u] = pc.site;
+            status[4u * p + 3u] = outDim;
+        }
     }
     uint blocks = uint(pc.midDim) / 256u;
     precise float acc = 0.0;

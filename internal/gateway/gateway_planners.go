@@ -120,6 +120,16 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 		plannerCfg.DeferColdTools = cfg.DeferColdTools
 	}
 	ikp := agent.NewInKernelPlannerWithConfig(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, plannerCfg)
+	selectedDFlash2, dflash2Err := dflash2Selected(cfg)
+	if dflash2Err != nil {
+		return &dflash2RefusedPlanner{model: modelID, err: dflash2Err}
+	}
+	if selectedDFlash2 {
+		if err := ikp.EnableDFlash2(cfg.DFlash2Target); err != nil {
+			return &dflash2RefusedPlanner{model: modelID, err: err}
+		}
+		return ikp
+	}
 	if shouldEnableMetalMTP(cfg) {
 		if err := ikp.EnableMetalMTP(); err != nil {
 			logf("gateway: failed to enable Metal MTP coordinator: %v", err)

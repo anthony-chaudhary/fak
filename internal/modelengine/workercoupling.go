@@ -164,8 +164,9 @@ type RuntimeMetricsSnapshot struct {
 	NumCPU             int
 	SchedLatencyP50    time.Duration
 	SchedLatencyP95    time.Duration
-	CPUIdleFraction    float64
-	SampledAt          time.Time
+	// CPUIdleFraction is -1 when no valid recent counter interval is available.
+	CPUIdleFraction float64
+	SampledAt       time.Time
 }
 
 // MetricsSampler reads or synthesizes Go runtime scheduler metrics.
@@ -180,7 +181,9 @@ type WorkerCouplingConfig struct {
 	MaxPipelineWorkers int
 	MinWorkers         int
 	SampleInterval     time.Duration
-	MaxRunningCap      int
+	// MaxRunningCap is an additional admission ceiling when coupling is enabled.
+	// Nonpositive values impose no additional limit. It never evicts running lanes.
+	MaxRunningCap int
 	// HostDRAMThrottleThreshold and HostDRAMObservationMaxAge are deliberately zero by
 	// default. A source-bound physical receipt must opt this controller in.
 	HostDRAMThrottleThreshold float64
@@ -425,9 +428,10 @@ func (c *WorkerCoupler) sampleLocked(now time.Time, force bool) RuntimeMetricsSn
 		snap = c.sampler()
 	} else {
 		snap = RuntimeMetricsSnapshot{
-			GOMAXPROCS: runtime.GOMAXPROCS(0),
-			NumCPU:     runtime.NumCPU(),
-			SampledAt:  now,
+			CPUIdleFraction: -1,
+			GOMAXPROCS:      runtime.GOMAXPROCS(0),
+			NumCPU:          runtime.NumCPU(),
+			SampledAt:       now,
 		}
 	}
 	if snap.GOMAXPROCS <= 0 {
@@ -737,6 +741,16 @@ func (c *WorkerCoupler) CoupledMaxRunning(configuredMaxRunning int) int {
 	defer c.mu.Unlock()
 	c.sampleLocked(time.Now(), false)
 
+	running := c.coupledMaxRunningLocked(configuredMaxRunning)
+	if cap := c.policy.MaxRunningCap; c.policy.Mode != CouplingModeDisabled && cap > 0 && (running <= 0 || running > cap) {
+		return cap
+	}
+	return running
+}
+
+// coupledMaxRunningLocked computes the existing pressure policy before the
+// independent configured ceiling is applied. c.mu must be held.
+func (c *WorkerCoupler) coupledMaxRunningLocked(configuredMaxRunning int) int {
 	if c.policy.Mode != CouplingModeDynamic {
 		return configuredMaxRunning
 	}
@@ -954,7 +968,7 @@ func (c *WorkerCoupler) WriteMetrics(b *strings.Builder) {
 	writeNativeHelpType(b, p+"sched_latency_p50_seconds", "P50 Go runtime goroutine scheduler latency in seconds.", "gauge")
 	fmt.Fprintf(b, "%ssched_latency_p50_seconds %.6f\n", p, st.SchedLatencyP50.Seconds())
 
-	writeNativeHelpType(b, p+"cpu_idle_fraction", "Recent CPU idle time fraction in range [0.0, 1.0].", "gauge")
+	writeNativeHelpType(b, p+"cpu_idle_fraction", "Recent CPU idle time fraction in range [0.0, 1.0], or -1 when unavailable.", "gauge")
 	fmt.Fprintf(b, "%scpu_idle_fraction %.4f\n", p, st.CPUIdleFraction)
 
 	writeNativeHelpType(b, p+"host_dram_pressure_qualified", "Whether host DRAM utilization is measured and source-qualified (1) or unavailable (0).", "gauge")
@@ -1175,11 +1189,12 @@ func computePressureScore(snap RuntimeMetricsSnapshot) (RuntimePressureClass, fl
 
 // runtimeMetricsReader provides stateful Go 1.26 runtime/metrics sampling.
 type runtimeMetricsReader struct {
-	mu         sync.Mutex
-	prevIdle   float64
-	prevTotal  float64
-	prevCounts []uint64
-	prevTime   time.Time
+	mu                    sync.Mutex
+	hasCPUCounterBaseline bool
+	prevIdle              float64
+	prevTotal             float64
+	prevCounts            []uint64
+	prevTime              time.Time
 }
 
 func newRuntimeMetricsReader() *runtimeMetricsReader {
@@ -1208,14 +1223,17 @@ func (r *runtimeMetricsReader) Sample() RuntimeMetricsSnapshot {
 
 	now := time.Now()
 	snap := RuntimeMetricsSnapshot{
-		GOMAXPROCS: runtime.GOMAXPROCS(0),
-		NumCPU:     runtime.NumCPU(),
-		SampledAt:  now,
+		CPUIdleFraction: -1,
+		GOMAXPROCS:      runtime.GOMAXPROCS(0),
+		NumCPU:          runtime.NumCPU(),
+		SampledAt:       now,
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	var idle, total float64
+	var haveIdle, haveTotal bool
 	for _, sample := range samples {
 		switch sample.Name {
 		case metricSchedRunnable:
@@ -1231,24 +1249,11 @@ func (r *runtimeMetricsReader) Sample() RuntimeMetricsSnapshot {
 			}
 		case metricCPUIdle:
 			if sample.Value.Kind() == rmetrics.KindFloat64 {
-				idle := sample.Value.Float64()
-				for _, other := range samples {
-					if other.Name == metricCPUTotal && other.Value.Kind() == rmetrics.KindFloat64 {
-						total := other.Value.Float64()
-						dIdle := idle - r.prevIdle
-						dTotal := total - r.prevTotal
-						if dTotal > 0 && dIdle >= 0 {
-							frac := dIdle / dTotal
-							if frac > 1.0 {
-								frac = 1.0
-							}
-							snap.CPUIdleFraction = frac
-						}
-						r.prevIdle = idle
-						r.prevTotal = total
-						break
-					}
-				}
+				idle, haveIdle = sample.Value.Float64(), true
+			}
+		case metricCPUTotal:
+			if sample.Value.Kind() == rmetrics.KindFloat64 {
+				total, haveTotal = sample.Value.Float64(), true
 			}
 		case metricSchedLatencies:
 			if sample.Value.Kind() == rmetrics.KindFloat64Histogram {
@@ -1261,38 +1266,57 @@ func (r *runtimeMetricsReader) Sample() RuntimeMetricsSnapshot {
 			}
 		}
 	}
+	snap.CPUIdleFraction = r.cpuIdleInterval(idle, total, haveIdle && haveTotal)
 	r.prevTime = now
 	return snap
+}
+
+// cpuIdleInterval is called while the reader mutex is held. Missing or invalid
+// counters break the interval; the next valid pair seeds a fresh baseline.
+// A first sample, reset or zero-total interval is unknown, never measured busy.
+func (r *runtimeMetricsReader) cpuIdleInterval(idle, total float64, available bool) float64 {
+	if !available || math.IsNaN(idle) || math.IsInf(idle, 0) || idle < 0 ||
+		math.IsNaN(total) || math.IsInf(total, 0) || total < 0 {
+		r.hasCPUCounterBaseline = false
+		return -1
+	}
+	previousIdle, previousTotal, hadBaseline := r.prevIdle, r.prevTotal, r.hasCPUCounterBaseline
+	r.prevIdle, r.prevTotal, r.hasCPUCounterBaseline = idle, total, true
+	if !hadBaseline || idle < previousIdle || total <= previousTotal {
+		return -1
+	}
+	// Runtime CPU classes are estimates. Preserve the existing upper clamp
+	// for a valid pair whose independently reported idle delta exceeds total.
+	return math.Min(1, (idle-previousIdle)/(total-previousTotal))
 }
 
 func histogramQuantile(h *rmetrics.Float64Histogram, prevCounts []uint64, q float64) time.Duration {
 	if h == nil || len(h.Counts) == 0 || len(h.Buckets) < 2 {
 		return 0
 	}
-	// Use delta counts if available to isolate interval latency.
+	// Comparable cumulative counters describe this interval even when no new
+	// waits were recorded. Replaying lifetime latency in an empty interval
+	// would keep a historical load spike in the current worker/admission budget.
+	// A first sample, shape change or counter reset instead starts a new baseline.
 	counts := h.Counts
 	useDelta := len(prevCounts) == len(h.Counts)
-	var total uint64
 	if useDelta {
-		deltaCounts := make([]uint64, len(h.Counts))
-		var deltaTotal uint64
-		for i := range h.Counts {
-			if h.Counts[i] >= prevCounts[i] {
-				deltaCounts[i] = h.Counts[i] - prevCounts[i]
+		for i, count := range h.Counts {
+			if count < prevCounts[i] {
+				useDelta = false
+				break
 			}
-			deltaTotal += deltaCounts[i]
-		}
-		if deltaTotal > 0 {
-			counts = deltaCounts
-			total = deltaTotal
-		} else {
-			useDelta = false
 		}
 	}
-	if !useDelta {
-		for _, c := range h.Counts {
-			total += c
+	if useDelta {
+		counts = make([]uint64, len(h.Counts))
+		for i, count := range h.Counts {
+			counts[i] = count - prevCounts[i]
 		}
+	}
+	var total uint64
+	for _, count := range counts {
+		total += count
 	}
 	if total == 0 {
 		return 0

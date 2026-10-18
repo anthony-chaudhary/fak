@@ -134,6 +134,7 @@ type v41ForwardState struct {
 	forwardCoverage   *NativeForwardCoverage
 	activationCapture V41ActivationCaptureReceipt
 	activeStepRound   *v41StepRound
+	dsparkCapture     *v41DSparkCapture
 	attentionInputRun *v41AttentionInputRun
 
 	// indexKeyMemo is the session's per-index-source-layer memo of the last
@@ -167,8 +168,7 @@ type v41ForwardState struct {
 	engramProjection     v41EngramProjectionFunc
 	mhcProjection        v41MHCProjectionFunc
 	mhcFFNProjection     v41MHCProjectionFunc
-	finalNorm            v41FinalNormFunc
-	bf16Boundary         v41BF16BoundaryFunc
+	headNorm             *v41FinalNormBinding
 	logitScale           v41LogitScaleFunc
 	attentionNormBinding *v41AttentionNormBinding
 	queryNorm            *v41QueryNormBinding
@@ -338,7 +338,18 @@ func (m *Model) forwardV41WithHeadSelection(ids []int, st *v41ForwardState, last
 
 // No-logits prefill retains every checked head-input boundary, but does not
 // project or scale a distribution that the caller explicitly discards.
-func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (act *Activations, err error) {
+func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (*Activations, error) {
+	if st != nil && st.dsparkCapture != nil {
+		return st.dsparkCapture.runCold(func() (*Activations, error) {
+			return m.forwardV41WithHeadModeCore(ids, st, lastHeadOnly, wantLogits)
+		})
+	}
+	return m.forwardV41WithHeadModeCore(ids, st, lastHeadOnly, wantLogits)
+}
+
+// The optional capture wrapper observes this whole call, including all deferred
+// trace/device cleanup. The ordinary nil-capture arithmetic body is unchanged.
+func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastHeadOnly, wantLogits bool) (act *Activations, err error) {
 	if st != nil && st.activeStepRound != nil {
 		return nil, errV41StepRoundState
 	}
@@ -365,7 +376,7 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, finalNorm: st.finalNorm, bf16Boundary: st.bf16Boundary, logitScale: st.logitScale, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScale: st.logitScale, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.copySharedAttentionFrom(st)
 		inputRun := st.beginAttentionInputRun(runState)
 		defer inputRun.close()
@@ -376,6 +387,11 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 				st.history = st.history[:historyLen]
 			}
 		}()
+		if capture := st.dsparkCapture; capture != nil {
+			if err := capture.bindCold(runState); err != nil {
+				return nil, err
+			}
+		}
 	}
 	// A stateless cold forward still needs a transient cross-layer source registry.
 	if runState == nil && m.v41RoleSchedule() {
@@ -546,16 +562,20 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 	}
 
 	var headProjection v41DenseProjectionFunc
-	var finalNorm v41FinalNormFunc
-	var bf16Boundary v41BF16BoundaryFunc
+	var headNorm *v41FinalNormBinding
 	var logitScale v41LogitScaleFunc
 	var logitRefusal v41LogitHostRefusal
 	if runState != nil {
 		headProjection = runState.denseProjection()
-		finalNorm = runState.finalNorm
-		bf16Boundary = runState.bf16Boundary
+		headNorm = runState.headNorm
 		logitScale = runState.logitScale
 		logitRefusal = runState.logitHostRefusal()
+	}
+	headState := runState
+	if trace != nil {
+		// Preserve every ordinary boundary for the actual diagnostic capture,
+		// including a recorder enabled without the activation-trace env path.
+		headState = nil
 	}
 	act.Logits = make([][]float32, len(seq))
 	for t := 0; t < len(seq); t++ {
@@ -564,7 +584,7 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 			headInput = act.Hidden[len(act.Hidden)-1][t*H : (t+1)*H]
 		}
 		if !wantLogits || (lastHeadOnly && t != len(seq)-1) {
-			row, err := m.v41PrepareHeadInput(headInput, finalNorm, bf16Boundary)
+			row, err := m.v41PrepareHeadInputBound(headInput, headNorm, headState)
 			if err != nil {
 				return nil, err
 			}
@@ -573,11 +593,16 @@ func (m *Model) forwardV41WithHeadMode(ids []int, st *v41ForwardState, lastHeadO
 			}
 			continue
 		}
-		logits, err := m.v41HeadWithLogitScale(headInput, headProjection, finalNorm, bf16Boundary, logitScale, logitRefusal)
+		logits, err := m.v41HeadWithLogitScaleBound(headInput, headProjection, headNorm, headState, logitScale, logitRefusal)
 		if err != nil {
 			return nil, err
 		}
 		act.Logits[t] = logits
+	}
+	if st != nil && st.dsparkCapture != nil {
+		if err := st.dsparkCapture.beforeCommit(-1); err != nil {
+			return nil, err
+		}
 	}
 	if st != nil {
 		st.layers = runState.layers
@@ -916,8 +941,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")
-		s.v41Forward.finalNorm = s.v41FinalNormFunc()
-		s.v41Forward.bf16Boundary = s.v41FinalNormBF16CheckedFunc()
+		s.v41Forward.headNorm = &v41FinalNormBinding{normalize: s.v41FinalNormFunc(), round: s.v41FinalNormBF16CheckedFunc()}
 		s.v41Forward.logitScale = s.v41LogitScaleFunc()
 		s.v41Forward.attentionNormBinding = s.v41BindAttentionNorm()
 		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
@@ -935,9 +959,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.kvNorm = s.v41BindKVNorm()
 		s.v41Forward.queryNorm = s.v41BindQueryNorm()
 		s.v41Forward.ffnNorm = s.v41BindFFNNorm()
-		if s.v41Forward.bf16Boundary == nil {
-			s.v41Forward.bf16Boundary = s.v41Forward.gatherOps.bf16PublishFunc()
-		}
+		s.v41Forward.headNorm = s.v41BindFinalNorm(s.v41Forward.headNorm)
 		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
 		if s.executionPolicy == ExecutionPolicyDeviceOnly {
 			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)

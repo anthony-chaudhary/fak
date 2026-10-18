@@ -152,7 +152,7 @@ func TestV41PrefixCoverageSurvivesFailedStep(t *testing.T) {
 	before := captureV41ForwardSnapshot(s.v41Forward)
 	sentinel := errors.New("selected final norm failure after all decoder layers")
 	calls, advancedLayers := 0, 0
-	s.v41Forward.finalNorm = func([]float32) ([]float32, error) {
+	s.v41Forward.setFinalNorm(func([]float32) ([]float32, error) {
 		calls++
 		for _, layer := range s.v41Forward.layers {
 			if layer.nextWindowPos == len(before.history)+1 {
@@ -160,7 +160,7 @@ func TestV41PrefixCoverageSurvivesFailedStep(t *testing.T) {
 			}
 		}
 		return nil, sentinel
-	}
+	})
 	var fault any
 	returned := false
 	func() {

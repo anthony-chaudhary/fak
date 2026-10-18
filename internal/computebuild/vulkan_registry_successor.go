@@ -71,6 +71,7 @@ const (
 	VulkanShaderRegistryV27ID = "fak.vulkan-shader-registry.v27.current98"
 	// VulkanShaderRegistryV28ID adds the grouped-query split-KV decode attention module.
 	VulkanShaderRegistryV28ID = "fak.vulkan-shader-registry.v28.current99"
+	VulkanShaderRegistryV29ID = "fak.vulkan-shader-registry.v29.current100"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -128,9 +129,11 @@ var (
 
 	vulkanRegistryV28 = &vulkanSuccessorRegistry{version: "V28", schema: VulkanBuildReceiptSchemaV28, id: VulkanShaderRegistryV28ID, count: 99, parent: vulkanRegistryV27, added: []string{"attention_split_kv"}}
 
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26, vulkanRegistryV27, vulkanRegistryV28}
+	vulkanRegistryV29 = &vulkanSuccessorRegistry{version: "V29", schema: VulkanBuildReceiptSchemaV29, id: VulkanShaderRegistryV29ID, count: 100, parent: vulkanRegistryV28, added: []string{"v41_f32_finite"}}
+
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26, vulkanRegistryV27, vulkanRegistryV28, vulkanRegistryV29}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV28
+	vulkanCurrentRegistry = vulkanRegistryV29
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

@@ -17,6 +17,10 @@ on:
         description: "Publish verified assets to an existing release"
         type: boolean
         default: false
+      build_dflash2bench:
+        description: "Build the experimental Vulkan benchmark CI artifact (requires publish=false)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -92,6 +96,56 @@ jobs:
           "$RELOCATED/fak" version
           timeout 120s "$RELOCATED/fak" backends | tee "$RELOCATED/backends.txt"
           grep -Fx vulkan "$RELOCATED/backends.txt"
+
+      - name: Build optional DFlash2 Vulkan benchmark CI artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.build_dflash2bench
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          test "$PUBLISH" = false
+          ROOT="$RUNNER_TEMP/dflash2bench-ci"
+          BUNDLE="$ROOT/bundle"
+          mkdir -p "$BUNDLE"
+          SOURCE_COMMIT=$(git rev-parse --verify HEAD)
+          printf '%s\n' "$SOURCE_COMMIT" > "$BUNDLE/source-commit.txt"
+          printf 'workflow_ref=%s\nworkflow_sha=%s\n' "$WORKFLOW_REF" "$WORKFLOW_SHA" > "$BUNDLE/workflow.txt"
+          # Reuse the canonical shader bundle/static shim already built above.
+          # Package cgo flags link internal/compute/libfakvulkan.a and libvulkan.
+          GOOS=linux GOARCH=amd64 go build -pgo off -trimpath -buildvcs=true -tags vulkan -o "$BUNDLE/dflash2bench" ./cmd/dflash2bench
+          go version -m "$BUNDLE/dflash2bench" > "$BUNDLE/build-info.txt"
+          grep -F "vcs.revision=$SOURCE_COMMIT" "$BUNDLE/build-info.txt"
+          cp -R internal/compute/spirv "$BUNDLE/spirv"
+          cp LICENSE "$BUNDLE/LICENSE"
+          cp cmd/dflash2bench/README.md "$BUNDLE/README.md"
+          cp internal/model/dflash2_reference_LICENSE.txt "$BUNDLE/dflash2_reference_LICENSE.txt"
+          for file in dflash2bench source-commit.txt workflow.txt build-info.txt LICENSE README.md dflash2_reference_LICENSE.txt spirv/q4k_matmul.spv; do
+            test -s "$BUNDLE/$file"
+          done
+          # CLI/linkage smoke only. Lavapipe is not physical GPU/model evidence.
+          LAVAPIPE=$(find /usr/share/vulkan/icd.d -name '*lvp*.json' -print -quit)
+          test -n "$LAVAPIPE"
+          export VK_ICD_FILENAMES="$LAVAPIPE"
+          unset FAK_VULKAN_SPIRV
+          ( cd "$RUNNER_TEMP" && timeout 30s "$BUNDLE/dflash2bench" --help ) > "$BUNDLE/help.txt" 2>&1
+          test -s "$BUNDLE/help.txt"
+          grep -F -- '-target-panel' "$BUNDLE/help.txt"
+          ( cd "$BUNDLE" && tar -czf "$ROOT/dflash2bench_linux_amd64_vulkan.tar.gz" . )
+          ( cd "$ROOT" && sha256sum dflash2bench_linux_amd64_vulkan.tar.gz > dflash2bench_linux_amd64_vulkan.tar.gz.sha256 )
+          test -s "$ROOT/dflash2bench_linux_amd64_vulkan.tar.gz"
+          test -s "$ROOT/dflash2bench_linux_amd64_vulkan.tar.gz.sha256"
+          ( cd "$ROOT" && sha256sum -c dflash2bench_linux_amd64_vulkan.tar.gz.sha256 )
+
+      - name: Retain optional DFlash2 benchmark CI artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.build_dflash2bench
+        uses: actions/upload-artifact@v4
+        with:
+          name: dflash2bench-linux-amd64-vulkan
+          path: |
+            ${{ runner.temp }}/dflash2bench-ci/dflash2bench_linux_amd64_vulkan.tar.gz
+            ${{ runner.temp }}/dflash2bench-ci/dflash2bench_linux_amd64_vulkan.tar.gz.sha256
+          if-no-files-found: error
 
       - name: Retain verified archive and registration witness
         uses: actions/upload-artifact@v4

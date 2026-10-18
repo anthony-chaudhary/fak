@@ -185,14 +185,14 @@ func TestV41StepCohortSharedHeadCardinality(t *testing.T) {
 						cancels = append(cancels, cancel)
 						if !tc.afterHead {
 							st := f.lanes[lane].session.v41State()
-							norm := st.finalNorm
-							st.finalNorm = func(x []float32) ([]float32, error) {
+							norm := st.finalNorm()
+							st.setFinalNorm(func(x []float32) ([]float32, error) {
 								cancel()
 								if norm != nil {
 									return norm(x)
 								}
 								return m.finalNorm(x), nil
-							}
+							})
 						}
 					}
 					if tc.afterHead {

@@ -71,6 +71,9 @@ func (e *ConfigError) Error() string {
 // registered — i.e. internal/registrations was imported) and that EngineID names
 // a registered engine. It fails loud rather than degrade to a permissive default.
 func New(cfg Config) (*Server, error) {
+	if err := validateDFlash2Config(cfg); err != nil {
+		return nil, err
+	}
 	mcpSessionBearer := strings.TrimSpace(cfg.MCPSessionBearer)
 	mcpSessionBearerDigest := sha256.Sum256([]byte(mcpSessionBearer))
 	// fak_read is part of this server's default MCP inventory, so arm its confined

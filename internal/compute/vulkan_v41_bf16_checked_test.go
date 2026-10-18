@@ -596,6 +596,7 @@ VkBuffer inputHandle{}, outputHandle{}, statusHandle{}, stageHandle{};
 VkPipeline checkedPipeline{};
 uint32_t expectedCount = 64, expectedSite = 1, expectedGroups = 1;
 bool checkedDispatch = true;
+bool finiteDispatch = false;
 int fills = 0, dispatches = 0, copies = 0, barriers = 0;
 std::array<uint32_t, 4> stage{};
 VkResult call(const char* name) {
@@ -610,9 +611,9 @@ Command& command(VkCommandBuffer id) {
 void execute(VkCommandBuffer id) {
     for (const auto& op : command(id).ops) {
         if (op.kind == 0) memory[op.dest].fill(UINT32_MAX);
-        else if (op.kind == 1) {
+        else if (op.kind == 1 || op.kind == 3) {
             require(memory[op.dest] == std::array<uint32_t,4>{UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX}, "status write did not follow its executed all-ones fill");
-            memory[op.dest] = {0x42463143, op.site, UINT32_MAX, op.count};
+            memory[op.dest] = {op.kind == 3 ? 0x46333243u : 0x42463143u, op.site, UINT32_MAX, op.count};
         }
         else if (op.kind == 2) stage = memory.at(op.source);
         else die("unknown recorded operation");
@@ -746,6 +747,14 @@ static VKAPI_ATTR void VKAPI_CALL checked_vkCmdDispatch(VkCommandBuffer id, uint
     call("vkCmdDispatch"); ++dispatches;
     auto& c = command(id);
     require(c.push.size() == (checkedDispatch ? 2u : 1u) && x == expectedGroups && y == 1 && z == 1 && c.push[0] == expectedCount, "dispatch geometry/count");
+    if (finiteDispatch) {
+        require(checkedDispatch && c.bindings.size() == 2 && c.bindings[0] == inputHandle &&
+                c.bindings[1] == statusHandle && c.pipeline == checkedPipeline &&
+                c.filled && c.dependency && c.push[1] == expectedSite,
+                "finite input/status roles and same-command initialization");
+        c.ops.push_back({3, {}, statusHandle, expectedCount, expectedSite});
+        return;
+    }
     require(c.bindings.size() == (checkedDispatch ? 3u : 2u) && c.bindings[0] == inputHandle && c.bindings[1] == outputHandle, "dispatch input/output roles");
     if (checkedDispatch) {
         require(c.pipeline == checkedPipeline && c.filled && c.dependency && c.bindings[2] == statusHandle && c.push[1] == expectedSite, "same-command initialized status/push/site");
@@ -798,7 +807,8 @@ void reset() {
     auto& raw = g_kern[K_V41_BF16_BOUNDARY];
     raw = {}; raw.pipe = handle<VkPipeline>(40); raw.dsl = handle<VkDescriptorSetLayout>(41); raw.layout = handle<VkPipelineLayout>(42); raw.nbuf = 2; raw.pcsize = 4;
     g_have_v41_bf16_boundary = 1;
-    expectedCount = 64; expectedSite = 1; expectedGroups = 1; checkedDispatch = true;
+    expectedCount = 64; expectedSite = 1; expectedGroups = 1; checkedDispatch = true; finiteDispatch = false;
+    g_kern[K_V41_F32_FINITE] = {};
     memory[statusHandle] = {0x42463143, expectedSite, UINT32_MAX, expectedCount};
 }
 int invoke() { return fvk_v41_bf16_checked_f32(&input, &output, &status, int(expectedCount), expectedSite); }
@@ -974,12 +984,108 @@ void batchReuseCases() {
             "step begin hid reused-command failure");
     reset(); // isolated fixture teardown only
 }
+// Optional finite-only entrypoint, using the same real checked owner above.
+// The mocked shader writes only its envelope; arithmetic is a device witness.
+void finiteReset() {
+    reset(); finiteDispatch = true;
+    auto& k = g_kern[K_V41_F32_FINITE];
+    k = {}; k.pipe = handle<VkPipeline>(50); k.dsl = handle<VkDescriptorSetLayout>(51);
+    k.layout = handle<VkPipelineLayout>(52); k.nbuf = 2; k.pcsize = 8;
+    checkedPipeline = k.pipe;
+    memory[statusHandle] = {0x46333243, expectedSite, UINT32_MAX, expectedCount};
+}
+int finiteInvoke() { return fvk_v41_f32_finite(&input,&status,int(expectedCount),expectedSite); }
+void finiteRelease(bool pending) {
+    const auto before = calls;
+    fvk_free(&status);
+    require(calls == before, "finite release unexpectedly reached driver");
+    if (pending) {
+        require(g_batchFreed.size() == 1 && g_batchFreed[0] == &status && g_poolCount == 0,
+                "finite uncertain status escaped quarantine");
+        require(fvk_malloc(status.bytes) == nullptr, "finite quarantine reused");
+    } else {
+        require(g_batchFreed.empty() && g_poolCount == 1 &&
+                fvk_malloc(status.bytes) == &status && g_poolCount == 0,
+                "finite completed status not reusable");
+    }
+}
+void finiteCases() {
+    finiteReset();
+    require(fvk_have_v41_f32_finite() && fvk_v41_f32_finite_count_supported(1) &&
+            !fvk_v41_f32_finite_count_supported(0), "finite capability/count");
+    g_maxStorageBufferRange = 15;
+    require(!fvk_v41_f32_finite_count_supported(1), "finite status range missing");
+    g_maxStorageBufferRange = 16;
+    require(fvk_v41_f32_finite_count_supported(4) && !fvk_v41_f32_finite_count_supported(5),
+            "finite input descriptor range missing");
+    for (int bad = 0; bad < 10; ++bad) {
+        finiteReset();
+        switch (bad) {
+        case 0: expectedSite = 3; break;
+        case 1: expectedCount = 0; break;
+        case 2: status.bytes = 15; break;
+        case 3: input.bytes = 255; break;
+        case 4: status.buf = input.buf; break;
+        case 5: status.mem = input.mem; status.memoryOffset = input.bytes-1; break;
+        case 6: status.memoryOffset = std::numeric_limits<VkDeviceSize>::max(); break;
+        case 7: g_batching = true; break;
+        case 8: g_kern[K_V41_F32_FINITE].pipe = VK_NULL_HANDLE; break;
+        case 9: g_restore.stage = &staging; break;
+        }
+        require(finiteInvoke() != 0 && calls.empty() && fills == 0 && dispatches == 0,
+                "finite refusal reached recording");
+    }
+    for (uint32_t site : {1u,2u}) for (bool batched : {false,true}) {
+        finiteReset(); expectedSite = site; expectedCount = 193; expectedGroups = 2;
+        memory[statusHandle] = {0x46333243,site,UINT32_MAX,expectedCount}; // stale success
+        if (batched) require(fvk_v41_step_batch_begin() == 0, "finite step batch begin");
+        require(finiteInvoke() == 0 && fills == 1 && dispatches == 1 && copies == 0,
+                "finite record dispatch or premature host read");
+        if (batched) require(calls["vkQueueSubmit"] == 0, "finite batch flushed early");
+        std::array<uint32_t,4> host{};
+        require(fvk_v41_d2h(host.data(),&status,16) == 0 &&
+                host == std::array<uint32_t,4>{0x46333243,site,UINT32_MAX,expectedCount},
+                "finite completion/status freshness");
+        if (batched) require(fvk_v41_step_batch_end() == 0, "finite step batch end");
+        require(g_d2hCount == 1 && g_d2hBytes == 16 && copies == 1,
+                "finite readback included an input row");
+        finiteRelease(false);
+    }
+    const char* APIs[] = {"vkAllocateDescriptorSets","vkAllocateCommandBuffers","vkBeginCommandBuffer",
+                         "vkEndCommandBuffer","vkResetFences","vkQueueSubmit","vkWaitForFences"};
+    for (const char* api : APIs) {
+        finiteReset(); failure = api;
+        const bool pending = failure == "vkQueueSubmit" || failure == "vkWaitForFences";
+        failureResult = failure == "vkWaitForFences" ? VK_TIMEOUT : pending ? VK_ERROR_DEVICE_LOST : VK_ERROR_OUT_OF_HOST_MEMORY;
+        const VkResult expected = failureResult > VK_SUCCESS ? VK_ERROR_UNKNOWN : failureResult;
+        require(finiteInvoke() == expected && g_submissionStatus == expected &&
+                g_v41SubmissionPendingFailure == pending && calls[api] == 1,
+                "finite selected failure identity");
+        const auto before = calls;
+        require(finiteInvoke() == expected && calls == before, "finite selected error replayed");
+        finiteRelease(pending);
+    }
+    // Interruption has no returned completion proof. Poison before retiring
+    // known handles, and never overwrite an already observed primary fault.
+    finiteReset(); fvk_v41_f32_finite_abandon();
+    require(g_submissionStatus == VK_ERROR_UNKNOWN && g_v41SubmissionPendingFailure,
+            "finite interruption failed to poison the shared execution domain");
+    finiteRelease(true);
+    require(finiteInvoke() == VK_ERROR_UNKNOWN && calls.empty(), "abandon allowed replay");
+    finiteReset(); g_submissionStatus = VK_ERROR_DEVICE_LOST;
+    fvk_v41_f32_finite_abandon();
+    require(g_submissionStatus == VK_ERROR_DEVICE_LOST && g_v41SubmissionPendingFailure,
+            "abandon replaced primary failure");
+    finiteRelease(true);
+    reset(); // synthetic fixture teardown only
+}
 } // namespace checked_fixture
 int main() {
     checked_fixture::geometryCases();
     checked_fixture::successCases();
     checked_fixture::failures();
     checked_fixture::batchReuseCases();
+    checked_fixture::finiteCases();
     std::puts("PASS real checked owner: initialization, dependency, refusal, transport and quarantine; no physical/numerical claim");
     return 0;
 }

@@ -236,6 +236,14 @@ func dflash2ValidateTensors(sf *safetensorsFile, shapes map[string][]int) (map[s
 // An error leaves dst unchanged. Successful reads may execute concurrently into
 // caller-owned, disjoint destinations. The caller owns synchronization of dst.
 func (w *dflash2Weights) ReadBF16(ctx context.Context, name string, first int64, dst []float32) error {
+	return w.readBF16WithScratch(ctx, name, first, dst, nil)
+}
+
+// readBF16WithScratch keeps the same bounded, failure-atomic read contract.
+// A nonnil caller-owned scratch buffer avoids allocation; it may change on
+// failure and must not be shared by concurrent calls or alias dst, including
+// through unsafe conversions. No buffer is retained.
+func (w *dflash2Weights) readBF16WithScratch(ctx context.Context, name string, first int64, dst []float32, scratch []byte) error {
 	if ctx == nil {
 		return fmt.Errorf("dflash2: context is required")
 	}
@@ -251,7 +259,16 @@ func (w *dflash2Weights) ReadBF16(ctx context.Context, name string, first int64,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	buf := make([]byte, 2*len(dst))
+	bytes := 2 * len(dst)
+	var buf []byte
+	if scratch == nil {
+		buf = make([]byte, bytes)
+	} else {
+		if len(scratch) < bytes || len(scratch) > 2*dflash2MaxReadElements || len(scratch)%2 != 0 {
+			return fmt.Errorf("dflash2: invalid bounded BF16 scratch buffer")
+		}
+		buf = scratch[:bytes]
+	}
 	if len(buf) != 0 {
 		if n, err := w.r.ReadAt(buf, tensor.offset+2*first); err != nil || n != len(buf) {
 			return fmt.Errorf("dflash2: tensor span read: %w", errors.Join(err, io.ErrUnexpectedEOF))

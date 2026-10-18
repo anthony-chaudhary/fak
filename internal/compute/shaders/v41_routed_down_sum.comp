@@ -35,6 +35,10 @@ layout(std430, set = 0, binding = 9) readonly buffer Ids { uint ids[]; };
 layout(std430, set = 0, binding = 10) writeonly buffer Sum { float sumOut[]; };
 // Native ownership fills 4*picks words with UINT32_MAX in the same command before
 // this dispatch. Per pick: magic, site, lowest fault lane, count.
+// Only global row zero publishes the constant headers. Native admission requires
+// outDim > 0, so that invocation always runs. Other rows only atomically update
+// the disjoint fault word; no invocation reads a header. The existing completed
+// status read observes both, without an intra-dispatch barrier.
 layout(std430, set = 0, binding = 11) buffer Status { uint status[]; };
 
 layout(push_constant) uniform PC {
@@ -136,10 +140,12 @@ void main() {
     uint outDim = uint(pc.outDim);
     if (row >= outDim) return;
     uint picks = pc.picks;
-    for (uint p = 0u; p < picks; ++p) {
-        status[4u * p] = 0x42463143u;
-        status[4u * p + 1u] = pc.site;
-        status[4u * p + 3u] = outDim;
+    if (row == 0u) {
+        for (uint p = 0u; p < picks; ++p) {
+            status[4u * p] = 0x42463143u;
+            status[4u * p + 1u] = pc.site;
+            status[4u * p + 3u] = outDim;
+        }
     }
     uint blocks = uint(pc.midDim) / 256u;
     precise float acc = 0.0;

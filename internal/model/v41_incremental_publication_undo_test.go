@@ -183,7 +183,7 @@ func TestV41StepRegistryLiveFailureRestoration(t *testing.T) {
 					return nil, v41ProjectionDeclined, nil
 				})
 			case "head failure":
-				st.finalNorm = func([]float32) ([]float32, error) { return nil, sentinel }
+				st.setFinalNorm(func([]float32) ([]float32, error) { return nil, sentinel })
 			}
 			before := captureV41ForwardSnapshot(st)
 			var returned error

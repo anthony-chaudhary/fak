@@ -142,6 +142,8 @@ const (
 	VulkanBuildReceiptSchemaV27 = "fak.vulkan-build-receipt.v27"
 	// VulkanBuildReceiptSchemaV28 adds the grouped-query split-KV decode attention module.
 	VulkanBuildReceiptSchemaV28 = "fak.vulkan-build-receipt.v28"
+	// VulkanBuildReceiptSchemaV29 adds optional raw F32 finite status.
+	VulkanBuildReceiptSchemaV29 = "fak.vulkan-build-receipt.v29"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

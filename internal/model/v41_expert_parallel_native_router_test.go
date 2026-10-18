@@ -324,7 +324,7 @@ func TestV41ExpertParallelNativeRouterTCP(t *testing.T) {
 						st.setDenseProjection(st.denseProjection())
 						bound = st.projectionRoute
 					}
-					if b.expertWork || st.bf16Boundary != nil || st.gatherOps.bf16PublishFunc() != nil {
+					if b.expertWork || st.bf16Boundary() != nil || st.gatherOps.bf16PublishFunc() != nil {
 						return errors.New("fixture admitted unrelated full-forward capability")
 					}
 					config, _ := json.Marshal(m.Cfg)

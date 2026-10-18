@@ -91,3 +91,40 @@ func v41ColdPlainAttentionSink(layer int, q, flat, sink []float32, window [][]fl
 		rowKV: &v41SharedAttentionRows{window: window}, resident: resident, sinkKey: resident.sinkKey,
 	}, attend)
 }
+
+// v41ColdPlainHostAttention borrows a validated window only across a callback-free
+// host contraction. The timing boundary is part of that proof: check and sample
+// the built-in clock under one ledger lock, then release it before arithmetic.
+// An installed clock may mutate the original rows, so it retains the historical
+// pre-clock packed snapshot. Missing ledgers and malformed inputs also decline.
+func (m *Model) v41ColdPlainHostAttention(q, sink []float32, kvRows [][]float32, keys, idx []int32, opt V41SparseAttentionSinkOptions) (out []float32, opened int64, handled bool, err error) {
+	ledger := v41ExpertFaultLedgerOf(m, false)
+	if ledger == nil {
+		return
+	}
+	var window [][]float32
+	func() {
+		ledger.mu.Lock()
+		defer ledger.mu.Unlock()
+		if ledger.nowNanos != nil {
+			return
+		}
+		// The original timed host path included validation. Keep it inside
+		// this measurement too; a declined attempt discards the timestamp.
+		started := ledger.nowLocked()
+		if !v41ColdPlainAttentionCanBorrow(q, sink, kvRows, keys, idx, opt) {
+			return
+		}
+		first, end := int(keys[0]), int(keys[len(keys)-1])+1
+		window = kvRows[first:end:end]
+		opened = started
+	}()
+	if window == nil {
+		return
+	}
+	// Validation excluded Inverse, and the checked core invokes no other user
+	// code. The result is fresh; the borrowed window never escapes this call.
+	handled = true
+	out, err = v41SparseAttentionSinkChecked(q, sink, idx, opt, v41SparseSinkRows{window: window})
+	return
+}

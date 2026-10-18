@@ -205,7 +205,7 @@ func TestV41DeviceOnlyLogitPostprocessHeadRefusesTyped(t *testing.T) {
 		for i := range x {
 			x[i] = float32(i%5-2) * 0.25
 		}
-		return m.v41HeadWithLogitScale(x, st.denseProjection(), st.finalNorm, st.bf16Boundary, st.logitScale, st.logitHostRefusal())
+		return m.v41HeadWithLogitScale(x, st.denseProjection(), st.finalNorm(), st.bf16Boundary(), st.logitScale, st.logitHostRefusal())
 	}
 	session := func(t *testing.T, m *Model, b compute.Backend, deviceOnly bool) *Session {
 		s := v41DenseTestSession(t, m, b)

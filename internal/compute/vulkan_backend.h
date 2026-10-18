@@ -33,12 +33,78 @@ extern "C" {
 int fvk_init(char *name, int namelen, int *is_discrete, const char *spirv_dir);
 /* Query identity from the physical device selected by fvk_init. Values come
  * directly from VkPhysicalDeviceProperties, never process configuration. */
+
+/* Explicit idle-only diagnostic probe. Creates one unbound VkBuffer at a time,
+ * queries actual requirements and destroys it before publication. Driver host
+ * allocation is possible. No VkDeviceMemory allocation, bind, submit or fence.
+ * Caller holds the complete execution owner and external vulkanMu. */
+#define FVK_BUFFER_REQUIREMENTS_MAX_PROBES 16
+#define FVK_BUFFER_REQUIREMENTS_OK 0
+#define FVK_BUFFER_REQUIREMENTS_UNAVAILABLE 1
+#define FVK_BUFFER_REQUIREMENTS_INVALID 2
+#define FVK_BUFFER_REQUIREMENTS_BUSY 3
+#define FVK_BUFFER_REQUIREMENTS_QUARANTINED 4
+#define FVK_BUFFER_REQUIREMENTS_DRIVER_FAILED 5
+#define FVK_BUFFER_REQUIREMENTS_STORAGE 1
+#define FVK_BUFFER_REQUIREMENTS_TRANSFER 2
+typedef struct {
+    uint64_t size_bytes;
+    uint32_t profile;
+} fvk_buffer_requirements_request;
+typedef struct {
+    uint64_t requested_bytes, required_bytes, alignment;
+    uint32_t profile, memory_type_bits;
+    uint32_t requires_dedicated, prefers_dedicated;
+} fvk_buffer_requirements_row;
+typedef struct {
+    uint64_t device_generation;
+    uint32_t count, memory_type_count;
+    fvk_buffer_requirements_row rows[FVK_BUFFER_REQUIREMENTS_MAX_PROBES];
+} fvk_buffer_requirements_snapshot;
+/* Non-OK clears out; driver_result retains the exact create error, if any. */
+int fvk_buffer_requirements_probe(const fvk_buffer_requirements_request *requests,
+    uint32_t count, fvk_buffer_requirements_snapshot *out, int32_t *driver_result);
+
 int fvk_device_identity(char *name, int namelen, uint32_t *vendor_id,
                         uint32_t *device_id, uint32_t *driver_version,
                         uint32_t *api_version);
 /* Selected VkPhysicalDeviceType, or OTHER (0) when unavailable. Metadata only:
  * integrated=1, discrete=2, virtual=3, CPU=4. Used by physical qualification. */
 int fvk_device_type(void);
+
+/* Atomic capacity observation, called with the external vulkanMu held. This is
+ * current allocator/heap evidence, not a future-fit quote or a reservation.
+ * It does not allocate Vulkan storage, submit, fence, trim, or change owners.
+ * The driver budget can change due to other processes even during this query. */
+#define FVK_MEMORY_CAPACITY_MAX_HEAPS 16
+#define FVK_MEMORY_CAPACITY_MAX_TYPES 32
+#define FVK_MEMORY_CAPACITY_OK 0
+#define FVK_MEMORY_CAPACITY_UNAVAILABLE 1
+#define FVK_MEMORY_CAPACITY_INVALID 2
+typedef struct {
+    uint64_t size_bytes, budget_bytes, usage_bytes;
+    uint32_t flags, budget_known;
+} fvk_memory_capacity_heap;
+typedef struct {
+    uint32_t property_flags, heap_index;
+} fvk_memory_capacity_type;
+typedef struct {
+    uint64_t device_generation;
+    uint64_t limit_bytes, live_bytes, peak_bytes, refused_allocations;
+    uint64_t max_buffer_bytes, max_storage_buffer_range, max_memory_allocation_size;
+    uint32_t max_memory_allocation_count;
+    uint32_t guard_initialized, guard_configured, guard_configuration_valid, guard_accounting_valid;
+    int32_t submission_status;
+    uint32_t quarantined, batch_active, inflight_active, restore_active;
+    uint32_t vendor_id, device_id, driver_version, api_version, device_type;
+    uint32_t heap_count, type_count;
+    char device_name[256];
+    fvk_memory_capacity_heap heaps[FVK_MEMORY_CAPACITY_MAX_HEAPS];
+    fvk_memory_capacity_type types[FVK_MEMORY_CAPACITY_MAX_TYPES];
+} fvk_memory_capacity_snapshot;
+/* Returns OK only with a complete fixed-size record; other results clear out. */
+int fvk_memory_capacity_snapshot_read(fvk_memory_capacity_snapshot *out);
+
 
 /* Query the DRM render node of the initialized, selected physical device. Returns
  * 1 only for a supported Linux query with a valid major/minor pair; otherwise
@@ -657,6 +723,19 @@ int fvk_v41_attention_bf16_module_abi(const void *data, size_t bytes);
  * same checked module and state. Its closed site policy is final norm 1/2,
  * query norm 5/6 and 7..27; attention 3/4 stays on the entry above. */
 int fvk_v41_bf16_publish_f32(const void *dInput, void *dOut, void *dStatus, int count, uint32_t site);
+
+/* Optional raw F32 finiteness status: input is borrowed through checked
+ * completion; status is a fresh disjoint 16-byte allocation owned by its caller.
+ * No row output, host readback, BF16 conversion or CPU fallback is performed. */
+int fvk_have_v41_f32_finite(void);
+int fvk_v41_f32_finite_count_supported(int count);
+int fvk_v41_f32_finite(const void *dInput, void *dStatus, int count, uint32_t site);
+int fvk_v41_f32_finite_module_abi(const void *data, size_t bytes);
+/* Caller holds the execution-owner mutex. Sticky quarantine of an interrupted
+ * acquisition/dispatch/retirement; this never proves drain or clears a fault. */
+void fvk_v41_f32_finite_abandon(void);
+
+
 
 /* Experimental BF16 bit-copy spine. Production archives deliberately omit
  * these symbols; a witness-tagged Go build cannot link the wrong archive.

@@ -33,7 +33,7 @@ func TestV41DSparkNativeReference(t *testing.T) {
 			t.Fatal("proposal mutated committed rings")
 		}
 		for i := range got.Proposed {
-			if len(got.Logits[i]) != 8 || len(got.hidden[i]) != f.cfg.HiddenSize {
+			if len(got.Logits[i]) != f.cfg.VocabSize || len(got.hidden[i]) != f.cfg.HiddenSize {
 				t.Fatal("incomplete five-row head")
 			}
 			confWeight, err := f.w.row(ctx, "mtp.2.confidence_head.proj.weight", 0)

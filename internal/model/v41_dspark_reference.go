@@ -85,19 +85,21 @@ type v41DSparkProposal struct {
 // The target Session remains exclusively caller-owned: Step/Close/restore must
 // not run concurrently. Borrowed shards must remain immutable and open.
 // AppendCommitted publishes all three rings atomically. Propose is read-only;
-// transient noise KV never enters a persistent ring. Exact verification,
-// feature-capture integration and accepted-prefix rollback remain separate.
+// transient noise KV never enters a persistent ring. Captured-feature integration
+// and retained-prefix publication use the internal captured-tail/round seams.
+// Exact acceptance policy, checkpoint authentication and serving remain separate.
 type v41DSparkReference struct {
-	mu     sync.Mutex
-	w      *v41DSparkRows
-	target *Session
-	model  *Model
-	state  *v41ForwardState
-	cfg    Config
-	ring   [3][v41WindowSize][]float32
-	next   int
-	prefix [32]byte
-	closed bool
+	mu      sync.Mutex
+	w       *v41DSparkRows
+	target  *Session
+	model   *Model
+	state   *v41ForwardState
+	cfg     Config
+	ring    [3][v41WindowSize][]float32
+	next    int
+	prefix  [32]byte
+	closed  bool
+	invalid bool // Incomplete target drain; Close must still release the Model hold.
 }
 
 func newV41DSparkReference(target *Session, w *v41DSparkRows) (*v41DSparkReference, error) {
@@ -177,9 +179,9 @@ func v41DSparkPrefix(ids []int) [32]byte {
 }
 
 func (f *v41DSparkReference) ready(ctx context.Context) error {
-	if ctx == nil || f.closed || f.target == nil || f.target.M != f.model || !f.target.modelWeightsHeld ||
+	if ctx == nil || f.closed || f.invalid || !f.nativeHostLocked() || f.target == nil || f.target.M != f.model || !f.target.modelWeightsHeld ||
 		f.target.v41Forward != f.state || f.state.activeStepRound != nil ||
-		f.next > len(f.state.history) || v41DSparkPrefix(f.state.history[:f.next]) != f.prefix {
+		f.next < 0 || f.next > len(f.state.history) || v41DSparkPrefix(f.state.history[:f.next]) != f.prefix {
 		return fmt.Errorf("%w: closed, speculative, or changed target prefix", errV41DSparkReference)
 	}
 	return ctx.Err()
@@ -212,27 +214,53 @@ func (f *v41DSparkReference) AppendCommitted(ctx context.Context, rows []v41DSpa
 	if err := f.ready(ctx); err != nil {
 		return err
 	}
-	if len(rows) == 0 || len(rows) > v41WindowSize || len(rows) > len(f.state.history)-f.next {
-		return fmt.Errorf("%w: committed span", errV41DSparkReference)
+	staged, err := f.stageRowsLocked(ctx, rows, f.next)
+	if err != nil {
+		return err
+	}
+	next := f.next + len(rows)
+	prefix := v41DSparkPrefix(f.state.history[:next])
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.ring, f.next, f.prefix = staged, next, prefix
+	return nil
+}
+
+// nativeHostLocked is rechecked at use, not just at construction. Changing the
+// target's execution policy cannot turn this correctness path into device admission.
+func (f *v41DSparkReference) nativeHostLocked() bool {
+	return f.target != nil && f.target.Backend == nil && !f.target.halClosed &&
+		f.target.executionPolicy != ExecutionPolicyDeviceOnly &&
+		f.target.PrecisionPolicy == nil && f.target.PrecisionSchedule == nil
+}
+
+// stageRowsLocked preserves AppendCommitted's arithmetic and row order. It
+// borrows target history only under the caller's exclusive Session ownership.
+// No reference field or existing ring row is mutated by projection or failure.
+func (f *v41DSparkReference) stageRowsLocked(ctx context.Context, rows []v41DSparkContextRow, start int) ([3][v41WindowSize][]float32, error) {
+	staged := f.ring
+	if ctx == nil || start < 0 || start > len(f.state.history) || len(rows) == 0 ||
+		len(rows) > v41WindowSize || len(rows) > len(f.state.history)-start {
+		return staged, fmt.Errorf("%w: committed span", errV41DSparkReference)
 	}
 	d, H := f.cfg.DeepSeekV41.DSpark, f.cfg.HiddenSize
 	for i, row := range rows {
-		if row.Position != f.next+i || row.Token < 0 || row.Token >= f.cfg.VocabSize ||
+		if row.Position != start+i || row.Token < 0 || row.Token >= f.cfg.VocabSize ||
 			row.Token != f.state.history[row.Position] || len(row.Layers) != len(d.TargetLayerIDs) || len(row.Hidden) != len(d.TargetLayerIDs) {
-			return fmt.Errorf("%w: committed feature lineage", errV41DSparkReference)
+			return staged, fmt.Errorf("%w: committed feature lineage", errV41DSparkReference)
 		}
 		for j, tap := range d.TargetLayerIDs {
 			if row.Layers[j] != tap || len(row.Hidden[j]) != H {
-				return fmt.Errorf("%w: committed feature tap", errV41DSparkReference)
+				return staged, fmt.Errorf("%w: committed feature tap", errV41DSparkReference)
 			}
 			for _, v := range row.Hidden[j] {
 				if !finite32(v) {
-					return errV41DSparkReference
+					return staged, errV41DSparkReference
 				}
 			}
 		}
 	}
-	staged := f.ring
 	for _, row := range rows {
 		x := make([]float32, 0, H*len(d.TargetLayerIDs))
 		for _, tap := range row.Hidden {
@@ -240,27 +268,24 @@ func (f *v41DSparkReference) AppendCommitted(ctx context.Context, rows []v41DSpa
 		}
 		main, err := f.linear(ctx, "mtp.0.main_proj.weight", x, true)
 		if err != nil {
-			return err
+			return staged, err
 		}
 		main, err = f.norm(ctx, "mtp.0.main_norm.weight", main)
 		if err != nil {
-			return err
+			return staged, err
 		}
 		for stage := range staged {
 			kv, err := f.kv(ctx, stage, main, row.Position)
 			if err != nil {
-				return err
+				return staged, err
 			}
 			staged[stage][row.Position%v41WindowSize] = kv
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return staged, err
 	}
-	f.ring = staged
-	f.next += len(rows)
-	f.prefix = v41DSparkPrefix(f.state.history[:f.next])
-	return nil
+	return staged, nil
 }
 
 func (f *v41DSparkReference) rotate(x []float32, stage, position int, inverse bool) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"reflect"
 	"runtime"
 	rmetrics "runtime/metrics"
 	"strings"
@@ -708,6 +709,223 @@ func BenchmarkNativeSchedulerCoupledBatch(b *testing.B) {
 		}
 		if _, err := req.Result(); err != nil {
 			b.Fatalf("Result: %v", err)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestWorkerCouplerLatencyWindowRecovery(t *testing.T) {
+	// The cumulative histogram retains an old slow interval. A quiet interval
+	// has no new latency evidence; it must not replay those lifetime waits.
+	buckets := []float64{0, 0.001, 0.040, 0.080}
+	oldCounts := []uint64{0, 0, 100}
+	quantile := func(counts, previous []uint64) time.Duration {
+		return histogramQuantile(&rmetrics.Float64Histogram{
+			Buckets: buckets,
+			Counts:  counts,
+		}, previous, 0.95)
+	}
+	slow := quantile(oldCounts, nil)
+	if slow < 40*time.Millisecond {
+		t.Fatalf("cold baseline latency = %v, want the retained slow bucket", slow)
+	}
+	for _, tc := range []struct {
+		name     string
+		counts   []uint64
+		previous []uint64
+		want     time.Duration
+	}{
+		{"empty_interval", []uint64{0, 0, 100}, oldCounts, 0},
+		{"fresh_fast_interval", []uint64{10, 0, 100}, oldCounts, 950 * time.Microsecond},
+		{"fresh_slow_interval", []uint64{0, 0, 110}, oldCounts, slow},
+		{"counter_reset", []uint64{0, 0, 10}, oldCounts, quantile([]uint64{0, 0, 10}, nil)},
+		{"mixed_reset", []uint64{10, 0, 10}, oldCounts, quantile([]uint64{10, 0, 10}, nil)},
+		{"shape_reset", []uint64{0, 0, 100}, []uint64{100}, slow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := quantile(tc.counts, tc.previous); got != tc.want {
+				t.Fatalf("interval latency = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if !reflect.DeepEqual(oldCounts, []uint64{0, 0, 100}) {
+		t.Fatal("latency calculation mutated the previous interval")
+	}
+
+	coupler := NewWorkerCoupler(WorkerCouplingConfig{
+		Mode:             CouplingModeDynamic,
+		MaxDecodeWorkers: 8,
+		MinWorkers:       1,
+		SampleInterval:   0,
+	})
+	current := RuntimeMetricsSnapshot{
+		RunnableGoroutines: 8,
+		GOMAXPROCS:         8,
+		NumCPU:             8,
+		CPUIdleFraction:    0.25,
+		SchedLatencyP95:    slow,
+	}
+	coupler.SetSampler(func() RuntimeMetricsSnapshot { return current })
+	sched := &NativeScheduler{maxRunning: 8, coupler: coupler}
+	check := func(label string, wantRunning, wantWorkers int) {
+		t.Helper()
+		sched.mu.Lock()
+		gotRunning := sched.effectiveMaxRunningLocked()
+		sched.mu.Unlock()
+		gotWorkers := coupler.WorkersFor(OpDecode)
+		if gotRunning != wantRunning || gotWorkers != wantWorkers {
+			t.Fatalf("%s: running/workers = %d/%d, want %d/%d",
+				label, gotRunning, gotWorkers, wantRunning, wantWorkers)
+		}
+	}
+	check("slow interval", 6, 4)
+	current.SchedLatencyP95 = quantile(oldCounts, oldCounts)
+	check("no new waits", 8, 6)
+	// Other pressure remains authoritative; an empty histogram is not a claim
+	// that the host is idle and cannot lift the configured single-lane ceiling.
+	current.RunnableGoroutines = 80
+	current.CPUIdleFraction = 0
+	check("runnable pressure persists", 4, 2)
+	sched.maxRunning = 1
+	check("single-lane ceiling", 1, 2)
+	sched.maxRunning = 8
+	current.RunnableGoroutines, current.CPUIdleFraction = 8, 0.25
+	current.SchedLatencyP95 = quantile([]uint64{0, 0, 110}, oldCounts)
+	check("new waits throttle again", 6, 4)
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestWorkerCouplerHonorsAdmissionCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mode       WorkerCouplingMode
+		configured int
+		cap        int
+		critical   bool
+		want       int
+	}{
+		{"unbounded", CouplingModeDynamic, 0, 4, false, 4},
+		{"negative_unbounded", CouplingModeDynamic, -1, 4, false, 4},
+		{"configured_above_cap", CouplingModeDynamic, 8, 4, false, 4},
+		{"configured_below_cap", CouplingModeDynamic, 2, 4, false, 2},
+		{"single_lane", CouplingModeDynamic, 1, 4, true, 1},
+		{"pressure_stricter", CouplingModeDynamic, 8, 4, true, 2},
+		{"cap_stricter", CouplingModeDynamic, 0, 4, true, 4},
+		{"zero_cap", CouplingModeDynamic, 0, 0, false, 0},
+		{"negative_cap", CouplingModeDynamic, 0, -1, false, 0},
+		{"static", CouplingModeStatic, 0, 4, true, 4},
+		{"static_configured_stricter", CouplingModeStatic, 2, 4, true, 2},
+		{"disabled_unbounded", CouplingModeDisabled, 0, 4, true, 0},
+		{"disabled_configured", CouplingModeDisabled, 8, 4, true, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			coupler := NewWorkerCoupler(WorkerCouplingConfig{
+				Mode:           tc.mode,
+				MaxRunningCap:  tc.cap,
+				SampleInterval: 0,
+			})
+			coupler.SetSampler(func() RuntimeMetricsSnapshot {
+				snap := RuntimeMetricsSnapshot{GOMAXPROCS: 8, NumCPU: 8, CPUIdleFraction: 1}
+				if tc.critical {
+					snap.RunnableGoroutines = 80
+					snap.SchedLatencyP95 = 40 * time.Millisecond
+					snap.CPUIdleFraction = 0
+				}
+				return snap
+			})
+			sched := &NativeScheduler{maxRunning: tc.configured, coupler: coupler}
+			sched.mu.Lock()
+			got := sched.effectiveMaxRunningLocked()
+			sched.mu.Unlock()
+			if got != tc.want {
+				t.Fatalf("admission ceiling = %d, want %d", got, tc.want)
+			}
+		})
+	}
+
+	coupler := NewWorkerCoupler(WorkerCouplingConfig{
+		Mode:           CouplingModeDynamic,
+		MaxRunningCap:  4,
+		SampleInterval: 0,
+	})
+	coupler.SetSampler(func() RuntimeMetricsSnapshot {
+		return RuntimeMetricsSnapshot{GOMAXPROCS: 8, NumCPU: 8, CPUIdleFraction: 1}
+	})
+	for _, cap := range []int{4, 2, 0, 12} {
+		policy := coupler.Config()
+		policy.MaxRunningCap = cap
+		coupler.SetConfig(policy)
+		want := 8
+		if cap > 0 && cap < want {
+			want = cap
+		}
+		if got := coupler.CoupledMaxRunning(8); got != want {
+			t.Fatalf("updated cap %d: admission ceiling = %d, want %d", cap, got, want)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestWorkerCouplerCPUIdleUnknownIntervals(t *testing.T) {
+	reader := &runtimeMetricsReader{}
+	for _, tc := range []struct {
+		name        string
+		idle, total float64
+		available   bool
+		want        float64
+	}{
+		{"first_pair", 4, 8, true, -1},
+		{"measured_half_idle", 6, 12, true, .5},
+		{"no_counter_progress", 6, 12, true, -1},
+		{"idle_reset", 5, 14, true, -1},
+		{"after_idle_reset", 6, 16, true, .5},
+		{"total_reset", 7, 10, true, -1},
+		{"after_total_reset", 8, 12, true, .5},
+		{"both_reset", 0, 0, true, -1},
+		{"measured_fully_busy", 0, 2, true, 0},
+		{"estimated_delta_clamp", 3, 3, true, 1},
+		{"missing_counter", 0, 0, false, -1},
+		{"reseed_after_missing", 20, 40, true, -1},
+		{"fresh_after_missing", 21, 42, true, .5},
+		{"invalid_idle", math.NaN(), 43, true, -1},
+		{"reseed_after_invalid", 22, 44, true, -1},
+		{"invalid_total", 22, math.Inf(1), true, -1},
+		{"negative_idle", -1, 45, true, -1},
+		{"negative_total", 22, -1, true, -1},
+		{"reseed_again", 23, 46, true, -1},
+		{"measured_idle", 25, 48, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reader.cpuIdleInterval(tc.idle, tc.total, tc.available); got != tc.want {
+				t.Fatalf("CPU idle fraction = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// Unknown is excluded by the existing pressure formula. A genuine busy
+	// interval still lowers the decode budget; no threshold or cap is changed.
+	coupler := NewWorkerCoupler(WorkerCouplingConfig{
+		Mode: CouplingModeDynamic, MaxDecodeWorkers: 8, MinWorkers: 1,
+		SampleInterval: 0, MaxRunningCap: 1,
+	})
+	current := RuntimeMetricsSnapshot{GOMAXPROCS: 8, NumCPU: 8, CPUIdleFraction: -1}
+	coupler.SetSampler(func() RuntimeMetricsSnapshot { return current })
+	for _, tc := range []struct {
+		idle    float64
+		class   RuntimePressureClass
+		workers int
+	}{
+		{-1, PressureNominal, 8},
+		{0, PressureLight, 6},
+		{-1, PressureNominal, 8},
+	} {
+		current.CPUIdleFraction = tc.idle
+		coupler.SampleNow()
+		if stats := coupler.Stats(); stats.PressureClass != tc.class || stats.DecodeWorkers != tc.workers {
+			t.Fatalf("idle=%v: class/workers=%s/%d, want %s/%d", tc.idle, stats.PressureClass, stats.DecodeWorkers, tc.class, tc.workers)
+		}
+		if got := coupler.CoupledMaxRunning(8); got != 1 {
+			t.Fatalf("single-lane admission ceiling changed to %d", got)
 		}
 	}
 }

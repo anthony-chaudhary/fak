@@ -230,7 +230,7 @@ func TestV41DSparkPackedReaderReviewRegressions(t *testing.T) {
 		reads := 0
 		reader := v41DSparkTestReaderAt(func(p []byte, off int64) (int, error) {
 			reads++
-			if off != 0 || len(p) != 8 {
+			if off != 0 || len(p) != binary.Size(uint64(0)) {
 				t.Fatalf("read past prefix budget: off=%d len=%d", off, len(p))
 			}
 			binary.LittleEndian.PutUint64(p, v41DSparkMaxHeaderBytes+1)

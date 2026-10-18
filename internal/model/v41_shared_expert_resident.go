@@ -525,7 +525,13 @@ func (s *Session) v41DeferredSharedExpertChain(layer int) v41ColdSharedResidentF
 }
 
 func (s *Session) v41SharedExpertChain(layer int, deferredChecks bool, consume v41SharedResidentConsumer, afterChecked func(compute.Tensor) error) v41ColdSharedResidentFunc {
-	protected := map[compute.Buffer]bool{}
+	// Reserve the resident snapshot plus this chain's three lazy weight resolutions.
+	// Keep the full snapshot: a malformed backend result may alias any resident.
+	residentCount := 0
+	if s != nil {
+		residentCount = len(s.halW)
+	}
+	protected := make(map[compute.Buffer]bool, residentCount+3)
 	if s != nil {
 		for _, weight := range s.halW {
 			if weight.Buf() != nil {
@@ -652,7 +658,10 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 			result, cause = nil, retire(cause)
 		}
 	}()
-	var owned []compute.Tensor
+	// The scalar chain owns one input, four raw rows, four publications and
+	// four status records. Reserve one more slot for the decode add consumer;
+	// append still grows safely if a future consumer owns additional tensors.
+	owned := make([]compute.Tensor, 0, 14)
 	consumed := map[compute.Buffer]bool{}
 	defer func() {
 		primary := recover()
@@ -701,7 +710,8 @@ func (s *Session) v41SharedExpertResident(layer int, input []float32, protected 
 		status     compute.V41DeferredStatus
 		leaf, site string
 	}
-	var pending []publicationRecord
+	// Gate, up, activation and down each publish exactly one status.
+	pending := make([]publicationRecord, 0, 4)
 	drained := false
 	drain := func(final compute.Tensor) error {
 		drained = true // V41ReadDeferred consumes records on errors as well.

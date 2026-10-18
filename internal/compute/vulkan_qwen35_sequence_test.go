@@ -1226,3 +1226,40 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 			totalTokens, maxDelta, cacheGeomK.len, cacheExactK.cap, cacheGeomK.cap)
 	})
 }
+
+func TestVulkanQwen35SequenceFeatureCaptureEnvelope(t *testing.T) {
+	base := Qwen35SequencePrefillRequest{
+		TokenIDs: make([]int, 8), Layers: make([]Qwen35SequenceLayer, 64),
+		FeatureLayers: []int{5, 19, 33, 47, 61}, NeedAllLogits: true, CapturePrefixReplay: true,
+	}
+	if err := qwen35SequenceFeatureContract(base); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		rows int
+		taps []int
+		all  bool
+	}{
+		{"ordinary_eight", 8, nil, true},
+		{"too_many_rows", 9, []int{5}, true},
+		{"duplicate", 8, []int{5, 5}, true},
+		{"unordered", 8, []int{19, 5}, true},
+		{"negative", 8, []int{-1}, true},
+		{"out_of_range", 8, []int{64}, true},
+		{"too_many_taps", 8, []int{0, 1, 2, 3, 4, 5}, true},
+		{"missing_logits", 8, []int{5}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := base
+			req.TokenIDs, req.FeatureLayers, req.NeedAllLogits = make([]int, tc.rows), tc.taps, tc.all
+			if err := qwen35SequenceFeatureContract(req); err == nil {
+				t.Fatal("invalid capture admitted")
+			}
+		})
+	}
+	base.TokenIDs, base.FeatureLayers = make([]int, 4), nil
+	if err := qwen35SequenceFeatureContract(base); err != nil {
+		t.Fatalf("ordinary MTP4 changed: %v", err)
+	}
+}

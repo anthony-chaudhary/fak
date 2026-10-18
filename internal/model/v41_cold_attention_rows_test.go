@@ -390,4 +390,93 @@ func TestV41ColdPlainAttentionSessionParity(t *testing.T) {
 			t.Logf("exact cold/Step output and continuation parity; H2D bytes borrowed/flat=%d/%d gathers=%d/%d", borrowBytes, flatBytes, borrowGathers, flatGathers)
 		})
 	}
+
+	t.Run("cpu-default", func(t *testing.T) {
+		run := func(clock bool) v41ColdAttentionRun {
+			m := v41IncrementalPlainModel(t, 1)
+			m.Cfg.Window = []int{3}
+			s := m.NewSession()
+			defer func() {
+				s.Close()
+				if err := m.CloseWeights(); err != nil {
+					t.Fatal(err)
+				}
+			}()
+			var ticks int64
+			if clock {
+				m.v41SetExpertTimeClock(func() int64 { ticks++; return ticks })
+			}
+			prefix, next := v41IncrementalPrefix(m.Cfg, 7)
+			var result v41ColdAttentionRun
+			result.logits = append(result.logits, append([]float32(nil), s.Prefill(prefix)...))
+			result.states = append(result.states, captureV41ForwardSnapshot(s.v41State()))
+			result.logits = append(result.logits, append([]float32(nil), s.Step(next)...))
+			result.states = append(result.states, captureV41ForwardSnapshot(s.v41State()))
+			if clock && ticks == 0 {
+				t.Fatal("packed control did not execute its installed clock")
+			}
+			return result
+		}
+		borrow, packed := run(false), run(true)
+		if !reflect.DeepEqual(borrow.states, packed.states) {
+			t.Fatal("CPU borrowing changed retained cold/Step state")
+		}
+		for i := range borrow.logits {
+			v41SharedAttentionSessionBits(t, "CPU cold/Step logits", borrow.logits[i], packed.logits[i])
+		}
+
+		m := &Model{}
+		m.v41SetExpertFaultPhase(V41PhasePrefill)
+		q, sink := []float32{0.5, -0.25}, []float32{0.125}
+		rows := [][]float32{{9, 8}, {0.25, 0.5}, {-0.5, 0.75}}
+		keys, idx := []int32{1, 2}, []int32{0, 1, -1}
+		opt := V41SparseAttentionSinkOptions{B: 1, M: 1, Heads: 1, HeadDim: 2, N: 2, TopK: 3, Softmax: 0.5}
+		flat := []float32{0.25, 0.5, -0.5, 0.75}
+		want, err := V41SparseAttentionSink(q, flat, sink, idx, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []float32
+		var handled bool
+		borrowAllocs := testing.AllocsPerRun(100, func() {
+			got, _, handled, err = m.v41ColdPlainHostAttention(q, sink, rows, keys, idx, opt)
+		})
+		if err != nil || !handled {
+			t.Fatalf("valid host contraction declined: handled=%t err=%v", handled, err)
+		}
+		v41SharedAttentionSessionBits(t, "CPU borrowed rows", got, want)
+		packedAllocs := testing.AllocsPerRun(100, func() {
+			values, _ := v41ColdPlainAttentionInput(q, sink, rows, keys, idx, opt, nil, nil)
+			got, err = V41SparseAttentionSink(q, values, sink, idx, opt)
+		})
+		if err != nil || borrowAllocs >= packedAllocs || !reflect.DeepEqual(rows, [][]float32{{9, 8}, {0.25, 0.5}, {-0.5, 0.75}}) {
+			t.Fatalf("host copy witness changed inputs or allocations: borrowed=%g packed=%g err=%v", borrowAllocs, packedAllocs, err)
+		}
+		v41SharedAttentionSessionBits(t, "CPU packed control", got, want)
+		clockCalls := 0
+		m.v41SetExpertTimeClock(func() int64 {
+			clockCalls++
+			rows[1][0] = 17
+			return 1
+		})
+		if values, _, selected, cause := m.v41ColdPlainHostAttention(q, sink, rows, keys, idx, opt); selected || cause != nil || values != nil || clockCalls != 0 || rows[1][0] != 0.25 {
+			t.Fatal("installed-clock decline executed a callback or changed input")
+		}
+		values, window := v41ColdPlainAttentionInput(q, sink, rows, keys, idx, opt, nil, nil)
+		m.v41NowNanos()
+		got, err = v41ColdPlainAttentionSink(0, q, values, sink, window, idx, opt, nil, nil)
+		if err != nil || clockCalls != 1 || rows[1][0] != 17 {
+			t.Fatalf("custom-clock packed path changed: calls=%d err=%v", clockCalls, err)
+		}
+		v41SharedAttentionSessionBits(t, "pre-clock packed snapshot", got, want)
+		m.v41SetExpertTimeClock(nil)
+		rows[1][0] = float32(math.NaN())
+		if values, _, selected, cause := m.v41ColdPlainHostAttention(q, sink, rows, keys, idx, opt); selected || cause != nil || values != nil {
+			t.Fatal("malformed input bypassed the ordinary validator")
+		}
+		if values, _, selected, cause := (&Model{}).v41ColdPlainHostAttention(q, sink, rows, keys, idx, opt); selected || cause != nil || values != nil {
+			t.Fatal("missing ledger acquired host borrowing authority")
+		}
+		t.Logf("CPU contraction allocations borrowed/packed=%g/%g; no device or elapsed-time claim", borrowAllocs, packedAllocs)
+	})
 }
