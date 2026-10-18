@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/taskvc"
 )
 
 // capturedTaskRepoRoot is the checkout the versioned task definitions under
@@ -229,6 +231,77 @@ func TestSchedLauncherAuditCatchesTheAuditedRegressions(t *testing.T) {
 		if p.Verdict != schedVerdictFail || p.Allowed {
 			t.Fatalf("verdict = %q allowed = %v, want fail/not-allowed (an exemption covers the "+
 				"launcher axis only)\n%+v", p.Verdict, p.Allowed, p)
+		}
+	})
+}
+
+// TestSchedLauncherAuditCitesTaskvcResidual pins the read-back of the out-of-tree
+// remediation: once internal/taskvc's inventory records why a task is not rebuildable,
+// the audit cites that reason and stops asking for it, while the verdict stays warn.
+func TestSchedLauncherAuditCitesTaskvcResidual(t *testing.T) {
+	origStat := schedStatFn
+	defer func() { schedStatFn = origStat }()
+	schedStatFn = func(path string) (os.FileInfo, error) {
+		return nil, nil
+	}
+	const recordClause = "or record the residual gap in internal/taskvc's inventory with a reason"
+	const outTreeArgs = `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%LOCALAPPDATA%\Fleet\stranded_recovery.ps1"`
+
+	t.Run("an inventoried out-of-tree task cites its recorded residual", func(t *testing.T) {
+		var row taskvc.Coverage
+		for _, c := range taskvc.Inventory() {
+			if c.Task == "FleetStrandedRecovery" {
+				row = c
+			}
+		}
+		if strings.TrimSpace(row.Reason) == "" {
+			t.Fatal("FleetStrandedRecovery has no reason-bearing row in taskvc.Inventory()")
+		}
+		p := schedLauncherAudit(schedScanTaskInfo{
+			TaskName:        "FleetStrandedRecovery",
+			LogonType:       "S4U",
+			ActionExecute:   "powershell.exe",
+			ActionArguments: outTreeArgs,
+		}, capturedTaskRepoRoot)
+		if p.Provenance != schedProvenanceOutTree {
+			t.Fatalf("provenance = %q, want %q", p.Provenance, schedProvenanceOutTree)
+		}
+		if p.Verdict != schedVerdictWarn || p.Allowed {
+			t.Fatalf("verdict = %q allowed = %v, want warn/not-allowed\n%+v", p.Verdict, p.Allowed, p)
+		}
+		want := "residual recorded in internal/taskvc inventory (status=" + string(row.Status) + "): " + row.Reason
+		found := false
+		for _, r := range p.Reasons {
+			found = found || r == want
+		}
+		if !found {
+			t.Errorf("reasons missing the taskvc residual %q, got %q", want, p.Reasons)
+		}
+		if strings.Contains(strings.Join(p.Remediations, " "), recordClause) {
+			t.Errorf("remediation still asks to record a residual taskvc already holds: %q", p.Remediations)
+		}
+	})
+
+	t.Run("an unlisted out-of-tree task keeps the original remediation", func(t *testing.T) {
+		p := schedLauncherAudit(schedScanTaskInfo{
+			TaskName:        "FleetUnlistedOutOfTreeProbe",
+			LogonType:       "S4U",
+			ActionExecute:   "powershell.exe",
+			ActionArguments: outTreeArgs,
+		}, capturedTaskRepoRoot)
+		if p.Verdict != schedVerdictWarn || p.Allowed {
+			t.Fatalf("verdict = %q allowed = %v, want warn/not-allowed\n%+v", p.Verdict, p.Allowed, p)
+		}
+		wantFix := "move the script into the repo and register it from a tools/register_*.ps1 installer, " + recordClause
+		found := false
+		for _, r := range p.Remediations {
+			found = found || r == wantFix
+		}
+		if !found {
+			t.Errorf("remediations missing %q, got %q", wantFix, p.Remediations)
+		}
+		if strings.Contains(strings.Join(p.Reasons, " "), "internal/taskvc inventory") {
+			t.Errorf("an unlisted task must not cite a taskvc residual: %q", p.Reasons)
 		}
 	})
 }

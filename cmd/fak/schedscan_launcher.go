@@ -11,7 +11,10 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
+
+	"github.com/anthony-chaudhary/fak/internal/taskvc"
 )
 
 // The scheduled-task LAUNCHER POSTURE audit (#2174).
@@ -187,6 +190,19 @@ var schedLauncherExemptions = map[string]string{
 		"and no shell interpreter between the scheduler and the program — wrapping it in conhost would only add " +
 		"the exit-code mask of #5095 without adding isolation",
 }
+
+// schedTaskvcResiduals indexes internal/taskvc's declared inventory by task name,
+// keeping only rows that record a residual reason. It reads the static Inventory,
+// never ScanTree, so the audit stays free of git calls.
+var schedTaskvcResiduals = sync.OnceValue(func() map[string]taskvc.Coverage {
+	byTask := map[string]taskvc.Coverage{}
+	for _, c := range taskvc.Inventory() {
+		if strings.TrimSpace(c.Reason) != "" {
+			byTask[c.Task] = c
+		}
+	}
+	return byTask
+})
 
 // schedLauncherPosture is one task's launcher-contract record: the identity and
 // operational fields an operator needs (name, action, working directory, last
@@ -567,10 +583,15 @@ func schedLauncherAudit(row schedScanTaskInfo, repoRoot string) schedLauncherPos
 	}
 
 	if provenance == schedProvenanceOutTree {
-		add("out-of-tree script ("+script+"): no repo installer recreates it, so the audited launcher contract "+
-			"cannot be enforced on the next reimage",
-			"move the script into the repo and register it from a tools/register_*.ps1 installer, "+
-				"or record the residual gap in internal/taskvc's inventory with a reason")
+		outTree := "out-of-tree script (" + script + "): no repo installer recreates it, so the audited launcher contract " +
+			"cannot be enforced on the next reimage"
+		moveFix := "move the script into the repo and register it from a tools/register_*.ps1 installer"
+		if residual, ok := schedTaskvcResiduals()[p.Name]; ok {
+			add(outTree, moveFix)
+			add(fmt.Sprintf("residual recorded in internal/taskvc inventory (status=%s): %s", residual.Status, residual.Reason), "")
+		} else {
+			add(outTree, moveFix+", or record the residual gap in internal/taskvc's inventory with a reason")
+		}
 		worse(schedVerdictWarn)
 	} else if provenance == schedProvenanceUnknown {
 		add("script "+script+" could not be placed relative to the repo root", "pass --repo-root so provenance can be decided")
