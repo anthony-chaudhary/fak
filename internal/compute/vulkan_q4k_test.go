@@ -646,16 +646,17 @@ func TestVulkanQ4KWave32CapabilityAdmission(t *testing.T) {
 	})
 }
 
-// TestVulkanQ4KSmallPanelWeightReuseParity is the independent software witness for
-// the P2-P4 small-panel weight-reuse specialization (#12693). The shader loads each
-// packed Q4_K row once and serves every token's dot from that resident load; the
-// canonical CPU Q4_K reference is the oracle, so any reassociation or reuse damage
-// surfaces as a parity failure rather than being re-derived in the test.
+// TestVulkanQ4KSmallPanelWeightReuseParity checks the P2-P8 weight-reuse
+// specialization against the independent CPU Q4_K reference. P5-P8 use two
+// tiles of at most four tokens; P1 and P9 retain the one-token-per-invocation
+// route. Force this shader rather than an optional cooperative-matrix route.
 //
-// P1 and P5 are explicit non-regression controls: P1 keeps the original scalar route,
-// and P5 exceeds the reuse panel and must fall back to the original route too.
+// fak-test:runtime integration est=15s
 func TestVulkanQ4KSmallPanelWeightReuseParity(t *testing.T) {
 	v := q4Device(t)
+	t.Setenv("FAK_VULKAN_Q4K_ARM", "scalar")
+	prev := vulkanMMCM1SetConfig(VulkanMMCM1Config{Enabled: false, MinTokens: 8})
+	t.Cleanup(func() { vulkanMMCM1SetConfig(prev) })
 	const out = 70 // crosses a 64-lane workgroup boundary and is not a multiple of 64
 
 	for _, in := range []int{256, 512, 5120, 17408} {
@@ -671,7 +672,7 @@ func TestVulkanQ4KSmallPanelWeightReuseParity(t *testing.T) {
 				}
 			}
 
-			for _, P := range []int{1, 2, 3, 4, 5} {
+			for _, P := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9} {
 				t.Run("P"+fmtInt(P), func(t *testing.T) {
 					x := make([]float32, P*in)
 					for i := range x {
@@ -686,9 +687,14 @@ func TestVulkanQ4KSmallPanelWeightReuseParity(t *testing.T) {
 					dx := v.Upload(hx, F32)
 					defer v.Free(dx)
 
+					before := VulkanMMCM1Snapshot()
 					dy := v.BatchedMatMul(dw, dx, P)
 					defer v.Free(dy)
 					got := v.Read(dy)
+					after := VulkanMMCM1Snapshot()
+					if after.GEMM != before.GEMM || after.Disabled != before.Disabled+1 {
+						t.Fatalf("Q4_K fallback route not witnessed: before=%+v after=%+v", before, after)
+					}
 					want := Default().Read(Default().BatchedMatMul(hw, hx, P))
 					if len(got) != P*out || len(want) != P*out {
 						t.Fatalf("output len got=%d want=%d, expected %d", len(got), len(want), P*out)

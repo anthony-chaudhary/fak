@@ -20,19 +20,20 @@ void main() {
     // share one unambiguous flattening for every token count, including tokens==1.
     int row = globalIdx % pc.outDim;
     int token = globalIdx / pc.outDim;
-    if (row >= pc.outDim) return;
+    if (row >= pc.outDim || token >= pc.tokens) return;
 
-    // Small-panel weight reuse (P2-P4). For 2..4 tokens the flattened order puts
-    // every row's token-0 invocation in the first `outDim` slots, so the token-0
-    // invocation can serve all tokens for its row from one resident weight load;
-    // the remaining host-dispatched invocations return harmlessly. P=1 and P>=5
-    // keep the original one-(row,token)-per-invocation route untouched.
+    // Small-panel weight reuse (P2-P8). Each row's token-0 invocation serves
+    // tokens 0..3; token 4 serves the remaining tokens when P>=5. Each leader
+    // loads its row weights once for at most four tokens, retaining the same
+    // 32 accumulators as P2-P4. Other invocations return without writing. P=1
+    // and P>=9 keep the original one-(row,token)-per-invocation route.
     int panel = pc.tokens;
-    bool reuse = panel >= 2 && panel <= 4;
+    int baseToken = 0;
+    bool reuse = panel >= 2 && panel <= 8;
     if (reuse) {
-        if (token != 0) return;
-    } else if (token >= pc.tokens) {
-        return;
+        baseToken = (token / 4) * 4;
+        if (token != baseToken) return;
+        panel = min(4, pc.tokens - baseToken);
     }
 
     int blocks = pc.inDim / 256;
@@ -112,7 +113,7 @@ void main() {
         return;
     }
 
-    // P2-P4: one row-weight load, independent per-token chains. Each token keeps
+    // P2-P8: one row-weight load per tile, independent per-token chains. Each token keeps
     // the same eight-chain structure and fold order, so every token's result is
     // identical to what the non-reuse path would have produced for that token;
     // only the weight traffic is shared.
@@ -173,7 +174,7 @@ void main() {
                 float cv7 = d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o;
 
                 for (int t = 0; t < panel; ++t) {
-                    int xb = t * pc.inDim;
+                    int xb = (baseToken + t) * pc.inDim;
                     int base = t * 8;
                     accA[base + 0] += cv0 * x[xb + xBase_even + lane + 0];
                     accA[base + 1] += cv1 * x[xb + xBase_even + lane + 1];
@@ -189,7 +190,7 @@ void main() {
     }
     for (int t = 0; t < panel; ++t) {
         int base = t * 8;
-        y[t * pc.outDim + row] = fold8(accA[base + 0], accA[base + 1], accA[base + 2], accA[base + 3],
+        y[(baseToken + t) * pc.outDim + row] = fold8(accA[base + 0], accA[base + 1], accA[base + 2], accA[base + 3],
                                        accA[base + 4], accA[base + 5], accA[base + 6], accA[base + 7]);
     }
 }
