@@ -26,6 +26,10 @@ type v41GroupedPanelStatus struct {
 // row tiles. Capability refusal happens before activation work; after selection
 // every failure retires the owner and is never replayed by the scalar arm.
 func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads, headDim, groups, rank, dim int) ([][]float32, v41DenseProjectionOutcome, error) {
+	return s.v41GroupedOutputPanelOwned(nil, layer, panel, rows, heads, headDim, groups, rank, dim)
+}
+
+func (s *Session) v41GroupedOutputPanelOwned(owner *v41GroupedOutputCohort, layer int, panel []float32, rows, heads, headDim, groups, rank, dim int) ([][]float32, v41DenseProjectionOutcome, error) {
 	if s == nil || s.M == nil || s.Backend == nil || rows <= 1 || heads <= 0 || headDim <= 0 || groups <= 0 || rank <= 0 || dim <= 0 || heads%groups != 0 {
 		return nil, v41GroupedPanelDecline(layer, rows, "shape"), nil
 	}
@@ -73,7 +77,7 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 		}
 	}
 
-	weights, err := v41SelectedDeviceCall(s, layer, "v41-grouped-output-panel-weights", func(stage *string) (v41GroupedPanelWeights, error) {
+	weights, err := v41GroupedPanelSelectedCall(owner, s, layer, "v41-grouped-output-panel-weights", func(stage *string) (v41GroupedPanelWeights, error) {
 		*stage = "weight upload"
 		w := v41GroupedPanelWeights{a: make([]compute.Tensor, groups), aDtype: aSource.dtype, bDtype: bSource.dtype}
 		groupElems := rank * groupIn
@@ -90,6 +94,9 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 		w.b, cause = s.v41GroupedPanelWeight(key, bSource, 0, dim, joined)
 		if cause != nil {
 			return v41GroupedPanelWeights{}, cause
+		}
+		if owner != nil && !owner.validWeights(w, groupIn) {
+			return v41GroupedPanelWeights{}, errV41ProjectionResult
 		}
 		return w, nil
 	})
@@ -142,11 +149,11 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 	defer func() {
 		s.M.v41NoteGroupedOutput(1, 0, completed, 0, stats.calls, stats.upload, stats.readback, 0, opened)
 	}()
-	result, err := v41SelectedDeviceCall(s, layer, "v41-grouped-output-panel", func(stage *string) ([][]float32, error) {
+	result, err := v41GroupedPanelSelectedCall(owner, s, layer, "v41-grouped-output-panel", func(stage *string) ([][]float32, error) {
 		out := make([][]float32, 0, rows)
 		at := 0
 		for _, n := range tiles {
-			part, cause := s.v41GroupedOutputTile(rowOps, deferred, panel[at*totalIn:(at+n)*totalIn], n, groupIn, groups, rank, dim, weights, stage, &stats)
+			part, cause := s.v41GroupedOutputTile(owner, rowOps, deferred, panel[at*totalIn:(at+n)*totalIn], n, groupIn, groups, rank, dim, weights, stage, &stats)
 			if cause != nil {
 				return nil, cause
 			}
@@ -232,7 +239,7 @@ func v41GroupedPanelWeightSupports(be compute.Backend, w compute.Tensor, rows in
 	}
 }
 
-func (s *Session) v41GroupedOutputTile(rows compute.V41RowLogBackend, deferred compute.V41DeferredStatusBackend, input []float32, count, groupIn, groups, rank, dim int, weights v41GroupedPanelWeights, stage *string, stats *v41GroupedResidentStats) (result [][]float32, err error) {
+func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compute.V41RowLogBackend, deferred compute.V41DeferredStatusBackend, input []float32, count, groupIn, groups, rank, dim int, weights v41GroupedPanelWeights, stage *string, stats *v41GroupedResidentStats) (result [][]float32, err error) {
 	var owned []compute.Tensor
 	var pending []v41GroupedPanelStatus
 	borrowed := append([]compute.Tensor(nil), weights.a...)
@@ -286,6 +293,48 @@ func (s *Session) v41GroupedOutputTile(rows compute.V41RowLogBackend, deferred c
 	defer func() {
 		p := primary
 		present := bodyReturned && primaryPresent
+		if owner != nil {
+			// Selected cohort cleanup drains each owned resource once. Preserve the
+			// original arithmetic/transport failure if a later release also panics.
+			var cleanup any
+			var cleanupPresent bool
+			attempt := func(f func()) {
+				completed := false
+				defer func() {
+					if !completed {
+						value := recover()
+						if !cleanupPresent {
+							cleanup, cleanupPresent = value, true
+						}
+					}
+				}()
+				f()
+				completed = true
+			}
+			if len(pending) != 0 {
+				attempt(func() {
+					_, drain := read(nil)
+					if drain != nil {
+						err = errors.Join(drain, err)
+						if pe, ok := p.(error); ok {
+							err = errors.Join(err, pe)
+							present = false
+						}
+					}
+				})
+			}
+			for i := len(owned) - 1; i >= 0; i-- {
+				index := i
+				attempt(func() { s.Backend.Free(owned[index]) })
+			}
+			if present {
+				panic(p)
+			}
+			if err == nil && cleanupPresent {
+				panic(cleanup)
+			}
+			return
+		}
 		if len(pending) != 0 {
 			_, drain := read(nil)
 			if drain != nil {

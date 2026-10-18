@@ -271,10 +271,12 @@ func (w *dflash2Weights) Close() error {
 	defer w.mu.Unlock()
 	if !w.closed {
 		w.closed = true
-		if w.closer != nil {
-			w.closeErr = w.closer.Close()
-		}
+		closer := w.closer
 		w.r, w.closer, w.tensors = nil, nil, nil
+		if closer != nil {
+			w.closeErr = fmt.Errorf("dflash2: weight cleanup did not complete")
+			w.closeErr = closer.Close()
+		}
 	}
 	return w.closeErr
 }

@@ -32,6 +32,51 @@ import (
 
 type v41GroupedOutputFunc func(layer int, o []float32, heads, headDim, groups, rank, dim int) ([]float32, v41DenseProjectionOutcome, error)
 
+// v41GroupedOutputCallback resolves the scalar behavior without constructing a new closure.
+// v41GroupedOutputRoute is a private closed sum interpreted only below.
+// Legacy functions and nil retain their scalar behavior and carry no native
+// authority. A canonical product is immutable and caches its scalar closure.
+type v41GroupedOutputRoute any
+
+type v41GroupedOutputBinding struct {
+	ordinary v41GroupedOutputFunc
+	owner    *Session
+	model    *Model
+	backend  compute.Backend
+}
+
+func v41GroupedOutputCallback(route v41GroupedOutputRoute) v41GroupedOutputFunc {
+	switch value := route.(type) {
+	case nil:
+		return nil
+	case v41GroupedOutputFunc:
+		return value
+	case func(int, []float32, int, int, int, int, int) ([]float32, v41DenseProjectionOutcome, error):
+		return value
+	case *v41GroupedOutputBinding:
+		if value == nil {
+			return nil
+		}
+		return value.ordinary
+	default:
+		return v41InvalidGroupedOutputRoute
+	}
+}
+func v41InvalidGroupedOutputRoute(int, []float32, int, int, int, int, int) ([]float32, v41DenseProjectionOutcome, error) {
+	return nil, v41ProjectionError, errV41ProjectionResult
+}
+func (s *Session) v41BindGroupedOutput() v41GroupedOutputRoute {
+	ordinary := s.v41GroupedOutputFunc()
+	if ordinary == nil {
+		return nil
+	}
+	return &v41GroupedOutputBinding{ordinary: ordinary, owner: s, model: s.M, backend: s.Backend}
+}
+func (b *v41GroupedOutputBinding) canonical(s *Session) bool {
+	return b != nil && b.ordinary != nil && s != nil && b.owner == s && b.model == s.M &&
+		backendHasComparableIdentity(s.Backend) && b.backend == s.Backend && !s.halClosed && s.halFailure == nil
+}
+
 func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim int, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
 	var woA, woB []float32
 	loaded := false
@@ -52,12 +97,12 @@ func (m *Model) v41GroupedOutputProjector(l, heads, headDim, groups, rank, dim i
 				return nil, err
 			}
 		}
-		if scratch.groupedOutput != nil {
+		if grouped := v41GroupedOutputCallback(scratch.groupedOutput); grouped != nil {
 			callbackInput := o
 			if full {
 				callbackInput = append([]float32(nil), o...)
 			}
-			y, outcome, err := scratch.groupedOutput(l, callbackInput, heads, headDim, groups, rank, dim)
+			y, outcome, err := grouped(l, callbackInput, heads, headDim, groups, rank, dim)
 			switch outcome {
 			case v41ProjectionHandled:
 				if err != nil || len(y) != dim {

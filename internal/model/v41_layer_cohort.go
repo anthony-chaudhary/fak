@@ -3,21 +3,24 @@ package model
 import (
 	"fmt"
 	"os"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // v41LayerStepWork is a lane-owned continuation, never a shallow Session copy.
 // Attention/router preparation may change journaled source state, but hidden
 // state/window publication and the final token commit remain with this lane.
 type v41LayerStepWork struct {
-	layer   int
-	input   []float32
-	picks   []routePick
-	full    bool
-	scratch *v41ProjScratch
-	scalar  func() ([]float32, error)
-	finish  func([]float32) error
-	cleanup func()
-	closed  bool
+	layer              int
+	input              []float32
+	picks              []routePick
+	full               bool
+	roleAttentionState v41RoleAttentionState
+	scratch            *v41ProjScratch
+	scalar             func() ([]float32, error)
+	finish             func([]float32) error
+	cleanup            func()
+	closed             bool
 	// publishKV commits this position's attention window row before the MoE
 	// finish, so a later position of the same session can attend to it while
 	// this position's experts are still pending. finish skips the commit once
@@ -82,7 +85,7 @@ func (w *v41LayerStepWork) complete(routed []float32) (err error) {
 // The new schedule is confined to the already-selected multi-session caller;
 // single-lane wrappers execute their unchanged scalar/fused continuation.
 func (m *Model) v41LayerCohortEnabled(lanes []v41StepCohortLane, txs []*v41StepTransaction) bool {
-	if v41RoutedIDOptedIn() || os.Getenv(v41LayerExpertBatchEnv) == "0" {
+	if v41RoutedIDOptedIn() {
 		return false
 	}
 	full, err := v41ForwardGeometry(m.Cfg)
@@ -90,16 +93,17 @@ func (m *Model) v41LayerCohortEnabled(lanes []v41StepCohortLane, txs []*v41StepT
 		return false
 	}
 	active := 0
+	experts := os.Getenv(v41LayerExpertBatchEnv) != "0"
 	for lane, tx := range txs {
 		if tx == nil || tx.closed {
 			continue
 		}
 		if lanes[lane].session.v41State().routedExpert == nil {
-			return false
+			experts = false
 		}
 		active++
 	}
-	return active >= 2 && active <= 4
+	return active >= 2 && active <= 4 && (experts || m.v41GroupedDecodeEnabled(lanes, txs))
 }
 
 type v41LayerExpertGroup struct {
@@ -147,13 +151,22 @@ func finishV41LayerExpertGroups(groups *[]v41LayerExpertGroup, err *error, recei
 // peer preparation fault can be observed relative to another lane's experts;
 // each lane's arithmetic order, journal, cancellation and commit remain private.
 func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41StepCohortLane, txs []*v41StepTransaction, results []v41StepCohortResult, receipt *v41StepCohortReceipt, cancelled func(int) bool) (err error) {
+	var attention *[4]v41LayerAttentionSuspension
+	if m.v41GroupedDecodeEnabled(lanes, txs) {
+		attention = new([4]v41LayerAttentionSuspension)
+	}
 	active := make([]int, 0, len(lanes))
 	for lane, tx := range txs {
 		if tx == nil || tx.closed || cancelled(lane) {
 			continue
 		}
 		receipt.atLane(lane)
-		if err = tx.prepareLayer(); err != nil {
+		if attention != nil {
+			err = tx.prepareAttention(&attention[lane])
+		} else {
+			err = tx.prepareLayer()
+		}
+		if err != nil {
 			results[lane].err = err
 			return err
 		}
@@ -171,6 +184,11 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 	if len(active) == 0 {
 		return nil
 	}
+	if attention != nil {
+		if err := m.resumeV41CohortAttention(scope, lanes, txs, active, results, receipt); err != nil {
+			return err
+		}
+	}
 
 	fallback := func() error {
 		for _, lane := range active {
@@ -187,6 +205,15 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 	}
 	if len(active) < 2 {
 		return fallback()
+	}
+	// Dense attention batching does not imply routed-expert support.
+	if os.Getenv(v41LayerExpertBatchEnv) == "0" {
+		return fallback()
+	}
+	for _, lane := range active {
+		if lanes[lane].session.v41State().routedExpert == nil {
+			return fallback()
+		}
 	}
 	first := txs[active[0]].pendingLayer
 	if !first.full || len(first.picks) == 0 {
@@ -339,4 +366,141 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 	}()
 	complete = true
 	return err
+}
+
+const v41GroupedDecodeEnv = "FAK_V41_GROUPED_DECODE"
+
+// This opt-in selects no work by itself. The synchronous cohort owner performs
+// exact model/session/geometry and per-weight admission before device selection.
+func (m *Model) v41GroupedDecodeEnabled(lanes []v41StepCohortLane, txs []*v41StepTransaction) bool {
+	if os.Getenv(v41GroupedDecodeEnv) != "1" || len(lanes) > 4 || m == nil || m.lora != nil || m.prism != nil {
+		return false
+	}
+	active := 0
+	for i, tx := range txs {
+		if tx == nil || tx.closed {
+			continue
+		}
+		if i >= len(lanes) || lanes[i].session == nil {
+			return false
+		}
+		s := lanes[i].session
+		if s.M != m || s.Backend == nil {
+			return false
+		}
+		if grouped, publication := v41GroupedDecodeBindings(s); grouped == nil || publication == nil {
+			return false
+		}
+		if _, ok := s.Backend.(compute.V41RowLogBackend); !ok {
+			return false
+		}
+		if _, ok := s.Backend.(compute.V41BF16PublishBackend); !ok {
+			return false
+		}
+		if _, ok := s.Backend.(compute.V41DeferredStatusBackend); !ok {
+			return false
+		}
+		active++
+	}
+	return active == 2 || active == 4
+}
+
+func (m *Model) resumeV41CohortAttention(scope *backendExecutionScope, lanes []v41StepCohortLane, txs []*v41StepTransaction, active []int, results []v41StepCohortResult, receipt *v41StepCohortReceipt) error {
+	var output [][]float32
+	grouped := false
+	if len(active) == 2 || len(active) == 4 {
+		var rows [4]v41GroupedOutputCohortRow
+		for row, lane := range active {
+			rows[row] = v41GroupedOutputCohortRow{Lane: lane, Session: lanes[lane].session, Input: txs[lane].pendingAttention.input()}
+		}
+		receipt.atLane(-1)
+		var groupedBindings [4]*v41GroupedOutputBinding
+		var publications [4]*v41BF16PublicationBinding
+		canonical := true
+		for row, lane := range active {
+			groupedBindings[row], publications[row] = v41GroupedDecodeBindings(lanes[lane].session)
+			a := txs[lane].pendingAttention
+			scratch := a.plainScratch()
+			if groupedBindings[row] == nil || publications[row] == nil || scratch == nil || scratch.groupedOutput != groupedBindings[row] || scratch.gatherOps != lanes[lane].session.v41Forward.gatherOps {
+				canonical = false
+			}
+		}
+		var owner *v41GroupedOutputCohort
+		outcome := v41ProjectionDeclined
+		var err error
+		if canonical {
+			owner, outcome, err = prepareV41GroupedOutputCohort(scope, txs[active[0]].nextLayer, rows[:len(active)])
+		}
+		if err == nil && owner != nil {
+			output, outcome, err = owner.Run()
+			if err == nil {
+				for row, lane := range active {
+					g, p := v41GroupedDecodeBindings(lanes[lane].session)
+					scratch := txs[lane].pendingAttention.plainScratch()
+					if g != groupedBindings[row] || p != publications[row] || scratch.groupedOutput != g || scratch.gatherOps != lanes[lane].session.v41Forward.gatherOps {
+						err = fmt.Errorf("%w: grouped decode projection provenance changed", ErrV41ForwardStage)
+						if owner.selected {
+							err = owner.retire(err)
+						}
+						output = nil
+						break
+					}
+				}
+			}
+		}
+		if err != nil {
+			for _, lane := range active {
+				results[lane].err = err
+			}
+			return err
+		}
+		grouped = outcome == v41ProjectionHandled
+		if grouped && len(output) != len(active) {
+			err = errV41ProjectionResult
+			if owner != nil {
+				err = owner.retire(err)
+			}
+			for _, lane := range active {
+				results[lane].err = err
+			}
+			return err
+		}
+		if !grouped && outcome != v41ProjectionDeclined {
+			return errV41ProjectionResult
+		}
+	}
+	// The ordered participant set is fixed through Run and resume. Cancellation
+	// is observed again by the existing expert/finish path, which rolls back
+	// that lane before commit. A selected failure returned above never resumes.
+	for row, lane := range active {
+		receipt.atLane(lane)
+		var projected []float32
+		if grouped {
+			projected = output[row]
+		}
+		if err := txs[lane].resumeAttention(projected, grouped); err != nil {
+			results[lane].err = err
+			return err
+		}
+	}
+	return nil
+}
+
+// Both publications skipped by panel composition must be the canonical owner-
+// bound operations. Legacy wrappers, custom callbacks and device-only wrappers
+// deliberately carry no grouped authority; they retain their scalar behavior.
+func v41GroupedDecodeBindings(s *Session) (*v41GroupedOutputBinding, *v41BF16PublicationBinding) {
+	if s == nil || s.v41Forward == nil || s.v41Forward.callbackOwner != s {
+		return nil, nil
+	}
+	st := s.v41Forward
+	grouped, ok := st.groupedOutput.(*v41GroupedOutputBinding)
+	if !ok || !grouped.canonical(s) || st.gatherOps == nil || st.gatherOps.owner != s {
+		return nil, nil
+	}
+	publication := st.gatherOps.bf16Publish
+	if publication == nil || publication.ordinary == nil || publication.core == nil || publication.owner != s || publication.model != s.M || publication.backend != s.Backend {
+		return nil, nil
+	}
+	return grouped, publication
 }

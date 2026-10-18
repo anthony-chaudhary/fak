@@ -59,8 +59,18 @@ func dflash2TestFixture(t *testing.T) ([]byte, dflash2WeightContract) {
 func TestDFlash2WeightsStockContract(t *testing.T) {
 	t.Parallel()
 	c := qwen38DFlash2WeightContract()
-	if len(c.shapes) != 81 || c.fileBytes != 3848817896 || len(c.sha256) != 64 {
-		t.Fatalf("unexpected stock contract: tensors=%d bytes=%d", len(c.shapes), c.fileBytes)
+	if len(c.shapes) != 81 { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned five-layer artifact requires 6 global plus 5*15 layer tensors
+		t.Fatalf("unexpected stock tensor count=%d", len(c.shapes))
+	}
+	if c.fileBytes != 3848817896 {
+		t.Fatalf("unexpected stock file bytes=%d", c.fileBytes)
+	}
+	digest, err := hex.DecodeString(c.sha256)
+	if err != nil || len(digest) != sha256.Size {
+		t.Fatalf("stock digest is not a SHA-256 encoding: %q (%v)", c.sha256, err)
+	}
+	if c.sha256 != "67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c" {
+		t.Fatalf("stock digest differs from the pinned artifact: %s", c.sha256)
 	}
 	var total int64
 	for _, shape := range c.shapes {
@@ -224,7 +234,7 @@ func TestDFlash2WeightsRejectSizeHashAndHeaderBudget(t *testing.T) {
 	var calls int
 	reader := dflash2TestReaderAt(func(p []byte, off int64) (int, error) {
 		calls++
-		if len(p) != 8 || off != 0 {
+		if len(p) != binary.Size(uint64(0)) || off != 0 {
 			t.Fatalf("read beyond header-length budget: len=%d off=%d", len(p), off)
 		}
 		binary.LittleEndian.PutUint64(p, dflash2MaxHeaderBytes+1)

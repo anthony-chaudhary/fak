@@ -4553,6 +4553,36 @@
           "category": "incidental",
           "reason": "Prometheus observation positioned under gateway-engine as gateway-device-transient-pool-count; the gateway prefix matches the gate substring, but this metric makes no admission, refusal, or policy decision.",
           "token": "fak_gateway_device_transient_pool_buffers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation constant guardRouterKeyEnv names the already-positioned FAK_GATEWAY_KEY credential-holder environment variable (x-gateway-engine-fakgatewaykey) for guarded router launches. It is distinct from FAK_GUARD_API_KEY_ENV, which stores another credential variable name, and adds no guard or gate policy.",
+          "token": "guardrouterkeyenv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constant naming the existing OpenCode fak provider configuration key; a wire identifier for the established guarded provider, not a new guard or policy concept.",
+          "token": "guardOpenCodeLegacyProviderID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private constant naming the existing OpenCode fak-router provider configuration key; a wire identifier for the established router-backed provider, not a new guard or policy concept.",
+          "token": "guardOpenCodeRouterProviderID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private string parser recognizing the two existing OpenCode provider prefixes while installing guarded configuration; no independent guard mechanism or public policy capability.",
+          "token": "guardOpenCodeProviderPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private string normalization helper stripping an already-recognized OpenCode provider prefix; it supports existing guarded configuration without introducing a new guard concept.",
+          "token": "guardOpenCodeModelName"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private argv composition helper combining the existing OpenCode standalone-mode and model-pinning helpers; it is not an independent guard, policy, or execution owner.",
+          "token": "guardOpenCodeCommand"
         }
       ],
       "exclude": [
@@ -4880,6 +4910,11 @@
         "guardNormalizeRestatement",
         "guardOAuthKeychainSource",
         "guardOAuthKeychainSourceName",
+        "guardOpenCodeCommand",
+        "guardOpenCodeLegacyProviderID",
+        "guardOpenCodeModelName",
+        "guardOpenCodeProviderPrefix",
+        "guardOpenCodeRouterProviderID",
         "guardOperatorQuestionEscalationSink",
         "guardOperatorQuestionEscalationSlackSource",
         "guardOperatorQuestionEscalationSlackText",
@@ -4944,6 +4979,7 @@
         "guardinjectedenv",
         "guardoperatordirectedeffectivemode",
         "guardrails",
+        "guardrouterkeyenv",
         "guards",
         "guardsessiontempdir",
         "guardskewbuildwarning",

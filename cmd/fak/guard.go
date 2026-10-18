@@ -1317,7 +1317,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		opencodeEnv, opencodeInstall = installGuardOpenCodeConfig(launchPlan.executableCommand(), gwURL, opencodeModel, os.Getenv, opencodeLimits)
 		injected = append(injected, opencodeEnv...)
 		if opencodeInstall.Applied {
-			command = guardOpenCodeStandaloneCommand(command)
+			command = opencodeInstall.Command
 			launchPlan = launchPlan.withExecutableCommand(command)
 		}
 	}

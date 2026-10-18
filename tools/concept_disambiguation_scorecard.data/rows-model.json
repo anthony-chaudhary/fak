@@ -268,10 +268,309 @@
       "definition": "Synchronous cold plain attention dispatch through borrowed rows with original flat reconstruction when dispatch guards change.",
       "distinction": "Timed dispatch and guard recheck rather than pre-dispatch borrowing predicate.",
       "distinct_from": [
-        "v41coldplainattentioncanborrow"
+        "v41coldplainattentioncanborrow",
+        "v41sparseattentionsinkchecked"
       ],
       "aliases": [],
       "grounding": "v41ColdPlainAttentionSink",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41sparseattentionsinkchecked",
+      "canonical": "v41SparseAttentionSinkChecked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Synchronous sparse sink contraction over an already validated flat or split-row host view, preserving arithmetic order without flattening the cold KV bank.",
+      "distinction": "Unlike v41ColdPlainAttentionSink, which chooses and dispatches a contiguous plain-attention window, this contracts selected sparse rows only after its caller validates every original row and canonical index.",
+      "distinct_from": [
+        "v41coldplainattentionsink"
+      ],
+      "aliases": [],
+      "grounding": "v41SparseAttentionSinkChecked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentioncontinuation",
+      "canonical": "v41RoleAttentionContinuation",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private one-lane suspended source or shared-reader attention operation retaining its output-projection input and one-shot resident cleanup until resume or abandon.",
+      "distinction": "Unlike v41PlainAttentionContinuation, this resumes a source or shared-reader role whose registry publication remains journaled by the caller; it is not a cross-request cohort, transaction journal, or persistent KV owner.",
+      "distinct_from": [
+        "v41plainattentioncontinuation",
+        "v41roleattentionstate",
+        "preparev41roleattention",
+        "v41layerattentionsuspension"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionContinuation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionstate",
+      "canonical": "v41RoleAttentionState",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Shared one-shot lifecycle discriminator for a role-attention continuation: pending, resuming, transferred or closed, stored in its existing layer-work holder.",
+      "distinction": "Unlike v41RoleAttentionContinuation, this is only the lifecycle discriminator shared by copied continuation values; it owns no tensors, callback, transaction or persistent KV state.",
+      "distinct_from": [
+        "v41roleattentioncontinuation",
+        "roleattentionstate",
+        "v41roleattentionpending",
+        "v41roleattentionresuming",
+        "v41roleattentiontransferred",
+        "v41roleattentionclosed"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "preparev41roleattention",
+      "canonical": "prepareV41RoleAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Constructs a source or shared-reader attention continuation after attention contraction and before output projection, leaving registry rollback to the caller transaction.",
+      "distinction": "Unlike v41RoleAttentionContinuation, this is the preparation operation that returns the suspended holder; it neither resumes output projection nor grants batching or device capability.",
+      "distinct_from": [
+        "v41roleattentioncontinuation"
+      ],
+      "aliases": [],
+      "grounding": "prepareV41RoleAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "roleattentionstate",
+      "canonical": "roleAttentionState",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle field in the shared layer-work holder, consulted by every copied continuation before resume or cleanup.",
+      "distinction": "Unlike v41RoleAttentionState, this is the per-work stored instance of that discriminator, not the enum type or a separate ownership token.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "roleAttentionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionpending",
+      "canonical": "v41RoleAttentionPending",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value before a suspended continuation begins its single resume.",
+      "distinction": "Unlike v41RoleAttentionState, this is its pending value; it allows the one resume attempt and has not transferred resident cleanup.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionPending",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionresuming",
+      "canonical": "v41RoleAttentionResuming",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value set before executing the one resume attempt.",
+      "distinction": "Unlike v41RoleAttentionState, this is its in-progress value; reentrant resume is rejected and failure still requires cleanup.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionResuming",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentiontransferred",
+      "canonical": "v41RoleAttentionTransferred",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value after successful resume transfers resident cleanup to returned layer work.",
+      "distinction": "Unlike v41RoleAttentionState, this is its successful transfer value; continuation close must no longer abort the transferred resident.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionTransferred",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41roleattentionclosed",
+      "canonical": "v41RoleAttentionClosed",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The role-attention lifecycle value after abandon or failed resume closes the suspended operation.",
+      "distinction": "Unlike v41RoleAttentionState, this is its terminal closed value; repeated close is idempotent and resume is rejected.",
+      "distinct_from": [
+        "v41roleattentionstate"
+      ],
+      "aliases": [],
+      "grounding": "v41RoleAttentionClosed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "v41layerattentionsuspension",
+      "canonical": "v41LayerAttentionSuspension",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Caller-held one-lane storage selecting a concrete plain or source/reader attention continuation; the transaction owns abandonment until successful resume transfers layer work.",
+      "distinction": "Unlike v41RoleAttentionContinuation, this dispatch holder can contain either plain or role attention; the concrete holder retains shared lifecycle ownership and this wrapper grants no cross-request or device authority.",
+      "distinct_from": [
+        "v41roleattentioncontinuation",
+        "prepareattention",
+        "resumev41cohortattention",
+        "pendingattention"
+      ],
+      "aliases": [],
+      "grounding": "v41LayerAttentionSuspension",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "prepareattention",
+      "canonical": "prepareAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Transaction method that registers caller-held attention suspension storage and prepares exactly the next layer, aborting incomplete preparation.",
+      "distinction": "Unlike v41LayerAttentionSuspension, this is the transaction admission and preparation operation; it rejects existing pending work and does not resume projection or commit the transaction.",
+      "distinct_from": [
+        "v41layerattentionsuspension",
+        "resumeattention",
+        "preparev41layerattention"
+      ],
+      "aliases": [],
+      "grounding": "prepareAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "resumev41cohortattention",
+      "canonical": "resumeV41CohortAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Coordinates projection and ordered resume of active one-lane attention suspensions, selecting grouped output only for two or four canonically bound participants within the live owner scope.",
+      "distinction": "Unlike v41LayerAttentionSuspension, this coordinates multiple lane holders; it uses scalar fallback only for a capability decline before activation/arithmetic selection; selected failures never replay scalar.",
+      "distinct_from": [
+        "v41layerattentionsuspension"
+      ],
+      "aliases": [],
+      "grounding": "resumeV41CohortAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "pendingattention",
+      "canonical": "pendingAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Transaction field referencing its currently suspended one-lane attention holder, cleared on successful resume or abort.",
+      "distinction": "Unlike v41LayerAttentionSuspension, this is the transaction reference that tracks abandonment responsibility, not independent suspension storage or persistent KV ownership.",
+      "distinct_from": [
+        "v41layerattentionsuspension"
+      ],
+      "aliases": [],
+      "grounding": "pendingAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "resumeattention",
+      "canonical": "resumeAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Transaction method that resumes suspended attention using supplied grouped projection or its scalar projector and transfers successful output into pending layer work.",
+      "distinction": "Unlike prepareAttention, this consumes an existing suspension; failures abort incomplete work and successful resume clears the pending-attention reference without committing the layer.",
+      "distinct_from": [
+        "prepareattention"
+      ],
+      "aliases": [],
+      "grounding": "resumeAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "preparev41layerattention",
+      "canonical": "prepareV41LayerAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Model operation that checks layer rows and retained state then prepares either plain or source/reader attention into caller-provided suspension storage.",
+      "distinction": "Unlike prepareAttention, this chooses and constructs the concrete model continuation; transaction admission, rollback and pending-reference ownership remain with its caller.",
+      "distinct_from": [
+        "prepareattention"
+      ],
+      "aliases": [],
+      "grounding": "prepareV41LayerAttention",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

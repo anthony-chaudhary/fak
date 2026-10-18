@@ -169,13 +169,47 @@ func (s *Session) PrefixSnapshotHostOnly() (*PrefixSnapshot, error) {
 	return s.prefixSnapshot(false)
 }
 
-func (s *Session) prefixSnapshot(readResidentGDN bool) (out *PrefixSnapshot, err error) {
-	scope := s.beginBackendExecution()
-	defer scope.finishError(&err)
-	return s.prefixSnapshotOwned(scope, readResidentGDN)
+func (s *Session) prefixSnapshot(readResidentGDN bool) (*PrefixSnapshot, error) {
+	return acquireCompletePrefixSnapshot(s.Backend, func(scope *backendExecutionScope) (*PrefixSnapshot, error) {
+		scope.bind(s)
+		return s.prefixSnapshotOwned(scope, readResidentGDN)
+	})
+}
+
+// A returned candidate stays owned here until execution-scope retirement also
+// returns normally. Failure cleanup runs after that scope releases its mutex.
+func acquireCompletePrefixSnapshot(backend compute.Backend, body func(*backendExecutionScope) (*PrefixSnapshot, error)) (out *PrefixSnapshot, err error) {
+	var candidate *PrefixSnapshot
+	published := false
+	defer func() {
+		if !published && candidate != nil {
+			suppressBackendCleanupPanic(candidate.Close)
+		}
+	}()
+	func() {
+		scope := beginBackendExecution(backend)
+		complete := false
+		defer scope.finishCompleted(&complete)
+		candidate, err = body(scope)
+		complete = err == nil
+	}()
+	if err != nil {
+		return nil, err
+	}
+	published = true
+	return candidate, nil
 }
 
 func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResidentGDN bool) (*PrefixSnapshot, error) {
+	var out *PrefixSnapshot
+	published := false
+	// Registered before source locks, so cleanup never invokes a backend while
+	// the source geometry or recurrent mutex is held.
+	defer func() {
+		if !published && out != nil {
+			suppressBackendCleanupPanic(func() { out.closeOwned(scope) })
+		}
+	}()
 	if s != nil && s.M.v41EPRequested() {
 		return nil, fmt.Errorf("%w: distributed prefix snapshot is not supported", ErrV41ExpertParallel)
 	}
@@ -191,7 +225,7 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 		// halKV plus recurrent tensors.
 		tokens = s.halKV.Len()
 	}
-	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens, DenseGPULayers: s.DenseGPULayers, GPULayers: s.GPULayers, ExecutionPolicy: s.executionPolicy}
+	out = &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens, DenseGPULayers: s.DenseGPULayers, GPULayers: s.GPULayers, ExecutionPolicy: s.executionPolicy}
 	s.targetHiddenMu.RLock()
 	out.captureTargetHidden = s.captureTargetHidden
 	out.targetHidden = cloneTargetHidden(s.targetHidden)
@@ -205,6 +239,11 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	// session has one; a session that never ran a V4.1 forward keeps the absent
 	// contract.
 	out.v41 = captureV41ForwardSnapshotWithPublications(s.v41Forward, true)
+	if out.v41 == nil && s.M != nil && s.M.Cfg.IsDeepSeekV41() {
+		// Preserve absence explicitly: Restore must clear any target continuation,
+		// rather than replacing generic KV while leaving stale V4.1 history live.
+		out.v41 = &v41ForwardSnapshot{}
+	}
 	if s.v41Forward != nil && s.v41Forward.forwardCoverage != nil {
 		coverage := *s.v41Forward.forwardCoverage
 		out.coverage = &coverage
@@ -228,6 +267,7 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 		}
 	}
 	if s.Backend == nil && !readResidentGDN {
+		published = true
 		return out, nil
 	}
 	if s.Backend == nil {
@@ -241,14 +281,13 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 		if s.qwen35GDNOwnersHoldLiveState() {
 			snapshots, layer, stage, err := s.snapshotQwen35GDNOwners()
 			if err != nil {
-				out.closeOwned(scope)
 				return nil, fmt.Errorf("model: prefix snapshot cannot read resident GDN layer %d (%s): %w", layer, stage, err)
 			}
 			writeQwen35GDNSnapshotsToHost(s.M.Cfg, out.Cache, snapshots)
 		} else if s.qwen35HAL != nil && s.qwen35HAL.sequenceFailure != nil {
-			out.closeOwned(scope)
 			return nil, fmt.Errorf("model: cannot snapshot prefix after resident GDN failure: %w", s.qwen35HAL.sequenceFailure)
 		}
+		published = true
 		return out, nil
 	}
 	if s.halKV == nil {
@@ -258,9 +297,9 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	var err error
 	out.qwen35, err = cloneQwen35HALState(s.qwen35HAL, s.Backend)
 	if err != nil {
-		out.closeOwned(scope)
 		return nil, err
 	}
+	published = true
 	return out, nil
 }
 
@@ -289,9 +328,7 @@ func (p *PrefixSnapshot) Clone() (out *PrefixSnapshot, err error) {
 	if p == nil {
 		return nil, nil
 	}
-	scope := beginBackendExecution(p.Backend)
-	defer scope.finishError(&err)
-	return p.cloneOwned(scope)
+	return acquireCompletePrefixSnapshot(p.Backend, p.cloneOwned)
 }
 
 // CloneForRestore keeps sealed V4.1 publication rows immutable and shared while
@@ -301,9 +338,9 @@ func (p *PrefixSnapshot) CloneForRestore() (out *PrefixSnapshot, err error) {
 	if p == nil {
 		return nil, nil
 	}
-	scope := beginBackendExecution(p.Backend)
-	defer scope.finishError(&err)
-	return p.cloneOwnedWithPublications(scope, true)
+	return acquireCompletePrefixSnapshot(p.Backend, func(scope *backendExecutionScope) (*PrefixSnapshot, error) {
+		return p.cloneOwnedWithPublications(scope, true)
+	})
 }
 
 func (p *PrefixSnapshot) cloneOwned(scope *backendExecutionScope) (*PrefixSnapshot, error) {
@@ -311,48 +348,62 @@ func (p *PrefixSnapshot) cloneOwned(scope *backendExecutionScope) (*PrefixSnapsh
 }
 
 func (p *PrefixSnapshot) cloneOwnedWithPublications(scope *backendExecutionScope, shareSealed bool) (*PrefixSnapshot, error) {
+	var out *PrefixSnapshot
+	published := false
+	defer func() {
+		if !published && out != nil {
+			suppressBackendCleanupPanic(func() { out.closeOwned(scope) })
+		}
+	}()
 	if p == nil {
 		return nil, nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	started := prefixProfileStart()
-	defer func() { emitPrefixProfile(started, "device_clone", "complete", p, nil) }()
-	if p.Cache == nil {
-		return nil, nil
-	}
-	out := &PrefixSnapshot{
-		owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens, ExecutionPolicy: p.ExecutionPolicy,
-		DenseGPULayers: p.DenseGPULayers, GPULayers: p.GPULayers,
-		captureTargetHidden: p.captureTargetHidden,
-		targetHidden:        cloneTargetHidden(p.targetHidden),
-		targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
-		v41:                 p.v41.cloneWithPublications(shareSealed),
-		// A backend identity is copied by reference (it names the device the state
-		// belongs to, never device memory this snapshot owns), so a clone keeps the
-		// same backend-prefix contract as its source.
-		v41DeviceIdentity:    p.v41DeviceIdentity,
-		hasV41DeviceIdentity: p.hasV41DeviceIdentity,
-		v41Tokens:            p.v41Tokens,
-		hasV41Tokens:         p.hasV41Tokens,
-	}
-	if p.coverage != nil {
-		coverage := *p.coverage
-		out.coverage = &coverage
-	}
-	if p.Backend == nil {
-		return out, nil
-	}
-	if p.halKV == nil {
-		return nil, fmt.Errorf("model: device prefix snapshot has no KV store")
-	}
-	out.halKV = p.halKV.Clone()
-	var err error
-	out.qwen35, err = cloneQwen35HALState(p.qwen35, p.Backend)
+	err := func() error {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		started := prefixProfileStart()
+		defer func() { emitPrefixProfile(started, "device_clone", "complete", p, nil) }()
+		if p.Cache == nil {
+			return nil
+		}
+		out = &PrefixSnapshot{
+			owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens, ExecutionPolicy: p.ExecutionPolicy,
+			DenseGPULayers: p.DenseGPULayers, GPULayers: p.GPULayers,
+			captureTargetHidden: p.captureTargetHidden,
+			targetHidden:        cloneTargetHidden(p.targetHidden),
+			targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
+			v41:                 p.v41.cloneWithPublications(shareSealed),
+			// A backend identity is copied by reference (it names the device the state
+			// belongs to, never device memory this snapshot owns), so a clone keeps the
+			// same backend-prefix contract as its source.
+			v41DeviceIdentity:    p.v41DeviceIdentity,
+			hasV41DeviceIdentity: p.hasV41DeviceIdentity,
+			v41Tokens:            p.v41Tokens,
+			hasV41Tokens:         p.hasV41Tokens,
+		}
+		if p.coverage != nil {
+			coverage := *p.coverage
+			out.coverage = &coverage
+		}
+		if p.Backend == nil {
+			return nil
+		}
+		if p.halKV == nil {
+			return fmt.Errorf("model: device prefix snapshot has no KV store")
+		}
+		out.halKV = p.halKV.Clone()
+		var err error
+		out.qwen35, err = cloneQwen35HALState(p.qwen35, p.Backend)
+		if err != nil {
+			return err
+		}
+		return nil
+	}()
 	if err != nil {
-		out.closeOwned(scope)
 		return nil, err
 	}
+	// The source lock and deferred profile callback have both completed.
+	published = true
 	return out, nil
 }
 
@@ -434,10 +485,24 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 		if p.halKV == nil {
 			return fmt.Errorf("model: device prefix snapshot missing KV")
 		}
-		if s.halKV != nil {
-			s.halKV.Free()
-		}
-		s.closeQwen35HALState()
+		// Detach attempted releases before callbacks. A Free may complete and
+		// then panic or Goexit; recovery must never retry that old handle.
+		oldKV, oldRecurrent := s.halKV, s.qwen35HAL
+		s.halKV, s.qwen35HAL = nil, nil
+		s.qwen35MetalStateIdentity = nil
+		runBackendSiblingCleanup(
+			func() {
+				if oldKV != nil {
+					oldKV.Free()
+				}
+			},
+			func() {
+				if oldRecurrent != nil {
+					oldRecurrent.free(s.Backend)
+				}
+			},
+		)
+		// The source still owns both replacements until all old cleanup returns.
 		s.halKV, s.halLineage, s.qwen35HAL = p.halKV, p.halLineage, p.qwen35
 		p.halKV, p.qwen35 = nil, nil
 		p.halLineage = tokenLineage{}
@@ -492,8 +557,10 @@ func (p *PrefixSnapshot) Close() {
 		return
 	}
 	scope := beginBackendExecution(p.Backend)
-	defer scope.finish()
+	complete := false
+	defer scope.finishCompleted(&complete)
 	p.closeOwned(scope)
+	complete = true
 }
 
 func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
@@ -512,12 +579,18 @@ func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 	p.v41, p.coverage = nil, nil
 	p.closed = true
 	p.mu.Unlock()
-	if kv != nil {
-		kv.Free()
-	}
-	if recurrent != nil {
-		recurrent.free(backend)
-	}
+	runBackendSiblingCleanup(
+		func() {
+			if kv != nil {
+				kv.Free()
+			}
+		},
+		func() {
+			if recurrent != nil {
+				recurrent.free(backend)
+			}
+		},
+	)
 }
 
 // snapshotResidentPositions reports a restore target's resident position count

@@ -113,6 +113,13 @@ func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDi
 		} else {
 			out, err = v41SelectedSharedAttention(layer, request, attend)
 		}
+	} else if attend == nil {
+		// The full combined validation above has checked q, sink, scale, every
+		// original row (including future rows), and every canonical ID. The local
+		// masked indices are in range. This host-only interval calls no user code,
+		// so the checked contraction can read these same rows without flattening
+		// the entire bank or scanning its immutable bytes a second time.
+		out, err = v41SparseAttentionSinkChecked(q, sink, idx, opt, v41SparseSinkRows{window: window, compressed: compressed})
 	} else {
 		flat := make([]float32, 0, kvCount)
 		for _, stream := range [][][]float32{window, compressed} {

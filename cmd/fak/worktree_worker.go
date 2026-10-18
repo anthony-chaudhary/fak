@@ -1096,6 +1096,11 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	if err := fs.Parse(argv); err != nil {
 		return returnEarly(workerworktree.Result{OK: false, Reason: err.Error()}, 2)
 	}
+	if fs.NArg() > 0 {
+		return returnEarly(workerworktree.Result{OK: false, Code: "LAND_STRAY_ARGS",
+			Reason: "unexpected positional arguments; pass one --paths flag per path",
+			Detail: strings.Join(fs.Args(), " ")}, 2)
+	}
 	selectedSymptomTests := normalizeWorkerLandStrings([]string(symptomTests))
 	if len(symptomTests) > 0 && len(selectedSymptomTests) == 0 {
 		return returnEarly(workerworktree.Result{OK: false, Code: "SYMPTOM_SELECTOR_INVALID", Reason: "--symptom-test requires a non-empty Go test-name regex"}, 2)

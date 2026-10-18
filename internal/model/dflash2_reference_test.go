@@ -53,8 +53,17 @@ func dflash2TinyWeightsWithValue(t *testing.T, g dflash2Geometry, override func(
 			shapes[fmt.Sprintf("layers.%d.%s", i, name)] = shape
 		}
 	}
-	if len(shapes) != 81 {
+	if len(shapes) != 81 { //boundarylint:ignore CHANGE_DETECTOR_TEST pinned five-layer artifact requires 6 global plus 5*15 layer tensors
 		t.Fatal("fixture must contain all81 tensors")
+	}
+	stockShapes := qwen38DFlash2WeightContract().shapes
+	if len(shapes) != len(stockShapes) {
+		t.Fatalf("fixture tensor count=%d, stock contract=%d", len(shapes), len(stockShapes))
+	}
+	for name := range stockShapes {
+		if _, ok := shapes[name]; !ok {
+			t.Fatalf("fixture is missing stock tensor %q", name)
+		}
 	}
 	names := make([]string, 0, len(shapes))
 	for name := range shapes {
@@ -642,9 +651,10 @@ func TestDFlash2ReferenceFullEightTokenAcceptance(t *testing.T) {
 	want := plain.Prefill(prompt)
 	normalizeSnapshotForTest(t, target)
 	normalizeSnapshotForTest(t, plain)
-	tokens, after, err := f.GreedyRound(context.Background(), before, 8)
-	if err != nil || len(tokens) != 8 {
-		t.Fatalf("full acceptance tokens=%v err=%v", tokens, err)
+	const requestedTokens = 8
+	tokens, after, err := f.GreedyRound(context.Background(), before, requestedTokens)
+	if err != nil || len(tokens) != requestedTokens {
+		t.Fatalf("full acceptance tokens=%v want=%d err=%v", tokens, requestedTokens, err)
 	}
 	for _, token := range tokens {
 		if token != 0 || token != argmaxF32(want) {
@@ -654,7 +664,7 @@ func TestDFlash2ReferenceFullEightTokenAcceptance(t *testing.T) {
 	}
 	assertFloat32BitsEqual(t, "full-accept boundary", want, after)
 	assertQwen35MTPTargetStateEqual(t, target, plain)
-	if f.nextPosition != len(prompt)+8 {
+	if f.nextPosition != len(prompt)+requestedTokens {
 		t.Fatal("full acceptance did not commit all rows")
 	}
 	if len(f.cache[0].keys) != (g.window-1)*g.kvHeads*g.headDim {

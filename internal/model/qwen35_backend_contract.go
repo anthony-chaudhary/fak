@@ -453,13 +453,20 @@ func (s *Session) WholeSequenceUnsupportedReason() error {
 	}
 }
 
-// SequencePosition reports the session's current sequence position: the HAL KV
+// SequencePosition reports V4.1 history at an owned between-call boundary, otherwise the HAL KV
 // length on a backend-selected session (the device path keeps its positions in
 // halKV), else the resident model cache length. It is the single position
 // authority the whole-token witness pairs around a decode Step.
 func (s *Session) SequencePosition() int {
 	if s == nil {
 		return 0
+	}
+	// V4.1 commits its history independently of the generic host/HAL KV stores.
+	// During forward this history may be provisional; this is not a concurrent
+	// or reentrant committed-state snapshot.
+	// This is the same position authority published by PrefixSnapshot.Tokens.
+	if s.v41Forward != nil {
+		return len(s.v41Forward.history)
 	}
 	if s.Backend != nil && s.halKV != nil {
 		return s.halKV.Len()

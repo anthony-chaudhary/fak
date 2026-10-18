@@ -163,7 +163,7 @@ type v41ForwardState struct {
 	// decline) preserves the historical host f32 down contraction byte-for-byte.
 	expertDown           v41ExpertDownFunc
 	projectionRoute      *v41ProjectionRouteBinding
-	groupedOutput        v41GroupedOutputFunc
+	groupedOutput        v41GroupedOutputRoute
 	engramProjection     v41EngramProjectionFunc
 	mhcProjection        v41MHCProjectionFunc
 	mhcFFNProjection     v41MHCProjectionFunc
@@ -912,7 +912,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.routedLayer = s.v41RoutedLayerFunc()
 		s.v41Forward.routedPrefill = nil
 		s.v41Forward.bindCanonicalDense(s.v41BindDenseProjection())
-		s.v41Forward.groupedOutput = s.v41GroupedOutputFunc()
+		s.v41Forward.groupedOutput = s.v41BindGroupedOutput()
 		s.v41Forward.engramProjection = s.v41EngramProjectionFunc()
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")

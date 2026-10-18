@@ -135,6 +135,12 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	if err != nil {
 		return nil, fmt.Errorf("model: snapshot Qwen3.8 MTP target transaction: %w", err)
 	}
+	published := false
+	defer func() {
+		if !published {
+			suppressBackendCleanupPanic(snapshot.Close)
+		}
+	}()
 	tx := &qwen35MTPTargetTransaction{
 		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
 		step: target.stepOwned, beforeHALStep: target.halStep, beforeHALWarm: target.halLogitsWarm,
@@ -169,6 +175,7 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	}
 	tx.receipt.Accounting.Setup = measuredSpeculativeCost(started)
 	tx.receipt.Accounting.KnownMemoryBytes = snapshot.ResidentBytes()
+	published = true
 	return tx, nil
 }
 
@@ -289,6 +296,15 @@ func (tx *qwen35MTPTargetTransaction) commitOwned(accepted int) (logits []float3
 	if err != nil {
 		return nil, tx.rollbackFailure("preserve commit rollback", err)
 	}
+	// The clone stays locally owned until tx.snapshot adopts it. Clear this
+	// handle before a cleanup callback, which may have freed before panicking.
+	defer func() {
+		if rollback != nil {
+			pending := rollback
+			rollback = nil
+			suppressBackendCleanupPanic(func() { pending.closeOwned(tx.target.backendExecutionScope) })
+		}
+	}()
 	if tx.receipt.Path == targetVerificationQwen38Path && tx.receipt.OneOperation {
 		// The cacheless Qwen3.8 whole-sequence operation never mutated the live
 		// target. Keep that exact state in place and retain the clone only as the
@@ -296,7 +312,9 @@ func (tx *qwen35MTPTargetTransaction) commitOwned(accepted int) (logits []float3
 		tx.receipt.Accounting.Rollback.Measured = true
 	} else {
 		if err := tx.restore(); err != nil {
-			rollback.closeOwned(tx.target.backendExecutionScope)
+			pending := rollback
+			rollback = nil
+			pending.closeOwned(tx.target.backendExecutionScope)
 			tx.finish()
 			return nil, err
 		}
@@ -305,6 +323,7 @@ func (tx *qwen35MTPTargetTransaction) commitOwned(accepted int) (logits []float3
 	// can undo every accepted token rather than exposing a partial prefix.
 	tx.snapshot.closeOwned(tx.target.backendExecutionScope)
 	tx.snapshot = rollback
+	rollback = nil // ownership transferred; local cleanup is now disarmed
 	logits = append([]float32(nil), tx.beforeLogits...)
 	started := time.Now()
 	// Synchronization includes accepted-prefix Step replay; TargetDecodeSteps

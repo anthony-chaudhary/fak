@@ -958,7 +958,7 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 		x = embedder.EmbeddingRow(embedTable, id)
 	}
 	featureResidualReleased := false
-	if s.qwen35TargetFeatureTxn != nil {
+	if s.qwen35TargetFeatureTxn != nil || s.qwen35TargetLayerCapture != nil {
 		defer func() {
 			if !featureResidualReleased {
 				if batch != nil {
@@ -1270,7 +1270,7 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 
 // tokenHAL preserves the public Step/Prefill contract: return the full host logits.
 func (s *Session) tokenHAL(id, pos int) []float32 {
-	if s.qwen35TargetFeatureTxn != nil {
+	if s.qwen35TargetFeatureTxn != nil || s.qwen35TargetLayerCapture != nil {
 		return s.tokenHALTargetFeatures(id, pos)
 	}
 	be := s.Backend

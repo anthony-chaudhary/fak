@@ -145,11 +145,16 @@ func (f *dflash2Reference) proposalReady(ctx context.Context) error {
 func (f *dflash2Reference) Close() error {
 	if f != nil && !f.closed {
 		f.closed = true
-		f.closeErr = f.w.Close()
-		f.target.M.releaseWeightSession()
+		w, m := f.w, f.target.M
 		f.cache = [5]dflash2ContextKV{}
 		f.prefixTokens = nil
 		f.target, f.w = nil, nil
+		f.closeErr = errors.New("dflash2: reference cleanup did not complete")
+		var closeErr error
+		// Keep the durable incomplete error until file close AND final model
+		// retirement return. Both releases run even if a sibling calls Goexit.
+		runBackendSiblingCleanup(func() { closeErr = w.Close() }, m.releaseWeightSession)
+		f.closeErr = closeErr
 	}
 	if f == nil {
 		return nil

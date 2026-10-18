@@ -292,12 +292,18 @@ func (r qwen35HALLayerRelease) free() {
 	if r.backend == nil {
 		return
 	}
-	if r.conv.Buf() != nil {
-		r.backend.Free(r.conv)
-	}
-	if r.recurrent.Buf() != nil {
-		r.backend.Free(r.recurrent)
-	}
+	runBackendSiblingCleanup(
+		func() {
+			if r.conv.Buf() != nil {
+				r.backend.Free(r.conv)
+			}
+		},
+		func() {
+			if r.recurrent.Buf() != nil {
+				r.backend.Free(r.recurrent)
+			}
+		},
+	)
 }
 
 // detach releases this handle's reference while the containing state is
@@ -332,37 +338,48 @@ func (l *qwen35HALLayerState) detach(backend compute.Backend) (qwen35HALLayerRel
 // mutableOwnerLocked returns an exclusive owner with owner.mu held. The
 // containing qwen35HALState.mu must already be held. A failed pair clone leaves
 // the shared owner and refcount unchanged.
-func (l *qwen35HALLayerState) mutableOwnerLocked(backend compute.Backend) (*qwen35HALLayerOwner, qwen35HALLayerRelease, error) {
+func (l *qwen35HALLayerState) mutableOwnerLocked(backend compute.Backend, partial *qwen35HALLayerRelease) (*qwen35HALLayerOwner, error) {
 	owner := l.ownerLocked(backend)
 	if owner == nil {
-		return nil, qwen35HALLayerRelease{}, fmt.Errorf("model: missing Qwen3.5 recurrent state")
+		return nil, fmt.Errorf("model: missing Qwen3.5 recurrent state")
 	}
 	owner.mu.Lock()
+	locked := owner
+	defer func() {
+		if locked != nil {
+			locked.mu.Unlock()
+		}
+	}()
 	if owner.refs == 1 {
-		return owner, qwen35HALLayerRelease{}, nil
+		locked = nil // transfer the held lock to the mutation caller
+		return owner, nil
 	}
 	cloner, ok := backend.(compute.TensorCloner)
 	if !ok {
-		owner.mu.Unlock()
-		return nil, qwen35HALLayerRelease{}, fmt.Errorf("model: backend %T cannot clone Qwen3.5 recurrent state", backend)
+		return nil, fmt.Errorf("model: backend %T cannot clone Qwen3.5 recurrent state", backend)
 	}
+	// Publish each returned partial copy before another callback can interrupt.
+	// The caller releases it after both this owner and its enclosing state unlock.
+	partial.backend = backend
 	conv, err := cloner.CloneTensor(owner.conv)
+	partial.conv = conv
 	if err != nil {
-		owner.mu.Unlock()
-		return nil, qwen35HALLayerRelease{}, fmt.Errorf("model: clone Qwen3.5 convolution state: %w", err)
+		return nil, fmt.Errorf("model: clone Qwen3.5 convolution state: %w", err)
 	}
 	recurrent, err := cloner.CloneTensor(owner.recurrent)
+	partial.recurrent = recurrent
 	if err != nil {
-		owner.mu.Unlock()
-		return nil, qwen35HALLayerRelease{backend: backend, conv: conv}, fmt.Errorf("model: clone Qwen3.5 recurrent state: %w", err)
+		return nil, fmt.Errorf("model: clone Qwen3.5 recurrent state: %w", err)
 	}
 	owner.refs--
 	owner.mu.Unlock()
+	locked = nil
 	owner = &qwen35HALLayerOwner{refs: 1, backend: backend, conv: conv, recurrent: recurrent}
 	owner.mu.Lock()
 	l.owner = owner
 	l.conv, l.recurrent = conv, recurrent
-	return owner, qwen35HALLayerRelease{}, nil
+	*partial = qwen35HALLayerRelease{} // physical ownership moved to the new pair
+	return owner, nil
 }
 
 // mutateLayer holds the handle/owner locks across the backend operation. That makes a
@@ -374,6 +391,14 @@ func (q *qwen35HALState) mutateLayer(
 	fn func(conv, recurrent compute.Tensor) (compute.Tensor, compute.Tensor, compute.Tensor, error),
 ) (output, nextConv, nextRecurrent compute.Tensor, err error) {
 	var cleanup qwen35HALLayerRelease
+	complete := false
+	defer func() {
+		if complete {
+			cleanup.free()
+		} else {
+			suppressBackendCleanupPanic(cleanup.free)
+		}
+	}()
 	output, nextConv, nextRecurrent, err = func() (compute.Tensor, compute.Tensor, compute.Tensor, error) {
 		q.mu.Lock()
 		defer q.mu.Unlock()
@@ -381,8 +406,7 @@ func (q *qwen35HALState) mutateLayer(
 			return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, fmt.Errorf("model: Qwen3.5 recurrent layer %d out of bounds", layer)
 		}
 		l := &q.layers[layer]
-		owner, deferred, mutableErr := l.mutableOwnerLocked(backend)
-		cleanup = deferred
+		owner, mutableErr := l.mutableOwnerLocked(backend, &cleanup)
 		if mutableErr != nil {
 			return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, mutableErr
 		}
@@ -394,7 +418,7 @@ func (q *qwen35HALState) mutateLayer(
 		}
 		return out, conv, recurrent, mutateErr
 	}()
-	cleanup.free()
+	complete = err == nil
 	return output, nextConv, nextRecurrent, err
 }
 
@@ -406,6 +430,14 @@ func (q *qwen35HALState) mutateSequence(
 	fn func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error),
 ) (compute.Qwen35SequencePrefillResult, error) {
 	var cleanup qwen35HALLayerRelease
+	complete := false
+	defer func() {
+		if complete {
+			cleanup.free()
+		} else {
+			suppressBackendCleanupPanic(cleanup.free)
+		}
+	}()
 	result, err := func() (compute.Qwen35SequencePrefillResult, error) {
 		q.mu.Lock()
 		defer q.mu.Unlock()
@@ -416,24 +448,22 @@ func (q *qwen35HALState) mutateSequence(
 				locked[i].mu.Unlock()
 			}
 		}
+		defer unlock()
 		for layer := range q.layers {
 			state := &q.layers[layer]
 			if state.conv.Buf() == nil && state.recurrent.Buf() == nil {
 				continue
 			}
-			owner, deferred, mutableErr := state.mutableOwnerLocked(backend)
-			cleanup = deferred
+			owner, mutableErr := state.mutableOwnerLocked(backend, &cleanup)
 			if mutableErr != nil {
-				unlock()
 				return compute.Qwen35SequencePrefillResult{}, fmt.Errorf("layer %d: %w", layer, mutableErr)
 			}
 			locked = append(locked, owner)
 			states[layer] = compute.Qwen35SequenceState{Conv: owner.conv, Recurrent: owner.recurrent}
 		}
-		defer unlock()
 		return fn(states)
 	}()
-	cleanup.free()
+	complete = err == nil
 	return result, err
 }
 
@@ -487,12 +517,20 @@ func cloneQwen35HALState(src *qwen35HALState, backend compute.Backend) (*qwen35H
 	if src == nil {
 		return nil, nil
 	}
+	var out *qwen35HALState
+	published := false
+	defer func() {
+		if !published && out != nil {
+			suppressBackendCleanupPanic(func() { out.free(backend) })
+		}
+	}()
 	src.mu.Lock()
 	defer src.mu.Unlock()
-	out := &qwen35HALState{backend: src.backend, layers: make([]qwen35HALLayerState, len(src.layers))}
+	out = &qwen35HALState{backend: src.backend, layers: make([]qwen35HALLayerState, len(src.layers))}
 	for i := range src.layers {
 		out.layers[i] = src.layers[i].share(backend)
 	}
+	published = true
 	return out, nil
 }
 
@@ -512,10 +550,12 @@ func (q *qwen35HALState) free(backend compute.Backend) {
 	q.qsaBlockScores = nil
 	sequenceBackend, sequenceStates := q.detachSequenceLocked()
 	q.mu.Unlock()
+	actions := make([]func(), 0, len(releases)+1)
 	for _, release := range releases {
-		release.free()
+		actions = append(actions, release.free)
 	}
-	freeQwen35SequenceStates(sequenceBackend, sequenceStates)
+	actions = append(actions, func() { freeQwen35SequenceStates(sequenceBackend, sequenceStates) })
+	runBackendSiblingCleanup(actions...)
 }
 
 func (q *qwen35HALState) detachSequenceLocked() (Qwen35GDNPreprojectedSequenceBackend, []Qwen35GDNAuxState) {
@@ -533,11 +573,13 @@ func freeQwen35SequenceStates(backend Qwen35GDNPreprojectedSequenceBackend, stat
 	if backend == nil {
 		return
 	}
+	actions := make([]func(), 0, len(states))
 	for _, state := range states {
 		if state.valid() {
-			_ = backend.FreeQwen35GDNAuxState(state)
+			actions = append(actions, func() { _ = backend.FreeQwen35GDNAuxState(state) })
 		}
 	}
+	runBackendSiblingCleanup(actions...)
 }
 
 func (q *qwen35HALState) setMetalForwardReceipt(r Qwen35MetalForwardSequenceReceipt) {

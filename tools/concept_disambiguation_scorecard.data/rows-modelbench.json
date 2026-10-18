@@ -1,0 +1,101 @@
+{
+  "rows": [
+    {
+      "id": "suffixprefillsession",
+      "canonical": "suffixPrefillSession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Modelbench interface for owned prefix prefill, suffix continuation, next-token step, between-call sequence position and terminal close in checkpoint replay comparisons.",
+      "distinction": "This is the narrow benchmark adapter contract, not the model Session implementation, transport conversation, or concurrent state snapshot; implementations retain their own checkpoint backing lifetime.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "suffixPrefillSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kerneltimestampdelta",
+      "canonical": "kernel_timestamp_delta",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Optional serialized modelbench receipt field containing the backend KernelProfile counter and timestamp delta across host-delimited prefix, suffix or next-step phases.",
+      "distinction": "This profile delta is process-global and may be partial or contaminated by concurrent work. It is not GPU utilization, device wall time or isolated kernel-active time; Vulkan timestamp profiling serializes diagnostic batches and includes barriers and copies.",
+      "distinct_from": [
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "kernel_timestamp_delta",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "artifactcoverage",
+      "canonical": "ArtifactCoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The modelbench suffix receipt field and JSON alias describing the declared extent of checkpoint artifact identity verification, currently input-file-only.",
+      "distinction": "This states an identity-check boundary, not test or model coverage. It does not establish a complete sharded checkpoint set, correctness, GPU execution or production readiness; identity hashing can warm the page cache outside timing.",
+      "distinct_from": [
+        "coverage",
+        "artifactidentitycoverage"
+      ],
+      "aliases": [
+        "artifact_identity_coverage"
+      ],
+      "grounding": "ArtifactCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "artifactidentitycoverage",
+      "canonical": "artifact_identity_coverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Serialized JSON field in the suffix-prefill receipt that exposes the ArtifactCoverage value for checkpoint identity verification; currently input-file-only.",
+      "distinction": "This is the wire key for the declared identity boundary, unlike the Go ArtifactCoverage field or general test coverage. It does not verify a complete shard set, GPU execution or model correctness.",
+      "distinct_from": [
+        "artifactcoverage"
+      ],
+      "aliases": [],
+      "grounding": "artifact_identity_coverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "loadbenchownedq4kcontext",
+      "canonical": "loadBenchOwnedQ4KContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Modelbench Q4K loader adapter that accepts cancellation context and retains the loader-owned checkpoint backing for the resulting model session until terminal cleanup.",
+      "distinction": "Unlike the hierarchical quant loader cancellation budget, this benchmark adapter governs retained backing ownership and cleanup across successful execution, load errors and panic; it does not add a new context scheduler or change device timing.",
+      "distinct_from": [
+        "context-ctx-parallelquantloadcontextbudget"
+      ],
+      "aliases": [],
+      "grounding": "loadBenchOwnedQ4KContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

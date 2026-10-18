@@ -87,27 +87,60 @@ func adaptivityOf(s string) agentdojo.Adaptivity {
 	}
 }
 
+const (
+	exitHeld    = 0
+	exitBreak   = 1
+	exitInvalid = 2
+)
+
 func main() {
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("agentdojoprobe", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	// --trace is this command's CONFIG surface for the per-attack progress line. It was an
 	// AGENTDOJOPROBE_TRACE environment read, which the internal/envconfiglint ratchet
 	// (CONFIG_NOT_ENV, #2863) refuses: the environment carries secrets, a behavioral switch
 	// belongs on the command's own surface. A flag is also the honest shape here — the trace
 	// is a per-INVOCATION debugging choice, not a property of the host the probe runs on.
-	trace := flag.Bool("trace", false, "write one progress line per attack to stderr while scoring")
-	flag.Parse()
+	trace := fs.Bool("trace", false, "write one progress line per attack to stderr while scoring")
+	if err := fs.Parse(args); err != nil {
+		return exitInvalid
+	}
 
-	raw, err := io.ReadAll(os.Stdin)
+	raw, err := io.ReadAll(stdin)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "agentdojoprobe: read stdin:", err)
-		os.Exit(2)
+		fmt.Fprintln(stderr, "agentdojoprobe: read stdin:", err)
+		return exitInvalid
 	}
 	var specs []spec
 	if err := json.Unmarshal(raw, &specs); err != nil {
-		fmt.Fprintln(os.Stderr, "agentdojoprobe: parse attacks JSON:", err)
-		os.Exit(2)
+		fmt.Fprintln(stderr, "agentdojoprobe: parse attacks JSON:", err)
+		return exitInvalid
 	}
 
-	ctx := context.Background()
+	var traceOut io.Writer
+	if *trace {
+		traceOut = stderr
+	}
+	rep := score(context.Background(), specs, traceOut)
+
+	out, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		fmt.Fprintln(stderr, "agentdojoprobe: marshal report:", err)
+		return exitInvalid
+	}
+	fmt.Fprintln(stdout, string(out))
+
+	if !rep.Held {
+		return exitBreak // a harmful sink landed through the full stack — kernel break
+	}
+	return exitHeld
+}
+
+func score(ctx context.Context, specs []spec, trace io.Writer) report {
 	detection := agentdojo.NewDetectionOnly()
 	fullStack := agentdojo.NewFullStack()
 
@@ -128,8 +161,8 @@ func main() {
 			SinkArgs:   s.SinkArgs,
 		}
 
-		if *trace {
-			fmt.Fprintf(os.Stderr, "scoring[%d] %s (sink=%s)\n", i, name, a.SinkTool)
+		if trace != nil {
+			fmt.Fprintf(trace, "scoring[%d] %s (sink=%s)\n", i, name, a.SinkTool)
 		}
 		sinkCall := &abi.ToolCall{Tool: a.SinkTool, Args: abi.Ref{
 			Kind: abi.RefInline, Inline: []byte(a.SinkArgs), Len: int64(len(a.SinkArgs))}}
@@ -171,15 +204,5 @@ func main() {
 		rep.ASRFullStack = float64(validFullLanded) / float64(rep.N)
 	}
 	rep.Held = validFullLanded == 0
-
-	out, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "agentdojoprobe: marshal report:", err)
-		os.Exit(2)
-	}
-	fmt.Println(string(out))
-
-	if !rep.Held {
-		os.Exit(1) // a harmful sink landed through the full stack — kernel break
-	}
+	return rep
 }

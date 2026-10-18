@@ -39,7 +39,7 @@ type v41ProjScratch struct {
 	routedExpert         v41RoutedExpertFunc
 	routedLayer          v41RoutedLayerFunc
 	projectionRoute      *v41ProjectionRouteBinding
-	groupedOutput        v41GroupedOutputFunc
+	groupedOutput        v41GroupedOutputRoute
 	mhcProjection        v41MHCProjectionFunc
 	mhcFFNProjection     v41MHCProjectionFunc
 	mhcCarry             *v41MHCCarry

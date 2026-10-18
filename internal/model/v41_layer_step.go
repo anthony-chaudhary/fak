@@ -158,31 +158,125 @@ func (m *Model) v41LayerStepRole(l int, plan V41AttentionPlan, x []float32, stre
 }
 
 func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) (work *v41LayerStepWork, err error) {
+	attention, err := m.prepareV41RoleAttention(l, plan, x, streams, pos, layerState, registry, scratch)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if work == nil {
+			attention.close()
+		}
+	}()
+	projected, err := attention.project(attention.input)
+	if err != nil {
+		return nil, v41StageErr(v41StageAttention, l, err)
+	}
+	return attention.resumeProjected(projected, false)
+}
+
+// v41RoleAttentionContinuation owns one suspended source/reader attention
+// operation. Its existing layer-work holder carries shared one-shot state, so
+// copying this value cannot duplicate resume or resident cleanup. Registry
+// publication remains journaled by the caller; the window callback stays private
+// until successful resume transfers the holder to the layer-work consumer.
+type v41RoleAttentionContinuation struct {
+	m        *Model
+	l, pos   int
+	x        []float32
+	streams  [][]float32
+	mix      v41MHCMix
+	scratch  *v41ProjScratch
+	resident *v41MHCResident
+	input    []float32
+	project  func([]float32) ([]float32, error)
+	work     *v41LayerStepWork
+}
+
+type v41RoleAttentionState uint8
+
+const (
+	v41RoleAttentionPending v41RoleAttentionState = iota
+	v41RoleAttentionResuming
+	v41RoleAttentionTransferred
+	v41RoleAttentionClosed
+)
+
+func (a *v41RoleAttentionContinuation) close() {
+	if a == nil || a.work == nil || a.work.roleAttentionState == v41RoleAttentionTransferred || a.work.roleAttentionState == v41RoleAttentionClosed {
+		return
+	}
+	a.work.roleAttentionState = v41RoleAttentionClosed
+	if a.resident != nil {
+		a.resident.abort()
+	}
+}
+
+func (a *v41RoleAttentionContinuation) resume(projected []float32) (*v41LayerStepWork, error) {
+	return a.resumeProjected(projected, true)
+}
+
+func (a *v41RoleAttentionContinuation) resumeProjected(projected []float32, validate bool) (work *v41LayerStepWork, err error) {
+	if a == nil || a.work == nil || a.work.roleAttentionState != v41RoleAttentionPending {
+		return nil, fmt.Errorf("%w: role attention continuation is not pending", ErrV41ForwardStage)
+	}
+	a.work.roleAttentionState = v41RoleAttentionResuming
+	defer func() {
+		if work == nil {
+			a.close()
+		}
+	}()
+	m, l, pos, scratch := a.m, a.l, a.pos, a.scratch
+	x, streams, mix, resident := a.x, a.streams, a.mix, a.resident
+	if validate && len(projected) != m.Cfg.HiddenSize {
+		return nil, v41StageErr(v41StageAttention, l, errV41ProjectionResult)
+	}
+	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, projected)
+	work, err = m.prepareV41LayerStepRoleFinishInto(l, pos, x, streams, mix, projected, scratch, a.work)
+	if err != nil {
+		return nil, err
+	}
+	commitWindow := a.work.publishKV
+	finish := work.finish
+	work.finish = func(routed []float32) error {
+		if err := finish(routed); err != nil {
+			return err
+		}
+		return commitWindow()
+	}
+	work.publishKV = commitWindow
+	if resident != nil {
+		work.cleanup = resident.abort
+	}
+	a.work.roleAttentionState = v41RoleAttentionTransferred
+	return work, nil
+}
+
+func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float32, streams [][]float32, pos int, layerState, registry *V41AttentionState, scratch *v41ProjScratch) (attention v41RoleAttentionContinuation, err error) {
 	cfg := m.Cfg
 	attentionContinuation := newV41SharedAttentionContinuation(m, l, pos, plan, layerState, registry, scratch)
 	if len(x) != cfg.HiddenSize {
-		return nil, v41StageErr(v41StageAttention, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer role step hidden row has %d values, want %d", ErrV41ForwardStage, len(x), cfg.HiddenSize))
 	}
 	if len(streams) != 4 {
-		return nil, v41StageErr(v41StageMHC, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: layer role step carries %d mHC streams, want 4", ErrV41ForwardStage, len(streams)))
 	}
 	for s := range streams {
 		if len(streams[s]) != cfg.HiddenSize {
-			return nil, v41StageErr(v41StageMHC, l,
+			return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l,
 				fmt.Errorf("%w: layer role step stream %d has %d values, want %d", ErrV41ForwardStage, s, len(streams[s]), cfg.HiddenSize))
 		}
 	}
 	if registry == nil {
-		return nil, v41StageErr(v41StageAttention, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d role step requires the shared source registry", ErrV41ForwardStage, l))
 	}
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
 	if pos != layerState.nextWindowPos {
-		return nil, v41StageErr(v41StageAttention, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d role step position %d is not the next retained position %d",
 				ErrV41ForwardStage, l, pos, layerState.nextWindowPos))
 	}
@@ -190,34 +284,34 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		len(layerState.window) != layerState.windowSize || layerState.headDim != cfg.HeadDim ||
 		layerState.retainedWindowRows < 0 || layerState.retainedWindowRows > min(pos, layerState.windowSize) ||
 		len(layerState.window[pos%layerState.windowSize]) != cfg.HeadDim {
-		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window state has invalid geometry", ErrV41ForwardStage))
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window state has invalid geometry", ErrV41ForwardStage))
 	}
 	windowStart := 0
 	if window := cfg.windowForLayer(l); window > 0 {
 		windowStart = max(0, pos-window+1)
 	}
 	if windowStart < pos-layerState.retainedWindowRows {
-		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window is not fully retained", ErrV41ForwardStage))
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: role window is not fully retained", ErrV41ForwardStage))
 	}
 
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
 	eps := float32(cfg.RMSNormEps)
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
-		return nil, err
+		return v41RoleAttentionContinuation{}, err
 	}
 	if !full {
-		return nil, v41StageErr(v41StageAttention, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: layer %d role step requires the full V4.1 geometry", ErrV41ForwardStage, l))
 	}
 
 	var mhcDevice *v41MHCDevice
 	if full {
 		if err := scratch.mhcCarry.validate(l, 1); err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		if err := m.v41AdmitMHC(l); err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		mhcDevice = scratch.mhcCarry.device
 	}
@@ -227,7 +321,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	}
 	if resident != nil {
 		defer func() {
-			if work == nil {
+			if attention.work == nil {
 				resident.abort()
 			}
 		}()
@@ -239,7 +333,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	// ---- mHC coefficient split (one position), byte-identical to the plain branch ----
 	mhcFlat, mhcTransposed, mhcOK := m.v41MHCWeightLayout(l)
 	if !mhcOK {
-		return nil, v41StageErr(v41StageMHC, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l,
 			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
 	}
 	var mix v41MHCMix
@@ -247,7 +341,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	if resident != nil {
 		rows, rerr := resident.beginLayer(l, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
 		if rerr != nil {
-			return nil, rerr
+			return v41RoleAttentionContinuation{}, rerr
 		}
 		collapsed = rows[0]
 	} else {
@@ -257,12 +351,12 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		if mhcFlat {
 			width, ok := checkedMulInt(4, H)
 			if !ok || len(streams) != 4 {
-				return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+				return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 			}
 			input = make([]float32, 0, width)
 			for _, stream := range streams {
 				if len(stream) != H {
-					return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+					return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 				}
 				input = append(input, stream...)
 			}
@@ -270,21 +364,21 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
 		mixes, err := projectMHC(input)
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		mix, err = v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		if mhcDevice != nil {
 			collapsed, err = mhcDevice.preBF16(l, streams, scratch.mhcCarry.pre[0])
 			if err != nil {
-				return nil, err
+				return v41RoleAttentionContinuation{}, err
 			}
 		} else {
 			collapsed, err = v41MHCPre(streams, scratch.mhcCarry.pre[0])
 			if err != nil {
-				return nil, v41StageErr(v41StageMHC, l, err)
+				return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, err)
 			}
 		}
 	}
@@ -294,7 +388,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		var nextCollapsed []float32
 		nextCollapsed, qLat, prefixHandled, err = scratch.queryPrefix(l, collapsed)
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		if prefixHandled {
 			collapsed = nextCollapsed
@@ -303,47 +397,47 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	if !prefixHandled {
 		collapsed, err = m.v41AttentionInputNormWithPublications(l, collapsed, eps, scratch.attentionNormFunc(), scratch.attentionBF16Func())
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 	}
 
 	// ---- attention query for the one position (mirrors v41Layer's full branch) ----
 	ropeDim := cfg.QKRopeHeadDim
 	if ropeDim <= 0 || ropeDim%2 != 0 || ropeDim > hd {
-		return nil, v41StageErr(v41StageAttention, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention qk_rope_head_dim must be a positive even value <= head_dim %d, got %d", ErrV41ForwardStage, hd, ropeDim))
 	}
 	if !prefixHandled {
 		qLat, err = m.v41ProjMatRowsWithProjection(l, "attn.wq_a.weight", collapsed, cfg.QLoraRank, H, scratch.denseProjection())
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		if err := m.v41QueryNormInPlaceWithPublish(l, qLat, eps, scratch.queryNorm.normFunc(), scratch.gatherOps.bf16PublishFunc()); err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 	}
 	scratch.activationTrace.record(l, pos, v41TraceStageQLatent, qLat)
 	q, err := m.v41ProjMatRowsWithProjection(l, "attn.wq_b.weight", qLat, nH*hd, cfg.QLoraRank, scratch.denseProjection())
 	if err != nil {
-		return nil, err
+		return v41RoleAttentionContinuation{}, err
 	}
 	if hd > v41KVLoraRank {
-		return nil, v41StageErr(v41StageAttention, l,
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l,
 			fmt.Errorf("%w: attention head_dim %d exceeds full KV latent rank %d", ErrV41ForwardStage, hd, v41KVLoraRank))
 	}
 	kvFull, err := m.v41ProjMatRowsWithProjection(l, "attn.wkv.weight", collapsed, v41KVLoraRank, H, scratch.denseProjection())
 	if err != nil {
-		return nil, err
+		return v41RoleAttentionContinuation{}, err
 	}
 	kv := kvFull[:hd]
 	if err := m.v41KVNormWithBinding(l, kv, eps, scratch.kvNorm, scratch.gatherOps); err != nil {
-		return nil, err
+		return v41RoleAttentionContinuation{}, err
 	}
 	cos, sin := v41RopeTableForLayer(cfg, l, pos)
 	scratch.activationTrace.record(l, pos, v41TraceStageKVLatent, kv)
 	q, kv, err = v41AttentionQKRoPEWithPublish(cfg, l, q, kv, cos, sin, nH, hd, ropeDim, scratch.tailRoPE, scratch.gatherOps.bf16PublishFunc())
 	if err != nil {
-		return nil, err
+		return v41RoleAttentionContinuation{}, err
 	}
 	window := make([][]float32, 0, pos-windowStart+1)
 	for key := windowStart; key < pos; key++ {
@@ -373,7 +467,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
 		pool, perr := NewV41CompressorPool(plan.Ratio, width)
 		if perr != nil {
-			return nil, v41StageErr(v41StageCompress, l, perr)
+			return v41RoleAttentionContinuation{}, v41StageErr(v41StageCompress, l, perr)
 		}
 		if normalize := scratch.compressorNorm; normalize != nil {
 			pool.normalize = func(pooled, gain []float32, eps float32) ([]float32, error) {
@@ -410,7 +504,7 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 				ref:      V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub},
 			})
 		if err != nil {
-			return nil, v41StageErr(v41StageCompress, l, err)
+			return v41RoleAttentionContinuation{}, v41StageErr(v41StageCompress, l, err)
 		}
 		// Step owns the state synchronously. Attention consumes these rows before
 		// returning; index scoring still packs its own flat key buffer.
@@ -419,26 +513,26 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 			var ok bool
 			indexKeys, ok = layerState.borrowIndexKeys(l)
 			if len(sharedKV) != len(indexKeys) || (len(sharedKV) > 0 && !ok) {
-				return nil, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
+				return v41RoleAttentionContinuation{}, v41StageErr(v41StageIndexer, l, fmt.Errorf("%w: own index history is incomplete", ErrV41ForwardStage))
 			}
 		}
 	} else {
 		sharedKV, indexKeys, err = m.v41CompressedReaderStepRows(plan, registry, pos+1)
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 	}
 	if indexSourceAt(cfg.DeepSeekV41, l) {
 		sourceIdx, err = m.v41IndexRowsWithPreparedProjection(l, pos, qLat, collapsed, indexKeys, scratch.denseProjection(), scratch.indexerScoreBinding, scratch.indexScoreHealth, scratch.gatherOps, nil, nil, scratch.projectionRoute, indexView)
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		sourceRows, err = m.v41RoleStepNormalizeIndex(l, plan, sourceIdx, len(indexKeys))
 		if err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 		if err := registry.PublishTopK(plan.Ratio, [][]int32{sourceRows}); err != nil {
-			return nil, err
+			return v41RoleAttentionContinuation{}, err
 		}
 	}
 	// Canonical compressed IDs remain unoffset until the common composer adds
@@ -454,12 +548,12 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 			ids, ierr = m.v41RoleStepIndex(registry, l, pos, plan, qLat, collapsed, len(sharedKV))
 		}
 		if ierr != nil {
-			return nil, ierr
+			return v41RoleAttentionContinuation{}, ierr
 		}
 		if ids == nil {
 			ids, ierr = m.v41RoleStepNormalizeIndex(l, plan, nil, len(sharedKV))
 			if ierr != nil {
-				return nil, ierr
+				return v41RoleAttentionContinuation{}, ierr
 			}
 		}
 	}
@@ -476,21 +570,11 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 	}, scratch.sharedAttentionFunc(), attentionContinuation)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
-		return nil, v41StageErr(v41StageAttention, l, err)
+		return v41RoleAttentionContinuation{}, v41StageErr(v41StageAttention, l, err)
 	}
 	o, err = v41RotatedOutputForProjection(cfg, l, pos, o, nH, hd, scratch.gatherOps)
 	if err != nil {
-		return nil, err
-	}
-	attnProjected, err := projectOutput(o)
-	if err != nil {
-		return nil, v41StageErr(v41StageAttention, l, err)
-	}
-	scratch.activationTrace.record(l, pos, v41TraceStageAttnOut, attnProjected)
-
-	work, err = m.prepareV41LayerStepRoleFinish(l, pos, x, streams, mix, attnProjected, scratch)
-	if err != nil {
-		return nil, err
+		return v41RoleAttentionContinuation{}, err
 	}
 	windowCommitted := false
 	commitWindow := func() error {
@@ -511,18 +595,11 @@ func (m *Model) prepareV41LayerStepRole(l int, plan V41AttentionPlan, x []float3
 		windowCommitted = true
 		return nil
 	}
-	finish := work.finish
-	work.finish = func(routed []float32) error {
-		if err := finish(routed); err != nil {
-			return err
-		}
-		return commitWindow()
-	}
-	work.publishKV = commitWindow
-	if resident != nil {
-		work.cleanup = resident.abort
-	}
-	return work, nil
+	return v41RoleAttentionContinuation{
+		m: m, l: l, pos: pos, x: x, streams: streams, mix: mix,
+		scratch: scratch, resident: resident, input: o, project: projectOutput,
+		work: &v41LayerStepWork{publishKV: commitWindow},
+	}, nil
 }
 
 // v41LayerStepRoleFinish runs the MoE block and the mHC post for one position and
@@ -538,6 +615,10 @@ func (m *Model) v41LayerStepRoleFinish(l, pos int, x []float32, streams [][]floa
 }
 
 func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch) (work *v41LayerStepWork, err error) {
+	return m.prepareV41LayerStepRoleFinishInto(l, pos, x, streams, mix, attnOut, scratch, nil)
+}
+
+func (m *Model) prepareV41LayerStepRoleFinishInto(l, pos int, x []float32, streams [][]float32, mix v41MHCMix, attnOut []float32, scratch *v41ProjScratch, into *v41LayerStepWork) (work *v41LayerStepWork, err error) {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	projectFFN, err := m.v41FFNMHCProjector(l, scratch)
@@ -571,7 +652,12 @@ func (m *Model) prepareV41LayerStepRoleFinish(l, pos int, x []float32, streams [
 		return nil, err
 	}
 	m.emitExpertRouteAt(l, pos, picks)
-	work = &v41LayerStepWork{layer: l, input: ffnX, picks: picks, full: true, scratch: scratch}
+	if into == nil {
+		work = &v41LayerStepWork{layer: l, input: ffnX, picks: picks, full: true, scratch: scratch}
+	} else {
+		work = into
+		work.layer, work.input, work.picks, work.full, work.scratch = l, ffnX, picks, true, scratch
+	}
 	work.scalar = func() ([]float32, error) {
 		routed, batched, err := m.v41RoutedLayerStep(l, picks, ffnX, scratch)
 		if err != nil {

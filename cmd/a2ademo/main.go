@@ -18,11 +18,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/demoassert"
+	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/demoassert"
 )
 
 func kindName(k abi.VerdictKind) string {
@@ -46,19 +47,34 @@ func verdictStr(v abi.Verdict) string {
 	return kindName(v.Kind)
 }
 
-func main() {
-	ctx := context.Background()
-	bus := a2achan.NewBus()
-	checks := demoassert.Recorder{Writer: os.Stderr}
-	fail := checks.Fail
-	line := func(label string, v abi.Verdict) { fmt.Printf("    %-46s -> %s\n", label, verdictStr(v)) }
+const (
+	exitOK     = 0
+	exitFailed = 1
+)
 
-	fmt.Println("fak a2achan — in-kernel agent-to-agent message channel (no key, no model)")
-	fmt.Printf("  capabilities negotiable: send=%v recv=%v\n",
+type channelBus interface {
+	Send(ctx context.Context, from string, to a2achan.ChannelKey, body abi.Ref, caps ...abi.Capability) abi.Verdict
+	Recv(ctx context.Context, to a2achan.ChannelKey, caps ...abi.Capability) (a2achan.Message, abi.Verdict, error)
+	Subscribe(topic a2achan.ChannelKey) (inbox a2achan.ChannelKey, cancel func())
+	Publish(ctx context.Context, from string, topic a2achan.ChannelKey, body abi.Ref, caps ...abi.Capability) (abi.Verdict, int)
+	Stats() a2achan.Stats
+}
+
+func main() {
+	os.Exit(run(context.Background(), a2achan.NewBus(), os.Stdout, os.Stderr))
+}
+
+func run(ctx context.Context, bus channelBus, stdout, stderr io.Writer) int {
+	checks := demoassert.Recorder{Writer: stderr}
+	fail := checks.Fail
+	line := func(label string, v abi.Verdict) { fmt.Fprintf(stdout, "    %-46s -> %s\n", label, verdictStr(v)) }
+
+	fmt.Fprintln(stdout, "fak a2achan — in-kernel agent-to-agent message channel (no key, no model)")
+	fmt.Fprintf(stdout, "  capabilities negotiable: send=%v recv=%v\n",
 		abi.Supported(a2achan.CapA2ASend), abi.Supported(a2achan.CapA2ARecv))
 
 	// [1] in-kernel point-to-point. A shared-scope body crosses agents.
-	fmt.Println("\n[1] in-kernel point-to-point (concurrent agents rendezvous)")
+	fmt.Fprintln(stdout, "\n[1] in-kernel point-to-point (concurrent agents rendezvous)")
 	work := a2achan.ChannelKey{Locale: a2achan.InKernel, ID: "work"}
 	v := bus.Send(ctx, "alpha", work, a2achan.Shared([]byte("task: build the report")), a2achan.CapA2ASend)
 	line("alpha SEND shared -> work", v)
@@ -75,7 +91,7 @@ func main() {
 	}
 
 	// [2] the default-deny floor — the model cannot talk past it.
-	fmt.Println("\n[2] the capability floor (default-deny on messages, like tool calls)")
+	fmt.Fprintln(stdout, "\n[2] the capability floor (default-deny on messages, like tool calls)")
 	v = bus.Send(ctx, "alpha", a2achan.ChannelKey{Locale: a2achan.InKernel, ID: "bravo-inbox"},
 		a2achan.Private([]byte("my private state")), a2achan.CapA2ASend)
 	line("alpha SEND private -> another agent's channel", v)
@@ -96,7 +112,7 @@ func main() {
 
 	// [3] between sessions — keyed by the peer's TraceID (the identity already on
 	// every call). A2A across the session boundary.
-	fmt.Println("\n[3] between sessions (keyed by peer TraceID)")
+	fmt.Fprintln(stdout, "\n[3] between sessions (keyed by peer TraceID)")
 	s2 := a2achan.ChannelKey{Locale: a2achan.Session, ID: "trace-S2"}
 	v = bus.Send(ctx, "trace-S1", s2, a2achan.Shared([]byte("resume: step 4 of 7")), a2achan.CapA2ASend)
 	line("session S1 SEND -> session:S2", v)
@@ -108,7 +124,7 @@ func main() {
 
 	// [4] between context windows — a self-handoff across a compaction boundary.
 	// The body stays ScopeAgent/private because it never leaves the agent.
-	fmt.Println("\n[4] between context windows (self-handoff across compaction)")
+	fmt.Fprintln(stdout, "\n[4] between context windows (self-handoff across compaction)")
 	win := a2achan.ChannelKey{Locale: a2achan.Window, ID: "agent-7"}
 	v = bus.Send(ctx, "agent-7", win, a2achan.Private([]byte("summary + open tasks")), a2achan.CapA2ASend)
 	line("window N SEND private -> own continuation", v)
@@ -119,7 +135,7 @@ func main() {
 	}
 
 	// [5] one-to-many: one adjudicated publish, fanned out to N subscribers.
-	fmt.Println("\n[5] one-to-many (pub/sub: one adjudicated message, N subscribers)")
+	fmt.Fprintln(stdout, "\n[5] one-to-many (pub/sub: one adjudicated message, N subscribers)")
 	topic := a2achan.ChannelKey{Locale: a2achan.InKernel, ID: "fleet-events"}
 	in1, _ := bus.Subscribe(topic)
 	in2, _ := bus.Subscribe(topic)
@@ -127,17 +143,18 @@ func main() {
 	line(fmt.Sprintf("coordinator PUBLISH (fanout=%d)", n), pv)
 	e1, _, _ := bus.Recv(ctx, in1, a2achan.CapA2ARecv)
 	e2, _, _ := bus.Recv(ctx, in2, a2achan.CapA2ARecv)
-	fmt.Printf("    sub-a RECV %q ; sub-b RECV %q\n", e1.Body.Inline, e2.Body.Inline)
+	fmt.Fprintf(stdout, "    sub-a RECV %q ; sub-b RECV %q\n", e1.Body.Inline, e2.Body.Inline)
 	if n != 2 {
 		fail("the publish should reach both subscribers")
 	}
 
 	st := bus.Stats()
-	fmt.Printf("\n  bus audit: sent=%d received=%d denied=%d held=%d\n", st.Sent, st.Received, st.Denied, st.Held)
+	fmt.Fprintf(stdout, "\n  bus audit: sent=%d received=%d denied=%d held=%d\n", st.Sent, st.Received, st.Denied, st.Held)
 
 	if checks.Failed {
-		fmt.Fprintln(os.Stderr, "\na2ademo: FAILED")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "\na2ademo: FAILED")
+		return exitFailed
 	}
-	fmt.Println("\na2ademo: OK — adjudicated A2A delivery across in-kernel / session / window locales + pub/sub")
+	fmt.Fprintln(stdout, "\na2ademo: OK — adjudicated A2A delivery across in-kernel / session / window locales + pub/sub")
+	return exitOK
 }

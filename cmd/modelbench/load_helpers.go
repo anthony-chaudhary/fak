@@ -70,7 +70,7 @@ type q4kModelLoader func(context.Context, string, *ggufload.LoadProfiler) (*mode
 
 var (
 	loadResidentQ4K q4kModelLoader = func(ctx context.Context, path string, _ *ggufload.LoadProfiler) (*model.Model, error) {
-		return ggufload.LoadModelQ4KContext(ctx, path)
+		return loadBenchOwnedQ4KContext(ctx, path, nil)
 	}
 	loadStreamedDenseQ4K q4kModelLoader = func(ctx context.Context, path string, p *ggufload.LoadProfiler) (*model.Model, error) {
 		return ggufload.LoadModelQ4KStreamedDenseContext(ctx, path, p)

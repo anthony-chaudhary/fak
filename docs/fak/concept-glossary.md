@@ -1448,3 +1448,143 @@ Private call-scoped loan of freshly normalized cold-prefill activation chunks to
 Private one-lane suspended plain-attention operation between contraction/rotation and grouped output projection. Its shared per-layer lifecycle permits one resume or abandon cleanup, and successful resume transfers resident cleanup to the returned layer work.
 
 **Distinct from:** Unlike v41SharedAttentionContinuation, this owns suspended computation and resource transfer rather than proving live execution eligibility. Unlike v41AttentionInputPanel, it carries one lane's output-projection input rather than a multi-row cold-prefill normalized-input loan. It owns neither the transaction journal nor persistent KV state and grants no batching or device capability.
+
+
+### v41SparseAttentionSinkChecked
+
+Synchronous sparse sink contraction over an already validated flat or split-row host view, preserving arithmetic order without flattening the cold KV bank.
+
+**Distinct from:** Unlike v41ColdPlainAttentionSink, which chooses and dispatches a contiguous plain-attention window, this contracts selected sparse rows only after its caller validates every original row and canonical index.
+
+
+### suffixPrefillSession
+
+Modelbench interface for owned prefix prefill, suffix continuation, next-token step, between-call sequence position and terminal close in checkpoint replay comparisons.
+
+**Distinct from:** This is the narrow benchmark adapter contract, not the model Session implementation, transport conversation, or concurrent state snapshot; implementations retain their own checkpoint backing lifetime.
+
+
+### kernel_timestamp_delta
+
+Optional serialized modelbench receipt field containing the backend KernelProfile counter and timestamp delta across host-delimited prefix, suffix or next-step phases.
+
+**Distinct from:** This profile delta is process-global and may be partial or contaminated by concurrent work. It is not GPU utilization, device wall time or isolated kernel-active time; Vulkan timestamp profiling serializes diagnostic batches and includes barriers and copies.
+
+
+### ArtifactCoverage
+
+The modelbench suffix receipt field and JSON alias describing the declared extent of checkpoint artifact identity verification, currently input-file-only.
+
+**Distinct from:** This states an identity-check boundary, not test or model coverage. It does not establish a complete sharded checkpoint set, correctness, GPU execution or production readiness; identity hashing can warm the page cache outside timing.
+
+
+### artifact_identity_coverage
+
+Serialized JSON field in the suffix-prefill receipt that exposes the ArtifactCoverage value for checkpoint identity verification; currently input-file-only.
+
+**Distinct from:** This is the wire key for the declared identity boundary, unlike the Go ArtifactCoverage field or general test coverage. It does not verify a complete shard set, GPU execution or model correctness.
+
+
+### loadBenchOwnedQ4KContext
+
+Modelbench Q4K loader adapter that accepts cancellation context and retains the loader-owned checkpoint backing for the resulting model session until terminal cleanup.
+
+**Distinct from:** Unlike the hierarchical quant loader cancellation budget, this benchmark adapter governs retained backing ownership and cleanup across successful execution, load errors and panic; it does not add a new context scheduler or change device timing.
+
+
+### v41RoleAttentionContinuation
+
+Private one-lane suspended source or shared-reader attention operation retaining its output-projection input and one-shot resident cleanup until resume or abandon.
+
+**Distinct from:** Unlike v41PlainAttentionContinuation, this resumes a source or shared-reader role whose registry publication remains journaled by the caller; it is not a cross-request cohort, transaction journal, or persistent KV owner.
+
+
+### v41RoleAttentionState
+
+Shared one-shot lifecycle discriminator for a role-attention continuation: pending, resuming, transferred or closed, stored in its existing layer-work holder.
+
+**Distinct from:** Unlike v41RoleAttentionContinuation, this is only the lifecycle discriminator shared by copied continuation values; it owns no tensors, callback, transaction or persistent KV state.
+
+
+### prepareV41RoleAttention
+
+Constructs a source or shared-reader attention continuation after attention contraction and before output projection, leaving registry rollback to the caller transaction.
+
+**Distinct from:** Unlike v41RoleAttentionContinuation, this is the preparation operation that returns the suspended holder; it neither resumes output projection nor grants batching or device capability.
+
+
+### roleAttentionState
+
+The role-attention lifecycle field in the shared layer-work holder, consulted by every copied continuation before resume or cleanup.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is the per-work stored instance of that discriminator, not the enum type or a separate ownership token.
+
+
+### v41RoleAttentionPending
+
+The role-attention lifecycle value before a suspended continuation begins its single resume.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its pending value; it allows the one resume attempt and has not transferred resident cleanup.
+
+
+### v41RoleAttentionResuming
+
+The role-attention lifecycle value set before executing the one resume attempt.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its in-progress value; reentrant resume is rejected and failure still requires cleanup.
+
+
+### v41RoleAttentionTransferred
+
+The role-attention lifecycle value after successful resume transfers resident cleanup to returned layer work.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its successful transfer value; continuation close must no longer abort the transferred resident.
+
+
+### v41RoleAttentionClosed
+
+The role-attention lifecycle value after abandon or failed resume closes the suspended operation.
+
+**Distinct from:** Unlike v41RoleAttentionState, this is its terminal closed value; repeated close is idempotent and resume is rejected.
+
+
+### v41LayerAttentionSuspension
+
+Caller-held one-lane storage selecting a concrete plain or source/reader attention continuation; the transaction owns abandonment until successful resume transfers layer work.
+
+**Distinct from:** Unlike v41RoleAttentionContinuation, this dispatch holder can contain either plain or role attention; the concrete holder retains shared lifecycle ownership and this wrapper grants no cross-request or device authority.
+
+
+### prepareAttention
+
+Transaction method that registers caller-held attention suspension storage and prepares exactly the next layer, aborting incomplete preparation.
+
+**Distinct from:** Unlike v41LayerAttentionSuspension, this is the transaction admission and preparation operation; it rejects existing pending work and does not resume projection or commit the transaction.
+
+
+### resumeV41CohortAttention
+
+Coordinates projection and ordered resume of active one-lane attention suspensions, selecting grouped output only for two or four canonically bound participants within the live owner scope.
+
+**Distinct from:** Unlike v41LayerAttentionSuspension, this coordinates multiple lane holders; it uses scalar fallback only for a capability decline before activation/arithmetic selection; selected failures never replay scalar.
+
+
+### pendingAttention
+
+Transaction field referencing its currently suspended one-lane attention holder, cleared on successful resume or abort.
+
+**Distinct from:** Unlike v41LayerAttentionSuspension, this is the transaction reference that tracks abandonment responsibility, not independent suspension storage or persistent KV ownership.
+
+
+### resumeAttention
+
+Transaction method that resumes suspended attention using supplied grouped projection or its scalar projector and transfers successful output into pending layer work.
+
+**Distinct from:** Unlike prepareAttention, this consumes an existing suspension; failures abort incomplete work and successful resume clears the pending-attention reference without committing the layer.
+
+
+### prepareV41LayerAttention
+
+Model operation that checks layer rows and retained state then prepares either plain or source/reader attention into caller-provided suspension storage.
+
+**Distinct from:** Unlike prepareAttention, this chooses and constructs the concrete model continuation; transaction admission, rollback and pending-reference ownership remain with its caller.
