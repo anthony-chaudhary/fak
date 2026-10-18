@@ -39,8 +39,6 @@ Repository vocabulary contains commands named `sweep` that do not sample a respo
 
 - [`SweepGuard`](../../internal/wipattr/sweep.go#L5) classifies broad-staging hazards by ownership.
 
-- [`internal/sweepconfig`](../../internal/sweepconfig/sweepconfig.go) loads profiles; it does not run or certify an experiment.
-
 These are cleanup, reconciliation, inventory, or bounded campaign loops. They should not emit an optimization peak or be wired through #10189 merely because their names contain `sweep`.
 
 ## What MLCommons contributes

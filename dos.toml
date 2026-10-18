@@ -76,7 +76,7 @@ concurrent = [
   "cachemeta", "ociartifact", "fakpack", "portabilityswitch",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
-  "provenance", "recall", "registrations", "shipgate", "steward", "studydrift", "studymonitor", "studyreceipt", "turnbench",
+  "provenance", "recall", "registrations", "shipgate", "steward", "studymonitor", "studyreceipt", "turnbench",
   "vdso", "witness", "stopgate",
   "cmd", "experiments", "docs", "tools", "scripts", "visuals", "claude", "ci",
   "tokenizer",
@@ -103,7 +103,6 @@ concurrent = [
   "vcachechain",
   "dropin",
   "comm",
-  "cohort",
   "agenttopo",
   "promptmmu",
   "vcacheobserve",
@@ -317,8 +316,8 @@ concurrent = [
   "cachesweep", "cachevalue", "cachevalueledger", "cachevaluepost", "cachevaluereport",
   "cachewitness", "cadencereport", "callavoid", "capindex", "capindexgw", "catchupscore",
   "chatops", "chatrelay", "checkpointscore", "claimcheck", "closebatch", "closureaudit",
-  "closurerate", "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
-  "commit-audit", "commitissuelink", "commitsubject", "compactcohere", "completiondist",
+  "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
+  "commit-audit", "commitissuelink", "commitsubject", "compactcohere",
   "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
   "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "deadlineadmit",
   "deepseekbench", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
@@ -360,7 +359,7 @@ concurrent = [
   "qwen36nodereports", "qwen36parity", "randhex", "reachdelta", "readmevisualaudit",
   "refactorverify", "refutil", "rehydrate", "relay", "releasestale", "releasestatus",
   "repoguard", "resumebackoff", "resumemetrics", "roofline", "safecommit", "savingsvector",
-  "scdiff", "scmbridge", "scorecardpane", "scratchmark", "seatpark", "secretgate", "secretload", "selfinstall",
+  "scdiff", "scmbridge", "scorecardpane", "seatpark", "secretgate", "secretload", "selfinstall",
   "sensecheck", "seoaeoscore", "servicelease", "serviceledger", "servicespec", "sessionctl",
   "sessiondesc", "sessionjournal", "sessionledger", "sessionobs", "sessionread",
   "sessionreset", "sessionsearch", "sessionsignals", "sessionsteer", "shadowgit", "sidecar",
@@ -370,7 +369,7 @@ concurrent = [
   "stablejson",
   "optsdefault",
   "stopfailure", "stripeload", "strmatch", "supervisoragent", "supportmaturity",
-  "supportmaturityscore", "swebenchsota", "sweepconfig", "syspromptmmu", "systemservice",
+  "supportmaturityscore", "swebenchsota", "syspromptmmu", "systemservice",
   "taskdecision", "taskgraph", "terminalbench", "terminalrisk", "testroute",
   "timeoutphase", "tokencache", "toolrollup", "toolsandbox", "toolseq",
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
@@ -386,7 +385,6 @@ concurrent = [
   "skillfootprint", # #5444: internal/skillfootprint leaf -- see [lanes].concurrent note.
   "taskvc", # #3323: internal/taskvc leaf -- see [lanes].concurrent note.
   "gitdaily", # #5577: unattended daily git-hygiene tick; see [lanes.trees].
-  "docrender",
   "streamrules", # #5920: pure streaming rule detection primitive; see [lanes.trees].
   "archreport",
   "archcheck",
@@ -419,7 +417,6 @@ concurrent = [
   "tempartifact",
   "valuechain",
   "hostdiag",
-  "ultracodenegcontrol",
   "systembaseline",
   "studyclass",
   "studyadjacency",
@@ -443,7 +440,7 @@ concurrent = [
   "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
   "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
   "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
-  "codexmcpdiag", "commitlifecycle", "committedbuildwitness", "committedtree", "composition",
+  "codexmcpdiag", "commitlifecycle", "committedbuildwitness", "committedtree",
   "computetrace", "computetune", "configguide", "configsurface", "coordination", "cubicquanteval",
   "cudaarch", "deliverystages", "demoassert", "dependencyquarantine", "devcheckpoint", "devcmd",
   "devhandoff", "disambiguation", "discoveryrouter", "docreach", "docsearch", "doneclaimaudit",
@@ -472,9 +469,9 @@ concurrent = [
   "serverartifact", "servicewatchdog", "sessiondiag", "sessionmine", "sessionrecovery", "sessionregistry",
   "shellprov", "shelltoken", "sortkeys", "speedab", "stackpreflight", "stackresolve",
   "stalework", "strictjson", "stringlist", "stringset", "studybench", "studyforge",
-  "subtractiveprofile", "suiteverify", "supervisionpolicy", "supportgraph", "terminalbarrier", "terminalrelief",
+  "suiteverify", "supervisionpolicy", "supportgraph", "terminalbarrier", "terminalrelief",
   "testenv", "testquality", "toolplugin", "toolpriorbench", "trajectoryassurance", "turnavoid",
-  "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer",
+  "turntaxvisual",
   "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplifecycle",
   "wipreadiness",
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
@@ -603,7 +600,6 @@ autopick = [
   "taskmgr",
   "dropin",
   "comm",
-  "cohort",
   "agenttopo",
   "promptmmu",
   "session", # #756: internal/session leaf, see [lanes].concurrent note
@@ -691,7 +687,6 @@ autopick = [
   "egressrefresh", # #5130: internal/egressrefresh leaf -- see [lanes].concurrent note.
   "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
   "tokenprofile",
-  "docrender",
   "streamrules",
   "generationctl",
   "quantprov",
@@ -716,7 +711,6 @@ autopick = [
   "valuechain",
   "hostdiag",
   "power", # internal/power leaf (cross-platform OS power assertion and wake-lock management)
-  "ultracodenegcontrol",
   "systembaseline",
   "studyclass",
   "studyadjacency",
@@ -879,9 +873,8 @@ recall = ["internal/recall/**"]
 registrations = ["internal/registrations/**"]
 shipgate = ["internal/shipgate/**"]
 steward = ["internal/steward/**"]
-studydrift = ["internal/studydrift/**"]
 studymonitor = ["internal/studymonitor/**"]
-studyreceipt = ["internal/studyreceipt/**", "internal/study/**", "cmd/fak/study.go", "cmd/fak/study_test.go", "cmd/fak/main.go", ".claude/skills/study-repo/SKILL.md", ".claude/skills/field-borrow/SKILL.md"]
+studyreceipt = ["internal/study/**", "cmd/fak/study.go", "cmd/fak/study_test.go", "cmd/fak/main.go", ".claude/skills/study-repo/SKILL.md", ".claude/skills/field-borrow/SKILL.md"]
 turnbench = ["internal/turnbench/**"]
 vdso = ["internal/vdso/**"]
 witness = ["internal/witness/**"]
@@ -962,7 +955,6 @@ vcachewarm = ["internal/vcachewarm/**"]
 taskmgr = ["internal/taskmgr/**"]
 dropin = ["internal/dropin/**"]
 comm = ["internal/comm/**"]
-cohort = ["internal/cohort/**"]
 agenttopo = ["internal/agenttopo/**"]
 promptmmu = ["internal/promptmmu/**"]
 session = ["internal/session/**"] # #756 (Pillar 2 / #748): per-session DRIVE state + cost ring
@@ -997,7 +989,6 @@ scorecard = ["pkg/scorecard/**"]
 repocompose = ["pkg/repocompose/**"]
 deploykit = ["pkg/deploykit/**"]
 strix = ["pkg/strix/**"]
-scratchmark = ["internal/scratchmark/**"] # self-declared-disposability detector: a file whose leading comment block calls itself a throwaway. Its gate shim (internal/hooks/gate_scratchmark.go) stays in the `hooks` lane to keep leaf trees pairwise-disjoint.
 productscorecard = ["internal/productscorecard/**"]
 rsl = ["internal/rsl/**"]
 mlpscore = ["internal/mlpscore/**"]
@@ -1110,7 +1101,6 @@ claimcheck = ["internal/claimcheck/**"]
 customizationindex = ["internal/customizationindex/**"]
 closebatch = ["internal/closebatch/**"]
 closureaudit = ["internal/closureaudit/**"]
-closurerate = ["internal/closurerate/**"]
 cmdutil = ["internal/cmdutil/**"]
 codegraph = ["internal/codegraph/**"]
 codesearch = ["internal/codesearch/**"]
@@ -1120,7 +1110,6 @@ commit-audit = ["tools/issue_closure_audit.py", "tools/issue_closure_audit_test.
 commitissuelink = ["internal/commitissuelink/**"]
 commitsubject = ["internal/commitsubject/**"]
 compactcohere = ["internal/compactcohere/**"]
-completiondist = ["internal/completiondist/**"]
 conceptbench = ["internal/conceptbench/**"]
 conceptcatalog = ["internal/conceptcatalog/**"]
 conceptusage = ["internal/conceptusage/**"]
@@ -1354,7 +1343,6 @@ supervisoragent = ["internal/supervisoragent/**"]
 supportmaturity = ["internal/supportmaturity/**"]
 supportmaturityscore = ["internal/supportmaturityscore/**"]
 swebenchsota = ["internal/swebenchsota/**"]
-sweepconfig = ["internal/sweepconfig/**"]
 syspromptmmu = ["internal/syspromptmmu/**"]
 systemservice = ["internal/systemservice/**"]
 taskdecision = ["internal/taskdecision/**"]
@@ -1410,7 +1398,6 @@ skillfootprint = ["internal/skillfootprint/**"]
 taskvc = ["internal/taskvc/**"]
 gitdaily = ["internal/gitdaily/**"]
 tokenprofile = ["internal/tokenprofile/**"]
-docrender = ["internal/docrender/**"]
 streamrules = ["internal/streamrules/**"]
 archreport = ["internal/archreport/**"]
 archcheck = ["internal/archcheck/**"]
@@ -1444,7 +1431,6 @@ cloudroute = ["internal/cloudroute/**"]
 tempartifact = ["internal/tempartifact/**"]
 valuechain = ["internal/valuechain/**"]
 hostdiag = ["internal/hostdiag/**"]
-ultracodenegcontrol = ["internal/ultracodenegcontrol/**"]
 systembaseline = ["internal/systembaseline/**"]
 studyclass = ["internal/studyclass/**"]
 studyadjacency = ["internal/studyadjacency/**"]
@@ -1484,7 +1470,6 @@ codexmcpdiag = ["internal/codexmcpdiag/**"]
 commitlifecycle = ["internal/commitlifecycle/**"]
 committedbuildwitness = ["internal/committedbuildwitness/**"]
 committedtree = ["internal/committedtree/**"]
-composition = ["internal/composition/**"]
 computetrace = ["internal/computetrace/**", "pkg/referenceoracle/**"]
 computetune = ["internal/computetune/**"]
 configguide = ["internal/configguide/**"]
@@ -1634,7 +1619,6 @@ stringlist = ["internal/stringlist/**"]
 stringset = ["internal/stringset/**"]
 studybench = ["internal/studybench/**"]
 studyforge = ["internal/studyforge/**"]
-subtractiveprofile = ["internal/subtractiveprofile/**"]
 suiteverify = ["internal/suiteverify/**"]
 supervisionpolicy = ["internal/supervisionpolicy/**"]
 supportgraph = ["internal/supportgraph/**"]
@@ -1647,10 +1631,6 @@ toolpriorbench = ["internal/toolpriorbench/**"]
 trajectoryassurance = ["internal/trajectoryassurance/**"]
 turnavoid = ["internal/turnavoid/**"]
 turntaxvisual = ["internal/turntaxvisual/**"]
-ultracodeborrow = ["internal/ultracodeborrow/**"]
-ultracodecrossover = ["internal/ultracodecrossover/**"]
-ultracodedogfood = ["internal/ultracodedogfood/**"]
-ultracodetokenizer = ["internal/ultracodetokenizer/**"]
 vcachecalibration = ["internal/vcachecalibration/**"]
 vllmquant = ["internal/vllmquant/**"]
 wavefuel = ["internal/wavefuel/**"]

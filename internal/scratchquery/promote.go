@@ -65,8 +65,8 @@ var CandidateKinds = []CandidateKind{
 // filename) carries it ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the artifact author's explicit "do not promote me".
 const KeepDirective = "promote:keep"
 
-// promoteHeaderBytes bounds how much of an artifact's head Classify reads, the
-// same fail-closed discipline scratchmark applies to a declarative header.
+// promoteHeaderBytes bounds how much of an artifact's head Classify reads, so a
+// declarative header is checked fail-closed without reading the whole file.
 const promoteHeaderBytes = 16 * 1024
 
 // markerRules is the CLOSED marker table: each rule names one kind and the

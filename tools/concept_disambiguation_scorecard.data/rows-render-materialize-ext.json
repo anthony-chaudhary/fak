@@ -439,6 +439,25 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x-render-materialize-rendercomparison",
+      "canonical": "RenderComparison (naive-control two-arm table)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "naivecontrol.RenderComparison (internal/naivecontrol/compare.go:172) writes the `fak naive-control compare` text report: the ledger line and optional window, one column per arm for runs, picks offered and git-shipped, ship rate, commits claimed and landed, wall and controller time, cost and cost per shipped pick, then every reason a cell reads UNKNOWN. The compare verb calls it for non-JSON output (cmd/fak/naive_control.go:501).",
+      "distinction": "It only formats a Comparison that naivecontrol.Compare already folded; it decides nothing. It is not `x-ci-coverage-render-materialize-rendercompare`, the bench-runs before/after block, and not `x2-render-materialize-rendercontrast`, the session-observation value-vs-waste report.",
+      "distinct_from": [
+        "x-ci-coverage-render-materialize-rendercompare",
+        "x2-render-materialize-rendercontrast"
+      ],
+      "aliases": [],
+      "grounding": "RenderComparison",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

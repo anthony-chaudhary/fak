@@ -32,7 +32,8 @@ FAK already has the first substrate in `internal/composition`,
 `internal/modeldescriptor`, `internal/resourcelifecycle`,
 `internal/causalreceipt`, and `internal/archfitness`. The next move is to extend
 those primitives, not introduce a second plugin, orchestration, or scorecard
-architecture.
+architecture. (Later update: `internal/composition` and `internal/resourcelifecycle`
+were removed because no production path called them.)
 
 ## Scope, cutoff, and evidence limits
 
@@ -237,9 +238,9 @@ disaggregated handoff, structured output, and MoE placement.
 
 | Existing primitive | Current contract | Architectural role |
 |---|---|---|
-| `internal/composition` | `fak.composition-snapshot/1` plus a validated composition receipt | Binds intent, model, execution, resource claims, and graph edges before execution. |
+| `internal/composition` (removed) | `fak.composition-snapshot/1` plus a validated composition receipt | Binds intent, model, execution, resource claims, and graph edges before execution. |
 | `internal/modeldescriptor` | `fak.model-capability-descriptor/1` and `fak.model-onboarding-report/1` | Describes witnessed fak-native capability and enforces an onboarding coupling budget. |
-| `internal/resourcelifecycle` | Claims, allocations, observations, ownership, placement, teardown, and receipts | Provides the seed for explicit resource authority and lifecycle accounting. |
+| `internal/resourcelifecycle` (removed) | Claims, allocations, observations, ownership, placement, teardown, and receipts | Provides the seed for explicit resource authority and lifecycle accounting. |
 | `internal/causalreceipt` | `fak.causal-receipt/1` | Joins IDs, decisions, phases, resources, metrics, and incident answers into replayable evidence. |
 | `internal/archfitness` | `fak.architecture-fitness/1` and ratchet behavior | Measures dependency DAG, frozen seams, family switches, change amplification, descriptor coverage, ownership, fixtures, causal evidence, schema migration, hot-path scaling, privacy/cardinality, and stale exceptions. |
 
@@ -464,9 +465,9 @@ attach the gap to an existing owner when its intended outcome and witness match.
 - [`docs/research/sglang-2026-08-27/README.md`](sglang-2026-08-27/README.md)
 - [`docs/notes/CONCEPT-STUDY-DYNAMO-2026-07-18.md`](../notes/CONCEPT-STUDY-DYNAMO-2026-07-18.md)
 - [`docs/notes/CONCEPT-STUDY-MOJO-2026-08-21.md`](../notes/CONCEPT-STUDY-MOJO-2026-08-21.md)
-- [`internal/composition/composition.go`](../../internal/composition/composition.go)
+- `internal/composition/composition.go` (removed)
 - [`internal/modeldescriptor/descriptor.go`](../../internal/modeldescriptor/descriptor.go)
-- [`internal/resourcelifecycle/lifecycle.go`](../../internal/resourcelifecycle/lifecycle.go)
+- `internal/resourcelifecycle/lifecycle.go` (removed)
 - [`internal/causalreceipt/receipt.go`](../../internal/causalreceipt/receipt.go)
 - [`internal/archfitness/fitness.go`](../../internal/archfitness/fitness.go)
 

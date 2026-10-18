@@ -61,7 +61,6 @@ var tier = map[string]int{
 	"gym":             5, // sandbox evaluation gym, scenario runner, and closed-loop multi-turn harness simulation (#11652, #11666).
 	"observer":        1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
 	"director":        3, // autonomous multi-agent roll-up digest for zero-self-report supervisor steering (#11411).
-	"studyreceipt":    1,
 	"stopgate":        1, // unified lifecycle stop gates across fak guard and fak agent (#11253); stdlib-only, off the hot path.
 	"abi":             0,
 	"launchguard":     1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
@@ -214,7 +213,6 @@ var tier = map[string]int{
 	"testroute":             1,                // pure host test-route fold (native / WSL / CI) over caller-supplied probe data; stdlib-only, no I/O.
 	"mergepreview":          2,                // read-only shared-trunk merge preview over git merge-tree; stdlib-only, off the hot path.
 	"taskdecision":          1,                // task-scoped append-only decision log loaded into reset carryover; stdlib-only, off the hot path.
-	"sweepconfig":           2,                // agent sweep profile load/save/list helpers over JSON/YAML-lite config; stdlib-only, off the hot path.
 	"qwen36parity":          1,                // Qwen3.6 Mac parity witness grader/scrubber over JSON artifacts; stdlib-only, off the hot path.
 	"whatschanged":          2,                // read-only peer code-diff readout over git log/diff-tree; stdlib-only, off the hot path.
 	"modver":                2,                // per-module version derivation over git log/ls-files (the version-everything spine); imports appversion(1)+windowgate(1), off the hot path.
@@ -366,7 +364,6 @@ var tier = map[string]int{
 	"maturity":            2, // pure feature-maturity lifecycle scorecard: folds dos.toml lanes + the tree's import graph into a per-capability ladder rung + next-work backlog; stdlib-only, off the hot path.
 	"dropin":              1,
 	"comm":                3,
-	"cohort":              3, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
 	"agenttopo":           3, // declared agent communication DAG over comm.Group + modelroute folds.
 	"promptmmu":           2, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
 	"loopmgr":             2, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing â€” those stay in the producers.
@@ -395,7 +392,6 @@ var tier = map[string]int{
 	"savingsvector":       1, // pure four-account saving-decomposition lens over a turnbench Report's already-measured fields (local_cpu/gpu_prefill/context_window/wall_clock, labeled per axis); stdlib-only, imports nothing internal, off the hot path.
 	"swebenchsota":        3, // SWE-bench SOTA leaderboard snapshot: a tool-shaped leaf that extracts the embedded leaderboard JSON (regex+unescape), folds the per-group SOTA, and emits a versioned snapshot. net/http fetch off the hot path; imports nothing internal.
 	"borrowprovenance":    1, // exact-source provenance pin + drift verification: pure SHA-256/validation contract, stdlib-only and off the hot path.
-	"ultracodeborrow":     1, // deterministic study-artifact contract for source/license/axis/owner/benchmark/privacy completeness; stdlib-only and off the hot path.
 	"dogfoodissues":       4, // dogfood-action-issues backlog bridge: folds a recent-feature dogfood report.json into scorecard ACTION items, derives a stable dedup key per item, renders the marker-stamped issue body, and (only on --live) composes the external `gh` CLI to create/update one issue per item. Composer: shells out off the hot path, imports nothing internal.
 	"learningdebt":        4, // learning-scorecard HARD-defect -> GitHub triage issue dispatcher (#1283): folds learning_scorecard.py --json defects into stable keys, dedups (seen-cache + issue-body marker), caps, dry-run by default; shells to gh/python off the hot path, imports nothing internal.
 	"horizonrecovery":     1, // pure budget-recovery (term r) grounding lens over a ctxplanbench report's already-measured real-transcript fields: surfaces the recovery ratio + its fault-rate FENCE co-located, structurally refuses to emit r/horizon_multiplier; stdlib-only, imports nothing internal, off the hot path.
@@ -493,11 +489,9 @@ var tier = map[string]int{
 	"fusedturn":           1, // executable "one turn spawns both": classifies each abi.ToolCall into its concept-family (classical / weight-based) + folds a FusedTurn (fused iff it spans both) whose Adjudicate proves both families cross ONE floor via an injected Decider (*kernel.Kernel.BatchDecide); imports only abi(0), off the hot path.
 	"workerworktree":      2, // native port of tools/worker_worktree.py (#3168): per-worker git worktree isolation (prepare detached-at-SHA / land diff onto trunk / reap) that the Go dispatch spawn wires in behind a default-off flag; imports windowgate(1) for the no-window git runner + stdlib, off the hot path.
 	"speedab":             1, // pure pinned fast-vs-standard manifest grader; stdlib-only, off the hot path.
-	"closurerate":         1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
 	"issuecost":           2, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
 	"mutationbudget":      1, // GitHub mutation throttle guard: holds close/comment bursts with an actionable reason when remaining API budget < reserve; stdlib-only, off the hot path.
 	"mutationefficacy":    2, // bounded SOFT mutation-testing probe (#3845): applies operator mutants over an allow-list, runs `go test`, counts survivors as SOFT KPI; imports pkg/scorecard + os/exec, off the hot path.
-	"completiondist":      2, // fold historical issue-closure durations into a distribution (median/p95/buckets) for the capacity model; reuses fleetmetrics+fleetcap; stdlib-only, off the hot path.
 	"auditreason":         1, // closed vocabulary classifying commit-audit failures as transient (retryable) vs permanent unwitnessed claim; stdlib-only, off the hot path.
 	"commitissuelink":     1, // pure checker (#1812): flags a commit that carries this repo's ship-stamp trailer but whose subject omits a scannable #N, guessing the issue from a body Fixes/Closes/Resolves trailer when one exists; stdlib-only, off the hot path.
 	"committedtree":       2, // neutral committed git tree materialization shared by runtime and fak-dev; imports windowgate, no command ownership.
@@ -603,7 +597,6 @@ var tier = map[string]int{
 	"fleetbus":              2, // #5600 (epic #5599): the fleet control bus — the cross-PROCESS join sessionctl(3)/broadcast (per-gateway, ack-less) and fleetspine(1) (display-only, one-way) each lack. Three envelopes (directive/instance/ack) over a swappable Bus, with the return path as the load-bearing half: a directive is never its own witness, the consuming instance's ack is. Declares NO ops — the bus is a carrier and the APPLIER (cmd/fak) owns op meaning, which is exactly what keeps a fleet-level carrier from importing sessionctl(3) and lets it carry control ops that are not session ops. Exactly-once application under at-least-once delivery via a per-(instance,directive) O_EXCL claim marker. Imports flock(1)+jsonlledger(1), off the hot path. NOT pureRoot (it imports sibling leaves).
 	"gitbroker":             2, // #5622 (rung 3 of epic #5619): the resident per-repo git query broker separate short-lived client processes share over one AF_UNIX socket — token-authed transport, a Class A (content-addressed, full-OID keyed) object cache that by construction needs no invalidation, and a mandatory provenance tag (broker/cache/fallback-spawn) on every answer. Fail-open is the safety argument: every client call is deadlined and ANY broker problem re-derives the answer by spawning git through the same Runner, so a dead broker costs latency and a provenance tag, never bytes. Imports windowgate(1)+stdlib (net/os/exec/crypto) — every `git cat-file --batch` spawn takes the no-window hook, since the fallback path spawns under background automation on a Windows fleet; off the hot path. NOT pureRoot (it imports a sibling leaf).
 	"tokenprofile":          3,
-	"docrender":             2,
 	"pagespublish":          2, // Pure stdlib pre/post-build audit for source UTF-8, artifact breadth, SEO metadata, sitemap, and exact deploy manifests; off the hot path.
 	"learningobservation":   2, // #5982 (parent #2908): content-addressed observation/candidate/witness/verdict records plus the seven closed-enum lineage relations. Pure stdlib durable substrate; admission policy remains outside this leaf. Off the hot path.
 	"learningmesh":          2, // #9839: deterministic cross-envelope transfer candidates; orchestration and execution remain outside this leaf.
@@ -698,7 +691,6 @@ var tier = map[string]int{
 	"sessionrecovery":       2, // selects and witnesses bounded crash recovery without provider-private state (#8013).
 	"harnessinstructions":   3, // tier-3 adapter composing public harness instructions through the host-owned system-prompt MMU.
 	"sessionintent":         1, // stdlib-only session control declarations and deterministic stop evaluation (#7352).
-	"subtractiveprofile":    1, // stdlib-only deterministic capability subtraction algebra (#6791).
 	"harnessmodelset":       1,
 	"modelsetresolve":       2, // deterministic role resolution composing tier-1 intent and inventory contracts.
 	"modelsetlock":          2,
@@ -710,7 +702,6 @@ var tier = map[string]int{
 	"modelloadplan":              3, // deterministic Qwen load planner over harnessresolve locks; off the hot path (#8134).
 	"geminicache":                2, // provider CachedContent lifecycle adapter over stdlib HTTP and immutable context identity (#8481).
 	"qwen38ladder":               1, // stdlib-only paired evidence gate from pinned Qwen3.5 proxies to exact Qwen3.8-27B (#8011).
-	"scratchmark":                1, // #6616 stdlib-only bounded detector for source artifacts self-declared disposable in their leading comment block.
 	"fleetsearch":                3, // read-only join over lifecycle/sessionjournal/toolproc evidence; no runtime kernel.
 	"discoveryrouter":            3, // bounded read-only composition over existing discovery sources; no storage or runtime kernel.
 	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
@@ -719,16 +710,11 @@ var tier = map[string]int{
 	"projectionspine":            2, // disposable projection restart and session reattach spine (#8912); composes supervisionpolicy restart budgets and fault domains.
 	"hostdiag":                   3,
 	"shellprov":                  2, // privacy-safe receipt store for fak-owned shell launch identity (#9086); composes flock for serialized broker receipt updates.
-	"ultracodetokenizer":         1,
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
-	"studydrift":                 2, // external source source refresh and supersession receipt primitive (#8611).
 	"servicewatchdog":            2, // systemd lifecycle read-back and watchdog progress integration (#8654).
 	"computetrace":               1, // stdlib-only bounded compute-event artifact schema and recorder.
-	"ultracodenegcontrol":        1,
 	"computetune":                2, // offline offline tuning decision primitive over replayable compute traces (#8608).
-	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
 	"systembaseline":             1,
-	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
 	"archrank":                   3, // deterministic research-ranking method; no runtime kernel (#9145).
 	"qwen4exp":                   1, // stdlib-only deterministic native four-layer correctness oracle (#9123).
 	"studyclass":                 2,
@@ -743,7 +729,6 @@ var tier = map[string]int{
 	"archfitness":                1, // stdlib-only architecture fitness report contract.
 	"causalreceipt":              2, // causal-receipt validation/ordering contract plus Produce, which folds a computetrace(1) artifact into a receipt (23d4a6ad7) -- a foundation-composite like computetune(2), not a stdlib-only primitive.
 	"cloudhandoff":               1, // stdlib-only cloud handoff contract and deterministic planner.
-	"composition":                1, // stdlib-only immutable composition identity and validation contract.
 	"docsearch":                  2, // shared documentation loader/search composite over trigram ranking.
 	"localadmission":             1, // stdlib-only local runtime admission state primitive.
 	"localappcontract":           1, // stdlib-only local application protocol contract.

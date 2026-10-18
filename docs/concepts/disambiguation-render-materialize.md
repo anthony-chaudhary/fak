@@ -6,7 +6,6 @@ description: "This map positions the current render-materialize coverage backlog
 
 This map positions the current `render-materialize` coverage backlog. Each entry names the exact repository symbol; the family label remains the broader domain and is not a substitute for the symbol.
 
-- **`docrender`** — the exact `render-materialize` symbol `docrender`; use this spelling for that operation rather than the undifferentiated family name.
 - **`materializeraw`** — the exact `render-materialize` symbol `materializeraw`; use this spelling for that operation rather than the undifferentiated family name.
 - **`renderings`** — the exact `render-materialize` symbol `renderings`; use this spelling for that operation rather than the undifferentiated family name.
 - **`renderissue`** — the exact `render-materialize` symbol `renderissue`; use this spelling for that operation rather than the undifferentiated family name.

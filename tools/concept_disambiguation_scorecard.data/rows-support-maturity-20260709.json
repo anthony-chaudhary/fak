@@ -107,6 +107,24 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x-support-maturity-errwarmprefixunsupported",
+      "canonical": "ErrWarmPrefixUnsupported (agent warm-prefix refusal)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "agent.ErrWarmPrefixUnsupported (internal/agent/inkernel_warm.go:66) is the fail-closed sentinel WarmPrefix returns when a planner cannot materialize or restore a native prefix cache: a nil planner, an unbounded descriptor, no prefix tree, a recompute-only model or backend, or a V4.1 route without complete-snapshot continuation, each with its own closed receipt reason. The turnkey startup warm tests for it with errors.Is (cmd/fak/up_agent_warm.go:314) and reports the warm as unsupported rather than degraded.",
+      "distinction": "It means this planner cannot warm at all; a cancelled context or a device fault returns a cold receipt with a different error. It is not `kvprefixreusesupported`, the per-architecture predicate on whether a KV cache is the complete session prefix, which is only one of the gates behind this refusal.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [],
+      "grounding": "ErrWarmPrefixUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

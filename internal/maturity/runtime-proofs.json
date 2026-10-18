@@ -543,11 +543,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/closurerate",
-            "lane": "closurerate"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/cloudhandoff",
             "lane": "cloudhandoff"
         },
@@ -618,11 +613,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/cohort",
-            "lane": "cohort"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/comm",
             "lane": "comm"
         },
@@ -670,16 +660,6 @@
             "command": "fak version modules",
             "output_contains": "internal/compactcohere",
             "lane": "compactcohere"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/completiondist",
-            "lane": "completiondist"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/composition",
-            "lane": "composition"
         },
         {
             "command": "fak version modules",
@@ -1000,11 +980,6 @@
             "command": "fak version modules",
             "output_contains": "internal/docreach",
             "lane": "docreach"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/docrender",
-            "lane": "docrender"
         },
         {
             "command": "fak version modules",
@@ -3022,11 +2997,6 @@
             "lane": "scratchjanitor"
         },
         {
-            "command": "fak version modules",
-            "output_contains": "internal/scratchmark",
-            "lane": "scratchmark"
-        },
-        {
             "command": "fak dev devindex leaf seatpark",
             "output_contains": "seatpark",
             "lane": "seatpark"
@@ -3433,11 +3403,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/studydrift",
-            "lane": "studydrift"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/studyforge",
             "lane": "studyforge"
         },
@@ -3457,19 +3422,14 @@
             "lane": "studyprio"
         },
         {
-            "command": "fak version modules",
-            "output_contains": "internal/studyreceipt",
+            "command": "fak dev devindex leaf studyreceipt",
+            "output_contains": "studyreceipt  ok",
             "lane": "studyreceipt"
         },
         {
             "command": "fak version modules",
             "output_contains": "internal/studytickets",
             "lane": "studytickets"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/subtractiveprofile",
-            "lane": "subtractiveprofile"
         },
         {
             "command": "fak version modules",
@@ -3530,11 +3490,6 @@
             "command": "fak version modules",
             "output_contains": "internal/sweepcert",
             "lane": "sweepcert"
-        },
-        {
-            "command": "fak dev devindex leaf sweepconfig",
-            "output_contains": "sweepconfig",
-            "lane": "sweepconfig"
         },
         {
             "command": "fak dev devindex leaf syspromptmmu",
@@ -3795,31 +3750,6 @@
             "command": "fak version modules",
             "output_contains": "internal/ultracodebench",
             "lane": "ultracodebench"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/ultracodeborrow",
-            "lane": "ultracodeborrow"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/ultracodecrossover",
-            "lane": "ultracodecrossover"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/ultracodedogfood",
-            "lane": "ultracodedogfood"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/ultracodenegcontrol",
-            "lane": "ultracodenegcontrol"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/ultracodetokenizer",
-            "lane": "ultracodetokenizer"
         },
         {
             "command": "fak version modules",

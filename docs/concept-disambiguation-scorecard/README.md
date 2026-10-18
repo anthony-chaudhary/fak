@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **662** (clarity 0 + coverage 662) |
-| **Crystal-clear concepts (and climbing)** | **1282** crystal of 3089 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3167 / 3829** (82.7% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **660** (clarity 0 + coverage 660) |
+| **Crystal-clear concepts (and climbing)** | **1281** crystal of 3090 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3167 / 3827** (82.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **89** of 4346 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3089 concepts - score 88.8/100 (grade B) - disambiguation-debt 662
+concept-disambiguation chart - 3090 concepts - score 88.8/100 (grade B) - disambiguation-debt 660
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1282
-  o defined       ############################ 1807
+  * crystal       ####################........ 1281
+  o defined       ############################ 1809
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -53,10 +53,10 @@ clarity mix by family (each cell = one concept):
   plan             *****************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (418 concept(s); 173 crystal)
   policy-capability ***************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 99 crystal)
   pool             **********ooooooooooooooooooooooooooooooooo (43 concept(s); 10 crystal)
-  render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
+  render-materialize *******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  ***********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (269 concept(s); 95 crystal)
-  support-maturity *****************************************************ooooooooooooooooooooooooooo (80 concept(s); 53 crystal)
+  support-maturity *****************************************************oooooooooooooooooooooooooooo (81 concept(s); 53 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 83 crystal)
@@ -71,8 +71,8 @@ coverage by family (positioned / discovered):
   context-ctx      ########################.... 268/314
   pool             ##############.............. 44/85
   policy-capability ########################.... 225/264
-  support-maturity ####################........ 85/122
-  render-materialize ########################.... 217/251
+  support-maturity ####################........ 85/121
+  render-materialize ########################.... 217/250
   witness-proof    ########################.... 172/198
   score-debt       #######################..... 114/139
   evict            ####################........ 57/79
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3167/3829 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.8%  (3167/3827 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4346 lookup name(s) -> 3089 concept(s), 89 ambiguous
+name index: 4346 lookup name(s) -> 3090 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2432 / 5664 |
+| Boundaries drawn (mutual / total) | 2432 / 5665 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4346 over 3089 concepts |
+| Lookup names indexed | 4346 over 3090 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3089 |
+| Concepts carrying a contrast set | 3090 |
 
 ## The concepts (best verdict first)
 
@@ -1116,7 +1116,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | render-materialize | **renderNativePerformance** - cmd/fak.renderNativePerformance projects a validated nativeperf.Graph into the human hill-climb report: envelope and comparison headers, the enabled/status/rung checklist, expected-versus-witnessed throughput, feature stack, gaps, and independent envelopes. |
 | * | crystal | symbol | render-materialize | **renderDeepSeekV41Chat (DeepSeek V4.1 GGUF-style prompt)** - Renders the implemented DeepSeek V4.1 GGUF-style chat grammar: role boundaries, tool definitions and DSML tool-call history, merged tool results, and response-format instructions in the in-kernel prompt path. |
 | * | crystal | symbol | render-materialize | **RenderAdapterReport (benchmark adapter layout)** - internal/benchmarkdown RenderAdapterReport renders the shared headings, metadata order, summary table, task table, promotion section, and spacing for an already-projected benchmark adapter report. |
-| * | crystal | symbol | render-materialize | **render-materialize implementation surface for docrender** - `docrender` is the render-materialize symbol declared or used at `internal/docrender/doc.go:1` as `// Package docrender turns this repo's Markdown into a print-ready HTML page and,`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for materializeraw** - `materializeRaw` is the render-materialize symbol declared or used at `internal/contextq/contextq.go:382` as `materializeRaw(ctx, im, req, &res, frames, entries, selected, excluded)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for renderings** - `renderings` is the render-materialize symbol declared or used at `internal/gateway/compaction_contract.go:30` as `// One source, two renderings, so they cannot disagree about what the boundary did.`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for renderissue** - `RenderIssue` is the render-materialize symbol declared or used at `internal/ideascout/fetch.go:187` as `// label (RenderIssue always emits ScoutLabel) and the matching`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2868,6 +2867,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | render-materialize | **RenderIteration (guardrsi)** - guardrsi.RenderIteration formats one guard-verdict-RSI iteration (rows folded, verdict-quality delta, honesty holes, candidate lever, keep/revert rule) as text; sibling RenderScorecard formats the guard-RSI scorecard payload. |
 | o | defined | symbol | render-materialize | **renderReason (repoguard)** - repoguard.renderReason builds the human refusal message when a destructive/write op targets a path outside the repo, listing each violating op->target with its resolved path and the remediation. |
 | o | defined | concept | render-materialize | **render (verb)** - render is the repo-wide convention for a pure projection function that turns a typed value into a human/Markdown/wire/terminal text surface (e.g. the bare `func render` in loophealth and dispatchworker), without mutating its input. |
+| o | defined | symbol | render-materialize | **RenderComparison (naive-control two-arm table)** - naivecontrol.RenderComparison (internal/naivecontrol/compare.go:172) writes the `fak naive-control compare` text report: the ledger line and optional window, one column per arm for runs, picks offered and git-shipped, ship rate, commits claimed and landed, wall and controller time, cost and cost per shipped pick, then every reason a cell reads UNKNOWN. The compare verb calls it for non-JSON output (cmd/fak/naive_control.go:501). |
 | o | defined | metric | score-debt | **per-scorecard *_debt integer** - Each scorecard emits one named debt integer counting its surface's unmet rungs — learning_debt (unwitnessed learning docs), conflation_debt (provenance honesty), growth_debt (silently-undefined coverage cells), loopindex_debt (loop stages not yet witnessed), maturity_debt (support-maturity ladder skips), support_maturity_debt, dogfood_debt, sessionobs_debt — read in delta folds via the DebtKey constant and the baseline/current bDebt/cDebt locals. |
 | o | defined | subsystem | score-debt | **named scorecard surface (payload + baseline)** - These are concrete scorecard surfaces and their plumbing: learning_scorecard, code_quality_scorecard, and product_scorecard are distinct deterministic measurement tools, ScorecardPayload is the per-scorecard struct carrying corpus/KPIs/grade, and tools/scorecard_baseline.json is the pinned baseline the control-pane ratchet reds against. |
 | o | defined | symbol | score-debt | **conceptusagedebt (score-debt identifier)** - conceptusagedebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
@@ -3133,6 +3133,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | support-maturity | **ParityVerdict (eveparity witness)** - The eveparity.Witness.ParityVerdict string field ('pass' | 'divergent') Compare sets: pass only when every case agrees on pass/fail with a byte-identical reason and no hard-gate failure was downgraded to a soft score; any disagreement or downgrade flips it to divergent. |
 | o | defined | symbol | support-maturity | **ParityVerdict (recall replica agreement)** - The recall package's uint8 enum (ParityAgree | ParityResolved | ParityConflict) ParityFinding.Verdict carries: whether several replicas of one logical memory resource corroborate on bytes, resolve to one clear live witness, or conflict with no clear winner (#786). |
 | o | defined | metric | support-maturity | **CosineParity (arm-vs-reference output cosine)** - CosineParity is the cosine similarity between a candidate arm's output and its reference arm's output: the Strix ablation receipt records it per ablation row (internal/amdgpu/strix_receipt.go:739), the Strix candidate verdict marks a run REGRESSED when it is NaN or below the configured minimum (internal/amdgpu/strix_candidate.go), and the Qwen3.8 subagent packet requires it at or above MinCosineParity 0.9999 (internal/cachevalue/qwen38_subagent_packet.go). |
+| o | defined | symbol | support-maturity | **ErrWarmPrefixUnsupported (agent warm-prefix refusal)** - agent.ErrWarmPrefixUnsupported (internal/agent/inkernel_warm.go:66) is the fail-closed sentinel WarmPrefix returns when a planner cannot materialize or restore a native prefix cache: a nil planner, an unbounded descriptor, no prefix tree, a recompute-only model or backend, or a V4.1 route without complete-snapshot continuation, each with its own closed receipt reason. The turnkey startup warm tests for it with errors.Is (cmd/fak/up_agent_warm.go:314) and reports the warm as unsupported rather than degraded. |
 | o | defined | symbol | witness-proof | **loopmgr witnessed run-status set** - The loop/bench witnessed run-status family: loopmgr.StatusWitnessRefused ("witness_refused") and StatusWitnessUnavailable ("witness_unavailable"), bench/loopgate VerdictWitnessed/OutcomeWitnessed ("witnessed") and its witnessed_done promotion, callavoid's WitnessedRedirect and its WitnessedEmpty count, and loopindex's WitnessedIndex health score. |
 | o | defined | symbol | witness-proof | **unwitnessed-claim reason set** - The unwitnessed-claim deny/re-arm reason family: loopgate.ReasonDoneUnwitnessed ("LOOP_DONE_UNWITNESSED", the re-arm reason when a done claim has no witness, as adjudicated for a claim-unwitnessed turn) and the proposed context-safety SAFETY_UNWITNESSED DOS refusal token for a rendered number with no tamper-evident source. |
 | o | defined | symbol | witness-proof | **ReviewRefute (scout review verdict)** - modelroute.ReviewRefute is the scout-review verdict value "refute" returned when an opt-in pre-commit review rejects a diff; safecommit raises it to the ReasonReviewRefuted ("REVIEW_REFUTED") refusal that blocks the commit before it lands. |
@@ -3166,7 +3167,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **cloneWitness** - cloneWitness (internal/taskmgr/evidence.go) is the deep-copy helper for a WitnessRecord, so handed-off evidence cannot alias the stored record. |
 | o | defined | symbol | witness-proof | **CoreLockWitness** - CoreLockWitness (internal/safecommit/safecommit.go) is the result field carrying the witness claim under which a core-lock hold was cleared. |
 | o | defined | symbol | witness-proof | **CoreLockMaintenanceWitness** - CoreLockMaintenanceWitness (internal/safecommit) is the commit option: an independent witness claim that may clear a core-lock maintenance hold. |
-| o | defined | symbol | witness-proof | **HasWitness** - HasWitness (internal/closurerate/closurerate.go) is the bit recording whether an issue close points at a diff, commit, or test witness. |
+| o | defined | symbol | witness-proof | **HasWitness** - HasWitness (the hasWitness parameter of ProvenanceFromJournal in internal/recall/journal_index.go) is the bit recording whether a journal row carries a live witness; when set, the row grades as witnessed. |
 | o | defined | symbol | witness-proof | **MissingWitness** - MissingWitness (internal/devexmeter) lists the friction classes whose meter window lacked a witness, keeping the meter honest about gaps. |
 | o | defined | config | witness-proof | **LOOP_DONE_UNWITNESSED** - LOOP_DONE_UNWITNESSED (internal/gateway/adjudicate_proposed.go ReasonLoopBodyUnwitnessed) is the closed refusal token for a loop body claiming done with no witness. |
 | o | defined | symbol | witness-proof | **dos_witness_verbs** - dos_witness_verbs.go (internal/hooks) is fak's bounded mirror of the DOS commit-audit claim classifier's code-effect verb set. |
@@ -3369,8 +3370,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3232/5664 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3089 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3233/5665 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3090 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3395,8 +3396,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | context-ctx | 268 | 314 | 46 |
 | pool | 44 | 85 | 41 |
 | policy-capability | 225 | 264 | 39 |
-| support-maturity | 85 | 122 | 37 |
-| render-materialize | 217 | 251 | 34 |
+| support-maturity | 85 | 121 | 36 |
+| render-materialize | 217 | 250 | 33 |
 | witness-proof | 172 | 198 | 26 |
 | score-debt | 114 | 139 | 25 |
 | evict | 57 | 79 | 22 |

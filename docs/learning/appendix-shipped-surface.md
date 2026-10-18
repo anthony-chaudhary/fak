@@ -510,7 +510,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/customizationindex` | Indexes supported customization seams so operators can discover the owning guide and contract. |
 | `internal/depthadmit` | Folds witnessed plan depth and admits continuation only while declared closure can still be reached. |
 | `internal/dispatchdoa` | Detects workers that died before completing useful dispatch work. |
-| `internal/docrender` | Renders repository Markdown into print-ready HTML and related publication artifacts. |
 | `internal/fleetbus` | Carries typed fleet-control messages rather than treating terminal text as a control protocol. |
 | `internal/generationctl` | Coordinates live generation epochs, steering directives, and their acknowledgements. |
 | `internal/gitbroker` | Centralizes guarded git execution and the resident content-addressed read broker. |
@@ -535,7 +534,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/projectassets` | Resolves canonical project assets and proves generated copies remain in parity. |
 | `internal/quantdetect` | Performs bounded, weight-free detection of quantization formats. |
 | `internal/quantprov` | Carries neutral provenance for quantized artifacts and their transformations. |
-| `internal/scratchmark` | Detects source files whose leading contract marks them as disposable scratch. |
 | `internal/serveradapter` | Renders configuration for supported external inference servers and probes readiness. |
 | `internal/serverlifecycle` | Owns one local server instance from configuration through readiness and teardown. |
 | `internal/serverproduct` | Defines the secret-free boundary between a server product description and its adapter. |
@@ -543,7 +541,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/skilleffectiveness` | Measures whether loading a skill improved witnessed outcomes for matched work. |
 | `internal/skillfootprint` | Prices the resident skill-description context floor. |
 | `internal/streamrules` | Matches incremental provider output against regex rules without waiting for stream completion. |
-| `internal/studydrift` | Detects when a pinned external study no longer matches the source revision it analyzed. |
 | `internal/studymonitor` | Folds study provenance and drift checks into an operator-readable monitoring verdict. |
 | `internal/taskvc` | Binds enabled fleet Scheduled Tasks to versioned installers or scrubbed captures. |
 | `internal/tempartifact` | Inventories and conservatively reaps direct fak temporary artifacts. |
@@ -551,7 +548,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/toolcallcontrol` | Applies deterministic pre-execution checks to proposed tool calls. |
 | `internal/toolcatalog` | Separates executable tool registration from the catalog metadata agents discover. |
 | `internal/ultracodebench` | Evaluates paired single-agent and fleet coding runs with accepted-effect accounting. |
-| `internal/ultracodenegcontrol` | Evaluates predeclared negative controls so fleet gains cannot be self-attributed. |
 | `internal/valuechain` | Verifies that promised value-chain stages resolve to observed, evidence-bearing artifacts. |
 
 The recurring pattern is shell → pure fold → witness: for example,

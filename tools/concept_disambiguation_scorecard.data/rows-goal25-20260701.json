@@ -1225,8 +1225,8 @@
       "canonical": "HasWitness",
       "family": "witness-proof",
       "kind": "symbol",
-      "definition": "HasWitness (internal/closurerate/closurerate.go) is the bit recording whether an issue close points at a diff, commit, or test witness.",
-      "distinction": "A presence BIT on a close record, not a witness mechanism.",
+      "definition": "HasWitness (the hasWitness parameter of ProvenanceFromJournal in internal/recall/journal_index.go) is the bit recording whether a journal row carries a live witness; when set, the row grades as witnessed.",
+      "distinction": "A presence BIT on a journal row, not a witness mechanism.",
       "distinct_from": [
         "claim"
       ],

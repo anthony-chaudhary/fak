@@ -39,7 +39,6 @@ literal	internal/contextq	IndexViewTypes	ViewType	1
 literal	internal/dispatchtick	bucketWorkClass	LaunchBucket	1
 literal	internal/dispatchtick	highRiskVerbs	MetaAction	1
 literal	internal/dispatchtick	readOnlyVerbs	MetaAction	1
-literal	internal/docrender	corpusRules	Kind	1
 literal	internal/engine	measuredProvenances	CacheProvenance	1
 literal	internal/executionroute	StateKind.BoundAxes	CompatAxis	3
 literal	internal/fleetmon	eligibleClasses	Classification	1

@@ -3,7 +3,7 @@
 **Issue:** [#8484](https://github.com/anthony-chaudhary/fak/issues/8484)  
 **Observed:** 2026-08-21 20:12 PDT  
 **Machine companion:** [`CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.json`](CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.json)  
-**Deterministic witness:** `internal/ultracodeborrow/check_test.go`
+**Deterministic witness:** none; the companion is frozen data (its Go checker had no gate and was removed)
 
 ## Verdict
 

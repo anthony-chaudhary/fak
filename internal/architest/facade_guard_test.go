@@ -30,11 +30,6 @@ var facadeOffList = map[string]string{
 	"advmodel":              "reachability-roster entry for fak version modules lanes; no self-registration",
 	"breathgate":            "reachability-roster entry for fak version modules lanes; no self-registration",
 	"cavemansafety":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"closurerate":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"cohort":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"completiondist":        "reachability-roster entry for fak version modules lanes; no self-registration",
-	"composition":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"docrender":             "reachability-roster entry for fak version modules lanes; no self-registration",
 	"fakrpc":                "reachability-roster entry for fak version modules lanes; no self-registration",
 	"guardcorpus":           "reachability-roster entry for fak version modules lanes; no self-registration",
 	"knownenv":              "reachability-roster entry for fak version modules lanes; no self-registration",
@@ -49,16 +44,6 @@ var facadeOffList = map[string]string{
 	"portabilityswitch":     "reachability-roster entry for fak version modules lanes; no self-registration",
 	"projectionspine":       "reachability-roster entry for fak version modules lanes; no self-registration",
 	"reflexagent":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"scratchmark":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"studydrift":            "reachability-roster entry for fak version modules lanes; no self-registration",
-	"studyreceipt":          "reachability-roster entry for fak version modules lanes; no self-registration",
-	"subtractiveprofile":    "reachability-roster entry for fak version modules lanes; no self-registration",
-	"sweepconfig":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodeborrow":       "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodecrossover":    "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodedogfood":      "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodenegcontrol":   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodetokenizer":    "reachability-roster entry for fak version modules lanes; no self-registration",
 
 	// fak-private#2609: internal/registrations is also a shipped registration surface.
 	// These imports are deliberate reachability-roster links and have no init side effects.
