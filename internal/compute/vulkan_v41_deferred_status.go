@@ -135,12 +135,13 @@ func (v *vulkanBackend) V41BF16PublishDeferred(input Tensor, site uint32) (out T
 // V41ReadDeferred reads every status record and row with one fvk_v41_d2h_many
 // and frees every record, on success and failure alike.
 func (v *vulkanBackend) V41ReadDeferred(statuses []V41DeferredStatus, rows []Tensor) ([]error, [][]float32, error) {
-	return v.v41ReadDeferredLayout(statuses, rows, nil, 0, false)
+	return v.v41ReadDeferredLayout(statuses, rows, nil, 0, v41DeferredReadOrdinary)
 }
 
 // An explicit mode selects the packed-panel layout. Invalid width cannot fall
 // back to legacy typed-arena materialization or obtain an independence grant.
-func (v *vulkanBackend) v41ReadDeferredLayout(statuses []V41DeferredStatus, rows []Tensor, panelRows []int, width int, packed bool) (verdicts []error, values [][]float32, err error) {
+func (v *vulkanBackend) v41ReadDeferredLayout(statuses []V41DeferredStatus, rows []Tensor, panelRows []int, width int, mode v41DeferredReadMode) (verdicts []error, values [][]float32, err error) {
+	packed := mode != v41DeferredReadOrdinary
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	records := make([]*vulkanBuf, 0, len(statuses))
@@ -252,7 +253,12 @@ func (v *vulkanBackend) v41ReadDeferredLayout(statuses []V41DeferredStatus, rows
 	logicalRows := len(rows)
 	if packed {
 		var ok bool
-		logicalRows, ok = v41DeferredPanelRows(rows, panelRows, width)
+		switch mode {
+		case v41DeferredReadRoutedPanel:
+			logicalRows, ok = v41DeferredPanelRows(rows, panelRows, width)
+		case v41DeferredReadGroupedPanel:
+			logicalRows, ok = v41GroupedDeferredPanelLayout(statuses, rows, panelRows, width)
+		}
 		if !ok || len(statuses) > 64 || verdictCount > 64 {
 			return nil, nil, invalid("packed deferred logical row layout exceeds cohort bounds")
 		}
@@ -368,11 +374,30 @@ func (v *vulkanBackend) v41BindDeferredPanelReader(original V41DeferredStatusBac
 }
 
 func (v *vulkanBackend) v41ReadDeferredPanels(statuses []V41DeferredStatus, panels []Tensor, rows []int, width int) ([]error, V41DeferredReadResult, error) {
-	verdicts, values, err := v.v41ReadDeferredLayout(statuses, panels, rows, width, true)
+	verdicts, values, err := v.v41ReadDeferredLayout(statuses, panels, rows, width, v41DeferredReadRoutedPanel)
 	if err != nil {
 		return nil, V41DeferredReadResult{}, err
 	}
 	// Panel materialization always allocates independent rows, including singleton
 	// regions mixed with chunks. Mint only after physical status cleanup succeeds.
+	return verdicts, V41DeferredReadResult{count: len(values), state: &v41DeferredReadState{rows: values, independent: true}}, nil
+}
+
+// The grouped grant is separate from routed cohorts and cannot be inherited by
+// a wrapper that overrides deferred reads or publication semantics.
+func (v *vulkanBackend) v41BindGroupedDeferredPanelReader(original V41DeferredStatusBackend) V41GroupedDeferredPanelReader {
+	canonical, ok := original.(*vulkanBackend)
+	if !ok || canonical != v || v == nil {
+		return nil
+	}
+	return v.v41ReadGroupedDeferredPanel
+}
+
+func (v *vulkanBackend) v41ReadGroupedDeferredPanel(statuses []V41DeferredStatus, panel Tensor, rows, width int) ([]error, V41DeferredReadResult, error) {
+	verdicts, values, err := v.v41ReadDeferredLayout(statuses, []Tensor{panel}, []int{rows}, width, v41DeferredReadGroupedPanel)
+	if err != nil {
+		return nil, V41DeferredReadResult{}, err
+	}
+	// The shared packed path has retired every status before this grant.
 	return verdicts, V41DeferredReadResult{count: len(values), state: &v41DeferredReadState{rows: values, independent: true}}, nil
 }

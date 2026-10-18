@@ -269,6 +269,11 @@ func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compu
 	valid := func(t compute.Tensor, n int) bool {
 		return t.Backend() == s.Backend && t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && t.Numel() == n
 	}
+	// Bind before publication; wider groups/chunks retain ordinary readback.
+	var panelRead compute.V41GroupedDeferredPanelReader
+	if compute.V41GroupedDeferredPanelEligible(count, groups, dim) {
+		panelRead = compute.BindV41GroupedDeferredPanelReader(deferred)
+	}
 	read := func(outputs []compute.Tensor) ([][]float32, error) {
 		status := make([]compute.V41DeferredStatus, len(pending))
 		for i := range pending {
@@ -276,17 +281,7 @@ func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compu
 		}
 		meta := pending
 		pending = nil
-		verdicts, values, cause := deferred.V41ReadDeferred(status, outputs)
-		if cause != nil {
-			return nil, cause
-		}
-		if len(verdicts) != len(meta) || len(values) != len(outputs) {
-			return nil, errV41BF16BoundaryResult
-		}
-		if fault := v41GroupedPanelFirstFault(verdicts, meta, count, groups); fault != nil {
-			return nil, fault
-		}
-		return values, nil
+		return v41GroupedPanelReadRows(deferred, panelRead, status, meta, outputs, count, groups, dim)
 	}
 	var primary any
 	var primaryPresent, bodyReturned bool
@@ -447,15 +442,8 @@ func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compu
 			if cause != nil {
 				return nil, cause
 			}
-			if len(values[0]) != count*dim || !v41BF16Widened(values[0]) {
-				return nil, errV41ProjectionResult
-			}
 			stats.readback += int64(count*dim) * 4
-			result = make([][]float32, count)
-			for t := range result {
-				result[t] = append([]float32(nil), values[0][t*dim:(t+1)*dim]...)
-			}
-			return result, nil
+			return values, nil
 		}()
 		complete = true
 	}()
@@ -494,4 +482,70 @@ func v41GroupedPanelFirstFault(verdicts []error, meta []v41GroupedPanelStatus, r
 	}
 	_ = groups
 	return best
+}
+
+func v41GroupedPanelReadRows(deferred compute.V41DeferredStatusBackend, panelRead compute.V41GroupedDeferredPanelReader, status []compute.V41DeferredStatus, meta []v41GroupedPanelStatus, outputs []compute.Tensor, count, groups, dim int) ([][]float32, error) {
+	var verdicts []error
+	var values [][]float32
+	var result compute.V41DeferredReadResult
+	var cause error
+	packed := panelRead != nil && len(outputs) == 1
+	expected := len(outputs)
+	got := 0
+	if packed {
+		verdicts, result, cause = panelRead(status, outputs[0], count, dim)
+		expected, got = count, result.RowCount()
+	} else {
+		verdicts, values, cause = deferred.V41ReadDeferred(status, outputs)
+		got = len(values)
+	}
+	if cause != nil {
+		return nil, cause
+	}
+	if len(verdicts) != len(meta) || got != expected {
+		return nil, errV41BF16BoundaryResult
+	}
+	if fault := v41GroupedPanelFirstFault(verdicts, meta, count, groups); fault != nil {
+		return nil, fault
+	}
+	// A status-only cleanup keeps the ordinary reader and never takes rows.
+	if len(outputs) == 0 {
+		return values, nil
+	}
+	independent := false
+	if packed {
+		values, independent = result.TakeRows()
+	}
+	return v41GroupedPanelHostRows(values, count, dim, packed, independent)
+}
+
+// Independence comes only from the sealed read result after numeric verdicts.
+// Unknown readers retain copies; returning one row never retains sibling rows.
+func v41GroupedPanelHostRows(values [][]float32, count, dim int, packed, independent bool) ([][]float32, error) {
+	if packed {
+		if len(values) != count {
+			return nil, errV41ProjectionResult
+		}
+		for _, row := range values {
+			if len(row) != dim || !v41BF16Widened(row) {
+				return nil, errV41ProjectionResult
+			}
+		}
+		if independent {
+			return values, nil
+		}
+		rows := make([][]float32, count)
+		for i, row := range values {
+			rows[i] = append([]float32(nil), row...)
+		}
+		return rows, nil
+	}
+	if len(values) != 1 || len(values[0]) != count*dim || !v41BF16Widened(values[0]) {
+		return nil, errV41ProjectionResult
+	}
+	rows := make([][]float32, count)
+	for i := range rows {
+		rows[i] = append([]float32(nil), values[0][i*dim:(i+1)*dim]...)
+	}
+	return rows, nil
 }

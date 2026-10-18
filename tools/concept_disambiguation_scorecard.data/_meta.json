@@ -18139,6 +18139,11 @@
           "category": "incidental",
           "reason": "Names required quantization scale arrangement evidence in a pretrained-drafter intake checklist; it declares no new layout implementation or compatibility claim.",
           "token": "scale_layouts"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private pure validation helper for the existing F32 RowMajor grouped-output panel and scalar deferred-status descriptors. It checks row, width, count and extent bounds and returns logical row count; it defines no new tensor layout, byte ordering or storage representation.",
+          "token": "v41GroupedDeferredPanelLayout"
         }
       ],
       "id": "layout",
@@ -18161,6 +18166,7 @@
         "scale_layouts",
         "usesmlamoelayout",
         "v41DeferredLayout",
+        "v41GroupedDeferredPanelLayout",
         "v41HeadLayout",
         "v41HeadLayoutSnapshot",
         "v41HeadLayoutSupported",
