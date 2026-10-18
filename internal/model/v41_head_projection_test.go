@@ -399,7 +399,7 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 		b := newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false)
 		s := v41EngProjSession(t, m, b)
 		st := s.v41State()
-		normalize := st.finalNorm
+		normalize := st.finalNorm()
 		if normalize == nil {
 			normalize = func(row []float32) ([]float32, error) {
 				return rmsnorm(row, m.tensor("model.norm.weight"), float32(m.Cfg.RMSNormEps)), nil
@@ -407,13 +407,13 @@ func TestV41HeadProjectionSelectedFailureRollback(t *testing.T) {
 		}
 		fault := errors.New("prior final norm sentinel")
 		calls := 0
-		st.finalNorm = func(row []float32) ([]float32, error) {
+		st.setFinalNorm(func(row []float32) ([]float32, error) {
 			calls++
 			if calls == 2 {
 				return nil, fault
 			}
 			return normalize(row)
-		}
+		})
 		err := recoverError(func() { s.Prefill([]int{1, 2, 3}) })
 		var selected *V41ProjectionOperationError
 		if !errors.As(err, &selected) || !errors.Is(err, fault) || selected.Stage != string(v41StageFinalNorm) {
@@ -567,19 +567,19 @@ func TestV41HeadProjectionFullNormAndScaleSemantics(t *testing.T) {
 			b := newV41HeadProjBackend(m.kqw["lm_head.weight"].raw, false)
 			s := v41EngProjSession(t, m, b)
 			st := s.v41State()
-			normalize := st.finalNorm
+			normalize := st.finalNorm()
 			if normalize == nil {
 				normalize = func(row []float32) ([]float32, error) {
 					return rmsnorm(row, m.tensor("model.norm.weight"), float32(m.Cfg.RMSNormEps)), nil
 				}
 			}
 			normCalls := 0
-			st.finalNorm = func(row []float32) ([]float32, error) {
+			st.setFinalNorm(func(row []float32) ([]float32, error) {
 				normCalls++
 				return normalize(row)
-			}
+			})
 			boundaryCalls := map[string]int{}
-			st.bf16Boundary = func(layer int, site string, row []float32) ([]float32, error) {
+			st.setBF16Boundary(func(layer int, site string, row []float32) ([]float32, error) {
 				if layer == -1 && (site == "model.norm.weight input" || site == "model.norm.weight output") {
 					boundaryCalls[site]++
 				}
@@ -588,7 +588,7 @@ func TestV41HeadProjectionFullNormAndScaleSemantics(t *testing.T) {
 					out[i] = v41RoundBF16(value)
 				}
 				return out, nil
-			}
+			})
 			ids := []int{1, 2, 3}
 			got := s.Prefill(ids)
 			candidateOps := append([]v41HeadProjOp(nil), b.operations...)

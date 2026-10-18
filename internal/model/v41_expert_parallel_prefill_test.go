@@ -204,7 +204,7 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 						s := m.NewBackendSession(b)
 						sessions = append(sessions, s)
 						st := s.v41State()
-						if b.expertWork || b.V41RowLogAvailable() || st.gatherOps.bf16PublishFunc() != nil || st.bf16Boundary != nil || st.routedExpert == nil {
+						if b.expertWork || b.V41RowLogAvailable() || st.gatherOps.bf16PublishFunc() != nil || st.bf16Boundary() != nil || st.routedExpert == nil {
 							panic("expert-only recorder bound unrelated capability or omitted packed owner binding")
 						}
 						st.setRouterTopK(func(int, []float32, []float32, v41RouterConfig, bool) ([]routePick, error) {
@@ -381,7 +381,7 @@ func TestV41ExpertParallelPrefillPanelTCP(t *testing.T) {
 					s := m.NewBackendSession(b)
 					sessions[rank] = s
 					st := s.v41State()
-					if b.expertWork || b.V41RowLogAvailable() || st.gatherOps.bf16PublishFunc() != nil || st.bf16Boundary != nil || st.routedExpert == nil {
+					if b.expertWork || b.V41RowLogAvailable() || st.gatherOps.bf16PublishFunc() != nil || st.bf16Boundary() != nil || st.routedExpert == nil {
 						panic("expert-only recorder bound unrelated capability or omitted packed owner binding")
 					}
 					prefill, step := st.routedPrefill, st.routedLayer

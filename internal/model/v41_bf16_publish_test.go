@@ -104,7 +104,7 @@ func TestV41BF16PublishHelpersRoundOnDevice(t *testing.T) {
 	b := newV41BF16PublishRecorder()
 	s := v41DenseTestSession(t, m, b)
 	publish := s.v41BF16PublishFunc()
-	if publish == nil || s.v41State().gatherOps.bf16Publish == nil || s.v41State().bf16Boundary == nil {
+	if publish == nil || s.v41State().gatherOps.bf16Publish == nil || s.v41State().bf16Boundary() == nil {
 		t.Fatal("ordinary publication not bound for a backend that supports it")
 	}
 	H := m.Cfg.HiddenSize

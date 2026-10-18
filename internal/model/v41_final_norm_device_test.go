@@ -57,7 +57,7 @@ func TestV41FinalNormDeviceDispatch(t *testing.T) {
 	newSession := func(t *testing.T) (*Session, *v41FinalNormTestBackend) {
 		b := &v41FinalNormTestBackend{v41DenseTestBackend: newV41DenseTestBackend(), normalized: map[compute.Buffer]bool{}}
 		s := v41DenseTestSession(t, m, b)
-		if s.v41State().finalNorm == nil {
+		if s.v41State().finalNorm() == nil {
 			t.Fatal("device session did not bind final RMSNorm")
 		}
 		return s, b
@@ -197,7 +197,7 @@ func TestV41FullFinalNormBF16Owner(t *testing.T) {
 	// Direct device callback ABI is still F32; only the full graph owner rounds.
 	b := newV41DenseTestBackend()
 	device := v41DenseTestSession(t, m, b)
-	direct, err := device.v41State().finalNorm(input)
+	direct, err := device.v41State().finalNorm()(input)
 	if err != nil {
 		t.Fatal(err)
 	}

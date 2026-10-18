@@ -302,7 +302,7 @@ func TestV41DSparkCaptureTailAndFailure(t *testing.T) {
 		}
 		defer c.close()
 		fault := errors.New("late cold head fault")
-		s.v41Forward.finalNorm = func([]float32) ([]float32, error) { return nil, fault }
+		s.v41Forward.setFinalNorm(func([]float32) ([]float32, error) { return nil, fault })
 		_, err = m.forwardV41(nil, s.v41Forward)
 		if !errors.Is(err, fault) {
 			t.Fatalf("head cause: %v", err)
@@ -323,7 +323,7 @@ func TestV41DSparkCaptureTailAndFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(c.close)
-			s.v41Forward.finalNorm = func(x []float32) ([]float32, error) { cancel(); return x, nil }
+			s.v41Forward.setFinalNorm(func(x []float32) ([]float32, error) { cancel(); return x, nil })
 			_, _, err = m.forwardV41StepCore(3, s.v41Forward, nil, false, !noLogits)
 			if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(before, captureV41ForwardSnapshot(s.v41Forward)) {
 				t.Fatalf("late cancellation changed target state (noLogits=%v): %v", noLogits, err)

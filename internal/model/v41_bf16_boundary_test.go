@@ -132,7 +132,7 @@ func TestV41BF16BoundaryFinalNormDispatch(t *testing.T) {
 	m := v41FullStepPatchedNorms(t)
 	b := newV41BF16BoundaryRecorder()
 	s := v41DenseTestSession(t, m, b)
-	if s.v41State().bf16Boundary == nil {
+	if s.v41State().bf16Boundary() == nil {
 		t.Fatal("session did not bind BF16 callback")
 	}
 	v41GroupedParity(t, s.Prefill([]int{1, 2}), lastLogits(m.Forward([]int{1, 2})), 1e-4)

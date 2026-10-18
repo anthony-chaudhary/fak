@@ -205,16 +205,16 @@ func TestV41BF16BoundaryVulkan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer control.Close()
-	control.v41State().bf16Boundary = nil
+	control.v41State().setBF16Boundary(nil)
 	calls := 0
-	round := device.v41State().bf16Boundary
+	round := device.v41State().bf16Boundary()
 	if round == nil {
 		t.Fatal("production session did not bind witness boundary")
 	}
-	device.v41State().bf16Boundary = func(layer int, site string, row []float32) ([]float32, error) {
+	device.v41State().setBF16Boundary(func(layer int, site string, row []float32) ([]float32, error) {
 		calls++
 		return round(layer, site, row)
-	}
+	})
 	for _, pair := range [][2][]float32{{device.Prefill([]int{1, 2}), control.Prefill([]int{1, 2})}, {device.Step(3), control.Step(3)}} {
 		if len(pair[0]) != len(pair[1]) {
 			t.Fatal("logit width mismatch")

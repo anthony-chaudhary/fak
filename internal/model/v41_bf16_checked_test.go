@@ -192,7 +192,7 @@ func TestV41BF16CheckedFinalNormDispatch(t *testing.T) {
 		s := v41DenseTestSession(t, m, b)
 		input := []float32{math.Float32frombits(0x80000000), math.Float32frombits(0x00018000), math.Float32frombits(0x3f808000), math.Float32frombits(0x3f818000)}
 		original := append([]float32(nil), input...)
-		round := s.v41State().bf16Boundary
+		round := s.v41State().bf16Boundary()
 		got, err := round(-1, "model.norm.weight input", input)
 		if err != nil || b.calls != 1 || b.rawCalls != 0 || len(got) != len(input) {
 			t.Fatalf("checked finite publication not selected: calls=%d err=%v", b.calls, err)
@@ -274,7 +274,7 @@ func TestV41BF16CheckedFinalNormDispatch(t *testing.T) {
 			case "unknown-site":
 				site = "unknown"
 			}
-			got, err := s.v41State().bf16Boundary(-1, site, values)
+			got, err := s.v41State().bf16Boundary()(-1, site, values)
 			var closed *BackendForwardOperationError
 			if got != nil || !errors.As(err, &closed) || closed.Path != "v41-bf16-checked" || !s.BackendSessionClosed() || len(b.checkedLive) != 0 {
 				t.Fatalf("invalid checked publication not closed: mode=%s err=%v", mode, err)

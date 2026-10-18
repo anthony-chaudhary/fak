@@ -82,7 +82,7 @@ func v41DeviceParitySeams(st *v41ForwardState) (bound, host []string) {
 		{"expert_gate_up", st.expertGateUp != nil}, {"expert_down", st.expertDown != nil},
 		{"dense_projection", st.denseProjection() != nil}, {"grouped_output", st.groupedOutput != nil},
 		{"engram_projection", st.engramProjection != nil}, {"mhc_projection", st.mhcProjection != nil},
-		{"mhc_ffn_projection", st.mhcFFNProjection != nil}, {"final_norm", st.finalNorm != nil},
+		{"mhc_ffn_projection", st.mhcFFNProjection != nil}, {"final_norm", st.finalNorm() != nil},
 		{"attention_norm", st.attentionNormFunc() != nil}, {"attention_bf16", st.attentionBF16Func() != nil},
 		{"query_norm", st.queryNorm != nil}, {"kv_norm", st.kvNorm != nil}, {"ffn_norm", st.ffnNorm != nil},
 		{"compressor_norm", st.compressorNorm != nil}, {"index_key_norm", st.indexKeyNorm != nil},

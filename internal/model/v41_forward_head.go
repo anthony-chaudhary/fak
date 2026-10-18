@@ -21,7 +21,11 @@ func (m *Model) v41HeadWithBF16Boundary(x []float32, project v41DenseProjectionF
 }
 
 func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFunc, normalize v41FinalNormFunc, round v41BF16BoundaryFunc, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
-	xf, err := m.v41PrepareHeadInput(x, normalize, round)
+	return m.v41HeadWithLogitScaleBound(x, project, &v41FinalNormBinding{normalize: normalize, round: round}, nil, scale, refuse)
+}
+
+func (m *Model) v41HeadWithLogitScaleBound(x []float32, project v41DenseProjectionFunc, binding *v41FinalNormBinding, state *v41ForwardState, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
+	xf, err := m.v41PrepareHeadInputBound(x, binding, state)
 	if err != nil {
 		return nil, err
 	}
@@ -35,6 +39,11 @@ func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFun
 // v41PrepareHeadInput retains the serial final-normalization and BF16 boundaries.
 // A cohort prepares each row separately; normalization never crosses sessions.
 func (m *Model) v41PrepareHeadInput(x []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
+	return m.v41PrepareHeadInputBound(x, &v41FinalNormBinding{normalize: normalize, round: round}, nil)
+}
+
+func (m *Model) v41PrepareHeadInputBound(x []float32, binding *v41FinalNormBinding, state *v41ForwardState) ([]float32, error) {
+	normalize, round := binding.normFunc(), binding.roundFunc()
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
 			fmt.Errorf("%w: missing model.norm.weight", ErrV41ForwardStage))
@@ -53,6 +62,12 @@ func (m *Model) v41PrepareHeadInput(x []float32, normalize v41FinalNormFunc, rou
 	}
 	var xf []float32
 	if full {
+		if values, selected, cause := binding.try(m, state, x); selected {
+			if cause != nil {
+				return nil, &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, cause)}
+			}
+			return values, nil
+		}
 		xf, err = m.v41FullFinalNormWithBF16Boundary(x, normalize, round)
 		if err != nil {
 			return nil, err

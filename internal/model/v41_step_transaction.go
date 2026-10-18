@@ -403,7 +403,11 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 				return nil, err
 			}
 		}
-		return m.v41PrepareHeadInput(headInput, st.finalNorm, st.bf16Boundary)
+		headState := st
+		if scratch.activationTrace != nil {
+			headState = nil
+		}
+		return m.v41PrepareHeadInputBound(headInput, st.headNorm, headState)
 	}
 	tx.headProject = func(input []float32) ([]float32, error) {
 		return m.v41ProjectHeadInput(input, scratch.denseProjection(), 1)

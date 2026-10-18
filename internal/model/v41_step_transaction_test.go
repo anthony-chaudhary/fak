@@ -71,7 +71,7 @@ func TestV41StepTransactionInterleavedSessions(t *testing.T) {
 				}
 			}
 			if fail && lane == 1 {
-				states[lane].finalNorm = func([]float32) ([]float32, error) { return nil, sentinel }
+				states[lane].setFinalNorm(func([]float32) ([]float32, error) { return nil, sentinel })
 			}
 			before[lane] = captureV41ForwardSnapshot(states[lane])
 			registry[lane] = states[lane].attn
@@ -855,9 +855,9 @@ func TestV41StepRoundNoLogitsFailure(t *testing.T) {
 				if fault == "nonfinite-normalization" {
 					want = errV41ProjectionResult
 				}
-				normalize := st.finalNorm
+				normalize := st.finalNorm()
 				calls := 0
-				st.finalNorm = func(input []float32) ([]float32, error) {
+				st.setFinalNorm(func(input []float32) ([]float32, error) {
 					calls++
 					if fault == "normalization-error" {
 						return nil, primary
@@ -865,10 +865,10 @@ func TestV41StepRoundNoLogitsFailure(t *testing.T) {
 					row := append([]float32(nil), input...)
 					row[0] = float32(math.NaN())
 					return row, nil
-				}
+				})
 				headCalls := m.V41ExpertFaultAttribution().Decode.HeadProjectionHostCalls
 				got := recoverError(func() { _ = tx.finalizeNoLogits() })
-				st.finalNorm = normalize
+				st.setFinalNorm(normalize)
 				var selected *V41ProjectionOperationError
 				if calls != 1 || !errors.Is(got, want) || !errors.As(got, &selected) ||
 					tx.stats.Committed || !tx.closed || len(st.history) != len(before.history)+1 ||

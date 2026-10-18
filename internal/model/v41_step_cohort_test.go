@@ -230,7 +230,7 @@ func TestV41StepCohortIsolation(t *testing.T) {
 		}
 		fault := errors.New("selected lane one head fault")
 		calls := 0
-		f.lanes[1].session.v41State().finalNorm = func([]float32) ([]float32, error) { calls++; return nil, fault }
+		f.lanes[1].session.v41State().setFinalNorm(func([]float32) ([]float32, error) { calls++; return nil, fault })
 		f.backend.reset()
 		panicked := recoverError(func() { _, _ = m.forwardV41StepCohort(&owner, f.lanes) })
 		if !errors.Is(panicked, fault) || calls != 1 || f.backend.beginCalls != 1 || f.backend.ends != 1 {

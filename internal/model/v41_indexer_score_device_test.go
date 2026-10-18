@@ -373,14 +373,14 @@ func TestV41IndexerKeyResidency(t *testing.T) {
 		st := s.v41State()
 		before := captureV41ForwardSnapshot(st)
 		fault := errors.New("after index scoring")
-		st.finalNorm = func([]float32) ([]float32, error) { return nil, fault }
+		st.setFinalNorm(func([]float32) ([]float32, error) { return nil, fault })
 		calls := len(b.calls)
 		err := recoverError(func() { _, _, _ = m.forwardV41Step(6, st, nil) })
 		var selected *V41ProjectionOperationError
 		if !errors.As(err, &selected) || !errors.Is(err, fault) || len(b.calls) != calls+2 || !reflect.DeepEqual(captureV41ForwardSnapshot(st), before) {
 			t.Fatalf("late selected panic did not roll back publication after both scores: %v", err)
 		}
-		st.finalNorm = nil
+		st.setFinalNorm(nil)
 		uploads := b.keyUploadBytes
 		v41ScoreTestBits(t, s.Step(7), control.Step(7))
 		if b.keyUploadBytes-uploads != int64(2*3*m.Cfg.IndexHeadDim*4) {

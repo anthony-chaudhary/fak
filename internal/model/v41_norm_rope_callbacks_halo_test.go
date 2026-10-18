@@ -176,7 +176,7 @@ func v41NormRoPEHaloIsolate(st *v41ForwardState) {
 	st.gatherOps, st.mhcDevice = nil, nil
 	// The final-norm BF16 pair binds the ordinary publication; this witness
 	// budgets only its five callbacks' dispatches.
-	st.bf16Boundary = nil
+	st.setBF16Boundary(nil)
 }
 
 // FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 with the Halo SPIRV
@@ -277,8 +277,9 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 	if st.attentionNormFunc() != nil || hs.attentionNormFunc() != nil || st.compressorNorm != nil || hs.compressorNorm != nil || st.indexKeyNorm != nil || hs.indexKeyNorm != nil {
 		t.Fatal("five-callback witness did not isolate adjacent normalization seams")
 	}
-	hs.queryNorm, hs.kvNorm, hs.ffnNorm, hs.finalNorm, hs.tailRoPE = nil, nil, nil, nil, nil
-	query, kv, ffn, final, rope := st.queryNorm.normFunc(), st.kvNorm.normFunc(), st.ffnNorm.normFunc(), st.finalNorm, st.tailRoPE
+	hs.queryNorm, hs.kvNorm, hs.ffnNorm, hs.tailRoPE = nil, nil, nil, nil
+	hs.setFinalNorm(nil)
+	query, kv, ffn, final, rope := st.queryNorm.normFunc(), st.kvNorm.normFunc(), st.ffnNorm.normFunc(), st.finalNorm(), st.tailRoPE
 	if query == nil || kv == nil || ffn == nil || final == nil || rope == nil {
 		t.Fatal("one of five required native callbacks is unbound")
 	}
@@ -292,9 +293,9 @@ func TestV41NormRoPECallbacksHalo(t *testing.T) {
 	st.ffnNorm = &v41FFNNormBinding{ordinary: func(l int, x []float32) ([]float32, error) {
 		return w.norm(s, layerName(l, "ffn_norm.weight"), "ffn_norm", x, func() ([]float32, error) { return ffn(l, x) })
 	}}
-	st.finalNorm = func(x []float32) ([]float32, error) {
+	st.setFinalNorm(func(x []float32) ([]float32, error) {
 		return w.norm(s, "model.norm.weight", "final_norm", x, func() ([]float32, error) { return final(x) })
-	}
+	})
 	st.tailRoPE = w.rope(rope)
 	total := 0
 	for phase, ids := range [][]int{{1, 2}, {3}, {4, 5}} {

@@ -72,7 +72,7 @@ func TestV41StepPartialGroupUndoRetainsOwnedStorage(t *testing.T) {
 				oldEnd := state.kvPublishedEnd[0]
 				failure := errors.New("head failure after partial-group transition")
 				observed := 0
-				st.finalNorm = func([]float32) ([]float32, error) {
+				st.setFinalNorm(func([]float32) ([]float32, error) {
 					observed++
 					if prefixLen%2 == 1 {
 						if len(state.partialInputs) != 0 || state.kvPublishedEnd[0] != oldEnd+1 {
@@ -86,7 +86,7 @@ func TestV41StepPartialGroupUndoRetainsOwnedStorage(t *testing.T) {
 						t.Fatal("compressor projection/pooling mutated retained input values")
 					}
 					return nil, failure
-				}
+				})
 				// Repeat the fault so an append retry also overwrites a stale slot
 				// outside the restored length, without corrupting retained ownership.
 				for attempt := 0; attempt < 2; attempt++ {
@@ -130,7 +130,7 @@ func TestV41StepPartialGroupUndoRetainsOwnedStorage(t *testing.T) {
 						t.Fatal("public reader or snapshot aliases retained partial input")
 					}
 				}
-				st.finalNorm = nil
+				st.setFinalNorm(nil)
 				if got, want := branch.Step(5), peer.Step(5); !reflect.DeepEqual(got, want) {
 					t.Fatal("retry logits differ from untouched sibling continuation")
 				}

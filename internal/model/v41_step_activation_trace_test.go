@@ -218,7 +218,7 @@ func TestV41StepActivationTrace(t *testing.T) {
 		failed.Prefill(prefix)
 		positions := v41AllNextWindowPos(failed.v41Forward)
 		fault := errors.New("selected head failure")
-		failed.v41State().finalNorm = func([]float32) ([]float32, error) { return nil, fault }
+		failed.v41State().setFinalNorm(func([]float32) ([]float32, error) { return nil, fault })
 		path := filepath.Join(t.TempDir(), "aborted.json")
 		withV41ActivationTraceEnv(t, path)
 		if err := recoverError(func() { failed.Step(next) }); !errors.Is(err, fault) {

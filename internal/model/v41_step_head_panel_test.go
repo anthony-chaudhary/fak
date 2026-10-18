@@ -295,14 +295,14 @@ func TestV41StepCohortSharedHead(t *testing.T) {
 	t.Run("selected decline cannot replay on host", func(t *testing.T) {
 		f := newV41SharedHeadFixture(t, m)
 		st := f.lanes[1].session.v41State()
-		norm := st.finalNorm
-		st.finalNorm = func(x []float32) ([]float32, error) {
+		norm := st.finalNorm()
+		st.setFinalNorm(func(x []float32) ([]float32, error) {
 			f.b.deny = true
 			if norm != nil {
 				return norm(x)
 			}
 			return m.finalNorm(x), nil
-		}
+		})
 		var owner sync.Mutex
 		got := recoverError(func() { _, _ = m.forwardV41StepCohortSharedHead(&owner, f.lanes) })
 		var selected *V41ProjectionOperationError
@@ -332,14 +332,14 @@ func TestV41StepCohortSharedHead(t *testing.T) {
 		defer cancel()
 		f.lanes[1].ctx = ctx
 		st := f.lanes[1].session.v41State()
-		norm := st.finalNorm
-		st.finalNorm = func(x []float32) ([]float32, error) {
+		norm := st.finalNorm()
+		st.setFinalNorm(func(x []float32) ([]float32, error) {
 			cancel()
 			if norm != nil {
 				return norm(x)
 			}
 			return m.finalNorm(x), nil
-		}
+		})
 		var owner sync.Mutex
 		got, err := m.forwardV41StepCohortSharedHead(&owner, f.lanes)
 		if err != nil || !got[0].stats.Committed || got[1].stats.Committed || !errors.Is(got[1].err, context.Canceled) || !reflect.DeepEqual(f.b.headRows, []int{1}) {
