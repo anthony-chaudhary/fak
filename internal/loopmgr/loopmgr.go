@@ -133,8 +133,8 @@ const (
 // Phase projects a LoopState onto the shared lifecycle skeleton. The bool is false
 // for the supervisor-only extras (Armed/Disabled) and any unknown string — the
 // projection is explicit about the extras, never a silent default. This is the
-// supervisor half of the #912 "one machine" converter; internal/lifebridge
-// composes it with the served-session half.
+// supervisor half of the #912 "one machine" mapping; session.RunState.Phase is
+// the served-session half.
 func (s LoopState) Phase() (lifecycle.Phase, bool) {
 	switch s {
 	case StateRunning:

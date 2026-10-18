@@ -1,6 +1,6 @@
 # Codex logical-session continuity
 
-`sessionctl.CodexSession` owns the durable fak identity, semantic cursor, execution epoch, input lease, and replay journal for a Codex-backed session. `codexsession.Adapter` owns only the provider wire protocol.
+`sessionctl.CodexSession` owns the durable fak identity, semantic cursor, execution epoch, input lease, and replay journal for a Codex-backed session. The provider wire protocol is out of scope here, and no in-tree adapter drives this state today.
 
 - `New`, `Resume`, and `Fork` are explicit operations. A failed resume never creates a hidden replacement thread.
 - The Codex thread ID and adapter version are persisted as opaque provider coordinates beneath the fak logical-session ID.

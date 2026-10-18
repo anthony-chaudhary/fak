@@ -193,22 +193,6 @@
       "gaps": []
     },
     {
-      "id": "x-session-runtime-sessionreplay",
-      "canonical": "sessionreplay (package)",
-      "family": "session-runtime",
-      "kind": "subsystem",
-      "definition": "internal/sessionreplay freezes one turn's regime-conditioned harness decision as a fak.sessionreplay.v1 fixture and re-adjudicates it through the REAL adjudicator over an internal/policy regime floor for regression testing.",
-      "distinction": "The REPLAY-REGRESSION fixture package (re-adjudicates a captured turn for regression) - not sessionsearch (cross-session recall over the guard journal) and not sessionctl (the redirect control op).",
-      "distinct_from": ["x-session-runtime-sessionsearch", "x-session-runtime-sessionctl"],
-      "aliases": [],
-      "grounding": "sessionreplay",
-      "grounding_kind": "path",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-session-runtime-handlefaksession",
       "canonical": "handleFakSession",
       "family": "session-runtime",

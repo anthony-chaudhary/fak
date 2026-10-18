@@ -30,7 +30,6 @@ This map positions the current `policy-capability` coverage backlog. Each entry 
 - **`multimodalpolicy`** — the exact `policy-capability` symbol `multimodalpolicy`; use this spelling for that operation rather than the undifferentiated family name.
 - **`postureargs`** — the exact `policy-capability` symbol `postureargs`; use this spelling for that operation rather than the undifferentiated family name.
 - **`tunefirepolicy`** — the exact `policy-capability` symbol `tunefirepolicy`; use this spelling for that operation rather than the undifferentiated family name.
-- **`usagepreflight`** — the exact `policy-capability` symbol `usagepreflight`; use this spelling for that operation rather than the undifferentiated family name.
 
 
 ### runtimecap fallback policy (pin/refuse or local CPU degrade)

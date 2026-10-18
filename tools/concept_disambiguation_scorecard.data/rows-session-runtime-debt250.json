@@ -393,8 +393,8 @@
       "canonical": "session-runtime implementation surface for pausesession",
       "family": "session-runtime",
       "kind": "symbol",
-      "definition": "`PAUSE_SESSION` is the session-runtime symbol declared or used at `internal/humanctl/envelope.go:221` as `case \"PAUSE_SESSION\":`. This row positions that concrete implementation surface, not merely the family label.",
-      "distinction": "Use `PAUSE_SESSION` for the operation evidenced at `internal/humanctl/envelope.go:221`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "definition": "`PAUSE_SESSION` is the session-runtime symbol declared or used at `internal/policy/control_vocab.go:71` as `ControlPauseSession: \"PAUSE_SESSION\",`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PAUSE_SESSION` for the operation evidenced at `internal/policy/control_vocab.go:71`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
       "distinct_from": [
         "x2-session-runtime-sessionobs"
       ],
@@ -596,8 +596,8 @@
       "canonical": "session-runtime implementation surface for stopsession",
       "family": "session-runtime",
       "kind": "symbol",
-      "definition": "`STOP_SESSION` is the session-runtime symbol declared or used at `internal/humanctl/envelope.go:223` as `case \"STOP_SESSION\":`. This row positions that concrete implementation surface, not merely the family label.",
-      "distinction": "Use `STOP_SESSION` for the operation evidenced at `internal/humanctl/envelope.go:223`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "definition": "`STOP_SESSION` is the session-runtime symbol declared or used at `internal/policy/control_vocab.go:72` as `ControlStopSession:  \"STOP_SESSION\",`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `STOP_SESSION` for the operation evidenced at `internal/policy/control_vocab.go:72`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
       "distinct_from": [
         "x2-session-runtime-sessionobs",
         "loopsession"
@@ -678,6 +678,25 @@
       ],
       "aliases": [],
       "grounding": "ReleaseSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-stickysessionrouter",
+      "canonical": "StickySessionRouter (harness-version session pin)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "harnessversion.StickySessionRouter (internal/harnessversion/router.go:33) pins each session to one sub-harness runtime version. Route (router.go:190) returns the session's pinned version when it has one; otherwise it negotiates from the X-Fak-Harness-Version header or the request path, falls back to weighted canary selection, and pins the result. The gateway consults it when it admits a session (internal/gateway/session_admit.go:97).",
+      "distinction": "It pins a session to a harness VERSION for canary rollout. It is not `x-session-runtime-llamaslotaffinity`, which pins requests to one llama-server KV slot, and not `cov-debt250-session-runtime-releasesession`, the ctxmmu fork-session teardown.",
+      "distinct_from": [
+        "x-session-runtime-llamaslotaffinity",
+        "cov-debt250-session-runtime-releasesession"
+      ],
+      "aliases": [],
+      "grounding": "StickySessionRouter",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

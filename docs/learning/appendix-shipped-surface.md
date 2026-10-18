@@ -236,9 +236,7 @@ package name. One honest line each.
 
 | Package | Purpose |
 | --- | --- |
-| `internal/chatopsdetach` | Pure detached-execution decision kernel for chatops ACT verbs: ack-now / witnessed-completion / stall-escalation routing. |
 | `internal/doomloop` | Two-axis doom-loop classifier: an effort-vs-verified-progress window → a closed verdict + reversible-first correction. |
-| `internal/dormancysim` | The deterministic time-travel harness for the dormancy organs: one injectable clock threaded through the pure measure and rehydrate leaves, so a test fast-forwards an agent's dormancy from hours to months with zero real waits. |
 | `internal/executionroute` | Composes harness, model, and session routing into one inspectable execution decision. |
 | `internal/guardrotate` | The pure decision core for `fak guard`'s cooldown-aware seat selection: without it a bare `fak guard` launches against an account the launcher just watched bounce off its own cap. |
 | `internal/guardsessions` | The local, queryable index of `fak guard` sessions — one appended row per launch (handle, trace id, wrapped agent, pid, cwd, journal path, start time), and prefix resolution to the one session it names. |
@@ -251,7 +249,6 @@ package name. One honest line each.
 | `internal/sessionctl` | The control-op vocabulary spine of the out-of-band operator control plane: every shipped write op (pause, resume, cancel, throttle, budget, pace, priority, steer, redirect) named once with what "applied" means and how it refuses. |
 | `internal/sessionread` | The read/query/observe-op vocabulary spine — the outbound twin of `sessionctl`: what each shipped read DISCLOSES, under whose right, on what evidence, and how it refuses when the read is illegal. |
 | `internal/sessionledger` | The durable per-trace hash chain the gateway and the RSI loop append to at every turn boundary, as append-only JSONL — one bounded line per append instead of re-marshalling whole-state JSON on every write. |
-| `internal/sessionreplay` | Freezes one turn's regime-conditioned harness decision into a checked-in, deterministically replayable regression fixture, so a mode/regime bug is reproducible with its ambient state pinned, not just its transcript. |
 | `internal/sessionsearch` | Witnessed cross-session recall over the guard session journal: full-text recall whose relevance is MEASURED, so an index that quietly starts returning irrelevant hits is caught instead of trusted. |
 | `internal/sessionsteer` | The steering and admission half of the zero-knob automatic-context doctrine: a content-free snapshot of a long session's context-value advice becomes one typed directive the guard hooks turn into a start-time rule and a stop-time persist decision. |
 | `internal/supervisoragent` | The closed, payload-free INPUT CONTRACT a supervisor agent consumes. The meta-loop actor may CONSUME a witnessed signal and pick a move; it may never MANUFACTURE a health signal by reading transcripts. |
@@ -349,7 +346,6 @@ package name. One honest line each.
 | `internal/projectcompletion` | Folds the board's project-work readouts into completion buckets and points per standard, so "how much of this project is actually done" becomes a derived number instead of a status opinion. |
 | `internal/projectreport` | Folds a GitHub ProjectsV2 board into the same control-pane envelope the milestone report uses, so the board becomes an operator-visible dimension instead of a write-only sync target. |
 | `internal/questionledger` | The deterministic labeling authority for the question-loop ledger: unambiguous ids, a closed category vocabulary, a closed status lifecycle, and no leaked host, path, or email — rules prose in a skill file cannot enforce. |
-| `internal/spendrollup` | Builds the cross-account `fak spend` rollup and gate-fails any figure that forgets its valuation basis or its WITNESSED/OBSERVED provenance label — the conflation card's discipline applied to money. |
 | `internal/steerpr` | Folds continuous-merge trunk commits into operator-legible PR-sized units banded by where operator attention is owed. |
 
 #### G.7 — Context, cache, and token economics
@@ -367,7 +363,6 @@ package name. One honest line each.
 | `internal/stepbatoncapture` | The live-side producer of that stamp: it reads the gateway's managed-context report while the trace is alive and projects it into a durable stamp — kept out of `stepbaton` so that core never imports the gateway. |
 | `internal/stripeload` | Fans a single logical read across N byte-identical mirrors of the same file, sized by relative bandwidth. It is a `ReaderAt`, so the model loader needs no changes to stripe across several NVMes or sources. |
 | `internal/toon` | A general JSON/TOON codec whose correctness spine is a lossless, type-preserving round-trip. A uniform array of flat objects collapses to one header plus one line per row, so field names are not repeated per row. |
-| `internal/turnkind` | Classifies the latest user turn from message STRUCTURE alone — which content-block types it carries, never their content — so a routine tool-result continuation is told apart from a fresh instruction. |
 
 #### G.8 — Model, kernel, and hardware benchmarks
 
@@ -525,7 +520,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/harnessserver` | Binds a harness to an externally owned, already-ready inference server. |
 | `internal/hostdiag` | Correlates Windows resource warnings with privacy-safe fak workload facts. |
 | `internal/httptrust` | Resolves one declared corporate CA bundle source for outbound HTTP clients. |
-| `internal/humanctl` | Indexes operator-requested outcomes and the control surfaces that can satisfy them. |
 | `internal/kvquantmeta` | Defines provider-neutral KV-cache quantization descriptors and compatibility rules. |
 | `internal/leasequeue` | Queues region-admission waiters with explicit ownership instead of busy retry. |
 | `internal/lightgapport` | Audits claimed portability swap points against committed CI witnesses. |

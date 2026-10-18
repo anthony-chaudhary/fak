@@ -151,7 +151,6 @@ var changeDetectorBaseline = []string{
 	"internal/dispatchconservation/tail_test.go",
 	"internal/dispatchtick/priority_test.go",
 	"internal/dojo/claims_test.go",
-	"internal/dormancysim/dormancysim_test.go",
 	"internal/experiments/showcase_contract_test.go",
 	"internal/fleet/fleet_test.go",
 	"internal/fleetpane/fleetpane_test.go",

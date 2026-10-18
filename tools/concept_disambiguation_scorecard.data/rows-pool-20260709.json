@@ -26,8 +26,8 @@
       "canonical": "credential_pool.py (Hermes reference)",
       "family": "pool",
       "kind": "doc-term",
-      "definition": "The external Hermes script agent/credential_pool.py, named in the package comments of internal/metrics/spend.go and internal/spendrollup/spendrollup.go as the prior-art system that pools spend/credentials across accounts but relays the provider's own billed number without labeling who authored the figure.",
-      "distinction": "It is an EXTERNAL reference system fak's own comments cite for contrast, not a fak subsystem: unlike Pool (session)'s in-process bounded session container or PoolProfile's tier-pooling character profile, fak's spendrollup deliberately does NOT copy credential_pool.py's unlabeled pooled-spend model - it draws the WITNESSED/OBSERVED provenance split directly against it.",
+      "definition": "The external Hermes script agent/credential_pool.py, named in the package comment of internal/metrics/spend.go as the prior-art system that pools spend/credentials across accounts but relays the provider's own billed number without labeling who authored the figure.",
+      "distinction": "It is an EXTERNAL reference system fak's own comments cite for contrast, not a fak subsystem: unlike Pool (session)'s in-process bounded session container or PoolProfile's tier-pooling character profile, fak's spend rollup (internal/metrics/spend.go) deliberately does NOT copy credential_pool.py's unlabeled pooled-spend model - it draws the WITNESSED/OBSERVED provenance split directly against it.",
       "distinct_from": [
         "pool-session",
         "poolprofile-cachemeta"
@@ -142,6 +142,24 @@
         "usedPools"
       ],
       "grounding": "usedPools",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-errpoolclosed",
+      "canonical": "ErrPoolClosed (observer pool sentinel)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "observer.ErrPoolClosed (internal/observer/verdict.go:92) is the sentinel the observer worker pool returns after Close: Start refuses with it (internal/observer/pool.go:266), and so does ObserveSyncBarrier (pool.go:499). Close marks the pool closed before stopping it, so a closed pool refuses new observations instead of queueing them.",
+      "distinction": "It means the observer pool was closed for good. A pool halted by Stop alone returns the separate ErrPoolStopped sentinel instead, and unlike `pool-session` this is the observer worker pool, not the bounded session-state container.",
+      "distinct_from": [
+        "pool-session"
+      ],
+      "aliases": [],
+      "grounding": "ErrPoolClosed",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

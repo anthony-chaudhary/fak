@@ -1358,8 +1358,8 @@
       "canonical": "session-runtime implementation surface for codexsession",
       "family": "session-runtime",
       "kind": "symbol",
-      "definition": "`codexsession` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `codexsession` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "definition": "`CodexSession` (internal/sessionctl/codex_resume.go) is the durable fak logical-session record for a Codex-backed session: identity, semantic cursor, execution epoch, input lease and replay journal, with the provider thread ID kept as an opaque coordinate. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `CodexSession` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
       "distinct_from": [
         "x2-session-runtime-sessionobs"
       ],

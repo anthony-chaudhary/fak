@@ -399,13 +399,13 @@ func (p *Package) enumFieldOf(st *ast.StructType) (structEnumField, bool) {
 // TYPE APPEARS ON THE FIRST ValueSpec ONLY.
 //
 //	const (
-//	        KindUnknown Kind = iota // <- typed
-//	        KindNewAsk              // <- ValueSpec.Type is nil
-//	        KindMechanical          // <- ValueSpec.Type is nil
+//	        ClassRefused Class = iota // <- typed
+//	        ClassRead                 // <- ValueSpec.Type is nil
+//	        ClassControl              // <- ValueSpec.Type is nil
 //	)
 //
 // A walker that reads each spec's own Type therefore discovers ONE member of
-// turnkind.Kind instead of four, and every exhaustiveness assertion over it
+// chatops.Class instead of four, and every exhaustiveness assertion over it
 // passes while checking almost nothing. That failure has exactly the shape of
 // the defect this package exists to catch, so it would have been invisible: the
 // suite green and the linter blind. The last-seen type is carried forward
@@ -485,9 +485,9 @@ func mentionsIota(e ast.Expr) bool {
 }
 
 // typeName reduces a type expression to the bare identifier this package
-// reasons about. A qualified name (turnkind.Kind) reduces to its selector, so an
-// EXTERNAL test package's `[]turnkind.Kind` literal is understood as a literal
-// of Kind — fak's hand-written coverage tables routinely live in `package
+// reasons about. A qualified name (chatops.Class) reduces to its selector, so an
+// EXTERNAL test package's `[]chatops.Class` literal is understood as a literal
+// of Class — fak's hand-written coverage tables routinely live in `package
 // foo_test`, and dropping the qualified form would skip every one of them.
 func typeName(e ast.Expr) string {
 	switch t := e.(type) {

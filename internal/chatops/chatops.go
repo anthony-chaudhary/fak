@@ -1,14 +1,14 @@
 // Package chatops is the inbound chatops DOOR — epic #2259 leaf C4 (#2264): the
 // pure fold that turns one raw Slack message into either a closed-grammar verb the
 // fleet operator controls understand, or a structured refusal. It is the READ/authz
-// half of the control surface; the ACT half's execution kernel (internal/chatopsdetach,
-// C5) consumes the Command this door produces.
+// half of the control surface; the ACT half's execution path (C5) is not built, so
+// nothing executes the act verbs this door parses.
 //
 // Tier: foundation (1) — see internal/architest. State in, decision out, no I/O: the
 // door takes a Message + a Config and returns a Result, touching no wire, no clock,
-// and no git. That is the same discipline internal/chatopsdetach and
-// internal/dispatchtick's preflight hold, and it is what lets a test pin the whole
-// security boundary with plain structs and no Slack.
+// and no git. That is the same discipline internal/dispatchtick's preflight holds,
+// and it is what lets a test pin the whole security boundary with plain structs and
+// no Slack.
 //
 // # Why a door at all
 //
@@ -39,9 +39,8 @@
 //
 // A Result that survives all seven carries the verb, its operand, the idempotency
 // nonce (the Slack ts — internal/slackwire's IdemEventType contract), and the channel
-// and user for the ack/audit trail. For an act verb the impure shell lifts those
-// fields into an internal/chatopsdetach.Command (the Verb string values are shared by
-// design) and routes it through guarded dispatch; a read verb is answered inline —
+// and user for the ack/audit trail. An act verb is declined by the impure shell until
+// the guarded-dispatch act path (C5) lands; a read verb is answered inline —
 // notably `status`/`fleet`, which surface the gateway's cross-machine SessionFleet
 // aggregate straight into the channel.
 //
@@ -81,7 +80,7 @@ const (
 	// dispatching work — the halt kill-switch.
 	ClassControl
 	// ClassAct is a mutating verb the shell must DETACH through guarded dispatch
-	// (internal/chatopsdetach): ack now, witnessed completion out-of-band. It is placed
+	// (C5): ack now, witnessed completion out-of-band. It is placed
 	// last so the zero Class is ClassRefused — a zero Result is a refusal, never an
 	// accidental accept.
 	ClassAct

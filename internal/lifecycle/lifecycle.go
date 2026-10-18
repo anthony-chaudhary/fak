@@ -11,8 +11,8 @@
 // converter, so the two machines only LOOKED like one. This package is the literal
 // dedupe that makes the "one machine seen at two altitudes" claim load-bearing
 // (epic #912): the four common tokens are defined here exactly once, both layers
-// source them, and the cross-layer converter (internal/lifebridge) pivots through
-// the Phase below instead of two hand-kept string tables drifting apart.
+// source them, and each layer projects onto the Phase below instead of two
+// hand-kept string tables drifting apart.
 //
 // THE SHARED CORE, NOT THE WHOLE VERB SET.
 // The shared skeleton is the four states both layers carry. The layer-specific

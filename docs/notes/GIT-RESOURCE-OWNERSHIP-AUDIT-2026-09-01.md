@@ -1,5 +1,7 @@
 # Git resource ownership audit — 2026-09-01
 
+> Status: the `internal/gitresource` leaf this note adopted was later removed because no cleanup caller ever used it. The invariants below remain the design input for binding worktree cleanup to fenced Git ownership (#10658).
+
 ## Decision
 
 Adopt a small typed ownership vocabulary in `internal/gitresource`; do not infer authority from a checkout path, branch name, process label, or cleanup caller. The leaf models repository-common, per-worktree, path-set, and selected runtime resources, then admits cleanup only after an exact owner-and-epoch comparison and persisted terminal evidence.

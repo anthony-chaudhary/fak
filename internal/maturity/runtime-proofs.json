@@ -498,11 +498,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/chatopsdetach",
-            "lane": "chatopsdetach"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/chatrelay",
             "lane": "chatrelay"
         },
@@ -620,11 +615,6 @@
             "command": "fak version modules",
             "output_contains": "internal/codexresume",
             "lane": "codexresume"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/codexsession",
-            "lane": "codexsession"
         },
         {
             "command": "fak version modules",
@@ -1063,11 +1053,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/dormancysim",
-            "lane": "dormancysim"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/dosdecision",
             "lane": "dosdecision"
         },
@@ -1130,16 +1115,6 @@
             "command": "fak version modules",
             "output_contains": "internal/epicprogress",
             "lane": "epicprogress"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/epochbridge",
-            "lane": "epochbridge"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/estimatecal",
-            "lane": "estimatecal"
         },
         {
             "command": "fak version modules",
@@ -1390,11 +1365,6 @@
             "command": "fak version modules",
             "output_contains": "internal/gitgate",
             "lane": "gitgate"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/gitresource",
-            "lane": "gitresource"
         },
         {
             "command": "fak version modules",
@@ -1753,11 +1723,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/humanctl",
-            "lane": "humanctl"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/hwgatelint",
             "lane": "hwgatelint"
         },
@@ -1775,16 +1740,6 @@
             "command": "fak version modules",
             "output_contains": "internal/ifc",
             "lane": "ifc"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/incidentrsi",
-            "lane": "incidentrsi"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/interactivesession",
-            "lane": "interactivesession"
         },
         {
             "command": "fak version modules",
@@ -1995,11 +1950,6 @@
             "command": "fak version modules",
             "output_contains": "internal/leaseref",
             "lane": "leaseref"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/lifebridge",
-            "lane": "lifebridge"
         },
         {
             "command": "fak version modules",
@@ -3227,11 +3177,6 @@
             "lane": "sessionregistry"
         },
         {
-            "command": "fak dev devindex leaf sessionreplay",
-            "output_contains": "sessionreplay",
-            "lane": "sessionreplay"
-        },
-        {
             "command": "fak dev devindex leaf sessionreset",
             "output_contains": "sessionreset",
             "lane": "sessionreset"
@@ -3365,11 +3310,6 @@
             "command": "fak version modules",
             "output_contains": "internal/speedab",
             "lane": "speedab"
-        },
-        {
-            "command": "fak dev devindex leaf spendrollup",
-            "output_contains": "spendrollup",
-            "lane": "spendrollup"
         },
         {
             "command": "fak version modules",
@@ -3682,11 +3622,6 @@
             "lane": "testroute"
         },
         {
-            "command": "fak version modules",
-            "output_contains": "internal/timeaware",
-            "lane": "timeaware"
-        },
-        {
             "command": "fak dev devindex leaf timeoutphase",
             "output_contains": "timeoutphase",
             "lane": "timeoutphase"
@@ -3843,11 +3778,6 @@
         },
         {
             "command": "fak version modules",
-            "output_contains": "internal/turnkind",
-            "lane": "turnkind"
-        },
-        {
-            "command": "fak version modules",
             "output_contains": "internal/turntaxmeter",
             "lane": "turntaxmeter"
         },
@@ -3910,11 +3840,6 @@
             "command": "fak version modules",
             "output_contains": "internal/usagelog",
             "lane": "usagelog"
-        },
-        {
-            "command": "fak version modules",
-            "output_contains": "internal/usagepreflight",
-            "lane": "usagepreflight"
         },
         {
             "command": "fak version modules",

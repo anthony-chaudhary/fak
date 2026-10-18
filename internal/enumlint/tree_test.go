@@ -133,7 +133,7 @@ func TestKnownVocabulariesAreDiscovered(t *testing.T) {
 	}{
 		{"internal/wipref", "CensusClass", 5,
 			"the ticket's exemplar: the ONE place the tree hand-checks exhaustiveness (TestClassifyVocabulary)"},
-		{"internal/turnkind", "Kind", 4,
+		{"internal/chatops", "Class", 4,
 			"an iota enumeration — under-counting it makes every assertion over it vacuous"},
 		{"internal/adjudicator", "ReversibilityClass", 2,
 			"a closed verdict vocabulary in the package the ticket names"},

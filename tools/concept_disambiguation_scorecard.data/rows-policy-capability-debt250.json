@@ -438,21 +438,23 @@
       "gaps": []
     },
     {
-      "id": "cov-debt250-policy-capability-usagepreflight",
-      "canonical": "policy-capability implementation surface for usagepreflight",
+      "id": "cov-debt250-policy-capability-parseposture",
+      "canonical": "ParsePosture (policy posture-string parser)",
       "family": "policy-capability",
       "kind": "symbol",
-      "definition": "`usagepreflight` is the policy-capability symbol declared or used at `internal/usagepreflight/usagepreflight.go:1` as `// Package usagepreflight decides whether an outbound provider request may spend`. This row positions that concrete implementation surface, not merely the family label.",
-      "distinction": "Use `usagepreflight` for the operation evidenced at `internal/usagepreflight/usagepreflight.go:1`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "definition": "policy.ParsePosture (internal/policy/policy.go:716) turns a posture string into an adjudicator.Posture: empty or fail_closed gives PostureFailClosed, admit_and_log gives PostureAdmitAndLog, default_open gives PostureDefaultOpen, and any other value returns an error alongside PostureFailClosed. The guarded-launch startup parses an explicit posture override and the FAK_GUARD_POSTURE value with it (cmd/fak/guard_startup.go:296 and :301), and the chat command falls back to it for mode strings it does not recognize (cmd/fak/chat.go:724).",
+      "distinction": "It parses one posture token into the adjudicator enum. It is not `posture`, the admission behavior that value selects, not `egressposture`, the egress stance stamped on a refusal, and not `cov-debt250-policy-capability-postureargs`, the fleet guard cache's posture argument list.",
       "distinct_from": [
-        "egressposture"
+        "posture",
+        "egressposture",
+        "cov-debt250-policy-capability-postureargs"
       ],
       "aliases": [],
-      "grounding": "usagepreflight",
+      "grounding": "ParsePosture",
       "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "glossary_anchor": "",
       "parent": "",
-      "verdict": "crystal",
+      "verdict": "defined",
       "gaps": []
     }
   ]

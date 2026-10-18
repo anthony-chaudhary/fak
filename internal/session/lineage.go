@@ -11,10 +11,10 @@ import (
 // epic #912). When a budget-exhausted session re-continues, it mints a continuation
 // id (continuationID = "win-" + the first 8 bytes of sha256(trace+rev), in hex).
 // Those 16 hex chars ARE a uint64, so a continuation id and an abi epoch are two
-// encodings of ONE lineage point. This file owns that bijection so the lineage
-// bridge (internal/epochbridge) can map a session generation onto an abi epoch
-// without re-spelling the id format. It adds no field and changes no behavior — the
-// mint is still continuationID; these are read-only projections of it.
+// encodings of ONE lineage point. This file owns that bijection so a caller can map
+// a session generation onto an abi epoch without re-spelling the id format. It adds
+// no field and changes no behavior — the mint is still continuationID; these are
+// read-only projections of it.
 
 // continuationPrefix marks every minted continuation id. It must match the prefix
 // continuationID writes (usage.go); TestContinuationEpochRoundTrip binds the two, so
@@ -27,8 +27,8 @@ const continuationHexLen = 16
 
 // ContinuationID is the exported form of the fresh-window handoff id a budget-
 // exhausted session hands its next generation — the same value the internal mint
-// writes to State.ContinuationID. Exported so the lineage bridge can derive the
-// epoch a continuation from (trace, rev) would carry.
+// writes to State.ContinuationID. Exported so a caller can derive the epoch a
+// continuation from (trace, rev) would carry.
 func ContinuationID(trace string, rev uint64) string {
 	return continuationID(trace, rev)
 }

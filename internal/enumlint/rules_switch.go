@@ -17,7 +17,7 @@ import (
 //
 // The `default` clause is the discriminator, and it is the right one. A switch
 // WITH a default has made a decision about the members it does not name, even if
-// that decision is "refuse": internal/turnkind's classifier and
+// that decision is "refuse": internal/chatops' Class.String and
 // internal/wipref's Classify both lean on a default that carries a real domain
 // value. A switch WITHOUT one has made no decision at all. That is why this rule
 // is not "every member needs a case" — that formulation would fire on correct

@@ -78,9 +78,9 @@ The lexical/index fallback found the exact seams:
 - [`internal/harnessprofile/version.go:17`](../../internal/harnessprofile/version.go#L17)
   binds adapter semantic content to a version; its tests require a version bump
   when the digest changes.
-- [`internal/codexsession/compatibility.go:23`](../../internal/codexsession/compatibility.go#L23)
-  binds binary/protocol/schema/authority and fails closed on an untested digest,
-  but it is Codex-specific and exact-match rather than a cross-release semantic
+- `internal/codexsession/compatibility.go:23` (since removed as unused) bound
+  binary/protocol/schema/authority and failed closed on an untested digest, but
+  it was Codex-specific and exact-match rather than a cross-release semantic
   compatibility classifier.
 - [`internal/versionskew/versionskew.go:41`](../../internal/versionskew/versionskew.go#L41)
   classifies build ancestry and provenance. That is necessary but does not prove

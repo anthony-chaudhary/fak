@@ -21,7 +21,6 @@ var hardGoBackgroundFiles = map[string]bool{
 	"internal/agentqueue/actuator.go":                   true,
 	"internal/codetools/bash_windows.go":                true,
 	"internal/accounts/credrefresh_treekill_windows.go": true,
-	"internal/codexsession/adapter.go":                  true,
 	"internal/appversion/binarydoctor.go":               true,
 	"internal/codelint/packs.go":                        true,
 	"cmd/fak/taskmgr.go":                                true,

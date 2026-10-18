@@ -36,7 +36,7 @@ For an agent investigating a regression, displaying recorded events is not enoug
 At `f21eb416d92f03286747f84e888fb7dd1038c7a9`:
 
 - `cmd/fak/audit_replay.go:21-43` folds repeated tool+args-digest decisions to detect inconsistent verdicts, but explicitly cannot reconstruct raw args or re-execute state.
-- `internal/sessionreplay/replay.go:14-41` re-adjudicates one captured tool call under one regime-specific policy.
+- `internal/sessionreplay/replay.go:14-41` re-adjudicated one captured tool call under one regime-specific policy; that package was later removed because nothing called it.
 - `internal/compute/kvreplay_trace.go:74-102` replays one KV eviction corpus through policy/oracle simulators.
 - `internal/trajectory/event.go:128-157` strictly encodes/decodes events, while `:166-203` projects message events into turns; there is no generic reducer/checkpoint/divergence contract.
 
@@ -74,7 +74,7 @@ Do not re-run live tools/providers, persist raw payloads, promise bitwise hardwa
 - #6528 owns replay/explain of derived context views.
 - #8609 (closed) owns compute-event capture/summary for kernel replay.
 - #11028 (closed) owns agent-trajectory regression evaluation.
-- Existing `fak audit replay`, `sessionreplay`, and KV replay remain domain-specific consumers.
+- Existing `fak audit replay` and KV replay remain domain-specific consumers.
 
 Searches for `deterministic replay`, `reconstruction`, and `first divergence` across open/closed public issues on 2026-09-08 found no shared trace-state fold contract.
 

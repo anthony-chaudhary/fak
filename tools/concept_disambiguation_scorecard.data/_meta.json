@@ -7506,7 +7506,6 @@
         "hashUnit",
         "hedge_loser_slot_released",
         "installGuardCodexSessionStartHookAt",
-        "interactivesession",
         "kernelSession",
         "ledgerSettledSessions",
         "live-tool",
@@ -7708,7 +7707,7 @@
       "known_tokens": [],
       "min_files": 3,
       "name": "Session / scheduling family",
-      "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner). Ignored tokens: plurals/inflections (sessionids, slotting), a guard-hook helper that belongs to the guard-gate family (guardsessiontempdir), a model-package method whose Session is the inference type not the drive record (requireminimaxsession), session-audit count fields (confusedsessions, sessionsaudited, topsessions), a total-slots metric also used by GPU compute (totalslots), TUI rendering/verb types (tuisessionrow, runtuisessions), a stale empty dir (interactivesession), an action string literal (restartfreshsession), and a capacity default const already covered by AccountSessionCap (defaultclaudesessionsperaccount).",
+      "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner). Ignored tokens: plurals/inflections (sessionids, slotting), a guard-hook helper that belongs to the guard-gate family (guardsessiontempdir), a model-package method whose Session is the inference type not the drive record (requireminimaxsession), session-audit count fields (confusedsessions, sessionsaudited, topsessions), a total-slots metric also used by GPU compute (totalslots), TUI rendering/verb types (tuisessionrow, runtuisessions), an action string literal (restartfreshsession), and a capacity default const already covered by AccountSessionCap (defaultclaudesessionsperaccount).",
       "roots": [
         "session",
         "slot",
@@ -15162,11 +15161,6 @@
         },
         {
           "category": "incidental",
-          "reason": "Output type of the internal/gitresource AdmitCleanup seam (typed admit/deny for one cleanup candidate); distinct from dosdecision loop decisions and TurnTaxDecision because it admits Git-resource mutation, not agent-loop actions; leaf-local symbol.",
-          "token": "CleanupDecision"
-        },
-        {
-          "category": "incidental",
           "reason": "demotion action outcome",
           "token": "DemotionDecision"
         },
@@ -16906,11 +16900,6 @@
           "category": "incidental",
           "reason": "Mapping helper that enforces the existing supervision policy process-class-to-fault-domain invariant, not a separate user-facing plan concept.",
           "token": "processClassPlane"
-        },
-        {
-          "category": "incidental",
-          "reason": "Input type of the internal/gitresource AdmitCleanup seam (one proposed Git resource mutation with resource kind, scope, owner+epoch, terminal evidence); leaf-local contract symbol, not a cross-subsystem concept and no overloaded root.",
-          "token": "CleanupCandidate"
         },
         {
           "category": "incidental",

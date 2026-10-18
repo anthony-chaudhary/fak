@@ -227,8 +227,8 @@ type Verdict struct {
 // The nonce is derived DETERMINISTICALLY from the proposing message (proposer, channel,
 // message ts, verb, operand) rather than drawn at random. Two consequences, both wanted:
 // a re-delivered Slack message re-mints the SAME nonce and therefore cannot open a second
-// pending proposal for one command (the idempotency discipline internal/chatopsdetach
-// holds for dispatch), and the whole kernel stays pure — no RNG, no clock beyond the
+// pending proposal for one command (the idempotency discipline a detached dispatch
+// needs), and the whole kernel stays pure — no RNG, no clock beyond the
 // `now` argument. The nonce is a BINDING token, not a secret: authorization is the admin
 // allowlist, checked independently, so knowing a nonce grants nothing to someone who
 // could not already approve.

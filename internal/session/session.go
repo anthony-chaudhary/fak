@@ -117,8 +117,8 @@ func ParseRunState(s string) (RunState, bool) {
 // for Throttled (a session-only pace modifier with no shared peer), for Terminating
 // (the session-only forceful-stop staging state, #2758) and for any
 // out-of-range value — the projection is explicit about the extras, never a silent
-// default. This is the served-session half of the #912 "one machine" converter;
-// internal/lifebridge composes it with the supervisor half.
+// default. This is the served-session half of the #912 "one machine" mapping;
+// loopmgr.LoopState.Phase is the supervisor half.
 func (s RunState) Phase() (lifecycle.Phase, bool) {
 	switch s {
 	case Running:

@@ -15,24 +15,24 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **666** (clarity 0 + coverage 666) |
-| **Crystal-clear concepts (and climbing)** | **1283** crystal of 3088 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3170 / 3836** (82.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **662** (clarity 0 + coverage 662) |
+| **Crystal-clear concepts (and climbing)** | **1282** crystal of 3089 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3167 / 3829** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **89** of 4346 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3088 concepts - score 88.7/100 (grade B) - disambiguation-debt 666
+concept-disambiguation chart - 3089 concepts - score 88.8/100 (grade B) - disambiguation-debt 662
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1283
-  o defined       ############################ 1805
+  * crystal       ####################........ 1282
+  o defined       ############################ 1807
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -51,8 +51,8 @@ clarity mix by family (each cell = one concept):
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             *****************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (418 concept(s); 173 crystal)
-  policy-capability ****************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 100 crystal)
-  pool             **********oooooooooooooooooooooooooooooooo (42 concept(s); 10 crystal)
+  policy-capability ***************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 99 crystal)
+  pool             **********ooooooooooooooooooooooooooooooooo (43 concept(s); 10 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  ***********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (269 concept(s); 95 crystal)
@@ -63,14 +63,14 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   plan             #######################..... 480/585
-  session-runtime  #######################..... 289/359
+  session-runtime  #######################..... 286/355
   cache            #######################..... 340/408
   gateway-engine   #######################..... 247/305
-  guard-gate       ##########################.. 515/563
+  guard-gate       ##########################.. 515/562
   attention        #####################....... 146/192
   context-ctx      ########################.... 268/314
-  pool             ##############.............. 44/86
-  policy-capability ########################.... 225/265
+  pool             ##############.............. 44/85
+  policy-capability ########################.... 225/264
   support-maturity ####################........ 85/122
   render-materialize ########################.... 217/251
   witness-proof    ########################.... 172/198
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.6%  (3170/3836 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.7%  (3167/3829 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4346 lookup name(s) -> 3088 concept(s), 89 ambiguous
+name index: 4346 lookup name(s) -> 3089 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2432 / 5661 |
+| Boundaries drawn (mutual / total) | 2432 / 5664 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4346 over 3088 concepts |
+| Lookup names indexed | 4346 over 3089 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3088 |
+| Concepts carrying a contrast set | 3089 |
 
 ## The concepts (best verdict first)
 
@@ -1068,7 +1068,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for multimodalpolicy** - `MultimodalPolicy` is the policy-capability symbol declared or used at `internal/model/multimodal.go:59` as `// MultimodalPolicy is the opt-in governance envelope for image-bearing prompts.`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for postureargs** - `postureArgs` is the policy-capability symbol declared or used at `cmd/fak/dispatch_tick_worker.go:120` as `postureArgs, postureErr := fleetGuardCachePostureArgs()`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for tunefirepolicy** - `TuneFirePolicy` is the policy-capability symbol declared or used at `internal/agent/anthropic_compact.go:263` as `// rsiloop.TuneFirePolicy over a corpus of scored per-fire receipts (rsiloop.CompactionFireObs →`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | policy-capability | **policy-capability implementation surface for usagepreflight** - `usagepreflight` is the policy-capability symbol declared or used at `internal/usagepreflight/usagepreflight.go:1` as `// Package usagepreflight decides whether an outbound provider request may spend`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | concept | policy-capability | **capability floor** - The deployable, declarative authorization layer that defines exactly which tools an agent may call by name, loaded as a JSON manifest at runtime. |
 | * | crystal | config | policy-capability | **policy manifest** - The versioned JSON structure an operator edits to configure the capability floor, mapping 1:1 to adjudicator.Policy with deny reasons validated against the closed vocabulary. |
 | * | crystal | subsystem | policy-capability | **adjudicator** - The in-process DOS reference monitor: the rung that folds a decision chain to prove a tool call allowed, denied, or deferred under the loaded policy. |
@@ -1182,7 +1181,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for closesession** - CloseSession is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionaddrexplicit** - sessionAddrExplicit is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for slotid** - SlotID is the session-runtime symbol declared or referenced in the repository. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | session-runtime | **session-runtime implementation surface for codexsession** - `codexsession` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
+| * | crystal | symbol | session-runtime | **session-runtime implementation surface for codexsession** - `CodexSession` (internal/sessionctl/codex_resume.go) is the durable fak logical-session record for a Codex-backed session: identity, semantic cursor, execution epoch, input lease and replay journal, with the provider thread ID kept as an opaque coordinate. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionaction** - `sessionaction` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for awssessiontoken** - `awssessiontoken` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for debugsessions** - `debugsessions` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -1232,7 +1231,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for imagepadslots** - `ImagePadSlots` is the session-runtime symbol declared or used at `internal/model/vision_prompt.go:7` as `// #4030), the tokenizer locates the placeholders (ImagePadSlots, #4031), vision_splice.go`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for newsessiongateway** - `NewSessionGateway` is the session-runtime symbol declared or used at `cmd/fak/micro.go:420` as `gw := microagent.NewSessionGateway(microagent.NewSchedulingGateway(base, sched), tbl)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for ownssessionloop** - `ownsSessionLoop` is the session-runtime symbol declared or used at `cmd/fak/serve_fleetbus.go:59` as `// native mirrors gateway.Server.ownsSessionLoop (unexported there): a non-native`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | session-runtime | **session-runtime implementation surface for pausesession** - `PAUSE_SESSION` is the session-runtime symbol declared or used at `internal/humanctl/envelope.go:221` as `case "PAUSE_SESSION":`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | session-runtime | **session-runtime implementation surface for pausesession** - `PAUSE_SESSION` is the session-runtime symbol declared or used at `internal/policy/control_vocab.go:71` as `ControlPauseSession: "PAUSE_SESSION",`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for restoreservesessions** - `restoreServeSessions` is the session-runtime symbol declared or used at `cmd/fak/serve.go:918` as `// restoreServeSessions re-attaches the persisted DRIVE state of every session (the COLD`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionchangeevent** - `SessionChangeEvent` is the session-runtime symbol declared or used at `internal/gateway/session_changes.go:26` as `// SessionChangeEvent is one drive-state revision on the wire: a session's full`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessiondurable** - `session_durable` is the session-runtime symbol declared or used at `cmd/fak/dispatch_tick.go:1153` as `// registerServeSessionDurability publishes the descriptor UNDER (session_durable.go), so`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1243,7 +1242,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionrecoverycheckpoint** - `SessionRecoveryCheckpoint` is the session-runtime symbol declared or used at `internal/disambiguation/query.go:252` as `Sources: []SourceWitness{ {Kind: SourceKindGoSource, Locator: "internal/session/cumulative_envelope.go", Revision: "session-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessionsubscribe** - `session_subscribe` is the session-runtime symbol declared or used at `internal/gateway/http.go:1229` as `// re-attach drain of the drive-state revision feed (session_subscribe.go).`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for sessiontag** - `SessionTag` is the session-runtime symbol declared or used at `cmd/fak/serve_fleetbus.go:293` as `meta, tagged := sessionctl.SessionTag(st.TraceID)`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | session-runtime | **session-runtime implementation surface for stopsession** - `STOP_SESSION` is the session-runtime symbol declared or used at `internal/humanctl/envelope.go:223` as `case "STOP_SESSION":`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | session-runtime | **session-runtime implementation surface for stopsession** - `STOP_SESSION` is the session-runtime symbol declared or used at `internal/policy/control_vocab.go:72` as `ControlStopSession:  "STOP_SESSION",`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for tagservedsessionadmit** - `tagServedSessionAdmit` is the session-runtime symbol declared or used at `cmd/fak/main_session_control.go:97` as `tagServedSessionAdmit(traceID, v.State)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for targetsession** - `targetSession` is the session-runtime symbol declared or used at `cmd/fak/vcache_codex_extract.go:34` as `targetSession := *session`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | session-runtime | **session-runtime implementation surface for validsessionid** - `validSessionID` is the session-runtime symbol declared or used at `cmd/fak/dispatch_tick.go:1176` as `// validDispatchLeaseSessionID mirrors leaseref's own validSessionID (both it and validID`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2624,6 +2623,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | policy-capability | **PostureAdoptionPct (cachevaluereport)** - cachevaluereport.PostureAdoptionPct ('posture_adoption_pct') is the 0..100 percentage of exit sessions this week that ran under an ACTIVE managed-cache posture - the cache-value weekly digest's adoption measure, nil when no sessions exited. |
 | o | defined | config | policy-capability | **workerModelPolicy (cmd)** - cmd/fak workerModelPolicy is the resolved launch decision for one dispatch worker: the Model to pin (empty => seat default + fallback chain), the ordered downgrade Chain a Layer-2 model switch tries, the Source that decided it, and the tier-profile Effort/Ultracode knobs carried into WorkerLaunch. |
 | o | defined | symbol | policy-capability | **DeliveryPolicy** - egressfloor.DeliveryPolicy is the deny-by-default capability floor that maps each delivery platform to allowed destinations and adjudicates an outbound Delivery into a witnessed DeliveryRecord. |
+| o | defined | symbol | policy-capability | **ParsePosture (policy posture-string parser)** - policy.ParsePosture (internal/policy/policy.go:716) turns a posture string into an adjudicator.Posture: empty or fail_closed gives PostureFailClosed, admit_and_log gives PostureAdmitAndLog, default_open gives PostureDefaultOpen, and any other value returns an error alongside PostureFailClosed. The guarded-launch startup parses an explicit posture override and the FAK_GUARD_POSTURE value with it (cmd/fak/guard_startup.go:296 and :301), and the chat command falls back to it for mode strings it does not recognize (cmd/fak/chat.go:724). |
 | o | defined | symbol | policy-capability | **RegisterCapability (abi)** - abi.RegisterCapability is the registry writer that adds a negotiable feature token to the kernel's process-global Supported() capability set, called from a driver's init(). |
 | o | defined | symbol | policy-capability | **RegisterAdjudicator (abi)** - abi.RegisterAdjudicator inserts a PDP/PEP adjudicator link into the kernel's pre-call decision chain at a numeric rank (lower rank runs first) and rebuilds the registry snapshot. |
 | o | defined | symbol | policy-capability | **WithAdjudicators (kernel)** - kernel.WithAdjudicators constructs a kernel that folds an EXPLICIT caller-supplied adjudicator chain instead of the process-global registry, so K replay arms each carry their own monitor without colliding. |
@@ -2697,12 +2697,13 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | pool | **quotaPeakPagedPoolUsage** - quotaPeakPagedPoolUsage (internal/harnessres/sample_windows.go) is the PROCESS_MEMORY_COUNTERS field: peak paged-pool bytes the sampled process ever charged. |
 | o | defined | symbol | pool | **quotaPeakNonPagedPoolUsage** - quotaPeakNonPagedPoolUsage (internal/harnessres/sample_windows.go) is the PROCESS_MEMORY_COUNTERS field: peak non-paged-pool bytes the sampled process ever charged. |
 | o | defined | symbol | pool | **byPool accumulator** - Local map[string]AccountRow / map[string]Account accumulator named byPool, paired with an order slice, built inside uniquePoolRows (internal/dispatchtick/accounts.go) and uniquePoolAccounts (internal/fleetaccounts/resolve.go): it keeps exactly one representative row per pool key, the best-ranked candidate under accountPoolRowLess / accountPoolLess, while the input rows are reduced down to one row per pool. |
-| o | defined | doc-term | pool | **credential_pool.py (Hermes reference)** - The external Hermes script agent/credential_pool.py, named in the package comments of internal/metrics/spend.go and internal/spendrollup/spendrollup.go as the prior-art system that pools spend/credentials across accounts but relays the provider's own billed number without labeling who authored the figure. |
+| o | defined | doc-term | pool | **credential_pool.py (Hermes reference)** - The external Hermes script agent/credential_pool.py, named in the package comment of internal/metrics/spend.go as the prior-art system that pools spend/credentials across accounts but relays the provider's own billed number without labeling who authored the figure. |
 | o | defined | symbol | pool | **leaseWorkersByPool** - Function with two independent implementations (internal/dispatchtick/accounts.go over AccountRow/SeatLease, internal/fleetaccounts/resolve.go over Account/Lease) that walks the live seat leases and returns a map from pool key to the list of worker ids currently holding a lease in that pool; leaseLoadByPool and wave/status/resolve callers use it to seed per-pool in-flight occupancy before granting new slots. |
 | o | defined | symbol | pool | **normalizeWorkerPool** - internal/dispatchtick/accounts.go helper (also called from tierroute.go) that normalizes raw account rows, drops non-routable ones, applies an optional product filter, and resolves the target model tier for a work kind - the shared front matter both RouteAccount and AllocateWave run before touching the pool. |
 | o | defined | symbol | pool | **RotationEmptyPool** - accounts.RotationEmptyPool is the RotationNoCandidateReason constant ("empty_pool") that NextRotationDecision (internal/accounts/rotation.go) returns when a rotate finds NO eligible seats at all in the pool - every seat reserved, disabled, tombstoned, or unservable - and that cmd/fak/accounts_rotation_runtime.go switches on to render the failure to an operator. |
 | o | defined | symbol | pool | **uniquePoolAccounts** - internal/fleetaccounts/resolve.go function that reduces a slice of Account rows to one representative Account per pool key via the byPool accumulator, keeping the best-ranked (offerable-first, then rank) row; called from AllocateWave, status_report.go, resolve.go, and capacity.go to avoid double-counting a pool's seats. |
 | o | defined | symbol | pool | **usedPools** - Local map[string]bool set built during AllocateWave (internal/dispatchtick/accounts.go and internal/fleetaccounts/wave.go) that records which pool keys have already been granted at least one session slot in the current wave, so the result can report DistinctPools = len(usedPools) alongside the granted/shortfall counts and the reason string. |
+| o | defined | symbol | pool | **ErrPoolClosed (observer pool sentinel)** - observer.ErrPoolClosed (internal/observer/verdict.go:92) is the sentinel the observer worker pool returns after Close: Start refuses with it (internal/observer/pool.go:266), and so does ObserveSyncBarrier (pool.go:499). Close marks the pool closed before stopping it, so a closed pool refuses new observations instead of queueing them. |
 | o | defined | symbol | pool | **Pool (polymodel residency)** - polymodel.NewPool (internal/polymodel/polymodel.go) constructs a model-RESIDENCY pool that keeps many prefill-warm models resident under one weight-byte budget, evicting the coldest UNPINNED model (LRU) when an admission would exceed the cap. |
 | o | defined | symbol | pool | **DefaultPoolProfiles (cachemeta)** - cachemeta.DefaultPoolProfiles returns a representative PoolProfile per residency tier — HBM/DRAM/NUMA-far host-private, CXL the coherent switch-pooled zero-copy tier, disk local, remote reachable-but-copy-only — the order-of-magnitude default an operator overrides with their fabric's measured topology. |
 | o | defined | symbol | pool | **PoolReuseVerdict (cachemeta gate)** - cachemeta.PoolReuseVerdict is the cross-tenant reuse trust GATE for a SHARED pool: it permits a tenant to attend a pooled cell another tenant wrote only when the cell is un-poisoned, declared shareable beyond its agent scope, adjudicated TaintTrusted, and its materialization key matches on every axis. |
@@ -3010,6 +3011,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | config | session-runtime | **WT_SESSION (Windows Terminal multiplexer marker)** - cmd/fak/guard_resolve.go + guard_split.go: the Windows Terminal environment marker fak's guard-split detection reads to decide whether an attended launch is inside a terminal multiplexer (so it can open the info pane). |
 | o | defined | doc-term | session-runtime | **unsloth (GGUF quant provider org)** - cmd/qwen35check/acceptance.go + internal/ggufload: the Unsloth HuggingFace org whose *-GGUF repos (e.g. unsloth/Qwen3.6-27B-GGUF) supply the acceptance-checkpoint quants, including UD mixes that use IQ3_XXS/IQ4_XS/Q8_0 beside the K-quants. |
 | o | defined | symbol | session-runtime | **ReleaseSession (ctxmmu fork-session teardown)** - ctxmmu ReleaseSession ends one forked context session and decrements the refcount of every physical KV page block it holds, reclaiming a block when its count reaches zero. The SessionForker interface declares it (internal/ctxmmu/fork.go:59); ForkManager (fork.go:504) also drops the session from its map, COWPageTable (internal/ctxmmu/cow_table.go:507) refuses a second release with ErrSessionReleased, and the MMU method (fork.go:992) delegates to its ForkManager. An empty ID returns ErrInvalidSessionID and an unknown one ErrSessionNotFound. |
+| o | defined | symbol | session-runtime | **StickySessionRouter (harness-version session pin)** - harnessversion.StickySessionRouter (internal/harnessversion/router.go:33) pins each session to one sub-harness runtime version. Route (router.go:190) returns the session's pinned version when it has one; otherwise it negotiates from the X-Fak-Harness-Version header or the request path, falls back to weighted canary selection, and pins the result. The gateway consults it when it admits a session (internal/gateway/session_admit.go:97). |
 | o | defined | subsystem | session-runtime | **sessionbench (value-stack bench)** - cmd/sessionbench is the Go benchmark command that measures the net value-add of fak's fused agent kernel over a synthetic multi-agent, multi-turn session workload (its prefillTokens A/B/C formula). |
 | o | defined | symbol | session-runtime | **DurabilitySession (durability tier)** - DurabilitySession is the ctxplan/ctxmmu durability-tier constant ("session") that marks a stored context span as true only for the current session's lifetime. |
 | o | defined | symbol | session-runtime | **BatchSession (batched decode)** - model.BatchSession decodes B independent user sequences in lockstep over one shared weight stream (continuous-batching decode), built via NewBatchSession. |
@@ -3092,7 +3094,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **ParentSessionID** - ParentSessionID is the json field (parent_session_id) on eveimport and Codex-loop session records identifying the parent session that spawned a subagent, enabling parent-child session linkage. |
 | o | defined | symbol | session-runtime | **sessionStartSHA** - sessionStartSHA captures the git HEAD SHA at session start, used as the progress-head baseline by the guard no-progress detector and the durable-session setup. |
 | o | defined | symbol | session-runtime | **StoppedBySession** - StoppedBySession is the ArmMetrics field (json stopped_by_session) carrying the session-control stop reason (BudgetTurns, BudgetContext, Paused, Drained, Terminated) when a wired session.Table ended the arm. |
-| o | defined | subsystem | session-runtime | **sessionreplay (package)** - internal/sessionreplay freezes one turn's regime-conditioned harness decision as a fak.sessionreplay.v1 fixture and re-adjudicates it through the REAL adjudicator over an internal/policy regime floor for regression testing. |
 | o | defined | symbol | session-runtime | **handleFakSession** - handleFakSession is the HTTP handler behind POST/GET /v1/fak/session/{id}/{verb}, the session DRIVE-state control surface routing pause/resume/priority/pace/subscribe/observe verbs. |
 | o | defined | symbol | session-runtime | **launchHostSessionPlatform** - launchHostSessionPlatform is the S4U watchdog's session-0 resurrection launcher, called by resurrectHostCrashSessions to hand a typed hostresurrect.Request to the interactive broker after a host crash. |
 | o | defined | symbol | session-runtime | **Budget** - A session's remaining work allotment across three independent axes: turns (round-trips), output tokens, and context tokens. |
@@ -3368,8 +3369,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3229/5661 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3088 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3232/5664 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3089 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3386,14 +3387,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | plan | 480 | 585 | 105 |
-| session-runtime | 289 | 359 | 70 |
+| session-runtime | 286 | 355 | 69 |
 | cache | 340 | 408 | 68 |
 | gateway-engine | 247 | 305 | 58 |
-| guard-gate | 515 | 563 | 48 |
+| guard-gate | 515 | 562 | 47 |
 | attention | 146 | 192 | 46 |
 | context-ctx | 268 | 314 | 46 |
-| pool | 44 | 86 | 42 |
-| policy-capability | 225 | 265 | 40 |
+| pool | 44 | 85 | 41 |
+| policy-capability | 225 | 264 | 39 |
 | support-maturity | 85 | 122 | 37 |
 | render-materialize | 217 | 251 | 34 |
 | witness-proof | 172 | 198 | 26 |

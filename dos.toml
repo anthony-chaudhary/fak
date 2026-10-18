@@ -124,7 +124,6 @@ concurrent = [
   "freshstatus",
   "trajctl",
   "waiting",
-  "chatopsdetach",
   "godfileceiling",
   "microagent",
   "l3kv",
@@ -153,7 +152,7 @@ concurrent = [
   "codexresume",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
-  "blobfs", "blobhttp", "ctxplan", "gitgate", "gitresource", "hfhub", "memq", "polymodel", "storedrv",
+  "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
   "capabilitymatrix",
@@ -326,8 +325,8 @@ concurrent = [
   "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
   "dispatchdoa",
   "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
-  "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim",
-  "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge",
+  "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy",
+  "edittx", "egressfloor", "envconfiglint", "epicprogress",
   "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
   "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare",
   "fleetmetrics",
@@ -345,10 +344,9 @@ concurrent = [
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
   "hostfault", "hostplacement", "hostresurrect", "hil", "benchpromotion", "landingvoucher", "mtpbench", "rawdecode", "telemetry", "hwgatelint", "ideascout", "idempotency", "papers",
-  "incidentrsi",
   "intlist", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
-  "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "lifebridge",
+  "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region",
   "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
   "localbench", "looptrigger",
   "looporphan", "looprecover", "loopscore", "macbench", "maputil", "mathx",
@@ -364,10 +362,10 @@ concurrent = [
   "repoguard", "resumebackoff", "resumemetrics", "roofline", "safecommit", "savingsvector",
   "scdiff", "scmbridge", "scorecardpane", "scratchmark", "seatpark", "secretgate", "secretload", "selfinstall",
   "sensecheck", "seoaeoscore", "servicelease", "serviceledger", "servicespec", "sessionctl",
-  "sessiondesc", "sessionjournal", "sessionledger", "sessionobs", "sessionread", "sessionreplay",
+  "sessiondesc", "sessionjournal", "sessionledger", "sessionobs", "sessionread",
   "sessionreset", "sessionsearch", "sessionsignals", "sessionsteer", "shadowgit", "sidecar",
   "signals", "simhash", "skillenv", "skillvalue", "skipledger", "slackenv", "slackmeta",
-  "sotacoverage", "sotamatrix", "spendrollup", "stallscan", "stepbaton", "stepbatoncapture",
+  "sotacoverage", "sotamatrix", "stallscan", "stepbaton", "stepbatoncapture",
   "storagepressure",
   "stablejson",
   "optsdefault",
@@ -376,7 +374,7 @@ concurrent = [
   "taskdecision", "taskgraph", "terminalbench", "terminalrisk", "testroute",
   "timeoutphase", "tokencache", "toolrollup", "toolsandbox", "toolseq",
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
-  "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
+  "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turntaxmeter",
   "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
   "vcachescore", "vcachesnapshot", "verattest", "verifierexposure",
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
@@ -402,7 +400,6 @@ concurrent = [
   "mixedprecision",
   "depthadmit",
   "managedocs",
-  "humanctl",
   "toolcatalog",
   "toolcallcontrol",
   "projectassets",
@@ -446,11 +443,11 @@ concurrent = [
   "archrank", "armbench", "auditreceipt", "benchmarkdown", "bitnetmeta", "bitnetruntime",
   "blastlease", "borrowprovenance", "buildoverlay", "categorybaseline", "causalreceipt", "cavemanpairwise",
   "cavemansafety", "childprocess", "citeverify", "cloudhandoff", "codebookmeta", "codetools", "systools",
-  "codexmcpdiag", "codexsession", "commitlifecycle", "committedbuildwitness", "committedtree", "composition",
+  "codexmcpdiag", "commitlifecycle", "committedbuildwitness", "committedtree", "composition",
   "computetrace", "computetune", "configguide", "configsurface", "coordination", "cubicquanteval",
   "cudaarch", "deliverystages", "demoassert", "dependencyquarantine", "devcheckpoint", "devcmd",
   "devhandoff", "disambiguation", "discoveryrouter", "docreach", "docsearch", "doneclaimaudit",
-  "dosdecision", "edgequal", "enumlint", "estimatecal", "exclusivefile", "fabricmap",
+  "dosdecision", "edgequal", "enumlint", "exclusivefile", "fabricmap",
   "fastintent", "fleetsearch", "flowmetrics", "fp4meta", "framevisibility", "frontmatter",
   "gardenbudget", "geminicache", "generation", "genlock", "ggufinterop", "goalregistry",
   "grafanacontract", "harnessartifact", "harnessclassify", "harnesscompose", "harnesscontrolpacket", "harnesscontrolstudy",
@@ -477,14 +474,13 @@ concurrent = [
   "stalework", "strictjson", "stringlist", "stringset", "studybench", "studyforge",
   "subtractiveprofile", "suiteverify", "supervisionpolicy", "supportgraph", "terminalbarrier", "terminalrelief",
   "testenv", "testquality", "toolplugin", "toolpriorbench", "trajectoryassurance", "turnavoid",
-  "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer", "usagepreflight",
+  "turntaxvisual", "ultracodeborrow", "ultracodecrossover", "ultracodedogfood", "ultracodetokenizer",
   "vcachecalibration", "vllmquant", "wavefuel", "wipinventory", "wiplifecycle",
   "wipreadiness",
   "witnessprocess", "workaccount", "workdelivery", "workflowoutcomestudy", "workloadfit", "workshape",
   "workspin",
   "placementtax",
   "extensionfault",
-  "timeaware",
   "toolbound",
   "overtonscore",
   "walkfiles",
@@ -495,7 +491,6 @@ concurrent = [
   "promptcomp",
   "control",
   "agentopt",
-  "interactivesession",
   "harnessbench",
   "workspaceslot",
   "agentsched",
@@ -674,7 +669,6 @@ autopick = [
   "waiting",
   "tuiplugin",
   "issuefanout", # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner), see [lanes].concurrent note
-  "chatopsdetach",
   "godfileceiling",
   "microagent",
   "l3kv",
@@ -707,7 +701,6 @@ autopick = [
   "codexresume",
   "depthadmit",
   "managedocs",
-  "humanctl",
   "toolcatalog",
   "toolcallcontrol",
   "projectassets",
@@ -745,7 +738,6 @@ autopick = [
   "promptcomp",
   "control",
   "agentopt",
-  "interactivesession",
   "toolgrammar",
   "containment",
   "readmenext",
@@ -1030,7 +1022,6 @@ trajctl = ["internal/trajctl/**"]
 waiting = ["internal/waiting/**"]
 tuiplugin = ["internal/tuiplugin/**"]
 issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (the spine-first + fan-out follow-on planner); cmd/fak/issue_fanout.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
-chatopsdetach = ["internal/chatopsdetach/**"]
 godfileceiling = ["internal/godfileceiling/**"]
 microagent = ["internal/microagent/**"]
 microharnessdemo = ["cmd/microharnessdemo/**"] # bounded harness demo and its privacy-safe usage/health evidence
@@ -1161,12 +1152,10 @@ dogfoodscore = ["internal/dogfoodscore/**"]
 dojocal = ["internal/dojocal/**"]
 dojopost = ["internal/dojopost/**"]
 dormancy = ["internal/dormancy/**"]
-dormancysim = ["internal/dormancysim/**"]
 edittx = ["internal/edittx/**"]
 egressfloor = ["internal/egressfloor/**"]
 envconfiglint = ["internal/envconfiglint/**"]
 epicprogress = ["internal/epicprogress/**"]
-epochbridge = ["internal/epochbridge/**"]
 evebridge = ["internal/evebridge/**"]
 eveimport = ["internal/eveimport/**"]
 eveparity = ["internal/eveparity/**"]
@@ -1229,7 +1218,6 @@ hwgatelint = ["internal/hwgatelint/**"]
 ideascout = ["internal/ideascout/**"]
 papers = ["internal/papers/**"]
 idempotency = ["internal/idempotency/**"]
-incidentrsi = ["internal/incidentrsi/**"]
 intlist = ["internal/intlist/**"]
 issuecohort = ["internal/issuecohort/**"]
 issuecontractrepair = ["internal/issuecontractrepair/**"]
@@ -1248,7 +1236,6 @@ knownenv = ["internal/knownenv/**"]
 kv = ["internal/kv/**"]
 kvbudget = ["internal/kvbudget/**"]
 l3region = ["internal/l3region/**"]
-lifebridge = ["internal/lifebridge/**"]
 lifecycle = ["internal/lifecycle/**"]
 linkstate = ["internal/linkstate/**"]
 loaddebounce = ["internal/loaddebounce/**"]
@@ -1339,7 +1326,6 @@ sessionjournal = ["internal/sessionjournal/**"]
 sessionledger = ["internal/sessionledger/**"]
 sessionobs = ["internal/sessionobs/**"]
 sessionread = ["internal/sessionread/**"]
-sessionreplay = ["internal/sessionreplay/**"]
 sessionreset = ["internal/sessionreset/**"]
 sessionsearch = ["internal/sessionsearch/**"]
 sessionsignals = ["internal/sessionsignals/**", "pkg/sessionsignals/**"]
@@ -1355,7 +1341,6 @@ slackenv = ["internal/slackenv/**"]
 slackmeta = ["internal/slackmeta/**"]
 sotacoverage = ["internal/sotacoverage/**"]
 sotamatrix = ["internal/sotamatrix/**"]
-spendrollup = ["internal/spendrollup/**"]
 stallscan = ["internal/stallscan/**"]
 stepbaton = ["internal/stepbaton/**"]
 stepbatoncapture = ["internal/stepbatoncapture/**"]
@@ -1393,7 +1378,6 @@ treedoctor = ["internal/treedoctor/**"]
 trendreport = ["internal/trendreport/**"]
 trigram = ["internal/trigram/**"]
 trunkbuildprobe = ["internal/trunkbuildprobe/**"]
-turnkind = ["internal/turnkind/**"]
 turntaxmeter = ["internal/turntaxmeter/**"]
 uiquality = ["internal/uiquality/**"]
 ultracodebench = ["internal/ultracodebench/**"] # #8496: cmd/fak adapters remain on the shared cmd lane.
@@ -1439,7 +1423,6 @@ codexresume = ["internal/codexresume/**"]
 mixedprecision = ["internal/mixedprecision/**"] # #6407: see the [lanes].concurrent note.
 depthadmit = ["internal/depthadmit/**"]
 managedocs = ["internal/managedocs/**"]
-humanctl = ["internal/humanctl/**"]
 toolcatalog = ["internal/toolcatalog/**"]
 toolcallcontrol = ["internal/toolcallcontrol/**"]
 harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
@@ -1498,7 +1481,6 @@ codebookmeta = ["internal/codebookmeta/**"]
 codetools = ["internal/codetools/**"]
 systools = ["internal/systools/**"]
 codexmcpdiag = ["internal/codexmcpdiag/**"]
-codexsession = ["internal/codexsession/**"]
 commitlifecycle = ["internal/commitlifecycle/**"]
 committedbuildwitness = ["internal/committedbuildwitness/**"]
 committedtree = ["internal/committedtree/**"]
@@ -1524,7 +1506,6 @@ doneclaimaudit = ["internal/doneclaimaudit/**"]
 dosdecision = ["internal/dosdecision/**"]
 edgequal = ["internal/edgequal/**"]
 enumlint = ["internal/enumlint/**"]
-estimatecal = ["internal/estimatecal/**"]
 exclusivefile = ["internal/exclusivefile/**"]
 fabricmap = ["internal/fabricmap/**"]
 fastintent = ["internal/fastintent/**"]
@@ -1670,7 +1651,6 @@ ultracodeborrow = ["internal/ultracodeborrow/**"]
 ultracodecrossover = ["internal/ultracodecrossover/**"]
 ultracodedogfood = ["internal/ultracodedogfood/**"]
 ultracodetokenizer = ["internal/ultracodetokenizer/**"]
-usagepreflight = ["internal/usagepreflight/**"]
 vcachecalibration = ["internal/vcachecalibration/**"]
 vllmquant = ["internal/vllmquant/**"]
 wavefuel = ["internal/wavefuel/**"]
@@ -1684,10 +1664,8 @@ workflowoutcomestudy = ["internal/workflowoutcomestudy/**"]
 workloadfit = ["internal/workloadfit/**"]
 workshape = ["internal/workshape/**"]
 workspin = ["internal/workspin/**"]
-gitresource = ["internal/gitresource/**"]
 placementtax = ["internal/placementtax/**"]
 extensionfault = ["internal/extensionfault/**"]
-timeaware = ["internal/timeaware/**"]
 toolbound = ["internal/toolbound/**"]
 overtonscore = ["internal/overtonscore/**"]
 walkfiles = ["internal/walkfiles/**"]
@@ -1698,7 +1676,6 @@ perfscout = ["internal/perfscout/**"]
 promptcomp = ["internal/promptcomp/**"]
 control = ["internal/control/**"]
 agentopt = ["internal/agentopt/**"]
-interactivesession = ["internal/interactivesession/**"]
 harnessbench = ["internal/harnessbench/**"]
 workspaceslot = ["internal/workspaceslot/**"]
 agentsched = ["internal/agentsched/**"]

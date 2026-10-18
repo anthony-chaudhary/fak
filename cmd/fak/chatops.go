@@ -23,9 +23,9 @@ import (
 // command does the Slack I/O, the audit journal, and the idempotent poll.
 //
 // It answers the READ verbs inline — `help`, `ping`, `status`, `fleet` — and DECLINES the
-// act/control verbs (`dispatch`, `resume`, `bench`, `halt`): the mutating path detaches
-// through guarded dispatch (internal/chatopsdetach, #2264) and lands separately, so this
-// spine can never start or stop work. Every inbound message is folded through the kernel's
+// act/control verbs (`dispatch`, `resume`, `bench`, `halt`): the mutating path would detach
+// through guarded dispatch (#2264) and is not built, so this spine can never start or stop
+// work. Every inbound message is folded through the kernel's
 // ordered fence (bot-loop → wrong-channel → not-addressed → empty → not-admin → grammar) and
 // journaled; channel text is only ever parsed as a closed verb, never executed as free-form.
 //

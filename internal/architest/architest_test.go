@@ -67,7 +67,6 @@ var tier = map[string]int{
 	"launchguard":     1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
 	"storagepressure": 3, // storage headroom and reclaim reporting; mechanism leaf, off the hot path.
 	"wipreadiness":    1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
-	"timeaware":       1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
 	"resultstier":     1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
 	"power":           1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
 	"telemetry":       1, // live runtime telemetry aggregation and Prometheus exposition; stdlib-only, off the hot path.
@@ -78,7 +77,6 @@ var tier = map[string]int{
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
 	"harnessprotocol": 1, // product-neutral headless run protocol and projections; stdlib plus public harnesskit contract only.
-	"usagepreflight":  2, // remaining-quota admission calculation; stdlib-only, off the hot path.
 
 	"envconfiglint":          2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
 	"flowmetrics":            2, // deterministic flow-metrics fold (#6194); composes maputil for stable issue/commit row traversal while grading Little's-Law KPIs and working-tree WIP.
@@ -165,7 +163,7 @@ var tier = map[string]int{
 	"deepseekbench": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench core (#3014), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
 	"deepseekv4moe": 2,              // DeepSeek V4 MoE fixture/bench core (#3018) is a foundation-composite, NOT a primitive: it assembles the shared offline eviction oracle (replayoracle(1)) and the shared numeric helpers (mathx(1)) into the expert-cache policy bench, so it imports two sibling primitives rather than "nothing internal"; off the hot path.
 	"guardvars":     1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
-	"glm52prefillsweep": 2, "turnkind": 1, // glm52prefillsweep: GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); imports windowgate(1) for hidden subprocesses. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
+	"glm52prefillsweep":     2,                // GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); imports windowgate(1) for hidden subprocesses, off the hot path.
 	"questionledger":        2,                // /question-loop ledger discipline (Go port of tools/question_ledger.py): lint/next-id/dedupe-check/stats over docs/questions/asked.jsonl; stdlib-only, off the hot path.
 	"quality":               2,                // missing-middle quality-ladder spine (epic #4509): versioned quality-case schema + reference/engine Runner adapters + deterministic differential comparator & rubric oracle + replay-complete result/failure-bundle; off the hot path. NOT pureRoot: the incremental-Unicode oracle's first-divergence offset delegates to strmatch(1) rather than carrying the copy `fak benchmarks`' name matcher already had (bfb2e3fa7), so it imports a sibling leaf.
 	"trunkbuildprobe":       2,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; imports windowgate(1) for hidden subprocesses, off the hot path.
@@ -279,7 +277,6 @@ var tier = map[string]int{
 	"issueownerprompt": 1, // stdlib-only canonical resolver lifecycle and drift validator (#6848).
 	"promptlint":       1, // durable freshness monitor for the dispatch worker-issue prompts (#3218): flags a rendered prompt whose `fak <verb>` / UPPER_SNAKE claims drift from the surface; stdlib-only, off the hot path.
 	"sensecheck":       1, // "does this actually make sense?" common-sense smell battery side-car; stdlib-only, imports nothing internal, off the hot path.
-	"spendrollup":      2, // cross-account `fak spend` rollup with a WITNESSED/OBSERVED provenance gate that fails any figure missing its valuation basis or provenance label; imports fleetaccounts(1), off the hot path.
 	"worktreewitness":  1, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; stdlib-only, off the hot path.
 	"goalregistry":     2, // canonical cross-harness goal identity and bindings; foundation composite over the tier-0 flock primitive.
 	"serverartifact":   1, // stdlib-only local artifact identity, digest, and mutation verification; imports no internal package.
@@ -404,7 +401,6 @@ var tier = map[string]int{
 	"horizonrecovery":     1, // pure budget-recovery (term r) grounding lens over a ctxplanbench report's already-measured real-transcript fields: surfaces the recovery ratio + its fault-rate FENCE co-located, structurally refuses to emit r/horizon_multiplier; stdlib-only, imports nothing internal, off the hot path.
 	"guardrsi":            2, // pure guard RSI journal fold + scorecard: reads guard-audit bytes, computes deterministic verdict quality, and validates keep/revert iterations; stdlib-only, off the hot path.
 	"generalizationdebt":  1, // pure tree-wide generalization-debt scorer; stdlib-only and off the hot path (#10486).
-	"incidentrsi":         1, // pure incident/trigger/debounce receipt contracts and folds; stdlib-only and off the hot path (#10495/#10497).
 	"repoguard":           2, // pure repo-containment classifier: resolves write/delete targets against a workspace root and emits OUT_OF_TREE_WRITE; stdlib-only, shared by the hook binary and loop driver.
 	"egresslist":          1, // pure offline operator/community allow-block matcher: compiles immutable adblock-style host rules with allow precedence and an embedded registry + provenance/checksum manifest. Stdlib-only, imports nothing internal, off the hot path.
 	"egressrefresh":       2, // the network-touching maintenance twin of egresslist(1): re-fetches bundled filter lists from their pinned provenance URLs, re-normalizes through egresslist's own ingest path, and rewrites the checked-in artifact + checksum. Imports egresslist(1)+stdlib; runs ONLY from `fak egresslist refresh`, never from a decision, which is what keeps the decide path offline. NOT pureRoot (it imports a sibling leaf).
@@ -413,8 +409,6 @@ var tier = map[string]int{
 	"workflow":            1, // pure DAG/map-reduce/fan-out orchestration core (#245, D-005): JSON-DSL compiler + topo-validated executor + retry/fail-fast fault tolerance; stdlib-only, imports nothing internal, off the hot path.
 	"l3region":            1, // L3 disaggregated-cache child B Stage-1 seam (#77, epic #504): an abi.RegionBackend over a fake in-memory page-keyed L3 store â€” a Ref.Digest resolves to a page-key set (mget/mset), region round-trips bit-exact + verify-don't-trust. Imports only abi+stdlib; NOT registered (library leaf), off the hot path.
 	"lifecycle":           1, // canonical shared run-state vocabulary; stdlib-only, imported by session/loopmgr to avoid token drift.
-	"epochbridge":         2, // explicit session generation <-> abi speculation epoch converter; imports only abi/session and owns neither type.
-	"lifebridge":          2, // explicit session.RunState <-> loopmgr.LoopState converter over lifecycle; imports only tier-1 leaves.
 	"memview":             3, // typed virtual-view contract over canonical raw memory cells (#904): MemoryViewRecord binds a derived view (snippet/summary/qa/fact) to its source by a digest + byte span, inherits the source taint, and is invalidated when the source digest changes; a materialized view carries an abi.Verdict and re-enters adjudication before any effect. Mechanism: imports only abi(0)+stdlib, defines a RawPage interface so recall.Page adapts without an upward import; off the hot path, registers nothing.
 	"fakrpc":              1, // disaggregated agent-RPC contract (#930): the pure Request envelope + the FAKRES nonce/sha frame (encode/decode/verify) a resident worker (cmd/fakrpcd) and pluggable text-only bridges build on. stdlib-only, imports nothing internal, off the hot path â€” the same frame tools/dgx_witness_run.sh emits.
 	"resume":              2, // deterministic resume-cache decision (#745/#774 family): prices RESUME_FULL/CUT/RESET against the projected cold/warm prompt-cache posture at the resume boundary and recommends a cut-by-default re-entry; pure Plan(Input) Report, imports only cacheprice(1) for the canonical cache multipliers, off the hot path. The computable answer to "resume a 250k session â€” what happens to the cache".
@@ -461,7 +455,6 @@ var tier = map[string]int{
 	"turntaxmeter":        2, // pure observer-effect sampling and overhead-budget meter; stdlib-only, off the hot path.
 	"slackenv":            1, // the ONE .env.slack.local token/channel resolver every outbound Slack publisher (scoreboard/blockerpost/benchpost/dispatchpost/dojopost/marketing/nodeusagepost) and chatrelay delegates to; pure stdlib, off the hot path.
 	"dormancy":            1, // dormancy clock + horizon bucketer (#1179, epic #1178): a durable monotonic LastActiveAt Stamp + a pure Horizon(gap) -> {warm,cool,cold,frozen,ancient} bucketer (thresholds anchored to the resume cache TTLs); stdlib-only, imports nothing internal, off the hot path. Surfaced on session/loop/lease as the shared "how long dormant" field.
-	"dormancysim":         2, // deterministic time-travel dormancy harness (#1192): drives dormancy(1)+rehydrate(1) with one injected virtual clock so day/week/month horizon tests run without wall-clock waits; off the hot path.
 	"rehydrate":           2, // horizon-gated re-entry orchestrator (#1181, epic #1178 Phase-2 spine): the CRaC afterRestore analog — a staged Gate that runs strictly more revalidation rungs (COLD_CACHE/STALE_CRED/STALE_RECALL/STALE_LEASE/STALE_PLAN) the longer the image was dormant, refusing admission at the first that does not clear. COMPOSES rungs (the four children supply the checks); imports only dormancy(1)+stdlib, registers nothing, off the hot path. sessionimage.Rehydrate composes a Gate at its boundary.
 	"syspromptmmu":        3, // system-prompt MMU: Rung 1 (#1259) emits fak's ordered base-context plan (SegStable spine + versioned policy floor as []cachemeta.PromptSegment, each content-witnessed); Rung 2 (#1260) is the cache-safe system-block splicer (BuildSystemValue + SpliceSystemOverlay, bytes.Equal(prefix) proven, fail-safe identity). Pure authorship/decision layer: imports cachemeta(1)+promptmmu(1)+stdlib, off the hot path.
 	"devcmd":              5, // fak-dev command implementations; integrates the agent/gateway/selfquery surfaces while staying off the serving/guard graph.
@@ -534,7 +527,6 @@ var tier = map[string]int{
 	"trajctl":               2,
 	"trajctlhook":           3, // impure call-site of the pure trajctl fold (#3129): git-shell PhaseCommits assembly + LiveTurnEnd producer that drives RunTurnEnd from a running session. Imports trajctl(1)+sessionaudit(1), off the hot path.
 	"waiting":               2, // R3 waiting-on-human queue (#2272, epic #2269): pure fold over loopmgr's loop-event ledger turning each blocked-on-operator notify into one kernel object with age, held resources, deadline, and the safe default that fires on expiry; ack-closure honestly fenced not_yet pending the R2 escalation packet (#2271); imports loopmgr(1), off the hot path.
-	"chatopsdetach":         1, // detached-execution decision kernel for chatops act verbs (#2265, epic #2259 C5): the pure fold that routes an inbound act verb + its guarded-dispatch admission verdict to dispatch-once / re-ack / structured-refuse over a command-nonce spool, plus the stall-to-blockers escalation judge. State in, decision out; imports nothing internal, off the hot path — the seam the (not-yet-landed) chatops door binds to.
 	"godfileceiling":        2,
 	"microagent":            5,
 	"sessionmine":           2, // offline normalization and ranking of local session telemetry; imports processalive(1), no runtime kernel.
@@ -544,7 +536,6 @@ var tier = map[string]int{
 	"l3kv":                  3, // durable off-box L3 KV residency backend (#1472): routes span content through the storedrv(2) router (blobfs local stand-in + the FAK_BLOB_HTTP_URL remote pool) behind a durable span→content manifest, so it declares alongside storedrv; imports abi(0)+model(1)+blob/blobfs/blobhttp(1)+storedrv(2), off the hot path.
 	"l3server":              2, // pure L3 slab-allocated storage engine and protocol server (#11077); stdlib-only, off the hot path.
 	"conformance":           3, // standalone third-party-runnable fak safety-conformance suite (#453): pins the guarantees a fork/auditor must verify independently of the kernel's own tests; composes abi(0)+adjudicator(2)+policy(2), so it declares at the lowest layer its imports allow (tier 2, alongside shipgate), off the hot path.
-	"sessionreplay":         3, // per-turn regime-conditioned replay-regression fixture (#4425, epic #4107): the fak.sessionreplay.v1 golden format + a pure Replay that re-adjudicates a captured (turn, active_regime) through the REAL adjudicator(2) over an internal/policy(2) regime floor, freezing a mode/regime-conditioned verdict for regression. Composes abi(0)+adjudicator(2)+policy(2) (like conformance), so it declares tier 2; test-time only, mutates nothing, off the hot path.
 	"doomloop":              1, // two-axis doom-loop classifier (#doomloop): folds a live worker's effort-vs-verified-progress sample window into a closed verdict + a graduated, reversible-first correction (observe->nudge->escalate, never an auto-teardown); the missing enforcement half of fleetmon/trajctl/relay/loopmgr detection. Pure, stdlib-only, off the hot path.
 	"looporphan":            1, // duplicate-loop-supervisor reaper core (#resume-consolidate-duplicate-loops): pure fold of a loop-supervisor process census into a closed KEEP/REAP/COLLISION/UNKNOWN plan that keeps the one parenting live work and reaps idle orphans/duplicates; fail-closed (no start-fence or unknown parent -> UNKNOWN, never REAP). Imports nothing internal, off the hot path.
 	"cvregress":             3,
@@ -618,7 +609,6 @@ var tier = map[string]int{
 	"learningmesh":          2, // #9839: deterministic cross-envelope transfer candidates; orchestration and execution remain outside this leaf.
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
 	"testenv":               2, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
-	"estimatecal":           2, // #5899 (epic #3229): pure in-memory estimate-vs-billed correction ratio fold keyed by provider/model; stdlib-only, imports nothing internal, off the hot path.
 	"docreach":              2, // Pure document-reachability census; repository I/O stays in cmd/fak.
 	"testquality":           3, // #5936: pure stdlib Go test AST quality findings plus counted baseline ratchet; repository I/O and CLI wiring stay in cmd/fak.
 	"dependencyquarantine":  0, // #5947: stdlib-only repository dependency-budget and nested-module quarantine checker; imports no sibling leaf.
@@ -671,7 +661,6 @@ var tier = map[string]int{
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	"tempartifact":          1, // stdlib-only exact-path OS-temp artifact lifecycle; process inspection stays in its off-path platform adapter.
 	"managedocs":            1,
-	"humanctl":              1,
 	"frontmatter":           1, // stdlib-only flat YAML scalar decoder shared by skill metadata readers.
 	"toolcatalog":           2, // typed tool declarations and runtime adapters composed over the frontmatter primitive.
 	"harnessserve":          2, // bounded local-runtime supervisor composed over the processalive primitive.
@@ -728,7 +717,6 @@ var tier = map[string]int{
 	"agentqueue":                 2, // bounded agent desired-state planner and crash-safe store (#8875, #8876); composes flock for serialized durable state updates.
 	"supervisionpolicy":          2, // typed fault-domain, bounded restart, and epoch-fenced adoption policy (#8909, #9053); composes flock for cross-process child takeover.
 	"projectionspine":            2, // disposable projection restart and session reattach spine (#8912); composes supervisionpolicy restart budgets and fault domains.
-	"codexsession":               4, // local Codex app-server adapter projected into the public harness protocol (#8736).
 	"hostdiag":                   3,
 	"shellprov":                  2, // privacy-safe receipt store for fak-owned shell launch identity (#9086); composes flock for serialized broker receipt updates.
 	"ultracodetokenizer":         1,
@@ -774,7 +762,6 @@ var tier = map[string]int{
 	"extensionfault":             1, // stdlib-only optional extension subprocess fault-isolation primitive.
 	"optsdefault":                1, // stdlib-only shared scorecard Options defaults (empty root, zero now).
 	"stablejson":                 1, // stdlib-only canonical two-space-indented JSON rendering primitive.
-	"gitresource":                1, // stdlib-only typed Git resource-ownership and cleanup-admission contract; folded by lifecycle integrations (#10613).
 	"workspin":                   1, // stdlib-only deterministic busywork-trend classifier over bounded commit/issue observations; folded by the CLI (#10609).
 	"toolbound":                  1,
 	"overtonscore":               1,
@@ -794,7 +781,6 @@ var tier = map[string]int{
 	"worktree":                   2, // ephemeral git worktree manager and janitor (#11169); imports leaseref(2), off the hot path.
 	"marketplace":                1,
 	"mtptune":                    1,
-	"interactivesession":         1,
 	"kimik3page":                 1,
 	"breathgate":                 1,
 	"kv":                         1,

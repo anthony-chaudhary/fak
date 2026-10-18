@@ -628,7 +628,6 @@ func f() {
 		"cmd/fak/guard_operator_question.go",
 		"cmd/fak/guard_plan_oracles.go",
 		"internal/agentqueue/actuator.go",
-		"internal/codexsession/adapter.go",
 		"internal/appversion/binarydoctor.go",
 		"internal/codelint/packs.go",
 		"cmd/rsiloop/dosobserve.go",
