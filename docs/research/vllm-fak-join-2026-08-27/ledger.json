@@ -6431,7 +6431,7 @@
       "signal": "torch.compile",
       "rule": "mechanism.kernels_compilation.title",
       "actionable": true,
-      "disposition": "landed",
+      "disposition": "partial",
       "artifacts": [
         {
           "kind": "issue",
@@ -6439,33 +6439,25 @@
           "state": "closed",
           "title": "bench(vllm): record torch.compile cache and CUDA-graph warmup in tuned baselines",
           "url": "https://github.com/anthony-chaudhary/fak/issues/1731",
-          "exact": true,
           "record_digest": "sha256:b8a5473e2346135d734015db8fef7d9925e18f0905fc46ea364fd0446860faab"
-        },
-        {
-          "kind": "repo_path",
-          "id": "internal/vllmcompile",
-          "revision": "f43478553e2bc373ff5912960a67fb4e6806e2d7",
-          "path": "internal/vllmcompile",
-          "exact": true
         }
       ],
-      "confidence": "explicit-map+captured-closed+history",
+      "confidence": "explicit-partial-scope",
       "evidence": {
         "query": "signal=\"torch compile\" field=title mechanism=kernels_compilation policy=exact-title-or-conservative-lexical",
-        "match_count": 7,
+        "match_count": 5,
         "matches": [
           "explicit_witness:docs/notes/VLLM-OPTIMIZATION-REUSE-TICKET-MAP-2026-06-30.md#ticket-map-row-11 issue=#1731 state=closed record=sha256:b8a5473e2346135d734015db8fef7d9925e18f0905fc46ea364fd0446860faab",
-          "git:f43478553e2bc373ff5912960a67fb4e6806e2d7 issue=#1731 path=internal/vllmcompile",
           "issue:#1731 state=closed basis=title_tokens score=76 record=sha256:b8a5473e2346135d734015db8fef7d9925e18f0905fc46ea364fd0446860faab",
           "issue:#3051 state=closed basis=body_tokens score=27 record=sha256:04d6944bb512fa85de3801fbda2e556f6d42895cadbdaef207c0de492167d16a",
           "issue:#3052 state=closed basis=title_tokens score=76 record=sha256:eed091fa17bdca5e0d68cef4a72b3cd7a31a2fb50abc6d35be3dcfad8f0bf1a4",
-          "issue:#5256 state=open basis=body_tokens score=27 record=sha256:0e1e05b0e8d3ed7cc81c2cc28c6aa1ce6662427ee6ac2fccdab977ad0f218d26",
-          "repo_path:internal/vllmcompile basis=explicit_witness"
+          "issue:#5256 state=open basis=body_tokens score=27 record=sha256:0e1e05b0e8d3ed7cc81c2cc28c6aa1ce6662427ee6ac2fccdab977ad0f218d26"
         ],
-        "full_matches_digest": "sha256:7a6158be52456050fa836ce49ee4322178fd463f3a4f7859079dd77fd4e8022f",
-        "digest": "sha256:122d1b37d2582282b145bfa41e3dfbca91608797075d2bcad166b94082c0c658"
+        "full_matches_digest": "sha256:399fa86e03c9e2120467011f3ea04c4c3467c196bb4ae000bab175df21ddc25b",
+        "digest": "sha256:b0c815c0f8de5b46d242b2524b1880a1df301215aaae17b3797e491b623024e7"
       },
+      "manual_review": true,
+      "manual_reason": "issue #1731 closed, but its tuned-baseline gate package was removed with no caller; no live repository witness remains",
       "members_checksum": "sha256:ea5f80ed181b324b346721055b72e22223bad76017195460e1c473e1477da603"
     },
     {

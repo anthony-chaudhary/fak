@@ -10,5 +10,5 @@ This map positions the current `evict` coverage backlog. Each entry names the ex
 ## Follow-on discovered names
 
 - **`expertringevict`** — the exact `evict` symbol; distinct from the broader family label and sibling operations.
-- **`qevict`** — the exact `evict` symbol; distinct from the broader family label and sibling operations.
-- **`qevicteval`** — the exact `evict` symbol; distinct from the broader family label and sibling operations.
+- **`qevict`** — the QEvict research record (`docs/research/quantization/qevict.md`); fak has no live symbol or runtime for it.
+- **`evictorphans`** — the exact `evict` symbol for quarantining orphan working-tree files under `refs/fak/quarantine/`; distinct from KV-cache, page and memory eviction.

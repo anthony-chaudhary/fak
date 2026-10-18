@@ -448,7 +448,7 @@ func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 		a, b string
 		want bool
 	}{
-		{"two distinct leaves", "internal/mixedprecision/**", "internal/quantpolicy/**", false},
+		{"two distinct leaves", "internal/mixedprecision/**", "internal/quantmeta/**", false},
 		{"the string-prefix trap", "internal/agent/**", "internal/agenttopo/**", false},
 		{"same tree twice", "internal/agent/**", "internal/agent/**", true},
 		{"a leaf swallowing a nested leaf", "internal/resume/**", "internal/resume/scan/**", true},

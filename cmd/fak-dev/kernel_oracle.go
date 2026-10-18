@@ -10,12 +10,14 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/perfledger"
 )
 
 // kernel-oracle joins llama.cpp `test-backend-ops perf` rows with fak's Vulkan
@@ -101,14 +103,34 @@ type oracleRow struct {
 }
 
 type oracleStage struct {
-	Kernel      string  `json:"kernel"`
-	Groups      string  `json:"groups"`
-	CallsBatch  float64 `json:"calls_per_batch"`
-	USPerCall   float64 `json:"us_per_call"`
-	SharePct    float64 `json:"share_pct"`
-	JoinedShape string  `json:"joined_shape,omitempty"`
-	Unjoined    string  `json:"unjoined,omitempty"`
+	Kernel      string               `json:"kernel"`
+	Groups      string               `json:"groups"`
+	CallsBatch  float64              `json:"calls_per_batch,omitempty"`
+	USPerCall   float64              `json:"us_per_call"`
+	SharePct    float64              `json:"share_pct"`
+	JoinedShape string               `json:"joined_shape,omitempty"`
+	Unjoined    string               `json:"unjoined,omitempty"`
+	Ledger      *oracleLedgerLineage `json:"ledger,omitempty"`
 	gx, gy      int64
+}
+
+type oracleLedgerLineage struct {
+	Line            int     `json:"line"`
+	RequestID       string  `json:"request_id"`
+	Model           string  `json:"model"`
+	Version         string  `json:"version,omitempty"`
+	WorkloadSHA256  string  `json:"workload_sha256,omitempty"`
+	ConfigSHA256    string  `json:"config_sha256,omitempty"`
+	Source          string  `json:"source"`
+	Method          string  `json:"method"`
+	Pipelining      string  `json:"pipelining"`
+	Complete        bool    `json:"complete"`
+	DecodeSteps     int     `json:"decode_steps"`
+	CallsPerToken   float64 `json:"calls_per_token"`
+	Truncated       uint64  `json:"truncated"`
+	UntimedCompute  uint64  `json:"untimed_compute"`
+	UntimedTransfer uint64  `json:"untimed_transfer"`
+	BarriersElided  uint64  `json:"barriers_elided"`
 }
 
 type oracleSummary struct {
@@ -165,7 +187,7 @@ func runKernelOracle(stdout, stderr io.Writer, argv []string) int {
 
 func writeKernelOracleUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak-dev kernel-oracle shapes (--gguf F | --metadata-json F) [--n 1,2,4,8,512] [--out F]")
-	fmt.Fprintln(w, "       fak-dev kernel-oracle rank --shapes F [--ggml F] [--fak-bench F] [--fak-profile F]")
+	fmt.Fprintln(w, "       fak-dev kernel-oracle rank --shapes F [--ggml F] [--fak-bench F] [--fak-profile F] [--fak-ledger F --fak-ledger-request ID]")
 	fmt.Fprintln(w, "                                  [--ggml-backend Vulkan0] [--evidence-class C] [--node N] [--out F]")
 	fmt.Fprintln(w, "ggml input: console output of `test-backend-ops perf -b <backend> [--test-file F]`")
 	fmt.Fprintln(w, "fak input:  `go test -bench` lines and/or FAK_VULKAN_TIMESTAMP_PROFILE=1 ts-stage lines")
@@ -361,6 +383,8 @@ func runKernelOracleRank(stdout, stderr io.Writer, argv []string) error {
 	ggmlPath := fs.String("ggml", "", "test-backend-ops perf console output")
 	benchPath := fs.String("fak-bench", "", "go test -bench output (BenchmarkVulkanRawIQMatvec)")
 	profilePath := fs.String("fak-profile", "", "stderr carrying FAK_VULKAN_TIMESTAMP_PROFILE ts-stage lines")
+	ledgerPath := fs.String("fak-ledger", "", "raw profile-on perf-ledger JSONL; preserves device interval lineage")
+	ledgerRequest := fs.String("fak-ledger-request", "", "exact request_id of one profile-on ledger window")
 	backend := fs.String("ggml-backend", "Vulkan0", "test-backend-ops backend section to read")
 	benchMode := fs.String("fak-bench-mode", "native_stream", "benchmark sub-mode to read (native_stream streams from DRAM)")
 	evidence := fs.String("evidence-class", "unlabeled", "HW-WITNESSED | SW-VERIFIED | FIXTURE | unlabeled")
@@ -373,10 +397,17 @@ func runKernelOracleRank(stdout, stderr io.Writer, argv []string) error {
 	*ggmlPath = pathutil.ExpandTilde(*ggmlPath)
 	*benchPath = pathutil.ExpandTilde(*benchPath)
 	*profilePath = pathutil.ExpandTilde(*profilePath)
+	*ledgerPath = pathutil.ExpandTilde(*ledgerPath)
 	*out = pathutil.ExpandTilde(*out)
-	if *shapesPath == "" || (*ggmlPath == "" && *benchPath == "" && *profilePath == "") {
-		fmt.Fprintln(stderr, "kernel-oracle rank: --shapes and at least one of --ggml, --fak-bench, --fak-profile are required")
+	if *shapesPath == "" || (*ggmlPath == "" && *benchPath == "" && *profilePath == "" && *ledgerPath == "") {
+		fmt.Fprintln(stderr, "kernel-oracle rank: --shapes and at least one measured input are required")
 		return errKernelOracleUsage
+	}
+	if (*ledgerPath == "") != (*ledgerRequest == "") {
+		return fmt.Errorf("%w: --fak-ledger and --fak-ledger-request must be supplied together", errKernelOracleUsage)
+	}
+	if *ledgerPath != "" && (*profilePath != "" || *benchPath != "" || *ggmlPath != "") {
+		return fmt.Errorf("%w: ledger device intervals cannot be compared with host console or legacy timing inputs", errKernelOracleUsage)
 	}
 	var shapes oracleShapeList
 	inputs := map[string]string{}
@@ -405,7 +436,21 @@ func runKernelOracleRank(stdout, stderr io.Writer, argv []string) error {
 		}
 		in.stages = parseFakStages(text)
 	}
+	if *ledgerPath != "" {
+		text, err := readOracleInput(*ledgerPath, inputs, "fak_ledger")
+		if err != nil {
+			return err
+		}
+		stages, err := parseOracleLedger(text, *ledgerRequest, shapes.Model)
+		if err != nil {
+			return err
+		}
+		in.stages = append(in.stages, stages...)
+	}
 	rec := rankKernelOracle(in)
+	if *ledgerPath != "" {
+		rec.Notes = append(rec.Notes, "structured ledger device intervals preserve producer lineage; serialized profiling differs from production scheduling; ggml console timings are host elapsed; nominal model matching is not process or model-byte attestation")
+	}
 	rec.EvidenceClass = *evidence
 	rec.Node = *node
 	rec.Inputs = inputs
@@ -460,14 +505,28 @@ func rankKernelOracle(in oracleRankInput) oracleReceipt {
 		r.FakUS = &us
 		r.FakSource = "microbench"
 	}
-	joinOracleStages(in.stages, rows, in.shapes)
+	for i := range in.stages {
+		if in.stages[i].Unjoined == "" {
+			joinOracleStages(in.stages[i:i+1], rows, in.shapes)
+			stage := in.stages[i]
+			if stage.Ledger != nil && stage.JoinedShape != "" {
+				for _, row := range rows {
+					if stage.JoinedShape == fmt.Sprintf("%s %dx%d n=%d", row.Dtype, row.m, row.k, row.N) {
+						row.FakSource = "structured_perf_ledger"
+					}
+				}
+			}
+		}
+	}
 	rec.FakStages = in.stages
 	for _, key := range order {
 		r := rows[key]
 		if r.FakUS == nil && r.FakInsituUS != nil {
 			v := *r.FakInsituUS
 			r.FakUS = &v
-			r.FakSource = "insitu_profile"
+			if r.FakSource == "" {
+				r.FakSource = "insitu_profile"
+			}
 		}
 		if r.FakUS != nil && r.Op == "MUL_MAT" && r.m > 0 {
 			r.FakGBps, r.FakTFLOPS = oracleMatRates(r.Dtype, r.m, r.k, r.N, *r.FakUS)
@@ -651,3 +710,66 @@ func writeOracleJSON(stdout io.Writer, path string, v any) error {
 	}
 	return os.WriteFile(path, b, 0o644)
 }
+
+func parseOracleLedger(text, requestID, shapeModel string) ([]oracleStage, error) {
+	var selected *perfledger.Record
+	selectedLine := 0
+	for i, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var record perfledger.Record
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			return nil, fmt.Errorf("%w: malformed ledger line %d", errKernelOracleUsage, i+1)
+		}
+		if record.RequestID != requestID {
+			continue
+		}
+		if selected != nil || record.Schema != perfledger.Schema {
+			return nil, fmt.Errorf("%w: selected ledger request is duplicated or has unknown schema", errKernelOracleUsage)
+		}
+		selected, selectedLine = &record, i+1
+	}
+	if selected == nil || selected.NativeTiming == nil || selected.NativeTiming.Kernels == nil {
+		return nil, fmt.Errorf("%w: selected ledger request has no structured device profile", errKernelOracleUsage)
+	}
+	r := selected
+	k := r.NativeTiming.Kernels
+	var stages []oracleStage
+	seen := map[string]bool{}
+	for _, sample := range k.SelectedKernels {
+		key := sample.Kernel + "|" + sample.Groups
+		if seen[key] {
+			return nil, fmt.Errorf("%w: duplicate selected kernel geometry", errKernelOracleUsage)
+		}
+		seen[key] = true
+		st := oracleStage{Kernel: sample.Kernel, Groups: sample.Groups, USPerCall: sample.USPerCall, SharePct: sample.Share * 100,
+			Ledger: &oracleLedgerLineage{Line: selectedLine, RequestID: r.RequestID, Model: r.Model, Version: r.Version, WorkloadSHA256: r.WorkloadSHA256, ConfigSHA256: r.ConfigSHA256, Source: k.Source, Method: "unverified", Pipelining: k.Pipelining, Complete: k.Complete, DecodeSteps: k.DecodeSteps, CallsPerToken: sample.CallsPerToken, Truncated: k.Truncated, UntimedCompute: k.UntimedCompute, UntimedTransfer: k.UntimedTransfer, BarriersElided: k.BarriersElided}}
+		if k.Source == perfledger.KernelSourceStructured && k.Backend == "vulkan" && k.Pipelining == perfledger.KernelPipeliningDisabledByProfile {
+			st.Ledger.Method = "structured_device_timestamp_intervals"
+		}
+		gx, gy, ok := strings.Cut(sample.Groups, "x")
+		var errX, errY error
+		st.gx, errX = strconv.ParseInt(gx, 10, 32)
+		st.gy, errY = strconv.ParseInt(gy, 10, 32)
+		switch {
+		case r.Error != "" || r.Planner != "inkernel" || r.Backend != "vulkan" || k.Backend != "vulkan":
+			st.Unjoined = "ledger_native_identity_unverified"
+		case r.Model != strings.TrimSuffix(filepath.Base(shapeModel), ".gguf"):
+			st.Unjoined = "ledger_model_mismatch"
+		case k.Source != perfledger.KernelSourceStructured || k.Pipelining != perfledger.KernelPipeliningDisabledByProfile:
+			st.Unjoined = "ledger_timer_method_unknown"
+		case !k.Complete || k.DecodeSteps <= 0 || k.Truncated != 0 || k.UntimedCompute != 0 || k.BarriersElided != 0 || !oracleLedgerPositive(k.GPUMSPerToken) || !oracleLedgerPositive(k.WallMSPerToken):
+			st.Unjoined = "ledger_device_profile_incomplete"
+		case !ok || errX != nil || errY != nil || st.gx <= 0 || st.gy <= 0 || !oracleLedgerPositive(sample.CallsPerToken) || !oracleLedgerPositive(sample.USPerCall) || sample.Share < 0 || sample.Share > 1:
+			st.Unjoined = "ledger_sample_invalid"
+		}
+		stages = append(stages, st)
+	}
+	if len(stages) == 0 {
+		return nil, fmt.Errorf("%w: selected ledger profile has no kernel rows", errKernelOracleUsage)
+	}
+	return stages, nil
+}
+
+func oracleLedgerPositive(n float64) bool { return n > 0 && !math.IsNaN(n) && !math.IsInf(n, 0) }

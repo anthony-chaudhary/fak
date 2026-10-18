@@ -1,13 +1,13 @@
 ---
-title: "DeepSeek V4 deterministic batch-invariant parity-harness spec + offline fixture"
-description: "The parity-harness SPECIFICATION every future DeepSeek-V4 native kernel must pass before a perf claim can close: batch-size / cache-hit / request-order / seed invariance rows with bitwise-preferred, FP4/FP8-bounded tolerance rules, mapped onto fak's real GLM-DSA seams, plus a pure-Go offline fixture (internal/dsparity) that needs no weights and no GPU. A PLAN, not a benchmark — no throughput/latency/score is claimed."
+title: "DeepSeek V4 deterministic batch-invariant parity-harness spec + offline witness"
+description: "The parity-harness SPECIFICATION every future DeepSeek-V4 native kernel must pass before a perf claim can close: batch-size / cache-hit / request-order / seed invariance rows with bitwise-preferred, FP4/FP8-bounded tolerance rules, mapped onto fak's real GLM-DSA seams, plus a weight-free witness on the real internal/model selector seam that needs no GPU. A PLAN, not a benchmark; no throughput/latency/score is claimed."
 ---
 
 # DeepSeek V4 deterministic batch-invariant parity-harness
 
 **2026-07-09.** Issue **[#3021](https://github.com/anthony-chaudhary/fak/issues/3021)**,
 parent epic **[#3006](https://github.com/anthony-chaudhary/fak/issues/3006)** (native
-DeepSeek-V4 kernel track). This is a **specification + offline fixture only** — no native
+DeepSeek-V4 kernel track). This is a **specification + offline witness only** — no native
 V4 kernel lands here, and **no performance number is claimed**. Current-state claims are
 witnessed against the exact `path:line` cited (read 2026-07-09 on `main`). It is a sibling
 of the other `docs/deepseek/*.md` / `docs/notes/DEEPSEEK-V4-*.md` plan notes:
@@ -36,8 +36,9 @@ load-bearing fused paths are exactly where a naive kernel loses that property:
 So the honest deliverable *before* any V4 kernel is written is a **parity harness**: a
 fixed table of invariance rows + expected fields, with tolerance rules that prefer bitwise
 and bound the genuinely mixed-precision paths — and a **claim-discipline** rule that no
-perf ticket closes on "faster" alone. This document is that spec; `internal/dsparity` is
-its offline, weight-free fixture.
+perf ticket closes on "faster" alone. This document is that spec, and the row table below is
+its single source; `internal/model/dsa_v4parity_test.go` is its offline, weight-free witness on
+the real selector seam.
 
 ## The V4 facts that drive the harness (from the issue grounding)
 
@@ -76,8 +77,9 @@ the pieces fak has no kernel for yet are named as distinct **proposed** seams.
 
 ## The parity rows (the harness table)
 
-The rows are encoded as **pure data** in [`internal/dsparity/dsparity.go`](../../internal/dsparity/dsparity.go)
-(`Rows()`), each with the expected fields the field-lock test pins. Summary:
+The rows live in this table. (They were first encoded as pure data in a standalone
+`internal/dsparity` fixture; it had no caller and checked only a synthetic re-implementation of
+the tie-break, so it was removed.)
 
 | id | axis | kernel | compare field | variants | tolerance | witness |
 |---|---|---|---|---|---|---|
@@ -90,58 +92,56 @@ The rows are encoded as **pure data** in [`internal/dsparity/dsparity.go`](../..
 | `seed/topk-selection-fixed` | seed | sparse-attention | topk-indices | seed=1 runA/runB | **bitwise** | offline-synthetic |
 | `seed/index-share-layers` | seed | sparse-attention | index-digest | seed=7 runA/runB | **bitwise** | offline-synthetic |
 
-Each row carries the locked expected FIELDS (`RequiredFields()`): `id`, `axis`, `kernel`,
-`compare_field`, `variants`, `tolerance`, `max_abs_tol`, `max_rel_tol`, `witness`,
-`fak_seam`, `rationale`.
+Each row carries the expected FIELDS: `id`, `axis`, `kernel`, `compare_field`, `variants`,
+`tolerance`, `max_abs_tol`, `max_rel_tol`, `witness`, `fak_seam`, `rationale`.
 
 ## Tolerance rules (bitwise preferred; FP4/FP8 bounded)
 
-A closed `ToleranceClass` vocabulary, enforced by `ParityRow.Validate()` and the table
-tests:
+A closed tolerance-class vocabulary:
 
 - **`bitwise`** — the default and the goal. `max_abs_tol == max_rel_tol == 0`. Batch-invariant
   kernels make this *achievable* for index selection, routing decisions, and greedy
   next-token identity, so those rows demand it.
 - **`fp8-bounded`** — for a fused-attention (HCA/mHC) accumulation where FP8 reduction
-  associativity cannot be pinned bit-for-bit. A **documented** abs/rel bound is required
-  (`Validate` rejects a zero bound), and the bounds shown here (1e-3 / 5e-4) are
+  associativity cannot be pinned bit-for-bit. A **documented**, non-zero abs/rel bound is
+  required, and the bounds shown here (1e-3 / 5e-4) are
   **MODELED** placeholders that must be replaced by a **tuned baseline** measured on the
   native kernel — they are not witnessed tolerances.
 - **`fp4-bounded`** — for the FP4 expert GEMM's grouped accumulation (experts are FP4 in the
   V4 checkpoint). Same rule, a wider **MODELED** placeholder bound (2e-2) pending a tuned
   baseline.
 
-`TestBitwisePreferred` fails if bitwise rows are not a strict majority, so the FP4/FP8
-escape hatch cannot quietly become the default.
+Bitwise rows must stay a strict majority, so the FP4/FP8 escape hatch cannot quietly become
+the default.
 
 > The numeric tolerances (1e-3, 5e-4, 2e-2) are **MODELED** starting points, **not**
 > witnessed error bounds. Each **host-gated** row's bound must be re-derived from a
 > **tuned-baseline** run of the real native kernel before it is trusted.
 
-## Offline fixture — `internal/dsparity` (no weights, no GPU)
+## Offline witness on the real selector seam (no weights, no GPU)
 
-The fixture is self-contained (stdlib only, **no cross-package imports**), so the first
-witness is `go test ./internal/dsparity/` with nothing downloaded:
+The weight-free witness in `internal/model/dsa_v4parity_test.go` drives the ACTUAL `dsaIndexScores` / `dsaTopKIndices` /
+`dsaIndexShare` / `dsaIndexDigest` at V4 scale (top-k 1024 over a synthetic 4096-key slice),
+so the rows it covers are checked on the real code path, not a re-implementation:
 
-- **Schema witnesses** — `TestRequiredFieldsLocked` pins the expected-fields set;
-  `TestEveryRowValidates`, `TestToleranceConsistency`, `TestNoDuplicateIDs`,
-  `TestAllRequiredAxesCovered`, `TestEveryAxisHasOfflineWitness`, `TestBitwisePreferred`
-  enforce the closed vocabularies and the harness invariants.
-- **An executed synthetic witness** — `stableTopK` reproduces `dsaTopKIndices`'s total
-  tie-break (score desc, then position asc). `TestSyntheticRequestOrderInvariance` selects
-  top-k over synthetic scores, then over 16 random permutations of the *same*
-  (position, score) pairs under a **fixed seed**, and requires an identical result — the
-  concrete "expert routing under different request ordering" / "top-k under a fixed seed"
-  property, demonstrated with no model. `TestSyntheticTopKIsCausalPrefixStable` shows the
-  same-seed selection is idempotent and tie-break-correct.
+- `TestDSAV4ScaleSelectionIsRequestOrderInvariant`: `order/expert-routing-permutation` and
+  `seed/topk-selection-fixed` on the selector: the selection digest is bitwise identical no
+  matter what order the keys are presented in.
+- `TestDSAV4ScaleTieBreakIsTotalAndSeedStable`: a full tie resolves by the total,
+  position-ascending tie-break, identically across runs.
+- `TestDSAV4ScaleIndexShareIsBitwiseAcrossLayers`: `seed/index-share-layers`: shared layers
+  reuse the computed top-k bitwise.
+- `TestDSAV4ScaleDigestDetectsDrift`: the index digest the batch/seed rows compare against
+  changes on a single perturbed index, so drift cannot go unnoticed.
+- `TestDSAV4ScaleTopKIsCausalAndBounded` and `TestDSAV4ScaleScoringPipelineIsDeterministic`:
+  causal well-formedness and a deterministic scoring pipeline.
+
+Run it with `go test ./internal/model -run 'TestDSAV4Scale' -count=1`.
 
 The **host-gated** rows (`batch/hca-logits`, `cache/prefix-logits`, `order/expert-output`)
-are labeled `WitnessHostGated` in the table: they need a real native V4 kernel on a GPU to
-produce the compared logits, and are intentionally left un-witnessed here rather than
-faked.
-
-Status: `go test ./internal/dsparity/` is **green** on `main` as of 2026-07-09 (schema +
-synthetic order-invariance witnesses only; the numeric-parity rows remain host-gated).
+need a real native V4 kernel on a GPU to produce the compared logits, and are intentionally
+left un-witnessed here rather than faked. The batch-size half of `batch/indexer-scores-1-N-M`
+and `cache/prefix-next-token` have no offline witness yet beyond that digest primitive.
 
 ## Claim discipline — no perf ticket closes on "faster" alone
 
@@ -157,7 +157,7 @@ MODELED/PAPER_CLAIMED). The rule for #3006's kernel tickets:
 > an undetected regression, not a result — the same reason a "tests pass" commit that
 > deleted the assertions is not a pass.
 
-The wiring: each perf ticket names the `dsparity` row ids it must keep green; the row's
+The wiring: each perf ticket names the parity row ids it must keep green; the row's
 `witness` field says whether that is an offline `go test` or a host-gated kernel run; and
 the ship commit for a kernel cites the witnessed rows, exactly as the budget/scorecard
 notes require a provenance label on every number.
@@ -166,32 +166,31 @@ notes require a provenance label on every number.
 
 Bullet-by-bullet against #3021's acceptance / witness criteria:
 
-- **"a test fixture defines the parity ROWS and expected FIELDS"** → `internal/dsparity/dsparity.go`
-  `Rows()` is the row table; `RequiredFields()` + `TestRequiredFieldsLocked` pin the exact
-  expected-fields set (`id`, `axis`, `kernel`, `compare_field`, `variants`, `tolerance`,
-  `max_abs_tol`, `max_rel_tol`, `witness`, `fak_seam`, `rationale`).
-- **"offline-runnable"** → the package has no cross-package imports and no network/GPU
-  dependency; `go test ./internal/dsparity/` is green with nothing downloaded, and
-  `TestEveryAxisHasOfflineWitness` guarantees each axis has a weight-free row.
+- **"a test fixture defines the parity ROWS and expected FIELDS"** → the row table and the
+  expected-fields list above (`id`, `axis`, `kernel`, `compare_field`, `variants`, `tolerance`,
+  `max_abs_tol`, `max_rel_tol`, `witness`, `fak_seam`, `rationale`). The original data fixture
+  (`internal/dsparity`) was removed; this table is now the source.
+- **"offline-runnable"** → `go test ./internal/model -run 'TestDSAV4Scale'` needs no weights,
+  network, or GPU, and every axis has at least one weight-free row.
 - **Parity rows: same prompt at batch 1/N/M** → `batch/indexer-scores-1-N-M` (bitwise,
   offline) + `batch/hca-logits-1-N-M` (fp8-bounded, host-gated).
 - **same prefix with and without cache hit** → `cache/prefix-next-token` (bitwise, offline)
   + `cache/prefix-logits-bounded` (fp8-bounded, host-gated).
 - **same expert routing under different request ordering** → `order/expert-routing-permutation`
   (bitwise, offline) + `order/expert-output-bounded` (fp4-bounded, host-gated); the offline
-  witness is executed by `TestSyntheticRequestOrderInvariance`.
+  witness is executed by `TestDSAV4ScaleSelectionIsRequestOrderInvariant`.
 - **same sparse-attention top-k selector under deterministic seeds** → `seed/topk-selection-fixed`
   + `seed/index-share-layers` (both bitwise, offline), mapped to `dsaTopKIndices` /
   `dsaIndexShare`.
-- **tolerance: bitwise where possible; bounded for FP4/FP8** → the `ToleranceClass` closed
-  vocabulary + `Validate()` (`bitwise` ⇒ zero tol; `fp4/fp8-bounded` ⇒ documented positive
-  tol) + `TestBitwisePreferred` (bitwise is a strict majority).
+- **tolerance: bitwise where possible; bounded for FP4/FP8** → the closed tolerance-class
+  vocabulary (`bitwise` ⇒ zero tol; `fp4/fp8-bounded` ⇒ documented positive tol), with bitwise
+  rows a strict majority.
 - **tie to commit/claim discipline: no perf ticket closes with only "faster"** → the "Claim
   discipline" section, wired to the same refusal posture as `deepseekbench.CompareSpeedup`
   and `deepseek_budget.claimNativeSupport`.
-- **first witness needs NO real weights (synthetic/offline)** → the whole `internal/dsparity`
-  package is synthetic + offline; the numeric rows that genuinely need a kernel are labeled
-  `WitnessHostGated`, not faked.
+- **first witness needs NO real weights (synthetic/offline)** → `dsa_v4parity_test.go` is
+  synthetic + offline; the numeric rows that genuinely need a kernel are labeled host-gated,
+  not faked.
 
 ## Host-gated / MODELED / follow-up
 
@@ -202,9 +201,9 @@ Bullet-by-bullet against #3021's acceptance / witness criteria:
 - **Proposed seams** (no fak kernel yet): the HCA (rate-128) `kvLayout` impl, the fused
   MoE-overlap dispatch kernel, and the FP4 expert GEMM — all named distinctly above and in
   the sibling notes (#3016 / #3017 / #3018 / #3019).
-- **Follow-up**: once the native kernels exist, extend `dsparity` with a `witness` runner
-  that flips the host-gated rows from spec to measured, and cite the witnessed row ids in
-  each kernel's ship commit.
+- **Follow-up**: once the native kernels exist, add a witness runner that flips the
+  host-gated rows from spec to measured, and cite the witnessed row ids in each kernel's ship
+  commit.
 
 ## Sources (researched July 2026)
 

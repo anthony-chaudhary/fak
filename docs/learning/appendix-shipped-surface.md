@@ -379,10 +379,8 @@ package name. One honest line each.
 | --- | --- |
 | `internal/benchauthority` | The typed, in-binary source of truth for the primary benchmark NUMBERS fak claims — the number, its baseline, its provenance, its retraction history — replacing a hand-typed table of run-on cells. |
 | `internal/benchckpt` | The shared per-cell write-ahead checkpoint the compute-bench executors write through, so a crash at cell N does not discard the cells already measured. |
-| `internal/deepseekv4kv` | A pure, weight-free block-accounting fixture for the DeepSeek V4 heterogeneous KV plane and its prefix-reuse policies. It reasons in normalized units, so unpublished head dimensions are never fabricated. |
 | `internal/deepseekv4moe` | A pure, weight-free synthetic model of V4's all-MoE dispatch that compares naive per-expert scheduling against grouped/fused scheduling in work-units, never in fabricated milliseconds. |
 | `internal/deploymanifest` | Defines the unified `fak.toml` all-in-one deployment manifest and its fail-closed loader — one reviewable declarative artifact in place of flag-soup, a policy file, environment variables, and service registration. |
-| `internal/dsparity` | The pure, offline parity-harness SPECIFICATION for future DeepSeek-V4 native kernels: what a batch-invariant, bit-reproducible decode would have to prove before any such kernel is trusted. |
 | `internal/glm52prefillsweep` | The GLM-5.2 pure-fak prefill-latency sweep driver: a prefill-dominant request at each prompt length, landing time-to-first-token and prefill throughput per length as discoverable benchmark-ledger artifacts. |
 | `internal/macfit` | Models Apple unified-memory capacity for many concurrent agents. |
 | `internal/modelaccept` | Evaluates versioned exact-model capability corpora without letting missing evidence or averages authorize a tier. |
@@ -523,7 +521,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/dispatchdoa` | Detects workers that died before completing useful dispatch work. |
 | `internal/docrender` | Renders repository Markdown into print-ready HTML and related publication artifacts. |
 | `internal/fleetbus` | Carries typed fleet-control messages rather than treating terminal text as a control protocol. |
-| `internal/fp4runtime` | Negotiates versioned FP4 and microscaling artifacts at the runtime boundary. |
 | `internal/generationctl` | Coordinates live generation epochs, steering directives, and their acknowledgements. |
 | `internal/gitbroker` | Centralizes guarded git execution and the resident content-addressed read broker. |
 | `internal/gitdaily` | Runs the deduped daily lock-reap and safe object-database consolidation fold. |
@@ -547,7 +544,6 @@ the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact wo
 | `internal/portabilityswitch` | Coordinates context changes with lifecycle state during a portability switch. |
 | `internal/projectassets` | Resolves canonical project assets and proves generated copies remain in parity. |
 | `internal/quantdetect` | Performs bounded, weight-free detection of quantization formats. |
-| `internal/quantpolicy` | Evaluates explicit constraints over a proposed quantization choice. |
 | `internal/quantprov` | Carries neutral provenance for quantized artifacts and their transformations. |
 | `internal/scratchmark` | Detects source files whose leading contract marks them as disposable scratch. |
 | `internal/serveradapter` | Renders configuration for supported external inference servers and probes readiness. |

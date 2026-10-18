@@ -432,13 +432,6 @@ Typed exhaustive corpus-level gold facts and candidate outputs for state counts,
 **Distinct from:** aggregateAnswers is the benchmark answer payload; guard-corpus is a policy-test corpus and grade-candidates are scorecard candidates, not expected benchmark facts.
 
 
-### quantpolicy
-
-Structural policy constraints over quantization capability metadata, including precision bounds, exact approved artifact formats, provenance requirements, and conversion permission.
-
-**Distinct from:** Unlike the general capability floor, quantpolicy decides whether one declared quantized artifact operation satisfies caller-supplied constraints; it neither selects nor runs a quantizer, conversion, runtime, or model kernel.
-
-
 ### CompactionJoinKey
 
 The event-join coordinate a compaction fire shares with the provider usage record for the turn it rewrote, so the fire's provider-side re-warm counters can be PROVEN against one usage row instead of pasted in by caller convention. The zero value is UNSTAMPED: a sample assembled without turn context, which the join passes through verbatim rather than counting as a failed join.

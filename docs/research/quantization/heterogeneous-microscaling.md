@@ -1,17 +1,17 @@
 ---
 title: "Heterogeneity-aware microscaling: bounded interoperability evaluation"
-description: "Contract: internal/microscaleeval (fak.microscale-eval/v1)."
+description: "Research record for AdaMX heterogeneity-aware microscaling; its retired contract was fak.microscale-eval/v1."
 ---
 # Heterogeneity-aware microscaling: bounded interoperability evaluation
 
 Issue: [#6248](https://github.com/anthony-chaudhary/fak/issues/6248), child of #6221.  
-Contract: `internal/microscaleeval` (`fak.microscale-eval/v1`).
+Contract (retired): `fak.microscale-eval/v1`. The `internal/microscaleeval` package had no caller in fak and was removed; it remains in git history, and this page is the research record.
 
 ## Verdict first
 
-**Integrate the neutral descriptor/adjudicator; delegate AdaMX execution; do not claim a native AdaMX kernel.** The contract can identify an exact declared OCP/vendor profile as `supported`, route a known heterogeneous descriptor to an explicitly named adapter as `delegate`, and return `unsupported` for unknown schemas, families, malformed pins, or known formats outside the runtime envelope. It never silently treats AdaMX, OCP MXFP4, and NVIDIA FP4 block scaling as interchangeable.
+**At review time: integrate the neutral descriptor/adjudicator; delegate AdaMX execution; do not claim a native AdaMX kernel.** The retired contract could identify an exact declared OCP/vendor profile as `supported`, route a known heterogeneous descriptor to an explicitly named adapter as `delegate`, and return `unsupported` for unknown schemas, families, malformed pins, or known formats outside the runtime envelope. It never silently treated AdaMX, OCP MXFP4, and NVIDIA FP4 block scaling as interchangeable.
 
-No model weights or AdaMX implementation artifact accompanied the paper sources inspected for this issue, and this leaf does not implement a kernel. Consequently all research comparisons below are **modeled/paper-reported**, not locally observed. Hardware performance and quality remain unclaimed; a future observed claim must include a run digest and hardware fingerprint accepted by the Go contract.
+No model weights or AdaMX implementation artifact accompanied the paper sources inspected for this issue, and the retired leaf did not implement a kernel. Consequently all research comparisons below are **modeled/paper-reported**, not locally observed. Hardware performance and quality remain unclaimed; a future observed claim must include a run digest and hardware fingerprint.
 
 ## Pinned research inputs
 
@@ -35,7 +35,7 @@ The hashes identify the exact bytes evaluated, not an endorsement or executable 
 
 ### Bounded format identifiers
 
-The leaf intentionally recognizes only:
+The retired leaf intentionally recognized only:
 
 - `ocp-mx-v1`
 - `nvidia-nvfp4`
@@ -69,17 +69,17 @@ Those figures are not converted into a fak gain claim: this issue did not indepe
 
 The paper reports a **22 nm FD-SOI accelerator prototype**. Against its otherwise-identical MXFP4 accelerator baseline with FP4-only multipliers, the abstract reports about **1% system-energy overhead** for AdaMX; at the lower-EBW point it reports reduced storage/memory footprint and energy while remaining more accurate than that baseline.
 
-This is not an observed CUDA/GPU result. The relevant sanctioned lab nodes cannot turn a paper-only custom decoder/accelerator into a faithful hardware witness without the executable artifact, recipe, model pins, and reference vectors. Dispatching an unrelated MXFP4 GEMM would answer a different question and would falsely substitute vendor native support for AdaMX. The contract therefore requires:
+This is not an observed CUDA/GPU result. The relevant sanctioned lab nodes cannot turn a paper-only custom decoder/accelerator into a faithful hardware witness without the executable artifact, recipe, model pins, and reference vectors. Dispatching an unrelated MXFP4 GEMM would answer a different question and would falsely substitute vendor native support for AdaMX. The contract therefore required:
 
 - observed source/run identity;
 - SHA-256 of the machine-readable run witness; and
 - hardware/runtime fingerprint.
 
-Without all three, `observed` is rejected rather than downgraded or invented.
+Without all three, `observed` was rejected rather than downgraded or invented.
 
 ## Provenance contract
 
-Every adjudication preserves four separate immutable pins:
+Every adjudication preserved four separate immutable pins:
 
 1. **Artifact:** encoded tensor/container or fixture bytes.
 2. **Recipe:** quantizer/calibration/selector configuration.
@@ -93,29 +93,15 @@ Each pin requires `id`, `revision`, and lowercase SHA-256. This prevents a paper
 
 ## Named witness
 
-`TestNamedWitnessProducesClosedOutcomes` reads three public in-code fixtures through the real adjudicator:
+The retired package's `TestNamedWitnessProducesClosedOutcomes` read three public in-code fixtures through the real adjudicator:
 
 1. exact OCP MXFP4 profile → `supported/native_profile_match`;
 2. AdaMX-like per-block/per-operand descriptor with a named adapter → `delegate/heterogeneous_runtime_required`;
 3. unknown family → `unsupported/unsupported_format`.
 
-Additional tests prove unknown schemas and incomplete pins refuse, incomplete observed evidence cannot masquerade as measurement, and NVIDIA-style FP4 does not silently match OCP MXFP4.
+Additional tests proved unknown schemas and incomplete pins refuse, incomplete observed evidence cannot masquerade as measurement, and NVIDIA-style FP4 does not silently match OCP MXFP4. Those tests were removed with the package.
 
-Reproduce from WSL:
-
-```bash
-cd /mnt/c/work/fak
-go test ./internal/microscaleeval -run 'TestNamedWitnessProducesClosedOutcomes|TestUnknownSchemaAndIncompletePinsRefuse|TestObservedCannotBeClaimedWithoutRunAndHardwareWitness|TestVendorFP4DoesNotSilentlyMatchOCP' -count=1
-```
-
-Repository-scoped acceptance:
-
-```powershell
-fak validate --mine internal/microscaleeval/contract.go --mine internal/microscaleeval/contract_test.go --mine docs/research/quantization/heterogeneous-microscaling.md
-fak buildcheck --vet ./internal/microscaleeval
-```
-
-## Integration decision
+## Integration decision (at review time)
 
 - **Integrate:** the typed descriptor, provenance chain, evidence typing, and exact capability adjudication.
 - **Delegate:** AdaMX decode/execute only to a specifically pinned adapter/runtime that advertises the heterogeneous behavior.

@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **675** (clarity 0 + coverage 675) |
-| **Crystal-clear concepts (and climbing)** | **1285** crystal of 3085 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3171 / 3846** (82.4% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 228 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4344 indexed names |
+| **Disambiguation-debt (drive to 0)** | **671** (clarity 0 + coverage 671) |
+| **Crystal-clear concepts (and climbing)** | **1284** crystal of 3086 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3170 / 3841** (82.5% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4345 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3085 concepts - score 88.6/100 (grade B) - disambiguation-debt 675
+concept-disambiguation chart - 3086 concepts - score 88.6/100 (grade B) - disambiguation-debt 671
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1285
-  o defined       ############################ 1800
+  * crystal       ####################........ 1284
+  o defined       ############################ 1802
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -51,7 +51,7 @@ clarity mix by family (each cell = one concept):
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             *****************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (418 concept(s); 173 crystal)
-  policy-capability *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 101 crystal)
+  policy-capability ****************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 100 crystal)
   pool             **********oooooooooooooooooooooooooooooooo (42 concept(s); 10 crystal)
   render-materialize ********************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 44 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
@@ -59,7 +59,7 @@ clarity mix by family (each cell = one concept):
   support-maturity *****************************************************ooooooooooooooooooooooooooo (80 concept(s); 53 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ***********************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 83 crystal)
+  witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (173 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
   plan             #######################..... 480/585
@@ -69,13 +69,13 @@ coverage by family (positioned / discovered):
   guard-gate       ##########################.. 515/563
   attention        #####################....... 146/192
   context-ctx      ########################.... 268/314
-  policy-capability ########################.... 225/267
   pool             ##############.............. 44/86
-  support-maturity ###################......... 85/123
+  policy-capability ########################.... 225/266
+  support-maturity ####################........ 85/122
   render-materialize ########################.... 217/251
-  witness-proof    ########################.... 173/202
+  witness-proof    ########################.... 172/200
   score-debt       #######################..... 114/139
-  evict            ####################........ 57/80
+  evict            ####################........ 57/79
   loop             ########################.... 100/117
   layout           #################........... 20/33
   decision         #########################... 60/66
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.4%  (3171/3846 confusable tokens positioned)
+namespace coverage  [##########################......] 82.5%  (3170/3841 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 228
+  mutual       ############################ 227
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 228/228
+  pairs separated   [################################] 227/227
 
-name index: 4344 lookup name(s) -> 3085 concept(s), 89 ambiguous
+name index: 4345 lookup name(s) -> 3086 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 228 |
-| **Separated from each other (drive to all)** | **228 / 228** (228 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 227 |
+| **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2444 / 5666 |
+| Boundaries drawn (mutual / total) | 2438 / 5662 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4344 over 3085 concepts |
+| Lookup names indexed | 4345 over 3086 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3085 |
+| Concepts carrying a contrast set | 3086 |
 
 ## The concepts (best verdict first)
 
@@ -453,8 +453,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | metric | evict | **CostEvictions** - The radixkv counter (Stats.CostEvictions) tallying evictions made by the legacy cost-aware eviction strategy. |
 | * | crystal | symbol | evict | **EvictionLRU** - The radixkv EvictionPolicy enum value (EvictionLRU) selecting least-recently-used eviction ordering. |
 | * | crystal | symbol | evict | **evict implementation surface for expertringevict** - `ExpertRingEvict` is the evict symbol declared or used at `internal/model/expert_ring_hal.go:71` as `s.expertRing.policy = s.ExpertRingEvict`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | evict | **evict implementation surface for qevict** - `qevict` is the evict symbol declared or used at `internal/qevicteval/contract.go:13` as `RecipeID = "qevict/arxiv-2608.05326v1"`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | evict | **evict implementation surface for qevicteval** - `qevicteval` is the evict symbol declared or used at `internal/qevicteval/contract.go:1` as `package qevicteval`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | doc-term | evict | **QEvict research record** - `QEvict` names the recoverable quantized KV-eviction recipe (arXiv:2608.05326v1) whose bounded trace-replay evaluation is recorded in `docs/research/quantization/qevict.md`. fak has no runtime or evaluator for it; the `internal/qevicteval` contract was removed unwired. |
+| * | crystal | symbol | evict | **evict implementation surface for evictorphans** - `EvictOrphans` (internal/wipinventory/evict.go:42) archives un-checkpointed orphan working-tree files into a synthetic commit under `refs/fak/quarantine/<timestamp>` and then removes them from the working tree; `fak wip evict` and the sweep path call it (cmd/fak/wip_evict.go, cmd/fak/sweep.go). |
 | * | crystal | symbol | evict | **evict (KV cache)** - Physical tensor span removal and RoPE re-rotation in KV cache for memory compaction |
 | * | crystal | symbol | evict | **evict (playbook)** - Logical span pruning from rendered playbook under token budget |
 | * | crystal | symbol | evict | **evict (session pool)** - Model instance eviction from a bounded LRU session pool |
@@ -1079,7 +1079,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **gateway admission policy** - The gateway scheduler configuration that independently bounds running sequence count, aggregate running-token budget, waiting-queue depth, and starvation aging. |
 | * | crystal | symbol | policy-capability | **PolicyKnob** - A registry ROW in PolicyKnobRegistry naming one amendable policy surface together with its amendment class (FROZEN / RATCHET / GATED_WIDEN / SELF_AMENDABLE) and permitted direction. It is metadata ABOUT a policy field, not a field itself, and carries no runtime value. |
 | * | crystal | symbol | policy-capability | **MultiplicityPolicy (statistical policy for a comparison family)** - The declaration one family of quality comparisons is held to: the alpha error budget, the multiplicity correction that spends it (holm-bonferroni, benjamini-hochberg, or none), and which metrics are PRIMARY so the secondary family has a gate to open behind. |
-| * | crystal | symbol | policy-capability | **quantpolicy** - Structural policy constraints over quantization capability metadata, including precision bounds, exact approved artifact formats, provenance requirements, and conversion permission. |
 | * | crystal | symbol | policy-capability | **serve execution policy** - The resolved `fak serve --execution-policy` (production or bringup): whether the GFX1151 device-only refusals apply to this serve, and which of them a bring-up-dedicated node lifted. |
 | * | crystal | symbol | policy-capability | **execution policy report** - The /healthz execution_policy block a serve publishes under a non-production execution policy: the dedicated model and every device-only refusal token the policy bypassed. |
 | * | crystal | symbol | policy-capability | **sessionQuarantineRetentionPolicy** - The cmd/fak accessor that reads FAK_SESSION_QUARANTINE_RETENTION and returns the bounded retention policy governing how many, how old and how large the quarantined copies of a corrupt session registry may grow before the recovery path reaps them; an unparseable value returns the conservative default plus an error the caller warns about rather than failing on. |
@@ -1410,7 +1409,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for changedwitnesskind** - `ChangedWitnessKind` is the witness-proof symbol declared or used at `internal/corelockgate/binarygrammar.go:55` as `GrammarChangedMarker = "name it with " + ChangedWitnessKind + ":<path>"`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for codexguardwitness** - `codex_guard_witness` is the witness-proof symbol declared or used at `cmd/fak/sessions_codex_loop.go:412` as `}{"fak.codex_guard_witness.v1", sessionID, time.Now().UTC().Format(time.RFC3339Nano)})`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for commitiswitnessed** - `commitIsWitnessed` is the witness-proof symbol declared or used at `internal/closureaudit/bindprobe.go:177` as `if !commitIsWitnessed(a) {`. This row positions that concrete implementation surface, not merely the family label. |
-| * | crystal | symbol | witness-proof | **witness-proof implementation surface for evidencewitnessed** - `EvidenceWitnessed` is the witness-proof symbol declared or used at `internal/quantpolicy/contract.go:97` as `EvidenceWitnessed EvidenceKind = "witnessed"`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | witness-proof | **witness-proof implementation surface for evidencewitnessed** - `EvidenceWitnessed` is the witness-proof symbol declared at `internal/sessionread/vocab.go:60` as `EvidenceWitnessed Evidence = "WITNESSED"`: the session-read evidence class for output backed by a durable artifact or signed ledger. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for issueresolvewitnessed** - `issue_resolve_witnessed` is the witness-proof symbol declared or used at `internal/branchrole/refaudit.go:231` as `"tools/issue_resolve_witnessed.py": RefClassDevelopmentSource,`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for kvprefixwitness** - `KVPrefixWitness` is the witness-proof symbol declared or used at `internal/cachewitness/cachewitness.go:70` as `KVPrefix KVPrefixWitness `json:"kv_prefix"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | witness-proof | **witness-proof implementation surface for resolvewitnessfiles** - `resolveWitnessFiles` is the witness-proof symbol declared or used at `cmd/fak/dispatch_tick_livescan.go:231` as `// resolveWitnessFiles returns the durable resolve-*.witness audit sidecars under runsDir,`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2123,7 +2122,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | guard-gate | **GateDisposition** - GateDisposition (internal/ctxmmu/disposition.go) grades an observed context disposition against the wanted disposition, given evidence, returning a DispositionOutcome. |
 | o | defined | symbol | guard-gate | **GateEphemeral** - GateEphemeral (internal/ctxmmu/ephemeral_gate.go) decides whether ephemeral text may be reclassified, returning an EphemeralGateOutcome. |
 | o | defined | symbol | guard-gate | **gatePriorArt** - gatePriorArt (internal/hooks/gate_priorart.go) is the staged-diff hook gate that emits prior-art findings for changes matching kernel globs. |
-| o | defined | symbol | guard-gate | **GateReport** - GateReport (internal/vllmcompile) is the structured result a QA gate returns, folding its per-row verdicts into one pass/fail. |
+| o | defined | symbol | guard-gate | **GateReport** - GateReport is a reused result-shape name: cachevaluereport.GateReport (internal/cachevaluereport/audit.go:494) is the cache-savings SLO verdict whose Pass=false is the non-zero exit, skillvalue.GateReport (internal/skillvalue/skillvalue.go:86) lists active skills lacking a valuation basis, and cmd/fak's gateReport is one pre-commit gate's line in the hooks `gates` array. |
 | o | defined | symbol | guard-gate | **guardIsCodex** - guardIsCodex (cmd/fak/guard_codex.go) detects whether the guarded child command is a Codex CLI invocation, selecting the Codex install shape. |
 | o | defined | config | guard-gate | **guardDisabled** - guardDisabled (cmd/fak/dispatch_tick.go) reports whether dispatch must skip the fak guard wrapper (GUARD_DISABLED environment switch). |
 | o | defined | symbol | guard-gate | **ScoreTrendGate** - ScoreTrendGate (internal/cachevalueledger/ledger.go) grades a ledger's score trend and gates on regression (TrendGateResult). |
@@ -2680,6 +2679,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | concept | policy-capability | **unadjudicated (executor / raw-arm)** - "unadjudicated" names an executor or call path that runs WITHOUT going through the adjudicator at all - microagent's toolexec registry refuses (#2018) to ever hand back a bare unadjudicated executor, while livecodebench's raw-arm gateway calls are deliberately run UNADJUDICATED to collect an un-gated baseline. |
 | o | defined | symbol | policy-capability | **Policy (loaded)** - The in-memory decision table compiled from a manifest, holding allow-lists, deny maps, arg predicates, posture, and secret patterns the adjudicator consults. |
 | o | defined | subsystem | policy-capability | **preflight ladder** - The cheapest-first well-formedness rung ladder that catches malformed / unsafe calls before they fire, registered ahead of the authoritative monitor. |
+| o | defined | symbol | policy-capability | **EgressPolicy (sandbox enum vs microagent floor)** - EgressPolicy names two different outbound-network controls: sandbox.EgressPolicy (internal/sandbox/types.go:91) is a string enum of container network containment (blocked, loopback, allowlist) that the MCP tool sandbox and gym set to blocked, while microagent.EgressPolicy (internal/microagent/egress.go:95) is one agent's egress floor - a trust level plus allowlisted destinations - that ToolExec.WithEgress attaches and Decide applies per tool call. |
 | o | defined | symbol | pool | **PagedKVPool (paged KV block pool)** - model.PagedKVPool (internal/model/pagedkv.go) is the shared pool of fixed-size physical KV blocks every paged sequence draws from with reference-counted copy-on-write; NewPagedKVPool builds a 2-plane K/V pool, and NewPagedKVPoolWithRaw builds a 3-plane pool that adds the pre-RoPE Kraw plane so exact-span eviction can re-rotate survivors in a single rotation. |
 | o | defined | symbol | pool | **BuildSeatPool (dispatchtick accounts)** - dispatchtick.BuildSeatPool folds account rows and seat leases for a product into a SeatPoolResult — the available agent-seat capacity by account the dispatcher draws a worker from. |
 | o | defined | symbol | pool | **L3PoolWitness (gateway deletion probe)** - gateway.L3PoolWitness is the minimal control-path probe interface the L3 deletion rung folds — an exists/mget over page keys that returns only presence booleans, never page payload bytes — so a deletion certificate can attest an L3 page pool no longer holds a subject's pages. |
@@ -3127,11 +3127,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | subsystem | support-maturity | **toolcoverage** - Package toolcoverage (internal/toolcoverage) audits which load-bearing tools modules have sibling tests. |
 | o | defined | symbol | support-maturity | **CorrectnessLaw (vCache cache-safety statement)** - CorrectnessLaw is the vCache action/report field that states the correctness invariant: full uncached prompt execution remains the authoritative path and cache hits are only rebates. |
 | o | defined | subsystem | support-maturity | **supportmaturity (support-maturity rung scale)** - internal/supportmaturity (internal/milestonereport uses M4Correct): the support-maturity rung scale (M0..M4) grading how mature a subsystem's support is; maturedRung = M4Correct is the top rung a milestone requires. |
-| o | defined | subsystem | support-maturity | **dsparity** - Package dsparity (internal/dsparity) is the pure, offline, dependency-free parity-harness SPECIFICATION for future DeepSeek-V4 native kernels (#3021): it encodes the parity rows and expected fields (invariance axis, tolerance, witness kind) a batch-invariant kernel must satisfy before a speed claim can close, runnable without real weights or a GPU. |
 | o | defined | subsystem | support-maturity | **eveparity** - Package eveparity (internal/eveparity) is the CI-runnable witness for issue #2605: it runs a fixture Eve-shaped eval suite once raw and once fak-routed through the real gateway proxy, then Compare folds the two arms into a Witness proving fak never silently downgrades a hard Eve gate failure into a soft pass. |
 | o | defined | config | support-maturity | **MONITOR_NO_FAILURE_COVERAGE** - The closed arm-time refusal token (ReasonMonitorNoFailureCoverage, abi.ReasonCode 1044, internal/toolproc/monitor.go) ArmMonitor cites when a monitor's filter declares no failure-signature class alongside its progress pattern, so a monitor that would stay silent-on-failure by construction is refused instead of armed. |
 | o | defined | symbol | support-maturity | **ParityVerdict (eveparity witness)** - The eveparity.Witness.ParityVerdict string field ('pass' | 'divergent') Compare sets: pass only when every case agrees on pass/fail with a byte-identical reason and no hard-gate failure was downgraded to a soft score; any disagreement or downgrade flips it to divergent. |
 | o | defined | symbol | support-maturity | **ParityVerdict (recall replica agreement)** - The recall package's uint8 enum (ParityAgree | ParityResolved | ParityConflict) ParityFinding.Verdict carries: whether several replicas of one logical memory resource corroborate on bytes, resolve to one clear live witness, or conflict with no clear winner (#786). |
+| o | defined | metric | support-maturity | **CosineParity (arm-vs-reference output cosine)** - CosineParity is the cosine similarity between a candidate arm's output and its reference arm's output: the Strix ablation receipt records it per ablation row (internal/amdgpu/strix_receipt.go:739), the Strix candidate verdict marks a run REGRESSED when it is NaN or below the configured minimum (internal/amdgpu/strix_candidate.go), and the Qwen3.8 subagent packet requires it at or above MinCosineParity 0.9999 (internal/cachevalue/qwen38_subagent_packet.go). |
 | o | defined | symbol | witness-proof | **loopmgr witnessed run-status set** - The loop/bench witnessed run-status family: loopmgr.StatusWitnessRefused ("witness_refused") and StatusWitnessUnavailable ("witness_unavailable"), bench/loopgate VerdictWitnessed/OutcomeWitnessed ("witnessed") and its witnessed_done promotion, callavoid's WitnessedRedirect and its WitnessedEmpty count, and loopindex's WitnessedIndex health score. |
 | o | defined | symbol | witness-proof | **unwitnessed-claim reason set** - The unwitnessed-claim deny/re-arm reason family: loopgate.ReasonDoneUnwitnessed ("LOOP_DONE_UNWITNESSED", the re-arm reason when a done claim has no witness, as adjudicated for a claim-unwitnessed turn) and the proposed context-safety SAFETY_UNWITNESSED DOS refusal token for a rendered number with no tamper-evident source. |
 | o | defined | symbol | witness-proof | **ReviewRefute (scout review verdict)** - modelroute.ReviewRefute is the scout-review verdict value "refute" returned when an opt-in pre-commit review rejects a diff; safecommit raises it to the ReasonReviewRefuted ("REVIEW_REFUTED") refusal that blocks the commit before it lands. |
@@ -3155,7 +3155,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **FAK_V41_TAIL_ROPE_EXACT_WITNESS** - The native compile-time define that requires the existing mandatory tail RoPE module to carry DenormPreserve, SignedZeroInfNanPreserve and RoundingModeRTE F32 modes with matching selected-device support and strict ABI/arithmetic-shape admission. It exposes the exact-environment and parser-test C symbols. The same define enables those modes in the unchanged GLSL arithmetic algorithm; ordinary builds retain their prior module policy. |
 | o | defined | symbol | witness-proof | **-lfakvulkan_v41_tail_rope_exact_witness** - The exact cgo linker-option token selecting libfakvulkan_v41_tail_rope_exact_witness.a for the strict tail RoPE witness-tagged Go build. All five Vulkan archive selectors choose this input exclusively for that tag combination. Ordinary native archives lack the strict environment marker and parser-test symbols. |
 | o | defined | symbol | witness-proof | **DISCARD_WITNESSED (wip-recon safe-discard action)** - internal/wiprecon/recon.go: the reconciliation ACTION for a crashed owner's checkpoint whose delta already LANDED in HEAD (git-witnessed), so dropping it loses nothing. Fail-safe by construction: the only path to it requires Landed==true. |
-| o | defined | symbol | witness-proof | **validWitness (two same-named witness membership tests)** - validWitness is a REUSED name for two different membership tests: internal/dsparity's map of accepted parity Witness values, and internal/trajctl's function over a WitnessRung. Both answer 'is this witness value in the closed set', over unrelated vocabularies. |
+| o | defined | symbol | witness-proof | **validWitness (trajctl witness-rung membership test)** - validWitness (internal/trajctl/trajctl.go:333) reports whether a WitnessRung is one of trajctl's closed rungs (W0-W3); score and retention-summary validation refuse a value outside that set. |
 | o | defined | symbol | witness-proof | **witnessExitedWorkers (post-run commit-claim audit)** - cmd/fak/dispatch_tick_witness.go: audits the workers that have EXITED, bucketing each resolve log into witnessed / unwitnessed / no-commit claims and returning the per-worker witness records. |
 | o | defined | symbol | witness-proof | **ClaimWitnessed (dispatch-tick sweep verdict)** - dispatchtick.ClaimWitnessed is the CLAIM_WITNESSED verdict a finished dispatch worker's slot grades into when `dos commit-audit` confirms its resolving commit cleared the diff-witnessed keep-bit - the positive branch of the .witness sidecar claim vocabulary (ClaimWitnessed / ClaimUnwitnessed / ClaimNoCommit). |
 | o | defined | symbol | witness-proof | **WitnessClaim** - WitnessClaim (internal/taskmgr/evidence.go) is the witness interface method: turn a Claim into a WitnessRecord backed by evidence. |
@@ -3197,6 +3197,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **WitnessSidecarSuffix (dispatch-tick audited-once marker)** - internal/dispatchtick.WitnessSidecarSuffix (".witness") is the on-disk file-name suffix marking a dispatch-tick worker slot as audited-once, since a landed commit's diff (and so its verdict) is immutable and a slot must be graded exactly one time. |
 | o | defined | symbol | witness-proof | **WitnessSource (concept-bench referee field)** - internal/conceptbench's Verdict.WitnessSource is a string field naming the exact real DOS tool that answered one concept-bench probe (e.g. dos_verify, dos_arbitrate, dos_check_reason), so a probe's verdict can be traced back to which referee produced it. |
 | o | defined | subsystem | witness-proof | **worktreewitness (detached-trunk command harness)** - internal/worktreewitness runs an arbitrary command inside a transient, self-reaping detached git worktree pinned at the resolved origin/main SHA, so the verdict reflects the trunk tip and is never contaminated by a peer's dirty uncommitted WIP in the shared working tree. |
+| o | defined | symbol | witness-proof | **RequiredWitnesses (witnesses still owed)** - RequiredWitnesses names two declared lists of witnesses that must still be produced: corelockaudit.Finding.RequiredWitnesses (internal/corelockaudit/corelockaudit.go:96) holds the commands that would clear a core-lock warning on one lock class, and safesync.Packet.RequiredWitnesses (internal/safesync/packet.go:70) names the witness classes (tests, build check, remote containment) the safe-sync executor verifies before it pushes. |
 | o | defined | symbol | witness-proof | **VerdictRequireWitness (abi verdict)** - abi.VerdictRequireWitness is the kernel verdict kind that leaves a gated call PENDING an independent read-back, so the kernel must corroborate the caller's claimed effect (carried in the WitnessPayload) before the call may dispatch. |
 | o | defined | symbol | witness-proof | **ReasonUnwitnessed (deny reason)** - abi.ReasonUnwitnessed is the deny reason-code the kernel attaches when a require-witness gate found no corroboration, so the fail-closed default turns the pending verdict into a DENY (also surfaced as looprecover's unwitnessed disposition). |
 | o | defined | symbol | witness-proof | **WitnessPayload (verdict claim carrier)** - abi.WitnessPayload is the typed bounded-disclosure verdict payload struct{Claim string} that an adjudicator attaches to a RequireWitness or Deny verdict to carry the single claim string the kernel must corroborate. |
@@ -3365,17 +3366,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3222/5666 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3085 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3224/5662 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3086 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 228 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 227 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4344 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4345 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3389,13 +3390,13 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 515 | 563 | 48 |
 | attention | 146 | 192 | 46 |
 | context-ctx | 268 | 314 | 46 |
-| policy-capability | 225 | 267 | 42 |
 | pool | 44 | 86 | 42 |
-| support-maturity | 85 | 123 | 38 |
+| policy-capability | 225 | 266 | 41 |
+| support-maturity | 85 | 122 | 37 |
 | render-materialize | 217 | 251 | 34 |
-| witness-proof | 173 | 202 | 29 |
+| witness-proof | 172 | 200 | 28 |
 | score-debt | 114 | 139 | 25 |
-| evict | 57 | 80 | 23 |
+| evict | 57 | 79 | 22 |
 | loop | 100 | 117 | 17 |
 | layout | 20 | 33 | 13 |
 | decision | 60 | 66 | 6 |

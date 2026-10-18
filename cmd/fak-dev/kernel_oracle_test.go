@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"github.com/anthony-chaudhary/fak/internal/perfledger"
 	"math"
 	"os"
 	"path/filepath"
@@ -388,5 +390,119 @@ func TestKernelOracleRankExpandsInputAndOutputTilde(t *testing.T) {
 				t.Fatal("tilde file output differs from absolute-path stdout")
 			}
 		})
+	}
+}
+
+func oracleLedgerFixture(t *testing.T) perfledger.Record {
+	t.Helper()
+	return perfledger.Record{Schema: perfledger.Schema, RequestID: "measured-request", Model: "Qwen-fixture", Identity: perfledger.Identity{Planner: "inkernel", Backend: "vulkan", Version: "test-source"}, NativeTiming: &perfledger.NativeTiming{Kernels: &perfledger.NativeKernels{Source: perfledger.KernelSourceStructured, Backend: "vulkan", DecodeSteps: 31, GPUMSPerToken: 2, WallMSPerToken: 3, Complete: true, Pipelining: perfledger.KernelPipeliningDisabledByProfile, SelectedKernels: []perfledger.SelectedKernel{{Kernel: "iq2xxs_matvec", Groups: "640x1", CallsPerToken: 7, USPerCall: 80, Share: 0.5}, {Kernel: "unknown_kernel", Groups: "1x1", CallsPerToken: 1, USPerCall: 1, Share: 0.01}}}}}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleStructuredLedgerSelectsExactWindowAndPreservesLineage(t *testing.T) {
+	r := oracleLedgerFixture(t)
+	warm := r
+	warm.RequestID = "warm-request"
+	a, _ := json.Marshal(warm)
+	b, _ := json.Marshal(r)
+	stages, err := parseOracleLedger(string(a)+"\n"+string(b)+"\n", r.RequestID, "/models/Qwen-fixture.gguf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shapes := oracleShapeList{Shapes: []oracleShape{{Op: "MUL_MAT", Dtype: "iq2_xxs", M: 10240, K: 5120, N: 1}}}
+	rec := rankKernelOracle(oracleRankInput{shapes: shapes, stages: stages})
+	row := findOracleRow(t, rec.Rows, "MUL_MAT", "iq2_xxs", "10240x5120", 1)
+	if row.FakUS == nil || *row.FakUS != 80 || row.Status != oracleStatusGGMLMissing || row.FakSource != "structured_perf_ledger" {
+		t.Fatal("device observation missing or absent ggml zero-filled")
+	}
+	st := rec.FakStages[0]
+	if st.Ledger.Line != 2 || st.Ledger.RequestID != r.RequestID || st.Ledger.CallsPerToken != 7 || st.CallsBatch != 0 || st.Ledger.Method != "structured_device_timestamp_intervals" || st.JoinedShape == "" {
+		t.Fatalf("lineage or geometry lost: %+v", st)
+	}
+	if rec.FakStages[1].Unjoined != "kernel_geometry_unknown" {
+		t.Fatal("unknown kernel inferred")
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleStructuredLedgerUnverifiedObservationsRemainUnjoined(t *testing.T) {
+	for _, name := range []string{"model", "source", "pipeline", "incomplete", "untimed", "elided", "zero_time", "invalid_groups", "zero_calls", "native_identity"} {
+		t.Run(name, func(t *testing.T) {
+			r := oracleLedgerFixture(t)
+			k := r.NativeTiming.Kernels
+			switch name {
+			case "model":
+				r.Model = "different-model"
+			case "source":
+				k.Source = "unknown"
+			case "pipeline":
+				k.Pipelining = "unknown"
+			case "incomplete":
+				k.Complete = false
+			case "untimed":
+				k.UntimedCompute = 1
+			case "elided":
+				k.BarriersElided = 1
+			case "zero_time":
+				k.GPUMSPerToken = 0
+			case "invalid_groups":
+				k.SelectedKernels[0].Groups = "unknown"
+			case "zero_calls":
+				k.SelectedKernels[0].CallsPerToken = 0
+			case "native_identity":
+				r.Backend = "cpu-ref"
+			}
+			raw, _ := json.Marshal(r)
+			stages, err := parseOracleLedger(string(raw), r.RequestID, "/models/Qwen-fixture.gguf")
+			if err != nil || len(stages) != 2 || stages[0].Unjoined == "" {
+				t.Fatalf("unverified row accepted: stages=%+v err=%v", stages, err)
+			}
+			rec := rankKernelOracle(oracleRankInput{shapes: oracleShapeList{Shapes: []oracleShape{{Op: "MUL_MAT", Dtype: "iq2_xxs", M: 10240, K: 5120, N: 1}}}, stages: stages})
+			if rec.Rows[0].FakUS != nil || rec.Rows[0].Status != oracleStatusBothMissing {
+				t.Fatal("unverified observation gained rank timing")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleStructuredLedgerRejectsAmbiguousOrAbsentWindow(t *testing.T) {
+	r := oracleLedgerFixture(t)
+	raw, _ := json.Marshal(r)
+	for _, text := range []string{string(raw) + "\n" + string(raw), "{", `{"schema":"unknown","request_id":"measured-request"}`, ""} {
+		if _, err := parseOracleLedger(text, r.RequestID, "Qwen-fixture"); !errors.Is(err, errKernelOracleUsage) {
+			t.Fatal("missing or ambiguous window accepted")
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleStructuredLedgerCLIHashesRawInput(t *testing.T) {
+	r := oracleLedgerFixture(t)
+	line, _ := json.Marshal(r)
+	path := filepath.Join(t.TempDir(), "on.perf.jsonl")
+	if err := os.WriteFile(path, append(line, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	args := []string{"kernel-oracle", "rank", "--shapes", kernelOracleShapesFile(t), "--fak-ledger", path, "--fak-ledger-request", r.RequestID}
+	if code := run(&out, &stderr, args); code != 0 {
+		t.Fatal(stderr.String())
+	}
+	var rec oracleReceipt
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Inputs["fak_ledger"] == "" || len(rec.FakStages) != 2 || rec.FakStages[0].Unjoined != "ledger_model_mismatch" {
+		t.Fatal("raw input hash or model mismatch missing")
+	}
+	out.Reset()
+	mixed := append(append([]string{}, args...), "--ggml", filepath.Join("testdata", "kernel_oracle", "ggml-perf.txt"))
+	if code := run(&out, &stderr, mixed); code != 2 || out.Len() != 0 {
+		t.Fatal("incompatible host and device timers gained comparison output")
+	}
+	out.Reset()
+	if code := run(&out, &stderr, args[:len(args)-2]); code == 0 {
+		t.Fatal("implicit window accepted")
 	}
 }

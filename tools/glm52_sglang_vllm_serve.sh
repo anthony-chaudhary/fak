@@ -127,9 +127,8 @@ SG_QFLAGS="${QUANT_FLAGS:-${SG_QFLAGS}}"
 #     cache dirs to a persistent, tuple-KEYED location so a second boot of the same
 #     config reuses the artifacts instead of re-paying the ~500s JIT tax every time.
 #     Invalidation is structural: any tuple field change resolves to a different
-#     directory, so a stale cache can never silently mis-serve. The key format is
-#     kept byte-identical to internal/vllmcompile.CacheTuple.Key() (contract:
-#     docs/notes/GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md).
+#     directory, so a stale cache can never silently mis-serve. Key format contract:
+#     docs/notes/GLM52-COMPILE-CACHE-PERSISTENCE-CONTRACT-3052-2026-07-06.md.
 #     Set COMPILE_CACHE_PERSIST=0 to opt out; point PERSIST_ROOT at a persistent
 #     disk mount (default is repo-local and does NOT survive a VM re-create).
 COMPILE_CACHE_PERSIST="${COMPILE_CACHE_PERSIST:-1}"
@@ -169,7 +168,7 @@ if [ "${COMPILE_CACHE_PERSIST}" = "1" ]; then
   export VLLM_CACHE_ROOT="${CACHE_DIR}/vllm"
   export HF_HUB_CACHE="${PERSIST_ROOT}/hf"
 
-  # Canonical operator readout (byte-identical to vllmcompile.Readout) + human note.
+  # Canonical operator readout + human note.
   printf 'COMPILE_CACHE %s dir=%s tuple=%s\n' "${CACHE_STATE}" "${CACHE_DIR}" "${CACHE_KEY}"
   if [ "${CACHE_STATE}" = "hit" ]; then
     log "compile cache warm — reusing persisted JIT/compile artifacts; this boot skips most of the warmup tax"

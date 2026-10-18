@@ -18,10 +18,10 @@ import (
 // reference within a documented FP8 bound — the "FP8 weights compute through the
 // existing f32 GEMM within tolerance" claim, witnessed on CPU with no GPU.
 //
-// This is the model-side analogue of dsparity's ToleranceFP8Bounded row (dsparity.go:66):
-// a genuinely mixed-precision path where the comparison is a bounded abs/rel tolerance,
-// not bitwise. The bound is derived from e4m3 precision, then confirmed by measurement
-// (t.Logf below), never reverse-fit to force a pass.
+// This is the model-side analogue of the FP8-bounded tolerance class in
+// docs/deepseek/v4-parity-harness.md: a genuinely mixed-precision path where the
+// comparison is a bounded abs/rel tolerance, not bitwise. The bound is derived from e4m3
+// precision, then confirmed by measurement (t.Logf below), never reverse-fit to force a pass.
 
 // e4m3Max is the largest finite float8_e4m3fn magnitude (S.1111.110 = 448); block
 // scaling maps a tile's absmax onto this so the tile uses e4m3's full dynamic range.

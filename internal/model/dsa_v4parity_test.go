@@ -13,11 +13,8 @@ import (
 // The DeepSeek-V4 native-kernel track (epic #3006) names its recommended first
 // rung in docs/notes/DEEPSEEK-V4-ATTENTION-SEAM-MAP-2026-07-08.md: a weight-free
 // V4-shape fixture that drives dsaIndexScores / dsaTopKIndices and digests the
-// selection — the parity oracle a native kernel must later match. The existing
-// offline fixture (internal/dsparity, spec'd in docs/deepseek/v4-parity-harness.md
-// / #3021) witnesses the invariance PROPERTIES, but it is stdlib-only with NO
-// cross-package import (v4-parity-harness.md:123), so it exercises a SYNTHETIC
-// reimplementation of the tie-break — never the actual internal/model seam. The
+// selection — the parity oracle a native kernel must later match. The parity rows
+// (docs/deepseek/v4-parity-harness.md / #3021) name the invariance PROPERTIES; the
 // in-package dsa_index_test.go tests the real seam only at tiny shapes (topK=2).
 //
 // This file closes that gap: it drives the ACTUAL dsaIndexScores / dsaTopKIndices

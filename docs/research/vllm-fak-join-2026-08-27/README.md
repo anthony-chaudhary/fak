@@ -31,9 +31,9 @@ The forge input must be a terminal `complete` capture. A truncated `gh issue lis
 
 | disposition | count |
 |---|---:|
-| `landed` | 4 |
+| `landed` | 3 |
 | `open_exact` | 2 |
-| `partial` | 168 |
+| `partial` | 169 |
 | `conflict` | 13 |
 | `obsolete` | 1 |
 | `uncovered` | 5 |
@@ -46,7 +46,6 @@ The forge input must be a terminal `complete` capture. A truncated `gh issue lis
 |---|---|---|
 | `apis_tool_calling_structured_output:body:guided-decoding` | `landed` | #26 (closed)<br>internal/guideddecode |
 | `apis_tool_calling_structured_output:title:structured-output` | `open_exact` | #5270 (open)<br>docs/notes/BORROW-TGI-SERVING-ADMISSION-STUDY-2026-07-18.md<br>internal/gateway/http.go |
-| `kernels_compilation:title:torch-compile` | `landed` | #1731 (closed)<br>internal/vllmcompile |
 | `kv_cache:title:paged-attention` | `landed` | #486 (closed)<br>internal/compute/cuda_kernels.cu<br>internal/compute/cuda_flash_test.go |
 | `observability_operations:body:helm-chart` | `open_exact` | #2665 (open)<br>deploy/k8s/README.md |
 | `observability_operations:title:kubernetes` | `landed` | #2662 (closed)<br>deploy/k8s |
@@ -62,7 +61,7 @@ The forge input must be a terminal `complete` capture. A truncated `gh issue lis
 | `apis_tool_calling_structured_output:label:frontend` | `partial` | #38 (closed)<br>#47 (closed)<br>#202 (closed)<br>#2236 (open) |
 | `apis_tool_calling_structured_output:label:streaming-input` | `partial` | #47 (closed)<br>#463 (closed)<br>#718 (closed)<br>#2606 (closed) |
 
-## Manual review (181)
+## Manual review (182)
 
 Every `partial` and `conflict` join is listed; no ambiguous candidate is silently promoted.
 
@@ -116,6 +115,7 @@ Every `partial` and `conflict` join is listed; no ambiguous candidate is silentl
 | `kernels_compilation:title:cuda-kernel` | `partial` | lexical evidence is reproducible but insufficient for an exact semantic join | issue:#1010 state=closed basis=body_tokens score=27 record=sha256:2eafeeea13beb9226a766e6cf174a9b27d3d79ef9927684a93202838372bbd4b<br>issue:#1012 state=closed basis=body_tokens score=27 record=sha256:40efd6ebcc3a717d21bea7fb7e172227c8f5c52e94af5373c8e74ebdb6ce634d<br>issue:#1026 state=open basis=body_tokens score=27 record=sha256:02d7adefef9d2a2c7fffa1578908612d0a6387bdaadd031aa96895d9a535efcc<br>total=170 full=sha256:e53481f7c6b047ad63475f6ce4be516bf5b37c1ac1cadf05934de107f0ae0c7c |
 | `kernels_compilation:title:custom-kernel` | `partial` | the upstream classifier marked this cluster non-actionable, which is not evidence that the FAK mechanism is obsolete | issue:#1063 state=open basis=body_tokens score=27 record=sha256:c6c897c4efe4a345ce6b7f5480fcf4cecf4499c0c4d87a0258fb376ec94a2b0c<br>issue:#1123 state=closed basis=body_phrase score=49 record=sha256:c6078a762961fce5a820e673bdae1e65f0ad44be0b8718a06b909dca0a154d5d<br>issue:#2085 state=closed basis=body_tokens score=27 record=sha256:4e37fd5427fa11bb908d4c4e05bb0551cdaddfc7df4f95382c73a758456ca95f<br>total=32 full=sha256:264a9641d7dfb282d952914c963534441f6cc6db564eea8a9eff219b68f7d788 |
 | `kernels_compilation:title:gemm` | `partial` | lexical evidence is reproducible but insufficient for an exact semantic join | issue:#1 state=closed basis=body_phrase score=47 record=sha256:befdc2c58b1c7e041feec18fbcefb174fa1a603928a79bf01845c6701cfcf205<br>issue:#1010 state=closed basis=body_phrase score=47 record=sha256:2eafeeea13beb9226a766e6cf174a9b27d3d79ef9927684a93202838372bbd4b<br>issue:#1012 state=closed basis=body_phrase score=47 record=sha256:40efd6ebcc3a717d21bea7fb7e172227c8f5c52e94af5373c8e74ebdb6ce634d<br>total=131 full=sha256:827799495e634e7f9f58d72a2a26969929a6e11f29434669c718e60a40aa64cf |
+| `kernels_compilation:title:torch-compile` | `partial` | issue #1731 closed, but its tuned-baseline gate package was removed with no caller; no live repository witness remains | explicit_witness:docs/notes/VLLM-OPTIMIZATION-REUSE-TICKET-MAP-2026-06-30.md#ticket-map-row-11 issue=#1731 state=closed record=sha256:b8a5473e2346135d734015db8fef7d9925e18f0905fc46ea364fd0446860faab<br>issue:#1731 state=closed basis=title_tokens score=76 record=sha256:b8a5473e2346135d734015db8fef7d9925e18f0905fc46ea364fd0446860faab<br>issue:#3051 state=closed basis=body_tokens score=27 record=sha256:04d6944bb512fa85de3801fbda2e556f6d42895cadbdaef207c0de492167d16a<br>total=5 full=sha256:399fa86e03c9e2120467011f3ea04c4c3467c196bb4ae000bab175df21ddc25b |
 | `kernels_compilation:title:triton` | `partial` | lexical evidence is reproducible but insufficient for an exact semantic join | issue:#1279 state=closed basis=body_phrase score=47 record=sha256:31ce4ae18bb9d74002f1a0c4fcdea35ee22d348dd7293b6ff23cb7c6111eaba7<br>issue:#3052 state=closed basis=body_phrase score=47 record=sha256:eed091fa17bdca5e0d68cef4a72b3cd7a31a2fb50abc6d35be3dcfad8f0bf1a4<br>issue:#3238 state=open basis=body_phrase score=47 record=sha256:74b4627f91df9576b4f7eb7f692cb1377098e00253ff0fe74071ab15460d0cf4<br>total=12 full=sha256:62d72a0f89797305e3efd4cb0b8835ab8257a93f66c05ced1ddc67921e3bc11b |
 | `kv_cache:body:block-manager` | `partial` | lexical evidence is reproducible but insufficient for an exact semantic join | issue:#1131 state=closed basis=body_tokens score=27 record=sha256:0a71422b458c210368ebb67544488e4c40fa12f3a78c77c5d7f507b7b8655ea1<br>issue:#3900 state=open basis=body_tokens score=27 record=sha256:60d4f326760b3a03aa0d5a60ee4855dd4f240e88656988761152da682626c54a<br>issue:#4955 state=closed basis=body_tokens score=27 record=sha256:d3930037416066f5de5f3b680f0cbaf5f8e7952a2c7bfb29fa818616a5f54f61<br>total=8 full=sha256:bd7b3023124c0382d5d4f346febd098203a73e7882781d8728c3b7c4be21cb9d |
 | `kv_cache:body:cache-connector` | `partial` | lexical evidence is reproducible but insufficient for an exact semantic join | issue:#1732 state=closed basis=body_tokens score=27 record=sha256:f91b218d0fdeed1eaa47212268e05704abe05db0d26dff0383a99e14f4b83440<br>issue:#2236 state=open basis=body_tokens score=27 record=sha256:170d91c8a4b7ceb5834d575202b9526f2565aabfc482358b35aad70446296d51<br>issue:#2239 state=closed basis=body_tokens score=27 record=sha256:0525c608c99bc4bdfefea514f35cd0b09315c490f30e681600316e7a1cb53a71<br>total=13 full=sha256:d4edc781918634417bfa0c6269504b6ad8abf95354aff4b901d68b8754af3f46 |
