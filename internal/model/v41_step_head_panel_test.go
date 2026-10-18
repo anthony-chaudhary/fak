@@ -365,7 +365,7 @@ func TestV41StepCohortSharedHead(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			f.lanes[1].ctx = ctx
-			f.lanes[1].session.v41State().logitScale = func(values []float32, factor float32) ([]float32, error) {
+			f.lanes[1].session.v41State().setLogitScale(func(values []float32, factor float32) ([]float32, error) {
 				if !cancelDuringScale {
 					return nil, fault
 				}
@@ -375,7 +375,7 @@ func TestV41StepCohortSharedHead(t *testing.T) {
 					out[i] *= factor
 				}
 				return out, nil
-			}
+			})
 			var owner sync.Mutex
 			got, err := m.forwardV41StepCohortSharedHead(&owner, f.lanes)
 			if cancelDuringScale {

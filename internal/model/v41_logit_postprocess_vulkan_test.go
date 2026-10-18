@@ -119,12 +119,12 @@ func TestV41LogitPostprocessDeviceOnlyVulkan(t *testing.T) {
 			if hst.logitHostRefusal() != nil {
 				t.Fatal("host-policy state refuses the host postprocess")
 			}
-			want, err := hostModel.v41HeadWithLogitScale(x, hst.denseProjection(), hst.finalNorm(), hst.bf16Boundary(), hst.logitScale, nil)
+			want, err := hostModel.v41HeadWithLogitScale(x, hst.denseProjection(), hst.finalNorm(), hst.bf16Boundary(), hst.logitScale(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			before, observed, _ := compute.CaptureBackendExecutionSnapshot(be)
-			got, err := only.v41HeadWithLogitScale(x, st.denseProjection(), st.finalNorm(), st.bf16Boundary(), st.logitScale, refuse)
+			got, err := only.v41HeadWithLogitScale(x, st.denseProjection(), st.finalNorm(), st.bf16Boundary(), st.logitScale(), refuse)
 			if err != nil || s.BackendSessionClosed() || s.HostFallbackObserved() {
 				t.Fatalf("device-only identity head = %v (closed=%t)", err, s.BackendSessionClosed())
 			}
@@ -162,7 +162,7 @@ func TestV41LogitPostprocessDeviceOnlyVulkan(t *testing.T) {
 			if err := gated.v41DeviceOnlyAdmissionRefusal(); !errors.As(err, &typed) || !slices.Contains(v41HostOpNames(typed.ops), "logit-scale") {
 				t.Fatalf("configured scale admission = %v, want it to name logit-scale", err)
 			}
-			_, err = scaled.v41HeadWithLogitScale(x, gst.denseProjection(), gst.finalNorm(), gst.bf16Boundary(), gst.logitScale, gst.logitHostRefusal())
+			_, err = scaled.v41HeadWithLogitScale(x, gst.denseProjection(), gst.finalNorm(), gst.bf16Boundary(), gst.logitScale(), gst.logitHostRefusal())
 			var closed *BackendForwardOperationError
 			var host2 *v41DeviceOnlyHostOpError
 			if !errors.As(err, &closed) || closed.Path != "device-only" || !errors.Is(err, errV41DeviceOnlyHostOp) || !errors.As(err, &host2) || !slices.Equal(v41HostOpNames(host2.ops), []string{"logit-scale"}) {

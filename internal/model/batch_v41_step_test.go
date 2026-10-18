@@ -212,14 +212,14 @@ func TestV41BatchStep(t *testing.T) {
 			case "after projection":
 				f.b.afterHead = cancel
 			case "during scale":
-				f.lanes[1].Session.v41State().logitScale = func(x []float32, factor float32) ([]float32, error) {
+				f.lanes[1].Session.v41State().setLogitScale(func(x []float32, factor float32) ([]float32, error) {
 					cancel()
 					y := append([]float32(nil), x...)
 					for i := range y {
 						y[i] *= factor
 					}
 					return y, nil
-				}
+				})
 			case "all after projection":
 				f.lanes[0].Context = ctx
 				f.b.afterHead = cancel
@@ -254,7 +254,7 @@ func TestV41BatchStep(t *testing.T) {
 		want := f.refs[0].Step(f.lanes[0].Token)
 		f.reset()
 		primary := errors.New("second lane logit scaling failed")
-		f.lanes[1].Session.v41State().logitScale = func([]float32, float32) ([]float32, error) { return nil, primary }
+		f.lanes[1].Session.v41State().setLogitScale(func([]float32, float32) ([]float32, error) { return nil, primary })
 		beforeTokens := f.m.V41ExpertFaultAttribution().Decode.Tokens
 		beforeHost := f.m.V41ExpertFaultAttribution().Decode.HeadProjectionHostCalls
 		got, err := f.m.StepV41Batch(f.lanes)

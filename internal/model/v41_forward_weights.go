@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"math"
@@ -1334,11 +1335,18 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 					if continuation != nil {
 						loan = &v41ProjectionLoan{backend: s.Backend}
 						defer func() {
-							if continuation.indexQuery {
+							if continuation.indexQuery || continuation.headScale {
 								// Store the body fault before cleanup can Goexit. The
 								// composer has an outer completion fence and keeps
 								// the projection as sole owner of x/y on every path.
 								continuation.projectionCause = err
+								if continuation.headScale {
+									defer func() {
+										if continuation.cleanup.present {
+											successfulRows = 0
+										}
+									}()
+								}
 								loan.releaseIndexCleanup(&continuation.cleanup)
 								return
 							}
@@ -1420,7 +1428,7 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 						} else {
 							defer s.Backend.Free(y)
 						}
-						if continuation != nil {
+						if continuation != nil && !continuation.headScale {
 							allowedLeaf := leaf == "ffn.gate.weight" && !continuation.indexQuery || leaf == "indexer.wq_b.weight" && continuation.indexQuery && out == 8192 && s.M.lora == nil && s.M.prism == nil
 							if rows != 1 || !allowedLeaf || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
 								return nil, errV41ProjectionResult
@@ -1469,6 +1477,24 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 						if continuation != nil && continuation.indexQuery && continuation.selected {
 							continuation.rawValidated = true
 						}
+						if continuation != nil && continuation.headScale {
+							if !head || rows != 1 || s.M.lora != nil || s.M.prism != nil || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || len(y.Shape) != 1 || y.Shape[0] != out {
+								return nil, errV41ProjectionResult
+							}
+							continuation.raw, continuation.rawValidated = values, true
+							successfulRows = rows
+							// Keep the original deferred head note/retirement
+							// boundary, excluding the entire scale continuation.
+							func() {
+								paused := time.Now()
+								defer func() {
+									if opened != 0 {
+										opened += time.Since(paused).Nanoseconds()
+									}
+								}()
+								continuation.invoke(y, loan)
+							}()
+						}
 						return values, nil
 					}()
 					bodyReturned = true
@@ -1479,7 +1505,7 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 				if err != nil {
 					return nil, v41ProjectionError, closeFailure(err)
 				}
-				if continuation == nil || continuation.completed || (continuation.indexQuery && continuation.cause == nil && !continuation.panicPresent && !continuation.cleanup.present) {
+				if continuation == nil || (continuation.completed && !continuation.headScale) || (continuation.headScale && continuation.rawValidated && !continuation.cleanup.present) || (continuation.indexQuery && continuation.cause == nil && !continuation.panicPresent && !continuation.cleanup.present) {
 					successfulRows = rows
 				}
 				return result, v41ProjectionHandled, nil

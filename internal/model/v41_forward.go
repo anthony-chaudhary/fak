@@ -169,7 +169,7 @@ type v41ForwardState struct {
 	mhcProjection        v41MHCProjectionFunc
 	mhcFFNProjection     v41MHCProjectionFunc
 	headNorm             *v41FinalNormBinding
-	logitScale           v41LogitScaleFunc
+	logitScaleBinding    *v41LogitScaleBinding
 	attentionNormBinding *v41AttentionNormBinding
 	queryNorm            *v41QueryNormBinding
 	queryPrefix          v41QueryPrefixFunc
@@ -376,7 +376,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScale: st.logitScale, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScaleBinding: st.logitScaleBinding, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.copySharedAttentionFrom(st)
 		inputRun := st.beginAttentionInputRun(runState)
 		defer inputRun.close()
@@ -568,7 +568,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 	if runState != nil {
 		headProjection = runState.denseProjection()
 		headNorm = runState.headNorm
-		logitScale = runState.logitScale
+		logitScale = runState.logitScale()
 		logitRefusal = runState.logitHostRefusal()
 	}
 	headState := runState
@@ -942,7 +942,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.mhcProjection = s.v41MHCProjectionFunc()
 		s.v41Forward.mhcFFNProjection = s.v41MHCProjectionFuncNamed("mhc.ffn_mixes.weight")
 		s.v41Forward.headNorm = &v41FinalNormBinding{normalize: s.v41FinalNormFunc(), round: s.v41FinalNormBF16CheckedFunc()}
-		s.v41Forward.logitScale = s.v41LogitScaleFunc()
+		s.v41Forward.bindCanonicalLogitScale(s)
 		s.v41Forward.attentionNormBinding = s.v41BindAttentionNorm()
 		s.v41Forward.queryPrefix = s.v41QueryPrefixFunc()
 		s.v41Forward.compressorNorm = s.v41CompressorNormFunc()

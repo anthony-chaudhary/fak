@@ -203,13 +203,13 @@ func TestV41LogitScaleVulkan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer control.Close()
-	control.v41State().logitScale = nil
+	control.v41State().setLogitScale(nil)
 	calls := 0
-	scale := device.v41State().logitScale
+	scale := device.v41State().logitScale()
 	if scale == nil {
 		t.Fatal("production head did not bind scalar witness")
 	}
-	device.v41State().logitScale = func(row []float32, factor float32) ([]float32, error) { calls++; return scale(row, factor) }
+	device.v41State().setLogitScale(func(row []float32, factor float32) ([]float32, error) { calls++; return scale(row, factor) })
 	for _, pair := range [][2][]float32{{device.Prefill([]int{1, 2}), control.Prefill([]int{1, 2})}, {device.Step(3), control.Step(3)}} {
 		v41LogitScaleCheckBits(t, pair[0], pair[1])
 	}

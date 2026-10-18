@@ -127,10 +127,12 @@ var errV41RouterProjectionScope = errors.New("model: V4.1 router projection scop
 type v41ProjectionContinuation struct {
 	// indexQuery is a closed purpose; the zero value retains router behavior.
 	indexQuery      bool
+	headScale       bool
 	selected        bool
 	rawValidated    bool
 	raw             []float32
 	cleanup         v41ProjectionCleanup
+	scaleCleanup    v41ProjectionCleanup
 	projectionCause error
 
 	consume      func(compute.Tensor, *v41ProjectionLoan)

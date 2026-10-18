@@ -409,14 +409,30 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		}
 		return m.v41PrepareHeadInputBound(headInput, st.headNorm, headState)
 	}
+	// Only the synchronous single-row projection can prepare a scaled row.
+	// Shared-panel projection bypasses this callback and retains ordinary finish.
+	var composedScale []float32
 	tx.headProject = func(input []float32) ([]float32, error) {
+		composedScale = nil
+		if scratch.activationTrace == nil {
+			raw, scaled, selected, err := m.v41TryHeadScaleLoan(st, scratch.projectionRoute, input, cfg)
+			if selected {
+				composedScale = scaled
+				return raw, err
+			}
+		}
 		return m.v41ProjectHeadInput(input, scratch.denseProjection(), 1)
 	}
 	tx.headFinish = func(logits []float32, beforeCommit func() error) ([]float32, error) {
 		if len(logits) != cfg.VocabSize {
 			return nil, v41ProjectionOperationErr(-1, m.headName(), errV41ProjectionResult)
 		}
-		res, err := v41ScaleHeadLogits(logits, cfg, st.logitScale, st.logitHostRefusal())
+		res := composedScale
+		composedScale = nil
+		var err error
+		if res == nil {
+			res, err = v41ScaleHeadLogits(logits, cfg, st.logitScale(), st.logitHostRefusal())
+		}
 		if err != nil {
 			return nil, err
 		}
