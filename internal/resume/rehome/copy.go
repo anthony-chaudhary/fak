@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/anthony-chaudhary/fak/internal/memorycotravel"
 )
 
 // RehomeTranscript copies a session's transcript (and its sidecar <sid>/ dir) from the
@@ -26,9 +28,9 @@ import (
 // may hold the transcript under a Windows mandatory lock) so one failed slug never
 // aborts the others or crashes the resolver — the launcher's fail-open contract.
 //
-// The optional agent-memory co-travel (memory_cotravel, default FAK_MEMORY_COTRAVEL=
-// shadow → copy nothing) is intentionally not ported here: its default path is a no-op,
-// so omitting it preserves the observable copy behavior.
+// Each real per-slug copy also carries the owner slug's agent-memory store to that
+// destination slug via memorycotravel, gated by FAK_MEMORY_COTRAVEL (default shadow:
+// plan and append one ledger row, copy nothing). It never changes the return value.
 func RehomeTranscript(srcCfg, dstCfg, project, sid string, destProjects []string) bool {
 	src := filepath.Join(srcCfg, "projects", project, sid+".jsonl")
 	if fi, err := os.Stat(src); err != nil || fi.IsDir() {
@@ -67,6 +69,7 @@ func RehomeTranscript(srcCfg, dstCfg, project, sid string, destProjects []string
 			// Best-effort sidecar copy (subagents/workflows dir); never fatal.
 			_ = copyTree(side, filepath.Join(dstDir, sid))
 		}
+		memorycotravel.CotravelMemory(srcCfg, dstCfg, project, sid, memorycotravel.Options{DstSlug: slug})
 	}
 	return copiedAny
 }

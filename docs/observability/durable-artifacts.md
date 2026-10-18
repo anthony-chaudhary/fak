@@ -337,7 +337,7 @@ Reaping deletes expired refs of all three kinds.
 
 | Artifact | Path | Format | Writer | Purpose |
 |---|---|---|---|---|
-| Memory co-travel ledger | `~/.claude/fak-memory-cotravel-ledger.jsonl` (`FAK_MEMORY_COTRAVEL_LEDGER`) | JSONL (atomic rewrite) | `internal/memorycotravel/memorycotravel.go:~211` | fact-file co-travel; also copies `*.md` facts into a dest memory dir |
+| Memory co-travel ledger | `~/.claude/fak-memory-cotravel-ledger.jsonl` (`FAK_MEMORY_COTRAVEL_LEDGER`) | JSONL (atomic rewrite) | `internal/memorycotravel/memorycotravel.go:~212` | fact-file co-travel; one row per real `fak resume` re-home copy (`internal/resume/rehome/copy.go`) unless `FAK_MEMORY_COTRAVEL=off`; copies `*.md` facts into the dest memory dir only when `=on` |
 | Memory store | `.claude/memory/` (`MEMORY.md` + `*.md`) | markdown | agent-authored; fak writes only via co-travel copy | recall corpus; scanned by `internal/memq` |
 | Checkpoint findings ledger | `<dir>/.fak/checkpoint-findings.jsonl` | JSONL **content-addressed upsert** (atomic rewrite) | `internal/findingsink/findingsink.go:273` | converging findings keyed by finding Key + emit count |
 | Macbench watch log + result | `--log` (append) + `--result` (overwrite) | multi-object indented JSON | `cmd/fak/macbench.go:245`/`:290` | benchmark health stream + latest result |
