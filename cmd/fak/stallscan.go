@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/stallpage"
 	"github.com/anthony-chaudhary/fak/internal/stallscan"
 )
 
@@ -168,7 +169,8 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		// A leak past the reboot high-water is the page the loop exists to catch:
 		// prompt a reboot BEFORE the freeze, not after (issue #3668).
 		if adv := stallscan.AdviseReboot(sample, stallscan.DefaultRebootThresholds()); adv.Advised {
-			at := time.Now().UTC().Format("15:04:05")
+			now := time.Now().UTC()
+			at := now.Format("15:04:05")
 			fmt.Fprintf(stdout, "%s  REBOOT   %s\n", at, adv.Reason)
 			// A second process over the same line is its own driver of the reboot,
 			// not a detail of the first — print every crosser the headline used to
@@ -176,6 +178,7 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 			for _, also := range adv.SecondaryCrossers() {
 				fmt.Fprintf(stdout, "%s  REBOOT   also: %s\n", at, also.Reason)
 			}
+			publishStallRebootPage(stdout, stderr, filepath.Dir(logPath), sample, now)
 		}
 		return -1 // continue
 	}
@@ -197,6 +200,19 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		}
 	}
 	return 0
+}
+
+// publishStallRebootPage pages an advised crossing at most once per (axis,
+// process) per dedup window; a failed write is reported and never stops the loop.
+func publishStallRebootPage(stdout, stderr io.Writer, dir string, sample stallscan.Sample, now time.Time) {
+	res, err := stallpage.Publish(dir, sample, now, stallpage.DefaultDedupWindow)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak stallscan --watch: reboot page write failed: %v\n", err)
+		return
+	}
+	if res.Published {
+		fmt.Fprintf(stdout, "%s  PAGED    %s\n", now.UTC().Format("15:04:05"), stallpage.PageLogPath(dir))
+	}
 }
 
 // updateGrowthBaseline maintains the per-PID first-seen census across --watch

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/stallpage"
 	"github.com/anthony-chaudhary/fak/internal/stallscan"
 )
 
@@ -227,5 +228,54 @@ func TestBoundStallLogRetainsCompleteNewestRecords(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != "stallscan.jsonl" {
 		t.Fatalf("atomic replacement left residue: %v", entries)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestPublishStallRebootPageDedupesWithinWindow(t *testing.T) {
+	leak := func(handles int) stallscan.Sample {
+		return stallscan.Sample{
+			TopHandles: []stallscan.ProcHandles{{PID: 42, Name: "WindowsTerminal.exe", Handles: handles}},
+			TopThreads: []stallscan.ProcThreads{{PID: 42, Name: "WindowsTerminal.exe", Threads: 100}},
+		}
+	}
+	ledgerLines := func(dir string) int {
+		b, err := os.ReadFile(stallpage.PageLogPath(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bytes.Count(b, []byte{'\n'})
+	}
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+
+	var out, errOut bytes.Buffer
+	publishStallRebootPage(&out, &errOut, dir, leak(30_001), now)
+	if errOut.Len() != 0 {
+		t.Fatalf("first page wrote stderr: %q", errOut.String())
+	}
+	if got := strings.Count(out.String(), "PAGED"); got != 1 || !strings.Contains(out.String(), stallpage.PageLogPath(dir)) {
+		t.Fatalf("first crossing printed %q, want one PAGED line naming the ledger", out.String())
+	}
+	if n := ledgerLines(dir); n != 1 {
+		t.Fatalf("ledger has %d lines after first page, want 1", n)
+	}
+
+	out.Reset()
+	publishStallRebootPage(&out, &errOut, dir, leak(31_000), now.Add(time.Minute))
+	if out.Len() != 0 || errOut.Len() != 0 {
+		t.Fatalf("repeat within window printed stdout=%q stderr=%q, want nothing", out.String(), errOut.String())
+	}
+	if n := ledgerLines(dir); n != 1 {
+		t.Fatalf("ledger has %d lines after deduped repeat, want 1", n)
+	}
+
+	calm := t.TempDir()
+	publishStallRebootPage(&out, &errOut, calm, leak(29_999), now)
+	if out.Len() != 0 || errOut.Len() != 0 {
+		t.Fatalf("below-line sample printed stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+	if entries, err := os.ReadDir(calm); err != nil || len(entries) != 0 {
+		t.Fatalf("below-line sample left files %v (err %v)", entries, err)
 	}
 }
