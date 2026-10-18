@@ -12,162 +12,128 @@ import (
 
 // facadeOffList names blank imports in the shipped registration surfaces whose package
 // declares NO init() and therefore performs no self-registration when the fak binary
-// links it. Each is kept on the reachability roster so `fak version modules` lane
-// tooling (and other repo-scoped tooling that reaches a leaf only through the binary's
-// link set) can still see the package come alive during a build; the import is kept
-// deliberately inert. This is the same consciously-reviewed allow-list shape as
-// regOffList and the tier table: a leaf added here is a reviewed "wired nowhere,
-// deliberately linked" decision, not an accident.
+// links it. Such an import runs nothing; it only makes reachability readers count the
+// package as wired.
+//
+// The cmd/fak/registered_leaves.go entries are a burn-down list, not a reviewed keep.
+// Their "fak version modules lanes" reason never held: internal/modver.Snapshot scans the
+// git tree, so a runtime proof of the form `fak version modules` -> "internal/<pkg>"
+// passes whether or not the package is linked. Each entry leaves this list when its
+// package gains a production caller (wire), loses the blank import because its consumer
+// is a CI test (unlink), or is deleted (reap); none may be added.
 //
 // Derivation contract (issue #12873): this list must stay in lockstep with the tree.
 // A leaf that grows a real init() registration graduates off this list automatically by
 // the test below re-deriving self-registration from the AST; a NEW leaf that blank-imports
 // without init() fails the build until it is listed here for a stated reason.
-//
-// Populated empirically on the post-#12873 tree: every entry below is blank-imported by
-// cmd/fak/registered_leaves.go or internal/registrations/registrations.go and declares no
-// func init() in its non-test .go files.
-// macromailbox and macrostate are EXCLUDED — both were reaped as inert blank-import
-// facades by #12873, and the regression pin below keeps them out.
 var facadeOffList = map[string]string{
-	"advmodel":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"agentsched":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"breathgate":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"cache":                      "reachability-roster entry for fak version modules lanes; no self-registration",
-	"cavemansafety":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"chatopsdetach":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"closurerate":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"codexsession":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"cohort":                     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"completiondist":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"composition":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"computeadmit":               "reachability-roster entry for fak version modules lanes; no self-registration (its reason-code registration fires from the Submit-admitter constructor, never from init())",
-	"computetune":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"dataslot":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"deadlineadmit":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"decodemigrate":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"deepseekv4kv":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"dependencyquarantine":       "reachability-roster entry for fak version modules lanes; no self-registration",
-	"deployment":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"docrender":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"dormancysim":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"dosadapter":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"dsparity":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"epochbridge":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"escalation":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"estimatecal":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"eveimport":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"eveparity":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fakrpc":                     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"faultlab":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fleetfreeze":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fleetmemory":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fleetsim":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fleetverify":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"fp4runtime":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"framebus":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"gcpgpu":                     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"gitresource":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"godfileceiling":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"guardcorpus":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"harnessmodelsetconformance": "reachability-roster entry for fak version modules lanes; no self-registration",
-	"harnesswarm":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"humanctl":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"incidentrsi":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"interactivesession":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"issuecatalog":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"issuecheck":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"issueownerprompt":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"kimik3page":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"knownenv":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"kvint2eval":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"launchlatency":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"lifebridge":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"lightgapport":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"localappux":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"lookahead":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"loopunblock":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"market":                     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"mcpbroker":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"memorycotravel":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"microscaleeval":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"mixedprecision":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"modelpack":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"modelsrc":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"mtpeval":                    "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfartifact":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfbackend":          "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfcorrelation":      "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfcoverage":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfobscontract":      "reachability-roster entry for fak version modules lanes; no self-registration",
-	"nativeperfslo":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"observability":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ociartifact":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"openaiadapter":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"opensweharder":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"openviking":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"operatortouches":            "reachability-roster entry for fak version modules lanes; no self-registration",
-	"pkg/harnesssidecar":         "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
-	"pkg/managedharness":         "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
-	"portabilityswitch":          "reachability-roster entry for fak version modules lanes; no self-registration",
-	"projectionspine":            "reachability-roster entry for fak version modules lanes; no self-registration",
-	"providerjobaccounting":      "reachability-roster entry for fak version modules lanes; no self-registration",
-	"qevicteval":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantcompat":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantfixture":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantlicense":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantmatrix":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantobs":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantpolicy":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"quantroute":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"qwen4exp":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"qwenflashnext":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"qwensemanticstop":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"qwenworkbudget":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"reflexagent":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"region":                     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"requanteval":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"residency":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"residualquant":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"resourcelifecycle":          "reachability-roster entry for fak version modules lanes; no self-registration",
-	"resultstier":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"resulttier":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"rollout":                    "reachability-roster entry for fak version modules lanes; no self-registration",
-	"rotationmeta":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"schedcontract":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"schemaadapter":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"scratchmark":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"servingsim":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"servingsupervision":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"sessionreplay":              "reachability-roster entry for fak version modules lanes; no self-registration",
-	"spendrollup":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"stallpage":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"studydrift":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"studyreceipt":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"subtractiveprofile":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"sweepconfig":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"taskidentity":               "reachability-roster entry for fak version modules lanes; no self-registration",
-	"taskvc":                     "reachability-roster entry for fak version modules lanes; no self-registration",
-	"timeaware":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"toolbound":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"tracesink":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"trajctlhook":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"turnkind":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodeborrow":            "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodecrossover":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodedogfood":           "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodenegcontrol":        "reachability-roster entry for fak version modules lanes; no self-registration",
-	"ultracodetokenizer":         "reachability-roster entry for fak version modules lanes; no self-registration",
-	"usagepreflight":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"vcacheqa":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"vcachestar":                 "reachability-roster entry for fak version modules lanes; no self-registration",
-	"vllmcompile":                "reachability-roster entry for fak version modules lanes; no self-registration",
-	"vllmquant":                  "reachability-roster entry for fak version modules lanes; no self-registration",
-	"wavefuel":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"wiplease":                   "reachability-roster entry for fak version modules lanes; no self-registration",
-	"workerenvelope":             "reachability-roster entry for fak version modules lanes; no self-registration",
-	"worklog":                    "reachability-roster entry for fak version modules lanes; no self-registration",
-	"workspaceslot":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"advmodel":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"breathgate":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"cache":                 "reachability-roster entry for fak version modules lanes; no self-registration",
+	"cavemansafety":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"chatopsdetach":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"closurerate":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"codexsession":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"cohort":                "reachability-roster entry for fak version modules lanes; no self-registration",
+	"completiondist":        "reachability-roster entry for fak version modules lanes; no self-registration",
+	"composition":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"computeadmit":          "reachability-roster entry for fak version modules lanes; no self-registration (its reason-code registration fires from the Submit-admitter constructor, never from init())",
+	"dataslot":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"deadlineadmit":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"decodemigrate":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"deepseekv4kv":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"deployment":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"docrender":             "reachability-roster entry for fak version modules lanes; no self-registration",
+	"dormancysim":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"dosadapter":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"dsparity":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"epochbridge":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"escalation":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"estimatecal":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"fakrpc":                "reachability-roster entry for fak version modules lanes; no self-registration",
+	"faultlab":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"fleetfreeze":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"fleetmemory":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"fleetsim":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"fleetverify":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"fp4runtime":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"framebus":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"gcpgpu":                "reachability-roster entry for fak version modules lanes; no self-registration",
+	"gitresource":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"guardcorpus":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"harnesswarm":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"humanctl":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"incidentrsi":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"interactivesession":    "reachability-roster entry for fak version modules lanes; no self-registration",
+	"issuecatalog":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"issuecheck":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"knownenv":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"launchlatency":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"lifebridge":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"lightgapport":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"localappux":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"lookahead":             "reachability-roster entry for fak version modules lanes; no self-registration",
+	"loopunblock":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"market":                "reachability-roster entry for fak version modules lanes; no self-registration",
+	"microscaleeval":        "reachability-roster entry for fak version modules lanes; no self-registration",
+	"modelpack":             "reachability-roster entry for fak version modules lanes; no self-registration",
+	"modelsrc":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"mtpeval":               "reachability-roster entry for fak version modules lanes; no self-registration",
+	"nativeperfobscontract": "reachability-roster entry for fak version modules lanes; no self-registration",
+	"observability":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"openaiadapter":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"opensweharder":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"openviking":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"operatortouches":       "reachability-roster entry for fak version modules lanes; no self-registration",
+	"pkg/harnesssidecar":    "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
+	"pkg/managedharness":    "public SDK intentionally linked on the reachability roster; consumers import it explicitly and it has no init side effects (fak-private#2609)",
+	"portabilityswitch":     "reachability-roster entry for fak version modules lanes; no self-registration",
+	"projectionspine":       "reachability-roster entry for fak version modules lanes; no self-registration",
+	"qevicteval":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"quantcompat":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"quantfixture":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"quantlicense":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"quantobs":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"quantpolicy":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"quantroute":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"qwenflashnext":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"qwensemanticstop":      "reachability-roster entry for fak version modules lanes; no self-registration",
+	"qwenworkbudget":        "reachability-roster entry for fak version modules lanes; no self-registration",
+	"reflexagent":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"region":                "reachability-roster entry for fak version modules lanes; no self-registration",
+	"requanteval":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"residency":             "reachability-roster entry for fak version modules lanes; no self-registration",
+	"residualquant":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"resourcelifecycle":     "reachability-roster entry for fak version modules lanes; no self-registration",
+	"resulttier":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"rollout":               "reachability-roster entry for fak version modules lanes; no self-registration",
+	"schedcontract":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"schemaadapter":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"scratchmark":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"servingsim":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"servingsupervision":    "reachability-roster entry for fak version modules lanes; no self-registration",
+	"sessionreplay":         "reachability-roster entry for fak version modules lanes; no self-registration",
+	"spendrollup":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"studydrift":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"studyreceipt":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"subtractiveprofile":    "reachability-roster entry for fak version modules lanes; no self-registration",
+	"sweepconfig":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"taskidentity":          "reachability-roster entry for fak version modules lanes; no self-registration",
+	"timeaware":             "reachability-roster entry for fak version modules lanes; no self-registration",
+	"tracesink":             "reachability-roster entry for fak version modules lanes; no self-registration",
+	"turnkind":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"ultracodeborrow":       "reachability-roster entry for fak version modules lanes; no self-registration",
+	"ultracodecrossover":    "reachability-roster entry for fak version modules lanes; no self-registration",
+	"ultracodedogfood":      "reachability-roster entry for fak version modules lanes; no self-registration",
+	"ultracodenegcontrol":   "reachability-roster entry for fak version modules lanes; no self-registration",
+	"ultracodetokenizer":    "reachability-roster entry for fak version modules lanes; no self-registration",
+	"usagepreflight":        "reachability-roster entry for fak version modules lanes; no self-registration",
+	"vcacheqa":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"vcachestar":            "reachability-roster entry for fak version modules lanes; no self-registration",
+	"vllmcompile":           "reachability-roster entry for fak version modules lanes; no self-registration",
+	"wiplease":              "reachability-roster entry for fak version modules lanes; no self-registration",
+	"workerenvelope":        "reachability-roster entry for fak version modules lanes; no self-registration",
+	"worklog":               "reachability-roster entry for fak version modules lanes; no self-registration",
 
 	// fak-private#2609: internal/registrations is also a shipped registration surface.
 	// These imports are deliberate reachability-roster links and have no init side effects.
@@ -191,9 +157,26 @@ var facadeOffList = map[string]string{
 // as reached.
 var reapedFacadeLeaves = []string{"macromailbox", "macrostate"}
 
-var facadeRegistrationFiles = []string{
-	filepath.Join("cmd", "fak", "registered_leaves.go"),
-	filepath.Join("internal", "registrations", "registrations.go"),
+// facadeSurfacePackages are registration aggregators scanned as surfaces themselves, so a
+// blank import of one is checked through its own imports rather than its (absent) init().
+var facadeSurfacePackages = map[string]bool{"internal/registrations": true}
+
+// facadeRegistrationFiles returns every non-test .go file directly under cmd/fak, so a
+// facade cannot regrow in a new file, plus the registrations aggregator.
+func facadeRegistrationFiles(t *testing.T, internal string) []string {
+	t.Helper()
+	cmdFiles, err := filepath.Glob(filepath.Join(internal, "..", "cmd", "fak", "*.go"))
+	if err != nil {
+		t.Fatalf("glob cmd/fak: %v", err)
+	}
+	var out []string
+	for _, f := range cmdFiles {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		out = append(out, filepath.Join("cmd", "fak", filepath.Base(f)))
+	}
+	return append(out, filepath.Join("internal", "registrations", "registrations.go"))
 }
 
 type facadeImport struct {
@@ -217,7 +200,7 @@ func (f facadeImport) offListKey() string {
 func blankImportFacades(t *testing.T, internal string) []facadeImport {
 	t.Helper()
 	var out []facadeImport
-	for _, registrationFile := range facadeRegistrationFiles {
+	for _, registrationFile := range facadeRegistrationFiles(t, internal) {
 		out = append(out, blankImportFacadesFromFile(t, internal, registrationFile)...)
 	}
 	return out
@@ -375,11 +358,13 @@ func TestRegisteredLeavesFacadeImports(t *testing.T) {
 		"pkg/managedharness": false,
 	}
 	var selfRegistered, offListed int
+	observed := map[string]bool{}
 	for _, imp := range imports {
+		observed[imp.offListKey()] = true
 		if _, required := requiredPublicFacades[imp.offListKey()]; required {
 			requiredPublicFacades[imp.offListKey()] = true
 		}
-		if declaresInitFunc(t, internal, imp) {
+		if facadeSurfacePackages[imp.packagePath] || declaresInitFunc(t, internal, imp) {
 			selfRegistered++
 			continue
 		}
@@ -388,6 +373,11 @@ func TestRegisteredLeavesFacadeImports(t *testing.T) {
 			continue
 		}
 		t.Error(potentialFacadeMessage(imp))
+	}
+	for key := range facadeOffList {
+		if !observed[key] {
+			t.Errorf("stale facadeOffList entry %q: no registration surface blank-imports it any more; delete the entry", key)
+		}
 	}
 	for packagePath, seen := range requiredPublicFacades {
 		if !seen {
