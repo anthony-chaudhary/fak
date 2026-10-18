@@ -112,6 +112,8 @@ type serveFlags struct {
 	workspaceAdmissionPermissive *bool
 	configPath                   *string
 	printEffectiveConfig         *bool
+	launchEvidencePath           *string
+	startupConfigSHA256          string
 	printFeatures                *bool
 	addr                         *string
 	stdio                        *bool
@@ -259,6 +261,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.readinessCoherence = fs.Int("readiness-coherence", coherence.DefaultCount, "hold readiness until a temperature-0 'count 1..N' probe answers correctly (binary/shader skew); 0 disables")
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
 	sf.applianceObservability = fs.Bool("appliance-observability", false, "activate appliance Grafana dashboard catalog profile (fak-strix-*) and default routing to fak-strix-index")
+	sf.launchEvidencePath = fs.String("launch-evidence", "", "write private process-bound startup evidence to a new absolute JSON path after model setup; existing files refuse startup")
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
 	sf.printFeatures = fs.Bool("print-features", false, "print the evaluated feature matrix and provenance before initialization, then exit without model I/O")
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
@@ -469,7 +472,12 @@ func cmdServe(argv []string) {
 	var manifest deploymanifest.Manifest
 	manifestPresent := false
 	if configPath != "" {
-		manifest, err = deploymanifest.Load(configPath)
+		var configBytes []byte
+		configBytes, err = os.ReadFile(configPath)
+		if err == nil {
+			manifest, err = deploymanifest.Parse(configBytes)
+			sf.startupConfigSHA256 = serveLaunchDigest(configBytes)
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
 			os.Exit(2)
@@ -823,6 +831,10 @@ func cmdServe(argv []string) {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: feature catalog unavailable: %v\n", err)
+	}
+	if err := writeServeLaunchEvidence(sf, rt); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: launch evidence: %v\n", err)
+		os.Exit(2)
 	}
 	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
 	rt.run(sf)
