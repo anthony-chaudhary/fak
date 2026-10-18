@@ -109,13 +109,21 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		// appends at Cache.Len()), so the index IS the absolute position and the lower
 		// bound max(0, base+t-W+1) equals the keyed-off-pos[] bound.
 		parFor(P, dispatchWorkers, func(lo, hi int) {
+			// parFor may invoke a worker once per stolen chunk. Keep scratch local
+			// to this invocation, sized for its widest row, then reuse across heads
+			// and tokens. No row arithmetic or observer ownership changes.
+			if lo >= hi {
+				return
+			}
+			maxPos := base + hi
+			scoreScratch := make([]float32, maxPos-windowLoContig(maxPos, maxPos-1, Wl))
 			for t := lo; t < hi; t++ {
 				nPos := base + t + 1
 				j0 := windowLoContig(nPos, base+t, Wl)
 				for h := 0; h < nH; h++ {
 					kvh := h / grp
 					qh := packedHead(Q, t, nH*hd, h, hd)
-					scores := make([]float32, nPos-j0)
+					scores := scoreScratch[:nPos-j0]
 					fillAttentionScores(scores, qh, Kl, j0, nPos, w, kvh, hd, scale, dot)
 					softcapInPlace(scores, attnCap)
 					softmaxInPlace(scores)
