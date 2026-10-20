@@ -100,12 +100,10 @@ func (w *samplerWorkspace) effBuf(n int) []float32 {
 
 // probSorter is the concrete sort.Interface over an index permutation. Unlike the
 // sort.Slice closure it replaces, constructing and sorting it allocates nothing once
-// its probs/idx slices are wired to a workspace buffer. tieByIndex selects the top-k
-// tie-break (equal probability keeps the lower index) versus the nucleus tie-break
-// (equal probability is left in sort order), matching descProbOrder's two comparators
-// exactly — pdqsort's output is byte-identical whether it is driven by sort.Slice or
-// by this interface, because both dispatch the same Less semantics into the same
-// algorithm.
+// its probs/idx slices are wired to a workspace buffer. tieByIndex makes equal
+// probability deterministic by keeping the lower token index. The nucleus path
+// enables it because sort.Sort is not stable; relying on input order would leave the
+// exact kept set unspecified when top-p cuts through a tie.
 type probSorter struct {
 	probs      []float64
 	idx        []int
@@ -191,10 +189,23 @@ func sampleLogitsWS(logits []float32, temp, topP float64, topK int, rng *rand.Ra
 		sum += p
 	}
 	sum = w.applyCPUSamplingTruncation(probs, sum, topP, topK)
-	r := rng.Float64() * sum
+	return sampleProbabilityRow(probs, sum, rng.Float64())
+}
+
+// sampleProbabilityRow inverts one probability row with a coin in [0,1). It uses
+// the strict CDF boundary from DeepInfer's reference sampler: a zero-mass token is
+// never selected, including when coin is exactly zero, and a coin exactly on a CDF
+// boundary belongs to the next positive interval. The input row remains unchanged.
+// Adapted from DeepInfer at 774ce244; see third_party/deepinfer-sampling/NOTICE.
+func sampleProbabilityRow(probs []float64, sum, coin float64) int {
+	target := coin * sum
+	var cumulative float64
 	for i, p := range probs {
-		r -= p
-		if r <= 0 {
+		if p <= 0 {
+			continue
+		}
+		cumulative += p
+		if cumulative > target {
 			return i
 		}
 	}
@@ -204,7 +215,9 @@ func sampleLogitsWS(logits []float32, temp, topP float64, topK int, rng *rand.Ra
 			return i
 		}
 	}
-	return len(logits) - 1
+	// Preserve the historical last-index sentinel for an invalid row with no
+	// positive mass. Sampling callers are responsible for supplying sum > 0.
+	return len(probs) - 1
 }
 
 // sampleLogitsWithBias applies the OpenAI logit_bias map before the existing in-kernel
@@ -296,7 +309,9 @@ func (w *samplerWorkspace) nucleusTruncate(probs []float64, sum, topP float64) f
 	}
 	w.sorter.probs = probs
 	w.sorter.idx = order
-	w.sorter.tieByIndex = false
+	// DeepInfer's reference uses a stable descending sort. Since order starts as
+	// token-id order, lower token id wins equal-probability ties.
+	w.sorter.tieByIndex = true
 	sort.Sort(&w.sorter)
 	target := topP * sum
 	var cum float64

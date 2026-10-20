@@ -425,8 +425,11 @@ func BenchmarkTopKTruncate_FullSort_248k(b *testing.B) {
 
 // referenceMapNucleusTruncate is the golden reference implementing nucleus truncation
 // via a vocabulary-sized map[int]bool membership mask and maskKept (the pre-optimization implementation).
+// Equal probabilities keep lower token indexes first, matching stable descending order.
 func referenceMapNucleusTruncate(probs []float64, sum, topP float64) float64 {
-	order := descProbOrder(probs, func(i, j int) bool { return probs[i] > probs[j] })
+	order := descProbOrder(probs, func(i, j int) bool {
+		return probs[i] > probs[j] || (probs[i] == probs[j] && i < j)
+	})
 	target := topP * sum
 	var cum float64
 	kept := make(map[int]bool, len(order))

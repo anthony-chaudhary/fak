@@ -1,0 +1,15 @@
+DeepInfer sampling contracts
+
+Copyright contributors to the DeepInfer project
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+
+Adaptation: Go implementation of two sampler correctness contracts from
+deepinfer/model_executor/layers/tilelang_ops/fused_sample.py and
+deepinfer/model_executor/layers/tilelang_ops/random_sampling.py: stable token-id
+ordering for equal-probability top-p candidates and strict inverse-CDF selection
+that never returns a zero-probability token at the zero coin boundary. Fak keeps
+its existing top-k-then-top-p policy and host-side sampler architecture.
