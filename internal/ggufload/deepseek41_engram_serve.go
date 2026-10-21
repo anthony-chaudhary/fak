@@ -239,6 +239,10 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 	if err != nil {
 		return refuse(err)
 	}
+	if err := model.ValidateV41PublishedEngramLayout(eng.LayerIDs, layout); err != nil {
+		return &model.V41ForwardError{Stage: "engram", Layer: eng.LayerIDs[0],
+			Err: fmt.Errorf("%w: %w", model.ErrV41NativeUnsupported, err)}
+	}
 
 	type engramAcquire struct {
 		id     int

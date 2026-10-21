@@ -35,3 +35,18 @@ upstream self-reference padding. Unlike upstream, ratio-0 layers and ratio-0
 sources are inactive, out-of-range sources are tolerated, a schedule with no
 KV source is not checked, and candidate, YOCO, segment and use_swa/index_topk
 rules are not ported. The check runs only for non-published GGUF schedules.
+
+Engram table derivation (internal/model/v41_engram_derive.go)
+Upstream paths:
+  deepinfer/model_executor/models/v4_modules/engram_metadata.py lines 24-27, 78-95, 108-114
+  deepinfer/model_executor/models/v4_modules/engram.py lines 42, 53
+  deepinfer/hugging_face/config.py lines 195-213
+  deepinfer/environ.py line 146
+Adaptation: Go port of the table-size prime derivation (next prime from
+vocab-1 per ngram table, one seen set across all layers and heads, flattened
+[ngram][head]) with deterministic trial division, plus the compressed pad
+binding token_map[2] and the odd multiplier generation range from the
+NumPy bound. Neither GGUF dialect carries the Engram table vocabulary, so the
+check assumes the published 16000000 and runs only for the published
+V4.1-Flash Engram geometry (layers 1 and 14, max n-gram 4, 8 heads) when the
+serving loader attaches the Engram stage.
