@@ -480,15 +480,23 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sinkErr error
-	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
+	if nativeStructuredRequested(sp) {
+		pending := ""
 		comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 			if sinkErr != nil || tokenPiece == "" {
 				return
 			}
-			if sinkErr = sink(tokenPiece); sinkErr != nil {
+			var piece string
+			if piece, pending = nativeStructuredRunePrefix(pending + tokenPiece); piece == "" {
+				return
+			}
+			if sinkErr = sink(piece); sinkErr != nil {
 				cancel()
 			}
 		}))...)
+		if sinkErr == nil && err == nil && pending != "" {
+			sinkErr = sink(pending)
+		}
 		if sinkErr != nil {
 			return comp, sinkErr
 		}
@@ -2079,7 +2087,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	ctx = withNativeTargetSampleSeed(ctx, sp.Seed)
 	ctx = withNativeMinP(ctx, sp.MinP)
-	structured, err := p.newNativeStructuredConstraint(sp.ResponseFormat, nil)
+	structured, err := p.newNativeRequestConstraint(sp, nil)
 	if err != nil {
 		return nil, err
 	}

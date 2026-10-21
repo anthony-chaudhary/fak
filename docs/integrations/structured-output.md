@@ -134,16 +134,17 @@ also rejected before inference. `strict` may be true or omitted. Native
 `json_object` is unsupported; upstream engine passthrough retains its own
 supported surface.
 
-On `/v1/chat/completions`, `response_format` with type `json_schema` is the only
-constraint carrier the native route enforces. Every other carrier on that route
-is refused before prefill instead of being ignored: other `response_format`
-types (`json_object`, `regex`, `grammar`) and every provider-native guided field
-(`guided_json`, `guided_regex`, `guided_choice`, `guided_grammar`,
-`guided_decoding_backend`, `json_schema`, `regex`, `ebnf`). This applies to
-buffered and streamed requests, including when a guided field accompanies a
-supported `json_schema` response format. A `guided_decoding_backend` alone is
-refused too, since the native route has no selectable backend. A guided field
-sent as `null` counts as absent. Regex and EBNF constraints therefore need an
+On `/v1/chat/completions`, the native route enforces two constraint carriers:
+`response_format` with type `json_schema`, and a guided regex sent as
+`guided_regex` or its SGLang alias `regex`. Every other carrier on that route is
+refused before prefill instead of being ignored: other `response_format` types
+(`json_object`, `regex`, `grammar`) and the remaining provider-native guided
+fields (`guided_json`, `guided_choice`, `guided_grammar`,
+`guided_decoding_backend`, `json_schema`, `ebnf`). This applies to buffered and
+streamed requests, including when such a field accompanies a supported
+`json_schema` response format or guided regex. A `guided_decoding_backend` alone
+is refused too, since the native route has no selectable backend. A guided field
+sent as `null` counts as absent. EBNF and other grammars therefore need an
 upstream engine in ride mode.
 
 On `/v1/responses`, the structured-output control is `text.format`. fak maps it
@@ -166,6 +167,26 @@ object, a non-object `format`, and a `format` without a non-empty string
 `type`. Schema envelope and cap violations return the chat route's HTTP 422
 codes. This route parses no top-level `response_format` and no provider-native
 guided field, so either one is dropped.
+
+A native guided regex is a JSON string in Go `regexp/syntax` Perl syntax, at most
+4096 bytes. The whole response must match it, as if the pattern were wrapped in
+`\A(?:…)\z`. `.` excludes newline unless `(?s)` is set, `(?i)` case folding is
+supported, and `^`, `$`, `\A` and `\z` hold only at the response's start and end.
+Multi-line anchors (`(?m)^`), word boundaries (`\b`, `\B`), backreferences and
+lookaround are refused. Each request compiles its pattern into a byte-level
+automaton over UTF-8, so a token may end inside a multi-byte character and only
+valid UTF-8 is generated. A pattern is refused before inference when its automaton
+needs more than 4096 states (for example `(a|b)*a(a|b){16}`, or a literal longer
+than 4095 bytes), when its repeat-expanded program exceeds 8192 nodes, or when it
+matches no text. `guided_regex` and `regex` may be sent together only with the
+same pattern, and a guided regex is refused alongside any `response_format`
+other than `text`. Special tokens such as `<|im_start|>` are never admitted as
+pattern text. The model's stop token is admitted only while the text so far fully
+matches, and only it is admitted once no longer match is possible. A reasoning
+span may precede the regex response the same way it precedes a schema object
+(below). Per-token streaming holds back a partial multi-byte character until it
+completes. Compile and mask cost are bounded by these caps but have not been
+measured on a named model yet.
 
 The legacy `/v1/completions` route does not parse `response_format` or any
 guided field yet. Carriers sent there are dropped rather than refused, in native

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -26,24 +28,120 @@ func (e *nativeGuidedCarrierError) Error() string {
 
 func (e *nativeGuidedCarrierError) Unwrap() error { return ErrNativeStructuredUnsupported }
 
-// refuseNativeGuidedCarriers rejects every provider-native guided-decode field:
-// the native route enforces only response_format json_schema, so serving any
-// other carrier would return unconstrained text as if it were constrained.
+// nativeGuidedRegexCarriers are the only guided fields the native route
+// enforces; the first one present names the request's pattern.
+var nativeGuidedRegexCarriers = [...]string{"guided_regex", "regex"}
+
+// refuseNativeGuidedCarriers rejects every provider-native guided-decode field
+// the native route cannot enforce, so no carrier yields unconstrained text as if
+// it were constrained.
 func refuseNativeGuidedCarriers(guided map[string]json.RawMessage) error {
-	carrier, found := "", false
+	_, _, err := nativeGuidedRegex(guided)
+	return err
+}
+
+// nativeGuidedRegex returns the guided regex carrier and pattern, if any. Both
+// regex carriers may be sent only with the same string pattern.
+func nativeGuidedRegex(guided map[string]json.RawMessage) (carrier, pattern string, err error) {
+	refused, found := "", false
 	for key, raw := range guided {
-		trimmed := bytes.TrimSpace(raw)
-		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		if nativeGuidedAbsent(raw) || slices.Contains(nativeGuidedRegexCarriers[:], key) {
 			continue
 		}
-		if !found || key < carrier {
-			carrier, found = key, true
+		if !found || key < refused {
+			refused, found = key, true
 		}
 	}
-	if !found {
+	if found {
+		return "", "", &nativeGuidedCarrierError{Carrier: refused}
+	}
+	for _, key := range nativeGuidedRegexCarriers {
+		if nativeGuidedAbsent(guided[key]) {
+			continue
+		}
+		var value string
+		if json.Unmarshal(guided[key], &value) != nil || (carrier != "" && value != pattern) {
+			return "", "", &nativeGuidedCarrierError{Carrier: key}
+		}
+		if carrier == "" {
+			carrier, pattern = key, value
+		}
+	}
+	return carrier, pattern, nil
+}
+
+func nativeGuidedAbsent(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
+}
+
+// nativeStructuredRequested reports whether the request carries a constraint
+// the native route enforces.
+func nativeStructuredRequested(sp SampleParams) bool {
+	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
+		return true
+	}
+	carrier, _, err := nativeGuidedRegex(sp.GuidedDecode)
+	return err == nil && carrier != ""
+}
+
+// nativeStructuredRunePrefix splits off a trailing incomplete UTF-8 rune so a
+// streamed piece never ends inside a multi-byte rune.
+func nativeStructuredRunePrefix(text string) (complete, tail string) {
+	for start := len(text) - 1; start >= 0 && start >= len(text)-utf8.UTFMax; start-- {
+		if utf8.RuneStart(text[start]) {
+			if !utf8.FullRuneInString(text[start:]) {
+				return text[:start], text[start:]
+			}
+			break
+		}
+	}
+	return text, ""
+}
+
+// nativeRegexTokenDecoder hides special tokens from a regex mask: TokenBytes
+// spells them literally, so a permissive pattern would otherwise admit control
+// tokens as text. The mask admits the stop token by id alone.
+type nativeRegexTokenDecoder struct {
+	tok     grammar.TokenDecoder
+	special map[int]string
+}
+
+func (d nativeRegexTokenDecoder) TokenBytes(id int) []byte {
+	if _, ok := d.special[id]; ok {
 		return nil
 	}
-	return &nativeGuidedCarrierError{Carrier: carrier}
+	return d.tok.TokenBytes(id)
+}
+
+// newNativeRequestConstraint builds the request's native constraint: a guided
+// regex, or otherwise its response_format. A guided regex binds the whole
+// response, so it refuses any response_format other than text.
+func (p *InKernelPlanner) newNativeRequestConstraint(sp SampleParams, stops map[int]bool) (*nativeStructuredConstraint, error) {
+	carrier, pattern, err := nativeGuidedRegex(sp.GuidedDecode)
+	if err != nil {
+		return nil, err
+	}
+	if carrier == "" {
+		return p.newNativeStructuredConstraint(sp.ResponseFormat, stops)
+	}
+	if !nativeGuidedAbsent(sp.ResponseFormat) {
+		var response struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(sp.ResponseFormat), &response) != nil || response.Type != "text" {
+			return nil, &nativeGuidedCarrierError{Carrier: carrier}
+		}
+	}
+	stopID, err := p.nativeStructuredStopID(stops)
+	if err != nil {
+		return nil, err
+	}
+	mask, err := grammar.CompileRegex(pattern, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", ErrNativeStructuredUnsupported, carrier, err)
+	}
+	return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
 }
 
 type nativeStructuredConstraintContextKey struct{}
@@ -120,10 +218,24 @@ func (p *InKernelPlanner) newNativeStructuredConstraint(raw json.RawMessage, sto
 	if len(schema) == 0 || bytes.Equal(schema, []byte("null")) {
 		return nil, fmt.Errorf("%w: json_schema schema is required", ErrNativeStructuredUnsupported)
 	}
+	stopID, err := p.nativeStructuredStopID(stops)
+	if err != nil {
+		return nil, err
+	}
+	mask, err := grammar.CompileJSONSchema(schema, p.tok, grammar.CompileOptions{EOS: stopID})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNativeStructuredUnsupported, err)
+	}
+	return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
+}
+
+// nativeStructuredStopID picks the lowest in-vocabulary stop token as the one
+// EOS a structured mask admits once the response is complete.
+func (p *InKernelPlanner) nativeStructuredStopID(stops map[int]bool) (int, error) {
+	if p == nil || p.tok == nil || p.m == nil {
+		return -1, fmt.Errorf("%w: tokenizer or model is unavailable", ErrNativeStructuredUnsupported)
+	}
 	if stops == nil {
-		if p == nil || p.tok == nil || p.m == nil {
-			return nil, fmt.Errorf("%w: tokenizer or model is unavailable", ErrNativeStructuredUnsupported)
-		}
 		stops = StopIDs(p.tok, p.m.Cfg)
 	}
 	stopID := -1
@@ -133,13 +245,9 @@ func (p *InKernelPlanner) newNativeStructuredConstraint(raw json.RawMessage, sto
 		}
 	}
 	if stopID < 0 {
-		return nil, fmt.Errorf("%w: no in-vocabulary stop token", ErrNativeStructuredUnsupported)
+		return -1, fmt.Errorf("%w: no in-vocabulary stop token", ErrNativeStructuredUnsupported)
 	}
-	mask, err := grammar.CompileJSONSchema(schema, p.tok, grammar.CompileOptions{EOS: stopID})
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNativeStructuredUnsupported, err)
-	}
-	return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
+	return stopID, nil
 }
 
 // armReasoning lets a reasoning span precede the schema response. A seeded prompt
