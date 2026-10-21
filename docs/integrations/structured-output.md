@@ -110,11 +110,16 @@ of which at most four may be optional, and its schema may contain at most 64 KiB
 (65,536 bytes). Optional properties may be omitted or emitted once; required
 properties are always emitted. Emitted keys use canonical lexicographic order.
 Strings use printable ASCII without escapes; string `enum` and `const` values
-must fit that surface. Numbers use canonical JSON syntax without exponents.
-Nested objects, arrays, unknown constraint keywords, `additionalProperties:true`,
-union keywords, regex and EBNF are rejected before inference. `strict` may be
-true or omitted. Native `json_object` is also unsupported; upstream engine
-passthrough retains its own supported surface.
+must fit that surface. Native response schemas also accept integer `enum` and
+`const` constraints with 1–32 raw members. Members must be signed 64-bit JSON
+integers; they are emitted in canonical decimal form, with `-0` normalized to
+`0` and duplicates removed. Fractions, exponents, overflow, `null`, mixed-type
+integer sets and constrained number values are rejected before inference.
+Unconstrained numbers use canonical JSON syntax without exponents. Nested
+objects, arrays, unknown constraint keywords, `additionalProperties:true`, union
+keywords, regex and EBNF are also rejected before inference. `strict` may be true
+or omitted. Native `json_object` is unsupported; upstream engine passthrough
+retains its own supported surface.
 
 The mask composes with temperature, top-k, top-p, logit bias and repetition
 penalties. Buffered and per-token streaming preserve the generated JSON bytes,
@@ -125,10 +130,11 @@ treating a partial response as a complete object.
 
 Structured requests currently use target-only decoding. The bounded optional
 property support applies only to native JSON-schema responses; tool-schema
-compilation remains required-only. Requests combining this mode with tools,
-DFlash2, a reasoning-prefilled prompt, a thinking budget or an unmodified-logit
-inference receipt are refused. Plain text and omitted formats retain the ordinary
-route. Unsupported native combinations return HTTP 400 with code
+compilation remains required-only and accepts only its existing string enum
+surface. Requests combining this mode with tools, DFlash2, a reasoning-prefilled
+prompt, a thinking budget or an unmodified-logit inference receipt are refused.
+Plain text and omitted formats retain the ordinary route. Unsupported native
+combinations return HTTP 400 with code
 `native_structured_output_unsupported`; inability to select a valid token returns
 HTTP 500 with code `native_structured_decode_failed`.
 

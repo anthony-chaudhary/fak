@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -82,19 +83,21 @@ type CompileOptions struct {
 type fieldKind int
 
 const (
-	fieldString     fieldKind = iota // free printable-ASCII string, no escapes
-	fieldStringEnum                  // one of a closed set of quoted literals
-	fieldBool                        // true | false
-	fieldInt                         // -? (0 | [1-9][0-9]*)
-	fieldNumber                      // integer with optional .[0-9]+ fraction
+	fieldString      fieldKind = iota // free printable-ASCII string, no escapes
+	fieldStringEnum                   // one of a closed set of quoted literals
+	fieldBool                         // true | false
+	fieldInt                          // -? (0 | [1-9][0-9]*)
+	fieldNumber                       // integer with optional .[0-9]+ fraction
+	fieldIntegerEnum                  // one of a bounded set of canonical int64 literals
 )
 
 // compiledField is one required argument property in canonical (sorted) order.
 type compiledField struct {
-	name       string
-	kind       fieldKind
-	enum       []string // fieldStringEnum: sorted, deduped variants
-	quotedEnum [][]byte // enum variants with their JSON quotes, prefix-free
+	name        string
+	kind        fieldKind
+	enum        []string // fieldStringEnum: sorted, deduped variants
+	quotedEnum  [][]byte // enum variants with their JSON quotes, prefix-free
+	integerEnum [][]byte // fieldIntegerEnum: sorted, deduped canonical literals
 }
 
 // segment is one step of a tool's argument-region grammar: either a fixed
@@ -348,6 +351,8 @@ func scanValueField(f compiledField, rest []byte) valueScan {
 		return scanLiterals(rest, boolLits)
 	case fieldInt:
 		return scanNumber(rest, true)
+	case fieldIntegerEnum:
+		return scanIntegerLiterals(rest, f.integerEnum)
 	default:
 		return scanNumber(rest, false)
 	}
@@ -413,6 +418,33 @@ func scanLiterals(rest []byte, cands [][]byte) valueScan {
 		return valueScan{state: vDead}
 	}
 	return valueScan{state: vPartial, allowed: allowed}
+}
+
+func scanIntegerLiterals(rest []byte, cands [][]byte) valueScan {
+	allowed := map[byte]bool{}
+	canEnd := false
+	longestComplete := 0
+	for _, candidate := range cands {
+		switch {
+		case len(rest) < len(candidate) && bytes.Equal(rest, candidate[:len(rest)]):
+			allowed[candidate[len(rest)]] = true
+		case len(rest) == len(candidate) && bytes.Equal(rest, candidate):
+			canEnd = true
+		case len(rest) > len(candidate) && bytes.Equal(rest[:len(candidate)], candidate):
+			if len(candidate) > longestComplete {
+				longestComplete = len(candidate)
+			}
+		}
+	}
+	// An exact short member can also prefix a longer member (1 and 10). Preserve
+	// both the following object delimiter and the longer member's next byte.
+	if canEnd || len(allowed) > 0 {
+		return valueScan{state: vPartial, allowed: allowed, canEnd: canEnd}
+	}
+	if longestComplete > 0 {
+		return valueScan{state: vComplete, n: longestComplete}
+	}
+	return valueScan{state: vDead}
 }
 
 // scanNumber walks canonical JSON number syntax: -? (0 | [1-9][0-9]*) with an
@@ -695,7 +727,7 @@ func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOpt
 		if strings.ContainsAny(name, "\"\\") || !asciiPrintable(name) {
 			return nil, unsupported(tool, name, "property name needs JSON string escaping")
 		}
-		field, err := normalizeField(tool, name, props[name])
+		field, err := normalizeResponseField(tool, name, props[name])
 		if err != nil {
 			return nil, err
 		}
@@ -725,6 +757,16 @@ func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOpt
 }
 
 func normalizeField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
+	return normalizeFieldMode(tool, name, prop, false)
+}
+
+func normalizeResponseField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
+	return normalizeFieldMode(tool, name, prop, true)
+}
+
+const maxResponseIntegerEnumMembers = 32
+
+func normalizeFieldMode(tool, name string, prop map[string]json.RawMessage, allowIntegerEnums bool) (compiledField, error) {
 	for k := range prop {
 		switch k {
 		case "type", "enum", "const", "title", "description":
@@ -740,6 +782,12 @@ func normalizeField(tool, name string, prop map[string]json.RawMessage) (compile
 	}
 	_, hasEnum := prop["enum"]
 	_, hasConst := prop["const"]
+	if allowIntegerEnums && ty == "integer" && (hasEnum || hasConst) {
+		if hasEnum && hasConst {
+			return compiledField{}, unsupported(tool, name, "both enum and const")
+		}
+		return normalizeIntegerEnum(tool, name, prop, hasConst)
+	}
 	if (hasEnum || hasConst) && ty != "string" {
 		return compiledField{}, unsupported(tool, name, "enum/const on type %q (v0 supports string enums only)", ty)
 	}
@@ -787,6 +835,37 @@ func normalizeField(tool, name string, prop map[string]json.RawMessage) (compile
 	default:
 		return compiledField{}, unsupported(tool, name, "type %q", ty)
 	}
+}
+
+func normalizeIntegerEnum(tool, name string, prop map[string]json.RawMessage, isConst bool) (compiledField, error) {
+	var members []json.RawMessage
+	if isConst {
+		members = []json.RawMessage{prop["const"]}
+	} else if err := json.Unmarshal(prop["enum"], &members); err != nil || members == nil {
+		return compiledField{}, unsupported(tool, name, "integer enum must be an array")
+	}
+	if len(members) == 0 {
+		return compiledField{}, unsupported(tool, name, "empty enum")
+	}
+	if len(members) > maxResponseIntegerEnumMembers {
+		return compiledField{}, unsupported(tool, name, "integer enum has %d members, limit %d", len(members), maxResponseIntegerEnumMembers)
+	}
+	canonical := make([]string, 0, len(members))
+	for _, raw := range members {
+		literal := strings.TrimSpace(string(raw))
+		value, err := strconv.ParseInt(literal, 10, 64)
+		if err != nil {
+			return compiledField{}, unsupported(tool, name, "integer enum member is not a signed int64")
+		}
+		canonical = append(canonical, strconv.FormatInt(value, 10))
+	}
+	sort.Strings(canonical)
+	canonical = dedupSorted(canonical)
+	field := compiledField{name: name, kind: fieldIntegerEnum}
+	for _, literal := range canonical {
+		field.integerEnum = append(field.integerEnum, []byte(literal))
+	}
+	return field, nil
 }
 
 func asciiPrintable(s string) bool {

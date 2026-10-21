@@ -270,6 +270,87 @@ func TestNativeStructuredOptionalScalarCompleteAndStream(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=200ms lane=default
+func TestNativeStructuredIntegerEnumCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	encodeOne := func(text string) int {
+		t.Helper()
+		ids, err := p.tok.Encode(text)
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("encode %q: ids=%v err=%v", text, ids, err)
+		}
+		return ids[0]
+	}
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"color":{"type":"string","enum":["blue","red"]},"count":{"type":"integer","enum":[1,10,100]}},"required":["color"],"additionalProperties":false}}}`)
+	seed := int64(37)
+	temperature := 0.8
+	opts := []SampleOpt{
+		WithResponseFormat(format),
+		WithSeed(&seed),
+		WithTemperature(&temperature),
+		WithLogitBias(map[int]float64{encodeOne(","): 100, encodeOne("0"): 100}),
+		WithMaxTokens(96),
+	}
+	messages := []Message{{Role: RoleUser, Content: "Choose a color and count."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		if completion.FinishReason != "stop" {
+			t.Fatalf("finish reason = %q, want stop", completion.FinishReason)
+		}
+		decoder := json.NewDecoder(strings.NewReader(completion.Message.Content))
+		decoder.UseNumber()
+		var value map[string]any
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("decode %q: %v", completion.Message.Content, err)
+		}
+		color, ok := value["color"].(string)
+		if !ok || (color != "blue" && color != "red") {
+			t.Fatalf("color = %#v, want declared string member", value["color"])
+		}
+		count, ok := value["count"].(json.Number)
+		if !ok {
+			t.Fatalf("count has type %T, want json.Number", value["count"])
+		}
+		integer, err := count.Int64()
+		if err != nil {
+			t.Fatalf("count %q is not an integer: %v", count, err)
+		}
+		if integer != 100 {
+			t.Fatalf("count = %d, want forced prefix-related member 100", integer)
+		}
+		if len(value) != 2 {
+			t.Fatalf("response properties = %#v, want color and count", value)
+		}
+	}
+
+	buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, buffered)
+	replayed, err := p.Complete(context.Background(), messages, nil, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, replayed)
+	if replayed.Message.Content != buffered.Message.Content {
+		t.Fatalf("same-seed replay = %q, want %q", replayed.Message.Content, buffered.Message.Content)
+	}
+
+	var streamed strings.Builder
+	stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+		streamed.WriteString(piece)
+		return nil
+	}, messages, nil, append(opts, WithPerTokenStream(true))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, stream)
+	if stream.Message.Content != buffered.Message.Content || streamed.String() != stream.Message.Content {
+		t.Fatalf("seeded buffered/stream mismatch: buffered=%q streamed=%q completion=%q", buffered.Message.Content, streamed.String(), stream.Message.Content)
+	}
+}
+
 // fak-test:runtime fast est=50ms lane=default
 func TestNativeStructuredTextFormatPreservesOrdinaryOutput(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)
@@ -301,6 +382,23 @@ func TestNativeStructuredUnsupportedRequestRefusesBeforeSampling(t *testing.T) {
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{}}},"required":["answer"],"additionalProperties":false}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"extra":{"type":"string","minLength":1}},"required":["answer"],"additionalProperties":false}}}`),
 	}
+	integerSetFormat := func(constraint string) json.RawMessage {
+		return json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"count":{"type":"integer",` + constraint + `}},"required":["count"],"additionalProperties":false}}}`)
+	}
+	cases = append(cases,
+		integerSetFormat(`"enum":[]`),
+		integerSetFormat(`"enum":[1,"2"]`),
+		integerSetFormat(`"enum":[null]`),
+		integerSetFormat(`"enum":[1.5]`),
+		integerSetFormat(`"enum":[1e2]`),
+		integerSetFormat(`"enum":[9223372036854775808]`),
+		integerSetFormat(`"const":null`),
+	)
+	tooManyIntegerMembers := make([]string, 33)
+	for i := range tooManyIntegerMembers {
+		tooManyIntegerMembers[i] = fmt.Sprintf("%d", i)
+	}
+	cases = append(cases, integerSetFormat(`"enum":[`+strings.Join(tooManyIntegerMembers, ",")+`]`))
 	properties := make(map[string]any, 17)
 	required := make([]string, 0, 17)
 	for i := range 17 {
