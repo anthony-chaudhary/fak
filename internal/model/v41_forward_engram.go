@@ -431,6 +431,13 @@ func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry,
 }
 
 func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]float32, full bool, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (gatheredRows int, err error) {
+	return m.v41EngramInjectOwnedPrepared(l, x, streams, full, positions, layerRows, eps, geometry, nil)
+}
+
+// v41EngramInjectOwnedPrepared consumes a current-call owned panel after a
+// resident gate declines. A nil panel keeps the ordinary host preflight and
+// gather order; retained panels are never stored on the geometry or session.
+func (m *Model) v41EngramInjectOwnedPrepared(l int, x [][]float32, streams [][][]float32, full bool, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry, gathered *v41EngramGatheredRows) (gatheredRows int, err error) {
 	stage, cacheIdx := geometry.stage, geometry.cacheIdx
 	H, dim, cols, hc := geometry.H, geometry.dim, geometry.cols, geometry.hc
 	qNorm, kNorm := geometry.qNorm, geometry.kNorm
@@ -458,9 +465,14 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 					ErrV41NativeUnsupported, t, len(x[t]), H))
 		}
 	}
-	gathered, err := m.v41EngramGatherRows(l, positions, layerRows, eps, geometry)
-	if err != nil {
-		return gatheredRows, err
+	if gathered == nil {
+		gathered, err = m.v41EngramGatherRows(l, positions, layerRows, eps, geometry)
+		if err != nil {
+			return gatheredRows, err
+		}
+	} else if gathered.layer != l || gathered.stage != stage || gathered.cacheIdx != cacheIdx || gathered.dim != dim || len(gathered.rows) != len(layerRows) {
+		return gatheredRows, v41StageErr(v41StageEngram, l,
+			fmt.Errorf("%w: Engram retained row owner does not match current injection", ErrV41NativeUnsupported))
 	}
 
 	gatheredRows = len(layerRows)

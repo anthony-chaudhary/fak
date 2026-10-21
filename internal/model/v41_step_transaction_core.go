@@ -258,16 +258,21 @@ func (m *Model) v41StepInjectEngram(l int, e v41StepEngram, st *v41ForwardState,
 	layerRows := e.rows[base : base+geometry.cols]
 	var rows int
 	var injectionErr error
+	var gathered *v41EngramGatheredRows
 	handled := false
 	if resident != nil {
 		if gate := scratch.gatherOps.engramGateFunc(); gate != nil {
-			rows, handled, injectionErr = m.v41EngramInjectResident(l, resident.streams, 1, layerRows, float32(cfg.RMSNormEps), geometry, gate)
+			gathered, injectionErr = m.v41EngramGatherRows(l, 1, layerRows, float32(cfg.RMSNormEps), geometry)
+			if injectionErr == nil {
+				rows = len(gathered.rows)
+				handled, injectionErr = gate(l, resident.streams, gathered, 1, geometry, float32(cfg.RMSNormEps))
+			}
 			handled = handled || injectionErr != nil
 		}
 	}
 	if !handled {
 		if resident != nil {
-			// The session has no Engram gate: read the panel back around this layer.
+			// An absent or declining gate reads the panel back around this layer.
 			host, readErr := resident.hostStreams(l)
 			if readErr != nil {
 				rollback()
@@ -276,8 +281,13 @@ func (m *Model) v41StepInjectEngram(l int, e v41StepEngram, st *v41ForwardState,
 			copy(x, host[0][0])
 			engramStreams = host
 		}
-		rows, injectionErr = m.v41EngramInjectPrepared(l, [][]float32{x}, engramStreams, e.full, 1,
-			layerRows, float32(cfg.RMSNormEps), geometry)
+		if gathered == nil {
+			rows, injectionErr = m.v41EngramInjectPrepared(l, [][]float32{x}, engramStreams, e.full, 1,
+				layerRows, float32(cfg.RMSNormEps), geometry)
+		} else {
+			rows, injectionErr = m.v41EngramInjectOwnedPrepared(l, [][]float32{x}, engramStreams, e.full, 1,
+				layerRows, float32(cfg.RMSNormEps), geometry, gathered)
+		}
 		if injectionErr == nil && resident != nil {
 			injectionErr = resident.setHostStreams(l, engramStreams)
 		}
