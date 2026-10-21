@@ -17,12 +17,19 @@ type JSONSchemaMask struct {
 
 	decodedOnce sync.Once
 	decoded     [][]byte
+
+	programs   []jsonShapeProgram
+	cacheMu    sync.Mutex
+	cacheVocab int
+	cache      map[string][]uint64
 }
 
 const (
 	maxJSONSchemaBytes      = 65_536
 	maxJSONSchemaProperties = 16
 	maxJSONSchemaOptional   = 4
+	// maxJSONSchemaMaskCacheStates bounds one request's cached admission sets.
+	maxJSONSchemaMaskCacheStates = 64
 )
 
 // CompileJSONSchema compiles the currently supported scalar object subset into
@@ -53,10 +60,15 @@ func CompileJSONSchema(schema []byte, dec TokenDecoder, opts CompileOptions) (*J
 		segs[last].lit = append([]byte(nil), segs[last].lit[:len(segs[last].lit)-1]...)
 		objects = append(objects, compiledTool{fields: fields, segs: segs})
 	}
+	programs := make([]jsonShapeProgram, len(objects))
+	for i := range objects {
+		programs[i] = newJSONShapeProgram(objects[i])
+	}
 	return &JSONSchemaMask{
-		objects: objects,
-		dec:     dec,
-		eos:     opts.EOS,
+		objects:  objects,
+		dec:      dec,
+		eos:      opts.EOS,
+		programs: programs,
 	}, nil
 }
 
@@ -64,28 +76,22 @@ func CompileJSONSchema(schema []byte, dec TokenDecoder, opts CompileOptions) (*J
 // checked byte by byte, so a token that starts legally but crosses the complete
 // object boundary is rejected. Dead-end histories mask the whole vocabulary.
 func (m *JSONSchemaMask) MaskLogits(history []int, logits []float32) {
-	if m == nil || m.dec == nil {
+	if m == nil || m.dec == nil || len(logits) == 0 {
 		return
 	}
 	m.cacheDecoded(len(logits))
-	prefix := make([]byte, 0, len(history))
-	for _, id := range history {
-		piece := m.tokenBytes(id)
-		if len(piece) == 0 {
-			maskAll(logits)
-			return
-		}
-		prefix = append(prefix, piece...)
-	}
-	allowed, complete := m.argsAllowed(prefix)
-	if complete && len(allowed) == 0 {
-		maskAllExcept(logits, m.eos)
-		return
-	}
-	if len(allowed) == 0 {
+	state, ok := m.stateAfter(history)
+	if !ok {
 		maskAll(logits)
 		return
 	}
+	complete := false
+	for i := range state.cursors {
+		if m.programs[i].complete(&state.cursors[i]) {
+			complete = true
+		}
+	}
+	admitted := m.admittedTokens(state, len(logits))
 	neg := float32(math.Inf(-1))
 	for id := range logits {
 		if id == m.eos {
@@ -94,7 +100,7 @@ func (m *JSONSchemaMask) MaskLogits(history []int, logits []float32) {
 			}
 			continue
 		}
-		if !m.admits(prefix, allowed, m.tokenBytes(id)) {
+		if admitted[id>>6]&(1<<(uint(id)&63)) == 0 {
 			logits[id] = neg
 		}
 	}
@@ -116,33 +122,83 @@ func (m *JSONSchemaMask) tokenBytes(id int) []byte {
 	return m.dec.TokenBytes(id)
 }
 
-func (m *JSONSchemaMask) admits(prefix []byte, first map[byte]bool, token []byte) bool {
-	if len(token) == 0 {
-		return false
+// stateAfter steps every shape through the history bytes. It reports false for
+// an undecodable token or a history no shape accepts.
+func (m *JSONSchemaMask) stateAfter(history []int) (jsonMaskState, bool) {
+	state := jsonMaskState{cursors: make([]jsonCursor, len(m.programs))}
+	for i := range m.programs {
+		state.cursors[i] = m.programs[i].start()
 	}
-	buf := append([]byte(nil), prefix...)
-	allowed := first
-	for _, b := range token {
-		if !allowed[b] {
-			return false
+	for _, id := range history {
+		piece := m.tokenBytes(id)
+		if len(piece) == 0 {
+			return state, false
 		}
-		buf = append(buf, b)
-		allowed, _ = m.argsAllowed(buf)
+		for _, b := range piece {
+			for i := range state.cursors {
+				m.programs[i].step(&state.cursors[i], b)
+			}
+		}
+		if !state.alive() {
+			return state, false
+		}
 	}
-	return true
+	return state, true
 }
 
-func (m *JSONSchemaMask) argsAllowed(prefix []byte) (map[byte]bool, bool) {
-	allowed := map[byte]bool{}
-	complete := false
-	for i := range m.objects {
-		next, done := m.objects[i].argsAllowed(prefix)
-		for b := range next {
-			allowed[b] = true
+// admittedTokens returns the bitset of tokens whose every byte keeps at least
+// one shape alive from state. Results are cached per state and vocabulary size.
+func (m *JSONSchemaMask) admittedTokens(state jsonMaskState, vocabSize int) []uint64 {
+	key := state.key()
+	m.cacheMu.Lock()
+	if m.cacheVocab == vocabSize {
+		if bits, ok := m.cache[key]; ok {
+			m.cacheMu.Unlock()
+			return bits
 		}
-		complete = complete || done
 	}
-	return allowed, complete
+	m.cacheMu.Unlock()
+
+	var firstOK [256]bool
+	scratch := make([]jsonCursor, len(state.cursors))
+	survives := func(piece []byte) bool {
+		copy(scratch, state.cursors)
+		for _, b := range piece {
+			alive := false
+			for i := range scratch {
+				if m.programs[i].step(&scratch[i], b) {
+					alive = true
+				}
+			}
+			if !alive {
+				return false
+			}
+		}
+		return true
+	}
+	for b := range firstOK {
+		firstOK[b] = survives([]byte{byte(b)})
+	}
+	bits := make([]uint64, (vocabSize+63)/64)
+	for id := 0; id < vocabSize; id++ {
+		piece := m.tokenBytes(id)
+		if len(piece) == 0 || !firstOK[piece[0]] {
+			continue
+		}
+		if len(piece) == 1 || survives(piece) {
+			bits[id>>6] |= 1 << (uint(id) & 63)
+		}
+	}
+
+	m.cacheMu.Lock()
+	// A full cache restarts rather than freezing, so a later long free string
+	// still reaches the cached path after many structural states.
+	if m.cacheVocab != vocabSize || m.cache == nil || len(m.cache) >= maxJSONSchemaMaskCacheStates {
+		m.cache, m.cacheVocab = map[string][]uint64{}, vocabSize
+	}
+	m.cache[key] = bits
+	m.cacheMu.Unlock()
+	return bits
 }
 
 func maskAll(logits []float32) {
