@@ -105,5 +105,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "native-structured-constraint-from-context",
+      "canonical": "nativeStructuredConstraintFromContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "nativeStructuredConstraintFromContext retrieves the request-local native JSON-schema decoder constraint stored in a Go context.Context so reused and direct decode paths apply the same token mask.",
+      "distinction": "It reads structured-decoding state carried through a Go context.Context; it does not manage model-visible context bytes, deadlines, or subprocess cancellation like generic context.Context plumbing.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "nativeStructuredConstraintFromContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

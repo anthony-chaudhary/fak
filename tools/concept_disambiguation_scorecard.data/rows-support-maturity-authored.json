@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "native-structured-unsupported-refusal",
+      "canonical": "ErrNativeStructuredUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ErrNativeStructuredUnsupported is the typed per-request refusal returned when a native structured-output request cannot be honored without violating its JSON-schema or execution-mode contract.",
+      "distinction": "It classifies one refused native structured-output request; it does not claim that structured output lacks all support, measure coverage, or assign a product maturity rung.",
+      "distinct_from": [
+        "cov8145-outcomeunsupported"
+      ],
+      "aliases": [],
+      "grounding": "ErrNativeStructuredUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -83,6 +83,50 @@ fak serve --addr 127.0.0.1:8080 \
   --policy examples/customer-support-readonly-policy.json
 ```
 
+### Native JSON-schema responses
+
+On a native model route, an explicit `response_format` can constrain each token to
+a JSON object. For example:
+
+```json
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "answer",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {"answer": {"type": "string", "enum": ["yes", "no"]}},
+      "required": ["answer"],
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+The native subset supports required scalar properties: strings, booleans,
+integers and numbers. Properties are emitted in sorted order. Strings use
+printable ASCII without escapes; string `enum` and `const` values must fit that
+surface. Numbers use canonical JSON syntax without exponents. Nested objects,
+arrays, optional properties and unsupported constraint keywords are rejected
+before inference. `strict` may be true or omitted. Native `json_object`, regex
+and EBNF formats are currently unsupported; upstream engine passthrough retains
+its own supported surface.
+
+The mask composes with temperature, top-k, top-p, logit bias and repetition
+penalties. Buffered and per-token streaming preserve the generated JSON bytes,
+including strings resembling reasoning delimiters or tool calls. EOS is admitted
+only after the object is complete. A token limit, cancellation or explicit stop
+can still interrupt a response; callers must check the finish reason before
+treating a partial response as a complete object.
+
+Structured requests currently use target-only decoding. Requests combining this
+mode with tools, DFlash2, a reasoning-prefilled prompt, a thinking budget or an
+unmodified-logit inference receipt are refused. Plain text and omitted formats
+retain the ordinary route. Unsupported native combinations return HTTP 400 with
+code `native_structured_output_unsupported`; inability to select a valid token
+returns HTTP 500 with code `native_structured_decode_failed`.
+
 ### OpenAI SDK — preserve `response_format`, `text.format`, `strict`, `logit_bias`
 
 ```python

@@ -12,7 +12,8 @@
         "recall (session core dump)",
         "x2-context-ctx-reasoncompactionthrash",
         "context-ctx-parallelquantloadcontextbudget",
-        "context-ctx-quantmodelq4kprofileoptionscontext"
+        "context-ctx-quantmodelq4kprofileoptionscontext",
+        "native-structured-constraint-from-context"
       ],
       "aliases": [
         "newrequestwithcontext",

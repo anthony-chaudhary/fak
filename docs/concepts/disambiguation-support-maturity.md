@@ -26,3 +26,10 @@ fak_native_receipt_signal_supported is the labeled Prometheus gauge that reports
 fak_native_receipt_unsupported_total is the Prometheus counter of native receipt observations excluded from native performance totals because the receipt lacks the required supported or authoritative evidence.
 
 **Distinct from:** It counts cumulative excluded receipt observations; it is not the latest-receipt per-signal support gauge, which reports a current labeled capability bit.
+
+
+### ErrNativeStructuredUnsupported
+
+ErrNativeStructuredUnsupported is the typed per-request refusal returned when a native structured-output request cannot be honored without violating its JSON-schema or execution-mode contract.
+
+**Distinct from:** It classifies one refused native structured-output request; it does not claim that structured output lacks all support, measure coverage, or assign a product maturity rung.

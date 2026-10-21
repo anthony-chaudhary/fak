@@ -25,3 +25,10 @@ This map positions the current `context-ctx` coverage backlog. Each entry names 
 - **`queuepeakcontexts`** — the exact `context-ctx` symbol `queuepeakcontexts`; use this spelling for that operation rather than the undifferentiated family name.
 - **`restoredcontexts`** — the exact `context-ctx` symbol `restoredcontexts`; use this spelling for that operation rather than the undifferentiated family name.
 - **`tracefromcontext`** — the exact `context-ctx` symbol `tracefromcontext`; use this spelling for that operation rather than the undifferentiated family name.
+
+
+### nativeStructuredConstraintFromContext
+
+nativeStructuredConstraintFromContext retrieves the request-local native JSON-schema decoder constraint stored in a Go context.Context so reused and direct decode paths apply the same token mask.
+
+**Distinct from:** It reads structured-decoding state carried through a Go context.Context; it does not manage model-visible context bytes, deadlines, or subprocess cancellation like generic context.Context plumbing.

@@ -709,6 +709,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		maxNew:      maxNew,
 		measurement: measurement,
 		thinking:    nativeThinkingConstraintFromContext(ctx),
+		structured:  nativeStructuredConstraintFromContext(ctx),
 		firstDraw: func(token int) {
 			p.recordNativeFirstDraw(traceID, token, stops[token])
 		},
@@ -879,6 +880,7 @@ type decodeLane struct {
 	// pairing witness. Production leaves it nil and reads the live Session.
 	forwardCoverageSource nativeForwardCoverageSource
 	thinking              *nativeThinkingConstraint
+	structured            *nativeStructuredConstraint
 	firstDraw             func(int)
 	// samplerHook / emitHook are the CW-03 (#13351) purpose-observation taps. They are
 	// nil on the served path (a literal no-op) and set only by a cache-prime caller's
@@ -1131,6 +1133,15 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.samplerHook()
 	}
 	sampleStart := time.Now()
+	effectiveLogits := ln.logits
+	if ln.structured != nil {
+		var err error
+		effectiveLogits, err = ln.structured.maskLogits(ln.logits, ln.stops)
+		if err != nil {
+			ln.err, ln.done = err, true
+			return 0, false
+		}
+	}
 	forced := false
 	if ln.thinking != nil {
 		var err error
@@ -1140,12 +1151,18 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 			return 0, false
 		}
 	}
-	if !forced && ln.greedyReady {
+	if !forced && ln.greedyReady && ln.structured == nil {
 		next = ln.greedyNext
 	} else if !forced {
-		next = sampleLogitsWithPenaltyWS(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
+		next = sampleLogitsWithPenaltyWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
+	if ln.structured != nil {
+		if err := ln.structured.accept(next, effectiveLogits); err != nil {
+			ln.err, ln.done = err, true
+			return 0, false
+		}
+	}
 	if ln.firstDraw != nil {
 		ln.firstDraw(next)
 		ln.firstDraw = nil
@@ -1154,7 +1171,7 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.stopped, ln.done = true, true
 		return 0, false
 	}
-	if err := ln.measurement.record(ln.logits, next); err != nil {
+	if err := ln.measurement.record(effectiveLogits, next); err != nil {
 		ln.err, ln.done = err, true
 		return 0, false
 	}
@@ -1213,7 +1230,7 @@ func (ln *decodeLane) vocabSize() int {
 // no per-token logprob receipt reading the full distribution. A forced thinking-close token
 // is chosen before sampling and composes unchanged.
 func (ln *decodeLane) deviceGreedy() bool {
-	return ln.temp <= 0 && len(ln.logitBias) == 0 && ln.freqPenalty == 0 && ln.presPenalty == 0 &&
+	return ln.structured == nil && ln.temp <= 0 && len(ln.logitBias) == 0 && ln.freqPenalty == 0 && ln.presPenalty == 0 &&
 		(ln.measurement == nil || ln.measurement.inferenceDisabled)
 }
 

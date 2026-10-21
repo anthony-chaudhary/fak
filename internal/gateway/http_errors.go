@@ -28,6 +28,12 @@ import (
 // detail is NEVER forwarded — only the status + classification cross the boundary —
 // so an upstream error message cannot leak to a possibly-unauthenticated caller.
 func upstreamErrorStatus(err error) (status int, code, msg string) {
+	if errors.Is(err, agent.ErrNativeStructuredUnsupported) {
+		return http.StatusBadRequest, "native_structured_output_unsupported", "the native model route does not support this structured-output request"
+	}
+	if errors.Is(err, agent.ErrNativeStructuredNoToken) {
+		return http.StatusInternalServerError, "native_structured_decode_failed", "native structured decoding could not select a valid token"
+	}
 	var deadlineErr *deadlineAdmissionError
 	if errors.As(err, &deadlineErr) {
 		return http.StatusServiceUnavailable, deadlineadmit.CodeDeadlineInfeasible, deadlineErr.Error()

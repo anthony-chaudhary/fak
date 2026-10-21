@@ -7,7 +7,8 @@
       "kind": "symbol",
       "definition": "`OutcomeUnsupported` is the support-maturity symbol declared or used at `cmd/fak/quantwatch.go:70` as `case quantwatch.OutcomeAbstain, quantwatch.OutcomeUnsupported:`. This row positions that concrete implementation surface, not merely the family label.",
       "distinct_from": [
-        "x2-support-maturity-supportmaturity"
+        "x2-support-maturity-supportmaturity",
+        "native-structured-unsupported-refusal"
       ],
       "aliases": [],
       "grounding": "outcomeunsupported",

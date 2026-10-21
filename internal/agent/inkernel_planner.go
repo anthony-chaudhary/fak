@@ -465,6 +465,20 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	defer cancel()
 	var sinkErr error
 	sp := applySampleOpts(opts...)
+	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
+		comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
+			if sinkErr != nil || tokenPiece == "" {
+				return
+			}
+			if sinkErr = sink(tokenPiece); sinkErr != nil {
+				cancel()
+			}
+		}))...)
+		if sinkErr != nil {
+			return comp, sinkErr
+		}
+		return comp, err
+	}
 	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
 	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
 	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
@@ -1678,7 +1692,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	return recoverDeviceCall(func() (res inKernelGenerateResult, err error) {
 		// Budgeted requests use the shared target sampler until speculative acceptance
 		// and rollback carry the same request-local constraint.
-		targetOnly := nativeThinkingConstraintFromContext(ctx) != nil
+		targetOnly := nativeThinkingConstraintFromContext(ctx) != nil || nativeStructuredConstraintFromContext(ctx) != nil
 		if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
 			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
 				return inKernelGenerateResult{}, err
@@ -1999,6 +2013,23 @@ func splitNativeBudgetReasoning(raw string, seeded bool) (string, string) {
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
+	sp := applySampleOpts(opts...)
+	structured, err := p.newNativeStructuredConstraint(sp.ResponseFormat, nil)
+	if err != nil {
+		return nil, err
+	}
+	if structured != nil {
+		if sp.NativeInferenceReceipt {
+			return nil, fmt.Errorf("%w: %w", ErrNativeStructuredUnsupported, &model.NativeInferenceReceiptUnsupportedError{Reason: "structured output masks model logits"})
+		}
+		if len(tools) > 0 {
+			return nil, fmt.Errorf("%w: structured output with tools", ErrNativeStructuredUnsupported)
+		}
+		if p.dflash2 != nil {
+			return nil, fmt.Errorf("%w: dflash2 decode", ErrNativeStructuredUnsupported)
+		}
+		ctx = context.WithValue(ctx, nativeStructuredConstraintContextKey{}, structured)
+	}
 	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
 	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
 	// HERE — the narrowest Go frame that wraps the whole device decode (generateReused's
@@ -2022,7 +2053,6 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				return nil, capacityErr
 			}
 		}
-		sp := applySampleOpts(opts...)
 		if observer := sp.DecodeTokenObserver; observer != nil {
 			delivered := &atomic.Bool{}
 			ctx = context.WithValue(ctx, inKernelObserverDeliveryContextKey{}, delivered)
@@ -2098,6 +2128,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 		effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
 		startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
+		if structured != nil && (effectiveBudget > 0 || startInSpan) {
+			return nil, fmt.Errorf("%w: reasoning-prefilled or budgeted requests", ErrNativeStructuredUnsupported)
+		}
 		var thinking *nativeThinkingConstraint
 		if p.dflash2 != nil && effectiveBudget > 0 {
 			return nil, errors.New("dflash2: thinking constraints are not supported")
@@ -2271,6 +2304,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 					if thinking != nil {
 						thinking.reset()
 					}
+					if structured != nil {
+						structured.reset()
+					}
 					if measurement != nil {
 						measurement.reset()
 					}
@@ -2377,25 +2413,30 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			if sp.DecodeTokenObserver != nil {
 				sp.DecodeTokenObserver("", sb.String())
 			}
-			reasoning, content := splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
-			for strings.Contains(content, thinkClose) {
-				idx := strings.Index(content, thinkClose)
-				residual := strings.TrimSpace(content[:idx])
-				if strings.HasPrefix(strings.ToLower(residual), thinkOpen) {
-					residual = residual[len(thinkOpen):]
-				}
-				residual = strings.TrimSpace(residual)
-				if residual != "" {
-					if reasoning != "" {
-						reasoning = strings.TrimSpace(reasoning + "\n" + residual)
-					} else {
-						reasoning = residual
+			var reasoning, content string
+			if structured != nil {
+				content = sb.String()
+			} else {
+				reasoning, content = splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
+				for strings.Contains(content, thinkClose) {
+					idx := strings.Index(content, thinkClose)
+					residual := strings.TrimSpace(content[:idx])
+					if strings.HasPrefix(strings.ToLower(residual), thinkOpen) {
+						residual = residual[len(thinkOpen):]
 					}
+					residual = strings.TrimSpace(residual)
+					if residual != "" {
+						if reasoning != "" {
+							reasoning = strings.TrimSpace(reasoning + "\n" + residual)
+						} else {
+							reasoning = residual
+						}
+					}
+					content = strings.TrimSpace(content[idx+len(thinkClose):])
 				}
-				content = strings.TrimSpace(content[idx+len(thinkClose):])
-			}
-			if thinking != nil && thinking.forced {
-				content = StripReasoning(content)
+				if thinking != nil && thinking.forced {
+					content = StripReasoning(content)
+				}
 			}
 			// Model reports the artifact this planner actually decoded, so the gateway
 			// echoes the served model rather than whatever name the client sent.
@@ -2461,7 +2502,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			// the in-kernel forward becomes a first-class tool-calling planner. Without this the
 			// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
 			// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
-			comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
+			if structured == nil {
+				comp = normalizeInKernelToolCalls(comp, offered, sp.ToolChoice, tools, messages)
+			}
 			return comp, nil
 		}()
 		complete = true

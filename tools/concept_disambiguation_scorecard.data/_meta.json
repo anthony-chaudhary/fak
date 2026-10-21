@@ -12530,6 +12530,11 @@
           "category": "incidental",
           "reason": "Private DSpark reference row holding existing target layer positions and hidden-state values; this immutable numerical data record introduces no request, cancellation, or independent runtime context owner.",
           "token": "v41DSparkContextRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private typed context.Context key used only to store and retrieve the positioned nativeStructuredConstraintFromContext request-local decoder constraint; it is a carrier identity, not a separate model-context or structured-output concept.",
+          "token": "nativeStructuredConstraintContextKey"
         }
       ],
       "exclude": [
@@ -12683,6 +12688,7 @@
         "nativeCompactionObserver",
         "nativeCompactionObserverKey",
         "nativeContext",
+        "nativeStructuredConstraintContextKey",
         "newGuardCompactionWitness",
         "newTraceContext",
         "noteCompactionContract",

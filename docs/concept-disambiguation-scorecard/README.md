@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **659** (clarity 0 + coverage 659) |
-| **Crystal-clear concepts (and climbing)** | **1281** crystal of 3090 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3166 / 3825** (82.8% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1283** crystal of 3092 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3168 / 3827** (82.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4346 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4348 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3090 concepts - score 88.8/100 (grade B) - disambiguation-debt 659
+concept-disambiguation chart - 3092 concepts - score 88.8/100 (grade B) - disambiguation-debt 659
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1281
+  * crystal       ####################........ 1283
   o defined       ############################ 1809
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 51 crystal)
   cache            *********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (299 concept(s); 117 crystal)
-  context-ctx      ***************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (246 concept(s); 87 crystal)
+  context-ctx      ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (247 concept(s); 88 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  ***********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (269 concept(s); 95 crystal)
-  support-maturity *****************************************************oooooooooooooooooooooooooooo (81 concept(s); 53 crystal)
+  support-maturity ******************************************************oooooooooooooooooooooooooooo (82 concept(s); 54 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 83 crystal)
@@ -67,11 +67,11 @@ coverage by family (positioned / discovered):
   cache            #######################..... 340/408
   gateway-engine   #######################..... 246/304
   attention        #####################....... 146/192
-  context-ctx      ########################.... 268/314
+  context-ctx      ########################.... 269/315
   guard-gate       ##########################.. 515/561
   pool             ##############.............. 44/85
   policy-capability ########################.... 225/264
-  support-maturity ####################........ 85/121
+  support-maturity ####################........ 86/122
   render-materialize ########################.... 217/250
   score-debt       #######################..... 114/139
   witness-proof    #########################... 173/197
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.8%  (3166/3825 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.8%  (3168/3827 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4346 lookup name(s) -> 3090 concept(s), 89 ambiguous
+name index: 4348 lookup name(s) -> 3092 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2428 / 5660 |
+| Boundaries drawn (mutual / total) | 2432 / 5664 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4346 over 3090 concepts |
+| Lookup names indexed | 4348 over 3092 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3090 |
+| Concepts carrying a contrast set | 3092 |
 
 ## The concepts (best verdict first)
 
@@ -314,6 +314,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **ContextDigest (pending-admission proof-context digest)** - pendingadmission.Binding.ContextDigest is the canonical JSON digest of that binding's ProofContext, checked so the stored execution identity cannot drift independently of the exact candidate binding. |
 | * | crystal | symbol | context-ctx | **parallelQuantLoadContextBudget (ggufload hierarchical quant load)** - The internal/ggufload WeightSource method that runs the production hierarchical, cancellable quantized tensor load: an outer tensor fan-out with a per-tensor inner worker budget, applying each computed tensor serially under the caller's context. |
 | * | crystal | symbol | context-ctx | **QuantModelQ4KProfileOptionsContext (cancellable Q4_K model build)** - The internal/ggufload WeightSource entry point that builds a Q4_K quantized model from a GGUF under a caller context, a load profile, and functional load options such as streamed experts; the context-aware form the plain QuantModelQ4K wrappers delegate to. |
+| * | crystal | symbol | context-ctx | **nativeStructuredConstraintFromContext** - nativeStructuredConstraintFromContext retrieves the request-local native JSON-schema decoder constraint stored in a Go context.Context so reused and direct decode paths apply the same token mask. |
 | * | crystal | symbol | context-ctx | **ContextEpoch** - ContextEpoch is the span during which one initially rendered System Context stays the immutable baseline for a session's provider cache. The gateway holds a bounded per-session store of that baseline, and every turn reconciles against it; the epoch ends, bumping a baseline sequence number, when the session compacts, the session identity moves, or an incompatible transition invalidates the rendering. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextual** - `contextual` is the context-ctx symbol declared or used at `cmd/fak/harness_preview.go:21` as `currentDomain := fs.String("current-domain", "", "last admitted contextual domain")`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextid** - `ContextID` is the context-ctx symbol declared or used at `cmd/microcontextdemo/effect_batch.go:22` as `ContextID string `json:"context_id"``. This row positions that concrete implementation surface, not merely the family label. |
@@ -1313,6 +1314,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for guardsupport** - `guard_support` is the support-maturity symbol declared or used at `internal/accounts/credrefresh.go:97` as `// cmd/fak/guard_support.go's credExpiresAt; it lives here so this leaf stays free of a cmd import.`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for seatcoveragemaxagemin** - `SeatCoverageMaxAgeMin` is the support-maturity symbol declared or used at `internal/accountprobe/coverage.go:32` as `// SeatCoverageMaxAgeMin. This seat's health is measured, so its silence is a finding.`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for sotacoveragescorecard** - `sota_coverage_scorecard` is the support-maturity symbol declared or used at `cmd/fak/sota_coverage_scorecard.go:3` as `// sota_coverage_scorecard.go is the thin CLI shell over internal/sotacoverage: it resolves`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | support-maturity | **ErrNativeStructuredUnsupported** - ErrNativeStructuredUnsupported is the typed per-request refusal returned when a native structured-output request cannot be honored without violating its JSON-schema or execution-mode contract. |
 | * | crystal | symbol | support-maturity | **Qwen35 MTP spec-decode unsupported error** - Qwen35MTPSpecDecodeUnsupportedError is the typed model-layer admission refusal returned before native Qwen3.8 MTP depth-N decoding mutates an unsupported target session. |
 | * | crystal | concept | support-maturity | **support** - A capability is supported when fak has an implemented path that accepts the case without asserting how broadly it is exercised, whether every answer is right, how it compares to a peer, or whether it is production-mature. |
 | * | crystal | metric | support-maturity | **coverage** - Coverage is the measured fraction of a declared or discovered universe that has rows, tests, witnesses, or other positioned evidence. |
@@ -3370,8 +3372,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3232/5660 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3090 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3232/5664 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3092 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3380,7 +3382,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4346 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4348 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3392,11 +3394,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cache | 340 | 408 | 68 |
 | gateway-engine | 246 | 304 | 58 |
 | attention | 146 | 192 | 46 |
-| context-ctx | 268 | 314 | 46 |
+| context-ctx | 269 | 315 | 46 |
 | guard-gate | 515 | 561 | 46 |
 | pool | 44 | 85 | 41 |
 | policy-capability | 225 | 264 | 39 |
-| support-maturity | 85 | 121 | 36 |
+| support-maturity | 86 | 122 | 36 |
 | render-materialize | 217 | 250 | 33 |
 | score-debt | 114 | 139 | 25 |
 | witness-proof | 173 | 197 | 24 |
