@@ -93,6 +93,76 @@ func TestInKernelBatchedDecodeMatchesSerial(t *testing.T) {
 	t.Logf("EQUIVALENCE: %d co-batched lanes (staggered depths %v) each bit-identical to serial Session.Step decode", N, maxNew)
 }
 
+// TestInKernelStochasticSamplingIsBatchCompositionInvariant verifies that a logical
+// request's seeded stochastic stream does not depend on which other requests share a
+// decode batch, their order, or an early-retiring neighbor.
+//
+// fak-test:runtime fast est=1s lane=default
+func TestInKernelStochasticSamplingIsBatchCompositionInvariant(t *testing.T) {
+	cfg := tinyCfg()
+	m := model.NewSynthetic(cfg)
+	type request struct {
+		prompt []int
+		seed   int64
+		maxNew int
+	}
+
+	sharedPrompt := synthIDs(cfg.VocabSize, 13, 8101)
+	requests := []request{
+		{prompt: sharedPrompt, seed: 101, maxNew: 12},
+		{prompt: sharedPrompt, seed: 202, maxNew: 12},
+		{prompt: synthIDs(cfg.VocabSize, 9, 8102), seed: 303, maxNew: 8},
+		{prompt: synthIDs(cfg.VocabSize, 17, 8103), seed: 404, maxNew: 1},
+	}
+
+	run := func(order []int) map[int][]int {
+		lanes := make([]*decodeLane, len(order))
+		sinks := make([]*batchLaneSink, len(order))
+		for batchIndex, requestIndex := range order {
+			r := requests[requestIndex]
+			lanes[batchIndex], sinks[batchIndex] = newDecodeLaneOver(m, r.prompt, r.maxNew, r.seed)
+			lanes[batchIndex].temp = 5.0
+			lanes[batchIndex].topP = 0.95
+			lanes[batchIndex].topK = 16
+		}
+		inKernelDecodeLanesBatched(context.Background(), lanes, m, false)
+
+		got := make(map[int][]int, len(order))
+		for batchIndex, requestIndex := range order {
+			if lanes[batchIndex].err != nil {
+				t.Fatalf("request %d decode failed: %v", requestIndex, lanes[batchIndex].err)
+			}
+			if len(sinks[batchIndex].toks) != requests[requestIndex].maxNew {
+				t.Fatalf("request %d produced %d tokens, want %d", requestIndex, len(sinks[batchIndex].toks), requests[requestIndex].maxNew)
+			}
+			got[requestIndex] = sinks[batchIndex].toks
+		}
+		return got
+	}
+
+	singletons := make(map[int][]int, len(requests))
+	for i := range requests {
+		singletons[i] = run([]int{i})[i]
+	}
+	if eqInts(singletons[0], singletons[1]) {
+		t.Fatalf("distinct request seeds did not activate stochastic sampling: seed 101 and 202 both produced %v", singletons[0])
+	}
+	t.Logf("STOCHASTIC: identical prompts with seeds 101 and 202 diverged: %v != %v", singletons[0], singletons[1])
+
+	assertMatchesSingleton := func(name string, got map[int][]int, requestIDs ...int) {
+		t.Helper()
+		for _, requestID := range requestIDs {
+			if !eqInts(got[requestID], singletons[requestID]) {
+				t.Fatalf("%s changed request %d's seeded stream:\n got =%v\n want=%v", name, requestID, got[requestID], singletons[requestID])
+			}
+		}
+	}
+
+	assertMatchesSingleton("original batch", run([]int{0, 1, 2}), 0, 1, 2)
+	assertMatchesSingleton("permuted batch", run([]int{2, 0, 1}), 0, 1, 2)
+	assertMatchesSingleton("batch with early-retiring neighbor", run([]int{3, 0, 1, 2}), 0, 1, 2, 3)
+}
+
 // TestInKernelBatchServePathByteIdenticalToSerial pins the acceptance bar on the LIVE serve
 // path: generateReused (what /v1/chat/completions and /v1/messages drive) decodes byte-for-byte
 // the same tokens whether FAK_INKERNEL_BATCH is off (serial Session.Step) or on (rerouted
