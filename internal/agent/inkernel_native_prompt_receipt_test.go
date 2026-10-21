@@ -30,7 +30,9 @@ func TestInKernelNativePromptReceiptMatchesPreparedEncoding(t *testing.T) {
 		{Type: "function", Function: ToolDefFunction{Name: "Read", Description: "read a file"}},
 		{Type: "function", Function: ToolDefFunction{Name: "cold_database", Description: "query old records"}},
 	}
-	responseFormat := json.RawMessage(`{"type":"json_object"}`)
+	// Native json_object is refused; a text format keeps the request on the
+	// unmodified-logit receipt route while still flowing through prompt rendering.
+	responseFormat := json.RawMessage(`{"type":"text"}`)
 	toolChoice := json.RawMessage(`{"type":"function","function":{"name":"Read"}}`)
 	opts := []SampleOpt{
 		WithMaxTokens(2),

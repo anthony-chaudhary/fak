@@ -128,11 +128,28 @@ only after the object is complete. A token limit, cancellation or explicit stop
 can still interrupt a response; callers must check the finish reason before
 treating a partial response as a complete object.
 
+Reasoning may precede the object. When the prompt opens a reasoning span (a
+thinking-mode Qwen3.5-family template) or the request sets a reasoning effort or
+thinking budget, decoding is unconstrained inside the span and the schema mask
+starts only after the model emits the atomic `</think>` token. Text that merely
+spells `</think>` with ordinary tokens does not end the span. Without a seeded
+span, the first token may be the atomic `<think>` token or the start of the
+object. EOS stays unavailable until the object is complete, so a response cannot
+end inside reasoning. The thinking budget forces `</think>` when it is spent;
+once the object starts, the budget no longer observes tokens, so think tags
+inside JSON strings are ordinary content. The reasoning before `</think>` is
+returned as reasoning content, never as the response; per-token streams carry
+only the object bytes. Both delimiters must be single in-vocabulary non-stop
+tokens; otherwise the request is refused. A span still open at the token limit
+returns empty content with finish reason `length`. This is adapted from
+DeepInfer's structured-output trigger/bound matcher (Apache-2.0); no upstream
+source is copied.
+
 Structured requests currently use target-only decoding. The bounded optional
 property support applies only to native JSON-schema responses; tool-schema
 compilation remains required-only and accepts only its existing string enum
-surface. Requests combining this mode with tools, DFlash2, a reasoning-prefilled
-prompt, a thinking budget or an unmodified-logit inference receipt are refused.
+surface. Requests combining this mode with tools, DFlash2 or an unmodified-logit
+inference receipt are refused.
 Plain text and omitted formats retain the ordinary route. Unsupported native
 combinations return HTTP 400 with code
 `native_structured_output_unsupported`; inability to select a valid token returns

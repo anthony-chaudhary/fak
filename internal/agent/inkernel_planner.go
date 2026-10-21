@@ -2144,7 +2144,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
 		startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
 		if structured != nil && (effectiveBudget > 0 || startInSpan) {
-			return nil, fmt.Errorf("%w: reasoning-prefilled or budgeted requests", ErrNativeStructuredUnsupported)
+			if err := structured.armReasoning(p, startInSpan, stops); err != nil {
+				return nil, err
+			}
 		}
 		var thinking *nativeThinkingConstraint
 		if p.dflash2 != nil && effectiveBudget > 0 {
@@ -2158,6 +2160,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			if err != nil {
 				return nil, err
 			}
+			thinking.spanByToken = structured.reasoningArmed()
 			ctx = context.WithValue(ctx, nativeThinkingConstraintContextKey{}, thinking)
 		}
 		// emit runs per generated token: decode the piece, accumulate the text, and apply the
@@ -2181,16 +2184,31 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 		}
 		scanner := newIncrementalStopScanner(maxStop, sp.Stop)
+		// structuredContentStart is the byte offset just past a structured
+		// response's close trigger; reasoning before it never reaches the stream.
+		structuredContentStart := -1
 		emit := func(next int) bool {
 			if piece, derr := p.tok.Decode([]int{next}); derr == nil {
 				sb.WriteString(piece)
-				if sp.DecodeTokenObserver != nil {
+				visible := true
+				if structured.takeReasoningClosed() {
+					structuredContentStart, visible = sb.Len(), false
+				} else if structured.reasoningActive() {
+					visible = false
+				}
+				if sp.DecodeTokenObserver != nil && visible {
 					sp.DecodeTokenObserver(piece, "")
 				}
+				if !visible {
+					// Stop strings apply to the response, never to hidden reasoning.
+					return false
+				}
+				contentStart := max(structuredContentStart, 0)
 				if scanner.appendPiece(piece) {
-					if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
+					if trimmed, hit := checkStop(sb.String()[contentStart:], sp.Stop); hit {
+						kept := sb.String()[:contentStart] + trimmed
 						sb.Reset()
-						sb.WriteString(trimmed)
+						sb.WriteString(kept)
 						return true
 					}
 				}
@@ -2315,6 +2333,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				}
 				return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 					sb.Reset()
+					structuredContentStart = -1
 					scanner.reset()
 					if thinking != nil {
 						thinking.reset()
@@ -2430,7 +2449,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 			var reasoning, content string
 			if structured != nil {
-				content = sb.String()
+				reasoning, content = structured.splitOutput(sb.String(), structuredContentStart)
 			} else {
 				reasoning, content = splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
 				for strings.Contains(content, thinkClose) {
