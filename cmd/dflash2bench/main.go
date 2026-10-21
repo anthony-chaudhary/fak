@@ -112,6 +112,15 @@ type report struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "prepare" {
+		ctx, cancelSignal := signal.NotifyContext(context.Background(), os.Interrupt)
+		code := runPrepareCLI(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		cancelSignal()
+		if code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 	var o options
 	flag.StringVar(&o.specPath, "target-spec", "", "trusted JSON DFlash2TargetSpec: ordered shard identities, independent digest, tokenizer/renderer IDs, sidecar path")
 	flag.StringVar(&o.promptPath, "prompt-ids", "", "JSON integer array of already rendered prompt token IDs")

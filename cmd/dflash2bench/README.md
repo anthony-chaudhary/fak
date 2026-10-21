@@ -53,6 +53,43 @@ ahead of time. The benchmark does not invent a chat template, add BOS, render
 text, or apply string stops. Both arms exclude the same authenticated EOS and
 stop IDs before commit.
 
+## Prepare immutable inputs offline
+
+`dflash2bench prepare` authenticates the complete ordered GGUF shard set before
+reading its embedded tokenizer and using the same in-kernel renderer as the
+benchmark target. It requires `fak.dflash2.trusted-target.v1`, containing
+`model_id`, ordered `shards`, an independently trusted
+`expected_shard_set_sha256`, explicit `expected_renderer_id`, and the absolute
+future `sidecar_path`. `expected_tokenizer_id` may be omitted: after every GGUF
+byte matches the trusted size and raw SHA-256 declarations, preparation derives
+the embedded operational tokenizer identity and emits it. If supplied, it must
+match exactly. The independent trust root remains the pinned shard declaration;
+the command never creates trust by hashing arbitrary observed files.
+
+The `fak.dflash2.prompt-request.v1` input contains a versioned `prompt_id`, the
+same `model_id` and `renderer_id`, `messages`, optional `tools`, and
+`max_output_tokens`. Unknown fields and renderer drift refuse. Example:
+
+```sh
+dflash2bench prepare \
+  --target-declaration /absolute/trusted-target-declaration.json \
+  --prompt-request /absolute/versioned-prompt-request.json \
+  --target-spec-out /absolute/prepared-target-spec.json \
+  --prompt-ids-out /absolute/prepared-prompt-ids.json \
+  --receipt-out /absolute/preparation-receipt.json
+```
+
+All paths in the target declaration must remain immutable through preparation
+and the later benchmark run. Output files are created new and never overwrite an
+existing path. The source-bound `fak.dflash2.preparation.v1` receipt hashes both
+input files and both emitted benchmark inputs, and records the actual tokenizer,
+renderer, model/config, and clean source revision identities.
+
+`PREPARED` means input preparation only. This command does not open or authenticate
+the DFlash2 sidecar, initialize Vulkan, use a GPU, run inference, or provide
+physical evidence. The admitted hardware controller must separately authenticate
+the pinned sidecar and preserve the prepared files before execution.
+
 ## Build and run
 
 After building the existing Vulkan shim/shaders as documented, use the same
