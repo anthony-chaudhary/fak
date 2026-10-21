@@ -248,7 +248,9 @@ type File struct {
 // WeightSource binds a parsed File to the readers that hold its tensor bytes, routing
 // each tensor to the shard file that actually contains it (single-file or split
 // checkpoint) and owning the open shard files so Close releases them all.
+// A WeightSource must not be copied after first use.
 type WeightSource struct {
+	readLife weightSourceReadLifetime
 	// Set only after every retained shard matches the trusted manifest.
 	authenticatedArtifact *model.AuthenticatedArtifactIdentity
 	File                  *File

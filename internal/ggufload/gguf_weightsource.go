@@ -1,11 +1,13 @@
 package ggufload
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -229,18 +231,94 @@ func NewWeightSource(f *File, r io.ReaderAt, size int64) (*WeightSource, error) 
 	return &WeightSource{File: f, r: r, size: size, byName: byName}, nil
 }
 
-// Close closes every shard reader the source opened, returning the first close error.
+// weightSourceReadLifetime is zero-value ready, including for literal fixtures.
+// Borrowers need only mu; Close serializes callbacks with closeMu, never mu.
+// Source construction and metadata mutation must finish before publication.
+type weightSourceReadLifetime struct {
+	mu           sync.Mutex
+	borrowers    uint64
+	closing      bool
+	closingCh    chan struct{}
+	drained      chan struct{}
+	closeMu      sync.Mutex
+	closeStarted bool
+	closeDone    bool
+}
+
+var errWeightSourceCloseIncomplete = errors.New("gguf: source retirement incomplete after abnormal closer termination")
+
+// holdSourceReads retains the actual shard owner before an opted-in borrowed
+// operation starts. Release is idempotent and must follow joined completion of
+// every operation using this borrow. The notification stops later issue, not an
+// in-flight ReadAt. No model hold or arbitrary attachment implies this lease.
+func (s *WeightSource) holdSourceReads() (release func(), closing <-chan struct{}, ok bool) {
+	life := &s.readLife
+	life.mu.Lock()
+	defer life.mu.Unlock()
+	if life.closing || life.borrowers == ^uint64(0) {
+		return nil, nil, false
+	}
+	if life.closingCh == nil {
+		life.closingCh = make(chan struct{})
+	}
+	life.borrowers++
+	released := false
+	return func() {
+		life.mu.Lock()
+		defer life.mu.Unlock()
+		if released {
+			return
+		}
+		released = true
+		life.borrowers--
+		if life.closing && life.borrowers == 0 && life.drained != nil {
+			close(life.drained)
+			life.drained = nil
+		}
+	}, life.closingCh, true
+}
+
+// Close closes every shard reader in order, returning the first close error.
+// It first rejects new retained reads and waits for existing borrowers to join
+// and release. A noninterruptible ReaderAt can make this wait indefinite. Never
+// call Close while retaining your own borrow, or reenter Close from a shard's
+// Close callback. Neither operation can make progress. Callers without borrows
+// retain synchronous close ordering; no retirement goroutine is introduced.
 func (s *WeightSource) Close() error {
-	if len(s.closers) == 0 {
+	life := &s.readLife
+	life.closeMu.Lock()
+	defer life.closeMu.Unlock()
+	if life.closeStarted {
+		if !life.closeDone {
+			return errWeightSourceCloseIncomplete
+		}
 		return nil
 	}
+	life.mu.Lock()
+	life.closing = true
+	if life.closingCh != nil {
+		close(life.closingCh)
+	}
+	if life.borrowers != 0 {
+		life.drained = make(chan struct{})
+	}
+	drained := life.drained
+	life.mu.Unlock()
+	if drained != nil {
+		<-drained
+	}
+	// Claim ownership before callbacks. A panic or Goexit propagates unchanged,
+	// but a later Close must not replay a callback whose outcome is uncertain.
+	closers := s.closers
+	s.closers = nil
+	life.closeStarted = true
 	var firstErr error
-	for _, c := range s.closers {
+	for _, c := range closers {
 		if err := c.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	s.closers = nil
+	life.closeDone = true
 	return firstErr
 }
 
