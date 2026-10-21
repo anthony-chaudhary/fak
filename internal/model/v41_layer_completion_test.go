@@ -28,7 +28,13 @@ func TestV41LayerCohortPreservesIncompleteUnwind(t *testing.T) {
 					receipt := &v41StepCohortReceipt{faultLane: -1}
 					prepared, scalarCalls, finishCalls := 0, 0, 0
 					for i := range lanes {
-						lanes[i].session = &Session{M: m, Backend: backend, backendExecutionScope: scope}
+						s := &Session{M: m, Backend: backend, backendExecutionScope: scope}
+						// Without a routed callback the cohort takes its early fallback
+						// and never reaches the grouped prepare this fixture pins.
+						s.v41Forward = &v41ForwardState{callbackOwner: s, routedExpert: func(int, string, []float32, float32) ([]float32, v41RoutedExpertOutcome, error) {
+							return nil, v41RoutedExpertDeclined, nil
+						}}
+						lanes[i].session = s
 						txs[i] = &v41StepTransaction{layers: 1, layer: func(layer int) (*v41LayerStepWork, error) {
 							prepared++
 							return &v41LayerStepWork{layer: layer, full: true, input: []float32{0}, picks: []routePick{{expert: 0, weight: 1}}, scalar: func() ([]float32, error) {
