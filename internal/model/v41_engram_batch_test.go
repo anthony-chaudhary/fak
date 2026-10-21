@@ -317,7 +317,7 @@ func TestV41EngramBatchAttachedSession(t *testing.T) {
 		before := make([]int, len(observed))
 		for layer, src := range observed {
 			before[layer] = len(src.reads)
-			src.gather, src.prepared = false, false
+			src.gather, src.owned, src.prepared = false, false, false
 		}
 		var got []float32
 		if index == 1 {
@@ -360,9 +360,9 @@ func TestV41EngramBatchAttachedSession(t *testing.T) {
 }
 
 type v41EngramBatchObservedSource struct {
-	src              V41EngramRowSource
-	reads            []v41EngramBatchRead
-	gather, prepared bool
+	src                     V41EngramRowSource
+	reads                   []v41EngramBatchRead
+	gather, owned, prepared bool
 }
 
 func (s *v41EngramBatchObservedSource) RowBytes() int { return s.src.RowBytes() }
@@ -373,7 +373,8 @@ func (s *v41EngramBatchObservedSource) ReadRows(start, count int, dst []byte) (i
 	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs[:])])
 	for {
 		frame, more := frames.Next()
-		s.gather = s.gather || strings.HasSuffix(frame.Function, ".GatherV41EngramRows")
+		s.owned = s.owned || strings.HasSuffix(frame.Function, ".v41EngramGatherRows")
+		s.gather = s.gather || s.owned || strings.HasSuffix(frame.Function, ".GatherV41EngramRows")
 		s.prepared = s.prepared || strings.HasSuffix(frame.Function, ".v41EngramInjectPrepared")
 		if !more {
 			break

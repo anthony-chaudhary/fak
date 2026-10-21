@@ -458,9 +458,9 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 					ErrV41NativeUnsupported, t, len(x[t]), H))
 		}
 	}
-	gathered, err := GatherV41EngramRows([]*V41EngramRowCache{stage.caches[cacheIdx]}, layerRows, cols)
+	gathered, err := m.v41EngramGatherRows(l, positions, layerRows, eps, geometry)
 	if err != nil {
-		return gatheredRows, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: %w", ErrV41NativeUnsupported, err))
+		return gatheredRows, err
 	}
 
 	gatheredRows = len(layerRows)
@@ -492,7 +492,7 @@ func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]floa
 		}
 	}
 	for t := range positions {
-		if err := v41EngramDecodePosition(l, stage, cacheIdx, gathered, t, cols, dim, rowVec); err != nil {
+		if err := v41EngramDecodePosition(l, stage, cacheIdx, gathered.rows, t, cols, dim, rowVec); err != nil {
 			return gatheredRows, err
 		}
 		// Project the COLS*DIM concatenation through engram_kv.weight
