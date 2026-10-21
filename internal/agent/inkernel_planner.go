@@ -188,6 +188,9 @@ type InKernelPlanner struct {
 	pressureTrimMu sync.Mutex
 	pressureTrim   map[requestPressureTrimKey]*requestPressureTrimStats
 
+	deviceBudgetMu      sync.Mutex
+	deviceReservedBytes int64
+
 	// hostBudget is the armed host-session memory ceiling (#13267, inkernel_host_budget.go):
 	// nil keeps the historical unbounded host path; SetHostMemoryBudget arms it.
 	hostBudgetMu sync.Mutex
@@ -2198,9 +2201,11 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				defer p.concurrencyProfile.forwardExit(phase)
 			}
 			if coalesced {
-				if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+				releaseDeviceMemory, err := p.admitCoalescedDeviceMemory(len(ids), maxNew)
+				if err != nil {
 					return nil, err
 				}
+				defer releaseDeviceMemory()
 			}
 			// #13267: the host-session (Metal) seam has no compute.Backend for refuseOversizeRequest
 			// to ask, so an armed host ceiling prices it here, before any session or clone exists.

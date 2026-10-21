@@ -3,10 +3,135 @@ package agent
 import (
 	"errors"
 	"log"
+	"math"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+const inKernelCoalescedDeviceReservationSite = "coalesced-device-reservation"
+
+func (p *InKernelPlanner) admitCoalescedDeviceMemory(promptTokens, maxNew int) (func(), error) {
+	noop := func() {}
+	if p == nil || p.backend == nil || p.m == nil {
+		return noop, nil
+	}
+	plan, extrasErr := p.requestMemoryPlanWithExtras(promptTokens, maxNew, p.requestMTPHistoryEligible(maxNew))
+	if extrasErr != nil {
+		return noop, &InKernelCapacityError{
+			Class:  compute.MemoryUnknown,
+			Scope:  compute.MemoryScopeDevice,
+			Site:   inKernelRuntimeExtrasUnknownSite,
+			Detail: extrasErr.Error(),
+			Cause:  extrasErr,
+		}
+	}
+	if len(plan) == 0 {
+		return noop, nil
+	}
+
+	p.deviceBudgetMu.Lock()
+	defer p.deviceBudgetMu.Unlock()
+	p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
+
+	deviceCapacityKnown := false
+	check := func() (compute.MemoryPlan, error) {
+		total, free, known := compute.DeviceMemoryInfo(p.backend)
+		deviceCapacityKnown = known && total > 0 && free >= 0
+		fitPlan := plan
+		if p.deviceReservedBytes > 0 {
+			want := plan.DeviceTotal()
+			if want > math.MaxInt64-p.deviceReservedBytes {
+				return fitPlan, &InKernelCapacityError{
+					Want:  want,
+					Avail: 0,
+					Class: primaryDemandClass(plan, compute.MemoryScopeDevice),
+					Scope: compute.MemoryScopeDevice,
+					Site:  inKernelCoalescedDeviceReservationSite,
+				}
+			}
+			fitPlan = append(compute.MemoryPlan(nil), plan...)
+			fitPlan = append(fitPlan, compute.MemoryDemand{
+				Class:  compute.MemoryUnknown,
+				Scope:  compute.MemoryScopeDevice,
+				Bytes:  p.deviceReservedBytes,
+				Detail: "coalesced-inflight-reservation",
+			})
+		}
+		// The fixed snapshot retains the original margin: request + held must fit
+		// inside headroom(free), rather than applying headroom after subtracting held.
+		// A live probe may already reflect an admitted lane's allocation, so counting
+		// its held reservation too is conservative; this is not a global allocator.
+		return fitPlan, compute.RefuseMemoryPlanIfTooBigForReportedDevice(
+			p.backend, fitPlan, total, free, known, inKernelRequestDeviceHeadroom,
+		)
+	}
+
+	fitPlan, err := check()
+	if err != nil {
+		var fe *compute.FitError
+		if !errors.As(err, &fe) {
+			return noop, err
+		}
+		if p.maybeTrimRequestPressure(fitPlan, "capacity_precheck") {
+			p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
+			retryPlan, retryErr := check()
+			if retryErr == nil {
+				p.recordRequestPressureTrimResolved(retryPlan, "capacity_precheck")
+			} else if errors.As(retryErr, &fe) {
+				return noop, p.coalescedDeviceCapacityError(fe, plan)
+			} else {
+				return noop, retryErr
+			}
+		} else {
+			return noop, p.coalescedDeviceCapacityError(fe, plan)
+		}
+	} else if p.maybeTrimRequestPressure(fitPlan, "low_margin") {
+		p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
+	}
+	if !deviceCapacityKnown {
+		return noop, nil
+	}
+
+	want := plan.DeviceTotal()
+	if want <= 0 {
+		return noop, nil
+	}
+	if p.deviceReservedBytes < 0 || want > math.MaxInt64-p.deviceReservedBytes {
+		return noop, &InKernelCapacityError{
+			Want:  want,
+			Avail: 0,
+			Class: primaryDemandClass(plan, compute.MemoryScopeDevice),
+			Scope: compute.MemoryScopeDevice,
+			Site:  "capacity-precheck",
+		}
+	}
+	p.deviceReservedBytes += want
+	released := false
+	return func() {
+		p.deviceBudgetMu.Lock()
+		defer p.deviceBudgetMu.Unlock()
+		if released {
+			return
+		}
+		released = true
+		p.deviceReservedBytes -= want
+		if p.deviceReservedBytes < 0 {
+			p.deviceReservedBytes = 0
+		}
+	}, nil
+}
+
+func (p *InKernelPlanner) coalescedDeviceCapacityError(fe *compute.FitError, requestPlan compute.MemoryPlan) error {
+	err := p.capacityErrorFromFit(fe)
+	capacityErr, ok := err.(*InKernelCapacityError)
+	if !ok || capacityErr.Scope != compute.MemoryScopeDevice || p.deviceReservedBytes <= 0 {
+		return err
+	}
+	capacityErr.Class = primaryDemandClass(requestPlan, compute.MemoryScopeDevice)
+	capacityErr.Site = inKernelCoalescedDeviceReservationSite
+	return capacityErr
+}
 
 func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error {
 	if p == nil || p.backend == nil || p.m == nil {
