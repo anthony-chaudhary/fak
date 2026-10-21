@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"hash"
 	"log"
+	randv2 "math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -73,6 +74,11 @@ type InKernelPlanner struct {
 	maxNew        int
 	temp          float64
 	seed          int64
+	// seedExplicit records an operator-set FAK_INKERNEL_SEED. Seedless sampled
+	// requests then take successive streams derived from seed, so a fresh planner
+	// replays a run; otherwise each one draws fresh entropy.
+	seedExplicit bool
+	seedRequests atomic.Uint64
 	// decodeTraceNow is an injectable monotonic clock used only by explicitly
 	// traced requests. nil selects time.Now; the default path never reads it.
 	decodeTraceNow func() time.Time
@@ -2021,6 +2027,28 @@ func (p *InKernelPlanner) ValidateSamplingSeed(seed *int64) error {
 	return nil
 }
 
+// nextSeedlessSampleSeed gives one seedless sampled request its own RNG stream.
+// Adapted from DeepInfer SamplingParams._make_seed (Apache-2.0, deepseek-ai/DeepInfer deepinfer/sampling_params.py at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
+func (p *InKernelPlanner) nextSeedlessSampleSeed() int64 {
+	if !p.seedExplicit {
+		return int64(randv2.Uint64())
+	}
+	n := p.seedRequests.Add(1) - 1
+	return int64(model.SplitMix64(uint64(p.seed) + n*model.SplitMixConstant))
+}
+
+// requestSampleSeed seeds one decode's planner RNG. A greedy or request-keyed
+// decode never draws from it, so only a seedless sampled decode consumes a stream.
+func (p *InKernelPlanner) requestSampleSeed(ctx context.Context, temp float64) int64 {
+	if seed, ok := nativeSeedlessSampleSeedFromContext(ctx); ok {
+		return seed
+	}
+	if _, keyed := nativeTargetSampleSeedFromContext(ctx); keyed || temp <= 0 {
+		return p.seed
+	}
+	return p.nextSeedlessSampleSeed()
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
@@ -2122,6 +2150,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 		if err := p.validateDFlash2Request(sp, temp, freqPenalty, presPenalty); err != nil {
 			return nil, err
+		}
+		if sp.Seed == nil && temp > 0 {
+			// Resolved once per request so an OOM retry replays the same stream.
+			ctx = withNativeSeedlessSampleSeed(ctx, p.nextSeedlessSampleSeed())
 		}
 		prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 		if err != nil {

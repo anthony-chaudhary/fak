@@ -33,6 +33,17 @@ func nativeTargetSampleSeedFromContext(ctx context.Context) (uint64, bool) {
 	return seed, ok
 }
 
+type nativeSeedlessSampleSeedContextKey struct{}
+
+func withNativeSeedlessSampleSeed(ctx context.Context, seed int64) context.Context {
+	return context.WithValue(ctx, nativeSeedlessSampleSeedContextKey{}, seed)
+}
+
+func nativeSeedlessSampleSeedFromContext(ctx context.Context) (int64, bool) {
+	seed, ok := ctx.Value(nativeSeedlessSampleSeedContextKey{}).(int64)
+	return seed, ok
+}
+
 // WithSeed sets a request-local sampling seed; nil leaves the existing option unchanged.
 func WithSeed(seed *int64) SampleOpt {
 	return func(sp *SampleParams) {

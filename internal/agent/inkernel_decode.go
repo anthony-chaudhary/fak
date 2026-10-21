@@ -683,7 +683,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// difference between the two drivers, and model.StepBatchActive is bit-for-bit identical to
 	// serial Session.Step per lane, so an unset FAK_INKERNEL_BATCH decodes byte-identically to
 	// the pre-seam loop (the #401 wiring seam; the batched glm_moe_dsa GEMM is a separate lever).
-	rng := rand.New(rand.NewSource(p.seed))
+	rng := rand.New(rand.NewSource(p.requestSampleSeed(ctx, temp)))
 	targetSampleKey, targetSampleKeyed := nativeTargetSampleSeedFromContext(ctx)
 	// counts is the per-token generation histogram this turn's frequency/presence
 	// penalty is computed from (#1705): counts[t] is how many times token t has
