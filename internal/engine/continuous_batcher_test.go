@@ -2,8 +2,13 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // TestContinuousBatcher_BasicScheduling verifies submission, iteration-level continuous batching,
@@ -597,6 +602,235 @@ func TestContinuousBatcher_ClosePreservesBufferedToken(t *testing.T) {
 
 	if _, open := <-slot.Tokens(); open {
 		t.Fatal("tokenCh still open after Close(); Close() failed to close the channel")
+	}
+}
+
+func TestContinuousBatcher_CloseTerminatesOwnedWork(t *testing.T) {
+	cfg := DefaultContinuousBatcherConfig()
+	cfg.MaxSlots = 3
+	cfg.PrefillBudget = 1
+
+	cb, err := NewContinuousBatcher(cfg)
+	if err != nil {
+		t.Fatalf("NewContinuousBatcher failed: %v", err)
+	}
+
+	requests := []*SubagentRequest{
+		{SessionID: "prefilling", PromptTokens: []int{1, 2, 3}, TargetTokens: 4, ChunkedPrefill: true},
+		{SessionID: "active", PromptTokens: []int{4}, TargetTokens: 4},
+		{SessionID: "yielded", PromptTokens: []int{5}, TargetTokens: 4},
+		{SessionID: "queued", PromptTokens: []int{6}, TargetTokens: 4},
+	}
+	for _, req := range requests {
+		if _, err := cb.Submit(req); err != nil {
+			t.Fatalf("Submit(%s) failed: %v", req.SessionID, err)
+		}
+	}
+	if err := cb.YieldSlot("yielded"); err != nil {
+		t.Fatalf("YieldSlot failed: %v", err)
+	}
+
+	wantStates := map[string]SlotState{
+		"prefilling": SlotStatePrefilling,
+		"active":     SlotStateActiveDecode,
+		"yielded":    SlotStateYieldedIO,
+	}
+	owned := make(map[string]*Slot, len(wantStates))
+	for id, want := range wantStates {
+		slot, ok := cb.GetSlot(id)
+		if !ok {
+			t.Fatalf("GetSlot(%s) failed", id)
+		}
+		if slot.State != want {
+			t.Fatalf("%s state = %s, want %s", id, slot.State, want)
+		}
+		owned[id] = slot
+	}
+	if got := cb.WaitingQueueLength(); got != 1 {
+		t.Fatalf("WaitingQueueLength before close = %d, want 1", got)
+	}
+
+	if err := cb.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	if got := cb.WaitingQueueLength(); got != 0 {
+		t.Fatalf("WaitingQueueLength after close = %d, want 0", got)
+	}
+	if got := cb.EmptySlotCount(); got != cfg.MaxSlots {
+		t.Fatalf("EmptySlotCount after close = %d, want %d", got, cfg.MaxSlots)
+	}
+	if _, ok := cb.GetSlot("queued"); ok {
+		t.Fatal("queued request was promoted after close")
+	}
+	for id, slot := range owned {
+		if slot.State != SlotStateFinished {
+			t.Errorf("%s state after close = %s, want %s", id, slot.State, SlotStateFinished)
+		}
+		if !errors.Is(slot.Err(), ErrBatcherClosed) {
+			t.Errorf("%s error after close = %v, want ErrBatcherClosed", id, slot.Err())
+		}
+		select {
+		case <-slot.Done():
+		default:
+			t.Errorf("%s Done still open after close", id)
+		}
+		if _, open := <-slot.Tokens(); open {
+			t.Errorf("%s Tokens still open after close", id)
+		}
+		got, ok := cb.GetSlot(id)
+		if !ok || got != slot {
+			t.Errorf("GetSlot(%s) after close = (%p, %v), want completed slot %p", id, got, ok, slot)
+		}
+	}
+
+	if err := cb.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+	if got := cb.WaitingQueueLength(); got != 0 {
+		t.Fatalf("WaitingQueueLength after second close = %d, want 0", got)
+	}
+	if _, err := cb.Submit(&SubagentRequest{SessionID: "late", TargetTokens: 1}); !errors.Is(err, ErrBatcherClosed) {
+		t.Fatalf("Submit after close = %v, want ErrBatcherClosed", err)
+	}
+}
+
+func TestContinuousBatcher_ModelSessionCleanup(t *testing.T) {
+	newOwned := func(t *testing.T) (*ContinuousBatcher, *Slot, *atomic.Int32) {
+		t.Helper()
+		cfg := DefaultContinuousBatcherConfig()
+		cfg.MaxSlots = 1
+		cfg.Model = model.NewSynthetic(wireModelConfig())
+		cb, err := NewContinuousBatcher(cfg)
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher failed: %v", err)
+		}
+		if _, err := cb.Submit(&SubagentRequest{SessionID: "owned", PromptTokens: []int{1}, TargetTokens: 1}); err != nil {
+			t.Fatalf("Submit failed: %v", err)
+		}
+		slot, ok := cb.GetSlot("owned")
+		if !ok || slot.sess == nil {
+			t.Fatal("model-backed slot has no owned session")
+		}
+		var releases atomic.Int32
+		slot.sess.SetHostPathBypass("batcher-cleanup-test", func() { releases.Add(1) })
+		return cb, slot, &releases
+	}
+
+	for _, tc := range []struct {
+		name   string
+		retire func(*ContinuousBatcher) error
+	}{
+		{name: "normal", retire: func(cb *ContinuousBatcher) error {
+			_, err := cb.Step(context.Background())
+			return err
+		}},
+		{name: "cancel", retire: func(cb *ContinuousBatcher) error { return cb.Cancel("owned") }},
+		{name: "close", retire: func(cb *ContinuousBatcher) error { return cb.Close() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cb, slot, releases := newOwned(t)
+			if err := tc.retire(cb); err != nil {
+				t.Fatalf("retire failed: %v", err)
+			}
+			if got := releases.Load(); got != 1 {
+				t.Fatalf("session release count = %d, want 1", got)
+			}
+			if slot.sess != nil {
+				t.Fatal("terminal slot retains model session")
+			}
+			if err := cb.Close(); err != nil {
+				t.Fatalf("Close after retirement failed: %v", err)
+			}
+			if err := cb.Close(); err != nil {
+				t.Fatalf("repeated Close failed: %v", err)
+			}
+			if got := releases.Load(); got != 1 {
+				t.Fatalf("session release count after repeated Close = %d, want 1", got)
+			}
+		})
+	}
+
+	t.Run("already-completed", func(t *testing.T) {
+		cb, err := NewContinuousBatcher(ContinuousBatcherConfig{MaxSlots: 1})
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher failed: %v", err)
+		}
+		sess := model.NewSynthetic(wireModelConfig()).NewSession()
+		var releases atomic.Int32
+		sess.SetHostPathBypass("batcher-cleanup-test", func() { releases.Add(1) })
+		slot := &Slot{SessionID: "completed", State: SlotStateFinished, sess: sess}
+		cb.completedMap[slot.SessionID] = slot
+
+		if err := cb.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+		if got := releases.Load(); got != 1 {
+			t.Fatalf("completed session release count = %d, want 1", got)
+		}
+		if slot.sess != nil {
+			t.Fatal("completed slot retains model session")
+		}
+	})
+}
+
+func TestContinuousBatcher_CloseCancelRace(t *testing.T) {
+	mdl := model.NewSynthetic(wireModelConfig())
+	for i := 0; i < 100; i++ {
+		cb, err := NewContinuousBatcher(ContinuousBatcherConfig{MaxSlots: 1, Model: mdl})
+		if err != nil {
+			t.Fatalf("iteration %d: NewContinuousBatcher failed: %v", i, err)
+		}
+		if _, err := cb.Submit(&SubagentRequest{SessionID: "race", TargetTokens: 4}); err != nil {
+			t.Fatalf("iteration %d: Submit failed: %v", i, err)
+		}
+		slot, ok := cb.GetSlot("race")
+		if !ok {
+			t.Fatalf("iteration %d: slot not found", i)
+		}
+		if slot.sess == nil {
+			t.Fatalf("iteration %d: model-backed slot has no session", i)
+		}
+		var releases atomic.Int32
+		slot.sess.SetHostPathBypass("batcher-race-test", func() { releases.Add(1) })
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var cancelErr error
+		go func() {
+			defer wg.Done()
+			<-start
+			cancelErr = cb.Cancel("race")
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = cb.Close()
+		}()
+		close(start)
+		wg.Wait()
+
+		if cancelErr != nil && !errors.Is(cancelErr, ErrBatcherClosed) {
+			t.Fatalf("iteration %d: Cancel error = %v, want nil or ErrBatcherClosed", i, cancelErr)
+		}
+		select {
+		case <-slot.Done():
+		default:
+			t.Fatalf("iteration %d: Done still open", i)
+		}
+		if _, open := <-slot.Tokens(); open {
+			t.Fatalf("iteration %d: Tokens still open", i)
+		}
+		if got := cb.EmptySlotCount(); got != 1 {
+			t.Fatalf("iteration %d: EmptySlotCount = %d, want 1", i, got)
+		}
+		if got := releases.Load(); got != 1 {
+			t.Fatalf("iteration %d: session release count = %d, want 1", i, got)
+		}
+		if slot.sess != nil {
+			t.Fatalf("iteration %d: terminal slot retains model session", i)
+		}
 	}
 }
 

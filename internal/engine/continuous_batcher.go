@@ -277,12 +277,22 @@ func (s *Slot) reset() {
 	s.PrefillPos = 0
 	s.PrefixHits = 0
 	s.PrefixMatchedTokens = 0
-	s.sess = nil
+	s.closeSessionLocked()
 	s.tokenCh = nil
 	s.doneCh = nil
 	s.err = nil
 	s.AdmittedAt = time.Time{}
 	s.CompletedAt = time.Time{}
+}
+
+// closeSessionLocked releases the slot's model-session ownership once and
+// detaches it from completed slot metadata. Caller MUST hold s.mu.
+func (s *Slot) closeSessionLocked() {
+	sess := s.sess
+	s.sess = nil
+	if sess != nil {
+		sess.Close()
+	}
 }
 
 // ContinuousBatcherConfig configures continuous batching capacity and hardware parameters.
@@ -1047,6 +1057,7 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 			slot.CompletedAt = time.Now()
 			close(slot.doneCh)
 			close(slot.tokenCh)
+			slot.closeSessionLocked()
 			newlyFinished = append(newlyFinished, slot)
 		}
 		slot.mu.Unlock()
@@ -1359,6 +1370,7 @@ func (cb *ContinuousBatcher) Cancel(sessionID string) error {
 		close(slot.doneCh)
 	}
 	close(slot.tokenCh)
+	slot.closeSessionLocked()
 	slot.mu.Unlock()
 
 	cb.completedMap[sessionID] = slot
@@ -1420,6 +1432,11 @@ func (cb *ContinuousBatcher) currentKVCacheBytesLocked() int64 {
 }
 
 func (cb *ContinuousBatcher) tryPromoteWaitingLocked() []string {
+	if cb.closed {
+		cb.waitingQueue = nil
+		return nil
+	}
+
 	var promoted []string
 	for len(cb.waitingQueue) > 0 {
 		emptyIdx := -1
@@ -1455,7 +1472,7 @@ func (cb *ContinuousBatcher) WaitingQueue() []*SubagentRequest {
 	return res
 }
 
-// Close closes the batcher and marks remaining active sessions finished.
+// Close closes the batcher and releases all scheduler-owned work.
 func (cb *ContinuousBatcher) Close() error {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -1464,18 +1481,34 @@ func (cb *ContinuousBatcher) Close() error {
 		return nil
 	}
 	cb.closed = true
+	cb.waitingQueue = nil
 
-	for _, slot := range cb.slots {
+	for i, slot := range cb.slots {
 		slot.mu.Lock()
-		if slot.State == SlotStateActiveDecode || slot.State == SlotStateYieldedIO {
+		if slot.State != SlotStateEmpty {
+			sessionID := slot.SessionID
+			slot.State = SlotStateFinished
 			slot.err = ErrBatcherClosed
+			slot.CompletedAt = time.Now()
 			select {
 			case <-slot.doneCh:
 			default:
 				close(slot.doneCh)
+				close(slot.tokenCh)
 			}
-			close(slot.tokenCh)
+			slot.closeSessionLocked()
+			slot.mu.Unlock()
+
+			cb.completedMap[sessionID] = slot
+			delete(cb.sessionMap, sessionID)
+			cb.slots[i] = &Slot{Index: i, State: SlotStateEmpty}
+			continue
 		}
+		slot.mu.Unlock()
+	}
+	for _, slot := range cb.completedMap {
+		slot.mu.Lock()
+		slot.closeSessionLocked()
 		slot.mu.Unlock()
 	}
 

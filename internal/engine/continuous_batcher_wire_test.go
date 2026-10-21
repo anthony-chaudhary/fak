@@ -14,6 +14,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -711,8 +712,13 @@ func TestContinuousBatcher_WireModelChunkedPrefill(t *testing.T) {
 // loop) will never run, leaving Result() to block forever. A pre-close admitted
 // request must also still terminate.
 func TestContinuousBatcher_WireEngineAdmitAfterClose(t *testing.T) {
-	// Uses its own engine instance (not the process-wide DefaultBatchingEngine).
-	eng, err := NewBatchingEngine()
+	// A long step interval keeps the first chunked request resident while the
+	// second remains queued, so Close must flush both ownership classes.
+	cfg := DefaultBatchingEngineConfig()
+	cfg.Batcher.MaxSlots = 1
+	cfg.Batcher.PrefillBudget = 1
+	cfg.StepInterval = time.Hour
+	eng, err := NewBatchingEngine(cfg)
 	if err != nil {
 		t.Fatalf("NewBatchingEngine failed: %v", err)
 	}
@@ -720,11 +726,13 @@ func TestContinuousBatcher_WireEngineAdmitAfterClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Admit one request before close, then close. It must still terminate.
+	// Admit one resident request and one queued request before close. Both handles
+	// must terminate even though the scheduler cannot promote the queued request.
 	preArgs, err := json.Marshal(map[string]any{
-		"session_id":    "before-close",
-		"prompt_tokens": []int{1, 2, 3},
-		"target_tokens": 3,
+		"session_id":      "before-close",
+		"prompt_tokens":   []int{1, 2, 3},
+		"target_tokens":   100,
+		"chunked_prefill": true,
 	})
 	if err != nil {
 		t.Fatalf("marshal pre-close args failed: %v", err)
@@ -733,9 +741,33 @@ func TestContinuousBatcher_WireEngineAdmitAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Admit(before close) failed: %v", err)
 	}
+	queuedArgs, err := json.Marshal(map[string]any{
+		"session_id":    "queued-before-close",
+		"prompt_tokens": []int{4, 5, 6},
+		"target_tokens": 100,
+	})
+	if err != nil {
+		t.Fatalf("marshal queued args failed: %v", err)
+	}
+	queued, err := eng.Admit(ctx, &abi.ToolCall{Tool: "t", Args: abi.Ref{Kind: abi.RefInline, Inline: queuedArgs}})
+	if err != nil {
+		t.Fatalf("Admit(queued before close) failed: %v", err)
+	}
+	if got := eng.cb.WaitingQueueLength(); got != 1 {
+		t.Fatalf("waiting queue before Close = %d, want 1", got)
+	}
 
 	if err := eng.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
+	}
+	if err := eng.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+	if got := eng.cb.WaitingQueueLength(); got != 0 {
+		t.Fatalf("waiting queue after Close = %d, want 0", got)
+	}
+	if got := eng.cb.EmptySlotCount(); got != cfg.Batcher.MaxSlots {
+		t.Fatalf("empty slots after Close = %d, want %d", got, cfg.Batcher.MaxSlots)
 	}
 
 	// Admit after close must fail fast with a non-nil error and must not hang.
@@ -759,16 +791,23 @@ func TestContinuousBatcher_WireEngineAdmitAfterClose(t *testing.T) {
 		t.Fatal("Admit after Close hung past the 5s deadline")
 	}
 
-	// The pre-close request must have terminated (result or error, but not hang).
-	resCh := make(chan struct{})
-	go func() {
-		_, _ = pre.Result()
-		close(resCh)
-	}()
-	select {
-	case <-resCh:
-	case <-ctx.Done():
-		t.Fatal("pre-close request Result() hung after Close")
+	for id, req := range map[string]abi.EngineRequest{
+		"resident": pre,
+		"queued":   queued,
+	} {
+		resCh := make(chan error, 1)
+		go func() {
+			_, resultErr := req.Result()
+			resCh <- resultErr
+		}()
+		select {
+		case resultErr := <-resCh:
+			if !errors.Is(resultErr, ErrBatcherClosed) {
+				t.Errorf("%s Result error = %v, want ErrBatcherClosed", id, resultErr)
+			}
+		case <-ctx.Done():
+			t.Fatalf("%s Result() hung after Close", id)
+		}
 	}
 }
 

@@ -231,14 +231,14 @@ func (e *BatchingEngine) run() {
 	idle := 0
 	for {
 		if e.ctx.Err() != nil {
-			e.finishAll(e.ctx.Err())
+			e.finishAll(ErrBatcherClosed)
 			return
 		}
 		if e.outstanding() == 0 {
 			select {
 			case <-e.wake:
 			case <-e.ctx.Done():
-				e.finishAll(e.ctx.Err())
+				e.finishAll(ErrBatcherClosed)
 				return
 			}
 			continue
@@ -248,7 +248,7 @@ func (e *BatchingEngine) run() {
 		res, err := e.cb.StepPhase(e.ctx)
 		if err != nil {
 			if e.ctx.Err() != nil {
-				e.finishAll(e.ctx.Err())
+				e.finishAll(ErrBatcherClosed)
 				return
 			}
 			if errors.Is(err, ErrBatcherClosed) {
@@ -272,7 +272,7 @@ func (e *BatchingEngine) run() {
 			case <-e.wake:
 				idle = 0
 			case <-e.ctx.Done():
-				e.finishAll(e.ctx.Err())
+				e.finishAll(ErrBatcherClosed)
 				return
 			}
 			continue
@@ -281,7 +281,7 @@ func (e *BatchingEngine) run() {
 		if e.cfg.StepInterval > 0 {
 			select {
 			case <-e.ctx.Done():
-				e.finishAll(e.ctx.Err())
+				e.finishAll(ErrBatcherClosed)
 				return
 			case <-time.After(e.cfg.StepInterval):
 			}
