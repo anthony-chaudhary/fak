@@ -116,13 +116,19 @@ integers; they are emitted in canonical decimal form, with `-0` normalized to
 `0` and duplicates removed. Fractions, exponents, overflow, `null`, mixed-type
 integer sets and constrained number values are rejected before inference.
 Unconstrained numbers use canonical JSON syntax without exponents. A property may
-also be an array whose `items` is one of those scalar schemas, with optional
-`minItems` and `maxItems` between 0 and 64; arrays are emitted as `[a,b]` with
-no whitespace. Nested arrays, object items, tuple `items`, `uniqueItems` and
-other array keywords are rejected, and tool schemas remain array-free. A
-property may also be a nested object with the same property rules, up to three
-object levels including the top. The 16-property and four-optional limits count
-every property at every level; an omitted optional object omits its members.
+also be an array whose `items` is one of those scalar schemas or a fixed-shape
+object, with optional `minItems` and `maxItems` between 0 and 64; arrays are
+emitted as `[a,b]` with no whitespace. Every member of an object item, at every
+level inside it, must be required, and an array inside an item may hold only
+scalars, so every item carries the same keys in canonical order, for example
+`{"rows":[{"kind":"a","ok":true},{"kind":"b","ok":false}]}`. Optional item
+members, arrays of objects inside an item, arrays of arrays, tuple `items`,
+`uniqueItems` and other array keywords are rejected, and tool schemas remain
+array-free. A property may also be a nested object with the same property rules,
+up to three object levels including the top; an object item sits one level below
+the object that holds its array. The 16-property and four-optional limits count
+every property at every level, including item members; an omitted optional
+object omits its members.
 Unknown constraint keywords, `additionalProperties:true`, union keywords, regex
 and EBNF are also rejected before inference. `strict` may be true
 or omitted. Native `json_object` is unsupported; upstream engine passthrough

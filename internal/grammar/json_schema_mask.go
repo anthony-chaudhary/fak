@@ -32,7 +32,8 @@ const (
 )
 
 // CompileJSONSchema compiles the supported response subset (scalars, scalar
-// arrays and nested objects) into a tokenizer-aware mask. Up to four optional
+// arrays, nested objects and arrays of fixed-shape objects) into a
+// tokenizer-aware mask. Up to four optional
 // properties across the tree expand into at most 16 canonical shapes;
 // unsupported keywords return ErrUnsupportedSchema.
 func CompileJSONSchema(schema []byte, dec TokenDecoder, opts CompileOptions) (*JSONSchemaMask, error) {

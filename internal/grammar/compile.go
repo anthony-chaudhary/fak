@@ -89,7 +89,8 @@ const (
 	fieldInt                          // -? (0 | [1-9][0-9]*)
 	fieldNumber                       // integer with optional .[0-9]+ fraction
 	fieldIntegerEnum                  // one of a bounded set of canonical int64 literals
-	fieldArray                        // response-only [item,...] of one scalar item kind
+	fieldArray                        // response-only [item,...] of one scalar or fixed-object item kind
+	fieldObject                       // response-only array item: one fixed-shape object
 )
 
 // compiledField is one required argument property in canonical (sorted) order.
@@ -99,9 +100,10 @@ type compiledField struct {
 	enum        []string       // fieldStringEnum: sorted, deduped variants
 	quotedEnum  [][]byte       // enum variants with their JSON quotes, prefix-free
 	integerEnum [][]byte       // fieldIntegerEnum: sorted, deduped canonical literals
-	item        *compiledField // fieldArray: the scalar item grammar
+	item        *compiledField // fieldArray: the item grammar
 	minItems    int            // fieldArray: inclusive lower bound
 	maxItems    int            // fieldArray: inclusive upper bound, -1 when unbounded
+	segs        []segment      // fieldObject: literal/value segments ending in '}'
 }
 
 // segment is one step of a tool's argument-region grammar: either a fixed
@@ -357,7 +359,7 @@ func scanValueField(f compiledField, rest []byte) valueScan {
 		return scanNumber(rest, true)
 	case fieldIntegerEnum:
 		return scanIntegerLiterals(rest, f.integerEnum)
-	case fieldArray:
+	case fieldArray, fieldObject:
 		// Arrays exist only in response schemas, which step cursors instead.
 		return valueScan{state: vDead}
 	default:
@@ -807,7 +809,8 @@ func normalizeResponseObject(tool, path string, top map[string]json.RawMessage, 
 		if raw, ok := prop["type"]; ok {
 			_ = json.Unmarshal(raw, &ty)
 		}
-		if ty == "object" {
+		switch ty {
+		case "object":
 			if depth >= maxJSONSchemaDepth {
 				return nil, unsupported(tool, path+name, "object nesting deeper than %d", maxJSONSchemaDepth)
 			}
@@ -816,7 +819,13 @@ func normalizeResponseObject(tool, path string, top map[string]json.RawMessage, 
 				return nil, err
 			}
 			p.object = child
-		} else {
+		case "array":
+			field, err := normalizeArrayField(tool, path+name, prop, depth, budget)
+			if err != nil {
+				return nil, err
+			}
+			p.field = &field
+		default:
 			field, err := normalizeResponseField(tool, path+name, prop)
 			if err != nil {
 				return nil, err
@@ -883,12 +892,6 @@ const (
 )
 
 func normalizeFieldMode(tool, name string, prop map[string]json.RawMessage, allowIntegerEnums bool) (compiledField, error) {
-	if allowIntegerEnums {
-		var ty string
-		if raw, ok := prop["type"]; ok && json.Unmarshal(raw, &ty) == nil && ty == "array" {
-			return normalizeArrayField(tool, name, prop)
-		}
-	}
 	for k := range prop {
 		switch k {
 		case "type", "enum", "const", "title", "description":
@@ -959,10 +962,11 @@ func normalizeFieldMode(tool, name string, prop map[string]json.RawMessage, allo
 	}
 }
 
-// normalizeArrayField admits a response-only array of one scalar item schema
-// with optional minItems/maxItems bounds of at most maxResponseArrayItems.
-// Nested arrays, object items and other array keywords are refused.
-func normalizeArrayField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
+// normalizeArrayField admits a response-only array whose items is one scalar
+// schema or one fixed-shape object, with optional minItems/maxItems bounds of
+// at most maxResponseArrayItems. depth is the enclosing object's level. Arrays
+// of arrays, tuple items and other array keywords are refused.
+func normalizeArrayField(tool, name string, prop map[string]json.RawMessage, depth int, budget *responseBudget) (compiledField, error) {
 	for k := range prop {
 		switch k {
 		case "type", "items", "minItems", "maxItems", "title", "description":
@@ -982,10 +986,16 @@ func normalizeArrayField(tool, name string, prop map[string]json.RawMessage) (co
 	if raw, ok := items["type"]; ok {
 		_ = json.Unmarshal(raw, &itemType)
 	}
-	if itemType == "array" || itemType == "object" {
+	var item compiledField
+	var err error
+	switch itemType {
+	case "array":
 		return compiledField{}, unsupported(tool, name, "array items of type %q", itemType)
+	case "object":
+		item, err = normalizeObjectItem(tool, name+"[]", items, depth, budget)
+	default:
+		item, err = normalizeResponseField(tool, name+"[]", items)
 	}
-	item, err := normalizeFieldMode(tool, name+"[]", items, true)
 	if err != nil {
 		return compiledField{}, err
 	}
@@ -1012,6 +1022,42 @@ func normalizeArrayField(tool, name string, prop map[string]json.RawMessage) (co
 		return compiledField{}, unsupported(tool, name, "minItems %d exceeds maxItems %d", minItems, maxItems)
 	}
 	return compiledField{name: name, kind: fieldArray, item: &item, minItems: minItems, maxItems: maxItems}, nil
+}
+
+// normalizeObjectItem lowers an array's object item into one segment list.
+// Every member at every level is required and any array inside holds only
+// scalars, so every item has the same shape and the cursor steps it with one
+// extra array frame instead of a stack.
+func normalizeObjectItem(tool, path string, items map[string]json.RawMessage, depth int, budget *responseBudget) (compiledField, error) {
+	if depth >= maxJSONSchemaDepth {
+		return compiledField{}, unsupported(tool, path, "object nesting deeper than %d", maxJSONSchemaDepth)
+	}
+	obj, err := normalizeResponseObject(tool, path+".", items, depth+1, budget)
+	if err != nil {
+		return compiledField{}, err
+	}
+	if err := requireFixedObject(tool, path+".", obj); err != nil {
+		return compiledField{}, err
+	}
+	var b responseShapeBuilder
+	b.object(obj)
+	return compiledField{name: path, kind: fieldObject, segs: append(b.segs, segment{lit: b.lit})}, nil
+}
+
+func requireFixedObject(tool, path string, o *responseObject) error {
+	for _, p := range o.props {
+		switch {
+		case p.optional >= 0:
+			return unsupported(tool, path+p.name, "optional property inside an array item")
+		case p.object != nil:
+			if err := requireFixedObject(tool, path+p.name+".", p.object); err != nil {
+				return err
+			}
+		case p.field.kind == fieldArray && p.field.item.kind == fieldObject:
+			return unsupported(tool, path+p.name, "array of objects inside an array item")
+		}
+	}
+	return nil
 }
 
 func normalizeIntegerEnum(tool, name string, prop map[string]json.RawMessage, isConst bool) (compiledField, error) {

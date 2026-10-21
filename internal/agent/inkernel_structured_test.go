@@ -442,6 +442,56 @@ func TestNativeStructuredNestedObjectCompleteAndStream(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=2000ms lane=default
+func TestNativeStructuredObjectArrayCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"rows":{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["a","b"]},"ok":{"type":"boolean"}},"required":["kind","ok"],"additionalProperties":false},"minItems":1,"maxItems":2}},"required":["rows"],"additionalProperties":false}}}`)
+	temperature := 0.9
+	messages := []Message{{Role: RoleUser, Content: "List one or two rows."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		var value struct {
+			Rows []struct {
+				Kind *string `json:"kind"`
+				OK   *bool   `json:"ok"`
+			} `json:"rows"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(completion.Message.Content))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("native object-array response is not the schema object: %q: %v", completion.Message.Content, err)
+		}
+		if completion.FinishReason != "stop" || len(value.Rows) < 1 || len(value.Rows) > 2 {
+			t.Fatalf("finish=%q content=%q, want 1..2 rows and a stop", completion.FinishReason, completion.Message.Content)
+		}
+		for _, row := range value.Rows {
+			if row.Kind == nil || row.OK == nil || (*row.Kind != "a" && *row.Kind != "b") {
+				t.Fatalf("row violates the item schema in %q", completion.Message.Content)
+			}
+		}
+	}
+	for seed := int64(1); seed <= 4; seed++ {
+		opts := []SampleOpt{WithResponseFormat(format), WithTemperature(&temperature), WithSeed(&seed), WithMaxTokens(128)}
+		buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, buffered)
+		var streamed strings.Builder
+		stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+			streamed.WriteString(piece)
+			return nil
+		}, messages, nil, append(opts, WithPerTokenStream(true))...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, stream)
+		if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+			t.Fatalf("seed %d: buffered %q, stream %q, streamed %q", seed, buffered.Message.Content, stream.Message.Content, streamed.String())
+		}
+	}
+}
+
 // fak-test:runtime fast est=50ms lane=default
 func TestNativeStructuredTextFormatPreservesOrdinaryOutput(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)

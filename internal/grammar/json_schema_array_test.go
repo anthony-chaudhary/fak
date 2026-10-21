@@ -161,7 +161,7 @@ func TestCompileJSONSchemaArrayRefusals(t *testing.T) {
 		`{"type":"array"}`,
 		`{"type":"array","items":[{"type":"string"}]}`,
 		`{"type":"array","items":{"type":"array","items":{"type":"string"}}}`,
-		`{"type":"array","items":{"type":"object","properties":{}}}`,
+		`{"type":"array","items":{"type":"object","properties":{"a":{"type":"string"}}}}`,
 		`{"type":"array","items":{"type":"string"},"uniqueItems":true}`,
 		`{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":2}`,
 		`{"type":"array","items":{"type":"string"},"maxItems":65}`,
