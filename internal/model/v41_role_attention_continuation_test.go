@@ -652,7 +652,12 @@ func TestV41RoleAttentionContinuationAllocations(t *testing.T) {
 						}
 					}
 				}
+				// AllocsPerRun counts process-wide mallocs, and a concurrent goroutine
+				// can only add to them, so the minimum of several samples is the arm's count.
 				allocs := testing.AllocsPerRun(10, run)
+				for range 4 {
+					allocs = min(allocs, testing.AllocsPerRun(10, run))
+				}
 				result := testing.Benchmark(func(b *testing.B) {
 					b.ReportAllocs()
 					for i := 0; i < b.N; i++ {
