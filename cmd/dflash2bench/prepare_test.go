@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
@@ -110,6 +112,17 @@ func TestPrepareDFlash2InputIsClosed(t *testing.T) {
 	var request preparePromptRequest
 	if _, err := readJSON(path, &request); err == nil {
 		t.Fatal("readJSON accepted an unknown prompt-request field")
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestPrepareDFlash2RefusesRegisteredDeviceBackend(t *testing.T) {
+	unregister := compute.RegisterDeviceWorkReader("test-device", func() compute.DeviceWork { return compute.DeviceWork{} })
+	t.Cleanup(unregister)
+	declaration, request, declarationRaw, requestRaw, _ := prepareFixture(t)
+	_, err := prepareDFlash2(t.Context(), declaration, request, declarationRaw, requestRaw, prepareSourceIdentity{Revision: strings.Repeat("a", 40)})
+	if !errors.Is(err, ErrPrepareDeviceBackendRegistered) {
+		t.Fatalf("prepareDFlash2 error = %v, want %v", err, ErrPrepareDeviceBackendRegistered)
 	}
 }
 

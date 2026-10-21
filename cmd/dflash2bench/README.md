@@ -85,10 +85,28 @@ existing path. The source-bound `fak.dflash2.preparation.v1` receipt hashes both
 input files and both emitted benchmark inputs, and records the actual tokenizer,
 renderer, model/config, and clean source revision identities.
 
-`PREPARED` means input preparation only. This command does not open or authenticate
-the DFlash2 sidecar, initialize Vulkan, use a GPU, run inference, or provide
-physical evidence. The admitted hardware controller must separately authenticate
-the pinned sidecar and preserve the prepared files before execution.
+`PREPARED` means input preparation only. The `prepare` subcommand does not request
+a compute backend, open or authenticate the DFlash2 sidecar, run inference, or
+provide physical evidence. Preparation refuses if a device backend is already
+registered, before it can emit `PREPARED`. A Vulkan-tagged executable can still
+initialize Vulkan during package initialization when `FAK_VULKAN_SPIRV` names a
+shader bundle or a `spirv` directory is adjacent to the resolved executable. For
+CPU-only offline preparation, copy the source-pinned executable by itself into a
+fresh directory with no adjacent `spirv` directory, unset `FAK_VULKAN_SPIRV`, and
+run that copy:
+
+```sh
+install -m 0500 "$build/dflash2bench" "$prep_dir/dflash2bench"
+env -u FAK_VULKAN_SPIRV "$prep_dir/dflash2bench" prepare \
+  --target-declaration /absolute/trusted-target-declaration.json \
+  --prompt-request /absolute/versioned-prompt-request.json \
+  --target-spec-out /absolute/prepared-target-spec.json \
+  --prompt-ids-out /absolute/prepared-prompt-ids.json \
+  --receipt-out /absolute/preparation-receipt.json
+```
+
+The admitted hardware controller must separately authenticate the pinned sidecar
+and preserve the prepared files before execution.
 
 ## Build and run
 

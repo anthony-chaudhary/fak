@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -26,6 +27,8 @@ const (
 	preparePromptSchema  = "fak.dflash2.prompt-request.v1"
 	prepareReceiptSchema = "fak.dflash2.preparation.v1"
 )
+
+var ErrPrepareDeviceBackendRegistered = errors.New("prepare: device backend already initialized")
 
 type prepareTargetDeclaration struct {
 	Schema                 string                   `json:"schema"`
@@ -145,6 +148,9 @@ func prepareDFlash2(ctx context.Context, declaration prepareTargetDeclaration, r
 	if ctx == nil {
 		return out, errors.New("prepare: context required")
 	}
+	if compute.DeviceBackendRegistered() {
+		return out, ErrPrepareDeviceBackendRegistered
+	}
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
@@ -226,6 +232,9 @@ func prepareDFlash2(ctx context.Context, declaration prepareTargetDeclaration, r
 		TokenizerIdentitySource: "authenticated_embedded_gguf", Scope: "input-preparation-only",
 		GPUUsed: false, SidecarAuthenticated: false, PhysicalEvidence: false,
 		TargetSpec: spec, Encoding: encoding,
+	}
+	if compute.DeviceBackendRegistered() {
+		return out, ErrPrepareDeviceBackendRegistered
 	}
 	receiptRaw, err := marshalPreparedJSON(receipt)
 	if err != nil {
