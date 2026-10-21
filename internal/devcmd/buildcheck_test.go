@@ -571,6 +571,9 @@ func TestRunBuildCheckCompileManifestFailsClosed(t *testing.T) {
 	manifest := filepath.Join(root, "unit.json")
 	writeBuildcheckFile(t, root, "unit.json", `{"schema":"fak.work-delivery/v1","id":"unit","axes":{"authoring":"recorded","compile_admission":"undeclared","verification":"unverified","integration":"unintegrated","release":"not_ready"},"artifacts":[{"path":"peer.go","kind":"go-source"}]}`)
 
+	runGitTest(t, root, "init", "-q")
+	runGitTest(t, root, "add", "--", ".")
+
 	oldWD, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -596,6 +599,9 @@ func TestRunBuildCheckCompileManifestExcludesRecordedSource(t *testing.T) {
 	writeBuildcheckFile(t, root, "recorded.go", "package main\nfunc broken( {\n")
 	manifest := filepath.Join(root, "unit.json")
 	writeBuildcheckFile(t, root, "unit.json", `{"schema":"fak.work-delivery/v1","id":"unit","axes":{"authoring":"recorded","compile_admission":"excluded","verification":"unverified","integration":"unintegrated","release":"not_ready"},"artifacts":[{"path":"recorded.go","kind":"go-source"}]}`)
+
+	runGitTest(t, root, "init", "-q")
+	runGitTest(t, root, "add", "--", ".")
 
 	oldWD, err := os.Getwd()
 	if err != nil {
@@ -633,6 +639,9 @@ func TestRunBuildCheckCompileManifestIncludesAdmittedSource(t *testing.T) {
 	writeBuildcheckFile(t, root, "admitted.go", "package main\nfunc broken( {\n")
 	manifest := filepath.Join(root, "unit.json")
 	writeBuildcheckFile(t, root, "unit.json", `{"schema":"fak.work-delivery/v1","id":"unit","axes":{"authoring":"recorded","compile_admission":"admitted","verification":"unverified","integration":"unintegrated","release":"not_ready"},"artifacts":[{"path":"admitted.go","kind":"go-source"}]}`)
+
+	runGitTest(t, root, "init", "-q")
+	runGitTest(t, root, "add", "--", ".")
 
 	oldWD, err := os.Getwd()
 	if err != nil {
