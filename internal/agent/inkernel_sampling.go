@@ -326,6 +326,96 @@ func (w *samplerWorkspace) nucleusTruncate(probs []float64, sum, topP float64) f
 	if len(probs) == 0 {
 		return 0
 	}
+	if newSum, ok := w.nucleusTruncatePrefix(probs, topP*sum); ok {
+		return newSum
+	}
+	return w.nucleusTruncateFull(probs, sum, topP)
+}
+
+// nucleusTruncatePrefix sorts only the tokens at or above a probability threshold
+// whose mass reaches target. Every other token is strictly less probable, so those
+// candidates are exactly the head of the full descending order and the cutoff walk
+// over them matches the full sort bit for bit. It declines (ok=false) when no
+// threshold isolates a small head or when the walk would continue past the head.
+// The threshold search adapts DeepInfer's sort-free top-p selection (Apache-2.0,
+// deepseek-ai/DeepInfer deepinfer/model_executor/layers/tilelang_ops/fused_sample.py
+// at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
+func (w *samplerWorkspace) nucleusTruncatePrefix(probs []float64, target float64) (float64, bool) {
+	var pmax float64
+	for _, p := range probs {
+		if p != p {
+			return 0, false
+		}
+		if p > pmax {
+			pmax = p
+		}
+	}
+	if pmax <= 0 {
+		return 0, false
+	}
+	threshold := 0.0
+	for scale := 1.0 / 16; scale >= 1.0/(1<<20); scale /= 16 {
+		t := pmax * scale
+		var mass float64
+		n := 0
+		for _, p := range probs {
+			if p >= t {
+				mass += p
+				n++
+			}
+		}
+		if 2*n > len(probs) {
+			return 0, false
+		}
+		if mass >= target {
+			threshold = t
+			break
+		}
+	}
+	if threshold == 0 {
+		return 0, false
+	}
+	order := w.orderBuf(len(probs))[:0]
+	for i, p := range probs {
+		if p >= threshold {
+			order = append(order, i)
+		}
+	}
+	w.sorter.probs = probs
+	w.sorter.idx = order
+	w.sorter.tieByIndex = true
+	sort.Sort(&w.sorter)
+	var cum float64
+	cutoff := -1
+	for rank, idx := range order {
+		if rank > 0 && cum >= target {
+			cutoff = rank
+			break
+		}
+		cum += probs[idx]
+	}
+	if cutoff < 0 {
+		if cum < target {
+			return 0, false
+		}
+		cutoff = len(order)
+	}
+	for _, idx := range order[cutoff:] {
+		probs[idx] = 0
+	}
+	for i, p := range probs {
+		if p < threshold {
+			probs[i] = 0
+		}
+	}
+	var newSum float64
+	for _, p := range probs {
+		newSum += p
+	}
+	return newSum, true
+}
+
+func (w *samplerWorkspace) nucleusTruncateFull(probs []float64, sum, topP float64) float64 {
 	order := w.orderBuf(len(probs))
 	for i := range order {
 		order[i] = i
