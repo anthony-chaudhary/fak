@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
 )
 
@@ -37,7 +38,10 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	if errors.Is(err, agent.ErrNativeStructuredNoToken) {
 		return http.StatusInternalServerError, "native_structured_decode_failed", "native structured decoding could not select a valid token"
 	}
-	if errors.Is(err, agent.ErrNonFiniteLogits) {
+	if errors.Is(err, model.ErrSamplingModeUnsupported) {
+		return http.StatusBadRequest, "sampling_mode_unsupported", "the native model route does not support this sampling parameter"
+	}
+	if errors.Is(err, agent.ErrNonFiniteLogits) || errors.Is(err, model.ErrSpeculativeNonFiniteLogits) {
 		return http.StatusInternalServerError, "native_sampler_nonfinite_logits", "the native model produced non-finite logits"
 	}
 	var deadlineErr *deadlineAdmissionError

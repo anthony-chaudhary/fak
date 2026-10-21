@@ -184,6 +184,16 @@ func sampleLogitsCoinWS(logits []float32, temp, topP float64, topK int, coin flo
 }
 
 func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
+	return sampleLogitsMinPCoreWS(logits, temp, topP, topK, 0, rng, coin, hasCoin, w)
+}
+
+// sampleLogitsMinPCoreWS is the sampler core with a min-p cutoff. A positive minP
+// drops every token whose temperature-scaled probability is below minP times the
+// most probable token's; top-k and then top-p truncate the survivors. That is
+// vLLM's order (temperature, the min-p logits processor, then top-k/top-p);
+// DeepInfer has no min_p. minP<=0 or NaN skips the stage, so the draw is
+// bit-identical to the path without it.
+func sampleLogitsMinPCoreWS(logits []float32, temp, topP float64, topK int, minP float64, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	nonFinite, finite := false, false
 	if temp <= 0 {
 		best, bi := float32(-math.MaxFloat32), 0
@@ -220,11 +230,56 @@ func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *ran
 		probs[i] = p
 		sum += p
 	}
+	if minP > 0 {
+		sum = minPTruncate(probs, sum, minP)
+	}
 	sum = w.applyCPUSamplingTruncation(probs, sum, topP, topK)
 	if !hasCoin {
 		coin = rng.Float64()
 	}
 	return sampleProbabilityRow(probs, sum, coin)
+}
+
+// minPTruncate zeroes, in place, every probability below minP times the row
+// maximum and returns the surviving mass. Comparing the unnormalized
+// temperature-scaled weights is the normalized rule p_i >= minP*p_max without a
+// division. The maximum always survives, even for minP > 1.
+func minPTruncate(probs []float64, sum, minP float64) float64 {
+	var pmax float64
+	for _, p := range probs {
+		if p > pmax {
+			pmax = p
+		}
+	}
+	threshold := min(minP*pmax, pmax)
+	if !(threshold > 0) {
+		return sum
+	}
+	var kept float64
+	for i, p := range probs {
+		if p < threshold {
+			probs[i] = 0
+			continue
+		}
+		kept += p
+	}
+	return kept
+}
+
+// nativeTopP resolves a request top_p for the host sampler, where topP<=0 means
+// no nucleus. An omitted top_p keeps that meaning. An explicit 0 asks for the
+// narrowest nucleus, so it becomes the smallest positive cutoff; the nucleus
+// always keeps its first token, so the draw is the most probable token (the
+// top_p -> 0+ limit, which llama.cpp and Hugging Face also give top_p=0).
+func nativeTopP(topP *float64) float64 {
+	switch {
+	case topP == nil:
+		return 0
+	case *topP == 0:
+		return math.SmallestNonzeroFloat64
+	default:
+		return *topP
+	}
 }
 
 // sampleProbabilityRow inverts one probability row with a coin in [0,1). It uses
