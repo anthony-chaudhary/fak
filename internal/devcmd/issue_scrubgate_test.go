@@ -98,6 +98,20 @@ func TestIssueScrubGateJSONShape(t *testing.T) {
 		{`{"clean":false,"needs_scrub":true,"replacements":1,"survivor_count":0}`, true},
 		{`{"clean":true}`, false},
 		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"detail":"synthetic-private-value"}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":true}`, true},
+		{`{"clean":false,"needs_scrub":true,"replacements":1,"survivor_count":0,"audited":true}`, true},
+		{`{"clean":false,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"refused":"empty-input"}`, true},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":"true"}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":null}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":true,"detail":"synthetic-private-value"}`, false},
+		{`{"clean":false,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"refused":true}`, false},
+		{`{"clean":false,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"refused":"unknown"}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":true,"refused":"empty-input"}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"audited":true}`, false},
+		{`{"clean":false,"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":true,"audited":true}`, false},
+		{`{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0} {}`, false},
 		{`not json`, false},
 		{`null`, false},
 		{`{"clean":true,"needs_scrub":null,"replacements":0,"survivor_count":0}`, false},
@@ -136,6 +150,53 @@ func TestIssueScrubGateCompanionFixtures(t *testing.T) {
 			}
 			if !tc.clean && !verdict.NeedsScrub && verdict.SurvivorCount == 0 {
 				t.Fatalf("needle fixture had no refusal evidence: %+v", verdict)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestIssueScrubGateEmptyInputRefusesBeforeProducer(t *testing.T) {
+	for _, input := range []string{"", " ", "\t\r\n", "\u001c", "\u001d", "\u001e", "\u001f", " \u001c\u001d\u001e\u001f\t"} {
+		verdict := runIssueScrubGateSubprocess(t.TempDir(), input, input)
+		if verdict.Ran || verdict.Clean || verdict.Err != "issue_scrub.py --check refused empty input" {
+			t.Fatal("empty input did not refuse before producer lookup")
+		}
+	}
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestIssueScrubGateAuditedProducerContract(t *testing.T) {
+	if _, err := exec.LookPath("python"); err != nil {
+		t.Fatal("producer contract witness requires Python")
+	}
+	for _, tc := range []struct {
+		name, raw string
+		allow     bool
+	}{
+		{"legacy", `{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0}`, true},
+		{"audited", `{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":true}`, true},
+		{"refused", `{"clean":false,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"refused":"empty-input"}`, false},
+		{"false clean", `{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"refused":"empty-input"}`, false},
+		{"duplicate audited", `{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":false,"audited":true}`, false},
+		{"unknown", `{"clean":true,"needs_scrub":false,"replacements":0,"survivor_count":0,"audited":true,"detail":"synthetic-private-value"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Mkdir(filepath.Join(root, "tools"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			// A static value-free producer fixture; it never contacts a service.
+			program := "print('" + tc.raw + "')\n"
+			if err := os.WriteFile(filepath.Join(root, issueScrubGateScriptName), []byte(program), 0600); err != nil {
+				t.Fatal(err)
+			}
+			verdict := runIssueScrubGateSubprocess(root, "Synthetic title", "Synthetic body")
+			if (verdict.Ran && verdict.Clean) != tc.allow {
+				t.Fatal("producer contract admission mismatch")
+			}
+			if strings.Contains(verdict.Err, "synthetic-private-value") {
+				t.Fatal("producer refusal echoed an unknown field value")
 			}
 		})
 	}

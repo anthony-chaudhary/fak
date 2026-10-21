@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -139,21 +140,49 @@ func issueScrubGateRefusalPaths(probed []string) string {
 // refuse: a modified scrubber could smuggle needle values into stdout, and the
 // gate would then be echoing them through its own diagnostics.
 type issueScrubGateJsonResult struct {
-	Clean         bool `json:"clean"`
-	NeedsScrub    bool `json:"needs_scrub"`
-	Replacements  int  `json:"replacements"`
-	SurvivorCount int  `json:"survivor_count"`
+	Clean         bool    `json:"clean"`
+	NeedsScrub    bool    `json:"needs_scrub"`
+	Replacements  int     `json:"replacements"`
+	SurvivorCount int     `json:"survivor_count"`
+	Audited       *bool   `json:"audited,omitempty"`
+	Refused       *string `json:"refused,omitempty"`
 }
 
 // issueScrubGateResultIsKnownShape rejects any JSON object carrying a field
-// outside the documented --check contract. Extra keys are not tolerated so a
-// stdout shape drift can only ever refuse, never echo.
+// outside the two documented --check contracts. Legacy producers emit four
+// fields; newer producers add audited=true, or an explicit empty-input refusal.
+// Unknown keys and unaudited success are never accepted or echoed.
 func issueScrubGateResultIsKnownShape(raw []byte) bool {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	// Decode fields explicitly: map unmarshalling silently keeps the last value
+	// of duplicate keys, which could hide an earlier audited=false declaration.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	opening, err := dec.Token()
+	if err != nil || opening != json.Delim('{') {
 		return false
 	}
-	if len(fields) != 4 {
+	fields := make(map[string]json.RawMessage)
+	for dec.More() {
+		token, err := dec.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return false
+		}
+		if _, duplicate := fields[key]; duplicate {
+			return false
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return false
+		}
+		fields[key] = value
+	}
+	if closing, err := dec.Token(); err != nil || closing != json.Delim('}') {
+		return false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return false
+	}
+	if len(fields) < 4 || len(fields) > 6 {
 		return false
 	}
 	for _, key := range []string{"clean", "needs_scrub", "replacements", "survivor_count"} {
@@ -161,7 +190,17 @@ func issueScrubGateResultIsKnownShape(raw []byte) bool {
 			return false
 		}
 	}
-	return true
+	switch len(fields) {
+	case 4:
+		return true // Legacy contract; the caller independently refuses empty input.
+	case 5:
+		return bytes.Equal(bytes.TrimSpace(fields["audited"]), []byte("true"))
+	case 6:
+		var refused string
+		return bytes.Equal(bytes.TrimSpace(fields["audited"]), []byte("false")) &&
+			json.Unmarshal(fields["refused"], &refused) == nil && refused == "empty-input"
+	}
+	return false
 }
 
 // issueScrubGateHook is the process-wide injection seam behind
@@ -190,6 +229,13 @@ func issueCreateRunScrubGate(privateRoot, title, body string) issueScrubGateVerd
 // refuses: it carries private-adjacent material the scrubber would silently mutate,
 // so publishing might leak something the needle scan cannot see.
 func runIssueScrubGateSubprocess(privateRoot, title, body string) issueScrubGateVerdict {
+	// Enforce anti-vacuity locally as well, including for legacy producers.
+	if strings.TrimFunc(issueScrubGateStdin(title, body), func(r rune) bool {
+		// Python str.strip also includes the four information separators.
+		return unicode.IsSpace(r) || (r >= '\u001c' && r <= '\u001f')
+	}) == "" {
+		return issueScrubGateVerdict{Err: "issue_scrub.py --check refused empty input"}
+	}
 	var probed []string
 	script, root := "", issueScrubGateLocate(privateRoot)
 	if root != "" {
@@ -244,6 +290,9 @@ func runIssueScrubGateSubprocess(privateRoot, title, body string) issueScrubGate
 	dec := json.NewDecoder(bytes.NewReader(out))
 	if err := dec.Decode(&result); err != nil {
 		return issueScrubGateVerdict{Path: script, Err: "issue_scrub.py --check returned invalid field types"}
+	}
+	if result.Refused != nil || (result.Audited != nil && !*result.Audited) {
+		return issueScrubGateVerdict{Path: script, Err: "issue_scrub.py --check refused unaudited input"}
 	}
 	if result.Clean && (cmd.ProcessState.ExitCode() != 0 || result.NeedsScrub || result.Replacements != 0 || result.SurvivorCount != 0) {
 		return issueScrubGateVerdict{Path: script, Err: "issue_scrub.py --check returned an inconsistent clean verdict"}
