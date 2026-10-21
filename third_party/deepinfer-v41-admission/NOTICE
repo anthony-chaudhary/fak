@@ -22,3 +22,16 @@ iterations, epsilon 1e-6 (compared in float32), SwiGLU clamp 10 and top-k
 renormalisation, or it is refused instead of running with forward defaults.
 An explicit expert_weights_norm that is false or not a bool is refused on
 every deepseek41 GGUF, mirroring the upstream assert on norm_topk_prob.
+
+Shared-layer topology refinement (internal/model/v41_topology_validate.go)
+Upstream paths:
+  deepinfer/model_executor/models/v4_modules/cross_layer.py lines 181-197
+  deepinfer/hugging_face/config.py lines 62-85
+Adaptation: Go source-list form of the segmented layer maps. The
+index-topk, index-K and KV refinement chain collapses to one check,
+kvOwner(indexSource(l)) == kvOwner(l), because fak's index keys are owned by
+the KV sources; a layer with no preceding KV source owns itself, as in the
+upstream self-reference padding. Unlike upstream, ratio-0 layers and ratio-0
+sources are inactive, out-of-range sources are tolerated, a schedule with no
+KV source is not checked, and candidate, YOCO, segment and use_swa/index_topk
+rules are not ported. The check runs only for non-published GGUF schedules.

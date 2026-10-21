@@ -47,6 +47,9 @@ func NewDeepSeekV41GGUFConfig(c Config, t V41GGUFTopology) (*DeepSeekV41Config, 
 		d41.IndexSourceLayerIDs = append([]int(nil), t.IndexSourceLayerIDs...)
 	}
 	if !v41PublishedDecoderSchedule(c) {
+		if err := v41ValidateSharedTopology(c, d41); err != nil {
+			return nil, err
+		}
 		return d41, nil
 	}
 	for _, src := range []struct {
