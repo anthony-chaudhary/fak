@@ -261,7 +261,7 @@ session control-verb writes, and from the live Paused→Running resume the
 | `FAK_PROVIDER_EXTRA_BODY_JSON` | Optional extra JSON body to send with upstream provider requests (advanced). |
 | `FAK_INKERNEL_MAX_TOKENS` | Max tokens to generate for in-kernel planner. Default: `256`. |
 | `FAK_INKERNEL_TEMP` | Sampling temperature for in-kernel planner. Default: `0`. |
-| `FAK_INKERNEL_SEED` | Sampling seed for in-kernel planner. Default: `0` (random). |
+| `FAK_INKERNEL_SEED` | Seed policy for seedless sampled (temperature > 0) in-kernel requests. Unset (default): each request draws fresh entropy. Set to any integer, including `0`: requests take a reproducible per-request sequence from a fresh planner. Explicit request seeds and greedy decoding are unaffected. |
 
 ### Performance Tuning (Internal)
 

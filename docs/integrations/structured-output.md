@@ -110,11 +110,46 @@ of which at most four may be optional, and its schema may contain at most 64 KiB
 (65,536 bytes). Optional properties may be omitted or emitted once; required
 properties are always emitted. Emitted keys use canonical lexicographic order.
 Strings use printable ASCII without escapes; string `enum` and `const` values
-must fit that surface. Numbers use canonical JSON syntax without exponents.
-Nested objects, arrays, unknown constraint keywords, `additionalProperties:true`,
-union keywords, regex and EBNF are rejected before inference. `strict` may be
-true or omitted. Native `json_object` is also unsupported; upstream engine
-passthrough retains its own supported surface.
+must fit that surface. Native response schemas also accept integer `enum` and
+`const` constraints with 1–32 raw members. Members must be signed 64-bit JSON
+integers; they are emitted in canonical decimal form, with `-0` normalized to
+`0` and duplicates removed. Fractions, exponents, overflow, `null`, mixed-type
+integer sets and constrained number values are rejected before inference.
+Unconstrained numbers use canonical JSON syntax without exponents. A property may
+also be an array whose `items` is one of those scalar schemas or a fixed-shape
+object, with optional `minItems` and `maxItems` between 0 and 64; arrays are
+emitted as `[a,b]` with no whitespace. Every member of an object item, at every
+level inside it, must be required, and an array inside an item may hold only
+scalars, so every item carries the same keys in canonical order, for example
+`{"rows":[{"kind":"a","ok":true},{"kind":"b","ok":false}]}`. Optional item
+members, arrays of objects inside an item, arrays of arrays, tuple `items`,
+`uniqueItems` and other array keywords are rejected, and tool schemas remain
+array-free. A property may also be a nested object with the same property rules,
+up to three object levels including the top; an object item sits one level below
+the object that holds its array. The 16-property and four-optional limits count
+every property at every level, including item members; an omitted optional
+object omits its members.
+Unknown constraint keywords, `additionalProperties:true` and union keywords are
+also rejected before inference. `strict` may be true or omitted. Native
+`json_object` is unsupported; upstream engine passthrough retains its own
+supported surface.
+
+On `/v1/chat/completions`, `response_format` with type `json_schema` is the only
+constraint carrier the native route enforces. Every other carrier on that route
+is refused before prefill instead of being ignored: other `response_format`
+types (`json_object`, `regex`, `grammar`) and every provider-native guided field
+(`guided_json`, `guided_regex`, `guided_choice`, `guided_grammar`,
+`guided_decoding_backend`, `json_schema`, `regex`, `ebnf`). This applies to
+buffered and streamed requests, including when a guided field accompanies a
+supported `json_schema` response format. A `guided_decoding_backend` alone is
+refused too, since the native route has no selectable backend. A guided field
+sent as `null` counts as absent. Regex and EBNF constraints therefore need an
+upstream engine in ride mode.
+
+The legacy `/v1/completions` route does not parse `response_format` or any
+guided field yet. Carriers sent there are dropped rather than refused, in native
+and ride mode alike, so the response is unconstrained text with HTTP 200. Send
+constrained requests to `/v1/chat/completions`.
 
 The mask composes with temperature, top-k, top-p, logit bias and repetition
 penalties. Buffered and per-token streaming preserve the generated JSON bytes,
@@ -123,12 +158,30 @@ only after the object is complete. A token limit, cancellation or explicit stop
 can still interrupt a response; callers must check the finish reason before
 treating a partial response as a complete object.
 
+Reasoning may precede the object. When the prompt opens a reasoning span (a
+thinking-mode Qwen3.5-family template) or the request sets a reasoning effort or
+thinking budget, decoding is unconstrained inside the span and the schema mask
+starts only after the model emits the atomic `</think>` token. Text that merely
+spells `</think>` with ordinary tokens does not end the span. Without a seeded
+span, the first token may be the atomic `<think>` token or the start of the
+object. EOS stays unavailable until the object is complete, so a response cannot
+end inside reasoning. The thinking budget forces `</think>` when it is spent;
+once the object starts, the budget no longer observes tokens, so think tags
+inside JSON strings are ordinary content. The reasoning before `</think>` is
+returned as reasoning content, never as the response; per-token streams carry
+only the object bytes. Both delimiters must be single in-vocabulary non-stop
+tokens; otherwise the request is refused. A span still open at the token limit
+returns empty content with finish reason `length`. This is adapted from
+DeepInfer's structured-output trigger/bound matcher (Apache-2.0); no upstream
+source is copied.
+
 Structured requests currently use target-only decoding. The bounded optional
 property support applies only to native JSON-schema responses; tool-schema
-compilation remains required-only. Requests combining this mode with tools,
-DFlash2, a reasoning-prefilled prompt, a thinking budget or an unmodified-logit
-inference receipt are refused. Plain text and omitted formats retain the ordinary
-route. Unsupported native combinations return HTTP 400 with code
+compilation remains required-only and accepts only its existing string enum
+surface. Requests combining this mode with tools, DFlash2 or an unmodified-logit
+inference receipt are refused.
+Plain text and omitted formats retain the ordinary route. Unsupported native
+combinations return HTTP 400 with code
 `native_structured_output_unsupported`; inability to select a valid token returns
 HTTP 500 with code `native_structured_decode_failed`.
 
@@ -167,16 +220,19 @@ Front the engine and let it do the token-level enforcement:
 fak serve --provider openai --base-url http://127.0.0.1:8000/v1 --model your-model
 ```
 
-Use the **current** structured-output field names: `response_format` (OpenAI-compatible)
-or the engine's `structured_outputs` object. fak is a transparent proxy — it forwards
-whatever constraint field the client sends and does not rewrite it — but recipes should
-prefer the current names.
+Use the **current** structured-output field name `response_format` (OpenAI-compatible).
+On `/v1/chat/completions`, fak forwards `response_format` and the guided fields listed
+under the native section (`guided_json`, `guided_regex`, `guided_choice`,
+`guided_grammar`, `guided_decoding_backend`, `json_schema`, `regex`, `ebnf`) without
+rewriting them. The engine's `structured_outputs` object is not on that allowlist yet,
+so the chat route drops it; send `response_format` instead. The legacy
+`/v1/completions` route forwards none of these carriers yet.
 
 > **Deprecated-field warning.** vLLM **removed** the older top-level guided fields
 > (`guided_json`, `guided_grammar`, `guided_choice`, `guided_regex`) in **v0.12.0** in
 > favor of `structured_outputs` / `response_format`. A client still sending the old
 > fields will have them forwarded unchanged by fak, but a current vLLM will ignore them.
-> Prefer `response_format` / `structured_outputs`. SGLang accepts JSON Schema, regex, and
+> Prefer `response_format` through fak. SGLang accepts JSON Schema, regex, and
 > EBNF with XGrammar as the default backend.
 
 The engine enforces the grammar at decode; fak forwards the constraint and adjudicates the

@@ -683,7 +683,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// difference between the two drivers, and model.StepBatchActive is bit-for-bit identical to
 	// serial Session.Step per lane, so an unset FAK_INKERNEL_BATCH decodes byte-identically to
 	// the pre-seam loop (the #401 wiring seam; the batched glm_moe_dsa GEMM is a separate lever).
-	rng := rand.New(rand.NewSource(p.seed))
+	rng := rand.New(rand.NewSource(p.requestSampleSeed(ctx, temp)))
 	targetSampleKey, targetSampleKeyed := nativeTargetSampleSeedFromContext(ctx)
 	// counts is the per-token generation histogram this turn's frequency/presence
 	// penalty is computed from (#1705): counts[t] is how many times token t has
@@ -789,6 +789,11 @@ type nativeThinkingConstraint struct {
 	closeID     int
 	forced      bool
 	decodeToken func(int) (string, error)
+	// spanByToken counts reasoning by the structured constraint's token-ID span
+	// instead of decoded marker text, so a spelled-out close cannot end the budget
+	// while the schema still waits for the atomic close token.
+	spanByToken bool
+	spanCount   int
 }
 
 func nativeThinkingConstraintFromContext(ctx context.Context) *nativeThinkingConstraint {
@@ -824,6 +829,28 @@ func (p *InKernelPlanner) newNativeThinkingConstraint(limit int, startInSpan boo
 func (c *nativeThinkingConstraint) reset() {
 	c.budget = NewThinkBudget(c.limit, c.startInSpan)
 	c.forced = false
+	c.spanCount = 0
+}
+
+// closingTokenInSpan is closingToken for a token-ID span: inSpan comes from the
+// structured constraint, and the limit counts tokens accepted inside it.
+func (c *nativeThinkingConstraint) closingTokenInSpan(inSpan bool, vocab int) (int, bool, error) {
+	if c.closeID < 0 || c.closeID >= vocab {
+		return 0, false, &NativeThinkingBudgetUnsupportedError{Reason: "closing token is outside the logits vocabulary"}
+	}
+	if inSpan && c.limit >= 0 && c.spanCount >= c.limit {
+		c.forced = true
+		return c.closeID, true, nil
+	}
+	return 0, false, nil
+}
+
+// acceptTokenInSpan counts one reasoning token selected inside a token-ID span.
+// The close token ends the span and is not reasoning.
+func (c *nativeThinkingConstraint) acceptTokenInSpan(inSpan bool, token int) {
+	if inSpan && token != c.closeID {
+		c.spanCount++
+	}
 }
 
 // acceptToken counts the actual selected token before it can be emitted or
@@ -1150,7 +1177,18 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		}
 	}
 	forced := false
-	if ln.thinking != nil {
+	// Once a structured response leaves reasoning, its JSON bytes (which may spell
+	// think tags inside strings) are no longer reasoning and never feed the budget.
+	reasoning := ln.structured == nil || ln.structured.reasoningActive()
+	inSpan := ln.structured.inReasoningSpan()
+	if ln.thinking != nil && ln.thinking.spanByToken {
+		var err error
+		next, forced, err = ln.thinking.closingTokenInSpan(inSpan, ln.vocabSize())
+		if err != nil {
+			ln.err, ln.done = err, true
+			return 0, false
+		}
+	} else if ln.thinking != nil && reasoning {
 		var err error
 		next, forced, err = ln.thinking.closingToken(ln.vocabSize())
 		if err != nil {
@@ -1166,6 +1204,10 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 			next = sampleLogitsWithPenaltyCoinWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, coin, &ln.sampling)
 		} else {
 			next = sampleLogitsWithPenaltyWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
+		}
+		if ln.sampling.nonFinite {
+			ln.err, ln.done = ErrNonFiniteLogits, true
+			return 0, false
 		}
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
@@ -1195,7 +1237,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.err, ln.done = err, true
 		return 0, false
 	}
-	if ln.thinking != nil {
+	if ln.thinking != nil && ln.thinking.spanByToken {
+		ln.thinking.acceptTokenInSpan(inSpan, next)
+	} else if ln.thinking != nil && reasoning {
 		if err := ln.thinking.acceptToken(next); err != nil {
 			ln.err, ln.done = err, true
 			return 0, false

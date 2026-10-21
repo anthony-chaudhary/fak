@@ -1,0 +1,25 @@
+DeepInfer V4.1 config-derivation parity contracts
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+Upstream paths:
+  deepinfer/hugging_face/config.py:62-96,146-161,266-311
+  deepinfer/model_executor/models/deepseek.py:126-137
+  deepinfer/model_executor/models/v4_modules/cross_layer.py:114-116
+  deepinfer/model_executor/models/v4_modules/mla_attn.py:256-257
+  deepinfer/worker/cache_engine.py:115-116
+  deepinfer/model_executor/models/vision_encoder/vit.py:27-32,126-130,145
+  deepinfer/model_executor/models/vision_encoder/mlp_projector.py:17
+
+Adaptation (internal/model/v41_config_deepinfer_parity_test.go): a Go contract
+test applies DeepInfer derivation rules to fak's committed dba1be0a fixture. It
+transcribes DeepInfer's nearest-source map, index-K fallback to KV sources,
+candidate-source range, attention module list, prefill boundary invariants,
+NoPE/HC/window widths and vision encoder constants, and compares them with
+fak's V4.1 attention plan resolution, per-layer rotary policy, mHC stream row
+and retained vision metadata. It is test-only evidence with no runtime change,
+and it makes no claim about any other published V4.1 config.

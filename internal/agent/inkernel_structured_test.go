@@ -270,6 +270,228 @@ func TestNativeStructuredOptionalScalarCompleteAndStream(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=200ms lane=default
+func TestNativeStructuredIntegerEnumCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	encodeOne := func(text string) int {
+		t.Helper()
+		ids, err := p.tok.Encode(text)
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("encode %q: ids=%v err=%v", text, ids, err)
+		}
+		return ids[0]
+	}
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"color":{"type":"string","enum":["blue","red"]},"count":{"type":"integer","enum":[1,10,100]}},"required":["color"],"additionalProperties":false}}}`)
+	seed := int64(37)
+	temperature := 0.8
+	opts := []SampleOpt{
+		WithResponseFormat(format),
+		WithSeed(&seed),
+		WithTemperature(&temperature),
+		WithLogitBias(map[int]float64{encodeOne(","): 100, encodeOne("0"): 100}),
+		WithMaxTokens(96),
+	}
+	messages := []Message{{Role: RoleUser, Content: "Choose a color and count."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		if completion.FinishReason != "stop" {
+			t.Fatalf("finish reason = %q, want stop", completion.FinishReason)
+		}
+		decoder := json.NewDecoder(strings.NewReader(completion.Message.Content))
+		decoder.UseNumber()
+		var value map[string]any
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("decode %q: %v", completion.Message.Content, err)
+		}
+		color, ok := value["color"].(string)
+		if !ok || (color != "blue" && color != "red") {
+			t.Fatalf("color = %#v, want declared string member", value["color"])
+		}
+		count, ok := value["count"].(json.Number)
+		if !ok {
+			t.Fatalf("count has type %T, want json.Number", value["count"])
+		}
+		integer, err := count.Int64()
+		if err != nil {
+			t.Fatalf("count %q is not an integer: %v", count, err)
+		}
+		if integer != 100 {
+			t.Fatalf("count = %d, want forced prefix-related member 100", integer)
+		}
+		if len(value) != 2 {
+			t.Fatalf("response properties = %#v, want color and count", value)
+		}
+	}
+
+	buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, buffered)
+	replayed, err := p.Complete(context.Background(), messages, nil, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, replayed)
+	if replayed.Message.Content != buffered.Message.Content {
+		t.Fatalf("same-seed replay = %q, want %q", replayed.Message.Content, buffered.Message.Content)
+	}
+
+	var streamed strings.Builder
+	stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+		streamed.WriteString(piece)
+		return nil
+	}, messages, nil, append(opts, WithPerTokenStream(true))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, stream)
+	if stream.Message.Content != buffered.Message.Content || streamed.String() != stream.Message.Content {
+		t.Fatalf("seeded buffered/stream mismatch: buffered=%q streamed=%q completion=%q", buffered.Message.Content, streamed.String(), stream.Message.Content)
+	}
+}
+
+// fak-test:runtime fast est=300ms lane=default
+func TestNativeStructuredScalarArrayCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"tags":{"type":"array","items":{"type":"string","enum":["a","b"]},"minItems":1,"maxItems":3}},"required":["tags"],"additionalProperties":false}}}`)
+	temperature := 0.9
+	messages := []Message{{Role: RoleUser, Content: "List one to three tags."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		var value struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.Unmarshal([]byte(completion.Message.Content), &value); err != nil {
+			t.Fatalf("native array response is not JSON: %q: %v", completion.Message.Content, err)
+		}
+		if completion.FinishReason != "stop" || len(value.Tags) < 1 || len(value.Tags) > 3 {
+			t.Fatalf("finish=%q tags=%v, want 1..3 tags and a stop", completion.FinishReason, value.Tags)
+		}
+		for _, tag := range value.Tags {
+			if tag != "a" && tag != "b" {
+				t.Fatalf("tag %q outside the item enum in %q", tag, completion.Message.Content)
+			}
+		}
+	}
+	for seed := int64(1); seed <= 4; seed++ {
+		opts := []SampleOpt{WithResponseFormat(format), WithTemperature(&temperature), WithSeed(&seed), WithMaxTokens(64)}
+		buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, buffered)
+		var streamed strings.Builder
+		stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+			streamed.WriteString(piece)
+			return nil
+		}, messages, nil, append(opts, WithPerTokenStream(true))...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, stream)
+		if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+			t.Fatalf("seed %d: buffered %q, stream %q, streamed %q", seed, buffered.Message.Content, stream.Message.Content, streamed.String())
+		}
+	}
+}
+
+// fak-test:runtime fast est=300ms lane=default
+func TestNativeStructuredNestedObjectCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"place":{"type":"object","properties":{"kind":{"type":"string","enum":["a","b"]},"near":{"type":"boolean"}},"required":["kind","near"],"additionalProperties":false},"rank":{"type":"integer","enum":[1,2]}},"required":["place","rank"],"additionalProperties":false}}}`)
+	temperature := 0.9
+	messages := []Message{{Role: RoleUser, Content: "Describe the place."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		var value struct {
+			Place *struct {
+				Kind *string `json:"kind"`
+				Near *bool   `json:"near"`
+			} `json:"place"`
+			Rank *int `json:"rank"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(completion.Message.Content))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("native nested response is not the schema object: %q: %v", completion.Message.Content, err)
+		}
+		if completion.FinishReason != "stop" || value.Place == nil || value.Place.Kind == nil || value.Place.Near == nil || value.Rank == nil ||
+			(*value.Place.Kind != "a" && *value.Place.Kind != "b") || (*value.Rank != 1 && *value.Rank != 2) {
+			t.Fatalf("finish=%q content=%q violates the nested schema", completion.FinishReason, completion.Message.Content)
+		}
+	}
+	for seed := int64(1); seed <= 3; seed++ {
+		opts := []SampleOpt{WithResponseFormat(format), WithTemperature(&temperature), WithSeed(&seed), WithMaxTokens(64)}
+		buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, buffered)
+		var streamed strings.Builder
+		stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+			streamed.WriteString(piece)
+			return nil
+		}, messages, nil, append(opts, WithPerTokenStream(true))...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+			t.Fatalf("seed %d: buffered %q, stream %q, streamed %q", seed, buffered.Message.Content, stream.Message.Content, streamed.String())
+		}
+	}
+}
+
+// fak-test:runtime fast est=2000ms lane=default
+func TestNativeStructuredObjectArrayCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"rows":{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["a","b"]},"ok":{"type":"boolean"}},"required":["kind","ok"],"additionalProperties":false},"minItems":1,"maxItems":2}},"required":["rows"],"additionalProperties":false}}}`)
+	temperature := 0.9
+	messages := []Message{{Role: RoleUser, Content: "List one or two rows."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		var value struct {
+			Rows []struct {
+				Kind *string `json:"kind"`
+				OK   *bool   `json:"ok"`
+			} `json:"rows"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(completion.Message.Content))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("native object-array response is not the schema object: %q: %v", completion.Message.Content, err)
+		}
+		if completion.FinishReason != "stop" || len(value.Rows) < 1 || len(value.Rows) > 2 {
+			t.Fatalf("finish=%q content=%q, want 1..2 rows and a stop", completion.FinishReason, completion.Message.Content)
+		}
+		for _, row := range value.Rows {
+			if row.Kind == nil || row.OK == nil || (*row.Kind != "a" && *row.Kind != "b") {
+				t.Fatalf("row violates the item schema in %q", completion.Message.Content)
+			}
+		}
+	}
+	for seed := int64(1); seed <= 4; seed++ {
+		opts := []SampleOpt{WithResponseFormat(format), WithTemperature(&temperature), WithSeed(&seed), WithMaxTokens(128)}
+		buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, buffered)
+		var streamed strings.Builder
+		stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+			streamed.WriteString(piece)
+			return nil
+		}, messages, nil, append(opts, WithPerTokenStream(true))...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, stream)
+		if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+			t.Fatalf("seed %d: buffered %q, stream %q, streamed %q", seed, buffered.Message.Content, stream.Message.Content, streamed.String())
+		}
+	}
+}
+
 // fak-test:runtime fast est=50ms lane=default
 func TestNativeStructuredTextFormatPreservesOrdinaryOutput(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)
@@ -298,9 +520,26 @@ func TestNativeStructuredUnsupportedRequestRefusesBeforeSampling(t *testing.T) {
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"array"}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"strict":false,"schema":{}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{}}`),
-		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{}}},"required":["answer"],"additionalProperties":false}}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{},"additionalProperties":true}},"required":["answer"],"additionalProperties":false}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"extra":{"type":"string","minLength":1}},"required":["answer"],"additionalProperties":false}}}`),
 	}
+	integerSetFormat := func(constraint string) json.RawMessage {
+		return json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"count":{"type":"integer",` + constraint + `}},"required":["count"],"additionalProperties":false}}}`)
+	}
+	cases = append(cases,
+		integerSetFormat(`"enum":[]`),
+		integerSetFormat(`"enum":[1,"2"]`),
+		integerSetFormat(`"enum":[null]`),
+		integerSetFormat(`"enum":[1.5]`),
+		integerSetFormat(`"enum":[1e2]`),
+		integerSetFormat(`"enum":[9223372036854775808]`),
+		integerSetFormat(`"const":null`),
+	)
+	tooManyIntegerMembers := make([]string, 33)
+	for i := range tooManyIntegerMembers {
+		tooManyIntegerMembers[i] = fmt.Sprintf("%d", i)
+	}
+	cases = append(cases, integerSetFormat(`"enum":[`+strings.Join(tooManyIntegerMembers, ",")+`]`))
 	properties := make(map[string]any, 17)
 	required := make([]string, 0, 17)
 	for i := range 17 {
@@ -483,4 +722,238 @@ func TestNativeStructuredNonfiniteAllowedLogitsRefuse(t *testing.T) {
 			t.Fatalf("nonfinite allowed score %v: %v", value, err)
 		}
 	}
+}
+
+func nativeStructuredReasoningPlanner(t *testing.T, seeded bool) *InKernelPlanner {
+	t.Helper()
+	tok := atomicThinkingTokenizer(t)
+	cfg := tinyConcurrencyConfig()
+	if seeded {
+		cfg = model.Config{
+			ModelType: "qwen3_5_text", HiddenSize: 32, NumLayers: 4, NumHeads: 4, NumKVHeads: 2, HeadDim: 8,
+			IntermediateSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true,
+			LayerTypes:          []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+			LinearConvKernelDim: 3, LinearKeyHeadDim: 8, LinearNumKeyHeads: 2, LinearValueHeadDim: 8, LinearNumValueHeads: 4,
+			AttnOutputGate: true, FullAttentionInterval: 4, NormGain1p: true,
+		}
+	}
+	cfg.VocabSize = tok.Vocab()
+	cfg.EOSTokenID = 0
+	m := model.NewSynthetic(cfg)
+	m.Quantize()
+	p := NewInKernelPlanner(m, tok, "synthetic-structured-reasoning", false, nil, false)
+	p.maxNew = 48
+	p.batchDecode = false
+	return p
+}
+
+func nativeStructuredReasoningIDs(t *testing.T, p *InKernelPlanner) (open, close, body, eos int) {
+	t.Helper()
+	one := func(text string) int {
+		ids, err := p.tok.Encode(text)
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("encode %q: ids=%v err=%v", text, ids, err)
+		}
+		return ids[0]
+	}
+	return one(thinkOpen), one(thinkClose), one("x"), 0
+}
+
+// fak-test:runtime fast est=200ms lane=default
+func TestNativeStructuredReasoningBudgetThenSchema(t *testing.T) {
+	p := nativeStructuredReasoningPlanner(t, false)
+	open, close, body, eos := nativeStructuredReasoningIDs(t, p)
+	zero := 0.0
+	opts := []SampleOpt{
+		WithResponseFormat(nativeStructuredTestFormat), WithThinkingBudget(2), WithTemperature(&zero),
+		WithLogitBias(map[int]float64{body: 100, open: 60, close: -100, eos: 200}),
+		WithMaxTokens(48), WithDecodeTrace(true), WithNativeDecodeTokenIDs(true),
+	}
+	messages := []Message{{Role: RoleUser, Content: "Think briefly, then answer."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		if completion.FinishReason != "stop" {
+			t.Fatalf("finish reason = %q, want stop", completion.FinishReason)
+		}
+		nativeStructuredCheckAnswer(t, completion.Message.Content)
+		if completion.Message.ReasoningContent != "xx" {
+			t.Fatalf("reasoning = %q, want the two budgeted reasoning tokens", completion.Message.ReasoningContent)
+		}
+		ids := completion.NativeDecodeTokenIDs
+		if ids == nil || len(ids.TokenIDs) < 5 || !slices.Equal(ids.TokenIDs[:4], []int{open, body, body, close}) {
+			t.Fatalf("token IDs = %v, want opener, two reasoning tokens, then the forced close", ids)
+		}
+		if slices.Contains(ids.TokenIDs, eos) {
+			t.Fatalf("EOS escaped the reasoning span or the schema: %v", ids.TokenIDs)
+		}
+	}
+	buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, buffered)
+
+	var streamed strings.Builder
+	stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+		streamed.WriteString(piece)
+		return nil
+	}, messages, nil, append(opts, WithPerTokenStream(true))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, stream)
+	if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+		t.Fatalf("reasoning leaked into the schema stream: streamed=%q content=%q buffered=%q", streamed.String(), stream.Message.Content, buffered.Message.Content)
+	}
+}
+
+// fak-test:runtime fast est=150ms lane=default
+func TestNativeStructuredReasoningBudgetMaySkipReasoning(t *testing.T) {
+	p := nativeStructuredReasoningPlanner(t, false)
+	open, _, body, _ := nativeStructuredReasoningIDs(t, p)
+	zero := 0.0
+	completion, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Answer."}}, nil,
+		WithResponseFormat(nativeStructuredTestFormat), WithThinkingBudget(4), WithTemperature(&zero),
+		WithLogitBias(map[int]float64{body: 100, open: -100}), WithMaxTokens(48))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeStructuredCheckAnswer(t, completion.Message.Content)
+	if completion.Message.ReasoningContent != "" {
+		t.Fatalf("reasoning = %q, want none when the model answers directly", completion.Message.ReasoningContent)
+	}
+}
+
+// fak-test:runtime fast est=150ms lane=default
+func TestNativeStructuredBudgetIgnoresThinkTextInsideJSON(t *testing.T) {
+	p := nativeStructuredReasoningPlanner(t, false)
+	open, _, _, _ := nativeStructuredReasoningIDs(t, p)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"note":{"type":"string","const":"<think>abcdef</think>"}},"required":["note"],"additionalProperties":false}}}`)
+	completion, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Answer."}}, nil,
+		WithResponseFormat(format), WithThinkingBudget(1), WithLogitBias(map[int]float64{open: -100}), WithMaxTokens(64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"note":"<think>abcdef</think>"}`; completion.Message.Content != want || completion.Message.ReasoningContent != "" {
+		t.Fatalf("schema text was treated as reasoning: content=%q reasoning=%q", completion.Message.Content, completion.Message.ReasoningContent)
+	}
+}
+
+// fak-test:runtime fast est=30ms lane=default
+func TestNativeStructuredBudgetCountsSpelledCloseAsReasoning(t *testing.T) {
+	p := nativeStructuredReasoningPlanner(t, false)
+	stops := StopIDs(p.tok, p.m.Cfg)
+	structured, err := p.newNativeStructuredConstraint(nativeStructuredTestFormat, stops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := structured.armReasoning(p, true, stops); err != nil {
+		t.Fatal(err)
+	}
+	const limit = 12
+	thinking, err := p.newNativeThinkingConstraint(limit, true, stops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thinking.spanByToken = true
+	_, closeID, body, _ := nativeStructuredReasoningIDs(t, p)
+	var reasoning []int
+	for _, b := range []byte(thinkClose) {
+		ids, err := p.tok.Encode(string(b))
+		if err != nil || len(ids) != 1 || ids[0] == closeID {
+			t.Fatalf("encode %q: %v %v", b, ids, err)
+		}
+		reasoning = append(reasoning, ids[0])
+	}
+	for len(reasoning) < limit {
+		reasoning = append(reasoning, body)
+	}
+	oneHot := func(id int) []float32 {
+		logits := make([]float32, p.m.Cfg.VocabSize)
+		logits[id] = 100
+		return logits
+	}
+	ln := &decodeLane{structured: structured, thinking: thinking, maxNew: 64, stops: stops, rng: rand.New(rand.NewSource(1))}
+	for i, id := range reasoning {
+		ln.logits = oneHot(id)
+		if next, advance := ln.decodeOne(context.Background()); !advance || next != id || ln.err != nil {
+			t.Fatalf("reasoning token %d: next=%d advance=%v err=%v", i, next, advance, ln.err)
+		}
+	}
+	ln.logits = oneHot(body)
+	if next, advance := ln.decodeOne(context.Background()); !advance || next != closeID {
+		t.Fatalf("after %d reasoning tokens including a spelled close, next=%d advance=%v err=%v; want the forced atomic close", limit, next, advance, ln.err)
+	}
+	if structured.reasoningActive() {
+		t.Fatal("forced close did not start the schema response")
+	}
+}
+
+// fak-test:runtime fast est=150ms lane=default
+func TestNativeStructuredStopStringIgnoresReasoning(t *testing.T) {
+	p := nativeStructuredReasoningPlanner(t, true)
+	_, close, body, eos := nativeStructuredReasoningIDs(t, p)
+	zero := 0.0
+	completion, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Think, then answer."}}, nil,
+		WithResponseFormat(nativeStructuredTestFormat), WithThinkingBudget(3), WithTemperature(&zero), WithStop([]string{"xx"}),
+		WithLogitBias(map[int]float64{body: 100, close: -100, eos: 200}), WithMaxTokens(48))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeStructuredCheckAnswer(t, completion.Message.Content)
+	if completion.FinishReason != "stop" || completion.Message.ReasoningContent != "xxx" {
+		t.Fatalf("stop string matched hidden reasoning: finish=%q reasoning=%q content=%q", completion.FinishReason, completion.Message.ReasoningContent, completion.Message.Content)
+	}
+}
+
+// fak-test:runtime fast est=300ms lane=default
+func TestNativeStructuredSeededReasoningClosesOnTriggerToken(t *testing.T) {
+	zero := 0.0
+	t.Run("budget forces the trigger", func(t *testing.T) {
+		p := nativeStructuredReasoningPlanner(t, true)
+		_, close, body, eos := nativeStructuredReasoningIDs(t, p)
+		completion, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Think, then answer."}}, nil,
+			WithResponseFormat(nativeStructuredTestFormat), WithThinkingBudget(3), WithTemperature(&zero),
+			WithLogitBias(map[int]float64{body: 100, close: -100, eos: 200}), WithMaxTokens(48),
+			WithDecodeTrace(true), WithNativeDecodeTokenIDs(true))
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeStructuredCheckAnswer(t, completion.Message.Content)
+		if completion.Message.ReasoningContent != "xxx" {
+			t.Fatalf("reasoning = %q, want three budgeted tokens", completion.Message.ReasoningContent)
+		}
+		if ids := completion.NativeDecodeTokenIDs; ids == nil || len(ids.TokenIDs) < 4 || !slices.Equal(ids.TokenIDs[:4], []int{body, body, body, close}) {
+			t.Fatalf("token IDs = %v, want three reasoning tokens then the close trigger", ids)
+		}
+	})
+	t.Run("model closes without a budget", func(t *testing.T) {
+		t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
+		p := nativeStructuredReasoningPlanner(t, true)
+		_, close, _, _ := nativeStructuredReasoningIDs(t, p)
+		completion, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Answer."}}, nil,
+			WithResponseFormat(nativeStructuredTestFormat), WithTemperature(&zero),
+			WithLogitBias(map[int]float64{close: 100}), WithMaxTokens(48))
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeStructuredCheckAnswer(t, completion.Message.Content)
+		if completion.Message.ReasoningContent != "" {
+			t.Fatalf("reasoning = %q, want an empty span", completion.Message.ReasoningContent)
+		}
+	})
+	t.Run("unclosed span is reasoning, never content", func(t *testing.T) {
+		t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
+		p := nativeStructuredReasoningPlanner(t, true)
+		_, close, body, eos := nativeStructuredReasoningIDs(t, p)
+		completion, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "Answer."}}, nil,
+			WithResponseFormat(nativeStructuredTestFormat), WithTemperature(&zero),
+			WithLogitBias(map[int]float64{body: 100, close: -100, eos: 200}), WithMaxTokens(4))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completion.FinishReason != "length" || completion.Message.Content != "" || completion.Message.ReasoningContent != "xxxx" {
+			t.Fatalf("unclosed reasoning: finish=%q content=%q reasoning=%q", completion.FinishReason, completion.Message.Content, completion.Message.ReasoningContent)
+		}
+	})
 }

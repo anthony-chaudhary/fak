@@ -540,7 +540,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
 	}
-	rng := rand.New(rand.NewSource(p.seed))
+	rng := rand.New(rand.NewSource(p.requestSampleSeed(ctx, temp)))
 
 	gen := 0
 	stopped := false
@@ -609,6 +609,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 				proposalGenerator = nil
 			}
 			next := sampleLogitsWithPenaltyWS(curLogits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng, &samplingWS)
+			if samplingWS.nonFinite {
+				err = ErrNonFiniteLogits
+				break
+			}
 			if next < 0 || stops[next] {
 				stopped = true
 				break

@@ -37,6 +37,9 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 	if errors.Is(err, agent.ErrNativeStructuredNoToken) {
 		return http.StatusInternalServerError, "native_structured_decode_failed", "native structured decoding could not select a valid token"
 	}
+	if errors.Is(err, agent.ErrNonFiniteLogits) {
+		return http.StatusInternalServerError, "native_sampler_nonfinite_logits", "the native model produced non-finite logits"
+	}
 	var deadlineErr *deadlineAdmissionError
 	if errors.As(err, &deadlineErr) {
 		return http.StatusServiceUnavailable, deadlineadmit.CodeDeadlineInfeasible, deadlineErr.Error()

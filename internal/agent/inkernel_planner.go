@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"hash"
 	"log"
+	randv2 "math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -73,6 +74,11 @@ type InKernelPlanner struct {
 	maxNew        int
 	temp          float64
 	seed          int64
+	// seedExplicit records an operator-set FAK_INKERNEL_SEED. Seedless sampled
+	// requests then take successive streams derived from seed, so a fresh planner
+	// replays a run; otherwise each one draws fresh entropy.
+	seedExplicit bool
+	seedRequests atomic.Uint64
 	// decodeTraceNow is an injectable monotonic clock used only by explicitly
 	// traced requests. nil selects time.Now; the default path never reads it.
 	decodeTraceNow func() time.Time
@@ -435,6 +441,9 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	sp := applySampleOpts(opts...)
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
+		return nil, err
+	}
+	if err := refuseNativeGuidedCarriers(sp.GuidedDecode); err != nil {
 		return nil, err
 	}
 	if p.dflash2 != nil {
@@ -2021,11 +2030,36 @@ func (p *InKernelPlanner) ValidateSamplingSeed(seed *int64) error {
 	return nil
 }
 
+// nextSeedlessSampleSeed gives one seedless sampled request its own RNG stream.
+// Adapted from DeepInfer SamplingParams._make_seed (Apache-2.0, deepseek-ai/DeepInfer deepinfer/sampling_params.py at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
+func (p *InKernelPlanner) nextSeedlessSampleSeed() int64 {
+	if !p.seedExplicit {
+		return int64(randv2.Uint64())
+	}
+	n := p.seedRequests.Add(1) - 1
+	return int64(model.SplitMix64(uint64(p.seed) + n*model.SplitMixConstant))
+}
+
+// requestSampleSeed seeds one decode's planner RNG. A greedy or request-keyed
+// decode never draws from it, so only a seedless sampled decode consumes a stream.
+func (p *InKernelPlanner) requestSampleSeed(ctx context.Context, temp float64) int64 {
+	if seed, ok := nativeSeedlessSampleSeedFromContext(ctx); ok {
+		return seed
+	}
+	if _, keyed := nativeTargetSampleSeedFromContext(ctx); keyed || temp <= 0 {
+		return p.seed
+	}
+	return p.nextSeedlessSampleSeed()
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
+		return nil, err
+	}
+	if err := refuseNativeGuidedCarriers(sp.GuidedDecode); err != nil {
 		return nil, err
 	}
 	ctx = withNativeTargetSampleSeed(ctx, sp.Seed)
@@ -2123,6 +2157,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if err := p.validateDFlash2Request(sp, temp, freqPenalty, presPenalty); err != nil {
 			return nil, err
 		}
+		if sp.Seed == nil && temp > 0 {
+			// Resolved once per request so an OOM retry replays the same stream.
+			ctx = withNativeSeedlessSampleSeed(ctx, p.nextSeedlessSampleSeed())
+		}
 		prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 		if err != nil {
 			return nil, err
@@ -2144,7 +2182,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		effectiveBudget := ResolveEffortBudget(sp.ReasoningEffort, sp.ThinkingBudget, turnContext...)
 		startInSpan := strings.HasSuffix(chat, qwenThinkAssistantSeed)
 		if structured != nil && (effectiveBudget > 0 || startInSpan) {
-			return nil, fmt.Errorf("%w: reasoning-prefilled or budgeted requests", ErrNativeStructuredUnsupported)
+			if err := structured.armReasoning(p, startInSpan, stops); err != nil {
+				return nil, err
+			}
 		}
 		var thinking *nativeThinkingConstraint
 		if p.dflash2 != nil && effectiveBudget > 0 {
@@ -2158,6 +2198,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			if err != nil {
 				return nil, err
 			}
+			thinking.spanByToken = structured.reasoningArmed()
 			ctx = context.WithValue(ctx, nativeThinkingConstraintContextKey{}, thinking)
 		}
 		// emit runs per generated token: decode the piece, accumulate the text, and apply the
@@ -2181,16 +2222,31 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 		}
 		scanner := newIncrementalStopScanner(maxStop, sp.Stop)
+		// structuredContentStart is the byte offset just past a structured
+		// response's close trigger; reasoning before it never reaches the stream.
+		structuredContentStart := -1
 		emit := func(next int) bool {
 			if piece, derr := p.tok.Decode([]int{next}); derr == nil {
 				sb.WriteString(piece)
-				if sp.DecodeTokenObserver != nil {
+				visible := true
+				if structured.takeReasoningClosed() {
+					structuredContentStart, visible = sb.Len(), false
+				} else if structured.reasoningActive() {
+					visible = false
+				}
+				if sp.DecodeTokenObserver != nil && visible {
 					sp.DecodeTokenObserver(piece, "")
 				}
+				if !visible {
+					// Stop strings apply to the response, never to hidden reasoning.
+					return false
+				}
+				contentStart := max(structuredContentStart, 0)
 				if scanner.appendPiece(piece) {
-					if trimmed, hit := checkStop(sb.String(), sp.Stop); hit {
+					if trimmed, hit := checkStop(sb.String()[contentStart:], sp.Stop); hit {
+						kept := sb.String()[:contentStart] + trimmed
 						sb.Reset()
-						sb.WriteString(trimmed)
+						sb.WriteString(kept)
 						return true
 					}
 				}
@@ -2315,6 +2371,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				}
 				return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 					sb.Reset()
+					structuredContentStart = -1
 					scanner.reset()
 					if thinking != nil {
 						thinking.reset()
@@ -2430,7 +2487,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 			var reasoning, content string
 			if structured != nil {
-				content = sb.String()
+				reasoning, content = structured.splitOutput(sb.String(), structuredContentStart)
 			} else {
 				reasoning, content = splitNativeBudgetReasoning(sb.String(), thinking != nil && startInSpan)
 				for strings.Contains(content, thinkClose) {

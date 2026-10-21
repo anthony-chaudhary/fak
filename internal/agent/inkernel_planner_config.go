@@ -90,6 +90,7 @@ type InKernelPlannerConfig struct {
 func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool, cfg InKernelPlannerConfig) *InKernelPlanner {
 	prefillChunkTokens, prefillChunkErr := resolveInKernelQwenQ4KPrefillChunkTokens(cfg.QwenQ4KPrefillChunkTokens)
 	prefillChunkExplicit := cfg.QwenQ4KPrefillChunkTokens != 0
+	seed, seedExplicit := inKernelSeedFromEnv()
 	p := &InKernelPlanner{
 		m:                            m,
 		tok:                          tok,
@@ -106,7 +107,8 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		denseGPULayers:               cfg.DenseGPULayers,
 		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
 		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
-		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
+		seed:                         seed,
+		seedExplicit:                 seedExplicit,
 		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
 		qwenQ4KPrefillChunkExplicit:  prefillChunkExplicit,
 		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
@@ -180,6 +182,17 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		}
 	}
 	return p
+}
+
+// inKernelSeedFromEnv reads FAK_INKERNEL_SEED with envInt's parse rules and reports
+// whether it was set: only a parsed value makes seedless sampling reproducible.
+func inKernelSeedFromEnv() (int64, bool) {
+	if v := os.Getenv("FAK_INKERNEL_SEED"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // RuntimeConfig returns the explicit native settings fixed at planner construction.

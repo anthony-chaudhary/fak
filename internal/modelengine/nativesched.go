@@ -400,78 +400,148 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		prompt = []int{0}
 	}
 	q4k := prep.q4k || s.residentQ4K
-	sess := s.newLaneSession(q4k, NativeSessionFresh)
-	if s.captureQwenState {
-		if err := sess.EnableQwen35MetalStateIdentityReceipt(prompt); err != nil {
-			sess.Close()
-			return nil, err
-		}
-	}
-	prefillChunkTokens := s.qwenPrefillChunkBudget(prep, sess, len(prompt))
-	state := schedLaneDecode
-	promptCursor := len(prompt)
-	promptLen := len(prompt)
-	var logits []float32
-	if prefillChunkTokens == 0 {
-		if s.inBatchDedupEligible(sess, prompt) {
-			var err error
-			logits, err = s.prefillCoalesced(ctx, sess, prompt)
-			if err != nil {
-				s.closeLaneSession(sess)
-				return nil, err
-			}
-		} else {
-			logits = s.coldPrefillSync(sess, prompt)
-		}
-		if s.captureQwenState {
-			executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
-			if err != nil || !executed {
-				sess.Close()
-				if err == nil {
-					err = errors.New("modelengine: Qwen Metal state identity was not executed")
-				}
-				return nil, err
-			}
-			receipt, ok := sess.Qwen35MetalStateIdentityReceipt()
-			if !ok {
-				sess.Close()
-				return nil, errors.New("modelengine: Qwen Metal state identity receipt unavailable")
-			}
-			s.mu.Lock()
-			s.qwenStateReceipts = append(s.qwenStateReceipts, receipt)
-			s.mu.Unlock()
-		}
-	} else {
-		state = schedLanePrefilling
-		promptCursor = 0
-		// promptLen is also the scheduler's resident-KV accounting input. Do not
-		// reserve the not-yet-executed tail of an asynchronously-prefilled prompt.
-		promptLen = 0
-	}
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
 
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
-		sched:              s,
-		ctx:                cctx,
-		cancel:             cancel,
-		sess:               sess,
-		logits:             logits,
-		tool:               c.Tool,
-		prompt:             append([]int(nil), prompt...),
-		promptLen:          promptLen,
-		putCtx:             ctx,
-		tok:                prep.tok,
-		q4k:                q4k,
-		state:              state,
-		promptCursor:       promptCursor,
-		prefillChunkTokens: prefillChunkTokens,
-		kvReuseHits:        kvReuseHits,
-		kvPinned:           kvPinned,
-		kvPinUntil:         kvPinUntil,
-		tokens:             make(chan abi.EngineToken, 1),
-		done:               make(chan struct{}),
-		hint:               hint,
+		sched:       s,
+		ctx:         cctx,
+		cancel:      cancel,
+		tool:        c.Tool,
+		prompt:      append([]int(nil), prompt...),
+		putCtx:      ctx,
+		tok:         prep.tok,
+		q4k:         q4k,
+		prefillQ4K:  prep.q4k,
+		kvReuseHits: kvReuseHits,
+		kvPinned:    kvPinned,
+		kvPinUntil:  kvPinUntil,
+		tokens:      make(chan abi.EngineToken, 1),
+		done:        make(chan struct{}),
+		hint:        hint,
+	}
+
+	s.mu.Lock()
+	if s.qwenPrefillTokens >= nativeQwenPrefillMinChunkTokens &&
+		prep.q4k &&
+		q4k &&
+		s.qwenPrefillCap != nil &&
+		s.qwenPrefillCap.model == s.m &&
+		nativeQwenResidentAppendEligible(s.m.Cfg, len(prompt)) {
+		ln.prefillChunkTokens = s.qwenPrefillTokens
+	}
+	capacityGateEnabled := s.effectiveMaxRunningLocked() > 0 && s.preemptionEnabledLocked()
+	if capacityGateEnabled {
+		maxRun := s.effectiveMaxRunningLocked()
+		reservations := len(s.lanes)
+		deferredAhead := len(s.preempted) > 0
+		for _, waitingLane := range s.waiting {
+			if waitingLane.materializing || waitingLane.sess != nil {
+				reservations++
+			} else {
+				deferredAhead = true
+			}
+		}
+		deferMaterialization := deferredAhead || reservations >= maxRun
+		if deferMaterialization {
+			if s.closed {
+				s.mu.Unlock()
+				cancel()
+				return nil, errSchedClosed
+			}
+			if err := ctx.Err(); err != nil {
+				s.mu.Unlock()
+				cancel()
+				return nil, err
+			}
+			s.seqNo++
+			ln.seqNo = s.seqNo
+			s.waiting = append(s.waiting, ln)
+			materializationPending := false
+			for _, waitingLane := range s.waiting {
+				if waitingLane.materializing {
+					materializationPending = true
+					break
+				}
+			}
+			s.mu.Unlock()
+			if !materializationPending {
+				s.started.Do(func() {
+					s.mu.Lock()
+					s.runStarted = true
+					s.mu.Unlock()
+					go s.run()
+				})
+			}
+			s.signal()
+			return ln, nil
+		}
+		ln.materializing = true
+		s.seqNo++
+		ln.seqNo = s.seqNo
+		s.waiting = append(s.waiting, ln)
+		s.mu.Unlock()
+
+		candidate := *ln
+		initializationErr := s.initializeLaneExecution(&candidate)
+		s.mu.Lock()
+		removeReservation := func() {
+			for index, waitingLane := range s.waiting {
+				if waitingLane == ln {
+					s.waiting = append(s.waiting[:index], s.waiting[index+1:]...)
+					return
+				}
+			}
+		}
+		switch {
+		case initializationErr != nil:
+			removeReservation()
+		case s.closed:
+			removeReservation()
+			s.closeLaneSession(candidate.sess)
+			initializationErr = errSchedClosed
+		case ctx.Err() != nil:
+			removeReservation()
+			s.closeLaneSession(candidate.sess)
+			initializationErr = ctx.Err()
+		default:
+			ln.sess = candidate.sess
+			ln.logits = candidate.logits
+			ln.state = candidate.state
+			ln.promptCursor = candidate.promptCursor
+			ln.promptLen = candidate.promptLen
+			ln.prefillChunkTokens = candidate.prefillChunkTokens
+			ln.materializing = false
+		}
+		waitingRemains := len(s.waiting) > 0
+		s.mu.Unlock()
+		if initializationErr != nil {
+			if waitingRemains {
+				s.started.Do(func() {
+					s.mu.Lock()
+					s.runStarted = true
+					s.mu.Unlock()
+					go s.run()
+				})
+				s.signal()
+			}
+			cancel()
+			return nil, initializationErr
+		}
+		s.started.Do(func() {
+			s.mu.Lock()
+			s.runStarted = true
+			s.mu.Unlock()
+			go s.run()
+		})
+		s.signal()
+		return ln, nil
+	}
+	s.mu.Unlock()
+
+	if err := s.initializeLaneExecution(ln); err != nil {
+		cancel()
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -481,13 +551,13 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		// run loop; publishing this lane would orphan its request and KV-bearing
 		// session. Reject it and release the freshly created session exactly once.
 		cancel()
-		s.closeLaneSession(sess)
+		s.closeLaneSession(ln.sess)
 		return nil, errSchedClosed
 	}
 	if err := ctx.Err(); err != nil {
 		s.mu.Unlock()
 		cancel()
-		s.closeLaneSession(sess)
+		s.closeLaneSession(ln.sess)
 		return nil, err
 	}
 	s.seqNo++
@@ -503,6 +573,62 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	})
 	s.signal()
 	return ln, nil
+}
+
+func (s *NativeScheduler) initializeLaneExecution(ln *schedLane) error {
+	sess := s.newLaneSession(ln.q4k, NativeSessionFresh)
+	if s.captureQwenState {
+		if err := sess.EnableQwen35MetalStateIdentityReceipt(ln.prompt); err != nil {
+			sess.Close()
+			return err
+		}
+	}
+	prefillChunkTokens := s.qwenPrefillChunkBudget(schedPrepare{prompt: ln.prompt, tok: ln.tok, q4k: ln.prefillQ4K}, sess, len(ln.prompt))
+	state := schedLaneDecode
+	promptCursor := len(ln.prompt)
+	promptLen := len(ln.prompt)
+	var logits []float32
+	if prefillChunkTokens == 0 {
+		if s.inBatchDedupEligible(sess, ln.prompt) {
+			var err error
+			logits, err = s.prefillCoalesced(ln.ctx, sess, ln.prompt)
+			if err != nil {
+				s.closeLaneSession(sess)
+				return err
+			}
+		} else {
+			logits = s.coldPrefillSync(sess, ln.prompt)
+		}
+		if s.captureQwenState {
+			executed, err := sess.FinalizeQwen35MetalStateIdentityReceipt()
+			if err != nil || !executed {
+				sess.Close()
+				if err == nil {
+					err = errors.New("modelengine: Qwen Metal state identity was not executed")
+				}
+				return err
+			}
+			receipt, ok := sess.Qwen35MetalStateIdentityReceipt()
+			if !ok {
+				sess.Close()
+				return errors.New("modelengine: Qwen Metal state identity receipt unavailable")
+			}
+			s.mu.Lock()
+			s.qwenStateReceipts = append(s.qwenStateReceipts, receipt)
+			s.mu.Unlock()
+		}
+	} else {
+		state = schedLanePrefilling
+		promptCursor = 0
+		promptLen = 0
+	}
+	ln.sess = sess
+	ln.logits = logits
+	ln.state = state
+	ln.promptCursor = promptCursor
+	ln.promptLen = promptLen
+	ln.prefillChunkTokens = prefillChunkTokens
+	return nil
 }
 
 // Complete is the one-shot shim every LifecycleEngine offers so it also satisfies
@@ -598,7 +724,7 @@ func (s *NativeScheduler) SetMaxTokensPerStep(n int) {
 
 // laneStepTokens is a lane's per-step token cost under maxTokensPerStep.
 func laneStepTokens(ln *schedLane) int {
-	if ln.state != schedLanePrefilling {
+	if ln.state != schedLanePrefilling && (ln.sess != nil || ln.prefillChunkTokens == 0) {
 		return 1
 	}
 	chunk := len(ln.prompt) - ln.promptCursor
@@ -616,6 +742,11 @@ func laneStepTokens(ln *schedLane) int {
 // vllm/v1/core/sched/scheduler.py:569@975dca5, Apache-2.0). An empty running set always
 // admits its first live candidate so an oversized first chunk cannot stall the loop.
 func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
+	for _, ln := range s.waiting {
+		if ln.materializing {
+			return
+		}
+	}
 	budget := 0
 	if s.maxTokensPerStep > 0 {
 		budget = s.maxTokensPerStep
@@ -755,7 +886,14 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
 	// cancelled while it was still waiting is retired here rather than promoted.
 	maxRun := s.effectiveMaxRunningLocked()
-	if s.promotionPicker != nil && len(s.waiting) > 1 {
+	waitingMaterialization := false
+	for _, ln := range s.waiting {
+		if ln.materializing {
+			waitingMaterialization = true
+			break
+		}
+	}
+	if s.promotionPicker != nil && len(s.waiting) > 1 && !waitingMaterialization {
 		slots := len(s.waiting)
 		if maxRun > 0 {
 			slots = maxRun - len(s.lanes)
@@ -781,6 +919,47 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		s.waiting = reordered
 	}
 	s.promoteWaitingLocked(maxRun)
+	var pendingMaterialization *schedLane
+	for _, ln := range s.lanes {
+		if !ln.terminal && ln.sess == nil {
+			pendingMaterialization = ln
+			break
+		}
+	}
+	if pendingMaterialization != nil {
+		closed = s.closed
+		s.mu.Unlock()
+		if err := pendingMaterialization.ctx.Err(); err != nil {
+			s.mu.Lock()
+			pendingMaterialization.finish(nil, err)
+			closed = s.closed
+			s.mu.Unlock()
+			return true, false, closed
+		}
+		candidate := *pendingMaterialization
+		initializationErr := s.initializeLaneExecution(&candidate)
+		s.mu.Lock()
+		switch {
+		case initializationErr != nil:
+			pendingMaterialization.finish(nil, initializationErr)
+		case s.closed:
+			s.closeLaneSession(candidate.sess)
+			pendingMaterialization.finish(nil, errSchedClosed)
+		case pendingMaterialization.ctx.Err() != nil:
+			s.closeLaneSession(candidate.sess)
+			pendingMaterialization.finish(nil, pendingMaterialization.ctx.Err())
+		default:
+			pendingMaterialization.sess = candidate.sess
+			pendingMaterialization.logits = candidate.logits
+			pendingMaterialization.state = candidate.state
+			pendingMaterialization.promptCursor = candidate.promptCursor
+			pendingMaterialization.promptLen = candidate.promptLen
+			pendingMaterialization.prefillChunkTokens = candidate.prefillChunkTokens
+		}
+		closed = s.closed
+		s.mu.Unlock()
+		return true, false, closed
+	}
 	if used := s.usedKVBlocksLocked(); used > s.maxObservedKVBlocks {
 		s.maxObservedKVBlocks = used
 	}
@@ -1215,6 +1394,7 @@ type schedLane struct {
 	putCtx             context.Context
 	tok                NLTokenizer
 	q4k                bool
+	prefillQ4K         bool
 	state              schedLaneState
 	promptCursor       int
 	prefillChunkTokens int
@@ -1227,11 +1407,12 @@ type schedLane struct {
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.
-	preemptMode  NativePreemptionMode
-	preemptRound int64
-	hostKV       []byte
-	gpuDirectKV  *model.Qwen38GPUDirectDescriptor
-	savedLogits  []float32
+	preemptMode   NativePreemptionMode
+	preemptRound  int64
+	hostKV        []byte
+	gpuDirectKV   *model.Qwen38GPUDirectDescriptor
+	savedLogits   []float32
+	materializing bool
 
 	tokens chan abi.EngineToken
 	done   chan struct{}

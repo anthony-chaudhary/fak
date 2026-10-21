@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -82,19 +83,27 @@ type CompileOptions struct {
 type fieldKind int
 
 const (
-	fieldString     fieldKind = iota // free printable-ASCII string, no escapes
-	fieldStringEnum                  // one of a closed set of quoted literals
-	fieldBool                        // true | false
-	fieldInt                         // -? (0 | [1-9][0-9]*)
-	fieldNumber                      // integer with optional .[0-9]+ fraction
+	fieldString      fieldKind = iota // free printable-ASCII string, no escapes
+	fieldStringEnum                   // one of a closed set of quoted literals
+	fieldBool                         // true | false
+	fieldInt                          // -? (0 | [1-9][0-9]*)
+	fieldNumber                       // integer with optional .[0-9]+ fraction
+	fieldIntegerEnum                  // one of a bounded set of canonical int64 literals
+	fieldArray                        // response-only [item,...] of one scalar or fixed-object item kind
+	fieldObject                       // response-only array item: one fixed-shape object
 )
 
 // compiledField is one required argument property in canonical (sorted) order.
 type compiledField struct {
-	name       string
-	kind       fieldKind
-	enum       []string // fieldStringEnum: sorted, deduped variants
-	quotedEnum [][]byte // enum variants with their JSON quotes, prefix-free
+	name        string
+	kind        fieldKind
+	enum        []string       // fieldStringEnum: sorted, deduped variants
+	quotedEnum  [][]byte       // enum variants with their JSON quotes, prefix-free
+	integerEnum [][]byte       // fieldIntegerEnum: sorted, deduped canonical literals
+	item        *compiledField // fieldArray: the item grammar
+	minItems    int            // fieldArray: inclusive lower bound
+	maxItems    int            // fieldArray: inclusive upper bound, -1 when unbounded
+	segs        []segment      // fieldObject: literal/value segments ending in '}'
 }
 
 // segment is one step of a tool's argument-region grammar: either a fixed
@@ -348,6 +357,11 @@ func scanValueField(f compiledField, rest []byte) valueScan {
 		return scanLiterals(rest, boolLits)
 	case fieldInt:
 		return scanNumber(rest, true)
+	case fieldIntegerEnum:
+		return scanIntegerLiterals(rest, f.integerEnum)
+	case fieldArray, fieldObject:
+		// Arrays exist only in response schemas, which step cursors instead.
+		return valueScan{state: vDead}
 	default:
 		return scanNumber(rest, false)
 	}
@@ -413,6 +427,33 @@ func scanLiterals(rest []byte, cands [][]byte) valueScan {
 		return valueScan{state: vDead}
 	}
 	return valueScan{state: vPartial, allowed: allowed}
+}
+
+func scanIntegerLiterals(rest []byte, cands [][]byte) valueScan {
+	allowed := map[byte]bool{}
+	canEnd := false
+	longestComplete := 0
+	for _, candidate := range cands {
+		switch {
+		case len(rest) < len(candidate) && bytes.Equal(rest, candidate[:len(rest)]):
+			allowed[candidate[len(rest)]] = true
+		case len(rest) == len(candidate) && bytes.Equal(rest, candidate):
+			canEnd = true
+		case len(rest) > len(candidate) && bytes.Equal(rest[:len(candidate)], candidate):
+			if len(candidate) > longestComplete {
+				longestComplete = len(candidate)
+			}
+		}
+	}
+	// An exact short member can also prefix a longer member (1 and 10). Preserve
+	// both the following object delimiter and the longer member's next byte.
+	if canEnd || len(allowed) > 0 {
+		return valueScan{state: vPartial, allowed: allowed, canEnd: canEnd}
+	}
+	if longestComplete > 0 {
+		return valueScan{state: vComplete, n: longestComplete}
+	}
+	return valueScan{state: vDead}
 }
 
 // scanNumber walks canonical JSON number syntax: -? (0 | [1-9][0-9]*) with an
@@ -630,7 +671,41 @@ func normalizeFields(tool string, schema []byte) ([]compiledField, error) {
 	return fields, nil
 }
 
-func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOptional int) ([][]compiledField, error) {
+// maxJSONSchemaDepth bounds response object nesting; the top-level object is
+// depth 1.
+const maxJSONSchemaDepth = 3
+
+// responseShape is one canonical response object: its value fields in emission
+// order and the literal/value segments the masks step.
+type responseShape struct {
+	fields []compiledField
+	segs   []segment
+}
+
+// responseObject is one object level of a response schema, properties in
+// canonical (sorted) key order.
+type responseObject struct {
+	props []responseProp
+}
+
+type responseProp struct {
+	name     string
+	optional int             // index among optional properties, -1 when required
+	field    *compiledField  // scalar or array value
+	object   *responseObject // nested object value
+}
+
+type responseBudget struct {
+	maxProperties, maxOptional int
+	properties, optional       int
+}
+
+// normalizeJSONSchemaShapes expands a response schema into its canonical
+// shapes. Nested objects with fixed properties flatten into literal and value
+// segments; optional properties at any depth (at most maxOptional in total)
+// choose among at most 2^maxOptional shapes, deduplicated when an omitted
+// object would make its own optional members irrelevant.
+func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOptional int) ([]responseShape, error) {
 	var root any
 	if err := json.Unmarshal(schema, &root); err != nil {
 		return nil, fmt.Errorf("grammar: tool %q: parse schema: %w", tool, err)
@@ -640,91 +715,183 @@ func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOpt
 	}
 	var top map[string]json.RawMessage
 	_ = json.Unmarshal(schema, &top)
+	budget := responseBudget{maxProperties: maxProperties, maxOptional: maxOptional}
+	obj, err := normalizeResponseObject(tool, "", top, 1, &budget)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[int]bool{}
+	var shapes []responseShape
+	for selection := 0; selection < 1<<budget.optional; selection++ {
+		b := responseShapeBuilder{selection: selection}
+		b.object(obj)
+		if seen[b.visited] {
+			continue
+		}
+		seen[b.visited] = true
+		b.segs = append(b.segs, segment{lit: b.lit})
+		shapes = append(shapes, responseShape{fields: b.fields, segs: b.segs})
+	}
+	return shapes, nil
+}
+
+func normalizeResponseObject(tool, path string, top map[string]json.RawMessage, depth int, budget *responseBudget) (*responseObject, error) {
 	for k := range top {
 		switch k {
-		case "type", "properties", "required", "additionalProperties", "title", "description", "$schema":
+		case "type", "properties", "required", "additionalProperties", "title", "description":
+		case "$schema":
+			if depth == 1 {
+				continue
+			}
+			fallthrough
 		default:
-			return nil, unsupported(tool, "", "top-level keyword %q", k)
+			if depth == 1 {
+				return nil, unsupported(tool, "", "top-level keyword %q", k)
+			}
+			return nil, unsupported(tool, path, "object keyword %q", k)
 		}
 	}
 	if raw, ok := top["type"]; ok {
 		var ty string
 		if err := json.Unmarshal(raw, &ty); err != nil || ty != "object" {
-			return nil, unsupported(tool, "", "top-level type %s (arguments must be an object)", raw)
+			return nil, unsupported(tool, path, "top-level type %s (arguments must be an object)", raw)
 		}
 	}
 	if raw, ok := top["additionalProperties"]; ok {
 		var ap *bool
 		if err := json.Unmarshal(raw, &ap); err != nil || ap == nil || *ap {
-			return nil, unsupported(tool, "", "additionalProperties other than false")
+			return nil, unsupported(tool, path, "additionalProperties other than false")
 		}
 	}
 	props := map[string]map[string]json.RawMessage{}
 	if raw, ok := top["properties"]; ok {
 		if err := json.Unmarshal(raw, &props); err != nil || props == nil {
-			return nil, unsupported(tool, "", "properties must be an object")
+			return nil, unsupported(tool, path, "properties must be an object")
 		}
 	}
-	if len(props) > maxProperties {
-		return nil, unsupported(tool, "", "%d properties exceed limit %d", len(props), maxProperties)
+	budget.properties += len(props)
+	if budget.properties > budget.maxProperties {
+		return nil, unsupported(tool, "", "%d properties exceed limit %d", budget.properties, budget.maxProperties)
 	}
 	var required []string
 	if raw, ok := top["required"]; ok {
 		if err := json.Unmarshal(raw, &required); err != nil || required == nil {
-			return nil, unsupported(tool, "", "required must be an array of property names")
+			return nil, unsupported(tool, path, "required must be an array of property names")
 		}
 	}
 	reqd := map[string]bool{}
 	for _, r := range required {
 		if _, ok := props[r]; !ok {
-			return nil, fmt.Errorf("grammar: tool %q: required property %q not declared in properties", tool, r)
+			return nil, fmt.Errorf("grammar: tool %q: required property %q not declared in properties", tool, path+r)
 		}
 		reqd[r] = true
-	}
-	if optional := len(props) - len(reqd); optional > maxOptional {
-		return nil, unsupported(tool, "", "%d optional properties exceed limit %d", optional, maxOptional)
 	}
 	names := make([]string, 0, len(props))
 	for name := range props {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	fields := make([]compiledField, 0, len(names))
-	optionalIndexes := make([]int, 0, maxOptional)
+	obj := &responseObject{props: make([]responseProp, 0, len(names))}
 	for _, name := range names {
 		if strings.ContainsAny(name, "\"\\") || !asciiPrintable(name) {
-			return nil, unsupported(tool, name, "property name needs JSON string escaping")
+			return nil, unsupported(tool, path+name, "property name needs JSON string escaping")
 		}
-		field, err := normalizeField(tool, name, props[name])
-		if err != nil {
-			return nil, err
-		}
+		p := responseProp{name: name, optional: -1}
 		if !reqd[name] {
-			optionalIndexes = append(optionalIndexes, len(fields))
-		}
-		fields = append(fields, field)
-	}
-
-	shapes := make([][]compiledField, 0, 1<<len(optionalIndexes))
-	for selection := 0; selection < 1<<len(optionalIndexes); selection++ {
-		shape := make([]compiledField, 0, len(fields))
-		optional := 0
-		for i := range fields {
-			if optional < len(optionalIndexes) && optionalIndexes[optional] == i {
-				include := selection&(1<<optional) != 0
-				optional++
-				if !include {
-					continue
-				}
+			p.optional = budget.optional
+			budget.optional++
+			if budget.optional > budget.maxOptional {
+				return nil, unsupported(tool, "", "%d optional properties exceed limit %d", budget.optional, budget.maxOptional)
 			}
-			shape = append(shape, fields[i])
 		}
-		shapes = append(shapes, shape)
+		prop := props[name]
+		var ty string
+		if raw, ok := prop["type"]; ok {
+			_ = json.Unmarshal(raw, &ty)
+		}
+		switch ty {
+		case "object":
+			if depth >= maxJSONSchemaDepth {
+				return nil, unsupported(tool, path+name, "object nesting deeper than %d", maxJSONSchemaDepth)
+			}
+			child, err := normalizeResponseObject(tool, path+name+".", prop, depth+1, budget)
+			if err != nil {
+				return nil, err
+			}
+			p.object = child
+		case "array":
+			field, err := normalizeArrayField(tool, path+name, prop, depth, budget)
+			if err != nil {
+				return nil, err
+			}
+			p.field = &field
+		default:
+			field, err := normalizeResponseField(tool, path+name, prop)
+			if err != nil {
+				return nil, err
+			}
+			p.field = &field
+		}
+		obj.props = append(obj.props, p)
 	}
-	return shapes, nil
+	return obj, nil
+}
+
+// responseShapeBuilder lowers one optional-property selection into segments,
+// merging literals maximally so every value segment has a literal successor.
+// visited records the selected optional properties actually reached, so
+// selections that differ only inside an omitted object share one shape.
+type responseShapeBuilder struct {
+	selection int
+	visited   int
+	lit       []byte
+	segs      []segment
+	fields    []compiledField
+}
+
+func (b *responseShapeBuilder) object(o *responseObject) {
+	b.lit = append(b.lit, '{')
+	first := true
+	for i := range o.props {
+		p := &o.props[i]
+		if p.optional >= 0 {
+			if b.selection&(1<<p.optional) == 0 {
+				continue
+			}
+			b.visited |= 1 << p.optional
+		}
+		if !first {
+			b.lit = append(b.lit, ',')
+		}
+		first = false
+		b.lit = append(b.lit, '"')
+		b.lit = append(b.lit, p.name...)
+		b.lit = append(b.lit, '"', ':')
+		if p.object != nil {
+			b.object(p.object)
+			continue
+		}
+		b.segs = append(b.segs, segment{lit: b.lit}, segment{field: p.field})
+		b.fields = append(b.fields, *p.field)
+		b.lit = nil
+	}
+	b.lit = append(b.lit, '}')
 }
 
 func normalizeField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
+	return normalizeFieldMode(tool, name, prop, false)
+}
+
+func normalizeResponseField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
+	return normalizeFieldMode(tool, name, prop, true)
+}
+
+const (
+	maxResponseIntegerEnumMembers = 32
+	maxResponseArrayItems         = 64
+)
+
+func normalizeFieldMode(tool, name string, prop map[string]json.RawMessage, allowIntegerEnums bool) (compiledField, error) {
 	for k := range prop {
 		switch k {
 		case "type", "enum", "const", "title", "description":
@@ -740,6 +907,12 @@ func normalizeField(tool, name string, prop map[string]json.RawMessage) (compile
 	}
 	_, hasEnum := prop["enum"]
 	_, hasConst := prop["const"]
+	if allowIntegerEnums && ty == "integer" && (hasEnum || hasConst) {
+		if hasEnum && hasConst {
+			return compiledField{}, unsupported(tool, name, "both enum and const")
+		}
+		return normalizeIntegerEnum(tool, name, prop, hasConst)
+	}
 	if (hasEnum || hasConst) && ty != "string" {
 		return compiledField{}, unsupported(tool, name, "enum/const on type %q (v0 supports string enums only)", ty)
 	}
@@ -787,6 +960,135 @@ func normalizeField(tool, name string, prop map[string]json.RawMessage) (compile
 	default:
 		return compiledField{}, unsupported(tool, name, "type %q", ty)
 	}
+}
+
+// normalizeArrayField admits a response-only array whose items is one scalar
+// schema or one fixed-shape object, with optional minItems/maxItems bounds of
+// at most maxResponseArrayItems. depth is the enclosing object's level. Arrays
+// of arrays, tuple items and other array keywords are refused.
+func normalizeArrayField(tool, name string, prop map[string]json.RawMessage, depth int, budget *responseBudget) (compiledField, error) {
+	for k := range prop {
+		switch k {
+		case "type", "items", "minItems", "maxItems", "title", "description":
+		default:
+			return compiledField{}, unsupported(tool, name, "array keyword %q", k)
+		}
+	}
+	rawItems, ok := prop["items"]
+	if !ok {
+		return compiledField{}, unsupported(tool, name, "array without items")
+	}
+	var items map[string]json.RawMessage
+	if err := json.Unmarshal(rawItems, &items); err != nil || items == nil {
+		return compiledField{}, unsupported(tool, name, "array items must be one schema object")
+	}
+	var itemType string
+	if raw, ok := items["type"]; ok {
+		_ = json.Unmarshal(raw, &itemType)
+	}
+	var item compiledField
+	var err error
+	switch itemType {
+	case "array":
+		return compiledField{}, unsupported(tool, name, "array items of type %q", itemType)
+	case "object":
+		item, err = normalizeObjectItem(tool, name+"[]", items, depth, budget)
+	default:
+		item, err = normalizeResponseField(tool, name+"[]", items)
+	}
+	if err != nil {
+		return compiledField{}, err
+	}
+	bound := func(key string, def int) (int, error) {
+		raw, ok := prop[key]
+		if !ok {
+			return def, nil
+		}
+		var n int
+		if err := json.Unmarshal(raw, &n); err != nil || n < 0 || n > maxResponseArrayItems || string(bytes.TrimSpace(raw)) != strconv.Itoa(n) {
+			return 0, unsupported(tool, name, "%s must be an integer in [0, %d]", key, maxResponseArrayItems)
+		}
+		return n, nil
+	}
+	minItems, err := bound("minItems", 0)
+	if err != nil {
+		return compiledField{}, err
+	}
+	maxItems, err := bound("maxItems", -1)
+	if err != nil {
+		return compiledField{}, err
+	}
+	if maxItems >= 0 && minItems > maxItems {
+		return compiledField{}, unsupported(tool, name, "minItems %d exceeds maxItems %d", minItems, maxItems)
+	}
+	return compiledField{name: name, kind: fieldArray, item: &item, minItems: minItems, maxItems: maxItems}, nil
+}
+
+// normalizeObjectItem lowers an array's object item into one segment list.
+// Every member at every level is required and any array inside holds only
+// scalars, so every item has the same shape and the cursor steps it with one
+// extra array frame instead of a stack.
+func normalizeObjectItem(tool, path string, items map[string]json.RawMessage, depth int, budget *responseBudget) (compiledField, error) {
+	if depth >= maxJSONSchemaDepth {
+		return compiledField{}, unsupported(tool, path, "object nesting deeper than %d", maxJSONSchemaDepth)
+	}
+	obj, err := normalizeResponseObject(tool, path+".", items, depth+1, budget)
+	if err != nil {
+		return compiledField{}, err
+	}
+	if err := requireFixedObject(tool, path+".", obj); err != nil {
+		return compiledField{}, err
+	}
+	var b responseShapeBuilder
+	b.object(obj)
+	return compiledField{name: path, kind: fieldObject, segs: append(b.segs, segment{lit: b.lit})}, nil
+}
+
+func requireFixedObject(tool, path string, o *responseObject) error {
+	for _, p := range o.props {
+		switch {
+		case p.optional >= 0:
+			return unsupported(tool, path+p.name, "optional property inside an array item")
+		case p.object != nil:
+			if err := requireFixedObject(tool, path+p.name+".", p.object); err != nil {
+				return err
+			}
+		case p.field.kind == fieldArray && p.field.item.kind == fieldObject:
+			return unsupported(tool, path+p.name, "array of objects inside an array item")
+		}
+	}
+	return nil
+}
+
+func normalizeIntegerEnum(tool, name string, prop map[string]json.RawMessage, isConst bool) (compiledField, error) {
+	var members []json.RawMessage
+	if isConst {
+		members = []json.RawMessage{prop["const"]}
+	} else if err := json.Unmarshal(prop["enum"], &members); err != nil || members == nil {
+		return compiledField{}, unsupported(tool, name, "integer enum must be an array")
+	}
+	if len(members) == 0 {
+		return compiledField{}, unsupported(tool, name, "empty enum")
+	}
+	if len(members) > maxResponseIntegerEnumMembers {
+		return compiledField{}, unsupported(tool, name, "integer enum has %d members, limit %d", len(members), maxResponseIntegerEnumMembers)
+	}
+	canonical := make([]string, 0, len(members))
+	for _, raw := range members {
+		literal := strings.TrimSpace(string(raw))
+		value, err := strconv.ParseInt(literal, 10, 64)
+		if err != nil {
+			return compiledField{}, unsupported(tool, name, "integer enum member is not a signed int64")
+		}
+		canonical = append(canonical, strconv.FormatInt(value, 10))
+	}
+	sort.Strings(canonical)
+	canonical = dedupSorted(canonical)
+	field := compiledField{name: name, kind: fieldIntegerEnum}
+	for _, literal := range canonical {
+		field.integerEnum = append(field.integerEnum, []byte(literal))
+	}
+	return field, nil
 }
 
 func asciiPrintable(s string) bool {
