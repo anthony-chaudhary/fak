@@ -11,39 +11,52 @@ import (
 // the required-scalar object grammar used by CallMask, without the tool-call
 // envelope. Unsupported schema features are refused by CompileJSONSchema.
 type JSONSchemaMask struct {
-	object compiledTool
-	dec    TokenDecoder
-	eos    int
+	objects []compiledTool
+	dec     TokenDecoder
+	eos     int
 
 	decodedOnce sync.Once
 	decoded     [][]byte
 }
 
-// CompileJSONSchema compiles the currently supported required-scalar object
-// subset into a tokenizer-aware mask. The accepted schema surface is exactly
-// normalizeFields' surface; unsupported keywords return ErrUnsupportedSchema.
+const (
+	maxJSONSchemaBytes      = 65_536
+	maxJSONSchemaProperties = 16
+	maxJSONSchemaOptional   = 4
+)
+
+// CompileJSONSchema compiles the currently supported scalar object subset into
+// a tokenizer-aware mask. Up to four optional properties are expanded into at
+// most 16 canonical shapes; unsupported keywords return ErrUnsupportedSchema.
 func CompileJSONSchema(schema []byte, dec TokenDecoder, opts CompileOptions) (*JSONSchemaMask, error) {
 	if dec == nil {
 		return nil, errors.New("grammar: CompileJSONSchema needs a TokenDecoder (inject tokenizer TokenBytes)")
 	}
-	fields, err := normalizeFields("response", schema)
+	if len(schema) > maxJSONSchemaBytes {
+		return nil, unsupported("response", "", "schema size %d exceeds limit %d", len(schema), maxJSONSchemaBytes)
+	}
+	shapes, err := normalizeJSONSchemaShapes("response", schema, maxJSONSchemaProperties, maxJSONSchemaOptional)
 	if err != nil {
 		return nil, err
 	}
-	segs := buildSegments(fields)
-	last := len(segs) - 1
-	if last < 0 || segs[last].field != nil || len(segs[last].lit) < 2 ||
-		!bytes.Equal(segs[last].lit[len(segs[last].lit)-2:], []byte("}}")) {
-		return nil, errors.New("grammar: CompileJSONSchema internal object grammar is incomplete")
+	objects := make([]compiledTool, 0, len(shapes))
+	for _, fields := range shapes {
+		segs := buildSegments(fields)
+		last := len(segs) - 1
+		if last < 0 || segs[last].field != nil || len(segs[last].lit) < 2 ||
+			!bytes.Equal(segs[last].lit[len(segs[last].lit)-2:], []byte("}}")) {
+			return nil, errors.New("grammar: CompileJSONSchema internal object grammar is incomplete")
+		}
+		// buildSegments closes both the arguments object and its tool envelope.
+		// A response-format mask emits the bare arguments object, so remove only
+		// the envelope's closing brace from the final immutable segment.
+		segs[last].lit = append([]byte(nil), segs[last].lit[:len(segs[last].lit)-1]...)
+		objects = append(objects, compiledTool{fields: fields, segs: segs})
 	}
-	// buildSegments closes both the arguments object and its tool envelope.
-	// A response-format mask emits the bare arguments object, so remove only
-	// the envelope's closing brace from the final immutable segment.
-	segs[last].lit = append([]byte(nil), segs[last].lit[:len(segs[last].lit)-1]...)
 	return &JSONSchemaMask{
-		object: compiledTool{fields: fields, segs: segs},
-		dec:    dec,
-		eos:    opts.EOS,
+		objects: objects,
+		dec:     dec,
+		eos:     opts.EOS,
 	}, nil
 }
 
@@ -64,8 +77,8 @@ func (m *JSONSchemaMask) MaskLogits(history []int, logits []float32) {
 		}
 		prefix = append(prefix, piece...)
 	}
-	allowed, complete := m.object.argsAllowed(prefix)
-	if complete {
+	allowed, complete := m.argsAllowed(prefix)
+	if complete && len(allowed) == 0 {
 		maskAllExcept(logits, m.eos)
 		return
 	}
@@ -75,7 +88,13 @@ func (m *JSONSchemaMask) MaskLogits(history []int, logits []float32) {
 	}
 	neg := float32(math.Inf(-1))
 	for id := range logits {
-		if id == m.eos || !m.admits(prefix, allowed, m.tokenBytes(id)) {
+		if id == m.eos {
+			if !complete {
+				logits[id] = neg
+			}
+			continue
+		}
+		if !m.admits(prefix, allowed, m.tokenBytes(id)) {
 			logits[id] = neg
 		}
 	}
@@ -102,15 +121,28 @@ func (m *JSONSchemaMask) admits(prefix []byte, first map[byte]bool, token []byte
 		return false
 	}
 	buf := append([]byte(nil), prefix...)
-	allowed, complete := first, false
+	allowed := first
 	for _, b := range token {
-		if complete || !allowed[b] {
+		if !allowed[b] {
 			return false
 		}
 		buf = append(buf, b)
-		allowed, complete = m.object.argsAllowed(buf)
+		allowed, _ = m.argsAllowed(buf)
 	}
 	return true
+}
+
+func (m *JSONSchemaMask) argsAllowed(prefix []byte) (map[byte]bool, bool) {
+	allowed := map[byte]bool{}
+	complete := false
+	for i := range m.objects {
+		next, done := m.objects[i].argsAllowed(prefix)
+		for b := range next {
+			allowed[b] = true
+		}
+		complete = complete || done
+	}
+	return allowed, complete
 }
 
 func maskAll(logits []float32) {

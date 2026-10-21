@@ -630,6 +630,100 @@ func normalizeFields(tool string, schema []byte) ([]compiledField, error) {
 	return fields, nil
 }
 
+func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOptional int) ([][]compiledField, error) {
+	var root any
+	if err := json.Unmarshal(schema, &root); err != nil {
+		return nil, fmt.Errorf("grammar: tool %q: parse schema: %w", tool, err)
+	}
+	if _, ok := root.(map[string]any); !ok {
+		return nil, unsupported(tool, "", "top-level schema must be an object")
+	}
+	var top map[string]json.RawMessage
+	_ = json.Unmarshal(schema, &top)
+	for k := range top {
+		switch k {
+		case "type", "properties", "required", "additionalProperties", "title", "description", "$schema":
+		default:
+			return nil, unsupported(tool, "", "top-level keyword %q", k)
+		}
+	}
+	if raw, ok := top["type"]; ok {
+		var ty string
+		if err := json.Unmarshal(raw, &ty); err != nil || ty != "object" {
+			return nil, unsupported(tool, "", "top-level type %s (arguments must be an object)", raw)
+		}
+	}
+	if raw, ok := top["additionalProperties"]; ok {
+		var ap *bool
+		if err := json.Unmarshal(raw, &ap); err != nil || ap == nil || *ap {
+			return nil, unsupported(tool, "", "additionalProperties other than false")
+		}
+	}
+	props := map[string]map[string]json.RawMessage{}
+	if raw, ok := top["properties"]; ok {
+		if err := json.Unmarshal(raw, &props); err != nil || props == nil {
+			return nil, unsupported(tool, "", "properties must be an object")
+		}
+	}
+	if len(props) > maxProperties {
+		return nil, unsupported(tool, "", "%d properties exceed limit %d", len(props), maxProperties)
+	}
+	var required []string
+	if raw, ok := top["required"]; ok {
+		if err := json.Unmarshal(raw, &required); err != nil || required == nil {
+			return nil, unsupported(tool, "", "required must be an array of property names")
+		}
+	}
+	reqd := map[string]bool{}
+	for _, r := range required {
+		if _, ok := props[r]; !ok {
+			return nil, fmt.Errorf("grammar: tool %q: required property %q not declared in properties", tool, r)
+		}
+		reqd[r] = true
+	}
+	if optional := len(props) - len(reqd); optional > maxOptional {
+		return nil, unsupported(tool, "", "%d optional properties exceed limit %d", optional, maxOptional)
+	}
+	names := make([]string, 0, len(props))
+	for name := range props {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	fields := make([]compiledField, 0, len(names))
+	optionalIndexes := make([]int, 0, maxOptional)
+	for _, name := range names {
+		if strings.ContainsAny(name, "\"\\") || !asciiPrintable(name) {
+			return nil, unsupported(tool, name, "property name needs JSON string escaping")
+		}
+		field, err := normalizeField(tool, name, props[name])
+		if err != nil {
+			return nil, err
+		}
+		if !reqd[name] {
+			optionalIndexes = append(optionalIndexes, len(fields))
+		}
+		fields = append(fields, field)
+	}
+
+	shapes := make([][]compiledField, 0, 1<<len(optionalIndexes))
+	for selection := 0; selection < 1<<len(optionalIndexes); selection++ {
+		shape := make([]compiledField, 0, len(fields))
+		optional := 0
+		for i := range fields {
+			if optional < len(optionalIndexes) && optionalIndexes[optional] == i {
+				include := selection&(1<<optional) != 0
+				optional++
+				if !include {
+					continue
+				}
+			}
+			shape = append(shape, fields[i])
+		}
+		shapes = append(shapes, shape)
+	}
+	return shapes, nil
+}
+
 func normalizeField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
 	for k := range prop {
 		switch k {

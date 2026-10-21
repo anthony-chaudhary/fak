@@ -2,7 +2,9 @@ package grammar
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -87,10 +89,61 @@ func TestJSONSchemaMaskDeadEndsFailClosed(t *testing.T) {
 }
 
 // fak-test:runtime fast est=10ms lane=default
+func TestJSONSchemaMaskOptionalScalarBranches(t *testing.T) {
+	const eos = 1
+	dec := jsonSchemaTokenDecoder{
+		[]byte(`{"a":"x"}`),
+		nil,
+		[]byte(`{"a":"x","b":true}`),
+		[]byte(`{"a":"x"}tail`),
+		[]byte(`{"b":true}`),
+		[]byte(`{"a":"x"`),
+		[]byte(`}`),
+		[]byte(`,"b":true}`),
+		[]byte(`,"b":false}`),
+		[]byte(`{"b":true,"a":"x"}`),
+		[]byte(`{"a":"x","b":true}tail`),
+		[]byte(`{"a":"x","b":true,"b":false}`),
+	}
+	mask, err := CompileJSONSchema([]byte(`{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"boolean"}},"required":["a"],"additionalProperties":false}`), dec, CompileOptions{EOS: eos})
+	if err != nil {
+		t.Fatalf("CompileJSONSchema optional scalar: %v", err)
+	}
+
+	logits := make([]float32, len(dec))
+	mask.MaskLogits(nil, logits)
+	if got := jsonSchemaSurvivors(logits); !got[0] || !got[2] || !got[5] || got[eos] || got[3] || got[4] || got[9] || got[10] || got[11] {
+		t.Fatalf("initial survivors = %v; want required field with omitted/present optional branches", got)
+	}
+
+	logits = make([]float32, len(dec))
+	mask.MaskLogits([]int{5}, logits)
+	if got := jsonSchemaSurvivors(logits); !got[6] || !got[7] || !got[8] || got[eos] {
+		t.Fatalf("branch-point survivors = %v; want close or optional boolean", got)
+	}
+
+	logits = make([]float32, len(dec))
+	mask.MaskLogits([]int{2}, logits)
+	if got := jsonSchemaSurvivors(logits); len(got) != 1 || !got[eos] {
+		t.Fatalf("complete optional object survivors = %v; want EOS only", got)
+	}
+
+	emptyMask, err := CompileJSONSchema([]byte(`{"type":"object","properties":{"a":{"type":"string"}},"required":[],"additionalProperties":false}`), jsonSchemaTokenDecoder{[]byte(`{}`), []byte(`{"a":"x"}`)}, CompileOptions{EOS: -1})
+	if err != nil {
+		t.Fatalf("CompileJSONSchema optional-only object: %v", err)
+	}
+	logits = make([]float32, 2)
+	emptyMask.MaskLogits(nil, logits)
+	if got := jsonSchemaSurvivors(logits); !got[0] || !got[1] {
+		t.Fatalf("optional-only survivors = %v; want empty and populated objects", got)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
 func TestCompileJSONSchemaRejectsUnsupportedSchemaWithoutWeakening(t *testing.T) {
 	cases := []string{
 		`{"properties":{"nested":{"type":"object"}},"required":["nested"]}`,
-		`{"properties":{"required":{"type":"string"},"optional":{"type":"string"}},"required":["required"]}`,
+		`{"properties":{"required":{"type":"string"},"hidden":{"type":"object"}},"required":["required"]}`,
 		`{"properties":{"a":{"type":"string","pattern":"^x$"}},"required":["a"]}`,
 		`{"properties":{"a":{"type":"array"}},"required":["a"]}`,
 	}
@@ -98,6 +151,81 @@ func TestCompileJSONSchemaRejectsUnsupportedSchemaWithoutWeakening(t *testing.T)
 		if _, err := CompileJSONSchema([]byte(schema), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1}); !errors.Is(err, ErrUnsupportedSchema) {
 			t.Fatalf("schema %s: err = %v, want ErrUnsupportedSchema", schema, err)
 		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCompileJSONSchemaOptionalBoundsAndPreservedRefusals(t *testing.T) {
+	schemaWithProperties := func(total, required int) []byte {
+		var schema strings.Builder
+		schema.WriteString(`{"type":"object","properties":{`)
+		for i := 0; i < total; i++ {
+			if i > 0 {
+				schema.WriteByte(',')
+			}
+			fmt.Fprintf(&schema, `"p%02d":{"type":"string"}`, i)
+		}
+		schema.WriteString(`},"required":[`)
+		for i := 0; i < required; i++ {
+			if i > 0 {
+				schema.WriteByte(',')
+			}
+			fmt.Fprintf(&schema, `"p%02d"`, i)
+		}
+		schema.WriteString(`],"additionalProperties":false}`)
+		return []byte(schema.String())
+	}
+
+	mask, err := CompileJSONSchema(schemaWithProperties(4, 0), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1})
+	if err != nil {
+		t.Fatalf("four optional properties: %v", err)
+	}
+	if got := len(mask.objects); got != 16 {
+		t.Fatalf("four optional properties compiled %d shapes, want 16", got)
+	}
+	if _, err := CompileJSONSchema(schemaWithProperties(16, 16), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1}); err != nil {
+		t.Fatalf("16 total properties: %v", err)
+	}
+	maxCombined, err := CompileJSONSchema(schemaWithProperties(16, 12), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1})
+	if err != nil {
+		t.Fatalf("16 total and four optional properties: %v", err)
+	}
+	if got := len(maxCombined.objects); got != 16 {
+		t.Fatalf("combined maximum compiled %d shapes, want 16", got)
+	}
+	duplicateRequiredSchema := strings.Replace(string(schemaWithProperties(5, 1)), `"required":["p00"]`, `"required":["p00","p00"]`, 1)
+	duplicateRequired, err := CompileJSONSchema([]byte(duplicateRequiredSchema), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1})
+	if err != nil {
+		t.Fatalf("duplicate required membership with four unique optionals: %v", err)
+	}
+	if got := len(duplicateRequired.objects); got != 16 {
+		t.Fatalf("duplicate required membership compiled %d shapes, want 16", got)
+	}
+	base := []byte(`{"type":"object","properties":{},"required":[]}`)
+	atByteLimit := append(append([]byte(nil), base...), []byte(strings.Repeat(" ", maxJSONSchemaBytes-len(base)))...)
+	if _, err := CompileJSONSchema(atByteLimit, jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1}); err != nil {
+		t.Fatalf("schema at byte limit: %v", err)
+	}
+
+	cases := map[string][]byte{
+		"schema byte limit":         append(atByteLimit, ' '),
+		"property count limit":      schemaWithProperties(17, 17),
+		"optional count limit":      schemaWithProperties(5, 0),
+		"null schema":               []byte(`null`),
+		"array schema":              []byte(`[]`),
+		"null properties":           []byte(`{"type":"object","properties":null,"required":[]}`),
+		"array properties":          []byte(`{"type":"object","properties":[],"required":[]}`),
+		"null required":             []byte(`{"type":"object","properties":{},"required":null}`),
+		"object required":           []byte(`{"type":"object","properties":{},"required":{}}`),
+		"null additionalProperties": []byte(`{"type":"object","properties":{},"required":[],"additionalProperties":null}`),
+	}
+	for name, schema := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := CompileJSONSchema(schema, jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1})
+			if !errors.Is(err, ErrUnsupportedSchema) {
+				t.Fatalf("err = %v, want ErrUnsupportedSchema", err)
+			}
+		})
 	}
 }
 

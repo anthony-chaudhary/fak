@@ -104,14 +104,17 @@ a JSON object. For example:
 }
 ```
 
-The native subset supports required scalar properties: strings, booleans,
-integers and numbers. Properties are emitted in sorted order. Strings use
-printable ASCII without escapes; string `enum` and `const` values must fit that
-surface. Numbers use canonical JSON syntax without exponents. Nested objects,
-arrays, optional properties and unsupported constraint keywords are rejected
-before inference. `strict` may be true or omitted. Native `json_object`, regex
-and EBNF formats are currently unsupported; upstream engine passthrough retains
-its own supported surface.
+The native subset supports required and optional scalar properties: strings,
+booleans, integers and numbers. A response may declare at most 16 properties,
+of which at most four may be optional, and its schema may contain at most 64 KiB
+(65,536 bytes). Optional properties may be omitted or emitted once; required
+properties are always emitted. Emitted keys use canonical lexicographic order.
+Strings use printable ASCII without escapes; string `enum` and `const` values
+must fit that surface. Numbers use canonical JSON syntax without exponents.
+Nested objects, arrays, unknown constraint keywords, `additionalProperties:true`,
+union keywords, regex and EBNF are rejected before inference. `strict` may be
+true or omitted. Native `json_object` is also unsupported; upstream engine
+passthrough retains its own supported surface.
 
 The mask composes with temperature, top-k, top-p, logit bias and repetition
 penalties. Buffered and per-token streaming preserve the generated JSON bytes,
@@ -120,12 +123,14 @@ only after the object is complete. A token limit, cancellation or explicit stop
 can still interrupt a response; callers must check the finish reason before
 treating a partial response as a complete object.
 
-Structured requests currently use target-only decoding. Requests combining this
-mode with tools, DFlash2, a reasoning-prefilled prompt, a thinking budget or an
-unmodified-logit inference receipt are refused. Plain text and omitted formats
-retain the ordinary route. Unsupported native combinations return HTTP 400 with
-code `native_structured_output_unsupported`; inability to select a valid token
-returns HTTP 500 with code `native_structured_decode_failed`.
+Structured requests currently use target-only decoding. The bounded optional
+property support applies only to native JSON-schema responses; tool-schema
+compilation remains required-only. Requests combining this mode with tools,
+DFlash2, a reasoning-prefilled prompt, a thinking budget or an unmodified-logit
+inference receipt are refused. Plain text and omitted formats retain the ordinary
+route. Unsupported native combinations return HTTP 400 with code
+`native_structured_output_unsupported`; inability to select a valid token returns
+HTTP 500 with code `native_structured_decode_failed`.
 
 ### OpenAI SDK — preserve `response_format`, `text.format`, `strict`, `logit_bias`
 

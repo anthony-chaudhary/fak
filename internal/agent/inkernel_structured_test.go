@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"slices"
@@ -123,6 +124,152 @@ func TestNativeStructuredCompleteAndStream(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=600ms lane=default
+func TestNativeStructuredOptionalScalarCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	encodeOne := func(text string) int {
+		t.Helper()
+		ids, err := p.tok.Encode(text)
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("encode %q: ids=%v err=%v", text, ids, err)
+		}
+		return ids[0]
+	}
+	comma, closeObject := encodeOne(","), encodeOne("}")
+	seed := int64(-17)
+	temperature := 0.8
+	messages := []Message{{Role: RoleUser, Content: "Return the requested object."}}
+
+	tests := []struct {
+		name       string
+		definition string
+		check      func(*testing.T, any)
+	}{
+		{"string", `{"type":"string","enum":["optional"]}`, func(t *testing.T, value any) {
+			if value != "optional" {
+				t.Fatalf("optional string = %#v", value)
+			}
+		}},
+		{"boolean", `{"type":"boolean"}`, func(t *testing.T, value any) {
+			if _, ok := value.(bool); !ok {
+				t.Fatalf("optional boolean has type %T", value)
+			}
+		}},
+		{"integer", `{"type":"integer"}`, func(t *testing.T, value any) {
+			n, ok := value.(json.Number)
+			if !ok {
+				t.Fatalf("optional integer has type %T", value)
+			}
+			if _, err := n.Int64(); err != nil {
+				t.Fatalf("optional integer %q: %v", n, err)
+			}
+		}},
+		{"number", `{"type":"number"}`, func(t *testing.T, value any) {
+			n, ok := value.(json.Number)
+			if !ok {
+				t.Fatalf("optional number has type %T", value)
+			}
+			if _, err := n.Float64(); err != nil {
+				t.Fatalf("optional number %q: %v", n, err)
+			}
+		}},
+	}
+
+	check := func(t *testing.T, content string, included bool, checkOptional func(*testing.T, any)) {
+		t.Helper()
+		decoder := json.NewDecoder(strings.NewReader(content))
+		decoder.UseNumber()
+		var value map[string]any
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("decode %q: %v", content, err)
+		}
+		if value["answer"] != "kept" {
+			t.Fatalf("required answer missing from %q", content)
+		}
+		optional, present := value["extra"]
+		if present != included {
+			t.Fatalf("optional presence in %q = %v, want %v", content, present, included)
+		}
+		wantProperties := 1
+		if included {
+			wantProperties++
+		}
+		if len(value) != wantProperties {
+			t.Fatalf("unexpected properties in %q", content)
+		}
+		if included {
+			checkOptional(t, optional)
+		}
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"answer":{"type":"string","const":"kept"},"extra":` + tc.definition + `},"required":["answer"],"additionalProperties":false}}}`)
+			for _, branch := range []struct {
+				name     string
+				bias     map[int]float64
+				included bool
+			}{
+				{"omit", map[int]float64{closeObject: 100}, false},
+				{"include", map[int]float64{comma: 100, closeObject: 99}, true},
+			} {
+				t.Run(branch.name, func(t *testing.T) {
+					opts := []SampleOpt{
+						WithResponseFormat(format),
+						WithSeed(&seed),
+						WithTemperature(&temperature),
+						WithLogitBias(branch.bias),
+						WithMaxTokens(96),
+					}
+					buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if buffered.FinishReason != "stop" {
+						t.Fatalf("buffered finish reason = %q, want stop", buffered.FinishReason)
+					}
+					check(t, buffered.Message.Content, branch.included, tc.check)
+					if tc.name == "string" {
+						want := `{"answer":"kept"}`
+						if branch.included {
+							want = `{"answer":"kept","extra":"optional"}`
+						}
+						if buffered.Message.Content != want {
+							t.Fatalf("forced %s output = %q, want %q", branch.name, buffered.Message.Content, want)
+						}
+					}
+					replayed, err := p.Complete(context.Background(), messages, nil, opts...)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if replayed.Message.Content != buffered.Message.Content {
+						t.Fatalf("same-seed replay = %q, want %q", replayed.Message.Content, buffered.Message.Content)
+					}
+					if replayed.FinishReason != "stop" {
+						t.Fatalf("replay finish reason = %q, want stop", replayed.FinishReason)
+					}
+
+					var streamed strings.Builder
+					stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+						streamed.WriteString(piece)
+						return nil
+					}, messages, nil, append(opts, WithPerTokenStream(true))...)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if stream.FinishReason != "stop" {
+						t.Fatalf("stream finish reason = %q, want stop", stream.FinishReason)
+					}
+					if stream.Message.Content != buffered.Message.Content || streamed.String() != stream.Message.Content {
+						t.Fatalf("seeded buffered/stream mismatch: buffered=%q streamed=%q completion=%q", buffered.Message.Content, streamed.String(), stream.Message.Content)
+					}
+					check(t, stream.Message.Content, branch.included, tc.check)
+				})
+			}
+		})
+	}
+}
+
 // fak-test:runtime fast est=50ms lane=default
 func TestNativeStructuredTextFormatPreservesOrdinaryOutput(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)
@@ -151,7 +298,42 @@ func TestNativeStructuredUnsupportedRequestRefusesBeforeSampling(t *testing.T) {
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"array"}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"strict":false,"schema":{}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{}}},"required":["answer"],"additionalProperties":false}}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"extra":{"type":"string","minLength":1}},"required":["answer"],"additionalProperties":false}}}`),
 	}
+	properties := make(map[string]any, 17)
+	required := make([]string, 0, 17)
+	for i := range 17 {
+		name := fmt.Sprintf("p%02d", i)
+		properties[name] = map[string]any{"type": "boolean"}
+		required = append(required, name)
+	}
+	cases = append(cases, nativeStructuredFormatForSchema(t, map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"required":             required,
+		"additionalProperties": false,
+	}))
+	cases = append(cases, nativeStructuredFormatForSchema(t, map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"answer": map[string]any{"type": "string"},
+			"o1":     map[string]any{"type": "boolean"},
+			"o2":     map[string]any{"type": "boolean"},
+			"o3":     map[string]any{"type": "boolean"},
+			"o4":     map[string]any{"type": "boolean"},
+			"o5":     map[string]any{"type": "boolean"},
+		},
+		"required":             []string{"answer"},
+		"additionalProperties": false,
+	}))
+	cases = append(cases, nativeStructuredFormatForSchema(t, map[string]any{
+		"type":                 "object",
+		"description":          strings.Repeat("x", 65536),
+		"properties":           map[string]any{"answer": map[string]any{"type": "string"}},
+		"required":             []string{"answer"},
+		"additionalProperties": false,
+	}))
 	for _, format := range cases {
 		_, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "refuse"}}, nil, WithResponseFormat(format))
 		if !errors.Is(err, ErrNativeStructuredUnsupported) {
@@ -161,6 +343,21 @@ func TestNativeStructuredUnsupportedRequestRefusesBeforeSampling(t *testing.T) {
 	if sampled != 0 {
 		t.Fatalf("unsupported request sampled %d times", sampled)
 	}
+}
+
+func nativeStructuredFormatForSchema(t *testing.T, schema any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"strict": true,
+			"schema": schema,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 // fak-test:runtime fast est=20ms lane=default
