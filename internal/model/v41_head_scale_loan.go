@@ -3,10 +3,13 @@ package model
 import (
 	"fmt"
 	"math"
-	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// SetV41HeadScaleLoan declares the runtime head-to-scale continuation opt-in.
+// Configure it before creating sessions; undeclared configuration remains off.
+func (c *Config) SetV41HeadScaleLoan(on bool) { c.EnableV41HeadScaleLoan = on }
 
 // v41TryHeadScaleLoan is an opt-in, synchronous single-row Step composition.
 // Both ordinary host reads remain. Projection owns every transient until the
@@ -16,7 +19,7 @@ import (
 // its original deferred projection note still follows input/head retirement.
 // Custom clock callbacks decline composition to preserve their call boundary.
 func (m *Model) v41TryHeadScaleLoan(st *v41ForwardState, projection *v41ProjectionRouteBinding, input []float32, cfg Config) (raw, scaled []float32, selected bool, cause error) {
-	if os.Getenv("FAK_V41_HEAD_SCALE_LOAN") != "1" || st == nil || st.dsparkCapture != nil || projection == nil || m == nil || m.lora != nil || m.prism != nil || v41ActivationTraceEnvPath() != "" {
+	if !cfg.EnableV41HeadScaleLoan || st == nil || st.dsparkCapture != nil || projection == nil || m == nil || m.lora != nil || m.prism != nil || v41ActivationTraceEnvPath() != "" {
 		return
 	}
 	factor := v41LogitFactor(cfg)

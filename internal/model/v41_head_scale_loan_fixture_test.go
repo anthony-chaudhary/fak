@@ -181,7 +181,6 @@ func (b *v41HeadScaleLoanRecorder) Free(x compute.Tensor) {
 // canonical composition authority, even if its ordinary implementation is equal.
 // fak-test:runtime medium est=1s lane=default
 func TestV41HeadScaleLoanOrdinaryControlAndRawFence(t *testing.T) {
-	t.Setenv("FAK_V41_HEAD_SCALE_LOAN", "1")
 	for _, nonfinite := range []bool{false, true} {
 		name := "ordinary-control"
 		if nonfinite {
@@ -189,6 +188,7 @@ func TestV41HeadScaleLoanOrdinaryControlAndRawFence(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			m := v41IncrementalPlainModel(t, 1)
+			m.Cfg.SetV41HeadScaleLoan(true)
 			m.Cfg.LogitScale, m.Cfg.LogitSoftcap, m.Cfg.SuppressTokens = .5, 0, nil
 			b := newV41HeadScaleLoanRecorder()
 			s := v41DenseTestSession(t, m, b)
@@ -244,10 +244,10 @@ func TestV41HeadScaleLoanWarmStepParity(t *testing.T) {
 		compute.BackendSupportsDeviceWeightDtype(probe, compute.Q4_K) {
 		t.Fatal("fixture must advertise exactly its F32 resident-weight capability")
 	}
-	t.Setenv("FAK_V41_HEAD_SCALE_LOAN", "1")
 	var control []float32
 	for _, ordinary := range []bool{true, false} {
 		m := v41IncrementalPlainModel(t, 1)
+		m.Cfg.SetV41HeadScaleLoan(true)
 		m.Cfg.LogitScale, m.Cfg.LogitSoftcap, m.Cfg.SuppressTokens = .5, 0, nil
 		b := newV41HeadScaleLoanRecorder()
 		s := v41DenseTestSession(t, m, b)
@@ -278,8 +278,8 @@ func TestV41HeadScaleLoanWarmStepParity(t *testing.T) {
 
 // fak-test:runtime medium est=1s lane=default
 func TestV41HeadScaleLoanRawFailurePrecedesSelectedScale(t *testing.T) {
-	t.Setenv("FAK_V41_HEAD_SCALE_LOAN", "1")
 	m := v41IncrementalPlainModel(t, 1)
+	m.Cfg.SetV41HeadScaleLoan(true)
 	m.Cfg.LogitScale = .5
 	b := newV41HeadScaleLoanRecorder()
 	s := v41DenseTestSession(t, m, b)
@@ -304,11 +304,11 @@ func TestV41HeadScaleLoanRawFailurePrecedesSelectedScale(t *testing.T) {
 
 // fak-test:runtime medium est=1s lane=default
 func TestV41HeadScaleLoanSelectedFailureRetiresAndRollsBack(t *testing.T) {
-	t.Setenv("FAK_V41_HEAD_SCALE_LOAN", "1")
 	t.Setenv("GODEBUG", "panicnil=1")
 	for _, mode := range []string{"error", "alias", "panic-nil", "goexit", "error-and-cleanup", "cleanup-nil", "cleanup-goexit", "dual-cleanup"} {
 		t.Run(mode, func(t *testing.T) {
 			m := v41IncrementalPlainModel(t, 1)
+			m.Cfg.SetV41HeadScaleLoan(true)
 			m.Cfg.LogitScale = .5
 			b := newV41HeadScaleLoanRecorder()
 			s := v41DenseTestSession(t, m, b)
@@ -372,8 +372,8 @@ func TestV41HeadScaleLoanSelectedFailureRetiresAndRollsBack(t *testing.T) {
 
 // fak-test:runtime medium est=1s lane=default
 func TestV41HeadScaleLoanCustomClockKeepsOrdinaryBoundary(t *testing.T) {
-	t.Setenv("FAK_V41_HEAD_SCALE_LOAN", "1")
 	m := v41IncrementalPlainModel(t, 1)
+	m.Cfg.SetV41HeadScaleLoan(true)
 	m.Cfg.LogitScale = .5
 	b := newV41HeadScaleLoanRecorder()
 	s := v41DenseTestSession(t, m, b)
@@ -394,5 +394,26 @@ func TestV41HeadScaleLoanCustomClockKeepsOrdinaryBoundary(t *testing.T) {
 	want := []string{"head-project", "head-read", "head-free", "scale-upload", "scale-multiply", "scale-read"}
 	if !reflect.DeepEqual(b.events, want) {
 		t.Fatalf("custom clock order=%v", b.events)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestV41HeadScaleLoanDefaultsOffDespiteLegacyEnvironment(t *testing.T) {
+	t.Setenv("FAK_V41_HEAD_SCALE_LOAN", "1")
+	m := v41IncrementalPlainModel(t, 1)
+	m.Cfg.LogitScale = .5
+	b := newV41HeadScaleLoanRecorder()
+	s := v41DenseTestSession(t, m, b)
+	b.headWeight = s.weightHAL(m.headName()).Buf()
+	s.Prefill([]int{1})
+	s.Step(2)
+	b.events, b.uploadBytes, b.scaleCalls = nil, 0, 0
+	result := s.Step(3)
+	if len(result) != m.Cfg.VocabSize || b.retainedScaleCalls != 0 || b.scaleCalls != 1 || b.uploadBytes != 4*m.Cfg.VocabSize || b.scaleInput == b.headOutput {
+		t.Fatalf("default-off changed: width=%d retained=%d scale=%d upload=%d", len(result), b.retainedScaleCalls, b.scaleCalls, b.uploadBytes)
+	}
+	want := []string{"head-project", "head-read", "head-free", "scale-upload", "scale-multiply", "scale-read"}
+	if !reflect.DeepEqual(b.events, want) || b.headLive || len(b.scaleLive) != 0 {
+		t.Fatalf("default-off order/lifetime: %v", b.events)
 	}
 }

@@ -32,6 +32,9 @@ type Config struct {
 	// EnableResidualHook gates the activation-space write seam. Its zero value is off.
 	EnableResidualHook bool
 	residualHook       ResidualHook
+	// EnableV41HeadScaleLoan opts into the synchronous head-to-scale continuation.
+	// It is runtime configuration, never checkpoint metadata. The zero value is off.
+	EnableV41HeadScaleLoan bool `json:"-"`
 
 	HiddenSize        int     `json:"hidden_size"`
 	NumLayers         int     `json:"num_hidden_layers"`
