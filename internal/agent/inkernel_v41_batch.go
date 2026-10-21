@@ -10,10 +10,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-// This driver is deliberately dormant: no planner admission or production
-// coordinator calls it. A future caller must own each Session until it returns,
-// preserve coalescedDecode's no-request-retry boundary, and deliver lane.err
-// individually instead of broadcasting a peer's failure to every request.
+// The production V4.1 coordinator owns each request Session until this driver
+// returns, preserves coalescedDecode's no-request-retry boundary, and delivers
+// lane.err individually instead of broadcasting a peer's failure to every request.
 // The planner gate may surround this call; the backend mutex must not, because
 // StepV41Batch and public Session.Step acquire their own recording-domain owner.
 func inKernelDecodeV41Lanes(ctx context.Context, lanes []*decodeLane, m *model.Model) (inKernelV41DecodeReceipt, error) {
@@ -59,6 +58,10 @@ type inKernelV41DecodeOps struct {
 	wait   func(context.Context) error
 }
 
+type inKernelV41Admission func() ([]*decodeLane, error)
+
+type inKernelV41AdmissionContextKey struct{}
+
 type inKernelV41Pending struct {
 	lane    *decodeLane
 	id      uint64
@@ -82,29 +85,50 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 	if len(lanes) > 4 || ops.batch == nil || ops.serial == nil || ops.wait == nil {
 		return receipt, fmt.Errorf("agent: invalid V4.1 decode driver admission")
 	}
-	pending := make([]inKernelV41Pending, len(lanes))
-	seen := make(map[*model.Session]bool, len(lanes))
-	for i, lane := range lanes {
-		if lane == nil || lane.s == nil || seen[lane.s] {
-			return receipt, fmt.Errorf("agent: nil or aliased V4.1 decode lane")
+	pending := make([]*inKernelV41Pending, 0, 4)
+	seen := make(map[*model.Session]bool, 4)
+	nextID := uint64(1)
+	appendLanes := func(candidates []*decodeLane) error {
+		if len(pending)+len(candidates) > 4 {
+			return fmt.Errorf("agent: invalid V4.1 decode driver admission")
 		}
-		seen[lane.s] = true
-		// Original cohort slots remain stable across every survivor compaction.
-		pending[i] = inKernelV41Pending{lane: lane, id: uint64(i + 1)}
+		for _, lane := range candidates {
+			if lane == nil || lane.s == nil || seen[lane.s] {
+				return fmt.Errorf("agent: nil or aliased V4.1 decode lane")
+			}
+			seen[lane.s] = true
+			pending = append(pending, &inKernelV41Pending{lane: lane, id: nextID})
+			nextID++
+		}
+		return nil
+	}
+	if err := appendLanes(lanes); err != nil {
+		return receipt, err
 	}
 	failPending := func(err error) {
-		for i := range pending {
-			p := &pending[i]
+		for _, p := range pending {
 			if p.pending {
 				p.lane.err, p.lane.done, p.pending = err, true, false
 			}
 		}
 	}
+	admit, _ := ctx.Value(inKernelV41AdmissionContextKey{}).(inKernelV41Admission)
+	admitAtBoundary := false
 	for {
-		input := make([]model.V41BatchLane, 0, len(lanes))
-		byID := make(map[uint64]*inKernelV41Pending, len(lanes))
-		for i := range pending {
-			p := &pending[i]
+		if admitAtBoundary && admit != nil && len(pending) < 4 {
+			admitAtBoundary = false
+			admitted, err := admit()
+			if err != nil {
+				return receipt, err
+			}
+			if err := appendLanes(admitted); err != nil {
+				failPending(err)
+				return receipt, err
+			}
+		}
+		input := make([]model.V41BatchLane, 0, len(pending))
+		byID := make(map[uint64]*inKernelV41Pending, len(pending))
+		for _, p := range pending {
 			laneCtx := inKernelV41LaneContext(ctx, p.lane)
 			if p.pending {
 				if err := laneCtx.Err(); err != nil {
@@ -162,6 +186,7 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 				}
 				continue // Keep the chosen token, RNG, counts, emit and gen unchanged.
 			}
+			committed := 0
 			for _, lane := range input {
 				p := byID[lane.ID]
 				if err := lane.Context.Err(); err != nil {
@@ -186,8 +211,10 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 				}
 				row := model.V41BatchLaneResult{ID: p.id, Logits: logits, Committed: true}
 				inKernelV41ApplyRow(p, row, nil, NativeForwardSessionStep, 1, traceDuration)
+				committed++
 				enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, elapsed)
 			}
+			admitAtBoundary = committed > 0
 			continue
 		}
 		if batchErr != nil {
@@ -203,6 +230,7 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 			inKernelV41ApplyRow(byID[row.ID], row, batchErr, NativeForwardV41BatchStep, len(input), traceDuration)
 		}
 		enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, committed, elapsed)
+		admitAtBoundary = committed > 0
 	}
 }
 

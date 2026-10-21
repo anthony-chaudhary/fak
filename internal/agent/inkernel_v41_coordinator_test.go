@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -28,6 +29,423 @@ type v41CoordinatorTrimProbe struct {
 }
 
 func (b *v41CoordinatorTrimProbe) Trim() { b.trims.Add(1) }
+
+func v41LateFillRequest(maxNew int) (*inKernelCoalesceRequest, *decodeLane, *batchLaneSink, context.CancelFunc) {
+	lanes, sinks := v41DriverLanes(1, maxNew)
+	requestContext, cancel := context.WithCancel(context.Background())
+	lane := lanes[0]
+	request := v41CoordinatorRequest(requestContext, func(runContext context.Context) (inKernelGenerateResult, error) {
+		defer lane.s.Close()
+		coordinated, err := coalescedDecode(runContext, lane)
+		if !coordinated && err == nil {
+			err = errors.New("request did not enter coordinated decode")
+		}
+		return inKernelGenerateResult{gen: lane.gen}, err
+	})
+	return request, lane, sinks[0], cancel
+}
+
+func v41LateFillSelected(input []model.V41BatchLane) model.V41BatchResult {
+	result := model.V41BatchResult{Selected: true, SharedHeadPanels: 1, SharedHeadRows: len(input), Lanes: make([]model.V41BatchLaneResult, len(input))}
+	for index, lane := range input {
+		result.Lanes[index] = model.V41BatchLaneResult{ID: lane.ID, Committed: true, Logits: []float32{0, 0, 10}}
+	}
+	return result
+}
+
+func v41LateFillQueue(planner *InKernelPlanner, requests ...*inKernelCoalesceRequest) {
+	planner.coalesceMu.Lock()
+	for _, request := range requests {
+		request.enqueued = time.Now()
+		planner.coalesceReady = append(planner.coalesceReady, request)
+	}
+	planner.coalesceRunning = true
+	planner.coalesceMu.Unlock()
+}
+
+func v41LateFillQueued(planner *InKernelPlanner) []*inKernelCoalesceRequest {
+	planner.coalesceMu.Lock()
+	defer planner.coalesceMu.Unlock()
+	return append([]*inKernelCoalesceRequest(nil), planner.coalesceReady...)
+}
+
+func v41LateFillClearQueue(planner *InKernelPlanner) {
+	planner.coalesceMu.Lock()
+	for index := range planner.coalesceReady {
+		planner.coalesceReady[index] = nil
+	}
+	planner.coalesceReady = nil
+	planner.coalesceRunning = false
+	planner.coalesceMu.Unlock()
+}
+
+func v41LateFillIDs(input []model.V41BatchLane) []uint64 {
+	ids := make([]uint64, len(input))
+	for index, lane := range input {
+		ids[index] = lane.ID
+	}
+	return ids
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41CohortLateFillBounded(t *testing.T) {
+	t.Run("fills initial headroom once and counts failed preparation", func(t *testing.T) {
+		modelInstance := model.NewSynthetic(tinyCfg())
+		planner := &InKernelPlanner{m: modelInstance}
+		requestA, laneA, _, cancelA := v41LateFillRequest(3)
+		requestB, _, _, cancelB := v41LateFillRequest(3)
+		requestD, _, _, cancelD := v41LateFillRequest(3)
+		requestE, _, _, cancelE := v41LateFillRequest(3)
+		prepareErr := errors.New("late preparation failed")
+		requestC := v41CoordinatorRequest(context.Background(), func(context.Context) (inKernelGenerateResult, error) {
+			return inKernelGenerateResult{}, prepareErr
+		})
+		defer func() {
+			cancelA()
+			cancelB()
+			cancelD()
+			cancelE()
+			v41LateFillClearQueue(planner)
+		}()
+
+		var batches [][]uint64
+		calls := 0
+		operations := inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				calls++
+				batches = append(batches, v41LateFillIDs(input))
+				if calls == 1 {
+					v41LateFillQueue(planner, requestB, requestC, requestD, requestE)
+				}
+				return v41LateFillSelected(input), nil
+			},
+			serial: func(*model.Session, int) ([]float32, error) {
+				return nil, errors.New("unexpected serial fallback")
+			},
+			wait: func(context.Context) error { return errors.New("unexpected busy wait") },
+		}
+		before := enginestep.Default.Snapshot(0, enginestep.KindCohort).Cohorts.Steps
+		finished := make(chan struct{})
+		go func() {
+			planner.runV41DecodeCohort([]*inKernelCoalesceRequest{requestA}, func(ctx context.Context, lanes []*decodeLane, _ *model.Model) (inKernelV41DecodeReceipt, error) {
+				return inKernelDecodeV41LanesWithOps(ctx, lanes, operations)
+			})
+			close(finished)
+		}()
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			cancelA()
+			cancelB()
+			cancelD()
+			cancelE()
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("late-fill cohort failed to join after cancellation")
+			}
+			t.Fatal("late-fill cohort exceeded deadline")
+		}
+		after := enginestep.Default.Snapshot(1, enginestep.KindCohort)
+		if after.Cohorts.Steps != before+1 || len(after.Recent) != 1 || after.Recent[0].Lanes != 3 {
+			t.Errorf("cohort telemetry before=%d after=%d recent=%+v", before, after.Cohorts.Steps, after.Recent)
+		}
+
+		wantBatches := [][]uint64{{1}, {1, 2, 3}, {2, 3}}
+		if !reflect.DeepEqual(batches, wantBatches) {
+			t.Errorf("batch IDs=%v want=%v", batches, wantBatches)
+		}
+		queued := v41LateFillQueued(planner)
+		if !reflect.DeepEqual(queued, []*inKernelCoalesceRequest{requestE}) {
+			t.Errorf("queue after bounded fill=%p want only E=%p", queued, requestE)
+		}
+		if requestA.decodePass.Load() != 1 || requestB.decodePass.Load() != 1 || requestC.decodePass.Load() != 0 || requestD.decodePass.Load() != 1 || requestE.decodePass.Load() != 0 {
+			t.Errorf("decode passes A/B/C/D/E=%d/%d/%d/%d/%d", requestA.decodePass.Load(), requestB.decodePass.Load(), requestC.decodePass.Load(), requestD.decodePass.Load(), requestE.decodePass.Load())
+		}
+		if requestA.closes.Load() != 1 || requestB.closes.Load() != 1 || requestC.closes.Load() != 0 || requestD.closes.Load() != 1 || requestE.closes.Load() != 0 {
+			t.Errorf("closes A/B/C/D/E=%d/%d/%d/%d/%d", requestA.closes.Load(), requestB.closes.Load(), requestC.closes.Load(), requestD.closes.Load(), requestE.closes.Load())
+		}
+		for _, request := range []*inKernelCoalesceRequest{requestA, requestB, requestC, requestD} {
+			select {
+			case <-request.receiptReady:
+				if request.receipt.CohortSize != 3 || request.receipt.SessionCloses != 3 {
+					t.Errorf("selected receipt=%+v", request.receipt)
+				}
+			default:
+				t.Errorf("selected request lacks receipt")
+			}
+		}
+		select {
+		case result := <-requestC.result:
+			if result.err != prepareErr {
+				t.Errorf("preparation error=%v", result.err)
+			}
+		default:
+			t.Errorf("failed preparation did not complete")
+		}
+		if laneA.gen != 3 {
+			t.Errorf("A generated=%d", laneA.gen)
+		}
+	})
+
+	t.Run("busy retry blocks admission and FIFO kinds cannot be bypassed", func(t *testing.T) {
+		modelInstance := model.NewSynthetic(tinyCfg())
+		planner := &InKernelPlanner{m: modelInstance}
+		requestA, laneA, sinkA, cancelA := v41LateFillRequest(3)
+		requestB, _, _, cancelB := v41LateFillRequest(3)
+		requestQwen, _, _, cancelQwen := v41LateFillRequest(2)
+		requestQwen.kind = inKernelCoalesceQwen
+		requestC, _, _, cancelC := v41LateFillRequest(2)
+		defer func() {
+			cancelA()
+			cancelB()
+			cancelQwen()
+			cancelC()
+			v41LateFillClearQueue(planner)
+		}()
+
+		var batches [][]uint64
+		var first []model.V41BatchLane
+		busyStable := false
+		busyUnchanged := false
+		fifoHeld := false
+		calls := 0
+		operations := inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				calls++
+				batches = append(batches, v41LateFillIDs(input))
+				switch calls {
+				case 1:
+					first = append([]model.V41BatchLane(nil), input...)
+					v41LateFillQueue(planner, requestB, requestQwen, requestC)
+					return v41DriverRefusal(input), model.ErrV41BatchBusy
+				case 2:
+					busyStable = reflect.DeepEqual(first, input)
+				case 3, 4:
+					fifoHeld = reflect.DeepEqual(v41LateFillQueued(planner), []*inKernelCoalesceRequest{requestQwen, requestC})
+				}
+				return v41LateFillSelected(input), nil
+			},
+			serial: func(*model.Session, int) ([]float32, error) {
+				return nil, errors.New("unexpected serial fallback")
+			},
+			wait: func(context.Context) error {
+				busyUnchanged = laneA.gen == 1 && len(laneA.forwarded) == 0 && reflect.DeepEqual(sinkA.toks, []int{1}) && reflect.DeepEqual(v41LateFillQueued(planner), []*inKernelCoalesceRequest{requestB, requestQwen, requestC})
+				return nil
+			},
+		}
+		finished := make(chan struct{})
+		go func() {
+			planner.runV41DecodeCohort([]*inKernelCoalesceRequest{requestA}, func(ctx context.Context, lanes []*decodeLane, _ *model.Model) (inKernelV41DecodeReceipt, error) {
+				return inKernelDecodeV41LanesWithOps(ctx, lanes, operations)
+			})
+			close(finished)
+		}()
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			cancelA()
+			cancelB()
+			cancelQwen()
+			cancelC()
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("busy late-fill cohort failed to join after cancellation")
+			}
+			t.Fatal("busy late-fill cohort exceeded deadline")
+		}
+
+		wantBatches := [][]uint64{{1}, {1}, {1, 2}, {2}}
+		if !reflect.DeepEqual(batches, wantBatches) || !busyStable || !busyUnchanged || !fifoHeld {
+			t.Errorf("batches=%v stable=%t unchanged=%t fifo=%t", batches, busyStable, busyUnchanged, fifoHeld)
+		}
+		if requestA.decodePass.Load() != 1 || requestB.decodePass.Load() != 1 || requestQwen.decodePass.Load() != 0 || requestC.decodePass.Load() != 0 {
+			t.Errorf("decode passes A/B/Q/C=%d/%d/%d/%d", requestA.decodePass.Load(), requestB.decodePass.Load(), requestQwen.decodePass.Load(), requestC.decodePass.Load())
+		}
+		if !reflect.DeepEqual(v41LateFillQueued(planner), []*inKernelCoalesceRequest{requestQwen, requestC}) {
+			t.Errorf("FIFO queue changed after cohort")
+		}
+	})
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestV41CohortLateFillTerminalCleanup(t *testing.T) {
+	t.Run("late preparation panic joins selected teardown", func(t *testing.T) {
+		planner := &InKernelPlanner{m: model.NewSynthetic(tinyCfg())}
+		lanes, sinks := v41DriverLanes(1, 3)
+		laneA := lanes[0]
+		cleanupStarted, releaseCleanup := make(chan struct{}), make(chan struct{})
+		requestA := v41CoordinatorRequest(context.Background(), func(runContext context.Context) (inKernelGenerateResult, error) {
+			defer func() {
+				close(cleanupStarted)
+				<-releaseCleanup
+				laneA.s.Close()
+			}()
+			_, err := coalescedDecode(runContext, laneA)
+			return inKernelGenerateResult{gen: laneA.gen}, err
+		})
+		primary := &struct{ stage string }{"late preparation"}
+		requestPanic := v41CoordinatorRequest(context.Background(), func(context.Context) (inKernelGenerateResult, error) { panic(primary) })
+		requestC, _, _, cancelC := v41LateFillRequest(2)
+		requestD, _, _, cancelD := v41LateFillRequest(2)
+		requestE, _, _, cancelE := v41LateFillRequest(2)
+		defer func() {
+			cancelC()
+			cancelD()
+			cancelE()
+			v41LateFillClearQueue(planner)
+		}()
+
+		calls := 0
+		finished := make(chan any, 1)
+		go func() {
+			defer func() { finished <- recover() }()
+			planner.runV41DecodeCohort([]*inKernelCoalesceRequest{requestA}, func(ctx context.Context, got []*decodeLane, _ *model.Model) (inKernelV41DecodeReceipt, error) {
+				return inKernelDecodeV41LanesWithOps(ctx, got, inKernelV41DecodeOps{
+					batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+						calls++
+						if calls == 1 {
+							v41LateFillQueue(planner, requestPanic, requestC, requestD, requestE)
+						}
+						return v41LateFillSelected(input), nil
+					},
+					serial: func(*model.Session, int) ([]float32, error) { return nil, errors.New("unexpected serial fallback") },
+					wait:   func(context.Context) error { return errors.New("unexpected busy wait") },
+				})
+			})
+		}()
+		select {
+		case <-cleanupStarted:
+		case <-time.After(time.Second):
+			close(releaseCleanup)
+			t.Fatal("fatal late-fill cleanup never began")
+		}
+		select {
+		case got := <-finished:
+			close(releaseCleanup)
+			t.Fatalf("panic escaped before selected cleanup: %v", got)
+		case <-time.After(10 * time.Millisecond):
+		}
+		close(releaseCleanup)
+		select {
+		case got := <-finished:
+			if got != primary {
+				t.Errorf("panic identity=%v", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("fatal late-fill cohort failed to join")
+		}
+		if calls != 1 || laneA.gen != 1 || !reflect.DeepEqual(laneA.forwarded, []int{1}) || !reflect.DeepEqual(sinks[0].toks, []int{1}) {
+			t.Errorf("panic replayed A: calls=%d gen=%d forwarded=%v emitted=%v", calls, laneA.gen, laneA.forwarded, sinks[0].toks)
+		}
+		for _, request := range []*inKernelCoalesceRequest{requestA, requestPanic, requestC, requestD} {
+			select {
+			case <-request.done:
+			default:
+				t.Errorf("selected request did not finish")
+			}
+			select {
+			case <-request.receiptReady:
+			default:
+				t.Errorf("selected request lacks terminal receipt")
+			}
+		}
+		if requestA.receipt.SharedPanels != 1 || requestA.receipt.SharedRows != 1 || requestA.receipt.SharedMACs != 0 {
+			t.Errorf("fatal late-fill erased committed receipt: %+v", requestA.receipt)
+		}
+		if requestA.closes.Load() != 1 || !reflect.DeepEqual(v41LateFillQueued(planner), []*inKernelCoalesceRequest{requestE}) {
+			t.Errorf("fatal cleanup closes=%d queue=%p", requestA.closes.Load(), v41LateFillQueued(planner))
+		}
+		gateContext, gateCancel := context.WithTimeout(context.Background(), time.Second)
+		defer gateCancel()
+		if err := planner.devMu.LockContext(gateContext); err != nil {
+			t.Error("fatal late-fill retained planner gate")
+		} else {
+			planner.devMu.Unlock()
+		}
+	})
+
+	t.Run("selected cancellation is local and does not refund membership", func(t *testing.T) {
+		planner := &InKernelPlanner{m: model.NewSynthetic(tinyCfg())}
+		requestA, _, _, cancelA := v41LateFillRequest(3)
+		lanesB, _ := v41DriverLanes(1, 3)
+		laneB := lanesB[0]
+		contextB, cancelB := context.WithCancel(context.Background())
+		startedB, releaseB := make(chan struct{}), make(chan struct{})
+		requestB := v41CoordinatorRequest(contextB, func(runContext context.Context) (inKernelGenerateResult, error) {
+			close(startedB)
+			<-releaseB
+			defer laneB.s.Close()
+			_, err := coalescedDecode(runContext, laneB)
+			return inKernelGenerateResult{gen: laneB.gen}, err
+		})
+		requestC, _, _, cancelC := v41LateFillRequest(3)
+		requestD, _, _, cancelD := v41LateFillRequest(3)
+		requestE, _, _, cancelE := v41LateFillRequest(2)
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(releaseB) }) }
+		defer func() {
+			cancelA()
+			cancelB()
+			cancelC()
+			cancelD()
+			cancelE()
+			release()
+			v41LateFillClearQueue(planner)
+		}()
+
+		var batches [][]uint64
+		finished := make(chan struct{})
+		go func() {
+			planner.runV41DecodeCohort([]*inKernelCoalesceRequest{requestA}, func(ctx context.Context, got []*decodeLane, _ *model.Model) (inKernelV41DecodeReceipt, error) {
+				return inKernelDecodeV41LanesWithOps(ctx, got, inKernelV41DecodeOps{
+					batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+						batches = append(batches, v41LateFillIDs(input))
+						if len(batches) == 1 {
+							v41LateFillQueue(planner, requestB, requestC, requestD, requestE)
+						}
+						return v41LateFillSelected(input), nil
+					},
+					serial: func(*model.Session, int) ([]float32, error) { return nil, errors.New("unexpected serial fallback") },
+					wait:   func(context.Context) error { return errors.New("unexpected busy wait") },
+				})
+			})
+			close(finished)
+		}()
+		selected := false
+		select {
+		case <-startedB:
+			selected = true
+			cancelB()
+			release()
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Fatal("selected cancellation never reached admission")
+		}
+		if selected {
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("selected cancellation cohort failed to join")
+			}
+		}
+		if !selected || !reflect.DeepEqual(batches, [][]uint64{{1}, {1, 3, 4}, {3, 4}}) {
+			t.Errorf("selected=%t batches=%v", selected, batches)
+		}
+		select {
+		case result := <-requestB.result:
+			if !errors.Is(result.err, context.Canceled) {
+				t.Errorf("selected cancellation result=%v", result.err)
+			}
+		default:
+			t.Errorf("selected cancellation has no result")
+		}
+		if laneB.gen != 0 || len(laneB.forwarded) != 0 || requestB.closes.Load() != 1 || requestE.decodePass.Load() != 0 || !reflect.DeepEqual(v41LateFillQueued(planner), []*inKernelCoalesceRequest{requestE}) {
+			t.Errorf("canceled lane gen=%d forwarded=%v closes=%d Epasses=%d queue=%p", laneB.gen, laneB.forwarded, requestB.closes.Load(), requestE.decodePass.Load(), v41LateFillQueued(planner))
+		}
+	})
+}
 
 // Scripted positive results below qualify request/driver state transitions only.
 // No Flash head arithmetic or actual Complete admission is fabricated.
