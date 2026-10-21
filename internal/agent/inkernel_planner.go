@@ -443,6 +443,9 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
 		return nil, err
 	}
+	if err := refuseNativeGuidedCarriers(sp.GuidedDecode); err != nil {
+		return nil, err
+	}
 	if p.dflash2 != nil {
 		if err := validateDFlash2Stops(sp.Stop); err != nil {
 			return nil, err
@@ -2054,6 +2057,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
+		return nil, err
+	}
+	if err := refuseNativeGuidedCarriers(sp.GuidedDecode); err != nil {
 		return nil, err
 	}
 	ctx = withNativeTargetSampleSeed(ctx, sp.Seed)

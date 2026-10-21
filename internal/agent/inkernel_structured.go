@@ -18,6 +18,34 @@ var (
 	ErrNativeStructuredNoToken     = errors.New("native structured output has no allowed token")
 )
 
+type nativeGuidedCarrierError struct{ Carrier string }
+
+func (e *nativeGuidedCarrierError) Error() string {
+	return fmt.Sprintf("%v: guided carrier %q", ErrNativeStructuredUnsupported, e.Carrier)
+}
+
+func (e *nativeGuidedCarrierError) Unwrap() error { return ErrNativeStructuredUnsupported }
+
+// refuseNativeGuidedCarriers rejects every provider-native guided-decode field:
+// the native route enforces only response_format json_schema, so serving any
+// other carrier would return unconstrained text as if it were constrained.
+func refuseNativeGuidedCarriers(guided map[string]json.RawMessage) error {
+	carrier, found := "", false
+	for key, raw := range guided {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+			continue
+		}
+		if !found || key < carrier {
+			carrier, found = key, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return &nativeGuidedCarrierError{Carrier: carrier}
+}
+
 type nativeStructuredConstraintContextKey struct{}
 
 // nativeStructuredPhase places a structured response relative to an optional

@@ -129,10 +129,27 @@ up to three object levels including the top; an object item sits one level below
 the object that holds its array. The 16-property and four-optional limits count
 every property at every level, including item members; an omitted optional
 object omits its members.
-Unknown constraint keywords, `additionalProperties:true`, union keywords, regex
-and EBNF are also rejected before inference. `strict` may be true
-or omitted. Native `json_object` is unsupported; upstream engine passthrough
-retains its own supported surface.
+Unknown constraint keywords, `additionalProperties:true` and union keywords are
+also rejected before inference. `strict` may be true or omitted. Native
+`json_object` is unsupported; upstream engine passthrough retains its own
+supported surface.
+
+On `/v1/chat/completions`, `response_format` with type `json_schema` is the only
+constraint carrier the native route enforces. Every other carrier on that route
+is refused before prefill instead of being ignored: other `response_format`
+types (`json_object`, `regex`, `grammar`) and every provider-native guided field
+(`guided_json`, `guided_regex`, `guided_choice`, `guided_grammar`,
+`guided_decoding_backend`, `json_schema`, `regex`, `ebnf`). This applies to
+buffered and streamed requests, including when a guided field accompanies a
+supported `json_schema` response format. A `guided_decoding_backend` alone is
+refused too, since the native route has no selectable backend. A guided field
+sent as `null` counts as absent. Regex and EBNF constraints therefore need an
+upstream engine in ride mode.
+
+The legacy `/v1/completions` route does not parse `response_format` or any
+guided field yet. Carriers sent there are dropped rather than refused, in native
+and ride mode alike, so the response is unconstrained text with HTTP 200. Send
+constrained requests to `/v1/chat/completions`.
 
 The mask composes with temperature, top-k, top-p, logit bias and repetition
 penalties. Buffered and per-token streaming preserve the generated JSON bytes,
@@ -203,16 +220,19 @@ Front the engine and let it do the token-level enforcement:
 fak serve --provider openai --base-url http://127.0.0.1:8000/v1 --model your-model
 ```
 
-Use the **current** structured-output field names: `response_format` (OpenAI-compatible)
-or the engine's `structured_outputs` object. fak is a transparent proxy — it forwards
-whatever constraint field the client sends and does not rewrite it — but recipes should
-prefer the current names.
+Use the **current** structured-output field name `response_format` (OpenAI-compatible).
+On `/v1/chat/completions`, fak forwards `response_format` and the guided fields listed
+under the native section (`guided_json`, `guided_regex`, `guided_choice`,
+`guided_grammar`, `guided_decoding_backend`, `json_schema`, `regex`, `ebnf`) without
+rewriting them. The engine's `structured_outputs` object is not on that allowlist yet,
+so the chat route drops it; send `response_format` instead. The legacy
+`/v1/completions` route forwards none of these carriers yet.
 
 > **Deprecated-field warning.** vLLM **removed** the older top-level guided fields
 > (`guided_json`, `guided_grammar`, `guided_choice`, `guided_regex`) in **v0.12.0** in
 > favor of `structured_outputs` / `response_format`. A client still sending the old
 > fields will have them forwarded unchanged by fak, but a current vLLM will ignore them.
-> Prefer `response_format` / `structured_outputs`. SGLang accepts JSON Schema, regex, and
+> Prefer `response_format` through fak. SGLang accepts JSON Schema, regex, and
 > EBNF with XGrammar as the default backend.
 
 The engine enforces the grammar at decode; fak forwards the constraint and adjudicates the
