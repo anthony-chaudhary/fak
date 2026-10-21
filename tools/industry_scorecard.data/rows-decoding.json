@@ -266,12 +266,12 @@
       "unit": "samplers supported (temp/top-p/top-k/min-p)",
       "higher_is_better": true,
       "verdict": "no-claim",
-      "status": "stub",
+      "status": "shipped",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "No fak evidence: CLAIMS.md In-kernel model describes 'a real greedy Prefill+Step decode' and 'real greedy speculative decode is token-identical to plain greedy' — the decode path is GREEDY-ONLY. No temperature, top-p, top-k, or min-p sampler is mentioned in CLAIMS.md or BENCHMARK-AUTHORITY.md.",
+      "fak_doc": "internal/agent/inkernel_sampling.go sampleLogitsWithPenaltyCoreWS (temperature, top-p, top-k, min-p, bias, penalties); structured masks in internal/agent/inkernel_structured.go. Witnesses: TestTopKExcludesTokensOutsideTheK, TestTopPNucleusTruncateEquivalence, TestSamplerMinPComposesBeforeTopKAndTopP, TestSamplerRandomizedPITIsUniform, TestSampleLogitsWithPenaltyFrequencySuppressesRepeatedToken, TestNativeStructuredCompleteAndStream, TestNativeGuidedRegexConstrainsCompletion, TestNativeGuidedJSONConstrainsCompletion, TestNativeGuidedChoiceConstrainsCompletion (go test ./internal/agent). No sampler-parity benchmark exists.",
       "apples_to_apples": false,
-      "comparison_note": "REAL GAP. fak's in-kernel model decodes greedily only (argmax), which is what makes its losslessness proofs tractable, but it ships NO stochastic samplers (temperature/top-p/top-k/min-p). min-p is now native across vLLM/llama.cpp/SGLang/TensorRT-LLM; fak has none. A production serving engine needs samplers; fak makes no claim. (When fronting an external engine via fak guard / fak serve, sampling passes through to that engine untouched — fak's own engine has no sampler.)",
+      "comparison_note": "Mechanism shipped; cross-engine parity not measured yet. The native `fak serve` route samples with temperature, top-p, top-k, min-p (vLLM order), logit_bias, frequency and presence penalties, and a per-request seed; temperature 0 is greedy. The same lanes mask logits for structured output: a bounded JSON-schema subset (`response_format` json_schema or `guided_json`), `guided_regex`/`regex`, and `guided_choice`. Typical-p, multiplicative repetition penalty, n/best_of and pluggable logits processors are not native yet. With no measured sampler-parity number against vLLM or llama.cpp, the verdict stays no-claim. In ride mode, sampling passes through to the fronted engine untouched.",
       "measured_on": "2026-06-23"
     }
   ]

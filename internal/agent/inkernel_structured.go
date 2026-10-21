@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -28,46 +30,148 @@ func (e *nativeGuidedCarrierError) Error() string {
 
 func (e *nativeGuidedCarrierError) Unwrap() error { return ErrNativeStructuredUnsupported }
 
-// nativeGuidedRegexCarriers are the only guided fields the native route
+// nativeGuidedRegexCarriers are the guided regex fields the native route
 // enforces; the first one present names the request's pattern.
 var nativeGuidedRegexCarriers = [...]string{"guided_regex", "regex"}
+
+// nativeGuidedCarriers are every guided field the native route enforces.
+var nativeGuidedCarriers = [...]string{"guided_choice", "guided_json", "guided_regex", "regex"}
+
+// guided_choice compiles to a regex alternation; these bounds keep its escaped
+// pattern and automaton inside the regex mask's caps.
+const (
+	maxNativeGuidedChoices     = 128
+	maxNativeGuidedChoiceBytes = 1024
+)
+
+// nativeGuided is the one guided constraint a request carries: a regex pattern
+// (guided_regex, regex, guided_choice) or a JSON schema (guided_json).
+type nativeGuided struct {
+	carrier string
+	pattern string
+	schema  json.RawMessage
+}
 
 // refuseNativeGuidedCarriers rejects every provider-native guided-decode field
 // the native route cannot enforce, so no carrier yields unconstrained text as if
 // it were constrained.
 func refuseNativeGuidedCarriers(guided map[string]json.RawMessage) error {
-	_, _, err := nativeGuidedRegex(guided)
+	_, err := parseNativeGuided(guided)
 	return err
 }
 
-// nativeGuidedRegex returns the guided regex carrier and pattern, if any. Both
-// regex carriers may be sent only with the same string pattern.
-func nativeGuidedRegex(guided map[string]json.RawMessage) (carrier, pattern string, err error) {
-	refused, found := "", false
+// parseNativeGuided returns the request's guided constraint, if any. Only one
+// kind may be sent; both regex carriers may be sent only with the same pattern.
+func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) {
+	refused, kinds := "", []string{}
 	for key, raw := range guided {
-		if nativeGuidedAbsent(raw) || slices.Contains(nativeGuidedRegexCarriers[:], key) {
+		if nativeGuidedAbsent(raw) {
 			continue
 		}
-		if !found || key < refused {
-			refused, found = key, true
+		if !slices.Contains(nativeGuidedCarriers[:], key) {
+			if refused == "" || key < refused {
+				refused = key
+			}
+			continue
 		}
+		if key == "regex" && !nativeGuidedAbsent(guided["guided_regex"]) {
+			continue
+		}
+		kinds = append(kinds, key)
 	}
-	if found {
-		return "", "", &nativeGuidedCarrierError{Carrier: refused}
+	if refused != "" {
+		return nativeGuided{}, &nativeGuidedCarrierError{Carrier: refused}
 	}
+	if len(kinds) == 0 {
+		return nativeGuided{}, nil
+	}
+	slices.Sort(kinds)
+	if len(kinds) > 1 {
+		return nativeGuided{}, &nativeGuidedCarrierError{Carrier: kinds[0]}
+	}
+	switch kinds[0] {
+	case "guided_json":
+		schema, err := nativeGuidedJSONSchema(guided["guided_json"])
+		return nativeGuided{carrier: "guided_json", schema: schema}, err
+	case "guided_choice":
+		pattern, err := nativeGuidedChoicePattern(guided["guided_choice"])
+		return nativeGuided{carrier: "guided_choice", pattern: pattern}, err
+	}
+	var spec nativeGuided
 	for _, key := range nativeGuidedRegexCarriers {
 		if nativeGuidedAbsent(guided[key]) {
 			continue
 		}
 		var value string
-		if json.Unmarshal(guided[key], &value) != nil || (carrier != "" && value != pattern) {
-			return "", "", &nativeGuidedCarrierError{Carrier: key}
+		if json.Unmarshal(guided[key], &value) != nil || (spec.carrier != "" && value != spec.pattern) {
+			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: key}
 		}
-		if carrier == "" {
-			carrier, pattern = key, value
+		if spec.carrier == "" {
+			spec.carrier, spec.pattern = key, value
 		}
 	}
-	return carrier, pattern, nil
+	return spec, nil
+}
+
+// nativeGuidedJSONSchema accepts a schema object or, as vLLM does, a JSON string
+// holding one.
+func nativeGuidedJSONSchema(raw json.RawMessage) (json.RawMessage, error) {
+	schema := bytes.TrimSpace(raw)
+	if len(schema) > 0 && schema[0] == '"' {
+		var text string
+		if json.Unmarshal(schema, &text) != nil {
+			return nil, &nativeGuidedCarrierError{Carrier: "guided_json"}
+		}
+		schema = bytes.TrimSpace([]byte(text))
+	}
+	if len(schema) == 0 || schema[0] != '{' || !json.Valid(schema) {
+		return nil, &nativeGuidedCarrierError{Carrier: "guided_json"}
+	}
+	return schema, nil
+}
+
+// nativeGuidedChoicePattern turns a guided_choice list into a full-match
+// alternation of escaped literals, so the response is exactly one member.
+func nativeGuidedChoicePattern(raw json.RawMessage) (string, error) {
+	refused := &nativeGuidedCarrierError{Carrier: "guided_choice"}
+	var members []any
+	if json.Unmarshal(raw, &members) != nil || len(members) == 0 {
+		return "", refused
+	}
+	seen := make(map[string]bool, len(members))
+	quoted := make([]string, 0, min(len(members), maxNativeGuidedChoices))
+	size := 0
+	for _, member := range members {
+		choice, ok := member.(string)
+		if !ok || choice == "" {
+			return "", refused
+		}
+		if seen[choice] {
+			continue
+		}
+		seen[choice] = true
+		size += len(choice)
+		if len(quoted) == maxNativeGuidedChoices || size > maxNativeGuidedChoiceBytes {
+			return "", refused
+		}
+		quoted = append(quoted, regexp.QuoteMeta(choice))
+	}
+	return strings.Join(quoted, "|"), nil
+}
+
+// nativeGuidedSameSchema compares schemas as parsed JSON, so key order and
+// whitespace do not matter.
+func nativeGuidedSameSchema(a, b json.RawMessage) bool {
+	decode := func(raw json.RawMessage) (any, bool) {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var value any
+		err := decoder.Decode(&value)
+		return value, err == nil
+	}
+	left, okLeft := decode(a)
+	right, okRight := decode(b)
+	return okLeft && okRight && reflect.DeepEqual(left, right)
 }
 
 func nativeGuidedAbsent(raw json.RawMessage) bool {
@@ -81,8 +185,8 @@ func nativeStructuredRequested(sp SampleParams) bool {
 	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
 		return true
 	}
-	carrier, _, err := nativeGuidedRegex(sp.GuidedDecode)
-	return err == nil && carrier != ""
+	guided, err := parseNativeGuided(sp.GuidedDecode)
+	return err == nil && guided.carrier != ""
 }
 
 // nativeStructuredRunePrefix splits off a trailing incomplete UTF-8 rune so a
@@ -115,31 +219,48 @@ func (d nativeRegexTokenDecoder) TokenBytes(id int) []byte {
 }
 
 // newNativeRequestConstraint builds the request's native constraint: a guided
-// regex, or otherwise its response_format. A guided regex binds the whole
-// response, so it refuses any response_format other than text.
+// carrier, or otherwise its response_format. A guided carrier binds the whole
+// response, so it refuses any response_format other than text, except that
+// guided_json may repeat the same schema as a json_schema response_format.
 func (p *InKernelPlanner) newNativeRequestConstraint(sp SampleParams, stops map[int]bool) (*nativeStructuredConstraint, error) {
-	carrier, pattern, err := nativeGuidedRegex(sp.GuidedDecode)
+	guided, err := parseNativeGuided(sp.GuidedDecode)
 	if err != nil {
 		return nil, err
 	}
-	if carrier == "" {
+	if guided.carrier == "" {
 		return p.newNativeStructuredConstraint(sp.ResponseFormat, stops)
 	}
 	if !nativeGuidedAbsent(sp.ResponseFormat) {
 		var response struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal(bytes.TrimSpace(sp.ResponseFormat), &response) != nil || response.Type != "text" {
-			return nil, &nativeGuidedCarrierError{Carrier: carrier}
+		if json.Unmarshal(bytes.TrimSpace(sp.ResponseFormat), &response) != nil {
+			return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
 		}
+		switch {
+		case response.Type == "text":
+		case response.Type == "json_schema" && guided.schema != nil:
+			schema, err := nativeResponseFormatSchema(sp.ResponseFormat)
+			if err != nil {
+				return nil, err
+			}
+			if !nativeGuidedSameSchema(schema, guided.schema) {
+				return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+			}
+		default:
+			return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+		}
+	}
+	if guided.schema != nil {
+		return p.newNativeJSONSchemaConstraint(guided.schema, stops)
 	}
 	stopID, err := p.nativeStructuredStopID(stops)
 	if err != nil {
 		return nil, err
 	}
-	mask, err := grammar.CompileRegex(pattern, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
+	mask, err := grammar.CompileRegex(guided.pattern, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrNativeStructuredUnsupported, carrier, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrNativeStructuredUnsupported, guided.carrier, err)
 	}
 	return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
 }
@@ -191,6 +312,16 @@ func nativeStructuredJSONSchemaRequested(raw json.RawMessage) bool {
 }
 
 func (p *InKernelPlanner) newNativeStructuredConstraint(raw json.RawMessage, stops map[int]bool) (*nativeStructuredConstraint, error) {
+	schema, err := nativeResponseFormatSchema(raw)
+	if err != nil || schema == nil {
+		return nil, err
+	}
+	return p.newNativeJSONSchemaConstraint(schema, stops)
+}
+
+// nativeResponseFormatSchema returns the schema of a json_schema
+// response_format, or nil for an absent or text format.
+func nativeResponseFormatSchema(raw json.RawMessage) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil
@@ -218,6 +349,12 @@ func (p *InKernelPlanner) newNativeStructuredConstraint(raw json.RawMessage, sto
 	if len(schema) == 0 || bytes.Equal(schema, []byte("null")) {
 		return nil, fmt.Errorf("%w: json_schema schema is required", ErrNativeStructuredUnsupported)
 	}
+	return schema, nil
+}
+
+// newNativeJSONSchemaConstraint compiles the native response subset shared by
+// response_format json_schema and guided_json.
+func (p *InKernelPlanner) newNativeJSONSchemaConstraint(schema json.RawMessage, stops map[int]bool) (*nativeStructuredConstraint, error) {
 	stopID, err := p.nativeStructuredStopID(stops)
 	if err != nil {
 		return nil, err
