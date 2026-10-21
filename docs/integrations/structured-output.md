@@ -58,7 +58,7 @@ semantic accuracy, and policy safety as *separate* axes — see
 
 | Library / surface | fak integration posture | What fak can honestly prove |
 |---|---|---|
-| **OpenAI SDK** (Python/JS) | `base_url` → fak; `response_format`, Responses `text.format`, `tools`, `strict`, and `logit_bias` are forwarded to the ride engine **verbatim** | The constraint carriers cross the upstream wire byte-equivalent, and every generated tool call enters adjudication before any survivor is forwarded — test-backed below. fak does **not** perform the decode. |
+| **OpenAI SDK** (Python/JS) | `base_url` → fak; `response_format`, `tools`, `strict`, and `logit_bias` are forwarded to the ride engine **verbatim**; Responses `text.format` is first mapped onto the same `response_format` | The constraint carriers cross the upstream wire byte-equivalent, and every generated tool call enters adjudication before any survivor is forwarded — test-backed below. fak does **not** perform the decode. |
 | **vLLM / SGLang** (ride upstream) | Ride-mode engine behind fak; current structured-output field names forwarded; the **engine** enforces the grammar at decode | fak forwards the constraint and adjudicates the result; token-level enforcement is the engine's. Gateway tax is measured separately, not folded into the engine's numbers. |
 | **LangChain** (`ProviderStrategy` / `ToolStrategy`) | Same OpenAI `base_url`. `ProviderStrategy` uses provider-native structured output; `ToolStrategy` lowers the schema to tool calling | Tool calls produced by **either** strategy still adjudicate. fak is agnostic to which strategy the app chose. |
 | **Pydantic AI** (Tool / Native / Prompted Output) | `base_url` → fak. **Tool Output** and **Native Output** map to a real provider/engine enforcement path; **Prompted Output** is parse/validate/retry | Only **Tool** and **Native** are enforcement-grade. **Prompted Output is not constrained decoding** and fak does not claim it is. |
@@ -146,6 +146,27 @@ refused too, since the native route has no selectable backend. A guided field
 sent as `null` counts as absent. Regex and EBNF constraints therefore need an
 upstream engine in ride mode.
 
+On `/v1/responses`, the structured-output control is `text.format`. fak maps it
+onto the chat route's `response_format` before planning, so both routes apply
+the same rules. A `json_schema` format keeps its members (`name`, `schema`,
+`strict`, `description`) beside `type`; fak moves them unchanged under a
+`json_schema` wrapper, so the native subset and the schema caps above apply as
+they do on chat. Type `text`, a missing or `null` `format`, and a missing or
+`null` `text` keep the ordinary route. Any other type, such as `json_object`,
+passes through unchanged. The native route refuses it with HTTP 400
+`native_structured_output_unsupported`, and ride mode forwards it upstream as
+`response_format`. fak normally adds its own context-restore tool to a
+`/v1/responses` turn. It skips that tool only on a structured turn where the
+client sent no tools. Native structured output is refused alongside any tool,
+so a native request with no client tools is honored rather than refused. A
+structured turn that carries client tools still gets the restore tool, so tool
+results that fak elided stay recoverable. Three
+envelope errors return HTTP 400 `invalid_text_format`: a `text` that is not an
+object, a non-object `format`, and a `format` without a non-empty string
+`type`. Schema envelope and cap violations return the chat route's HTTP 422
+codes. This route parses no top-level `response_format` and no provider-native
+guided field, so either one is dropped.
+
 The legacy `/v1/completions` route does not parse `response_format` or any
 guided field yet. Carriers sent there are dropped rather than refused, in native
 and ride mode alike, so the response is unconstrained text with HTTP 200. Send
@@ -208,9 +229,13 @@ resp = client.chat.completions.create(
 )
 ```
 
-On the **Responses** API the carrier is `text.format` instead of `response_format`; fak
-forwards it the same way. Any tool call the constrained generation emits still enters the
-capability floor before it is returned to your code.
+On the **Responses** API the carrier is `text.format` instead of `response_format`. On
+inbound `/v1/responses`, fak maps it onto `response_format` (see the native section above)
+and then forwards or enforces it as on the chat route. When an upstream speaks the
+Responses wire, fak maps `response_format` back to `text.format`. Any tool call the
+constrained generation emits still enters the capability floor before it is returned to
+your code. `internal/gateway/responses_text_format_test.go` witnesses the inbound mapping
+on the native, ride and planner paths.
 
 ### vLLM / SGLang — ride mode, current field names, one deprecation note
 
