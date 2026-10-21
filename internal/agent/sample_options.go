@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -18,6 +20,11 @@ type SampleOpt func(*SampleParams)
 
 // ErrSeedUnsupported identifies routes without request-bound sampling seeds.
 var ErrSeedUnsupported = errors.New("sampling seed unsupported")
+
+// ErrNativeMinPUnsupported refuses a nonzero min_p on the native planner. Its
+// decode lanes do not carry the cutoff yet, and ignoring it would sample a wider
+// distribution than the client asked for.
+var ErrNativeMinPUnsupported = fmt.Errorf("%w: native min_p", model.ErrSamplingModeUnsupported)
 
 type nativeTargetSampleSeedContextKey struct{}
 

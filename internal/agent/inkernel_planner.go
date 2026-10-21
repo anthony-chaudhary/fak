@@ -446,6 +446,9 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	if err := refuseNativeGuidedCarriers(sp.GuidedDecode); err != nil {
 		return nil, err
 	}
+	if err := validateNativeSamplingParams(sp); err != nil {
+		return nil, err
+	}
 	if p.dflash2 != nil {
 		if err := validateDFlash2Stops(sp.Stop); err != nil {
 			return nil, err
@@ -2052,6 +2055,15 @@ func (p *InKernelPlanner) requestSampleSeed(ctx context.Context, temp float64) i
 	return p.nextSeedlessSampleSeed()
 }
 
+// validateNativeSamplingParams refuses sampling fields the native decode lanes
+// cannot honor, before any model work or stream commit.
+func validateNativeSamplingParams(sp SampleParams) error {
+	if sp.MinP != nil && *sp.MinP != 0 {
+		return ErrNativeMinPUnsupported
+	}
+	return nil
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
@@ -2060,6 +2072,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return nil, err
 	}
 	if err := refuseNativeGuidedCarriers(sp.GuidedDecode); err != nil {
+		return nil, err
+	}
+	if err := validateNativeSamplingParams(sp); err != nil {
 		return nil, err
 	}
 	ctx = withNativeTargetSampleSeed(ctx, sp.Seed)
@@ -2126,12 +2141,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if sp.Temperature != nil {
 			temp = *sp.Temperature
 		}
-		// Per-request nucleus cutoff; 0 (the zero value) disables truncation so an omitted
-		// top_p keeps the full softmax draw, identical to the pre-seam path.
-		topP := 0.0
-		if sp.TopP != nil {
-			topP = *sp.TopP
-		}
+		// An omitted top_p keeps the full softmax draw; an explicit 0 keeps only the
+		// most probable token instead of meaning "no nucleus".
+		topP := nativeTopP(sp.TopP)
 		// Per-request top-k; 0 (the zero value, and any value <=0) disables truncation so
 		// an omitted top_k keeps the full distribution, identical to the pre-seam path.
 		topK := 0
@@ -2151,7 +2163,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if sp.PresencePenalty != nil {
 			presPenalty = *sp.PresencePenalty
 		}
-		if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
+		if sp.NativeInferenceReceipt && (temp != 0 || (sp.TopP != nil && *sp.TopP != 0) || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 		}
 		if err := p.validateDFlash2Request(sp, temp, freqPenalty, presPenalty); err != nil {

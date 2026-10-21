@@ -1032,6 +1032,10 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 	if rejectInvalidSampling(w, validateSampling(req)) {
 		return false
 	}
+	if msg := validateSamplingPenalties(req.FrequencyPenalty, req.PresencePenalty); msg != "" {
+		writeErrCode(w, http.StatusBadRequest, codeSamplingParamOutOfRange, msg)
+		return false
+	}
 	if rejectInvalidResponseFormatCarrier(w, req.ResponseFormat) {
 		return false
 	}
@@ -1365,6 +1369,30 @@ func validateSamplingRanges(temperature, topP *float64) string {
 		return "top_p: must be in [0, 1]"
 	}
 	return ""
+}
+
+// maxAbsSamplingPenalty is the OpenAI and vLLM bound on frequency_penalty and
+// presence_penalty.
+const maxAbsSamplingPenalty = 2.0
+
+const codeSamplingParamOutOfRange = "sampling_param_out_of_range"
+
+// validateSamplingPenalties returns the 400 message for a present
+// frequency_penalty or presence_penalty outside [-2, 2], or "" when both are in
+// range. An unbounded penalty pushes a logit to +-Inf in the native sampler,
+// which would surface a client error as a model fault.
+func validateSamplingPenalties(frequency, presence *float64) string {
+	if !samplingPenaltyInRange(frequency) {
+		return "frequency_penalty: must be in [-2, 2]"
+	}
+	if !samplingPenaltyInRange(presence) {
+		return "presence_penalty: must be in [-2, 2]"
+	}
+	return ""
+}
+
+func samplingPenaltyInRange(p *float64) bool {
+	return p == nil || (*p >= -maxAbsSamplingPenalty && *p <= maxAbsSamplingPenalty)
 }
 
 // segmentContent splits assistant content into incremental streaming fragments at

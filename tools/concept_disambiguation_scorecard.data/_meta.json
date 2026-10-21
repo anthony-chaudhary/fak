@@ -14417,6 +14417,16 @@
           "category": "incidental",
           "reason": "HTTP error-code alias of ErrSeedUnsupported for the same sampling-seed input contract, not a separate maturity concept.",
           "token": "sampling_seed_unsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sampling-mode input-validation sentinel shared by native and speculative sampling refusals, not a product support or maturity classification.",
+          "token": "ErrSamplingModeUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "HTTP error-code alias of ErrSamplingModeUnsupported for the same sampling-parameter input contract, not a separate maturity concept.",
+          "token": "sampling_mode_unsupported"
         }
       ],
       "exclude": [
@@ -14455,6 +14465,7 @@
         "EngineRingCoverage",
         "ErrKVHostSnapshotUnsupported",
         "ErrQwen35GDNSequenceUnsupported",
+        "ErrSamplingModeUnsupported",
         "ErrSeedUnsupported",
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
@@ -14658,6 +14669,7 @@
         "runMaturityBaselinePromote",
         "runtime_delegation_required",
         "runtoolcoverageaudit",
+        "sampling_mode_unsupported",
         "sampling_seed_unsupported",
         "scoreparity",
         "seenSupport",
