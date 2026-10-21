@@ -216,19 +216,14 @@ func prepareDFlash2(ctx context.Context, declaration prepareTargetDeclaration, r
 	if err != nil {
 		return out, err
 	}
-	configRaw, err := json.Marshal(struct {
-		Config  model.Config `json:"config"`
-		BOS     *int         `json:"bos"`
-		EOS     int          `json:"eos"`
-		EOSList []int        `json:"eos_list"`
-	}{cfg, cfg.BOSTokenID, cfg.EOSTokenID, cfg.EOSTokenIDs})
+	targetConfigSHA256, err := targetConfigIdentitySHA256(cfg)
 	if err != nil {
-		return out, fmt.Errorf("prepare: encode target config identity: %w", err)
+		return out, err
 	}
 	receipt := prepareReceipt{
 		Schema: prepareReceiptSchema, Status: "PREPARED", Source: source, PromptID: request.PromptID, ModelID: declaration.ModelID,
 		TargetDeclarationSHA256: digestHex(declarationRaw), PromptRequestSHA256: digestHex(requestRaw),
-		TargetSpecSHA256: digestHex(targetSpecRaw), PromptIDsSHA256: digestHex(promptIDsRaw), TargetConfigSHA256: digestHex(configRaw),
+		TargetSpecSHA256: digestHex(targetSpecRaw), PromptIDsSHA256: digestHex(promptIDsRaw), TargetConfigSHA256: targetConfigSHA256,
 		TokenizerIdentitySource: "authenticated_embedded_gguf", Scope: "input-preparation-only",
 		GPUUsed: false, SidecarAuthenticated: false, PhysicalEvidence: false,
 		TargetSpec: spec, Encoding: encoding,
@@ -241,6 +236,19 @@ func prepareDFlash2(ctx context.Context, declaration prepareTargetDeclaration, r
 		return out, err
 	}
 	return preparedDFlash2{TargetSpec: targetSpecRaw, PromptIDs: promptIDsRaw, Receipt: receiptRaw}, nil
+}
+
+func targetConfigIdentitySHA256(cfg model.Config) (string, error) {
+	raw, err := json.Marshal(struct {
+		Config  model.Config `json:"config"`
+		BOS     *int         `json:"bos"`
+		EOS     int          `json:"eos"`
+		EOSList []int        `json:"eos_list"`
+	}{cfg, cfg.BOSTokenID, cfg.EOSTokenID, cfg.EOSTokenIDs})
+	if err != nil {
+		return "", fmt.Errorf("encode target config identity: %w", err)
+	}
+	return digestHex(raw), nil
 }
 
 func validatePrepareInputs(declaration prepareTargetDeclaration, request preparePromptRequest, source prepareSourceIdentity) error {

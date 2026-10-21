@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // fak-test:runtime fast est=2s
@@ -55,6 +56,25 @@ func TestPrepareDFlash2AuthenticatesAndEncodesProductionFixture(t *testing.T) {
 	}
 	if spec.ExpectedShardSetSHA256 != declaration.ExpectedShardSetSHA256 || !slices.Equal(ids, receipt.Encoding.TokenIDs) {
 		t.Fatalf("prepared outputs are not bound to receipt")
+	}
+	weights, err := ggufload.OpenWeightsAuthenticated(t.Context(), declaration.Shards, declaration.ExpectedShardSetSHA256)
+	if err != nil {
+		t.Fatalf("reopen authenticated target: %v", err)
+	}
+	cfg, err := weights.File.Config()
+	if err != nil {
+		_ = weights.Close()
+		t.Fatalf("target config: %v", err)
+	}
+	if err := weights.Close(); err != nil {
+		t.Fatalf("close authenticated target: %v", err)
+	}
+	var runtime report
+	if err := recordTargetConfig(&runtime, cfg); err != nil {
+		t.Fatalf("record runtime target config: %v", err)
+	}
+	if runtime.TargetConfigSHA256 != receipt.TargetConfigSHA256 {
+		t.Fatalf("runtime target config digest = %s, preparation receipt = %s", runtime.TargetConfigSHA256, receipt.TargetConfigSHA256)
 	}
 	if err := os.Rename(targetPath, targetPath+".retired"); err != nil {
 		t.Fatalf("authenticated target reader was not retired: %v", err)
@@ -123,6 +143,32 @@ func TestPrepareDFlash2RefusesRegisteredDeviceBackend(t *testing.T) {
 	_, err := prepareDFlash2(t.Context(), declaration, request, declarationRaw, requestRaw, prepareSourceIdentity{Revision: strings.Repeat("a", 40)})
 	if !errors.Is(err, ErrPrepareDeviceBackendRegistered) {
 		t.Fatalf("prepareDFlash2 error = %v, want %v", err, ErrPrepareDeviceBackendRegistered)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestTargetConfigIdentityMatchesPreparationAndRuntimeReport(t *testing.T) {
+	bos := 151643
+	cfg := model.Config{ModelType: "qwen3.5", HiddenSize: 5120, BOSTokenID: &bos, EOSTokenID: 151645, EOSTokenIDs: []int{151645, 151643}}
+	want, err := targetConfigIdentitySHA256(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got report
+	if err := recordTargetConfig(&got, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got.TargetConfigSHA256 != want || got.TargetConfig == nil || got.TargetConfig.BOSTokenID == nil || *got.TargetConfig.BOSTokenID != bos || got.TargetEOS != cfg.EOSTokenID || !slices.Equal(got.TargetEOSList, cfg.EOSTokenIDs) {
+		t.Fatalf("runtime target config identity = %+v, want digest %s", got, want)
+	}
+	withoutBOS := cfg
+	withoutBOS.BOSTokenID = nil
+	withoutBOSSHA, err := targetConfigIdentitySHA256(withoutBOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withoutBOSSHA == want {
+		t.Fatal("target config identity did not bind BOS")
 	}
 }
 

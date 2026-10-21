@@ -95,6 +95,7 @@ type report struct {
 	Spec                    agent.DFlash2TargetSpec `json:"trusted_target_spec"`
 	PromptSHA256            string                  `json:"prompt_ids_file_sha256"`
 	TargetConfig            *model.Config           `json:"authenticated_target_config,omitempty"`
+	TargetConfigSHA256      string                  `json:"target_config_sha256"`
 	TargetEOS               int                     `json:"target_eos"`
 	TargetEOSList           []int                   `json:"target_eos_list"`
 	RequestedDraftMode      string                  `json:"requested_draft_mode"`
@@ -245,7 +246,9 @@ func run(ctx context.Context, o options) (r report, err error) {
 	// backing. A hard external deadline also covers Goexit/background goroutines.
 	m := target.Model()
 	cfg := m.Cfg
-	r.TargetConfig, r.TargetEOS, r.TargetEOSList = &cfg, cfg.EOSTokenID, slices.Clone(cfg.EOSTokenIDs)
+	if err = recordTargetConfig(&r, cfg); err != nil {
+		return r, err
+	}
 	for _, id := range prompt {
 		if id >= cfg.VocabSize {
 			return r, errors.New("prompt token exceeds authenticated vocabulary")
@@ -302,6 +305,18 @@ func run(ctx context.Context, o options) (r report, err error) {
 	}
 	r.Status = "PRELIMINARY_PAIR_COMPLETE"
 	return r, nil
+}
+
+func recordTargetConfig(r *report, cfg model.Config) error {
+	digest, err := targetConfigIdentitySHA256(cfg)
+	if err != nil {
+		return err
+	}
+	r.TargetConfig = &cfg
+	r.TargetConfigSHA256 = digest
+	r.TargetEOS = cfg.EOSTokenID
+	r.TargetEOSList = slices.Clone(cfg.EOSTokenIDs)
+	return nil
 }
 
 func benchmarkSelection(o options) (agent.DFlash2TargetOptions, error) {
