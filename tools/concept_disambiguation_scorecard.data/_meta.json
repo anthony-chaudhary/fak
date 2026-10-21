@@ -1472,6 +1472,16 @@
           "category": "incidental",
           "reason": "Integer report field populated from the existing session SequencePosition and checked to require a fresh zero-token starting state in each measurement arm. It implements no new cache, reuse policy, or cache lifecycle.",
           "token": "InitialCacheTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Grammar mask helper that memoizes per-token decoded bytes for one request mask, not a KV, prefix or serving cache.",
+          "token": "cacheDecoded"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mutex guarding a grammar mask per-state token admission memo, not a KV, prefix or serving cache.",
+          "token": "cacheMu"
         }
       ],
       "exclude": [
@@ -1596,9 +1606,11 @@
         "cacheCreditOverrun",
         "cacheCreditStale",
         "cacheCreditUncached",
+        "cacheDecoded",
         "cacheEntryPresent",
         "cacheLoadMaxWorkersFor",
         "cacheMissing",
+        "cacheMu",
         "cacheOwned",
         "cachePrompt",
         "cacheRatio",
@@ -12545,6 +12557,11 @@
           "category": "incidental",
           "reason": "Reader for the private request seed context carrier; no independent model context or context-window behavior.",
           "token": "nativeTargetSampleSeedFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request-scoped accessor for the native min_p sampling cutoff carried on the decode context, not a context-window or KV context concept.",
+          "token": "nativeMinPFromContext"
         }
       ],
       "exclude": [
@@ -12698,6 +12715,7 @@
         "nativeCompactionObserver",
         "nativeCompactionObserverKey",
         "nativeContext",
+        "nativeMinPFromContext",
         "nativeStructuredConstraintContextKey",
         "nativeTargetSampleSeedContextKey",
         "nativeTargetSampleSeedFromContext",
@@ -14427,6 +14445,11 @@
           "category": "incidental",
           "reason": "HTTP error-code alias of ErrSamplingModeUnsupported for the same sampling-parameter input contract, not a separate maturity concept.",
           "token": "sampling_mode_unsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed grammar compile sentinel for constraint schemas or patterns outside the native subset, not a product support or maturity classification.",
+          "token": "ErrUnsupportedSchema"
         }
       ],
       "exclude": [
@@ -14470,6 +14493,7 @@
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
+        "ErrUnsupportedSchema",
         "ExactTokenParity",
         "ExcludedUnsupportedProvider",
         "FAK_PARITY_API_KEY",

@@ -480,15 +480,23 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sinkErr error
-	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
+	if nativeStructuredRequested(sp) {
+		pending := ""
 		comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 			if sinkErr != nil || tokenPiece == "" {
 				return
 			}
-			if sinkErr = sink(tokenPiece); sinkErr != nil {
+			var piece string
+			if piece, pending = nativeStructuredRunePrefix(pending + tokenPiece); piece == "" {
+				return
+			}
+			if sinkErr = sink(piece); sinkErr != nil {
 				cancel()
 			}
 		}))...)
+		if sinkErr == nil && err == nil && pending != "" {
+			sinkErr = sink(pending)
+		}
 		if sinkErr != nil {
 			return comp, sinkErr
 		}
@@ -2058,7 +2066,7 @@ func (p *InKernelPlanner) requestSampleSeed(ctx context.Context, temp float64) i
 // validateNativeSamplingParams refuses sampling fields the native decode lanes
 // cannot honor, before any model work or stream commit.
 func validateNativeSamplingParams(sp SampleParams) error {
-	if sp.MinP != nil && *sp.MinP != 0 {
+	if sp.MinP != nil && !(*sp.MinP >= 0 && *sp.MinP <= 1) {
 		return ErrNativeMinPUnsupported
 	}
 	return nil
@@ -2078,7 +2086,8 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return nil, err
 	}
 	ctx = withNativeTargetSampleSeed(ctx, sp.Seed)
-	structured, err := p.newNativeStructuredConstraint(sp.ResponseFormat, nil)
+	ctx = withNativeMinP(ctx, sp.MinP)
+	structured, err := p.newNativeRequestConstraint(sp, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2163,7 +2172,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if sp.PresencePenalty != nil {
 			presPenalty = *sp.PresencePenalty
 		}
-		if sp.NativeInferenceReceipt && (temp != 0 || (sp.TopP != nil && *sp.TopP != 0) || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
+		if sp.NativeInferenceReceipt && (temp != 0 || (sp.TopP != nil && *sp.TopP != 0) || topK > 0 || (sp.MinP != nil && *sp.MinP != 0) || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
 			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 		}
 		if err := p.validateDFlash2Request(sp, temp, freqPenalty, presPenalty); err != nil {

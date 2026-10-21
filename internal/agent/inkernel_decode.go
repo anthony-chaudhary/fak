@@ -704,6 +704,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		temp:        temp,
 		topP:        topP,
 		topK:        topK,
+		minP:        nativeMinPFromContext(ctx),
 		logitBias:   logitBias,
 		freqPenalty: freqPenalty,
 		presPenalty: presPenalty,
@@ -898,6 +899,7 @@ type decodeLane struct {
 	temp        float64
 	topP        float64
 	topK        int
+	minP        float64
 	logitBias   model.LogitBias
 	freqPenalty float64
 	presPenalty float64
@@ -1201,9 +1203,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	} else if !forced {
 		if ln.sampleKeyed && ln.temp > 0 {
 			coin := model.KeyedUniform64(ln.sampleKey, model.DomainTargetSample, ln.sampleBase+ln.gen)
-			next = sampleLogitsWithPenaltyCoinWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, coin, &ln.sampling)
+			next = sampleLogitsWithPenaltyCoreWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.minP, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, nil, coin, true, &ln.sampling)
 		} else {
-			next = sampleLogitsWithPenaltyWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
+			next = sampleLogitsWithPenaltyCoreWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.minP, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, 0, false, &ln.sampling)
 		}
 		if ln.sampling.nonFinite {
 			ln.err, ln.done = ErrNonFiniteLogits, true
@@ -1283,7 +1285,8 @@ func (ln *decodeLane) vocabSize() int {
 
 // deviceGreedy reports whether the next token is the plain argmax of the next logits, so
 // the forward may select it on the device: temperature 0 with no logit bias, no penalty and
-// no per-token logprob receipt reading the full distribution. A forced thinking-close token
+// no per-token logprob receipt reading the full distribution. top-k, top-p and min_p never
+// drop the most probable token, so they do not bar it. A forced thinking-close token
 // is chosen before sampling and composes unchanged.
 func (ln *decodeLane) deviceGreedy() bool {
 	return ln.structured == nil && ln.temp <= 0 && len(ln.logitBias) == 0 && ln.freqPenalty == 0 && ln.presPenalty == 0 &&

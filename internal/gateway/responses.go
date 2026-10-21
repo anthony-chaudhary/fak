@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,9 +49,11 @@ const ResponsesElisionsHeader = "X-Fak-Context-Elisions"
 // subset of the OpenAI Responses API). Input is raw because the Responses wire
 // allows EITHER a bare string OR an array of typed input items; decodeResponsesInput
 // folds both into the gateway's []agent.Message — the same union trick normalizeStop
-// uses for the chat `stop` field. Unknown top-level fields (text/structured-output,
-// store, reasoning, metadata, previous_response_id) are accepted and ignored for
-// drop-in compatibility; there is, by construction, no Ref field to smuggle.
+// uses for the chat `stop` field. Text carries the structured-output control
+// (`text.format`), which responsesTextResponseFormat maps onto the chat wire's
+// `response_format`. Other unknown top-level fields (reasoning, metadata) are accepted
+// and ignored for drop-in compatibility; there is, by construction, no Ref field to
+// smuggle.
 type ResponsesRequest struct {
 	Model           string          `json:"model"`
 	Input           json.RawMessage `json:"input"`
@@ -59,6 +63,7 @@ type ResponsesRequest struct {
 	Temperature     *float64        `json:"temperature,omitempty"`
 	TopP            *float64        `json:"top_p,omitempty"`
 	Stream          bool            `json:"stream,omitempty"`
+	Text            json.RawMessage `json:"text,omitempty"`
 	// Store controls whether this completed response may be addressed by a later
 	// previous_response_id. Omitted follows the Responses API default and stores it;
 	// explicit false leaves no continuation state behind.
@@ -299,9 +304,21 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
 		return
 	}
+	responseFormat, ok := responsesTextResponseFormat(req.Text)
+	if !ok {
+		writeErrCode(w, http.StatusBadRequest, "invalid_text_format", "text.format must be an object with a non-empty string type")
+		return
+	}
+	if rejectInvalidResponseFormatCarrier(w, responseFormat) {
+		return
+	}
 	restoreContinuation := newResponsesRestoreContinuation(req.Tools)
 	restoreToolName, restoreToolPresent := determineResponsesRestoreTool(req.Tools)
-	if !restoreToolPresent {
+	// A structured turn with no client tools stays tool-free: the native route refuses
+	// structured output alongside any tool, so the gateway-owned restore tool would turn
+	// every such json_schema request into a refusal. With client tools present the
+	// restore tool is still offered, so elided tool results stay recoverable.
+	if !restoreToolPresent && (len(responseFormat) == 0 || len(req.Tools) > 0) {
 		req.Tools = append(req.Tools, responsesTool{
 			Type:        "function",
 			Name:        restoreToolName,
@@ -455,6 +472,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxOutputTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
+		agent.WithResponseFormat(responseFormat),
 	}
 
 	began := time.Now()
@@ -1350,6 +1368,64 @@ func validateResponsesSampling(req ResponsesRequest) string {
 		return "max_output_tokens: must be a positive integer"
 	}
 	return validateSamplingRanges(req.Temperature, req.TopP)
+}
+
+// responsesTextResponseFormat inverts agent.responsesText: json_schema members move
+// back under a `json_schema` wrapper with their raw bytes intact, so the shared schema
+// caps measure what the client sent; other non-text types pass through verbatim. nil
+// with ok is the ordinary route; !ok is a malformed envelope.
+func responsesTextResponseFormat(raw json.RawMessage) (json.RawMessage, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, true
+	}
+	if trimmed[0] != '{' {
+		return nil, false
+	}
+	var text struct {
+		Format json.RawMessage `json:"format"`
+	}
+	if json.Unmarshal(trimmed, &text) != nil {
+		return nil, false
+	}
+	format := bytes.TrimSpace(text.Format)
+	if len(format) == 0 || bytes.Equal(format, []byte("null")) {
+		return nil, true
+	}
+	var members map[string]json.RawMessage
+	if format[0] != '{' || json.Unmarshal(format, &members) != nil {
+		return nil, false
+	}
+	var typ string
+	if json.Unmarshal(members["type"], &typ) != nil || strings.TrimSpace(typ) == "" {
+		return nil, false
+	}
+	if typ == "text" {
+		return nil, true
+	}
+	if typ != "json_schema" {
+		return append(json.RawMessage(nil), format...), true
+	}
+	keys := make([]string, 0, len(members))
+	for key := range members {
+		if key != "type" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	var out bytes.Buffer
+	out.WriteString(`{"type":"json_schema","json_schema":{`)
+	for i, key := range keys {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		name, _ := json.Marshal(key)
+		out.Write(name)
+		out.WriteByte(':')
+		out.Write(members[key])
+	}
+	out.WriteString(`}}`)
+	return out.Bytes(), true
 }
 
 // trimLeadingWS returns raw with leading JSON whitespace stripped, so a caller can

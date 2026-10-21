@@ -58,7 +58,7 @@ semantic accuracy, and policy safety as *separate* axes — see
 
 | Library / surface | fak integration posture | What fak can honestly prove |
 |---|---|---|
-| **OpenAI SDK** (Python/JS) | `base_url` → fak; `response_format`, Responses `text.format`, `tools`, `strict`, and `logit_bias` are forwarded to the ride engine **verbatim** | The constraint carriers cross the upstream wire byte-equivalent, and every generated tool call enters adjudication before any survivor is forwarded — test-backed below. fak does **not** perform the decode. |
+| **OpenAI SDK** (Python/JS) | `base_url` → fak; `response_format`, `tools`, `strict`, and `logit_bias` are forwarded to the ride engine **verbatim**; Responses `text.format` is first mapped onto the same `response_format` | The constraint carriers cross the upstream wire byte-equivalent, and every generated tool call enters adjudication before any survivor is forwarded — test-backed below. fak does **not** perform the decode. |
 | **vLLM / SGLang** (ride upstream) | Ride-mode engine behind fak; current structured-output field names forwarded; the **engine** enforces the grammar at decode | fak forwards the constraint and adjudicates the result; token-level enforcement is the engine's. Gateway tax is measured separately, not folded into the engine's numbers. |
 | **LangChain** (`ProviderStrategy` / `ToolStrategy`) | Same OpenAI `base_url`. `ProviderStrategy` uses provider-native structured output; `ToolStrategy` lowers the schema to tool calling | Tool calls produced by **either** strategy still adjudicate. fak is agnostic to which strategy the app chose. |
 | **Pydantic AI** (Tool / Native / Prompted Output) | `base_url` → fak. **Tool Output** and **Native Output** map to a real provider/engine enforcement path; **Prompted Output** is parse/validate/retry | Only **Tool** and **Native** are enforcement-grade. **Prompted Output is not constrained decoding** and fak does not claim it is. |
@@ -134,17 +134,59 @@ also rejected before inference. `strict` may be true or omitted. Native
 `json_object` is unsupported; upstream engine passthrough retains its own
 supported surface.
 
-On `/v1/chat/completions`, `response_format` with type `json_schema` is the only
-constraint carrier the native route enforces. Every other carrier on that route
-is refused before prefill instead of being ignored: other `response_format`
-types (`json_object`, `regex`, `grammar`) and every provider-native guided field
-(`guided_json`, `guided_regex`, `guided_choice`, `guided_grammar`,
-`guided_decoding_backend`, `json_schema`, `regex`, `ebnf`). This applies to
-buffered and streamed requests, including when a guided field accompanies a
-supported `json_schema` response format. A `guided_decoding_backend` alone is
-refused too, since the native route has no selectable backend. A guided field
-sent as `null` counts as absent. Regex and EBNF constraints therefore need an
+On `/v1/chat/completions`, the native route enforces two constraint carriers:
+`response_format` with type `json_schema`, and a guided regex sent as
+`guided_regex` or its SGLang alias `regex`. Every other carrier on that route is
+refused before prefill instead of being ignored: other `response_format` types
+(`json_object`, `regex`, `grammar`) and the remaining provider-native guided
+fields (`guided_json`, `guided_choice`, `guided_grammar`,
+`guided_decoding_backend`, `json_schema`, `ebnf`). This applies to buffered and
+streamed requests, including when such a field accompanies a supported
+`json_schema` response format or guided regex. A `guided_decoding_backend` alone
+is refused too, since the native route has no selectable backend. A guided field
+sent as `null` counts as absent. EBNF and other grammars therefore need an
 upstream engine in ride mode.
+
+On `/v1/responses`, the structured-output control is `text.format`. fak maps it
+onto the chat route's `response_format` before planning, so both routes apply
+the same rules. A `json_schema` format keeps its members (`name`, `schema`,
+`strict`, `description`) beside `type`; fak moves them unchanged under a
+`json_schema` wrapper, so the native subset and the schema caps above apply as
+they do on chat. Type `text`, a missing or `null` `format`, and a missing or
+`null` `text` keep the ordinary route. Any other type, such as `json_object`,
+passes through unchanged. The native route refuses it with HTTP 400
+`native_structured_output_unsupported`, and ride mode forwards it upstream as
+`response_format`. fak normally adds its own context-restore tool to a
+`/v1/responses` turn. It skips that tool only on a structured turn where the
+client sent no tools. Native structured output is refused alongside any tool,
+so a native request with no client tools is honored rather than refused. A
+structured turn that carries client tools still gets the restore tool, so tool
+results that fak elided stay recoverable. Three
+envelope errors return HTTP 400 `invalid_text_format`: a `text` that is not an
+object, a non-object `format`, and a `format` without a non-empty string
+`type`. Schema envelope and cap violations return the chat route's HTTP 422
+codes. This route parses no top-level `response_format` and no provider-native
+guided field, so either one is dropped.
+
+A native guided regex is a JSON string in Go `regexp/syntax` Perl syntax, at most
+4096 bytes. The whole response must match it, as if the pattern were wrapped in
+`\A(?:…)\z`. `.` excludes newline unless `(?s)` is set, `(?i)` case folding is
+supported, and `^`, `$`, `\A` and `\z` hold only at the response's start and end.
+Multi-line anchors (`(?m)^`), word boundaries (`\b`, `\B`), backreferences and
+lookaround are refused. Each request compiles its pattern into a byte-level
+automaton over UTF-8, so a token may end inside a multi-byte character and only
+valid UTF-8 is generated. A pattern is refused before inference when its automaton
+needs more than 4096 states (for example `(a|b)*a(a|b){16}`, or a literal longer
+than 4095 bytes), when its repeat-expanded program exceeds 8192 nodes, or when it
+matches no text. `guided_regex` and `regex` may be sent together only with the
+same pattern, and a guided regex is refused alongside any `response_format`
+other than `text`. Special tokens such as `<|im_start|>` are never admitted as
+pattern text. The model's stop token is admitted only while the text so far fully
+matches, and only it is admitted once no longer match is possible. A reasoning
+span may precede the regex response the same way it precedes a schema object
+(below). Per-token streaming holds back a partial multi-byte character until it
+completes. Compile and mask cost are bounded by these caps but have not been
+measured on a named model yet.
 
 The legacy `/v1/completions` route does not parse `response_format` or any
 guided field yet. Carriers sent there are dropped rather than refused, in native
@@ -208,9 +250,13 @@ resp = client.chat.completions.create(
 )
 ```
 
-On the **Responses** API the carrier is `text.format` instead of `response_format`; fak
-forwards it the same way. Any tool call the constrained generation emits still enters the
-capability floor before it is returned to your code.
+On the **Responses** API the carrier is `text.format` instead of `response_format`. On
+inbound `/v1/responses`, fak maps it onto `response_format` (see the native section above)
+and then forwards or enforces it as on the chat route. When an upstream speaks the
+Responses wire, fak maps `response_format` back to `text.format`. Any tool call the
+constrained generation emits still enters the capability floor before it is returned to
+your code. `internal/gateway/responses_text_format_test.go` witnesses the inbound mapping
+on the native, ride and planner paths.
 
 ### vLLM / SGLang — ride mode, current field names, one deprecation note
 

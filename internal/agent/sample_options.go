@@ -21,10 +21,30 @@ type SampleOpt func(*SampleParams)
 // ErrSeedUnsupported identifies routes without request-bound sampling seeds.
 var ErrSeedUnsupported = errors.New("sampling seed unsupported")
 
-// ErrNativeMinPUnsupported refuses a nonzero min_p on the native planner. Its
-// decode lanes do not carry the cutoff yet, and ignoring it would sample a wider
-// distribution than the client asked for.
+// ErrNativeMinPUnsupported refuses a min_p the native planner cannot honor: NaN
+// or a value outside vLLM's [0, 1] range.
 var ErrNativeMinPUnsupported = fmt.Errorf("%w: native min_p", model.ErrSamplingModeUnsupported)
+
+type nativeMinPContextKey struct{}
+
+// withNativeMinP binds the request's min_p cutoff for the decode lanes. It always
+// records the request's own value, so a nested request without min_p never
+// inherits an outer request's cutoff.
+func withNativeMinP(ctx context.Context, minP *float64) context.Context {
+	v := 0.0
+	if minP != nil {
+		v = *minP
+	}
+	if v == nativeMinPFromContext(ctx) {
+		return ctx
+	}
+	return context.WithValue(ctx, nativeMinPContextKey{}, v)
+}
+
+func nativeMinPFromContext(ctx context.Context) float64 {
+	minP, _ := ctx.Value(nativeMinPContextKey{}).(float64)
+	return minP
+}
 
 type nativeTargetSampleSeedContextKey struct{}
 
@@ -148,8 +168,8 @@ func WithChatWireTopK(k *int) SampleOpt {
 	}
 }
 
-// WithMinP sets the per-request min-p cutoff for the OpenAI-compatible chat wire.
-// nil is a no-op.
+// WithMinP sets the per-request min-p cutoff: forwarded on the OpenAI-compatible
+// chat wire and applied by the native sampler. nil is a no-op.
 func WithMinP(p *float64) SampleOpt {
 	return func(sp *SampleParams) {
 		if p != nil {

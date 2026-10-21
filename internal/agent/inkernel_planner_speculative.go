@@ -17,7 +17,8 @@ import (
 
 // greedySpeculativeRequestEligible keeps the target verifier's exact-greedy
 // contract at the request boundary. Sampling and score transforms retain the
-// ordinary target path; top-p and top-k are inert when temperature is zero.
+// ordinary target path; top-p, top-k and min_p are inert when temperature is
+// zero because none of them can drop the most probable token.
 func (p *InKernelPlanner) greedySpeculativeRequestEligible(temp float64, logitBias model.LogitBias, freqPenalty, presPenalty float64) bool {
 	return p.speculativeEngine != nil && temp <= 0 && len(logitBias) == 0 && freqPenalty == 0 && presPenalty == 0
 }
@@ -541,6 +542,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		counts = make([]int32, len(logits))
 	}
 	rng := rand.New(rand.NewSource(p.requestSampleSeed(ctx, temp)))
+	minP := nativeMinPFromContext(ctx)
 
 	gen := 0
 	stopped := false
@@ -608,7 +610,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 				mtpExecution.DowngradeReason = vulkanMTPDowngradeEmptyProposal
 				proposalGenerator = nil
 			}
-			next := sampleLogitsWithPenaltyWS(curLogits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng, &samplingWS)
+			next := sampleLogitsWithPenaltyCoreWS(curLogits, temp, topP, topK, minP, logitBias, freqPenalty, presPenalty, counts, rng, 0, false, &samplingWS)
 			if samplingWS.nonFinite {
 				err = ErrNonFiniteLogits
 				break
