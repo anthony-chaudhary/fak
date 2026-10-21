@@ -1205,6 +1205,10 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		} else {
 			next = sampleLogitsWithPenaltyWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
 		}
+		if ln.sampling.nonFinite {
+			ln.err, ln.done = ErrNonFiniteLogits, true
+			return 0, false
+		}
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
 	if ln.structured != nil {

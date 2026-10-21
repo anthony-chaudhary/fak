@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"math"
 	"math/rand"
 	"sort"
@@ -61,7 +62,17 @@ type samplerWorkspace struct {
 	vals   []float64
 	eff    []float32
 	sorter probSorter
+	// nonFinite reports that the last sampled row held NaN or +Inf, or had no
+	// finite logit, so the drawn token is not a sample of the model output.
+	nonFinite bool
 }
+
+// ErrNonFiniteLogits refuses a token drawn from a row with NaN or +Inf logits or
+// no finite logit. DeepInfer's fused sampler asserts the same condition before
+// sampling (Apache-2.0, deepseek-ai/DeepInfer
+// deepinfer/model_executor/layers/tilelang_ops/cuda/fused_sample.py at
+// 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01); no upstream source is copied.
+var ErrNonFiniteLogits = errors.New("native sampler: logits contain NaN or +Inf, or no finite entry")
 
 func (w *samplerWorkspace) resize(vocab int) {
 	if cap(w.probs) < vocab {
@@ -173,21 +184,34 @@ func sampleLogitsCoinWS(logits []float32, temp, topP float64, topK int, coin flo
 }
 
 func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
+	nonFinite, finite := false, false
 	if temp <= 0 {
 		best, bi := float32(-math.MaxFloat32), 0
 		for i, x := range logits {
+			if x != x || x > math.MaxFloat32 {
+				nonFinite = true
+			} else if x >= -math.MaxFloat32 {
+				finite = true
+			}
 			if x > best {
 				best, bi = x, i
 			}
 		}
+		w.nonFinite = nonFinite || !finite
 		return bi
 	}
 	maxL := float32(-math.MaxFloat32)
 	for _, x := range logits {
+		if x != x || x > math.MaxFloat32 {
+			nonFinite = true
+		} else if x >= -math.MaxFloat32 {
+			finite = true
+		}
 		if x > maxL {
 			maxL = x
 		}
 	}
+	w.nonFinite = nonFinite || !finite
 	w.resize(len(logits))
 	probs := w.probs
 	var sum float64
