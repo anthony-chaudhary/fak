@@ -10,7 +10,8 @@ import (
 
 // ErrDeepSeek41HParam is the typed refusal for a deepseek41 hyperparameter key
 // that is present but unusable. An absent key leaves the config axis at its
-// zero value, which the V4.1 forward admission refuses by name.
+// zero value; on the published decoder schedule model.NewDeepSeekV41GGUFConfig
+// then refuses it with model.ErrV41ConfigAdmission.
 var ErrDeepSeek41HParam = errors.New("gguf: deepseek41 hyperparameter malformed")
 
 const (
@@ -118,6 +119,11 @@ func applyDeepSeek41HParams(f *File, p string, cfg *model.Config) error {
 		cfg.SwigluLimit = limit
 	}
 
+	if f.hasKey(p + ds41KeyExpertWeightsNorm) {
+		if v, ok := f.Bool(p + ds41KeyExpertWeightsNorm); !ok || !v {
+			return ds41HParamErr(p+ds41KeyExpertWeightsNorm, "is %v; the native V4.1 router always renormalizes its top-k weights", f.Metadata[p+ds41KeyExpertWeightsNorm].Value)
+		}
+	}
 	if f.hasKey(p + ds41KeyExpertGatingFunc) {
 		g, ok := f.Uint64(p + ds41KeyExpertGatingFunc)
 		if !ok || g != ds41GatingSqrtSoftplus {

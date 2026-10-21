@@ -1,0 +1,24 @@
+DeepInfer V4.1 load-time admission contracts
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+
+Published hyperparameter admission (internal/model/v41_gguf_topology.go)
+Upstream paths:
+  deepinfer/hugging_face/config.py lines 164-174, 282, 294-298
+  deepinfer/model_executor/models/v4_modules/hc_blocks.py lines 84-95
+  deepinfer/model_executor/models/v4_modules/moe.py lines 55-60
+  deepinfer/model_executor/models/v4_modules/mlp.py lines 164-165
+Adaptation: contract-only. DeepInfer reads hc_mult, hc_eps,
+hc_sinkhorn_iters, swiglu_limit and norm_topk_prob as required config keys
+and asserts norm_topk_prob. Fak turns that required-key admission into
+fail-closed published-value admission on the GGUF path: a file whose decoder
+schedule is the published V4.1-Flash one must declare HC mult 4, 20 Sinkhorn
+iterations, epsilon 1e-6 (compared in float32), SwiGLU clamp 10 and top-k
+renormalisation, or it is refused instead of running with forward defaults.
+An explicit expert_weights_norm that is false or not a bool is refused on
+every deepseek41 GGUF, mirroring the upstream assert on norm_topk_prob.
