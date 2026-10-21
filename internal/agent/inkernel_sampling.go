@@ -190,9 +190,12 @@ func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *ran
 // sampleLogitsMinPCoreWS is the sampler core with a min-p cutoff. A positive minP
 // drops every token whose temperature-scaled probability is below minP times the
 // most probable token's; top-k and then top-p truncate the survivors. That is
-// vLLM's order (temperature, the min-p logits processor, then top-k/top-p);
-// DeepInfer has no min_p. minP<=0 or NaN skips the stage, so the draw is
-// bit-identical to the path without it.
+// vLLM v1's order (v0.11.0 vllm/v1/sample/sampler.py: temperature, the
+// argmax-invariant min-p processor, then top-k/top-p); llama.cpp's default chain
+// instead runs min_p after top-k/top-p and before temperature, and DeepInfer's
+// SamplingParams has no min_p. temp<=0 returns the argmax before the cutoff, so
+// min_p never changes a greedy pick. minP<=0 or NaN skips the stage, so the draw
+// is bit-identical to the path without it.
 func sampleLogitsMinPCoreWS(logits []float32, temp, topP float64, topK int, minP float64, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	nonFinite, finite := false, false
 	if temp <= 0 {
@@ -319,17 +322,17 @@ func sampleLogitsWithBias(logits []float32, temp, topP float64, topK int, bias m
 }
 
 func sampleLogitsWithBiasWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand, w *samplerWorkspace) int {
-	return sampleLogitsWithBiasCoreWS(logits, temp, topP, topK, bias, rng, 0, false, w)
+	return sampleLogitsWithBiasCoreWS(logits, temp, topP, topK, 0, bias, rng, 0, false, w)
 }
 
-func sampleLogitsWithBiasCoreWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
+func sampleLogitsWithBiasCoreWS(logits []float32, temp, topP float64, topK int, minP float64, bias model.LogitBias, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	if len(bias) == 0 {
-		return sampleLogitsCoreWS(logits, temp, topP, topK, rng, coin, hasCoin, w)
+		return sampleLogitsMinPCoreWS(logits, temp, topP, topK, minP, rng, coin, hasCoin, w)
 	}
 	eff := w.effBuf(len(logits))
 	copy(eff, logits)
 	applyLogitBias(eff, bias)
-	return sampleLogitsCoreWS(eff, temp, topP, topK, rng, coin, hasCoin, w)
+	return sampleLogitsMinPCoreWS(eff, temp, topP, topK, minP, rng, coin, hasCoin, w)
 }
 
 // applyLogitBias adds the OpenAI logit_bias map into logits IN PLACE. Out-of-range
@@ -366,16 +369,19 @@ func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bia
 }
 
 func sampleLogitsWithPenaltyWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand, w *samplerWorkspace) int {
-	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, bias, frequencyPenalty, presencePenalty, counts, rng, 0, false, w)
+	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, 0, bias, frequencyPenalty, presencePenalty, counts, rng, 0, false, w)
 }
 
 func sampleLogitsWithPenaltyCoinWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, coin float64, w *samplerWorkspace) int {
-	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, bias, frequencyPenalty, presencePenalty, counts, nil, coin, true, w)
+	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, 0, bias, frequencyPenalty, presencePenalty, counts, nil, coin, true, w)
 }
 
-func sampleLogitsWithPenaltyCoreWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
+// sampleLogitsWithPenaltyCoreWS is the served decode lane's sampler: logit_bias and
+// the repetition penalties shape the logits, then sampleLogitsMinPCoreWS applies
+// temperature, min_p, top-k and top-p in that order. minP 0 is the historical draw.
+func sampleLogitsWithPenaltyCoreWS(logits []float32, temp, topP float64, topK int, minP float64, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	if frequencyPenalty == 0 && presencePenalty == 0 {
-		return sampleLogitsWithBiasCoreWS(logits, temp, topP, topK, bias, rng, coin, hasCoin, w)
+		return sampleLogitsWithBiasCoreWS(logits, temp, topP, topK, minP, bias, rng, coin, hasCoin, w)
 	}
 	eff := w.effBuf(len(logits))
 	copy(eff, logits)
@@ -389,7 +395,7 @@ func sampleLogitsWithPenaltyCoreWS(logits []float32, temp, topP float64, topK in
 		penalty := frequencyPenalty*float64(c) + presencePenalty
 		eff[tok] -= float32(penalty)
 	}
-	return sampleLogitsCoreWS(eff, temp, topP, topK, rng, coin, hasCoin, w)
+	return sampleLogitsMinPCoreWS(eff, temp, topP, topK, minP, rng, coin, hasCoin, w)
 }
 
 // nucleusTruncate zeroes every probability outside the top-p nucleus in place and

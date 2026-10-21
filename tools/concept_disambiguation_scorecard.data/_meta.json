@@ -12545,6 +12545,11 @@
           "category": "incidental",
           "reason": "Reader for the private request seed context carrier; no independent model context or context-window behavior.",
           "token": "nativeTargetSampleSeedFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request-scoped accessor for the native min_p sampling cutoff carried on the decode context, not a context-window or KV context concept.",
+          "token": "nativeMinPFromContext"
         }
       ],
       "exclude": [
@@ -12698,6 +12703,7 @@
         "nativeCompactionObserver",
         "nativeCompactionObserverKey",
         "nativeContext",
+        "nativeMinPFromContext",
         "nativeStructuredConstraintContextKey",
         "nativeTargetSampleSeedContextKey",
         "nativeTargetSampleSeedFromContext",
