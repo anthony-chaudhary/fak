@@ -11,10 +11,10 @@ module github.com/anthony-chaudhary/fak
 
 go 1.26.0
 
-// Pin the patched toolchain: go1.26.9 fixes the reachable standard-library
-// net/http vulnerabilities reported by govulncheck against go1.26.6.
-// GOTOOLCHAIN=auto fetches the same patched release in CI and locally.
-toolchain go1.26.9
+// Pin the patched toolchain: go1.26.10 fixes GO-2026-6809 in crypto/x509,
+// in addition to the earlier standard-library security fixes.
+// GOTOOLCHAIN=auto selects this release when the default toolchain is older.
+toolchain go1.26.10
 
 require golang.org/x/term v0.44.0
 
