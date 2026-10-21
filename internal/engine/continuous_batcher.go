@@ -1007,19 +1007,31 @@ func (cb *ContinuousBatcher) stepWithBudget(ctx context.Context, budget int) (*B
 	if cb.cfg.Model != nil {
 		if activeCount == 1 {
 			slot := activeSlots[0]
-			logits := slot.sess.Step(slot.LastToken)
-			tokensThisStep[0] = argmax(logits)
+			if len(slot.PromptTokens) > 0 && len(slot.GeneratedTokens) == 0 {
+				tokensThisStep[0] = slot.LastToken
+			} else {
+				logits := slot.sess.Step(slot.LastToken)
+				tokensThisStep[0] = argmax(logits)
+			}
 		} else {
 			seqs := make([]*model.Session, activeCount)
 			ids := make([]int, activeCount)
+			stepActive := make([]bool, activeCount)
 			for i, slot := range activeSlots {
 				seqs[i] = slot.sess
 				ids[i] = slot.LastToken
+				if len(slot.PromptTokens) > 0 && len(slot.GeneratedTokens) == 0 {
+					tokensThisStep[i] = slot.LastToken
+					continue
+				}
+				stepActive[i] = true
 			}
 			bs := &model.BatchSession{M: cb.cfg.Model, Seqs: seqs}
-			batchLogits := bs.StepBatch(ids)
+			batchLogits := bs.StepBatchActive(ids, stepActive)
 			for i, logits := range batchLogits {
-				tokensThisStep[i] = argmax(logits)
+				if stepActive[i] {
+					tokensThisStep[i] = argmax(logits)
+				}
 			}
 		}
 	} else {
@@ -1424,7 +1436,7 @@ func (cb *ContinuousBatcher) MaxKVCacheBytes() int64 {
 func (cb *ContinuousBatcher) currentKVCacheBytesLocked() int64 {
 	var total int64
 	for _, s := range cb.slots {
-		if s.State == SlotStateActiveDecode || s.State == SlotStateYieldedIO {
+		if s.State == SlotStatePrefilling || s.State == SlotStateActiveDecode || s.State == SlotStateYieldedIO {
 			total += s.KVCacheBytes
 		}
 	}
