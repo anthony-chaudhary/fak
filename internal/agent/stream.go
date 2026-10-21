@@ -482,6 +482,32 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	return p.prepareUpstreamContext(context.Background(), messages, tools, stream, opts...)
 }
 
+// ValidateSamplingSeed reports whether this planner's provider can honor an
+// explicit request seed. It is pure request preflight: no transcript shaping,
+// marshaling, raw passthrough, or network I/O occurs.
+func (p *HTTPPlanner) ValidateSamplingSeed(seed *int64) error {
+	if seed == nil {
+		return nil
+	}
+	adapter, err := p.transcriptAdapter()
+	if err != nil {
+		return err
+	}
+	return validateProviderSamplingSeed(adapter.Provider(), seed)
+}
+
+func validateProviderSamplingSeed(provider Provider, seed *int64) error {
+	if seed == nil {
+		return nil
+	}
+	switch provider {
+	case ProviderAnthropic, ProviderGemini, ProviderOpenAIResponses:
+		return fmt.Errorf("planner: %s: %w", provider, ErrSeedUnsupported)
+	default:
+		return nil
+	}
+}
+
 func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Message, tools []ToolDef, stream bool, opts ...SampleOpt) (_ *upstreamCall, retErr error) {
 	var slotRelease func()
 	var slotLease *llamaSoftSlotLease
@@ -494,11 +520,15 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 	if err != nil {
 		return nil, err
 	}
+	sp := applySampleOpts(opts...)
+	if err := validateProviderSamplingSeed(adapter.Provider(), sp.Seed); err != nil {
+		return nil, err
+	}
 	forceResponsesStream := p.ForceResponsesStream && adapter.Provider() == ProviderOpenAIResponses
 	safeMessages := messages
 	var quarantines []TranscriptQuarantine
 	if p.QuarantineTranscript {
-		safeMessages, quarantines = quarantineOutboundMessages(messages, applySampleOpts(opts...).OversizePagingSuppressed)
+		safeMessages, quarantines = quarantineOutboundMessages(messages, sp.OversizePagingSuppressed)
 	}
 	// §A4 coherence shaping: after the safety quarantine, give the coherence layer a
 	// chance to break the provider prefix when a world witness has been refuted. nil
@@ -509,7 +539,6 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 	if stabilized, ok := StabilizePromptPrefix(safeMessages); ok {
 		safeMessages = stabilized
 	}
-	sp := applySampleOpts(opts...)
 	// Request-model pass-through (#82): a client-supplied model wins for THIS turn.
 	modelID := p.ModelID
 	if sp.Model != "" {
@@ -567,6 +596,7 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 			Messages:                 safeMessages,
 			Tools:                    tools,
 			Temperature:              temperature,
+			Seed:                     sp.Seed,
 			OmitTemperature:          forceResponsesStream || (sp.Temperature == nil && sp.InheritUpstreamTemperature),
 			OmitMaxOutputTokens:      forceResponsesStream,
 			MaxTokens:                maxTokens,

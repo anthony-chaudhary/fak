@@ -911,7 +911,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// the tool-call conformance fail-closed) has to report in-band now, as an SSE error
 	// event + [DONE]; see chatStreamWriter.fail.
 	var stream *chatStreamWriter
-	if req.Stream {
+	if req.Stream && req.Seed == nil {
 		stream = newChatStreamWriter(w, reqModel, req.DeclaredStreamUsage())
 		if err := stream.open(); err != nil {
 			// The client is already gone; do not spend a decode on a socket nobody reads.
@@ -931,6 +931,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithClientTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
+		agent.WithSeed(req.Seed),
 		agent.WithStop(normalizeStop(req.Stop)),
 		// Structured-output passthrough (#907): forward the client's response_format /
 		// logit_bias to the ride engine verbatim so vLLM/SGLang enforce the constraint
@@ -980,6 +981,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	applyVulkanMTPExecutionHeaders(w, comp.VulkanMTP)
 	if receiptRequested {
 		applyNativeBatchReceiptHeaders(w, comp.InKernelBatch)
+	}
+	if req.Stream && stream == nil {
+		stream = newChatStreamWriter(w, reqModel, req.DeclaredStreamUsage())
+		if err := stream.open(); err != nil {
+			s.logf("gateway: client vanished before the streamed response landed: %v", err)
+			return
+		}
 	}
 
 	asst := comp.Message

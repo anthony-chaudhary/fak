@@ -520,6 +520,14 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if !ok || !sp.StreamingSupported() {
 		return false
 	}
+	if validator, ok := sp.(interface {
+		ValidateSamplingSeed(*int64) error
+	}); ok {
+		if err := validator.ValidateSamplingSeed(req.Seed); err != nil {
+			s.writeUpstreamErr(w, err)
+			return true
+		}
+	}
 	if sessionTurn.turnCost != nil {
 		sessionTurn.turnCost.Streaming = true
 	}
@@ -673,6 +681,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithClientTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
+		agent.WithSeed(req.Seed),
 		agent.WithStop(normalizeStop(req.Stop)),
 		// Structured-output passthrough (#907): the streamed wire forwards the same
 		// response_format / logit_bias constraints as the buffered path, so a streamed

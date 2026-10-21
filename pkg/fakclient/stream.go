@@ -65,6 +65,7 @@ type StreamChatRequest struct {
 	MaxTokens   int             `json:"max_tokens,omitempty"`
 	Temperature *float64        `json:"temperature,omitempty"`
 	TopP        *float64        `json:"top_p,omitempty"`
+	Seed        *int64          `json:"seed,omitempty"`
 	Stop        json.RawMessage `json:"stop,omitempty"`
 
 	// stream is always set to true by StreamChatCompletions, never by callers —

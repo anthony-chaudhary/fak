@@ -684,6 +684,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// serial Session.Step per lane, so an unset FAK_INKERNEL_BATCH decodes byte-identically to
 	// the pre-seam loop (the #401 wiring seam; the batched glm_moe_dsa GEMM is a separate lever).
 	rng := rand.New(rand.NewSource(p.seed))
+	targetSampleKey, targetSampleKeyed := nativeTargetSampleSeedFromContext(ctx)
 	// counts is the per-token generation histogram this turn's frequency/presence
 	// penalty is computed from (#1705): counts[t] is how many times token t has
 	// already been generated in THIS response. Only allocated when a penalty is
@@ -710,6 +711,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		measurement: measurement,
 		thinking:    nativeThinkingConstraintFromContext(ctx),
 		structured:  nativeStructuredConstraintFromContext(ctx),
+		sampleKey:   targetSampleKey,
+		sampleKeyed: targetSampleKeyed,
+		sampleBase:  len(ids),
 		firstDraw: func(token int) {
 			p.recordNativeFirstDraw(traceID, token, stops[token])
 		},
@@ -881,6 +885,9 @@ type decodeLane struct {
 	forwardCoverageSource nativeForwardCoverageSource
 	thinking              *nativeThinkingConstraint
 	structured            *nativeStructuredConstraint
+	sampleKey             uint64
+	sampleKeyed           bool
+	sampleBase            int
 	firstDraw             func(int)
 	// samplerHook / emitHook are the CW-03 (#13351) purpose-observation taps. They are
 	// nil on the served path (a literal no-op) and set only by a cache-prime caller's
@@ -1154,7 +1161,12 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	if !forced && ln.greedyReady && ln.structured == nil {
 		next = ln.greedyNext
 	} else if !forced {
-		next = sampleLogitsWithPenaltyWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
+		if ln.sampleKeyed && ln.temp > 0 {
+			coin := model.KeyedUniform64(ln.sampleKey, model.DomainTargetSample, ln.sampleBase+ln.gen)
+			next = sampleLogitsWithPenaltyCoinWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, coin, &ln.sampling)
+		} else {
+			next = sampleLogitsWithPenaltyWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, &ln.sampling)
+		}
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
 	if ln.structured != nil {

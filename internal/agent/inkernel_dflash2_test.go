@@ -261,6 +261,42 @@ func TestDFlash2RequestConstraints(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestDFlash2RequestSeedUnsupported(t *testing.T) {
+	ordinary := &InKernelPlanner{}
+	zero := int64(0)
+	if err := ordinary.ValidateSamplingSeed(&zero); err != nil {
+		t.Fatalf("ordinary target seed preflight: %v", err)
+	}
+	if err := (&InKernelPlanner{dflash2: &DFlash2Target{}}).ValidateSamplingSeed(nil); err != nil {
+		t.Fatalf("omitted seed preflight: %v", err)
+	}
+	for _, seed := range []int64{0, -1} {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			p := &InKernelPlanner{dflash2: &DFlash2Target{}}
+			badStops := make([]string, 1025)
+			if err := p.validateDFlash2Request(SampleParams{Seed: &seed, Stop: badStops}, 0, 0, 0); !errors.Is(err, ErrSeedUnsupported) {
+				t.Fatalf("unbound target did not refuse seed: %v", err)
+			}
+			if comp, err := p.Complete(context.Background(), nil, nil, WithSeed(&seed)); comp != nil || !errors.Is(err, ErrSeedUnsupported) {
+				t.Fatalf("buffered seed admission: completion=%v error=%v", comp, err)
+			}
+			if comp, err := p.CompleteStream(context.Background(), nil, nil, nil, WithSeed(&seed), WithStop(badStops)); comp != nil || !errors.Is(err, ErrSeedUnsupported) {
+				t.Fatalf("seed and invalid-stop precedence: completion=%v error=%v", comp, err)
+			}
+			for _, perToken := range []bool{false, true} {
+				comp, err := p.CompleteStream(context.Background(), func(string) error {
+					t.Fatal("seed refusal published a token")
+					return nil
+				}, nil, nil, WithSeed(&seed), WithStop(badStops), WithPerTokenStream(perToken))
+				if comp != nil || !errors.Is(err, ErrSeedUnsupported) {
+					t.Fatalf("stream seed admission (%t): completion=%v error=%v", perToken, comp, err)
+				}
+			}
+		})
+	}
+}
+
 // fak-test:runtime fast est=1s lane=default
 func TestDFlash2PrimaryUnwindSurvivesCleanupPanic(t *testing.T) {
 	for _, mode := range []string{"0", "1"} {

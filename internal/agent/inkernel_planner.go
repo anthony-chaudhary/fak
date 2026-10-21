@@ -433,8 +433,12 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 // sink with the post-decode projection (loop_project.go), so its emitted deltas land in
 // the client's view of Content.
 func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	sp := applySampleOpts(opts...)
+	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
+		return nil, err
+	}
 	if p.dflash2 != nil {
-		if err := validateDFlash2Stops(applySampleOpts(opts...).Stop); err != nil {
+		if err := validateDFlash2Stops(sp.Stop); err != nil {
 			return nil, err
 		}
 	}
@@ -445,7 +449,7 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	// gate so the turnkey server streams by default while every other CompleteStream
 	// caller keeps the historical env-gated default exactly.
 	perToken := inKernelPerTokenStreamEnabled()
-	if sp := applySampleOpts(opts...); sp.PerTokenStream != nil {
+	if sp.PerTokenStream != nil {
 		perToken = *sp.PerTokenStream
 	}
 	if !perToken {
@@ -464,7 +468,6 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var sinkErr error
-	sp := applySampleOpts(opts...)
 	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
 		comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 			if sinkErr != nil || tokenPiece == "" {
@@ -1690,9 +1693,9 @@ const (
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
 	return recoverDeviceCall(func() (res inKernelGenerateResult, err error) {
-		// Budgeted requests use the shared target sampler until speculative acceptance
-		// and rollback carry the same request-local constraint.
-		targetOnly := nativeThinkingConstraintFromContext(ctx) != nil || nativeStructuredConstraintFromContext(ctx) != nil
+		// Speculative acceptance and rollback must share request-local constraints and seeds.
+		_, seeded := nativeTargetSampleSeedFromContext(ctx)
+		targetOnly := seeded || nativeThinkingConstraintFromContext(ctx) != nil || nativeStructuredConstraintFromContext(ctx) != nil
 		if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
 			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
 				return inKernelGenerateResult{}, err
@@ -2010,10 +2013,22 @@ func splitNativeBudgetReasoning(raw string, seeded bool) (string, string) {
 	return splitReasoning(raw)
 }
 
+// ValidateSamplingSeed checks route support before a streaming response commits.
+func (p *InKernelPlanner) ValidateSamplingSeed(seed *int64) error {
+	if seed != nil && p.dflash2 != nil {
+		return ErrSeedUnsupported
+	}
+	return nil
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
+	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
+		return nil, err
+	}
+	ctx = withNativeTargetSampleSeed(ctx, sp.Seed)
 	structured, err := p.newNativeStructuredConstraint(sp.ResponseFormat, nil)
 	if err != nil {
 		return nil, err

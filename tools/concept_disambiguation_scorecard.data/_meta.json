@@ -12535,6 +12535,16 @@
           "category": "incidental",
           "reason": "Private typed context.Context key used only to store and retrieve the positioned nativeStructuredConstraintFromContext request-local decoder constraint; it is a carrier identity, not a separate model-context or structured-output concept.",
           "token": "nativeStructuredConstraintContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context.Context key carrying a copied sampling seed and explicit presence, not a model context-window concept.",
+          "token": "nativeTargetSampleSeedContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reader for the private request seed context carrier; no independent model context or context-window behavior.",
+          "token": "nativeTargetSampleSeedFromContext"
         }
       ],
       "exclude": [
@@ -12689,6 +12699,8 @@
         "nativeCompactionObserverKey",
         "nativeContext",
         "nativeStructuredConstraintContextKey",
+        "nativeTargetSampleSeedContextKey",
+        "nativeTargetSampleSeedFromContext",
         "newGuardCompactionWitness",
         "newTraceContext",
         "noteCompactionContract",
@@ -14395,6 +14407,16 @@
           "category": "incidental",
           "reason": "Native device-limit predicate used by the optional F32 capability check; it describes count feasibility, not support status or qualification.",
           "token": "fvk_v41_f32_finite_count_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed sampling-seed input-validation sentinel, not a product support or maturity classification.",
+          "token": "ErrSeedUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "HTTP error-code alias of ErrSeedUnsupported for the same sampling-seed input contract, not a separate maturity concept.",
+          "token": "sampling_seed_unsupported"
         }
       ],
       "exclude": [
@@ -14433,6 +14455,7 @@
         "EngineRingCoverage",
         "ErrKVHostSnapshotUnsupported",
         "ErrQwen35GDNSequenceUnsupported",
+        "ErrSeedUnsupported",
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
@@ -14635,6 +14658,7 @@
         "runMaturityBaselinePromote",
         "runtime_delegation_required",
         "runtoolcoverageaudit",
+        "sampling_seed_unsupported",
         "scoreparity",
         "seenSupport",
         "setup_parity_clean",

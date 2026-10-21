@@ -587,6 +587,7 @@ type SampleParams struct {
 	Temperature *float64 // sampling temperature (nil => planner default)
 	TopP        *float64 // nucleus sampling (nil => unset on the wire)
 	TopK        *int     // top-k truncation (nil => unset; <=0 => no truncation)
+	Seed        *int64   // nil => legacy sampling; explicit zero is a valid seed
 	Stop        []string // stop sequences (empty => unset on the wire)
 
 	// InheritUpstreamTemperature, with a nil Temperature, omits temperature from the

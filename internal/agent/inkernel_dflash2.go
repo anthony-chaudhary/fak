@@ -182,6 +182,9 @@ func (p *InKernelPlanner) validateDFlash2Request(sp SampleParams, temp, frequenc
 	if p.dflash2 == nil {
 		return nil
 	}
+	if sp.Seed != nil {
+		return ErrSeedUnsupported
+	}
 	if err := validateDFlash2Stops(sp.Stop); err != nil {
 		return err
 	}

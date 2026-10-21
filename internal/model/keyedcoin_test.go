@@ -1,9 +1,28 @@
 package model
 
 import (
+	"math"
 	"reflect"
 	"testing"
 )
+
+// fak-test:runtime fast est=5ms lane=default
+func TestKeyedUniformLegacyVectors(t *testing.T) {
+	for _, tc := range []struct {
+		key    uint64
+		domain DomainTag
+		step   int
+		bits   uint32
+	}{
+		{0, DomainAcceptCoin, 0, 0x3f699ff8},
+		{0x123456789abcdef0, DomainBonusToken, 7, 0x3e1ad2c8},
+		{^uint64(0), DomainResidual, 31, 0x3f48e466},
+	} {
+		if got := math.Float32bits(KeyedUniform(tc.key, tc.domain, tc.step)); got != tc.bits {
+			t.Fatalf("key %#x domain %#x step %d: bits %#x want %#x", tc.key, tc.domain, tc.step, got, tc.bits)
+		}
+	}
+}
 
 // keyedSampler is the per-request RNG-identity capability #13146 requires,
 // expressed as an interface so this file COMPILES against the parent commit as
@@ -202,6 +221,42 @@ func TestKeyedUniformRangeAndDomains(t *testing.T) {
 		if a == b || b == c || a == c {
 			t.Fatalf("domain collision at step %d: accept=%g bonus=%g residual=%g", step, a, b, c)
 		}
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestKeyedUniform64TargetSampleContract(t *testing.T) {
+	keys := []uint64{0, ^uint64(0), 1, 0x123456789abcdef0}
+	for _, key := range keys {
+		for step := 0; step < 1024; step++ {
+			u := KeyedUniform64(key, DomainTargetSample, step)
+			if u < 0 || u >= 1 {
+				t.Fatalf("key %#x step %d: draw %g outside [0,1)", key, step, u)
+			}
+			if got := KeyedUniform64(key, DomainTargetSample, step); got != u {
+				t.Fatalf("key %#x step %d: replay %g != %g", key, step, got, u)
+			}
+		}
+	}
+
+	const key = uint64(0x71756573742d6b65)
+	for step := 0; step < 64; step++ {
+		target := KeyedUniform64(key, DomainTargetSample, step)
+		for _, domain := range []DomainTag{DomainAcceptCoin, DomainBonusToken, DomainResidual} {
+			if target == KeyedUniform64(key, domain, step) {
+				t.Fatalf("target-sample domain collided with domain %#x at step %d", domain, step)
+			}
+		}
+	}
+
+	if KeyedUniform64(0, DomainTargetSample, 0) == KeyedUniform64(^uint64(0), DomainTargetSample, 0) {
+		t.Fatal("explicit zero and negative-one seed wrapped to the same target-sample draw")
+	}
+	if got := KeyedUniform64(0xaf55f34f046b4dba, DomainTargetSample, 0); got != 1.0-1.0/9007199254740992.0 {
+		t.Fatalf("maximal 53-bit draw = %.17g, want greatest float below one", got)
+	}
+	if got := KeyedUniform64(key, DomainTargetSample, 0); got == float64(KeyedUniform(key, DomainTargetSample, 0)) {
+		t.Fatal("target draw discarded the precision below KeyedUniform's high 24 bits")
 	}
 }
 

@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"context"
 	"math/rand"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // inkernel_sampling_test.go is the #13873 witness: the in-kernel sampler must be
@@ -20,6 +23,63 @@ type sampleOptionsCase struct {
 	temp float64
 	topP float64
 	topK int
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestWithSeedCopiesAndContextPreservesPresence(t *testing.T) {
+	seed := int64(-7)
+	var params SampleParams
+	WithSeed(&seed)(&params)
+	seed = 99
+	if params.Seed == nil || *params.Seed != -7 {
+		t.Fatalf("WithSeed did not copy input: got %v", params.Seed)
+	}
+	WithSeed(nil)(&params)
+	if params.Seed == nil || *params.Seed != -7 {
+		t.Fatalf("WithSeed(nil) changed existing seed: got %v", params.Seed)
+	}
+
+	for _, want := range []int64{0, -1} {
+		ctx := withNativeTargetSampleSeed(context.Background(), &want)
+		got, ok := nativeTargetSampleSeedFromContext(ctx)
+		if !ok || got != uint64(want) {
+			t.Fatalf("seed %d context = (%d,%v), want (%d,true)", want, got, ok, uint64(want))
+		}
+	}
+	base := context.Background()
+	if got := withNativeTargetSampleSeed(base, nil); got != base {
+		t.Fatal("nil seed replaced request context")
+	}
+	if _, ok := nativeTargetSampleSeedFromContext(base); ok {
+		t.Fatal("seed unexpectedly present in unseeded context")
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestInkernelExplicitCoinPreservesLegacyRNGState(t *testing.T) {
+	logits := []float32{-0.4, 1.2, 0.7, 0.2, -1.0}
+	bias := model.LogitBias{0: 0.6, 4: 1.1}
+	counts := []int32{0, 2, 0, 1, 0}
+	const seed = int64(9137)
+
+	legacyRNG := rand.New(rand.NewSource(seed))
+	coinRNG := rand.New(rand.NewSource(seed))
+	want := sampleLogitsWithPenaltyWS(logits, 0.8, 0.9, 4, bias, 0.15, 0.25, counts, legacyRNG, &samplerWorkspace{})
+	coin := coinRNG.Float64()
+	got := sampleLogitsWithPenaltyCoinWS(logits, 0.8, 0.9, 4, bias, 0.15, 0.25, counts, coin, &samplerWorkspace{})
+	if want != 2 {
+		t.Fatalf("legacy golden token = %d, want 2", want)
+	}
+	if got != want {
+		t.Fatalf("explicit coin selected %d, legacy selected %d", got, want)
+	}
+	gotState, wantState := legacyRNG.Uint64(), coinRNG.Uint64()
+	if wantState != 0x8509b013fc96c7b7 {
+		t.Fatalf("legacy golden next RNG = %#x, want %#x", wantState, uint64(0x8509b013fc96c7b7))
+	}
+	if gotState != wantState {
+		t.Fatalf("legacy RNG state changed: got %#x want %#x", gotState, wantState)
+	}
 }
 
 func sampleOptionsCases() []sampleOptionsCase {

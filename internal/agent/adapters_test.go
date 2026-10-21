@@ -32,6 +32,61 @@ func adapterTestMessages(toolResult string) []Message {
 	}
 }
 
+func TestRequestSeedProviderWireAndRefusals(t *testing.T) {
+	zero := int64(0)
+	negative := int64(-7)
+	for _, provider := range []Provider{ProviderOpenAI, ProviderXAI} {
+		for _, tc := range []struct {
+			name   string
+			seed   *int64
+			stream bool
+			want   string
+		}{
+			{name: "omitted"},
+			{name: "zero_buffered", seed: &zero, want: `"seed":0`},
+			{name: "negative_stream", seed: &negative, stream: true, want: `"seed":-7`},
+		} {
+			t.Run(string(provider)+"/"+tc.name, func(t *testing.T) {
+				raw, err := (openAIAdapter{provider: provider}).MarshalRequest(adapterRequest{
+					Model: "m", Messages: []Message{{Role: RoleUser, Content: "hi"}}, Seed: tc.seed, Stream: tc.stream,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := strings.Contains(string(raw), `"seed"`); got != (tc.seed != nil) {
+					t.Fatalf("seed presence=%v body=%s", got, raw)
+				}
+				if tc.want != "" && !strings.Contains(string(raw), tc.want) {
+					t.Fatalf("body=%s want %s", raw, tc.want)
+				}
+			})
+		}
+	}
+
+	for _, provider := range []Provider{ProviderAnthropic, ProviderGemini, ProviderOpenAIResponses} {
+		t.Run(string(provider), func(t *testing.T) {
+			var hits int
+			ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+			defer ts.Close()
+			planner, err := NewProviderHTTPPlanner(string(provider), ts.URL, "m", "key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := []SampleOpt{WithSeed(&zero)}
+			if provider == ProviderAnthropic {
+				opts = append(opts, WithRawRequestBody([]byte(`{"model":"m","messages":[]}`)))
+			}
+			_, err = planner.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, opts...)
+			if !errors.Is(err, ErrSeedUnsupported) {
+				t.Fatalf("error=%v want ErrSeedUnsupported", err)
+			}
+			if hits != 0 {
+				t.Fatalf("unsupported seed reached provider %d time(s)", hits)
+			}
+		})
+	}
+}
+
 func adapterTestTools() []ToolDef {
 	return []ToolDef{{
 		Type: "function",

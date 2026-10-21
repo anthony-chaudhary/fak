@@ -122,6 +122,28 @@ func (p *recordingPlanner) Complete(ctx context.Context, m []agent.Message, t []
 }
 func (*recordingPlanner) Model() string { return "recording" }
 
+type recordingStreamingPlanner struct {
+	recordingPlanner
+}
+
+func (p *recordingStreamingPlanner) CompleteStream(_ context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	var sp agent.SampleParams
+	for _, opt := range opts {
+		opt(&sp)
+	}
+	p.got = sp
+	if sink != nil {
+		_ = sink("ok")
+	}
+	return p.comp, nil
+}
+
+type forcedStreamingHTTPPlanner struct {
+	*agent.HTTPPlanner
+}
+
+func (forcedStreamingHTTPPlanner) StreamingSupported() bool { return true }
+
 // newTestServer wires an isolated chain and returns a ready Server bound to the
 // echo engine. Not parallel-safe (mutates the global ABI registry).
 func newTestServer(t *testing.T) *Server {
@@ -2762,6 +2784,97 @@ func TestChatCompletionsForwardsMaxTokens(t *testing.T) {
 	}
 	if rp.got.Temperature == nil || *rp.got.Temperature != 0.5 {
 		t.Fatalf("planner got temperature = %v, want 0.5", rp.got.Temperature)
+	}
+}
+
+func TestChatRequestSeedJSONAndPlannerPaths(t *testing.T) {
+	zero := int64(0)
+	negative := int64(-9)
+	for _, tc := range []struct {
+		name string
+		body string
+		want *int64
+	}{
+		{name: "omitted", body: `{}`},
+		{name: "zero", body: `{"seed":0}`, want: &zero},
+		{name: "negative", body: `{"seed":-9}`, want: &negative},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req ChatRequest
+			if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+				t.Fatal(err)
+			}
+			if (req.Seed == nil) != (tc.want == nil) || req.Seed != nil && *req.Seed != *tc.want {
+				t.Fatalf("seed=%v want=%v", req.Seed, tc.want)
+			}
+		})
+	}
+	var req ChatRequest
+	if err := json.Unmarshal([]byte(`{"seed":9223372036854775808}`), &req); err == nil {
+		t.Fatal("out-of-int64 seed decoded without error")
+	}
+
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream_%v", stream), func(t *testing.T) {
+			srv := newTestServer(t)
+			seed := int64(-11)
+			comp := &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "ok"}, FinishReason: "stop"}
+			var captured *agent.SampleParams
+			if stream {
+				planner := &recordingStreamingPlanner{recordingPlanner: recordingPlanner{comp: comp}}
+				srv.planner = planner
+				captured = &planner.got
+			} else {
+				planner := &recordingPlanner{comp: comp}
+				srv.planner = planner
+				captured = &planner.got
+			}
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+			body := fmt.Sprintf(`{"model":"m","seed":%d,"stream":%v,"messages":[{"role":"user","content":"hi"}]}`, seed, stream)
+			resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if captured.Seed == nil || *captured.Seed != seed {
+				t.Fatalf("captured seed=%v want=%d", captured.Seed, seed)
+			}
+		})
+	}
+}
+
+func TestSeedUnsupportedReturnsHTTP400BeforeSSE(t *testing.T) {
+	srv := newTestServer(t)
+	var upstreamHits, shaperCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		upstreamHits.Add(1)
+	}))
+	defer upstream.Close()
+	planner, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAIResponses), upstream.URL, "m", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner.CoherenceShaper = func(messages []agent.Message) []agent.Message {
+		shaperCalls.Add(1)
+		time.Sleep(350 * time.Millisecond)
+		return messages
+	}
+	srv.planner = forcedStreamingHTTPPlanner{HTTPPlanner: planner}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","seed":0,"stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusBadRequest || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") || !bytes.Contains(raw, []byte(`"code":"sampling_seed_unsupported"`)) {
+		t.Fatalf("status=%d content-type=%q body=%s", resp.StatusCode, resp.Header.Get("Content-Type"), raw)
+	}
+	if upstreamHits.Load() != 0 || shaperCalls.Load() != 0 {
+		t.Fatalf("preflight was late: upstream_hits=%d shaper_calls=%d", upstreamHits.Load(), shaperCalls.Load())
 	}
 }
 

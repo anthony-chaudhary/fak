@@ -31,7 +31,7 @@ func (b *dflash2GateBackend) ForwardExecutionOwner() *sync.Mutex { return b.owne
 
 func dflash2ServingFixture(t *testing.T) (*InKernelPlanner, *DFlash2Target) {
 	t.Helper()
-	tok, err := tokenizer.FromGGML([]string{"a", "b", "c", "<|im_end|>"}, nil, []int32{1, 1, 1, 3}, "qwen2")
+	tok, err := tokenizer.FromGGML([]string{"a", "b", "c", "<|im_end|>", "ab"}, []string{"a b"}, []int32{1, 1, 1, 3, 1}, "qwen2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func dflash2ServingFixture(t *testing.T) (*InKernelPlanner, *DFlash2Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &model.Model{Cfg: model.Config{EOSTokenID: 3, VocabSize: 4}}
+	m := &model.Model{Cfg: model.Config{EOSTokenID: 3, VocabSize: 5}}
 	target := &DFlash2Target{m: m, tok: tok, backend: be, domain: domain, source: &ggufload.WeightSource{},
 		spec:   DFlash2TargetSpec{TokenizerID: tok.Identity(), RendererID: inKernelPromptRendererID(m.Cfg, SampleParams{})},
 		leases: make(map[*dflash2Lease]struct{})}

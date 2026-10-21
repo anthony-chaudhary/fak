@@ -2,7 +2,9 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -13,6 +15,33 @@ import (
 // the A/B loop, the injector decorator, the mock — compiles unchanged, and only
 // the gateway (which actually has a client request to forward) passes options.
 type SampleOpt func(*SampleParams)
+
+// ErrSeedUnsupported identifies routes without request-bound sampling seeds.
+var ErrSeedUnsupported = errors.New("sampling seed unsupported")
+
+type nativeTargetSampleSeedContextKey struct{}
+
+func withNativeTargetSampleSeed(ctx context.Context, seed *int64) context.Context {
+	if seed == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, nativeTargetSampleSeedContextKey{}, uint64(*seed))
+}
+
+func nativeTargetSampleSeedFromContext(ctx context.Context) (uint64, bool) {
+	seed, ok := ctx.Value(nativeTargetSampleSeedContextKey{}).(uint64)
+	return seed, ok
+}
+
+// WithSeed sets a request-local sampling seed; nil leaves the existing option unchanged.
+func WithSeed(seed *int64) SampleOpt {
+	return func(sp *SampleParams) {
+		if seed != nil {
+			v := *seed
+			sp.Seed = &v
+		}
+	}
+}
 
 // WithModel overrides the planner's configured model id for this one request — the
 // gateway's request-model pass-through (#82). An empty string is a NO-OP, so a

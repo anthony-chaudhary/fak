@@ -61,6 +61,7 @@ type adapterRequest struct {
 	Messages    []Message
 	Tools       []ToolDef
 	Temperature float64
+	Seed        *int64
 	// OmitTemperature suppresses the temperature field for provider variants that reject
 	// it. The normal OpenAI Responses API leaves this false; Codex's ChatGPT backend
 	// requires it when using the subscription route.
@@ -189,6 +190,7 @@ type openAIRequest struct {
 	Tools               []ToolDef            `json:"tools,omitempty"`
 	ToolChoice          any                  `json:"tool_choice,omitempty"`
 	Temperature         *float64             `json:"temperature,omitempty"`
+	Seed                *int64               `json:"seed,omitempty"`
 	MaxTokens           int                  `json:"max_tokens,omitempty"`
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
@@ -253,6 +255,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		Tools:              openAICompatibleTools(r.Tools),
 		ToolChoice:         toolChoice,
 		Temperature:        temp,
+		Seed:               r.Seed,
 		MaxTokens:          r.MaxTokens,
 		ReasoningEffort:    r.ReasoningEffort,
 		TopP:               r.TopP,
@@ -937,6 +940,9 @@ type openAIResponsesResponse struct {
 // reservedExtraBodyKey already fences the Responses core keys (input,
 // max_output_tokens, store), so a merge can extend the body but never rewrite it.
 func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
+	if r.Seed != nil {
+		return nil, fmt.Errorf("provider %s: %w", ProviderOpenAIResponses, ErrSeedUnsupported)
+	}
 	toolChoice := ""
 	if len(r.Tools) > 0 {
 		toolChoice = "auto"

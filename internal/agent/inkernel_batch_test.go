@@ -4,7 +4,9 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -161,6 +163,212 @@ func TestInKernelStochasticSamplingIsBatchCompositionInvariant(t *testing.T) {
 	assertMatchesSingleton("original batch", run([]int{0, 1, 2}), 0, 1, 2)
 	assertMatchesSingleton("permuted batch", run([]int{2, 0, 1}), 0, 1, 2)
 	assertMatchesSingleton("batch with early-retiring neighbor", run([]int{3, 0, 1, 2}), 0, 1, 2, 3)
+}
+
+// TestInKernelRequestKeyedSamplingIsBatchCompositionInvariant proves the request
+// key, rather than a lane-local mutable RNG, owns each stochastic target draw.
+//
+// fak-test:runtime fast est=1s lane=default
+func TestInKernelRequestKeyedSamplingIsBatchCompositionInvariant(t *testing.T) {
+	cfg := tinyCfg()
+	m := model.NewSynthetic(cfg)
+	type request struct {
+		prompt []int
+		seed   int64
+		maxNew int
+	}
+	sharedPrompt := synthIDs(cfg.VocabSize, 13, 9101)
+	requests := []request{
+		{prompt: sharedPrompt, seed: 101, maxNew: 12},
+		{prompt: sharedPrompt, seed: -1, maxNew: 12},
+		{prompt: synthIDs(cfg.VocabSize, 9, 9102), seed: 303, maxNew: 8},
+		{prompt: synthIDs(cfg.VocabSize, 17, 9103), seed: 0, maxNew: 1},
+	}
+
+	run := func(order []int) map[int][]int {
+		lanes := make([]*decodeLane, len(order))
+		sinks := make([]*batchLaneSink, len(order))
+		for batchIndex, requestIndex := range order {
+			r := requests[requestIndex]
+			lanes[batchIndex], sinks[batchIndex] = newDecodeLaneOver(m, r.prompt, r.maxNew, 777)
+			lanes[batchIndex].temp = 5
+			lanes[batchIndex].topP = 0.95
+			lanes[batchIndex].topK = 16
+			lanes[batchIndex].sampleKey = uint64(r.seed)
+			lanes[batchIndex].sampleKeyed = true
+			lanes[batchIndex].sampleBase = len(r.prompt)
+		}
+		inKernelDecodeLanesBatched(context.Background(), lanes, m, false)
+		got := make(map[int][]int, len(order))
+		for batchIndex, requestIndex := range order {
+			if lanes[batchIndex].err != nil {
+				t.Fatalf("request %d decode failed: %v", requestIndex, lanes[batchIndex].err)
+			}
+			got[requestIndex] = sinks[batchIndex].toks
+		}
+		return got
+	}
+
+	singletons := make(map[int][]int, len(requests))
+	for i := range requests {
+		singletons[i] = run([]int{i})[i]
+		if replay := run([]int{i})[i]; !eqInts(replay, singletons[i]) {
+			t.Fatalf("request %d did not replay: got %v want %v", i, replay, singletons[i])
+		}
+	}
+	if eqInts(singletons[0], singletons[1]) {
+		t.Fatalf("distinct request keys produced the same active stream: %v", singletons[0])
+	}
+	assert := func(name string, got map[int][]int, ids ...int) {
+		t.Helper()
+		for _, id := range ids {
+			if !eqInts(got[id], singletons[id]) {
+				t.Fatalf("%s changed request %d: got %v want %v", name, id, got[id], singletons[id])
+			}
+		}
+	}
+	assert("original", run([]int{0, 1, 2}), 0, 1, 2)
+	assert("permuted", run([]int{2, 0, 1}), 0, 1, 2)
+	assert("early retire", run([]int{3, 0, 1, 2}), 0, 1, 2, 3)
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestInKernelRequestKeyedSampleUsesAbsolutePosition(t *testing.T) {
+	draw := func(sampleBase int) int {
+		got := -1
+		lane := &decodeLane{
+			logits:      make([]float32, 16),
+			temp:        1,
+			stops:       map[int]bool{},
+			emit:        func(token int) bool { got = token; return false },
+			maxNew:      1,
+			sampleKey:   17,
+			sampleKeyed: true,
+			sampleBase:  sampleBase,
+		}
+		lane.decodeOne(context.Background())
+		if lane.err != nil {
+			t.Fatal(lane.err)
+		}
+		return got
+	}
+	if got := draw(3); got != 13 {
+		t.Fatalf("absolute position 3 selected %d, want 13", got)
+	}
+	if got := draw(11); got != 0 {
+		t.Fatalf("absolute position 11 selected %d, want 0", got)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestInKernelForcedThinkingBypassesRequestCoin(t *testing.T) {
+	constraint := &nativeThinkingConstraint{
+		budget:  NewThinkBudget(0, true),
+		closeID: 5,
+		decodeToken: func(token int) (string, error) {
+			if token == 5 {
+				return thinkClose, nil
+			}
+			return "reasoning", nil
+		},
+	}
+	got := -1
+	lane := &decodeLane{
+		logits:      make([]float32, 16),
+		temp:        1,
+		stops:       map[int]bool{},
+		emit:        func(token int) bool { got = token; return false },
+		maxNew:      1,
+		thinking:    constraint,
+		sampleKey:   17,
+		sampleKeyed: true,
+		sampleBase:  3,
+	}
+	lane.decodeOne(context.Background())
+	if lane.err != nil {
+		t.Fatal(lane.err)
+	}
+	if got != 5 || !constraint.forced {
+		t.Fatalf("forced close selected %d forced=%v, want 5/true", got, constraint.forced)
+	}
+	if len(lane.sampling.probs) != 0 {
+		t.Fatal("forced close entered the probability sampler")
+	}
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestInKernelRequestSeedReplaysAfterOOMRetry(t *testing.T) {
+	cfg := tinyCfg()
+	cfg.EOSTokenID = -1
+	ids := synthIDs(cfg.VocabSize, 8, 9191)
+	seed := int64(-9)
+	run := func(injectOOM bool) ([]int, bool) {
+		measurement := &nativeInferenceMeasurement{startedAt: time.Now()}
+		backend := compute.Default()
+		var fault *receiptOOMRetryBackend
+		if injectOOM {
+			fault = &receiptOOMRetryBackend{Backend: backend, measurement: measurement}
+			backend = fault
+		}
+		p := &InKernelPlanner{m: model.NewSynthetic(cfg), modelID: "seeded-oom-retry", backend: backend}
+		ctx := withNativeTargetSampleSeed(context.Background(), &seed)
+		var emitted []int
+		_, err := p.generateReusedWithOOMRetry(ctx, ids, 6, 5, 0.95, 16, nil, 0, 0, map[int]bool{}, func(token int) bool {
+			emitted = append(emitted, token)
+			return false
+		}, func() {
+			emitted = emitted[:0]
+			measurement.reset()
+		}, measurement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return emitted, fault != nil && fault.failed
+	}
+	want, _ := run(false)
+	got, faulted := run(true)
+	if !faulted {
+		t.Fatal("OOM retry fixture did not inject a first-attempt failure")
+	}
+	if !eqInts(got, want) {
+		t.Fatalf("seeded OOM replay changed stream: got %v want %v", got, want)
+	}
+}
+
+// fak-test:runtime fast est=200ms lane=default
+func TestInKernelSeededCompleteReplaysWithSchema(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	temperature, topP, topK := 0.8, 0.8, 2
+	messages := []Message{{Role: RoleUser, Content: "Answer with the requested object."}}
+	run := func(seed int64) string {
+		completion, err := p.Complete(context.Background(), messages, nil,
+			WithSeed(&seed), WithResponseFormat(nativeStructuredTestFormat),
+			WithTemperature(&temperature), WithTopP(&topP), WithTopK(&topK))
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeStructuredCheckAnswer(t, completion.Message.Content)
+		return completion.Message.Content
+	}
+	if first, replay := run(0), run(0); first != replay {
+		t.Fatalf("explicit zero seed did not replay through Complete: %q != %q", first, replay)
+	}
+	_ = run(-1)
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestInKernelSeededRequestBypassesSpeculativeProposals(t *testing.T) {
+	probe := &speculativeRequestProbe{tokens: []int{1, 2}}
+	p, ids := speculativeRequestPlanner(t, probe)
+	seed := int64(-1)
+	ctx := withNativeTargetSampleSeed(context.Background(), &seed)
+	_, err := p.generateReusedRecovering(ctx, ids, 3, 0, 0, 0, nil, 0, 0, map[int]bool{}, func(int) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 0 {
+		t.Fatalf("seeded target-only request made %d speculative proposal calls", probe.calls)
+	}
 }
 
 // TestInKernelBatchServePathByteIdenticalToSerial pins the acceptance bar on the LIVE serve

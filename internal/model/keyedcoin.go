@@ -8,9 +8,10 @@ import "hash/fnv"
 type DomainTag uint64
 
 const (
-	DomainAcceptCoin DomainTag = 0x1
-	DomainBonusToken DomainTag = 0x2
-	DomainResidual   DomainTag = 0x3
+	DomainAcceptCoin   DomainTag = 0x1
+	DomainBonusToken   DomainTag = 0x2
+	DomainResidual     DomainTag = 0x3
+	DomainTargetSample DomainTag = 0x4
 )
 
 // HashRequestID folds a request id to a 64-bit key via FNV-1a (hash/fnv). An
@@ -31,7 +32,19 @@ func HashRequestID(requestID string) uint64 {
 // and weaken the stream. KeyedUniform(0, ...) is defined but callers must not
 // use it as a keyed draw: KeyedOn() gates that.
 func KeyedUniform(requestHash uint64, domain DomainTag, step int) float32 {
-	seed := requestHash ^ uint64(domain) ^ (uint64(step+1) * SplitMixConstant)
-	u := SplitMix64(seed)
+	u := keyedUniformWord(requestHash, domain, step)
 	return float32(u>>40) * (1.0 / 16777216.0)
+}
+
+// KeyedUniform64 derives a deterministic 53-bit uniform float64 in [0,1).
+// It shares KeyedUniform's key schedule while retaining enough precision for
+// the ordinary target sampler's float64 CDF inversion.
+func KeyedUniform64(requestHash uint64, domain DomainTag, step int) float64 {
+	u := keyedUniformWord(requestHash, domain, step)
+	return float64(u>>11) * (1.0 / 9007199254740992.0)
+}
+
+func keyedUniformWord(requestHash uint64, domain DomainTag, step int) uint64 {
+	seed := requestHash ^ uint64(domain) ^ (uint64(step+1) * SplitMixConstant)
+	return SplitMix64(seed)
 }

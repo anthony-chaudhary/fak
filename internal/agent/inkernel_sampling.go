@@ -165,6 +165,14 @@ func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand
 // sampleLogitsWS is sampleLogits over a caller-owned reusable workspace. After the
 // first call sizes the workspace to the vocabulary, repeated calls allocate nothing.
 func sampleLogitsWS(logits []float32, temp, topP float64, topK int, rng *rand.Rand, w *samplerWorkspace) int {
+	return sampleLogitsCoreWS(logits, temp, topP, topK, rng, 0, false, w)
+}
+
+func sampleLogitsCoinWS(logits []float32, temp, topP float64, topK int, coin float64, w *samplerWorkspace) int {
+	return sampleLogitsCoreWS(logits, temp, topP, topK, nil, coin, true, w)
+}
+
+func sampleLogitsCoreWS(logits []float32, temp, topP float64, topK int, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	if temp <= 0 {
 		best, bi := float32(-math.MaxFloat32), 0
 		for i, x := range logits {
@@ -189,7 +197,10 @@ func sampleLogitsWS(logits []float32, temp, topP float64, topK int, rng *rand.Ra
 		sum += p
 	}
 	sum = w.applyCPUSamplingTruncation(probs, sum, topP, topK)
-	return sampleProbabilityRow(probs, sum, rng.Float64())
+	if !hasCoin {
+		coin = rng.Float64()
+	}
+	return sampleProbabilityRow(probs, sum, coin)
 }
 
 // sampleProbabilityRow inverts one probability row with a coin in [0,1). It uses
@@ -229,13 +240,17 @@ func sampleLogitsWithBias(logits []float32, temp, topP float64, topK int, bias m
 }
 
 func sampleLogitsWithBiasWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand, w *samplerWorkspace) int {
+	return sampleLogitsWithBiasCoreWS(logits, temp, topP, topK, bias, rng, 0, false, w)
+}
+
+func sampleLogitsWithBiasCoreWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	if len(bias) == 0 {
-		return sampleLogitsWS(logits, temp, topP, topK, rng, w)
+		return sampleLogitsCoreWS(logits, temp, topP, topK, rng, coin, hasCoin, w)
 	}
 	eff := w.effBuf(len(logits))
 	copy(eff, logits)
 	applyLogitBias(eff, bias)
-	return sampleLogitsWS(eff, temp, topP, topK, rng, w)
+	return sampleLogitsCoreWS(eff, temp, topP, topK, rng, coin, hasCoin, w)
 }
 
 // applyLogitBias adds the OpenAI logit_bias map into logits IN PLACE. Out-of-range
@@ -272,8 +287,16 @@ func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bia
 }
 
 func sampleLogitsWithPenaltyWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand, w *samplerWorkspace) int {
+	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, bias, frequencyPenalty, presencePenalty, counts, rng, 0, false, w)
+}
+
+func sampleLogitsWithPenaltyCoinWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, coin float64, w *samplerWorkspace) int {
+	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, bias, frequencyPenalty, presencePenalty, counts, nil, coin, true, w)
+}
+
+func sampleLogitsWithPenaltyCoreWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand, coin float64, hasCoin bool, w *samplerWorkspace) int {
 	if frequencyPenalty == 0 && presencePenalty == 0 {
-		return sampleLogitsWithBiasWS(logits, temp, topP, topK, bias, rng, w)
+		return sampleLogitsWithBiasCoreWS(logits, temp, topP, topK, bias, rng, coin, hasCoin, w)
 	}
 	eff := w.effBuf(len(logits))
 	copy(eff, logits)
@@ -287,7 +310,7 @@ func sampleLogitsWithPenaltyWS(logits []float32, temp, topP float64, topK int, b
 		penalty := frequencyPenalty*float64(c) + presencePenalty
 		eff[tok] -= float32(penalty)
 	}
-	return sampleLogitsWS(eff, temp, topP, topK, rng, w)
+	return sampleLogitsCoreWS(eff, temp, topP, topK, rng, coin, hasCoin, w)
 }
 
 // nucleusTruncate zeroes every probability outside the top-p nucleus in place and

@@ -86,6 +86,37 @@ func mustStream(t *testing.T, c *fakclient.Client, onDelta func(string)) *fakcli
 	return res
 }
 
+func TestStreamChatRequestSeedBodyRoundTrip(t *testing.T) {
+	zero := int64(0)
+	for _, tc := range []struct {
+		name string
+		seed *int64
+	}{
+		{name: "omitted"},
+		{name: "explicit_zero", seed: &zero},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]json.RawMessage
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, sseEvent(sseOpenChunk("seed", "m"))+sseEvent(fakclient.StreamDoneToken))
+			}))
+			defer ts.Close()
+			_, err := fakclient.New(ts.URL).StreamChatCompletions(context.Background(), fakclient.StreamChatRequest{Model: "m", Seed: tc.seed}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, present := body["seed"]
+			if present != (tc.seed != nil) || present && string(got) != "0" {
+				t.Fatalf("seed present=%v value=%s", present, got)
+			}
+		})
+	}
+}
+
 // newStreamServer serves one SSE conversation from frames on every request,
 // flushing after each frame so the client observes the stream incrementally.
 func newStreamServer(t *testing.T, frames []string) *httptest.Server {

@@ -28,6 +28,9 @@ import (
 // detail is NEVER forwarded — only the status + classification cross the boundary —
 // so an upstream error message cannot leak to a possibly-unauthenticated caller.
 func upstreamErrorStatus(err error) (status int, code, msg string) {
+	if errors.Is(err, agent.ErrSeedUnsupported) {
+		return http.StatusBadRequest, "sampling_seed_unsupported", "the selected model route does not support a sampling seed"
+	}
 	if errors.Is(err, agent.ErrNativeStructuredUnsupported) {
 		return http.StatusBadRequest, "native_structured_output_unsupported", "the native model route does not support this structured-output request"
 	}

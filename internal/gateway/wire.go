@@ -382,6 +382,7 @@ type ChatRequest struct {
 	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
 	Temperature         *float64 `json:"temperature,omitempty"`
 	TopP                *float64 `json:"top_p,omitempty"`
+	Seed                *int64   `json:"seed,omitempty"`
 	// Stop is raw because the OpenAI wire allows EITHER a bare string OR an array of
 	// strings; decoding straight into []string would reject the common `"stop":"\n"`
 	// form. normalizeStop folds both shapes to a slice.
