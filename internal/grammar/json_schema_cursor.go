@@ -29,6 +29,10 @@ const (
 type jsonFieldProgram struct {
 	kind  fieldKind
 	cands [][]byte
+
+	item     *jsonFieldProgram // fieldArray item grammar
+	minItems int32
+	maxItems int32 // -1 when unbounded
 }
 
 type jsonShapeProgram struct {
@@ -37,34 +41,58 @@ type jsonShapeProgram struct {
 }
 
 // jsonCursor is one shape's parse position. seg == len(segs) means the object
-// is complete; any further byte is dead.
+// is complete; any further byte is dead. Inside an array, off/lo/hi/num describe
+// the current item and count saturates at the largest bound that matters.
 type jsonCursor struct {
-	seg  int32
-	off  int32 // literal offset, or bytes consumed inside the current value
-	lo   int32 // literal-set alive range [lo, hi)
-	hi   int32
-	num  int8
-	dead bool
+	seg   int32
+	off   int32 // literal offset, or bytes consumed inside the current value
+	lo    int32 // literal-set alive range [lo, hi)
+	hi    int32
+	num   int8
+	arr   int8
+	count int32
+	dead  bool
 }
+
+const (
+	arrOpen  = iota // expecting '['
+	arrFirst        // after '[': first item or ']'
+	arrItem         // inside an item
+	arrAfter        // after an item: ',' or ']'
+	arrNext         // after ',': next item
+)
+
+const (
+	valueDead      = iota // b is illegal here
+	valueConsumed         // b extended the value, which is still open
+	valueCompleted        // b completed the value
+	valueHandoff          // the value had already ended; b belongs to what follows
+)
 
 func newJSONShapeProgram(t compiledTool) jsonShapeProgram {
 	p := jsonShapeProgram{segs: t.segs, fields: make([]*jsonFieldProgram, len(t.segs))}
 	for i, seg := range t.segs {
-		if seg.field == nil {
-			continue
+		if seg.field != nil {
+			p.fields[i] = newJSONFieldProgram(seg.field)
 		}
-		fp := &jsonFieldProgram{kind: seg.field.kind}
-		switch seg.field.kind {
-		case fieldStringEnum:
-			fp.cands = sortedCandidates(seg.field.quotedEnum)
-		case fieldBool:
-			fp.cands = sortedCandidates(boolLits)
-		case fieldIntegerEnum:
-			fp.cands = sortedCandidates(seg.field.integerEnum)
-		}
-		p.fields[i] = fp
 	}
 	return p
+}
+
+func newJSONFieldProgram(f *compiledField) *jsonFieldProgram {
+	fp := &jsonFieldProgram{kind: f.kind}
+	switch f.kind {
+	case fieldStringEnum:
+		fp.cands = sortedCandidates(f.quotedEnum)
+	case fieldBool:
+		fp.cands = sortedCandidates(boolLits)
+	case fieldIntegerEnum:
+		fp.cands = sortedCandidates(f.integerEnum)
+	case fieldArray:
+		fp.item = newJSONFieldProgram(f.item)
+		fp.minItems, fp.maxItems = int32(f.minItems), int32(f.maxItems)
+	}
+	return fp
 }
 
 func sortedCandidates(in [][]byte) [][]byte {
@@ -81,10 +109,19 @@ func (p *jsonShapeProgram) start() jsonCursor {
 }
 
 func (p *jsonShapeProgram) enter(c *jsonCursor, seg int32) {
-	c.seg, c.off, c.num = seg, 0, numStart
-	c.lo, c.hi = 0, 0
-	if int(seg) < len(p.fields) && p.fields[seg] != nil {
-		c.hi = int32(len(p.fields[seg].cands))
+	c.seg, c.arr, c.count = seg, arrOpen, 0
+	var fp *jsonFieldProgram
+	if int(seg) < len(p.fields) {
+		fp = p.fields[seg]
+	}
+	startValue(c, fp)
+}
+
+// startValue resets the per-value state for fp (nil for a literal segment).
+func startValue(c *jsonCursor, fp *jsonFieldProgram) {
+	c.off, c.num, c.lo, c.hi = 0, numStart, 0, 0
+	if fp != nil {
+		c.hi = int32(len(fp.cands))
 	}
 }
 
@@ -117,55 +154,149 @@ func (p *jsonShapeProgram) step(c *jsonCursor, b byte) bool {
 			}
 			return true
 		}
-		switch fp.kind {
-		case fieldString:
-			switch {
-			case c.off == 0:
-				if b != '"' {
-					c.dead = true
-					return false
-				}
-				c.off = 1
-			case b == '"':
-				p.enter(c, c.seg+1)
-			case !stringContentOK(b):
-				c.dead = true
-				return false
-			}
-			return true
-		case fieldStringEnum, fieldBool:
-			if !narrowCandidates(fp.cands, c, b) {
-				c.dead = true
-				return false
-			}
-			// Quoted variants and true/false are prefix-free: a member completed
-			// here cannot be extended by any surviving member.
-			if len(fp.cands[c.lo]) == int(c.off) {
-				p.enter(c, c.seg+1)
-			}
-			return true
-		case fieldIntegerEnum:
-			exact := c.hi > c.lo && len(fp.cands[c.lo]) == int(c.off)
-			if narrowCandidates(fp.cands, c, b) {
-				return true
-			}
-			if !exact {
-				c.dead = true
-				return false
-			}
-			p.enter(c, c.seg+1)
-			continue
-		default:
-			if stepNumber(c, b, fp.kind == fieldInt) {
+		if fp.kind == fieldArray {
+			if stepArray(c, fp, b) {
 				return true
 			}
 			if c.dead {
 				return false
 			}
 			p.enter(c, c.seg+1)
+			return true
+		}
+		switch stepValue(c, fp, b) {
+		case valueConsumed:
+			return true
+		case valueCompleted:
+			p.enter(c, c.seg+1)
+			return true
+		case valueHandoff:
+			p.enter(c, c.seg+1)
 			continue
+		default:
+			c.dead = true
+			return false
 		}
 	}
+}
+
+// stepValue advances one scalar value by b. It never marks c dead itself.
+func stepValue(c *jsonCursor, fp *jsonFieldProgram, b byte) int {
+	switch fp.kind {
+	case fieldString:
+		switch {
+		case c.off == 0:
+			if b != '"' {
+				return valueDead
+			}
+			c.off = 1
+		case b == '"':
+			return valueCompleted
+		case !stringContentOK(b):
+			return valueDead
+		}
+		return valueConsumed
+	case fieldStringEnum, fieldBool:
+		if !narrowCandidates(fp.cands, c, b) {
+			return valueDead
+		}
+		// Quoted variants and true/false are prefix-free: a member completed
+		// here cannot be extended by any surviving member.
+		if len(fp.cands[c.lo]) == int(c.off) {
+			return valueCompleted
+		}
+		return valueConsumed
+	case fieldIntegerEnum:
+		exact := c.hi > c.lo && len(fp.cands[c.lo]) == int(c.off)
+		if narrowCandidates(fp.cands, c, b) {
+			return valueConsumed
+		}
+		if exact {
+			return valueHandoff
+		}
+		return valueDead
+	case fieldInt, fieldNumber:
+		dead := false
+		if stepNumber(c, b, fp.kind == fieldInt, &dead) {
+			return valueConsumed
+		}
+		if dead {
+			return valueDead
+		}
+		return valueHandoff
+	default:
+		return valueDead
+	}
+}
+
+// stepArray advances an array value. It reports false with c alive only after
+// the closing ']' was consumed, so the caller moves to the next segment.
+func stepArray(c *jsonCursor, fp *jsonFieldProgram, b byte) bool {
+	for {
+		switch c.arr {
+		case arrOpen:
+			if b != '[' {
+				c.dead = true
+				return false
+			}
+			c.arr = arrFirst
+			return true
+		case arrFirst:
+			if b == ']' {
+				if fp.minItems > 0 {
+					c.dead = true
+				}
+				return false
+			}
+			if fp.maxItems == 0 {
+				c.dead = true
+				return false
+			}
+			startValue(c, fp.item)
+			c.arr = arrItem
+		case arrNext:
+			startValue(c, fp.item)
+			c.arr = arrItem
+		case arrItem:
+			// A finished item's scanner state is reset so every position after
+			// an item shares one cache key.
+			switch stepValue(c, fp.item, b) {
+			case valueConsumed:
+				return true
+			case valueCompleted:
+				startValue(c, nil)
+				c.arr, c.count = arrAfter, arrayCount(c.count+1, fp)
+				return true
+			case valueHandoff:
+				startValue(c, nil)
+				c.arr, c.count = arrAfter, arrayCount(c.count+1, fp)
+			default:
+				c.dead = true
+				return false
+			}
+		default: // arrAfter
+			switch {
+			case b == ',' && (fp.maxItems < 0 || c.count < fp.maxItems):
+				c.arr = arrNext
+				return true
+			case b == ']' && c.count >= fp.minItems:
+				return false
+			default:
+				c.dead = true
+				return false
+			}
+		}
+	}
+}
+
+// arrayCount saturates the item count at the largest bound that still matters,
+// keeping cursor states (and cache keys) finite for unbounded arrays.
+func arrayCount(n int32, fp *jsonFieldProgram) int32 {
+	limit := fp.minItems
+	if fp.maxItems >= 0 {
+		limit = fp.maxItems
+	}
+	return min(n, limit)
 }
 
 // narrowCandidates keeps the members whose next byte is b. It leaves c
@@ -193,8 +324,8 @@ func narrowCandidates(cands [][]byte, c *jsonCursor, b byte) bool {
 }
 
 // stepNumber consumes b when it extends the canonical number. When it does not,
-// it reports false and marks c dead unless the number can already end.
-func stepNumber(c *jsonCursor, b byte, integerOnly bool) bool {
+// it reports false and sets *dead unless the number can already end.
+func stepNumber(c *jsonCursor, b byte, integerOnly bool, dead *bool) bool {
 	digit := b >= '0' && b <= '9'
 	switch c.num {
 	case numStart:
@@ -206,7 +337,7 @@ func stepNumber(c *jsonCursor, b byte, integerOnly bool) bool {
 		case digit:
 			c.num = numIntDigits
 		default:
-			c.dead = true
+			*dead = true
 			return false
 		}
 	case numAfterMinus:
@@ -216,7 +347,7 @@ func stepNumber(c *jsonCursor, b byte, integerOnly bool) bool {
 		case digit:
 			c.num = numIntDigits
 		default:
-			c.dead = true
+			*dead = true
 			return false
 		}
 	case numIntZero:
@@ -234,7 +365,7 @@ func stepNumber(c *jsonCursor, b byte, integerOnly bool) bool {
 		}
 	case numAfterDot:
 		if !digit {
-			c.dead = true
+			*dead = true
 			return false
 		}
 		c.num = numFracDigits
@@ -261,7 +392,7 @@ func (s *jsonMaskState) alive() bool {
 }
 
 func (s *jsonMaskState) key() string {
-	buf := make([]byte, 0, len(s.cursors)*17)
+	buf := make([]byte, 0, len(s.cursors)*23)
 	for _, c := range s.cursors {
 		if c.dead {
 			buf = append(buf, 0)
@@ -272,7 +403,8 @@ func (s *jsonMaskState) key() string {
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(c.off))
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(c.lo))
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(c.hi))
-		buf = append(buf, byte(c.num))
+		buf = append(buf, byte(c.num), byte(c.arr))
+		buf = binary.LittleEndian.AppendUint32(buf, uint32(c.count))
 	}
 	return string(buf)
 }

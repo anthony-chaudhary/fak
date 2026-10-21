@@ -115,8 +115,12 @@ must fit that surface. Native response schemas also accept integer `enum` and
 integers; they are emitted in canonical decimal form, with `-0` normalized to
 `0` and duplicates removed. Fractions, exponents, overflow, `null`, mixed-type
 integer sets and constrained number values are rejected before inference.
-Unconstrained numbers use canonical JSON syntax without exponents. Nested
-objects, arrays, unknown constraint keywords, `additionalProperties:true`, union
+Unconstrained numbers use canonical JSON syntax without exponents. A property may
+also be an array whose `items` is one of those scalar schemas, with optional
+`minItems` and `maxItems` between 0 and 64; arrays are emitted as `[a,b]` with
+no whitespace. Nested arrays, object items, tuple `items`, `uniqueItems` and
+other array keywords are rejected, and tool schemas remain array-free. Nested
+objects, unknown constraint keywords, `additionalProperties:true`, union
 keywords, regex and EBNF are also rejected before inference. `strict` may be true
 or omitted. Native `json_object` is unsupported; upstream engine passthrough
 retains its own supported surface.

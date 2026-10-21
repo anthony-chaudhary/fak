@@ -89,15 +89,19 @@ const (
 	fieldInt                          // -? (0 | [1-9][0-9]*)
 	fieldNumber                       // integer with optional .[0-9]+ fraction
 	fieldIntegerEnum                  // one of a bounded set of canonical int64 literals
+	fieldArray                        // response-only [item,...] of one scalar item kind
 )
 
 // compiledField is one required argument property in canonical (sorted) order.
 type compiledField struct {
 	name        string
 	kind        fieldKind
-	enum        []string // fieldStringEnum: sorted, deduped variants
-	quotedEnum  [][]byte // enum variants with their JSON quotes, prefix-free
-	integerEnum [][]byte // fieldIntegerEnum: sorted, deduped canonical literals
+	enum        []string       // fieldStringEnum: sorted, deduped variants
+	quotedEnum  [][]byte       // enum variants with their JSON quotes, prefix-free
+	integerEnum [][]byte       // fieldIntegerEnum: sorted, deduped canonical literals
+	item        *compiledField // fieldArray: the scalar item grammar
+	minItems    int            // fieldArray: inclusive lower bound
+	maxItems    int            // fieldArray: inclusive upper bound, -1 when unbounded
 }
 
 // segment is one step of a tool's argument-region grammar: either a fixed
@@ -353,6 +357,9 @@ func scanValueField(f compiledField, rest []byte) valueScan {
 		return scanNumber(rest, true)
 	case fieldIntegerEnum:
 		return scanIntegerLiterals(rest, f.integerEnum)
+	case fieldArray:
+		// Arrays exist only in response schemas, which step cursors instead.
+		return valueScan{state: vDead}
 	default:
 		return scanNumber(rest, false)
 	}
@@ -764,9 +771,18 @@ func normalizeResponseField(tool, name string, prop map[string]json.RawMessage) 
 	return normalizeFieldMode(tool, name, prop, true)
 }
 
-const maxResponseIntegerEnumMembers = 32
+const (
+	maxResponseIntegerEnumMembers = 32
+	maxResponseArrayItems         = 64
+)
 
 func normalizeFieldMode(tool, name string, prop map[string]json.RawMessage, allowIntegerEnums bool) (compiledField, error) {
+	if allowIntegerEnums {
+		var ty string
+		if raw, ok := prop["type"]; ok && json.Unmarshal(raw, &ty) == nil && ty == "array" {
+			return normalizeArrayField(tool, name, prop)
+		}
+	}
 	for k := range prop {
 		switch k {
 		case "type", "enum", "const", "title", "description":
@@ -835,6 +851,61 @@ func normalizeFieldMode(tool, name string, prop map[string]json.RawMessage, allo
 	default:
 		return compiledField{}, unsupported(tool, name, "type %q", ty)
 	}
+}
+
+// normalizeArrayField admits a response-only array of one scalar item schema
+// with optional minItems/maxItems bounds of at most maxResponseArrayItems.
+// Nested arrays, object items and other array keywords are refused.
+func normalizeArrayField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {
+	for k := range prop {
+		switch k {
+		case "type", "items", "minItems", "maxItems", "title", "description":
+		default:
+			return compiledField{}, unsupported(tool, name, "array keyword %q", k)
+		}
+	}
+	rawItems, ok := prop["items"]
+	if !ok {
+		return compiledField{}, unsupported(tool, name, "array without items")
+	}
+	var items map[string]json.RawMessage
+	if err := json.Unmarshal(rawItems, &items); err != nil || items == nil {
+		return compiledField{}, unsupported(tool, name, "array items must be one schema object")
+	}
+	var itemType string
+	if raw, ok := items["type"]; ok {
+		_ = json.Unmarshal(raw, &itemType)
+	}
+	if itemType == "array" || itemType == "object" {
+		return compiledField{}, unsupported(tool, name, "array items of type %q", itemType)
+	}
+	item, err := normalizeFieldMode(tool, name+"[]", items, true)
+	if err != nil {
+		return compiledField{}, err
+	}
+	bound := func(key string, def int) (int, error) {
+		raw, ok := prop[key]
+		if !ok {
+			return def, nil
+		}
+		var n int
+		if err := json.Unmarshal(raw, &n); err != nil || n < 0 || n > maxResponseArrayItems || string(bytes.TrimSpace(raw)) != strconv.Itoa(n) {
+			return 0, unsupported(tool, name, "%s must be an integer in [0, %d]", key, maxResponseArrayItems)
+		}
+		return n, nil
+	}
+	minItems, err := bound("minItems", 0)
+	if err != nil {
+		return compiledField{}, err
+	}
+	maxItems, err := bound("maxItems", -1)
+	if err != nil {
+		return compiledField{}, err
+	}
+	if maxItems >= 0 && minItems > maxItems {
+		return compiledField{}, unsupported(tool, name, "minItems %d exceeds maxItems %d", minItems, maxItems)
+	}
+	return compiledField{name: name, kind: fieldArray, item: &item, minItems: minItems, maxItems: maxItems}, nil
 }
 
 func normalizeIntegerEnum(tool, name string, prop map[string]json.RawMessage, isConst bool) (compiledField, error) {

@@ -351,6 +351,51 @@ func TestNativeStructuredIntegerEnumCompleteAndStream(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=300ms lane=default
+func TestNativeStructuredScalarArrayCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"tags":{"type":"array","items":{"type":"string","enum":["a","b"]},"minItems":1,"maxItems":3}},"required":["tags"],"additionalProperties":false}}}`)
+	temperature := 0.9
+	messages := []Message{{Role: RoleUser, Content: "List one to three tags."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		var value struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.Unmarshal([]byte(completion.Message.Content), &value); err != nil {
+			t.Fatalf("native array response is not JSON: %q: %v", completion.Message.Content, err)
+		}
+		if completion.FinishReason != "stop" || len(value.Tags) < 1 || len(value.Tags) > 3 {
+			t.Fatalf("finish=%q tags=%v, want 1..3 tags and a stop", completion.FinishReason, value.Tags)
+		}
+		for _, tag := range value.Tags {
+			if tag != "a" && tag != "b" {
+				t.Fatalf("tag %q outside the item enum in %q", tag, completion.Message.Content)
+			}
+		}
+	}
+	for seed := int64(1); seed <= 4; seed++ {
+		opts := []SampleOpt{WithResponseFormat(format), WithTemperature(&temperature), WithSeed(&seed), WithMaxTokens(64)}
+		buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, buffered)
+		var streamed strings.Builder
+		stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+			streamed.WriteString(piece)
+			return nil
+		}, messages, nil, append(opts, WithPerTokenStream(true))...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, stream)
+		if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+			t.Fatalf("seed %d: buffered %q, stream %q, streamed %q", seed, buffered.Message.Content, stream.Message.Content, streamed.String())
+		}
+	}
+}
+
 // fak-test:runtime fast est=50ms lane=default
 func TestNativeStructuredTextFormatPreservesOrdinaryOutput(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)
