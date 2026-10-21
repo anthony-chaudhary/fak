@@ -1,15 +1,14 @@
 package grammar
 
 import (
-	"bytes"
 	"errors"
 	"math"
 	"sync"
 )
 
-// JSONSchemaMask constrains generated tokens to one bare JSON object. It reuses
-// the required-scalar object grammar used by CallMask, without the tool-call
-// envelope. Unsupported schema features are refused by CompileJSONSchema.
+// JSONSchemaMask constrains generated tokens to one bare JSON object built from
+// literal and value segments like CallMask's, without the tool-call envelope.
+// Unsupported schema features are refused by CompileJSONSchema.
 type JSONSchemaMask struct {
 	objects []compiledTool
 	dec     TokenDecoder
@@ -32,9 +31,10 @@ const (
 	maxJSONSchemaMaskCacheStates = 64
 )
 
-// CompileJSONSchema compiles the currently supported scalar object subset into
-// a tokenizer-aware mask. Up to four optional properties are expanded into at
-// most 16 canonical shapes; unsupported keywords return ErrUnsupportedSchema.
+// CompileJSONSchema compiles the supported response subset (scalars, scalar
+// arrays and nested objects) into a tokenizer-aware mask. Up to four optional
+// properties across the tree expand into at most 16 canonical shapes;
+// unsupported keywords return ErrUnsupportedSchema.
 func CompileJSONSchema(schema []byte, dec TokenDecoder, opts CompileOptions) (*JSONSchemaMask, error) {
 	if dec == nil {
 		return nil, errors.New("grammar: CompileJSONSchema needs a TokenDecoder (inject tokenizer TokenBytes)")
@@ -47,18 +47,13 @@ func CompileJSONSchema(schema []byte, dec TokenDecoder, opts CompileOptions) (*J
 		return nil, err
 	}
 	objects := make([]compiledTool, 0, len(shapes))
-	for _, fields := range shapes {
-		segs := buildSegments(fields)
-		last := len(segs) - 1
-		if last < 0 || segs[last].field != nil || len(segs[last].lit) < 2 ||
-			!bytes.Equal(segs[last].lit[len(segs[last].lit)-2:], []byte("}}")) {
+	for _, shape := range shapes {
+		last := len(shape.segs) - 1
+		if last < 0 || shape.segs[last].field != nil || len(shape.segs[last].lit) == 0 ||
+			shape.segs[last].lit[len(shape.segs[last].lit)-1] != '}' {
 			return nil, errors.New("grammar: CompileJSONSchema internal object grammar is incomplete")
 		}
-		// buildSegments closes both the arguments object and its tool envelope.
-		// A response-format mask emits the bare arguments object, so remove only
-		// the envelope's closing brace from the final immutable segment.
-		segs[last].lit = append([]byte(nil), segs[last].lit[:len(segs[last].lit)-1]...)
-		objects = append(objects, compiledTool{fields: fields, segs: segs})
+		objects = append(objects, compiledTool{fields: shape.fields, segs: shape.segs})
 	}
 	programs := make([]jsonShapeProgram, len(objects))
 	for i := range objects {

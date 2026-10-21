@@ -669,7 +669,41 @@ func normalizeFields(tool string, schema []byte) ([]compiledField, error) {
 	return fields, nil
 }
 
-func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOptional int) ([][]compiledField, error) {
+// maxJSONSchemaDepth bounds response object nesting; the top-level object is
+// depth 1.
+const maxJSONSchemaDepth = 3
+
+// responseShape is one canonical response object: its value fields in emission
+// order and the literal/value segments the masks step.
+type responseShape struct {
+	fields []compiledField
+	segs   []segment
+}
+
+// responseObject is one object level of a response schema, properties in
+// canonical (sorted) key order.
+type responseObject struct {
+	props []responseProp
+}
+
+type responseProp struct {
+	name     string
+	optional int             // index among optional properties, -1 when required
+	field    *compiledField  // scalar or array value
+	object   *responseObject // nested object value
+}
+
+type responseBudget struct {
+	maxProperties, maxOptional int
+	properties, optional       int
+}
+
+// normalizeJSONSchemaShapes expands a response schema into its canonical
+// shapes. Nested objects with fixed properties flatten into literal and value
+// segments; optional properties at any depth (at most maxOptional in total)
+// choose among at most 2^maxOptional shapes, deduplicated when an omitted
+// object would make its own optional members irrelevant.
+func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOptional int) ([]responseShape, error) {
 	var root any
 	if err := json.Unmarshal(schema, &root); err != nil {
 		return nil, fmt.Errorf("grammar: tool %q: parse schema: %w", tool, err)
@@ -679,88 +713,160 @@ func normalizeJSONSchemaShapes(tool string, schema []byte, maxProperties, maxOpt
 	}
 	var top map[string]json.RawMessage
 	_ = json.Unmarshal(schema, &top)
+	budget := responseBudget{maxProperties: maxProperties, maxOptional: maxOptional}
+	obj, err := normalizeResponseObject(tool, "", top, 1, &budget)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[int]bool{}
+	var shapes []responseShape
+	for selection := 0; selection < 1<<budget.optional; selection++ {
+		b := responseShapeBuilder{selection: selection}
+		b.object(obj)
+		if seen[b.visited] {
+			continue
+		}
+		seen[b.visited] = true
+		b.segs = append(b.segs, segment{lit: b.lit})
+		shapes = append(shapes, responseShape{fields: b.fields, segs: b.segs})
+	}
+	return shapes, nil
+}
+
+func normalizeResponseObject(tool, path string, top map[string]json.RawMessage, depth int, budget *responseBudget) (*responseObject, error) {
 	for k := range top {
 		switch k {
-		case "type", "properties", "required", "additionalProperties", "title", "description", "$schema":
+		case "type", "properties", "required", "additionalProperties", "title", "description":
+		case "$schema":
+			if depth == 1 {
+				continue
+			}
+			fallthrough
 		default:
-			return nil, unsupported(tool, "", "top-level keyword %q", k)
+			if depth == 1 {
+				return nil, unsupported(tool, "", "top-level keyword %q", k)
+			}
+			return nil, unsupported(tool, path, "object keyword %q", k)
 		}
 	}
 	if raw, ok := top["type"]; ok {
 		var ty string
 		if err := json.Unmarshal(raw, &ty); err != nil || ty != "object" {
-			return nil, unsupported(tool, "", "top-level type %s (arguments must be an object)", raw)
+			return nil, unsupported(tool, path, "top-level type %s (arguments must be an object)", raw)
 		}
 	}
 	if raw, ok := top["additionalProperties"]; ok {
 		var ap *bool
 		if err := json.Unmarshal(raw, &ap); err != nil || ap == nil || *ap {
-			return nil, unsupported(tool, "", "additionalProperties other than false")
+			return nil, unsupported(tool, path, "additionalProperties other than false")
 		}
 	}
 	props := map[string]map[string]json.RawMessage{}
 	if raw, ok := top["properties"]; ok {
 		if err := json.Unmarshal(raw, &props); err != nil || props == nil {
-			return nil, unsupported(tool, "", "properties must be an object")
+			return nil, unsupported(tool, path, "properties must be an object")
 		}
 	}
-	if len(props) > maxProperties {
-		return nil, unsupported(tool, "", "%d properties exceed limit %d", len(props), maxProperties)
+	budget.properties += len(props)
+	if budget.properties > budget.maxProperties {
+		return nil, unsupported(tool, "", "%d properties exceed limit %d", budget.properties, budget.maxProperties)
 	}
 	var required []string
 	if raw, ok := top["required"]; ok {
 		if err := json.Unmarshal(raw, &required); err != nil || required == nil {
-			return nil, unsupported(tool, "", "required must be an array of property names")
+			return nil, unsupported(tool, path, "required must be an array of property names")
 		}
 	}
 	reqd := map[string]bool{}
 	for _, r := range required {
 		if _, ok := props[r]; !ok {
-			return nil, fmt.Errorf("grammar: tool %q: required property %q not declared in properties", tool, r)
+			return nil, fmt.Errorf("grammar: tool %q: required property %q not declared in properties", tool, path+r)
 		}
 		reqd[r] = true
-	}
-	if optional := len(props) - len(reqd); optional > maxOptional {
-		return nil, unsupported(tool, "", "%d optional properties exceed limit %d", optional, maxOptional)
 	}
 	names := make([]string, 0, len(props))
 	for name := range props {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	fields := make([]compiledField, 0, len(names))
-	optionalIndexes := make([]int, 0, maxOptional)
+	obj := &responseObject{props: make([]responseProp, 0, len(names))}
 	for _, name := range names {
 		if strings.ContainsAny(name, "\"\\") || !asciiPrintable(name) {
-			return nil, unsupported(tool, name, "property name needs JSON string escaping")
+			return nil, unsupported(tool, path+name, "property name needs JSON string escaping")
 		}
-		field, err := normalizeResponseField(tool, name, props[name])
-		if err != nil {
-			return nil, err
-		}
+		p := responseProp{name: name, optional: -1}
 		if !reqd[name] {
-			optionalIndexes = append(optionalIndexes, len(fields))
-		}
-		fields = append(fields, field)
-	}
-
-	shapes := make([][]compiledField, 0, 1<<len(optionalIndexes))
-	for selection := 0; selection < 1<<len(optionalIndexes); selection++ {
-		shape := make([]compiledField, 0, len(fields))
-		optional := 0
-		for i := range fields {
-			if optional < len(optionalIndexes) && optionalIndexes[optional] == i {
-				include := selection&(1<<optional) != 0
-				optional++
-				if !include {
-					continue
-				}
+			p.optional = budget.optional
+			budget.optional++
+			if budget.optional > budget.maxOptional {
+				return nil, unsupported(tool, "", "%d optional properties exceed limit %d", budget.optional, budget.maxOptional)
 			}
-			shape = append(shape, fields[i])
 		}
-		shapes = append(shapes, shape)
+		prop := props[name]
+		var ty string
+		if raw, ok := prop["type"]; ok {
+			_ = json.Unmarshal(raw, &ty)
+		}
+		if ty == "object" {
+			if depth >= maxJSONSchemaDepth {
+				return nil, unsupported(tool, path+name, "object nesting deeper than %d", maxJSONSchemaDepth)
+			}
+			child, err := normalizeResponseObject(tool, path+name+".", prop, depth+1, budget)
+			if err != nil {
+				return nil, err
+			}
+			p.object = child
+		} else {
+			field, err := normalizeResponseField(tool, path+name, prop)
+			if err != nil {
+				return nil, err
+			}
+			p.field = &field
+		}
+		obj.props = append(obj.props, p)
 	}
-	return shapes, nil
+	return obj, nil
+}
+
+// responseShapeBuilder lowers one optional-property selection into segments,
+// merging literals maximally so every value segment has a literal successor.
+// visited records the selected optional properties actually reached, so
+// selections that differ only inside an omitted object share one shape.
+type responseShapeBuilder struct {
+	selection int
+	visited   int
+	lit       []byte
+	segs      []segment
+	fields    []compiledField
+}
+
+func (b *responseShapeBuilder) object(o *responseObject) {
+	b.lit = append(b.lit, '{')
+	first := true
+	for i := range o.props {
+		p := &o.props[i]
+		if p.optional >= 0 {
+			if b.selection&(1<<p.optional) == 0 {
+				continue
+			}
+			b.visited |= 1 << p.optional
+		}
+		if !first {
+			b.lit = append(b.lit, ',')
+		}
+		first = false
+		b.lit = append(b.lit, '"')
+		b.lit = append(b.lit, p.name...)
+		b.lit = append(b.lit, '"', ':')
+		if p.object != nil {
+			b.object(p.object)
+			continue
+		}
+		b.segs = append(b.segs, segment{lit: b.lit}, segment{field: p.field})
+		b.fields = append(b.fields, *p.field)
+		b.lit = nil
+	}
+	b.lit = append(b.lit, '}')
 }
 
 func normalizeField(tool, name string, prop map[string]json.RawMessage) (compiledField, error) {

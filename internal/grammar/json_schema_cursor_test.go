@@ -104,6 +104,8 @@ var cursorTestSchemas = []string{
 	`{"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"string"},"c":{"type":"boolean"},"d":{"type":"number"},"e":{"type":"string","const":"z"}},"required":["a"],"additionalProperties":false}`,
 	`{"type":"object","properties":{},"additionalProperties":false}`,
 	`{"type":"object","properties":{"e":{"type":"string","enum":["","a b","a!","a"]},"n":{"type":"integer","enum":[1,10,100,1000,-1,-10,0,5]},"o":{"type":"number"},"p":{"type":"integer"},"q":{"type":"boolean"}},"required":["e"],"additionalProperties":false}`,
+	`{"type":"object","properties":{"o":{"type":"object","properties":{"n":{"type":"integer"},"s":{"type":"string"}},"required":["n","s"]},"z":{"type":"boolean"}},"required":["o","z"]}`,
+	`{"type":"object","properties":{"a":{"type":"integer"},"m":{"type":"object","properties":{"k":{"type":"string","enum":["a","b"]},"x":{"type":"number"}},"required":["k"]}},"required":["a"]}`,
 }
 
 // fak-test:runtime fast est=2s lane=default

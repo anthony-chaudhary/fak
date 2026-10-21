@@ -318,8 +318,10 @@ func TestCompileJSONSchemaIntegerEnumBoundsAndRefusals(t *testing.T) {
 // fak-test:runtime fast est=10ms lane=default
 func TestCompileJSONSchemaRejectsUnsupportedSchemaWithoutWeakening(t *testing.T) {
 	cases := []string{
-		`{"properties":{"nested":{"type":"object"}},"required":["nested"]}`,
-		`{"properties":{"required":{"type":"string"},"hidden":{"type":"object"}},"required":["required"]}`,
+		`{"properties":{"nested":{"type":"object","additionalProperties":true}},"required":["nested"]}`,
+		`{"properties":{"nested":{"properties":{}}},"required":["nested"]}`,
+		`{"properties":{"nested":{"type":"object","properties":{"x":{"type":"string","pattern":"a"}},"required":["x"]}},"required":["nested"]}`,
+		`{"properties":{"a":{"type":"object","properties":{"b":{"type":"object","properties":{"c":{"type":"object","properties":{}}},"required":["c"]}},"required":["b"]}},"required":["a"]}`,
 		`{"properties":{"a":{"type":"string","pattern":"^x$"}},"required":["a"]}`,
 		`{"properties":{"a":{"type":"array"}},"required":["a"]}`,
 	}

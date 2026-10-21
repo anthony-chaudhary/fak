@@ -119,9 +119,12 @@ Unconstrained numbers use canonical JSON syntax without exponents. A property ma
 also be an array whose `items` is one of those scalar schemas, with optional
 `minItems` and `maxItems` between 0 and 64; arrays are emitted as `[a,b]` with
 no whitespace. Nested arrays, object items, tuple `items`, `uniqueItems` and
-other array keywords are rejected, and tool schemas remain array-free. Nested
-objects, unknown constraint keywords, `additionalProperties:true`, union
-keywords, regex and EBNF are also rejected before inference. `strict` may be true
+other array keywords are rejected, and tool schemas remain array-free. A
+property may also be a nested object with the same property rules, up to three
+object levels including the top. The 16-property and four-optional limits count
+every property at every level; an omitted optional object omits its members.
+Unknown constraint keywords, `additionalProperties:true`, union keywords, regex
+and EBNF are also rejected before inference. `strict` may be true
 or omitted. Native `json_object` is unsupported; upstream engine passthrough
 retains its own supported surface.
 

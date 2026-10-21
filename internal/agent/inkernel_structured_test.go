@@ -396,6 +396,52 @@ func TestNativeStructuredScalarArrayCompleteAndStream(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=300ms lane=default
+func TestNativeStructuredNestedObjectCompleteAndStream(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	format := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"place":{"type":"object","properties":{"kind":{"type":"string","enum":["a","b"]},"near":{"type":"boolean"}},"required":["kind","near"],"additionalProperties":false},"rank":{"type":"integer","enum":[1,2]}},"required":["place","rank"],"additionalProperties":false}}}`)
+	temperature := 0.9
+	messages := []Message{{Role: RoleUser, Content: "Describe the place."}}
+	check := func(t *testing.T, completion *Completion) {
+		t.Helper()
+		var value struct {
+			Place *struct {
+				Kind *string `json:"kind"`
+				Near *bool   `json:"near"`
+			} `json:"place"`
+			Rank *int `json:"rank"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(completion.Message.Content))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("native nested response is not the schema object: %q: %v", completion.Message.Content, err)
+		}
+		if completion.FinishReason != "stop" || value.Place == nil || value.Place.Kind == nil || value.Place.Near == nil || value.Rank == nil ||
+			(*value.Place.Kind != "a" && *value.Place.Kind != "b") || (*value.Rank != 1 && *value.Rank != 2) {
+			t.Fatalf("finish=%q content=%q violates the nested schema", completion.FinishReason, completion.Message.Content)
+		}
+	}
+	for seed := int64(1); seed <= 3; seed++ {
+		opts := []SampleOpt{WithResponseFormat(format), WithTemperature(&temperature), WithSeed(&seed), WithMaxTokens(64)}
+		buffered, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, buffered)
+		var streamed strings.Builder
+		stream, err := p.CompleteStream(context.Background(), func(piece string) error {
+			streamed.WriteString(piece)
+			return nil
+		}, messages, nil, append(opts, WithPerTokenStream(true))...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if streamed.String() != stream.Message.Content || stream.Message.Content != buffered.Message.Content {
+			t.Fatalf("seed %d: buffered %q, stream %q, streamed %q", seed, buffered.Message.Content, stream.Message.Content, streamed.String())
+		}
+	}
+}
+
 // fak-test:runtime fast est=50ms lane=default
 func TestNativeStructuredTextFormatPreservesOrdinaryOutput(t *testing.T) {
 	p := nativeStructuredTestPlanner(t)
@@ -424,7 +470,7 @@ func TestNativeStructuredUnsupportedRequestRefusesBeforeSampling(t *testing.T) {
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"array"}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"strict":false,"schema":{}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{}}`),
-		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{}}},"required":["answer"],"additionalProperties":false}}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{},"additionalProperties":true}},"required":["answer"],"additionalProperties":false}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"answer":{"type":"string"},"extra":{"type":"string","minLength":1}},"required":["answer"],"additionalProperties":false}}}`),
 	}
 	integerSetFormat := func(constraint string) json.RawMessage {
