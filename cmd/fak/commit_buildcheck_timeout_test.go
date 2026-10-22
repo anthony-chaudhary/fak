@@ -22,7 +22,7 @@ func TestRunCommitHelpDocumentsBuildCheckTimeout(t *testing.T) {
 	for _, want := range []string{
 		"build-check-timeout",
 		"default 4m",
-		"controls prospective validation, not advisory-lock waiting or earlier build/materialization phases",
+		"maximum duration per preliminary build and for prospective validation (default 4m each); excludes advisory-lock waiting and earlier materialization phases",
 	} {
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("commit help missing %q; got:\n%s", want, errb.String())

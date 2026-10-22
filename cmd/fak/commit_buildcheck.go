@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/token"
 	"io"
@@ -145,8 +146,21 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 	// expired deadline is not.
 	couldNotRun := func(err error) (safecommit.BuildCheckOutcome, string) {
 		outcome := safecommit.ClassifyBuildCheckError(err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, exec.ErrWaitDelay) {
+			// An interrupted/incomplete build is not static infrastructure failure.
+			// Keep it on the explicit timeout-waiver path, never silently fail open.
+			outcome = safecommit.BuildCheckSkippedTimeout
+		}
 		fmt.Fprintf(stderr, "fak commit: build-check %s: %v\n", outcome, err)
 		return outcome, err.Error()
+	}
+	if timeout <= 0 {
+		timeout = defaultValidateTimeout
+	}
+	build := func(dir string, packages []string) (string, bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return commitGoBuildPackages(ctx, dir, packages)
 	}
 	if _, err := exec.LookPath("go"); err != nil {
 		return couldNotRun(err) // toolchain unavailable: cannot check
@@ -183,7 +197,10 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 		// e.g. the commit deletes the package outright: nothing left to compile.
 		return safecommit.BuildCheckNotApplicable, "no buildable package remains in the prospective tree"
 	}
-	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
+	buildDetail, buildOK, buildErr := build(propDir, propPkgs)
+	if buildErr != nil {
+		return couldNotRun(fmt.Errorf("prospective build did not finish: %w", buildErr))
+	}
 	// The build has exited and only its result is needed now. Release this owned
 	// snapshot before validate (or HEAD attribution) materializes another full tree.
 	// A release failure must not become skipped-infra and admit an unchecked commit:
@@ -206,7 +223,11 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 	}
 	defer os.RemoveAll(headDir)
 	if headPkgs := commitBuildCheckExistingPackages(headDir, pkgs); len(headPkgs) > 0 {
-		if headDetail, headOK := goBuildPackages(headDir, headPkgs); !headOK && !commitBuildCheckOnlyUnbuildable(headDetail) {
+		headDetail, headOK, headErr := build(headDir, headPkgs)
+		if headErr != nil {
+			return couldNotRun(fmt.Errorf("HEAD attribution build did not finish: %w", headErr))
+		}
+		if !headOK && !commitBuildCheckOnlyUnbuildable(headDetail) {
 			fmt.Fprint(stderr, formatPreexistingRedAdvisory(headDetail))
 			// Best-effort fleet witness: fold this per-clone shrug onto a shared class so the
 			// fleet converges on ONE break instead of each clone re-discovering it. Fail-open —
@@ -225,6 +246,64 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 	}
 	buildDetail += "\n" + commitValidateCommand(paths)
 	return safecommit.BuildCheckFailed, buildDetail
+}
+
+// commitGoBuildPackages keeps an unfinished process distinct from compiler red.
+// The legacy pre-push helper retains its own contract and is deliberately unchanged.
+func commitGoBuildPackages(ctx context.Context, dir string, pkgs []string) (string, bool, error) {
+	cmd := windowgate.CommandContext(ctx, "go", goBuildPackageArgs(pkgs)...)
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	// Own the output drain separately: exec.Cmd.Wait can hide ErrWaitDelay
+	// behind ExitError when a failed root leaves descendants holding its pipes.
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return "", false, err
+	}
+	defer reader.Close()
+	cmd.Stdout, cmd.Stderr = writer, writer
+	job, err := windowgate.StartInNewJob(cmd)
+	_ = writer.Close()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", false, ctx.Err()
+		}
+		return "", false, err
+	}
+	defer job.Close()  // Windows retains descendant ownership after the root exits.
+	defer cmd.Cancel() // also reap descendants after an early root exit
+	var output bytes.Buffer
+	drained := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&output, reader)
+		drained <- copyErr
+	}()
+	err = cmd.Wait()
+	select {
+	case copyErr := <-drained:
+		if copyErr != nil {
+			return strings.TrimSpace(output.String()), false, fmt.Errorf("build output drain incomplete: %v: %w", copyErr, exec.ErrWaitDelay)
+		}
+	case <-ctx.Done():
+		_ = cmd.Cancel()
+		_ = reader.Close()
+		<-drained
+		return strings.TrimSpace(output.String()), false, ctx.Err()
+	}
+	detail := strings.TrimSpace(output.String())
+	if ctx.Err() != nil {
+		return detail, false, ctx.Err()
+	}
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return detail, false, nil
+		}
+		return detail, false, err
+	}
+	return "", true, nil
 }
 
 // commitValidateOwnedPaths lifts the existing isolated validator into the commit admission
