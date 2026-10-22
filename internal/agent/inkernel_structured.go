@@ -302,15 +302,13 @@ func (p *InKernelPlanner) newNativeRequestConstraint(sp SampleParams, stops map[
 		return p.newNativeStructuredConstraint(sp.ResponseFormat, stops)
 	}
 	if !nativeGuidedAbsent(sp.ResponseFormat) {
-		var response struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(bytes.TrimSpace(sp.ResponseFormat), &response) != nil {
+		if _, err := nativeExactMembers(sp.ResponseFormat, "type", "json_schema"); err != nil {
 			return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
 		}
+		formatType := nativeResponseFormatType(sp.ResponseFormat)
 		switch {
-		case response.Type == "text":
-		case response.Type == "json_schema" && guided.schema != nil:
+		case formatType == "text":
+		case formatType == "json_schema" && guided.schema != nil:
 			schema, err := nativeResponseFormatSchema(sp.ResponseFormat)
 			if err != nil {
 				return nil, err
@@ -478,7 +476,7 @@ func (p *InKernelPlanner) newNativeJSONSchemaConstraint(schema json.RawMessage, 
 	if err != nil {
 		return nil, err
 	}
-	mask, err := grammar.CompileJSONSchema(schema, p.tok, grammar.CompileOptions{EOS: stopID})
+	mask, err := grammar.CompileJSONSchema(schema, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNativeStructuredUnsupported, err)
 	}
