@@ -552,6 +552,7 @@ concurrent = [
   "customizationindex",
   "readmenext",
   "vulkanregistry",
+  "worktreeprune",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -726,6 +727,7 @@ autopick = [
   "containment",
   "readmenext",
   "agentbench",
+  "worktreeprune",
   # new-leaf:lane
 ]
 
@@ -1682,6 +1684,7 @@ gatewayauth = ["pkg/gatewayauth/**"]
 pendingadmission = ["pkg/pendingadmission/**"]
 worktreecheck = ["pkg/worktreecheck/**"]
 vulkanregistry = ["pkg/vulkanregistry/**"]
+worktreeprune = ["internal/worktreeprune/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

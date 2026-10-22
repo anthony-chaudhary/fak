@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
 )
 
 // THE OWNER-STAMPED GC (#3573)
@@ -480,8 +481,8 @@ func gcRemoveDirectoryFirst(root, wtPath string, git GitRunner) string {
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		return "directory_remains"
 	}
-	if rc, out := run(git, root, []string{"worktree", "prune"}); rc != 0 {
-		return "prune_failed: " + strings.TrimSpace(out)
+	if _, err := worktreeprune.CleanupOwn(root, wtPath); err != nil {
+		return "registration_cleanup_failed: " + err.Error()
 	}
 	removePoolMemberState(wtPath)
 	removeOwnerStamp(wtPath)

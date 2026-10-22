@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/processalive"
+	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
 )
 
 const (
@@ -377,30 +378,13 @@ func commonGitDirFor(root string) string {
 	return gitCommon
 }
 
-// hasForeignPlatformRegistration reports whether any worker-worktree admin
-// registration under gitCommon names a foreign-OS path that cannot be verified
-// locally. When one is present, a repository-wide `git worktree prune` is unsafe
-// because it may remove the foreign registration's shared admin directory.
+// hasForeignPlatformRegistration reports whether a repository-wide `git worktree
+// prune` is unsafe under gitCommon: any registration, worker-named or not (the
+// 2026-10-22 prune wiped fak-flow lanes), whose gitdir names a foreign-OS path,
+// or an unreadable registration set. Skipping a prune only leaves stale entries;
+// a wrong prune strands a lane.
 func hasForeignPlatformRegistration(gitCommon string) bool {
-	entries, err := os.ReadDir(filepath.Join(gitCommon, "worktrees"))
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !IsWorkerWorktree(entry.Name()) {
-			continue
-		}
-		adminDir := filepath.Join(gitCommon, "worktrees", entry.Name())
-		content, err := os.ReadFile(filepath.Join(adminDir, "gitdir"))
-		if err != nil {
-			continue
-		}
-		rawGitdir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(content)), "gitdir: "))
-		if isForeignPlatformRegistration(rawGitdir, filepath.Dir(rawGitdir)) {
-			return true
-		}
-	}
-	return false
+	return worktreeprune.GuardBroadPrune(gitCommon) != nil
 }
 
 func sweepDeadWorktrees(root, wtRoot string, git GitRunner) {
@@ -435,26 +419,9 @@ func isForeignPlatformRegistration(rawGitdir, wtPath string) bool {
 	return true
 }
 
-// isForeignOSPath reports whether p looks like a path from a foreign operating system
-// (e.g. on Linux/Unix, starts with a Windows drive letter ^[a-zA-Z]:[/\\] or contains '\\';
-// on Windows, starts with '/' or doesn't have a Windows volume) (#11813).
-func isForeignOSPath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		// On Windows, a foreign-platform path starts with '/' or doesn't have a Windows volume.
-		if strings.HasPrefix(p, "/") || !hasWindowsVolume(p) {
-			return true
-		}
-		return false
-	}
-	// On Linux/Unix, a foreign path starts with a Windows drive letter, contains '\\', or starts with '\\\\'.
-	if isWindowsDrivePath(p) || strings.Contains(p, `\`) || strings.HasPrefix(p, `\\`) {
-		return true
-	}
-	return false
-}
+// isForeignOSPath reports whether p looks like a path from a foreign operating
+// system; the classifier is shared with every broad-prune guard (#11813).
+func isForeignOSPath(p string) bool { return worktreeprune.IsForeignOSPath(p) }
 
 // translateForeignPath attempts to translate a foreign-platform path to the local platform path.
 // On Windows, it translates /mnt/<drive>/... to <drive>:\...
@@ -478,7 +445,7 @@ func translateForeignPath(p string) (string, bool) {
 		}
 		return "", false
 	}
-	if isWindowsDrivePath(p) {
+	if worktreeprune.IsWindowsDrivePath(p) {
 		drive := strings.ToLower(string(p[0]))
 		rest := p[2:]
 		rest = strings.TrimPrefix(rest, `\`)
@@ -490,21 +457,7 @@ func translateForeignPath(p string) (string, bool) {
 }
 
 func isWindowsAbsolutePath(p string) bool {
-	return isWindowsDrivePath(p) || strings.HasPrefix(p, `\\`)
-}
-
-func isWindowsDrivePath(p string) bool {
-	return len(p) >= 3 && isDriveLetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\')
-}
-
-func hasWindowsVolume(p string) bool {
-	if len(p) >= 2 && isDriveLetter(p[0]) && p[1] == ':' {
-		return true
-	}
-	if strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, "//") {
-		return true
-	}
-	return false
+	return worktreeprune.IsWindowsDrivePath(p) || strings.HasPrefix(p, `\\`)
 }
 
 func isDriveLetter(c byte) bool {

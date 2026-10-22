@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
 )
 
 // DefaultRef is the remote-tracking trunk tip ref pinned by default.
@@ -36,6 +38,9 @@ type Result struct {
 	Output   string `json:"output,omitempty"`
 	Archived string `json:"archived,omitempty"`
 	ReapNote string `json:"reap_note,omitempty"`
+	// ReapOutcome is set only when `worktree remove` failed and the targeted
+	// fallback ran; it is a worktreeprune.Outcome.
+	ReapOutcome string `json:"reap_outcome,omitempty"`
 }
 
 func classifyGreen(code int, ranOK bool) bool { return ranOK && code == 0 }
@@ -86,8 +91,8 @@ func Run(cfg Config, gitRun Runner, cmdRun Runner) (res Result, err error) {
 		return res, fmt.Errorf("worktreewitness: worktree add %s: code=%d err=%v: %s", ShortSHA(sha), code, err, out)
 	}
 	defer func() {
-		archived, note := reap(top, wt, cfg.ArchiveDir, res.ShortSHA, gitRun)
-		res.Archived, res.ReapNote = archived, note
+		archived, note, outcome := reap(top, wt, cfg.ArchiveDir, res.ShortSHA, gitRun)
+		res.Archived, res.ReapNote, res.ReapOutcome = archived, note, outcome
 	}()
 
 	module := wt
@@ -105,7 +110,7 @@ func Run(cfg Config, gitRun Runner, cmdRun Runner) (res Result, err error) {
 	return res, nil
 }
 
-func reap(top, wt, archiveDir, short string, gitRun Runner) (archived, note string) {
+func reap(top, wt, archiveDir, short string, gitRun Runner) (archived, note, outcome string) {
 	dirty := worktreeDirty(wt, gitRun)
 	if dirty && archiveDir != "" {
 		if p, err := archiveWorktree(wt, archiveDir, short, gitRun); err == nil {
@@ -115,12 +120,21 @@ func reap(top, wt, archiveDir, short string, gitRun Runner) (archived, note stri
 		}
 	}
 	if _, code, err := gitRun(top, "git", "-C", top, "worktree", "remove", "--force", wt); err != nil || code != 0 {
-		_, _, _ = gitRun(top, "git", "-C", top, "worktree", "prune")
+		// Never a repository-wide prune here: it also deletes every registration
+		// git cannot stat, including lanes created from the other OS.
+		got, cerr := worktreeprune.CleanupOwn(top, wt)
+		outcome = string(got)
+		fallback := "remove failed; " + outcome
+		if cerr != nil {
+			fallback += ": " + cerr.Error()
+		}
 		if note == "" {
-			note = "remove needed prune fallback"
+			note = fallback
+		} else {
+			note += "; " + fallback
 		}
 	}
-	return archived, note
+	return archived, note, outcome
 }
 
 func worktreeDirty(wt string, gitRun Runner) bool {

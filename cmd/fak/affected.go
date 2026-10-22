@@ -44,6 +44,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
 )
 
 func cmdAffected(argv []string) { os.Exit(runAffected(os.Stdout, os.Stderr, argv)) }
@@ -397,9 +398,12 @@ func runAffectedBaselineRed(root, ref string, pkgs []string) (red, seen map[stri
 	}
 	defer func() {
 		if _, rerr := gitOut(root, "worktree", "remove", "--force", wt); rerr != nil {
-			// A locked test binary can hold the dir on Windows; prune the registration
-			// so no stale .git/worktrees entry lingers, then best-effort delete.
-			_, _ = gitOut(root, "worktree", "prune")
+			// A locked test binary can hold the dir on Windows. Drop only this
+			// baseline's registration: a repository-wide prune also deletes every
+			// registration git cannot stat, including lanes created from the other OS.
+			if outcome, cerr := worktreeprune.CleanupOwn(root, wt); cerr != nil {
+				fmt.Fprintf(os.Stderr, "fak affected: baseline worktree %s left registered (%s): %v\n", wt, outcome, cerr)
+			}
 		}
 		os.RemoveAll(tmp)
 	}()

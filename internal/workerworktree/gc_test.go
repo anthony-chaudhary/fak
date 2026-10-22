@@ -153,6 +153,7 @@ func makeGCWorktree(t *testing.T, root, lane, key string, owner OwnerStamp) stri
 	if err := writeOwnerStamp(wt, owner); err != nil {
 		t.Fatal(err)
 	}
+	makeCandidateRegistration(t, filepath.Join(root, ".git"), wt, key)
 	return wt
 }
 
@@ -255,7 +256,7 @@ func TestGarbageCollectReclaimsDeadIdleAndLeasedPoolOwners(t *testing.T) {
 	opts.LeaseLive = func(string) bool { return false }
 	opts.Apply = true
 
-	report := GarbageCollect("/repo", g.run, opts)
+	report := GarbageCollect(root, g.run, opts)
 	if report.WouldReap != 2 || report.Reaped != 2 || len(report.Failures) != 0 {
 		t.Fatalf("dead idle+leased GC report=%+v", report)
 	}
@@ -337,7 +338,7 @@ func TestGarbageCollectApplyRechecksExternalProcess(t *testing.T) {
 		return probes >= 2, nil
 	}
 
-	report := GarbageCollect("/repo", g.run, opts)
+	report := GarbageCollect(root, g.run, opts)
 	if report.WouldReap != 1 || report.Reaped != 0 {
 		t.Fatalf("apply-time process activation must refuse: %+v", report)
 	}
@@ -360,6 +361,14 @@ func TestGarbageCollectApplyRemovesDirectoryBeforePrune(t *testing.T) {
 		LeaseID:   "resolve-workerworktree-apply",
 		CreatedAt: now.Add(-24 * time.Hour),
 	})
+	peer := filepath.Join(root, ".git", "worktrees", "foreign-peer")
+	if err := os.MkdirAll(peer, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	peerData := []byte("C:/foreign/live/.git\n")
+	if err := os.WriteFile(filepath.Join(peer, "gitdir"), peerData, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	g := &gcGit{
 		list:      gcPorcelain(wt),
 		status:    map[string]string{},
@@ -373,18 +382,24 @@ func TestGarbageCollectApplyRemovesDirectoryBeforePrune(t *testing.T) {
 	opts := baseGCOptions(now, root)
 	opts.Apply = true
 
-	report := GarbageCollect("/repo", g.run, opts)
+	report := GarbageCollect(root, g.run, opts)
 	if report.Mode != "apply" || report.WouldReap != 1 || report.Reaped != 1 || len(report.Failures) != 0 {
 		t.Fatalf("report = %+v, want one applied reap", report)
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatalf("worktree dir still exists after apply: %v", err)
 	}
-	if g.callsWithPrefix("worktree", "prune") != 1 {
-		t.Fatalf("worktree prune calls=%d, want 1: %v", g.callsWithPrefix("worktree", "prune"), g.calls)
+	if g.callsWithPrefix("worktree", "prune") != 0 {
+		t.Fatalf("GC ran broad prune: %v", g.calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "worktrees", "apply")); !os.IsNotExist(err) {
+		t.Fatalf("own registration remains: %v", err)
 	}
 	if g.callsWithPrefix("worktree", "remove") != 0 {
 		t.Fatalf("GC must not unregister before filesystem removal: %v", g.calls)
+	}
+	if got, err := os.ReadFile(filepath.Join(peer, "gitdir")); err != nil || string(got) != string(peerData) {
+		t.Fatalf("peer registration changed: %q, %v", got, err)
 	}
 	if _, err := os.Stat(OwnerStampPath(wt)); !os.IsNotExist(err) {
 		t.Fatalf("owner stamp still exists after reap: %v", err)

@@ -232,3 +232,75 @@ func TestParseTopologyCandidateOwner(t *testing.T) {
 // new candidate is created, and the new one is gone, unregistered, afterwards.
 
 func noGit(string, []string) (int, string) { return 0, "" }
+
+func makeCandidateRegistration(t *testing.T, common, wt, name string) string {
+	t.Helper()
+	admin := filepath.Join(common, "worktrees", name)
+	if err := os.MkdirAll(admin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(admin, "gitdir"), []byte(filepath.Join(wt, ".git")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+admin+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return admin
+}
+
+// fak-test:runtime fast est=100ms
+func TestCandidateCleanupOnlyRemovesOwnRegistration(t *testing.T) {
+	for _, mode := range []string{"sweep", "defer", "unknown"} {
+		t.Run(mode, func(t *testing.T) {
+			parent := t.TempDir()
+			caller := filepath.Join(parent, "caller")
+			common := filepath.Join(parent, "original", ".git")
+			wt := filepath.Join(parent, topologyCandidatePrefix+"123-0-dead")
+			if err := os.MkdirAll(wt, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			own := makeCandidateRegistration(t, common, wt, "own")
+			peer := filepath.Join(common, "worktrees", "peer")
+			if err := os.MkdirAll(peer, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			peerData := []byte("C:/foreign/live/.git\n")
+			if err := os.WriteFile(filepath.Join(peer, "gitdir"), peerData, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "unknown" {
+				if err := os.Remove(filepath.Join(wt, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git := func(_ string, args []string) (int, string) {
+				for _, arg := range args {
+					if arg == "prune" {
+						t.Fatalf("unexpected broad prune: %v", args)
+					}
+				}
+				return 1, "unavailable"
+			}
+			if mode == "defer" {
+				cleanupTopologyCandidate(caller, wt, git)
+			} else {
+				report := SweepTopologyCandidates(caller, parent, git, CandidateSweepOptions{
+					Apply: true, ProcessAlive: func(int) bool { return false },
+				})
+				if report.Reaped != 1 || len(report.Failures) != 0 {
+					t.Fatalf("cleanup report: %+v", report)
+				}
+			}
+			if _, err := os.Stat(wt); !os.IsNotExist(err) {
+				t.Fatalf("candidate remains: %v", err)
+			}
+			_, err := os.Stat(own)
+			if mode == "unknown" && err != nil || mode != "unknown" && !os.IsNotExist(err) {
+				t.Fatalf("own registration state in %s: %v", mode, err)
+			}
+			if got, err := os.ReadFile(filepath.Join(peer, "gitdir")); err != nil || string(got) != string(peerData) {
+				t.Fatalf("peer registration changed: %q, %v", got, err)
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/processstart"
+	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
 )
 
 // THE TOPOLOGY-CANDIDATE LEAK
@@ -217,7 +219,6 @@ func SweepTopologyCandidates(root, parent string, git GitRunner, opts CandidateS
 		report.Failures = append(report.Failures, GCFailure{Path: parent, Reason: "read_parent_failed: " + err.Error()})
 		return report
 	}
-	pruneDirs := map[string]bool{}
 	for _, entry := range entries {
 		if !entry.IsDir() || !isTopologyCandidateName(entry.Name()) {
 			continue
@@ -232,24 +233,15 @@ func SweepTopologyCandidates(root, parent string, git GitRunner, opts CandidateS
 				} else {
 					item.Removed = true
 					report.Reaped++
-					pruneDirs[commonDir] = true
+					if err := cleanupCandidateRegistration(commonDir, item.Path); err != nil {
+						report.Failures = append(report.Failures, GCFailure{Path: item.Path, Reason: "registration_cleanup_failed: " + err.Error()})
+					}
 				}
 			}
 		}
 		report.Candidates = append(report.Candidates, item)
 	}
-	if commonDir, unlocked := sweepLockedCandidateRegistrations(root, git, opts, &report); unlocked {
-		pruneDirs[commonDir] = true
-	}
-	for commonDir := range pruneDirs {
-		args := []string{"worktree", "prune"}
-		if commonDir != "" {
-			args = append([]string{"--git-dir=" + commonDir}, args...)
-		}
-		if rc, out := run(git, root, args); rc != 0 {
-			report.Failures = append(report.Failures, GCFailure{Path: commonDir, Reason: "prune_failed: " + tail(out, 200)})
-		}
-	}
+	sweepLockedCandidateRegistrations(root, git, opts, &report)
 	return report
 }
 
@@ -306,8 +298,8 @@ func classifyTopologyCandidate(path string, opts CandidateSweepOptions) Candidat
 // directory forever. For a root candidate registration whose directory is gone and
 // whose lock is held by a dead owner (or, for a legacy name, has not moved for
 // LegacyMaxAge), Apply removes the lock file, which is all `git worktree unlock`
-// does, so the caller's prune can collect the entry. It reports root's common git
-// directory and whether any lock was removed.
+// does, then removes only that exact registration. It reports root's common git
+// directory and whether any registration was removed.
 func sweepLockedCandidateRegistrations(root string, git GitRunner, opts CandidateSweepOptions, report *CandidateSweepReport) (string, bool) {
 	rc, out := run(git, root, []string{"rev-parse", "--git-common-dir"})
 	commonDir := strings.TrimSpace(out)
@@ -332,7 +324,14 @@ func sweepLockedCandidateRegistrations(root string, git GitRunner, opts Candidat
 		if err != nil {
 			continue
 		}
-		wt := filepath.Dir(filepath.Clean(strings.TrimSpace(string(gitdir))))
+		rawGitdir := strings.TrimSpace(string(gitdir))
+		if worktreeprune.IsForeignOSPath(rawGitdir) {
+			continue
+		}
+		if !filepath.IsAbs(rawGitdir) {
+			rawGitdir = filepath.Join(adminDir, rawGitdir)
+		}
+		wt := filepath.Dir(filepath.Clean(rawGitdir))
 		if !isTopologyCandidateName(filepath.Base(wt)) {
 			continue
 		}
@@ -361,6 +360,8 @@ func sweepLockedCandidateRegistrations(root string, git GitRunner, opts Candidat
 			if opts.Apply {
 				if err := os.Remove(filepath.Join(adminDir, "locked")); err != nil && !os.IsNotExist(err) {
 					report.Failures = append(report.Failures, GCFailure{Path: wt, Reason: "unlock_failed: " + err.Error()})
+				} else if err := cleanupCandidateRegistration(commonDir, wt); err != nil {
+					report.Failures = append(report.Failures, GCFailure{Path: wt, Reason: "registration_cleanup_failed: " + err.Error()})
 				} else {
 					item.Removed = true
 					report.Reaped++
@@ -385,7 +386,15 @@ func candidateCommonGitDir(path string) string {
 	if !found {
 		return ""
 	}
-	admin = filepath.Clean(strings.TrimSpace(admin))
+	admin = strings.TrimSpace(admin)
+	if worktreeprune.IsForeignOSPath(admin) {
+		return ""
+	}
+	admin = filepath.FromSlash(admin)
+	if !filepath.IsAbs(admin) {
+		admin = filepath.Join(path, admin)
+	}
+	admin = filepath.Clean(admin)
 	if !strings.EqualFold(filepath.Base(filepath.Dir(admin)), "worktrees") {
 		return ""
 	}
@@ -414,10 +423,25 @@ func removeTopologyCandidateDir(path string) string {
 // is gone. Whatever still remains carries its owner's identity and is collected by
 // a later sweep once this process exits.
 func cleanupTopologyCandidate(root, candDir string, git GitRunner) {
+	// Capture the original repository before either removal destroys .git.
+	commonDir := candidateCommonGitDir(candDir)
 	run(git, root, []string{"worktree", "remove", "--force", candDir})
 	if removeTopologyCandidateDir(candDir) == "" {
-		run(git, root, []string{"worktree", "prune"})
+		_ = cleanupCandidateRegistration(commonDir, candDir)
 	}
+}
+
+// Unknown candidate scope never falls back to the caller's repository. A missing
+// .git file is normal for an interrupted add; retain any unidentified registration.
+func cleanupCandidateRegistration(commonDir, path string) error {
+	if commonDir == "" {
+		return nil
+	}
+	_, err := worktreeprune.RemoveOwnRegistration(commonDir, path)
+	if errors.Is(err, worktreeprune.ErrOwnRegistrationNotFound) {
+		return nil
+	}
+	return err
 }
 
 var (
