@@ -2913,6 +2913,69 @@ func TestSweepDeadWorktreesMixedCrossOSRegistration(t *testing.T) {
 	}
 }
 
+// TestBroadPruneSkippedForNonWorkerForeignRegistration pins the 2026-10-22
+// lane loss: the wiped registrations were fak-flow lanes, not worker worktrees,
+// so a foreign-OS registration under any name must block every broad prune.
+func TestBroadPruneSkippedForNonWorkerForeignRegistration(t *testing.T) {
+	root := t.TempDir()
+	laneName := "ticket-flow-lane"
+	if IsWorkerWorktree(laneName) {
+		t.Fatalf("%q must not be a worker worktree name", laneName)
+	}
+	laneAdmin := filepath.Join(root, ".git", "worktrees", laneName)
+	laneGitdir := "/mnt/c/work/fak/.worktrees/ticket-flow-lane/.git"
+	if runtime.GOOS != "windows" {
+		laneGitdir = "C:/work/fak/.worktrees/ticket-flow-lane/.git"
+	}
+	lanePayload := []byte("flow lane admin payload that must survive byte-for-byte\n")
+	for name, data := range map[string][]byte{"gitdir": []byte(laneGitdir + "\n"), "HEAD": lanePayload} {
+		if err := os.MkdirAll(laneAdmin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(laneAdmin, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !hasForeignPlatformRegistration(commonGitDirFor(root)) {
+		t.Fatal("a non-worker foreign-OS registration must block a broad prune")
+	}
+
+	deadAdmin := filepath.Join(root, ".git", "worktrees", "fak-worker-wt-nonworker-dead")
+	if err := os.MkdirAll(deadAdmin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deadGitdir := filepath.Join(root, "_scratch", "nonexistent-nonworker", ".git")
+	if err := os.WriteFile(filepath.Join(deadAdmin, "gitdir"), []byte(deadGitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls [][]string
+	record := func(_ string, args []string) (int, string) {
+		calls = append(calls, append([]string{}, args...))
+		return 0, ""
+	}
+	report := SweepDeadWorktrees(root, t.TempDir(), record)
+	cleanupPartialPrepare(root, filepath.Join(root, "_scratch", "fak-worker-wt-partial"), record)
+
+	if report.Pruned != 1 || !report.PruneSkippedForeign {
+		t.Fatalf("sweep Pruned=%d PruneSkippedForeign=%v, want 1 and true (paths %v)", report.Pruned, report.PruneSkippedForeign, report.Paths)
+	}
+	for _, c := range calls {
+		if len(c) >= 2 && c[0] == "worktree" && c[1] == "prune" {
+			t.Fatalf("broad worktree prune issued beside a non-worker foreign registration: %v", calls)
+		}
+	}
+	if _, err := os.Stat(deadAdmin); !os.IsNotExist(err) {
+		t.Fatalf("dead local worker admin dir %q was not reaped", deadAdmin)
+	}
+	if got, err := os.ReadFile(filepath.Join(laneAdmin, "HEAD")); err != nil || !bytes.Equal(got, lanePayload) {
+		t.Fatalf("flow lane admin HEAD changed: %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(laneAdmin, "gitdir")); err != nil || string(got) != laneGitdir+"\n" {
+		t.Fatalf("flow lane admin gitdir changed: %q err=%v", got, err)
+	}
+}
+
 func TestIsWindowsAbsolutePath(t *testing.T) {
 	cases := []struct {
 		path string

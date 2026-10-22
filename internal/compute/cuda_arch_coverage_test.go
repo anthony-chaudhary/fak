@@ -42,6 +42,7 @@ func TestClassifyCUDAArchFullBuild(t *testing.T) {
 		{8, 9, CUDANative, "sm_89 cubin, exact"},
 		{9, 0, CUDANative, "sm_90 cubin, exact"},
 		{10, 0, CUDANative, "sm_100 cubin, exact"},
+		{10, 3, CUDANative, "sm_103 cubin, exact (B300)"},
 		{12, 0, CUDANative, "sm_120 cubin, exact"},
 		{12, 1, CUDANative, "sm_120 cubin covers 12.1 (same major, minor 1>=0)"},
 		{13, 0, CUDAJITFromPTX, "no sm_13x cubin; compute_120 PTX JITs forward onto 13.0"},

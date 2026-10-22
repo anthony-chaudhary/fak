@@ -292,10 +292,12 @@ per-request option fields are declared, but the backends read the server-wide
 `StructuredOutputsConfig` values instead; with `disable_any_whitespace` set, the
 xgrammar backend compiles JSON with separators `(",", ":")`.
 
-The legacy `/v1/completions` route does not parse `response_format` or any
-guided field yet. Carriers sent there are dropped rather than refused, in native
-and ride mode alike, so the response is unconstrained text with HTTP 200. Send
-constrained requests to `/v1/chat/completions`.
+The legacy `/v1/completions` route carries the same carriers as chat:
+`response_format`, every guided field and `structured_outputs` reach the native
+planner with chat's enforcement and typed refusals, a malformed carrier gets
+chat's status and code before routing, and ride mode forwards them verbatim. A
+native refusal of a streamed completions request arrives as an in-band SSE error
+event. `TestCompletionsStructured*` in `internal/gateway` witnesses this.
 
 The mask composes with seeds, temperature, top-k, top-p, min-p, logit bias and
 repetition penalties. Buffered and per-token streaming preserve the generated JSON bytes,
@@ -395,7 +397,7 @@ array, number or boolean) returns HTTP 400 `invalid_structured_outputs` before
 dispatch, on buffered and streamed requests alike. `null` counts as absent, as for the
 other guided fields. The native route enforces a `structured_outputs` object's
 `json`, `regex` or `choice` member and refuses the rest (see above). The legacy
-`/v1/completions` route forwards none of these carriers yet, and `/v1/responses`
+`/v1/completions` route carries them the same way chat does, and `/v1/responses`
 drops `structured_outputs`. `internal/gateway/structured_outputs_carrier_test.go`
 witnesses ride forwarding, the planner carrier, the envelope 400, and the native
 route's enforced content and 400 refusals over HTTP, buffered and streamed;

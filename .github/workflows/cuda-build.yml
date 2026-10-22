@@ -87,8 +87,8 @@ jobs:
   # ---- deep tier: nvcc container, NO GPU, paths-filtered -----------------------------------
   # A matrix over the arches whose codegen we must guard. sm_89 stays on the 12.6 line so it
   # AGREES with internal/compute/setup_cuda_wsl.sh's local-dev pin; the Blackwell arches
-  # (sm_100 datacenter B200/GB200, sm_120 consumer) run on a 12.8 toolkit because the
-  # compute_100/compute_120 targets simply do not exist in 12.6's nvcc. That is deliberate:
+  # (sm_100 B200/GB200, sm_103 B300/GB300, sm_120 consumer) run on a 12.9 toolkit because
+  # compute_100/compute_120 do not exist in 12.6's nvcc and compute_103 first ships in 12.9. That is deliberate:
   # a tcgen05/TMEM/NVFP4 intrinsic that is invalid for Blackwell (added under #4189/#4190)
   # only fails to compile on the sm_100/sm_120 legs, which is the whole point of #4186.
   # fail-fast: false so one arch's break still lets the others report.
@@ -103,14 +103,16 @@ jobs:
           - arch: sm_89
             image: nvcr.io/nvidia/cuda:12.6.2-devel-ubuntu22.04@sha256:1c253f721b28b27c924677493c8ed45812c1b1a562bca828c144683b444e7298
           - arch: sm_100
-            image: nvcr.io/nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97
+            image: nvcr.io/nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8
+          - arch: sm_103
+            image: nvcr.io/nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8
           - arch: sm_120
-            image: nvcr.io/nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97
+            image: nvcr.io/nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8
     # -devel ships nvcc + cuBLAS headers + the cudart/cublas stub libs the cgo link needs (no
     # GPU). The image is pinned per-arch (above) and documented; keep the arch set consistent
     # with internal/compute/cuda_arch.txt (the authoritative set) and Dockerfile.cuda. The
-    # 12.8 pin for the Blackwell legs is intentionally NEWER than the 12.6 local-dev pin —
-    # 12.6 cannot emit compute_100/compute_120 at all.
+    # 12.9 pin for the Blackwell legs is intentionally NEWER than the 12.6 sm_89 pin —
+    # 12.6 cannot emit compute_100/compute_120 at all, and 12.8 cannot emit compute_103.
     container: ${{ matrix.image }}
     steps:
       - name: toolchain (the -devel image lacks git/build-essential by default)

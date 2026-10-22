@@ -1,0 +1,501 @@
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+#extension GL_KHR_shader_subgroup_ballot : require
+layout(local_size_x = 128) in;
+
+// Determinism class split-k. Two dispatches over one module:
+//   pass 0 (split): workgroup (block, headGroup) loads TILE KV rows once into
+//     shared memory and scores them against HG heads, then writes one partial
+//     per (head, block): [max, sum, scoreFlag, valueFlag | out[headDim]].
+//   pass 1 (combine): one workgroup per head merges its partials in block order.
+// Every reduction has a fixed shape, so bits are stable run to run.
+// A head whose partials saw a nonfinite score, a nonfinite or |v| >= 2^126 value,
+// a nonfinite sink, a sentinel maximum or a nonfinite merge reruns the
+// run-to-run per-head body (runHead, verbatim from v41_shared_attention_fast.comp),
+// so its status words and fault records equal that class's.
+const int LANES = 128;
+const int WAVE = 32;
+const int WAVES = 4;
+const int CHUNK = 8192;
+const int QREGS = 16;
+const int OUT_REGS = 4;
+const int ROWS = 4;
+const int UNROLL = 8;
+const int NONE = 0x7fffffff;
+
+const int D = 512;          // split pass head width; the host admits only headDim == D
+const int D4 = D / 4;       // == LANES
+const int TILE = 16;        // KV rows per split workgroup; TILE * D == CHUNK
+const int HG = 64;          // heads per split workgroup
+const int ROWS_PER_LANE = TILE / 2;
+const int PART = D + 4;     // floats per (head, block) partial
+const int PART4 = PART / 4;
+const float BIG = 8.507059e37; // 2^126
+
+layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
+layout(std430, binding = 0) readonly buffer Q4Buf { vec4 Q4[]; };
+layout(std430, binding = 1) readonly buffer KVBuf { float KV[]; };
+layout(std430, binding = 1) readonly buffer KV4Buf { vec4 KV4[]; };
+layout(std430, binding = 2) readonly buffer SinkBuf { float Sink[]; };
+layout(std430, binding = 3) buffer OutBuf { float Out[]; };
+layout(std430, binding = 3) buffer Out4Buf { vec4 Out4[]; };
+layout(std430, binding = 4) writeonly buffer StatusBuf { uint Status[]; };
+layout(std430, binding = 5) buffer PartBuf { vec4 Part4[]; };
+
+layout(push_constant) uniform Push {
+    int heads;
+    int headDim;
+    int selectedRows;
+    int mode;
+    int hasSink;
+    float scale;
+    int pass;
+} pc;
+
+// The split pass stores its KV tile here; runHead uses it as score scratch.
+shared float sVal[CHUNK];
+shared float sP[HG * TILE];
+shared float sWaveF[WAVES];
+shared int sWaveI[WAVES];
+shared int sWaveE[WAVES];
+shared uint sFlag;
+
+float qr[QREGS];
+
+bool finiteValue(float x) {
+    return !isnan(x) && !isinf(x);
+}
+
+void fault(uint head, uint stage, int slot, int element, float value) {
+    uint base = head * 4u;
+    Status[base] = stage;
+    Status[base + 1u] = uint(slot + 1);
+    Status[base + 2u] = uint(element + 1);
+    Status[base + 3u] = floatBitsToUint(value);
+}
+
+void sync() {
+    memoryBarrierShared();
+    barrier();
+}
+
+float waveSum(float x) {
+    precise float s = x;
+    for (uint offset = uint(WAVE) / 2u; offset > 0u; offset >>= 1u) {
+        precise float next = s + subgroupShuffleXor(s, offset);
+        s = next;
+    }
+    return s;
+}
+
+float groupSum(float x, int wave) {
+    float s = waveSum(x);
+    if (subgroupElect()) sWaveF[wave] = s;
+    sync();
+    precise float low = sWaveF[0] + sWaveF[1];
+    precise float high = sWaveF[2] + sWaveF[3];
+    precise float total = low + high;
+    sync();
+    return total;
+}
+
+float groupMax(float x, int wave) {
+    float m = subgroupMax(x);
+    if (subgroupElect()) sWaveF[wave] = m;
+    sync();
+    float r = sWaveF[0];
+    for (int w = 1; w < WAVES; ++w) r = sWaveF[w] > r ? sWaveF[w] : r;
+    sync();
+    return r;
+}
+
+int groupMin(int x, int wave) {
+    int m = subgroupMin(x);
+    if (subgroupElect()) sWaveI[wave] = m;
+    sync();
+    int r = sWaveI[0];
+    for (int w = 1; w < WAVES; ++w) r = sWaveI[w] < r ? sWaveI[w] : r;
+    sync();
+    return r;
+}
+
+bool publishFirstFault(uint head, uint stage, int slotBase, int slot, int element, float value, int wave, int lane) {
+    int s = subgroupMin(slot);
+    int e = subgroupMin(slot == s ? element : NONE);
+    uint owner = subgroupBallotFindLSB(subgroupBallot(slot == s && element == e));
+    float v = subgroupShuffle(value, owner);
+    if (subgroupElect()) {
+        sWaveI[wave] = s;
+        sWaveE[wave] = e;
+        sWaveF[wave] = v;
+    }
+    sync();
+    int bestSlot = NONE;
+    int bestElement = NONE;
+    float bestValue = 0.0;
+    for (int w = 0; w < WAVES; ++w) {
+        int ws = sWaveI[w];
+        int we = sWaveE[w];
+        if (ws < bestSlot || (ws == bestSlot && we < bestElement)) { bestSlot = ws; bestElement = we; bestValue = sWaveF[w]; }
+    }
+    sync();
+    if (bestElement == NONE) return false;
+    if (lane == 0) fault(head, stage, bestSlot == NONE ? -1 : slotBase + bestSlot, bestElement, bestValue);
+    return true;
+}
+
+void accumulate(inout float acc, inout bool live, float weight, float kv, int slot, int d,
+                inout int faultSlot, inout int faultElement, inout float faultValue) {
+    if (!live) return;
+    precise float product = weight * kv;
+    precise float nextValue = acc + product;
+    if (!finiteValue(nextValue)) {
+        live = false;
+        if (slot < faultSlot) { faultSlot = slot; faultElement = d; faultValue = nextValue; }
+    } else {
+        acc = nextValue;
+    }
+}
+
+void scoreChunk(int base, int count, int wave, int sl) {
+    for (int i0 = wave * ROWS; i0 < count; i0 += WAVES * ROWS) {
+        precise float part[ROWS];
+        uint kvBase[ROWS];
+        for (int r = 0; r < ROWS; ++r) {
+            part[r] = 0.0;
+            int row = i0 + r < count ? i0 + r : count - 1;
+            kvBase[r] = uint(base + row) * uint(pc.headDim);
+        }
+        for (int k = 0; k < QREGS; ++k) {
+            int d = sl + k * WAVE;
+            if (d < pc.headDim) {
+                for (int r = 0; r < ROWS; ++r) {
+                    precise float product = qr[k] * KV[kvBase[r] + uint(d)];
+                    precise float next = part[r] + product;
+                    part[r] = next;
+                }
+            }
+        }
+        for (int r = 0; r < ROWS; ++r) {
+            float dot = waveSum(part[r]);
+            precise float score = dot * pc.scale;
+            if (sl == 0 && i0 + r < count) sVal[i0 + r] = score;
+        }
+    }
+}
+
+// The run-to-run class body for one head, unchanged except that the head is a
+// parameter. Every lane of the workgroup must call it.
+void runHead(uint head, int lane, int wave, int sl) {
+    uint statusBase = head * 4u;
+    if (lane == 0) {
+        Status[statusBase] = 0u;
+        Status[statusBase + 1u] = 0u;
+        Status[statusBase + 2u] = 0u;
+        Status[statusBase + 3u] = 0u;
+    }
+    uint outBase = head * uint(pc.headDim);
+    for (int d = lane; d < pc.headDim; d += LANES) Out[outBase + uint(d)] = 0.0;
+    uint qBase = head * uint(pc.headDim);
+    for (int k = 0; k < QREGS; ++k) {
+        int d = sl + k * WAVE;
+        qr[k] = d < pc.headDim ? Q[qBase + uint(d)] : 0.0;
+    }
+    bool resident = pc.selectedRows <= CHUNK;
+
+    float seed = pc.mode == 0 ? uintBitsToFloat(0xff800000u) : uintBitsToFloat(0xff7fffffu);
+    float negInf = uintBitsToFloat(0xff800000u);
+    float maximum = pc.hasSink != 0 ? Sink[head] : seed;
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        scoreChunk(base, count, wave, sl);
+        sync();
+        int bad = NONE;
+        float local = negInf;
+        for (int i = lane; i < count; i += LANES) {
+            float score = sVal[i];
+            if (!finiteValue(score)) { bad = i; break; }
+            if (score > local) local = score;
+        }
+        int firstBad = groupMin(bad, wave);
+        if (firstBad != NONE) {
+            if (lane == 0) fault(head, 1u, base + firstBad, -1, sVal[firstBad]);
+            return;
+        }
+        float chunkMaximum = groupMax(local, wave);
+        if (chunkMaximum > maximum) maximum = chunkMaximum;
+    }
+    if (maximum == seed) return;
+    precise float denominator = 0.0;
+    if (pc.hasSink != 0) {
+        precise float shift = Sink[head] - maximum;
+        precise float term = exp(shift);
+        if (!finiteValue(term)) {
+            if (lane == 0) fault(head, 2u, -1, -1, term);
+            return;
+        }
+        denominator = term;
+    }
+
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        if (!resident) {
+            scoreChunk(base, count, wave, sl);
+            sync();
+        }
+        int bad = NONE;
+        precise float partial = 0.0;
+        for (int i = lane; i < count; i += LANES) {
+            precise float shift = sVal[i] - maximum;
+            precise float term = exp(shift);
+            sVal[i] = term;
+            if (bad == NONE) {
+                if (!finiteValue(term)) {
+                    bad = i;
+                } else {
+                    precise float nextPartial = partial + term;
+                    partial = nextPartial;
+                }
+            }
+        }
+        int firstBad = groupMin(bad, wave);
+        if (firstBad != NONE) {
+            if (lane == 0) fault(head, 2u, base + firstBad, -1, sVal[firstBad]);
+            return;
+        }
+        float chunkSum = groupSum(partial, wave);
+        precise float nextDenominator = denominator + chunkSum;
+        denominator = nextDenominator;
+    }
+    if (!finiteValue(denominator)) {
+        if (lane == 0) fault(head, 3u, -1, -1, denominator);
+        return;
+    }
+    if (denominator == 0.0) return;
+
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        if (!resident) {
+            scoreChunk(base, count, wave, sl);
+            sync();
+            for (int i = lane; i < count; i += LANES) {
+                precise float shift = sVal[i] - maximum;
+                sVal[i] = exp(shift);
+            }
+        }
+        int bad = NONE;
+        for (int i = lane; i < count; i += LANES) {
+            precise float weight = sVal[i] / denominator;
+            sVal[i] = weight;
+            if (bad == NONE && !finiteValue(weight)) bad = i;
+        }
+        int firstBad = groupMin(bad, wave);
+        int limit = firstBad == NONE ? count : firstBad;
+        float acc[OUT_REGS];
+        bool live[OUT_REGS];
+        for (int r = 0; r < OUT_REGS; ++r) {
+            int d = lane + r * LANES;
+            live[r] = d < pc.headDim;
+            acc[r] = live[r] ? Out[outBase + uint(d)] : 0.0;
+        }
+        int faultSlot = NONE;
+        int faultElement = NONE;
+        float faultValue = 0.0;
+        int i = 0;
+        for (; i + UNROLL <= limit; i += UNROLL) {
+            float kv[UNROLL * OUT_REGS];
+            for (int u = 0; u < UNROLL; ++u) {
+                uint rowBase = uint(base + i + u) * uint(pc.headDim);
+                for (int r = 0; r < OUT_REGS; ++r) {
+                    int d = lane + r * LANES;
+                    kv[u * OUT_REGS + r] = KV[rowBase + uint(d < pc.headDim ? d : 0)];
+                }
+            }
+            for (int u = 0; u < UNROLL; ++u) {
+                float weight = sVal[i + u];
+                for (int r = 0; r < OUT_REGS; ++r) {
+                    accumulate(acc[r], live[r], weight, kv[u * OUT_REGS + r], i + u, lane + r * LANES, faultSlot, faultElement, faultValue);
+                }
+            }
+        }
+        for (; i < limit; ++i) {
+            float weight = sVal[i];
+            uint rowBase = uint(base + i) * uint(pc.headDim);
+            for (int r = 0; r < OUT_REGS; ++r) {
+                int d = lane + r * LANES;
+                float value = KV[rowBase + uint(d < pc.headDim ? d : 0)];
+                accumulate(acc[r], live[r], weight, value, i, d, faultSlot, faultElement, faultValue);
+            }
+        }
+        for (int r = 0; r < OUT_REGS; ++r) {
+            int d = lane + r * LANES;
+            if (d < pc.headDim) Out[outBase + uint(d)] = acc[r];
+        }
+        if (publishFirstFault(head, 5u, base, faultSlot, faultElement, faultValue, wave, lane)) return;
+        if (limit < count) {
+            if (lane == 0) fault(head, 4u, base + limit, -1, sVal[limit]);
+            return;
+        }
+        sync();
+    }
+
+    int faultElement = NONE;
+    float faultValue = 0.0;
+    for (int d = lane; d < pc.headDim; d += LANES) {
+        float value = Out[outBase + uint(d)];
+        if (!finiteValue(value)) { faultElement = d; faultValue = value; break; }
+    }
+    publishFirstFault(head, 6u, 0, NONE, faultElement, faultValue, wave, lane);
+}
+
+bool finite4(vec4 v) {
+    return !any(isnan(v)) && !any(isinf(v));
+}
+
+void splitPass(int lane) {
+    int block = int(gl_WorkGroupID.x);
+    int headBase = int(gl_WorkGroupID.y) * HG;
+    int blocks = (pc.selectedRows + TILE - 1) / TILE;
+    int rowBase = block * TILE;
+    int count = min(TILE, pc.selectedRows - rowBase);
+    if (lane == 0) sFlag = 0u;
+    sync();
+
+    // Load the tile once; rows past count are zero and carry no weight.
+    bool valueBad = false;
+    for (int i = lane; i < TILE * D4; i += LANES) {
+        int r = i / D4;
+        int c = i - r * D4;
+        vec4 v = r < count ? KV4[uint(rowBase + r) * uint(D4) + uint(c)] : vec4(0.0);
+        if (!finite4(v) || any(greaterThanEqual(abs(v), vec4(BIG)))) valueBad = true;
+        int o = r * D + c * 4;
+        sVal[o] = v.x;
+        sVal[o + 1] = v.y;
+        sVal[o + 2] = v.z;
+        sVal[o + 3] = v.w;
+    }
+    if (valueBad) atomicOr(sFlag, 1u);
+    sync();
+
+    // Scores: lane owns head lane/2 and rows of parity lane%2.
+    int localHead = lane >> 1;
+    int parity = lane & 1;
+    int head = headBase + localHead;
+    if (head < pc.heads) {
+        float acc[ROWS_PER_LANE];
+        for (int j = 0; j < ROWS_PER_LANE; ++j) acc[j] = 0.0;
+        uint qBase = uint(head) * uint(D4);
+        for (int c = 0; c < D4; ++c) {
+            vec4 q = Q4[qBase + uint(c)];
+            for (int j = 0; j < ROWS_PER_LANE; ++j) {
+                int o = (parity + 2 * j) * D + c * 4;
+                acc[j] = fma(q.x, sVal[o], acc[j]);
+                acc[j] = fma(q.y, sVal[o + 1], acc[j]);
+                acc[j] = fma(q.z, sVal[o + 2], acc[j]);
+                acc[j] = fma(q.w, sVal[o + 3], acc[j]);
+            }
+        }
+        for (int j = 0; j < ROWS_PER_LANE; ++j) sP[localHead * TILE + parity + 2 * j] = acc[j] * pc.scale;
+    }
+    sync();
+
+    // Per-head block softmax partial, rows in order.
+    if (lane < HG && headBase + lane < pc.heads) {
+        float negInf = uintBitsToFloat(0xff800000u);
+        float m = negInf;
+        bool scoreBad = false;
+        for (int r = 0; r < count; ++r) {
+            float s = sP[lane * TILE + r];
+            if (!finiteValue(s)) scoreBad = true;
+            m = s > m ? s : m;
+        }
+        float l = 0.0;
+        for (int r = 0; r < TILE; ++r) {
+            float e = 0.0;
+            if (r < count && !scoreBad) e = exp(sP[lane * TILE + r] - m);
+            sP[lane * TILE + r] = e;
+            l += e;
+        }
+        uint p = (uint(headBase + lane) * uint(blocks) + uint(block)) * uint(PART4);
+        Part4[p] = vec4(m, l, scoreBad ? 1.0 : 0.0, sFlag != 0u ? 1.0 : 0.0);
+    }
+    sync();
+
+    // Weighted values: lane owns columns [4 lane, 4 lane + 4) for every head.
+    vec4 v[TILE];
+    for (int r = 0; r < TILE; ++r) {
+        int o = r * D + lane * 4;
+        v[r] = vec4(sVal[o], sVal[o + 1], sVal[o + 2], sVal[o + 3]);
+    }
+    for (int h = 0; h < HG; ++h) {
+        if (headBase + h >= pc.heads) break;
+        vec4 acc = vec4(0.0);
+        for (int r = 0; r < TILE; ++r) acc = fma(vec4(sP[h * TILE + r]), v[r], acc);
+        uint p = (uint(headBase + h) * uint(blocks) + uint(block)) * uint(PART4);
+        Part4[p + 1u + uint(lane)] = acc;
+    }
+}
+
+void combinePass(int lane, int wave, int sl) {
+    uint head = gl_WorkGroupID.x;
+    if (head >= uint(pc.heads)) return;
+    int blocks = (pc.selectedRows + TILE - 1) / TILE;
+    uint first = head * uint(blocks) * uint(PART4);
+    float seed = pc.mode == 0 ? uintBitsToFloat(0xff800000u) : uintBitsToFloat(0xff7fffffu);
+
+    bool rerun = pc.hasSink != 0 && !finiteValue(Sink[head]);
+    float maximum = pc.hasSink != 0 ? Sink[head] : seed;
+    for (int b = 0; b < blocks; ++b) {
+        vec4 hdr = Part4[first + uint(b) * uint(PART4)];
+        if (hdr.z != 0.0 || hdr.w != 0.0) rerun = true;
+        maximum = hdr.x > maximum ? hdr.x : maximum;
+    }
+    if (maximum == seed) rerun = true;
+    float denominator = 0.0;
+    if (!rerun) {
+        if (pc.hasSink != 0) denominator = exp(Sink[head] - maximum);
+        for (int b = 0; b < blocks; ++b) {
+            vec4 hdr = Part4[first + uint(b) * uint(PART4)];
+            denominator += hdr.y * exp(hdr.x - maximum);
+        }
+        if (!finiteValue(denominator) || denominator == 0.0) rerun = true;
+    }
+    vec4 o = vec4(0.0);
+    if (!rerun) {
+        vec4 acc = vec4(0.0);
+        for (int b = 0; b < blocks; ++b) {
+            uint p = first + uint(b) * uint(PART4);
+            float f = exp(Part4[p].x - maximum);
+            acc = fma(Part4[p + 1u + uint(lane)], vec4(f), acc);
+        }
+        o = acc / denominator;
+    }
+    // Header-derived decisions are uniform; the output check is per lane.
+    int bad = rerun || !finite4(o) ? 1 : 0;
+    if (groupMin(-bad, wave) != 0) {
+        runHead(head, lane, wave, sl);
+        return;
+    }
+    Out4[head * uint(D4) + uint(lane)] = o;
+    if (lane == 0) {
+        uint statusBase = head * 4u;
+        Status[statusBase] = 0u;
+        Status[statusBase + 1u] = 0u;
+        Status[statusBase + 2u] = 0u;
+        Status[statusBase + 3u] = 0u;
+    }
+}
+
+void main() {
+    int lane = int(gl_LocalInvocationID.x);
+    int wave = int(gl_SubgroupID);
+    // glslang marks gl_SubgroupInvocationID RelaxedPrecision; derive it exactly.
+    int sl = int(subgroupBallotExclusiveBitCount(subgroupBallot(true)));
+    if (pc.pass == 0) {
+        splitPass(lane);
+    } else {
+        combinePass(lane, wave, sl);
+    }
+}

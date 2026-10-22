@@ -103,6 +103,7 @@ type ExpertRouteAnalyzeOptions struct {
 	Coverage   float64 // hot-set pick coverage per layer; default 0.8
 	Phase      string  // keep only this phase ("" keeps all)
 	KeepRepeat bool    // keep re-routes of an already-seen (token, layer)
+	Ranks      []int   // expert-parallel rank counts for per-step balance; none skips it
 }
 
 // ExpertRouteWindowStat is the unique-expert count over every sliding window of
@@ -173,6 +174,7 @@ type ExpertRouteAnalysis struct {
 	HotSetSize         int                      `json:"hot_set_size"`
 	HotSet             []ExpertUsageCount       `json:"hot_set"`
 	PerLayer           []ExpertRouteLayerStats  `json:"per_layer"`
+	RankBalance        []ExpertRouteRankBalance `json:"rank_balance,omitempty"`
 }
 
 func (o ExpertRouteAnalyzeOptions) withDefaults() ExpertRouteAnalyzeOptions {
@@ -332,6 +334,13 @@ func AnalyzeExpertRouteTrace(t ExpertRouteTrace, opts ExpertRouteAnalyzeOptions)
 			CapacityPerLayer: c, TotalExperts: c * rep.Layers,
 			LRUHitRate: routeRatio(lruHits[ci], rep.Picks), BeladyHitRate: routeRatio(minHits[ci], rep.Picks),
 		})
+	}
+	if len(opts.Ranks) > 0 {
+		rb, err := expertRouteRankBalance(byLayer, expertRouteExperts(t, routes), opts.Ranks)
+		if err != nil {
+			return ExpertRouteAnalysis{}, err
+		}
+		rep.RankBalance = rb
 	}
 	return rep, nil
 }

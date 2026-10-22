@@ -271,7 +271,7 @@ var tier = map[string]int{
 	"issueownerprompt": 1, // stdlib-only canonical resolver lifecycle and drift validator (#6848).
 	"promptlint":       1, // durable freshness monitor for the dispatch worker-issue prompts (#3218): flags a rendered prompt whose `fak <verb>` / UPPER_SNAKE claims drift from the surface; stdlib-only, off the hot path.
 	"sensecheck":       1, // "does this actually make sense?" common-sense smell battery side-car; stdlib-only, imports nothing internal, off the hot path.
-	"worktreewitness":  1, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; stdlib-only, off the hot path.
+	"worktreewitness":  2, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; imports worktreeprune(1) for its own-registration cleanup, off the hot path.
 	"goalregistry":     2, // canonical cross-harness goal identity and bindings; foundation composite over the tier-0 flock primitive.
 	"serverartifact":   1, // stdlib-only local artifact identity, digest, and mutation verification; imports no internal package.
 	"serverproduct":    2, // independent local-server product contract and readiness receipts; foundation composite over protocol and artifact identities.
@@ -786,6 +786,7 @@ var tier = map[string]int{
 	"fakroot":        1,
 	"stepobs":        2,
 	"h2hbench":       1, // off-path engine head-to-head benchmark; stdlib-only, imports nothing internal.
+	"worktreeprune":  1, // stdlib-only broad `git worktree prune` refusal on foreign-OS registrations plus own-registration cleanup.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

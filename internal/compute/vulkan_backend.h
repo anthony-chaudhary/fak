@@ -495,9 +495,14 @@ int fvk_v41_shared_attention_f32(const void *dQ, const void *dSharedKV,
 /* Optional determinism class for the same entrypoint (registry V16/79):
  * class 0 (default) is the serial bit-exact kernel above; class 1 is the
  * run-to-run Wave32 subgroup-tree module, used only for headDim <= 512.
+ * Class 2 (split-k, registry V33) splits rows into 16-row tiles across
+ * workgroups that score 64 heads per KV load, then merges per-head partials;
+ * it runs for headDim == 512 and 32..8192 rows, and otherwise (or for any
+ * head whose partials are unsafe) uses class 1's arithmetic.
  * set_class returns 0, 1 not ready, 2 invalid class, 3 module unavailable.
- * FAK_V41_SHARED_ATTENTION_DETERMINISM=run-to-run selects class 1 at init. */
+ * FAK_V41_SHARED_ATTENTION_DETERMINISM=run-to-run|split-k selects class 1|2 at init. */
 int fvk_have_v41_shared_attention_fast(void);
+int fvk_have_v41_shared_attention_split(void);
 int fvk_v41_shared_attention_class(void);
 int fvk_v41_shared_attention_set_class(int cls);
 

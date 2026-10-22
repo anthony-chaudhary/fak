@@ -274,7 +274,7 @@ func TestTimestampProfileCoversBatchRecording(t *testing.T) {
 	if submits < 10 {
 		t.Fatalf("found %d one-shot submits, want the shim's full set", submits)
 	}
-	if !regexp.MustCompile(`static inline void dpOneShot\([^)]*\) \{\n\s+tsCountUntimed\(`).MatchString(src) {
+	if !regexp.MustCompile(`static inline void dpOneShot\([^)]*\) \{\n\s+if \(!timed\) tsCountUntimed\(`).MatchString(src) {
 		t.Error("dpOneShot no longer counts untimed work first")
 	}
 	for _, format := range []string{
@@ -283,6 +283,119 @@ func TestTimestampProfileCoversBatchRecording(t *testing.T) {
 	} {
 		if !strings.Contains(src, format) {
 			t.Errorf("ts-stage stderr format changed: %s", format)
+		}
+	}
+}
+
+// shimUntimedComputeSites names the only functions whose one-shot compute
+// stays untimed (counted in untimed_compute). Every other one-shot compute
+// dispatch, the resident Qwen path's included, must carry a timestamp pair.
+var shimUntimedComputeSites = map[string]bool{"fvk_v41_query_prefix_f32": true}
+
+var (
+	shimOneShotDispatch = regexp.MustCompile(`vkCmdDispatch\(cmd\b`)
+	shimOneShotCopyFill = regexp.MustCompile(`vkCmd(?:CopyBuffer|FillBuffer)\(cmd\b`)
+	shimFuncStart       = regexp.MustCompile(`^[A-Za-z][^;]*?(\w+)\(`)
+)
+
+// shimEnclosingFunc returns the top-level function holding line i: its name
+// and the body's [start, end) line range.
+func shimEnclosingFunc(lines []string, i int) (string, int, int) {
+	start := i
+	for start > 0 && !shimFuncStart.MatchString(lines[start]) {
+		start--
+	}
+	end := i
+	for end < len(lines) && lines[end] != "}" {
+		end++
+	}
+	name := ""
+	if m := shimFuncStart.FindStringSubmatch(lines[start]); m != nil {
+		name = m[1]
+	}
+	return name, start, end
+}
+
+func shimFollowedWithin(lines []string, i, n int, want string) bool {
+	for j := i + 1; j <= i+n && j < len(lines); j++ {
+		if strings.Contains(lines[j], want) {
+			return true
+		}
+	}
+	return false
+}
+
+// A compute op submitted outside a batch must time itself: it opens a
+// timestamp pair before its first command, stamps every command it records,
+// and reads (or counts lost) the pair after its submit. Only the listed V4.1
+// site may stay untimed, and it must count itself. The open refuses while a
+// batch's slots are unread, and a one-shot is not a batch.
+// fak-test:runtime fast est=20ms lane=default
+func TestTimestampProfileTimesOneShotCompute(t *testing.T) {
+	src := shimSource(t)
+	lines := strings.Split(src, "\n")
+	timed, untimed := 0, 0
+	for i, line := range lines {
+		if !shimOneShotDispatch.MatchString(line) {
+			continue
+		}
+		name, start, end := shimEnclosingFunc(lines, i)
+		body := strings.Join(lines[start:end], "\n")
+		if shimUntimedComputeSites[name] {
+			untimed++
+			if !strings.Contains(body, "tsCountUntimed(true)") {
+				t.Errorf("vulkan_shim.cpp:%d %s stays untimed without counting untimed_compute", i+1, name)
+			}
+			continue
+		}
+		timed++
+		open := -1
+		for j := start; j < end; j++ {
+			if strings.Contains(lines[j], "const bool timed = tsOneShotBegin(cmd);") {
+				open = j
+				break
+			}
+		}
+		if open < 0 {
+			t.Errorf("vulkan_shim.cpp:%d %s submits one-shot compute without opening a timestamp pair", i+1, name)
+			continue
+		}
+		if !shimFollowedWithin(lines, i, 2, "if (timed) tsAfterDispatch(cmd, (uint32_t)(&k - g_kern), groupsX, groupsY);") {
+			t.Errorf("vulkan_shim.cpp:%d %s dispatch is not stamped", i+1, name)
+		}
+		if !strings.Contains(body, "dpOneShot(g_dp.oneShotCompute, timed);") {
+			t.Errorf("%s does not tell dpOneShot the submit was timed", name)
+		}
+		submits := 0
+		for j := start; j < end; j++ {
+			if j < open && (shimOneShotDispatch.MatchString(lines[j]) || shimOneShotCopyFill.MatchString(lines[j])) {
+				t.Errorf("vulkan_shim.cpp:%d %s records before the timestamp pair opens", j+1, name)
+			}
+			if shimOneShotCopyFill.MatchString(lines[j]) && !shimFollowedWithin(lines, j, 2, "if (timed) tsAfterDispatch(cmd, ") {
+				t.Errorf("vulkan_shim.cpp:%d %s records an unstamped command", j+1, name)
+			}
+			if shimOneShotSubmit.MatchString(lines[j]) {
+				submits++
+				if !shimFollowedWithin(lines, j, 2, "if (timed) tsOneShotEnd(") {
+					t.Errorf("vulkan_shim.cpp:%d %s submit does not read its timestamp pair", j+1, name)
+				}
+			}
+		}
+		if submits == 0 {
+			t.Errorf("%s has no one-shot submit", name)
+		}
+	}
+	if timed == 0 || untimed != len(shimUntimedComputeSites) {
+		t.Fatalf("one-shot compute sites: timed=%d untimed=%d, want >=1 and %d", timed, untimed, len(shimUntimedComputeSites))
+	}
+	for name, re := range map[string]*regexp.Regexp{
+		"open_refuses_pending_batch": regexp.MustCompile(`bool tsOneShotBegin\(VkCommandBuffer cmd\) \{\n\s+if \(!g_tsOn \|\| g_batching\) return false;\n\s+if \(!g_tsInitTried\) tsInit\(\);\n\s+if \(!g_tsUsable \|\| g_tsUsed != 0\) return false;\n\s+vkCmdResetQueryPool\(cmd, g_tsPool, 0, kTsOneShotSlots\);`),
+		"one_shot_not_a_batch":       regexp.MustCompile(`if \(batch && \(\+\+g_tsBatches % g_tsEvery\) == 0\) tsReport\(\);`),
+		"lost_one_shot_truncates":    regexp.MustCompile(`void tsOneShotEnd\(bool completed\) \{\n\s+if \(completed\) tsCollect\(false\);\n\s+else tsBatchLost\(\);\n\}`),
+		"uncertain_v41_not_read":     regexp.MustCompile(`if \(timed\) tsOneShotEnd\(completed && !g_v41SubmissionPendingFailure\);`),
+	} {
+		if !re.MatchString(src) {
+			t.Errorf("one-shot timestamp contract %s changed", name)
 		}
 	}
 }

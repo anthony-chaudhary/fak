@@ -40,10 +40,10 @@ def test_declared_arches_use_blackwell_capable_cuda_toolchains():
         r"(?:cuda-nvcc|cuda-cudart-dev|cuda-nvrtc-dev|libcublas-dev|cuda-cccl)=([0-9.]+)",
         setup,
     )
-    assert docker_versions == ["12.8.1", "12.8.1"]
-    assert setup_versions == ["12.8"] * 5
+    assert docker_versions == ["12.9.1", "12.9.1"]
+    assert setup_versions == ["12.9"] * 5
 
-    minimum_by_arch = {"sm_100": (12, 8), "sm_120": (12, 8)}
+    minimum_by_arch = {"sm_100": (12, 8), "sm_103": (12, 9), "sm_120": (12, 8)}
     for arch in arches:
         minimum = minimum_by_arch.get(arch, (0, 0))
         assert all(_minor(version) >= minimum for version in docker_versions)

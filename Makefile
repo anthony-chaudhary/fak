@@ -693,6 +693,9 @@ cuda-build:
 cuda-build-sm100:
 	FAK_CUDA_ARCH=sm_100 bash internal/compute/build_cuda.sh build
 
+cuda-build-sm103:
+	FAK_CUDA_ARCH=sm_103 bash internal/compute/build_cuda.sh build
+
 cuda-build-sm120:
 	FAK_CUDA_ARCH=sm_120 bash internal/compute/build_cuda.sh build
 

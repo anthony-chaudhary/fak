@@ -396,7 +396,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_V41_SHARED_ATTENTION_SPLIT, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -419,7 +419,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
-    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION: case K_V41_SHARED_ATTENTION_FAST: case K_V41_INDEXER_SCORE:
+    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION: case K_V41_SHARED_ATTENTION_FAST: case K_V41_SHARED_ATTENTION_SPLIT: case K_V41_INDEXER_SCORE:
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS: case K_V41_ROUTER_TOPK: case K_V41_INDEX_SELECT:
     case K_V41_ROUTER_GATE_TOPK:
@@ -471,8 +471,8 @@ static inline void dpDispatch(const Kernel& k) {
 
 // FAK_VULKAN_TIMESTAMP_PROFILE gate, read once at load; the profile itself is below.
 const bool g_tsOn = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
-// Work submitted outside a timed batch is in no timestamp row, so the profile counts
-// it rather than silently reporting full coverage.
+// Work submitted outside a timed batch, with no timestamp pair of its own, is in no
+// timestamp row, so the profile counts it rather than silently reporting full coverage.
 std::atomic<uint64_t> g_tsUntimedCompute{0}, g_tsUntimedTransfer{0};
 // A dispatch recorded without its barrier overlaps its predecessor, so its delta is not its own time.
 uint64_t g_tsBarriersElided = 0;
@@ -481,8 +481,9 @@ static inline void tsCountUntimed(bool compute) {
     (compute ? g_tsUntimedCompute : g_tsUntimedTransfer).fetch_add(1, std::memory_order_relaxed);
 }
 
-static inline void dpOneShot(std::atomic<uint64_t>& family) {
-    tsCountUntimed(&family == &g_dp.oneShotCompute);
+// timed: the submit carried its own timestamp pair (tsOneShotBegin), so its time is in a row.
+static inline void dpOneShot(std::atomic<uint64_t>& family, bool timed = false) {
+    if (!timed) tsCountUntimed(&family == &g_dp.oneShotCompute);
     g_deviceSubmits.fetch_add(1, std::memory_order_relaxed);
     if (!g_dp_on) return;
     family.fetch_add(1, std::memory_order_relaxed);
@@ -577,6 +578,10 @@ int g_have_v41_shared_attention = 0;
 int g_have_v41_shared_attention_fast = 0;
 bool g_v41SharedAttentionFastSubgroups = false;
 int g_v41SharedAttentionClass = 0;
+// Class 2 (split-k) is the optional two-pass module; its partials live in a
+// shim-owned scratch buffer that grows on demand and is never aliased.
+int g_have_v41_shared_attention_split = 0;
+Buffer* g_v41SplitPartials = nullptr;
 // Optional: the router module is not in the trusted shader registry yet, so it
 // is published only when its module is present and its ABI matches.
 int g_have_v41_router_topk = 0;
@@ -1733,6 +1738,7 @@ const char* const kKernelNames[] = {
     "qwen35_value_head_tile",
     "v41_router_gate_topk",
     "v41_compressor_ring",
+    "v41_shared_attention_split",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -1805,6 +1811,22 @@ void tsBatchBegin(VkCommandBuffer cmd) {
     g_tsBatchStart = std::chrono::steady_clock::now();
 }
 
+// A compute op submitted outside a batch gets its own timestamp pair, so it lands in a
+// row instead of the untimed count. Unread slots of a recorded batch would be clobbered,
+// so with any pending the op stays untimed (and counted).
+const uint32_t kTsOneShotSlots = 3; // begin, status fill, dispatch
+bool tsOneShotBegin(VkCommandBuffer cmd) {
+    if (!g_tsOn || g_batching) return false;
+    if (!g_tsInitTried) tsInit();
+    if (!g_tsUsable || g_tsUsed != 0) return false;
+    vkCmdResetQueryPool(cmd, g_tsPool, 0, kTsOneShotSlots);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_tsPool, 0);
+    g_tsUsed = 1;
+    g_tsSlots.clear();
+    g_tsBatchStart = std::chrono::steady_clock::now();
+    return true;
+}
+
 void tsAfterDispatch(VkCommandBuffer cmd, uint32_t kid, uint32_t gx, uint32_t gy) {
     if (!g_tsOn || !g_tsUsable) return;
     if (g_tsUsed >= kTsMax) { ++g_tsTruncated; return; }
@@ -1837,7 +1859,9 @@ void tsBatchLost() {
     g_tsUsed = 0;
 }
 
-void tsBatchCollect() {
+// A one-shot (batch=false) folds into the rows and totals but is not a batch, so the
+// per-batch ts-stage figures stay per decode batch.
+void tsCollect(bool batch) {
     if (!g_tsOn || !g_tsUsable || g_tsUsed < 2) return;
     std::vector<uint64_t> ts(g_tsUsed);
     if (vkGetQueryPoolResults(g_dev, g_tsPool, 0, g_tsUsed, ts.size() * sizeof(uint64_t), ts.data(),
@@ -1857,8 +1881,16 @@ void tsBatchCollect() {
     g_tsGpuNs += ((ts[g_tsUsed - 1] - ts[0]) & g_tsMask) * g_tsPeriodNs;
     g_tsWallNs += wall;
     g_tsOps += g_tsUsed - 1;
-    if ((++g_tsBatches % g_tsEvery) == 0) tsReport();
+    if (batch && (++g_tsBatches % g_tsEvery) == 0) tsReport();
     g_tsUsed = 0;
+}
+
+void tsBatchCollect() { tsCollect(true); }
+
+// Reads the pair tsOneShotBegin opened, or counts its slots lost when the submit failed.
+void tsOneShotEnd(bool completed) {
+    if (completed) tsCollect(false);
+    else tsBatchLost();
 }
 
 void batchBegin() {
@@ -3696,7 +3728,7 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     }
     // Ordinary scalar kernels inside a checked step also fail closed on
     // descriptor allocation; skipping a dispatch must never publish stale data.
-    const bool checkedV41 = forceChecked || g_stepBatch || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_COMPRESSOR_RING] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
+    const bool checkedV41 = forceChecked || g_stepBatch || &k == &g_kern[K_V41_TAIL_ROPE_QK] || &k == &g_kern[K_V41_TAIL_ROPE_EXACT] || &k == &g_kern[K_V41_SHARED_ATTENTION] || &k == &g_kern[K_V41_SHARED_ATTENTION_FAST] || &k == &g_kern[K_V41_SHARED_ATTENTION_SPLIT] || &k == &g_kern[K_V41_INDEXER_SCORE] || &k == &g_kern[K_V41_MHC] || &k == &g_kern[K_V41_ROUTER_TOPK] || &k == &g_kern[K_V41_INDEX_SELECT] || &k == &g_kern[K_V41_Q2K_EMBED_GATHER] || &k == &g_kern[K_V41_EXACT_RMSNORM] || &k == &g_kern[K_V41_BF16_BOUNDARY] || &k == &g_kern[K_V41_LOGIT_SCALE] || &k == &g_kern[K_V41_ENGRAM_GATE] || &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_COMPRESSOR_RING] || &k == &g_kern[K_V41_SCALE_EXACT] || &k == &g_kern[K_V41_ENGRAM_ROW_DECODE] || &k == &g_kern[K_V41_ROUTED_GATE_UP_SWIGLU_ID] || &k == &g_kern[K_V41_ROUTED_DOWN_SUM];
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -3770,10 +3802,12 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     // Unbatched: one-shot submit + fence (the original per-op path).
     VkCommandBuffer cmd = checkedV41 ? v41BeginCmdChecked() : beginCmd();
     if (cmd == VK_NULL_HANDLE) { recycleDescriptorSet(rec); return false; }
+    const bool timed = tsOneShotBegin(cmd);
     if (initializedStatus != nullptr) {
         // Completion alone is not memory visibility. This same-command fill
         // and conservative dependency cover status atomics AND prior input writes.
         vkCmdFillBuffer(cmd, initializedStatus->buf, 0, statusBytes, UINT32_MAX);
+        if (timed) tsAfterDispatch(cmd, kTsFill, 0, 0);
         recordComputeBarrier(cmd);
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
@@ -3781,13 +3815,16 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
     dpDispatch(k);
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
-    dpOneShot(g_dp.oneShotCompute);
+    if (timed) tsAfterDispatch(cmd, (uint32_t)(&k - g_kern), groupsX, groupsY);
+    dpOneShot(g_dp.oneShotCompute, timed);
     if (checkedV41) {
         const bool completed = v41EndSubmitWaitChecked(cmd, true);
+        if (timed) tsOneShotEnd(completed && !g_v41SubmissionPendingFailure);
         if (!g_v41SubmissionPendingFailure) recycleDescriptorSet(rec);
         return completed;
     }
     endSubmitWait(cmd);
+    if (timed) tsOneShotEnd(g_submissionStatus == VK_SUCCESS);
     recycleDescriptorSet(rec);
     return g_submissionStatus == VK_SUCCESS;
 }
@@ -4298,6 +4335,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_tail_rope_exact = 0;
     g_have_v41_shared_attention = 0;
     g_have_v41_shared_attention_fast = 0;
+    g_have_v41_shared_attention_split = 0;
+    g_v41SplitPartials = nullptr; // owned by the device generation being torn down
     g_v41SharedAttentionClass = 0;
     g_have_v41_router_topk = 0;
     g_have_v41_router_gate_topk = 0;
@@ -4626,6 +4665,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_V41_SHARED_ATTENTION], P("v41_shared_attention.spv"), 5, 24);
     const bool v41SharedAttentionFastBuilt = g_v41SharedAttentionFastSubgroups &&
         buildKernel(g_kern[K_V41_SHARED_ATTENTION_FAST], P("v41_shared_attention_fast.spv"), 5, 24, 32);
+    // Optional split-k class: the same Wave32 pin plus a partials binding and a pass word.
+    FILE* v41SplitProbe = fopen(P("v41_shared_attention_split.spv").c_str(), "rb");
+    if (v41SplitProbe) fclose(v41SplitProbe);
+    const bool v41SharedAttentionSplitBuilt = v41SharedAttentionFastBuilt && v41SplitProbe != nullptr &&
+        buildKernel(g_kern[K_V41_SHARED_ATTENTION_SPLIT], P("v41_shared_attention_split.spv"), 6, 28, 32);
     // Trusted since registry V7/complete66, but still optional at init: an
     // absent module leaves the capability false and device-only V4.1 refuses.
     const std::string v41RouterModule = P("v41_router_topk.spv");
@@ -4881,8 +4925,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_tail_rope_qk = 1;
     g_have_v41_shared_attention = 1;
     g_have_v41_shared_attention_fast = v41SharedAttentionFastBuilt ? 1 : 0;
+    g_have_v41_shared_attention_split = v41SharedAttentionSplitBuilt ? 1 : 0;
     if (const char* cls = std::getenv("FAK_V41_SHARED_ATTENTION_DETERMINISM")) {
-        g_v41SharedAttentionClass = (std::strcmp(cls, "run-to-run") == 0 && g_have_v41_shared_attention_fast) ? 1 : 0;
+        if (std::strcmp(cls, "run-to-run") == 0 && g_have_v41_shared_attention_fast) g_v41SharedAttentionClass = 1;
+        else if (std::strcmp(cls, "split-k") == 0 && g_have_v41_shared_attention_split) g_v41SharedAttentionClass = 2;
+        else g_v41SharedAttentionClass = 0;
     }
     g_have_v41_router_topk = v41RouterPipelineBuilt ? 1 : 0;
     g_have_v41_router_gate_topk = v41RouterGatePipelineBuilt ? 1 : 0;
@@ -6920,14 +6967,52 @@ int fvk_have_v41_shared_attention_fast(void) {
     return g_ready && g_have_v41_shared_attention_fast && g_kern[K_V41_SHARED_ATTENTION_FAST].pipe != VK_NULL_HANDLE;
 }
 
+int fvk_have_v41_shared_attention_split(void) {
+    return g_ready && g_have_v41_shared_attention_split && g_kern[K_V41_SHARED_ATTENTION_SPLIT].pipe != VK_NULL_HANDLE;
+}
+
 int fvk_v41_shared_attention_class(void) { return g_v41SharedAttentionClass; }
 
 int fvk_v41_shared_attention_set_class(int cls) {
     if (!g_ready) return 1;
-    if (cls != 0 && cls != 1) return 2;
+    if (cls != 0 && cls != 1 && cls != 2) return 2;
     if (cls == 1 && !fvk_have_v41_shared_attention_fast()) return 3;
+    if (cls == 2 && !fvk_have_v41_shared_attention_split()) return 3;
     g_v41SharedAttentionClass = cls;
     return 0;
+}
+
+// Split-k class: a split pass over (row tiles x head groups) writes per-(head, tile)
+// softmax partials into shim scratch, then a per-head combine pass merges them in
+// tile order and writes out and status. Returns false when the shape is outside
+// the module's envelope or a dispatch fails; the caller then runs the run-to-run
+// class, which overwrites out and status. Neither pass is declared to the Go hazard
+// ledger, so both keep the coarse barrier and any following elision fails closed.
+static bool v41SharedAttentionSplit(Buffer** bufs, int heads, int headDim, int selectedRows,
+                                    int mode, int hasSink, float scale) {
+    constexpr int kTile = 16, kHeadGroup = 64, kPart = 512 + 4, kMaxRows = 8192, kMinRows = 32;
+    if (!fvk_have_v41_shared_attention_split() || headDim != 512 ||
+        selectedRows < kMinRows || selectedRows > kMaxRows) return false;
+    const uint32_t blocks = uint32_t((selectedRows + kTile - 1) / kTile);
+    const uint32_t groups = uint32_t((heads + kHeadGroup - 1) / kHeadGroup);
+    const uint64_t partBytes = uint64_t(heads) * blocks * kPart * sizeof(float);
+    if (blocks > g_maxComputeWorkGroupCountX || partBytes > (uint64_t(1) << 31)) return false;
+    if (!g_v41SplitPartials || g_v41SplitPartials->bytes < partBytes) {
+        Buffer* grown = (Buffer*)fvk_malloc(size_t(partBytes));
+        if (!grown) return false;
+        if (g_v41SplitPartials) fvk_free(g_v41SplitPartials);
+        g_v41SplitPartials = grown;
+    }
+    Buffer* split[6] = {bufs[0], bufs[1], bufs[2], bufs[3], bufs[4], g_v41SplitPartials};
+    struct Push {
+        int32_t heads, headDim, selectedRows, mode, hasSink;
+        float scale;
+        int32_t pass;
+    } pc{heads, headDim, selectedRows, mode, hasSink, scale, 0};
+    static_assert(sizeof(Push) == 28, "V4.1 split attention push ABI must be 28 bytes");
+    if (!dispatch(g_kern[K_V41_SHARED_ATTENTION_SPLIT], split, &pc, sizeof(pc), blocks, groups)) return false;
+    pc.pass = 1;
+    return dispatch(g_kern[K_V41_SHARED_ATTENTION_SPLIT], split, &pc, sizeof(pc), uint32_t(heads));
 }
 
 int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
@@ -6975,7 +7060,12 @@ int fvk_v41_shared_attention_f32(const void* dQ, const void* dSharedKV,
     // One 128-lane workgroup per head; its lane 0 initializes the four status
     // words and publishes the ordered first fault. There is no atomic winner race.
     // The run-to-run class holds Q in 16 lane registers, so wider heads stay serial.
-    const bool fast = g_v41SharedAttentionClass == 1 && fvk_have_v41_shared_attention_fast() && headDim <= 512;
+    if (g_v41SharedAttentionClass == 2 && v41SharedAttentionSplit(bufs, heads, headDim, selectedRows, mode, hasSink, scale)) {
+        return (int)g_submissionStatus;
+    }
+    // Split-k shapes outside its envelope, or a failed split dispatch, take the
+    // run-to-run class: the split pass writes only shim scratch, never out or status.
+    const bool fast = g_v41SharedAttentionClass != 0 && fvk_have_v41_shared_attention_fast() && headDim <= 512;
     if (!dispatch(g_kern[fast ? K_V41_SHARED_ATTENTION_FAST : K_V41_SHARED_ATTENTION], bufs, &pc, sizeof(pc), uint32_t(heads))) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
