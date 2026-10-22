@@ -142,10 +142,13 @@ func TestInKernelExecutionLogNamesQwen35CUDAPath(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(old) })
 	p.logExecutionSummary("avx512", "+fused", 23, 0, 0, 23, 192.63, 0.1, 1, 7.08, 0.1)
 	got := buf.String()
-	for _, want := range []string{"backend=cuda", "forward_path=" + model.Qwen35GDNCUDAPath, "q8dec=avx512+fused/"} {
+	for _, want := range []string{"backend=cuda", "forward_path=" + model.Qwen35GDNCUDAPath, "host="} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("execution log %q missing %q", got, want)
 		}
+	}
+	if strings.Contains(got, "q8dec=") {
+		t.Fatalf("device execution log %q carries the CPU q8dec tier", got)
 	}
 }
 
