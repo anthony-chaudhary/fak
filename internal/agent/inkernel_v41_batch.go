@@ -58,9 +58,14 @@ type inKernelV41DecodeOps struct {
 	wait   func(context.Context) error
 }
 
-type inKernelV41Admission func() ([]*decodeLane, error)
+type inKernelV41Lifecycle struct {
+	admit      func(int) ([]*decodeLane, error)
+	retire     func([]*decodeLane) error
+	progress   func(int, int)
+	membership func([]*decodeLane)
+}
 
-type inKernelV41AdmissionContextKey struct{}
+type inKernelV41LifecycleContextKey struct{}
 
 type inKernelV41Pending struct {
 	lane    *decodeLane
@@ -88,18 +93,37 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 	pending := make([]*inKernelV41Pending, 0, 4)
 	seen := make(map[*model.Session]bool, 4)
 	nextID := uint64(1)
+	lifecycle, _ := ctx.Value(inKernelV41LifecycleContextKey{}).(*inKernelV41Lifecycle)
+	notifyMembership := func() {
+		if lifecycle == nil || lifecycle.membership == nil {
+			return
+		}
+		active := make([]*decodeLane, len(pending))
+		for index, item := range pending {
+			active[index] = item.lane
+		}
+		lifecycle.membership(active)
+	}
 	appendLanes := func(candidates []*decodeLane) error {
 		if len(pending)+len(candidates) > 4 {
 			return fmt.Errorf("agent: invalid V4.1 decode driver admission")
 		}
+		if nextID == 0 || uint64(len(candidates)) > ^uint64(0)-nextID+1 {
+			return fmt.Errorf("agent: exhausted V4.1 decode lane IDs")
+		}
+		candidateSessions := make(map[*model.Session]bool, len(candidates))
 		for _, lane := range candidates {
-			if lane == nil || lane.s == nil || seen[lane.s] {
+			if lane == nil || lane.s == nil || seen[lane.s] || candidateSessions[lane.s] {
 				return fmt.Errorf("agent: nil or aliased V4.1 decode lane")
 			}
+			candidateSessions[lane.s] = true
+		}
+		for _, lane := range candidates {
 			seen[lane.s] = true
 			pending = append(pending, &inKernelV41Pending{lane: lane, id: nextID})
 			nextID++
 		}
+		notifyMembership()
 		return nil
 	}
 	if err := appendLanes(lanes); err != nil {
@@ -112,12 +136,46 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 			}
 		}
 	}
-	admit, _ := ctx.Value(inKernelV41AdmissionContextKey{}).(inKernelV41Admission)
+	retireFinished := func() error {
+		retired := make([]*decodeLane, 0, len(pending))
+		kept := pending[:0]
+		for _, item := range pending {
+			if item.lane.done {
+				retired = append(retired, item.lane)
+				delete(seen, item.lane.s)
+				continue
+			}
+			kept = append(kept, item)
+		}
+		keptLength := len(kept)
+		for index := keptLength; index < len(pending); index++ {
+			pending[index] = nil
+		}
+		pending = pending[:keptLength]
+		if len(retired) == 0 || lifecycle == nil || lifecycle.retire == nil {
+			return nil
+		}
+		return lifecycle.retire(retired)
+	}
 	admitAtBoundary := false
 	for {
-		if admitAtBoundary && admit != nil && len(pending) < 4 {
+		advance := func() {
+			for _, item := range pending {
+				laneCtx := inKernelV41LaneContext(ctx, item.lane)
+				if err := laneCtx.Err(); err != nil {
+					item.lane.err, item.lane.done, item.pending = err, true, false
+				} else if !item.pending && !item.lane.done && item.lane.gen < item.lane.maxNew {
+					item.token, item.pending = item.lane.decodeOne(laneCtx)
+				}
+			}
+		}
+		advance()
+		if err := retireFinished(); err != nil {
+			return receipt, err
+		}
+		if admitAtBoundary && lifecycle != nil && lifecycle.admit != nil && len(pending) < 4 {
 			admitAtBoundary = false
-			admitted, err := admit()
+			admitted, err := lifecycle.admit(4 - len(pending))
 			if err != nil {
 				return receipt, err
 			}
@@ -125,21 +183,18 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 				failPending(err)
 				return receipt, err
 			}
+			advance()
+			if err := retireFinished(); err != nil {
+				return receipt, err
+			}
 		}
 		input := make([]model.V41BatchLane, 0, len(pending))
 		byID := make(map[uint64]*inKernelV41Pending, len(pending))
-		for _, p := range pending {
-			laneCtx := inKernelV41LaneContext(ctx, p.lane)
-			if p.pending {
-				if err := laneCtx.Err(); err != nil {
-					p.lane.err, p.lane.done, p.pending = err, true, false
-				}
-			} else if !p.lane.done && p.lane.gen < p.lane.maxNew {
-				p.token, p.pending = p.lane.decodeOne(laneCtx)
-			}
-			if p.pending {
-				input = append(input, model.V41BatchLane{ID: p.id, Context: laneCtx, Session: p.lane.s, Token: p.token})
-				byID[p.id] = p
+		for _, item := range pending {
+			if item.pending {
+				laneCtx := inKernelV41LaneContext(ctx, item.lane)
+				input = append(input, model.V41BatchLane{ID: item.id, Context: laneCtx, Session: item.lane.s, Token: item.token})
+				byID[item.id] = item
 			}
 		}
 		if len(input) == 0 {
@@ -222,6 +277,9 @@ func inKernelDecodeV41LanesWithOps(ctx context.Context, lanes []*decodeLane, ops
 		}
 		receipt.sharedPanels += out.SharedHeadPanels
 		receipt.sharedRows += out.SharedHeadRows
+		if lifecycle != nil && lifecycle.progress != nil {
+			lifecycle.progress(receipt.sharedPanels, receipt.sharedRows)
+		}
 		committed := 0
 		for _, row := range out.Lanes {
 			if row.Committed {

@@ -139,6 +139,9 @@ type inKernelCoalesceRequest struct {
 	receipt      InKernelBatchReceipt
 	closes       atomic.Uint32
 	receiptReady chan struct{}
+	receiptOnce  sync.Once
+	terminalErr  error
+	panicValue   any
 	enqueued     time.Time // coalescer arrival, for the cohort_wait phase
 }
 
@@ -176,23 +179,49 @@ func (p *InKernelPlanner) runCoalescedGenerateKind(ctx context.Context, run func
 	p.coalesceMu.Unlock()
 
 	if leader {
-		if hook != nil {
-			hook()
-		} else {
-			runtime.Gosched()
+		if kind != inKernelCoalesceV41 {
+			if hook != nil {
+				hook()
+			} else {
+				runtime.Gosched()
+			}
+			p.drainCoalescedGenerates()
+			out := <-req.result
+			return finishCoalescedRequest(req, out)
 		}
-		p.drainCoalescedGenerates()
+		var hookPanic any
+		func() {
+			defer func() { hookPanic = recover() }()
+			if hook != nil {
+				hook()
+			} else {
+				runtime.Gosched()
+			}
+		}()
+		if hookPanic != nil {
+			p.withdrawCoalescedRequest(req, true)
+			req.result <- inKernelCoalesceResult{err: errInKernelV41CohortAborted}
+			close(req.done)
+			req.terminalErr = errInKernelV41CohortAborted
+			req.panicValue = hookPanic
+			req.publishReceipt()
+			out := <-req.result
+			return finishCoalescedRequest(req, out)
+		}
+		go p.drainCoalescedGenerates()
 	} else {
 		select {
 		case <-req.drain:
 			if ctx.Err() != nil && p.withdrawCoalescedRequest(req, true) {
 				return inKernelGenerateResult{}, ctx.Err()
 			}
-			p.drainCoalescedGenerates()
+			if kind == inKernelCoalesceV41 {
+				go p.drainCoalescedGenerates()
+			} else {
+				p.drainCoalescedGenerates()
+			}
 		case out := <-req.result:
-			<-req.receiptReady
-			out.result.batchReceipt = req.receipt
-			return out.result, out.err
+			return finishCoalescedRequest(req, out)
 		case <-ctx.Done():
 			if p.withdrawCoalescedRequest(req, false) {
 				return inKernelGenerateResult{}, ctx.Err()
@@ -202,9 +231,23 @@ func (p *InKernelPlanner) runCoalescedGenerateKind(ctx context.Context, run func
 		}
 	}
 	out := <-req.result
+	return finishCoalescedRequest(req, out)
+}
+
+func finishCoalescedRequest(req *inKernelCoalesceRequest, out inKernelCoalesceResult) (inKernelGenerateResult, error) {
 	<-req.receiptReady
 	out.result.batchReceipt = req.receipt
+	if req.terminalErr != nil {
+		out.err = req.terminalErr
+	}
+	if req.panicValue != nil {
+		panic(req.panicValue)
+	}
 	return out.result, out.err
+}
+
+func (req *inKernelCoalesceRequest) publishReceipt() {
+	req.receiptOnce.Do(func() { close(req.receiptReady) })
 }
 
 // withdrawCoalescedRequest removes only a still-queued follower. Selection and
@@ -274,10 +317,11 @@ func (p *InKernelPlanner) drainCoalescedGenerates() {
 		enginestep.Default.ObservePhase(enginestep.PhaseCohortWait, time.Since(req.enqueued))
 	}
 	if kind == inKernelCoalesceV41 {
-		// The Flash runner joins every selected request before an unknown
-		// panic can escape. Hand off queued work even on that fatal path.
-		defer p.finishCoalescedCohort()
-		p.runV41DecodeCohort(cohort, inKernelDecodeV41Lanes)
+		fatal := p.runV41DecodeCohortCore(cohort, inKernelDecodeV41Lanes)
+		p.finishCoalescedCohort()
+		if fatal != nil && fatal.request != nil {
+			fatal.request.publishReceipt()
+		}
 		return
 	}
 	p.runDecodeCohort(cohort)
