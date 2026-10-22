@@ -134,18 +134,19 @@ also rejected before inference. `strict` may be true or omitted. Native
 `json_object` is unsupported; upstream engine passthrough retains its own
 supported surface.
 
-On `/v1/chat/completions`, the native route enforces two constraint carriers:
-`response_format` with type `json_schema`, and a guided regex sent as
-`guided_regex` or its SGLang alias `regex`. Every other carrier on that route is
-refused before prefill instead of being ignored: other `response_format` types
+On `/v1/chat/completions`, the native route enforces four constraint carriers:
+`response_format` with type `json_schema`, a guided regex sent as
+`guided_regex` or its SGLang alias `regex`, a vLLM `guided_json` schema, and a
+vLLM `guided_choice` list. Every other carrier on that route is refused before
+prefill instead of being ignored: other `response_format` types
 (`json_object`, `regex`, `grammar`) and the remaining provider-native guided
-fields (`guided_json`, `guided_choice`, `guided_grammar`,
-`guided_decoding_backend`, `json_schema`, `ebnf`). This applies to buffered and
-streamed requests, including when such a field accompanies a supported
-`json_schema` response format or guided regex. A `guided_decoding_backend` alone
-is refused too, since the native route has no selectable backend. A guided field
-sent as `null` counts as absent. EBNF and other grammars therefore need an
-upstream engine in ride mode.
+fields (`guided_grammar`, `guided_decoding_backend`, `json_schema`, `ebnf`).
+This applies to buffered and streamed requests, including when such a field
+accompanies a supported carrier. A request may carry only one guided kind, so
+any two of `guided_json`, `guided_choice` and the regex pair are refused. A
+`guided_decoding_backend` alone is refused too, since the native route has no
+selectable backend. A guided field sent as `null` counts as absent. EBNF and
+other grammars therefore need an upstream engine in ride mode.
 
 On `/v1/responses`, the structured-output control is `text.format`. fak maps it
 onto the chat route's `response_format` before planning, so both routes apply
@@ -188,13 +189,40 @@ span may precede the regex response the same way it precedes a schema object
 completes. Compile and mask cost are bounded by these caps but have not been
 measured on a named model yet.
 
+`guided_json` takes a schema object or, as in vLLM, a JSON string that holds
+one. It compiles through the same path as a `json_schema` `response_format`, so
+the native subset, caps and refusals above apply unchanged. Any other value,
+such as an array, a number, or a string that does not hold exactly one JSON
+object, is refused. `guided_json` may accompany a `response_format` of type
+`text`, or of type `json_schema` when both carry the same schema. Schemas are
+compared as parsed JSON, so key order and whitespace may differ, but `1` and
+`1.0` are different. Any other `response_format` is refused. The gateway's HTTP
+422 schema byte and depth checks read only `response_format`; an oversized
+`guided_json` schema is refused by the native 64 KiB cap with HTTP 400 instead.
+Unlike `response_format`, `guided_json` alone adds no schema instruction to the
+prompt; only the mask enforces it.
+
+`guided_choice` is a non-empty JSON array of non-empty strings, and the whole
+response must equal exactly one member. Each member is escaped with Go's
+`regexp.QuoteMeta`, and the members are joined into an alternation that the
+regex mask above compiles, so metacharacters such as `.` or `|` are literal text.
+Duplicate members are removed. At most 128 distinct members totalling at most
+1024 bytes are accepted, which keeps every accepted list inside the regex caps.
+A member may be a prefix of another, as in `["a","ab"]`: after `a`, both the
+stop token and `b` stay admissible, and after `ab` only the stop token is. An
+empty list, a non-string or empty member, or a list over either bound is refused
+before inference. Like a guided regex, `guided_choice` is refused alongside any
+`response_format` other than `text`. A reasoning span may precede a
+`guided_json` or `guided_choice` response exactly as it precedes a schema
+object.
+
 The legacy `/v1/completions` route does not parse `response_format` or any
 guided field yet. Carriers sent there are dropped rather than refused, in native
 and ride mode alike, so the response is unconstrained text with HTTP 200. Send
 constrained requests to `/v1/chat/completions`.
 
-The mask composes with temperature, top-k, top-p, logit bias and repetition
-penalties. Buffered and per-token streaming preserve the generated JSON bytes,
+The mask composes with seeds, temperature, top-k, top-p, min-p, logit bias and
+repetition penalties. Buffered and per-token streaming preserve the generated JSON bytes,
 including strings resembling reasoning delimiters or tool calls. EOS is admitted
 only after the object is complete. A token limit, cancellation or explicit stop
 can still interrupt a response; callers must check the finish reason before

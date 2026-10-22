@@ -53,60 +53,68 @@ func (p *InKernelPlanner) runV41DecodeCohort(cohort []*inKernelCoalesceRequest, 
 	defer p.devMu.Unlock()
 	enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
 
-	states := make([]inKernelV41RequestState, len(cohort))
-	prepared := make([]*inKernelV41RequestState, 0, len(cohort))
-	lanes := make([]*decodeLane, 0, len(cohort))
+	states := make([]*inKernelV41RequestState, 0, 4)
+	prepared := make([]*inKernelV41RequestState, 0, 4)
+	lanes := make([]*decodeLane, 0, 4)
 	var primary any
-	started := 0
-	for i, req := range cohort {
-		state := &states[i]
-		state.req = req
-		go func(state *inKernelV41RequestState) {
-			r := state.req
-			var out inKernelCoalesceResult
-			defer func() {
-				if cause := recover(); cause != nil {
-					// Close has unwound, but this boundary cannot distinguish a
-					// cleanup panic from unrelated post-decode work. Never hide
-					// an unknown panic merely because the lane already failed.
-					if err, known := recoverDevicePanic(cause); known {
-						out.err = err
-					} else {
-						state.panic, out.err = cause, errInKernelV41CohortAborted
+	prepare := func(requests []*inKernelCoalesceRequest) []*decodeLane {
+		selected := make([]*inKernelV41RequestState, len(requests))
+		for index, request := range requests {
+			state := &inKernelV41RequestState{req: request}
+			selected[index] = state
+			states = append(states, state)
+		}
+		admitted := make([]*decodeLane, 0, len(requests))
+		started := 0
+		for _, state := range selected {
+			go func(state *inKernelV41RequestState) {
+				request := state.req
+				var out inKernelCoalesceResult
+				defer func() {
+					if cause := recover(); cause != nil {
+						if err, known := recoverDevicePanic(cause); known {
+							out.err = err
+						} else {
+							state.panic, out.err = cause, errInKernelV41CohortAborted
+						}
+						if state.lane != nil && state.lane.err != nil {
+							out.err = state.lane.err
+						}
 					}
-					if state.lane != nil && state.lane.err != nil {
-						out.err = state.lane.err // Preserve its result, not suppress panic.
+					request.result <- out
+					close(request.done)
+					select {
+					case request.prepared <- nil:
+					default:
 					}
+				}()
+				runCtx := context.WithValue(request.ctx, inKernelCoalesceContextKey{}, request)
+				out.result, out.err = request.run(runCtx)
+			}(state)
+			started++
+			if lane := <-state.req.prepared; lane != nil {
+				state.lane = lane
+				lane.ctx = state.req.ctx
+				prepared = append(prepared, state)
+				admitted = append(admitted, lane)
+			} else {
+				<-state.req.done
+				if state.panic != nil {
+					primary = state.panic
+					break
 				}
-				r.result <- out
-				close(r.done)
-				select {
-				case r.prepared <- nil:
-				default:
-				}
-			}()
-			// Preserve the original context and the same decodePass fence used
-			// by admitDeviceOOMRetry. Never create a replacement request.
-			runCtx := context.WithValue(r.ctx, inKernelCoalesceContextKey{}, r)
-			out.result, out.err = r.run(runCtx)
-		}(state)
-		started++
-		if lane := <-req.prepared; lane != nil {
-			state.lane = lane
-			lane.ctx = req.ctx
-			prepared, lanes = append(prepared, state), append(lanes, lane)
-		} else {
-			<-req.done
-			if state.panic != nil {
-				primary = state.panic
-				break // A fatal preparation cannot authorize more preparation.
 			}
 		}
+		if primary != nil {
+			for _, state := range selected[started:] {
+				state.req.result <- inKernelCoalesceResult{err: errInKernelV41CohortAborted}
+				close(state.req.done)
+			}
+		}
+		return admitted
 	}
-	for _, req := range cohort[started:] {
-		req.result <- inKernelCoalesceResult{err: errInKernelV41CohortAborted}
-		close(req.done)
-	}
+	lanes = append(lanes, prepare(cohort)...)
+	selectedCount := len(cohort)
 
 	var receipt inKernelV41DecodeReceipt
 	var terminal error
@@ -120,12 +128,23 @@ func (p *InKernelPlanner) runV41DecodeCohort(cohort []*inKernelCoalesceRequest, 
 						primary = cause
 					}
 				}
+				enginestep.Default.ObserveCohort(len(lanes))
 			}()
-			enginestep.Default.ObserveCohort(len(lanes))
 			if p.coalesceBatchHook != nil {
 				p.coalesceBatchHook(len(lanes))
 			}
-			receipt, terminal = decode(context.Background(), lanes, p.m)
+			admit := inKernelV41Admission(func() ([]*decodeLane, error) {
+				requests := p.dequeueV41CoalescedRequests(4 - selectedCount)
+				selectedCount += len(requests)
+				admitted := prepare(requests)
+				lanes = append(lanes, admitted...)
+				if primary != nil {
+					return admitted, errInKernelV41CohortAborted
+				}
+				return admitted, nil
+			})
+			decodeCtx := context.WithValue(context.Background(), inKernelV41AdmissionContextKey{}, admit)
+			receipt, terminal = decode(decodeCtx, lanes, p.m)
 			if p.coalesceSharedHook != nil {
 				p.coalesceSharedHook(receipt.sharedPanels, 0) // No fabricated MAC estimate.
 			}
@@ -144,10 +163,10 @@ func (p *InKernelPlanner) runV41DecodeCohort(cohort []*inKernelCoalesceRequest, 
 		}
 		state.req.proceed <- lane.err
 	}
-	for i, req := range cohort {
-		<-req.done // Includes every run closure's deferred session teardown.
-		if primary == nil && states[i].panic != nil {
-			primary = states[i].panic
+	for _, state := range states {
+		<-state.req.done // Includes every run closure's deferred session teardown.
+		if primary == nil && state.panic != nil {
+			primary = state.panic
 		}
 	}
 	result := InKernelBatchReceipt{
@@ -157,9 +176,9 @@ func (p *InKernelPlanner) runV41DecodeCohort(cohort []*inKernelCoalesceRequest, 
 	for _, state := range prepared {
 		result.SessionCloses += state.req.closes.Load()
 	}
-	for _, req := range cohort {
-		req.receipt = result
-		close(req.receiptReady)
+	for _, state := range states {
+		state.req.receipt = result
+		close(state.req.receiptReady)
 	}
 	if primary != nil {
 		panic(primary) // Original identity, after all joins and receipt publication.

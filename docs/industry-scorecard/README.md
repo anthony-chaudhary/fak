@@ -27,7 +27,7 @@ The driver is the UNBOUNDED competitive front, not the bounded grade. Lead with 
 | Parity-debt — honesty defects (at goal) | 0 · coverage-debt 0 |
 | Tracked | 91 dimensions · 104 competitors · 94 positions |
 | As of | 2026-06-27 (fak 0.31.0) |
-| Advisory signals | 10 fak-freshness · 0 industry-drift |
+| Advisory signals | 11 fak-freshness · 0 industry-drift |
 | Legacy bounded score (saturates near the top; grades map honesty + coverage, not field standing; hides the still-open industry gap; not the driver) | 98.8/100 (grade A) — honesty 98.0 × 60% + coverage 100.0% × 40% |
 
 > **Read this right.** The metric to optimize is fak's **standing** on the field (raise it above its floor by turning a gap/parity axis into a measured lead) and the **honest-gap count** (drive it toward 0 as benchmarks land). The bounded /100 grade-A composite grades only map completeness + honesty — it scores how complete and honest fak's competitive MAP is, explicitly **not how much fak wins** — and it SATURATES near the top once the map is honestly drawn and can no longer tell you how much of the field fak still does not contest, so it is kept only as a labeled legacy line, not the driver. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
@@ -179,7 +179,7 @@ coverage by group:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (10 unverifiable) |
+| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (11 unverifiable) |
 | structure | `well_formed` | 100 | 0 | all 94 rows well-formed |
 | completeness | `competitor_named` | 100 | 0 | every row names a concrete competitor |
 | completeness | `axis_coverage` | 100 | 0 | all 5 contracted regimes covered |

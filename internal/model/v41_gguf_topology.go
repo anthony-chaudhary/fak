@@ -47,6 +47,9 @@ func NewDeepSeekV41GGUFConfig(c Config, t V41GGUFTopology) (*DeepSeekV41Config, 
 		d41.IndexSourceLayerIDs = append([]int(nil), t.IndexSourceLayerIDs...)
 	}
 	if !v41PublishedDecoderSchedule(c) {
+		if err := v41ValidateSharedTopology(c, d41); err != nil {
+			return nil, err
+		}
 		return d41, nil
 	}
 	for _, src := range []struct {
@@ -65,10 +68,38 @@ func NewDeepSeekV41GGUFConfig(c Config, t V41GGUFTopology) (*DeepSeekV41Config, 
 			return nil, fmt.Errorf("%w: GGUF %s=%v disagree with the published schedule %v", ErrV41ConfigAdmission, src.name, *src.got, src.published)
 		}
 	}
+	if err := v41AdmitPublishedGGUFHParams(c); err != nil {
+		return nil, err
+	}
 	d41.CandidateSourceLayerID = v41PublishedCandidateSourceLayerID
 	d41.CandidateTopKBlocks = v41PublishedCandidateTopKBlocks
 	d41.CandidateBlockSize = v41PublishedCandidateBlockSize
 	return d41, nil
+}
+
+// v41AdmitPublishedGGUFHParams refuses a published-schedule GGUF whose
+// hyper-connection, SwiGLU clamp or top-k renormalisation axes are absent or
+// differ from the published config, rather than letting the forward fall back
+// to its defaults (one Sinkhorn iteration, no clamp). HCEps is compared in
+// float32 because the GGUF stores it as F32. Adapted from DeepInfer at
+// 774ce244; see third_party/deepinfer-v41-admission/NOTICE.
+func v41AdmitPublishedGGUFHParams(c Config) error {
+	for _, ax := range []struct {
+		name      string
+		ok        bool
+		got, want any
+	}{
+		{"hyper_connection.count", c.HCMult == 4, c.HCMult, 4},
+		{"hyper_connection.sinkhorn_iterations", c.HCSinkhornIters == 20, c.HCSinkhornIters, 20},
+		{"hyper_connection.epsilon", float32(c.HCEps) == float32(1e-6), c.HCEps, 1e-6},
+		{"swiglu_clamp", float32(c.SwigluLimit) == 10, c.SwigluLimit, 10},
+		{"expert_weights_norm", c.NormTopKProb, c.NormTopKProb, true},
+	} {
+		if !ax.ok {
+			return fmt.Errorf("%w: GGUF %s=%v, published %v", ErrV41ConfigAdmission, ax.name, ax.got, ax.want)
+		}
+	}
+	return nil
 }
 
 // v41PublishedDecoderSchedule reports a 40-layer decoder whose compress schedule

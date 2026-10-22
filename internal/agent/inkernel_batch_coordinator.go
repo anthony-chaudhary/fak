@@ -297,6 +297,38 @@ func (p *InKernelPlanner) finishCoalescedCohort() {
 	p.coalesceMu.Unlock()
 }
 
+func (p *InKernelPlanner) dequeueV41CoalescedRequests(limit int) []*inKernelCoalesceRequest {
+	if limit <= 0 {
+		return nil
+	}
+	p.coalesceMu.Lock()
+	count := len(p.coalesceReady)
+	if count > limit {
+		count = limit
+	}
+	for index := 0; index < count; index++ {
+		if p.coalesceReady[index].kind != inKernelCoalesceV41 {
+			count = index
+			break
+		}
+	}
+	if count == 0 {
+		p.coalesceMu.Unlock()
+		return nil
+	}
+	requests := append([]*inKernelCoalesceRequest(nil), p.coalesceReady[:count]...)
+	for index := 0; index < count; index++ {
+		p.coalesceReady[index] = nil
+	}
+	p.coalesceReady = p.coalesceReady[count:]
+	enginestep.Default.SetQueueDepth(len(p.coalesceReady))
+	p.coalesceMu.Unlock()
+	for _, request := range requests {
+		enginestep.Default.ObservePhase(enginestep.PhaseCohortWait, time.Since(request.enqueued))
+	}
+	return requests
+}
+
 func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
 	deviceWait := time.Now()
 	p.devMu.Lock()

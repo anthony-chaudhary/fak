@@ -29,6 +29,13 @@ func ds41TopologyFile(kvSources, indexSources []int) *File {
 	}
 	meta["deepseek41.attention.compress_ratios"] = vcruzI32Array(ds41PublishedRatios)
 	meta["deepseek41.attention.compress_rope_freq_base"] = Value{Type: TypeFloat32, Value: float32(160000)}
+	clamp := make([]float32, len(ds41PublishedRatios))
+	for i := range clamp {
+		clamp[i] = 10
+	}
+	meta["deepseek41.swiglu_clamp_exp"] = vcruzF32Array(clamp...)
+	meta["deepseek41.swiglu_clamp_shexp"] = vcruzF32Array(clamp...)
+	meta["deepseek41.expert_weights_norm"] = Value{Type: TypeBool, Value: true}
 	f := &File{Metadata: meta}
 	for _, l := range kvSources {
 		for _, leaf := range []string{"attn_compressor_kv", "attn_compressor_gate", "indexer.attn_k"} {
@@ -90,5 +97,66 @@ func TestDeepSeek41GGUFTopologyCrossChecksPublishedSources(t *testing.T) {
 	extraKeyOwner.Tensors = append(extraKeyOwner.Tensors, TensorInfo{Name: "blk.24.indexer.attn_k.weight", Dims: []uint64{512, 128}, Type: TensorF32})
 	if _, err := extraKeyOwner.Config(); !errors.Is(err, model.ErrV41ConfigAdmission) {
 		t.Errorf("index-key owner outside the KV sources: err = %v, want ErrV41ConfigAdmission", err)
+	}
+}
+
+// A published-schedule GGUF missing or misdeclaring a hyperparameter the forward
+// would otherwise default is refused at load, not run with the fallback.
+// fak-test:runtime fast est=10ms
+func TestDeepSeek41GGUFTopologyRefusesUnpublishedHParams(t *testing.T) {
+	const p = "deepseek41."
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]Value)
+	}{
+		{"delete sinkhorn_iterations", func(m map[string]Value) { delete(m, p+"hyper_connection.sinkhorn_iterations") }},
+		{"sinkhorn_iterations 19", func(m map[string]Value) {
+			m[p+"hyper_connection.sinkhorn_iterations"] = Value{Type: TypeUint32, Value: uint32(19)}
+		}},
+		{"delete epsilon", func(m map[string]Value) { delete(m, p+"hyper_connection.epsilon") }},
+		{"epsilon 1e-5", func(m map[string]Value) {
+			m[p+"hyper_connection.epsilon"] = Value{Type: TypeFloat32, Value: float32(1e-5)}
+		}},
+		{"delete both clamps", func(m map[string]Value) {
+			delete(m, p+"swiglu_clamp_exp")
+			delete(m, p+"swiglu_clamp_shexp")
+		}},
+		{"clamp 7", func(m map[string]Value) {
+			clamp := make([]float32, len(ds41PublishedRatios))
+			for i := range clamp {
+				clamp[i] = 7
+			}
+			m[p+"swiglu_clamp_exp"] = vcruzF32Array(clamp...)
+			m[p+"swiglu_clamp_shexp"] = vcruzF32Array(clamp...)
+		}},
+		{"delete expert_weights_norm", func(m map[string]Value) { delete(m, p+"expert_weights_norm") }},
+	} {
+		f := ds41TopologyFile(nil, nil)
+		tc.edit(f.Metadata)
+		if _, err := f.Config(); !errors.Is(err, model.ErrV41ConfigAdmission) {
+			t.Errorf("%s: err = %v, want ErrV41ConfigAdmission", tc.name, err)
+		}
+	}
+}
+
+// An explicit expert_weights_norm that disables top-k renormalisation, or is not
+// a bool, is refused on any deepseek41 schedule; an absent key is the
+// published-schedule admission's concern.
+// fak-test:runtime fast est=10ms
+func TestDeepSeek41GGUFTopologyRefusesExpertWeightsNormOff(t *testing.T) {
+	const key = "deepseek41.expert_weights_norm"
+	for _, v := range []Value{{Type: TypeBool, Value: false}, {Type: TypeUint32, Value: uint32(1)}} {
+		published := ds41TopologyFile(nil, nil)
+		published.Metadata[key] = v
+		reduced := &File{Metadata: vcruzHParamMeta()}
+		reduced.Metadata[key] = v
+		for name, f := range map[string]*File{"published": published, "reduced": reduced} {
+			if _, err := f.Config(); !errors.Is(err, ErrDeepSeek41HParam) {
+				t.Errorf("%s %v: err = %v, want ErrDeepSeek41HParam", name, v, err)
+			}
+		}
+	}
+	if _, err := (&File{Metadata: vcruzHParamMeta()}).Config(); err != nil {
+		t.Fatalf("reduced schedule without expert_weights_norm: %v", err)
 	}
 }
