@@ -554,7 +554,8 @@ func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 // created itself. That removal happens before the lock is released, so it can
 // never delete a tree a later attempt has adopted.
 func prepareOwnedLocked(ctx context.Context, root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
-	sweepDeadWorktrees(root, wtRoot, git)
+	// Preparation owns only its target. Reclaim unrelated worktrees through
+	// the explicit guarded sweep API, never as a side effect of reuse or refusal.
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}

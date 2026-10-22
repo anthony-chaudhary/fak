@@ -42,8 +42,8 @@ func assertPreparedTreeLive(t *testing.T, repo, wt string) {
 // A prepare whose caller failed after materialization (the CLI refusing its own
 // --message/--path pairing) leaves a tree owned by an exited process; the
 // same-key retry adopts it with reused=true, owned by another exited process.
-// The next prepare anywhere on the host sweeps dead worktrees, and it must not
-// delete the tree the retry just handed out (2026-09-26, cand-leak-0926).
+// A subsequent explicit sweep must not delete the tree the retry just handed
+// out (2026-09-26, cand-leak-0926).
 func TestPrepareRetryAfterFailedPrepareStaysRegistered(t *testing.T) {
 	fixture := newReapProofFixture(t)
 	wtRoot := t.TempDir()
@@ -176,4 +176,60 @@ func TestSweepKeepsDeadOwnerTreeWhenStatusProbeFails(t *testing.T) {
 		t.Fatalf("worker edit lost: %q, %v", got, err)
 	}
 	assertPreparedTreeLive(t, fixture.repo, prep.Path)
+}
+
+// fak-test:runtime fast est=2s
+func TestPrepareDoesNotSweepUnrelatedWorktree(t *testing.T) {
+	t.Setenv(PoolCapEnv, "0")
+	for _, refusal := range []bool{false, true} {
+		name := "reuse"
+		if refusal {
+			name = "orphan-refusal"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newReapProofFixture(t)
+			wtRoot := t.TempDir()
+			const lane, key = "workerworktree", "no-implicit-sweep"
+			owner := OwnerStamp{PID: os.Getpid(), LeaseID: "no-implicit-sweep"}
+			target := Path(lane, key, wtRoot)
+			if refusal {
+				if err := os.MkdirAll(target, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				first := PrepareOwnedBounded(fixture.repo, lane, key, fixture.base, wtRoot, owner, time.Minute)
+				if !first.OK {
+					t.Fatalf("first prepare: %+v", first)
+				}
+			}
+			unrelated := Path(lane, "unrelated-stale", wtRoot)
+			reapProofGit(t, fixture.repo, "worktree", "add", "--detach", unrelated, fixture.base)
+			old := time.Now().Add(-24 * time.Hour)
+			if err := writeOwnerStamp(unrelated, OwnerStamp{PID: deadOwnerPID, LeaseID: "unrelated", CreatedAt: old}); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteWorkerLease(unrelated, WorkerLease{PID: deadOwnerPID, SessionID: "unrelated", CreatedAt: old, HeartbeatTS: old}); err != nil {
+				t.Fatal(err)
+			}
+			ensureGitExclude(fixture.repo, WorkerLeaseFileName)
+			if !deadOwnerSweepable(unrelated, time.Now()) || isWorktreeDirty(unrelated, nil) {
+				t.Fatal("fixture must be a clean, stale unrelated checkout eligible for explicit sweeping")
+			}
+			ResetSweepGateForTest()
+			t.Cleanup(ResetSweepGateForTest)
+			result := PrepareOwnedBounded(fixture.repo, lane, key, fixture.base, wtRoot, owner, time.Minute)
+			if refusal {
+				if result.OK || result.Code != PrepareCodeOrphanTargetRefused || !result.Preserved {
+					t.Fatalf("orphan refusal: %+v", result)
+				}
+			} else if !result.OK || !result.Reused || !samePath(result.Path, target) {
+				t.Fatalf("same-key reuse: %+v", result)
+			}
+			assertPreparedTreeLive(t, fixture.repo, unrelated)
+			stamp, err := readOwnerStamp(unrelated)
+			if err != nil || stamp.PID != deadOwnerPID || !stamp.CreatedAt.Equal(old) {
+				t.Fatalf("unrelated owner changed: %+v, %v", stamp, err)
+			}
+		})
+	}
 }
