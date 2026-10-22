@@ -441,6 +441,8 @@ type v41CompressorPublication struct {
 	finalize     func(start int, latent, indexKey []float32) error
 	registry     *V41AttentionState
 	ref          V41AttentionStateRef
+	// ring, when admitted, replaces the closing-group replay for ratio >= 2.
+	ring *v41CompressorRingStep
 }
 
 // appendCompressorSourcePublication stages the normalized latent, its optional
@@ -490,6 +492,33 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source norm width %d, want %d", len(normWeight), s.headDim)
 	}
 
+	// A selected device ring projects each input as it arrives and pools the
+	// group in the closing store, so only that token reads back one row. The
+	// retained host inputs below stay the authority the ring reseeds from.
+	var pooled []float32
+	ringClosed := false
+	if publication.ring.fits(ratio, s.partialInputs, input) {
+		closing := len(s.partialInputs)+1 == ratio
+		if closing {
+			if err := pool.validateNorm(normWeight, eps); err != nil {
+				return nil, nil, false, 0, 0, err
+			}
+		}
+		raw, err := publication.ring.store(s.partialInputs, s.partialPositions, input, pos)
+		if err != nil {
+			return nil, nil, false, 0, 0, err
+		}
+		if closing {
+			if len(raw) != s.headDim {
+				return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor ring group %d from %d emitted no latent", ratio, groupLo)
+			}
+			if pooled, err = pool.normalizePooled(raw, normWeight, eps); err != nil {
+				return nil, nil, false, 0, 0, err
+			}
+			ringClosed = true
+		}
+	}
+
 	// Incomplete group: append the one input and synthesize no output. At most
 	// ratio-1 rows are retained by construction (the guard above refuses a full
 	// group). This is the append-only fast path: no projection runs.
@@ -501,54 +530,10 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 		return nil, nil, false, 0, 0, nil
 	}
 
-	// Group completes with this input. Build the contiguous group of INPUT rows
-	// oldest-first and project+pool it exactly once. The pool is the arithmetic
-	// authority, so this reproduces the exact values v41CompressedRows emits for
-	// the group, at one group's cost instead of O(sequence).
-	staged := make([][]float32, 0, ratio)
-	staged = append(staged, s.partialInputs...)
-	staged = append(staged, append([]float32(nil), input...))
-	stagedPos := append(append([]int(nil), s.partialPositions...), pos)
-	if len(staged) != ratio || stagedPos[0] != groupLo {
-		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source group is %d rows spanning [%d,%d], want %d from %d", len(staged), stagedPos[0], pos, ratio, groupLo)
-	}
-	replay, err := NewV41CompressorPool(ratio, s.headDim)
-	if err != nil {
-		return nil, nil, false, 0, 0, err
-	}
-	// Replay owns only this completing group; inherit the selected tail without
-	// retaining a session callback in attention state or published rows.
-	replay.normalize = pool.normalize
-	replay.gatedPool = pool.gatedPool
-	var pooled []float32
-	didEmit := false
-	for i, row := range staged {
-		kv, err := projectKV(row)
-		if err != nil {
+	if !ringClosed {
+		if pooled, err = s.replayCompressorGroup(ratio, groupLo, pos, input, pool, projectKV, projectScore, normWeight, eps); err != nil {
 			return nil, nil, false, 0, 0, err
 		}
-		// Ratio one has no gate: each token is its own group.
-		var score []float32
-		if ratio > 1 {
-			if score, err = projectScore(row); err != nil {
-				return nil, nil, false, 0, 0, err
-			}
-		}
-		// A fresh pool is contiguity-checked from position 0, so the group is
-		// replayed with GROUP-RELATIVE positions 0..ratio-1, exactly as
-		// v41CompressedRows drives a fresh pool with its 0-based sequence
-		// positions. The pooled arithmetic is position-independent; the absolute
-		// covered range [groupLo,pos] is preserved separately and returned.
-		out, emitted, err := replay.PushNormalized(i, kv, score, normWeight, eps)
-		if err != nil {
-			return nil, nil, false, 0, 0, err
-		}
-		if emitted {
-			pooled, didEmit = out, true
-		}
-	}
-	if !didEmit {
-		return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor source full group %d from %d emitted no latent", ratio, groupLo)
 	}
 
 	// The index projection consumes the normalized, RoPE-free latent. Finalize
@@ -621,6 +606,67 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 		publication.registry.publish(shared)
 	}
 	return append([]float32(nil), pooled...), append([]float32(nil), indexKey...), true, start, end, nil
+}
+
+// replayCompressorGroup is the host-staged closing group: it builds the
+// contiguous group of INPUT rows oldest-first and projects and pools it exactly
+// once. The pool is the arithmetic authority, so this reproduces the exact
+// values v41CompressedRows emits for the group, at one group's cost instead of
+// O(sequence).
+func (s *V41AttentionState) replayCompressorGroup(
+	ratio, groupLo, pos int,
+	input []float32,
+	pool *V41CompressorPool,
+	projectKV func([]float32) ([]float32, error),
+	projectScore func([]float32) ([]float32, error),
+	normWeight []float32,
+	eps float32,
+) (pooled []float32, err error) {
+	staged := make([][]float32, 0, ratio)
+	staged = append(staged, s.partialInputs...)
+	staged = append(staged, append([]float32(nil), input...))
+	stagedPos := append(append([]int(nil), s.partialPositions...), pos)
+	if len(staged) != ratio || stagedPos[0] != groupLo {
+		return nil, fmt.Errorf("model: V41 compressor source group is %d rows spanning [%d,%d], want %d from %d", len(staged), stagedPos[0], pos, ratio, groupLo)
+	}
+	replay, err := NewV41CompressorPool(ratio, s.headDim)
+	if err != nil {
+		return nil, err
+	}
+	// Replay owns only this completing group; inherit the selected tail without
+	// retaining a session callback in attention state or published rows.
+	replay.normalize = pool.normalize
+	replay.gatedPool = pool.gatedPool
+	didEmit := false
+	for i, row := range staged {
+		kv, err := projectKV(row)
+		if err != nil {
+			return nil, err
+		}
+		// Ratio one has no gate: each token is its own group.
+		var score []float32
+		if ratio > 1 {
+			if score, err = projectScore(row); err != nil {
+				return nil, err
+			}
+		}
+		// A fresh pool is contiguity-checked from position 0, so the group is
+		// replayed with GROUP-RELATIVE positions 0..ratio-1, exactly as
+		// v41CompressedRows drives a fresh pool with its 0-based sequence
+		// positions. The pooled arithmetic is position-independent; the absolute
+		// covered range [groupLo,pos] is preserved separately and returned.
+		out, emitted, err := replay.PushNormalized(i, kv, score, normWeight, eps)
+		if err != nil {
+			return nil, err
+		}
+		if emitted {
+			pooled, didEmit = out, true
+		}
+	}
+	if !didEmit {
+		return nil, fmt.Errorf("model: V41 compressor source full group %d from %d emitted no latent", ratio, groupLo)
+	}
+	return pooled, nil
 }
 
 // appendCompressorSourceIndex is appendCompressorSource PLUS the index-key

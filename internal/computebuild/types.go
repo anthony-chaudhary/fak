@@ -148,6 +148,8 @@ const (
 	VulkanBuildReceiptSchemaV30 = "fak.vulkan-build-receipt.v30"
 	// VulkanBuildReceiptSchemaV31 adds the V4.1 fused router gate projection + top-k module.
 	VulkanBuildReceiptSchemaV31 = "fak.vulkan-build-receipt.v31"
+	// VulkanBuildReceiptSchemaV32 adds the V4.1 device-resident compressor ring module.
+	VulkanBuildReceiptSchemaV32 = "fak.vulkan-build-receipt.v32"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

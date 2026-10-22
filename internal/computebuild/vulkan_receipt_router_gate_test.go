@@ -9,10 +9,11 @@ import (
 // Pins only the source/receipt census. No shader or native archive is compiled.
 func TestVulkanReceiptV31RouterGate(t *testing.T) {
 	want := append(vulkanRegistryV30.stems(), "v41_router_gate_topk")
-	if len(want) != 102 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 102 || !reflect.DeepEqual(want, vulkanRegistryV31.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V31 must add exactly the fused router gate module to V30")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	id, err := vulkanRegistryV31.identity()
+	schema := vulkanRegistryV31.schema
 	if err != nil || schema != VulkanBuildReceiptSchemaV31 || id.ID != VulkanShaderRegistryV31ID || id.ModuleCount != 102 {
 		t.Fatalf("V31 identity differs: %s %+v %v", schema, id, err)
 	}

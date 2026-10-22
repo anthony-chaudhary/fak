@@ -847,3 +847,21 @@ SOFTWARE.
 ```
 
 TileKernels carries the same MIT license text with `Copyright (c) 2026 DeepSeek`.
+
+## DeepInfer device-resident compressor ring
+
+The V4.1 decode compressor ring (`internal/compute/shaders/v41_compressor_ring.comp`,
+`internal/compute/v41_compressor_ring.go`, `internal/model/v41_compressor_ring_device.go`)
+adapts the store-then-compute structure of `compress_and_update_state_decode_tl`
+(`deepinfer/model_executor/layers/tilelang_ops/cuda/compress.py`) from deepseek-ai/DeepInfer at
+revision `774ce244b87cc0eb8d4b94ab9f5de2ab22049f01` (Apache-2.0):
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/model_executor/layers/tilelang_ops/cuda/compress.py
+
+Changed for Fak: no upstream code is copied. One Vulkan dispatch stores a decode token's projected
+(kv, score) row into a per-layer F32 ring row and, for the token that closes a group, pools the
+ring in the same dispatch; the pool keeps Fak's exact binary32 `v41_compressor_pool.comp`
+arithmetic instead of fast-math exp, writes F32 instead of BF16, carries a per-dimension
+non-finite status, and serves one sequence per session instead of a slot-indexed state cache.
+The host attention state remains the source of truth and reseeds stale ring rows. Licensed under
+the Apache License, Version 2.0 (upstream `LICENSE`); the upstream repository has no NOTICE file.
+License text: https://www.apache.org/licenses/LICENSE-2.0

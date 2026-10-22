@@ -1,0 +1,116 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+
+// v41_compressor_ring.comp - DeepSeek V4.1 device-resident compressor group
+// ring. Adapted from DeepInfer compress_and_update_state_decode_tl (Apache-2.0,
+// deepseek-ai/DeepInfer deepinfer/model_executor/layers/tilelang_ops/cuda/compress.py
+// at 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01; see THIRD_PARTY_NOTICES.md); no
+// upstream source is copied. Every decode token stores its projected
+// (kv, score) row into ring row `slot`; the token that closes a group
+// (emit != 0) also pools the ring in the same dispatch. The pool arithmetic is
+// v41_compressor_pool.comp verbatim (exact binary32, no fast math), so an
+// emitted row is bit-identical to that module on the same ring contents.
+// Out row 1 carries per-dimension status as an exact small float: bit 0 a
+// non-finite kv, bit 1 a non-finite score, anywhere in the group.
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4464], 4459, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4466], 4461, 32);
+spirv_execution_mode(extensions = ["SPV_KHR_float_controls"], capabilities = [4467], 4462, 32);
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly  buffer KRow  { float KR[]; };  // [width]
+layout(std430, binding = 1) readonly  buffer SRow  { float SR[]; };  // [width]
+layout(std430, binding = 2)           buffer KRing { float KV[]; };  // [ratio,width]
+layout(std430, binding = 3)           buffer SRing { float SC[]; };  // [ratio,width]
+layout(std430, binding = 4) writeonly buffer OBuf  { float Out[]; }; // [2,width]
+
+layout(push_constant) uniform Push { int ratio; int width; int slot; int emit; } pc;
+
+// Correctly rounded binary32 quotient for finite, normal operands (Markstein).
+float divRN(float a, float b) {
+    precise float y = 1.0 / b;
+    precise float e = fma(-b, y, 1.0);
+    precise float y1 = fma(e, y, y);
+    precise float q = a * y1;
+    precise float r = fma(-b, q, a);
+    precise float out1 = fma(r, y1, q);
+    return out1;
+}
+
+// Cody-Waite reduction and the Cephes expf polynomial (about 1 ulp), the same
+// evaluation as v41_compressor_pool.comp.
+float expF32(float x) {
+    if (x > 88.72283935546875) return uintBitsToFloat(0x7f800000u);
+    if (x < -103.97207641601562) return 0.0;
+    precise float n = roundEven(x * 1.4426950408889634);
+    precise float r0 = fma(n, -0.693359375, x);
+    precise float r = fma(n, 2.12194440e-4, r0);
+    precise float p = 1.9875691500e-4;
+    p = fma(p, r, 1.3981999507e-3);
+    p = fma(p, r, 8.3334519073e-3);
+    p = fma(p, r, 4.1665795894e-2);
+    p = fma(p, r, 1.6666665459e-1);
+    p = fma(p, r, 5.0000001201e-1);
+    precise float rr = r * r;
+    precise float poly = fma(p, rr, r);
+    precise float e = poly + 1.0;
+    int k = int(n);
+    if (k > 127) {
+        e = e * 2.0;
+        k -= 1;
+    }
+    if (k < -126) {
+        precise float tiny = e * uintBitsToFloat(0x00800000u);
+        return tiny * exp2(float(k + 126));
+    }
+    return e * uintBitsToFloat(uint(k + 127) << 23);
+}
+
+bool nonFinite(float v) {
+    return (floatBitsToUint(v) & 0x7f800000u) == 0x7f800000u;
+}
+
+void main() {
+    uint d = gl_GlobalInvocationID.x;
+    uint W = uint(pc.width);
+    if (d >= W) return;
+    uint R = uint(pc.ratio);
+    uint S = uint(pc.slot);
+    float newK = KR[d];
+    float newS = SR[d];
+    KV[S * W + d] = newK;
+    SC[S * W + d] = newS;
+    if (pc.emit == 0) return;
+
+    // This invocation owns column d of every ring row, so the new row is taken
+    // from registers and older rows come from prior dispatches.
+    uint status = 0u;
+    for (uint t = 0u; t < R; ++t) {
+        float kv = t == S ? newK : KV[t * W + d];
+        float sc = t == S ? newS : SC[t * W + d];
+        if (nonFinite(kv)) status |= 1u;
+        if (nonFinite(sc)) status |= 2u;
+    }
+    float mx = S == 0u ? newS : SC[d];
+    for (uint t = 1u; t < R; ++t) {
+        float v = t == S ? newS : SC[t * W + d];
+        if (v > mx) mx = v;
+    }
+    precise float denom = 0.0;
+    for (uint t = 0u; t < R; ++t) {
+        precise float shifted = (t == S ? newS : SC[t * W + d]) - mx;
+        precise float w = expF32(shifted);
+        precise float next = denom + w;
+        denom = next;
+    }
+    precise float acc = 0.0;
+    for (uint t = 0u; t < R; ++t) {
+        precise float shifted = (t == S ? newS : SC[t * W + d]) - mx;
+        precise float w = expF32(shifted);
+        precise float q = divRN(w, denom);
+        precise float prod = (t == S ? newK : KV[t * W + d]) * q;
+        precise float next = acc + prod;
+        acc = next;
+    }
+    Out[d] = acc;
+    Out[W + d] = float(status);
+}
