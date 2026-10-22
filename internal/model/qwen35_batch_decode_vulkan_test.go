@@ -53,6 +53,7 @@ func TestVulkanQwen35IndependentDecodeBatchMatchesCPU(t *testing.T) {
 	for _, lanes := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("B%d", lanes), func(t *testing.T) {
 			cfg := qwen35HybridTestCfg()
+			cfg.HeadDim = 64
 			cfg.PartialRotaryFactor = .5
 			m := NewSynthetic(cfg)
 			serial := make([]*Session, lanes)
