@@ -1,0 +1,21 @@
+DeepInfer special-token injection boundary
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer, doc/inference_deployment_qa.md:35,298-304
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/doc/inference_deployment_qa.md
+
+Adaptation: behavior adapted from the description only; no upstream code is
+copied, and the DeepSeek Recipe encoder it describes is not in the source tree
+(the in-tree eval/run_eval.py:222 encodes the whole prompt text and does not
+itself segment). Fak adds a seam-preserving segmented encode to its Go
+tokenizer: added and control tokens match only inside trusted template text,
+client text between matches stays one BPE chunk across segment seams so benign
+prompts keep their ids, and no plain run ever yields an added-token id. The
+DeepSeek V4.1 chat renderer marks message content, tool schemas, tool-call
+names and arguments, and the response format as client text, and native
+prompt encoding uses the segmented path only when
+FAK_DEEPSEEK41_SEGMENTED_PROMPT=1 (renderer id suffix +segmented-v1).
+Output-side recognition of </think> and DSML by token id is not adapted here.
