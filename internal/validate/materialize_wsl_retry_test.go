@@ -118,7 +118,7 @@ func TestExtractCommittedTipWSLRetriesTransientPackedRefsParse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), wslRetryTestTimeout)
 	defer cancel()
 
-	dir, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
+	dir, _, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
 	materialize, cleanup := fake.counts()
 	if err != nil {
 		t.Fatalf("extractCommittedTipWSLWithin: %v (materialize calls=%d)", err, materialize)
@@ -147,7 +147,7 @@ func TestExtractCommittedTipWSLDoesNotRetryGenuineFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), wslRetryTestTimeout)
 	defer cancel()
 
-	dir, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
+	dir, _, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
 	if err == nil {
 		t.Fatalf("extractCommittedTipWSLWithin succeeded with dir %q, want error", dir)
 	}
@@ -177,7 +177,7 @@ func TestExtractCommittedTipWSLFailsClosedWhenPackedRefsStaysTorn(t *testing.T) 
 	defer cancel()
 
 	// Sleeps through the full backoff (~1.75s) by design.
-	dir, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
+	dir, _, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
 	if err == nil {
 		t.Fatalf("extractCommittedTipWSLWithin succeeded with dir %q, want fail-closed error", dir)
 	}
@@ -209,7 +209,7 @@ func TestExtractCommittedTipWSLStopsOnContextCancel(t *testing.T) {
 	})
 
 	start := time.Now()
-	_, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
+	_, _, err := extractCommittedTipWSLWithin(ctx, repo, wslRetryTestTip)
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)

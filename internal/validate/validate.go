@@ -295,6 +295,8 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 			return finishValidateWSLCapabilityRefusal(stdout, stderr, &res, &recorder, verdict, *asJSON)
 		}
 		phase.finish(nil)
+		// Deferred before the workspace cleanup, so it releases only after that.
+		defer holdValidateWSLVM(ctx)()
 	} else {
 		recorder.skip("wsl_preflight", "native workspace selected")
 	}
@@ -339,6 +341,9 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	}
 	if err == nil {
 		err = prepareValidateWorkfile(ctx, r, dir, wslWorkspace)
+	}
+	if wslWorkspace {
+		err = typeValidateWSLWorkspaceLoss(ctx, prep.wslBootID, dir, err)
 	}
 	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "overlay", err, *asJSON,
 		fmt.Sprintf("fak validate: cannot overlay owned paths: %v", err)); failed {
@@ -1060,7 +1065,9 @@ func readWSLWorktreeGitDir(repo string) (string, bool) {
 	return "", false
 }
 
-func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string, error) {
+// extractCommittedTipWSLWithin returns the WSL workspace and the boot id of the
+// VM it was built in ("" when the script did not report one).
+func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string, string, error) {
 	wslDir := fmt.Sprintf("/tmp/fak-validate-%d-%d", os.Getpid(), validateNow().UnixNano())
 	quotedDir := posixQuote(wslDir)
 	cacheDir := "/tmp/fak-validate-cache"
@@ -1085,7 +1092,8 @@ func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string
 		"git -C " + quotedDir + " read-tree " + posixQuote(tip) + "; " +
 		"git -C " + quotedDir + " update-ref --no-deref HEAD " + posixQuote(tip) + "; " +
 		"ls -1t " + posixQuote(cacheDir) + "/*.tar 2>/dev/null | tail -n +4 | xargs -r rm -f --; " +
-		"trap - ERR INT TERM"
+		"trap - ERR INT TERM; " +
+		"printf '" + validateWSLBootIDPrefix + "%s\\n' \"$(cat " + validateWSLBootIDPath + " 2>/dev/null || true)\""
 	// WSL git reads .git/packed-refs through drvfs non-atomically while Windows-side
 	// landers rewrite it, and git archive parses packed-refs even for a full SHA, so a
 	// torn read is transient: rerun the idempotent script (it recreates wslDir) with a
@@ -1095,11 +1103,11 @@ func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string
 	for attempt := 1; ; attempt++ {
 		out, err := validateWSLCommand(ctx, "--cd", repo, "-e", "bash", "-lc", script)
 		if err == nil {
-			return wslDir, nil
+			return wslDir, parseValidateWSLBootID(out), nil
 		}
 		if ctx.Err() != nil {
 			cleanupValidateWSLDir(wslDir)
-			return "", ctx.Err()
+			return "", "", ctx.Err()
 		}
 		detail := strings.TrimSpace(string(out))
 		if detail == "" {
@@ -1107,18 +1115,18 @@ func extractCommittedTipWSLWithin(ctx context.Context, repo, tip string) (string
 		}
 		if !isTransientPackedRefsRead(detail) {
 			cleanupValidateWSLDir(wslDir)
-			return "", fmt.Errorf("materialize committed tip in WSL: %s", detail)
+			return "", "", fmt.Errorf("materialize committed tip in WSL: %s", detail)
 		}
 		if attempt == attempts {
 			cleanupValidateWSLDir(wslDir)
-			return "", fmt.Errorf("materialize committed tip in WSL: %s (transient packed-refs read persisted across %d attempts)", detail, attempts)
+			return "", "", fmt.Errorf("materialize committed tip in WSL: %s (transient packed-refs read persisted across %d attempts)", detail, attempts)
 		}
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			cleanupValidateWSLDir(wslDir)
-			return "", ctx.Err()
+			return "", "", ctx.Err()
 		case <-timer.C:
 		}
 		wait *= 2

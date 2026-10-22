@@ -27,6 +27,7 @@ type preparedValidateWorkspace struct {
 	testRun      string
 	dir          string
 	wslWorkspace bool
+	wslBootID    string
 	cleanup      func()
 }
 
@@ -50,14 +51,17 @@ func prepareValidateWorkspace(req validateWorkspaceRequest) (preparedValidateWor
 	}
 	wslWorkspace := runtime.GOOS == "windows" && req.wslTests
 	phase = req.recorder.start("extract_tip")
-	var dir string
+	var dir, bootID string
 	if wslWorkspace {
-		dir, err = extractCommittedTipWSLWithin(req.ctx, req.root, req.tip)
+		dir, bootID, err = extractCommittedTipWSLWithin(req.ctx, req.root, req.tip)
 	} else {
 		dir, err = extractCommittedTipWithin(req.ctx, req.root, req.tip)
 	}
 	if err == nil {
 		err = prepareValidateWorkfile(req.ctx, req.root, dir, wslWorkspace)
+		if wslWorkspace {
+			err = typeValidateWSLWorkspaceLoss(req.ctx, bootID, dir, err)
+		}
 	}
 	if req.ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
 		detail := context.DeadlineExceeded.Error()
@@ -83,5 +87,5 @@ func prepareValidateWorkspace(req validateWorkspaceRequest) (preparedValidateWor
 	if wslWorkspace {
 		cleanup = func() { cleanupValidateWSLDir(dir) }
 	}
-	return preparedValidateWorkspace{paths: paths, testRun: effectiveTestRun, dir: dir, wslWorkspace: wslWorkspace, cleanup: cleanup}, 0, false
+	return preparedValidateWorkspace{paths: paths, testRun: effectiveTestRun, dir: dir, wslWorkspace: wslWorkspace, wslBootID: bootID, cleanup: cleanup}, 0, false
 }

@@ -239,7 +239,7 @@ func TestValidateGitIdentity(t *testing.T) {
 					}
 					return nil, nil
 				})
-				dir, err := extractCommittedTipWSLWithin(context.Background(), repo, wslRetryTestTip)
+				dir, _, err := extractCommittedTipWSLWithin(context.Background(), repo, wslRetryTestTip)
 				scripts := wslRetryTestScripts(t, fake, repo)
 				if len(scripts) != 1 {
 					t.Fatalf("materialization calls=%d", len(scripts))
