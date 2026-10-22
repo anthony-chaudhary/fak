@@ -1,6 +1,7 @@
 package polymodel
 
 import (
+	"math"
 	"reflect"
 	"testing"
 )
@@ -28,9 +29,10 @@ func TestAcceptanceProfileUnavailableWithoutProposal(t *testing.T) {
 	profile.record(2, 1)
 	profile.proposed = append(profile.proposed, 0)
 	profile.accepted = append(profile.accepted, 0)
+	profile.reached = append(profile.reached, 0)
 	got := profile.snapshot()
-	if got[2].Rate != nil {
-		t.Fatalf("zero-proposal rate = %v, want unavailable", *got[2].Rate)
+	if got[2].Rate != nil || got[2].ConditionalRate != nil {
+		t.Fatalf("zero-proposal rates = %v/%v, want unavailable", got[2].Rate, got[2].ConditionalRate)
 	}
 }
 
@@ -74,9 +76,9 @@ func TestSpecDecodeAndTreeExposeSamePositionSemantics(t *testing.T) {
 		t.Fatalf("chain profile %#v != tree profile %#v", chain.AcceptanceProfile, tree.AcceptanceProfile)
 	}
 	want := []AcceptancePosition{
-		{Position: 0, Proposed: 1, Accepted: 1, Rate: ratePointer(1)},
-		{Position: 1, Proposed: 1, Accepted: 1, Rate: ratePointer(1)},
-		{Position: 2, Proposed: 1, Accepted: 0, Rate: ratePointer(0)},
+		{Position: 0, Proposed: 1, Accepted: 1, Rate: ratePointer(1), Reached: 1, ConditionalRate: ratePointer(1)},
+		{Position: 1, Proposed: 1, Accepted: 1, Rate: ratePointer(1), Reached: 1, ConditionalRate: ratePointer(1)},
+		{Position: 2, Proposed: 1, Accepted: 0, Rate: ratePointer(0), Reached: 1, ConditionalRate: ratePointer(0)},
 	}
 	if !reflect.DeepEqual(chain.AcceptanceProfile, want) {
 		t.Fatalf("profile = %#v, want %#v", chain.AcceptanceProfile, want)
@@ -87,3 +89,111 @@ func TestSpecDecodeAndTreeExposeSamePositionSemantics(t *testing.T) {
 }
 
 func ratePointer(value float64) *float64 { return &value }
+
+func geometricYield(rates []float64) float64 {
+	yield, prefix := 1.0, 1.0
+	for _, rate := range rates {
+		prefix *= rate
+		yield += prefix
+	}
+	return yield
+}
+
+func conditionalRates(t *testing.T, positions []AcceptancePosition) []float64 {
+	t.Helper()
+	rates := make([]float64, len(positions))
+	for i, row := range positions {
+		if row.ConditionalRate == nil {
+			t.Fatalf("position %d conditional rate unavailable", i)
+		}
+		rates[i] = *row.ConditionalRate
+	}
+	return rates
+}
+
+func assertPositionCounts(t *testing.T, got []AcceptancePosition, proposed, reached, accepted []int) {
+	t.Helper()
+	if len(got) != len(proposed) {
+		t.Fatalf("positions = %d, want %d", len(got), len(proposed))
+	}
+	for i, row := range got {
+		if row.Position != i || row.Proposed != proposed[i] || row.Reached != reached[i] || row.Accepted != accepted[i] {
+			t.Fatalf("position %d = %+v, want proposed/reached/accepted %d/%d/%d", i, row, proposed[i], reached[i], accepted[i])
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAcceptanceProfileCensoredConditionalRate(t *testing.T) {
+	var profile acceptanceProfile
+	for accepted, rounds := range []int{125, 100, 80, 64, 256} {
+		for range rounds {
+			profile.record(4, accepted)
+		}
+	}
+	got := profile.snapshot()
+	assertPositionCounts(t, got, []int{625, 625, 625, 625}, []int{625, 500, 400, 320}, []int{500, 400, 320, 256})
+	for i, wantRate := range []float64{0.8, 0.64, 0.512, 0.4096} {
+		if got[i].Rate == nil || *got[i].Rate != wantRate {
+			t.Fatalf("position %d marginal rate = %v, want %v", i, got[i].Rate, wantRate)
+		}
+		if got[i].ConditionalRate == nil || *got[i].ConditionalRate != 0.8 {
+			t.Fatalf("position %d conditional rate = %v, want 0.8", i, got[i].ConditionalRate)
+		}
+	}
+
+	const observedYield = 2101.0 / 625.0
+	conditionalYield := geometricYield(conditionalRates(t, got))
+	if math.Abs(conditionalYield-observedYield) > 1e-12 {
+		t.Fatalf("conditional-fed yield = %v, want observed %v", conditionalYield, observedYield)
+	}
+	marginal := 1476.0 / 2500.0
+	marginalYield := geometricYield([]float64{marginal, marginal, marginal, marginal})
+	if math.Abs(marginalYield-2.2662717139910656) > 1e-12 {
+		t.Fatalf("marginal-fed yield = %v, want 2.2662717139910656", marginalYield)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAcceptanceProfileConditionalRateVariableDepth(t *testing.T) {
+	var profile acceptanceProfile
+	profile.record(4, 4)
+	profile.record(2, 2)
+	profile.record(3, 1)
+	got := profile.snapshot()
+	assertPositionCounts(t, got, []int{3, 3, 2, 1}, []int{3, 3, 1, 1}, []int{3, 2, 1, 1})
+	wantConditional := []float64{1, 2.0 / 3.0, 1, 1}
+	wantMarginal := []float64{1, 2.0 / 3.0, 0.5, 1}
+	for i := range got {
+		if *got[i].ConditionalRate != wantConditional[i] || *got[i].Rate != wantMarginal[i] {
+			t.Fatalf("position %d rates = %v/%v, want conditional %v marginal %v", i, *got[i].ConditionalRate, *got[i].Rate, wantConditional[i], wantMarginal[i])
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAcceptanceProfileConditionalRateNilWhenUnreached(t *testing.T) {
+	var profile acceptanceProfile
+	profile.record(3, 0)
+	got := profile.snapshot()
+	assertPositionCounts(t, got, []int{1, 1, 1}, []int{1, 0, 0}, []int{0, 0, 0})
+	if got[0].ConditionalRate == nil || *got[0].ConditionalRate != 0 {
+		t.Fatalf("reached position conditional rate = %v, want 0", got[0].ConditionalRate)
+	}
+	for _, row := range got[1:] {
+		if row.ConditionalRate != nil || row.Rate == nil || *row.Rate != 0 {
+			t.Fatalf("unreached position %d = %+v, want nil conditional and zero marginal", row.Position, row)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAcceptanceProfileTreeReachedCountsRounds(t *testing.T) {
+	var profile acceptanceProfile
+	profile.recordCounts([]int{2, 1}, 1)
+	got := profile.snapshot()
+	assertPositionCounts(t, got, []int{2, 1}, []int{1, 1}, []int{1, 0})
+	if *got[0].ConditionalRate != 1 || *got[1].ConditionalRate != 0 || *got[0].Rate != 0.5 || *got[1].Rate != 0 {
+		t.Fatalf("tree rates = %+v", got)
+	}
+}

@@ -1,17 +1,32 @@
 package polymodel
 
 // AcceptancePosition reports speculative acceptance at one zero-based draft
-// position. Rate is nil when no proposal reached the position.
+// position. Rate is the marginal Accepted/Proposed and is nil when no proposal
+// reached the position. Reached counts rounds whose drafts before this position
+// were all accepted, so ConditionalRate = Accepted/Reached is the per-position
+// acceptance probability a geometric yield model multiplies; it is nil when
+// Reached is zero.
 type AcceptancePosition struct {
-	Position int      `json:"position"`
-	Proposed int      `json:"proposed"`
-	Accepted int      `json:"accepted"`
-	Rate     *float64 `json:"rate,omitempty"`
+	Position        int      `json:"position"`
+	Proposed        int      `json:"proposed"`
+	Accepted        int      `json:"accepted"`
+	Rate            *float64 `json:"rate,omitempty"`
+	Reached         int      `json:"reached"`
+	ConditionalRate *float64 `json:"conditional_rate,omitempty"`
 }
 
 type acceptanceProfile struct {
 	proposed []int
 	accepted []int
+	reached  []int
+}
+
+func (p *acceptanceProfile) grow(positions int) {
+	if positions > len(p.proposed) {
+		p.proposed = append(p.proposed, make([]int, positions-len(p.proposed))...)
+		p.accepted = append(p.accepted, make([]int, positions-len(p.accepted))...)
+		p.reached = append(p.reached, make([]int, positions-len(p.reached))...)
+	}
 }
 
 func (p *acceptanceProfile) record(proposed, accepted int) {
@@ -24,12 +39,12 @@ func (p *acceptanceProfile) record(proposed, accepted int) {
 	if accepted > proposed {
 		accepted = proposed
 	}
-	if proposed > len(p.proposed) {
-		p.proposed = append(p.proposed, make([]int, proposed-len(p.proposed))...)
-		p.accepted = append(p.accepted, make([]int, proposed-len(p.accepted))...)
-	}
+	p.grow(proposed)
 	for position := 0; position < proposed; position++ {
 		p.proposed[position]++
+		if position <= accepted {
+			p.reached[position]++
+		}
 		if position < accepted {
 			p.accepted[position]++
 		}
@@ -39,26 +54,32 @@ func (p *acceptanceProfile) record(proposed, accepted int) {
 func (p acceptanceProfile) snapshot() []AcceptancePosition {
 	result := make([]AcceptancePosition, len(p.proposed))
 	for position, proposed := range p.proposed {
-		row := AcceptancePosition{Position: position, Proposed: proposed, Accepted: p.accepted[position]}
+		row := AcceptancePosition{Position: position, Proposed: proposed, Accepted: p.accepted[position], Reached: p.reached[position]}
 		if proposed > 0 {
 			rate := float64(row.Accepted) / float64(proposed)
 			row.Rate = &rate
+		}
+		if row.Reached > 0 {
+			rate := float64(row.Accepted) / float64(row.Reached)
+			row.ConditionalRate = &rate
 		}
 		result[position] = row
 	}
 	return result
 }
 
+// recordCounts folds one tree round: proposedByPosition counts nodes per depth,
+// while Reached and Accepted count rounds, so a wide level reaches once.
 func (p *acceptanceProfile) recordCounts(proposedByPosition []int, accepted int) {
-	if len(proposedByPosition) > len(p.proposed) {
-		p.proposed = append(p.proposed, make([]int, len(proposedByPosition)-len(p.proposed))...)
-		p.accepted = append(p.accepted, make([]int, len(proposedByPosition)-len(p.accepted))...)
-	}
+	p.grow(len(proposedByPosition))
 	for position, proposed := range proposedByPosition {
 		if proposed < 0 {
 			proposed = 0
 		}
 		p.proposed[position] += proposed
+		if proposed > 0 && position <= accepted {
+			p.reached[position]++
+		}
 		if position < accepted {
 			p.accepted[position]++
 		}

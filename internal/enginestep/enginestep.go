@@ -14,7 +14,8 @@
 // forward. Metric vocabulary is adapted (not ported) from vLLM's v1 scheduler
 // stats (Apache-2.0): iteration tokens, running/waiting, per-phase request time;
 // the speculative families adapt vLLM's SpecDecodingStats (drafts, draft tokens,
-// accepted tokens).
+// accepted tokens), and the per-position families adapt DeepInfer's per-step
+// verified/accepted counters (Apache-2.0, third_party/deepinfer-spec-policy).
 package enginestep
 
 import (
@@ -100,7 +101,15 @@ const (
 	MetricSpecDraftTokensTotal    = "fak_engine_spec_draft_tokens_total"
 	MetricSpecAcceptedTokensTotal = "fak_engine_spec_accepted_tokens_total"
 	MetricSpecAcceptedPerRound    = "fak_engine_spec_accepted_per_round"
+
+	MetricSpecPositionVerifiedTotal = "fak_engine_spec_position_verified_total"
+	MetricSpecPositionReachedTotal  = "fak_engine_spec_position_reached_total"
+	MetricSpecPositionAcceptedTotal = "fak_engine_spec_position_accepted_total"
 )
+
+// SpecPositionSlots bounds the per-position speculative counters; the last slot
+// aggregates every deeper draft position so per-position sums equal the totals.
+const SpecPositionSlots = 16
 
 // MetricFamilies lists every family WritePrometheus emits, in render order.
 var MetricFamilies = []string{
@@ -110,6 +119,7 @@ var MetricFamilies = []string{
 	MetricRequestsActive, MetricLastStepTimestamp,
 	MetricSpecRoundsTotal, MetricSpecDraftTokensTotal, MetricSpecAcceptedTokensTotal,
 	MetricSpecAcceptedPerRound,
+	MetricSpecPositionVerifiedTotal, MetricSpecPositionReachedTotal, MetricSpecPositionAcceptedTotal,
 }
 
 var (
@@ -275,6 +285,10 @@ type Recorder struct {
 	specRounds      uint64
 	specDrafted     uint64
 	specAcceptedTok uint64
+	specPosVerified [SpecPositionSlots]uint64
+	specPosReached  [SpecPositionSlots]uint64
+	specPosAccepted [SpecPositionSlots]uint64
+	specPosDepth    int
 	queueDepth      int64
 	requestsActive  int64
 	lastStep        time.Time
@@ -390,6 +404,11 @@ func (r *Recorder) observeDecodeStep(path, reason string, lanes int, d time.Dura
 // `proposed` draft tokens were verified, `accepted` of them matched the target,
 // and `emitted` tokens (accepted prefix plus bonus, after stop/maxNew trimming)
 // reached the caller. A round with no proposal is a serial step, not a round.
+//
+// Per-position counters follow linear-chain semantics: draft i is verified when
+// i < proposed, reached when every earlier draft was accepted, and accepted when
+// i < accepted. A tree caller passes its flattened node count as proposed, so
+// tree rounds need a depth-aware caller before these positions describe them.
 func (r *Recorder) ObserveSpeculativeRound(proposed, accepted, emitted int, d time.Duration) {
 	if r == nil || proposed <= 0 {
 		return
@@ -408,8 +427,28 @@ func (r *Recorder) ObserveSpeculativeRound(proposed, accepted, emitted int, d ti
 	r.specDrafted += uint64(proposed)
 	r.specAcceptedTok += uint64(accepted)
 	r.specAccepted.observe(float64(accepted))
+	r.observeSpecPositionsLocked(proposed, accepted)
 	r.lastStep = r.now()
 	r.appendLocked(StepRecord{Kind: KindDecodeStep, Path: PathSpeculative, Lanes: 1, Tokens: emitted, Proposed: proposed, Accepted: accepted, DurationNS: d.Nanoseconds(), AtUnixNano: r.lastStep.UnixNano()})
+}
+
+func (r *Recorder) observeSpecPositionsLocked(proposed, accepted int) {
+	last := SpecPositionSlots - 1
+	for i := 0; i < min(proposed, last); i++ {
+		r.specPosVerified[i]++
+		if i <= accepted {
+			r.specPosReached[i]++
+		}
+		if i < accepted {
+			r.specPosAccepted[i]++
+		}
+	}
+	if proposed > last {
+		r.specPosVerified[last] += uint64(proposed - last)
+		r.specPosReached[last] += uint64(max(0, min(proposed-1, accepted)-last+1))
+		r.specPosAccepted[last] += uint64(max(0, accepted-last))
+	}
+	r.specPosDepth = max(r.specPosDepth, min(proposed, SpecPositionSlots))
 }
 
 type requestObservationKey struct{}
@@ -630,11 +669,25 @@ type PathStat struct {
 // accepted/drafted; TokensPerRound is emitted tokens per target forward, the
 // number speculation must push above 1 to pay.
 type SpecStat struct {
-	Rounds         uint64  `json:"rounds"`
-	DraftTokens    uint64  `json:"draft_tokens"`
-	AcceptedTokens uint64  `json:"accepted_tokens"`
-	AcceptanceRate float64 `json:"acceptance_rate"`
-	TokensPerRound float64 `json:"tokens_per_round"`
+	Rounds         uint64             `json:"rounds"`
+	DraftTokens    uint64             `json:"draft_tokens"`
+	AcceptedTokens uint64             `json:"accepted_tokens"`
+	AcceptanceRate float64            `json:"acceptance_rate"`
+	TokensPerRound float64            `json:"tokens_per_round"`
+	Positions      []SpecPositionStat `json:"positions,omitempty"`
+}
+
+// SpecPositionStat counts one zero-based draft position. Rate is the marginal
+// Accepted/Verified; ConditionalRate is Accepted/Reached, the acceptance
+// probability once the prefix before the position was accepted, and is nil
+// when no round reached the position.
+type SpecPositionStat struct {
+	Position        int      `json:"position"`
+	Verified        uint64   `json:"verified"`
+	Reached         uint64   `json:"reached"`
+	Accepted        uint64   `json:"accepted"`
+	Rate            *float64 `json:"rate,omitempty"`
+	ConditionalRate *float64 `json:"conditional_rate,omitempty"`
 }
 
 // Snapshot is the bounded agent-facing view of the recorder.
@@ -714,6 +767,7 @@ func (r *Recorder) Snapshot(recent int, kind string) Snapshot {
 			AcceptedTokens: r.specAcceptedTok,
 			AcceptanceRate: float64(r.specAcceptedTok) / float64(r.specDrafted),
 			TokensPerRound: float64(r.decodeTokens[PathSpeculative]) / float64(r.specRounds),
+			Positions:      r.specPositionsLocked(),
 		}
 	}
 	if recent == 0 || r.next == 0 {
@@ -737,6 +791,26 @@ func (r *Recorder) Snapshot(recent int, kind string) Snapshot {
 	}
 	s.Recent = picked
 	return s
+}
+
+func (r *Recorder) specPositionsLocked() []SpecPositionStat {
+	if r.specPosDepth == 0 {
+		return nil
+	}
+	positions := make([]SpecPositionStat, r.specPosDepth)
+	for i := range positions {
+		row := SpecPositionStat{Position: i, Verified: r.specPosVerified[i], Reached: r.specPosReached[i], Accepted: r.specPosAccepted[i]}
+		if row.Verified > 0 {
+			rate := float64(row.Accepted) / float64(row.Verified)
+			row.Rate = &rate
+		}
+		if row.Reached > 0 {
+			rate := float64(row.Accepted) / float64(row.Reached)
+			row.ConditionalRate = &rate
+		}
+		positions[i] = row
+	}
+	return positions
 }
 
 // Compact renders the snapshot summary as one bounded line for agents.
@@ -834,6 +908,19 @@ func (r *Recorder) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "%s %d\n", MetricSpecAcceptedTokensTotal, r.specAcceptedTok)
 	helpType(w, MetricSpecAcceptedPerRound, "Draft tokens accepted per speculative verify round.", "histogram")
 	r.specAccepted.write(w, MetricSpecAcceptedPerRound, "")
+	for _, family := range []struct {
+		name, help string
+		counts     *[SpecPositionSlots]uint64
+	}{
+		{MetricSpecPositionVerifiedTotal, "Draft tokens verified at each zero-based draft position (linear-chain semantics; the last position aggregates deeper drafts).", &r.specPosVerified},
+		{MetricSpecPositionReachedTotal, "Verified draft tokens whose earlier drafts in the round were all accepted, by draft position (linear-chain semantics; the last position aggregates deeper drafts).", &r.specPosReached},
+		{MetricSpecPositionAcceptedTotal, "Draft tokens accepted at each zero-based draft position (linear-chain semantics; the last position aggregates deeper drafts).", &r.specPosAccepted},
+	} {
+		helpType(w, family.name, family.help, "counter")
+		for i := 0; i < r.specPosDepth; i++ {
+			fmt.Fprintf(w, "%s{position=\"%d\"} %d\n", family.name, i, family.counts[i])
+		}
+	}
 }
 
 func helpType(w io.Writer, name, help, typ string) {
