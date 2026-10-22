@@ -60,6 +60,8 @@ type PagedKVPool struct {
 
 	loweredMaxBlocks int
 	maxBlocksLowered bool // distinguishes an explicit zero ceiling from no lowering
+
+	misuseReleases int
 }
 
 // LowerMaxBlocks latches a stricter backing-growth ceiling for Reserve and
@@ -100,6 +102,10 @@ func (p *PagedKVPool) Alloc() int {
 func (p *PagedKVPool) Release(id int) {
 	p.release(id)
 }
+
+// MisuseReleases counts ignored releases of an out-of-range block id or of a
+// block whose reference count was already 0.
+func (p *PagedKVPool) MisuseReleases() int { return p.misuseReleases }
 
 // FreeBlocks returns the count of free blocks currently in the pool.
 func (p *PagedKVPool) FreeBlocks() int {
@@ -169,6 +175,7 @@ func (p *PagedKVPool) alloc() int {
 // release drops one reference to a block; the last reference returns it to the free list.
 func (p *PagedKVPool) release(id int) {
 	if id < 0 || id >= len(p.ref) || p.ref[id] == 0 {
+		p.misuseReleases++
 		return
 	}
 	p.ref[id]--
