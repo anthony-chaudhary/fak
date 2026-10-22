@@ -1,0 +1,36 @@
+DeepInfer V4.1 numeric reference oracles
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+
+Every adaptation listed here lives in a Go test file under internal/model. Each
+is an unwired host oracle used for measurement: no serving path, forward pass,
+configuration field, environment knob or default calls it, and none claims
+bitwise parity with the DeepInfer CUDA or Ascend kernels.
+
+Indexer Q/K MXFP4 cast (internal/model/v41_index_mxfp4_test.go)
+
+Upstream paths:
+  deepinfer/model_executor/models/v4_modules/index_attn.py:85-87,133-179,296-317
+  deepinfer/model_executor/layers/tilelang_ops/cache_common.py:129-137
+  deepinfer/model_executor/layers/tilelang_ops/fused_transform.py:61-86,249-257
+  deepinfer/model_executor/layers/tilelang_ops/common.py:22-24
+  deepinfer/model_executor/layers/tilelang_ops/cuda/fused_transform.py:180-183,473-489,514-547
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/asc/kv_quant.py:48-92,170-189
+  deepinfer/model_executor/layers/tilelang_ops/asc/fused_transform.py:346-353
+
+Adaptation: Go emulation of the indexer Q/K cast. Inputs are rounded to bf16,
+each group of 32 values gets one UE8M0 power-of-two scale, and values are
+encoded as e2m1 codes. The scale rule is transcribed from upstream code: amax
+floored at 6*2^-126, multiplied by float32(1/6), and rounded up to a power of
+two through the (bits-1)>>23 exponent step, so a zero group keeps scale byte 1.
+The e2m1 round-to-nearest-even tie rule with finite saturation is inferred from
+the upstream cast comments; the CUDA conversion kernel itself is external to the
+repository. The test composes this cast with fak's own f32 indexer score and
+top-k selection to measure top-512 selection overlap against fak's bf16-widened
+f32 scoring. Fak's indexer is unchanged and does not score MXFP4.
