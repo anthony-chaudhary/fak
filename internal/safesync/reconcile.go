@@ -559,6 +559,7 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		if r.opts.Apply {
 			applyOpts := Options{
 				Repo:                repo,
+				TargetSHA:           targetSHA,
 				Remote:              r.opts.Remote,
 				Branch:              branch,
 				Runner:              run,

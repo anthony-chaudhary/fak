@@ -995,3 +995,50 @@ func TestRouteReconciliationDisjointUntrackedCollision(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=2s
+func TestRouteReconciliationApplyExactTarget(t *testing.T) {
+	t.Parallel()
+	origin, clone := setupTestOriginAndClone(t)
+	base := revString(t, clone, "HEAD")
+
+	writeFile(t, filepath.Join(origin, "intermediate.txt"), "intermediate\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "intermediate target")
+	git(t, clone, "fetch", "origin")
+	tracking := revString(t, clone, "origin/work")
+
+	writeFile(t, filepath.Join(origin, "exact_target.txt"), "exact target\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "exact integration target")
+	target := revString(t, origin, "HEAD")
+	// Obtain the requested object without advancing the deliberately stale tracking ref.
+	git(t, clone, "fetch", "--no-tags", "--refmap=", "origin", target)
+	if revString(t, clone, "HEAD") != base || revString(t, clone, "origin/work") != tracking || revString(t, clone, "FETCH_HEAD") != target {
+		t.Fatal("fixture must retain HEAD at A and tracking at B while fetching C")
+	}
+
+	res, err := RouteReconciliation(context.Background(), ReconcileOptions{
+		Repo:   clone,
+		Remote: "origin",
+		Branch: "work",
+		Goal:   "integrate " + target,
+		Apply:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Route != RouteApply || res.Target != target || !res.Applied || res.Execution == nil || !res.Execution.Success {
+		t.Fatalf("exact-target apply failed: %+v", res)
+	}
+	if res.Execution.NewHead != target || revString(t, clone, "HEAD") != target {
+		t.Fatalf("applied HEAD = %q, receipt = %q, want exact target %q", revString(t, clone, "HEAD"), res.Execution.NewHead, target)
+	}
+	got, err := os.ReadFile(filepath.Join(clone, "exact_target.txt"))
+	if err != nil || string(got) != "exact target\n" {
+		t.Fatalf("exact target file = %q, error = %v", got, err)
+	}
+	if got := revString(t, clone, "origin/work"); got != tracking {
+		t.Fatalf("tracking ref moved to %q, want unchanged %q", got, tracking)
+	}
+}

@@ -74,6 +74,9 @@ type Options struct {
 	// when a peer writer holds the worktree lease, before refusing (#11234/#11616).
 	// 0 means no wait in Phase 1 (fail-fast / assess immediately) and default 10s in Phase 2.
 	QueueWait time.Duration `json:"queue_wait,omitempty"`
+	// TargetSHA pins a caller-assessed immutable target instead of remote/branch.
+	// Empty preserves the default remote-tracking target.
+	TargetSHA string `json:"target_sha,omitempty"`
 	// barrier is a test-only seam fired while Apply holds the writer lease, so a
 	// concurrency test can prove a second managed writer is refused mid-window.
 	barrier func()
@@ -177,7 +180,10 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 			return Assessment{}, err
 		}
 	}
-	targetRef := opts.Remote + "/" + branch
+	targetRef := strings.TrimSpace(opts.TargetSHA)
+	if targetRef == "" {
+		targetRef = opts.Remote + "/" + branch
+	}
 
 	if opts.Fetch {
 		if _, err := checked(ctx, run, opts.Repo, "fetch", opts.Remote, branch); err != nil {
@@ -198,7 +204,7 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 				State:     StateNoRemoteRef,
 				TargetRef: targetRef,
 				Branch:    branch,
-				Reason:    "remote-tracking ref " + targetRef + " not found; fetch first",
+				Reason:    "target ref " + targetRef + " not found; fetch first",
 			}, nil
 		}
 		return Assessment{}, err
