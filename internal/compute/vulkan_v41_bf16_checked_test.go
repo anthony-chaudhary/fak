@@ -460,6 +460,7 @@ func TestVulkanV41BF16CheckedOrchestration(t *testing.T) {
 	var sourceText strings.Builder
 	for _, file := range []struct{ name, env string }{
 		{"vulkan_shim.cpp", "FAK_V41_BF16_CHECKED_WITNESS_SHIM_SHA256"},
+		{"vulkan_spirv_admission.h", "FAK_V41_BF16_CHECKED_WITNESS_ADMISSION_SHA256"},
 		{"vulkan_backend.h", "FAK_V41_BF16_CHECKED_WITNESS_HEADER_SHA256"},
 		{"v41_index_scale_bf16_spirv.h", "FAK_V41_BF16_CHECKED_WITNESS_INDEX_SCALE_SHA256"},
 	} {

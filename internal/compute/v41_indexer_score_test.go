@@ -148,7 +148,7 @@ func TestV41IndexerScoreSourceContract(t *testing.T) {
 			t.Errorf("forbidden shader behavior %q", token)
 		}
 	}
-	shim := read("vulkan_shim.cpp")
+	shim := string(vulkanAdmissionSource(t))
 	for _, token := range []string{
 		"VkPhysicalDeviceFloatControlsProperties floatControls", "floatControls.shaderDenormPreserveFloat32 != VK_TRUE", "floatControls.shaderSignedZeroInfNanPreserveFloat32 != VK_TRUE", "floatControls.shaderRoundingModeRTEFloat32 != VK_TRUE",
 		"!v41IndexerScoreABI(code)", "modes != 7 || capabilities != 15", "floatResults.size() != 4", "!decorated(result.second, noContraction, 0)", "modeEntry != entry",

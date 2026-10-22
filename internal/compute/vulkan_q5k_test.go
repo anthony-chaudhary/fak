@@ -430,12 +430,9 @@ func q5KMaxAbsDelta(got, want []float32) (delta, reference float64) {
 // treating a five-word header as a valid shader or claiming semantic validation.
 // fak-test:runtime fast est=1ms lane=default
 func TestVulkanSPIRVFramingSourceContract(t *testing.T) {
-	raw, err := os.ReadFile("vulkan_shim.cpp")
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := vulkanAdmissionSource(t)
 	source := string(raw)
-	start := strings.Index(source, "static bool spirvModuleFraming(")
+	start := strings.Index(source, "inline bool spirvModuleFraming(")
 	end := strings.Index(source, "bool buildKernel(")
 	if start < 0 || end <= start {
 		t.Fatal("missing framing guard before shared kernel loader")

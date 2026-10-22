@@ -33,6 +33,7 @@ func TestVulkanArgmaxBatchFlush(t *testing.T) {
 	var all strings.Builder
 	for _, file := range []struct{ name, env string }{
 		{"vulkan_shim.cpp", "FAK_ARGMAX_BATCH_SHIM_SHA256"},
+		{"vulkan_spirv_admission.h", "FAK_ARGMAX_BATCH_ADMISSION_SHA256"},
 		{"vulkan_backend.h", "FAK_ARGMAX_BATCH_HEADER_SHA256"},
 		{"v41_index_scale_bf16_spirv.h", "FAK_ARGMAX_BATCH_INDEX_SCALE_SHA256"},
 		{"v41_routed_swiglu_chunk_spirv.h", "FAK_ARGMAX_BATCH_ROUTED_CHUNK_SHA256"},

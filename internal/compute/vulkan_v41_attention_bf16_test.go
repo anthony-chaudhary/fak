@@ -460,6 +460,7 @@ func TestVulkanV41AttentionBF16Orchestration(t *testing.T) {
 	var sourceText strings.Builder
 	for _, file := range []struct{ name, env string }{
 		{"vulkan_shim.cpp", "FAK_V41_ATTENTION_BF16_TEST_SHIM_SHA256"},
+		{"vulkan_spirv_admission.h", "FAK_V41_ATTENTION_BF16_TEST_ADMISSION_SHA256"},
 		{"vulkan_backend.h", "FAK_V41_ATTENTION_BF16_TEST_HEADER_SHA256"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(sourceDir, file.name))

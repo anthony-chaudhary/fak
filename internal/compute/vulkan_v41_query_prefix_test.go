@@ -43,6 +43,7 @@ func TestVulkanV41QueryPrefixOrchestration(t *testing.T) {
 	var sourceText strings.Builder
 	for _, file := range []struct{ name, env string }{
 		{"vulkan_shim.cpp", "FAK_V41_QUERY_PREFIX_WITNESS_SHIM_SHA256"},
+		{"vulkan_spirv_admission.h", "FAK_V41_QUERY_PREFIX_WITNESS_ADMISSION_SHA256"},
 		{"vulkan_backend.h", "FAK_V41_QUERY_PREFIX_WITNESS_HEADER_SHA256"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(sourceDir, file.name))
