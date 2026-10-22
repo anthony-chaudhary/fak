@@ -23,7 +23,7 @@
       "kind": "metric",
       "definition": "Coverage is the measured fraction of a declared or discovered universe that has rows, tests, witnesses, or other positioned evidence.",
       "distinction": "Coverage says how much of the space is seen; it does not by itself prove support exists for every case, correctness of behavior, peer parity, or operational maturity.",
-      "distinct_from": ["support", "correctness", "parity", "maturity", "native-forward-coverage-observation", "native-forward-coverage-receipt", "artifactcoverage"],
+      "distinct_from": ["support", "correctness", "parity", "maturity", "native-forward-coverage-observation", "native-forward-coverage-receipt", "artifactcoverage", "v41workloadcoverage"],
       "aliases": [],
       "grounding": "coverage",
       "grounding_kind": "metric",

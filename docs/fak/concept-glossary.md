@@ -1602,3 +1602,10 @@ V41EngramLookAheadReadPolicy(rowBytes) declares whether an Engram producer suppo
 InKernelPlannerConfig.V41EngramLookAhead is a default-false typed operator selection for attached V4.1 Engram in explicitly serial, non-speculative, non-expert-parallel serving. It routes greedy and sampled incremental forwards through the per-call look-ahead API while preserving greedy accounting, effective request cancellation and terminal selected-forward failures.
 
 **Distinct from:** This is caller admission and no-replay selection, not producer read eligibility/staging or general serve launch policy. It does not retain source lifetime, authenticate a producer, change batching defaults, guarantee RSS, enable hardware or demonstrate throughput.
+
+
+### V41WorkloadCoverage
+
+V41WorkloadCoverage is the exported scope and missingness contract for fixed model-lifetime V4.1 observed route-work counters. It states token-row and successful-forward or committed-cohort-lane observation semantics, unavailable failed partial work and restored-prefix provenance, unsupported request isolation, and absence of binding to expert/device timing or actual asynchronous look-ahead selection.
+
+**Distinct from:** This metadata describes the limits of cumulative observed logical work, not a coverage fraction or the request-local per-output-token traversal proof carried by NativeForwardCoverage. It supplies neither an elapsed-time throughput denominator, a final cohort success result, effective timestamp mode/run identity, nor support, correctness or physical GPU qualification.

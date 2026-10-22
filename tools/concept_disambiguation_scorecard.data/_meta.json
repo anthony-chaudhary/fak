@@ -14570,6 +14570,16 @@
           "category": "incidental",
           "reason": "Closed grammar compile sentinel for constraint schemas or patterns outside the native subset, not a product support or maturity classification.",
           "token": "ErrUnsupportedSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "The existing agent attribution record field carries the separately positioned model.V41WorkloadCoverage value without adding a second coverage measure, observation scope, request identity or readiness policy.",
+          "token": "WorkloadCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "This initializer returns the fixed missingness and scope strings of the separately positioned V41WorkloadCoverage receipt contract. It does not independently measure coverage, choose runtime policy or establish request isolation, timing validity or readiness.",
+          "token": "V41WorkloadCoverageDefault"
         }
       ],
       "exclude": [
@@ -14728,12 +14738,14 @@
         "UNSUPPORTED_PROOF_FEATURE",
         "UNSUPPORTED_SESSION_KIND",
         "UnsupportedFields",
+        "V41WorkloadCoverageDefault",
         "VerdictParityOK",
         "VerdictPartialCoverage",
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",
         "WatchdogExcludeKind",
         "WitnessDigest",
+        "WorkloadCoverage",
         "achievedMaturity",
         "backend_does_not_support_transition",
         "calendar_coverage",

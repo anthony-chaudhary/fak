@@ -143,10 +143,23 @@ func TestV41PhaseCoverageDebugExport(t *testing.T) {
 		Status: "unavailable", Reason: "device_contraction_not_timed", UnavailableSamples: 2,
 	}
 	p := &InKernelPlanner{}
-	source := model.V41ExpertFaultAttribution{Prefill: prefill, Decode: decode}
+	// Populate the actual fixed workload vocabulary at its maximum counter
+	// width, so the existing export ceiling also covers the new default fields.
+	maxRow := model.V41WorkloadRows{ObservedOperations: ^uint64(0), ExecutedRows: ^uint64(0), AppendedRows: ^uint64(0)}
+	source := model.V41ExpertFaultAttribution{
+		Prefill: prefill, Decode: decode,
+		Workload: model.V41WorkloadLifetime{
+			ColdFull: maxRow, SuffixSerial: maxRow, SuffixBatch: maxRow,
+			SuffixRefold: maxRow, SerialDecode: maxRow, DecodeRefold: maxRow, CohortDecode: maxRow,
+		},
+		WorkloadCoverage: model.V41WorkloadCoverageDefault(),
+	}
 	p.foldV41PhasesLocked(source)
 	p.foldV41PhasesLocked(source)
 	got := p.MoEResidencyStats()
+	if got.V41Phases.Workload != source.Workload || got.V41Phases.WorkloadCoverage != source.WorkloadCoverage {
+		t.Fatal("default export lost workload rows or coverage")
+	}
 	wantPrefill := v41SnapshotFixture(10)
 	wantPrefill.ContractionNanos = 0
 	requireV41PhaseSnapshot(t, got.V41Phases.Prefill, wantPrefill)
@@ -203,12 +216,17 @@ func TestV41PhaseAttributionBusyReadRetainsLastCounters(t *testing.T) {
 	source := model.V41ExpertFaultAttribution{Prefill: v41AttributionFixture(10), Decode: v41AttributionFixture(100)}
 	source.Prefill.HeadProjectionDeviceCalls = 7
 	source.Decode.RoutedLayerDispatches = 9
+	source.Workload.SerialDecode = model.V41WorkloadRows{ObservedOperations: 3, ExecutedRows: 3, AppendedRows: 3}
+	source.WorkloadCoverage = model.V41WorkloadCoverageDefault()
 	p.foldV41PhasesLocked(source)
 	previous := *p.MoEResidencyStats().V41Phases
 	coverage := model.V41ExpertPhaseCoverage{Scope: "unavailable", RequestIsolationReason: "ledger_busy"}
+	workloadCoverage := model.V41WorkloadCoverageDefault()
+	workloadCoverage.Scope, workloadCoverage.Basis = "unavailable", "ledger_busy"
 	busy := model.V41ExpertFaultAttribution{
-		Prefill: model.V41ExpertFaultAttributionPhase{Coverage: coverage},
-		Decode:  model.V41ExpertFaultAttributionPhase{Coverage: coverage},
+		WorkloadCoverage: workloadCoverage,
+		Prefill:          model.V41ExpertFaultAttributionPhase{Coverage: coverage},
+		Decode:           model.V41ExpertFaultAttributionPhase{Coverage: coverage},
 	}
 	p.foldV41PhasesLocked(busy)
 	stale := p.MoEResidencyStats().V41Phases
@@ -231,7 +249,7 @@ func TestV41PhaseAttributionBusyReadRetainsLastCounters(t *testing.T) {
 	}
 	fresh := &InKernelPlanner{}
 	fresh.foldV41PhasesLocked(busy)
-	if unavailable := fresh.MoEResidencyStats().V41Phases; unavailable.Availability != "unavailable" || unavailable.AvailabilityReason != "ledger_busy" {
+	if unavailable := fresh.MoEResidencyStats().V41Phases; unavailable.Availability != "unavailable" || unavailable.AvailabilityReason != "ledger_busy" || unavailable.WorkloadCoverage != workloadCoverage {
 		t.Fatalf("first busy read claimed a measured snapshot: %+v", unavailable)
 	}
 }

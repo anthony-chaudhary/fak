@@ -29,7 +29,8 @@
       "distinction": "This is the serialized receipt projection consumed by evidence validators; internal forwardCoverage is captured at decode time, while generic coverage does not prove one token traversed the configured native depth.",
       "distinct_from": [
         "native-forward-coverage-observation",
-        "coverage"
+        "coverage",
+        "v41workloadcoverage"
       ],
       "aliases": [],
       "grounding": "NativeForwardCoverage",

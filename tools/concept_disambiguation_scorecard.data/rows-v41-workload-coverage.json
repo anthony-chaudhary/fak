@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "v41workloadcoverage",
+      "canonical": "V41WorkloadCoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "V41WorkloadCoverage is the exported scope and missingness contract for fixed model-lifetime V4.1 observed route-work counters. It states token-row and successful-forward or committed-cohort-lane observation semantics, unavailable failed partial work and restored-prefix provenance, unsupported request isolation, and absence of binding to expert/device timing or actual asynchronous look-ahead selection.",
+      "distinction": "This metadata describes the limits of cumulative observed logical work, not a coverage fraction or the request-local per-output-token traversal proof carried by NativeForwardCoverage. It supplies neither an elapsed-time throughput denominator, a final cohort success result, effective timestamp mode/run identity, nor support, correctness or physical GPU qualification.",
+      "distinct_from": [
+        "native-forward-coverage-receipt",
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "V41WorkloadCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

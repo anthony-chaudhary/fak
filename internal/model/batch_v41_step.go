@@ -175,6 +175,8 @@ func (m *Model) stepV41BatchOwned(scope *backendExecutionScope, lanes []v41StepC
 				// accurate when a later lane failed after an earlier history append.
 				for _, result := range results {
 					if result.stats.Committed {
+						// A committed lane remains observed work even if cleanup later fails.
+						m.v41NoteWorkload(v41WorkloadCohort, 1, 1)
 						m.v41NoteExpertFaultToken(1)
 						if v41IncrementalStepProbe != nil {
 							v41IncrementalStepProbe()

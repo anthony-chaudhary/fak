@@ -112,7 +112,9 @@ type CheckpointResidencySnapshot struct {
 
 // V41PhaseLifetimeSnapshot is the bounded model-lifetime view of V4.1 work.
 type V41PhaseLifetimeSnapshot struct {
-	Scope string `json:"scope"`
+	Workload         model.V41WorkloadLifetime `json:"workload"`
+	WorkloadCoverage model.V41WorkloadCoverage `json:"workload_coverage"`
+	Scope            string                    `json:"scope"`
 	// Availability qualifies the complete snapshot when a nonblocking source
 	// read is busy. Stale snapshots retain the last successfully read counters.
 	Availability       string                             `json:"availability,omitempty"`
@@ -334,7 +336,7 @@ func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution
 	}
 	if busy(at.Prefill.Coverage) && busy(at.Decode.Coverage) {
 		previous := p.moeResidency.V41Phases
-		snapshot := V41PhaseLifetimeSnapshot{Scope: "model_lifetime", Availability: "unavailable", AvailabilityReason: "ledger_busy"}
+		snapshot := V41PhaseLifetimeSnapshot{Scope: "model_lifetime", Availability: "unavailable", AvailabilityReason: "ledger_busy", WorkloadCoverage: at.WorkloadCoverage}
 		if previous != nil {
 			snapshot = *previous
 			snapshot.Availability, snapshot.AvailabilityReason = "stale", "ledger_busy"
@@ -367,11 +369,12 @@ func (p *InKernelPlanner) foldV41PhasesLocked(at model.V41ExpertFaultAttribution
 	}
 	indexer := V41IndexerPhaseLifetimeSnapshot{Prefill: v41IndexerPhaseSnapshot(at.Prefill), Decode: v41IndexerPhaseSnapshot(at.Decode)}
 	routed := V41RoutedPhaseLifetimeSnapshot{Prefill: v41RoutedPhaseSnapshot(at.Prefill), Decode: v41RoutedPhaseSnapshot(at.Decode)}
-	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) && routed == (V41RoutedPhaseLifetimeSnapshot{}) && expertCoverage == (V41ExpertCoverageLifetimeSnapshot{}) {
+	if prefill == (V41PhaseSnapshot{}) && decode == (V41PhaseSnapshot{}) && projections == (V41ProjectionPhaseLifetimeSnapshot{}) && compressor == (V41CompressorPhaseLifetimeSnapshot{}) && indexer == (V41IndexerPhaseLifetimeSnapshot{}) && routed == (V41RoutedPhaseLifetimeSnapshot{}) && expertCoverage == (V41ExpertCoverageLifetimeSnapshot{}) && at.Workload == (model.V41WorkloadLifetime{}) {
 		return
 	}
 	p.moeResidency.V41Phases = &V41PhaseLifetimeSnapshot{
 		Scope: "model_lifetime", Prefill: prefill, Decode: decode, Projections: projections, Compressor: compressor, Indexer: indexer, Routed: routed, ExpertCoverage: expertCoverage,
+		Workload: at.Workload, WorkloadCoverage: at.WorkloadCoverage,
 	}
 }
 

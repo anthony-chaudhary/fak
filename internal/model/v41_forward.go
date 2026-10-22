@@ -696,6 +696,7 @@ func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 			}
 			return s.prefillV41Suffix(ids, wantLogits)
 		}
+		priorRows := len(s.v41State().history)
 		var act *Activations
 		var err error
 		func() {
@@ -713,6 +714,11 @@ func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 		if err != nil {
 			panic(err)
 		}
+		route := v41WorkloadCold
+		if priorRows > 0 {
+			route = v41WorkloadSuffixRefold
+		}
+		s.M.v41NoteWorkload(route, len(s.v41State().history), len(ids))
 		s.M.v41NoteExpertFaultToken(len(ids))
 		return lastLogits(act)
 	})
@@ -778,6 +784,7 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 			}
 			return s.prefillV41Refold(st, startLen, ids, wantLogits)
 		}
+		s.M.v41NoteWorkload(v41WorkloadSuffixSerial, 1, 1)
 		if v41PrefillStepProbe != nil {
 			v41PrefillStepProbe()
 		}
@@ -825,6 +832,7 @@ func (s *Session) prefillV41Refold(st *v41ForwardState, startLen int, ids []int,
 	if ferr != nil {
 		panic(ferr)
 	}
+	s.M.v41NoteWorkload(v41WorkloadSuffixRefold, len(st.history), len(ids))
 	s.M.v41NoteExpertFaultToken(len(ids))
 	return lastLogits(act)
 }
@@ -916,6 +924,7 @@ func (s *Session) stepV41(id int) []float32 {
 				bodyComplete = true
 			}()
 			if err == nil {
+				s.M.v41NoteWorkload(v41WorkloadDecode, 1, 1)
 				s.M.v41NoteExpertFaultToken(1)
 				if v41IncrementalStepProbe != nil {
 					v41IncrementalStepProbe()
@@ -943,6 +952,7 @@ func (s *Session) stepV41(id int) []float32 {
 		if err != nil {
 			panic(err)
 		}
+		s.M.v41NoteWorkload(v41WorkloadDecodeRefold, len(s.v41State().history), 1)
 		s.M.v41NoteExpertFaultToken(1)
 		return lastLogits(act)
 	})

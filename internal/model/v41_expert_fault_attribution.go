@@ -229,12 +229,14 @@ type V41ExpertFaultAttributionPhase = v41ExpertFaultPhaseLedger
 
 // V41ExpertFaultAttribution is the model-level snapshot served to the agent
 // planner's execution-summary log: prefill and decode ledgers are INDEPENDENT
-// running totals over the model's lifetime (the serve resets per request), so
-// the consumer derives per-request attribution by differencing consecutive
-// snapshots the same way it already differences the tier stats.
+// running totals over the model's lifetime. Differences do not establish
+// request isolation; overlapping work and the shared phase selector retain
+// the explicit coverage limitations below.
 type V41ExpertFaultAttribution struct {
-	Prefill v41ExpertFaultPhaseLedger `json:"prefill"`
-	Decode  v41ExpertFaultPhaseLedger `json:"decode"`
+	Workload         V41WorkloadLifetime       `json:"workload"`
+	WorkloadCoverage V41WorkloadCoverage       `json:"workload_coverage"`
+	Prefill          v41ExpertFaultPhaseLedger `json:"prefill"`
+	Decode           v41ExpertFaultPhaseLedger `json:"decode"`
 }
 
 // v41ExpertFaultLedger is the mutex-guarded accumulator a V4.1 model's
@@ -245,10 +247,11 @@ type V41ExpertFaultAttribution struct {
 // field, so adding this observation touches no shared struct layout and never
 // keeps a released model (a reload, or every test fixture) reachable.
 type v41ExpertFaultLedger struct {
-	mu    sync.Mutex
-	phase V41ExpertPhase
-	pre   v41ExpertFaultPhaseLedger
-	dec   v41ExpertFaultPhaseLedger
+	mu       sync.Mutex
+	phase    V41ExpertPhase
+	pre      v41ExpertFaultPhaseLedger
+	dec      v41ExpertFaultPhaseLedger
+	workload V41WorkloadLifetime
 
 	// nowNanos reads a monotonic clock in nanoseconds. Nil selects elapsed
 	// process time from v41ExpertFaultClockEpoch; tests inject exact readings.
@@ -479,6 +482,9 @@ func (l *v41ExpertFaultLedger) snapshot() V41ExpertFaultAttribution {
 		return out
 	}
 	if !l.mu.TryLock() {
+		out.WorkloadCoverage = V41WorkloadCoverageDefault()
+		out.WorkloadCoverage.Scope = "unavailable"
+		out.WorkloadCoverage.Basis = "ledger_busy"
 		// A debug read must not wait behind model work. Counters omitted in
 		// this snapshot are unavailable, never measured zero.
 		c := V41ExpertPhaseCoverage{Scope: "unavailable", RequestIsolation: "unsupported", RequestIsolationReason: "ledger_busy", Dependency: "halo-request-observation-context-20261015"}
@@ -489,8 +495,15 @@ func (l *v41ExpertFaultLedger) snapshot() V41ExpertFaultAttribution {
 		return out
 	}
 	defer l.mu.Unlock()
+	out.Workload = l.workload
 	out.Prefill = l.deriveLocked(l.pre)
 	out.Decode = l.deriveLocked(l.dec)
+	if out.Workload != (V41WorkloadLifetime{}) || out.Prefill != (V41ExpertFaultAttributionPhase{}) || out.Decode != (V41ExpertFaultAttributionPhase{}) {
+		out.WorkloadCoverage = V41WorkloadCoverageDefault()
+		if out.Workload.Overflow {
+			out.WorkloadCoverage.Basis = "unavailable_counter_overflow"
+		}
+	}
 	return out
 }
 

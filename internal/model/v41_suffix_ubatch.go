@@ -54,6 +54,7 @@ func (s *Session) prefillV41SuffixBatched(ids []int, wantLogits bool) ([]float32
 			// restored out of order, so rebuild every layer state from history.
 			return s.prefillV41Refold(st, startLen, ids, wantLogits), true
 		}
+		s.M.v41NoteWorkload(v41WorkloadSuffixBatch, end-done, end-done)
 		logits = got
 	}
 	s.M.v41NoteExpertFaultToken(len(ids))
