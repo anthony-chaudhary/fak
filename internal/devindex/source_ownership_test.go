@@ -47,6 +47,7 @@ func TestStudyOperationsAreDevOwnedAndProductStudyStaysRuntime(t *testing.T) {
 	for _, name := range []string{
 		"study-monitor", "study-inventory", "study-forge", "study-classify",
 		"study-link", "study-priority", "study-tickets", "study-adjacency",
+		"inference-topology",
 		"idea-scout", "borrow-provenance", "customization-index",
 	} {
 		row, ok := byName[name]

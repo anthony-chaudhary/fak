@@ -43,6 +43,7 @@ var Commands = []Command{
 	{Name: "goal-launch", Owner: "dev", Handler: "devcmd.RunGoalLaunch", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "idea-scout", Owner: "dev", Handler: "devcmd.RunIdeaScout", SourceOrigin: "internal/devcmd/ideascout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "index", Aliases: []string{"devindex"}, Owner: "dev", Handler: "devcmd.RunIndex", SourceOrigin: "internal/devcmd/index.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "inference-topology", Owner: "dev", Handler: "devcmd.RunInferenceTopology", SourceOrigin: "internal/devcmd/inference_topology.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "issue", Owner: "dev", Handler: "devcmd.RunIssue", SourceOrigin: "internal/devcmd/issue_contract.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "issue-contract-repair", Owner: "dev", Handler: "devcmd.RunIssueContractRepair", SourceOrigin: "internal/devcmd/issue_contract_repair.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "kernel-oracle", Owner: "dev", Handler: "runKernelOracle", SourceOrigin: "cmd/fak-dev/kernel_oracle.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

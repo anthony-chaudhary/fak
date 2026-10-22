@@ -436,6 +436,7 @@ var verbManifest = []Verb{
 	{Name: "study", Synopsis: "add, retrieve, or search local content-addressed study receipts", Lane: "cmd"},
 	{Name: "study-forge", Synopsis: "capture and validate deterministic paginated GitHub forge corpora", Lane: "cmd"},
 	{Name: "study-adjacency", Synopsis: "validate and render the bounded related-system runtime study manifest", Lane: "cmd"},
+	{Name: "inference-topology", Synopsis: "validate, analyze, inventory and render analytical per-rank decode resource and collective constraints", Lane: "cmd", Doc: "docs/notes/INFERENCE-TOPOLOGY-RESEARCH-VERBS.md"},
 	{Name: "study-classify", Synopsis: "classify a validated forge corpus into deterministic dispositions and evidence-backed mechanism clusters", Lane: "cmd", Doc: "docs/cli-reference.md"},
 	{Name: "study-inventory", Synopsis: "render a deterministic local checkout map for exhaustive study-repo passes", Lane: "cmd"},
 	{Name: "study-link", Synopsis: "build and validate a deterministic evidence ledger joining study clusters to witnessed FAK work", Lane: "studylink"},

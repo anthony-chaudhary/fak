@@ -337,6 +337,7 @@ var maintainerDevCommands = []string{
 	"storage-pressure",
 	"study-forge",
 	"study-adjacency",
+	"inference-topology",
 	"study-classify",
 	"study-link",
 	"study-priority",
