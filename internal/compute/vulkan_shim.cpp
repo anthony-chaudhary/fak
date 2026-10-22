@@ -471,8 +471,8 @@ static inline void dpDispatch(const Kernel& k) {
 
 // FAK_VULKAN_TIMESTAMP_PROFILE gate, read once at load; the profile itself is below.
 const bool g_tsOn = [] { const char* v = std::getenv("FAK_VULKAN_TIMESTAMP_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
-// Work submitted outside a timed batch is in no timestamp row, so the profile counts
-// it rather than silently reporting full coverage.
+// Work submitted outside a timed batch, with no timestamp pair of its own, is in no
+// timestamp row, so the profile counts it rather than silently reporting full coverage.
 std::atomic<uint64_t> g_tsUntimedCompute{0}, g_tsUntimedTransfer{0};
 // A dispatch recorded without its barrier overlaps its predecessor, so its delta is not its own time.
 uint64_t g_tsBarriersElided = 0;
@@ -481,8 +481,9 @@ static inline void tsCountUntimed(bool compute) {
     (compute ? g_tsUntimedCompute : g_tsUntimedTransfer).fetch_add(1, std::memory_order_relaxed);
 }
 
-static inline void dpOneShot(std::atomic<uint64_t>& family) {
-    tsCountUntimed(&family == &g_dp.oneShotCompute);
+// timed: the submit carried its own timestamp pair (tsOneShotBegin), so its time is in a row.
+static inline void dpOneShot(std::atomic<uint64_t>& family, bool timed = false) {
+    if (!timed) tsCountUntimed(&family == &g_dp.oneShotCompute);
     g_deviceSubmits.fetch_add(1, std::memory_order_relaxed);
     if (!g_dp_on) return;
     family.fetch_add(1, std::memory_order_relaxed);
@@ -1810,6 +1811,22 @@ void tsBatchBegin(VkCommandBuffer cmd) {
     g_tsBatchStart = std::chrono::steady_clock::now();
 }
 
+// A compute op submitted outside a batch gets its own timestamp pair, so it lands in a
+// row instead of the untimed count. Unread slots of a recorded batch would be clobbered,
+// so with any pending the op stays untimed (and counted).
+const uint32_t kTsOneShotSlots = 3; // begin, status fill, dispatch
+bool tsOneShotBegin(VkCommandBuffer cmd) {
+    if (!g_tsOn || g_batching) return false;
+    if (!g_tsInitTried) tsInit();
+    if (!g_tsUsable || g_tsUsed != 0) return false;
+    vkCmdResetQueryPool(cmd, g_tsPool, 0, kTsOneShotSlots);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_tsPool, 0);
+    g_tsUsed = 1;
+    g_tsSlots.clear();
+    g_tsBatchStart = std::chrono::steady_clock::now();
+    return true;
+}
+
 void tsAfterDispatch(VkCommandBuffer cmd, uint32_t kid, uint32_t gx, uint32_t gy) {
     if (!g_tsOn || !g_tsUsable) return;
     if (g_tsUsed >= kTsMax) { ++g_tsTruncated; return; }
@@ -1842,7 +1859,9 @@ void tsBatchLost() {
     g_tsUsed = 0;
 }
 
-void tsBatchCollect() {
+// A one-shot (batch=false) folds into the rows and totals but is not a batch, so the
+// per-batch ts-stage figures stay per decode batch.
+void tsCollect(bool batch) {
     if (!g_tsOn || !g_tsUsable || g_tsUsed < 2) return;
     std::vector<uint64_t> ts(g_tsUsed);
     if (vkGetQueryPoolResults(g_dev, g_tsPool, 0, g_tsUsed, ts.size() * sizeof(uint64_t), ts.data(),
@@ -1862,8 +1881,16 @@ void tsBatchCollect() {
     g_tsGpuNs += ((ts[g_tsUsed - 1] - ts[0]) & g_tsMask) * g_tsPeriodNs;
     g_tsWallNs += wall;
     g_tsOps += g_tsUsed - 1;
-    if ((++g_tsBatches % g_tsEvery) == 0) tsReport();
+    if (batch && (++g_tsBatches % g_tsEvery) == 0) tsReport();
     g_tsUsed = 0;
+}
+
+void tsBatchCollect() { tsCollect(true); }
+
+// Reads the pair tsOneShotBegin opened, or counts its slots lost when the submit failed.
+void tsOneShotEnd(bool completed) {
+    if (completed) tsCollect(false);
+    else tsBatchLost();
 }
 
 void batchBegin() {
@@ -3775,10 +3802,12 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     // Unbatched: one-shot submit + fence (the original per-op path).
     VkCommandBuffer cmd = checkedV41 ? v41BeginCmdChecked() : beginCmd();
     if (cmd == VK_NULL_HANDLE) { recycleDescriptorSet(rec); return false; }
+    const bool timed = tsOneShotBegin(cmd);
     if (initializedStatus != nullptr) {
         // Completion alone is not memory visibility. This same-command fill
         // and conservative dependency cover status atomics AND prior input writes.
         vkCmdFillBuffer(cmd, initializedStatus->buf, 0, statusBytes, UINT32_MAX);
+        if (timed) tsAfterDispatch(cmd, kTsFill, 0, 0);
         recordComputeBarrier(cmd);
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
@@ -3786,13 +3815,16 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
     dpDispatch(k);
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
-    dpOneShot(g_dp.oneShotCompute);
+    if (timed) tsAfterDispatch(cmd, (uint32_t)(&k - g_kern), groupsX, groupsY);
+    dpOneShot(g_dp.oneShotCompute, timed);
     if (checkedV41) {
         const bool completed = v41EndSubmitWaitChecked(cmd, true);
+        if (timed) tsOneShotEnd(completed && !g_v41SubmissionPendingFailure);
         if (!g_v41SubmissionPendingFailure) recycleDescriptorSet(rec);
         return completed;
     }
     endSubmitWait(cmd);
+    if (timed) tsOneShotEnd(g_submissionStatus == VK_SUCCESS);
     recycleDescriptorSet(rec);
     return g_submissionStatus == VK_SUCCESS;
 }
