@@ -1,0 +1,28 @@
+DeepInfer request sampling-carry contract for legacy /v1/completions
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer, deepinfer/sampling_params.py (lines 47-62, 63,
+        74, 86-105), deepinfer/engine/llm_engine.py (line 526)
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/sampling_params.py
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/engine/llm_engine.py
+
+Adaptation (internal/gateway legacy /v1/completions sampling carriers): no
+upstream code is adapted; the contract is inspired by the finding. Upstream
+builds every request's SamplingParams from the client's non-null fields
+(llm_engine.py:526), binds a per-sequence seed (sampling_params.py:61,74,86-91)
+and refuses out-of-range values with an error rather than serving a request
+that ignored them (sampling_params.py:93-105), apart from logprobs, which it
+drops without a word (sampling_params.py:63). It has no HTTP completions wire
+and no frequency/presence penalties, logit_bias or min_p. Fak's legacy
+/v1/completions route had silently dropped seed, logit_bias,
+frequency_penalty, presence_penalty, top_k and min_p. It now decodes them with
+/v1/chat/completions' types, refuses an out-of-range penalty with chat's typed
+400 (sampling_param_out_of_range) before admission and before any EP follower
+or stream preamble, and passes all six to the planner with chat's options, so
+ride upstreams receive them and native or provider refusals carry chat's
+codes. A seeded stream:true opens its SSE stream after the decode, as chat
+does, so an unsupported seed is an HTTP 400 sampling_seed_unsupported rather
+than an in-band stream error.

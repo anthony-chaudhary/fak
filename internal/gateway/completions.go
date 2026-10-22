@@ -24,7 +24,8 @@ import (
 // (#5514): the 200, the SSE headers and an opening chunk go out BEFORE the decode, and a
 // failure after that point rides an in-band SSE error event. Only the frame shape stays
 // legacy — see completionStreamWriter. That includes a native structured-output refusal:
-// chat's live stream can still answer it with a 400, this wire reports it in-band.
+// chat's live stream can still answer it with a 400, this wire reports it in-band. A
+// seeded stream opens after the decode, as chat's does, so an unsupported seed is a 400.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -78,6 +79,10 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
+		return
+	}
+	if msg := validateSamplingPenalties(body.FrequencyPenalty, body.PresencePenalty); msg != "" {
+		writeErrCode(w, http.StatusBadRequest, codeSamplingParamOutOfRange, msg)
 		return
 	}
 	if rejectInvalidResponseFormatCarrier(w, carriers.ResponseFormat) {
@@ -135,7 +140,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// real HTTP status. The upstream error below is the only thing left that can fail, and
 	// it now has to report in-band; see sseStreamWriter.fail.
 	var stream *completionStreamWriter
-	if req.Stream {
+	if req.Stream && body.Seed == nil {
 		stream = newCompletionStreamWriter(w, reqModel)
 		if err := stream.open(); err != nil {
 			// The client is already gone; do not spend a decode on a socket nobody reads.
@@ -150,9 +155,15 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
+		agent.WithSeed(body.Seed),
 		agent.WithStop(normalizeStop(req.Stop)),
 		agent.WithResponseFormat(carriers.ResponseFormat),
+		agent.WithLogitBias(body.LogitBias),
 		agent.WithGuidedDecode(carriers.GuidedDecodeFields()),
+		agent.WithFrequencyPenalty(body.FrequencyPenalty),
+		agent.WithPresencePenalty(body.PresencePenalty),
+		agent.WithChatWireTopK(body.TopK),
+		agent.WithMinP(body.MinP),
 		agent.WithRawPrompt(),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
@@ -172,6 +183,13 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeUpstreamErr(w, err)
 		return
+	}
+	if req.Stream && stream == nil {
+		stream = newCompletionStreamWriter(w, reqModel)
+		if err := stream.open(); err != nil {
+			s.logf("gateway: client vanished before the streamed response landed: %v", err)
+			return
+		}
 	}
 	if decodeTraceRequested && comp.DecodeTrace == nil {
 		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
@@ -210,12 +228,18 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// completionCarrierRequest adds the chat route's structured-output carriers, with
-// ChatRequest's tags, to the legacy body. Embedding ChatRequest instead would make
-// the fields it shares with CompletionRequest ambiguous, and encoding/json drops
-// ambiguous fields silently.
+// completionCarrierRequest adds the chat route's structured-output carriers and
+// sampling controls, with ChatRequest's tags and types, to the legacy body.
+// Embedding ChatRequest instead would make the fields it shares with
+// CompletionRequest ambiguous, and encoding/json drops ambiguous fields silently.
 type completionCarrierRequest struct {
 	CompletionRequest
+	Seed                  *int64          `json:"seed,omitempty"`
+	LogitBias             map[int]float64 `json:"logit_bias,omitempty"`
+	FrequencyPenalty      *float64        `json:"frequency_penalty,omitempty"`
+	PresencePenalty       *float64        `json:"presence_penalty,omitempty"`
+	TopK                  *int            `json:"top_k,omitempty"`
+	MinP                  *float64        `json:"min_p,omitempty"`
 	ResponseFormat        json.RawMessage `json:"response_format,omitempty"`
 	GuidedJSON            json.RawMessage `json:"guided_json,omitempty"`
 	GuidedRegex           json.RawMessage `json:"guided_regex,omitempty"`
