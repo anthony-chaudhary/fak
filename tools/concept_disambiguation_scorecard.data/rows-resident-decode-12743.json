@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "attention-fvkqwen35causalattentionpanelf32",
+      "canonical": "fvk_qwen35_causal_attention_panel_f32 (Vulkan Qwen3.5 causal attention panel)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Vulkan compute entrypoint consuming resident Q and caller-preappended K/V pointers over a caller-owned prefix, computing one causal panel.",
+      "distinction": "Low-level kernel versus qwen35FullAttentionHAL model orchestration/KV lifecycle and Metal FullAttentionDevice.",
+      "distinct_from": [
+        "halo-mtp-attention-qwen35fullattentionhal",
+        "attention-fullattentiondevice"
+      ],
+      "aliases": [],
+      "grounding": "fvk_qwen35_causal_attention_panel_f32",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
