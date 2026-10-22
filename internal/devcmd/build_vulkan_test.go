@@ -3,9 +3,32 @@ package devcmd
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// fak-test:runtime fast est=1ms
+func TestVulkanSDKPaths(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name      string
+		isWindows bool
+		include   string
+		lib       string
+	}{
+		{name: "linux", include: "include", lib: "lib"},
+		{name: "windows", isWindows: true, include: "Include", lib: "Lib"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := filepath.Join("sdk", "version")
+			include, lib := vulkanSDKPaths(root, tt.isWindows)
+			if include != filepath.Join(root, tt.include) || lib != filepath.Join(root, tt.lib) {
+				t.Fatalf("SDK paths = (%q, %q), want (%q, %q)", include, lib, filepath.Join(root, tt.include), filepath.Join(root, tt.lib))
+			}
+		})
+	}
+}
 
 func TestVulkanBuildHelpAndInvalid(t *testing.T) {
 	var stdout, stderr bytes.Buffer

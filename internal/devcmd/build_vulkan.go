@@ -144,6 +144,15 @@ var (
 	observeVulkanVerificationBinary            = hashVulkanVerificationBinary
 )
 
+// vulkanSDKPaths matches host-specific toolchain discovery without accessing the SDK.
+func vulkanSDKPaths(root string, isWindows bool) (include, lib string) {
+	includeDir, libDir := "include", "lib"
+	if isWindows {
+		includeDir, libDir = "Include", "Lib"
+	}
+	return filepath.Join(root, includeDir), filepath.Join(root, libDir)
+}
+
 // RunBuildVulkan parses CLI arguments and runs Vulkan build/test tasks via computebuild.RunVulkan.
 func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 	var sub string
@@ -313,8 +322,7 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 		tc := &computebuild.Toolchain{Go: "go", IsWindows: runtime.GOOS == "windows"}
 		if *vulkanSDK != "" {
 			tc.VulkanSDK = *vulkanSDK
-			tc.VulkanInc = filepath.Join(*vulkanSDK, "Include")
-			tc.VulkanLib = filepath.Join(*vulkanSDK, "Lib")
+			tc.VulkanInc, tc.VulkanLib = vulkanSDKPaths(*vulkanSDK, tc.IsWindows)
 		}
 		if *cxx != "" {
 			tc.CXX = *cxx
