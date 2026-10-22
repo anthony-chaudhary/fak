@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -74,12 +75,44 @@ func TestV41ScaleExactSourceContract(t *testing.T) {
 		"g_have_v41_scale_exact = v41ScaleExactBuilt ? 1 : 0;",
 		"return g_ready && g_v41IndexerFloatControls && g_have_v41_scale_exact &&",
 		"if (!dispatch(g_kern[K_V41_SCALE_EXACT], bufs, &pc, sizeof(pc), groups)) {",
-		"|| &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT]",
 		`"v41_tail_rope_exact", "v41_scale_exact",`,
 	} {
 		if !strings.Contains(shim, token) {
 			t.Errorf("missing strict scalar twin native contract %q", token)
 		}
+	}
+	// Membership, not adjacency: other kernels may be inserted or reordered.
+	// Check the actual dispatch initializer, not the many other scale references.
+	if !v41ScaleExactCheckedAdmission(shim) {
+		t.Error("strict scalar twin must independently select checked dispatch")
+	}
+	const admission = "&k == &g_kern[K_V41_SCALE_EXACT]"
+	declaration := regexp.MustCompile(`\bconst\s+bool\s+checkedV41\s*=\s*([^;]+);`).FindStringSubmatchIndex(shim)
+	if declaration == nil {
+		t.Fatal("missing checked dispatch initializer")
+	}
+	start, end := declaration[2], declaration[3]
+	initializer := shim[start:end]
+	member := regexp.MustCompile(`&\s*k\s*==\s*&\s*g_kern\s*\[\s*K_V41_SCALE_EXACT\s*\]`)
+	for _, replacement := range []string{
+		"false", // Other references to SCALE_EXACT must not satisfy membership.
+		"&k != &g_kern[K_V41_SCALE_EXACT]",
+		admission + " && false",
+		"false /* " + admission + " */",
+	} {
+		broken := shim[:start] + member.ReplaceAllString(initializer, replacement) + shim[end:]
+		if v41ScaleExactCheckedAdmission(broken) {
+			t.Errorf("checked dispatch negative control admitted %q", replacement)
+		}
+	}
+	// Keep insertion, reordering and line wrapping from becoming gate failures.
+	terms := strings.Split(initializer, "||")
+	for i, j := 0, len(terms)-1; i < j; i, j = i+1, j-1 {
+		terms[i], terms[j] = terms[j], terms[i]
+	}
+	reordered := shim[:start] + strings.Join(terms, " ||\n        ") + " || &k == &g_kern[K_V41_TEST_ADDITION]" + shim[end:]
+	if !v41ScaleExactCheckedAdmission(reordered) {
+		t.Error("checked dispatch witness depends on order, adjacency or line wrapping")
 	}
 	// The ordinary exports must not hide behind the witness-archive guard.
 	exports := shim[strings.Index(shim, "int fvk_v41_scale_exact_module_abi("):]
@@ -92,6 +125,41 @@ func TestV41ScaleExactSourceContract(t *testing.T) {
 		!strings.Contains(marker, "C.fvk_v41_scale_exact_f32(source.ptr, output.ptr, C.int(input.Shape[0]), C.float(scale))") {
 		t.Fatal("ordinary marker must bind the admitted twin in every Vulkan archive")
 	}
+}
+
+// v41ScaleExactCheckedAdmission recognizes only the reviewed disjunction grammar.
+// It is a source witness, not a C++ parser or runtime proof. Fail closed if that
+// grammar changes, while allowing whitespace, reordering and unrelated additions.
+func v41ScaleExactCheckedAdmission(shim string) bool {
+	start := strings.Index(shim, "bool dispatch(Kernel& k,")
+	if start < 0 {
+		return false
+	}
+	end := strings.Index(shim[start:], "\n}")
+	if end < 0 {
+		return false
+	}
+	body := shim[start : start+end]
+	body = regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`).ReplaceAllString(body, " ")
+	declarations := regexp.MustCompile(`\bconst\s+bool\s+checkedV41\s*=\s*([^;]+);`).FindAllStringSubmatch(body, -1)
+	if len(declarations) != 1 {
+		return false
+	}
+	kernel := regexp.MustCompile(`^&\s*k\s*==\s*&\s*g_kern\s*\[\s*(K_[A-Z0-9_]+)\s*\]$`)
+
+	found := false
+	for _, term := range strings.Split(declarations[0][1], "||") {
+		term = strings.TrimSpace(term)
+		if term == "forceChecked" || term == "g_stepBatch" {
+			continue
+		}
+		match := kernel.FindStringSubmatch(term)
+		if match == nil {
+			return false
+		}
+		found = found || match[1] == "K_V41_SCALE_EXACT"
+	}
+	return found
 }
 
 // fak-test:runtime fast est=1ms lane=default
