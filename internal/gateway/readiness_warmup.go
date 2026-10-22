@@ -92,20 +92,21 @@ func warmupCeiling(getenv func(string) string) time.Duration {
 	return time.Duration(n) * time.Second
 }
 
-// warmupSeparateTurnEnv, when true, runs the 1-token warmup turn ahead of an armed
-// coherence probe again. It is the OFF arm of the boot-warmup A/B (#12640): on
-// DeepSeek V4.1 the extra turn repeats a cold routed-expert page-in before READY.
-// Remove it once that A/B is measured.
+// warmupSeparateTurnEnv selects the boot-warmup arm (#12640). Unset (the default)
+// or true keeps the 1-token warmup turn ahead of an armed coherence probe; false
+// folds it into the probe. The fold measured 7.6% slower start->first-token on
+// DeepSeek V4.1 (strix3 ABBA, 2026-10-22): the turn's routed-expert page-in is
+// reused by the probe and the first request, not wasted.
 const warmupSeparateTurnEnv = "FAK_WARMUP_SEPARATE_TURN"
 
 // coherenceProbeIsFirstDecode reports whether the armed count probe replaces the
-// separate warmup turn as the boot's first decode.
+// separate warmup turn as the boot's first decode: only on an explicit opt-in.
 func (s *Server) coherenceProbeIsFirstDecode(getenv func(string) string) bool {
 	if s.startupDecode.armedCount() <= 0 {
 		return false
 	}
 	separate, err := strconv.ParseBool(getenv(warmupSeparateTurnEnv))
-	return err != nil || !separate
+	return err == nil && !separate
 }
 
 // warmupGate records whether a boot-time warmup inference is expected and, once
@@ -239,8 +240,8 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 // warm turn must not debit a budget or mutate session state. The prompt is a fixed,
 // code-authored one-token turn — the tax is paid on the FIRST decode, so a single
 // token is enough to force weight load + CUDA-graph capture + JIT compile while
-// wasting no steady-state compute. An armed coherence probe is itself a first
-// decode, so it replaces that turn (coherenceProbeIsFirstDecode) and its failure
+// wasting no steady-state compute. With FAK_WARMUP_SEPARATE_TURN=0 an armed
+// coherence probe replaces that turn (coherenceProbeIsFirstDecode) and its failure
 // is classified as the warmup forward's was. Safe on a nil Server or nil planner (a serve
 // with no local backend to warm): it releases any armed gate so readiness is never
 // stuck pending.

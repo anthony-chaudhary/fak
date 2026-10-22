@@ -44,10 +44,11 @@ func (p *recordingBootPlanner) Complete(_ context.Context, msgs []agent.Message,
 	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "1 2 3"}}, nil
 }
 
-// An armed count probe is the boot's first decode: READY costs one synthetic
-// completion, not a 1-token warmup turn followed by the probe (#12640).
+// With the fold opted in (FAK_WARMUP_SEPARATE_TURN=0) an armed count probe is the
+// boot's first decode: READY costs one synthetic completion (#12640).
 // fak-test:runtime fast est=50ms lane=default
 func TestRunWarmupArmedProbeIsTheOnlyBootDecode(t *testing.T) {
+	t.Setenv(warmupSeparateTurnEnv, "0")
 	planner := &recordingBootPlanner{}
 	srv := &Server{planner: planner}
 	srv.ArmWarmupGate()
@@ -66,8 +67,8 @@ func TestRunWarmupArmedProbeIsTheOnlyBootDecode(t *testing.T) {
 	}
 }
 
-// With no probe armed, and with the FAK_WARMUP_SEPARATE_TURN A/B arm, the 1-token
-// warmup turn still runs first.
+// With no probe armed, by default, and with FAK_WARMUP_SEPARATE_TURN true or
+// unparsable, the 1-token warmup turn runs ahead of the probe.
 // fak-test:runtime fast est=50ms lane=default
 func TestRunWarmupSeparateTurnArms(t *testing.T) {
 	cases := []struct {
@@ -77,7 +78,9 @@ func TestRunWarmupSeparateTurnArms(t *testing.T) {
 		wantCalls int
 	}{
 		{"unarmed probe", 0, "", 1},
+		{"armed probe default", 3, "", 2},
 		{"separate turn env", 3, "1", 2},
+		{"unparsable env", 3, "maybe", 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,9 +99,10 @@ func TestRunWarmupSeparateTurnArms(t *testing.T) {
 	}
 }
 
-// When the probe is the first decode, its failure reads as the warmup forward's
-// did: a typed V4.1 refusal stays backend_refused with its forward site. Behind
-// a separate warmup turn the probe keeps coherence_probe_error.
+// When the probe is the first decode (fold opted in), its failure reads as the
+// warmup forward's did: a typed V4.1 refusal stays backend_refused with its
+// forward site. Behind a separate warmup turn, the default, the probe keeps
+// coherence_probe_error.
 // fak-test:runtime fast est=50ms lane=default
 func TestRunWarmupFirstDecodeProbeFailureReason(t *testing.T) {
 	refusal := fmt.Errorf("warmup: %w", &model.V41IndexWeightScaleOperationError{
@@ -111,9 +115,10 @@ func TestRunWarmupFirstDecodeProbeFailureReason(t *testing.T) {
 		wantReason string
 		wantSite   bool
 	}{
-		{"typed refusal on first decode", "", refusal, WarmupFailureBackendRefused, true},
-		{"untyped error on first decode", "", errors.New("boom"), WarmupFailureBackendError, false},
+		{"typed refusal on first decode", "0", refusal, WarmupFailureBackendRefused, true},
+		{"untyped error on first decode", "0", errors.New("boom"), WarmupFailureBackendError, false},
 		{"untyped error behind separate turn", "1", errors.New("boom"), WarmupFailureCoherenceProbe, false},
+		{"untyped error behind default turn", "", errors.New("boom"), WarmupFailureCoherenceProbe, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
