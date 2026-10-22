@@ -362,3 +362,71 @@ func TestV41KVCacheFP8NonfinitePolicyUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// Literal source-derived witness, not a captured GPU result. DeepInfer commit
+// 9bd9cf243fc53ef9afbf8f04d391d989117d6ab9, tilelang_ops/cache_common.py
+// ref_cast_from_bf16/ref_cast_to_bf16 and cuda/store_kv_cache.py use BF16
+// input, E4M3 RNE scale, reciprocal of the stored scale, then E2M1 RNE.
+// 6.375/6 = 1.0625 ties to scale 1 (0x38), not upward to 1.125 (0x39).
+// The literal signed payload ties distinguish nearest-even from downward ties.
+// fak-test:runtime fast est=100ms lane=default
+// Estimated only, not measured: one bounded host row plus refusal cases.
+func TestV41KVCacheFP4DeepInferLiteral(t *testing.T) {
+	layout, _ := V41KVCacheLayoutFor(V41KVFP4)
+	nope, rope := make([]float32, layout.DNoPE), make([]float32, layout.DRoPE)
+	values := []float32{6.375, -6.375, 0.75, -0.75, 1.25, -1.25, 1.75, -1.75, 2.5, -2.5, 3.5, -3.5, 5, -5, 0, math.Float32frombits(0x80000000)}
+	copy(nope, values)
+	for i, v := range values {
+		rope[i] = v * 2 // distinct RoPE scale, same packed payload
+	}
+	// A zero tile must use scale 2^-9, not zero. A large finite BF16 tile
+	// saturates both scale and payload; nearest-distance subtraction alone
+	// cannot safely choose an E2M1 code at this magnitude.
+	nope[32], nope[33] = 0x1p100, -0x1p100
+	// The F32 convenience boundary rounds 0.749 to BF16 0.75 BEFORE casting;
+	// its E2M1 tie rounds to 1.0, not 0.5. Inputs must remain unmodified.
+	nope[48], nope[49] = 6.375, 0.749
+	record, err := layout.V41KVQuantizeRow(nope, rope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := make([]byte, 288)
+	packed := []byte{0xf7, 0xa2, 0xa2, 0xc4, 0xc4, 0xe6, 0xe6, 0x80}
+	copy(want, packed)
+	copy(want[224:], packed)
+	want[16], want[24] = 0xf7, 0x27
+	for i := 256; i < len(want); i++ {
+		want[i] = 0x01
+	}
+	want[256], want[258], want[259], want[284] = 0x38, 0x7e, 0x38, 0x40
+	if !bytes.Equal(record, want) {
+		t.Fatalf("FP4 record = %x, want literal %x", record, want)
+	}
+	if nope[49] != float32(0.749) || math.Float32bits(nope[15]) != 0x80000000 {
+		t.Fatal("quantization modified caller-owned input")
+	}
+	row, err := layout.V41KVDequantizeRow(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := []float32{6, -6, 1, -1, 1, -1, 2, -2, 2, -2, 4, -4, 4, -4, 0, math.Float32frombits(0x80000000)}
+	for i, v := range decoded {
+		if math.Float32bits(row.NoPE[i]) != math.Float32bits(v) || math.Float32bits(row.RoPE[i]) != math.Float32bits(v*2) {
+			t.Fatalf("decoded value %d = %g/%g, want %g/%g", i, row.NoPE[i], row.RoPE[i], v, v*2)
+		}
+	}
+	if row.NoPEScales[1] != 0x1p-9 || row.NoPE[16] != 0 || row.NoPE[32] != 2688 || row.NoPE[33] != -2688 || row.NoPE[49] != 1 {
+		t.Fatalf("zero/saturated/BF16 boundary decode = %g/%g/%g/%g/%g", row.NoPEScales[1], row.NoPE[16], row.NoPE[32], row.NoPE[33], row.NoPE[49])
+	}
+	for _, bad := range []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1)), math.MaxFloat32} {
+		for _, part := range [][]float32{nope, rope} {
+			old := part[0]
+			part[0] = bad
+			record, err := layout.V41KVQuantizeRow(nope, rope)
+			part[0] = old
+			if record != nil || !errors.Is(err, ErrV41KVCacheLayout) {
+				t.Fatalf("nonfinite/BF16 overflow %g: record=%x err=%v", bad, record, err)
+			}
+		}
+	}
+}

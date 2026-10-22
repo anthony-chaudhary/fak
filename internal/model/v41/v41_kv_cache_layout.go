@@ -239,7 +239,12 @@ type V41KVCacheRow struct {
 // record. nope must be exactly DNoPE wide and rope exactly DRoPE; anything else
 // fails closed. fp8 encodes each value as e4m3 with one e8m0 scale per tile
 // (`amax/448` raised to the next power of two); fp4 encodes each value as an
-// e2m1 nibble packed two-per-byte with one e4m3 (`amax/6`) scale per tile.
+// e2m1 nibble packed two-per-byte with one e4m3 scale per tile and no global
+// scale. The F32 host inputs are first rounded to BF16 (nearest-even); BF16
+// overflow is refused. FP4 follows DeepInfer's BF16 cache cast, including
+// nearest-even payload/scale rounding and a minimum scale of 2^-9. This
+// deliberately changes bytes from the former upward-rounded, zero-scale
+// host approximation. FP8 behavior and the record geometry are unchanged.
 //
 // The record order matches the published layout: NoPE payload, RoPE payload,
 // NoPE scales, then RoPE scales.
@@ -264,6 +269,17 @@ func (l V41KVCacheLayout) V41KVQuantizeRow(nope, rope []float32) ([]byte, error)
 		out = append(out, payload...)
 		out = append(out, scales...)
 	case V41KVFP4:
+		// Upstream accepts BF16, while this host API accepts F32. Convert owned
+		// copies before amax reduction, never modifying caller-owned rows.
+		nope, rope = append([]float32(nil), nope...), append([]float32(nil), rope...)
+		for _, part := range [][]float32{nope, rope} {
+			for i, v := range part {
+				part[i] = v41KVBF16(v)
+			}
+		}
+		if err := finiteV41KVCacheValues(nope, rope); err != nil {
+			return nil, fmt.Errorf("%w: after BF16 conversion", err)
+		}
 		payload, scales := quantizeV41KVFP4(nope, rope, l.TileSize)
 		out = append(out, payload...)
 		out = append(out, scales...)
@@ -278,7 +294,8 @@ func (l V41KVCacheLayout) V41KVQuantizeRow(nope, rope []float32) ([]byte, error)
 
 // V41KVDequantizeRow decodes a record produced by V41KVQuantizeRow back to f32.
 // The record length must equal BytesPerToken; a short or long record fails
-// closed rather than being truncated or padded.
+// closed rather than being truncated or padded. FP4 results are rounded to
+// BF16 and widened to F32, matching DeepInfer ref_cast_to_bf16.
 func (l V41KVCacheLayout) V41KVDequantizeRow(record []byte) (*V41KVCacheRow, error) {
 	if err := l.Validate(); err != nil {
 		return nil, err
@@ -363,10 +380,10 @@ func quantizeV41KVFP4(nope, rope []float32, tile int) ([]byte, []byte) {
 	for _, part := range [][]float32{nope, rope} {
 		for start := 0; start < len(part); start += tile {
 			scales = append(scales, encodeE4M3Scale(part[start:start+tile]))
-			inv := e4m3ScaleToF32(scales[len(scales)-1])
+			mult := float32(1) / e4m3ScaleToF32(scales[len(scales)-1])
 			for i := start; i < start+tile; i += 2 {
-				lo := e2m1Code(part[i] / inv)
-				hi := e2m1Code(part[i+1] / inv)
+				lo := e2m1Code(float32(part[i] * mult))
+				hi := e2m1Code(float32(part[i+1] * mult))
 				payload = append(payload, lo|hi<<4)
 			}
 		}
@@ -382,8 +399,8 @@ func dequantizeV41KVFP4(packed, scales []byte, tile int) []float32 {
 	for start, s := 0, 0; start < len(packed); start, s = start+half, s+1 {
 		inv := e4m3ScaleToF32(scales[s])
 		for i := start; i < start+half && i < len(packed); i++ {
-			out = append(out, e2m1NibbleValue(int(packed[i]&0x0f))*inv)
-			out = append(out, e2m1NibbleValue(int(packed[i]>>4))*inv)
+			out = append(out, v41KVBF16(float32(e2m1NibbleValue(int(packed[i]&0x0f))*inv)))
+			out = append(out, v41KVBF16(float32(e2m1NibbleValue(int(packed[i]>>4))*inv)))
 		}
 	}
 	return out
@@ -434,32 +451,25 @@ func v41KVScaleValuesE4M3(scales []byte) []float32 {
 	return out
 }
 
-// encodeE4M3Scale chooses the e4m3 scale byte for a tile: the smallest
-// representable e4m3 value at least amax/6, matching the fp4 `amax/6` scale. A
-// zero tile uses the e4m3 zero code.
+// encodeE4M3Scale follows DeepInfer 9bd9cf243fc53ef9afbf8f04d391d989117d6ab9,
+// deepinfer/model_executor/layers/tilelang_ops/cuda/store_kv_cache.py and
+// cache_common.py ref_cast_from_bf16: BF16 amax, F32 floor/multiply/clamp,
+// then E4M3 nearest-even. Even a zero tile stores the positive scale 2^-9.
 func encodeE4M3Scale(tile []float32) byte {
-	var amax float64
+	var amax float32
 	for _, v := range tile {
-		if a := math.Abs(float64(v)); a > amax {
-			amax = a
-		}
+		amax = max(amax, float32(math.Abs(float64(v))))
 	}
-	if amax == 0 {
-		return 0
-	}
-	target := amax / v41KVE2M1Max
-	best := byte(0)
-	bestVal := math.Inf(1)
-	for b := 0; b < 256; b++ {
-		if b&0x7f == 0x7f {
-			continue
-		}
-		v := math.Abs(float64(e4m3ScaleToF32(byte(b))))
-		if v >= target && v < bestVal {
-			best, bestVal = byte(b), v
-		}
-	}
-	return best
+	target := min(float32(max(amax, float32(6*0x1p-9))*float32(1.0/6.0)), float32(v41KVE4M3Max))
+	return encodeE4M3Value(target)
+}
+
+// v41KVBF16 rounds a finite F32 to BF16 nearest-even, then widens it. The
+// public encoder checks both before and after conversion to reject overflow.
+func v41KVBF16(v float32) float32 {
+	bits := math.Float32bits(v)
+	bits += 0x7fff + ((bits >> 16) & 1)
+	return math.Float32frombits(bits & 0xffff0000)
 }
 
 // encodeE4M3Value encodes one already-scaled value as an e4m3 byte, rounding to
@@ -495,7 +505,7 @@ func encodeE4M3Value(v float32) byte {
 func e4m3ScaleToF32(b byte) float32 { return model.FP8E4M3ToF32(b) }
 
 // e2m1Code encodes one already-scaled value as an e2m1 nibble, rounding to the
-// nearest representable magnitude and saturating at the format maximum.
+// nearest representable magnitude with ties to even and finite saturation.
 func e2m1Code(v float32) byte {
 	x := float64(v)
 	sign := byte(0)
@@ -503,11 +513,14 @@ func e2m1Code(v float32) byte {
 		sign = 0x8
 		x = -x
 	}
+	if x >= v41KVE2M1Max {
+		return sign | 7
+	}
 	best, bestErr := 0, math.Inf(1)
 	for code := 0; code < 8; code++ {
 		mag := float64(e2m1Value(code))
 		err := math.Abs(mag - x)
-		if err < bestErr {
+		if err < bestErr || (err == bestErr && best&1 != 0 && code&1 == 0) {
 			best, bestErr = code, err
 		}
 	}
