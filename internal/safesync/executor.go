@@ -49,6 +49,9 @@ type ExecutionReceipt struct {
 	LocalCommitsContained bool   `json:"local_commits_contained"`
 	PeerBytesPreserved    bool   `json:"peer_bytes_preserved"`
 	LocalOnly             bool   `json:"local_only,omitempty"`
+	ReviewDigest          string `json:"review_digest,omitempty"`
+	ExecutionMode         string `json:"execution_mode,omitempty"`
+	NewTree               string `json:"new_tree,omitempty"`
 	Pushed                bool   `json:"pushed"`
 	TargetSHA             string `json:"target_sha"`
 	NewHEAD               string `json:"new_head"`
@@ -58,6 +61,7 @@ type ExecutionReceipt struct {
 
 // ExecuteOptions configures PacketExecutor.
 type ExecuteOptions struct {
+	ReviewedOverlap *ReviewedOverlapRequest `json:"reviewed_overlap,omitempty"`
 	// LocalOnly preserves admission and validation gates for a clean local checkpoint.
 	LocalOnly          bool                                         `json:"local_only,omitempty"`
 	Repo               string                                       `json:"repo"`
@@ -107,6 +111,9 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 		return nil, errors.New("reconciliation packet is nil")
 	}
 
+	if e.opts.ReviewedOverlap != nil && (!e.opts.LocalOnly || len(e.opts.SuspendPaths) != 0) {
+		return localOnlyRefusal(packet, ReasonDivergedOverlap, "reviewed overlap requires local-only execution without suspension")
+	}
 	repo := e.opts.Repo
 	run := e.opts.Runner
 	now := e.opts.Now
@@ -178,7 +185,8 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 	// 2. Check packet.Dispatchable == true and disposition in allowed set (safe-disjoint, trivial-superset, owner-authorized-path-suspend).
 	// If semantic-conflict-review -> error with reason DIVERGED_OVERLAP.
 	// If wait-for-owner -> error with reason LEASE_OWNER_UNAVAILABLE.
-	if !packet.Dispatchable || !isAllowedDisposition(packet.Disposition) {
+	reviewCandidate := e.opts.ReviewedOverlap != nil && packet.Disposition == DispositionOwnerHandoffRequired
+	if (!packet.Dispatchable || !isAllowedDisposition(packet.Disposition)) && !reviewCandidate {
 		var reason, detail string
 		switch packet.Disposition {
 		case DispositionSemanticConflictReview:
@@ -238,6 +246,17 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 		}
 	}
 
+	var reviewed *reviewedOverlapAdmission
+	if e.opts.ReviewedOverlap != nil {
+		reviewed, err = ValidateCleanOverlapReview(ctx, CleanOverlapReviewOptions{Repo: repo, Runner: run, Now: now}, *e.opts.ReviewedOverlap, lease)
+		if err != nil {
+			return localOnlyRefusal(packet, ReasonDivergedOverlap, err.Error())
+		}
+		if reviewed.review.LocalHead != packet.LocalHead || reviewed.review.TargetSHA != packet.TargetSHA {
+			return localOnlyRefusal(packet, ReasonPathspecRace, "packet and review tips differ")
+		}
+	}
+
 	// Snapshot peer dirty bytes before executing graph operation
 	peerPaths := identifyPeerPaths(curDirty, packet.Disposition, e.opts.SuspendPaths)
 	peerSnapshotsBefore, err := snapshotFileBytes(repo, peerPaths)
@@ -251,109 +270,132 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 	// - If owner-authorized-path-suspend: ParkAndReapply.
 	var newHEAD string
 
-	switch packet.Disposition {
-	case DispositionTrivialSuperset:
-		isAnc, _ := isAncestor(ctx, run, repo, curHead, packet.TargetSHA)
-		if isAnc {
-			ffRes := run(ctx, repo, "merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", packet.TargetSHA)
-			if ffRes.Err != nil || ffRes.Code != 0 {
-				return nil, fmt.Errorf("trivial-superset fast-forward failed: %v %s", ffRes.Err, string(ffRes.Stderr))
-			}
-			newHEAD, err = rev(ctx, run, repo, "HEAD")
-			if err != nil {
-				return nil, fmt.Errorf("resolve HEAD after fast-forward: %w", err)
-			}
-		} else if curHead == packet.TargetSHA {
-			newHEAD = curHead
-		} else {
-			// textless merge
-			mpRunner := func(c context.Context, dir string, args ...string) (mergepreview.RunResult, error) {
-				r := run(c, dir, args...)
-				return mergepreview.RunResult{Stdout: r.Stdout, Stderr: r.Stderr, Code: r.Code}, r.Err
-			}
-			msg := fmt.Sprintf("Merge %s (trivial superset)", targetRef)
-			mpRes, mpErr := mergepreview.Apply(ctx, repo, packet.TargetSHA, msg, mpRunner)
-			if mpErr != nil {
-				return nil, fmt.Errorf("trivial-superset textless merge failed: %w", mpErr)
-			}
-			if mpRes.ApplyOutcome != mergepreview.ApplyResolvedSuperset {
-				return nil, fmt.Errorf("trivial-superset textless merge deferred: %s", mpRes.Detail)
-			}
-			if mpRes.MergeCommit != "" {
-				newHEAD = mpRes.MergeCommit
-			} else {
+	if reviewed != nil {
+		// The private admission selects ordinary merge; it never rewrites the
+		// packet or adds owner-handoff-required to globally allowed dispositions.
+		if err := e.checkLocalOnlyState(ctx, packet.LocalHead, targetRef, packet.TargetSHA); err != nil {
+			return localOnlyRefusal(packet, ReasonPathspecRace, err.Error())
+		}
+		if err := reviewCleanState(ctx, run, repo); err != nil {
+			return localOnlyRefusal(packet, ReasonPathspecRace, err.Error())
+		}
+		if err := checkReviewWriter(repo, lease); err != nil {
+			return localOnlyRefusal(packet, ReasonLeaseOwnerUnavailable, err.Error())
+		}
+		result := run(ctx, repo, "merge", "--no-ff", "--no-edit", "--signoff", "--no-autostash", "--no-overwrite-ignore", "-m", "Merge reviewed clean overlap (local-only)", packet.TargetSHA)
+		newHEAD, err = rev(ctx, run, repo, "HEAD")
+		if result.Err != nil || result.Code != 0 || err != nil {
+			return e.reviewedFailure(ctx, packet, reviewed, newHEAD, fmt.Errorf("reviewed merge failed: %v %s; HEAD readback: %v", result.Err, result.Stderr, err))
+		}
+		if err := e.checkReviewedResult(ctx, reviewed, newHEAD, lease); err != nil {
+			return e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+		}
+	} else {
+		switch packet.Disposition {
+		case DispositionTrivialSuperset:
+			isAnc, _ := isAncestor(ctx, run, repo, curHead, packet.TargetSHA)
+			if isAnc {
+				ffRes := run(ctx, repo, "merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", packet.TargetSHA)
+				if ffRes.Err != nil || ffRes.Code != 0 {
+					return nil, fmt.Errorf("trivial-superset fast-forward failed: %v %s", ffRes.Err, string(ffRes.Stderr))
+				}
 				newHEAD, err = rev(ctx, run, repo, "HEAD")
 				if err != nil {
-					return nil, fmt.Errorf("resolve HEAD after textless merge: %w", err)
+					return nil, fmt.Errorf("resolve HEAD after fast-forward: %w", err)
+				}
+			} else if curHead == packet.TargetSHA {
+				newHEAD = curHead
+			} else {
+				// textless merge
+				mpRunner := func(c context.Context, dir string, args ...string) (mergepreview.RunResult, error) {
+					r := run(c, dir, args...)
+					return mergepreview.RunResult{Stdout: r.Stdout, Stderr: r.Stderr, Code: r.Code}, r.Err
+				}
+				msg := fmt.Sprintf("Merge %s (trivial superset)", targetRef)
+				mpRes, mpErr := mergepreview.Apply(ctx, repo, packet.TargetSHA, msg, mpRunner)
+				if mpErr != nil {
+					return nil, fmt.Errorf("trivial-superset textless merge failed: %w", mpErr)
+				}
+				if mpRes.ApplyOutcome != mergepreview.ApplyResolvedSuperset {
+					return nil, fmt.Errorf("trivial-superset textless merge deferred: %s", mpRes.Detail)
+				}
+				if mpRes.MergeCommit != "" {
+					newHEAD = mpRes.MergeCommit
+				} else {
+					newHEAD, err = rev(ctx, run, repo, "HEAD")
+					if err != nil {
+						return nil, fmt.Errorf("resolve HEAD after textless merge: %w", err)
+					}
 				}
 			}
-		}
 
-	case DispositionSafeDisjoint:
-		msg := fmt.Sprintf("Merge %s (safe-disjoint)", targetRef)
-		mergeArgs := []string{"merge", "--no-ff", "--no-edit", "--signoff", "-m", msg}
-		if e.opts.LocalOnly {
-			mergeArgs = append(mergeArgs, "--no-autostash", "--no-overwrite-ignore")
-		}
-		mergeArgs = append(mergeArgs, packet.TargetSHA)
-		mergeRes := run(ctx, repo, mergeArgs...)
-		if mergeRes.Err != nil || mergeRes.Code != 0 {
-			return nil, fmt.Errorf("safe-disjoint merge failed: %v %s", mergeRes.Err, string(mergeRes.Stderr))
-		}
-		newHEAD, err = rev(ctx, run, repo, "HEAD")
-		if err != nil {
-			return nil, fmt.Errorf("resolve HEAD after safe-disjoint merge: %w", err)
-		}
-
-	case DispositionOwnerAuthorizedPathSuspend:
-		suspendPaths := e.opts.SuspendPaths
-		if len(suspendPaths) == 0 {
-			remoteWriteSet := make(map[string]bool)
-			for _, c := range packet.RemoteCommits {
-				for _, p := range c.Paths {
-					remoteWriteSet[p] = true
-				}
+		case DispositionSafeDisjoint:
+			msg := fmt.Sprintf("Merge %s (safe-disjoint)", targetRef)
+			mergeArgs := []string{"merge", "--no-ff", "--no-edit", "--signoff", "-m", msg}
+			if e.opts.LocalOnly {
+				mergeArgs = append(mergeArgs, "--no-autostash", "--no-overwrite-ignore")
 			}
-			for _, dp := range packet.DirtyPaths {
-				if remoteWriteSet[dp] {
-					suspendPaths = append(suspendPaths, dp)
-				}
+			mergeArgs = append(mergeArgs, packet.TargetSHA)
+			mergeRes := run(ctx, repo, mergeArgs...)
+			if mergeRes.Err != nil || mergeRes.Code != 0 {
+				return nil, fmt.Errorf("safe-disjoint merge failed: %v %s", mergeRes.Err, string(mergeRes.Stderr))
 			}
-		}
-		session := strings.TrimSpace(e.opts.Session)
-		if session == "" {
-			session = "executor"
-		}
-		parkOpts := ParkOptions{
-			Repo:           repo,
-			Session:        session,
-			Paths:          suspendPaths,
-			TargetRef:      targetRef,
-			Apply:          true,
-			Runner:         run,
-			EnvRunner:      e.opts.EnvRunner,
-			Now:            now,
-			WriterLeaseTTL: e.opts.WriterLeaseTTL,
-			LeaseOwner:     leaseOwner,
-			Lease:          lease,
-		}
-		parkRec, parkErr := ParkAndReapply(ctx, parkOpts)
-		if parkErr != nil {
-			return nil, fmt.Errorf("park and reapply: %w", parkErr)
-		}
-		if !parkRec.OK || parkRec.Status == ParkStatusConflict {
-			return nil, fmt.Errorf("park and reapply conflict: %s (%s)", parkRec.Reason, parkRec.Detail)
-		}
-		newHEAD = parkRec.NewHEAD
-		if newHEAD == "" {
 			newHEAD, err = rev(ctx, run, repo, "HEAD")
 			if err != nil {
-				return nil, fmt.Errorf("resolve HEAD after park and reapply: %w", err)
+				return nil, fmt.Errorf("resolve HEAD after safe-disjoint merge: %w", err)
 			}
+
+		case DispositionOwnerAuthorizedPathSuspend:
+			suspendPaths := e.opts.SuspendPaths
+			if len(suspendPaths) == 0 {
+				remoteWriteSet := make(map[string]bool)
+				for _, c := range packet.RemoteCommits {
+					for _, p := range c.Paths {
+						remoteWriteSet[p] = true
+					}
+				}
+				for _, dp := range packet.DirtyPaths {
+					if remoteWriteSet[dp] {
+						suspendPaths = append(suspendPaths, dp)
+					}
+				}
+			}
+			session := strings.TrimSpace(e.opts.Session)
+			if session == "" {
+				session = "executor"
+			}
+			parkOpts := ParkOptions{
+				Repo:           repo,
+				Session:        session,
+				Paths:          suspendPaths,
+				TargetRef:      targetRef,
+				Apply:          true,
+				Runner:         run,
+				EnvRunner:      e.opts.EnvRunner,
+				Now:            now,
+				WriterLeaseTTL: e.opts.WriterLeaseTTL,
+				LeaseOwner:     leaseOwner,
+				Lease:          lease,
+			}
+			parkRec, parkErr := ParkAndReapply(ctx, parkOpts)
+			if parkErr != nil {
+				return nil, fmt.Errorf("park and reapply: %w", parkErr)
+			}
+			if !parkRec.OK || parkRec.Status == ParkStatusConflict {
+				return nil, fmt.Errorf("park and reapply conflict: %s (%s)", parkRec.Reason, parkRec.Detail)
+			}
+			newHEAD = parkRec.NewHEAD
+			if newHEAD == "" {
+				newHEAD, err = rev(ctx, run, repo, "HEAD")
+				if err != nil {
+					return nil, fmt.Errorf("resolve HEAD after park and reapply: %w", err)
+				}
+			}
+
+		default:
+			return nil, fmt.Errorf("unsupported disposition %q", packet.Disposition)
 		}
 
-	default:
-		return nil, fmt.Errorf("unsupported disposition %q", packet.Disposition)
 	}
 
 	// 5. Verify required build and test witnesses before pushing.
@@ -363,6 +405,11 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 			buildVerifier = defaultBuildVerifier
 		}
 		if err := buildVerifier(ctx, repo); err != nil {
+			if reviewed != nil {
+				receipt, failure := e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+				receipt.Reason = ReasonBuildCheckFailed
+				return receipt, failure
+			}
 			receipt := &ExecutionReceipt{
 				Schema:    ExecuteReceiptSchema,
 				Status:    ExecuteStatusFailed,
@@ -383,6 +430,11 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 			testVerifier = defaultTestVerifier
 		}
 		if err := testVerifier(ctx, repo); err != nil {
+			if reviewed != nil {
+				receipt, failure := e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+				receipt.Reason = ReasonTestCheckFailed
+				return receipt, failure
+			}
 			receipt := &ExecutionReceipt{
 				Schema:    ExecuteReceiptSchema,
 				Status:    ExecuteStatusFailed,
@@ -400,7 +452,28 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 	// Local-only stops before publication and executor-stage Git fetch.
 	// Explicit assessment fetch, validation dependencies and hooks keep their own policy.
 	if e.opts.LocalOnly {
-		return e.localOnlyReadback(ctx, packet, targetRef, newHEAD, lease)
+		receipt, readErr := e.localOnlyReadback(ctx, packet, targetRef, newHEAD, lease)
+		if reviewed != nil {
+			if readErr != nil {
+				return e.reviewedFailure(ctx, packet, reviewed, newHEAD, readErr)
+			}
+			receipt.ReviewDigest, receipt.ExecutionMode, receipt.NewTree = reviewed.review.Digest, "reviewed-clean-overlap", reviewed.review.MergedTree
+			if readErr == nil {
+				if err := e.checkReviewedResult(ctx, reviewed, newHEAD, lease); err != nil {
+					return e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+				}
+				if err := e.checkLocalOnlyState(ctx, newHEAD, targetRef, packet.TargetSHA); err != nil {
+					return e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+				}
+				if err := reviewCleanState(ctx, run, repo); err != nil {
+					return e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+				}
+				if err := checkReviewWriter(repo, lease); err != nil {
+					return e.reviewedFailure(ctx, packet, reviewed, newHEAD, err)
+				}
+			}
+		}
+		return receipt, readErr
 	}
 
 	// 6. Push: execute SafePush.
@@ -751,4 +824,18 @@ func (e *PacketExecutor) localOnlyReadback(ctx context.Context, packet *Reconcil
 	receipt.Detail = "validated local checkpoint; no publication or executor-stage Git fetch (not a no-network guarantee)"
 	receipt.PeerBytesPreserved = true // Clean before and after; no suspended peer paths.
 	return receipt, nil
+}
+
+func (e *PacketExecutor) reviewedFailure(ctx context.Context, packet *ReconciliationPacket, admission *reviewedOverlapAdmission, head string, err error) (*ExecutionReceipt, error) {
+	actual, readErr := rev(ctx, e.opts.Runner, e.opts.Repo, "HEAD")
+	if readErr == nil {
+		head = actual
+	}
+	tree, _ := rev(ctx, e.opts.Runner, e.opts.Repo, "HEAD^{tree}")
+	if readErr != nil {
+		err = fmt.Errorf("%w; observed HEAD unavailable: %v", err, readErr)
+	}
+	return &ExecutionReceipt{NewTree: tree, Schema: ExecuteReceiptSchema, Status: ExecuteStatusFailed, LocalOnly: true,
+		TargetSHA: packet.TargetSHA, NewHEAD: head, ReviewDigest: admission.review.Digest,
+		ExecutionMode: "reviewed-clean-overlap", Reason: "REVIEWED_OVERLAP_FAILED", Detail: err.Error()}, err
 }

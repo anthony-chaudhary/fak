@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -41,7 +42,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply", "push", "drain", "reconcile", "packet", "execute", "heal":
+		case "check", "apply", "push", "drain", "reconcile", "packet", "execute", "heal", "review-overlap":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -49,7 +50,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, packet, execute, or heal)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, push, drain, reconcile, packet, execute, review-overlap, or heal)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -89,6 +90,11 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	executeFlag := fs.Bool("execute", false, "reconcile: execute reconciliation packet with independent graph readback")
 	localOnly := fs.Bool("local-only", false, "execute/reconcile --execute: validated clean local checkpoint; no publication or executor-stage Git fetch")
 	emitPacket := fs.Bool("emit-packet", false, "reconcile: emit owner-aware reconciliation packet")
+	reviewFile := fs.String("reviewed-overlap", "", "local-only execution: exact clean-overlap review manifest")
+	acceptReview := fs.String("accept-review", "", "local-only execution: explicitly accept this exact reviewed manifest digest")
+	reviewTarget := fs.String("target", "", "review-overlap: exact immutable target commit")
+	reviewer := fs.String("reviewer", "", "review-overlap: actual accountable reviewer identity (not authentication)")
+	reviewEvidence := fs.String("review-evidence", "", "review-overlap: review/authority evidence reference")
 	packetFile := fs.String("packet", "", "execute: path to reconciliation packet JSON file")
 	sessionFlag := fs.String("session", "", "reconcile: session id for suspended paths")
 	var suspendPaths pathList
@@ -101,6 +107,53 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	if *localOnly && ((command != "execute" && !(command == "reconcile" && *executeFlag)) || *applyFlag) {
 		fmt.Fprintln(stderr, "fak sync: --local-only requires execute or reconcile --execute, and cannot be combined with --apply")
 		return syncExitUsage
+	}
+	var overlapRequest *safesync.ReviewedOverlapRequest
+	if *reviewFile != "" || *acceptReview != "" {
+		if *reviewFile == "" || *acceptReview == "" || !*localOnly || *applyFlag || len(suspendPaths) != 0 || (command != "execute" && !(command == "reconcile" && *executeFlag)) {
+			fmt.Fprintln(stderr, "fak sync: --reviewed-overlap and --accept-review require local-only execute or reconcile --execute without apply or suspension")
+			return syncExitUsage
+		}
+		data, err := os.ReadFile(pathutil.ExpandTilde(*reviewFile))
+		if err != nil {
+			fmt.Fprintf(stderr, "fak sync: read review: %v\n", err)
+			return syncExitUsage
+		}
+		var manifest safesync.CleanOverlapReview
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&manifest); err != nil {
+			fmt.Fprintf(stderr, "fak sync: decode review: %v\n", err)
+			return syncExitUsage
+		}
+		var extra interface{}
+		if err := decoder.Decode(&extra); err != io.EOF {
+			fmt.Fprintln(stderr, "fak sync: trailing review data")
+			return syncExitUsage
+		}
+		overlapRequest = &safesync.ReviewedOverlapRequest{Review: manifest, Approval: safesync.ReviewedOverlapApproval{Digest: *acceptReview}}
+	}
+	if command != "review-overlap" && (*reviewTarget != "" || *reviewer != "" || *reviewEvidence != "") {
+		fmt.Fprintln(stderr, "fak sync: --target, --reviewer and --review-evidence are review-overlap-only")
+		return syncExitUsage
+	}
+	if command == "review-overlap" {
+		if *fetch || *applyFlag || *executeFlag || len(suspendPaths) != 0 {
+			fmt.Fprintln(stderr, "fak sync review-overlap: manifest generation does not fetch, execute, apply or suspend")
+			return syncExitUsage
+		}
+		manifest, err := safesync.PrepareCleanOverlapReview(context.Background(), safesync.CleanOverlapReviewOptions{
+			Repo: pathutil.ExpandTilde(*repo), TargetSHA: *reviewTarget, Reviewer: *reviewer, Evidence: *reviewEvidence,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak sync review-overlap: %v\n", err)
+			return syncExitRefused
+		}
+		if err := writeIndentedJSON(stdout, manifest); err != nil {
+			fmt.Fprintln(stderr, err)
+			return syncExitInternal
+		}
+		return syncExitOK
 	}
 	if command == "push" && *dryRun {
 		fmt.Fprintln(stderr, "fak sync push: --dry-run is not supported; no push was attempted")
@@ -194,17 +247,18 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			sess = firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"), "sync-reconcile")
 		}
 		opts := safesync.ReconcileOptions{
-			Repo:         repoPath,
-			Remote:       *remote,
-			Branch:       *branch,
-			Goal:         *goal,
-			Apply:        *applyFlag,
-			Execute:      *executeFlag,
-			LocalOnly:    *localOnly,
-			Fetch:        *fetch,
-			SuspendPaths: suspendPaths,
-			Session:      sess,
-			EmitPacket:   *emitPacket || *executeFlag,
+			ReviewedOverlap: overlapRequest,
+			Repo:            repoPath,
+			Remote:          *remote,
+			Branch:          *branch,
+			Goal:            *goal,
+			Apply:           *applyFlag,
+			Execute:         *executeFlag,
+			LocalOnly:       *localOnly,
+			Fetch:           *fetch,
+			SuspendPaths:    suspendPaths,
+			Session:         sess,
+			EmitPacket:      *emitPacket || *executeFlag,
 		}
 		assessment, err := syncRouteReconciliation(context.Background(), opts)
 		if err != nil {
@@ -312,6 +366,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		}
 
 		execOpts := safesync.ExecuteOptions{
+			ReviewedOverlap:    overlapRequest,
 			LocalOnly:          *localOnly,
 			Repo:               repoPath,
 			Remote:             *remote,
@@ -484,7 +539,15 @@ func syncUsage(w io.Writer) {
   fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute [--local-only]]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync execute   [--local-only] [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
+  fak sync review-overlap --repo DIR --target SHA --reviewer NAME --review-evidence REF
+  fak sync execute --local-only --reviewed-overlap MANIFEST --accept-review DIGEST [--packet FILE]
   fak sync heal      [--repo DIR] [--dry-run] [--json]
+
+Review generation emits both full parent-to-result diffs and is not approval. An
+authorized operator must genuinely review the exact manifest before accepting its
+digest. Reviewed overlap is local-only; live independent path claims, textual
+conflicts, and stale bindings remain refused. Reviewer names are audit metadata,
+not authentication. Multiple merge bases are not admitted by this bounded mode.
 
 Local-only packet execution requires a clean index/worktree and successful build/test
 witnesses; it preserves ownership refusals and stops before publication or executor-stage

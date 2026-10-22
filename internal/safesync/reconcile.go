@@ -44,23 +44,24 @@ const (
 
 // ReconcileOptions configures ReconcileRouter.
 type ReconcileOptions struct {
-	Repo              string           `json:"repo"`
-	Remote            string           `json:"remote"`
-	Branch            string           `json:"branch,omitempty"`
-	Goal              string           `json:"goal,omitempty"` // publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)
-	Apply             bool             `json:"apply,omitempty"`
-	Fetch             bool             `json:"fetch,omitempty"`
-	Runner            Runner           `json:"-"`
-	Now               func() time.Time `json:"-"`
-	WriterLeaseTTL    time.Duration    `json:"-"`
-	Contention        bool             `json:"-"` // test or override seam for active contention
-	SuspendPaths      []string         `json:"suspend_paths,omitempty"`
-	Session           string           `json:"session,omitempty"`
-	EmitPacket        bool             `json:"emit_packet,omitempty"`
-	LocalOnly         bool             `json:"local_only,omitempty"`
-	Execute           bool             `json:"execute,omitempty"`
-	AutoQuarantine    bool             `json:"auto_quarantine,omitempty"`
-	QuarantineScratch bool             `json:"quarantine_scratch,omitempty"`
+	ReviewedOverlap   *ReviewedOverlapRequest `json:"reviewed_overlap,omitempty"`
+	Repo              string                  `json:"repo"`
+	Remote            string                  `json:"remote"`
+	Branch            string                  `json:"branch,omitempty"`
+	Goal              string                  `json:"goal,omitempty"` // publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)
+	Apply             bool                    `json:"apply,omitempty"`
+	Fetch             bool                    `json:"fetch,omitempty"`
+	Runner            Runner                  `json:"-"`
+	Now               func() time.Time        `json:"-"`
+	WriterLeaseTTL    time.Duration           `json:"-"`
+	Contention        bool                    `json:"-"` // test or override seam for active contention
+	SuspendPaths      []string                `json:"suspend_paths,omitempty"`
+	Session           string                  `json:"session,omitempty"`
+	EmitPacket        bool                    `json:"emit_packet,omitempty"`
+	LocalOnly         bool                    `json:"local_only,omitempty"`
+	Execute           bool                    `json:"execute,omitempty"`
+	AutoQuarantine    bool                    `json:"auto_quarantine,omitempty"`
+	QuarantineScratch bool                    `json:"quarantine_scratch,omitempty"`
 }
 
 // GoalInfo represents the parsed reconciliation goal.
@@ -195,6 +196,9 @@ func RouteReconciliation(ctx context.Context, opts ReconcileOptions) (ReconcileA
 
 // Route runs the state inspection pipeline and emits the ReconcileAssessment.
 func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error) {
+	if r.opts.ReviewedOverlap != nil && (!r.opts.LocalOnly || !r.opts.Execute || r.opts.Apply || len(r.opts.SuspendPaths) != 0) {
+		return ReconcileAssessment{}, fmt.Errorf("reviewed overlap requires local-only packet execution without apply or suspension")
+	}
 	if r.opts.LocalOnly && (!r.opts.Execute || r.opts.Apply) {
 		return ReconcileAssessment{}, fmt.Errorf("local-only requires packet execution without apply")
 	}
@@ -225,15 +229,16 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 	}
 	if r.opts.Execute && assessment.Packet != nil {
 		execOpts := ExecuteOptions{
-			LocalOnly:      r.opts.LocalOnly,
-			Repo:           r.opts.Repo,
-			Remote:         r.opts.Remote,
-			Branch:         assessment.Branch,
-			WriterLeaseTTL: r.opts.WriterLeaseTTL,
-			SuspendPaths:   r.opts.SuspendPaths,
-			Session:        r.opts.Session,
-			Runner:         r.opts.Runner,
-			Now:            r.opts.Now,
+			ReviewedOverlap: r.opts.ReviewedOverlap,
+			LocalOnly:       r.opts.LocalOnly,
+			Repo:            r.opts.Repo,
+			Remote:          r.opts.Remote,
+			Branch:          assessment.Branch,
+			WriterLeaseTTL:  r.opts.WriterLeaseTTL,
+			SuspendPaths:    r.opts.SuspendPaths,
+			Session:         r.opts.Session,
+			Runner:          r.opts.Runner,
+			Now:             r.opts.Now,
 		}
 		receipt, execErr := ExecutePacket(ctx, assessment.Packet, execOpts)
 		assessment.ExecuteReceipt = receipt
