@@ -1,6 +1,8 @@
 DeepInfer V4.1 numeric reference oracles
 
 Copyright DeepSeek-AI / DeepInfer authors
+Copyright 2023 The vLLM team.
+Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Source: deepseek-ai/DeepInfer
@@ -83,3 +85,26 @@ SwiGLU, route weight and down-input cast are one fused upstream kernel, so the
 oracle casts the float32 weighted value directly; whether a bf16 rounding sits
 before that cast is not observable upstream. The test measures expert-output
 relative L2 change against fak's host bf16 expert graph on a synthetic fixture.
+
+Float32 rotary table (internal/model/v41_rope_f32_test.go)
+
+Upstream paths:
+  deepinfer/model_executor/layers/rotary_embedding.py:35-41,68-82,109-144,195-207
+  deepinfer/model_executor/models/v4_modules/utils.py:19-48
+  deepinfer/model_executor/models/v4_modules/rope.py:19-52
+  deepinfer/hugging_face/config.py:88-96
+
+The rotary_embedding.py source derives from vLLM and HuggingFace Transformers;
+its copyright lines, reproduced above, are retained as Apache-2.0 section 4(c)
+requires.
+
+Adaptation: Go float32 emulation of the V4.1 rotary table. The inverse
+frequencies are built as float32 pow and reciprocal; on compressed layers the
+YaRN blend follows the upstream operand order (interpolation weighted by one
+minus the mask, extrapolation by the mask) with every step rounded to float32;
+the angle is the float32 product of position and frequency, and cos and sin have
+unit amplitude because the V4.1 config disables YaRN mscale. Layer regime,
+theta and YaRN parameters come from fak's existing V4.1 rotary policy. Host pow
+and trigonometry are correctly rounded, so this makes no bitwise claim against
+CUDA or torch. The test measures the angle gap between fak's float64 table and
+this float32 emulation at long positions; fak's table is unchanged.
