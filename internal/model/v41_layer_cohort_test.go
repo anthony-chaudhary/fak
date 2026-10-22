@@ -121,7 +121,7 @@ func (b *v41LayerCohortBackend) V41ReadDeferred(statuses []compute.V41DeferredSt
 }
 func (b *v41LayerCohortBackend) resetCohort() { b.expertFences = nil; b.outputsPerFence = nil }
 
-// fak-test:runtime medium est=6s lane=default
+// fak-test:runtime medium est=16s lane=default
 func TestV41LayerCohortTransactions(t *testing.T) {
 	t.Setenv(v41DeferredBF16PublishEnv, "1")
 	t.Setenv(v41RoutedIDEnv, "0")
@@ -358,6 +358,126 @@ func TestV41LayerCohortTransactions(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) { runScriptedRoutes(t, test.routes) })
 	}
+	unionModes := []struct {
+		name string
+		mode v41CohortExpertUnionMode
+	}{{"on", v41CohortExpertUnionOn}, {"off", v41CohortExpertUnionOff}, {"auto", v41CohortExpertUnionAuto}}
+	checkUnionFences := func(t *testing.T, b *v41LayerCohortBackend, lanes int, union bool) {
+		t.Helper()
+		fences, statuses, outputs := lanes*m.Cfg.NumLayers, 2*m.Cfg.NumExpertsPerTok, 1
+		if union {
+			fences, statuses, outputs = m.Cfg.NumLayers, 2*lanes*m.Cfg.NumExpertsPerTok, lanes
+		}
+		if len(b.expertFences) != fences {
+			t.Fatalf("expert fences=%v want %d", b.expertFences, fences)
+		}
+		for i, n := range b.expertFences {
+			if n != statuses || b.outputsPerFence[i] != outputs {
+				t.Fatalf("expert fence statuses=%v outputs=%v want %d/%d", b.expertFences, b.outputsPerFence, statuses, outputs)
+			}
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		routes [][]int
+		shared int
+	}{
+		{name: "high overlap", routes: [][]int{{0, 1, 2, 3, 4, 5}, {5, 4, 3, 2, 1, 0}}, shared: 6},
+		{name: "threshold overlap three lanes", routes: [][]int{{0, 1, 2, 3, 4, 5}, {0, 1, 2, 6, 7, 8}, {0, 1, 2, 9, 10, 11}}, shared: 6},
+		{name: "below threshold overlap", routes: [][]int{{0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, 4, 6}}, shared: 5},
+		{name: "low overlap", routes: [][]int{{0, 1, 2, 3, 4, 5}, {0, 6, 7, 8, 9, 10}}, shared: 1},
+		{name: "disjoint", routes: [][]int{{0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11}}, shared: 0},
+	} {
+		var unionLogits [][]float32
+		for _, mode := range unionModes {
+			t.Run("expert union gate/"+test.name+"/"+mode.name, func(t *testing.T) {
+				setV41CohortExpertUnionModeForTest(t, mode.mode)
+				b, lanes, refs := newScriptedFixture(t, len(test.routes))
+				want := serialScripted(b, lanes, refs, test.routes)
+				startScripted(b, test.routes)
+				before := V41CohortExpertUnionSnapshot()
+				got, err := m.StepV41Batch(lanes)
+				after := V41CohortExpertUnionSnapshot()
+				if err != nil || !got.Selected || len(got.Lanes) != len(test.routes) {
+					t.Fatalf("gated batch selected=%v err=%v", got.Selected, err)
+				}
+				logits := make([][]float32, len(got.Lanes))
+				for i, result := range got.Lanes {
+					if result.ID != lanes[i].ID || !result.Committed || result.Err != nil || !v41SameBits(result.Logits, want[i]) {
+						t.Fatalf("gated lane %d differed from serial fused route: %+v", i, result)
+					}
+					if unionLogits != nil && !v41SameBits(result.Logits, unionLogits[i]) {
+						t.Fatalf("gated lane %d differed from the union logits", i)
+					}
+					logits[i] = result.Logits
+				}
+				if mode.mode == v41CohortExpertUnionOn {
+					unionLogits = logits
+				}
+				union := mode.mode.admitsSharedRows(test.shared) && mode.mode != v41CohortExpertUnionOff
+				checkUnionFences(t, b.v41LayerCohortBackend, len(test.routes), union)
+				layers := uint64(m.Cfg.NumLayers)
+				var selected, overlap, observed uint64
+				if union {
+					selected = layers
+				} else if mode.mode == v41CohortExpertUnionAuto {
+					overlap = layers
+				}
+				if mode.mode != v41CohortExpertUnionOff {
+					observed = layers
+				}
+				var observedAll uint64
+				for i := range after.SharedRows {
+					observedAll += after.SharedRows[i] - before.SharedRows[i]
+				}
+				if after.Selected-before.Selected != selected || after.DeclinedOverlap-before.DeclinedOverlap != overlap ||
+					after.DeclinedCapacity != before.DeclinedCapacity || after.DeclinedAdmission != before.DeclinedAdmission || observedAll != observed ||
+					after.SharedRows[test.shared]-before.SharedRows[test.shared] != observed {
+					t.Fatalf("union counters %+v -> %+v want selected=%d overlap=%d observed=%d at shared=%d", before, after, selected, overlap, observed, test.shared)
+				}
+			})
+		}
+	}
+	for _, mode := range unionModes {
+		t.Run("expert union gate/native router/"+mode.name, func(t *testing.T) {
+			setV41CohortExpertUnionModeForTest(t, mode.mode)
+			b, lanes, refs := newFixture(t)
+			want := make([][]float32, len(refs))
+			for i, r := range refs {
+				want[i] = append([]float32(nil), r.Step(lanes[i].Token)...)
+			}
+			b.resetCohort()
+			before := V41CohortExpertUnionSnapshot()
+			got, err := m.StepV41Batch(lanes)
+			after := V41CohortExpertUnionSnapshot()
+			if err != nil || !got.Selected {
+				t.Fatalf("native gated batch selected=%v err=%v", got.Selected, err)
+			}
+			for i, result := range got.Lanes {
+				if !result.Committed || result.Err != nil || !v41SameBits(result.Logits, want[i]) {
+					t.Fatalf("native gated lane %d differed from serial: %+v", i, result)
+				}
+			}
+			selected, overlap := after.Selected-before.Selected, after.DeclinedOverlap-before.DeclinedOverlap
+			layers := uint64(m.Cfg.NumLayers)
+			switch mode.mode {
+			case v41CohortExpertUnionOn:
+				checkUnionFences(t, b, len(lanes), true)
+				if selected != layers || overlap != 0 {
+					t.Fatalf("native on counters selected=%d overlap=%d", selected, overlap)
+				}
+			case v41CohortExpertUnionOff:
+				checkUnionFences(t, b, len(lanes), false)
+				if selected != 0 || overlap != 0 {
+					t.Fatalf("native off counters selected=%d overlap=%d", selected, overlap)
+				}
+			case v41CohortExpertUnionAuto:
+				if selected+overlap != layers || len(b.expertFences) != int(selected)+len(lanes)*int(overlap) {
+					t.Fatalf("native auto counters selected=%d overlap=%d fences=%v", selected, overlap, b.expertFences)
+				}
+			}
+		})
+	}
 	t.Run("partial overlap cancellation stays lane local", func(t *testing.T) {
 		routes := [][]int{{0, 1, 2, 3, 4, 5}, {0, 1, 2, 6, 7, 8}, {0, 1, 2, 9, 10, 11}}
 		b, lanes, refs := newScriptedFixture(t, len(routes))
@@ -413,9 +533,14 @@ func TestV41LayerCohortTransactions(t *testing.T) {
 		want := serialScripted(b, lanes, refs, routes)
 		before := m.V41ExpertFaultAttribution().Decode
 		startScripted(b, routes)
+		unionBefore := V41CohortExpertUnionSnapshot()
 		got, err := m.StepV41Batch(lanes)
+		unionAfter := V41CohortExpertUnionSnapshot()
 		if err != nil || !got.Selected {
 			t.Fatalf("late ring decline fallback selected=%v err=%v", got.Selected, err)
+		}
+		if unionAfter.DeclinedAdmission-unionBefore.DeclinedAdmission != uint64(m.Cfg.NumLayers) || unionAfter.DeclinedCapacity != unionBefore.DeclinedCapacity || unionAfter.Selected != unionBefore.Selected {
+			t.Fatalf("late ring decline union counters %+v -> %+v", unionBefore, unionAfter)
 		}
 		for i, result := range got.Lanes {
 			if !result.Committed || result.Err != nil || !v41SameBits(result.Logits, want[i]) {
