@@ -92,6 +92,22 @@ func warmupCeiling(getenv func(string) string) time.Duration {
 	return time.Duration(n) * time.Second
 }
 
+// warmupSeparateTurnEnv, when true, runs the 1-token warmup turn ahead of an armed
+// coherence probe again. It is the OFF arm of the boot-warmup A/B (#12640): on
+// DeepSeek V4.1 the extra turn repeats a cold routed-expert page-in before READY.
+// Remove it once that A/B is measured.
+const warmupSeparateTurnEnv = "FAK_WARMUP_SEPARATE_TURN"
+
+// coherenceProbeIsFirstDecode reports whether the armed count probe replaces the
+// separate warmup turn as the boot's first decode.
+func (s *Server) coherenceProbeIsFirstDecode(getenv func(string) string) bool {
+	if s.startupDecode.armedCount() <= 0 {
+		return false
+	}
+	separate, err := strconv.ParseBool(getenv(warmupSeparateTurnEnv))
+	return err != nil || !separate
+}
+
 // warmupGate records whether a boot-time warmup inference is expected and, once
 // run, how long boot->first-token took. Zero value == not armed (the gate is
 // silent and /healthz is unaffected). Guarded by its own mutex so the health read
@@ -223,7 +239,9 @@ func (s *Server) MarkWarmupComplete(d time.Duration) {
 // warm turn must not debit a budget or mutate session state. The prompt is a fixed,
 // code-authored one-token turn — the tax is paid on the FIRST decode, so a single
 // token is enough to force weight load + CUDA-graph capture + JIT compile while
-// wasting no steady-state compute. Safe on a nil Server or nil planner (a serve
+// wasting no steady-state compute. An armed coherence probe is itself a first
+// decode, so it replaces that turn (coherenceProbeIsFirstDecode) and its failure
+// is classified as the warmup forward's was. Safe on a nil Server or nil planner (a serve
 // with no local backend to warm): it releases any armed gate so readiness is never
 // stuck pending.
 //
@@ -254,46 +272,18 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		s.MarkWarmupComplete(0)
 		return 0, nil
 	}
-	msgs := []agent.Message{{Role: agent.RoleUser, Content: "warmup"}}
 	start := time.Now()
-
 	ceiling := warmupCeiling(os.Getenv)
-	done := make(chan struct{})
-	var compErr error
-	go func() {
-		_, compErr = s.completeBootProbe(ctx, msgs, agent.WithMaxTokens(1))
-		close(done)
-	}()
-	if ceiling > 0 {
-		timer := time.NewTimer(ceiling)
-		defer timer.Stop()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			// A cancelled/expired caller context surfaces as before, leaving the gate
-			// PENDING; the worker goroutine is abandoned.
-			return time.Since(start), s.failWarmup(ctx.Err(), "")
-		case <-timer.C:
-			return time.Since(start), s.failWarmup(fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness held as warmup_failed",
-				ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling), "")
-		}
-	} else {
-		// A negative FAK_WARMUP_CEILING_S disables the bound: wait indefinitely, but
-		// still surface a caller cancellation.
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return time.Since(start), s.failWarmup(ctx.Err(), "")
-		}
-	}
-
-	if compErr != nil {
-		return time.Since(start), s.failWarmup(compErr, "")
+	probeFailure := WarmupFailureCoherenceProbe
+	if s.coherenceProbeIsFirstDecode(os.Getenv) {
+		probeFailure = ""
+	} else if err := s.runWarmupTurn(ctx, ceiling, start); err != nil {
+		return time.Since(start), s.failWarmup(err, "")
 	}
 	// The known-answer coherence probe runs BEFORE the gate releases, so there is
 	// no window in which a skewed binary/shader pair reports ready.
 	if err := s.runStartupCoherenceProbe(ctx, ceiling); err != nil {
-		return time.Since(start), s.failWarmup(err, WarmupFailureCoherenceProbe)
+		return time.Since(start), s.failWarmup(err, probeFailure)
 	}
 	d := time.Since(start)
 
@@ -328,7 +318,35 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 		return d, s.failWarmup(err, "")
 	}
 	s.MarkWarmupComplete(d)
-	return d, compErr
+	return d, nil
+}
+
+// runWarmupTurn issues the fixed 1-token warmup turn, bounded by ceiling (<=0 =
+// unbounded) and ctx. On a cancelled context or timeout the worker goroutine is
+// abandoned.
+func (s *Server) runWarmupTurn(ctx context.Context, ceiling time.Duration, start time.Time) error {
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "warmup"}}
+	done := make(chan struct{})
+	var compErr error
+	go func() {
+		_, compErr = s.completeBootProbe(ctx, msgs, agent.WithMaxTokens(1))
+		close(done)
+	}()
+	var timeout <-chan time.Time
+	if ceiling > 0 {
+		timer := time.NewTimer(ceiling)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+	select {
+	case <-done:
+		return compErr
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timeout:
+		return fmt.Errorf("%w after %s (ceiling %s); the backend forward never returned its first token — readiness held as warmup_failed",
+			ErrWarmupTimeout, time.Since(start).Round(time.Millisecond), ceiling)
+	}
 }
 
 // checkWarmupPending checks if the server warmup gate is still armed and incomplete.
