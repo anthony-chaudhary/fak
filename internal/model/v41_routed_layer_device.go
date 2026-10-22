@@ -25,6 +25,11 @@ const v41PrefillExpertPanelEnv = "FAK_V41_PREFILL_EXPERT_PANEL"
 // path instead of the two-dispatch fused path, for A/B and bisection.
 const v41RoutedFusedEnv = "FAK_V41_ROUTED_FUSED"
 
+// v41RoutedPrefetchEnv set to "1" starts a batched layer's ring-miss checkpoint
+// reads together ahead of its queue-depth-one page-in loop and joins them before
+// the layer returns or tears down; unset keeps demand reads only.
+const v41RoutedPrefetchEnv = "FAK_V41_ROUTED_PREFETCH"
+
 // v41RoutedLayerFunc runs every routed pick of one full-profile decode layer on
 // the device and returns their routed sum (#13820). Each pick issues the
 // kernels v41RoutedExpertFunc issues, in the same order, and the sum adds the
@@ -70,6 +75,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 	if fusedBackend != nil && (os.Getenv(v41RoutedFusedEnv) == "0" || !fusedBackend.V41RoutedFusedAvailable()) {
 		fusedBackend = nil
 	}
+	prefetch := os.Getenv(v41RoutedPrefetchEnv) == "1"
 	return func(layer int, picks []routePick, x []float32) (result []float32, outcome v41RoutedExpertOutcome, cause error) {
 		if len(picks) == 0 || len(x) != H {
 			return nil, v41RoutedExpertDeclined, nil
@@ -89,7 +95,9 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		}
 		s.ensureOpenBackendSession()
 		path, stage := "v41-routed-expert", "gate/up"
+		joinPrefetch := func() {}
 		closeFailure := func(err error) error {
+			joinPrefetch()
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
 			s.closeBackendOwned()
@@ -143,6 +151,10 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				releases[i]()
 			}
 		}()
+		if prefetch {
+			_, joinPrefetch = s.prefetchV41RoutedPicks(names)
+			defer joinPrefetch()
+		}
 		weights := make([]v41RoutedLayerWeights, len(picks))
 		admitted := func() bool {
 			if r := s.routedExpertRing(names[0][0]); r != nil {

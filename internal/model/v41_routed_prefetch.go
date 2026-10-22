@@ -31,13 +31,14 @@ func (s *Session) v41RoutedPrefetchMisses(names [][3]string) []string {
 }
 
 // prefetchV41RoutedPicks starts the checkpoint reads for a layer's ring misses together, so the
-// serial page-in loop that follows consumes reads already in flight or finished.
-func (s *Session) prefetchV41RoutedPicks(names [][3]string) int {
+// serial page-in loop that follows consumes reads already in flight or finished. The caller runs
+// the returned join before it returns or tears its session down, so no read outlives the layer.
+func (s *Session) prefetchV41RoutedPicks(names [][3]string) (int, func()) {
 	misses := s.v41RoutedPrefetchMisses(names)
 	if len(misses) == 0 {
-		return 0
+		return 0, func() {}
 	}
-	return s.M.expertCheckpoint.Prefetch(misses)
+	return s.M.expertCheckpoint.prefetchJoined(misses)
 }
 
 // readAheadV41RoutedPicks hints only current mapped checkpoint misses after the
