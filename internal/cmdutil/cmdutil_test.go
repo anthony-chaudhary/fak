@@ -1,6 +1,7 @@
 package cmdutil
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -98,11 +99,11 @@ func TestMaxAbsDiffF32(t *testing.T) {
 	if got := MaxAbsDiffF32([]float32{1, -4, 3}, []float32{1, 2, 2.5}); got != 6 {
 		t.Errorf("MaxAbsDiffF32 = %v, want 6", got)
 	}
-	if got := MaxAbsDiffF32([]float32{1, 2, 100}, []float32{1, 2}); got != 0 {
-		t.Errorf("shorter-input comparison = %v, want 0", got)
+	if got := MaxAbsDiffF32([]float32{1, 2, 100}, []float32{1, 2}); !math.IsInf(got, 1) {
+		t.Errorf("length-mismatch comparison = %v, want +Inf", got)
 	}
-	if got := MaxAbsDiffF32(nil, []float32{5}); got != 0 {
-		t.Errorf("nil input comparison = %v, want 0", got)
+	if got := MaxAbsDiffF32(nil, []float32{5}); !math.IsInf(got, 1) {
+		t.Errorf("nil input comparison = %v, want +Inf", got)
 	}
 }
 
