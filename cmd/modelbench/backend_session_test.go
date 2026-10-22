@@ -697,6 +697,19 @@ func TestModelbenchStreamedColdPrefill(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				prefillCalls := 0
+				if mode == "" {
+					originalPrefill := smokeSessionPrefill
+					t.Cleanup(func() { smokeSessionPrefill = originalPrefill })
+					// time.Sleep returns only after the monotonic clock time.Since reads has advanced
+					// 1ms, so the measured wall is >=1ms even on a coarse Windows clock tick.
+					smokeSessionPrefill = func(s *model.Session, ids []int) []float32 {
+						prefillCalls++
+						logits := originalPrefill(s, ids)
+						time.Sleep(time.Millisecond)
+						return logits
+					}
+				}
 				runSmoke(f, target, "fixture", 0, target.Cfg.VocabSize)
 				var receipt map[string]any
 				raw, err := os.ReadFile(*f.out)
@@ -715,8 +728,8 @@ func TestModelbenchStreamedColdPrefill(t *testing.T) {
 					}
 					return
 				}
-				if receipt["smoke_status"] != smokeStatusOK || exitCode != 0 || be.newKV != 1 {
-					t.Fatalf("smoke execution status=%v exit=%d session constructions=%d", receipt["smoke_status"], exitCode, be.newKV)
+				if receipt["smoke_status"] != smokeStatusOK || exitCode != 0 || be.newKV != 1 || prefillCalls != 1 {
+					t.Fatalf("smoke execution status=%v exit=%d session constructions=%d prefill calls=%d", receipt["smoke_status"], exitCode, be.newKV, prefillCalls)
 				}
 				if receipt["smoke_prefill_tokens"] != float64(3) || receipt["smoke_prefill_kv_reused_tokens"] != float64(0) || receipt["smoke_prefill_pass"] != "first_after_load" {
 					t.Fatalf("fresh prefill evidence: %v", receipt)
@@ -725,13 +738,14 @@ func TestModelbenchStreamedColdPrefill(t *testing.T) {
 					t.Fatal("receipt did not hash initial Float32LE logits before decode")
 				}
 				ms, ok := receipt["smoke_prefill_ms"].(float64)
-				if !ok || ms <= 0 {
-					t.Fatal("prefill wall absent/nonpositive")
+				if !ok || !(ms >= 1) {
+					t.Fatalf("prefill wall %v does not bracket the 1ms prefill seam", receipt["smoke_prefill_ms"])
 				}
 				rate, ok := receipt["smoke_prefill_tok_per_sec"].(float64)
 				if !ok || rate <= 0 || math.Abs(rate-3000/ms) > 1e-9*rate {
 					t.Fatal("prefill count/time/rate disagree")
 				}
+				t.Logf("prefill wall %.3fms rate %.3f tok/s rate-vs-count/time divergence %.3g", ms, rate, math.Abs(rate-3000/ms)/rate)
 				if receipt["smoke_prefill_os_cache"] != "inherited_uncontrolled" {
 					t.Fatal("OS cache regime undisclosed")
 				}
