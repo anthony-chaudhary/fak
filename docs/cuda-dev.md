@@ -58,6 +58,7 @@ path, including first-class Blackwell targets:
 
 ```bash
 make cuda-build-sm100  # B200 / GB200
+make cuda-build-sm103  # B300 / GB300 (CUDA 12.9+)
 make cuda-build-sm120  # RTX 50-series / consumer Blackwell
 ```
 
@@ -147,7 +148,7 @@ likely to forget (a missing prototype or a missing binding):
   pure-Go), `go vet -tags cuda` (no toolkit), and — in official NVIDIA NGC CUDA `-devel`
   containers — an `nvcc` compile of the kernels plus `go build -tags cuda` (which *links*
   against the image's cudart/cublas stub libs but never *runs*, so no device is needed).
-  The matrix keeps CUDA 12.6.2 for `sm_89` and CUDA 12.8.1 for `sm_100`/`sm_120`, all on
+  The matrix keeps CUDA 12.6.2 for `sm_89` and CUDA 12.9.1 for `sm_100`/`sm_103`/`sm_120`, all on
   Ubuntu 22.04. Each image in the workflow is pinned by its multi-platform index digest.
   On 2026-10-09, anonymous manifest reads from [NVIDIA NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda)
   and NVIDIA's Docker Hub repository returned byte-identical indexes and `linux/amd64`

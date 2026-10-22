@@ -209,7 +209,7 @@ class ReleaseDryRunTest(unittest.TestCase):
             docker_path = root / "Dockerfile.cuda"
             write(
                 docker_path,
-                docker_path.read_text(encoding="utf-8").replace("12.8.1", "12.4.1"),
+                docker_path.read_text(encoding="utf-8").replace("12.9.1", "12.4.1"),
             )
         git(root, "add", *fixture_paths)
         git(root, "commit", "-m", "add tag contracts")

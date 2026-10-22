@@ -70,13 +70,14 @@ func (c cudaCC) atLeast(o cudaCC) bool {
 }
 
 // cudaEmbeddedArches is the SASS cubin set this build embeds, ascending, mirroring
-// internal/compute/cuda_arch.txt (sm_80, sm_89, sm_90, sm_100, sm_120). TestCUDAArchCoverageMatchesFile
+// internal/compute/cuda_arch.txt (sm_80, sm_89, sm_90, sm_100, sm_103, sm_120). TestCUDAArchCoverageMatchesFile
 // asserts this Go table stays byte-equal to cuda_arch.txt so the two can never drift.
 var cudaEmbeddedArches = []cudaCC{
 	{8, 0},  // sm_80  — A100 (Ampere datacenter)
 	{8, 9},  // sm_89  — Ada (L4/L40, RTX 40xx)
 	{9, 0},  // sm_90  — H100/H200 (Hopper)
 	{10, 0}, // sm_100 — Blackwell datacenter (B100/B200)
+	{10, 3}, // sm_103 — Blackwell Ultra datacenter (B300/GB300)
 	{12, 0}, // sm_120 — Blackwell consumer (RTX 50xx)
 }
 

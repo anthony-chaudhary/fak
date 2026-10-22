@@ -199,7 +199,7 @@ today versus what still needs a live run.
   [reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md), this quickstart
   folds into that page instead of standing alone.
 - **Invalidating assumption to watch:** that the **default all-arch build** is the right
-  thing to hand a renter. It buys card-independence (five cubins + a `compute_120` PTX
+  thing to hand a renter. It buys card-independence (six cubins + a `compute_120` PTX
   floor) at the cost of build time and image size, and nobody has measured that cost on a
   rented box — where you often build *on* the metered instance itself. If compiling five
   cubins turns out to dominate the time-to-first-token on a fresh rental, the guidance
