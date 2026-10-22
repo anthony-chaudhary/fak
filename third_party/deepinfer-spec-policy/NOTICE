@@ -1,0 +1,28 @@
+DeepInfer speculative acceptance telemetry
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+Upstream paths:
+  deepinfer/engine/stats_logger.py:211-236
+  deepinfer/model_executor/layers/tilelang_ops/sampler.py:321-400 (per-step counting 343-357, last-slot clamp 351)
+  deepinfer/model_executor/layers/tilelang_ops/sampler.py:584-589
+  deepinfer/model_executor/layers/tilelang_ops/fused_sample.py:58-63, 227-234
+  deepinfer/model_executor/layers/tilelang_ops/common.py:3-19
+  csrc/engine/scheduler.hpp:1242-1252
+
+Adaptation: Go per-position speculative acceptance accounting. The enginestep
+per-position verified/accepted counters, the fixed slot cap whose last slot
+aggregates deeper drafts, and the test-only mean |accept_prob - confidence|
+over verify rows adapt the upstream sampler and stats logger. Upstream
+telemetry reports the marginal accepted/verified rate per position; the
+censored conditional rate (accepted/reached, where reached means every earlier
+draft in the round was accepted) is a Fak-native estimator inspired by the
+per-token conditional confidence semantics in scheduler.hpp, added beside the
+unchanged marginal rate in internal/polymodel and as a reached counter in
+internal/enginestep. The test oracle computes acceptance as the exact
+sum_x min(target_x, draft_x) with no DRAFT_PROB_PENALTY, where upstream uses
+max(1 - sum relu(target - penalized draft), 0). No upstream code is copied.

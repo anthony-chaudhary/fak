@@ -1,0 +1,110 @@
+DeepInfer V4.1 numeric reference oracles
+
+Copyright DeepSeek-AI / DeepInfer authors
+Copyright 2023 The vLLM team.
+Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+
+Every adaptation listed here lives in a Go test file under internal/model. Each
+is an unwired host oracle used for measurement: no serving path, forward pass,
+configuration field, environment knob or default calls it, and none claims
+bitwise parity with the DeepInfer CUDA or Ascend kernels.
+
+Indexer Q/K MXFP4 cast (internal/model/v41_index_mxfp4_test.go)
+
+Upstream paths:
+  deepinfer/model_executor/models/v4_modules/index_attn.py:85-87,133-179,296-317
+  deepinfer/model_executor/layers/tilelang_ops/cache_common.py:129-137
+  deepinfer/model_executor/layers/tilelang_ops/fused_transform.py:61-86,249-257
+  deepinfer/model_executor/layers/tilelang_ops/common.py:22-24
+  deepinfer/model_executor/layers/tilelang_ops/cuda/fused_transform.py:180-183,473-489,514-547
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/asc/kv_quant.py:48-92,170-189
+  deepinfer/model_executor/layers/tilelang_ops/asc/fused_transform.py:346-353
+
+Adaptation: Go emulation of the indexer Q/K cast. Inputs are rounded to bf16,
+each group of 32 values gets one UE8M0 power-of-two scale, and values are
+encoded as e2m1 codes. The scale rule is transcribed from upstream code: amax
+floored at 6*2^-126, multiplied by float32(1/6), and rounded up to a power of
+two through the (bits-1)>>23 exponent step, so a zero group keeps scale byte 1.
+The e2m1 round-to-nearest-even tie rule with finite saturation is inferred from
+the upstream cast comments; the CUDA conversion kernel itself is external to the
+repository. The test composes this cast with fak's own f32 indexer score and
+top-k selection to measure top-512 selection overlap against fak's bf16-widened
+f32 scoring. Fak's indexer is unchanged and does not score MXFP4.
+
+KV cache FP8 window and FP4 compressed casts (internal/model/v41_kv_quant_oracle_test.go)
+
+Upstream paths:
+  deepinfer/model_executor/layers/tilelang_ops/cache_common.py:109-128,331-357
+  deepinfer/model_executor/layers/tilelang_ops/cuda/store_kv_cache.py:9-16,141-184
+  deepinfer/model_executor/layers/tilelang_ops/cuda/fused_transform.py:514-547
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/common.py:22-27
+  deepinfer/model_executor/layers/tilelang_ops/asc/kv_quant.py:48-92,170-189
+  deepinfer/model_executor/model_metadata_utils.py:37-39
+  deepinfer/model_executor/models/v4_modules/attn.py:402-451
+  deepinfer/hugging_face/config.py:303
+
+Adaptation: Go emulation of the V4.1 KV cache casts on fak's projected rows.
+Window rows, and compressed rows when the FP4 sparse KV option is off, are
+rounded to bf16 and passed through fak's existing per-32 e4m3 activation
+reference with a UE8M0 power-of-two scale; a boundary test shows that its
+float32(1/448) multiply selects the same scale as the store kernel's division by
+448. Compressed rows in the default FP4 profile are rounded to bf16 and cast per
+16 values: amax floored at 6*2^-9, multiplied by float32(1/6), capped at 448,
+narrowed to an e4m3 scale, inverted in float32, and the scaled values encoded as
+e2m1, then dequantized to bf16, which is also what the prefill cast-back
+returns. The e4m3 and e2m1 round-to-nearest-even and saturation rules are
+inferred from the upstream constants and cast comments; the CUDA conversion
+kernels are external to the repository. The test measures the relative L2 change
+of fak's host combined attention output on a synthetic fixture.
+
+MoE GEMM-input MXFP8 activation casts (internal/model/v41_mxfp8_act_oracle_test.go)
+
+Upstream paths:
+  deepinfer/hugging_face/config.py:253-264,304-306
+  deepinfer/model_executor/layers/linear.py:13-24
+  deepinfer/model_executor/layers/tilelang_ops/common.py:25-26
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/cuda/norm.py:280-300
+  deepinfer/model_executor/models/v4_modules/mlp.py:140-141,177-182,274-289,412-442,518-525
+  deepinfer/model_executor/models/v4_modules/moe.py:66-67
+
+Adaptation: the e4m3 round trip with one UE8M0 power-of-two scale per 32 values
+already existed in fak as its activation reference. The DeepInfer contribution
+is the placement map: with FP8 MLP activations enabled, the bf16 FFN-norm input
+to gate/up and the route-weighted SwiGLU operand to down are cast, while the
+router projection and the GEMM outputs stay bf16; the norm-fused cast also
+corroborates the 1e-4 amax floor and the ceil power-of-two scale rule. The
+SwiGLU, route weight and down-input cast are one fused upstream kernel, so the
+oracle casts the float32 weighted value directly; whether a bf16 rounding sits
+before that cast is not observable upstream. The test measures expert-output
+relative L2 change against fak's host bf16 expert graph on a synthetic fixture.
+
+Float32 rotary table (internal/model/v41_rope_f32_test.go)
+
+Upstream paths:
+  deepinfer/model_executor/layers/rotary_embedding.py:35-41,68-82,109-144,195-207
+  deepinfer/model_executor/models/v4_modules/utils.py:19-48
+  deepinfer/model_executor/models/v4_modules/rope.py:19-52
+  deepinfer/hugging_face/config.py:88-96
+
+The rotary_embedding.py source derives from vLLM and HuggingFace Transformers;
+its copyright lines, reproduced above, are retained as Apache-2.0 section 4(c)
+requires.
+
+Adaptation: Go float32 emulation of the V4.1 rotary table. The inverse
+frequencies are built as float32 pow and reciprocal; on compressed layers the
+YaRN blend follows the upstream operand order (interpolation weighted by one
+minus the mask, extrapolation by the mask) with every step rounded to float32;
+the angle is the float32 product of position and frequency, and cos and sin have
+unit amplitude because the V4.1 config disables YaRN mscale. Layer regime,
+theta and YaRN parameters come from fak's existing V4.1 rotary policy. Host pow
+and trigonometry are correctly rounded, so this makes no bitwise claim against
+CUDA or torch. The test measures the angle gap between fak's float64 table and
+this float32 emulation at long positions; fak's table is unchanged.
