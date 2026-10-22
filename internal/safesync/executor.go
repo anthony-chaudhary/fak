@@ -48,6 +48,7 @@ type ExecutionReceipt struct {
 	Status                string `json:"status"`
 	LocalCommitsContained bool   `json:"local_commits_contained"`
 	PeerBytesPreserved    bool   `json:"peer_bytes_preserved"`
+	LocalOnly             bool   `json:"local_only,omitempty"`
 	Pushed                bool   `json:"pushed"`
 	TargetSHA             string `json:"target_sha"`
 	NewHEAD               string `json:"new_head"`
@@ -57,6 +58,8 @@ type ExecutionReceipt struct {
 
 // ExecuteOptions configures PacketExecutor.
 type ExecuteOptions struct {
+	// LocalOnly preserves admission and validation gates for a clean local checkpoint.
+	LocalOnly          bool                                         `json:"local_only,omitempty"`
 	Repo               string                                       `json:"repo"`
 	Remote             string                                       `json:"remote"`
 	Branch             string                                       `json:"branch,omitempty"`
@@ -201,6 +204,10 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 		return receipt, &ExecuteError{Reason: reason, Detail: detail}
 	}
 
+	if e.opts.LocalOnly && len(curDirty) != 0 {
+		return localOnlyRefusal(packet, ReasonDirtyWriteOverlap, "local-only execution requires a clean index and worktree")
+	}
+
 	// 3. Acquire writer lease for the repo.
 	leaseOwner := strings.TrimSpace(e.opts.LeaseOwner)
 	if leaseOwner == "" {
@@ -224,6 +231,12 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 	defer func() { _ = lease.Release() }()
 	stopHeartbeat := lease.keepAlive(now)
 	defer stopHeartbeat()
+
+	if e.opts.LocalOnly {
+		if err := e.checkLocalOnlyState(ctx, packet.LocalHead, targetRef, packet.TargetSHA); err != nil {
+			return localOnlyRefusal(packet, ReasonPathspecRace, err.Error())
+		}
+	}
 
 	// Snapshot peer dirty bytes before executing graph operation
 	peerPaths := identifyPeerPaths(curDirty, packet.Disposition, e.opts.SuspendPaths)
@@ -278,7 +291,12 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 
 	case DispositionSafeDisjoint:
 		msg := fmt.Sprintf("Merge %s (safe-disjoint)", targetRef)
-		mergeRes := run(ctx, repo, "merge", "--no-ff", "--no-edit", "--signoff", "-m", msg, packet.TargetSHA)
+		mergeArgs := []string{"merge", "--no-ff", "--no-edit", "--signoff", "-m", msg}
+		if e.opts.LocalOnly {
+			mergeArgs = append(mergeArgs, "--no-autostash", "--no-overwrite-ignore")
+		}
+		mergeArgs = append(mergeArgs, packet.TargetSHA)
+		mergeRes := run(ctx, repo, mergeArgs...)
 		if mergeRes.Err != nil || mergeRes.Code != 0 {
 			return nil, fmt.Errorf("safe-disjoint merge failed: %v %s", mergeRes.Err, string(mergeRes.Stderr))
 		}
@@ -339,7 +357,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 	}
 
 	// 5. Verify required build and test witnesses before pushing.
-	if requiresWitness(packet.RequiredWitnesses, "build check") || requiresWitness(packet.RequiredWitnesses, "build") {
+	if e.opts.LocalOnly || requiresWitness(packet.RequiredWitnesses, "build check") || requiresWitness(packet.RequiredWitnesses, "build") {
 		buildVerifier := e.opts.BuildVerifier
 		if buildVerifier == nil {
 			buildVerifier = defaultBuildVerifier
@@ -348,6 +366,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 			receipt := &ExecutionReceipt{
 				Schema:    ExecuteReceiptSchema,
 				Status:    ExecuteStatusFailed,
+				LocalOnly: e.opts.LocalOnly,
 				Pushed:    false,
 				TargetSHA: packet.TargetSHA,
 				NewHEAD:   newHEAD,
@@ -358,7 +377,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 		}
 	}
 
-	if requiresWitness(packet.RequiredWitnesses, "tests") || requiresWitness(packet.RequiredWitnesses, "test") {
+	if e.opts.LocalOnly || requiresWitness(packet.RequiredWitnesses, "tests") || requiresWitness(packet.RequiredWitnesses, "test") {
 		testVerifier := e.opts.TestVerifier
 		if testVerifier == nil {
 			testVerifier = defaultTestVerifier
@@ -367,6 +386,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 			receipt := &ExecutionReceipt{
 				Schema:    ExecuteReceiptSchema,
 				Status:    ExecuteStatusFailed,
+				LocalOnly: e.opts.LocalOnly,
 				Pushed:    false,
 				TargetSHA: packet.TargetSHA,
 				NewHEAD:   newHEAD,
@@ -375,6 +395,12 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 			}
 			return receipt, fmt.Errorf("test gate failed: %w", err)
 		}
+	}
+
+	// Local-only stops before publication and executor-stage Git fetch.
+	// Explicit assessment fetch, validation dependencies and hooks keep their own policy.
+	if e.opts.LocalOnly {
+		return e.localOnlyReadback(ctx, packet, targetRef, newHEAD, lease)
 	}
 
 	// 6. Push: execute SafePush.
@@ -646,4 +672,83 @@ func hasGoSource(repo string) bool {
 		return nil
 	})
 	return found
+}
+
+// checkLocalOnlyState runs under the native writer lease, before mutation and
+// after validation. Local-only intentionally does not admit dirty-path suspension.
+func (e *PacketExecutor) checkLocalOnlyState(ctx context.Context, head, targetRef, target string) error {
+	actual, err := rev(ctx, e.opts.Runner, e.opts.Repo, "HEAD")
+	if err != nil || actual != head {
+		return fmt.Errorf("local HEAD changed: want %s, got %s (%v)", head, actual, err)
+	}
+	actual, err = rev(ctx, e.opts.Runner, e.opts.Repo, targetRef)
+	if err != nil || actual != target {
+		return fmt.Errorf("target changed: want %s, got %s (%v)", target, actual, err)
+	}
+	dirty, err := workingTreeDirtyPaths(ctx, e.opts.Runner, e.opts.Repo)
+	if err != nil {
+		return err
+	}
+	if len(dirty) != 0 {
+		return fmt.Errorf("local-only requires a clean index and worktree: %v", dirty)
+	}
+	return nil
+}
+
+func localOnlyRefusal(packet *ReconciliationPacket, reason, detail string) (*ExecutionReceipt, error) {
+	return &ExecutionReceipt{
+		Schema: ExecuteReceiptSchema, Status: ExecuteStatusRefused, LocalOnly: true,
+		TargetSHA: packet.TargetSHA, Reason: reason, Detail: detail,
+	}, &ExecuteError{Reason: reason, Detail: detail}
+}
+
+func (e *PacketExecutor) localOnlyReadback(ctx context.Context, packet *ReconciliationPacket, targetRef, newHEAD string, lease *WriterLease) (*ExecutionReceipt, error) {
+	receipt := &ExecutionReceipt{
+		Schema: ExecuteReceiptSchema, Status: ExecuteStatusFailed, LocalOnly: true,
+		TargetSHA: packet.TargetSHA, NewHEAD: newHEAD,
+	}
+	fail := func(reason, detail string) (*ExecutionReceipt, error) {
+		receipt.Reason, receipt.Detail = reason, detail
+		return receipt, &ExecuteError{Reason: reason, Detail: detail}
+	}
+	if lease.Lost() {
+		return fail(ReasonLeaseOwnerUnavailable, "writer lease lost after graph execution")
+	}
+	if err := e.checkLocalOnlyState(ctx, newHEAD, targetRef, packet.TargetSHA); err != nil {
+		return fail(ReasonPathspecRace, err.Error())
+	}
+	// Never trust the packet's enumerated local commits as the only ancestry
+	// evidence. Both immutable pre-execution tips must survive independently.
+	ancestors := []string{packet.LocalHead, packet.TargetSHA}
+	for _, c := range packet.LocalCommits {
+		if c.SHA != "" {
+			ancestors = append(ancestors, c.SHA)
+		}
+	}
+	for _, ancestor := range ancestors {
+		ok, err := isAncestor(ctx, e.opts.Runner, e.opts.Repo, ancestor, newHEAD)
+		if err != nil || !ok {
+			return fail("LOCAL_COMMITS_NOT_CONTAINED", fmt.Sprintf("%s is not contained in local checkpoint %s: %v", ancestor, newHEAD, err))
+		}
+	}
+	if packet.Disposition == DispositionSafeDisjoint {
+		parents := e.opts.Runner(ctx, e.opts.Repo, "rev-list", "--parents", "-n", "1", newHEAD)
+		want := newHEAD + " " + packet.LocalHead + " " + packet.TargetSHA
+		if parents.Err != nil || parents.Code != 0 || strings.TrimSpace(string(parents.Stdout)) != want {
+			return fail("UNEXPECTED_MERGE_PARENTS", "local checkpoint does not have the canonical local HEAD and target parents")
+		}
+	}
+	// Readback itself takes time. Fence success after all ancestry/parent queries,
+	// not just before them, while retaining the resulting HEAD on any failure.
+	if err := e.checkLocalOnlyState(ctx, newHEAD, targetRef, packet.TargetSHA); err != nil {
+		return fail(ReasonPathspecRace, err.Error())
+	}
+	if lease.Lost() {
+		return fail(ReasonLeaseOwnerUnavailable, "writer lease lost during graph readback")
+	}
+	receipt.Status = ExecuteStatusExecuted
+	receipt.LocalCommitsContained = true
+	receipt.Detail = "validated local checkpoint; no publication or executor-stage Git fetch (not a no-network guarantee)"
+	receipt.PeerBytesPreserved = true // Clean before and after; no suspended peer paths.
+	return receipt, nil
 }

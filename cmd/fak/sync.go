@@ -87,6 +87,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	goal := fs.String("goal", "publish", fmt.Sprintf("reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/%s)", defaultDev))
 	applyFlag := fs.Bool("apply", false, "reconcile: execute the selected safe primitive")
 	executeFlag := fs.Bool("execute", false, "reconcile: execute reconciliation packet with independent graph readback")
+	localOnly := fs.Bool("local-only", false, "execute/reconcile --execute: validated clean local checkpoint; no publication or executor-stage Git fetch")
 	emitPacket := fs.Bool("emit-packet", false, "reconcile: emit owner-aware reconciliation packet")
 	packetFile := fs.String("packet", "", "execute: path to reconciliation packet JSON file")
 	sessionFlag := fs.String("session", "", "reconcile: session id for suspended paths")
@@ -95,6 +96,10 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	var recheckPaths pathList
 	fs.Var(&recheckPaths, "recheck-path", "check: recheck PUBLIC_LEAK only for this repo-relative repair path (repeatable)")
 	if err := fs.Parse(argv); err != nil {
+		return syncExitUsage
+	}
+	if *localOnly && ((command != "execute" && !(command == "reconcile" && *executeFlag)) || *applyFlag) {
+		fmt.Fprintln(stderr, "fak sync: --local-only requires execute or reconcile --execute, and cannot be combined with --apply")
 		return syncExitUsage
 	}
 	if command == "push" && *dryRun {
@@ -195,6 +200,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			Goal:         *goal,
 			Apply:        *applyFlag,
 			Execute:      *executeFlag,
+			LocalOnly:    *localOnly,
 			Fetch:        *fetch,
 			SuspendPaths: suspendPaths,
 			Session:      sess,
@@ -306,6 +312,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		}
 
 		execOpts := safesync.ExecuteOptions{
+			LocalOnly:          *localOnly,
 			Repo:               repoPath,
 			Remote:             *remote,
 			Branch:             *branch,
@@ -474,10 +481,16 @@ func syncUsage(w io.Writer) {
   fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
   fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
-  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute]
+  fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute [--local-only]]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-  fak sync execute   [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
+  fak sync execute   [--local-only] [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
   fak sync heal      [--repo DIR] [--dry-run] [--json]
+
+Local-only packet execution requires a clean index/worktree and successful build/test
+witnesses; it preserves ownership refusals and stops before publication or executor-stage
+Git fetch. Explicit assessment --fetch, validation dependencies and normal hooks retain
+their separate controls; this is not a universal no-network mode. A failed validation
+can leave a local merge for inspection, never a validated success.
 
 Safe shared-trunk git for dirty worktrees. check is read-only except for optional
 --fetch. It runs PUBLIC_LEAK before commit time, classifies candidate findings against
