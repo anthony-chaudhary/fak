@@ -173,13 +173,26 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 	if err != nil {
 		return couldNotRun(err)
 	}
-	defer os.RemoveAll(propDir)
+	defer func() {
+		if propDir != "" {
+			_ = os.RemoveAll(propDir)
+		}
+	}()
 	propPkgs := commitBuildCheckExistingPackages(propDir, pkgs)
 	if len(propPkgs) == 0 {
 		// e.g. the commit deletes the package outright: nothing left to compile.
 		return safecommit.BuildCheckNotApplicable, "no buildable package remains in the prospective tree"
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
+	// The build has exited and only its result is needed now. Release this owned
+	// snapshot before validate (or HEAD attribution) materializes another full tree.
+	// A release failure must not become skipped-infra and admit an unchecked commit:
+	// retain the deferred retry and continue through the existing genuine gates.
+	if err := os.RemoveAll(propDir); err != nil {
+		fmt.Fprintf(stderr, "fak commit: could not release prospective build snapshot before validation: %v; continuing required checks\n", err)
+	} else {
+		propDir = ""
+	}
 	if buildOK || commitBuildCheckOnlyUnbuildable(buildDetail) {
 		return commitValidateOwnedPaths(stderr, root, paths, timeout)
 	}
