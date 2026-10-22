@@ -386,6 +386,115 @@ func TestSymptomTaggedRedThenGreenConfirms(t *testing.T) {
 	assertRepoClean(t, dir)
 }
 
+// fak-test:runtime slow est=120s
+func TestSymptomVulkanScratchBuildsCanonicalArchiveBeforeSelectedTests(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+	t.Setenv("FAK_VULKAN_SPIRV", "must-not-reach-selected-test")
+
+	writeRepoPath(t, dir, "internal/compute/vulkan_shim.cpp", "extern \"C\" int fak_test_value(void) { return 1; }\n")
+	writeRepoPath(t, dir, "internal/compute/vulkan.go", `//go:build vulkan && cgo
+
+package compute
+
+/*
+#cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
+int fak_test_value(void);
+*/
+import "C"
+
+func DeviceValue() int { return int(C.fak_test_value()) }
+`)
+	writeRepoPath(t, dir, "cmd/probe/probe.go", `package probe
+
+func Sign(n int) int {
+	if n > 0 { return 1 }
+	return 0
+}
+`)
+	gitIn(t, dir, "add", "internal/compute/vulkan_shim.cpp", "internal/compute/vulkan.go", "cmd/probe/probe.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent: buggy tagged compute package")
+
+	writeRepoPath(t, dir, "cmd/probe/probe.go", `package probe
+
+func Sign(n int) int {
+	if n > 0 { return 1 }
+	if n < 0 { return -1 }
+	return 0
+}
+`)
+	writeRepoPath(t, dir, "cmd/probe/probe_test.go", `//go:build vulkan && cgo
+
+package probe
+
+import (
+	"m/internal/compute"
+	"os"
+	"testing"
+)
+
+func TestSignNegative(t *testing.T) {
+	if got := os.Getenv("FAK_VULKAN_SPIRV"); got != "" { t.Fatalf("FAK_VULKAN_SPIRV leaked into selected test: %q", got) }
+	if got := compute.DeviceValue(); got != 1 { t.Fatalf("DeviceValue()=%d, want 1", got) }
+	if Sign(-3) != -1 { t.Fatalf("Sign(-3)=%d, want -1", Sign(-3)) }
+}
+`)
+	gitIn(t, dir, "add", "cmd/probe/probe.go", "cmd/probe/probe_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(compute): cover tagged cgo link")
+
+	got, detail := NewWithRunner(gitRunner, dir).
+		WithSymptomTests([]string{"^TestSignNegative$"}).
+		ResolveSymptomWithDetail(ctx, "HEAD", true)
+	if got != abi.WitnessConfirmed {
+		t.Fatalf("Vulkan scratch symptom outcome=%v detail=%q, want confirmed canonical archive preparation", got, detail)
+	}
+	assertRepoClean(t, dir)
+}
+
+// fak-test:runtime slow est=30s
+func TestSymptomVulkanScratchPreparationFailureRefutesCandidate(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	t.Setenv(SymptomFlagEnv, "1")
+
+	writeRepoPath(t, dir, "internal/compute/vulkan_shim.cpp", "this is not valid C++\n")
+	writeRepoPath(t, dir, "internal/compute/vulkan.go", `//go:build vulkan && cgo
+
+package compute
+
+/*
+#cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
+*/
+import "C"
+
+func Value() int { return 0 }
+`)
+	gitIn(t, dir, "add", "internal/compute/vulkan_shim.cpp", "internal/compute/vulkan.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent")
+	writeRepoPath(t, dir, "internal/compute/vulkan_test.go", `//go:build vulkan && cgo
+
+package compute
+
+import "testing"
+
+func TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }
+`)
+	gitIn(t, dir, "add", "internal/compute/vulkan_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(compute): add Vulkan witness")
+
+	r := NewWithRunner(gitRunner, dir).WithSymptomTests([]string{"^TestValue$"})
+	got, detail := r.ResolveSymptomWithDetail(context.Background(), "HEAD", true)
+	if got != abi.WitnessRefuted {
+		t.Fatalf("preparation failure outcome=%v detail=%q, want fail-closed candidate refutation", got, detail)
+	}
+	if r.SymptomFailureExcerpt() == "" {
+		t.Fatal("preparation failure omitted bounded diagnostic excerpt")
+	}
+	assertRepoClean(t, dir)
+}
+
 // --- explicit caller tags (#13243, the explicit-tags half) ------------------------------
 
 // mergeTags is the UNION seam: an explicit caller hint can ADD a tag the //go:build

@@ -71,6 +71,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/computebuild"
 	"github.com/anthony-chaudhary/fak/internal/corelockgate"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -147,34 +148,46 @@ func gitRunner(ctx context.Context, dir string, args ...string) (string, int, er
 }
 
 func commandRunner(ctx context.Context, dir string, argv ...string) (string, int, error) {
-	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
-		return "", -1, exec.ErrNotFound
+	return commandRunnerEnv(nil)(ctx, dir, argv...)
+}
+
+func commandRunnerEnv(overlay map[string]string) CommandRunner {
+	return func(ctx context.Context, dir string, argv ...string) (string, int, error) {
+		if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+			return "", -1, exec.ErrNotFound
+		}
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		// commandRunner runs arbitrary FAIL_TO_PASS/PASS_TO_PASS verification commands
+		// (`go test`, pytest, docker) that fork their own descendant tree — the toolchain
+		// plus the spawned test binary. Bare CommandContext ctx-cancel is single-PID
+		// (windowgate only hides the window; it is not a tree kill), so a deadline-cancel
+		// of a hung verification orphans that subtree (#3106 defect class). Tree-kill on
+		// cancel and bound the reap, mirroring internal/nightrun/run.go.
+		procguard.ConfigureProcessTreeCancel(cmd)
+		cmd.WaitDelay = 10 * time.Second
+		if dir != "" {
+			cmd.Dir = dir
+			cleanGitEnv(cmd)
+		}
+		if len(overlay) > 0 {
+			if cmd.Env == nil {
+				cmd.Env = isolatedGitEnv()
+			}
+			cmd.Env = computebuild.MergeEnviron(cmd.Env, overlay)
+		}
+		var out strings.Builder
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		err := cmd.Run()
+		if err == nil {
+			return out.String(), 0, nil
+		}
+		if ee, ok := err.(*exec.ExitError); ok {
+			return out.String(), ee.ExitCode(), nil
+		}
+		return out.String(), -1, err
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	// commandRunner runs arbitrary FAIL_TO_PASS/PASS_TO_PASS verification commands
-	// (`go test`, pytest, docker) that fork their own descendant tree — the toolchain
-	// plus the spawned test binary. Bare CommandContext ctx-cancel is single-PID
-	// (windowgate only hides the window; it is not a tree kill), so a deadline-cancel
-	// of a hung verification orphans that subtree (#3106 defect class). Tree-kill on
-	// cancel and bound the reap, mirroring internal/nightrun/run.go.
-	procguard.ConfigureProcessTreeCancel(cmd)
-	cmd.WaitDelay = 10 * time.Second
-	if dir != "" {
-		cmd.Dir = dir
-		cleanGitEnv(cmd)
-	}
-	var out strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
-	if err == nil {
-		return out.String(), 0, nil
-	}
-	if ee, ok := err.(*exec.ExitError); ok {
-		return out.String(), ee.ExitCode(), nil
-	}
-	return out.String(), -1, err
 }
 
 // Resolver is the git-backed WitnessResolver. Construct with New (real git) or

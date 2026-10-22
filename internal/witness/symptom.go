@@ -61,6 +61,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/buildwitness"
+	"github.com/anthony-chaudhary/fak/internal/computebuild"
 )
 
 // SymptomFlagEnv opts the EXECUTION rung in. The structural rung runs regardless.
@@ -321,6 +322,27 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	}
 	defer cleanupCommit()
 	parentDir := ""
+	vulkanEnvs := make(map[string]map[string]string)
+	vulkanScratchRequired := false
+	if r.realCommandExecution {
+		exec = func(ctx context.Context, dir string, argv ...string) (string, int, error) {
+			if env := vulkanEnvs[filepath.Clean(dir)]; len(env) > 0 {
+				return commandRunnerEnv(env)(ctx, dir, argv...)
+			}
+			return commandRunner(ctx, dir, argv...)
+		}
+		if env, needed, prepErr := prepareVulkanSymptomScratch(ctx, commitDir, pkgs, tags, false); needed {
+			vulkanScratchRequired = true
+			if prepErr != nil {
+				r.symptomExcerpt = capSymptomExcerpt("Vulkan scratch preparation: " + prepErr.Error())
+				if ctx.Err() != nil {
+					return abi.WitnessAbstain, "candidate Vulkan scratch preparation timed out"
+				}
+				return abi.WitnessRefuted, "candidate Vulkan scratch preparation failed"
+			}
+			vulkanEnvs[filepath.Clean(commitDir)] = env
+		}
+	}
 	var cleanupParent func()
 	defer func() {
 		if cleanupParent != nil {
@@ -331,6 +353,14 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		parentDir, cleanupParent, err = v.scratchWorktree(ctx, parent)
 		if err != nil {
 			return "parent scratch worktree failed"
+		}
+		if r.realCommandExecution && vulkanScratchRequired {
+			if env, needed, prepErr := prepareVulkanSymptomScratch(ctx, parentDir, nil, tags, true); needed {
+				if prepErr != nil {
+					return "parent Vulkan scratch preparation failed"
+				}
+				vulkanEnvs[filepath.Clean(parentDir)] = env
+			}
 		}
 		if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
 			return "could not overlay changed tests onto parent"
@@ -450,6 +480,53 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		return abi.WitnessRefuted, "changed tests passed at parent"
 	}
 	return abi.WitnessConfirmed, "changed tests failed at parent and passed at candidate"
+}
+
+func prepareVulkanSymptomScratch(ctx context.Context, repoRoot string, pkgs, tags []string, required bool) (map[string]string, bool, error) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		return nil, false, nil
+	}
+	if strings.TrimSpace(os.Getenv("CGO_ENABLED")) == "0" {
+		return nil, false, nil
+	}
+	vulkan := false
+	for _, tag := range tags {
+		if tag == "vulkan" {
+			vulkan = true
+			break
+		}
+	}
+	pkgDir := filepath.Join(repoRoot, "internal", "compute")
+	if !vulkan || !computebuild.FileExists(filepath.Join(pkgDir, "vulkan_shim.cpp")) {
+		return nil, false, nil
+	}
+	tc, err := computebuild.DiscoverToolchain()
+	if err != nil {
+		return nil, true, err
+	}
+	env := computebuild.SynthesizeVulkanCgoEnv(tc, pkgDir)
+	env["FAK_VULKAN_SPIRV"] = ""
+	if !required {
+		argv := []string{"go", "list", "-test", "-deps", "-f={{if .CgoFiles}}{{.ImportPath}}{{end}}", "-tags", strings.Join(tags, ",")}
+		argv = append(argv, pkgs...)
+		out, code, err := commandRunnerEnv(env)(ctx, repoRoot, argv...)
+		if err != nil || code != 0 {
+			return nil, true, fmt.Errorf("resolving Vulkan cgo package closure: %s", capSymptomExcerpt(out))
+		}
+		for _, importPath := range strings.Fields(out) {
+			if strings.HasSuffix(importPath, "/internal/compute") {
+				required = true
+				break
+			}
+		}
+	}
+	if !required {
+		return nil, false, nil
+	}
+	if _, err := computebuild.BuildVulkanShim(ctx, tc, repoRoot, nil); err != nil {
+		return nil, true, err
+	}
+	return env, true, nil
 }
 
 type symptomSelection struct {
