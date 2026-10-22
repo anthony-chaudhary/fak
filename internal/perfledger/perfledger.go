@@ -210,6 +210,53 @@ type NativeTiming struct {
 	// Kernels is the decode window's per-kernel GPU time; absent unless the
 	// backend's timestamp profile was on and every decode window measured it.
 	Kernels *NativeKernels `json:"kernels,omitempty"`
+	// GPUIdleMSPerToken is a lower bound on device-idle host wall per decode
+	// step: fence wake and submit latency count as busy. It is absent when any
+	// decode window ran a pipelined batch, whose completion the host does not
+	// observe until it drains. SyncsPerToken is host waits on device completion
+	// per step, and SyncSites splits those waits by waiting entry point and the
+	// kernel waited on. Each is absent unless the backend observed every submit
+	// and wait in every decode window.
+	GPUIdleMSPerToken *float64         `json:"gpu_idle_ms_per_token,omitempty"`
+	SyncsPerToken     *float64         `json:"syncs_per_token,omitempty"`
+	SyncSites         []NativeSyncSite `json:"sync_sites,omitempty"`
+}
+
+// NativeSyncSite is one host-sync (site, stage) cell per decode step.
+type NativeSyncSite struct {
+	Site             string  `json:"site"`
+	Stage            string  `json:"stage"`
+	SyncsPerToken    float64 `json:"syncs_per_token"`
+	WaitMSPerToken   float64 `json:"wait_ms_per_token"`
+	D2HBytesPerToken float64 `json:"d2h_bytes_per_token,omitempty"`
+}
+
+// WithDeviceSync returns a copy carrying the decode-window idle and sync rates.
+// Values that are negative, NaN or infinite stay absent, and a site table is
+// kept only beside a measured syncs/token.
+func (n *NativeTiming) WithDeviceSync(idleMSPerToken float64, idleOK bool, syncsPerToken float64, syncsOK bool, sites []NativeSyncSite) *NativeTiming {
+	if n == nil {
+		return nil
+	}
+	out := *n
+	if v, ok := finiteNonnegativeHostWork(idleMSPerToken, idleOK); ok {
+		out.GPUIdleMSPerToken = &v
+	}
+	if v, ok := finiteNonnegativeHostWork(syncsPerToken, syncsOK); ok {
+		out.SyncsPerToken = &v
+		out.SyncSites = make([]NativeSyncSite, 0, len(sites))
+		for _, s := range sites {
+			syncs, okS := finiteNonnegativeHostWork(s.SyncsPerToken, true)
+			wait, okW := finiteNonnegativeHostWork(s.WaitMSPerToken, true)
+			d2h, okD := finiteNonnegativeHostWork(s.D2HBytesPerToken, true)
+			if !okS || !okW || !okD {
+				out.SyncsPerToken, out.SyncSites = nil, nil
+				break
+			}
+			out.SyncSites = append(out.SyncSites, NativeSyncSite{Site: s.Site, Stage: s.Stage, SyncsPerToken: syncs, WaitMSPerToken: wait, D2HBytesPerToken: d2h})
+		}
+	}
+	return &out
 }
 
 // WithHostWork returns a copy carrying the decode-window CPU split. Values that

@@ -71,6 +71,16 @@ static inline uint64_t submitWaitNow() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+// Always-on host-sync accounting (writers hold vulkanMu; Go reads the atomics lock-free).
+// g_deviceIdleClock is one word so a lock-free read is coherent: bit 0 set means idle
+// since origin value>>1, clear means value>>1 idle ns booked so far.
+static std::atomic<uint64_t> g_deviceIdleClock{0};
+static uint32_t g_syncOutstanding = 0;
+// Pipelined batches submitted without a host wait, and drained. Between the two the
+// device may finish unobserved, so the idle clock misses that idle.
+static std::atomic<uint64_t> g_syncPipeSubmits{0}, g_syncPipeDrains{0};
+// Last compute kernel recorded per path since that path's last host sync.
+static uint32_t g_syncBatchStage = UINT32_MAX, g_syncOneShotStage = UINT32_MAX;
 
 #define VKCHECK(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { \
   fprintf(stderr, "fak-vulkan: %s:%d VkResult=%d\n", __FILE__, __LINE__, (int)_r); abort(); } } while (0)
@@ -424,6 +434,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
 
 static inline void dpDispatch(const Kernel& k) {
     g_deviceDispatches.fetch_add(1, std::memory_order_relaxed);
+    (g_batching ? g_syncBatchStage : g_syncOneShotStage) = (uint32_t)(&k - g_kern);
     if (!g_dp_on) return;
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
@@ -469,6 +480,74 @@ static inline void dpOneShot(std::atomic<uint64_t>& family) {
     if (!g_dp_on) return;
     family.fetch_add(1, std::memory_order_relaxed);
     g_dp.oneShotSubmits.fetch_add(1, std::memory_order_relaxed);
+}
+
+// ---- host-sync sites ------------------------------------------------------------------
+// A site is the outermost entry point that made the host wait on the device; the stage is
+// the last compute kernel recorded on the waited path (kSyncStageNone: no dispatch).
+enum SyncSite : uint32_t {
+    kSyncSiteSubmitWait, kSyncSiteBatchFlush, kSyncSiteFlushStatus, kSyncSiteReadback,
+    kSyncSiteStepSuspend, kSyncSiteStepEnd, kSyncSitePipelineDrain, kSyncSiteUpload, kSyncSiteCount
+};
+const char* const kSyncSiteNames[kSyncSiteCount] = {
+    "submit_wait", "batch_flush", "flush_status", "readback", "step_suspend", "step_end", "pipeline_drain", "upload"};
+constexpr uint32_t kSyncSiteUnset = kSyncSiteCount;
+constexpr uint32_t kSyncStageNone = (uint32_t)K_COUNT;
+constexpr uint32_t kSyncStageCount = kSyncStageNone + 1;
+struct SyncCell { std::atomic<uint64_t> syncs{0}, waitNs{0}, d2hBytes{0}; };
+SyncCell g_syncCells[kSyncSiteCount][kSyncStageCount];
+uint32_t g_syncSite = kSyncSiteUnset;
+bool g_syncBatchFlush = false;
+SyncCell* g_syncLast = nullptr;
+
+struct SyncScope {
+    uint32_t prevSite;
+    bool prevBatch;
+    explicit SyncScope(uint32_t site, bool batchFlush = false) : prevSite(g_syncSite), prevBatch(g_syncBatchFlush) {
+        if (g_syncSite == kSyncSiteUnset) g_syncSite = site;
+        if (batchFlush) g_syncBatchFlush = true;
+    }
+    ~SyncScope() { g_syncSite = prevSite; g_syncBatchFlush = prevBatch; }
+};
+
+inline uint32_t syncTakeBatchStage() { const uint32_t s = g_syncBatchStage; g_syncBatchStage = UINT32_MAX; return s; }
+inline uint32_t syncTakeStage() {
+    if (g_syncBatchFlush) return syncTakeBatchStage();
+    const uint32_t s = g_syncOneShotStage;
+    g_syncOneShotStage = UINT32_MAX;
+    return s;
+}
+
+inline uint64_t syncIdleNs(uint64_t now) {
+    const uint64_t v = g_deviceIdleClock.load(std::memory_order_relaxed);
+    if (!(v & 1)) return v >> 1;
+    return now > (v >> 1) ? now - (v >> 1) : 0;
+}
+
+// A submit with nothing outstanding closes the open idle interval at `at`.
+inline void syncSubmitted(uint64_t at) {
+    if (g_syncOutstanding++ != 0) return;
+    const uint64_t v = g_deviceIdleClock.load(std::memory_order_relaxed);
+    if (v & 1) g_deviceIdleClock.store(syncIdleNs(at) << 1, std::memory_order_relaxed);
+}
+
+// A completed host wait: the last outstanding signal opens an idle interval, and the wait
+// books to the scoped site (or `site`) and `stage`.
+inline void syncSignaled(uint32_t site, uint32_t stage, uint64_t waitStart, bool scoped = true) {
+    const uint64_t now = submitWaitNow();
+    if (g_syncOutstanding > 0 && --g_syncOutstanding == 0) {
+        const uint64_t v = g_deviceIdleClock.load(std::memory_order_relaxed);
+        if (!(v & 1)) g_deviceIdleClock.store(((now - (v >> 1)) << 1) | 1, std::memory_order_relaxed);
+    }
+    if (scoped && g_syncSite != kSyncSiteUnset) site = g_syncSite;
+    SyncCell& c = g_syncCells[site < kSyncSiteCount ? site : kSyncSiteSubmitWait][stage < kSyncStageCount ? stage : kSyncStageNone];
+    c.syncs.fetch_add(1, std::memory_order_relaxed);
+    c.waitNs.fetch_add(now > waitStart ? now - waitStart : 0, std::memory_order_relaxed);
+    g_syncLast = &c;
+}
+
+inline void syncNoteD2H(uint64_t bytes) {
+    if (g_syncLast) g_syncLast->d2hBytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
 // Q8 fast-path availability (set in fvk_init from the device's 8-bit-storage + int8 features).
@@ -1378,8 +1457,10 @@ void submitWait(VkCommandBuffer cmd) {
     VKCHECK(vkResetFences(g_dev, 1, &g_submitFence));
     const uint64_t submitted = submitWaitNow();
     VKCHECK(vkQueueSubmit(g_queue, 1, &si, g_submitFence));
+    syncSubmitted(submitted);
     VKCHECK(vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX));
     g_submitWaitNs.fetch_add(submitWaitNow() - submitted, std::memory_order_relaxed);
+    syncSignaled(kSyncSiteSubmitWait, syncTakeStage(), submitted);
 }
 
 // Only a completed batch may transfer its command to the batch-local idle slot.
@@ -1427,9 +1508,11 @@ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
             // submit conservatively: no failure result is a quiescence proof.
             g_v41SubmissionPendingFailure = true;
         } else {
+            syncSubmitted(submitted);
             r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
             if (r != VK_SUCCESS) g_v41SubmissionPendingFailure = true;
             else g_submitWaitNs.fetch_add(submitWaitNow() - submitted, std::memory_order_relaxed);
+            if (r == VK_SUCCESS) syncSignaled(kSyncSiteSubmitWait, syncTakeStage(), submitted);
         }
     }
     if (!g_v41SubmissionPendingFailure &&
@@ -1807,6 +1890,7 @@ struct InflightBatch {
     uint64_t d2dCount = 0;
     uint64_t d2dBytes = 0;
     bool d2dValid = true;
+    uint32_t syncStage = UINT32_MAX;
 };
 InflightBatch g_inflight;
 VkFence g_pipeFences[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
@@ -1822,6 +1906,9 @@ void drainInflight() {
     g_inflight = InflightBatch{};
     const auto t0 = std::chrono::steady_clock::now();
     VKCHECK(vkWaitForFences(g_dev, 1, &done.fence, VK_TRUE, UINT64_MAX));
+    g_syncPipeDrains.fetch_add(1, std::memory_order_release);
+    syncSignaled(kSyncSitePipelineDrain, done.syncStage,
+        (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count(), false);
     if (g_dp_on) {
         g_pipeWaitNs.fetch_add((uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - t0).count(), std::memory_order_relaxed);
@@ -1867,9 +1954,13 @@ void submitBehindInflightWait(VkCommandBuffer cmd) {
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
     VKCHECK(vkResetFences(g_dev, 1, &g_submitFence));
+    const uint64_t syncAt = submitWaitNow();
     VKCHECK(vkQueueSubmit(g_queue, 1, &si, g_submitFence));
+    syncSubmitted(syncAt);
+    const uint32_t syncStage = syncTakeStage();
     drainInflight();
     VKCHECK(vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX));
+    syncSignaled(kSyncSiteBatchFlush, syncStage, syncAt);
     if (!retainCompletedBatchCommand(cmd)) vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
 }
 
@@ -1894,11 +1985,16 @@ void batchCycle() {
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &g_batchCmd;
+    const uint64_t syncAt = submitWaitNow();
     VKCHECK(vkQueueSubmit(g_queue, 1, &si, fence));
+    syncSubmitted(syncAt);
+    g_syncPipeSubmits.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t syncStage = syncTakeBatchStage();
     drainInflight();
     g_inflight.active = true;
     g_inflight.cmd = g_batchCmd;
     g_inflight.fence = fence;
+    g_inflight.syncStage = syncStage;
     g_inflight.sets.swap(g_batchSets);
     g_inflight.freed.swap(g_batchFreed);
     g_inflight.d2dCount = g_batchD2DCount;
@@ -1921,6 +2017,7 @@ void batchCycle() {
 }
 
 void batchFlush() {
+    SyncScope syncScope(kSyncSiteBatchFlush, true);
     if (g_v41SubmissionPendingFailure) return; // never retry an uncertain submit
     if (!g_batching) { drainInflight(); return; }
     bool hadWork = g_batchOps > 0;
@@ -2000,6 +2097,7 @@ bool stepUploadReserve(size_t bytes, size_t* offset) {
         return true;
     }
     if (g_upArenaUsed > 0) {
+        SyncScope syncScope(kSyncSiteUpload);
         batchFlush();
         if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS || g_batching) return false;
         batchBegin();
@@ -2058,6 +2156,7 @@ bool stepRecordUpload(Buffer* dst, const void* host, size_t bytes) {
 // Record the readback copy behind every prior recorded op, submit the step's
 // recorded chain once on the checked path, then resume recording.
 int stepRecordReadback(void* host, Buffer* src, size_t bytes) {
+    SyncScope syncScope(kSyncSiteReadback);
     int stagingStatus = VK_SUCCESS;
     Buffer* stage = stagingBuffer(bytes, &stagingStatus);
     if (!stage) {
@@ -2077,6 +2176,7 @@ int stepRecordReadback(void* host, Buffer* src, size_t bytes) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : (int)VK_ERROR_UNKNOWN;
     }
     memcpy(host, g_stageMapped, bytes);
+    syncNoteD2H(bytes);
     if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
         g_transferCountersValid = false;
     }
@@ -2090,6 +2190,7 @@ struct V41StepSuspend {
     bool resume = false;
     V41StepSuspend() {
         if (!g_stepBatch || !g_batching) return;
+        SyncScope syncScope(kSyncSiteStepSuspend);
         batchFlush();
         resume = !g_batching && !g_v41SubmissionPendingFailure && g_submissionStatus == VK_SUCCESS;
     }
@@ -2108,6 +2209,7 @@ void copyHostToMappedWeight(Buffer* dst, const void* host, size_t bytes) {
 
 // staging copy host<->device through one persistent HOST_VISIBLE scratch buffer.
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
+    SyncScope syncScope(kSyncSiteUpload);
     if (g_v41SubmissionPendingFailure) return;
     if (bytes == 0 || !dst || !host) return;
     drainInflight();
@@ -2129,6 +2231,7 @@ void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
 }
 
 int copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
+    SyncScope syncScope(kSyncSiteReadback);
     if (g_v41SubmissionPendingFailure) return (int)g_submissionStatus;
     if (bytes == 0) return VK_SUCCESS;
     if (!host || !src) return VK_ERROR_INITIALIZATION_FAILED;
@@ -2143,6 +2246,7 @@ int copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
     endSubmitWait(cmd);
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     memcpy(host, g_stageMapped, bytes);
+    syncNoteD2H(bytes);
     if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
         g_transferCountersValid = false;
     }
@@ -4967,6 +5071,7 @@ void fvk_free(void* d) {
 // visible to subsequently-recorded ops, and the staging copy itself needs its own submit).
 // In practice weights upload BEFORE the per-token batch begins (cached), so this rarely flushes.
 void fvk_h2d(void* d, const void* h, size_t bytes) {
+    SyncScope syncScope(kSyncSiteUpload);
     if (g_v41SubmissionPendingFailure) return;
     Buffer* page = B(d);
     if (page && page->offloadPristine && page->mapped && h && bytes <= page->bytes) {
@@ -5074,6 +5179,7 @@ void fvk_debug_restore_fail_after_submits(int successful_submits) {
 // d2h is a true host fence (the final logits Read): flush the recorded batch so the compute
 // has actually executed, then copy device->host.
 int fvk_d2h(void* h, const void* d, size_t bytes) {
+    SyncScope syncScope(kSyncSiteReadback);
     if (stepBatchRecording() && h && d && bytes > 0 && bytes <= B((void*)d)->bytes &&
         g_submissionStatus == VK_SUCCESS) {
         return stepRecordReadback(h, B((void*)d), bytes);
@@ -5086,6 +5192,7 @@ int fvk_d2h(void* h, const void* d, size_t bytes) {
 // V4.1 status/output readback deliberately avoids the generic aborting command
 // helpers. The shared staging allocation and transfer counters remain canonical.
 int fvk_v41_d2h(void* h, const void* d, size_t bytes) {
+    SyncScope syncScope(kSyncSiteReadback);
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (!g_ready || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return VK_ERROR_INITIALIZATION_FAILED;
     Buffer* src = B(d);
@@ -5116,6 +5223,7 @@ int fvk_v41_d2h(void* h, const void* d, size_t bytes) {
     dpOneShot(g_dp.oneShotD2H);
     if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
     memcpy(h, g_stageMapped, bytes);
+    syncNoteD2H(bytes);
     if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
         g_transferCountersValid = false;
     }
@@ -5437,6 +5545,7 @@ int fvk_v41_try_query_norm_publication(float* host, float* published, const void
 // one submit instead of k. Regions are ordered and disjoint in the host image.
 // Single-row KV chain. Claims only existing pool capacity; no allocator calls.
 int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void* gain, float eps, int probe, int* status) {
+    SyncScope syncScope(kSyncSiteReadback);
     if (!status) return -1;
     *status=VK_SUCCESS;
     auto fail=[&]() { *status=g_submissionStatus!=VK_SUCCESS?(int)g_submissionStatus:(int)VK_ERROR_UNKNOWN; return -1; };
@@ -5498,6 +5607,7 @@ int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void*
     if(g_v41SubmissionPendingFailure || g_submissionStatus!=VK_SUCCESS || !stepBatchRecording())return fail();
     memcpy(image,g_stageMapped,hostBytes);
     const size_t copied[]={16u,bytes,16u,bytes};
+    for (size_t n : copied) syncNoteD2H(n);
     for(size_t n:copied)if(!checkedCounterAdd(g_d2hCount,1)||!checkedCounterAdd(g_d2hBytes,n))g_transferCountersValid=false;
     return 1;
 }
@@ -5506,6 +5616,7 @@ int fvk_v41_try_kv_norm_publication(const float* host, float* image, const void*
 // across probe, bounded Go allocation and commit. No stage growth or allocation.
 int fvk_v41_try_index_query_publication(float* raw, float* published, const void* source,
                                         const void* weight, const void* input, int probe, int* status) {
+    SyncScope syncScope(kSyncSiteReadback);
     if (!status) return -1;
     *status = VK_SUCCESS;
     auto fail = [&]() {
@@ -5588,6 +5699,7 @@ int fvk_v41_try_index_query_publication(float* raw, float* published, const void
     memcpy(raw,(const char*)g_stageMapped+16,bytes);
     memcpy(published,g_stageMapped,16);
     memcpy(published+4,(const char*)g_stageMapped+16+bytes,bytes);
+    for (size_t n : lengths) syncNoteD2H(n);
     for (size_t n:lengths) {
         if (!checkedCounterAdd(g_d2hCount,1) || !checkedCounterAdd(g_d2hBytes,n)) g_transferCountersValid=false;
     }
@@ -5596,6 +5708,7 @@ int fvk_v41_try_index_query_publication(float* raw, float* published, const void
 
 int fvk_v41_d2h_many(void* host, size_t hostBytes, int count, void* const* srcs,
                      const size_t* offsets, const size_t* bytes) {
+    SyncScope syncScope(kSyncSiteReadback);
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
     if (!g_ready || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return VK_ERROR_INITIALIZATION_FAILED;
     if (!host || hostBytes == 0 || count <= 0 || !srcs || !offsets || !bytes) return VK_ERROR_INITIALIZATION_FAILED;
@@ -5641,6 +5754,7 @@ int fvk_v41_d2h_many(void* host, size_t hostBytes, int count, void* const* srcs,
         if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
     }
     memcpy(host, g_stageMapped, hostBytes);
+    for (int i = 0; i < count; ++i) syncNoteD2H(bytes[i]);
     for (int i = 0; i < count; ++i) {
         if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes[i])) {
             g_transferCountersValid = false;
@@ -5843,6 +5957,7 @@ void fvk_submission_reset(void) {
     // Callers must retire the context instead of clearing an unconfirmed fence.
 }
 int fvk_batch_flush_status(void) {
+    SyncScope syncScope(kSyncSiteFlushStatus);
     fvk_batch_flush();
     const int status = (int)g_submissionStatus;
     if (status == VK_SUCCESS && g_stepBatch) batchBegin();
@@ -5864,6 +5979,7 @@ int fvk_v41_step_batch_begin(void) {
 }
 int fvk_v41_step_batch_end(void) {
     if (!g_stepBatch) return (int)g_submissionStatus;
+    SyncScope syncScope(kSyncSiteStepEnd);
     batchFlush();
     g_stepBatch = false;
     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
@@ -5877,6 +5993,41 @@ void fvk_device_work_counters(uint64_t* dispatches, uint64_t* d2h_bytes, uint64_
     if (dispatches) *dispatches = g_deviceDispatches.load(std::memory_order_relaxed);
     if (d2h_bytes) *d2h_bytes = g_d2hBytes.load(std::memory_order_relaxed);
     if (submit_wait_ns) *submit_wait_ns = g_submitWaitNs.load(std::memory_order_relaxed);
+}
+uint64_t fvk_device_idle_ns(void) { return syncIdleNs(submitWaitNow()); }
+void fvk_sync_pipeline_counters(uint64_t* submits, uint64_t* drains) {
+    const uint64_t d = g_syncPipeDrains.load(std::memory_order_acquire);
+    if (drains) *drains = d;
+    if (submits) *submits = g_syncPipeSubmits.load(std::memory_order_relaxed);
+}
+int fvk_sync_site_count(void) { return (int)kSyncSiteCount; }
+int fvk_sync_stage_count(void) { return (int)kSyncStageCount; }
+const char* fvk_sync_site_name(int site) {
+    return site >= 0 && site < (int)kSyncSiteCount ? kSyncSiteNames[site] : "";
+}
+const char* fvk_sync_stage_name(int stage) {
+    if (stage == (int)kSyncStageNone) return "none";
+    return stage >= 0 && stage < (int)K_COUNT ? kKernelNames[stage] : "";
+}
+int fvk_sync_site_rows(uint32_t* site, uint32_t* stage, uint64_t* syncs, uint64_t* wait_ns,
+                       uint64_t* d2h_bytes, int cap) {
+    int n = 0;
+    for (uint32_t s = 0; s < kSyncSiteCount; ++s) {
+        for (uint32_t k = 0; k < kSyncStageCount; ++k) {
+            const SyncCell& c = g_syncCells[s][k];
+            const uint64_t count = c.syncs.load(std::memory_order_relaxed);
+            if (count == 0) continue;
+            if (n < cap && site && stage && syncs && wait_ns && d2h_bytes) {
+                site[n] = s;
+                stage[n] = k;
+                syncs[n] = count;
+                wait_ns[n] = c.waitNs.load(std::memory_order_relaxed);
+                d2h_bytes[n] = c.d2hBytes.load(std::memory_order_relaxed);
+            }
+            ++n;
+        }
+    }
+    return n;
 }
 int fvk_transfer_counters(uint64_t* h2d_count, uint64_t* h2d_bytes,
                            uint64_t* d2h_count, uint64_t* d2h_bytes,

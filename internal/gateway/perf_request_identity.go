@@ -134,6 +134,9 @@ func applyRequestObservation(o *requestObservation, rec *perfledger.Record) {
 			share, shareOK := totals.HostShare()
 			rec.NativeTiming = rec.NativeTiming.WithHostWork(cpu, cpuOK, share, shareOK)
 			rec.NativeTiming = rec.NativeTiming.WithKernels(nativeKernels(totals))
+			idle, idleOK := totals.GPUIdleMSPerToken()
+			syncs, syncsOK := totals.SyncsPerToken()
+			rec.NativeTiming = rec.NativeTiming.WithDeviceSync(idle, idleOK, syncs, syncsOK, nativeSyncSites(totals))
 		}
 	}
 	if o.complete && !o.failed && o.read > 0 {
@@ -173,6 +176,20 @@ func nativeKernels(totals nativeperf.DecodeHostWorkTotals) *perfledger.NativeKer
 		BarriersElided:  k.BarriersElided,
 		Samples:         samples,
 	})
+}
+
+// nativeSyncSites converts the request's folded host syncs into the ledger's
+// per-token site table; nil when any decode window lacked them.
+func nativeSyncSites(totals nativeperf.DecodeHostWorkTotals) []perfledger.NativeSyncSite {
+	rates, ok := totals.SyncSiteRates()
+	if !ok {
+		return nil
+	}
+	out := make([]perfledger.NativeSyncSite, 0, len(rates))
+	for _, r := range rates {
+		out = append(out, perfledger.NativeSyncSite{Site: r.Site, Stage: r.Stage, SyncsPerToken: r.SyncsPerToken, WaitMSPerToken: r.WaitMSPerToken, D2HBytesPerToken: r.D2HBytesPerToken})
+	}
+	return out
 }
 
 const maxInboundRequestIDLen = 128

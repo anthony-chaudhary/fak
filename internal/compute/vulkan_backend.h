@@ -905,6 +905,25 @@ uint64_t fvk_d2h_bytes(void);
 /* Always-on cumulative device-work counters: recorded compute dispatches, D2H
  * payload bytes, and host wall nanoseconds from queue submit to fence signal. */
 void fvk_device_work_counters(uint64_t *dispatches, uint64_t *d2h_bytes, uint64_t *submit_wait_ns);
+/* Always-on host-sync accounting. fvk_device_idle_ns is cumulative host wall with
+ * nothing submitted outstanding, from the observed last fence signal to the next
+ * submit, including an idle interval still open at the read; fence wake and submit
+ * latency count as busy, so it is a lower bound. A sync is one host
+ * wait on device completion, booked per (site, stage): site is the outermost
+ * waiting entry point, stage the last compute kernel recorded on the waited path.
+ * fvk_sync_site_rows copies up to cap nonzero cells and returns the nonzero count. */
+uint64_t fvk_device_idle_ns(void);
+int fvk_sync_site_count(void);
+int fvk_sync_stage_count(void);
+const char *fvk_sync_site_name(int site);
+const char *fvk_sync_stage_name(int stage);
+int fvk_sync_site_rows(uint32_t *site, uint32_t *stage, uint64_t *syncs, uint64_t *wait_ns,
+                       uint64_t *d2h_bytes, int cap);
+/* Cumulative pipelined batches submitted without a host wait and drained (drains
+ * read first, so drains <= submits). While submits exceed drains the device may
+ * go idle unobserved: idle over a window where either moved, or that began with
+ * one outstanding, is not on the idle clock. */
+void fvk_sync_pipeline_counters(uint64_t *submits, uint64_t *drains);
 /* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
  * before initialization; all six outputs are mandatory. Observed zero directions
  * are returned as zero values with success=1. */
