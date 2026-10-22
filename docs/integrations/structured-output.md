@@ -134,21 +134,27 @@ also rejected before inference. `strict` may be true or omitted. Native
 `json_object` is unsupported; upstream engine passthrough retains its own
 supported surface.
 
-On `/v1/chat/completions`, the native route enforces four constraint carriers:
-`response_format` with type `json_schema`, a guided regex sent as
-`guided_regex` or its SGLang alias `regex`, a vLLM `guided_json` schema, and a
-vLLM `guided_choice` list. Every other carrier on that route is refused before
-prefill instead of being ignored: other `response_format` types
-(`json_object`, `regex`, `grammar`) and the remaining provider-native guided
-fields (`guided_grammar`, `guided_decoding_backend`, `json_schema`, `ebnf`,
-`structured_outputs`). This applies to buffered and streamed requests, including
-when such a field accompanies a supported carrier. A request may carry only one
-guided kind, so any two of `guided_json`, `guided_choice` and the regex pair are
-refused. A `guided_decoding_backend` alone is refused too, since the native
-route has no selectable backend. vLLM's `structured_outputs` object is refused
-whole, even when its member is one the native route enforces as `guided_json`,
-`guided_choice` or `guided_regex`. A guided field sent as `null` counts as
-absent. EBNF and other grammars therefore need an upstream engine in ride mode.
+On `/v1/chat/completions`, the native route enforces these constraint carriers:
+`response_format` with type `json_schema`; a guided regex sent as
+`guided_regex` or its SGLang alias `regex`; a vLLM `guided_json` schema or its
+SGLang alias `json_schema`; a vLLM `guided_choice` list; and vLLM's
+`structured_outputs` object with a `json`, `regex` or `choice` member. Every
+other carrier on that route is refused before prefill instead of being ignored:
+other `response_format` types (`json_object`, `regex`, `grammar`), the
+remaining provider-native guided fields (`guided_grammar`,
+`guided_decoding_backend`, `ebnf`), and the `structured_outputs` members
+`json_object`, `grammar` and `structural_tag`. This applies to buffered and
+streamed requests, including when such a field accompanies a supported carrier.
+A request may carry only one guided kind: a JSON schema, a regex or a choice
+list. Carriers of the same kind may be sent together only when they carry the
+same constraint, so `guided_regex`, `regex` and `structured_outputs.regex` must
+hold the same pattern; `guided_json`, `json_schema` and `structured_outputs.json`
+the same schema (compared as described for `guided_json` below); and
+`guided_choice` and `structured_outputs.choice` the same list once duplicates
+are removed, in the same order. Carriers of different kinds are refused. A
+`guided_decoding_backend` alone is refused too, since the native route has no
+selectable backend. A guided field sent as `null` counts as absent. EBNF and
+other grammars therefore need an upstream engine in ride mode.
 
 On `/v1/responses`, the structured-output control is `text.format`. fak maps it
 onto the chat route's `response_format` before planning, so both routes apply
@@ -198,11 +204,13 @@ such as an array, a number, or a string that does not hold exactly one JSON
 object, is refused. `guided_json` may accompany a `response_format` of type
 `text`, or of type `json_schema` when both carry the same schema. Schemas are
 compared as parsed JSON, so key order and whitespace may differ, but `1` and
-`1.0` are different. Any other `response_format` is refused. The gateway's HTTP
-422 schema byte and depth checks read only `response_format`; an oversized
-`guided_json` schema is refused by the native 64 KiB cap with HTTP 400 instead.
-Unlike `response_format`, `guided_json` alone adds no schema instruction to the
-prompt; only the mask enforces it.
+`1.0` are different. Any other `response_format` is refused. SGLang's
+`json_schema` field is an alias of `guided_json`: it takes the same values,
+usually a JSON string holding the schema, and follows the same rules. The
+gateway's HTTP 422 schema byte and depth checks read only `response_format`; an
+oversized `guided_json` or `json_schema` schema is refused by the native 64 KiB
+cap with HTTP 400 instead. Unlike `response_format`, these guided schema
+carriers add no schema instruction to the prompt; only the mask enforces them.
 
 `guided_choice` is a non-empty JSON array of non-empty strings, and the whole
 response must equal exactly one member. Each member is escaped with Go's
@@ -215,8 +223,36 @@ stop token and `b` stay admissible, and after `ab` only the stop token is. An
 empty list, a non-string or empty member, or a list over either bound is refused
 before inference. Like a guided regex, `guided_choice` is refused alongside any
 `response_format` other than `text`. A reasoning span may precede a
-`guided_json` or `guided_choice` response exactly as it precedes a schema
-object.
+`guided_json`, `json_schema`, `guided_choice` or `structured_outputs` response
+exactly as it precedes a schema object.
+
+vLLM's `structured_outputs` object is enforced by mapping its one constraint
+member onto the carrier with the same meaning: `json` (a schema object or a JSON
+string holding one) onto `guided_json`, `regex` onto `guided_regex`, and
+`choice` onto `guided_choice`. Each member then accepts the same values and
+compiles to the same mask as that carrier, so the caps, refusals and pairing
+with `response_format` above apply unchanged. Like vLLM, the object must carry
+exactly one constraint member; an empty object, one whose members are all
+`null`, or one with two members is refused. The members `json_object`,
+`grammar` and `structural_tag` are refused. Of the options in vLLM's
+`StructuredOutputsParams`, `disable_any_whitespace` and
+`disable_additional_properties` are accepted with either boolean value. Native
+JSON masks never emit free whitespace or an undeclared property, which satisfies
+both values, and neither option affects regex or choice output. In vLLM,
+`disable_any_whitespace: true` means compact JSON without whitespace, the layout
+native masks emit, and
+`disable_additional_properties: true` closes objects that do not set
+`additionalProperties`, as the native subset already does. A
+`whitespace_pattern` other than `null` is refused, because the native masks
+cannot follow a custom whitespace pattern. Any other key is refused rather than
+ignored, including `disable_fallback`, which current vLLM does not define, and
+the internal `_backend` field. A refusal names the offending member, for
+example `structured_outputs.grammar`. Source: `StructuredOutputsParams` in
+`vllm/sampling_params.py` and the xgrammar and guidance backends under
+`vllm/v1/structured_output/`, vLLM `main` as of 2026-10-21. There, the
+per-request option fields are declared, but the backends read the server-wide
+`StructuredOutputsConfig` values instead; with `disable_any_whitespace` set, the
+xgrammar backend compiles JSON with separators `(",", ":")`.
 
 The legacy `/v1/completions` route does not parse `response_format` or any
 guided field yet. Carriers sent there are dropped rather than refused, in native
@@ -319,11 +355,14 @@ in `vllm/sampling_params.py` and `ChatCompletionRequest.structured_outputs` in
 checks only the envelope: a `structured_outputs` that is not a JSON object (a string,
 array, number or boolean) returns HTTP 400 `invalid_structured_outputs` before
 dispatch, on buffered and streamed requests alike. `null` counts as absent, as for the
-other guided fields. The native route refuses a `structured_outputs` object (see
-above). The legacy `/v1/completions` route forwards none of these carriers yet, and
-`/v1/responses` drops `structured_outputs`. `internal/gateway/structured_outputs_carrier_test.go`
-witnesses ride forwarding, the planner carrier, the envelope 400 and the native
-refusal.
+other guided fields. The native route enforces a `structured_outputs` object's
+`json`, `regex` or `choice` member and refuses the rest (see above). The legacy
+`/v1/completions` route forwards none of these carriers yet, and `/v1/responses`
+drops `structured_outputs`. `internal/gateway/structured_outputs_carrier_test.go`
+witnesses ride forwarding, the planner carrier, the envelope 400, and the native
+route's enforced content and 400 refusals over HTTP, buffered and streamed;
+`internal/agent/inkernel_structured_outputs_test.go` witnesses native
+enforcement and refusals.
 
 > **Deprecated-field warning.** vLLM **removed** the older top-level guided fields
 > (`guided_json`, `guided_grammar`, `guided_choice`, `guided_regex`,

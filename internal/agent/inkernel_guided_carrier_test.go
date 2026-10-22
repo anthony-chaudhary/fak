@@ -54,7 +54,8 @@ func TestNativeGuidedCarrierRefusedBeforeSampling(t *testing.T) {
 	for key, value := range nativeGuidedTestCarriers {
 		if slices.Contains(nativeGuidedCarriers[:], key) {
 			// Enforced natively; refusals of bad enforced carriers live in
-			// inkernel_regex_test.go and inkernel_guided_json_choice_test.go.
+			// inkernel_regex_test.go, inkernel_guided_json_choice_test.go and
+			// inkernel_structured_outputs_test.go.
 			continue
 		}
 		cases = append(cases, refusal{key, []SampleOpt{WithGuidedDecode(map[string]json.RawMessage{key: value})}, key})
@@ -109,7 +110,7 @@ func TestNativeGuidedCarrierAbsentKeepsOrdinaryRoute(t *testing.T) {
 		opts []SampleOpt
 	}{
 		{"absent", nil},
-		{"null_carriers", []SampleOpt{WithGuidedDecode(map[string]json.RawMessage{"guided_regex": json.RawMessage(`null`), "ebnf": json.RawMessage(" null ")})}},
+		{"null_carriers", []SampleOpt{WithGuidedDecode(map[string]json.RawMessage{"guided_regex": json.RawMessage(`null`), "ebnf": json.RawMessage(" null "), "json_schema": json.RawMessage(`null`), "structured_outputs": json.RawMessage(`null`)})}},
 		{"response_format_text", []SampleOpt{WithResponseFormat(json.RawMessage(`{"type":"text"}`))}},
 	} {
 		for _, entry := range nativeGuidedEntries() {

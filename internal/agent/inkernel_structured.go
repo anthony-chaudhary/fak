@@ -30,12 +30,8 @@ func (e *nativeGuidedCarrierError) Error() string {
 
 func (e *nativeGuidedCarrierError) Unwrap() error { return ErrNativeStructuredUnsupported }
 
-// nativeGuidedRegexCarriers are the guided regex fields the native route
-// enforces; the first one present names the request's pattern.
-var nativeGuidedRegexCarriers = [...]string{"guided_regex", "regex"}
-
 // nativeGuidedCarriers are every guided field the native route enforces.
-var nativeGuidedCarriers = [...]string{"guided_choice", "guided_json", "guided_regex", "regex"}
+var nativeGuidedCarriers = [...]string{"guided_choice", "guided_json", "guided_regex", "json_schema", "regex", "structured_outputs"}
 
 // guided_choice compiles to a regex alternation; these bounds keep its escaped
 // pattern and automaton inside the regex mask's caps.
@@ -45,7 +41,8 @@ const (
 )
 
 // nativeGuided is the one guided constraint a request carries: a regex pattern
-// (guided_regex, regex, guided_choice) or a JSON schema (guided_json).
+// (guided_regex, regex, guided_choice) or a JSON schema (guided_json,
+// json_schema), possibly sent as the matching structured_outputs member.
 type nativeGuided struct {
 	carrier string
 	pattern string
@@ -60,10 +57,25 @@ func refuseNativeGuidedCarriers(guided map[string]json.RawMessage) error {
 	return err
 }
 
+// nativeGuidedKind names the constraint a carrier sends with the member name
+// vLLM's structured_outputs uses for it.
+func nativeGuidedKind(carrier string) string {
+	switch carrier {
+	case "guided_json", "json_schema":
+		return "json"
+	case "guided_regex", "regex":
+		return "regex"
+	case "guided_choice":
+		return "choice"
+	}
+	return ""
+}
+
 // parseNativeGuided returns the request's guided constraint, if any. Only one
-// kind may be sent; both regex carriers may be sent only with the same pattern.
+// kind may be sent; carriers of the same kind may be sent together only with
+// the same constraint.
 func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) {
-	refused, kinds := "", []string{}
+	refused, keys := "", []string{}
 	for key, raw := range guided {
 		if nativeGuidedAbsent(raw) {
 			continue
@@ -74,66 +86,124 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 			}
 			continue
 		}
-		if key == "regex" && !nativeGuidedAbsent(guided["guided_regex"]) {
-			continue
-		}
-		kinds = append(kinds, key)
+		keys = append(keys, key)
 	}
 	if refused != "" {
 		return nativeGuided{}, &nativeGuidedCarrierError{Carrier: refused}
 	}
-	if len(kinds) == 0 {
+	if len(keys) == 0 {
 		return nativeGuided{}, nil
 	}
-	slices.Sort(kinds)
-	if len(kinds) > 1 {
-		return nativeGuided{}, &nativeGuidedCarrierError{Carrier: kinds[0]}
+	slices.Sort(keys)
+	type member struct {
+		carrier, kind string
+		raw           json.RawMessage
 	}
-	switch kinds[0] {
-	case "guided_json":
-		schema, err := nativeGuidedJSONSchema(guided["guided_json"])
-		return nativeGuided{carrier: "guided_json", schema: schema}, err
-	case "guided_choice":
-		pattern, err := nativeGuidedChoicePattern(guided["guided_choice"])
-		return nativeGuided{carrier: "guided_choice", pattern: pattern}, err
+	members := make([]member, 0, len(keys))
+	for _, key := range keys {
+		m := member{carrier: key, kind: nativeGuidedKind(key), raw: guided[key]}
+		if key == "structured_outputs" {
+			kind, raw, err := nativeStructuredOutputsMember(guided[key])
+			if err != nil {
+				return nativeGuided{}, err
+			}
+			m = member{carrier: key + "." + kind, kind: kind, raw: raw}
+		}
+		members = append(members, m)
+	}
+	for _, m := range members[1:] {
+		if m.kind != members[0].kind {
+			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: keys[0]}
+		}
 	}
 	var spec nativeGuided
-	for _, key := range nativeGuidedRegexCarriers {
-		if nativeGuidedAbsent(guided[key]) {
-			continue
+	for _, m := range members {
+		next := nativeGuided{carrier: m.carrier}
+		var err error
+		switch m.kind {
+		case "json":
+			next.schema, err = nativeGuidedJSONSchema(m.carrier, m.raw)
+		case "choice":
+			next.pattern, err = nativeGuidedChoicePattern(m.carrier, m.raw)
+		default:
+			if json.Unmarshal(m.raw, &next.pattern) != nil {
+				err = &nativeGuidedCarrierError{Carrier: m.carrier}
+			}
 		}
-		var value string
-		if json.Unmarshal(guided[key], &value) != nil || (spec.carrier != "" && value != spec.pattern) {
-			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: key}
+		if err != nil {
+			return nativeGuided{}, err
 		}
 		if spec.carrier == "" {
-			spec.carrier, spec.pattern = key, value
+			spec = next
+			continue
+		}
+		if next.pattern != spec.pattern || (spec.schema != nil && !nativeGuidedSameSchema(spec.schema, next.schema)) {
+			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: m.carrier}
 		}
 	}
 	return spec, nil
 }
 
+// nativeStructuredOutputsMember returns the one constraint member of a vLLM
+// structured_outputs object. Of StructuredOutputsParams' options, only the two
+// booleans are accepted: the native masks emit no free whitespace and no
+// undeclared property, which satisfies either value. A whitespace_pattern,
+// unknown key or other member is refused rather than ignored. A member or
+// option sent as null counts as absent.
+func nativeStructuredOutputsMember(raw json.RawMessage) (string, json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return "", nil, &nativeGuidedCarrierError{Carrier: "structured_outputs"}
+	}
+	refused, kinds := "", []string{}
+	for key, value := range fields {
+		if nativeGuidedAbsent(value) {
+			continue
+		}
+		switch key {
+		case "json", "regex", "choice":
+			kinds = append(kinds, key)
+			continue
+		case "disable_any_whitespace", "disable_additional_properties":
+			var flag bool
+			if json.Unmarshal(value, &flag) == nil {
+				continue
+			}
+		}
+		if refused == "" || key < refused {
+			refused = key
+		}
+	}
+	if refused != "" {
+		return "", nil, &nativeGuidedCarrierError{Carrier: "structured_outputs." + refused}
+	}
+	if len(kinds) != 1 {
+		return "", nil, &nativeGuidedCarrierError{Carrier: "structured_outputs"}
+	}
+	return kinds[0], fields[kinds[0]], nil
+}
+
 // nativeGuidedJSONSchema accepts a schema object or, as vLLM does, a JSON string
 // holding one.
-func nativeGuidedJSONSchema(raw json.RawMessage) (json.RawMessage, error) {
+func nativeGuidedJSONSchema(carrier string, raw json.RawMessage) (json.RawMessage, error) {
 	schema := bytes.TrimSpace(raw)
 	if len(schema) > 0 && schema[0] == '"' {
 		var text string
 		if json.Unmarshal(schema, &text) != nil {
-			return nil, &nativeGuidedCarrierError{Carrier: "guided_json"}
+			return nil, &nativeGuidedCarrierError{Carrier: carrier}
 		}
 		schema = bytes.TrimSpace([]byte(text))
 	}
 	if len(schema) == 0 || schema[0] != '{' || !json.Valid(schema) {
-		return nil, &nativeGuidedCarrierError{Carrier: "guided_json"}
+		return nil, &nativeGuidedCarrierError{Carrier: carrier}
 	}
 	return schema, nil
 }
 
 // nativeGuidedChoicePattern turns a guided_choice list into a full-match
 // alternation of escaped literals, so the response is exactly one member.
-func nativeGuidedChoicePattern(raw json.RawMessage) (string, error) {
-	refused := &nativeGuidedCarrierError{Carrier: "guided_choice"}
+func nativeGuidedChoicePattern(carrier string, raw json.RawMessage) (string, error) {
+	refused := &nativeGuidedCarrierError{Carrier: carrier}
 	var members []any
 	if json.Unmarshal(raw, &members) != nil || len(members) == 0 {
 		return "", refused

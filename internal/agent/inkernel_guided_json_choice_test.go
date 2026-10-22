@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -143,10 +144,18 @@ func TestNativeGuidedJSONSharesResponseFormatSubset(t *testing.T) {
 				t.Fatal(err)
 			}
 			viaFormat, formatErr := p.newNativeRequestConstraint(SampleParams{ResponseFormat: nativeStructuredFormatForSchema(t, tc.schema)}, stops)
+			var carriers []map[string]json.RawMessage
 			for _, guided := range []json.RawMessage{schema, nativeGuidedJSONString(t, schema)} {
-				viaGuided, guidedErr := p.newNativeRequestConstraint(SampleParams{GuidedDecode: map[string]json.RawMessage{"guided_json": guided}}, stops)
+				carriers = append(carriers,
+					map[string]json.RawMessage{"guided_json": guided},
+					map[string]json.RawMessage{"json_schema": guided},
+					map[string]json.RawMessage{"structured_outputs": json.RawMessage(`{"json":` + string(guided) + `}`)},
+				)
+			}
+			for _, carrier := range carriers {
+				viaGuided, guidedErr := p.newNativeRequestConstraint(SampleParams{GuidedDecode: carrier}, stops)
 				if (formatErr == nil) != tc.admit || (guidedErr == nil) != tc.admit {
-					t.Fatalf("admit = response_format:%v guided_json:%v, want %v (%v / %v)", formatErr == nil, guidedErr == nil, tc.admit, formatErr, guidedErr)
+					t.Fatalf("admit = response_format:%v %v:%v, want %v (%v / %v)", formatErr == nil, slices.Collect(maps.Keys(carrier)), guidedErr == nil, tc.admit, formatErr, guidedErr)
 				}
 				if !tc.admit {
 					if !errors.Is(formatErr, ErrNativeStructuredUnsupported) || !errors.Is(guidedErr, ErrNativeStructuredUnsupported) {
@@ -168,7 +177,7 @@ func TestNativeGuidedJSONSharesResponseFormatSubset(t *testing.T) {
 					t.Fatal(err)
 				}
 				if !slices.Equal(formatMask, guidedMask) || viaFormat.stopID != viaGuided.stopID {
-					t.Fatal("guided_json and response_format compiled different first-token masks")
+					t.Fatalf("%v and response_format compiled different first-token masks", slices.Collect(maps.Keys(carrier)))
 				}
 			}
 		})
@@ -245,7 +254,9 @@ func TestNativeGuidedJSONRefusedBeforeSampling(t *testing.T) {
 		{"with_guided_choice", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "guided_choice": json.RawMessage(`["a"]`)})}, "guided_choice"},
 		{"with_backend", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "guided_decoding_backend": json.RawMessage(`"xgrammar"`)})}, "guided_decoding_backend"},
 		{"with_ebnf", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "ebnf": json.RawMessage(`"root ::= \"a\""`)})}, "ebnf"},
-		{"with_sglang_json_schema", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "json_schema": nativeGuidedJSONString(t, schema)})}, "json_schema"},
+		{"with_differing_sglang_json_schema", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "json_schema": nativeGuidedJSONString(t, other)})}, "json_schema"},
+		{"with_structured_outputs_regex", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "structured_outputs": json.RawMessage(`{"regex":"a"}`)})}, "guided_json"},
+		{"with_differing_structured_outputs_json", []SampleOpt{guided(map[string]json.RawMessage{"guided_json": schema, "structured_outputs": json.RawMessage(`{"json":` + string(other) + `}`)})}, "structured_outputs.json"},
 	})
 }
 
