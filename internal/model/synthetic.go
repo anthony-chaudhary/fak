@@ -18,6 +18,39 @@ type synthTensor struct {
 // deterministic; fill decides whether a given tensor is a fixed constant (norm/bias
 // inits) or a scaled LCG draw. Shared by every NewSynthetic* constructor.
 func synthBuildRaw(tensors []synthTensor, fill func(name string, next func() float32) float32) (map[string]tensorMeta, []byte) {
+	return synthBuildRawResolved(tensors, func(name string) synthElemFill {
+		return synthElemFill{custom: func(next func() float32) float32 { return fill(name, next) }}
+	})
+}
+
+// synthElemFill is one tensor's fill policy, resolved once by name: a constant (no LCG
+// draw), scale*next(), or an arbitrary per-element custom function.
+type synthElemFill struct {
+	value  float32
+	scale  float32
+	scaled bool
+	custom func(next func() float32) float32
+}
+
+// synthConstFill fills every element with v without consuming the LCG.
+func synthConstFill(v float32) synthElemFill { return synthElemFill{value: v} }
+
+// synthScaledFill fills every element with scale*next().
+func synthScaledFill(scale float32) synthElemFill { return synthElemFill{scale: scale, scaled: true} }
+
+// synthMatmulFillFor is synthMatmulFill resolved once for name.
+func synthMatmulFillFor(name string) synthElemFill {
+	if strings.Contains(name, "embed_tokens") {
+		return synthScaledFill(0.2)
+	}
+	return synthScaledFill(0.1)
+}
+
+// synthBuildRawResolved is synthBuildRaw with the name-dependent fill decision hoisted
+// out of the element loop: resolve runs once per tensor rather than once per element,
+// which dominated large V4.1 fixture construction. The LCG sequence and bytes are
+// identical to synthBuildRaw for an equivalent fill.
+func synthBuildRawResolved(tensors []synthTensor, resolve func(name string) synthElemFill) (map[string]tensorMeta, []byte) {
 	man := make(map[string]tensorMeta, len(tensors))
 	off := 0
 	for _, t := range tensors {
@@ -38,10 +71,22 @@ func synthBuildRaw(tensors []synthTensor, fill func(name string, next func() flo
 	}
 	for _, t := range tensors {
 		m := man[t.name]
-		n := m.Nbytes / 4
-		for i := 0; i < n; i++ {
-			f := fill(t.name, next)
-			binary.LittleEndian.PutUint32(raw[m.Offset+i*4:], math.Float32bits(f))
+		dst := raw[m.Offset : m.Offset+m.Nbytes]
+		f := resolve(t.name)
+		switch {
+		case f.custom != nil:
+			for i := 0; i+4 <= len(dst); i += 4 {
+				binary.LittleEndian.PutUint32(dst[i:], math.Float32bits(f.custom(next)))
+			}
+		case f.scaled:
+			for i := 0; i+4 <= len(dst); i += 4 {
+				binary.LittleEndian.PutUint32(dst[i:], math.Float32bits(f.scale*next()))
+			}
+		default:
+			bits := math.Float32bits(f.value)
+			for i := 0; i+4 <= len(dst); i += 4 {
+				binary.LittleEndian.PutUint32(dst[i:], bits)
+			}
 		}
 	}
 	return man, raw
@@ -133,12 +178,12 @@ func NewSynthetic(cfg Config) *Model {
 	}
 	tensors = append(tensors, ts{"model.norm.weight", []int{H}})
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		norm := strings.HasSuffix(name, "layernorm.weight") || strings.HasSuffix(name, "linear_attn.norm.weight") || name == "model.norm.weight"
 		if norm {
-			return 1.0
+			return synthConstFill(1.0)
 		}
-		return synthMatmulFill(name, next)
+		return synthMatmulFillFor(name)
 	})
 
 	cfg.TieWordEmbeddings = true
@@ -245,12 +290,12 @@ func NewSyntheticMoE(cfg Config) *Model {
 	}
 	tensors = append(tensors, ts{"model.norm.weight", []int{H}})
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		norm := strings.HasSuffix(name, "layernorm.weight") || name == "model.norm.weight"
 		if norm {
-			return 1.0
+			return synthConstFill(1.0)
 		}
-		return synthMatmulFill(name, next)
+		return synthMatmulFillFor(name)
 	})
 
 	cfg.TieWordEmbeddings = true
@@ -326,18 +371,18 @@ func NewSyntheticGLMDsa(cfg Config) *Model {
 	}
 	add("model.norm.weight", H)
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		isOne := strings.HasSuffix(name, "layernorm.weight") ||
 			strings.HasSuffix(name, "k_norm.weight") ||
 			name == "model.norm.weight"
 		isZero := strings.HasSuffix(name, "k_norm.bias")
 		switch {
 		case isOne:
-			return 1.0
+			return synthConstFill(1.0)
 		case isZero:
-			return 0.0
+			return synthConstFill(0.0)
 		}
-		return synthMatmulFill(name, next)
+		return synthMatmulFillFor(name)
 	})
 
 	cfg.TieWordEmbeddings = true

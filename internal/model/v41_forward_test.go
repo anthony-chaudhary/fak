@@ -103,18 +103,18 @@ func v41ReducedModelLayers(t testing.TB, layers int) *Model {
 		}
 	}
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight"):
-			return 1.0 // well-conditioned norms
+			return synthConstFill(1.0) // well-conditioned norms
 		case hasSuffix(name, "mhc.scale"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.base"):
-			return 0.0
+			return synthConstFill(0.0)
 		case hasSuffix(name, "attn.sink"):
-			return 0.25 * next()
+			return synthScaledFill(0.25)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	return &Model{Cfg: cfg, manifest: man, raw: raw}
@@ -847,18 +847,18 @@ func v41ReducedEngramModel(t *testing.T) (*Model, V41EngramLayout) {
 		)
 	}
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.scale"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.base"):
-			return 0.0
+			return synthConstFill(0.0)
 		case hasSuffix(name, "attn.sink"):
-			return 0.25 * next()
+			return synthScaledFill(0.25)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	m := &Model{Cfg: cfg, manifest: man, raw: raw}
@@ -1273,12 +1273,12 @@ func v41ReducedCompressIndexModel(t *testing.T) *Model {
 		{layerName(0, "indexer.k_norm.weight"), []int{cfg.IndexHeadDim}},
 		{layerName(0, "indexer.weights_proj.weight"), []int{cfg.IndexNHeads, H}},
 	}
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case hasSuffix(name, "compressor.norm.weight") || hasSuffix(name, "indexer.k_norm.weight"):
-			return 1.0
+			return synthConstFill(1.0)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	for k, v := range man {
@@ -1434,12 +1434,12 @@ func TestV41CEDCSA2StagesIndependent(t *testing.T) {
 		{layerName(0, "indexer.k_norm.weight"), []int{cfg.IndexHeadDim}},
 		{layerName(0, "indexer.weights_proj.weight"), []int{cfg.IndexNHeads, H}},
 	}
-	man, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(extra, func(name string) synthElemFill {
 		switch {
 		case hasSuffix(name, "compressor.norm.weight") || hasSuffix(name, "indexer.k_norm.weight"):
-			return 1.0
+			return synthConstFill(1.0)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	for k, v := range man {

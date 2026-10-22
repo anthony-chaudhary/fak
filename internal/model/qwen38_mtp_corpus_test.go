@@ -63,7 +63,11 @@ func TestQwen38MTP_QualityCorpusDomains(t *testing.T) {
 	}
 }
 
+// Independent of every other test (own synthetic model, no env or globals), so it
+// overlaps the >4k-token long-context replay with the rest of the package.
+// fak-test:runtime slow est=30s lane=default
 func TestQwen38MTP_QualityGreedyBitExactParity(t *testing.T) {
+	t.Parallel()
 	m := qwen38HybridMTPEnabledSyntheticModel(t)
 	corpus := NewDefaultQwen38QualityCorpus()
 
@@ -102,7 +106,11 @@ func TestQwen38MTP_QualityGreedyBitExactParity(t *testing.T) {
 	}
 }
 
+// Independent of every other test (own synthetic model, no env or globals), so it
+// overlaps the >4k-token long-context replay with the rest of the package.
+// fak-test:runtime slow est=30s lane=default
 func TestQwen38MTP_QualitySampledEnvelope(t *testing.T) {
+	t.Parallel()
 	m := qwen38HybridMTPEnabledSyntheticModel(t)
 	corpus := NewDefaultQwen38QualityCorpus()
 
