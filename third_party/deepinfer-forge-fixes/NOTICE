@@ -1,0 +1,33 @@
+DeepInfer forge-finding contract fixes
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer, deepinfer/testing.py (lines 15-23)
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/testing.py
+Upstream change: https://github.com/deepseek-ai/DeepInfer/pull/80
+
+Adaptation (internal/cmdutil MaxAbsDiffF32): no upstream code is adapted; the
+contract is inspired by the finding. Fak adopts upstream assert_close's shape
+and NaN refusal (testing.py:16-17): a length mismatch or a NaN on either side
+now returns +Inf instead of comparing only the shorter prefix and skipping
+NaN. Fak extends the refusal to mismatched non-finite pairs (an infinity
+against a finite value or the opposite infinity yields +Inf), unlike
+upstream's zeroing of non-finite entries (testing.py:19-20); matching
+same-sign infinities still compare equal.
+
+Source: deepseek-ai/DeepInfer, deepinfer/entrypoints/llm.py (lines 117-142)
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/entrypoints/llm.py
+Upstream changes: https://github.com/deepseek-ai/DeepInfer/pull/27
+                  https://github.com/deepseek-ai/DeepInfer/pull/29
+
+Adaptation (internal/gateway legacy /v1/completions prompt arrays): no
+upstream code is adapted; the contract is inspired by the finding. Upstream
+treats a list of prompts as one request per element (llm.py:119-141), so a
+multi-prompt array is a batch, not one prompt. Fak's gateway route does not
+serve batches, so it now refuses a string array of two or more prompts with a
+typed 400 (error.code prompt_batch_unsupported) before admission and before
+any stream preamble, instead of joining the prompts with newlines into one
+completion. A bare string and a one-element array are served unchanged.

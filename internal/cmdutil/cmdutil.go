@@ -7,6 +7,7 @@ package cmdutil
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -76,19 +77,29 @@ func CapPositive(n, cap int) int {
 	return n
 }
 
-// MaxAbsDiffF32 returns the largest absolute difference over the shorter input.
+// MaxAbsDiffF32 returns the largest absolute elementwise difference, or +Inf
+// when the lengths differ or either side holds a NaN at some index. Matching
+// same-sign infinities count as equal.
 func MaxAbsDiffF32(a, b []float32) float64 {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
+	if len(a) != len(b) {
+		return math.Inf(1)
 	}
+	b = b[:len(a)]
 	var maxDiff float64
-	for i := 0; i < n; i++ {
+	for i := range a {
 		diff := float64(a[i] - b[i])
 		if diff < 0 {
 			diff = -diff
 		}
-		if diff > maxDiff {
+		// NaN fails every ordered compare, so it lands here without a
+		// second per-element test on the common path.
+		if !(diff <= maxDiff) {
+			if diff != diff {
+				if a[i] == b[i] {
+					continue
+				}
+				return math.Inf(1)
+			}
 			maxDiff = diff
 		}
 	}

@@ -6,6 +6,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -138,13 +139,11 @@ func TestMaxAbsDiff(t *testing.T) {
 	if d := maxAbsDiff([]float32{1, 2, 2.5}, []float32{1, -4, 3}); d != 6 {
 		t.Errorf("swapped args: d = %v, want 6", d)
 	}
-	// Documented (if blunt) behavior: comparison runs over the SHORTER
-	// length, so a tail-only divergence past len(b) is not seen.
-	if d := maxAbsDiff([]float32{1, 2, 100}, []float32{1, 2}); d != 0 {
-		t.Errorf("short b: d = %v, want 0 (only min length compared)", d)
+	if d := maxAbsDiff([]float32{1, 2, 100}, []float32{1, 2}); !math.IsInf(d, 1) {
+		t.Errorf("short b: d = %v, want +Inf", d)
 	}
-	if d := maxAbsDiff(nil, []float32{5}); d != 0 {
-		t.Errorf("nil a: d = %v, want 0", d)
+	if d := maxAbsDiff(nil, []float32{5}); !math.IsInf(d, 1) {
+		t.Errorf("nil a: d = %v, want +Inf", d)
 	}
 }
 
