@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -16,12 +17,13 @@ import (
 // reads the stream panel directly and its flatten-RMS scale runs inside the
 // device split.
 type v41MHCResident struct {
-	d       *v41MHCDevice
-	streams *v41DeviceStreams
-	carry   compute.Tensor
-	layer   v41MHCResidentLayer
-	rows    int
-	hidden  int
+	d          *v41MHCDevice
+	streams    *v41DeviceStreams
+	carry      compute.Tensor
+	layer      v41MHCResidentLayer
+	rows       int
+	hidden     int
+	prenormOff bool
 }
 
 // resident reports whether this seam dispatches on a backend operation (as
@@ -118,7 +120,7 @@ func (d *v41MHCDevice) newResident(x [][]float32) (*v41MHCResident, error) {
 		}
 		return nil, d.fail(-1, "initial-streams", "admission", errV41MHCResult)
 	}
-	r := &v41MHCResident{d: d, rows: len(x), hidden: H}
+	r := &v41MHCResident{d: d, rows: len(x), hidden: H, prenormOff: os.Getenv(v41MHCPrenormEnv) == "0"}
 	s := d.s
 	err := d.guard(-1, "initial-streams", func(stage *string) error {
 		*stage = "x upload"
@@ -259,6 +261,23 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 		if err != nil {
 			return err
 		}
+		if fused := r.prenorm(weight, rows, streams.Hidden()); fused != nil {
+			*stage = "params upload"
+			pt := r.splitParams(layer, scaleLeaf, baseLeaf, scale, base)
+			*stage = "prenorm-split"
+			out, err := fused.V41MHCPrenormSplit(weight, streams.Tensor(), pt, rows, streams.Hidden(), iters, hcEps, rmsEps)
+			if err != nil {
+				if out.Buf() != nil && out.Buf() != weight.Buf() && out.Buf() != pt.Buf() && out.Buf() != streams.Tensor().Buf() {
+					s.Backend.Free(out)
+				}
+				return err
+			}
+			if !v41MHCFreshOutput(s, out, []int{rows, compute.V41MHCCoeffWidth}, weight, pt, streams.Tensor()) {
+				return errV41MHCResult
+			}
+			coeffs = out
+			return nil
+		}
 		*stage = "projection"
 		var raw compute.Tensor
 		if rows == 1 {
@@ -278,15 +297,7 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 		view := raw
 		view.Shape = []int{rows, compute.V41MHCCoeffWidth}
 		*stage = "params upload"
-		// The split coefficients are immutable checkpoint data, just like the
-		// mix matrix above. The model/backend owner separates loaded model
-		// generations and backend instances; these leaf names separate layer
-		// and attention/FFN role. Forward-local cleanup must not free them.
-		paramsKey := "v41-mhc-split-params:" + layerName(layer, scaleLeaf) + ":" + layerName(layer, baseLeaf)
-		pt := s.cachedImmutableWeight(paramsKey, paramsKey, func() compute.Tensor {
-			params := append(append(make([]float32, 0, compute.V41MHCParamWidth), scale...), base...)
-			return s.uploadHostF32([]int{compute.V41MHCParamWidth}, params, compute.MemoryWeights, "V4.1 mHC split params")
-		})
+		pt := r.splitParams(layer, scaleLeaf, baseLeaf, scale, base)
 		*stage = "rms-split"
 		out, err := r.d.op.V41MHCRMSSplit(view, streams.Tensor(), pt, rows, streams.Hidden(), iters, hcEps, rmsEps)
 		if err != nil {
@@ -302,6 +313,40 @@ func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scale
 		return nil
 	})
 	return coeffs, err
+}
+
+// splitParams borrows the cached device scale[3]|base[24] row of one split.
+func (r *v41MHCResident) splitParams(layer int, scaleLeaf, baseLeaf string, scale, base []float32) compute.Tensor {
+	s := r.d.s
+	// The split coefficients are immutable checkpoint data, just like the
+	// mix matrix. The model/backend owner separates loaded model generations
+	// and backend instances; these leaf names separate layer and
+	// attention/FFN role. Forward-local cleanup must not free them.
+	paramsKey := "v41-mhc-split-params:" + layerName(layer, scaleLeaf) + ":" + layerName(layer, baseLeaf)
+	return s.cachedImmutableWeight(paramsKey, paramsKey, func() compute.Tensor {
+		params := append(append(make([]float32, 0, compute.V41MHCParamWidth), scale...), base...)
+		return s.uploadHostF32([]int{compute.V41MHCParamWidth}, params, compute.MemoryWeights, "V4.1 mHC split params")
+	})
+}
+
+// v41MHCPrenormEnv set to "0" keeps the mix projection on MatMul followed by
+// the rms-split, for A/B and bisection.
+const v41MHCPrenormEnv = "FAK_V41_MHC_PRENORM"
+
+// prenorm returns the backend's fused projection + rms-split only where it
+// reproduces this call's MatMul + rms-split bit for bit: an F32 weight follows
+// matmul.comp's chunk order for any row count, a Q2_K weight q2k_matvec's
+// order, which a panel MatMul does not use. The backend admits a weight only
+// after its once-per-device self-check in that dtype found the two equal.
+func (r *v41MHCResident) prenorm(weight compute.Tensor, rows, hidden int) compute.V41MHCPrenormBackend {
+	if r.prenormOff {
+		return nil
+	}
+	op, ok := r.d.op.(compute.V41MHCPrenormBackend)
+	if !ok || (weight.Dtype == compute.Q2_K && rows != 1) || !op.V41MHCPrenormAvailable() || !op.SupportsV41MHCPrenormWeight(weight, hidden) {
+		return nil
+	}
+	return op
 }
 
 // collapse returns the BF16 hc_pre rows sum_h pre[h]*stream[h] of streams under

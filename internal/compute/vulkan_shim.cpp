@@ -7210,6 +7210,63 @@ int fvk_v41_mhc_f32(int mode, const void* dA, const void* dB, const void* dC,
     return (int)g_submissionStatus;
 }
 
+// A Q2_K prenorm reproduces q2k_matvec's order, so it exists only while the
+// one-token Q2_K MatMul it replaces dispatches that kernel.
+int fvk_have_v41_mhc_prenorm(int weightQ2K) {
+    return fvk_have_v41_mhc() && (!weightQ2K || g_have_q2k_matvec) ? 1 : 0;
+}
+
+int fvk_v41_mhc_prenorm_split_f32(int weightQ2K, const void* dW, const void* dStreams,
+                                  const void* dParams, void* dScratch, void* dOut,
+                                  int rows, int hidden, int iters, float eps, float rmsEps) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_mhc_prenorm(weightQ2K)) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (rows <= 0 || hidden <= 0 || iters < 1 || !std::isfinite(eps) || !(eps > 0.0f) ||
+        !std::isfinite(rmsEps) || !(rmsEps > 0.0f)) return 2;
+    const uint64_t r = uint64_t(rows), width = 4u * uint64_t(hidden);
+    const uint64_t chunks = (width + 1023u) / 1024u;
+    if (weightQ2K ? width % 256u != 0 : chunks > 64u) return 2;
+    const uint64_t perGroup = weightQ2K ? 2u : 64u / chunks;
+    const uint64_t dotGroups = (24u + perGroup - 1u) / perGroup;
+    const uint64_t weightBytes = weightQ2K ? 24u * (width / 256u) * 84u : 24u * width * 4u;
+    const uint64_t streams = r * width;
+    const uint64_t prenormGroups = r * (dotGroups + 1u), splitGroups = (r + 63u) / 64u;
+    if (streams > UINT32_MAX || 24u * width > UINT32_MAX || r * 25u > UINT32_MAX) return 2;
+    if (prenormGroups > g_maxComputeWorkGroupCountX || splitGroups > g_maxComputeWorkGroupCountX) return 2;
+    // Weight, streams, params[27], scratch[rows,25], coeffs[rows,24].
+    Buffer* bufs[5] = {B(dW), B(dStreams), B(dParams), B(dScratch), B(dOut)};
+    const uint64_t bytes[5] = {weightBytes, streams * 4u, 27u * 4u, r * 25u * 4u, r * 24u * 4u};
+    for (int i = 0; i < 5; ++i) {
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            bytes[i] > bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int i = 0; i < 3; ++i) if (aliases(bufs[3], bufs[i])) return 2;
+    for (int i = 0; i < 4; ++i) if (aliases(bufs[4], bufs[i])) return 2;
+    struct Push { int32_t mode, rows, hidden, iters; float eps, rmsEps; };
+    static_assert(sizeof(Push) == 24 && offsetof(Push, eps) == 16 && offsetof(Push, rmsEps) == 20,
+                  "V4.1 mHC push ABI must be four int32 values then two float32");
+    const Push project{weightQ2K ? 6 : 5, rows, hidden, 0, 0.0f, 0.0f};
+    Buffer* projectBufs[4] = {bufs[0], bufs[1], bufs[2], bufs[3]};
+    if (!dispatch(g_kern[K_V41_MHC], projectBufs, &project, sizeof(project), uint32_t(prenormGroups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    const Push finish{7, rows, hidden, iters, eps, rmsEps};
+    Buffer* finishBufs[4] = {bufs[3], bufs[3], bufs[2], bufs[4]};
+    if (!dispatch(g_kern[K_V41_MHC], finishBufs, &finish, sizeof(finish), uint32_t(splitGroups))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 #ifdef FAK_V41_INDEXER_SCORE_WITNESS
 // Test-archive-only symbols. No production runtime switch can enable them or
 // mark Supports true. The tagged Go witness must link this exact test archive.

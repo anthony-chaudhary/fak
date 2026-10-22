@@ -9992,6 +9992,26 @@
           "category": "incidental",
           "reason": "Private one-boolean invocation-local selected-forward state carrier implementing the positioned InKernelPlannerConfig.V41EngramLookAhead selection/no-replay contract. It is not an independent engine, request policy, cancellation scope, source lease or session ownership abstraction.",
           "token": "inKernelEngramAttempt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal Vulkan computetrace recorder for one matmul kernel event; the V4.1 mHC prenorm dispatch shares its emitting gate. It is an observability helper, not a gateway or engine concept.",
+          "token": "recordvulkanmatmulkernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal constant naming the kernel phase label on Vulkan computetrace records; a trace field value, not a gateway or engine concept.",
+          "token": "vulkankernelphase"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal struct carrying optional per-kernel GPU timer samples onto a Vulkan computetrace record; an observability payload, not a gateway or engine concept.",
+          "token": "vulkankerneltiming"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal constructor that folds a phase performance-query observation into the per-kernel timing payload of a Vulkan computetrace record; not a gateway or engine concept.",
+          "token": "vulkankerneltimingfrom"
         }
       ],
       "exclude": [
@@ -10162,6 +10182,7 @@
         "query_public_policy",
         "recordVDSOServeMeasured",
         "recordVDSOServeProof",
+        "recordvulkanmatmulkernel",
         "remoteEngine",
         "remoteTarget",
         "renderinkernelchatmlrequest",
@@ -10176,6 +10197,9 @@
         "skippedkernelfiles",
         "skippedkernelscantruncated",
         "unknown_engine_start_sequence",
+        "vulkankernelphase",
+        "vulkankerneltiming",
+        "vulkankerneltimingfrom",
         "webSearchEngine",
         "writeEngine"
       ],
@@ -14575,6 +14599,11 @@
           "category": "incidental",
           "reason": "Optional backend capability predicate for the V4.1 device-resident compressor ring module; it reports operation availability before selection and makes no product-support or maturity claim.",
           "token": "supportsv41compressorring"
+        },
+        {
+          "category": "incidental",
+          "reason": "Optional backend capability predicate admitting a V4.1 mHC mix weight to the fused prenorm dispatch after its per-device bit-identity self-check; it reports operation availability and makes no product-support or maturity claim.",
+          "token": "supportsv41mhcprenormweight"
         }
       ],
       "exclude": [
@@ -14837,6 +14866,7 @@
         "supportmaturityscore",
         "supports",
         "supportsv41compressorring",
+        "supportsv41mhcprenormweight",
         "supportwitness",
         "targetcoverage",
         "topncoverage",

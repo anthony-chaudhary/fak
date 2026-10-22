@@ -37,6 +37,8 @@ type v41MHCTestBackend struct {
 	streamUploads          int
 	// rowDecode binds the Engram table-row decode (v41_engram_row_decode_test.go).
 	rowDecode bool
+	// prenorm binds the fused projection + rms-split (v41_mhc_prenorm_test.go).
+	prenorm bool
 }
 
 func newV41MHCTestBackend(supported bool) *v41MHCTestBackend {

@@ -580,6 +580,19 @@ int fvk_have_v41_mhc(void);
 int fvk_v41_mhc_f32(int mode, const void *dA, const void *dB, const void *dC,
                     void *dOut, int rows, int hidden, int iters, float eps, float rmsEps);
 
+/* V4.1 mHC prenorm: the one-token [24,4*hidden] mix projection of the
+ * flattened streams and its row sum of squares in one dispatch (mode 5 F32
+ * weight, mode 6 raw Q2_K weight) into scratch[rows,25] = raw[24] | sumsq,
+ * then the mode-7 rms-split into fresh coeffs[rows,24]. Outputs are bitwise
+ * the one-token MatMul (matmul.comp decode chunks, or q2k_matvec.comp) followed
+ * by mode 4. params is scale[3]|base[24]; scratch and out are disjoint from
+ * every input. Q2_K requires hidden*4 % 256 == 0 and the q2k_matvec module;
+ * F32 requires at most 64 1024-wide chunks. Return codes match fvk_v41_mhc_f32. */
+int fvk_have_v41_mhc_prenorm(int weightQ2K);
+int fvk_v41_mhc_prenorm_split_f32(int weightQ2K, const void *dW, const void *dStreams,
+                                  const void *dParams, void *dScratch, void *dOut,
+                                  int rows, int hidden, int iters, float eps, float rmsEps);
+
 /* V4.1 one-query index selection after the indexer score. Four storage
  * bindings: scores[rows] F32 (compared as order-preserving integer keys),
  * scratch[2*blocks+rows] uint32, out[min(topK,rows)] F32 exact row integers
