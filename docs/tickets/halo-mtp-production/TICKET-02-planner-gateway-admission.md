@@ -128,7 +128,42 @@ through the exact generic verifier, then stops subsequent drafting.
 - [ ] [HW-WITNESSED] Physical Halo end-to-end A/B remains unchecked here and is
   qualified separately with N>=5 matched samples, exact token parity, zero hidden
   fallback, complete source/artifact/system provenance, P50/P90, and confidence
-  intervals before any performance or default-on claim.
+  intervals before any performance or default-on claim. Not witnessed yet: the
+  first physical A/B found the route unreachable on a real artifact (see
+  "Hardware A/B record"); the qualified rerun needs a stage at the fix commit.
+- [x] [SW-VERIFIED] A resident Q4_K_M retained head (matrices in the quant stores,
+  only F32 norms in the manifest) is admitted by `Qwen35MTPMode` and the forward
+  tensor validator through its validated resident layout; an incomplete resident
+  head still refuses with `*Qwen35MTPIncompleteError`.
+
+## Hardware A/B record (2026-10-22, strix1)
+
+`fak-strix bench abba` on strix1 at public `59ccab2e04b7`, private loopback
+`fak serve --engine inkernel --backend vulkan`, greedy, B=`FAK_SPECULATIVE=off`
+(the default serve retains no MTP head) vs C1=`FAK_SPECULATIVE=mtp`:
+
+- `Qwen3.8-27B-UD-Q2_K_XL`: C1 refuses at load, 0/7 runs:
+  `resident-Q4K weight admission: gguf: Qwen MTP tensor mtp.layers.0.self_attn.k_proj.weight has type Q8_0, want Q4_K`.
+  That artifact is outside the resident Vulkan envelope (B: 13.35 tok/s, CV 0.5%).
+- `Qwen3.8-27B-Q4_K_M`, 3 ABBA rounds: B 4.40 vs C1 4.47 tok/s, median delta
+  -0.19% [-1.42, +14.12], p=0.45, WITHIN_NOISE, greedy text identical. Every C1
+  ledger row reads `engine.path=serial` with no speculative rounds. This is a
+  null A/B: MTP never ran, so it is not an MTP measurement.
+
+Root cause, from an on-node probe of the gateway predicate: `Qwen35MTPMode`
+checked only the F32 manifest, which holds the resident head's norms but not
+its eight Q4_K/Q6_K/Q8_0 matrices. It returned `*Qwen35MTPIncompleteError`, so
+`shouldEnableVulkanMTP` was false and nothing reported a route or downgrade.
+`validateQwen35MTPForwardTensors` had the same manifest-only check, so the
+draft constructor would refuse next. The fix routes both through the validated
+resident layout (`qwen38MTPTensorLayout`, Format Q4_K).
+
+A diagnostic strix1 build with the fix (modified source, not a qualified
+receipt) reports `X-Fak-Speculative: mtp-vulkan`, 8 rounds, 32 drafted and 11
+accepted tokens (34%), then `acceptance-floor-fallback`. Decode is 2.0-2.1 tok/s
+against 4.2 tok/s serial on the same 64-token greedy request, with identical
+text, and `fak_compute_host_fallback_total` stays 0 for `mtp_draft_host_forward`
+and `spec_verify_attention`, so the device-only host-stage guard was not hit.
 
 ## Definition of done
 

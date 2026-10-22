@@ -669,6 +669,11 @@ var qwen35MTPDecoderAliases = map[string]string{
 }
 
 func (m *Model) validateQwen35MTPForwardTensors() error {
+	// The resident Q4_K route keeps the head's matrices in the quant stores;
+	// its exact layout validation covers the matrices, the F32 norms and the head.
+	if layout, present, err := m.qwen38MTPTensorLayout(); present && err == nil && layout.Format == Qwen38MTPFormatQ4K {
+		return nil
+	}
 	cfg := m.Cfg
 	h, hd := cfg.HiddenSize, cfg.HeadDim
 	if h <= 0 || hd <= 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 || cfg.IntermediateSize <= 0 || cfg.VocabSize <= 0 {
