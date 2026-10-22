@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // DeepSeek V4.1 control tokens, as the GGUF vocab spells them.
@@ -36,72 +37,98 @@ const (
 // results wrapped in <tool_result>); each assistant turn is <｜Assistant｜></think>,
 // its content, any DSML tool calls and EOS; the open generation turn closes it.
 func renderDeepSeekV41Chat(messages []Message, tools []ToolDef, responseFormat json.RawMessage) string {
-	var system strings.Builder
+	return joinPromptSegments(renderDeepSeekV41ChatSegments(messages, tools, responseFormat))
+}
+
+// renderDeepSeekV41ChatSegments is renderDeepSeekV41Chat split into template text
+// (Trusted) and client text: message content, tool schemas, tool-call names and
+// arguments, and the response format.
+func renderDeepSeekV41ChatSegments(messages []Message, tools []ToolDef, responseFormat json.RawMessage) []tokenizer.Segment {
+	var segs []tokenizer.Segment
+	trusted := func(text string) {
+		if text != "" {
+			segs = append(segs, tokenizer.Segment{Text: text, Trusted: true})
+		}
+	}
+	ordinary := func(text string) {
+		if text != "" {
+			segs = append(segs, tokenizer.Segment{Text: text})
+		}
+	}
+	trusted(deepSeekV41BOS)
+	system := len(segs)
 	first := true
 	for _, m := range messages {
 		if m.Role != RoleSystem {
 			continue
 		}
 		if !first {
-			system.WriteString("\n\n")
+			trusted("\n\n")
 		}
-		system.WriteString(m.Content)
+		ordinary(m.Content)
 		first = false
 	}
-	if schemas := deepSeekV41ToolSchemas(tools); schemas != "" {
-		if system.Len() > 0 {
-			system.WriteString("\n\n")
+	systemJoin := func() {
+		if len(segs) > system {
+			trusted("\n\n")
 		}
-		system.WriteString(deepSeekV41ToolsHeader + schemas + deepSeekV41ToolsFooter)
+	}
+	if schemas := deepSeekV41ToolSchemas(tools); len(schemas) > 0 {
+		systemJoin()
+		trusted(deepSeekV41ToolsHeader)
+		for _, schema := range schemas {
+			ordinary(schema)
+			trusted("\n")
+		}
+		trusted(deepSeekV41ToolsFooter)
 	}
 	if format := bytes.TrimSpace(responseFormat); len(format) > 0 && !bytes.Equal(format, []byte("null")) {
-		if system.Len() > 0 {
-			system.WriteString("\n\n")
-		}
-		system.WriteString(deepSeekV41ResponseFormat + spacedJSON(string(format)))
+		systemJoin()
+		trusted(deepSeekV41ResponseFormat)
+		ordinary(spacedJSON(string(format)))
 	}
 
-	var b strings.Builder
-	b.WriteString(deepSeekV41BOS)
-	b.WriteString(system.String())
 	inUser := false
 	openUser := func() {
 		if inUser {
-			b.WriteString("\n\n")
+			trusted("\n\n")
 			return
 		}
-		b.WriteString(deepSeekV41User)
+		trusted(deepSeekV41User)
 		inUser = true
 	}
 	for _, m := range messages {
 		switch m.Role {
 		case RoleUser, RoleDeveloper:
 			openUser()
-			b.WriteString(m.Content)
+			ordinary(m.Content)
 		case RoleTool:
 			openUser()
-			b.WriteString("<tool_result>" + m.Content + "</tool_result>")
+			trusted("<tool_result>")
+			ordinary(m.Content)
+			trusted("</tool_result>")
 		case RoleAssistant:
 			inUser = false
-			b.WriteString(deepSeekV41Assistant + deepSeekV41ThinkEnd + m.Content)
+			trusted(deepSeekV41Assistant + deepSeekV41ThinkEnd)
+			ordinary(m.Content)
 			if len(m.ToolCalls) > 0 {
-				b.WriteString("\n\n<" + deepSeekV41DSML + "tool_calls>\n")
+				trusted("\n\n<" + deepSeekV41DSML + "tool_calls>\n")
 				for _, call := range m.ToolCalls {
-					deepSeekV41RenderToolCall(&b, call.Function)
+					deepSeekV41RenderToolCall(trusted, ordinary, call.Function)
 				}
-				b.WriteString("</" + deepSeekV41DSML + "tool_calls>")
+				trusted("</" + deepSeekV41DSML + "tool_calls>")
 			}
-			b.WriteString(deepSeekV41EOS)
+			trusted(deepSeekV41EOS)
 		}
 	}
-	b.WriteString(deepSeekV41Assistant + deepSeekV41ThinkEnd)
-	return b.String()
+	trusted(deepSeekV41Assistant + deepSeekV41ThinkEnd)
+	return segs
 }
 
 // deepSeekV41ToolSchemas renders `tool['function'] | tojson` per function tool,
-// one per line, keeping the declared parameter schema's key order.
-func deepSeekV41ToolSchemas(tools []ToolDef) string {
-	var b strings.Builder
+// keeping the declared parameter schema's key order; the template puts one per line.
+func deepSeekV41ToolSchemas(tools []ToolDef) []string {
+	var out []string
 	for _, tool := range tools {
 		if tool.Type != "" && tool.Type != "function" {
 			continue
@@ -115,27 +142,33 @@ func deepSeekV41ToolSchemas(tools []ToolDef) string {
 		if err != nil {
 			continue
 		}
-		b.WriteString(encoded + "\n")
+		out = append(out, encoded)
 	}
-	return b.String()
+	return out
 }
 
 // deepSeekV41RenderToolCall renders one historical call in the template's DSML
 // form: string arguments verbatim, every other value as tojson, in source order.
-func deepSeekV41RenderToolCall(b *strings.Builder, fn Func) {
-	b.WriteString("<" + deepSeekV41DSML + "invoke name=\"" + fn.Name + "\">\n")
+func deepSeekV41RenderToolCall(trusted, ordinary func(string), fn Func) {
+	trusted("<" + deepSeekV41DSML + "invoke name=\"")
+	ordinary(fn.Name)
+	trusted("\">\n")
 	args := deepSeekV41ToolArguments(fn.Arguments)
 	for _, arg := range args {
 		kind := "false"
 		if arg.isString {
 			kind = "true"
 		}
-		b.WriteString("<" + deepSeekV41DSML + "parameter name=\"" + arg.name + "\" string=\"" + kind + "\">" + arg.value + "</" + deepSeekV41DSML + "parameter>\n")
+		trusted("<" + deepSeekV41DSML + "parameter name=\"")
+		ordinary(arg.name)
+		trusted("\" string=\"" + kind + "\">")
+		ordinary(arg.value)
+		trusted("</" + deepSeekV41DSML + "parameter>\n")
 	}
 	if len(args) == 0 {
-		b.WriteByte('\n')
+		trusted("\n")
 	}
-	b.WriteString("</" + deepSeekV41DSML + "invoke>\n")
+	trusted("</" + deepSeekV41DSML + "invoke>\n")
 }
 
 type deepSeekV41ToolArgument struct {
@@ -188,16 +221,33 @@ func inKernelRenderPrompt(messages []Message, tools []ToolDef, cfg model.Config,
 		}
 		return b.String()
 	case cfg.IsDeepSeekV41():
-		// The template carries response_format itself; a forced tool keeps the
-		// shared instruction and drops the schemas, as the ChatML path does.
-		if forced := inKernelForcedToolInstruction(sp.ToolChoice, tools); forced != "" {
-			messages = append([]Message{{Role: RoleSystem, Content: forced}}, messages...)
-		}
-		if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
-			tools = nil
-		}
+		messages, tools = deepSeekV41ChatRequest(messages, tools, sp.ToolChoice)
 		return renderDeepSeekV41Chat(messages, tools, sp.ResponseFormat)
 	default:
 		return renderInKernelChatMLRequest(messages, tools, cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	}
+}
+
+// inKernelRenderDeepSeekV41ChatSegments is the V4.1 chat branch of
+// inKernelRenderPrompt as trusted template and ordinary client segments.
+func inKernelRenderDeepSeekV41ChatSegments(messages []Message, tools []ToolDef, sp SampleParams) []tokenizer.Segment {
+	messages, tools = deepSeekV41ChatRequest(messages, tools, sp.ToolChoice)
+	return renderDeepSeekV41ChatSegments(messages, tools, sp.ResponseFormat)
+}
+
+// deepSeekV41ChatRequest applies tool_choice to a V4.1 chat request. The template
+// carries response_format itself; a forced tool keeps the shared instruction and
+// drops the schemas, as the ChatML path does.
+func deepSeekV41ChatRequest(messages []Message, tools []ToolDef, toolChoice json.RawMessage) ([]Message, []ToolDef) {
+	var choice string
+	if json.Unmarshal(toolChoice, &choice) == nil && choice == "none" {
+		tools = nil
+	}
+	if forced := inKernelForcedToolInstruction(toolChoice, tools); forced != "" {
+		messages = append([]Message{{Role: RoleSystem, Content: forced}}, messages...)
+	}
+	if inKernelEffectiveToolName(toolChoice, tools) != "" {
+		tools = nil
+	}
+	return messages, tools
 }

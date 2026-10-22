@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // PromptEncoding is the exact prompt representation consumed by native context
@@ -86,8 +88,17 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	}
 	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
 	raw := inKernelRawV41Prompt(p.m.Cfg, sp)
-	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
-	ids, err := p.tok.Encode(rendered)
+	var rendered string
+	var ids []int
+	var err error
+	if deepSeekV41SegmentedPrompt(p.m.Cfg, sp) {
+		segs := inKernelRenderDeepSeekV41ChatSegments(messages, tools, sp)
+		rendered = joinPromptSegments(segs)
+		ids, err = p.tok.EncodeSegments(segs)
+	} else {
+		rendered = inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
+		ids, err = p.tok.Encode(rendered)
+	}
 	if err != nil {
 		return preparedPrompt{}, err
 	}
@@ -110,6 +121,29 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 // raw completion instead of the ChatML template other families use.
 func inKernelRawV41Prompt(cfg model.Config, sp SampleParams) bool {
 	return sp.RawPrompt && cfg.IsDeepSeekV41()
+}
+
+// DeepSeekV41SegmentedPromptEnv opts V4.1 chat prompts into segmented encoding:
+// client text can no longer spell control tokens. Off keeps legacy prompt ids.
+const DeepSeekV41SegmentedPromptEnv = "FAK_DEEPSEEK41_SEGMENTED_PROMPT"
+
+const deepSeekV41SegmentedRendererSuffix = "+segmented-v1"
+
+func deepSeekV41SegmentedPrompt(cfg model.Config, sp SampleParams) bool {
+	return cfg.IsDeepSeekV41() && !inKernelRawV41Prompt(cfg, sp) && os.Getenv(DeepSeekV41SegmentedPromptEnv) == "1"
+}
+
+func joinPromptSegments(segs []tokenizer.Segment) string {
+	n := 0
+	for _, seg := range segs {
+		n += len(seg.Text)
+	}
+	var b strings.Builder
+	b.Grow(n)
+	for _, seg := range segs {
+		b.WriteString(seg.Text)
+	}
+	return b.String()
 }
 
 func inKernelPromptRendererID(cfg model.Config, sp SampleParams) string {
@@ -183,6 +217,9 @@ func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp Sam
 
 func (p *InKernelPlanner) promptRendererID(sp SampleParams) string {
 	legacy := inKernelPromptRendererID(p.m.Cfg, sp)
+	if deepSeekV41SegmentedPrompt(p.m.Cfg, sp) {
+		legacy += deepSeekV41SegmentedRendererSuffix
+	}
 	if p.deepSeekV41ChatProfile == "" || inKernelRawV41Prompt(p.m.Cfg, sp) {
 		return legacy
 	}

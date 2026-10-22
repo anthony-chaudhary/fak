@@ -397,6 +397,130 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 	return ids, nil
 }
 
+// ErrOrdinaryAddedToken marks ordinary text whose only vocabulary spelling is an
+// added token, so it cannot be encoded without emitting that token's id.
+var ErrOrdinaryAddedToken = errors.New("tokenizer: ordinary text resolves only to an added token")
+
+// Segment is one span of text for EncodeSegments. Only Trusted text may spell an
+// added or control token; the zero value is ordinary text.
+type Segment struct {
+	Text    string
+	Trusted bool
+}
+
+// EncodeSegments encodes the concatenated segment text as Encode would, except that
+// an added token is matched only where every byte of the match is Trusted. Text
+// between matches stays one BPE chunk across segment seams, so benign text keeps
+// Encode's ids, and that chunk never yields an added-token id. Behavior from the
+// DeepInfer deployment notes at 774ce244; see third_party/deepinfer-token-injection/NOTICE.
+func (t *Tokenizer) EncodeSegments(segs []Segment) ([]int, error) {
+	if t.mergeRank == nil {
+		return nil, ErrEncodeUnsupported
+	}
+	type span struct{ start, end int }
+	var full strings.Builder
+	var trusted []span
+	for _, seg := range segs {
+		start := full.Len()
+		full.WriteString(seg.Text)
+		if !seg.Trusted || seg.Text == "" {
+			continue
+		}
+		if n := len(trusted); n > 0 && trusted[n-1].end == start {
+			trusted[n-1].end = full.Len()
+			continue
+		}
+		trusted = append(trusted, span{start, full.Len()})
+	}
+	text := full.String()
+	added := make(map[int]bool, len(t.addedByContent))
+	for _, sp := range t.addedByContent {
+		added[sp.id] = true
+	}
+	var ids []int
+	var err error
+	run := 0
+	for _, r := range trusted {
+		for pos := r.start; pos < r.end; {
+			at, sp, ok := t.nextAddedMatch(text[pos:r.end])
+			if !ok {
+				break
+			}
+			if ids, err = t.appendOrdinary(ids, text[run:pos+at], added); err != nil {
+				return nil, err
+			}
+			ids = append(ids, sp.id)
+			pos += at + len(sp.content)
+			run = pos
+		}
+	}
+	return t.appendOrdinary(ids, text[run:], added)
+}
+
+func (t *Tokenizer) nextAddedMatch(s string) (int, specialToken, bool) {
+	at := -1
+	for _, sp := range t.addedByContent {
+		if i := strings.Index(s, sp.content); i >= 0 && (at < 0 || i < at) {
+			at = i
+		}
+	}
+	if at < 0 {
+		return 0, specialToken{}, false
+	}
+	sp, _ := t.matchAdded(s[at:])
+	return at, sp, true
+}
+
+func (t *Tokenizer) appendOrdinary(ids []int, chunk string, added map[int]bool) ([]int, error) {
+	if chunk == "" {
+		return ids, nil
+	}
+	split := t.split
+	if split == nil {
+		split = preTokenizeByteLevel
+	}
+	pieces := []string{chunk}
+	if !t.metaspace {
+		pieces = split(chunk)
+	}
+	for _, piece := range pieces {
+		encoded := byteLevelEncode(piece)
+		if t.metaspace {
+			encoded = metaspaceEncode(piece)
+		}
+		if t.ignoreMerges {
+			if id, ok := t.tokenToID[encoded]; ok && !added[id] {
+				ids = append(ids, id)
+				continue
+			}
+		}
+		syms, err := t.bpe(encoded)
+		if err != nil {
+			return nil, err
+		}
+		for _, sym := range syms {
+			id, ok := t.tokenToID[sym]
+			if !ok {
+				return nil, fmt.Errorf("tokenizer: token %q not in vocab", sym)
+			}
+			if !added[id] {
+				ids = append(ids, id)
+				continue
+			}
+			// GGML vocabs map raw added-token text in tokenToID, so a merge chain can
+			// rebuild a control spelling; emit its single-rune pieces instead.
+			for _, r := range sym {
+				rid, ok := t.tokenToID[string(r)]
+				if !ok || added[rid] {
+					return nil, fmt.Errorf("%w: %q", ErrOrdinaryAddedToken, sym)
+				}
+				ids = append(ids, rid)
+			}
+		}
+	}
+	return ids, nil
+}
+
 // Decode converts ids to text using the ByteLevel byte-to-unicode inverse mapping.
 func (t *Tokenizer) Decode(ids []int) (string, error) {
 	var out []byte
