@@ -6051,11 +6051,13 @@ static int v41IndexerScoreChecked(const void* dQ, const void* dKeys,
     Buffer* bufs[4] = {B(dQ), B(dKeys), B(dWeights), B(dScores)};
     const uint64_t counts[4] = {qCount, keyCount, uint64_t(heads), uint64_t(rows)};
     for (int i = 0; i < 4; ++i) {
-        // Empty key/output handles are never dereferenced or bound.
+        // Empty key/output handles are never dereferenced or bound. Keys may be
+        // a longer row log: the shader reads only rows*headDim elements.
         if (counts[i] == 0) { if (bufs[i] != nullptr) return 2; continue; }
         if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
             counts[i] > std::numeric_limits<size_t>::max() / sizeof(float) ||
-            counts[i] * sizeof(float) != bufs[i]->bytes || bufs[i]->bytes > g_maxStorageBufferRange ||
+            (i == 1 ? counts[i] * sizeof(float) > bufs[i]->bytes : counts[i] * sizeof(float) != bufs[i]->bytes) ||
+            bufs[i]->bytes > g_maxStorageBufferRange ||
             bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
     }
     if (rows == 0) return 0; // no capability lookup, allocation, binding or dispatch

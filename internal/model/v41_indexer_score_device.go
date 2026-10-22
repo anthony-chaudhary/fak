@@ -49,8 +49,8 @@ const v41IndexerKeyPrefix = "v41-indexer-keys/"
 
 // A backend whose indexer score reads only the leading rows*width elements of
 // its key buffer may score a [rows,width] view of a row log with spare row
-// capacity. Exact-extent backends (current Vulkan) omit it and keep the
-// exact-size log.
+// capacity (Vulkan does). Exact-extent backends omit it and keep the exact-size
+// log.
 type v41IndexerScoreSpareKeyBackend interface {
 	V41IndexerScoreSpareKeyCapacity() bool
 }
@@ -82,6 +82,7 @@ type v41IndexerKeyCache struct {
 	handles           map[string]compute.Tensor
 	validatedRows     int
 	descriptorLookups int
+	copiedRows        int
 }
 
 type v41IndexerKeyCall struct {
@@ -327,6 +328,7 @@ func (p *v41IndexerKeyCall) acquire(query compute.Tensor) (compute.Tensor, error
 			if err := c.ops.V41RowLogCopy(next, 0, p.old, 0, p.copyRows); err != nil {
 				return compute.Tensor{}, err
 			}
+			c.copiedRows += p.copyRows
 		}
 		dst = next
 	}
@@ -349,6 +351,7 @@ func (p *v41IndexerKeyCall) acquire(query compute.Tensor) (compute.Tensor, error
 		if err := c.ops.V41RowLogCopy(dst, p.copyRows, staged, 0, n); err != nil {
 			return compute.Tensor{}, err
 		}
+		c.copiedRows += n
 	}
 	p.entry.tensor = dst
 	view := dst

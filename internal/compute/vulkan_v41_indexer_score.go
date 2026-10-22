@@ -43,6 +43,10 @@ func (v *vulkanBackend) V41IndexerScoreUnavailableReason() string {
 	return C.GoString(C.fvk_v41_indexer_score_unavailable_reason())
 }
 
+// The shader scores only rows*headDim key elements, so the model may pass a row
+// log with spare row capacity instead of re-copying an exact-extent log.
+func (v *vulkanBackend) V41IndexerScoreSpareKeyCapacity() bool { return true }
+
 // V41IndexerScore uses the existing checked V4.1 submission and readback path.
 // Native uncertain completion quarantines memory until process exit. The output
 // never enters the Go transient pool, and no public Read/Free/Upload is called
@@ -86,17 +90,19 @@ func (v *vulkanBackend) v41IndexerScoreWithNative(q, keys, weights Tensor, rows,
 		name  string
 		t     Tensor
 		bytes int
+		spare bool
 	}{
-		{"q", q, qb}, {"keys", keys, kb}, {"weights", weights, wb},
+		{"q", q, qb, false}, {"keys", keys, kb, kb > 0}, {"weights", weights, wb, false},
 	} {
-		// Empty key storage is never bound or read. All other operands must be
-		// exact-sized live device allocations owned by this backend.
+		// Empty key storage is never bound or read. Nonempty keys may be a
+		// [rows,headDim] view of a longer row log; every other operand must be an
+		// exact-sized live device allocation owned by this backend.
 		if operand.bytes == 0 && operand.t.buf == nil && operand.t.be == nil {
 			continue
 		}
 		b, ok := operand.t.buf.(*vulkanBuf)
-		if operand.t.be != v || !ok || b == nil || (operand.bytes != 0 && b.ptr == nil) || b.n != operand.bytes || b.scalePtr != nil || len(b.q8Chunks) != 0 {
-			return Tensor{}, vulkanV41IndexerScoreStatusError(2, operand.name+" must be an exact-sized F32 device buffer owned by this backend")
+		if operand.t.be != v || !ok || b == nil || (operand.bytes != 0 && b.ptr == nil) || b.n < operand.bytes || (!operand.spare && b.n != operand.bytes) || b.scalePtr != nil || len(b.q8Chunks) != 0 {
+			return Tensor{}, vulkanV41IndexerScoreStatusError(2, operand.name+" must be a correctly sized F32 device buffer owned by this backend")
 		}
 	}
 	if status := int(C.fvk_submission_status()); status != 0 {

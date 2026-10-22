@@ -10,7 +10,7 @@ import (
 )
 
 // The recorder's score reads only the leading rows of its key buffer, so it may
-// advertise spare key capacity. Current Vulkan binds an exact key extent.
+// advertise spare key capacity; the bare recorder is the exact-extent control.
 type v41SpareKeyScoreBackend struct{ *v41ScoreTestBackend }
 
 func (b *v41SpareKeyScoreBackend) V41IndexerScoreSpareKeyCapacity() bool { return true }
@@ -136,14 +136,14 @@ func TestV41IndexerKeyCache(t *testing.T) {
 		for n := 5; n <= 36; n++ {
 			token := n % m.Cfg.VocabSize
 			type mark struct {
-				upload, copy       int64
-				validated, lookups int
-				rows               map[int]v41IndexerKeyEntry
+				upload, copy               int64
+				validated, lookups, copied int
+				rows                       map[int]v41IndexerKeyEntry
 			}
 			before := make([]mark, len(lanes))
 			for i, l := range lanes {
 				c := l.s.v41State().gatherOps.indexerKeys
-				before[i] = mark{l.b.keyUploadBytes, l.b.keyCopyBytes, c.validatedRows, c.descriptorLookups, v41KeyCacheRows(l.s)}
+				before[i] = mark{l.b.keyUploadBytes, l.b.keyCopyBytes, c.validatedRows, c.descriptorLookups, c.copiedRows, v41KeyCacheRows(l.s)}
 			}
 			step(token)
 			for i, l := range lanes {
@@ -176,6 +176,9 @@ func TestV41IndexerKeyCache(t *testing.T) {
 				}
 				if lookups != walked {
 					t.Fatalf("spare=%v token=%d walked %d descriptors, want %d (appended plus one anchor per hit; prefix re-walked)", l.spare, token, lookups, walked)
+				}
+				if copied := int64(c.copiedRows - before[i].copied); copied*rowBytes != l.b.keyCopyBytes-before[i].copy {
+					t.Fatalf("spare=%v token=%d copiedRows=%d disagrees with %d recorded copy bytes", l.spare, token, copied, l.b.keyCopyBytes-before[i].copy)
 				}
 				sums[i].hits += hits
 				sums[i].uploaded += uploaded
