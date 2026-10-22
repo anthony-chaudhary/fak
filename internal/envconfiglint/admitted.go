@@ -13,6 +13,9 @@ package envconfiglint
 //
 // This list may only SHRINK, except for the explicit two-name compatibility decision
 // recorded below on 2026-10-17. That exception authorizes no further admissions.
+// The 2026-10-22 census decision admits exactly four more names, INVOCATION_ID (systemd
+// block) and FAK_INKERNEL_SEED, FAK_V41_SUFFIX_UBATCH and FAK_QWEN35_NATIVE_SSM_OUT (FIFTH
+// OCCURRENCE below), so the ratchet gates again; it likewise authorizes no further admissions.
 // Each entry is behavioral configuration that genuinely belongs
 // on a config surface; none can move there yet because that surface does not exist — it is
 // #2862's deliverable. When #2862 lands, each read relocates and its line is deleted here.
@@ -278,6 +281,15 @@ var admittedPostFreeze = []string{
 	"NOTIFY_SOCKET",
 	"WATCHDOG_PID",
 	"WATCHDOG_USEC",
+
+	// cmd/fak/serve_launch_evidence.go — systemd (systemd.exec) injects INVOCATION_ID, a
+	// per-run id of the unit invocation, and fak stamps it into the fak.serve_launch_evidence.v1
+	// receipt so the receipt binds to the manager's own record of this run. Manager-owned like
+	// the three above, not a fak setting: a flag copy would be a second authority for the id.
+	// Introduced by 168a27e3d3; admitted by the 2026-10-22 census decision after 152 unwatched
+	// trunk advances. Owner: cmd/fak serve launch evidence. Sunset: with the servicewatchdog
+	// entries above, or when the launch receipt stops binding the systemd invocation.
+	"INVOCATION_ID",
 
 	// cmd/fak/release_status_ci.go shares this workflow filename contract with
 	// tools/release_context.py and tools/release_decide.py. Keeping the same inherited override
@@ -777,4 +789,35 @@ var admittedPostFreeze = []string{
 	// Relocates to: gateway Config fields set by `fak serve` flags.
 	"FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES",
 	"FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH",
+
+	// FIFTH OCCURRENCE (2026-10-22 census decision): four reads shipped while the ratchet was
+	// red and unwatched again; ages are trunk advances at public 60a9f5551f. INVOCATION_ID sits
+	// in the systemd block above. Admission resolves the current offenses; it does not erase
+	// that liveness failure or pay the #2862 relocation debt.
+
+	// internal/agent/inkernel_planner_config.go — operator override for the in-kernel planner's
+	// seedless-sampling seed. Read through envInt since adf0a64374, so the scan could not see it
+	// until 0f6a55dd0a inlined a literal read (107 advances): the SCANNER VISIBILITY re-add the
+	// header asks for. A reproducibility override, not a credential.
+	// Relocates to: an explicit Seed field on InKernelPlannerConfig.
+	"FAK_INKERNEL_SEED",
+
+	// cmd/modelbench/suffix_prefill.go — echoes the batched V4.1 suffix-prefill threshold into
+	// the suffix-prefill benchmark receipt, the CGO_ENABLED provenance precedent. Not a prior
+	// admission: the behavioral read in internal/model/v41_suffix_ubatch.go passes a const name
+	// the scan cannot see, so this is the knob's first ledger visibility and that read stays
+	// ungated. Introduced by a6611b979a (172 advances).
+	// Relocates to: a typed suffix-ubatch threshold on the model session config that modelbench
+	// records instead of re-reading the process env.
+	"FAK_V41_SUFFIX_UBATCH",
+
+	// internal/ggufload/qwen35_native_rows.go — the "0" rollback kill switch for the tiled native
+	// Qwen3.5-family GDN out_proj (ssm_out) route. Same family as the 2026-10-17 exception but
+	// admitted on this decision, not under it. Not relocated here: it is the only operator
+	// rollback lever (WithQwen35NativeSSMOut is not threaded from serve), it is pinned by
+	// qwen35_tiled_out_proj_test.go, and the loader is peer code. Introduced by 36d3e634c3
+	// (53 advances).
+	// Relocates to: WithQwen35NativeSSMOut(false) threaded from serve, then delete the env arm,
+	// as with FAK_DIRECT.
+	"FAK_QWEN35_NATIVE_SSM_OUT",
 }

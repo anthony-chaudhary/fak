@@ -372,3 +372,53 @@ func TestQwenRollbackCompatibilityAdmissions(t *testing.T) {
 		t.Fatal("compatibility admissions must not relax stale unadmitted read detection")
 	}
 }
+
+// fak-test:runtime fast est=10ms
+func TestCensus20261022AdmissionsStayPinned(t *testing.T) {
+	root := repoRoot(t)
+	for _, tc := range []struct{ name, file string }{
+		{"INVOCATION_ID", "cmd/fak/serve_launch_evidence.go"},
+		{"FAK_INKERNEL_SEED", "internal/agent/inkernel_planner_config.go"},
+		{"FAK_V41_SUFFIX_UBATCH", "cmd/modelbench/suffix_prefill.go"},
+		{"FAK_QWEN35_NATIVE_SSM_OUT", "internal/ggufload/qwen35_native_rows.go"},
+	} {
+		src, err := os.ReadFile(filepath.Join(root, tc.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		visible := false
+		for _, read := range ScanGoEnvReads(string(src)) {
+			visible = visible || read == tc.name
+		}
+		if !visible {
+			t.Errorf("%s must remain a visible literal read in %s", tc.name, tc.file)
+		}
+		if IsSecretName(tc.name) {
+			t.Errorf("census admission %s must remain non-secret", tc.name)
+		}
+		count := 0
+		for _, admitted := range admittedPostFreeze {
+			if admitted == tc.name {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s admission count = %d, want exactly one", tc.name, count)
+		}
+		if off := Classify([]string{tc.name}, tc.file, baselineSet()); len(off) != 0 {
+			t.Errorf("census admission %s refused: %v", tc.name, off)
+		}
+	}
+	for _, tc := range []struct{ name, file string }{
+		{"SYSTEMD_EXEC_PID", "cmd/fak/serve_launch_evidence.go"},
+		{"FAK_V41_SUFFIX_UBATCH_MIN", "cmd/modelbench/suffix_prefill.go"},
+	} {
+		off := Classify([]string{tc.name}, tc.file, baselineSet())
+		if len(off) != 1 || off[0].Name != tc.name {
+			t.Fatalf("nearby unapproved name %s must remain refused: %v", tc.name, off)
+		}
+		if v := ClassifyLiveness(off, func(Offense) int { return UnwatchedTolerance + 1 }); v.Watched() {
+			t.Fatalf("census admissions must not relax stale unadmitted read detection for %s", tc.name)
+		}
+	}
+}
