@@ -236,7 +236,7 @@
     },
     {
       "class": "container_base",
-      "reference": "nvidia/cuda:12.8.1-devel-ubuntu22.04",
+      "reference": "nvidia/cuda:12.9.1-devel-ubuntu22.04",
       "consumer_domains": [
         "Dockerfile.cuda"
       ],
@@ -245,24 +245,24 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
-      "note": "Dockerfile.cuda build stage; compute_100/compute_120 need a 12.8 toolkit. The CI nvcc legs use the separately registered, digest-pinned NVIDIA NGC reference."
+      "note": "Dockerfile.cuda build stage; compute_103 requires a 12.9 toolkit. The CI nvcc legs use the separately registered, digest-pinned NVIDIA NGC reference."
     },
     {
       "class": "container_base",
-      "reference": "nvcr.io/nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97",
+      "reference": "nvcr.io/nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8",
       "consumer_domains": [
         ".github/workflows"
       ],
       "status": "used",
       "pin": "immutable",
-      "digest": "sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97",
+      "digest": "sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
-      "note": "CI job container for the cuda-build.yml sm_100/sm_120 nvcc legs, pinned to the official NVIDIA NGC index verified byte-identical to Docker Hub on 2026-10-09. CUDA 12.8.1 devel and Ubuntu 22.04 are unchanged; NVIDIA lists this tag as unsupported."
+      "note": "CI job container for the cuda-build.yml sm_100/sm_103/sm_120 nvcc legs, pinned to the NVIDIA NGC digest declared in that workflow. CUDA 12.9.1 supplies compute_103 support; this register records the declared reference, not independent registry or runtime qualification."
     },
     {
       "class": "container_base",
-      "reference": "nvidia/cuda:12.8.1-runtime-ubuntu22.04",
+      "reference": "nvidia/cuda:12.9.1-runtime-ubuntu22.04",
       "consumer_domains": [
         "Dockerfile.cuda"
       ],
