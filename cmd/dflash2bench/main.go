@@ -40,7 +40,31 @@ type phase struct {
 	DeviceAfter  []compute.DeviceWork `json:"device_after"`
 }
 
+// roundSample is an ordered request segment. Complete requires successful
+// commit and caller-side parity checks; partial rows never qualify throughput.
+type roundSample struct {
+	Index                   int                            `json:"round_index"`
+	StartPosition           int                            `json:"start_position"`
+	RequestedDraftPositions int                            `json:"requested_draft_positions"`
+	ProposedDraftTokens     int                            `json:"proposed_draft_tokens"`
+	VerifiedDraftTokens     int                            `json:"verified_draft_tokens"`
+	CommittedDraftTokens    int                            `json:"committed_draft_tokens"`
+	CommittedTargetAnchors  int                            `json:"committed_target_anchors"`
+	StopTruncatedTokens     int                            `json:"stop_truncated_tokens"`
+	ProposalRan             bool                           `json:"proposal_ran"`
+	PrepareComplete         bool                           `json:"prepare_complete"`
+	Complete                bool                           `json:"complete"`
+	PrepareSeconds          float64                        `json:"prepare_total_seconds"`
+	ProposalSeconds         float64                        `json:"draft_proposal_seconds"`
+	VerifySeconds           float64                        `json:"target_verify_method_seconds"`
+	CommitSeconds           float64                        `json:"commit_seconds"`
+	Commit                  model.DFlash2CommitObservation `json:"post_commit"`
+	FallbackBefore          []compute.HostFallbackCount    `json:"host_fallback_before"`
+	FallbackAfter           []compute.HostFallbackCount    `json:"host_fallback_after"`
+}
+
 type arm struct {
+	RoundSamples             []roundSample                   `json:"round_samples"`
 	Verification             []model.DFlash2VerificationWork `json:"completed_target_verification"`
 	DiagnosticOpen           phase                           `json:"diagnostic_gate_session_sidecar_open_and_verification"`
 	Mode                     string                          `json:"mode"`
@@ -251,6 +275,7 @@ func run(ctx context.Context, o options) (r report, err error) {
 			"Proposed draft tokens exclude the mandatory exact target anchor. Verified and committed draft tokens are separate; no bonus token is counted.",
 			"Decode includes committing every emitted token, including the final token, on both arms. EOS/stop IDs are excluded before commit.",
 			"Device counters are cumulative snapshots from existing readers, not kernel timings. Missing readers mean unavailable; SubmitWaitObserved=false remains unavailable.",
+			"Round fallback snapshots are process-global, not request-attributed; concurrent activity may contaminate their deltas.",
 			"Cancellation is cooperative. Use an external resource supervisor and hard deadline on the admitted hardware runner.",
 		}}
 	r.Build, _ = debug.ReadBuildInfo()
@@ -535,9 +560,15 @@ func draftBody(ctx context.Context, q *agent.DFlash2DiagnosticRequest, prompt []
 		if panelWidth != 0 {
 			maximum = min(maximum, panelWidth)
 		}
+		a.RoundSamples = append(a.RoundSamples, roundSample{Index: len(a.RoundSamples),
+			StartPosition: len(prompt) + len(a.TokenIDs), RequestedDraftPositions: maximum - 1,
+			FallbackBefore: compute.HostFallbackCounts()})
+		sample := &a.RoundSamples[len(a.RoundSamples)-1]
 		prepareStart := time.Now()
 		round, timing, err := q.PrepareTimed(ctx, maximum)
 		prepareSeconds := time.Since(prepareStart).Seconds()
+		sample.PrepareSeconds = prepareSeconds
+		sample.FallbackAfter = compute.HostFallbackCounts()
 		if err != nil {
 			return err
 		}
@@ -559,6 +590,9 @@ func draftBody(ctx context.Context, q *agent.DFlash2DiagnosticRequest, prompt []
 		if len(verified) < 1 || len(verified) > maximum {
 			return errors.New("invalid verified prefix")
 		}
+		sample.PrepareComplete, sample.ProposalRan = true, timing.ProposalRan
+		sample.ProposedDraftTokens, sample.VerifiedDraftTokens = timing.ProposedDraftTokens, len(verified)-1
+		sample.ProposalSeconds, sample.VerifySeconds = timing.Proposal.Seconds(), timing.Verify.Seconds()
 		a.Verification = append(a.Verification, timing.Verification)
 		a.Rounds++
 		if timing.ProposalRan {
@@ -580,9 +614,19 @@ func draftBody(ctx context.Context, q *agent.DFlash2DiagnosticRequest, prompt []
 				break
 			}
 		}
+		sample.StopTruncatedTokens = len(verified) - chosen
 		commitStart := time.Now()
-		committed, err := round.Commit(ctx, chosen)
-		a.CommitSeconds += time.Since(commitStart).Seconds()
+		committed, observed, err := round.CommitObserved(ctx, chosen)
+		sample.CommitSeconds = time.Since(commitStart).Seconds()
+		sample.Commit = observed
+		if observed.Complete {
+			sample.CommittedDraftTokens = max(0, len(committed)-1)
+			if len(committed) > 0 {
+				sample.CommittedTargetAnchors = 1
+			}
+		}
+		sample.FallbackAfter = compute.HostFallbackCounts()
+		a.CommitSeconds += sample.CommitSeconds
 		if err != nil {
 			return err
 		}
@@ -592,6 +636,10 @@ func draftBody(ctx context.Context, q *agent.DFlash2DiagnosticRequest, prompt []
 		if err = ctx.Err(); err != nil {
 			return err
 		}
+		if !observed.Complete || !observed.ReceiptAvailable {
+			return errors.New("missing completed post-commit receipt")
+		}
+		sample.Complete = true
 		a.TokenIDs = append(a.TokenIDs, committed...)
 		a.CommittedDraftTokens += max(0, len(committed)-1)
 		if len(committed) > 0 {
@@ -609,6 +657,42 @@ func draftBody(ctx context.Context, q *agent.DFlash2DiagnosticRequest, prompt []
 	}
 	if a.CommittedPositions != len(prompt)+len(a.TokenIDs) {
 		return errors.New("draft committed position mismatch")
+	}
+	return reconcileRoundSamples(a)
+}
+
+// reconcileRoundSamples gates successful arms, not partial failure diagnostics.
+func reconcileRoundSamples(a *arm) error {
+	var requested, proposed, verified, committed, anchors, calls int
+	var proposal, verify, prepare, commit float64
+	for _, r := range a.RoundSamples {
+		if !r.Complete || !r.PrepareComplete || !r.Commit.Complete || !r.Commit.ReceiptAvailable {
+			return errors.New("incomplete DFlash2 round sample")
+		}
+		committedTokens := r.CommittedDraftTokens + r.CommittedTargetAnchors
+		if r.StopTruncatedTokens != r.VerifiedDraftTokens+1-committedTokens ||
+			r.Commit.Verification.AcceptedTokens != committedTokens ||
+			r.Commit.Verification.AcceptedTokens+r.Commit.Verification.RejectedTokens != r.ProposedDraftTokens+1 {
+			return errors.New("DFlash2 prefix counts disagree with post-commit receipt")
+		}
+		requested += r.RequestedDraftPositions
+		proposed += r.ProposedDraftTokens
+		verified += r.VerifiedDraftTokens
+		committed += r.CommittedDraftTokens
+		anchors += r.CommittedTargetAnchors
+		if r.ProposalRan {
+			calls++
+		}
+		proposal += r.ProposalSeconds
+		verify += r.VerifySeconds
+		prepare += r.PrepareSeconds
+		commit += r.CommitSeconds
+	}
+	if len(a.RoundSamples) != a.Rounds || calls != a.DraftCalls || requested != a.RequestedDraftPositions ||
+		proposed != a.ProposedDraftTokens || verified != a.VerifiedDraftTokens || committed != a.CommittedDraftTokens ||
+		anchors != a.CommittedTargetAnchors || committed+anchors != len(a.TokenIDs) ||
+		proposal != a.ProposalSeconds || verify != a.VerifySeconds || prepare != a.PrepareSeconds || commit != a.CommitSeconds {
+		return errors.New("DFlash2 round samples disagree with arm totals")
 	}
 	return nil
 }

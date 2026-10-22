@@ -96,3 +96,22 @@ func (t *DFlash2PrepareTiming) recordVerification(r TargetVerificationReceipt, r
 			Operations: r.TargetVerificationOperations, DecodeSteps: r.TargetDecodeSteps, OneOperation: r.OneOperation}
 	}
 }
+
+// DFlash2CommitObservation preserves post-Commit work, including replay/repair.
+// Complete=false is partial diagnostic evidence, never a successful sample.
+// Verification costs retain their Measured flags; absent costs are not zero.
+type DFlash2CommitObservation struct {
+	Complete         bool                      `json:"complete"`
+	ReceiptAvailable bool                      `json:"receipt_available"`
+	Verification     TargetVerificationReceipt `json:"verification"`
+}
+
+// CommitObserved uses the same locked operation as Commit. Its receipt is copied
+// after terminal cleanup, while the underlying transaction remains reachable.
+// Like Commit, an interrupted call need not return (for example runtime.Goexit).
+func (r *Qwen38DFlash2Round) CommitObserved(ctx context.Context, accepted int) ([]int, DFlash2CommitObservation, error) {
+	var observation DFlash2CommitObservation
+	tokens, err := r.commit(ctx, accepted, &observation)
+	observation.Complete = err == nil
+	return tokens, observation, err
+}

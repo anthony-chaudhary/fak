@@ -426,6 +426,10 @@ func (r *Qwen38DFlash2Round) Tokens() []int {
 // decision. Invalid counts, cancellation, and late draft failures abort the
 // round. A caller must never publish the prepared copy before this succeeds.
 func (r *Qwen38DFlash2Round) Commit(ctx context.Context, accepted int) (tokens []int, err error) {
+	return r.commit(ctx, accepted, nil)
+}
+
+func (r *Qwen38DFlash2Round) commit(ctx context.Context, accepted int, observation *DFlash2CommitObservation) (tokens []int, err error) {
 	if r == nil || r.owner == nil {
 		return nil, errors.New("dflash2: nil prepared round")
 	}
@@ -434,6 +438,17 @@ func (r *Qwen38DFlash2Round) Commit(ctx context.Context, accepted int) (tokens [
 	defer q.mu.Unlock()
 	if q.closed || r.done || q.pending != r {
 		return nil, errors.New("dflash2: prepared round is no longer active")
+	}
+	// Capture the transaction before terminal cleanup clears r.cp. This observer
+	// runs after cleanup and never changes the ordinary Commit path or clocks.
+	if observation != nil {
+		tx := r.cp.tx.tx
+		defer func() {
+			observation.Verification = tx.VerificationReceipt()
+			// This route has no scheduler shape; do not export an aliased pointer.
+			observation.Verification.Shape = nil
+			observation.ReceiptAvailable = true
+		}()
 	}
 	complete := false
 	defer func() {
