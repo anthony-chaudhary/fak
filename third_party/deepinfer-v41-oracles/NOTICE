@@ -9,10 +9,12 @@ Source: deepseek-ai/DeepInfer
 Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
 https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
 
-Every adaptation listed here lives in a Go test file under internal/model. Each
-is an unwired host oracle used for measurement: no serving path, forward pass,
+The original adaptations at the revision above live in Go test files under
+internal/model. Each is an unwired host oracle used for measurement: no serving path, forward pass,
 configuration field, environment knob or default calls it, and none claims
 bitwise parity with the DeepInfer CUDA or Ascend kernels.
+The separately pinned host-format boundary below is not test-only, but is also
+unwired from serving and does not establish device or scoring parity.
 
 Indexer Q/K MXFP4 cast (internal/model/v41_index_mxfp4_test.go)
 
@@ -108,3 +110,40 @@ theta and YaRN parameters come from fak's existing V4.1 rotary policy. Host pow
 and trigonometry are correctly rounded, so this makes no bitwise claim against
 CUDA or torch. The test measures the angle gap between fak's float64 table and
 this float32 emulation at long positions; fak's table is unchanged.
+
+Indexer MXFP4 host-format boundary (internal/model/v41_index_mxfp4.go)
+
+Source: deepseek-ai/DeepInfer
+Revision: 9bd9cf243fc53ef9afbf8f04d391d989117d6ab9
+https://github.com/deepseek-ai/DeepInfer/tree/9bd9cf243fc53ef9afbf8f04d391d989117d6ab9
+Upstream paths:
+  deepinfer/model_executor/layers/tilelang_ops/cache_common.py:129-137,257-328
+  deepinfer/model_executor/layers/tilelang_ops/cuda/fused_transform.py:473-547
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/common.py:23-24
+  deepinfer/model_executor/layers/tilelang_ops/cuda/load_paged_kv_cache.py:127-156
+
+Adaptation: a named host representation of exactly 128 indexer values, packed
+E2M1 low-nibble first with four per-32 UE8M0 scales. It transcribes the fused
+producer's BF16 input/product boundary, amax floor 6*2^-126, FP32 multiply by
+rounded 1/6, bitwise ceiling exponent and BF16 inverse power-of-two scale.
+Pages have all B*64 payload bytes followed by B*4 scale bytes, with the block
+stride rounded up to 32 bytes, not interleaved 68-byte rows. Producer zero rows
+have scale byte 1; absent-segment byte-zero storage is not a real encoded row.
+Positive host block sizes describe this layout, not device-kernel admission.
+Finite-only input/output and scale-zero refusal are Fak host validation policy,
+not claims about upstream consumer behavior. Inputs and page images are owned
+or copied, and malformed lengths, indices and size overflow are rejected.
+
+Corroborating encoding evidence (not copied implementation): DeepInfer pins
+TileLang 0.1.15, revision a35f8ddf45eba16c21211ec8822d56ce5363036f,
+src/tl_templates/cuda/cuda_fp4.h:111-124. Its CUDA conversion uses
+cudaRoundNearest and packs the even element into the low nibble. CUDA FP4
+documentation specifies same-sign maximum-normal saturation. Host E2M1
+conversion models those rules; generated CUDA, extreme/subnormal device
+behavior and end-to-end score parity have not been executed or established.
+This boundary does not modify the original test-only oracle, wire live Q/K
+casts or scoring, add generic dtypes/GGUF handling, or bind a device ABI. In
+particular, upstream paired BF16 FMA scoring is distinct from Fak F32 scoring.
+The focused host test contains source-derived literal row/page bytes, not
+captured CUDA outputs.
