@@ -44,6 +44,7 @@ package model
 // returns logits when a stage is missing.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -126,9 +127,11 @@ func v41StageErr(stage v41ForwardStage, layer int, err error) error {
 // Session.Step still recomputes full history; these states are seeded for later
 // incremental leaves and do not activate incremental arithmetic.
 type v41ForwardState struct {
-	history []int
-	attn    *V41AttentionState
-	layers  []*V41AttentionState
+	// Non-nil only during the serial, explicit per-call look-ahead entry point.
+	engramLookAheadContext context.Context
+	history                []int
+	attn                   *V41AttentionState
+	layers                 []*V41AttentionState
 	// forwardCoverage names the last successful logits-producing traversal.
 	// Prefix snapshots preserve it as cached-logit provenance, not new execution.
 	forwardCoverage   *NativeForwardCoverage
@@ -896,6 +899,10 @@ func (s *Session) stepV41(id int) []float32 {
 					v41IncrementalStepProbe()
 				}
 				return logits
+			}
+			// A selected opt-in refusal must never replay an unretained gather.
+			if s.v41State().engramLookAheadContext != nil {
+				panic(err)
 			}
 			var batchErr *v41StepBatchError
 			var selectedRoPE *V41TailRoPEOperationError

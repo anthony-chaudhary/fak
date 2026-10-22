@@ -63,7 +63,7 @@ const (
 // allowance does not claim exact accounting of Go's allocator or GC retention.
 var v41EngramLookAheadCharge atomic.Int64
 
-// No scheduler calls this seam yet. Its caller owns one transaction and must
+// The explicit per-call Step path owns one transaction and must
 // consume synchronously or close the future on every exit. The callback must not
 // retain panel slices or call close/the backing source's Close on its own lease.
 // cancel is concurrent-safe; close joins both gathering and an active callback.
@@ -325,4 +325,100 @@ func (f *v41EngramLookAheadJob) releaseJoined() {
 		defer v41EngramLookAheadCharge.Store(0)
 		release()
 	})
+}
+
+// StepWithV41EngramLookAhead explicitly opts one seeded V4.1 decode into bounded
+// Engram look-ahead. Ordinary Step, Prefill and later calls remain synchronous.
+// It has Step's serial Session ownership and panic-on-error contract. The context
+// applies to Engram look-ahead, not arbitrary model operations. Cancellation can
+// wait indefinitely for an underlying ReaderAt to return; source/model buffers
+// are retained until that read and its consumption have joined.
+//
+// Ineligible sources and occupied global credit use the ordinary synchronous
+// gather. Once an eligible producer's hold is attempted, refusal fails closed.
+// Speculative I/O and cache effects may precede consumption or an earlier-layer
+// failure. No synchronous I/O-order equivalence or throughput benefit is promised.
+func (s *Session) StepWithV41EngramLookAhead(ctx context.Context, id int) []float32 {
+	if s == nil || s.M == nil || !s.M.Cfg.IsDeepSeekV41() || ctx == nil {
+		panic(v41EngramLookAheadErr(-1, "requires a V4.1 session and context"))
+	}
+	s.ensureOpenBackendSession()
+	st := s.v41State()
+	if !s.v41IncrementalEligible() || st.activeStepRound != nil || st.engramLookAheadContext != nil {
+		panic(v41EngramLookAheadErr(-1, "requires an exclusively owned seeded incremental session"))
+	}
+	if err := ctx.Err(); err != nil {
+		panic(err)
+	}
+	st.engramLookAheadContext = ctx
+	defer func() { st.engramLookAheadContext = nil }()
+	return s.Step(id)
+}
+
+// The serial transaction owns this slot. There is at most one pending layer,
+// including an error that must not be published before that layer is reached.
+// No goroutine reads this slot or the transaction itself.
+type v41StepEngramLookAhead struct {
+	m      *Model
+	tx     *v41StepTransaction
+	ctx    context.Context
+	engram v41StepEngram
+	layer  int
+	ids    []uint32
+	future v41EngramLookAhead
+	err    error
+}
+
+func (a *v41StepEngramLookAhead) issueAfter(previous int) {
+	a.layer, a.ids, a.err = -1, nil, nil
+	for layer := previous + 1; layer < a.m.Cfg.NumLayers; layer++ {
+		cacheIdx := a.engram.stage.cacheIndex(layer)
+		if cacheIdx < 0 {
+			continue
+		}
+		a.layer = layer
+		cols := a.engram.stage.columns
+		base, ok := checkedMulInt(cacheIdx, cols)
+		if !ok || cols <= 0 || base < 0 || base > len(a.engram.rows) || cols > len(a.engram.rows)-base {
+			a.err = v41EngramLookAheadErr(layer, "current row identifiers do not cover the pending layer")
+			return
+		}
+		a.ids = a.engram.rows[base : base+cols]
+		a.future, a.err = a.m.startV41EngramLookAhead(a.ctx, a.tx, true, layer, a.ids, float32(a.m.Cfg.RMSNormEps))
+		return
+	}
+}
+
+func (a *v41StepEngramLookAhead) inject(layer int, apply func(*v41EngramGatheredRows) error) (err error) {
+	if a == nil || layer != a.layer {
+		return apply(nil)
+	}
+	if a.err != nil {
+		return a.err
+	}
+	if a.future != nil {
+		// The consumer unwinds before close joins it. In particular, its callback
+		// must not call transaction teardown while it still owns consumerDone.
+		f := a.future
+		func() {
+			defer func() { f.close(); a.future = nil }()
+			err = f.consume(a.tx, layer, a.ids, apply)
+		}()
+	} else {
+		err = apply(nil)
+	}
+	if err == nil {
+		// The consumed panel's credit has been released. Start the next declared
+		// layer while this layer's attention and MLP still have work to perform.
+		a.issueAfter(layer)
+	}
+	return err
+}
+
+func (a *v41StepEngramLookAhead) close() {
+	if f := a.future; f != nil {
+		a.future = nil
+		f.close()
+	}
+	a.ids, a.err, a.m, a.tx, a.ctx = nil, nil, nil, nil, nil
 }

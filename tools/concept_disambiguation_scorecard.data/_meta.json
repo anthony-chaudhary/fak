@@ -12574,6 +12574,11 @@
           "category": "incidental",
           "reason": "Request-scoped accessor for the native min_p sampling cutoff carried on the decode context, not a context-window or KV context concept.",
           "token": "nativeMinPFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private field borrowing the caller's standard context.Context only during one serial opted-in Step and transporting cancellation to the existing Engram future contract; it introduces no new context type, independent cancellation scope, or ownership abstraction.",
+          "token": "engramLookAheadContext"
         }
       ],
       "exclude": [
@@ -12695,6 +12700,7 @@
         "ctxThrashConsecutiveRefills",
         "ctxsleep",
         "dflash2ContextKV",
+        "engramLookAheadContext",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
         "featureActivationContextKey",

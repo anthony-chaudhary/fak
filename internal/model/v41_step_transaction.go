@@ -220,6 +220,7 @@ func (r *v41StepRound) drain(keep int) (err error) {
 // seam does not open a backend batch, permit concurrent forwards, or share rows.
 // Captured locals retain the same bounded per-layer undo journal as serial Step.
 type v41StepTransaction struct {
+	engramLookAhead   *v41StepEngramLookAhead
 	stats             v41StepStats
 	nextLayer, layers int
 	closed            bool
@@ -363,11 +364,25 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		return tx, err
 	}
 
+	if st.engramLookAheadContext != nil && engram.stage != nil {
+		tx.engramLookAhead = &v41StepEngramLookAhead{m: m, tx: tx, ctx: st.engramLookAheadContext, engram: engram, layer: -1}
+		tx.engramLookAhead.issueAfter(-1)
+	}
+
 	tx.layer = func(l int) (*v41LayerStepWork, error) {
 		state := st.layerState(l)
 		journal.stage(l, state)
-		if err := m.v41StepInjectEngram(l, engram, st, x, streams, resident, scratch, rollback); err != nil {
-			return nil, err
+		if tx.engramLookAhead == nil {
+			if err := m.v41StepInjectEngram(l, engram, st, x, streams, resident, scratch, rollback); err != nil {
+				return nil, err
+			}
+		} else {
+			applyEngram := func(rows *v41EngramGatheredRows) error {
+				return m.v41StepInjectEngramOwned(l, engram, st, x, streams, resident, scratch, rollback, rows)
+			}
+			if err := tx.engramLookAhead.inject(l, applyEngram); err != nil {
+				return nil, err
+			}
 		}
 		if st.dsparkCapture != nil {
 			if err := st.dsparkCapture.captureStep(st, l, id, pos, streams, resident, full); err != nil {
@@ -660,6 +675,14 @@ func (tx *v41StepTransaction) abort() {
 	if tx.closed {
 		return
 	}
+	defer tx.abortResources()
+	tx.joinEngramLookAhead()
+}
+
+func (tx *v41StepTransaction) abortResources() {
+	if tx.closed {
+		return
+	}
 	// A suspended resident layer must release its local epoch before journal
 	// rollback and transaction cleanup. Even a release panic cannot skip them.
 	var cleanup any
@@ -681,6 +704,20 @@ func (tx *v41StepTransaction) abort() {
 }
 
 func (tx *v41StepTransaction) close() {
+	// Join before marking closed or releasing resident/scratch/model state.
+	// The existing cleanup still runs if a source release panics or Goexits.
+	defer tx.closeResources()
+	tx.joinEngramLookAhead()
+}
+
+func (tx *v41StepTransaction) joinEngramLookAhead() {
+	if ahead := tx.engramLookAhead; ahead != nil {
+		tx.engramLookAhead = nil
+		ahead.close()
+	}
+}
+
+func (tx *v41StepTransaction) closeResources() {
 	tx.closed = true
 	cleanupOK := false
 	defer func() {

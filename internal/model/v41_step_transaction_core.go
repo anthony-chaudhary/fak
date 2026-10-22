@@ -229,6 +229,10 @@ func (m *Model) v41StepEngramRows(st *v41ForwardState, id int) (v41StepEngram, e
 // declared Engram layer. A selected projection-operation failure panics after
 // rollback so it is never replayed on host.
 func (m *Model) v41StepInjectEngram(l int, e v41StepEngram, st *v41ForwardState, x []float32, streams [][]float32, resident *v41MHCResident, scratch *v41ProjScratch, rollback func()) error {
+	return m.v41StepInjectEngramOwned(l, e, st, x, streams, resident, scratch, rollback, nil)
+}
+
+func (m *Model) v41StepInjectEngramOwned(l int, e v41StepEngram, st *v41ForwardState, x []float32, streams [][]float32, resident *v41MHCResident, scratch *v41ProjScratch, rollback func(), gathered *v41EngramGatheredRows) error {
 	if e.stage == nil {
 		return nil
 	}
@@ -258,11 +262,22 @@ func (m *Model) v41StepInjectEngram(l int, e v41StepEngram, st *v41ForwardState,
 	layerRows := e.rows[base : base+geometry.cols]
 	var rows int
 	var injectionErr error
-	var gathered *v41EngramGatheredRows
+	if gathered != nil {
+		if gathered.layer != l || gathered.stage != geometry.stage || gathered.cacheIdx != cacheIdx || gathered.dim != geometry.dim || len(gathered.rows) != len(layerRows) {
+			rollback()
+			return v41EngramLookAheadErr(l, "retained panel owner does not match injection")
+		}
+		if err := v41EngramGateParamsErr(l, float32(cfg.RMSNormEps), geometry.qNorm, geometry.kNorm); err != nil {
+			rollback()
+			return err
+		}
+	}
 	handled := false
 	if resident != nil {
 		if gate := scratch.gatherOps.engramGateFunc(); gate != nil {
-			gathered, injectionErr = m.v41EngramGatherRows(l, 1, layerRows, float32(cfg.RMSNormEps), geometry)
+			if gathered == nil {
+				gathered, injectionErr = m.v41EngramGatherRows(l, 1, layerRows, float32(cfg.RMSNormEps), geometry)
+			}
 			if injectionErr == nil {
 				rows = len(gathered.rows)
 				handled, injectionErr = gate(l, resident.streams, gathered, 1, geometry, float32(cfg.RMSNormEps))
