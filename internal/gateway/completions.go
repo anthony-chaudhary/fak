@@ -23,7 +23,8 @@ import (
 // With stream:true it takes the same EARLY-preamble split #5399 gave the chat wire
 // (#5514): the 200, the SSE headers and an opening chunk go out BEFORE the decode, and a
 // failure after that point rides an in-band SSE error event. Only the frame shape stays
-// legacy — see completionStreamWriter.
+// legacy — see completionStreamWriter. That includes a native structured-output refusal:
+// chat's live stream can still answer it with a 400, this wire reports it in-band.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -53,10 +54,11 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer waitEPFanout()
-	var req CompletionRequest
-	if !decodeRequestBody(w, r, &req) {
+	var body completionCarrierRequest
+	if !decodeRequestBody(w, r, &body) {
 		return
 	}
+	req, carriers := body.CompletionRequest, body.carriers()
 	prompt, batched := normalizePrompt(req.Prompt)
 	if batched {
 		writeErrCode(w, http.StatusBadRequest, "prompt_batch_unsupported", "prompt: an array of more than one prompt is a batch, which this route does not serve; send one request per prompt")
@@ -69,7 +71,16 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectStopLimits(w, normalizeStop(req.Stop)) {
 		return
 	}
+	if rejectGuidedRegexLimits(w, carriers) {
+		return
+	}
+	if rejectInvalidStructuredOutputs(w, carriers.StructuredOutputs) {
+		return
+	}
 	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
+		return
+	}
+	if rejectInvalidResponseFormatCarrier(w, carriers.ResponseFormat) {
 		return
 	}
 	decodeTraceRequested := req.FakDecodeTrace
@@ -140,6 +151,8 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
+		agent.WithResponseFormat(carriers.ResponseFormat),
+		agent.WithGuidedDecode(carriers.GuidedDecodeFields()),
 		agent.WithRawPrompt(),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
@@ -195,6 +208,39 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// completionCarrierRequest adds the chat route's structured-output carriers, with
+// ChatRequest's tags, to the legacy body. Embedding ChatRequest instead would make
+// the fields it shares with CompletionRequest ambiguous, and encoding/json drops
+// ambiguous fields silently.
+type completionCarrierRequest struct {
+	CompletionRequest
+	ResponseFormat        json.RawMessage `json:"response_format,omitempty"`
+	GuidedJSON            json.RawMessage `json:"guided_json,omitempty"`
+	GuidedRegex           json.RawMessage `json:"guided_regex,omitempty"`
+	GuidedChoice          json.RawMessage `json:"guided_choice,omitempty"`
+	GuidedGrammar         json.RawMessage `json:"guided_grammar,omitempty"`
+	GuidedDecodingBackend json.RawMessage `json:"guided_decoding_backend,omitempty"`
+	JSONSchema            json.RawMessage `json:"json_schema,omitempty"`
+	Regex                 json.RawMessage `json:"regex,omitempty"`
+	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
+	StructuredOutputs     json.RawMessage `json:"structured_outputs,omitempty"`
+}
+
+func (r completionCarrierRequest) carriers() ChatRequest {
+	return ChatRequest{
+		ResponseFormat:        r.ResponseFormat,
+		GuidedJSON:            r.GuidedJSON,
+		GuidedRegex:           r.GuidedRegex,
+		GuidedChoice:          r.GuidedChoice,
+		GuidedGrammar:         r.GuidedGrammar,
+		GuidedDecodingBackend: r.GuidedDecodingBackend,
+		JSONSchema:            r.JSONSchema,
+		Regex:                 r.Regex,
+		EBNF:                  r.EBNF,
+		StructuredOutputs:     r.StructuredOutputs,
+	}
 }
 
 func completionStreamModel(stream *completionStreamWriter) string {

@@ -31,3 +31,24 @@ serve batches, so it now refuses a string array of two or more prompts with a
 typed 400 (error.code prompt_batch_unsupported) before admission and before
 any stream preamble, instead of joining the prompts with newlines into one
 completion. A bare string and a one-element array are served unchanged.
+
+Source: deepseek-ai/DeepInfer, deepinfer/entrypoints/llm.py (lines 117-142),
+        deepinfer/engine/llm_engine.py (lines 606-612),
+        deepinfer/sampling_params.py (lines 59, 63, 82)
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/entrypoints/llm.py
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/engine/llm_engine.py
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/sampling_params.py
+Upstream change: https://github.com/deepseek-ai/DeepInfer/pull/119
+
+Adaptation (internal/gateway legacy /v1/completions structured carriers): no
+upstream code is adapted; the contract is inspired by the finding. Upstream
+carries so_args on every request's SamplingParams (sampling_params.py:59,82)
+and builds the structured-output matcher at enqueue (llm_engine.py:606-612),
+while PR#119 drops logprobs without a word (sampling_params.py:63). Fak's
+legacy /v1/completions route had dropped response_format and every
+guided-decode carrier the same silent way; it now decodes the same ten
+carriers as /v1/chat/completions, applies chat's ingress refusals before
+admission and before any EP follower or stream preamble, and passes the
+carriers to the planner. Native refusals therefore carry the same typed code;
+on stream:true that code arrives as an in-band SSE error.
