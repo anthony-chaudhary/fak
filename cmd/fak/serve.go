@@ -1158,6 +1158,9 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	}
 	if native, ok := abi.Engine(*sf.engineID).(*modelengine.Engine); ok {
 		srv.SetKVPreemptor(native.KVPreemptionMetricWriter())
+		if err := native.KVPreemptionEnvErr(); err != nil {
+			startupMessages = append(startupMessages, newServeStartupMessage("serve", "native-kv-env", "warning", modelengine.NativeKVEnvNotice(err)))
+		}
 	}
 	srv.AddStartupMessages(startupMessages...)
 	// fak#13567: gateway.New built the in-kernel planner, which performs the Metal residency
