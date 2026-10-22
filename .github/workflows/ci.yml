@@ -1058,6 +1058,18 @@ jobs:
   # un-instrumented binary). ubuntu-latest ships gcc and defaults CGO_ENABLED=1,
   # so this is the reproducible home of the "race-free" claim. See
   # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
+  #
+  # SHARDED (2026-10-22): one runner could not finish `go test -race ./...` inside
+  # the 30-minute job deadline. Measured on run 39814588650 (ubuntu-latest, -p=1):
+  # cmd/fak alone took 1193s under -race and the job was killed while still in
+  # internal/q*, so every push's race-detector ended `cancelled` and ci-provenance
+  # could never verify. The non-race test step sums ~3430s of package time, with
+  # cmd/fak (597s) and internal/model (541s) dominant, then internal/tokencache
+  # (194s) and internal/agent (180s). Those get dedicated legs (cli, model, heavy);
+  # every other package is assigned round-robin over `go list` order to one of
+  # RACE_REST_SHARDS legs (worst rest leg ~350s non-race on that run), so the
+  # union is exactly ./... by construction. needs.race-detector.result is success only when every leg
+  # succeeds, so ci-provenance's contract is unchanged.
   race-detector:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
@@ -1065,9 +1077,13 @@ jobs:
       run_id: ${{ steps.source.outputs.run_id }}
       run_attempt: ${{ steps.source.outputs.run_attempt }}
     if: github.event_name != 'workflow_dispatch'
-    name: race detector · go test -race ./...
+    name: race detector · go test -race (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [cli, model, heavy, rest-0, rest-1, rest-2, rest-3, rest-4, rest-5, rest-6, rest-7]
     env:
       GOTOOLCHAIN: auto
       # Keep race compilation under the same hosted-runner process ceiling.
@@ -1107,23 +1123,55 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/go-build
-          key: ${{ runner.os }}-gorace-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          key: ${{ runner.os }}-gorace-${{ matrix.shard }}-${{ hashFiles('go.mod') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-gorace-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gorace-${{ matrix.shard }}-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gorace-${{ matrix.shard }}-
             ${{ runner.os }}-gorace-
 
       - name: C toolchain present (the race detector needs cgo)
         run: cc --version
 
-      - name: go test -race ./... (zero data races)
+      - name: select race shard packages
+        id: shard
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          RACE_REST_SHARDS: "8"
+        run: |
+          set -euo pipefail
+          mod=$(go list -m)
+          # Dedicated legs: packages whose -race wall alone would crowd a shared leg.
+          cli=("$mod/cmd/fak")
+          model=("$mod/internal/model")
+          heavy=("$mod/internal/tokencache" "$mod/internal/agent")
+          case "$SHARD" in
+            cli) printf '%s\n' "${cli[@]}" > "$RUNNER_TEMP/race-packages.txt" ;;
+            model) printf '%s\n' "${model[@]}" > "$RUNNER_TEMP/race-packages.txt" ;;
+            heavy) printf '%s\n' "${heavy[@]}" > "$RUNNER_TEMP/race-packages.txt" ;;
+            rest-*)
+              excludes=()
+              for pkg in "${cli[@]}" "${model[@]}" "${heavy[@]}"; do excludes+=(-e "$pkg"); done
+              go list ./... | grep -vxF "${excludes[@]}" \
+                | awk -v n="$RACE_REST_SHARDS" -v i="${SHARD#rest-}" '(NR-1)%n==i' > "$RUNNER_TEMP/race-packages.txt" ;;
+            *) echo "::error::unknown race shard $SHARD"; exit 1 ;;
+          esac
+          test -s "$RUNNER_TEMP/race-packages.txt"
+          echo "shard $SHARD: $(wc -l < "$RUNNER_TEMP/race-packages.txt") packages"
+
+      - name: go test -race <shard> (zero data races)
         id: race_tests
+        shell: bash
         # -count=1 forces a real, uncached run — the honest "fresh read-back" of
         # the race-free claim on every push/PR, never a cached green from before.
         # -timeout=25m: ThreadSanitizer instrumentation makes CPU-bound packages
         # (e.g. internal/turnbench's sweep/grid tests) 5-10x slower, well past the
         # default 10m per-package binary timeout. This only grants wall-clock; it
         # changes nothing about which tests run.
-        run: go test -race -count=1 -timeout=25m ./...
+        run: |
+          set -euo pipefail
+          mapfile -t pkgs < "$RUNNER_TEMP/race-packages.txt"
+          go test -race -count=1 -timeout=25m "${pkgs[@]}"
 
       - name: record exact verification provenance
         if: always()
@@ -1145,6 +1193,9 @@ jobs:
             mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
           fi
           commands="$CORE_COMMANDS_JSON"
+          if [[ -s "$RUNNER_TEMP/race-packages.txt" ]]; then
+            commands=$(jq -Rn '[["go","test","-race","-count=1","-timeout=25m"] + [inputs]]' < "$RUNNER_TEMP/race-packages.txt")
+          fi
           if [[ "$CI_CLASS" == diagnostic ]]; then
             if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
           fi
@@ -1161,7 +1212,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-race-detector
+          name: ci-job-${{ github.run_id }}-${{ github.run_attempt }}-race-detector-${{ matrix.shard }}
           path: ${{ runner.temp }}/ci-race-detector.json
           if-no-files-found: error
 
