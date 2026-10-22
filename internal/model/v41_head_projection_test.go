@@ -54,22 +54,22 @@ func v41HeadProjFixture(t *testing.T) *Model {
 	for _, name := range names {
 		tensors = append(tensors, synthTensor{name, m.manifest[name].Shape})
 	}
-	m.manifest, m.raw = synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	m.manifest, m.raw = synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") || hasSuffix(name, "attn.kv_norm.weight"):
-			return 1
+			return synthConstFill(1)
 		case hasSuffix(name, "mhc.ffn_scale"):
-			return .75
+			return synthConstFill(.75)
 		case hasSuffix(name, "mhc.ffn_base"):
-			return .125 * next()
+			return synthScaledFill(.125)
 		case hasSuffix(name, "mhc.scale"):
-			return 1
+			return synthConstFill(1)
 		case hasSuffix(name, "mhc.base"):
-			return 0
+			return synthConstFill(0)
 		case hasSuffix(name, "attn.sink"):
-			return .25 * next()
+			return synthScaledFill(.25)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	m.kqw = map[string]*kQuantTensor{"lm_head.weight": q2kFixtureTensor(cfg.VocabSize, cfg.HiddenSize, 1366813001)}

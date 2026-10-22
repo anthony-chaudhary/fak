@@ -50,14 +50,14 @@ func v41IncrementalExpertFixture(t *testing.T, role, streamed bool) *Model {
 			{layerName(0, "indexer.k_norm.weight"), []int{c.IndexHeadDim}},
 			{layerName(0, "indexer.weights_proj.weight"), []int{c.IndexNHeads, H}},
 		}
-		man, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+		man, raw := synthBuildRawResolved(extra, func(name string) synthElemFill {
 			if hasSuffix(name, "mhc.ffn_scale") {
-				return .75
+				return synthConstFill(.75)
 			}
 			if hasSuffix(name, "norm.weight") {
-				return 1
+				return synthConstFill(1)
 			}
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		})
 		for k, v := range man {
 			v.Offset += len(m.raw)

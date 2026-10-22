@@ -229,18 +229,18 @@ func v41ReducedBlockAlignedModel(t *testing.T) *Model {
 		)
 	}
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") || hasSuffix(name, "ffn_norm.weight"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.scale"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.base"):
-			return 0.0
+			return synthConstFill(0.0)
 		case hasSuffix(name, "attn.sink"):
-			return 0.25 * next()
+			return synthScaledFill(0.25)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	return &Model{Cfg: cfg, manifest: man, raw: raw}

@@ -80,14 +80,14 @@ func v41CompressorTestFixtureIndex(t *testing.T, indexDim int) *Model {
 			extra = append(extra, synthTensor{layerName(layer, spec.leaf), spec.shape})
 		}
 	}
-	manifest, raw := synthBuildRaw(extra, func(name string, next func() float32) float32 {
+	manifest, raw := synthBuildRawResolved(extra, func(name string) synthElemFill {
 		if strings.HasSuffix(name, "mhc.ffn_scale") {
-			return .75
+			return synthConstFill(.75)
 		}
 		if strings.HasSuffix(name, "norm.weight") {
-			return 0.8 + 0.2*next()
+			return synthElemFill{custom: func(next func() float32) float32 { return 0.8 + 0.2*next() }}
 		}
-		return synthMatmulFill(name, next)
+		return synthMatmulFillFor(name)
 	})
 	for name, meta := range manifest {
 		meta.Offset += len(m.raw)

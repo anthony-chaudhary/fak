@@ -112,24 +112,24 @@ func v41FullEngramModelConfigWith(t *testing.T, cfg Config, deviceExperts bool, 
 		}
 	}
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") ||
 			hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") ||
 			hasSuffix(name, "attn.kv_norm.weight"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.ffn_scale"):
-			return .75
+			return synthConstFill(.75)
 		case hasSuffix(name, "mhc.ffn_base"):
-			return .125 * next()
+			return synthScaledFill(.125)
 		case hasSuffix(name, "mhc.scale"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.base"):
-			return 0.0
+			return synthConstFill(0.0)
 		case hasSuffix(name, "attn.sink"):
-			return 0.25 * next()
+			return synthScaledFill(0.25)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	m := &Model{Cfg: cfg, manifest: man, raw: raw}
@@ -495,24 +495,24 @@ func v41RectangularEngramModel(t *testing.T, dim int) (*Model, V41EngramLayout) 
 		)
 	}
 
-	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
 		switch {
 		case name == "model.norm.weight" || hasSuffix(name, "attn_norm.weight") ||
 			hasSuffix(name, "ffn_norm.weight") || hasSuffix(name, "attn.wq_a_norm.weight") ||
 			hasSuffix(name, "attn.kv_norm.weight"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.ffn_scale"):
-			return .75
+			return synthConstFill(.75)
 		case hasSuffix(name, "mhc.ffn_base"):
-			return .125 * next()
+			return synthScaledFill(.125)
 		case hasSuffix(name, "mhc.scale"):
-			return 1.0
+			return synthConstFill(1.0)
 		case hasSuffix(name, "mhc.base"):
-			return 0.0
+			return synthConstFill(0.0)
 		case hasSuffix(name, "attn.sink"):
-			return 0.25 * next()
+			return synthScaledFill(0.25)
 		default:
-			return synthMatmulFill(name, next)
+			return synthMatmulFillFor(name)
 		}
 	})
 	m := &Model{Cfg: cfg, manifest: man, raw: raw}
