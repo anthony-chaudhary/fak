@@ -1,0 +1,272 @@
+--- a/internal/compute/vulkan_shim.cpp
++++ b/internal/compute/vulkan_shim.cpp
+@@ -23,6 +23,9 @@
+ 
+ #include "vulkan_backend.h"
+ #include "vulkan_memory_guard.h"
++#include "_experimental/v41_packed_runtime/proposed_api.h"
++#include <map>
++#include <cstdint>
+ 
+ #include <vulkan/vulkan.h>
+ 
+@@ -286,6 +289,16 @@
+     bool           offloadPage = false; // mapped host-visible expert-ring page, recycled via g_hvOffloadPool
+     bool           offloadPristine = false; // handed out by fvk_malloc_offload_weight, not written since
+ };
++
++// EXPERIMENTAL: this patch is not part of the default runtime. All operations
++// below require the existing vulkanMu. The store survives every init attempt.
++#include "_experimental/v41_packed_runtime/vulkan_v41_batch_lifetime_prototype.h"
++V41BatchLifetimePrototype g_completion;
++uint64_t g_completionGeneration = 0;
++uint64_t g_completionOwner = 0, g_completionNextOwner = 0;
++fvk_v41_batch_identity g_completionWindow{};
++VkCommandBuffer g_completionCommand = VK_NULL_HANDLE;
++bool completionAdmission(); // defined after InflightBatch
+ 
+ // Called only at native pool checkout, under the existing external allocator lock.
+ // Exhaustion is sticky unavailable rather than wrapping into an old checkout ID.
+@@ -858,6 +871,7 @@
+ void destroyBuffer(Buffer* b) {
+     if (g_v41SubmissionPendingFailure) return; // referenced scratch/arena may still be in flight
+     if (!b) return;
++    if (g_completion.pinned(b)) return; // no destruction before explicit acknowledgement
+     if (b->buf) {
+         drainInflight(); // a pipelined batch may still bind this buffer
+         // Descriptor sets outlive temporary buffers; a recycled handle is not
+@@ -1501,6 +1515,11 @@
+ }
+ 
+ bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {
++    // Capture the native-issued window before any wait/reuse/reopen. A one-shot
++    // checked command cannot retire the current batch simply by succeeding.
++    const bool ownsWindow = g_completionWindow.serial && cmd == g_completionCommand;
++    const fvk_v41_batch_identity window = g_completionWindow;
++    bool receiptRecorded = false;
+     VkResult r = vkEndCommandBuffer(cmd);
+     if (r == VK_SUCCESS && submit) r = vkResetFences(g_dev, 1, &g_submitFence);
+     if (r == VK_SUCCESS && submit) {
+@@ -1519,7 +1538,44 @@
+             r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
+             if (r != VK_SUCCESS) g_v41SubmissionPendingFailure = true;
+             else g_submitWaitNs.fetch_add(submitWaitNow() - submitted, std::memory_order_relaxed);
++            // Preserve the actual successful-wait telemetry even if the
++            // subsequent identity invariant fails closed.
+             if (r == VK_SUCCESS) syncSignaled(kSyncSiteSubmitWait, syncTakeStage(), submitted);
++            if (r == VK_SUCCESS && ownsWindow) {
++                // This is the only COMPLETE minting site: actual successful wait,
++                // with end/reset/submit already checked, before command recycling.
++                receiptRecorded = g_completion.retireChecked(window,
++                    reinterpret_cast<uintptr_t>(cmd), true, true,
++                    g_v41SubmissionPendingFailure, (int)g_submissionStatus);
++                fvk_v41_batch_phase phase;
++                int status;
++                if (!receiptRecorded || !g_completion.query(window, phase, status) ||
++                    phase != FVK_V41_BATCH_COMPLETE || status != 0) {
++                    g_completion.quarantineRecording((int)VK_ERROR_UNKNOWN);
++                    g_v41SubmissionPendingFailure = true;
++                    r = VK_ERROR_UNKNOWN;
++                }
++            }
++        }
++    }
++    if (ownsWindow && !receiptRecorded) {
++        // Empty windows are CANCELLED, never initialized-write receipts. Failed
++        // end/reset/submit/wait keeps enrolled owners pinned; no acknowledgement.
++        if (!g_completion.retireChecked(window, reinterpret_cast<uintptr_t>(cmd),
++                r == VK_SUCCESS && !submit, false,
++                g_v41SubmissionPendingFailure,
++                r == VK_SUCCESS ? (int)g_submissionStatus : (int)r)) {
++            g_completion.quarantineRecording((int)VK_ERROR_UNKNOWN);
++            g_v41SubmissionPendingFailure = true;
++            r = VK_ERROR_UNKNOWN;
++        }
++        fvk_v41_batch_phase phase;
++        int status;
++        if (!g_completion.query(window, phase, status) ||
++            phase == FVK_V41_BATCH_QUARANTINED) {
++            // Selected owning-window errors retain command, descriptors and
++            // parked buffers as well as allocation pins, including end/reset.
++            g_v41SubmissionPendingFailure = true;
+         }
+     }
+     if (!g_v41SubmissionPendingFailure &&
+@@ -1864,10 +1920,35 @@
+ void batchBegin() {
+ 	if (g_v41SubmissionPendingFailure || g_submissionStatus != VK_SUCCESS) return;
+ 	if (g_batching) return;          // already recording — the model brackets each token
++    if (g_stepBatch) {
++        // Reject inflight BEFORE v41BeginCmdChecked can invoke unchecked drain.
++        if (!completionAdmission() || !g_completion.begin(g_completionGeneration,
++                g_completionOwner, g_completionWindow)) {
++            g_submissionStatus = VK_ERROR_UNKNOWN;
++            return;
++        }
++    }
+ 	// A V4.1 window must latch command allocation/begin failures, not abort.
+ 	g_batchCmd = g_batchIdleCmd != VK_NULL_HANDLE ? beginReusedBatchCommand() :
+         (g_stepBatch ? v41BeginCmdChecked() : allocBeginCmd());
+-	if (g_batchCmd == VK_NULL_HANDLE) return;
++    if (g_batchCmd == VK_NULL_HANDLE) {
++        if (g_stepBatch) {
++            g_completion.cancelReservation(g_completionWindow);
++            g_completion.forget(g_completionWindow); // no use/command ever attached
++            g_completionWindow = {};
++        }
++        return;
++    }
++    if (g_stepBatch) {
++        g_completionCommand = g_batchCmd;
++        if (!g_completion.activate(g_completionWindow,
++                reinterpret_cast<uintptr_t>(g_batchCmd))) {
++            g_completion.quarantineRecording((int)VK_ERROR_UNKNOWN);
++            g_v41SubmissionPendingFailure = true;
++            g_submissionStatus = VK_ERROR_UNKNOWN;
++            return;
++        }
++    }
+ 	tsBatchBegin(g_batchCmd);
+ 	g_batching = true;
+ 	g_batchOps = 0;
+@@ -1900,6 +1981,12 @@
+     uint32_t syncStage = UINT32_MAX;
+ };
+ InflightBatch g_inflight;
++bool completionAdmission() {
++    return g_ready && g_memoryDeviceGenerationReady && g_completionOwner &&
++        g_completionGeneration == g_memoryDeviceGeneration &&
++        !g_inflight.active && !g_restore.stage && !g_restore.cmd &&
++        !g_v41SubmissionPendingFailure && g_submissionStatus == VK_SUCCESS;
++}
+ VkFence g_pipeFences[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+ const bool g_pipelineFlush = [] {
+     const char* v = std::getenv("FAK_VULKAN_PIPELINE_FLUSH");
+@@ -2029,6 +2116,13 @@
+     if (!g_batching) { drainInflight(); return; }
+     bool hadWork = g_batchOps > 0;
+     if (g_batchHasV41) {
++        if (g_completionWindow.serial && g_inflight.active) {
++            // An impossible foreign owner must not enter the unchecked drain.
++            g_completion.quarantineRecording((int)VK_ERROR_UNKNOWN);
++            g_submissionStatus = VK_ERROR_UNKNOWN;
++            g_v41SubmissionPendingFailure = true;
++            return;
++        }
+         drainInflight();
+         if (hadWork) dpBatchSubmit();
+         const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);
+@@ -2061,6 +2155,9 @@
+         if (it->set) g_descSetPool[it->layout].push_back(*it);
+     }
+     g_batchSets.clear();
++    // Receipts remain in the store after detaching this reusable command alias.
++    g_completionWindow = {};
++    g_completionCommand = VK_NULL_HANDLE;
+     g_batchCmd = VK_NULL_HANDLE;
+     // Clear the batching flag BEFORE recycling, so the fvk_free calls below take the real
+     // recycle path instead of re-parking into g_batchFreed. The recorded ops have executed
+@@ -4283,7 +4380,9 @@
+ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
+     // A re-init is not a device teardown and cannot establish quiescence. Keep
+     // the poisoned context and its loaded capability bound until process exit.
+-    if (g_v41SubmissionPendingFailure) return 9;
++    // No device-retirement protocol exists for this experiment. Once bound,
++    // forbid re-init even after uses are acknowledged; never reset the store.
++    if (g_v41SubmissionPendingFailure || g_completionGeneration) return 9;
+     if (!configureMemoryGuard()) {
+         fprintf(stderr, "fak-vulkan: invalid FAK_VULKAN_MEMORY_LIMIT_BYTES (expected 1..INT64_MAX)\n");
+         return 10;
+@@ -5037,6 +5136,7 @@
+ void fvk_free(void* d) {
+     if (!d) return;
+     Buffer* b = B(d);
++    if (g_completion.pinned(b)) return; // refuse pool return as well as destruction
+     // During a batch, a freed buffer may still be referenced by a recorded-but-unsubmitted
+     // op (e.g. the KV grow copies old->new then frees old; the copy hasn't executed yet).
+     // Park it and recycle only after the batch flushes, so it can't be handed back out and
+@@ -5974,7 +6074,14 @@
+ int fvk_v41_step_batch_begin(void) {
+     if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+     if (!g_ready || g_v41SubmissionPendingFailure || g_batching || g_stepBatch ||
+-        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 1;
++        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE || g_inflight.active ||
++        !g_memoryDeviceGenerationReady || !g_memoryDeviceGeneration ||
++        g_completionNextOwner == std::numeric_limits<uint64_t>::max()) return 1;
++    if (g_completionGeneration != g_memoryDeviceGeneration) {
++        if (!g_completion.bindContext(g_memoryDeviceGeneration)) return 1;
++        g_completionGeneration = g_memoryDeviceGeneration;
++    }
++    g_completionOwner = ++g_completionNextOwner; // native step token, never reused
+     g_stepBatch = true;
+     g_batchHazardsArmed = 0;
+     batchBegin();
+@@ -9322,3 +9429,68 @@
+     g_dp.oneShotCompute.store(0); g_dp.oneShotH2D.store(0);
+     g_dp.oneShotD2H.store(0); g_dp.oneShotD2D.store(0);
+ }
++
++// EXPERIMENTAL completion interface. Snapshot/query never flush, drain or submit.
++int fvk_v41_batch_current(fvk_v41_batch_identity* out) {
++    if (!out) return 1;
++    *out = {};
++    if (!completionAdmission() || !g_stepBatch || !g_batching ||
++        g_batchCmd != g_completionCommand || !g_completionWindow.serial) return 1;
++    *out = g_completionWindow;
++    return 0;
++}
++int fvk_v41_batch_query(fvk_v41_batch_identity id,
++                        fvk_v41_batch_phase* phase, int* result) {
++    if (!phase || !result) return 1;
++    *phase = FVK_V41_BATCH_QUARANTINED;
++    *result = (int)VK_ERROR_UNKNOWN;
++    if (id.generation != g_memoryDeviceGeneration) return 1;
++    return g_completion.query(id, *phase, *result) ? 0 : 1;
++}
++int fvk_v41_batch_acknowledge(fvk_v41_batch_identity id, uint64_t use) {
++    // Completion is a historical fence fact, not permission on a failed context.
++    if (g_submissionStatus != VK_SUCCESS || g_v41SubmissionPendingFailure ||
++        !g_memoryDeviceGenerationReady || id.generation != g_memoryDeviceGeneration) return 1;
++    return g_completion.acknowledge(id, use) ? 0 : 1;
++}
++int fvk_v41_batch_forget(fvk_v41_batch_identity id) {
++    return g_completion.forget(id) ? 0 : 1;
++}
++
++// EXACT UNWIRED BOUNDARY: only the private packed owner adapter may call this.
++// It must hold strong Go owner references before entering native code, retain
++// the returned ticket, and publish metadata only after query(COMPLETE). Not a
++// public pointer-registration API. Existing packed synchronous guards stay intact.
++// First operation intentionally only fills an entire fresh packed allocation.
++static int v41CompletionRecordPackedZero(fvk_v41_batch_identity id,
++                                         Buffer* dst, size_t capacity,
++                                         uint64_t* use) {
++    if (!use) return 1;
++    *use = 0;
++    fvk_v41_batch_identity current{};
++    if (fvk_v41_batch_current(&current) || current.generation != id.generation ||
++        current.owner != id.owner || current.serial != id.serial) return 1;
++    // Identity is checked BEFORE dereferencing the private owner's live handle.
++    if (!dst || !capacity || capacity % 288 || dst->bytes != capacity ||
++        !dst->buf || !dst->mem || dst->deviceGeneration != id.generation ||
++        !dst->allocationID || dst->weightArenaBound || dst->offloadPage ||
++        dst->mapped || dst->memoryOffset || dst->allocationBytes < capacity ||
++        g_batchOps == std::numeric_limits<int>::max()) return 2;
++    V41BatchLifetimePrototype::Allocation allocation{
++        dst, dst->deviceGeneration, dst->allocationID, dst->bytes};
++    // Store growth and custody happen before ANY referencing command. An
++    // allocation failure/overlap rejection cannot leave an untracked command.
++    if (!g_completion.enroll(id, {}, allocation, *use)) return 1;
++    recordTransferBarrier(g_batchCmd);
++    vkCmdFillBuffer(g_batchCmd, dst->buf, 0, capacity, 0);
++    recordTransferBarrier(g_batchCmd);
++    ++g_batchOps;
++    g_batchHasV41 = true; // prevents asynchronous generic pipeline submission
++    if (!g_completion.recorded(id, *use)) {
++        g_completion.quarantineRecording((int)VK_ERROR_UNKNOWN);
++        g_submissionStatus = VK_ERROR_UNKNOWN;
++        g_v41SubmissionPendingFailure = true;
++        return (int)VK_ERROR_UNKNOWN;
++    }
++    return 0;
++}

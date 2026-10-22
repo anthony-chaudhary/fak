@@ -1,0 +1,277 @@
+#version 450
+#extension GL_EXT_spirv_intrinsics : require
+// SOURCE DECLARATIONS ONLY: compiler and device qualification UNRUN.
+// Core SPIR-V 1.4+ float controls; Vulkan 1.2 targets SPIR-V 1.5.
+spirv_execution_mode(capabilities = [4464], 4459, 32); // DenormPreserve
+spirv_execution_mode(capabilities = [4466], 4461, 32); // SignedZeroInfNanPreserve
+spirv_execution_mode(capabilities = [4467], 4462, 32); // RoundingModeRTE
+layout(local_size_x = 128) in;
+
+// SOURCE-ONLY CANDIDATE: not registered, compiled, admitted or GPU-qualified.
+// New packed ABI, NOT compatible with V41SharedAttentionBackend's F32 ABI.
+// See CONTRACT.md for mandatory host checks, immutable inputs and float controls.
+// Only main-KV width 512 (448 NoPE + 64 RoPE), contiguous 288-byte records.
+
+// One workgroup owns one head. Each score and each output element is still one
+// lane's serial sum in slot/element order; lane 0 keeps the ordered maximum,
+// denominator and first-fault scans, so every value and status bit is unchanged.
+const int LANES = 128;
+const int CHUNK = 2048;
+const int NONE = 0x7fffffff;
+
+layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
+layout(std430, binding = 1) readonly buffer PackedKVBuf { uint PackedKV[]; };
+layout(std430, binding = 2) readonly buffer SinkBuf { float Sink[]; };
+layout(std430, binding = 3) buffer OutBuf { float Out[]; };
+layout(std430, binding = 4) writeonly buffer StatusBuf { uint Status[]; };
+
+layout(push_constant) uniform Push {
+    layout(offset = 0) int heads;
+    layout(offset = 4) int headDim;
+    layout(offset = 8) int selectedRows;
+    layout(offset = 12) int mode;
+    layout(offset = 16) int hasSink;
+    layout(offset = 20) float scale;
+    layout(offset = 24) uint rowStrideBytes;
+    layout(offset = 28) uint formatVersion;
+} pc;
+
+// Canonical byte sequence is little-endian within uint words. Descriptor base
+// is aligned and row zero starts there. Row stride 288 is not 64/128 aligned.
+uint packedByte(uint address) {
+    return (PackedKV[address >> 2u] >> ((address & 3u) * 8u)) & 255u;
+}
+
+float packedMainValue(int slot, int element) {
+    uint row = uint(slot) * pc.rowStrideBytes;
+    uint d = uint(element);
+    uint payload = packedByte(row + (d >> 1u));
+    uint code = (payload >> ((d & 1u) * 4u)) & 15u;
+    uint scaleCode = packedByte(row + 256u + (d >> 4u));
+    // Fail closed for malformed scales, without silently repairing a record.
+    // Host admission must validate all records before dispatch; this additionally
+    // routes a corrupt scale to the ordinary nonfinite scaled-score failure.
+    if (scaleCode == 0u || scaleCode >= 127u) return uintBitsToFloat(0x7fc00000u);
+    uint exponent = scaleCode >> 3u;
+    uint mantissa = scaleCode & 7u;
+    float tileScale = exponent == 0u ? float(mantissa) * (1.0 / 512.0)
+        : uintBitsToFloat(((exponent + 120u) << 23u) | (mantissa << 20u));
+    const float magnitude[8] = float[8](0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0);
+    float value = uintBitsToFloat(floatBitsToUint(magnitude[code & 7u]) | ((code & 8u) << 28u));
+    precise float decoded = value * tileScale;
+    // ref_cast_to_bf16 reference dequantization, then exact F32 widening. This is
+    // NOT an extra BF16 cast on Q, scores, weights or attention accumulators.
+    // Valid E2M1 * E4M3 products are finite and exactly BF16-representable;
+    // retaining explicit RNE documents the publication contract and signed zero.
+    uint bits = floatBitsToUint(decoded);
+    bits += 0x7fffu + ((bits >> 16u) & 1u);
+    return uintBitsToFloat(bits & 0xffff0000u);
+}
+
+shared float sScore[CHUNK];
+shared float sWeight[CHUNK];
+shared uint sStop;
+shared float sMaximum;
+shared float sDenominator;
+shared int sLimit;
+shared int sFaultSlot[LANES];
+shared int sFaultElement[LANES];
+shared float sFaultValue[LANES];
+
+bool finiteValue(float x) {
+    return !isnan(x) && !isinf(x);
+}
+
+void fault(uint head, uint stage, int slot, int element, float value) {
+    uint base = head * 4u;
+    Status[base] = stage;
+    Status[base + 1u] = uint(slot + 1);
+    Status[base + 2u] = uint(element + 1);
+    Status[base + 3u] = floatBitsToUint(value);
+}
+
+float scaledScore(uint head, int slot) {
+    uint qBase = head * uint(pc.headDim);
+    precise float dot = 0.0;
+    for (int d = 0; d < pc.headDim; ++d) {
+        precise float product = Q[qBase + uint(d)] * packedMainValue(slot, d);
+        precise float nextDot = dot + product;
+        dot = nextDot;
+    }
+    precise float score = dot * pc.scale;
+    return score;
+}
+
+void sync() {
+    memoryBarrierShared();
+    barrier();
+}
+
+// Lane 0 picks the first (slot, element) fault in the scalar kernel's order.
+void publishFirstLaneFault(uint head, uint stage, int slotBase) {
+    int slot = NONE;
+    int element = NONE;
+    float value = 0.0;
+    for (int l = 0; l < LANES; ++l) {
+        int s = sFaultSlot[l];
+        int e = sFaultElement[l];
+        if (s < slot || (s == slot && e < element)) { slot = s; element = e; value = sFaultValue[l]; }
+    }
+    if (element != NONE) {
+        fault(head, stage, slot == NONE ? -1 : slotBase + slot, element, value);
+        sStop = 1u;
+    }
+}
+
+void main() {
+    uint head = gl_WorkGroupID.x;
+    int lane = int(gl_LocalInvocationID.x);
+    if (head >= uint(pc.heads)) return;
+    uint statusBase = head * 4u;
+    if (lane == 0) {
+        Status[statusBase] = 0u;
+        Status[statusBase + 1u] = 0u;
+        Status[statusBase + 2u] = 0u;
+        Status[statusBase + 3u] = 0u;
+        sStop = 0u;
+    }
+    uint outBase = head * uint(pc.headDim);
+    for (int d = lane; d < pc.headDim; d += LANES) Out[outBase + uint(d)] = 0.0;
+    bool resident = pc.selectedRows <= CHUNK;
+
+    // Plain and compressed intentionally have different finite-extreme behavior.
+    float seed = pc.mode == 0 ? uintBitsToFloat(0xff800000u) : uintBitsToFloat(0xff7fffffu);
+    float maximum = pc.hasSink != 0 ? Sink[head] : seed;
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        for (int i = lane; i < count; i += LANES) sScore[i] = scaledScore(head, base + i);
+        sync();
+        if (lane == 0) {
+            for (int i = 0; i < count; ++i) {
+                float score = sScore[i];
+                if (!finiteValue(score)) { fault(head, 1u, base + i, -1, score); sStop = 1u; break; }
+                if (score > maximum) maximum = score;
+            }
+        }
+        sync();
+        if (sStop != 0u) return;
+    }
+    // Score validation precedes the compressed finite-sentinel skip.
+    if (lane == 0) {
+        sMaximum = maximum;
+        if (maximum == seed) {
+            sStop = 1u;
+        } else {
+            precise float denominator = 0.0;
+            if (pc.hasSink != 0) {
+                precise float shift = Sink[head] - maximum;
+                precise float term = exp(shift);
+                if (!finiteValue(term)) { fault(head, 2u, -1, -1, term); sStop = 1u; }
+                denominator = term;
+            }
+            sDenominator = denominator;
+        }
+    }
+    sync();
+    if (sStop != 0u) return;
+    maximum = sMaximum;
+
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        for (int i = lane; i < count; i += LANES) {
+            // A finite extreme subtraction may become -Inf; exp(-Inf)=0 is valid.
+            float score = resident ? sScore[i] : scaledScore(head, base + i);
+            precise float shift = score - maximum;
+            precise float term = exp(shift);
+            sWeight[i] = term;
+        }
+        sync();
+        if (lane == 0) {
+            precise float denominator = sDenominator;
+            for (int i = 0; i < count; ++i) {
+                float term = sWeight[i];
+                if (!finiteValue(term)) { fault(head, 2u, base + i, -1, term); sStop = 1u; break; }
+                precise float nextDenominator = denominator + term;
+                denominator = nextDenominator;
+            }
+            sDenominator = denominator;
+        }
+        sync();
+        if (sStop != 0u) return;
+    }
+    if (lane == 0) {
+        float denominator = sDenominator;
+        if (!finiteValue(denominator)) { fault(head, 3u, -1, -1, denominator); sStop = 1u; }
+        else if (denominator == 0.0) sStop = 1u;
+    }
+    sync();
+    if (sStop != 0u) return;
+    float denominator = sDenominator;
+
+    for (int base = 0; base < pc.selectedRows; base += CHUNK) {
+        int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        for (int i = lane; i < count; i += LANES) {
+            float term;
+            if (resident) {
+                term = sWeight[i];
+            } else {
+                float score = scaledScore(head, base + i);
+                precise float shift = score - maximum;
+                term = exp(shift);
+            }
+            precise float weight = term / denominator;
+            sWeight[i] = weight;
+        }
+        sync();
+        if (lane == 0) {
+            sLimit = count;
+            for (int i = 0; i < count; ++i) {
+                if (!finiteValue(sWeight[i])) { sLimit = i; break; }
+            }
+        }
+        sync();
+        // A weight fault at slot s precedes every value of slot s.
+        int limit = sLimit;
+        int faultSlot = NONE;
+        int faultElement = NONE;
+        float faultValue = 0.0;
+        for (int d = lane; d < pc.headDim; d += LANES) {
+            float value = Out[outBase + uint(d)];
+            for (int i = 0; i < limit; ++i) {
+                precise float product = sWeight[i] * packedMainValue(base + i, d);
+                precise float nextValue = value + product;
+                if (!finiteValue(nextValue)) {
+                    if (i < faultSlot) { faultSlot = i; faultElement = d; faultValue = nextValue; }
+                    break;
+                }
+                value = nextValue;
+            }
+            Out[outBase + uint(d)] = value;
+        }
+        sFaultSlot[lane] = faultSlot;
+        sFaultElement[lane] = faultElement;
+        sFaultValue[lane] = faultValue;
+        sync();
+        if (lane == 0) {
+            publishFirstLaneFault(head, 5u, base);
+            if (sStop == 0u && limit < count) {
+                fault(head, 4u, base + limit, -1, sWeight[limit]);
+                sStop = 1u;
+            }
+        }
+        sync();
+        if (sStop != 0u) return;
+    }
+
+    int faultElement = NONE;
+    float faultValue = 0.0;
+    for (int d = lane; d < pc.headDim; d += LANES) {
+        float value = Out[outBase + uint(d)];
+        if (!finiteValue(value)) { faultElement = d; faultValue = value; break; }
+    }
+    sFaultSlot[lane] = NONE;
+    sFaultElement[lane] = faultElement;
+    sFaultValue[lane] = faultValue;
+    sync();
+    if (lane == 0) publishFirstLaneFault(head, 6u, 0);
+}
