@@ -10,12 +10,14 @@ import (
 // TestClassifyLiveness pins the closed vocabulary branch by branch: every input shape
 // maps to exactly one class, the reclaimable rule is peer-dead-only, and the evidence
 // sentence names the comparison that decided.
+// fak-test:runtime fast est=1ms
 func TestClassifyLiveness(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	sessions := map[string]SessionDescriptor{
-		"live-1":    {ID: "live-1", PCBState: "RUNNING", UpdatedAt: 9_900, TTLSecs: 1800},
-		"lapsed-1":  {ID: "lapsed-1", PCBState: "RUNNING", UpdatedAt: 1_000, TTLSecs: 60},
-		"stopped-1": {ID: "stopped-1", PCBState: "STOPPED", UpdatedAt: 9_990, TTLSecs: 1800},
+		"live-1":       {ID: "live-1", PCBState: "RUNNING", UpdatedAt: 9_900, TTLSecs: 1800},
+		"lapsed-1":     {ID: "lapsed-1", PCBState: "RUNNING", UpdatedAt: 1_000, TTLSecs: 60},
+		"stopped-1":    {ID: "stopped-1", PCBState: "STOPPED", UpdatedAt: 9_990, TTLSecs: 1800},
+		"non-expiring": {ID: "non-expiring", PCBState: "RUNNING", UpdatedAt: now.Add(-30 * 24 * time.Hour).Unix(), TTLSecs: 0},
 	}
 	cases := []struct {
 		name         string
@@ -74,6 +76,14 @@ func TestClassifyLiveness(t *testing.T) {
 			wantEvidence: "pcb_state=STOPPED",
 		},
 		{
+			name:         "month-old non-expiring descriptor does not establish heartbeat",
+			rec:          Record{ID: "protected", SessionID: "non-expiring"},
+			self:         "other-session",
+			wantClass:    LivenessPeerLive,
+			wantKind:     EvidenceNonExpiring,
+			wantEvidence: "recent heartbeat not established",
+		},
+		{
 			name:         "anonymous reader never classifies self",
 			rec:          Record{ID: "mine", SessionID: "live-1"},
 			self:         "",
@@ -94,6 +104,22 @@ func TestClassifyLiveness(t *testing.T) {
 			}
 			if !strings.Contains(ev, c.wantEvidence) {
 				t.Fatalf("evidence %q missing %q", ev, c.wantEvidence)
+			}
+			if c.wantKind == EvidenceNonExpiring {
+				if strings.Contains(ev, "is heartbeating") {
+					t.Fatalf("non-expiring declaration claims a heartbeat: %q", ev)
+				}
+				if _, drop := CascadeDrop(c.rec, sessions, now); drop {
+					t.Fatal("non-expiring descriptor must not release its registrations")
+				}
+				rows := classifyAll(t, []Record{c.rec}, sessions, c.self, now)
+				if rows[0].Reclaimable {
+					t.Fatal("non-expiring descriptor must remain non-reclaimable")
+				}
+				summary := SummarizeLiveness(rows)
+				if summary.ByEvidenceKind[EvidenceNonExpiring] != 1 || summary.ByEvidenceKind[EvidenceHeartbeating] != 0 || summary.PositiveEvidence != 1 || summary.Coverage != 1 {
+					t.Fatalf("descriptor presence must count separately from heartbeat: %+v", summary)
+				}
 			}
 		})
 		seen[c.wantKind] = true

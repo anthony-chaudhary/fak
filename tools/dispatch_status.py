@@ -1035,6 +1035,12 @@ def _lease_liveness(rec: dict[str, Any], sessions: dict[str, dict[str, Any]],
     if _session_expired(desc, now_ts):
         return ("peer-dead", True,
                 f"session {session_id} heartbeat lapsed: now >= {updated}+{ttl}")
+    if ttl <= 0:
+        # Match native non-expiring-descriptor evidence without changing admission.
+        return ("peer-live", False,
+                f"owning session {session_id} has a non-expiring descriptor "
+                f"(pcb_state={state or '?'}, updated_at_unix={updated}, ttl_seconds={ttl}); "
+                "recent heartbeat not established — never reclaimable")
     return ("peer-live", False,
             f"session {session_id} heartbeating state={state or '?'} updated_at={updated} ttl={ttl}")
 

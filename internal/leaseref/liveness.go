@@ -56,9 +56,9 @@ const (
 	// LivenessSelf: the lease's SessionID is the reading agent's own session — its own
 	// lane, not a peer's.
 	LivenessSelf = "self"
-	// LivenessPeerLive: the owning session's descriptor is present and heartbeating
-	// (not expired, not STOPPED). NEVER reclaimable — this is the lane-steal the
-	// classification exists to prevent.
+	// LivenessPeerLive: the owning session's descriptor is present, not expired and
+	// not STOPPED. A non-expiring descriptor preserves this admission class without
+	// proving a recent heartbeat; EvidenceKind distinguishes it. NEVER reclaimable.
 	LivenessPeerLive = "peer-live"
 	// LivenessPeerDead: the owning session is POSITIVELY dead — its descriptor exists
 	// and either the heartbeat lapsed past TTL or it published the terminal STOPPED
@@ -96,7 +96,11 @@ const (
 	// TTL is behind now — it stopped answering rather than announcing. A reaper may
 	// reasonably log or rate-limit this differently from a clean STOPPED. Class: peer-dead.
 	EvidenceHeartbeatLapsed = "heartbeat-lapsed"
-	// EvidenceHeartbeating: the descriptor is present, un-expired and not STOPPED.
+	// EvidenceNonExpiring: the descriptor is present and not STOPPED, but its TTL
+	// disables expiry. This observes a declaration, not a recent heartbeat.
+	// Class: peer-live (unchanged conservative admission).
+	EvidenceNonExpiring = "non-expiring-descriptor"
+	// EvidenceHeartbeating: the descriptor has a positive TTL, is un-expired and not STOPPED.
 	// Class: peer-live.
 	EvidenceHeartbeating = "heartbeating"
 )
@@ -111,6 +115,7 @@ var evidenceKinds = []string{
 	EvidenceNoDescriptor,
 	EvidenceTerminalStopped,
 	EvidenceHeartbeatLapsed,
+	EvidenceNonExpiring,
 	EvidenceHeartbeating,
 }
 
@@ -131,10 +136,11 @@ var livenessClasses = []string{
 //
 // Note what this does NOT mean: a positive kind is not a claim the verdict is actionable
 // (EvidenceHeartbeating is positive and never reclaimable). It means the verdict was
-// derived from a signal that was present.
+// derived from a signal that was present. EvidenceNonExpiring observes a descriptor,
+// not freshness; positive evidence and coverage are not recent-heartbeat claims.
 func EvidenceIsPositive(kind string) bool {
 	switch kind {
-	case EvidenceSelfSession, EvidenceTerminalStopped, EvidenceHeartbeatLapsed, EvidenceHeartbeating:
+	case EvidenceSelfSession, EvidenceTerminalStopped, EvidenceHeartbeatLapsed, EvidenceNonExpiring, EvidenceHeartbeating:
 		return true
 	case EvidenceNoBinding, EvidenceNoDescriptor:
 		return false
@@ -164,9 +170,8 @@ type ClassifiedLease struct {
 	Reclaimable bool   `json:"reclaimable"`
 	Evidence    string `json:"evidence"`
 	// EvidenceKind is the machine-routable companion to Evidence: which comparison
-	// decided (the closed Evidence* vocabulary). Strictly additive — `liveness`,
-	// `reclaimable` and the sentences are byte-identical to before it existed, so a
-	// consumer routing on today's contract is untouched.
+	// decided (the closed Evidence* vocabulary). Diagnostic kinds do not change
+	// `liveness` or `reclaimable`; consumers must not infer freshness from peer-live.
 	EvidenceKind string `json:"evidence_kind"`
 }
 
@@ -180,8 +185,8 @@ type ClassifiedLease struct {
 // The kind is a third RESULT rather than a wrapper or a struct (the shape #5484 left
 // open) so there stays exactly one place a branch's verdict is stated: a parallel
 // classifier would be a second rule free to drift from this one, which is precisely the
-// hazard CascadeDrop already routes through here to avoid. class and evidence keep their
-// old values byte for byte; only the arity changed.
+// hazard CascadeDrop already routes through here to avoid. Diagnostic distinctions
+// preserve the class and reclaimability contract.
 func ClassifyLiveness(rec Record, sessions map[string]SessionDescriptor, selfSession string, now time.Time) (class, kind, evidence string) {
 	if rec.SessionID == "" {
 		return LivenessPeerUnknown, EvidenceNoBinding,
@@ -205,6 +210,11 @@ func ClassifyLiveness(rec Record, sessions map[string]SessionDescriptor, selfSes
 		return LivenessPeerDead, EvidenceHeartbeatLapsed, fmt.Sprintf(
 			"owning session %s stopped heartbeating: now_unix=%d >= updated_at_unix=%d + ttl_seconds=%d — positively dead, reclaimable",
 			rec.SessionID, now.Unix(), d.UpdatedAt, d.TTLSecs)
+	}
+	if d.TTLSecs <= 0 {
+		return LivenessPeerLive, EvidenceNonExpiring, fmt.Sprintf(
+			"owning session %s has a non-expiring descriptor (pcb_state=%s, updated_at_unix=%d, ttl_seconds=%d); recent heartbeat not established — never reclaimable",
+			rec.SessionID, d.PCBState, d.UpdatedAt, d.TTLSecs)
 	}
 	return LivenessPeerLive, EvidenceHeartbeating, fmt.Sprintf(
 		"owning session %s is heartbeating (pcb_state=%s, updated_at_unix=%d, ttl_seconds=%d) — never reclaimable",

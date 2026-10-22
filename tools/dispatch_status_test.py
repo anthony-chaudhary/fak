@@ -1310,6 +1310,36 @@ class LeaseStateTest(unittest.TestCase):
         self.assertEqual(by_id["resolve-gateway"]["liveness"], "peer-unknown")
         self.assertFalse(by_id["resolve-gateway"]["reclaimable"])
 
+    def test_non_expiring_descriptor_does_not_claim_heartbeat(self) -> None:
+        mod = load()
+        now = 3_000_000
+        updated = now - 30 * 24 * 60 * 60
+        for ttl in (0, -1):
+            for pcb_state in ("RUNNING", "STOPPED"):
+                with self.subTest(ttl=ttl, pcb_state=pcb_state):
+                    state = mod.summarize_leases([{
+                        "id": "resolve-tools-1762", "session_id": "s-peer",
+                        "tree_globs": ["tools/**"],
+                        "acquired_unix": now - 1, "ttl_seconds": 3_600,
+                    }], self._backlog(), sessions={
+                        "s-peer": {"pcb_state": pcb_state,
+                                   "updated_at": updated, "ttl_seconds": ttl},
+                    }, now_ts=now)
+                    row = state["active"][0]
+                    stopped = pcb_state == "STOPPED"
+                    self.assertEqual(row["liveness"], "peer-dead" if stopped else "peer-live")
+                    self.assertEqual(row["reclaimable"], stopped)
+                    self.assertTrue(row["blocks_candidate"])
+                    self.assertEqual(state["blocking_stranded_count"], int(stopped))
+                    self.assertEqual(state["blocking_live_count"], int(not stopped))
+                    if stopped:
+                        self.assertIn("published STOPPED", row["liveness_evidence"])
+                    else:
+                        self.assertEqual(row["liveness_evidence"],
+                            "owning session s-peer has a non-expiring descriptor "
+                            f"(pcb_state=RUNNING, updated_at_unix={updated}, ttl_seconds={ttl}); "
+                            "recent heartbeat not established — never reclaimable")
+
     def test_summarize_leases_counts_stranded_vs_live_blocking(self) -> None:
         # #4324: LANE_LEASE_HELD refusals against a dead holder ("phantom"
         # collisions) must be countable separately from refusals against a

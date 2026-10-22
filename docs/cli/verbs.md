@@ -155,7 +155,7 @@ fak blockers feed --issues FILE [--source-status FILE] [--label blocked --repo-u
 fak chatrelay --endpoint URL --channel C0X [--model M --mention <@U> --system S --prime=false --once --interval 3s --dry-run]   # bridge ONE Slack channel to a `fak serve` /v1/chat/completions endpoint: poll history, forward each human message, post the reply in-thread. Generic chatbot front end — no shell, no command router; channel text is chatbot input, never a command. FAK_CHATRELAY_* (token falls back to the scoreboard token; channel has NO fallback). See docs/fak/slack-sessions.md
 fak chatops   --channel C0X --admins U07A,U07B [--bot-user <@U07BOT> --audit FILE --prime=false --once --interval 3s --dry-run]   # inbound read-only control door: poll ONE control channel, parse each admin mention as ONE verb from a closed grammar (help/ping/status/fleet answer; dispatch/resume/halt are declined until the guarded act path lands). Fail-closed admin allowlist on the immutable user id; refuses to start with no admins; every decision journaled to --audit. FAK_CHATOPS_* (token falls back to the scoreboard token; channel/admins have NO fallback). See docs/fak/slack-sessions.md
 fak fleet control send --op OP [--payload|--text TEXT] (--all | --instance I,I | --machine M | --role R) [--lane L --wave W --label X] [--ttl 5m] [--wait 10s] [--reason R] [--bus DIR] [--json] | status --directive ID | instances [--ttl D]   # the centralized control point (#5600): fan ONE op to every announced fleet instance over a shared bus directory (`fak serve --fleet-bus` arms an instance), then fold the ACKS back — `send` exits 0 only when every addressed instance witnessed the apply, 1 when it published but nobody has answered (including `--wait 0`), and 2 when the selector addresses nobody (`FLEETBUS_NO_TARGET`) rather than accepting a directive that can never apply. Instance axes (`--all`/`--instance`/`--machine`/`--role`) pick WHICH processes; session axes (`--lane`/`--wave`/`--label`) narrow WITHIN each one. An instance that matched nothing acks REFUSED, never a hollow "applied". The selectors pick which INSTANCES and which sessions within them, but the set an instance can write at all is its own `fak serve --session-registry` scope — neither `--bus` here nor `--fleet-bus-dir` there narrows it (#5825), so `--all` against the default shared per-user registry reaches every session on each addressed host, including peers'
-fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | session-publish --session S [--ttl SEC] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR] | sync [--remote R] [--push-only|--fetch-only] [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's heartbeat (#2164); `session-publish` refreshes that heartbeat as a side ref; `audit` is the read-only staleness report; `sync` converges the namespace with a remote (push-then-fetch, side refs only)
+fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | session-publish --session S [--ttl SEC] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR] | sync [--remote R] [--push-only|--fetch-only] [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's descriptor (#2164); `session-publish` refreshes that descriptor as a side ref; `audit` is the read-only staleness report; `sync` converges the namespace with a remote (push-then-fetch, side refs only)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak manage decision journal's hash chain, or export it
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
@@ -297,7 +297,7 @@ dos arbitrate --lane docs --tree 'docs/**' --leases "$(fak leaseref live)"
 
 fak leaseref sync --fetch-only --remote origin   # import peers' leases without publishing (the old manual `git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'`)
 fak leaseref list           # every record under refs/fak/locks/*, marked LIVE / EXPIRED
-fak leaseref liveness --session $ME   # classify each LIVE lease self|peer-live|peer-dead|peer-unknown by session heartbeat (#2164)
+fak leaseref liveness --session $ME   # classify each LIVE lease self|peer-live|peer-dead|peer-unknown by session descriptor (#2164)
 fak leaseref session-publish --session $ME --ttl 2400   # publish/refresh refs/fak/locks/session-$ME, a side-ref heartbeat used by liveness
 fak leaseref audit          # READ-ONLY staleness report (control-pane envelope); reaps nothing
 fak leaseref reap           # delete the expired (reapable) records — a crashed holder is bounded
@@ -358,17 +358,23 @@ arbitrate a same-fetch-window race; a signature envelope over the record is
 deferred follow-up. Exits `0` ok, `2` on a usage/parse error, `1` on a git/store
 failure.
 
-`liveness` (#2164) answers the question a lease's pid cannot: **is the lane's
-owner actually alive?** A record's pid names the *acquiring* process, which dies
+`liveness` (#2164) answers the question a lease's pid cannot: **what evidence
+supports the lane owner's liveness?** A record's pid names the *acquiring* process, which dies
 almost immediately, so a dead pid never means a free lane. Instead, a lease
 acquired with `--session S` is bound to the guard-session descriptor at
 `refs/fak/locks/session-<S>` — the ref a live session *heartbeats* on every PCB
 transition — and `liveness` classifies each live lease `self` (yours),
-`peer-live` (heartbeating — never steal it), `peer-dead` (heartbeat lapsed or
-terminal `STOPPED` — the only *reclaimable* class), or `peer-unknown` (no
+`peer-live` (descriptor present, non-expired and not `STOPPED` — never steal it),
+`peer-dead` (heartbeat lapsed or terminal `STOPPED` — the only *reclaimable* class), or `peer-unknown` (no
 binding / no descriptor — publishing is best-effort, so absence is not death;
 fails closed to not-reclaimable). Each row carries the `evidence` comparison
-that decided it. Reclaiming still goes through the fenced `acquire` — this view
+and machine-routable `evidence_kind` that decided it. For peers, a descriptor
+with `ttl_seconds <= 0` yields `non-expiring-descriptor`, not `heartbeating`:
+recent heartbeat is not established, but the lease remains `peer-live` and
+non-reclaimable. Terminal `STOPPED` takes precedence even for a non-expiring
+descriptor. `heartbeating` requires a positive, unexpired TTL. Positive evidence
+and coverage measure observed signals, not necessarily heartbeat freshness.
+Reclaiming still goes through the fenced `acquire` — this view
 only tells an agent which refusals are worth contesting.
 
 ### Exact-model rollout gate: `fak model canary-gate`

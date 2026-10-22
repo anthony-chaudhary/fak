@@ -220,9 +220,11 @@ paths:
       description: |
         The LEGACY OpenAI text-completion wire — the pre-chat surface vLLM, SGLang,
         and llama.cpp-server all still serve, for older clients and eval/embedding
-        harnesses. The request `prompt` (a bare string or an array of strings, joined
-        with newlines) is wrapped as a single user turn and run through the same
-        served completion path as the chat route. There are no tools on this wire, so
+        harnesses. The request `prompt` (a bare string or a one-element array of
+        strings) is wrapped as a single user turn and run through the same served
+        completion path as the chat route. An array of two or more prompts is an
+        OpenAI batch, which this route refuses with a 400 whose `error.code` is
+        `prompt_batch_unsupported`. There are no tools on this wire, so
         there is no tool-call adjudication. With `stream: true` a synthetic SSE stream
         of `text` fragments is emitted after the full turn completes.
       parameters:
@@ -499,13 +501,17 @@ paths:
       tags: [fak-native]
       summary: Cross-machine session presence and lease liveness
       description: |
-        The presence half of the dev-server read plane: the live (heartbeating)
+        The presence half of the dev-server read plane: the non-expired
         guard-session descriptors under `refs/fak/locks/session-*`, plus every
         live lock lease classified by its owning session's liveness
         (`self | peer-live | peer-dead | peer-unknown`; classification here is
         from an anonymous reader, so nothing classifies `self`). `reclaimable`
         is true only on `peer-dead` — a positively dead owner; absence of
-        evidence fails closed. Distinct from `/v1/fak/sessions`, the
+        evidence fails closed. A non-expiring descriptor (`ttl_seconds <= 0`)
+        yields `peer-live` with `evidence_kind: non-expiring-descriptor`, not a
+        recent-heartbeat claim; it remains non-reclaimable. Terminal `STOPPED`
+        takes precedence and yields `peer-dead` even with a non-expiring TTL.
+        Distinct from `/v1/fak/sessions`, the
         served-session DRIVE-state snapshot. Values are OBSERVED from the
         coordinator's own clone; 404 when the host CLI did not wire the
         provider.
@@ -3751,7 +3757,7 @@ components:
               host: { type: string, description: The node the session is live on. }
               pcb_state: { type: string, description: RUNNING/THROTTLED/PAUSED/DRAINING/STOPPED. }
               updated_at: { type: integer, description: Unix seconds of the last publish (the heartbeat clock). }
-              ttl_seconds: { type: integer, description: Descriptor lifetime; 0 never expires. }
+              ttl_seconds: { type: integer, description: Descriptor lifetime; values <= 0 never expire. }
         classified_leases:
           type: array
           description: Every live lock lease tagged with its session-liveness class. Empty view is `[]`.
@@ -3766,6 +3772,15 @@ components:
               liveness: { type: string, description: self | peer-live | peer-dead | peer-unknown. }
               reclaimable: { type: boolean, description: True only on peer-dead (a positively dead owner); everything else fails closed. }
               evidence: { type: string, description: The comparison that decided the class. }
+              evidence_kind:
+                type: string
+                enum: [no-session-binding, self-session, no-descriptor, terminal-stopped, heartbeat-lapsed, non-expiring-descriptor, heartbeating]
+                description: |
+                  The signal that decided the class. For peers, terminal-stopped
+                  takes precedence over TTL. non-expiring-descriptor observes a
+                  descriptor with ttl_seconds <= 0, not a recent heartbeat;
+                  heartbeating requires a positive, unexpired TTL. Both remain
+                  peer-live and non-reclaimable.
 
     LeaseWriteResult:
       type: object
@@ -3950,7 +3965,7 @@ components:
       properties:
         model: { type: string, description: Echoed back; the served model is fixed at boot. }
         prompt:
-          description: A bare string OR an array of strings (joined with newlines into one prompt).
+          description: A bare string OR a one-element array of strings. An array of two or more prompts (a batch) is refused with 400 `prompt_batch_unsupported`.
         max_tokens: { type: integer, description: Forwarded to the model. Omit for the planner default. }
         temperature: { type: number, format: float }
         top_p: { type: number, format: float }
