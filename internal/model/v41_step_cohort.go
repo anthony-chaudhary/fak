@@ -17,6 +17,7 @@ type v41StepCohortLane struct {
 	session *Session
 	id      int
 	ctx     context.Context
+	round   *v41StepRound // Optional exact retained journal; ordinary callers leave nil.
 }
 
 type v41StepCohortResult struct {
@@ -174,7 +175,11 @@ func (m *Model) forwardV41StepCohortOwned(scope *backendExecutionScope, lanes []
 				if cancelled(lane) {
 					continue
 				}
-				txs[lane], err = m.beginV41StepAdmitted(input.id, input.session.v41State(), &scratch[lane])
+				if input.round != nil {
+					txs[lane], err = input.round.beginStep(input.id, &scratch[lane])
+				} else {
+					txs[lane], err = m.beginV41StepAdmitted(input.id, input.session.v41State(), &scratch[lane])
+				}
 				if err != nil {
 					results[lane].err = err
 					return err
@@ -228,8 +233,14 @@ func (m *Model) forwardV41StepCohortOwned(scope *backendExecutionScope, lanes []
 // states are supported; rejecting shared state objects catches an accidental
 // shallow lane clone before any ring or source publication is touched.
 func (m *Model) v41StepCohortAdmit(lanes []v41StepCohortLane) error {
+	return m.v41StepCohortAdmitSize(lanes, 2)
+}
+
+// A retained batch may have a singleton tail wave. Ordinary cohort entry still
+// requires two lanes; the same identity, cursor and journal checks apply here.
+func (m *Model) v41StepCohortAdmitSize(lanes []v41StepCohortLane, minimum int) error {
 	decline := func(reason string) error { return fmt.Errorf("%w: %s", errV41StepCohortDeclined, reason) }
-	if m == nil || len(lanes) < 2 || !m.Cfg.IsDeepSeekV41() {
+	if m == nil || len(lanes) < minimum || !m.Cfg.IsDeepSeekV41() {
 		return decline("need at least two V4.1 sessions")
 	}
 	if m.v41EPRequested() || m.EPDecodeCoordinated() {
@@ -263,6 +274,14 @@ func (m *Model) v41StepCohortAdmit(lanes []v41StepCohortLane) error {
 			return decline("invalid token or unseeded incremental state")
 		}
 		st := s.v41Forward
+		if r := lane.round; r != nil {
+			if r.model != m || r.state != st || st.callbackOwner != s || !r.ownsState() || r.failed || r.poisoned ||
+				r.pending != nil || len(r.entries) >= r.capacity || !r.atCommittedBoundary() {
+				return decline("retained round identity or boundary differs")
+			}
+		} else if st.activeStepRound != nil {
+			return decline("active retained round requires explicit association")
+		}
 		if seenStates[st] {
 			return decline("lanes share a continuation state")
 		}
