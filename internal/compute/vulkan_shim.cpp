@@ -380,7 +380,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -406,6 +406,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL: case K_V41_SHARED_ATTENTION: case K_V41_SHARED_ATTENTION_FAST: case K_V41_INDEXER_SCORE:
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS: case K_V41_ROUTER_TOPK: case K_V41_INDEX_SELECT:
+    case K_V41_ROUTER_GATE_TOPK:
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
@@ -492,6 +493,12 @@ int g_v41SharedAttentionClass = 0;
 // Optional: the router module is not in the trusted shader registry yet, so it
 // is published only when its module is present and its ABI matches.
 int g_have_v41_router_topk = 0;
+// Optional fused router gate projection + top-k. The device verdict is the
+// Go self-check result against matmul + router top-k on this device:
+// 0 unknown, 1 bit-identical, 2 disagreed. Reset with the device.
+int g_have_v41_router_gate_topk = 0;
+int g_v41RouterGateVerdict = 0;
+bool g_v41RouterGateSubgroups = false;
 // Independently admitted only after dynamic binary32 properties and module proof.
 int g_have_v41_indexer_score = 0;
 int g_have_v41_mhc = 0;
@@ -1631,6 +1638,7 @@ const char* const kKernelNames[] = {
     "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk", "v41_q2k_token_pair",
     "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k", "v41_f32_finite",
     "qwen35_value_head_tile",
+    "v41_router_gate_topk",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -4177,6 +4185,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_v41_shared_attention_fast = 0;
     g_v41SharedAttentionClass = 0;
     g_have_v41_router_topk = 0;
+    g_have_v41_router_gate_topk = 0;
+    g_v41RouterGateVerdict = 0;
     g_have_v41_indexer_score = 0;
     g_have_v41_mhc = 0;
     g_have_v41_index_select = 0;
@@ -4367,6 +4377,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         g_have_glm_kda_wave32 && haveSubgroupBasic && haveSubgroupArithmetic && haveSubgroupShuffle &&
         (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT) != 0 &&
         limits.maxComputeSharedMemorySize >= 8192 * 4 + 64;
+    g_v41RouterGateSubgroups = haveSubgroupBasic && haveSubgroupArithmetic;
     g_gdn_prefill_max_groups_y = limits.maxComputeWorkGroupCount[1];
     g_have_gdn_prefill_tiled =
         (haveSubgroupBasic && haveSubgroupShuffle && (effectiveSubgroup32 || requiredSubgroup32) &&
@@ -4506,6 +4517,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     const bool v41RouterModulePresent = v41RouterProbe != nullptr;
     if (v41RouterProbe) fclose(v41RouterProbe);
     const bool v41RouterPipelineBuilt = v41RouterModulePresent && buildKernel(g_kern[K_V41_ROUTER_TOPK], v41RouterModule, 5, 24);
+    const std::string v41RouterGateModule = P("v41_router_gate_topk.spv");
+    FILE* v41RouterGateProbe = fopen(v41RouterGateModule.c_str(), "rb");
+    const bool v41RouterGateModulePresent = v41RouterGateProbe != nullptr;
+    if (v41RouterGateProbe) fclose(v41RouterGateProbe);
+    const bool v41RouterGatePipelineBuilt = g_v41RouterGateSubgroups && v41RouterGateModulePresent &&
+        buildKernel(g_kern[K_V41_ROUTER_GATE_TOPK], v41RouterGateModule, 7, 24);
     // This registration is coupled to the separately versioned V5/complete62
     // receipt migration. The frozen V4/complete61 identity is not extended.
     if (g_v41IndexerFloatControls) {
@@ -4750,6 +4767,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         g_v41SharedAttentionClass = (std::strcmp(cls, "run-to-run") == 0 && g_have_v41_shared_attention_fast) ? 1 : 0;
     }
     g_have_v41_router_topk = v41RouterPipelineBuilt ? 1 : 0;
+    g_have_v41_router_gate_topk = v41RouterGatePipelineBuilt ? 1 : 0;
     g_have_v41_indexer_score = v41IndexerPipelineBuilt ? 1 : 0;
     g_have_v41_mhc = v41MHCPipelineBuilt ? 1 : 0;
     g_have_v41_index_select = v41IndexSelectBuilt ? 1 : 0;
@@ -6843,6 +6861,62 @@ int fvk_v41_router_topk_f32(const void* dLogits, const void* dBias,
     // One 64-lane workgroup per row; lane 0 alone writes status and picks,
     // after an exact-compare merge, so there is no atomic winner race.
     if (!dispatch(g_kern[K_V41_ROUTER_TOPK], bufs, &pc, sizeof(pc), uint32_t(rows))) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
+int fvk_have_v41_router_gate_topk(void) {
+    return g_ready && g_have_v41_router_gate_topk && g_kern[K_V41_ROUTER_GATE_TOPK].pipe != VK_NULL_HANDLE;
+}
+
+int fvk_v41_router_gate_verdict(void) { return g_v41RouterGateVerdict; }
+
+void fvk_v41_router_gate_set_verdict(int verdict) {
+    if (verdict == 1 || verdict == 2) g_v41RouterGateVerdict = verdict;
+}
+
+int fvk_v41_router_gate_topk_f32(const void* dWeight, const void* dInput, const void* dBias,
+                                 void* dLogits, void* dExperts, void* dWeights, void* dStatus,
+                                 int experts, int hidden, int topK,
+                                 int full, int hasBias, float routeScale) {
+    if (!g_ready) return 1;
+    if (!fvk_have_v41_router_gate_topk()) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (experts <= 0 || experts > 1024 || hidden <= 0 || hidden > 65536 ||
+        topK <= 0 || topK > experts || topK > 8 ||
+        (full != 0 && full != 1) || (hasBias != 0 && hasBias != 1) ||
+        !std::isfinite(routeScale) || !(routeScale > 0.0f)) return 2;
+    const uint64_t chunks = (uint64_t(hidden) + 1023u) / 1024u;
+    const uint64_t perGroup = 64u / chunks;
+    const uint64_t groups = (uint64_t(experts) + perGroup - 1u) / perGroup;
+    const uint64_t weightCount = uint64_t(experts) * uint64_t(hidden);
+    if (weightCount > INT32_MAX || groups == 0 || groups > g_maxComputeWorkGroupCountX) return 2;
+    Buffer* bufs[7] = {B(dWeight), B(dInput), B(dBias), B(dLogits), B(dExperts), B(dWeights), B(dStatus)};
+    const uint64_t counts[7] = {weightCount, uint64_t(hidden), hasBias ? uint64_t(experts) : 1u,
+                                uint64_t(experts), uint64_t(topK), uint64_t(topK), 4u};
+    for (int i = 0; i < 7; ++i) {
+        // Read-only operands may sit in larger storage; outputs are exact.
+        if (!bufs[i] || bufs[i]->buf == VK_NULL_HANDLE || bufs[i]->mem == VK_NULL_HANDLE ||
+            (i < 3 ? counts[i] * sizeof(uint32_t) > bufs[i]->bytes : counts[i] * sizeof(uint32_t) != bufs[i]->bytes) ||
+            bufs[i]->bytes > std::numeric_limits<VkDeviceSize>::max() - bufs[i]->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int out = 3; out <= 6; ++out) {
+        for (int i = 0; i < 7; ++i) if (i != out && aliases(bufs[out], bufs[i])) return 2;
+    }
+    struct Push {
+        int32_t experts, hidden, topK, full, hasBias;
+        float routeScale;
+    } pc{experts, hidden, topK, full, hasBias, routeScale};
+    static_assert(sizeof(int) == 4 && sizeof(float) == 4 && sizeof(Push) == 24,
+                  "V4.1 router gate push ABI must be five int32 values and one float32");
+    if (!dispatch(g_kern[K_V41_ROUTER_GATE_TOPK], bufs, &pc, sizeof(pc), uint32_t(groups), 1, true)) {
         return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
     }
     return (int)g_submissionStatus;

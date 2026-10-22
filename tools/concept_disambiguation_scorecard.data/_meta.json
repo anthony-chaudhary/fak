@@ -4653,6 +4653,26 @@
           "category": "incidental",
           "reason": "Read-only Boolean metadata copied from the existing Vulkan memory guard into a validated diagnostic snapshot; it does not create, disable or replace a guard or authorize allocation.",
           "token": "guard_accounting_valid"
+        },
+        {
+          "category": "incidental",
+          "reason": "MoE router gate projection fused with expert top-k in the V4.1 Vulkan backend, not a guard, policy or admission gate.",
+          "token": "v41routergatetopk"
+        },
+        {
+          "category": "incidental",
+          "reason": "MoE router gate projection fused with expert top-k in the V4.1 Vulkan backend, not a guard, policy or admission gate.",
+          "token": "v41routergatetopkavailable"
+        },
+        {
+          "category": "incidental",
+          "reason": "MoE router gate projection fused with expert top-k in the V4.1 Vulkan backend, not a guard, policy or admission gate.",
+          "token": "v41routergatetopkbackend"
+        },
+        {
+          "category": "incidental",
+          "reason": "MoE router gate bias tensor in V4.1 routing, not a guard or admission gate.",
+          "token": "gatebias"
         }
       ],
       "exclude": [
@@ -4846,6 +4866,7 @@
         "gate_sigmoid",
         "gate_test",
         "gate_verbtier",
+        "gatebias",
         "gated",
         "gatedReq",
         "gatedly",
@@ -5164,6 +5185,9 @@
         "v41EPGuard",
         "v41EPOwnerGuardBinarySHA256",
         "v41UsesGatedCompressor",
+        "v41routergatetopk",
+        "v41routergatetopkavailable",
+        "v41routergatetopkbackend",
         "validateGuardBudgetFlags",
         "verifyGateCheckout",
         "wgate",

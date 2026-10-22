@@ -265,5 +265,28 @@ func (m *Model) Qwen35MTPMode(disabled bool) (Qwen35MTPMode, error) {
 	if m == nil {
 		return Qwen35MTPMode{Engine: qwen35MTPEngine, Reason: "nil-model"}, nil
 	}
-	return qwen35MTPAdmission(m.Cfg, m.manifest, disabled)
+	return qwen35MTPAdmission(m.Cfg, m.qwen35MTPAdmissionManifest(), disabled)
+}
+
+// qwen35MTPAdmissionManifest is the tensor view admission reads. The resident
+// Q4_K loader keeps the retained head's matrices in the quant stores and only
+// its F32 norms in the manifest, so a head whose exact resident layout validates
+// counts its matrices as present.
+func (m *Model) qwen35MTPAdmissionManifest() map[string]tensorMeta {
+	layout, present, err := m.qwen38MTPTensorLayout()
+	if !present || err != nil || layout.Format != Qwen38MTPFormatQ4K {
+		return m.manifest
+	}
+	man := make(map[string]tensorMeta, len(qwen35MTPRequiredTensors))
+	for name, meta := range m.manifest {
+		if strings.HasPrefix(name, "mtp.") {
+			man[name] = meta
+		}
+	}
+	for _, name := range qwen38MTPMatrixTensors {
+		if _, ok := man[name]; !ok {
+			man[name] = tensorMeta{}
+		}
+	}
+	return man
 }

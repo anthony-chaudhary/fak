@@ -1,0 +1,21 @@
+DeepInfer scheduler capacity contracts
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer, deepinfer/config.py lines 68-71 and 146-147
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/config.py#L68-L71
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/config.py#L146-L147
+Lesson (unmerged upstream changes): https://github.com/deepseek-ai/DeepInfer/pull/79,
+https://github.com/deepseek-ai/DeepInfer/pull/118, https://github.com/deepseek-ai/DeepInfer/pull/55
+
+Native KV capacity env: no upstream code is copied or adapted. Upstream
+validates scheduler capacity configuration at construction and raises on an
+out-of-range value; the listed pull requests extend that to non-positive
+capacities. Fak keeps its documented ignore-and-fall-back policy for a
+malformed FAK_NATIVE_KV_MAX_BLOCKS or FAK_NATIVE_KV_BLOCK_TOKENS (preemption
+stays off, blocks stay 16 tokens) and now reports each ignored value, with the
+fallback it took, as a typed error, a one-line [fak] stderr notice when the
+native scheduler is built, and a native-kv-env warning in the fak serve startup
+messages, so an operator's intended setting is no longer replaced silently.

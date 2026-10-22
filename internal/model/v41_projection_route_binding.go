@@ -323,6 +323,9 @@ func (m *Model) v41RouterPicksForStep(layer int, input []float32, hidden int, cf
 		return s.M == m && s.Backend == backend && s.v41Forward == state && state.projectionRoute == b && state.callbackOwner == s &&
 			s.cacheGeometryEpoch == epoch && s.backendExecutionScope == scope && scope.live && m.lora == nil && m.prism == nil
 	}
+	if fused, handled, err := m.v41RouterPicksFused(s, layer, input, hidden, cfg, full, bias, valid); handled {
+		return fused, err
+	}
 	var picks []routePick
 	c := &v41ProjectionContinuation{valid: valid}
 	c.consume = func(t compute.Tensor, loan *v41ProjectionLoan) {

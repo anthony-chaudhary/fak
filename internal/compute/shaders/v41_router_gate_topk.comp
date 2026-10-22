@@ -1,0 +1,289 @@
+#version 450
+#extension GL_EXT_control_flow_attributes : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+layout(local_size_x = 64) in;
+
+// V4.1 MoE router gate projection fused ahead of the top-k, one token row.
+// Adapted from DeepGEMM sm100_bf16_mega_gate and TileKernels
+// moe_topk_gate_forward (MIT); see THIRD_PARTY_NOTICES.md.
+//
+// Projection: each lane owns one 1024-wide chunk of one logit and runs
+// matmul.comp's decode chunk sum verbatim (sixteen loads, then in-order
+// acc += w * x), and the chunk-0 lane adds the partials onto 0.0 in chunk
+// order, so the logits are bit-identical to MatMul's one-token F32 path.
+// Routing: the last workgroup to publish its logits routes the row with
+// v41_router_topk.comp's arithmetic. Status word 3 is the arrival counter,
+// seeded to UINT32_MAX with word 0 by the host, so a route that never runs
+// reads back as a malformed record instead of stale picks.
+layout(std430, binding = 0) readonly buffer WeightBuf { float W[]; };
+layout(std430, binding = 1) readonly buffer InputBuf { float X[]; };
+layout(std430, binding = 2) readonly buffer BiasBuf { float Bias[]; };
+layout(std430, binding = 3) coherent writeonly buffer LogitBuf { float Logits[]; };
+// The router reads the logits through this alias of binding 3, so glslang's
+// precise propagation from the scoring arithmetic cannot reach back through
+// the Logits stores and forbid contraction in the projection sum.
+layout(std430, binding = 3) coherent readonly buffer LogitInBuf { float LogitsIn[]; };
+layout(std430, binding = 4) writeonly buffer ExpertBuf { uint Experts[]; };
+layout(std430, binding = 5) writeonly buffer WeightOutBuf { float Weights[]; };
+layout(std430, binding = 6) coherent buffer StatusBuf { uint Status[]; };
+
+layout(push_constant) uniform Push {
+    int experts;
+    int hidden;
+    int topK;
+    int full;
+    int hasBias;
+    float routeScale;
+} pc;
+
+const uint LANES = 64u;
+const uint SHARED_CAP = 1024u;
+const int MAX_K = 8;
+const int MAX_E = 1024;
+const uint PRELOAD = uint(MAX_E) / LANES;
+const int NO_FAULT = 0x7fffffff;
+
+shared float Part[LANES];
+shared uint sLast;
+shared float sSelect[MAX_E];
+shared float sScoreOf[MAX_E];
+shared int sFaultExpert[LANES];
+shared uint sKey[LANES];
+shared int sExpert[LANES];
+shared int sPick[MAX_K];
+shared float sPickScore[MAX_K];
+
+bool finiteValue(float x) {
+    return !isnan(x) && !isinf(x);
+}
+
+void fault(uint stage, int expert, float value) {
+    Status[0] = stage;
+    Status[1] = uint(expert + 1);
+    Status[2] = floatBitsToUint(value);
+    Status[3] = 0u;
+}
+
+// log1p(e) for e in [0,1]: log(u) * e / (u - 1) cancels the rounding of u = 1 + e.
+float log1pUnit(float e) {
+    precise float u = 1.0 + e;
+    if (u == 1.0) return e;
+    precise float l = log(u);
+    precise float ratio = e / (u - 1.0);
+    precise float r = l * ratio;
+    return r;
+}
+
+float routerScore(float z) {
+    // Below -20, log1p(e^z) = e^z to F32 precision; sqrt(e^z) = e^(z/2) avoids
+    // underflowing e^z before the root.
+    if (z < -20.0) {
+        precise float h = 0.5 * z;
+        precise float r = exp(h);
+        return r;
+    }
+    precise float a = abs(z);
+    precise float e = exp(-a);
+    precise float sp = max(z, 0.0) + log1pUnit(e);
+    precise float s = sqrt(sp);
+    return s;
+}
+
+// Selection order is v41_router_topk.comp's ranksBefore: larger value first,
+// lower expert first on equal values. The unsigned order key of a finite
+// value keeps that order: a > b exactly when orderKey(a) > orderKey(b), and
+// both zeros share one key.
+uint orderKey(float value) {
+    uint bits = value == 0.0 ? 0u : floatBitsToUint(value);
+    return (bits & 0x80000000u) != 0u ? ~bits : bits | 0x80000000u;
+}
+
+void route(uint lane) {
+    // Stage every owned logit and bias into the slots this lane later fills
+    // with its selection values and scores. The clamped loads are
+    // unconditional, so they all issue before the first use instead of one
+    // memory round trip per expert.
+    float zv[PRELOAD];
+    float bv[PRELOAD];
+    [[unroll]] for (uint j = 0u; j < PRELOAD; ++j) {
+        uint e = min(lane + j * LANES, uint(pc.experts) - 1u);
+        zv[j] = LogitsIn[e];
+        bv[j] = Bias[pc.hasBias != 0 ? e : 0u];
+    }
+    [[unroll]] for (uint j = 0u; j < PRELOAD; ++j) {
+        uint e = lane + j * LANES;
+        if (e < uint(pc.experts)) {
+            sSelect[e] = zv[j];
+            sScoreOf[e] = bv[j];
+        }
+    }
+
+    int faultExpert = NO_FAULT;
+    uint faultStage = 0u;
+    float faultValue = 0.0;
+    // Host order per expert: logit, score, bias, then selection score. A lane
+    // walks its experts ascending, so its first fault is its lowest one.
+    for (int e = int(lane); e < pc.experts; e += int(LANES)) {
+        float z = sSelect[e];
+        if (!finiteValue(z)) { faultExpert = e; faultStage = 1u; faultValue = z; break; }
+        precise float s = routerScore(z);
+        if (!finiteValue(s)) { faultExpert = e; faultStage = 2u; faultValue = s; break; }
+        precise float c = s;
+        if (pc.hasBias != 0) {
+            float b = sScoreOf[e];
+            if (!finiteValue(b)) { faultExpert = e; faultStage = 3u; faultValue = b; break; }
+            c = s + b;
+            if (!finiteValue(c)) { faultExpert = e; faultStage = 4u; faultValue = c; break; }
+        }
+        sSelect[e] = c;
+        sScoreOf[e] = s;
+    }
+
+    // The row's first fault is the lowest faulting expert across all lanes.
+    // Each expert has one owner lane, so that lane alone publishes it.
+    int groupFault = subgroupMin(faultExpert);
+    if (subgroupElect()) sFaultExpert[gl_SubgroupID] = groupFault;
+    barrier();
+    int firstFault = sFaultExpert[0];
+    for (uint g = 1u; g < gl_NumSubgroups; ++g) firstFault = min(firstFault, sFaultExpert[g]);
+    if (firstFault != NO_FAULT) {
+        if (faultExpert == firstFault) fault(faultStage, faultExpert, faultValue);
+        return;
+    }
+
+    // Each round takes the best unpicked expert under the total order above,
+    // which reproduces the router's descending pick sequence. A lane holds its
+    // selection values in registers and its picks in one taken mask.
+    float cv[PRELOAD];
+    [[unroll]] for (uint j = 0u; j < PRELOAD; ++j) cv[j] = sSelect[min(lane + j * LANES, uint(pc.experts) - 1u)];
+    uint taken = 0u;
+    for (int round = 0; round < pc.topK; ++round) {
+        bool has = false;
+        float best = 0.0;
+        int bestExpert = NO_FAULT;
+        [[unroll]] for (uint j = 0u; j < PRELOAD; ++j) {
+            int e = int(lane + j * LANES);
+            // Ascending slots with strict > keep the lane's lower expert on ties.
+            if (e < pc.experts && (taken & (1u << j)) == 0u && (!has || cv[j] > best)) { has = true; best = cv[j]; bestExpert = e; }
+        }
+        // The largest key, then the lowest expert holding it, is the round's
+        // first pick. 0 sorts below every finite key and marks an empty lane.
+        uint key = has ? orderKey(best) : 0u;
+        uint topKey = subgroupMax(key);
+        int winner = subgroupMin(has && key == topKey ? bestExpert : NO_FAULT);
+        if (gl_NumSubgroups > 1u) {
+            if (subgroupElect()) {
+                sKey[gl_SubgroupID] = topKey;
+                sExpert[gl_SubgroupID] = winner;
+            }
+            barrier();
+            topKey = sKey[0];
+            winner = sExpert[0];
+            for (uint g = 1u; g < gl_NumSubgroups; ++g) {
+                if (sKey[g] > topKey || (sKey[g] == topKey && sExpert[g] < winner)) {
+                    topKey = sKey[g];
+                    winner = sExpert[g];
+                }
+            }
+            barrier();
+        }
+        if (uint(winner) % LANES == lane) taken |= 1u << (uint(winner) / LANES);
+        if (lane == 0u) {
+            sPick[round] = winner;
+            sPickScore[round] = sScoreOf[winner];
+        }
+    }
+    if (lane != 0u) return;
+
+    precise float sum = 0.0;
+    for (int slot = 0; slot < pc.topK; ++slot) {
+        precise float s = sPickScore[slot];
+        precise float next = sum + s;
+        sum = next;
+    }
+    if (!finiteValue(sum) || sum < 0.0 || (pc.full == 0 && sum == 0.0)) { fault(5u, -1, sum); return; }
+    precise float denominator = sum;
+    if (pc.full != 0) {
+        precise float d = sum + 1e-20;
+        denominator = d;
+    }
+    for (int slot = 0; slot < pc.topK; ++slot) {
+        precise float s = sPickScore[slot];
+        precise float q = s / denominator;
+        precise float w = q * pc.routeScale;
+        if (!finiteValue(w)) { fault(6u, sPick[slot], w); return; }
+        Experts[uint(slot)] = uint(sPick[slot]);
+        Weights[uint(slot)] = w;
+    }
+    Status[0] = 0u;
+    Status[1] = 0u;
+    Status[2] = 0u;
+    Status[3] = 0u;
+}
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.hidden);
+    uint out_ = uint(pc.experts);
+    uint chunks = (in_ + SHARED_CAP - 1u) / SHARED_CAP;
+    uint perGroup = LANES / chunks;
+    uint local = tid / chunks;
+    uint c = tid - local * chunks;
+    uint o = gl_WorkGroupID.x * perGroup + local;
+    bool live = local < perGroup && o < out_;
+    if (live) {
+        uint c0 = c * SHARED_CAP;
+        uint clen = min(SHARED_CAP, in_ - c0);
+        uint wbase = o * in_ + c0;
+        float acc = 0.0;
+        uint i = 0u;
+        // All sixteen loads issue before the in-order accumulation.
+        for (; i + 16u <= clen; i += 16u) {
+            float w0 = W[wbase + i + 0u], w1 = W[wbase + i + 1u], w2 = W[wbase + i + 2u], w3 = W[wbase + i + 3u];
+            float w4 = W[wbase + i + 4u], w5 = W[wbase + i + 5u], w6 = W[wbase + i + 6u], w7 = W[wbase + i + 7u];
+            float w8 = W[wbase + i + 8u], w9 = W[wbase + i + 9u], w10 = W[wbase + i + 10u], w11 = W[wbase + i + 11u];
+            float w12 = W[wbase + i + 12u], w13 = W[wbase + i + 13u], w14 = W[wbase + i + 14u], w15 = W[wbase + i + 15u];
+            float x0 = X[c0 + i + 0u], x1 = X[c0 + i + 1u], x2 = X[c0 + i + 2u], x3 = X[c0 + i + 3u];
+            float x4 = X[c0 + i + 4u], x5 = X[c0 + i + 5u], x6 = X[c0 + i + 6u], x7 = X[c0 + i + 7u];
+            float x8 = X[c0 + i + 8u], x9 = X[c0 + i + 9u], x10 = X[c0 + i + 10u], x11 = X[c0 + i + 11u];
+            float x12 = X[c0 + i + 12u], x13 = X[c0 + i + 13u], x14 = X[c0 + i + 14u], x15 = X[c0 + i + 15u];
+            acc += w0 * x0;
+            acc += w1 * x1;
+            acc += w2 * x2;
+            acc += w3 * x3;
+            acc += w4 * x4;
+            acc += w5 * x5;
+            acc += w6 * x6;
+            acc += w7 * x7;
+            acc += w8 * x8;
+            acc += w9 * x9;
+            acc += w10 * x10;
+            acc += w11 * x11;
+            acc += w12 * x12;
+            acc += w13 * x13;
+            acc += w14 * x14;
+            acc += w15 * x15;
+        }
+        for (; i < clen; ++i) acc += W[wbase + i] * X[c0 + i];
+        Part[tid] = acc;
+    }
+    barrier();
+    if (live && c == 0u) {
+        float y = 0.0;
+        for (uint k = 0u; k < chunks; ++k) y += Part[tid + k];
+        Logits[o] = y;
+    }
+    // Publish this group's logits, then count its arrival. The arrival that
+    // completes the count routes the row; every other group is done.
+    memoryBarrierBuffer();
+    barrier();
+    if (tid == 0u) {
+        uint prev = atomicAdd(Status[3], 1u);
+        sLast = prev + 1u == gl_NumWorkGroups.x - 1u ? 1u : 0u;
+    }
+    barrier();
+    if (sLast == 0u) return;
+    memoryBarrierBuffer();
+    route(tid);
+}

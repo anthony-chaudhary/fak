@@ -74,6 +74,8 @@ const (
 	VulkanShaderRegistryV29ID = "fak.vulkan-shader-registry.v29.current100"
 	// VulkanShaderRegistryV30ID adds the Qwen3.5 GDN core value-head tiling module.
 	VulkanShaderRegistryV30ID = "fak.vulkan-shader-registry.v30.current101"
+	// VulkanShaderRegistryV31ID adds the V4.1 fused router gate projection + top-k module.
+	VulkanShaderRegistryV31ID = "fak.vulkan-shader-registry.v31.current102"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -135,9 +137,11 @@ var (
 
 	vulkanRegistryV30 = &vulkanSuccessorRegistry{version: "V30", schema: VulkanBuildReceiptSchemaV30, id: VulkanShaderRegistryV30ID, count: 101, parent: vulkanRegistryV29, added: []string{"qwen35_value_head_tile"}}
 
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26, vulkanRegistryV27, vulkanRegistryV28, vulkanRegistryV29, vulkanRegistryV30}
+	vulkanRegistryV31 = &vulkanSuccessorRegistry{version: "V31", schema: VulkanBuildReceiptSchemaV31, id: VulkanShaderRegistryV31ID, count: 102, parent: vulkanRegistryV30, added: []string{"v41_router_gate_topk"}}
+
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26, vulkanRegistryV27, vulkanRegistryV28, vulkanRegistryV29, vulkanRegistryV30, vulkanRegistryV31}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV30
+	vulkanCurrentRegistry = vulkanRegistryV31
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

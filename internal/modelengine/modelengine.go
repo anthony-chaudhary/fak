@@ -31,6 +31,9 @@ package modelengine
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -88,6 +91,7 @@ type Engine struct {
 	schedOnce    sync.Once
 	sched        *NativeScheduler
 	coupler      *WorkerCoupler
+	kvEnvErr     error // written once inside schedOnce
 
 	// tok is the OPTIONAL NL tokenizer (nil = byte-level default). Set ONCE at boot via
 	// SetTokenizer, before the server accepts requests, then read-only on the dispatch
@@ -347,7 +351,12 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 			// (synchronous admission) instead of crashing a serving process.
 			_ = sched.SetQwenPrefillMaxTokensPerIteration(nativeServingPrefillTokensPerIteration)
 		}
-		if p := nativePreemptionPolicyFromEnvWithProbe(nativeKVFreeBytesProbe, nativeKVBytesPerToken(e.model().Cfg)); p.MaxBlocks > 0 {
+		p, kvEnvErr := nativePreemptionPolicyFromEnvChecked(nativeKVFreeBytesProbe, nativeKVBytesPerToken(e.model().Cfg))
+		if kvEnvErr != nil {
+			e.kvEnvErr = kvEnvErr
+			fmt.Fprintln(nativeEnvNotice, "[fak] "+NativeKVEnvNotice(kvEnvErr))
+		}
+		if p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)
 		}
 		if e.coupler != nil {
@@ -434,6 +443,17 @@ func (e *Engine) KVPreemptionStats() NativePreemptionStats {
 	return e.nativeScheduler().KVPreemptionStats()
 }
 
+// KVPreemptionEnvErr returns the malformed FAK_NATIVE_KV_* capacity values the
+// native scheduler ignored when it was built, or nil. Every joined error is a
+// *NativeKVEnvError matching ErrNativeKVEnvInvalid.
+func (e *Engine) KVPreemptionEnvErr() error {
+	if e == nil {
+		return nil
+	}
+	e.nativeScheduler()
+	return e.kvEnvErr
+}
+
 // SetKVPreemptionPolicy updates the package Default engine.
 func SetKVPreemptionPolicy(p NativePreemptionPolicy) { Default.SetKVPreemptionPolicy(p) }
 
@@ -492,17 +512,66 @@ func nativePreemptionPolicyFromEnv() NativePreemptionPolicy {
 // memory only when FAK_NATIVE_KV_MAX_BLOCKS is unset; an explicit value,
 // including 0, always wins.
 func nativePreemptionPolicyFromEnvWithProbe(probe func() (uint64, bool), kvBytesPerToken uint64) NativePreemptionPolicy {
-	p := NativePreemptionPolicy{Mode: NativePreemptSwap}
-	if raw := os.Getenv("FAK_NATIVE_KV_BLOCK_TOKENS"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			p.BlockTokens = n
-		}
+	p, _ := nativePreemptionPolicyFromEnvChecked(probe, kvBytesPerToken)
+	return p
+}
+
+// ErrNativeKVEnvInvalid marks a FAK_NATIVE_KV_* capacity value that the
+// native scheduler ignored.
+var ErrNativeKVEnvInvalid = errors.New("modelengine: invalid native KV env")
+
+// NativeKVEnvError names one ignored FAK_NATIVE_KV_* capacity value.
+type NativeKVEnvError struct {
+	Name  string
+	Value string
+}
+
+func (e *NativeKVEnvError) Error() string {
+	return fmt.Sprintf("%v: %s=%q (want a non-negative integer; ignored, %s)", ErrNativeKVEnvInvalid, e.Name, e.Value, nativeKVEnvFallback(e.Name))
+}
+
+func (e *NativeKVEnvError) Unwrap() error { return ErrNativeKVEnvInvalid }
+
+func nativeKVEnvFallback(name string) string {
+	switch name {
+	case "FAK_NATIVE_KV_MAX_BLOCKS":
+		return "KV preemption stays off"
+	case "FAK_NATIVE_KV_BLOCK_TOKENS":
+		return fmt.Sprintf("blocks stay %d tokens", nativeKVDefaultBlockTokens)
 	}
-	if raw := os.Getenv("FAK_NATIVE_KV_MAX_BLOCKS"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			p.MaxBlocks = n
-		}
-	} else if probe != nil {
+	return "default kept"
+}
+
+// NativeKVEnvNotice renders a KVPreemptionEnvErr result as one operator line.
+func NativeKVEnvNotice(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.ReplaceAll(err.Error(), "\n", "; ")
+}
+
+var nativeEnvNotice io.Writer = os.Stderr
+
+// nativeKVEnvCount keeps the historical ignore-and-disable result for a bad
+// value (0, untrimmed) and only adds the typed error.
+func nativeKVEnvCount(name, raw string) (int, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, &NativeKVEnvError{Name: name, Value: raw}
+	}
+	return n, nil
+}
+
+func nativePreemptionPolicyFromEnvChecked(probe func() (uint64, bool), kvBytesPerToken uint64) (NativePreemptionPolicy, error) {
+	p := NativePreemptionPolicy{Mode: NativePreemptSwap}
+	var blockErr, maxErr error
+	p.BlockTokens, blockErr = nativeKVEnvCount("FAK_NATIVE_KV_BLOCK_TOKENS", os.Getenv("FAK_NATIVE_KV_BLOCK_TOKENS"))
+	rawMax := os.Getenv("FAK_NATIVE_KV_MAX_BLOCKS")
+	p.MaxBlocks, maxErr = nativeKVEnvCount("FAK_NATIVE_KV_MAX_BLOCKS", rawMax)
+	if rawMax == "" && probe != nil {
 		if free, ok := probe(); ok {
 			blockTokens := p.BlockTokens
 			if blockTokens <= 0 {
@@ -525,7 +594,7 @@ func nativePreemptionPolicyFromEnvWithProbe(probe func() (uint64, bool), kvBytes
 	case "cost-aware", "cost", "kvbm":
 		p.VictimRule = NativePreemptVictimCostAware
 	}
-	return p
+	return p, errors.Join(blockErr, maxErr)
 }
 
 // buildPrompt turns a tool name + argument bytes into a bounded prompt of token ids,
