@@ -517,7 +517,7 @@ func BenchmarkV41ColdAttentionRows(b *testing.B) {
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					out, err := run(0, 2*n, 2, f.heads, f.dim, f.q, f.sink, f.window, f.compressed, f.ids, .125, nil, nil, nil)
-					if err != nil || len(out) != 4096 {
+					if err != nil || len(out) != len(f.q) {
 						b.Fatal(err)
 					}
 				}

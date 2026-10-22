@@ -234,6 +234,7 @@ var (
 // end of the batch). Every one-shot submit must be counted as untimed work.
 // fak-test:runtime fast est=20ms lane=default
 func TestTimestampProfileCoversBatchRecording(t *testing.T) {
+	const timestampSearchLines = 4
 	src := shimSource(t)
 	recorded := shimRecordedCommand.FindAllStringIndex(src, -1)
 	if len(recorded) < 8 {
@@ -246,8 +247,8 @@ func TestTimestampProfileCoversBatchRecording(t *testing.T) {
 			end = next[0]
 		}
 		window := rest[:end]
-		if lines := strings.SplitN(window, "\n", 5); len(lines) == 5 {
-			window = strings.Join(lines[:4], "\n")
+		if lines := strings.SplitN(window, "\n", timestampSearchLines+1); len(lines) > timestampSearchLines {
+			window = strings.Join(lines[:timestampSearchLines], "\n")
 		}
 		if !strings.Contains(window, "tsAfterDispatch(") {
 			line := strings.Count(src[:loc[0]], "\n") + 1

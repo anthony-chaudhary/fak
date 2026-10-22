@@ -86,16 +86,23 @@ func counterSource() func() map[string]int64 {
 // fak-test:runtime fast est=20ms lane=default
 func TestDumpTeacherForcedRoundTripCompares(t *testing.T) {
 	dir := t.TempDir()
+	specs := promptSet()
+	prefillChunk := 2
 	var refSessions []*fakeSession
-	ref, err := Dump(promptSet(), DumpOptions{Dir: filepath.Join(dir, "ref"), Label: "ref", PrefillChunk: 2,
+	ref, err := Dump(specs, DumpOptions{Dir: filepath.Join(dir, "ref"), Label: "ref", PrefillChunk: prefillChunk,
 		NewSession: factory(nil, &refSessions), Counters: counterSource()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := refSessions[0].prefills; len(got) != 3 || len(got[0]) != 2 || len(got[2]) != 1 {
+	wantPanels := (len(specs[0].IDs) + prefillChunk - 1) / prefillChunk
+	wantLastPanel := len(specs[0].IDs) % prefillChunk
+	if wantLastPanel == 0 {
+		wantLastPanel = prefillChunk
+	}
+	if got := refSessions[0].prefills; len(got) != wantPanels || len(got[0]) != prefillChunk || len(got[len(got)-1]) != wantLastPanel {
 		t.Fatalf("prefill panels %v", got)
 	}
-	if ref.Vocab != fakeVocab || len(ref.Prompts[0].Fed) != 11 || len(ref.Prompts[0].Argmax) != 12 || ref.Prompts[0].Forced {
+	if ref.Vocab != fakeVocab || len(ref.Prompts[0].Fed) != specs[0].Positions-1 || len(ref.Prompts[0].Argmax) != specs[0].Positions || ref.Prompts[0].Forced {
 		t.Fatalf("ref prompt %+v", ref.Prompts[0])
 	}
 	if c := ref.Prompts[0].Counters; c["prefill"]["calls"] != 10 || c["decode"]["calls"] != 10 {
@@ -118,7 +125,7 @@ func TestDumpTeacherForcedRoundTripCompares(t *testing.T) {
 		}
 		return 1e-5 * float32(id)
 	}
-	cand, err := Dump(promptSet()[:1], DumpOptions{Dir: filepath.Join(dir, "cand"), Label: "cand", PrefillChunk: 2,
+	cand, err := Dump(specs[:1], DumpOptions{Dir: filepath.Join(dir, "cand"), Label: "cand", PrefillChunk: prefillChunk,
 		Teacher: reread, NewSession: factory(flip, nil)})
 	if err != nil {
 		t.Fatal(err)

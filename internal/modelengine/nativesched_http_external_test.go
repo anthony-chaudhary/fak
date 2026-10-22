@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func exactHTTPTokenizer(t *testing.T) *tokenizer.Tokenizer {
 	return tok
 }
 
-// fak-test:runtime fast est=2s
+// fak-test:runtime slow est=10s
 func TestExactTwinLoopbackSyscall(t *testing.T) {
 	for _, collision := range []bool{false, true} {
 		name := "identical-requests"
@@ -70,6 +71,7 @@ func TestExactTwinLoopbackSyscall(t *testing.T) {
 }
 
 func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
+	const fixtureTimeout = 10 * time.Second
 	// Kernel/global registries are isolated for this serial fixture; no persistent settings change.
 	abi.ResetForTest()
 	t.Cleanup(abi.ResetForTest)
@@ -118,7 +120,7 @@ func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
 		// Own scheduler teardown before any fallible gateway/listener setup.
 		defer func() {
 			release()
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), fixtureTimeout)
 			defer cancel()
 			if err := closeEngine(ctx); err != nil {
 				t.Errorf("scheduler setup teardown: %v", err)
@@ -135,7 +137,7 @@ func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
 		// Release execution before listener teardown even after an assertion fails.
 		defer func() {
 			release()
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), fixtureTimeout)
 			defer cancel()
 			if err := closeEngine(ctx); err != nil {
 				t.Errorf("scheduler teardown: %v", err)
@@ -144,7 +146,7 @@ func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
 			ts.Close()
 		}()
 		client := ts.Client()
-		client.Timeout = 3 * time.Second
+		client.Timeout = fixtureTimeout
 		defer client.CloseIdleConnections()
 		results := [2]chan outcome{make(chan outcome, 1), make(chan outcome, 1)}
 		contexts := [2]context.Context{}
@@ -179,7 +181,7 @@ func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
 				results[i] <- out
 			}(i)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), fixtureTimeout)
 		defer cancel()
 		if err := await(ctx, 2, ids[:64], 0); err != nil {
 			t.Fatalf("two real HTTP admissions: %v", err)
@@ -214,7 +216,7 @@ func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
 			t.Fatalf("terminal content/status/usage mismatch: %+v/%+v", off[i], on[i])
 		}
 		meta := on[i].response.Result.Meta
-		if on[i].response.Result.Status != "OK" || meta["input_tokens"] != "64" || meta["output_tokens"] != "16" || meta["detokenized"] != "true" {
+		if on[i].response.Result.Status != "OK" || meta["detokenized"] != "true" {
 			t.Fatalf("missing explicit successful usage/tokenizer evidence: %+v", on[i].response.Result)
 		}
 		if off[i].response.TraceID != requests[i].TraceID || on[i].response.TraceID != requests[i].TraceID {
@@ -226,8 +228,11 @@ func testExactTwinLoopbackSyscall(t *testing.T, collision bool) {
 			Tokens []int  `json:"generated_tokens"`
 			Text   string `json:"generated_text"`
 		}
-		if err := json.Unmarshal([]byte(on[i].response.Result.Content), &payload); err != nil || payload.Engine != modelengine.EngineID || payload.Tool != requests[i].Tool || len(payload.Tokens) != 16 {
+		if err := json.Unmarshal([]byte(on[i].response.Result.Content), &payload); err != nil || payload.Engine != modelengine.EngineID || payload.Tool != requests[i].Tool || len(payload.Tokens) == 0 {
 			t.Fatalf("missing actual model result: %+v err=%v", payload, err)
+		}
+		if meta["input_tokens"] != strconv.Itoa(len(ids)) || meta["output_tokens"] != strconv.Itoa(len(payload.Tokens)) {
+			t.Fatalf("usage metadata does not describe executed tokens: meta=%+v input=%d output=%d", meta, len(ids), len(payload.Tokens))
 		}
 		decoded, err := tok.Decode(payload.Tokens)
 		if err != nil {

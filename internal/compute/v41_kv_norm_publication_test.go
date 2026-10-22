@@ -8,38 +8,51 @@ import (
 
 // fak-test:runtime fast est=1ms lane=default
 func TestV41KVNormPublicationEvidenceOrder(t *testing.T) {
-	image := make([]float32, 1032)
+	input := make([]float32, 512)
+	output := make([]float32, len(input))
+	statusWords := []uint32{v41BF16CheckedStatusMagic, 0, math.MaxUint32, uint32(len(input))}
+	inputStatusOffset := 0
+	inputDataOffset := len(statusWords)
+	outputStatusOffset := inputDataOffset + len(input)
+	outputDataOffset := outputStatusOffset + len(statusWords)
+	image := make([]float32, outputDataOffset+len(output))
 	set := func(offset int, site, index uint32) {
-		for i, v := range []uint32{v41BF16CheckedStatusMagic, site, index, 512} {
+		words := append([]uint32(nil), statusWords...)
+		words[1], words[2] = site, index
+		for i, v := range words {
 			image[offset+i] = math.Float32frombits(v)
 		}
 	}
-	set(0, V41BF16PublishKVNormInput, math.MaxUint32)
-	set(516, V41BF16PublishKVNormOutput, math.MaxUint32)
+	set(inputStatusOffset, V41BF16PublishKVNormInput, math.MaxUint32)
+	set(outputStatusOffset, V41BF16PublishKVNormOutput, math.MaxUint32)
 	p := &V41KVNormPublication{image: image}
-	image[4+511] = float32(math.NaN())
-	image[520] = 1
+	image[inputDataOffset+len(input)-1] = float32(math.NaN())
+	image[outputDataOffset] = 1
 	if err := p.InputError(); err != nil {
 		t.Fatal(err)
 	}
-	image[516] = 0
-	if len(p.Raw()) != 512 || cap(p.Raw()) != 512 || !math.IsNaN(float64(p.Raw()[511])) {
+	image[outputStatusOffset] = 0
+	if len(p.Raw()) != len(input) || cap(p.Raw()) != len(input) || !math.IsNaN(float64(p.Raw()[len(input)-1])) {
 		t.Fatal("raw evidence hidden by output envelope")
 	}
 	if out, err := p.Published(); out != nil || err == nil {
 		t.Fatal("invalid output envelope escaped")
 	}
-	set(516, V41BF16PublishKVNormOutput, math.MaxUint32)
+	set(outputStatusOffset, V41BF16PublishKVNormInput, math.MaxUint32)
+	if out, err := p.Published(); out != nil || err == nil {
+		t.Fatal("input publication accepted as output")
+	}
+	set(outputStatusOffset, V41BF16PublishKVNormOutput, math.MaxUint32)
 	out, err := p.Published()
-	if err != nil || len(out) != 512 || cap(out) != 512 || &out[0] != &image[520] {
+	if err != nil || len(out) != len(output) || cap(out) != len(output) || &out[0] != &image[outputDataOffset] {
 		t.Fatalf("output range: %v", err)
 	}
 	p.Raw()[0] = 7
 	if out[0] != 1 {
 		t.Fatal("raw/output ranges overlap")
 	}
-	set(0, V41BF16PublishKVNormInput, 2)
-	set(516, V41BF16PublishKVNormOutput, 3)
+	set(inputStatusOffset, V41BF16PublishKVNormInput, 2)
+	set(outputStatusOffset, V41BF16PublishKVNormOutput, 3)
 	var fault *V41BF16CheckedArithmeticError
 	var backend *BackendError
 	if err = p.InputError(); !errors.As(err, &fault) || fault.Index != 2 || fault.Site != V41BF16PublishKVNormInput || !errors.As(err, &backend) {
@@ -55,7 +68,7 @@ func TestV41KVNormPublicationEvidenceOrder(t *testing.T) {
 	if out, err = absent.Published(); out != nil || err == nil {
 		t.Fatal("nil publication")
 	}
-	for _, n := range []int{0, 1031, 1033} {
+	for _, n := range []int{0, len(image) - 1, len(image) + 1} {
 		q := &V41KVNormPublication{image: make([]float32, n)}
 		if q.Raw() != nil || q.InputError() == nil {
 			t.Fatalf("accepted length%d", n)

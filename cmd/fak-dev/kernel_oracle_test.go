@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,11 +24,15 @@ func kernelOracleFixture(t *testing.T, name string) string {
 }
 
 func kernelOracleShapesFile(t *testing.T) string {
+	return kernelOracleShapesFileForNs(t, "1,512")
+}
+
+func kernelOracleShapesFileForNs(t *testing.T, ns string) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "shapes.json")
 	var stdout, stderr bytes.Buffer
 	meta := filepath.Join("testdata", "kernel_oracle", "qwen-metadata.json")
-	if code := run(&stdout, &stderr, []string{"kernel-oracle", "shapes", "--metadata-json", meta, "--n", "1,512", "--out", out}); code != 0 {
+	if code := run(&stdout, &stderr, []string{"kernel-oracle", "shapes", "--metadata-json", meta, "--n", ns, "--out", out}); code != 0 {
 		t.Fatalf("shapes exit %d: %s", code, stderr.String())
 	}
 	return out
@@ -63,11 +68,14 @@ func TestKernelOracleParsesRecordedTestBackendOpsPerf(t *testing.T) {
 	if got.Backend != "Vulkan0" || got.Device != "AMD Radeon 8060S Graphics (RADV STRIX_HALO)" {
 		t.Fatalf("backend=%q device=%q", got.Backend, got.Device)
 	}
-	if got.Unsupported != 1 || len(got.Rows) != 5 {
-		t.Fatalf("unsupported=%d rows=%d, want 1 and 5", got.Unsupported, len(got.Rows))
+	if got.Unsupported != 1 {
+		t.Fatalf("unsupported=%d, want 1", got.Unsupported)
 	}
 	byKey := map[string]oracleMeasurement{}
 	for _, r := range got.Rows {
+		if _, exists := byKey[r.key()]; exists {
+			t.Fatalf("duplicate measurement identity %q", r.key())
+		}
 		byKey[r.key()] = r
 	}
 	qkv := byKey[oracleMatKey("iq2_xxs", 10240, 5120, 1)]
@@ -84,18 +92,44 @@ func TestKernelOracleParsesRecordedTestBackendOpsPerf(t *testing.T) {
 	var gdn oracleMeasurement
 	for _, r := range got.Rows {
 		if r.Op == "GATED_DELTA_NET" {
+			if gdn.Params != "" {
+				t.Fatalf("duplicate GATED_DELTA_NET measurements: first=%+v second=%+v", gdn, r)
+			}
 			gdn = r
 		}
 	}
 	if gdn.US != 11.5 || gdn.GBps != 8.15 || gdn.Dtype != "f32" || gdn.Params == "" {
 		t.Fatalf("generic non-matmul row = %+v", gdn)
 	}
+	wantMatmul := map[string]bool{
+		oracleMatKey("iq2_xxs", 10240, 5120, 1):   true,
+		oracleMatKey("iq2_xxs", 6144, 5120, 1):    true,
+		oracleMatKey("iq2_xxs", 10240, 5120, 512): true,
+		oracleMatKey("q6_k", 5120, 17408, 1):      true,
+	}
+	for key, row := range byKey {
+		if row.Op == "GATED_DELTA_NET" {
+			continue
+		}
+		if !wantMatmul[key] {
+			t.Fatalf("unexpected measurement identity %q: %+v", key, row)
+		}
+		delete(wantMatmul, key)
+	}
+	if len(wantMatmul) != 0 {
+		t.Fatalf("missing matmul measurement identities: %v", wantMatmul)
+	}
 }
 
 // fak-test:runtime fast est=10ms lane=default
 func TestKernelOracleShapesFromModelTensorDirectory(t *testing.T) {
+	requestedNs := []int64{1, 512}
+	nsArgs := make([]string, 0, len(requestedNs))
+	for _, n := range requestedNs {
+		nsArgs = append(nsArgs, strconv.FormatInt(n, 10))
+	}
 	var list oracleShapeList
-	b, err := os.ReadFile(kernelOracleShapesFile(t))
+	b, err := os.ReadFile(kernelOracleShapesFileForNs(t, strings.Join(nsArgs, ",")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,17 +139,61 @@ func TestKernelOracleShapesFromModelTensorDirectory(t *testing.T) {
 	if list.Schema != kernelOracleShapesSchema || list.Arch != "qwen35" {
 		t.Fatalf("schema=%q arch=%q", list.Schema, list.Arch)
 	}
-	// 8 matmul weights (token_embd, norm and conv excluded), 7 distinct (dtype,m,k), x2 n values.
-	if len(list.Shapes) != 14 {
-		t.Fatalf("shapes=%d, want 14", len(list.Shapes))
+	type tensorDirectory struct {
+		Tensors []struct {
+			Name string  `json:"name"`
+			Type string  `json:"type"`
+			Dims []int64 `json:"dims"`
+		} `json:"tensors"`
+	}
+	var source tensorDirectory
+	if err := json.Unmarshal([]byte(kernelOracleFixture(t, "qwen-metadata.json")), &source); err != nil {
+		t.Fatal(err)
+	}
+	type weightContract struct {
+		dtype string
+		m, k  int64
+	}
+	weightCounts := map[weightContract]int{}
+	for _, tensor := range source.Tensors {
+		if len(tensor.Dims) != 2 || !strings.HasSuffix(tensor.Name, ".weight") ||
+			strings.HasPrefix(tensor.Name, "token_embd") || strings.Contains(tensor.Name, "conv1d") ||
+			strings.Contains(tensor.Name, "engram_embd") || strings.Contains(tensor.Name, "engram_table") ||
+			strings.EqualFold(tensor.Type, "F32") {
+			continue
+		}
+		weightCounts[weightContract{
+			dtype: strings.ToLower(tensor.Type),
+			m:     tensor.Dims[1],
+			k:     tensor.Dims[0],
+		}]++
+	}
+	type shapeContract struct {
+		weightContract
+		n int64
+	}
+	wantShapes := map[shapeContract]int{}
+	for weight, count := range weightCounts {
+		for _, n := range requestedNs {
+			wantShapes[shapeContract{weightContract: weight, n: n}] = count
+		}
 	}
 	for _, s := range list.Shapes {
 		if s.Dtype == "q2_k" || s.Dtype == "f32" {
 			t.Fatalf("excluded tensor leaked into shapes: %+v", s)
 		}
-		if s.Dtype == "iq2_xxs" && s.M == 10240 && s.Count != 2 {
-			t.Fatalf("qkv count = %d, want 2 layers", s.Count)
+		key := shapeContract{weightContract: weightContract{dtype: s.Dtype, m: s.M, k: s.K}, n: s.N}
+		wantCount, ok := wantShapes[key]
+		if !ok {
+			t.Fatalf("unexpected shape contract: %+v", s)
 		}
+		if s.Count != wantCount {
+			t.Fatalf("shape %+v count=%d, want %d source tensors", s, s.Count, wantCount)
+		}
+		delete(wantShapes, key)
+	}
+	if len(wantShapes) != 0 {
+		t.Fatalf("missing shapes derived from tensor directory: %v", wantShapes)
 	}
 	if !containsString(list.Ops, "GATED_DELTA_NET") || !containsString(list.Ops, "FLASH_ATTN_EXT") {
 		t.Fatalf("ops = %v", list.Ops)

@@ -1104,12 +1104,32 @@ func TestInKernelV41CoordinatorPanicJoinsTeardown(t *testing.T) {
 // This executes real queue/handoff and dense CPU sessions, not Flash admission.
 // fak-test:runtime fast est=100ms lane=default
 func TestInKernelV41CoordinatorFIFOAndCap(t *testing.T) {
+	const v41CohortLimit = 4
 	m := model.NewSynthetic(tinyCfg())
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	open := func() { releaseOnce.Do(func() { close(release) }) }
 	p := &InKernelPlanner{m: m, coalesceReadyHook: func() { <-release }}
 	kinds := []inKernelCoalesceKind{inKernelCoalesceV41, inKernelCoalesceV41, inKernelCoalesceV41, inKernelCoalesceV41, inKernelCoalesceV41, inKernelCoalesceQwen, inKernelCoalesceQwen, inKernelCoalesceV41, inKernelCoalesceQwen}
+	wantID := make([]uint64, len(kinds))
+	var wantSizes []int
+	var cohortID uint64
+	for first := 0; first < len(kinds); {
+		limit := inKernelDecodeCohortMax
+		if kinds[first] == inKernelCoalesceV41 {
+			limit = v41CohortLimit
+		}
+		last := first + 1
+		for last < len(kinds) && last-first < limit && kinds[last] == kinds[first] {
+			last++
+		}
+		cohortID++
+		wantSizes = append(wantSizes, last-first)
+		for i := first; i < last; i++ {
+			wantID[i] = cohortID
+		}
+		first = last
+	}
 	var mu sync.Mutex
 	var order, sizes []int
 	p.coalesceBatchHook = func(n int) { mu.Lock(); sizes = append(sizes, n); mu.Unlock() }
@@ -1132,7 +1152,6 @@ func TestInKernelV41CoordinatorFIFOAndCap(t *testing.T) {
 		awaitCoalescedQueue(t, p, i+1)
 	}
 	open()
-	wantID := []uint64{1, 1, 1, 1, 2, 3, 3, 4, 5}
 	for i, done := range answers {
 		select {
 		case out := <-done:
@@ -1147,7 +1166,7 @@ func TestInKernelV41CoordinatorFIFOAndCap(t *testing.T) {
 	for i := range wantOrder {
 		wantOrder[i] = i
 	}
-	if !reflect.DeepEqual(order, wantOrder) || !reflect.DeepEqual(sizes, []int{4, 1, 2, 1, 1}) || p.coalesceRunning || len(p.coalesceReady) != 0 {
+	if !reflect.DeepEqual(order, wantOrder) || !reflect.DeepEqual(sizes, wantSizes) || p.coalesceRunning || len(p.coalesceReady) != 0 {
 		t.Fatalf("FIFO order=%v sizes=%v idle=%t", order, sizes, !p.coalesceRunning)
 	}
 }

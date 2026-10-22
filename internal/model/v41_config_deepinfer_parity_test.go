@@ -154,7 +154,8 @@ func TestV41ConfigDerivationMatchesDeepInfer(t *testing.T) {
 			p := plans[l]
 			same(t, "candidate", l, [3]int{p.CandidateSource, p.CandidateTopKBlock, p.CandidateBlockSize}, want)
 		}
-		if len(candidate) != 20 || candidate[20] != 20 || candidate[39] != 20 {
+		wantCandidateCount := n - m.CandidateSourceLayerID
+		if len(candidate) != wantCandidateCount || candidate[m.CandidateSourceLayerID] != m.CandidateSourceLayerID || candidate[n-1] != m.CandidateSourceLayerID {
 			t.Fatalf("transcribed candidate map=%v", candidate)
 		}
 	})
@@ -257,8 +258,8 @@ func TestV41ConfigDerivationMatchesDeepInfer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(flat) != m.HCMult*cfg.HiddenSize || len(flat) != 20480 || width != cfg.HiddenSize {
-			t.Fatalf("hc_norm_group_size: fak row=%d width=%d want 20480/%d", len(flat), width, cfg.HiddenSize)
+		if len(flat) != m.HCMult*cfg.HiddenSize || width != cfg.HiddenSize {
+			t.Fatalf("hc_norm_group_size: fak row=%d width=%d want %d/%d", len(flat), width, m.HCMult*cfg.HiddenSize, cfg.HiddenSize)
 		}
 
 		same(t, "window_size", -1, v41WindowSize, rawInt(t, fixture.Text, "sliding_window"))

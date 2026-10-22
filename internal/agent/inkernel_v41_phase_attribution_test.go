@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -16,6 +17,28 @@ func requireV41PhaseSnapshot(t *testing.T, got, want V41PhaseSnapshot) {
 		if !reflect.DeepEqual(gv.Field(i).Interface(), wv.Field(i).Interface()) {
 			t.Fatalf("V41 phase field %s = %v, want %v", typ.Field(i).Name, gv.Field(i).Interface(), wv.Field(i).Interface())
 		}
+	}
+}
+
+func requireV41PhaseWireFields(t *testing.T, phase map[string]json.RawMessage) {
+	t.Helper()
+	typ := reflect.TypeOf(V41PhaseSnapshot{})
+	want := make(map[string]bool, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			t.Fatalf("V41 phase field %s has no exported JSON identity", typ.Field(i).Name)
+		}
+		want[name] = true
+	}
+	for name := range phase {
+		if !want[name] {
+			t.Fatalf("unexpected V41 phase wire field %q", name)
+		}
+		delete(want, name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing V41 phase wire fields: %v", want)
 	}
 }
 
@@ -195,7 +218,8 @@ func TestV41PhaseCoverageDebugExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, phase := range []map[string]json.RawMessage{wire.Prefill, wire.Decode} {
-		if string(phase["contraction_nanos"]) != "0" || len(phase) != 31 {
+		requireV41PhaseWireFields(t, phase)
+		if string(phase["contraction_nanos"]) != "0" {
 			t.Fatalf("zero elapsed requires exported coverage: %s", encoded)
 		}
 	}

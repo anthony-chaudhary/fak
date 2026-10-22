@@ -24,20 +24,21 @@ func newBackendDecodeLane(m *model.Model, prompt []int, maxNew int) (*decodeLane
 }
 
 func TestInKernelSerialGreedyDecodeSelectsOnDevice(t *testing.T) {
+	const maxNew = 8
 	cfg := tinyCfg()
 	cfg.EOSTokenID = -1
 	m := model.NewSynthetic(cfg)
 	prompt := synthIDs(cfg.VocabSize, 9, 4242)
 
-	host, hostSink := newDecodeLaneOver(m, prompt, 8, 0)
+	host, hostSink := newDecodeLaneOver(m, prompt, maxNew, 0)
 	inKernelDecodeSerial(context.Background(), host)
-	dev, devSink := newBackendDecodeLane(m, prompt, 8)
+	dev, devSink := newBackendDecodeLane(m, prompt, maxNew)
 	inKernelDecodeSerial(context.Background(), dev)
 
 	if host.err != nil || dev.err != nil {
 		t.Fatalf("decode errors host=%v device=%v", host.err, dev.err)
 	}
-	if !eqInts(devSink.toks, hostSink.toks) || len(devSink.toks) != 8 {
+	if !eqInts(devSink.toks, hostSink.toks) || len(devSink.toks) != maxNew {
 		t.Fatalf("device-greedy tokens %v, want host-sampled %v", devSink.toks, hostSink.toks)
 	}
 	if !dev.greedyReady || dev.logits != nil || dev.vocab != cfg.VocabSize {
@@ -47,20 +48,21 @@ func TestInKernelSerialGreedyDecodeSelectsOnDevice(t *testing.T) {
 }
 
 func TestInKernelBatchedSingletonGreedyDecodeSelectsOnDevice(t *testing.T) {
+	const maxNew = 8
 	cfg := tinyCfg()
 	cfg.EOSTokenID = -1
 	m := model.NewSynthetic(cfg)
 	prompt := synthIDs(cfg.VocabSize, 11, 515)
 
-	host, hostSink := newDecodeLaneOver(m, prompt, 8, 0)
+	host, hostSink := newDecodeLaneOver(m, prompt, maxNew, 0)
 	inKernelDecodeSerial(context.Background(), host)
-	dev, devSink := newBackendDecodeLane(m, prompt, 8)
+	dev, devSink := newBackendDecodeLane(m, prompt, maxNew)
 	inKernelDecodeLanesBatched(context.Background(), []*decodeLane{dev}, m, false)
 
 	if host.err != nil || dev.err != nil {
 		t.Fatalf("decode errors host=%v device=%v", host.err, dev.err)
 	}
-	if !eqInts(devSink.toks, hostSink.toks) || len(devSink.toks) != 8 {
+	if !eqInts(devSink.toks, hostSink.toks) || len(devSink.toks) != maxNew {
 		t.Fatalf("batched device-greedy tokens %v, want host-sampled %v", devSink.toks, hostSink.toks)
 	}
 	if !dev.greedyReady || dev.logits != nil || dev.vocab != cfg.VocabSize {
