@@ -1708,6 +1708,11 @@ type VulkanMTPExecution struct {
 	DowngradeReason       string
 	Cancelled             bool
 	Elapsed               time.Duration
+	// RoundDiagnostics preserve post-commit target accounting, not additive GPU spans.
+	RoundDiagnostics        []*VulkanMTPRoundDiagnostic
+	RoundDiagnosticsDropped int
+	ClosedRoundTotals       *VulkanMTPClosedRoundTotals
+	AcceptanceFallback      *VulkanMTPFallbackDiagnostic
 }
 
 const (

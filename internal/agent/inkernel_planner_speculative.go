@@ -555,9 +555,11 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		maxDraft = 4
 	}
 
-	// A verified round stays open through its bonus Step so the recorded round time is
-	// one whole draft-verify-advance cycle; it closes at the next iteration or after the loop.
+	// The existing enginestep round covers verify-through-advance, not drafting.
+	// The separate MTP diagnostic interval also includes proposal generation.
 	var round speculativeRoundObservation
+	diagnosticNow := vulkanMTPDiagnosticClock(ctx)
+	diagnosticDecodeStart := diagnosticNow()
 
 	for gen < maxNew {
 		round.close(gen)
@@ -574,12 +576,20 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			proposalGenerator = nil
 			if mtpExecution != nil {
 				mtpExecution.DowngradeReason = vulkanMTPDowngradeAcceptanceFloor
+				mtpExecution.AcceptanceFallback = &VulkanMTPFallbackDiagnostic{
+					Phase: "decode", AfterRounds: mtpExecution.ProposalRounds,
+					EmittedTokens: gen, DecodeElapsed: diagnosticNow().Sub(diagnosticDecodeStart),
+					Acceptance: eng.AcceptanceStats(),
+				}
 			}
 		}
 
-		// Propose speculative candidate tokens
+		// Start before Propose: the round includes drafting, verification, emission,
+		// and bonus advance. Nested target accounting is overlapping, not additive.
+		var diagnosticStart time.Time
 		var proposal model.DraftProposal
 		if proposalGenerator != nil {
+			diagnosticStart = diagnosticNow()
 			roundDraft := maxDraft
 			if remaining := maxNew - gen; roundDraft > remaining {
 				roundDraft = remaining
@@ -653,6 +663,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			mtpExecution.ProposalRounds++
 			mtpExecution.ProposedTokens += len(proposal.Tokens)
 		}
+		draftElapsed := diagnosticNow().Sub(diagnosticStart)
 		roundStart := time.Now()
 		vRes, deviceReceipt, vErr := verifyGreedySpeculativeRoundObserved(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
 		if vErr != nil {
@@ -661,6 +672,19 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 		round.open(roundStart, speculativeProposalSize(proposal), vRes.NumAccepted, gen)
 		if mtpExecution != nil {
+			if mtpExecution.ClosedRoundTotals == nil {
+				mtpExecution.ClosedRoundTotals = &VulkanMTPClosedRoundTotals{Scope: "closed-successfully-verified-rounds-only"}
+			}
+			round.totals = mtpExecution.ClosedRoundTotals
+			round.diagnosticStart, round.diagnosticNow = diagnosticStart, diagnosticNow
+			round.draftElapsed = draftElapsed
+			if len(mtpExecution.RoundDiagnostics) < vulkanMTPDiagnosticRoundLimit {
+				round.diagnostic = newVulkanMTPRoundDiagnostic(mtpExecution.ProposalRounds, gen, speculativeProposalSize(proposal), vRes.NumAccepted, draftElapsed, deviceReceipt)
+				round.diagnosticStart, round.diagnosticNow = diagnosticStart, diagnosticNow
+				mtpExecution.RoundDiagnostics = append(mtpExecution.RoundDiagnostics, round.diagnostic)
+			} else {
+				mtpExecution.RoundDiagnosticsDropped++
+			}
 			mtpExecution.AcceptedTokens += vRes.NumAccepted
 			mtpExecution.RejectedTokens += len(proposal.Tokens) - vRes.NumAccepted
 			mtpExecution.RollbackTokens += vRes.RollbackKVCount
@@ -727,6 +751,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			gen++
 			committed = append(committed, tok)
 			emittedThisRound++
+			round.acceptedEmitted++
+			if round.diagnostic != nil {
+				round.diagnostic.AcceptedEmittedTokens++
+			}
 			if err = measurement.recordDecodeTrace(gen, tok); err != nil {
 				roundStopped = true
 				break
@@ -784,6 +812,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		emitStopped := emit != nil && emit(bonus)
 		gen++
 		committed = append(committed, bonus)
+		round.bonusEmitted = true
+		if round.diagnostic != nil {
+			round.diagnostic.BonusEmitted = true
+		}
 		if err = measurement.recordDecodeTrace(gen, bonus); err != nil {
 			eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, true)
 			break
@@ -832,12 +864,22 @@ type speculativeRoundObservation struct {
 	proposed, accepted int
 	genAtOpen          int
 	active             bool
+	diagnosticStart    time.Time
+	diagnosticNow      func() time.Time
+	diagnostic         *VulkanMTPRoundDiagnostic
+	totals             *VulkanMTPClosedRoundTotals
+	draftElapsed       time.Duration
+	acceptedEmitted    int
+	bonusEmitted       bool
 	// tally accumulates every closed round of the request; open never resets it.
 	tally SpeculativeDecodeTally
 }
 
 func (r *speculativeRoundObservation) open(start time.Time, proposed, accepted, gen int) {
 	r.start, r.proposed, r.accepted, r.genAtOpen, r.active = start, proposed, accepted, gen, true
+	r.diagnostic = nil
+	r.totals = nil
+	r.acceptedEmitted, r.bonusEmitted = 0, false
 }
 
 func (r *speculativeRoundObservation) close(gen int) {
@@ -848,6 +890,26 @@ func (r *speculativeRoundObservation) close(gen int) {
 	r.tally.Rounds++
 	r.tally.DraftTokens += r.proposed
 	r.tally.AcceptedTokens += r.accepted
+	var inclusiveElapsed time.Duration
+	if r.totals != nil {
+		inclusiveElapsed = r.diagnosticNow().Sub(r.diagnosticStart)
+		r.totals.Rounds++
+		r.totals.ProposedTokens += r.proposed
+		r.totals.AcceptedTokens += r.accepted
+		r.totals.AcceptedEmittedTokens += r.acceptedEmitted
+		if r.bonusEmitted {
+			r.totals.BonusEmittedTokens++
+		}
+		r.totals.EmittedTokens += gen - r.genAtOpen
+		r.totals.DraftElapsed += r.draftElapsed
+		r.totals.InclusiveElapsed += inclusiveElapsed
+	}
+	if r.diagnostic != nil {
+		r.diagnostic.InclusiveElapsed = inclusiveElapsed
+		r.diagnostic.EmittedTokens = gen - r.genAtOpen
+		r.diagnostic.RoundClosed = true
+	}
+	// Preserve the existing verify-through-advance controller/metric input.
 	enginestep.Default.ObserveSpeculativeRound(r.proposed, r.accepted, gen-r.genAtOpen, time.Since(r.start))
 }
 
