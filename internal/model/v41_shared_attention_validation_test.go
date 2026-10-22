@@ -101,13 +101,28 @@ func TestV41SharedAttentionValidatedContinuation(t *testing.T) {
 				consumed++
 				return out, err
 			}
-			v41SharedAttentionSessionBits(t, "cold", s.Prefill([]int{1, 2}), strict.Prefill([]int{1, 2}))
-			if consumed != 0 {
-				t.Fatal("cold prefill acquired continuation authority")
+			// Cold positions consume one proof per combined position, and the
+			// device preparation then re-scans no row the composer already proved.
+			var proofScans, strictScans int
+			scans := &proofScans
+			v41SharedAttentionPrepareScanProbe = func(elements int) { *scans += elements }
+			defer func() { v41SharedAttentionPrepareScanProbe = nil }()
+			cold := s.Prefill([]int{1, 2})
+			scans = &strictScans
+			v41SharedAttentionSessionBits(t, "cold", cold, strict.Prefill([]int{1, 2}))
+			v41SharedAttentionPrepareScanProbe = nil
+			coldProofs := 0
+			for layer := 0; layer < m.Cfg.NumLayers; layer++ {
+				if plan, err := m.v41AttentionPlan(layer); err == nil && plan.Ratio > 0 {
+					coldProofs += 2
+				}
+			}
+			if coldProofs == 0 || consumed != coldProofs || proofScans != 0 || strictScans == 0 {
+				t.Fatalf("cold proofs=%d want %d, prepare row scans proof=%d strict=%d", consumed, coldProofs, proofScans, strictScans)
 			}
 			v41SharedAttentionSessionBits(t, "step", s.Step(3), strict.Step(3))
 			v41SharedAttentionSessionBits(t, "suffix", s.Prefill([]int{4, 5}), strict.Prefill([]int{4, 5}))
-			if consumed != 3*m.Cfg.NumLayers || len(b.calls) != len(control.calls) || b.uploads != control.uploads ||
+			if consumed != coldProofs+3*m.Cfg.NumLayers || len(b.calls) != len(control.calls) || b.uploads != control.uploads ||
 				len(b.live) != 0 || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), captureV41ForwardSnapshot(strict.v41Forward)) {
 				t.Fatal("single-token route changed strict output, work, lifetime, or continuation state")
 			}
@@ -172,7 +187,7 @@ func TestV41SharedAttentionValidatedContinuation(t *testing.T) {
 			var closed *BackendForwardOperationError
 			if !errors.As(err, &selected) || !errors.As(err, &closed) || !errors.Is(err, ErrV41ForwardStage) ||
 				wrapped != 1 || !s.halClosed || s.halFailure == nil || len(b.calls) != calls || b.uploads != uploads || len(b.live) != 0 ||
-				consumed != 3*m.Cfg.NumLayers || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {
+				consumed != coldProofs+3*m.Cfg.NumLayers || !reflect.DeepEqual(captureV41ForwardSnapshot(s.v41Forward), before) {
 				t.Fatalf("masked original row escaped strict validation or retirement: %v", err)
 			}
 			if retry := recoverError(invoke); retry != s.halFailure || wrapped != 1 || len(b.calls) != calls {

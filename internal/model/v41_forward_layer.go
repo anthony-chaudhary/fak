@@ -706,6 +706,13 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 	// Every position contracts against the same immutable bank, so it is
 	// finite-scanned once per layer rather than once per position.
 	var validated v41ValidatedPrefix
+	// The composer's validation also covers the device preparation while each
+	// position's proof is consumed; a proof the composer does not hand to the
+	// core stops minting for the rest of the layer.
+	var coldProof *v41SharedAttentionContinuation
+	if coldAttentionOwner != nil && (plan.Ratio > 0 || plan.Role == V41AttentionRoleReader) {
+		coldProof = newV41ColdSharedAttentionContinuation(m, l, plan, st, coldAttentionOwner, scratch)
+	}
 	for t := 0; t < seq; t++ {
 		// The reference concatenates this layer's window with selected source
 		// groups before ONE sink contraction, even before a group completes.
@@ -728,10 +735,14 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 					ids[group] = int32(group)
 				}
 			}
+			proof := coldProof.at(t, cfg.windowForLayer(l))
 			attentionOpened := m.v41NowNanos()
 			o, err := v41CombinedAttentionValidated(l, t, plan.kvGroupSize(cfg), nH, hd, qkv.qHeads[t], sink, window, sharedKV, ids, scale,
-				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttentionFunc(), nil, &validated)
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttentionFunc(), proof, &validated)
 			m.v41NoteAttentionContraction(attentionOpened)
+			if proof != nil && !proof.used {
+				coldProof = nil
+			}
 			if err != nil {
 				return nil, v41StageErr(v41StageAttention, l, err)
 			}

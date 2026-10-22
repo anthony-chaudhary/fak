@@ -27,8 +27,9 @@ type v41SharedAttentionCore struct {
 }
 
 // A continuation captures ownership before projections and other callbacks.
-// It is local to one role step, including each serial incremental suffix token.
-// Cold/full prefill and ordinary callback reconstruction never receive it.
+// It is local to one role step, including each serial incremental suffix token,
+// or to one cold/full-prefill position. Ordinary callback reconstruction never
+// receives it.
 type v41SharedAttentionContinuation struct {
 	binding                                 *v41SharedAttentionBinding
 	rowOwner                                *V41AttentionState
@@ -72,24 +73,7 @@ func newV41SharedAttentionContinuation(m *Model, layer, pos int, plan V41Attenti
 			layerState.windowSize != ringRows || layerState.headDim != c.headDim {
 			return false
 		}
-		current := m.Cfg
-		if layer < 0 || layer >= current.NumLayers || current.DeepSeekV41 != cfg.DeepSeekV41 || current.NumLayers != cfg.NumLayers || current.NumHeads != c.heads ||
-			current.HeadDim != c.headDim || current.windowForLayer(layer) != window || current.attnScale() != c.scale {
-			return false
-		}
-		// For an in-range nonzero layer, nearest-source identity gives exactly
-		// v41AttentionRoles' role without allocating a whole-layer map. Recheck
-		// current metadata rather than trusting the memoized plan after callbacks.
-		resolved, err := v41AttentionPlanFor(current, layer, nil)
-		if err != nil || resolved.Ratio <= 0 {
-			return false
-		}
-		if resolved.KVSourceLayer == layer {
-			resolved.Role = V41AttentionRoleKVSource
-		} else if resolved.KVSourceLayer >= 0 {
-			resolved.Role = V41AttentionRoleReader
-		}
-		return resolved == plan && resolved.kvGroupSize(current) == c.sourceRatio
+		return c.configLive(m, cfg, plan, window)
 	}
 	if !c.live() {
 		return nil
@@ -97,10 +81,34 @@ func newV41SharedAttentionContinuation(m *Model, layer, pos int, plan V41Attenti
 	return c
 }
 
+// configLive rechecks current model metadata rather than trusting the memoized
+// plan after callbacks. For an in-range nonzero layer, nearest-source identity
+// gives exactly v41AttentionRoles' role without allocating a whole-layer map.
+func (c *v41SharedAttentionContinuation) configLive(m *Model, cfg Config, plan V41AttentionPlan, window int) bool {
+	current, layer := m.Cfg, c.layer
+	if layer < 0 || layer >= current.NumLayers || current.DeepSeekV41 != cfg.DeepSeekV41 || current.NumLayers != cfg.NumLayers || current.NumHeads != c.heads ||
+		current.HeadDim != c.headDim || current.windowForLayer(layer) != window || current.attnScale() != c.scale {
+		return false
+	}
+	resolved, err := v41AttentionPlanFor(current, layer, nil)
+	if err != nil || resolved.Ratio <= 0 {
+		return false
+	}
+	if resolved.KVSourceLayer == layer {
+		resolved.Role = V41AttentionRoleKVSource
+	} else if resolved.KVSourceLayer >= 0 {
+		resolved.Role = V41AttentionRoleReader
+	}
+	return resolved == plan && resolved.kvGroupSize(current) == c.sourceRatio
+}
+
 // The proof never travels in the ordinary request. It names the exact local
 // request and borrowed stream descriptors, and is consumed even on mismatch.
 // Between the composer's original-row validation and consumption there are no
 // arbitrary callbacks; session ownership excludes concurrent row mutation.
+// Compressed rows covered by the composer's v41ValidatedPrefix memo were proven
+// finite by an earlier call; they are trusted only as immutable publications
+// that no code between calls can alias or write.
 type v41SharedAttentionValidation struct {
 	continuation       *v41SharedAttentionContinuation
 	request            *v41SharedAttentionRequest
@@ -302,6 +310,9 @@ func v41PrepareSharedAttentionRows(request v41SharedAttentionRequest, sourceRows
 					return bad("row KV width %d, want %d", len(row), p.headDim)
 				}
 				if !rowsValidated {
+					if probe := v41SharedAttentionPrepareScanProbe; probe != nil {
+						probe(len(row))
+					}
 					if err := finiteRow32(row, "shared attention row KV"); err != nil {
 						return bad("%v", err)
 					}
