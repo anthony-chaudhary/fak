@@ -97,7 +97,9 @@ func TestAgentZeroSubprocessSpawnsAcross1000Operations(t *testing.T) {
 	if m.SubprocessesAvoided < 1000 {
 		t.Fatalf("SubprocessesAvoided = %d, want >= 1000", m.SubprocessesAvoided)
 	}
-	if m.HitRate() < 0.90 {
+	// Under -race, sync.Pool deliberately drops a fraction of Puts, so pool
+	// reuse thresholds only hold for the uninstrumented build.
+	if !raceDetectorEnabled && m.HitRate() < 0.90 {
 		t.Fatalf("HitRate = %.4f, want >= 0.90", m.HitRate())
 	}
 }
@@ -162,6 +164,9 @@ func TestAgentBufferPoolConcurrentContention(t *testing.T) {
 	}
 	if m.Releases != m.Acquires {
 		t.Fatalf("Releases = %d, want %d (all acquired buffers returned)", m.Releases, m.Acquires)
+	}
+	if raceDetectorEnabled {
+		return // sync.Pool drops Puts under -race; reuse bounds hold only uninstrumented.
 	}
 	// Bounded allocations under concurrent access
 	if m.Allocations > workers*4 {

@@ -599,10 +599,14 @@ func BenchmarkHealth_ConcurrentEvaluation(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		var resp HealthResponse
+		var healthy bool
 		for pb.Next() {
-			sinkHealthResp = agg.Snapshot()
-			sinkBool = agg.IsHealthy()
+			resp = agg.Snapshot()
+			healthy = agg.IsHealthy()
 		}
+		runtime.KeepAlive(resp)
+		runtime.KeepAlive(healthy)
 	})
 
 	atomic.StoreInt32(&stop, 1)

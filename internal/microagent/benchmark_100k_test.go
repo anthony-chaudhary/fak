@@ -160,7 +160,12 @@ func TestDescriptorStream100K(t *testing.T) {
 			rss *= 1024
 		}
 	}
-	if rss == 0 || rss > 100000000 {
+	if rss == 0 {
+		t.Fatal("absolute process peak RSS was not reported by /proc/self/status")
+	}
+	// ThreadSanitizer shadow memory multiplies RSS 5-10x; the envelope is a
+	// claim about the uninstrumented binary, which the non-race job enforces.
+	if !raceDetectorEnabled && rss > 100000000 {
 		t.Fatalf("absolute process peak RSS %d exceeds 100000000-byte envelope", rss)
 	}
 	t.Logf("engine=synthetic-descriptor-scale contexts=%d completed=%d contract_verified=%d cold_thaws=%d state_mismatches=0 worker_limit=64 peak_active_calls=%d peak_observed_goroutines=%d resident_peak=%d absolute_peak_rss_bytes=%d", count, completed, completed, stats.Thaws, gateway.peak.Load(), gateway.goroutines.Load(), stats.Peak, rss)

@@ -115,6 +115,9 @@ func TestBufferPoolConcurrentAccessAndBoundedAllocations(t *testing.T) {
 		t.Fatalf("Releases = %d, want %d", m.Releases, totalOps)
 	}
 
+	if raceDetectorEnabled {
+		return // sync.Pool drops Puts under -race; reuse bounds hold only uninstrumented.
+	}
 	// Bounded allocations: despite 5,000 operations, allocations must be bounded
 	// by concurrent worker count (~numGoroutines * 3 classes).
 	maxExpectedAllocs := uint64(numGoroutines * 4)
