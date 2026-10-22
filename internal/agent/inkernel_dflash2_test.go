@@ -410,11 +410,15 @@ func dflash2WiredPlanner(t *testing.T, r *dflash2ScriptRequest) *InKernelPlanner
 		tokens[b] = string(rune(code))
 		types[b] = 1
 	}
-	tokens = append(tokens, "<|im_start|>", "<|im_end|>", "<|endoftext|>")
-	types = append(types, 3, 3, 3)
-	tok, err := tokenizer.FromGGML(tokens, nil, types, "qwen2")
+	// Append the merged token after controls to preserve byte and EOS IDs.
+	tokens = append(tokens, "<|im_start|>", "<|im_end|>", "<|endoftext|>", "ab")
+	types = append(types, 3, 3, 3, 1)
+	tok, err := tokenizer.FromGGML(tokens, []string{"a b"}, types, "qwen2")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if ids, err := tok.Encode("ab"); err != nil || !reflect.DeepEqual(ids, []int{len(tokens) - 1}) {
+		t.Fatalf("fixture BPE merge: ids=%v err=%v", ids, err)
 	}
 	base, ok := compute.Lookup("cpu-ref")
 	if !ok {
