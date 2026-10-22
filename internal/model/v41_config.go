@@ -422,6 +422,10 @@ func admitDeepSeekV41Published(c Config, m *DeepSeekV41Config) error {
 		got  any
 	}{
 		{"identity", m.WrapperModelType == "deepseek_v41" && m.TextModelType == "deepseek_v41_text", m.WrapperModelType + "/" + m.TextModelType},
+		// The native V4.1 router implements sqrtsoftplus, not a selectable
+		// scoring function. Retain the omitted-field default, but do not accept
+		// an explicit selector that the forward would silently ignore.
+		{"scoring_func", c.ScoringFunc == "" || c.ScoringFunc == "sqrtsoftplus", c.ScoringFunc},
 		{"decoder geometry", c.NumLayers == 40 && c.HiddenSize == 5120 && c.NumHeads == 64 && c.NumKVHeads == 1 && c.HeadDim == 512, fmt.Sprintf("layers=%d hidden=%d heads=%d kv_heads=%d head_dim=%d", c.NumLayers, c.HiddenSize, c.NumHeads, c.NumKVHeads, c.HeadDim)},
 		{"attention geometry", c.QKRopeHeadDim == 64 && c.QLoraRank == 1280 && c.OLoraRank == 1024 && c.OGroups == 8, fmt.Sprintf("rope=%d qrank=%d orank=%d groups=%d", c.QKRopeHeadDim, c.QLoraRank, c.OLoraRank, c.OGroups)},
 		{"moe geometry", c.NumExperts == 384 && c.NSharedExperts == 1 && c.NumExpertsPerTok == 6 && c.MoEIntermediateSize == 2304, fmt.Sprintf("experts=%d shared=%d topk=%d width=%d", c.NumExperts, c.NSharedExperts, c.NumExpertsPerTok, c.MoEIntermediateSize)},
