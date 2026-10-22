@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests metal-check cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests metal-check cuda-check cuda-build cuda-test cuda-accept-model cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -702,9 +702,40 @@ cuda-build-sm120:
 cuda-test:
 	bash internal/compute/build_cuda.sh test
 
-# cuda-accept: run EVERY on-GPU acceptance witness with one verdict (SKIP-is-not-PASS) via
-# tools/cuda_acceptance.sh. GPU node only; a no-GPU host exits non-zero (never a false green).
-cuda-accept:
+# cuda-accept-model: build the real-model witness with build_cuda.sh's resolved CUDA
+# environment, then emit its single JSON receipt on stdout. Progress stays on stderr so
+# callers can consume the receipt directly. FAK_CUDA_ACCEPT_HF must name a compatible
+# HuggingFace config.json + model.safetensors directory; a missing model refuses before
+# any toolchain or build work begins.
+FAK_CUDA_ACCEPT_TOKENS ?= 12
+CUDA_GPUCHECK_BIN ?= tools/.bin/gpucheck
+
+cuda-accept-model:
+	@if [ -z "$(strip $(FAK_CUDA_ACCEPT_HF))" ]; then \
+		echo "cuda-accept-model: FAK_CUDA_ACCEPT_HF is required (HuggingFace config.json + model.safetensors directory)" >&2; \
+		exit 2; \
+	fi
+	@if [ ! -f "$(FAK_CUDA_ACCEPT_HF)/config.json" ] || [ ! -f "$(FAK_CUDA_ACCEPT_HF)/model.safetensors" ]; then \
+		echo "cuda-accept-model: FAK_CUDA_ACCEPT_HF must contain config.json and model.safetensors" >&2; \
+		exit 2; \
+	fi
+	@case "$(FAK_CUDA_ACCEPT_TOKENS)" in \
+		''|*[!0-9]*) echo "cuda-accept-model: FAK_CUDA_ACCEPT_TOKENS must be a positive integer" >&2; exit 2 ;; \
+	esac; \
+	if [ "$(FAK_CUDA_ACCEPT_TOKENS)" -le 0 ]; then \
+		echo "cuda-accept-model: FAK_CUDA_ACCEPT_TOKENS must be a positive integer" >&2; \
+		exit 2; \
+	fi
+	@mkdir -p "$(dir $(CUDA_GPUCHECK_BIN))"
+	@echo "[cuda] building native gpucheck witness ..." >&2
+	@bash internal/compute/build_cuda.sh binary ./cmd/gpucheck "$(abspath $(CUDA_GPUCHECK_BIN))" >&2
+	@echo "[cuda] comparing $(FAK_CUDA_ACCEPT_TOKENS) greedy tokens on the CPU reference and native CUDA backend ..." >&2
+	@"$(abspath $(CUDA_GPUCHECK_BIN))" -hf "$(FAK_CUDA_ACCEPT_HF)" -backend cuda -n "$(FAK_CUDA_ACCEPT_TOKENS)" -json -require-native
+
+# cuda-accept: require the real-model native receipt, then run EVERY per-family on-GPU
+# acceptance witness with one verdict (SKIP-is-not-PASS) via tools/cuda_acceptance.sh.
+# GPU node only; a no-GPU host exits non-zero (never a false green).
+cuda-accept: cuda-accept-model
 	bash tools/cuda_acceptance.sh
 
 # cuda-occupancy (#4188): print the decode-shaped per-kernel occupancy + HBM-traffic witness

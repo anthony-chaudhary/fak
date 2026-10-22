@@ -32,7 +32,7 @@ a consumer card, the GPU server, or a GCP DLVM). So the loop is deliberately spl
 | author (local gate) | `make cuda-check` | anywhere — no nvcc, no GPU |
 | build | `make cuda-build` | a CUDA host (WSL / GPU server / cloud VM) |
 | test (Approx witness) | `make cuda-test` | a CUDA host with a GPU |
-| validate (every witness) | `make cuda-accept` | a CUDA host with a GPU |
+| validate (real model + every device-family witness) | `make cuda-accept` | a CUDA host with a GPU and compatible HF weights |
 
 ## 1. Setup — stand up a toolchain
 
@@ -111,8 +111,38 @@ make cuda-test                  # the -tags cuda CUDA/HALDevice witnesses (graph
 
 Run **every** on-GPU witness with one verdict:
 
+```bash
+FAK_CUDA_ACCEPT_HF=/srv/models/Qwen2.5-1.5B-Instruct make cuda-accept
 ```
-make cuda-accept                # wraps: bash tools/cuda_acceptance.sh — one manifest, SKIP-is-not-PASS
+
+`cuda-accept` first runs `cuda-accept-model`. It refuses before checking the CUDA
+toolchain or building anything unless `FAK_CUDA_ACCEPT_HF` is explicit. The directory
+must contain a real HuggingFace `config.json` and compatible, unsharded
+`model.safetensors`; a GGUF file is not accepted. `FAK_CUDA_ACCEPT_TOKENS` selects the
+positive greedy-token count and defaults to 12. The model gate builds `cmd/gpucheck`
+through `build_cuda.sh binary`, then emits one JSON receipt on stdout while build progress
+goes to stderr.
+
+For RTX PRO 6000 and RTX 50-series first light (`sm_120`), use the current Blackwell
+toolchain (CUDA 12.9.1 in CI) and select the architecture explicitly:
+
+```bash
+FAK_CUDA_ARCH=sm_120 \
+FAK_CUDA_ACCEPT_HF=/srv/models/Qwen2.5-1.5B-Instruct \
+FAK_CUDA_ACCEPT_TOKENS=12 \
+make cuda-accept
+```
+
+The model receipt compares the same greedy continuation from the legacy pure-Go f32 CPU
+reference and the requested native CUDA backend. `-require-native` refuses when the
+session's observed backend metadata does not select CUDA with device memory. That is a
+session-selection and output-parity gate; it does not prove that every individual operation
+avoided a host fallback. The per-family acceptance witnesses retain that narrower diagnostic
+role. Run their manifest directly when diagnosing an operation family without rebuilding or
+loading the model:
+
+```bash
+bash tools/cuda_acceptance.sh
 ```
 
 [`tools/cuda_acceptance.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cuda_acceptance.sh) runs each acceptance witness
@@ -121,7 +151,11 @@ make cuda-accept                # wraps: bash tools/cuda_acceptance.sh — one m
 `PASS | SKIP | FAIL` manifest. A **SKIP is not a PASS**: on a host with no reachable GPU every
 family skips and the aggregator exits non-zero, so a CPU-only box can never read as green.
 Each individual witness — e.g. [`tools/run_484_acceptance_on_gpu.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/run_484_acceptance_on_gpu.sh)
-for the fp16 HGEMM path — can still be run on its own.
+for the fp16 HGEMM path — can still be run on its own. The current `gpucheck` receipt records
+the model-directory basename, backend/tier selection, and compared tokens; it is parity and
+selection evidence for this invocation, not a source-SHA, model-digest, full-configuration, or
+hardware-identity provenance receipt. Provenance qualification, performance measurement, and
+maturity promotion remain separate gates.
 
 ## 5. Add a kernel
 
