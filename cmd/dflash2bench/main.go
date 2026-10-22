@@ -72,44 +72,53 @@ type arm struct {
 	FallbackBefore           []compute.HostFallbackCount     `json:"host_fallback_before"`
 	FallbackAfter            []compute.HostFallbackCount     `json:"host_fallback_after"`
 	Error                    string                          `json:"error,omitempty"`
+	MemoryBeforePrefill      memoryCapacityObservation       `json:"vulkan_memory_capacity_before_prefill"`
+}
+
+type memoryCapacityObservation struct {
+	Phase    string `json:"phase"`
+	Snapshot any    `json:"snapshot,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 type report struct {
-	Schema                  string                  `json:"schema"`
-	Status                  string                  `json:"status"`
-	StartedUTC              string                  `json:"started_utc"`
-	Build                   *debug.BuildInfo        `json:"go_build_info"`
-	GOOS                    string                  `json:"goos"`
-	GOARCH                  string                  `json:"goarch"`
-	CPUs                    int                     `json:"logical_cpus"`
-	GOMAXPROCS              int                     `json:"gomaxprocs"`
-	Q8Workers               int                     `json:"q8_workers"`
-	Q4KWorkers              int                     `json:"q4k_workers"`
-	PromptPath              string                  `json:"prompt_ids_path"`
-	TimeoutSeconds          float64                 `json:"cooperative_timeout_seconds"`
-	Backend                 string                  `json:"backend"`
-	BackendTier             string                  `json:"backend_tier"`
-	BackendClass            string                  `json:"backend_class"`
-	BackendCaps             compute.Caps            `json:"backend_caps"`
-	KernelProfileRegistered bool                    `json:"kernel_profile_registered"`
-	Spec                    agent.DFlash2TargetSpec `json:"trusted_target_spec"`
-	PromptSHA256            string                  `json:"prompt_ids_file_sha256"`
-	TargetConfig            *model.Config           `json:"authenticated_target_config,omitempty"`
-	TargetConfigSHA256      string                  `json:"target_config_sha256"`
-	TargetEOS               int                     `json:"target_eos"`
-	TargetEOSList           []int                   `json:"target_eos_list"`
-	RequestedDraftMode      string                  `json:"requested_draft_mode"`
-	RequestedTargetPanel    string                  `json:"requested_target_panel"`
-	Order                   string                  `json:"order"`
-	RequestedTokens         int                     `json:"requested_tokens"`
-	TargetLoad              phase                   `json:"target_authentication_and_load"`
-	TargetClose             phase                   `json:"target_retirement"`
-	Arms                    []arm                   `json:"arms"`
-	ExactTokenParity        bool                    `json:"exact_token_parity"`
-	PreliminaryDecodeRatio  *float64                `json:"preliminary_plain_seconds_over_draft_seconds,omitempty"`
-	PreliminaryRequestRatio *float64                `json:"preliminary_plain_request_seconds_over_draft_request_seconds,omitempty"`
-	Notes                   []string                `json:"notes"`
-	Error                   string                  `json:"error,omitempty"`
+	Schema                  string                           `json:"schema"`
+	Status                  string                           `json:"status"`
+	StartedUTC              string                           `json:"started_utc"`
+	Build                   *debug.BuildInfo                 `json:"go_build_info"`
+	GOOS                    string                           `json:"goos"`
+	GOARCH                  string                           `json:"goarch"`
+	CPUs                    int                              `json:"logical_cpus"`
+	GOMAXPROCS              int                              `json:"gomaxprocs"`
+	Q8Workers               int                              `json:"q8_workers"`
+	Q4KWorkers              int                              `json:"q4k_workers"`
+	PromptPath              string                           `json:"prompt_ids_path"`
+	TimeoutSeconds          float64                          `json:"cooperative_timeout_seconds"`
+	Backend                 string                           `json:"backend"`
+	BackendTier             string                           `json:"backend_tier"`
+	BackendClass            string                           `json:"backend_class"`
+	BackendCaps             compute.Caps                     `json:"backend_caps"`
+	KernelProfileRegistered bool                             `json:"kernel_profile_registered"`
+	Spec                    agent.DFlash2TargetSpec          `json:"trusted_target_spec"`
+	PromptSHA256            string                           `json:"prompt_ids_file_sha256"`
+	TargetConfig            *model.Config                    `json:"authenticated_target_config,omitempty"`
+	TargetConfigSHA256      string                           `json:"target_config_sha256"`
+	TargetEOS               int                              `json:"target_eos"`
+	TargetEOSList           []int                            `json:"target_eos_list"`
+	RequestedDraftMode      string                           `json:"requested_draft_mode"`
+	RequestedTargetPanel    string                           `json:"requested_target_panel"`
+	Order                   string                           `json:"order"`
+	RequestedTokens         int                              `json:"requested_tokens"`
+	TargetLoad              phase                            `json:"target_authentication_and_load"`
+	TargetLoadMemory        agent.DFlash2LoadMemoryEstimates `json:"target_load_memory_estimates"`
+	MemoryBeforeLoad        memoryCapacityObservation        `json:"vulkan_memory_capacity_before_load"`
+	TargetClose             phase                            `json:"target_retirement"`
+	Arms                    []arm                            `json:"arms"`
+	ExactTokenParity        bool                             `json:"exact_token_parity"`
+	PreliminaryDecodeRatio  *float64                         `json:"preliminary_plain_seconds_over_draft_seconds,omitempty"`
+	PreliminaryRequestRatio *float64                         `json:"preliminary_plain_request_seconds_over_draft_request_seconds,omitempty"`
+	Notes                   []string                         `json:"notes"`
+	Error                   string                           `json:"error,omitempty"`
 }
 
 func main() {
@@ -182,6 +191,43 @@ func endPhase(start time.Time, before []compute.DeviceWork) phase {
 	return phase{Seconds: time.Since(start).Seconds(), DeviceBefore: before, DeviceAfter: compute.DeviceWorkSnapshot()}
 }
 
+var readVulkanMemoryCapacity = vulkanMemoryCapacitySnapshot
+
+func observeMemoryCapacity(phase string, be compute.Backend) (out memoryCapacityObservation) {
+	out.Phase = phase
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			out.Snapshot = nil
+			out.Error = fmt.Sprintf("capacity snapshot panic: %v", recovered)
+		}
+	}()
+	var err error
+	out.Snapshot, err = readVulkanMemoryCapacity(be)
+	if err != nil {
+		out.Error = err.Error()
+	}
+	return out
+}
+
+func reportFailureCapacityOnPanic(be compute.Backend, loadMemory *agent.DFlash2LoadMemoryEstimates, stderr io.Writer) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	diagnostic := struct {
+		Schema     string                           `json:"schema"`
+		Capacity   memoryCapacityObservation        `json:"vulkan_memory_capacity_at_failure"`
+		LoadMemory agent.DFlash2LoadMemoryEstimates `json:"target_load_memory_estimates"`
+	}{Schema: "fak-dflash2-failure-capacity/1", Capacity: observeMemoryCapacity("failure", be)}
+	if loadMemory != nil {
+		diagnostic.LoadMemory = *loadMemory
+	}
+	if encoded, err := json.Marshal(diagnostic); err == nil {
+		fmt.Fprintln(stderr, string(encoded))
+	}
+	panic(recovered)
+}
+
 func newMixedQuantSession(m *model.Model, be compute.Backend) (*model.Session, error) {
 	s, err := m.NewBackendSessionChecked(be)
 	if err != nil {
@@ -244,12 +290,17 @@ func run(ctx context.Context, o options) (r report, err error) {
 	}
 	r.Backend, r.BackendTier, r.BackendClass, r.BackendCaps = be.Name(), be.Tier(), be.Class().String(), be.Caps()
 	r.KernelProfileRegistered = compute.KernelProfileReaderRegistered()
+	var failureLoadMemory agent.DFlash2LoadMemoryEstimates
+	defer reportFailureCapacityOnPanic(be, &failureLoadMemory, os.Stderr)
+	r.MemoryBeforeLoad = observeMemoryCapacity("before_load", be)
 	start, before := beginPhase()
 	target, err := agent.NewDFlash2TargetWithOptions(ctx, r.Spec, be, selection)
 	r.TargetLoad = endPhase(start, before)
 	if err != nil {
 		return r, err
 	}
+	r.TargetLoadMemory = target.LoadMemoryEstimates()
+	failureLoadMemory = r.TargetLoadMemory
 	// This standalone process is the sole backend client. The plain arm uses
 	// a direct Session; the draft arm holds the target diagnostic domain lease. Keep target/readers alive
 	// until every arm retires normally. Returned errors cause main to exit;
@@ -365,6 +416,7 @@ func runArm(ctx context.Context, mode string, target *agent.DFlash2Target, m *mo
 		if a.InitialCacheTokens != 0 {
 			return a, errors.New("fresh session has a nonempty cache")
 		}
+		a.MemoryBeforePrefill = observeMemoryCapacity("before_prefill", be)
 		err = plainBody(ctx, s, prompt, stops, limit, requestStart, &a)
 		start, before = beginPhase()
 		s.Close()
@@ -384,6 +436,7 @@ func runArm(ctx context.Context, mode string, target *agent.DFlash2Target, m *mo
 		if selection.Request.TargetPanel == model.DFlash2TargetPanel8 {
 			panelWidth = 8
 		}
+		a.MemoryBeforePrefill = observeMemoryCapacity("before_prefill", be)
 		err = draftBody(ctx, q, prompt, stops, limit, panelWidth, requestStart, &a)
 		start, before = beginPhase()
 		err = errors.Join(err, q.Close())

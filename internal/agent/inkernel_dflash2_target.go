@@ -50,6 +50,15 @@ type DFlash2Target struct {
 	closed      bool
 	closeErr    error
 	factory     func(context.Context, *dflash2Lease) error // private test seam
+	loadMemory  DFlash2LoadMemoryEstimates
+}
+
+// DFlash2LoadMemoryEstimates records the option-exact logical weight plans for
+// the strict expanded fallback and the capability-selected loader policy.
+type DFlash2LoadMemoryEstimates struct {
+	ExpandedFallback compute.MemoryPlan `json:"expanded_fallback"`
+	Selected         compute.MemoryPlan `json:"selected"`
+	PackedQ2Selected bool               `json:"packed_q2_selected"`
 }
 
 func dflash2Digest(s string) bool {
@@ -115,6 +124,15 @@ func newDFlash2Target(ctx context.Context, spec DFlash2TargetSpec, backend compu
 
 func newDFlash2TargetWithOptions(ctx context.Context, spec DFlash2TargetSpec, backend compute.Backend, options DFlash2TargetOptions,
 	open func(context.Context, []ggufload.ShardIdentity, string) (*ggufload.WeightSource, error)) (out *DFlash2Target, err error) {
+	return newDFlash2TargetWithLoader(ctx, spec, backend, options, open,
+		func(ctx context.Context, source *ggufload.WeightSource, opts []ggufload.Q4KLoadOption) (*model.Model, error) {
+			return source.QuantModelQ4KProfileOptionsContext(ctx, nil, opts...)
+		})
+}
+
+func newDFlash2TargetWithLoader(ctx context.Context, spec DFlash2TargetSpec, backend compute.Backend, options DFlash2TargetOptions,
+	open func(context.Context, []ggufload.ShardIdentity, string) (*ggufload.WeightSource, error),
+	load func(context.Context, *ggufload.WeightSource, []ggufload.Q4KLoadOption) (*model.Model, error)) (out *DFlash2Target, err error) {
 	if err = options.validate(backend); err != nil {
 		return nil, err
 	}
@@ -153,6 +171,10 @@ func newDFlash2TargetWithOptions(ctx context.Context, spec DFlash2TargetSpec, ba
 	if open == nil {
 		completed = true
 		return nil, errors.New("dflash2: source opener required")
+	}
+	if load == nil {
+		completed = true
+		return nil, errors.New("dflash2: model loader required")
 	}
 	openEntered = true
 	target.source, err = open(ctx, spec.Shards, spec.ExpectedShardSetSHA256)
@@ -194,12 +216,28 @@ func newDFlash2TargetWithOptions(ctx context.Context, spec DFlash2TargetSpec, ba
 		completed = true
 		return nil, errors.New("dflash2: authenticated token embedding missing")
 	}
-	loadOptions, err := dflash2LoadOptions(embedding.Type)
+	fallbackOptions, err := dflash2LoadOptions(embedding.Type, nil)
 	if err != nil {
 		completed = true
 		return nil, err
 	}
-	target.m, err = target.source.QuantModelQ4KProfileOptionsContext(ctx, nil, loadOptions...)
+	loadOptions, err := dflash2LoadOptions(embedding.Type, backend)
+	if err != nil {
+		completed = true
+		return nil, err
+	}
+	target.loadMemory.ExpandedFallback, err = target.source.EstimateQ4KLoadMemoryPlan(fallbackOptions...)
+	if err != nil {
+		completed = true
+		return nil, err
+	}
+	target.loadMemory.Selected, err = target.source.EstimateQ4KLoadMemoryPlan(loadOptions...)
+	if err != nil {
+		completed = true
+		return nil, err
+	}
+	target.loadMemory.PackedQ2Selected = dflash2BackendSupportsQ2K(backend)
+	target.m, err = load(ctx, target.source, loadOptions)
 	if err != nil {
 		completed = true
 		return nil, err
@@ -239,6 +277,19 @@ func (t *DFlash2Target) Tokenizer() *tokenizer.Tokenizer {
 		return nil
 	}
 	return t.tok
+}
+
+func (t *DFlash2Target) LoadMemoryEstimates() DFlash2LoadMemoryEstimates {
+	if t == nil {
+		return DFlash2LoadMemoryEstimates{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return DFlash2LoadMemoryEstimates{
+		ExpandedFallback: slices.Clone(t.loadMemory.ExpandedFallback),
+		Selected:         slices.Clone(t.loadMemory.Selected),
+		PackedQ2Selected: t.loadMemory.PackedQ2Selected,
+	}
 }
 
 func (t *DFlash2Target) ValidateBinding(m *model.Model, tok *tokenizer.Tokenizer, backend compute.Backend, q4k, metal bool) error {
@@ -414,8 +465,16 @@ func (t *DFlash2Target) String() string {
 	return fmt.Sprintf("dflash2:%s:%s", t.spec.ExpectedShardSetSHA256, t.spec.TokenizerID)
 }
 
-func dflash2LoadOptions(dtype ggufload.TensorType) ([]ggufload.Q4KLoadOption, error) {
+func dflash2BackendSupportsQ2K(backend compute.Backend) bool {
+	capable, ok := backend.(interface{ SupportsQ2K() bool })
+	return ok && capable.SupportsQ2K()
+}
+
+func dflash2LoadOptions(dtype ggufload.TensorType, backend compute.Backend) ([]ggufload.Q4KLoadOption, error) {
 	opts := []ggufload.Q4KLoadOption{ggufload.WithMTPRetention(false), ggufload.WithNativeLinearAttnRows(false), ggufload.WithDenseKQuantResident(false)}
+	if dflash2BackendSupportsQ2K(backend) {
+		opts = append(opts, ggufload.WithDenseQ2KResident(true))
+	}
 	switch dtype {
 	case ggufload.TensorQ4_K:
 		return append(opts, ggufload.WithQ4KEmbeddingResident(true)), nil
