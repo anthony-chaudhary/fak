@@ -170,6 +170,11 @@ type V41AttentionState struct {
 	// validatedPrefix is this layer's decode-attention memo, never snapshot
 	// state: clones start empty and therefore rescan.
 	validatedPrefix v41ValidatedPrefix
+
+	// Row views hold the borrowed descriptors of each source's publications,
+	// armed by the first borrow and extended by publish. Like validatedPrefix
+	// they are never snapshot state: clones rebuild once on first borrow.
+	kvRowViews, indexRowViews map[int][][]float32
 }
 
 func (s *V41AttentionState) indexWidth() int {
@@ -341,6 +346,7 @@ func (s *V41AttentionState) seedTemporalWithInputs(projectedKV, partialInputs []
 	s.topk = nil
 	s.topkSet = false
 	s.validatedPrefix = v41ValidatedPrefix{}
+	s.kvRowViews, s.indexRowViews = nil, nil
 	return nil
 }
 
@@ -829,6 +835,7 @@ func (s *V41AttentionState) Reset() {
 	s.topkSet = false
 	s.topkRatio = 0
 	s.validatedPrefix = v41ValidatedPrefix{}
+	s.kvRowViews, s.indexRowViews = nil, nil
 }
 
 // WindowKV returns a copy of the current logical window, oldest slot first.
@@ -850,36 +857,19 @@ func (s *V41AttentionState) KVSourceRows(sourceLayerID int) ([][]float32, bool) 
 	return s.kvSourceRows(sourceLayerID, true)
 }
 
-// borrowKVSourceRows returns fresh descriptors over read-only publications for
-// one synchronous Step. The caller exclusively owns the state until consumption
-// ends: no concurrent publication, Reset, or reseed is permitted. Neither these
-// rows nor their descriptors may be retained by callbacks, snapshots, or mirrors;
-// a synchronous consumer needing retained data must copy it before returning.
+// borrowKVSourceRows returns read-only descriptors over read-only publications
+// for one synchronous Step. The caller exclusively owns the state until
+// consumption ends: no concurrent publication, Reset, or reseed is permitted.
+// The descriptors alias the state's row view (capacity equals length, so an
+// append reallocates); neither they nor their rows may be written or retained by
+// callbacks, snapshots, or mirrors, and a consumer needing retained data must
+// copy it before returning.
 func (s *V41AttentionState) borrowKVSourceRows(sourceLayerID int) ([][]float32, bool) {
 	return s.kvSourceRows(sourceLayerID, false)
 }
 
 func (s *V41AttentionState) kvSourceRows(sourceLayerID int, copyPayload bool) ([][]float32, bool) {
-	if s == nil {
-		return nil, false
-	}
-	end := s.kvPublishedEnd[sourceLayerID]
-	if end == 0 {
-		return nil, false
-	}
-	out := make([][]float32, 0, end)
-	for start := 0; start < end; start++ {
-		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
-		row, ok := s.kvPublication(key)
-		if !ok {
-			return nil, false
-		}
-		if copyPayload {
-			row = append([]float32(nil), row...)
-		}
-		out = append(out, row)
-	}
-	return out, true
+	return s.sourceRows(false, sourceLayerID, copyPayload)
 }
 
 // IndexKeys returns a copy of the index-key cache published by the given source
@@ -895,18 +885,65 @@ func (s *V41AttentionState) borrowIndexKeys(sourceLayerID int) ([][]float32, boo
 }
 
 func (s *V41AttentionState) indexKeys(sourceLayerID int, copyPayload bool) ([][]float32, bool) {
+	return s.sourceRows(true, sourceLayerID, copyPayload)
+}
+
+// v41RowViewRebuildProbe observes each borrow served by the full map walk
+// instead of the row view. Tests set it; production leaves it nil.
+var v41RowViewRebuildProbe func(index bool, source, rows int)
+
+func (s *V41AttentionState) publication(index bool, key v41AttentionPublicationKey) ([]float32, bool) {
+	if index {
+		return s.indexPublication(key)
+	}
+	return s.kvPublication(key)
+}
+
+// sourceRows resolves one source's publications [0,end). A borrow is served
+// from the row view when its terminal descriptor is still the published anchor:
+// publications are immutable and append-only, rollback removes only rows at or
+// beyond the restored end, and reset/reseed/restore replace the state or its
+// views, so the anchor identifies the whole prefix (as for validatedPrefix and
+// the indexer key cache). Otherwise the map walk keeps every refusal and re-arms
+// the view. Copying readers always walk the maps.
+func (s *V41AttentionState) sourceRows(index bool, source int, copyPayload bool) ([][]float32, bool) {
 	if s == nil {
 		return nil, false
 	}
-	end := s.indexPublishedEnd[sourceLayerID]
+	ends, views := s.kvPublishedEnd, &s.kvRowViews
+	if index {
+		ends, views = s.indexPublishedEnd, &s.indexRowViews
+	}
+	end := ends[source]
+	if !copyPayload && end > 0 {
+		if view := (*views)[source]; len(view) >= end && len(view[end-1]) > 0 {
+			last := view[end-1]
+			anchor, ok := s.publication(index, v41AttentionPublicationKey{sourceLayer: source, start: end - 1, end: end})
+			if ok && len(anchor) == len(last) && &anchor[0] == &last[0] {
+				if len(view) > end {
+					clear(view[end:])
+					(*views)[source] = view[:end]
+				}
+				return view[:end:end], true
+			}
+		}
+	}
 	if end == 0 {
 		return nil, false
 	}
+	if !copyPayload {
+		if probe := v41RowViewRebuildProbe; probe != nil {
+			probe(index, source, end)
+		}
+	}
 	out := make([][]float32, 0, end)
 	for start := 0; start < end; start++ {
-		key := v41AttentionPublicationKey{sourceLayer: sourceLayerID, start: start, end: start + 1}
-		row, ok := s.indexPublication(key)
+		key := v41AttentionPublicationKey{sourceLayer: source, start: start, end: start + 1}
+		row, ok := s.publication(index, key)
 		if !ok {
+			if !copyPayload {
+				delete(*views, source)
+			}
 			return nil, false
 		}
 		if copyPayload {
@@ -914,7 +951,29 @@ func (s *V41AttentionState) indexKeys(sourceLayerID int, copyPayload bool) ([][]
 		}
 		out = append(out, row)
 	}
+	if !copyPayload {
+		if *views == nil {
+			*views = make(map[int][][]float32)
+		}
+		(*views)[source] = out
+	}
 	return out, true
+}
+
+// extendV41RowView appends a fresh publication to an armed view. A view that
+// does not reach start is dropped and rebuilt by the next borrow; a longer one
+// holds rolled-back rows, which the new publication replaces.
+func extendV41RowView(views map[int][][]float32, source, start int, row []float32) {
+	view, armed := views[source]
+	if !armed {
+		return
+	}
+	if len(view) < start {
+		delete(views, source)
+		return
+	}
+	clear(view[start:])
+	views[source] = append(view[:start], row)
 }
 
 // Candidates returns a copy of the latest source-published candidate mask, and
@@ -1031,14 +1090,18 @@ func (s *V41AttentionState) publish(updates []V41AttentionStateUpdate) {
 		if up.Latent != nil {
 			start := s.kvPublishedEnd[up.Ref.LayerID]
 			key := v41AttentionPublicationKey{sourceLayer: up.Ref.LayerID, start: start, end: start + 1}
-			s.kvPublications[key] = append([]float32(nil), up.Latent...)
+			row := append([]float32(nil), up.Latent...)
+			s.kvPublications[key] = row
 			s.kvPublishedEnd[up.Ref.LayerID] = start + 1
+			extendV41RowView(s.kvRowViews, up.Ref.LayerID, start, row)
 		}
 		if up.IndexKey != nil {
 			start := s.indexPublishedEnd[up.Ref.LayerID]
 			key := v41AttentionPublicationKey{sourceLayer: up.Ref.LayerID, start: start, end: start + 1}
-			s.indexPublications[key] = append([]float32(nil), up.IndexKey...)
+			row := append([]float32(nil), up.IndexKey...)
+			s.indexPublications[key] = row
 			s.indexPublishedEnd[up.Ref.LayerID] = start + 1
+			extendV41RowView(s.indexRowViews, up.Ref.LayerID, start, row)
 		}
 	}
 }
