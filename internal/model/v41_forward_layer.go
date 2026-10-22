@@ -28,6 +28,9 @@ func (m *Model) v41RoleSchedule() bool {
 // reads and writes all four DISTINCT persistent streams.
 func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float32, full bool, hd, nH, H int, eps float32, hcIters int, hcEps float32, routeCfg v41RouterConfig, st *v41ForwardState, scratch *v41ProjScratch, trace *v41ActivationTraceState) error {
 	cfg := m.Cfg
+	stages := st.coldStageRecorder()
+	stages.enter(V41ColdStageLayerSetup)
+	defer stages.leave()
 	if scratch == nil {
 		scratch = &v41ProjScratch{}
 	}
@@ -55,6 +58,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	}
 	defer scratch.clearLayerSessionBindings()
 
+	stages.enter(V41ColdStageEngram)
 	if err := m.v41LayerEngramInject(l, tokens, x, streams, full, eps, st, scratch, resident); err != nil {
 		return err
 	}
@@ -64,6 +68,7 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 
+	stages.enter(V41ColdStageMHCPre)
 	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
 	mixBase := m.tensor(layerName(l, "mhc.base"))
 	mixScale := m.tensor(layerName(l, "mhc.scale"))
@@ -81,27 +86,33 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageQKV)
 	qkv, err := m.v41LayerProjectQKV(l, seq, preByPos, full, hd, nH, H, eps, scratch, trace)
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageCompressor)
 	src, err := m.v41LayerAttentionSources(l, seq, hd, full, qkv.kvRows, preByPos, st, scratch)
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageIndexer)
 	indexList, err := m.v41LayerIndexList(l, seq, hd, src, qkv.qLatRows, preByPos, st, scratch)
 	if err != nil {
 		return err
 	}
 	if st != nil {
+		stages.enter(V41ColdStagePublish)
 		if err := m.v41LayerPublishAttentionState(l, seq, hd, src, qkv, preByPos, indexList, st); err != nil {
 			return err
 		}
 	}
+	stages.enter(V41ColdStageAttention)
 	attnProjectionInput, err := m.v41LayerAttentionContract(l, seq, nH, hd, src, qkv, indexList, sink, st, scratch)
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageOutProj)
 	attnOut, err := m.v41LayerProjectAttentionOutput(l, seq, full, nH, hd, H, attnProjectionInput, projectOutput, st)
 	if err != nil {
 		return err

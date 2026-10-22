@@ -78,6 +78,7 @@ func TestPhaseProfileV41AttributionJSONBoundary(t *testing.T) {
 			if a.WallNanos <= 0 || a.WallNanos != tc.got.TotalNanos || a.AggregateTimerSemantics != "may_nest" || a.HostWallNanos != nil || a.HostWallObservationStatus != "unknown" || a.CopyWallNanos != nil || a.CopyWallObservationStatus != "unknown" || a.HardwareExecutionEvidence != "not_established_by_model_counters" {
 				t.Fatalf("wall/evidence semantics=%+v", a)
 			}
+			phaseRequireColdStagePartition(t, tc.name, a.ColdStages, m.Cfg.NumLayers)
 		})
 	}
 	if final := m.V41ExpertFaultAttribution().Prefill; final.Tokens <= boundary.Prefill[0].V41ModelAttribution.After.Tokens {
@@ -105,5 +106,92 @@ func TestPhaseProfileV41AttributionJSONBoundary(t *testing.T) {
 	}
 	if !bytes.Equal(plain, legacyJSON) {
 		t.Fatalf("non-V4.1 wrapper changed legacy JSON: got=%s want=%s", plain, legacyJSON)
+	}
+}
+
+// phaseRequireColdStagePartition checks the receipt's closed contract: stage
+// rows plus unassigned sum to total in every published family, unobserved
+// families are omitted, and the cold prefill enters each per-layer stage once
+// per layer.
+func phaseRequireColdStagePartition(t *testing.T, phase string, c *phaseV41ColdStages, layers int) {
+	t.Helper()
+	if c == nil || c.Schema != phaseV41ColdStagesSchema || c.Semantics != "exclusive_partition" || len(c.Stages) != int(model.V41ColdStageCount) {
+		t.Fatalf("%s cold-stage receipt=%+v", phase, c)
+	}
+	if c.DeviceWorkObserved != (c.SubmitWaitCoverage != "") {
+		t.Fatalf("%s submit_wait_coverage=%q with device_work_observed=%t", phase, c.SubmitWaitCoverage, c.DeviceWorkObserved)
+	}
+	type sums struct {
+		entries, d2hCount, d2hBytes, h2dCount, h2dBytes, d2d, d2dBytes, submits, dispatches, deviceSubmits, workDispatches, wait uint64
+		wall                                                                                                                     int64
+	}
+	fold := func(s *sums, row phaseV41ColdStage) {
+		s.entries += row.Entries
+		s.wall += row.HostWallNanos
+		if (row.Counters != nil) != c.CountersObserved || (row.DeviceSubmits != nil) != c.DeviceSubmitsObserved || (row.DeviceWork != nil) != c.DeviceWorkObserved {
+			t.Fatalf("%s %s family presence disagrees with the receipt flags: %+v", phase, row.Stage, row)
+		}
+		if k := row.Counters; k != nil {
+			if (k.DispatchSubmits != nil) != c.DispatchCountsLive || (k.ComputeDispatches != nil) != c.DispatchCountsLive {
+				t.Fatalf("%s %s dispatch counts presence disagrees with dispatch_counts_live=%t", phase, row.Stage, c.DispatchCountsLive)
+			}
+			s.d2hCount += k.D2HCount
+			s.d2hBytes += k.D2HBytes
+			s.h2dCount += k.H2DCount
+			s.h2dBytes += k.H2DBytes
+			s.d2d += k.D2DCopies
+			s.d2dBytes += k.D2DBytes
+			if k.DispatchSubmits != nil {
+				s.submits += *k.DispatchSubmits
+				s.dispatches += *k.ComputeDispatches
+			}
+		}
+		if row.DeviceSubmits != nil {
+			s.deviceSubmits += *row.DeviceSubmits
+		}
+		if w := row.DeviceWork; w != nil {
+			s.workDispatches += w.Dispatches
+			s.wait += w.SubmitWaitNanos
+		}
+	}
+	var sum, total sums
+	fold(&sum, c.Unassigned)
+	for i, row := range c.Stages {
+		if row.Stage != model.V41ColdStage(i).String() {
+			t.Fatalf("%s stage %d named %q", phase, i, row.Stage)
+		}
+		fold(&sum, row)
+	}
+	fold(&total, c.Total)
+	if sum != total {
+		t.Fatalf("%s stages+unassigned do not close on total: sum=%+v total=%+v", phase, sum, total)
+	}
+	if phase == "prefill" && c.Stages[model.V41ColdStageQKV].Entries != uint64(layers) {
+		t.Fatalf("prefill qkv entries=%d want %d layers", c.Stages[model.V41ColdStageQKV].Entries, layers)
+	}
+}
+
+// TestPhaseV41ColdStagesDeviceSubmits pins the always-on submit family: it is
+// published per row whenever observed, closes on total, and stays present when
+// the profiler's dispatch counts are not live.
+// fak-test:runtime fast est=10ms lane=default
+func TestPhaseV41ColdStagesDeviceSubmits(t *testing.T) {
+	var w model.V41ColdStageAttribution
+	w.CountersObserved, w.DeviceSubmitsObserved = true, true
+	w.Stages[model.V41ColdStageRouted] = model.V41ColdStageCounters{Entries: 3, HostWallNanos: 50, DeviceSubmits: 7}
+	w.Stages[model.V41ColdStageAttention] = model.V41ColdStageCounters{Entries: 3, HostWallNanos: 20, DeviceSubmits: 2}
+	w.Unassigned.DeviceSubmits = 1
+	c := newPhaseV41ColdStages(w)
+	phaseRequireColdStagePartition(t, "decode", c, 0)
+	routed := c.Stages[model.V41ColdStageRouted]
+	if !c.DeviceSubmitsObserved || c.DispatchCountsLive || routed.DeviceSubmits == nil || *routed.DeviceSubmits != 7 ||
+		routed.Counters == nil || routed.Counters.DispatchSubmits != nil || c.Total.DeviceSubmits == nil || *c.Total.DeviceSubmits != 10 {
+		t.Fatalf("profile-off receipt lost the always-on submits: %+v", c)
+	}
+	w.DeviceSubmitsObserved = false
+	c = newPhaseV41ColdStages(w)
+	phaseRequireColdStagePartition(t, "decode", c, 0)
+	if c.Total.DeviceSubmits != nil || c.Stages[model.V41ColdStageRouted].DeviceSubmits != nil {
+		t.Fatalf("unobserved submits were published: %+v", c)
 	}
 }

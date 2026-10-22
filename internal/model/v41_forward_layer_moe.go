@@ -42,18 +42,23 @@ type v41LayerFFNPanel struct {
 // v41LayerMoE runs the router, the routed and shared experts, and the mHC
 // post-mix for one layer, then publishes the next streams.
 func (m *Model) v41LayerMoE(in v41LayerMoEInput) error {
+	stages := in.st.coldStageRecorder()
+	stages.enter(V41ColdStageFFNIn)
 	panel, err := m.v41LayerFFNInputs(in)
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageRouter)
 	perTokenPicks, err := m.v41LayerRoute(in, panel)
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageRouted)
 	routedByToken, err := m.v41LayerRoutedContraction(in, panel.inputs, perTokenPicks)
 	if err != nil {
 		return err
 	}
+	stages.enter(V41ColdStageSharedPost)
 	return m.v41LayerSharedExpertAndPost(in, panel, routedByToken)
 }
 

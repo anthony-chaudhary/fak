@@ -67,6 +67,12 @@ static inline void dp_inc(std::atomic<uint64_t>& v) { if (g_dp_on) v.fetch_add(1
 // recorded compute dispatch, and host wall from queue submit to fence signal.
 static std::atomic<uint64_t> g_deviceDispatches{0};
 static std::atomic<uint64_t> g_submitWaitNs{0};
+// Every batch and one-shot queue submit, also profile-independent; with the profile on
+// it moves exactly with batch_submits + one_shot_submits.
+static std::atomic<uint64_t> g_deviceSubmits{0};
+static inline void dpBatchSubmit() { g_deviceSubmits.fetch_add(1, std::memory_order_relaxed); dp_inc(g_dp.batchSubmits); }
+uint64_t fvk_device_submits(void) { return g_deviceSubmits.load(std::memory_order_relaxed); }
+
 static inline uint64_t submitWaitNow() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -477,6 +483,7 @@ static inline void tsCountUntimed(bool compute) {
 
 static inline void dpOneShot(std::atomic<uint64_t>& family) {
     tsCountUntimed(&family == &g_dp.oneShotCompute);
+    g_deviceSubmits.fetch_add(1, std::memory_order_relaxed);
     if (!g_dp_on) return;
     family.fetch_add(1, std::memory_order_relaxed);
     g_dp.oneShotSubmits.fetch_add(1, std::memory_order_relaxed);
@@ -1979,7 +1986,7 @@ void batchCycle() {
         batchBegin();
         return;
     }
-    dp_inc(g_dp.batchSubmits);
+    dpBatchSubmit();
     VKCHECK(vkEndCommandBuffer(g_batchCmd));
     VKCHECK(vkResetFences(g_dev, 1, &fence));
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -2023,7 +2030,7 @@ void batchFlush() {
     bool hadWork = g_batchOps > 0;
     if (g_batchHasV41) {
         drainInflight();
-        if (hadWork) dp_inc(g_dp.batchSubmits);
+        if (hadWork) dpBatchSubmit();
         const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);
         if (!completed || !hadWork || g_v41SubmissionPendingFailure) tsBatchLost();
         if (g_v41SubmissionPendingFailure) return; // retain command, sets and parked buffers
@@ -2032,7 +2039,7 @@ void batchFlush() {
             !checkedCounterAdd(g_d2dCount, g_batchD2DCount) ||
             !checkedCounterAdd(g_d2dBytes, g_batchD2DBytes))) g_transferCountersValid = false;
     } else if (hadWork) {
-        dp_inc(g_dp.batchSubmits);
+        dpBatchSubmit();
         if (g_inflight.active) submitBehindInflightWait(g_batchCmd);
         else endSubmitWait(g_batchCmd);   // single submit + fence for the whole recorded chain
         tsBatchCollect();
@@ -8432,7 +8439,7 @@ int fvk_v41_query_prefix_f32(const float* hostCollapse, const fvk_v41_query_pref
         return g_submissionStatus != VK_SUCCESS ? int(g_submissionStatus) : 4;
     }
     *failedStage = 9;
-    dp_inc(g_dp.batchSubmits); // one combined H2D+compute submission, not two
+    dpBatchSubmit(); // one combined H2D+compute submission, not two
     tsCountUntimed(true);
     const bool completed = v41EndSubmitWaitChecked(cmd, true);
     // The helper owns command freeing on success/known-pre-submit failure.

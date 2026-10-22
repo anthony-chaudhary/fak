@@ -901,6 +901,9 @@ bool fvk_batch_foreign_active(void);
 uint64_t fvk_h2d_bytes(void);
 /* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */
 uint64_t fvk_direct_h2d_bytes(void);
+/* Always-on cumulative queue submits: every batch and one-shot submit, whether or not
+ * FAK_VULKAN_DISPATCH_PROFILE=1 (with it on, equal to batch + one-shot submits). */
+uint64_t fvk_device_submits(void);
 uint64_t fvk_d2h_bytes(void);
 /* Always-on cumulative device-work counters: recorded compute dispatches, D2H
  * payload bytes, and host wall nanoseconds from queue submit to fence signal. */
