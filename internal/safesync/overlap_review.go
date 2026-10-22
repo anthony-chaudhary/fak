@@ -26,21 +26,22 @@ const CleanOverlapReviewSchema = "fak.sync.clean-overlap-review.v1"
 // both parent-to-result diffs participate in its digest. Names are audit metadata,
 // not authentication; the authorized operator's explicit acceptance is the boundary.
 type CleanOverlapReview struct {
-	Schema       string   `json:"schema"`
-	Repository   string   `json:"repository"`
-	Worktree     string   `json:"worktree"`
-	LocalHead    string   `json:"local_head"`
-	TargetSHA    string   `json:"target_sha"`
-	MergeBases   []string `json:"merge_bases"`
-	MergedTree   string   `json:"merged_tree"`
-	OverlapPaths []string `json:"overlap_paths"`
-	WritePaths   []string `json:"write_paths"`
-	LocalOnly    bool     `json:"local_only"`
-	Reviewer     string   `json:"reviewer"`
-	Evidence     string   `json:"evidence"`
-	LocalDiff    string   `json:"local_to_result_diff"`
-	TargetDiff   string   `json:"target_to_result_diff"`
-	Digest       string   `json:"digest"`
+	Schema       string                    `json:"schema"`
+	Repository   string                    `json:"repository"`
+	Worktree     string                    `json:"worktree"`
+	LocalHead    string                    `json:"local_head"`
+	TargetSHA    string                    `json:"target_sha"`
+	MergeBases   []string                  `json:"merge_bases"`
+	MergedTree   string                    `json:"merged_tree"`
+	OverlapPaths []string                  `json:"overlap_paths"`
+	WritePaths   []string                  `json:"write_paths"`
+	LocalOnly    bool                      `json:"local_only"`
+	Reviewer     string                    `json:"reviewer"`
+	Evidence     string                    `json:"evidence"`
+	LocalDiff    string                    `json:"local_to_result_diff"`
+	TargetDiff   string                    `json:"target_to_result_diff"`
+	LockWaivers  []leaseref.SnapshotWaiver `json:"lock_waivers,omitempty"`
+	Digest       string                    `json:"digest"`
 }
 
 // ReviewedOverlapApproval records explicit acceptance of exactly one manifest.
@@ -57,12 +58,13 @@ type ReviewedOverlapRequest struct {
 
 // CleanOverlapReviewOptions specifies immutable inputs and accountable review metadata.
 type CleanOverlapReviewOptions struct {
-	Repo      string
-	TargetSHA string
-	Reviewer  string
-	Evidence  string
-	Runner    Runner
-	Now       func() time.Time
+	Repo        string
+	TargetSHA   string
+	Reviewer    string
+	Evidence    string
+	LockWaivers []leaseref.SnapshotWaiver
+	Runner      Runner
+	Now         func() time.Time
 }
 
 type reviewedOverlapAdmission struct{ review CleanOverlapReview }
@@ -172,6 +174,9 @@ func PrepareCleanOverlapReview(ctx context.Context, opts CleanOverlapReviewOptio
 	if !exactObjectID(opts.TargetSHA) || strings.TrimSpace(opts.Reviewer) == "" || strings.TrimSpace(opts.Evidence) == "" {
 		return nil, fmt.Errorf("review requires exact target commit, reviewer and evidence reference")
 	}
+	if err := leaseref.ValidateSnapshotWaivers(opts.LockWaivers); err != nil {
+		return nil, fmt.Errorf("invalid review lock waivers: %w", err)
+	}
 	run, repo := opts.Runner, opts.Repo
 	if err := reviewCleanState(ctx, run, repo); err != nil {
 		return nil, err
@@ -274,7 +279,8 @@ func PrepareCleanOverlapReview(ctx context.Context, opts CleanOverlapReviewOptio
 	}
 	review := &CleanOverlapReview{Schema: CleanOverlapReviewSchema, Repository: common, Worktree: worktree,
 		LocalHead: head, TargetSHA: target, MergeBases: baseSet, MergedTree: tree, OverlapPaths: paths, WritePaths: writes, LocalOnly: true,
-		Reviewer: opts.Reviewer, Evidence: opts.Evidence, LocalDiff: localDiff, TargetDiff: targetDiff}
+		Reviewer: opts.Reviewer, Evidence: opts.Evidence, LocalDiff: localDiff, TargetDiff: targetDiff,
+		LockWaivers: append([]leaseref.SnapshotWaiver(nil), opts.LockWaivers...)}
 	review.Digest = reviewDigest(*review)
 	return review, nil
 }
@@ -318,7 +324,16 @@ func checkReviewPathOwners(ctx context.Context, opts CleanOverlapReviewOptions, 
 		r := run(c, dir, args...)
 		return string(r.Stdout), r.Code, r.Err
 	}
-	records, _, err := leaseref.NewWithRunner(lr, opts.Repo).StrictLiveSnapshot(ctx, now())
+	store := leaseref.NewWithRunner(lr, opts.Repo)
+	var records []leaseref.Record
+	var err error
+	if len(review.LockWaivers) == 0 {
+		records, _, err = store.StrictLiveSnapshot(ctx, now())
+	} else {
+		// This helper is reached only after explicit digest acceptance and native
+		// review recomputation. No other sync mode receives these exceptions.
+		records, _, err = store.StrictLiveSnapshotWithWaivers(ctx, now(), review.LockWaivers)
+	}
 	if err != nil {
 		return fmt.Errorf("inspect independent path leases: %w", err)
 	}
@@ -374,6 +389,7 @@ func ValidateCleanOverlapReview(ctx context.Context, opts CleanOverlapReviewOpti
 		return nil, err
 	}
 	opts.TargetSHA, opts.Reviewer, opts.Evidence = review.TargetSHA, review.Reviewer, review.Evidence
+	opts.LockWaivers = append([]leaseref.SnapshotWaiver(nil), review.LockWaivers...)
 	fresh, err := PrepareCleanOverlapReview(ctx, opts)
 	if err != nil {
 		return nil, err

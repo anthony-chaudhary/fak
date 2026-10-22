@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
@@ -95,6 +96,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	reviewTarget := fs.String("target", "", "review-overlap: exact immutable target commit")
 	reviewer := fs.String("reviewer", "", "review-overlap: actual accountable reviewer identity (not authentication)")
 	reviewEvidence := fs.String("review-evidence", "", "review-overlap: review/authority evidence reference")
+	lockWaiversFile := fs.String("lock-waivers", "", "review-overlap: JSON array of exact lock ref/object/reason/evidence exceptions to include in the review")
 	packetFile := fs.String("packet", "", "execute: path to reconciliation packet JSON file")
 	sessionFlag := fs.String("session", "", "reconcile: session id for suspended paths")
 	var suspendPaths pathList
@@ -133,8 +135,8 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		}
 		overlapRequest = &safesync.ReviewedOverlapRequest{Review: manifest, Approval: safesync.ReviewedOverlapApproval{Digest: *acceptReview}}
 	}
-	if command != "review-overlap" && (*reviewTarget != "" || *reviewer != "" || *reviewEvidence != "") {
-		fmt.Fprintln(stderr, "fak sync: --target, --reviewer and --review-evidence are review-overlap-only")
+	if command != "review-overlap" && (*reviewTarget != "" || *reviewer != "" || *reviewEvidence != "" || *lockWaiversFile != "") {
+		fmt.Fprintln(stderr, "fak sync: --target, --reviewer, --review-evidence and --lock-waivers are review-overlap-only")
 		return syncExitUsage
 	}
 	if command == "review-overlap" {
@@ -142,8 +144,27 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintln(stderr, "fak sync review-overlap: manifest generation does not fetch, execute, apply or suspend")
 			return syncExitUsage
 		}
+		var lockWaivers []leaseref.SnapshotWaiver
+		if *lockWaiversFile != "" {
+			data, err := os.ReadFile(pathutil.ExpandTilde(*lockWaiversFile))
+			if err != nil {
+				fmt.Fprintf(stderr, "fak sync review-overlap: read lock waivers: %v\n", err)
+				return syncExitUsage
+			}
+			decoder := json.NewDecoder(bytes.NewReader(data))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&lockWaivers); err != nil {
+				fmt.Fprintf(stderr, "fak sync review-overlap: decode lock waivers: %v\n", err)
+				return syncExitUsage
+			}
+			var extra interface{}
+			if err := decoder.Decode(&extra); err != io.EOF || len(lockWaivers) == 0 {
+				fmt.Fprintln(stderr, "fak sync review-overlap: lock waivers must be one nonempty JSON array")
+				return syncExitUsage
+			}
+		}
 		manifest, err := safesync.PrepareCleanOverlapReview(context.Background(), safesync.CleanOverlapReviewOptions{
-			Repo: pathutil.ExpandTilde(*repo), TargetSHA: *reviewTarget, Reviewer: *reviewer, Evidence: *reviewEvidence,
+			Repo: pathutil.ExpandTilde(*repo), TargetSHA: *reviewTarget, Reviewer: *reviewer, Evidence: *reviewEvidence, LockWaivers: lockWaivers,
 		})
 		if err != nil {
 			fmt.Fprintf(stderr, "fak sync review-overlap: %v\n", err)
@@ -539,7 +560,7 @@ func syncUsage(w io.Writer) {
   fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute [--local-only]]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync execute   [--local-only] [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
-  fak sync review-overlap --repo DIR --target SHA --reviewer NAME --review-evidence REF
+  fak sync review-overlap --repo DIR --target SHA --reviewer NAME --review-evidence REF [--lock-waivers FILE]
   fak sync execute --local-only --reviewed-overlap MANIFEST --accept-review DIGEST [--packet FILE]
   fak sync heal      [--repo DIR] [--dry-run] [--json]
 
@@ -548,6 +569,9 @@ authorized operator must genuinely review the exact manifest before accepting it
 digest. Reviewed overlap is local-only; live independent path claims, textual
 conflicts, and stale bindings remain refused. Reviewer names are audit metadata,
 not authentication. Multiple merge bases are not admitted by this bounded mode.
+Optional lock waivers are a JSON array of ref, expected_oid, reason and evidence.
+They are bound into the accepted digest, never delete refs, never exempt valid live
+claims, and are refused if unused or stale. Other sync modes remain strict.
 
 Local-only packet execution requires a clean index/worktree and successful build/test
 witnesses; it preserves ownership refusals and stops before publication or executor-stage
