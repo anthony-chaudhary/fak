@@ -26,8 +26,8 @@ fak sync check [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
 # Apply verified fast-forward integration when all touched paths are safe
 fak sync apply [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
 
-# Safely push current HEAD to remote with automatic race retries
-fak sync push [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
+# Safely push captured HEAD (or an explicit source commit) with automatic race retries
+fak sync push [--repo DIR] [--remote origin] [--branch B] [--source COMMIT] [--retries N] [--budget 5s] [--json]
 
 # Drain stranded commits when trunk turns green after a push blockage
 fak sync drain [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
@@ -41,6 +41,8 @@ fak sync packet [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
 # Execute a pre-built reconciliation packet with independent graph verification
 fak sync execute [--packet FILE] [--repo DIR] [--remote origin] [--branch B] [--json]
 ```
+
+`push` captures HEAD by default. With `--source COMMIT`, it resolves that commit once and uses the same immutable source through retries and readback, without including later HEAD changes. Invalid sources are refused rather than replaced with HEAD. Normal push hooks and branch rules still apply.
 
 ## Architectural Foundation: The Three-Tree Invariant
 

@@ -36,7 +36,10 @@ var (
 	syncBuildReconciliationPacket = safesync.BuildReconciliationPacket
 	syncExecutePacket             = safesync.ExecutePacket
 	syncHeal                      = safesync.Heal
-	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
+	syncResolveSource             = func(repo, source string) (string, error) {
+		return gitOut(repo, "rev-parse", "--verify", "--end-of-options", source+"^{commit}")
+	}
+	syncCaptureSource = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
 func runSync(stdout, stderr io.Writer, argv []string) int {
@@ -65,6 +68,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "remote name")
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
+	source := fs.String("source", "", "push: commit to publish, resolved once before pushing (default: captured HEAD)")
 	retries := fs.Int("retries", 3, "push: total attempts before giving up on a moving trunk")
 	queueFile := fs.String("queue-file", "", "drain: stranded-commit queue file (default: <repo>/.fak/sync-drain-queue.json)")
 	budgetDefault := 60 * time.Second
@@ -104,6 +108,16 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	var recheckPaths pathList
 	fs.Var(&recheckPaths, "recheck-path", "check: recheck PUBLIC_LEAK only for this repo-relative repair path (repeatable)")
 	if err := fs.Parse(argv); err != nil {
+		return syncExitUsage
+	}
+	sourceSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "source" {
+			sourceSet = true
+		}
+	})
+	if sourceSet && (command != "push" || strings.TrimSpace(*source) == "") {
+		fmt.Fprintln(stderr, "fak sync: --source requires push and a nonempty commit")
 		return syncExitUsage
 	}
 	if *localOnly && ((command != "execute" && !(command == "reconcile" && *executeFlag)) || *applyFlag) {
@@ -200,7 +214,15 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitUsage
 		}
 		repoPath := pathutil.ExpandTilde(*repo)
-		sourceSHA, err := syncCaptureSource(repoPath)
+		var sourceSHA string
+		var err error
+		if sourceSet {
+			// Resolve before advisory work and preserve this object through every retry.
+			// An invalid explicit source must never fall back to the current HEAD.
+			sourceSHA, err = syncResolveSource(repoPath, *source)
+		} else {
+			sourceSHA, err = syncCaptureSource(repoPath)
+		}
 		if err != nil || strings.TrimSpace(sourceSHA) == "" {
 			fmt.Fprintf(stderr, "fak sync: capture push source: %v\n", err)
 			return syncExitInternal
@@ -555,7 +577,7 @@ func syncUsage(w io.Writer) {
   fak sync [check]   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
                         [--recheck-path PATH ...] [--resume-token TOKEN]
   fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
-  fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
+  fak sync push      [--repo DIR] [--remote origin] [--branch B] [--source COMMIT] [--retries N] [--budget 5s] [--json]
   fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
   fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute [--local-only]]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
@@ -584,8 +606,9 @@ Safe shared-trunk git for dirty worktrees. check is read-only except for optiona
 the remote baseline, and emits collision-safe repair slices, a targeted recheck, and an
 operation-bound resume token. A resume always reruns the whole gate; the token cannot
 bypass or soften it. apply runs the fast-forward only when every path Git would write is clean at
-HEAD or already byte-identical to the remote-tracking version. push pushes the branch
-and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
+HEAD or already byte-identical to the remote-tracking version. push publishes a captured
+HEAD by default; --source resolves the requested commit once instead, without including
+later HEAD changes. Normal push hooks and branch rules still apply. It retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a
 clear integrate-then-push next step. Its velocity evidence scores only a published
 safe push against the declared --budget; refusals/errors retain timing but are UNSCORED.
