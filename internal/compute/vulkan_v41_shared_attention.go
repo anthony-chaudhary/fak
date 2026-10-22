@@ -35,11 +35,15 @@ func (v *vulkanBackend) SupportsV41SharedAttention() bool {
 // BitExact is the serial kernel and the parity oracle. RunToRun is the pinned
 // Wave32 subgroup-tree module: stable bits run to run on one device and
 // driver, never bit-identical to BitExact. Heads wider than 512 stay BitExact.
+// SplitK is also run-to-run: 16-row tiles spread across workgroups that load
+// each KV row once for 64 heads, then a fixed-order per-head merge. Shapes
+// outside its envelope, and any head that would fault, use RunToRun.
 type V41SharedAttentionClass int
 
 const (
 	V41SharedAttentionBitExact V41SharedAttentionClass = 0
 	V41SharedAttentionRunToRun V41SharedAttentionClass = 1
+	V41SharedAttentionSplitK   V41SharedAttentionClass = 2
 )
 
 // ErrV41SharedAttentionClassUnavailable reports a class this device cannot run.
@@ -54,6 +58,16 @@ func (v *vulkanBackend) V41SharedAttentionFastAvailable() bool {
 	return C.fvk_have_v41_shared_attention_fast() != 0
 }
 
+// V41SharedAttentionSplitAvailable reports the optional split-k module.
+func (v *vulkanBackend) V41SharedAttentionSplitAvailable() bool {
+	if v == nil {
+		return false
+	}
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_have_v41_shared_attention_split() != 0
+}
+
 func (v *vulkanBackend) V41SharedAttentionClass() V41SharedAttentionClass {
 	if v == nil {
 		return V41SharedAttentionBitExact
@@ -64,7 +78,7 @@ func (v *vulkanBackend) V41SharedAttentionClass() V41SharedAttentionClass {
 }
 
 // SetV41SharedAttentionClass selects the class for later dispatches; the
-// FAK_V41_SHARED_ATTENTION_DETERMINISM=run-to-run startup env sets the default.
+// FAK_V41_SHARED_ATTENTION_DETERMINISM=run-to-run|split-k startup env sets the default.
 func (v *vulkanBackend) SetV41SharedAttentionClass(class V41SharedAttentionClass) error {
 	if v == nil {
 		return ErrV41SharedAttentionClassUnavailable

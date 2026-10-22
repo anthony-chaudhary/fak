@@ -150,6 +150,8 @@ const (
 	VulkanBuildReceiptSchemaV31 = "fak.vulkan-build-receipt.v31"
 	// VulkanBuildReceiptSchemaV32 adds the V4.1 device-resident compressor ring module.
 	VulkanBuildReceiptSchemaV32 = "fak.vulkan-build-receipt.v32"
+	// VulkanBuildReceiptSchemaV33 adds the V4.1 split-k shared attention module.
+	VulkanBuildReceiptSchemaV33 = "fak.vulkan-build-receipt.v33"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
