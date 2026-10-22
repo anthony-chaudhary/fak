@@ -173,7 +173,7 @@ func TestV41CompressedVisibilityRefusalParity(t *testing.T) {
 			if we == nil || ge == nil || we.Error() != ge.Error() || want != nil || got != nil || callbacks != 0 {
 				t.Fatalf("refusal mismatch: baseline=%v candidate=%v callbacks=%d", we, ge, callbacks)
 			}
-			if tc.name != "score_overflow_later_head" {
+			if tc.name != "score_overflow_later_head" && !raceEnabled() {
 				old := testing.AllocsPerRun(10, func() { _, _ = v41CompressedVisibilityBaseline(q, v, o) })
 				fresh := testing.AllocsPerRun(10, func() { _, _ = V41AttentionCompressedForward(q, v, o) })
 				if old != fresh {

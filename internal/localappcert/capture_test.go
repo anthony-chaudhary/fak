@@ -207,7 +207,13 @@ func TestCaptureTimeoutIsTypedFailWithEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
+	limit := 5 * time.Second
+	if raceDetectorEnabled {
+		// Each scenario re-execs the race-instrumented test binary; CI measured
+		// 13.1s for this capture under -race, so the promptness bound scales.
+		limit = 30 * time.Second
+	}
+	if elapsed := time.Since(started); elapsed > limit {
 		t.Fatalf("per-scenario timeout took %v", elapsed)
 	}
 	row := captureRow(t, rows, timedOutName)

@@ -1060,16 +1060,23 @@ jobs:
   # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
   #
   # SHARDED (2026-10-22): one runner could not finish `go test -race ./...` inside
-  # the 30-minute job deadline. Measured on run 39814588650 (ubuntu-latest, -p=1):
-  # cmd/fak alone took 1193s under -race and the job was killed while still in
-  # internal/q*, so every push's race-detector ended `cancelled` and ci-provenance
-  # could never verify. The non-race test step sums ~3430s of package time, with
-  # cmd/fak (597s) and internal/model (541s) dominant, then internal/tokencache
-  # (194s) and internal/agent (180s). Those get dedicated legs (cli, model, heavy);
-  # every other package is assigned round-robin over `go list` order to one of
-  # RACE_REST_SHARDS legs (worst rest leg ~350s non-race on that run), so the
-  # union is exactly ./... by construction. needs.race-detector.result is success only when every leg
-  # succeeds, so ci-provenance's contract is unchanged.
+  # the 30-minute job deadline (run 39814588650: killed in internal/q*, so every
+  # push's race-detector ended `cancelled` and ci-provenance could never verify).
+  # Leg groups come from MEASURED -race package time on run 39841600487
+  # (ubuntu-latest, -p=1, GOMAXPROCS=2; race/non-race ratio ~4x, up to 27x):
+  # internal/model 1500s (hit the 25m package timeout), branchrole 1021s,
+  # turnbench 916s, deepseekv4moe 579s + hooks 453s, devcmd 532s + codelint 426s,
+  # conceptcatalog 354s + agent 313s; cmd/fak (8433 tests) never finished inside
+  # 30m, so its tests split over two legs by complementary -run patterns
+  # (^Test[A-L]: 4099 funcs; ^(Test[^A-L]|Test$|Example|Fuzz): 4334). The
+  # ~5800s remainder is round-robined over `go list` order into RACE_REST_SHARDS
+  # legs, so the union is exactly ./... by construction. Budget per leg: <=~20m
+  # of package time plus ~4m cold compile (measured: rest-7 go-test step 731s vs
+  # 511s package time). needs.race-detector.result is success only when every
+  # leg succeeds, so ci-provenance's contract is unchanged.
+  # NO race build cache: the old gorace cache saved only on success (never), and
+  # ~420MB per leg per SHA would churn the repo's 10GB Actions cache, which the
+  # build-vet-test gobuild entries (1-1.5GB each) already fill.
   race-detector:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
@@ -1080,10 +1087,23 @@ jobs:
     name: race detector · go test -race (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Race is the most expensive gate (~4 runner-hours per commit on run
+    # 39841600487) and trunk pushes arrive ~4/hour on a 20-concurrent-job account,
+    # so per-commit race cannot keep up: one run's legs filled every slot and
+    # queued ci-fast behind them. Per-leg concurrency without cancel-in-progress
+    # keeps one running + one pending leg per shard per ref; a newer push replaces
+    # the stale pending leg, so the race verdict rolls up to the trunk tip and a
+    # superseded commit's race-detector reads cancelled (ci-provenance then
+    # refuses it as incomplete, never a false green). max-parallel leaves slots
+    # free for build-vet-test, ci-fast and head-snapshot-build.
+    concurrency:
+      group: race-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}-${{ matrix.shard }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
+      max-parallel: 8
       matrix:
-        shard: [cli, model, heavy, rest-0, rest-1, rest-2, rest-3, rest-4, rest-5, rest-6, rest-7]
+        shard: [cli-a, cli-b, model, heavy-1, heavy-2, heavy-3, heavy-4, heavy-5, rest-0, rest-1, rest-2, rest-3, rest-4, rest-5, rest-6, rest-7]
     env:
       GOTOOLCHAIN: auto
       # Keep race compilation under the same hosted-runner process ceiling.
@@ -1097,6 +1117,10 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Same full history as build-vet-test: internal/pythongate (and release
+          # substrate tests) read git history and fail on a depth-1 clone.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -1114,21 +1138,6 @@ jobs:
           [[ "$sha" == "$GITHUB_SHA" ]]
           go env -json GOVERSION GOOS GOARCH CGO_ENABLED GOFLAGS GOTOOLCHAIN | jq --arg gomaxprocs "${GOMAXPROCS:-}" '. + {GOMAXPROCS:$gomaxprocs}' > "$RUNNER_TEMP/ci-environment.json"
 
-      # Race-build cache, the single biggest CI-time win here: `-race` re-instruments and
-      # recompiles the whole tree (the reason this job carries a 25m timeout). Its GOCACHE
-      # entries are race-instrumented, so they get a SEPARATE key prefix (gorace) from the
-      # non-race build cache above — restoring it lets a push recompile only the packages
-      # that changed under instrumentation instead of all of them.
-      - name: cache Go race build cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/go-build
-          key: ${{ runner.os }}-gorace-${{ matrix.shard }}-${{ hashFiles('go.mod') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-gorace-${{ matrix.shard }}-${{ hashFiles('go.mod') }}-
-            ${{ runner.os }}-gorace-${{ matrix.shard }}-
-            ${{ runner.os }}-gorace-
-
       - name: C toolchain present (the race detector needs cgo)
         run: cc --version
 
@@ -1141,23 +1150,39 @@ jobs:
         run: |
           set -euo pipefail
           mod=$(go list -m)
-          # Dedicated legs: packages whose -race wall alone would crowd a shared leg.
-          cli=("$mod/cmd/fak")
-          model=("$mod/internal/model")
-          heavy=("$mod/internal/tokencache" "$mod/internal/agent")
-          case "$SHARD" in
-            cli) printf '%s\n' "${cli[@]}" > "$RUNNER_TEMP/race-packages.txt" ;;
-            model) printf '%s\n' "${model[@]}" > "$RUNNER_TEMP/race-packages.txt" ;;
-            heavy) printf '%s\n' "${heavy[@]}" > "$RUNNER_TEMP/race-packages.txt" ;;
-            rest-*)
-              excludes=()
-              for pkg in "${cli[@]}" "${model[@]}" "${heavy[@]}"; do excludes+=(-e "$pkg"); done
-              go list ./... | grep -vxF "${excludes[@]}" \
-                | awk -v n="$RACE_REST_SHARDS" -v i="${SHARD#rest-}" '(NR-1)%n==i' > "$RUNNER_TEMP/race-packages.txt" ;;
-            *) echo "::error::unknown race shard $SHARD"; exit 1 ;;
-          esac
+          # Dedicated legs (see the measured budget above the job).
+          declare -A groups=(
+            [cli-a]="cmd/fak"
+            [cli-b]="cmd/fak"
+            [model]="internal/model"
+            [heavy-1]="internal/branchrole"
+            [heavy-2]="internal/turnbench"
+            [heavy-3]="internal/deepseekv4moe internal/hooks"
+            [heavy-4]="internal/devcmd internal/codelint"
+            [heavy-5]="internal/conceptcatalog internal/agent internal/tokencache"
+          )
+          # Complementary -run patterns: together they select every Test/Example/Fuzz.
+          declare -A runs=(
+            [cli-a]='^Test[A-L]'
+            [cli-b]='^(Test[^A-L]|Test$|Example|Fuzz)'
+          )
+          : > "$RUNNER_TEMP/race-packages.txt"
+          if [[ -n "${groups[$SHARD]:-}" ]]; then
+            for rel in ${groups[$SHARD]}; do printf '%s/%s\n' "$mod" "$rel"; done > "$RUNNER_TEMP/race-packages.txt"
+          elif [[ "$SHARD" =~ ^rest-[0-9]+$ ]]; then
+            excludes=()
+            for rel in ${groups[*]}; do excludes+=(-e "$mod/$rel"); done
+            go list ./... | grep -vxF "${excludes[@]}" \
+              | awk -v n="$RACE_REST_SHARDS" -v i="${SHARD#rest-}" '(NR-1)%n==i' > "$RUNNER_TEMP/race-packages.txt"
+          else
+            echo "::error::unknown race shard $SHARD"; exit 1
+          fi
           test -s "$RUNNER_TEMP/race-packages.txt"
-          echo "shard $SHARD: $(wc -l < "$RUNNER_TEMP/race-packages.txt") packages"
+          {
+            if [[ -n "${runs[$SHARD]:-}" ]]; then printf '%s\n' -run "${runs[$SHARD]}"; fi
+            cat "$RUNNER_TEMP/race-packages.txt"
+          } > "$RUNNER_TEMP/race-args.txt"
+          echo "shard $SHARD: $(wc -l < "$RUNNER_TEMP/race-packages.txt") packages, run=${runs[$SHARD]:-all}"
 
       - name: go test -race <shard> (zero data races)
         id: race_tests
@@ -1170,8 +1195,8 @@ jobs:
         # changes nothing about which tests run.
         run: |
           set -euo pipefail
-          mapfile -t pkgs < "$RUNNER_TEMP/race-packages.txt"
-          go test -race -count=1 -timeout=25m "${pkgs[@]}"
+          mapfile -t args < "$RUNNER_TEMP/race-args.txt"
+          go test -race -count=1 -timeout=25m "${args[@]}"
 
       - name: record exact verification provenance
         if: always()
@@ -1193,8 +1218,8 @@ jobs:
             mv "$RUNNER_TEMP/ci-environment-complete.json" "$RUNNER_TEMP/ci-environment.json"
           fi
           commands="$CORE_COMMANDS_JSON"
-          if [[ -s "$RUNNER_TEMP/race-packages.txt" ]]; then
-            commands=$(jq -Rn '[["go","test","-race","-count=1","-timeout=25m"] + [inputs]]' < "$RUNNER_TEMP/race-packages.txt")
+          if [[ -s "$RUNNER_TEMP/race-args.txt" ]]; then
+            commands=$(jq -Rn '[["go","test","-race","-count=1","-timeout=25m"] + [inputs]]' < "$RUNNER_TEMP/race-args.txt")
           fi
           if [[ "$CI_CLASS" == diagnostic ]]; then
             if [[ -f "$RUNNER_TEMP/ci-routed-command.json" ]]; then commands=$(cat "$RUNNER_TEMP/ci-routed-command.json"); else commands='[]'; fi
