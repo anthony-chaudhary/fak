@@ -38,9 +38,13 @@ func TestVerbManifest(t *testing.T) {
 			}
 		}
 	}
-	// Each manifest verb must be a live main.go case — no manifest entry for a verb
-	// the dispatch lacks (the freshness gate's converse: manifest > dispatch).
+	// Each catalog verb must bind to an actual runtime or developer dispatch.
 	declared := liveMainVerbs(t, c.Root)
+	if b, err := os.ReadFile(filepath.Join(c.Root, "cmd", "fak-dev", "main.go")); err == nil {
+		for _, tok := range devDispatchVerbs(b) {
+			declared[tok] = true
+		}
+	}
 	for _, v := range verbs {
 		hit := false
 		for _, sp := range v.Spellings() {
@@ -49,7 +53,7 @@ func TestVerbManifest(t *testing.T) {
 			}
 		}
 		if !hit {
-			t.Errorf("manifest verb %q (or its aliases) is not a case in main.go", v.Name)
+			t.Errorf("manifest verb %q (or its aliases) is not dispatched by either CLI artifact", v.Name)
 		}
 	}
 }
@@ -173,6 +177,33 @@ func liveMainVerbs(t *testing.T, root string) map[string]bool {
 		out[v] = true
 	}
 	return out
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestVerbsIncludeDevOnlyDispatch(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ncmd = [\"cmd/**\"]\n")
+	mustWrite(t, root, "INDEX.md", "# INDEX\n")
+	mustMkdir(t, root, "cmd", "fak")
+	mustMkdir(t, root, "cmd", "fak-dev")
+	mustWrite(t, filepath.Join(root, "cmd", "fak"), "main.go", "package main\nfunc main() {\n switch os.Args[1] {\n case \"serve\":\n default:\n }\n}\n")
+	mustWrite(t, filepath.Join(root, "cmd", "fak-dev"), "main.go", "package main\nfunc run(argv []string) {\n switch argv[0] {\n case \"inference-topology\":\n case \"uncurated-dev-probe\":\n default:\n }\n}\n")
+	c := &Catalog{Root: root}
+	hits := c.SearchVerbs("inference-topology")
+	if len(hits) == 0 || hits[0].Name != "inference-topology" || hits[0].Binary != BinaryFakDev {
+		t.Fatalf("dev-only command missing or falsely labeled: %+v", hits)
+	}
+	hits = c.SearchVerbs("uncurated-dev-probe")
+	if len(hits) == 0 || hits[0].Binary != BinaryFakDev || !strings.Contains(hits[0].Synopsis, "fak-dev uncurated-dev-probe") {
+		t.Fatalf("uncurated dev dispatch lost truthful discovery: %+v", hits)
+	}
+	usage, err := RenderVerbUsage(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(usage), `Name: "inference-topology"`) || !strings.Contains(string(usage), `Name: "serve"`) {
+		t.Fatal("runtime help must retain runtime commands and exclude exclusively developer commands")
+	}
 }
 
 func TestVerbByNameAndSearch(t *testing.T) {
