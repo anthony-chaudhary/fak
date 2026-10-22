@@ -311,7 +311,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
 	sf.nativeQ4KGateUpOutputSlab = nativeControls.q4kGateUpSlab
 	sf.nativeV41PrefillSumReadback = nativeControls.v41PrefillSumReadback
-	sf.nativeV41EngramLookAhead = fs.Bool("native-v41-engram-lookahead", false, "opt serial native V4.1 decode into bounded Engram read look-ahead; requires FAK_INKERNEL_BATCH=off and no speculation or expert parallelism; off by default")
+	sf.nativeV41EngramLookAhead = fs.Bool("native-v41-engram-lookahead", false, "opt serial native V4.1 decode into bounded Engram read look-ahead. Requires FAK_INKERNEL_BATCH=off and no speculation or expert parallelism; off by default")
 	sf.kvPrecision = nativeControls.kvPrecision
 	sf.nativePrefixProfile = nativeControls.prefixProfile
 	sf.vulkanQ4KProfile = nativeControls.vulkanQ4KProfile
