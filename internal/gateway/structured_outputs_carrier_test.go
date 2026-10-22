@@ -181,18 +181,37 @@ func TestStructuredOutputsCarrierMalformedRefusedBeforePlanner(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=600ms lane=default
-func TestStructuredOutputsCarrierNativeRouteRefusesInsteadOfDropping(t *testing.T) {
+// fak-test:runtime medium est=2s lane=default
+func TestStructuredOutputsCarrierNativeRouteEnforcesOrRefuses(t *testing.T) {
 	srv := nativeReceiptServer(t)
+	enforced := []struct {
+		name, extra, legacy, want string
+	}{
+		{"regex_compact", `"structured_outputs":` + structuredOutputsTestCarrier, `"guided_regex":"[ab]{2}"`, "aa"},
+		{"json", `"structured_outputs":{"json":{"type":"object"}}`, `"guided_json":{"type":"object"}`, "{}"},
+		{"choice", `"structured_outputs":{"choice":["ab","ba"]}`, `"guided_choice":["ab","ba"]`, "ab"},
+		{"regex_with_identical_guided_regex", `"structured_outputs":{"regex":"[ab]{2}"},"guided_regex":"[ab]{2}"`, `"guided_regex":"[ab]{2}"`, "aa"},
+	}
+	refused := []string{
+		`"structured_outputs":{}`,
+		`"structured_outputs":{"grammar":"root ::= \"a\""}`,
+		`"structured_outputs":{"json_object":true}`,
+		`"structured_outputs":{"regex":"[ab]{2}","whitespace_pattern":"[ ]?"}`,
+		`"structured_outputs":{"regex":"[ab]{2}"},"guided_regex":"[ab]{3}"`,
+	}
 	for _, stream := range []bool{false, true} {
-		for _, extra := range []string{
-			`"structured_outputs":` + structuredOutputsTestCarrier,
-			`"structured_outputs":{"json":{"type":"object"}}`,
-			`"structured_outputs":{"choice":["ab","ba"]}`,
-			`"structured_outputs":{}`,
-			`"structured_outputs":{"regex":"[ab]{2}"},"guided_regex":"[ab]{2}"`,
-		} {
-			t.Run(fmt.Sprintf("stream=%t/%s", stream, extra), func(t *testing.T) {
+		for _, tc := range enforced {
+			t.Run(fmt.Sprintf("stream=%t/enforced/%s", stream, tc.name), func(t *testing.T) {
+				for _, extra := range []string{tc.extra, tc.legacy} {
+					content, finish := nativeStructuredOutputsContent(t, srv, stream, extra)
+					if content != tc.want || finish != "stop" {
+						t.Fatalf("%s: content=%q finish=%q, want %q stop", extra, content, finish, tc.want)
+					}
+				}
+			})
+		}
+		for _, extra := range refused {
+			t.Run(fmt.Sprintf("stream=%t/refused/%s", stream, extra), func(t *testing.T) {
 				rr := postNativeReceipt(t, srv, structuredOutputsChatBody("synthetic-live", stream, extra))
 				if rr.Code != http.StatusBadRequest || chatErrorCode(t, rr.Body.Bytes()) != "native_structured_output_unsupported" {
 					t.Fatalf("status=%d body=%s, want 400 native_structured_output_unsupported", rr.Code, rr.Body.String())
@@ -206,15 +225,42 @@ func TestStructuredOutputsCarrierNativeRouteRefusesInsteadOfDropping(t *testing.
 			}
 		})
 	}
-	rr := postNativeReceipt(t, srv, structuredOutputsChatBody("synthetic-live", false, `"guided_regex":"[ab]{2}"`))
+}
+
+func nativeStructuredOutputsContent(t *testing.T, srv *Server, stream bool, extra string) (content, finish string) {
+	t.Helper()
+	rr := postNativeReceipt(t, srv, structuredOutputsChatBody("synthetic-live", stream, extra))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("guided_regex alone: status=%d body=%s, want 200", rr.Code, rr.Body.String())
+		t.Fatalf("%s: status=%d body=%s, want 200", extra, rr.Code, rr.Body.String())
 	}
-	var resp ChatResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
+	if !stream {
+		var resp ChatResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if len(resp.Choices) != 1 {
+			t.Fatalf("%s: choices=%d, want 1", extra, len(resp.Choices))
+		}
+		return resp.Choices[0].Message.Content, resp.Choices[0].FinishReason
 	}
-	if len(resp.Choices) != 1 || !slices.Contains([]string{"aa", "ab", "ba", "bb"}, resp.Choices[0].Message.Content) {
-		t.Fatalf("guided_regex alone: response %s, want content matching [ab]{2}", rr.Body.String())
+	var data []string
+	for _, line := range strings.Split(rr.Body.String(), "\n") {
+		if !strings.HasPrefix(line, ":") {
+			data = append(data, line)
+		}
 	}
+	chunks, sawDone := parseSSEChunks(t, []byte(strings.Join(data, "\n")))
+	if !sawDone {
+		t.Fatalf("%s: stream ended without [DONE]", extra)
+	}
+	var b strings.Builder
+	for _, c := range chunks {
+		for _, ch := range c.Choices {
+			b.WriteString(ch.Delta.Content)
+			if ch.FinishReason != nil {
+				finish = *ch.FinishReason
+			}
+		}
+	}
+	return b.String(), finish
 }

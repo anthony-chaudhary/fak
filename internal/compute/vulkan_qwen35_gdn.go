@@ -34,6 +34,19 @@ func (v *vulkanBackend) Qwen35GDNDecode(
 	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
 	rmsNormEpsilon float32,
 ) (output, nextConvState, nextRecurrentState Tensor, err error) {
+	return v.qwen35GDNDecode(normalizedInput, inProjQKV, inProjZ, inProjB, inProjA,
+		conv1D, aLog, dtBias, norm, outProj, convState, recurrentState,
+		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon, false)
+}
+
+func (v *vulkanBackend) qwen35GDNDecode(
+	normalizedInput,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState Tensor,
+	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
+	rmsNormEpsilon float32, tiledOut bool,
+) (output, nextConvState, nextRecurrentState Tensor, err error) {
 	in := qwen35GDNInputs{normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState}
 	if err := in.validateVulkanEntry(normalizedInput, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon); err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
@@ -57,6 +70,11 @@ func (v *vulkanBackend) Qwen35GDNDecode(
 	)
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
+	}
+	if tiledOut {
+		if core, err = v.qwen35TileValueHeads(core, 1, numKeyHeads, numValueHeads, valueHeadDim); err != nil {
+			return Tensor{}, Tensor{}, Tensor{}, err
+		}
 	}
 	output = v.MatMul(outProj, core)
 	return output, convState, recurrentState, nil

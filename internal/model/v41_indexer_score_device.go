@@ -47,16 +47,30 @@ type v41IndexerKeyView struct {
 
 const v41IndexerKeyPrefix = "v41-indexer-keys/"
 
+// A backend whose indexer score reads only the leading rows*width elements of
+// its key buffer may score a [rows,width] view of a row log with spare row
+// capacity. Exact-extent backends (current Vulkan) omit it and keep the
+// exact-size log.
+type v41IndexerScoreSpareKeyBackend interface {
+	V41IndexerScoreSpareKeyCapacity() bool
+}
+
+func v41IndexerScoreSpareKeyCapacity(b compute.Backend) bool {
+	spare, ok := b.(v41IndexerScoreSpareKeyBackend)
+	return ok && spare.V41IndexerScoreSpareKeyCapacity()
+}
+
 type v41IndexerKeyEntry struct {
-	view    v41IndexerKeyView
-	forward *v41ForwardState
-	model   *Model
-	epoch   uint64
-	pos     int
-	rows    int
-	width   int
-	anchor  []float32
-	tensor  compute.Tensor
+	view     v41IndexerKeyView
+	forward  *v41ForwardState
+	model    *Model
+	epoch    uint64
+	pos      int
+	rows     int
+	capacity int
+	width    int
+	anchor   []float32
+	tensor   compute.Tensor
 }
 
 type v41IndexerKeyCache struct {
@@ -65,7 +79,9 @@ type v41IndexerKeyCache struct {
 	entries map[int]v41IndexerKeyEntry
 	// Include orphaned handles from a prior callback binding. Rebinding cannot
 	// make already-live session allocations disappear from the budget ledger.
-	handles map[string]compute.Tensor
+	handles           map[string]compute.Tensor
+	validatedRows     int
+	descriptorLookups int
 }
 
 type v41IndexerKeyCall struct {
@@ -134,18 +150,10 @@ func (o *v41DeviceGatherOps) residentIndexerScore(m *Model, layer, pos int, rows
 	if v41OwnsCompressedRows(plan) {
 		expected, source = st.layerState(layer), layer
 	}
-	width, end := m.Cfg.IndexHeadDim, len(rows)
+	width, end, group := m.Cfg.IndexHeadDim, len(rows), max(1, plan.kvGroupSize(m.Cfg))
 	if view.owner != expected || view.source != source || width <= 0 || view.owner.indexWidth() != width || view.owner.indexPublishedEnd[source] != end ||
-		end > (pos+1)/max(1, plan.kvGroupSize(m.Cfg)) {
+		end > (pos+1)/group {
 		return nil
-	}
-	// Verify descriptor provenance against the authoritative store. This adds
-	// an O(rows) descriptor check, never a retained payload copy/hash.
-	for i, row := range rows {
-		published, ok := view.owner.indexPublication(v41AttentionPublicationKey{sourceLayer: source, start: i, end: i + 1})
-		if !ok || len(row) != width || len(published) != width || &row[0] != &published[0] {
-			return nil
-		}
 	}
 	ops, ok := s.Backend.(compute.V41RowLogBackend)
 	if !ok || !ops.V41RowLogAvailable() {
@@ -168,31 +176,56 @@ func (o *v41DeviceGatherOps) residentIndexerScore(m *Model, layer, pos int, rows
 	old := s.halW[key]
 	entry, hit := c.entries[layer]
 	hit = hit && entry.view == *view && entry.forward == st && entry.model == m && entry.epoch == s.cacheGeometryEpoch && entry.width == width &&
-		entry.pos+1 == pos && entry.rows > 0 && entry.rows <= end && old.Backend() == s.Backend && old.Buf() != nil && old.Buf() == entry.tensor.Buf() && slices.Equal(old.Shape, []int{entry.rows, width})
+		entry.pos+1 == pos && entry.rows > 0 && entry.rows <= end && entry.capacity >= entry.rows &&
+		old.Backend() == s.Backend && old.Buf() != nil && old.Buf() == entry.tensor.Buf() && slices.Equal(old.Shape, []int{entry.capacity, width})
 	if hit {
 		anchor, present := view.owner.indexPublication(v41AttentionPublicationKey{sourceLayer: source, start: entry.rows - 1, end: entry.rows})
 		hit = present && len(anchor) == width && len(entry.anchor) == width && &anchor[0] == &entry.anchor[0]
 	}
-	copyRows := 0
+	copyRows, capacity := 0, 0
 	if hit {
-		copyRows = entry.rows
+		copyRows, capacity = entry.rows, entry.capacity
 	}
-	replace := !hit || copyRows != end
-	peak := charged
-	if replace {
-		nextBytes, ok := checkedMul(int64(end), int64(width), 4)
-		stageBytes, stageOK := checkedMul(int64(end-copyRows), int64(width), 4)
-		if !ok || !stageOK || nextBytes > o.indexerKeyBudgetBytes-peak {
+	// Verify descriptor provenance against the authoritative store without a
+	// retained payload copy/hash. An anchor hit already proves rows before the
+	// anchor are the cached, validated publications; walk only anchor onward.
+	// On a hit, caller rows below the anchor are trusted unchecked: the only
+	// caller passes borrowIndexKeys rows, and scoring reads the device copy.
+	for i := max(0, copyRows-1); i < end; i++ {
+		c.descriptorLookups++
+		published, ok := view.owner.indexPublication(v41AttentionPublicationKey{sourceLayer: source, start: i, end: i + 1})
+		if row := rows[i]; !ok || len(row) != width || len(published) != width || &row[0] != &published[0] {
 			return nil
 		}
-		peak += nextBytes
-		if stageBytes > o.indexerKeyBudgetBytes-peak {
+	}
+	spare := v41IndexerScoreSpareKeyCapacity(s.Backend)
+	replace := !hit || end > capacity || (!spare && capacity != end)
+	budget, peak := o.indexerKeyBudgetBytes, charged
+	if stage := end - copyRows; stage > 0 {
+		stageBytes, ok := checkedMul(int64(stage), int64(width), 4)
+		if !ok || stageBytes > budget-peak {
 			return nil
 		}
 		peak += stageBytes
 	}
-	call := &v41IndexerKeyCall{cache: c, layer: layer, key: key, rows: rows, old: old, copyRows: copyRows, replace: replace, budget: o.indexerKeyBudgetBytes, extraBytes: peak - charged,
-		entry: v41IndexerKeyEntry{view: *view, forward: st, model: m, epoch: s.cacheGeometryEpoch, pos: pos, rows: end, width: width, anchor: rows[end-1]}}
+	if replace {
+		sizes := []int{end}
+		if grown := min(capacity, m.Cfg.MaxPositionEmbeddings/group/2) * 2; spare && grown > end {
+			sizes = []int{grown, end}
+		}
+		capacity = 0
+		for _, size := range sizes {
+			if nextBytes, ok := checkedMul(int64(size), int64(width), 4); ok && nextBytes <= budget-peak {
+				capacity, peak = size, peak+nextBytes
+				break
+			}
+		}
+		if capacity == 0 {
+			return nil
+		}
+	}
+	call := &v41IndexerKeyCall{cache: c, layer: layer, key: key, rows: rows, old: old, copyRows: copyRows, replace: replace, budget: budget, extraBytes: peak - charged,
+		entry: v41IndexerKeyEntry{view: *view, forward: st, model: m, epoch: s.cacheGeometryEpoch, pos: pos, rows: end, capacity: capacity, width: width, anchor: rows[end-1]}}
 	o.indexerKeys = c
 	return func(layer int, q, flat, weights []float32, heads, width, count int) ([]float32, error) {
 		if o.indexerKeyCall != nil || s.v41Forward != st || st.gatherOps != o || layer != call.layer {
@@ -234,10 +267,14 @@ func (p *v41IndexerKeyCall) validate(q, flat, weights []float32, heads, width, r
 	if err := check("query", q, 0); err != nil {
 		return err
 	}
-	for i, row := range p.rows {
+	// Device rows before copyRows were finite-checked when appended and are
+	// immutable; the anchor hit that set copyRows proves they are unchanged.
+	for i := p.copyRows; i < len(p.rows); i++ {
+		row := p.rows[i]
 		if len(row) != width {
 			return errV41IndexerScoreResult
 		}
+		p.cache.validatedRows++
 		if err := check("keys", row, i*width); err != nil {
 			return err
 		}
@@ -254,18 +291,19 @@ func (p *v41IndexerKeyCall) acquire(query compute.Tensor) (compute.Tensor, error
 	if s.halW == nil {
 		s.halW = make(map[string]compute.Tensor)
 	}
+	n, dst := p.entry.rows-p.copyRows, p.old
 	if !p.replace {
 		if live, present := s.halW[p.key]; !present || live.Buf() != p.old.Buf() {
 			return compute.Tensor{}, errV41IndexerScoreResult
 		}
-		p.entry.tensor = p.old
-		return p.old, nil
 	}
-	if _, present := s.halW[p.key+"/next"]; present {
-		return compute.Tensor{}, errV41IndexerScoreResult
-	}
-	if _, present := s.halW[p.key+"/staging"]; present {
-		return compute.Tensor{}, errV41IndexerScoreResult
+	if p.stages() {
+		if _, present := s.halW[p.key+"/next"]; present {
+			return compute.Tensor{}, errV41IndexerScoreResult
+		}
+		if _, present := s.halW[p.key+"/staging"]; present {
+			return compute.Tensor{}, errV41IndexerScoreResult
+		}
 	}
 	// All cache-owned allocations, including staging, enter halW immediately.
 	// Failure cleanup then flushes the owning session before retiring them.
@@ -276,39 +314,49 @@ func (p *v41IndexerKeyCall) acquire(query compute.Tensor) (compute.Tensor, error
 		s.halW[key], c.handles[key] = t, t
 		return t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && slices.Equal(t.Shape, []int{rows, p.entry.width})
 	}
-	next, err := c.ops.V41RowLogAlloc(p.entry.rows, p.entry.width)
-	owned := adopt(p.key+"/next", next, p.entry.rows)
-	if err != nil {
-		return compute.Tensor{}, err
+	if p.replace {
+		next, err := c.ops.V41RowLogAlloc(p.entry.capacity, p.entry.width)
+		owned := adopt(p.key+"/next", next, p.entry.capacity)
+		if err != nil {
+			return compute.Tensor{}, err
+		}
+		if !owned {
+			return compute.Tensor{}, errV41IndexerScoreResult
+		}
+		if p.copyRows > 0 {
+			if err := c.ops.V41RowLogCopy(next, 0, p.old, 0, p.copyRows); err != nil {
+				return compute.Tensor{}, err
+			}
+		}
+		dst = next
 	}
-	if !owned {
-		return compute.Tensor{}, errV41IndexerScoreResult
-	}
-	if p.copyRows > 0 {
-		if err := c.ops.V41RowLogCopy(next, 0, p.old, 0, p.copyRows); err != nil {
+	// Appending past the committed rows leaves the validated prefix untouched,
+	// so a failure before commit cannot invalidate the cached entry.
+	if n > 0 {
+		var values []float32
+		if n == 1 {
+			values = p.rows[p.copyRows]
+		} else {
+			values = make([]float32, 0, n*p.entry.width)
+			for _, row := range p.rows[p.copyRows:] {
+				values = append(values, row...)
+			}
+		}
+		staged := s.uploadHostF32([]int{n, p.entry.width}, values, compute.MemoryActivation, "V4.1 indexer score key append")
+		if !adopt(p.key+"/staging", staged, n) {
+			return compute.Tensor{}, errV41IndexerScoreResult
+		}
+		if err := c.ops.V41RowLogCopy(dst, p.copyRows, staged, 0, n); err != nil {
 			return compute.Tensor{}, err
 		}
 	}
-	n := p.entry.rows - p.copyRows
-	var values []float32
-	if n == 1 {
-		values = p.rows[p.copyRows]
-	} else {
-		values = make([]float32, 0, n*p.entry.width)
-		for _, row := range p.rows[p.copyRows:] {
-			values = append(values, row...)
-		}
-	}
-	staged := s.uploadHostF32([]int{n, p.entry.width}, values, compute.MemoryActivation, "V4.1 indexer score key append")
-	if !adopt(p.key+"/staging", staged, n) {
-		return compute.Tensor{}, errV41IndexerScoreResult
-	}
-	if err := c.ops.V41RowLogCopy(next, p.copyRows, staged, 0, n); err != nil {
-		return compute.Tensor{}, err
-	}
-	p.entry.tensor = next
-	return next, nil
+	p.entry.tensor = dst
+	view := dst
+	view.Shape = []int{p.entry.rows, p.entry.width}
+	return view, nil
 }
+
+func (p *v41IndexerKeyCall) stages() bool { return p.replace || p.entry.rows > p.copyRows }
 
 func (p *v41IndexerKeyCall) commit() {
 	c, s := p.cache, p.cache.s
@@ -319,8 +367,10 @@ func (p *v41IndexerKeyCall) commit() {
 			s.Backend.Free(t)
 		}
 	}
-	if p.replace {
+	if p.stages() {
 		retire(p.key + "/staging")
+	}
+	if p.replace {
 		retire(p.key)
 		delete(s.halW, p.key+"/next")
 		delete(c.handles, p.key+"/next")

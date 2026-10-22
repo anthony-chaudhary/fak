@@ -167,6 +167,10 @@ type Qwen35SequenceLayer struct {
 	GDNInB, GDNInA             Tensor
 	GDNConv, GDNALog           Tensor
 	GDNDTBias, GDNNorm, GDNOut Tensor
+	// GDNOutTiled marks a GDNOut kept in the GGUF tiled input-column order: the core panel is
+	// tiled (Qwen35TiledValueHeadSource) before the out projection. A backend that cannot tile
+	// must refuse the request.
+	GDNOutTiled bool
 
 	Gate, Up, Down Tensor
 }

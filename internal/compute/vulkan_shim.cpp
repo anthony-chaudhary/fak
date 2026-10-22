@@ -380,7 +380,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -409,7 +409,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_QWEN35_GDN_PREFILL_TILED: case K_QWEN35_GDN_PREFILL_NORM:
-    case K_QWEN35_GDN_VERIFY_TILED:
+    case K_QWEN35_GDN_VERIFY_TILED: case K_QWEN35_VALUE_HEAD_TILE:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_V41_ROUTED_DOWN_PANEL_CHUNK: case K_V41_ROUTED_DOWN_PANEL_ROW: case K_V41_INDEX_SCALE_BF16: case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
@@ -589,6 +589,8 @@ bool g_have_coopmat_f16_16 = false;
 int g_have_q6k_matmul = 0;
 int g_have_q5k_matmul = 0;
 int g_have_q3k_matmul = 0;
+// Optional GDN core value-head tiling for a native-order ssm_out; absent SPIR-V keeps the copy route.
+int g_have_qwen35_value_head_tile = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -1628,6 +1630,7 @@ const char* const kKernelNames[] = {
     "qwen35_causal_attention_panel", "sigmoid_mul", "q2k_matvec", "rmsnorm_q8_matmul2_coop",
     "iq4xs_matvec", "iq3xxs_matvec", "iq2s_matvec", "iq3s_matvec", "iq2xxs_matvec", "iq2xs_matvec", "iq1s_matvec", "v41_tail_rope_qk", "v41_shared_attention", "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_boundary", "v41_logit_scale", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk", "v41_q2k_token_pair",
     "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k", "v41_f32_finite",
+    "qwen35_value_head_tile",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -4680,6 +4683,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
                                     3, 3 * sizeof(int)) ? 1 : 0;
     g_have_q3k_matmul = buildKernel(g_kern[K_Q3K_MATMUL], P("q3k_matmul.spv"),
                                     3, 3 * sizeof(int)) ? 1 : 0;
+    g_have_qwen35_value_head_tile = buildKernel(g_kern[K_QWEN35_VALUE_HEAD_TILE],
+                                    P("qwen35_value_head_tile.spv"), 2, 4 * sizeof(int)) ? 1 : 0;
     buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
     buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
@@ -5642,6 +5647,11 @@ int fvk_debug_select_q2k_matvec(int enabled) {
     g_have_q2k_matvec = (enabled && g_kern[K_Q2K_MATVEC].pipe != VK_NULL_HANDLE) ? 1 : 0;
     return prev;
 }
+int fvk_debug_select_qwen35_value_head_tile(int enabled) {
+    int prev = g_have_qwen35_value_head_tile;
+    g_have_qwen35_value_head_tile = (enabled && g_kern[K_QWEN35_VALUE_HEAD_TILE].pipe != VK_NULL_HANDLE) ? 1 : 0;
+    return prev;
+}
 
 // device->device copies (RoPE's copy-then-rotate, the KV append) are RECORDED into the open
 // batch with a preceding barrier, so they stay ordered against the compute that produced the
@@ -6016,6 +6026,7 @@ int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 int fvk_have_q6k_matmul(void) { return g_have_q6k_matmul; }
 int fvk_have_q5k_matmul(void) { return g_have_q5k_matmul; }
 int fvk_have_q3k_matmul(void) { return g_have_q3k_matmul; }
+int fvk_have_qwen35_value_head_tile(void) { return g_have_qwen35_value_head_tile; }
 uint32_t fvk_max_compute_work_group_count_x(void) { return g_maxComputeWorkGroupCountX; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
@@ -8620,6 +8631,36 @@ extern "C" int fvk_qwen35_split_qg_panel_f32(const void* qg, void* q, void* gate
     Buffer* bufs[] = {B(qg),B(q),B(gate)};
     dispatch(g_kern[K_QWEN35_SPLIT_QG_PANEL],bufs,&pc,sizeof(pc),
         (uint32_t)(((uint64_t)tokens*nHeads*headDim+255)/256));
+    return (int)g_submissionStatus;
+}
+// Tiles a [tokens, nV*headDim] GDN core panel into the GGUF ssm_out input-column order: dst
+// head c reads src head (c % nK) * (nV / nK) + c / nK. The optional kernel is one dispatch;
+// without its module the same permutation records one device copy per (token, head).
+extern "C" int fvk_qwen35_value_head_tile_f32(const void* src, void* dst,
+    int tokens, int nK, int nV, int headDim) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (nK <= 0 || nV <= 0 || nV % nK != 0 || src == dst ||
+        !panelFits(src, tokens, nV, headDim) || !panelFits(dst, tokens, nV, headDim)) return 2;
+    if (g_have_qwen35_value_head_tile) {
+        struct { int tokens, n_k, n_v, head_dim; } pc{tokens, nK, nV, headDim};
+        Buffer* bufs[] = {B((void*)src), B(dst)};
+        uint64_t groups = ((uint64_t)tokens * nV * headDim + 255) / 256;
+        uint64_t cap = 65535;
+        if (g_maxComputeWorkGroupCountX != 0 && g_maxComputeWorkGroupCountX < cap) cap = g_maxComputeWorkGroupCountX;
+        if (groups > cap) groups = cap;
+        if (!dispatch(g_kern[K_QWEN35_VALUE_HEAD_TILE], bufs, &pc, sizeof(pc), (uint32_t)groups)) return 3;
+        return (int)g_submissionStatus;
+    }
+    const int ratio = nV / nK;
+    const size_t headBytes = (size_t)headDim * sizeof(float);
+    for (int t = 0; t < tokens; ++t) {
+        const size_t row = (size_t)t * (size_t)nV * headBytes;
+        for (int c = 0; c < nV; ++c) {
+            const int h = (c % nK) * ratio + c / nK;
+            fvk_d2d_range(dst, row + (size_t)c * headBytes, src, row + (size_t)h * headBytes, headBytes);
+        }
+    }
     return (int)g_submissionStatus;
 }
 extern "C" int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,

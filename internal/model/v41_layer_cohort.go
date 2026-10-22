@@ -93,7 +93,7 @@ func (m *Model) v41LayerCohortEnabled(lanes []v41StepCohortLane, txs []*v41StepT
 		return false
 	}
 	active := 0
-	experts := os.Getenv(v41LayerExpertBatchEnv) != "0"
+	experts := os.Getenv(v41LayerExpertBatchEnv) != "0" && v41CohortExpertUnionSetting() != v41CohortExpertUnionOff
 	for lane, tx := range txs {
 		if tx == nil || tx.closed {
 			continue
@@ -207,7 +207,8 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 		return fallback()
 	}
 	// Dense attention batching does not imply routed-expert support.
-	if os.Getenv(v41LayerExpertBatchEnv) == "0" {
+	mode := v41CohortExpertUnionSetting()
+	if os.Getenv(v41LayerExpertBatchEnv) == "0" || mode == v41CohortExpertUnionOff {
 		return fallback()
 	}
 	for _, lane := range active {
@@ -251,6 +252,13 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 	}
 	flatRows := len(active) * len(first.picks)
 	if flatRows > v41LayerCohortMaxRows || len(experts) > v41LayerCohortMaxRows {
+		v41CohortExpertUnionStats.declinedCapacity.Add(1)
+		return fallback()
+	}
+	shared := flatRows - len(experts)
+	observeV41CohortSharedRows(shared)
+	if !mode.admitsSharedRows(shared) {
+		v41CohortExpertUnionStats.declinedOverlap.Add(1)
 		return fallback()
 	}
 	var groups []v41LayerExpertGroup
@@ -289,6 +297,7 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 				groups = nil
 				receipt.atLane(-1)
 				closeV41LayerExpertGroups(owned)
+				v41CohortExpertUnionStats.declinedAdmission.Add(1)
 				return fallback()
 			}
 			if outcome != v41RoutedExpertHandled || lease == nil {
@@ -335,6 +344,7 @@ func (m *Model) advanceV41LayerCohort(scope *backendExecutionScope, lanes []v41S
 			}
 		}
 		receipt.atLane(-1)
+		v41CohortExpertUnionStats.selected.Add(1)
 		routed, fault, cause := runV41RoutedCohortLeases(leases, sums)
 		if cause != nil {
 			receipt.atLane(fault)

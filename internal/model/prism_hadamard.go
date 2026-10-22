@@ -179,8 +179,10 @@ func (p *prismHadamardState) inverseRow(row []float32, width int) {
 
 // prismProjectInput returns x unchanged for an undeclared weight. For a
 // rotated weight, it leaves the caller's activation untouched; group members
-// may share x yet require different sign vectors.
+// may share x yet require different sign vectors. It is the per-weight input
+// transform seam, so it also tiles the input of a tiled Qwen3.5 out_proj.
 func (m *Model) prismProjectInput(name string, x []float32) []float32 {
+	x = m.qwen35TiledOutProjInput(name, x, 1)
 	if m == nil || m.prism == nil {
 		return x
 	}
@@ -204,6 +206,7 @@ func (m *Model) prismProjectInput(name string, x []float32) []float32 {
 
 // prismProjectPanel is the batched [rows,width] twin used by resident prefill.
 func (m *Model) prismProjectPanel(name string, x []float32, rows int) []float32 {
+	x = m.qwen35TiledOutProjInput(name, x, rows)
 	if m == nil || m.prism == nil || m.prism.weightWidth[name] == 0 {
 		return x
 	}

@@ -692,6 +692,9 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 	coldAttentionOwner := v41ColdAttentionResidentOwner(st.layerState(l), seq, cfg.windowForLayer(l), len(sharedKV), scratch.sharedAttentionFunc())
 	scale := cfg.attnScale()
 	attnProjectionInput := make([][]float32, seq)
+	// Every position contracts against the same immutable bank, so it is
+	// finite-scanned once per layer rather than once per position.
+	var validated v41ValidatedPrefix
 	for t := 0; t < seq; t++ {
 		// The reference concatenates this layer's window with selected source
 		// groups before ONE sink contraction, even before a group completes.
@@ -715,8 +718,8 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 				}
 			}
 			attentionOpened := m.v41NowNanos()
-			o, err := v41CombinedAttentionResident(l, t, plan.kvGroupSize(cfg), nH, hd, qkv.qHeads[t], sink, window, sharedKV, ids, scale,
-				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttentionFunc())
+			o, err := v41CombinedAttentionValidated(l, t, plan.kvGroupSize(cfg), nH, hd, qkv.qHeads[t], sink, window, sharedKV, ids, scale,
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttentionFunc(), nil, &validated)
 			m.v41NoteAttentionContraction(attentionOpened)
 			if err != nil {
 				return nil, v41StageErr(v41StageAttention, l, err)

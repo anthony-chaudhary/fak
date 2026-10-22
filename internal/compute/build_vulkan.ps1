@@ -206,7 +206,8 @@ function Build-Shaders {
     "mm_cm1_iq4xs",
     "mm_cm1_q4k",
     "attention_split_kv",
-    "v41_f32_finite"
+    "v41_f32_finite",
+    "qwen35_value_head_tile"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

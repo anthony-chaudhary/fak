@@ -302,6 +302,9 @@ type Model struct {
 	// prism is the optional Bonsai-2 signed Hadamard activation contract. Only
 	// weights explicitly named by the GGUF declaration consume rotated inputs.
 	prism *prismHadamardState
+	// qwen35TiledOutProj names the GDN out_proj weights held in their native GGUF bytes with
+	// the GGUF tiled input-column order; their consumers tile the core first.
+	qwen35TiledOutProj map[string]struct{}
 	// awqw holds the optional resident AWQ (Activation-aware Weight Quantization) 4-bit
 	// copy of the matmul weights, populated by LoadAWQ straight from an AutoAWQ
 	// safetensors export and consumed only by the opt-in AWQ path (awq.go). nil unless

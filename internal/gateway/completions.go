@@ -57,7 +57,11 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequestBody(w, r, &req) {
 		return
 	}
-	prompt := normalizePrompt(req.Prompt)
+	prompt, batched := normalizePrompt(req.Prompt)
+	if batched {
+		writeErrCode(w, http.StatusBadRequest, "prompt_batch_unsupported", "prompt: an array of more than one prompt is a batch, which this route does not serve; send one request per prompt")
+		return
+	}
 	if strings.TrimSpace(prompt) == "" {
 		writeErr(w, http.StatusBadRequest, "prompt: field required")
 		return
@@ -228,33 +232,41 @@ func validateCompletionDecodeTrace(req CompletionRequest) string {
 	return ""
 }
 
-// normalizePrompt folds the legacy `prompt` field (a bare string, an array of
-// strings, or absent/null) into a single prompt string. The array form is joined
-// with newlines (the common multi-line-prompt convention); anything malformed
-// degrades to "" so a bad prompt surfaces as the same empty-prompt 400 as a missing
-// one rather than erroring the decode.
-func normalizePrompt(raw json.RawMessage) string {
+// normalizePrompt folds the legacy `prompt` field (a bare string, a one-element
+// array of strings, or absent/null) into a single prompt string. An array of two
+// or more strings is an OpenAI batch (one choice per prompt), which this route
+// does not serve, so it reports batched instead of merging the prompts into one.
+// Anything malformed degrades to "" so a bad prompt surfaces as the same
+// empty-prompt 400 as a missing one rather than erroring the decode.
+func normalizePrompt(raw json.RawMessage) (prompt string, batched bool) {
 	b := []byte(raw)
 	i := 0
 	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\n' || b[i] == '\r') {
 		i++
 	}
 	if i >= len(b) {
-		return ""
+		return "", false
 	}
 	switch b[i] {
 	case '"':
 		var s string
 		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
+			return s, false
 		}
 	case '[':
 		var arr []string
 		if err := json.Unmarshal(raw, &arr); err == nil {
-			return strings.Join(arr, "\n")
+			switch len(arr) {
+			case 0:
+				return "", false
+			case 1:
+				return arr[0], false
+			default:
+				return "", true
+			}
 		}
 	}
-	return ""
+	return "", false
 }
 
 // completionStreamWriter owns the client half of one stream:true LEGACY completion. It

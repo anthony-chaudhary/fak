@@ -2173,6 +2173,16 @@
           "category": "incidental",
           "reason": "Private ownership-and-timing adapter for the existing checked sparse-attention contraction. It validates and borrows a callback-free host row window, then delegates unchanged numerical work to v41SparseAttentionSinkChecked; it introduces no separate attention algorithm, backend capability, or public attention contract.",
           "token": "v41ColdPlainHostAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "V4.1 combined attention entry that skips the finite re-scan of already validated compressed rows; a host-work memo helper, not a distinct attention mechanism.",
+          "token": "v41CombinedAttentionValidated"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test-only observer of elements scanned per combined attention call; nil in production.",
+          "token": "v41CombinedAttentionScanProbe"
         }
       ],
       "exclude": [
@@ -2236,6 +2246,8 @@
         "v41BindSharedAttention",
         "v41BoundSharedAttention",
         "v41ColdPlainHostAttention",
+        "v41CombinedAttentionScanProbe",
+        "v41CombinedAttentionValidated",
         "v41CombinedAttentionWithContinuation",
         "v41NoteAttentionContraction",
         "v41PlainAttentionClosed",

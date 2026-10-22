@@ -218,6 +218,16 @@ func newDFlash2TargetWithOptions(ctx context.Context, spec DFlash2TargetSpec, ba
 	return target, nil
 }
 
+func newDFlash2TargetSession(m *model.Model, backend compute.Backend) (*model.Session, error) {
+	s, err := m.NewBackendSessionChecked(backend)
+	if err != nil {
+		return nil, err
+	}
+	s.Quant = true
+	s.Q4K = true
+	return s, nil
+}
+
 func (t *DFlash2Target) Model() *model.Model {
 	if t == nil {
 		return nil
@@ -345,9 +355,8 @@ func (t *DFlash2Target) newRequest(ctx context.Context) (lease *dflash2Lease, er
 	if t.factory != nil {
 		err = t.factory(ctx, l)
 	} else {
-		l.session, err = t.m.NewBackendSessionChecked(t.backend)
+		l.session, err = newDFlash2TargetSession(t.m, t.backend)
 		if err == nil {
-			l.session.Q4K = true
 			var q *model.Qwen38DFlash2Request
 			q, err = model.NewQwen38DFlash2RequestWithOptions(ctx, l.session, t.spec.SidecarPath, t.options.Request)
 			if err == nil {

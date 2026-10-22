@@ -757,8 +757,16 @@ func (s *Session) qwen35LinearHAL(layer int, residual compute.Tensor, eps float3
 	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
 	p := func(suffix string) string { return layerName(layer, suffix) }
 	xn := s.Backend.RMSNorm(residual, s.normWeightHAL(p("input_layernorm.weight")), eps)
+	decode := s.qwen35HAL.backend.Qwen35GDNDecode
+	if s.M.Qwen35OutProjTiled(p("linear_attn.out_proj.weight")) {
+		tiled, ok := s.qwen35HAL.backend.(compute.Qwen35GDNTiledOutBackend)
+		if !ok {
+			s.failBackendForward(layer, "admission", fmt.Errorf("out_proj is held in tiled input-column order but the backend cannot tile the GDN core"))
+		}
+		decode = tiled.Qwen35GDNDecodeTiledOut
+	}
 	output, nextConv, nextRecurrent, err := s.qwen35HAL.mutateLayer(s.Backend, layer, func(oldConv, oldRecurrent compute.Tensor) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
-		return s.qwen35HAL.backend.Qwen35GDNDecode(
+		return decode(
 			xn,
 			s.matWeightHAL(p("linear_attn.in_proj_qkv.weight")),
 			s.matWeightHAL(p("linear_attn.in_proj_z.weight")),
@@ -1233,6 +1241,7 @@ func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogit
 			layer.GDNDTBias = s.weightHAL(p("linear_attn.dt_bias"))
 			layer.GDNNorm = s.weightHAL(p("linear_attn.norm.weight"))
 			layer.GDNOut = s.matWeightHAL(p("linear_attn.out_proj.weight"))
+			layer.GDNOutTiled = s.M.Qwen35OutProjTiled(p("linear_attn.out_proj.weight"))
 		} else {
 			layer.Q = s.matWeightHAL(p("self_attn.q_proj.weight"))
 			layer.K = s.matWeightHAL(p("self_attn.k_proj.weight"))

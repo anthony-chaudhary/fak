@@ -323,10 +323,10 @@ func (m *Model) referenceV41RoleLayerStep(l int, plan V41AttentionPlan, x []floa
 		}
 	}
 	attentionOpened := m.v41NowNanos()
-	o, err := v41CombinedAttentionWithContinuation(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
+	o, err := v41CombinedAttentionValidated(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
 		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: windowStart,
 		windowRows: len(window), compressedRows: len(sharedKV), sinkKey: layerName(l, "attn.sink"),
-	}, scratch.sharedAttentionFunc(), attentionContinuation)
+	}, scratch.sharedAttentionFunc(), attentionContinuation, &layerState.validatedPrefix)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
 		return nil, v41StageErr(v41StageAttention, l, err)

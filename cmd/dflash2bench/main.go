@@ -181,6 +181,17 @@ func beginPhase() (time.Time, []compute.DeviceWork) {
 func endPhase(start time.Time, before []compute.DeviceWork) phase {
 	return phase{Seconds: time.Since(start).Seconds(), DeviceBefore: before, DeviceAfter: compute.DeviceWorkSnapshot()}
 }
+
+func newMixedQuantSession(m *model.Model, be compute.Backend) (*model.Session, error) {
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		return nil, err
+	}
+	s.Quant = true
+	s.Q4K = true
+	return s, nil
+}
+
 func run(ctx context.Context, o options) (r report, err error) {
 	r = report{Schema: "fak-dflash2-diagnostic/1", Status: "INCOMPLETE", StartedUTC: time.Now().UTC().Format(time.RFC3339Nano),
 		GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, CPUs: runtime.NumCPU(), GOMAXPROCS: runtime.GOMAXPROCS(0), Q8Workers: model.Q8DecodeWorkers(), Q4KWorkers: model.Q4KDecodeWorkers(), PromptPath: o.promptPath, TimeoutSeconds: o.timeout.Seconds(), Order: o.order, RequestedTokens: o.tokens,
@@ -345,12 +356,11 @@ func runArm(ctx context.Context, mode string, target *agent.DFlash2Target, m *mo
 	requestStart := time.Now()
 	start, before := beginPhase()
 	if mode == "plain" {
-		s, openErr := m.NewBackendSessionChecked(be)
+		s, openErr := newMixedQuantSession(m, be)
 		a.SessionOpen = endPhase(start, before)
 		if openErr != nil {
 			return a, openErr
 		}
-		s.Q4K = true
 		a.InitialCacheTokens = s.SequencePosition()
 		if a.InitialCacheTokens != 0 {
 			return a, errors.New("fresh session has a nonempty cache")
