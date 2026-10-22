@@ -146,8 +146,8 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 
 // nativeStructuredOutputsMember returns the one constraint member of a vLLM
 // structured_outputs object. Of StructuredOutputsParams' options, only the two
-// booleans are accepted: the native masks emit no free whitespace and no
-// undeclared property, which satisfies either value. A whitespace_pattern,
+// booleans are accepted: the schema, regex and choice masks emit no free
+// whitespace and no undeclared property, which satisfies either value. A whitespace_pattern,
 // unknown key or other member is refused rather than ignored. A member or
 // option sent as null counts as absent.
 func nativeStructuredOutputsMember(raw json.RawMessage) (string, json.RawMessage, error) {
@@ -252,7 +252,7 @@ func nativeGuidedAbsent(raw json.RawMessage) bool {
 // nativeStructuredRequested reports whether the request carries a constraint
 // the native route enforces.
 func nativeStructuredRequested(sp SampleParams) bool {
-	if nativeStructuredJSONSchemaRequested(sp.ResponseFormat) {
+	if format := nativeResponseFormatType(sp.ResponseFormat); format == "json_schema" || format == "json_object" {
 		return true
 	}
 	guided, err := parseNativeGuided(sp.GuidedDecode)
@@ -273,9 +273,10 @@ func nativeStructuredRunePrefix(text string) (complete, tail string) {
 	return text, ""
 }
 
-// nativeRegexTokenDecoder hides special tokens from a regex mask: TokenBytes
-// spells them literally, so a permissive pattern would otherwise admit control
-// tokens as text. The mask admits the stop token by id alone.
+// nativeRegexTokenDecoder hides special tokens from a regex or JSON object
+// mask: TokenBytes spells them literally, so a permissive pattern or a free
+// JSON string would otherwise admit control tokens as text. The mask admits
+// the stop token by id alone.
 type nativeRegexTokenDecoder struct {
 	tok     grammar.TokenDecoder
 	special map[int]string
@@ -301,15 +302,13 @@ func (p *InKernelPlanner) newNativeRequestConstraint(sp SampleParams, stops map[
 		return p.newNativeStructuredConstraint(sp.ResponseFormat, stops)
 	}
 	if !nativeGuidedAbsent(sp.ResponseFormat) {
-		var response struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(bytes.TrimSpace(sp.ResponseFormat), &response) != nil {
+		if _, err := nativeExactMembers(sp.ResponseFormat, "type", "json_schema"); err != nil {
 			return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
 		}
+		formatType := nativeResponseFormatType(sp.ResponseFormat)
 		switch {
-		case response.Type == "text":
-		case response.Type == "json_schema" && guided.schema != nil:
+		case formatType == "text":
+		case formatType == "json_schema" && guided.schema != nil:
 			schema, err := nativeResponseFormatSchema(sp.ResponseFormat)
 			if err != nil {
 				return nil, err
@@ -370,18 +369,40 @@ func nativeStructuredConstraintFromContext(ctx context.Context) *nativeStructure
 	return constraint
 }
 
-func nativeStructuredJSONSchemaRequested(raw json.RawMessage) bool {
+// nativeResponseFormatType returns a response_format's type, or "" when it is
+// absent, null or not an object. The type is read by its exact key: a
+// case-variant such as "Type" would otherwise override it through
+// encoding/json's case-insensitive struct match, so it reads as an unsupported
+// type and the request is refused.
+func nativeResponseFormatType(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return false
+		return ""
 	}
-	var response struct {
-		Type string `json:"type"`
+	var members map[string]json.RawMessage
+	if json.Unmarshal(trimmed, &members) != nil {
+		return ""
 	}
-	return json.Unmarshal(trimmed, &response) == nil && response.Type == "json_schema"
+	for key := range members {
+		if key != "type" && strings.EqualFold(key, "type") {
+			return nativeResponseFormatAmbiguousType
+		}
+	}
+	var formatType string
+	if value, ok := members["type"]; ok && json.Unmarshal(value, &formatType) != nil {
+		return nativeResponseFormatAmbiguousType
+	}
+	return formatType
 }
 
+// nativeResponseFormatAmbiguousType marks a response_format whose type cannot
+// be read unambiguously; no native carrier matches it.
+const nativeResponseFormatAmbiguousType = "<ambiguous response_format type>"
+
 func (p *InKernelPlanner) newNativeStructuredConstraint(raw json.RawMessage, stops map[int]bool) (*nativeStructuredConstraint, error) {
+	if nativeResponseFormatType(raw) == "json_object" {
+		return p.newNativeJSONObjectConstraint(raw, stops)
+	}
 	schema, err := nativeResponseFormatSchema(raw)
 	if err != nil || schema == nil {
 		return nil, err
@@ -396,30 +417,56 @@ func nativeResponseFormatSchema(raw json.RawMessage) (json.RawMessage, error) {
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil
 	}
-	var response struct {
-		Type       string `json:"type"`
-		JSONSchema *struct {
-			Strict *bool           `json:"strict"`
-			Schema json.RawMessage `json:"schema"`
-		} `json:"json_schema"`
-	}
-	if err := json.Unmarshal(trimmed, &response); err != nil {
+	members, err := nativeExactMembers(trimmed, "type", "json_schema")
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid response_format: %v", ErrNativeStructuredUnsupported, err)
 	}
-	if response.Type == "text" {
+	formatType := nativeResponseFormatType(trimmed)
+	if formatType == "text" {
 		return nil, nil
 	}
-	if response.Type != "json_schema" || response.JSONSchema == nil {
-		return nil, fmt.Errorf("%w: response_format type %q", ErrNativeStructuredUnsupported, response.Type)
+	if formatType != "json_schema" || nativeGuidedAbsent(members["json_schema"]) {
+		return nil, fmt.Errorf("%w: response_format type %q", ErrNativeStructuredUnsupported, formatType)
 	}
-	if response.JSONSchema.Strict != nil && !*response.JSONSchema.Strict {
-		return nil, fmt.Errorf("%w: json_schema strict=false", ErrNativeStructuredUnsupported)
+	jsonSchema, err := nativeExactMembers(members["json_schema"], "strict", "schema")
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid response_format json_schema: %v", ErrNativeStructuredUnsupported, err)
 	}
-	schema := bytes.TrimSpace(response.JSONSchema.Schema)
+	if strict := jsonSchema["strict"]; !nativeGuidedAbsent(strict) {
+		var value bool
+		if json.Unmarshal(strict, &value) != nil {
+			return nil, fmt.Errorf("%w: json_schema strict must be a boolean", ErrNativeStructuredUnsupported)
+		}
+		if !value {
+			return nil, fmt.Errorf("%w: json_schema strict=false", ErrNativeStructuredUnsupported)
+		}
+	}
+	schema := bytes.TrimSpace(jsonSchema["schema"])
 	if len(schema) == 0 || bytes.Equal(schema, []byte("null")) {
 		return nil, fmt.Errorf("%w: json_schema schema is required", ErrNativeStructuredUnsupported)
 	}
 	return schema, nil
+}
+
+// nativeExactMembers decodes a JSON object by exact key. A key that differs
+// from one of the named keys only in case is refused: encoding/json struct
+// decoding would let it override the real member.
+func nativeExactMembers(raw json.RawMessage, keys ...string) (map[string]json.RawMessage, error) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &members); err != nil {
+		return nil, err
+	}
+	if members == nil {
+		return nil, errors.New("not an object")
+	}
+	for key := range members {
+		for _, want := range keys {
+			if key != want && strings.EqualFold(key, want) {
+				return nil, fmt.Errorf("member %q differs from %q only in case", key, want)
+			}
+		}
+	}
+	return members, nil
 }
 
 // newNativeJSONSchemaConstraint compiles the native response subset shared by
@@ -429,7 +476,31 @@ func (p *InKernelPlanner) newNativeJSONSchemaConstraint(schema json.RawMessage, 
 	if err != nil {
 		return nil, err
 	}
-	mask, err := grammar.CompileJSONSchema(schema, p.tok, grammar.CompileOptions{EOS: stopID})
+	mask, err := grammar.CompileJSONSchema(schema, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNativeStructuredUnsupported, err)
+	}
+	return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
+}
+
+// newNativeJSONObjectConstraint enforces OpenAI JSON mode: one JSON object of
+// any shape. Some providers carry a schema beside the json_object type; such a
+// member is refused rather than silently ignored.
+func (p *InKernelPlanner) newNativeJSONObjectConstraint(raw json.RawMessage, stops map[int]bool) (*nativeStructuredConstraint, error) {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &members); err != nil {
+		return nil, fmt.Errorf("%w: invalid response_format: %v", ErrNativeStructuredUnsupported, err)
+	}
+	for key, value := range members {
+		if key != "type" && !nativeGuidedAbsent(value) {
+			return nil, fmt.Errorf("%w: json_object member %q", ErrNativeStructuredUnsupported, key)
+		}
+	}
+	stopID, err := p.nativeStructuredStopID(stops)
+	if err != nil {
+		return nil, err
+	}
+	mask, err := grammar.CompileJSONObject(nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNativeStructuredUnsupported, err)
 	}

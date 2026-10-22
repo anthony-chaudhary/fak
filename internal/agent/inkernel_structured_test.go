@@ -515,7 +515,13 @@ func TestNativeStructuredUnsupportedRequestRefusesBeforeSampling(t *testing.T) {
 	sampled := 0
 	p.cachePrimeSamplerHook = func() { sampled++ }
 	cases := []json.RawMessage{
-		json.RawMessage(`{"type":"json_object"}`),
+		json.RawMessage(`{"type":"json_object","schema":{"type":"object"}}`),
+		json.RawMessage(`{"type":"json_object","Type":"text"}`),
+		json.RawMessage(`{"Type":"text","type":"json_object"}`),
+		json.RawMessage(`{"type":"json_schema","TYPE":"text","json_schema":{"schema":{"type":"object","properties":{},"additionalProperties":false}}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{},"additionalProperties":false}},"JSON_SCHEMA":{"schema":{}}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{},"additionalProperties":false},"Schema":{}}}`),
+		json.RawMessage(`{"type":"json_schema","json_schema":{"strict":"yes","schema":{"type":"object","properties":{},"additionalProperties":false}}}`),
 		json.RawMessage(`{"type":"regex","schema":".*"}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"array"}}}`),
 		json.RawMessage(`{"type":"json_schema","json_schema":{"strict":false,"schema":{}}}`),

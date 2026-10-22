@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,19 +28,39 @@ type InventoryMapOptions struct {
 	IndexedRevision         string
 	ObservedAt              string
 	MaxExamplesPerSubsystem int
+	// ExcludedSubmodules maps a declared, not-checked-out submodule path to the
+	// reason it is not fetched (for example an unreachable private URL); it then
+	// never counts as unpopulated, but its kernels stay unproven, so
+	// kernel_inventory stays required.
+	ExcludedSubmodules map[string]string
+
+	skippedKernelScanBudget int
 }
 
 type InventoryMap struct {
-	Schema           string                 `json:"schema"`
-	Repository       string                 `json:"repository"`
-	URL              string                 `json:"url,omitempty"`
-	IndexedRevision  string                 `json:"indexed_revision"`
-	ObservedAt       string                 `json:"observed_at"`
-	Totals           InventoryMapTotals     `json:"totals"`
-	SourceClasses    []InventoryClassStatus `json:"source_classes"`
-	Subsystems       []InventorySubsystem   `json:"subsystems"`
-	SkippedDirs      []string               `json:"skipped_dirs,omitempty"`
-	CompletenessNote string                 `json:"completeness_critic"`
+	Schema                     string                       `json:"schema"`
+	Repository                 string                       `json:"repository"`
+	URL                        string                       `json:"url,omitempty"`
+	IndexedRevision            string                       `json:"indexed_revision"`
+	ObservedAt                 string                       `json:"observed_at"`
+	Totals                     InventoryMapTotals           `json:"totals"`
+	SourceClasses              []InventoryClassStatus       `json:"source_classes"`
+	Subsystems                 []InventorySubsystem         `json:"subsystems"`
+	SkippedDirs                []string                     `json:"skipped_dirs,omitempty"`
+	Submodules                 []string                     `json:"submodules,omitempty"`
+	UnpopulatedSubmodules      []string                     `json:"unpopulated_submodules,omitempty"`
+	ExcludedSubmodules         []InventoryExcludedSubmodule `json:"excluded_submodules,omitempty"`
+	SkippedKernelFiles         int                          `json:"skipped_kernel_files,omitempty"`
+	SkippedKernelExamples      []string                     `json:"skipped_kernel_examples,omitempty"`
+	SkippedKernelScanTruncated bool                         `json:"skipped_kernel_scan_truncated,omitempty"`
+	CompletenessNote           string                       `json:"completeness_critic"`
+}
+
+// KernelSurfaceFiles is the kernel count that decides whether kernel_inventory
+// is required: kernels in the walked tree plus kernel-extension files found in
+// skipped directories (which totals deliberately exclude).
+func (report InventoryMap) KernelSurfaceFiles() int {
+	return report.Totals.KernelFiles + report.SkippedKernelFiles
 }
 
 type InventoryMapTotals struct {
@@ -50,6 +71,7 @@ type InventoryMapTotals struct {
 	TestFiles    int   `json:"test_files"`
 	DocsFiles    int   `json:"docs_files"`
 	TextLines    int   `json:"text_lines"`
+	KernelFiles  int   `json:"kernel_files,omitempty"`
 }
 
 type InventoryClassStatus struct {
@@ -68,6 +90,7 @@ type InventorySubsystem struct {
 	TestFiles     int                      `json:"test_files"`
 	DocsFiles     int                      `json:"docs_files"`
 	TextLines     int                      `json:"text_lines"`
+	KernelFiles   int                      `json:"kernel_files,omitempty"`
 	Languages     []InventoryLanguageCount `json:"languages,omitempty"`
 	ExamplePaths  []string                 `json:"example_paths,omitempty"`
 	SourceClasses []string                 `json:"source_classes,omitempty"`
@@ -79,10 +102,14 @@ type InventoryLanguageCount struct {
 }
 
 type inventoryAccumulator struct {
-	totals        InventoryMapTotals
-	subsystems    map[string]*subsystemAccumulator
-	sourceClasses map[string]map[string]bool
-	skippedDirs   []string
+	totals          InventoryMapTotals
+	subsystems      map[string]*subsystemAccumulator
+	sourceClasses   map[string]map[string]bool
+	skippedDirs     []string
+	kernelFiles     map[string]bool
+	kernelLanguages map[string]int
+	submodules      []string
+	submoduleFiles  map[string]int
 }
 
 type subsystemAccumulator struct {
@@ -112,27 +139,62 @@ func BuildInventoryMap(root string, opts InventoryMapOptions) (InventoryMap, err
 	if opts.MaxExamplesPerSubsystem <= 0 {
 		opts.MaxExamplesPerSubsystem = 8
 	}
+	excluded, err := normalizeExcludedSubmodules(opts.ExcludedSubmodules)
+	if err != nil {
+		return InventoryMap{}, err
+	}
+	submodules, err := readGitSubmodulePaths(root, excluded)
+	if err != nil {
+		return InventoryMap{}, err
+	}
+	declared := map[string]bool{}
+	for _, submodule := range submodules {
+		declared[submodule] = true
+	}
+	excludedRows := make([]InventoryExcludedSubmodule, 0, len(excluded))
+	for _, submodule := range sortedStringKeys(excluded) {
+		if !declared[submodule] {
+			return InventoryMap{}, fmt.Errorf("%w: %s", ErrExcludedSubmoduleUndeclared, submodule)
+		}
+		checkedOut, err := submoduleCheckedOut(root, submodule)
+		if err != nil {
+			return InventoryMap{}, err
+		}
+		if checkedOut {
+			return InventoryMap{}, fmt.Errorf("%w: %s", ErrExcludedSubmodulePopulated, submodule)
+		}
+		excludedRows = append(excludedRows, InventoryExcludedSubmodule{Path: submodule, Reason: excluded[submodule]})
+	}
+	plan := newInventoryWalkPlan(submodules, excluded)
+	scan := newSkippedKernelScan(opts.skippedKernelScanBudget, excluded)
 	acc := inventoryAccumulator{
-		subsystems:    map[string]*subsystemAccumulator{},
-		sourceClasses: map[string]map[string]bool{},
+		subsystems:      map[string]*subsystemAccumulator{},
+		sourceClasses:   map[string]map[string]bool{},
+		kernelFiles:     map[string]bool{},
+		kernelLanguages: map[string]int{},
+		submodules:      plan.walkedSubmodules,
+		submoduleFiles:  map[string]int{},
 	}
 	for _, class := range RequiredInventorySourceClasses {
 		acc.sourceClasses[class] = map[string]bool{}
 	}
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if path == root {
+		if filePath == root {
 			return nil
 		}
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(root, filePath)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if shouldSkipInventoryDir(entry.Name()) {
+			if plan.excludedDir(rel) {
+				return filepath.SkipDir
+			}
+			if !plan.enterDir(rel, entry.Name()) {
 				acc.skippedDirs = append(acc.skippedDirs, rel)
 				return filepath.SkipDir
 			}
@@ -147,28 +209,61 @@ func BuildInventoryMap(root string, opts InventoryMapOptions) (InventoryMap, err
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+		if plan.fileInPassThrough(rel) {
+			if skippedKernelScanEligible(path.Dir(rel)) {
+				scan.note(rel)
+			}
+			return nil
+		}
 		file := classifyInventoryFile(rel)
-		lines := countTextLines(path, info.Size(), file.TextLike)
+		lines, kernelMarker := scanInventoryText(filePath, info.Size(), file.TextLike, kernelMarkerRuleFor(file))
+		if kernelMarker {
+			file.Kernel = true
+		}
 		acc.addFile(rel, info.Size(), lines, file, opts.MaxExamplesPerSubsystem)
 		return nil
 	})
 	if err != nil {
 		return InventoryMap{}, err
 	}
+	skippedDirs := sortedStrings(acc.skippedDirs)
+	for _, dir := range skippedDirs {
+		if skippedKernelScanEligible(dir) {
+			scan.scanDir(root, dir)
+		}
+	}
 	sourceClasses := acc.renderSourceClasses()
 	subsystems := acc.renderSubsystems()
-	return InventoryMap{
-		Schema:           InventoryMapSchema,
-		Repository:       strings.TrimSpace(opts.Repository),
-		URL:              strings.TrimSpace(opts.URL),
-		IndexedRevision:  strings.TrimSpace(opts.IndexedRevision),
-		ObservedAt:       strings.TrimSpace(opts.ObservedAt),
-		Totals:           acc.totals,
-		SourceClasses:    sourceClasses,
-		Subsystems:       subsystems,
-		SkippedDirs:      sortedStrings(acc.skippedDirs),
-		CompletenessNote: inventoryCompletenessNote(sourceClasses, acc.skippedDirs),
-	}, nil
+	var unpopulated []string
+	for _, submodule := range acc.submodules {
+		if acc.submoduleFiles[submodule] == 0 {
+			unpopulated = append(unpopulated, submodule)
+		}
+	}
+	report := InventoryMap{
+		Schema:                     InventoryMapSchema,
+		Repository:                 strings.TrimSpace(opts.Repository),
+		URL:                        strings.TrimSpace(opts.URL),
+		IndexedRevision:            strings.TrimSpace(opts.IndexedRevision),
+		ObservedAt:                 strings.TrimSpace(opts.ObservedAt),
+		Totals:                     acc.totals,
+		SourceClasses:              sourceClasses,
+		Subsystems:                 subsystems,
+		SkippedDirs:                skippedDirs,
+		Submodules:                 submodules,
+		UnpopulatedSubmodules:      sortedStrings(unpopulated),
+		SkippedKernelFiles:         scan.files,
+		SkippedKernelExamples:      sortedStrings(scan.examples),
+		SkippedKernelScanTruncated: scan.truncated,
+	}
+	if len(excludedRows) > 0 {
+		report.ExcludedSubmodules = excludedRows
+	}
+	if report.KernelInventoryRequired() {
+		report.SourceClasses = append(report.SourceClasses, acc.kernelInventoryClassStatus(report, scan.limit))
+	}
+	report.CompletenessNote = inventoryCompletenessNote(report, plan.walkedSubmodules)
+	return report, nil
 }
 
 func WriteInventoryMapJSON(w io.Writer, report InventoryMap) error {
@@ -187,8 +282,16 @@ func RenderInventoryMapMarkdown(w io.Writer, report InventoryMap) {
 	if report.ObservedAt != "" {
 		fmt.Fprintf(w, "- **Observed at:** %s\n", report.ObservedAt)
 	}
-	fmt.Fprintf(w, "- **Totals:** %d files, %d directories, %d runtime files, %d tests/fixtures, %d docs, %d text lines\n\n",
-		report.Totals.Files, report.Totals.Directories, report.Totals.RuntimeFiles, report.Totals.TestFiles, report.Totals.DocsFiles, report.Totals.TextLines)
+	fmt.Fprintf(w, "- **Totals:** %d files, %d directories, %d runtime files, %d tests/fixtures, %d docs, %d text lines, %d GPU-kernel files\n",
+		report.Totals.Files, report.Totals.Directories, report.Totals.RuntimeFiles, report.Totals.TestFiles, report.Totals.DocsFiles, report.Totals.TextLines, report.Totals.KernelFiles)
+	if report.SkippedKernelFiles > 0 || report.SkippedKernelScanTruncated {
+		truncated := ""
+		if report.SkippedKernelScanTruncated {
+			truncated = " (scan truncated)"
+		}
+		fmt.Fprintf(w, "- **Kernel-extension files in skipped directories (not in totals):** %d%s\n", report.SkippedKernelFiles, truncated)
+	}
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "## Source Classes")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "| Class | Status | Evidence | Note |")
@@ -204,6 +307,22 @@ func RenderInventoryMapMarkdown(w io.Writer, report InventoryMap) {
 	for _, row := range report.Subsystems {
 		fmt.Fprintf(w, "| `%s` | %d | %d | %d | %d | %s | %s |\n",
 			row.Path, row.Files, row.RuntimeFiles, row.TestFiles, row.DocsFiles, renderLanguages(row.Languages), strings.Join(row.ExamplePaths, "<br>"))
+	}
+	if len(report.UnpopulatedSubmodules) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "## Unpopulated Submodules")
+		fmt.Fprintln(w)
+		for _, dir := range report.UnpopulatedSubmodules {
+			fmt.Fprintf(w, "- `%s`\n", dir)
+		}
+	}
+	if len(report.ExcludedSubmodules) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "## Excluded Submodules")
+		fmt.Fprintln(w)
+		for _, row := range report.ExcludedSubmodules {
+			fmt.Fprintf(w, "- `%s`: %s\n", row.Path, row.Reason)
+		}
 	}
 	if len(report.SkippedDirs) > 0 {
 		fmt.Fprintln(w)
@@ -232,6 +351,18 @@ func (acc *inventoryAccumulator) addFile(rel string, size int64, lines int, file
 	if file.Doc {
 		acc.totals.DocsFiles++
 	}
+	if file.Kernel {
+		acc.totals.KernelFiles++
+		acc.kernelFiles[rel] = true
+		acc.kernelLanguages[file.Language]++
+	}
+	if path.Base(rel) != ".git" {
+		for _, submodule := range acc.submodules {
+			if strings.HasPrefix(rel, submodule+"/") {
+				acc.submoduleFiles[submodule]++
+			}
+		}
+	}
 	for _, class := range file.SourceClasses {
 		acc.sourceClasses[class][rel] = true
 	}
@@ -255,7 +386,7 @@ func (acc *inventoryAccumulator) subsystemFor(rel string, exampleLimit int) *sub
 }
 
 func (acc inventoryAccumulator) renderSourceClasses() []InventoryClassStatus {
-	out := make([]InventoryClassStatus, 0, len(RequiredInventorySourceClasses))
+	out := make([]InventoryClassStatus, 0, len(RequiredInventorySourceClasses)+1)
 	for _, class := range RequiredInventorySourceClasses {
 		evidence := sortedMapKeys(acc.sourceClasses[class])
 		status, note := inventorySourceClassDisposition(class, evidence)
@@ -294,6 +425,9 @@ func (subsystem *subsystemAccumulator) addFile(rel string, size int64, lines int
 	if file.Doc {
 		subsystem.row.DocsFiles++
 	}
+	if file.Kernel {
+		subsystem.row.KernelFiles++
+	}
 	if file.Language != "" {
 		subsystem.languages[file.Language]++
 	}
@@ -311,6 +445,7 @@ type inventoryFileClass struct {
 	Test          bool
 	Doc           bool
 	TextLike      bool
+	Kernel        bool
 	SourceClasses []string
 }
 
@@ -361,6 +496,7 @@ func classifyInventoryFile(rel string) inventoryFileClass {
 		Test:          isTest,
 		Doc:           isDoc,
 		TextLike:      isDoc || language != "" || ext == ".toml" || ext == ".yaml" || ext == ".yml" || ext == ".json",
+		Kernel:        isRuntime && isKernelLanguage(language),
 		SourceClasses: sortedBoolKeys(classes),
 	}
 }
@@ -387,9 +523,9 @@ func inventorySourceClassDisposition(class string, evidence []string) (string, s
 	}
 }
 
-func inventoryCompletenessNote(classes []InventoryClassStatus, skipped []string) string {
+func inventoryCompletenessNote(report InventoryMap, walkedSubmodules []string) string {
 	var external, partial, absent []string
-	for _, class := range classes {
+	for _, class := range report.SourceClasses {
 		switch class.Status {
 		case InventoryClassExternalRequired:
 			external = append(external, class.Class)
@@ -401,8 +537,31 @@ func inventoryCompletenessNote(classes []InventoryClassStatus, skipped []string)
 	}
 	var parts []string
 	parts = append(parts, "local tree inventory walked every non-skipped regular file and grouped immediate subsystems")
-	if len(skipped) > 0 {
-		parts = append(parts, fmt.Sprintf("skipped dependency/cache/control directories: %s", strings.Join(sortedStrings(skipped), ", ")))
+	if len(report.SkippedDirs) > 0 {
+		parts = append(parts, fmt.Sprintf("skipped dependency/cache/control directories: %s", strings.Join(report.SkippedDirs, ", ")))
+	}
+	if len(walkedSubmodules) > 0 {
+		parts = append(parts, fmt.Sprintf("walked declared git submodules (skip-named parents are pass-through only): %s", strings.Join(sortedStrings(walkedSubmodules), ", ")))
+	}
+	if len(report.UnpopulatedSubmodules) > 0 {
+		parts = append(parts, fmt.Sprintf("declared submodules not checked out (run git submodule update --init --recursive and regenerate, or exclude with a reason): %s", strings.Join(report.UnpopulatedSubmodules, ", ")))
+	}
+	if len(report.ExcludedSubmodules) > 0 {
+		excluded := make([]string, 0, len(report.ExcludedSubmodules))
+		for _, row := range report.ExcludedSubmodules {
+			excluded = append(excluded, fmt.Sprintf("%s (%s)", row.Path, row.Reason))
+		}
+		parts = append(parts, fmt.Sprintf("declared submodules excluded from the walk (their kernels stay unproven, so kernel_inventory is required): %s", strings.Join(excluded, ", ")))
+	}
+	if report.SkippedKernelFiles > 0 || report.SkippedKernelScanTruncated {
+		scanNote := fmt.Sprintf("extension scan of skipped vendor/build/dist/target directories found %d kernel files (not in totals)", report.SkippedKernelFiles)
+		if report.SkippedKernelScanTruncated {
+			scanNote += " and was truncated at its entry budget"
+		}
+		parts = append(parts, scanNote)
+	}
+	if !report.KernelInventoryRequired() {
+		parts = append(parts, kernelInventoryAbsentNote)
 	}
 	if len(absent) > 0 {
 		parts = append(parts, fmt.Sprintf("classes checked absent in local tree: %s", strings.Join(absent, ", ")))
@@ -415,6 +574,7 @@ func inventoryCompletenessNote(classes []InventoryClassStatus, skipped []string)
 	}
 	return strings.Join(parts, "; ")
 }
+
 func shouldSkipInventoryDir(name string) bool {
 	switch strings.ToLower(name) {
 	case ".git", ".hg", ".svn", "node_modules", "vendor", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".cache", ".turbo", ".pytest_cache", "target", "coverage":
@@ -454,8 +614,26 @@ func inventoryLanguage(ext, base string) string {
 		return "Kotlin"
 	case ".c", ".h":
 		return "C"
-	case ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx":
+	case ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".inl", ".tcc":
 		return "C++"
+	case ".cu", ".cuh":
+		return "CUDA"
+	case ".hip":
+		return "HIP"
+	case ".comp", ".glsl":
+		return "GLSL"
+	case ".metal":
+		return "Metal"
+	case ".cl":
+		return "OpenCL"
+	case ".wgsl":
+		return "WGSL"
+	case ".ptx":
+		return "PTX"
+	case ".slang":
+		return "Slang"
+	case ".mojo":
+		return "Mojo"
 	case ".cs":
 		return "C#"
 	case ".rb":
@@ -511,21 +689,36 @@ func shouldKeepInventoryExample(rel string, file inventoryFileClass) bool {
 	return file.Runtime || file.Test || file.Doc || strings.Contains(base, "license") || strings.Contains(base, "changelog") || strings.Contains(base, "roadmap")
 }
 
-func countTextLines(path string, size int64, textLike bool) int {
+func scanInventoryText(filePath string, size int64, textLike bool, rule *kernelMarkerRule) (int, bool) {
 	if !textLike || size > 1<<20 {
-		return 0
+		return 0, false
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(filePath)
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	defer f.Close()
 	lines := 0
+	marked := false
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20+1)
 	for scanner.Scan() {
 		lines++
+		if marked || rule == nil {
+			continue
+		}
+		marked = rule.matches(scanner.Text())
 	}
-	return lines
+	return lines, marked
+}
+
+func sortedStringKeys(values map[string]string) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func renderLanguageCounts(counts map[string]int) []InventoryLanguageCount {

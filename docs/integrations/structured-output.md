@@ -130,17 +130,54 @@ the object that holds its array. The 16-property and four-optional limits count
 every property at every level, including item members; an omitted optional
 object omits its members.
 Unknown constraint keywords, `additionalProperties:true` and union keywords are
-also rejected before inference. `strict` may be true or omitted. Native
-`json_object` is unsupported; upstream engine passthrough retains its own
-supported surface.
+also rejected before inference. `strict` may be true or omitted. Upstream engine
+passthrough retains its own supported surface.
+
+### Native JSON mode (`json_object`)
+
+`{"type":"json_object"}`, OpenAI JSON mode, constrains a native response to
+exactly one JSON object of any shape: nested objects and arrays, strings,
+numbers, `true`, `false` and `null`. No schema applies; send `json_schema` for
+that. The format may carry no member besides `type`, and a member sent as
+`null` counts as absent. A `schema` or `json_schema` member beside
+`json_object`, which some providers accept, is refused before inference rather
+than ignored. Within RFC 8259 the mask applies these bounds:
+
+- The response begins with `{` and ends at the object's closing `}`. The stop
+  token is admitted only there, and nothing else is, so no text or whitespace
+  precedes or follows the object.
+- Whitespace (space, tab, LF, CR) may appear between tokens inside the object,
+  at most 32 consecutive bytes, so a model cannot loop on whitespace.
+  Pretty-printed output therefore keeps each newline plus indentation within 32
+  bytes.
+- Strings accept every JSON escape, including `\u` with any four hex digits
+  (unpaired surrogate escapes too, as RFC 8259's grammar allows). Raw characters
+  must be valid UTF-8 at U+0020 or above, and a token may end inside a
+  multi-byte character.
+- Numbers accept a sign, a fraction and an exponent, as in `-0.5e+3`; leading
+  zeros are refused.
+- Objects and arrays nest at most 32 deep, counting the top-level object. At that
+  depth an opening bracket is never admitted, while every other value stays
+  available.
+- Special tokens such as `<|im_start|>` are never admitted as string text.
+- Duplicate keys are not detected; JSON permits them.
+
+Each request builds its own mask and caches the token set admitted in each parse
+state, up to 128 states. A string body or a run of digits is one state however
+long it grows. On a synthetic 151,936-token vocabulary
+(`BenchmarkJSONValueMaskLargeVocab` in `internal/grammar`, one AMD Ryzen 9 9950X
+core), the first step including vocabulary decode took about 15 ms, each new
+state about 4.3 ms, and a cached step about 0.22 ms. These are mask-only CPU
+timings, not token time on a named model. A reasoning span may precede the
+object exactly as it precedes a schema object (below).
 
 On `/v1/chat/completions`, the native route enforces these constraint carriers:
-`response_format` with type `json_schema`; a guided regex sent as
+`response_format` with type `json_schema` or `json_object`; a guided regex sent as
 `guided_regex` or its SGLang alias `regex`; a vLLM `guided_json` schema or its
 SGLang alias `json_schema`; a vLLM `guided_choice` list; and vLLM's
 `structured_outputs` object with a `json`, `regex` or `choice` member. Every
 other carrier on that route is refused before prefill instead of being ignored:
-other `response_format` types (`json_object`, `regex`, `grammar`), the
+other `response_format` types (`regex`, `grammar`), the
 remaining provider-native guided fields (`guided_grammar`,
 `guided_decoding_backend`, `ebnf`), and the `structured_outputs` members
 `json_object`, `grammar` and `structural_tag`. This applies to buffered and
@@ -151,7 +188,8 @@ same constraint, so `guided_regex`, `regex` and `structured_outputs.regex` must
 hold the same pattern; `guided_json`, `json_schema` and `structured_outputs.json`
 the same schema (compared as described for `guided_json` below); and
 `guided_choice` and `structured_outputs.choice` the same list once duplicates
-are removed, in the same order. Carriers of different kinds are refused. A
+are removed, in the same order. Carriers of different kinds are refused, and `json_object` combines with no
+guided carrier. A
 `guided_decoding_backend` alone is refused too, since the native route has no
 selectable backend. A guided field sent as `null` counts as absent. EBNF and
 other grammars therefore need an upstream engine in ride mode.
@@ -162,10 +200,10 @@ the same rules. A `json_schema` format keeps its members (`name`, `schema`,
 `strict`, `description`) beside `type`; fak moves them unchanged under a
 `json_schema` wrapper, so the native subset and the schema caps above apply as
 they do on chat. Type `text`, a missing or `null` `format`, and a missing or
-`null` `text` keep the ordinary route. Any other type, such as `json_object`,
-passes through unchanged. The native route refuses it with HTTP 400
-`native_structured_output_unsupported`, and ride mode forwards it upstream as
-`response_format`. fak normally adds its own context-restore tool to a
+`null` `text` keep the ordinary route. Any other type passes through unchanged
+as `response_format`, and ride mode forwards it upstream. The native route
+enforces `json_object` as described above and refuses every other type, such as
+`regex`, with HTTP 400 `native_structured_output_unsupported`. fak normally adds its own context-restore tool to a
 `/v1/responses` turn. It skips that tool only on a structured turn where the
 client sent no tools. Native structured output is refused alongside any tool,
 so a native request with no client tools is honored rather than refused. A
@@ -237,7 +275,7 @@ exactly one constraint member; an empty object, one whose members are all
 `grammar` and `structural_tag` are refused. Of the options in vLLM's
 `StructuredOutputsParams`, `disable_any_whitespace` and
 `disable_additional_properties` are accepted with either boolean value. Native
-JSON masks never emit free whitespace or an undeclared property, which satisfies
+JSON schema masks never emit free whitespace or an undeclared property, which satisfies
 both values, and neither option affects regex or choice output. In vLLM,
 `disable_any_whitespace: true` means compact JSON without whitespace, the layout
 native masks emit, and
@@ -268,8 +306,8 @@ treating a partial response as a complete object.
 
 Reasoning may precede the object. When the prompt opens a reasoning span (a
 thinking-mode Qwen3.5-family template) or the request sets a reasoning effort or
-thinking budget, decoding is unconstrained inside the span and the schema mask
-starts only after the model emits the atomic `</think>` token. Text that merely
+thinking budget, decoding is unconstrained inside the span and the schema or
+JSON-mode mask starts only after the model emits the atomic `</think>` token. Text that merely
 spells `</think>` with ordinary tokens does not end the span. Without a seeded
 span, the first token may be the atomic `<think>` token or the start of the
 object. EOS stays unavailable until the object is complete, so a response cannot

@@ -28,16 +28,22 @@ func RunStudyInventory(stdout, stderr io.Writer, args []string) int {
 	outPath := fs.String("out", "", "write output to this path instead of stdout")
 	jsonOutput := fs.Bool("json", false, "emit JSON instead of Markdown")
 	examples := fs.Int("examples", 8, "maximum example paths per subsystem")
+	var excludeSubmodules stringListFlag
+	fs.Var(&excludeSubmodules, "exclude-submodule", "declared submodule that is not checked out and cannot be fetched, as <path>=<reason> (repeatable); kernel_inventory stays required")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*root) == "" || strings.TrimSpace(*repository) == "" || *examples < 1 {
-		fmt.Fprintln(stderr, "usage: fak study-inventory --root PATH --repository owner/name [--revision SHA] [--url URL] [--observed-at RFC3339] [--json] [--out PATH]")
+		fmt.Fprintln(stderr, "usage: fak study-inventory --root PATH --repository owner/name [--revision SHA] [--url URL] [--observed-at RFC3339] [--exclude-submodule PATH=REASON]... [--json] [--out PATH]")
+		return 2
+	}
+	excludedSubmodules, err := parseExcludeSubmoduleFlags(excludeSubmodules)
+	if err != nil {
+		fmt.Fprintf(stderr, "study-inventory: %v\n", err)
 		return 2
 	}
 	resolvedRevision := strings.TrimSpace(*revision)
 	if resolvedRevision == "" {
-		var err error
 		resolvedRevision, err = gitHeadRevision(*root)
 		if err != nil {
 			fmt.Fprintf(stderr, "study-inventory: --revision required when git HEAD cannot be read: %v\n", err)
@@ -57,6 +63,7 @@ func RunStudyInventory(stdout, stderr io.Writer, args []string) int {
 		IndexedRevision:         resolvedRevision,
 		ObservedAt:              resolvedObservedAt,
 		MaxExamplesPerSubsystem: *examples,
+		ExcludedSubmodules:      excludedSubmodules,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "study-inventory: %v\n", err)
@@ -86,6 +93,28 @@ func RunStudyInventory(stdout, stderr io.Writer, args []string) int {
 	}
 	fmt.Fprintf(stdout, "wrote study inventory map for %s to %s\n", report.Repository, *outPath)
 	return 0
+}
+
+// parseExcludeSubmoduleFlags turns repeated --exclude-submodule <path>=<reason>
+// values into the exclusion map; BuildInventoryMap validates each path against
+// the checkout's .gitmodules.
+func parseExcludeSubmoduleFlags(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(values))
+	for _, value := range values {
+		submodule, reason, ok := strings.Cut(value, "=")
+		submodule, reason = strings.TrimSpace(submodule), strings.TrimSpace(reason)
+		if !ok || submodule == "" || reason == "" {
+			return nil, fmt.Errorf("--exclude-submodule %q: want <path>=<reason> with a non-empty reason", value)
+		}
+		if _, dup := out[submodule]; dup {
+			return nil, fmt.Errorf("--exclude-submodule %q: path given twice", submodule)
+		}
+		out[submodule] = reason
+	}
+	return out, nil
 }
 
 func hasStudySelfFlag(args []string) bool {

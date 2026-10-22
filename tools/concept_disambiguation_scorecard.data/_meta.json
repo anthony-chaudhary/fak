@@ -1487,6 +1487,21 @@
           "category": "incidental",
           "reason": "Fixed 64 KiB logical allowance for bounded cache map and order growth, not a cache instance, residency budget, RSS guarantee, or cache architecture.",
           "token": "v41EngramLookAheadCacheMetadata"
+        },
+        {
+          "category": "incidental",
+          "reason": "Grammar mask field recording which vocabulary a per-request token admission memo was built for, not a KV, prefix or serving cache.",
+          "token": "cacheVocab"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bound on the JSON-mode grammar mask per-state token admission memo for one request, not a KV, prefix or serving cache.",
+          "token": "maxJSONValueMaskCacheStates"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test that the JSON-mode grammar mask memo stays bounded on long values.",
+          "token": "TestJSONValueMaskLongValuesKeepCacheFinite"
         }
       ],
       "exclude": [
@@ -1579,6 +1594,7 @@
         "SharedPrefixProviderCache",
         "SlidingCacheMetrics",
         "SubCacheWarmReplay",
+        "TestJSONValueMaskLongValuesKeepCacheFinite",
         "TestMicroCacheWitnessCapturesOnOffProviderCounters",
         "TestMicroCacheWitnessRefusesSingleEndpoint",
         "TokenCacheDir",
@@ -1629,6 +1645,7 @@
         "cacheStats",
         "cacheValueGateFactsFromReport",
         "cacheValueLedger",
+        "cacheVocab",
         "cacheWitnessReadback",
         "cacheWitnessServer",
         "cache_anchor_and_trailing_json",
@@ -1755,6 +1772,7 @@
         "liveMatrixPrefixCache",
         "loadCacheValueGateBaseline",
         "loadVCacheRuntimeCalibration",
+        "maxJSONValueMaskCacheStates",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
         "microCacheArm",
@@ -9915,6 +9933,31 @@
           "category": "incidental",
           "reason": "Boolean report field populated by the existing compute.KernelProfileReaderRegistered observation. It records reader availability, not a new gateway, engine, registry, or execution guarantee.",
           "token": "KernelProfileRegistered"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study inventory field for GPU-kernel source files counted in an external repository tree, not the fak in-kernel engine or gateway.",
+          "token": "kernelfiles"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study inventory source class requiring a per-kernel inventory of an external repository, not the fak in-kernel engine.",
+          "token": "kernelinventory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study inventory map predicate for whether a per-kernel inventory is owed, not the fak in-kernel engine.",
+          "token": "kernelinventoryrequired"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study inventory field for GPU-kernel source files counted in an external repository tree, not the fak in-kernel engine or gateway.",
+          "token": "skippedkernelfiles"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study inventory flag that the bounded scan of skipped directories for GPU-kernel files hit its budget.",
+          "token": "skippedkernelscantruncated"
         }
       ],
       "exclude": [
@@ -10056,6 +10099,9 @@
         "kernel_100ns",
         "kernel_completion_timing",
         "kernel_projection",
+        "kernelfiles",
+        "kernelinventory",
+        "kernelinventoryrequired",
         "kernels",
         "kernelwiki",
         "markInKernelDroppedToolCalls",
@@ -10091,6 +10137,8 @@
         "selectorGateway",
         "serviceOpsEngine",
         "shrinkWireInKernel",
+        "skippedkernelfiles",
+        "skippedkernelscantruncated",
         "unknown_engine_start_sequence",
         "webSearchEngine",
         "writeEngine"
@@ -15981,6 +16029,16 @@
           "category": "incidental",
           "reason": "Private provenance-label accessor: returns the existing renderer identifier, optionally namespaced by the immutable admitted chat profile, for PromptEncoding and inference receipts. It does not render or materialize prompt content; rendering remains in inKernelRenderPrompt.",
           "token": "promptRendererID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formats study inventory language counts for markdown output, not prompt rendering or materialization.",
+          "token": "renderlanguagecounts"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formats study inventory language counts for markdown output, not prompt rendering or materialization.",
+          "token": "renderlanguages"
         }
       ],
       "id": "render-materialize",
@@ -16091,6 +16149,8 @@
         "renderidentitypage",
         "rendering",
         "renderinkernelchatmlrequest",
+        "renderlanguagecounts",
+        "renderlanguages",
         "renders",
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
@@ -17331,6 +17391,11 @@
           "category": "incidental",
           "reason": "Issue #12727 private adapter for the existing agent Planner interface which retains and returns an authenticated DFlash2 binding error; this refusal wrapper introduces no work plan or planning lifecycle.",
           "token": "dflash2RefusedPlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Directory walk rules for a study inventory traversal, not a fak plan, goal or dispatch plan.",
+          "token": "newinventorywalkplan"
         }
       ],
       "exclude": [
@@ -17526,6 +17591,7 @@
         "motifDetectPlanFanoutReconcile",
         "nativecapacitycaptureplan",
         "newLivePlanner",
+        "newinventorywalkplan",
         "notplanned",
         "nplan",
         "opsRunPlannerInferencePreflight",
