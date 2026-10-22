@@ -20,6 +20,14 @@ import (
 	"time"
 )
 
+// Preserve the inherited exec-thread state for this exact child fixture.
+// Locking in TestMain can be too late after the main goroutine migrates.
+func init() {
+	if len(os.Args) == 3 && os.Args[1] == "--v41-ep-handoff-test-owner" {
+		runtime.LockOSThread()
+	}
+}
+
 // This process fixture verifies the real inherited-FD/process binding only. It
 // is not the production supervisor and does not establish its enforcement. The
 // separate stdlib guard witness owns the TERM/KILL/parent-death qualification.
