@@ -706,6 +706,7 @@ func resolveServeNativeContextDirectory(dir string, requested int) (serveNativeC
 // group and wires the rank-local forward; the dialed group lands on rt.epGroup and
 // is closed by cmdServe's deferred closeEPGroup.
 func (rt *serveRuntime) loadModel(sf *serveFlags) {
+	startupResidency := serveStartupResidency(*sf.ggufPath)
 	artifactStamp := stampModelArtifact(*sf.ggufPath)
 	// This header-only forward gate precedes expert-shard derivation and
 	// loadServeInKernelModel, which owns memory planning and tensor payload reads.
@@ -847,6 +848,9 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	inKernelTok, tokLoaded := resolveServeTokenizer(*sf.tokPath, *sf.ggufPath, rt.addStartupMessage)
 	if tokLoaded {
 		rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
+	}
+	if loadProfile != nil {
+		loadProfile.StartupResidency = startupResidency
 	}
 	rt.inKernelModel, rt.inKernelQ4K, rt.loadProfile, rt.inKernelTok = inKernelModel, inKernelQ4K, loadProfile, inKernelTok
 	if err := rt.admitWeightResidency(inKernelModel, *sf.ggufPath); err != nil {

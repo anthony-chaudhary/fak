@@ -341,7 +341,15 @@ type debugModelLoadVars struct {
 	MemoryFit           []debugMemoryFitVars           `json:"memory_fit,omitempty"`
 	MemoryHeadroomRatio float64                        `json:"memory_headroom_ratio,omitempty"`
 	LoadPaths           []debugModelLoadPathVars       `json:"load_paths,omitempty"`
+	StartupResidency    *debugModelLoadResidencyVars   `json:"page_cache,omitempty"`
 	Messages            []StartupMessage               `json:"messages,omitempty"`
+}
+
+type debugModelLoadResidencyVars struct {
+	StartupCase   string `json:"startup_case"`
+	ResidentBytes int64  `json:"resident_bytes"`
+	FileBytes     int64  `json:"file_bytes"`
+	Files         int    `json:"files"`
 }
 
 type debugModelLoadPathVars struct {
@@ -1195,6 +1203,9 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 		Bottleneck:          p.Bottleneck,
 		MemoryHeadroomRatio: p.MemoryHeadroomRatio,
 		Messages:            append([]StartupMessage(nil), p.Messages...),
+	}
+	if pc := p.StartupResidency; pc != nil {
+		out.StartupResidency = &debugModelLoadResidencyVars{StartupCase: pc.StartupCase, ResidentBytes: pc.ResidentBytes, FileBytes: pc.FileBytes, Files: pc.Files}
 	}
 	for _, ph := range p.sorted() {
 		out.Phases = append(out.Phases, debugModelLoadPhaseVars{
