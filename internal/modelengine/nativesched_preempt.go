@@ -99,6 +99,7 @@ type NativePreemptionStats struct {
 	GPUDirectBytes         int64
 	GPUDirectRestored      int64
 	GPUDirectStagingCopies int // strictly 0
+	PagedMisuseReleases    int64
 	VictimReason           string
 	VictimRule             NativePreemptionVictimRule
 	CostAwareVictims       int64
@@ -204,6 +205,7 @@ func writeNativePreemptionMetrics(b *strings.Builder, st NativePreemptionStats) 
 	writeNativeCounter(b, p+"readmitted_total", "Preempted sequences readmitted to the running set.", st.Readmitted)
 	writeNativeCounter(b, p+"swap_restored_bytes_total", "KV bytes restored from host DRAM on readmit.", st.SwapRestoredBytes)
 	writeNativeCounter(b, p+"gpudirect_restored_bytes_total", "KV bytes restored via GPU Direct NVMe on readmit.", st.GPUDirectRestored)
+	writeNativeCounter(b, p+"paged_misuse_releases_total", "Ignored paged-KV releases of a free or out-of-range block on the swap path.", st.PagedMisuseReleases)
 	writeNativeHelpType(b, p+"gpudirect_staging_copies", "Host DRAM staging bounce copies incurred by GPU Direct (strictly 0).", "gauge")
 	fmt.Fprintf(b, "%sgpudirect_staging_copies %d\n", p, st.GPUDirectStagingCopies)
 }
@@ -394,6 +396,7 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 			}
 		} else {
 			pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
+			defer s.accruePagedMisuseLocked(pool)
 			seq, err := pool.RestoreFromHost(ln.hostKV)
 			if err != nil {
 				return err
@@ -611,6 +614,7 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 				blob, err = model.QwenHybridKVCacheToHost(ln.sess.Cache, s.blockTokensLocked())
 			} else {
 				pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
+				defer s.accruePagedMisuseLocked(pool)
 				seq, pageErr := model.KVCacheToPaged(pool, ln.sess.Cache)
 				if pageErr != nil {
 					return pageErr
@@ -640,6 +644,10 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 	ln.sess = nil
 	s.preempted = append(s.preempted, ln)
 	return nil
+}
+
+func (s *NativeScheduler) accruePagedMisuseLocked(pool *model.PagedKVPool) {
+	s.preemptStats.PagedMisuseReleases += int64(pool.MisuseReleases())
 }
 
 func (s *NativeScheduler) recordQwenSwapUsage(direction, outcome, result string, bytes int) error {
