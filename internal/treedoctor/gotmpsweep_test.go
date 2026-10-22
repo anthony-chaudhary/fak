@@ -680,3 +680,121 @@ func goTmpReasonForPath(rep GoTmpReport, path string) string {
 	}
 	return ""
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestSweepGoTmpDefaultQuarantineStaysInsideAdmittedRoot(t *testing.T) {
+	now := time.Now()
+	repo := t.TempDir()
+	root := filepath.Join(repo, "_scratch", "go-tmp")
+	candidate := filepath.Join(root, "go-build-stale")
+	writeAged(t, filepath.Join(candidate, "b001", "_pkg_.a"), 19, now, time.Hour)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unusable OS temp parent deterministically catches the old placement
+	// without requiring a second filesystem or privileged mount in the test.
+	blockedTemp := filepath.Join(repo, "not-a-temp-directory")
+	if err := os.WriteFile(blockedTemp, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, blockedTemp)
+	}
+	snapshots := 0
+	rep := SweepGoTmp(GoTmpOptions{
+		Root: root, RepoRoot: repo, Now: now,
+		Processes: func() ([]GoTmpProcess, error) {
+			snapshots++
+			if snapshots == 2 {
+				children, err := os.ReadDir(canonicalRoot)
+				if err != nil || len(children) != 1 {
+					t.Fatalf("post-move children = %v, err=%v", children, err)
+				}
+				if !strings.HasPrefix(children[0].Name(), ".fak-maintenance-quarantine-") {
+					t.Fatalf("quarantine is not a fresh sibling: %s", children[0].Name())
+				}
+				moved := filepath.Join(canonicalRoot, children[0].Name(), filepath.Base(candidate), "b001", "_pkg_.a")
+				if _, err := os.Stat(moved); err != nil {
+					t.Fatalf("candidate missing from same-root quarantine: %v", err)
+				}
+			}
+			return nil, nil
+		},
+	}, true)
+	if rep.Failed() || rep.ReapCount() != 1 || rep.ReapedBytes != 19 || snapshots != 2 {
+		t.Fatalf("default quarantine failed: snapshots=%d report=%+v", snapshots, rep)
+	}
+	if !rep.Entries[0].Removed || rep.Entries[0].Reason != GoTmpReasonReclaimed {
+		t.Fatalf("candidate was not reclaimed: %+v", rep.Entries[0])
+	}
+	if children, err := os.ReadDir(root); err != nil || len(children) != 0 {
+		t.Fatalf("successful quarantine left residue: %v, err=%v", children, err)
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestSweepGoTmpDefaultQuarantineRejectsRootSubstitution(t *testing.T) {
+	for _, phase := range []string{"before-move", "after-move"} {
+		for _, replacement := range []string{"directory", "symlink"} {
+			t.Run(phase+"/"+replacement, func(t *testing.T) {
+				now := time.Now()
+				repo := t.TempDir()
+				root := filepath.Join(repo, "_scratch", "go-tmp")
+				displaced := filepath.Join(repo, "_scratch", "displaced")
+				outside := t.TempDir()
+				writeAged(t, filepath.Join(root, "go-build-stale", "payload"), 19, now, time.Hour)
+				snapshots := 0
+				var heldPayload, replacementPayload string
+				rep := SweepGoTmp(GoTmpOptions{
+					Root: root, RepoRoot: repo, Now: now,
+					Processes: func() ([]GoTmpProcess, error) {
+						snapshots++
+						if (phase == "before-move" && snapshots != 1) || (phase == "after-move" && snapshots != 2) {
+							return nil, nil
+						}
+						relPayload := filepath.Join("go-build-stale", "payload")
+						if phase == "after-move" {
+							children, err := os.ReadDir(root)
+							if err != nil || len(children) != 1 {
+								t.Fatalf("quarantine children = %v, err=%v", children, err)
+							}
+							relPayload = filepath.Join(children[0].Name(), relPayload)
+						}
+						if err := os.Rename(root, displaced); err != nil {
+							t.Fatal(err)
+						}
+						if replacement == "symlink" {
+							if err := os.Symlink(outside, root); err != nil {
+								t.Skipf("symlink unavailable: %v", err)
+							}
+						} else if err := os.Mkdir(root, 0o700); err != nil {
+							t.Fatal(err)
+						}
+						heldPayload = filepath.Join(displaced, relPayload)
+						replacementPayload = filepath.Join(root, relPayload)
+						writeAged(t, replacementPayload, 23, now, time.Hour)
+						return nil, nil
+					},
+				}, true)
+				if !rep.Failed() || rep.ReapCount() != 0 || rep.ReapedBytes != 0 || rep.Entries[0].Removed {
+					t.Fatalf("root substitution did not fail closed: %+v", rep)
+				}
+				for path, size := range map[string]int{heldPayload: 19, replacementPayload: 23} {
+					info, err := os.Stat(path)
+					if err != nil || info.Size() != int64(size) {
+						t.Fatalf("preserved payload %s: info=%v err=%v", path, info, err)
+					}
+				}
+				if phase == "after-move" {
+					if rep.Quarantine == "" || rep.Entries[0].QuarantinePath == "" {
+						t.Fatalf("lost quarantine move receipt: %+v", rep)
+					}
+					if _, err := os.Lstat(filepath.Join(root, "go-build-stale")); !os.IsNotExist(err) {
+						t.Fatalf("rollback touched replacement root: %v", err)
+					}
+				}
+			})
+		}
+	}
+}

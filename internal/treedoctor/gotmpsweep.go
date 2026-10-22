@@ -128,7 +128,8 @@ type GoTmpOptions struct {
 	MaxCandidates int
 	// Processes supplies one host process snapshot. Nil selects the platform witness.
 	Processes func() ([]GoTmpProcess, error)
-	// QuarantineRoot overrides the OS-temp quarantine parent for deterministic tests.
+	// QuarantineRoot overrides the default unique quarantine inside the admitted Root.
+	// Explicit parents are honored as supplied; cross-device renames fail closed.
 	QuarantineRoot string
 }
 
@@ -506,6 +507,20 @@ func SweepGoTmp(opts GoTmpOptions, apply bool) GoTmpReport {
 	if !foundEntry {
 		return rep
 	}
+	// Pin the default quarantine's admitted parent before process callbacks can
+	// observe or change the filesystem. Explicit quarantine policy is unchanged.
+	var quarantineRootInfo os.FileInfo
+	if apply && strings.TrimSpace(opts.QuarantineRoot) == "" {
+		quarantineRootInfo, err = os.Lstat(root)
+		if err == nil {
+			err = validateGoTmpQuarantineRoot(root, quarantineRootInfo)
+		}
+		if err != nil {
+			rep.Reaped, rep.ReapedBytes = nil, 0
+			rep.Err = fmt.Sprintf("pin default quarantine root: %v", err)
+			return rep
+		}
+	}
 	processes, processErr := goTmpProcessSnapshot(opts)
 	rep.ProcessSnapshots = 1
 	if processErr != nil {
@@ -533,5 +548,5 @@ func SweepGoTmp(opts GoTmpOptions, apply bool) GoTmpReport {
 	if !apply {
 		return rep
 	}
-	return applyGoTmpQuarantine(opts, rep)
+	return applyGoTmpQuarantine(opts, rep, quarantineRootInfo)
 }

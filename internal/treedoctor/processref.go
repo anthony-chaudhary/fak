@@ -167,7 +167,27 @@ type movedGoTmp struct {
 	dest       string
 }
 
-func applyGoTmpQuarantine(opts GoTmpOptions, rep GoTmpReport) GoTmpReport {
+// validateGoTmpQuarantineRoot detects changes at the lifecycle checkpoints. It
+// is not atomic filesystem confinement: callers must still own a stable Root.
+func validateGoTmpQuarantineRoot(root string, pinned os.FileInfo) error {
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(canonical) != root {
+		return fmt.Errorf("default quarantine root canonical path changed: %q", root)
+	}
+	current, err := os.Lstat(root)
+	if err != nil {
+		return err
+	}
+	if pinned == nil || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(pinned, current) {
+		return fmt.Errorf("default quarantine root identity changed: %q", root)
+	}
+	return nil
+}
+
+func applyGoTmpQuarantine(opts GoTmpOptions, rep GoTmpReport, quarantineRootInfo os.FileInfo) GoTmpReport {
 	eligible := make([]int, 0)
 	for i := range rep.Entries {
 		if rep.Entries[i].Verdict == GoTmpReap {
@@ -180,14 +200,23 @@ func applyGoTmpQuarantine(opts GoTmpOptions, rep GoTmpReport) GoTmpReport {
 	}
 
 	quarantineParent := strings.TrimSpace(opts.QuarantineRoot)
+	quarantinePattern := "run-"
 	if quarantineParent == "" {
-		quarantineParent = filepath.Join(os.TempDir(), "fak-maintenance-quarantine")
-	}
-	if err := os.MkdirAll(quarantineParent, 0o700); err != nil {
+		if err := validateGoTmpQuarantineRoot(opts.Root, quarantineRootInfo); err != nil {
+			markGoTmpApplyError(&rep, eligible, err)
+			return rep
+		}
+		// SweepGoTmp has already canonicalized and admitted Root. Create a fresh
+		// sibling of its candidates, rather than crossing to the OS temp volume.
+		// A non-Go prefix keeps any retained quarantine out of future default reaps.
+		// Do not create a missing Root or retry rejected candidates elsewhere.
+		quarantineParent = opts.Root
+		quarantinePattern = ".fak-maintenance-quarantine-"
+	} else if err := os.MkdirAll(quarantineParent, 0o700); err != nil {
 		markGoTmpApplyError(&rep, eligible, fmt.Errorf("create quarantine parent: %w", err))
 		return rep
 	}
-	runDir, err := os.MkdirTemp(quarantineParent, "run-")
+	runDir, err := os.MkdirTemp(quarantineParent, quarantinePattern)
 	if err != nil {
 		markGoTmpApplyError(&rep, eligible, fmt.Errorf("create unique quarantine: %w", err))
 		return rep
@@ -236,6 +265,18 @@ func applyGoTmpQuarantine(opts GoTmpOptions, rep GoTmpReport) GoTmpReport {
 	rep.ProcessSnapshots++
 	if postErr != nil {
 		rep.ProcessErr = postErr.Error()
+	}
+	if strings.TrimSpace(opts.QuarantineRoot) == "" {
+		if err := validateGoTmpQuarantineRoot(opts.Root, quarantineRootInfo); err != nil {
+			// The recorded paths no longer identify our admitted parent. Preserve
+			// the move receipt; neither delete nor roll back through replaced paths.
+			for _, movedEntry := range moved {
+				entry := &rep.Entries[movedEntry.entryIndex]
+				entry.RemoveErr = fmt.Sprintf("default quarantine root changed after move; retained quarantine at original root identity: %v", err)
+				entry.Reason = GoTmpReasonQuarantined
+			}
+			return rep
+		}
 	}
 	for _, movedEntry := range moved {
 		entry := &rep.Entries[movedEntry.entryIndex]
