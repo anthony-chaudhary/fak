@@ -502,6 +502,7 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 				},
 				registry: registry,
 				ref:      V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub},
+				ring:     scratch.gatherOps.compressorRingStep(m, l, plan.Ratio, scratch),
 			})
 		if err != nil {
 			return v41RoleAttentionContinuation{}, v41StageErr(v41StageCompress, l, err)

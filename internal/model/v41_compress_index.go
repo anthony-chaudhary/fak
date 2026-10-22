@@ -80,24 +80,37 @@ func (c *V41CompressorPool) Width() int {
 // the result is cast back to BF16. For ratio 1 the projected KV enters this tail
 // through the same BF16 boundary; projectedScore is unused.
 func (c *V41CompressorPool) PushNormalized(pos int, projectedKV, projectedScore, normWeight []float32, eps float32) ([]float32, bool, error) {
-	if c == nil || len(normWeight) != c.width {
-		return nil, false, fmt.Errorf("model: V41 compressor norm width %d does not match %d", len(normWeight), c.Width())
-	}
-	if !Finite32(eps) || eps <= 0 {
-		return nil, false, fmt.Errorf("model: V41 compressor norm epsilon must be finite and positive")
-	}
-	for i, weight := range normWeight {
-		if !Finite32(weight) {
-			return nil, false, fmt.Errorf("model: V41 compressor norm weight[%d] is non-finite", i)
-		}
+	if err := c.validateNorm(normWeight, eps); err != nil {
+		return nil, false, err
 	}
 	pooled, emitted, err := c.Push(pos, projectedKV, projectedScore)
 	if err != nil || !emitted {
 		return nil, emitted, err
 	}
+	normalized, err := c.normalizePooled(pooled, normWeight, eps)
+	return normalized, true, err
+}
+
+func (c *V41CompressorPool) validateNorm(normWeight []float32, eps float32) error {
+	if c == nil || len(normWeight) != c.width {
+		return fmt.Errorf("model: V41 compressor norm width %d does not match %d", len(normWeight), c.Width())
+	}
+	if !Finite32(eps) || eps <= 0 {
+		return fmt.Errorf("model: V41 compressor norm epsilon must be finite and positive")
+	}
+	for i, weight := range normWeight {
+		if !Finite32(weight) {
+			return fmt.Errorf("model: V41 compressor norm weight[%d] is non-finite", i)
+		}
+	}
+	return nil
+}
+
+// normalizePooled is PushNormalized's tail for an emitted raw pooled row; it
+// may round pooled in place.
+func (c *V41CompressorPool) normalizePooled(pooled, normWeight []float32, eps float32) ([]float32, error) {
 	if c.normalize != nil {
-		normalized, err := c.normalize(pooled, normWeight, eps)
-		return normalized, true, err
+		return c.normalize(pooled, normWeight, eps)
 	}
 	var meanSquare float32
 	for i := range pooled {
@@ -108,7 +121,7 @@ func (c *V41CompressorPool) PushNormalized(pos int, projectedKV, projectedScore,
 	for i := range pooled {
 		pooled[i] = v41RoundBF16(pooled[i] * rstd * normWeight[i])
 	}
-	return pooled, true, nil
+	return pooled, nil
 }
 
 // Push consumes one causal position. For ratio > 1 it emits only after the

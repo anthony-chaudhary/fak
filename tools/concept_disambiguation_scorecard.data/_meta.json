@@ -14573,6 +14573,11 @@
         },
         {
           "category": "incidental",
+          "reason": "Optional backend capability predicate for the V4.1 device-resident compressor ring module; it reports operation availability before selection and makes no product-support or maturity claim.",
+          "token": "supportsv41compressorring"
+        },
+        {
+          "category": "incidental",
           "reason": "The existing agent attribution record field carries the separately positioned model.V41WorkloadCoverage value without adding a second coverage measure, observation scope, request identity or readiness policy.",
           "token": "WorkloadCoverage"
         },
@@ -14843,6 +14848,7 @@
         "supportmaturitydebt",
         "supportmaturityscore",
         "supports",
+        "supportsv41compressorring",
         "supportwitness",
         "targetcoverage",
         "topncoverage",
@@ -18154,6 +18160,16 @@
           "category": "incidental",
           "reason": "Metric wire name positioned under gateway-engine as gateway-device-transient-pool-count for the DeviceTransientPoolStats observation; it measures the existing transient reuse pool and defines no additional pool or allocator.",
           "token": "fak_gateway_device_transient_pool_buffers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private V41CompressorPool helper that RMS-normalizes one emitted gated-pooled compressor row (PushNormalized's tail); pooled is attention-compression arithmetic, not a resource, buffer, worker or KV pool.",
+          "token": "normalizepooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing numeric bound on the V4.1 compressor pooling ratio, now also checked by the device compressor ring allocator; it bounds attention-compression arithmetic, not a resource, buffer, worker or KV pool.",
+          "token": "v41compressorpoolmaxratio"
         }
       ],
       "exclude": [
@@ -18194,6 +18210,7 @@
         "kvpoolbytes",
         "leasePooled",
         "leaseSpecificPooled",
+        "normalizepooled",
         "parseServeExpertRingPoolFraction",
         "poolCapText",
         "poolIdleExt",
@@ -18242,6 +18259,7 @@
         "v41FFNPoolPanelRows",
         "v41PoolNormPanelBackend",
         "v41TryPoolNormPanel",
+        "v41compressorpoolmaxratio",
         "validPoolOperands",
         "validPoolState",
         "withPoolLaneLock",

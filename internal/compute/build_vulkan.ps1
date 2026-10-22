@@ -208,7 +208,8 @@ function Build-Shaders {
     "attention_split_kv",
     "v41_f32_finite",
     "qwen35_value_head_tile",
-    "v41_router_gate_topk"
+    "v41_router_gate_topk",
+    "v41_compressor_ring"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"

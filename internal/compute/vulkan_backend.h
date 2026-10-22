@@ -643,6 +643,16 @@ int fvk_have_v41_compressor_pool(void);
 int fvk_v41_compressor_pool_f32(const void *dKV, const void *dScores, void *dOut,
                                 int ratio, int width);
 
+/* V4.1 device-resident compressor ring (optional v41_compressor_ring module).
+ * Stores kvRow/scoreRow [width] into ring row slot of kvRing/scoreRing
+ * [ratio,width]; with emit=1 the same dispatch pools the ring with the gated
+ * pool arithmetic into out [2,width] (pooled row, then per-dimension status).
+ * With emit=0 out is unused. Push ABI is int32 ratio, width, slot, emit. */
+int fvk_have_v41_compressor_ring(void);
+int fvk_v41_compressor_ring_f32(const void *dKVRow, const void *dScoreRow, void *dKVRing,
+                                void *dScoreRing, void *dOut, int ratio, int width,
+                                int slot, int emit);
+
 /* V4.1 routed-expert activation: BF16 gate/up publication, asymmetric clamp,
  * silu(g)*u, route weight and BF16 down-operand publication. Four storage
  * bindings: gate[count] F32, up[count] F32, out[count] F32 and a 16-byte status

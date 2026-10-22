@@ -31,6 +31,7 @@ type v41DeviceGatherOps struct {
 	compressedPublicationRoPE v41CompressedPublicationRoPEFunc
 	engramGate                v41EngramGateFunc
 	compressorPool            v41CompressorPoolFunc
+	compressorRing            *v41CompressorRing
 	bf16Publish               *v41BF16PublicationBinding
 	indexWeightScale          v41IndexWeightScaleFunc
 }
@@ -74,6 +75,7 @@ func (s *Session) v41DeviceGatherOpsFunc() *v41DeviceGatherOps {
 	ops := &v41DeviceGatherOps{owner: s, indexerKeyBudgetBytes: s.v41IndexerKeyAdmissionBytes(), inverseOutput: s.v41InverseOutputRoPEFunc(), indexSelect: s.v41IndexSelectFunc(), embedGather: s.v41EmbeddingGatherFunc(), indexRoPE: s.v41IndexRoPEFunc(), compressedPublicationRoPE: s.v41CompressedPublicationRoPEFunc(), engramGate: s.v41EngramGateFunc(), compressorPool: s.v41CompressorPoolFunc()}
 	ops.bf16Publish = s.v41BindBF16Publication()
 	ops.indexWeightScale = s.v41IndexWeightScaleFunc()
+	ops.compressorRing = s.v41CompressorRingBinding()
 	return ops
 }
 

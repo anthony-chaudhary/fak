@@ -197,7 +197,7 @@ func bindV41DSparkPackedShard(path string, inv *V41DSparkInventory, sf *safetens
 			}
 		}
 	}
-	for _, canonical := range inv.names {
+	for _, canonical := range append(inv.Names(), inv.optional...) {
 		name, present := s.sources[canonical]
 		if !present {
 			continue

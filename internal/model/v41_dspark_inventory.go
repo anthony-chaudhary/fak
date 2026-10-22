@@ -32,8 +32,9 @@ type V41DSparkTensorSpec struct {
 // The original bundled DSpark experts are MXFP4 (E2M1/I8, E8M0 per 32 K), even
 // in NVIDIA's NVFP4 target export. No NVFP4 draft representation is admitted.
 type V41DSparkInventory struct {
-	byName map[string]V41DSparkTensorSpec
-	names  []string
+	byName   map[string]V41DSparkTensorSpec
+	names    []string
+	optional []string
 }
 
 // DeepSeekV41DSparkInventory describes the three pretrained mtp.* stages using
@@ -152,6 +153,13 @@ func DeepSeekV41DSparkInventory(c Config) (*V41DSparkInventory, error) {
 		if err := add(p+"ffn.gate.e_score_correction_bias", V41ClassRouterBias, stage, []string{"F32"}, d.NumRoutedExperts); err != nil {
 			return nil, err
 		}
+		// The official export ships a second router bias (bias_vl). The target
+		// maps its e_score_correction_bias_vl twin but never requires or reads
+		// it, so the draft admits it the same way: optional, exact storage.
+		vl := p + "ffn.gate.e_score_correction_bias_vl"
+		inv.byName[vl] = V41DSparkTensorSpec{Name: vl, Class: V41ClassRouterBias, Stage: stage,
+			Shape: []int{d.NumRoutedExperts}, LogicalShape: []int{d.NumRoutedExperts}, AllowedDtypes: []string{"F32"}}
+		inv.optional = append(inv.optional, vl)
 		for _, role := range []struct {
 			name string
 			o, i int
@@ -195,6 +203,7 @@ func DeepSeekV41DSparkInventory(c Config) (*V41DSparkInventory, error) {
 		return nil, err
 	}
 	sort.Strings(inv.names)
+	sort.Strings(inv.optional)
 	return inv, nil
 }
 
@@ -207,7 +216,8 @@ func (inv *V41DSparkInventory) Names() []string {
 	return append([]string(nil), inv.names...)
 }
 
-// Lookup resolves only a required canonical weight role. Returned slices are
+// Lookup resolves only a declared canonical weight role: a required one from
+// Names or an optional one that Missing never reports. Returned slices are
 // copied so an intake consumer cannot mutate another consumer's contract.
 func (inv *V41DSparkInventory) Lookup(name string) (V41DSparkTensorSpec, bool) {
 	if inv == nil {
@@ -244,8 +254,13 @@ func v41DSparkCanonicalName(name string) (canonical string, draft bool) {
 	if parts[len(parts)-1] == "weight_scale_inv" {
 		parts[len(parts)-1] = "scale"
 	}
-	if len(parts) == 5 && parts[2] == "ffn" && parts[3] == "gate" && parts[4] == "bias" {
-		parts[4] = "e_score_correction_bias"
+	if len(parts) == 5 && parts[2] == "ffn" && parts[3] == "gate" {
+		switch parts[4] {
+		case "bias":
+			parts[4] = "e_score_correction_bias"
+		case "bias_vl":
+			parts[4] = "e_score_correction_bias_vl"
+		}
 	}
 	return strings.Join(parts, "."), true
 }

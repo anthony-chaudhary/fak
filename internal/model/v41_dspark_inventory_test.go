@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,6 +142,104 @@ func TestV41DSparkBundledInventoryAndPackedReader(t *testing.T) {
 	}
 	if _, err := shard.Read("mtp.1.ffn.experts.1.w1.weight", 1024); err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Fatalf("read after close = %v", err)
+	}
+}
+
+// The official deepseek-ai/DeepSeek-V4.1-Flash draft shards carry
+// mtp.N.ffn.gate.bias_vl F32[E] beside mtp.N.ffn.gate.bias in every stage.
+// fak-test:runtime fast est=20ms lane=default
+func TestV41DSparkAdmitsOfficialRouterBiasVL(t *testing.T) {
+	cfg := v41TestReducedConfig(t, 3, 2)
+	cfg.DeepSeekV41.DSpark.TargetLayerIDs = []int{0, 1, 2}
+	cfg.DeepSeekV41.DSpark.NumRoutedExperts = 2
+	cfg.DeepSeekV41.DSpark.NumExpertsPerTok = 1
+	cfg.DeepSeekV41.DSpark.MarkovRank = 4
+	cfg.DeepSeekV41.DSpark.NoiseTokenID = 7
+	const source = "mtp.0.ffn.gate.bias_vl"
+	const canonical = "mtp.0.ffn.gate.e_score_correction_bias_vl"
+	bias, biasVL := v41TestPattern(8, 3), v41TestPattern(8, 41)
+	fixture := func() map[string]tinySTTensor {
+		return map[string]tinySTTensor{
+			"mtp.0.ffn.gate.bias": {dtype: "F32", shape: []int{2}, data: bias},
+			source:                {dtype: "F32", shape: []int{2}, data: biasVL},
+		}
+	}
+	shard, err := OpenV41DSparkPackedShard(writeTinySafetensors(t, fixture()), cfg)
+	if err != nil {
+		t.Fatalf("official router bias_vl refused: %v", err)
+	}
+	defer shard.Close()
+	for _, name := range []string{canonical, source, "model.mtp.0.mlp.gate.bias_vl"} {
+		ref, err := shard.Reference(name)
+		if err != nil || ref.Ref.Name != source || ref.Ref.Class != V41ClassRouterBias || ref.Ref.Dtype != "F32" || ref.HasScale() {
+			t.Fatalf("%s did not map to the exact bias_vl source: %+v, %v", name, ref, err)
+		}
+	}
+	if got, err := shard.Read(canonical, int64(len(biasVL))); err != nil || !bytes.Equal(got, biasVL) {
+		t.Fatalf("bias_vl payload changed: %v", err)
+	}
+	if got, err := shard.Read("mtp.0.ffn.gate.e_score_correction_bias", int64(len(bias))); err != nil || !bytes.Equal(got, bias) {
+		t.Fatalf("bias_vl displaced the ordinary router bias: %v", err)
+	}
+	missing := shard.Missing()
+	if len(missing) == 0 {
+		t.Fatal("a partial shard was presented as a complete drafter")
+	}
+	for _, name := range missing {
+		if name == canonical || name == "mtp.0.ffn.gate.e_score_correction_bias" {
+			t.Fatalf("present router bias reported missing: %s", name)
+		}
+	}
+
+	// Optional, as on the target: no required role names the _vl bias, so an
+	// export without it still reaches the same completeness verdict.
+	_, published := readDeepSeekV41Config(t)
+	inv, err := DeepSeekV41DSparkInventory(published)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for stage := 0; stage < 3; stage++ {
+		name := "mtp." + strconv.Itoa(stage) + ".ffn.gate.e_score_correction_bias_vl"
+		spec, ok := inv.Lookup(name)
+		if !ok || spec.Class != V41ClassRouterBias || spec.Stage != stage || !sameShape(spec.Shape, []int{128}) ||
+			len(spec.AllowedDtypes) != 1 || spec.AllowedDtypes[0] != "F32" || len(spec.ScaleShape) != 0 {
+			t.Fatalf("%s = %+v, present=%v", name, spec, ok)
+		}
+	}
+	for _, name := range inv.Names() {
+		if strings.HasSuffix(name, "_vl") {
+			t.Fatalf("optional router bias became required: %s", name)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]tinySTTensor)
+	}{
+		{"BF16 storage", func(m map[string]tinySTTensor) {
+			m[source] = tinySTTensor{dtype: "BF16", shape: []int{2}, data: make([]byte, 4)}
+		}},
+		{"wrong expert width", func(m map[string]tinySTTensor) {
+			m[source] = tinySTTensor{dtype: "F32", shape: []int{3}, data: make([]byte, 12)}
+		}},
+		{"ambiguous canonical alias", func(m map[string]tinySTTensor) { m[canonical] = m[source] }},
+		{"unknown stage", func(m map[string]tinySTTensor) { m["mtp.3.ffn.gate.bias_vl"] = m[source] }},
+		{"no suffix matching", func(m map[string]tinySTTensor) { m["mtp.0.ffn.gate.bias_vl2"] = m[source] }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := fixture()
+			tc.edit(m)
+			s, err := OpenV41DSparkPackedShard(writeTinySafetensors(t, m), cfg)
+			if s != nil {
+				_ = s.Close()
+			}
+			if !errors.Is(err, ErrV41DSparkArtifact) {
+				t.Fatalf("malformed bias_vl accepted: %v", err)
+			}
+		})
+	}
+	if !errors.Is(published.RefuseDeepSeekV41DSpark(), ErrV41DSparkUnsupported) {
+		t.Fatal("artifact admission enabled DSpark execution")
 	}
 }
 
