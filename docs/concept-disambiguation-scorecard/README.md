@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **659** (clarity 0 + coverage 659) |
+| **Disambiguation-debt (drive to 0)** | **660** (clarity 0 + coverage 660) |
 | **Crystal-clear concepts (and climbing)** | **1283** crystal of 3092 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3168 / 3827** (82.8% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3168 / 3828** (82.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **89** of 4348 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3092 concepts - score 88.8/100 (grade B) - disambiguation-debt 659
+concept-disambiguation chart - 3092 concepts - score 88.8/100 (grade B) - disambiguation-debt 660
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####################........ 1283
@@ -77,14 +77,14 @@ coverage by family (positioned / discovered):
   witness-proof    #########################... 173/197
   evict            ####################........ 57/79
   loop             ########################.... 100/117
-  layout           #################........... 20/33
+  layout           ################............ 20/34
   decision         #########################... 60/66
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.8%  (3168/3827 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.8%  (3168/3828 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -3404,7 +3404,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | witness-proof | 173 | 197 | 24 |
 | evict | 57 | 79 | 22 |
 | loop | 100 | 117 | 17 |
-| layout | 20 | 33 | 13 |
+| layout | 20 | 34 | 14 |
 | decision | 60 | 66 | 6 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
