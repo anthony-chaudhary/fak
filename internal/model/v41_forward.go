@@ -46,6 +46,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -683,6 +685,9 @@ func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 		// historical full-prefill path byte-for-byte, so the first request still
 		// seeds the cache and a failed step never claims a cache hit.
 		if s.v41IncrementalEligible() && len(s.v41Forward.history) > 0 {
+			if st := s.v41State(); st.activeStepRound == nil && !s.M.v41EPRequested() && v41ActivationTraceEnvPath() == "" && v41SuffixRefoldEligible(len(st.history), len(ids)) {
+				return s.prefillV41Refold(st, len(st.history), ids, wantLogits)
+			}
 			if logits, ok := s.prefillV41SuffixBatched(ids, wantLogits); ok {
 				return logits
 			}
@@ -708,6 +713,23 @@ func (s *Session) prefillV41WithLogits(ids []int, wantLogits bool) []float32 {
 		s.M.v41NoteExpertFaultToken(len(ids))
 		return lastLogits(act)
 	})
+}
+
+// v41SuffixRefoldMaxHistoryEnv opts a short restored history into the cold
+// grouped prefill: a positive value is the longest history re-folded together
+// with a suffix of at least one full projection panel. Empty, zero or invalid
+// keeps the incremental suffix, because a 576-row grouped prefill at a ~60 GiB
+// expert ring lost the device once on Strix Halo.
+const v41SuffixRefoldMaxHistoryEnv = "FAK_V41_SUFFIX_REFOLD_MAX_HISTORY"
+
+const v41SuffixRefoldMinRows = v41ProjPanelRowChunk
+
+func v41SuffixRefoldEligible(historyLen, suffixLen int) bool {
+	if historyLen <= 0 || suffixLen < v41SuffixRefoldMinRows {
+		return false
+	}
+	maxHistory, err := strconv.Atoi(os.Getenv(v41SuffixRefoldMaxHistoryEnv))
+	return err == nil && historyLen <= maxHistory
 }
 
 // v41PrefillStepProbe is an optional test-only observer invoked once per suffix
