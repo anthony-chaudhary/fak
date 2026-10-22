@@ -166,6 +166,10 @@ type V41AttentionState struct {
 	topk           [][]int32
 	topkRatio      int
 	topkSet        bool
+
+	// validatedPrefix is this layer's decode-attention memo, never snapshot
+	// state: clones start empty and therefore rescan.
+	validatedPrefix v41ValidatedPrefix
 }
 
 func (s *V41AttentionState) indexWidth() int {
@@ -336,6 +340,7 @@ func (s *V41AttentionState) seedTemporalWithInputs(projectedKV, partialInputs []
 	s.candidatesSet = false
 	s.topk = nil
 	s.topkSet = false
+	s.validatedPrefix = v41ValidatedPrefix{}
 	return nil
 }
 
@@ -777,6 +782,7 @@ func (s *V41AttentionState) Reset() {
 	s.topk = nil
 	s.topkSet = false
 	s.topkRatio = 0
+	s.validatedPrefix = v41ValidatedPrefix{}
 }
 
 // WindowKV returns a copy of the current logical window, oldest slot first.

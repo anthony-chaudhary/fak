@@ -27,6 +27,49 @@ func v41CombinedAttentionResident(layer, pos, sourceRatio, heads, headDim int, q
 }
 
 func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDim int, q, sink []float32, window, compressed [][]float32, compressedIDs []int32, scale float32, resident *v41ResidentKVView, attend v41SharedAttentionFunc, continuation *v41SharedAttentionContinuation) ([]float32, error) {
+	return v41CombinedAttentionValidated(layer, pos, sourceRatio, heads, headDim, q, sink, window, compressed, compressedIDs, scale, resident, attend, continuation, nil)
+}
+
+// v41CombinedAttentionScanProbe observes the elements each combined call
+// finite-scans. Tests set it; production leaves it nil.
+var v41CombinedAttentionScanProbe func(elements int)
+
+// v41ValidatedPrefix remembers that a previous combined call proved compressed
+// rows [0, rows) finite. Only immutable append-only publications qualify: a
+// rollback deletes the tail, reset/reseed/restore replace the map, so a
+// still-identical terminal anchor identifies the whole scanned prefix. Holding
+// the anchor keeps its address from being reused.
+type v41ValidatedPrefix struct {
+	rows   int
+	anchor []float32
+}
+
+func (p *v41ValidatedPrefix) start(compressed [][]float32) int {
+	if p == nil || p.rows <= 0 || p.rows > len(compressed) {
+		return 0
+	}
+	last := compressed[p.rows-1]
+	if len(last) == 0 || len(last) != len(p.anchor) || &last[0] != &p.anchor[0] {
+		return 0
+	}
+	return p.rows
+}
+
+func (p *v41ValidatedPrefix) record(compressed [][]float32) {
+	if p == nil {
+		return
+	}
+	if n := len(compressed); n > 0 && len(compressed[n-1]) > 0 {
+		p.rows, p.anchor = n, compressed[n-1]
+		return
+	}
+	*p = v41ValidatedPrefix{}
+}
+
+// v41CombinedAttentionValidated skips the finite scan of compressed rows that
+// validated already covers. Window rows are mutable ring slots and are always
+// scanned, as are q, sink, widths and IDs, so refusals are unchanged.
+func v41CombinedAttentionValidated(layer, pos, sourceRatio, heads, headDim int, q, sink []float32, window, compressed [][]float32, compressedIDs []int32, scale float32, resident *v41ResidentKVView, attend v41SharedAttentionFunc, continuation *v41SharedAttentionContinuation, validated *v41ValidatedPrefix) ([]float32, error) {
 	fail := func(message string) ([]float32, error) {
 		return nil, v41StageErr(v41StageAttention, layer, fmt.Errorf("%w: combined attention %s", ErrV41ForwardStage, message))
 	}
@@ -58,16 +101,26 @@ func v41CombinedAttentionWithContinuation(layer, pos, sourceRatio, heads, headDi
 	}
 	// Validate every original row and ID before causal masking. An invalid future
 	// row or padding ID cannot disappear merely because this query cannot see it.
-	for _, stream := range [][][]float32{window, compressed} {
-		for _, row := range stream {
+	known := validated.start(compressed)
+	scanned := 0
+	for s, stream := range [][][]float32{window, compressed} {
+		for i, row := range stream {
 			if len(row) != headDim {
 				return fail("row width differs from head width")
 			}
+			if s == 1 && i < known {
+				continue
+			}
+			scanned += len(row)
 			if err := finiteRow32(row, "combined attention row"); err != nil {
 				return nil, v41StageErr(v41StageAttention, layer, err)
 			}
 		}
 	}
+	if probe := v41CombinedAttentionScanProbe; probe != nil {
+		probe(scanned)
+	}
+	validated.record(compressed)
 	for _, id := range compressedIDs {
 		if id < -1 || int(id) >= len(compressed) {
 			return fail("canonical compressed row ID is out of range")
