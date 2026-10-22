@@ -107,6 +107,10 @@ type InKernelPlanner struct {
 	// inkernel_chat summary line (#13694). It holds a string; empty means unobserved.
 	prefillQ4KGEMM atomic.Value
 
+	// hostStages is the current turn's host-stage window, reported as host= on
+	// a device-backed inkernel_chat summary line.
+	hostStages inKernelHostStageWindow
+
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
 	// next turn REUSES its KV, prefilling only the divergent suffix — the candidate-#13
@@ -2406,6 +2410,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				}, measurement)
 			}
 			var genRes inKernelGenerateResult
+			p.hostStages.begin()
 			if coalesced {
 				genRes, err = p.runCoalescedGenerateKind(ctx, generate, coalesceKind)
 			} else {
@@ -2654,8 +2659,9 @@ func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
 
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s q4k=%v q8dec=%s%s/%dw prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s%s",
-		p.modelID, backend, forwardPath, p.q4k, q8kern, q8fusedMark, model.Q8DecodeWorkers(), promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause())
+	hostClause, q8Clause := p.executionPlacementClauses(q8kern, q8fusedMark)
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s%s q4k=%v%s prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s%s",
+		p.modelID, backend, forwardPath, hostClause, p.q4k, q8Clause, promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause())
 }
 
 // prefillQ4KGEMMLabel is the gemm= value of the execution summary: the Q4_K prefill GEMM
@@ -2771,8 +2777,8 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 }
 
 // executionIdentity makes the request log say which compute path actually produced
-// the token. q8dec remains useful CPU implementation metadata, but it must not be
-// mistaken for a fallback when a device-backed Qwen3.6 session is selected.
+// the token. The summary prints q8dec only for a CPU session; a device turn names its
+// executed host stages in host= instead (executionPlacementClauses).
 // ExecutionIdentity reports the compute backend and forward path this planner
 // serves on, the same pair the inkernel_chat summary line logs.
 func (p *InKernelPlanner) ExecutionIdentity() (backend, forwardPath string) {

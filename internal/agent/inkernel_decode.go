@@ -1207,6 +1207,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		} else {
 			next = sampleLogitsWithPenaltyCoreWS(effectiveLogits, ln.temp, ln.topP, ln.topK, ln.minP, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng, 0, false, &ln.sampling)
 		}
+		if ln.s != nil {
+			observeHostSampledToken(ln.s.Backend)
+		}
 		if ln.sampling.nonFinite {
 			ln.err, ln.done = ErrNonFiniteLogits, true
 			return 0, false

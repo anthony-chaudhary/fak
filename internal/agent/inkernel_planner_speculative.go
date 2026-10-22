@@ -611,6 +611,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 				proposalGenerator = nil
 			}
 			next := sampleLogitsWithPenaltyCoreWS(curLogits, temp, topP, topK, minP, logitBias, freqPenalty, presPenalty, counts, rng, 0, false, &samplingWS)
+			observeHostSampledToken(p.backend)
 			if samplingWS.nonFinite {
 				err = ErrNonFiniteLogits
 				break
