@@ -9,10 +9,11 @@ import (
 // Pins only the source/receipt census. No shader or native archive is compiled.
 func TestVulkanReceiptV30ValueHeadTile(t *testing.T) {
 	want := append(vulkanRegistryV29.stems(), "qwen35_value_head_tile")
-	if len(want) != 101 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 101 || !reflect.DeepEqual(want, vulkanRegistryV30.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V30 must add exactly the GDN value-head tiling module to V29")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	id, err := vulkanRegistryV30.identity()
+	schema := vulkanRegistryV30.schema
 	if err != nil || schema != VulkanBuildReceiptSchemaV30 || id.ID != VulkanShaderRegistryV30ID || id.ModuleCount != 101 {
 		t.Fatalf("V30 identity differs: %s %+v %v", schema, id, err)
 	}

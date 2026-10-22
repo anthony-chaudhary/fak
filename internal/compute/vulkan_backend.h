@@ -515,6 +515,23 @@ int fvk_v41_router_topk_f32(const void *dLogits, const void *dBias,
                             int rows, int experts, int topK,
                             int full, int hasBias, float routeScale);
 
+/* V4.1 router gate projection fused ahead of fvk_v41_router_topk_f32 for one
+ * token row, one dispatch. Seven storage bindings: weight[experts,hidden] F32,
+ * input[hidden] F32, bias as above, logits[experts] F32 scratch, experts[topK]
+ * uint32, weights[topK] F32, status[4] uint32. The caller seeds status words 0
+ * and 3 with UINT32_MAX (word 3 counts workgroup arrivals). Logits match the
+ * one-token F32 matmul bit for bit; routing matches the router top-k. Push ABI:
+ * int32 experts, hidden, topK, full, hasBias; float32 routeScale. Bounds:
+ * experts <= 1024, hidden <= 65536. Return codes match the router top-k. The
+ * verdict is the Go device self-check result: 0 unknown, 1 equal, 2 differed. */
+int fvk_have_v41_router_gate_topk(void);
+int fvk_v41_router_gate_verdict(void);
+void fvk_v41_router_gate_set_verdict(int verdict);
+int fvk_v41_router_gate_topk_f32(const void *dWeight, const void *dInput, const void *dBias,
+                                 void *dLogits, void *dExperts, void *dWeights, void *dStatus,
+                                 int experts, int hidden, int topK,
+                                 int full, int hasBias, float routeScale);
+
 /* V4.1 scalar-order indexer score. Four exact F32 storage bindings:
  * Q[heads,headDim], keys[rows,headDim], weights[heads], scores[rows]. Inputs
  * are caller-validated finite and immutable; output must not alias any input.

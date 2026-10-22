@@ -146,6 +146,8 @@ const (
 	VulkanBuildReceiptSchemaV29 = "fak.vulkan-build-receipt.v29"
 	// VulkanBuildReceiptSchemaV30 adds the Qwen3.5 GDN core value-head tiling module.
 	VulkanBuildReceiptSchemaV30 = "fak.vulkan-build-receipt.v30"
+	// VulkanBuildReceiptSchemaV31 adds the V4.1 fused router gate projection + top-k module.
+	VulkanBuildReceiptSchemaV31 = "fak.vulkan-build-receipt.v31"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

@@ -800,3 +800,50 @@ to 8 query rows and head dim 256 instead of specialization constants; the partia
 reduce passes share one module selected by a push-constant mode; a single chunk writes
 the normalized output directly. No upstream runtime is included. The upstream license is
 the MIT license reproduced in the i-quant matrix-vector section above.
+
+## DeepGEMM mega gate and TileKernels top-k gate (V4.1 fused router)
+
+The fused router kernel `internal/compute/shaders/v41_router_gate_topk.comp` adapts the
+structure of DeepGEMM `deep_gemm/include/deep_gemm/impls/sm100_bf16_mega_gate.cuh` (the
+router gate projection and the top-k selection in one launch, so the gate logits never
+leave the device) at DeepGEMM revision `1fc9c66975ee322d628b3288534ca0e9ce12a64d`, vendored
+in DeepInfer revision `774ce244b87cc0eb8d4b94ab9f5de2ab22049f01`:
+https://github.com/deepseek-ai/DeepGEMM/tree/1fc9c66975ee322d628b3288534ca0e9ce12a64d
+and takes its selection semantics reference (sqrt-softplus score, correction bias, ties to
+the lower expert, normalized routed scaling) from TileKernels
+`tile_kernels/moe/moe_topk_gate_forward_cuda.py` at revision
+`c1cf914a82e6901c679445f872051ce44ac2cc63`:
+https://github.com/deepseek-ai/TileKernels/tree/c1cf914a82e6901c679445f872051ce44ac2cc63
+
+Changed for Fak: Vulkan GLSL instead of CUDA/TileLang; the F32 gate and one-token decode
+sum of Fak's `matmul.comp` instead of the BF16 tensor-core GEMM, so the logits equal Fak's
+existing projection bit for bit; the last arriving workgroup routes the row instead of a
+thread-block cluster; Fak's in-order score sum, `+1e-20` rule and fault status record from
+`v41_router_topk.comp`; no expert groups, masks, forced routing or EPLB mapping. No
+upstream runtime is included. The upstream licenses follow:
+
+```text
+MIT License
+
+Copyright (c) 2025 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+TileKernels carries the same MIT license text with `Copyright (c) 2026 DeepSeek`.

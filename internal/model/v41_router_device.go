@@ -54,8 +54,15 @@ func v41DeviceRouteCore(op compute.V41RouterTopKBackend, logits, bias compute.Te
 	if err != nil {
 		return nil, completed, err
 	}
+	out, err := v41RoutePicksFromDevice(got, rows, cfg)
+	return out, completed, err
+}
+
+// v41RoutePicksFromDevice validates a device publication of rows*TopK picks
+// and converts it into per-row routes.
+func v41RoutePicksFromDevice(got compute.V41RouterPicks, rows int, cfg v41RouterConfig) ([][]routePick, error) {
 	if len(got.Experts) != rows*cfg.TopK || len(got.Weights) != rows*cfg.TopK {
-		return nil, completed, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
+		return nil, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
 	}
 	out := make([][]routePick, rows)
 	// Keep one owned slab per publication; capped row views preserve append
@@ -68,12 +75,12 @@ func v41DeviceRouteCore(op compute.V41RouterTopKBackend, logits, bias compute.Te
 			i := row*cfg.TopK + slot
 			e, w := int(got.Experts[i]), got.Weights[i]
 			if e < 0 || e >= cfg.Experts || !finite32(w) {
-				return nil, completed, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
+				return nil, &v4RouteError{Field: "device_route", Reason: errV41DeviceRouteResult.Error()}
 			}
 			out[row][slot] = routePick{expert: e, weight: w}
 		}
 	}
-	return out, completed, nil
+	return out, nil
 }
 
 func v41RouterFaultError(f *compute.V41RouterTopKFault) error {
@@ -216,33 +223,8 @@ func v41SelectedRouterRows(s *Session, op compute.V41RouterTopKBackend, layer in
 					return nil, errV41RouterProjectionScope
 				}
 				*stage = "bias upload"
-				bias := []float32{0}
-				if hasBias {
-					bias = correctionBias
-				}
-				var bt compute.Tensor
-				resident := false
-				// Production passes the immutable checkpoint view. The callback
-				// also accepts arbitrary caller slices: equal values, a layer id,
-				// or a backend name do not establish checkpoint identity.
-				// A bare callback session without a held model lifetime stays transient.
-				name := layerName(layer, "ffn.gate.e_score_correction_bias")
-				if hasBias && s.modelWeightsHeld && s.halW != nil {
-					meta, present := s.M.manifest[name]
-					bytes, valid := checkedMulInt(len(bias), 4)
-					if present && valid && strings.EqualFold(meta.Dtype, "F32") &&
-						len(meta.Shape) == 1 && meta.Shape[0] == len(bias) && meta.Nbytes == bytes &&
-						meta.Offset >= 0 && meta.Offset <= len(s.M.raw) && bytes <= len(s.M.raw)-meta.Offset {
-						canonical := s.M.tensor(name)
-						if &canonical[0] == &bias[0] {
-							// Existing cache ownership separates loaded-model and
-							// exact-backend identities and owns final release.
-							bt, resident = s.weightHAL(name), true
-						}
-					}
-				}
-				if !resident {
-					bt = s.uploadHostF32([]int{len(bias)}, bias, compute.MemoryActivation, "V4.1 router correction bias")
+				bt, transient := s.v41RouterBiasTensor(layer, correctionBias)
+				if transient {
 					owned = append(owned, bt)
 				}
 				if scopeValid != nil && !scopeValid() {
@@ -273,6 +255,37 @@ func v41SelectedRouterRows(s *Session, op compute.V41RouterTopKBackend, layer in
 		ownedComplete = true
 		return
 	})
+}
+
+// v41RouterBiasTensor stages the correction bias for a device route: a [1]
+// dummy without bias, the borrowed checkpoint tensor when correctionBias is
+// the immutable checkpoint view, and otherwise a transient upload the caller
+// frees. Production passes the immutable checkpoint view. Callbacks also
+// accept arbitrary caller slices: equal values, a layer id, or a backend name
+// do not establish checkpoint identity, and a bare callback session without a
+// held model lifetime stays transient.
+func (s *Session) v41RouterBiasTensor(layer int, correctionBias []float32) (bt compute.Tensor, transient bool) {
+	bias := []float32{0}
+	hasBias := len(correctionBias) != 0
+	if hasBias {
+		bias = correctionBias
+	}
+	name := layerName(layer, "ffn.gate.e_score_correction_bias")
+	if hasBias && s.modelWeightsHeld && s.halW != nil {
+		meta, present := s.M.manifest[name]
+		bytes, valid := checkedMulInt(len(bias), 4)
+		if present && valid && strings.EqualFold(meta.Dtype, "F32") &&
+			len(meta.Shape) == 1 && meta.Shape[0] == len(bias) && meta.Nbytes == bytes &&
+			meta.Offset >= 0 && meta.Offset <= len(s.M.raw) && bytes <= len(s.M.raw)-meta.Offset {
+			canonical := s.M.tensor(name)
+			if &canonical[0] == &bias[0] {
+				// Existing cache ownership separates loaded-model and
+				// exact-backend identities and owns final release.
+				return s.weightHAL(name), false
+			}
+		}
+	}
+	return s.uploadHostF32([]int{len(bias)}, bias, compute.MemoryActivation, "V4.1 router correction bias"), true
 }
 
 // v41ColdRouterPanel batches selection, not the preceding projection. Ordinary
