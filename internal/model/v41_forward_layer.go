@@ -575,6 +575,7 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 	indexKeys := src.indexKeys
 	var indexList []int32
 	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
+		projected := m.v41IndexerProjectionPanels(l, seq, qLatRows, preByPos, scratch)
 		// Projection, normalization, rotation and memo copies have completed.
 		// Scalar and canonically bound native scoring read causal prefixes of
 		// one stable snapshot. Ordinary callbacks keep fresh mutable inputs.
@@ -595,7 +596,11 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 				end := groups * cfg.IndexHeadDim
 				prefix = keyPanel[:end:end]
 			}
-			localIdx, err := m.v41IndexRowsWithPreparedProjection(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute)
+			panelRow, err := projected.row(t)
+			if err != nil {
+				return nil, err
+			}
+			localIdx, err := m.v41IndexRowsWithPanelRow(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute, panelRow)
 			if borrow.revoked {
 				keyPanel = nil
 			}

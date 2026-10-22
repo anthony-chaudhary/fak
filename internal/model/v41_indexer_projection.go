@@ -100,6 +100,10 @@ func (m *Model) v41IndexRowsWithPreparedBinding(l, pos int, qLat, hidden []float
 }
 
 func (m *Model) v41IndexRowsWithPreparedProjection(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, projection *v41ProjectionRouteBinding, views ...*v41IndexerKeyView) ([]int32, error) {
+	return m.v41IndexRowsWithPanelRow(l, pos, qLat, hidden, keys, project, binding, health, ops, prepared, borrow, projection, v41IndexerPanelRow{}, views...)
+}
+
+func (m *Model) v41IndexRowsWithPanelRow(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, projection *v41ProjectionRouteBinding, panel v41IndexerPanelRow, views ...*v41IndexerKeyView) ([]int32, error) {
 	if projection != nil {
 		project = projection.projectionFunc()
 	}
@@ -144,9 +148,13 @@ func (m *Model) v41IndexRowsWithPreparedProjection(l, pos int, qLat, hidden []fl
 			flat = append(flat, key...)
 		}
 	}
-	q, published, err := m.v41IndexQueryProjection(l, qLat, width, cfg.QLoraRank, project, projection, ops)
-	if err != nil {
-		return nil, err
+	q, published := panel.query, false
+	var err error
+	if q == nil {
+		q, published, err = m.v41IndexQueryProjection(l, qLat, width, cfg.QLoraRank, project, projection, ops)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Both the BF16 linear and the reference's FP8 GEMM return BF16 in the
 	// pinned BF16 execution profile. This does not emulate FP8 input quantization.
@@ -160,9 +168,12 @@ func (m *Model) v41IndexRowsWithPreparedProjection(l, pos int, qLat, hidden []fl
 	if err := m.v41IndexRoPEPublished(l, pos, q, nHeads, ops.indexRoPEFunc(), publish); err != nil {
 		return nil, err
 	}
-	weights, err := m.v41ProjMatRowsWithProjection(l, "indexer.weights_proj.weight", hidden, nHeads, cfg.HiddenSize, project)
-	if err != nil {
-		return nil, err
+	weights := panel.weights
+	if weights == nil {
+		weights, err = m.v41ProjMatRowsWithProjection(l, "indexer.weights_proj.weight", hidden, nHeads, cfg.HiddenSize, project)
+		if err != nil {
+			return nil, err
+		}
 	}
 	weights, err = v41IndexWeightsBF16Device(l, weights, dim, nHeads, publish, ops.indexWeightScaleFunc())
 	if err != nil {
