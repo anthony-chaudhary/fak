@@ -1487,6 +1487,21 @@
           "category": "incidental",
           "reason": "Fixed 64 KiB logical allowance for bounded cache map and order growth, not a cache instance, residency budget, RSS guarantee, or cache architecture.",
           "token": "v41EngramLookAheadCacheMetadata"
+        },
+        {
+          "category": "incidental",
+          "reason": "Grammar mask field recording which vocabulary a per-request token admission memo was built for, not a KV, prefix or serving cache.",
+          "token": "cacheVocab"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bound on the JSON-mode grammar mask per-state token admission memo for one request, not a KV, prefix or serving cache.",
+          "token": "maxJSONValueMaskCacheStates"
+        },
+        {
+          "category": "test-only",
+          "reason": "Test that the JSON-mode grammar mask memo stays bounded on long values.",
+          "token": "TestJSONValueMaskLongValuesKeepCacheFinite"
         }
       ],
       "exclude": [
@@ -1579,6 +1594,7 @@
         "SharedPrefixProviderCache",
         "SlidingCacheMetrics",
         "SubCacheWarmReplay",
+        "TestJSONValueMaskLongValuesKeepCacheFinite",
         "TestMicroCacheWitnessCapturesOnOffProviderCounters",
         "TestMicroCacheWitnessRefusesSingleEndpoint",
         "TokenCacheDir",
@@ -1629,6 +1645,7 @@
         "cacheStats",
         "cacheValueGateFactsFromReport",
         "cacheValueLedger",
+        "cacheVocab",
         "cacheWitnessReadback",
         "cacheWitnessServer",
         "cache_anchor_and_trailing_json",
@@ -1755,6 +1772,7 @@
         "liveMatrixPrefixCache",
         "loadCacheValueGateBaseline",
         "loadVCacheRuntimeCalibration",
+        "maxJSONValueMaskCacheStates",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
         "microCacheArm",

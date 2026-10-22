@@ -227,7 +227,7 @@ func TestResponsesTextFormatRideForwardsChatCarrierUpstream(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=400ms lane=default
+// fak-test:runtime fast est=700ms lane=default
 func TestResponsesTextFormatNativeRoute(t *testing.T) {
 	srv := nativeReceiptServer(t)
 	rr := postResponsesTextFormat(t, srv, responsesTextFormatBody("synthetic-live", `{"format":{"type":"json_schema","name":"answer","strict":true,"schema":`+responsesTextFormatSchema+`}}`, "", false))
@@ -242,8 +242,21 @@ func TestResponsesTextFormatNativeRoute(t *testing.T) {
 	if resp.Status != "completed" || json.Unmarshal([]byte(resp.OutputText), &answer) != nil || len(answer) != 1 || (answer["answer"] != "a" && answer["answer"] != "b") {
 		t.Fatalf("json_schema: status=%q output_text=%q, want a completed object matching the schema", resp.Status, resp.OutputText)
 	}
+	jsonObjectBody := strings.Replace(responsesTextFormatBody("synthetic-live", `{"format":{"type":"json_object"}}`, "", false), `"max_output_tokens":32`, `"max_output_tokens":128`, 1)
+	rr = postResponsesTextFormat(t, srv, jsonObjectBody)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("json_object: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	resp = responsesResponse{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]any
+	if resp.Status != "completed" || !strings.HasPrefix(resp.OutputText, "{") || json.Unmarshal([]byte(resp.OutputText), &object) != nil {
+		t.Fatalf("json_object: status=%q output_text=%q, want a completed JSON object", resp.Status, resp.OutputText)
+	}
 	for _, text := range []string{
-		`{"format":{"type":"json_object"}}`,
+		`{"format":{"type":"json_object","schema":{}}}`,
 		`{"format":{"type":"json_schema","name":"answer","strict":false,"schema":` + responsesTextFormatSchema + `}}`,
 	} {
 		rr := postResponsesTextFormat(t, srv, responsesTextFormatBody("synthetic-live", text, "", false))
