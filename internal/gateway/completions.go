@@ -20,10 +20,12 @@ import (
 // conformance fail-close. The response carries the legacy `text_completion` object
 // with a bare `text` field per choice.
 //
-// With stream:true it takes the same EARLY-preamble split #5399 gave the chat wire
+// With stream:true and no seed it takes the same EARLY-preamble split #5399 gave the chat wire
 // (#5514): the 200, the SSE headers and an opening chunk go out BEFORE the decode, and a
 // failure after that point rides an in-band SSE error event. Only the frame shape stays
-// legacy — see completionStreamWriter.
+// legacy — see completionStreamWriter. That includes a native structured-output refusal:
+// chat's live stream can still answer it with a 400, this wire reports it in-band.
+// Seeded streams defer the preamble like chat so unsupported seeds retain HTTP 400.
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -53,11 +55,16 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer waitEPFanout()
-	var req CompletionRequest
-	if !decodeRequestBody(w, r, &req) {
+	var body completionCarrierRequest
+	if !decodeRequestBody(w, r, &body) {
 		return
 	}
-	prompt := normalizePrompt(req.Prompt)
+	req, carriers := body.CompletionRequest, body.carriers()
+	prompt, batched := normalizePrompt(req.Prompt)
+	if batched {
+		writeErrCode(w, http.StatusBadRequest, "prompt_batch_unsupported", "prompt: an array of more than one prompt is a batch, which this route does not serve; send one request per prompt")
+		return
+	}
 	if strings.TrimSpace(prompt) == "" {
 		writeErr(w, http.StatusBadRequest, "prompt: field required")
 		return
@@ -65,7 +72,20 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectStopLimits(w, normalizeStop(req.Stop)) {
 		return
 	}
+	if rejectGuidedRegexLimits(w, carriers) {
+		return
+	}
+	if rejectInvalidStructuredOutputs(w, carriers.StructuredOutputs) {
+		return
+	}
 	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
+		return
+	}
+	if msg := validateSamplingPenalties(body.FrequencyPenalty, body.PresencePenalty); msg != "" {
+		writeErrCode(w, http.StatusBadRequest, codeSamplingParamOutOfRange, msg)
+		return
+	}
+	if rejectInvalidResponseFormatCarrier(w, carriers.ResponseFormat) {
 		return
 	}
 	decodeTraceRequested := req.FakDecodeTrace
@@ -118,9 +138,11 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// Placement is load-bearing, as on the chat route: every PRE-decode refusal — the
 	// method/body/sampling 400s and writeSessionRefusal — is already behind us and kept its
 	// real HTTP status. The upstream error below is the only thing left that can fail, and
-	// it now has to report in-band; see sseStreamWriter.fail.
+	// it now has to report in-band unless a seed delays the preamble below.
 	var stream *completionStreamWriter
-	if req.Stream {
+	// Like chat, keep the status uncommitted until a seeded planner request has
+	// succeeded: a route that cannot honor seed must return its typed refusal.
+	if req.Stream && body.Seed == nil {
 		stream = newCompletionStreamWriter(w, reqModel)
 		if err := stream.open(); err != nil {
 			// The client is already gone; do not spend a decode on a socket nobody reads.
@@ -135,7 +157,15 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
+		agent.WithSeed(body.Seed),
+		agent.WithLogitBias(body.LogitBias),
+		agent.WithFrequencyPenalty(body.FrequencyPenalty),
+		agent.WithPresencePenalty(body.PresencePenalty),
+		agent.WithChatWireTopK(body.TopK),
+		agent.WithMinP(body.MinP),
 		agent.WithStop(normalizeStop(req.Stop)),
+		agent.WithResponseFormat(carriers.ResponseFormat),
+		agent.WithGuidedDecode(carriers.GuidedDecodeFields()),
 		agent.WithRawPrompt(),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
@@ -164,6 +194,9 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
 		return
 	}
+	if req.Stream && stream == nil {
+		stream = newCompletionStreamWriter(w, reqModel)
+	}
 
 	finish := comp.FinishReason
 	if finish == "" {
@@ -191,6 +224,46 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// completionCarrierRequest adds the chat route's structured-output carriers, with
+// ChatRequest's tags, to the legacy body. Embedding ChatRequest instead would make
+// the fields it shares with CompletionRequest ambiguous, and encoding/json drops
+// ambiguous fields silently.
+// Sampling controls also use the chat wire's tags and presence semantics.
+type completionCarrierRequest struct {
+	CompletionRequest
+	Seed                  *int64          `json:"seed,omitempty"`
+	LogitBias             map[int]float64 `json:"logit_bias,omitempty"`
+	FrequencyPenalty      *float64        `json:"frequency_penalty,omitempty"`
+	PresencePenalty       *float64        `json:"presence_penalty,omitempty"`
+	TopK                  *int            `json:"top_k,omitempty"`
+	MinP                  *float64        `json:"min_p,omitempty"`
+	ResponseFormat        json.RawMessage `json:"response_format,omitempty"`
+	GuidedJSON            json.RawMessage `json:"guided_json,omitempty"`
+	GuidedRegex           json.RawMessage `json:"guided_regex,omitempty"`
+	GuidedChoice          json.RawMessage `json:"guided_choice,omitempty"`
+	GuidedGrammar         json.RawMessage `json:"guided_grammar,omitempty"`
+	GuidedDecodingBackend json.RawMessage `json:"guided_decoding_backend,omitempty"`
+	JSONSchema            json.RawMessage `json:"json_schema,omitempty"`
+	Regex                 json.RawMessage `json:"regex,omitempty"`
+	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
+	StructuredOutputs     json.RawMessage `json:"structured_outputs,omitempty"`
+}
+
+func (r completionCarrierRequest) carriers() ChatRequest {
+	return ChatRequest{
+		ResponseFormat:        r.ResponseFormat,
+		GuidedJSON:            r.GuidedJSON,
+		GuidedRegex:           r.GuidedRegex,
+		GuidedChoice:          r.GuidedChoice,
+		GuidedGrammar:         r.GuidedGrammar,
+		GuidedDecodingBackend: r.GuidedDecodingBackend,
+		JSONSchema:            r.JSONSchema,
+		Regex:                 r.Regex,
+		EBNF:                  r.EBNF,
+		StructuredOutputs:     r.StructuredOutputs,
+	}
 }
 
 func completionStreamModel(stream *completionStreamWriter) string {
@@ -228,33 +301,41 @@ func validateCompletionDecodeTrace(req CompletionRequest) string {
 	return ""
 }
 
-// normalizePrompt folds the legacy `prompt` field (a bare string, an array of
-// strings, or absent/null) into a single prompt string. The array form is joined
-// with newlines (the common multi-line-prompt convention); anything malformed
-// degrades to "" so a bad prompt surfaces as the same empty-prompt 400 as a missing
-// one rather than erroring the decode.
-func normalizePrompt(raw json.RawMessage) string {
+// normalizePrompt folds the legacy `prompt` field (a bare string, a one-element
+// array of strings, or absent/null) into a single prompt string. An array of two
+// or more strings is an OpenAI batch (one choice per prompt), which this route
+// does not serve, so it reports batched instead of merging the prompts into one.
+// Anything malformed degrades to "" so a bad prompt surfaces as the same
+// empty-prompt 400 as a missing one rather than erroring the decode.
+func normalizePrompt(raw json.RawMessage) (prompt string, batched bool) {
 	b := []byte(raw)
 	i := 0
 	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\n' || b[i] == '\r') {
 		i++
 	}
 	if i >= len(b) {
-		return ""
+		return "", false
 	}
 	switch b[i] {
 	case '"':
 		var s string
 		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
+			return s, false
 		}
 	case '[':
 		var arr []string
 		if err := json.Unmarshal(raw, &arr); err == nil {
-			return strings.Join(arr, "\n")
+			switch len(arr) {
+			case 0:
+				return "", false
+			case 1:
+				return arr[0], false
+			default:
+				return "", true
+			}
 		}
 	}
-	return ""
+	return "", false
 }
 
 // completionStreamWriter owns the client half of one stream:true LEGACY completion. It
