@@ -220,6 +220,11 @@ func TestVulkanTsSnapshotTelescopes(t *testing.T) {
 	runVulkanTsSnapshotChild(t, "on", "FAK_VULKAN_TIMESTAMP_PROFILE=1", "FAK_VULKAN_TIMESTAMP_PROFILE_EVERY=1000000000")
 }
 
+// fak-test:runtime medium est=6s lane=default
+func TestVulkanTsSnapshotTimesOneShotCompute(t *testing.T) {
+	runVulkanTsSnapshotChild(t, "oneshot", "FAK_VULKAN_TIMESTAMP_PROFILE=1", "FAK_VULKAN_TIMESTAMP_PROFILE_EVERY=1000000000")
+}
+
 // fak-test:runtime medium est=4s lane=default
 func TestVulkanTsSnapshotDisabled(t *testing.T) {
 	runVulkanTsSnapshotChild(t, "off", "FAK_VULKAN_TIMESTAMP_PROFILE=0")
@@ -229,12 +234,14 @@ func TestVulkanTsSnapshotDisabled(t *testing.T) {
 func TestVulkanTsSnapshotChild(t *testing.T) {
 	mode := os.Getenv("FAK_VULKAN_TS_SNAPSHOT_CHILD")
 	if mode == "" {
-		t.Skip("child of TestVulkanTsSnapshotTelescopes and TestVulkanTsSnapshotDisabled")
+		t.Skip("child of the TestVulkanTsSnapshot* parent tests")
 	}
 	v := vk(t)
 	switch mode {
 	case "on":
 		vulkanTsSnapshotTelescopes(t, v)
+	case "oneshot":
+		vulkanTsSnapshotTimesOneShots(t, v)
 	case "off":
 		if vulkanTimestampProfileEnabled() {
 			t.Fatal("timestamp profile on with FAK_VULKAN_TIMESTAMP_PROFILE=0")
@@ -248,6 +255,50 @@ func TestVulkanTsSnapshotChild(t *testing.T) {
 	default:
 		t.Fatalf("unknown child mode %q", mode)
 	}
+}
+
+// Unbatched compute is what the resident decode submits between its batches:
+// each op must land in a row with its own timestamp pair, never in
+// untimed_compute, so the window stays complete.
+func vulkanTsSnapshotTimesOneShots(t *testing.T, v *vulkanBackend) {
+	if !vulkanTimestampProfileEnabled() || !KernelProfileReaderRegistered() {
+		t.Fatal("timestamp profile on but no kernel profile reader registered")
+	}
+	const calls, out, in = 24, 512, 256
+	x := v.UploadClass(NewF32(Default(), []int{in}, make([]float32, in)), F32, MemoryActivation, "ts one-shot input")
+	defer v.Free(x)
+	w := v.Upload(NewF32(Default(), []int{out, in}, make([]float32, out*in)), F32)
+	defer v.Free(w)
+	before := KernelProfileSnapshot()
+	if before == nil {
+		t.Fatal("kernel profile unusable before the one-shot ops")
+	}
+	for i := 0; i < calls; i++ {
+		v.Free(v.MatMul(w, x))
+	}
+	d := KernelProfileDelta(before, KernelProfileSnapshot())
+	if d == nil {
+		t.Fatal("kernel profile delta unusable across one-shot ops")
+	}
+	if d.UntimedCompute != 0 || d.Truncated != 0 || d.BarriersElided != 0 {
+		t.Fatalf("one-shot window incomplete: untimed_compute=%d truncated=%d barriers_elided=%d", d.UntimedCompute, d.Truncated, d.BarriersElided)
+	}
+	var sumCalls, matmulCalls uint64
+	var sumNS float64
+	for _, r := range d.Rows {
+		sumCalls += r.Calls
+		sumNS += r.NS
+		if KernelOpClass(r.Kernel) == KernelOpMatmul {
+			matmulCalls += r.Calls
+		}
+	}
+	if matmulCalls < calls || sumCalls != d.Ops || d.GPUNS <= 0 {
+		t.Fatalf("one-shot rows: matmul calls=%d want >=%d, row calls=%d ops=%d gpu_ns=%.0f", matmulCalls, calls, sumCalls, d.Ops, d.GPUNS)
+	}
+	if math.Abs(sumNS-d.GPUNS) > 1e-6*d.GPUNS+1 {
+		t.Fatalf("rows sum to %.0f ns, one-shots span %.0f ns: pairs must telescope", sumNS, d.GPUNS)
+	}
+	t.Logf("ts one-shot: batches=%d ops=%d rows=%d gpu_ns=%.0f untimed_compute=%d", d.Batches, d.Ops, len(d.Rows), d.GPUNS, d.UntimedCompute)
 }
 
 func vulkanTsSnapshotTelescopes(t *testing.T, v *vulkanBackend) {
