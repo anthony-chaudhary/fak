@@ -154,7 +154,17 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	prompt := turnkeyNormalizePrompt(req.Prompt)
+	prompt, batched := turnkeyNormalizePrompt(req.Prompt)
+	if batched {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": "prompt arrays with multiple strings are not supported; send one request per prompt",
+			"type":    "invalid_request_error",
+			"code":    "prompt_batch_unsupported",
+		}})
+		return
+	}
 	if strings.TrimSpace(prompt) == "" {
 		http.Error(w, "prompt: field required", http.StatusBadRequest)
 		return

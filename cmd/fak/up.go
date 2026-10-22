@@ -1076,21 +1076,26 @@ type turnkeyCompletionRequest struct {
 	Stream      bool            `json:"stream,omitempty"`
 }
 
-// turnkeyNormalizePrompt folds the legacy `prompt` field (bare string, or array of
-// strings joined with newlines) into one prompt string.
-func turnkeyNormalizePrompt(raw json.RawMessage) string {
+// turnkeyNormalizePrompt accepts a bare string or singleton string array unchanged.
+// Multiple strings are independent prompts, not one prompt to join together.
+func turnkeyNormalizePrompt(raw json.RawMessage) (prompt string, batched bool) {
 	if len(raw) == 0 {
-		return ""
+		return "", false
 	}
 	var one string
 	if err := json.Unmarshal(raw, &one); err == nil {
-		return one
+		return one, false
 	}
 	var many []string
 	if err := json.Unmarshal(raw, &many); err == nil {
-		return strings.Join(many, "\n")
+		if len(many) > 1 {
+			return "", true
+		}
+		if len(many) == 1 {
+			return many[0], false
+		}
 	}
-	return ""
+	return "", false
 }
 
 func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
