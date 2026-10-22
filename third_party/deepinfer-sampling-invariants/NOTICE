@@ -1,0 +1,26 @@
+DeepInfer top-p/top-k truncation invariants
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/model_executor/layers/tilelang_ops/fused_sample.py
+
+Upstream paths:
+  deepinfer/model_executor/layers/tilelang_ops/fused_sample.py:121-150 (apply_top_p_top_k_ref)
+  deepinfer/model_executor/layers/tilelang_ops/fused_sample.py:323-377 (_check_top_p_top_k)
+  deepinfer/model_executor/layers/tilelang_ops/cuda/fused_sample.py:263-288
+
+Adaptation: Go test-only restatement, in
+internal/agent/sampling_truncation_invariants_test.go, of the upstream
+top-p/top-k boundary checks (no pruned token outranks a survivor, survivors
+keep their probabilities, the kept prefix is minimal and reaches the top-p or
+top-k boundary) for fak's semantics: top-k first, then top-p over the
+post-top-k mass with an inclusive stop. The checks use exact float64
+comparisons in fak's stable descending summation order instead of the
+upstream eps. A short reference of the upstream rule (top-p over the full
+distribution with a strict exclusive-mass stop, then stable top-k) is used
+only to pin the CD-02 composition and CD-03 boundary-equality divergence rows.
+No upstream source is copied, nothing serving-side calls the test, and the
+production sampler is unchanged.
