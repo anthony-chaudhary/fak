@@ -613,6 +613,12 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 				return result, err
 			}
 			C.fvk_batch_begin()
+			if layer.GDNOutTiled {
+				stage = "gdn-value-head-tile"
+				if core, err = v.qwen35TileValueHeadsLocked(core, tokens, req.NumKeyHeads, req.NumValueHeads, req.ValueHeadDim); err != nil {
+					return result, qwen35VulkanSequenceError(stage, layerIndex, err.Error())
+				}
+			}
 			branch = mul(layer.GDNOut, core)
 		} else {
 			stage = "attention-projections"

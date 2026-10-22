@@ -350,6 +350,9 @@ int fvk_have_q6k_matmul(void);
 int fvk_have_q5k_matmul(void);
 /* Q3_K availability is tied to the optional q3k_matmul SPIR-V module. */
 int fvk_have_q3k_matmul(void);
+/* Value-head tiling kernel availability (optional qwen35_value_head_tile module); without it the
+ * tiling records device copies instead. */
+int fvk_have_qwen35_value_head_tile(void);
 uint32_t fvk_max_compute_work_group_count_x(void);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
  * single-buffer ceiling fak must respect: min(maxStorageBufferRange, maxMemoryAllocationSize)
@@ -891,6 +894,9 @@ int fvk_device_allocation_window_end(uint64_t token, uint64_t *live_bytes,
 
 int fvk_qwen35_split_qg_panel_f32(const void* qg, void* q, void* gate,
     int tokens, int nHeads, int headDim);
+/* Tiles a [tokens, nV*headDim] GDN core panel into the GGUF ssm_out input-column order. */
+int fvk_qwen35_value_head_tile_f32(const void* src, void* dst,
+    int tokens, int nK, int nV, int headDim);
 int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
     void* qOut, void* kOut, int tokens, int startPos, int nQHeads,
     int nKHeads, int headDim, int rotaryDim, double theta);

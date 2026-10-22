@@ -509,6 +509,8 @@ type vulkanBackend struct {
 	scalarGDNCalls              int64
 	q8GDNFusedInProjCalls       int64
 	q8GDNComposedInProjCalls    int64
+	qwen35TileKernelCalls       int64
+	qwen35TileCopyCalls         int64
 	haveQ4KFusedRMSNormMatMul2  bool
 	haveQ4KFusedSwiGLUMatMulAdd bool
 	forceScalarQ4K              bool

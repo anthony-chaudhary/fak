@@ -1,0 +1,24 @@
+#version 450
+// qwen35_value_head_tile.comp: permute a [tokens, n_v*head_dim] Qwen3.5 GDN core panel from
+// fak's grouped value-head order (h = k*ratio + r) into the GGUF tiled order ssm_out's native
+// input columns use (c = r*n_k + k). Every output element is one input element (a pure copy).
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) readonly buffer Src { float src[]; };
+layout(std430, binding = 1) writeonly buffer Dst { float dst[]; };
+layout(push_constant) uniform PC { int tokens; int n_k; int n_v; int head_dim; } pc;
+void main() {
+    uint headDim = uint(pc.head_dim);
+    uint nK = uint(pc.n_k);
+    uint ratio = uint(pc.n_v / pc.n_k);
+    uint width = uint(pc.n_v) * headDim;
+    uint total = uint(pc.tokens) * width;
+    uint stride = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    for (uint i = gl_GlobalInvocationID.x; i < total; i += stride) {
+        uint row = i / width;
+        uint rem = i - row * width;
+        uint c = rem / headDim;
+        uint d = rem - c * headDim;
+        uint h = (c % nK) * ratio + c / nK;
+        dst[i] = src[row * width + h * headDim + d];
+    }
+}

@@ -163,3 +163,25 @@ func qwen35DeviceQKNativeRow(cfg model.Config, canon string, t TensorType, shape
 	}
 	return false
 }
+
+// qwen35TiledOutProjResident is the ONE predicate, shared by computeQ4KTensorWork and
+// EstimateQ4KLoadMemoryPlan, admitting a GDN out_proj (GGUF ssm_out) to the tiled native route:
+// its GGUF bytes are kept unchanged, in the tiled input-column order, and every consumer tiles
+// the GDN core (compute.Qwen35TiledValueHeadSource) before the projection. Only a raw-i-quant
+// device backend's options admit it, the type must be one those options keep packed in 256-weight
+// blocks, and Prism's grouped checkpoint (whose columns are already grouped) is excluded.
+func qwen35TiledOutProjResident(cfg model.Config, canon string, t TensorType, shape []int, o q4kLoadOptions) bool {
+	if o.nativeSSMOutOff || o.prismGDNVGrouped || len(o.residentDenseIQ) == 0 || os.Getenv("FAK_QWEN35_NATIVE_SSM_OUT") == "0" {
+		return false
+	}
+	if t != TensorQ4_K && !denseKQuantRetained(o, t) {
+		return false
+	}
+	if bw, _, ok := residentExpertBlockGeometry(t); !ok || bw != qkK {
+		return false
+	}
+	if len(shape) != 2 || shape[0] != cfg.HiddenSize || shape[1] != cfg.LinearNumValueHeads*cfg.LinearValueHeadDim || shape[1]%qkK != 0 {
+		return false
+	}
+	return model.Qwen35TiledOutProjection(cfg, canon)
+}

@@ -318,7 +318,9 @@ func (s *WeightSource) walkQ4KLoadStorage(opts []Q4KLoadOption, visit func(q4kTe
 		// fak#13567: the native-row route keeps qwen35 row-permuted projections packed. It is
 		// the loader's own predicate (qwen35NativeRowResident), so the two cannot disagree.
 		nativeRows := !qwenMTP && qwen35NativeRowResident(cfg, canon, info.Type, shape, loadOpts)
-		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || nativeRows || model.ResidentQ4KEligible(cfg, canon))
+		// The tiled native out_proj route mirrors the loader's predicate the same way.
+		tiledOut := !qwenMTP && qwen35TiledOutProjResident(cfg, canon, info.Type, shape, loadOpts)
+		packedQ4 := info.Type == TensorQ4_K && (qwenMTP || nativeRows || tiledOut || model.ResidentQ4KEligible(cfg, canon))
 		blockWeights, _, residentable := residentExpertBlockGeometry(info.Type)
 		// retainKQuant mirrors the loader's dense k-quant retention predicate in
 		// quant_q4k_loader.go byte-for-byte: blanket k-quant residency, the selective Q2_K
@@ -327,7 +329,7 @@ func (s *WeightSource) walkQ4KLoadStorage(opts []Q4KLoadOption, visit func(q4kTe
 		// loader retains the packed tensor.
 		retainKQuant := denseKQuantRetained(loadOpts, info.Type)
 		packedKQuant := info.Type != TensorQ4_K && residentable &&
-			((qwenMTP && info.Type == TensorQ6_K) || nativeRows || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
+			((qwenMTP && info.Type == TensorQ6_K) || nativeRows || tiledOut || (info.Type == TensorPQ2_0 && prismPQ2ResidentEligible(cfg, canon, loadOpts.prismGDNVGrouped)) ||
 				(retainKQuant && model.ResidentKQuantEligible(cfg, canon)))
 		n, dtype := payload, ggufTensorDTypeLabel(info.Type)
 		var kind q4kStorageKind

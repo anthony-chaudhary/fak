@@ -270,6 +270,9 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 			if err := check("gdn_out", layer.GDNOut, true, req.Hidden, valueDim); err != nil {
 				return nil, err
 			}
+			if layer.GDNOutTiled {
+				return nil, qwen35SequenceFailure("tensor-preflight", index, "gdn_out in tiled input-column order needs a value-head tiling pass the CUDA sequence primitive does not run")
+			}
 			state := req.States[index]
 			if err := check("gdn_conv_state", state.Conv, false, req.ConvKernel-1, convDim); err != nil {
 				return nil, err

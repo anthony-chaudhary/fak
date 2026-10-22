@@ -86,6 +86,8 @@ type q4kLoadOptions struct {
 	prismGDNVGrouped         bool // checkpoint metadata, not a caller option
 	// nativeRowsOff disables the fak#13567 native-row route (qwen35NativeRowResident).
 	nativeRowsOff bool
+	// nativeSSMOutOff disables the tiled native out_proj route (qwen35TiledOutProjResident).
+	nativeSSMOutOff bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -110,6 +112,15 @@ func (o *q4kLoadOptions) setMTPRetention(enabled bool) {
 // Metal decode requires those weights as Q8. Pass false to force the historical Q8 route.
 func WithNativeLinearAttnRows(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.nativeRowsOff = !enabled }
+}
+
+// WithQwen35NativeSSMOut controls the Qwen3.5-family GDN out_proj (GGUF ssm_out) native route:
+// on a raw-i-quant device backend the weight keeps its GGUF bytes and tiled input-column order,
+// and the forward tiles the GDN core before the projection, instead of deinterleaving the
+// columns into a Q8_0 copy. The default (enabled) applies only where qwen35TiledOutProjResident
+// admits a tensor; pass false (or set FAK_QWEN35_NATIVE_SSM_OUT=0) to force the Q8 route.
+func WithQwen35NativeSSMOut(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.nativeSSMOutOff = !enabled }
 }
 
 // WithQ2KEmbeddingResident controls whether eligible Q2_K token embedding tables stay in
@@ -965,6 +976,10 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			if err := builder.AddCanonicalMTPFCQ8(pt.name, pt.shape, pt.raw); err != nil {
 				return err
 			}
+		case pt.tiledOutProj:
+			if err := builder.AddQwen35TiledOutProj(pt.name, pt.shape, pt.raw, pt.residentType.String()); err != nil {
+				return err
+			}
 		case pt.canonicalRows && pt.deviceQKRows:
 			if err := builder.AddCanonicalRowNormalizedDeviceQK(pt.name, pt.shape, pt.raw, pt.residentType.String()); err != nil {
 				return err
@@ -1436,6 +1451,13 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	}
 	if info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
 		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+		tw.acctResident = true
+		return tw
+	}
+	// A qwen35 GDN out_proj on a raw-i-quant device backend keeps its GGUF bytes and tiled
+	// input-column order; its consumers tile the GDN core instead of the loader reordering columns.
+	if qwen35TiledOutProjResident(cfg, canon, info.Type, shape, loadOpts) {
+		tw.pending = []pendingTensor{{resident: true, tiledOutProj: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 		tw.acctResident = true
 		return tw
 	}

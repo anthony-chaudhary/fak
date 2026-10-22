@@ -291,7 +291,21 @@ func (m *Model) ValidateBackendForwardPath(be compute.Backend) error {
 	if m == nil {
 		return nil
 	}
-	return ValidateBackendForwardConfig(m.Cfg, be)
+	if err := ValidateBackendForwardConfig(m.Cfg, be); err != nil {
+		return err
+	}
+	if be != nil && m.HasQwen35TiledOutProj() {
+		if _, ok := be.(compute.Qwen35GDNTiledOutBackend); !ok {
+			return &UnsupportedBackendForwardError{
+				Backend:         be.Name(),
+				Forward:         ForwardQwen35GDN,
+				IntendedPath:    Qwen35GDNVulkanPath,
+				ParityCosineMin: Qwen35GDNParityCosineMin,
+				Reason:          "the model holds GDN out_proj in the GGUF tiled input-column order and the backend cannot tile the GDN core",
+			}
+		}
+	}
+	return nil
 }
 
 // WholeSequencePath is the backend-neutral capability identity for one complete

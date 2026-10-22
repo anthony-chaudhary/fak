@@ -144,6 +144,8 @@ const (
 	VulkanBuildReceiptSchemaV28 = "fak.vulkan-build-receipt.v28"
 	// VulkanBuildReceiptSchemaV29 adds optional raw F32 finite status.
 	VulkanBuildReceiptSchemaV29 = "fak.vulkan-build-receipt.v29"
+	// VulkanBuildReceiptSchemaV30 adds the Qwen3.5 GDN core value-head tiling module.
+	VulkanBuildReceiptSchemaV30 = "fak.vulkan-build-receipt.v30"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

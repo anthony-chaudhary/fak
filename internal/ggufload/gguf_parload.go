@@ -107,6 +107,7 @@ type pendingTensor struct {
 	canonicalMTPFCQ8 bool       // exact canonical MTP fusion projection; preserve source Q8_0
 	canonicalRows    bool       // qwen35 raw K-quant rows already permuted into canonical order (fak#13567)
 	deviceQKRows     bool       // canonicalRows admitted by qwen35DeviceQKNativeRow
+	tiledOutProj     bool       // qwen35 GDN out_proj kept in GGUF bytes and tiled column order
 	q2kEmbed         bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
 	q4kEmbed         bool       // true -> model.NewQ4KEmbedding(raw) -> builder.SetQ2KEmbedding
 	tiedQ6KEmbed     bool       // true -> builder.SetTiedQ6KEmbedding(raw): one copy for gather + tied head

@@ -28,10 +28,11 @@ func TestVulkanReceiptV28SplitKVAttention(t *testing.T) {
 // fak-test:runtime fast est=5ms
 func TestVulkanReceiptV29RawFiniteStatus(t *testing.T) {
 	want := append(vulkanRegistryV28.stems(), "v41_f32_finite")
-	if len(want) != 100 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 100 || !reflect.DeepEqual(want, vulkanRegistryV29.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V29 must add exactly the optional finite-status module to V28")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	id, err := vulkanRegistryV29.identity()
+	schema := vulkanRegistryV29.schema
 	if err != nil || schema != VulkanBuildReceiptSchemaV29 || id.ID != VulkanShaderRegistryV29ID || id.ModuleCount != 100 {
 		t.Fatalf("V29 identity differs: %s %+v %v", schema, id, err)
 	}
