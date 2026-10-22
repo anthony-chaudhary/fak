@@ -252,6 +252,17 @@ func loadTurnkeyNativeResourcesWith(_ context.Context, modelPath, modelID string
 		return nil, err
 	}
 	metal := metalDecision.live
+	// Turnkey bypasses serveRuntime.resolveCompute, so enforce the same realized
+	// storage policy before model admission. resolveUpKVPrecision has already
+	// published any explicit flag to the environment; keep up's historical f32
+	// default rather than silently changing the context budget selected earlier.
+	deviceBackendName := ""
+	if backend != nil {
+		deviceBackendName = backend.Name()
+	}
+	if _, err := resolveServeKVPrecision("", serveKVBackendName(deviceBackendName, metal), false, realizedServeKVPrecisions); err != nil {
+		return nil, fmt.Errorf("turnkey KV precision: %w", err)
+	}
 	if metal {
 		if err := deps.refusePeak(modelPath); err != nil {
 			return nil, err
