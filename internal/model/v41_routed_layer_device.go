@@ -87,9 +87,14 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		}
 		names := make([][3]string, len(picks))
 		for slot, pick := range picks {
-			stem := "ffn.experts." + itoa(pick.expert)
-			names[slot] = [3]string{layerName(layer, stem+".w1.weight"), layerName(layer, stem+".w3.weight"), layerName(layer, stem+".w2.weight")}
-			if s.M.has(names[slot][2][:len(names[slot][2])-len("weight")] + "bias") {
+			downBias := ""
+			if routed := s.M.v41RoutedNames(layer, pick.expert); routed != nil {
+				names[slot], downBias = routed.weights, routed.biases[2]
+			} else {
+				stem := "ffn.experts." + itoa(pick.expert)
+				names[slot] = [3]string{layerName(layer, stem+".w1.weight"), layerName(layer, stem+".w3.weight"), layerName(layer, stem+".w2.weight")}
+			}
+			if s.M.has(v41OrBiasName(downBias, names[slot][2])) {
 				return nil, v41RoutedExpertDeclined, nil
 			}
 		}
@@ -189,7 +194,11 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				s.readAheadV41RoutedPicks(r, names)
 			}
 			for slot := range picks {
-				gateW, releaseGate, upW, releaseUp, _, ok := expertInputDeviceAdmitted(s, names[slot][0], names[slot][1], x, H)
+				var gateBias, upBias string
+				if routed := s.M.v41RoutedNames(layer, picks[slot].expert); routed != nil {
+					gateBias, upBias = routed.biases[0], routed.biases[1]
+				}
+				gateW, releaseGate, upW, releaseUp, _, ok := expertInputDeviceStage(s, names[slot][0], names[slot][1], gateBias, upBias, x, H)
 				if !ok {
 					return false
 				}

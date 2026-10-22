@@ -620,19 +620,19 @@ func (m *Model) v41ForwardAdmitted() error {
 	last := (*v41ExpertAdmitKey)(atomic.LoadPointer(&m.v41ExpertsAdmitted))
 	expertsAdmitted := last != nil && *last == expertKey
 	for l := 0; l < cfg.NumLayers; l++ {
-		if err := m.v41AdmitShape(layerName(l, "attn_norm.weight"), v41StageLayer, l, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafAttnNorm), v41StageLayer, l, H); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "ffn_norm.weight"), v41StageLayer, l, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafFFNNorm), v41StageLayer, l, H); err != nil {
 			return err
 		}
 		if err := m.v41AdmitMHC(l); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.wq_a.weight"), v41StageAttention, l, cfg.QLoraRank, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafWQA), v41StageAttention, l, cfg.QLoraRank, H); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.wq_b.weight"), v41StageAttention, l, qHeadDim, cfg.QLoraRank); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafWQB), v41StageAttention, l, qHeadDim, cfg.QLoraRank); err != nil {
 			return err
 		}
 		// Q/KV latent norms (reference Attention: self.q_norm = RMSNorm(q_lora_rank)
@@ -641,14 +641,14 @@ func (m *Model) v41ForwardAdmitted() error {
 		// stage and must stay byte-identical, so a reduced config neither requires
 		// nor reads these leaves. See v41Layer's application site (#13290).
 		if full {
-			if err := m.v41AdmitShape(layerName(l, "attn.wq_a_norm.weight"), v41StageAttention, l, cfg.QLoraRank); err != nil {
+			if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafWQANorm), v41StageAttention, l, cfg.QLoraRank); err != nil {
 				return err
 			}
-			if err := m.v41AdmitShape(layerName(l, "attn.kv_norm.weight"), v41StageAttention, l, kvLatentRank); err != nil {
+			if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafKVNorm), v41StageAttention, l, kvLatentRank); err != nil {
 				return err
 			}
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.wkv.weight"), v41StageAttention, l, kvLatentRank, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafWKV), v41StageAttention, l, kvLatentRank, H); err != nil {
 			return err
 		}
 		// wo_a is the leaf's group-major [Groups, OLoRARank, HeadsPerGroup*HeadDim]
@@ -659,25 +659,25 @@ func (m *Model) v41ForwardAdmitted() error {
 		if err := m.v41AdmitGroupedWoA(l); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.wo_b.weight"), v41StageAttention, l, H, oDim); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafWOB), v41StageAttention, l, H, oDim); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "attn.sink"), v41StageAttention, l, nH); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafAttnSink), v41StageAttention, l, nH); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "ffn.gate.weight"), v41StageMoE, l, cfg.NumExperts, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafGate), v41StageMoE, l, cfg.NumExperts, H); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "ffn.gate.e_score_correction_bias"), v41StageMoE, l, cfg.NumExperts); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafGateBias), v41StageMoE, l, cfg.NumExperts); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w1.weight"), v41StageMoE, l, I, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafSharedW1), v41StageMoE, l, I, H); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w3.weight"), v41StageMoE, l, I, H); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafSharedW3), v41StageMoE, l, I, H); err != nil {
 			return err
 		}
-		if err := m.v41AdmitShape(layerName(l, "ffn.shared_experts.w2.weight"), v41StageMoE, l, H, I); err != nil {
+		if err := m.v41AdmitShape(m.v41LeafName(l, v41LeafSharedW2), v41StageMoE, l, H, I); err != nil {
 			return err
 		}
 		for e := expertLo; e < expertHi && !expertsAdmitted; e++ {
@@ -751,7 +751,7 @@ func (e *v41MissingMHCMixError) Error() string { return "missing tensor " + e.Na
 func (e *v41MissingMHCMixError) Unwrap() error { return errV41MHCMixMissing }
 
 func (m *Model) v41AdmitMHCNamed(l int, leaf, base, scale string, requireFlat bool) error {
-	name := layerName(l, leaf)
+	name := m.v41MHCName(l, leaf)
 	// A malformed manifest rank is still present; leave its geometry refusal
 	// to the existing layout classifier. residentShape covers non-manifest stores.
 	_, manifestPresent := m.manifest[name]
@@ -764,10 +764,10 @@ func (m *Model) v41AdmitMHCNamed(l int, leaf, base, scale string, requireFlat bo
 	if !ok || (requireFlat && !flat) {
 		return v41StageErr(v41StageMHC, l, fmt.Errorf("%w: tensor %s has no admitted mHC geometry (require flattened=%t)", ErrV41ForwardStage, name, requireFlat))
 	}
-	if err := m.v41AdmitShape(layerName(l, base), v41StageMHC, l, v41MHCMixWidth); err != nil {
+	if err := m.v41AdmitShape(m.v41MHCName(l, base), v41StageMHC, l, v41MHCMixWidth); err != nil {
 		return err
 	}
-	return m.v41AdmitShape(layerName(l, scale), v41StageMHC, l, 3)
+	return m.v41AdmitShape(m.v41MHCName(l, scale), v41StageMHC, l, 3)
 }
 
 // v41AdmitGroupedWoA admits a layer's attn.wo_a.weight in either declaration of
@@ -790,7 +790,7 @@ func (m *Model) v41AdmitMHCNamed(l int, leaf, base, scale string, requireFlat bo
 // residency-completely by residentShape, so a resident-store wo_a is admitted at
 // its real geometry on either arm.
 func (m *Model) v41AdmitGroupedWoA(l int) error {
-	name := layerName(l, "attn.wo_a.weight")
+	name := m.v41LeafName(l, v41LeafWOA)
 	cfg := m.Cfg
 	out, in, ok := m.residentShape(name)
 	if !ok {

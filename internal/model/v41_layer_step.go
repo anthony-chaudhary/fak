@@ -326,8 +326,8 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 			}
 		}()
 	}
-	mixBase := m.tensor(layerName(l, "mhc.base"))
-	mixScale := m.tensor(layerName(l, "mhc.scale"))
+	mixBase := m.v41LeafTensor(l, v41LeafMHCBase)
+	mixScale := m.v41LeafTensor(l, v41LeafMHCScale)
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
 
 	// ---- mHC coefficient split (one position), byte-identical to the plain branch ----
@@ -464,7 +464,7 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 			indexView.owner, indexView.source = layerState, l
 		}
 		width := v41CompressorWidth(cfg)
-		normWeight := m.tensor(layerName(l, "attn.compressor.norm.weight"))
+		normWeight := m.v41LeafTensor(l, v41LeafCompressorNorm)
 		pool, perr := NewV41CompressorPool(plan.Ratio, width)
 		if perr != nil {
 			return v41RoleAttentionContinuation{}, v41StageErr(v41StageCompress, l, perr)
@@ -567,9 +567,9 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 	attentionOpened := m.v41NowNanos()
 	// sharedKV borrows the immutable publications themselves, so this layer's
 	// memo can skip rescanning rows an earlier step already proved finite.
-	o, err := v41CombinedAttentionValidated(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.tensor(layerName(l, "attn.sink")), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
+	o, err := v41CombinedAttentionValidated(l, pos, plan.kvGroupSize(cfg), nH, hd, q, m.v41LeafTensor(l, v41LeafAttnSink), window, sharedKV, ids, cfg.attnScale(), &v41ResidentKVView{
 		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: windowStart,
-		windowRows: len(window), compressedRows: len(sharedKV), sinkKey: layerName(l, "attn.sink"),
+		windowRows: len(window), compressedRows: len(sharedKV), sinkKey: m.v41LeafName(l, v41LeafAttnSink),
 	}, scratch.sharedAttentionFunc(), attentionContinuation, &layerState.validatedPrefix)
 	m.v41NoteAttentionContraction(attentionOpened)
 	if err != nil {
@@ -649,7 +649,7 @@ func (m *Model) prepareV41LayerStepRoleFinishInto(l, pos int, x []float32, strea
 		return nil, err
 	}
 	picks, err := m.v41RouterPicksForStep(l, ffnX, H, routeCfg, true, scratch, func() []float32 {
-		return m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
+		return m.v41LeafTensor(l, v41LeafGateBias)
 	})
 	if err != nil {
 		return nil, err

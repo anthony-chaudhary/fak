@@ -2201,6 +2201,16 @@
           "category": "test-only",
           "reason": "Test-only observer of elements scanned per combined attention call; nil in production.",
           "token": "v41CombinedAttentionScanProbe"
+        },
+        {
+          "category": "incidental",
+          "reason": "enum index into the per-model V4.1 layer name table for the fixed GGUF tensor suffix; a lookup key for an existing weight name, not a new canonical concept (attn_norm.weight)",
+          "token": "v41LeafAttnNorm"
+        },
+        {
+          "category": "incidental",
+          "reason": "enum index into the per-model V4.1 layer name table for the fixed GGUF tensor suffix; a lookup key for an existing weight name, not a new canonical concept (attn.sink)",
+          "token": "v41LeafAttnSink"
         }
       ],
       "exclude": [
@@ -2267,6 +2277,8 @@
         "v41CombinedAttentionScanProbe",
         "v41CombinedAttentionValidated",
         "v41CombinedAttentionWithContinuation",
+        "v41LeafAttnNorm",
+        "v41LeafAttnSink",
         "v41NoteAttentionContraction",
         "v41PlainAttentionClosed",
         "v41PlainAttentionPending",
@@ -4678,6 +4690,16 @@
           "category": "incidental",
           "reason": "GuardBroadPrune is a worktree-hygiene precondition in internal/worktreeprune that refuses a repository-wide git worktree prune while a foreign-OS lane registration is present; it matches guard-gate only on the guard prefix and adjudicates no tool call or policy, so it is incidental to the guard-gate concept family rather than a new canonical concept.",
           "token": "guardbroadprune"
+        },
+        {
+          "category": "incidental",
+          "reason": "enum index into the per-model V4.1 layer name table for the fixed GGUF tensor suffix; a lookup key for an existing weight name, not a new canonical concept (ffn.gate.weight, the MoE router gate, not a guard gate)",
+          "token": "v41LeafGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "enum index into the per-model V4.1 layer name table for the fixed GGUF tensor suffix; a lookup key for an existing weight name, not a new canonical concept (ffn.gate.e_score_correction_bias, the MoE router bias, not a guard gate)",
+          "token": "v41LeafGateBias"
         }
       ],
       "exclude": [
@@ -5190,6 +5212,8 @@
         "unguarded",
         "v41EPGuard",
         "v41EPOwnerGuardBinarySHA256",
+        "v41LeafGate",
+        "v41LeafGateBias",
         "v41UsesGatedCompressor",
         "v41routergatetopk",
         "v41routergatetopkavailable",

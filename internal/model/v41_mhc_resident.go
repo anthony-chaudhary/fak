@@ -234,7 +234,7 @@ func (r *v41MHCResident) setHostStreams(layer int, host [][][]float32) error {
 // the RMS-scaled result: the attention mix (mhc.*) or the FFN mix (mhc.ffn_*).
 func (r *v41MHCResident) mixes(layer int, streams *v41DeviceStreams, leaf, scaleLeaf, baseLeaf string, iters int, hcEps, rmsEps float32) (compute.Tensor, error) {
 	m := r.d.s.M
-	scale, base := m.tensor(layerName(layer, scaleLeaf)), m.tensor(layerName(layer, baseLeaf))
+	scale, base := m.tensor(m.v41MHCName(layer, scaleLeaf)), m.tensor(m.v41MHCName(layer, baseLeaf))
 	if len(scale) != 3 || len(base) != compute.V41MHCCoeffWidth || iters < 1 || !finite32(hcEps) || hcEps <= 0 || !finite32(rmsEps) || rmsEps <= 0 {
 		return compute.Tensor{}, v41StageErr(v41StageMHC, layer, fmt.Errorf("model: invalid V41 mHC geometry iters=%d scale=%d base=%d", iters, len(scale), len(base)))
 	}
@@ -322,7 +322,7 @@ func (r *v41MHCResident) splitParams(layer int, scaleLeaf, baseLeaf string, scal
 	// mix matrix. The model/backend owner separates loaded model generations
 	// and backend instances; these leaf names separate layer and
 	// attention/FFN role. Forward-local cleanup must not free them.
-	paramsKey := "v41-mhc-split-params:" + layerName(layer, scaleLeaf) + ":" + layerName(layer, baseLeaf)
+	paramsKey := s.M.v41MHCParamsKey(layer, scaleLeaf, baseLeaf)
 	return s.cachedImmutableWeight(paramsKey, paramsKey, func() compute.Tensor {
 		params := append(append(make([]float32, 0, compute.V41MHCParamWidth), scale...), base...)
 		return s.uploadHostF32([]int{compute.V41MHCParamWidth}, params, compute.MemoryWeights, "V4.1 mHC split params")
@@ -490,7 +490,7 @@ func (s *Session) v41MHCMixWeight(l int, leaf string, H int, transposed bool) (w
 	if !ok || !ok2 || H <= 0 || !v41MHCMixLeaf(leaf) {
 		return compute.Tensor{}, errV41MHCDeviceUnavailable
 	}
-	name := layerName(l, leaf)
+	name := s.M.v41MHCName(l, leaf)
 	out, in, present := s.M.residentShape(name)
 	if !present {
 		return compute.Tensor{}, errV41MHCDeviceUnavailable

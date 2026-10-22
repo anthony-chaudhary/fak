@@ -22,11 +22,16 @@ import (
 // both release callbacks after its last use. Each stage-and-hold is ONE shared-ring span
 // (R7/#5618), so staging up cannot evict gate before either projection is dispatched.
 func expertInputDeviceAdmitted(s *Session, gateName, upName string, xn any, hidden int) (compute.Tensor, func(), compute.Tensor, func(), []float32, bool) {
+	return expertInputDeviceStage(s, gateName, upName, "", "", xn, hidden)
+}
+
+// expertInputDeviceStage is expertInputDeviceAdmitted with the projections'
+// bias names supplied; an empty bias name is derived from its weight name.
+func expertInputDeviceStage(s *Session, gateName, upName, gateBias, upBias string, xn any, hidden int) (compute.Tensor, func(), compute.Tensor, func(), []float32, bool) {
 	none := compute.Tensor{}
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory ||
 		s.M.Cfg.ActGeluTanh || s.M.Cfg.ActGeluErf ||
-		s.M.has(gateName[:len(gateName)-len("weight")]+"bias") ||
-		s.M.has(upName[:len(upName)-len("weight")]+"bias") {
+		s.M.has(v41OrBiasName(gateBias, gateName)) || s.M.has(v41OrBiasName(upBias, upName)) {
 		return none, nil, none, nil, nil, false
 	}
 	x, ok := xn.([]float32)
