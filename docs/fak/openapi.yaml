@@ -220,9 +220,11 @@ paths:
       description: |
         The LEGACY OpenAI text-completion wire — the pre-chat surface vLLM, SGLang,
         and llama.cpp-server all still serve, for older clients and eval/embedding
-        harnesses. The request `prompt` (a bare string or an array of strings, joined
-        with newlines) is wrapped as a single user turn and run through the same
-        served completion path as the chat route. There are no tools on this wire, so
+        harnesses. The request `prompt` (a bare string or a one-element array of
+        strings) is wrapped as a single user turn and run through the same served
+        completion path as the chat route. An array of two or more prompts is an
+        OpenAI batch, which this route refuses with a 400 whose `error.code` is
+        `prompt_batch_unsupported`. There are no tools on this wire, so
         there is no tool-call adjudication. With `stream: true` a synthetic SSE stream
         of `text` fragments is emitted after the full turn completes.
       parameters:
@@ -3950,7 +3952,7 @@ components:
       properties:
         model: { type: string, description: Echoed back; the served model is fixed at boot. }
         prompt:
-          description: A bare string OR an array of strings (joined with newlines into one prompt).
+          description: A bare string OR a one-element array of strings. An array of two or more prompts (a batch) is refused with 400 `prompt_batch_unsupported`.
         max_tokens: { type: integer, description: Forwarded to the model. Omit for the planner default. }
         temperature: { type: number, format: float }
         top_p: { type: number, format: float }

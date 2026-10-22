@@ -644,8 +644,8 @@ type ChatChoice struct {
 // gateway adapts it onto the same in-kernel/upstream completion path the chat route
 // uses by wrapping `prompt` as a single user message; there are no tools on this
 // wire, so there is no tool-call adjudication. `prompt` is raw because the OpenAI
-// wire allows either a bare string or an array of strings (normalizePrompt folds
-// both); the array form is joined with newlines into one prompt.
+// wire allows either a bare string or an array of strings; normalizePrompt
+// accepts a bare string or a one-element array and refuses a multi-prompt batch.
 type CompletionRequest struct {
 	Model       string          `json:"model"`
 	Prompt      json.RawMessage `json:"prompt"`

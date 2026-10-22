@@ -83,31 +83,6 @@ func (c capturePlanner) Complete(_ context.Context, m []agent.Message, _ []agent
 
 func (capturePlanner) Model() string { return "capture" }
 
-// TestCompletionsArrayPromptJoined checks the OpenAI array-prompt form is folded into
-// one prompt (the planner sees a single user message with the lines newline-joined).
-func TestCompletionsArrayPromptJoined(t *testing.T) {
-	srv := newTestServer(t)
-	var seen string
-	srv.planner = capturePlanner{
-		comp: &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "ok"}, FinishReason: "stop"},
-		last: &seen,
-	}
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	var resp CompletionResponse
-	code := postJSON(t, ts.URL+"/v1/completions", CompletionRequest{
-		Model:  "test-model",
-		Prompt: json.RawMessage(`["line one","line two"]`),
-	}, &resp)
-	if code != 200 {
-		t.Fatalf("status = %d", code)
-	}
-	if seen != "line one\nline two" {
-		t.Errorf("planner saw prompt %q, want the two lines joined with newline", seen)
-	}
-}
-
 // TestCompletionsStreamEmitsTextSSE checks stream=true yields an SSE stream whose
 // chunks carry a `text` fragment (the legacy shape) and a [DONE] terminator, and
 // that concatenating the text reproduces the completion.
