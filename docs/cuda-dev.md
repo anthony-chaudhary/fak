@@ -61,6 +61,22 @@ make cuda-build-sm100  # B200 / GB200
 make cuda-build-sm120  # RTX 50-series / consumer Blackwell
 ```
 
+The native builder additionally accepts an explicit `fak-dev build-cuda build
+--arch sm_103` (or `--arch 103`) for B300. This opt-in requires the selected
+`nvcc --version` to report CUDA Toolkit 12.9 or newer before kernel compilation;
+unreadable, unparseable, or older compiler versions fail closed. CUDA 12.9 GA
+ships nvcc 12.9.41, supports C++14, and supports GCC 6–14 on Linux x86_64
+([release notes](https://docs.nvidia.com/cuda/archive/12.9.0/cuda-toolkit-release-notes/index.html),
+[host compiler requirements](https://docs.nvidia.com/cuda/archive/12.9.0/cuda-installation-guide-linux/index.html)).
+This emits plain `compute_103`/`sm_103`, not `sm_103a` or `sm_103f` features.
+
+This is native build planning and compiler admission only, not a successful CUDA
+build witness. Actual sm_103 CUDA compilation is **UNRUN** for this change.
+The default matrix, sm_89 development pin, and CUDA 12.8 CI/Docker paths remain
+unchanged. Issue #13935 still requires digest-pinned CUDA 12.9 CI/Docker images,
+an sm_103 compile leg, coordinated shared-matrix/coverage updates, and successful
+sm_100/sm_103/sm_120 compile and Docker build receipts before promotion.
+
 ## 2. Author — edit, then gate locally (no GPU)
 
 Edit the kernel in `cuda_kernels.cu`, its prototype in `cuda_backend.h`, and the cgo binding
