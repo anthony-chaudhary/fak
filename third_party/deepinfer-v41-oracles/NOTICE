@@ -61,3 +61,25 @@ returns. The e4m3 and e2m1 round-to-nearest-even and saturation rules are
 inferred from the upstream constants and cast comments; the CUDA conversion
 kernels are external to the repository. The test measures the relative L2 change
 of fak's host combined attention output on a synthetic fixture.
+
+MoE GEMM-input MXFP8 activation casts (internal/model/v41_mxfp8_act_oracle_test.go)
+
+Upstream paths:
+  deepinfer/hugging_face/config.py:253-264,304-306
+  deepinfer/model_executor/layers/linear.py:13-24
+  deepinfer/model_executor/layers/tilelang_ops/common.py:25-26
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/cuda/norm.py:280-300
+  deepinfer/model_executor/models/v4_modules/mlp.py:140-141,177-182,274-289,412-442,518-525
+  deepinfer/model_executor/models/v4_modules/moe.py:66-67
+
+Adaptation: the e4m3 round trip with one UE8M0 power-of-two scale per 32 values
+already existed in fak as its activation reference. The DeepInfer contribution
+is the placement map: with FP8 MLP activations enabled, the bf16 FFN-norm input
+to gate/up and the route-weighted SwiGLU operand to down are cast, while the
+router projection and the GEMM outputs stay bf16; the norm-fused cast also
+corroborates the 1e-4 amax floor and the ceil power-of-two scale rule. The
+SwiGLU, route weight and down-input cast are one fused upstream kernel, so the
+oracle casts the float32 weighted value directly; whether a bf16 rounding sits
+before that cast is not observable upstream. The test measures expert-output
+relative L2 change against fak's host bf16 expert graph on a synthetic fixture.
