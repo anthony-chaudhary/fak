@@ -109,15 +109,15 @@ func (m *Model) prepareV41PlainAttention(l int, x []float32, streams [][]float32
 		}()
 	}
 	H, hd, nH := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads
-	attnNorm := m.tensor(layerName(l, "attn_norm.weight"))
-	mixBase := m.tensor(layerName(l, "mhc.base"))
-	mixScale := m.tensor(layerName(l, "mhc.scale"))
+	attnNorm := m.v41LeafTensor(l, v41LeafAttnNorm)
+	mixBase := m.v41LeafTensor(l, v41LeafMHCBase)
+	mixScale := m.v41LeafTensor(l, v41LeafMHCScale)
 	projectOutput := m.v41GroupedOutputProjector(l, nH, hd, cfg.OGroups, cfg.OLoraRank, H, scratch)
 	if err := m.v41RequirePlainLayerStepWeights(l); err != nil {
 		return v41PlainAttentionContinuation{}, err
 	}
-	sink := m.tensor(layerName(l, "attn.sink"))
-	gateBias := m.tensor(layerName(l, "ffn.gate.e_score_correction_bias"))
+	sink := m.v41LeafTensor(l, v41LeafAttnSink)
+	gateBias := m.v41LeafTensor(l, v41LeafGateBias)
 
 	if err := st.collapseMHC(attnNorm, mixScale, mixBase); err != nil {
 		return v41PlainAttentionContinuation{}, err
@@ -187,15 +187,15 @@ func (a *v41PlainAttentionContinuation) resumeProjected(projected []float32, val
 }
 
 func (m *Model) v41RequirePlainLayerStepWeights(l int) error {
-	for _, leaf := range []string{
-		"attn.wq_a.weight", "attn.wq_b.weight", "attn.wkv.weight",
-		"ffn.gate.weight",
-		"ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight",
-		"ffn.shared_experts.w2.weight",
+	for _, leaf := range [...]v41Leaf{
+		v41LeafWQA, v41LeafWQB, v41LeafWKV,
+		v41LeafGate,
+		v41LeafSharedW1, v41LeafSharedW3,
+		v41LeafSharedW2,
 	} {
-		if !m.hasResidentWeight(layerName(l, leaf)) {
+		if name := m.v41LeafName(l, leaf); !m.hasResidentWeight(name) {
 			return v41StageErr(v41StageAttention, l,
-				fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, layerName(l, leaf)))
+				fmt.Errorf("%w: missing tensor %s", ErrV41ForwardStage, name))
 		}
 	}
 	return nil
@@ -395,7 +395,7 @@ func (st *v41PlainLayerStep) attentionInput(q, sink []float32, visibleKeys []int
 		B: 1, M: 1, Heads: nH, HeadDim: hd, TopK: len(visibleKeys) + 1, N: len(visibleKeys), Softmax: cfg.attnScale(),
 	}, &v41ResidentKVView{
 		owner: layerState, pos: pos, ringRows: layerState.windowSize, firstKey: int(visibleKeys[0]),
-		windowRows: len(visibleKeys), sinkKey: layerName(l, "attn.sink"),
+		windowRows: len(visibleKeys), sinkKey: m.v41LeafName(l, v41LeafAttnSink),
 	}, scratch.sharedAttentionFunc())
 	m.v41NoteAttentionContraction(opened)
 	if err != nil {

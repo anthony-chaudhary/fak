@@ -1315,9 +1315,11 @@ func (s *Session) v41RMSNormPrepared(name string, input []float32, width, rows i
 		if len(gain) != width {
 			return nil, closeFailure(errV41ProjectionResult)
 		}
-		for i, v := range input {
-			if !finite32(v) || !finite32(gain[i%width]) {
-				return nil, closeFailure(errV41ProjectionResult)
+		for row := 0; row < rows; row++ {
+			for i, v := range input[row*width : (row+1)*width] {
+				if !finite32(v) || !finite32(gain[i]) {
+					return nil, closeFailure(errV41ProjectionResult)
+				}
 			}
 		}
 		run := func() (values []float32, err error) {

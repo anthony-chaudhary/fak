@@ -275,7 +275,7 @@ func (m *Model) v41FullFFNInput(layer int, streams [][]float32, attnMix v41MHCMi
 	if err != nil {
 		return nil, v41MHCMix{}, nil, err
 	}
-	mix, err := v41MHCSplitOn(device, layer, projected, m.tensor(layerName(layer, "mhc.ffn_scale")), m.tensor(layerName(layer, "mhc.ffn_base")), 4, hcItersOrDefault(m.Cfg), hcEpsOrDefault(m.Cfg))
+	mix, err := v41MHCSplitOn(device, layer, projected, m.v41LeafTensor(layer, v41LeafMHCFFNScale), m.v41LeafTensor(layer, v41LeafMHCFFNBase), 4, hcItersOrDefault(m.Cfg), hcEpsOrDefault(m.Cfg))
 	if err != nil {
 		return nil, v41MHCMix{}, nil, err
 	}

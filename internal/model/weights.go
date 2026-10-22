@@ -125,7 +125,22 @@ var layerNames struct {
 	m  map[layerNameKey]string
 }
 
+type tensorLookupKind uint8
+
+const (
+	tensorLookupLayerName tensorLookupKind = iota
+	tensorLookupManifest
+	tensorLookupPresence
+)
+
+// tensorLookupProbe is a test-only observer of layerName, Model.tensor and
+// Model.has calls.
+var tensorLookupProbe func(tensorLookupKind)
+
 func layerName(layer int, suffix string) string {
+	if tensorLookupProbe != nil {
+		tensorLookupProbe(tensorLookupLayerName)
+	}
 	k := layerNameKey{layer, suffix}
 	layerNames.mu.RLock()
 	name, ok := layerNames.m[k]
@@ -459,6 +474,12 @@ type Model struct {
 	// name walk. It is an atomically accessed *v41ExpertAdmitKey; a plain pointer
 	// keeps Model copyable.
 	v41ExpertsAdmitted unsafe.Pointer
+
+	// v41NameTab is the atomically accessed *v41NameTable of per-layer V4.1
+	// tensor names (v41_layer_handles.go). v41NamesOff keeps every name on
+	// layerName; tests use it as the reference path.
+	v41NameTab  unsafe.Pointer
+	v41NamesOff bool
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying
@@ -648,11 +669,17 @@ func manifestTensor(manifest map[string]tensorMeta, raw []byte, owner, name stri
 
 // tensor returns a zero-copy []float32 view of a named weight.
 func (m *Model) tensor(name string) []float32 {
+	if tensorLookupProbe != nil {
+		tensorLookupProbe(tensorLookupManifest)
+	}
 	return manifestTensor(m.manifest, m.raw, "", name)
 }
 
 // has reports whether a tensor is present (e.g. q/k/v bias only exist on Qwen2).
 func (m *Model) has(name string) bool {
+	if tensorLookupProbe != nil {
+		tensorLookupProbe(tensorLookupPresence)
+	}
 	_, ok := m.manifest[name]
 	return ok
 }

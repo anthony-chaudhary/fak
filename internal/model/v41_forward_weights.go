@@ -317,7 +317,7 @@ func (m *Model) v41MHCWeightLayoutNamed(l int, leaf string) (flat, transposed, o
 	if !v41MHCMixLeaf(leaf) {
 		return false, false, false
 	}
-	out, in, present := m.residentShape(layerName(l, leaf))
+	out, in, present := m.residentShape(m.v41MHCName(l, leaf))
 	if !present {
 		return false, false, false
 	}
@@ -728,9 +728,8 @@ func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
 // the identical bytes (v41ExpertF32Into), so the only consequence is a missed
 // optimization, never a wrong value.
 func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch, retain bool) (w1, w3, w2 []float32, err error) {
-	leaves := [3]string{".w1.weight", ".w3.weight", ".w2.weight"}
-	for i, leaf := range leaves {
-		name := layerName(l, stem+leaf)
+	names := m.v41ExpertStemNames(l, stem)
+	for i, name := range names {
 		if w, ok := scratch.v41LayerCacheGet(name); ok {
 			// A layer-cache hit is a routed-expert read served from residency (it
 			// performs zero tier IO and zero dequant), so it counts in the SAME
@@ -759,7 +758,7 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch,
 		case 2:
 			dst = scratch.exp2
 		}
-		w, rerr := m.v41ExpertF32Into(l, stem+leaf, dst)
+		w, rerr := m.v41ExpertF32IntoNamed(l, name, dst)
 		if rerr != nil {
 			return nil, nil, nil, v41StageErr(v41StageMoE, l, rerr)
 		}
@@ -783,7 +782,7 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch,
 	// expert once and never re-reads it, so the copy would be dead (see the
 	// function doc comment).
 	if retain {
-		m.v41CacheExpertTriple(l, stem, scratch, w1, w3, w2)
+		m.v41CacheExpertNames(names, scratch, w1, w3, w2)
 		v41NoteExpertTripleRetention()
 	}
 	return w1, w3, w2, nil
@@ -809,19 +808,19 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch,
 // caller's returned slice keeps pointing at the live scratch, never the retained
 // copy, so no aliasing escapes the layer.
 func (m *Model) hostExpertDown(l int, stem string, scratch *v41ProjScratch) ([]float32, error) {
-	name := layerName(l, stem+".w2.weight")
-	if w, ok := scratch.v41LayerCacheGet(name); ok {
+	names := m.v41ExpertStemNames(l, stem)
+	if w, ok := scratch.v41LayerCacheGet(names[2]); ok {
 		m.v41NoteExpertResidentHit()
 		return w, nil
 	}
-	w, rerr := m.v41ExpertF32Into(l, stem+".w2.weight", scratch.exp2)
+	w, rerr := m.v41ExpertF32IntoNamed(l, names[2], scratch.exp2)
 	if rerr != nil {
 		return nil, v41StageErr(v41StageMoE, l, rerr)
 	}
 	scratch.exp2 = w
 	// Retain a copy for the rest of the layer so the next row of the SAME expert
 	// group is a RAM hit: one fault per expert group, not one per pick.
-	m.v41CacheExpertTriple(l, stem, scratch, nil, nil, w)
+	m.v41CacheExpertNames(names, scratch, nil, nil, w)
 	return w, nil
 }
 
@@ -835,19 +834,31 @@ func (m *Model) v41CacheExpertTriple(l int, stem string, scratch *v41ProjScratch
 			continue
 		}
 		leaf := [3]string{".w1.weight", ".w3.weight", ".w2.weight"}[i]
-		name := layerName(l, stem+leaf)
-		if _, ok := scratch.v41LayerCacheGet(name); ok {
-			continue
-		}
-		// Cache hits must still refresh recency when retention is disabled.
-		// On a miss, avoid a copy that v41LayerCachePut would discard.
-		if scratch == nil || scratch.expertLayerCacheBytes <= 0 {
-			continue
-		}
-		cp := make([]float32, len(w))
-		copy(cp, w)
-		scratch.v41LayerCachePut(name, cp)
+		m.v41CacheExpertWeight(layerName(l, stem+leaf), scratch, w)
 	}
+}
+
+// v41CacheExpertNames is v41CacheExpertTriple over already resolved names.
+func (m *Model) v41CacheExpertNames(names [3]string, scratch *v41ProjScratch, w1, w3, w2 []float32) {
+	for i, w := range [3][]float32{w1, w3, w2} {
+		if len(w) != 0 {
+			m.v41CacheExpertWeight(names[i], scratch, w)
+		}
+	}
+}
+
+func (m *Model) v41CacheExpertWeight(name string, scratch *v41ProjScratch, w []float32) {
+	if _, ok := scratch.v41LayerCacheGet(name); ok {
+		return
+	}
+	// Cache hits must still refresh recency when retention is disabled.
+	// On a miss, avoid a copy that v41LayerCachePut would discard.
+	if scratch == nil || scratch.expertLayerCacheBytes <= 0 {
+		return
+	}
+	cp := make([]float32, len(w))
+	copy(cp, w)
+	scratch.v41LayerCachePut(name, cp)
 }
 
 // v41ExpertF32Into is the caller-buffer twin of v41ExpertF32: it resolves one
@@ -876,7 +887,10 @@ func (m *Model) v41CacheExpertTriple(l int, stem string, scratch *v41ProjScratch
 // dequant materialized (not a copy: the dequant BLK-COUNT math itself is
 // untouched). All notes are inert no-ops unless a phase was set.
 func (m *Model) v41ExpertF32Into(l int, leaf string, dst []float32) ([]float32, error) {
-	name := layerName(l, leaf)
+	return m.v41ExpertF32IntoNamed(l, layerName(l, leaf), dst)
+}
+
+func (m *Model) v41ExpertF32IntoNamed(l int, name string, dst []float32) ([]float32, error) {
 	if w, ok := m.residentF32Mat(name); ok {
 		m.v41NoteExpertResidentHit()
 		return append(dst[:0], w...), nil

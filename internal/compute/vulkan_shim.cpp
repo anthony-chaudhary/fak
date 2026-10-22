@@ -7971,8 +7971,7 @@ extern "C" int fvk_qwen35_causal_attention_panel_f32(const void* q, const void* 
         headDim <= 256 && headDim % 64 == 0 && g_maxComputeWorkGroupCountX != 0 &&
         (uint64_t)nHeads <= g_maxComputeWorkGroupCountX &&
         (uint64_t)nKVHeads <= g_maxComputeWorkGroupCountY;
-    if (splitForced && !splitShape) return 2;
-    if (splitForced) {
+    if (splitForced && splitShape) {
         if (!g_have_attention_split_kv) {
             return 3;
         } else {

@@ -127,16 +127,17 @@ func TestValidateGoVetArgsWithinUsesSelectedCgoMetadata(t *testing.T) {
 	}
 }
 
-// fak-test:runtime slow est=15s
+// fak-test:runtime slow est=60s
 func TestValidateGoVetArgsWithinAvoidsRemovedCgoWorkspaceCachePath(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("WSL cache-path regression applies to Windows validation")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if verdict := preflightValidateWSLCapabilitiesWithin(ctx); verdict.Status != "ready" {
 		t.Skipf("WSL validation unavailable: %s", verdict.Detail)
 	}
+	defer holdValidateWSLVM(ctx)()
 
 	nonce := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 	first := "/tmp/fak-validate-vetargs-" + nonce + "-one"
@@ -176,8 +177,10 @@ func TestValidateGoVetArgsWithinAvoidsRemovedCgoWorkspaceCachePath(t *testing.T)
 	}
 	targets := []string{"buildcheck.test/cmd/fak", "buildcheck.test/p"}
 	env := []string{"GOWORK=off", "GOCACHE=" + cache}
-	if out, ok := validateRunGoEnvWithin(ctx, first, true, env, validateGoCheckArgs("vet", targets)...); !ok {
-		t.Fatalf("seed trimmed cgo vet cache: %s", out)
+	// Seed through the build phase, as validate does before vet: a vet-seeded cache
+	// replays the whole vet action and never re-reads the removed cgo source.
+	if out, ok := validateRunGoEnvWithin(ctx, first, true, env, validateGoCheckArgs("build", targets)...); !ok {
+		t.Fatalf("seed trimmed cgo build cache: %s", out)
 	}
 	cleanupValidateWSLDir(first)
 	if out, err := runValidateWSLCommandWithin(ctx, "/", "test", "!", "-e", first); err != nil {
