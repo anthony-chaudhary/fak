@@ -140,13 +140,15 @@ On `/v1/chat/completions`, the native route enforces four constraint carriers:
 vLLM `guided_choice` list. Every other carrier on that route is refused before
 prefill instead of being ignored: other `response_format` types
 (`json_object`, `regex`, `grammar`) and the remaining provider-native guided
-fields (`guided_grammar`, `guided_decoding_backend`, `json_schema`, `ebnf`).
-This applies to buffered and streamed requests, including when such a field
-accompanies a supported carrier. A request may carry only one guided kind, so
-any two of `guided_json`, `guided_choice` and the regex pair are refused. A
-`guided_decoding_backend` alone is refused too, since the native route has no
-selectable backend. A guided field sent as `null` counts as absent. EBNF and
-other grammars therefore need an upstream engine in ride mode.
+fields (`guided_grammar`, `guided_decoding_backend`, `json_schema`, `ebnf`,
+`structured_outputs`). This applies to buffered and streamed requests, including
+when such a field accompanies a supported carrier. A request may carry only one
+guided kind, so any two of `guided_json`, `guided_choice` and the regex pair are
+refused. A `guided_decoding_backend` alone is refused too, since the native
+route has no selectable backend. vLLM's `structured_outputs` object is refused
+whole, even when its member is one the native route enforces as `guided_json`,
+`guided_choice` or `guided_regex`. A guided field sent as `null` counts as
+absent. EBNF and other grammars therefore need an upstream engine in ride mode.
 
 On `/v1/responses`, the structured-output control is `text.format`. fak maps it
 onto the chat route's `response_format` before planning, so both routes apply
@@ -294,20 +296,42 @@ Front the engine and let it do the token-level enforcement:
 fak serve --provider openai --base-url http://127.0.0.1:8000/v1 --model your-model
 ```
 
-Use the **current** structured-output field name `response_format` (OpenAI-compatible).
-On `/v1/chat/completions`, fak forwards `response_format` and the guided fields listed
-under the native section (`guided_json`, `guided_regex`, `guided_choice`,
-`guided_grammar`, `guided_decoding_backend`, `json_schema`, `regex`, `ebnf`) without
-rewriting them. The engine's `structured_outputs` object is not on that allowlist yet,
-so the chat route drops it; send `response_format` instead. The legacy
-`/v1/completions` route forwards none of these carriers yet.
+Use the **current** structured-output field names: OpenAI-compatible `response_format`,
+or vLLM's `structured_outputs` object. On `/v1/chat/completions`, fak forwards
+`response_format`, `structured_outputs` and the guided fields listed under the native
+section (`guided_json`, `guided_regex`, `guided_choice`, `guided_grammar`,
+`guided_decoding_backend`, `json_schema`, `regex`, `ebnf`) without rewriting them.
+
+```python
+client.chat.completions.create(
+    model="your-model",
+    messages=[{"role": "user", "content": "classify the review"}],
+    extra_body={"structured_outputs": {"choice": ["positive", "negative"]}},
+)
+```
+
+vLLM's `structured_outputs` takes exactly one of `json`, `regex`, `choice`, `grammar`,
+`json_object` or `structural_tag`, plus the options `disable_any_whitespace`,
+`disable_additional_properties` and `whitespace_pattern`. Source: `StructuredOutputsParams`
+in `vllm/sampling_params.py` and `ChatCompletionRequest.structured_outputs` in
+`vllm/entrypoints/openai/chat_completion/protocol.py`, at vLLM commit `b6ff8a2f5`
+(2026-07-19). fak does not check those members, because the engine validates them. It
+checks only the envelope: a `structured_outputs` that is not a JSON object (a string,
+array, number or boolean) returns HTTP 400 `invalid_structured_outputs` before
+dispatch, on buffered and streamed requests alike. `null` counts as absent, as for the
+other guided fields. The native route refuses a `structured_outputs` object (see
+above). The legacy `/v1/completions` route forwards none of these carriers yet, and
+`/v1/responses` drops `structured_outputs`. `internal/gateway/structured_outputs_carrier_test.go`
+witnesses ride forwarding, the planner carrier, the envelope 400 and the native
+refusal.
 
 > **Deprecated-field warning.** vLLM **removed** the older top-level guided fields
-> (`guided_json`, `guided_grammar`, `guided_choice`, `guided_regex`) in **v0.12.0** in
-> favor of `structured_outputs` / `response_format`. A client still sending the old
-> fields will have them forwarded unchanged by fak, but a current vLLM will ignore them.
-> Prefer `response_format` through fak. SGLang accepts JSON Schema, regex, and
-> EBNF with XGrammar as the default backend.
+> (`guided_json`, `guided_grammar`, `guided_choice`, `guided_regex`,
+> `guided_decoding_backend`) in **v0.12.0** in favor of `structured_outputs` /
+> `response_format`. A client still sending the old fields will have them forwarded
+> unchanged by fak, but a current vLLM will ignore them. Prefer `structured_outputs`
+> or `response_format` through fak. SGLang accepts JSON Schema, regex, and EBNF with
+> XGrammar as the default backend.
 
 The engine enforces the grammar at decode; fak forwards the constraint and adjudicates the
 resulting tool calls. Measure the gateway tax as its own number — do not fold it into the

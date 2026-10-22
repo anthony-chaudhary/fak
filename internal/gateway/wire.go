@@ -428,7 +428,10 @@ type ChatRequest struct {
 	JSONSchema            json.RawMessage `json:"json_schema,omitempty"`
 	Regex                 json.RawMessage `json:"regex,omitempty"`
 	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
-	Stream                bool            `json:"stream,omitempty"`
+	// StructuredOutputs is vLLM's unified carrier, the replacement for the guided_*
+	// fields it removed in v0.12.0. The gateway checks only that it is an object.
+	StructuredOutputs json.RawMessage `json:"structured_outputs,omitempty"`
+	Stream            bool            `json:"stream,omitempty"`
 	// StreamOptions is the OpenAI chat `stream_options` carrier. The gateway honors
 	// exactly one member, include_usage; arbitrary unknown options are NOT forwarded
 	// (this path is not a proxy pass-through). See DeclaredStreamUsage.
@@ -482,6 +485,7 @@ func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
 	addGuidedDecodeField(fields, "json_schema", r.JSONSchema)
 	addGuidedDecodeField(fields, "regex", r.Regex)
 	addGuidedDecodeField(fields, "ebnf", r.EBNF)
+	addGuidedDecodeField(fields, "structured_outputs", r.StructuredOutputs)
 	if len(fields) == 0 {
 		return nil
 	}
