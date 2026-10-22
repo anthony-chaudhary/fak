@@ -9,7 +9,8 @@
       "distinction": "Unlike the per-session model.ExecutionPolicy (device-only or not), it is the launch-time operator policy that decides whether that session policy is installed at all; bringup is admitted only when FAK_BRINGUP_DEDICATED names the served model.",
       "distinct_from": [
         "x-ci-coverage-policy-capability-executionpolicy",
-        "gguf-manifest-header-preflight"
+        "gguf-manifest-header-preflight",
+        "v41engramlookaheadreadpolicy"
       ],
       "aliases": [],
       "grounding": "serveexecutionpolicy",

@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **660** (clarity 0 + coverage 660) |
-| **Crystal-clear concepts (and climbing)** | **1283** crystal of 3092 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3168 / 3828** (82.8% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **661** (clarity 0 + coverage 661) |
+| **Crystal-clear concepts (and climbing)** | **1284** crystal of 3093 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3169 / 3830** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4348 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4349 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3092 concepts - score 88.8/100 (grade B) - disambiguation-debt 660
+concept-disambiguation chart - 3093 concepts - score 88.8/100 (grade B) - disambiguation-debt 661
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1283
+  * crystal       ####################........ 1284
   o defined       ############################ 1809
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -51,7 +51,7 @@ clarity mix by family (each cell = one concept):
   layout           ***********ooooooooo (20 concept(s); 11 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             *****************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (418 concept(s); 173 crystal)
-  policy-capability ***************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 99 crystal)
+  policy-capability ****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (207 concept(s); 100 crystal)
   pool             **********ooooooooooooooooooooooooooooooooo (43 concept(s); 10 crystal)
   render-materialize *******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
@@ -66,11 +66,11 @@ coverage by family (positioned / discovered):
   session-runtime  #######################..... 286/355
   cache            #######################..... 340/408
   gateway-engine   #######################..... 246/304
+  guard-gate       ##########################.. 515/562
   attention        #####################....... 146/192
   context-ctx      ########################.... 269/315
-  guard-gate       ##########################.. 515/561
   pool             ##############.............. 44/85
-  policy-capability ########################.... 225/264
+  policy-capability ########################.... 226/265
   support-maturity ####################........ 86/122
   render-materialize ########################.... 217/250
   score-debt       #######################..... 114/139
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.8%  (3168/3828 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.7%  (3169/3830 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4348 lookup name(s) -> 3092 concept(s), 89 ambiguous
+name index: 4349 lookup name(s) -> 3093 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2432 / 5664 |
+| Boundaries drawn (mutual / total) | 2436 / 5668 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4348 over 3092 concepts |
+| Lookup names indexed | 4349 over 3093 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3092 |
+| Concepts carrying a contrast set | 3093 |
 
 ## The concepts (best verdict first)
 
@@ -1027,6 +1027,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **FirePolicy** - The rsiloop decision rule (rsiloop.FirePolicy) that decides whether an RSI tuning step fires at a given horizon margin (BaselineFirePolicy fires at MinHorizonMargin 0). |
 | * | crystal | config | policy-capability | **FLEET_POLICY_DIR** - The env var (FLEET_POLICY_DIR) naming a DIRECTORY of fleet dispatch-policy files loaded at tick preflight. |
 | * | crystal | config | policy-capability | **FLEET_POLICY_PATH** - The env var (FLEET_POLICY_PATH) naming a SINGLE fleet dispatch-policy file loaded at tick preflight. |
+| * | crystal | symbol | policy-capability | **V41EngramLookAheadReadPolicy** - V41EngramLookAheadReadPolicy(rowBytes) declares whether an Engram producer supports immutable, concurrent-safe look-ahead reads at the exact requested row width, returning its maximum staging bytes per row. |
 | * | crystal | symbol | policy-capability | **checkPolicyFile** - The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier. |
 | * | crystal | symbol | policy-capability | **policyExclusion** - The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision. |
 | * | crystal | symbol | policy-capability | **ManifestPreflight** - Header-only aggregate validation report from GGUF metadata and tensor descriptors, optional HF-config parity, loader key/tensor census and host-kernel availability; it reads no tensor payload. |
@@ -3372,8 +3373,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3232/5664 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3092 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3232/5668 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3093 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3382,7 +3383,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4348 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4349 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3393,11 +3394,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | session-runtime | 286 | 355 | 69 |
 | cache | 340 | 408 | 68 |
 | gateway-engine | 246 | 304 | 58 |
+| guard-gate | 515 | 562 | 47 |
 | attention | 146 | 192 | 46 |
 | context-ctx | 269 | 315 | 46 |
-| guard-gate | 515 | 561 | 46 |
 | pool | 44 | 85 | 41 |
-| policy-capability | 225 | 264 | 39 |
+| policy-capability | 226 | 265 | 39 |
 | support-maturity | 86 | 122 | 36 |
 | render-materialize | 217 | 250 | 33 |
 | score-debt | 114 | 139 | 25 |

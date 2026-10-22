@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "v41engramlookaheadreadpolicy",
+      "canonical": "V41EngramLookAheadReadPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "V41EngramLookAheadReadPolicy(rowBytes) declares whether an Engram producer supports immutable, concurrent-safe look-ahead reads at the exact requested row width, returning its maximum staging bytes per row.",
+      "distinction": "This is a producer read-eligibility and staging contract, not FP4 hardware capability or serve launch policy. It does not authenticate the factory, verify artifact bytes, retain source lifetime, activate a scheduler, or guarantee RSS.",
+      "distinct_from": [
+        "fp4hardwarecapability",
+        "serveexecutionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "V41EngramLookAheadReadPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

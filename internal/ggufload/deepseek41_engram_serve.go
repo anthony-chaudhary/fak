@@ -17,8 +17,10 @@ package ggufload
 // same contract V41EngramQ2KOpen / V41EngramGGUFOpen already document).
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -77,6 +79,47 @@ func (w *v41EngramRowReaderAt) V41EngramHoldSourceReads() (func(), <-chan struct
 		return nil, nil, false
 	}
 	return w.owner.holdSourceReads()
+}
+
+// V41EngramLookAheadReadPolicy is a declared producer contract, independent of
+// digest verification and source retention. Only this loader's owner-bound,
+// immutable row adapters are eligible. Their ReaderAt contract permits parallel
+// reads; callers must keep checkpoint bytes unchanged. The staging bound covers
+// raw K blocks plus the unaligned f32 fallback in V41EngramKSource.ReadRows.
+// Merely implementing a structural method is not factory authentication.
+func (w *v41EngramRowReaderAt) V41EngramLookAheadReadPolicy(rowBytes int) (int, bool) {
+	if w == nil || w.owner == nil || rowBytes != w.rowBytes {
+		return 0, false
+	}
+	switch src := w.src.(type) {
+	case *V41EngramGGUFSource:
+		return 0, src != nil && v41EngramLookAheadBaseReader(src.r)
+	case *V41EngramKSource:
+		if src == nil || !v41EngramLookAheadBaseReader(src.r) {
+			return 0, false
+		}
+		stride, _ := src.encodedRow()
+		return stride + v41EngramQ2KRowBytes, true
+	default:
+		return 0, false
+	}
+}
+
+// NewWeightSource also accepts arbitrary ReaderAt implementations. Lifetime
+// ownership alone says nothing about their allocation/concurrency behavior.
+// Keep this first producer envelope to concrete bounded read implementations;
+// wrappers and other readers remain ordinary synchronous sources.
+func v41EngramLookAheadBaseReader(reader io.ReaderAt) bool {
+	switch r := reader.(type) {
+	case *os.File:
+		return r != nil
+	case *mmapReaderAt:
+		return r != nil
+	case *bytes.Reader:
+		return r != nil
+	default:
+		return false
+	}
 }
 
 // openV41EngramServingReader binds lifetime only after opening the immutable row

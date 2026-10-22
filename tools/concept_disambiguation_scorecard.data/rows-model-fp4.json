@@ -69,7 +69,8 @@
       "distinction": "A declared capability of hardware, not a measurement of it and not a permission: fak never probes the device here, it reads what the document claims. A claim of capability that fak cannot honor produces a delegate, not a refusal.",
       "distinct_from": [
         "fp4delegate",
-        "adjudicatefp4metadata"
+        "adjudicatefp4metadata",
+        "v41engramlookaheadreadpolicy"
       ],
       "aliases": [],
       "grounding": "FP4HardwareCapability",

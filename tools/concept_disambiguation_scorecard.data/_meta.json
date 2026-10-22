@@ -1482,6 +1482,11 @@
           "category": "incidental",
           "reason": "Mutex guarding a grammar mask per-state token admission memo, not a KV, prefix or serving cache.",
           "token": "cacheMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixed 64 KiB logical allowance for bounded cache map and order growth, not a cache instance, residency budget, RSS guarantee, or cache architecture.",
+          "token": "v41EngramLookAheadCacheMetadata"
         }
       ],
       "exclude": [
@@ -1834,6 +1839,7 @@
         "turnCacheSummary",
         "uncached",
         "usercachedir",
+        "v41EngramLookAheadCacheMetadata",
         "vcache-signals",
         "vcachecalibration"
       ],
@@ -11365,6 +11371,11 @@
           "category": "incidental",
           "reason": "Private implementation of the existing inference qualification probe using HTTPPlanner.PrepareRequest and bounded receipt/cache handling; it preserves configured request semantics and introduces no separate capability policy.",
           "token": "opsRunPlannerInferencePreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private type-assertion and forwarding helper for the V41EngramLookAheadReadPolicy producer contract; returns ineligible when the contract is absent and introduces no independent policy.",
+          "token": "v41EngramForwardLookAheadPolicy"
         }
       ],
       "exclude": [
@@ -11631,6 +11642,7 @@
         "ultracodePosture",
         "ultracodePostureWord",
         "unnamed_capability",
+        "v41EngramForwardLookAheadPolicy",
         "validateWSLCapabilityVerdict",
         "validateWSLPreflightBounds",
         "validateWSLPreflightRetryFactor",

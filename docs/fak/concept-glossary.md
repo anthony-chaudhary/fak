@@ -1588,3 +1588,10 @@ Transaction method that resumes suspended attention using supplied grouped proje
 Model operation that checks layer rows and retained state then prepares either plain or source/reader attention into caller-provided suspension storage.
 
 **Distinct from:** Unlike prepareAttention, this chooses and constructs the concrete model continuation; transaction admission, rollback and pending-reference ownership remain with its caller.
+
+
+### V41EngramLookAheadReadPolicy
+
+V41EngramLookAheadReadPolicy(rowBytes) declares whether an Engram producer supports immutable, concurrent-safe look-ahead reads at the exact requested row width, returning its maximum staging bytes per row.
+
+**Distinct from:** This is a producer read-eligibility and staging contract, not FP4 hardware capability or serve launch policy. It does not authenticate the factory, verify artifact bytes, retain source lifetime, activate a scheduler, or guarantee RSS.

@@ -20,6 +20,10 @@ type servingReaderLeaseForTest interface {
 	V41EngramHoldSourceReads() (func(), <-chan struct{}, bool)
 }
 
+type servingReaderLookAheadPolicyForTest interface {
+	V41EngramLookAheadReadPolicy(int) (int, bool)
+}
+
 // The barrier wraps the actual owning shard ReaderAt. It is also an explicit
 // member of that WeightSource's closer list, not a model-lifetime substitute.
 type servingReaderOwnerBarrier struct {
@@ -65,6 +69,11 @@ func (r *servingReaderOwnerBarrier) Close() error {
 func TestV41EngramServingReaderOwnership(t *testing.T) {
 	t.Run("unowned", func(t *testing.T) {
 		plain := newV41EngramRowReaderAt(&V41EngramGGUFSource{r: bytes.NewReader(v41TestRow(1)), tableRows: 1}, 1, v41EngramRowBytes)
+		if policy, present := plain.(servingReaderLookAheadPolicyForTest); present {
+			if _, eligible := policy.V41EngramLookAheadReadPolicy(v41EngramRowBytes); eligible {
+				t.Fatal("unowned adapter advertised look-ahead eligibility")
+			}
+		}
 		if holder, exists := plain.(servingReaderLeaseForTest); exists {
 			release, closing, ok := holder.V41EngramHoldSourceReads()
 			if release != nil {
@@ -132,6 +141,25 @@ func TestV41EngramServingReaderOwnership(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				originalReader, _, originalWidth, err := any(ws).(servingReaderFactoryForTest).openV41EngramServingReader(1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				policy, present := originalReader.(servingReaderLookAheadPolicyForTest)
+				if !present {
+					t.Fatal("owned serving reader is missing its explicit look-ahead policy")
+				}
+				staging, eligible := policy.V41EngramLookAheadReadPolicy(originalWidth)
+				wantStaging := 0
+				if dialect != "packed" {
+					wantStaging = stride + v41EngramQ2KRowBytes
+				}
+				if !eligible || staging != wantStaging {
+					t.Fatalf("look-ahead policy=%d/%t, want=%d/true", staging, eligible, wantStaging)
+				}
+				if _, eligible := policy.V41EngramLookAheadReadPolicy(originalWidth + 1); eligible {
+					t.Fatal("loader promoted a different row geometry")
+				}
 				var events retainedReadEvents
 				barrier := &servingReaderOwnerBarrier{reader: original, off: info.FileOffset + int64(stride), size: stride, entered: make(chan struct{}), resume: make(chan struct{}), events: &events}
 				idx := ws.byName[info.Name]
@@ -143,6 +171,13 @@ func TestV41EngramServingReaderOwnership(t *testing.T) {
 				reader, rows, rowBytes, err := any(ws).(servingReaderFactoryForTest).openV41EngramServingReader(1)
 				if err != nil || rows < 2 {
 					t.Fatalf("serving factory: rows=%d err=%v", rows, err)
+				}
+				policy, present = reader.(servingReaderLookAheadPolicyForTest)
+				if !present {
+					t.Fatal("owned serving reader is missing its explicit look-ahead policy")
+				}
+				if _, eligible := policy.V41EngramLookAheadReadPolicy(rowBytes); eligible {
+					t.Fatal("arbitrary ReaderAt wrapper inherited concurrency eligibility")
 				}
 				holder, ok := reader.(servingReaderLeaseForTest)
 				if !ok {
