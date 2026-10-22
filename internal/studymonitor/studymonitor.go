@@ -80,11 +80,12 @@ type InventorySourceEvidence struct {
 }
 
 type InventoryReport struct {
-	Schema                string         `json:"schema"`
-	RequiredSourceClasses []string       `json:"required_source_classes"`
-	OK                    bool           `json:"ok"`
-	Blockers              int            `json:"blockers"`
-	Repositories          []InventoryRow `json:"repositories"`
+	Schema                   string         `json:"schema"`
+	RequiredSourceClasses    []string       `json:"required_source_classes"`
+	ConditionalSourceClasses []string       `json:"conditional_source_classes,omitempty"`
+	OK                       bool           `json:"ok"`
+	Blockers                 int            `json:"blockers"`
+	Repositories             []InventoryRow `json:"repositories"`
 }
 
 type InventoryRow struct {
@@ -160,13 +161,13 @@ func (r Registry) Validate() error {
 				return fmt.Errorf("%s: unsupported inventory mode %q", prefix, repo.Inventory.Mode)
 			}
 			for j, class := range repo.Inventory.SourceClasses {
-				if !isRequiredInventorySourceClass(strings.TrimSpace(class)) {
+				if !isKnownInventorySourceClass(strings.TrimSpace(class)) {
 					return fmt.Errorf("%s.inventory.source_classes[%d]: unsupported source class %q", prefix, j, class)
 				}
 			}
 			seenEvidence := map[string]bool{}
 			for j, evidence := range repo.Inventory.SourceEvidence {
-				if !isRequiredInventorySourceClass(evidence.Class) {
+				if !isKnownInventorySourceClass(evidence.Class) {
 					return fmt.Errorf("%s.inventory.source_evidence[%d]: unsupported source class %q", prefix, j, evidence.Class)
 				}
 				if seenEvidence[evidence.Class] {
@@ -236,11 +237,12 @@ func buildInventoryReport(registry Registry, repoRoot string) InventoryReport {
 		return rows[i].Repository < rows[j].Repository
 	})
 	return InventoryReport{
-		Schema:                InventorySchema,
-		RequiredSourceClasses: append([]string(nil), RequiredInventorySourceClasses...),
-		OK:                    blockers == 0,
-		Blockers:              blockers,
-		Repositories:          rows,
+		Schema:                   InventorySchema,
+		RequiredSourceClasses:    append([]string(nil), RequiredInventorySourceClasses...),
+		ConditionalSourceClasses: []string{KernelInventorySourceClass},
+		OK:                       blockers == 0,
+		Blockers:                 blockers,
+		Repositories:             rows,
 	}
 }
 
@@ -284,7 +286,7 @@ func validateInventoryMapTotals(row *InventoryRow, report InventoryMap) {
 			addInventoryRowReason(row, fmt.Sprintf("inventory map subsystem[%d] path is required", i))
 		}
 		if subsystem.Files < 0 || subsystem.Directories < 0 || subsystem.Bytes < 0 ||
-			subsystem.RuntimeFiles < 0 || subsystem.TestFiles < 0 || subsystem.DocsFiles < 0 || subsystem.TextLines < 0 {
+			subsystem.RuntimeFiles < 0 || subsystem.TestFiles < 0 || subsystem.DocsFiles < 0 || subsystem.TextLines < 0 || subsystem.KernelFiles < 0 {
 			addInventoryRowReason(row, fmt.Sprintf("inventory map subsystem[%d] has negative totals", i))
 		}
 		sum.Files += subsystem.Files
@@ -294,6 +296,7 @@ func validateInventoryMapTotals(row *InventoryRow, report InventoryMap) {
 		sum.TestFiles += subsystem.TestFiles
 		sum.DocsFiles += subsystem.DocsFiles
 		sum.TextLines += subsystem.TextLines
+		sum.KernelFiles += subsystem.KernelFiles
 	}
 	if report.Totals != sum {
 		addInventoryRowReason(row, "inventory map totals do not match subsystem aggregates")
@@ -313,7 +316,7 @@ func validateInventoryMapSourceClasses(row *InventoryRow, report InventoryMap) {
 			continue
 		}
 		seen[name] = true
-		if !isRequiredInventorySourceClass(name) {
+		if !isKnownInventorySourceClass(name) {
 			addInventoryRowReason(row, "inventory map has unsupported source class status: "+name)
 		}
 		status := strings.TrimSpace(class.Status)
@@ -322,7 +325,7 @@ func validateInventoryMapSourceClasses(row *InventoryRow, report InventoryMap) {
 		default:
 			addInventoryRowReason(row, "inventory map source class "+name+" has unsupported status "+class.Status)
 		}
-		if isRequiredInventorySourceClass(name) && !inventoryMapDispositionAllowed(name, status) {
+		if isKnownInventorySourceClass(name) && !inventoryMapDispositionAllowed(name, status) {
 			addInventoryRowReason(row, "inventory map source class "+name+" cannot use status "+status)
 		}
 		if (status == InventoryClassCovered && name != "completeness_critic") || status == InventoryClassPartial {
@@ -336,6 +339,37 @@ func validateInventoryMapSourceClasses(row *InventoryRow, report InventoryMap) {
 			addInventoryRowReason(row, "inventory map missing source class status: "+required)
 		}
 	}
+	validateInventoryMapKernelSurface(row, report)
+}
+
+// validateInventoryMapKernelSurface keeps a map honest about GPU kernels: a
+// tree with kernel files (walked, or found by the skipped-directory extension
+// scan), an excluded or unpopulated submodule, or a truncated scan must leave
+// kernel_inventory external_required for an explicit per-kernel inventory, so
+// a hand-edited checked_absent cannot claim source nobody saw. A declared
+// submodule the walk could not see also means the map is not exhaustive (a
+// vendored kernel library can otherwise be skipped wholesale); one excluded
+// with a recorded reason no longer blocks as unpopulated.
+func validateInventoryMapKernelSurface(row *InventoryRow, report InventoryMap) {
+	if len(report.UnpopulatedSubmodules) > 0 {
+		addInventoryRowReason(row, "inventory map has unpopulated submodules (git submodule update --init --recursive and regenerate, or --exclude-submodule <path>=<reason>): "+strings.Join(report.UnpopulatedSubmodules, ","))
+	}
+	for i, excluded := range report.ExcludedSubmodules {
+		if strings.TrimSpace(excluded.Path) == "" || strings.TrimSpace(excluded.Reason) == "" {
+			addInventoryRowReason(row, fmt.Sprintf("inventory map excluded_submodules[%d] needs a path and a reason", i))
+		}
+	}
+	if report.SkippedKernelFiles < 0 {
+		addInventoryRowReason(row, "inventory map skipped_kernel_files is negative")
+	}
+	if !report.KernelInventoryRequired() {
+		return
+	}
+	status, ok := inventoryMapSourceClassStatus(&report, KernelInventorySourceClass)
+	if !ok || status != InventoryClassExternalRequired {
+		addInventoryRowReason(row, fmt.Sprintf("inventory map leaves GPU kernels unproven (%d walked, %d in skipped directories, %d excluded and %d unpopulated submodules, scan truncated %t) but kernel_inventory status is %q, want %q",
+			report.Totals.KernelFiles, report.SkippedKernelFiles, len(report.ExcludedSubmodules), len(report.UnpopulatedSubmodules), report.SkippedKernelScanTruncated, status, InventoryClassExternalRequired))
+	}
 }
 
 func inventoryMapDispositionAllowed(class, status string) bool {
@@ -346,6 +380,8 @@ func inventoryMapDispositionAllowed(class, status string) bool {
 		return status == InventoryClassExternalRequired
 	case "completeness_critic":
 		return status == InventoryClassCovered
+	case KernelInventorySourceClass:
+		return status == InventoryClassExternalRequired || status == InventoryClassCheckedAbsent
 	default:
 		return status == InventoryClassCovered || status == InventoryClassCheckedAbsent
 	}
@@ -399,7 +435,7 @@ func finalizeInventoryRow(row *InventoryRow, repo Repository, inventoryMap *Inve
 		row.Reasons = append(row.Reasons, "missing completeness_critic")
 	}
 	satisfied := inventorySatisfiedSourceClasses(row, inventoryMap)
-	missing := missingRequiredSourceClassesFromSet(satisfied)
+	missing := missingRequiredSourceClassesFromSet(satisfied, requiredSourceClassesFor(inventoryMap))
 	if len(missing) > 0 {
 		row.MissingSourceClasses = missing
 		row.Reasons = append(row.Reasons, "missing source classes: "+strings.Join(missing, ","))
@@ -582,9 +618,19 @@ func effectiveInventoryMode(repo Repository) string {
 	return InventoryModeStandard
 }
 
-func missingRequiredSourceClassesFromSet(seen map[string]bool) []string {
+// requiredSourceClassesFor adds kernel_inventory to the base contract when the
+// row's inventory map counted GPU-kernel files or left kernels unproven.
+func requiredSourceClassesFor(inventoryMap *InventoryMap) []string {
+	required := append([]string(nil), RequiredInventorySourceClasses...)
+	if inventoryMap != nil && inventoryMap.KernelInventoryRequired() {
+		required = append(required, KernelInventorySourceClass)
+	}
+	return required
+}
+
+func missingRequiredSourceClassesFromSet(seen map[string]bool, required []string) []string {
 	var missing []string
-	for _, required := range RequiredInventorySourceClasses {
+	for _, required := range required {
 		if !seen[required] {
 			missing = append(missing, required)
 		}
@@ -605,6 +651,10 @@ func normalizedUnique(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func isKnownInventorySourceClass(class string) bool {
+	return isRequiredInventorySourceClass(class) || class == KernelInventorySourceClass
 }
 
 func isRequiredInventorySourceClass(class string) bool {
