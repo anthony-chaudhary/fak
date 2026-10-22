@@ -4673,6 +4673,11 @@
           "category": "incidental",
           "reason": "MoE router gate bias tensor in V4.1 routing, not a guard or admission gate.",
           "token": "gatebias"
+        },
+        {
+          "category": "incidental",
+          "reason": "GuardBroadPrune is a worktree-hygiene precondition in internal/worktreeprune that refuses a repository-wide git worktree prune while a foreign-OS lane registration is present; it matches guard-gate only on the guard prefix and adjudicates no tool call or policy, so it is incidental to the guard-gate concept family rather than a new canonical concept.",
+          "token": "guardbroadprune"
         }
       ],
       "exclude": [
@@ -5065,6 +5070,7 @@
         "guard_split_close_test",
         "guard_trim",
         "guardarbitrateflagvalue",
+        "guardbroadprune",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
         "guarddefaultaccountsregistrypath",

@@ -1,11 +1,15 @@
 package worktreewitness
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/worktreeprune"
 )
 
 // fakeGit records git invocations and provides scripted responses for tests.
@@ -14,6 +18,7 @@ type fakeGit struct {
 	top         string
 	statusOut   string
 	removeFails bool
+	onAdd       func(wt string)
 	calls       []string
 }
 
@@ -26,6 +31,9 @@ func (g *fakeGit) run(dir, name string, args ...string) (string, int, error) {
 	case len(sub) >= 1 && sub[0] == "rev-parse":
 		return g.sha + "\n", 0, nil
 	case len(sub) >= 2 && sub[0] == "worktree" && sub[1] == "add":
+		if g.onAdd != nil {
+			g.onAdd(sub[3])
+		}
 		return "", 0, nil
 	case len(sub) >= 2 && sub[0] == "worktree" && sub[1] == "remove":
 		if g.removeFails {
@@ -163,18 +171,78 @@ func TestRun_DirtyWorktreeArchivesBeforeReap(t *testing.T) {
 	}
 }
 
-func TestRun_RemoveFailureFallsBackToPrune(t *testing.T) {
-	git := &fakeGit{sha: "aaaabbbbccccdddd", top: repoAbs(t), removeFails: true}
-	cmd := &fakeCmd{code: 0, out: "ok"}
-	res, err := Run(baseCfg(), git.run, cmd.run)
+// TestRun_RemoveFailureRemovesOnlyOwnRegistration pins the 2026-10-22 lane-loss
+// fix: a failed `worktree remove` drops only this run's admin entry and never
+// issues a repository-wide prune, so a foreign-OS lane registration survives.
+func TestRun_RemoveFailureRemovesOnlyOwnRegistration(t *testing.T) {
+	top := t.TempDir()
+	common := filepath.Join(top, ".git")
+	foreignGitdir := "C:/work/fak/.worktrees/ticket-peer/.git"
+	if runtime.GOOS == "windows" {
+		foreignGitdir = "/mnt/c/work/fak/.worktrees/ticket-peer/.git"
+	}
+	peerAdmin := filepath.Join(common, "worktrees", "ticket-peer")
+	writeFile(t, filepath.Join(peerAdmin, "gitdir"), foreignGitdir+"\n")
+	ownAdmin := filepath.Join(common, "worktrees", "wt")
+	git := &fakeGit{sha: "aaaabbbbccccdddd", top: top, removeFails: true, onAdd: func(wt string) {
+		writeFile(t, filepath.Join(ownAdmin, "gitdir"), filepath.ToSlash(filepath.Join(wt, ".git"))+"\n")
+		writeFile(t, filepath.Join(wt, ".git"), "gitdir: "+filepath.ToSlash(ownAdmin)+"\n")
+	}}
+	cfg := baseCfg()
+	cfg.Repo = top
+	res, err := Run(cfg, git.run, (&fakeCmd{code: 0, out: "ok"}).run)
 	if err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
-	if !containsCall(git.calls, "worktree prune") {
-		t.Errorf("remove failure must fall back to prune; calls=%v", git.calls)
+	if containsCall(git.calls, "worktree prune") {
+		t.Fatalf("remove failure must never broad-prune; calls=%v", git.calls)
 	}
-	if res.ReapNote == "" {
-		t.Errorf("want a ReapNote recording the prune fallback")
+	if res.ReapOutcome != string(worktreeprune.OutcomeRemoved) {
+		t.Fatalf("ReapOutcome=%q want %q (note %q)", res.ReapOutcome, worktreeprune.OutcomeRemoved, res.ReapNote)
+	}
+	if _, err := os.Stat(ownAdmin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("own registration must be removed, stat err=%v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(peerAdmin, "gitdir")); err != nil || string(got) != foreignGitdir+"\n" {
+		t.Fatalf("foreign peer registration must survive untouched: %q err=%v", got, err)
+	}
+}
+
+func TestRun_RemoveFailureWithoutRegistryKeepsAndReports(t *testing.T) {
+	top := t.TempDir()
+	git := &fakeGit{sha: "aaaabbbbccccdddd", top: top, removeFails: true}
+	cfg := baseCfg()
+	cfg.Repo = top
+	res, err := Run(cfg, git.run, (&fakeCmd{code: 0, out: "ok"}).run)
+	if err != nil {
+		t.Fatalf("Run err: %v", err)
+	}
+	if containsCall(git.calls, "worktree prune") {
+		t.Fatalf("remove failure must never broad-prune; calls=%v", git.calls)
+	}
+	if res.ReapOutcome != string(worktreeprune.OutcomeKept) || res.ReapNote == "" {
+		t.Fatalf("ReapOutcome=%q note=%q, want %q with a note", res.ReapOutcome, res.ReapNote, worktreeprune.OutcomeKept)
+	}
+}
+
+func TestRun_CleanRemoveLeavesNoReapOutcome(t *testing.T) {
+	git := &fakeGit{sha: "aaaabbbbccccdddd", top: repoAbs(t)}
+	res, err := Run(baseCfg(), git.run, (&fakeCmd{code: 0, out: "ok"}).run)
+	if err != nil {
+		t.Fatalf("Run err: %v", err)
+	}
+	if res.ReapOutcome != "" {
+		t.Fatalf("ReapOutcome=%q want empty when remove succeeds", res.ReapOutcome)
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
