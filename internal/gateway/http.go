@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -1025,6 +1026,9 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 	if rejectGuidedRegexLimits(w, req) {
 		return false
 	}
+	if rejectInvalidStructuredOutputs(w, req.StructuredOutputs) {
+		return false
+	}
 	if len(req.Messages) == 0 {
 		writeErr(w, http.StatusBadRequest, "messages: field required")
 		return false
@@ -1058,6 +1062,17 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 		writeErr(w, http.StatusBadRequest, "native inference receipts require greedy sampling over unmodified logits")
 		return false
 	}
+	return true
+}
+
+// rejectInvalidStructuredOutputs refuses a non-object structured_outputs before
+// dispatch; null stays absent, as it does for the other guided carriers.
+func rejectInvalidStructuredOutputs(w http.ResponseWriter, raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || trimmed[0] == '{' {
+		return false
+	}
+	writeErrCode(w, http.StatusBadRequest, "invalid_structured_outputs", "structured_outputs must be a JSON object")
 	return true
 }
 
