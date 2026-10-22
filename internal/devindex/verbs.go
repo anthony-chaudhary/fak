@@ -436,6 +436,7 @@ var verbManifest = []Verb{
 	{Name: "study", Synopsis: "add, retrieve, or search local content-addressed study receipts", Lane: "cmd"},
 	{Name: "study-forge", Synopsis: "capture and validate deterministic paginated GitHub forge corpora", Lane: "cmd"},
 	{Name: "study-adjacency", Synopsis: "validate and render the bounded related-system runtime study manifest", Lane: "cmd"},
+	{Name: "inference-topology", Synopsis: "validate, analyze, inventory and render analytical per-rank decode resource and collective constraints", Lane: "cmd", Doc: "docs/notes/INFERENCE-TOPOLOGY-RESEARCH-VERBS.md"},
 	{Name: "study-classify", Synopsis: "classify a validated forge corpus into deterministic dispositions and evidence-backed mechanism clusters", Lane: "cmd", Doc: "docs/cli-reference.md"},
 	{Name: "study-inventory", Synopsis: "render a deterministic local checkout map for exhaustive study-repo passes", Lane: "cmd"},
 	{Name: "study-link", Synopsis: "build and validate a deterministic evidence ledger joining study clusters to witnessed FAK work", Lane: "studylink"},
@@ -495,11 +496,44 @@ var verbManifest = []Verb{
 	{Name: "workspin", Synopsis: "audit repository commit and issue activity to detect sustained churn without delivery", Lane: "cmd"},
 	{Name: "worktree", Synopsis: "guarded on-trunk-safe worktree verbs; 'witness' runs a check in a transient detached worktree at origin/main", Lane: "cmd", Doc: "docs/managed-worker-worktrees.md"},
 	{Name: "worktype", Synopsis: "attribute session token spend and outcomes to classified work types", Lane: "cmd"},
+	{Name: "amd-gotchas", Synopsis: "audit AMD development-host pitfalls and propose mitigations", Lane: "cmd"},
+	{Name: "amd-gpudirect", Synopsis: "inspect and audit AMD GPU Direct topology and run explicit transfer probes", Lane: "cmd"},
+	{Name: "amd-setup", Synopsis: "diagnose or configure AMD GPU governor and TTM limits", Lane: "cmd"},
+	{Name: "amd-sim", Synopsis: "model and verify supplied multi-agent AMD workload scenarios", Lane: "cmd"},
+	{Name: "amd-strix-package", Synopsis: "prepare an AMD Strix Halo installer package with LAN configuration", Lane: "cmd"},
+	{Name: "amd-strix-probe", Aliases: []string{"strix-probe"}, Synopsis: "inspect Strix Halo appliance facts", Lane: "cmd"},
+	{Name: "amd-strix-validate", Aliases: []string{"strix-validate"}, Synopsis: "validate Strix Halo kernel functions and explicit ablations", Lane: "cmd"},
+	{Name: "audit-leak", Aliases: []string{"auditleak", "leak-audit"}, Synopsis: "run companion secret and private-token audits on declared repository content", Lane: "cmd"},
+	{Name: "bench-subagent-fanout", Aliases: []string{"subagent-fanout-bench"}, Synopsis: "benchmark subagent fanout against identified inference endpoints", Lane: "cmd"},
+	{Name: "build", Synopsis: "build a selected fak profile and record phase timings", Lane: "cmd"},
+	{Name: "build-cuda", Aliases: []string{"cuda-build"}, Synopsis: "orchestrate CUDA backend checks, builds, tests and explicit benchmarks", Lane: "cmd"},
+	{Name: "build-matrix", Synopsis: "validate compilation across declared build variants and targets", Lane: "cmd"},
+	{Name: "build-vulkan", Aliases: []string{"vulkan-build"}, Synopsis: "orchestrate Vulkan shaders, libraries, binary builds and verification", Lane: "cmd"},
+	{Name: "catchup", Synopsis: "measure repository development catch-up debt", Lane: "cmd"},
+	{Name: "checkpoint", Synopsis: "append a structured developer progress milestone", Lane: "cmd"},
+	{Name: "codex-hook-census", Synopsis: "summarize observed Codex hook execution evidence", Lane: "cmd"},
+	{Name: "codex-hook-gate", Synopsis: "inspect recurrence of observed Codex hook failures", Lane: "cmd"},
+	{Name: "codex-hook-profile", Synopsis: "inspect effective Codex hook topology and readiness", Lane: "cmd"},
+	{Name: "codex-plugin-sync", Synopsis: "reconcile Codex plugin configuration with repository tooling", Lane: "cmd"},
+	{Name: "codex-stop-acceptance", Synopsis: "inspect Codex stop-hook acceptance evidence", Lane: "cmd"},
+	{Name: "codex-tool-errors", Synopsis: "classify recorded Codex tool failures", Lane: "cmd"},
+	{Name: "cuda-gpudirect", Synopsis: "inspect CUDA GPU Direct topology and run explicitly selected transfer probes", Lane: "cmd"},
+	{Name: "factory-migrate", Aliases: []string{"factorymigrate"}, Synopsis: "inspect and track factory automation migration into native Go tooling", Lane: "cmd"},
+	{Name: "gate", Synopsis: "run companion placement and encapsulation verification", Lane: "cmd"},
+	{Name: "goal-fleet", Synopsis: "run a serialized goal-worker fleet", Lane: "cmd"},
+	{Name: "goal-launch", Synopsis: "launch a detached goal worker", Lane: "cmd"},
+	{Name: "kernel-oracle", Synopsis: "rank Vulkan kernel operations and shapes against an identified reference", Lane: "cmd"},
+	{Name: "papers", Synopsis: "fetch and search research papers in a local BM25 index", Lane: "cmd"},
+	{Name: "perfscout", Synopsis: "search and inventory model inference optimization repositories", Lane: "cmd"},
+	{Name: "provenance", Synopsis: "inspect or mint companion context-provenance receipts", Lane: "cmd"},
+	{Name: "strix", Synopsis: "query or operate Strix Halo appliances through companion tooling", Lane: "cmd"},
+	{Name: "ticket", Aliases: []string{"tickets"}, Synopsis: "discover and read companion task tickets", Lane: "cmd"},
+	{Name: "windows-setup", Synopsis: "inspect or configure Windows test and fleet-spine prerequisites", Lane: "cmd"},
 }
 
 // Verbs returns the structured CLI-verb catalog, sorted by name. It is a live VIEW,
-// not a frozen list: COVERAGE comes from the cmd/fak/main.go dispatch switch (every
-// verb the binary actually routes), and the curated verbManifest supplies QUALITY
+// not a frozen list: COVERAGE comes from both CLI artifacts' dispatch switches,
+// and the curated verbManifest supplies QUALITY
 // (synopsis / owning lane / alias grouping / doc) for the verbs it names. A dispatched
 // verb with no curated entry still appears, carrying a fallback synopsis that points at
 // its own --help — so the catalog can never silently fall behind the binary the way a
@@ -521,6 +555,7 @@ func (c *Catalog) Verbs() []Verb {
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out
 	}
+	tokens = append(tokens, devTokens...)
 	overlay := map[string]Verb{}
 	for _, v := range verbManifest {
 		for _, sp := range v.Spellings() {
@@ -544,11 +579,12 @@ func (c *Catalog) Verbs() []Verb {
 			continue
 		}
 		seen[tok] = true
+		binary := binaryForVerb(tok, devTokens)
 		out = append(out, Verb{
 			Name:     tok,
-			Synopsis: "not yet cataloged — `fak " + tok + " -h` for usage",
+			Synopsis: "not yet cataloged — `" + binary + " " + tok + " -h` for usage",
 			Tier:     tierFor(tok),
-			Binary:   binaryForVerb(tok, devTokens),
+			Binary:   binary,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -45,7 +45,6 @@ func SupplementalDevVerbs() []Verb {
 // namespace-only commands, sorted by canonical spelling.
 func OwnershipVerbs(verbs []Verb) []Verb {
 	out := append([]Verb(nil), verbs...)
-	out = append(out, SupplementalDevVerbs()...)
 	seen := make(map[string]bool, len(out))
 	for _, verb := range out {
 		seen[verb.Name] = true
@@ -57,6 +56,12 @@ func OwnershipVerbs(verbs []Verb) []Verb {
 				out = append(out, Verb{Name: alias, Tier: verb.Tier})
 				seen[alias] = true
 			}
+		}
+	}
+	for _, verb := range SupplementalDevVerbs() {
+		if !seen[verb.Name] {
+			out = append(out, verb)
+			seen[verb.Name] = true
 		}
 	}
 	// Extracted fak-dev commands no longer appear in cmd/fak's switch-derived

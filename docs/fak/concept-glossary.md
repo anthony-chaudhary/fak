@@ -1609,3 +1609,10 @@ InKernelPlannerConfig.V41EngramLookAhead is a default-false typed operator selec
 V41WorkloadCoverage is the exported scope and missingness contract for fixed model-lifetime V4.1 observed route-work counters. It states token-row and successful-forward or committed-cohort-lane observation semantics, unavailable failed partial work and restored-prefix provenance, unsupported request isolation, and absence of binding to expert/device timing or actual asynchronous look-ahead selection.
 
 **Distinct from:** This metadata describes the limits of cumulative observed logical work, not a coverage fraction or the request-local per-output-token traversal proof carried by NativeForwardCoverage. It supplies neither an elapsed-time throughput denominator, a final cohort success result, effective timestamp mode/run identity, nor support, correctness or physical GPU qualification.
+
+
+### fvk_qwen35_causal_attention_panel_f32 (Vulkan Qwen3.5 causal attention panel)
+
+Vulkan compute entrypoint consuming resident Q and caller-preappended K/V pointers over a caller-owned prefix, computing one causal panel.
+
+**Distinct from:** Low-level kernel versus qwen35FullAttentionHAL model orchestration/KV lifecycle and Metal FullAttentionDevice.

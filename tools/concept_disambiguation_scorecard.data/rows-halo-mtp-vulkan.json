@@ -8,7 +8,8 @@
       "definition": "The internal/model Session method that executes one ordinary Qwen3.5 full-attention layer through the compute HAL over a device-resident residual and the session KV store; the retained MTP draft reuses it for its decoder layer.",
       "distinction": "It is the runtime operation for one full-attention step, not FullAttentionInterval, which describes where full-attention layers occur in a hybrid stack.",
       "distinct_from": [
-        "x-attention-fullattention"
+        "x-attention-fullattention",
+        "attention-fvkqwen35causalattentionpanelf32"
       ],
       "aliases": [
         "qwen35FullAttentionHAL"

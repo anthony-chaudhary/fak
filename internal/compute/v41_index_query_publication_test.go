@@ -9,25 +9,30 @@ import (
 // fak-test:runtime fast est=1ms lane=default
 func TestV41IndexQueryPublicationIndependentEvidence(t *testing.T) {
 	raw := make([]float32, 8192)
-	slab := make([]float32, 8196)
-	words := []uint32{v41BF16CheckedStatusMagic, V41BF16PublishIndexerProjection, math.MaxUint32, 8192}
+	words := []uint32{v41BF16CheckedStatusMagic, V41BF16PublishIndexerProjection, math.MaxUint32, uint32(len(raw))}
+	slab := make([]float32, len(words)+len(raw))
 	for i, w := range words {
 		slab[i] = math.Float32frombits(w)
 	}
-	raw[8191] = float32(math.NaN())
-	slab[4] = 1
+	raw[len(raw)-1] = float32(math.NaN())
+	slab[len(words)] = 1
 	p := &V41IndexQueryPublication{raw: raw, publication: slab}
 	// Raw remains observable even when the as-yet-unconsumed envelope is invalid.
 	slab[0] = 0
-	if len(p.Raw()) != 8192 || !math.IsNaN(float64(p.Raw()[8191])) {
+	if len(p.Raw()) != len(raw) || !math.IsNaN(float64(p.Raw()[len(raw)-1])) {
 		t.Fatal("lost raw evidence")
 	}
 	if out, err := p.Published(); out != nil || err == nil {
 		t.Fatal("malformed envelope escaped")
 	}
 	slab[0] = math.Float32frombits(words[0])
+	slab[1] = math.Float32frombits(V41BF16PublishIndexerKeyNorm)
+	if out, err := p.Published(); out != nil || err == nil {
+		t.Fatal("publication for a different site escaped")
+	}
+	slab[1] = math.Float32frombits(words[1])
 	out, err := p.Published()
-	if err != nil || len(out) != 8192 || cap(out) != 8192 || &out[0] != &slab[4] {
+	if err != nil || len(out) != len(raw) || cap(out) != len(raw) || &out[0] != &slab[len(words)] {
 		t.Fatalf("invalid output ownership: %v", err)
 	}
 	raw[0] = 7

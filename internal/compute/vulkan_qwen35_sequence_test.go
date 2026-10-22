@@ -1,5 +1,6 @@
 //go:build vulkan && (windows || linux) && cgo
 
+// Run this Vulkan-tagged test file with `go test -tags vulkan ./internal/compute`.
 package compute
 
 import (
@@ -1225,6 +1226,86 @@ func TestQwen35VulkanSequenceKVReserveGeometric(t *testing.T) {
 		t.Logf("Device KV reservation & attention output parity verified: tokens=%d maxDelta=%g logical_len=%d exact_cap=%d geom_cap=%d",
 			totalTokens, maxDelta, cacheGeomK.len, cacheExactK.cap, cacheGeomK.cap)
 	})
+}
+
+// Run with: go test -tags vulkan ./internal/compute -run '^TestQwen35VulkanSplitKVDecodeParity$'.
+// fak-test:runtime integration est=50ms lane=default
+func TestQwen35VulkanSplitKVDecodeParity(t *testing.T) {
+	v := vk(t)
+	defer os.Unsetenv("FAK_VULKAN_QWEN35_SPLIT_KV")
+	const (
+		nPos = 1024
+		hd   = 64
+	)
+	for _, tc := range []struct {
+		name string
+		nH   int
+		nKV  int
+	}{
+		{name: "gqa_ratio_2", nH: 4, nKV: 2},
+		{name: "gqa_ratio_4", nH: 8, nKV: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := make([]float32, tc.nH*hd)
+			k := make([]float32, nPos*tc.nKV*hd)
+			values := make([]float32, len(k))
+			for i := range q {
+				q[i] = float32(math.Sin(float64(i*17+3))) * 0.25
+			}
+			for i := range k {
+				k[i] = float32(math.Cos(float64(i*13+5))) * 0.125
+				values[i] = float32(math.Sin(float64(i*11+7))) * 0.125
+			}
+			dq := v.Upload(NewF32(Default(), []int{1, tc.nH * hd}, q), F32)
+			dk := v.Upload(NewF32(Default(), []int{nPos, tc.nKV * hd}, k), F32)
+			dv := v.Upload(NewF32(Default(), []int{nPos, tc.nKV * hd}, values), F32)
+			defer v.Free(dq)
+			defer v.Free(dk)
+			defer v.Free(dv)
+
+			run := func(mode string) []float32 {
+				t.Helper()
+				if err := os.Setenv("FAK_VULKAN_QWEN35_SPLIT_KV", mode); err != nil {
+					t.Fatal(err)
+				}
+				out, _ := v.devTr([]int{1, tc.nH * hd}, F32)
+				defer v.Free(out)
+				status := v.qwen35SequenceCausalAttentionForTest(
+					v.vp(dq), v.vp(dk), v.vp(dv), v.vp(out), 1, nPos-1, tc.nH, tc.nKV, hd,
+					float32(1/math.Sqrt(hd)),
+				)
+				if status != 0 {
+					t.Fatalf("split-KV mode %q status=%d", mode, status)
+				}
+				return v.Read(out)
+			}
+
+			scalar := run("0")
+			split := run("1")
+			var maxDelta float64
+			var maxMagnitude float64
+			for i := range scalar {
+				if math.IsNaN(float64(scalar[i])) || math.IsInf(float64(scalar[i]), 0) ||
+					math.IsNaN(float64(split[i])) || math.IsInf(float64(split[i]), 0) {
+					t.Fatalf("non-finite output at %d: scalar=%g split=%g", i, scalar[i], split[i])
+				}
+				delta := math.Abs(float64(scalar[i] - split[i]))
+				maxMagnitude = math.Max(maxMagnitude, math.Abs(float64(scalar[i])))
+				if delta > maxDelta {
+					maxDelta = delta
+				}
+				limit := 2e-4 + 2e-4*math.Abs(float64(scalar[i]))
+				if delta > limit {
+					t.Fatalf("output[%d] delta=%g exceeds %g: scalar=%g split=%g", i, delta, limit, scalar[i], split[i])
+				}
+			}
+			if maxMagnitude < 1e-5 {
+				t.Fatalf("split-KV parity produced a degenerate all-zero result: max_abs=%g", maxMagnitude)
+			}
+			t.Logf("split-KV decode parity: device=%s positions=%d heads=%d kv_heads=%d gqa_ratio=%d head_dim=%d max_abs_delta=%g max_abs=%g",
+				v.Tier(), nPos, tc.nH, tc.nKV, tc.nH/tc.nKV, hd, maxDelta, maxMagnitude)
+		})
+	}
 }
 
 func TestVulkanQwen35SequenceFeatureCaptureEnvelope(t *testing.T) {

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/hex"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -374,6 +375,11 @@ func TestAuthenticatedAgentRequestMarksChildUsable(t *testing.T) {
 
 // fak-test:runtime fast est=10ms lane=default
 func TestModelLoadLifecycleIdentityAndAdmissions(t *testing.T) {
+	const requestBytes = 16
+	generated, err := hex.DecodeString(randomHex(requestBytes))
+	if err != nil || len(generated) != requestBytes {
+		t.Fatalf("random identity width: bytes=%d err=%v", len(generated), err)
+	}
 	srv := newTestServer(t)
 	if got := srv.captureModelLoadLifecycle(); got != (modelLoadLifecycle{}) {
 		t.Fatal("missing profile must remain unknown")
@@ -382,7 +388,11 @@ func TestModelLoadLifecycleIdentityAndAdmissions(t *testing.T) {
 	before := time.Now().UnixMilli()
 	srv.SetModelLoadProfile(profile)
 	first := srv.captureModelLoadLifecycle()
-	if len(first.LoadID) != 32 || first.LoadID == profile.LoadID || first.RecordedUnixMS < before || first.LoadSeconds != 1.5 || first.RequestOrdinal != 1 {
+	decodedLoadID, err := hex.DecodeString(first.LoadID)
+	if err != nil {
+		t.Fatalf("load identity is not hexadecimal: %q: %v", first.LoadID, err)
+	}
+	if len(decodedLoadID) != requestBytes || first.LoadID == profile.LoadID || first.RecordedUnixMS < before || first.LoadSeconds != 1.5 || first.RequestOrdinal != 1 {
 		t.Fatalf("invalid first admission: %+v", first)
 	}
 	debug := debugModelLoadProfile(srv.modelLoadProfile())

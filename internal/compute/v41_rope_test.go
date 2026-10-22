@@ -95,7 +95,7 @@ func TestV41TailRoPESourceContract(t *testing.T) {
 			t.Errorf("forbidden shader behavior %q", forbidden)
 		}
 	}
-	shim := read("vulkan_shim.cpp")
+	shim := string(vulkanAdmissionSource(t))
 	for _, token := range []string{
 		`ok &= buildKernel(g_kern[K_V41_TAIL_ROPE_QK], P("v41_tail_rope_qk.spv"), 5, 3 * sizeof(int));`,
 		"case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK:",

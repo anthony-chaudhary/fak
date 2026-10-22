@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,7 +33,16 @@ func TestServeLaunchEvidenceBindsProcessAndPreservesExisting(t *testing.T) {
 	if err = json.Unmarshal(data, &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.PID != os.Getpid() || receipt.InvocationID != os.Getenv("INVOCATION_ID") || len(receipt.ExecutableSHA256) != 64 || receipt.PrefillChunkCeiling != 2048 || receipt.ConfigSHA256 != sf.startupConfigSHA256 || receipt.Backend != "unresolved" {
+	executablePath, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.ReadFile(executablePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantExecutableSHA256 := fmt.Sprintf("%x", sha256.Sum256(executable))
+	if receipt.PID != os.Getpid() || receipt.InvocationID != os.Getenv("INVOCATION_ID") || receipt.ExecutableSHA256 != wantExecutableSHA256 || receipt.PrefillChunkCeiling != 2048 || receipt.ConfigSHA256 != sf.startupConfigSHA256 || receipt.Backend != "unresolved" {
 		t.Fatalf("invalid startup binding: %+v", receipt)
 	}
 	if strings.Contains(string(data), "secret-upstream") {
@@ -40,7 +52,10 @@ func TestServeLaunchEvidenceBindsProcessAndPreservesExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
+	if !info.Mode().IsRegular() {
+		t.Fatalf("evidence mode = %v, want regular file", info.Mode())
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal("evidence must be private")
 	}
 	if err = writeServeLaunchEvidence(sf, rt); !errors.Is(err, os.ErrExist) {

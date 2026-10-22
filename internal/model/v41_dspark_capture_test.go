@@ -522,15 +522,22 @@ func (b *v41DSparkMeanRangeRecorder) Free(t compute.Tensor) {
 
 // fak-test:runtime fast est=100ms lane=default
 func TestV41DSparkCaptureResidentContract(t *testing.T) {
+	const (
+		first       = 1
+		count       = v41WindowSize
+		sourceRows  = first + count
+		streamCount = compute.V41MHCStreams
+		width       = 4
+	)
 	for _, mode := range []string{"ok", "declined", "alias", "non-bf16", "partial-error", "partial-error-free-fault", "read-free-fault"} {
 		t.Run(mode, func(t *testing.T) {
 			be := &v41DSparkMeanRangeRecorder{Backend: compute.Default(), allow: mode != "declined", mode: mode,
 				frees: make(map[compute.Buffer]int), cause: errors.New("selected mean fault")}
-			values := make([]float32, 129*4*4)
+			values := make([]float32, sourceRows*streamCount*width)
 			for i := range values {
 				values[i] = float32(i%31-15) / 16
 			}
-			input := compute.NewF32(be, []int{129, 4, 4}, values)
+			input := compute.NewF32(be, []int{sourceRows, streamCount, width}, values)
 			be.source = input.Buf()
 			streams, err := newV41DeviceStreams(be, input)
 			if err != nil {
@@ -538,9 +545,9 @@ func TestV41DSparkCaptureResidentContract(t *testing.T) {
 			}
 			defer streams.Free()
 			s := &Session{Backend: be, M: &Model{}}
-			c := &v41DSparkCapture{owner: s, width: 4}
-			r := &v41MHCResident{d: &v41MHCDevice{s: s}, streams: streams, rows: 129, hidden: 4}
-			rows, err := c.residentMeans(37, r, 1, 128, 129)
+			c := &v41DSparkCapture{owner: s, width: width}
+			r := &v41MHCResident{d: &v41MHCDevice{s: s}, streams: streams, rows: sourceRows, hidden: width}
+			rows, err := c.residentMeans(37, r, first, count, sourceRows)
 			if be.sourceReads != 0 || be.frees[input.Buf()] != 0 {
 				t.Fatal("capture read or freed borrowed full source panel")
 			}
@@ -556,10 +563,15 @@ func TestV41DSparkCaptureResidentContract(t *testing.T) {
 					t.Fatalf("selected fault lost retirement/cause: %v", err)
 				}
 			} else {
-				if err != nil || len(rows) != 128 || !reflect.DeepEqual(be.reads, []int{128 * 4}) {
+				if err != nil || len(rows) != count || !reflect.DeepEqual(be.reads, []int{count * width}) {
 					t.Fatalf("bounded output read: %v/%v", be.reads, err)
 				}
-				want := v41DSparkCaptureMeanOracle([][]float32{values[16:20], values[20:24], values[24:28], values[28:32]})
+				oracleStreams := make([][]float32, streamCount)
+				for i := range oracleStreams {
+					start := (first*streamCount + i) * width
+					oracleStreams[i] = values[start : start+width]
+				}
+				want := v41DSparkCaptureMeanOracle(oracleStreams)
 				if !reflect.DeepEqual(rows[0], want) {
 					t.Fatal("range offset or mean order differs")
 				}

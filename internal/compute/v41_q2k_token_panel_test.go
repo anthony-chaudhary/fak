@@ -97,10 +97,7 @@ func TestV41Q2KTokenPanelContract(t *testing.T) {
 			t.Fatal("negative control accepted unmasked or misaddressed token grid")
 		}
 	}
-	native, err := os.ReadFile("vulkan_shim.cpp")
-	if err != nil {
-		t.Fatal(err)
-	}
+	native := vulkanAdmissionSource(t)
 	if err := v41Q2TokenGridNativeSource(string(native)); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +209,7 @@ func v41Q2TokenGridNativeSource(source string) error {
 	// Pin actual loaded-byte classification and its publication only after a
 	// successful pipeline build. A filename or mere framing is insufficient.
 	for name, want := range map[string]string{
-		"static int v41TokenGridModuleABI(": "1de863aa99e27cc08a870eef8e21dde6eb65babdb907531e998bd0e5b9f6ef98",
+		"inline int v41TokenGridModuleABI(": "a15cd183827c99f1b029b608ba14ac765cf29069eed0ea245006b6b504f9694d",
 		"bool buildKernel(":                 "2878df63aafd34bf6aca3fbc9ad92f4f30b3a3ca1a1e524913d415c36d5f7512",
 	} {
 		body, err := extract(name)

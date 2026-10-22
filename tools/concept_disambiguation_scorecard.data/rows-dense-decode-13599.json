@@ -23,7 +23,7 @@
       "kind": "symbol",
       "definition": "internal/metalgemm/graph.go: the ProjectionGraph full-attention op whose KV prefix lives in a caller-owned DeviceKV that persists across graphs; it applies optional QK-norm and rotate-half RoPE, appends the panel's K/V rows on the device, and attends (gated, or ungated when gate is nil). The dense whole-token Q4_K decode and the Qwen3.5 hybrid route use it so no host prefix is uploaded per token.",
       "distinction": "It is the DEVICE-KV graph attention op - NOT qwen35FullAttentionHAL (the resident Qwen3.5 full-attention HAL step) and NOT FullAttentionInterval (which hybrid layers are full attention).",
-      "distinct_from": ["halo-mtp-attention-qwen35fullattentionhal", "x-attention-fullattention"],
+      "distinct_from": ["halo-mtp-attention-qwen35fullattentionhal", "x-attention-fullattention", "attention-fvkqwen35causalattentionpanelf32"],
       "aliases": ["FullAttentionDevice"],
       "grounding": "FullAttentionDevice",
       "grounding_kind": "symbol",

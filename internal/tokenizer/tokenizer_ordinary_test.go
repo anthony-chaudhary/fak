@@ -2,6 +2,7 @@ package tokenizer
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,8 +128,18 @@ func TestEncodeSegmentsOrdinaryNeverEmitsAddedIDs(t *testing.T) {
 			v, ids := controlVocab()
 			tok := v.build(t, pre)
 			special := tok.SpecialTokens()
-			if len(special) != 7 {
-				t.Fatalf("special tokens = %d, want 7", len(special))
+			unmatched := maps.Clone(special)
+			for id, typ := range v.types {
+				if typ != ggmlTypeControl && typ != ggmlTypeUserDefined {
+					continue
+				}
+				if got := unmatched[id]; got != v.tokens[id] {
+					t.Fatalf("special token %d = %q, want fixture token %q", id, got, v.tokens[id])
+				}
+				delete(unmatched, id)
+			}
+			if len(unmatched) != 0 {
+				t.Fatalf("SpecialTokens contains entries not marked special by the fixture: %v", unmatched)
 			}
 			for _, content := range special {
 				for _, text := range []string{content, "a" + content + "b", content + content, " " + content + "\n\n"} {

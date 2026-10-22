@@ -1,7 +1,7 @@
 package model
 
-// qwen35HybridQ4KBatchStep is installed by the Apple Metal implementation. It
-// stays nil elsewhere, preserving the established serial fallback.
+// qwen35HybridQ4KBatchStep is installed by an exact native batch implementation.
+// It stays nil elsewhere, preserving the established serial fallback.
 var qwen35HybridQ4KBatchStep func(*BatchSession, []int) ([][]float32, bool)
 
 func (bs *BatchSession) qwen35HybridQ4KBatchOK(batch int) bool {

@@ -3,35 +3,53 @@ package modelroute
 import "testing"
 
 func TestParseOpenCodeFreeModels(t *testing.T) {
-	lines := []string{
-		"opencode/beam-free",
-		"opencode/deepseek-v4.1-flash-free",
-		"opencode/ll-alpha-free",
-		"opencode/glm-5.3-flash-free",
-		"opencode/space-bunny-free",
-		"opencode/qwen3.6-27b",      // not free suffix -> skipped
-		"opencode-go/ox-alpha-free", // free suffix + opencode-go provider
-		"opencode/some-1b-free",     // deny token 1b -> rejected
-		"opencode/tiny-model-free",  // deny token tiny -> rejected
-		"opencode/compound-free",    // deny token compound -> rejected
-		"",
-		"   ",
-		"not-a-provider-model", // no slash -> skipped
-		"/leading-slash",       // empty provider -> skipped
-		"trailing/",            // empty name -> skipped
+	type disposition string
+	const (
+		survives disposition = "survives"
+		rejected disposition = "rejected"
+		skipped  disposition = "skipped"
+	)
+	cases := []struct {
+		line string
+		want disposition
+	}{
+		{"opencode/beam-free", survives},
+		{"opencode/deepseek-v4.1-flash-free", survives},
+		{"opencode/ll-alpha-free", survives},
+		{"opencode/glm-5.3-flash-free", survives},
+		{"opencode/space-bunny-free", survives},
+		{"opencode/qwen3.6-27b", skipped},
+		{"opencode-go/ox-alpha-free", survives},
+		{"opencode/some-1b-free", rejected},
+		{"opencode/tiny-model-free", rejected},
+		{"opencode/compound-free", rejected},
+		{"", skipped},
+		{"   ", skipped},
+		{"not-a-provider-model", skipped},
+		{"/leading-slash", skipped},
+		{"trailing/", skipped},
+	}
+	lines := make([]string, 0, len(cases))
+	wantSurvivors := map[string]bool{}
+	wantRejected := map[string]bool{}
+	for _, tc := range cases {
+		lines = append(lines, tc.line)
+		switch tc.want {
+		case survives:
+			wantSurvivors[tc.line] = true
+		case rejected:
+			wantRejected[tc.line] = true
+		}
 	}
 	got := ParseOpenCodeFreeModels(lines, "-free")
-	survivors, rejected := SplitOpenCodeFreeModels(got)
-	if len(survivors) != 6 {
-		t.Fatalf("expected 6 survivors, got %d", len(survivors))
-	}
-	if len(rejected) != 3 {
-		t.Fatalf("expected 3 rejected, got %d", len(rejected))
-	}
+	survivorModels, rejectedModels := SplitOpenCodeFreeModels(got)
 
-	// Verify a specific survivor.
 	found := false
-	for _, s := range survivors {
+	for _, s := range survivorModels {
+		if !wantSurvivors[s.ID] {
+			t.Fatalf("unexpected survivor: %+v", s)
+		}
+		delete(wantSurvivors, s.ID)
 		if s.ID == "opencode/ll-alpha-free" {
 			found = true
 			if !s.QualityOK {
@@ -45,12 +63,21 @@ func TestParseOpenCodeFreeModels(t *testing.T) {
 	if !found {
 		t.Fatal("opencode/ll-alpha-free not in survivors")
 	}
+	if len(wantSurvivors) != 0 {
+		t.Fatalf("missing survivors: %v", wantSurvivors)
+	}
 
-	// Verify rejected reasons mention deny tokens.
-	for _, r := range rejected {
+	for _, r := range rejectedModels {
+		if !wantRejected[r.ID] {
+			t.Fatalf("unexpected rejection: %+v", r)
+		}
+		delete(wantRejected, r.ID)
 		if r.Reason == "" {
 			t.Fatalf("rejected candidate %s has empty reason", r.ID)
 		}
+	}
+	if len(wantRejected) != 0 {
+		t.Fatalf("missing rejections: %v", wantRejected)
 	}
 }
 

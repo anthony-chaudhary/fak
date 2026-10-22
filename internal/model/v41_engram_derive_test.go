@@ -9,7 +9,13 @@ import (
 // fak-test:justify why=contract when=changed:internal/model/**
 // fak-test:runtime fast est=5ms lane=default
 func TestV41EngramPrimeDerivation(t *testing.T) {
-	primes, err := deriveV41EngramPrimes(16000000, 8, 4, 2)
+	const (
+		vocab    = 16000000
+		heads    = 8
+		maxNgram = 4
+		layers   = 2
+	)
+	primes, err := deriveV41EngramPrimes(vocab, heads, maxNgram, layers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,11 +23,15 @@ func TestV41EngramPrimeDerivation(t *testing.T) {
 		sum                  uint64
 		first, trigram, last uint32
 	}{{384006168, 16000057, 16000189, 16000463}, {384016682, 16000477, 16000667, 16000889}}
+	if len(primes) != layers || len(want) != layers {
+		t.Fatalf("layers: got=%d golden=%d want=%d", len(primes), len(want), layers)
+	}
+	columns := (maxNgram - 1) * heads
 	prev := uint32(0)
 	for layer, w := range want {
 		p := primes[layer]
-		if len(p) != 24 {
-			t.Fatalf("layer %d: %d columns, want 24", layer, len(p))
+		if len(p) != columns {
+			t.Fatalf("layer %d: %d columns, want %d", layer, len(p), columns)
 		}
 		var sum uint64
 		for _, v := range p {
@@ -31,8 +41,8 @@ func TestV41EngramPrimeDerivation(t *testing.T) {
 			prev = v
 			sum += uint64(v)
 		}
-		if sum != w.sum || p[0] != w.first || p[8] != w.trigram || p[23] != w.last {
-			t.Errorf("layer %d: sum=%d first=%d [8]=%d last=%d, want %d %d %d %d", layer, sum, p[0], p[8], p[23], w.sum, w.first, w.trigram, w.last)
+		if sum != w.sum || p[0] != w.first || p[heads] != w.trigram || p[len(p)-1] != w.last {
+			t.Errorf("layer %d: sum=%d first=%d trigram=%d last=%d, want %d %d %d %d", layer, sum, p[0], p[heads], p[len(p)-1], w.sum, w.first, w.trigram, w.last)
 		}
 	}
 	if p, err := deriveV41EngramPrimes(17, 2, 2, 1); err != nil || p[0][0] != 17 || p[0][1] != 19 {

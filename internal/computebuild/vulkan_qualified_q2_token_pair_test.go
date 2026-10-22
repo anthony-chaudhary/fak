@@ -43,7 +43,7 @@ func TestVulkanQualifiedQ2TokenPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(module) != 11796 || !vulkanQualifiedHash(module, "106f42d56d87f0d2ce44704a1e944efefc7a67320cf1a44cb492c4bacf07acbf") {
+	if !vulkanQualifiedHash(module, "106f42d56d87f0d2ce44704a1e944efefc7a67320cf1a44cb492c4bacf07acbf") {
 		t.Fatal("qualified module differs")
 	}
 	for _, pair := range [][2][]byte{{bytes.ReplaceAll(source, []byte("\n"), []byte("\r\n")), header}, {source, bytes.ReplaceAll(header, []byte("\n"), []byte("\r\n"))}, {append(append([]byte(nil), source...), 0), header}, {source, header[:len(header)-1]}, {source, bytes.Replace(header, []byte("0x03"), []byte("0x02"), 1)}} {
@@ -82,12 +82,12 @@ func TestVulkanQualifiedQ2TokenPair(t *testing.T) {
 // fak-test:runtime fast est=5ms
 func TestVulkanReceiptV26Q2TokenPair(t *testing.T) {
 	want := append(vulkanRegistryV25.stems(), "v41_q2k_token_pair")
-	if len(want) != 89 || !reflect.DeepEqual(want, vulkanRegistryV26.stems()) {
+	if !reflect.DeepEqual(want, vulkanRegistryV26.stems()) {
 		t.Fatal("V26 membership differs")
 	}
 	schema := vulkanRegistryV26.schema
 	id, err := vulkanRegistryV26.identity()
-	if err != nil || schema != VulkanBuildReceiptSchemaV26 || id.ID != VulkanShaderRegistryV26ID || id.ModuleCount != 89 {
+	if err != nil || schema != VulkanBuildReceiptSchemaV26 || id.ID != VulkanShaderRegistryV26ID || id.ModuleCount != len(want) {
 		t.Fatal("V26 identity differs")
 	}
 	if vulkanRegistryV25.validateStems(want) == nil || vulkanRegistryV26.validateStems(vulkanRegistryV25.stems()) == nil {

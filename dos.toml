@@ -416,6 +416,7 @@ concurrent = [
   "systembaseline",
   "studyclass",
   "studyadjacency",
+  "inferencetopology",
   "studylink",
   "studyprio",
   "studytickets",
@@ -1416,6 +1417,7 @@ hostdiag = ["internal/hostdiag/**"]
 systembaseline = ["internal/systembaseline/**"]
 studyclass = ["internal/studyclass/**"]
 studyadjacency = ["internal/studyadjacency/**"]
+inferencetopology = ["internal/inferencetopology/**"]
 studylink = ["internal/studylink/**"]
 studyprio = ["internal/studyprio/**"]
 studytickets = ["internal/studytickets/**"]

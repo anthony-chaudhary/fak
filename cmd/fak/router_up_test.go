@@ -38,13 +38,14 @@ func TestRouterHomeLayout(t *testing.T) {
 		t.Fatalf("unix routerHome = %q", got)
 	}
 	d.goos = "windows"
+	localAppData := filepath.Join(t.TempDir(), "LocalAppData")
 	d.getenv = func(k string) string {
 		if k == "LOCALAPPDATA" {
-			return `C:\Users\a\AppData\Local`
+			return localAppData
 		}
 		return ""
 	}
-	if got, _ := routerHome(d); got != filepath.Join(`C:\Users\a\AppData\Local`, "fak", "router") {
+	if got, _ := routerHome(d); got != filepath.Join(localAppData, "fak", "router") {
 		t.Fatalf("windows routerHome = %q", got)
 	}
 }
