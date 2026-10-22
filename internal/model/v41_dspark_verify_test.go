@@ -3,9 +3,61 @@ package model
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// fak-test:runtime medium est=8s lane=default
+func TestV41DSparkExecuteGreedyRoundSuppressedTokens(t *testing.T) {
+	ctx := context.Background()
+	m, w, _ := v41DSparkCommitFixture(t)
+	m.Cfg.SuppressTokens = []int{1}
+	f, oracle := v41DSparkCommitBoot(t, m, w), v41DSparkCommitBoot(t, m, w)
+	want, _, err := m.forwardV41Step(2, oracle.state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.ExecuteGreedyRound(ctx, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verified != 1 || got.Retained != 1 || len(got.Logits) != len(want) {
+		t.Fatal("suppressed-token round lost allocation or logits")
+	}
+	for token, value := range got.Logits {
+		if token == 1 {
+			if !math.IsInf(float64(value), -1) || !math.IsInf(float64(want[token]), -1) {
+				t.Fatal("configured token was not suppressed in both targets")
+			}
+		} else if !finite32(value) || !finite32(want[token]) || value != want[token] {
+			t.Fatalf("token %d differs from independent serial target: %v != %v", token, value, want[token])
+		}
+	}
+	if f.invalid || f.state.activeStepRound != nil || f.state.dsparkCapture != nil ||
+		!reflect.DeepEqual(captureV41ForwardSnapshot(f.state), captureV41ForwardSnapshot(oracle.state)) {
+		t.Fatal("suppressed-token round differs from independent serial target state")
+	}
+
+	// A completely masked vocabulary must abort, not select token zero by tie.
+	m.Cfg.SuppressTokens = make([]int, m.Cfg.VocabSize)
+	for token := range m.Cfg.SuppressTokens {
+		m.Cfg.SuppressTokens[token] = token
+	}
+	masked := v41DSparkCommitBoot(t, m, w)
+	before := captureV41ForwardSnapshot(masked.state)
+	ring, next, prefix := v41DSparkRingCopy(masked), masked.next, masked.prefix
+	if got, err := masked.ExecuteGreedyRound(ctx, 2, 1); got != nil || !errors.Is(err, errV41DSparkReference) ||
+		!strings.Contains(err.Error(), "no finite target candidate") {
+		t.Fatalf("all-masked target was not refused: %v", err)
+	}
+	if masked.invalid || masked.state.activeStepRound != nil || masked.state.dsparkCapture != nil ||
+		!reflect.DeepEqual(before, captureV41ForwardSnapshot(masked.state)) ||
+		!reflect.DeepEqual(ring, v41DSparkRingCopy(masked)) || masked.next != next || masked.prefix != prefix {
+		t.Fatal("all-masked refusal leaked target or draft state")
+	}
+}
 
 // fak-test:runtime medium est=8s lane=default
 func TestV41DSparkExecuteGreedyRound(t *testing.T) {

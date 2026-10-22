@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 )
 
 // v41DSparkGreedyRound is a host-reference receipt, not serving admission or a
@@ -93,10 +94,20 @@ func (f *v41DSparkReference) ExecuteGreedyRound(ctx context.Context, anchor, q i
 			if len(preceding) != f.cfg.VocabSize {
 				return fmt.Errorf("%w: target logits width", errV41DSparkReference)
 			}
-			for _, value := range preceding {
+			finiteCandidate := false
+			for token, value := range preceding {
+				// The target postprocessor deliberately masks configured tokens.
+				// No other nonfinite value is a valid greedy candidate.
+				if math.IsInf(float64(value), -1) && slices.Contains(f.model.Cfg.SuppressTokens, token) {
+					continue
+				}
 				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
 					return fmt.Errorf("%w: nonfinite target logits", errV41DSparkReference)
 				}
+				finiteCandidate = true
+			}
+			if !finiteCandidate {
+				return fmt.Errorf("%w: no finite target candidate", errV41DSparkReference)
 			}
 			if i < keep {
 				retained = append(retained[:0], preceding...)
