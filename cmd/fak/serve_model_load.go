@@ -14,6 +14,20 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
+// serveStartupResidency measures the GGUF's page-cache residency before the load reads
+// it, so /debug/vars can tell a cold start from a warm restart; nil when the
+// platform or the files cannot be measured.
+func serveStartupResidency(ggufPath string) *gateway.ModelLoadResidency {
+	if ggufPath == "" {
+		return nil
+	}
+	r, err := ggufload.MeasurePageCacheResidency(ggufload.ShardFiles(ggufPath))
+	if err != nil {
+		return nil
+	}
+	return &gateway.ModelLoadResidency{StartupCase: r.StartupCase(), ResidentBytes: r.ResidentBytes, FileBytes: r.FileBytes, Files: r.Files}
+}
+
 // toGatewayLoadProfile mirrors a ggufload.LoadProfile into the gateway's import-
 // decoupled ModelLoadProfile so the boot-time weight-load breakdown surfaces on
 // /metrics. Returns nil for a nil profile (no eager load happened).

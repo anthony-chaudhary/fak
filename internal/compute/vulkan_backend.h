@@ -580,6 +580,19 @@ int fvk_have_v41_mhc(void);
 int fvk_v41_mhc_f32(int mode, const void *dA, const void *dB, const void *dC,
                     void *dOut, int rows, int hidden, int iters, float eps, float rmsEps);
 
+/* V4.1 mHC prenorm: the one-token [24,4*hidden] mix projection of the
+ * flattened streams and its row sum of squares in one dispatch (mode 5 F32
+ * weight, mode 6 raw Q2_K weight) into scratch[rows,25] = raw[24] | sumsq,
+ * then the mode-7 rms-split into fresh coeffs[rows,24]. Outputs are bitwise
+ * the one-token MatMul (matmul.comp decode chunks, or q2k_matvec.comp) followed
+ * by mode 4. params is scale[3]|base[24]; scratch and out are disjoint from
+ * every input. Q2_K requires hidden*4 % 256 == 0 and the q2k_matvec module;
+ * F32 requires at most 64 1024-wide chunks. Return codes match fvk_v41_mhc_f32. */
+int fvk_have_v41_mhc_prenorm(int weightQ2K);
+int fvk_v41_mhc_prenorm_split_f32(int weightQ2K, const void *dW, const void *dStreams,
+                                  const void *dParams, void *dScratch, void *dOut,
+                                  int rows, int hidden, int iters, float eps, float rmsEps);
+
 /* V4.1 one-query index selection after the indexer score. Four storage
  * bindings: scores[rows] F32 (compared as order-preserving integer keys),
  * scratch[2*blocks+rows] uint32, out[min(topK,rows)] F32 exact row integers
@@ -901,10 +914,32 @@ bool fvk_batch_foreign_active(void);
 uint64_t fvk_h2d_bytes(void);
 /* Subset of fvk_h2d_bytes written directly into mapped device-local weight memory (UMA). */
 uint64_t fvk_direct_h2d_bytes(void);
+/* Always-on cumulative queue submits: every batch and one-shot submit, whether or not
+ * FAK_VULKAN_DISPATCH_PROFILE=1 (with it on, equal to batch + one-shot submits). */
+uint64_t fvk_device_submits(void);
 uint64_t fvk_d2h_bytes(void);
 /* Always-on cumulative device-work counters: recorded compute dispatches, D2H
  * payload bytes, and host wall nanoseconds from queue submit to fence signal. */
 void fvk_device_work_counters(uint64_t *dispatches, uint64_t *d2h_bytes, uint64_t *submit_wait_ns);
+/* Always-on host-sync accounting. fvk_device_idle_ns is cumulative host wall with
+ * nothing submitted outstanding, from the observed last fence signal to the next
+ * submit, including an idle interval still open at the read; fence wake and submit
+ * latency count as busy, so it is a lower bound. A sync is one host
+ * wait on device completion, booked per (site, stage): site is the outermost
+ * waiting entry point, stage the last compute kernel recorded on the waited path.
+ * fvk_sync_site_rows copies up to cap nonzero cells and returns the nonzero count. */
+uint64_t fvk_device_idle_ns(void);
+int fvk_sync_site_count(void);
+int fvk_sync_stage_count(void);
+const char *fvk_sync_site_name(int site);
+const char *fvk_sync_stage_name(int stage);
+int fvk_sync_site_rows(uint32_t *site, uint32_t *stage, uint64_t *syncs, uint64_t *wait_ns,
+                       uint64_t *d2h_bytes, int cap);
+/* Cumulative pipelined batches submitted without a host wait and drained (drains
+ * read first, so drains <= submits). While submits exceed drains the device may
+ * go idle unobserved: idle over a window where either moved, or that began with
+ * one outstanding, is not on the idle clock. */
+void fvk_sync_pipeline_counters(uint64_t *submits, uint64_t *drains);
 /* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
  * before initialization; all six outputs are mandatory. Observed zero directions
  * are returned as zero values with success=1. */

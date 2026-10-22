@@ -13,9 +13,21 @@ layout(local_size_x = 64) in;
 //                   -> Out=coeffs[rows,24]; mixes are first scaled by the flattened
 //                   streams' 1/sqrt(mean(x^2)+rmsEps), summed serially as the host does;
 //                   dispatched as one workgroup per row.
+// mode 5 prenorm-f32: A=mix weight F32[24,4H] B=streams[rows,4,H]
+//                   -> Out=prenorm[rows,25] = raw mixes[24] | serial sum of squares
+// mode 6 prenorm-q2k: as mode 5 with A the raw Q2_K bytes of the [24,4H] weight
+// mode 7 prenorm-split: A=prenorm[rows,25] C=scale[3]|base[24] -> Out=coeffs[rows,24]
+//                   Modes 5/6 then 7 are mode 4 preceded by the one-token projection:
+//                   every raw mix is matmul.comp's decode chunk sum (F32) or
+//                   q2k_matvec.comp's lane sum and tree (Q2_K) term for term, the
+//                   squares are summed in index order as rmsSplit does, and mode 7
+//                   is rmsSplit's scale and split. Modes 5/6 dispatch rows*(G+1)
+//                   workgroups: G projection groups beside one sum-of-squares group.
 // coeffs rows are pre[4] | post[4] | comb[16] (comb row-major [src,dst]).
 layout(std430, binding = 0) readonly buffer ABuf { float A[]; };
+layout(std430, binding = 0) readonly buffer AWords { uint Aw[]; };
 layout(std430, binding = 1) readonly buffer BBuf { float B[]; };
+layout(std430, binding = 1) readonly buffer BVec4 { vec4 B4[]; };
 layout(std430, binding = 2) readonly buffer CBuf { float C[]; };
 layout(std430, binding = 3) writeonly buffer OutBuf { float Out[]; };
 
@@ -256,6 +268,252 @@ void postMix(uint i) {
     Out[i] = bf16(acc);
 }
 
+// Adapted from the split structure of DeepGEMM sm100_tf32_hc_prenorm_gemm and
+// TileKernels mhc_reduce_partials_and_rmsnorm_fwd (MIT; THIRD_PARTY_NOTICES.md),
+// keeping fak's F32/Q2_K projection order instead of their TF32 MMA.
+const uint PRENORM_STRIDE = 25u;
+const uint SS_CHUNK = 1024u;
+// Not Sq: glslang marks every write to an array that a precise sum reads as
+// NoContraction, which would forbid the FMA contraction matmul.comp may get.
+shared float PrenormPart[64];
+
+uint prenormChunks(uint width) { return (width + 1023u) / 1024u; }
+
+uint prenormDotGroups(uint width) {
+    if (pc.mode == 6) return 12u;
+    uint perGroup = 64u / prenormChunks(width);
+    return (24u + perGroup - 1u) / perGroup;
+}
+
+// The loads of the next chunk are issued before lane 0 adds the current one;
+// the sum itself is rmsSplit's: squares rounded once, then added in index order.
+float prenormSumSquares(uint s, uint width, uint lid) {
+    precise float ss = 0.0;
+    uint n0 = min(SS_CHUNK, width);
+    for (uint j = lid; j < n0; j += 64u) {
+        precise float sq = B[s + j] * B[s + j];
+        Sq[j >> 2u][j & 3u] = sq;
+    }
+    barrier();
+    uint buf = 0u;
+    for (uint base = 0u; base < width; base += SS_CHUNK) {
+        uint n = min(SS_CHUNK, width - base);
+        uint next = base + SS_CHUNK;
+        uint nn = next < width ? min(SS_CHUNK, width - next) : 0u;
+        float v[16];
+        for (uint t = 0u; t < 16u; ++t) {
+            uint j = lid + 64u * t;
+            v[t] = j < nn ? B[s + next + j] : 0.0;
+        }
+        if (lid == 0u) {
+            uint o = buf * SS_CHUNK;
+            uint j = 0u;
+            for (; j + 16u <= n; j += 16u) {
+                uint q = (o + j) >> 2u;
+                vec4 a = Sq[q], b = Sq[q + 1u], c = Sq[q + 2u], e = Sq[q + 3u];
+                ss = ss + a.x; ss = ss + a.y; ss = ss + a.z; ss = ss + a.w;
+                ss = ss + b.x; ss = ss + b.y; ss = ss + b.z; ss = ss + b.w;
+                ss = ss + c.x; ss = ss + c.y; ss = ss + c.z; ss = ss + c.w;
+                ss = ss + e.x; ss = ss + e.y; ss = ss + e.z; ss = ss + e.w;
+            }
+            for (; j < n; ++j) ss = ss + Sq[(o + j) >> 2u][(o + j) & 3u];
+        }
+        uint ob = (buf ^ 1u) * SS_CHUNK;
+        for (uint t = 0u; t < 16u; ++t) {
+            uint j = lid + 64u * t;
+            if (j < nn) {
+                precise float sq = v[t] * v[t];
+                Sq[(ob + j) >> 2u][(ob + j) & 3u] = sq;
+            }
+        }
+        buf ^= 1u;
+        barrier();
+    }
+    return ss;
+}
+
+// matmul.comp decodeChunks with 64 lanes: each lane runs one 1024-wide chunk's
+// serial partial with the same loads and accumulation, and the chunk-0 lane
+// adds the partials in chunk order onto 0.0.
+void prenormDotsF32(uint row, uint d, uint tid) {
+    uint in_ = 4u * uint(pc.hidden);
+    uint chunks = prenormChunks(in_);
+    uint perGroup = 64u / chunks;
+    uint local = tid / chunks;
+    uint c = tid - local * chunks;
+    uint o = d * perGroup + local;
+    bool live = local < perGroup && o < 24u;
+    uint xrow = row * in_;
+    if (live) {
+        uint c0 = c * 1024u;
+        uint clen = min(1024u, in_ - c0);
+        uint wbase = o * in_ + c0;
+        uint xbase = xrow + c0;
+        float acc = 0.0;
+        uint i = 0u;
+        for (; i + 16u <= clen; i += 16u) {
+            float w0 = A[wbase + i + 0u], w1 = A[wbase + i + 1u], w2 = A[wbase + i + 2u], w3 = A[wbase + i + 3u];
+            float w4 = A[wbase + i + 4u], w5 = A[wbase + i + 5u], w6 = A[wbase + i + 6u], w7 = A[wbase + i + 7u];
+            float w8 = A[wbase + i + 8u], w9 = A[wbase + i + 9u], w10 = A[wbase + i + 10u], w11 = A[wbase + i + 11u];
+            float w12 = A[wbase + i + 12u], w13 = A[wbase + i + 13u], w14 = A[wbase + i + 14u], w15 = A[wbase + i + 15u];
+            float x0 = B[xbase + i + 0u], x1 = B[xbase + i + 1u], x2 = B[xbase + i + 2u], x3 = B[xbase + i + 3u];
+            float x4 = B[xbase + i + 4u], x5 = B[xbase + i + 5u], x6 = B[xbase + i + 6u], x7 = B[xbase + i + 7u];
+            float x8 = B[xbase + i + 8u], x9 = B[xbase + i + 9u], x10 = B[xbase + i + 10u], x11 = B[xbase + i + 11u];
+            float x12 = B[xbase + i + 12u], x13 = B[xbase + i + 13u], x14 = B[xbase + i + 14u], x15 = B[xbase + i + 15u];
+            acc += w0 * x0;
+            acc += w1 * x1;
+            acc += w2 * x2;
+            acc += w3 * x3;
+            acc += w4 * x4;
+            acc += w5 * x5;
+            acc += w6 * x6;
+            acc += w7 * x7;
+            acc += w8 * x8;
+            acc += w9 * x9;
+            acc += w10 * x10;
+            acc += w11 * x11;
+            acc += w12 * x12;
+            acc += w13 * x13;
+            acc += w14 * x14;
+            acc += w15 * x15;
+        }
+        for (; i < clen; ++i) acc += A[wbase + i] * B[xbase + i];
+        PrenormPart[tid] = acc;
+    }
+    barrier();
+    if (live && c == 0u) {
+        float y = 0.0;
+        for (uint k = 0u; k < chunks; ++k) y += PrenormPart[tid + k];
+        Out[row * PRENORM_STRIDE + o] = y;
+    }
+}
+
+vec4 q2kBytesOf(uint w) {
+    return vec4(float(w & 255u), float((w >> 8u) & 255u), float((w >> 16u) & 255u), float(w >> 24u));
+}
+
+// q2k_matvec.comp mode 0 for the two rows 2d and 2d+1: the same lane split,
+// per-superblock terms, lane accumulation and LDS tree.
+void prenormDotsQ2K(uint row, uint d, uint tid) {
+    uint inDim = 4u * uint(pc.hidden);
+    uint nsb = inDim / 256u;
+    uint wordsPerRow = nsb * 21u;
+    uint rowBase = d * 2u;
+    uint xrow4 = row * (inDim >> 2u);
+    uint t16 = tid & 15u;
+    uint h = t16 >> 3u;
+    uint s = (t16 >> 2u) & 1u;
+    uint lq = (t16 & 3u) * 4u;
+
+    precise float acc[2];
+    for (uint r = 0u; r < 2u; ++r) acc[r] = 0.0;
+
+    for (uint sb = tid >> 4u; sb < nsb; sb += 4u) {
+        vec4 xv[4];
+        precise float xsum[4];
+        for (uint j = 0u; j < 4u; ++j) {
+            uint idx = (sb * 256u + h * 128u + j * 32u + s * 16u + lq) >> 2u;
+            vec4 v = B4[xrow4 + idx];
+            xv[j] = v;
+            precise float x01 = v.x + v.y;
+            precise float x012 = x01 + v.z;
+            precise float x0123 = x012 + v.w;
+            xsum[j] = x0123;
+        }
+        for (uint r = 0u; r < 2u; ++r) {
+            uint orow = rowBase + r;
+            if (orow >= 24u) break;
+            uint base = orow * wordsPerRow + sb * 21u;
+            uint q = Aw[base + 4u + t16];
+            uint sc0 = Aw[base + h * 2u];
+            uint sc1 = Aw[base + h * 2u + 1u];
+            uint dm = Aw[base + 20u];
+            vec2 dd = unpackHalf2x16(dm);
+            uint scj[4];
+            scj[0] = (sc0 >> (s * 8u)) & 255u;
+            scj[1] = (sc0 >> ((2u + s) * 8u)) & 255u;
+            scj[2] = (sc1 >> (s * 8u)) & 255u;
+            scj[3] = (sc1 >> ((2u + s) * 8u)) & 255u;
+            precise float sum = 0.0;
+            for (uint j = 0u; j < 4u; ++j) {
+                vec4 qv = q2kBytesOf((q >> (2u * j)) & 0x03030303u);
+                precise float dl = dd.x * float(scj[j] & 15u);
+                precise float ml = dd.y * float(scj[j] >> 4u);
+                precise float q0 = qv.x * xv[j].x;
+                precise float q1 = qv.y * xv[j].y;
+                precise float q2 = qv.z * xv[j].z;
+                precise float q3 = qv.w * xv[j].w;
+                precise float q01 = q0 + q1;
+                precise float q012 = q01 + q2;
+                precise float qdot = q012 + q3;
+                precise float scaledDot = dl * qdot;
+                precise float minTerm = ml * xsum[j];
+                precise float term = scaledDot - minTerm;
+                sum = sum + term;
+            }
+            precise float nextAcc = acc[r] + sum;
+            acc[r] = nextAcc;
+        }
+    }
+
+    for (uint r = 0u; r < 2u; ++r) {
+        uint k = r * 64u + tid;
+        Sq[k >> 2u][k & 3u] = acc[r];
+    }
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) {
+            for (uint r = 0u; r < 2u; ++r) {
+                uint off = r * 64u + tid;
+                uint hi = off + stride;
+                precise float reduced = Sq[off >> 2u][off & 3u] + Sq[hi >> 2u][hi & 3u];
+                Sq[off >> 2u][off & 3u] = reduced;
+            }
+        }
+        barrier();
+    }
+    if (tid < 2u) {
+        uint orow = rowBase + tid;
+        uint k = tid * 64u;
+        if (orow < 24u) Out[row * PRENORM_STRIDE + orow] = Sq[k >> 2u][k & 3u];
+    }
+}
+
+void prenorm(uint g, uint lid) {
+    uint width = 4u * uint(pc.hidden);
+    uint per = prenormDotGroups(width) + 1u;
+    uint row = g / per;
+    if (row >= uint(pc.rows)) return;
+    uint sub = g - row * per;
+    if (sub == 0u) {
+        float ss = prenormSumSquares(row * width, width, lid);
+        if (lid == 0u) Out[row * PRENORM_STRIDE + 24u] = ss;
+    } else if (pc.mode == 5) {
+        prenormDotsF32(row, sub - 1u, lid);
+    } else {
+        prenormDotsQ2K(row, sub - 1u, lid);
+    }
+}
+
+void prenormSplit(uint row) {
+    if (row >= uint(pc.rows)) return;
+    uint width = 4u * uint(pc.hidden);
+    uint a = row * PRENORM_STRIDE;
+    precise float mean = divRN(A[a + 24u], float(width));
+    precise float arg = mean + pc.rmsEps;
+    float r = rsqrtF32(arg);
+    float mix[24];
+    float sc[3];
+    float bs[24];
+    for (uint i = 0u; i < 24u; ++i) {
+        precise float v = A[a + i] * r;
+        mix[i] = v;
+        bs[i] = C[3u + i];
+    }
+    for (uint i = 0u; i < 3u; ++i) sc[i] = C[i];
+    splitCore(row * 24u, mix, sc, bs);
+}
+
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (pc.mode == 0) initialStreams(i);
@@ -263,4 +521,6 @@ void main() {
     else if (pc.mode == 2) preCollapse(i);
     else if (pc.mode == 3) postMix(i);
     else if (pc.mode == 4 && gl_WorkGroupID.x < uint(pc.rows)) rmsSplit(gl_WorkGroupID.x, gl_LocalInvocationID.x);
+    else if (pc.mode == 5 || pc.mode == 6) prenorm(gl_WorkGroupID.x, gl_LocalInvocationID.x);
+    else if (pc.mode == 7) prenormSplit(i);
 }

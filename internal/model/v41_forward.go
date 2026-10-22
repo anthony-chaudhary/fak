@@ -436,6 +436,9 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 	}
 
 	// ---- embedding ----
+	stages := runState.coldStageRecorder()
+	stages.enter(V41ColdStageEmbedding)
+	defer stages.leave()
 	embedded, err := m.v41EmbeddingPanelOn(seq, runState.deviceGatherOps())
 	if err != nil {
 		return nil, err
@@ -520,6 +523,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 			return nil, err
 		}
 		executedLayers++
+		stages.enter(V41ColdStageLayerHidden)
 		if err := trace.recordLayerStreams(l, streams, resident); err != nil {
 			return nil, err
 		}
@@ -566,6 +570,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 		}
 	}
 
+	stages.enter(V41ColdStageHead)
 	var headProjection v41DenseProjectionFunc
 	var headNorm *v41FinalNormBinding
 	var logitScale v41LogitScaleFunc
@@ -604,6 +609,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 		}
 		act.Logits[t] = logits
 	}
+	stages.leave()
 	if st != nil && st.dsparkCapture != nil {
 		if err := st.dsparkCapture.beforeCommit(-1); err != nil {
 			return nil, err

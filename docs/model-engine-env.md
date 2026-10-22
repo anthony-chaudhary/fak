@@ -28,8 +28,10 @@ Conventions used in the tables:
 - **off-words** — a boolean that is **on by default** and turned off by one of
   `0`, `false`, `False`, `FALSE`, `off`, `OFF`; any other value (or unset) is on.
 - A malformed numeric value falls back to the listed default (it is ignored, not
-  an error) — except `FAK_BUDGET`, which prints a one-line `[fak] …` notice to
-  stderr and then runs at full width.
+  an error) — except that `FAK_BUDGET` prints a one-line `[fak] …` notice to
+  stderr and then runs at full width, and `FAK_NATIVE_KV_MAX_BLOCKS` /
+  `FAK_NATIVE_KV_BLOCK_TOKENS` print a one-line `[fak] …` notice naming each
+  ignored value and the fallback it took.
 
 ---
 
@@ -72,11 +74,11 @@ continuous-batching scheduler.
 
 | Variable | Type / units | Default | When to use | Source |
 |---|---|---|---|---|
-| `FAK_NATIVE_MAX_RUNNING` | int >= 1 (requests) | unset / invalid / <=0 = unbounded | Cap how many admitted in-kernel lifecycle requests run concurrently in `modelengine.NativeScheduler`; excess requests wait FIFO and are promoted as lanes finish. Use to bound the native batch width for local experiments or memory pressure. | `internal/modelengine/modelengine.go:226` |
-| `FAK_NATIVE_KV_MAX_BLOCKS` | int >= 1 (paged-KV blocks) | unset / invalid / <=0 = preemption disabled | Enable the native scheduler's KV pressure path and set the live block budget. When the running set exceeds the budget, the scheduler preempts a victim at a decode-step boundary and readmits it later. | `internal/modelengine/modelengine.go:239` |
-| `FAK_NATIVE_KV_BLOCK_TOKENS` | int >= 1 (tokens per block) | unset / invalid / <=0 = `16` | Override the block size used by the scheduler's paged-KV budget estimator and swap pool. | `internal/modelengine/modelengine.go:244` |
-| `FAK_NATIVE_KV_PREEMPT_MODE` | enum: `swap`, `swap-to-host`, `recompute` | unset = `swap` | Select how a preempted lane releases KV: serialize paged KV to host bytes (`swap`) or drop KV and replay prompt+generated tokens on readmit (`recompute`). | `internal/modelengine/modelengine.go:249` |
-| `FAK_NATIVE_KV_VICTIM_RULE` | enum: `most-recent`, `newest`, `cost-aware`, `cost`, `kvbm` | unset = `most-recent` | Select the live KV-pressure victim rule. In the native scheduler, `cost-aware`/`kvbm` uses the shared KVBM picker over scheduler-local reuse and TTL-bounded pin hints. In the in-kernel planner's radix cache, it selects the cost-aware radix victim rule under `FAK_INKERNEL_RADIX_BUDGET` pressure. | `internal/modelengine/modelengine.go:258`, `internal/agent/inkernel_planner.go:175` |
+| `FAK_NATIVE_MAX_RUNNING` | int >= 1 (requests) | unset / invalid / <=0 = unbounded | Cap how many admitted in-kernel lifecycle requests run concurrently in `modelengine.NativeScheduler`; excess requests wait FIFO and are promoted as lanes finish. Use to bound the native batch width for local experiments or memory pressure. | `internal/modelengine/modelengine.go:482` |
+| `FAK_NATIVE_KV_MAX_BLOCKS` | int >= 1 (paged-KV blocks) | unset / `0` = preemption disabled; invalid (non-integer, negative, padded, or unit-suffixed) = preemption disabled plus a `[fak]` stderr notice and, under `fak serve`, a `native-kv-env` warning startup message | Enable the native scheduler's KV pressure path and set the live block budget. When the running set exceeds the budget, the scheduler preempts a victim at a decode-step boundary and readmits it later. | `internal/modelengine/modelengine.go:572` |
+| `FAK_NATIVE_KV_BLOCK_TOKENS` | int >= 1 (tokens per block) | unset / `0` = `16`; invalid (non-integer, negative, padded, or unit-suffixed) = `16` plus a `[fak]` stderr notice and, under `fak serve`, a `native-kv-env` warning startup message | Override the block size used by the scheduler's paged-KV budget estimator and swap pool. | `internal/modelengine/modelengine.go:571` |
+| `FAK_NATIVE_KV_PREEMPT_MODE` | enum: `swap`, `swap-to-host`, `recompute` | unset = `swap` | Select how a preempted lane releases KV: serialize paged KV to host bytes (`swap`) or drop KV and replay prompt+generated tokens on readmit (`recompute`). | `internal/modelengine/modelengine.go:585` |
+| `FAK_NATIVE_KV_VICTIM_RULE` | enum: `most-recent`, `newest`, `cost-aware`, `cost`, `kvbm` | unset = `most-recent` | Select the live KV-pressure victim rule. In the native scheduler, `cost-aware`/`kvbm` uses the shared KVBM picker over scheduler-local reuse and TTL-bounded pin hints. In the in-kernel planner's radix cache, it selects the cost-aware radix victim rule under `FAK_INKERNEL_RADIX_BUDGET` pressure. | `internal/modelengine/modelengine.go:591`, `internal/agent/inkernel_planner.go:175` |
 
 When `fak serve` attaches the native scheduler as the KV-preemption metrics writer,
 the live `/metrics` surface emits the `fak_sched_preempt_*` family from

@@ -113,6 +113,15 @@ type DecodeHostWork struct {
 	Overlapped       bool
 	Kernels          *compute.KernelProfile
 	NonDecodeOverlap bool
+	// DeviceIdle is the window's device-idle host wall and SyncSites its host
+	// syncs by site and stage (see compute.DeviceWork). Both stay absent (nil,
+	// SyncsObserved false) unless the backend observed every submit and wait at
+	// both ends, no other decode overlapped, and no counter went backwards;
+	// DeviceIdle is also absent when it exceeds Wall or the window submitted,
+	// drained or began with a pipelined batch (compute.DeviceIdleDelta).
+	DeviceIdle    *time.Duration
+	SyncSites     []compute.DeviceSyncSite
+	SyncsObserved bool
 }
 
 // Finish closes the span. steps counts decode steps inside the window (the
@@ -150,6 +159,10 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 		// Each candidate owns its values. A later backend with unavailable or
 		// reset counters must not inherit the prior backend's measurement.
 		w.Readback, w.Kernel = 0, nil
+		w.DeviceIdle, w.SyncSites, w.SyncsObserved = nil, nil, false
+		if !w.Overlapped && prev.SyncObserved && after.SyncObserved {
+			w.DeviceIdle, w.SyncSites, w.SyncsObserved = decodeWindowSyncs(prev, after, w.Wall)
+		}
 		if after.ReadbackBytes >= prev.ReadbackBytes {
 			w.Readback = after.ReadbackBytes - prev.ReadbackBytes
 		}
@@ -179,6 +192,23 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 	return w
 }
 
+// decodeWindowSyncs is the window's idle and per-site sync delta between two
+// observed snapshots; observed is false on any counter reset.
+func decodeWindowSyncs(prev, after compute.DeviceWork, wall time.Duration) (idle *time.Duration, sites []compute.DeviceSyncSite, observed bool) {
+	if after.DeviceIdleNS < prev.DeviceIdleNS {
+		return nil, nil, false
+	}
+	sites, observed = compute.DeviceSyncSitesDelta(prev.SyncSites, after.SyncSites)
+	if !observed {
+		return nil, nil, false
+	}
+	if delta, ok := compute.DeviceIdleDelta(prev, after); ok && delta <= uint64(wall) {
+		d := time.Duration(delta)
+		idle = &d
+	}
+	return idle, sites, true
+}
+
 type decodeHostWorkKey struct{}
 
 // DecodeHostWorkAccumulator sums every decode window of one served request
@@ -197,6 +227,10 @@ type DecodeHostWorkAccumulator struct {
 	kernels       *compute.KernelProfile
 	kernelWindows int
 	kernelGap     bool
+	deviceIdle    time.Duration
+	deviceIdleGap bool
+	syncSites     []compute.DeviceSyncSite
+	syncGap       bool
 }
 
 // WithDecodeHostWork installs a per-request accumulator on ctx.
@@ -240,6 +274,16 @@ func (a *DecodeHostWorkAccumulator) add(w DecodeHostWork) {
 	if w.Backend != "" {
 		a.backend = w.Backend
 	}
+	if w.DeviceIdle == nil {
+		a.deviceIdleGap = true
+	} else {
+		a.deviceIdle += *w.DeviceIdle
+	}
+	if !w.SyncsObserved {
+		a.syncGap, a.syncSites = true, nil
+	} else if !a.syncGap {
+		a.syncSites = compute.DeviceSyncSitesAdd(a.syncSites, w.SyncSites)
+	}
 	switch {
 	case w.Kernels == nil:
 		a.kernelGap = true
@@ -266,6 +310,11 @@ type DecodeHostWorkTotals struct {
 	Kernel  *time.Duration
 	Backend string
 	Kernels *compute.KernelProfile
+	// DeviceIdle and SyncSites fold every window's device-idle wall and host
+	// syncs; SyncsObserved is false (SyncSites nil) when any window lacked them.
+	DeviceIdle    *time.Duration
+	SyncSites     []compute.DeviceSyncSite
+	SyncsObserved bool
 }
 
 // Totals returns a coherent copy; ok is false when no decode window ran.
@@ -291,6 +340,14 @@ func (a *DecodeHostWorkAccumulator) Totals() (DecodeHostWorkTotals, bool) {
 		k := *a.kernels
 		k.Rows = append([]compute.KernelRow(nil), a.kernels.Rows...)
 		t.Kernels = &k
+	}
+	if !a.deviceIdleGap {
+		idle := a.deviceIdle
+		t.DeviceIdle = &idle
+	}
+	if !a.syncGap {
+		t.SyncSites = append([]compute.DeviceSyncSite{}, a.syncSites...)
+		t.SyncsObserved = true
 	}
 	return t, true
 }
@@ -331,6 +388,55 @@ func (t DecodeHostWorkTotals) HostShare() (float64, bool) {
 		return 0, false
 	}
 	return float64(*t.CPU) / float64(t.Wall), true
+}
+
+// GPUIdleMSPerToken is device-idle host wall in milliseconds per decode step:
+// host work the device waited on in the serial chain.
+func (t DecodeHostWorkTotals) GPUIdleMSPerToken() (float64, bool) {
+	if t.DeviceIdle == nil || t.Steps <= 0 {
+		return 0, false
+	}
+	return float64(*t.DeviceIdle) / float64(time.Millisecond) / float64(t.Steps), true
+}
+
+// SyncsPerToken is host waits on device completion per decode step.
+func (t DecodeHostWorkTotals) SyncsPerToken() (float64, bool) {
+	if !t.SyncsObserved || t.Steps <= 0 {
+		return 0, false
+	}
+	var syncs uint64
+	for _, s := range t.SyncSites {
+		syncs += s.Syncs
+	}
+	return float64(syncs) / float64(t.Steps), true
+}
+
+// DecodeSyncSiteRate is one (site, stage) host-sync cell per decode step.
+type DecodeSyncSiteRate struct {
+	Site             string
+	Stage            string
+	SyncsPerToken    float64
+	WaitMSPerToken   float64
+	D2HBytesPerToken float64
+}
+
+// SyncSiteRates is every observed sync cell per decode step, sorted by Site
+// then Stage; ok is false when syncs or steps are unmeasured.
+func (t DecodeHostWorkTotals) SyncSiteRates() ([]DecodeSyncSiteRate, bool) {
+	if !t.SyncsObserved || t.Steps <= 0 {
+		return nil, false
+	}
+	steps := float64(t.Steps)
+	out := make([]DecodeSyncSiteRate, 0, len(t.SyncSites))
+	for _, s := range t.SyncSites {
+		out = append(out, DecodeSyncSiteRate{
+			Site: s.Site, Stage: s.Stage,
+			SyncsPerToken:    float64(s.Syncs) / steps,
+			WaitMSPerToken:   float64(s.WaitNS) / float64(time.Millisecond) / steps,
+			D2HBytesPerToken: float64(s.D2HBytes) / steps,
+		})
+	}
+	return out, true
 }
 
 // DecodeWindowReceipt projects the decode windows into the bounded phase

@@ -865,3 +865,27 @@ non-finite status, and serves one sequence per session instead of a slot-indexed
 The host attention state remains the source of truth and reseeds stale ring rows. Licensed under
 the Apache License, Version 2.0 (upstream `LICENSE`); the upstream repository has no NOTICE file.
 License text: https://www.apache.org/licenses/LICENSE-2.0
+
+## DeepGEMM and TileKernels mHC prenorm split
+
+Modes 5-7 of `internal/compute/shaders/v41_mhc.comp`, the dispatch entrypoint
+`fvk_v41_mhc_prenorm_split_f32` in `internal/compute/vulkan_shim.cpp`, and the Go shape in
+`internal/compute/v41_mhc_prenorm.go` adapt the split of the DeepSeek V4 manifold
+hyper-connection pre-norm into a projection pass that also produces the row sum of squares
+and a second pass that applies `rsqrt(sqrsum / (4 * hidden) + eps)` to the mixes:
+- `deep_gemm/include/deep_gemm/impls/sm100_tf32_hc_prenorm_gemm.cuh:43`
+  (`sm100_tf32_hc_prenorm_gemm_impl`, the `[m, 24]` mix GEMM with the fused `sqr_sum` and
+  split-K partials) from DeepGEMM at revision `1fc9c66975ee322d628b3288534ca0e9ce12a64d`
+  as vendored by DeepInfer (Apache-2.0); DeepGEMM is MIT, Copyright (c) 2025 DeepSeek.
+- `tile_kernels/mhc/norm_fn_cuda.py:67` (`mhc_reduce_partials_and_rmsnorm_fwd_cuda`) from
+  TileKernels at revision `c1cf914a82e6901c679445f872051ce44ac2cc63`; MIT, Copyright (c)
+  2026 DeepSeek.
+
+Changed for Fak: no upstream code is copied. Upstream multiplies in TF32 on tensor-core MMA
+and sums split-K partials; Fak keeps its existing binary32 arithmetic so the coefficients
+stay bitwise those of the one-token MatMul followed by the rms-split: an F32 weight runs
+`matmul.comp`'s 1024-wide chunk partials summed in chunk order, a Q2_K weight runs
+`q2k_matvec.comp`'s lanes and tree, and the sum of squares is the serial index-order sum of
+`rmsSplit`, computed by one workgroup beside the projection workgroups instead of after
+them. Vulkan has no grid barrier, so the split remains a second dispatch. The upstream
+license text is the MIT license reproduced in the antirez/ds4 section above.

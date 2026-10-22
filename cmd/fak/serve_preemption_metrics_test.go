@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 )
@@ -32,29 +34,7 @@ func TestServePreemptionMetricsFollowSelectedLiveEngine(t *testing.T) {
 		abi.RegisterEngine(modelengine.EngineID, previousNative)
 		abi.RegisterEngine("mock", previousMock)
 	})
-	build := func(engineID string) *httptest.Server {
-		fs, sf := newServeFlagSet()
-		if err := fs.Parse([]string{"--engine=" + engineID, "--workspace-admission-permissive"}); err != nil {
-			t.Fatal(err)
-		}
-		rt := &serveRuntime{t0: time.Now(), explicitFlags: map[string]bool{"engine": true}}
-		ingress, err := rt.buildGateway(sf)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ts := httptest.NewServer(rt.srv.Handler())
-		t.Cleanup(func() {
-			ts.Close()
-			rt.srv.Close()
-			if err := rt.closeServeArmLeases(); err != nil {
-				t.Error(err)
-			}
-			if ingress != nil {
-				_ = ingress.Close()
-			}
-		})
-		return ts
-	}
+	build := func(engineID string) *httptest.Server { return buildServeEngineGateway(t, engineID) }
 	scrape := func(ts *httptest.Server) string {
 		client := ts.Client()
 		client.Timeout = 5 * time.Second
@@ -130,5 +110,78 @@ func TestServePreemptionMetricsFollowSelectedLiveEngine(t *testing.T) {
 	native.SetKVPreemptionPolicy(modelengine.NativePreemptionPolicy{})
 	if strings.Contains(scrape(served), "fak_sched_preempt_") {
 		t.Fatal("disabled live engine retained preemption metrics")
+	}
+}
+
+func buildServeEngineGateway(t *testing.T, engineID string) *httptest.Server {
+	t.Helper()
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--engine=" + engineID, "--workspace-admission-permissive"}); err != nil {
+		t.Fatal(err)
+	}
+	rt := &serveRuntime{t0: time.Now(), explicitFlags: map[string]bool{"engine": true}}
+	ingress, err := rt.buildGateway(sf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		rt.srv.Close()
+		if err := rt.closeServeArmLeases(); err != nil {
+			t.Error(err)
+		}
+		if ingress != nil {
+			_ = ingress.Close()
+		}
+	})
+	return ts
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestServeStartupMessagesWarnOnMalformedNativeKVEnv(t *testing.T) {
+	cases := []struct {
+		name      string
+		maxBlocks string
+		wantWarn  bool
+	}{
+		{name: "malformed", maxBlocks: "abc", wantWarn: true},
+		{name: "valid", maxBlocks: "0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", tc.maxBlocks)
+			t.Setenv("FAK_NATIVE_KV_BLOCK_TOKENS", "")
+			t.Setenv("FAK_MEMORY_GOVERNOR", "0")
+			t.Setenv("FAK_ORG_ENROLLMENT_PATH", filepath.Join(t.TempDir(), "org-enrollment.json"))
+			native := modelengine.New()
+			native.Preload(model.NewSynthetic(modelengine.SyntheticConfig()))
+			previous := abi.Engine(modelengine.EngineID)
+			abi.RegisterEngine(modelengine.EngineID, native)
+			t.Cleanup(func() { abi.RegisterEngine(modelengine.EngineID, previous) })
+
+			served := buildServeEngineGateway(t, modelengine.EngineID)
+			vars := readServeStartupVars(t, served.URL+"/debug/vars", 5*time.Second)
+			envErr := native.KVPreemptionEnvErr()
+			if got := errors.Is(envErr, modelengine.ErrNativeKVEnvInvalid); got != tc.wantWarn {
+				t.Fatalf("errors.Is(KVPreemptionEnvErr, ErrNativeKVEnvInvalid) = %v, want %v; err = %v", got, tc.wantWarn, envErr)
+			}
+			var found []gateway.StartupMessage
+			for _, message := range vars.Startup.Messages {
+				if message.Kind == "native-kv-env" {
+					found = append(found, message)
+				}
+			}
+			if !tc.wantWarn {
+				if len(found) != 0 {
+					t.Fatalf("valid native KV env produced startup messages %+v", found)
+				}
+				return
+			}
+			want := gateway.StartupMessage{Source: "serve", Kind: "native-kv-env", Level: "warning", Text: modelengine.NativeKVEnvNotice(envErr)}
+			if len(found) != 1 || found[0] != want {
+				t.Fatalf("native-kv-env startup messages = %+v, want exactly [%+v]", found, want)
+			}
+		})
 	}
 }

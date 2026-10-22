@@ -256,7 +256,19 @@ type ModelLoadProfile struct {
 	MemoryPlan          []ModelLoadMemoryDemand
 	MemoryCapacities    []ModelLoadMemoryCapacity
 	MemoryHeadroomRatio float64
-	Messages            []StartupMessage
+	// StartupResidency is the GGUF files' OS page-cache residency measured before the
+	// load read them; nil when it was not measured.
+	StartupResidency *ModelLoadResidency
+	Messages         []StartupMessage
+}
+
+// ModelLoadResidency classifies a boot as a cold or warm start from how much of
+// the model's GGUF bytes the page cache already held.
+type ModelLoadResidency struct {
+	StartupCase   string
+	ResidentBytes int64
+	FileBytes     int64
+	Files         int
 }
 
 func (p *ModelLoadProfile) clone() *ModelLoadProfile {
@@ -269,6 +281,10 @@ func (p *ModelLoadProfile) clone() *ModelLoadProfile {
 	out.MemoryPlan = append([]ModelLoadMemoryDemand(nil), p.MemoryPlan...)
 	out.MemoryCapacities = append([]ModelLoadMemoryCapacity(nil), p.MemoryCapacities...)
 	out.Messages = append([]StartupMessage(nil), p.Messages...)
+	if p.StartupResidency != nil {
+		pc := *p.StartupResidency
+		out.StartupResidency = &pc
+	}
 	return &out
 }
 

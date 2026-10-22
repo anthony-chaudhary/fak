@@ -20,6 +20,21 @@ type DeviceWork struct {
 	// unavailable, even when SubmitWaitNS is nonzero. The current Vulkan reader
 	// leaves this false: its pipelined submits/fence waits are not all covered.
 	SubmitWaitObserved bool
+	// DeviceIdleNS is host wall with no submitted work outstanding: from the host
+	// observing the last outstanding fence signal to the next submit, including an
+	// idle interval still open at the read. Fence wake and submit latency count as
+	// busy, so it is a lower bound on device idle. SyncSites are the nonzero
+	// host-sync cells (see DeviceSyncSite), sorted by Site then Stage. Both are
+	// meaningful only when SyncObserved: the reader accounts for every submit and
+	// every host wait on device completion.
+	DeviceIdleNS uint64
+	SyncSites    []DeviceSyncSite
+	SyncObserved bool
+	// PipelinedSubmits and PipelinedDrains count batches submitted without a
+	// host wait and their later drains. While one is outstanding the device can
+	// finish unobserved, so DeviceIdleDelta refuses a window it touches.
+	PipelinedSubmits uint64
+	PipelinedDrains  uint64
 }
 
 var deviceWorkReaders struct {

@@ -125,12 +125,13 @@ through the exact generic verifier, then stops subsequent drafting.
   and downgrade/completion data through buffered JSON and the live
   `internal/gateway/stream_proxy.go` SSE path. Headers or trailers come from that
   request only; concurrent requests cannot observe or overwrite another result.
-- [ ] [HW-WITNESSED] Physical Halo end-to-end A/B remains unchecked here and is
-  qualified separately with N>=5 matched samples, exact token parity, zero hidden
-  fallback, complete source/artifact/system provenance, P50/P90, and confidence
-  intervals before any performance or default-on claim. Not witnessed yet: the
-  first physical A/B found the route unreachable on a real artifact (see
-  "Hardware A/B record"); the qualified rerun needs a stage at the fix commit.
+- [x] [HW-WITNESSED] Physical Halo end-to-end A/B, qualified with N>=5 matched
+  samples, exact token parity, zero hidden fallback, complete source/artifact/system
+  provenance, P50/P90, and confidence intervals. strix1 at `7a71f63db5`, 6 matched
+  pairs, identical greedy text: MTP decode is 4.495 -> 3.267 tok/s (-27.5%,
+  p<0.001) at 40.5% draft acceptance. The result is negative, so it makes no
+  performance or default-on claim; Vulkan MTP stays opt-in (see "Hardware A/B
+  record").
 - [x] [SW-VERIFIED] A resident Q4_K_M retained head (matrices in the quant stores,
   only F32 norms in the manifest) is admitted by `Qwen35MTPMode` and the forward
   tensor validator through its validated resident layout; an incomplete resident
@@ -164,6 +165,34 @@ accepted tokens (34%), then `acceptance-floor-fallback`. Decode is 2.0-2.1 tok/s
 against 4.2 tok/s serial on the same 64-token greedy request, with identical
 text, and `fak_compute_host_fallback_total` stays 0 for `mtp_draft_host_forward`
 and `spec_verify_attention`, so the device-only host-stage guard was not hit.
+
+Qualified rerun at the fix, `abba-20261022T104553Z`:
+
+- Setup: stage `abba-7a71f63db5c8`, binary sha256 `02b03ef4...8f1239`;
+  Qwen3.8-27B-Q4_K_M, GGUF sha256 `7e78da5d...6fe169`; 8192 context, greedy,
+  128 tokens. The node's own serve was parked for the window, then restored.
+- Pairs and parity: 3 mirrored ABBA rounds give 6 matched pairs per arm, plus
+  one profile-on run each. Greedy text is identical on every measured prompt.
+- Route: all 18 C1 ledger rows read `engine.path=speculative` and all 18 B rows
+  read `serial`. Draft acceptance is 282/696 = 40.5% (174 rounds, K=4).
+- Fallback: the only downgrade is the reported `acceptance-floor-fallback`.
+  Each 128-token request runs 8 rounds, then decodes serially. No other fallback
+  occurs.
+- Client decode, mean +- sd: B 4.495 +- 0.027, C1 3.267 +- 0.017 tok/s.
+  P50/P90: B 4.491/4.528, C1 3.264/3.293.
+- Delta: median -27.54% [-27.69, -26.71], 95% CI -27.32 +- 0.45%, p<0.001,
+  verdict SLOWER.
+- Engine decode: 4.469 -> 2.987 tok/s. TTFT: 4875 -> 8016 ms.
+
+The 35-token warm turn speculates throughout: 13 rounds, 52 drafted, 22
+accepted. Each K=4 resident verify round costs about 2.0 s, roughly 8.7 serial
+0.23 s steps, and emits about 2.7 tokens. Five tokens per round would still run
+at about 0.57x serial.
+
+In the profile-on run, GPU time goes from 213.4 to 270.5 ms/token. The rows
+added by speculation are the verify panel, `q4k_matmul` 1088x1 at 24.0
+ms/token, and the all-position head, `q6k_matmul` 15520x1 at 12.3 ms/token.
+The verify transaction is the lever, not the drafter.
 
 ## Definition of done
 

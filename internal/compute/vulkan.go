@@ -222,7 +222,9 @@ func init() {
 func readVulkanDeviceWork() DeviceWork {
 	var dispatches, readback, submitWait C.uint64_t
 	C.fvk_device_work_counters(&dispatches, &readback, &submitWait)
-	return DeviceWork{Dispatches: uint64(dispatches), ReadbackBytes: uint64(readback), SubmitWaitNS: uint64(submitWait)}
+	w := DeviceWork{Dispatches: uint64(dispatches), ReadbackBytes: uint64(readback), SubmitWaitNS: uint64(submitWait)}
+	readVulkanDeviceSync(&w)
+	return w
 }
 
 func vulkanTimestampProfileEnabled() bool { return C.fvk_ts_enabled() != 0 }
