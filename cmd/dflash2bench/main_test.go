@@ -1,11 +1,40 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// fak-test:runtime fast est=50ms lane=default
+func TestFailureCapacityDiagnosticPreservesPanic(t *testing.T) {
+	original := readVulkanMemoryCapacity
+	readVulkanMemoryCapacity = func(compute.Backend) (any, error) {
+		return map[string]any{"guard_refused_allocations": uint64(3)}, nil
+	}
+	t.Cleanup(func() { readVulkanMemoryCapacity = original })
+	var stderr bytes.Buffer
+	sentinel := errors.New("allocation failed")
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		func() {
+			defer reportFailureCapacityOnPanic(compute.Default(), nil, &stderr)
+			panic(sentinel)
+		}()
+	}()
+	if recovered != sentinel {
+		t.Fatalf("recovered=%v, want original panic", recovered)
+	}
+	for _, want := range [][]byte{[]byte(`"schema":"fak-dflash2-failure-capacity/1"`), []byte(`"phase":"failure"`), []byte(`"guard_refused_allocations":3`)} {
+		if !bytes.Contains(stderr.Bytes(), want) {
+			t.Fatalf("diagnostic %q missing %q", stderr.String(), want)
+		}
+	}
+}
 
 type mixedQuantBenchBackend struct{ compute.Backend }
 

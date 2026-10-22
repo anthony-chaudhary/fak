@@ -2,12 +2,14 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,13 +31,37 @@ type dflash2GateBackend struct {
 
 func (b *dflash2GateBackend) ForwardExecutionOwner() *sync.Mutex { return b.owner }
 
-type dflash2MixedDispatchBackend struct{ compute.Backend }
+type dflash2MixedDispatchBackend struct {
+	compute.Backend
+	q2Dispatches int
+	owner        *sync.Mutex
+}
 
 func (b dflash2MixedDispatchBackend) Caps() compute.Caps {
 	caps := b.Backend.Caps()
 	caps.DeviceMemory = true
 	caps.UploadDtype = true
 	return caps
+}
+
+func (b *dflash2MixedDispatchBackend) SupportsQ2K() bool { return true }
+func (b *dflash2MixedDispatchBackend) ForwardExecutionOwner() *sync.Mutex {
+	return b.owner
+}
+func (b *dflash2MixedDispatchBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	return compute.BackendSupportsDeviceWeightDtype(b.Backend, dt)
+}
+func (b *dflash2MixedDispatchBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	if w.Dtype == compute.Q2_K {
+		b.q2Dispatches++
+	}
+	return b.Backend.MatMul(w, x)
+}
+func (b *dflash2MixedDispatchBackend) BatchedMatMul(w, x compute.Tensor, p int) compute.Tensor {
+	if w.Dtype == compute.Q2_K {
+		b.q2Dispatches++
+	}
+	return b.Backend.BatchedMatMul(w, x, p)
 }
 
 func dflash2MixedDispatchModel(t *testing.T) *model.Model {
@@ -65,7 +91,7 @@ func dflash2MixedDispatchModel(t *testing.T) *model.Model {
 	addF32("model.layers.0.self_attn.o_proj.weight", []int{width, width}, 0.01)
 	addF32("model.layers.0.post_attention_layernorm.weight", []int{width}, 1)
 	addF32("model.layers.0.mlp.gate_proj.weight", []int{width, width}, 0.01)
-	if err := b.AddResidentQ4K("model.layers.0.mlp.up_proj.weight", []int{width, width}, make([]byte, width*144)); err != nil {
+	if err := b.AddResidentQ2K("model.layers.0.mlp.up_proj.weight", []int{width, width}, make([]byte, width*width/256*84)); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.AddResidentQ4K("model.layers.0.mlp.down_proj.weight", []int{width, width}, make([]byte, width*144)); err != nil {
@@ -84,16 +110,20 @@ func dflash2MixedDispatchModel(t *testing.T) *model.Model {
 func TestDFlash2TargetSessionDispatchesMixedQ8AndQ4K(t *testing.T) {
 	m := dflash2MixedDispatchModel(t)
 	report := m.ResidentReport()
-	if report.Q8Tensors == 0 || report.Q4KTensors == 0 {
+	if report.Q8Tensors == 0 || report.Q4KTensors == 0 || report.KQuantTensors == 0 {
 		t.Fatalf("fixture is not mixed: %+v", report)
 	}
-	s, err := newDFlash2TargetSession(m, dflash2MixedDispatchBackend{Backend: compute.Default()})
+	be := &dflash2MixedDispatchBackend{Backend: compute.Default(), owner: new(sync.Mutex)}
+	s, err := newDFlash2TargetSession(m, be)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.Close)
 	if got := s.Prefill([]int{1}); len(got) != widthForDFlash2TestModel {
 		t.Fatalf("logits=%d", len(got))
+	}
+	if be.q2Dispatches == 0 {
+		t.Fatal("packed Q2_K weight did not reach backend dispatch")
 	}
 }
 
@@ -370,20 +400,105 @@ func TestDFlash2ConstructorInterruptionRetainsAttempt(t *testing.T) {
 
 // fak-test:runtime fast est=50ms lane=default
 func TestDFlash2PackedLoadOptionsAreExclusive(t *testing.T) {
+	q2 := &dflash2MixedDispatchBackend{Backend: compute.Default(), owner: new(sync.Mutex)}
 	for _, dtype := range []ggufload.TensorType{ggufload.TensorQ2_K, ggufload.TensorQ4_K} {
-		opts, err := dflash2LoadOptions(dtype)
+		opts, err := dflash2LoadOptions(dtype, q2)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got := ggufload.ApplyQ4KLoadOptions(append([]ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(true), ggufload.WithMTPRetention(true)}, opts...))
-		if got.Q2KEmbeddingResident != (dtype == ggufload.TensorQ2_K) || got.Q4KEmbeddingResident != (dtype == ggufload.TensorQ4_K) || got.MTPRetention || got.DenseKQuantResident {
+		if got.Q2KEmbeddingResident != (dtype == ggufload.TensorQ2_K) || got.Q4KEmbeddingResident != (dtype == ggufload.TensorQ4_K) || !got.DenseQ2KResident || got.MTPRetention || got.DenseKQuantResident {
 			t.Fatalf("dtype=%s effects=%+v", dtype, got)
+		}
+		unsupported, err := dflash2LoadOptions(dtype, compute.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ggufload.ApplyQ4KLoadOptions(unsupported); got.DenseQ2KResident {
+			t.Fatalf("dtype=%s unsupported backend admitted packed dense Q2_K", dtype)
 		}
 	}
 	for _, dtype := range []ggufload.TensorType{ggufload.TensorF32, ggufload.TensorQ6_K, ggufload.TensorQ8_0} {
-		if _, err := dflash2LoadOptions(dtype); err == nil {
+		if _, err := dflash2LoadOptions(dtype, q2); err == nil {
 			t.Fatalf("unsupported dtype %s admitted", dtype)
 		}
+	}
+}
+
+// fak-test:runtime fast est=5s lane=default
+func TestDFlash2ConstructorSelectsPackedQ2AndDispatchesIt(t *testing.T) {
+	compressed, err := os.Open(filepath.Join("..", "ggufload", "testdata", "qwen38_ud_q2kxl_header.gguf.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer compressed.Close()
+	zr, err := gzip.NewReader(compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(zr, 16<<20))
+	if closeErr := zr.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := ggufload.Read(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := ggufload.NewWeightSource(file, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt, ok := file.GGMLTokenizer()
+	if !ok {
+		t.Fatal("pinned Qwen3.8 header has no tokenizer")
+	}
+	tok, err := tokenizer.FromGGML(gt.Tokens, gt.Merges, gt.TokenTypes, gt.Pre)
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := &dflash2MixedDispatchBackend{Backend: compute.Default(), owner: new(sync.Mutex)}
+	spec := DFlash2TargetSpec{
+		Shards:                 []ggufload.ShardIdentity{{Path: filepath.Join(t.TempDir(), "target.gguf"), Size: 1, RawFileSHA256: strings.Repeat("0", 64)}},
+		ExpectedShardSetSHA256: strings.Repeat("0", 64),
+		TokenizerID:            tok.Identity(),
+		RendererID:             "ornith-qwen35-chatml-v1:no-thinking",
+		SidecarPath:            filepath.Join(t.TempDir(), "dflash2.safetensors"),
+	}
+	loaderCalled := false
+	target, err := newDFlash2TargetWithLoader(t.Context(), spec, be, DFlash2TargetOptions{},
+		func(context.Context, []ggufload.ShardIdentity, string) (*ggufload.WeightSource, error) {
+			return source, nil
+		},
+		func(_ context.Context, got *ggufload.WeightSource, opts []ggufload.Q4KLoadOption) (*model.Model, error) {
+			loaderCalled = true
+			if got != source || !ggufload.ApplyQ4KLoadOptions(opts).DenseQ2KResident {
+				return nil, errors.New("constructor omitted selective packed Q2 loader option")
+			}
+			return dflash2MixedDispatchModel(t), nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaderCalled {
+		t.Fatal("constructor bypassed WeightSource loader")
+	}
+	estimates := target.LoadMemoryEstimates()
+	if !estimates.PackedQ2Selected || estimates.Selected.Total() >= estimates.ExpandedFallback.Total() {
+		t.Fatalf("load estimates selected=%d expanded=%d packed=%v", estimates.Selected.Total(), estimates.ExpandedFallback.Total(), estimates.PackedQ2Selected)
+	}
+	session, err := newDFlash2TargetSession(target.Model(), be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := session.Prefill([]int{1}); len(got) != widthForDFlash2TestModel || be.q2Dispatches == 0 {
+		t.Fatalf("logits=%d packed Q2 dispatches=%d", len(got), be.q2Dispatches)
+	}
+	session.Close()
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
