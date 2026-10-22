@@ -761,3 +761,46 @@ func TestSafePush_RetriesExhausted(t *testing.T) {
 		t.Fatalf("exhausted push = %+v, want RETRIES_EXHAUSTED after 2 attempts", res)
 	}
 }
+
+// fak-test:runtime fast est=10ms
+func TestSafePush_CredentialTransportDiagnostic(t *testing.T) {
+	const source = "0123456789012345678901234567890123456789"
+	const target = "refs/heads/review/credential-transport"
+	for _, tc := range []struct {
+		name, stderr string
+		localPrompt  bool
+	}{
+		{"unavailable username", "fatal: could not read Username for 'https://github.com': No such device or address", true},
+		{"disabled password prompt", "fatal: could not read Password for 'https://example.com': terminal prompts disabled", true},
+		{"remote-prefixed prompt text", "remote: fatal: could not read Username for 'https://github.com': No such device or address", false},
+		{"remote permission denial", "remote: Permission to owner/repo denied to user", false},
+		{"remote authentication failure", "fatal: Authentication failed for 'https://example.com/repo/'", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			waits := swallowPushSleep(t)
+			sr := &scriptedRunner{push: []RunResult{{Code: 128, Stderr: []byte(tc.stderr)}}}
+			res, err := SafePush(context.Background(), PushOptions{
+				Repo: ".", Remote: "origin", Branch: "review/credential-transport",
+				SourceRef: source, TargetRef: target, Runner: sr.run,
+			})
+			if err != nil || res.Pushed || res.Reason != PushReasonError || res.Attempts != 1 || len(*waits) != 0 {
+				t.Fatalf("result=%+v err=%v waits=%v; want terminal PUSH_ERROR without retry", res, err, *waits)
+			}
+			d := res.Diagnostics
+			if d == nil || d.Stderr != tc.stderr || d.Refspec != source+":"+target || res.Detail != tc.stderr || res.Remote != "origin" {
+				t.Fatalf("original failure and exact push target must survive: %+v", res)
+			}
+			if tc.localPrompt {
+				if d.Classification != "CREDENTIAL_TRANSPORT_UNAVAILABLE" || !strings.Contains(d.Hint, "does not establish a remote permission denial") {
+					t.Fatalf("missing local-transport diagnostic: %+v", d)
+				}
+			} else if d.Classification != "" || d.Hint != "" {
+				t.Fatalf("remote rejection mislabeled as unavailable local transport: %+v", d)
+			}
+			wantCalls := []string{"push origin " + source + ":" + target, "fetch origin review/credential-transport", "merge-base --is-ancestor " + source + " origin/review/credential-transport"}
+			if strings.Join(sr.calls, "|") != strings.Join(wantCalls, "|") {
+				t.Fatalf("diagnosis changed push/reconciliation actions: %v", sr.calls)
+			}
+		})
+	}
+}

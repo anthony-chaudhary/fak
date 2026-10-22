@@ -107,8 +107,11 @@ type PushResult struct {
 // Each stream is valid UTF-8 and retains at most 4096 bytes, including any
 // truncation marker.
 type PushDiagnostics struct {
-	Stdout string `json:"stdout,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
+	Stdout         string `json:"stdout,omitempty"`
+	Stderr         string `json:"stderr,omitempty"`
+	Refspec        string `json:"refspec,omitempty"` // exact argument passed to git push
+	Classification string `json:"classification,omitempty"`
+	Hint           string `json:"hint,omitempty"`
 }
 
 // PushVelocity is end-to-end, safety-qualified push timing. A numeric score is
@@ -233,6 +236,9 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 			res.Reason = PushReasonError
 			res.Detail = pushHeadline(msg)
 			res.Diagnostics = pushDiagnostics(pr)
+			if res.Diagnostics != nil {
+				res.Diagnostics.Refspec = pushArgs[2]
+			}
 			return res, nil
 		}
 		lastNetDetail = ""
@@ -579,10 +585,29 @@ func pushDiagnostics(r RunResult) *PushDiagnostics {
 		Stdout: pushDiagnosticTail(string(r.Stdout)),
 		Stderr: pushDiagnosticTail(string(r.Stderr)),
 	}
+	if isUnavailablePushCredentialPrompt(runDetail(r)) {
+		d.Classification = "CREDENTIAL_TRANSPORT_UNAVAILABLE"
+		d.Hint = "Git could not obtain credentials through its local prompt transport. This does not establish a remote permission denial; connected account access does not establish credentials for this Git process. Verify the authorized Git credential transport before retrying the same refspec; do not change identity or bypass push gates."
+	}
 	if d.Stdout == "" && d.Stderr == "" {
 		return nil
 	}
 	return d
+}
+
+// Match Git's local prompt failure, not remote authentication/authorization
+// rejection. Deliberately diagnostic-only: do not change retry or reconcile policy.
+func isUnavailablePushCredentialPrompt(out string) bool {
+	for _, line := range strings.Split(strings.ToLower(out), "\n") {
+		line = strings.TrimSpace(line)
+		if (strings.HasPrefix(line, "fatal: could not read username for '") ||
+			strings.HasPrefix(line, "fatal: could not read password for '")) &&
+			(strings.HasSuffix(line, "': no such device or address") ||
+				strings.HasSuffix(line, "': terminal prompts disabled")) {
+			return true
+		}
+	}
+	return false
 }
 
 // Keep the end of each stream: earlier advisory chatter must not crowd out the
