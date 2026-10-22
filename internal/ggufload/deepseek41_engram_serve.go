@@ -35,6 +35,9 @@ const v41EngramServeBudgetRows = 4
 // normal bounded ReadRows, so streaming is preserved. ReadAt slices whole rows so
 // an unaligned or partial request is served from the same verified rows.
 type v41EngramRowReaderAt struct {
+	// owner is set only by the serving factory that opens src from this source.
+	// It is immutable after construction; ordinary adapters leave it nil.
+	owner    *WeightSource
 	src      model.V41EngramRowSource
 	rows     int
 	rowBytes int
@@ -55,11 +58,38 @@ func (w v41EngramEncodedRowReaderAt) V41EngramEncodedRows(start, count int) (io.
 // newV41EngramRowReaderAt adapts src for binding, carrying its encoded extent
 // through when it names one.
 func newV41EngramRowReaderAt(src model.V41EngramRowSource, rows, rowBytes int) io.ReaderAt {
-	w := &v41EngramRowReaderAt{src: src, rows: rows, rowBytes: rowBytes}
-	if enc, ok := src.(model.V41EngramEncodedRows); ok {
+	return v41EngramReaderForm(&v41EngramRowReaderAt{src: src, rows: rows, rowBytes: rowBytes})
+}
+
+func v41EngramReaderForm(w *v41EngramRowReaderAt) io.ReaderAt {
+	if enc, ok := w.src.(model.V41EngramEncodedRows); ok {
 		return v41EngramEncodedRowReaderAt{v41EngramRowReaderAt: w, enc: enc}
 	}
 	return w
+}
+
+// V41EngramHoldSourceReads retains this exact reader's source until the caller
+// has joined all borrowed reads and invokes release. It does not interrupt
+// ReadAt, enable background work, or retain an unowned adapter. A borrower must
+// release before calling Close on its own WeightSource.
+func (w *v41EngramRowReaderAt) V41EngramHoldSourceReads() (func(), <-chan struct{}, bool) {
+	if w == nil || w.owner == nil || w.src == nil {
+		return nil, nil, false
+	}
+	return w.owner.holdSourceReads()
+}
+
+// openV41EngramServingReader binds lifetime only after opening the immutable row
+// source from this exact owner. The raw factory's concrete results and unowned
+// adapter's ordinary reads are unchanged; no arbitrary source/owner pairing is
+// accepted here.
+func (ws *WeightSource) openV41EngramServingReader(layer int) (io.ReaderAt, int, int, error) {
+	src, rows, rowBytes, err := openV41EngramRowSource(ws, layer)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	w := &v41EngramRowReaderAt{owner: ws, src: src, rows: rows, rowBytes: rowBytes}
+	return v41EngramReaderForm(w), rows, rowBytes, nil
 }
 
 func (w *v41EngramRowReaderAt) RowBytes() int { return w.rowBytes }
@@ -253,7 +283,7 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 	pending := make([]engramAcquire, len(eng.LayerIDs))
 	rowBytes := 0
 	for i, id := range eng.LayerIDs {
-		inner, tableRows, innerRowBytes, err := openV41EngramRowSource(ws, id)
+		reader, tableRows, innerRowBytes, err := ws.openV41EngramServingReader(id)
 		if err != nil {
 			return refuse(fmt.Errorf("layer %d: %w", id, err))
 		}
@@ -269,7 +299,7 @@ func attachV41EngramServing(m *model.Model, ws *WeightSource) error {
 		size := int64(tableRows) * int64(innerRowBytes)
 		pending[i] = engramAcquire{
 			id:     id,
-			reader: newV41EngramRowReaderAt(inner, tableRows, innerRowBytes),
+			reader: reader,
 			shard:  model.V41EngramShard{ID: shardName, ExpectedID: shardName, Offset: 0, Size: size, Rows: tableRows},
 			bind:   model.V41EngramArtifactBinding{Shard: shardName, Offset: 0, Size: size, Rows: tableRows, RowBytes: innerRowBytes},
 		}
