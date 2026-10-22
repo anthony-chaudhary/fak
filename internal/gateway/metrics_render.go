@@ -634,6 +634,31 @@ func writeV41RoutedDispatchMetrics(b *strings.Builder, phases *agent.V41PhaseLif
 	}
 }
 
+// writeV41CohortExpertUnionMetrics emits the V4.1 decode-cohort expert-union
+// outcomes (FAK_V41_COHORT_EXPERT_UNION) and the shared-rows histogram that
+// sizes the overlap gate. It stays silent until a cohort first builds a union,
+// so a scrape never reads "measured as zero" for a model that never batched.
+// declined_admission counts every routed-cohort lease decline (expert ring fit,
+// backend or weight capability, routing payload), not ring sizing alone.
+func writeV41CohortExpertUnionMetrics(b *strings.Builder, snap model.V41CohortExpertUnionCounters) {
+	var shared uint64
+	for _, n := range snap.SharedRows {
+		shared += n
+	}
+	if snap.Selected+snap.DeclinedOverlap+snap.DeclinedCapacity+snap.DeclinedAdmission+shared == 0 {
+		return
+	}
+	writeHelpType(b, "fak_v41_cohort_expert_union_total", "V4.1 decode-cohort expert-union decisions by outcome: selected ran the cross-lane union, declined_overlap fell back to per-lane fused experts because lanes shared too few rows, declined_capacity exceeded the row cap, declined_admission was any routed-cohort lease decline.", "counter")
+	fmt.Fprintf(b, "fak_v41_cohort_expert_union_total{outcome=\"selected\"} %d\n", snap.Selected)
+	fmt.Fprintf(b, "fak_v41_cohort_expert_union_total{outcome=\"declined_overlap\"} %d\n", snap.DeclinedOverlap)
+	fmt.Fprintf(b, "fak_v41_cohort_expert_union_total{outcome=\"declined_capacity\"} %d\n", snap.DeclinedCapacity)
+	fmt.Fprintf(b, "fak_v41_cohort_expert_union_total{outcome=\"declined_admission\"} %d\n", snap.DeclinedAdmission)
+	writeHelpType(b, "fak_v41_cohort_expert_union_shared_rows_total", "Built V4.1 cohort expert unions by how many flat routed rows the lanes shared (flat rows minus distinct experts).", "counter")
+	for rows, n := range snap.SharedRows {
+		fmt.Fprintf(b, "fak_v41_cohort_expert_union_shared_rows_total{shared=\"%d\"} %d\n", rows, n)
+	}
+}
+
 type v41RoutedDispatchPhase struct {
 	name string
 	snap agent.V41RoutedPhaseSnapshot
@@ -677,6 +702,7 @@ func (s *Server) writeMoEResidencyMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"budget\"} %d\n", l.BudgetBytes)
 	fmt.Fprintf(b, "fak_gateway_moe_expert_ring_bytes{kind=\"resident\"} %d\n", l.ResidentBytes)
 	writeV41RoutedDispatchMetrics(b, l.V41Phases)
+	writeV41CohortExpertUnionMetrics(b, model.V41CohortExpertUnionSnapshot())
 
 	last := l.Last
 	if last.Shape.Experts > 0 {
