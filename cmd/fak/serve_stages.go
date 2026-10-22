@@ -514,6 +514,23 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
 			"in-kernel chat decode -> Apple-Silicon Metal GPU (prefill + resident Q8 decode)"))
 	}
+	deviceBackendName := ""
+	if chatBackend != nil {
+		deviceBackendName = chatBackend.Name()
+	}
+	kvRes, err := resolveServeKVPrecision(*sf.kvPrecision, serveKVBackendName(deviceBackendName, useMetal), halo, realizedServeKVPrecisions)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(2)
+	}
+	if kvRes.Source == "halo-default" && kvRes.Realized != fakmodel.KVPrecisionFP32 {
+		*sf.kvPrecision = string(kvRes.Realized)
+	}
+	kvLevel, kvMsg := "info", fmt.Sprintf("kv precision %s (source=%s backend=%s)", kvRes.Realized, kvRes.Source, kvRes.Backend)
+	if kvRes.Note != "" {
+		kvLevel, kvMsg = "warn", kvMsg+": "+kvRes.Note
+	}
+	rt.addStartupMessage(newServeStartupMessage("serve", "kv-precision", kvLevel, kvMsg))
 	// Multi-GPU rank counts (#971). The EP arithmetic is host-proven bit-exact at ranks=1
 	// (the no-op default), but a ranks>1 reduction is only a real multi-GPU serve when it
 	// runs over a non-cpu-ref device collective. Fail loud on N>1 rather than silently reduce

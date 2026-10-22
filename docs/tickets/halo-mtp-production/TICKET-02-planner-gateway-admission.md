@@ -194,6 +194,31 @@ added by speculation are the verify panel, `q4k_matmul` 1088x1 at 24.0
 ms/token, and the all-position head, `q6k_matmul` 15520x1 at 12.3 ms/token.
 The verify transaction is the lever, not the drafter.
 
+The kernel attribution above is indirect: both profile-on rows have
+`complete=false` with untimed compute, which is also why `fak-strix perf receipt`
+refuses each arm (`untimed_submits`).
+
+## Follow-ups (2026-10-22 review)
+
+- [x] [SW-VERIFIED] The exact UD-Q2_K_XL retained head (Q6_K/Q8_0 matrices, F32
+  norms, Q4_K output head; layout Format Q4_K) admits through the resident layout
+  added in `7a71f63db5`, and its resident CPU forward matches the dequantized
+  oracle (cosine >= 0.9999, same argmax). An incomplete head still refuses with
+  `*Qwen35MTPIncompleteError`. Witness: `go test ./internal/model -run
+  '^TestQwen38MTPResidentUDQ2KXL'`, red against the pre-`7a71f63db5` admission
+  code. The strix1 Vulkan load refusal for that artifact (`k_proj` Q8_0, want
+  Q4_K) is the resident-Q4K loader envelope and is unchanged.
+- [x] [SW-VERIFIED] `fak-strix bench abba` now records, per run, the GGUF sha256
+  (`model_sha256`) and the run's own `fak_compute_host_fallback_total`
+  (`host_fallback`); per request, the `x-fak-speculative` and
+  `x-fak-speculative-downgrade` header or trailer (`route`). Each arm summary
+  carries `provenance.zero_hidden_fallback`.
+- [ ] [HW-WITNESSED] Rerun the strix1 B/C1 A/B with that runner so the qualified
+  comparison itself carries the GGUF digest, per-request route and a zero host
+  fallback count. Not witnessed yet.
+- [ ] The resident Vulkan timestamp profiler still leaves compute untimed on the
+  MTP rows, so no fak.perf-receipt/2 is creditable yet. Not closed yet.
+
 ## Definition of done
 
 - [x] Production gateway construction reaches request-scoped resident Vulkan MTP.

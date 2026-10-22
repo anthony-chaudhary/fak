@@ -2698,8 +2698,17 @@ func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
 func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
 	backend, forwardPath := p.executionIdentity()
 	hostClause, q8Clause := p.executionPlacementClauses(q8kern, q8fusedMark)
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s%s q4k=%v%s prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s%s",
-		p.modelID, backend, forwardPath, hostClause, p.q4k, q8Clause, promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause())
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s%s q4k=%v%s prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s%s kv=%s",
+		p.modelID, backend, forwardPath, hostClause, p.q4k, q8Clause, promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause(), p.kvPrecisionLabel())
+}
+
+// kvPrecisionLabel is the kv= value of the execution summary: the realized KV tier,
+// with the unset zero value spelled as the f32 it stores.
+func (p *InKernelPlanner) kvPrecisionLabel() string {
+	if p == nil || p.kvPrecision == "" {
+		return string(model.KVPrecisionFP32)
+	}
+	return string(p.kvPrecision)
 }
 
 // prefillQ4KGEMMLabel is the gemm= value of the execution summary: the Q4_K prefill GEMM
