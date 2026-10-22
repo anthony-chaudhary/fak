@@ -105,3 +105,48 @@ func TestServeGPULayersFlagsReachTypedPlannerConfig(t *testing.T) {
 		t.Fatalf("--native-gpu-layers: DenseGPULayers = %d, want 24", got)
 	}
 }
+
+// fak-test:justify why=regression when=changed:cmd/fak/serve*.go
+// fak-test:runtime fast est=50ms lane=default
+func TestServeV41EngramLookAheadConfig(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if serveNativePlannerConfig(sf).V41EngramLookAhead {
+		t.Fatal("look-ahead must default off")
+	}
+	if !serveNativePlannerConfig(sf).BatchDecode {
+		t.Fatal("flag must not change existing serve batching default")
+	}
+	var help bytes.Buffer
+	printServeHelp(&help, fs, "native")
+	if !strings.Contains(help.String(), "native-v41-engram-lookahead") {
+		t.Fatal("public flag absent from native help")
+	}
+	if err := fs.Parse([]string{"--native-v41-engram-lookahead"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := serveNativePlannerConfig(sf)
+	if !cfg.V41EngramLookAhead || !cfg.BatchDecode {
+		t.Fatal("flag lost or silently switched serving mode")
+	}
+	got := parseEffectiveServeConfig(t, "", "--native-v41-engram-lookahead").Values["native_v41_engram_lookahead"]
+	if got.Value != true || got.Source != "flag" {
+		t.Fatalf("effective readback=%+v", got)
+	}
+	for _, explicit := range []bool{false, true} {
+		sf := independentProxyComputeFlags(t, "--base-url", "http://127.0.0.1:18091/v1")
+		if explicit {
+			sf.explicit["native-v41-engram-lookahead"] = true
+		} else {
+			*sf.nativeV41EngramLookAhead = true
+		}
+		remote, err := (&serveRuntime{}).proxyOnlyCompute(sf, func(string) string { return "" })
+		if err != nil || remote {
+			t.Fatalf("enabled/explicit compute flag ignored: %t %v", remote, err)
+		}
+	}
+	shared := flag.NewFlagSet("shared", flag.ContinueOnError)
+	registerNativeControlFlags(shared)
+	if shared.Lookup("native-v41-engram-lookahead") != nil {
+		t.Fatal("serve-only route advertised by unsupported guard")
+	}
+}

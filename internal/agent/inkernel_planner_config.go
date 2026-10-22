@@ -77,6 +77,12 @@ type InKernelPlannerConfig struct {
 	// with it true, a B==1 fan-out is still bit-identical to serial (see the
 	// batchDecode field note in inkernel_planner.go).
 	BatchDecode bool
+	// V41EngramLookAhead opts serial Complete/CompleteStream forwards into bounded
+	// Engram look-ahead. False preserves existing execution. Enabled requests
+	// require BatchDecode=false, an attached V4.1 model and no speculation/EP.
+	// Source eligibility and lifetime admission remain independent; cancellation
+	// joins noninterruptible reads and is not a wall-time guarantee.
+	V41EngramLookAhead bool
 	// IncrementalContext opts this planner into the composed system-context
 	// registry seam (inkernel_incremental.go): independently refreshable typed
 	// context sources whose changes drive incremental context invalidation. It is
@@ -118,6 +124,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		elideStaleReads:              cfg.ElideStaleReads,
 		deferColdTools:               cfg.DeferColdTools,
 		batchDecode:                  cfg.BatchDecode,
+		v41EngramLookAhead:           cfg.V41EngramLookAhead,
 		warmDiskModelIdentity:        strings.TrimSpace(cfg.WarmDiskModelIdentity),
 		deepSeekV41ChatProfile:       cfg.DeepSeekV41ChatProfile,
 	}
@@ -206,6 +213,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 	return InKernelPlannerConfig{
 		WarmDiskModelIdentity:     p.warmDiskModelIdentity,
 		DeepSeekV41ChatProfile:    p.deepSeekV41ChatProfile,
+		V41EngramLookAhead:        p.v41EngramLookAhead,
 		ContextTokens:             p.contextTokens,
 		CPUCacheBytes:             cpuBytes,
 		KVPrecision:               p.kvPrecision,

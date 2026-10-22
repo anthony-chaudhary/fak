@@ -9958,6 +9958,16 @@
           "category": "incidental",
           "reason": "Study inventory flag that the bounded scan of skipped directories for GPU-kernel files hit its budget.",
           "token": "skippedkernelscantruncated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private lookup key for the invocation-owned selected-forward marker in the existing request context. It implements the positioned InKernelPlannerConfig.V41EngramLookAhead selection/no-replay contract and defines no independent engine, execution policy, cancellation scope or ownership contract.",
+          "token": "inKernelEngramAttemptContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private one-boolean invocation-local selected-forward state carrier implementing the positioned InKernelPlannerConfig.V41EngramLookAhead selection/no-replay contract. It is not an independent engine, request policy, cancellation scope, source lease or session ownership abstraction.",
+          "token": "inKernelEngramAttempt"
         }
       ],
       "exclude": [
@@ -10081,6 +10091,8 @@
         "inKernelCoalesceResult",
         "inKernelDecodeCohortMax",
         "inKernelDecodeIteration",
+        "inKernelEngramAttempt",
+        "inKernelEngramAttemptContextKey",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
         "inKernelRawV41Prompt",
@@ -12639,6 +12651,11 @@
           "category": "incidental",
           "reason": "Private field borrowing the caller's standard context.Context only during one serial opted-in Step and transporting cancellation to the existing Engram future contract; it introduces no new context type, independent cancellation scope, or ownership abstraction.",
           "token": "engramLookAheadContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private standard context lookup key for the invocation-owned selected-forward marker stored in the existing request context. The marker implements the separately positioned V41EngramLookAhead selection policy; the key defines no new context type, cancellation scope or source/session ownership contract.",
+          "token": "inKernelEngramAttemptContextKey"
         }
       ],
       "exclude": [
@@ -12779,6 +12796,7 @@
         "guardSourceReadRecovery",
         "guardSourceReadRecoverySchema",
         "inKernelCoalesceContextKey",
+        "inKernelEngramAttemptContextKey",
         "inspectCodexHookProfileContext",
         "laneCtx",
         "latestGuardCompactionWitness",

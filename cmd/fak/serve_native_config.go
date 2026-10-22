@@ -103,6 +103,7 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 			Qwen35MetalGDNSequence:    *sf.nativeQwen35MetalGDNSequence,
 			Q4KGateUpOutputSlab:       *sf.nativeQ4KGateUpOutputSlab,
 			DenseGPULayers:            gpuLayers,
+			V41EngramLookAhead:        sf.nativeV41EngramLookAhead != nil && *sf.nativeV41EngramLookAhead,
 			KVPrecision:               prec,
 			// An explicit --native-compact-history-budget wins; 0 leaves the field
 			// zero and serveNativePlannerConfigWithContext derives it from the

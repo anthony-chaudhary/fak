@@ -10,7 +10,8 @@
       "distinct_from": [
         "x-ci-coverage-policy-capability-executionpolicy",
         "gguf-manifest-header-preflight",
-        "v41engramlookaheadreadpolicy"
+        "v41engramlookaheadreadpolicy",
+        "v41engramseriallookaheadselection"
       ],
       "aliases": [],
       "grounding": "serveexecutionpolicy",

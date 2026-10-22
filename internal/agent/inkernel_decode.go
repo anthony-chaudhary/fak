@@ -397,7 +397,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			s = p.m.NewSession()
 		}
 	}
-	if closeSession {
+	// The selected route owns source-read lifetime even on a CPU session.
+	// Keep the historical default-off CPU cleanup behavior unchanged.
+	if closeSession || p.v41EngramLookAhead {
 		defer finishInKernelCleanup(&err, s.Close)
 	}
 	if measurement != nil {
@@ -740,6 +742,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged.
 		inKernelDecodeLanesBatched(ctx, []*decodeLane{ln}, p.m, p.quant)
 	} else {
+		ln.engramAttempt, _ = ctx.Value(inKernelEngramAttemptContextKey{}).(*inKernelEngramAttempt)
 		inKernelDecodeSerial(ctx, ln)
 	}
 	gen, stopped, err = ln.gen, ln.stopped, ln.err
@@ -888,13 +891,15 @@ func (c *nativeThinkingConstraint) closingToken(vocab int) (int, bool, error) {
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
 // the property that makes the two paths bit-for-bit equivalent.
 type decodeLane struct {
-	ctx    context.Context
-	s      *model.Session
-	logits []float32
-	counts []int32
-	rng    *rand.Rand
-	emit   func(int) bool
-	stops  map[int]bool
+	// engramAttempt belongs to this generation, never to a cached Session.
+	engramAttempt *inKernelEngramAttempt
+	ctx           context.Context
+	s             *model.Session
+	logits        []float32
+	counts        []int32
+	rng           *rand.Rand
+	emit          func(int) bool
+	stops         map[int]bool
 
 	temp        float64
 	topP        float64
@@ -1299,10 +1304,13 @@ func (ln *decodeLane) deviceGreedy() bool {
 // step is the serial forward. A greedy lane asks the session for the token only; a
 // session that cannot select on the device returns host logits and the lane samples them
 // exactly as before.
-func (ln *decodeLane) step(id int) {
+func (ln *decodeLane) step(ctx context.Context, id int) error {
+	if ln.engramAttempt != nil {
+		return ln.stepWithEngramLookAhead(ctx, id)
+	}
 	if !ln.deviceGreedy() {
 		ln.logits = ln.s.Step(id)
-		return
+		return nil
 	}
 	if ln.logits != nil {
 		ln.vocab = len(ln.logits)
@@ -1310,6 +1318,42 @@ func (ln *decodeLane) step(id int) {
 	ln.retainGreedyLogits()
 	ln.greedyNext, ln.logits = ln.s.StepGreedy(id)
 	ln.greedyReady = ln.logits == nil
+	return nil
+}
+
+// inKernelEngramAttempt is request-local retry state, distinct from observer
+// delivery. Only the serial caller mutates it; the background reader never does.
+type inKernelEngramAttempt struct{ selected bool }
+type inKernelEngramAttemptContextKey struct{}
+
+func (ln *decodeLane) stepWithEngramLookAhead(ctx context.Context, id int) error {
+	returned := false
+	var payload any
+	func() {
+		defer func() { payload = recover() }()
+		if !ln.deviceGreedy() {
+			ln.engramAttempt.selected = true
+			ln.logits = ln.s.StepWithV41EngramLookAhead(ctx, id)
+		} else {
+			if ln.logits != nil {
+				ln.vocab = len(ln.logits)
+			}
+			ln.retainGreedyLogits()
+			ln.engramAttempt.selected = true
+			ln.greedyNext, ln.logits = ln.s.StepGreedyWithV41EngramLookAhead(ctx, id)
+			ln.greedyReady = ln.logits == nil
+		}
+		returned = true
+	}()
+	if !returned {
+		// The model has already joined its retained read before reaching here.
+		// Goexit never reaches this conversion; unknown panics remain panics.
+		if err, ok := payload.(error); ok && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return err
+		}
+		panic(payload)
+	}
+	return nil
 }
 
 // retainGreedyLogits keeps a tracked continuation's latest distribution device-resident:
@@ -1344,7 +1388,10 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		}
 		stepStart := time.Now()
 		if ln.measurement == nil || ln.measurement.traceNow == nil {
-			ln.step(next)
+			if err := ln.step(laneCtx, next); err != nil {
+				ln.err, ln.done = err, true
+				return
+			}
 			enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 			if ln.forwarded != nil {
 				ln.forwarded = append(ln.forwarded, next)
@@ -1352,7 +1399,10 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 			continue
 		}
 		started := ln.measurement.traceNow()
-		ln.step(next)
+		if err := ln.step(laneCtx, next); err != nil {
+			ln.err, ln.done = err, true
+			return
+		}
 		enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
 		if ln.forwarded != nil {
 			ln.forwarded = append(ln.forwarded, next)

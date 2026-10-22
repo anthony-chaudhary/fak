@@ -263,3 +263,39 @@ row for it would read as dead-wired and red `--check`. It was carried inside the
 generated block by hand for a while, which the next `--md` regeneration silently
 dropped; it is documented with the guard flag surface instead (`fak manage --help`,
 "Token economy").
+
+## Optional serial V4.1 Engram look-ahead
+
+`--native-v41-engram-lookahead` is an explicit, default-off option for the
+in-kernel `Complete` / `CompleteStream` serial decode path. For a previously
+admitted V4.1 model with an attached Engram stage, the operator can select it
+alongside the **existing** serial-mode override:
+
+```bash
+FAK_INKERNEL_BATCH=off fak serve --gguf MODEL.gguf --tokenizer TOKENIZER \
+  --native-v41-engram-lookahead
+```
+
+This example is configuration syntax, not hardware launch or qualification.
+The flag does not disable the default batch/cohort mode for you. If batching,
+DFlash2, speculative/MTP decoding, or expert parallelism is configured, enabled
+requests refuse before forward or stream output. An absent Engram stage also
+refuses. Programmatic callers use `InKernelPlannerConfig.V41EngramLookAhead`
+with `BatchDecode: false`. There is no new environment variable or request-body
+extension. Effective config reports the requested setting, not actual overlap.
+
+Both greedy and sampled serial decode retain their existing selection and
+accounting behavior. Each selected forward uses the effective request/lane
+context and the bounded, retained one-panel Engram future. Source eligibility
+and process-wide credit remain separate checks: ineligible sources or busy
+credit may use the admitted synchronous path, but a failed source hold is a
+terminal refusal. A failure after selection is not eligible for whole-generation
+OOM retry, even if cancellation arrives concurrently. Pre-selection OOM retry
+is unchanged.
+
+Cancellation joins any already-started read before the session is retired.
+A noninterruptible underlying `ReadAt` can therefore delay cancellation; this
+is not a hard cancellation deadline. Ordinary/default, batch/cohort and
+speculative paths are unchanged. Other direct model-engine callers do not
+inherit this switch. No device throughput, universal serving coverage, or new
+default is implied.

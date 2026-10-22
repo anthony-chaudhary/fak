@@ -339,6 +339,18 @@ func (f *v41EngramLookAheadJob) releaseJoined() {
 // Speculative I/O and cache effects may precede consumption or an earlier-layer
 // failure. No synchronous I/O-order equivalence or throughput benefit is promised.
 func (s *Session) StepWithV41EngramLookAhead(ctx context.Context, id int) []float32 {
+	_, logits := s.stepWithV41EngramLookAhead(ctx, id, false)
+	return logits
+}
+
+// StepGreedyWithV41EngramLookAhead applies the same per-call ownership and
+// cancellation contract while preserving StepGreedy's device selection, retained
+// logits and host-fallback accounting. It does not force device-only execution.
+func (s *Session) StepGreedyWithV41EngramLookAhead(ctx context.Context, id int) (int, []float32) {
+	return s.stepWithV41EngramLookAhead(ctx, id, true)
+}
+
+func (s *Session) stepWithV41EngramLookAhead(ctx context.Context, id int, greedy bool) (int, []float32) {
 	if s == nil || s.M == nil || !s.M.Cfg.IsDeepSeekV41() || ctx == nil {
 		panic(v41EngramLookAheadErr(-1, "requires a V4.1 session and context"))
 	}
@@ -352,7 +364,10 @@ func (s *Session) StepWithV41EngramLookAhead(ctx context.Context, id int) []floa
 	}
 	st.engramLookAheadContext = ctx
 	defer func() { st.engramLookAheadContext = nil }()
-	return s.Step(id)
+	if greedy {
+		return s.StepGreedy(id)
+	}
+	return 0, s.Step(id)
 }
 
 // The serial transaction owns this slot. There is at most one pending layer,

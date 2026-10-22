@@ -189,6 +189,7 @@ func effectiveServeConfig(sf *serveFlags, m deploymanifest.Manifest, hasManifest
 			"native_qwen35_metal_gdn_sequence":     {Value: *sf.nativeQwen35MetalGDNSequence, Source: source("native-qwen35-metal-gdn-sequence", "", "")},
 			"native_q4k_gateup_slab":               {Value: *sf.nativeQ4KGateUpOutputSlab, Source: source("native-q4k-gateup-slab", "", "")},
 			"native_v41_prefill_sum_readback":      {Value: sf.nativeV41PrefillSumReadback != nil && *sf.nativeV41PrefillSumReadback, Source: source("native-v41-prefill-sum-readback", "", "")},
+			"native_v41_engram_lookahead":          {Value: sf.nativeV41EngramLookAhead != nil && *sf.nativeV41EngramLookAhead, Source: source("native-v41-engram-lookahead", "", "")},
 			"native_prefix_profile":                {Value: *sf.nativePrefixProfile, Source: source("native-prefix-profile", "", "")},
 			"vulkan_q4k_profile":                   {Value: *sf.vulkanQ4KProfile, Source: source("vulkan-q4k-profile", "", "")},
 			"vulkan_stage_q4k":                     {Value: *sf.vulkanStageQ4K, Source: source("vulkan-stage-q4k", "", "")},

@@ -1595,3 +1595,10 @@ Model operation that checks layer rows and retained state then prepares either p
 V41EngramLookAheadReadPolicy(rowBytes) declares whether an Engram producer supports immutable, concurrent-safe look-ahead reads at the exact requested row width, returning its maximum staging bytes per row.
 
 **Distinct from:** This is a producer read-eligibility and staging contract, not FP4 hardware capability or serve launch policy. It does not authenticate the factory, verify artifact bytes, retain source lifetime, activate a scheduler, or guarantee RSS.
+
+
+### InKernelPlannerConfig.V41EngramLookAhead
+
+InKernelPlannerConfig.V41EngramLookAhead is a default-false typed operator selection for attached V4.1 Engram in explicitly serial, non-speculative, non-expert-parallel serving. It routes greedy and sampled incremental forwards through the per-call look-ahead API while preserving greedy accounting, effective request cancellation and terminal selected-forward failures.
+
+**Distinct from:** This is caller admission and no-replay selection, not producer read eligibility/staging or general serve launch policy. It does not retain source lifetime, authenticate a producer, change batching defaults, guarantee RSS, enable hardware or demonstrate throughput.

@@ -226,6 +226,8 @@ type InKernelPlanner struct {
 	// Seqs[0].Step, so the served tokens are unchanged — the batched glm_moe_dsa GEMM that
 	// yields throughput is the separate, box-gated lever, not this flag.
 	batchDecode bool
+	// v41EngramLookAhead is an explicit serial-only construction setting.
+	v41EngramLookAhead bool
 
 	// kvPrefixEverAdmitted is the #3391 first-prefill latch: false until a reuse-enabled
 	// turn has admitted its prompt into the radix tree (generateReused step 3). While
@@ -443,6 +445,9 @@ func (p *InKernelPlanner) StreamingSupported() bool { return true }
 // sink with the post-decode projection (loop_project.go), so its emitted deltas land in
 // the client's view of Content.
 func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	if err := p.validateV41EngramLookAhead(); err != nil {
+		return nil, err
+	}
 	sp := applySampleOpts(opts...)
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
 		return nil, err
@@ -1752,6 +1757,13 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 }
 
 func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func(), measurementOpt ...*nativeInferenceMeasurement) (inKernelGenerateResult, error) {
+	if err := p.validateV41EngramLookAhead(); err != nil {
+		return inKernelGenerateResult{}, err
+	}
+	if p.v41EngramLookAhead {
+		// Fresh state per generation, shared only with this invocation's retry.
+		ctx = context.WithValue(ctx, inKernelEngramAttemptContextKey{}, &inKernelEngramAttempt{})
+	}
 	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err == nil {
 		return res, nil
@@ -1778,6 +1790,11 @@ type inKernelObserverDeliveryContextKey struct{}
 // under the recovered capacity,
 // otherwise it refuses typed instead of re-growing into the same wall.
 func (p *InKernelPlanner) admitDeviceOOMRetry(ctx context.Context, err error, promptTokens, maxNew int) (bool, error) {
+	if attempt, _ := ctx.Value(inKernelEngramAttemptContextKey{}).(*inKernelEngramAttempt); attempt != nil && attempt.selected {
+		// Selection may have started speculative I/O even if the forward failed.
+		// Preserve the primary failure, including when cancellation also arrived.
+		return false, err
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return false, ctxErr
 	}
@@ -2076,7 +2093,28 @@ func validateNativeSamplingParams(sp SampleParams) error {
 	return nil
 }
 
+// validateV41EngramLookAhead refuses incompatible explicit configuration before
+// any forward or output. It never disables an existing batch/speculative route.
+func (p *InKernelPlanner) validateV41EngramLookAhead() error {
+	if !p.v41EngramLookAhead {
+		return nil
+	}
+	if p.m == nil || !p.m.Cfg.IsDeepSeekV41() || !p.m.V41EngramAttached() {
+		return fmt.Errorf("%w: Engram look-ahead requires an attached V4.1 model", model.ErrV41NativeUnsupported)
+	}
+	if p.batchDecode {
+		return fmt.Errorf("%w: Engram look-ahead requires explicit serial decode (FAK_INKERNEL_BATCH=off for serve)", model.ErrV41NativeUnsupported)
+	}
+	if p.dflash2 != nil || p.speculativeEngine != nil || p.vulkanMTP || p.vulkanMTPDraftFactory != nil || p.MetalMTPCoordinator() != nil || p.m.ExpertParallelRanks() > 1 || p.m.IsExpertParallelRankLocal() {
+		return fmt.Errorf("%w: Engram look-ahead does not support speculative, DFlash2 or expert-parallel execution", model.ErrV41NativeUnsupported)
+	}
+	return nil
+}
+
 func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
+	if err := p.validateV41EngramLookAhead(); err != nil {
+		return nil, err
+	}
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
