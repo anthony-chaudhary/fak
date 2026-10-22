@@ -34,3 +34,30 @@ the upstream cast comments; the CUDA conversion kernel itself is external to the
 repository. The test composes this cast with fak's own f32 indexer score and
 top-k selection to measure top-512 selection overlap against fak's bf16-widened
 f32 scoring. Fak's indexer is unchanged and does not score MXFP4.
+
+KV cache FP8 window and FP4 compressed casts (internal/model/v41_kv_quant_oracle_test.go)
+
+Upstream paths:
+  deepinfer/model_executor/layers/tilelang_ops/cache_common.py:109-128,331-357
+  deepinfer/model_executor/layers/tilelang_ops/cuda/store_kv_cache.py:9-16,141-184
+  deepinfer/model_executor/layers/tilelang_ops/cuda/fused_transform.py:514-547
+  deepinfer/model_executor/layers/tilelang_ops/cuda/quant.py:4-9
+  deepinfer/model_executor/layers/tilelang_ops/common.py:22-27
+  deepinfer/model_executor/layers/tilelang_ops/asc/kv_quant.py:48-92,170-189
+  deepinfer/model_executor/model_metadata_utils.py:37-39
+  deepinfer/model_executor/models/v4_modules/attn.py:402-451
+  deepinfer/hugging_face/config.py:303
+
+Adaptation: Go emulation of the V4.1 KV cache casts on fak's projected rows.
+Window rows, and compressed rows when the FP4 sparse KV option is off, are
+rounded to bf16 and passed through fak's existing per-32 e4m3 activation
+reference with a UE8M0 power-of-two scale; a boundary test shows that its
+float32(1/448) multiply selects the same scale as the store kernel's division by
+448. Compressed rows in the default FP4 profile are rounded to bf16 and cast per
+16 values: amax floored at 6*2^-9, multiplied by float32(1/6), capped at 448,
+narrowed to an e4m3 scale, inverted in float32, and the scaled values encoded as
+e2m1, then dequantized to bf16, which is also what the prefill cast-back
+returns. The e4m3 and e2m1 round-to-nearest-even and saturation rules are
+inferred from the upstream constants and cast comments; the CUDA conversion
+kernels are external to the repository. The test measures the relative L2 change
+of fak's host combined attention output on a synthetic fixture.
