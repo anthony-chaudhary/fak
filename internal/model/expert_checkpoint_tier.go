@@ -782,8 +782,24 @@ func (t *ExpertCheckpointTier) prefetchDeclined(src *ggufExpertSource, overlay *
 }
 
 func (t *ExpertCheckpointTier) Prefetch(names []string) int {
+	return len(t.startPrefetch(names))
+}
+
+// prefetchJoined is Prefetch plus a join that returns once every read this call started has
+// settled (handed off, published or failed), so a caller can keep its speculative reads inside
+// its own lifetime. The join is idempotent.
+func (t *ExpertCheckpointTier) prefetchJoined(names []string) (int, func()) {
+	loads := t.startPrefetch(names)
+	return len(loads), func() {
+		for _, load := range loads {
+			<-load.done
+		}
+	}
+}
+
+func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpointLoad {
 	if t == nil || len(names) == 0 {
-		return 0
+		return nil
 	}
 	type job struct {
 		name    string
@@ -888,6 +904,10 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		}
 		drained = true
 	}
+	loads := make([]*expertCheckpointLoad, len(jobs))
+	for i, j := range jobs {
+		loads[i] = j.load
+	}
 	for w := 0; w < workers; w++ {
 		go drain()
 	}
@@ -895,7 +915,7 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 		queue <- j
 	}
 	close(queue)
-	return len(jobs)
+	return loads
 }
 
 // finishPrefetchJob runs one prefetch read and publishes its handoff. It is the body the goroutine
