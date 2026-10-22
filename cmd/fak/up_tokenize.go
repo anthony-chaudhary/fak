@@ -30,6 +30,7 @@ func turnkeyChatSampleOpts(req gateway.ChatRequest, contextTokens uint64) []agen
 		agent.WithTopP(req.TopP),
 		agent.WithToolChoice(req.ToolChoice),
 		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),
@@ -78,6 +79,9 @@ func (s *turnkeyServer) handleTokenize(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := ensureTurnkeyTokenizeEOF(decoder); err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !gateway.ValidateStructuredOutputCarriers(w, req) {
 		return
 	}
 	servedModel := strings.TrimSpace(s.plan.Tier.ModelID)

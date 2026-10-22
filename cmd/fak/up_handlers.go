@@ -175,12 +175,25 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 	}
 
 	chatReq := gateway.ChatRequest{
-		Model:       req.Model,
-		Messages:    []agent.Message{{Role: agent.RoleUser, Content: prompt}},
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
+		Model:                 req.Model,
+		Messages:              []agent.Message{{Role: agent.RoleUser, Content: prompt}},
+		MaxTokens:             req.MaxTokens,
+		Temperature:           req.Temperature,
+		TopP:                  req.TopP,
+		Stream:                req.Stream,
+		ResponseFormat:        req.ResponseFormat,
+		GuidedJSON:            req.GuidedJSON,
+		GuidedRegex:           req.GuidedRegex,
+		GuidedChoice:          req.GuidedChoice,
+		GuidedGrammar:         req.GuidedGrammar,
+		GuidedDecodingBackend: req.GuidedDecodingBackend,
+		JSONSchema:            req.JSONSchema,
+		Regex:                 req.Regex,
+		EBNF:                  req.EBNF,
+		StructuredOutputs:     req.StructuredOutputs,
+	}
+	if !gateway.ValidateStructuredOutputCarriers(w, chatReq) {
+		return
 	}
 	modelID := s.plan.Tier.ModelID
 	if chatReq.Model != "" {
@@ -270,6 +283,9 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 }
 
 func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
+	if gateway.WriteStructuredOutputError(w, err) {
+		return
+	}
 	var contextErr *agent.InKernelContextLengthError
 	if errors.As(err, &contextErr) {
 		w.Header().Set("Content-Type", "application/json")
