@@ -281,3 +281,76 @@ func TestResponsesTextFormatMalformedRefusedBeforePlanner(t *testing.T) {
 		t.Fatalf("planner calls=%d, want 0", planner.calls)
 	}
 }
+
+// Ambiguous structured-output keys must never erase a constraint before planning.
+// fak-test:runtime fast est=100ms lane=default
+func TestResponsesTextFormatAmbiguousKeysRefusedBeforePlanner(t *testing.T) {
+	// Schema property names are data, not carrier discriminators. Keep their
+	// original whitespace and spelling intact through envelope translation.
+	rawSchema := ` { "type" : "object", "properties" : { "Type": {}, "Format": {}, "Schema": {} } } `
+	format, ok := responsesTextResponseFormat(json.RawMessage(`{"format":{"type":"json_schema","schema":` + rawSchema + `}}`))
+	if !ok || !strings.Contains(string(format), `"schema":`+strings.TrimSpace(rawSchema)) {
+		t.Fatalf("schema bytes changed: ok=%v format=%s", ok, format)
+	}
+
+	for _, stream := range []bool{false, true} {
+		for _, text := range []string{
+			`{"format":{"type":"json_object"},"Format":null}`,
+			`{"Format":null,"format":{"type":"json_object"}}`,
+			`{"format":{"type":"json_object"},"FORMAT":{"type":"text"}}`,
+			`{"FORMAT":{"type":"text"},"format":{"type":"json_object"}}`,
+			`{"format":{"type":"json_object"},"format":null}`,
+			`{"format":null,"format":{"type":"json_object"}}`,
+			`{"Format":{"type":"json_object"}}`,
+			`{"format":{"type":"json_object"},"\u0066ormat":null}`,
+			`{"format":{"type":"json_schema","schema":{},"schema":null}}`,
+			`{"format":{"type":"json_schema","schema":{},"strict":true,"strict":false}}`,
+			`{"format":{"type":"json_schema","schema":{},"ſchema":null}}`,
+			`{"format":{"type":"json_schema","schema":{},"strict":true,"ſtrict":false}}`,
+			`{"format":{"type":"text","Type":"json_object"}}`,
+			`{"format":{"Type":"json_object","type":"text"}}`,
+			`{"format":{"type":"json_object","type":"text"}}`,
+			`{"format":{"type":"text","type":"json_object"}}`,
+			`{"format":{"type":"json_schema","schema":{},"Schema":null}}`,
+			`{"format":{"type":"json_schema","Schema":null,"schema":{}}}`,
+			`{"format":{"type":"json_schema","schema":{},"strict":true,"Strict":false}}`,
+		} {
+			srv := newTestServer(t)
+			planner := &responsesTextFormatStreamingPlanner{}
+			srv.planner = planner
+			rr := postResponsesTextFormat(t, srv, responsesTextFormatBody("client", text, "", stream))
+			if rr.Code != http.StatusBadRequest || chatErrorCode(t, rr.Body.Bytes()) != "invalid_text_format" {
+				t.Fatalf("stream=%v text=%s: status=%d body=%s", stream, text, rr.Code, rr.Body.String())
+			}
+			if !strings.HasPrefix(rr.Header().Get("Content-Type"), "application/json") || strings.Contains(rr.Body.String(), "data: ") {
+				t.Fatalf("stream=%v text=%s: refusal opened a stream: %s", stream, text, rr.Body.String())
+			}
+			if planner.calls != 0 {
+				t.Fatalf("stream=%v text=%s: planner calls=%d, want 0", stream, text, planner.calls)
+			}
+		}
+		// The outer text member must not erase a correctly validated inner envelope.
+		for _, fields := range []string{
+			`"text":{"format":{"type":"json_object"}},"Text":null`,
+			`"Text":null,"text":{"format":{"type":"json_object"}}`,
+			`"text":{"format":{"type":"json_object"}},"text":null`,
+			`"text":null,"text":{"format":{"type":"json_object"}}`,
+			`"Text":{"format":{"type":"json_object"}}`,
+		} {
+			srv := newTestServer(t)
+			planner := &responsesTextFormatStreamingPlanner{}
+			srv.planner = planner
+			body := `{"input":"answer",` + fields
+			if stream {
+				body += `,"stream":true`
+			}
+			rr := postResponsesTextFormat(t, srv, body+"}")
+			if !strings.HasPrefix(rr.Header().Get("Content-Type"), "application/json") || strings.Contains(rr.Body.String(), "data: ") {
+				t.Fatalf("stream=%v fields=%s: refusal opened a stream: %s", stream, fields, rr.Body.String())
+			}
+			if rr.Code != http.StatusBadRequest || planner.calls != 0 {
+				t.Fatalf("stream=%v fields=%s: status=%d calls=%d body=%s", stream, fields, rr.Code, planner.calls, rr.Body.String())
+			}
+		}
+	}
+}

@@ -71,6 +71,21 @@ type ResponsesRequest struct {
 	PreviousResponseID string `json:"previous_response_id,omitempty"`
 }
 
+// UnmarshalJSON keeps the structured-output envelope from being overwritten by
+// case-folded aliases or duplicate text members before format validation runs.
+func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
+	if _, ok := responsesExactFormatObject(data, "text"); !ok {
+		return fmt.Errorf("ambiguous Responses text envelope")
+	}
+	type request ResponsesRequest
+	var decoded request
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = ResponsesRequest(decoded)
+	return nil
+}
+
 // responsesTool is the inbound Responses function-tool declaration. Unlike the chat
 // wire's nested {type:"function", function:{name,...}}, the Responses wire FLATTENS
 // the function fields to the top level: {type:"function", name, description,
@@ -1370,6 +1385,48 @@ func validateResponsesSampling(req ResponsesRequest) string {
 	return validateSamplingRanges(req.Temperature, req.TopP)
 }
 
+// responsesExactFormatObject preserves raw values while refusing ambiguous
+// reserved keys. Check before map decoding can erase duplicates or struct
+// decoding can let a case-folded alias overwrite a constraint with null/text.
+// Unrelated extension members retain their existing last-value behavior.
+func responsesExactFormatObject(raw []byte, reserved ...string) (map[string]json.RawMessage, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	token, err := dec.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	members := make(map[string]json.RawMessage)
+	for dec.More() {
+		token, err := dec.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, false
+		}
+		for _, want := range reserved {
+			if strings.EqualFold(key, want) {
+				if key != want {
+					return nil, false
+				}
+				if _, exists := members[key]; exists {
+					return nil, false
+				}
+			}
+		}
+		var value json.RawMessage
+		if dec.Decode(&value) != nil {
+			return nil, false
+		}
+		members[key] = value
+	}
+	if token, err = dec.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	if _, err = dec.Token(); err != io.EOF {
+		return nil, false
+	}
+	return members, true
+}
+
 // responsesTextResponseFormat inverts agent.responsesText: json_schema members move
 // back under a `json_schema` wrapper with their raw bytes intact, so the shared schema
 // caps measure what the client sent; other non-text types pass through verbatim. nil
@@ -1382,18 +1439,16 @@ func responsesTextResponseFormat(raw json.RawMessage) (json.RawMessage, bool) {
 	if trimmed[0] != '{' {
 		return nil, false
 	}
-	var text struct {
-		Format json.RawMessage `json:"format"`
-	}
-	if json.Unmarshal(trimmed, &text) != nil {
+	text, ok := responsesExactFormatObject(trimmed, "format")
+	if !ok {
 		return nil, false
 	}
-	format := bytes.TrimSpace(text.Format)
+	format := bytes.TrimSpace(text["format"])
 	if len(format) == 0 || bytes.Equal(format, []byte("null")) {
 		return nil, true
 	}
-	var members map[string]json.RawMessage
-	if format[0] != '{' || json.Unmarshal(format, &members) != nil {
+	members, ok := responsesExactFormatObject(format, "type", "schema", "strict")
+	if !ok {
 		return nil, false
 	}
 	var typ string
