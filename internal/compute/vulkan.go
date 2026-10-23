@@ -2003,6 +2003,11 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	}
 	switch w.Dtype {
 	case F32:
+		// Only this ordinary single-dispatch F32 route has a complete three-buffer
+		// contract. Packed/scalar-head paths above and below remain undeclared.
+		if VulkanHazardLoweringArmed(os.Getenv) {
+			v.recordF32DecodeMatMul(w, x, y, out, in)
+		}
 		C.fvk_matmul_f32(v.vp(w), v.vp(x), v.vp(y), C.int(out), C.int(in), 1)
 	case Q8_0:
 		v.q8MatMulLocked(w, x, y, out, in, 1)

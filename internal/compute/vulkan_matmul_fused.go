@@ -600,3 +600,38 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 		panic("compute: vulkan SwiGLUMatMulAddInPlace unsupported weight dtype " + w.Dtype.String())
 	}
 }
+
+// recordF32DecodeMatMul is called under vulkanMu immediately before the one
+// fvk_matmul_f32 dispatch. Reservation reads are host metadata only: no upload,
+// staging, Vulkan calls, allocation, or epoch transition may occur here.
+func (v *vulkanBackend) recordF32DecodeMatMul(w, x, y Tensor, out, in int) {
+	if !C.fvk_batch_foreign_active() {
+		return
+	}
+	operand := func(t Tensor) vulkanF32DecodeOperand {
+		b, ok := t.buf.(*vulkanBuf)
+		if !ok || b == nil || b.ptr == nil || t.be != v ||
+			t.Dtype != F32 || t.Layout != RowMajor || t.Quant != nil ||
+			b.scalePtr != nil || len(b.q8Chunks) != 0 || b.n <= 0 {
+			return vulkanF32DecodeOperand{}
+		}
+		var backing C.fvk_buffer_reservation_info
+		if C.fvk_buffer_reservation(b.ptr, &backing) != 1 {
+			return vulkanF32DecodeOperand{}
+		}
+		return vulkanF32DecodeOperand{
+			BufferID: v.bufferIdentity(t), Bytes: int64(b.n), Shape: t.Shape,
+			AllocationID:     uint64(backing.allocation_id),
+			BindingOffset:    uint64(backing.binding_offset),
+			BufferBytes:      uint64(backing.buffer_bytes),
+			ReservationBytes: uint64(backing.reservation_bytes),
+		}
+	}
+	accesses, ok := vulkanF32DecodeMatMulAccesses(operand(w), operand(x), operand(y), out, in)
+	if !ok {
+		// An empty declaration poisons this prefix; it cannot license elision.
+		v.recordBatchDispatch()
+		return
+	}
+	v.recordBatchDispatch(accesses[:]...)
+}

@@ -2,6 +2,7 @@ package compute
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -46,6 +47,11 @@ type VulkanBufferAccess struct {
 	Offset   int64
 	Size     int64
 	Mode     VulkanAccessMode
+	// Optional physical backing proof for the ordinary F32 decode seam. BufferID
+	// retains the existing native binding identity namespace. Zero AllocationID
+	// means unavailable; it is never a claim that distinct bindings are disjoint.
+	AllocationID  uint64
+	BindingOffset int64
 }
 
 // VulkanDispatchAccess is the complete resource-access declaration for one recorded
@@ -126,7 +132,33 @@ func VulkanHazardMinBarriers(n int) int {
 // `next` describe a dependency requiring synchronization, and which kind. Disjoint
 // ranges on the same buffer never conflict; different buffers never conflict.
 func accessModesConflict(prev, next VulkanBufferAccess) (VulkanHazardKind, bool) {
-	if prev.BufferID != next.BufferID {
+	for _, a := range [2]VulkanBufferAccess{prev, next} {
+		if a.Offset < 0 || a.Size < 0 || a.BindingOffset < 0 ||
+			(a.AllocationID == 0 && a.BindingOffset != 0) ||
+			a.BindingOffset > math.MaxInt64-a.Offset ||
+			a.Size > math.MaxInt64-a.BindingOffset-a.Offset {
+			return VulkanHazardUnknown, true
+		}
+	}
+	if prev.AllocationID != 0 || next.AllocationID != 0 {
+		// Never compare a verified physical binding with a pointer-only identity
+		// as if they were different allocations. Existing pointer-only callers
+		// retain their established allocator contract when both are pointer-only.
+		if prev.AllocationID == 0 || next.AllocationID == 0 {
+			return VulkanHazardUnknown, true
+		}
+		if prev.BufferID == next.BufferID &&
+			(prev.AllocationID != next.AllocationID || prev.BindingOffset != next.BindingOffset) {
+			return VulkanHazardUnknown, true
+		}
+		if prev.AllocationID != next.AllocationID {
+			return VulkanHazardNone, false
+		}
+		// Ledger validation proves these additions cannot overflow. Preserve
+		// Size==0 as whole-backing conservative overlap.
+		prev.Offset += prev.BindingOffset
+		next.Offset += next.BindingOffset
+	} else if prev.BufferID != next.BufferID {
 		return VulkanHazardNone, false
 	}
 	if !accessRangesOverlap(prev, next) {

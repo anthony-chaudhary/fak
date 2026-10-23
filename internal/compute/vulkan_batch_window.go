@@ -60,7 +60,10 @@ func (l *vulkanBatchHazardLedger) recordVerdict(d VulkanDispatchAccess) bool {
 	}
 	for _, a := range d.Accesses {
 		if a.BufferID == 0 || a.Offset < 0 || a.Size < 0 || a.Offset > math.MaxInt64-a.Size ||
-			a.Mode < VulkanAccessRead || a.Mode > VulkanAccessReadWrite {
+			a.Mode < VulkanAccessRead || a.Mode > VulkanAccessReadWrite ||
+			a.BindingOffset < 0 || (a.AllocationID == 0 && a.BindingOffset != 0) ||
+			a.BindingOffset > math.MaxInt64-a.Offset ||
+			a.Size > math.MaxInt64-a.BindingOffset-a.Offset {
 			d.Declared = false
 		}
 	}
