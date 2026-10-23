@@ -16,6 +16,7 @@ func (scratch *v41ProjScratch) bindV41StepState(st *v41ForwardState) {
 	scratch.expertGateUp, scratch.expertDown = st.expertGateUp, st.expertDown
 	scratch.routedExpert = st.routedExpert
 	scratch.routedLayer = st.routedLayer
+	scratch.cpuMiss = st.cpuMiss
 	scratch.projectionRoute = st.projectionRoute
 	scratch.groupedOutput = st.groupedOutput
 	scratch.mhcProjection = st.mhcProjection
@@ -43,6 +44,7 @@ func (scratch *v41ProjScratch) clearV41StepState() {
 	scratch.expertGateUp, scratch.expertDown = nil, nil
 	scratch.routedExpert = nil
 	scratch.routedLayer = nil
+	scratch.cpuMiss = nil
 	scratch.projectionRoute = nil
 	scratch.groupedOutput = nil
 	scratch.mhcProjection = nil

@@ -194,9 +194,20 @@ type v41ExpertFaultPhaseLedger struct {
 	// layer recorded (5 per pick plus one sum add per pick on the per-pick arm,
 	// 5 per layer on the id arm); RoutedLayers and RoutedIDLayers count the
 	// layers each arm handled (fak#13820).
-	RoutedLayerDispatches    int     `json:"routed_layer_dispatches"`
-	RoutedLayers             int     `json:"routed_layers"`
-	RoutedIDLayers           int     `json:"routed_id_layers"`
+	RoutedLayerDispatches int `json:"routed_layer_dispatches"`
+	RoutedLayers          int `json:"routed_layers"`
+	RoutedIDLayers        int `json:"routed_id_layers"`
+	// CPUMiss* count the FAK_EXPERT_CPU_MISS=exact host arm: layers that
+	// split picks, misses computed on the host, misses still streamed to the
+	// device, the host arm's wall time, and the time the layer waited on the
+	// host after its device work finished.
+	CPUMissLayers            int     `json:"cpu_miss_layers"`
+	CPUMissExperts           int     `json:"cpu_miss_experts"`
+	CPUMissStreamed          int     `json:"cpu_miss_streamed"`
+	CPUMissNanos             int64   `json:"cpu_miss_nanos"`
+	CPUMissJoinWaitNanos     int64   `json:"cpu_miss_join_wait_nanos"`
+	CPUMissExpertsPerToken   float64 `json:"cpu_miss_experts_per_token"`
+	CPUMissNanosPerToken     float64 `json:"cpu_miss_nanos_per_token"`
 	Tokens                   int     `json:"tokens"`
 	Faults                   int     `json:"faults"`
 	FaultedBytes             int64   `json:"faulted_bytes"`
@@ -561,6 +572,8 @@ func (l *v41ExpertFaultLedger) deriveLocked(led v41ExpertFaultPhaseLedger) v41Ex
 		led.FaultNanosPerToken = float64(led.FaultDoorNanos) / ft
 		led.DequantNanosPerToken = float64(led.DequantNanos) / ft
 		led.ContractionNanosPerToken = float64(led.ContractionNanos) / ft
+		led.CPUMissExpertsPerToken = float64(led.CPUMissExperts) / ft
+		led.CPUMissNanosPerToken = float64(led.CPUMissNanos) / ft
 	}
 	if denom := led.ResidentHits + led.Faults; denom > 0 {
 		led.ResidentHitFraction = float64(led.ResidentHits) / float64(denom)
@@ -773,6 +786,24 @@ func (m *Model) v41NoteRoutedLayerDispatches(id bool, dispatches int) {
 		led.RoutedIDLayers++
 	}
 	led.RoutedLayerDispatches += dispatches
+}
+
+func (m *Model) v41NoteCPUMiss(experts, streamed int, cpuNanos, waitNanos int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.CPUMissLayers++
+	led.CPUMissExperts += experts
+	led.CPUMissStreamed += streamed
+	led.CPUMissNanos += cpuNanos
+	led.CPUMissJoinWaitNanos += waitNanos
 }
 
 func (m *Model) v41NoteIncrementalDeviceDispatch(gateUp bool, opened int64) {

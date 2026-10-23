@@ -202,6 +202,9 @@ type v41ForwardState struct {
 	// routedPrefill binds full-forward EP work separately from incremental Step.
 	// It consumes original absolute positions and is never snapshot data.
 	routedPrefill v41RoutedPrefillFunc
+	// cpuMiss is the OPTIONAL FAK_EXPERT_CPU_MISS=exact host arm beside
+	// routedLayer; nil keeps every pick on the device.
+	cpuMiss *v41CPUMissArm
 	// mhcDevice is the session's mHC stream seam (initial streams, split,
 	// pre-collapse, post-mix). nil keeps the host reference; a non-nil seam
 	// dispatches every full-geometry mHC op on the backend or refuses.
@@ -381,7 +384,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScaleBinding: st.logitScaleBinding, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScaleBinding: st.logitScaleBinding, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, cpuMiss: st.cpuMiss, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.copySharedAttentionFrom(st)
 		inputRun := st.beginAttentionInputRun(runState)
 		defer inputRun.close()
@@ -1009,6 +1012,7 @@ func (s *Session) v41State() *v41ForwardState {
 		if s.executionPolicy == ExecutionPolicyDeviceOnly {
 			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)
 		}
+		s.v41Forward.cpuMiss = s.v41CPUMissArmFor(s.v41Forward)
 		s.v41Forward.callbackOwner = s
 		s.bindV41ExpertParallel(s.v41Forward)
 	}

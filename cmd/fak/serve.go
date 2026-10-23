@@ -493,6 +493,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	parseDur := time.Since(tParse)
+	if err := validateServeExpertCPUMiss(os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	durability := resolveServeSessionState(*sf.sessionStatePath, os.Getenv)
 	*sf.sessionStatePath = durability.Path
 

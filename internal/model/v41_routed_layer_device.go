@@ -776,7 +776,14 @@ func (m *Model) v41RoutedLayerStep(l int, picks []routePick, ffnX []float32, scr
 	if err != nil {
 		return nil, true, err
 	}
+	if scratch.cpuMiss != nil {
+		return m.v41RoutedLayerStepCPUMiss(l, picks, x, scratch)
+	}
 	sum, outcome, cause := scratch.routedLayer(l, picks, x)
+	return v41RoutedLayerResult(l, H, sum, outcome, cause)
+}
+
+func v41RoutedLayerResult(l, H int, sum []float32, outcome v41RoutedExpertOutcome, cause error) ([]float32, bool, error) {
 	switch outcome {
 	case v41RoutedExpertHandled:
 		if cause != nil {

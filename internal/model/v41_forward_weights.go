@@ -39,6 +39,7 @@ type v41ProjScratch struct {
 	expertDown           v41ExpertDownFunc
 	routedExpert         v41RoutedExpertFunc
 	routedLayer          v41RoutedLayerFunc
+	cpuMiss              *v41CPUMissArm
 	projectionRoute      *v41ProjectionRouteBinding
 	groupedOutput        v41GroupedOutputRoute
 	mhcProjection        v41MHCProjectionFunc
