@@ -178,6 +178,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *lean {
 		// Lean Q8 load: the f32 weights are dropped, so the reference is the CPU Q8 lane (the
 		// model's proven quantized forward), not f32. Both sides are Q8-weight; argmax must agree.
+		// A backend that cannot stage quantized uploads would fall back to the dropped f32
+		// weights and panic, so it is refused before the load.
+		if !be.Caps().UploadDtype {
+			return fail(2, reasonUnsupportedOptions, fmt.Sprintf("-lean needs a backend that stages quantized uploads; %q does not", be.Name()))
+		}
 		m, lerr := model.LoadSafetensorsQuantDir(*hf, cfg)
 		if lerr != nil {
 			return fail(1, reasonModelLoad, "lean load: "+lerr.Error())
@@ -191,6 +196,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return fail(1, reasonBackendUnavailable, "backend session: "+sessionErr.Error())
 		}
 		defer ds.Close()
+		// The lean load kept only Q8 matmul weights, so the device session must stage them.
+		ds.Quant = true
 		observed = sessionBackendIdentity(ds)
 		ref = rs.Generate(prompt, *n)
 		dev = ds.Generate(prompt, *n)
