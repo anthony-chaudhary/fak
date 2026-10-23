@@ -11,20 +11,49 @@
     "rope_source_accepted_patch_sha256": "e0c6d577f0d1418539aaa78a4c2a17f0595363c225c61fd57575811174d0efe3",
     "hil_published": "30e1434ffc444009619b285142e00c8c46b77c00",
     "rope_cpu_receipt_sha256": "d3c9fa6cfe3421513593bb9ec3f334d066144e65121769bef7b6efbef5a127bb",
-    "coopmat_source_accepted_patch_sha256": "676d1ad28b97d99ff4acfe4c386119b0822f16830b67870ad90c79c204c39268"
+    "coopmat_source_accepted_patch_sha256": "676d1ad28b97d99ff4acfe4c386119b0822f16830b67870ad90c79c204c39268",
+    "hil_literal_env_followon_published": "02ea8d1f66a625333318fef88abb0e05b7fdc0a1",
+    "coopmat_published": "45d68c6b02f7aefc8cf9451870a200ded549a4bf",
+    "resolver_published": "04cc94239814456e56373688c27f07df491e3f4d",
+    "neutral_published": "089fdf693b98b04ff3aeb9d13e445fcbecfbb8fd",
+    "neutral_source": "aa422d94da69ea1405376d528bcf82ee87cccfd8",
+    "numerical_published": "fc61c250385bc6135192baff153b797f32a7e939",
+    "rope_published": "beca70ccdca9b5b858aa0bf16a1a0f511970da00",
+    "rope_source": "dca77acfa016143141d919e71dd548dd1d9d2b5f",
+    "rope_current_patch_sha256": "e66326b468e2b4c54f722291f639512c015bddddcdb484a32b55449207d8aba1",
+    "qsa_published": "5810134dd254fc7440b3715fa4669cccd26705dd",
+    "qsa_source": "bb4c14555b1d17711aecc277ec9c1ac6f0c76ddf",
+    "qsa_accepted_product_patch_sha256": "eb2f84f07d30cb4a50a5651d0c0784bc1e54677405c1fcdf409962872733bf0a",
+    "freshness_hosted_head": "5810134dd254fc7440b3715fa4669cccd26705dd"
   },
   "publication": {
     "status": "native_publication_snapshot_use_enclosing_git_commit",
     "created_issue_numbers": [
       13958,
-      13959
+      13959,
+      13961,
+      13962,
+      13964
     ],
     "commit": null,
     "issue_states_are_snapshot": true,
     "private_dedup": "unverified; no private content is included",
     "mutations_by_inventory": 0,
     "inventory_tracker_issue": 13960,
-    "inventory_tracker_url": "https://github.com/anthony-chaudhary/fak/issues/13960"
+    "inventory_tracker_url": "https://github.com/anthony-chaudhary/fak/issues/13960",
+    "original_inventory_commit": "b38758dd9b93f4a79ae8115c9af153f666fb8e36",
+    "original_inventory_commit_url": "https://github.com/anthony-chaudhary/fak/commit/b38758dd9b93f4a79ae8115c9af153f666fb8e36",
+    "freshness_update": {
+      "status": "ready_for_native_publication",
+      "observed_on": "2026-10-23",
+      "snapshot": "2026-10-23 16:58:22 UTC hosted source verification; issue states observed at 16:54:34 UTC",
+      "read_base_commit": "5810134dd254fc7440b3715fa4669cccd26705dd",
+      "verified_hosted_head": "5810134dd254fc7440b3715fa4669cccd26705dd",
+      "tracker_issue": 13960,
+      "changes": "Source/issue/evidence freshness only. Original census and baseline source findings unchanged.",
+      "closes_issues": false,
+      "inventory_tests_run": false
+    }
   },
   "coverage": {
     "hal": {
@@ -483,6 +512,38 @@
       "state": "open",
       "status_observed_on": "2026-10-23",
       "title": "fix(hil): refuse environment-only accelerator credit and incomplete micro-dose passes"
+    },
+    {
+      "number": 13961,
+      "url": "https://github.com/anthony-chaudhary/fak/issues/13961",
+      "source_description": "feat(compute): add public device-memory profile resolution",
+      "state": "open",
+      "status_observed_on": "2026-10-23",
+      "status_observation_note": "OPEN at verified public read on 2026-10-23 16:54:34 UTC; this is a dated state observation, not inferred closure from source publication."
+    },
+    {
+      "number": 13962,
+      "url": "https://github.com/anthony-chaudhary/fak/issues/13962",
+      "source_description": "refactor(compute): isolate neutral V4.1 deferred verdicts",
+      "state": "open",
+      "status_observed_on": "2026-10-23",
+      "status_observation_note": "OPEN at verified public read on 2026-10-23 16:54:34 UTC; this is a dated state observation, not inferred closure from source publication."
+    },
+    {
+      "number": 13963,
+      "url": "https://github.com/anthony-chaudhary/fak/issues/13963",
+      "source_description": "gated CUDA supplied-table tail rotary transforms",
+      "state": "open",
+      "status_observed_on": "2026-10-23",
+      "status_observation_note": "OPEN at verified public read on 2026-10-23 16:54:34 UTC; this is a dated state observation, not inferred closure from source publication."
+    },
+    {
+      "number": 13964,
+      "url": "https://github.com/anthony-chaudhary/fak/issues/13964",
+      "source_description": "refactor(model): use device memory profiles for QSA scratch admission",
+      "state": "open",
+      "status_observed_on": "2026-10-23",
+      "status_observation_note": "OPEN at verified public read on 2026-10-23 16:54:34 UTC; this is a dated state observation, not inferred closure from source publication."
     }
   ],
   "external_prerequisites": [
@@ -499,11 +560,12 @@
     },
     {
       "key": "cuda-hot-file-candidates-reconciled",
-      "status": "partially_published_candidate_pending",
+      "status": "gated_sources_published_rebind_hot_files_and_qualification_still_required",
       "related_issues": [
-        13956
+        13956,
+        13963
       ],
-      "gate": "BF16 is published at b7ccbe9. Corrected tail-RoPE patch e0c6d577 is source-accepted and has limited CPU source/protocol proof: one compile, two passing baselines and fourteen intended mutation refusals; controller drained. CUDA wrapper/native fixtures were not executed; ABI, lifecycle, arithmetic/FTZ and device/model proof remain unrun. Rebind exact kernel-file source and serialize D2H edits after ownership is available."
+      "gate": "BF16 source is published at b7ccbe9. Tail-RoPE source is hosted at beca70ccdca9b5b858aa0bf16a1a0f511970da00. The earlier e0c6 source/protocol slice passed two CPU baselines and fourteen intended mutation refusals. That receipt binds the older native fixture, not the current peer-composed source. Current composed compute/CUDA/cgo/native compile/link, Tensor ABI, capture/busy/cross-entry-point state, fault/free/quarantine lifecycle, device arithmetic/FTZ, numerical parity and model/performance checks remain UNRUN. V41TailRoPEExactAvailable remains false. Source publication does not satisfy the final-link gate or grant CUDA hot-file ownership; rebind current files and preserve the independently scoped gated candidates."
     },
     {
       "key": "cuda-final-link-gate-available",
@@ -684,7 +746,21 @@
       "record_kind": "new_leaf",
       "global_rank": 1,
       "source_commit": "30e1434ffc444009619b285142e00c8c46b77c00",
-      "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/30e1434ffc444009619b285142e00c8c46b77c00"
+      "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/30e1434ffc444009619b285142e00c8c46b77c00",
+      "later_source_followons": [
+        {
+          "issue": 13958,
+          "source_commit": "02ea8d1f66a625333318fef88abb0e05b7fdc0a1",
+          "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/02ea8d1f66a625333318fef88abb0e05b7fdc0a1",
+          "published_commit": "02ea8d1f66a625333318fef88abb0e05b7fdc0a1",
+          "publication_status": "source_published_hosted_verified",
+          "paths": [
+            "internal/hil/probe_other.go"
+          ],
+          "proof_limits": "Later one-file source follow-on restores four literal environment reads for envconfiglint visibility while retaining hint-only semantics and CPU/reference identity. Source was independently inspected and publication verified. The commit reports green envconfiglint/HIL tests, but that runtime claim was not independently verified by this inventory. Original 30e1434f/05c598 CPU proof remains attributed only to its original exact source.",
+          "peer_runtime_claim_independently_verified": false
+        }
+      ]
     },
     {
       "key": "memory-strix-backing-owner-release",
@@ -763,8 +839,8 @@
       "title": "fix(compute): remove hardware credit from cooperative-matrix model",
       "action": "track_created_leaf",
       "existing_issue": 13959,
-      "publication_status": "issue_created_source_commit_pending",
-      "implementation_status": "source_accepted_tests_unrun",
+      "publication_status": "source_published_hosted_verified",
+      "implementation_status": "source_published_tests_unrun_full_tier_debt_pending",
       "source_baseline": "93b295a81683f81868d1b9cc4c340496700cc0da",
       "delta_review_head": "68fbd200b2f4ebee0fe44b6a846947cb6db83136",
       "paths": [
@@ -787,7 +863,8 @@
       "depends_on": [],
       "external_prerequisites": [],
       "coordination": [
-        "One exact two-file compatibility-preserving patch is source-accepted; no compiler, formatter, Go test or hardware result is claimed. Preserve the existing author and bind current source before native publication."
+        "Source review, preimage/signature/arithmetic checks and dry application/whitespace checks only. Compiler, formatter, Go tests, native/device execution and measured performance were UNRUN; full-tier debt remains pending.",
+        "Canonical issue already exists; do not create a duplicate. Source publication alone does not close the issue or grant native/device/model qualification."
       ],
       "lane": "compute",
       "parent_candidates": [
@@ -851,15 +928,31 @@
             "description": "Declared development-process cause"
           }
         ],
-        "operation": "do_not_create_existing_issue",
+        "operation": "reference_created_issue_do_not_recreate",
         "admission_ready": false,
         "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13959",
-        "note": "Already created through normal native admission. This public body snapshot is historical admission evidence; use the hosted issue and explicit later publication fields, not a second create."
+        "note": "Already created through normal native admission. This public body snapshot is historical admission evidence; use the hosted issue and explicit later publication fields, not a second create.",
+        "superseded_by_issue_url": "https://github.com/anthony-chaudhary/fak/issues/13959",
+        "unresolved_fields": [
+          "remaining_test_and_qualification_debt"
+        ],
+        "proposal_body_status": "Historical preparation text only; current created issue body is authoritative. Do not replay this input as a create operation."
       },
       "record_kind": "new_leaf",
       "global_rank": 3,
       "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13959",
-      "candidate_patch_sha256": "676d1ad28b97d99ff4acfe4c386119b0822f16830b67870ad90c79c204c39268"
+      "candidate_patch_sha256": "676d1ad28b97d99ff4acfe4c386119b0822f16830b67870ad90c79c204c39268",
+      "source_commit": "45d68c6b02f7aefc8cf9451870a200ded549a4bf",
+      "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/45d68c6b02f7aefc8cf9451870a200ded549a4bf",
+      "published_commit": "45d68c6b02f7aefc8cf9451870a200ded549a4bf",
+      "published_commit_url": "https://github.com/anthony-chaudhary/fak/commit/45d68c6b02f7aefc8cf9451870a200ded549a4bf",
+      "evidence_status": {
+        "published_source": true,
+        "go_tests_executed": false,
+        "hardware_executed": false,
+        "full_tier_debt": "pending",
+        "limits": "Source review, preimage/signature/arithmetic checks and dry application/whitespace checks only. Compiler, formatter, Go tests, native/device execution and measured performance were UNRUN; full-tier debt remains pending."
+      }
     },
     {
       "key": "hal-export-memory-profile-resolver",
@@ -867,10 +960,10 @@
       "area_rank": 2,
       "priority": "P1",
       "title": "compute: expose fail-closed device-memory profile resolution to HAL consumers",
-      "action": "create_leaf",
-      "existing_issue": null,
-      "publication_status": "draft_not_created",
-      "implementation_status": "not_started_by_inventory",
+      "action": "track_created_leaf",
+      "existing_issue": 13961,
+      "publication_status": "source_published_hosted_verified",
+      "implementation_status": "source_published_tests_unrun_full_tier_debt_pending",
       "source_baseline": "93b295a81683f81868d1b9cc4c340496700cc0da",
       "delta_review_head": "68fbd200b2f4ebee0fe44b6a846947cb6db83136",
       "paths": [
@@ -891,23 +984,25 @@
       ],
       "depends_on": [],
       "external_prerequisites": [],
-      "coordination": [],
-      "lane": "compute",
-      "parent_candidates": [
-        12440
+      "coordination": [
+        "Exact two-file source review and dry application only. Sixteen precedence/refusal cases were authored, not executed. Formatter, Go compile/build/vet, external consumer, full compute/native/model checks were UNRUN; no native provider or bandwidth facts were added.",
+        "Canonical issue already exists; do not create a duplicate. Source publication alone does not close the issue or grant native/device/model qualification."
       ],
+      "lane": "compute",
+      "parent_candidates": [],
       "parent_allocation": {
-        "status": "unassigned",
+        "status": "see_verified_created_issue",
         "parent_issue": null,
         "estimate_points": null,
         "contribution_numerator": null,
         "contribution_denominator": null,
         "earned_completion": 0,
-        "note": "Related issues are evidence or lineage, not an allocated parent budget. Resolve a valid owning parent before strict native admission. Use a verified existing convention or transparently propose a reasoned, unearned baseline from the actual scope; never misrepresent proposed points as historical facts or reopen a completed predecessor."
+        "evidence_url": "https://github.com/anthony-chaudhary/fak/issues/13961",
+        "note": "Native metadata is owned by the created issue. This freshness update does not infer or reallocate its parent/points from historical predecessor references."
       },
       "scope_readiness": "bounded_ticket_content_ready",
-      "requires_current_dedupe": true,
-      "native_input_status": "requires_admission_reconciliation",
+      "requires_current_dedupe": false,
+      "native_input_status": "created_issue_hosted_body_authoritative",
       "native_issue_input": {
         "title": "compute: expose fail-closed device-memory profile resolution to HAL consumers",
         "body": "<!-- fak-composability-key: hal-export-memory-profile-resolver -->\n```routing\nlane: compute\npaths: internal/compute/device_memory_profile.go, internal/compute/device_memory_profile_test.go\nexpected_steps: 3\n```\n\n## Problem\nClosed #12440 established DeviceMemoryProfile and an optional provider, but resolveDeviceMemoryProfile remains package-private. Model planning still has independent Halo constants; consumers should reuse the existing policy rather than copy vendor checks. This leaf only exports the resolver. Native device probing is a separate follow-on.\n\n## Leaf scope (2 files)\ninternal/compute/device_memory_profile.go and device_memory_profile_test.go. Add a narrow documented ResolveDeviceMemoryProfile(Backend, string) (DeviceMemoryProfile, bool), retaining an internal compatibility wrapper if needed to avoid unrelated call-site churn.\n\n## Acceptance\n- Provider precedence is exact: provider-returned unknown/partial facts must not be replaced by an architecture or Vulkan fallback.\n- Existing bounded Vulkan tier parsing, unknown-GFX refusal, Radeon aliases, gfx1151 qualified fallback, partial AMD subgroup-only facts, nil backend behavior and CachePlanningAvailable semantics are unchanged.\n- Unknown NVIDIA/other architectures remain unavailable rather than becoming a 32 MiB/128 B/32-lane Strix profile.\n- Tests use fake providers and backend identities, including conflicting provider vs tier facts and unknown values, without requiring a GPU.\n- Run targeted DeviceMemoryProfile tests and compile a small consumer through the exported entry point in a sanctioned software lane. Record actual evidence, not planned commands as passes.\n\n## Dependencies and ownership\nCanonical HAL producer for model QSA consumers. CPU-miss bandwidth is a separate declared/calibrated fact through ExpertCPUMissProfile; never derive bandwidth from this cache/alignment/subgroup profile. Coordinate with those consumers; do not include model files here. Native CUDA provider follows separately and is not required to preserve current qualified Halo behavior.\n\n## Hardware handoff\nNo hardware required for this additive policy API. It conveys evidence, not capability/performance qualification. This inventory ran no tests.\n\n## Public source and evidence limits\nBaseline: 93b295a81683f81868d1b9cc4c340496700cc0da; reviewed later hosted delta: 68fbd200b2f4ebee0fe44b6a846947cb6db83136. Inventory source review ran no correctness, compiler, CUDA, hardware or performance tests. Proposed witness commands are not results. Any separate active-candidate evidence is explicitly labeled in the plan.\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/compute/device_memory_profile.go#L57\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/compute/device_memory_profile.go\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/compute/device_memory_profile_test.go\n\n## Canonical ownership and dependencies\nRelated public issues: #12440 (closed).\nDependencies: No logical implementation predecessor identified; current-source and ownership admission still apply..\nClosed predecessors remain historical references. Do not close broad open issues from source-only publication. Preserve qualified AMD behavior and all backend-specific qualification whitelists until independently qualified replacements exist.\n\n## Native admission fields to reconcile\nWork unit: leaf.\nGeneration: proposed, not an admission grant.\nParent allocation: unassigned; no numeric denominator or earned contribution claimed. Resolve normal native routing, model-tier, work-scale and estimate before creation. Use a verified existing parent convention or transparently propose a reasoned unearned baseline from the scoped work. A historical convention is not mandatory; do not misrepresent a proposal as a preexisting fact, fabricate a parent or bypass validation.\n\n## Boundary\nNo wholesale HAL rewrite, automatic CPU/external fallback, hardware job, purchase, device-access change, new credential, permission workaround or physical qualification is included. Rebind current main and exact paths before implementation. Record actual tests and unresolved integration/hardware debt separately.\n",
@@ -919,17 +1014,29 @@
             "name": "priority/P1"
           }
         ],
-        "operation": "create_after_verified_dedup_and_admission",
+        "operation": "reference_created_issue_do_not_recreate",
         "admission_ready": false,
         "unresolved_fields": [
-          "verified_parent_and_existing_or_reasoned_proposed_numeric_convention_if_required",
-          "native_routing_and_work_metadata",
-          "fresh_exact_dedup",
-          "current_source_and_path_ownership"
-        ]
+          "remaining_test_and_qualification_debt"
+        ],
+        "superseded_by_issue_url": "https://github.com/anthony-chaudhary/fak/issues/13961",
+        "proposal_body_status": "Historical preparation text only; current created issue body is authoritative. Do not replay this input as a create operation."
       },
       "record_kind": "new_leaf",
-      "global_rank": 4
+      "global_rank": 4,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13961",
+      "candidate_patch_sha256": "42c95d2d0101126394bffc1186babda95c0d870535bce2a1d26ddd6ed6479305",
+      "source_commit": "04cc94239814456e56373688c27f07df491e3f4d",
+      "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/04cc94239814456e56373688c27f07df491e3f4d",
+      "published_commit": "04cc94239814456e56373688c27f07df491e3f4d",
+      "published_commit_url": "https://github.com/anthony-chaudhary/fak/commit/04cc94239814456e56373688c27f07df491e3f4d",
+      "evidence_status": {
+        "published_source": true,
+        "go_tests_executed": false,
+        "hardware_executed": false,
+        "full_tier_debt": "pending",
+        "limits": "Exact two-file source review and dry application only. Sixteen precedence/refusal cases were authored, not executed. Formatter, Go compile/build/vet, external consumer, full compute/native/model checks were UNRUN; no native provider or bandwidth facts were added."
+      }
     },
     {
       "key": "model-batch-dispatch",
@@ -1088,15 +1195,18 @@
       "area_rank": 3,
       "priority": "P1",
       "title": "refactor(model): use device memory profiles for QSA scratch admission",
-      "action": "create_leaf",
-      "existing_issue": null,
-      "publication_status": "draft_not_created",
-      "implementation_status": "not_started_by_inventory",
+      "action": "track_created_leaf",
+      "existing_issue": 13964,
+      "publication_status": "source_published_hosted_verified",
+      "implementation_status": "source_published_tests_unrun_full_tier_debt_pending",
       "source_baseline": "93b295a81683f81868d1b9cc4c340496700cc0da",
       "delta_review_head": "68fbd200b2f4ebee0fe44b6a846947cb6db83136",
       "paths": [
         "internal/model/qwen35_hal.go",
-        "internal/model/qwen35_qsa_profile_test.go"
+        "internal/model/qwen35_qsa_profile_test.go",
+        "internal/model/qwen35_hal_test.go",
+        "tools/concept_disambiguation_scorecard.data/_meta.json",
+        "docs/concept-disambiguation-scorecard/README.md"
       ],
       "related_issues": [
         {
@@ -1122,26 +1232,26 @@
         "hal-export-memory-profile-resolver"
       ],
       "external_prerequisites": [],
-      "coordination": [],
-      "lane": "model",
-      "parent_candidates": [
-        12440,
-        12444,
-        12185
+      "coordination": [
+        "Source review, pinned standalone gofmt, isolated application and whitespace checks passed. Bounded profile-refusal, geometry/outer-allocation overflow, separate-alignment, no-transfer-decline and parity assertions were authored, not executed. Go compiler/build/vet, focused QSA and full model/native tests, selected-device parity and peak scratch accounting remain UNRUN; scoped source-publication waiver and full-tier verification debt remain. This path is still host-assisted: aligned accounting proves neither physical cache residency, device-only admission, a CUDA sparse-gather kernel nor performance gains. Five paths actually changed: the three accepted model source/test files, two incidental-helper classifications in the scorecard metadata, and its generated README. The paired generated INDEX.md stayed byte-identical. The original two-path inventory proposal is preserved as history.",
+        "Canonical issue already exists; do not create a duplicate. Source publication alone does not close the issue or grant native/device/model qualification."
       ],
+      "lane": "model",
+      "parent_candidates": [],
       "unresolved_paths": [],
       "parent_allocation": {
-        "status": "unassigned",
+        "status": "see_verified_created_issue",
         "parent_issue": null,
         "estimate_points": null,
         "contribution_numerator": null,
         "contribution_denominator": null,
         "earned_completion": 0,
-        "note": "Related issues are evidence or lineage, not an allocated parent budget. Resolve a valid owning parent before strict native admission. Use a verified existing convention or transparently propose a reasoned, unearned baseline from the actual scope; never misrepresent proposed points as historical facts or reopen a completed predecessor."
+        "evidence_url": "https://github.com/anthony-chaudhary/fak/issues/13964",
+        "note": "Native metadata is owned by the created issue. This freshness update does not infer or reallocate its parent/points from historical predecessor references."
       },
       "scope_readiness": "bounded_ticket_content_ready",
-      "requires_current_dedupe": true,
-      "native_input_status": "requires_admission_reconciliation",
+      "requires_current_dedupe": false,
+      "native_input_status": "created_issue_hosted_body_authoritative",
       "native_issue_input": {
         "title": "refactor(model): use device memory profiles for QSA scratch admission",
         "body": "<!-- fak-composability-key: model-qsa-profile -->\n```routing\nlane: model\npaths: internal/model/qwen35_hal.go, internal/model/qwen35_qsa_profile_test.go\nexpected_steps: 3\n```\n\n**Disposition:** candidate new model consumer leaf after the HAL component's two-file `ResolveDeviceMemoryProfile` export. Do not reopen/duplicate closed [#12440](https://github.com/anthony-chaudhary/fak/issues/12440) or duplicate [#12444](https://github.com/anthony-chaudhary/fak/issues/12444). Reference closed historical [#12185](https://github.com/anthony-chaudhary/fak/issues/12185).\n\n**Two-file scope:** `internal/model/qwen35_hal.go`; `internal/model/qwen35_qsa_profile_test.go` (new).\n\n**Dependency contract:** the HAL resolver preserves provider precedence, existing Vulkan tier resolution, known gfx1151 cache capacity, and unknown/partial facts. A real CUDA selected-device provider is a separate leaf; this consumer does not wait for or fabricate it.\n\n**Implementation boundary:** replace the unconditional `StrixHaloInfinityCacheBytes` comparison with checked geometry and the resolved explicit policy. Unknown capacity is a reasoned pre-mutation decline, not a fabricated 32 MiB default. Preserve the existing qualified Halo path. This QSA path remains host-assisted and must retain `refuseHostFallback`; no receipt may describe it as device-resident.\n\n**Software acceptance:**\n- Known 32 MiB gfx1151 envelope behaves identically at boundary and overflow.\n- Different explicit capacities change only admission; malformed or unknown capacity declines before any reads/writes; partial profile facts do not imply known capacity.\n- Checked multiplication/alignment rejects overflow and never allocates above the declared bound.\n- Device-only policy refuses the host path before transfer; selected failures keep established failure semantics.\n- Existing QSA config, row-gather parity, multisequence safety and reservation witnesses stay green.\n- Proposed witness `TestQwen35QSAScratchUsesDeviceProfile`; run `go test ./internal/model -run 'TestQSA|TestQwen35QSAScratch'`.\n\n**Separate hardware handoff:** exact backend/model QSA parity and peak scratch accounting. Any cache-residency or throughput claim needs measurement; cache capacity metadata cannot prove residency. A future CUDA-native sparse gather is a different kernel issue.\n\n## Public source and evidence limits\nBaseline: 93b295a81683f81868d1b9cc4c340496700cc0da; reviewed later hosted delta: 68fbd200b2f4ebee0fe44b6a846947cb6db83136. Inventory source review ran no correctness, compiler, CUDA, hardware or performance tests. Proposed witness commands are not results. Any separate active-candidate evidence is explicitly labeled in the plan.\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/model/qwen35_hal.go\n\n## Canonical ownership and dependencies\nRelated public issues: #12440 (closed), #12444 (closed), #12185 (closed).\nDependencies: hal-export-memory-profile-resolver.\nClosed predecessors remain historical references. Do not close broad open issues from source-only publication. Preserve qualified AMD behavior and all backend-specific qualification whitelists until independently qualified replacements exist.\n\n## Native admission fields to reconcile\nWork unit: leaf.\nGeneration: proposed, not an admission grant.\nParent allocation: unassigned; no numeric denominator or earned contribution claimed. Resolve normal native routing, model-tier, work-scale and estimate before creation. Use a verified existing parent convention or transparently propose a reasoned unearned baseline from the scoped work. A historical convention is not mandatory; do not misrepresent a proposal as a preexisting fact, fabricate a parent or bypass validation.\n\n## Boundary\nNo wholesale HAL rewrite, automatic CPU/external fallback, hardware job, purchase, device-access change, new credential, permission workaround or physical qualification is included. Rebind current main and exact paths before implementation. Record actual tests and unresolved integration/hardware debt separately.\n",
@@ -1153,17 +1263,73 @@
             "name": "priority/P1"
           }
         ],
-        "operation": "create_after_verified_dedup_and_admission",
+        "operation": "reference_created_issue_do_not_recreate",
         "admission_ready": false,
         "unresolved_fields": [
-          "verified_parent_and_existing_or_reasoned_proposed_numeric_convention_if_required",
-          "native_routing_and_work_metadata",
-          "fresh_exact_dedup",
-          "current_source_and_path_ownership"
-        ]
+          "remaining_test_and_qualification_debt"
+        ],
+        "superseded_by_issue_url": "https://github.com/anthony-chaudhary/fak/issues/13964",
+        "proposal_body_status": "Historical preparation text only; current created issue body is authoritative. Do not replay this input as a create operation."
       },
       "record_kind": "new_leaf",
-      "global_rank": 7
+      "global_rank": 7,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13964",
+      "candidate_patch_sha256": "eb2f84f07d30cb4a50a5651d0c0784bc1e54677405c1fcdf409962872733bf0a",
+      "source_commit": "bb4c14555b1d17711aecc277ec9c1ac6f0c76ddf",
+      "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/bb4c14555b1d17711aecc277ec9c1ac6f0c76ddf",
+      "published_commit": "5810134dd254fc7440b3715fa4669cccd26705dd",
+      "published_commit_url": "https://github.com/anthony-chaudhary/fak/commit/5810134dd254fc7440b3715fa4669cccd26705dd",
+      "integration_commit": "5810134dd254fc7440b3715fa4669cccd26705dd",
+      "evidence_status": {
+        "published_source": true,
+        "go_tests_executed": false,
+        "hardware_executed": false,
+        "full_tier_debt": "pending",
+        "limits": "Source review, pinned standalone gofmt, isolated application and whitespace checks passed. Bounded profile-refusal, geometry/outer-allocation overflow, separate-alignment, no-transfer-decline and parity assertions were authored, not executed. Go compiler/build/vet, focused QSA and full model/native tests, selected-device parity and peak scratch accounting remain UNRUN; scoped source-publication waiver and full-tier verification debt remain. This path is still host-assisted: aligned accounting proves neither physical cache residency, device-only admission, a CUDA sparse-gather kernel nor performance gains. Five paths actually changed: the three accepted model source/test files, two incidental-helper classifications in the scorecard metadata, and its generated README. The paired generated INDEX.md stayed byte-identical. The original two-path inventory proposal is preserved as history."
+      },
+      "candidate_patch_scope": {
+        "paths": [
+          "internal/model/qwen35_hal.go",
+          "internal/model/qwen35_qsa_profile_test.go",
+          "internal/model/qwen35_hal_test.go"
+        ],
+        "note": "Accepted product-source patch only; required classification metadata and generated derivative docs are separately included in the actual publication commit."
+      },
+      "historical_proposal_paths": [
+        "internal/model/qwen35_hal.go",
+        "internal/model/qwen35_qsa_profile_test.go"
+      ],
+      "scope_amendment": {
+        "observed_on": "2026-10-23",
+        "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13964",
+        "original_inventory_paths": [
+          "internal/model/qwen35_hal.go",
+          "internal/model/qwen35_qsa_profile_test.go"
+        ],
+        "accepted_source_paths": [
+          "internal/model/qwen35_hal.go",
+          "internal/model/qwen35_qsa_profile_test.go",
+          "internal/model/qwen35_hal_test.go"
+        ],
+        "publication_paths": [
+          "internal/model/qwen35_hal.go",
+          "internal/model/qwen35_qsa_profile_test.go",
+          "internal/model/qwen35_hal_test.go",
+          "tools/concept_disambiguation_scorecard.data/_meta.json",
+          "docs/concept-disambiguation-scorecard/README.md"
+        ],
+        "reason": "The original two-path inventory proposal became the accepted three-source-file repair, including the existing HAL test fixture. Normal native admission required metadata classifications for qwen35QSAScratchPlan and planQwen35QSAScratch, which are incidental private scalar geometry/result and effect-free validation helpers, not a separate executable planner. The native generator then refreshed the concept README. Its paired INDEX.md was owned/generated but remained byte-identical and is not counted as changed. The accepted three-file product patch is unchanged; the canonical issue owns the required derivative scope.",
+        "unchanged_generated_outputs": [
+          "docs/concept-disambiguation-scorecard/INDEX.md"
+        ]
+      },
+      "dependency_status": {
+        "hal-export-memory-profile-resolver": {
+          "status": "source_published_hosted_verified",
+          "commit": "04cc94239814456e56373688c27f07df491e3f4d",
+          "proof_limit": "Resolver source available; its Go regression and external-consumer tests remain UNRUN."
+        }
+      }
     },
     {
       "key": "memory-hierarchical-transfer-commit",
@@ -1925,10 +2091,10 @@
       "area_rank": 3,
       "priority": "P1",
       "title": "compute: separate V4.1 deferred-status decoding from Vulkan error attribution",
-      "action": "create_leaf",
-      "existing_issue": null,
-      "publication_status": "draft_not_created",
-      "implementation_status": "not_started_by_inventory",
+      "action": "track_created_leaf",
+      "existing_issue": 13962,
+      "publication_status": "source_published_hosted_verified",
+      "implementation_status": "source_published_tests_unrun_full_tier_debt_pending",
       "source_baseline": "93b295a81683f81868d1b9cc4c340496700cc0da",
       "delta_review_head": "68fbd200b2f4ebee0fe44b6a846947cb6db83136",
       "paths": [
@@ -1950,24 +2116,25 @@
       "depends_on": [],
       "external_prerequisites": [],
       "coordination": [
-        "Pure decoder refactor only. Keep BF16 and active tail-RoPE wrappers, status protocols, gates and kernel paths unchanged."
+        "Exact two-file neutral-core/compatibility-wrapper change; source/apply checks and standalone gofmt passed. Twenty-one cases were authored, not executed. Go compile/build/vet, deferred-status runtime tests, native lifecycle and full-model checks were UNRUN. errors.Is/As chains and nil Recovered for malformed envelopes remain the intended preserved contract.",
+        "Canonical issue already exists; do not create a duplicate. Source publication alone does not close the issue or grant native/device/model qualification.",
+        "Preserve BF16/tail-RoPE wrappers, status protocols, explicit gates and kernel paths; the neutral decoder publication does not grant a kernel rewrite."
       ],
       "lane": "compute",
-      "parent_candidates": [
-        13820
-      ],
+      "parent_candidates": [],
       "parent_allocation": {
-        "status": "unassigned",
+        "status": "see_verified_created_issue",
         "parent_issue": null,
         "estimate_points": null,
         "contribution_numerator": null,
         "contribution_denominator": null,
         "earned_completion": 0,
-        "note": "Related issues are evidence or lineage, not an allocated parent budget. Resolve a valid owning parent before strict native admission. Use a verified existing convention or transparently propose a reasoned, unearned baseline from the actual scope; never misrepresent proposed points as historical facts or reopen a completed predecessor."
+        "evidence_url": "https://github.com/anthony-chaudhary/fak/issues/13962",
+        "note": "Native metadata is owned by the created issue. This freshness update does not infer or reallocate its parent/points from historical predecessor references."
       },
       "scope_readiness": "bounded_ticket_content_ready",
-      "requires_current_dedupe": true,
-      "native_input_status": "requires_admission_reconciliation",
+      "requires_current_dedupe": false,
+      "native_input_status": "created_issue_hosted_body_authoritative",
       "native_issue_input": {
         "title": "compute: separate V4.1 deferred-status decoding from Vulkan error attribution",
         "body": "<!-- fak-composability-key: hal-neutral-deferred-status-core -->\n```routing\nlane: compute\npaths: internal/compute/v41_deferred_status.go, internal/compute/v41_deferred_status_test.go\nexpected_steps: 3\n```\n\n## Problem\nv41DeferredVerdict takes a backend name but constructs VulkanClassExecutionFailed/ErrVulkanExecutionFailed errors for BF16, finite-F32 and protocol failures. The arithmetic/status contracts are reusable; Vulkan attribution is not. This is a future reuse trap, not a reproduced CUDA device failure. Keep #13820's Vulkan deferred-status behavior compatible.\n\n## Leaf scope (2 files)\ninternal/compute/v41_deferred_status.go and v41_deferred_status_test.go. Extract a backend-neutral arithmetic/protocol verdict core, and retain the existing helper as the Vulkan-compatible attribution wrapper. Do not expand BackendError's frozen observable behavior or mutate the current CUDA candidates.\n\n## Acceptance\n- Pure decoder yields no Vulkan backend name, sentinel or class, and preserves the routed fault's concrete type and BF16/F32 arithmetic cause.\n- Existing Vulkan callers retain errors.Is/errors.As behavior, site names, error ownership and record ordering, including malformed 16-byte envelope, unknown kind, negative/extra raw-F32 record counts, valid success and arithmetic failure.\n- Transport/submission failure is never reinterpreted as an arithmetic verdict; unknown completion does not become success.\n- No host replay, no output publication before checked verdict, no status ownership/lifetime change.\n- CPU tests cover neutral core and compatibility wrapper separately; run the targeted deferred-status suite through the sanctioned lane and record the actual result.\n\n## Dependencies and hardware handoff\nIndependent of gated CUDA BF16 #13956 and the active tail-RoPE candidate. Do not edit cuda_kernels.cu, their wrappers, or their status formats. A future CUDA deferred adapter must supply CUDA-specific transport/fault attribution and its own stream/lifetime evidence; this refactor confers no CUDA deferred capability. No GPU needed here; no tests run during inventory.\n\n## Public source and evidence limits\nBaseline: 93b295a81683f81868d1b9cc4c340496700cc0da; reviewed later hosted delta: 68fbd200b2f4ebee0fe44b6a846947cb6db83136. Inventory source review ran no correctness, compiler, CUDA, hardware or performance tests. Proposed witness commands are not results. Any separate active-candidate evidence is explicitly labeled in the plan.\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/compute/v41_deferred_status.go#L56\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/compute/v41_deferred_status.go\n- https://github.com/anthony-chaudhary/fak/blob/93b295a81683f81868d1b9cc4c340496700cc0da/internal/compute/v41_deferred_status_test.go\n\n## Canonical ownership and dependencies\nRelated public issues: #13820 (not_reverified_in_packet).\nDependencies: No logical implementation predecessor identified; current-source and ownership admission still apply..\nClosed predecessors remain historical references. Do not close broad open issues from source-only publication. Preserve qualified AMD behavior and all backend-specific qualification whitelists until independently qualified replacements exist.\n\n## Native admission fields to reconcile\nWork unit: leaf.\nGeneration: proposed, not an admission grant.\nParent allocation: unassigned; no numeric denominator or earned contribution claimed. Resolve normal native routing, model-tier, work-scale and estimate before creation. Use a verified existing parent convention or transparently propose a reasoned unearned baseline from the scoped work. A historical convention is not mandatory; do not misrepresent a proposal as a preexisting fact, fabricate a parent or bypass validation.\n\n## Boundary\nNo wholesale HAL rewrite, automatic CPU/external fallback, hardware job, purchase, device-access change, new credential, permission workaround or physical qualification is included. Rebind current main and exact paths before implementation. Record actual tests and unresolved integration/hardware debt separately.\n",
@@ -1979,17 +2146,30 @@
             "name": "priority/P1"
           }
         ],
-        "operation": "create_after_verified_dedup_and_admission",
+        "operation": "reference_created_issue_do_not_recreate",
         "admission_ready": false,
         "unresolved_fields": [
-          "verified_parent_and_existing_or_reasoned_proposed_numeric_convention_if_required",
-          "native_routing_and_work_metadata",
-          "fresh_exact_dedup",
-          "current_source_and_path_ownership"
-        ]
+          "remaining_test_and_qualification_debt"
+        ],
+        "superseded_by_issue_url": "https://github.com/anthony-chaudhary/fak/issues/13962",
+        "proposal_body_status": "Historical preparation text only; current created issue body is authoritative. Do not replay this input as a create operation."
       },
       "record_kind": "new_leaf",
-      "global_rank": 18
+      "global_rank": 18,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13962",
+      "candidate_patch_sha256": "18965b4b70283af4c1a235fa745e1695435abd7d2e039c1ac21f7dd66c4d254a",
+      "source_commit": "aa422d94da69ea1405376d528bcf82ee87cccfd8",
+      "source_commit_url": "https://github.com/anthony-chaudhary/fak/commit/aa422d94da69ea1405376d528bcf82ee87cccfd8",
+      "published_commit": "089fdf693b98b04ff3aeb9d13e445fcbecfbb8fd",
+      "published_commit_url": "https://github.com/anthony-chaudhary/fak/commit/089fdf693b98b04ff3aeb9d13e445fcbecfbb8fd",
+      "integration_commit": "089fdf693b98b04ff3aeb9d13e445fcbecfbb8fd",
+      "evidence_status": {
+        "published_source": true,
+        "go_tests_executed": false,
+        "hardware_executed": false,
+        "full_tier_debt": "pending",
+        "limits": "Exact two-file neutral-core/compatibility-wrapper change; source/apply checks and standalone gofmt passed. Twenty-one cases were authored, not executed. Go compile/build/vet, deferred-status runtime tests, native lifecycle and full-model checks were UNRUN. errors.Is/As chains and nil Recovered for malformed envelopes remain the intended preserved contract."
+      }
     },
     {
       "key": "build-variant-accelerator-taxonomy-reconcile",
@@ -2970,6 +3150,32 @@
       },
       "record_kind": "new_leaf",
       "global_rank": 31
+    }
+  ],
+  "external_implementation_status": [
+    {
+      "topic": "gated_cuda_tail_rope",
+      "issue": 13963,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13963",
+      "source_commit": "dca77acfa016143141d919e71dd548dd1d9d2b5f",
+      "published_commit": "beca70ccdca9b5b858aa0bf16a1a0f511970da00",
+      "published_commit_url": "https://github.com/anthony-chaudhary/fak/commit/beca70ccdca9b5b858aa0bf16a1a0f511970da00",
+      "publication_status": "source_published_hosted_verified",
+      "historical_patch_sha256": "e0c6d577f0d1418539aaa78a4c2a17f0595363c225c61fd57575811174d0efe3",
+      "current_patch_sha256": "e66326b468e2b4c54f722291f639512c015bddddcdb484a32b55449207d8aba1",
+      "proof_limits": "The earlier e0c6 source/protocol slice passed two CPU baselines and fourteen intended mutation refusals. That receipt binds the older native fixture, not the current peer-composed source. Current composed compute/CUDA/cgo/native compile/link, Tensor ABI, capture/busy/cross-entry-point state, fault/free/quarantine lifecycle, device arithmetic/FTZ, numerical parity and model/performance checks remain UNRUN. V41TailRoPEExactAvailable remains false.",
+      "exact_capability_available": false
+    },
+    {
+      "topic": "numerical_profile_request_preflight",
+      "issue": 13891,
+      "issue_url": "https://github.com/anthony-chaudhary/fak/issues/13891",
+      "source_commit": "fc61c250385bc6135192baff153b797f32a7e939",
+      "published_commit": "fc61c250385bc6135192baff153b797f32a7e939",
+      "published_commit_url": "https://github.com/anthony-chaudhary/fak/commit/fc61c250385bc6135192baff153b797f32a7e939",
+      "publication_status": "partial_nonclosing_source_published",
+      "proof_limits": "Partial, nonclosing admission prerequisite only: six exact-source runtime component roots plus two AST-only ordering roots passed, with four runtime and two AST mutation controls. Full Model/projector runtime, zero calls to every backend method, named numerical-profile admission, weight/storage, device and full-model qualification remain UNRUN.",
+      "named_profile_admitted": false
     }
   ]
 }
