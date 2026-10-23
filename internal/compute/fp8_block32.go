@@ -7,6 +7,15 @@ import (
 	"math"
 )
 
+// ErrRoutedExpertResidentReleased is the typed refusal of a GEMV or Release on a
+// RoutedExpertResidentWeight that was already released: its device bytes are gone.
+var ErrRoutedExpertResidentReleased = errors.New("compute: routed-expert resident weight was released")
+
+// ErrRoutedExpertResidentStale is the typed refusal of a GEMV on a resident weight uploaded
+// before a device fault the session has since observed: a reconstructed context does not vouch
+// for bytes that predate the fault, so the caller must Release and upload again.
+var ErrRoutedExpertResidentStale = errors.New("compute: routed-expert resident weight predates a device fault")
+
 // ErrExpertDeviceKernelAbsent is the fail-closed verdict a routed-expert device
 // matmul returns when the target Backend carries no FP8/MXFP4 expert kernel. It is
 // deliberately TYPED and returned (never a scalar fallback): the expert tier binds
@@ -41,6 +50,35 @@ type RoutedExpertDeviceKernel interface {
 	// row and 32 unpacked K values, not the FP8 method's 32x32 tile layout.
 	// x has I entries, and the returned slice has O entries. Fail-closed as above.
 	GemvExpertMXFP4E8M0(O, I int, weight, scales []byte, x []float32) ([]float32, error)
+}
+
+// RoutedExpertResidentKernel is the OPTIONAL resident-weight companion of
+// RoutedExpertDeviceKernel: a routed expert's packed weight and E8M0 scale bytes are
+// uploaded ONCE and every later GEMV moves only x and y, instead of paying the packed
+// weight H2D on each call. The layouts are exactly those of the RoutedExpertDeviceKernel
+// method of the same format, and upload applies that method's acceptance predicate minus
+// x, so an upload plus a GEMV accepts and refuses exactly what the scalar oracle does and
+// returns bit-identical outputs.
+type RoutedExpertResidentKernel interface {
+	// UploadExpertFP8Block32E8M0 makes one FP8 block-32 E8M0 projection resident
+	// (layout of GemvExpertFP8Block32E8M0). The caller owns the handle and must Release it.
+	UploadExpertFP8Block32E8M0(O, I int, weight, scales []byte) (RoutedExpertResidentWeight, error)
+	// UploadExpertMXFP4E8M0 makes one MXFP4 E8M0 projection resident (layout of
+	// GemvExpertMXFP4E8M0). The caller owns the handle and must Release it.
+	UploadExpertMXFP4E8M0(O, I int, weight, scales []byte) (RoutedExpertResidentWeight, error)
+}
+
+// RoutedExpertResidentWeight is a typed handle to one device-resident routed-expert
+// projection. Its lifetime is explicit: nothing frees the device bytes but Release.
+type RoutedExpertResidentWeight interface {
+	// Gemv returns y[o] = sum_i w[o,i] * x[i] over the resident bytes. x must hold I
+	// entries. It fails closed, never with a short y: after Release with
+	// ErrRoutedExpertResidentReleased, and once the session has recovered from a device
+	// fault observed after the upload with ErrRoutedExpertResidentStale.
+	Gemv(x []float32) ([]float32, error)
+	// Release frees the device bytes. A second Release returns
+	// ErrRoutedExpertResidentReleased.
+	Release() error
 }
 
 // fp8_block32.go - the DeepSeek-V4.1 dense FP8 block-scale reference for the compute HAL.
@@ -213,6 +251,24 @@ func firstE8M0ScaleError(scales []byte) error {
 // it, so a device accepts and refuses exactly the inputs the oracle does. It allocates
 // nothing and returns the scale-grid column count sI.
 func checkGemvFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []float32) (int, error) {
+	return checkFP8Block32E8M0(name, O, I, weight, scales, x, true)
+}
+
+// checkFP8Block32E8M0Weight is checkGemvFP8Block32E8M0 without the x clause: the predicate a
+// resident upload applies once, leaving routedExpertXError for each later GEMV.
+func checkFP8Block32E8M0Weight(name string, O, I int, weight, scales []byte) (int, error) {
+	return checkFP8Block32E8M0(name, O, I, weight, scales, nil, false)
+}
+
+// routedExpertXError is the x-length clause both acceptance predicates share.
+func routedExpertXError(format, name string, O, I int, x []float32) error {
+	if len(x) != I {
+		return fmt.Errorf("%s %s: x has %d entries, shape [%d %d] implies %d", format, name, len(x), O, I, I)
+	}
+	return nil
+}
+
+func checkFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []float32, withX bool) (int, error) {
 	if O <= 0 || I <= 0 {
 		return 0, fmt.Errorf("fp8 block32 %s: shape [%d %d] has a non-positive dimension", name, O, I)
 	}
@@ -223,8 +279,10 @@ func checkGemvFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []f
 	if len(weight) != elems {
 		return 0, fmt.Errorf("fp8 block32 %s: weight has %d bytes, shape [%d %d] implies %d", name, len(weight), O, I, elems)
 	}
-	if len(x) != I {
-		return 0, fmt.Errorf("fp8 block32 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
+	if withX {
+		if err := routedExpertXError("fp8 block32", name, O, I, x); err != nil {
+			return 0, err
+		}
 	}
 	sO, sI := fp8Block32ScaleShape(O, I)
 	scaleElems, ok := fp8Block32Product(sO, sI)
@@ -391,6 +449,16 @@ func GemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32) ([
 // and refuse the same inputs. Every E2M1 nibble is finite, so only shapes, lengths and
 // the E8M0 NaN byte can refuse. It allocates nothing and returns ceil(I/32).
 func checkGemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32) (int, error) {
+	return checkMXFP4E8M0(name, O, I, weight, scales, x, true)
+}
+
+// checkMXFP4E8M0Weight is checkGemvMXFP4E8M0 without the x clause (see
+// checkFP8Block32E8M0Weight).
+func checkMXFP4E8M0Weight(name string, O, I int, weight, scales []byte) (int, error) {
+	return checkMXFP4E8M0(name, O, I, weight, scales, nil, false)
+}
+
+func checkMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32, withX bool) (int, error) {
 	if O <= 0 || I <= 0 || I%2 != 0 {
 		return 0, fmt.Errorf("mxfp4 %s: shape [%d %d] needs positive O and even I", name, O, I)
 	}
@@ -410,8 +478,10 @@ func checkGemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float3
 	if len(scales) != scaleElems {
 		return 0, fmt.Errorf("mxfp4 %s: scales has %d bytes, shape [%d %d] (blocks of %d) implies %d", name, len(scales), O, I, FP8Block32Dim, scaleElems)
 	}
-	if len(x) != I {
-		return 0, fmt.Errorf("mxfp4 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
+	if withX {
+		if err := routedExpertXError("mxfp4", name, O, I, x); err != nil {
+			return 0, err
+		}
 	}
 	if err := firstE8M0ScaleError(scales); err != nil {
 		return 0, fmt.Errorf("mxfp4 %s: %w", name, err)

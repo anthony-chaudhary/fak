@@ -58,3 +58,29 @@ func TestRoutedExpertGemvSourceIsFusionFree(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=2ms lane=default
+// Source witness only: the resident path adds no device math. The .cu still defines exactly
+// the two routed-expert kernels with one launch site each, and both C GEMV entry points (the
+// per-call upload and the resident id) run through the one shared rex_run body.
+func TestRoutedExpertResidentGemvSharesKernels(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.FromSlash("routed_expert_gemv.cu"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := stripCComments(strings.ReplaceAll(string(raw), "\r\n", "\n"))
+	for token, want := range map[string]int{
+		"__global__":                     2,
+		"<<<":                            2,
+		"k_rex_gemv_fp8_block32_e8m0<<<": 1,
+		"k_rex_gemv_mxfp4_e8m0<<<":       1,
+		"return rex_run(":                2,
+		"extern \"C\" int fcuda_routed_expert_gemv_e8m0(":          1,
+		"extern \"C\" int fcuda_routed_expert_resident_gemv_e8m0(": 1,
+	} {
+		if got := strings.Count(code, token); got != want {
+			t.Errorf("routed_expert_gemv.cu has %d occurrences of %q, want %d", got, token, want)
+		}
+	}
+}

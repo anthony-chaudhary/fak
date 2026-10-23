@@ -177,3 +177,78 @@ func TestRoutedExpertE8M0FiniteByteFixtureDiscriminatesEveryByte(t *testing.T) {
 		}
 	}
 }
+
+// TestRoutedExpertResidentAcceptanceSplitsOracle holds the resident split to the oracle: the
+// upload predicate (check*Weight) plus the per-GEMV x clause accepts exactly the inputs the
+// scalar oracle accepts, over every combination of one malformed or well-formed variant per
+// operand. A resident weight therefore widens or narrows nothing the byte-in/byte-out path
+// refuses.
+//
+// fak-test:runtime fast est=20ms lane=default
+func TestRoutedExpertResidentAcceptanceSplitsOracle(t *testing.T) {
+	const O, I = 40, 96
+	rng := rand.New(rand.NewSource(5))
+	finite := func(n int) []byte {
+		b := make([]byte, n)
+		for k := range b {
+			b[k] = byte(rng.Intn(0x7f)) | byte(rng.Intn(2))<<7
+		}
+		return b
+	}
+	set := func(b []byte, k int, v byte) []byte {
+		c := append([]byte(nil), b...)
+		c[k] = v
+		return c
+	}
+	x := make([]float32, I)
+	for i := range x {
+		x[i] = float32(rng.NormFloat64())
+	}
+	xs := [][]float32{x, x[:I-1], append(append([]float32(nil), x...), 1), nil}
+	for _, format := range []string{"fp8", "mxfp4"} {
+		var w, s []byte
+		var oracle func(string, int, int, []byte, []byte, []float32) ([]float32, error)
+		var weightOK func(string, int, int, []byte, []byte) (int, error)
+		prefix := "fp8 block32"
+		if format == "fp8" {
+			sO, sI := fp8Block32ScaleShape(O, I)
+			w, s = finite(O*I), bytes.Repeat([]byte{127}, sO*sI)
+			oracle, weightOK = GemvFP8Block32E8M0, checkFP8Block32E8M0Weight
+		} else {
+			w, s = finite(O*I/2), bytes.Repeat([]byte{127}, O*((I+31)/32))
+			oracle, weightOK = GemvMXFP4E8M0, checkMXFP4E8M0Weight
+			prefix = "mxfp4"
+		}
+		ws := [][]byte{w, w[:len(w)-1], append(append([]byte(nil), w...), 0), set(w, 7, 0x7f), set(w, len(w)-1, 0xff)}
+		ss := [][]byte{s, s[:len(s)-1], append(append([]byte(nil), s...), 127), set(s, 0, 0xff), set(s, len(s)-1, 0xff)}
+		var accepted, xOnlyRefused, refused int
+		for _, o := range []int{O, 0, -1, O + 1} {
+			for _, i := range []int{I, 0, -I, I + 1} {
+				for _, wv := range ws {
+					for _, sv := range ss {
+						for _, xv := range xs {
+							_, oerr := oracle("oracle", o, i, wv, sv, xv)
+							_, uerr := weightOK("upload", o, i, wv, sv)
+							xerr := routedExpertXError(prefix, "gemv", o, i, xv)
+							if (oerr == nil) != (uerr == nil && xerr == nil) {
+								t.Fatalf("%s [%d %d] len(w)=%d len(s)=%d len(x)=%d: oracle err=%v, upload err=%v, x err=%v",
+									format, o, i, len(wv), len(sv), len(xv), oerr, uerr, xerr)
+							}
+							switch {
+							case oerr == nil:
+								accepted++
+							case uerr == nil:
+								xOnlyRefused++
+							default:
+								refused++
+							}
+						}
+					}
+				}
+			}
+		}
+		if accepted == 0 || xOnlyRefused == 0 || refused == 0 {
+			t.Fatalf("%s: vacuous table: accepted=%d x-only refused=%d refused=%d", format, accepted, xOnlyRefused, refused)
+		}
+	}
+}

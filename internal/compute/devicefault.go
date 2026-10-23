@@ -457,6 +457,17 @@ func (l *DeviceFaultLatch) Snapshot() DeviceFaultSnapshot {
 	}
 }
 
+// faultCount is Snapshot().Faults without copying the transition log, for a resident device
+// object that pins the count it was created at and is suspect once the count moves.
+func (l *DeviceFaultLatch) faultCount() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.faults
+}
+
 // exhaustLocked condemns a session whose reconstruction budget is spent. Caller holds l.mu.
 func (l *DeviceFaultLatch) exhaustLocked() {
 	if l.health == DeviceUnrecoverable {
