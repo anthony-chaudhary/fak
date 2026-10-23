@@ -73,6 +73,21 @@ size_t fcuda_routed_expert_gemv_launches(void);
  * next call's device allocation (-3), kind 2 rejects its launch with a positive cudaError
  * before any kernel runs, 0 disarms. Production Go APIs do not expose this knob. */
 void fcuda_routed_expert_gemv_test_fault(int kind);
+/* Resident routed-expert weights: the same formats, kernels and statuses, but the packed
+ * weight/scale bytes are uploaded ONCE into pooled device memory named by a never-reused id
+ * (*handle, 0 on failure); each resident GEMV moves only x and y. format/O/I must match the
+ * upload; an unknown or released id returns -1. Release returns -2 and keeps the id while a
+ * graph capture is open. uploads is cumulative; live counts ids currently resident. The
+ * test fault seam above also arms the next upload (kind 1) or resident GEMV (kinds 1, 2). */
+int fcuda_routed_expert_resident_upload(
+    int format, const uint8_t *weight, size_t weight_bytes,
+    const uint8_t *scales, size_t scale_bytes, int64_t O, int64_t I, uint64_t *handle);
+int fcuda_routed_expert_resident_gemv_e8m0(
+    uint64_t handle, int format, const float *x, float *y, int64_t O, int64_t I,
+    double *timing_ms);
+int fcuda_routed_expert_resident_release(uint64_t handle);
+size_t fcuda_routed_expert_resident_uploads(void);
+size_t fcuda_routed_expert_resident_live(void);
 
 /* Device-specific allocation/copy helpers for multi-GPU collectives. The ordinary
  * fcuda_malloc/fcuda_h2d/fcuda_d2h path is device-0 + pooled. These helpers deliberately use

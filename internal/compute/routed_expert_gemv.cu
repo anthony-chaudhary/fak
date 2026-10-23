@@ -257,42 +257,48 @@ static bool rex_take_test_fault(int kind) {
   return true;
 }
 
-// One synchronous routed-expert GEMV: upload the PACKED weight/scale bytes and x, launch,
-// fence, read y back. Returns 0 on success; -1 invalid geometry/pointers; -2 refused while a
-// CUDA graph capture is open; -3 device allocation failure; a positive cudaError_t for any
-// copy, launch or execution fault. y is meaningful only when 0 is returned. timing_ms
-// (optional, 3 entries) receives host-wall H2D ms, device-event kernel ms, host-wall D2H ms.
-extern "C" int fcuda_routed_expert_gemv_e8m0(
-    int format, const uint8_t *weight, size_t weight_bytes,
-    const uint8_t *scales, size_t scale_bytes, const float *x, float *y,
-    int64_t O, int64_t I, double *timing_ms) {
-  if (!weight || !scales || !x || !y || O <= 0 || I <= 0) return -1;
-  if (format != REX_FORMAT_FP8_BLOCK32 && format != REX_FORMAT_MXFP4) return -1;
+// rex_geom is the validated byte geometry of one [O,I] routed-expert GEMV.
+struct rex_geom {
+  size_t weight, scale, x, y, blocks;
+};
+
+// rex_geometry validates format and shape and sizes every operand; false means status -1.
+static bool rex_geometry(int format, int64_t O, int64_t I, rex_geom *g) {
+  if (O <= 0 || I <= 0) return false;
+  if (format != REX_FORMAT_FP8_BLOCK32 && format != REX_FORMAT_MXFP4) return false;
   const size_t o = (size_t)O, i = (size_t)I;
   const size_t scaleCols = (i + 31) / 32;
-  size_t wantWeight = 0, wantScale = 0, xBytes = 0, yBytes = 0;
   if (format == REX_FORMAT_FP8_BLOCK32) {
-    if (!rex_mul_size(o, i, &wantWeight) || !rex_mul_size((o + 31) / 32, scaleCols, &wantScale)) return -1;
+    if (!rex_mul_size(o, i, &g->weight) || !rex_mul_size((o + 31) / 32, scaleCols, &g->scale)) return false;
   } else {
-    if (i % 2 != 0) return -1;
-    if (!rex_mul_size(o, i / 2, &wantWeight) || !rex_mul_size(o, scaleCols, &wantScale)) return -1;
+    if (i % 2 != 0) return false;
+    if (!rex_mul_size(o, i / 2, &g->weight) || !rex_mul_size(o, scaleCols, &g->scale)) return false;
   }
-  if (weight_bytes != wantWeight || scale_bytes != wantScale) return -1;
-  if (!rex_mul_size(i, sizeof(float), &xBytes) || !rex_mul_size(o, sizeof(float), &yBytes)) return -1;
-  const size_t blocks = (o + REX_ROWS - 1) / REX_ROWS;
-  if (blocks > (size_t)INT_MAX) return -1;
-  if (g_capture_open) return -2;
+  if (!rex_mul_size(i, sizeof(float), &g->x) || !rex_mul_size(o, sizeof(float), &g->y)) return false;
+  g->blocks = (o + REX_ROWS - 1) / REX_ROWS;
+  return g->blocks <= (size_t)INT_MAX;
+}
 
-  void *dW = fcuda_malloc(weight_bytes);
-  void *dS = fcuda_malloc(scale_bytes);
-  void *dX = fcuda_malloc(xBytes);
-  void *dY = fcuda_malloc(yBytes);
+// rex_run is the one synchronous GEMV both ABIs share: (upload the packed operands,) upload
+// x, launch, fence, read y back. Host weight/scales non-null is the per-call path: they are
+// copied into pooled buffers freed on return. Null means resW/resS already hold the resident
+// packed bytes and only x and y move. Statuses as fcuda_routed_expert_gemv_e8m0.
+static int rex_run(int format, const rex_geom &g, const uint8_t *weight, const uint8_t *scales,
+                   const void *resW, const void *resS, const float *x, float *y,
+                   int64_t O, int64_t I, double *timing_ms) {
+  const bool upload = weight != nullptr;
+  void *dW = upload ? fcuda_malloc(g.weight) : nullptr;
+  void *dS = upload ? fcuda_malloc(g.scale) : nullptr;
+  void *dX = fcuda_malloc(g.x);
+  void *dY = fcuda_malloc(g.y);
+  const void *kW = upload ? dW : resW;
+  const void *kS = upload ? dS : resS;
   int status = 0;
   double t0 = 0, t1 = 0, t2 = 0, t3 = 0;
   float kernelMs = 0.0f;
   static cudaEvent_t ev[2] = {nullptr, nullptr};
   cudaError_t e = cudaSuccess;
-  if (!dW || !dS || !dX || !dY || rex_take_test_fault(REX_TEST_FAULT_ALLOC)) { status = -3; goto done; }
+  if (!kW || !kS || !dX || !dY || rex_take_test_fault(REX_TEST_FAULT_ALLOC)) { status = -3; goto done; }
   (void)cudaGetLastError(); // discard stale status before attributing this call
   if (timing_ms) {
     for (int k = 0; k < 2; ++k) {
@@ -300,12 +306,14 @@ extern "C" int fcuda_routed_expert_gemv_e8m0(
     }
     t0 = rex_now_ms();
   }
-  if ((e = cudaMemcpy(dW, weight, weight_bytes, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
-  g_h2d_bytes += weight_bytes;
-  if ((e = cudaMemcpy(dS, scales, scale_bytes, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
-  g_h2d_bytes += scale_bytes;
-  if ((e = cudaMemcpy(dX, x, xBytes, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
-  g_h2d_bytes += xBytes;
+  if (upload) {
+    if ((e = cudaMemcpy(dW, weight, g.weight, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
+    g_h2d_bytes += g.weight;
+    if ((e = cudaMemcpy(dS, scales, g.scale, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
+    g_h2d_bytes += g.scale;
+  }
+  if ((e = cudaMemcpy(dX, x, g.x, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
+  g_h2d_bytes += g.x;
   if (timing_ms) {
     if ((e = cudaStreamSynchronize(0)) != cudaSuccess) { status = (int)e; goto done; }
     t1 = rex_now_ms();
@@ -313,11 +321,11 @@ extern "C" int fcuda_routed_expert_gemv_e8m0(
   }
   if (rex_take_test_fault(REX_TEST_FAULT_LAUNCH)) { status = (int)cudaErrorInvalidConfiguration; goto done; }
   if (format == REX_FORMAT_FP8_BLOCK32) {
-    k_rex_gemv_fp8_block32_e8m0<<<(unsigned int)blocks, REX_THREADS, 0, g_stream>>>(
-        (const uint8_t *)dW, (const uint8_t *)dS, (const float *)dX, (float *)dY, (long long)O, (long long)I);
+    k_rex_gemv_fp8_block32_e8m0<<<(unsigned int)g.blocks, REX_THREADS, 0, g_stream>>>(
+        (const uint8_t *)kW, (const uint8_t *)kS, (const float *)dX, (float *)dY, (long long)O, (long long)I);
   } else {
-    k_rex_gemv_mxfp4_e8m0<<<(unsigned int)blocks, REX_THREADS, 0, g_stream>>>(
-        (const uint8_t *)dW, (const uint8_t *)dS, (const float *)dX, (float *)dY, (long long)O, (long long)I);
+    k_rex_gemv_mxfp4_e8m0<<<(unsigned int)g.blocks, REX_THREADS, 0, g_stream>>>(
+        (const uint8_t *)kW, (const uint8_t *)kS, (const float *)dX, (float *)dY, (long long)O, (long long)I);
   }
   if ((e = cudaGetLastError()) != cudaSuccess) { status = (int)e; goto done; }
   if (timing_ms && (e = cudaEventRecord(ev[1], g_stream)) != cudaSuccess) { status = (int)e; goto done; }
@@ -327,8 +335,8 @@ extern "C" int fcuda_routed_expert_gemv_e8m0(
     if ((e = cudaEventElapsedTime(&kernelMs, ev[0], ev[1])) != cudaSuccess) { status = (int)e; goto done; }
     t2 = rex_now_ms();
   }
-  if ((e = cudaMemcpy(y, dY, yBytes, cudaMemcpyDeviceToHost)) != cudaSuccess) { status = (int)e; goto done; }
-  g_host_bytes += yBytes;
+  if ((e = cudaMemcpy(y, dY, g.y, cudaMemcpyDeviceToHost)) != cudaSuccess) { status = (int)e; goto done; }
+  g_host_bytes += g.y;
   if (timing_ms) {
     t3 = rex_now_ms();
     timing_ms[0] = t1 - t0;
@@ -343,8 +351,110 @@ done:
   return status;
 }
 
+// One synchronous routed-expert GEMV: upload the PACKED weight/scale bytes and x, launch,
+// fence, read y back. Returns 0 on success; -1 invalid geometry/pointers; -2 refused while a
+// CUDA graph capture is open; -3 device allocation failure; a positive cudaError_t for any
+// copy, launch or execution fault. y is meaningful only when 0 is returned. timing_ms
+// (optional, 3 entries) receives host-wall H2D ms, device-event kernel ms, host-wall D2H ms.
+extern "C" int fcuda_routed_expert_gemv_e8m0(
+    int format, const uint8_t *weight, size_t weight_bytes,
+    const uint8_t *scales, size_t scale_bytes, const float *x, float *y,
+    int64_t O, int64_t I, double *timing_ms) {
+  if (!weight || !scales || !x || !y) return -1;
+  rex_geom g;
+  if (!rex_geometry(format, O, I, &g)) return -1;
+  if (weight_bytes != g.weight || scale_bytes != g.scale) return -1;
+  if (g_capture_open) return -2;
+  return rex_run(format, g, weight, scales, nullptr, nullptr, x, y, O, I, timing_ms);
+}
+
 extern "C" size_t fcuda_routed_expert_gemv_launches(void) {
   return g_rex_launches;
+}
+
+// Resident routed-expert weights: pooled device copies of one projection's packed weight and
+// scale bytes, named by an id that is never reused, so a stale or released id is refused (-1)
+// rather than aliasing a later upload. Callers serialize every entry point (Go holds cudaMu).
+struct rex_resident {
+  int format;
+  int64_t O, I;
+  void *dW, *dS;
+};
+static std::unordered_map<uint64_t, rex_resident> g_rex_resident;
+static uint64_t g_rex_resident_next = 0;
+static size_t g_rex_resident_uploads = 0;
+
+// Upload one projection's PACKED bytes once and return its id in *handle. Returns 0, -1
+// (geometry/pointers), -2 (graph capture open), -3 (allocation) or a positive cudaError_t;
+// on any non-zero status nothing stays allocated and *handle is 0.
+extern "C" int fcuda_routed_expert_resident_upload(
+    int format, const uint8_t *weight, size_t weight_bytes,
+    const uint8_t *scales, size_t scale_bytes, int64_t O, int64_t I, uint64_t *handle) {
+  if (!handle) return -1;
+  *handle = 0;
+  if (!weight || !scales) return -1;
+  rex_geom g;
+  if (!rex_geometry(format, O, I, &g)) return -1;
+  if (weight_bytes != g.weight || scale_bytes != g.scale) return -1;
+  if (g_capture_open) return -2;
+  void *dW = fcuda_malloc(weight_bytes);
+  void *dS = fcuda_malloc(scale_bytes);
+  cudaError_t e = cudaSuccess;
+  if (!dW || !dS || rex_take_test_fault(REX_TEST_FAULT_ALLOC)) {
+    fcuda_free(dW);
+    fcuda_free(dS);
+    return -3;
+  }
+  (void)cudaGetLastError();
+  if ((e = cudaMemcpy(dW, weight, weight_bytes, cudaMemcpyHostToDevice)) == cudaSuccess) {
+    g_h2d_bytes += weight_bytes;
+    if ((e = cudaMemcpy(dS, scales, scale_bytes, cudaMemcpyHostToDevice)) == cudaSuccess) g_h2d_bytes += scale_bytes;
+  }
+  if (e != cudaSuccess) {
+    fcuda_free(dW);
+    fcuda_free(dS);
+    return (int)e;
+  }
+  *handle = ++g_rex_resident_next;
+  g_rex_resident[*handle] = rex_resident{format, O, I, dW, dS};
+  ++g_rex_resident_uploads;
+  return 0;
+}
+
+// GEMV over a resident id: only x and y cross the bus. format, O and I must match the
+// upload. Statuses as fcuda_routed_expert_gemv_e8m0, plus -1 for an unknown id.
+extern "C" int fcuda_routed_expert_resident_gemv_e8m0(
+    uint64_t handle, int format, const float *x, float *y, int64_t O, int64_t I, double *timing_ms) {
+  if (!x || !y) return -1;
+  auto it = g_rex_resident.find(handle);
+  if (it == g_rex_resident.end()) return -1;
+  const rex_resident &r = it->second;
+  if (r.format != format || r.O != O || r.I != I) return -1;
+  rex_geom g;
+  if (!rex_geometry(format, O, I, &g)) return -1;
+  if (g_capture_open) return -2;
+  return rex_run(format, g, nullptr, nullptr, r.dW, r.dS, x, y, O, I, timing_ms);
+}
+
+// Return a resident id's buffers to the pool. Returns 0, -1 (unknown id) or -2 (graph capture
+// open: the id stays resident and usable).
+extern "C" int fcuda_routed_expert_resident_release(uint64_t handle) {
+  auto it = g_rex_resident.find(handle);
+  if (it == g_rex_resident.end()) return -1;
+  if (g_capture_open) return -2;
+  fcuda_free(it->second.dW);
+  fcuda_free(it->second.dS);
+  g_rex_resident.erase(it);
+  return 0;
+}
+
+// Witnesses: cumulative successful resident uploads, and ids currently resident.
+extern "C" size_t fcuda_routed_expert_resident_uploads(void) {
+  return g_rex_resident_uploads;
+}
+
+extern "C" size_t fcuda_routed_expert_resident_live(void) {
+  return g_rex_resident.size();
 }
 
 extern "C" void fcuda_routed_expert_gemv_test_fault(int kind) {
