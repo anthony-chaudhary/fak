@@ -79,6 +79,11 @@ func (c *cudaBackend) dallocKV(nbytes int, site string) *cudaBuf {
 	return c.dallocClass(nbytes, MemoryKVCache, site)
 }
 
+// Match cudaKVMaxCopyFloats to the actual C ABI at build time. CUDA targets use
+// a four-byte int; fail compilation instead of silently assuming a wider ABI.
+var _ [4 - C.sizeof_int]byte
+var _ [C.sizeof_int - 4]byte
+
 // dslice is a growable VRAM float buffer (len/cap in floats).
 type dslice struct {
 	ptr      unsafe.Pointer
@@ -86,8 +91,11 @@ type dslice struct {
 }
 
 func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, site string) {
-	if d.len+nFloats > d.cap {
-		ncap := d.cap*2 + nFloats
+	ncap, err := cudaKVAppendCapacity(d.len, d.cap, nFloats, site)
+	if err != nil {
+		panic(err)
+	}
+	if ncap > d.cap {
 		np := c.dallocKV(ncap*F32.Bytes(), site).ptr
 		if d.len > 0 {
 			C.fcuda_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*4))
@@ -125,7 +133,17 @@ func (k *cudaKV) ResidentBytes() int64 {
 func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if k.cfg.NumKVHeads <= 0 || k.cfg.HeadDim <= 0 || k.cfg.NumKVHeads > cudaKVMaxCopyFloats/k.cfg.HeadDim {
+		panic(cudaKVAppendBoundsError("kv-append", "KV row width exceeds signed 32-bit copy limit"))
+	}
 	w := k.stride()
+	// Check every destination before any row advances, including malformed or
+	// already-over-limit caches restored from host snapshots.
+	for _, row := range [3]dslice{k.Kraw[layer], k.K[layer], k.V[layer]} {
+		if _, err := cudaKVAppendCapacity(row.len, row.cap, w, "kv-append"); err != nil {
+			panic(err)
+		}
+	}
 	// Preflight all three sources before the first append so a poisoned second or
 	// third operand cannot leave a partially advanced KV row.
 	kRawBuf := k.be.cudaBufForSubmit(kRaw)
