@@ -29,6 +29,7 @@ package compute
 int fak_cuda_matmul_f32(const float *w, const float *x, float *y, int out, int in, int p);
 int fak_cuda_matmul_f16(const void *w, const float *x, float *y, int out, int in, int p, int col_major);
 int fak_cuda_read_d2h(int device, void *h, const void *d, size_t n);
+int fak_cuda_upload_h2d(void *d, const void *h, size_t n);
 */
 import "C"
 
@@ -439,7 +440,8 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		buf := c.dallocClass(t.Numel()*F32.Bytes(), class, site)
 		out := makeF32TensorLike(c, t, buf)
 		return finishF32Upload(out, f, func(values []float32) {
-			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
+			status := int(C.fak_cuda_upload_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4)))
+			c.checkF32Upload(buf, status, site, func(ptr unsafe.Pointer) { C.fcuda_free(ptr) })
 		})
 	}
 	store := F32 // the resident dtype the `as` request narrows f32 host weights to
@@ -481,7 +483,8 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	}
 	out, buf := c.dev(t.Shape, F32)
 	if len(f) > 0 {
-		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+		status := int(C.fak_cuda_upload_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4)))
+		c.checkF32Upload(buf, status, site, func(ptr unsafe.Pointer) { C.fcuda_free(ptr) })
 		c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
 		if hp != 0 {
 			buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
@@ -489,6 +492,35 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		}
 	}
 	return out
+}
+
+// checkF32Upload retires an unpublished destination on copy failure. Caller
+// holds cudaMu: Free would deadlock, and cache/accounting publication must wait
+// until this boundary succeeds. Detach ownership before best-effort release.
+func (c *cudaBackend) checkF32Upload(dst *cudaBuf, status int, site string, release func(unsafe.Pointer)) {
+	if status == 0 {
+		return
+	}
+	c.faultLatch.Observe(DeviceFaultUnknown, site, status)
+	ptr := dst.ptr
+	dst.ptr = nil
+	c.dlUsed -= dst.budgetedWeightBytes
+	dst.budgetedWeightBytes = 0
+	if dst.managedWeight {
+		c.managedN--
+		dst.managedWeight = false
+	}
+	if ptr != nil {
+		func() {
+			// Preserve the transfer error even if cleanup itself fails.
+			defer func() { _ = recover() }()
+			release(ptr)
+		}()
+	}
+	panic(&CUDAOpError{
+		Op: "Upload", Site: site, Code: status, Class: dst.class,
+		Msg: "native host-to-device upload failed",
+	})
 }
 
 // uploadQ8 narrows an f32 host weight [out,in] to a resident Q8_0 weight at H2D (#485): the f32 is

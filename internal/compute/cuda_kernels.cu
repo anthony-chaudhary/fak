@@ -267,10 +267,14 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
     }
   }
 }
-extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
+extern "C" int fak_cuda_upload_h2d(void *d, const void *h, size_t n) {
   cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
   if (e == cudaSuccess) g_h2d_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+  return (int)e;
+}
+extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
+  (void)fak_cuda_upload_h2d(d, h, n);
 }
 extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
