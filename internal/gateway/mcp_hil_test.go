@@ -122,10 +122,11 @@ func TestMCPHIL(t *testing.T) {
 		}
 	})
 
-	t.Run("tools/call fak_hil_audit_comparison verified physical silicon", func(t *testing.T) {
+	t.Run("tools/call fak_hil_audit_comparison reported physical silicon needs proof", func(t *testing.T) {
 		audit := callMCPTool[hil.ComparisonAudit](t, srv, "fak_hil_audit_comparison", map[string]any{
 			"headline": "Metal vs CPU",
 			"candidate": hil.ComparisonArm{
+				Scope:             hil.ComparisonHardware,
 				Name:              "fak-metal",
 				IsPhysicalSilicon: true,
 				HardwareTarget:    "Apple Silicon",
@@ -136,6 +137,7 @@ func TestMCPHIL(t *testing.T) {
 				SampleCount:       10,
 			},
 			"baseline": hil.ComparisonArm{
+				Scope:             hil.ComparisonHardware,
 				Name:              "fak-cpu",
 				IsPhysicalSilicon: true,
 				HardwareTarget:    "Apple Silicon CPU",
@@ -148,11 +150,14 @@ func TestMCPHIL(t *testing.T) {
 			"lower_is_better": false,
 		})
 
-		if audit.Verdict != hil.VerdictRealHardwareVerified {
-			t.Fatalf("expected verdict %s, got %s", hil.VerdictRealHardwareVerified, audit.Verdict)
+		if audit.Verdict != hil.VerdictNeedsProof {
+			t.Fatalf("expected verdict %s, got %s", hil.VerdictNeedsProof, audit.Verdict)
 		}
-		if !audit.AllowedAsAchievedWin {
-			t.Error("expected AllowedAsAchievedWin == true")
+		if audit.AllowedAsAchievedWin {
+			t.Error("expected AllowedAsAchievedWin == false")
+		}
+		if !audit.Comparable || audit.Scope != hil.ComparisonHardware {
+			t.Errorf("expected comparable hardware metrics, got comparable=%t scope=%q", audit.Comparable, audit.Scope)
 		}
 		if audit.IsEarlyIndicator {
 			t.Error("expected IsEarlyIndicator == false")

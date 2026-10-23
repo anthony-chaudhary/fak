@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -56,8 +57,9 @@ func TestRunMicroDosesExecution(t *testing.T) {
 	}
 }
 
-func TestAuditComparisonRealHardware(t *testing.T) {
+func TestAuditComparisonNeedsProof(t *testing.T) {
 	cand := ComparisonArm{
+		Scope:             ComparisonEngine,
 		Name:              "fak-native-metal",
 		IsPhysicalSilicon: true,
 		HardwareTarget:    "Apple M3 Pro",
@@ -68,6 +70,7 @@ func TestAuditComparisonRealHardware(t *testing.T) {
 		SampleCount:       20,
 	}
 	base := ComparisonArm{
+		Scope:             ComparisonEngine,
 		Name:              "llama.cpp-metal",
 		IsPhysicalSilicon: true,
 		HardwareTarget:    "Apple M3 Pro",
@@ -79,11 +82,14 @@ func TestAuditComparisonRealHardware(t *testing.T) {
 	}
 
 	audit := AuditComparison("fak-native vs llama.cpp MTP Decode", cand, base, false)
-	if audit.Verdict != VerdictRealHardwareVerified {
-		t.Errorf("expected verdict %s, got %s", VerdictRealHardwareVerified, audit.Verdict)
+	if audit.Verdict != VerdictNeedsProof {
+		t.Errorf("expected verdict %s, got %s", VerdictNeedsProof, audit.Verdict)
 	}
-	if !audit.AllowedAsAchievedWin {
-		t.Errorf("expected AllowedAsAchievedWin to be true")
+	if audit.AllowedAsAchievedWin {
+		t.Errorf("producer-reported physical evidence must not qualify an achieved win")
+	}
+	if !audit.Comparable || audit.Scope != ComparisonEngine {
+		t.Errorf("expected comparable engine metrics, got comparable=%t scope=%q", audit.Comparable, audit.Scope)
 	}
 	if audit.IsEarlyIndicator {
 		t.Errorf("expected IsEarlyIndicator to be false")
@@ -102,7 +108,7 @@ func TestAuditComparisonRejectsSimulation(t *testing.T) {
 		Metric:            "tok/s",
 		Value:             318.8,
 		Unit:              "tok/s",
-		SampleCount:       0,
+		SampleCount:       1,
 	}
 	base := ComparisonArm{
 		Name:              "llama.cpp-baseline",
@@ -125,6 +131,9 @@ func TestAuditComparisonRejectsSimulation(t *testing.T) {
 	if !audit.IsEarlyIndicator {
 		t.Errorf("expected IsEarlyIndicator to be true")
 	}
+	if audit.Comparable || audit.Speedup != 0 {
+		t.Error("an unspecified scope must not produce a comparison ratio")
+	}
 }
 
 func TestAuditComparisonRejectsInvalidMetrics(t *testing.T) {
@@ -140,6 +149,104 @@ func TestAuditComparisonRejectsInvalidMetrics(t *testing.T) {
 	audit := AuditComparison("invalid", cand, base, false)
 	if audit.Verdict != VerdictInvalidComparison {
 		t.Errorf("expected verdict %s, got %s", VerdictInvalidComparison, audit.Verdict)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAuditComparisonEvidenceContract(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		mutate     func(*ComparisonArm, *ComparisonArm)
+		lower      bool
+		verdict    ComparisonVerdict
+		comparable bool
+		ratio      float64
+		early      bool
+		reason     string
+	}{
+		{name: "reported CPU measurements", verdict: VerdictNeedsProof, comparable: true, ratio: 2, reason: "receipt references are missing"},
+		{name: "lower is better", lower: true, verdict: VerdictNeedsProof, comparable: true, ratio: 0.5},
+		{name: "software measurements", mutate: func(c, b *ComparisonArm) {
+			c.IsPhysicalSilicon, b.IsPhysicalSilicon = false, false
+			c.EvidenceType, b.EvidenceType = "software_measurement", "software_measurement"
+		}, verdict: VerdictNeedsProof, comparable: true, ratio: 2},
+		{name: "empty metric", mutate: func(c, b *ComparisonArm) { c.Metric = "" }, reason: "metric"},
+		{name: "blank metric", mutate: func(c, b *ComparisonArm) { c.Metric, b.Metric = " ", " " }, reason: "metric"},
+		{name: "different metric", mutate: func(c, b *ComparisonArm) { b.Metric = "latency" }, reason: "metric"},
+		{name: "empty unit", mutate: func(c, b *ComparisonArm) { b.Unit = "" }, reason: "unit"},
+		{name: "blank unit", mutate: func(c, b *ComparisonArm) { c.Unit, b.Unit = " ", " " }, reason: "unit"},
+		{name: "different unit", mutate: func(c, b *ComparisonArm) { c.Unit = "ms" }, reason: "unit"},
+		{name: "zero value", mutate: func(c, b *ComparisonArm) { c.Value = 0 }, reason: "finite and positive"},
+		{name: "negative value", mutate: func(c, b *ComparisonArm) { b.Value = -1 }, reason: "finite and positive"},
+		{name: "NaN candidate", mutate: func(c, b *ComparisonArm) { c.Value = math.NaN() }, reason: "finite and positive"},
+		{name: "NaN baseline", mutate: func(c, b *ComparisonArm) { b.Value = math.NaN() }, reason: "finite and positive"},
+		{name: "infinite candidate", mutate: func(c, b *ComparisonArm) { c.Value = math.Inf(1) }, reason: "finite and positive"},
+		{name: "infinite baseline", mutate: func(c, b *ComparisonArm) { b.Value = math.Inf(-1) }, reason: "finite and positive"},
+		{name: "ratio overflow", mutate: func(c, b *ComparisonArm) { c.Value, b.Value = math.MaxFloat64, math.SmallestNonzeroFloat64 }, reason: "ratio"},
+		{name: "ratio underflow", mutate: func(c, b *ComparisonArm) { c.Value, b.Value = math.SmallestNonzeroFloat64, math.MaxFloat64 }, reason: "ratio"},
+		{name: "zero samples", mutate: func(c, b *ComparisonArm) { c.SampleCount = 0 }, reason: "sample count"},
+		{name: "negative samples", mutate: func(c, b *ComparisonArm) { b.SampleCount = -1 }, reason: "sample count"},
+		{name: "omitted scope", mutate: func(c, b *ComparisonArm) { c.Scope, b.Scope = "", "" }, verdict: VerdictNeedsProof, reason: "explicit comparison scope"},
+		{name: "one omitted scope", mutate: func(c, b *ComparisonArm) { b.Scope = "" }, reason: "same comparison scope"},
+		{name: "unknown scope", mutate: func(c, b *ComparisonArm) { c.Scope, b.Scope = "other", "other" }, reason: "Unknown comparison scope"},
+		{name: "different scope", mutate: func(c, b *ComparisonArm) { b.Scope = ComparisonHardware }, reason: "same comparison scope"},
+		{name: "missing target", mutate: func(c, b *ComparisonArm) { c.HardwareTarget = " " }, reason: "hardware targets"},
+		{name: "engine hardware mismatch", mutate: func(c, b *ComparisonArm) { b.HardwareTarget = "fixture GPU" }, reason: "matching hardware targets"},
+		{name: "explicit hardware comparison", mutate: func(c, b *ComparisonArm) {
+			c.Scope, b.Scope = ComparisonHardware, ComparisonHardware
+			b.HardwareTarget = "fixture GPU"
+		}, verdict: VerdictNeedsProof, comparable: true, ratio: 2},
+		{name: "blank receipt", mutate: func(c, b *ComparisonArm) { c.ReceiptRef = " "; b.ReceiptRef = "fixture://baseline" }, verdict: VerdictNeedsProof, comparable: true, ratio: 2, reason: "receipt references are missing"},
+		{name: "unverified receipt references", mutate: func(c, b *ComparisonArm) { c.ReceiptRef, b.ReceiptRef = "fixture://candidate", "fixture://baseline" }, verdict: VerdictNeedsProof, comparable: true, ratio: 2, reason: "proof is not bound"},
+		{name: "modeled evidence", mutate: func(c, b *ComparisonArm) { c.EvidenceType = "analytical_bound"; c.IsPhysicalSilicon = false }, verdict: VerdictEarlyIndicatorOnly, comparable: true, ratio: 2, early: true},
+		{name: "physical flag cannot promote model", mutate: func(c, b *ComparisonArm) { b.EvidenceType = "trace_sim" }, verdict: VerdictEarlyIndicatorOnly, comparable: true, ratio: 2, early: true},
+		{name: "unscoped model", mutate: func(c, b *ComparisonArm) { c.Scope, b.Scope = "", ""; c.EvidenceType = "analytical_bound" }, verdict: VerdictEarlyIndicatorOnly, early: true, reason: "explicit comparison scope"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := ComparisonArm{
+				Scope: ComparisonEngine, Name: "candidate", IsPhysicalSilicon: true,
+				HardwareTarget: "fixture CPU", EvidenceType: "hardware_measurement",
+				Metric: "throughput", Value: 20, Unit: "op/s", SampleCount: 3,
+			}
+			baseline := candidate
+			baseline.Name, baseline.Value = "baseline", 10
+			if tc.mutate != nil {
+				tc.mutate(&candidate, &baseline)
+			}
+			wantVerdict := tc.verdict
+			if wantVerdict == "" {
+				wantVerdict = VerdictInvalidComparison
+			}
+			audit := AuditComparison(tc.name, candidate, baseline, tc.lower)
+			if audit.Verdict != wantVerdict || audit.Comparable != tc.comparable || audit.Speedup != tc.ratio || audit.IsEarlyIndicator != tc.early {
+				t.Fatalf("audit = %+v; want verdict=%s comparable=%t ratio=%g early=%t", audit, wantVerdict, tc.comparable, tc.ratio, tc.early)
+			}
+			if audit.AllowedAsAchievedWin || audit.Verdict == VerdictRealHardwareVerified {
+				t.Fatal("producer metadata or fixtures must never qualify a physical win")
+			}
+			if audit.Comparable && audit.Scope != candidate.Scope {
+				t.Errorf("lost comparison scope: got %q want %q", audit.Scope, candidate.Scope)
+			}
+			if !strings.Contains(audit.Reason, tc.reason) {
+				t.Errorf("reason %q does not explain %q", audit.Reason, tc.reason)
+			}
+			if math.IsNaN(candidate.Value) || math.IsInf(candidate.Value, 0) || math.IsNaN(baseline.Value) || math.IsInf(baseline.Value, 0) {
+				return // encoding/json rejects the preserved nonfinite input values.
+			}
+			raw, err := json.Marshal(audit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded ComparisonAudit
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Schema != ComparisonSchema || decoded.Comparable != audit.Comparable || decoded.Scope != audit.Scope || decoded.Speedup != audit.Speedup || decoded.Verdict != audit.Verdict || decoded.AllowedAsAchievedWin || decoded.IsEarlyIndicator != audit.IsEarlyIndicator || decoded.Candidate.Scope != candidate.Scope || decoded.Baseline.Scope != baseline.Scope {
+				t.Fatalf("JSON round trip changed comparison evidence: %s", raw)
+			}
+		})
 	}
 }
 
@@ -540,7 +647,7 @@ func TestConcurrentInvocations(t *testing.T) {
 				SampleCount:       10,
 			}
 			audit := AuditComparison("conc", cand, base, false)
-			if audit.Verdict != VerdictRealHardwareVerified {
+			if audit.Verdict != VerdictNeedsProof || audit.AllowedAsAchievedWin {
 				t.Errorf("worker %d: unexpected verdict %s", idx, audit.Verdict)
 			}
 
@@ -636,7 +743,7 @@ func TestSchemaConformance(t *testing.T) {
 	if s, ok := auditMap["schema"].(string); !ok || s != "fak.hil.comparison.v1" {
 		t.Errorf("expected schema 'fak.hil.comparison.v1', got %v", auditMap["schema"])
 	}
-	for _, field := range []string{"schema", "timestamp", "headline", "candidate", "baseline", "speedup", "verdict", "allowed_as_achieved_win", "is_early_indicator", "reason", "enforcement_action"} {
+	for _, field := range []string{"schema", "timestamp", "headline", "candidate", "baseline", "comparable", "speedup", "verdict", "allowed_as_achieved_win", "is_early_indicator", "reason", "enforcement_action"} {
 		if _, ok := auditMap[field]; !ok {
 			t.Errorf("audit missing field %q", field)
 		}

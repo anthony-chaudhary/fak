@@ -61,8 +61,11 @@ type LANNodeInfo struct {
 type ComparisonVerdict string
 
 const (
-	// VerdictRealHardwareVerified indicates both comparison arms are measured on physical silicon.
+	// VerdictRealHardwareVerified requires independent physical execution proof.
+	// AuditComparison cannot issue it from producer-authored arm metadata alone.
 	VerdictRealHardwareVerified ComparisonVerdict = "VERIFIED_REAL_HARDWARE"
+	// VerdictNeedsProof withholds physical qualification from unverified evidence.
+	VerdictNeedsProof ComparisonVerdict = "NEEDS_PROOF"
 	// VerdictEarlyIndicatorOnly indicates at least one arm is simulated; valid only as early indicator.
 	VerdictEarlyIndicatorOnly ComparisonVerdict = "EARLY_INDICATOR_ONLY"
 	// VerdictRejectedSimulation indicates a simulated result was improperly claimed as an achieved win.
@@ -123,26 +126,44 @@ type InventoryReport struct {
 	NextAction string       `json:"next_action"`
 }
 
-// ComparisonArm represents one candidate or baseline in a head-to-head comparison.
+// ComparisonScope declares what the reported ratio compares, not what it proves.
+type ComparisonScope string
+
+const (
+	// ComparisonEngine compares engines or optimizations on the same named hardware.
+	ComparisonEngine ComparisonScope = "engine"
+	// ComparisonHardware compares named hardware targets without engine attribution.
+	ComparisonHardware ComparisonScope = "hardware"
+)
+
+// ComparisonArm represents producer-reported candidate or baseline evidence.
+// Its flags and reference strings do not independently verify physical execution.
 type ComparisonArm struct {
-	Name              string  `json:"name"`
-	IsPhysicalSilicon bool    `json:"is_physical_silicon"`
-	HardwareTarget    string  `json:"hardware_target"`
-	EvidenceType      string  `json:"evidence_type"` // e.g., "hardware_measurement", "analytical_bound", "trace_sim"
-	Metric            string  `json:"metric"`
-	Value             float64 `json:"value"`
-	Unit              string  `json:"unit"`
-	SampleCount       int     `json:"sample_count"`
-	ReceiptRef        string  `json:"receipt_ref,omitempty"`
+	Scope             ComparisonScope `json:"scope,omitempty"`
+	Name              string          `json:"name"`
+	IsPhysicalSilicon bool            `json:"is_physical_silicon"`
+	HardwareTarget    string          `json:"hardware_target"`
+	EvidenceType      string          `json:"evidence_type"` // e.g., "hardware_measurement", "analytical_bound", "trace_sim"
+	Metric            string          `json:"metric"`
+	Value             float64         `json:"value"`
+	Unit              string          `json:"unit"`
+	SampleCount       int             `json:"sample_count"`
+	ReceiptRef        string          `json:"receipt_ref,omitempty"`
 }
 
-// ComparisonAudit evaluates whether a reported comparison adheres to the physical hardware requirement.
+// ComparisonAudit separates reported-value compatibility from physical qualification.
 type ComparisonAudit struct {
-	Schema               string            `json:"schema"`
-	Timestamp            time.Time         `json:"timestamp"`
-	Headline             string            `json:"headline"`
-	Candidate            ComparisonArm     `json:"candidate"`
-	Baseline             ComparisonArm     `json:"baseline"`
+	Schema    string          `json:"schema"`
+	Timestamp time.Time       `json:"timestamp"`
+	Headline  string          `json:"headline"`
+	Candidate ComparisonArm   `json:"candidate"`
+	Baseline  ComparisonArm   `json:"baseline"`
+	Scope     ComparisonScope `json:"scope,omitempty"`
+	// Comparable covers declared metrics, units, samples and scope only. It does
+	// not establish matched workloads, measured execution or physical authority.
+	Comparable bool `json:"comparable"`
+	// Speedup is a descriptive ratio, not an achieved win. It is zero when the
+	// reported arms are not comparable; qualification is checked separately.
 	Speedup              float64           `json:"speedup"`
 	Verdict              ComparisonVerdict `json:"verdict"`
 	AllowedAsAchievedWin bool              `json:"allowed_as_achieved_win"`

@@ -70,7 +70,7 @@ func TestHILMicroDosesJSON(t *testing.T) {
 	}
 }
 
-func TestHILAuditComparisonRealHardware(t *testing.T) {
+func TestHILAuditComparisonNeedsProof(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rc := runHIL(&stdout, &stderr, []string{
 		"--audit-comparison",
@@ -81,12 +81,12 @@ func TestHILAuditComparisonRealHardware(t *testing.T) {
 		"--baseline-val", "12.14",
 		"--baseline-physical=true",
 	})
-	if rc != 0 {
-		t.Fatalf("expected rc 0 for real hardware comparison, got %d, stderr: %s", rc, stderr.String())
+	if rc != 1 {
+		t.Fatalf("expected rc 1 for unverified hardware comparison, got %d, stderr: %s", rc, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "VERIFIED_REAL_HARDWARE") {
-		t.Errorf("expected VERIFIED_REAL_HARDWARE in stdout, got:\n%s", out)
+	if !strings.Contains(out, "NEEDS_PROOF") || strings.Contains(out, "VERIFIED_REAL_HARDWARE") {
+		t.Errorf("expected NEEDS_PROOF without physical verification in stdout, got:\n%s", out)
 	}
 }
 

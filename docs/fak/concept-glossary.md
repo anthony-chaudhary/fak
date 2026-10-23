@@ -1693,3 +1693,10 @@ fitplan.Model field: the number of KV-bearing attention layers (ContextSizeConfi
 cmd/fak record of how a serve resolved its native context: the operator's requested tokens, the model-declared window, the resolved tokens and the source (explicit or auto); the --plan-json fit_plan reads the request as the context pin and the resolved value as the current candidate.
 
 **Distinct from:** The RESULT record; distinct from resolveServeNativeContext, the function that produces it by sizing against the fit budget.
+
+
+### ComparisonEngine
+
+HIL ComparisonScope value declaring an engine or optimization comparison on the same named hardware, used to admit a descriptive ratio only when both producer-reported arms have compatible dimensions.
+
+**Distinct from:** ComparisonEngine is a comparison-attribution discriminator, not the Engine inference execution driver. It requires the same named hardware; ComparisonHardware instead compares hardware targets without engine attribution. Structural ratio admission grants neither verified physical execution nor achieved-win credit.

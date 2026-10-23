@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "hil-comparison-engine",
+      "canonical": "ComparisonEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "HIL ComparisonScope value declaring an engine or optimization comparison on the same named hardware, used to admit a descriptive ratio only when both producer-reported arms have compatible dimensions.",
+      "distinction": "ComparisonEngine is a comparison-attribution discriminator, not the Engine inference execution driver. It requires the same named hardware; ComparisonHardware instead compares hardware targets without engine attribution. Structural ratio admission grants neither verified physical execution nor achieved-win credit.",
+      "distinct_from": [
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "ComparisonEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
