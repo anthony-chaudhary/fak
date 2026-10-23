@@ -257,7 +257,9 @@ func TestV41IncrementalEngramDefaultPhaseAttribution(t *testing.T) {
 	p := plain.NewSession()
 	p.Prefill([]int{1, 3, 2})
 	p.Step(5)
-	for _, phase := range v41IncrementalEngramPhaseJSON(t, plain) {
+	plainFields := v41IncrementalEngramPhaseJSON(t, plain)
+	for _, name := range []string{"prefill", "decode"} {
+		phase := plainFields[name]
 		for _, key := range []string{"incremental_engram_injections", "incremental_engram_rows", "incremental_engram_hash_tokens", "incremental_engram_nanos"} {
 			if got := v41IncrementalEngramJSONInt(t, phase, key); got != 0 {
 				t.Errorf("no-Engram %s=%d", key, got)

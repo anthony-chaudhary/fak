@@ -1616,16 +1616,17 @@ var interpreterSuffix = []string{".py", ".sh", ".bash", ".ps1", ".rb", ".pl", ".
 // chokepoint as regOffList. Each entry is a deliberate, reviewed decision, not a
 // silent pass.
 var interpreterExecAllow = map[string]string{
-	"windowgate":  "host process launcher executes caller-selected compiled programs after policy classification; script interpreters are rejected by the windowgate classifier",
-	"toolcatalog": "catalog command adapters execute declaration-selected compiled tools; declarations are validated before launch and are not interpreter dependencies",
-	"codetools":   "coding Bash engine executes an adjudicator-admitted argv; the dynamic program is the admitted tool target, not a kernel interpreter dependency",
-	"witness":     "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
-	"procguard":   "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
-	"accounts":    "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
-	"modelroute":  "cross-audit corpus self-check executes a structured, declaration-matched witness argv (normally the compiled crossauditfixture binary); the dynamic path is test/CLI calibration evidence, not a script interpreter dependency of tool-call adjudication",
-	"compute":     "host hardware topology probe queries the Windows display subsystem for AMD GPUs via Win32_VideoController in ProbeWindowsDisplayTopology; host-observation seam, not a tool-call adjudication dependency",
-	"mcpbroker":   "mcpbroker executes client-configured MCP tool servers through stdio; server command is caller-provided and validated at broker initialization",
-	"trajectory":  "telemetry alarm subprocess executes platform-resolved compiled notification binaries or audit tools; not an adjudication dependency of tool-call decide",
+	"windowgate":   "host process launcher executes caller-selected compiled programs after policy classification; script interpreters are rejected by the windowgate classifier",
+	"toolcatalog":  "catalog command adapters execute declaration-selected compiled tools; declarations are validated before launch and are not interpreter dependencies",
+	"codetools":    "coding Bash engine executes an adjudicator-admitted argv; the dynamic program is the admitted tool target, not a kernel interpreter dependency",
+	"witness":      "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
+	"procguard":    "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
+	"accounts":     "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
+	"modelroute":   "cross-audit corpus self-check executes a structured, declaration-matched witness argv (normally the compiled crossauditfixture binary); the dynamic path is test/CLI calibration evidence, not a script interpreter dependency of tool-call adjudication",
+	"compute":      "host hardware topology probe queries the Windows display subsystem for AMD GPUs via Win32_VideoController in ProbeWindowsDisplayTopology; host-observation seam, not a tool-call adjudication dependency",
+	"mcpbroker":    "mcpbroker executes client-configured MCP tool servers through stdio; server command is caller-provided and validated at broker initialization",
+	"computebuild": "kernel/shader build toolchain (reached via witness evidence) execs resolved compiled tools — RunCmd's compiler argv, the vswhere lookup, and a smoke probe of the binary it just built; not a tool-call adjudication dependency",
+	"trajectory":   "telemetry alarm subprocess executes platform-resolved compiled notification binaries or audit tools; not an adjudication dependency of tool-call decide",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
