@@ -71,6 +71,8 @@ func TestDirectSlabOversizedRequestPreservesActiveRegion(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer slab.Close()
+			// Software owner fixture, not a native registration witness.
+			bindTestDirectSlabRegistration(t, slab)
 			live, err := slab.Allocate(retained)
 			if err != nil {
 				t.Fatal(err)

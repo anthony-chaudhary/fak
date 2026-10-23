@@ -3,9 +3,7 @@ package compute
 import (
 	"fmt"
 	"math"
-	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -21,20 +19,18 @@ type DirectSlabConfig struct {
 	// Defaults to 64 if not specified or <= 0.
 	Alignment int
 
-	// PinMemory indicates whether the backing slab memory should be pinned in DRAM
-	// via runtime.Pinner to prevent GC movement or page faults during RDMA/DMA transfers.
+	// PinMemory pins the Go object against GC movement. It does not lock pages,
+	// register memory with a transport, or map memory into a device.
 	PinMemory bool
 
-	// DirectInterconnect indicates whether allocations are registered directly with
-	// the RDMA/interconnect fabric (DS4_TP_BIG_DIRECT semantics), bypassing CPU staging.
+	// DirectInterconnect requests direct transport policy, not registration evidence.
 	DirectInterconnect bool
 
-	// DeviceAccessible indicates whether the memory is unified and directly accessible
-	// by device/GPU hardware (UMA uncached / write-combining DRAM).
+	// DeviceAccessible requests device access, not evidence of a device mapping.
 	DeviceAccessible bool
 
-	// LKey is the optional RDMA memory region local key (ibv_sge.lkey).
-	// If 0 and Registered/DirectInterconnect is true, defaults to 0x1000.
+	// LKey is a legacy requested key. Only a provider receipt can supply the
+	// actual transport key; this value does not establish registration.
 	LKey uint32
 }
 
@@ -49,10 +45,12 @@ type SlabAllocation struct {
 	// Data is the subslice of the direct slab buffer corresponding to this allocation.
 	Data []byte
 
-	// Direct indicates whether this allocation supports direct zero-copy transfers.
+	// Direct snapshots provider-attested device eligibility at allocation time.
+	// GetSGE revalidates the live receipt; this is not a transfer measurement.
 	Direct bool
 
-	// Registered indicates whether the backing memory is registered with the interconnect.
+	// Registered snapshots provider registration at allocation time.
+	// It is not independent authority to use an address after Free.
 	Registered bool
 
 	// Release frees the allocation back to the allocator.
@@ -61,6 +59,7 @@ type SlabAllocation struct {
 	allocator *DirectSlabAllocator
 	block     *slabBlock
 	freed     bool
+	size      int64 // immutable requested length; exported metadata is not authority
 }
 
 // Free releases the allocation back to its owning DirectSlabAllocator.
@@ -95,14 +94,9 @@ type slabBlock struct {
 	next   *slabBlock
 }
 
-// DirectSlabAllocator maps contiguous tensor allocations into pre-pinned,
-// RDMA/interconnect-registered memory slabs. On Unified Memory Architecture (UMA)
-// APUs (e.g. AMD Strix Halo), CPU and GPU share physical DRAM, but memory allocated
-// via GPU runtimes is mapped with Write-Combining (WC) uncached semantics where standard
-// CPU memcpy runs at ~189-200 MB/s. DirectSlabAllocator implements DS4_TP_BIG_DIRECT=1
-// semantics: tensors are allocated directly within the RDMA-registered slab, and
-// verbs SGEs point directly to device-accessible addresses, completely bypassing
-// intermediate host staging copies (zero-copy).
+// DirectSlabAllocator suballocates aligned Go heap storage. Physical transport
+// registration and same-address device access require a live provider receipt;
+// configuration flags, environment variables and GC pinning are not evidence.
 type DirectSlabAllocator struct {
 	mu            sync.Mutex
 	cfg           DirectSlabConfig
@@ -114,22 +108,12 @@ type DirectSlabAllocator struct {
 	alignment     int
 	head          *slabBlock
 	active        map[*SlabAllocation]*slabBlock
-	registered    bool
-	direct        bool
 	pinner        *runtime.Pinner
 	stagingCopies int64
 	closed        bool
-	lkey          uint32
-}
-
-func isDirectEnvEnabled() bool {
-	if v := os.Getenv("DS4_TP_BIG_DIRECT"); v == "1" || strings.EqualFold(v, "true") {
-		return true
-	}
-	if v := os.Getenv("FAK_DIRECT_SLAB"); v == "1" || strings.EqualFold(v, "true") {
-		return true
-	}
-	return false
+	registration  directSlabRegistrationFacts
+	owner         directSlabRegistrationOwner
+	closeErr      error
 }
 
 // NewDirectSlabAllocator creates a new DirectSlabAllocator with the provided configuration.
@@ -150,14 +134,6 @@ func NewDirectSlabAllocator(cfg DirectSlabConfig) (*DirectSlabAllocator, error) 
 	maxInt := int64(int(^uint(0) >> 1))
 	if cfg.TotalBytes > maxInt-int64(alignment) {
 		return nil, fmt.Errorf("compute: slab capacity %d plus alignment %d exceeds addressable size", cfg.TotalBytes, alignment)
-	}
-
-	direct := (cfg.DirectInterconnect && cfg.DeviceAccessible) || isDirectEnvEnabled()
-	registered := cfg.PinMemory || cfg.DirectInterconnect || direct
-
-	lkey := cfg.LKey
-	if lkey == 0 && registered {
-		lkey = 0x1000
 	}
 
 	// Allocate backing memory with extra headroom to guarantee alignment.
@@ -188,10 +164,7 @@ func NewDirectSlabAllocator(cfg DirectSlabConfig) (*DirectSlabAllocator, error) 
 		alignment:     alignment,
 		head:          head,
 		active:        make(map[*SlabAllocation]*slabBlock),
-		registered:    registered,
-		direct:        direct,
 		pinner:        pinner,
-		lkey:          lkey,
 	}
 
 	return d, nil
@@ -255,13 +228,15 @@ func (d *DirectSlabAllocator) Allocate(size int64) (*SlabAllocation, error) {
 	chosen.free = false
 
 	subData := d.baseSlice[chosen.offset : chosen.offset+size]
+	registered := d.registrationLiveLocked()
 
 	alloc := &SlabAllocation{
 		Offset:     chosen.offset,
 		Size:       size,
+		size:       size,
 		Data:       subData,
-		Direct:     d.direct,
-		Registered: d.registered,
+		Direct:     registered && d.registration.deviceAccessible,
+		Registered: registered,
 		allocator:  d,
 		block:      chosen,
 	}
@@ -299,7 +274,9 @@ func (d *DirectSlabAllocator) Free(alloc *SlabAllocation) error {
 
 	alloc.freed = true
 	delete(d.active, alloc)
-	d.usedBytes -= alloc.Size
+	d.usedBytes -= alloc.size
+	alloc.Direct = false
+	alloc.Registered = false
 	block.free = true
 
 	// Coalesce with next block if free.
@@ -352,13 +329,21 @@ func (d *DirectSlabAllocator) BaseAddress() uintptr {
 	return d.baseAddr
 }
 
-// Reset clears all active allocations and resets the slab to its initial state.
-func (d *DirectSlabAllocator) Reset() {
+// Reset clears heap allocations. Provider-backed users must be freed first.
+func (d *DirectSlabAllocator) Reset() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	if d.closed {
+		return fmt.Errorf("compute: direct slab allocator is closed")
+	}
+	if d.owner != nil && len(d.active) != 0 {
+		return fmt.Errorf("compute: registered slab has live allocations")
+	}
 	for alloc := range d.active {
 		alloc.freed = true
+		alloc.Direct = false
+		alloc.Registered = false
 	}
 	d.active = make(map[*SlabAllocation]*slabBlock)
 	d.head = &slabBlock{
@@ -367,20 +352,36 @@ func (d *DirectSlabAllocator) Reset() {
 		free:   true,
 	}
 	d.usedBytes = 0
+	return nil
 }
 
-// Close releases the allocator and unpins the backing memory if pinned.
+// Close refuses to retire a registration with live allocations. Provider release
+// is attempted once. On release failure the owner and backing remain retained,
+// physical access is disabled, and repeated Close returns the same error.
 func (d *DirectSlabAllocator) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if d.closed {
-		return nil
+		return d.closeErr
+	}
+	if d.owner != nil && len(d.active) != 0 {
+		return fmt.Errorf("compute: registered slab has live allocations")
 	}
 	d.closed = true
+	if d.owner != nil {
+		d.closeErr = d.owner.release()
+		if d.closeErr != nil {
+			return d.closeErr
+		}
+		d.owner = nil
+		d.registration = directSlabRegistrationFacts{}
+	}
 
 	for alloc := range d.active {
 		alloc.freed = true
+		alloc.Direct = false
+		alloc.Registered = false
 	}
 	d.active = nil
 	d.head = nil
@@ -394,13 +395,16 @@ func (d *DirectSlabAllocator) Close() error {
 	return nil
 }
 
-// IsZeroCopy reports whether the allocator operates in direct zero-copy mode.
+// IsZeroCopy reports live provider-attested same-address device eligibility.
+// It does not measure transfers or establish device qualification.
 func (d *DirectSlabAllocator) IsZeroCopy() bool {
-	return d.direct
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.registrationLiveLocked() && d.registration.deviceAccessible
 }
 
 // StagingCopyCount returns the number of intermediate host staging copies performed.
-// Under direct zero-copy interconnect transfers, this count must remain 0.
+// A zero count alone establishes no registration or device-access capability.
 func (d *DirectSlabAllocator) StagingCopyCount() int64 {
 	return atomic.LoadInt64(&d.stagingCopies)
 }
@@ -410,8 +414,8 @@ func (d *DirectSlabAllocator) RecordStagingCopy(bytes int64) {
 	atomic.AddInt64(&d.stagingCopies, 1)
 }
 
-// GetSGE generates an RDMA/verbs ScatterGatherElement pointing directly to the
-// allocated physical buffer without intermediate staging copies.
+// GetSGE borrows a provider-registered descriptor until alloc.Free.
+// Callers must retain the allocation until all descriptor users have completed.
 func (d *DirectSlabAllocator) GetSGE(alloc *SlabAllocation) (ScatterGatherElement, error) {
 	if alloc == nil {
 		return ScatterGatherElement{}, fmt.Errorf("compute: cannot get SGE for nil allocation")
@@ -428,8 +432,17 @@ func (d *DirectSlabAllocator) GetSGE(alloc *SlabAllocation) (ScatterGatherElemen
 		return ScatterGatherElement{}, fmt.Errorf("compute: cannot get SGE for freed allocation")
 	}
 
-	if _, ok := d.active[alloc]; !ok {
+	block, ok := d.active[alloc]
+	if !ok || block == nil {
 		return ScatterGatherElement{}, fmt.Errorf("compute: allocation not active in this allocator")
+	}
+
+	if alloc.Offset != block.offset || alloc.Size != alloc.size || alloc.Size <= 0 ||
+		alloc.Offset < 0 || alloc.Offset > d.totalCapacity || alloc.Size > d.totalCapacity-alloc.Offset {
+		return ScatterGatherElement{}, fmt.Errorf("compute: slab allocation bounds do not match its owner")
+	}
+	if !d.registrationLiveLocked() {
+		return ScatterGatherElement{}, fmt.Errorf("compute: slab has no live provider registration")
 	}
 
 	if alloc.Size > math.MaxUint32 {
@@ -440,6 +453,6 @@ func (d *DirectSlabAllocator) GetSGE(alloc *SlabAllocation) (ScatterGatherElemen
 	return ScatterGatherElement{
 		Address: addr,
 		Length:  uint32(alloc.Size),
-		LKey:    d.lkey,
+		LKey:    d.registration.lkey,
 	}, nil
 }

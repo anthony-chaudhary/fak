@@ -951,7 +951,7 @@ func TestDirectSlab_USB4RoCEv2_DualStrixHalo(t *testing.T) {
 	}
 
 	// Verify DirectSlabAllocator configuration:
-	// Page-aligned (4096), Direct zero-copy, PinMemory
+	// Page-aligned heap storage is not evidence of native registration.
 	slab := interconnect.Slab()
 	if slab == nil {
 		t.Fatalf("slab allocator is nil")
@@ -959,9 +959,11 @@ func TestDirectSlab_USB4RoCEv2_DualStrixHalo(t *testing.T) {
 	if slab.Alignment() != 4096 {
 		t.Errorf("slab alignment = %d, want 4096", slab.Alignment())
 	}
-	if !slab.IsZeroCopy() {
-		t.Errorf("expected slab IsZeroCopy() = true")
+	if slab.IsZeroCopy() {
+		t.Error("configuration fabricated physical zero-copy evidence")
 	}
+	// Model the provider contract for descriptor tests, not physical hardware.
+	bindTestDirectSlabRegistration(t, slab)
 	if slab.StagingCopyCount() != 0 {
 		t.Errorf("slab StagingCopyCount = %d, want 0", slab.StagingCopyCount())
 	}
@@ -1058,6 +1060,8 @@ func TestDirectSlab_StreamAsyncDoorbellAllReduce(t *testing.T) {
 	}
 	defer interconnect.Close()
 
+	// Exercise software reduction with an explicit test-only registration owner.
+	bindTestDirectSlabRegistration(t, interconnect.Slab())
 	engine, err := NewUSB4DualAPUAllReduceEngine(interconnect, 0, 1)
 	if err != nil {
 		t.Fatalf("NewUSB4DualAPUAllReduceEngine failed: %v", err)

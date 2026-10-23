@@ -20,6 +20,7 @@ func TestUSB4AllReduceConstructionReturnsPartialSlots(t *testing.T) {
 			}
 			defer conn.Close()
 			slab := conn.Slab()
+			bindTestDirectSlabRegistration(t, slab)
 			unrelated, err := slab.Allocate(borrowedBytes)
 			if err != nil {
 				t.Fatal(err)
@@ -65,6 +66,7 @@ func TestUSB4AllReduceConstructionTransfersSuccessfulOwnership(t *testing.T) {
 	}
 	defer conn.Close()
 	slab := conn.Slab()
+	bindTestDirectSlabRegistration(t, slab)
 	unrelated, err := slab.Allocate(borrowedBytes)
 	if err != nil {
 		t.Fatal(err)
