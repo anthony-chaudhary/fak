@@ -74,6 +74,7 @@ const (
 	IQ2_S                // llama.cpp i-quant: 256-elem super-block (05f; appended: values above are stable)
 	IQ2_XS               // llama.cpp i-quant: 256-elem super-block (05f; appended: values above are stable)
 	IQ1_S                // llama.cpp i-quant: 256-elem super-block (05f; appended: values above are stable)
+	NVFP4                // NVIDIA NVFP4: packed E2M1 values with E4M3FN block scales and an FP32 global scale
 )
 
 // Bytes is the per-element storage width. For sub-byte formats (I4) it reports the
@@ -137,6 +138,8 @@ func (d Dtype) String() string {
 		return "iq2_xs"
 	case IQ2_S:
 		return "iq2_s"
+	case NVFP4:
+		return "nvfp4"
 	default:
 		return "dtype?"
 	}
@@ -144,7 +147,7 @@ func (d Dtype) String() string {
 
 // Quantized reports whether the dtype needs a QuantSpec to be interpreted.
 func (d Dtype) Quantized() bool {
-	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K || d == Q5_K || d == Q6_K || d == Q2_0 || d == Q2_K || d == Q3_K || d == IQ3_XXS || d == IQ3_S || d == IQ2_XXS || d == FP4 || d == IQ4_XS || d == IQ2_S || d == IQ2_XS || d == IQ1_S
+	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K || d == Q5_K || d == Q6_K || d == Q2_0 || d == Q2_K || d == Q3_K || d == IQ3_XXS || d == IQ3_S || d == IQ2_XXS || d == FP4 || d == IQ4_XS || d == IQ2_S || d == IQ2_XS || d == IQ1_S || d == NVFP4
 }
 
 // ---- Layout ---------------------------------------------------------------------
