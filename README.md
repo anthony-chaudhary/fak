@@ -23,8 +23,6 @@ and the [claims ledger](CLAIMS.md) for what is real and what is not.
 - Versus llama.cpp, the strongest local engine: no accepted full-run Mac comparison
   exists; the earlier near-parity figure was withdrawn on 2026-09-27 pending remeasurement.
 - NVIDIA H100: fak measured 111.94 decode tok/s; llama.cpp is still about 3× faster there.
-- AMD Strix Halo (one 128 GB box, DeepSeek-V4.1-Flash-Q2_K): 4.61 decode tok/s warm,
-  single stream (observed 2026-10-22). The ≥30 tok/s decode target is not yet met.
 
 llama.cpp is an explicit external reference for comparison only; fak never selects it
 as a fallback ([native inference goal](docs/native-inference-goal.md)).
@@ -82,7 +80,13 @@ fak agent --offline   # -> task completed
 - **Guard hardening:** context changes, memory apply, and plugin writes are refused
   unless an act-bound lease fences them.
 
-## Latest hardware results — 2026-10-22
+## DeepSeek V4.1 Flash on one Strix Halo — 2026-10-22
+
+`DeepSeek-V4.1-Flash-Q2_K` decodes at **4.61 tok/s** on one 128 GB AMD Strix Halo
+(warm, single stream, greedy output unchanged). The 30 tok/s decode target is not yet
+met. Details: [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md).
+
+## Latest hardware results — 2026-09-25
 
 One row per hardware family: the newest committed performance receipt for that platform,
 with its claim boundary and receipt link. A row stays historical until a newer quality-complete
@@ -92,7 +96,6 @@ measurement exists.
 |---|---|---|
 | Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
 | AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
-| AMD Strix Halo | DeepSeek-V4.1-Flash-Q2_K on one 128 GB Strix Halo (Ryzen AI Max+ 395): 4.61 decode tok/s (219 ms/step) on a warm greedy request, single stream, up 29% from 3.57 after cached readback staging; observed 2026-10-22. | Fixed-ring controlled A/B with identical greedy output in 32/32 requests. Cold first pass is 1.8–2.0 tok/s and cold prefill near 2 tok/s; the 30 decode / 100 prefill tok/s target is unmet. [V4.1 receipt](docs/benchmarks/receipts/halo-v41-100-30/v41-cached-readback-stage-20261022-strix3.md) |
 | NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |
 
 Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
