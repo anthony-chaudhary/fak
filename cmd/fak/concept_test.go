@@ -223,11 +223,11 @@ func TestConceptGenerateRequiresNewCompleteArtifacts(t *testing.T) {
 		wantCode int
 	}{
 		{"crash", nil, "raise RuntimeError('generation failed')\n", 1},
-		{"partial ACTION", nil, "(out/'README.md').write_text('new\\n')\nraise SystemExit(1)\n", 1},
-		{"partial success", nil, "(out/'README.md').write_text('new\\n')\n", 1},
-		{"complete failure", nil, "for name in ('README.md', 'INDEX.md'): (out/name).write_text('new\\n')\nraise SystemExit(2)\n", 1},
-		{"complete ACTION", []string{"--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_text('new\\n')\nraise SystemExit(1)\n", 0},
-		{"explicit worktree", []string{"--staged=false", "--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_text('new\\n')\nraise SystemExit(1)\n", 0},
+		{"partial ACTION", nil, "(out/'README.md').write_bytes(b'new\\n')\nraise SystemExit(1)\n", 1},
+		{"partial success", nil, "(out/'README.md').write_bytes(b'new\\n')\n", 1},
+		{"complete failure", nil, "for name in ('README.md', 'INDEX.md'): (out/name).write_bytes(b'new\\n')\nraise SystemExit(2)\n", 1},
+		{"complete ACTION", []string{"--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_bytes(b'new\\n')\nraise SystemExit(1)\n", 0},
+		{"explicit worktree", []string{"--staged=false", "--json"}, "for name in ('README.md', 'INDEX.md'): (out/name).write_bytes(b'new\\n')\nraise SystemExit(1)\n", 0},
 		{"tree requires staged mode", []string{"--tree", "HEAD"}, "raise RuntimeError('must not run')\n", 2},
 		{"unknown flag", []string{"--unknown"}, "raise RuntimeError('must not run')\n", 2},
 		{"positional unsupported", []string{"extra"}, "raise RuntimeError('must not run')\n", 2},

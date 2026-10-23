@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1313<br>
-rows: 1294<br>
-unverified rows: 0 / 1294<br>
-source-only rows absent from help: 1058
+parsed files: 1319<br>
+rows: 1300<br>
+unverified rows: 0 / 1300<br>
+source-only rows absent from help: 1064
 
 ## Surface table
 
@@ -176,7 +176,7 @@ source-only rows absent from help: 1058
 | `fak blockers` | the blockers report/Slack surface: what is gating the fleet right now | cmdBlockers | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak breath` | advisory counted-ratchet gate for the measurable half of the In-one-breath documentation contract | cmdBreath / internal/promptlint/breath, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `NOT_GROWING`, `SCAN_INVALID` | **SOURCE ONLY** |
 | `fak budget` | per-task budget readout: tokens/turns spent vs a soft target with a per-category breakdown | cmdBudget / internal/gatewayusageledger, internal/metrics | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
-| `fak build` |  |  | `if` arm of the dispatch in runExactDevHandoff() | N/A | — | **SOURCE ONLY** |
+| `fak build` | build a selected fak profile and record phase timings |  | `if` arm of the dispatch in runExactDevHandoff() | N/A | — | **SOURCE ONLY** |
 | `fak c` | shorthand for 'fak console agent': launch a fak-guard-wrapped interactive Claude Code session | cmdTUI / internal/pathutil, internal/tuiplugin | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak c help` |  | tuiUsage | `case` arm of the dispatch switch in runTUI() | NONE | — | **SOURCE ONLY** |
 | `fak cache` | the live cache spine: tier ladder, per-tier pressure, and the demote/spill/restore rollup | cmdCache | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
@@ -244,6 +244,10 @@ source-only rows absent from help: 1058
 | `fak compute-trace capture` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace first-divergence` | reports the first (layer, stage) where an actual trace leaves the reference, with the full per-layer x stage profile. | runComputeTraceFirstDivergence / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace from-llamacpp` | converts a llama.cpp tensor dump directory into a reference activation trace, optionally adopting a fak trace's digests. | runComputeTraceFromLlamaCpp / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace logits` |  | runComputeTraceLogits | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace logits compare` |  | runComputeTraceLogitsCompare / internal/logitoracle | `case` arm of the dispatch switch in runComputeTraceLogits() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace logits dump` | loads the model once through the serve loader and records full logit vectors for raw-token prompts | runComputeTraceLogitsDump / internal/compute, internal/compute/strix, internal/gateway, internal/ggufload, internal/logitoracle, internal/model, internal/modelengine, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in runComputeTraceLogits() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace logprobs` | scores an endpoint's greedy continuations against a reference oracle file or a live llama-server (check_logprobs_close). | runComputeTraceLogprobs | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace profile` | prints the per-(layer, stage) activation error profile of an actual trace against a reference trace. | runComputeTraceProfile / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace summary` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak concept` | position, classify, or validate entries in the concept catalog | runConceptCLI / internal/conceptcatalog, internal/hooks, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
@@ -450,6 +454,7 @@ source-only rows absent from help: 1058
 | `fak experiments record` |  | experimentsRecord / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak experiments register` |  | experimentsRegister / internal/experiments | `case` arm of the dispatch switch in runExperiments() | NONE | — | **SOURCE ONLY** |
 | `fak expert-trace` | analyze a FAK_EXPERT_TRACE route trace: unique experts, reuse, LRU/Belady curve, prewarm hot set | runExpertTrace / internal/model | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
+| `fak expert-trace overlap` |  | runExpertTraceOverlap / internal/model | `if` arm of the dispatch in runExpertTrace() | NONE | — | **SOURCE ONLY** |
 | `fak expert-trace policy` |  | runExpertTraceReplay / internal/deepseekv4moe, internal/model | `if` arm of the dispatch in runExpertTrace() | NONE | — | **SOURCE ONLY** |
 | `fak fanout` | fold the nightrun fan-out reuse ledger into a trend report | cmdFanout | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak fleet` | headless-worker fleet control surface: monitor/janitor/fold/replace/capacity/control (read-only by default) | cmdFleet | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
@@ -791,6 +796,7 @@ source-only rows absent from help: 1058
 | `fak observer` | register and inspect semantic screen observer components for agent session monitoring | cmdObserver / internal/observer | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak opencode` | OpenCode integration launcher (opencode routed through the kernel) | cmdOpencode / internal/fleet, internal/linkstate, internal/pathutil, internal/projectassets, internal/strmatch | `case` arm of the dispatch switch in dispatchCoreVerbA() | STRUCTURAL | `LAB_READINESS_NOT_READY`, `LAB_TARGET_CONFIG_INVALID`, `LAB_TARGET_CONFIG_MISSING`, `LAB_TARGET_NOT_FOUND`, `LAB_TARGET_NOT_READY`, `LAB_TARGET_REPORT_NOT_USEFUL` | **SOURCE ONLY** |
 | `fak opencode config` |  | runOpencodeConfig / internal/pathutil, internal/projectassets | `if` arm of the dispatch in runOpencode() | NONE | — | **SOURCE ONLY** |
+| `fak opencode free-models` | discovers the current OpenCode free-tier models via `opencode models`, applies the free-tier quality gate, and prints them in a machine-readable form | runOpencodeFreeModels / internal/modelroute | `if` arm of the dispatch in runOpencode() | RUNTIME | — | **SOURCE ONLY** |
 | `fak operator` | the human pacing brief: fold cadence/program/milestone into human/agent/watch/background buckets | cmdOperatorHeaviness | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak operator brief` |  | runOperatorBrief / internal/cadencereport, internal/heavinessscore, internal/milestonereport, internal/operatorbrief, internal/programreport, internal/steerpr | `case` arm of the dispatch switch in runOperatorHeavinessGroup() | NONE | — | **SOURCE ONLY** |
 | `fak operator heaviness` |  | runOperatorHeaviness / internal/heavinessscore | `case` arm of the dispatch switch in runOperatorHeavinessGroup() | NONE | — | yes |
@@ -1049,7 +1055,7 @@ source-only rows absent from help: 1058
 | `fak spend` | cross-account spend rollup with provenance labels; --check gates unlabeled spend figures | cmdSpend / internal/fleetaccounts, internal/metrics | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak stale-work` | discover and rank stale repository work against open issues within a bounded scan | cmdStaleWork / internal/stalework | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak stale-work loop` |  | runStaleWorkLoop / internal/stalework | `if` arm of the dispatch in runStaleWork() | NONE | — | **SOURCE ONLY** |
-| `fak stallscan` | host stall self-monitor: read low-usage churn signals to fingerprint a lockup; snapshot or --watch loop | cmdStallscan / internal/flock, internal/stallscan, internal/versionskew, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
+| `fak stallscan` | host stall self-monitor: read low-usage churn signals to fingerprint a lockup; snapshot or --watch loop | cmdStallscan / internal/flock, internal/stallpage, internal/stallscan, internal/versionskew, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak steer` | steer open pull requests through guarded commit-audit and merge readiness checks | cmdSteer / internal/branchrole, internal/issuecohort, internal/steerpr, internal/trajctl, internal/workerworktree | `case` arm of the dispatch switch in dispatchExtendedVerbB() | STRUCTURAL | `BLOCKED_BY_HUMAN` | **SOURCE ONLY** |
 | `fak steering` | the steerability Slack surface for #steering-guard (status/report/alert/pin) | cmdSteering / internal/dogfoodscore, internal/pathutil, internal/procguard, internal/scoreboard, internal/strmatch, internal/windowgate | `case` arm of the dispatch switch in dispatchExtendedVerbB() | RUNTIME | — | yes |
 | `fak stopfailure` | operator surface for .dos/stop-failures breaker markers (plan/reset-stale/clear-reviewed) | cmdStopFailure | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
