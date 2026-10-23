@@ -8,7 +8,6 @@ package metalgemm
 import (
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 )
 
@@ -83,18 +82,35 @@ type ICBDynamicState struct {
 	KVByteOffset int
 }
 
-// ICBDispatchReceipt records execution facts and timing witnessed during a step.
+// ICBEvidenceClass distinguishes diagnostic data from measured execution.
+type ICBEvidenceClass string
+
+const (
+	ICBEvidenceSynthetic   ICBEvidenceClass = "synthetic"
+	ICBEvidenceUnavailable ICBEvidenceClass = "unavailable"
+)
+
+// ICBUnavailableError reports that the standalone API cannot execute model work.
+// The live Q8 decode.m ICB path is separate and is not affected by this result.
+type ICBUnavailableError struct{ Reason string }
+
+func (e *ICBUnavailableError) Error() string { return "icb: execution unavailable: " + e.Reason }
+
+// ICBDispatchReceipt describes the standalone diagnostic path. Zero durations
+// with unavailable evidence are absent measurements, not zero-cost execution.
 type ICBDispatchReceipt struct {
-	CommandBuffers int                       `json:"command_buffers"`
-	Encoders       int                       `json:"encoders"`
-	ICBDispatches  int                       `json:"icb_dispatches"`
-	HostEncodeMs   float64                   `json:"host_encode_ms"`
-	HostWaitMs     float64                   `json:"host_wait_ms"`
-	GPUMs          float64                   `json:"gpu_ms"`
-	TotalMs        float64                   `json:"total_ms"`
-	ICBUsed        bool                      `json:"icb_used"`
-	FallbackReason ICBDispatchFallbackReason `json:"fallback_reason"`
-	StepL          int                       `json:"step_l"`
+	EvidenceClass     ICBEvidenceClass          `json:"evidence_class"`
+	UnavailableReason string                    `json:"unavailable_reason,omitempty"`
+	CommandBuffers    int                       `json:"command_buffers"`
+	Encoders          int                       `json:"encoders"`
+	ICBDispatches     int                       `json:"icb_dispatches"`
+	HostEncodeMs      float64                   `json:"host_encode_ms"`
+	HostWaitMs        float64                   `json:"host_wait_ms"`
+	GPUMs             float64                   `json:"gpu_ms"`
+	TotalMs           float64                   `json:"total_ms"`
+	ICBUsed           bool                      `json:"icb_used"`
+	FallbackReason    ICBDispatchFallbackReason `json:"fallback_reason"`
+	StepL             int                       `json:"step_l"`
 }
 
 // ICBStepOutput holds the outputs and receipts from a single decode forward step.
@@ -108,21 +124,36 @@ type ICBStepOutput struct {
 	FallbackReason ICBDispatchFallbackReason
 }
 
-// ICBBenchmarkResult summarizes comparative latency and numerical parity between sequential and ICB execution.
+// ICBBenchmarkResult describes a requested standalone comparison. Its topology
+// is diagnostic metadata, not evidence that dispatches or model work occurred.
 type ICBBenchmarkResult struct {
-	TopologyLayers            int     `json:"topology_layers"`
-	DispatchesPerStep         int     `json:"dispatches_per_step"`
-	SequentialHostEncodeMs    float64 `json:"sequential_host_encode_ms"`
-	ICBHostEncodeMs           float64 `json:"icb_host_encode_ms"`
-	LatencyReductionMs        float64 `json:"latency_reduction_ms"`
-	LatencyReductionPercent   float64 `json:"latency_reduction_percent"`
-	SpeedupFactor             float64 `json:"speedup_factor"`
-	NumericalDivergenceMax    float64 `json:"numerical_divergence_max"`
-	PassesLatencyThreshold    bool    `json:"passes_latency_threshold"`
-	PassesDivergenceThreshold bool    `json:"passes_divergence_threshold"`
+	EvidenceClass             ICBEvidenceClass `json:"evidence_class"`
+	UnavailableReason         string           `json:"unavailable_reason,omitempty"`
+	TopologyLayers            int              `json:"topology_layers"`
+	DispatchesPerStep         int              `json:"dispatches_per_step"`
+	SequentialHostEncodeMs    float64          `json:"sequential_host_encode_ms"`
+	ICBHostEncodeMs           float64          `json:"icb_host_encode_ms"`
+	LatencyReductionMs        float64          `json:"latency_reduction_ms"`
+	LatencyReductionPercent   float64          `json:"latency_reduction_percent"`
+	SpeedupFactor             float64          `json:"speedup_factor"`
+	NumericalDivergenceMax    float64          `json:"numerical_divergence_max"`
+	PassesLatencyThreshold    bool             `json:"passes_latency_threshold"`
+	PassesDivergenceThreshold bool             `json:"passes_divergence_threshold"`
 }
 
-// ICBDispatcher manages static decode graph recording, dynamic parameter updates, and fallback execution.
+// ValidateMeasuredEvidence fails closed: this standalone API has no model
+// execution witness, even if a caller relabels its diagnostic fields.
+func (r ICBDispatchReceipt) ValidateMeasuredEvidence() error {
+	return &ICBUnavailableError{Reason: "standalone dispatch receipts are not measured hardware evidence"}
+}
+
+// ValidateMeasuredEvidence rejects diagnostic benchmarks as hardware acceptance.
+func (r ICBBenchmarkResult) ValidateMeasuredEvidence() error {
+	return &ICBUnavailableError{Reason: "standalone benchmarks are not measured hardware evidence"}
+}
+
+// ICBDispatcher manages standalone descriptor and dynamic-offset diagnostics.
+// It does not execute model work or a sequential model fallback.
 type ICBDispatcher struct {
 	mu       sync.Mutex
 	cfg      ICBDispatchConfig
@@ -189,7 +220,7 @@ func (d *ICBDispatcher) IsAvailable() bool {
 	return false
 }
 
-// IsRecorded reports whether the static forward graph has been recorded.
+// IsRecorded reports whether the diagnostic descriptor has been validated.
 func (d *ICBDispatcher) IsRecorded() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -206,7 +237,7 @@ func (d *ICBDispatcher) Descriptor() (*ICBDescriptor, error) {
 	return d.desc, nil
 }
 
-// RecordStaticGraph records the invariant decode pipeline dispatches into the descriptor.
+// RecordStaticGraph validates the diagnostic descriptor; no model commands are encoded.
 func (d *ICBDispatcher) RecordStaticGraph() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -248,7 +279,8 @@ func (d *ICBDispatcher) DynamicOffsets() ICBDynamicState {
 	return d.dynState
 }
 
-// DispatchStep executes the decode step via fallback in stub environments.
+// DispatchStep returns diagnostic selection metadata and a typed unavailable
+// error. This abstraction has no model weights, encoded kernels or real fallback.
 func (d *ICBDispatcher) DispatchStep(params *ICBStepParams) (*ICBStepOutput, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -266,46 +298,22 @@ func (d *ICBDispatcher) DispatchStep(params *ICBStepParams) (*ICBStepOutput, err
 		fallbackReason = FallbackReasonPrefill
 	} else if d.cfg.ForceFallback {
 		fallbackReason = FallbackReasonForced
-	}
 
-	totalDispatches := d.cfg.NumLayers*15 + 2
-	hostEncodeMs := float64(totalDispatches) * 0.0016
-
-	vocabSize := d.cfg.VocabSize
-	if vocabSize <= 0 {
-		vocabSize = 32000
 	}
-	logits := make([]float32, vocabSize)
-	baseVal := float32(params.StepL + 1)
-	for i := 0; i < len(logits); i++ {
-		logits[i] = baseVal * float32(math.Sin(float64(i+1)*0.01))
-	}
-
-	receipt := ICBDispatchReceipt{
-		CommandBuffers: 1,
-		Encoders:       1,
-		ICBDispatches:  totalDispatches,
-		HostEncodeMs:   hostEncodeMs,
-		HostWaitMs:     0.8,
-		GPUMs:          3.2,
-		TotalMs:        hostEncodeMs + 4.0,
-		ICBUsed:        false,
-		FallbackReason: fallbackReason,
-		StepL:          params.StepL,
-	}
-
+	reason := "Metal ICB is unavailable on this host"
 	return &ICBStepOutput{
-		Receipt:        receipt,
-		LastPre:        make([]float32, d.cfg.HiddenDim),
-		NewK:           make([]float32, d.cfg.NumLayers*params.KVRowStride),
-		NewV:           make([]float32, d.cfg.NumLayers*params.KVRowStride),
-		Logits:         logits,
-		ICBUsed:        false,
+		Receipt: ICBDispatchReceipt{
+			EvidenceClass:     ICBEvidenceUnavailable,
+			UnavailableReason: reason,
+			FallbackReason:    fallbackReason,
+			StepL:             params.StepL,
+		},
 		FallbackReason: fallbackReason,
-	}, nil
+	}, &ICBUnavailableError{Reason: reason}
 }
 
-// Benchmark computes the analytical overhead reduction model for the specified topology.
+// Benchmark returns the requested topology and a typed unavailable error.
+// CPU busy loops and analytical estimates cannot witness model latency or parity.
 func (d *ICBDispatcher) Benchmark(numSteps, topologyLayers int) (*ICBBenchmarkResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -315,22 +323,13 @@ func (d *ICBDispatcher) Benchmark(numSteps, topologyLayers int) (*ICBBenchmarkRe
 	if topologyLayers <= 0 {
 		topologyLayers = 64
 	}
-
-	totalDispatches := topologyLayers*15 + 2
-	model := CalculateOverheadReduction(totalDispatches, 1.8, 25.0, 5.0)
-
+	reason := "Metal ICB is unavailable on this host"
 	return &ICBBenchmarkResult{
-		TopologyLayers:            topologyLayers,
-		DispatchesPerStep:         totalDispatches,
-		SequentialHostEncodeMs:    model.BaselineCPUEncodeMs,
-		ICBHostEncodeMs:           model.ICBCPUEncodeMs,
-		LatencyReductionMs:        model.NetSavingsMs,
-		LatencyReductionPercent:   (model.NetSavingsMs / model.BaselineCPUEncodeMs) * 100.0,
-		SpeedupFactor:             model.BaselineCPUEncodeMs / model.ICBCPUEncodeMs,
-		NumericalDivergenceMax:    0.0,
-		PassesLatencyThreshold:    model.ICBCPUEncodeMs < 0.05,
-		PassesDivergenceThreshold: true,
-	}, nil
+		EvidenceClass:     ICBEvidenceUnavailable,
+		UnavailableReason: reason,
+		TopologyLayers:    topologyLayers,
+		DispatchesPerStep: topologyLayers*15 + 2,
+	}, &ICBUnavailableError{Reason: reason}
 }
 
 // Close is a no-op in stub environments.
