@@ -2795,36 +2795,121 @@ __global__ void k_dsa_index_topk(const double *dScores, int nKeys, int queryPos,
 // shared-array size in k_dsa_index_topk.
 #define DSA_TOPK_MAX_KEYS 4096
 
-// fcuda_dsa_index_select_f32 scores all keys (k_dsa_index_score, f64-accumulated) then selects the
-// top-k positions (k_dsa_index_topk) on the device, copying back only the small index list. The
-// f64 score scratch is allocated internally (sized [nKeys] doubles) so the caller never sees the
-// double dtype. Returns the number of positions written into host outIdx (= min(topK, #valid keys)),
-// or -1 to DECLINE (nKeys past the shared-mem top-k cap) so the caller keeps the host selection.
+// DSA keeps the normal size-bucketed scratch ownership, but must retain the actual
+// CUDA allocation error instead of the public allocator's null-only result.
+static cudaError_t dsa_index_scratch(size_t bytes, void **out) {
+  void *ptr = nullptr;
+  auto it = g_pool.find(bytes);
+  if (it != g_pool.end() && !it->second.empty()) {
+    ptr = it->second.back();
+    it->second.pop_back();
+  } else {
+    const cudaError_t status = cudaMalloc(&ptr, bytes);
+    if (status != cudaSuccess) return status;
+  }
+  g_live[ptr] = bytes;
+  *out = ptr;
+  return cudaSuccess;
+}
+
+// Private checked seam. Status is independent of count: a nonexecuting decline
+// writes -1, empty work writes 0, and CUDA failure leaves both outputs unpublished.
+// Only success after both synchronous D2H copies and device restoration publishes
+// a nonempty selection. These copies fence the blocking device-0 g_stream.
+extern "C" int fak_cuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
+                                             const float *dWeights, int nKeys, int nH,
+                                             int indexDim, int queryPos, int topK, float scale,
+                                             int *outIdx, int *outCount) {
+  if (!outCount) return (int)cudaErrorInvalidValue;
+  if (nKeys <= 0 || topK <= 0 || queryPos < 0) { *outCount = 0; return 0; }
+  if (nKeys > DSA_TOPK_MAX_KEYS) { *outCount = -1; return 0; }
+  if (!dIndexQ || !dIndexK || !dWeights || !outIdx || nH <= 0 ||
+      nH > INT_MAX - 255 || indexDim <= 0) return (int)cudaErrorInvalidValue;
+  // A host-returning selection cannot complete inside graph capture, even when
+  // all its scratch happens to be warm in the pool.
+  if (g_capture_open) return (int)cudaErrorStreamCaptureUnsupported;
+  if (queryPos >= nKeys) queryPos = nKeys - 1;
+  if (topK > queryPos + 1) topK = queryPos + 1;
+
+  int previous = 0;
+  cudaError_t status = cudaGetDevice(&previous);
+  if (status != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: DSAIndexSelect capture current device failed: %s\n",
+            cudaGetErrorString(status));
+    return (int)status;
+  }
+  void *scores = nullptr, *selection = nullptr, *count = nullptr;
+  int hCount = 0, hSel[DSA_TOPK_MAX_KEYS];
+  int threads = 256;
+  const char *stage = "select device 0";
+  status = cudaSetDevice(0);
+  if (status == cudaSuccess) {
+    status = [&]() -> cudaError_t {
+      stage = "score scratch allocation";
+      cudaError_t result = dsa_index_scratch(sizeof(double) * (size_t)nKeys, &scores);
+      if (result != cudaSuccess) return result;
+      stage = "selection scratch allocation";
+      result = dsa_index_scratch(sizeof(int) * (size_t)topK, &selection);
+      if (result != cudaSuccess) return result;
+      stage = "count scratch allocation";
+      result = dsa_index_scratch(sizeof(int), &count);
+      if (result != cudaSuccess) return result;
+      double *dScores = (double *)scores;
+      int *dSel = (int *)selection, *dCount = (int *)count;
+      stage = "score kernel launch";
+      k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
+                                                     dScores, nKeys, nH, indexDim,
+                                                     queryPos, scale);
+      result = cudaGetLastError();
+      if (result != cudaSuccess) return result;
+      stage = "top-k kernel launch";
+      k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSel, dCount);
+      result = cudaGetLastError();
+      if (result != cudaSuccess) return result;
+      stage = "count device-to-host copy";
+      result = cudaMemcpy(&hCount, dCount, sizeof(int), cudaMemcpyDeviceToHost);
+      if (result != cudaSuccess) return result;
+      g_host_bytes += sizeof(int);
+      stage = "selection count validation";
+      if (hCount != topK) return cudaErrorInvalidValue;
+      stage = "selection device-to-host copy";
+      result = cudaMemcpy(hSel, dSel, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost);
+      if (result == cudaSuccess) g_host_bytes += sizeof(int) * (size_t)hCount;
+      return result;
+    }();
+  }
+  // Every nonnull pointer here was successfully admitted into g_live. Returning
+  // it to the device-0 pool cannot free an unspecified failed-allocation output.
+  // Partial submissions remain ordered before same-device g_stream pool reuse;
+  // no cudaFree or result publication is needed to release this scratch ownership.
+  fcuda_free(scores);
+  fcuda_free(selection);
+  fcuda_free(count);
+  if (status != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: DSAIndexSelect %s failed: %s\n", stage, cudaGetErrorString(status));
+  }
+  const cudaError_t restored = cudaSetDevice(previous);
+  if (restored != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: DSAIndexSelect restore device %d failed: %s\n",
+            previous, cudaGetErrorString(restored));
+  }
+  if (status == cudaSuccess) status = restored;
+  if (status == cudaSuccess) {
+    memcpy(outIdx, hSel, sizeof(int) * (size_t)hCount);
+    *outCount = hCount;
+  }
+  return (int)status;
+}
+
+// Preserve the public count-returning ABI and its nonexecuting decline/empty
+// semantics. A failed operation has no valid selection, regardless of copy count.
 extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
                                           const float *dWeights, int nKeys, int nH,
                                           int indexDim, int queryPos, int topK, float scale,
                                           int *outIdx) {
-  if (nKeys <= 0 || topK <= 0) return 0;
-  if (nKeys > DSA_TOPK_MAX_KEYS) return -1; // window past the maskable top-k tail: decline, host falls back
-  int threads = 256;
-  double *dScores = (double *)fcuda_malloc(sizeof(double) * (size_t)nKeys);
-  k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
-                                                     dScores, nKeys, nH, indexDim,
-                                                     queryPos, scale);
-  int *dSel = (int *)fcuda_malloc(sizeof(int) * (size_t)topK);
-  int *dCount = (int *)fcuda_malloc(sizeof(int));
-  k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSel, dCount);
-  int hCount = 0;
-  CK(cudaMemcpy(&hCount, dCount, sizeof(int), cudaMemcpyDeviceToHost));
-  if (hCount < 0) hCount = 0;
-  if (hCount > topK) hCount = topK;
-  if (hCount > 0) {
-    CK(cudaMemcpy(outIdx, dSel, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost));
-  }
-  g_host_bytes += sizeof(int) * (size_t)(hCount + 1); // only the index list crosses host-ward
-  fcuda_free(dScores);
-  fcuda_free(dSel);
-  fcuda_free(dCount);
+  int hCount = -1;
+  if (fak_cuda_dsa_index_select_f32(dIndexQ, dIndexK, dWeights, nKeys, nH,
+                                  indexDim, queryPos, topK, scale, outIdx, &hCount) != 0) return -1;
   return hCount;
 }
 

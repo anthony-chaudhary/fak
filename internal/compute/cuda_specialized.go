@@ -8,6 +8,9 @@ package compute
 #include <stdlib.h>
 #include "cuda_backend.h"
 int fak_cuda_argmax_f32(const float *dLogits, int n, int *outIdx);
+int fak_cuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
+    const float *dWeights, int nKeys, int nH, int indexDim, int queryPos,
+    int topK, float scale, int *outIdx, int *outCount);
 */
 import "C"
 
@@ -46,23 +49,65 @@ func (c *cudaBackend) DSASparseAttend(q, selK, selV Tensor, nSel, nH, qkHead, vH
 func (c *cudaBackend) DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if nKeys <= 0 || topK <= 0 {
+	if nKeys <= 0 || topK <= 0 || queryPos < 0 {
 		return nil
 	}
+	// Match the native shared mask cap. A decline performs no work and cannot
+	// establish readiness for any previously enqueued tensor.
+	if nKeys > 4096 {
+		return nil
+	}
+	if c.capturing {
+		panic(&CUDAOpError{Op: "DSAIndexSelect", Site: "dsa-index-capture", Msg: "host selection cannot complete during graph capture"})
+	}
+	if err := c.faultLatch.Admit("dsa-index-select"); err != nil {
+		panic(err)
+	}
+	if nH <= 0 || nH > math.MaxInt32-255 || indexDim <= 0 || indexDim > math.MaxInt32 ||
+		indexDim > math.MaxInt/F32.Bytes()/nH || indexDim > math.MaxInt/F32.Bytes()/nKeys {
+		panic(&CUDAOpError{Op: "DSAIndexSelect", Site: "dsa-index-geometry", Msg: "invalid indexer dimensions or native index range"})
+	}
+	// Bound host scratch and prevent queryPos+1 overflowing in the native kernel.
+	if queryPos >= nKeys {
+		queryPos = nKeys - 1
+	}
+	if topK > queryPos+1 {
+		topK = queryPos + 1
+	}
+	operand := func(name string, tensor Tensor, elements int) *C.float {
+		db, ok := tensor.buf.(*cudaBuf)
+		if !ok || db == nil || tensor.be != c || db.device != 0 {
+			panic(&CUDAOpError{Op: "DSAIndexSelect", Site: "dsa-index-geometry", Msg: name + " must be a live device-0 tensor owned by this CUDA backend"})
+		}
+		if err := db.invalidStateError(name); err != nil {
+			panic(err)
+		}
+		if tensor.Dtype != F32 || db.ptr == nil || db.n < 0 || elements > db.n/F32.Bytes() {
+			panic(&CUDAOpError{Op: "DSAIndexSelect", Site: "dsa-index-geometry", Class: db.class, Msg: name + " requires sufficient resident F32 storage"})
+		}
+		return (*C.float)(db.ptr)
+	}
+	q := operand("query", indexQ, nH*indexDim)
+	k := operand("keys", indexK, nKeys*indexDim)
+	w := operand("weights", weights, nH)
 	out := make([]C.int, topK)
-	n := int(C.fcuda_dsa_index_select_f32(c.cf(indexQ), c.cf(indexK), c.cf(weights),
+	var count C.int
+	status := int(C.fak_cuda_dsa_index_select_f32(q, k, w,
 		C.int(nKeys), C.int(nH), C.int(indexDim), C.int(queryPos), C.int(topK), C.float(scale),
-		&out[0]))
-	atomic.AddUint64(&c.fenceGen, 1) // the index list crossed host-ward — same fence as Argmax
+		&out[0], &count))
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, "dsa-index-select", status)
+		panic(&CUDAOpError{Op: "DSAIndexSelect", Site: "dsa-index-select", Code: status, Msg: "native selection or host read failed"})
+	}
+	n := int(count)
 	if n < 0 {
-		// The device DECLINED (nKeys past the shared-mem top-k cap): return an empty selection so the
-		// model's glmDsaValidSelection rejects it and keeps the host f64 score+top-k loop — the device
-		// path can only ever match the host selection, never silently degrade it on a long window.
+		// Keep the public capability's host fallback, but never turn it into a fence.
 		return nil
 	}
-	if n > topK {
-		n = topK
+	if n != topK {
+		panic(&CUDAOpError{Op: "DSAIndexSelect", Site: "dsa-index-select", Msg: "native selection returned an invalid count"})
 	}
+	atomic.AddUint64(&c.fenceGen, 1)
 	sel := make([]int, n)
 	for i := 0; i < n; i++ {
 		sel[i] = int(out[i])
