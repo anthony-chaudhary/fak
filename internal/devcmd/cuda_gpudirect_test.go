@@ -3,217 +3,205 @@ package devcmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-func TestRunCUDAGPUDirect_Inspect(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := RunCUDAGPUDirect(&stdout, &stderr, []string{"inspect"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect inspect returned %d: %s", code, stderr.String())
+// fak-test:runtime fast est=50ms lane=default
+func TestRunCUDAGPUDirectHardwareTruth(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	devices := filepath.Join(root, "bus", "pci", "devices")
+	if err := os.MkdirAll(devices, 0755); err != nil {
+		t.Fatal(err)
 	}
-	out := stdout.String()
-	for _, expected := range []string{
-		"CUDA GPU Direct Topology",
-		"RTX 5090",
-		"Samsung SSD 990 PRO",
-		"DIRECT_CPU_ROOT_COMPLEX",
-		"M2A_CPU",
-		"ACS Status",
-	} {
-		if !strings.Contains(out, expected) {
-			t.Errorf("inspect output missing expected %q:\n%s", expected, out)
+	for _, mode := range []string{"inspect", "audit"} {
+		for _, jsonOut := range []bool{false, true} {
+			var stdout, stderr bytes.Buffer
+			args := []string{mode, "--sysfs", root}
+			if jsonOut {
+				args = append(args, "--json")
+			}
+			wantCode := 0
+			if mode == "audit" {
+				wantCode = 1
+			}
+			if code := RunCUDAGPUDirect(&stdout, &stderr, args); code != wantCode {
+				t.Fatalf("%v: exit %d, want %d: %s", args, code, wantCode, &stderr)
+			}
+			for _, invented := range []string{"RTX 5090", "990 PRO", "Ryzen", "Aorus", "128GB", "[PASS]", `"status": "PASS"`} {
+				if strings.Contains(stdout.String(), invented) {
+					t.Errorf("%v fabricated %q: %s", args, invented, &stdout)
+				}
+			}
+			if !strings.Contains(stdout.String(), "UNVERIFIED") || !strings.Contains(stdout.String(), "UNKNOWN") {
+				t.Errorf("%v did not preserve uncertainty: %s", args, &stdout)
+			}
+			if jsonOut && mode == "inspect" {
+				var out CUDAInspectOutput
+				if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				if len(out.GPUs) != 0 || len(out.NVMeDevices) != 0 || len(out.Routes) != 0 || out.Host.CPU != "" {
+					t.Errorf("empty inventory replaced by fixtures: %+v", out)
+				}
+			}
+			if jsonOut && mode == "audit" {
+				var out CUDAHardwareAuditReport
+				if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				if out.Healthy || out.Verdict != "UNVERIFIED" || len(out.Checks) < 5 {
+					t.Errorf("unqualified audit: %+v", out)
+				}
+			}
 		}
 	}
-
-	// Test JSON mode
-	stdout.Reset()
-	stderr.Reset()
-	code = RunCUDAGPUDirect(&stdout, &stderr, []string{"inspect", "--json"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect inspect --json returned %d: %s", code, stderr.String())
+	// Exercise the real sysfs parser with one observed GPU and no storage.
+	gpuDir := filepath.Join(devices, "0000_09_00.0")
+	if err := os.Mkdir(gpuDir, 0755); err != nil {
+		t.Fatal(err)
 	}
-	var res map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		t.Fatalf("invalid JSON output: %v\nOutput: %s", err, stdout.String())
+	for name, value := range map[string]string{"address": "0000:09:00.0", "vendor": "0x10de", "class": "0x030000", "device": "0xabcd", "label": "Observed GPU"} {
+		if err := os.WriteFile(filepath.Join(gpuDir, name), []byte(value), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, ok := res["gpus"]; !ok {
-		t.Errorf("missing 'gpus' in JSON output: %+v", res)
+	var stdout, stderr bytes.Buffer
+	if code := RunCUDAGPUDirect(&stdout, &stderr, []string{"inspect", "--sysfs", root, "--json"}); code != 0 {
+		t.Fatalf("partial inventory exit %d: %s", code, &stderr)
 	}
-	if _, ok := res["nvme_devices"]; !ok {
-		t.Errorf("missing 'nvme_devices' in JSON output: %+v", res)
+	var out CUDAInspectOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := res["routes"]; !ok {
-		t.Errorf("missing 'routes' in JSON output: %+v", res)
-	}
-	if _, ok := res["host"]; !ok {
-		t.Errorf("missing 'host' in JSON output: %+v", res)
+	if len(out.GPUs) != 1 || out.GPUs[0].DeviceName != "Observed GPU" || len(out.NVMeDevices) != 0 || len(out.Routes) != 0 {
+		t.Errorf("partial inventory not preserved: %+v", out)
 	}
 }
 
-func TestRunCUDAGPUDirect_Audit(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := RunCUDAGPUDirect(&stdout, &stderr, []string{"audit"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect audit returned %d: %s", code, stderr.String())
-	}
-	out := stdout.String()
-	for _, expected := range []string{
-		"CUDA GPU Direct & BaM P2PDMA Hardware Audit",
-		"Above 4G Decoding",
-		"Resizable BAR (ReBAR)",
-		"PCIe Ten Bit Tag",
-		"IOMMU / ACS",
-		"NVreg_EnableResizableBar=1",
-		"Healthy:             true (Verdict: PASS)",
-	} {
-		if !strings.Contains(out, expected) {
-			t.Errorf("audit output missing expected %q:\n%s", expected, out)
+// fak-test:runtime fast est=20ms lane=default
+func TestRunCUDAGPUDirectProbeErrors(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"inspect", "audit"} {
+		var stdout, stderr bytes.Buffer
+		missing := filepath.Join(t.TempDir(), "missing")
+		if code := RunCUDAGPUDirect(&stdout, &stderr, []string{mode, "--sysfs", missing, "--json"}); code != 1 {
+			t.Fatalf("%s missing sysfs exit %d, want 1", mode, code)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out["probe_error"] == "" || out["probe_error"] == nil || stderr.Len() == 0 || out["verdict"] != "UNVERIFIED" {
+			t.Errorf("%s lost probe failure: %s stderr=%s", mode, &stdout, &stderr)
 		}
 	}
-
-	// Test JSON mode
-	stdout.Reset()
-	stderr.Reset()
-	code = RunCUDAGPUDirect(&stdout, &stderr, []string{"audit", "--json"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect audit --json returned %d: %s", code, stderr.String())
+	// A failed probe may still carry useful inventory; do not replace or drop it.
+	probe := func(string) (*compute.CUDAPCIeTopologyDiscovery, error) {
+		d := compute.NewCUDAPCIeTopologyDiscovery("")
+		d.GPUs = append(d.GPUs, compute.CUDADeviceNode{DeviceName: "Partial observed GPU"})
+		return d, errors.New("remaining inventory unreadable")
 	}
-	var res map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		t.Fatalf("invalid JSON output: %v\nOutput: %s", err, stdout.String())
+	var stdout, stderr bytes.Buffer
+	if code := runCUDAGPUDirectWithProbe(&stdout, &stderr, []string{"inspect", "--json"}, probe); code != 1 {
+		t.Fatalf("partial error exit %d, want 1", code)
 	}
-	if res["healthy"] != true {
-		t.Errorf("expected healthy=true, got %+v", res)
-	}
-	if res["verdict"] != "PASS" {
-		t.Errorf("expected verdict=PASS, got %+v", res)
-	}
-	checks, ok := res["checks"].([]any)
-	if !ok || len(checks) < 5 {
-		t.Errorf("expected at least 5 audit checks, got %+v", res["checks"])
+	if !strings.Contains(stdout.String(), "Partial observed GPU") || !strings.Contains(stdout.String(), "remaining inventory unreadable") {
+		t.Fatalf("partial probe result lost: %s", &stdout)
 	}
 }
 
-func TestRunCUDAGPUDirect_Bench(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := RunCUDAGPUDirect(&stdout, &stderr, []string{"bench"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect bench returned %d: %s", code, stderr.String())
+// fak-test:runtime fast est=100ms lane=default
+func TestRunCUDAGPUDirectSimulationBoundary(t *testing.T) {
+	t.Parallel()
+	noProbe := func(string) (*compute.CUDAPCIeTopologyDiscovery, error) {
+		t.Fatal("simulation or invalid usage probed hardware")
+		return nil, nil
 	}
-	out := stdout.String()
-	for _, expected := range []string{
-		"CUDA BaM NVMe P2PDMA Zero-Copy Microbenchmark Results",
-		"Staging Copies:       0",
-		"Zero-Copy Invariant:  VERIFIED",
-		"Throughput:",
-		"IOPS:",
+	for _, args := range [][]string{
+		{"bench"}, {"qwen38"}, {"qwen38-bench"}, {"nonexistent_mode"},
+		{"inspect", "extra"}, {"--mode", "bench"}, {"--unknown"},
 	} {
-		if !strings.Contains(out, expected) {
-			t.Errorf("bench output missing expected %q:\n%s", expected, out)
+		var stdout, stderr bytes.Buffer
+		if code := runCUDAGPUDirectWithProbe(&stdout, &stderr, args, noProbe); code != 2 {
+			t.Errorf("%v: exit %d, want usage exit 2: %s", args, code, &stderr)
 		}
 	}
-
-	// Test JSON mode
-	stdout.Reset()
-	stderr.Reset()
-	code = RunCUDAGPUDirect(&stdout, &stderr, []string{"bench", "--json"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect bench --json returned %d: %s", code, stderr.String())
-	}
-	var res map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		t.Fatalf("invalid JSON output: %v\nOutput: %s", err, stdout.String())
-	}
-	if res["staging_copy_count"] != float64(0) {
-		t.Errorf("expected staging_copy_count=0, got %+v", res["staging_copy_count"])
-	}
-	if res["zero_copy_verified"] != true {
-		t.Errorf("expected zero_copy_verified=true, got %+v", res["zero_copy_verified"])
-	}
-	if res["throughput_gbps"].(float64) <= 0 {
-		t.Errorf("expected positive throughput_gbps, got %+v", res["throughput_gbps"])
-	}
-	if res["iops"].(float64) <= 0 {
-		t.Errorf("expected positive iops, got %+v", res["iops"])
-	}
-}
-
-func TestRunCUDAGPUDirect_Qwen38(t *testing.T) {
-	// 1. Verify human table output
-	var stdout, stderr bytes.Buffer
-	code := RunCUDAGPUDirect(&stdout, &stderr, []string{"qwen38"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect qwen38 failed with code %d: %s", code, stderr.String())
-	}
-	out := stdout.String()
-	for _, expected := range []string{
-		"Qwen3.8 CUDA Direct Storage & Cache Swap Architecture",
-		"Baseline (CPU-staged)",
-		"Reference (llama.cpp)",
-		"fak-native (CUDA BaM P2PDMA)",
-		"Speedup vs Baseline",
-		"Speedup vs Reference",
-		"Zero-copy NVMe P2PDMA validated",
+	for _, args := range [][]string{
+		{"inspect", "--simulate"}, {"audit", "--simulate"}, {"bench", "--simulate"}, {"--mode", "bench", "--simulate"},
+		{"qwen38", "--simulate"}, {"qwen38-bench", "--simulate"}, {"qwen38-sim"},
 	} {
-		if !strings.Contains(out, expected) {
-			t.Errorf("qwen38 output missing expected %q:\n%s", expected, out)
+		var stdout, stderr bytes.Buffer
+		args = append(args, "--sysfs", filepath.Join(t.TempDir(), "must-not-probe"), "--json")
+		code := runCUDAGPUDirectWithProbe(&stdout, &stderr, args, noProbe)
+		wantCode := 0
+		if args[0] == "audit" {
+			wantCode = 1
 		}
-	}
-
-	// 2. Verify machine-readable JSON output
-	stdout.Reset()
-	stderr.Reset()
-	code = RunCUDAGPUDirect(&stdout, &stderr, []string{"qwen38", "--json"})
-	if code != 0 {
-		t.Fatalf("RunCUDAGPUDirect qwen38 --json returned %d: %s", code, stderr.String())
-	}
-	var receipt Qwen38CUDADirectSwapReceipt
-	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
-		t.Fatalf("invalid JSON output: %v\nOutput: %s", err, stdout.String())
-	}
-
-	if receipt.Schema != Qwen38CUDADirectSwapReceiptSchema {
-		t.Errorf("expected schema %q, got %q", Qwen38CUDADirectSwapReceiptSchema, receipt.Schema)
-	}
-	if receipt.Verdict != "PASS" {
-		t.Errorf("expected verdict 'PASS', got %q", receipt.Verdict)
-	}
-	if receipt.StagingCopyCount != 0 {
-		t.Errorf("expected staging copy count 0, got %d", receipt.StagingCopyCount)
-	}
-	if receipt.DirectDMABandwidthGBps <= 0 {
-		t.Errorf("expected positive direct DMA bandwidth, got %f", receipt.DirectDMABandwidthGBps)
-	}
-	if receipt.FakNative.StagingCopyCount != 0 {
-		t.Errorf("expected fak_native staging copy count 0, got %d", receipt.FakNative.StagingCopyCount)
-	}
-	if receipt.Baseline.StagingCopyCount != 3 {
-		t.Errorf("expected baseline staging copy count 3, got %d", receipt.Baseline.StagingCopyCount)
-	}
-	if receipt.SpeedupVsBaseline.TTFTSpeedup <= 1.0 {
-		t.Errorf("expected TTFT speedup > 1.0, got %f", receipt.SpeedupVsBaseline.TTFTSpeedup)
-	}
-
-	// 3. Test alias subcommands
-	for _, alias := range []string{"qwen38-bench", "qwen38-sim"} {
-		stdout.Reset()
-		stderr.Reset()
-		code = RunCUDAGPUDirect(&stdout, &stderr, []string{alias})
-		if code != 0 {
-			t.Errorf("RunCUDAGPUDirect(%q) failed with code %d: %s", alias, code, stderr.String())
+		if code != wantCode {
+			t.Fatalf("%v: exit %d: %s", args, code, &stderr)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out["provenance"] != "MODELED" || out["is_physical_silicon"] != false || out["verdict"] != "MODELED" {
+			t.Errorf("missing simulation provenance: %s", &stdout)
+		}
+		if out["throughput_gbps"] != nil && (out["throughput_gbps"] != float64(0) || out["iops"] != float64(0) || out["zero_copy_verified"] != false) {
+			t.Errorf("software queue claimed hardware performance: %s", &stdout)
+		}
+		if out["direct_dma_bandwidth_gbps"] != nil && out["direct_dma_bandwidth_gbps"] != float64(0) {
+			t.Errorf("software model claimed measured bandwidth: %s", &stdout)
 		}
 	}
 }
 
-func TestRunCUDAGPUDirect_InvalidMode(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := RunCUDAGPUDirect(&stdout, &stderr, []string{"nonexistent_mode"})
-	if code != 2 {
-		t.Fatalf("expected exit code 2 for invalid mode, got %d", code)
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDAQwen38ReceiptDoesNotClaimPerformance(t *testing.T) {
+	t.Parallel()
+	receipt := cudaQwen38ModeledReceipt("fixture", 1234, 0)
+	if receipt.Provenance != "MODELED" || receipt.Verdict != "MODELED" || receipt.IsPhysicalSilicon || receipt.BytesMoved != 1234 {
+		t.Fatalf("invalid model receipt: %+v", receipt)
 	}
-	if !strings.Contains(stderr.String(), "unknown mode") {
-		t.Errorf("expected 'unknown mode' in stderr, got: %s", stderr.String())
+	if receipt.DirectDMABandwidthGBps != 0 || receipt.SpeedupVsBaseline != (Qwen38BenchSpeedupMetrics{}) || receipt.SpeedupVsReference != (Qwen38BenchSpeedupMetrics{}) {
+		t.Errorf("unmeasured performance or comparison: %+v", receipt)
+	}
+	for _, arm := range []Qwen38BenchArmMetrics{receipt.Baseline, receipt.Reference, receipt.FakNative, receipt.Arms["baseline"], receipt.Arms["reference"], receipt.Arms["fak_native"]} {
+		if arm.BandwidthGBps != 0 || arm.TTFTMS != 0 || arm.PrefillTokPerS != 0 || arm.DecodeTokPerS != 0 || arm.DecodeITLP50MS != 0 || arm.DecodeITLP95MS != 0 {
+			t.Errorf("unmeasured arm contains performance: %+v", arm)
+		}
+	}
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, claim := range []string{"P2PDMA validated", "0.42s", "7.1 GB/s", "restoration verified", "bit-exact hybrid state verified"} {
+		if strings.Contains(string(data), claim) {
+			t.Errorf("receipt retained false claim %q: %s", claim, data)
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDAHardwareAuditHealthyRequiresAllPass(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"UNKNOWN", "WARN", "FAIL", "MODELED", ""} {
+		verdict, healthy := cudaAuditVerdict([]CUDAAuditCheck{{Status: "PASS"}, {Status: status}})
+		if healthy || verdict == "PASS" {
+			t.Errorf("%q produced healthy=%v verdict=%q", status, healthy, verdict)
+		}
+	}
+	if verdict, healthy := cudaAuditVerdict(nil); healthy || verdict != "UNVERIFIED" {
+		t.Errorf("empty audit produced healthy=%v verdict=%q", healthy, verdict)
+	}
+	if verdict, healthy := cudaAuditVerdict([]CUDAAuditCheck{{Status: "PASS"}}); !healthy || verdict != "PASS" {
+		t.Errorf("all observed PASS checks produced healthy=%v verdict=%q", healthy, verdict)
 	}
 }
