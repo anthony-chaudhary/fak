@@ -15,6 +15,20 @@ import (
 // checkpoint geometry.
 func v41KVLoraRankReduced(cfg Config) int { return cfg.HeadDim }
 
+// v41NumericalProfileAdmitted keeps requested semantics separate from geometry.
+// No named release/storage/numerical contract is qualified yet. In particular,
+// neither a matching shape nor an authenticated artifact alone admits the 1017
+// FP8 pre-wo_a boundary. Nil retains the legacy K-quant/BF16 behavior unchanged;
+// that compatibility path is not a DeepInfer parity statement.
+func v41NumericalProfileAdmitted(cfg Config) error {
+	if cfg.DeepSeekV41 == nil || cfg.DeepSeekV41.NumericalProfile == nil {
+		return nil
+	}
+	return v41StageErr(v41StageAttention, -1,
+		fmt.Errorf("%w: %w: explicit numerical semantics %q are not qualified",
+			ErrV41ForwardStage, ErrV41NumericalProfile, cfg.DeepSeekV41.NumericalProfile.Semantics))
+}
+
 // v41ForwardGeometry reports whether cfg declares the published full V4.1
 // geometry (true) or the reduced test fixture (false). It FAILS CLOSED: when the
 // parsed DeepSeekV41.Attention envelope is populated (a published/parsed config)
@@ -29,6 +43,9 @@ func v41KVLoraRankReduced(cfg Config) int { return cfg.HeadDim }
 // an empty envelope is classified by its own flat HeadDim: 512 (v41KVLoraRank)
 // means full, anything else (the reduced fixture's 32) means reduced.
 func v41ForwardGeometry(cfg Config) (bool, error) {
+	if err := v41NumericalProfileAdmitted(cfg); err != nil {
+		return false, err
+	}
 	m := cfg.DeepSeekV41
 	if m == nil || m.Attention.HeadDim == 0 {
 		return cfg.HeadDim == v41KVLoraRank, nil
@@ -542,6 +559,9 @@ func (m *Model) v41ForwardAdmitted() error {
 	if !m.Cfg.IsDeepSeekV41() {
 		return v41StageErr(v41StageEmbedding, -1,
 			fmt.Errorf("%w: config is not DeepSeek V4.1", ErrV41ForwardStage))
+	}
+	if err := v41NumericalProfileAdmitted(m.Cfg); err != nil {
+		return err
 	}
 	if len(m.manifest) == 0 {
 		return v41StageErr(v41StageEmbedding, -1,

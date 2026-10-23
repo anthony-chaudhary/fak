@@ -1,9 +1,11 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -14,7 +16,101 @@ const (
 var (
 	ErrV41ConfigAdmission   = errors.New("model: DeepSeek V4.1 Flash config is not admitted")
 	ErrV41NativeUnsupported = errors.New("model: DeepSeek V4.1 Flash native forward is not implemented")
+	ErrV41NumericalProfile  = errors.New("model: DeepSeek V4.1 numerical profile is not admitted")
 )
+
+// DeepSeekV41NumericalProfileRequest separates the requested target release,
+// converted storage and reference-code semantics. It is not an artifact receipt
+// or numerical qualification. No explicit profile is executable yet; retaining
+// a request prevents it from silently selecting the legacy geometry-based graph.
+// The schema version describes this request envelope, not supported arithmetic.
+type DeepSeekV41NumericalProfileRequest struct {
+	SchemaVersion       int    `json:"schema_version"`
+	TargetRepository    string `json:"target_repository"`
+	TargetRevision      string `json:"target_revision"`
+	StorageRepository   string `json:"storage_repository"`
+	StorageRevision     string `json:"storage_revision"`
+	StorageFormat       string `json:"storage_format"`
+	ReferenceRepository string `json:"reference_repository"`
+	ReferenceRevision   string `json:"reference_revision"`
+	Semantics           string `json:"semantics"`
+}
+
+func v41ValidateNumericalRequest(p *DeepSeekV41NumericalProfileRequest) error {
+	if p == nil || p.SchemaVersion != 1 {
+		return fmt.Errorf("%w: explicit request requires schema_version 1", ErrV41NumericalProfile)
+	}
+	for _, field := range []struct{ name, value string }{
+		{"target_repository", p.TargetRepository}, {"target_revision", p.TargetRevision},
+		{"storage_repository", p.StorageRepository}, {"storage_revision", p.StorageRevision},
+		{"storage_format", p.StorageFormat}, {"reference_repository", p.ReferenceRepository},
+		{"reference_revision", p.ReferenceRevision}, {"semantics", p.Semantics},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%w: explicit request lacks %s", ErrV41NumericalProfile, field.name)
+		}
+	}
+	return nil
+}
+
+func v41ParseNumericalRequest(raw json.RawMessage) (*DeepSeekV41NumericalProfileRequest, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var p *DeepSeekV41NumericalProfileRequest
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&p); err != nil {
+		return nil, fmt.Errorf("%w: malformed explicit request: %v", ErrV41NumericalProfile, err)
+	}
+	if err := v41ValidateNumericalRequest(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// Only the root may declare the reserved request key. Walk tokens rather than
+// decoded maps so a duplicate parent key cannot hide an earlier misplaced
+// request. UseNumber preserves unrelated unknown numeric metadata; this check
+// neither interprets nor reserializes legacy config values.
+func v41CheckNumericalRequestPlacement(raw []byte) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var visit func(root bool) error
+	visit = func(root bool) error {
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+		switch token {
+		case json.Delim('{'):
+			for d.More() {
+				key, err := d.Token()
+				if err != nil {
+					return err
+				}
+				name, _ := key.(string)
+				if !root && strings.EqualFold(name, "fak_v41_numerical_profile") {
+					return fmt.Errorf("%w: numerical profile request must be at the config root", ErrV41NumericalProfile)
+				}
+				if err := visit(false); err != nil {
+					return err
+				}
+			}
+		case json.Delim('['):
+			for d.More() {
+				if err := visit(false); err != nil {
+					return err
+				}
+			}
+		default:
+			return nil
+		}
+		_, err = d.Token() // The enclosing json.Unmarshal already validated syntax.
+		return err
+	}
+	return visit(true)
+}
 
 // DeepSeekV41QuantConfig retains the checkpoint's mixed-precision declaration.
 // It is metadata only; it does not enable an FP4 or FP8 execution path.
@@ -50,6 +146,11 @@ type DeepSeekV41Config struct {
 	WrapperModelType string
 	TextModelType    string
 	Quantization     DeepSeekV41QuantConfig
+
+	// Nil preserves legacy, unqualified arithmetic. An explicit request is
+	// serialized at the root as fak_v41_numerical_profile and fails closed
+	// before numerical dispatch until that exact contract is qualified.
+	NumericalProfile *DeepSeekV41NumericalProfileRequest
 
 	// Attention retains the decoder/attention execution axes as a single typed
 	// envelope. It is metadata only: later native leaves read these instead of
@@ -149,6 +250,11 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		return json.Marshal(configAlias(c))
 	}
 	m := c.DeepSeekV41
+	if m.NumericalProfile != nil {
+		if err := v41ValidateNumericalRequest(m.NumericalProfile); err != nil {
+			return nil, err
+		}
+	}
 	gguf := c.ModelType == "deepseek41"
 	if gguf && (m.WrapperModelType != "" || m.TextModelType != "") {
 		return nil, fmt.Errorf("%w: GGUF config carries official wrapper/text identity", ErrV41ConfigAdmission)
@@ -241,9 +347,10 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	}
 	type wrapperEnvelope struct {
 		configAlias
-		Quantization DeepSeekV41QuantConfig `json:"quantization_config"`
-		TextConfig   textEnvelope           `json:"text_config"`
-		VisionConfig *visionEnvelope        `json:"vision_config,omitempty"`
+		NumericalProfile *DeepSeekV41NumericalProfileRequest `json:"fak_v41_numerical_profile,omitempty"`
+		Quantization     DeepSeekV41QuantConfig              `json:"quantization_config"`
+		TextConfig       textEnvelope                        `json:"text_config"`
+		VisionConfig     *visionEnvelope                     `json:"vision_config,omitempty"`
 	}
 	var vision *visionEnvelope
 	if v := m.Vision; v != nil {
@@ -264,18 +371,20 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		}
 		return json.Marshal(struct {
 			textEnvelope
-			VisionConfig *visionEnvelope `json:"vision_config,omitempty"`
-		}{nested, vision})
+			NumericalProfile *DeepSeekV41NumericalProfileRequest `json:"fak_v41_numerical_profile,omitempty"`
+			VisionConfig     *visionEnvelope                     `json:"vision_config,omitempty"`
+		}{nested, m.NumericalProfile, vision})
 	}
-	return json.Marshal(wrapperEnvelope{configAlias(root), m.Quantization, nested, vision})
+	return json.Marshal(wrapperEnvelope{configAlias(root), m.NumericalProfile, m.Quantization, nested, vision})
 }
 
 func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, error) {
 	var envelope struct {
-		TextConfig   json.RawMessage `json:"text_config"`
-		ModelType    string          `json:"model_type"`
-		Quantization json.RawMessage `json:"quantization_config"`
-		VisionConfig *struct {
+		NumericalProfile json.RawMessage `json:"fak_v41_numerical_profile"`
+		TextConfig       json.RawMessage `json:"text_config"`
+		ModelType        string          `json:"model_type"`
+		Quantization     json.RawMessage `json:"quantization_config"`
+		VisionConfig     *struct {
 			ModelType      string `json:"model_type"`
 			NumHiddenLayer int    `json:"num_hidden_layers"`
 			HiddenSize     int    `json:"hidden_size"`
@@ -287,8 +396,15 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 	if err := json.Unmarshal(root, &envelope); err != nil {
 		return nil, err
 	}
+	if err := v41CheckNumericalRequestPlacement(root); err != nil {
+		return nil, err
+	}
 	var nested deepSeekV41TextMetadata
 	if err := json.Unmarshal(text, &nested); err != nil {
+		return nil, err
+	}
+	profile, err := v41ParseNumericalRequest(envelope.NumericalProfile)
+	if err != nil {
 		return nil, err
 	}
 	gguf := envelope.ModelType == "deepseek41"
@@ -309,6 +425,9 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 			present = present || len(fields[key]) > 0
 		}
 		if !present {
+			if profile != nil {
+				return nil, fmt.Errorf("%w: explicit request requires retained GGUF topology", ErrV41NumericalProfile)
+			}
 			return nil, nil
 		}
 		for i, key := range keys {
@@ -323,9 +442,13 @@ func parseDeepSeekV41Metadata(root, text []byte, c Config) (*DeepSeekV41Config, 
 			}
 		}
 	} else if envelope.ModelType != "deepseek_v41" && nested.ModelType != "deepseek_v41_text" {
+		if profile != nil {
+			return nil, fmt.Errorf("%w: explicit request requires a V4.1 config", ErrV41NumericalProfile)
+		}
 		return nil, nil
 	}
 	m := &DeepSeekV41Config{
+		NumericalProfile:          profile,
 		WrapperModelType:          envelope.ModelType,
 		TextModelType:             nested.ModelType,
 		KVSourceLayerIDs:          append([]int(nil), nested.KVSourceLayerIDs...),
