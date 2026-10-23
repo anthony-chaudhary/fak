@@ -1,5 +1,6 @@
 //go:build vulkan && (windows || linux) && cgo
 
+// Run on a Vulkan host: go test -tags=vulkan ./internal/compute -run TestVulkanV41TokenPanelNative
 package compute
 
 import (
@@ -134,7 +135,9 @@ func v41TokenPanelNativeFixture(dtype Dtype, out, in, rows int, exact bool) (Ten
 // a mismatch is an unqualified model route, not an Approx-tolerance pass.
 // Passing these finite fixtures does not prove universal kernel equivalence.
 // The ordinary MatMul Approx contract does not qualify this model route.
-// fak-test:runtime integration est=20s lane=optin
+// The V4.1 attn.wkv shape pins the dense KV panel route to per-token MatMul
+// bits (Ref #12640).
+// fak-test:runtime integration est=30s lane=optin
 func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 	if v41TokenPanelNativeStartup(t, "", "") {
 		return
@@ -145,11 +148,16 @@ func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 		if dtype == Q3_K {
 			fullOut, fullIn = 5120, 2304
 		}
-		for _, shape := range [][2]int{{1, 256}, {65, 1280}, {fullOut, fullIn}} {
+		shapes := [][2]int{{1, 256}, {65, 1280}, {fullOut, fullIn}}
+		kvShape := [2]int{512, 4096} // V4.1 attn.wkv cold-prefill panel
+		if dtype == Q2_K {
+			shapes = append(shapes, kvShape)
+		}
+		for _, shape := range shapes {
 			for _, rows := range []int{2, 4, 8, 9, 64} {
 				// Keep the grid additions bounded while covering an odd output
 				// tail, a masked token tail and the full admitted token extent.
-				if rows > 8 && shape != [2]int{65, 1280} {
+				if rows > 8 && shape != [2]int{65, 1280} && shape != kvShape {
 					continue
 				}
 				for _, exact := range []bool{true, false} {
