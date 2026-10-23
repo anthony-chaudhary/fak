@@ -36,6 +36,15 @@ func TestHALDeviceForwardMatchesNative(t *testing.T) {
 	// prefill-logit cosine: native (cpuref f32) vs device (Approx)
 	nativeLogits := m.NewSession().Prefill(prompt)
 	devLogits := m.NewBackendSession(be).Prefill(prompt)
+	if len(nativeLogits) != cfg.VocabSize || len(devLogits) != cfg.VocabSize {
+		t.Fatalf("prefill logit shape: native=%d cuda=%d want %d", len(nativeLogits), len(devLogits), cfg.VocabSize)
+	}
+	for i := range nativeLogits {
+		native, device := float64(nativeLogits[i]), float64(devLogits[i])
+		if math.IsNaN(native) || math.IsInf(native, 0) || math.IsNaN(device) || math.IsInf(device, 0) {
+			t.Fatalf("non-finite prefill logit at %d: native=%v cuda=%v", i, native, device)
+		}
+	}
 	var dot, na, nd float64
 	for i := range nativeLogits {
 		dot += float64(nativeLogits[i]) * float64(devLogits[i])
@@ -43,8 +52,8 @@ func TestHALDeviceForwardMatchesNative(t *testing.T) {
 		nd += float64(devLogits[i]) * float64(devLogits[i])
 	}
 	cos := dot / (math.Sqrt(na) * math.Sqrt(nd))
-	if cos < 0.999 {
-		t.Fatalf("device prefill logit cosine %.6f < 0.999", cos)
+	if math.IsNaN(cos) || math.IsInf(cos, 0) || cos < 0.999 {
+		t.Fatalf("device prefill logit cosine %.6f must be finite and >= 0.999", cos)
 	}
 
 	// greedy decode argmax-exact

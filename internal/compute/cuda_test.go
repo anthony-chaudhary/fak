@@ -247,9 +247,15 @@ func TestCUDAMatMulApproxMatchesRef(t *testing.T) {
 	if len(yRef) != out || len(yCu) != out {
 		t.Fatalf("shape: ref=%d cu=%d want %d", len(yRef), len(yCu), out)
 	}
+	for i := range yRef {
+		r, c := float64(yRef[i]), float64(yCu[i])
+		if math.IsNaN(r) || math.IsInf(r, 0) || math.IsNaN(c) || math.IsInf(c, 0) {
+			t.Fatalf("non-finite matmul output at %d: ref=%v cu=%v", i, r, c)
+		}
+	}
 	c := cosine(yRef, yCu)
-	if c < 0.9999 {
-		t.Fatalf("matmul cosine %.6f < 0.9999", c)
+	if math.IsNaN(c) || math.IsInf(c, 0) || c < 0.9999 {
+		t.Fatalf("matmul cosine %.6f must be finite and >= 0.9999", c)
 	}
 	var maxAbs float64
 	for i := range yRef {
