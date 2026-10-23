@@ -182,7 +182,7 @@ func BuildCUDALib(ctx context.Context, tc *Toolchain, repoRoot string, arch stri
 	if err != nil {
 		return nil, err
 	}
-	return ArchiveCUDALib(ctx, tc, filepath.Join(repoRoot, "internal", "compute"), objs, stdout)
+	return archiveCUDAWithImageAudit(ctx, tc, repoRoot, filepath.Join(repoRoot, "internal", "compute"), arch, objs, stdout)
 }
 
 // SignArtifact signs a binary with Authenticode on Windows using signtool.exe.
@@ -223,13 +223,11 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("nil CUDAConfig")
 	}
-	if cfg.RepoRoot == "" {
-		root, err := ResolveRepoRoot("")
-		if err != nil {
-			return err
-		}
-		cfg.RepoRoot = root
+	root, err := ResolveRepoRoot(cfg.RepoRoot)
+	if err != nil {
+		return err
 	}
+	cfg.RepoRoot = root
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
@@ -316,7 +314,7 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 		var artifact *BuildArtifact
 		if err := tracker.recordPhase("archive", func() error {
 			var err error
-			artifact, err = ArchiveCUDALib(ctx, cfg.Toolchain, cfg.PkgDir, objs, cfg.Stdout)
+			artifact, err = archiveCUDAWithImageAudit(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.PkgDir, cfg.Arch, objs, cfg.Stdout)
 			return err
 		}); err != nil {
 			return err
@@ -359,6 +357,7 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 			}
 			if FileExists(outBinPath) {
 				if art, err := InspectArtifact(outBinPath); err == nil {
+					art.CUDAImages = artifact.CUDAImages
 					if cfg.Toolchain.IsWindows && !cfg.SkipSign {
 						art.Signed = true
 					}
@@ -396,8 +395,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 		}); err != nil {
 			return err
 		}
+		var artifact *BuildArtifact
 		if err := tracker.recordPhase("archive", func() error {
-			_, err := ArchiveCUDALib(ctx, cfg.Toolchain, cfg.PkgDir, objs, cfg.Stdout)
+			var err error
+			artifact, err = archiveCUDAWithImageAudit(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.PkgDir, cfg.Arch, objs, cfg.Stdout)
 			return err
 		}); err != nil {
 			return err
@@ -431,6 +432,7 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 		}
 		if FileExists(outBinPath) {
 			if art, err := InspectArtifact(outBinPath); err == nil {
+				art.CUDAImages = artifact.CUDAImages
 				if cfg.Toolchain.IsWindows && !cfg.SkipSign {
 					art.Signed = true
 				}
@@ -454,7 +456,8 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 			return err
 		}
 		if err := tracker.recordPhase("archive", func() error {
-			_, err := ArchiveCUDALib(ctx, cfg.Toolchain, cfg.PkgDir, objs, cfg.Stdout)
+			artifact, err := archiveCUDAWithImageAudit(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.PkgDir, cfg.Arch, objs, cfg.Stdout)
+			tracker.receipt.Artifact = artifact
 			return err
 		}); err != nil {
 			return err
@@ -479,7 +482,8 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 			return err
 		}
 		if err := tracker.recordPhase("archive", func() error {
-			_, err := ArchiveCUDALib(ctx, cfg.Toolchain, cfg.PkgDir, objs, cfg.Stdout)
+			artifact, err := archiveCUDAWithImageAudit(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.PkgDir, cfg.Arch, objs, cfg.Stdout)
+			tracker.receipt.Artifact = artifact
 			return err
 		}); err != nil {
 			return err
