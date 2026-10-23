@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -60,6 +61,23 @@ func ParseCUDAArchMatrix(archText string, targetArch string) ([]string, string, 
 	return gencode, buildArchs, nil
 }
 
+// CUDA 12.9 first added the plain sm_103 target. Architecture-specific
+// sm_103a/sm_103f features are not implied by this admission check.
+var cudaReleaseVersion = regexp.MustCompile(`(?m)^Cuda compilation tools, release ([0-9]+)\.([0-9]+), V[0-9]+\.[0-9]+\.[0-9]+\r?$`)
+
+func requireSM103NVCCVersion(output string) error {
+	match := cudaReleaseVersion.FindStringSubmatch(strings.TrimSpace(output))
+	if match == nil {
+		return fmt.Errorf("sm_103 requires CUDA Toolkit 12.9 or newer: cannot parse nvcc --version")
+	}
+	major, majorErr := strconv.Atoi(match[1])
+	minor, minorErr := strconv.Atoi(match[2])
+	if majorErr != nil || minorErr != nil || major < 12 || (major == 12 && minor < 9) {
+		return fmt.Errorf("sm_103 requires CUDA Toolkit 12.9 or newer; nvcc reports %s.%s", match[1], match[2])
+	}
+	return nil
+}
+
 // LoadCUDAArchMatrix loads cuda_arch.txt from repoRoot/internal/compute/ and parses gencode flags.
 func LoadCUDAArchMatrix(repoRoot string, targetArch string) ([]string, string, error) {
 	archFile := filepath.Join(repoRoot, "internal", "compute", "cuda_arch.txt")
@@ -82,14 +100,27 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		return nil, err
 	}
 
-	if stdout != nil {
-		fmt.Fprintf(stdout, "[cuda] nvcc compile kernels (%s) ...\n", buildArchs)
-	}
-
 	var objs []string
 	env := os.Environ()
 	if len(tc.VsDevEnv) > 0 {
 		env = MergeEnviron(env, tc.VsDevEnv)
+	}
+	for _, arg := range gencodeArgs {
+		if arg == "arch=compute_103,code=sm_103" {
+			cmd := exec.CommandContext(ctx, tc.NVCC, "--version")
+			cmd.Dir, cmd.Env = pkgDir, env
+			version, err := cmd.Output()
+			if err != nil {
+				return nil, fmt.Errorf("sm_103 requires CUDA Toolkit 12.9 or newer: nvcc --version failed: %w", err)
+			}
+			if err := requireSM103NVCCVersion(string(version)); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	if stdout != nil {
+		fmt.Fprintf(stdout, "[cuda] nvcc compile kernels (%s) ...\n", buildArchs)
 	}
 
 	if tc.IsWindows {
