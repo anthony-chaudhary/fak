@@ -79,9 +79,13 @@ jobs:
 
       # The acceptance gate from issue #481: the Approx gate passes natively on Windows, not
       # only in WSL. Mirrors build_cuda.sh's `test` subcommand (default: graphs off).
+      # Green packages alone can hide a missing GPU behind t.Skip. The native gate captures
+      # go test -json, preserves its exit status, and requires run+pass for the exact SGEMM
+      # and HAL forward tests plus completed package passes. Optional tests may still skip.
+      # Evidence is exclusive per workflow attempt; compiler env/signing policy is unchanged.
       - name: Approx gate (go test -tags cuda)
         shell: pwsh
-        run: go test -tags cuda -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/
+        run: ./fak-cuda.exe test cuda-acceptance --json --evidence-dir "$env:RUNNER_TEMP/fak-cuda-acceptance-${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: upload signed binary
         uses: actions/upload-artifact@v4

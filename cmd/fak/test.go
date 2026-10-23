@@ -41,6 +41,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/testroute"
+	"github.com/anthony-chaudhary/fak/internal/validate"
 )
 
 func cmdTest(argv []string) { os.Exit(runTest(os.Stdout, os.Stderr, argv)) }
@@ -142,6 +143,7 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
   fak test affected            affected-package loop (delegates to fak affected)
   fak test durations           fold go test -json into a duration ledger
   fak test shards              balance packages from a duration ledger
+  fak test cuda-acceptance     native CUDA execution evidence gate (no WSL routing)
   fak test --json -n race      emit a machine-readable repair packet
   fak test ./internal/ctxmmu/  one package (any ./... or import-path target)
   fak test fast -- -run TestX  pass extra flags through to go test
@@ -179,6 +181,16 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 				subArgs = append([]string{"--json"}, subArgs...)
 			}
 			return runAffected(stdout, stderr, subArgs)
+		case "cuda-acceptance":
+			subArgs := append([]string(nil), args[1:]...)
+			if *json {
+				subArgs = append([]string{"--json"}, subArgs...)
+			}
+			if *dry || *dry2 {
+				// A subcommand flag must never negate the outer no-execution promise.
+				subArgs = append(subArgs, "--dry-run=true")
+			}
+			return validate.RunCUDAAcceptance(stdout, stderr, subArgs)
 		case "durations", "duration", "duration-ledger":
 			return runTestDurations(stdout, stderr, args[1:])
 		case "shards", "shard", "shard-plan":
