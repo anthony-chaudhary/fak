@@ -1186,10 +1186,9 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 // RMSNorm runs the RMS-normalization kernel over each row of x (one weight-width row at a time),
 // returning a new F32-resident tensor of x's shape.
 func (c *cudaBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
+	rows, n := requireCUDARMSNormGeometry(x, weight)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	n := weight.Numel()
-	rows := x.Numel() / n
 	y, _ := c.devTr(append([]int(nil), x.Shape...), F32)
 	C.fcuda_rmsnorm_f32(c.cf(x), c.cf(weight), c.cf(y), C.int(rows), C.int(n), C.float(eps))
 	return y
