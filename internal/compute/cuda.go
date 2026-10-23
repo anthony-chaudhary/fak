@@ -1159,7 +1159,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		status = int(C.fak_cuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1))
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)

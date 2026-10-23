@@ -1589,20 +1589,30 @@ static void q4_coeff_cache_evict(const void *q) {
     return;
   }
 }
-static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
+static int q4_coeffs_for(const uint8_t *q, int out, int in, float2 **result) {
   int device = 0;
   CK(cudaGetDevice(&device));
   for (int i = 0; i < g_q4_coeff_cache_n; ++i) {
     q4_coeff_cache_entry &entry = g_q4_coeff_cache[i];
-    if (entry.q == q && entry.out == out && entry.in == in && entry.device == device) return entry.coeff;
+    if (entry.q == q && entry.out == out && entry.in == in && entry.device == device) {
+      *result = entry.coeff;
+      return 0;
+    }
   }
   if (g_q4_coeff_cache_n >= 512) { fprintf(stderr, "fak-cuda: q4 coeff cache full\n"); abort(); }
   size_t n = (size_t)out * (in / 256) * 8;
   float2 *coeff = nullptr;
   CK(cudaMalloc(&coeff, n * sizeof(float2)));
   k_q4k_coeffs<<<(n + 255) / 256, 256, 0, g_stream>>>(q, coeff, out, in);
+  cudaError_t launch = cudaGetLastError();
+  if (launch != cudaSuccess) {
+    // A rejected initialization must never become a reusable cache entry.
+    CK(cudaFree(coeff));
+    return 20000 + (int)launch;
+  }
   g_q4_coeff_cache[g_q4_coeff_cache_n++] = {q, coeff, out, in, device};
-  return coeff;
+  *result = coeff;
+  return 0;
 }
 
 extern "C" int fak_cuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
@@ -1620,15 +1630,19 @@ extern "C" int fak_cuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, flo
     return status;
   }
   if (P < 4) {
-    float2 *coeff = q4_coeffs_for(dQ4K, out, in);
+    float2 *coeff = nullptr;
+    int status = q4_coeffs_for(dQ4K, out, in, &coeff);
+    if (status != 0) return status;
     k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P);
-    return 0;
+    cudaError_t launch = cudaGetLastError();
+    return launch == cudaSuccess ? 0 : 20000 + (int)launch;
   }
   constexpr int token_tile = 4;
   k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
-  return 0;
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 20000 + (int)launch;
 }
 
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
