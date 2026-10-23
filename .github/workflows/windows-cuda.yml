@@ -56,7 +56,9 @@ jobs:
         shell: pwsh
         run: |
           go build ./cmd/fak
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $cgo = (go list -f '{{.CgoFiles}}' ./internal/compute)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($cgo -ne '[]') { Write-Error "default build pulled cgo files: $cgo"; exit 1 }
           Write-Host 'default build pure-Go: OK'
 
@@ -64,7 +66,10 @@ jobs:
       # WDAC permits fork/exec. The cert thumbprint comes from a repo secret -> env; the script
       # reads it (FAK_SIGN_CERT_THUMBPRINT) and never hardcodes a cert. CUDA_PATH is provided by
       # the runner's toolkit install; the script derives CGO_CFLAGS/CGO_LDFLAGS from it.
-      - name: build + sign native-Windows cuda variant (#481)
+      # Keep acceptance in the builder's process so it inherits the derived CGO environment.
+      # Green packages alone can hide a missing GPU behind t.Skip: the native acceptance gate
+      # requires run+pass for the exact SGEMM and HAL forward tests and completed packages.
+      - name: build + sign + Approx gate native-Windows cuda variant (#481)
         shell: pwsh
         env:
           FAK_CUDA_ARCH: ${{ inputs.arch }}
@@ -75,19 +80,21 @@ jobs:
             ./tools/build_cuda_windows.ps1 -Output fak-cuda.exe -SkipSign
           } else {
             ./tools/build_cuda_windows.ps1 -Output fak-cuda.exe
+            ./fak-cuda.exe test cuda-acceptance --json --evidence-dir "$env:RUNNER_TEMP/fak-cuda-acceptance-${{ github.run_id }}-${{ github.run_attempt }}"
+            exit $LASTEXITCODE
           }
 
-      # The acceptance gate from issue #481: the Approx gate passes natively on Windows, not
-      # only in WSL. Mirrors build_cuda.sh's `test` subcommand (default: graphs off).
-      # Green packages alone can hide a missing GPU behind t.Skip. The native gate captures
-      # go test -json, preserves its exit status, and requires run+pass for the exact SGEMM
-      # and HAL forward tests plus completed package passes. Optional tests may still skip.
-      # Evidence is exclusive per workflow attempt; compiler env/signing policy is unchanged.
-      - name: Approx gate (go test -tags cuda)
-        shell: pwsh
-        run: ./fak-cuda.exe test cuda-acceptance --json --evidence-dir "$env:RUNNER_TEMP/fak-cuda-acceptance-${{ github.run_id }}-${{ github.run_attempt }}"
+      # Preserve failure evidence without publishing a binary that failed acceptance.
+      # Build-only runs and failures before acceptance legitimately have no evidence yet.
+      - name: upload native CUDA acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fak-cuda-windows-acceptance
+          path: ${{ runner.temp }}/fak-cuda-acceptance-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
 
-      - name: upload signed binary
+      - name: upload CUDA binary
         uses: actions/upload-artifact@v4
         with:
           name: fak-cuda-windows
