@@ -157,6 +157,26 @@ selection evidence for this invocation, not a source-SHA, model-digest, full-con
 hardware-identity provenance receipt. Provenance qualification, performance measurement, and
 maturity promotion remain separate gates.
 
+For native preparation without shell scripts, use the reached developer command:
+
+```bash
+fak-dev build-cuda first-light --repo-root /src/fak --arch sm_120 \
+  --hf /srv/models/Qwen2.5-1.5B-Instruct --plan --json \
+  --receipt .fak/cuda-first-light-plan.json
+fak-dev build-cuda first-light --repo-root /src/fak --arch sm_120 \
+  --hf /srv/models/Qwen2.5-1.5B-Instruct --timeout 20m --json
+```
+
+The plan writes pending stages without discovering a toolchain, compiling or running
+a device. Execution checks model files and architecture, parses the C header strictly,
+builds `gpucheck` through the native CUDA builder, then invokes its strict native HF
+parity gate. It stops on the first failure and writes `.fak/cuda-first-light.json`,
+including failed stages, the binary digest and the observed acceptance receipt.
+`--arch` must match the observed device tier exactly. `--timeout` bounds the header,
+build and acceptance commands together. GGUF serving coherence, per-family CUDA
+acceptance, same-card reference ABBA and performance receipts remain pending;
+`hardware_qualified` stays false even when this preparation passes.
+
 ## 5. Add a kernel
 
 Adding a device op is a five-point change; `make cuda-check` catches the two you are most

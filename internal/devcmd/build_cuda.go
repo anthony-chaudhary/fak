@@ -35,6 +35,9 @@ func RunBuildCUDA(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		flagArgs = argv
 	}
+	if sub == "first-light" {
+		return runCUDAFirstLight(stdout, stderr, flagArgs)
+	}
 
 	fs := flag.NewFlagSet("build-cuda", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -67,6 +70,7 @@ func RunBuildCUDA(stdout, stderr io.Writer, argv []string) int {
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak-dev build-cuda [subcommand] [flags] [pkg] [out]")
 		fmt.Fprintln(stderr, "subcommands:")
+		fmt.Fprintln(stderr, "  first-light check headers, build gpucheck and require native HF model parity (--plan prints preparation only)")
 		fmt.Fprintln(stderr, "  check      run GPU-free ABI parity, arch matrix, and header syntax checks")
 		fmt.Fprintln(stderr, "  build      compile CUDA kernels to libfakcuda.a and build compute package")
 		fmt.Fprintln(stderr, "  test       run CUDA HAL device integration tests")

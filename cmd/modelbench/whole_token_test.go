@@ -201,10 +201,16 @@ func (b *wholeTokenBackendFixture) Qwen35SequencePrefill(req compute.Qwen35Seque
 	b.sequenceCalls++
 	for token := range req.TokenIDs {
 		pos := req.StartPos + token
-		for layer := range req.Layers {
+		// Like the device sequence paths, only full-attention layers append, at their compact index.
+		compact := 0
+		for _, layer := range req.Layers {
+			if layer.Linear {
+				continue
+			}
 			width := req.NumKVHeads * req.HeadDim
 			z := compute.NewF32(b.Backend, []int{width}, make([]float32, width))
-			req.KV.AppendKV(layer, z, z, z, pos)
+			req.KV.AppendKV(compact, z, z, z, pos)
+			compact++
 		}
 	}
 	hidden := compute.NewF32(b.Backend, []int{req.Hidden}, make([]float32, req.Hidden))
