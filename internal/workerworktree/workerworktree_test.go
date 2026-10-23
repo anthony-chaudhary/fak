@@ -421,7 +421,7 @@ func TestIsWorkerWorktreeOnlyMarkerDirs(t *testing.T) {
 
 func TestPrepareDetachedAddAtTrunkHead(t *testing.T) {
 	g := newFakeGit().reply("rev-parse", 0, "feedface\n").reply("worktree", 0, "")
-	res := Prepare("/r", "tools", "3168", "", t.TempDir(), g.run)
+	res := Prepare(t.TempDir(), "tools", "3168", "", t.TempDir(), g.run)
 	if !res.OK {
 		t.Fatalf("prepare failed: %+v", res)
 	}
@@ -443,7 +443,7 @@ func TestPrepareDetachedAddAtTrunkHead(t *testing.T) {
 
 func TestPrepareFailOpenWhenHeadUnresolvable(t *testing.T) {
 	g := newFakeGit().reply("rev-parse", 127, "")
-	res := Prepare("/r", "tools", "1", "", t.TempDir(), g.run)
+	res := Prepare(t.TempDir(), "tools", "1", "", t.TempDir(), g.run)
 	if res.OK {
 		t.Fatal("prepare must fail when HEAD unresolvable")
 	}
@@ -454,7 +454,7 @@ func TestPrepareFailOpenWhenHeadUnresolvable(t *testing.T) {
 
 func TestPrepareExplicitBaseSHASkipsRevParse(t *testing.T) {
 	g := newFakeGit().reply("worktree", 0, "")
-	res := Prepare("/r", "tools", "1", "cafe", t.TempDir(), g.run)
+	res := Prepare(t.TempDir(), "tools", "1", "cafe", t.TempDir(), g.run)
 	if !res.OK || res.BaseSHA != "cafe" {
 		t.Fatalf("explicit base sha not honored: %+v", res)
 	}
@@ -465,7 +465,7 @@ func TestPrepareExplicitBaseSHASkipsRevParse(t *testing.T) {
 
 func TestPrepareAddFailureIsFailOpen(t *testing.T) {
 	g := newFakeGit().reply("rev-parse", 0, "abc\n").reply("worktree", 1, "fatal: already exists")
-	res := Prepare("/r", "tools", "1", "", t.TempDir(), g.run)
+	res := Prepare(t.TempDir(), "tools", "1", "", t.TempDir(), g.run)
 	if res.OK {
 		t.Fatal("add failure must fail open (ok=false)")
 	}
@@ -3133,5 +3133,23 @@ func TestPrepareWindowsOrphanTargetPreservesCommonGitState(t *testing.T) {
 	readSentinelBounded, err := os.ReadFile(sentinelFile)
 	if err != nil || !bytes.Equal(readSentinelBounded, sentinelContent) {
 		t.Fatalf("sentinel corrupted after PrepareOwnedBounded")
+	}
+}
+
+// A root with no .git is not a repository: the exclude stamp must not create
+// one (a fixture root "/r" once left a stray C:/r/.git on a Windows host).
+// fak-test:runtime fast est=5ms lane=default
+func TestEnsureGitExcludeNeverCreatesGitDir(t *testing.T) {
+	root := t.TempDir()
+	ensureGitExclude(root, WorkerLeaseFileName)
+	if _, err := os.Stat(filepath.Join(root, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("stat .git = %v, want not exist", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ensureGitExclude(root, WorkerLeaseFileName)
+	if got, err := os.ReadFile(filepath.Join(root, ".git", "info", "exclude")); err != nil || !strings.Contains(string(got), WorkerLeaseFileName) {
+		t.Fatalf("exclude = %q, %v; want it to name %s", got, err, WorkerLeaseFileName)
 	}
 }

@@ -104,8 +104,13 @@ func ensureGitExclude(root, pattern string) {
 	if root == "" || pattern == "" {
 		return
 	}
+	fi, err := os.Stat(filepath.Join(root, ".git"))
+	if err != nil {
+		// Not a repository: never conjure one (fixture root "/r" became C:/r).
+		return
+	}
 	excludePath := filepath.Join(root, ".git", "info", "exclude")
-	if fi, err := os.Stat(filepath.Join(root, ".git")); err == nil && !fi.IsDir() {
+	if !fi.IsDir() {
 		if data, err := os.ReadFile(filepath.Join(root, ".git")); err == nil {
 			s := strings.TrimSpace(string(data))
 			if strings.HasPrefix(s, "gitdir: ") {
