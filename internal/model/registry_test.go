@@ -140,6 +140,33 @@ func TestDeclarativeRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("rejected requirements cannot win resolution", func(t *testing.T) {
+		spec := ModelSpec{
+			ID: "rejected-requirements-model",
+			Backends: []BackendSpec{
+				{Name: "misspelled", Priority: 100, DeviceReq: DeviceRequirement{BackendName: "cdua"}},
+				{Name: "unobserved-metal-arch", Priority: 90, DeviceReq: DeviceRequirement{BackendName: "metal", MinDeviceArch: "sm_80"}},
+			},
+		}
+		host := HostProfile{HasCUDA: true, CUDAArch: "sm_89", HasMetal: true}
+		RegisterModelSpec(spec)
+		if _, err := ResolveModelBackend(spec.ID, host); !errors.Is(err, ErrNoMatchingBackend) {
+			t.Fatalf("ResolveModelBackend error = %v, want %v", err, ErrNoMatchingBackend)
+		}
+
+		spec.Backends = append(spec.Backends, BackendSpec{
+			Name: "explicit-cpu", Priority: 10, DeviceReq: DeviceRequirement{BackendName: "cpu-ref"},
+		})
+		RegisterModelSpec(spec)
+		backend, err := ResolveModelBackend(spec.ID, host)
+		if err != nil {
+			t.Fatalf("ResolveModelBackend unexpected error: %v", err)
+		}
+		if backend.Name != "explicit-cpu" {
+			t.Fatalf("ResolveModelBackend selected %q, want %q", backend.Name, "explicit-cpu")
+		}
+	})
+
 	t.Run("model not in registry returns ErrModelNotFound", func(t *testing.T) {
 		host := HostProfile{
 			Arch: "amd64",
@@ -217,9 +244,57 @@ func TestMatchDeviceRequirement(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "arch: non-cuda arch requirement does not fail",
+			name: "arch: metal required architecture has no host observation",
 			req:  DeviceRequirement{BackendName: "metal", MinDeviceArch: "metal3"},
 			host: HostProfile{HasMetal: true},
+			want: false,
+		},
+		{
+			name: "arch: metal cannot use cuda architecture",
+			req:  DeviceRequirement{BackendName: "metal", MinDeviceArch: "sm_80"},
+			host: HostProfile{HasMetal: true, CUDAArch: "sm_89"},
+			want: false,
+		},
+		{
+			name: "arch: vulkan required architecture has no host observation",
+			req:  DeviceRequirement{BackendName: "vulkan", MinDeviceArch: "sm_80"},
+			host: HostProfile{HasVulkan: true},
+			want: false,
+		},
+		{
+			name: "arch: vulkan cannot use cuda architecture",
+			req:  DeviceRequirement{BackendName: "vulkan", MinDeviceArch: "sm_80"},
+			host: HostProfile{HasVulkan: true, CUDAArch: "sm_89"},
+			want: false,
+		},
+		{
+			name: "arch: unspecified backend required architecture has no host observation",
+			req:  DeviceRequirement{MinDeviceArch: "sm_80"},
+			host: HostProfile{},
+			want: false,
+		},
+		{
+			name: "arch: unspecified backend cannot use cuda architecture",
+			req:  DeviceRequirement{MinDeviceArch: "sm_80"},
+			host: HostProfile{CUDAArch: "sm_89"},
+			want: false,
+		},
+		{
+			name: "arch: cpu-ref required architecture has no host observation",
+			req:  DeviceRequirement{BackendName: "cpu-ref", MinDeviceArch: "sm_80"},
+			host: HostProfile{},
+			want: false,
+		},
+		{
+			name: "arch: cpu-ref cannot use cuda architecture",
+			req:  DeviceRequirement{BackendName: "cpu-ref", MinDeviceArch: "sm_80"},
+			host: HostProfile{CUDAArch: "sm_89"},
+			want: false,
+		},
+		{
+			name: "arch: omitted metal architecture ignores cuda observation",
+			req:  DeviceRequirement{BackendName: "metal"},
+			host: HostProfile{HasMetal: true, CUDAArch: "sm_89"},
 			want: true,
 		},
 
@@ -256,6 +331,18 @@ func TestMatchDeviceRequirement(t *testing.T) {
 		},
 
 		// Platform flags
+		{
+			name: "platform: misspelled backend fails closed",
+			req:  DeviceRequirement{BackendName: "cdua"},
+			host: HostProfile{HasCUDA: true, HasMetal: true, HasVulkan: true},
+			want: false,
+		},
+		{
+			name: "platform: unknown backend fails closed",
+			req:  DeviceRequirement{BackendName: "unknown"},
+			host: HostProfile{HasCUDA: true, HasMetal: true, HasVulkan: true},
+			want: false,
+		},
 		{
 			name: "platform: cuda matches when has_cuda is true",
 			req:  DeviceRequirement{BackendName: "cuda"},

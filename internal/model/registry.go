@@ -54,6 +54,8 @@ var (
 // MatchDeviceRequirement verifies whether a host profile meets the device requirement.
 func MatchDeviceRequirement(req DeviceRequirement, host HostProfile) bool {
 	switch req.BackendName {
+	case "", "cpu-ref":
+		// Empty preserves legacy feature/memory-only requirements.
 	case "cuda":
 		if !host.HasCUDA {
 			return false
@@ -66,6 +68,8 @@ func MatchDeviceRequirement(req DeviceRequirement, host HostProfile) bool {
 		if !host.HasVulkan {
 			return false
 		}
+	default:
+		return false
 	}
 
 	if req.MinMemoryBytes > 0 && host.DeviceVRAM < req.MinMemoryBytes && host.TotalRAM < req.MinMemoryBytes {
@@ -78,10 +82,11 @@ func MatchDeviceRequirement(req DeviceRequirement, host HostProfile) bool {
 		}
 	}
 
-	if req.BackendName == "cuda" && req.MinDeviceArch != "" && host.CUDAArch == "" {
-		return false
-	}
-	if req.MinDeviceArch != "" && host.CUDAArch != "" {
+	if req.MinDeviceArch != "" {
+		// CUDAArch is the only backend-specific architecture fact in HostProfile.
+		if req.BackendName != "cuda" || host.CUDAArch == "" {
+			return false
+		}
 		if !cudaArchSatisfied(req.MinDeviceArch, host.CUDAArch) {
 			return false
 		}
