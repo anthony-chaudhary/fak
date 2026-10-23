@@ -2675,6 +2675,10 @@ extern "C" int fcuda_spec_verify_attention_f32(
 // single cuda_kernels.cu object on every supported host.
 #include "tree_attention.cu"
 
+// Routed-expert FP8 block-32 / MXFP4 E8M0 GEMV (RoutedExpertDeviceKernel), included for
+// the same single-object reason.
+#include "routed_expert_gemv.cu"
+
 // ---- GLM-MoE-DSA sparse attention over the host-selected key set ------------------
 // model.glmDsaAttendCached's inner loop on the device. GLM-5.2's attention is SPARSE: a learned
 // indexer picks the top-k keys a query attends, and the softmax(scale·q·k)·ΣwV runs over only

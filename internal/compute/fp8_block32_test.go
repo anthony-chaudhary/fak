@@ -221,7 +221,7 @@ func oracleMXFP4GEMV(t *testing.T, O, I int, weight, scales []byte, x []float32)
 				nib = b >> 4
 			}
 			s := oracleE8M0(scales[o*scaleCols+i/FP8Block32Dim])
-			acc += oracleMXE2M1(t, nib) * s * x[i]
+			acc += float32(oracleMXE2M1(t, nib) * s * x[i])
 		}
 		y[o] = acc
 	}
@@ -313,8 +313,8 @@ func TestFP8Block32ExpertGEMV(t *testing.T) {
 		t.Fatalf("FP8 scalar reference: %v", err)
 	}
 	// The device kernel delegates to the same scalar arithmetic under the in-memory
-	// stand-in, so bits must match; against a real device kernel this becomes an
-	// Approx cosine gate instead.
+	// stand-in, so bits must match; the real CUDA kernel is held to the same bits by
+	// cuda_routed_expert_gemv_test.go.
 	bitEqual(t, "fp8-device-vs-reference", gotFP8, refFP8)
 	if kernel.fp8Calls != 1 {
 		t.Fatalf("FP8 device kernel calls = %d, want 1", kernel.fp8Calls)

@@ -58,6 +58,22 @@ int fcuda_qwen4exp_ple_hash_i64(
 int fcuda_qwen4exp_ple_hash_sync(void);
 size_t fcuda_qwen4exp_ple_hash_launches(void);
 
+/* Routed-expert GEMV over PACKED weights with raw F8_E8M0 scales (routed_expert_gemv.cu).
+ * format 0 = float8_e4m3fn [O,I] with one scale per 32x32 tile; format 1 = MXFP4 [O,I/2]
+ * I8-packed E2M1 (low nibble = even K) with row-major [O,ceil(I/32)] scales. Host slices
+ * in, y out: uploads, launches, fences and reads back in one call, bit-identical to the
+ * Go scalar oracles. Returns 0, -1 (geometry), -2 (graph capture open), -3 (allocation),
+ * or a positive cudaError_t. timing_ms may be NULL or point at 3 doubles. */
+int fcuda_routed_expert_gemv_e8m0(
+    int format, const uint8_t *weight, size_t weight_bytes,
+    const uint8_t *scales, size_t scale_bytes, const float *x, float *y,
+    int64_t O, int64_t I, double *timing_ms);
+size_t fcuda_routed_expert_gemv_launches(void);
+/* One-shot deterministic fault seam for package-local -tags cuda tests: kind 1 fails the
+ * next call's device allocation (-3), kind 2 rejects its launch with a positive cudaError
+ * before any kernel runs, 0 disarms. Production Go APIs do not expose this knob. */
+void fcuda_routed_expert_gemv_test_fault(int kind);
+
 /* Device-specific allocation/copy helpers for multi-GPU collectives. The ordinary
  * fcuda_malloc/fcuda_h2d/fcuda_d2h path is device-0 + pooled. These helpers deliberately use
  * direct cudaMalloc/cudaFree on the requested device so rank-r collective buffers cannot be

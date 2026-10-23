@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -175,35 +176,91 @@ func DecodeFP8Block32E8M0(name string, O, I int, weight, scales []byte) ([]float
 	return out, nil
 }
 
+// e4m3NaNByte reports whether b is a float8_e4m3fn NaN encoding (0x7f or 0xff). E4M3
+// has no Inf, so this is exactly the byte set on which DecodeE4M3 is non-finite; an
+// exhaustive 256-byte witness holds the two to the same set.
+func e4m3NaNByte(b byte) bool { return b&0x7f == 0x7f }
+
+// firstE4M3NaNByte returns the index of the first E4M3 NaN byte in w, or -1. It is the
+// vectorized form of scanning DecodeE4M3 over every byte: a 16 MiB expert is checked in
+// two IndexByte passes instead of 16M float64 decodes.
+func firstE4M3NaNByte(w []byte) int {
+	k := bytes.IndexByte(w, 0x7f)
+	limit := w
+	if k >= 0 {
+		limit = w[:k]
+	}
+	if j := bytes.IndexByte(limit, 0xff); j >= 0 {
+		return j
+	}
+	return k
+}
+
+// firstE8M0ScaleError returns the decodeE8M0Scale refusal for the first scale byte it
+// refuses, or nil. decodeE8M0Scale refuses exactly byte 0xff (an exhaustive witness pins
+// that), so the scan is one IndexByte and the error is still decodeE8M0Scale's own.
+func firstE8M0ScaleError(scales []byte) error {
+	k := bytes.IndexByte(scales, 0xff)
+	if k < 0 {
+		return nil
+	}
+	_, err := decodeE8M0Scale(scales[k])
+	return err
+}
+
+// checkGemvFP8Block32E8M0 is the single acceptance predicate of a routed-expert FP8
+// block-32 E8M0 GEMV: the scalar oracle GemvFP8Block32E8M0 and every device kernel call
+// it, so a device accepts and refuses exactly the inputs the oracle does. It allocates
+// nothing and returns the scale-grid column count sI.
+func checkGemvFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []float32) (int, error) {
+	if O <= 0 || I <= 0 {
+		return 0, fmt.Errorf("fp8 block32 %s: shape [%d %d] has a non-positive dimension", name, O, I)
+	}
+	elems, ok := fp8Block32Product(O, I)
+	if !ok {
+		return 0, fmt.Errorf("fp8 block32 %s: shape [%d %d] overflows element count", name, O, I)
+	}
+	if len(weight) != elems {
+		return 0, fmt.Errorf("fp8 block32 %s: weight has %d bytes, shape [%d %d] implies %d", name, len(weight), O, I, elems)
+	}
+	if len(x) != I {
+		return 0, fmt.Errorf("fp8 block32 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
+	}
+	sO, sI := fp8Block32ScaleShape(O, I)
+	scaleElems, ok := fp8Block32Product(sO, sI)
+	if !ok {
+		return 0, fmt.Errorf("fp8 block32 %s: scale shape [%d %d] overflows element count", name, sO, sI)
+	}
+	if len(scales) != scaleElems {
+		return 0, fmt.Errorf("fp8 block32 %s: scales has %d bytes, shape [%d %d] (blocks of %d) implies %d", name, len(scales), O, I, FP8Block32Dim, scaleElems)
+	}
+	if err := firstE8M0ScaleError(scales); err != nil {
+		return 0, fmt.Errorf("fp8 block32 %s: %w", name, err)
+	}
+	if k := firstE4M3NaNByte(weight); k >= 0 {
+		return 0, fmt.Errorf("fp8 block32 %s: weight byte %d (%#02x) decodes to a non-finite value", name, k, weight[k])
+	}
+	return sI, nil
+}
+
 // GemvFP8Block32E8M0 is a portable scalar GEMV over a V4.1 E8M0 block-scaled weight:
 // y[o] = sum_i decode32(weight[o,i], scale[o/32,i/32]) * x[i]. It decodes each weight
 // element inline against its tile scale, never materializing the full dequantized matrix,
 // so a memory-bound engine can stream the FP8 weight and the fused scale in one pass.
 // Fail-closed: len(x) must equal I, and all weight/scale lengths are validated before y
 // is allocated.
+//
+// It is also the bit-exact oracle for device kernels: each row accumulates serially in
+// i order, and the explicit float32 conversion rounds every product before its add. The
+// Go spec forbids fusing across an explicit conversion, so this is the same function on
+// every GOARCH (the spec permits fusion; arm64, ppc64le, s390x, riscv64, loong64 and
+// amd64 with GOAMD64>=v3 do fuse a plain acc += w*x).
 func GemvFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []float32) ([]float32, error) {
-	if O <= 0 || I <= 0 {
-		return nil, fmt.Errorf("fp8 block32 %s: shape [%d %d] has a non-positive dimension", name, O, I)
+	sI, err := checkGemvFP8Block32E8M0(name, O, I, weight, scales, x)
+	if err != nil {
+		return nil, err
 	}
-	elems, ok := fp8Block32Product(O, I)
-	if !ok {
-		return nil, fmt.Errorf("fp8 block32 %s: shape [%d %d] overflows element count", name, O, I)
-	}
-	if len(weight) != elems {
-		return nil, fmt.Errorf("fp8 block32 %s: weight has %d bytes, shape [%d %d] implies %d", name, len(weight), O, I, elems)
-	}
-	if len(x) != I {
-		return nil, fmt.Errorf("fp8 block32 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
-	}
-	sO, sI := fp8Block32ScaleShape(O, I)
-	scaleElems, ok := fp8Block32Product(sO, sI)
-	if !ok {
-		return nil, fmt.Errorf("fp8 block32 %s: scale shape [%d %d] overflows element count", name, sO, sI)
-	}
-	if len(scales) != scaleElems {
-		return nil, fmt.Errorf("fp8 block32 %s: scales has %d bytes, shape [%d %d] (blocks of %d) implies %d", name, len(scales), O, I, FP8Block32Dim, scaleElems)
-	}
-	scaleF := make([]float32, scaleElems)
+	scaleF := make([]float32, len(scales))
 	for k, b := range scales {
 		v, err := decodeE8M0Scale(b)
 		if err != nil {
@@ -211,19 +268,13 @@ func GemvFP8Block32E8M0(name string, O, I int, weight, scales []byte, x []float3
 		}
 		scaleF[k] = v
 	}
-	for k, b := range weight {
-		d := DecodeE4M3(b)
-		if math.IsNaN(float64(d)) || math.IsInf(float64(d), 0) {
-			return nil, fmt.Errorf("fp8 block32 %s: weight byte %d (%#02x) decodes to a non-finite value", name, k, b)
-		}
-	}
 	y := make([]float32, O)
 	for o := 0; o < O; o++ {
 		scaleRow := (o / FP8Block32Dim) * sI
 		var acc float32
 		for i := 0; i < I; i++ {
 			w := DecodeE4M3(weight[o*I+i]) * scaleF[scaleRow+i/FP8Block32Dim]
-			acc += w * x[i]
+			acc += float32(w * x[i])
 		}
 		y[o] = acc
 	}
@@ -300,31 +351,16 @@ func GemvMXFP4ExpertDevice(name string, be Backend, O, I int, weight, scales []b
 // above reaches for. Weight rows are O packed rows of I/2 bytes (low nibble = val0,
 // high nibble = val1); one E8M0 byte scales each group of 32 unpacked K values, so a
 // row carries ceil(I/32) scale bytes. Fail-closed: every length, dtype and E8M0 NaN
-// byte is validated before y is allocated.
+// byte is validated before y is allocated. Each row accumulates serially in i order with
+// every product rounded before its add (explicit float32 conversion, as in
+// GemvFP8Block32E8M0), so the oracle is fusion-free on every GOARCH.
 func GemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32) ([]float32, error) {
-	if O <= 0 || I <= 0 || I%2 != 0 {
-		return nil, fmt.Errorf("mxfp4 %s: shape [%d %d] needs positive O and even I", name, O, I)
+	scaleCols, err := checkGemvMXFP4E8M0(name, O, I, weight, scales, x)
+	if err != nil {
+		return nil, err
 	}
 	packedCols := I / 2
-	elems, ok := fp8Block32Product(O, packedCols)
-	if !ok {
-		return nil, fmt.Errorf("mxfp4 %s: shape [%d %d] overflows packed byte count", name, O, I)
-	}
-	if len(weight) != elems {
-		return nil, fmt.Errorf("mxfp4 %s: weight has %d bytes, shape [%d %d] implies %d", name, len(weight), O, I, elems)
-	}
-	scaleCols := (I + FP8Block32Dim - 1) / FP8Block32Dim
-	scaleElems, ok := fp8Block32Product(O, scaleCols)
-	if !ok {
-		return nil, fmt.Errorf("mxfp4 %s: scale shape [%d %d] overflows element count", name, O, scaleCols)
-	}
-	if len(scales) != scaleElems {
-		return nil, fmt.Errorf("mxfp4 %s: scales has %d bytes, shape [%d %d] (blocks of %d) implies %d", name, len(scales), O, I, FP8Block32Dim, scaleElems)
-	}
-	if len(x) != I {
-		return nil, fmt.Errorf("mxfp4 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
-	}
-	scaleF := make([]float32, scaleElems)
+	scaleF := make([]float32, len(scales))
 	for k, b := range scales {
 		v, err := decodeE8M0Scale(b)
 		if err != nil {
@@ -343,9 +379,42 @@ func GemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32) ([
 				nib = b >> 4
 			}
 			w := mxE2M1Values[nib] * scaleF[scaleRow+i/FP8Block32Dim]
-			acc += w * x[i]
+			acc += float32(w * x[i])
 		}
 		y[o] = acc
 	}
 	return y, nil
+}
+
+// checkGemvMXFP4E8M0 is the single acceptance predicate of a routed-expert MXFP4 E8M0
+// GEMV, shared by the scalar oracle GemvMXFP4E8M0 and every device kernel so both accept
+// and refuse the same inputs. Every E2M1 nibble is finite, so only shapes, lengths and
+// the E8M0 NaN byte can refuse. It allocates nothing and returns ceil(I/32).
+func checkGemvMXFP4E8M0(name string, O, I int, weight, scales []byte, x []float32) (int, error) {
+	if O <= 0 || I <= 0 || I%2 != 0 {
+		return 0, fmt.Errorf("mxfp4 %s: shape [%d %d] needs positive O and even I", name, O, I)
+	}
+	packedCols := I / 2
+	elems, ok := fp8Block32Product(O, packedCols)
+	if !ok {
+		return 0, fmt.Errorf("mxfp4 %s: shape [%d %d] overflows packed byte count", name, O, I)
+	}
+	if len(weight) != elems {
+		return 0, fmt.Errorf("mxfp4 %s: weight has %d bytes, shape [%d %d] implies %d", name, len(weight), O, I, elems)
+	}
+	scaleCols := (I + FP8Block32Dim - 1) / FP8Block32Dim
+	scaleElems, ok := fp8Block32Product(O, scaleCols)
+	if !ok {
+		return 0, fmt.Errorf("mxfp4 %s: scale shape [%d %d] overflows element count", name, O, scaleCols)
+	}
+	if len(scales) != scaleElems {
+		return 0, fmt.Errorf("mxfp4 %s: scales has %d bytes, shape [%d %d] (blocks of %d) implies %d", name, len(scales), O, I, FP8Block32Dim, scaleElems)
+	}
+	if len(x) != I {
+		return 0, fmt.Errorf("mxfp4 %s: x has %d entries, shape [%d %d] implies %d", name, len(x), O, I, I)
+	}
+	if err := firstE8M0ScaleError(scales); err != nil {
+		return 0, fmt.Errorf("mxfp4 %s: %w", name, err)
+	}
+	return scaleCols, nil
 }

@@ -64,6 +64,7 @@ BINDINGS = (
     "internal/compute/cuda_collective.go",
     "internal/compute/cuda_collective_pg.go",
     "internal/compute/cuda_qwen4exp_ple_hash_cuda.go",
+    "internal/compute/cuda_routed_expert_gemv.go",
 )
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
