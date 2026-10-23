@@ -18,6 +18,28 @@ func DiscoverToolchain() (*Toolchain, error) {
 	return discoverToolchainOS()
 }
 
+// discoverWindowsCUDA keeps the selected compiler and toolkit paths together.
+// It is separate from Windows host discovery so this selection can be tested
+// without executing Visual Studio tools or requiring a CUDA installation.
+func discoverWindowsCUDA(tc *Toolchain) {
+	cudaRoot := os.Getenv("CUDA_PATH")
+	if cudaRoot == "" {
+		cudaRoot = os.Getenv("CUDA_HOME")
+	}
+	if cudaRoot != "" && FileExists(filepath.Join(cudaRoot, "bin", "nvcc.exe")) {
+		tc.NVCC = filepath.Join(cudaRoot, "bin", "nvcc.exe")
+	} else if nvccOnPath, err := exec.LookPath("nvcc.exe"); err == nil {
+		tc.NVCC = nvccOnPath
+		// A missing override compiler must not leave stale headers or libraries.
+		cudaRoot = filepath.Dir(filepath.Dir(nvccOnPath))
+	}
+	tc.CUDAHome = cudaRoot
+	if cudaRoot != "" {
+		tc.CUDAInc = []string{filepath.Join(cudaRoot, "include")}
+		tc.CUDALib = []string{filepath.Join(cudaRoot, "lib", "x64")}
+	}
+}
+
 // LookPath searches for an executable in the system PATH.
 func LookPath(file string) (string, error) {
 	return exec.LookPath(file)

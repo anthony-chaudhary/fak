@@ -94,23 +94,7 @@ func discoverToolchainOS() (*Toolchain, error) {
 	}
 
 	// 4. Discover NVCC / CUDA Toolkit.
-	cudaRoot := os.Getenv("CUDA_PATH")
-	if cudaRoot == "" {
-		cudaRoot = os.Getenv("CUDA_HOME")
-	}
-	if cudaRoot != "" && FileExists(filepath.Join(cudaRoot, "bin", "nvcc.exe")) {
-		tc.NVCC = filepath.Join(cudaRoot, "bin", "nvcc.exe")
-	} else if nvccOnPath, err := exec.LookPath("nvcc.exe"); err == nil {
-		tc.NVCC = nvccOnPath
-		if cudaRoot == "" {
-			cudaRoot = filepath.Dir(filepath.Dir(nvccOnPath))
-		}
-	}
-	tc.CUDAHome = cudaRoot
-	if cudaRoot != "" {
-		tc.CUDAInc = []string{filepath.Join(cudaRoot, "include")}
-		tc.CUDALib = []string{filepath.Join(cudaRoot, "lib", "x64")}
-	}
+	discoverWindowsCUDA(tc)
 
 	// 5. Discover SignTool.
 	tc.SignTool = FindSignTool()
