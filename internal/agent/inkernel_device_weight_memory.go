@@ -28,11 +28,21 @@ type DeviceWeightMemoryReporter interface {
 	DeviceWeightMemory() (DeviceWeightMemory, bool)
 }
 
+// Neutral readers take precedence independently for each counter family. Interface
+// presence, not a nonzero value, distinguishes supported observations from absence.
 type deviceWeightArenaCounters interface {
-	VulkanWeightArenaCounters() (memoryAllocations, bufferBindings, reservedBytes, liveBytes, peakReservedBytes uint64)
+	WeightArenaCounters() (memoryAllocations, bufferBindings, reservedBytes, liveBytes, peakReservedBytes uint64)
 }
 
 type devicePagedWeightCounters interface {
+	OffloadWeightCounters() (reused, fresh uint64)
+}
+
+type vulkanWeightArenaCounters interface {
+	VulkanWeightArenaCounters() (memoryAllocations, bufferBindings, reservedBytes, liveBytes, peakReservedBytes uint64)
+}
+
+type vulkanPagedWeightCounters interface {
 	VulkanOffloadWeightCounters() (reused, fresh uint64)
 }
 
@@ -44,9 +54,15 @@ func DeviceWeightMemoryFromBackend(be compute.Backend) (DeviceWeightMemory, bool
 	out := DeviceWeightMemory{Backend: be.Name()}
 	if c, ok := be.(deviceWeightArenaCounters); ok {
 		out.Arena = true
+		out.ArenaMemoryAllocations, out.ArenaBufferBindings, out.ArenaReservedBytes, out.ArenaLiveBytes, out.ArenaPeakReservedBytes = c.WeightArenaCounters()
+	} else if c, ok := be.(vulkanWeightArenaCounters); ok {
+		out.Arena = true
 		out.ArenaMemoryAllocations, out.ArenaBufferBindings, out.ArenaReservedBytes, out.ArenaLiveBytes, out.ArenaPeakReservedBytes = c.VulkanWeightArenaCounters()
 	}
 	if c, ok := be.(devicePagedWeightCounters); ok {
+		out.PagedWeights = true
+		out.PagedWeightsReused, out.PagedWeightsFreshly = c.OffloadWeightCounters()
+	} else if c, ok := be.(vulkanPagedWeightCounters); ok {
 		out.PagedWeights = true
 		out.PagedWeightsReused, out.PagedWeightsFreshly = c.VulkanOffloadWeightCounters()
 	}

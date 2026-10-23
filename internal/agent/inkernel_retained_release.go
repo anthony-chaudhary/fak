@@ -14,6 +14,11 @@ func (p *InKernelPlanner) RetainedReleaseSummary() (string, bool) {
 	if p == nil {
 		return "", false
 	}
+	// Prefer one neutral observation, including empty or unavailable text.
+	// The backend contract returns text; the planner adds the support bit.
+	if reporter, ok := p.backend.(interface{ RetainedReleaseSummary() string }); ok {
+		return reporter.RetainedReleaseSummary(), true
+	}
 	reporter, ok := p.backend.(interface{ VulkanRetainedReleaseSummary() string })
 	if !ok {
 		return "", false
