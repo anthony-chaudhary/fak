@@ -3031,9 +3031,26 @@ __global__ void k_argmax(const float *L, int n, int *outIdx) {
 // freshly-captured graph — patching just those params, NOT recompiling. That removes the
 // per-token instantiate cost that made naive per-token capture a no-win.
 static cudaGraphExec_t g_exec = nullptr;
+static cudaError_t g_exec_destroy_status = cudaSuccess;
+
+static cudaError_t graph_exec_release(void) {
+  if (g_exec_destroy_status != cudaSuccess) return g_exec_destroy_status;
+  if (!g_exec) return cudaSuccess;
+  const cudaError_t e = cudaGraphExecDestroy(g_exec);
+  if (e != cudaSuccess) {
+    // CUDA forbids using this handle after Destroy, even when it reports an
+    // earlier asynchronous error. Retain only its opaque identity; never retry,
+    // update, or launch it. Quarantine is sticky until process teardown.
+    g_exec_destroy_status = e;
+    fprintf(stderr, "fak-cuda: GraphExecDestroy: %s; graph execution quarantined\n", cudaGetErrorString(e));
+    return e;
+  }
+  g_exec = nullptr;
+  return cudaSuccess;
+}
 
 extern "C" void fcuda_graph_reset(void) {
-  if (g_exec) { cudaGraphExecDestroy(g_exec); g_exec = nullptr; }
+  graph_exec_release(); // Preserve the void ABI; failures remain sticky and logged.
 }
 
 // fcuda_graph_abort ends an open capture and throws the captured graph away WITHOUT launching
@@ -3051,6 +3068,7 @@ extern "C" void fcuda_graph_abort(void) {
 }
 
 extern "C" int fcuda_graph_begin(void) {
+  if (g_exec_destroy_status != cudaSuccess) return 1;
   // Global mode: capture every op submitted to g_stream regardless of thread (the Go
   // caller LockOSThread-pins the token, and cudaMu serializes, so nothing else submits).
   if (cudaStreamBeginCapture(g_stream, cudaStreamCaptureModeGlobal) != cudaSuccess) return 1;
@@ -3062,9 +3080,12 @@ extern "C" int fcuda_graph_end_launch(void) {
   g_capture_open = false; // #969: capture closed; device allocation is permitted again
   cudaError_t e = cudaStreamEndCapture(g_stream, &graph);
   if (e != cudaSuccess || !graph) { fprintf(stderr, "fak-cuda: EndCapture: %s\n", cudaGetErrorString(e)); return 1; }
+  if (g_exec_destroy_status != cudaSuccess) { cudaGraphDestroy(graph); return 5; }
   if (g_exec == nullptr) {
-    e = cudaGraphInstantiate(&g_exec, graph, 0);
-    if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); g_exec = nullptr; return 2; }
+    cudaGraphExec_t candidate = nullptr;
+    e = cudaGraphInstantiate(&candidate, graph, 0);
+    if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); return 2; }
+    g_exec = candidate;
   } else {
     cudaGraphExecUpdateResultInfo info;
     e = cudaGraphExecUpdate(g_exec, graph, &info);
@@ -3073,9 +3094,11 @@ extern "C" int fcuda_graph_end_launch(void) {
       static int warned = 0;
       if (warned < 3) { fprintf(stderr, "fak-cuda: ExecUpdate failed: %s (result=%d) -> re-instantiate\n", cudaGetErrorString(e), (int)info.result); warned++; }
       cudaGetLastError();
-      cudaGraphExecDestroy(g_exec);
-      e = cudaGraphInstantiate(&g_exec, graph, 0);
-      if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Re-instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); g_exec = nullptr; return 2; }
+      if (graph_exec_release() != cudaSuccess) { cudaGraphDestroy(graph); return 5; }
+      cudaGraphExec_t candidate = nullptr;
+      e = cudaGraphInstantiate(&candidate, graph, 0);
+      if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Re-instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); return 2; }
+      g_exec = candidate;
     }
   }
   int rc = 0;
