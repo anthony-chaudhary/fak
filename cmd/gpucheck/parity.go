@@ -37,6 +37,7 @@ type backendIdentity struct {
 
 type parityInput struct {
 	Requested        int
+	PromptLen        int
 	VocabSize        int
 	Reference        []int
 	Device           []int
@@ -60,6 +61,7 @@ type parityReceipt struct {
 	FallbackScope    string           `json:"fallback_scope"`
 	ReferenceLabel   string           `json:"reference_label,omitempty"`
 	RequestedTokens  int              `json:"requested_tokens"`
+	PromptLen        int              `json:"prompt_len,omitempty"` // prompt tokens the parity run prefilled
 	ComparedTokens   int              `json:"compared_tokens"`
 	ReferenceTokens  []int            `json:"reference_tokens"`
 	DeviceTokens     []int            `json:"device_tokens"`
@@ -74,6 +76,7 @@ func newParityReceipt(in parityInput) parityReceipt {
 		Schema:           gpucheckReceiptSchema,
 		Engine:           gpucheckNativeEngine,
 		RequestedBackend: in.RequestedBackend,
+		PromptLen:        in.PromptLen,
 		ObservedBackend:  in.Observed.Name,
 		ObservedTier:     in.Observed.Tier,
 		DeviceMemory:     in.Observed.DeviceMemory,

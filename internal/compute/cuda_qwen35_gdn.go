@@ -132,6 +132,8 @@ func qwen35GDNKernelStage(status int) string {
 		return "output-projection"
 	case 7:
 		return "stream-synchronize"
+	case 8:
+		return "scratch-allocation" // 80001: a P>=128 dequant + fp16 projection could not allocate scratch
 	default:
 		return "unknown"
 	}

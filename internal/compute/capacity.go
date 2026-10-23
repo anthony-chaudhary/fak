@@ -262,6 +262,49 @@ func EstimateHALScratchpadBytes(cfg TransformerScratchConfig) int64 {
 	return saturatingMulInt64(elems, 4)                                                     // f32 bytes
 }
 
+// PromptPanelRowBytes is the peak device scratch one prompt-panel row holds while a layer runs:
+// the f32 residual row, one layer's f32 per-row transients (input norm, Q/K/V, RoPE copies of Q
+// and K, attention context, o_proj, post-attention norm, gate/up/SwiGLU, down), and the int8
+// activation codes plus f32 block scales the per-row Q8_0 GEMM quantizes the widest input into.
+// Incomplete geometry returns 0.
+func PromptPanelRowBytes(cfg TransformerScratchConfig) int64 {
+	if cfg.HiddenSize <= 0 || cfg.IntermediateSize <= 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 {
+		return 0
+	}
+	h, i := int64(cfg.HiddenSize), int64(cfg.IntermediateSize)
+	q := saturatingMulInt64(int64(cfg.NumHeads), int64(cfg.HeadDim))
+	kv := saturatingMulInt64(int64(cfg.NumKVHeads), int64(cfg.HeadDim))
+	elems := saturatingSumInt64(
+		saturatingMulInt64(5, h),  // residual, input norm, o_proj, post-attention norm, down
+		saturatingMulInt64(3, q),  // Q, rotated Q, attention context
+		saturatingMulInt64(3, kv), // raw K, rotated K, V
+		saturatingMulInt64(3, i),  // gate, up, SwiGLU
+	)
+	widest := max(h, q, i)
+	quant := saturatingAddInt64(widest, saturatingMulInt64(widest/32, 4))
+	return saturatingAddInt64(saturatingMulInt64(elems, 4), quant)
+}
+
+// PromptPanelChunkTokens sizes one prompt-panel chunk so its peak scratch fits the per-token
+// transient demand EstimateHALTransientMemoryPlan already prices, capped at maxTokens. A
+// panel chunk therefore never needs memory the context fit did not admit. Incomplete geometry
+// returns 1.
+func PromptPanelChunkTokens(cfg TransformerScratchConfig, maxTokens int) int {
+	row := PromptPanelRowBytes(cfg)
+	budget := EstimateHALTransientMemoryPlan(cfg).Total()
+	if maxTokens < 1 || row <= 0 || budget <= 0 {
+		return 1
+	}
+	n := budget / row
+	if n < 1 {
+		return 1
+	}
+	if n > int64(maxTokens) {
+		return maxTokens
+	}
+	return int(n)
+}
+
 // ExpertParallelLargestBandExperts reports how many experts the BUSIEST rank holds when
 // numExperts experts are tiled across `ranks` near-even contiguous bands (the
 // model.ExpertParallelPlan / NewTPPlan tiling): ceil(numExperts/ranks). The per-card residency

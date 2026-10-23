@@ -170,6 +170,17 @@ type cudaBackend struct {
 	// Under capture, parameter and constant memory uploads must be emitted unconditionally
 	// into the stream so replayed graph executions do not read stale host-cached state.
 	capturing bool
+	// promptPanel routes scratch and activation allocations to the prompt-panel free list
+	// while a model prompt panel runs (PromptPanelBegin/End, cuda_prompt_panel.go). Guarded by cudaMu.
+	promptPanel bool
+	// promptPanelRows is the row count of the panel chunk now running; a chunk with a
+	// different count first releases the free list so two chunk sizes never coexist.
+	promptPanelRows int
+	// promptPanelBegins/MatMuls count panel scopes and per-row panel GEMMs, and
+	// promptPanelLastLive is how many panel buffers callers still held at the last
+	// PromptPanelEnd (CUDADebugPromptPanelCounters). Guarded by cudaMu.
+	promptPanelBegins, promptPanelMatMuls uint64
+	promptPanelLastLive                   int64
 }
 
 // cudaFaultReconstructBudget bounds how many context reconstructions a poisoned session may

@@ -115,15 +115,24 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 	case F16:
 		C.fcuda_matmul_f16(wb.ptr, c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), colMajorFlag(w))
 	case Q8_0:
-		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))
+		if rc := int(C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))); rc != 0 {
+			c.releaseTransientBuffers([]*cudaBuf{b})
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaQ8MatMulScratch(out, in, tokens, w.Quant.Block))}
+		}
 	case Q4_K:
-		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+		if rc := int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))); rc != 0 {
+			c.releaseTransientBuffers([]*cudaBuf{b})
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaKQuantScratch(out, in, tokens))}
+		}
 	case Q5_K:
 		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
 	case Q6_K:
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
 	case Q2_K:
-		C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+		if rc := int(C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))); rc != 0 {
+			c.releaseTransientBuffers([]*cudaBuf{b})
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaKQuantScratch(out, in, tokens))}
+		}
 	case Q2_0:
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))
 	default:

@@ -40,7 +40,7 @@ func TestCUDAHeaderExportsQ2KFunctions(t *testing.T) {
 	headerSrc := string(headerBytes)
 
 	requiredHeaderDecls := []string{
-		"void fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);",
+		"int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);",
 		"void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);",
 		"void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);",
 	}

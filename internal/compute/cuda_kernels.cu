@@ -43,6 +43,14 @@ static cudaStream_t g_stream = 0;
 static std::unordered_map<size_t, std::vector<void *>> g_pool; // free buffers, by exact byte size
 static std::unordered_map<void *, size_t> g_live;              // live ptr -> its byte size
 static std::unordered_map<void *, size_t> g_managed_live;      // live cudaMallocManaged ptr -> byte size
+// Prompt-panel scratch (model prompt panel, cuda_prompt_panel.go). Panel transients scale with
+// the chunk's row count, so they get their own exact-size free list that fcuda_panel_release
+// empties when the panel ends. They never enter g_pool, where fcuda_graph_prewarm would deepen
+// every panel-sized bucket to its spare count before the next captured decode.
+static std::unordered_map<size_t, std::vector<void *>> g_panel_pool;
+static std::unordered_map<void *, size_t> g_panel_live;
+// Panel bytes held by callers and cached in g_panel_pool, and the scope's peak of their sum.
+static size_t g_panel_live_bytes = 0, g_panel_cached_bytes = 0, g_panel_peak_bytes = 0;
 
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
 // A failed drain is not permission to recycle memory. At most one uncertain
@@ -219,6 +227,14 @@ extern "C" void fcuda_free(void *d) {
     cudaFree(d);
     return;
   }
+  auto pit = g_panel_live.find(d);
+  if (pit != g_panel_live.end()) {
+    g_panel_pool[pit->second].push_back(d); // panel scratch stays out of g_pool
+    g_panel_live_bytes -= pit->second;
+    g_panel_cached_bytes += pit->second;
+    g_panel_live.erase(pit);
+    return;
+  }
   auto it = g_live.find(d);
   if (it != g_live.end()) {
     g_pool[it->second].push_back(d); // return to the pool for reuse, don't cudaFree
@@ -232,7 +248,70 @@ extern "C" void fcuda_free(void *d) {
 }
 
 extern "C" size_t fcuda_live_allocations(void) {
-  return g_live.size() + g_managed_live.size();
+  return g_live.size() + g_managed_live.size() + g_panel_live.size();
+}
+
+// fcuda_malloc_panel serves prompt-panel scratch from g_panel_pool, never managed memory.
+// nullptr means the device allocation failed or a graph capture is open.
+extern "C" void *fcuda_malloc_panel(size_t bytes) {
+  if (bytes == 0) bytes = 1;
+  if (g_capture_open) return nullptr;
+  void *d = nullptr;
+  auto it = g_panel_pool.find(bytes);
+  if (it != g_panel_pool.end() && !it->second.empty()) {
+    d = it->second.back();
+    it->second.pop_back();
+    g_panel_cached_bytes -= bytes;
+  } else {
+    cudaError_t e = cudaMalloc(&d, bytes);
+    if (e != cudaSuccess || !d) {
+      fprintf(stderr, "fak-cuda: prompt panel cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(e));
+      return nullptr;
+    }
+  }
+  g_panel_live[d] = bytes;
+  g_panel_live_bytes += bytes;
+  if (g_panel_live_bytes + g_panel_cached_bytes > g_panel_peak_bytes)
+    g_panel_peak_bytes = g_panel_live_bytes + g_panel_cached_bytes;
+  return d;
+}
+
+// fcuda_panel_peak_reset restarts the panel peak at the bytes held now (a new panel scope).
+extern "C" void fcuda_panel_peak_reset(void) {
+  g_panel_peak_bytes = g_panel_live_bytes + g_panel_cached_bytes;
+}
+
+// fcuda_panel_release drains g_stream, then frees every pooled panel buffer. It returns how
+// many panel buffers callers still hold; those return to g_panel_pool when freed and leave at
+// the next release.
+extern "C" size_t fcuda_panel_release(void) {
+  cudaStreamSynchronize(g_stream);
+  for (auto &kv : g_panel_pool) {
+    for (void *p : kv.second) cudaFree(p);
+  }
+  g_panel_pool.clear();
+  g_panel_cached_bytes = 0;
+  return g_panel_live.size();
+}
+
+// fcuda_pool_stats reports the cached (free) bytes and non-empty bucket count of g_pool, its
+// largest such bucket size, and the panel pool's cached bytes and live buffers. Diagnostics.
+extern "C" void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *largestBucket,
+                                 size_t *panelCachedBytes, size_t *panelLive, size_t *panelPeakBytes) {
+  size_t bytes = 0, count = 0, largest = 0, panel = 0;
+  for (auto &kv : g_pool) {
+    if (kv.second.empty()) continue;
+    bytes += kv.first * kv.second.size();
+    count++;
+    if (kv.first > largest) largest = kv.first;
+  }
+  for (auto &kv : g_panel_pool) panel += kv.first * kv.second.size();
+  if (pooledBytes) *pooledBytes = bytes;
+  if (buckets) *buckets = count;
+  if (largestBucket) *largestBucket = largest;
+  if (panelCachedBytes) *panelCachedBytes = panel;
+  if (panelLive) *panelLive = g_panel_live.size();
+  if (panelPeakBytes) *panelPeakBytes = g_panel_peak_bytes;
 }
 
 // fcuda_graph_prewarm deepens every pool bucket by `extra` spare buffers (#969). The warm
@@ -896,13 +975,31 @@ __global__ void k_fp16_split(const float *src, __half *hi, __half *lo, size_t n)
   lo[i] = __float2half_rn(src[i] - __half2float(h));
 }
 
-static void fp16_compensated_matmul(const float *W, const float *X, float *Y,
-                                    int out, int in, int tokens) {
+// A dequant + fp16 GEMM returns 0, or one of these without launching when a scratch
+// allocation misses, so a caller fails closed instead of a kernel writing through a null
+// pointer: the f32 dequant (or per-row activation-code) scratch, or the fp16 split halves.
+#define FCUDA_SCRATCH_ALLOC_FAILED 80001
+#define FCUDA_SPLIT_SCRATCH_ALLOC_FAILED 80002
+// g_scratch_alloc_test_fault makes the Nth next scratch allocation of a dequant + fp16 GEMM
+// report a miss (fcuda_scratch_alloc_test_fault(N); 0 disarms), so tests can prove each
+// fail-closed site: 1 is the f32 dequant copy, 2..5 the fp16 split halves.
+static int g_scratch_alloc_test_fault = 0;
+extern "C" void fcuda_scratch_alloc_test_fault(int nth) { g_scratch_alloc_test_fault = nth > 0 ? nth : 0; }
+static void *scratch_malloc(size_t bytes) {
+  if (g_scratch_alloc_test_fault > 0 && --g_scratch_alloc_test_fault == 0) return nullptr;
+  return fcuda_malloc(bytes);
+}
+static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
+                                   int out, int in, int tokens) {
   size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
-  __half *wHi = (__half *)fcuda_malloc(wn * sizeof(__half));
-  __half *wLo = (__half *)fcuda_malloc(wn * sizeof(__half));
-  __half *xHi = (__half *)fcuda_malloc(xn * sizeof(__half));
-  __half *xLo = (__half *)fcuda_malloc(xn * sizeof(__half));
+  __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
+  __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
+  __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
+  __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
+  if (!wHi || !wLo || !xHi || !xLo) {
+    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+    return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
+  }
   k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn);
   k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn);
   const float one = 1.0f, zero = 0.0f;
@@ -916,6 +1013,7 @@ static void fp16_compensated_matmul(const float *W, const float *X, float *Y,
       wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
       CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
   fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+  return 0;
 }
 
 __global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
@@ -927,13 +1025,15 @@ __global__ void k_q8_dequant_transient(const signed char *codes, const float *sc
   W[i] = (float)codes[i] * scales[(size_t)row * (cols / block) + col / block];
 }
 
-static void q8_dequant_sgemm(const void *codes, const float *scales,
+static int q8_dequant_sgemm(const void *codes, const float *scales,
                             const float *X, float *Y, int rows, int cols, int tokens, int block) {
-  float *wide = (float *)fcuda_malloc((size_t)rows * cols * sizeof(float));
+  float *wide = (float *)scratch_malloc((size_t)rows * cols * sizeof(float));
+  if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
   k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
       (const signed char *)codes, scales, wide, rows, cols, block);
-  fp16_compensated_matmul(wide, X, Y, rows, cols, tokens);
+  int status = fp16_compensated_matmul(wide, X, Y, rows, cols, tokens);
   fcuda_free(wide);
+  return status;
 }
 
 __global__ void k_qwen35_gdn_fused_in_proj(
@@ -1436,10 +1536,11 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
   cudaGetLastError();
   if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
-    q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
-    q8_dequant_sgemm(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
-    q8_dequant_sgemm(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
-    q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    int dq = q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
+    if (dq == 0) dq = q8_dequant_sgemm(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
+    if (dq == 0) dq = q8_dequant_sgemm(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
+    if (dq == 0) dq = q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else {
     k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
       dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
@@ -1465,7 +1566,8 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   if (tokens >= 128 && outWQ8) {
-    q8_dequant_sgemm(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
+    int dq = q8_dequant_sgemm(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
+    if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else {
     k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
         dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd);
@@ -1657,28 +1759,51 @@ static signed char *g_q8_qX = nullptr;
 static int g_q8_qX_cap = 0; // bytes
 static float *g_q8_xScale = nullptr;
 static int g_q8_xScale_cap = 0; // floats
-extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
-                                    float *dY, int out, int in, int P, int block) {
-  if (P >= 128) {
-    q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
-    return;
-  }
+// q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
+// each (row, output) dot runs the same k_q8_gemm warp sum whatever P is, so a row's result is
+// bitwise the P=1 decode GEMV's. Returns 0 or FCUDA_SCRATCH_ALLOC_FAILED before any launch.
+static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const float *dX,
+                          float *dY, int out, int in, int P, int block) {
   int nblk = in / block;
   int needQX = P * in;          // int8 activation codes
   int needScale = P * nblk;     // per-block act scales (floats)
   if (needQX > g_q8_qX_cap) {
     if (g_q8_qX) cudaFree(g_q8_qX);
-    CK(cudaMalloc(&g_q8_qX, (size_t)needQX));
+    g_q8_qX = nullptr;
+    g_q8_qX_cap = 0;
+    if (cudaMalloc(&g_q8_qX, (size_t)needQX) != cudaSuccess || !g_q8_qX) {
+      g_q8_qX = nullptr;
+      return FCUDA_SCRATCH_ALLOC_FAILED;
+    }
     g_q8_qX_cap = needQX;
   }
   if (needScale > g_q8_xScale_cap) {
     if (g_q8_xScale) cudaFree(g_q8_xScale);
-    CK(cudaMalloc(&g_q8_xScale, (size_t)needScale * sizeof(float)));
+    g_q8_xScale = nullptr;
+    g_q8_xScale_cap = 0;
+    if (cudaMalloc(&g_q8_xScale, (size_t)needScale * sizeof(float)) != cudaSuccess || !g_q8_xScale) {
+      g_q8_xScale = nullptr;
+      return FCUDA_SCRATCH_ALLOC_FAILED;
+    }
     g_q8_xScale_cap = needScale;
   }
   k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
   k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block);
+  return 0;
+}
+extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
+                                   float *dY, int out, int in, int P, int block) {
+  if (P >= 128) return q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
+  return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+}
+// fcuda_q8_matmul_rows_f32 is the BitExact prompt-panel GEMM: the per-row path for every P
+// (gridDim.y = P, so callers bound P by the panel chunk).
+extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const float *dX,
+                                        float *dY, int out, int in, int P, int block) {
+  if (!dCodes || !dScales || !dX || !dY || out <= 0 || in <= 0 || P <= 0 || P > 65535 ||
+      block <= 0 || in % block != 0 || P > INT_MAX / in) return -1;
+  return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
 }
 
 // getScaleMinK4_dev reproduces the GGUF loader's getScaleMinK4 (internal/ggufload) bit-for-bit:
@@ -1844,25 +1969,27 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   return coeff;
 }
 
-extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
-                                     int out, int in, int P) {
+extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
+                                    int out, int in, int P) {
   if (P >= 128) {
-    float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
+    float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
+    if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
     k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wide, out, in);
-    fp16_compensated_matmul(wide, dX, dY, out, in, P);
+    int status = fp16_compensated_matmul(wide, dX, dY, out, in, P);
     fcuda_free(wide);
-    return;
+    return status;
   }
   if (P < 4) {
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
     k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P);
-    return;
+    return 0;
   }
   constexpr int token_tile = 4;
   k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
+  return 0;
 }
 
 // k_q2_0_gemm: Y[t,o] = Σ_b (Σ_{i in block} tern(o,b,i)·X[t,b·block+i]) · Wscale[o,b], where
@@ -2153,21 +2280,23 @@ extern "C" void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float
       (const unsigned char *)dQ2K, dX, dY, out, in, P);
 }
 
-extern "C" void fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY,
-                                     int out, int in, int P) {
+extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY,
+                                    int out, int in, int P) {
   if (P >= 128) {
-    float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
+    float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
+    if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
     k_q2k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ2K, wide, out, in);
-    fp16_compensated_matmul(wide, dX, dY, out, in, P);
+    int status = fp16_compensated_matmul(wide, dX, dY, out, in, P);
     fcuda_free(wide);
-    return;
+    return status;
   }
   if (P < 4) {
     fcuda_q2k_gemv(dQ2K, dX, dY, out, in, P);
-    return;
+    return 0;
   }
   fcuda_q2k_gemm_panel(dQ2K, dX, dY, out, in, P);
+  return 0;
 }
 
 // ---- RMSNorm: one block per row -------------------------------------------------
@@ -2272,6 +2401,37 @@ __global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta)
 extern "C" void fcuda_rope_f32(float *dX, int pos, int nHeads, int headDim, double theta) {
   int total = nHeads * (headDim / 2);
   k_rope<<<(total + 127) / 128, 128, 0, g_stream>>>(dX, pos, nHeads, headDim, theta);
+}
+
+// Prompt-panel RoPE for the dense HAL prefill: row t of X [tokens, nHeads*headDim] is
+// rotated at start+t into Y with k_rope's exact per-pair arithmetic.
+__global__ void k_rope_panel(const float *X, float *Y, int tokens, int start,
+                             int nHeads, int headDim, double theta) {
+  int half = headDim / 2;
+  size_t perRow = (size_t)nHeads * half;
+  size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x; // one (row, head, j) pair
+  if (t >= (size_t)tokens * perRow) return;
+  int row = (int)(t / perRow);
+  int within = (int)(t - (size_t)row * perRow);
+  int h = within / half, j = within % half;
+  double inv = 1.0 / pow(theta, (double)(2 * j) / (double)headDim);
+  double a = (double)(start + row) * inv;
+  float c = (float)cos(a), s = (float)sin(a);
+  size_t base = (size_t)row * nHeads * headDim + (size_t)h * headDim;
+  float x0 = X[base + j], x1 = X[base + j + half];
+  Y[base + j]        = x0 * c - x1 * s;
+  Y[base + j + half] = x1 * c + x0 * s;
+}
+extern "C" int fcuda_rope_panel_f32(const float *dX, float *dY, int tokens, int start,
+                                    int nHeads, int headDim, double theta) {
+  if (!dX || !dY || tokens <= 0 || start < 0 || nHeads <= 0 || headDim <= 0 ||
+      (headDim & 1) != 0 || !(theta > 0.0) || start > INT_MAX - tokens) return -1;
+  size_t total = (size_t)tokens * nHeads * (headDim / 2);
+  cudaGetLastError();
+  k_rope_panel<<<(unsigned)((total + 127) / 128), 128, 0, g_stream>>>(
+      dX, dY, tokens, start, nHeads, headDim, theta);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 70000 + (int)launch;
 }
 
 
@@ -2748,6 +2908,78 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
       dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 50000 + (int)launch;
+}
+
+// Prompt-panel causal attention for the dense HAL prefill: one block per (row, head), each
+// running k_flash_attention's body over its causal window [0, prefix+t], so a row is bitwise
+// the decode Attention over prefix+t+1 keys, non-finite scores included.
+__global__ void k_prompt_causal_attention_panel(
+    const float *Q, const float *K, const float *V, float *Out,
+    int tokens, int prefix, int nH, int nKV, int hd, float scale) {
+  int flat = blockIdx.x;
+  int h = flat % nH, token = flat / nH;
+  if (h >= nH || token >= tokens) return;
+  int grp = nH / nKV;
+  int kvh = h / grp;
+  int w = nKV * hd;
+  int nPos = prefix + token + 1;
+  const float *qh = Q + (size_t)token * nH * hd + (size_t)h * hd;
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + hd;
+  int tid = threadIdx.x;
+  for (int d = tid; d < hd; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  float m = -INFINITY, l = 0.f;
+  float acc[FLASH_ACC_MAX];
+#pragma unroll
+  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+  for (int j = 0; j < nPos; j++) {
+    const float *kj = K + (size_t)j * w + (size_t)kvh * hd;
+    float partial = 0.f;
+    for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float sc = red[0] * scale;
+    __syncthreads();
+    float mNew = fmaxf(m, sc);
+    float corr = expf(m - mNew);
+    float p = expf(sc - mNew);
+    l = l * corr + p;
+    const float *vj = V + (size_t)j * w + (size_t)kvh * hd;
+    int k = 0;
+    for (int d = tid; d < hd; d += FLASH_THREADS, k++) acc[k] = acc[k] * corr + p * vj[d];
+    m = mNew;
+  }
+  float invL = l > 0.f ? 1.f / l : 0.f;
+  int k = 0;
+  for (int d = tid; d < hd; d += FLASH_THREADS, k++) {
+    Out[(size_t)token * nH * hd + (size_t)h * hd + d] = acc[k] * invL;
+  }
+}
+
+// Launches k_prompt_causal_attention_panel for any GQA geometry with
+// hd <= FLASH_THREADS*FLASH_ACC_MAX. K/V hold prefix+tokens positions.
+extern "C" int fcuda_causal_attention_panel_f32(
+    const float *dQ, const float *dK, const float *dV, float *dOut,
+    int tokens, int prefix, int nH, int nKV, int hd, float scale) {
+  if (!dQ || !dK || !dV || !dOut || tokens <= 0 || prefix < 0 || nH <= 0 ||
+      nKV <= 0 || nH % nKV != 0 || hd <= 0 || hd > FLASH_THREADS * FLASH_ACC_MAX ||
+      !isfinite(scale) || scale <= 0.f) return -1;
+  if (tokens > INT_MAX / nH || prefix > INT_MAX - tokens ||
+      nKV > INT_MAX / hd || nH > INT_MAX / hd) return -1;
+  int kvWidth = nKV * hd, qWidth = nH * hd;
+  if (prefix + tokens > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
+  cudaGetLastError();
+  size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
+  k_prompt_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 71000 + (int)launch;
 }
 
 extern "C" int fak_qwen35_sequence_sync(void) {

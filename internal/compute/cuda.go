@@ -119,7 +119,21 @@ func (c *cudaBackend) Recycle() {
 			b.ptr = nil
 		}
 	}
+	clear(c.transient) // drop the handles so recycled cudaBufs are not kept reachable
 	c.transient = c.transient[:0]
+}
+
+// compactTransientLocked drops transients already freed (ptr == nil), so a long prompt's
+// per-op handles do not accumulate until the request's Recycle. Caller holds cudaMu.
+func (c *cudaBackend) compactTransientLocked() {
+	kept := c.transient[:0]
+	for _, b := range c.transient {
+		if b != nil && b.ptr != nil {
+			kept = append(kept, b)
+		}
+	}
+	clear(c.transient[len(kept):])
+	c.transient = kept
 }
 
 // releaseTransientBuffers immediately returns an operation-owned subset of
@@ -315,6 +329,9 @@ func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
 // ---- residency ------------------------------------------------------------------
 
 func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *cudaBuf {
+	if c.promptPanel && (class == MemoryScratchpad || class == MemoryActivation) {
+		return c.dallocPromptPanel(nbytes, class, site)
+	}
 	p := C.fcuda_malloc(C.size_t(nbytes))
 	if p == nil {
 		p = C.fcuda_malloc_managed(C.size_t(nbytes))
@@ -1050,14 +1067,14 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		// scales), F32 accumulate. No dequant-to-f32 round trip — the weight stays int8 in VRAM.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
-			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
+		cudaGEMMStatus("MatMul", int(C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
+			C.int(out), C.int(in), 1, C.int(w.Quant.Block))), cudaQ8MatMulScratch(out, in, 1, w.Quant.Block))
 	case Q4_K:
 		// native Q4_K GEMV (#485): the dequant (w = d·scale·code − dmin·min) is fused into the
 		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		cudaGEMMStatus("MatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), cudaGEMMScratch{})
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
@@ -1071,7 +1088,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		// resident super-block bytes; the weight stays 2-bit (84 bytes / 256 elements) in VRAM.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		cudaGEMMStatus("MatMul", int(C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), cudaGEMMScratch{})
 	case Q2_0:
 		// native packed-ternary Q2_0 GEMV (#4872): 2-bit codes + per-block f32 scales resident, the
 		// signed indicator unpacked and multiply-accumulated against the f32 activation on device
@@ -1122,14 +1139,14 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		// device, then the per-block integer dot against the resident int8 weight, F32 accumulate.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
-			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
+			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))), cudaQ8MatMulScratch(out, in, P, w.Quant.Block))
 	case Q4_K:
 		// native Q4_K prefill GEMM (#485): dequant fused into the tile off the resident super-block
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaKQuantScratch(out, in, P))
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
@@ -1143,7 +1160,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaKQuantScratch(out, in, P))
 	case Q2_0:
 		// native packed-ternary Q2_0 prefill GEMM (#4872): each of the P f32 activation rows dotted
 		// against the resident 2-bit ternary weight (unpacked signed indicator, one block scale folded

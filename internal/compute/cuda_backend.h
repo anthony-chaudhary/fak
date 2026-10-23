@@ -36,6 +36,18 @@ void fcuda_free(void *d);
  * no transient allocations; pooled free buffers are deliberately excluded. */
 size_t fcuda_live_allocations(void);
 void fcuda_trim_pool_large(size_t max_keep_bytes);
+/* Prompt-panel scratch: a separate exact-size free list that fcuda_panel_release empties, so
+ * panel-sized buffers never reach the decode pool. fcuda_malloc_panel returns NULL on failure
+ * (no managed fallback); fcuda_panel_release returns the panel buffers still held. */
+void *fcuda_malloc_panel(size_t bytes);
+/* Test seam: the Nth next dequant + fp16 GEMM scratch allocation misses (1 = the f32 dequant
+ * copy, 2..5 = the fp16 split halves); 0 disarms. */
+void fcuda_scratch_alloc_test_fault(int nth);
+size_t fcuda_panel_release(void);
+void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *largestBucket,
+                      size_t *panelCachedBytes, size_t *panelLive, size_t *panelPeakBytes);
+/* fcuda_panel_peak_reset restarts the peak of panel bytes held plus cached. */
+void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
 void fcuda_d2h(void *h, const void *d, size_t bytes);
 void fcuda_d2d(void *dst, const void *src, size_t bytes);
@@ -217,8 +229,14 @@ void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY, int out, i
  * cpuref q8round), then each block's integer dot is scaled by (weight block scale * activation
  * block scale) — the same per-block scheme as cpuref qdot8scalar, so the dynamic range of every
  * group is carried in full f32 and only the in-block code rounds. in must be divisible by block. */
-void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX, float *dY,
-                         int out, int in, int P, int block);
+int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX, float *dY,
+                        int out, int in, int P, int block);
+/* fcuda_q8_matmul_rows_f32 is fcuda_q8_matmul_f32 pinned to the per-row path for every P
+ * (1 <= P <= 65535): each row's output is bitwise the P=1 GEMV's. Both return 0, -1 on bad
+ * arguments, 80001 when the activation-code or f32 dequant scratch misses, or 80002 (P>=128
+ * fcuda_q8_matmul_f32 only) when the fp16 split scratch misses; nothing launched on a miss. */
+int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const float *dX, float *dY,
+                             int out, int in, int P, int block);
 
 /* fcuda_q4k_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident Q4_K — the raw
  * llama.cpp k-quant super-block bytes dQ4K, 256 elements per 144-byte super-block (f16 d, f16
@@ -227,7 +245,9 @@ void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float
  * unpacked per 32-elem sub-block exactly as the GGUF loader's getScaleMinK4 — and dots it with the
  * f32 activation, F32 accumulate. in must be divisible by 256. There is no activation quant on this
  * path (the weight, not the activation, is the narrow operand). */
-void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+/* fcuda_q4k_matmul_f32 and fcuda_q2k_matmul_f32 return 0, or 80001 (f32 dequant scratch) or
+ * 80002 (fp16 split scratch) when a P>=128 scratch allocation fails (nothing launched). */
 
 /* fcuda_q2_0_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident PACKED TERNARY
  * Q2_0 (#4872) — 2-bit codes dCodes[out*in/4] (4 weights/byte, LSB-first, u∈{0,1,2} → t=u-1)
@@ -244,7 +264,7 @@ void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int o
  * llama.cpp k-quant super-block bytes dQ2K, 256 elements per 84-byte super-block (16 scale bytes,
  * 64 quant bytes, f16 d, f16 dmin). Fused dequantization on device, F32 accumulate.
  * Eliminates A100 CPU decode offload on sm_80/sm_89/sm_90 (#11945). */
-void fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
+int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 
@@ -298,6 +318,14 @@ void fcuda_attention_f32(const float *dQ, const float *dK, const float *dV, floa
                          int nPos, int maxPos, int nH, int nKV, int hd, float scale);
 void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                int nPos, int maxPos, int nH, int nKV, int hd, float scale);
+
+/* Dense HAL prompt panel (model.promptPanelBackend). fcuda_rope_panel_f32 rotates row t of
+ * dX [tokens, nHeads*headDim] at start+t into dY. fcuda_causal_attention_panel_f32 attends
+ * query row t of dQ [tokens, nH*hd] to K/V rows [0, prefix+t]. Both return 0 or a refusal. */
+int fcuda_rope_panel_f32(const float *dX, float *dY, int tokens, int start,
+                         int nHeads, int headDim, double theta);
+int fcuda_causal_attention_panel_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
+                                     int tokens, int prefix, int nH, int nKV, int hd, float scale);
 
 /* Split-KV multi-query speculative verify attention (#11100).
  * Q is [qLen, nH, hd], K is [kvLen, nKV, hd], V is [kvLen, nKV, hd], Out is [qLen, nH, hd].

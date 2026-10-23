@@ -86,6 +86,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	hf := fs.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
 	backendName := fs.String("backend", "cuda", "device backend name (cuda, vulkan, metal)")
 	n := fs.Int("n", 12, "greedy tokens to compare")
+	promptLen := fs.Int("prompt-len", 0, "prompt tokens; 0 keeps the fixed 12-token prompt, another positive value repeats it cyclically to that length (a long-prompt prefill witness)")
 	lean := fs.Bool("lean", false, "memory-lean Q8 load (sharded dir); reference is the CPU Q8 path (use for 2.5-3B that won't fit f32)")
 	vulkanQ4KProfile := fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)")
 	vulkanStageQ4K := fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)")
@@ -115,6 +116,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if *n <= 0 {
 		return fail(2, reasonInvalidTokenCount, "-n must be positive")
+	}
+	if *promptLen < 0 {
+		return fail(2, reasonInvalidArguments, "-prompt-len must not be negative")
 	}
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*hf = pathutil.ExpandTilde(*hf)
@@ -172,6 +176,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	for i := range prompt {
 		prompt[i] %= cfg.VocabSize
 	}
+	prompt = cyclePrompt(prompt, *promptLen)
 	var ref, dev []int
 	var refLabel string
 	var observed backendIdentity
@@ -222,6 +227,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	receipt := evaluateParity(parityInput{
 		Requested:        *n,
+		PromptLen:        len(prompt),
 		VocabSize:        cfg.VocabSize,
 		Reference:        ref,
 		Device:           dev,
@@ -255,6 +261,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "OK — greedy argmax-exact over %d tokens vs %s (real-model Approx-gate witness)\n", receipt.ComparedTokens, refLabel)
 	return 0
+}
+
+// cyclePrompt repeats base to exactly n tokens; n == 0 keeps base unchanged.
+func cyclePrompt(base []int, n int) []int {
+	if n <= 0 || len(base) == 0 {
+		return base
+	}
+	out := make([]int, n)
+	for i := range out {
+		out[i] = base[i%len(base)]
+	}
+	return out
 }
 
 func hasArg(args []string, names ...string) bool {

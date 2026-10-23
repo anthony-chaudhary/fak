@@ -1325,6 +1325,9 @@ func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
 		s.retireRequestResources()
 		return logits
 	}
+	if panel, ok := s.promptPanelFor(ids); ok {
+		return s.prefillHALPanel(panel, ids, wantLogits)
+	}
 	last := len(ids) - 1
 	for i, id := range ids {
 		if i == last && wantLogits {

@@ -20,7 +20,7 @@ func TestCUDAFiniteReductionSentinelContract(t *testing.T) {
 	}
 	for want, count := range map[string]int{
 		"float lm = -INFINITY;":             1,
-		"float m = -INFINITY, l = 0.f;":     2,
+		"float m = -INFINITY, l = 0.f;":     3, // k_flash_attention, k_prompt_causal_attention_panel, k_dsa_sparse_attend
 		"float bv = -INFINITY; int bi = 0;": 1,
 	} {
 		if got := strings.Count(text, want); got != count {
