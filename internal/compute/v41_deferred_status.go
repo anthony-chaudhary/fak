@@ -52,11 +52,37 @@ type V41DeferredStatusBackend interface {
 	V41ReadDeferred(statuses []V41DeferredStatus, rows []Tensor) ([]error, [][]float32, error)
 }
 
-// v41DeferredVerdict decodes one issued status record into its operation's
-// arithmetic or protocol verdict.
+// v41DeferredVerdict retains the Vulkan attribution used by existing callers.
+// Other backends must attribute decodeV41DeferredStatus's causes themselves.
 func v41DeferredVerdict(backend string, status V41DeferredStatus, record []byte) error {
+	decodeErr := decodeV41DeferredStatus(status, record)
+	if decodeErr == nil {
+		return nil
+	}
+	var fault *V41RoutedSwiGLUFault
+	if errors.As(decodeErr, &fault) {
+		return fault
+	}
+	var protocol *v41DeferredStatusProtocolError
+	if errors.As(decodeErr, &protocol) {
+		return v41DeferredProtocolError(backend, protocol.kind, protocol.reason)
+	}
+	site := "V41RoutedSwiGLU"
+	switch status.Kind {
+	case V41DeferredF32Finite:
+		site = "V41F32Finite"
+	case V41DeferredBF16Publish:
+		site = "V41BF16Publish"
+	}
+	return &BackendError{Backend: backend, Site: site, Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: decodeErr.Error(), Recovered: decodeErr}
+}
+
+// decodeV41DeferredStatus returns an issued record's arithmetic or protocol
+// cause without backend attribution. The caller must establish completion and
+// freshness before decoding; transport failures do not supply a known verdict.
+func decodeV41DeferredStatus(status V41DeferredStatus, record []byte) error {
 	if len(record) != 16 {
-		return v41DeferredProtocolError(backend, status.Kind, "status record is not 16 bytes")
+		return &v41DeferredStatusProtocolError{status.Kind, "status record is not 16 bytes"}
 	}
 	switch status.Kind {
 	case V41DeferredRoutedSwiGLU:
@@ -64,34 +90,31 @@ func v41DeferredVerdict(backend string, status V41DeferredStatus, record []byte)
 		for i := range words {
 			words[i] = binary.LittleEndian.Uint32(record[4*i:])
 		}
-		decodeErr := decodeV41RoutedSwiGLUStatus(words, status.Count)
-		var fault *V41RoutedSwiGLUFault
-		if errors.As(decodeErr, &fault) {
-			return fault
-		}
-		if decodeErr != nil {
-			return &BackendError{Backend: backend, Site: "V41RoutedSwiGLU", Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: decodeErr.Error(), Recovered: decodeErr}
-		}
-		return nil
+		return decodeV41RoutedSwiGLUStatus(words, status.Count)
 	case V41DeferredF32Finite:
 		if status.Records < 0 || status.Records > 1 {
-			return v41DeferredProtocolError(backend, status.Kind, "raw F32 status must have one record")
+			return &v41DeferredStatusProtocolError{status.Kind, "raw F32 status must have one record"}
 		}
-		if statusErr := decodeV41F32FiniteStatus(record, status.Count, status.Site); statusErr != nil {
-			return &BackendError{Backend: backend, Site: "V41F32Finite", Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: statusErr.Error(), Recovered: statusErr}
-		}
-		return nil
+		return decodeV41F32FiniteStatus(record, status.Count, status.Site)
 	case V41DeferredBF16Publish:
-		if statusErr := decodeV41BF16PublishStatus(record, status.Count, status.Site); statusErr != nil {
-			return &BackendError{Backend: backend, Site: "V41BF16Publish", Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: statusErr.Error(), Recovered: statusErr}
-		}
-		return nil
+		return decodeV41BF16PublishStatus(record, status.Count, status.Site)
 	}
-	return v41DeferredProtocolError(backend, status.Kind, "unknown status kind")
+	return &v41DeferredStatusProtocolError{status.Kind, "unknown status kind"}
+}
+
+// Envelope failures have no operation-specific arithmetic cause. Keep them
+// distinct so the compatibility wrapper retains its original error chain.
+type v41DeferredStatusProtocolError struct {
+	kind   V41DeferredStatusKind
+	reason string
+}
+
+func (e *v41DeferredStatusProtocolError) Error() string {
+	return fmt.Sprintf("deferred V4.1 status kind %d: %s", e.kind, e.reason)
 }
 
 func v41DeferredProtocolError(backend string, kind V41DeferredStatusKind, reason string) *BackendError {
-	message := fmt.Sprintf("deferred V4.1 status kind %d: %s", kind, reason)
+	message := (&v41DeferredStatusProtocolError{kind, reason}).Error()
 	return &BackendError{Backend: backend, Site: "V41ReadDeferred", Class: VulkanClassExecutionFailed, Err: ErrVulkanExecutionFailed, Message: message}
 }
 
