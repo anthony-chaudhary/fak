@@ -20,8 +20,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -69,20 +71,68 @@ func metalGuard(compiled, available bool) metalGuardResult {
 var metalDeviceName = ""
 
 func main() {
-	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
-	backendName := flag.String("backend", "cuda", "device backend name (cuda, vulkan, metal)")
-	n := flag.Int("n", 12, "greedy tokens to compare")
-	lean := flag.Bool("lean", false, "memory-lean Q8 load (sharded dir); reference is the CPU Q8 path (use for 2.5-3B that won't fit f32)")
-	vulkanQ4KProfile := flag.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)")
-	vulkanStageQ4K := flag.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	jsonMode := hasArg(args, "-json", "--json")
+	fs := flag.NewFlagSet("gpucheck", flag.ContinueOnError)
+	if jsonMode {
+		fs.SetOutput(io.Discard)
+	} else {
+		fs.SetOutput(stderr)
+	}
+	hf := fs.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
+	backendName := fs.String("backend", "cuda", "device backend name (cuda, vulkan, metal)")
+	n := fs.Int("n", 12, "greedy tokens to compare")
+	lean := fs.Bool("lean", false, "memory-lean Q8 load (sharded dir); reference is the CPU Q8 path (use for 2.5-3B that won't fit f32)")
+	vulkanQ4KProfile := fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)")
+	vulkanStageQ4K := fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)")
+	jsonOutput := fs.Bool("json", false, "emit one machine-readable gpucheck receipt on stdout")
+	requireNative := fs.Bool("require-native", false, "require the observed session backend to match the requested device-memory backend")
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp && !jsonMode {
+			return 0
+		}
+		if jsonMode {
+			if emitJSON(stdout, failureReceipt("", "cuda", 0, reasonInvalidArguments, err.Error())) != nil {
+				return 1
+			}
+		}
+		return 2
+	}
+	jsonMode = *jsonOutput
+	fail := func(code int, reasonCode parityReasonCode, reason string) int {
+		if jsonMode {
+			if emitJSON(stdout, failureReceipt(filepath.Base(*hf), *backendName, *n, reasonCode, reason)) != nil {
+				return 1
+			}
+		} else {
+			fmt.Fprintln(stderr, reason)
+		}
+		return code
+	}
+	f16 := os.Getenv("FAK_CUDA_F16") == "1"
+	q8 := *lean || os.Getenv("FAK_CUDA_Q8") == "1"
+	if f16 && q8 {
+		return fail(2, reasonUnsupportedOptions, "FAK_CUDA_F16=1 cannot be combined with FAK_CUDA_Q8=1 or -lean")
+	}
+	if *n <= 0 {
+		return fail(2, reasonInvalidTokenCount, "-n must be positive")
+	}
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*hf = pathutil.ExpandTilde(*hf)
 	metalRequested := *backendName == "metal"
 	if metalRequested {
 		metalDeviceName = metalgemm.DeviceName()
 		g := metalGuard(metalgemm.Compiled(), metalgemm.Available())
-		fmt.Fprintln(os.Stderr, g.message)
+		if jsonMode && g.exitCode != 0 {
+			if emitJSON(stdout, failureReceipt(filepath.Base(*hf), *backendName, *n, reasonBackendUnavailable, g.message)) != nil {
+				return 1
+			}
+		} else if !jsonMode {
+			fmt.Fprintln(stderr, g.message)
+		}
 		if g.exitCode == 0 {
 			// Compiled + device present. The gpucheck micro-dose drives
 			// compute.Backend device lanes; Metal is the CPU-session seam, and its
@@ -91,28 +141,37 @@ func main() {
 			// verified device, witness lane not wired here) rather than running a
 			// comparison this command cannot drive correctly — a fabricated pass
 			// would be worse than an explicit not-wired signal.
-			fmt.Fprintln(os.Stderr, "gpucheck: metal is compiled and available; the Q4_K parity micro-dose lives in `cmd/modelbench -q4k -metal <gguf>` (Session.Metal prefill vs CPU Q8 reference)")
-			os.Exit(2)
+			message := "gpucheck: metal is compiled and available; the Q4_K parity micro-dose lives in `cmd/modelbench -q4k -metal <gguf>` (Session.Metal prefill vs CPU Q8 reference)"
+			if jsonMode {
+				if emitJSON(stdout, failureReceipt(filepath.Base(*hf), *backendName, *n, reasonMetalWitnessNotHere, message)) != nil {
+					return 1
+				}
+			} else {
+				fmt.Fprintln(stderr, message)
+			}
+			return 2
 		}
-		os.Exit(g.exitCode)
+		return g.exitCode
 	}
 	if *hf == "" {
-		fmt.Fprintln(os.Stderr, "need -hf")
-		os.Exit(2)
+		return fail(2, reasonInvalidArguments, "need -hf")
 	}
 	cfg, err := readCfg(*hf)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
-		os.Exit(1)
+		return fail(1, reasonConfiguration, "config: "+err.Error())
+	}
+	if cfg.VocabSize <= 0 {
+		return fail(1, reasonInvalidVocabulary, "config: vocabulary size must be positive")
 	}
 	be, ok := compute.Lookup(*backendName)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "backend %q not registered (have %v)\n", *backendName, compute.Registered())
-		os.Exit(1)
+		return fail(1, reasonBackendUnavailable, fmt.Sprintf("backend %q not registered (have %v)", *backendName, compute.Registered()))
+	}
+	if (f16 || q8) && !be.Caps().UploadDtype {
+		return fail(2, reasonUnsupportedOptions, fmt.Sprintf("backend %q cannot honor F16/Q8 weight uploads", *backendName))
 	}
 	if (*vulkanQ4KProfile || *vulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, *vulkanQ4KProfile, *vulkanStageQ4K) {
-		fmt.Fprintln(os.Stderr, "-vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
-		os.Exit(2)
+		return fail(2, reasonUnsupportedOptions, "-vulkan-q4k-profile/-vulkan-stage-q4k require -backend vulkan")
 	}
 	// A fixed, arbitrary prompt; correctness of the forward pass is token-value-independent,
 	// so deterministic ids exercise the identical arithmetic a real prompt would.
@@ -122,43 +181,129 @@ func main() {
 	}
 	var ref, dev []int
 	var refLabel string
+	var observed backendIdentity
 	if *lean {
 		// Lean Q8 load: the f32 weights are dropped, so the reference is the CPU Q8 lane (the
 		// model's proven quantized forward), not f32. Both sides are Q8-weight; argmax must agree.
 		m, lerr := model.LoadSafetensorsQuantDir(*hf, cfg)
 		if lerr != nil {
-			fmt.Fprintln(os.Stderr, "lean load:", lerr)
-			os.Exit(1)
+			return fail(1, reasonModelLoad, "lean load: "+lerr.Error())
 		}
+		defer m.CloseWeights()
 		rs := m.NewSession()
+		defer rs.Close()
 		rs.Quant = true
+		ds, sessionErr := m.NewBackendSessionChecked(be)
+		if sessionErr != nil {
+			return fail(1, reasonBackendUnavailable, "backend session: "+sessionErr.Error())
+		}
+		defer ds.Close()
+		ds.F16 = f16
+		ds.Quant = q8
+		observed = sessionBackendIdentity(ds)
 		ref = rs.Generate(prompt, *n)
-		dev = m.NewBackendSession(be).Generate(prompt, *n)
+		dev = ds.Generate(prompt, *n)
 		refLabel = "cpu-Q8"
 	} else {
 		m, lerr := model.LoadSafetensors(filepath.Join(*hf, "model.safetensors"), cfg)
 		if lerr != nil {
-			fmt.Fprintln(os.Stderr, "load:", lerr)
-			os.Exit(1)
+			return fail(1, reasonModelLoad, "load: "+lerr.Error())
 		}
-		ref = m.NewSession().Generate(prompt, *n)          // legacy pure-Go f32 reference
-		dev = m.NewBackendSession(be).Generate(prompt, *n) // HAL device path (Approx)
+		defer m.CloseWeights()
+		if q8 {
+			// Keep the f32 weights for the reference; only the device session selects Q8.
+			m.Quantize()
+		}
+		rs := m.NewSession()
+		defer rs.Close()
+		ds, sessionErr := m.NewBackendSessionChecked(be)
+		if sessionErr != nil {
+			return fail(1, reasonBackendUnavailable, "backend session: "+sessionErr.Error())
+		}
+		defer ds.Close()
+		ds.F16 = f16
+		ds.Quant = q8
+		observed = sessionBackendIdentity(ds)
+		ref = rs.Generate(prompt, *n) // legacy pure-Go f32 reference
+		dev = ds.Generate(prompt, *n) // HAL device path (Approx)
 		refLabel = "f32 legacy"
 	}
-	mismatch := -1
-	for i := 0; i < *n && i < len(ref) && i < len(dev); i++ {
-		if ref[i] != dev[i] {
-			mismatch = i
-			break
+	receipt := evaluateParity(parityInput{
+		Requested:        *n,
+		VocabSize:        cfg.VocabSize,
+		Reference:        ref,
+		Device:           dev,
+		RequestedBackend: *backendName,
+		Observed:         observed,
+		ReferenceLabel:   refLabel,
+		RequireNative:    *requireNative,
+		IsEOS:            cfg.IsEOS,
+	})
+	receipt.Model = filepath.Base(*hf)
+	if jsonMode {
+		if emitJSON(stdout, receipt) != nil {
+			return 1
+		}
+		if receipt.Pass {
+			return 0
+		}
+		return 1
+	}
+	fmt.Fprintf(stdout, "model=%s backend=%s f16=%v q8=%v\n", receipt.Model, *backendName,
+		f16, q8)
+	fmt.Fprintf(stdout, "ref(%s):       %v\n", refLabel, ref)
+	fmt.Fprintf(stdout, "dev(%s approx): %v\n", *backendName, dev)
+	if !receipt.Pass {
+		if mismatch := firstMismatch(ref, dev); mismatch >= 0 {
+			fmt.Fprintf(stdout, "MISMATCH at token %d: ref=%d dev=%d\n", mismatch, ref[mismatch], dev[mismatch])
+		} else {
+			fmt.Fprintf(stdout, "FAIL — %s\n", receipt.Reason)
+		}
+		return 1
+	}
+	fmt.Fprintf(stdout, "OK — greedy argmax-exact over %d tokens vs %s (real-model Approx-gate witness)\n", receipt.ComparedTokens, refLabel)
+	return 0
+}
+
+func hasArg(args []string, names ...string) bool {
+	for _, arg := range args {
+		for _, name := range names {
+			if arg == name || strings.HasPrefix(arg, name+"=") {
+				return true
+			}
 		}
 	}
-	fmt.Printf("model=%s backend=%s f16=%v q8=%v\n", filepath.Base(*hf), *backendName,
-		os.Getenv("FAK_CUDA_F16") == "1", os.Getenv("FAK_CUDA_Q8") == "1")
-	fmt.Printf("ref(%s):       %v\n", refLabel, ref)
-	fmt.Printf("dev(%s approx): %v\n", *backendName, dev)
-	if mismatch >= 0 {
-		fmt.Printf("MISMATCH at token %d: ref=%d dev=%d\n", mismatch, ref[mismatch], dev[mismatch])
-		os.Exit(1)
+	return false
+}
+
+func failureReceipt(modelName, backend string, requested int, reasonCode parityReasonCode, reason string) parityReceipt {
+	r := newParityReceipt(parityInput{Requested: requested, RequestedBackend: backend})
+	r.Model = modelName
+	r.ReasonCode = reasonCode
+	r.Reason = reason
+	return r
+}
+
+func emitJSON(w io.Writer, receipt parityReceipt) error {
+	return json.NewEncoder(w).Encode(receipt)
+}
+
+func sessionBackendIdentity(s *model.Session) backendIdentity {
+	if s == nil || s.Backend == nil {
+		return backendIdentity{}
 	}
-	fmt.Printf("OK — greedy argmax-exact over %d tokens vs %s (real-model Approx-gate witness)\n", *n, refLabel)
+	return backendIdentity{Name: s.Backend.Name(), Tier: s.Backend.Tier(), DeviceMemory: s.Backend.Caps().DeviceMemory}
+}
+
+func firstMismatch(ref, dev []int) int {
+	n := len(ref)
+	if len(dev) < n {
+		n = len(dev)
+	}
+	for i := 0; i < n; i++ {
+		if ref[i] != dev[i] {
+			return i
+		}
+	}
+	return -1
 }
