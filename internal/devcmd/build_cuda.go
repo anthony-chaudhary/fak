@@ -152,7 +152,11 @@ func RunBuildCUDA(stdout, stderr io.Writer, argv []string) int {
 		if *cudaHome != "" {
 			tc.CUDAHome = *cudaHome
 			tc.CUDAInc = []string{filepath.Join(*cudaHome, "include")}
+			// An explicit toolkit root selects its compiler too. Retaining the
+			// discovered nvcc would probe or compile against a different toolkit.
+			tc.NVCC = filepath.Join(*cudaHome, "bin", "nvcc")
 			if tc.IsWindows {
+				tc.NVCC += ".exe"
 				tc.CUDALib = []string{filepath.Join(*cudaHome, "lib", "x64")}
 			} else {
 				tc.CUDALib = []string{filepath.Join(*cudaHome, "lib64")}
