@@ -693,6 +693,8 @@ func (c *nativeStructuredConstraint) accept(token int, effective []float32) erro
 			return nil
 		}
 		c.phase = nativeStructuredJSON
+	case nativeStructuredJSON:
+		// JSON-phase tokens are validated by the finite/stop checks below.
 	}
 	if !nativeStructuredLogitFinite(effective[token]) {
 		return ErrNativeStructuredNoToken

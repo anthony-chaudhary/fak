@@ -105,6 +105,8 @@ func newJSONFieldProgram(f *compiledField) *jsonFieldProgram {
 	case fieldObject:
 		object := newJSONSegmentsProgram(f.segs)
 		fp.object = &object
+	case fieldString, fieldInt, fieldNumber:
+		// Free-form scalars carry no precomputed candidates or sub-program.
 	}
 	return fp
 }

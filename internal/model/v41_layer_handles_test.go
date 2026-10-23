@@ -38,6 +38,8 @@ func v41CountLookups(t *testing.T, step func()) v41LookupCount {
 		case tensorLookupPresence:
 			c.presence++
 			return
+		case tensorLookupLayerName:
+			// Name lookups are counted and attributed to their caller below.
 		}
 		c.names++
 		pc, _, _, ok := runtime.Caller(2)

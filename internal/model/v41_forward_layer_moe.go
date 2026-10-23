@@ -315,6 +315,8 @@ func (m *Model) v41LayerRoutedPickHost(in v41LayerMoEInput, xn []float32, pick r
 					}
 					_ = ffn.AddScaled(routed, yd, pick.weight)
 					return nil
+				case v41DownDeclined:
+					// No device down kernel: fall through to the host f32 down below.
 				}
 			}
 			w2, err := m.hostExpertDown(l, stem, scratch)
@@ -330,6 +332,8 @@ func (m *Model) v41LayerRoutedPickHost(in v41LayerMoEInput, xn []float32, pick r
 			}
 			_ = ffn.AddScaled(routed, y, pick.weight)
 			return nil
+		case v41GateUpDeclined:
+			// The device did not admit this expert: run the host triple below.
 		}
 	}
 	w1, w3, w2, err := m.v41ExpertTripleInto(l, stem, scratch, true)

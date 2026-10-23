@@ -458,6 +458,8 @@ func (t DecodeHostWorkTotals) DecodeWindowReceipt() (PhaseReceipt, bool) {
 			a.Parent = PhaseDecode
 			a.Inclusive = PhaseTiming{Wall: kernel, Active: kernel}
 			a.Exclusive = a.Inclusive
+		default:
+			// The decode window observes only decode and kernel time; other phases stay zero.
 		}
 		r.Phases = append(r.Phases, a)
 	}
