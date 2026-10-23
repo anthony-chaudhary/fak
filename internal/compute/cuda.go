@@ -909,16 +909,25 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	if hb, ok := t.buf.(*hostBuf); ok {
 		return hb.f32 // host-resident: nothing crosses the bus and no device work is fenced
 	}
-	db := t.buf.(*cudaBuf)
+	db, ok := t.buf.(*cudaBuf)
+	if !ok || db == nil || t.be != c {
+		panic(&CUDAOpError{Op: "Read", Site: "read-geometry", Msg: "requires a live tensor owned by this CUDA backend"})
+	}
 	if err := db.invalidStateError("buffer"); err != nil {
 		panic(err)
 	}
-	out := make([]float32, t.Numel())
+	elements, nbytes := requireCUDAReadGeometry(t, db.n, db.class)
+	// Empty views may have no allocation. A nonempty or previously allocated
+	// buffer must retain its pointer before a copy can observe it.
+	if db.ptr == nil && (nbytes != 0 || db.n != 0) {
+		panic(&CUDAOpError{Op: "Read", Site: "read-geometry", Msg: "requires a live tensor owned by this CUDA backend", Class: db.class})
+	}
+	out := make([]float32, elements)
 	if len(out) > 0 {
 		if db.device != 0 {
-			C.fcuda_d2h_on(C.int(db.device), unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+			C.fcuda_d2h_on(C.int(db.device), unsafe.Pointer(&out[0]), db.ptr, C.size_t(nbytes))
 		} else {
-			C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+			C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(nbytes))
 		}
 		atomic.AddUint64(&c.fenceGen, 1) // stream drained: prior enqueued work is now materialized
 	}
