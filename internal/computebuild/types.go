@@ -73,10 +73,11 @@ type CUDAConfig struct {
 
 // BuildArtifact records metadata about a generated binary or static library.
 type BuildArtifact struct {
-	Path      string `json:"path"`
-	SizeBytes int64  `json:"size_bytes"`
-	Signed    bool   `json:"signed,omitempty"`
-	SHA256    string `json:"sha256,omitempty"`
+	Path       string                 `json:"path"`
+	SizeBytes  int64                  `json:"size_bytes"`
+	Signed     bool                   `json:"signed,omitempty"`
+	SHA256     string                 `json:"sha256,omitempty"`
+	CUDAImages *CUDAArchiveImageAudit `json:"cuda_images,omitempty"`
 }
 
 const (
