@@ -91,12 +91,21 @@ func discoverToolchainOS() (*Toolchain, error) {
 		}
 	}
 
-	tc.CUDAHome = cudaHome
 	if cudaHome != "" {
 		nvccPath := filepath.Join(cudaHome, "bin", "nvcc")
 		if FileExists(nvccPath) {
 			tc.NVCC = nvccPath
 		}
+	}
+	if tc.NVCC == "" {
+		if p, err := exec.LookPath("nvcc"); err == nil {
+			tc.NVCC = p
+			// Keep headers and libraries with the compiler selected by fallback.
+			cudaHome = filepath.Dir(filepath.Dir(p))
+		}
+	}
+	tc.CUDAHome = cudaHome
+	if cudaHome != "" {
 		// Resolve include paths that actually exist.
 		for _, inc := range []string{
 			filepath.Join(cudaHome, "include"),
@@ -117,11 +126,5 @@ func discoverToolchainOS() (*Toolchain, error) {
 			}
 		}
 	}
-	if tc.NVCC == "" {
-		if p, err := exec.LookPath("nvcc"); err == nil {
-			tc.NVCC = p
-		}
-	}
-
 	return tc, nil
 }
