@@ -680,13 +680,14 @@ func (v *vulkanBackend) FlushBatch() {
 
 // CycleBatch ends the open window and opens the next one without waiting for the
 // closed window to execute (fvk_batch_cycle): the device runs it while the caller
-// records the next. An exact-hazard window keeps the synchronous flush.
+// records the next. Exact verdicts and resources stay owned by their closed window.
 func (v *vulkanBackend) CycleBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	v.flushBatchLocked(true)
 	v.batchNodeSeq = 0
 	vulkanBatchLedger().begin()
+	v.batchHazardEpoch = uint64(C.fvk_batch_hazards_epoch())
 }
 
 func (v *vulkanBackend) flushBatchLocked(cycle bool) {

@@ -882,7 +882,9 @@ void fvk_batch_flush(void);
 /* fvk_batch_cycle() closes the open batch and opens the next without waiting on it: the
  * device runs the closed batch while the host records the next, and only the batch before
  * it is retired. Every host fence, one-shot command and buffer destruction drains the
- * in-flight batch first. FAK_VULKAN_PIPELINE_FLUSH=0 restores flush+begin. */
+ * in-flight batch first. Exact hazard verdicts share that window's retirement fence;
+ * the successor always records a coarse cross-window dependency.
+ * FAK_VULKAN_PIPELINE_FLUSH=0 restores flush+begin. */
 void fvk_batch_cycle(void);
 int fvk_batch_inflight(void);
 bool fvk_batch_active(void);
@@ -890,10 +892,11 @@ bool fvk_batch_active(void);
  * The default batched recorder fences every recorded dispatch against its predecessor
  * with one coarse compute->compute barrier because it has no per-dispatch hazard input.
  * fvk_batch_hazards_arm(n) selects the exact-barrier lowering: n!=0 arms it (the Go
- * lowering has already proven the window's declarations complete), n==0 forces the
- * coarse barrier for the next and every subsequent batch (fail closed). The flag is
- * process-wide and defaults to 0, so an unarmed build is byte-identical to the prior
- * behavior. fvk_batch_hazards_armed() reports the live value. */
+ * lowering proves each declared prefix before native recording), n==0 forces coarse
+ * barriers in the active window until rearmed. Each new window starts unarmed with
+ * no pending verdict. Resetting it never changes an in-flight window's owned verdicts.
+ * The default unarmed command stream is unchanged.
+ * fvk_batch_hazards_armed() reports only the active recording window's value. */
 void fvk_batch_hazards_arm(int armed);
 int fvk_batch_hazards_armed(void);
 /* Request retirement uses the same completion fence without counting an extra public

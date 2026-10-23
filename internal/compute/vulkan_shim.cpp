@@ -1701,7 +1701,6 @@ void recordComputeBarrier(VkCommandBuffer cmd) {
 // coarse global barrier and the recorded bytes are identical to the prior behavior. The Go
 // ledger proves each declared prefix before recording, so the shim never has to
 // infer hazard metadata it was not handed; an unarmed or incomplete window falls closed.
-int g_batchHazardsArmed = 0;
 uint64_t g_batchHazardEpoch = 0;
 uint64_t g_batchHazardBoundaries = 0, g_batchHazardElisions = 0;
 
@@ -1712,13 +1711,27 @@ uint64_t g_batchHazardBoundaries = 0, g_batchHazardElisions = 0;
 // other dispatch (RMSNorm/RoPE/attention/...) simply has no entry and keeps its barrier.
 // A positional queue would misalign the moment an undeclared dispatch interleaves, so the
 // verdict is addressed, not streamed.
-std::unordered_map<int, char> g_batchHazardSync; // ordinal -> 1 needs sync, 0 elidable
+struct BatchHazardWindow {
+    uint64_t epoch = 0;
+    int armed = 0;
+    bool exhausted = false;
+    std::unordered_map<int, char> pending;
+    // Retain bounded installed verdicts with the window's resources until retirement.
+    // Only pending authorizes recording; consumed or failed attempts never do.
+    std::unordered_map<int, char> verdicts;
+};
+BatchHazardWindow g_batchHazardWindow;
+int& g_batchHazardsArmed = g_batchHazardWindow.armed;
+std::unordered_map<int, char>& g_batchHazardSync = g_batchHazardWindow.pending;
 
 // An unsuccessful dispatch must retire its verdict too: the next undeclared
 // operation otherwise inherits the same ordinal and an unrelated elision license.
 struct BatchHazardAttempt {
     int ordinal;
-    ~BatchHazardAttempt() { g_batchHazardSync.erase(ordinal); }
+    uint64_t epoch = g_batchHazardEpoch;
+    ~BatchHazardAttempt() {
+        if (epoch == g_batchHazardEpoch) g_batchHazardSync.erase(ordinal);
+    }
 };
 
 bool nextHazardSync(int ordinal) {
@@ -1939,9 +1952,9 @@ void batchBegin() {
 	g_batchSets.clear();
 	// A new window owns a fresh hazard verdict queue; anything left from the prior window
 	// must not leak into this one (the Go ledger re-lowers each window independently).
-	g_batchHazardSync.clear();
-	g_batchHazardsArmed = 0;
+	g_batchHazardWindow = BatchHazardWindow{};
 	if (g_batchHazardEpoch != std::numeric_limits<uint64_t>::max()) ++g_batchHazardEpoch;
+	g_batchHazardWindow.epoch = g_batchHazardEpoch;
 }
 
 // ---- pipelined batch cycle (FAK_VULKAN_PIPELINE_FLUSH, default on) ----------------
@@ -1961,6 +1974,7 @@ struct InflightBatch {
     uint64_t d2dBytes = 0;
     bool d2dValid = true;
     uint32_t syncStage = UINT32_MAX;
+    BatchHazardWindow hazards;
 };
 InflightBatch g_inflight;
 VkFence g_pipeFences[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
@@ -2040,7 +2054,7 @@ void batchCycle() {
     if (g_v41SubmissionPendingFailure || !g_batching) return;
     VkFence fence = VK_NULL_HANDLE;
     const bool eligible = g_pipelineFlush && !g_batchHasV41 && !g_stepBatch && !g_tsOn &&
-        !g_batchHazardsArmed && g_submissionStatus == VK_SUCCESS;
+        g_submissionStatus == VK_SUCCESS;
     if (eligible && g_batchOps == 0) return;
     if (eligible) fence = pipelineFence();
     if (fence == VK_NULL_HANDLE) {
@@ -2065,6 +2079,8 @@ void batchCycle() {
     g_inflight.cmd = g_batchCmd;
     g_inflight.fence = fence;
     g_inflight.syncStage = syncStage;
+    g_inflight.hazards = std::move(g_batchHazardWindow);
+    g_batchHazardWindow = BatchHazardWindow{};
     g_inflight.sets.swap(g_batchSets);
     g_inflight.freed.swap(g_batchFreed);
     g_inflight.d2dCount = g_batchD2DCount;
@@ -2131,8 +2147,7 @@ void batchFlush() {
 	g_batching = false;
 	g_batchOps = 0;
 	g_batchHasV41 = false;
-	g_batchHazardsArmed = 0;
-	g_batchHazardSync.clear();
+	g_batchHazardWindow = BatchHazardWindow{};
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
@@ -4860,8 +4875,15 @@ int fvk_batch_next_ordinal(void) { return g_batchOps; }
 void fvk_batch_hazards_set(int ordinal, int needs_sync) {
     // Only one immediate attempt is authorized, never a future ordinal or window.
     g_batchHazardSync.clear();
-    if (g_batchHazardsArmed && ordinal == g_batchOps)
-        g_batchHazardSync[ordinal] = needs_sync != 0 ? 1 : 0;
+    if (!g_batchHazardsArmed || ordinal != g_batchOps || g_batchHazardWindow.exhausted) return;
+    // Match the bounded Go declaration prefix; exhaustion cannot grow native storage.
+    if (g_batchHazardWindow.verdicts.size() >= 256) {
+        g_batchHazardWindow.exhausted = true;
+        return;
+    }
+    const char verdict = needs_sync != 0 ? 1 : 0;
+    g_batchHazardWindow.verdicts[ordinal] = verdict;
+    g_batchHazardSync[ordinal] = verdict;
 }
 void fvk_batch_hazards_reset(void) {
     g_batchHazardSync.clear();
