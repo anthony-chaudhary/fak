@@ -561,7 +561,7 @@ func TestQwen35QSASparseRowGather(t *testing.T) {
 	}
 
 	m := NewSynthetic(cfg)
-	be := newQKNormRecordingBackend(m)
+	be := &qsaProfileRecordingBackend{newQKNormRecordingBackend(m)}
 	s, err := m.NewBackendSessionChecked(be)
 	if err != nil {
 		t.Fatalf("NewBackendSessionChecked: %v", err)

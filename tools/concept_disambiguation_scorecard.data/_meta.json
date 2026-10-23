@@ -17516,6 +17516,16 @@
           "category": "incidental",
           "reason": "Directory walk rules for a study inventory traversal, not a fak plan, goal or dispatch plan.",
           "token": "newinventorywalkplan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #13964 internal scalar geometry and aligned K/V byte-bound result for the existing host-assisted QSA gather; no executable plan, reservation, scheduling state or independent planning lifecycle.",
+          "token": "qwen35QSAScratchPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #13964 effect-free geometry/overflow and selected-device fact validator for the existing host-assisted QSA gather; it returns scalar bounds, allocates no scratch and introduces no independent planner or reservation.",
+          "token": "planQwen35QSAScratch"
         }
       ],
       "exclude": [
@@ -17718,6 +17728,7 @@
         "orderLaneCandidatesAged",
         "overlayPlan",
         "planErr",
+        "planQwen35QSAScratch",
         "planResumeDedup",
         "planapproval",
         "planned",
@@ -17737,6 +17748,7 @@
         "planting",
         "plants",
         "processClassPlane",
+        "qwen35QSAScratchPlan",
         "recoveryJournalCandidates",
         "refuseDevicePlanAgainstFit",
         "refuseHostPlanAgainstFit",
