@@ -485,35 +485,17 @@ func (c Config) dropsMtpAndVisualAtLoad() bool {
 
 func appendSafetensorsFileInto(sf *safetensorsFile, man map[string]tensorMeta, raw *[]byte, off *int, cfg Config) error {
 	names := safetensorsTensorNames(sf.hdr)
-	// Pre-size the f32 buffer to the exact kept-tensor total so the per-tensor appends
-	// never reallocate. Without this, append's grow-and-copy transiently holds two copies
-	// of a multi-GB buffer and OOMs the load on a memory-tight box (e.g. a 1.9B model =
-	// ~7.5 GB f32 spiking past WSL's 15 GB). Gated on the mtp/vision-bearing models that
-	// drop tensors at load and therefore need an exact pre-size to avoid the reallocate.
-	if cfg.dropsMtpAndVisualAtLoad() {
-		need := len(*raw)
-		for _, name := range names {
-			if skipLoadTensor(cfg, name) {
-				continue
-			}
-			var e stEntry
-			if json.Unmarshal(sf.hdr[name], &e) != nil {
-				continue
-			}
-			elems, ok := checkedShapeProduct(e.Shape...)
-			if !ok {
-				return fmt.Errorf("safetensors: tensor %s shape %v overflows element count", name, e.Shape)
-			}
-			if elems > (math.MaxInt-need)/4 {
-				return fmt.Errorf("safetensors: tensor %s f32 byte size overflows int", name)
-			}
-			need += elems * 4
-		}
-		if cap(*raw) < need {
-			grown := make([]byte, len(*raw), need)
-			copy(grown, *raw)
-			*raw = grown
-		}
+	// Pre-size the f32 buffer to the exact decoded total so the per-tensor appends never
+	// reallocate. Without this, append's grow-and-copy transiently holds two copies of a
+	// multi-GB buffer and OOMs the load on a memory-tight box: a dense Qwen2.5-1.5B
+	// (~6.2 GB f32) reached 15.8 GB RSS and was OOM-killed under WSL's 15 GB. A header whose
+	// total passes f32ExpansionLimit must alias data_offsets; it skips the pre-size and falls
+	// back to append growth instead of reserving more than the file can decode to.
+	if need, ok := safetensorsF32AppendBytes(sf, cfg, names, sf.f32ExpansionLimit()); ok &&
+		need <= math.MaxInt-len(*raw) && cap(*raw)-len(*raw) < need {
+		grown := make([]byte, len(*raw), len(*raw)+need)
+		copy(grown, *raw)
+		*raw = grown
 	}
 	consumed := map[string]bool{}
 	for _, name := range names {
@@ -608,6 +590,115 @@ func appendSafetensorsFileInto(sf *safetensorsFile, man map[string]tensorMeta, r
 		}
 	}
 	return nil
+}
+
+// safetensorsF32AppendBytes returns the f32 bytes appendSafetensorsFileInto's decode loop
+// appends for sf, mirroring its skips and its MXFP4 (_blocks+_scales) and FP8
+// (weight+_scale_inv) pairings. A tensor counts only when its in-file payload matches its
+// declared geometry; a malformed tensor counts zero and the decode loop returns its error in
+// tensor order (fak#12603). Per-tensor checks cannot see data_offsets that alias one span, so
+// ok is false once the total passes limit and the caller skips the pre-size.
+func safetensorsF32AppendBytes(sf *safetensorsFile, cfg Config, names []string, limit int) (int, bool) {
+	total := 0
+	consumed := map[string]bool{}
+	for _, name := range names {
+		if consumed[name] || skipLoadTensor(cfg, name) {
+			continue
+		}
+		var e stEntry
+		if json.Unmarshal(sf.hdr[name], &e) != nil {
+			continue
+		}
+		n := 0
+		scalesName := strings.TrimSuffix(name, "_blocks") + "_scales"
+		_, mxfp4 := sf.hdr[scalesName]
+		_, fp8 := sf.hdr[name+"_scale_inv"]
+		switch {
+		case strings.HasSuffix(name, "_blocks") && mxfp4:
+			consumed[scalesName] = true
+			var scales stEntry
+			if json.Unmarshal(sf.hdr[scalesName], &scales) == nil {
+				n = sf.mxfp4F32Bytes(e, scales)
+			}
+		case fp8 && e.Dtype == "F8_E4M3":
+			consumed[name+"_scale_inv"] = true
+			n = sf.fp8F32Bytes(e)
+		case !skipSafetensorsTensor(name, e):
+			n = sf.plainF32Bytes(e)
+		}
+		if n > limit-total {
+			return 0, false
+		}
+		total += n
+	}
+	return total, true
+}
+
+// f32ExpansionLimit bounds the f32 bytes disjoint tensors can decode to: 8x the payload, the
+// widest expansion (an MXFP4 byte holds two values that each become a 4-byte f32).
+func (sf *safetensorsFile) f32ExpansionLimit() int {
+	payload := sf.size - sf.dataBase
+	if payload <= 0 {
+		return 0
+	}
+	if payload > int64(math.MaxInt/8) {
+		return math.MaxInt
+	}
+	return int(payload) * 8
+}
+
+// payloadLen is e's in-file payload byte count; false when tensorBytes would refuse it.
+func (sf *safetensorsFile) payloadLen(e stEntry) (int, bool) {
+	start, end, err := safetensorsDataBounds(sf.dataBase, sf.size, e)
+	if err != nil || end-start > int64(math.MaxInt) {
+		return 0, false
+	}
+	return int(end - start), true
+}
+
+func (sf *safetensorsFile) plainF32Bytes(e stEntry) int {
+	want, ok := safetensorsShapeBytes(e)
+	if got, inFile := sf.payloadLen(e); !ok || !inFile || got != want {
+		return 0
+	}
+	elems, _ := checkedShapeProduct(e.Shape...)
+	n, _ := checkedShapeProduct(elems, 4)
+	return n
+}
+
+func (sf *safetensorsFile) mxfp4F32Bytes(blocks, scales stEntry) int {
+	if blocks.Dtype != "U8" || scales.Dtype != "U8" || len(blocks.Shape) != 4 {
+		return 0
+	}
+	for _, dim := range blocks.Shape {
+		if dim <= 0 {
+			return 0
+		}
+	}
+	if !sameShape(scales.Shape, blocks.Shape[:3]) {
+		return 0
+	}
+	blockElems, okB := checkedShapeProduct(blocks.Shape...)
+	scaleElems, okS := checkedShapeProduct(blocks.Shape[:3]...)
+	gotB, inB := sf.payloadLen(blocks)
+	gotS, inS := sf.payloadLen(scales)
+	if !okB || !okS || !inB || !inS || gotB != blockElems || gotS != scaleElems {
+		return 0
+	}
+	n, _ := checkedShapeProduct(blockElems, 2, 4) // two E2M1 values per byte, f32 each
+	return n
+}
+
+func (sf *safetensorsFile) fp8F32Bytes(w stEntry) int {
+	if len(w.Shape) != 2 || w.Shape[0] <= 0 || w.Shape[1] <= 0 {
+		return 0
+	}
+	elems, ok := checkedShapeProduct(w.Shape...)
+	if got, inFile := sf.payloadLen(w); !ok || !inFile || got != elems {
+		return 0
+	}
+	n, _ := checkedShapeProduct(elems, 4)
+	return n
 }
 
 func skipSafetensorsTensor(name string, e stEntry) bool {
