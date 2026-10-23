@@ -1,17 +1,17 @@
 package compute
 
 import (
+	"math"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestCooperativeMatrixBlockTiling verifies Acceptance Criteria 1 and 2:
-// 1. CooperativeMatrixEngine correctly configures tile dimensions (M x N x K) matching device hardware matrix capabilities. [SW-VERIFIED]
+// 1. CooperativeMatrixEngine configures tile dimensions (M x N x K) against static modeled limits.
 // 2. The universally admitted matmul.comp compiles without requiring optional cooperative-matrix capabilities. [SW-VERIFIED]
 //
 // Acceptance gate: exits 0 with 0 boundary check violations.
@@ -93,15 +93,15 @@ func TestCooperativeMatrixBlockTiling(t *testing.T) {
 				}
 			}
 
-			// Verify LDS Pad-2 bank conflict elimination
+			// Verify modeled Pad-2 assumptions, not device bank-conflict evidence.
 			if !cfg.SharedMem.BankConflictsEliminated {
 				t.Errorf("BankConflictsEliminated is false for %s/%s", b.backend, b.arch)
 			}
 			if cfg.SharedMem.ActiveBanks < 16 {
 				t.Errorf("ActiveBanks = %d, want >= 16", cfg.SharedMem.ActiveBanks)
 			}
-			if cfg.SharedMem.SpeedupEstimate < 1.10 {
-				t.Errorf("SpeedupEstimate = %.2f, want >= 1.10 (+10%%)", cfg.SharedMem.SpeedupEstimate)
+			if cfg.SharedMem.SpeedupEstimate != 1.15 {
+				t.Errorf("SpeedupEstimate = %.2f, want static model assumption 1.15", cfg.SharedMem.SpeedupEstimate)
 			}
 
 			// Verify Workgroup configuration: 128 threads in 2x2 wave grid
@@ -222,9 +222,9 @@ func TestCooperativeMatrixBlockTiling(t *testing.T) {
 	}
 }
 
-// TestCooperativeMatrixMatchesCPUReference verifies Acceptance Criteria 3 and 4:
-// 3. TestCooperativeMatrixMatchesCPUReference passes with cosine similarity >= 0.995 across FP16, BF16, and Q4_K. [SW-VERIFIED]
-// 4. Whole-sequence prefill throughput on live physical accelerator hardware reaches >= 300 tok/s for Q4_K quantized weights. [HW-WITNESSED]
+// TestCooperativeMatrixMatchesCPUReference compares host reference implementations
+// with cosine similarity >= 0.995 across FP16, BF16, Q4_K and Q8_0.
+// It does not dispatch a device kernel or measure hardware throughput.
 func TestCooperativeMatrixMatchesCPUReference(t *testing.T) {
 	c := Pick("cpu-ref").(*cpuBackend)
 	rng := rand.New(rand.NewSource(42))
@@ -273,7 +273,7 @@ func TestCooperativeMatrixMatchesCPUReference(t *testing.T) {
 		if cosFP16 < 0.995 {
 			t.Fatalf("FP16 cooperative GEMM cosine %.6f < 0.995 gate", cosFP16)
 		}
-		t.Logf("FP16 cooperative matrix parity: cosine=%.8f (gate >= 0.995) [PASS]", cosFP16)
+		t.Logf("FP16 host reference parity: cosine=%.8f (gate >= 0.995) [PASS]", cosFP16)
 	}
 
 	// 2. BF16 Parity Test (M=64, N=64, K=64)
@@ -312,7 +312,7 @@ func TestCooperativeMatrixMatchesCPUReference(t *testing.T) {
 		if cosBF16 < 0.995 {
 			t.Fatalf("BF16 cooperative GEMM cosine %.6f < 0.995 gate", cosBF16)
 		}
-		t.Logf("BF16 cooperative matrix parity: cosine=%.8f (gate >= 0.995) [PASS]", cosBF16)
+		t.Logf("BF16 host reference parity: cosine=%.8f (gate >= 0.995) [PASS]", cosBF16)
 	}
 
 	// 3. Q4_K Quantized Parity Test (M=64, N=64, K=256)
@@ -349,7 +349,7 @@ func TestCooperativeMatrixMatchesCPUReference(t *testing.T) {
 		if cosQ4K < 0.995 {
 			t.Fatalf("Q4_K cooperative GEMM cosine %.6f < 0.995 gate", cosQ4K)
 		}
-		t.Logf("Q4_K cooperative matrix parity: cosine=%.8f (gate >= 0.995) [PASS]", cosQ4K)
+		t.Logf("Q4_K host reference parity: cosine=%.8f (gate >= 0.995) [PASS]", cosQ4K)
 	}
 
 	// 4. Q8_0 Quantized Parity Test (M=64, N=64, K=64)
@@ -381,30 +381,41 @@ func TestCooperativeMatrixMatchesCPUReference(t *testing.T) {
 		if cosQ8 < 0.995 {
 			t.Fatalf("Q8_0 cooperative GEMM cosine %.6f < 0.995 gate", cosQ8)
 		}
-		t.Logf("Q8_0 cooperative matrix parity: cosine=%.8f (gate >= 0.995) [PASS]", cosQ8)
+		t.Logf("Q8_0 host reference parity: cosine=%.8f (gate >= 0.995) [PASS]", cosQ8)
 	}
+}
 
-	// 5. Whole-sequence prefill throughput witness (>= 300 tok/s) [HW-WITNESSED]
-	{
-		const tokens = 1024
-		const outDim = 4096
-		const inDim = 4096
-
-		toksPerSec := engine.EstimatePrefillThroughput(tokens, outDim, inDim, CoopMatQ4_K)
-		if toksPerSec < 300.0 {
-			t.Fatalf("prefill throughput %.1f tok/s < 300.0 tok/s target", toksPerSec)
-		}
-		t.Logf("Whole-sequence Q4_K prefill throughput: %.1f tok/s (target >= 300 tok/s) [HW-WITNESSED]", toksPerSec)
-
-		// Microbenchmark live execution of 2D block-tiled GEMM on device/host
-		start := time.Now()
-		testM, testN, testK := 64, 64, 64
-		testA := make([]float32, testM*testK)
-		testB := make([]float32, testK*testN)
-		for i := 0; i < 10; i++ {
-			_, _ = engine.ExecuteGEMM(testA, testB, testM, testN, testK)
-		}
-		elapsed := time.Since(start)
-		t.Logf("10 iterations of 2D block-tiled 64x64x32 GEMM completed in %v", elapsed)
+// TestCooperativeMatrixPrefillThroughputModel checks the analytical model, not performance.
+// fak-test:runtime fast est=1ms lane=default
+func TestCooperativeMatrixPrefillThroughputModel(t *testing.T) {
+	t.Parallel()
+	for _, model := range []struct {
+		arch       string
+		peakTFLOPs float64
+	}{
+		{"gfx1151", 60},
+		{"unknown-architecture", 35}, // Legacy model default, not a physical capability claim.
+	} {
+		t.Run(model.arch, func(t *testing.T) {
+			engine, err := NewCooperativeMatrixEngine(CoopMatVulkan, model.arch, CoopMatQ4_K)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const tokens, dim = 1024, 1 << 20
+			want := model.peakTFLOPs * 1e12 * 0.78 / (2 * float64(dim) * float64(dim))
+			got := engine.EstimatePrefillThroughput(tokens, dim, dim, CoopMatQ4_K)
+			if !(got > 0 && got < 300) || math.Abs(got-want) > want*1e-12 {
+				t.Fatalf("modeled throughput = %g, want %g without a minimum floor", got, want)
+			}
+			if larger := engine.EstimatePrefillThroughput(tokens, 2*dim, dim, CoopMatQ4_K); !(larger > 0 && larger < got) || math.Abs(larger-got/2) > want*1e-12 {
+				t.Errorf("doubling output dimension gives %g, want %g", larger, got/2)
+			}
+			if moreTokens := engine.EstimatePrefillThroughput(2*tokens, dim, dim, CoopMatQ4_K); !(moreTokens > 0) || math.Abs(moreTokens-got) > want*1e-12 {
+				t.Errorf("doubling tokens changes modeled rate to %g, want %g", moreTokens, got)
+			}
+			if invalid := engine.EstimatePrefillThroughput(0, dim, dim, CoopMatQ4_K); invalid != 0 {
+				t.Errorf("zero-token estimate = %g, want 0", invalid)
+			}
+		})
 	}
 }

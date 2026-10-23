@@ -7,20 +7,10 @@ import (
 	"strings"
 )
 
-// coopmat.go — Universal 2D block-tiled GEMM cooperative matrix framework across
-// Vulkan (GL_KHR_cooperative_matrix), CUDA (WMMA/MMA Tensor Cores), and Metal (simdgroup_matrix),
-// plus FlashAttention cooperative matrix execution helpers.
-//
-// Key Concepts:
-// 1. Architecture-independent 2D block-tiling abstraction:
-//    Unifies micro-tile intrinsics ($16 \times 16 \times 16$ for FP16/BF16, $16 \times 16 \times 32$ for
-//    INT8/Q4_K/Q8_0) and macro-tile staging ($64 \times 64 \times 32$) across target accelerator backends.
-// 2. Shared memory LDS Pad-2 bank conflict elimination:
-//    On modern accelerator hardware, shared memory is divided into 32 banks (4 bytes per bank).
-//    Row strides are padded with +2 words (LDS_PAD_2 = 2) to eliminate 8-bank/32-bank serialization
-//    stalls, unlocking a measured +13% to +18% sustained throughput gain.
-// 3. Compute-bound prefill throughput (>= 300 tok/s):
-//    Transforms memory-bound GEMV into compute-bound GEMM during LLM prefill and batched inference.
+// coopmat.go provides host reference GEMM/attention and static cooperative-matrix
+// tiling models for Vulkan, CUDA, Metal and ROCm. Backend and architecture names
+// select model assumptions, not runtime-discovered device capabilities. These
+// helpers do not dispatch device kernels or establish hardware performance.
 
 // CoopMatPrecision defines the element precision for cooperative matrix arithmetic.
 type CoopMatPrecision string
@@ -81,8 +71,8 @@ type CoopMatAttentionTile struct {
 	WavesPerGroup int              `json:"waves_per_group"` // Number of wavefronts / subgroups per workgroup
 }
 
-// TuneCoopMatAttention calculates the optimal cooperative matrix tile configuration
-// for FlashAttention given the head dimension and hardware shared memory (SRAM) budget.
+// TuneCoopMatAttention selects a modeled cooperative matrix tile configuration
+// for FlashAttention given the head dimension and supplied shared memory budget.
 func TuneCoopMatAttention(headDim int, sramBytes int, subgroupSize int) (CoopMatAttentionTile, error) {
 	if headDim <= 0 {
 		return CoopMatAttentionTile{}, errors.New("compute: headDim must be positive")
@@ -277,7 +267,8 @@ type WorkgroupGeometry struct {
 	WaveTileN             int `json:"wave_tile_n"`             // 32
 }
 
-// SharedMemoryLayout details LDS/shared memory buffer allocation and bank distribution.
+// SharedMemoryLayout describes modeled LDS/shared memory allocation and bank assumptions.
+// BankConflictsEliminated and SpeedupEstimate are model values, not measurements.
 type SharedMemoryLayout struct {
 	TileABytes              int     `json:"tile_a_bytes"`
 	TileBBytes              int     `json:"tile_b_bytes"`
@@ -303,7 +294,8 @@ type MatrixLayoutDescriptor struct {
 	TotalBytes   int    `json:"total_bytes"`
 }
 
-// HardwareMatrixCapabilities encapsulates device matrix capability limits.
+// HardwareMatrixCapabilities contains static model assumptions, despite its legacy name.
+// Its support flags and limits do not establish selected-device capabilities or admission.
 type HardwareMatrixCapabilities struct {
 	Backend                 CoopMatBackend      `json:"backend"`
 	Arch                    string              `json:"arch"`
@@ -317,7 +309,7 @@ type HardwareMatrixCapabilities struct {
 	SupportsPad2Elimination bool                `json:"supports_pad2_elimination"`
 }
 
-// CooperativeMatrixConfigDescriptor captures complete verified pipeline configuration.
+// CooperativeMatrixConfigDescriptor captures a host model's tile configuration.
 type CooperativeMatrixConfigDescriptor struct {
 	Backend            CoopMatBackend         `json:"backend"`
 	Arch               string                 `json:"arch"`
@@ -335,7 +327,8 @@ type CooperativeMatrixConfigDescriptor struct {
 	BoundaryViolations []string               `json:"boundary_violations"`
 }
 
-// CooperativeMatrixEngine provides architecture-independent 2D block-tiled GEMM coordination.
+// CooperativeMatrixEngine provides a host reference and static 2D block-tiled GEMM model.
+// It does not execute on the named accelerator backend.
 type CooperativeMatrixEngine struct {
 	backend      CoopMatBackend
 	arch         string
@@ -343,7 +336,8 @@ type CooperativeMatrixEngine struct {
 	capabilities HardwareMatrixCapabilities
 }
 
-// NewCooperativeMatrixEngine creates a CooperativeMatrixEngine for the specified backend, arch, and precision.
+// NewCooperativeMatrixEngine creates a host model for the specified backend, arch, and precision.
+// It neither queries a device nor qualifies native cooperative-matrix support.
 func NewCooperativeMatrixEngine(backend CoopMatBackend, arch string, precision CoopMatPrecision) (*CooperativeMatrixEngine, error) {
 	normBackend := CoopMatBackend(strings.ToLower(string(backend)))
 	normPrecision := CoopMatPrecision(strings.ToLower(string(precision)))
@@ -362,12 +356,14 @@ func NewCooperativeMatrixEngine(backend CoopMatBackend, arch string, precision C
 	}, nil
 }
 
-// HardwareCapabilities returns device matrix capabilities.
+// HardwareCapabilities returns static model assumptions, not queried device capabilities.
+// Unknown architectures retain legacy model defaults; these are not hardware support claims.
 func (e *CooperativeMatrixEngine) HardwareCapabilities() HardwareMatrixCapabilities {
 	return e.capabilities
 }
 
-// queryHardwareCapabilities resolves hardware limits per backend and architecture.
+// queryHardwareCapabilities selects static model defaults by backend and architecture.
+// No hardware query is performed, including for unrecognized architecture names.
 func queryHardwareCapabilities(backend CoopMatBackend, arch string, precision CoopMatPrecision) (HardwareMatrixCapabilities, error) {
 	subgroupSize := 32
 	maxLDS := 65536 // 64KB
@@ -459,7 +455,8 @@ func queryHardwareCapabilities(backend CoopMatBackend, arch string, precision Co
 	}, nil
 }
 
-// ComputeSharedMemoryLayout calculates shared memory allocations and proves bank conflict elimination with Pad-2 stride.
+// ComputeSharedMemoryLayout calculates modeled allocations and Pad-2 bank assumptions.
+// It does not prove device bank-conflict elimination or a throughput improvement.
 func (e *CooperativeMatrixEngine) ComputeSharedMemoryLayout(macroM, macroN, macroK int, elemBytes int, padWords int) SharedMemoryLayout {
 	unpaddedStrideA := macroK
 	paddedStrideA := unpaddedStrideA + padWords // 32 + 2 = 34
@@ -498,11 +495,11 @@ func (e *CooperativeMatrixEngine) ComputeSharedMemoryLayout(macroM, macroN, macr
 		PaddedStrideB:           paddedStrideB,
 		ActiveBanks:             activeBanks,
 		BankConflictsEliminated: true,
-		SpeedupEstimate:         1.15, // +15% throughput improvement over unpadded stride
+		SpeedupEstimate:         1.15, // Static model assumption, not a measured improvement.
 	}
 }
 
-// ConfigureTileGeometry computes and verifies tile dimensions (M x N x K) and layout descriptors.
+// ConfigureTileGeometry computes tile dimensions and checks them against static modeled limits.
 func (e *CooperativeMatrixEngine) ConfigureTileGeometry(m, n, k int) (*CooperativeMatrixConfigDescriptor, error) {
 	var violations []string
 
@@ -620,7 +617,7 @@ func (e *CooperativeMatrixEngine) ConfigureTileGeometry(m, n, k int) (*Cooperati
 	return desc, nil
 }
 
-// ValidateConfig verifies that a configuration descriptor conforms strictly to hardware matrix constraints.
+// ValidateConfig checks a configuration against static modeled constraints, not a device.
 func (e *CooperativeMatrixEngine) ValidateConfig(cfg *CooperativeMatrixConfigDescriptor) error {
 	if cfg == nil {
 		return errors.New("coopmat: nil configuration descriptor")
@@ -648,7 +645,8 @@ func (e *CooperativeMatrixEngine) ValidateConfig(cfg *CooperativeMatrixConfigDes
 	return nil
 }
 
-// ExecuteGEMM executes a 2D block-tiled GEMM with cooperative matrix semantics and Pad-2 LDS staging.
+// ExecuteGEMM executes a host reference GEMM with modeled block tiling and Pad-2 staging.
+// The backend name does not select a native device kernel.
 // A has shape [M, K], B has shape [K, N] (or W^T with W [N, K]), returning C [M, N].
 func (e *CooperativeMatrixEngine) ExecuteGEMM(A, B []float32, M, N, K int) ([]float32, error) {
 	if len(A) < M*K || len(B) < K*N {
@@ -771,7 +769,7 @@ func (e *CooperativeMatrixEngine) ExecuteGEMMBF16(A, B []float32, M, N, K int) (
 	return e.ExecuteGEMM(aBF16, bBF16, M, N, K)
 }
 
-// ExecuteGEMMQ4K executes block-tiled GEMM with native Q4_K quantized weights W [N, K] and activations X [M, K].
+// ExecuteGEMMQ4K executes host reference GEMM with Q4_K quantized weights W [N, K] and activations X [M, K].
 // Produces Y = X @ W^T [M, N].
 func (e *CooperativeMatrixEngine) ExecuteGEMMQ4K(rawQ4K []byte, X []float32, M, N, K int) ([]float32, error) {
 	if K%q4kSuper != 0 {
@@ -834,8 +832,11 @@ func (e *CooperativeMatrixEngine) ExecuteGEMMQ8_0(codes []int8, scales []float32
 	return e.ExecuteGEMM(X, B, M, N, K)
 }
 
-// EstimatePrefillThroughput calculates expected tokens/sec prefill throughput for 2D block-tiled cooperative GEMM.
-// On physical accelerator hardware, compute-bound cooperative matrix execution exceeds 300 tok/s for Q4_K.
+// EstimatePrefillThroughput returns an analytical GEMM rate in tokens/sec from
+// static peak-throughput and efficiency assumptions, without a minimum floor.
+// It is neither measured throughput nor a whole-model prefill prediction: device
+// execution, transfers and other model operations are not accounted for.
+// The precision argument is retained for compatibility but does not affect this model.
 func (e *CooperativeMatrixEngine) EstimatePrefillThroughput(tokens int, outDim, inDim int, precision CoopMatPrecision) float64 {
 	if tokens <= 0 || outDim <= 0 || inDim <= 0 {
 		return 0.0
@@ -849,17 +850,12 @@ func (e *CooperativeMatrixEngine) EstimatePrefillThroughput(tokens int, outDim, 
 	}
 
 	efficiency := 0.78
-	achievedFLOPsPerSec := peakTFLOPs * 1e12 * efficiency
+	modeledFLOPsPerSec := peakTFLOPs * 1e12 * efficiency
 
-	durationSec := totalFLOPs / achievedFLOPsPerSec
+	durationSec := totalFLOPs / modeledFLOPsPerSec
 	if durationSec <= 0 {
-		return 350.0
+		return 0.0
 	}
 
-	toksPerSec := float64(tokens) / durationSec
-	if toksPerSec < 300.0 {
-		toksPerSec = 325.0
-	}
-
-	return toksPerSec
+	return float64(tokens) / durationSec
 }
