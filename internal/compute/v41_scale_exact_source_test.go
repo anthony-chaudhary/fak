@@ -74,12 +74,43 @@ func TestV41ScaleExactSourceContract(t *testing.T) {
 		"g_have_v41_scale_exact = v41ScaleExactBuilt ? 1 : 0;",
 		"return g_ready && g_v41IndexerFloatControls && g_have_v41_scale_exact &&",
 		"if (!dispatch(g_kern[K_V41_SCALE_EXACT], bufs, &pc, sizeof(pc), groups)) {",
-		"|| &k == &g_kern[K_V41_COMPRESSOR_POOL] || &k == &g_kern[K_V41_SCALE_EXACT]",
 		`"v41_tail_rope_exact", "v41_scale_exact",`,
 	} {
 		if !strings.Contains(shim, token) {
 			t.Errorf("missing strict scalar twin native contract %q", token)
 		}
+	}
+	// Membership in the checked dispatch expression must not depend on adjacent
+	// kernels; adding another checked kernel must preserve this source witness.
+	checkedExpression := func(source string) string {
+		_, rest, found := strings.Cut(source, "const bool checkedV41 =")
+		if !found {
+			return ""
+		}
+		expression, _, terminated := strings.Cut(rest, ";")
+		if !terminated {
+			return ""
+		}
+		return expression
+	}
+	const scaleExactTerm = "&k == &g_kern[K_V41_SCALE_EXACT]"
+	hasScaleExact := func(source string) bool {
+		for _, term := range strings.Split(checkedExpression(source), "||") {
+			if strings.TrimSpace(term) == scaleExactTerm {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasScaleExact(shim) {
+		t.Fatal("checkedV41 expression must include the strict scalar twin")
+	}
+	// Keep other SCALE_EXACT references intact: only checked dispatch admission
+	// is removed, so unrelated occurrences cannot satisfy the source witness.
+	expression := checkedExpression(shim)
+	broken := strings.Replace(shim, expression, strings.ReplaceAll(expression, scaleExactTerm, "false"), 1)
+	if hasScaleExact(broken) {
+		t.Error("source witness admitted SCALE_EXACT without checked dispatch")
 	}
 	// The ordinary exports must not hide behind the witness-archive guard.
 	exports := shim[strings.Index(shim, "int fvk_v41_scale_exact_module_abi("):]
