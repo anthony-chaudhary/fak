@@ -7,10 +7,12 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lstdc++ -lm
 #include <stdlib.h>
 #include "cuda_backend.h"
+int fak_cuda_argmax_f32(const float *dLogits, int n, int *outIdx);
 */
 import "C"
 
 import (
+	"math"
 	"sync/atomic"
 	"unsafe"
 )
@@ -88,14 +90,44 @@ func (c *cudaBackend) attentionNaive(q Tensor, kv KVStore, layer int, grp int, s
 
 // Argmax is the OTHER host fence (#482) and the one greedy decode uses: it runs the reduction
 // ON-DEVICE (k_argmax over the resident logits) and copies back only the single winning token
-// id — the full logits vector never crosses the bus. Like Read, the int copy drains g_stream,
-// so it bumps the fence generation (the logits it reduced are now Ready).
+// id — the full logits vector never crosses the bus. Only a successful device-0
+// reduction and scalar copy advance the fence generation, as with Read.
 func (c *cudaBackend) Argmax(logits Tensor) int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	id := int(C.fcuda_argmax_f32(c.cf(logits), C.int(logits.Numel())))
+	if err := c.faultLatch.Admit("argmax"); err != nil {
+		panic(err)
+	}
+	db, ok := logits.buf.(*cudaBuf)
+	if !ok || db == nil || logits.be != c || db.device != 0 {
+		panic(&CUDAOpError{Op: "Argmax", Site: "argmax-geometry", Msg: "requires a live device-0 tensor owned by this CUDA backend"})
+	}
+	if err := db.invalidStateError("buffer"); err != nil {
+		panic(err)
+	}
+	if logits.Dtype != F32 || db.ptr == nil {
+		panic(&CUDAOpError{Op: "Argmax", Site: "argmax-geometry", Msg: "requires resident F32 logits", Class: db.class})
+	}
+	elements := 1
+	for _, dim := range logits.Shape {
+		// k_argmax advances its signed int index by 256, including the last
+		// iteration. Bound both the C argument and that final increment.
+		if dim <= 0 || elements > (math.MaxInt32-255)/dim {
+			panic(&CUDAOpError{Op: "Argmax", Site: "argmax-geometry", Msg: "requires nonempty logits within the native index range", Class: db.class})
+		}
+		elements *= dim
+	}
+	if db.n < 0 || elements > db.n/F32.Bytes() {
+		panic(&CUDAOpError{Op: "Argmax", Site: "argmax-geometry", Msg: "logits exceed resident allocation", Class: db.class})
+	}
+	var id C.int
+	status := int(C.fak_cuda_argmax_f32((*C.float)(db.ptr), C.int(elements), &id))
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, "argmax", status)
+		panic(&CUDAOpError{Op: "Argmax", Site: "argmax", Code: status, Class: db.class, Msg: "native reduction or scalar read failed"})
+	}
 	atomic.AddUint64(&c.fenceGen, 1)
-	return id
+	return int(id)
 }
 
 // ---- async host-transfer witness (#482) -----------------------------------------

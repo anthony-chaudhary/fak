@@ -2915,29 +2915,72 @@ extern "C" int fcuda_graph_end_launch(void) {
   return rc;
 }
 
-// Persistent argmax index buffer (#969), grown ONCE and reused, exactly like g_attn_scratch
-// above. The previous code did fcuda_malloc(sizeof(int)) + fcuda_free per call; the pooled
-// allocator misses (-> cudaMalloc) on the first argmax of any size class, and CUDA forbids
-// cudaMalloc while g_stream is mid-capture ("operation not permitted when stream is capturing").
-// Since argmax is the final op of the captured decode graph, that lazy alloc crashed graph
-// capture/replay. A single persistent device int touched on every token never allocates inside
-// capture. ensure_argmax_idx() runs on the FIRST (uncaptured) fcuda_argmax_f32 call — the same
-// pre-warm role the explicit cuBLAS workspace prealloc in fcuda_init plays for the GEMM scratch
-// and the uncaptured halLogitsWarm step (internal/model/hal.go) plays for every pooled op output —
-// so by the time the first captured token runs, this buffer is already resident. There is no
-// separate fcuda_graph_warm() entry point; warming is exactly these three pre-capture allocations,
-// and the #969 g_capture_open guard in fcuda_malloc fails loud if any scratch was missed.
+// Persistent argmax index buffer on device 0 avoids an allocation per token.
+// Argmax is a host fence outside graph capture; the first call warms this allocation.
+// A failed allocation must not publish its unspecified output as reusable scratch.
 static int *g_argmax_idx = nullptr;
-static void ensure_argmax_idx(void) {
-  if (!g_argmax_idx) CK(cudaMalloc(&g_argmax_idx, sizeof(int)));
+static cudaError_t ensure_argmax_idx(void) {
+  if (g_argmax_idx) return cudaSuccess;
+  int *idx = nullptr;
+  const cudaError_t status = cudaMalloc(&idx, sizeof(int));
+  if (status == cudaSuccess) g_argmax_idx = idx;
+  return status;
 }
 
-extern "C" int fcuda_argmax_f32(const float *dLogits, int n) {
+// Private checked seam: retain the primary error, restore the calling thread's
+// device, and publish an index only when the entire operation succeeds. The
+// backend stream and persistent scratch both belong to device 0.
+extern "C" int fak_cuda_argmax_f32(const float *dLogits, int n, int *outIdx) {
+  int previous = 0;
+  cudaError_t status = cudaGetDevice(&previous);
+  if (status != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Argmax capture current device failed: %s\n",
+            cudaGetErrorString(status));
+    return (int)status;
+  }
   int hIdx = 0;
-  ensure_argmax_idx(); // no-op after the first call; never allocates inside a capture
-  k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, g_argmax_idx);
-  CK(cudaMemcpy(&hIdx, g_argmax_idx, sizeof(int), cudaMemcpyDeviceToHost));
-  g_host_bytes += sizeof(int); // only the token id crosses host-ward — the #482 witness
+  status = cudaSetDevice(0);
+  if (status == cudaSuccess) {
+    status = ensure_argmax_idx();
+    if (status != cudaSuccess) {
+      fprintf(stderr, "fak-cuda: Argmax scratch allocation failed: %s\n",
+              cudaGetErrorString(status));
+    } else {
+      k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, g_argmax_idx);
+      status = cudaGetLastError();
+      if (status != cudaSuccess) {
+        fprintf(stderr, "fak-cuda: Argmax kernel launch failed: %s\n",
+                cudaGetErrorString(status));
+      } else {
+        // The synchronous D2H copy on the legacy default stream waits for
+        // blocking g_stream: this is also the asynchronous execution boundary.
+        status = cudaMemcpy(&hIdx, g_argmax_idx, sizeof(int), cudaMemcpyDeviceToHost);
+        if (status == cudaSuccess) {
+          g_host_bytes += sizeof(int);
+        } else {
+          fprintf(stderr, "fak-cuda: Argmax device-to-host copy failed: %s\n",
+                  cudaGetErrorString(status));
+        }
+      }
+    }
+  } else {
+    fprintf(stderr, "fak-cuda: Argmax select device 0 failed: %s\n",
+            cudaGetErrorString(status));
+  }
+  const cudaError_t restored = cudaSetDevice(previous);
+  if (restored != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Argmax restore device %d failed: %s\n",
+            previous, cudaGetErrorString(restored));
+  }
+  if (status == cudaSuccess) status = restored;
+  if (status == cudaSuccess) *outIdx = hIdx;
+  return (int)status;
+}
+
+// Preserve the public index-returning ABI; a failed operation has no valid token.
+extern "C" int fcuda_argmax_f32(const float *dLogits, int n) {
+  int hIdx = -1;
+  if (fak_cuda_argmax_f32(dLogits, n, &hIdx) != 0) return -1;
   return hIdx;
 }
 
