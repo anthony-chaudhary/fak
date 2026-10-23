@@ -160,6 +160,7 @@ func serveAdmitActivatedExpertRing(plan compute.MemoryPlan, ring int64, sizing *
 		sizing.GuardTrimBytes += ring - trimmed
 		ring = trimmed
 		sizing.RingBytes = ring
+		sizing.Binding = serveExpertRingBindingGuard
 		plan = serveActivatedExpertRingResize(plan, ring)
 	}
 }

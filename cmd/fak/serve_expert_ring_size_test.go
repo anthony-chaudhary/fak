@@ -259,6 +259,51 @@ func TestSizeServeExpertRingTable(t *testing.T) {
 	})
 }
 
+// The startup log names the bound that set an auto ring, so a receipt can tell a live
+// MemAvailable or device-budget reading from the pool cap without re-deriving the inputs.
+// fak-test:runtime fast est=1ms lane=default
+func TestSizeServeExpertRingBinding(t *testing.T) {
+	f := ringSizingFit()
+	const token = 3 * ringGiB
+	nonRing := ringSizingNonRing(f, 2*ringGiB) // device 5 GiB, host page reserve 4 GiB
+	total := 1196 * ringGiB / 10               // strix3 MemTotal, 119.6 GiB: GTT pool cap 59.8 GiB
+	gtt := func(avail int64) serveExpertRingHost {
+		return serveExpertRingHost{Total: total, Avail: avail, Known: true, RSSAnonPeak: 2 * ringGiB, SharedPool: true, Carveout: 512 << 20, CarveoutKnown: true}
+	}
+	auto := serveExpertRingSize{Mode: serveExpertRingAuto}
+	for _, tc := range []struct {
+		name        string
+		size        serveExpertRingSize
+		fit         ggufload.ActivatedExpertFit
+		deviceAvail int64
+		host        serveExpertRingHost
+		want        serveExpertRingBinding
+	}{
+		{"pool_cap", auto, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingPool},
+		{"device_bound", auto, f, 40 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingDevice},
+		// The same box with 43 GiB less MemAvailable at load binds on the live host reading.
+		{"host_bound", auto, f, 200 * ringGiB, gtt(75 * ringGiB), serveExpertRingBindingHost},
+		{"band", auto, ggufload.ActivatedExpertFit{DeviceBaseBytes: f.DeviceBaseBytes, RoutedBandBytes: 20 * ringGiB, ActivatedLayerBytes: f.ActivatedLayerBytes, ActivatedTokenBytes: f.ActivatedTokenBytes, HostGatheredBytes: f.HostGatheredBytes}, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingBand},
+		{"floor", auto, f, 200 * ringGiB, serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true}, serveExpertRingBindingFloor},
+		{"auto_unmeasured", auto, f, compute.FreeUnknown, serveExpertRingHost{}, serveExpertRingBindingNone},
+		{"token", serveExpertRingSize{Mode: serveExpertRingToken}, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingNone},
+		{"explicit", serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 20 * ringGiB}, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := sizeServeExpertRing(tc.size, tc.fit, token, nonRing, tc.deviceAvail, tc.host)
+			if err != nil {
+				t.Fatalf("sizing err=%v", err)
+			}
+			if s.Binding != tc.want {
+				t.Fatalf("binding=%q ring=%d, want %q", s.Binding, s.RingBytes, tc.want)
+			}
+			if frag := "binding=" + string(tc.want) + " "; !strings.Contains(s.Text(), frag) {
+				t.Fatalf("log line lacks %q", frag)
+			}
+		})
+	}
+}
+
 func ringEnv(ring, fraction string) func(string) string {
 	return func(k string) string {
 		switch k {
@@ -437,6 +482,9 @@ func TestServeActivatedExpertRingAutoTrimsToTheLoadGuard(t *testing.T) {
 		t.Fatalf("auto placement against a small physical pool ok=%v err=%v", ok, err)
 	}
 	pool := compute.BudgetAfterHeadroom(host, serveGGUFDeviceHeadroom)
+	if auto.Sizing.Binding != serveExpertRingBindingGuard || !strings.Contains(auto.Sizing.Text(), "binding=guard ") {
+		t.Fatalf("guard-trimmed auto ring binding=%q, want %q in the sizing and its log line", auto.Sizing.Binding, serveExpertRingBindingGuard)
+	}
 	if auto.Sizing.GuardTrimBytes <= 0 || auto.RingBytes < floor || auto.RingBytes >= band || auto.Plan.Total() > pool {
 		t.Fatalf("auto ring=%d trim=%d floor=%d band=%d plan=%d pool=%d, want a ring trimmed to the physical pool",
 			auto.RingBytes, auto.Sizing.GuardTrimBytes, floor, band, auto.Plan.Total(), pool)

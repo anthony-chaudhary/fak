@@ -158,9 +158,26 @@ func serveExpertRingHostMargin(total int64) int64 {
 	return max(serveExpertRingHostMarginFloor, int64(float64(max(total, 0))*serveExpertRingHostMarginFraction))
 }
 
+// serveExpertRingBinding names the bound that set an auto ring, so a startup log shows which
+// live reading (device ceiling, host MemAvailable, pool cap, routed band, floor or the load-time
+// guard's live budget) chose the size instead of leaving it to be inferred from the inputs.
+type serveExpertRingBinding string
+
+const (
+	serveExpertRingBindingNone   serveExpertRingBinding = "none"
+	serveExpertRingBindingDevice serveExpertRingBinding = "device"
+	serveExpertRingBindingHost   serveExpertRingBinding = "host"
+	serveExpertRingBindingPool   serveExpertRingBinding = "pool"
+	serveExpertRingBindingBand   serveExpertRingBinding = "band"
+	serveExpertRingBindingFloor  serveExpertRingBinding = "floor"
+	serveExpertRingBindingGuard  serveExpertRingBinding = "guard"
+)
+
 // serveExpertRingSizing is the size choice and every input it was made from, for the log line.
 type serveExpertRingSizing struct {
-	Mode       serveExpertRingMode
+	Mode serveExpertRingMode
+	// Binding is the bound an auto ring took; none for token, explicit and unmeasured auto.
+	Binding    serveExpertRingBinding
 	RingBytes  int64
 	TokenBytes int64
 	Floor      int64
@@ -197,6 +214,7 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 	if s.Mode == "" {
 		s.Mode = serveExpertRingToken
 	}
+	s.Binding = serveExpertRingBindingNone
 	if s.Mode == serveExpertRingToken {
 		return s, nil
 	}
@@ -218,12 +236,17 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 			// Nothing measurable to size against: keep the admitted token ring.
 			return s, nil
 		}
-		ring := int64(math.MaxInt64)
+		ring, binding := int64(math.MaxInt64), serveExpertRingBindingNone
+		take := func(bound int64, b serveExpertRingBinding) {
+			if bound < ring {
+				ring, binding = bound, b
+			}
+		}
 		if s.DeviceBoundKnown {
-			ring = min(ring, s.DeviceBound)
+			take(s.DeviceBound, serveExpertRingBindingDevice)
 		}
 		if s.HostBoundKnown {
-			ring = min(ring, s.HostBound)
+			take(s.HostBound, serveExpertRingBindingHost)
 		}
 		if host.Known && host.Total > 0 {
 			s.PoolFraction = size.PoolFraction
@@ -231,12 +254,14 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 				s.PoolFraction = serveExpertRingDefaultPoolFraction(host)
 			}
 			s.PoolCapBytes = int64(s.PoolFraction * float64(host.Total))
-			ring = min(ring, s.PoolCapBytes)
+			take(s.PoolCapBytes, serveExpertRingBindingPool)
 		}
-		s.RingBytes = min(ring, s.Ceiling)
+		take(s.Ceiling, serveExpertRingBindingBand)
+		s.RingBytes = ring
 		if s.RingBytes < s.Floor {
-			s.RingBytes = s.Floor
+			s.RingBytes, binding = s.Floor, serveExpertRingBindingFloor
 		}
+		s.Binding = binding
 	case serveExpertRingExplicit:
 		s.RingBytes = min(size.Bytes, s.Ceiling)
 	default:
@@ -280,8 +305,12 @@ func (s serveExpertRingSizing) Text() string {
 	if mode == "" {
 		mode = serveExpertRingToken
 	}
-	return fmt.Sprintf("ring size mode=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) pool_cap=%s guard_trim=%s host_gathered=%s page_reserve=%s",
-		mode, bytesText(uint64(max(s.RingBytes, 0))), bytesText(uint64(max(s.TokenBytes, 0))),
+	binding := s.Binding
+	if binding == "" {
+		binding = serveExpertRingBindingNone
+	}
+	return fmt.Sprintf("ring size mode=%s binding=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) pool_cap=%s guard_trim=%s host_gathered=%s page_reserve=%s",
+		mode, binding, bytesText(uint64(max(s.RingBytes, 0))), bytesText(uint64(max(s.TokenBytes, 0))),
 		bytesText(uint64(max(s.Floor, 0))), bytesText(uint64(max(s.Ceiling, 0))),
 		bound(s.DeviceBound, s.DeviceBoundKnown), bytesText(uint64(max(s.DeviceAvail, 0))), bytesText(uint64(max(s.NonRingDevice, 0))),
 		bound(s.HostBound, s.HostBoundKnown), bytesText(uint64(max(s.HostAvail, 0))), bytesText(uint64(s.RSSAnonPeak)),
