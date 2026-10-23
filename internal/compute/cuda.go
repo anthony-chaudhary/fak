@@ -1111,8 +1111,8 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		// scales), F32 accumulate. No dequant-to-f32 round trip — the weight stays int8 in VRAM.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
-			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
+		status = int(C.fak_cuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
+			C.int(out), C.int(in), 1, C.int(w.Quant.Block)))
 	case Q4_K:
 		// native Q4_K GEMV (#485): the dequant (w = d·scale·code − dmin·min) is fused into the
 		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.

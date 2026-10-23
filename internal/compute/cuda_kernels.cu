@@ -1401,7 +1401,7 @@ static signed char *g_q8_qX = nullptr;
 static int g_q8_qX_cap = 0; // bytes
 static float *g_q8_xScale = nullptr;
 static int g_q8_xScale_cap = 0; // floats
-// Checked only for compensated prefill; decode/small-P behavior is unchanged.
+// Immediate submission status only; successful launches remain asynchronous.
 extern "C" int fak_cuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                     float *dY, int out, int in, int P, int block) {
   if (P >= 128) {
@@ -1421,9 +1421,12 @@ extern "C" int fak_cuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales
     g_q8_xScale_cap = needScale;
   }
   k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
+  cudaError_t launch = cudaGetLastError();
+  if (launch != cudaSuccess) return 20000 + (int)launch;
   k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block);
-  return 0;
+  launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 20000 + (int)launch;
 }
 
 extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
