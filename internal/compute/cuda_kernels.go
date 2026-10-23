@@ -5,6 +5,8 @@ package compute
 /*
 #include <stdint.h>
 #include "cuda_backend.h"
+int fak_cuda_matmul_f32(const float *w, const float *x, float *y, int out, int in, int p);
+int fak_cuda_matmul_f16(const void *w, const float *x, float *y, int out, int in, int p, int col_major);
 
 int fak_qwen35_embedding_gather_f32(
     const float *dEmbedding, const int *hIDs, int *dIDs, float *dOut,
@@ -103,6 +105,10 @@ func (c *cudaBackend) qwen35SequenceAllocLocked(shape []int, site string) (Tenso
 }
 
 func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site string) (Tensor, *cudaBuf, error) {
+	if err := c.faultLatch.Admit(site); err != nil {
+		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
+	}
+	var status int
 	y, b, err := c.qwen35SequenceAllocLocked([]int{tokens, w.Shape[0]}, site)
 	if err != nil {
 		return Tensor{}, nil, err
@@ -111,9 +117,9 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 	wb := w.buf.(*cudaBuf)
 	switch w.Dtype {
 	case F32:
-		C.fcuda_matmul_f32((*C.float)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+		status = int(C.fak_cuda_matmul_f32((*C.float)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens)))
 	case F16:
-		C.fcuda_matmul_f16(wb.ptr, c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), colMajorFlag(w))
+		status = int(C.fak_cuda_matmul_f16(wb.ptr, c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), colMajorFlag(w)))
 	case Q8_0:
 		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))
 	case Q4_K:
@@ -129,6 +135,11 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 	default:
 		c.releaseTransientBuffers([]*cudaBuf{b})
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Reason: "unsupported resident matrix dtype " + w.Dtype.String()}
+	}
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, site, status)
+		// Keep the output in the sequence-owned transient set for failure cleanup.
+		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: &CUDAOpError{Op: "MatMul", Site: site, Code: status, Class: MemoryActivation}}
 	}
 	return y, b, nil
 }

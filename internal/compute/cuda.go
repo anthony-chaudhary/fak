@@ -26,6 +26,8 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lstdc++ -lm
 #include <stdlib.h>
 #include "cuda_backend.h"
+int fak_cuda_matmul_f32(const float *w, const float *x, float *y, int out, int in, int p);
+int fak_cuda_matmul_f16(const void *w, const float *x, float *y, int out, int in, int p, int col_major);
 int fak_cuda_read_d2h(int device, void *h, const void *d, size_t n);
 */
 import "C"
@@ -1055,16 +1057,20 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
+	if err := c.faultLatch.Admit("matmul"); err != nil {
+		panic(err)
+	}
+	var status int
 	var y Tensor
 	switch w.Dtype {
 	case F32:
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_matmul_f32(c.cf(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		status = int(C.fak_cuda_matmul_f32(c.cf(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1))
 	case F16:
 		// tensor-core HGEMM (#484): F16 weight, f32 activation (converted to __half C-side), f32
 		// accumulate/output. P=1 (decode GEMV); the activation x stays F32-resident.
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_matmul_f16(c.cptr(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1, colMajorFlag(w))
+		status = int(C.fak_cuda_matmul_f16(c.cptr(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1, colMajorFlag(w)))
 	case Q8_0:
 		// native Q8_0 GEMV (#485): int8 codes + per-block f32 scales resident, the activation
 		// quantized to int8 ON DEVICE; integer per-block dot scaled by (weight·activation block
@@ -1109,6 +1115,11 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 			Class: MemoryActivation,
 		})
 	}
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, "matmul", status)
+		panic(&CUDAOpError{Op: "MatMul", Site: "matmul-submit", Code: status, Class: MemoryActivation})
+	}
+
 	// Shape post-condition (#972): the GEMV must yield exactly `out` rows. A wrong-shaped result
 	// (the sm_80 / CUDA-13.0 witness saw a non-block-aligned out=257 come back as 64) is a launch
 	// or binding fault — fail loud at the call site naming the dtype + dims, not silently downstream.
@@ -1129,15 +1140,19 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	out, in := requireCUDAMatMulGeometry("BatchedMatMul", w, X, P)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if err := c.faultLatch.Admit("matmul"); err != nil {
+		panic(err)
+	}
+	var status int
 	var y Tensor
 	switch w.Dtype {
 	case F32:
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_matmul_f32(c.cf(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		status = int(C.fak_cuda_matmul_f32(c.cf(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P)))
 	case F16:
 		// tensor-core HGEMM (#484): the prefill GEMM where fp16/tensor-cores pay off most.
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_matmul_f16(c.cptr(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P), colMajorFlag(w))
+		status = int(C.fak_cuda_matmul_f16(c.cptr(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P), colMajorFlag(w)))
 	case Q8_0:
 		// native Q8_0 prefill GEMM (#485): each of the P activation rows is quantized to int8 on
 		// device, then the per-block integer dot against the resident int8 weight, F32 accumulate.
@@ -1181,6 +1196,11 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			Class: MemoryActivation,
 		})
 	}
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, "matmul", status)
+		panic(&CUDAOpError{Op: "BatchedMatMul", Site: "matmul-submit", Code: status, Class: MemoryActivation})
+	}
+
 	// Shape post-condition (#972): the batched GEMM must yield exactly P*out elements. Catch a
 	// short/wrong-shaped device result loud at the call site rather than as silent garbage.
 	if n, want := y.Numel(), P*out; n != want {

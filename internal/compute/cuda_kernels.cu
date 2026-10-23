@@ -1156,13 +1156,11 @@ extern "C" void fcuda_qwen35_gdn_operations_reset(void) { g_qwen35_gdn_operation
 // y[P,out] = x[P,in] @ W[out,in]^T, all row-major. Column-major cuBLAS recipe:
 // treat row-major W[out,in] as col-major [in,out] (op=T), row-major X[P,in] as col-major
 // [in,P] (op=N); the col-major out[out,P] result IS row-major Y[P,out]. Verified by index.
-extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P) {
+// Private asynchronous checked seams. -1 means scratch was unavailable (including
+// a capture pool miss); 10000+status identifies cuBLAS, 20000+status a CUDA launch.
+// Success means accepted submission, not completion: no readiness fence advances.
+extern "C" int fak_cuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P) {
   const float alpha = 1.0f, beta = 0.0f;
-  // F32 SGEMM. The F16 HGEMM peer below checks its status; this path historically did NOT, so a
-  // failed launch (e.g. a cuBLAS/launch-config change on a new arch+toolkit pair — #972 first
-  // surfaced on sm_80 / CUDA 13.0) left dY stale and the device output looked structurally wrong
-  // (a non-block-aligned out dim came back short) with no diagnostic. Check + name the dims so the
-  // next witness run pinpoints the failure instead of reporting silent garbage.
   cublasStatus_t st = cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N,
               out, P, in,
               &alpha,
@@ -1172,13 +1170,14 @@ extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, in
               dY, out);
   if (st != CUBLAS_STATUS_SUCCESS) {
     fprintf(stderr, "fak-cuda: cublasSgemm(out=%d,in=%d,P=%d) failed: %d\n", out, in, P, (int)st);
-    // FAIL-SAFE (#972): a failed SGEMM leaves dY untouched, and dY is a RECYCLED pool buffer,
-    // so a stale (smaller) prior allocation's content reads back as a plausible-but-wrong vector
-    // (the "out=257 -> got 64" ghost the issue reports). Zero the full out*P result so a failed
-    // launch yields an unambiguous all-zero vector the cosine/shape gate rejects deterministically,
-    // never a short/garbage read that masquerades as a real result.
-    cudaMemsetAsync(dY, 0, (size_t)out * (size_t)P * sizeof(float), g_stream);
+    return 10000 + (int)st;
   }
+  return 0;
+}
+
+// Keep the public void ABI; Go callers use the checked seam and reject failures.
+extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P) {
+  (void)fak_cuda_matmul_f32(dW, dX, dY, out, in, P);
 }
 
 // ---- fp16 compute path (#484): F16 weights + tensor-core HGEMM ------------------
@@ -1219,11 +1218,17 @@ extern "C" void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, i
 //   colMajor==0 (row-major W [out,in]):  op_T on A, lda=in  (W treated as col-major [in,out]).
 //   colMajor!=0 (W repacked col-major):  op_N on A, lda=out (W IS col-major [out,in]).
 // Both yield C col-major [out,P] == row-major Y[P,out] (ldc=out), B = X col-major [in,P] (ldb=in).
-extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
+extern "C" int fak_cuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
                                  int out, int in, int P, int colMajor) {
   const __half *A = (const __half *)dWhalf;
   __half *dXh = (__half *)fcuda_malloc((size_t)P * in * sizeof(__half));
+  if (!dXh) return -1;
   k_f32_to_f16<<<(P * in + 255) / 256, 256, 0, g_stream>>>(dX, dXh, P * in);
+  const cudaError_t launch = cudaGetLastError();
+  if (launch != cudaSuccess) {
+    fcuda_free(dXh);
+    return 20000 + (int)launch;
+  }
   const float alpha = 1.0f, beta = 0.0f;
   cublasStatus_t st;
   if (colMajor) {
@@ -1238,7 +1243,14 @@ extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
                       CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
   }
   if (st != CUBLAS_STATUS_SUCCESS) fprintf(stderr, "fak-cuda: cublasGemmEx(HGEMM) failed: %d\n", (int)st);
+  // The pool reuses scratch only on this same ordered stream, including capture.
   fcuda_free(dXh);
+  return st == CUBLAS_STATUS_SUCCESS ? 0 : 10000 + (int)st;
+}
+
+extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
+                                 int out, int in, int P, int colMajor) {
+  (void)fak_cuda_matmul_f16(dWhalf, dX, dY, out, in, P, colMajor);
 }
 
 // ---- native quantized device GEMM (#485): Q8_0 + Q4_K, no dequant-to-f32 --------
