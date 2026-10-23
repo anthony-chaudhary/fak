@@ -13,6 +13,7 @@
 // in cuda_backend.h). The default `go build` excludes it; only `-tags cuda` links it.
 
 #include "cuda_backend.h"
+#include "cuda_device_scope.h"
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>  /* __half + __float2half — the fp16 compute path (#484) */
@@ -411,6 +412,8 @@ extern "C" int fcuda_set_device(int device) {
 
 extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
   if (bytes == 0) bytes = 1;
+  FcudaDeviceScope caller_device;
+  if (caller_device.status() != cudaSuccess) return nullptr;
   if (fcuda_set_device(device) != 0) return nullptr;
   void *d = nullptr;
   cudaError_t e = cudaMalloc(&d, bytes);
@@ -424,12 +427,16 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
 
 extern "C" void fcuda_free_on(int device, void *d) {
   if (!d) return;
+  FcudaDeviceScope caller_device;
+  if (caller_device.status() != cudaSuccess) return;
   if (fcuda_set_device(device) != 0) return;
   q4_coeff_cache_evict(d);
   CK(cudaFree(d));
 }
 
 extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
+  FcudaDeviceScope caller_device;
+  if (caller_device.status() != cudaSuccess) return;
   if (fcuda_set_device(device) != 0) return;
   cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
   if (e == cudaSuccess) g_h2d_bytes += n;
@@ -437,6 +444,8 @@ extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
 }
 
 extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
+  FcudaDeviceScope caller_device;
+  if (caller_device.status() != cudaSuccess) return;
   if (fcuda_set_device(device) != 0) return;
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
   if (e == cudaSuccess) g_host_bytes += n;
@@ -444,6 +453,8 @@ extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
 }
 
 extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
+  FcudaDeviceScope caller_device;
+  if (caller_device.status() != cudaSuccess) return;
   if (fcuda_set_device(device) != 0) return;
   CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream));
 }

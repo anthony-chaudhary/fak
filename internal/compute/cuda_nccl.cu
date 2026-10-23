@@ -24,6 +24,7 @@
 // in-rank-order reference is a host-staged sum; this file is the performant device path.
 
 #include "cuda_backend.h"
+#include "cuda_device_scope.h"
 #include <cuda_runtime.h>
 #include <nccl.h>
 #include <stdio.h>
@@ -42,6 +43,8 @@ extern "C" int fcuda_nccl_init(int n) {
   if (n <= 0) return -1;
   if (g_world == n) return 0;  // idempotent: already initialized over this many ranks
   if (g_world != 0) return -2; // re-init with a different world is a caller error (free first)
+  FcudaDeviceScope caller_device;
+  CKR(caller_device.status());
   int avail = 0;
   if (cudaGetDeviceCount(&avail) != cudaSuccess) return -3;
   if (n > avail) return -4;    // asked for more ranks than the box has GPUs
@@ -73,6 +76,8 @@ extern "C" int fcuda_nccl_allreduce_f32(void **dbufs, int n, int count) {
   if (g_world == 0) return -1;
   if (n != g_world) return -2;
   if (count <= 0) return -3;
+  FcudaDeviceScope caller_device;
+  CKR(caller_device.status());
   NK(ncclGroupStart());
   for (int r = 0; r < n; r++) {
     // Set the device before each grouped collective: in single-process-multi-GPU NCCL the call
@@ -98,6 +103,8 @@ extern "C" int fcuda_nccl_allgather_f32(void **dsend, void **drecv, int n, int s
   if (g_world == 0) return -1;
   if (n != g_world) return -2;
   if (sendcount <= 0) return -3;
+  FcudaDeviceScope caller_device;
+  CKR(caller_device.status());
   NK(ncclGroupStart());
   for (int r = 0; r < n; r++) {
     CKR(cudaSetDevice(r));
@@ -119,6 +126,8 @@ extern "C" int fcuda_nccl_reducescatter_f32(void **dsend, void **drecv, int n, i
   if (g_world == 0) return -1;
   if (n != g_world) return -2;
   if (recvcount <= 0) return -3;
+  FcudaDeviceScope caller_device;
+  CKR(caller_device.status());
   NK(ncclGroupStart());
   for (int r = 0; r < n; r++) {
     CKR(cudaSetDevice(r));
