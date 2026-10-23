@@ -157,12 +157,19 @@ func TestV41DeferredNeutralDecodeAndVulkanCompatibility(t *testing.T) {
 						}
 						return
 					}
-					// Check the concrete synchronous cause through errors.As, not
-					// just its text, and preserve errors.Is for that exact cause.
-					target := reflect.New(reflect.TypeOf(c.cause))
-					if !errors.As(got, target.Interface()) || !reflect.DeepEqual(target.Elem().Interface(), c.cause) ||
-						!errors.Is(got, attributed.Recovered.(error)) {
+					// Preserve errors.Is for the exact synchronous cause. A typed
+					// cause must also survive errors.As; an untyped string cause
+					// shares its dynamic type with the ErrVulkanExecutionFailed
+					// sentinel that precedes it in the chain, so errors.As cannot
+					// name it and identity is the contract.
+					if !errors.Is(got, attributed.Recovered.(error)) {
 						t.Fatalf("operation cause lost from error chain: %v", got)
+					}
+					if reflect.TypeOf(c.cause) != reflect.TypeOf(ErrVulkanExecutionFailed) {
+						target := reflect.New(reflect.TypeOf(c.cause))
+						if !errors.As(got, target.Interface()) || !reflect.DeepEqual(target.Elem().Interface(), c.cause) {
+							t.Fatalf("typed operation cause lost from error chain: %v", got)
+						}
 					}
 				})
 			}
