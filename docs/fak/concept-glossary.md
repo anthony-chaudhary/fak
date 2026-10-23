@@ -1616,3 +1616,31 @@ V41WorkloadCoverage is the exported scope and missingness contract for fixed mod
 Vulkan compute entrypoint consuming resident Q and caller-preappended K/V pointers over a caller-owned prefix, computing one causal panel.
 
 **Distinct from:** Low-level kernel versus qwen35FullAttentionHAL model orchestration/KV lifecycle and Metal FullAttentionDevice.
+
+
+### RooflinePolicy
+
+Explicit arithmetic admission policy binding a roofline receipt to a named device, memory bandwidth metric, units, memory/workload scope, denominator kind and minimum attainment and numerical-similarity thresholds.
+
+**Distinct from:** RooflinePolicy declares comparable dimensions and numeric acceptance thresholds; ClassWitnessed classifies observed benchmark evidence. Passing this policy does not establish physical execution, qualify a measured ceiling, or promote a theoretical ceiling to measured evidence.
+
+
+### LegacyStrixHaloRooflinePolicy
+
+Named compatibility preset selecting the original Strix Halo theoretical device-DRAM roofline campaign, accepted device aliases, full-ceiling denominator kind, 80-percent attainment target and legacy numerical-similarity floor; it supplies no bandwidth ceiling.
+
+**Distinct from:** This function constructs one explicitly named legacy RooflinePolicy, not a policy inferred from another device and not the validator or a measurement. Unlike arbitrary RooflinePolicy values it fixes the historical theoretical campaign; a measured ceiling requires a separate explicit policy and independent qualification.
+
+
+### ValidateRooflineAttainmentWithPolicy
+
+Pure roofline receipt validation operation that checks an explicit RooflinePolicy, full-ceiling provenance and matching device, metric, units and scope before computing attainment and enforcing the declared numerical thresholds.
+
+**Distinct from:** The validator applies a supplied RooflinePolicy rather than declaring one or selecting the LegacyStrixHaloRooflinePolicy preset. Arithmetic acceptance is not physical-execution authority, measured-ceiling qualification or permission to relabel theoretical evidence.
+
+
+### ErrInvalidRooflinePolicy
+
+Stable error sentinel for an invalid explicit roofline-policy configuration, including missing identity or scope, unsupported denominator dimensions, invalid aliases, and nonfinite or out-of-range thresholds.
+
+**Distinct from:** This error labels configuration refusal from RooflinePolicy validation; it is not a policy instance, the legacy preset, or the ValidateRooflineAttainmentWithPolicy operation. It does not certify receipt evidence and remains distinct from denominator incompatibility and below-target attainment errors.

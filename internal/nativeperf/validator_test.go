@@ -3,10 +3,196 @@ package nativeperf
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
 )
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRooflineExplicitPolicy(t *testing.T) {
+	// These are synthetic arithmetic fixtures, not hardware bandwidth claims.
+	halo := LegacyStrixHaloRooflinePolicy()
+	measured := halo
+	measured.DenominatorKind = RooflineMeasuredCeiling
+	other := measured
+	other.TargetDevice, other.DeviceAliases = "synthetic-nvidia-device", nil
+	other.MinimumAttainmentRatio, other.MinimumLogitCosineSimilarity = 0.75, 0.99
+	fixture := func(p RooflinePolicy) *BenchmarkReceipt {
+		return &BenchmarkReceipt{
+			Device: p.TargetDevice, ModelArchitecture: "qwen38",
+			BandwidthMetric: p.Metric, BandwidthUnits: p.Units, BandwidthScope: p.Scope,
+			RooflineDenominator: &RooflineDenominator{
+				Value: 100, Kind: p.DenominatorKind, TargetDevice: p.TargetDevice,
+				Metric: p.Metric, Units: p.Units, Scope: p.Scope,
+			},
+			AchievedBandwidthGBps: 80, LogitCosineSimilarity: 0.999948,
+			Simulated: true, ProofToken: "synthetic-arithmetic-only-not-execution-proof",
+		}
+	}
+	type testCase struct {
+		name      string
+		policy    RooflinePolicy
+		edit      func(*BenchmarkReceipt)
+		legacy    bool
+		json      string
+		wantErr   error
+		decodeErr bool
+		wantRatio float64
+	}
+	cases := []testCase{
+		{name: "full theoretical ceiling", policy: halo, wantRatio: 0.8},
+		{name: "full measured ceiling", policy: measured, wantRatio: 0.8},
+		{name: "second explicit device and thresholds", policy: other, edit: func(r *BenchmarkReceipt) {
+			r.AchievedBandwidthGBps, r.LogitCosineSimilarity = 75, 0.995
+		}, wantRatio: 0.75},
+		{name: "64 percent cannot pass full ceiling", policy: halo, edit: func(r *BenchmarkReceipt) {
+			r.AchievedBandwidthGBps, r.Target80PctBandwidthGBps = 64, 80
+		}, wantErr: ErrSubRooflineAttainment},
+		{name: "threshold is not full ceiling", policy: halo, edit: func(r *BenchmarkReceipt) {
+			r.RooflineDenominator = nil
+			r.AchievedBandwidthGBps, r.Target80PctBandwidthGBps = 64, 80
+		}, wantErr: ErrMissingDenominator},
+		{name: "legacy threshold is not full ceiling", policy: halo, legacy: true, edit: func(r *BenchmarkReceipt) {
+			r.RooflineDenominator = nil
+			r.AchievedBandwidthGBps, r.Target80PctBandwidthGBps = 64, 80
+		}, wantErr: ErrMissingDenominator},
+		{name: "legacy full ceiling retains exact floor", policy: halo, legacy: true, edit: func(r *BenchmarkReceipt) {
+			r.RooflineDenominator, r.TheoreticalPeakBandwidthGBps = nil, 100
+			r.BandwidthMetric, r.BandwidthUnits, r.BandwidthScope = "", "", ""
+		}, wantRatio: 0.8},
+		{name: "legacy measured cannot enter theoretical packet", policy: measured, legacy: true, wantErr: ErrIncompatibleDenominator},
+		{name: "legacy device substrings refused", policy: halo, legacy: true, edit: func(r *BenchmarkReceipt) { r.Device = "not-gfx1151" }, wantErr: ErrMismatchedTargetDevice},
+		{name: "conflicting target device", policy: halo, edit: func(r *BenchmarkReceipt) { r.TargetDevice = other.TargetDevice }, wantErr: ErrMismatchedTargetDevice},
+		{name: "other device needs its own policy", policy: halo, edit: func(r *BenchmarkReceipt) { r.Device = other.TargetDevice }, wantErr: ErrMismatchedTargetDevice},
+		{name: "denominator device mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.TargetDevice = other.TargetDevice }, wantErr: ErrIncompatibleDenominator},
+		{name: "denominator metric mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Metric = "tokens_per_second" }, wantErr: ErrIncompatibleDenominator},
+		{name: "denominator units mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Units = "Gb/s" }, wantErr: ErrIncompatibleDenominator},
+		{name: "denominator scope mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Scope = "device-cache" }, wantErr: ErrIncompatibleDenominator},
+		{name: "achieved metric mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.BandwidthMetric = "tokens_per_second" }, wantErr: ErrIncompatibleDenominator},
+		{name: "achieved units mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.BandwidthUnits = "GiB/s" }, wantErr: ErrIncompatibleDenominator},
+		{name: "achieved scope mismatch", policy: halo, edit: func(r *BenchmarkReceipt) { r.BandwidthScope = "host-dram" }, wantErr: ErrIncompatibleDenominator},
+		{name: "missing dimensions are not inferred", policy: halo, edit: func(r *BenchmarkReceipt) { r.BandwidthScope = "" }, wantErr: ErrIncompatibleDenominator},
+		{name: "threshold kind refused", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Kind = "target" }, wantErr: ErrIncompatibleDenominator},
+		{name: "measured is not theoretical", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Kind = RooflineMeasuredCeiling }, wantErr: ErrIncompatibleDenominator},
+		{name: "explicit plus legacy denominator ambiguous", policy: halo, edit: func(r *BenchmarkReceipt) { r.TheoreticalPeakBandwidthGBps = 100 }, wantErr: ErrIncompatibleDenominator},
+		{name: "two flat denominators ambiguous", policy: halo, edit: func(r *BenchmarkReceipt) {
+			r.RooflineDenominator = nil
+			r.TheoreticalPeakBandwidthGBps, r.MeasuredPeakBandwidthGBps = 100, 100
+		}, wantErr: ErrIncompatibleDenominator},
+		{name: "finite inputs cannot produce infinite ratio", policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Value = math.SmallestNonzeroFloat64 }, wantErr: ErrInvalidMetrics},
+		{name: "numerical floor retained", policy: halo, edit: func(r *BenchmarkReceipt) { r.LogitCosineSimilarity = 0.99985 }, wantErr: ErrLogitDivergence},
+		{name: "nested measured preserves provenance", policy: measured, json: `{"device":"gfx1151","model_architecture":"qwen38","bandwidth_metric":"memory_bandwidth","bandwidth_units":"GB/s","bandwidth_scope":"device-dram","roofline_attainment":{"measured_roofline":100,"useful_throughput":80},"logit_cosine_similarity":0.999948,"simulated":true,"proof_token":"synthetic"}`, wantRatio: 0.8},
+		{name: "nested measured fails legacy packet", policy: halo, legacy: true, json: `{"device":"gfx1151","model_architecture":"qwen38","roofline_attainment":{"measured_roofline":100,"useful_throughput":80},"logit_cosine_similarity":0.999948,"simulated":true,"proof_token":"synthetic"}`, wantErr: ErrIncompatibleDenominator},
+		{name: "nested full theoretical remains supported", policy: halo, legacy: true, json: `{"hardware":{"target_isa":"gfx1151","peak_dram_bandwidth_gbps":100},"workload":{"model":"qwen38"},"roofline_attainment":{"useful_throughput":80},"logit_cosine_similarity":0.999948,"simulated":true,"proof_token":"synthetic"}`, wantRatio: 0.8},
+		{name: "nested negative ceiling retained for refusal", policy: halo, legacy: true, json: `{"device":"gfx1151","model_architecture":"qwen38","hardware":{"peak_dram_bandwidth_gbps":-1},"achieved_bandwidth_gbps":80,"logit_cosine_similarity":0.999948,"simulated":true,"proof_token":"synthetic"}`, wantErr: ErrMissingDenominator},
+		{name: "nested zero flat ceiling cannot be replaced", policy: halo, json: `{"theoretical_peak_bandwidth_gbps":0,"hardware":{"peak_dram_bandwidth_gbps":100}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "nested device mismatch refused", policy: halo, json: `{"device":"gfx1151","hardware":{"target_isa":"synthetic-nvidia-device","peak_dram_bandwidth_gbps":100}}`, wantErr: ErrMismatchedTargetDevice, decodeErr: true},
+		{name: "nested measured and theoretical ambiguous", policy: halo, legacy: true, json: `{"device":"gfx1151","model_architecture":"qwen38","hardware":{"peak_dram_bandwidth_gbps":100},"roofline_attainment":{"measured_roofline":80,"useful_throughput":80},"logit_cosine_similarity":0.999948,"simulated":true,"proof_token":"synthetic"}`, wantErr: ErrIncompatibleDenominator},
+		{name: "duplicate ceiling cannot discount denominator", policy: halo, json: `{"device":"gfx1151","model_architecture":"qwen38","theoretical_peak_bandwidth_gbps":100,"theoretical_peak_bandwidth_gbps":80,"achieved_bandwidth_gbps":64,"logit_cosine_similarity":0.999948}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "case variant ceiling duplicate", policy: halo, json: `{"theoretical_peak_bandwidth_gbps":100,"THEORETICAL_PEAK_BANDWIDTH_GBPS":80}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "escaped ceiling duplicate", policy: halo, json: `{"theoretical_peak_bandwidth_gbps":100,"theoretical_peak_bandwidth_\u0067bps":80}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "typed denominator duplicate value", policy: halo, json: `{"roofline_denominator":{"value":100,"value":80}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "typed denominator duplicate kind", policy: halo, json: `{"roofline_denominator":{"kind":"measured","KIND":"theoretical"}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "nested hardware duplicate ceiling", policy: halo, json: `{"hardware":{"peak_dram_bandwidth_gbps":100,"PEAK_DRAM_BANDWIDTH_GBPS":80}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "nested measured duplicate ceiling", policy: measured, json: `{"roofline_attainment":{"measured_roofline":100,"MEASURED_ROOFLINE":80}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "conflicting achieved bandwidth refused", policy: halo, json: `{"theoretical_peak_bandwidth_gbps":100,"achieved_bandwidth_gbps":80,"roofline_attainment":{"useful_throughput":64}}`, wantErr: ErrInvalidMetrics, decodeErr: true},
+		{name: "conflicting logit similarity refused", policy: halo, json: `{"logit_cosine_similarity":0.999948,"numerical_parity":{"logit_cosine_similarity":0.9}}`, wantErr: ErrInvalidMetrics, decodeErr: true},
+		{name: "opaque metadata contents unchanged", policy: halo, legacy: true, json: `{"device":"gfx1151","model_architecture":"qwen38","theoretical_peak_bandwidth_gbps":100,"achieved_bandwidth_gbps":80,"logit_cosine_similarity":0.999948,"simulated":true,"proof_token":"synthetic","metadata":{"value":100,"value":80}}`, wantRatio: 0.8},
+
+		{name: "nested conflicting theoretical ceiling", policy: halo, json: `{"theoretical_peak_bandwidth_gbps":100,"hardware":{"peak_dram_bandwidth_gbps":80}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+		{name: "nested conflicting measured ceiling", policy: measured, json: `{"measured_peak_bandwidth_gbps":100,"roofline_attainment":{"measured_roofline":80}}`, wantErr: ErrIncompatibleDenominator, decodeErr: true},
+	}
+	for _, value := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		cases = append(cases,
+			testCase{name: "invalid ceiling " + fmt.Sprint(value), policy: halo, edit: func(r *BenchmarkReceipt) { r.RooflineDenominator.Value = value }, wantErr: ErrMissingDenominator},
+			testCase{name: "invalid achieved " + fmt.Sprint(value), policy: halo, edit: func(r *BenchmarkReceipt) { r.AchievedBandwidthGBps = value }, wantErr: ErrMissingDenominator})
+	}
+	for _, value := range []float64{0, -1, 1.01, math.NaN(), math.Inf(1)} {
+		invalidRatio, invalidSimilarity := halo, halo
+		invalidRatio.MinimumAttainmentRatio = value
+		invalidSimilarity.MinimumLogitCosineSimilarity = value
+		cases = append(cases,
+			testCase{name: "invalid policy attainment " + fmt.Sprint(value), policy: invalidRatio, wantErr: ErrInvalidRooflinePolicy},
+			testCase{name: "invalid policy similarity " + fmt.Sprint(value), policy: invalidSimilarity, wantErr: ErrInvalidRooflinePolicy})
+	}
+	for name, edit := range map[string]func(*RooflinePolicy){
+		"device": func(p *RooflinePolicy) { p.TargetDevice = "" },
+		"scope":  func(p *RooflinePolicy) { p.Scope = "" },
+		"metric": func(p *RooflinePolicy) { p.Metric = "tokens_per_second" },
+		"units":  func(p *RooflinePolicy) { p.Units = "Gb/s" },
+		"kind":   func(p *RooflinePolicy) { p.DenominatorKind = "target" },
+	} {
+		invalid := halo
+		edit(&invalid)
+		cases = append(cases, testCase{name: "invalid policy " + name, policy: invalid, wantErr: ErrInvalidRooflinePolicy})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := fixture(tc.policy)
+			if tc.json != "" {
+				// Reusing a receipt must not retain stale full ceilings from prior JSON.
+				err := json.Unmarshal([]byte(tc.json), r)
+				if tc.decodeErr {
+					if !errors.Is(err, tc.wantErr) {
+						t.Fatalf("decode error = %v, want %v", err, tc.wantErr)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.edit != nil {
+				tc.edit(r)
+			}
+			var res *VerificationResult
+			var err error
+			if tc.legacy {
+				res, err = ValidateRooflineAttainment(r)
+			} else {
+				res, err = ValidateRooflineAttainmentWithPolicy(r, tc.policy)
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				if res != nil && res.Clean() {
+					t.Fatal("invalid receipt passed")
+				}
+				if tc.legacy {
+					if _, err := GenerateReproducibilityPacket(r); err == nil {
+						t.Fatal("legacy packet accepted rejected receipt")
+					}
+				}
+				return
+			}
+			if !res.Clean() || res.AttainmentRatio != tc.wantRatio {
+				t.Fatalf("unexpected result: %+v", res)
+			}
+			if res.RooflineDenominator == nil || res.RooflineDenominator.Kind != tc.policy.DenominatorKind || res.RooflineDenominator.Value != 100 {
+				t.Fatalf("lost denominator provenance: %+v", res)
+			}
+			if tc.policy.DenominatorKind == RooflineMeasuredCeiling {
+				if res.TheoreticalPeakBandwidthGBps != 0 || res.MeasuredPeakBandwidthGBps != 100 {
+					t.Fatal("measured ceiling relabeled theoretical")
+				}
+			} else if res.TheoreticalPeakBandwidthGBps != 100 || res.MeasuredPeakBandwidthGBps != 0 {
+				t.Fatal("theoretical ceiling relabeled measured")
+			}
+			if tc.legacy {
+				packet, err := GenerateReproducibilityPacket(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if packet.Attainment.TheoreticalPeakBandwidthGBps != 100 || packet.Attainment.FloorThresholdRatio != 0.8 {
+					t.Fatalf("legacy packet changed its full ceiling or threshold: %+v", packet.Attainment)
+				}
+			}
+		})
+	}
+}
 
 // validTestReceipt returns a pristine valid benchmark receipt for testing.
 func validTestReceipt() *BenchmarkReceipt {
