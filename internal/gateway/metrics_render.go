@@ -628,6 +628,24 @@ func writeV41RoutedDispatchMetrics(b *strings.Builder, phases *agent.V41PhaseLif
 		fmt.Fprintf(b, "fak_gateway_v41_routed_layers_total{phase=\"%s\",arm=\"id\"} %d\n", ph.name, ph.snap.RoutedIDLayers)
 		fmt.Fprintf(b, "fak_gateway_v41_routed_layers_total{phase=\"%s\",arm=\"per_pick\"} %d\n", ph.name, ph.snap.RoutedLayers-ph.snap.RoutedIDLayers)
 	}
+	if phases.Routed.Prefill.CPUMissExperts+phases.Routed.Decode.CPUMissExperts > 0 {
+		writeHelpType(b, "fak_gateway_v41_cpu_miss_experts_total", "V4.1 routed-expert ring misses the FAK_EXPERT_CPU_MISS=exact arm computed on the host instead of uploading, by forward phase.", "counter")
+		for _, ph := range v41RoutedDispatchPhases(phases) {
+			fmt.Fprintf(b, "fak_gateway_v41_cpu_miss_experts_total{phase=\"%s\"} %d\n", ph.name, ph.snap.CPUMissExperts)
+		}
+		writeHelpType(b, "fak_gateway_v41_cpu_miss_streamed_total", "V4.1 routed-expert ring misses past the host arm's per-layer cap that still streamed to the device, by forward phase.", "counter")
+		for _, ph := range v41RoutedDispatchPhases(phases) {
+			fmt.Fprintf(b, "fak_gateway_v41_cpu_miss_streamed_total{phase=\"%s\"} %d\n", ph.name, ph.snap.CPUMissStreamed)
+		}
+		writeHelpType(b, "fak_gateway_v41_cpu_miss_seconds_total", "Wall time of the V4.1 host CPU-miss arm, by forward phase. Divide by fak_gateway_v41_phase_tokens_total for host expert seconds per token.", "counter")
+		for _, ph := range v41RoutedDispatchPhases(phases) {
+			fmt.Fprintf(b, "fak_gateway_v41_cpu_miss_seconds_total{phase=\"%s\"} %g\n", ph.name, float64(ph.snap.CPUMissNanos)/1e9)
+		}
+		writeHelpType(b, "fak_gateway_v41_cpu_miss_join_wait_seconds_total", "Time V4.1 routed layers waited on the host CPU-miss arm after their device work finished, by forward phase.", "counter")
+		for _, ph := range v41RoutedDispatchPhases(phases) {
+			fmt.Fprintf(b, "fak_gateway_v41_cpu_miss_join_wait_seconds_total{phase=\"%s\"} %g\n", ph.name, float64(ph.snap.CPUMissJoinWaitNanos)/1e9)
+		}
+	}
 	writeHelpType(b, "fak_gateway_v41_phase_tokens_total", "Tokens the V4.1 forward attributed to each phase over the model lifetime.", "counter")
 	for _, ph := range v41RoutedDispatchPhases(phases) {
 		fmt.Fprintf(b, "fak_gateway_v41_phase_tokens_total{phase=\"%s\"} %d\n", ph.name, ph.snap.Tokens)

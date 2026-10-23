@@ -156,6 +156,13 @@ type V41RoutedPhaseSnapshot struct {
 	RoutedLayerDispatches int `json:"routed_layer_dispatches"`
 	RoutedLayers          int `json:"routed_layers"`
 	RoutedIDLayers        int `json:"routed_id_layers"`
+	// CPUMiss* attribute the FAK_EXPERT_CPU_MISS=exact host arm: ring misses
+	// computed on the host, misses still streamed, the host arm's wall time,
+	// and the time the layer waited on the host after its device work.
+	CPUMissExperts       int   `json:"cpu_miss_experts"`
+	CPUMissStreamed      int   `json:"cpu_miss_streamed"`
+	CPUMissNanos         int64 `json:"cpu_miss_nanos"`
+	CPUMissJoinWaitNanos int64 `json:"cpu_miss_join_wait_nanos"`
 }
 
 // V41PhaseSnapshot preserves the legacy fixed-shape numeric counters.
@@ -434,6 +441,10 @@ func v41RoutedPhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41RoutedPh
 		RoutedLayerDispatches: in.RoutedLayerDispatches,
 		RoutedLayers:          in.RoutedLayers,
 		RoutedIDLayers:        in.RoutedIDLayers,
+		CPUMissExperts:        in.CPUMissExperts,
+		CPUMissStreamed:       in.CPUMissStreamed,
+		CPUMissNanos:          in.CPUMissNanos,
+		CPUMissJoinWaitNanos:  in.CPUMissJoinWaitNanos,
 	}
 }
 
