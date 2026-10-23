@@ -165,11 +165,11 @@ func TestProbeLANNodeHTTPHealthz(t *testing.T) {
 	if info.Transport != "http_healthz" {
 		t.Errorf("expected transport http_healthz, got %q", info.Transport)
 	}
-	if info.Appliance != "AMD Ryzen AI MAX+ 395" {
-		t.Errorf("expected appliance AMD Ryzen AI MAX+ 395, got %q", info.Appliance)
+	if info.Appliance != "" {
+		t.Errorf("expected unknown appliance from liveness-only probe, got %q", info.Appliance)
 	}
-	if info.GPU != "AMD Radeon 8060S (40 CUs, gfx1151, 64 GB UMA)" {
-		t.Errorf("expected GPU AMD Radeon 8060S (40 CUs, gfx1151, 64 GB UMA), got %q", info.GPU)
+	if info.GPU != "" {
+		t.Errorf("expected unknown GPU from liveness-only probe, got %q", info.GPU)
 	}
 	if info.LatencyMicros <= 0 {
 		t.Errorf("expected latency > 0, got %d", info.LatencyMicros)
@@ -261,11 +261,86 @@ func TestProbeLANNodeSSHReachable(t *testing.T) {
 	if info.Transport != "tcp_ssh" {
 		t.Errorf("expected transport tcp_ssh, got %q", info.Transport)
 	}
-	if info.Appliance != "strix-halo (SSH port 22 reachable; gateway offline)" {
-		t.Errorf("expected SSH appliance message, got %q", info.Appliance)
+	if info.Appliance != "" || info.GPU != "" {
+		t.Errorf("SSH reachability must not establish hardware identity: %+v", info)
 	}
 	if info.Host != "<LAN_IP>" {
 		t.Errorf("expected host scrubbed, got %q", info.Host)
+	}
+}
+
+// fak-test:runtime fast est=200ms lane=default
+func TestProbeLANNodeLivenessDoesNotInventIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		gateway   string
+		ssh       bool
+		transport string
+	}{
+		{name: "non_halo_http_override", gateway: "http", transport: "http_healthz"},
+		{name: "raw_tcp_gateway", gateway: "tcp", transport: "tcp_port"},
+		{name: "raw_tcp_gateway_and_ssh", gateway: "tcp", ssh: true, transport: "tcp_ssh"},
+		{name: "ssh_only", ssh: true, transport: "tcp_ssh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listen := func() net.Listener {
+				l, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatalf("listen: %v", err)
+				}
+				t.Cleanup(func() { _ = l.Close() })
+				return l
+			}
+			acceptTCP := func(l net.Listener) {
+				go func() {
+					for {
+						conn, err := l.Accept()
+						if err != nil {
+							return
+						}
+						_ = conn.Close()
+					}
+				}()
+			}
+			gateway, ssh := listen(), listen()
+			_, sshPort, err := net.SplitHostPort(ssh.Addr().String())
+			if err != nil {
+				t.Fatalf("split SSH address: %v", err)
+			}
+			t.Setenv("FAK_LAN_SSH_PORT", sshPort)
+			switch tc.gateway {
+			case "http":
+				server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("ok"))
+				})}
+				t.Cleanup(func() { _ = server.Close() })
+				go func() { _ = server.Serve(gateway) }()
+			case "tcp":
+				acceptTCP(gateway)
+			default:
+				_ = gateway.Close()
+			}
+			if tc.ssh {
+				acceptTCP(ssh)
+			} else {
+				_ = ssh.Close()
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			// An arbitrary loopback override is not a hardware identity source.
+			info := ProbeLANNode(ctx, gateway.Addr().String())
+			if info.Status != LANNodeOnline || !info.Reachable || info.Transport != tc.transport {
+				t.Fatalf("liveness = %+v, want reachable ONLINE via %s", info, tc.transport)
+			}
+			if info.Appliance != "" || info.GPU != "" {
+				t.Errorf("liveness invented hardware identity: appliance=%q GPU=%q", info.Appliance, info.GPU)
+			}
+			if info.Host != "<LAN_IP>" || !strings.Contains(info.Endpoint, "<LAN_IP>:") || strings.Contains(info.Endpoint, "127.0.0.1") {
+				t.Errorf("liveness telemetry was not scrubbed: %+v", info)
+			}
+		})
 	}
 }
 
@@ -349,8 +424,8 @@ func TestProbeInventory(t *testing.T) {
 	if rep.LAN.Status != LANNodeOnline {
 		t.Errorf("expected LAN status %s, got %s", LANNodeOnline, rep.LAN.Status)
 	}
-	if rep.NextAction == "" {
-		t.Errorf("expected non-empty next action")
+	if rep.NextAction != "lan node reachable; verify hardware identity and accelerator execution before remote offload" {
+		t.Errorf("expected unverified hardware guidance, got %q", rep.NextAction)
 	}
 
 	// Unconfigured inventory check

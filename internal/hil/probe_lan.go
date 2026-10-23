@@ -39,7 +39,8 @@ func ScrubLANTelemetry(text string) string {
 	return text
 }
 
-// ProbeLANNode performs fast, non-blocking reachability and capability probing of a LAN accelerator node.
+// ProbeLANNode performs bounded reachability checks of a LAN node.
+// Liveness alone does not establish hardware identity or accelerator execution.
 func ProbeLANNode(ctx context.Context, hostOverride string) LANNodeInfo {
 	return probeLANNode(ctx, hostOverride, []string{canonicalStrixLANHost})
 }
@@ -90,6 +91,8 @@ func unconfiguredLANNode() LANNodeInfo {
 }
 
 func probeLANHost(ctx context.Context, rawHost string) LANNodeInfo {
+	// Leave Appliance and GPU unknown: neither a configured hostname nor HTTP,
+	// TCP, or SSH reachability supplies observed hardware identity.
 	start := time.Now()
 	if strings.EqualFold(rawHost, "unconfigured") || strings.EqualFold(rawHost, "none") {
 		return unconfiguredLANNode()
@@ -195,8 +198,6 @@ func probeLANHost(ctx context.Context, rawHost string) LANNodeInfo {
 						LatencyMicros: time.Since(start).Microseconds(),
 						Transport:     "http_healthz",
 						Endpoint:      fmt.Sprintf("http://%s:%s", scrubbedHost, gatewayPort),
-						Appliance:     "AMD Ryzen AI MAX+ 395",
-						GPU:           "AMD Radeon 8060S (40 CUs, gfx1151, 64 GB UMA)",
 					}
 				}
 			}
@@ -240,7 +241,6 @@ evaluate:
 				Reachable:     true,
 				LatencyMicros: time.Since(start).Microseconds(),
 				Transport:     "tcp_ssh",
-				Appliance:     "strix-halo (SSH port 22 reachable; gateway offline)",
 				Endpoint:      fmt.Sprintf("%s:%s", scrubbedHost, sshPort),
 			}
 		}
@@ -250,7 +250,6 @@ evaluate:
 			Reachable:     true,
 			LatencyMicros: time.Since(start).Microseconds(),
 			Transport:     "tcp_port",
-			Appliance:     "strix-halo (gateway port reachable; healthz offline)",
 			Endpoint:      fmt.Sprintf("http://%s:%s", scrubbedHost, gatewayPort),
 		}
 	}
@@ -263,7 +262,6 @@ evaluate:
 			Reachable:     true,
 			LatencyMicros: time.Since(start).Microseconds(),
 			Transport:     "tcp_ssh",
-			Appliance:     "strix-halo (SSH port 22 reachable; gateway offline)",
 			Endpoint:      fmt.Sprintf("%s:%s", scrubbedHost, sshPort),
 		}
 	}
@@ -322,7 +320,7 @@ func ProbeInventory(ctx context.Context, lanHost string) InventoryReport {
 	nextAction := "lan node unconfigured; set FAK_STRIX_HOST or pass lanHost to enable remote acceleration"
 	switch lan.Status {
 	case LANNodeOnline:
-		nextAction = "lan node online; remote hardware offload available"
+		nextAction = "lan node reachable; verify hardware identity and accelerator execution before remote offload"
 	case LANNodeOffline:
 		nextAction = "lan node offline; using local silicon only"
 	case LANNodeUnconfigured:
