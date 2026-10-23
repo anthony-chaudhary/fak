@@ -9,6 +9,179 @@ import (
 	"unsafe"
 )
 
+type slabOwnerFixture struct {
+	HeapBackingProvider
+	allocErr error
+	freeErr  error
+	owned    map[unsafe.Pointer]bool
+	freed    int
+}
+
+func (p *slabOwnerFixture) AllocateSlab(size int64) (unsafe.Pointer, []byte, error) {
+	if p.allocErr != nil {
+		return nil, nil, p.allocErr
+	}
+	ptr, data, err := p.HeapBackingProvider.AllocateSlab(size)
+	if p.owned == nil {
+		p.owned = make(map[unsafe.Pointer]bool)
+	}
+	p.owned[ptr] = true
+	return ptr, data, err
+}
+
+func (p *slabOwnerFixture) FreeSlab(ptr unsafe.Pointer, size int64) error {
+	if !p.owned[ptr] {
+		return errors.New("wrong slab owner or duplicate release")
+	}
+	if p.freeErr != nil {
+		return p.freeErr
+	}
+	delete(p.owned, ptr)
+	p.freed++
+	return nil
+}
+
+// fak-test:runtime fast est=100ms
+func TestBlockCachingAllocatorBackingOwnerLifecycle(t *testing.T) {
+	t.Run("popped before free count decrement", func(t *testing.T) {
+		owner := &slabOwnerFixture{}
+		cfg := DefaultAllocatorConfig()
+		cfg.DefaultSlabSize = MinBinSize
+		cfg.BackingProvider = owner
+		a := NewBlockCachingAllocator(cfg)
+		b, err := a.Allocate(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Free(b); err != nil {
+			t.Fatal(err)
+		}
+		// Pause the Allocate fast path immediately after its locked pop, before
+		// it decrements freeBlocks. No timing or goroutine scheduling is needed.
+		bin := a.bins[b.BinIndex]
+		bin.mu.Lock()
+		bin.freeList = bin.freeList[:len(bin.freeList)-1]
+		bin.mu.Unlock()
+		if n, err := a.Trim(0); n != 0 || err != nil {
+			t.Fatalf("trim released a popped block: %d, %v", n, err)
+		}
+		if owner.freed != 0 || len(a.slabs) != 1 || a.Telemetry().TotalAllocatedBytes != MinBinSize {
+			t.Fatal("popped slab ownership or accounting was lost")
+		}
+		// Restore the paused state, then exercise the ordinary Allocate/Free path.
+		bin.mu.Lock()
+		bin.freeList = append(bin.freeList, b)
+		bin.mu.Unlock()
+		reused, err := a.Allocate(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reused != b {
+			t.Fatal("restored block was not reused")
+		}
+		if err := a.Free(reused); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := a.Trim(0); n != MinBinSize || err != nil {
+			t.Fatalf("trim after free = %d, %v", n, err)
+		}
+		if owner.freed != 1 || len(a.slabs) != 0 {
+			t.Fatal("slab was not retired exactly once")
+		}
+	})
+	t.Run("UMA manager", func(t *testing.T) {
+		mgr := NewUMAPointerManager()
+		cfg := DefaultAllocatorConfig()
+		cfg.BackingProvider = NewUMAPointerBackingProvider(mgr)
+		a := NewBlockCachingAllocator(cfg)
+		b, err := a.Allocate(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mgr.ActiveAllocations() != 1 {
+			t.Fatal("manager did not retain slab")
+		}
+		if err := a.Free(b); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Trim(0); err != nil {
+			t.Fatal(err)
+		}
+		a.Reset()
+		if mgr.ActiveAllocations() != 0 {
+			t.Fatal("manager retained released slab")
+		}
+	})
+	for _, reset := range []bool{false, true} {
+		for _, fallback := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reset=%v/fallback=%v", reset, fallback), func(t *testing.T) {
+				failure := errors.New("release failed")
+				owner := &slabOwnerFixture{}
+				cfg := DefaultAllocatorConfig()
+				cfg.DefaultSlabSize = MinBinSize
+				cfg.BackingProvider = owner
+				if fallback {
+					cfg.BackingProvider = &slabOwnerFixture{allocErr: errors.New("allocate failed")}
+				}
+				a := NewBlockCachingAllocator(cfg)
+				a.heapBackup = owner
+				b, err := a.Allocate(1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// A second owner proves partial success is independent of map iteration order.
+				other := &slabOwnerFixture{}
+				a.provider = other
+				c, err := a.Allocate(1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reset {
+					if err := a.Free(b); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := a.Free(c); err != nil {
+					t.Fatal(err)
+				}
+				owner.freeErr = failure
+				if reset {
+					a.Reset()
+				} else {
+					n, err := a.Trim(0)
+					if n != MinBinSize || !errors.Is(err, failure) {
+						t.Fatalf("partial trim = %d, %v", n, err)
+					}
+				}
+				wantActive := int64(0)
+				if reset {
+					wantActive = MinBinSize
+				}
+				stats := a.Telemetry()
+				if len(a.slabs) != 1 || stats.TotalAllocatedBytes != MinBinSize || stats.ActiveBytes != wantActive || stats.CachedBytes != MinBinSize-wantActive || other.freed != 1 || owner.freed != 0 {
+					t.Fatalf("failed owner lost or accounting incorrect: %+v, slabs=%d", stats, len(a.slabs))
+				}
+				owner.freeErr = nil
+				if reset {
+					a.Reset()
+					a.Reset()
+				} else {
+					if n, err := a.Trim(0); n != MinBinSize || err != nil {
+						t.Fatalf("retry = %d, %v", n, err)
+					}
+					if n, err := a.Trim(0); n != 0 || err != nil {
+						t.Fatalf("duplicate = %d, %v", n, err)
+					}
+				}
+				stats = a.Telemetry()
+				if len(a.slabs) != 0 || stats.TotalAllocatedBytes != 0 || stats.ActiveBytes != 0 || stats.CachedBytes != 0 || owner.freed != 1 || other.freed != 1 {
+					t.Fatalf("retry accounting: %+v", stats)
+				}
+			})
+		}
+	}
+}
+
 // failingBackingProvider always returns an error to test heap fallback.
 type failingBackingProvider struct{}
 

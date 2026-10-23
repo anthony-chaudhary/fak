@@ -155,6 +155,8 @@ type BackingProvider interface {
 // UMAPointerBackingProvider allocates slabs via UMAPointerManager with hugepage alignment.
 type UMAPointerBackingProvider struct {
 	mgr        *UMAPointerManager
+	mu         sync.Mutex
+	buffers    map[unsafe.Pointer]*UMABuffer
 	ioctlCount atomic.Int64
 }
 
@@ -174,12 +176,28 @@ func (p *UMAPointerBackingProvider) AllocateSlab(size int64) (unsafe.Pointer, []
 	if err != nil {
 		return nil, nil, err
 	}
+	p.mu.Lock()
+	if p.buffers == nil {
+		p.buffers = make(map[unsafe.Pointer]*UMABuffer)
+	}
+	p.buffers[buf.UnsafePointer()] = buf
+	p.mu.Unlock()
 	p.ioctlCount.Add(1) // Simulate initial GEM allocation ioctl
 	return buf.UnsafePointer(), buf.Slice(), nil
 }
 
 // FreeSlab releases the slab memory.
 func (p *UMAPointerBackingProvider) FreeSlab(ptr unsafe.Pointer, size int64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	buf, ok := p.buffers[ptr]
+	if !ok {
+		return ErrBufferNotOwned
+	}
+	if err := p.mgr.FreeUMABuffer(buf); err != nil {
+		return err
+	}
+	delete(p.buffers, ptr)
 	return nil
 }
 
@@ -253,6 +271,7 @@ func DefaultAllocatorConfig() AllocatorConfig {
 
 // slabRecord tracks an allocated backing slab and its constituent blocks.
 type slabRecord struct {
+	owner       BackingProvider
 	id          uint64
 	size        int64
 	ptr         unsafe.Pointer
@@ -416,11 +435,13 @@ func (a *BlockCachingAllocator) allocateNewSlab(binIdx int, binSize, requestedSi
 		slabSize = binSize
 	}
 
-	ptr, slice, err := a.provider.AllocateSlab(slabSize)
+	owner := a.provider
+	ptr, slice, err := owner.AllocateSlab(slabSize)
 	if err != nil {
 		if a.cfg.FallbackToHeap && a.heapBackup != nil {
 			a.fallbackHeapCount.Add(1)
-			ptr, slice, err = a.heapBackup.AllocateSlab(slabSize)
+			owner = a.heapBackup
+			ptr, slice, err = owner.AllocateSlab(slabSize)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrSlabAllocationFailed, err)
@@ -431,6 +452,7 @@ func (a *BlockCachingAllocator) allocateNewSlab(binIdx int, binSize, requestedSi
 	slabID := a.nextID
 
 	slab := &slabRecord{
+		owner:       owner,
 		id:          slabID,
 		size:        slabSize,
 		ptr:         ptr,
@@ -536,48 +558,41 @@ func (a *BlockCachingAllocator) Trim(targetReleaseBytes int64) (int64, error) {
 	defer a.mu.Unlock()
 
 	var releasedTotal int64
-	slabsToFree := make([]*slabRecord, 0)
-
+	var releaseErr error
+	attempted := false
 	for _, slab := range a.slabs {
-		if int(slab.freeBlocks.Load()) == slab.totalBlocks {
-			slabsToFree = append(slabsToFree, slab)
-			releasedTotal += slab.size
-			if targetReleaseBytes > 0 && releasedTotal >= targetReleaseBytes {
-				break
-			}
-		}
-	}
-
-	if len(slabsToFree) == 0 {
-		return 0, nil
-	}
-
-	// Remove blocks belonging to trimmed slabs from bin free lists.
-	for _, slab := range slabsToFree {
 		bin := a.bins[slab.binIndex]
 		bin.mu.Lock()
-
-		kept := make([]*BlockDescriptor, 0, len(bin.freeList))
+		// A popped block may not yet have decremented freeBlocks; require all
+		// descriptors to still be on the locked free list before releasing.
+		freeCount := 0
 		for _, b := range bin.freeList {
-			if b.SlabID != slab.id {
-				kept = append(kept, b)
+			if b.SlabID == slab.id {
+				freeCount++
 			}
 		}
-		bin.freeList = kept
+		if int(slab.freeBlocks.Load()) != slab.totalBlocks || freeCount != slab.totalBlocks {
+			bin.mu.Unlock()
+			continue
+		}
+		attempted = true
+		if err := slab.owner.FreeSlab(slab.ptr, slab.size); err != nil {
+			releaseErr = errors.Join(releaseErr, fmt.Errorf("slab %d: %w", slab.id, err))
+			bin.mu.Unlock()
+			continue
+		}
+		a.retireSlab(slab, bin)
 		bin.mu.Unlock()
-
-		// Release raw slab memory via provider.
-		_ = a.provider.FreeSlab(slab.ptr, slab.size)
-		delete(a.slabs, slab.id)
-
-		a.totalAllocatedBytes.Add(-slab.size)
-		a.cachedBytes.Add(-slab.size)
+		releasedTotal += slab.size
+		if targetReleaseBytes > 0 && releasedTotal >= targetReleaseBytes {
+			break
+		}
 	}
-
-	a.trimCount.Add(1)
+	if attempted {
+		a.trimCount.Add(1)
+	}
 	a.trimmedBytes.Add(releasedTotal)
-
-	return releasedTotal, nil
+	return releasedTotal, releaseErr
 }
 
 // TrimUnderPressure trims cached free blocks based on the memory pressure level.
@@ -626,23 +641,52 @@ func (a *BlockCachingAllocator) Telemetry() PoolTelemetry {
 	}
 }
 
-// Reset clears the allocator state and empties all pools.
+// retireSlab removes a successfully released slab. The allocator and bin locks
+// must be held; failed releases must never reach this point.
+func (a *BlockCachingAllocator) retireSlab(slab *slabRecord, bin *binHeader) {
+	kept := bin.freeList[:0]
+	for _, b := range bin.freeList {
+		if b.SlabID != slab.id {
+			kept = append(kept, b)
+		}
+	}
+	clear(bin.freeList[len(kept):])
+	bin.freeList = kept
+	var active int64
+	for _, b := range slab.blocks {
+		if b.InUse {
+			active += b.BinSize
+		}
+		b.InUse = false
+		b.ActualSize = 0
+		b.Ptr = nil
+		b.Data = nil
+		b.slab = nil
+	}
+	delete(a.slabs, slab.id)
+	a.totalAllocatedBytes.Add(-slab.size)
+	a.activeBytes.Add(-active)
+	a.cachedBytes.Add(-(slab.size - active))
+}
+
+// Reset releases all slabs, invalidating their descriptors on success. Failed
+// releases retain their owner, blocks and accounting for a later Reset or Trim.
+// Callers must quiesce allocation and block use before Reset.
 func (a *BlockCachingAllocator) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-
-	for i := 0; i < NumBins; i++ {
-		bin := a.bins[i]
+	for _, slab := range a.slabs {
+		bin := a.bins[slab.binIndex]
 		bin.mu.Lock()
-		bin.freeList = bin.freeList[:0]
+		if err := slab.owner.FreeSlab(slab.ptr, slab.size); err == nil {
+			a.retireSlab(slab, bin)
+		}
 		bin.mu.Unlock()
 	}
-
-	for _, slab := range a.slabs {
-		_ = a.provider.FreeSlab(slab.ptr, slab.size)
+	// Do not erase historical counters while retained ownership still exists.
+	if len(a.slabs) != 0 {
+		return
 	}
-	a.slabs = make(map[uint64]*slabRecord)
-
 	a.totalAllocatedBytes.Store(0)
 	a.activeBytes.Store(0)
 	a.cachedBytes.Store(0)
