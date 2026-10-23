@@ -1,6 +1,8 @@
 package metalgemm
 
 import (
+	"encoding/json"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -168,5 +170,140 @@ func TestExecutionReceiptRecomputesDigestAndCounters(t *testing.T) {
 	tamperedCounters.Counters.CommandBuffers++
 	if err := ValidateExecutionReceipt(tamperedCounters); err == nil || !strings.Contains(err.Error(), "aggregate mismatch") {
 		t.Fatalf("tampered counters err = %v, want aggregate mismatch", err)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestExecutionEncoderSpans(t *testing.T) {
+	t.Parallel()
+	capture := ExecutionEncoderTiming{Status: "complete", ClockDomain: "metal-gpu-counter", WindowEndMilliseconds: 10,
+		Spans: []ExecutionEncoderSpan{{1, "norm", 1, 5}, {2, "projection", 3, 8}},
+	}
+	coverage, err := capture.EncoderCoverage(2)
+	if err != nil || !coverage.Available || coverage.AttributedMilliseconds != 7 || coverage.UnattributedMilliseconds != 3 || len(coverage.Covered) != 1 || len(coverage.Uncovered) != 2 {
+		t.Fatalf("overlap union = %+v, %v", coverage, err)
+	}
+	// Encoder order need not be chronological when work overlaps.
+	reversed := capture
+	reversed.Spans = []ExecutionEncoderSpan{{1, "projection", 3, 8}, {2, "norm", 1, 5}}
+	if result, err := reversed.EncoderCoverage(2); err != nil || result.AttributedMilliseconds != 7 {
+		t.Fatalf("submission order: %+v, %v", result, err)
+	}
+	partial := capture
+	partial.Status = "partial"
+	if _, err := partial.EncoderCoverage(3); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"unavailable", "disjoint"} {
+		missing := ExecutionEncoderTiming{Status: status, Reason: "no comparable GPU samples"}
+		if c, err := missing.EncoderCoverage(2); err != nil || c.Available {
+			t.Fatalf("%s = %+v, %v", status, c, err)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*ExecutionEncoderTiming)
+	}{
+		{"nonfinite", func(c *ExecutionEncoderTiming) { c.Spans[0].StartMilliseconds = math.NaN() }},
+		{"infinite window", func(c *ExecutionEncoderTiming) { c.WindowEndMilliseconds = math.Inf(1) }},
+		{"outside window", func(c *ExecutionEncoderTiming) { c.Spans[0].EndMilliseconds = 11 }},
+		{"reversed interval", func(c *ExecutionEncoderTiming) { c.Spans[0].EndMilliseconds = 0 }},
+		{"duplicate ordinal", func(c *ExecutionEncoderTiming) { c.Spans[1].Ordinal = 1 }},
+		{"missing identity", func(c *ExecutionEncoderTiming) { c.Spans[0].Operation = "" }},
+		{"host clock", func(c *ExecutionEncoderTiming) { c.ClockDomain = "host-monotonic" }},
+		{"false unavailable", func(c *ExecutionEncoderTiming) { c.Status = "unavailable" }},
+		{"false partial", func(c *ExecutionEncoderTiming) { c.Status = "partial" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := capture
+			c.Spans = append([]ExecutionEncoderSpan(nil), capture.Spans...)
+			tc.change(&c)
+			if _, err := c.EncoderCoverage(2); err == nil {
+				t.Fatal("invalid timing accepted")
+			}
+		})
+	}
+	event := ExecutionEvent{Operation: ExecutionQ8GEMV, CommandBufferID: 1, Committed: true, CompletedWait: true, HostReadback: true, Encoders: 2, GPUMilliseconds: 10, TimingAvailable: true, EncoderTiming: &capture}
+	session := NewExecutionSession()
+	session.Record(ExecutionSnapshot{Events: []ExecutionEvent{event}}, nil)
+	capture.Spans[0].Operation = "mutated caller"
+	receipt, err := session.Receipt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Events[0].EncoderTiming.Spans[0].Operation != "norm" {
+		t.Fatal("session retained caller timing alias")
+	}
+	if err := ValidateExecutionReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Events[0].EncoderTiming.Spans[0].Operation = "mutated receipt"
+	if err := ValidateExecutionReceipt(receipt); err == nil {
+		t.Fatal("timing tampering escaped digest")
+	}
+	again, err := session.Receipt()
+	if err != nil || again.Events[0].EncoderTiming.Spans[0].Operation != "norm" {
+		t.Fatalf("receipt retained alias: %v", err)
+	}
+	event.EncoderTiming = nil
+	data, err := json.Marshal(event)
+	if err != nil || strings.Contains(string(data), "encoder_timing") {
+		t.Fatalf("profile-OFF schema changed: %s, %v", data, err)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestExecutionEncoderSpansNativeSegments(t *testing.T) {
+	t.Parallel()
+	// CPU fixture verifies native readback conversion, not measured GPU evidence.
+	raw := []rawEncoderSample{
+		{1, 1, 1000000, 3000000, "norm"},
+		{1, 2, 2000000, 4000000, "projection"},
+		{3, 1, 9000000, 11000000, "attention"},
+	}
+	if executionEncoderSampleLimit*2*8 > 32*1024 {
+		t.Fatal("capture exceeds Apple timestamp buffer ceiling")
+	}
+	oversized := make([]rawEncoderSample, executionEncoderSampleLimit+1)
+	if got := encoderTimingFromSamples(oversized, 1); got.Status != "unavailable" {
+		t.Fatal("oversized native readback accepted")
+	}
+	capture := encoderTimingFromSamples(raw, 3)
+	if capture.Status != "segmented" || len(capture.Segments) != 3 {
+		t.Fatalf("segments = %+v", capture)
+	}
+	if total, err := capture.EncoderCoverage(0); err != nil || total.Available {
+		t.Fatalf("cross-buffer timeline was invented: %+v, %v", total, err)
+	}
+	first := capture.Segments[0]
+	coverage, err := first.Timing.EncoderCoverage(first.CapturedEncoders)
+	if err != nil || coverage.AttributedMilliseconds != 3 || first.Timing.Status != "partial" || !first.Timing.UnmeasuredPrefix || !first.Timing.UnmeasuredSuffix || first.Timing.UncoveredEncoderScope == "" {
+		t.Fatalf("partial coverage = %+v, %+v, %v", first, coverage, err)
+	}
+	if capture.Segments[1].Timing.Status != "unavailable" || capture.Segments[1].CapturedEncoders != 0 {
+		t.Fatal("unsampled segment fabricated")
+	}
+	clone := capture.Clone()
+	clone.Segments[0].Timing.Spans[0].Operation = "mutated"
+	if capture.Segments[0].Timing.Spans[0].Operation != "norm" {
+		t.Fatal("segment clone aliases original")
+	}
+	clone = capture.Clone()
+	clone.Segments[0].Timing.UnmeasuredPrefix = false
+	if _, err := clone.EncoderCoverage(0); err == nil {
+		t.Fatal("unknown prefix omission accepted")
+	}
+	clone = capture.Clone()
+	clone.Segments[1].CommandBufferID = 1
+	if _, err := clone.EncoderCoverage(0); err == nil {
+		t.Fatal("duplicate segment accepted")
+	}
+	for _, invalid := range [][]rawEncoderSample{
+		{{1, 1, 0, 1, "zero"}}, {{1, 1, 2, 1, "reversed"}}, {{1, 1, 1, ^uint64(0), "error"}},
+		{{2, 1, 1, 2, "a"}, {1, 1, 3, 4, "b"}}, {{1, 2, 1, 2, "ordinal"}},
+	} {
+		if got := encoderTimingFromSamples(invalid, 3); got.Status != "unavailable" {
+			t.Fatalf("invalid samples accepted: %+v", got)
+		}
 	}
 }

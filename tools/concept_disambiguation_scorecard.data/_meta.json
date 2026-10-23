@@ -14644,9 +14644,21 @@
           "category": "incidental",
           "reason": "This initializer returns the fixed missingness and scope strings of the separately positioned V41WorkloadCoverage receipt contract. It does not independently measure coverage, choose runtime policy or establish request isolation, timing validity or readiness.",
           "token": "V41WorkloadCoverageDefault"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Metal GPU-clock interval accounting result for one comparable timing window, not a backend support or maturity claim. Covered time is the union of measured encoder spans; uncovered time is unattributed, not idle, and excludes host submission and waits.",
+          "token": "ExecutionEncoderCoverage"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Method validating a Metal encoder timing capture and computing its interval union and complement within one GPU-clock window, not a backend support or maturity predicate. It validates segmented captures without comparing separate buffers and does not establish device qualification.",
+          "token": "EncoderCoverage"
         }
       ],
       "exclude": [
+        "EncoderCoverage",
+        "ExecutionEncoderCoverage",
         "SupportsV41Q2KTokenPanel",
         "SupportsV41Q3KTokenPanel",
         "broadefficiencysupported",

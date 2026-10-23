@@ -28,6 +28,7 @@ void *mg_graph_encode_q4k_from(void *graph, int wid, void *input, int elems);
 void *mg_graph_encode_q6k_from(void *graph, int wid, void *input, int elems);
 void *mg_graph_quantize_q8(void *graph, void *input, int elems, void **scales);
 void *mg_graph_encode_q8_from(void *graph, int wid, void *q, void *d, int elems);
+int mg_graph_request_encoder_timing(void *graph);
 int mg_graph_finish(void *graph, mg_graph_receipt *receipt, int inject_post_submit_failure);
 int mg_graph_await_terminal(void *graph);
 int mg_graph_flush(void *graph);
@@ -124,6 +125,10 @@ func (e *GraphPostSubmitError) Error() string {
 }
 
 type GraphReceipt struct {
+	// EncoderTiming is nil unless capture was requested. Aggregate command-buffer
+	// duration never substitutes for native per-encoder GPU samples.
+	EncoderTiming *ExecutionEncoderTiming `json:"encoder_timing,omitempty"`
+
 	Committed, CompletedWait, TimingAvailable bool
 	Encoders, IntermediateWaits               int
 	IntermediateReadbacks, HostReadbacks      int
@@ -184,6 +189,7 @@ func PromptPanelWitnessed(rows int) bool {
 }
 
 type ProjectionGraph struct {
+	encoderTimingRequested  bool
 	ptr                     unsafe.Pointer
 	p                       int
 	encoders                int
@@ -198,6 +204,23 @@ type ProjectionGraph struct {
 	testTerminalGate        unsafe.Pointer
 	quarantineDone          chan struct{}
 	flushed                 bool
+}
+
+// RequestEncoderTiming requests explicit encoder-attribution availability in the
+// terminal receipt. Unsupported devices report unavailable; supported Apple GPUs
+// sample stage boundaries without adding dispatches or host timing substitutes.
+func (g *ProjectionGraph) RequestEncoderTiming() error {
+	if err := g.open(); err != nil {
+		return err
+	}
+	if g.encoders != 0 || g.flushed {
+		return errors.New("metalgemm: encoder timing must be requested before encoding")
+	}
+	if C.mg_graph_request_encoder_timing(g.ptr) == 0 {
+		return errors.New("metalgemm: encoder timing request rejected")
+	}
+	g.encoderTimingRequested = true
+	return nil
 }
 
 // InjectPostSubmitFailureForTest makes Finish return an accepted failure after
@@ -1116,6 +1139,12 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 	segments := int(C.mg_graph_segments(g.ptr))
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
 	receipt := GraphReceipt{CommandBuffers: segments, Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, AllocatedBuffers: int(r.allocated_buffers), RetainedBufferBytes: uint64(r.retained_buffer_bytes), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds), Q4KGEMVKernels: q4kKernels, Q6KGEMVKernels: q6kKernels}
+	if g.encoderTimingRequested {
+		receipt.EncoderTiming = &ExecutionEncoderTiming{Status: "unavailable", Reason: "native graph did not complete successfully"}
+		if ok {
+			receipt.EncoderTiming = graphEncoderTiming(g.ptr)
+		}
+	}
 	if !ok && receipt.Committed && !receipt.CompletedWait {
 		g.quarantineCommittedGraph()
 		return receipt, commandBufferStallError(receipt.WaitMilliseconds, int(r.status_code), int(r.error_code), cString(&r.error_text[0]), "graph finish")

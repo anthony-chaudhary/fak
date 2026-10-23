@@ -185,6 +185,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequenceReceipt() (Qwe
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	receipt := b.forwardReceipt
+	receipt.EncoderTiming = receipt.EncoderTiming.Clone()
 	if receipt.StateIdentity != nil {
 		identity := cloneQwen35MetalStateIdentityReceipt(*receipt.StateIdentity)
 		receipt.StateIdentity = &identity
@@ -193,6 +194,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequenceReceipt() (Qwe
 }
 
 func (b *metalQwen35GDNSequenceBackend) setForwardReceipt(r Qwen35MetalForwardSequenceReceipt) {
+	r.EncoderTiming = r.EncoderTiming.Clone()
 	b.mu.Lock()
 	if r.StateIdentity != nil {
 		identity := cloneQwen35MetalStateIdentityReceipt(*r.StateIdentity)
@@ -976,6 +978,11 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 		return nil, receipt, false, err
 	}
 	defer g.Free()
+	if s.PhaseProfiler != nil {
+		if err := g.RequestEncoderTiming(); err != nil {
+			return nil, receipt, false, err
+		}
+	}
 	deviceKVCompleted := false
 	defer func() {
 		if deviceKV != nil && !deviceKVCompleted {
@@ -1156,6 +1163,7 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35MetalDecodeToken(s *Session, id in
 	receipt = Qwen35MetalForwardSequenceReceipt{
 		Path: Qwen35MetalGDNSequenceForwardPath, Available: true,
 		SelectorState: Qwen35MetalSequenceSelectorOn, EvidenceState: Qwen35MetalSequenceEvidenceExecuted, Tokens: P,
+		EncoderTiming:  graphReceipt.EncoderTiming.Clone(),
 		CommandBuffers: graphReceipt.CommandBuffers, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks,
 		IntermediateWaits: graphReceipt.IntermediateWaits, IntermediateReadbacks: graphReceipt.IntermediateReadbacks,
 		HostUploadBytes: graphReceipt.HostUploadBytes, HostReadbackBytes: graphReceipt.HostReadbackBytes,

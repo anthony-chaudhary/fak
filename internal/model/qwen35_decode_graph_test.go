@@ -101,6 +101,7 @@ func TestQwen35DecodeGraphTraceDoesNotOverwriteActiveOwner(t *testing.T) {
 	assertQwen35GraphLifecycle(t, s, 2, 2, false)
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestQwen35DecodeGraphNativeAttributionIsCallOwned(t *testing.T) {
 	cfg := qwen35HybridQ4KTestCfg()
 	cfg.NumLayers = 1
@@ -109,13 +110,20 @@ func TestQwen35DecodeGraphNativeAttributionIsCallOwned(t *testing.T) {
 	s.EnableQwen35DecodeGraphTrace()
 	finish := s.beginQwen35DecodeGraph(7)
 
+	timing := &metalgemm.ExecutionEncoderTiming{
+		Status: "complete", ClockDomain: "metal-gpu-counter", WindowEndMilliseconds: 2,
+		Spans: []metalgemm.ExecutionEncoderSpan{{Ordinal: 1, Operation: "projection", StartMilliseconds: 0.5, EndMilliseconds: 1.5}},
+	}
 	s.observeQwen35MetalExecutionSnapshot(metalgemm.ExecutionSnapshot{Events: []metalgemm.ExecutionEvent{{
 		Operation:       metalgemm.ExecutionQ4KGEMV,
 		CommandBufferID: 1,
 		Committed:       true,
 		CompletedWait:   true,
 		HostReadback:    true,
+		EncoderTiming:   timing,
 	}}})
+	timing.Status = "unavailable"
+	timing.Spans[0].Operation = "mutated caller"
 	s.recordQwen35ModelGraphNode(0, "observed")
 	s.recordQwen35ModelGraphNode(0, "unobserved")
 	finish(false)
@@ -127,6 +135,17 @@ func TestQwen35DecodeGraphNativeAttributionIsCallOwned(t *testing.T) {
 	observed, unobserved := trace.Nodes[0], trace.Nodes[1]
 	if observed.NativeAttributionStatus != Qwen35DecodeGraphNativeAttributionAvailable || len(observed.NativeEvents) != 1 {
 		t.Fatalf("observed attribution = %+v", observed)
+	}
+	gotTiming := observed.NativeEvents[0].EncoderTiming
+	if gotTiming == nil || gotTiming.Status != "complete" || gotTiming.Spans[0].Operation != "projection" {
+		t.Fatalf("caller mutation changed recorded timing: %+v", gotTiming)
+	}
+	gotTiming.Status = "disjoint"
+	gotTiming.Spans[0].Operation = "mutated returned trace"
+	again := s.LastQwen35DecodeGraphTrace()
+	againTiming := again.Nodes[0].NativeEvents[0].EncoderTiming
+	if againTiming.Status != "complete" || againTiming.Spans[0].Operation != "projection" {
+		t.Fatalf("returned trace mutation changed later snapshot: %+v", againTiming)
 	}
 	if unobserved.NativeAttributionStatus != Qwen35DecodeGraphNativeAttributionUnavailable || unobserved.UnavailableReason != Qwen35DecodeGraphMetalEventSourceUnavailable {
 		t.Fatalf("unobserved attribution = %+v", unobserved)

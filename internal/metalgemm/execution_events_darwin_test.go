@@ -84,3 +84,72 @@ func TestExecutionObservationCapturesQuantizedMetalLifecycle(t *testing.T) {
 		requireCompletedExecution(t, observation, ExecutionQ8GEMV)
 	})
 }
+
+// fak-test:runtime integration est=2s lane=optin
+func TestExecutionEncoderSpansNativeCapture(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	defer ResetQ4K()
+	const width = 256
+	weight := UploadQ4K(make([]byte, 144), 1, width)
+	if weight == nil {
+		t.Fatal("Q4K upload")
+	}
+	defer weight.Release()
+	run := func(profile bool) GraphReceipt {
+		g, err := BeginProjectionGraph(make([]float32, width), nil, nil, 1, width)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.Free()
+		if profile {
+			if err := g.RequestEncoderTiming(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		first, err := g.EncodeQ4K(weight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Flush(); err != nil {
+			t.Fatal(err)
+		}
+		second, err := g.EncodeQ4K(weight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values, receipt, err := g.FinishRead(first, second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(values) != 2 || len(values[0]) != 1 || len(values[1]) != 1 || values[0][0] != 0 || values[1][0] != 0 {
+			t.Fatalf("output = %v", values)
+		}
+		return receipt
+	}
+	off, on := run(false), run(true)
+	if off.EncoderTiming != nil || off.CommandBuffers != on.CommandBuffers || off.Encoders != on.Encoders || off.HostReadbacks != on.HostReadbacks {
+		t.Fatal("profiling changed default lifecycle")
+	}
+	if on.EncoderTiming == nil {
+		t.Fatal("requested capture has no availability receipt")
+	}
+	if _, err := on.EncoderTiming.EncoderCoverage(on.Encoders); err != nil {
+		t.Fatal(err)
+	}
+	if on.EncoderTiming.Status == "unavailable" {
+		if on.EncoderTiming.Reason == "Apple GPU stage-boundary timestamp counters unsupported" {
+			t.Skipf("native timestamp capture unsupported: %s", on.EncoderTiming.Reason)
+		}
+		t.Fatalf("native timestamp capture failed: %s", on.EncoderTiming.Reason)
+	}
+	if len(on.EncoderTiming.Segments) != 2 {
+		t.Fatal("missing native command-buffer segments")
+	}
+	for _, segment := range on.EncoderTiming.Segments {
+		if segment.CapturedEncoders != 1 || len(segment.Timing.Spans) != 1 || segment.Timing.Status != "partial" {
+			t.Fatalf("invalid native segment: %+v", segment)
+		}
+	}
+}

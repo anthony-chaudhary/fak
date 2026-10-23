@@ -13,6 +13,10 @@ import "errors"
 const PromptPanelMaxTokens = 128
 
 type GraphReceipt struct {
+	// EncoderTiming is nil unless capture was requested. Aggregate command-buffer
+	// duration never substitutes for native per-encoder GPU samples.
+	EncoderTiming *ExecutionEncoderTiming `json:"encoder_timing,omitempty"`
+
 	Committed, CompletedWait, TimingAvailable bool
 	Encoders, IntermediateWaits               int
 	IntermediateReadbacks, HostReadbacks      int
@@ -29,6 +33,11 @@ type GraphReceipt struct {
 }
 type GraphResult struct{}
 type ProjectionGraph struct{}
+
+// RequestEncoderTiming is unavailable without a native Metal graph.
+func (g *ProjectionGraph) RequestEncoderTiming() error {
+	return ExecutionEventsUnavailableError{}
+}
 
 func BeginProjectionGraph([]float32, []int8, []float32, int, int) (*ProjectionGraph, error) {
 	return nil, errors.New("metalgemm: projection graph unavailable")

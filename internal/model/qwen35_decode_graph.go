@@ -117,7 +117,7 @@ func (s *Session) observeQwen35MetalExecutionSnapshot(snapshot metalgemm.Executi
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.active != nil {
-		r.active.nativeEvents = append(r.active.nativeEvents, snapshot.Events...)
+		r.active.nativeEvents = append(r.active.nativeEvents, cloneQwen35NativeEvents(snapshot.Events)...)
 	}
 }
 
@@ -154,7 +154,7 @@ func (s *Session) recordQwen35ModelGraphNode(layer int, operation string, depend
 	if len(r.active.nativeEvents) != 0 {
 		n.NativeAttributionStatus = Qwen35DecodeGraphNativeAttributionAvailable
 		n.UnavailableReason = ""
-		n.NativeEvents = append([]metalgemm.ExecutionEvent(nil), r.active.nativeEvents...)
+		n.NativeEvents = cloneQwen35NativeEvents(r.active.nativeEvents)
 		r.active.nativeEvents = nil
 		hostRead, syncs := false, 0
 		for _, event := range n.NativeEvents {
@@ -173,7 +173,17 @@ func cloneQwen35DecodeGraphTrace(in Qwen35DecodeGraphTrace) Qwen35DecodeGraphTra
 	out.Nodes = append([]Qwen35DecodeGraphNode(nil), in.Nodes...)
 	for i := range out.Nodes {
 		out.Nodes[i].DependsOn = append([]string(nil), in.Nodes[i].DependsOn...)
-		out.Nodes[i].NativeEvents = append([]metalgemm.ExecutionEvent(nil), in.Nodes[i].NativeEvents...)
+		out.Nodes[i].NativeEvents = cloneQwen35NativeEvents(in.Nodes[i].NativeEvents)
+	}
+	return out
+}
+
+// Native encoder timing owns nested spans; copying only the event slice lets
+// caller or returned-trace mutations rewrite another observation's evidence.
+func cloneQwen35NativeEvents(events []metalgemm.ExecutionEvent) []metalgemm.ExecutionEvent {
+	out := append([]metalgemm.ExecutionEvent(nil), events...)
+	for i := range out {
+		out[i].EncoderTiming = out[i].EncoderTiming.Clone()
 	}
 	return out
 }

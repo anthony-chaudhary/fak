@@ -228,6 +228,8 @@ type qwen35GDNSequenceSnapshotter interface {
 // has not produced a terminal receipt; a committed post-submit failure remains
 // available so callers can distinguish it from the default path.
 type Qwen35MetalForwardSequenceReceipt struct {
+	EncoderTiming *metalgemm.ExecutionEncoderTiming `json:"encoder_timing,omitempty"`
+
 	Path                        string                           `json:"path"`
 	Available                   bool                             `json:"available"`
 	SelectorState               Qwen35MetalSequenceSelectorState `json:"selector_state"`
@@ -562,6 +564,9 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 						aggValid = true
 					} else {
 						agg.ExecutedPanels++
+						if agg.EncoderTiming != nil || receipt.EncoderTiming != nil {
+							agg.EncoderTiming = &metalgemm.ExecutionEncoderTiming{Status: "disjoint", Reason: "multiple graph panels do not share a captured timing window"}
+						}
 						agg.Tokens += receipt.Tokens
 						agg.CommandBuffers += receipt.CommandBuffers
 						agg.Encoders += receipt.Encoders
@@ -705,13 +710,14 @@ func (s *Session) Qwen35MetalForwardSequenceStatus() Qwen35MetalForwardSequenceR
 	if !ok {
 		return base
 	}
+	receipt.EncoderTiming = receipt.EncoderTiming.Clone()
 	receipt.SelectorState = Qwen35MetalSequenceSelectorOn
 	receipt.EvidenceState = Qwen35MetalSequenceEvidenceExecuted
 	return receipt
 }
 
 // Qwen35MetalForwardSequenceReceipt returns the last terminal whole-sequence
-// receipt as a scalar-only value snapshot. The zero value has Available=false
+// receipt as an immutable value snapshot. The zero value has Available=false
 // and means this session has no such execution evidence.
 func (s *Session) Qwen35MetalForwardSequenceReceipt() Qwen35MetalForwardSequenceReceipt {
 	receipt := s.Qwen35MetalForwardSequenceStatus()
