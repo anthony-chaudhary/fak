@@ -409,3 +409,150 @@ func TestBlockCachingAllocator_Errors(t *testing.T) {
 		t.Errorf("expected ErrBlockClosed on double free, got %v", err)
 	}
 }
+
+type lifecycleBackingProvider struct {
+	BackingProvider
+	allocateErr error
+	releaseErr  error
+	attempts    int
+	releases    int
+}
+
+func (p *lifecycleBackingProvider) AllocateSlab(size int64) (unsafe.Pointer, []byte, error) {
+	if p.allocateErr != nil {
+		return nil, nil, p.allocateErr
+	}
+	return p.BackingProvider.AllocateSlab(size)
+}
+
+func (p *lifecycleBackingProvider) FreeSlab(ptr unsafe.Pointer, size int64) error {
+	p.attempts++
+	if p.releaseErr != nil {
+		return p.releaseErr
+	}
+	if err := p.BackingProvider.FreeSlab(ptr, size); err != nil {
+		return err
+	}
+	p.releases++
+	return nil
+}
+
+// fak-test:runtime fast est=1s
+func TestBlockCachingAllocatorBackingOwnerLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		reset    bool
+		fallback bool
+		fail     bool
+	}{
+		{name: "uma_trim"},
+		{name: "uma_reset", reset: true},
+		{name: "fallback_trim", fallback: true},
+		{name: "fallback_reset", reset: true, fallback: true},
+		{name: "trim_retry", fail: true},
+		{name: "reset_retry", reset: true, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := NewUMAPointerManager()
+			borrowed, err := mgr.AllocateUMABuffer(64, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mgr.FreeUMABuffer(borrowed)
+			borrowed.Slice()[0] = 17
+			uma := NewUMAPointerBackingProvider(mgr)
+			sharedPtr, sharedData, err := uma.AllocateSlab(MinBinSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer uma.FreeSlab(sharedPtr, MinBinSize)
+			sharedData[0] = 23
+			baseline := mgr.ActiveAllocations()
+
+			primary := &lifecycleBackingProvider{BackingProvider: uma}
+			fallback := &lifecycleBackingProvider{BackingProvider: NewHeapBackingProvider()}
+			owner := primary
+			if tc.fallback {
+				primary.allocateErr = errors.New("primary unavailable")
+				owner = fallback
+			}
+			cfg := DefaultAllocatorConfig()
+			cfg.DefaultSlabSize = 2 * MinBinSize
+			cfg.BackingProvider = primary
+			alloc := NewBlockCachingAllocator(cfg)
+			alloc.heapBackup = fallback
+			defer alloc.Reset()
+			block, err := alloc.Allocate(MinBinSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.Data[0] = 31
+			ptr := block.Ptr
+			if !tc.reset {
+				if n, err := alloc.Trim(0); n != 0 || err != nil || owner.attempts != 0 {
+					t.Fatalf("trim released active slab: bytes=%d err=%v attempts=%d", n, err, owner.attempts)
+				}
+				if err := alloc.Free(block); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := alloc.Telemetry()
+			activeBefore := mgr.ActiveAllocations()
+			releaseErr := errors.New("release temporarily unavailable")
+			cleanup := func(wantErr error) {
+				t.Helper()
+				if tc.reset {
+					alloc.Reset()
+					return
+				}
+				n, err := alloc.Trim(0)
+				wantBytes := cfg.DefaultSlabSize
+				if wantErr != nil {
+					wantBytes = 0
+				}
+				if !errors.Is(err, wantErr) || n != wantBytes {
+					t.Fatalf("trim: bytes=%d err=%v; want bytes=%d err=%v", n, err, wantBytes, wantErr)
+				}
+			}
+			if tc.fail {
+				owner.releaseErr = releaseErr
+				cleanup(releaseErr)
+				after := alloc.Telemetry()
+				if len(alloc.slabs) != 1 || after.TotalAllocatedBytes != before.TotalAllocatedBytes ||
+					after.ActiveBytes != before.ActiveBytes || after.CachedBytes != before.CachedBytes ||
+					after.TrimmedBytes != before.TrimmedBytes || mgr.ActiveAllocations() != activeBefore {
+					t.Fatalf("failed release discarded ownership/accounting: before=%+v after=%+v", before, after)
+				}
+				if block.Ptr != ptr || block.Data[0] != 31 || owner.releases != 0 {
+					t.Fatal("failed release invalidated retained block")
+				}
+				owner.releaseErr = nil
+			}
+			cleanup(nil)
+			after := alloc.Telemetry()
+			if len(alloc.slabs) != 0 || after.TotalAllocatedBytes != 0 || after.ActiveBytes != 0 || after.CachedBytes != 0 {
+				t.Fatalf("successful release retained slab/accounting: %+v", after)
+			}
+			if mgr.ActiveAllocations() != baseline || borrowed.Slice()[0] != 17 || sharedData[0] != 23 {
+				t.Fatal("cleanup did not release exactly the allocator's UMA buffer")
+			}
+			if len(alloc.bins[0].freeList) != 0 || block.Ptr != nil || block.Data != nil {
+				t.Fatal("retired slab left reusable block handles")
+			}
+			if err := alloc.Free(block); !errors.Is(err, ErrBlockClosed) {
+				t.Fatalf("retired block free=%v", err)
+			}
+			attempts := owner.attempts
+			if n, err := alloc.Trim(0); n != 0 || err != nil {
+				t.Fatalf("duplicate trim: bytes=%d err=%v", n, err)
+			}
+			alloc.Reset()
+			if owner.releases != 1 || owner.attempts != attempts || (tc.fallback && primary.attempts != 0) {
+				t.Fatalf("wrong or repeated owner release: primary=%+v fallback=%+v", primary, fallback)
+			}
+			if err := uma.FreeSlab(sharedPtr, MinBinSize); err != nil || mgr.ActiveAllocations() != baseline-1 {
+				t.Fatalf("shared provider lost unrelated slab ownership: %v", err)
+			}
+		})
+	}
+}
