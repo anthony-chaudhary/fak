@@ -439,11 +439,16 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 	if p.Backend != s.Backend {
 		return fmt.Errorf("model: prefix snapshot backend mismatch")
 	}
-	if p.coverage != nil {
-		coverage := p.coverage
-		if p.owner == nil || p.owner.M != s.M {
+	// State-only V4.1 prefill deliberately has no logits coverage receipt.
+	// Its retained attention state still belongs to the model that produced it;
+	// missing coverage must not authorize reuse across same-shape artifacts.
+	if p.coverage != nil || p.v41 != nil && p.v41.hadState {
+		if p.owner == nil || p.owner.M == nil || p.owner.M != s.M {
 			return fmt.Errorf("%w: prefix snapshot model identity mismatch", ErrNativeForwardCoverageInvalid)
 		}
+	}
+	if p.coverage != nil {
+		coverage := p.coverage
 		if err := coverage.Validate(); err != nil {
 			return err
 		}
