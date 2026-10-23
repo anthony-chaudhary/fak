@@ -32,9 +32,12 @@ func pagedHALKVEnabled() bool {
 	}
 }
 
+// halKVConfig sizes the resident store to the layers that append to it: a Qwen3.5
+// hybrid writes only its compact full-attention layers, so whole-store walks such as
+// Evict never touch a never-populated linear-attention slot.
 func halKVConfig(cfg Config) compute.KVConfig {
 	return compute.KVConfig{
-		NumLayers:  cfg.NumLayers,
+		NumLayers:  qwen35HALKVLayer(cfg, cfg.NumLayers),
 		NumKVHeads: cfg.NumKVHeads,
 		HeadDim:    cfg.HeadDim,
 		RopeTheta:  cfg.RopeTheta,

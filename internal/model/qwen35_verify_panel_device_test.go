@@ -179,12 +179,13 @@ func assertDeviceStateMatchesSerial(t *testing.T, target *Session, serial *Sessi
 	}
 	defer host.Close()
 
+	kvCfg := halKVConfig(serial.M.Cfg)
 	wantKV := compute.KVHostSnapshot{
-		Config: halKVConfig(serial.M.Cfg),
+		Config: kvCfg,
 		Pos:    append([]int(nil), serial.Cache.pos...),
-		K:      make([][]float32, serial.M.Cfg.NumLayers),
-		KRaw:   make([][]float32, serial.M.Cfg.NumLayers),
-		V:      make([][]float32, serial.M.Cfg.NumLayers),
+		K:      make([][]float32, kvCfg.NumLayers),
+		KRaw:   make([][]float32, kvCfg.NumLayers),
+		V:      make([][]float32, kvCfg.NumLayers),
 	}
 	for layer := 0; layer < serial.M.Cfg.NumLayers; layer++ {
 		if serial.M.Cfg.isLinearAttnLayer(layer) {
