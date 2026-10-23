@@ -308,7 +308,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 				}
 				parityScript := filepath.Join(cfg.RepoRoot, "tools", "cuda_abi_parity.py")
 				if FileExists(parityScript) {
-					_ = RunCmd(ctx, py, []string{parityScript, "--check"}, cfg.RepoRoot, nil, cfg.Stdout, cfg.Stderr)
+					if err := RunCmd(ctx, py, []string{parityScript, "--check"}, cfg.RepoRoot, nil, cfg.Stdout, cfg.Stderr); err != nil {
+						return fmt.Errorf("CUDA ABI parity check: %w", err)
+					}
 				}
 			}
 
@@ -328,7 +330,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 						fmt.Fprintf(cfg.Stdout, "[cuda] strict standalone parse cuda_backend.h (%s) ...\n", cfg.Toolchain.CC)
 					}
 					headerArgs := []string{"-x", "c", "-std=c11", "-fsyntax-only", "-Wall", "-Werror", headerPath}
-					_ = RunCmd(ctx, cfg.Toolchain.CC, headerArgs, cfg.PkgDir, nil, cfg.Stdout, cfg.Stderr)
+					if err := RunCmd(ctx, cfg.Toolchain.CC, headerArgs, cfg.PkgDir, nil, cfg.Stdout, cfg.Stderr); err != nil {
+						return fmt.Errorf("CUDA standalone header check: %w", err)
+					}
 				}
 			}
 			return nil
