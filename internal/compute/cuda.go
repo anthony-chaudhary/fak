@@ -1020,6 +1020,7 @@ func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 // MatMul computes y = x @ Wᵀ as a decode GEMV (P=1), dispatching on the weight dtype to the
 // SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
+	out, in := requireCUDAMatMulGeometry("MatMul", w, x, 1)
 	cudaMu.Lock()
 	trace := computetrace.Enabled()
 	started := time.Now()
@@ -1033,7 +1034,6 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
-	out, in := w.Shape[0], w.Shape[1]
 	var y Tensor
 	switch w.Dtype {
 	case F32:
@@ -1105,9 +1105,9 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 // BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ for P activation rows, dispatching on the
 // weight dtype to the SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMM.
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
+	out, in := requireCUDAMatMulGeometry("BatchedMatMul", w, X, P)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	out, in := w.Shape[0], w.Shape[1]
 	var y Tensor
 	switch w.Dtype {
 	case F32:
