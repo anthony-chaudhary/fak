@@ -47,6 +47,9 @@ int fvk_batch_hazards_armed(void);
 int fvk_batch_next_ordinal(void);
 void fvk_batch_hazards_set(int ordinal, int needs_sync);
 void fvk_batch_hazards_reset(void);
+uint64_t fvk_batch_hazards_epoch(void);
+uint64_t fvk_batch_barrier_boundaries(void);
+uint64_t fvk_batch_barriers_elided(void);
 */
 import "C"
 
@@ -459,12 +462,15 @@ type vulkanBackend struct {
 	haveQ8 bool
 	// batchNodeSeq advances per declared dispatch inside a batch window so the hazard
 	// ledger's edges are unique and deterministic (#12218).
-	batchNodeSeq    int
-	haveQ8GDNInProj bool
-	haveCoopmat     bool
-	haveAttention   bool
-	transient       []*vulkanBuf
-	freeTransient   map[int][]*vulkanBuf
+	batchNodeSeq            int
+	batchHazardEpoch        uint64
+	batchHazardBoundaryBase uint64
+	batchHazardElisionBase  uint64
+	haveQ8GDNInProj         bool
+	haveCoopmat             bool
+	haveAttention           bool
+	transient               []*vulkanBuf
+	freeTransient           map[int][]*vulkanBuf
 	transientPoolGauge
 	// Strix Halo (GFX1151) preflight subsystems, handed over by the serve runtime
 	// when Strix silicon is detected. Retained for the backend's zero-copy UMA and
@@ -651,16 +657,21 @@ func (v *vulkanBackend) DedicatedVRAMCarveout() (int64, bool) {
 func (v *vulkanBackend) BeginBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	if C.fvk_batch_active() {
+		return
+	}
 	v.batchNodeSeq = 0
 	vulkanBatchLedger().begin()
 	C.fvk_batch_begin()
+	v.batchHazardEpoch = uint64(C.fvk_batch_hazards_epoch())
+	v.batchHazardBoundaryBase = uint64(C.fvk_batch_barrier_boundaries())
+	v.batchHazardElisionBase = uint64(C.fvk_batch_barriers_elided())
 }
 
 // FlushBatch submits the recorded command batch to the device, ending the batching
-// window opened by BeginBatch. The window's declared buffer ranges lower to an exact
-// hazard plan (#12218) whose receipt is accumulated; the coarse barrier remains the
-// default until FAK_VULKAN_BATCH_HAZARDS arms the exact path, and any incomplete
-// window falls closed to the coarse floor.
+// window opened by BeginBatch. Verdicts were installed before each native dispatch;
+// this collects their recorded counts. The coarse barrier remains the default until
+// FAK_VULKAN_BATCH_HAZARDS arms the exact path; unknown accesses retain their barriers.
 func (v *vulkanBackend) FlushBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -681,23 +692,28 @@ func (v *vulkanBackend) CycleBatch() {
 func (v *vulkanBackend) flushBatchLocked(cycle bool) {
 	armed := VulkanHazardLoweringArmed(os.Getenv)
 	plan, stats := vulkanBatchLedger().lower(armed)
-	vulkanBatchStatsGlobal.observe(stats)
-	// Arm the shim only for a window the lowering fully proved, and set one verdict per
-	// edge keyed by the successor's recorder ordinal. An unarmed or non-exact window
-	// leaves the shim on the coarse global barrier (fail closed).
-	if armed && plan.Exact {
-		C.fvk_batch_hazards_reset()
-		C.fvk_batch_hazards_arm(1)
-		for _, edge := range plan.Edges {
-			sync := C.int(0)
-			if edge.NeedsSync {
-				sync = C.int(1)
-			}
-			C.fvk_batch_hazards_set(C.int(edge.NextShimOrdinal), sync)
+	// Native counters describe what was recorded, not a retrospective prediction.
+	// They remain active with profiling off and include undeclared barrier boundaries.
+	boundaries := uint64(C.fvk_batch_barrier_boundaries())
+	elisions := uint64(C.fvk_batch_barriers_elided())
+	coarse, avoided := boundaries-v.batchHazardBoundaryBase, elisions-v.batchHazardElisionBase
+	if coarse <= uint64(^uint(0)>>1) && avoided <= coarse {
+		stats.BarriersCoarse = int(coarse)
+		stats.BarriersExact = int(coarse - avoided)
+		if coarse > 0 {
+			stats.Windows = 1
+		}
+		if plan.BarrierFloor() != int(coarse) {
+			stats.ExactWindows = 0
+			stats.CoarseFallback = 1
 		}
 	} else {
-		C.fvk_batch_hazards_arm(0)
+		// Counter wrap or an inconsistent snapshot cannot support an elision claim.
+		stats.BarriersExact = stats.BarriersCoarse
+		stats.ExactWindows, stats.CoarseFallback = 0, 1
 	}
+	v.batchHazardBoundaryBase, v.batchHazardElisionBase = boundaries, elisions
+	vulkanBatchStatsGlobal.observe(stats)
 	if cycle {
 		C.fvk_batch_cycle()
 	} else {
@@ -712,17 +728,37 @@ func (v *vulkanBackend) flushBatchLocked(cycle bool) {
 // The node id advances per declaration so a window's edges are stable and unique, and
 // the shim's current op ordinal is captured so a verdict binds to the exact recorded op.
 func (v *vulkanBackend) recordBatchDispatch(accesses ...VulkanBufferAccess) {
-	v.batchNodeSeq++
-	ordinal := 0
-	if C.fvk_batch_active() {
-		ordinal = int(C.fvk_batch_next_ordinal())
+	if !C.fvk_batch_foreign_active() {
+		return
 	}
-	vulkanBatchLedger().record(VulkanDispatchAccess{
+	epoch := uint64(C.fvk_batch_hazards_epoch())
+	if epoch != v.batchHazardEpoch {
+		// Native host-sync paths may close and reopen a window without BeginBatch.
+		vulkanBatchLedger().begin()
+		v.batchHazardEpoch = epoch
+		v.batchNodeSeq = 0
+	}
+	v.batchNodeSeq++
+	ordinal := int(C.fvk_batch_next_ordinal())
+	needsSync := vulkanBatchLedger().recordVerdict(VulkanDispatchAccess{
 		NodeID:      v.batchNodeSeq,
 		ShimOrdinal: ordinal,
 		Declared:    true,
 		Accesses:    accesses,
 	})
+	// This seam is called under vulkanMu immediately before the declared native op.
+	// FlushBatch is too late: vkCmdPipelineBarrier has already recorded its command.
+	armed := VulkanHazardLoweringArmed(os.Getenv)
+	if !armed {
+		C.fvk_batch_hazards_arm(0)
+		return
+	}
+	C.fvk_batch_hazards_arm(1)
+	sync := C.int(1)
+	if !needsSync {
+		sync = 0
+	}
+	C.fvk_batch_hazards_set(C.int(ordinal), sync)
 }
 
 // bufferIdentity returns a stable identity for a tensor's device buffer, used only to

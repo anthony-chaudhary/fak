@@ -129,13 +129,15 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		return v.v41ScalarHeadLocked(w, X, P)
 	}
 	y, _ := v.devTr([]int{P, out}, F32)
-	v.recordBatchDispatch(
-		VulkanBufferAccess{BufferID: v.bufferIdentity(w), Size: 0, Mode: VulkanAccessRead},
-		VulkanBufferAccess{BufferID: v.bufferIdentity(X), Size: 0, Mode: VulkanAccessRead},
-		VulkanBufferAccess{BufferID: v.bufferIdentity(y), Size: 0, Mode: VulkanAccessWrite},
-	)
 	switch w.Dtype {
 	case F32:
+		// Packed routes can touch scale or staging buffers not described here.
+		// Only this single-dispatch F32 route supplies complete declarations.
+		v.recordBatchDispatch(
+			VulkanBufferAccess{BufferID: v.bufferIdentity(w), Size: 0, Mode: VulkanAccessRead},
+			VulkanBufferAccess{BufferID: v.bufferIdentity(X), Size: 0, Mode: VulkanAccessRead},
+			VulkanBufferAccess{BufferID: v.bufferIdentity(y), Size: 0, Mode: VulkanAccessWrite},
+		)
 		C.fvk_matmul_f32(v.vp(w), v.vp(X), v.vp(y), C.int(out), C.int(in), C.int(P))
 	case Q8_0:
 		v.q8MatMulLocked(w, X, y, out, in, P)

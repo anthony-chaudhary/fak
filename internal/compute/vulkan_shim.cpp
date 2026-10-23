@@ -1699,9 +1699,11 @@ void recordComputeBarrier(VkCommandBuffer cmd) {
 
 // Exact batch resource hazards (#12218). Default-off: when unarmed the recorder keeps the
 // coarse global barrier and the recorded bytes are identical to the prior behavior. The Go
-// ledger proves a window's declarations complete before arming, so the shim never has to
+// ledger proves each declared prefix before recording, so the shim never has to
 // infer hazard metadata it was not handed; an unarmed or incomplete window falls closed.
 int g_batchHazardsArmed = 0;
+uint64_t g_batchHazardEpoch = 0;
+uint64_t g_batchHazardBoundaries = 0, g_batchHazardElisions = 0;
 
 // Per-dispatch sync verdicts keyed by the dispatch's ordinal within the batch window. The
 // key is the op ordinal the shim itself assigns (g_batchOps BEFORE the increment), so a
@@ -1711,6 +1713,13 @@ int g_batchHazardsArmed = 0;
 // A positional queue would misalign the moment an undeclared dispatch interleaves, so the
 // verdict is addressed, not streamed.
 std::unordered_map<int, char> g_batchHazardSync; // ordinal -> 1 needs sync, 0 elidable
+
+// An unsuccessful dispatch must retire its verdict too: the next undeclared
+// operation otherwise inherits the same ordinal and an unrelated elision license.
+struct BatchHazardAttempt {
+    int ordinal;
+    ~BatchHazardAttempt() { g_batchHazardSync.erase(ordinal); }
+};
 
 bool nextHazardSync(int ordinal) {
     if (!g_batchHazardsArmed) return true;
@@ -1723,7 +1732,9 @@ bool nextHazardSync(int ordinal) {
 // whose Go-side plan already proved it disjoint from its predecessor needs no device fence
 // at all, so the elided case records nothing. The coarse path records the global barrier.
 void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
+    ++g_batchHazardBoundaries;
     if (g_batchHazardsArmed && !nextHazardSync(ordinal)) {
+        ++g_batchHazardElisions;
         dp_inc(g_dp.barriersElided);
         if (g_tsOn) ++g_tsBarriersElided;
         return;
@@ -1929,6 +1940,8 @@ void batchBegin() {
 	// A new window owns a fresh hazard verdict queue; anything left from the prior window
 	// must not leak into this one (the Go ledger re-lowers each window independently).
 	g_batchHazardSync.clear();
+	g_batchHazardsArmed = 0;
+	if (g_batchHazardEpoch != std::numeric_limits<uint64_t>::max()) ++g_batchHazardEpoch;
 }
 
 // ---- pipelined batch cycle (FAK_VULKAN_PIPELINE_FLUSH, default on) ----------------
@@ -2118,6 +2131,8 @@ void batchFlush() {
 	g_batching = false;
 	g_batchOps = 0;
 	g_batchHasV41 = false;
+	g_batchHazardsArmed = 0;
+	g_batchHazardSync.clear();
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
 	g_batchD2DValid = true;
@@ -2538,6 +2553,7 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr, uint32_t statusBytes = 16) {
+    BatchHazardAttempt hazardAttempt{g_batchOps};
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
     // initialization. They never flush a batch; they record only into a V4.1 step batch.
@@ -4828,21 +4844,31 @@ void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }
 void fvk_batch_cycle(void) { dp_inc(g_dp.batchFlushes); batchCycle(); }
 int fvk_batch_inflight(void) { return g_inflight.active ? 1 : 0; }
 bool fvk_batch_active(void) { return g_batching; }
-void fvk_batch_hazards_arm(int armed) { g_batchHazardsArmed = armed != 0 ? 1 : 0; }
+void fvk_batch_hazards_arm(int armed) {
+    g_batchHazardsArmed = armed && g_batching && !g_stepBatch &&
+        g_batchHazardEpoch != 0 && g_batchHazardEpoch != std::numeric_limits<uint64_t>::max() ? 1 : 0;
+    if (!g_batchHazardsArmed) g_batchHazardSync.clear();
+}
 int fvk_batch_hazards_armed(void) { return g_batchHazardsArmed; }
+uint64_t fvk_batch_hazards_epoch(void) { return g_batchHazardEpoch; }
+uint64_t fvk_batch_barrier_boundaries(void) { return g_batchHazardBoundaries; }
 /* The ordinal the NEXT recorded dispatch will carry. Because a barrier is emitted before
  * op k against op k-1, that barrier's verdict key is k = the value returned here. A Go
  * seam declares its verdict under this key so the verdict can only ever elide the exact
  * dispatch it was computed for, regardless of interleaved undeclared dispatches. */
 int fvk_batch_next_ordinal(void) { return g_batchOps; }
 void fvk_batch_hazards_set(int ordinal, int needs_sync) {
-    g_batchHazardSync[ordinal] = needs_sync != 0 ? 1 : 0;
+    // Only one immediate attempt is authorized, never a future ordinal or window.
+    g_batchHazardSync.clear();
+    if (g_batchHazardsArmed && ordinal == g_batchOps)
+        g_batchHazardSync[ordinal] = needs_sync != 0 ? 1 : 0;
 }
 void fvk_batch_hazards_reset(void) {
     g_batchHazardSync.clear();
 }
 uint64_t fvk_batch_barriers_elided(void) {
-    return g_dp.barriersElided.load(std::memory_order_relaxed);
+    // Correctness receipts must not depend on the optional dispatch profiler.
+    return g_batchHazardElisions;
 }
 void fvk_retire_request(void) { batchFlush(); }
 int fvk_submission_status(void) { return (int)g_submissionStatus; }
