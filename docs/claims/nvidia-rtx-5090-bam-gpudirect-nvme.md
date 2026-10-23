@@ -1,20 +1,22 @@
 ---
-title: "NVIDIA RTX 5090 BaM GPU Direct NVMe & Hierarchical Memory [SIMULATED]"
-description: "Zero-copy NVMe P2PDMA and BaM-architecture storage overflow engine for Qwen3.8-27B and Flash Next on NVIDIA RTX 5090 FE."
+title: "NVIDIA RTX 5090 BaM-style Storage & Hierarchical Memory [SIMULATED]"
+description: "In-memory queue and state-coordination model for a representative NVIDIA RTX 5090 target; no physical NVMe P2PDMA or inference performance qualification."
 ---
 
-# NVIDIA RTX 5090 BaM GPU Direct NVMe & Hierarchical Memory
+# NVIDIA RTX 5090 BaM-style Storage & Hierarchical Memory
 
 [← Claims index](../../CLAIMS.md)
 
-> ⚠️ **CRITICAL PROVENANCE NOTICE: THEORETICAL ROOFLINE PROJECTION ([SIMULATED])**
+> **PROVENANCE: IN-MEMORY MODEL ([SIMULATED]), NOT A HARDWARE WITNESS**
 >
-> All performance figures below (318.8 tok/s decode, 0.42s 32K context restoration, 7.1 GB/s P2PDMA) are **modeled analytical roofline projections ([SIMULATED])**, NOT physical empirical measurements on Blackwell hardware.
+> Historical figures such as 318.8 tok/s decode, 0.42s 32K restoration, and 7.1 GB/s P2PDMA were illustrative constants, not measured results or calibrated hardware predictions. This includes the earlier CPU-staged/reference values and their speedup ratios.
 >
-> **Why we over-explain this simulation:**
-> - **Zero physical execution on Blackwell silicon:** Execution on hardware is pending active Linux driver DMA-BUF P2PDMA support (`nvidia-open`).
-> - **What is verified:** Pure Go unit tests (`internal/compute/cuda_gpudirect_storage_test.go`, `internal/model/qwen38_cudadirect_swap_test.go`) verify interface invariants (`StagingCopyCount() == 0`, queue descriptor math, bit-exact state serialization), not empirical throughput or bus latency.
-> - **Unmodeled physical effects:** PCIe TLP packetization headers, DRAM bank conflicts / auto-refresh, thermal throttling (DVFS), OS/CGO scheduling jitter, and MoE expert routing skew.
-> - **Discipline reference:** [`docs/standards/simulated-results-discipline.md`](../standards/simulated-results-discipline.md).
+> Pure Go tests exercise queue/descriptor arithmetic, memory-tier policy, and synthetic state serialization. `StagingCopyCount() == 0` is a model/interface assertion, not a measurement of physical host copies. The CLI has no physical transfer or Qwen inference backend; installing Blackwell hardware or a driver does not change that.
+>
+> Discipline reference: [simulated-results discipline](../standards/simulated-results-discipline.md).
 
-- [SIMULATED] **NVIDIA RTX 5090 BaM GPU Direct NVMe & Hierarchical Memory (Issue #11326).** Zero-copy NVMe P2PDMA and BaM-architecture storage overflow engine for Qwen3.8-27B and Flash Next on NVIDIA Blackwell sm_120 (RTX 5090 FE 32GB GDDR7 + Samsung 990 Pro 2TB NVMe). Mapped direct NVMe queues in BAR1 VRAM (`CUDABaMVRAMQueue`), zero host DRAM bounce copies (`StagingCopyCount() == 0`), Direct CPU Root Complex P2PDMA (<700ns latency), and 3-Tier Hierarchical Memory Manager (Tier 0 VRAM 32GB, Tier 1 Host Pinned DRAM 128GB, Tier 2 NVMe P2PDMA). Modeled projection: 318.8 tok/s decode, 0.42s 32K context restoration, 7.1 GB/s sustained P2PDMA bandwidth, 0 host staging copies, and 51B PLE offloaded to 128GB Host DRAM with dynamic VRAM expert slot-streaming via `cuStreamWaitValue64`. Algorithmic zero-copy invariant and bit-exact hybrid state verified in pure Go tests (`internal/compute/cuda_gpudirect_storage_test.go`, `internal/model/qwen38_cudadirect_swap_test.go`). Witness: `docs/benchmarks/QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md` (`fak.modelengine.qwen38-cudadirect-swap/1`; reproduce: `go run ./cmd/fak-dev cuda-gpudirect qwen38 --json`). Physical Blackwell on-device execution required to promote to the SHIPPED tier.
+- [SIMULATED] **BaM-style queue and hierarchical-memory model (Issue #11326).** `CUDABaMVRAMQueue` and the Qwen coordinator model submission/completion descriptors, tier bookkeeping, expert slots, and KV/GDN state coordination using a representative RTX 5090 FE / Ryzen 9 5950X / NVMe SSD profile. The simulation does not establish VRAM queue residency, pinned/UVA host memory, MMIO, `cuStreamWaitValue64` execution, physical zero-copy DMA, or inference performance.
+
+- [SIMULATED] **Explicit execution boundary.** `bench`, `qwen38`, and `qwen38-bench` require `--simulate`; `qwen38-sim` is the shorthand. Attempt the model with `go run ./cmd/fak-dev cuda-gpudirect qwen38 --simulate --json`. Successful output uses `fak.modelengine.qwen38-cudadirect-swap/1`, MODELED provenance/verdict, and `is_physical_silicon: false`. Legacy numeric performance fields are zero/unmeasured, not measured zeros. Errors return nonzero without a success receipt. Hardware `inspect` and `audit` do not silently inject fixtures and leave unprobed capabilities UNKNOWN/UNVERIFIED.
+
+Interface-test sources: `internal/compute/cuda_gpudirect_storage_test.go`, `internal/model/qwen38_cudadirect_swap_test.go`. Evidence limits and physical promotion requirements: [NVIDIA GPUDirect model record](../benchmarks/QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md). An implemented physical backend plus independently reviewed on-device transfers, model correctness, and end-to-end measurements are required before a scoped hardware-performance claim.

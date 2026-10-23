@@ -164,7 +164,7 @@ does.
 | `max_tokens` | int | Forwarded to the model. Omit (or `0`) to use the planner default; a **negative** value is a `400`. |
 | `temperature` | number | Forwarded. Valid range `[0, 2]`; out of range is a `400`. Optional. |
 | `top_p` | number | Forwarded. Valid range `[0, 1]`; out of range is a `400`. Optional. |
-| `min_p` | number | Optional. Proxied routes forward it unchanged. The native route drops every token whose probability after temperature is below `min_p` times the most probable token's, then applies `top_k` and `top_p` to what remains. That is vLLM's order; llama.cpp's default chain runs min-p after top-k/top-p and before temperature. Omitted or `0` disables it, and it never changes a `temperature: 0` pick. On the native route a value outside `[0, 1]` is a `400` with code `sampling_mode_unsupported`. |
+| `min_p` | number | Optional. Proxied routes forward it unchanged. The native route drops every token whose probability after temperature is below `min_p` times the most probable token's, then applies `top_k` and `top_p` to what remains. For sampler-order comparison, this matches vLLM's order; llama.cpp's default chain runs min-p after top-k/top-p and before temperature. Omitted or `0` disables it, and it never changes a `temperature: 0` pick. On the native route a value outside `[0, 1]` is a `400` with code `sampling_mode_unsupported`. |
 | `stop` | string \| string[] | Either shape accepted. Optional. |
 | `stream` | bool | `true` ⇒ an SSE stream — live token pass-through when it is safe, else synthesized (see below). |
 

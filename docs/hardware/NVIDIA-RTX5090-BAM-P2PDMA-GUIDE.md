@@ -1,267 +1,124 @@
 ---
-title: "NVIDIA RTX 5090 FE & Gigabyte X570 BaM P2PDMA Deployment Guide"
-description: "Step-by-step hardware layout, UEFI/BIOS configuration, Linux kernel tuning, and validation guide for zero-copy BaM NVMe P2PDMA on NVIDIA RTX 5090 FE and AMD Ryzen 9 5950X."
+title: "NVIDIA RTX 5090 FE & Gigabyte X570 BaM P2PDMA Planning and Diagnostics"
+description: "Target hardware planning, observed inventory, and explicit simulation boundaries for the unqualified NVIDIA RTX 5090 BaM NVMe P2PDMA path."
 ---
 
-# NVIDIA RTX 5090 FE & Gigabyte X570 BaM P2PDMA Deployment Guide
+# NVIDIA RTX 5090 FE & Gigabyte X570 BaM P2PDMA Planning and Diagnostics
 
-> **Scope & Purpose:**  
-> This guide provides the complete deployment runbook to configure and verify **zero-copy Big Accelerator Memory (BaM) Peer-to-Peer DMA (P2PDMA)** on a workstation pairing an **NVIDIA GeForce RTX 5090 FE (32GB GDDR7, sm_120)** with an **AMD Ryzen 9 5950X** on a **Gigabyte X570 Aorus Elite WiFi** motherboard.  
-> Following this guide ensures direct PCIe root complex switching (<700ns latency), full 32GB Resizable BAR aperture mapping, zero host DRAM bounce copies (`StagingCopyCount() == 0`), and seamless operation of `fak`'s 3-Tier Hierarchical Memory Manager for Qwen 3.8 models.
+> **Scope & status: unqualified hardware target, not a deployment guarantee.**
+> The RTX 5090 FE / Ryzen 9 5950X / X570 workstation is a representative target for the BaM-style storage model. The current `cuda-gpudirect` commands do not implement a physical NVMe-to-GPU transfer or an end-to-end Qwen inference benchmark. Installing this hardware or changing BIOS/driver settings does not turn the simulation into a physical backend.
+>
+> Hardware `inspect` reports available inventory only. Unprobed settings and route properties remain **UNKNOWN/UNVERIFIED**. Explicit simulation exercises in-memory descriptors, queues, and state coordination; it does not qualify hardware performance or physical zero-copy operation.
 
-Related benchmark evidence: [`docs/benchmarks/QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md`](../benchmarks/QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md)  
-Receipt schema: `fak.modelengine.qwen38-cudadirect-swap/1`  
+Related model and evidence limits: [`QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md`](../benchmarks/QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md)
+Simulation receipt schema: `fak.modelengine.qwen38-cudadirect-swap/1`
 Tracking issue: [#11326](https://github.com/anthony-chaudhary/fak/issues/11326)
 
 ---
 
-## 1. Workstation Hardware Specification
+## 1. Representative Workstation Profile
 
-The validated target profile consists of:
+These are **model inputs**, not a discovered or validated workstation configuration:
 
-| Component | Hardware Specification | Role in Architecture |
+| Component | Representative target | Intended role |
 | :--- | :--- | :--- |
-| **GPU** | NVIDIA GeForce RTX 5090 Founders Edition (32GB GDDR7, sm_120, PCIe 4.0 x16) | **Tier 0 VRAM:** Model weights, active KV pages, BaM queues |
-| **CPU** | AMD Ryzen 9 5950X (16 cores / 32 threads, Zen 3, PCIe 4.0 Root Complex) | Root Complex PCIe arbiter (10-bit Tag completer) |
-| **Motherboard** | Gigabyte X570 Aorus Elite WiFi (AMD X570 chipset, rev 1.0) | PCIe interconnect fabric & direct CPU lane switching |
-| **Host Memory**| 128 GB DDR4 (4 × 32 GB dual-channel DDR4-3200/3600 CL16/18) | **Tier 1 Host DRAM:** 2.37 GB UVA embeddings + 51 GB PLE table |
-| **NVMe SSD** | Samsung SSD 990 PRO 2TB (M.2 NVMe PCIe 4.0 x4, NVMe 2.0) | **Tier 2 Storage:** Paged KV slabs & serialized GDN states |
+| GPU | NVIDIA GeForce RTX 5090 FE, 32 GB GDDR7, `sm_120` | Tier 0 weights, active KV pages, modeled BaM queues |
+| CPU | AMD Ryzen 9 5950X | Host processing and PCIe root-complex target |
+| Motherboard | Gigabyte X570 Aorus Elite WiFi | Candidate PCIe interconnect layout |
+| Host memory | 128 GB DDR4 | Tier 1 model capacity, including embedding/PLE placeholders |
+| NVMe SSD | Illustrative 2 TB NVMe SSD | Tier 2 storage target |
+
+Neither a device name nor its PCI address proves VRAM capacity, BAR1 size, ReBAR, ACS behavior, link bandwidth, motherboard slot identity, or supported peer DMA. Record those properties from appropriate hardware/driver evidence before using them as admission inputs.
+
+## 2. Motherboard Layout and Slot Planning
+
+The representative layout uses the primary `PCIEX16` GPU slot and `M2A_CPU` NVMe slot rather than a chipset-attached `M2B_SB` slot. Confirm wiring against the manual for the exact board revision and inspect the actual PCIe ancestry. Linux sysfs names and BDF numbering alone do not establish a named motherboard slot or a usable P2P path.
+
+A shorter candidate path may avoid shared chipset resources, but this guide provides no measured latency or bandwidth for either placement. In particular, the earlier **680 ns**, **7.1 GB/s**, and chipset slowdown figures were illustrative assumptions, not physical observations. An apparent common root complex does not prove driver-supported DMA or the absence of ACS redirection.
+
+## 3. UEFI / BIOS Planning
+
+Above 4G Decoding, Resizable BAR, negotiated PCIe link settings, ten-bit tag support, and boot mode are properties to inspect with the exact board, GPU, and driver documentation. The current `cuda-gpudirect audit` does not read enough firmware/register state to certify these settings.
+
+Do not infer a full 32 GiB BAR1 aperture from a GPU model string, and do not treat an unknown value as a disabled or enabled setting. Record observed values and their source separately from the representative model.
+
+IOMMU and ACS changes can weaken device isolation. This guide does not prescribe disabling them to obtain a favorable audit result. Any authorized configuration experiment needs a recorded baseline, an exact supported change, and a rollback plan; a modeled receipt cannot validate that change.
+
+## 4. Linux Kernel and Driver Planning
+
+Record the exact OS/kernel, GPU driver, device identifiers, negotiated links, and supported peer-memory interface before attempting hardware integration. Consult the matching official kernel and NVIDIA driver documentation for supported parameters and device combinations.
+
+Earlier versions of this guide presented `pcie_p2pdma=1`, `NVreg_EnableResizableBar=1`, `NVreg_EnableGpuFirmware=0`, and `RMDisableP2PDMA=0` as a verified setup recipe. This path has no physical witness establishing that recipe. Do not copy those options or rebuild a boot configuration on the basis of this guide. Driver availability is not the only missing piece: the current CLI also lacks a physical transfer/execution backend.
 
 ---
 
-## 2. Motherboard Physical Layout & Slot Selection
+## 5. Diagnostics and Explicit Simulation
 
-Physical slot selection is critical on the Gigabyte X570 platform. Installing the SSD in the incorrect M.2 slot will degrade P2PDMA bandwidth by up to 60% and introduce severe Access Control Services (ACS) latency stalls.
+### Step 5.1: Inspect available hardware inventory
 
-```
-       +-------------------------------------------------------+
-       |             REAR I/O & MOTHERBOARD VRM                |
-       |                                                       |
-       |                  [ AM4 CPU SOCKET ]                   |
-       |                   AMD Ryzen 9 5950X                   |
-       |                                                       |
-       |  ===================================================  |
-       |  || [M2A_CPU SLOT] (Top M.2 under thermal heatsink)|| <--- MUST USE THIS SLOT!
-       |  || Direct 4x PCIe 4.0 lanes to CPU Root Complex  ||      (Samsung 990 PRO 2TB)
-       |  ===================================================  |
-       |                                                       |
-       |  +-------------------------------------------------+  |
-       |  | [PCIEX16 SLOT] (Steel-reinforced primary slot)   | <--- NVIDIA RTX 5090 FE
-       |  | Direct 16x PCIe 4.0 lanes to CPU Root Complex   |      (32GB GDDR7 BAR1)
-       |  +-------------------------------------------------+  |
-       |                                                       |
-       |  [ PCIEX1 Slot ]                                      |
-       |  [ PCIEX4 Slot ]                                      |
-       |                                                       |
-       |  +---------------------------+  +------------------+  |
-       |  | [M2B_SB SLOT]             |  | AMD X570 CHIPSET |  |
-       |  | DO NOT USE! (Chipset Hop) |  | (Active Fan)     |  |
-       |  +---------------------------+  +------------------+  |
-       +-------------------------------------------------------+
-```
-
-### Critical Slot Rules:
-1. **NVMe Storage SSD: Install into `M2A_CPU` (Top Slot)**
-   - Located directly between the CPU socket and the primary `PCIEX16` slot, beneath the integrated metal M.2 Thermal Guard heatsink.
-   - Wired **directly** to the Ryzen 5950X's internal I/O Die (IOD) PCIe controller.
-   - Enables direct peer-to-peer DMA switching inside the CPU root complex at **<700 ns** latency without touching host RAM.
-2. **DO NOT USE `M2B_SB` (Lower Slot)**
-   - The lower slot is routed through the AMD X570 chipset (southbridge) over an interconnect downlink.
-   - P2P traffic traversing the chipset suffers:
-     - 3–5× higher latency (~2,400 ns vs ~680 ns).
-     - Access Control Services (ACS) packet reflection stalls (`ACSStallRisk == true`).
-     - Bandwidth throttling down to <3.0 GB/s due to shared chipset bus contention.
-3. **GPU Installation:**
-   - Install the RTX 5090 FE into the primary steel-reinforced **`PCIEX16`** slot closest to the CPU.
-
----
-
-## 3. UEFI / BIOS Configuration (Gigabyte X570)
-
-Power on the machine and press `Delete` repeatedly to enter the Gigabyte UEFI BIOS. Press `F2` to switch to **Advanced Mode**.
-
-Configure the following settings:
-
-### A. PCIe & Memory Aperture Settings (`Settings -> IO Ports`)
-- **Above 4G Decoding:** Set to **`Enabled`**
-  - *Purpose:* Allocates 64-bit memory address space for PCIe devices above the 4 GB physical boundary. Required for ReBAR.
-- **Re-Size BAR Support:** Set to **`Auto`** (or **`Enabled`**)
-  - *Purpose:* Advertises the full 32 GB VRAM capacity as a single BAR1 aperture (`BAR1SizeBytes == 34,359,738,368 bytes`) rather than clamping to the legacy 256 MB window.
-- **PCIe Slot Configuration (PCIEX16):** Set to **`Gen4`**
-  - *Purpose:* Prevents auto-negotiation down to PCIe Gen3 speeds, ensuring the full 16 GT/s line rate (~31.5 GB/s bidirectional).
-- **M2A_CPU Link Speed:** Set to **`Gen4`**
-  - *Purpose:* Locks the Samsung 990 Pro slot to PCIe 4.0 x4 (16 GT/s, ~7.88 GB/s theoretical ceiling).
-
-### B. AMD CBS / NBIO Options (`Settings -> AMD CBS`)
-- **PCIe Ten Bit Tag Support:** Set to **`Enabled`** (`AMD CBS -> NBIO Common Options`)
-  - *Purpose:* Extends PCIe tag completer capability from 8-bit (256 tags) to 10-bit (up to 768 non-posted outbound transactions). Essential for high-concurrency BaM NVMe queue submissions.
-- **IOMMU:** Set to **`Enabled`** (`AMD CBS -> NBIO Common Options`)
-  - *Purpose:* Arms AMD-Vi hardware virtualization for Linux `iommu=pt` pass-through mapping.
-- **ACS Enable:** Set to **`Auto`** or **`Disabled`** on Root Ports
-  - *Purpose:* Avoids forced redirection of peer-to-peer PCIe packets up to the OS kernel.
-
-### C. Boot & Compatibility (`Boot`)
-- **CSM Support (Compatibility Support Module):** Set to **`Disabled`**
-  - *Crucial:* Resizable BAR cannot operate in legacy CSM / BIOS mode; pure UEFI boot is strictly required.
-
-Press **`F10`** to Save & Exit.
-
----
-
-## 4. Linux Kernel & Driver Configuration
-
-Boot into your Linux distribution (Ubuntu 24.04 LTS / Debian 12 / Rocky Linux 9 with kernel 6.6+ recommended).
-
-### A. Kernel Boot Parameters (`/etc/default/grub`)
-Edit `/etc/default/grub` using `sudo nano /etc/default/grub`:
-
-```ini
-# Add iommu=pt, amd_iommu=on, and pcie_p2pdma=1
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash iommu=pt amd_iommu=on pcie_p2pdma=1"
-```
-
-- **`iommu=pt`**: Sets IOMMU to pass-through mode. Direct hardware accesses bypass virtualization page tables, reducing P2P latency to sub-700ns while allowing DMA-BUF peer mapping.
-- **`amd_iommu=on`**: Ensures AMD Zen 3 IOMMU drivers initialize properly.
-- **`pcie_p2pdma=1`**: Activates kernel-level PCIe peer-to-peer DMA support across memory tiers.
-
-Update the GRUB bootloader:
 ```bash
-sudo update-grub
-# On Fedora / RHEL:
-# sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+go run ./cmd/fak-dev cuda-gpudirect inspect --json
 ```
 
-### B. NVIDIA Kernel Module Options (`/etc/modprobe.d/nvidia.conf`)
-Create or edit `/etc/modprobe.d/nvidia.conf`:
+The hardware path reads available inventory without substituting a representative RTX 5090 or NVMe SSD when devices are absent. A successful enumeration exits zero while its verdict remains **UNVERIFIED**: enumeration is not a physical execution witness.
 
-```ini
-# Enable large Resizable BAR aperture in the NVIDIA kernel driver
-options nvidia NVreg_EnableResizableBar=1
+With `--sysfs` omitted or empty, discovery follows the platform: Linux reads `/sys`; Windows queries CIM display identity/driver data only, without an NVMe probe or inferred VRAM/BAR1/ReBAR. Windows-reported adapter RAM is not treated as authoritative GPU VRAM. Query/parse errors are surfaced, and other platforms report unsupported discovery. An explicit nonempty `--sysfs PATH`, including `/sys`, selects the Linux sysfs parser on every platform. It does not enable hardware execution or simulation. `--simulate` instead selects representative fixtures before any hardware probe.
 
-# Open GPU kernel module firmware configuration
-options nvidia NVreg_EnableGpuFirmware=0
+Interpret the output conservatively:
+- `provenance: OBSERVED` describes inventory observations, not measured P2PDMA or model execution.
+- `is_physical_silicon: false` means no physical execution witness was produced, even if real devices were enumerated.
+- `unknown_fields` identifies unprobed capabilities. Missing host specifications, VRAM/BAR1 sizes, ReBAR, slot mappings, ACS/IOMMU settings, and route performance must not become healthy defaults.
+- A probe error returns nonzero with diagnostic context; any partial inventory is not a complete discovery result.
 
-# Ensure P2PDMA transactions are permitted on consumer Blackwell hardware
-options nvidia NVreg_RegistryDwords="RMDisableP2PDMA=0"
-```
+### Step 5.2: Read the hardware audit limits
 
-Rebuild the initramfs image and reboot:
 ```bash
-sudo update-initramfs -u
-sudo reboot
+go run ./cmd/fak-dev cuda-gpudirect audit --json
 ```
+
+The current audit reports unsupported checks as **UNKNOWN**, `healthy: false`, and verdict **UNVERIFIED**, with a nonzero exit. This is an evidence gap, not proof that the workstation is defective. There is no fabricated all-PASS output to match and no automatic BIOS/driver remediation established by this audit.
+
+The following are exit codes of the **`fak-dev` executable**. The examples use `go run`, which returns its own wrapper status and prints `exit status N` for a child failure; do not expect the shell to receive the child's exact code through `go run`.
+
+Executable exit meanings are deliberate:
+- `inspect`: **0** for completed enumeration, **1** for a probe error; neither means qualified DMA.
+- `audit`: **1** for the current unknown/unsupported checks. `audit --simulate` also exits **1**, with MODELED provenance/verdict, UNKNOWN checks, and `healthy: false`.
+- `bench`, `qwen38`, or `qwen38-bench` without `--simulate`: **2** (unsupported physical mode/usage). Invalid or surplus arguments also return **2** before probing.
+
+### Step 5.3: Exercise the in-memory BaM queue model
+
+```bash
+go run ./cmd/fak-dev cuda-gpudirect bench --simulate --json
+```
+
+`bench` without `--simulate` refuses rather than silently running a model or claiming a hardware benchmark. The explicit simulation uses representative fixtures and in-memory queue operations, even on a GPU-equipped host. It reports **MODELED**, `is_physical_silicon: false`, and `zero_copy_verified: false`.
+
+Legacy numeric throughput/IOPS fields are zero placeholders for **unmeasured**, not physical zero-performance results. A descriptor's zero staging count, a simulated doorbell count, or elapsed Go execution time does not measure PCIe DMA, GPU queue residency, or host bounce copies.
+
+### Step 5.4: Exercise the Qwen state-coordination simulation
+
+```bash
+go run ./cmd/fak-dev cuda-gpudirect qwen38 --simulate --json
+# Equivalent explicit simulation entry points:
+go run ./cmd/fak-dev cuda-gpudirect qwen38-bench --simulate --json
+go run ./cmd/fak-dev cuda-gpudirect qwen38-sim --json
+```
+
+`qwen38` and `qwen38-bench` require `--simulate`; `qwen38-sim` is the shorthand. These commands do not load model weights or run physical token generation. A successful receipt is **MODELED**, not PASS or PHYSICAL_WITNESSED, and its legacy performance fields remain unmeasured placeholders. A constructor or state-restoration error returns nonzero without a success receipt; do not promote it into one.
+
+Capture any run in a fresh, exclusively owned evidence directory. Preserve stderr, exit status, source identity, and the original receipt together. Never overwrite a historical receipt or relabel modeled output as hardware evidence.
 
 ---
 
-## 5. Verification & Diagnostics with `fak-dev cuda-gpudirect`
+## 6. Troubleshooting and Next Physical Witness
 
-`fak` provides dedicated diagnostic and verification tools within `cmd/fak-dev` to audit hardware topology, verify BIOS flags, benchmark P2PDMA speeds, and validate zero-copy memory invariance.
-
-### Step 5.1: Inspect PCIe Topology & Interconnect Routing
-Run the topology prober:
-```bash
-go run ./cmd/fak-dev cuda-gpudirect inspect
-```
-
-**Expected Healthy Output:**
-```text
-CUDA GPU Direct Topology & Interconnect Prober:
-  Host CPU:            AMD Ryzen 9 5950X (Zen 3, 16c/32t)
-  Motherboard:         Gigabyte X570 Aorus Elite WiFi
-  Host Memory:         128GB DDR4
-  CUDA Devices (1 discovered):
-    GPU 0: NVIDIA GeForce RTX 5090 FE [sm_120] BDF=0000:09:00.0 VRAM=32.0 GiB BAR1=32.0 GiB (Large BAR (ReBAR enabled))
-           Upstream Root Port: 0000:00:01.1 | NUMA Node: 0
-  NVMe Storage Devices (1 discovered):
-    NVMe 0: Samsung SSD 990 PRO 2TB BDF=0000:01:00.0 Slot=M2A_CPU (Direct CPU lanes) PeakRead=7.45 GB/s
-            Upstream Root Port: 0000:00:01.2 | NUMA Node: 0
-  PCIe P2P Interconnect Routes (1 evaluated):
-    Route 0: DIRECT_CPU_ROOT_COMPLEX | Optimal: true | Latency: ~680 ns | Max BW: 7.1 GB/s
-             ACS Status: No ACS stall risk | ReBAR compliant
-             - Direct CPU Root Complex P2P route verified (optimal latency ~680ns, bandwidth ~7.1 GB/s)
-  Summary ACS Status: Direct P2P Permitted (No ACS redirection stall risk detected on primary route)
-```
-
-Verify that:
-- `BAR1=32.0 GiB` reports **Large BAR (ReBAR enabled)**.
-- Slot reports **`M2A_CPU (Direct CPU lanes)`**.
-- Route reports **`DIRECT_CPU_ROOT_COMPLEX`**, `Optimal: true`, `Latency: ~680 ns`, and `No ACS stall risk`.
-
----
-
-### Step 5.2: Run the Hardware & Driver Audit
-Run the automated configuration auditor:
-```bash
-go run ./cmd/fak-dev cuda-gpudirect audit
-```
-
-**Expected Healthy Output:**
-```text
-CUDA GPU Direct & BaM P2PDMA Hardware Audit:
-  Healthy:             true (Verdict: PASS)
-  Host CPU:            AMD Ryzen 9 5950X (Zen 3, 16c/32t)
-  Motherboard:         Gigabyte X570 Aorus Elite WiFi
-  Host Memory:         128GB DDR4
-  System Settings & Verification Checks:
-    [PASS] Above 4G Decoding          : Required 64-bit PCIe MMIO aperture enabled above 4GB physical memory boundary.
-    [PASS] Resizable BAR (ReBAR)      : Full 32GB BAR1 aperture active (BAR1: 32 GiB, VRAM: 32 GiB).
-    [PASS] PCIe Ten Bit Tag           : PCIe 10-bit Tag completer enabled on Zen 3 root complex for up to 768 non-posted outbound transactions.
-    [PASS] IOMMU / ACS                : Direct CPU Root Complex interconnect route: P2P DMA traffic permitted without ACS redirection stalls.
-    [PASS] NVreg_EnableResizableBar=1 : NVIDIA kernel module parameter NVreg_EnableResizableBar=1 active; large BAR mapping established.
-```
-
-If any check returns `WARN` or `FAIL`, follow the printed remediation instructions.
-
----
-
-### Step 5.3: Run the BaM NVMe P2PDMA Microbenchmark
-Benchmark direct bus-master DMA transfers between the Samsung 990 Pro and RTX 5090 FE BAR1 memory:
-```bash
-go run ./cmd/fak-dev cuda-gpudirect bench
-```
-
-**Expected Output:**
-```text
-CUDA BaM NVMe P2PDMA Zero-Copy Microbenchmark Results:
-  Device:               NVIDIA GeForce RTX 5090 FE (sm_120)
-  Storage Device:       Samsung SSD 990 PRO 2TB (M2A_CPU)
-  Route Interconnect:   DIRECT_CPU_ROOT_COMPLEX (PCIe Root Complex)
-  Queue Architecture:   CUDA BaM VRAM Submission/Completion Queues (ASPLOS 2023)
-  Commands Executed:    32 (16 Reads, 16 Writes)
-  Total Bytes Moved:    2097152 (2.00 MB)
-  Throughput:           7.12 GB/s
-  IOPS:                 118720 IOPS (64 KiB blocks)
-  Staging Copies:       0 (zero host DRAM bounce copies)
-  Doorbell MMIO Rings:  1
-  Zero-Copy Invariant:  VERIFIED (staging_copy_count == 0)
-```
-
-The microbenchmark verifies that:
-- `Staging Copies: 0` (strictly zero host DRAM bounce buffers).
-- `Zero-Copy Invariant: VERIFIED`.
-- Sustained throughput exceeds **7.1 GB/s**.
-
----
-
-### Step 5.4: Execute the Qwen 3.8 Model Coordination Benchmark
-Simulate end-to-end model execution for Qwen3.8-27B and Flash Next:
-```bash
-go run ./cmd/fak-dev cuda-gpudirect qwen38
-```
-
-To output the canonical machine-readable receipt in JSON format:
-```bash
-go run ./cmd/fak-dev cuda-gpudirect qwen38 --json
-```
-
----
-
-## 6. Troubleshooting & Common Pitfalls
-
-| Symptom / Error | Root Cause | Remediation Action |
+| Observation | Meaning | Next check |
 | :--- | :--- | :--- |
-| `BAR1 clamped to 256 MB` / `small BAR bottleneck` | CSM enabled or Re-Size BAR disabled in BIOS | Enter BIOS -> `Boot -> CSM Support -> Disabled`, then `Settings -> IO Ports -> Re-Size BAR Support -> Auto`. |
-| `IOMMU / ACS: WARN` / Route is `CHIPSET_DOWNLINK` | NVMe drive installed in `M2B_SB` (chipset slot) | Power down workstation and relocate Samsung 990 Pro SSD into **`M2A_CPU`** (top slot under CPU heatsink). |
-| `ACS STALL RISK DETECTED` in topology prober | PCIe Access Control Services redirecting packets | Verify `iommu=pt` in GRUB commandline and ensure drive is in `M2A_CPU`. |
-| `NVreg_EnableResizableBar=1: WARN` | Missing NVIDIA module option | Add `options nvidia NVreg_EnableResizableBar=1` to `/etc/modprobe.d/nvidia.conf` and reload driver. |
-| Inter-token latency spikes during token generation | Host memory bus contention from DRAM staging | Verify `fak-dev cuda-gpudirect bench` reports `Staging Copies: 0` and zero host bounce copies. |
+| Empty device list | No matching inventory was discovered | Check the requested sysfs root and the host's actual device visibility; do not inject fixtures into hardware output. |
+| `probe_error` / nonzero probe exit | Enumeration was incomplete or unavailable | Inspect the reported error and preserve partial inventory separately from a complete result. |
+| `UNKNOWN` / `UNVERIFIED`, `healthy: false` | Required capability evidence is missing | Gather actual firmware, driver, register, and route evidence; do not assume a failed device or change isolation settings blindly. |
+| `bench` / `qwen38` refuses without `--simulate` | The physical execution backend is not implemented | Use explicit simulation only for model/interface work; implement and separately witness the hardware path. |
+| Modeled throughput fields are zero | Physical rates were not measured | Do not interpret these placeholders as a benchmark. |
+| Qwen simulation returns an error | The in-memory path did not complete | Preserve the exact failure and repair it before claiming model/interface success. |
+
+The next qualification step is an implemented physical backend with traceable on-device transfers, data-integrity checks, measured timings, and an end-to-end fak-native workload. See the [promotion requirements](../benchmarks/QWEN38-NVIDIA-5090-GPUDIRECT-RESULTS.md#8-promotion-gate--the-missing-physical-witness). Hardware inventory and a successful simulation remain separate evidence classes.
