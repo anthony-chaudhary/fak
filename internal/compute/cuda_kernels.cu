@@ -2832,7 +2832,11 @@ extern "C" int fcuda_graph_end_launch(void) {
   int rc = 0;
   e = cudaGraphLaunch(g_exec, g_stream);
   if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Launch: %s\n", cudaGetErrorString(e)); rc = 3; }
-  CK(cudaStreamSynchronize(g_stream));
+  e = cudaStreamSynchronize(g_stream);
+  if (e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Graph completion: %s\n", cudaGetErrorString(e));
+    if (rc == 0) rc = 4; // Preserve an earlier launch failure while rejecting async execution failures.
+  }
   cudaGraphDestroy(graph); // keep g_exec for the next token's ExecUpdate
   return rc;
 }
