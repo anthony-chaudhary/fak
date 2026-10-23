@@ -54,7 +54,13 @@ func LookupDeviceMemoryProfile(architecture string) (DeviceMemoryProfile, bool) 
 	}
 }
 
-func resolveDeviceMemoryProfile(be Backend, architecture string) (DeviceMemoryProfile, bool) {
+// ResolveDeviceMemoryProfile resolves selected-device facts through the optional
+// provider first. A provider's profile and boolean are returned unchanged, even
+// when facts are partial or unavailable. Without a provider, Vulkan uses only
+// its reported tier; other backends (including nil) use the architecture hint.
+// A true result alone does not establish cache-planning readiness: callers must
+// also check CachePlanningAvailable before using the profile for that purpose.
+func ResolveDeviceMemoryProfile(be Backend, architecture string) (DeviceMemoryProfile, bool) {
 	if provider, ok := be.(DeviceMemoryProfileProvider); ok {
 		return provider.DeviceMemoryProfile()
 	}
