@@ -20,6 +20,8 @@ import (
 type P2PRouteKind string
 
 const (
+	// RouteUnknown means that inventory has not established a usable P2P route.
+	RouteUnknown P2PRouteKind = "UNKNOWN"
 	// RouteDirectCPURootComplex represents an optimal peer-to-peer route switched directly within the CPU PCIe root complex.
 	RouteDirectCPURootComplex P2PRouteKind = "DIRECT_CPU_ROOT_COMPLEX"
 	// RouteChipsetDownlink represents a degraded route crossing motherboard chipset / southbridge interconnects.
@@ -54,6 +56,12 @@ type CUDADeviceNode struct {
 	ReBAREnabled     bool   `json:"rebar_enabled"`
 	UpstreamRootPort string `json:"upstream_root_port"`
 	NUMANode         int    `json:"numa_node"`
+	PNPDeviceID      string `json:"pnp_device_id,omitempty"`
+	DriverVersion    string `json:"driver_version,omitempty"`
+	// AdapterRAM is a legacy WMI report, not authoritative modern GPU capacity.
+	ReportedAdapterRAMBytes uint64   `json:"reported_adapter_ram_bytes,omitempty"`
+	EvidenceSource          string   `json:"evidence_source"`
+	UnknownFields           []string `json:"unknown_fields"`
 }
 
 // NVMeStorageNode describes a PCIe NVMe storage device and its topology location.
@@ -64,6 +72,8 @@ type NVMeStorageNode struct {
 	UpstreamRootPort string       `json:"upstream_root_port"`
 	PeakReadGBps     float64      `json:"peak_read_gbps"`
 	NUMANode         int          `json:"numa_node"`
+	EvidenceSource   string       `json:"evidence_source"`
+	UnknownFields    []string     `json:"unknown_fields"`
 }
 
 // P2PRouteVerdict evaluates the peer-to-peer DMA suitability between an NVMe drive and a CUDA GPU.
@@ -75,6 +85,9 @@ type P2PRouteVerdict struct {
 	ACSStallRisk      bool         `json:"acs_stall_risk"`
 	ReBARCompliant    bool         `json:"rebar_compliant"`
 	DiagnosticNotes   []string     `json:"diagnostic_notes"`
+	EvidenceSource    string       `json:"evidence_source"`
+	UnknownFields     []string     `json:"unknown_fields"`
+	P2PValidated      bool         `json:"p2p_validated"`
 }
 
 // CUDAPCIeTopologyDiscovery coordinates host-wide discovery and routing adjudication for NVIDIA GPUs and NVMe drives.
@@ -95,18 +108,13 @@ func NewCUDAPCIeTopologyDiscovery(sysfsRoot string) *CUDAPCIeTopologyDiscovery {
 
 // Discover scans the host for NVIDIA GPUs and NVMe controllers using Linux sysfs or Windows fallback.
 func (d *CUDAPCIeTopologyDiscovery) Discover() error {
+	d.resetInventory()
 	if d.SysfsRoot != "" || runtime.GOOS == "linux" {
 		root := d.SysfsRoot
 		if root == "" {
 			root = "/sys"
 		}
-		err := d.DiscoverLinuxSysfs(root)
-		if err == nil && (len(d.GPUs) > 0 || len(d.NVMeDevices) > 0) {
-			return nil
-		}
-		if d.SysfsRoot != "" {
-			return err
-		}
+		return d.DiscoverLinuxSysfs(root)
 	}
 
 	if runtime.GOOS == "windows" {
@@ -116,8 +124,14 @@ func (d *CUDAPCIeTopologyDiscovery) Discover() error {
 	return errors.New("cudatopology: unsupported platform or sysfs unavailable")
 }
 
+func (d *CUDAPCIeTopologyDiscovery) resetInventory() {
+	d.GPUs = make([]CUDADeviceNode, 0)
+	d.NVMeDevices = make([]NVMeStorageNode, 0)
+}
+
 // DiscoverLinuxSysfs parses Linux PCIe sysfs tree under sysfsRoot for NVIDIA GPUs and NVMe devices.
 func (d *CUDAPCIeTopologyDiscovery) DiscoverLinuxSysfs(sysfsRoot string) error {
+	d.resetInventory()
 	if sysfsRoot == "" {
 		sysfsRoot = "/sys"
 	}
@@ -130,176 +144,124 @@ func (d *CUDAPCIeTopologyDiscovery) DiscoverLinuxSysfs(sysfsRoot string) error {
 
 	for _, entry := range entries {
 		devDir := filepath.Join(pciDevicesDir, entry.Name())
-		bdf := strings.ReplaceAll(entry.Name(), "_", ":")
-		if addrData, err := os.ReadFile(filepath.Join(devDir, "address")); err == nil {
-			if addr := strings.TrimSpace(string(addrData)); addr != "" {
-				bdf = addr
+		read := func(name string) string {
+			data, err := os.ReadFile(filepath.Join(devDir, name))
+			if err != nil {
+				return ""
 			}
+			return strings.TrimSpace(string(data))
 		}
-
-		vendorData, err := os.ReadFile(filepath.Join(devDir, "vendor"))
-		if err != nil {
+		vendor, vendorErr := strconv.ParseUint(read("vendor"), 0, 16)
+		class, classErr := strconv.ParseUint(read("class"), 0, 24)
+		// NVIDIA audio, USB, and bridge functions are not CUDA display devices.
+		isGPU := vendorErr == nil && vendor == 0x10de && classErr == nil && class>>16 == 0x03
+		isNVMe := classErr == nil && class == 0x010802
+		if !isGPU && !isNVMe {
 			continue
 		}
-		vendor := strings.TrimSpace(string(vendorData))
 
-		var class string
-		if classData, err := os.ReadFile(filepath.Join(devDir, "class")); err == nil {
-			class = strings.TrimSpace(string(classData))
+		bdf := entry.Name()
+		if address := read("address"); address != "" {
+			bdf = address
 		}
-
-		numaNode := 0
-		if numaData, err := os.ReadFile(filepath.Join(devDir, "numa_node")); err == nil {
-			if n, err := strconv.Atoi(strings.TrimSpace(string(numaData))); err == nil && n >= 0 {
-				numaNode = n
-			}
+		numaNode := -1
+		if n, err := strconv.Atoi(read("numa_node")); err == nil && n >= 0 {
+			numaNode = n
 		}
-
-		upstreamPort := ""
-		if portData, err := os.ReadFile(filepath.Join(devDir, "upstream_root_port")); err == nil {
-			upstreamPort = strings.TrimSpace(string(portData))
-		}
-
-		// Check for NVIDIA GPU (Vendor 0x10de)
-		if strings.EqualFold(vendor, "0x10de") {
-			var deviceID string
-			if devData, err := os.ReadFile(filepath.Join(devDir, "device")); err == nil {
-				deviceID = strings.TrimSpace(string(devData))
+		// An explicit inventory attribute is useful evidence, but its spelling
+		// does not prove CPU/chipset routing or working peer-to-peer DMA.
+		upstreamPort := read("upstream_root_port")
+		if isGPU {
+			name := read("label")
+			if name == "" {
+				name = read("model")
 			}
-
-			var label string
-			if labelData, err := os.ReadFile(filepath.Join(devDir, "label")); err == nil {
-				label = strings.TrimSpace(string(labelData))
+			unknown := []string{"arch", "total_vram_bytes", "rebar_enabled"}
+			if name == "" {
+				unknown = append(unknown, "device_name")
 			}
-			if label == "" {
-				if modelData, err := os.ReadFile(filepath.Join(devDir, "model")); err == nil {
-					label = strings.TrimSpace(string(modelData))
-				}
+			resource, _ := os.ReadFile(filepath.Join(devDir, "resource"))
+			bar1Size := cudaBAR1ResourceSize(string(resource))
+			if bar1Size == 0 {
+				unknown = append(unknown, "bar1_size_bytes")
 			}
-
-			// Parse BAR sizes from resource file
-			var bar1Size uint64
-			if resData, err := os.ReadFile(filepath.Join(devDir, "resource")); err == nil {
-				sizes := ParsePCIeResourceSizes(string(resData))
-				if len(sizes) > 1 && sizes[1] > 0 {
-					bar1Size = sizes[1]
-				}
-			}
-
-			// Default architecture and capacity (RTX 5090 Blackwell baseline)
-			arch := "sm_120"
-			devName := "NVIDIA GeForce RTX 5090"
-			totalVRAM := uint64(32) * 1024 * 1024 * 1024 // 32 GiB
-
-			if strings.Contains(label, "4090") || strings.EqualFold(deviceID, "0x2684") {
-				arch = "sm_89"
-				devName = "NVIDIA GeForce RTX 4090"
-				totalVRAM = uint64(24) * 1024 * 1024 * 1024
-			} else if label != "" {
-				devName = label
-			}
-
 			if upstreamPort == "" {
-				upstreamPort = "0000:00:01.1" // PEG Root Port default
+				unknown = append(unknown, "upstream_root_port")
 			}
-
-			rebarEnabled := bar1Size >= totalVRAM && totalVRAM > 0
-
+			if numaNode < 0 {
+				unknown = append(unknown, "numa_node")
+			}
 			d.GPUs = append(d.GPUs, CUDADeviceNode{
-				PCIAddress:       bdf,
-				DeviceName:       devName,
-				Arch:             arch,
-				TotalVRAMBytes:   totalVRAM,
-				BAR1SizeBytes:    bar1Size,
-				ReBAREnabled:     rebarEnabled,
-				UpstreamRootPort: upstreamPort,
-				NUMANode:         numaNode,
+				PCIAddress: bdf, DeviceName: name, BAR1SizeBytes: bar1Size,
+				UpstreamRootPort: upstreamPort, NUMANode: numaNode,
+				EvidenceSource: "linux_sysfs", UnknownFields: unknown,
 			})
 			continue
 		}
 
-		// Check for NVMe storage controller (Class 0x0108xx or explicit slot_type / model)
-		isNVMe := strings.HasPrefix(strings.ToLower(class), "0x0108")
-		var slotTypeRaw string
-		if slotData, err := os.ReadFile(filepath.Join(devDir, "slot_type")); err == nil {
-			slotTypeRaw = strings.TrimSpace(string(slotData))
-			isNVMe = true
-		}
-
-		var model string
-		if modelData, err := os.ReadFile(filepath.Join(devDir, "model")); err == nil {
-			model = strings.TrimSpace(string(modelData))
-			isNVMe = true
-		} else {
-			// Check nested nvme subsystem
+		model := read("model")
+		if model == "" {
 			nvmeSubsystem := filepath.Join(devDir, "nvme")
 			if nvmeEntries, err := os.ReadDir(nvmeSubsystem); err == nil {
 				for _, ne := range nvmeEntries {
-					if mData, err := os.ReadFile(filepath.Join(nvmeSubsystem, ne.Name(), "model")); err == nil {
-						model = strings.TrimSpace(string(mData))
-						isNVMe = true
-						break
+					if data, err := os.ReadFile(filepath.Join(nvmeSubsystem, ne.Name(), "model")); err == nil {
+						model = strings.TrimSpace(string(data))
+						if model != "" {
+							break
+						}
 					}
 				}
 			}
 		}
-
-		if isNVMe {
-			if model == "" {
-				model = "NVMe PCIe SSD"
-			}
-
-			slotType := NVMeSlotUnknown
-			switch strings.ToUpper(slotTypeRaw) {
-			case "M2A_CPU":
-				slotType = NVMeSlotM2ACPU
-			case "M2B_SB":
-				slotType = NVMeSlotM2BSB
-			case "CHIPSET":
-				slotType = NVMeSlotChipset
-			default:
-				if strings.Contains(upstreamPort, "0000:00:01.") {
-					slotType = NVMeSlotM2ACPU
-				} else if strings.Contains(upstreamPort, "0000:00:03.") {
-					slotType = NVMeSlotM2BSB
-				}
-			}
-
-			if upstreamPort == "" {
-				if slotType == NVMeSlotM2ACPU {
-					upstreamPort = "0000:00:01.2"
-				} else if slotType == NVMeSlotM2BSB {
-					upstreamPort = "0000:00:03.1"
-				}
-			}
-
-			peakReadGBps := 7.4
-			if strings.Contains(model, "T705") {
-				peakReadGBps = 14.5
-			} else if strings.Contains(model, "990 PRO") {
-				peakReadGBps = 7.45
-			} else if strings.Contains(model, "980 PRO") {
-				peakReadGBps = 7.0
-			}
-
-			if readData, err := os.ReadFile(filepath.Join(devDir, "peak_read_gbps")); err == nil {
-				if p, err := strconv.ParseFloat(strings.TrimSpace(string(readData)), 64); err == nil && p > 0 {
-					peakReadGBps = p
-				}
-			}
-
-			d.NVMeDevices = append(d.NVMeDevices, NVMeStorageNode{
-				PCIAddress:       bdf,
-				Model:            model,
-				SlotType:         slotType,
-				UpstreamRootPort: upstreamPort,
-				PeakReadGBps:     peakReadGBps,
-				NUMANode:         numaNode,
-			})
+		slotType := NVMeSlotUnknown
+		switch strings.ToUpper(read("slot_type")) {
+		case "M2A_CPU":
+			slotType = NVMeSlotM2ACPU
+		case "M2B_SB":
+			slotType = NVMeSlotM2BSB
+		case "CHIPSET":
+			slotType = NVMeSlotChipset
 		}
+		unknown := []string{"peak_read_gbps"}
+		if model == "" {
+			unknown = append(unknown, "model")
+		}
+		if slotType == NVMeSlotUnknown {
+			unknown = append(unknown, "slot_type")
+		}
+		if upstreamPort == "" {
+			unknown = append(unknown, "upstream_root_port")
+		}
+		if numaNode < 0 {
+			unknown = append(unknown, "numa_node")
+		}
+		d.NVMeDevices = append(d.NVMeDevices, NVMeStorageNode{
+			PCIAddress: bdf, Model: model, SlotType: slotType,
+			UpstreamRootPort: upstreamPort, NUMANode: numaNode,
+			EvidenceSource: "linux_sysfs", UnknownFields: unknown,
+		})
 	}
-
 	return nil
+}
+
+// Keep physical resource line indices: skipping a malformed BAR0 must not
+// promote BAR2 into BAR1. An absent, unassigned, or invalid aperture is unknown.
+func cudaBAR1ResourceSize(resource string) uint64 {
+	lines := strings.Split(resource, "\n")
+	if len(lines) < 2 {
+		return 0
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) < 3 {
+		return 0
+	}
+	start, errStart := strconv.ParseUint(fields[0], 0, 64)
+	end, errEnd := strconv.ParseUint(fields[1], 0, 64)
+	flags, errFlags := strconv.ParseUint(fields[2], 0, 64)
+	if errStart != nil || errEnd != nil || errFlags != nil || start == 0 || end < start || flags&0x200 == 0 {
+		return 0
+	}
+	return end - start + 1
 }
 
 type winDisplayInfoRaw struct {
@@ -333,79 +295,109 @@ func ParseWindowsCUDADisplayJSON(jsonData string) ([]CUDADeviceNode, error) {
 
 	nodes := make([]CUDADeviceNode, 0, len(items))
 	for _, item := range items {
-		arch := "sm_120"
-		totalVRAM := uint64(item.RAM)
-		if strings.Contains(item.Name, "5090") {
-			arch = "sm_120"
-			totalVRAM = uint64(32) * 1024 * 1024 * 1024
-		} else if strings.Contains(item.Name, "4090") {
-			arch = "sm_89"
-			totalVRAM = uint64(24) * 1024 * 1024 * 1024
-		} else if totalVRAM == 0 {
-			totalVRAM = uint64(16) * 1024 * 1024 * 1024
+		pnp := strings.ToUpper(item.PNP)
+		parts := strings.Split(pnp, "\\")
+		if len(parts) < 2 || parts[0] != "PCI" {
+			continue
 		}
-
-		bdf := "0000:09:00.0"
-		bar1Size := totalVRAM
-
+		isNVIDIA := false
+		for _, id := range strings.Split(parts[1], "&") {
+			if id == "VEN_10DE" {
+				isNVIDIA = true
+			}
+		}
+		if !isNVIDIA {
+			continue
+		}
+		if item.RAM < 0 {
+			return nil, errors.New("cudatopology: negative AdapterRAM in display JSON")
+		}
+		unknown := []string{"pci_address", "arch", "total_vram_bytes", "bar1_size_bytes", "rebar_enabled", "upstream_root_port", "numa_node"}
+		if item.Name == "" {
+			unknown = append(unknown, "device_name")
+		}
 		nodes = append(nodes, CUDADeviceNode{
-			PCIAddress:       bdf,
-			DeviceName:       item.Name,
-			Arch:             arch,
-			TotalVRAMBytes:   totalVRAM,
-			BAR1SizeBytes:    bar1Size,
-			ReBAREnabled:     bar1Size >= totalVRAM,
-			UpstreamRootPort: "0000:00:01.1",
-			NUMANode:         0,
+			DeviceName: item.Name, PNPDeviceID: item.PNP, DriverVersion: item.Driver,
+			ReportedAdapterRAMBytes: uint64(item.RAM), NUMANode: -1,
+			EvidenceSource: "windows_cim", UnknownFields: unknown,
 		})
 	}
-
 	return nodes, nil
 }
 
-// DiscoverWindows probes Windows display and disk controller subsystems via PowerShell WMI queries.
+// DiscoverWindows probes observed display identity. Disk topology and modern
+// GPU memory capacity are not available from this Win32_VideoController query.
 func (d *CUDAPCIeTopologyDiscovery) DiscoverWindows() error {
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA|GeForce|RTX' } | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } } | ConvertTo-Json -Compress")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	if err == nil {
-		if gpus, err := ParseWindowsCUDADisplayJSON(string(out)); err == nil && len(gpus) > 0 {
-			d.GPUs = append(d.GPUs, gpus...)
-		}
-	}
-
-	// Fallback NVMe detection on Windows
-	d.NVMeDevices = append(d.NVMeDevices, NVMeStorageNode{
-		PCIAddress:       "0000:01:00.0",
-		Model:            "Samsung SSD 990 PRO 2TB",
-		SlotType:         NVMeSlotM2ACPU,
-		UpstreamRootPort: "0000:00:01.2",
-		PeakReadGBps:     7.45,
-		NUMANode:         0,
+	return d.discoverWindows(func() ([]byte, error) {
+		cmd := exec.Command("powershell", "-NoProfile", "-Command",
+			"$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-CimInstance Win32_VideoController | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } }) -Compress")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Output()
 	})
+}
 
+func (d *CUDAPCIeTopologyDiscovery) discoverWindows(query func() ([]byte, error)) error {
+	d.resetInventory()
+	out, err := query()
+	if err != nil {
+		return fmt.Errorf("cudatopology: querying Windows displays: %w", err)
+	}
+	gpus, err := ParseWindowsCUDADisplayJSON(string(out))
+	if err != nil {
+		return fmt.Errorf("cudatopology: parsing Windows displays: %w", err)
+	}
+	d.GPUs = gpus
 	return nil
 }
 
-// EvaluateP2PRoute computes the topology verdict, bandwidth, latency, and ReBAR compliance for an NVMe -> GPU P2P route.
+// EvaluateP2PRoute reports whether observed inventory establishes a P2P route.
 func (d *CUDAPCIeTopologyDiscovery) EvaluateP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict {
 	return EvaluateP2PRoute(gpu, nvme)
 }
 
-// EvaluateP2PRoute performs standalone PCIe topology routing adjudication.
+// EvaluateP2PRoute never promotes inventory or PCI address patterns into proof
+// of peer access. Until a capability/transfer probe exists, even complete-looking
+// inventory leaves routing, ACS, ReBAR enablement, and performance unvalidated.
+// Existing false/zero scalars are compatibility placeholders; UnknownFields is
+// authoritative about missing evidence, not a confirmed negative observation.
 func EvaluateP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict {
+	notes := []string{
+		"Inventory alone does not validate NVMe-to-GPU peer access or a usable GPUDirect path.",
+		"ACS behavior, ReBAR enablement, latency, and bandwidth have not been measured or verified.",
+	}
+	if gpu.NUMANode >= 0 && nvme.NUMANode >= 0 && gpu.NUMANode != nvme.NUMANode {
+		notes = append(notes, "Different NUMA nodes are reported; NUMA identifiers alone do not identify sockets or prove P2P support.")
+	}
+	return P2PRouteVerdict{
+		RouteKind: RouteUnknown, EvidenceSource: "hardware_inventory",
+		UnknownFields:   []string{"route_kind", "is_optimal", "latency_estimate_ns", "max_bandwidth_gbps", "acs_stall_risk", "rebar_compliant"},
+		DiagnosticNotes: notes,
+	}
+}
+
+// EvaluateModeledP2PRoute evaluates explicitly supplied hypothetical topology.
+// Its constants and classifications are model assumptions, not observations,
+// capability checks, or hardware performance measurements.
+func EvaluateModeledP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict {
+	verdict := evaluateModeledP2PRoute(gpu, nvme)
+	verdict.EvidenceSource = "modeled"
+	verdict.UnknownFields = []string{}
+	verdict.DiagnosticNotes = append([]string{"Modeled scenario only: no physical P2P transfer or performance measurement was performed."}, verdict.DiagnosticNotes...)
+	return verdict
+}
+
+func evaluateModeledP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict {
 	notes := make([]string, 0, 4)
 
 	// Step 1: ReBAR (Resizable BAR) validation
 	rebarCompliant := gpu.BAR1SizeBytes >= gpu.TotalVRAMBytes && gpu.TotalVRAMBytes > 0
 	if !rebarCompliant {
-		notes = append(notes, "Small BAR clamped (256MB) - run with NVreg_EnableResizableBar=1")
+		notes = append(notes, "Modeled BAR1 aperture does not cover modeled VRAM; actual ReBAR enablement is not established")
 	}
 
 	// Step 2: Cross-Socket NUMA evaluation
 	if gpu.NUMANode >= 0 && nvme.NUMANode >= 0 && gpu.NUMANode != nvme.NUMANode {
-		notes = append(notes, "Cross-socket NUMA interconnect detected: crossing inter-socket link adds latency and limits P2P throughput")
+		notes = append(notes, "Modeled cross-socket interconnect assumes additional latency and limited P2P throughput")
 		return P2PRouteVerdict{
 			RouteKind:         RouteCrossSocketNUMA,
 			IsOptimal:         false,
@@ -425,8 +417,8 @@ func EvaluateP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict 
 		strings.Contains(strings.ToLower(nvme.UpstreamRootPort), "southbridge")
 
 	if isChipset {
-		notes = append(notes, "Crosses X570 chipset downlink interconnect: PCIe Gen4 x4 uplink throttled to ~2.1 GB/s, high latency ~3800ns")
-		notes = append(notes, "ACS (Access Control Services) stall risk detected on chipset downstream ports: P2P DMA traffic forced to loopback through CPU host bridge")
+		notes = append(notes, "Modeled chipset downlink assumes ~2.1 GB/s bandwidth and ~3800ns latency")
+		notes = append(notes, "Modeled ACS (Access Control Services) stall risk assumes P2P traffic is redirected through the host bridge")
 		return P2PRouteVerdict{
 			RouteKind:         RouteChipsetDownlink,
 			IsOptimal:         false,
@@ -443,7 +435,7 @@ func EvaluateP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict 
 		(strings.HasPrefix(gpu.UpstreamRootPort, "0000:00:01.") && strings.HasPrefix(nvme.UpstreamRootPort, "0000:00:01."))
 
 	if isDirectCPU {
-		notes = append(notes, "Direct CPU Root Complex P2P route verified (optimal latency ~680ns, bandwidth ~7.4 GB/s)")
+		notes = append(notes, "Modeled direct CPU root complex assumes ~680ns latency and ~7.4 GB/s bandwidth")
 		isOptimal := rebarCompliant
 		if !rebarCompliant {
 			notes = append(notes, "P2P DMA constrained by small BAR aperture despite direct root complex connection")
@@ -460,10 +452,10 @@ func EvaluateP2PRoute(gpu CUDADeviceNode, nvme NVMeStorageNode) P2PRouteVerdict 
 		}
 	}
 
-	// Step 5: Incompatible fallback
-	notes = append(notes, "Incompatible PCIe topology: devices not on compatible interconnect")
+	// Unrecognized modeled topology remains unknown, not proven incompatible.
+	notes = append(notes, "No route assumption is available for this modeled topology")
 	return P2PRouteVerdict{
-		RouteKind:         RouteIncompatible,
+		RouteKind:         RouteUnknown,
 		IsOptimal:         false,
 		LatencyEstimateNs: 0,
 		MaxBandwidthGBps:  0.0,

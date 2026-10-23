@@ -1,321 +1,207 @@
 package compute
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-func TestCUDAPCIeTopology_DirectCPURootComplex(t *testing.T) {
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDAPCIeTopology_ExplicitModelOnly(t *testing.T) {
+	t.Parallel()
 	gpu := CUDADeviceNode{
-		PCIAddress:       "0000:09:00.0",
-		DeviceName:       "NVIDIA GeForce RTX 5090",
-		Arch:             "sm_120",
-		TotalVRAMBytes:   32 * 1024 * 1024 * 1024, // 32 GiB
-		BAR1SizeBytes:    32 * 1024 * 1024 * 1024,
-		ReBAREnabled:     true,
-		UpstreamRootPort: "0000:00:01.1",
-		NUMANode:         0,
+		TotalVRAMBytes: 32 << 30, BAR1SizeBytes: 32 << 30,
+		UpstreamRootPort: "0000:00:01.1", NUMANode: 0,
 	}
-
-	nvme := NVMeStorageNode{
-		PCIAddress:       "0000:01:00.0",
-		Model:            "Samsung SSD 990 PRO 2TB",
-		SlotType:         NVMeSlotM2ACPU,
-		UpstreamRootPort: "0000:00:01.2",
-		PeakReadGBps:     7.45,
+	for _, tc := range []struct {
+		name      string
+		nvme      NVMeStorageNode
+		kind      P2PRouteKind
+		optimal   bool
+		acs       bool
+		latency   uint32
+		bandwidth float64
+	}{
+		{"direct", NVMeStorageNode{SlotType: NVMeSlotM2ACPU, NUMANode: 0}, RouteDirectCPURootComplex, true, false, 680, 7.4},
+		{"chipset", NVMeStorageNode{SlotType: NVMeSlotM2BSB, NUMANode: 0}, RouteChipsetDownlink, false, true, 3800, 2.1},
+		{"numa", NVMeStorageNode{NUMANode: 1}, RouteCrossSocketNUMA, false, false, 1800, 4.5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := EvaluateModeledP2PRoute(gpu, tc.nvme)
+			if v.RouteKind != tc.kind || v.IsOptimal != tc.optimal || v.ACSStallRisk != tc.acs || v.LatencyEstimateNs != tc.latency || v.MaxBandwidthGBps != tc.bandwidth {
+				t.Fatalf("unexpected explicit model: %+v", v)
+			}
+			if v.EvidenceSource != "modeled" || v.P2PValidated || !strings.Contains(v.DiagnosticNotes[0], "Modeled scenario only") {
+				t.Fatalf("model was presented as hardware evidence: %+v", v)
+			}
+		})
 	}
-
-	disco := NewCUDAPCIeTopologyDiscovery("")
-	verdict := disco.EvaluateP2PRoute(gpu, nvme)
-
-	if verdict.RouteKind != RouteDirectCPURootComplex {
-		t.Errorf("RouteKind = %s, want %s", verdict.RouteKind, RouteDirectCPURootComplex)
-	}
-	if !verdict.IsOptimal {
-		t.Errorf("IsOptimal = false, want true")
-	}
-	if !verdict.ReBARCompliant {
-		t.Errorf("ReBARCompliant = false, want true")
-	}
-	if verdict.ACSStallRisk {
-		t.Errorf("ACSStallRisk = true, want false")
-	}
-	if verdict.LatencyEstimateNs >= 700 || verdict.LatencyEstimateNs == 0 {
-		t.Errorf("LatencyEstimateNs = %d, want < 700ns", verdict.LatencyEstimateNs)
-	}
-	if verdict.MaxBandwidthGBps < 7.4 {
-		t.Errorf("MaxBandwidthGBps = %f, want >= 7.4", verdict.MaxBandwidthGBps)
+	gpu.BAR1SizeBytes = 256 << 20
+	v := EvaluateModeledP2PRoute(gpu, NVMeStorageNode{SlotType: NVMeSlotM2ACPU})
+	if v.ReBARCompliant || v.IsOptimal {
+		t.Fatalf("modeled small aperture was optimal: %+v", v)
 	}
 }
 
-func TestCUDAPCIeTopology_ChipsetDownlink(t *testing.T) {
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDAPCIeTopology_HardwareRoutesRemainUnknown(t *testing.T) {
+	t.Parallel()
 	gpu := CUDADeviceNode{
-		PCIAddress:       "0000:09:00.0",
-		DeviceName:       "NVIDIA GeForce RTX 5090",
-		Arch:             "sm_120",
-		TotalVRAMBytes:   32 * 1024 * 1024 * 1024,
-		BAR1SizeBytes:    32 * 1024 * 1024 * 1024,
-		ReBAREnabled:     true,
-		UpstreamRootPort: "0000:00:01.1",
-		NUMANode:         0,
+		TotalVRAMBytes: 32 << 30, BAR1SizeBytes: 32 << 30, ReBAREnabled: true,
+		UpstreamRootPort: "0000:00:01.1", NUMANode: 0,
 	}
-
-	nvme := NVMeStorageNode{
-		PCIAddress:       "0000:02:00.0",
-		Model:            "Crucial T705 2TB",
-		SlotType:         NVMeSlotM2BSB,
-		UpstreamRootPort: "0000:00:03.1",
-		PeakReadGBps:     14.5,
+	d := NewCUDAPCIeTopologyDiscovery("")
+	d.GPUs = []CUDADeviceNode{gpu}
+	d.NVMeDevices = []NVMeStorageNode{
+		{SlotType: NVMeSlotM2ACPU, UpstreamRootPort: "0000:00:01.2", NUMANode: 0},
+		{SlotType: NVMeSlotM2BSB, UpstreamRootPort: "0000:00:03.1", NUMANode: 0},
+		{SlotType: NVMeSlotM2ACPU, NUMANode: 1},
+		{SlotType: NVMeSlotUnknown, NUMANode: -1},
 	}
-
-	disco := NewCUDAPCIeTopologyDiscovery("")
-	verdict := disco.EvaluateP2PRoute(gpu, nvme)
-
-	if verdict.RouteKind != RouteChipsetDownlink {
-		t.Errorf("RouteKind = %s, want %s", verdict.RouteKind, RouteChipsetDownlink)
-	}
-	if verdict.IsOptimal {
-		t.Errorf("IsOptimal = true, want false for chipset downlink")
-	}
-	if !verdict.ACSStallRisk {
-		t.Errorf("ACSStallRisk = false, want true")
-	}
-	if verdict.LatencyEstimateNs < 3000 {
-		t.Errorf("LatencyEstimateNs = %d, want ~3800ns", verdict.LatencyEstimateNs)
-	}
-	if verdict.MaxBandwidthGBps > 2.5 {
-		t.Errorf("MaxBandwidthGBps = %f, want throttled ~2.1 GB/s", verdict.MaxBandwidthGBps)
-	}
-
-	// Verify ACS stall risk diagnostic note
-	hasACSNote := false
-	for _, note := range verdict.DiagnosticNotes {
-		if strings.Contains(note, "ACS") && strings.Contains(note, "stall") {
-			hasACSNote = true
-			break
+	for _, v := range d.EvaluateAllRoutes() {
+		if v.RouteKind != RouteUnknown || v.IsOptimal || v.P2PValidated || v.LatencyEstimateNs != 0 || v.MaxBandwidthGBps != 0 || v.ReBARCompliant {
+			t.Fatalf("inventory promoted to hardware evidence: %+v", v)
+		}
+		if v.EvidenceSource != "hardware_inventory" || !slices.Contains(v.UnknownFields, "acs_stall_risk") || !slices.Contains(v.UnknownFields, "rebar_compliant") {
+			t.Fatalf("unknown ACS/ReBAR was reported as a negative observation: %+v", v)
+		}
+		data, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"route_kind", "is_optimal", "latency_estimate_ns", "max_bandwidth_gbps", "acs_stall_risk", "rebar_compliant", "unknown_fields", "p2p_validated"} {
+			if _, ok := fields[key]; !ok {
+				t.Errorf("missing compatibility key %s", key)
+			}
 		}
 	}
-	if !hasACSNote {
-		t.Errorf("expected ACS stall risk diagnostic note, got: %v", verdict.DiagnosticNotes)
-	}
 }
 
-func TestCUDAPCIeTopology_SmallBARValidation(t *testing.T) {
-	// 256 MiB clamped small BAR
-	gpuSmallBAR := CUDADeviceNode{
-		PCIAddress:       "0000:09:00.0",
-		DeviceName:       "NVIDIA GeForce RTX 5090",
-		Arch:             "sm_120",
-		TotalVRAMBytes:   32 * 1024 * 1024 * 1024,
-		BAR1SizeBytes:    256 * 1024 * 1024, // 256 MiB
-		ReBAREnabled:     false,
-		UpstreamRootPort: "0000:00:01.1",
-		NUMANode:         0,
-	}
-
-	nvme := NVMeStorageNode{
-		PCIAddress:       "0000:01:00.0",
-		Model:            "Samsung SSD 990 PRO 2TB",
-		SlotType:         NVMeSlotM2ACPU,
-		UpstreamRootPort: "0000:00:01.2",
-		PeakReadGBps:     7.45,
-	}
-
-	disco := NewCUDAPCIeTopologyDiscovery("")
-	verdict := disco.EvaluateP2PRoute(gpuSmallBAR, nvme)
-
-	if verdict.ReBARCompliant {
-		t.Errorf("ReBARCompliant = true, want false for 256MB small BAR")
-	}
-	if verdict.IsOptimal {
-		t.Errorf("IsOptimal = true, want false when small BAR is clamped")
-	}
-
-	// Must contain warning: "Small BAR clamped (256MB) - run with NVreg_EnableResizableBar=1"
-	const expectedWarning = "Small BAR clamped (256MB) - run with NVreg_EnableResizableBar=1"
-	hasWarn := false
-	for _, note := range verdict.DiagnosticNotes {
-		if strings.Contains(note, expectedWarning) {
-			hasWarn = true
-			break
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDAPCIeTopology_SysfsObservedInventory(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeDevice := func(address string, files map[string]string) {
+		t.Helper()
+		// Colons are not portable directory names on Windows.
+		dir := filepath.Join(root, "bus", "pci", "devices", strings.ReplaceAll(address, ":", "_"))
+		files["address"] = address
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for name, data := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if !hasWarn {
-		t.Errorf("DiagnosticNotes missing warning %q, got: %v", expectedWarning, verdict.DiagnosticNotes)
-	}
-
-	// Now verify large BAR (ReBAR enabled)
-	gpuLargeBAR := gpuSmallBAR
-	gpuLargeBAR.BAR1SizeBytes = 32 * 1024 * 1024 * 1024
-	gpuLargeBAR.ReBAREnabled = true
-
-	verdictLarge := disco.EvaluateP2PRoute(gpuLargeBAR, nvme)
-	if !verdictLarge.ReBARCompliant {
-		t.Errorf("ReBARCompliant = false, want true for 32GB large BAR")
-	}
-	if !verdictLarge.IsOptimal {
-		t.Errorf("IsOptimal = false, want true for Large BAR + M2A_CPU")
-	}
-}
-
-func TestCUDAPCIeTopology_SimulatedSysfsParsing(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// 1. Setup NVIDIA RTX 5090 device under /sys/bus/pci/devices/0000_09_00.0
-	gpuDir := filepath.Join(tmpDir, "bus", "pci", "devices", "0000_09_00.0")
-	if err := os.MkdirAll(gpuDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	_ = os.WriteFile(filepath.Join(gpuDir, "vendor"), []byte("0x10de\n"), 0644)
-	_ = os.WriteFile(filepath.Join(gpuDir, "device"), []byte("0x2b80\n"), 0644)
-	_ = os.WriteFile(filepath.Join(gpuDir, "numa_node"), []byte("0\n"), 0644)
-	_ = os.WriteFile(filepath.Join(gpuDir, "label"), []byte("NVIDIA GeForce RTX 5090\n"), 0644)
-	_ = os.WriteFile(filepath.Join(gpuDir, "upstream_root_port"), []byte("0000:00:01.1\n"), 0644)
-
-	// Resource file: BAR0 (16MB), BAR1 (32 GiB = 0x800000000)
-	gpuResource := `0x000000f400000000 0x000000f400ffffff 0x0000000000040200
-0x000000c000000000 0x000000c7ffffffff 0x000000000014020c
-`
-	_ = os.WriteFile(filepath.Join(gpuDir, "resource"), []byte(gpuResource), 0644)
-
-	// 2. Setup NVMe M2A_CPU device under /sys/bus/pci/devices/0000_01_00.0
-	nvme1Dir := filepath.Join(tmpDir, "bus", "pci", "devices", "0000_01_00.0")
-	if err := os.MkdirAll(nvme1Dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.WriteFile(filepath.Join(nvme1Dir, "vendor"), []byte("0x144d\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme1Dir, "class"), []byte("0x010802\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme1Dir, "numa_node"), []byte("0\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme1Dir, "model"), []byte("Samsung SSD 990 PRO 2TB\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme1Dir, "slot_type"), []byte("M2A_CPU\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme1Dir, "upstream_root_port"), []byte("0000:00:01.2\n"), 0644)
-
-	// 3. Setup NVMe M2B_SB device under /sys/bus/pci/devices/0000_02_00.0
-	nvme2Dir := filepath.Join(tmpDir, "bus", "pci", "devices", "0000_02_00.0")
-	if err := os.MkdirAll(nvme2Dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.WriteFile(filepath.Join(nvme2Dir, "vendor"), []byte("0xc0a9\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme2Dir, "class"), []byte("0x010802\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme2Dir, "numa_node"), []byte("0\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme2Dir, "model"), []byte("Crucial T705 2TB\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme2Dir, "slot_type"), []byte("M2B_SB\n"), 0644)
-	_ = os.WriteFile(filepath.Join(nvme2Dir, "upstream_root_port"), []byte("0000:00:03.1\n"), 0644)
-
-	// Parse mock sysfs
-	disco := NewCUDAPCIeTopologyDiscovery(tmpDir)
-	if err := disco.Discover(); err != nil {
-		t.Fatalf("Discover failed: %v", err)
-	}
-
-	if len(disco.GPUs) != 1 {
-		t.Fatalf("expected 1 GPU, got %d", len(disco.GPUs))
-	}
-	gpu := disco.GPUs[0]
-	if gpu.PCIAddress != "0000:09:00.0" {
-		t.Errorf("GPU PCIAddress = %s, want 0000:09:00.0", gpu.PCIAddress)
-	}
-	if gpu.Arch != "sm_120" {
-		t.Errorf("GPU Arch = %s, want sm_120", gpu.Arch)
-	}
-	if gpu.TotalVRAMBytes != 32*1024*1024*1024 {
-		t.Errorf("GPU TotalVRAMBytes = %d, want %d", gpu.TotalVRAMBytes, uint64(32*1024*1024*1024))
-	}
-	if !gpu.ReBAREnabled {
-		t.Errorf("GPU ReBAREnabled = false, want true")
-	}
-
-	if len(disco.NVMeDevices) != 2 {
-		t.Fatalf("expected 2 NVMe devices, got %d", len(disco.NVMeDevices))
-	}
-
-	// Route 1: GPU -> NVMe 1 (M2A_CPU)
-	verdict1 := disco.EvaluateP2PRoute(gpu, disco.NVMeDevices[0])
-	if verdict1.RouteKind != RouteDirectCPURootComplex {
-		t.Errorf("verdict1 RouteKind = %s, want %s", verdict1.RouteKind, RouteDirectCPURootComplex)
-	}
-	if !verdict1.IsOptimal {
-		t.Errorf("verdict1 IsOptimal = false, want true")
-	}
-
-	// Route 2: GPU -> NVMe 2 (M2B_SB)
-	verdict2 := disco.EvaluateP2PRoute(gpu, disco.NVMeDevices[1])
-	if verdict2.RouteKind != RouteChipsetDownlink {
-		t.Errorf("verdict2 RouteKind = %s, want %s", verdict2.RouteKind, RouteChipsetDownlink)
-	}
-	if verdict2.IsOptimal {
-		t.Errorf("verdict2 IsOptimal = true, want false")
-	}
-	if !verdict2.ACSStallRisk {
-		t.Errorf("verdict2 ACSStallRisk = false, want true")
-	}
-}
-
-func TestCUDAPCIeTopology_WindowsFallbackProber(t *testing.T) {
-	mockDisplayJSON := `[
-		{
-			"name": "NVIDIA GeForce RTX 5090",
-			"driver": "572.16",
-			"ram": 34359738368,
-			"pnp": "PCI\\VEN_10DE&DEV_2B80&SUBSYS_000010DE&REV_A1\\4&1F2B3C4D&0&0008"
+	writeDevice("0000:09:00.0", map[string]string{
+		"vendor": "0x10de", "class": "0x030200", "device": "0x2684", "label": "NVIDIA GeForce RTX 4090",
+		"numa_node": "-1", "resource": "0x10000000 0x10ffffff 0x200\n0x000000c000000000 0x000000c7ffffffff 0x14020c\n",
+	})
+	writeDevice("0000:0a:00.0", map[string]string{
+		"vendor": "0x10de", "class": "0x030000", "numa_node": "malformed", "resource": "malformed\nmalformed\n0x10000000 0x1fffffff 0x200\n",
+	})
+	writeDevice("0000:09:00.1", map[string]string{"vendor": "0x10de", "class": "0x040300", "model": "GPU audio"})
+	writeDevice("0000:09:00.2", map[string]string{"vendor": "0x10de", "model": "missing class"})
+	writeDevice("0000:01:00.0", map[string]string{
+		"vendor": "0x144d", "class": "0x010802", "model": "Observed 990 PRO", "numa_node": "0",
+		"upstream_root_port": "0000:00:01.2", "peak_read_gbps": "7.45",
+	})
+	writeDevice("0000:02:00.0", map[string]string{
+		"vendor": "0x8086", "class": "0x010601", "model": "Not NVMe", "slot_type": "M2A_CPU",
+	})
+	writeDevice("0000:03:00.0", map[string]string{
+		"vendor": "0x8086", "class": "0x010801", "model": "NVMHCI is not NVMe",
+	})
+	d := NewCUDAPCIeTopologyDiscovery(root)
+	for range 2 {
+		if err := d.Discover(); err != nil {
+			t.Fatal(err)
 		}
-	]`
-
-	gpus, err := ParseWindowsCUDADisplayJSON(mockDisplayJSON)
-	if err != nil {
-		t.Fatalf("ParseWindowsCUDADisplayJSON failed: %v", err)
+		if len(d.GPUs) != 2 || len(d.NVMeDevices) != 1 {
+			t.Fatalf("class gates or repeat reset failed: GPUs=%+v NVMe=%+v", d.GPUs, d.NVMeDevices)
+		}
 	}
-	if len(gpus) != 1 {
-		t.Fatalf("expected 1 GPU, got %d", len(gpus))
+	gpu := d.GPUs[0]
+	if gpu.PCIAddress != "0000:09:00.0" || gpu.DeviceName != "NVIDIA GeForce RTX 4090" || gpu.BAR1SizeBytes != 32<<30 {
+		t.Fatalf("lost observed identity/aperture: %+v", gpu)
 	}
-	if gpus[0].DeviceName != "NVIDIA GeForce RTX 5090" {
-		t.Errorf("DeviceName = %s, want NVIDIA GeForce RTX 5090", gpus[0].DeviceName)
+	for _, gpu := range d.GPUs {
+		if gpu.Arch != "" || gpu.TotalVRAMBytes != 0 || gpu.ReBAREnabled || gpu.UpstreamRootPort != "" || gpu.NUMANode != -1 {
+			t.Fatalf("invented GPU facts: %+v", gpu)
+		}
+		for _, field := range []string{"arch", "total_vram_bytes", "rebar_enabled", "upstream_root_port", "numa_node"} {
+			if !slices.Contains(gpu.UnknownFields, field) {
+				t.Errorf("missing unknown %s: %+v", field, gpu)
+			}
+		}
 	}
-	if gpus[0].Arch != "sm_120" {
-		t.Errorf("Arch = %s, want sm_120", gpus[0].Arch)
+	if gpu := d.GPUs[1]; gpu.DeviceName != "" || gpu.BAR1SizeBytes != 0 || !slices.Contains(gpu.UnknownFields, "bar1_size_bytes") {
+		t.Fatalf("invented name or shifted malformed BAR resource: %+v", gpu)
 	}
-	if gpus[0].TotalVRAMBytes != 34359738368 {
-		t.Errorf("TotalVRAMBytes = %d, want 34359738368", gpus[0].TotalVRAMBytes)
+	nvme := d.NVMeDevices[0]
+	if nvme.Model != "Observed 990 PRO" || nvme.NUMANode != 0 || nvme.UpstreamRootPort != "0000:00:01.2" || nvme.SlotType != NVMeSlotUnknown || nvme.PeakReadGBps != 0 || !slices.Contains(nvme.UnknownFields, "peak_read_gbps") {
+		t.Fatalf("lost observed NVMe facts or invented slot/speed: %+v", nvme)
 	}
-	if !gpus[0].ReBAREnabled {
-		t.Errorf("ReBAREnabled = false, want true")
+	if err := d.DiscoverLinuxSysfs(filepath.Join(root, "missing")); err == nil || len(d.GPUs) != 0 || len(d.NVMeDevices) != 0 {
+		t.Fatalf("failed discovery retained stale inventory: err=%v GPUs=%v NVMe=%v", err, d.GPUs, d.NVMeDevices)
+	}
+	empty := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(empty, "bus", "pci", "devices"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DiscoverLinuxSysfs(empty); err != nil {
+		t.Fatalf("successful empty inventory: %v", err)
 	}
 }
 
-func TestCUDAPCIeTopology_CrossSocketNUMA(t *testing.T) {
-	gpu := CUDADeviceNode{
-		PCIAddress:       "0000:09:00.0",
-		DeviceName:       "NVIDIA GeForce RTX 5090",
-		Arch:             "sm_120",
-		TotalVRAMBytes:   32 * 1024 * 1024 * 1024,
-		BAR1SizeBytes:    32 * 1024 * 1024 * 1024,
-		ReBAREnabled:     true,
-		UpstreamRootPort: "0000:00:01.1",
-		NUMANode:         0,
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDAPCIeTopology_WindowsObservedIdentityAndErrors(t *testing.T) {
+	t.Parallel()
+	const display = `[{
+		"name":"NVIDIA GeForce RTX 5090", "driver":"572.16", "ram":4293918720,
+		"pnp":"PCI\\VEN_10DE&DEV_2B80&SUBSYS_000010DE&REV_A1\\4&1F2B3C4D&0&0008"
+	},{"name":"Not NVIDIA", "ram":123, "pnp":"PCI\\VEN_8086&DEV_0000"}]`
+	nodes, err := ParseWindowsCUDADisplayJSON(display)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("nodes=%+v err=%v", nodes, err)
 	}
-
-	nvme := NVMeStorageNode{
-		PCIAddress:       "0000:81:00.0",
-		Model:            "Samsung SSD 990 PRO 2TB",
-		SlotType:         NVMeSlotM2ACPU,
-		UpstreamRootPort: "0000:80:01.1",
-		PeakReadGBps:     7.45,
-		NUMANode:         1,
+	gpu := nodes[0]
+	if gpu.DeviceName != "NVIDIA GeForce RTX 5090" || gpu.PNPDeviceID == "" || gpu.DriverVersion != "572.16" || gpu.ReportedAdapterRAMBytes != 4293918720 {
+		t.Fatalf("lost observed Windows identity: %+v", gpu)
 	}
-
-	disco := NewCUDAPCIeTopologyDiscovery("")
-	verdict := disco.EvaluateP2PRoute(gpu, nvme)
-
-	if verdict.RouteKind != RouteCrossSocketNUMA {
-		t.Errorf("RouteKind = %s, want %s", verdict.RouteKind, RouteCrossSocketNUMA)
+	if gpu.PCIAddress != "" || gpu.Arch != "" || gpu.TotalVRAMBytes != 0 || gpu.BAR1SizeBytes != 0 || gpu.ReBAREnabled || gpu.UpstreamRootPort != "" || gpu.NUMANode != -1 || !slices.Contains(gpu.UnknownFields, "total_vram_bytes") {
+		t.Fatalf("invented Windows topology/capacity: %+v", gpu)
 	}
-	if verdict.IsOptimal {
-		t.Errorf("IsOptimal = true, want false")
+	d := NewCUDAPCIeTopologyDiscovery("")
+	for range 2 {
+		if err := d.discoverWindows(func() ([]byte, error) { return []byte(display), nil }); err != nil {
+			t.Fatal(err)
+		}
+		if len(d.GPUs) != 1 || len(d.NVMeDevices) != 0 {
+			t.Fatalf("duplicate GPU or fabricated disk: %+v", d)
+		}
 	}
-	if verdict.LatencyEstimateNs < 1000 {
-		t.Errorf("LatencyEstimateNs = %d, want cross-socket latency >= 1000", verdict.LatencyEstimateNs)
+	queryErr := errors.New("CIM query failed")
+	err = d.discoverWindows(func() ([]byte, error) { return nil, queryErr })
+	if !errors.Is(err, queryErr) || len(d.GPUs) != 0 || len(d.NVMeDevices) != 0 {
+		t.Fatalf("query failure swallowed or stale inventory: err=%v d=%+v", err, d)
+	}
+	for _, invalid := range []string{"", "not JSON", "{", `[{"ram":"invalid"}]`} {
+		if err := d.discoverWindows(func() ([]byte, error) { return []byte(invalid), nil }); err == nil {
+			t.Errorf("parse error swallowed for %q", invalid)
+		}
+	}
+	if err := d.discoverWindows(func() ([]byte, error) { return []byte("[]"), nil }); err != nil || len(d.GPUs) != 0 || len(d.NVMeDevices) != 0 {
+		t.Fatalf("empty query should be empty inventory, not synthetic hardware: err=%v d=%+v", err, d)
 	}
 }
