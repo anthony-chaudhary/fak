@@ -27,7 +27,7 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 		return []byte("FAK_BENCH_NODE=fak-cuda-build-l4\ngpu=NVIDIA L4\n"), 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 0 {
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--workspace", dir, "--queue", q, "--json"}, fake); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
 	var got benchFleetDispatchReport
@@ -38,7 +38,7 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 		t.Fatalf("report=%+v", got)
 	}
 	out.Reset()
-	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 0 {
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--workspace", dir, "--queue", q, "--json"}, fake); code != 0 {
 		t.Fatal(code)
 	}
 	json.Unmarshal(out.Bytes(), &got)
@@ -47,6 +47,9 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "witnesses", "abc.json")); err != nil {
 		t.Fatal(err)
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "experiments", "benchmark", "runs", "by-machine", "gcp-g2-l4", "*-bench-fleet-abc", "manifest.json")); len(m) != 1 {
+		t.Fatalf("run artifact not ingested under the test workspace: %q", m)
 	}
 }
 
