@@ -392,9 +392,14 @@ func TestV41CPUMissSessionDecode(t *testing.T) {
 	}()
 
 	const steps = 3
+	// The flag is read when V4.1 state first binds, not at construction, so
+	// the device-only reference must run before the env flips to exact.
 	_, device := newSession(t, "off", ExecutionPolicyPortable)
-	hostModel, host := newSession(t, "exact", ExecutionPolicyPortable)
 	want := v41RoutedLayerSteps(t, device, prompt, steps)
+	if device.v41State().cpuMiss != nil {
+		t.Fatal("device-only reference must not bind the host arm")
+	}
+	hostModel, host := newSession(t, "exact", ExecutionPolicyPortable)
 	got := v41RoutedLayerSteps(t, host, prompt, steps)
 	for i := range want {
 		v41CPUMissClose(t, "logits window "+itoa(i), got[i], want[i], 1.0/16)
