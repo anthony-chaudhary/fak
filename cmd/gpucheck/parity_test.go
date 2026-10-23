@@ -98,6 +98,16 @@ func TestRunRejectsNonPositiveCountBeforeModelLoad(t *testing.T) {
 	}
 }
 
+func TestRunHelpSucceeds(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-h"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("help stream is empty")
+	}
+}
+
 func TestRunJSONFailureReceiptOnlyOnStdout(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"-json", "-hf", t.TempDir(), "-n", "-1", "-backend", "cuda", "-require-native"}, &stdout, &stderr); code != 2 {

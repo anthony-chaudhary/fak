@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -91,6 +92,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	jsonOutput := fs.Bool("json", false, "emit one machine-readable gpucheck receipt on stdout")
 	requireNative := fs.Bool("require-native", false, "require the observed session backend to match the requested device-memory backend")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		if jsonMode {
 			if emitJSON(stdout, failureReceipt("", "cuda", 0, reasonInvalidArguments, err.Error())) != nil {
 				return 1
