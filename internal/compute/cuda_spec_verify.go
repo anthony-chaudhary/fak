@@ -2,14 +2,18 @@
 
 package compute
 
-// validateSpecVerifyOperandsLocked checks the buffers the verification kernel will
-// consume. The caller holds cudaMu and has validated tensor pointers and geometry.
 func (c *cudaBackend) validateSpecVerifyOperandsLocked(q, k, v, out *Tensor, expectedQ int) error {
+	return c.validateVerifyAttentionOperandsLocked("SpecVerifyAttention", "spec-verify-preflight", q, k, v, out, expectedQ)
+}
+
+// validateVerifyAttentionOperandsLocked checks the buffers the verification kernel
+// will consume. The caller holds cudaMu and has validated tensor pointers and geometry.
+func (c *cudaBackend) validateVerifyAttentionOperandsLocked(op, site string, q, k, v, out *Tensor, expectedQ int) error {
 	// Validate every pointer before allocating an output or crossing the C ABI.
 	// Ready is deliberately not required: queued producers share g_stream's FIFO.
 	validate := func(name string, t Tensor) error {
 		refuse := func(reason string) error {
-			return &CUDAOpError{Op: "SpecVerifyAttention", Site: "spec-verify-preflight", Msg: name + " " + reason}
+			return &CUDAOpError{Op: op, Site: site, Msg: name + " " + reason}
 		}
 		if t.Backend() != c {
 			return refuse("must be owned by the executing CUDA backend; upload host tensors before verification")
@@ -22,7 +26,7 @@ func (c *cudaBackend) validateSpecVerifyOperandsLocked(q, k, v, out *Tensor, exp
 			return refuse("must have a live default-device CUDA allocation")
 		}
 		if err := buf.invalidStateError(name); err != nil {
-			return &CUDAOpError{Op: "SpecVerifyAttention", Site: "spec-verify-preflight", Msg: name + " has invalid CUDA state", Err: err}
+			return &CUDAOpError{Op: op, Site: site, Msg: name + " has invalid CUDA state", Err: err}
 		}
 		if t.Numel() <= 0 || buf.n/F32.Bytes() < t.Numel() {
 			return refuse("CUDA allocation is too small for its f32 elements")

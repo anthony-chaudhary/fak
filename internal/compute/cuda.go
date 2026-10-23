@@ -1374,6 +1374,7 @@ func (c *cudaBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH,
 // TreeVerifyAttention runs one fused K<=32 branch-tree attention pass. The
 // uint32 rows are copied into the CUDA launch parameter block; the device does
 // not allocate or stream a dense KxK mask.
+// Inputs and any reused output must be live row-major F32 CUDA tensors.
 func (c *cudaBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d int) error {
 	if err := validateTreeVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d); err != nil {
 		return err
@@ -1386,6 +1387,10 @@ func (c *cudaBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint3
 	defer cudaMu.Unlock()
 
 	expectedQ := qLen * nH * d
+	if err := c.validateVerifyAttentionOperandsLocked("TreeVerifyAttention", "tree-verify-preflight", q, k, v, out, expectedQ); err != nil {
+		return err
+	}
+
 	if out.buf == nil || out.Numel() != expectedQ {
 		devOut, _ := c.devTr([]int{qLen, nH, d}, F32)
 		*out = devOut
