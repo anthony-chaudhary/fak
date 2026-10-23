@@ -127,13 +127,13 @@ func TestCUDAF16StageNativeBindingAndOrder(t *testing.T) {
 		}
 	}
 	body := bodies["uploadF16"]
-	for _, want := range []string{"c.devF16(t.Shape, t.Layout)", "c.allocateF16UploadStage(buf, len(f)*4,", "c.dallocClass(bytes, MemoryScratchpad, \"f16-stage\")", "C.fcuda_free(ptr)", "C.fcuda_f32_to_f16_T(", "C.fcuda_f32_to_f16(", "C.fcuda_free(stage.ptr)", "c.accountImmutableWeightUpload(", "uploadCache["} {
+	for _, want := range []string{"c.devF16(t.Shape, t.Layout)", "c.allocateF16UploadStage(buf, len(f)*4,", "c.dallocClass(bytes, MemoryScratchpad, \"f16-stage\")", "C.fcuda_free(ptr)", "C.fak_cuda_f32_to_f16_T(", "C.fak_cuda_f32_to_f16(", "C.fcuda_free(stagePtr)", "c.accountImmutableWeightUpload(", "uploadCache["} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing upload owner operation %q", want)
 		}
 	}
 	prev := -1
-	for _, step := range []string{"c.devF16(", "if len(f) == 0", "c.allocateF16UploadStage(", "C.fcuda_h2d(", "if t.Layout == ColMajor", "C.fcuda_free(stage.ptr)", "c.accountImmutableWeightUpload(", "uploadCache["} {
+	for _, step := range []string{"c.devF16(", "if len(f) == 0", "c.allocateF16UploadStage(", "C.fak_cuda_upload_h2d(", "if t.Layout == ColMajor", "stagePtr := stage.ptr", "stage.ptr = nil", "C.fcuda_free(stagePtr)", "c.accountImmutableWeightUpload(", "uploadCache["} {
 		i := strings.Index(body, step)
 		if i <= prev {
 			t.Fatalf("wrong owner order for %q", step)

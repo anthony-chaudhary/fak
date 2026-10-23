@@ -1252,8 +1252,12 @@ __global__ void k_f32_to_f16(const float *src, __half *dst, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) dst[i] = __float2half(src[i]);
 }
-extern "C" void fcuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n) {
+extern "C" int fak_cuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n) {
   k_f32_to_f16<<<(n + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, n);
+  return (int)cudaGetLastError();
+}
+extern "C" void fcuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n) {
+  (void)fak_cuda_f32_to_f16(dDstHalf, dSrc, n);
 }
 
 // k_f32_to_f16_T narrows AND transpose-repacks a row-major f32 weight [out,in] into a
@@ -1266,9 +1270,13 @@ __global__ void k_f32_to_f16_T(const float *src, __half *dst, int out, int in) {
   int o = s / in, i = s % in;
   dst[o + (size_t)i * out] = __float2half(src[s]);
 }
-extern "C" void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in) {
+extern "C" int fak_cuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in) {
   int total = out * in;
   k_f32_to_f16_T<<<(total + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, out, in);
+  return (int)cudaGetLastError();
+}
+extern "C" void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in) {
+  (void)fak_cuda_f32_to_f16_T(dDstHalf, dSrc, out, in);
 }
 
 // fcuda_matmul_f16: Y[P,out] = X[P,in] @ W[out,in]^T on tensor cores. W is resident __half;

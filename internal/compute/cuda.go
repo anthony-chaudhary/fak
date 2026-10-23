@@ -32,6 +32,8 @@ int fak_cuda_q8_matmul_f32(const int8_t *w, const float *scales, const float *x,
 int fak_cuda_q4k_matmul_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p);
 int fak_cuda_read_d2h(int device, void *h, const void *d, size_t n);
 int fak_cuda_upload_h2d(void *d, const void *h, size_t n);
+int fak_cuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n);
+int fak_cuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in);
 */
 import "C"
 
@@ -886,23 +888,62 @@ func (c *cudaBackend) uploadF16(t Tensor, hb HostBuffer, f []float32, hp uintptr
 		func(bytes int) *cudaBuf { return c.dallocClass(bytes, MemoryScratchpad, "f16-stage") },
 		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
 	)
-	C.fcuda_h2d(stage.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-	if t.Layout == ColMajor && len(t.Shape) == 2 {
-		C.fcuda_f32_to_f16_T(buf.ptr, (*C.float)(stage.ptr), C.int(t.Shape[0]), C.int(t.Shape[1]))
-	} else {
-		C.fcuda_f32_to_f16(buf.ptr, (*C.float)(stage.ptr), C.int(len(f)))
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		// Caller holds cudaMu. Detach both owners and restore placement before
+		// either best-effort release; cleanup must not replace the primary panic.
+		stagePtr, dstPtr := stage.ptr, buf.ptr
+		stage.ptr, buf.ptr = nil, nil
+		c.dlUsed -= buf.budgetedWeightBytes
+		buf.budgetedWeightBytes = 0
+		if buf.managedWeight {
+			c.managedN--
+			buf.managedWeight = false
+		}
+		for _, ptr := range []unsafe.Pointer{stagePtr, dstPtr} {
+			if ptr != nil {
+				func() {
+					defer func() { _ = recover() }()
+					C.fcuda_free(ptr)
+				}()
+			}
+		}
+	}()
+	status := int(C.fak_cuda_upload_h2d(stage.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4)))
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, "upload-f16-h2d", status)
+		panic(&CUDAOpError{Op: "Upload", Site: "upload-f16-h2d", Code: status, Class: buf.class,
+			Msg: "native host-to-device upload failed"})
 	}
-	C.fcuda_free(stage.ptr)
+	if t.Layout == ColMajor && len(t.Shape) == 2 {
+		status = int(C.fak_cuda_f32_to_f16_T(buf.ptr, (*C.float)(stage.ptr), C.int(t.Shape[0]), C.int(t.Shape[1])))
+	} else {
+		status = int(C.fak_cuda_f32_to_f16(buf.ptr, (*C.float)(stage.ptr), C.int(len(f))))
+	}
+	if status != 0 {
+		c.faultLatch.Observe(DeviceFaultUnknown, "upload-f16-convert", status)
+		panic(&CUDAOpError{Op: "Upload", Site: "upload-f16-convert", Code: status, Class: buf.class,
+			Msg: "native F16 conversion submission failed"})
+	}
+	// Accepted submission is not completed execution. Preserve same-stream
+	// asynchronous conversion and pool reuse, without adding a host fence.
+	stagePtr := stage.ptr
+	stage.ptr = nil
+	C.fcuda_free(stagePtr)
 	c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
 	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F16, t.Layout
 	uploadCache[ucKey{hp, F16, t.Layout}] = out
+	published = true
 	return out
 }
 
 // allocateF16UploadStage owns the unpublished destination only while the scratch
 // allocation is pending. Caller holds cudaMu. A failed allocation must not strand
 // the destination or its logical placement charge. H2D, conversion, stage release
-// and upload-cache publication occur after this boundary and are unchanged.
+// and upload-cache publication belong to the caller's subsequent owner boundary.
 func (c *cudaBackend) allocateF16UploadStage(dst *cudaBuf, bytes int, allocate func(int) *cudaBuf, release func(unsafe.Pointer)) *cudaBuf {
 	allocated := false
 	defer func() {
