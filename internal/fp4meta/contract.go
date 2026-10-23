@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 )
 
 // SchemaV1 is the canonical schema identifier for version 1 of the FP4 metadata contract.
@@ -179,7 +180,8 @@ type Result struct {
 }
 
 // Parse strictly decodes a descriptor and returns typed decisions for valid JSON,
-// including descriptors from unknown schema versions or variants.
+// including descriptors from unknown schema versions or variants. Repeated fields,
+// including escaped names and case-insensitive struct aliases, are invalid.
 func Parse(raw []byte, capabilities Capabilities) (Descriptor, Result, error) {
 	var descriptor Descriptor
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -194,7 +196,54 @@ func Parse(raw []byte, capabilities Capabilities) (Descriptor, Result, error) {
 		}
 		return Descriptor{}, Result{Outcome: OutcomeRefuse, Reason: ReasonInvalidDescriptor, Detail: err.Error()}, err
 	}
+	fields := json.NewDecoder(bytes.NewReader(raw))
+	fields.UseNumber()
+	if err := rejectDuplicateFields(fields); err != nil {
+		return Descriptor{}, Result{Outcome: OutcomeRefuse, Reason: ReasonInvalidDescriptor, Detail: err.Error()}, err
+	}
 	return descriptor, Adjudicate(descriptor, capabilities), nil
+}
+
+// rejectDuplicateFields checks each object separately after the typed decode has
+// accepted the document. Token unescapes field names; EqualFold matches the
+// aliases encoding/json accepts for this descriptor's struct fields.
+func rejectDuplicateFields(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	switch token {
+	case json.Delim('{'):
+		var names []string
+		for decoder.More() {
+			token, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			name, ok := token.(string)
+			if !ok {
+				return errors.New("JSON object field is not a string")
+			}
+			for _, previous := range names {
+				if strings.EqualFold(previous, name) {
+					return fmt.Errorf("duplicate JSON field %q", name)
+				}
+			}
+			names = append(names, name)
+			if err := rejectDuplicateFields(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+	case json.Delim('['):
+		for decoder.More() {
+			if err := rejectDuplicateFields(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+	}
+	return err
 }
 
 // Adjudicate separates metadata recognition from runtime and hardware support.

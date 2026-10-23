@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -157,5 +158,50 @@ func allCapabilities() Capabilities {
 		Accumulators: []Accumulator{AccumulatorFP16, AccumulatorFP32},
 		Hardware:     []string{"nvidia/sm100"},
 		Runtime:      true,
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestParseNVFP4RejectsAmbiguousScaleFields(t *testing.T) {
+	t.Parallel()
+	raw, err := json.Marshal(goldenDescriptor(t, "nvfp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := string(raw)
+	// Repeated names in separate objects are not duplicates. In this fixture,
+	// encoding and scale both declare exponent_bits, while artifact, recipe,
+	// and runtime each declare version.
+	for _, valid := range []string{
+		good,
+		strings.Replace(good, `"block_size":16`, `"BLOCK_SIZE":16`, 1),
+	} {
+		if _, decision, err := Parse([]byte(valid), allCapabilities()); err != nil || decision.Outcome != OutcomeAccept {
+			t.Fatalf("valid descriptor = %#v, %v", decision, err)
+		}
+	}
+	for _, tc := range []struct {
+		name, old, replacement string
+	}{
+		{"nested scale", `"block_size":16`, `"block_size":32,"block_size":16`},
+		{"escaped scale", `"block_size":16`, `"\u0062lock_size":32,"block_size":16`},
+		{"casefold scale", `"block_size":16`, `"BLOCK_SIZE":32,"block_size":16`},
+		{"repeated scale object", `"scale":{`, `"scale":{"block_size":32},"scale":{`},
+		{"top-level variant", `"variant":"nvfp4"`, `"variant":"mxfp4","variant":"nvfp4"`},
+		{"identical scale", `"block_size":16`, `"block_size":16,"block_size":16`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.Count(good, tc.old) != 1 {
+				t.Fatalf("fixture must contain %q exactly once", tc.old)
+			}
+			ambiguous := strings.Replace(good, tc.old, tc.replacement, 1)
+			descriptor, decision, err := Parse([]byte(ambiguous), allCapabilities())
+			if err == nil || decision.Outcome != OutcomeRefuse || decision.Reason != ReasonInvalidDescriptor {
+				t.Fatalf("ambiguous descriptor = %#v, %v; want invalid-descriptor refusal", decision, err)
+			}
+			if !reflect.DeepEqual(descriptor, Descriptor{}) {
+				t.Fatalf("refusal exposed partial descriptor: %#v", descriptor)
+			}
+		})
 	}
 }
