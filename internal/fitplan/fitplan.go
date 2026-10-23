@@ -56,8 +56,9 @@ const (
 type Tier string
 
 const (
-	TierSOL       Tier = "sol"
-	TierEmpirical Tier = "empirical"
+	TierSOL        Tier = "sol"
+	TierEmpirical  Tier = "empirical"
+	TierCalibrated Tier = "calibrated" // fit from this host's receipts, keyed by hardware epoch
 )
 
 // Status is the planner's overall verdict.
@@ -123,6 +124,7 @@ type Model struct {
 	AttnLayers                int    `json:"attn_layers,omitempty"` // KV-bearing attention layers, sliding-window included
 	NumHeads                  int    `json:"num_heads,omitempty"`
 	HeadDim                   int    `json:"head_dim,omitempty"`
+	QuantFamily               string `json:"quant_family,omitempty"` // QuantFamily of the type carrying the most payload bytes
 }
 
 // Hardware is the pool and peaks a plan is priced against.
@@ -275,7 +277,7 @@ func Plan(in Input) Report {
 		Workload: p.wl,
 		Pins:     in.Pins,
 		Evidence: Evidence{
-			Calibration:     in.Calibration.finite(),
+			Calibration:     in.Calibration.finite(in.Hardware.Peaks.BytesPerSec),
 			Peaks:           in.Hardware.Peaks.finite(),
 			Topology:        in.Hardware.Topology,
 			PoolUsableBytes: max(p.avail, 0),
@@ -621,7 +623,7 @@ func (p *planner) throughputGate() (Omission, Bound) {
 		// On a shared pool spilled rows are pool bytes at pool bandwidth; only a discrete
 		// device pays a host link for them.
 		return OmitOffloadBandwidthUnknown, BoundLink
-	case !positiveFinite(in.Hardware.Peaks.BytesPerSec):
+	case !positiveFinite(in.Hardware.Peaks.BytesPerSec) && !positiveFinite(in.Calibration.AchievedBytesPerSec):
 		return OmitPeakBandwidthUnknown, ""
 	}
 	return "", ""
@@ -659,7 +661,7 @@ func (p *planner) priceThroughput(pr *Prediction, c Candidate) {
 	if flopsKnown && positiveFinite(peaks.FLOPsPerSec) {
 		peakF = peaks.FLOPsPerSec
 	}
-	bw, f := cal.BandwidthEfficiency*peakBW, cal.ComputeEfficiency*peakF
+	bw, f := cal.effectiveBandwidth(peakBW), cal.ComputeEfficiency*peakF
 
 	b := 1
 	if p.wl.BatchedDecode {
@@ -672,7 +674,7 @@ func (p *planner) priceThroughput(pr *Prediction, c Candidate) {
 	kvRead := addSat(attendedKVBytes(c.Context, lkv), c.Context.SessionState.Total())
 
 	r := p.decodeStep(b, lkv, kvRead)
-	step := finiteOrZero(r.RooflineTokPerSecCeiling(f, bw))
+	step := finiteOrZero(withOverhead(r.RooflineTokPerSecCeiling(f, bw), cal.OverheadSeconds))
 	pr.Bound = BoundMemory
 	if f > 0 && r.FLOPBoundTokPerSecCeiling(f) < r.TokPerSecCeiling(bw) {
 		pr.Bound = BoundCompute
@@ -685,7 +687,12 @@ func (p *planner) priceThroughput(pr *Prediction, c Candidate) {
 		pr.DecodeTokSPerSeq = step / float64(p.wl.Concurrency)
 	}
 	pr.DecodeBytesPerStep = r.WeightBytesPerToken
-	pr.DecodeTokSCeiling = finiteOrZero(p.decodeStep(1, lkv, kvRead).RooflineTokPerSecCeiling(peakF, peakBW))
+	if positiveFinite(peakBW) {
+		pr.DecodeTokSCeiling = finiteOrZero(p.decodeStep(1, lkv, kvRead).RooflineTokPerSecCeiling(peakF, peakBW))
+	} else {
+		// The achieved bandwidth stated decode; the SOL ceiling still needs the spec peak.
+		pr.Omitted = append(pr.Omitted, OmitPeakBandwidthUnknown)
+	}
 
 	if !flopsKnown {
 		pr.Omitted = append(pr.Omitted, OmitModelFLOPsUnknown)
@@ -746,23 +753,64 @@ func finiteOrZero(f float64) float64 {
 	return f
 }
 
-// Calibration is the fraction of each peak the engine is assumed to sustain.
+// Calibration is the fraction of each peak the engine is assumed to sustain. A positive
+// AchievedBytesPerSec (a calibrated row's effective bandwidth) overrides BandwidthEfficiency x
+// peak, the llm-analysis achieved-bandwidth shape, so a host with no spec peak still prices
+// decode. OverheadSeconds is t_ovh, the fixed per-step cost a decode step adds.
 type Calibration struct {
 	Tier                Tier    `json:"tier"`
 	BandwidthEfficiency float64 `json:"bandwidth_efficiency"`
 	ComputeEfficiency   float64 `json:"compute_efficiency"`
 	Source              string  `json:"source"`
+	AchievedBytesPerSec float64 `json:"achieved_bytes_per_s,omitempty"`
+	OverheadSeconds     float64 `json:"overhead_s,omitempty"`
+	// ComputeTier and ComputeSource label ComputeEfficiency when its evidence differs from Tier.
+	ComputeTier   Tier            `json:"compute_tier,omitempty"`
+	ComputeSource string          `json:"compute_source,omitempty"`
+	State         RowState        `json:"state,omitempty"`  // a calibrated row's state; drift = not fit to rank
+	Row           *CalibrationRow `json:"row,omitempty"`    // the store row: key, fit, residuals, receipt provenance
+	Lookup        *CalibrationKey `json:"lookup,omitempty"` // the key the plan resolved against, row or not
 }
 
 func (c Calibration) valid() bool {
 	in := func(e float64) bool { return e > 0 && e <= 1 }
-	return in(c.BandwidthEfficiency) && in(c.ComputeEfficiency)
+	bw := in(c.BandwidthEfficiency) || positiveFinite(c.AchievedBytesPerSec)
+	ovh := c.OverheadSeconds >= 0 && !math.IsInf(c.OverheadSeconds, 0)
+	return bw && in(c.ComputeEfficiency) && ovh
 }
 
-func (c Calibration) finite() Calibration {
+// finite is the calibration as evidence: non-finite numbers zeroed, and an achieved bandwidth
+// restated as its efficiency against a known spec peak, so bandwidth_efficiency keeps its (0,1]
+// meaning wherever a peak exists.
+func (c Calibration) finite(peak float64) Calibration {
+	if positiveFinite(c.AchievedBytesPerSec) && positiveFinite(peak) {
+		c.BandwidthEfficiency = math.Min(c.AchievedBytesPerSec/peak, 1)
+	}
 	c.BandwidthEfficiency = finiteOrZero(c.BandwidthEfficiency)
 	c.ComputeEfficiency = finiteOrZero(c.ComputeEfficiency)
+	c.AchievedBytesPerSec = finiteOrZero(c.AchievedBytesPerSec)
+	c.OverheadSeconds = finiteOrZero(c.OverheadSeconds)
 	return c
+}
+
+// effectiveBandwidth is the achieved bandwidth when stated, capped at a known spec peak (no
+// prediction beats the SOL ceiling), else efficiency x peak.
+func (c Calibration) effectiveBandwidth(peak float64) float64 {
+	if positiveFinite(c.AchievedBytesPerSec) {
+		if positiveFinite(peak) {
+			return math.Min(c.AchievedBytesPerSec, peak)
+		}
+		return c.AchievedBytesPerSec
+	}
+	return c.BandwidthEfficiency * peak
+}
+
+// withOverhead adds t_ovh to a roofline rate's step time: 1 / (1/rate + t_ovh).
+func withOverhead(rate, overhead float64) float64 {
+	if !positiveFinite(rate) || !(overhead > 0) {
+		return rate
+	}
+	return 1 / (1/rate + overhead)
 }
 
 // generic, uncalibrated: bandwidth 0.55 (llmfit estimate_tps, MIT, AlexsJones/llmfit fit.rs), compute 0.5 (low end of the 0.5-0.7 FLOP-efficiency band analytic LLM models assume, cf. cli99/llm-analysis, Apache-2.0)

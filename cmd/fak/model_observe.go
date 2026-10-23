@@ -107,6 +107,8 @@ func runModelObserveBandwidth(args []string) error {
 			return runModelObserveNUMAImport(args[1:])
 		case "numa-topology":
 			return runModelObserveNUMATopology(args[1:])
+		case "calibrate":
+			return runModelObserveBandwidthCalibrate(args[1:])
 		}
 	}
 	fs := flag.NewFlagSet("model-observe bandwidth", flag.ContinueOnError)
@@ -251,8 +253,12 @@ func runModelObserveBandwidthCollect(args []string) error {
 	rooflineKneeThreshold := fs.Float64("roofline-knee-threshold", modelperfobs.DefaultRooflineKneeThreshold, "saturation knee fraction of the peak point median")
 	output := fs.String("output", "", "write collection JSON to this path")
 	pretty := fs.Bool("pretty", true, "indent JSON output")
+	calibrate := fs.Bool("calibrate", false, "add the measured host roofline to the fit-plan calibration store (requires --measure-host-roofline; env "+calibrationStoreEnv+")")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *calibrate && !*measureRoofline {
+		return fmt.Errorf("--calibrate requires --measure-host-roofline")
 	}
 	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice), AMDDevice: modelperfobs.AMDDeviceSelector(*amdDevice)}
 	visited := make(map[string]bool)
@@ -360,6 +366,7 @@ func runModelObserveBandwidthCollect(args []string) error {
 		}
 	}
 	var collection modelperfobs.BandwidthCollection
+	var hostRoofline *modelperfobs.RooflineMeasurement
 	var err error
 	if *appleMemoryImport != "" {
 		var started, ended time.Time
@@ -465,7 +472,6 @@ func runModelObserveBandwidthCollect(args []string) error {
 		}
 		runControl := context.Background()
 		cancel := context.CancelFunc(func() {})
-		var hostRoofline *modelperfobs.RooflineMeasurement
 		if rooflineOptions != nil {
 			rooflineBudget, budgetErr := modelperfobs.RooflineRuntimeBudget(*rooflineOptions)
 			if budgetErr != nil {
@@ -495,21 +501,19 @@ func runModelObserveBandwidthCollect(args []string) error {
 			}
 		}
 	}
-	w := io.Writer(os.Stdout)
-	var f *os.File
+	raw, err := encodeModelObserveJSON(*pretty, collection)
+	if err != nil {
+		return err
+	}
 	if *output != "" {
-		f, err = os.Create(*output)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w = f
+		err = os.WriteFile(*output, raw, 0o666)
+	} else {
+		_, err = os.Stdout.Write(raw)
 	}
-	enc := json.NewEncoder(w)
-	if *pretty {
-		enc.SetIndent("", "  ")
+	if err != nil || !*calibrate || hostRoofline == nil {
+		return err
 	}
-	return enc.Encode(collection)
+	return ingestHostRooflineCalibration(raw, *output, *hostRoofline)
 }
 
 const (
@@ -589,6 +593,8 @@ func modelObserveUsage() string {
 		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +
 		"       fak model-observe bandwidth numa-topology [--output FILE --pretty=true]\n" +
 		"       fak model-observe bandwidth numa-import --input FILE [--output FILE --pretty=true]\n" +
+		"       fak model-observe bandwidth collect --measure-host-roofline --calibrate [--output FILE]\n" +
+		"       fak model-observe bandwidth calibrate [--store FILE --measured-here] [RECEIPT.json ...]\n" +
 		"       fak model-observe bandwidth collect --nvidia-ncu-csv FILE --device DEVICE --capture-start RFC3339 --capture-end RFC3339 --phase PHASE --shape SHAPE [--device-roofline-gb-s N]\n" +
 		"       fak model-observe bandwidth collect --host-counter-import FILE --host-counter-provider PROVIDER --host-counter-scope system|socket|controller [--host-counter-scope-id ID --host-counter-format FORMAT --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe bandwidth collect --apple-memory-import FILE --apple-memory-provider PROVIDER --apple-memory-provider-version VERSION --apple-memory-scope system|package [--apple-memory-format generic-json --apple-memory-interval DURATION --capture-start RFC3339 --capture-end RFC3339]\n" +

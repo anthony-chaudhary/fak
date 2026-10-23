@@ -40,6 +40,7 @@ func (s *WeightSource) FitPlanModel(embed EmbedStorage, opts ...Q4KLoadOption) (
 	if m.HeadParams, err = s.headParams(cfg); err != nil {
 		return fitplan.Model{}, err
 	}
+	m.QuantFamily = s.fitPlanQuantFamily()
 	// The gather table is excluded from the swept scale only where it is excluded from the sweep.
 	if cfg.TieWordEmbeddings || m.GatherPayloadBytes > 0 {
 		if m.GatherResidentBytes, err = s.inputEmbedGatherResident(cfg, embed, opts); err != nil {
@@ -117,6 +118,27 @@ func (s *WeightSource) fitPlanSweep(cfg model.Config) (fitplan.Model, error) {
 	}
 	m.ActiveSetUnknown = cfg.NumExperts > 0
 	return m, nil
+}
+
+// fitPlanQuantFamily is the quant family carrying the most payload bytes, the one a decode's
+// dequant cost tracks; float tensors name the family only when nothing is quantized.
+func (s *WeightSource) fitPlanQuantFamily() string {
+	byFamily := map[string]uint64{}
+	for _, info := range s.File.Tensors {
+		if n, err := tensorPayloadBytes(info); err == nil {
+			byFamily[fitplan.QuantFamily(info.Type.String())] += n
+		}
+	}
+	best, bestN := "", uint64(0)
+	for family, n := range byFamily {
+		if family != "float" && (n > bestN || (n == bestN && family < best)) {
+			best, bestN = family, n
+		}
+	}
+	if best == "" && byFamily["float"] > 0 {
+		return "float"
+	}
+	return best
 }
 
 func (s *WeightSource) tensorElemsByName(name string) (int64, error) {

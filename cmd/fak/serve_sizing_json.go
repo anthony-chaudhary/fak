@@ -241,6 +241,10 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		warnings = append(warnings, startupWarnings...)
 	}
 
+	armLabel := serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm)
+	if pq2Checkpoint && be == nil && selectedArm == serveLoadArmResidentQ4K {
+		armLabel = "cpu-resident-pq2_0"
+	}
 	embed, q4kOpts := serveFitPlanEmbed(ws, be, selectedArm, cpuOffloadActive, model, fit)
 	fitPlan := buildServeSizingFitPlan(ws, be, serveFitPlanSizing{
 		weights:    weights,
@@ -249,11 +253,8 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		sizingFit:  sizingFit,
 		hostFit:    hostFit,
 		resolution: resolution,
+		arm:        armLabel,
 	})
-	armLabel := serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm)
-	if pq2Checkpoint && be == nil && selectedArm == serveLoadArmResidentQ4K {
-		armLabel = "cpu-resident-pq2_0"
-	}
 	return serveSizingArtifact{
 		Version:                     serveSizingVersion,
 		Model:                       model,
@@ -349,6 +350,7 @@ type serveFitPlanSizing struct {
 	sizingFit  serveFitBudget
 	hostFit    serveFitBudget
 	resolution serveNativeContextResolution
+	arm        string // the artifact's arm label: the calibration row's kernel path
 }
 
 // buildServeSizingFitPlan prices the SAME weights plan, budgets and resolved context the
@@ -395,7 +397,7 @@ func buildServeSizingFitPlan(ws *ggufload.WeightSource, be compute.Backend, in s
 		Weights:     in.weights,
 		Hardware:    hw,
 		Workload:    fitplan.DefaultWorkload(),
-		Calibration: fitplan.GenericEmpirical(),
+		Calibration: resolveServeCalibration(be, m, in.arm),
 		Pins:        pins,
 		Candidates:  fitplan.BuildCandidates(tiers, res.ResolvedTokens, pins.ContextTokens),
 	})
