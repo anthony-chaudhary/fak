@@ -413,6 +413,9 @@ type Session struct {
 	// Step recomputes the full history and stays consistent with one longer Forward. It
 	// is nil for every non-V4.1 session.
 	v41Forward *v41ForwardState
+	// v41CPUMissProfile is an explicitly supplied immutable execution envelope,
+	// never a backend-name/cache-size default. Nil keeps the default-off path inert.
+	v41CPUMissProfile *v41CPUMissProfileBinding
 	// v41ColdStages is the opt-in per-stage attribution of the cold V4.1
 	// forward (EnableV41ColdStageAttribution); nil keeps every bracket inert.
 	v41ColdStages *v41ColdStageRecorder

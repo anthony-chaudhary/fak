@@ -6,7 +6,201 @@ import (
 	"math"
 	"reflect"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// These are declared synthetic rates over the fixture's actual packed slab,
+// not a measurement or hardware-admission receipt.
+func v41CPUMissTestProfile(m *Model) ExpertCPUMissProfile {
+	var size int64
+	for _, leaf := range []string{".w1.weight", ".w3.weight", ".w2.weight"} {
+		size += kQuantResidentBytes(m.kqw[layerName(0, "ffn.experts.0"+leaf)])
+	}
+	return ExpertCPUMissProfile{
+		Bandwidth: MoEBandwidthProfile{PCIeBandwidthBytesPerSec: 3.5e9, CPUBandwidthBytesPerSec: 25e9, ExpertSizeBytes: size, HostCPUEnabled: true},
+		Channels:  ExpertCPUMissSharedChannels,
+		Source:    "synthetic test envelope; not measured",
+	}
+}
+
+// One caller-intake regression: no implicit Halo profile, no profile-driven
+// fallback, and the selected facts determine the unchanged solver's split.
+// fak-test:runtime fast est=1s lane=default
+func TestV41CPUMissExplicitProfile(t *testing.T) {
+	m := &Model{Cfg: Config{ModelType: "deepseek41", NumLayers: 1, NumExperts: 6, HiddenSize: qkK, MoEIntermediateSize: qkK}, kqw: make(map[string]*kQuantTensor)}
+	gate, down := q2kFixtureTensor(qkK, qkK, 13966), q3kFixtureTensor(qkK, qkK)
+	for expert := 0; expert < 6; expert++ {
+		for _, leaf := range []string{".w1.weight", ".w3.weight"} {
+			m.kqw[layerName(0, "ffn.experts."+itoa(expert)+leaf)] = gate
+		}
+		m.kqw[layerName(0, "ffn.experts."+itoa(expert)+".w2.weight")] = down
+	}
+	newSession := func() *Session {
+		return &Session{M: &Model{Cfg: m.Cfg, kqw: m.kqw}, Backend: newV41RoutedLayerTestBackend(), halW: make(map[string]compute.Tensor)}
+	}
+	deviceCalls := 0
+	st := &v41ForwardState{routedLayer: func(int, []routePick, []float32) ([]float32, v41RoutedExpertOutcome, error) {
+		deviceCalls++
+		return nil, v41RoutedExpertDeclined, nil
+	}}
+	profile := v41CPUMissTestProfile(m)
+	picks := []routePick{{expert: 3}, {expert: 1}, {expert: 5}, {expert: 0}, {expert: 4}, {expert: 2}, {expert: 1}}
+	refused := func(t *testing.T, s *Session) {
+		t.Helper()
+		arm := s.v41CPUMissArmFor(st)
+		if arm == nil {
+			t.Fatal("enabled profile refusal must not silently disable the arm")
+		}
+		before := deviceCalls
+		_, handled, err := m.v41RoutedLayerStepCPUMiss(0, picks, nil, &v41ProjScratch{cpuMiss: arm, routedLayer: st.routedLayer})
+		if !handled || !errors.Is(err, ErrExpertCPUMissProfile) || errors.Is(err, ErrV41ForwardStage) || deviceCalls != before {
+			t.Fatalf("profile refusal handled=%t err=%v device calls=%d->%d", handled, err, before, deviceCalls)
+		}
+	}
+
+	t.Setenv(ExpertCPUMissEnv, "")
+	if arm := newSession().v41CPUMissArmFor(st); arm != nil {
+		t.Fatal("default-off consulted a missing profile")
+	}
+	t.Setenv(ExpertCPUMissEnv, "exact")
+	t.Run("missing", func(t *testing.T) { refused(t, newSession()) })
+	for name, mutate := range map[string]func(*ExpertCPUMissProfile){
+		"zero transfer":    func(p *ExpertCPUMissProfile) { p.Bandwidth.PCIeBandwidthBytesPerSec = 0 },
+		"negative host":    func(p *ExpertCPUMissProfile) { p.Bandwidth.CPUBandwidthBytesPerSec = -1 },
+		"nan transfer":     func(p *ExpertCPUMissProfile) { p.Bandwidth.PCIeBandwidthBytesPerSec = math.NaN() },
+		"infinite host":    func(p *ExpertCPUMissProfile) { p.Bandwidth.CPUBandwidthBytesPerSec = math.Inf(1) },
+		"nan latency":      func(p *ExpertCPUMissProfile) { p.Bandwidth.GPUComputeLatencySecPerExpert = math.NaN() },
+		"negative latency": func(p *ExpertCPUMissProfile) { p.Bandwidth.GPUComputeLatencySecPerExpert = -1 },
+		"zero slab":        func(p *ExpertCPUMissProfile) { p.Bandwidth.ExpertSizeBytes = 0 },
+		"host disabled":    func(p *ExpertCPUMissProfile) { p.Bandwidth.HostCPUEnabled = false },
+		"unknown channels": func(p *ExpertCPUMissProfile) { p.Channels = "" },
+		"missing source":   func(p *ExpertCPUMissProfile) { p.Source = " " },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, p := newSession(), profile
+			mutate(&p)
+			if err := s.SetV41CPUMissProfile(p); !errors.Is(err, ErrExpertCPUMissProfile) {
+				t.Fatalf("invalid intake err=%v", err)
+			}
+			refused(t, s)
+		})
+	}
+	for name, mutate := range map[string]func(*Session){
+		"stale model":        func(s *Session) { s.M = m },
+		"same-name backend":  func(s *Session) { s.Backend = newV41RoutedLayerTestBackend() },
+		"changed policy":     func(s *Session) { s.SetExecutionPolicy(ExecutionPolicyDeviceOnly) },
+		"changed checkpoint": func(s *Session) { s.M.expertCheckpoint = NewExpertCheckpointTier(0) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSession()
+			if err := s.SetV41CPUMissProfile(profile); err != nil {
+				t.Fatal(err)
+			}
+			arm := s.v41CPUMissArmFor(st)
+			mutate(s)
+			if _, _, err := arm.plan(0, picks); !errors.Is(err, ErrExpertCPUMissProfile) || errors.Is(err, ErrV41ForwardStage) {
+				t.Fatalf("already-bound stale profile err=%v", err)
+			}
+			refused(t, s)
+		})
+	}
+	t.Run("off ignores stale profile", func(t *testing.T) {
+		s := newSession()
+		if err := s.SetV41CPUMissProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+		s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+		t.Setenv(ExpertCPUMissEnv, "off")
+		if arm := s.v41CPUMissArmFor(st); arm != nil {
+			t.Fatal("off consulted stale profile")
+		}
+	})
+	t.Run("wrong slab", func(t *testing.T) {
+		s, p := newSession(), profile
+		p.Bandwidth.ExpertSizeBytes++
+		if err := s.SetV41CPUMissProfile(p); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, s)
+	})
+	t.Run("actual miss count overflows scalar-valid estimate", func(t *testing.T) {
+		s, p := newSession(), profile
+		p.Bandwidth.GPUComputeLatencySecPerExpert = math.MaxFloat64 / 2
+		if err := s.SetV41CPUMissProfile(p); err != nil {
+			t.Fatalf("one-expert estimate should be finite: %v", err)
+		}
+		// Six unique misses can overflow solver/post-cap channel estimates
+		// even though each one-expert channel duration is finite.
+		refused(t, s)
+	})
+	for _, tc := range []struct {
+		name         string
+		stream, host float64
+		want         []int
+	}{
+		{"host favored and capped", 1e9, 99e9, []int{3, 1, 6, 5}},
+		{"stream favored", 99e9, 1e9, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, p := newSession(), profile
+			p.Bandwidth.PCIeBandwidthBytesPerSec, p.Bandwidth.CPUBandwidthBytesPerSec = tc.stream, tc.host
+			p.Channels = ExpertCPUMissIndependentChannels
+			if err := s.SetV41CPUMissProfile(p); err != nil {
+				t.Fatal(err)
+			}
+			p.Bandwidth.ExpertSizeBytes++ // Intake owns a copy, not this caller value.
+			arm := s.v41CPUMissArmFor(st)
+			if arm == nil || arm.err != nil {
+				t.Fatalf("arm=%+v", arm)
+			}
+			for i := 0; i < 2; i++ {
+				cpu, streamed, err := arm.plan(0, picks)
+				if err != nil || !reflect.DeepEqual(cpu, tc.want) || len(cpu)+streamed != len(picks) {
+					t.Fatalf("cpu=%v streamed=%d err=%v, want cpu=%v and %d reconciled picks", cpu, streamed, err, tc.want, len(picks))
+				}
+			}
+			if arm.controller.Policy.NonExact {
+				t.Fatal("profile intake changed exact quality")
+			}
+			if err := s.SetV41CPUMissProfile(profile); !errors.Is(err, ErrExpertCPUMissProfile) {
+				t.Fatalf("profile replaced: %v", err)
+			}
+		})
+	}
+	t.Run("explicit device-only remains opt-in host work", func(t *testing.T) {
+		s := newSession()
+		s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+		if err := s.SetV41CPUMissProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+		if arm := s.v41CPUMissArmFor(st); arm == nil || arm.err != nil {
+			t.Fatalf("opted-in arm=%+v", arm)
+		}
+	})
+	t.Run("historical preset is explicit", func(t *testing.T) {
+		p := V41CPUMissHaloReferenceProfile()
+		if p.PCIeBandwidthBytesPerSec != 3.5e9 || p.CPUBandwidthBytesPerSec != 25e9 || p.ExpertSizeBytes != 12810240 || !p.HostCPUEnabled {
+			t.Fatalf("historical preset changed: %+v", p)
+		}
+		plan, err := (ExpertCPUMissPolicy{Mode: ExpertCPUMissExact, Profile: p}).PlanExpertCPUMiss(0, []MoEMissCandidate{{ExpertID: 0}, {ExpertID: 1}, {ExpertID: 2}, {ExpertID: 3}, {ExpertID: 4}, {ExpertID: 5}})
+		if err != nil || len(plan.CPUExperts) != DefaultExpertCPUMissPerLayer || plan.QualityLabel() != ExpertMissQualityExact {
+			t.Fatalf("historical solver witness: %+v err=%v", plan, err)
+		}
+		// Six host experts cost ~3.074 ms, less than one streamed expert's
+		// ~3.660 ms. The solver chooses all host, then the cap retains IDs 0..2.
+		if !reflect.DeepEqual(plan.CPUExperts, []MoEMissCandidate{{ExpertID: 0}, {ExpertID: 1}, {ExpertID: 2}}) || !reflect.DeepEqual(plan.StreamExperts, []MoEMissCandidate{{ExpertID: 3}, {ExpertID: 4}, {ExpertID: 5}}) {
+			t.Fatalf("historical expert partition changed: %+v", plan)
+		}
+		s := newSession()
+		declared := profile
+		declared.Bandwidth = p
+		if err := s.SetV41CPUMissProfile(declared); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, s) // Real fixture slab is not the historical artifact's slab.
+	})
+}
 
 // v41CPUMissClose bounds a host-vs-reference row: the packed GEMV and the f32
 // expansion sum in different orders, so a BF16 publication may round one ulp
@@ -156,7 +350,7 @@ func TestV41CPUMissLayerSplitMatchesDevice(t *testing.T) {
 // expert-ring page-in misses on the host with logits that track the device.
 // fak-test:runtime slow est=40s lane=default
 func TestV41CPUMissSessionDecode(t *testing.T) {
-	newSession := func(t *testing.T, mode string) (*Model, *Session) {
+	newSession := func(t *testing.T, mode string, policy ExecutionPolicy) (*Model, *Session) {
 		t.Helper()
 		t.Setenv(ExpertCPUMissEnv, mode)
 		m := v41PinnedSlateFixture(t, false)
@@ -165,6 +359,12 @@ func TestV41CPUMissSessionDecode(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(s.Close)
+		s.SetExecutionPolicy(policy)
+		if mode == "exact" {
+			if err := s.SetV41CPUMissProfile(v41CPUMissTestProfile(m)); err != nil {
+				t.Fatal(err)
+			}
+		}
 		// A ring below the three layers' routed working set keeps decode
 		// picks paging in, the regime the host arm exists for.
 		s.ExpertRingBytes = 1 << 20
@@ -172,14 +372,14 @@ func TestV41CPUMissSessionDecode(t *testing.T) {
 	}
 	prompt := []int{1, 2, 3}
 
-	if _, s := newSession(t, ""); s.v41State().cpuMiss != nil {
+	if _, s := newSession(t, "", ExecutionPolicyPortable); s.v41State().cpuMiss != nil {
 		t.Fatal("unset flag must not bind the host arm")
 	}
-	if _, s := newSession(t, "exact"); func() bool { s.SetExecutionPolicy(ExecutionPolicyDeviceOnly); return s.v41State().cpuMiss == nil }() {
+	if _, s := newSession(t, "exact", ExecutionPolicyDeviceOnly); s.v41State().cpuMiss == nil || s.v41State().cpuMiss.err != nil {
 		t.Fatal("fak serve's device-only policy must keep the opted-in host arm")
 	}
 
-	_, bad := newSession(t, "sometimes")
+	_, bad := newSession(t, "sometimes", ExecutionPolicyPortable)
 	last := bad.Prefill(prompt)
 	func() {
 		defer func() {
@@ -192,8 +392,8 @@ func TestV41CPUMissSessionDecode(t *testing.T) {
 	}()
 
 	const steps = 3
-	_, device := newSession(t, "off")
-	hostModel, host := newSession(t, "exact")
+	_, device := newSession(t, "off", ExecutionPolicyPortable)
+	hostModel, host := newSession(t, "exact", ExecutionPolicyPortable)
 	want := v41RoutedLayerSteps(t, device, prompt, steps)
 	got := v41RoutedLayerSteps(t, host, prompt, steps)
 	for i := range want {

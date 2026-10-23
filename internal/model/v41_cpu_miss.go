@@ -3,27 +3,117 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-// v41CPUMissHaloProfile is the strix3 Q4 receipt's UMA picture
+// V41CPUMissHaloReferenceProfile returns the historical strix3 Q4 estimates
 // (docs/benchmarks/receipts/halo-v41-100-30/v41-q4-cpu-miss-20261013-strix3.md):
 // device H2D ~3.5 GB/s solo, host streaming ~25 GB/s under contention, one
-// V4.1 Flash Q2_K/Q3_K expert slab per miss.
-var v41CPUMissHaloProfile = MoEBandwidthProfile{
-	PCIeBandwidthBytesPerSec: 3.5e9,
-	CPUBandwidthBytesPerSec:  25e9,
-	ExpertSizeBytes:          12810240,
-	HostCPUEnabled:           true,
+// V4.1 Flash Q2_K/Q3_K expert slab per miss. This is an explicitly selected
+// reference preset, NOT current calibration or a default for any backend.
+func V41CPUMissHaloReferenceProfile() MoEBandwidthProfile {
+	return MoEBandwidthProfile{
+		PCIeBandwidthBytesPerSec: 3.5e9,
+		CPUBandwidthBytesPerSec:  25e9,
+		ExpertSizeBytes:          12810240,
+		HostCPUEnabled:           true,
+	}
 }
 
 // ErrExpertCPUMissFlag refuses an unparseable FAK_EXPERT_CPU_MISS. It is not
 // an ErrV41ForwardStage, so stepV41 raises it instead of silently replaying
 // the token on the whole-history fallback.
 var ErrExpertCPUMissFlag = errors.New("model: invalid " + ExpertCPUMissEnv)
+
+// ErrExpertCPUMissProfile is a selected, non-replayable profile refusal, not
+// ErrV41ForwardStage. Supply valid facts to a fresh session before inference.
+var ErrExpertCPUMissProfile = errors.New("model: invalid or missing V4.1 CPU-miss execution profile")
+
+// ExpertCPUMissChannels declares the resource assumption behind supplied rates.
+// It is not inferred from device names, cache capacity or memory placement.
+type ExpertCPUMissChannels string
+
+const (
+	ExpertCPUMissIndependentChannels ExpertCPUMissChannels = "independent"
+	ExpertCPUMissSharedChannels      ExpertCPUMissChannels = "shared"
+)
+
+// ExpertCPUMissProfile is caller-declared execution input, not proof of hardware
+// qualification. Source identifies a calibration or explicitly labeled estimate.
+// Shared-channel rates must account for concurrent host/device contention; the
+// unchanged solver's max-of-channel estimate is not a shared-bandwidth measurement.
+// No discovery, calibration, CUDA admission or native-device-only claim occurs here.
+type ExpertCPUMissProfile struct {
+	Bandwidth MoEBandwidthProfile
+	Channels  ExpertCPUMissChannels
+	Source    string
+}
+
+func (p ExpertCPUMissProfile) validate() error {
+	if strings.TrimSpace(p.Source) == "" || (p.Channels != ExpertCPUMissIndependentChannels && p.Channels != ExpertCPUMissSharedChannels) {
+		return fmt.Errorf("%w: declare the rate source and independent/shared channel model", ErrExpertCPUMissProfile)
+	}
+	b := p.Bandwidth
+	for _, rate := range []float64{b.PCIeBandwidthBytesPerSec, b.CPUBandwidthBytesPerSec} {
+		if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+			return fmt.Errorf("%w: transfer and host rates must be finite and positive", ErrExpertCPUMissProfile)
+		}
+	}
+	if b.ExpertSizeBytes <= 0 || !b.HostCPUEnabled || b.GPUComputeLatencySecPerExpert < 0 || math.IsNaN(b.GPUComputeLatencySecPerExpert) || math.IsInf(b.GPUComputeLatencySecPerExpert, 0) {
+		return fmt.Errorf("%w: require a positive expert slab, enabled host arm and finite nonnegative device latency", ErrExpertCPUMissProfile)
+	}
+	stream, host := b.EstimateChannelTimes(1, 1)
+	if math.IsInf(stream, 0) || math.IsInf(host, 0) || math.IsInf(b.PCIeBandwidthBytesPerSec+b.CPUBandwidthBytesPerSec, 0) {
+		return fmt.Errorf("%w: channel estimates overflow", ErrExpertCPUMissProfile)
+	}
+	return nil
+}
+
+type v41CPUMissProfileBinding struct {
+	profile    ExpertCPUMissProfile
+	owner      *Session
+	model      *Model
+	backend    compute.Backend
+	policy     ExecutionPolicy
+	checkpoint *ExpertCheckpointTier
+}
+
+// SetV41CPUMissProfile copies an explicit profile once, after selecting the
+// model/backend/execution policy and before binding V4.1 state. It does not
+// enable CPU-miss: FAK_EXPERT_CPU_MISS=exact remains separately required.
+// Sessions are single-owner; profile installation is not concurrent with use.
+func (s *Session) SetV41CPUMissProfile(profile ExpertCPUMissProfile) error {
+	if s == nil || s.M == nil || !s.M.Cfg.IsDeepSeekV41() || !backendHasComparableIdentity(s.Backend) || s.halClosed {
+		return fmt.Errorf("%w: select an open V4.1 session and an identity-bearing backend first", ErrExpertCPUMissProfile)
+	}
+	if s.v41Forward != nil || s.v41CPUMissProfile != nil {
+		return fmt.Errorf("%w: profile is immutable; configure a fresh session before inference", ErrExpertCPUMissProfile)
+	}
+	if err := profile.validate(); err != nil {
+		return err
+	}
+	s.v41CPUMissProfile = &v41CPUMissProfileBinding{
+		profile: profile, owner: s, model: s.M, backend: s.Backend,
+		policy: s.executionPolicy, checkpoint: s.M.expertCheckpoint,
+	}
+	return nil
+}
+
+func (b *v41CPUMissProfileBinding) validate(s *Session) error {
+	if b == nil {
+		return fmt.Errorf("%w: call SetV41CPUMissProfile before inference", ErrExpertCPUMissProfile)
+	}
+	if s == nil || s.halClosed || b.owner != s || b.model != s.M || !backendHasComparableIdentity(s.Backend) || b.backend != s.Backend || b.policy != s.executionPolicy || b.checkpoint != s.M.expertCheckpoint {
+		return fmt.Errorf("%w: selected session/model/backend/policy or checkpoint changed", ErrExpertCPUMissProfile)
+	}
+	return nil
+}
 
 // v41CPUMissArm computes a layer's device-ring misses on the host while the
 // batched routed layer runs the resident picks. plan returns the pick slots the
@@ -38,15 +128,24 @@ func (s *Session) v41CPUMissArmFor(st *v41ForwardState) *v41CPUMissArm {
 	if s == nil || s.M == nil || st == nil || st.routedLayer == nil {
 		return nil
 	}
-	policy, err := ExpertCPUMissPolicyFromEnv(v41CPUMissHaloProfile)
+	// Parse the opt-in first. Off never consults profile facts or calibration.
+	policy, err := ExpertCPUMissPolicyFromEnv(MoEBandwidthProfile{})
 	if err != nil {
 		return &v41CPUMissArm{err: fmt.Errorf("%w: %w", ErrExpertCPUMissFlag, err)}
 	}
 	if !policy.Enabled() {
 		return nil
 	}
+	binding := s.v41CPUMissProfile
+	if err := binding.validate(s); err != nil {
+		return &v41CPUMissArm{err: err}
+	}
+	policy.Profile = binding.profile.Bandwidth
 	arm := &v41CPUMissArm{controller: &ExpertCPUMissController{Policy: policy}}
 	arm.plan = func(layer int, picks []routePick) ([]int, int, error) {
+		if err := binding.validate(s); err != nil {
+			return nil, 0, err
+		}
 		return s.v41CPUMissPlan(arm.controller, layer, picks)
 	}
 	return arm
@@ -63,15 +162,35 @@ func (s *Session) v41CPUMissPlan(c *ExpertCPUMissController, layer int, picks []
 	var misses []MoEMissCandidate
 	r := s.routedExpertRing(layerName(layer, "ffn.experts."+itoa(picks[0].expert)+".w1.weight"))
 	done := s.ringEnter(r)
+	defer func() {
+		if done != nil {
+			done()
+		}
+	}()
 	for slot, pick := range picks {
 		stem := "ffn.experts." + itoa(pick.expert)
 		resident, stageable := true, true
+		var slab int64
 		for _, leaf := range [3]string{".w1.weight", ".w3.weight", ".w2.weight"} {
 			w, ok := s.resolveExpertWeight(layerName(layer, stem+leaf))
 			if !ok {
 				stageable = false
 				break
 			}
+			var size int64
+			switch {
+			case w.ck != nil:
+				size = w.ck.bytes
+			case w.q4 != nil:
+				size = q4kResidentBytes(w.q4)
+			case w.kq != nil:
+				size = kQuantResidentBytes(w.kq)
+			}
+			// Descriptor sizes do not fault, stage or infer any bandwidth.
+			if size <= 0 || size > math.MaxInt64-slab {
+				return nil, 0, fmt.Errorf("%w: invalid slab for layer %d expert %d", ErrExpertCPUMissProfile, layer, pick.expert)
+			}
+			slab += size
 			key := w.halKey()
 			var in bool
 			if r != nil {
@@ -80,6 +199,9 @@ func (s *Session) v41CPUMissPlan(c *ExpertCPUMissController, layer int, picks []
 				_, in = s.halW[key]
 			}
 			resident = resident && in
+		}
+		if stageable && slab != c.Policy.Profile.ExpertSizeBytes {
+			return nil, 0, fmt.Errorf("%w: layer %d expert %d slab is %d bytes, profile declares %d", ErrExpertCPUMissProfile, layer, pick.expert, slab, c.Policy.Profile.ExpertSizeBytes)
 		}
 		if !stageable || resident {
 			continue
@@ -90,8 +212,15 @@ func (s *Session) v41CPUMissPlan(c *ExpertCPUMissController, layer int, picks []
 		slots[pick.expert] = append(slots[pick.expert], slot)
 	}
 	done()
+	done = nil
 	if len(misses) == 0 {
 		return nil, 0, nil
+	}
+	// Every solver candidate and the capped split use counts up to this actual
+	// unique-miss count. Scalar-valid rates/latency can still overflow here.
+	streamTime, hostTime := c.Policy.Profile.EstimateChannelTimes(len(misses), len(misses))
+	if math.IsInf(streamTime, 0) || math.IsNaN(streamTime) || math.IsInf(hostTime, 0) || math.IsNaN(hostTime) {
+		return nil, 0, fmt.Errorf("%w: channel estimates overflow for %d misses", ErrExpertCPUMissProfile, len(misses))
 	}
 	plan, err := c.Plan(layer, misses)
 	if err != nil {
@@ -120,6 +249,9 @@ func (m *Model) v41RoutedLayerStepCPUMiss(l int, picks []routePick, x []float32,
 	}
 	cpuSlots, streamed, planErr := arm.plan(l, picks)
 	if planErr != nil {
+		if errors.Is(planErr, ErrExpertCPUMissProfile) {
+			return nil, true, planErr
+		}
 		return nil, true, v41StageErr(v41StageMoE, l, fmt.Errorf("%w: %w", ErrV41ForwardStage, planErr))
 	}
 	if len(cpuSlots) == 0 {
