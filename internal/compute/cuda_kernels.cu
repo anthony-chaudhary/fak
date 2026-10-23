@@ -61,12 +61,28 @@ static size_t g_qwen35_gdn_operations = 0;
 // Stages 2..6 model a launch check failure; stage 7 models final async execution failure.
 static int g_qwen35_gdn_test_fault_stage = 0;
 
+// Resolve a real kernel from this translation unit before advertising the backend.
+// This is only a loader-admission probe, not an all-kernel or native-SASS witness.
+__global__ void k_copyrow(float *dstBase, const float *src, int offset, int n);
+
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
   if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) return 1;
   if (cudaSetDevice(0) != cudaSuccess) return 2;
   cudaDeviceProp p;
   if (cudaGetDeviceProperties(&p, 0) != cudaSuccess) return 3;
+  // Device discovery and cuBLAS availability do not prove that this artifact's
+  // FAK kernels can load on the selected GPU (for example an Ada-only artifact
+  // on Blackwell). Referencing a kernel forces CUDA's lazy loader without a launch.
+  cudaFuncAttributes kernel_attrs;
+  cudaError_t kernel_status = cudaFuncGetAttributes(&kernel_attrs, k_copyrow);
+  if (kernel_status != cudaSuccess) {
+    // CUDA can also report an earlier asynchronous/runtime error here: retain the
+    // real diagnostic rather than claiming every failure is an architecture mismatch.
+    fprintf(stderr, "fak-cuda: kernel load probe failed on %s (sm_%d%d): %s\n",
+            p.name, p.major, p.minor, cudaGetErrorString(kernel_status));
+    return 5;
+  }
   if (name && namelen > 0) { strncpy(name, p.name, namelen - 1); name[namelen - 1] = 0; }
   if (sm) *sm = p.major * 10 + p.minor;
   if (total_mem) *total_mem = p.totalGlobalMem;
