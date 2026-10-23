@@ -277,6 +277,38 @@ extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
   if (e == cudaSuccess) g_host_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
 }
+
+// Read needs the result of the entire native operation, including restoring its
+// caller's thread-local device. The legacy void transfer ABI remains unchanged.
+extern "C" int fak_cuda_read_d2h(int device, void *h, const void *d, size_t n) {
+  int previous = 0;
+  cudaError_t status = cudaGetDevice(&previous);
+  if (status != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Read capture current device failed: %s\n",
+            cudaGetErrorString(status));
+    return (int)status;
+  }
+  status = cudaSetDevice(device);
+  if (status == cudaSuccess) {
+    status = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
+    if (status == cudaSuccess) {
+      g_host_bytes += n;
+    } else {
+      fprintf(stderr, "fak-cuda: Read device-to-host copy on device %d failed: %s\n",
+              device, cudaGetErrorString(status));
+    }
+  } else {
+    fprintf(stderr, "fak-cuda: Read select device %d failed: %s\n",
+            device, cudaGetErrorString(status));
+  }
+  const cudaError_t restored = cudaSetDevice(previous);
+  if (restored != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Read restore device %d failed: %s\n",
+            previous, cudaGetErrorString(restored));
+  }
+  return (int)(status != cudaSuccess ? status : restored);
+}
+
 // Device-to-device copies stay on the default stream but are ASYNC w.r.t. the host: a
 // synchronous cudaMemcpy fences the whole device, and RoPE + every KV append issues one,
 // so a 30-layer decode paid ~150 full device syncs per token (catastrophic on WSL, where a

@@ -26,6 +26,7 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lstdc++ -lm
 #include <stdlib.h>
 #include "cuda_backend.h"
+int fak_cuda_read_d2h(int device, void *h, const void *d, size_t n);
 */
 import "C"
 
@@ -900,10 +901,10 @@ func (c *cudaBackend) Host(t Tensor) ([]float32, bool) {
 	return hostF32(t)
 }
 
-// Read is a host fence (#482): it copies device -> host f32 and, because that synchronous d2h
-// drains g_stream, bumps the fence generation so every async buffer enqueued before it flips
-// to Ready. It also moves the FULL vector host-ward — the costly path greedy decode avoids by
-// using Argmax instead (the witness counts these bytes).
+// Read copies device -> host f32. A successful nonempty device-0 read fences g_stream
+// under the backend's legacy-default-stream/blocking-stream contract and publishes
+// prior async outputs as Ready. Rank-local reads do not fence unrelated device-0 work.
+// The full vector crosses host-ward, unlike the scalar-only Argmax path (#482).
 func (c *cudaBackend) Read(t Tensor) []float32 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -923,14 +924,24 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	if db.ptr == nil && (nbytes != 0 || db.n != 0) {
 		panic(&CUDAOpError{Op: "Read", Site: "read-geometry", Msg: "requires a live tensor owned by this CUDA backend", Class: db.class})
 	}
+	if elements > 0 {
+		if err := c.faultLatch.Admit("read-d2h"); err != nil {
+			panic(err)
+		}
+	}
 	out := make([]float32, elements)
 	if len(out) > 0 {
-		if db.device != 0 {
-			C.fcuda_d2h_on(C.int(db.device), unsafe.Pointer(&out[0]), db.ptr, C.size_t(nbytes))
-		} else {
-			C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(nbytes))
+		status := int(C.fak_cuda_read_d2h(C.int(db.device), unsafe.Pointer(&out[0]), db.ptr, C.size_t(nbytes)))
+		if status != 0 {
+			c.faultLatch.Observe(DeviceFaultUnknown, "read-d2h", status)
+			panic(&CUDAOpError{
+				Op: "Read", Site: "read-d2h", Code: status, Class: db.class,
+				Msg: "native device-to-host read failed",
+			})
 		}
-		atomic.AddUint64(&c.fenceGen, 1) // stream drained: prior enqueued work is now materialized
+		if db.device == 0 {
+			atomic.AddUint64(&c.fenceGen, 1)
+		}
 	}
 	return out
 }
