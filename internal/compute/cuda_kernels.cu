@@ -86,10 +86,37 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   if (name && namelen > 0) { strncpy(name, p.name, namelen - 1); name[namelen - 1] = 0; }
   if (sm) *sm = p.major * 10 + p.minor;
   if (total_mem) *total_mem = p.totalGlobalMem;
-  if (!g_blas) { if (cublasCreate(&g_blas) != CUBLAS_STATUS_SUCCESS) return 4; }
-  cublasSetPointerMode(g_blas, CUBLAS_POINTER_MODE_HOST);
-  if (!g_stream) CK(cudaStreamCreate(&g_stream));
-  cublasSetStream(g_blas, g_stream);
+  // This function is the sole resource publisher: globals are all-or-none. Do not
+  // rebind an initialized handle, since cublasSetStream resets its user workspace.
+  if (g_blas && g_stream && g_blas_workspace) return 0;
+  cublasHandle_t blas = nullptr;
+  cudaStream_t stream = 0;
+  void *workspace = nullptr;
+  bool have_blas = false, have_stream = false, have_workspace = false;
+  auto fail = [&](const char *operation, int status, bool cuda_error) {
+    fprintf(stderr, "fak-cuda: %s failed: %s (status %d)\n", operation,
+            cuda_error ? cudaGetErrorString((cudaError_t)status) : "cuBLAS error", status);
+    // A failed creator's output is not owned. Release only successful acquisitions,
+    // with the handle first so it cannot retain a freed workspace or stream.
+    if (have_blas) {
+      cublasStatus_t cleanup = cublasDestroy(blas);
+      if (cleanup != CUBLAS_STATUS_SUCCESS)
+        fprintf(stderr, "fak-cuda: cublasDestroy during init cleanup failed (status %d)\n", (int)cleanup);
+    }
+    if (have_workspace) CK(cudaFree(workspace));
+    if (have_stream) CK(cudaStreamDestroy(stream));
+    return cuda_error ? 6 : 4; // Preserve cuBLAS status 4; 5 remains kernel-loader failure.
+  };
+  cublasStatus_t blas_status = cublasCreate(&blas);
+  if (blas_status != CUBLAS_STATUS_SUCCESS) return fail("cublasCreate", (int)blas_status, false);
+  have_blas = true;
+  blas_status = cublasSetPointerMode(blas, CUBLAS_POINTER_MODE_HOST);
+  if (blas_status != CUBLAS_STATUS_SUCCESS) return fail("cublasSetPointerMode", (int)blas_status, false);
+  cudaError_t cuda_status = cudaStreamCreate(&stream);
+  if (cuda_status != cudaSuccess) return fail("cudaStreamCreate", (int)cuda_status, true);
+  have_stream = true;
+  blas_status = cublasSetStream(blas, stream);
+  if (blas_status != CUBLAS_STATUS_SUCCESS) return fail("cublasSetStream", (int)blas_status, false);
   // Pre-allocate an explicit cuBLAS workspace (#969). With NO user workspace, cuBLAS lazily
   // cudaMalloc's its own internal workspace the first time it sees a given GEMM problem — and
   // CUDA forbids cudaMalloc while g_stream is mid stream-capture. Because the decode GEMMs are
@@ -98,11 +125,15 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   // "cudaMalloc(256 bytes) ... operation not permitted when stream is capturing". Handing cuBLAS
   // a user-owned workspace makes it use that buffer exclusively and never allocate during capture.
   // 32 MiB is NVIDIA's recommended size for Hopper and is safe (a superset) on Ampere/Ada too.
-  if (!g_blas_workspace) {
-    const size_t ws = (size_t)32 * 1024 * 1024;
-    if (cudaMalloc(&g_blas_workspace, ws) == cudaSuccess)
-      cublasSetWorkspace(g_blas, g_blas_workspace, ws);
-  }
+  const size_t ws = (size_t)32 * 1024 * 1024;
+  cuda_status = cudaMalloc(&workspace, ws);
+  if (cuda_status != cudaSuccess) return fail("cudaMalloc(cuBLAS workspace)", (int)cuda_status, true);
+  have_workspace = true;
+  blas_status = cublasSetWorkspace(blas, workspace, ws);
+  if (blas_status != CUBLAS_STATUS_SUCCESS) return fail("cublasSetWorkspace", (int)blas_status, false);
+  g_blas = blas;
+  g_stream = stream;
+  g_blas_workspace = workspace;
   return 0;
 }
 
