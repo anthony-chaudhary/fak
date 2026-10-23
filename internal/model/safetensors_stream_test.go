@@ -908,6 +908,125 @@ func TestSafetensorsStreamRejectsMalformedPayloads(t *testing.T) {
 	}
 }
 
+// A dense checkpoint (no mtp/vision drop) must still get one exact pre-size: cap == len
+// proves no append regrow, whose transient second copy OOM-killed a dense Qwen2.5-1.5B load.
+// The skipped GPT-NeoX U8 attention mask is excluded from the size, not just from decode.
+// fak-test:runtime fast est=1ms lane=default
+func TestAppendSafetensorsPreSizesDenseCheckpointExactly(t *testing.T) {
+	cfg := Config{ModelType: "gpt_neox"}
+	if cfg.dropsMtpAndVisualAtLoad() {
+		t.Fatal("fixture must exercise the dense, non-dropping load path")
+	}
+	path := writeTinySafetensors(t, map[string]tinySTTensor{
+		"gpt_neox.embed_in.weight":         {dtype: "BF16", shape: []int{3, 1}, data: make([]byte, 6)},
+		"gpt_neox.final_layer_norm.weight": {dtype: "F32", shape: []int{2}, data: make([]byte, 8)},
+		"gpt_neox.layers.0.attention.bias": {dtype: "U8", shape: []int{4}, data: make([]byte, 4)},
+	})
+	sf, err := openSafetensorsFile(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer sf.Close()
+	man := map[string]tensorMeta{}
+	var raw []byte
+	off := 0
+	if err := appendSafetensorsFileInto(sf, man, &raw, &off, cfg); err != nil {
+		t.Fatalf("appendSafetensorsFileInto: %v", err)
+	}
+	const want = (3 + 2) * 4
+	if len(raw) != want || cap(raw) != want {
+		t.Fatalf("packed f32 len=%d cap=%d, want both %d (one exact pre-size, no append regrow)", len(raw), cap(raw), want)
+	}
+}
+
+// The pre-size trusts a header shape only once its in-file payload matches, so a hostile
+// dense header (huge declared shape, 4-byte payload) reserves nothing and still fails with
+// the decode loop's clean error rather than a fatal multi-GB allocation.
+// fak-test:runtime fast est=1ms lane=default
+func TestAppendSafetensorsPreSizeBoundedByPayload(t *testing.T) {
+	cfg := Config{}
+	path := writeTinySafetensors(t, map[string]tinySTTensor{
+		"model.norm.weight": {dtype: "F32", shape: []int{1 << 24}, data: make([]byte, 4)},
+	})
+	sf, err := openSafetensorsFile(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer sf.Close()
+	man := map[string]tensorMeta{}
+	var raw []byte
+	off := 0
+	if err := appendSafetensorsFileInto(sf, man, &raw, &off, cfg); err == nil {
+		t.Fatal("appendSafetensorsFileInto accepted a shape its payload cannot hold")
+	}
+	if cap(raw) > 4*4 {
+		t.Fatalf("pre-size reserved cap=%d bytes from an unbacked header shape; want <= 16", cap(raw))
+	}
+}
+
+// Per-tensor payload checks cannot see aliasing: hundreds of entries sharing one data span
+// would each count in full. The pre-size must stay within 8x the file payload and the load
+// must fail with exactly the error the first malformed tensor gives on its own.
+// fak-test:runtime fast est=5ms lane=default
+func TestAppendSafetensorsPreSizeBoundedUnderAliasedOffsets(t *testing.T) {
+	const span = 1024
+	bad := stEntry{Dtype: "F32", Shape: []int{4}, DataOffsets: []int{0, 4}}
+	hdr := map[string]stEntry{"a.bad": bad}
+	for i := 0; i < 300; i++ {
+		hdr[fmt.Sprintf("b.%03d", i)] = stEntry{Dtype: "F32", Shape: []int{span / 4}, DataOffsets: []int{0, span}}
+	}
+	load := func(hdr map[string]stEntry) ([]byte, error) {
+		sf, err := openSafetensorsFile(writeRawSafetensors(t, hdr, make([]byte, span)))
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		defer sf.Close()
+		var raw []byte
+		off := 0
+		err = appendSafetensorsFileInto(sf, map[string]tensorMeta{}, &raw, &off, Config{})
+		return raw, err
+	}
+	raw, err := load(hdr)
+	_, alone := load(map[string]stEntry{"a.bad": bad})
+	if err == nil || alone == nil || err.Error() != alone.Error() {
+		t.Fatalf("aliased load err=%v, want the lone malformed tensor's err=%v", err, alone)
+	}
+	if cap(raw) > 8*span {
+		t.Fatalf("pre-size reserved cap=%d from aliased offsets; want <= %d (8x the file payload)", cap(raw), 8*span)
+	}
+}
+
+// MXFP4 blocks decode to 8 f32 bytes per packed byte and FP8 weights to 4; their consumed
+// _scales/_scale_inv companions append nothing. cap == len proves the pre-size mirrors both.
+// fak-test:runtime fast est=1ms lane=default
+func TestAppendSafetensorsPreSizesPairedFormatsExactly(t *testing.T) {
+	cfg := Config{}
+	if cfg.dropsMtpAndVisualAtLoad() {
+		t.Fatal("fixture must exercise the dense, non-dropping load path")
+	}
+	path := writeTinySafetensors(t, map[string]tinySTTensor{
+		"model.layers.0.mlp.experts.gate_up_proj_blocks":   {dtype: "U8", shape: []int{1, 1, 1, 4}, data: []byte{0x21, 0x43, 0x65, 0x07}},
+		"model.layers.0.mlp.experts.gate_up_proj_scales":   {dtype: "U8", shape: []int{1, 1, 1}, data: []byte{127}},
+		"model.layers.0.self_attn.q_proj.weight":           {dtype: "F8_E4M3", shape: []int{1, 1}, data: []byte{0x38}},
+		"model.layers.0.self_attn.q_proj.weight_scale_inv": {dtype: "F32", shape: []int{1, 1}, data: []byte{0, 0, 0x80, 0x3f}},
+	})
+	sf, err := openSafetensorsFile(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer sf.Close()
+	man := map[string]tensorMeta{}
+	var raw []byte
+	off := 0
+	if err := appendSafetensorsFileInto(sf, man, &raw, &off, cfg); err != nil {
+		t.Fatalf("appendSafetensorsFileInto: %v", err)
+	}
+	const want = 4*2*4 + 1*4
+	if len(raw) != want || cap(raw) != want {
+		t.Fatalf("packed f32 len=%d cap=%d, want both %d (paired formats pre-sized exactly)", len(raw), cap(raw), want)
+	}
+}
+
 func TestSafetensorsPreSizeRejectsShapeOverflow(t *testing.T) {
 	cfg := Config{ModelType: "glm_moe_dsa"}
 	path := writeRawSafetensors(t, map[string]stEntry{
