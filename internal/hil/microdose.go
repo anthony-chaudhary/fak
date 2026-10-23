@@ -16,7 +16,8 @@ func DefaultMicroDoses() []DoseKind {
 	}
 }
 
-// RunMicroDoses executes the requested micro-dose hardware tests on physical silicon.
+// RunMicroDoses executes the requested micro-doses using the platform runner.
+// A host CPU reference result is not evidence of physical accelerator execution.
 func RunMicroDoses(ctx context.Context, kinds ...DoseKind) Report {
 	start := time.Now()
 	hw := ProbeHardware()
@@ -45,17 +46,22 @@ func RunMicroDoses(ctx context.Context, kinds ...DoseKind) Report {
 		report.MicroDoses = append(report.MicroDoses, res)
 	}
 
-	report.AllPassed = allPassed
+	ctxErr := ctx.Err()
+	report.AllPassed = len(report.MicroDoses) > 0 && len(report.MicroDoses) == len(kinds) && ctxErr == nil && allPassed
 	report.TotalDurationMicros = time.Since(start).Microseconds()
 
-	if hw.PhysicalAvailable {
-		if allPassed {
+	if ctxErr != nil {
+		report.Guidance = fmt.Sprintf("Micro-dose suite canceled after %d of %d requested doses: %v. No complete passing suite is reported.", len(report.MicroDoses), len(kinds), ctxErr)
+	} else if hw.PhysicalAvailable {
+		if report.AllPassed {
 			report.Guidance = fmt.Sprintf("Physical %s silicon active; all micro-doses passed in %d µs (<100ms). Bias toward hardware testing satisfied.", hw.Kind, report.TotalDurationMicros)
 		} else {
 			report.Guidance = fmt.Sprintf("Physical %s silicon active, but one or more micro-doses failed. Inspect hardware and driver health.", hw.Kind)
 		}
+	} else if report.AllPassed {
+		report.Guidance = "All micro-doses passed in host CPU reference mode (reference only). No physical accelerator execution was verified; dispatch accelerator-gated work to sanctioned compute."
 	} else {
-		report.Guidance = "No local physical accelerator detected. Micro-doses ran in host CPU reference mode; dispatch accelerator-gated work to sanctioned compute."
+		report.Guidance = "One or more host CPU reference micro-doses failed or did not complete. No physical accelerator execution was verified; inspect the reference results separately from accelerator availability."
 	}
 
 	return report

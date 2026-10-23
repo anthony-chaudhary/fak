@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 )
 
 func probePlatformHardware() HardwareInfo {
@@ -13,27 +14,17 @@ func probePlatformHardware() HardwareInfo {
 	info.Platform = runtime.GOOS
 	info.Architecture = runtime.GOARCH
 
-	// Check CUDA presence via environment or driver files
-	if os.Getenv("CUDA_VISIBLE_DEVICES") != "" || os.Getenv("FAK_CUDA") == "1" {
-		info.Kind = HardwareCUDA
-		info.DeviceName = "NVIDIA CUDA Device (Environment Configured)"
-		info.PhysicalAvailable = true
-		info.Details["cuda_visible_devices"] = os.Getenv("CUDA_VISIBLE_DEVICES")
-		return info
-	}
-
-	// Check Vulkan presence via environment
-	if os.Getenv("VK_ICD_FILENAMES") != "" || os.Getenv("FAK_VULKAN") == "1" {
-		info.Kind = HardwareVulkan
-		info.DeviceName = "Vulkan Compute Device"
-		info.PhysicalAvailable = true
-		return info
-	}
-
-	// Fallback to host CPU SIMD
+	// This build executes only runHostReferenceMicroDose. Environment settings
+	// configure potential accelerators; they do not prove discovery or execution.
 	info.Kind = HardwareCPUSIMD
 	info.DeviceName = "Host CPU (Reference SIMD)"
 	info.PhysicalAvailable = false
 	info.Details["runtime_num_cpu"] = strconv.Itoa(runtime.NumCPU())
+	info.Details["execution_mode"] = "host_cpu_reference"
+	for _, key := range []string{"CUDA_VISIBLE_DEVICES", "FAK_CUDA", "VK_ICD_FILENAMES", "FAK_VULKAN"} {
+		if value := os.Getenv(key); value != "" {
+			info.Details["configuration_hint_"+strings.ToLower(key)] = value
+		}
+	}
 	return info
 }
