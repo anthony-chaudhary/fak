@@ -3,15 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 // guardAllowWatcherFailClosed isolates the deny expectations from the live posture
@@ -208,5 +211,158 @@ func TestGuardAllowWatcherRevokesAtTTLExpiryWithoutFileChange(t *testing.T) {
 	}
 	if string(after) != string(before) {
 		t.Fatalf("watcher rewrote overlay bytes across expiry:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestGuardAllowWatcherStopJoinsReloadBeforeScopeDrop(t *testing.T) {
+	scopeTestRepo(t, "watcher-stop")
+	sessionPath := armGuardAllowSessionScopeTeardown()
+	t.Cleanup(func() { guardAllowSessionScopeTeardownPath = "" })
+	if err := saveGuardAllowOverlay(sessionPath, guardAllowOverlay{Allow: []string{"session_tool"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A quarantined overlay can become removable while the session is running;
+	// teardown must not clear that quarantine while a reload still reads it.
+	guardAllowSessionScopeQuarantined = true
+	repoPath := guardAllowOverlayPath()
+	userPath, err := guardAllowWritePathForScope("user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveGuardAllowOverlay(userPath, guardAllowOverlay{Allow: []string{"user_tool"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		observedQuarantine := make(chan bool, 1)
+		stop := startGuardAllowWatcher(context.Background(), func(context.Context) (gateway.PolicyReloadResponse, error) {
+			close(entered)
+			<-release
+			quarantined := guardAllowSessionScopeQuarantined
+			for _, layer := range guardAllowEffectiveReadLayers() {
+				if layer.Name == guardAllowScopeSession {
+					quarantined = false
+				}
+			}
+			observedQuarantine <- quarantined
+			return gateway.PolicyReloadResponse{}, nil
+		}, false)
+		released := false
+		defer func() {
+			if !released {
+				close(release)
+			}
+			stop()
+		}()
+
+		// Changing a durable layer enters Reload even while session scope is quarantined.
+		if err := saveGuardAllowOverlay(repoPath, guardAllowOverlay{Allow: []string{"repo_tool"}}); err != nil {
+			t.Fatal(err)
+		}
+		durable := map[string][]byte{}
+		for _, path := range []string{repoPath, userPath} {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			durable[path] = raw
+		}
+		<-entered
+		stopped := make(chan struct{})
+		go func() {
+			stop()
+			dropGuardAllowSessionScopeAtSessionEnd(true, nil)
+			close(stopped)
+		}()
+		// Unlike a sleep or a select/default alone, Wait proves the stop caller has
+		// reached its join while the callback remains blocked on our release channel.
+		synctest.Wait()
+		select {
+		case <-stopped:
+			t.Fatal("stop returned and dropped scope while Reload was still in flight")
+		default:
+		}
+		if !guardAllowSessionScopeQuarantined || guardAllowSessionScopeTeardownPath != sessionPath {
+			t.Fatal("scope state changed before Reload completed")
+		}
+		if _, err := os.Stat(sessionPath); err != nil {
+			t.Fatalf("session overlay removed before Reload completed: %v", err)
+		}
+
+		close(release)
+		released = true
+		<-stopped
+		if quarantined := <-observedQuarantine; !quarantined {
+			t.Fatal("in-flight Reload observed scope after quarantine was cleared")
+		}
+		if guardAllowSessionScopeQuarantined || guardAllowSessionScopeTeardownPath != "" {
+			t.Fatal("session scope was not disarmed after the watcher joined")
+		}
+		if _, err := os.Stat(sessionPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("session overlay survived teardown: %v", err)
+		}
+		for path, before := range durable {
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("teardown changed durable overlay %q: %v", path, err)
+			}
+		}
+		stop()
+		stop()
+	})
+}
+
+// fak-test:runtime fast est=10ms
+func TestGuardAllowWatcherStopAfterParentCancellation(t *testing.T) {
+	scopeTestRepo(t, "watcher-already-canceled")
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		stop := startGuardAllowWatcher(ctx, nil, false)
+		stopped := make(chan struct{}, 2)
+		for range 2 {
+			go func() {
+				stop()
+				stopped <- struct{}{}
+			}()
+		}
+		synctest.Wait()
+		if len(stopped) != 2 {
+			t.Fatal("concurrent stops did not join an already-canceled watcher")
+		}
+		stop()
+	})
+}
+
+func TestGuardAllowWatcherStopIsWiredIntoTerminalCancel(t *testing.T) {
+	boot, err := os.ReadFile("guard.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wiring := "\tstopAllowWatcher := startGuardAllowWatcher("
+	cancelJoin := "\tcancel = func() {\n\t\tcancelContext()\n\t\tstopAllowWatcher()\n\t}"
+	startAt := strings.Index(string(boot), wiring)
+	joinAt := strings.Index(string(boot), cancelJoin)
+	serveAt := strings.Index(string(boot), "go func() { serveErr <- srv.Serve(")
+	if startAt < 0 || joinAt <= startAt || serveAt <= joinAt {
+		t.Fatal("watcher stop/join must be in the shared cancel chain before gateway startup")
+	}
+	exit, err := os.ReadFile("guard_child_supervision.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishAt := bytes.Index(exit, []byte("func finishGuardChildAndReport("))
+	if finishAt < 0 {
+		t.Fatal("missing child terminal funnel")
+	}
+	terminal := string(exit[finishAt:])
+	cancelAt := strings.Index(terminal, "\tcancel()")
+	dropAt := strings.Index(terminal, "\tdropGuardAllowSessionScopeAtSessionEnd(")
+	exitAt := strings.Index(terminal, "\t\t\tos.Exit(")
+	if cancelAt < 0 || dropAt <= cancelAt || exitAt <= dropAt {
+		t.Fatal("terminal funnel must synchronously cancel before dropping scope and os.Exit")
 	}
 }

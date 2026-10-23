@@ -1023,7 +1023,15 @@ func cmdManageCommand(commandName string, argv []string) {
 	//    process in the group, so the child receives and handles its own either way.
 	signal.Ignore(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
-	startGuardAllowWatcher(ctx, guardPolicyReloader(*policyPath), *quiet)
+	stopAllowWatcher := startGuardAllowWatcher(ctx, guardPolicyReloader(*policyPath), *quiet)
+	// Cancel synchronously joins the watcher before finishGuardChildAndReport drops
+	// session scope (including quarantine). A defer alone misses its os.Exit paths.
+	cancelContext := cancel
+	cancel = func() {
+		cancelContext()
+		stopAllowWatcher()
+	}
+	defer cancel()
 	fleetLogf := fleetspine.Logf(nil)
 	// Compact/animated attended startup owns a hard pre-child output budget. Fleet
 	// discovery is best-effort operational detail and remains visible in the full

@@ -126,12 +126,24 @@ func (w *guardAllowWatcher) Run(ctx context.Context) error {
 	}
 }
 
-func startGuardAllowWatcher(ctx context.Context, reload gateway.PolicyReloadFunc, _ bool) {
+// startGuardAllowWatcher owns one Run goroutine. Its stop function cancels and joins that run,
+// including any in-flight Reload, before session-scope state may be torn down.
+// Repeated or concurrent stops are safe, even after the parent was canceled.
+func startGuardAllowWatcher(ctx context.Context, reload gateway.PolicyReloadFunc, _ bool) context.CancelFunc {
 	w := newGuardAllowWatcher(guardAllowWatchInterval, reload, func(e guardAllowWatchEvent) {
 		if !e.Rejected {
 			return
 		}
 		fmt.Fprintf(os.Stderr, "fak guard allow watcher: rejected; keeping last-good floor: %s\n", e.Detail)
 	})
-	go func() { _ = w.Run(ctx) }()
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = w.Run(ctx)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
