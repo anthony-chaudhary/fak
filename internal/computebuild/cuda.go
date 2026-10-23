@@ -296,22 +296,28 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 
 	switch cfg.Command {
 	case "check":
-		return tracker.recordPhase("preflight_check", func() error {
+		err := tracker.recordPhase("preflight_check", func() error {
 			// 1. Python ABI parity check
 			py, err := exec.LookPath("python3")
 			if err != nil {
 				py, err = exec.LookPath("python")
 			}
-			if err == nil {
-				if cfg.Stdout != nil {
-					fmt.Fprintln(cfg.Stdout, "[cuda] GPU-free ABI/header portability check ...")
-				}
-				parityScript := filepath.Join(cfg.RepoRoot, "tools", "cuda_abi_parity.py")
-				if FileExists(parityScript) {
-					if err := RunCmd(ctx, py, []string{parityScript, "--check"}, cfg.RepoRoot, nil, cfg.Stdout, cfg.Stderr); err != nil {
-						return fmt.Errorf("CUDA ABI parity check: %w", err)
-					}
-				}
+			if err != nil {
+				return fmt.Errorf("CUDA ABI parity check requires python3 or python on PATH: %w", err)
+			}
+			parityScript := filepath.Join(cfg.RepoRoot, "tools", "cuda_abi_parity.py")
+			if !FileExists(parityScript) {
+				return fmt.Errorf("CUDA ABI parity check script not found: %s", parityScript)
+			}
+			headerPath := filepath.Join(cfg.PkgDir, "cuda_backend.h")
+			if !FileExists(headerPath) {
+				return fmt.Errorf("CUDA standalone header check input not found: %s", headerPath)
+			}
+			if cfg.Stdout != nil {
+				fmt.Fprintln(cfg.Stdout, "[cuda] GPU-free ABI/header portability check ...")
+			}
+			if err := RunCmd(ctx, py, []string{parityScript, "--check"}, cfg.RepoRoot, nil, cfg.Stdout, cfg.Stderr); err != nil {
+				return fmt.Errorf("CUDA ABI parity check: %w", err)
 			}
 
 			// 2. Architecture matrix test
@@ -322,21 +328,30 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 				return err
 			}
 
-			// 3. Strict standalone header parse
-			if cfg.Toolchain.CC != "" {
-				headerPath := filepath.Join(cfg.PkgDir, "cuda_backend.h")
-				if FileExists(headerPath) {
-					if cfg.Stdout != nil {
-						fmt.Fprintf(cfg.Stdout, "[cuda] strict standalone parse cuda_backend.h (%s) ...\n", cfg.Toolchain.CC)
-					}
-					headerArgs := []string{"-x", "c", "-std=c11", "-fsyntax-only", "-Wall", "-Werror", headerPath}
-					if err := RunCmd(ctx, cfg.Toolchain.CC, headerArgs, cfg.PkgDir, nil, cfg.Stdout, cfg.Stderr); err != nil {
-						return fmt.Errorf("CUDA standalone header check: %w", err)
-					}
+			// The host-C parse is optional on no-toolchain authoring hosts;
+			// the Python ABI/header check above is always required.
+			if cfg.Toolchain.CC == "" {
+				if cfg.Stdout != nil {
+					fmt.Fprintln(cfg.Stdout, "[cuda] strict standalone parse skipped: no C compiler; explicit header deps checked")
 				}
+				return nil
+			}
+			if cfg.Stdout != nil {
+				fmt.Fprintf(cfg.Stdout, "[cuda] strict standalone parse cuda_backend.h (%s) ...\n", cfg.Toolchain.CC)
+			}
+			headerArgs := []string{"-x", "c", "-std=c11", "-fsyntax-only", "-Wall", "-Werror", headerPath}
+			if err := RunCmd(ctx, cfg.Toolchain.CC, headerArgs, cfg.PkgDir, nil, cfg.Stdout, cfg.Stderr); err != nil {
+				return fmt.Errorf("CUDA standalone header check: %w", err)
 			}
 			return nil
 		})
+		if err == nil && cfg.Toolchain.CC == "" {
+			tracker.receipt.Phases = append(tracker.receipt.Phases, ComputeBuildPhase{
+				Name:    "standalone_header_check",
+				Outcome: "skipped",
+			})
+		}
+		return err
 
 	case "build":
 		var objs []string
