@@ -3,6 +3,8 @@ package nativeperf
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -387,5 +389,170 @@ func TestGenerateReproducibilityPacket_RejectsInvalidReceipt(t *testing.T) {
 	_, errNil := GenerateReproducibilityPacket(nil)
 	if !errors.Is(errNil, ErrNilReceipt) {
 		t.Fatalf("expected ErrNilReceipt, got %v", errNil)
+	}
+}
+
+// TestRooflineThresholdOnlyRegression protects against applying 0.8 twice.
+func TestRooflineThresholdOnlyRegression(t *testing.T) {
+	r := validTestReceipt()
+	r.TheoreticalPeakBandwidthGBps = 0
+	r.Target80PctBandwidthGBps = 80
+	r.AchievedBandwidthGBps = 64
+	result, err := ValidateRooflineAttainment(r)
+	if !errors.Is(err, ErrMissingDenominator) || result.Clean() {
+		t.Fatalf("threshold-only input admitted as a full ceiling: result=%+v err=%v", result, err)
+	}
+}
+
+func TestRooflineExplicitPolicyDenominators(t *testing.T) {
+	for _, device := range []string{"synthetic-device-a", "synthetic-device-b"} {
+		t.Run(device, func(t *testing.T) {
+			policy := RooflinePolicy{device, "bandwidth", "GB/s", "synthetic-dram", 0.8, 0.999900}
+			tests := []struct {
+				name   string
+				mutate func(*BenchmarkReceipt)
+				pass   bool
+			}{
+				{"full measured", func(r *BenchmarkReceipt) {}, true},
+				{"full theoretical", func(r *BenchmarkReceipt) { r.RooflineDenominator.Kind = "theoretical" }, true},
+				{"below 80 percent", func(r *BenchmarkReceipt) { r.AchievedBandwidthGBps = 79.99 }, false},
+				{"threshold kind", func(r *BenchmarkReceipt) { r.RooflineDenominator.Kind = "target" }, false},
+				{"missing kind", func(r *BenchmarkReceipt) { r.RooflineDenominator.Kind = "" }, false},
+				{"missing denominator", func(r *BenchmarkReceipt) { r.RooflineDenominator = nil }, false},
+				{"threshold only", func(r *BenchmarkReceipt) {
+					r.RooflineDenominator = nil
+					r.Target80PctBandwidthGBps = 80
+					r.AchievedBandwidthGBps = 64
+				}, false},
+				{"ambiguous", func(r *BenchmarkReceipt) { r.TheoreticalPeakBandwidthGBps = 100 }, false},
+				{"wrong unit", func(r *BenchmarkReceipt) { r.RooflineDenominator.Units = "GiB/s" }, false},
+				{"missing scope", func(r *BenchmarkReceipt) { r.RooflineDenominator.Scope = "" }, false},
+				{"wrong scope", func(r *BenchmarkReceipt) { r.RooflineDenominator.Scope = "cache" }, false},
+				{"wrong metric", func(r *BenchmarkReceipt) { r.RooflineDenominator.Metric = "compute" }, false},
+				{"wrong denominator device", func(r *BenchmarkReceipt) { r.RooflineDenominator.Device = "other" }, false},
+				{"wrong receipt device", func(r *BenchmarkReceipt) { r.Device = "other" }, false},
+				{"conflicting device", func(r *BenchmarkReceipt) { r.TargetDevice = "other" }, false},
+				{"zero ceiling", func(r *BenchmarkReceipt) { r.RooflineDenominator.Value = 0 }, false},
+				{"negative ceiling", func(r *BenchmarkReceipt) { r.RooflineDenominator.Value = -1 }, false},
+				{"nan ceiling", func(r *BenchmarkReceipt) { r.RooflineDenominator.Value = math.NaN() }, false},
+				{"infinite ceiling", func(r *BenchmarkReceipt) { r.RooflineDenominator.Value = math.Inf(1) }, false},
+				{"nan achieved", func(r *BenchmarkReceipt) { r.AchievedBandwidthGBps = math.NaN() }, false},
+				{"infinite achieved", func(r *BenchmarkReceipt) { r.AchievedBandwidthGBps = math.Inf(1) }, false},
+				{"overflow ratio", func(r *BenchmarkReceipt) {
+					r.RooflineDenominator.Value = math.SmallestNonzeroFloat64
+					r.AchievedBandwidthGBps = math.MaxFloat64
+				}, false},
+				{"quality below floor", func(r *BenchmarkReceipt) { r.LogitCosineSimilarity = 0.9998 }, false},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					r := validTestReceipt()
+					r.Device = device
+					r.TheoreticalPeakBandwidthGBps = 0
+					r.AchievedBandwidthGBps = 80
+					r.RooflineDenominator = &RooflineDenominator{100, "measured", device, "bandwidth", "GB/s", "synthetic-dram"}
+					tt.mutate(r)
+					result, err := ValidateRooflineAttainmentWithPolicy(r, policy)
+					if (err == nil) != tt.pass || result.Clean() != tt.pass {
+						t.Fatalf("pass=%v result=%+v err=%v", tt.pass, result, err)
+					}
+					if tt.pass && (result.RooflineDenominator == nil || *result.RooflineDenominator != *r.RooflineDenominator) {
+						t.Fatalf("denominator provenance changed: %+v", result)
+					}
+					if tt.pass && r.RooflineDenominator.Kind == "measured" && result.TheoreticalPeakBandwidthGBps != 0 {
+						t.Fatal("measured ceiling relabeled theoretical")
+					}
+				})
+			}
+			r := validTestReceipt()
+			r.Device = device
+			if _, err := ValidateRooflineAttainment(r); err == nil {
+				t.Fatal("legacy Halo wrapper admitted another device")
+			}
+		})
+	}
+}
+
+func TestRooflineNestedMeasuredProvenance(t *testing.T) {
+	for _, scope := range []string{"device-dram", ""} {
+		data := fmt.Sprintf(`{"device":"gfx1151","model_architecture":"qwen38","logit_cosine_similarity":1,"roofline_attainment":{"measured_roofline":100,"useful_throughput":80,"metric":"bandwidth","units":"GB/s","scope":%q}}`, scope)
+		var r BenchmarkReceipt
+		if err := json.Unmarshal([]byte(data), &r); err != nil {
+			t.Fatal(err)
+		}
+		if r.TheoreticalPeakBandwidthGBps != 0 || r.RooflineDenominator == nil || r.RooflineDenominator.Kind != "measured" {
+			t.Fatalf("lost measured provenance: %+v", r)
+		}
+		result, err := ValidateRooflineAttainmentWithPolicy(&r, HaloRooflinePolicy())
+		if (err == nil) != (scope != "") {
+			t.Fatalf("scope=%q result=%+v err=%v", scope, result, err)
+		}
+	}
+}
+
+func TestRooflineHaloBoundaryAndPolicyValidation(t *testing.T) {
+	r := validTestReceipt()
+	r.TheoreticalPeakBandwidthGBps = 100
+	r.AchievedBandwidthGBps = 80
+	if result, err := ValidateRooflineAttainment(r); err != nil || result.AttainmentRatio != 0.8 {
+		t.Fatalf("legacy boundary changed: %+v %v", result, err)
+	}
+	if _, err := ValidateRooflineAttainmentWithPolicy(r, HaloRooflinePolicy()); err == nil {
+		t.Fatal("explicit policy silently inferred legacy denominator")
+	}
+	for _, ratio := range []float64{0, -1, 1.1, math.NaN(), math.Inf(1)} {
+		p := HaloRooflinePolicy()
+		p.MinimumAttainmentRatio = ratio
+		if _, err := ValidateRooflineAttainmentWithPolicy(r, p); err == nil {
+			t.Fatalf("invalid policy ratio accepted: %v", ratio)
+		}
+	}
+}
+
+func TestRooflineAmbiguousNestedCeilings(t *testing.T) {
+	for _, data := range []string{
+		`{"theoretical_peak_bandwidth_gbps":100,"hardware":{"peak_dram_bandwidth_gbps":200}}`,
+		`{"roofline_denominator":{"value":100},"roofline_attainment":{"measured_roofline":100}}`,
+	} {
+		var r BenchmarkReceipt
+		if err := json.Unmarshal([]byte(data), &r); err == nil {
+			t.Fatalf("ambiguous sources accepted: %s", data)
+		}
+	}
+	r := validTestReceipt()
+	r.Device = "not-gfx1151"
+	if _, err := ValidateRooflineAttainment(r); err == nil {
+		t.Fatal("substring device admitted")
+	}
+}
+
+func TestRooflineLegacyPacketRejectsMeasuredCeiling(t *testing.T) {
+	r := validTestReceipt()
+	r.TheoreticalPeakBandwidthGBps = 0
+	r.AchievedBandwidthGBps = 80
+	r.RooflineDenominator = &RooflineDenominator{100, "measured", "gfx1151", "bandwidth", "GB/s", "device-dram"}
+	if result, err := ValidateRooflineAttainmentWithPolicy(r, HaloRooflinePolicy()); err != nil || !result.Clean() {
+		t.Fatalf("explicit measured arithmetic rejected: %+v %v", result, err)
+	}
+	if result, err := ValidateRooflineAttainment(r); !errors.Is(err, ErrMissingDenominator) || result.Clean() {
+		t.Fatalf("legacy measured input accepted: %+v %v", result, err)
+	}
+	if packet, err := GenerateReproducibilityPacket(r); !errors.Is(err, ErrMissingDenominator) || packet != nil {
+		t.Fatalf("legacy packet lost measured provenance: %+v %v", packet, err)
+	}
+}
+
+func TestRooflineLegacyEquivalentAliases(t *testing.T) {
+	r := validTestReceipt()
+	r.Device = "strix-halo"
+	r.TargetDevice = "gfx1151"
+	if result, err := ValidateRooflineAttainment(r); err != nil || !result.Clean() {
+		t.Fatalf("equivalent Halo aliases rejected: %+v %v", result, err)
+	}
+	r.RooflineDenominator = &RooflineDenominator{100, "theoretical", "gfx1151", "bandwidth", "GB/s", "device-dram"}
+	r.TheoreticalPeakBandwidthGBps = 0
+	r.AchievedBandwidthGBps = 80
+	if _, err := ValidateRooflineAttainmentWithPolicy(r, HaloRooflinePolicy()); !errors.Is(err, ErrMismatchedTargetDevice) {
+		t.Fatalf("explicit policy normalized aliases: %v", err)
 	}
 }
