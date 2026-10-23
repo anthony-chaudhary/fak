@@ -2,6 +2,7 @@
 """Contract tests for the release cadence workflow."""
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -129,6 +130,21 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
         self.assertIn('actions/upload-artifact@v4', text)
         self.assertIn('name: release-lease-receipt-${{ github.run_id }}-${{ github.run_attempt }}', text)
 
+
+    def test_step_receipts_are_gitignored_so_cut_sees_a_clean_tree(self) -> None:
+        # v0.57.0: untracked root receipts (cut-plan.json, ...) were foreign dirt to
+        # release_cut's dirty-path guard, refusing the execute cut.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        ignored = set((ROOT / ".gitignore").read_text(encoding="utf-8").split())
+        receipts = set(re.findall(r"(?:> |--receipt-path )([\w.-]+\.json)\b", text))
+        self.assertIn("cut.json", receipts)
+        for name in sorted(receipts):
+            self.assertIn(f"/{name}", ignored, name)
+
+    def test_cut_step_prints_refusal_before_failing(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("--lock-already-held > cut.json || rc=$?", text)
+        self.assertLess(text.index("|| rc=$?"), text.index("cat cut.json"))
 
     def test_release_owner_is_declared_once_for_the_whole_job(self) -> None:
         self.assertEqual(WORKFLOW.read_text(encoding="utf-8").count("FAK_RELEASE_OWNER:"), 1)

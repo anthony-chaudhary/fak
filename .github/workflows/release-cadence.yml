@@ -330,8 +330,13 @@ jobs:
           set -euo pipefail
           git config user.name "fleet-release-cadence[bot]"
           git config user.email "fleet-release-cadence@users.noreply.github.com"
-          python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 --lock-already-held > cut.json
+          rc=0
+          python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 --lock-already-held > cut.json || rc=$?
           cat cut.json
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::release_cut execute exited $rc: $(python -c 'import json; d=json.load(open("cut.json")); print(d.get("aborted"), d.get("foreign_dirty") or d.get("detail") or "")' 2>/dev/null || echo 'unreadable cut.json')"
+            exit "$rc"
+          fi
           ok="$(python -c 'import json; print(json.load(open("cut.json"))["ok"])')"
           if [ "$ok" != "True" ]; then
             echo "::error::release_cut execute refused"
