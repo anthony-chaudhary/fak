@@ -7,6 +7,8 @@ package compute
 #include "cuda_backend.h"
 int fak_cuda_matmul_f32(const float *w, const float *x, float *y, int out, int in, int p);
 int fak_cuda_matmul_f16(const void *w, const float *x, float *y, int out, int in, int p, int col_major);
+int fak_cuda_q8_matmul_f32(const int8_t *w, const float *scales, const float *x, float *y, int out, int in, int p, int block);
+int fak_cuda_q4k_matmul_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p);
 
 int fak_qwen35_embedding_gather_f32(
     const float *dEmbedding, const int *hIDs, int *dIDs, float *dOut,
@@ -121,9 +123,9 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 	case F16:
 		status = int(C.fak_cuda_matmul_f16(wb.ptr, c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), colMajorFlag(w)))
 	case Q8_0:
-		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))
+		status = int(C.fak_cuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block)))
 	case Q4_K:
-		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+		status = int(C.fak_cuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens)))
 	case Q5_K:
 		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
 	case Q6_K:

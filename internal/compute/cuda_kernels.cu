@@ -595,6 +595,47 @@ static void fp16_compensated_matmul(const float *W, const float *X, float *Y,
   fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
 }
 
+// Submission status only: corrections must not consume stale or partial Y after
+// a rejected GEMM. Pooled scratch remains ordered on g_stream, not synchronized.
+// Keep legacy GDN/Q2 helpers separate: their callers have no checked status seam.
+static int fp16_compensated_matmul_checked(const float *W, const float *X, float *Y,
+                                    int out, int in, int tokens) {
+  size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
+  int status = -1;
+  cudaError_t launch;
+  cublasStatus_t st;
+  const float one = 1.0f, zero = 0.0f;
+  __half *wHi = (__half *)fcuda_malloc(wn * sizeof(__half));
+  __half *wLo = (__half *)fcuda_malloc(wn * sizeof(__half));
+  __half *xHi = (__half *)fcuda_malloc(xn * sizeof(__half));
+  __half *xLo = (__half *)fcuda_malloc(xn * sizeof(__half));
+  if (!wHi || !wLo || !xHi || !xLo) goto cleanup;
+  k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn);
+  launch = cudaGetLastError();
+  if (launch != cudaSuccess) { status = 20000 + (int)launch; goto cleanup; }
+  k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn);
+  launch = cudaGetLastError();
+  if (launch != cudaSuccess) { status = 20000 + (int)launch; goto cleanup; }
+  st = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wHi, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &zero, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  if (st != CUBLAS_STATUS_SUCCESS) { status = 10000 + (int)st; goto cleanup; }
+  st = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wLo, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  if (st != CUBLAS_STATUS_SUCCESS) { status = 10000 + (int)st; goto cleanup; }
+  st = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  status = st == CUBLAS_STATUS_SUCCESS ? 0 : 10000 + (int)st;
+cleanup:
+  if (wHi) fcuda_free(wHi);
+  if (wLo) fcuda_free(wLo);
+  if (xHi) fcuda_free(xHi);
+  if (xLo) fcuda_free(xLo);
+  return status;
+}
+
 __global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
                                          float *W, int rows, int cols, int block) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -611,6 +652,20 @@ static void q8_dequant_sgemm(const void *codes, const float *scales,
       (const signed char *)codes, scales, wide, rows, cols, block);
   fp16_compensated_matmul(wide, X, Y, rows, cols, tokens);
   fcuda_free(wide);
+}
+
+static int q8_dequant_sgemm_checked(const void *codes, const float *scales,
+                            const float *X, float *Y, int rows, int cols, int tokens, int block) {
+  float *wide = (float *)fcuda_malloc((size_t)rows * cols * sizeof(float));
+  if (!wide) return -1;
+  k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
+      (const signed char *)codes, scales, wide, rows, cols, block);
+  cudaError_t launch = cudaGetLastError();
+  int status = launch == cudaSuccess
+      ? fp16_compensated_matmul_checked(wide, X, Y, rows, cols, tokens)
+      : 20000 + (int)launch;
+  fcuda_free(wide);
+  return status;
 }
 
 __global__ void k_qwen35_gdn_fused_in_proj(
@@ -1346,11 +1401,11 @@ static signed char *g_q8_qX = nullptr;
 static int g_q8_qX_cap = 0; // bytes
 static float *g_q8_xScale = nullptr;
 static int g_q8_xScale_cap = 0; // floats
-extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
+// Checked only for compensated prefill; decode/small-P behavior is unchanged.
+extern "C" int fak_cuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                     float *dY, int out, int in, int P, int block) {
   if (P >= 128) {
-    q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
-    return;
+    return q8_dequant_sgemm_checked(dCodes, dScales, dX, dY, out, in, P, block);
   }
   int nblk = in / block;
   int needQX = P * in;          // int8 activation codes
@@ -1368,6 +1423,12 @@ extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, 
   k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
   k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block);
+  return 0;
+}
+
+extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
+                                    float *dY, int out, int in, int P, int block) {
+  (void)fak_cuda_q8_matmul_f32(dCodes, dScales, dX, dY, out, in, P, block);
 }
 
 // getScaleMinK4_dev reproduces the GGUF loader's getScaleMinK4 (internal/ggufload) bit-for-bit:
@@ -1533,25 +1594,35 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   return coeff;
 }
 
-extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
+extern "C" int fak_cuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
   if (P >= 128) {
     float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
+    if (!wide) return -1;
     k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wide, out, in);
-    fp16_compensated_matmul(wide, dX, dY, out, in, P);
+    cudaError_t launch = cudaGetLastError();
+    int status = launch == cudaSuccess
+        ? fp16_compensated_matmul_checked(wide, dX, dY, out, in, P)
+        : 20000 + (int)launch;
     fcuda_free(wide);
-    return;
+    return status;
   }
   if (P < 4) {
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
     k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P);
-    return;
+    return 0;
   }
   constexpr int token_tile = 4;
   k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
+  return 0;
+}
+
+extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
+                                     int out, int in, int P) {
+  (void)fak_cuda_q4k_matmul_f32(dQ4K, dX, dY, out, in, P);
 }
 
 // k_q2_0_gemm: Y[t,o] = Σ_b (Σ_{i in block} tern(o,b,i)·X[t,b·block+i]) · Wscale[o,b], where

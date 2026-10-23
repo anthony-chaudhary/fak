@@ -28,6 +28,8 @@ package compute
 #include "cuda_backend.h"
 int fak_cuda_matmul_f32(const float *w, const float *x, float *y, int out, int in, int p);
 int fak_cuda_matmul_f16(const void *w, const float *x, float *y, int out, int in, int p, int col_major);
+int fak_cuda_q8_matmul_f32(const int8_t *w, const float *scales, const float *x, float *y, int out, int in, int p, int block);
+int fak_cuda_q4k_matmul_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p);
 int fak_cuda_read_d2h(int device, void *h, const void *d, size_t n);
 int fak_cuda_upload_h2d(void *d, const void *h, size_t n);
 */
@@ -1190,14 +1192,14 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		// device, then the per-block integer dot against the resident int8 weight, F32 accumulate.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
-			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
+		status = int(C.fak_cuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
+			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block)))
 	case Q4_K:
 		// native Q4_K prefill GEMM (#485): dequant fused into the tile off the resident super-block
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		status = int(C.fak_cuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P)))
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
