@@ -576,6 +576,7 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 			Class: MemoryWeights,
 		})
 	}
+	requireCUDAQ8BlockAlignment(blk)
 	codes := hb.I8()
 	scales := t.Quant.Scale
 	nblk := in / blk
