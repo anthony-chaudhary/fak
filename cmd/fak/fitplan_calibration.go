@@ -118,9 +118,9 @@ func fitPlanHardwareEpoch(be compute.Backend) compute.HardwareEpochFingerprint {
 }
 
 // hostCPUModel names the CPU without spawning a process: /proc/cpuinfo's model name on Linux,
-// PROCESSOR_IDENTIFIER on Windows, else GOARCH.
+// the registry ProcessorNameString on Windows, else GOARCH.
 func hostCPUModel() string {
-	if v := strings.TrimSpace(os.Getenv("PROCESSOR_IDENTIFIER")); runtime.GOOS == "windows" && v != "" {
+	if v := windowsCPUModel(); v != "" {
 		return v
 	}
 	if runtime.GOOS == "linux" {
