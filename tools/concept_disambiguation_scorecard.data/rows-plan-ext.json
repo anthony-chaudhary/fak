@@ -194,7 +194,9 @@
       "distinction": "It is a memory-capacity plan checked against a backend, NOT a context-window plan (ctxplan) nor a routed model plan (modelroute).",
       "distinct_from": [
         "plan-planner",
-        "v41-ep-panel-plan"
+        "v41-ep-panel-plan",
+        "fitplan-planner",
+        "fitplan-pool-usable-bytes"
       ],
       "aliases": [],
       "grounding": "memoryplan",

@@ -105,26 +105,34 @@ func validateServeNativeContextTokens(tokens int) error {
 // (ggufload.BackendSharesHostRAM) host-scoped co-resident weights are charged
 // against the same KV budget (#13284); a nil/discrete backend is unchanged.
 func resolveServeNativeContext(ws *ggufload.WeightSource, be compute.Backend, weights compute.MemoryPlan, fit serveFitBudget, requested int) (serveNativeContextResolution, compute.MemoryPlan, error) {
+	resolution, plan, _, err := resolveServeNativeContextBudget(ws, be, weights, fit, requested)
+	return resolution, plan, err
+}
+
+// resolveServeNativeContextBudget is resolveServeNativeContext that also returns the budget the
+// context was sized against, so a caller judging the same plan never re-probes a host window
+// that drifts between reads.
+func resolveServeNativeContextBudget(ws *ggufload.WeightSource, be compute.Backend, weights compute.MemoryPlan, fit serveFitBudget, requested int) (serveNativeContextResolution, compute.MemoryPlan, serveFitBudget, error) {
 	resolution := serveNativeContextResolution{RequestedTokens: requested, Source: "auto"}
 	if err := validateServeNativeContextTokens(requested); err != nil {
-		return resolution, nil, err
+		return resolution, nil, fit, err
 	}
 	if requested > 0 {
 		resolution.Source = "explicit"
 		resolution.ResolvedTokens = requested
 	}
 	if ws == nil {
-		return resolution, nil, nil
+		return resolution, nil, fit, nil
 	}
 	cfg, err := ws.File.Config()
 	if err != nil {
-		return resolution, nil, err
+		return resolution, nil, fit, err
 	}
 	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
 	csc.PoolSharedWithHost = ggufload.BackendSharesHostRAM(be)
 	resolution.ModelDeclaredTokens = csc.MaxContext
 	if requested > 0 && csc.MaxContext > 0 && requested > csc.MaxContext {
-		return resolution, nil, fmt.Errorf("--native-context-tokens %d exceeds model-declared context window %d", requested, csc.MaxContext)
+		return resolution, nil, fit, fmt.Errorf("--native-context-tokens %d exceeds model-declared context window %d", requested, csc.MaxContext)
 	}
 	override := -1
 	if requested > 0 {
@@ -145,7 +153,7 @@ func resolveServeNativeContext(ws *ggufload.WeightSource, be compute.Backend, we
 	avail := sizingFit.avail()
 	resolution.ResolvedTokens, _ = compute.AutoSizeContextPlan(csc, weights, avail, override)
 	logServeExplicitContextClamp(os.Stderr, csc, weights, sizingFit, avail, requested, resolution.ResolvedTokens)
-	return resolution, csc.PerContextMemoryPlan(resolution.ResolvedTokens), nil
+	return resolution, csc.PerContextMemoryPlan(resolution.ResolvedTokens), sizingFit, nil
 }
 
 // serveSharedPoolSizingFit is the memory ceiling the context auto-sizer must size against when

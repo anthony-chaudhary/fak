@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/fitplan"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
@@ -80,6 +82,7 @@ type serveSizingArtifact struct {
 	Startup                     *serveSizingStartup    `json:"startup,omitempty"`
 	Pools                       []serveSizingPool      `json:"pools"`
 	Warnings                    []string               `json:"warnings"`
+	FitPlan                     *fitplan.Report        `json:"fit_plan,omitempty"`
 }
 
 // serveSizingArm names the load arm loadServeInKernelModel's switch would select for
@@ -147,7 +150,7 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}
-	resolution, contextPlan, err := resolveServeNativeContext(ws, be, weights, fit, requestedNativeContextTokens)
+	resolution, contextPlan, sizingFit, err := resolveServeNativeContextBudget(ws, be, weights, fit, requestedNativeContextTokens)
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}
@@ -238,6 +241,15 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		warnings = append(warnings, startupWarnings...)
 	}
 
+	embed, q4kOpts := serveFitPlanEmbed(ws, be, selectedArm, cpuOffloadActive, model, fit)
+	fitPlan := buildServeSizingFitPlan(ws, be, serveFitPlanSizing{
+		weights:    weights,
+		embed:      embed,
+		q4kOpts:    q4kOpts,
+		sizingFit:  sizingFit,
+		hostFit:    hostFit,
+		resolution: resolution,
+	})
 	armLabel := serveSizingArmForSelected(be, cpuOffloadActive, useMetal, selectedArm)
 	if pq2Checkpoint && be == nil && selectedArm == serveLoadArmResidentQ4K {
 		armLabel = "cpu-resident-pq2_0"
@@ -256,6 +268,7 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		Startup:                     startup,
 		Pools:                       pools,
 		Warnings:                    warnings,
+		FitPlan:                     fitPlan,
 	}, nil
 }
 
@@ -324,4 +337,114 @@ func runServeSizingJSON(sf *serveFlags) {
 		os.Exit(1)
 	}
 	fmt.Println(string(out))
+}
+
+// serveFitPlanSizing is what the artifact already sized, so the fit plan re-reads no pool budget: the
+// selected arm's weights plan and embedding storage, the budget the context was resolved
+// against, the host pool snapshot the artifact reports, and the resolution.
+type serveFitPlanSizing struct {
+	weights    compute.MemoryPlan
+	embed      ggufload.EmbedStorage
+	q4kOpts    []ggufload.Q4KLoadOption
+	sizingFit  serveFitBudget
+	hostFit    serveFitBudget
+	resolution serveNativeContextResolution
+}
+
+// buildServeSizingFitPlan prices the SAME weights plan, budgets and resolved context the
+// artifact sized. It never touches warnings: dry-admit returns art.Warnings verbatim.
+func buildServeSizingFitPlan(ws *ggufload.WeightSource, be compute.Backend, in serveFitPlanSizing) *fitplan.Report {
+	if ws == nil {
+		return nil
+	}
+	res := in.resolution
+	if res.ResolvedTokens <= 0 {
+		rep := fitplan.Unavailable(fitplan.OmitContextUnknown)
+		return &rep
+	}
+	m, err := ws.FitPlanModel(in.embed, in.q4kOpts...)
+	cfg, cfgErr := ws.File.Config()
+	if err != nil || cfgErr != nil {
+		rep := fitplan.Unavailable(fitplan.OmitModelFactsUnavailable)
+		return &rep
+	}
+	cur := serveKVPrecision()
+	other := compute.KVPrecisionQ8
+	if cur == compute.KVPrecisionQ8 {
+		other = compute.KVPrecisionF32
+	}
+	// Label each tier by the storage the geometry realizes: a model may force F32 KV
+	// whatever the knob asks, and the pin must name what the engine keeps.
+	curCSC, otherCSC := cfg.ContextSizeConfigWithPrecision(cur), cfg.ContextSizeConfigWithPrecision(other)
+	tiers := []fitplan.KVTier{
+		{Precision: curCSC.KV.Precision.String(), Context: curCSC},
+		{Precision: otherCSC.KV.Precision.String(), Context: otherCSC},
+	}
+	hw := serveFitPlanHardware(be, in.sizingFit, in.hostFit)
+	hw.Peaks, _ = fitplan.DevicePeaks(serveFitPlanArch(be))
+	var pins fitplan.Pins
+	if strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION")) != "" {
+		pins.KVPrecision = tiers[0].Precision
+	}
+	// The operator's request is the pin, not the value a live boot clamps it to.
+	if res.Source == "explicit" {
+		pins.ContextTokens = res.RequestedTokens
+	}
+	rep := fitplan.Plan(fitplan.Input{
+		Model:       m,
+		Weights:     in.weights,
+		Hardware:    hw,
+		Workload:    fitplan.DefaultWorkload(),
+		Calibration: fitplan.GenericEmpirical(),
+		Pins:        pins,
+		Candidates:  fitplan.BuildCandidates(tiers, res.ResolvedTokens, pins.ContextTokens),
+	})
+	return &rep
+}
+
+// serveFitPlanHardware applies resolveServeNativeContext's pool rule: a shared-pool APU and a
+// host-only serve price the one pool the context was sized against; a discrete device adds the
+// host pool its host-scoped weight rows draw on.
+func serveFitPlanHardware(be compute.Backend, sizingFit, hostFit serveFitBudget) fitplan.Hardware {
+	switch {
+	case be == nil:
+		return fitplan.Hardware{Topology: fitplan.TopologyHostOnly, PoolUsableBytes: sizingFit.avail()}
+	case ggufload.BackendSharesHostRAM(be):
+		return fitplan.Hardware{Topology: fitplan.TopologyUnified, PoolUsableBytes: sizingFit.avail()}
+	default:
+		return fitplan.Hardware{Topology: fitplan.TopologyDiscrete, PoolUsableBytes: sizingFit.avail(), HostPoolUsableBytes: hostFit.avail()}
+	}
+}
+
+// serveFitPlanEmbed names the embedding storage of the weights plan serveNativeContextSizingInputs
+// built for this arm, with the same Q4K options. Under FAK_STREAM_Q4K rebuilding them re-reads
+// host memory; that arm streams weights, so its plan states no throughput anyway.
+func serveFitPlanEmbed(ws *ggufload.WeightSource, be compute.Backend, arm serveLoadArm, cpuOffloadActive bool, path string, fit serveFitBudget) (ggufload.EmbedStorage, []ggufload.Q4KLoadOption) {
+	switch {
+	case cpuOffloadActive:
+		return ggufload.EmbedPayload, nil
+	case arm == serveLoadArmF32:
+		return ggufload.EmbedF32, nil
+	case arm == serveLoadArmQuantProfileQ8:
+		return ggufload.EmbedQ8, nil
+	case arm == serveLoadArmResidentQ4K:
+		return ggufload.EmbedQ4K, serveQ4KFitOptions(path, ws, be, arm, fit)
+	default:
+		return ggufload.EmbedPayload, nil
+	}
+}
+
+func serveFitPlanArch(be compute.Backend) string {
+	if be == nil {
+		return ""
+	}
+	if provider, ok := be.(compute.DeviceMemoryProfileProvider); ok {
+		if prof, ok := provider.DeviceMemoryProfile(); ok {
+			return prof.Architecture
+		}
+	}
+	if prof, ok := compute.DeviceMemoryProfileForVulkanTier(be.Tier()); ok {
+		return prof.Architecture
+	}
+	return ""
 }

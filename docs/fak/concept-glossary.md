@@ -1644,3 +1644,52 @@ Pure roofline receipt validation operation that checks an explicit RooflinePolic
 Stable error sentinel for an invalid explicit roofline-policy configuration, including missing identity or scope, unsupported denominator dimensions, invalid aliases, and nonfinite or out-of-range thresholds.
 
 **Distinct from:** This error labels configuration refusal from RooflinePolicy validation; it is not a policy instance, the legacy preset, or the ValidateRooflineAttainmentWithPolicy operation. It does not certify receipt evidence and remains distinct from denominator incompatibility and below-target attainment errors.
+
+
+### fitplan
+
+Package internal/fitplan: the header-derived model-fit planner. Plan prices one selected serve arm's weights MemoryPlan against a pool budget over a KV-tier x context candidate table and returns a Report: fit status, one-stream max context, per-candidate max concurrency, nominal decode/prefill tok/s and TTFT with the binding bound and evidence tier, typed omissions for unknown inputs, and a typed refusal (weights_exceed_pool, context_exceeds_pool, concurrency_exceeds_pool, pin_unmatched).
+
+**Distinct from:** A PRICER over an existing demand list, not the demand list: it consumes the selected arm's weights MemoryPlan and re-prices each candidate's KV, session-state and scratch terms (the terms PerContextMemoryPlan sums) from its ContextSizeConfig, adding the candidate search, throughput prediction and refusal vocabulary. It never allocates and never overrides an operator pin.
+
+
+### FitPlanModel
+
+ggufload.WeightSource method that derives fitplan.Model from GGUF tensor headers for the selected arm's embedding storage: loaded payload bytes, decode-swept bytes per token (row-gathered untied input embedding excluded, routed experts at the RoutedExpertActiveSet top-k share), active and LM-head parameters, expert counts and attention geometry.
+
+**Distinct from:** Produces the planner's MODEL FACTS input, header-only and arm-aware; distinct from the fitplan planner that prices those facts and from the weights MemoryPlan estimators that size resident bytes.
+
+
+### BuildCandidates
+
+fitplan function that expands KV storage tiers over ContextLadder (resolved context, pinned extras, 4K/32K/128K served windows, model max) into the Candidate table Plan prices; the first tier at the resolved context is marked Current, and a tier whose KV charge equals an earlier tier's is skipped.
+
+**Distinct from:** Builds the SEARCH SPACE only: it neither fits nor predicts; Plan judges each candidate. Distinct from the fitplan planner as a whole.
+
+
+### PoolUsableBytes
+
+fitplan Hardware and Evidence field: the headroom-adjusted bytes of the pool the plan's KV store and pool-charged weights draw on: device memory on a discrete GPU, the one shared pool on a unified-memory APU (host-scoped rows charged once), host RAM on a host-only serve; <=0 means unknown and the plan fails open.
+
+**Distinct from:** A CAPACITY, not a demand: MemoryPlan lists what must be resident, PoolUsableBytes is what it is judged against. Distinct from HostPoolUsableBytes, a discrete topology's separate host pool.
+
+
+### HostPoolUsableBytes
+
+fitplan Hardware and Evidence field set only for a discrete topology: the headroom-adjusted host RAM that host-scoped weight rows (CPU-offloaded experts, streamed working sets) draw on; overflow refuses weights_exceed_pool with host_pool=true.
+
+**Distinct from:** The SECOND pool of a discrete device only; on a unified-memory APU the same rows are charged once to PoolUsableBytes, never to a disjoint host pool, so UMA memory is never double counted.
+
+
+### AttnLayers
+
+fitplan.Model field: the number of KV-bearing attention layers (ContextSizeConfig.KV.NumLayers): every decoder layer that keeps token-indexed KV, sliding-window layers included, Qwen3.5-hybrid linear-attention layers excluded when their recurrent geometry is known. Its per-position width (layers x heads x head dim) prices decode KV FLOPs and the quadratic prefill attention term, an upper bound for windowed models.
+
+**Distinct from:** A layer COUNT for FLOP pricing that does not split sliding-window from global layers; distinct from FullAttentionInterval, the hybrid model's period that decides WHICH layers run full attention.
+
+
+### serveNativeContextResolution
+
+cmd/fak record of how a serve resolved its native context: the operator's requested tokens, the model-declared window, the resolved tokens and the source (explicit or auto); the --plan-json fit_plan reads the request as the context pin and the resolved value as the current candidate.
+
+**Distinct from:** The RESULT record; distinct from resolveServeNativeContext, the function that produces it by sizing against the fit budget.

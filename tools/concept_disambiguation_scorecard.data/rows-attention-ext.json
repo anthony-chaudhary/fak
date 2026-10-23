@@ -452,7 +452,8 @@
       "distinction": "It marks the global-attention layers in the cadence, NOT a sliding-window layer.",
       "distinct_from": [
         "attended",
-        "x-disambig-fullattentioninterval"
+        "x-disambig-fullattentioninterval",
+        "fitplan-attn-layers"
       ],
       "aliases": [],
       "grounding": "fullattention",
