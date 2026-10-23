@@ -83,7 +83,7 @@ func TestVulkanMemoryTypeRetryOwnerSourceContract(t *testing.T) {
 		}
 	}
 	for _, clause := range []string{
-		`environmentFlagEnabled("FAK_VULKAN_STAGE_HOST_CACHED")`,
+		`!environmentFlagIs("FAK_VULKAN_STAGE_HOST_CACHED", '0')`,
 		"g_preferCachedTransferStage ? VK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0",
 	} {
 		if !strings.Contains(source, clause) {
@@ -196,8 +196,8 @@ func TestVulkanCachedTransferStageBacking(t *testing.T) {
 	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") != "1" {
 		t.Skip("requires an explicitly admitted Vulkan device")
 	}
-	if os.Getenv("FAK_VULKAN_STAGE_HOST_CACHED") != "1" {
-		t.Fatal("device witness requires FAK_VULKAN_STAGE_HOST_CACHED=1 before process start")
+	if os.Getenv("FAK_VULKAN_STAGE_HOST_CACHED") == "0" {
+		t.Skip("cached staging is opted out by FAK_VULKAN_STAGE_HOST_CACHED=0")
 	}
 	if vulkanDev == nil {
 		t.Fatal("required Vulkan backend was not initialized")

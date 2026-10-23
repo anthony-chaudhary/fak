@@ -193,19 +193,23 @@ bool checkedCounterAdd(std::atomic<uint64_t>& counter, uint64_t value) {
     return true;
 }
 
-bool environmentFlagEnabled(const char* name) {
+bool environmentFlagIs(const char* name, char flag) {
 #ifdef _WIN32
     char value[2]{};
     DWORD length = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
-    return length == 1 && value[0] == '1';
+    return length == 1 && value[0] == flag;
 #else
     const char* value = std::getenv(name);
-    return value && value[0] == '1' && value[1] == '\0';
+    return value && value[0] == flag && value[1] == '\0';
 #endif
 }
 
+bool environmentFlagEnabled(const char* name) { return environmentFlagIs(name, '1'); }
+
+// CPU reads of uncached GTT staging run near 1 GB/s on Strix Halo, which made
+// V4.1 decode readback ~43 ms/step; cached is the default and =0 opts out.
 const bool g_preferCachedTransferStage =
-    environmentFlagEnabled("FAK_VULKAN_STAGE_HOST_CACHED");
+    !environmentFlagIs("FAK_VULKAN_STAGE_HOST_CACHED", '0');
 
 VulkanMemoryGuard g_memoryGuard;
 
