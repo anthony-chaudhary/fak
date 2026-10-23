@@ -19,6 +19,11 @@ package model
 //     falls back to the per-token residentMatRows call, which is exactly
 //     v41ProjMatRows's own read.
 //
+// On a device backend the contract holds per dtype: F32 MatMul and
+// BatchedMatMul share one kernel, while Vulkan Q2_K does not, so the attn.wkv
+// Q2_K panel takes the per-token-identical route (v41_q2k_token_parity.go).
+// The Q2_K query panels keep the batched kernel's order (Ref #12640).
+//
 // Query, KV and router projections use this adapter. The per-token norm/RoPE
 // and routing glue stays scalar at the call site; shared-expert projections
 // remain scalar. A single-row (decode) panel and an unsupported layout take

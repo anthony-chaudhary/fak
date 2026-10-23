@@ -1411,8 +1411,15 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 								}
 							}
 						}
+						var parityTile compute.V41Q2KTokenPanelBackend
+						parityRows := false
+						if !head && continuation == nil {
+							parityTile, parityRows = v41Q2KTokenParityRoute(s.Backend, weight, leaf, rows)
+						}
 						shape := []int{in}
-						if rows > 1 {
+						if parityTile != nil {
+							shape = []int{rows * in}
+						} else if rows > 1 {
 							shape = []int{rows, in}
 						}
 						opStage = "activation upload"
@@ -1429,9 +1436,17 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 						uploaded = int64(len(input)) * 4
 						opStage = "matmul"
 						var y compute.Tensor
-						if rows == 1 {
+						switch {
+						case rows == 1:
 							y = s.Backend.MatMul(weight, x)
-						} else {
+						case parityTile != nil:
+							var tileErr error
+							if y, tileErr = parityTile.V41Q2KTokenPanel(weight, x, rows); tileErr != nil {
+								return nil, tileErr
+							}
+						case parityRows:
+							y = s.v41Q2KMatMulRows(weight, input, rows, in, out)
+						default:
 							y = s.Backend.BatchedMatMul(weight, x, rows)
 						}
 						if loan != nil {
