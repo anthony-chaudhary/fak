@@ -344,7 +344,7 @@ func TestV41ExpertDeviceMatmul(t *testing.T) {
 				nib = b >> 4
 			}
 			exp := int(scales[o*scaleCols+i/v41FP8BlockDim]) - 127
-			acc += v4ExpertE2M1Values[nib] * float32(math.Ldexp(1, exp)) * x[i]
+			acc += float32(v4ExpertE2M1Values[nib] * float32(math.Ldexp(1, exp)) * x[i])
 		}
 		reference[o] = acc
 	}
