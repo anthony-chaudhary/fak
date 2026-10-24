@@ -44,22 +44,34 @@ func TestBillingModeFromCredentialClass(t *testing.T) {
 	}
 }
 
-// TestBillingModeIndependentOfForcedManagedCache is the overstatement fence: `--managed-cache
-// on` forces the posture ACTIVE even on a credential whose billing fak cannot see, and the
-// seat stamp must NOT follow that flag. Deriving the ledger's real-$ column from the active
-// bit would let an operator flag turn unprovable spend into "real dollars".
+// TestBillingModeIndependentOfForcedManagedCache keeps the seat stamp independent of
+// the cache lever: unknown Anthropic billing stays passive even with on (#5295), but
+// an active non-Anthropic passthrough is still unknown and a disabled API-key seat
+// still bills real dollars. Neither active nor passive determines the billing class.
 func TestBillingModeIndependentOfForcedManagedCache(t *testing.T) {
-	in := guardManagedCacheInputs{provider: "anthropic"} // passthrough: billing unknown
-	posture, err := resolveGuardManagedCache(guardManagedCacheOn, in)
-	if err != nil {
-		t.Fatalf("resolve managed cache: %v", err)
-	}
-	if !posture.active {
-		t.Fatalf("precondition: --managed-cache on should force ACTIVE here, got %+v", posture)
-	}
-	if got := billingModeFrom(in); got != cachevaluereport.BillingModeUnknown {
-		t.Fatalf("forced-active passthrough classified %q, want %q — an operator flag must not mint real dollars",
-			got, cachevaluereport.BillingModeUnknown)
+	for _, tc := range []struct {
+		name       string
+		mode       string
+		in         guardManagedCacheInputs
+		wantActive bool
+		wantBill   string
+	}{
+		{"anthropic passthrough on", guardManagedCacheOn, guardManagedCacheInputs{provider: "anthropic"}, false, cachevaluereport.BillingModeUnknown},
+		{"non-anthropic passthrough on", guardManagedCacheOn, guardManagedCacheInputs{provider: "openai"}, true, cachevaluereport.BillingModeUnknown},
+		{"api key off", guardManagedCacheOff, guardManagedCacheInputs{provider: "anthropic", apiKey: "test-api-key"}, false, cachevaluereport.BillingModeAPIKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			posture, err := resolveGuardManagedCache(tc.mode, tc.in)
+			if err != nil {
+				t.Fatalf("resolve managed cache: %v", err)
+			}
+			if posture.active != tc.wantActive {
+				t.Fatalf("cache active = %v, want %v; posture = %+v", posture.active, tc.wantActive, posture)
+			}
+			if got := billingModeFrom(tc.in); got != tc.wantBill {
+				t.Fatalf("billing mode = %q, want %q — cache posture must not determine the billing class", got, tc.wantBill)
+			}
+		})
 	}
 }
 

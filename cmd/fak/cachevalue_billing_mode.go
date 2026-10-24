@@ -19,9 +19,9 @@ import (
 //
 // The class is derived from exactly the credential fields resolveGuardManagedCache reads,
 // so the ledger and the managed-cache banner can never disagree about which seat is which.
-// It is deliberately NOT the resolved active/passive bit: `--managed-cache on` forces
-// ACTIVE on a passthrough credential whose billing fak cannot see, and stamping that as
-// real-dollar would re-introduce the very overstatement this splits apart.
+// It is deliberately NOT the resolved active/passive bit: disabling managed cache does
+// not change API-key billing, and forced-on non-Anthropic passthrough still has unknown
+// billing. Neither an operator flag nor a cache decision can mint real-dollar evidence.
 var (
 	billingModeMu    sync.RWMutex
 	billingModeStamp string
