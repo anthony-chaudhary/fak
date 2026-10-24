@@ -288,10 +288,12 @@ func TestPolicyReloaderSwapsAdjudicatorPolicy(t *testing.T) {
 // the route 404'd. The reloader must re-derive the embedded floor + operator allow
 // overlay so an overlay edit takes effect with no relaunch (add AND remove).
 func TestGuardPolicyReloaderDefaultFloorAppliesOverlay(t *testing.T) {
-	overlay := filepath.Join(t.TempDir(), "allow.json")
+	guardAllowWatcherFailClosed(t)
+	dir := t.TempDir()
+	overlay := filepath.Join(dir, "allow.json")
 	t.Setenv(guardAllowOverlayEnv, overlay)
+	t.Setenv(guardDenyOverlayEnv, filepath.Join(dir, "deny.json"))
 	defer func() {
-		adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy())
 		ifc.ConfigureDefaultPolicy(ifc.Policy{})
 	}()
 
