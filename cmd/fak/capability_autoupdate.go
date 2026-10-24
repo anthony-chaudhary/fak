@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -122,7 +123,10 @@ func needsCapabilityAutoUpgrade(argv []string) bool {
 	}
 	switch argv[1] {
 	case "hil":
-		return true
+		// Use the command's parser so help used as a flag value or after --
+		// cannot bypass freshness checks for an executing HIL invocation.
+		fs := newHILFlagSet(io.Discard, new(hilOptions))
+		return !errors.Is(fs.Parse(argv[2:]), flag.ErrHelp)
 	case "validate":
 		for _, arg := range argv[2:] {
 			if arg == "--strix" || strings.HasPrefix(arg, "--strix=") {

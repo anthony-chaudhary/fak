@@ -15,6 +15,69 @@ import (
 
 const capabilityAutoUpgradeTestCommit = "0123456789abcdef0123456789abcdef01234567"
 
+// fak-test:runtime fast est=10ms lane=default
+func TestCapabilityAutoUpgradeHILHelpStaysLocal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		help bool
+	}{
+		{name: "long help", args: []string{"--help"}, help: true},
+		{name: "short help", args: []string{"-h"}, help: true},
+		{name: "single dash help", args: []string{"-help"}, help: true},
+		{name: "double dash short help", args: []string{"--h"}, help: true},
+		{name: "help after boolean", args: []string{"--probe", "--help"}, help: true},
+		{name: "help after value", args: []string{"--lan-host", "test-host", "-h"}, help: true},
+		{name: "help after explicit false", args: []string{"--probe=false", "--help"}, help: true},
+		{name: "micro doses"},
+		{name: "probe", args: []string{"--probe"}},
+		{name: "inventory", args: []string{"--inventory"}},
+		{name: "comparison audit", args: []string{"--audit-comparison"}},
+		{name: "help is string value", args: []string{"--candidate", "--help"}},
+		{name: "help is inline value", args: []string{"--candidate=-h"}},
+		{name: "help follows terminator", args: []string{"--", "--help"}},
+		{name: "help follows positional", args: []string{"operand", "--help"}},
+		{name: "help follows invalid flag", args: []string{"--unknown", "--help"}},
+		{name: "help follows invalid value", args: []string{"--candidate-val=invalid", "--help"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			argv := append([]string{"fak", "hil"}, tc.args...)
+			if got := needsCapabilityAutoUpgrade(argv); got == tc.help {
+				t.Fatalf("needsCapabilityAutoUpgrade(%q) = %v, want %v", argv, got, !tc.help)
+			}
+			if !tc.help {
+				return
+			}
+			deps := capabilityAutoUpgradeDeps{
+				getenv: func(string) string {
+					t.Fatal("help must not consult updater configuration")
+					return ""
+				},
+				resolveCheckout: func() (string, string, error) {
+					t.Fatal("help must not resolve the checkout")
+					return "", "", nil
+				},
+				process: func(string, []string, io.Reader, io.Writer, io.Writer, []string) error {
+					t.Fatal("help must not start the updater")
+					return nil
+				},
+			}
+			var stdout, stderr bytes.Buffer
+			if code, handled := runCapabilityAutoUpgrade(nil, &stdout, &stderr, argv, deps); code != 0 || handled {
+				t.Fatalf("early gate = (%d, %v), want (0, false)", code, handled)
+			}
+			if stdout.Len() != 0 || stderr.Len() != 0 {
+				t.Fatalf("early gate emitted output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+			if code := runHIL(&stdout, &stderr, tc.args); code != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "Usage of hil:") {
+				t.Fatalf("help = %d, stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestCapabilityAutoUpgradeEligibilityAndEscapeStayCheap(t *testing.T) {
 	tests := []struct {
 		name string

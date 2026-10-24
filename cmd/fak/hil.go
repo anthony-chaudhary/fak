@@ -15,72 +15,101 @@ func cmdHIL(argv []string) {
 	os.Exit(runHIL(os.Stdout, os.Stderr, argv))
 }
 
-func runHIL(stdout, stderr io.Writer, argv []string) int {
+type hilOptions struct {
+	asJSON       bool
+	probeOnly    bool
+	lanProbe     bool
+	inventory    bool
+	lanHost      string
+	auditComp    bool
+	candName     string
+	candVal      float64
+	candPhysical bool
+	candType     string
+	candTarget   string
+	baseName     string
+	baseVal      float64
+	basePhysical bool
+	baseType     string
+	baseTarget   string
+	metric       string
+	lowerBetter  bool
+}
+
+// newHILFlagSet shares the command's flag grammar with the early freshness gate.
+// Constructing and parsing it has no hardware, checkout, or updater side effects.
+func newHILFlagSet(stderr io.Writer, opts *hilOptions) *flag.FlagSet {
 	fs := flag.NewFlagSet("hil", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	asJSON := fs.Bool("json", false, "emit output as JSON envelope")
-	probeOnly := fs.Bool("probe", false, "probe and report physical hardware capabilities only")
-	lanProbe := fs.Bool("lan", false, "probe local silicon and LAN appliance node (AMD Strix Halo)")
-	inventory := fs.Bool("inventory", false, "emit dynamic hardware fleet inventory (local + LAN appliance)")
-	lanHost := fs.String("lan-host", "", "override LAN appliance host alias or address")
-	auditComp := fs.Bool("audit-comparison", false, "audit a head-to-head comparison for physical hardware vs simulation")
-	candName := fs.String("candidate", "", "candidate system name for comparison audit")
-	candVal := fs.Float64("candidate-val", 0, "candidate metric value")
-	candPhysical := fs.Bool("candidate-physical", true, "candidate was measured on physical silicon")
-	candType := fs.String("candidate-type", "hardware_measurement", "candidate evidence type")
-	candTarget := fs.String("candidate-target", "", "candidate hardware target")
-	baseName := fs.String("baseline", "", "baseline system name for comparison audit")
-	baseVal := fs.Float64("baseline-val", 0, "baseline metric value")
-	basePhysical := fs.Bool("baseline-physical", true, "baseline was measured on physical silicon")
-	baseType := fs.String("baseline-type", "hardware_measurement", "baseline evidence type")
-	baseTarget := fs.String("baseline-target", "", "baseline hardware target")
-	metric := fs.String("metric", "tok/s", "comparison metric name")
-	lowerBetter := fs.Bool("lower-is-better", false, "lower metric value is better")
+	fs.BoolVar(&opts.asJSON, "json", false, "emit output as JSON envelope")
+	fs.BoolVar(&opts.probeOnly, "probe", false, "probe and report physical hardware capabilities only")
+	fs.BoolVar(&opts.lanProbe, "lan", false, "probe local silicon and LAN appliance node (AMD Strix Halo)")
+	fs.BoolVar(&opts.inventory, "inventory", false, "emit dynamic hardware fleet inventory (local + LAN appliance)")
+	fs.StringVar(&opts.lanHost, "lan-host", "", "override LAN appliance host alias or address")
+	fs.BoolVar(&opts.auditComp, "audit-comparison", false, "audit a head-to-head comparison for physical hardware vs simulation")
+	fs.StringVar(&opts.candName, "candidate", "", "candidate system name for comparison audit")
+	fs.Float64Var(&opts.candVal, "candidate-val", 0, "candidate metric value")
+	fs.BoolVar(&opts.candPhysical, "candidate-physical", true, "candidate was measured on physical silicon")
+	fs.StringVar(&opts.candType, "candidate-type", "hardware_measurement", "candidate evidence type")
+	fs.StringVar(&opts.candTarget, "candidate-target", "", "candidate hardware target")
+	fs.StringVar(&opts.baseName, "baseline", "", "baseline system name for comparison audit")
+	fs.Float64Var(&opts.baseVal, "baseline-val", 0, "baseline metric value")
+	fs.BoolVar(&opts.basePhysical, "baseline-physical", true, "baseline was measured on physical silicon")
+	fs.StringVar(&opts.baseType, "baseline-type", "hardware_measurement", "baseline evidence type")
+	fs.StringVar(&opts.baseTarget, "baseline-target", "", "baseline hardware target")
+	fs.StringVar(&opts.metric, "metric", "tok/s", "comparison metric name")
+	fs.BoolVar(&opts.lowerBetter, "lower-is-better", false, "lower metric value is better")
+	return fs
+}
+
+func runHIL(stdout, stderr io.Writer, argv []string) int {
+	var opts hilOptions
+	fs := newHILFlagSet(stderr, &opts)
 
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 
 	// 1. Comparison Audit Mode
-	if *auditComp || (*candName != "" && *baseName != "") {
-		if *candName == "" || *baseName == "" || *candVal <= 0 || *baseVal <= 0 {
+	if opts.auditComp || (opts.candName != "" && opts.baseName != "") {
+		if opts.candName == "" || opts.baseName == "" || opts.candVal <= 0 || opts.baseVal <= 0 {
 			fmt.Fprintln(stderr, "fak hil: comparison audit requires non-empty --candidate, --baseline, --candidate-val > 0, and --baseline-val > 0")
 			return 2
 		}
 
-		cTarget := *candTarget
+		cTarget := opts.candTarget
 		if cTarget == "" {
 			cTarget = "local-silicon"
 		}
-		bTarget := *baseTarget
+		bTarget := opts.baseTarget
 		if bTarget == "" {
 			bTarget = "reference-silicon"
 		}
 
 		cand := hil.ComparisonArm{
-			Name:              *candName,
-			IsPhysicalSilicon: *candPhysical,
+			Name:              opts.candName,
+			IsPhysicalSilicon: opts.candPhysical,
 			HardwareTarget:    cTarget,
-			EvidenceType:      *candType,
-			Metric:            *metric,
-			Value:             *candVal,
-			Unit:              *metric,
+			EvidenceType:      opts.candType,
+			Metric:            opts.metric,
+			Value:             opts.candVal,
+			Unit:              opts.metric,
 			SampleCount:       10,
 		}
 		base := hil.ComparisonArm{
-			Name:              *baseName,
-			IsPhysicalSilicon: *basePhysical,
+			Name:              opts.baseName,
+			IsPhysicalSilicon: opts.basePhysical,
 			HardwareTarget:    bTarget,
-			EvidenceType:      *baseType,
-			Metric:            *metric,
-			Value:             *baseVal,
-			Unit:              *metric,
+			EvidenceType:      opts.baseType,
+			Metric:            opts.metric,
+			Value:             opts.baseVal,
+			Unit:              opts.metric,
 			SampleCount:       10,
 		}
 
-		audit := hil.AuditComparison(fmt.Sprintf("%s vs %s", *candName, *baseName), cand, base, *lowerBetter)
-		if *asJSON {
+		audit := hil.AuditComparison(fmt.Sprintf("%s vs %s", opts.candName, opts.baseName), cand, base, opts.lowerBetter)
+		if opts.asJSON {
 			if err := writeIndentedJSON(stdout, audit); err != nil {
 				fmt.Fprintf(stderr, "fak hil: write json: %v\n", err)
 				return 1
@@ -104,11 +133,11 @@ func runHIL(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	// 2. Dynamic Hardware Inventory Mode
-	if *inventory {
+	if opts.inventory {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		inv := hil.ProbeInventory(ctx, *lanHost)
-		if *asJSON {
+		inv := hil.ProbeInventory(ctx, opts.lanHost)
+		if opts.asJSON {
 			if err := writeIndentedJSON(stdout, inv); err != nil {
 				fmt.Fprintf(stderr, "fak hil: write json: %v\n", err)
 				return 1
@@ -141,15 +170,15 @@ func runHIL(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	// 3. Probe Only Mode
-	if *probeOnly {
+	if opts.probeOnly {
 		hw := hil.ProbeHardware()
-		if *lanProbe {
+		if opts.lanProbe {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			lan := hil.ProbeLANNode(ctx, *lanHost)
+			lan := hil.ProbeLANNode(ctx, opts.lanHost)
 			hw.LANNode = &lan
 		}
-		if *asJSON {
+		if opts.asJSON {
 			if err := writeIndentedJSON(stdout, hw); err != nil {
 				fmt.Fprintf(stderr, "fak hil: write json: %v\n", err)
 				return 1
@@ -187,7 +216,7 @@ func runHIL(stdout, stderr io.Writer, argv []string) int {
 
 	report := hil.RunMicroDoses(ctx)
 
-	if *asJSON {
+	if opts.asJSON {
 		if err := writeIndentedJSON(stdout, report); err != nil {
 			fmt.Fprintf(stderr, "fak hil: write json: %v\n", err)
 			return 1
