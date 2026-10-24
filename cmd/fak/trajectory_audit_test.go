@@ -11,7 +11,15 @@ import (
 	"testing"
 )
 
+// Live audit fixtures select Claude/Codex roots explicitly; the optional
+// unsupported source must not depend on the machine running the test.
+func isolateTrajectoryAuditOpenCode(t *testing.T) {
+	t.Helper()
+	t.Setenv("OPENCODE_HOME", filepath.Join(t.TempDir(), "missing-opencode"))
+}
+
 func TestRunTrajectoryAuditPinnedCrossHarness(t *testing.T) {
+	isolateTrajectoryAuditOpenCode(t)
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")
 	markdownPath := filepath.Join(temp, "audit.md")
@@ -64,6 +72,7 @@ func TestRunTrajectoryAuditPinnedCrossHarness(t *testing.T) {
 }
 
 func TestRunTrajectoryAuditRendersCodexCacheAttribution(t *testing.T) {
+	isolateTrajectoryAuditOpenCode(t)
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")
 	markdownPath := filepath.Join(temp, "audit.md")
@@ -104,6 +113,7 @@ func TestRunTrajectoryAuditRendersCodexCacheAttribution(t *testing.T) {
 }
 
 func TestRunTrajectoryAuditUnsupportedShapeWritesArtifactAndFails(t *testing.T) {
+	isolateTrajectoryAuditOpenCode(t)
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")
 	claudeRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "unsupported", "claude", "projects")
@@ -125,6 +135,7 @@ func TestRunTrajectoryAuditUnsupportedShapeWritesArtifactAndFails(t *testing.T) 
 }
 
 func TestRunTrajectoryAuditIssue9418SharedCodexSessionIDsStayDistinct(t *testing.T) {
+	isolateTrajectoryAuditOpenCode(t)
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")
 	missingClaude := filepath.Join(temp, "missing-claude")
@@ -209,6 +220,7 @@ func TestRunTrajectoryAuditRefusalMatrix(t *testing.T) {
 
 func assertTrajectoryAuditRefusal(t *testing.T, claudeRoot, codexRoot, code string) {
 	t.Helper()
+	isolateTrajectoryAuditOpenCode(t)
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")
 	markdownPath := filepath.Join(temp, "audit.md")
@@ -525,6 +537,7 @@ func TestTrajectoryUsageListsAssurance(t *testing.T) {
 }
 
 func TestRunTrajectoryAuditProgressFlag(t *testing.T) {
+	isolateTrajectoryAuditOpenCode(t)
 	temp := t.TempDir()
 	jsonlPath := filepath.Join(temp, "audit.jsonl")
 	claudeRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "claude", "projects")

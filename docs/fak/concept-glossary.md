@@ -1707,3 +1707,10 @@ HIL ComparisonScope value declaring an engine or optimization comparison on the 
 Pure checked geometry for NVFP4 scale images: computes rows*scaleCols linearLen, pads rows to 128 and scale columns to 4, and returns the padded swizzledLen and tileCols.
 
 **Distinct from:** Describes lengths and tile geometry only; it is not SwizzleNVFP4Scales or UnswizzleNVFP4Scales value permutation, tensor element ordering, checkpoint weight packing, state/KV layout, scale-image allocation, execution, or hardware qualification.
+
+
+### unsupported_coverage
+
+Machine-readable trajectory audit refusal code emitted when an OpenCode source root is present but its corpus parser is unavailable, marking the source unscanned rather than successfully empty.
+
+**Distinct from:** A source-specific audit refusal, not a measured coverage fraction or general capability-support claim; an absent optional root remains non-refusing, while a present root contributes one refused record without exposing its absolute path.

@@ -273,7 +273,7 @@ type AuditDeltaRow struct {
 	Regression           bool     `json:"regression"`
 }
 
-// AuditRefusalRow names a transcript shape the parser refused to estimate.
+// AuditRefusalRow names source coverage or a transcript shape the parser refused to estimate.
 type AuditRefusalRow struct {
 	Schema     string `json:"schema"`
 	Kind       string `json:"kind"`
@@ -724,6 +724,13 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 			return res, fmt.Errorf("trajectory audit: stat %s root: %w", source.Name, err)
 		}
 		res.denominator.RootPresent = true
+		// Presence is not evidence of an empty corpus when its storage cannot be read.
+		res.denominator.RefusedRecords = 1
+		res.refusals = []AuditRefusalRow{{
+			Schema: AuditSchema, Kind: "refusal", Source: source.Name, SourcePath: ".",
+			Code:   "unsupported_coverage",
+			Detail: "OpenCode corpus coverage is unsupported; source was not scanned",
+		}}
 		return res, nil
 	default:
 		return res, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
