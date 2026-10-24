@@ -44,7 +44,7 @@ date: 2026-07-10
 
 | Value | What it does |
 |---|---|
-| `on` | Ask for the stable-prefix 1h-TTL upgrade. On an API key it activates and saves dollars. On a **subscription-OAuth seat the guard refuses it and downgrades to passive**, with the reason printed in the banner: the provider rejects a `ttl:"1h"` body on that credential class with an HTTP 400 in practice (measured 2026-07-18), so forcing it would fail your turns rather than steer the cache. |
+| `on` | Ask for the stable-prefix 1h-TTL upgrade. On an API key it activates and saves dollars. On a **subscription-OAuth seat the guard refuses it and downgrades to passive**, with the reason printed in the banner: the provider rejects a `ttl:"1h"` body on that credential class with an HTTP 400 in practice (measured 2026-07-18), so forcing it would fail your turns rather than steer the cache. Unknown Anthropic passthrough also stays passive because its billing is unproven and it may carry subscription OAuth; use `--api-key-env` to establish API-key billing. |
 | `off` | Never touch the provider cache — just forward your agent's own `cache_control` markers unchanged. |
 | `auto` | Activate **only when fak can prove the session bills an API key** on the Anthropic wire (via `--api-key-env`). A subscription-OAuth seat, a passthrough credential, a non-Anthropic provider, or a local in-kernel model all stay **passive**. |
 

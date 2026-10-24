@@ -54,7 +54,7 @@ surface; that is a different claim from observed provider savings.
 
 | Choice | Behavior | Select it when |
 |---|---|---|
-| `on` | Requests active managed-cache steering regardless of whether fak can observe per-token billing. | The launcher default or an operator explicitly wants the longer Anthropic cache tier. |
+| `on` | On the Anthropic wire, requests active managed-cache steering only when fak can prove API-key billing. Subscription-OAuth and unknown passthrough credentials stay passive. | The launcher default or an operator explicitly wants the longer Anthropic cache tier. |
 | `auto` | Activates only when fak can identify API-key billing; otherwise it stays passive. | The bare-guard default, or when active steering should depend on observable billing. |
 | `off` | Leaves provider cache markers unsteered. | A bounded comparison or a provider path where the operator deliberately wants passive behavior. |
 
