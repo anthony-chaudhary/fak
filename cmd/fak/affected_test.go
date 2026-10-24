@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -156,18 +157,21 @@ func TestAffectedBlameAttribution(t *testing.T) {
 		return map[string]string{"a/a.go": "m/a", "b/b.go": "m/b", "c/c.go": "m/c"},
 			map[string][]string{}, 3, nil
 	}
+	var candidateArgs []string
 	affectedRunGoTest = func(root string, args []string, stdout, stderr io.Writer) (int, error) {
+		candidateArgs = append([]string(nil), args...)
 		fmt.Fprintln(stdout, "FAIL\tm/a\t0.10s")
 		fmt.Fprintln(stdout, "ok  \tm/c\t0.01s")
 		fmt.Fprintln(stdout, "FAIL\tm/b\t0.10s")
 		return 1, nil
 	}
-	var baselineAsked []string
-	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, map[string]bool, error) {
+	var baselineAsked, baselineFlags []string
+	affectedBaselineRed = func(root, ref string, flags, pkgs []string) (map[string]bool, map[string]bool, error) {
 		if ref != "HEAD" {
 			t.Errorf("baseline ref = %q, want HEAD (no --base given)", ref)
 		}
 		baselineAsked = append([]string(nil), pkgs...)
+		baselineFlags = append([]string(nil), flags...)
 		// m/a was red before any working-tree change; both produced a baseline verdict.
 		return map[string]bool{"m/a": true}, map[string]bool{"m/a": true, "m/b": true}, nil
 	}
@@ -176,7 +180,11 @@ func TestAffectedBlameAttribution(t *testing.T) {
 	// the closure of the caller's declared c/c.go (peer-wip) -> exit 0, PEER_RED_ONLY.
 	report := filepath.Join(t.TempDir(), "report.json")
 	var out, errb bytes.Buffer
-	code := runAffected(&out, &errb, []string{"--mine", "c/c.go", "--report", report})
+	code := runAffected(&out, &errb, []string{
+		"--mine", "c/c.go", "--report", report, "--short", "--v",
+		"--run", "^TestSelected$", "--count", "2", "--timeout", "30s",
+		"--", "-tags=selected", "-race",
+	})
 	if code != 0 {
 		t.Fatalf("exonerated run exit = %d, want 0\nstderr=%s", code, errb.String())
 	}
@@ -185,6 +193,14 @@ func TestAffectedBlameAttribution(t *testing.T) {
 	}
 	if !reflect.DeepEqual(baselineAsked, []string{"m/a", "m/b"}) {
 		t.Fatalf("baseline asked for %v, want the failing packages [m/a m/b]", baselineAsked)
+	}
+	wantFlags := []string{"-short", "-v", "-run", "^TestSelected$", "-count=2", "-timeout", "30s", "-tags=selected", "-race"}
+	if !reflect.DeepEqual(baselineFlags, wantFlags) {
+		t.Fatalf("baseline flags = %v, want %v", baselineFlags, wantFlags)
+	}
+	wantArgs := append(append([]string{"test"}, wantFlags...), "m/a", "m/b", "m/c")
+	if !reflect.DeepEqual(candidateArgs, wantArgs) {
+		t.Fatalf("candidate args = %v, want %v", candidateArgs, wantArgs)
 	}
 	raw, err := os.ReadFile(report)
 	if err != nil {
@@ -230,7 +246,7 @@ func TestAffectedBlameAttribution(t *testing.T) {
 
 	// Baseline unavailable: nothing is exonerated by that rung (fail-closed), but the
 	// closure rung still works; with a red inside the closure the exit stays 1.
-	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, map[string]bool, error) {
+	affectedBaselineRed = func(root, ref string, flags, pkgs []string) (map[string]bool, map[string]bool, error) {
 		return nil, nil, fmt.Errorf("git worktree unavailable")
 	}
 	out.Reset()
@@ -253,6 +269,81 @@ func TestBaselineHarnessFailure(t *testing.T) {
 	clean := "--- FAIL: TestX (0.00s)\n    x_test.go:10: want 1, got 2\nFAIL\tm/a\t0.42s\nok  \tm/b\t0.01s\n"
 	if m := baselineHarnessFailure(clean); m != "" {
 		t.Fatalf("clean red output misread as harness failure (marker %q)", m)
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestAffectedBlamePreservesTestSelection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires native test execution; run this fixture through WSL")
+	}
+	repo, git := seedGitFixtureRepo(t)
+	commitFiles(t, repo, git, "seed selected and unrelated tests", map[string]string{
+		"go.mod":   "module affectedfixture.test\n\ngo 1.26\n",
+		"value.go": "package fixture\n\nfunc Value() int { return 1 }\n",
+		"selected_test.go": `//go:build affectedselection
+
+package fixture
+
+import "testing"
+
+func TestSelected(t *testing.T) {
+	if !testing.Short() || Value() != 1 {
+		t.Fatal("selected regression or mismatched short mode")
+	}
+}
+`,
+		"unrelated_test.go": `package fixture
+
+import "testing"
+
+func TestUnrelated(t *testing.T) {
+	t.Fatal("pre-existing failure outside the selected regression")
+}
+`,
+	})
+	if err := os.WriteFile(filepath.Join(repo, "value.go"), []byte("package fixture\n\nfunc Value() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	t.Setenv("FAK_WORKSPACE_ROOT", "")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	for _, tc := range []struct {
+		test    string
+		code    int
+		verdict string
+		class   string
+	}{
+		{"TestSelected", 1, "TEST_FAILED", affectedtests.BlameMine},
+		{"TestUnrelated", 0, "PEER_RED_ONLY", affectedtests.BlamePeerPreexisting},
+	} {
+		t.Run(tc.test, func(t *testing.T) {
+			report := filepath.Join(t.TempDir(), "report.json")
+			var out, errb bytes.Buffer
+			code := runAffected(&out, &errb, []string{
+				"--mine", "value.go", "--short", "--run", "^" + tc.test + "$",
+				"--count", "1", "--timeout", "10s", "--report", report,
+				"--", "-tags=affectedselection",
+			})
+			if !strings.Contains(out.String(), "--- FAIL: "+tc.test) {
+				t.Fatalf("selected test did not execute and fail: stdout=%s stderr=%s", out.String(), errb.String())
+			}
+			if code != tc.code {
+				t.Fatalf("exit = %d, want %d; stdout=%s stderr=%s", code, tc.code, out.String(), errb.String())
+			}
+			raw, err := os.ReadFile(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rep affectedRunReport
+			if err := json.Unmarshal(raw, &rep); err != nil {
+				t.Fatal(err)
+			}
+			if rep.Verdict != tc.verdict || len(rep.Blame) != 1 || rep.Blame[0].Class != tc.class {
+				t.Fatalf("verdict=%s blame=%v, want %s/%s", rep.Verdict, rep.Blame, tc.verdict, tc.class)
+			}
+		})
 	}
 }
 
@@ -346,7 +437,7 @@ func TestAffectedRerunFailFlaky(t *testing.T) {
 		return map[string]bool{"m/a": true}, nil
 	}
 	var baselineAsked []string
-	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, map[string]bool, error) {
+	affectedBaselineRed = func(root, ref string, flags, pkgs []string) (map[string]bool, map[string]bool, error) {
 		baselineAsked = append([]string(nil), pkgs...)
 		return map[string]bool{"m/b": true}, map[string]bool{"m/b": true}, nil
 	}

@@ -230,7 +230,7 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 				fmt.Fprintf(stderr, "fak affected: %s\n", reason)
 				exitCode = 0
 			case *blame:
-				blames = attributeAffectedFailures(stderr, root, baselineRef, stillFailing, mineFiles, changedFiles, fileToPkg, edges)
+				blames = attributeAffectedFailures(stderr, root, baselineRef, goTestFlags, stillFailing, mineFiles, changedFiles, fileToPkg, edges)
 				mineCount := 0
 				for _, b := range blames {
 					if b.Class == affectedtests.BlameMine {
@@ -339,7 +339,7 @@ func affectedInitialVerdict(code int, runErr error, elapsed, budget time.Duratio
 // narrated: an unavailable baseline exonerates nothing, and a --mine file that is not
 // among the changed files (a typo'd path would otherwise shrink the closure and
 // exonerate everything as peer-wip) voids the closure rung entirely.
-func attributeAffectedFailures(stderr io.Writer, root, baselineRef string, failing, mineFiles, changedFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
+func attributeAffectedFailures(stderr io.Writer, root, baselineRef string, flags, failing, mineFiles, changedFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
 	var mineClosure map[string]bool
 	if len(mineFiles) > 0 {
 		changed := make(map[string]bool, len(changedFiles))
@@ -362,7 +362,7 @@ func attributeAffectedFailures(stderr io.Writer, root, baselineRef string, faili
 			}
 		}
 	}
-	baselineRed, baselineSeen, err := affectedBaselineRed(root, baselineRef, failing)
+	baselineRed, baselineSeen, err := affectedBaselineRed(root, baselineRef, flags, failing)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak affected: baseline rerun at %s unavailable (%v); no baseline exoneration — fail-closed\n", baselineRef, err)
 		baselineRed, baselineSeen = nil, nil
@@ -376,6 +376,8 @@ func attributeAffectedFailures(stderr io.Writer, root, baselineRef string, faili
 // returning — the trunk stays untouched). The rerun invokes `go test` directly rather
 // than through the test.ps1/WSL routing: that routing mirrors the MAIN working tree, so
 // it would re-test the very tree the baseline must exclude.
+// The original test flags must survive: a failure outside the selected tests or build
+// configuration is not evidence that the candidate's selected failure pre-existed.
 //
 // It returns (red, seen): the packages whose baseline verdict was FAIL, and every
 // package that produced a verdict at all (FAIL or ok) — the coverage evidence that
@@ -386,7 +388,7 @@ func attributeAffectedFailures(stderr io.Writer, root, baselineRef string, faili
 // run that produced NO verdict at all (a module-load abort) each return an error, and
 // the caller exonerates nothing. A plain non-zero test exit is the signal being
 // measured, not an error.
-func runAffectedBaselineRed(root, ref string, pkgs []string) (red, seen map[string]bool, err error) {
+func runAffectedBaselineRed(root, ref string, flags, pkgs []string) (red, seen map[string]bool, err error) {
 	tmp, err := os.MkdirTemp("", "fak-affected-baseline-")
 	if err != nil {
 		return nil, nil, fmt.Errorf("temp dir: %w", err)
@@ -408,7 +410,9 @@ func runAffectedBaselineRed(root, ref string, pkgs []string) (red, seen map[stri
 		os.RemoveAll(tmp)
 	}()
 
-	cmd := exec.Command("go", append([]string{"test"}, pkgs...)...)
+	args := append([]string{"test"}, flags...)
+	args = append(args, pkgs...)
+	cmd := exec.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = wt
 	var out bytes.Buffer
