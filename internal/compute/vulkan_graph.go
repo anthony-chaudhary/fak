@@ -790,6 +790,139 @@ func (c *VulkanLayerGraphCache) Stats() VulkanGraphCacheStats {
 	return s
 }
 
+// ---- Dedicated Transfer Queue Selection (#10915) --------------------------------
+
+// VulkanQueueFamily is one physical-device queue family as the host planner needs it. It
+// mirrors the fields of VkQueueFamilyProperties read by selection; it holds no device handle
+// and makes no claim that a queue or ownership-transfer path has been created.
+type VulkanQueueFamily struct {
+	Index      int  `json:"index"`
+	QueueCount int  `json:"queue_count"`
+	Compute    bool `json:"compute"`
+	Transfer   bool `json:"transfer"`
+	Graphics   bool `json:"graphics"`
+}
+
+// VulkanTransferQueuePlan is the host-side outcome of selecting a transfer queue family for
+// a target gfx arch. Selected is false when no distinct candidate qualifies; the caller then
+// keeps the unified-queue plan. FallbackReason is
+// a closed-vocabulary token, never free prose. Selected plans bind only as direct in-memory
+// selection results; the private validation marker is intentionally absent from JSON receipts.
+type VulkanTransferQueuePlan struct {
+	GFX            string `json:"gfx"`
+	ComputeFamily  int    `json:"compute_family"`
+	TransferFamily int    `json:"transfer_family"`
+	Selected       bool   `json:"selected"`
+	Dedicated      bool   `json:"dedicated"`
+	FallbackReason string `json:"fallback_reason,omitempty"`
+	validation     vulkanTransferQueueValidation
+}
+
+type vulkanTransferQueueValidation struct {
+	gfx            string
+	computeFamily  int
+	transferFamily int
+	selected       bool
+	dedicated      bool
+}
+
+func validateTransferQueuePlan(plan VulkanTransferQueuePlan) VulkanTransferQueuePlan {
+	plan.validation = vulkanTransferQueueValidation{
+		gfx:            plan.GFX,
+		computeFamily:  plan.ComputeFamily,
+		transferFamily: plan.TransferFamily,
+		selected:       plan.Selected,
+		dedicated:      plan.Dedicated,
+	}
+	return plan
+}
+
+func (v vulkanTransferQueueValidation) matches(plan VulkanTransferQueuePlan) bool {
+	return v == (vulkanTransferQueueValidation{
+		gfx:            plan.GFX,
+		computeFamily:  plan.ComputeFamily,
+		transferFamily: plan.TransferFamily,
+		selected:       plan.Selected,
+		dedicated:      plan.Dedicated,
+	})
+}
+
+const (
+	vulkanTransferFallbackNoQueueFamilies      = "no_queue_families"
+	vulkanTransferFallbackInvalidComputeFamily = "invalid_compute_family"
+	vulkanTransferFallbackInvalidQueueFamily   = "invalid_queue_family"
+	vulkanTransferFallbackDuplicateQueueFamily = "duplicate_queue_family"
+	vulkanTransferFallbackNoDistinctFamily     = "no_distinct_transfer_family"
+	vulkanTransferFallbackUnknownArch          = "unknown_arch"
+	vulkanTransferFallbackInvalidPlan          = "invalid_transfer_queue_plan"
+	vulkanTransferFallbackRebindBusy           = "transfer_queue_rebind_busy"
+	vulkanTransferFallbackUnifiedQueue         = "unified_queue"
+)
+
+// SelectTransferQueueFamily picks a host plan for out-of-core layer staging. It prefers a
+// dedicated transfer-only family (no compute/graphics bit); failing that it accepts any
+// transfer-capable family distinct from the compute family; failing that it returns
+// Selected=false with a
+// closed-vocabulary fallback reason and the caller keeps the unified single queue. Pure
+// selection over the enumerated families — no device call, no fabricated capability.
+func SelectTransferQueueFamily(gfx string, computeFamily int, families []VulkanQueueFamily) VulkanTransferQueuePlan {
+	plan := VulkanTransferQueuePlan{GFX: gfx, ComputeFamily: computeFamily, TransferFamily: -1}
+	if computeFamily < 0 {
+		plan.FallbackReason = vulkanTransferFallbackInvalidComputeFamily
+		return plan
+	}
+	if len(families) == 0 {
+		plan.FallbackReason = vulkanTransferFallbackNoQueueFamilies
+		return plan
+	}
+	seen := make(map[int]struct{}, len(families))
+	computeAvailable := false
+	for _, f := range families {
+		if f.Index < 0 {
+			plan.FallbackReason = vulkanTransferFallbackInvalidQueueFamily
+			return plan
+		}
+		if _, ok := seen[f.Index]; ok {
+			plan.FallbackReason = vulkanTransferFallbackDuplicateQueueFamily
+			return plan
+		}
+		seen[f.Index] = struct{}{}
+		if f.Index == computeFamily && f.QueueCount > 0 && f.Compute {
+			computeAvailable = true
+		}
+	}
+	if !computeAvailable {
+		plan.FallbackReason = vulkanTransferFallbackInvalidComputeFamily
+		return plan
+	}
+	for _, f := range families {
+		if f.QueueCount > 0 && f.Index != computeFamily && f.Transfer && !f.Compute && !f.Graphics {
+			plan.TransferFamily = f.Index
+			plan.Selected = true
+			plan.Dedicated = true
+			return validateTransferQueuePlan(plan)
+		}
+	}
+	for _, f := range families {
+		if f.QueueCount > 0 && f.Transfer && f.Index != computeFamily {
+			plan.TransferFamily = f.Index
+			plan.Selected = true
+			return validateTransferQueuePlan(plan)
+		}
+	}
+	plan.FallbackReason = vulkanTransferFallbackNoDistinctFamily
+	return plan
+}
+
+// PlanTransferQueueForArch selects a transfer queue family for a named gfx arch, returning
+// Selected=false (unified-queue fallback) when the arch is unknown or no family qualifies.
+func PlanTransferQueueForArch(gfx string, computeFamily int, families []VulkanQueueFamily) VulkanTransferQueuePlan {
+	if _, ok := LookupRowtileArch(gfx); !ok {
+		return VulkanTransferQueuePlan{GFX: gfx, ComputeFamily: computeFamily, TransferFamily: -1, FallbackReason: vulkanTransferFallbackUnknownArch}
+	}
+	return SelectTransferQueueFamily(gfx, computeFamily, families)
+}
+
 // ---- Bounded Staging Pool (#9835) -----------------------------------------------
 
 // StagingSlotState reflects the readiness of a bounded staging slot.
@@ -825,6 +958,13 @@ type VulkanStagingPool struct {
 	deviceLost  bool
 	totalStaged int64
 	transfers   uint64
+
+	// Transfer-queue binding (#10915) is host-side planning state only. A selected plan makes
+	// completed staging values strictly increasing within one binding epoch. Vulkan queue,
+	// semaphore, submission, and ownership-transfer wiring remain the backend's responsibility.
+	transferPlan    VulkanTransferQueuePlan
+	hasTransferPlan bool
+	lastTimeline    uint64
 }
 
 // NewVulkanStagingPool allocates a bounded staging pool with numSlots (>= 2 for double-buffering).
@@ -840,10 +980,11 @@ func NewVulkanStagingPool(numSlots int, slotCapacity int64, align int64) (*Vulka
 	}
 
 	p := &VulkanStagingPool{
-		numSlots: numSlots,
-		slotSize: slotCapacity,
-		align:    align,
-		slots:    make([]VulkanStagingSlot, numSlots),
+		numSlots:     numSlots,
+		slotSize:     slotCapacity,
+		align:        align,
+		slots:        make([]VulkanStagingSlot, numSlots),
+		transferPlan: VulkanTransferQueuePlan{TransferFamily: -1},
 	}
 	p.cond = sync.NewCond(&p.mu)
 
@@ -870,6 +1011,90 @@ func (p *VulkanStagingPool) SlotCapacity() int64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.slotSize
+}
+
+// BindTransferQueue updates the pool's host-side transfer plan and returns the plan still in
+// force. FallbackReason reports a refused update without replacing the retained plan. A
+// selected plan must originate from SelectTransferQueueFamily (or PlanTransferQueueForArch),
+// so a caller cannot fabricate family availability by filling exported receipt fields.
+// Changing or clearing a binding starts a fresh timeline epoch only when every slot
+// is free; rebinding the same plan preserves monotonicity. This method does not create a
+// VkQueue, semaphore, submission, or queue-family ownership transfer.
+func (p *VulkanStagingPool) BindTransferQueue(plan VulkanTransferQueuePlan) VulkanTransferQueuePlan {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if plan.Selected && (!plan.validation.matches(plan) || plan.ComputeFamily < 0 || plan.TransferFamily < 0 || plan.TransferFamily == plan.ComputeFamily || plan.FallbackReason != "") {
+		return p.rejectedTransferQueuePlanLocked(plan, vulkanTransferFallbackInvalidPlan)
+	}
+
+	if plan.Selected && p.hasTransferPlan && sameTransferQueueBinding(p.transferPlan, plan) {
+		return p.transferPlan
+	}
+	if !plan.Selected && !p.hasTransferPlan {
+		return normalizeUnselectedTransferQueuePlan(plan)
+	}
+	if p.hasActiveStagingSlotLocked() {
+		return p.rejectedTransferQueuePlanLocked(plan, vulkanTransferFallbackRebindBusy)
+	}
+	if !plan.Selected {
+		plan = normalizeUnselectedTransferQueuePlan(plan)
+		p.transferPlan = VulkanTransferQueuePlan{TransferFamily: -1}
+		p.hasTransferPlan = false
+		p.lastTimeline = 0
+		return plan
+	}
+	p.transferPlan = plan
+	p.hasTransferPlan = true
+	p.lastTimeline = 0
+	return plan
+}
+
+func normalizeUnselectedTransferQueuePlan(plan VulkanTransferQueuePlan) VulkanTransferQueuePlan {
+	if plan.FallbackReason == "" {
+		plan.FallbackReason = vulkanTransferFallbackUnifiedQueue
+	}
+	plan.TransferFamily = -1
+	plan.Selected = false
+	plan.Dedicated = false
+	return plan
+}
+
+func (p *VulkanStagingPool) rejectedTransferQueuePlanLocked(plan VulkanTransferQueuePlan, reason string) VulkanTransferQueuePlan {
+	if p.hasTransferPlan {
+		retained := p.transferPlan
+		retained.FallbackReason = reason
+		return retained
+	}
+	plan.FallbackReason = reason
+	return normalizeUnselectedTransferQueuePlan(plan)
+}
+
+func sameTransferQueueBinding(a, b VulkanTransferQueuePlan) bool {
+	return a.GFX == b.GFX && a.ComputeFamily == b.ComputeFamily && a.TransferFamily == b.TransferFamily && a.Dedicated == b.Dedicated
+}
+
+func (p *VulkanStagingPool) hasActiveStagingSlotLocked() bool {
+	for i := range p.slots {
+		if p.slots[i].State != StagingSlotFree {
+			return true
+		}
+	}
+	return false
+}
+
+// TransferQueuePlan returns the bound transfer-queue plan and whether one is in force.
+func (p *VulkanStagingPool) TransferQueuePlan() (VulkanTransferQueuePlan, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.transferPlan, p.hasTransferPlan
+}
+
+// TransferOverlapped reports whether the host plan permits distinct-family overlap. It does
+// not prove that Vulkan queue execution, ownership barriers, or GPU overlap are wired.
+func (p *VulkanStagingPool) TransferOverlapped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.hasTransferPlan && p.transferPlan.Selected && p.transferPlan.TransferFamily >= 0 && p.transferPlan.TransferFamily != p.transferPlan.ComputeFamily
 }
 
 // AcquireSlot blocks until an idle slot is available and marks it StagingSlotTransferring.
@@ -963,8 +1188,17 @@ func (p *VulkanStagingPool) MarkTransferComplete(slotID int, timeline uint64) er
 		return fmt.Errorf("compute: slot %d in state %s cannot transition to ready", slotID, slot.State)
 	}
 
+	// The host plan models a timeline-semaphore handoff. Preserve strict monotonicity within
+	// its binding epoch; actual Vulkan signaling and waiting are outside this planning type.
+	if p.hasTransferPlan && timeline <= p.lastTimeline {
+		return fmt.Errorf("%w: transfer timeline %d not strictly greater than last %d", ErrVulkanInvalidGeometry, timeline, p.lastTimeline)
+	}
+
 	slot.State = StagingSlotReady
 	slot.TimelineVal = timeline
+	if p.hasTransferPlan {
+		p.lastTimeline = timeline
+	}
 	return nil
 }
 
