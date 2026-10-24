@@ -48,8 +48,10 @@ any of it: `make cuda-check` runs without a toolchain.
   lives at `/usr/local/cuda`. Nothing to install — [`build_cuda.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh)
   detects the system toolchain automatically.
 - **Native Windows** (a Windows box with the CUDA Toolkit + a signing cert): use
-  [`tools/build_cuda_windows.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/build_cuda_windows.ps1), which ports the build off
-   the WSL workaround and code-signs the binary (on Windows, WDAC blocks unsigned fork/exec).
+  `fak-dev build-cuda build|binary`, which ports the build off the WSL workaround and
+  code-signs the binary (on Windows, WDAC blocks unsigned fork/exec).
+  [`tools/build_cuda_windows.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/build_cuda_windows.ps1) is the legacy path; it
+  writes no archive stamp (section 3), so a kernel-only edit built through it can relink stale.
 
 The GPU arch defaults to `sm_89`; override with `FAK_CUDA_ARCH=<arch>`. The authoritative
 supported set is [`internal/compute/cuda_arch.txt`](../internal/compute/cuda_arch.txt), which every
@@ -92,6 +94,17 @@ make cuda-build                 # nvcc -> libfakcuda.a, then go build -tags cuda
 This delegates to [`build_cuda.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh), which compiles the
 kernels into an in-tree `libfakcuda.a` and builds the `-tags cuda` variant against it. The
 same script works unchanged on WSL, a datacenter image, and a GCP DLVM.
+
+Go keys builds on source content, not on cgo link inputs, so the archive alone never
+invalidates a linked binary. Both `build_cuda.sh` and `fak-dev build-cuda` therefore write
+the git-ignored `internal/compute/cuda_archive_stamp_gen.go`, which carries the archive digest
+(nvcc's per-process `tmpxft_<pid>` names masked). A kernel-only edit then relinks every
+`-tags cuda` binary and test binary, including a hand-run `go test -tags cuda -c`, while an
+unchanged rebuild still hits the cache. An archive rebuilt by hand, or by the legacy
+`tools/build_cuda_windows.ps1`, bypasses the stamp; rerun the entrypoint. The masked digest is
+witnessed byte-stable only on Linux (GNU ar's deterministic default); native Windows objects are
+not normalized, so there an unchanged rebuild may re-stamp and recompile the compute package:
+slower, never stale.
 
 ## 4. Validate — prove correctness against the CPU reference
 

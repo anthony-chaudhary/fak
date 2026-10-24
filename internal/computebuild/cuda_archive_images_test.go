@@ -143,6 +143,7 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 		if artifact.CUDAImages == nil || artifact.SHA256 != artifact.CUDAImages.ArchiveSHA256 {
 			t.Fatal("archive was returned without observed images")
 		}
+		requireCUDAArchiveStamp(t, root)
 	}
 	tc.IsWindows, tc.AR = false, tc.NVCC
 	cfg := &CUDAConfig{Command: "binary", RepoRoot: root, Arch: "sm_120", OutPkg: "./cmd/fak", OutBin: filepath.Join(root, "built-fak"), SkipSmoke: true, SkipSign: true, Toolchain: tc, Stdout: io.Discard, Stderr: io.Discard}
@@ -161,13 +162,55 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 		t.Fatal("native binary receipt lost the observed archive images")
 	}
 	t.Setenv("FAK_CUDA_IMAGE_TEST_ELF", "ELF file 1: stale.sm_100.cubin\n")
+	staleCUDAArchiveStamp(t, root)
 	if err := RunCUDA(context.Background(), cfg); !errors.Is(err, ErrCUDAImageAuditInvalid) {
 		t.Fatalf("native build accepted wrong archive images: %v", err)
 	}
+	requireCUDAArchiveStamp(t, root)
 	if cfg.Receipt.Outcome != "failed" || cfg.Receipt.Artifact != nil || len(cfg.Receipt.Phases) != 2 || cfg.Receipt.Phases[1].Outcome != "failed" {
 		t.Fatal("wrong archive did not stop the native build before linking")
 	}
 	if strings.Contains(cfg.Receipt.Error, "tool.go") {
 		t.Fatal("fixture source leaked into the bounded audit diagnostic")
+	}
+	// A toolkit without cuobjdump (the micromamba WSL env) refuses the audit after the archive
+	// was replaced; the stamp must still name the archive on disk.
+	tool, err := os.ReadFile(tc.NVCC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := filepath.Join(root, "no-cuobjdump", strings.Replace(filepath.Base(tc.NVCC), "cuobjdump", "nvcc", 1))
+	writeFixtureFile(t, bare, string(tool))
+	if err := os.Chmod(bare, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleCUDAArchiveStamp(t, root)
+	if _, err := BuildCUDALib(context.Background(), &Toolchain{NVCC: bare, AR: bare}, root, "sm_120", false, io.Discard); !errors.Is(err, ErrCUDAImageAuditToolMissing) {
+		t.Fatalf("toolkit without cuobjdump did not refuse the audit: %v", err)
+	}
+	requireCUDAArchiveStamp(t, root)
+}
+
+func staleCUDAArchiveStamp(t *testing.T, root string) {
+	t.Helper()
+	stale, err := CUDAArchiveStampSource(strings.Repeat("0", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(root, "internal", "compute", CUDAArchiveStampFile), string(stale))
+}
+
+func requireCUDAArchiveStamp(t *testing.T, root string) {
+	t.Helper()
+	digest, err := CUDAArchiveDigest(filepath.Join(root, "internal", "compute", "libfakcuda.a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := CUDAArchiveStampSource(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "internal", "compute", CUDAArchiveStampFile)); err != nil || string(got) != string(want) {
+		t.Fatalf("compute stamp does not name the archive on disk: %v", err)
 	}
 }
