@@ -127,10 +127,11 @@ func TestBenchNodeProbeUsesRemoteShell(t *testing.T) {
 					if err := json.Unmarshal(data, &args); err != nil {
 						t.Fatal(err)
 					}
-					if len(args) != 18 || !strings.HasPrefix(args[13], "UserKnownHostsFile=") {
+					wantArgs := []string{"-i", "unused-fixture-key", "-p", "22", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=8", "-o", "ServerAliveCountMax=3", "-o", "", "-o", "StrictHostKeyChecking=yes", "user@192.0.2.1", tc.command}
+					if len(args) != len(wantArgs) || !strings.HasPrefix(args[13], "UserKnownHostsFile=") {
 						t.Fatalf("unexpected SSH arguments: %q", args)
 					}
-					wantArgs := []string{"-i", "unused-fixture-key", "-p", "22", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=8", "-o", "ServerAliveCountMax=3", "-o", args[13], "-o", "StrictHostKeyChecking=yes", "user@192.0.2.1", tc.command}
+					wantArgs[13] = args[13]
 					if !reflect.DeepEqual(args, wantArgs) {
 						t.Errorf("SSH arguments = %q, want %q", args, wantArgs)
 					}

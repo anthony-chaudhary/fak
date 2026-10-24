@@ -211,6 +211,7 @@ func TestQueryFilesBatchCacheLifecycle(t *testing.T) {
 
 func TestQueryFilesTopKIncludesLateBestMatch(t *testing.T) {
 	const count = 64
+	const topK = 5
 	files := make([]string, count)
 	tree := make(map[string]string, count)
 	for i := range files {
@@ -221,9 +222,9 @@ func TestQueryFilesTopKIncludesLateBestMatch(t *testing.T) {
 	tree[files[count-1]] += namedBlock("process")
 	got := QueryFiles(map[string]string{"new.go": namedBlock("process")}, files, func(rel string) (string, bool) {
 		return tree[rel], true
-	}, 5)["new.go"]
-	want := legacyQuery(namedBlock("process"), tree, "new.go", 5)
-	if !reflect.DeepEqual(got, want) || len(got) != 5 || got[0].File != files[count-1] {
+	}, topK)["new.go"]
+	want := legacyQuery(namedBlock("process"), tree, "new.go", topK)
+	if !reflect.DeepEqual(got, want) || len(got) != topK || got[0].File != files[count-1] {
 		t.Fatalf("streamed top-k=%+v, want %+v", got, want)
 	}
 }
