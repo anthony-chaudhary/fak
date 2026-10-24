@@ -155,6 +155,9 @@ func ConvertLlamaCppDumpArch(dir, arch string) (Artifact, error) {
 		maxBytes := int64(^uint(0) >> 1)
 		emptyTail := false
 		for d, n := range e.Ne {
+			if spec.RowRank > 0 && d >= spec.RowRank && n != 1 {
+				return Artifact{}, dumpErr("%s: ne[%d]=%d, want singleton after row rank %d", e.Name, d, n, spec.RowRank)
+			}
 			if n == 0 && d >= spec.WidthDims && spec.TailAligned {
 				emptyTail = true
 				continue

@@ -37,14 +37,15 @@ func runComputeTraceFromLlamaCpp(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "reference trace artifact path")
 	adopt := fs.String("adopt-digests", "", "fak trace whose input/weight digests the reference adopts after its token ids match")
-	stageMap := fs.String("stage-map", computetrace.LlamaCppArchDeepSeek41, "GGUF arch whose llama.cpp stage map names the dump ("+strings.Join(computetrace.LlamaCppStageMapArches(), ", ")+")")
+	stageMaps := computetrace.LlamaCppStageMapArches()
+	stageMap := fs.String("stage-map", computetrace.LlamaCppArchDeepSeek41, "reference stage map for the dump; -core maps cover a subset ("+strings.Join(stageMaps, ", ")+")")
 	pos, rest := computeTraceSplitPositional(args)
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
 	pos = append(pos, fs.Args()...)
 	if len(pos) != 1 || *out == "" {
-		fmt.Fprintln(stderr, "usage: fak compute-trace from-llamacpp <dump-dir> --out ref.json [--stage-map deepseek41|qwen4exp] [--adopt-digests fak-trace.json]")
+		fmt.Fprintf(stderr, "usage: fak compute-trace from-llamacpp <dump-dir> --out ref.json [--stage-map %s] [--adopt-digests fak-trace.json]\n", strings.Join(stageMaps, "|"))
 		return 2
 	}
 	ref, err := computetrace.ConvertLlamaCppDumpArch(pos[0], *stageMap)
