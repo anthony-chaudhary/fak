@@ -12,7 +12,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
-	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
@@ -109,22 +108,6 @@ func emitWIPLifecycle(stdout, stderr io.Writer, receipt wiplifecycle.Receipt) in
 func beginAutomaticWIPLifecycle(root, kind string, stderr io.Writer) func() {
 	finish, _, _ := beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, wipinventory.GitRunner{})
 	return finish
-}
-
-type boundedLifecycleGitRunner struct {
-	run workerworktree.GitRunner
-}
-
-func (r boundedLifecycleGitRunner) Run(root string, args ...string) ([]byte, error) {
-	rc, out := r.run(root, args)
-	if rc != 0 {
-		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(out))
-	}
-	return []byte(out), nil
-}
-
-func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, git workerworktree.GitRunner) (func(), wiplifecycle.Receipt, error) {
-	return beginAutomaticWIPLifecycleWithRunner(root, kind, stderr, boundedLifecycleGitRunner{run: git})
 }
 
 func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) (func(), wiplifecycle.Receipt, error) {
