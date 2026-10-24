@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var auditClaudePytestFixturePath = regexp.MustCompile(`^C--Users-.+-AppData-Local-Temp-pytest-of-.+-pytest-[0-9]+-test_(?:main_json_runs_and_emits_0|route_findings_off_writes0|route_findings_on_appends0)-ws/00000000-aaaa-bbbb-cccc-000000000000\.jsonl$`)
+var auditClaudePytestFixturePath = regexp.MustCompile(`^(?:C--Users-.+-AppData-Local-Temp|-private-var-folders-[^-]+-[^-]+-T)-pytest-of-.+-pytest-[0-9]+-test_(?:main_json_runs_and_emits_0|route_findings_off_writes0|route_findings_on_appends0)-ws/00000000-aaaa-bbbb-cccc-000000000000\.jsonl$`)
 
 // auditIsClaudePytestFixture recognizes the complete hermetic DOS test shape
 // that is written beneath Claude's default projects root. Every mismatch falls
