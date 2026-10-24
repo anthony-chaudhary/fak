@@ -19,10 +19,11 @@ import (
 	"strings"
 )
 
-// GGUF arch keys of the registered stage maps.
+// Registered reference stage-map keys.
 const (
-	LlamaCppArchDeepSeek41 = "deepseek41"
-	LlamaCppArchQwen4Exp   = "qwen4exp"
+	LlamaCppArchDeepSeek41    = "deepseek41"
+	LlamaCppArchQwen4Exp      = "qwen4exp"
+	LlamaCppArchMiniMaxM3Core = "minimax-m3-core"
 )
 
 // ErrUnknownStageMap is returned for an arch with no registered stage map.
@@ -35,6 +36,9 @@ type LlamaCppStage struct {
 	// WidthDims is how many leading ne dims form one token row; every
 	// remaining dim counts tokens.
 	WidthDims int `json:"width_dims"`
+	// RowRank, when nonzero, requires later axes to be singleton so head,
+	// group or cache dimensions cannot silently become token rows.
+	RowRank int `json:"row_rank,omitempty"`
 	// RoPETail is the trailing row span the reference captured after RoPE
 	// while fak samples before it; sample indices there are excluded.
 	RoPETail int `json:"rope_tail,omitempty"`
@@ -134,6 +138,38 @@ func (m LlamaCppStageMap) finish(a *Artifact, maxLayer int, rows map[llamaCppRow
 }
 
 var llamaCppStageMaps = map[string]LlamaCppStageMap{
+	LlamaCppArchMiniMaxM3Core: {
+		Arch:      LlamaCppArchMiniMaxM3Core,
+		Reference: "llama.cpp@970b51ce7c9ba5fff0726c5e9994f1c2f0e4eedc + MiniMax-M3 patch sha256:666bf3ccf76cdeec9b0e6b40b248440cd6fd234e9c43fb10130e3ec3230de289 src/models/minimax-m3.cpp; core row stages only, source-derived schema",
+		Layered: map[string]LlamaCppStage{
+			"ffn_moe_out": {Stage: "moe_routed", WidthDims: 1, RowRank: 2, TailAligned: true},
+			"ffn_shexp":   {Stage: "shared_expert", WidthDims: 1, RowRank: 2, TailAligned: true},
+			"ffn_out":     {Stage: "moe_sum", WidthDims: 1, RowRank: 2, TailAligned: true, Note: "full FFN output, including leading dense layers"},
+			"l_out":       {Stage: "residual_streams", WidthDims: 1, RowRank: 2, TailAligned: true},
+		},
+		Post: map[string]LlamaCppStage{
+			"result_norm":   {Stage: "final_norm", WidthDims: 1, RowRank: 2, TailAligned: true},
+			"result_output": {Stage: "logits", WidthDims: 1, RowRank: 2, TailAligned: true},
+		},
+		Unmapped: map[string]string{
+			"model.input_embed": "outside the core FFN/residual/output subset",
+			"attn_norm":         "outside the core FFN/residual/output subset",
+			"Qcur_normed":       "multi-head query axes require a separate stage contract",
+			"Kcur_normed":       "multi-head key axes require a separate stage contract",
+			"Qcur":              "post-RoPE query, not a pre-RoPE activation alias",
+			"Kcur":              "post-RoPE key, not a pre-RoPE activation alias",
+			"Vcur":              "multi-head value axes require a separate stage contract",
+			"attn_out":          "dense helper callback is absent after the sparse output projection; no uniform projected-attention alias",
+			"kqv_out":           "sparse attention before output projection, not attention_projected",
+			"ffn_inp":           "attention residual addition; retain raw src0 relation, do not alias its sum to attention_projected",
+			"ffn_norm":          "outside the core FFN/residual/output subset",
+			"msa_fattn":         "grouped attention output before flattening and output projection",
+			"msa_bs":            "indexer cache-block scores; axes are not fixed per-token activation rows",
+			"msa_bsf":           "indexer cache-block scores; axes are not fixed per-token activation rows",
+			"msa_block_mask":    "indexer block/head mask, not a per-token activation row",
+			"msa_mask4":         "attention mask with cache/head axes, not a per-token activation row",
+		},
+	},
 	LlamaCppArchDeepSeek41: {
 		Arch:      LlamaCppArchDeepSeek41,
 		Reference: "vcruz305/llama.cpp@5210c7c5ed61dddaee6ed476623abf4b63093d16",

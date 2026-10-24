@@ -71,9 +71,128 @@ func TestLlamaCppQwen4ExpCoversEveryCbName(t *testing.T) {
 			}
 		}
 	}
-	if got := LlamaCppStageMapArches(); !slices.Equal(got, []string{"deepseek41", "qwen4exp"}) {
+	if got := LlamaCppStageMapArches(); !slices.Equal(got, []string{"deepseek41", "minimax-m3-core", "qwen4exp"}) {
 		t.Fatalf("arches=%v", got)
 	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestLlamaCppMiniMaxM3CoreRows(t *testing.T) {
+	// Source-derived schema fixtures only: synthetic offsets are not an external
+	// MiniMax model oracle. MiniMax l_out has no Qwen hc/group width dimension.
+	const width = 16
+	m, ok := LlamaCppStageMapFor(LlamaCppArchMiniMaxM3Core)
+	if !ok {
+		t.Fatal("MiniMax core stage map missing")
+	}
+	aliases := []struct {
+		name, stage string
+		post        bool
+	}{
+		{"ffn_moe_out", "moe_routed", false},
+		{"ffn_shexp", "shared_expert", false},
+		{"ffn_out", "moe_sum", false},
+		{"l_out", "residual_streams", false},
+		{"result_norm", "final_norm", true},
+		{"result_output", "logits", true},
+	}
+	type key struct {
+		layer int
+		stage string
+		token int
+	}
+	want := map[key]struct {
+		seq, row int
+	}{}
+	var tensors []dumpTensor
+	for _, alias := range aliases {
+		spec, layer, found := m.lookup(alias.name)
+		if !alias.post {
+			spec, layer, found = m.lookup(alias.name + "-0")
+		}
+		if !found || spec.Stage != alias.stage || spec.WidthDims != 1 || spec.RowRank != 2 || !spec.TailAligned {
+			t.Fatalf("alias %s has incorrect row metadata", alias.name)
+		}
+		if alias.post && layer != llamaCppPostLayer {
+			t.Fatalf("%s is not a post-stack stage", alias.name)
+		}
+		layers := []int{0, 1}
+		if alias.post {
+			layers = []int{2}
+		}
+		for _, il := range layers {
+			rows := 3
+			name := fmt.Sprintf("%s-%d", alias.name, il)
+			if il > 0 {
+				rows = 1
+			}
+			if alias.post {
+				name = alias.name
+			}
+			seq := len(tensors)
+			tensors = append(tensors, dumpTensor{name: name, ne: [4]int64{width, int64(rows), 1, 1}, dumped: true})
+			for row := 0; row < rows; row++ {
+				want[key{il, alias.stage, 3 - rows + row}] = struct{ seq, row int }{seq, row}
+			}
+		}
+	}
+	for _, name := range []string{"kqv_out", "ffn_inp", "msa_fattn", "msa_bs", "msa_bsf", "msa_block_mask", "msa_mask4"} {
+		if m.Unmapped[name] == "" {
+			t.Fatalf("missing raw-stage diagnostic for %s", name)
+		}
+		tensors = append(tensors, dumpTensor{name: name + "-1", ne: [4]int64{2, 3, 2, 1}, dumped: true})
+	}
+	tensors = append(tensors, dumpTensor{name: "l_last-1", ne: [4]int64{width, 4, 1, 1}, dumped: true})
+	dir := writeDump(t, []int{7, 8, 9}, tensors)
+	indexBefore, err := os.ReadFile(filepath.Join(dir, "index.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := ConvertLlamaCppDumpArch(dir, LlamaCppArchMiniMaxM3Core)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Events) != len(want) {
+		t.Fatalf("events=%d, want %d core events", len(a.Events), len(want))
+	}
+	for _, e := range a.Events {
+		k := key{e.Layer, e.Phase, e.Token}
+		location, found := want[k]
+		if !found {
+			t.Fatalf("unexpected event layer=%d stage=%s token=%d", k.layer, k.stage, k.token)
+		}
+		if len(e.Shapes) != 1 || !slices.Equal(e.Shapes[0], []int{width}) {
+			t.Fatalf("%s width includes a token/group axis: %v", e.Phase, e.Shapes)
+		}
+		for i, j := range e.SampleIndices {
+			if expected := float32(location.seq*10000 + location.row*width + j); e.SampleValues[i] != expected {
+				t.Fatalf("%s token %d sample %d=%v, want offset %v", e.Phase, e.Token, i, e.SampleValues[i], expected)
+			}
+		}
+		if e.WeightDigest != "" {
+			t.Fatal("schema fixture acquired a model weight identity")
+		}
+		delete(want, k)
+	}
+	if len(want) != 0 {
+		t.Fatalf("%d expected row identities missing", len(want))
+	}
+	indexAfter, err := os.ReadFile(filepath.Join(dir, "index.jsonl"))
+	if err != nil || !bytes.Equal(indexBefore, indexAfter) {
+		t.Fatal("raw index diagnostics changed during import")
+	}
+	t.Run("group axes refuse instead of becoming token rows", func(t *testing.T) {
+		for _, alias := range aliases {
+			name := alias.name
+			if !alias.post {
+				name += "-0"
+			}
+			dir := writeDump(t, []int{7, 8, 9}, []dumpTensor{{name: name, ne: [4]int64{width, 1, 2, 1}, dumped: true}})
+			if _, err := ConvertLlamaCppDumpArch(dir, LlamaCppArchMiniMaxM3Core); !errors.Is(err, ErrLlamaCppDump) {
+				t.Fatalf("%s grouped tensor err=%v, want ErrLlamaCppDump", alias.name, err)
+			}
+		}
+	})
 }
 
 const (
