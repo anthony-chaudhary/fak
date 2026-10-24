@@ -54,6 +54,11 @@ type guardAllowOverlay struct {
 	Version     string   `json:"version"`
 	Allow       []string `json:"allow,omitempty"`
 	AllowPrefix []string `json:"allow_prefix,omitempty"`
+	// Approve lists per-call operator approval ids (adjudicator.OperatorApprovalID).
+	// Each admits ONE exact call past a POLICY_BLOCK rule, a DEFAULT_DENY or the
+	// reversibility hold; it never widens a tool name. `fak guard allow --approve`
+	// writes them with a short default TTL (guard_allow_approve.go).
+	Approve []string `json:"approve,omitempty"`
 	// Expiry records an optional TTL per widening (#5179, epic #5170 Track D
 	// "GATED-WIDEN safety rails"): it maps an Allow / AllowPrefix entry name to an
 	// RFC3339 (UTC) instant after which the entry is auto-reverted. `fak guard allow
@@ -149,9 +154,11 @@ func loadGuardAllowOverlayLayers() (guardAllowOverlay, []guardAllowOverlayLayer,
 		}
 		merged.Allow = append(merged.Allow, ov.Allow...)
 		merged.AllowPrefix = append(merged.AllowPrefix, ov.AllowPrefix...)
+		merged.Approve = append(merged.Approve, ov.Approve...)
 	}
 	merged.Allow = guardAllowNormalize(merged.Allow)
 	merged.AllowPrefix = guardAllowNormalize(merged.AllowPrefix)
+	merged.Approve = guardAllowNormalizeOptional(merged.Approve)
 	return merged, layers, nil
 }
 
@@ -180,6 +187,7 @@ func loadGuardAllowOverlay(path string) (guardAllowOverlay, error) {
 	ov.Version = guardAllowOverlayVersion
 	ov.Allow = guardAllowNormalize(ov.Allow)
 	ov.AllowPrefix = guardAllowNormalize(ov.AllowPrefix)
+	ov.Approve = guardAllowNormalizeOptional(ov.Approve)
 	// Launch-boundary TTL auto-revert (#5179): every read path funnels through here, so an
 	// entry past its expiry is dropped from the floor and from `--list` alike on the next
 	// launch. A missing/permanent entry and an unparseable stamp are retained.
@@ -195,6 +203,7 @@ func saveGuardAllowOverlay(path string, ov guardAllowOverlay) error {
 	ov.Version = guardAllowOverlayVersion
 	ov.Allow = guardAllowNormalize(ov.Allow)
 	ov.AllowPrefix = guardAllowNormalize(ov.AllowPrefix)
+	ov.Approve = guardAllowNormalizeOptional(ov.Approve)
 	guardAllowPruneOrphanExpiry(&ov)
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -273,6 +282,7 @@ func guardApplyAllowOverlay(rt *policy.Runtime, ov guardAllowOverlay) int {
 			}
 		}
 	}
+	added += guardApplyOperatorApprovals(rt, ov.Approve)
 	return added
 }
 
@@ -381,6 +391,7 @@ func guardAllowDropExpired(ov guardAllowOverlay, now time.Time) (guardAllowOverl
 	out := guardAllowOverlay{Version: ov.Version}
 	out.Allow = guardAllowSubtract(ov.Allow, dropped)
 	out.AllowPrefix = guardAllowSubtract(ov.AllowPrefix, dropped)
+	out.Approve = guardAllowNormalizeOptional(guardAllowSubtract(ov.Approve, dropped))
 	for name, stamp := range ov.Expiry {
 		if expired[name] {
 			continue
@@ -407,6 +418,9 @@ func guardAllowPruneOrphanExpiry(ov *guardAllowOverlay) {
 		live[n] = true
 	}
 	for _, n := range ov.AllowPrefix {
+		live[n] = true
+	}
+	for _, n := range ov.Approve {
 		live[n] = true
 	}
 	for name := range ov.Expiry {
@@ -451,6 +465,7 @@ func cmdGuardAllow(argv []string) {
 	journalPath := fs.String("journal", "", "the audit journal --from-journal reads (default: the newest repo-local guard journal)")
 	fromClaudeSettings := fs.Bool("from-claude-settings", false, "import permissions.allow from Claude settings.json (+ settings.local.json, or a positional path) into the overlay; name-level entries only")
 	fromMCPConfig := fs.Bool("from-mcp-config", false, "import one coarse allow_prefix per mcpServers key from .mcp.json (or a positional path)")
+	approve := fs.Bool("approve", false, "APPROVE the exact refused call(s) named by the positional operator approval id(s) (ap-<12 hex>, printed on the refusal). Each id admits ONE call past a POLICY_BLOCK rule, a DEFAULT_DENY or the reversibility confirm hold; it widens no tool name and never lifts the credential, self-modify, secret or egress floors. Defaults: --ttl 15m, and the session scope when run inside a guarded session (e.g. Claude Code's ! prompt). The agent cannot run this itself: the floor refuses it from the agent's shell tools.")
 	addAll := fs.Bool("add-all", false, "with an import source, add EVERY mappable entry found to the overlay in one step")
 	_ = fs.Parse(argv)
 
@@ -460,6 +475,9 @@ func cmdGuardAllow(argv []string) {
 	// rather than silently picking one and writing the widening somewhere the operator did
 	// not mean.
 	writeScope := "repo"
+	if *approve && !*user && guardAllowSessionID() != "" {
+		*session = true // an approval names one call in this session: keep it session-scoped
+	}
 	switch {
 	case *session && *user:
 		fmt.Fprintln(os.Stderr, "fak guard allow: --session and --user name different scopes; pick one")
@@ -496,6 +514,8 @@ func cmdGuardAllow(argv []string) {
 	}
 
 	switch {
+	case *approve:
+		os.Exit(runGuardAllowApprove(os.Stdout, os.Stderr, path, &ov, fs.Args(), *ttl, *remove, *prefix || *list || *fromJournal || *fromClaudeSettings || *fromMCPConfig))
 	case *fromJournal:
 		os.Exit(runGuardAllowFromJournal(os.Stdout, os.Stderr, path, &ov, *journalPath, *addAll))
 	case *fromClaudeSettings:
@@ -562,6 +582,7 @@ func saveGuardAllowOverlayOrExit(path string, overlay guardAllowOverlay) {
 func guardAllowRemove(ov *guardAllowOverlay, names []string) {
 	ov.Allow = guardAllowSubtract(ov.Allow, names)
 	ov.AllowPrefix = guardAllowSubtract(ov.AllowPrefix, names)
+	ov.Approve = guardAllowNormalizeOptional(guardAllowSubtract(ov.Approve, names))
 }
 
 // guardAllowBlockedTool is one DEFAULT_DENY'd tool name and how many times the guarded
@@ -688,7 +709,7 @@ func runGuardAllowFromJournal(stdout, stderr io.Writer, overlayPath string, ov *
 // printGuardAllowOverlay renders the current overlay for --list and post-mutation echo.
 func printGuardAllowOverlay(w io.Writer, path string, ov guardAllowOverlay) {
 	fmt.Fprintf(w, "operator allow overlay: %s\n", path)
-	if len(ov.Allow) == 0 && len(ov.AllowPrefix) == 0 {
+	if len(ov.Allow) == 0 && len(ov.AllowPrefix) == 0 && len(ov.Approve) == 0 {
 		fmt.Fprintln(w, "  (empty — no extra tools allowed beyond the capability floor)")
 		return
 	}
@@ -697,6 +718,9 @@ func printGuardAllowOverlay(w io.Writer, path string, ov guardAllowOverlay) {
 	}
 	if len(ov.AllowPrefix) > 0 {
 		fmt.Fprintf(w, "  allow (prefix): %s\n", strings.Join(ov.AllowPrefix, ", "))
+	}
+	if len(ov.Approve) > 0 {
+		fmt.Fprintf(w, "  approved calls: %s\n", strings.Join(ov.Approve, ", "))
 	}
 	printGuardAllowExpiries(w, ov, guardAllowNow())
 }
@@ -737,6 +761,8 @@ func guardAllowUsage() string {
 		"  fak guard allow --list                 print every effective layer with its scope, precedence and provenance",
 		"  fak guard allow --user <tool>...       write the per-user home layer instead of repo-local",
 		"  fak guard allow --session <tool>...    write the session-scope layer (narrowest, applied last; dropped at guard boot AND at session end, so it never outlives a session)",
+		"  fak guard allow --approve <ap-id>...   approve ONE exact refused call (id printed on the refusal); 15m TTL, session scope inside a session",
+		"  fak guard allow --approve --remove <ap-id>   revoke an approval",
 		"  fak guard allow --from-journal         list what a guarded session BLOCKED + the command to allow each",
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
 		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",

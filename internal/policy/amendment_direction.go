@@ -73,6 +73,7 @@ var analyzedAmendmentFields = map[string]bool{
 	"Profile":                  true,
 	"Complain":                 true,
 	"AdvisoryReasons":          true,
+	"OperatorApprovals":        true,
 	"SecretPosture":            true,
 	"EgressExtraDenyHosts":     true,
 	"ResearchEgressAllowHosts": true,
@@ -143,6 +144,15 @@ func diffRemainingKnobs(d *AmendmentDelta, old, next adjudicator.Policy) {
 	}
 	for _, code := range advisoryKeysOnlyIn(old.AdvisoryReasons, next.AdvisoryReasons) {
 		d.route(false, AmendmentChange{Field: "AdvisoryReasons", Label: "removed_advisory_reasons", Old: abi.ReasonName(code)})
+	}
+
+	// OperatorApprovals — each id admits one exact call past a POLICY_BLOCK or
+	// DEFAULT_DENY, so adding an id widens and removing one tightens.
+	for _, id := range sortedKeys(old.OperatorApprovals, next.OperatorApprovals, true) {
+		d.route(true, AmendmentChange{Field: "OperatorApprovals", Label: "added_operator_approval", New: id})
+	}
+	for _, id := range sortedKeys(old.OperatorApprovals, next.OperatorApprovals, false) {
+		d.route(false, AmendmentChange{Field: "OperatorApprovals", Label: "removed_operator_approval", Old: id})
 	}
 
 	diffResearchAllowHosts(d, old, next)

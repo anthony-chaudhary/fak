@@ -37,6 +37,22 @@ var refusalNotes = []refusalNote{
 	{render: defaultDenyOperatorRemedy},
 	{render: reversibilityGateNote, confirmRecipe: true},
 	{render: livelockInBandNote},
+	{render: operatorApprovalNote},
+}
+
+// detailOperatorApprovalID is the Detail key carrying a refusal's per-call
+// operator approval id. It mirrors adjudicator.MetaOperatorApprovalID.
+const detailOperatorApprovalID = "operator_approval_id"
+
+// operatorApprovalNote tells the agent, and the human reading the transcript,
+// that an attending operator may approve this exact call. The runnable command
+// stays out of agent-visible text (#11504); it rides OperatorRemedyCommand.
+func operatorApprovalNote(a ToolAdjudication) string {
+	id := strings.TrimSpace(a.Verdict.Detail[detailOperatorApprovalID])
+	if id == "" || a.Admitted {
+		return ""
+	}
+	return "Operator override: approval id " + id + ". An attending operator can approve this exact call from their own shell (guard allow --approve " + id + "); then re-propose the identical call. The agent cannot approve it. With no operator attending, continue with the recovery above."
 }
 
 // RecoveryPivotAdmittedTool is the typed in-band recovery a DEFAULT_DENY
@@ -78,6 +94,9 @@ func OperatorRemedyCommand(a ToolAdjudication) string {
 		if cmd := strings.TrimSpace(a.Verdict.Detail["operator_action"]); cmd != "" {
 			return cmd
 		}
+	}
+	if id := strings.TrimSpace(a.Verdict.Detail[detailOperatorApprovalID]); id != "" && !a.Admitted {
+		return "fak guard allow --approve " + id
 	}
 	r := reasonOrKind(a.Verdict)
 	if r == "DEFAULT_DENY" && a.Verdict.By == leaseAdmissionBy {

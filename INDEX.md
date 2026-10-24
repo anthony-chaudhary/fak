@@ -299,6 +299,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Guard operator approval](docs/notes/GUARD-OPERATOR-APPROVAL-2026-10-23.md) -- auto-indexed dated note.
 - [TIRx Harness concept study — compiler-facing agentic GPU harness, no inference engine](docs/notes/CONCEPT-STUDY-TIRX-HARNESS-2026-09-30.md) — pinned read-only study of mlc-ai/TIRx-harness@ccd7a04a and TIRx-kernels@909d8e0b: prompt-prescribed persistence, no native compaction or permission mediation; deliberately no integration or performance qualification.
 - [Applied OSS runtime learnings: complete prefix tails and V4.1 activation limits](docs/notes/OSS-RUNTIME-BORROWS-2026-09-29.md) — pinned source evidence, software witnesses, and device-path tradeoffs (2026-09-29).
 - [2026-09-28: AGENTS.md sectioned loader, wiring estimate (#3535)](docs/notes/2026-09-28-agents-md-sectioned-loader-estimate.md) -- auto-indexed dated note.

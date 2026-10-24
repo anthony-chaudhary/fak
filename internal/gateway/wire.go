@@ -88,6 +88,15 @@ func renderVerdict(v abi.Verdict, resultMeta map[string]string) WireVerdict {
 		w.Detail["remedy"] = remedy
 	}
 
+	// A refusal an operator may lift per call carries its approval id
+	// (adjudicator.MetaOperatorApprovalID): an identifier, not a grant.
+	if id := v.Meta[detailOperatorApprovalID]; id != "" {
+		if w.Detail == nil {
+			w.Detail = map[string]string{}
+		}
+		w.Detail[detailOperatorApprovalID] = id
+	}
+
 	// A result quarantined by the context-MMU at admit-time overrides the (Allow)
 	// submit verdict — the poisoned bytes were already paged out.
 	if resultMeta["admit"] == "quarantined" {

@@ -274,11 +274,26 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 
 	// A name-level deny softens only when the operator declared its cited reason
 	// advisory; POLICY_BLOCK and SECRET_EXFIL are clamped out of that set.
+	// A per-call operator approval may lift a POLICY_BLOCK name deny; the args are
+	// decoded only on that path so the no-deny fast path is unchanged.
+	var args map[string]any
+	var approval *operatorApprovalState
 	if r, ok := p.Deny[c.Tool]; ok {
-		return p.soften(abi.Verdict{Kind: abi.VerdictDeny, Reason: r, By: "monitor"}, nil)
+		v := p.soften(abi.Verdict{Kind: abi.VerdictDeny, Reason: r, By: "monitor"}, nil)
+		if v.Kind != abi.VerdictDeny {
+			return v
+		}
+		args = decodeArgs(ctx, c)
+		approval = newOperatorApprovalState(p, c.Tool, args)
+		v, lifted := approval.lift(v)
+		if !lifted {
+			return v
+		}
+	} else {
+		args = decodeArgs(ctx, c)
+		approval = newOperatorApprovalState(p, c.Tool, args)
 	}
-
-	args := decodeArgs(ctx, c)
+	defer func() { verdict = approval.finish(verdict) }()
 
 	// The risk class comes from the decoded args, never model-controlled Meta, and
 	// only when a profile is installed: a nil profile runs every rung (#666).
@@ -345,7 +360,10 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 		v, denied, notes := evalArgPredicates(argPreds, c.Tool, args)
 		advisoryNotes = append(advisoryNotes, notes...)
 		if denied {
-			return p.soften(v, advisoryNotes)
+			sv, lifted := approval.lift(p.soften(v, advisoryNotes))
+			if !lifted {
+				return sv
+			}
 		}
 	}
 
@@ -356,9 +374,21 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 	redactedArgs, redacted := applyRedactionTransforms(p, argPreds, args, cl, pr)
 	rev := a.runReversibilityRung(ctx, p, c, args, redactedArgs, redacted, lowerTool, cl, pr)
 	if rev.handled {
-		return rev.verdict
+		held, confirmed := approval.confirmHold(rev.verdict)
+		if !confirmed {
+			return held
+		}
+		rev = reversibilityRungResult{args: argsWithoutConfirmation(args), redactedArgs: redactedArgs, redacted: redacted}
 	}
-	return a.admitOrDefaultDeny(ctx, p, c, lowerTool, rev, advisoryNotes)
+	v := a.admitOrDefaultDeny(ctx, p, c, lowerTool, rev, advisoryNotes)
+	if v.Reason != abi.ReasonDefaultDeny {
+		return v
+	}
+	v, lifted := approval.lift(v)
+	if lifted {
+		return allowWithNotes("monitor", advisoryNotes)
+	}
+	return v
 }
 
 func (a *Adjudicator) evaluateCircuitBreaker(ctx context.Context, c *abi.ToolCall, v *abi.Verdict) {
