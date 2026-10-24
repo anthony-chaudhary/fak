@@ -61,7 +61,7 @@ var witnessSeeds = []witnessSeed{
 	{
 		ClusterID: "kv_cache:title:paged-attention",
 		Issue:     486,
-		Paths:     []string{"internal/compute/cuda_kernels.cu", "internal/compute/cuda_flash_test.go"},
+		Paths:     []string{"internal/compute/cuda_kernels.cu", "internal/compute/cuda/attention.cuh", "internal/compute/cuda_flash_test.go"},
 		Mode:      Landed,
 		Source:    "captured issue #486 plus issue-linked repository history",
 	},

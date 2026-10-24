@@ -25,7 +25,7 @@ func TestCUDAV41TailRoPESourceContract(t *testing.T) {
 		}
 		return string(data)
 	}
-	adapter, native := read("cuda_v41_rope.go"), read("cuda_kernels.cu")
+	adapter, native := read("cuda_v41_rope.go"), cudaSourceClosure(t, "cuda_kernels.cu")
 	if !strings.HasPrefix(adapter, "//go:build cuda && cgo && fak_cuda_v41_tail_rope\n") {
 		t.Fatal("candidate adapter must be absent from ordinary CUDA builds")
 	}

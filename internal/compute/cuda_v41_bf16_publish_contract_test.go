@@ -24,7 +24,7 @@ func TestCUDAV41BF16PublishContract(t *testing.T) {
 		}
 		return string(data)
 	}
-	goSource, native := read("cuda_v41_bf16_publish.go"), read("cuda_kernels.cu")
+	goSource, native := read("cuda_v41_bf16_publish.go"), cudaSourceClosure(t, "cuda_kernels.cu")
 	if !strings.HasPrefix(goSource, "//go:build cuda && cgo && fak_cuda_v41_bf16_publish\n") {
 		t.Fatal("ordinary CUDA must not expose the candidate interface")
 	}

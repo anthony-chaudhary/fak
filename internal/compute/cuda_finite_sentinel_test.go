@@ -1,7 +1,6 @@
 package compute
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -10,11 +9,7 @@ import (
 // reachable from default CI: every maximum accumulator in this translation unit
 // must admit the entire finite float32 range.
 func TestCUDAFiniteReductionSentinelContract(t *testing.T) {
-	source, err := os.ReadFile("cuda_kernels.cu")
-	if err != nil {
-		t.Fatalf("read cuda_kernels.cu: %v", err)
-	}
-	text := string(source)
+	text := cudaSourceClosure(t, "cuda_kernels.cu")
 	if strings.Contains(text, "-1e30f") {
 		t.Fatal("cuda_kernels.cu retains a finite -1e30f reduction sentinel")
 	}

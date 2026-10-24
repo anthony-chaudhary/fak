@@ -93,9 +93,17 @@ if ! git clone --depth 1 "$REPO_URL" "$SRC"; then
   SRC=/srv/fleet/fak
 fi
 cd "$SRC" || { say "no source tree"; echo done >"$WORK/DONE.97"; exit 97; }
-KCNT=$(grep -c 'fcuda_q8_matmul_f32\|fcuda_q4k_matmul_f32\|fcuda_flash_attention_f32' internal/compute/cuda_kernels.cu 2>/dev/null) || true
-KCNT=${KCNT:-0}
-say "HEAD $(git rev-parse --short HEAD 2>/dev/null || echo '(non-git)')  kernels=$KCNT lines=$(wc -l < internal/compute/cuda_kernels.cu 2>/dev/null)"
+shopt -s nullglob
+KERNEL_SOURCES=(internal/compute/cuda_kernels.cu internal/compute/cuda/*.cuh)
+shopt -u nullglob
+KCNT=0
+for symbol in fcuda_q8_matmul_f32 fcuda_q4k_matmul_f32 fcuda_flash_attention_f32; do
+  if grep -q "$symbol" "${KERNEL_SOURCES[@]}" 2>/dev/null; then
+    KCNT=$((KCNT + 1))
+  fi
+done
+KLINES=$(cat "${KERNEL_SOURCES[@]}" 2>/dev/null | wc -l) || true
+say "HEAD $(git rev-parse --short HEAD 2>/dev/null || echo '(non-git)')  kernels=$KCNT sources=${#KERNEL_SOURCES[@]} lines=${KLINES:-0}"
 if [ "${KCNT:-0}" -lt 3 ]; then
   say "ABORT: source tree at $SRC lacks the Q8/Q4K/flash kernels (clone failed + stale fallback). Ship the current internal/compute/* instead."
   echo "stale-tree" >"$WORK/DONE.96"; exit 96

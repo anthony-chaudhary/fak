@@ -12,11 +12,11 @@ for the registration seam; this guide is the CUDA-specific loop that rides on to
 
 ## Why the loop is shaped this way
 
-The CUDA backend is three files that have to agree on one flat C ABI:
+The CUDA backend is three source layers that have to agree on one flat C ABI:
 
 | File | Role |
 |---|---|
-| [`internal/compute/cuda_kernels.cu`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_kernels.cu) | the kernels (`__global__` + `extern "C" fcuda_*` entry points) |
+| [`internal/compute/cuda_kernels.cu`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_kernels.cu) + [`internal/compute/cuda/*.cuh`](../internal/compute/cuda/README.md) | thin single-translation-unit aggregator + focused kernel modules (`__global__` + `extern "C" fcuda_*` entry points) |
 | [`internal/compute/cuda_backend.h`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_backend.h) | the flat C ABI — the typed seam (data, never trust) |
 | [`internal/compute/cuda.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda.go) | the cgo binding that registers an *Approx* `cuda` backend |
 
@@ -66,8 +66,10 @@ make cuda-build-sm120  # RTX 50-series / consumer Blackwell
 
 ## 2. Author — edit, then gate locally (no GPU)
 
-Edit the kernel in `cuda_kernels.cu`, its prototype in `cuda_backend.h`, and the cgo binding
-in `cuda.go`. Then run the local gate **before** you push to a GPU node:
+Edit the kernel in the focused `cuda/*.cuh` module, its prototype in `cuda_backend.h`, and
+the cgo binding in `cuda.go`. Keep `cuda_kernels.cu` as the thin compile entry and preserve
+its module include order; see the [`cuda/` module guide](../internal/compute/cuda/README.md).
+Then run the local gate **before** you push to a GPU node:
 
 ```
 make cuda-check                 # wraps: bash internal/compute/build_cuda.sh check
@@ -195,8 +197,9 @@ acceptance, same-card reference ABBA and performance receipts remain pending;
 Adding a device op is a five-point change; `make cuda-check` catches the two you are most
 likely to forget (a missing prototype or a missing binding):
 
-1. **Kernel** — the `__global__` kernel plus an `extern "C" fcuda_yourop(…)` entry in
-   `cuda_kernels.cu`.
+1. **Kernel** — the `__global__` kernel plus an `extern "C" fcuda_yourop(…)` entry in the
+   focused `cuda/*.cuh` module. Add a new module through the thin `cuda_kernels.cu` aggregator
+   only when the [`cuda/` module guide](../internal/compute/cuda/README.md) calls for one.
 2. **ABI** — the matching prototype in `cuda_backend.h`. Keep the header toolkit-free (pass
    `__half`/device handles as `void*`) so `cuda-check` and `go vet -tags cuda` stay GPU-free.
 3. **Binding** — the method on `*cudaBackend` in `cuda.go` that calls `C.fcuda_yourop(…)`.

@@ -268,11 +268,7 @@ func TestSpecVerifyAttentionValidation(t *testing.T) {
 // TestSpecVerifyAttentionCUDASourceContract inspects the CUDA kernel source and header files
 // to ensure exact symbol alignment without needing a CUDA compiler.
 func TestSpecVerifyAttentionCUDASourceContract(t *testing.T) {
-	cuBytes, err := os.ReadFile("cuda_kernels.cu")
-	if err != nil {
-		t.Fatalf("failed to read cuda_kernels.cu: %v", err)
-	}
-	cuSrc := string(cuBytes)
+	cuSrc := cudaSourceClosure(t, "cuda_kernels.cu")
 
 	for _, symbol := range []string{
 		"k_spec_verify_attention",
@@ -371,12 +367,14 @@ func TestTreeVerifyAttentionCUDASourceContract(t *testing.T) {
 			t.Errorf("tree_attention.cu missing %q", symbol)
 		}
 	}
-	mainCU, err := os.ReadFile("cuda_kernels.cu")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(mainCU), `#include "tree_attention.cu"`) {
-		t.Error("cuda_kernels.cu does not compile the focused tree-attention fragment")
+	mainCU := cudaSourceClosure(t, "cuda_kernels.cu")
+	for _, include := range []string{
+		`#include "cuda/spec_graph.cuh"`,
+		`#include "../tree_attention.cu"`,
+	} {
+		if !strings.Contains(mainCU, include) {
+			t.Errorf("CUDA source closure does not retain tree-attention wiring %q", include)
+		}
 	}
 	header, err := os.ReadFile("cuda_backend.h")
 	if err != nil {

@@ -52,11 +52,7 @@ func TestCUDAHeaderExportsQ2KFunctions(t *testing.T) {
 
 	// Check internal/compute/cuda_kernels.cu
 	cuPath := filepath.Join(repoRoot, "internal", "compute", "cuda_kernels.cu")
-	cuBytes, err := os.ReadFile(cuPath)
-	if err != nil {
-		t.Fatalf("failed to read %s: %v", cuPath, err)
-	}
-	cuSrc := string(cuBytes)
+	cuSrc := cudaSourceClosure(t, cuPath)
 
 	requiredCuSymbols := []string{
 		"k_q2k_gemv",

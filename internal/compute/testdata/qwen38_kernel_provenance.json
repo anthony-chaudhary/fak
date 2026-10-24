@@ -115,7 +115,7 @@
       "id": "qwen4exp-cuda-ple-hash",
       "upstream": "freetoken-pr-338",
       "source_path": "python/freetoken/kernel/triton/ple_hash.py",
-      "destination": "internal/compute/cuda_kernels.cu",
+      "destination": "internal/compute/cuda/runtime_services.cuh",
       "decision": "ADAPT",
       "attribution": "Algorithm adapted from FlashML-org/FreeToken\n// python/freetoken/kernel/triton/ple_hash.py:31-83 at\n// de77d16a5ac36494d85964f846b50ad36f7acc21 (Apache-2.0).",
       "parity_witness": "internal/compute/cuda_qwen4exp_ple_hash_cuda_test.go"

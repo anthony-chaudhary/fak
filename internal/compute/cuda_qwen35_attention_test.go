@@ -43,7 +43,7 @@ func qwen38SourceFunction(t *testing.T, source, marker string) string {
 }
 
 func TestQwen38PromptAttentionHD256SourceSpine(t *testing.T) {
-	source := qwen38PromptAttentionSource(t, "cuda_kernels.cu")
+	source := cudaSourceClosure(t, "cuda_kernels.cu")
 	body := qwen38SourceFunction(t, source, "__global__ void k_qwen38_causal_attention_panel_hd256")
 	for _, want := range []string{
 		"float acc[QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS]",
@@ -65,7 +65,7 @@ func TestQwen38PromptAttentionHD256SourceSpine(t *testing.T) {
 }
 
 func TestQwen38PromptAttentionABIDispatchIsFailClosed(t *testing.T) {
-	cu := qwen38PromptAttentionSource(t, "cuda_kernels.cu")
+	cu := cudaSourceClosure(t, "cuda_kernels.cu")
 	goSource := qwen38PromptAttentionSource(t, "cuda_kernels.go")
 	const abi = "int fak_qwen35_causal_attention_panel_f32("
 	if !strings.Contains(cu, "extern \"C\" "+abi) || !strings.Contains(goSource, abi) {
