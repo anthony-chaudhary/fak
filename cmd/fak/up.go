@@ -1068,12 +1068,22 @@ type chatCompletionMessage = agent.Message
 // local to keep this file's wire surface explicit; `prompt` is raw because the wire
 // allows a bare string or an array of strings.
 type turnkeyCompletionRequest struct {
-	Model       string          `json:"model"`
-	Prompt      json.RawMessage `json:"prompt"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	TopP        *float64        `json:"top_p,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
+	Model                 string          `json:"model"`
+	Prompt                json.RawMessage `json:"prompt"`
+	MaxTokens             int             `json:"max_tokens,omitempty"`
+	Temperature           *float64        `json:"temperature,omitempty"`
+	TopP                  *float64        `json:"top_p,omitempty"`
+	Stream                bool            `json:"stream,omitempty"`
+	ResponseFormat        json.RawMessage `json:"response_format,omitempty"`
+	GuidedJSON            json.RawMessage `json:"guided_json,omitempty"`
+	GuidedRegex           json.RawMessage `json:"guided_regex,omitempty"`
+	GuidedChoice          json.RawMessage `json:"guided_choice,omitempty"`
+	GuidedGrammar         json.RawMessage `json:"guided_grammar,omitempty"`
+	GuidedDecodingBackend json.RawMessage `json:"guided_decoding_backend,omitempty"`
+	JSONSchema            json.RawMessage `json:"json_schema,omitempty"`
+	Regex                 json.RawMessage `json:"regex,omitempty"`
+	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
+	StructuredOutputs     json.RawMessage `json:"structured_outputs,omitempty"`
 }
 
 // turnkeyNormalizePrompt folds the legacy `prompt` field (bare string, or array of

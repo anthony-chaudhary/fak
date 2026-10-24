@@ -30,6 +30,7 @@ func turnkeyChatSampleOpts(req gateway.ChatRequest, contextTokens uint64) []agen
 		agent.WithTopP(req.TopP),
 		agent.WithToolChoice(req.ToolChoice),
 		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),

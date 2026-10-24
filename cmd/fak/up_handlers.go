@@ -165,12 +165,22 @@ func (s *turnkeyServer) handleCompletions(w http.ResponseWriter, r *http.Request
 	}
 
 	chatReq := gateway.ChatRequest{
-		Model:       req.Model,
-		Messages:    []agent.Message{{Role: agent.RoleUser, Content: prompt}},
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
+		Model:                 req.Model,
+		Messages:              []agent.Message{{Role: agent.RoleUser, Content: prompt}},
+		MaxTokens:             req.MaxTokens,
+		Temperature:           req.Temperature,
+		TopP:                  req.TopP,
+		Stream:                req.Stream,
+		ResponseFormat:        req.ResponseFormat,
+		GuidedJSON:            req.GuidedJSON,
+		GuidedRegex:           req.GuidedRegex,
+		GuidedChoice:          req.GuidedChoice,
+		GuidedGrammar:         req.GuidedGrammar,
+		GuidedDecodingBackend: req.GuidedDecodingBackend,
+		JSONSchema:            req.JSONSchema,
+		Regex:                 req.Regex,
+		EBNF:                  req.EBNF,
+		StructuredOutputs:     req.StructuredOutputs,
 	}
 	modelID := s.plan.Tier.ModelID
 	if chatReq.Model != "" {
@@ -304,6 +314,24 @@ func writeTurnkeyInferenceError(w http.ResponseWriter, err error) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
 			"message": err.Error() + hint,
 			"type":    "server_error", "code": "in_kernel_oom",
+		}})
+		return
+	}
+	if errors.Is(err, agent.ErrNativeStructuredUnsupported) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": "the native model route does not support this structured-output request",
+			"type":    "invalid_request_error", "code": "native_structured_output_unsupported", "param": nil,
+		}})
+		return
+	}
+	if errors.Is(err, agent.ErrNativeStructuredNoToken) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": "native structured decoding could not select a valid token",
+			"type":    "server_error", "code": "native_structured_decode_failed", "param": nil,
 		}})
 		return
 	}
