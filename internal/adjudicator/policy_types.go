@@ -72,6 +72,13 @@ type Policy struct {
 	// never be blanket-softened; use ArgPredicate.Advisory for one FP-prone rule.
 	// Empty/nil keeps every rung enforcing (byte-identical to HEAD). See advisory.go.
 	AdvisoryReasons map[abi.ReasonCode]bool
+	// OperatorApprovals is the set of per-call operator approval ids
+	// (OperatorApprovalID). An approved call may pass a POLICY_BLOCK arg rule, a
+	// POLICY_BLOCK name deny, or the default deny, and answers the reversibility
+	// confirm hold, for that exact call only. It never lifts the credential block,
+	// self-modify, SECRET_EXFIL or egress. Empty/nil changes nothing. See
+	// operator_approval.go.
+	OperatorApprovals map[string]bool
 	// SecretPosture selects what the on-discovery secret rung (internal/secretgate,
 	// #884/#885) does when a tool RESULT bears a credential: quarantine (the zero
 	// value = today's behavior), fail_closed (deny), or admit_and_log (admit a

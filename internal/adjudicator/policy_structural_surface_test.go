@@ -31,6 +31,7 @@ var shippedUndecidedRules = []struct{ marker, why string }{
 	{`(?i:true)`, "the effectful-apply flag on fak_memory_run. Unlike every other entry here this one is not a decider waiting to be written: the arg is a BOOLEAN, so the anchored regex has exactly two possible inputs and no room to quote anything. The raw regex is the whole truth by construction, and the mention hazard the other entries carry does not exist for it (see freeTextArg)"},
 	{`\bfind\s+`, "fence against broad recursive searches on user root"},
 	{`USERPROFILE`, "PowerShell fence against broad recursive searches on user root"},
+	{`--approve`, "the agent-self-approval fence for per-call operator approvals (operator_approval.go). A quoted mention is refused too, which is the safe direction: an agent never needs to spell the approve verb, and the human runs it at the harness prompt, which is not adjudicated"},
 }
 
 // freeTextArg reports whether an arg's VALUE can carry a quoted MENTION of the

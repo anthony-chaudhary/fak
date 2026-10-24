@@ -215,6 +215,15 @@ func archiveCUDAWithImageAudit(ctx context.Context, tc *Toolchain, repoRoot, pkg
 	if err != nil {
 		return nil, err
 	}
+	// The archive is already replaced on disk; stamp it before the audit so a refused audit
+	// cannot leave the previous digest keying a stale link.
+	digest, changed, err := WriteCUDAArchiveStamp(pkgDir, artifact.Path)
+	if err != nil {
+		return nil, err
+	}
+	if stdout != nil {
+		fmt.Fprintf(stdout, "[cuda] archive stamp %s digest %.12s (changed=%t)\n", CUDAArchiveStampFile, digest, changed)
+	}
 	artifact.CUDAImages, err = AuditCUDAArchiveImages(ctx, tc, repoRoot, arch, artifact.Path)
 	if err != nil {
 		return nil, err

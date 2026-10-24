@@ -214,6 +214,9 @@ type Config struct {
 	ScoringFunc         string  `json:"scoring_func,omitempty"`
 	TopKMethod          string  `json:"topk_method,omitempty"`
 
+	// MoELayerSchedule retains MiniMax's per-layer moe_layer_freq array in normalized exports.
+	MoELayerSchedule []int `json:"moe_layer_schedule,omitempty"`
+
 	// MoELayout names an explicit expert-dispatch layout when a checkpoint declares
 	// one beyond the default routed-MoE path. DeepSeek-V4 W4A4 checkpoints declare
 	// "w4a4_megamoe" (SGLang v0.5.19 --enable-w4a4-megamoe). Empty keeps every legacy
@@ -486,7 +489,8 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	c.DeepSeekV41 = nil
 	aux := struct {
 		*configAlias
-		EOS eosToken `json:"eos_token_id"`
+		EOS          eosToken        `json:"eos_token_id"`
+		MoELayerFreq json.RawMessage `json:"moe_layer_freq"`
 	}{configAlias: (*configAlias)(c)}
 	// Multimodal wrappers (Qwen3.5 "Qwen3_5ForConditionalGeneration") nest the language-
 	// model config under "text_config"; the top level holds only architectures/model_type
@@ -541,6 +545,9 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		c.EOSTokenID = c.EOSTokenIDs[0]
 	}
 	if err := c.deriveConfigAxes(hints); err != nil {
+		return err
+	}
+	if err := c.decodeMiniMaxConfig(b, lm, aux.MoELayerFreq); err != nil {
 		return err
 	}
 	metadata, err := parseDeepSeekV41Metadata(b, lm, *c)

@@ -151,6 +151,13 @@ func amendmentDirectionCases() []amendmentDirectionCase {
 			widenNext:   adjudicator.Policy{AdvisoryReasons: map[abi.ReasonCode]bool{abi.ReasonDefaultDeny: true}},
 		},
 		{
+			field:       "OperatorApprovals",
+			tightenOld:  adjudicator.Policy{OperatorApprovals: map[string]bool{"ap-000000000000": true}},
+			tightenNext: adjudicator.Policy{},
+			widenOld:    adjudicator.Policy{},
+			widenNext:   adjudicator.Policy{OperatorApprovals: map[string]bool{"ap-000000000000": true}},
+		},
+		{
 			field:       "SecretPosture",
 			tightenOld:  adjudicator.Policy{SecretPosture: adjudicator.SecretAdmitAndLog},
 			tightenNext: adjudicator.Policy{SecretPosture: adjudicator.SecretFailClosed},

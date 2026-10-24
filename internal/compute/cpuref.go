@@ -37,8 +37,9 @@ func init() { Register(&cpuBackend{}) }
 // an f32 and/or int8 slice. It is the sole HostBuffer implementation, which is what makes
 // host addressability unreachable on a device tensor by construction.
 type hostBuf struct {
-	f32 []float32
-	i8  []int8
+	f32   []float32
+	i8    []int8
+	nvfp4 bool
 }
 
 // Ready reports the host buffer materialized; the CPU reference is synchronous so it is always true.
@@ -94,7 +95,7 @@ func (c *cpuBackend) CloneTensor(t Tensor) (Tensor, error) {
 	if !ok || h == nil {
 		return Tensor{}, errors.New("cpu-ref: CloneTensor requires host buffer")
 	}
-	out.buf = &hostBuf{f32: append([]float32(nil), h.f32...), i8: append([]int8(nil), h.i8...)}
+	out.buf = &hostBuf{f32: append([]float32(nil), h.f32...), i8: append([]int8(nil), h.i8...), nvfp4: h.nvfp4}
 	if t.Quant != nil {
 		out.Quant = cloneQuantSpec(t.Quant)
 	}
@@ -170,7 +171,7 @@ func (c *cpuBackend) RequireStrixDecodeGEMV() error {
 // Q8_0 reproduces qMatRows (quantize the activation, per-block int8 dot). One method,
 // two dtypes — the duplication the audit ranked hardest, expressed as dispatch.
 // SupportsDeviceWeightDtype reports the exact dtype set cpuBackend.MatMul has a case for,
-// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS and Q2_0. Every other
+// matching that switch: F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0 and NVFP4. Every other
 // dtype falls to the switch's panic default, so it is reported false here.
 //
 // The CPU reference is a host backend (Caps().DeviceMemory is false), so the device seams
@@ -178,7 +179,7 @@ func (c *cpuBackend) RequireStrixDecodeGEMV() error {
 // caller that probes it directly (including a recording wrapper that embeds this backend).
 func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	switch dt {
-	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0:
+	case F32, Q8_0, Q4_K, Q5_K, Q6_K, Q2_K, Q3_K, IQ2_XXS, Q2_0, NVFP4:
 		return true
 	default:
 		return isRawIQ(dt)
@@ -188,6 +189,9 @@ func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 	if computetrace.Emitting() {
 		defer c.traceMatMul(w, x, time.Now())
+	}
+	if nvfp4Tensor(w) {
+		return c.nvfp4MatMul(w, x, 1, false)
 	}
 	out, in := w.Shape[0], w.Shape[1]
 	xf := c.f32(x)
@@ -272,6 +276,9 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 // BatchedMatMul: Y[t,o] = Σ_i W[o,i]·X[t,i] — the prefill GEMM. F32 reproduces
 // matMulBatch; Q8_0 reproduces qGemm8scalar (qgemm8cell deferred-reduction, lanes=16).
 func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
+	if nvfp4Tensor(w) {
+		return c.nvfp4MatMul(w, X, P, true)
+	}
 	out, in := w.Shape[0], w.Shape[1]
 	Xf := c.f32(X)
 	Y := make([]float32, P*out)
