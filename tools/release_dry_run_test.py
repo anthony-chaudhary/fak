@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,32 @@ def git(root: Path, *args: str) -> str:
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+# Every file the two tag-contract tests read; the fixture repo copies exactly
+# these, so a contract test that starts reading a new file must be listed here
+# (enforced by test_tag_contract_fixture_covers_contract_inputs).
+TAG_CONTRACT_FIXTURE_PATHS = (
+    ".github/actions/release-upload/action.yml",
+    ".github/workflows/release-artifacts.yml",
+    ".github/workflows/release-macos.yml",
+    ".github/workflows/release-container.yml",
+    ".github/workflows/release-cuda-container.yml",
+    ".github/workflows/ci.yml",
+    "install.sh",
+    "Dockerfile",
+    "Dockerfile.cuda",
+    "Makefile",
+    "scripts/build.sh",
+    "internal/compute/cuda_arch.txt",
+    "internal/compute/build_cuda.sh",
+    "internal/compute/setup_cuda_wsl.sh",
+    "tools/build_cuda_windows.ps1",
+    "tools/release_artifacts_workflow_test.py",
+    "tools/cuda_arch_targets_test.py",
+)
+
+CONTRACT_TESTS = ("tools/release_artifacts_workflow_test.py", "tools/cuda_arch_targets_test.py")
 
 
 class ReleaseDryRunTest(unittest.TestCase):
@@ -176,25 +203,7 @@ class ReleaseDryRunTest(unittest.TestCase):
 
     def _repo_with_tag_contracts(self, failing: str | None = None) -> Path:
         root = self._repo()
-        fixture_paths = (
-            ".github/workflows/release-artifacts.yml",
-            ".github/workflows/release-macos.yml",
-            ".github/workflows/release-container.yml",
-            ".github/workflows/release-cuda-container.yml",
-            ".github/workflows/ci.yml",
-            "install.sh",
-            "Dockerfile",
-            "Dockerfile.cuda",
-            "Makefile",
-            "scripts/build.sh",
-            "internal/compute/cuda_arch.txt",
-            "internal/compute/build_cuda.sh",
-            "internal/compute/setup_cuda_wsl.sh",
-            "tools/build_cuda_windows.ps1",
-            "tools/release_artifacts_workflow_test.py",
-            "tools/cuda_arch_targets_test.py",
-        )
-        for path in fixture_paths:
+        for path in TAG_CONTRACT_FIXTURE_PATHS:
             target = root / path
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / path, target)
@@ -211,7 +220,7 @@ class ReleaseDryRunTest(unittest.TestCase):
                 docker_path,
                 docker_path.read_text(encoding="utf-8").replace("12.9.1", "12.4.1"),
             )
-        git(root, "add", *fixture_paths)
+        git(root, "add", *TAG_CONTRACT_FIXTURE_PATHS)
         git(root, "commit", "-m", "add tag contracts")
         return root
 
@@ -253,6 +262,19 @@ class ReleaseDryRunTest(unittest.TestCase):
             "tools/cuda_arch_targets_test.py [cuda contract]: exit 1",
             human.stdout,
         )
+
+    def test_tag_contract_fixture_covers_contract_inputs(self) -> None:
+        literal = re.compile(r'ROOT\s*/\s*"([^"]+)"((?:\s*/\s*"[^"]+")*)')
+        segment = re.compile(r'"([^"]+)"')
+        referenced = set()
+        for test in CONTRACT_TESTS:
+            text = (ROOT / test).read_text(encoding="utf-8")
+            for match in literal.finditer(text):
+                parts = [match.group(1), *segment.findall(match.group(2))]
+                referenced.add("/".join(parts))
+        self.assertIn(".github/actions/release-upload/action.yml", referenced)
+        missing = sorted(p for p in referenced if p not in TAG_CONTRACT_FIXTURE_PATHS)
+        self.assertEqual(missing, [], "tag-contract fixture lacks files the contract tests read")
 
     def test_full_dry_run_runs_both_valid_tag_contracts(self) -> None:
         rd = load()
