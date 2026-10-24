@@ -157,13 +157,13 @@ ssh_node(){ ssh "${SSH_OPTS[@]}" "$SSH_USER@$IP" "$@"; }
 
 case "$REMOTE_SHELL" in
   bash|zsh|sh)
-    remote_probe(){ ssh_node true >/dev/null 2>&1; }
+    remote_probe(){ ssh_node true; }
     remote_bash(){ ssh_node "bash -s"; }
     ;;
   windows-wsl)
     # Windows OpenSSH may launch the account's default shell as cmd.exe. Keep the SSH
     # reachability probe in cmd, then pipe the real runner script into WSL bash.
-    remote_probe(){ ssh_node "cmd /c exit 0" >/dev/null 2>&1; }
+    remote_probe(){ ssh_node "cmd /c exit 0"; }
     remote_bash(){
       if [ -n "$WSL_DISTRO" ]; then
         ssh_node wsl.exe -d "$WSL_DISTRO" -e bash -s
@@ -186,7 +186,7 @@ if [ "$AGENT_HOST" = "true" ] || { [ -n "$SELF_IP" ] && [ "$SELF_IP" = "$IP" ]; 
   echo "WARN: BENCH_ALLOW_COLOCATED=1 -- proceeding under contention." >&2
 fi
 
-reachable(){ remote_probe; }   # SSH handshake -- a node can answer ping with no sshd
+reachable(){ remote_probe >/dev/null 2>&1; }   # SSH handshake -- a node can answer ping with no sshd
 
 # --- onboarding-state classifier -------------------------------------------------------------
 # classify_onboard_state <exit_code> <stderr> -> no-sshd | sshd-only | authorized | unknown.
@@ -226,7 +226,7 @@ onboard_remedy(){
 # as remote_probe, so ping and diagnose cannot disagree about what "reachable" means.
 diagnose_onboard_state(){
   local err rc state
-  err="$(ssh_node true 2>&1 >/dev/null)"; rc=$?
+  err="$(remote_probe 2>&1 >/dev/null)"; rc=$?
   state="$(classify_onboard_state "$rc" "$err")"
   printf 'ONBOARD-STATE %s %s\n' "$NODE" "$state"
   printf 'ONBOARD-REMEDY %s\n' "$(onboard_remedy "$state")"
