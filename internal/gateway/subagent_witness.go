@@ -44,6 +44,35 @@ func subagentSpawnTool(tool string) bool {
 	return containsAnySubstring(strings.ToLower(tool), subagentSpawnShapes)
 }
 
+// subagentSpawnOperation identifies child-creating operations for depth admission.
+// Unlike the deliberately coarse fold-witness matcher above, admission must not
+// treat task_status, list_agents, or an agent-named server's reads as new children.
+// Task, Agent, and Workflow create delegated work (agent/spawn_place.go); native
+// task_spawn and external spawn/create spellings cover the other harnesses.
+// Resolve policy-backed aliases exactly as buildCall does, then strip explicit
+// namespace separators. Without that policy evidence an underscore may be part
+// of an operation (get_task), not a server prefix.
+func (s *Server) subagentSpawnOperation(tool string) bool {
+	tool = strings.ToLower(canonicalToolName(tool, s.PolicyRuntime()))
+	if strings.HasPrefix(tool, "mcp__") {
+		rest := strings.TrimPrefix(tool, "mcp__")
+		if i := strings.Index(rest, "__"); i > 0 && i+2 < len(rest) {
+			tool = rest[i+2:]
+		}
+	}
+	if i := strings.LastIndexAny(tool, ".:"); i >= 0 {
+		tool = tool[i+1:]
+	}
+	switch tool {
+	case "task", "agent", "workflow", "subagent", "dispatch", "spawn",
+		"task_spawn", "spawn_task", "spawn_agent", "spawn_subagent",
+		"agent_spawn", "subagent_spawn", "create_agent", "create_subagent":
+		return true
+	default:
+		return false
+	}
+}
+
 // doneClaim pairs a space-padded completion-claim phrase with the coarse claim KIND it
 // asserts. An ordered slice (not a map) so a multi-phrase result resolves deterministically.
 type doneClaim struct{ phrase, kind string }

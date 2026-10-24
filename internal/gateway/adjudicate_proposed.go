@@ -146,6 +146,13 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			pass = append(pass, tc)
 			continue
 		}
+		// Child creation must reach ordinary adjudication, including its depth
+		// cap, even when a namespace looks read-only or reuse sees read-shaped
+		// arguments. Non-spawn reads such as list_agents remain cache-eligible.
+		if s.subagentSpawnOperation(tool) {
+			pass = append(pass, tc)
+			continue
+		}
 		// TOOLPROC REUSE PROBE (#5119) — the content-keyed twin of the vDSO name probe
 		// below, and the live caller internal/gateway/toolproc_reuse.go was written to
 		// have. It keys on the command CONTENT (`read:<path>@<digest>` / `query:<canon>`)
@@ -645,7 +652,7 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 // is declared. The check runs at the adjudication seam, before adjudicateWithSeq,
 // so a refused spawn spends nothing and is never forwarded.
 func (s *Server) subagentDepthRefusal(ctx context.Context, tool string) (WireVerdict, bool) {
-	if !subagentSpawnTool(tool) {
+	if !s.subagentSpawnOperation(tool) {
 		return WireVerdict{}, false
 	}
 	parentDepth := sessionDepthFrom(ctx)
