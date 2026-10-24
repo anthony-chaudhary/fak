@@ -483,6 +483,70 @@ extern "C" double fcuda_event_elapsed_ms_end(void) {
     return (double)ms;
 }
 
+// Kernel-profile event pool (cuda_profile.go). Created once at init when the profile is on;
+// a failed creation destroys what it made and leaves the pool empty, so every later call
+// refuses and the Go reader reports the profile unavailable. No call here prints, and a
+// failure clears only the last-error it raised itself, never an op's earlier error.
+static std::vector<cudaEvent_t> g_prof_events;
+
+static int prof_status(cudaError_t e, cudaError_t prior) {
+  if (prior == cudaSuccess && cudaPeekAtLastError() != cudaSuccess) (void)cudaGetLastError();
+  return (int)e;
+}
+
+extern "C" int fcuda_prof_init(int pairs) {
+  if (pairs <= 0 || !g_prof_events.empty()) return -1;
+  std::vector<cudaEvent_t> events((size_t)pairs * 2, nullptr);
+  for (size_t i = 0; i < events.size(); ++i) {
+    cudaError_t e = cudaEventCreate(&events[i]);
+    if (e != cudaSuccess) {
+      for (size_t j = 0; j < i; ++j) cudaEventDestroy(events[j]);
+      return (int)e;
+    }
+  }
+  g_prof_events.swap(events);
+  return 0;
+}
+
+// The Go fold never calls this while g_stream is capturing (cudaStreamQuery would
+// invalidate the capture). An event recorded on an idle stream is waited on, so the
+// profile never leaves an idle stream busy for an idle-stream admission check.
+extern "C" int fcuda_prof_record(int event, int *was_idle) {
+  if (!was_idle || event < 0 || (size_t)event >= g_prof_events.size()) return -1;
+  *was_idle = 0;
+  const cudaError_t prior = cudaPeekAtLastError();
+  const cudaError_t query = cudaStreamQuery(g_stream);
+  if (query != cudaSuccess && query != cudaErrorNotReady) return prof_status(query, prior);
+  cudaError_t e = cudaEventRecord(g_prof_events[(size_t)event], g_stream);
+  if (e == cudaSuccess && query == cudaSuccess) {
+    *was_idle = 1;
+    e = cudaEventSynchronize(g_prof_events[(size_t)event]);
+  }
+  return prof_status(e, prior);
+}
+
+extern "C" int fcuda_prof_elapsed_ms(int from_event, int to_event, float *ms) {
+  if (!ms || from_event < 0 || to_event < 0 || (size_t)from_event >= g_prof_events.size() ||
+      (size_t)to_event >= g_prof_events.size()) return -1;
+  const cudaError_t prior = cudaPeekAtLastError();
+  cudaError_t e = cudaEventSynchronize(g_prof_events[(size_t)to_event]);
+  if (e == cudaSuccess)
+    e = cudaEventElapsedTime(ms, g_prof_events[(size_t)from_event], g_prof_events[(size_t)to_event]);
+  return prof_status(e, prior);
+}
+
+extern "C" int fcuda_prof_capturing(void) {
+  if (g_capture_open) return 1;
+  const cudaError_t prior = cudaPeekAtLastError();
+  cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+  const cudaError_t e = cudaStreamIsCapturing(g_stream, &status);
+  if (e != cudaSuccess) {
+    prof_status(e, prior);
+    return 1;
+  }
+  return status != cudaStreamCaptureStatusNone ? 1 : 0;
+}
+
 extern "C" int fcuda_set_device(int device) {
   cudaError_t e = cudaSetDevice(device);
   if (e != cudaSuccess) {

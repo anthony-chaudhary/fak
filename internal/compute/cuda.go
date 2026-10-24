@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -43,8 +42,9 @@ import (
 
 // cudaMu serializes all device ops: the cuBLAS handle and the single default stream are
 // not safe under concurrent use, and this first backend favors obvious correctness over
-// intra-backend concurrency (the async/stream seam is a tracked follow-up).
-var cudaMu sync.Mutex
+// intra-backend concurrency (the async/stream seam is a tracked follow-up). Its critical
+// sections are also the opt-in kernel profile's timed spans (cuda_profile.go).
+var cudaMu cudaDeviceMutex
 
 // graphEnabled gates the CUDA-graph decode path (FAK_CUDA_GRAPH=1). It is OFF by default
 // because PER-TOKEN capture is a measured dead end: re-instantiating a ~600-node graph
@@ -97,6 +97,9 @@ func init() {
 		faultLatch:  NewDeviceFaultLatch("cuda", cudaFaultReconstructBudget),
 	}
 	Register(cudaDev)
+	if cudaTimestampProfileEnabled(os.Getenv(cudaTimestampProfileEnv)) {
+		installCUDAKernelProfile()
+	}
 	// Apply the TF32 tensor-core math mode from the env now that fcuda_init has created the
 	// cuBLAS handle (Lever 4). Default-off, so a run that does not set FAK_CUDA_TF32 keeps the
 	// pedantic FP32-core path and its witnessed cosine floors; a host can still flip it later
@@ -104,6 +107,47 @@ func init() {
 	tf32Enabled = os.Getenv("FAK_CUDA_TF32") == "1"
 	applyCUDATF32()
 }
+
+// installCUDAKernelProfile creates the event pool and registers the "cuda" kernel profile
+// reader. The reader is registered even when the pool fails, so an opted-in process reads
+// the profile as unavailable rather than as off; with the profile off nothing registers.
+func installCUDAKernelProfile() {
+	status := int(C.fcuda_prof_init(C.int(cudaProfilePairs)))
+	if status != 0 {
+		fmt.Fprintf(os.Stderr, "fak-cuda: %s=1 but the event pool failed (status %d); kernel profile unavailable\n", cudaTimestampProfileEnv, status)
+	}
+	cudaMu.profile.Store(newCUDAKernelProfiler(cudaEventClock{}, cudaProfilePairs, status == 0))
+	RegisterKernelProfileReader("cuda", cudaMu.readProfile)
+}
+
+// cudaEventClock is the profile's cgo clock over the fcuda_prof_* event pool.
+type cudaEventClock struct{}
+
+func cudaProfileEvent(m cudaProfileMark) C.int {
+	e := m.slot * 2
+	if m.end {
+		e++
+	}
+	return C.int(e)
+}
+
+func (cudaEventClock) record(m cudaProfileMark) (idle bool, err error) {
+	var wasIdle C.int
+	if status := int(C.fcuda_prof_record(cudaProfileEvent(m), &wasIdle)); status != 0 {
+		return false, fmt.Errorf("fcuda_prof_record: status %d", status)
+	}
+	return wasIdle != 0, nil
+}
+
+func (cudaEventClock) elapsedNS(from, to cudaProfileMark) (float64, error) {
+	var ms C.float
+	if status := int(C.fcuda_prof_elapsed_ms(cudaProfileEvent(from), cudaProfileEvent(to), &ms)); status != 0 {
+		return 0, fmt.Errorf("fcuda_prof_elapsed_ms: status %d", status)
+	}
+	return float64(ms) * 1e6, nil
+}
+
+func (cudaEventClock) capturing() bool { return C.fcuda_prof_capturing() != 0 }
 
 // Recycle returns every transient op-output buffer allocated since the last Recycle to the
 // pooled allocator. The HAL calls it at each token boundary (after Read), where all
