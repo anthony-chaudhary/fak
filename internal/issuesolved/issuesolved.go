@@ -5,6 +5,7 @@ package issuesolved
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,11 +91,23 @@ type IssueItem struct {
 
 // defaultGhExecutor builds deadlined gh commands using internal/ghexec.
 func defaultGhExecutor(ctx context.Context, args ...string) ([]byte, error) {
-	if ctx == nil {
-		ctx = context.Background()
+	return runGhWithTimeout(ctx, ghexec.DefaultTimeout, args...)
+}
+
+func runGhWithTimeout(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	cmd, cancel := ghexec.CommandTimeout(ctx, timeout, args...)
+	defer cancel()
+	// Bound pipe draining if a descendant outlives the killed gh process.
+	cmd.WaitDelay = 10 * time.Second
+	out, err := cmd.Output()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		// Output retains a bounded stderr prefix and suffix, separate from JSON stdout.
+		if detail := strings.TrimSpace(string(exitErr.Stderr)); detail != "" {
+			err = fmt.Errorf("%w: %s", err, detail)
+		}
 	}
-	cmd := ghexec.Command(ctx, args...)
-	return cmd.Output()
+	return out, err
 }
 
 // defaultGitExecutor runs git commands directly using os/exec.

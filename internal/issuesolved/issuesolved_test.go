@@ -6,11 +6,126 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestMain runs a native fake gh without shell helpers, network, or credentials.
+func TestMain(m *testing.M) {
+	if os.Getenv("FAK_ISSUESOLVED_GH_HELPER") == "1" && strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "gh" {
+		if os.Getenv("GH_PROMPT_DISABLED") != "1" || os.Getenv("GH_NO_UPDATE_NOTIFIER") != "1" {
+			fmt.Fprintln(os.Stderr, "fake gh: interactive configuration")
+			os.Exit(98)
+		}
+		switch os.Getenv("FAK_ISSUESOLVED_GH_MODE") {
+		case "failure":
+			fmt.Fprintln(os.Stdout, "[]")
+			fmt.Fprintln(os.Stderr, "synthetic gh: rate limit exceeded")
+			os.Exit(7)
+		case "hang":
+			fmt.Fprintln(os.Stdout, "fake gh started")
+			time.Sleep(3 * time.Second)
+			os.Exit(0)
+		default:
+			fmt.Fprintln(os.Stderr, "synthetic gh: warning, not JSON")
+			fmt.Fprintln(os.Stdout, `[{"number":12161,"title":"fixture","closedAt":"2026-09-08T10:00:00Z","stateReason":"COMPLETED","url":"https://example.invalid/issues/12161"}]`)
+			os.Exit(0)
+		}
+	}
+	os.Exit(m.Run())
+}
+
+func installFakeGh(t *testing.T) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	name := "gh"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	src, err := os.Open(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(filepath.Join(bin, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		t.Fatal(err)
+	}
+	// No real gh is reachable, even if command resolution regresses.
+	t.Setenv("PATH", bin)
+	t.Setenv("FAK_ISSUESOLVED_GH_HELPER", "1")
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestGhExecutor_Stderr_Timeout(t *testing.T) {
+	installFakeGh(t)
+	t.Run("stderr", func(t *testing.T) {
+		t.Setenv("FAK_ISSUESOLVED_GH_MODE", "failure")
+		_, err := collectIssuesFromGh(nil, "fixture/repo", time.Time{}, time.Now(), defaultGhExecutor)
+		if err == nil || !strings.Contains(err.Error(), "gh issue list:") || !strings.Contains(err.Error(), "synthetic gh: rate limit exceeded") {
+			t.Fatalf("missing gh stderr diagnostic: %v", err)
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+			t.Fatalf("lost underlying gh exit error: %v", err)
+		}
+	})
+	t.Run("json stdout excludes stderr", func(t *testing.T) {
+		t.Setenv("FAK_ISSUESOLVED_GH_MODE", "success")
+		since := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+		items, err := collectIssuesFromGh(nil, "fixture/repo", since, since.Add(24*time.Hour), defaultGhExecutor)
+		want := []IssueItem{{
+			Number: 12161, Title: "fixture", ClosedAt: since.Add(10 * time.Hour),
+			StateReason: "COMPLETED", URL: "https://example.invalid/issues/12161",
+		}}
+		if err != nil || !reflect.DeepEqual(items, want) {
+			t.Fatalf("gh JSON changed or stderr leaked into stdout: items=%v, want=%v, err=%v", items, want, err)
+		}
+	})
+	t.Run("parent cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := defaultGhExecutor(ctx, "issue", "list"); !errors.Is(err, context.Canceled) {
+			t.Fatalf("parent cancellation = %v, want context.Canceled", err)
+		}
+	})
+	t.Run("earlier parent deadline", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+		if _, err := defaultGhExecutor(ctx, "issue", "list"); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("parent deadline = %v, want context.DeadlineExceeded", err)
+		}
+	})
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestGhExecutor_OwnTimeout(t *testing.T) {
+	installFakeGh(t)
+	t.Setenv("FAK_ISSUESOLVED_GH_MODE", "hang")
+	// The default entry point supplies ghexec.DefaultTimeout to this same helper.
+	// A short budget proves process termination without adding a minute to the suite.
+	out, err := runGhWithTimeout(context.Background(), 250*time.Millisecond, "issue", "list")
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || string(out) != "fake gh started\n" {
+		t.Fatalf("gh was not started and terminated by its deadline: stdout=%q, err=%v", out, err)
+	}
+}
 
 func TestDefaultOptions(t *testing.T) {
 	opts := DefaultOptions()
