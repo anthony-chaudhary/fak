@@ -69,6 +69,8 @@ func v41DeferredVerdict(backend string, status V41DeferredStatus, record []byte)
 	}
 	site := "V41RoutedSwiGLU"
 	switch status.Kind {
+	case V41DeferredRoutedSwiGLU:
+		site = "V41RoutedSwiGLU"
 	case V41DeferredF32Finite:
 		site = "V41F32Finite"
 	case V41DeferredBF16Publish:

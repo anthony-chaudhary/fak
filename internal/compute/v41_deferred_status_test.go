@@ -5,10 +5,53 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/enumlint"
 )
+
+// The compatibility table below pins verdict behavior; this source-bound check
+// keeps the wrapper's attribution switch exhaustive without a lint exemption.
+// fak-test:justify why=contract when=changed:internal/compute/v41_deferred_status.go
+// fak-test:runtime fast est=10ms lane=default
+func TestV41DeferredVerdictEnumCoverage(t *testing.T) {
+	t.Parallel()
+	source, err := os.ReadFile("v41_deferred_status.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan := func(source []byte) enumlint.Report {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "v41_deferred_status.go"), source, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		report, err := enumlint.Scan(dir, enumlint.Config{Rules: []string{enumlint.RuleSwitch}, Exempt: enumlint.NoExemptions})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(report.Unparsed) != 0 || report.Packages != 1 || report.Enums != 1 || report.Members != 3 || report.Sites < 2 {
+			t.Fatalf("incomplete deferred-status enum scan: %+v", report)
+		}
+		return report
+	}
+	if report := scan(source); len(report.Findings) != 0 {
+		t.Fatalf("non-exhaustive deferred-status switch: %+v", report.Findings)
+	}
+	const routedCase = "\tcase V41DeferredRoutedSwiGLU:\n\t\tsite = \"V41RoutedSwiGLU\"\n"
+	if strings.Count(string(source), routedCase) != 1 {
+		t.Fatal("routed attribution arm must occur exactly once for the negative control")
+	}
+	mutated := strings.Replace(string(source), routedCase, "", 1)
+	report := scan([]byte(mutated))
+	if len(report.Findings) != 1 || report.Findings[0].Owner != "v41DeferredVerdict" || len(report.Findings[0].Missing) != 1 || report.Findings[0].Missing[0].Name != "V41DeferredRoutedSwiGLU" {
+		t.Fatalf("negative control did not detect the missing routed attribution: %+v", report.Findings)
+	}
+}
 
 func v41DeferredRecord(words ...uint32) []byte {
 	out := make([]byte, 4*len(words))
