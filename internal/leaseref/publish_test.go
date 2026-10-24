@@ -95,9 +95,22 @@ func (f *publishFixture) refs(dir string) string {
 	return f.git(dir, "", "for-each-ref", "--format=%(refname) %(objectname)")
 }
 
+// publishTestLazyFetchOption independently reports whether the host Git accepts
+// --no-lazy-fetch; Git before 2.45 exits 129 on the unknown global option.
+func publishTestLazyFetchOption(t *testing.T) bool {
+	t.Helper()
+	err := exec.Command("git", "--no-replace-objects", "--no-lazy-fetch", "version").Run()
+	var exit *exec.ExitError
+	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 129) {
+		t.Fatalf("git capability probe: %v", err)
+	}
+	return err == nil
+}
+
 // fak-test:justify why=integration when=changed:internal/leaseref/publish* witness=publish.go#PublishOwnedRef
 // fak-test:runtime integration est=5s lane=default
 func TestLeaserefPublish(t *testing.T) {
+	lazyFetchOption := publishTestLazyFetchOption(t)
 	for _, kind := range []string{"absent-intent", "renewed-lease", "expired-predecessor"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newPublishFixture(t)
@@ -129,13 +142,16 @@ func TestLeaserefPublish(t *testing.T) {
 			t.Setenv("GIT_TRACE2_EVENT", trace)
 			var push []string
 			var deadline time.Time
+			var calls int
 			f.store.run = func(ctx context.Context, dir string, args ...string) (string, int, error) {
 				got, ok := ctx.Deadline()
 				if !ok || (!deadline.IsZero() && got != deadline) {
 					t.Fatal("not one shared bounded context")
 				}
 				deadline = got
-				if !slices.Contains(args, "--no-replace-objects") || !slices.Contains(args, "--no-lazy-fetch") {
+				// The first call always carries the option: its exit status is the capability check.
+				calls++
+				if !slices.Contains(args, "--no-replace-objects") || slices.Contains(args, "--no-lazy-fetch") != (lazyFetchOption || calls == 1) {
 					t.Fatalf("object substitution or implicit fetch allowed: %v", args)
 				}
 				if slices.Contains(args, "fetch") {
@@ -150,8 +166,12 @@ func TestLeaserefPublish(t *testing.T) {
 			if !r.ConfirmedPublication || !r.TransportAttempted || !r.TransportCompleted || r.Indeterminate || r.RemoteReadbackOID != f.opts.PinnedOID || r.LocalReadbackOID != f.opts.PinnedOID {
 				t.Fatalf("publication receipt: %+v", r)
 			}
-			want := []string{"--no-replace-objects", "--no-lazy-fetch", "-c", "push.negotiate=false", "push", "--no-follow-tags", "--recurse-submodules=no",
-				"--force-with-lease=" + f.opts.Ref + ":" + f.opts.ExpectedRemoteOID, "--", f.remote, f.opts.PinnedOID + ":" + f.opts.Ref}
+			want := []string{"--no-replace-objects"}
+			if lazyFetchOption {
+				want = append(want, "--no-lazy-fetch")
+			}
+			want = append(want, "-c", "push.negotiate=false", "push", "--no-follow-tags", "--recurse-submodules=no",
+				"--force-with-lease="+f.opts.Ref+":"+f.opts.ExpectedRemoteOID, "--", f.remote, f.opts.PinnedOID+":"+f.opts.Ref)
 			if !reflect.DeepEqual(push, want) {
 				t.Fatalf("push=%v want=%v", push, want)
 			}
@@ -411,6 +431,112 @@ func TestLeaserefPublish(t *testing.T) {
 				if _, err := os.Stat(os.Getenv("FAK_LEASEREF_PUBLISH_HOOK")); err != nil {
 					t.Fatal("normal pre-push hook did not execute")
 				}
+			}
+		})
+	}
+}
+
+// fak-test:justify why=integration when=changed:internal/leaseref/publish* witness=publish.go#PublishOwnedRef
+// fak-test:runtime integration est=4s lane=default
+func TestLeaserefPublishWithoutLazyFetchOption(t *testing.T) {
+	without := func(args []string) []string {
+		return slices.DeleteFunc(slices.Clone(args), func(arg string) bool { return arg == "--no-lazy-fetch" })
+	}
+	objectAccess := []string{"--show-object-format", "for-each-ref", "cat-file", "ls-remote", "push", "fetch"}
+	for _, kind := range []string{"supported", "clean", "promisor-remote", "partial-clone-filter", "partial-clone-extension", "promisor-pack", "option-unconfirmed", "option-unrunnable"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newPublishFixture(t)
+			switch kind {
+			case "promisor-remote":
+				f.git(f.local, "", "config", "remote.origin.promisor", "true")
+			case "partial-clone-filter":
+				f.git(f.local, "", "config", "remote.origin.partialclonefilter", "blob:none")
+			case "partial-clone-extension":
+				f.git(f.local, "", "config", "core.repositoryformatversion", "1")
+				f.git(f.local, "", "config", "extensions.partialClone", "origin")
+			case "promisor-pack":
+				pack := filepath.Join(f.local, ".git", "objects", "pack", "pack-fixture.promisor")
+				if err := os.MkdirAll(filepath.Dir(pack), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(pack, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			beforeRemote := f.refs(f.remote)
+			var calls [][]string
+			// Emulate Git 2.43, which exits 129 on the unknown global option, unless
+			// the case is a Git that accepts it.
+			f.store.run = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+				calls = append(calls, slices.Clone(args))
+				option := slices.Contains(args, "--no-lazy-fetch")
+				switch {
+				case kind == "supported":
+					return gitRunner(ctx, dir, without(args)...)
+				case option && kind == "option-unconfirmed":
+					return "", 128, nil
+				case option && kind == "option-unrunnable":
+					return "", -1, errors.New("git could not be executed")
+				case option:
+					return "", 129, nil
+				}
+				return gitRunner(ctx, dir, args...)
+			}
+			r := f.store.PublishOwnedRef(context.Background(), f.opts)
+			if len(calls) == 0 || !slices.Contains(calls[0], "--no-lazy-fetch") {
+				t.Fatalf("first Git call did not carry the lazy-fetch guard: %v", calls)
+			}
+			var push []string
+			for i, args := range calls {
+				if !slices.Contains(args, "--no-replace-objects") {
+					t.Fatalf("object substitution allowed: %v", args)
+				}
+				if kind != "supported" && i > 0 && slices.Contains(args, "--no-lazy-fetch") {
+					t.Fatalf("rejected option reached Git again: %v", args)
+				}
+				if kind == "supported" && !slices.Contains(args, "--no-lazy-fetch") {
+					t.Fatalf("supported Git lost the lazy-fetch guard: %v", args)
+				}
+				if slices.Contains(args, "push") {
+					push = args
+				}
+			}
+			switch kind {
+			case "supported", "clean":
+				if !r.ConfirmedPublication || r.Indeterminate || r.Reason != "" {
+					t.Fatalf("publication receipt: %+v", r)
+				}
+				want := []string{"--no-replace-objects", "--no-lazy-fetch"}
+				if kind == "clean" {
+					want = want[:1]
+				}
+				want = append(want, "-c", "push.negotiate=false", "push", "--no-follow-tags", "--recurse-submodules=no",
+					"--force-with-lease="+f.opts.Ref+":", "--", f.remote, f.opts.PinnedOID+":"+f.opts.Ref)
+				if !reflect.DeepEqual(push, want) {
+					t.Fatalf("push=%v want=%v", push, want)
+				}
+				return
+			case "option-unconfirmed", "option-unrunnable":
+				if r.Reason != "OBJECT_FORMAT_UNCONFIRMED" || len(calls) != 1 {
+					t.Fatalf("unconfirmed option status took the unguarded fallback: %+v calls=%v", r, calls)
+				}
+			default:
+				if r.Reason != "LAZY_FETCH_GUARD_UNAVAILABLE" {
+					t.Fatalf("lazy-fetch-capable repository was not refused: %+v", r)
+				}
+			}
+			if r.ConfirmedPublication || r.TransportAttempted || r.Indeterminate {
+				t.Fatalf("refusal receipt: %+v", r)
+			}
+			for _, args := range calls[1:] {
+				for _, access := range objectAccess {
+					if slices.Contains(args, access) {
+						t.Fatalf("refusal ran %s without the guard: %v", access, args)
+					}
+				}
+			}
+			if f.refs(f.remote) != beforeRemote {
+				t.Fatal("refusal changed remote refs")
 			}
 		})
 	}

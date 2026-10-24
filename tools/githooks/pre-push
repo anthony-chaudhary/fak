@@ -87,8 +87,36 @@ fi
 # Deletion/new-ref rows need no base, and every original old:new pair stays intact.
 advertised_bases="$(printf '%s\n' "$push_updates" | awk 'NF == 4 && $2 !~ /^0+$/ && $4 !~ /^0+$/ { print $4 }' | sort -u)"
 missing_bases=""
+# Git before 2.45 rejects --no-lazy-fetch with status 129. Read without it only
+# where no promisor key, partial-clone extension or promisor pack exists; otherwise
+# every base goes to native hydration, which owns the typed refusal.
+lazy_fetch_option="--no-lazy-fetch"
+lazy_fetch_safe=1
+if [ -n "$advertised_bases" ]; then
+	git --no-lazy-fetch version >/dev/null 2>&1
+	lazy_fetch_status=$?
+	if [ "$lazy_fetch_status" -ne 0 ]; then
+		lazy_fetch_option=""
+		lazy_fetch_safe=0
+		if [ "$lazy_fetch_status" -eq 129 ]; then
+			git config --name-only --get-regexp '^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$' >/dev/null 2>&1
+			if [ "$?" -eq 1 ] && promisor_pack_dir="$(git rev-parse --git-path objects/pack 2>/dev/null)" && [ -n "$promisor_pack_dir" ]; then
+				lazy_fetch_safe=1
+				for promisor_pack in "$promisor_pack_dir"/*.promisor; do
+					if [ -e "$promisor_pack" ]; then
+						lazy_fetch_safe=0
+					fi
+				done
+			fi
+		fi
+	fi
+fi
 for advertised_base in $advertised_bases; do
-	base_type="$(git --no-lazy-fetch --no-replace-objects cat-file -t "$advertised_base" 2>/dev/null)"
+	base_type=""
+	if [ "$lazy_fetch_safe" -eq 1 ]; then
+		# Unquoted on purpose: an empty option must expand to no argument at all.
+		base_type="$(git $lazy_fetch_option --no-replace-objects cat-file -t "$advertised_base" 2>/dev/null)"
+	fi
 	if [ "$base_type" != "commit" ]; then
 		missing_bases="${missing_bases}${missing_bases:+ }${advertised_base}"
 	fi

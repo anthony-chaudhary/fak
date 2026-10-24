@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -104,6 +105,16 @@ func (s *Store) PublishOwnedRef(parent context.Context, o PublishOptions) (r Pub
 		}
 	}
 	format, code, err := s.publishGit(ctx, "rev-parse", "--show-object-format")
+	if err == nil && code == 129 && ctx.Err() == nil {
+		// Git before 2.45 rejects --no-lazy-fetch with this usage status. Omit it
+		// only where no promisor configuration or pack can make a read fetch.
+		unguarded := context.WithValue(ctx, publishWithoutLazyFetch{}, true)
+		if !s.publishCannotLazyFetch(unguarded) {
+			return fail("LAZY_FETCH_GUARD_UNAVAILABLE")
+		}
+		ctx = unguarded
+		format, code, err = s.publishGit(ctx, "rev-parse", "--show-object-format")
+	}
 	if err != nil || code != 0 || (strings.TrimSpace(format) != "sha1" && strings.TrimSpace(format) != "sha256") ||
 		(strings.TrimSpace(format) == "sha1") != (len(o.PinnedOID) == 40) {
 		return fail("OBJECT_FORMAT_UNCONFIRMED")
@@ -171,13 +182,46 @@ func (s *Store) PublishOwnedRef(parent context.Context, o PublishOptions) (r Pub
 	return r
 }
 
+type publishWithoutLazyFetch struct{}
+
 func (s *Store) publishGit(ctx context.Context, args ...string) (string, int, error) {
 	if err := ctx.Err(); err != nil {
 		return "", -1, err
 	}
 	// Immutable object identity must survive replace refs; a missing predecessor
-	// must not cause an implicit partial-clone fetch. Older Git fails closed.
-	return s.run(ctx, s.dir, append([]string{"--no-replace-objects", "--no-lazy-fetch"}, args...)...)
+	// must not cause an implicit partial-clone fetch.
+	globals := []string{"--no-replace-objects", "--no-lazy-fetch"}
+	if ctx.Value(publishWithoutLazyFetch{}) != nil {
+		globals = globals[:1]
+	}
+	return s.run(ctx, s.dir, append(globals, args...)...)
+}
+
+// publishCannotLazyFetch reports whether the repository has no promisor remote,
+// partial-clone extension or promisor pack. Any such key counts, even one set false.
+func (s *Store) publishCannotLazyFetch(ctx context.Context) bool {
+	_, code, err := s.publishGit(ctx, "config", "--name-only", "--get-regexp", `^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$`)
+	if err != nil || code != 1 || ctx.Err() != nil {
+		return false
+	}
+	out, code, err := s.publishGit(ctx, "rev-parse", "--git-path", "objects/pack")
+	pack := strings.TrimSuffix(out, "\n")
+	if err != nil || code != 0 || pack == "" || ctx.Err() != nil {
+		return false
+	}
+	if !filepath.IsAbs(pack) {
+		pack = filepath.Join(s.dir, pack)
+	}
+	entries, err := os.ReadDir(pack)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".promisor") {
+			return false
+		}
+	}
+	return true
 }
 
 func validPublishRef(ref string) bool {

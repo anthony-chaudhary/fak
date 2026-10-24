@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1213,8 +1215,9 @@ func runPrepushBaseHydration(stdout, stderr io.Writer, root, raw, remote string)
 	// Lazy fetch and replacements cannot satisfy this check from another source.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	globals := []string{"--no-lazy-fetch", "--no-replace-objects", "-C", root}
 	git := func(capture bool, args ...string) (string, error) {
-		argv := append([]string{"--no-lazy-fetch", "--no-replace-objects", "-C", root}, args...)
+		argv := slices.Concat(globals, args)
 		cmd := windowgate.CommandContext(ctx, "git", argv...)
 		windowgate.ConfigureBackgroundCommand(cmd)
 		sysproc.ConfigureProcessGroup(cmd)
@@ -1233,6 +1236,19 @@ func runPrepushBaseHydration(stdout, stderr io.Writer, root, raw, remote string)
 		}
 		err := cmd.Run()
 		return strings.TrimSpace(out.String()), err
+	}
+	// Git before 2.45 rejects --no-lazy-fetch with usage status 129. Reads may
+	// omit it only where no promisor configuration or pack can make one fetch.
+	if _, err := git(false, "version"); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 129 {
+			return fail("git --no-lazy-fetch support is unconfirmed")
+		}
+		globals = globals[1:]
+		if !prepushCannotLazyFetch(git, root) {
+			version, _ := git(true, "version")
+			return fail(prepushGitVersion(version) + " lacks --no-lazy-fetch and this repository can lazy-fetch")
+		}
 	}
 	present := func(oid string) bool {
 		resolved, err := git(true, "rev-parse", "--verify", "--end-of-options", oid+"^{commit}")
@@ -1267,6 +1283,43 @@ func runPrepushBaseHydration(stdout, stderr io.Writer, root, raw, remote string)
 	}
 	fmt.Fprintf(stdout, "PREPUSH_BASE_AVAILABLE: %d exact advertised commits; build and structural gates remain unrun\n", len(unique))
 	return 0
+}
+
+// prepushCannotLazyFetch reports whether root has no promisor remote, partial-clone
+// extension or promisor pack. Any such key counts, even one set to false.
+func prepushCannotLazyFetch(git func(bool, ...string) (string, error), root string) bool {
+	var exit *exec.ExitError
+	_, err := git(false, "config", "--name-only", "--get-regexp", `^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$`)
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return false
+	}
+	pack, err := git(true, "rev-parse", "--git-path", "objects/pack")
+	if err != nil || pack == "" {
+		return false
+	}
+	if !filepath.IsAbs(pack) {
+		pack = filepath.Join(root, pack)
+	}
+	entries, err := os.ReadDir(pack)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".promisor") {
+			return false
+		}
+	}
+	return true
+}
+
+func prepushGitVersion(out string) string {
+	version := strings.TrimPrefix(out, "git version ")
+	if version == "" || len(version) > 64 || strings.IndexFunc(version, func(r rune) bool {
+		return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || strings.ContainsRune(".-_ ()", r))
+	}) >= 0 {
+		return "git (unknown version)"
+	}
+	return "git " + version
 }
 
 // prepushArchiveTip archives sha from repo r into a fresh temp dir (committed bytes only — `git

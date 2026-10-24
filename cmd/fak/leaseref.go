@@ -180,7 +180,10 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       same holder/session/acquisition because intents have no generation token.
       NAME must have one push destination, no mirror or URL rewrite configuration.
       Normal hooks run; follow-tags and recursive submodule pushes are disabled.
-      Requires Git support for --no-replace-objects and --no-lazy-fetch.
+      Git calls use --no-replace-objects and --no-lazy-fetch. Git before 2.45
+      lacks --no-lazy-fetch: publication omits it only when no promisor remote,
+      partial-clone extension or promisor pack exists, and is otherwise refused
+      before transport with reason LAZY_FETCH_GUARD_UNAVAILABLE.
       METHOD is documented-enforcement or authorized-server-control. SOURCE cites
       evidence the caller already established that the trusted server preserves
       direct refs throughout refs/fak/locks/. A boolean or ls-remote advertisement

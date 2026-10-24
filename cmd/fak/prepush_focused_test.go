@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,10 +23,21 @@ import (
 
 const focusedHelperEnv = "FAK_FOCUSED_PREPUSH_HELPER"
 
+// The git shim variables deliberately avoid the FAK_FOCUSED_PREPUSH_ prefix,
+// which focusedFixture.run strips from the hook environment.
+const (
+	focusedGitShimRealEnv   = "FAK_PREPUSH_GIT_SHIM_REAL"
+	focusedGitShimOptionEnv = "FAK_PREPUSH_GIT_SHIM_OPTION_EXIT"
+	focusedGitShimTraceEnv  = "FAK_PREPUSH_GIT_SHIM_TRACE"
+)
+
 // The hook finds this Go test executable under the name fak. Dispatch before
 // testing parses the CLI arguments; no shell launcher or second Go build is needed.
 func init() {
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if name == "git" && os.Getenv(focusedGitShimRealEnv) != "" {
+		os.Exit(focusedGitShim(os.Args[1:]))
+	}
 	if name == "git-remote-fak-stall" && os.Getenv("FAK_FOCUSED_PREPUSH_STALL_ADDR") != "" {
 		// A real Git remote-helper child holds this connection until the
 		// production deadline terminates the fetch process group.
@@ -592,8 +606,168 @@ func advertisedBaseObjectPresent(t *testing.T, root, oid string) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := windowgate.CommandContext(ctx, "git", "--no-lazy-fetch", "--no-replace-objects", "-C", root, "cat-file", "-e", oid)
-	return cmd.Run() == nil
+	// The fixture is never a partial clone, so Git before 2.45 may omit the option.
+	args := []string{"--no-replace-objects", "-C", root, "cat-file", "-e", oid}
+	if windowgate.CommandContext(ctx, "git", "--no-lazy-fetch", "version").Run() == nil {
+		args = append([]string{"--no-lazy-fetch"}, args...)
+	}
+	return windowgate.CommandContext(ctx, "git", args...).Run() == nil
+}
+
+// focusedGitShim stands in for git on PATH and records argv. A nonzero option
+// status answers the --no-lazy-fetch global option as Git before 2.45 does
+// (129); status 0 emulates a Git that accepts it on any host Git.
+func focusedGitShim(args []string) int {
+	if trace := os.Getenv(focusedGitShimTraceEnv); trace != "" {
+		file, err := os.OpenFile(trace, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return 97
+		}
+		err = json.NewEncoder(file).Encode(args)
+		if closeErr := file.Close(); err != nil || closeErr != nil {
+			return 97
+		}
+	}
+	if at := focusedGitGlobalOption(args, "--no-lazy-fetch"); at >= 0 {
+		code, err := strconv.Atoi(os.Getenv(focusedGitShimOptionEnv))
+		if err != nil {
+			return 97
+		}
+		if code != 0 {
+			return code
+		}
+		args = slices.Delete(slices.Clone(args), at, at+1)
+	}
+	cmd := exec.Command(os.Getenv(focusedGitShimRealEnv), args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	var exit *exec.ExitError
+	if err := cmd.Run(); errors.As(err, &exit) {
+		return exit.ExitCode()
+	} else if err != nil {
+		return 96
+	}
+	return 0
+}
+
+func focusedGitGlobalOption(args []string, option string) int {
+	for i := 0; i < len(args) && strings.HasPrefix(args[i], "-"); i++ {
+		switch args[i] {
+		case option:
+			return i
+		case "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env":
+			i++
+		}
+	}
+	return -1
+}
+
+// fak-test:runtime medium est=25s lane=default
+func TestPrepushWithoutLazyFetchOption(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell := gitHookShell(t)
+	hook := prepushHookUnderTest(t)
+	cases := []struct {
+		name, optionExit, signal string
+		hook                     bool
+		code                     int
+	}{
+		{name: "hydrate-supported", optionExit: "0", code: 0},
+		{name: "hydrate-clean", optionExit: "129", code: 0},
+		{name: "hydrate-promisor-remote", optionExit: "129", signal: "promisor-remote", code: 2},
+		{name: "hydrate-promisor-pack", optionExit: "129", signal: "promisor-pack", code: 2},
+		{name: "hydrate-option-unconfirmed", optionExit: "128", code: 2},
+		{name: "hook-supported", optionExit: "0", hook: true, code: 0},
+		{name: "hook-clean", optionExit: "129", hook: true, code: 0},
+		{name: "hook-promisor-remote", optionExit: "129", signal: "promisor-remote", hook: true, code: 1},
+		{name: "hook-option-unconfirmed", optionExit: "128", hook: true, code: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFocusedFixture(t)
+			switch tc.signal {
+			case "promisor-remote":
+				f.git(t, "config", "remote.origin.promisor", "true")
+			case "promisor-pack":
+				pack := filepath.Join(f.root, ".git", "objects", "pack", "pack-fixture.promisor")
+				if err := os.MkdirAll(filepath.Dir(pack), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(pack, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			shim := filepath.Join(f.bin, "git")
+			if runtime.GOOS == "windows" {
+				shim += ".exe"
+			}
+			focusedLinkExecutable(t, f.executable, shim)
+			trace := filepath.Join(t.TempDir(), "git-calls.jsonl")
+			t.Setenv(focusedGitShimRealEnv, realGit)
+			t.Setenv(focusedGitShimOptionEnv, tc.optionExit)
+			t.Setenv(focusedGitShimTraceEnv, trace)
+			var out string
+			var code int
+			var calls [][]string
+			if tc.hook {
+				out, code, calls = f.run(t, shell, []string{hook}, "refs/heads/main "+f.good+" refs/heads/main "+f.base+"\n")
+			} else {
+				t.Setenv("PATH", f.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				var stdout, stderr bytes.Buffer
+				code = runHooksPrePush(&stdout, &stderr, []string{"--root", f.root, "--hydrate-bases", f.base})
+				out = stdout.String() + stderr.String()
+			}
+			data, err := os.ReadFile(trace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Availability reads are the calls that disable replacement objects.
+			var reads, guardedReads int
+			dec := json.NewDecoder(bytes.NewReader(data))
+			for {
+				var args []string
+				if err := dec.Decode(&args); err == io.EOF {
+					break
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Contains(args, "cat-file") && !slices.Contains(args, "--verify") && !slices.Contains(args, "fetch") {
+					continue
+				}
+				reads++
+				if !slices.Contains(args, "--no-replace-objects") {
+					continue
+				}
+				if slices.Contains(args, "--no-lazy-fetch") != (tc.optionExit == "0") {
+					t.Fatalf("availability read with the wrong lazy-fetch guard: %v", args)
+				}
+				guardedReads++
+			}
+			if code != tc.code {
+				t.Fatalf("code=%d want=%d\n%s", code, tc.code, out)
+			}
+			if tc.code != 0 {
+				if !strings.Contains(out, "PREPUSH_BASE_UNAVAILABLE") || reads != 0 {
+					t.Fatalf("unguarded repository was read or refused without the typed token: reads=%d\n%s", reads, out)
+				}
+				if tc.hook && (len(calls) != 1 || focusedCallCount(calls, "pre-push", "--hydrate-bases", f.base) != 1) {
+					t.Fatalf("hook must leave the refusal to native hydration alone: %v", calls)
+				}
+				return
+			}
+			if guardedReads == 0 {
+				t.Fatalf("no availability read observed:\n%s", data)
+			}
+			if !tc.hook && !strings.Contains(out, "PREPUSH_BASE_AVAILABLE") {
+				t.Fatalf("hydration did not admit the present base:\n%s", out)
+			}
+			if tc.hook && (len(calls) != 2 || focusedCallCount(calls, "pre-push", "--hydrate-bases", "") != 0) {
+				t.Fatalf("present base must reach exactly the import witness and range admission: %v", calls)
+			}
+		})
+	}
 }
 
 // fak-test:runtime medium est=5s lane=default
