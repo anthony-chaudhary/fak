@@ -232,7 +232,8 @@ void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY, int out, i
 int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX, float *dY,
                         int out, int in, int P, int block);
 /* fcuda_q8_matmul_rows_f32 is fcuda_q8_matmul_f32 pinned to the per-row path for every P
- * (1 <= P <= 65535): each row's output is bitwise the P=1 GEMV's. Both return 0, -1 on bad
+ * (1 <= P <= 65535): each row's output is bitwise the P=1 GEMV's, through a row-tiled kernel
+ * that reads each weight block once per tile of rows. Both return 0, -1 on bad
  * arguments, 80001 when the activation-code or f32 dequant scratch misses, or 80002 (P>=128
  * fcuda_q8_matmul_f32 only) when the fp16 split scratch misses; nothing launched on a miss. */
 int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const float *dX, float *dY,
