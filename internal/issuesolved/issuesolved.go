@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,19 +149,39 @@ func resolvePrivateDir(publicDir, privateDir string) string {
 	return "../fak-private"
 }
 
-func normalizeOptions(opts Options) Options {
+func normalizeOptions(opts Options) (Options, error) {
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
 	}
-	if opts.Hours <= 0 && opts.Since.IsZero() {
-		opts.Hours = 24
+	// Reports and backend filters use wall time, not process-local monotonic readings.
+	opts.Now = opts.Now.Round(0)
+	opts.Since = opts.Since.Round(0)
+	if math.IsNaN(opts.Hours) || math.IsInf(opts.Hours, 0) || opts.Hours < 0 {
+		return opts, fmt.Errorf("hours must be finite and non-negative")
 	}
-	if opts.Hours > 0 && opts.Since.IsZero() {
+	if opts.Hours > 0 {
+		nanos := opts.Hours * float64(time.Hour)
+		if nanos < 1 || nanos >= float64(math.MaxInt64) {
+			return opts, fmt.Errorf("hours must fit a positive time.Duration")
+		}
+	}
+	if opts.Since.IsZero() {
+		// Zero-value options retain the default 24-hour lookback.
+		if opts.Hours == 0 {
+			opts.Hours = 24
+		}
 		opts.Since = opts.Now.Add(-time.Duration(opts.Hours * float64(time.Hour)))
 	}
-	if opts.Hours <= 0 && !opts.Since.IsZero() {
-		opts.Hours = opts.Now.Sub(opts.Since).Hours()
+	if !opts.Since.Before(opts.Now) {
+		return opts, fmt.Errorf("since must be before now")
 	}
+	duration := opts.Now.Sub(opts.Since)
+	if !opts.Now.Add(-duration).Equal(opts.Since) {
+		return opts, fmt.Errorf("since window exceeds time.Duration range")
+	}
+	// An explicit Since is authoritative, including when Hours was defaulted.
+	// Derive the label from the actual interval rather than conflicting input.
+	opts.Hours = duration.Hours()
 	if opts.PublicRepo == "" {
 		opts.PublicRepo = "anthony-chaudhary/fak"
 	}
@@ -184,7 +205,7 @@ func normalizeOptions(opts Options) Options {
 			opts.IncludePrivate = false
 		}
 	}
-	return opts
+	return opts, nil
 }
 
 // Collect gathers issue and commit metrics across repositories according to opts.
@@ -192,7 +213,11 @@ func Collect(ctx context.Context, opts Options) (*Report, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	opts = normalizeOptions(opts)
+	var err error
+	opts, err = normalizeOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 
 	ghExec := opts.GhExecutor
 	if ghExec == nil {

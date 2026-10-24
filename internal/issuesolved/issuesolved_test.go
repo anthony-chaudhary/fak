@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -154,7 +155,10 @@ func TestOptions_TimeCalculation(t *testing.T) {
 		Now:   fixedNow,
 		Hours: 9.0,
 	}
-	norm1 := normalizeOptions(opts1)
+	norm1, err := normalizeOptions(opts1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	expectedSince1 := fixedNow.Add(-9 * time.Hour)
 	if !norm1.Since.Equal(expectedSince1) {
 		t.Errorf("expected Since=%v, got %v", expectedSince1, norm1.Since)
@@ -169,7 +173,10 @@ func TestOptions_TimeCalculation(t *testing.T) {
 		Now:   fixedNow,
 		Since: explicitSince,
 	}
-	norm2 := normalizeOptions(opts2)
+	norm2, err := normalizeOptions(opts2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if norm2.Hours != 9.0 {
 		t.Errorf("expected Hours=9.0, got %f", norm2.Hours)
 	}
@@ -178,7 +185,10 @@ func TestOptions_TimeCalculation(t *testing.T) {
 	opts3 := Options{
 		Now: fixedNow,
 	}
-	norm3 := normalizeOptions(opts3)
+	norm3, err := normalizeOptions(opts3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if norm3.Hours != 24 {
 		t.Errorf("expected Hours=24, got %f", norm3.Hours)
 	}
@@ -821,7 +831,10 @@ func TestCollect_MissingPrivateDir(t *testing.T) {
 		PublicDir:      ".",
 		PrivateDir:     missingDir,
 	}
-	norm := normalizeOptions(optsNorm)
+	norm, err := normalizeOptions(optsNorm)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if norm.IncludePrivate {
 		t.Errorf("expected normalizeOptions to set IncludePrivate=false for missing private dir in git mode")
 	}
@@ -883,5 +896,81 @@ func TestCollect_MissingPrivateDir(t *testing.T) {
 	}
 	if repMock == nil {
 		t.Fatal("expected non-nil Report for mock git")
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCollect_TimeValidation(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		opts Options
+	}{
+		{"negative hours", Options{Hours: -2}},
+		{"negative hours with since", Options{Hours: -2, Since: now.Add(-time.Hour)}},
+		{"nan hours", Options{Hours: math.NaN()}},
+		{"infinite hours", Options{Hours: math.Inf(1)}},
+		{"overflow hours", Options{Hours: float64(math.MaxInt64) / float64(time.Hour)}},
+		{"subnanosecond hours", Options{Hours: math.SmallestNonzeroFloat64}},
+		{"future since", Options{Since: now.Add(time.Hour)}},
+		{"zero window", Options{Since: now}},
+		{"overflow since", Options{Since: now.AddDate(-300, 0, 0)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			opts.Now = now
+			opts.GhExecutor = func(context.Context, ...string) ([]byte, error) {
+				t.Fatal("invalid window invoked gh")
+				return nil, nil
+			}
+			opts.GitExecutor = func(context.Context, string, ...string) ([]byte, error) {
+				t.Fatal("invalid window invoked git")
+				return nil, nil
+			}
+			if rep, err := Collect(context.Background(), opts); err == nil || rep != nil {
+				t.Fatalf("Collect = (%v, %v), want nil report and error", rep, err)
+			}
+		})
+	}
+	largestHours := math.Nextafter(float64(math.MaxInt64)/float64(time.Hour), 0)
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want time.Duration
+	}{
+		{"zero value default", Options{}, 24 * time.Hour},
+		{"fractional hours", Options{Hours: 0.5}, 30 * time.Minute},
+		{"one nanosecond", Options{Hours: 1 / float64(time.Hour)}, time.Nanosecond},
+		{"largest safe hours", Options{Hours: largestHours}, time.Duration(largestHours * float64(time.Hour))},
+		{"since authoritative", Options{Hours: 24, Since: now.Add(-2 * time.Hour)}, 2 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			opts.Now = now
+			opts.Source = "github"
+			opts.GhExecutor = func(context.Context, ...string) ([]byte, error) { return []byte("[]"), nil }
+			opts.GitExecutor = func(context.Context, string, ...string) ([]byte, error) { return []byte("0"), nil }
+			rep, err := Collect(context.Background(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !rep.Since.Equal(now.Add(-tc.want)) || rep.Hours != tc.want.Hours() || !rep.Until.Equal(now) {
+				t.Fatalf("inconsistent report: since=%v until=%v hours=%v", rep.Since, rep.Until, rep.Hours)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestOptions_TimeCalculationUsesWallTime(t *testing.T) {
+	now := time.Now()
+	since := now.Add(-time.Hour)
+	opts, err := normalizeOptions(Options{Now: now, Since: since})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Equality, rather than Time.Equal, also detects retained monotonic readings.
+	if opts.Now != now.Round(0) || opts.Since != since.Round(0) || opts.Hours != 1 {
+		t.Fatalf("window retained monotonic readings or inconsistent hours: %+v", opts)
 	}
 }
