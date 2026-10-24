@@ -2143,6 +2143,78 @@ extern "C" void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScale
       (const unsigned char *)dCodes, dScales, dX, dY, out, in, P, block);
 }
 
+// Reference-order NVFP4 W4A16 path. This is intentionally one thread per output:
+// it preserves the CPU oracle's serial K reduction while keeping the packed E2M1
+// weights and E4M3FN block scales resident. It is a correctness baseline, not a
+// tensor-core performance claim. X must be finite and remain finite after BF16 RNE;
+// preserving stream asynchrony means this ABI does not scan device data first.
+static __device__ __forceinline__ float nv4_bf16_rne(float x) {
+  uint32_t bits = __float_as_uint(x);
+  bits += 0x7fffu + ((bits >> 16) & 1u);
+  return __uint_as_float(bits & 0xffff0000u);
+}
+
+static __device__ __forceinline__ float nv4_e2m1(uint32_t nib) {
+  const uint32_t sign = (nib & 0x8u) << 28;
+  const uint32_t e = (nib >> 1) & 0x3u;
+  const uint32_t m = nib & 0x1u;
+  const uint32_t mag = e ? (((e + 126u) << 23) | (m << 22))
+                         : (m ? 0x3f000000u : 0u);
+  return __uint_as_float(sign | mag);
+}
+
+static __device__ __forceinline__ float nv4_e4m3fn(uint32_t b) {
+  const uint32_t sign = (b & 0x80u) << 24;
+  const uint32_t e = (b >> 3) & 0x0fu;
+  const uint32_t m = b & 0x07u;
+  uint32_t mag;
+  if (e != 0u) {
+    mag = ((e + 120u) << 23) | (m << 20);
+  } else {
+    mag = __float_as_uint(__fmul_rn((float)m, 0.001953125f));
+  }
+  return __uint_as_float(sign | mag);
+}
+
+__global__ void k_nvfp4_w4a16_f32(const uint8_t *Payload, const float *X,
+                                  float *Y, int out, int in, int P,
+                                  float globalScale) {
+  const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  const size_t outputs = (size_t)P * (size_t)out;
+  if (index >= outputs) return;
+
+  const int o = (int)(index % (size_t)out);
+  const int p = (int)(index / (size_t)out);
+  const size_t weightBytes = (size_t)out * (size_t)in / 2u;
+  const uint8_t *wrow = Payload + (size_t)o * (size_t)in / 2u;
+  const uint8_t *srow = Payload + weightBytes + (size_t)o * (size_t)(in / 16);
+  const float *xrow = X + (size_t)p * (size_t)in;
+
+  float sum = 0.0f;
+  for (int k = 0; k < in; ++k) {
+    const uint8_t pair = wrow[k >> 1];
+    const uint32_t nib = (k & 1) ? (uint32_t)(pair >> 4) : (uint32_t)(pair & 0x0fu);
+    const float weight = __fmul_rn(nv4_e2m1(nib), nv4_e4m3fn(srow[k >> 4]));
+    const float product = __fmul_rn(weight, nv4_bf16_rne(xrow[k]));
+    sum = __fadd_rn(sum, product);
+  }
+  Y[index] = __fmul_rn(sum, globalScale);
+}
+
+extern "C" int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX,
+                                      float *dY, int out, int in, int P,
+                                      float globalScale) {
+  if (!dPayload || !dX || !dY || out <= 0 || in <= 0 || P <= 0 || (in & 15) != 0 ||
+      globalScale < 0.0f || !isfinite(globalScale))
+    return (int)cudaErrorInvalidValue;
+  const size_t outputs = (size_t)P * (size_t)out;
+  const size_t blocks = (outputs + 255u) / 256u;
+  if (blocks > (size_t)UINT_MAX) return (int)cudaErrorInvalidConfiguration;
+  k_nvfp4_w4a16_f32<<<(unsigned int)blocks, 256, 0, g_stream>>>(
+      dPayload, dX, dY, out, in, P, globalScale);
+  return (int)cudaGetLastError();
+}
+
 // Q5_K/Q6_K resident dequant-fused GEMV. One warp computes one output row.
 __global__ void k_q5k_gemm(const unsigned char *W, const float *X, float *Y,
                            int out, int in, int P) {
