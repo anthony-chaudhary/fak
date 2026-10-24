@@ -570,6 +570,11 @@ func runValidateAuditSelectionPhase(ctx context.Context, stdout io.Writer, res *
 // non-test Go files", which would red every delta whose importer closure reaches it.
 func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir string, paths []string, fileToPkg map[string]string, edges map[string][]string, baseFileToPkg map[string]string, baseEdges map[string][]string) (vetTargets, buildTargets []string) {
 	buildable := validateBuildablePackages(fileToPkg)
+	// Base-only files restore dependency context, not package liveness.
+	livePkgs := make(map[string]bool, len(fileToPkg))
+	for _, pkg := range fileToPkg {
+		livePkgs[pkg] = true
+	}
 	for file, pkg := range baseFileToPkg {
 		if _, exists := fileToPkg[file]; !exists {
 			fileToPkg[file] = pkg
@@ -581,10 +586,6 @@ func selectValidatePackages(res *validateResult, recorder *validateRecorder, dir
 	phase := recorder.start("test_select")
 	changedPkgs := affectedtests.ChangedPackages(fileToPkg, paths)
 	selected := affectedtests.Select(edges, changedPkgs)
-	livePkgs := make(map[string]bool, len(fileToPkg))
-	for _, pkg := range fileToPkg {
-		livePkgs[pkg] = true
-	}
 	for _, pkg := range changedPkgs {
 		if livePkgs[pkg] { // omit a package deleted by this delta
 			res.Tested = append(res.Tested, pkg)

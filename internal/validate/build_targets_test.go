@@ -1,8 +1,12 @@
 package validate
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // TestSelectValidatePackagesVetsButNeverBuildsTestOnlyImporters pins the gate against
@@ -38,6 +42,56 @@ func TestSelectValidatePackagesVetsButNeverBuildsTestOnlyImporters(t *testing.T)
 	}
 	if want := []string{mod + "/internal/leaf"}; !reflect.DeepEqual(res.Tested, want) {
 		t.Errorf("tested = %v, want %v", res.Tested, want)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestSelectValidatePackagesOmitsDeletedPackages(t *testing.T) {
+	eventFixtureEnvironment(t)
+	for _, keepPackage := range []bool{false, true} {
+		name := "whole package"
+		if keepPackage {
+			name = "one file from surviving package"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := eventFixtureRoot(t)
+			eventFixtureFile(t, root, "leaf/delete.go", "package leaf\n")
+			eventFixtureFile(t, root, "consumer/consumer.go", "package consumer\nimport _ \"fixture.test/events/leaf\"\n")
+			eventFixtureFile(t, root, "unrelated/unrelated.go", "package unrelated\n")
+			if keepPackage {
+				eventFixtureFile(t, root, "leaf/keep.go", "package leaf\n")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			baseFiles, baseEdges, _, err := goListGraphWithin(ctx, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(root, "leaf", "delete.go")); err != nil {
+				t.Fatal(err)
+			}
+			files, edges, _, err := goListGraphWithin(ctx, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if baseFiles["leaf/delete.go"] != "fixture.test/events/leaf" || files["leaf/delete.go"] != "" {
+				t.Fatal("go list did not observe the source deletion")
+			}
+			res, recorder := newStrixPhaseTestRecorder()
+			vet, build := selectValidatePackages(res, recorder, root, []string{"leaf/delete.go"}, files, edges, baseFiles, baseEdges)
+			wantTargets := []string{"./consumer"}
+			var wantTested []string
+			if keepPackage {
+				wantTargets = append(wantTargets, "./leaf")
+				wantTested = []string{"fixture.test/events/leaf"}
+			}
+			if !reflect.DeepEqual(vet, wantTargets) || !reflect.DeepEqual(build, wantTargets) {
+				t.Errorf("vet=%v build=%v, want live importer closure %v", vet, build, wantTargets)
+			}
+			if !reflect.DeepEqual(res.Tested, wantTested) {
+				t.Errorf("tested=%v, want live changed packages %v", res.Tested, wantTested)
+			}
+		})
 	}
 }
 
