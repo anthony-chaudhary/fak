@@ -258,6 +258,9 @@ func (v *vulkanBackend) v41ReadDeferredLayout(statuses []V41DeferredStatus, rows
 			logicalRows, ok = v41DeferredPanelRows(rows, panelRows, width)
 		case v41DeferredReadGroupedPanel:
 			logicalRows, ok = v41GroupedDeferredPanelLayout(statuses, rows, panelRows, width)
+		default:
+			// Ordinary reads bypass this branch; unknown packed modes fail geometry.
+			ok = false
 		}
 		if !ok || len(statuses) > 64 || verdictCount > 64 {
 			return nil, nil, invalid("packed deferred logical row layout exceeds cohort bounds")
