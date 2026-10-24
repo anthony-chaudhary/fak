@@ -3,6 +3,7 @@ package devcmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/computebuild"
 )
+
+const cudaFirstLightFixtureExecutable = "fixture executable"
 
 func cudaFirstLightFixture(t *testing.T) (string, []string) {
 	t.Helper()
@@ -61,7 +64,7 @@ func cudaFirstLightFakeDeps(t *testing.T, calls *[]string, acceptance map[string
 			if _, ok := ctx.Deadline(); !ok {
 				t.Fatal("build is missing its deadline")
 			}
-			return os.WriteFile(cfg.OutBin, []byte("fixture executable"), 0o600)
+			return os.WriteFile(cfg.OutBin, []byte(cudaFirstLightFixtureExecutable), 0o600)
 		},
 		run: func(ctx context.Context, name string, args []string, dir string, env []string, stdout, stderr io.Writer) error {
 			if _, ok := ctx.Deadline(); !ok {
@@ -69,8 +72,9 @@ func cudaFirstLightFakeDeps(t *testing.T, calls *[]string, acceptance map[string
 			}
 			if name == "cc" {
 				*calls = append(*calls, "header")
-				if !reflect.DeepEqual(args[:6], []string{"-x", "c", "-std=c11", "-fsyntax-only", "-Wall", "-Werror"}) {
-					t.Fatalf("header args: %v", args)
+				expectedPrefix := []string{"-x", "c", "-std=c11", "-fsyntax-only", "-Wall", "-Werror"}
+				if len(args) < len(expectedPrefix) || !reflect.DeepEqual(args[:len(expectedPrefix)], expectedPrefix) {
+					t.Fatalf("header args: %v; want prefix: %v", args, expectedPrefix)
 				}
 				return nil
 			}
@@ -129,6 +133,7 @@ func TestCUDAFirstLightOrdinaryPlan(t *testing.T) {
 // fak-test:runtime fast est=1s
 // fak-test:justify why=contract when=changed:internal/devcmd/**
 func TestCUDAFirstLightExecutionAndFailFirst(t *testing.T) {
+	wantBinarySHA256 := fmt.Sprintf("%x", sha256.Sum256([]byte(cudaFirstLightFixtureExecutable)))
 	for _, failure := range []string{"", "header", "build", "accept", "timeout"} {
 		t.Run(failure, func(t *testing.T) {
 			root, args := cudaFirstLightFixture(t)
@@ -176,7 +181,7 @@ func TestCUDAFirstLightExecutionAndFailFirst(t *testing.T) {
 				t.Fatalf("calls=%v want=%v", calls, want)
 			}
 			if failure == "" {
-				if code != 0 || r.Outcome != "passed" || !r.NativeModelParity || len(r.BinarySHA256) != 64 {
+				if code != 0 || r.Outcome != "passed" || !r.NativeModelParity || r.BinarySHA256 != wantBinarySHA256 {
 					t.Fatalf("exit=%d receipt=%+v", code, r)
 				}
 			} else if code == 0 || r.Outcome != "failed" || r.NativeModelParity {
