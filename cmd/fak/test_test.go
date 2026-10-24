@@ -94,6 +94,34 @@ func TestRunTest_DryRunPrintsCommand(t *testing.T) {
 	}
 }
 
+// Pin the CLI boundary: extra pre-separator targets must not disappear, while
+// explicitly forwarded packages and flags must reach the resolved command.
+func TestRunTest_DryRunRejectsIgnoredArguments(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		wantRC int
+		want   string
+	}{
+		{"extra package", []string{"-n", "./cmd/fak", "./internal/safesync", "--", "-run", "TestPlanTest"}, 2, "unexpected arguments before --"},
+		{"unseparated flag", []string{"-n", "./cmd/fak", "-run", "TestPlanTest"}, 2, "unexpected arguments before --"},
+		{"explicit passthrough", []string{"-n", "./cmd/fak", "--", "./internal/safesync", "-run", "TestPlanTest"}, 0, "./cmd/fak ./internal/safesync -run TestPlanTest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if rc := runTest(&out, &errb, tc.args); rc != tc.wantRC {
+				t.Fatalf("rc = %d, want %d; stdout=%s stderr=%s", rc, tc.wantRC, out.String(), errb.String())
+			}
+			if !strings.Contains(out.String()+errb.String(), tc.want) {
+				t.Fatalf("missing %q; stdout=%s stderr=%s", tc.want, out.String(), errb.String())
+			}
+			if tc.wantRC != 0 && out.Len() != 0 {
+				t.Fatalf("invalid arguments produced a resolved command: %s", out.String())
+			}
+		})
+	}
+}
+
 func TestRunTestJSONDryRunEmitsRepairPacket(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runTest(&out, &errb, []string{"--json", "-n", "race"}); rc != 0 {

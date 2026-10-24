@@ -69,6 +69,11 @@ func planTest(goos string, args []string) (testPlan, error) {
 		}
 	}
 
+	// Never silently discard a target or flag placed before the separator.
+	if len(args) > 1 {
+		return testPlan{}, fmt.Errorf("unexpected arguments before --: %q (specify one tier or package; put additional go test arguments after --)", args[1:])
+	}
+
 	// The first remaining token selects the tier or names a package target.
 	tierArg := "fast"
 	if len(args) > 0 && args[0] != "" {
