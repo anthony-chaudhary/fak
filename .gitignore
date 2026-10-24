@@ -956,3 +956,12 @@ Microsoft/
 # Generated per spawn as the worker's stdin -- NEVER tracked. Accidentally committed in
 # b782efab3 and thrashed since (#13101 restores, 13038 park); root-anchored.
 /SESSION_PROMPT.txt
+
+# Claude Code's native worktree checkouts. The WorktreeCreate hook routes Claude
+# worktrees to .worktrees/ticket-claude-<name>; a leftover native checkout is a
+# full tree copy (~25k files) that would otherwise flood `git status`.
+/.claude/worktrees/
+
+# Prometheus file-SD targets written at runtime by the observability stack
+# (prometheus.yml mounts them); host-specific and regenerated, never tracked.
+/tools/grafana/provisioning/*-targets.json
