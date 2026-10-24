@@ -2,10 +2,12 @@ package wipinventory
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +58,87 @@ type EnvRunner interface {
 }
 
 type GitRunner struct{}
+
+// DeadlineRunner bounds lifecycle observation without weakening the separate
+// worker reap safety runner. An observation is known only after successful exit
+// and complete stdout/stderr EOF; a successful parent can leave inherited pipes
+// open or leave a descendant still writing the status.
+type DeadlineRunner struct{ Context context.Context }
+
+func (r DeadlineRunner) Run(dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(r.Context, "git", args...)
+	cmd.Dir = dir
+	return runDeadlineCommand(r.Context, cmd)
+}
+
+func runDeadlineCommand(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 100 * time.Millisecond
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	defer stdoutRead.Close()
+	defer stdoutWrite.Close()
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	defer stderrRead.Close()
+	defer stderrWrite.Close()
+	// Own the readers: Cmd.Wait closes StdoutPipe before a descendant necessarily
+	// finishes writing. Direct file writers let us reap the parent separately from
+	// waiting for trustworthy EOF, bounded by the absolute capture deadline.
+	cmd.Stdout, cmd.Stderr = stdoutWrite, stderrWrite
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git %s: %w", strings.Join(cmd.Args[1:], " "), err)
+	}
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
+	var stdout, stderr bytes.Buffer
+	var stdoutErr, stderrErr error
+	var readers sync.WaitGroup
+	readers.Add(2)
+	go func() {
+		defer readers.Done()
+		_, stdoutErr = io.Copy(&stdout, stdoutRead)
+	}()
+	go func() {
+		defer readers.Done()
+		_, stderrErr = io.Copy(&stderr, stderrRead)
+	}()
+	drained := make(chan struct{})
+	go func() {
+		readers.Wait()
+		close(drained)
+	}()
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case <-drained:
+	case <-ctx.Done():
+		_ = stdoutRead.Close()
+		_ = stderrRead.Close()
+		<-drained
+	}
+	err = <-waited
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if stdoutErr != nil {
+		return nil, fmt.Errorf("git stdout incomplete: %w", stdoutErr)
+	}
+	if stderrErr != nil {
+		return nil, fmt.Errorf("git stderr incomplete: %w", stderrErr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(cmd.Args[1:], " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}
 
 func (GitRunner) Run(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
@@ -165,6 +248,7 @@ type Report struct {
 	Repository       string        `json:"repository"`
 	HEAD             string        `json:"head,omitempty"`
 	Main             Checkout      `json:"main"`
+	Focus            *Checkout     `json:"focus,omitempty"`
 	Ignored          Population    `json:"ignored_generated"`
 	Worktrees        []Checkout    `json:"registered_worker_worktrees"`
 	StaleWorkers     []StaleWorker `json:"stale_worker_residue"`
@@ -173,7 +257,12 @@ type Report struct {
 	IgnoreInputs     IgnoreInputs  `json:"ignore_visibility"`
 	Errors           []string      `json:"errors,omitempty"`
 }
-type Options struct{ WorkerRoot string }
+type Options struct {
+	WorkerRoot string
+	// Focus is observed before fleet-wide work so unrelated slow checkouts cannot
+	// consume the deadline before a destructive caller captures its own target.
+	Focus string
+}
 
 func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 	abs, err := filepath.Abs(root)
@@ -181,8 +270,24 @@ func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 		root = abs
 	}
 	rep := Report{Schema: Schema, ObservedAt: now.UTC(), Repository: filepath.ToSlash(root)}
+	if len(opts) > 0 && opts[0].Focus != "" {
+		focus := opts[0].Focus
+		if abs, absErr := filepath.Abs(focus); absErr == nil {
+			focus = abs
+		}
+		c, captureErr := checkout(focus, "", "", now, r)
+		rep.Focus = &c
+		if captureErr != nil {
+			rep.Errors = append(rep.Errors, "checkout "+c.Path+": "+captureErr.Error())
+		}
+	}
 	rep.HEAD = one(root, r, &rep, "rev-parse", "HEAD")
-	rep.Main, err = checkout(root, rep.HEAD, "main", now, r)
+	if rep.Focus != nil && samePath(rep.Focus.Path, root) {
+		rep.Main = *rep.Focus
+		rep.Main.HEAD, rep.Main.Branch = rep.HEAD, "main"
+	} else {
+		rep.Main, err = checkout(root, rep.HEAD, "main", now, r)
+	}
 	if err != nil {
 		rep.Errors = append(rep.Errors, "checkout "+rep.Main.Path+": "+err.Error())
 	}
@@ -314,7 +419,22 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 		}
 		pending = append(pending, checkoutSpec{path: path, head: head, branch: branch})
 	}
+	var focused []Checkout
+	if rep.Focus != nil {
+		remaining := pending[:0]
+		for _, spec := range pending {
+			if samePath(spec.path, rep.Focus.Path) {
+				c := *rep.Focus
+				c.HEAD, c.Branch = spec.head, spec.branch
+				focused = append(focused, c)
+			} else {
+				remaining = append(remaining, spec)
+			}
+		}
+		pending = remaining
+	}
 	live, checkoutErrors := probeCheckouts(pending, rep.ObservedAt, r)
+	live = append(live, focused...)
 	rep.Errors = append(rep.Errors, checkoutErrors...)
 	entries, readErr := os.ReadDir(workerRoot)
 	if readErr != nil && !os.IsNotExist(readErr) {

@@ -12740,6 +12740,11 @@
           "category": "incidental",
           "reason": "Private standard context lookup key for the invocation-owned selected-forward marker stored in the existing request context. The marker implements the separately positioned V41EngramLookAhead selection policy; the key defines no new context type, cancellation scope or source/session ownership contract.",
           "token": "inKernelEngramAttemptContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local standard-library timeout context for the before-inventory sub-budget; not a new domain context, ownership boundary, or lifecycle abstraction.",
+          "token": "beforeCtx"
         }
       ],
       "exclude": [
@@ -12813,6 +12818,7 @@
         "admitAndRouteChatInputTriggerWithContext",
         "affinityContextKey",
         "appendGuardCompactionWitnessTo",
+        "beforeCtx",
         "callCtx",
         "captureNativeCompaction",
         "capturedSelfcheckContexts",

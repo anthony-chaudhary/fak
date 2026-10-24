@@ -57,7 +57,7 @@ func worktreeWorkerReap(argv []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), *maxWait)
 	defer cancel()
 	git := workerworktree.BoundedGitRunner(ctx)
-	finishLifecycle, receipt, err := beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap", os.Stderr, git)
+	finishLifecycle, receipt, err := beginWorkerReapLifecycle(ctx, repoRoot, strings.TrimSpace(*worktree), *maxWait, os.Stderr)
 	defer finishLifecycle()
 	if err != nil || !receipt.Before.Known {
 		detail := ""
@@ -71,7 +71,7 @@ func worktreeWorkerReap(argv []string) {
 			Code:      ReapCodePrestateUnknown,
 			Path:      strings.TrimSpace(*worktree),
 			Preserved: true,
-			Reason:    "before lifecycle inventory could not be captured completely",
+			Reason:    "target before lifecycle inventory could not be captured completely",
 			Detail:    detail,
 		})
 		os.Exit(1)

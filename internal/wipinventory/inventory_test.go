@@ -1,9 +1,11 @@
 package wipinventory
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +13,150 @@ import (
 	"testing"
 	"time"
 )
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCollectFocusScopesCompletenessToTheFocus(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), workerMarker+"-target")
+	other := filepath.Join(t.TempDir(), workerMarker+"-other")
+	for _, dir := range []string{target, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("preserved"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &focusOrderRunner{scaleRunner: newScaleRunner(root, []string{target, other}, other, 0)}
+	rep := Collect(root, time.Now(), runner, Options{WorkerRoot: t.TempDir(), Focus: target})
+	if rep.Focus == nil || !rep.Focus.Tracked.Known || !rep.Focus.Untracked.Known || rep.Focus.Tracked.Count != 1 || rep.Focus.Untracked.Count != 1 {
+		t.Fatalf("target capture lost: %+v", rep.Focus)
+	}
+	if len(runner.calls) == 0 || runner.calls[0] != target+" status" {
+		t.Fatalf("target was not observed first: %v", runner.calls)
+	}
+	count := 0
+	for _, call := range runner.calls {
+		if call == target+" status" {
+			count++
+		}
+	}
+	if count != 1 || !strings.Contains(strings.Join(rep.Errors, "\n"), filepath.Base(other)) {
+		t.Fatalf("focus should be captured once with unrelated error retained: count=%d errors=%v", count, rep.Errors)
+	}
+}
+
+type focusOrderRunner struct {
+	*scaleRunner
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *focusOrderRunner) Run(dir string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	r.calls = append(r.calls, dir+" "+args[0])
+	r.mu.Unlock()
+	return r.scaleRunner.Run(dir, args...)
+}
+
+// fak-test:runtime medium est=2s lane=default
+func TestDeadlineRunnerClassifiesExitStatusNotInheritedPipes(t *testing.T) {
+	for _, tc := range []struct {
+		mode      string
+		want      string
+		wantError string
+	}{
+		{"dirty", " M owned.go\x00", ""},
+		{"delayed", " M owned.go\x00", ""},
+		{"truncated", "", "context deadline exceeded"},
+		{"failure", "", "status unavailable"},
+		{"stall", "", "context deadline exceeded"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			budget := 3 * time.Second
+			if tc.mode == "stall" || tc.mode == "truncated" {
+				budget = 100 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDeadlineRunnerProcessHelper$")
+			cmd.Env = append(os.Environ(), "FAK_INVENTORY_PROCESS_HELPER="+tc.mode)
+			out, err := runDeadlineCommand(ctx, cmd)
+			if string(out) != tc.want {
+				t.Fatalf("output=%q want=%q err=%v", out, tc.want, err)
+			}
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("successful dirty status treated as failure: %v", err)
+				}
+				status, captureErr := checkout(t.TempDir(), "", "", time.Now(), deadlineFixtureRunner{ctx: ctx, mode: tc.mode})
+				if captureErr != nil || !status.Tracked.Known || !status.Untracked.Known || status.Tracked.Count != 1 || len(status.Tracked.Samples) != 1 || status.Tracked.Samples[0] != "owned.go" {
+					t.Fatalf("successful dirty status not recorded as known paths: %+v err=%v", status, captureErr)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || strings.Contains(err.Error(), "stdout-is-not-an-error") {
+					t.Fatalf("failure must name cause/stderr, never stdout: %v", err)
+				}
+				if tc.mode == "truncated" {
+					captureCtx, captureCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+					defer captureCancel()
+					status, captureErr := checkout(t.TempDir(), "", "", time.Now(), deadlineFixtureRunner{ctx: captureCtx, mode: tc.mode})
+					if captureErr == nil || status.Tracked.Known || status.Untracked.Known {
+						t.Fatalf("truncated target status admitted: %+v err=%v", status, captureErr)
+					}
+				}
+			}
+		})
+	}
+}
+
+type deadlineFixtureRunner struct {
+	ctx  context.Context
+	mode string
+}
+
+func (r deadlineFixtureRunner) Run(dir string, _ ...string) ([]byte, error) {
+	cmd := exec.CommandContext(r.ctx, os.Args[0], "-test.run=^TestDeadlineRunnerProcessHelper$")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "FAK_INVENTORY_PROCESS_HELPER="+r.mode)
+	return runDeadlineCommand(r.ctx, cmd)
+}
+
+func TestDeadlineRunnerProcessHelper(t *testing.T) {
+	switch os.Getenv("FAK_INVENTORY_PROCESS_HELPER") {
+	case "dirty", "delayed", "truncated":
+		child := exec.Command(os.Args[0], "-test.run=^TestDeadlineRunnerProcessHelper$")
+		childMode := "pipe-holder"
+		if os.Getenv("FAK_INVENTORY_PROCESS_HELPER") != "dirty" {
+			childMode = "late-writer"
+		}
+		child.Env = append(os.Environ(), "FAK_INVENTORY_PROCESS_HELPER="+childMode)
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(3)
+		}
+		if childMode == "pipe-holder" {
+			fmt.Fprint(os.Stdout, " M owned.go\x00")
+		} else {
+			fmt.Fprint(os.Stdout, " M own")
+		}
+		os.Exit(0)
+	case "pipe-holder":
+		time.Sleep(400 * time.Millisecond)
+		os.Exit(0)
+	case "late-writer":
+		time.Sleep(300 * time.Millisecond)
+		fmt.Fprint(os.Stdout, "ed.go\x00")
+		os.Exit(0)
+	case "failure":
+		fmt.Fprint(os.Stdout, "stdout-is-not-an-error")
+		fmt.Fprint(os.Stderr, "status unavailable")
+		os.Exit(9)
+	case "stall":
+		time.Sleep(3 * time.Second)
+		os.Exit(0)
+	}
+}
 
 type fakeRunner struct {
 	root   string

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -345,6 +346,7 @@ func newSingleReapFixture(t *testing.T) (repo, worktree, base string) {
 	}
 	t.Setenv(workerworktree.PoolCapEnv, "0")
 	root := t.TempDir()
+	t.Setenv(workerworktree.WorktreeRootEnv, filepath.Join(root, "workers"))
 	repo = filepath.Join(root, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
@@ -436,6 +438,7 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 	base := git("rev-parse", "HEAD")
 
 	workerRoot := filepath.Join(root, "workers")
+	t.Setenv(workerworktree.WorktreeRootEnv, workerRoot)
 	prepared := workerworktree.Prepare(repo, "cmd", "12404", base, workerRoot, nil)
 	if !prepared.OK {
 		t.Fatalf("prepare: %+v", prepared)
@@ -454,10 +457,16 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Force before-inventory unknown pre-state: corrupt .git/index in repo so
-	// wipinventory.Collect encounters a git error during population capture,
-	// rendering receipt.Before.Known = false.
-	indexPath := filepath.Join(repo, ".git", "index")
+	// Only the target's unknown pre-state must refuse its reap. A corrupt main
+	// checkout or unrelated worker is advisory, not target admission.
+	indexOut, err := exec.Command("git", "-C", worktree, "rev-parse", "--git-path", "index").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPath := strings.TrimSpace(string(indexOut))
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(worktree, indexPath)
+	}
 	savedIndex, err := os.ReadFile(indexPath)
 	if err != nil {
 		t.Fatal(err)
@@ -484,7 +493,7 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 		t.Fatalf("want no removal receipt emitted, got removed=true")
 	}
 
-	// Restore .git/index
+	// Restore the target's index.
 	if err := os.WriteFile(indexPath, savedIndex, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -538,6 +547,67 @@ func TestWorkerReapRefusesWhenPreLifecycleInventoryIsUnknown(t *testing.T) {
 	}
 }
 
+// fak-test:runtime integration est=1s lane=default
+func TestWorkerReapIgnoresUnrelatedWorktreeCaptureFailure(t *testing.T) {
+	repo, target, base := newSingleReapFixture(t)
+	other := workerworktree.Prepare(repo, "cmd", "13560-unrelated", base, filepath.Dir(target), nil)
+	if !other.OK {
+		t.Fatalf("prepare unrelated: %+v", other)
+	}
+	t.Cleanup(func() { _ = workerworktree.ForceReap(repo, other.Path, nil) })
+	indexOut, err := exec.Command("git", "-C", other.Path, "rev-parse", "--git-path", "index").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPath := strings.TrimSpace(string(indexOut))
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(other.Path, indexPath)
+	}
+	if err := os.WriteFile(indexPath, []byte("invalid unrelated index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := runReapCommand(t, 8*time.Second, nil, "--root", repo, "--worktree", target, "--max-wait", "5s")
+	got := reapReceipt(t, res.stdout)
+	if res.code != 0 || got["removed"] != true || got["ok"] != true {
+		t.Fatalf("unrelated failure refused clean target: exit=%d receipt=%v stderr=%q", res.code, got, res.stderr)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("clean target was not removed: %v", err)
+	}
+	if _, err := os.Stat(other.Path); err != nil {
+		t.Fatalf("unrelated worktree was touched: %v", err)
+	}
+	receipts, err := wiplifecycle.List(repo)
+	if err != nil || len(receipts) != 1 {
+		t.Fatalf("durable lifecycle evidence missing: receipts=%+v err=%v", receipts, err)
+	}
+	before := receipts[0].Before
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(beforeJSON, &fields); err != nil {
+		t.Fatal(err)
+	}
+	var focus string
+	var advisory []string
+	_ = json.Unmarshal(fields["focus"], &focus)
+	_ = json.Unmarshal(fields["advisory"], &advisory)
+	if !before.Known || focus != filepath.ToSlash(target) || !strings.Contains(strings.Join(advisory, "\n"), filepath.ToSlash(other.Path)) {
+		t.Fatalf("target completeness or advisory missing: %+v", before)
+	}
+	artifact, err := os.ReadFile(filepath.FromSlash(before.Artifact))
+	if err != nil || !strings.Contains(string(artifact), "index") {
+		t.Fatalf("unrelated error missing from artifact: %s err=%v", artifact, err)
+	}
+	finished := receipts[0]
+	after, err := os.ReadFile(filepath.FromSlash(finished.After.Artifact))
+	if finished.FinishedAt == "" || finished.After.Known || err != nil || !strings.Contains(string(after), "index") {
+		t.Fatalf("after fleet evidence lost: receipt=%+v artifact=%s err=%v", finished, after, err)
+	}
+}
+
 func TestSingleReapExplicitSupersessionRemovesRegisteredDirtyWorktree(t *testing.T) {
 	repo, worktree, _ := newSingleReapFixture(t)
 	want := []byte("already landed\n")
@@ -578,6 +648,7 @@ func TestSingleReapExplicitSupersessionRemovesRegisteredDirtyWorktree(t *testing
 	}
 }
 
+// fak-test:runtime integration est=4s lane=default
 func TestSingleReapStatusStallReturnsWithinBound(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake git shim is a POSIX script; the acceptance gate runs under WSL")
@@ -590,19 +661,18 @@ func TestSingleReapStatusStallReturnsWithinBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Since #12404 the reap first captures a before-lifecycle inventory under the SAME
-	// deadline, and that inventory runs its own `git status ... -z` in the checkout. So a
-	// worktree whose status stalls now fails closed there (REAP_PRESTATE_UNKNOWN); the
-	// REAP_TIMEOUT arm of ReapChecked is reached only when just its own status probe (no
-	// -z) stalls. Both arms must stay bounded, refuse, and preserve the worktree.
+	// Target capture and ReapChecked both remain fail-closed and bounded. An
+	// unrelated main-checkout stall spends only the capture sub-budget, leaving
+	// ReapChecked time to return its independent dirty-target refusal.
 	shimDir := t.TempDir()
 	shim := filepath.Join(shimDir, "git")
 	body := "#!/bin/sh\n" +
 		"if [ \"$PWD\" = \"$FAK_REAP_STALL_DIR\" ] && [ \"$1\" = status ]; then\n" +
 		"  case \"$FAK_REAP_STALL_MATCH:$*\" in\n" +
-		"    any:*) sleep 30 ;;\n" +
+		"    any:*) exec sleep 30 ;;\n" +
+		"    late:*) (sleep 1; printf ' M owned.txt\\000') & exit 0 ;;\n" +
 		"    checked:*\" -z\"*) ;;\n" +
-		"    checked:*) sleep 30 ;;\n" +
+		"    checked:*) exec sleep 30 ;;\n" +
 		"  esac\n" +
 		"fi\n" +
 		"exec \"$FAK_REAP_REAL_GIT\" \"$@\"\n"
@@ -611,19 +681,22 @@ func TestSingleReapStatusStallReturnsWithinBound(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, match, maxWait string
+		stallDir             string
 		deadline, bound      time.Duration
 		code, detail         string
 	}{
 		// Every status in the checkout stalls: the pre-inventory hits the deadline first.
-		{"inventory status stalls", "any", "200ms", 3 * time.Second, 2 * time.Second, ReapCodePrestateUnknown, "context deadline exceeded"},
+		{"inventory status stalls", "any", "200ms", worktree, 3 * time.Second, 2 * time.Second, ReapCodePrestateUnknown, "context deadline exceeded"},
+		{"target delayed descendant output", "late", "600ms", worktree, 3 * time.Second, 2 * time.Second, ReapCodePrestateUnknown, "context deadline exceeded"},
 		// Only ReapChecked's probe stalls: the inventory completes, the checked reap times
 		// out. The wider budget leaves the real inventory room to finish on a loaded host.
-		{"checked status stalls", "checked", "2s", 10 * time.Second, 6 * time.Second, "REAP_TIMEOUT", ""},
+		{"checked status stalls", "checked", "2s", worktree, 10 * time.Second, 6 * time.Second, "REAP_TIMEOUT", ""},
+		{"unrelated inventory stalls", "any", "2s", repo, 6 * time.Second, 3 * time.Second, "DIRTY_WORKTREE_REFUSED", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := []string{
 				"PATH=" + shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
-				"FAK_REAP_STALL_DIR=" + worktree,
+				"FAK_REAP_STALL_DIR=" + tc.stallDir,
 				"FAK_REAP_STALL_MATCH=" + tc.match,
 				"FAK_REAP_REAL_GIT=" + realGit,
 			}

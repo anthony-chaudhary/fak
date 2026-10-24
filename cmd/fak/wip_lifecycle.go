@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -127,12 +128,26 @@ func beginAutomaticWIPLifecycleWithGit(root, kind string, stderr io.Writer, git 
 }
 
 func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) (func(), wiplifecycle.Receipt, error) {
+	return beginAutomaticWIPLifecycleWithRunners(root, kind, stderr, runner, runner)
+}
+
+func beginWorkerReapLifecycle(ctx context.Context, root, focus string, maxWait time.Duration, stderr io.Writer) (func(), wiplifecycle.Receipt, error) {
+	// Reserve at least half the total budget for the independent safety probe and
+	// removal. Fleet-wide capture remains useful evidence, not target admission.
+	beforeCtx, cancel := context.WithTimeout(ctx, maxWait/2)
+	defer cancel()
+	return beginAutomaticWIPLifecycleWithRunners(root, "worker-reap", stderr,
+		wipinventory.DeadlineRunner{Context: beforeCtx}, wipinventory.DeadlineRunner{Context: ctx},
+		wipinventory.Options{Focus: focus})
+}
+
+func beginAutomaticWIPLifecycleWithRunners(root, kind string, stderr io.Writer, beforeRunner, afterRunner wipinventory.Runner, opts ...wipinventory.Options) (func(), wiplifecycle.Receipt, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
 		return func() {}, wiplifecycle.Receipt{}, err
 	}
-	receipt, err := wiplifecycle.BeginWithRunner(root, kind, "", time.Now(), runner)
+	receipt, err := wiplifecycle.BeginWithRunner(root, kind, "", time.Now(), beforeRunner, opts...)
 	if err != nil {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=before kind=%s error=%v\n", kind, err)
 		return func() {}, receipt, err
@@ -146,10 +161,13 @@ func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, r
 	} else {
 		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURED phase=before kind=%s operation=%s artifact=%s\n", kind, receipt.OperationID, receipt.Before.Artifact)
 	}
+	for _, advisory := range receipt.Before.Advisory {
+		fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_ADVISORY phase=before kind=%s operation=%s error=%q\n", kind, receipt.OperationID, advisory)
+	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			finished, finishErr := wiplifecycle.FinishWithRunner(root, receipt.OperationID, time.Now(), runner)
+			finished, finishErr := wiplifecycle.FinishWithRunner(root, receipt.OperationID, time.Now(), afterRunner)
 			if finishErr != nil {
 				fmt.Fprintf(stderr, "WIP_LIFECYCLE_CAPTURE_FAILED phase=after kind=%s operation=%s error=%v\n", kind, receipt.OperationID, finishErr)
 				return

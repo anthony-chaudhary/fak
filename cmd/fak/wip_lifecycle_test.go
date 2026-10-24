@@ -57,7 +57,7 @@ func TestWorkerLifecycleMutationHooksStayWired(t *testing.T) {
 	// The single-worktree reap entrypoint moved to worktree_worker_reap.go (#12114);
 	// crash recovery still lives in worktree_worker.go. Pin each hook in its owner file.
 	for _, hook := range []struct{ file, want string }{
-		{"worktree_worker_reap.go", `beginAutomaticWIPLifecycleWithGit(repoRoot, "worker-reap"`},
+		{"worktree_worker_reap.go", `beginWorkerReapLifecycle(ctx, repoRoot`},
 		{"worktree_worker.go", `beginAutomaticWIPLifecycle(repoRoot, "crash-recovery"`},
 	} {
 		if !strings.Contains(readEntrypoint(t, hook.file), hook.want) {

@@ -1,13 +1,63 @@
 package wiplifecycle
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 )
+
+// fak-test:runtime medium est=100ms lane=default
+func TestBeginFocusedCaptureKeepsUnrelatedFailuresAdvisory(t *testing.T) {
+	for _, failTarget := range []bool{false, true} {
+		t.Run(fmt.Sprintf("target-unknown-%t", failTarget), func(t *testing.T) {
+			repo := initRepo(t)
+			target := t.TempDir()
+			runner := lifecycleFocusRunner{target: target, failTarget: failTarget}
+			receipt, err := BeginWithRunner(repo, "worker-reap", "focus-test", time.Now(), runner, wipinventory.Options{Focus: target, WorkerRoot: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if receipt.Before.Known == failTarget || receipt.Before.Focus != filepath.ToSlash(target) {
+				t.Fatalf("wrong target admission: %+v", receipt.Before)
+			}
+			if failTarget && !strings.Contains(receipt.Before.Error, "target status failed") {
+				t.Fatalf("unknown target cause lost: %+v", receipt.Before)
+			}
+			if !strings.Contains(strings.Join(receipt.Before.Advisory, "\n"), "unrelated status failed") {
+				t.Fatalf("unrelated capture error not advisory: %+v", receipt.Before)
+			}
+			stored, err := Read(receipt.ReceiptPath)
+			if err != nil || stored.Before.Known != receipt.Before.Known || len(stored.Before.Advisory) == 0 {
+				t.Fatalf("focused decision not durably recorded: %+v err=%v", stored, err)
+			}
+		})
+	}
+}
+
+type lifecycleFocusRunner struct {
+	target     string
+	failTarget bool
+}
+
+func (r lifecycleFocusRunner) Run(dir string, args ...string) ([]byte, error) {
+	if len(args) > 0 && args[0] == "status" {
+		if dir == r.target {
+			if r.failTarget {
+				return nil, errors.New("target status failed")
+			}
+			return nil, nil
+		}
+		return nil, errors.New("unrelated status failed")
+	}
+	return (wipinventory.GitRunner{}).Run(dir, args...)
+}
 
 func TestBeginFinishCaptureOrderedSnapshotsWithSharedIdentity(t *testing.T) {
 	repo := initRepo(t)
