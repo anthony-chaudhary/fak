@@ -889,3 +889,51 @@ stay bitwise those of the one-token MatMul followed by the rms-split: an F32 wei
 `rmsSplit`, computed by one workgroup beside the projection workgroups instead of after
 them. Vulkan has no grid barrier, so the split remains a second dispatch. The upstream
 license text is the MIT license reproduced in the antirez/ds4 section above.
+
+
+## FlashInfer NVFP4 W4A16 numerical staging
+
+`internal/compute/nvfp4_backend.go` adapts the local E2M1 × E4M3FN-to-BF16
+conversion and delayed FP32 tensor-scale staging from FlashInfer at revision
+`866c80d0c70a90624b4c2056d12d1543d709609e`:
+
+- [`e2m1x16_e4m3_to_bf16x16` (line 18)](https://github.com/flashinfer-ai/flashinfer/blob/866c80d0c70a90624b4c2056d12d1543d709609e/flashinfer/fused_moe/cute_dsl/blackwell/moe_w4a16_utils.py#L18),
+  Copyright (c) 2026 FlashInfer contributors, SPDX-License-Identifier: Apache-2.0.
+- [`_dequantize` (line 44)](https://github.com/flashinfer-ai/flashinfer/blob/866c80d0c70a90624b4c2056d12d1543d709609e/tests/moe_ep/w4a16_reference.py#L44)
+  and the reference's FP32 matmul followed by `fc1_alpha` / `fc2_alpha`
+  (lines 303–304 and 324–325), covered by the upstream Apache-2.0 license.
+
+Changed for Fak: owned row-major packed host tensors, strict shape/scale/input
+validation, F32-to-BF16 round-to-nearest-even activation conversion, a streaming
+scalar Go reduction with separately rounded FP32 products and additions, and
+one tensor-scale multiply per output. This preserves the numerical staging;
+it does not reproduce GPU MMA reduction order or establish a Blackwell kernel,
+serving integration, or performance result. The BSD-3-Clause SM100 kernel is
+not included. The existing early-scale CPU reference keeps its contract.
+
+The full Apache License, Version 2.0 text is reproduced in the
+[TensorFold benchmark evidence section](#tensorfold-benchmark-evidence) above.
+The upstream NOTICE follows; its KDA references describe upstream files, not
+files incorporated by this adaptation.
+
+```text
+FlashInfer
+Copyright 2025-2026 NVIDIA
+Copyright 2023-2026 FlashInfer community (https://flashinfer.ai/)
+
+-------------------------------------------------------------------------------------------------
+Some of the code in this project are adapted from other open-source projects with different
+licenses. This product also bundles some third-party components under other open source licenses.
+See licenses/ for text of these licenses.
+
+The persistent CuTe DSL KDA kernels are adapted from humanfia/kda-for-kda-release,
+Copyright (c) 2026 KDA Team, under the MIT License (licenses/LICENSE.kda-for-kda).
+
+The static PTX KDA kernels are adapted from NVlabs/kda (260927-kda-for-kda),
+Copyright (c) 2026 KDA Team, under the MIT License (LICENSE.kda-for-kda.txt).
+
+The TIRx KDA kernels are adapted from NVlabs/kda (260927-kda-for-kda),
+Copyright (c) 2026 KDA Team, under the MIT License (licenses/LICENSE.kda-for-kda).
+The split kernel also retains its original Apache-2.0 TIRx-author attribution.
+Source: https://github.com/NVlabs/kda/tree/260927-kda-for-kda
+```
