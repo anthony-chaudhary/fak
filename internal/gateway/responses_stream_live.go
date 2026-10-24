@@ -282,7 +282,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	}
 	if err != nil {
 		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
-		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, 0, started)
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, 0, started, comp)
 		if writeFailure != nil {
 			return true
 		}

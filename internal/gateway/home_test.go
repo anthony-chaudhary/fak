@@ -198,16 +198,33 @@ func TestDashboardRoutesAppendPrivacySafeUsageRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	s.richDashboards.probe = func(context.Context, string) error { return nil }
+	releaseProbe := make(chan struct{})
+	s.richDashboards.probe = func(ctx context.Context, _ string) error {
+		select {
+		case <-releaseProbe:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	s.richDashboards.baseURL = "http://localhost:3000"
 
 	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/?private=do-not-log", nil))
-	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health&private=do-not-log", nil))
+	pending := httptest.NewRecorder()
+	s.Handler().ServeHTTP(pending, httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health&private=do-not-log", nil))
+	close(releaseProbe)
+	if pending.Code != http.StatusOK {
+		t.Fatalf("pending dashboard status = %d, want %d", pending.Code, http.StatusOK)
+	}
 	deadline := time.Now().Add(time.Second)
 	for s.richDashboards.snapshot().State != "ready" && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health&private=do-not-log", nil))
+	ready := httptest.NewRecorder()
+	s.Handler().ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health&private=do-not-log", nil))
+	if ready.Code != http.StatusSeeOther {
+		t.Fatalf("ready dashboard status = %d, want %d", ready.Code, http.StatusSeeOther)
+	}
 	rows := gatewayusageledger.ReadLedgerFile(path)
 	if len(rows) != 2 || rows[0].Kind != "dashboard_lightweight_open" || rows[1].Kind != "dashboard_rich_ready" {
 		t.Fatalf("usage rows = %+v", rows)

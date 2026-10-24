@@ -115,6 +115,17 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 		if sp := nd.Speculative; sp != nil {
 			e.SpecRounds, e.SpecDraftTokens, e.SpecAcceptedTokens = sp.Rounds, sp.DraftTokens, sp.AcceptedTokens
 		}
+		if cost := nd.SpeculativeCost; cost != nil {
+			e.SpeculativeCost = &perfledger.SpeculativeDecodeCost{
+				Scope: cost.Scope, Attempts: cost.Attempts,
+				Completed:         perfledger.SpeculativeAttemptCost(cost.Completed),
+				ProposalError:     perfledger.SpeculativeAttemptCost(cost.ProposalError),
+				EmptyProposal:     perfledger.SpeculativeAttemptCost(cost.EmptyProposal),
+				VerificationError: perfledger.SpeculativeAttemptCost(cost.VerificationError),
+				Cancelled:         perfledger.SpeculativeAttemptCost(cost.Cancelled),
+				Incomplete:        perfledger.SpeculativeAttemptCost(cost.Incomplete),
+			}
+		}
 		d.engine = e
 		if t := comp.Timings; t != nil {
 			d.nativeTiming = perfledger.NewNativeTiming(t.PromptN, t.PredictedN, t.PromptMS, t.PredictedMS)
@@ -322,11 +333,15 @@ func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) {
 // It deliberately leaves the fak_gateway_inference_* counters alone: a turn that
 // produced no tokens is not a generation, but its latency is still part of what
 // the client saw, so dropping it would hide the slow tail.
-func (m *gatewayMetrics) recordPerfFailure(src perfSource, loc servingLocality, errClass string, status int, dur, ttft time.Duration) {
+func (m *gatewayMetrics) recordPerfFailure(src perfSource, loc servingLocality, errClass string, status int, dur, ttft time.Duration, completions ...*agent.Completion) {
 	if m == nil {
 		return
 	}
 	rec := perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), errClass, status, src.elapsed(dur), ttft)
+	if len(completions) > 0 {
+		detail := perfDetailFromCompletion(completions[0])
+		rec.Model, rec.Engine = strings.TrimSpace(detail.model), detail.engine
+	}
 	src.apply(&rec)
 	m.commitPerf(rec)
 }
@@ -352,7 +367,7 @@ func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
 // recordFailedTurn records the perf row for a served turn whose planner call
 // failed. committed reports that response bytes were already on the wire, so the
 // client saw 200 and then an in-stream error.
-func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err error, began time.Time, ttft time.Duration, committed bool) {
+func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err error, began time.Time, ttft time.Duration, committed bool, completions ...*agent.Completion) {
 	if s == nil || s.metrics == nil || err == nil {
 		return
 	}
@@ -375,7 +390,7 @@ func (s *Server) recordFailedTurn(ctx context.Context, loc servingLocality, err 
 	default:
 		status, _, _ = upstreamErrorStatus(err)
 	}
-	s.metrics.recordPerfFailure(perfSourceFrom(ctx), loc, class, status, elapsed, ttft)
+	s.metrics.recordPerfFailure(perfSourceFrom(ctx), loc, class, status, elapsed, ttft, completions...)
 }
 
 func (m *gatewayMetrics) setHTTPWriteTimeout(d time.Duration) {

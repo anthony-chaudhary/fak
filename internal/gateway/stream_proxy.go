@@ -751,7 +751,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 			failTTFT = hb.streamStart.Sub(began)
 		}
 		hb.mu.Unlock()
-		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, failTTFT, started)
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, reqModel), err, began, failTTFT, started, comp)
 		if writeErr != nil {
 			s.logf("gateway: live stream failed after downstream write error: %v", err)
 			// The downstream is already broken. Do not emit terminal frames,

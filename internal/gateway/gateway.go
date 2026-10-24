@@ -1323,7 +1323,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	comp, err := s.completeWithFirstTokenWatchdog(ctx, turn.traceID, messages, tools, opts...)
 	s.recordBufferedTurnCost(turn, comp, plannerBegan)
 	if err != nil {
-		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, sampleModelOf(opts)), err, plannerBegan, 0, false)
+		s.recordFailedTurn(ctx, s.chatServingLocality(ctx, sampleModelOf(opts)), err, plannerBegan, 0, false, comp)
 		// Preserve request-local execution metadata on failures. Callers still
 		// receive the original error, while buffered/streaming HTTP paths can
 		// report an actual speculative route or typed downgrade in headers.

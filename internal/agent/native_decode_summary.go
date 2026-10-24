@@ -27,7 +27,8 @@ type NativeDecodeSummary struct {
 	// decoded alone).
 	CohortSize int `json:"cohort_size,omitempty"`
 	// Speculative is set only when at least one verify round ran.
-	Speculative *SpeculativeDecodeTally `json:"speculative,omitempty"`
+	Speculative     *SpeculativeDecodeTally `json:"speculative,omitempty"`
+	SpeculativeCost *SpeculativeDecodeCost  `json:"speculative_cost,omitempty"`
 }
 
 func newNativeDecodeSummary(res inKernelGenerateResult) *NativeDecodeSummary {
@@ -42,6 +43,10 @@ func newNativeDecodeSummary(res inKernelGenerateResult) *NativeDecodeSummary {
 		spec := res.spec
 		sum.Speculative = &spec
 		sum.Path = NativeDecodePathSpeculative
+	}
+	if res.specCost != nil {
+		cost := *res.specCost
+		sum.SpeculativeCost = &cost
 	}
 	return sum
 }

@@ -159,11 +159,36 @@ var Paths = []string{PathSerial, PathBatched, PathSpeculative}
 // the process-wide fak_engine_* families and /v1/fak/observation/engine to a
 // single served turn.
 type Engine struct {
-	Path               string `json:"path"`
-	CohortSize         int    `json:"cohort_size,omitempty"`
-	SpecRounds         int    `json:"spec_rounds,omitempty"`
-	SpecDraftTokens    int    `json:"spec_draft_tokens,omitempty"`
-	SpecAcceptedTokens int    `json:"spec_accepted_tokens,omitempty"`
+	Path               string                 `json:"path"`
+	CohortSize         int                    `json:"cohort_size,omitempty"`
+	SpecRounds         int                    `json:"spec_rounds,omitempty"`
+	SpecDraftTokens    int                    `json:"spec_draft_tokens,omitempty"`
+	SpecAcceptedTokens int                    `json:"spec_accepted_tokens,omitempty"`
+	SpeculativeCost    *SpeculativeDecodeCost `json:"speculative_cost,omitempty"`
+}
+
+// SpeculativeAttemptCost retains one outcome's request-owned wall times.
+// InclusiveElapsed contains DraftElapsed; these durations must not be summed.
+type SpeculativeAttemptCost struct {
+	Attempts           int           `json:"attempts"`
+	EmittedTokens      int           `json:"emitted_tokens"`
+	MeasuredAttempts   int           `json:"measured_attempts"`
+	UnmeasuredAttempts int           `json:"unmeasured_attempts"`
+	DraftElapsed       time.Duration `json:"draft_elapsed_ns"`
+	InclusiveElapsed   time.Duration `json:"inclusive_elapsed_ns"`
+}
+
+// SpeculativeDecodeCost is absent when no proposal attempt was observed.
+// It excludes prefill and the unassisted serial remainder.
+type SpeculativeDecodeCost struct {
+	Scope             string                 `json:"scope"`
+	Attempts          int                    `json:"attempts"`
+	Completed         SpeculativeAttemptCost `json:"completed"`
+	ProposalError     SpeculativeAttemptCost `json:"proposal_error"`
+	EmptyProposal     SpeculativeAttemptCost `json:"empty_proposal"`
+	VerificationError SpeculativeAttemptCost `json:"verification_error"`
+	Cancelled         SpeculativeAttemptCost `json:"cancelled"`
+	Incomplete        SpeculativeAttemptCost `json:"incomplete"`
 }
 
 // PartialNativePhases preserves request-owned phase observations even when

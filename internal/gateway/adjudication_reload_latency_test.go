@@ -211,7 +211,7 @@ func TestAdjudicationLatencyUnderPolicyReload(t *testing.T) {
 	// Quiet the per-operation structured log (observability emitted AFTER the verdict);
 	// a synchronous stderr write per call would dominate the measured tail. The metrics
 	// fold stays, so the measured window is the adjudication work.
-	srv.logf = func(string, ...any) {}
+	srv.logf = nil
 
 	floorA, floorB := reloadFloorVariants(t)
 

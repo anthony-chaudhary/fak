@@ -265,6 +265,10 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	emit func(int) bool,
 	measurementOpt ...*nativeInferenceMeasurement,
 ) (res inKernelGenerateResult, err error) {
+	var attempt speculativeAttemptObservation
+	var round speculativeRoundObservation
+	var gen int
+	var diagnosticNow func() time.Time
 	// Keep request-local route evidence when a backend panic is converted to the
 	// same typed device error as the outer decode boundary. Recovering only in
 	// generateReusedRecovering would discard this function's named result.
@@ -272,6 +276,16 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
 				err = e
+				attempt.outcome = speculativeAttemptIncomplete
+				attempt.close(gen, err, ctx.Err(), diagnosticNow)
+				res.gen = gen
+				res.specCost = attempt.totals
+				res.spec = round.tally
+				if round.active {
+					res.spec.Rounds++
+					res.spec.DraftTokens += round.proposed
+					res.spec.AcceptedTokens += round.accepted
+				}
 				return
 			}
 			panic(r)
@@ -544,7 +558,6 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	rng := rand.New(rand.NewSource(p.requestSampleSeed(ctx, temp)))
 	minP := nativeMinPFromContext(ctx)
 
-	gen := 0
 	stopped := false
 	curLogits := logits
 	// A single workspace for the whole speculative run keeps the serial fallback draw
@@ -557,12 +570,12 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 	// The existing enginestep round covers verify-through-advance, not drafting.
 	// The separate MTP diagnostic interval also includes proposal generation.
-	var round speculativeRoundObservation
-	diagnosticNow := vulkanMTPDiagnosticClock(ctx)
+	diagnosticNow = vulkanMTPDiagnosticClock(ctx)
 	diagnosticDecodeStart := diagnosticNow()
 
 	for gen < maxNew {
 		round.close(gen)
+		attempt.close(gen, err, ctx.Err(), diagnosticNow)
 		if err = ctx.Err(); err != nil {
 			break
 		}
@@ -589,13 +602,15 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		var diagnosticStart time.Time
 		var proposal model.DraftProposal
 		if proposalGenerator != nil {
-			diagnosticStart = diagnosticNow()
 			roundDraft := maxDraft
 			if remaining := maxNew - gen; roundDraft > remaining {
 				roundDraft = remaining
 			}
 			var propErr error
+			diagnosticStart = diagnosticNow()
+			attempt.begin(diagnosticStart, gen)
 			proposal, propErr = proposalGenerator.Propose(ctx, committed, roundDraft)
+			attempt.draftFinished(diagnosticNow().Sub(diagnosticStart), propErr)
 			if propErr != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					err = ctxErr
@@ -616,6 +631,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 		// If proposal has no tokens and no tree, fall back to single-step autoregressive
 		if len(proposal.Tokens) == 0 && proposal.Tree == nil {
+			attempt.emptyProposal()
 			if mtpExecution != nil && proposalGenerator != nil {
 				mtpExecution.DowngradeReason = vulkanMTPDowngradeEmptyProposal
 				proposalGenerator = nil
@@ -667,9 +683,11 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		roundStart := time.Now()
 		vRes, deviceReceipt, vErr := verifyGreedySpeculativeRoundObserved(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
 		if vErr != nil {
+			attempt.verificationFailed(vErr)
 			err = vErr
 			break
 		}
+		attempt.outcome = speculativeAttemptCompleted
 		round.open(roundStart, speculativeProposalSize(proposal), vRes.NumAccepted, gen)
 		if mtpExecution != nil {
 			if mtpExecution.ClosedRoundTotals == nil {
@@ -836,6 +854,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	}
 
 	round.close(gen)
+	attempt.close(gen, err, ctx.Err(), diagnosticNow)
 	decodeS := time.Since(td).Seconds()
 	hostSpan.Finish(ctx, max(gen-1, 0))
 	nonDecode = nativeperf.BeginNonDecodeWork()
@@ -853,6 +872,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		stopped:    stopped,
 		vulkanMTP:  mtpExecution,
 		spec:       round.tally,
+		specCost:   attempt.totals,
 	}, err
 }
 

@@ -1682,7 +1682,8 @@ type inKernelGenerateResult struct {
 	vulkanMTP         *VulkanMTPExecution
 	// spec is this request's own verified draft rounds (zero off the speculative
 	// paths); enginestep.Default only holds the process-wide sum.
-	spec SpeculativeDecodeTally
+	spec     SpeculativeDecodeTally
+	specCost *SpeculativeDecodeCost
 }
 
 // VulkanMTPExecution is the request-local execution receipt for the resident
@@ -2464,8 +2465,8 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				// context cancel) never reached the in-loop terminal emit, so the request still gets a
 				// terminal observation here — bound to the same trace id (#13120).
 				p.recordNativePhase(nativePhaseTraceID(ctx), NativePhaseTerminal, time.Now(), 0, false)
-				if genRes.vulkanMTP != nil {
-					return &Completion{VulkanMTP: genRes.vulkanMTP}, err
+				if genRes.vulkanMTP != nil || genRes.specCost != nil {
+					return &Completion{Model: p.modelID, VulkanMTP: genRes.vulkanMTP, NativeDecode: newNativeDecodeSummary(genRes)}, err
 				}
 				return nil, err
 			}
