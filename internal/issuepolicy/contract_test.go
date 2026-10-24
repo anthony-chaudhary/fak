@@ -364,6 +364,116 @@ func TestReviewCandidateRefusesPrivateBoundary(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=500ms
+func TestReviewCandidateCompanionNameBoundary(t *testing.T) {
+	t.Parallel()
+	type boundaryCase struct {
+		name    string
+		text    string
+		private bool
+	}
+	cases := []boundaryCase{
+		{"public coordination", "Coordinate public AGENTS.md and go.work guidance with fak-private.", false},
+		{"quoted name", "Coordinate with `FAK-PRIVATE`.", false},
+		{"qualified issue", "Coordinates with: fak-private#123.", false},
+		{"owner qualified issue", "Coordinates with: anthony-chaudhary/fak-private#123.", false},
+		{"canonical issue URL", "Coordinates with: https://github.com/anthony-chaudhary/fak-private/issues/123.", false},
+		{"parenthesized issue", "Coordinates with: (fak-private#123).", false},
+		{"Markdown issue link", "Coordinates with: [fak-private#123](https://github.com/anthony-chaudhary/fak-private/issues/123).", false},
+		{"canonical Markdown destination", "Coordinates with: [path](https://github.com/anthony-chaudhary/fak-private/issues/123).", false},
+		{"relative Markdown destination", "Requires [path](fak-private#123).", true},
+		{"owner relative Markdown destination", "Requires [path](anthony-chaudhary/fak-private#123).", true},
+		{"whitespace relative Markdown destination", "Requires [path]( fak-private#123 ).", true},
+		{"whitespace owner Markdown destination", "Requires [path]( anthony-chaudhary/fak-private#123 ).", true},
+		{"relative Markdown definition", "[path]: fak-private#123", true},
+		{"owner relative Markdown definition", "[path]: anthony-chaudhary/fak-private#123", true},
+		{"whitespace canonical Markdown link", "Coordinates with: [fak-private#123]( https://github.com/anthony-chaudhary/fak-private/issues/123 ).", false},
+		{"canonical Markdown definition", "[path]: https://github.com/anthony-chaudhary/fak-private/issues/123", false},
+		{"bare name with linked path label", "Requires fak-private [platform/dispatch/x.go](https://github.com/anthony-chaudhary/fak-private/issues/123).", true},
+		{"bare name with linked backslash label", `Requires fak-private [platform\dispatch\x.go](https://github.com/anthony-chaudhary/fak-private/issues/123).`, true},
+		{"bare name with qualified label", "Coordinate fak-private with [anthony-chaudhary/fak-private#123](https://github.com/anthony-chaudhary/fak-private/issues/123).", false},
+		{"Markdown link slash suffix", "Requires [path](https://github.com/anthony-chaudhary/fak-private/issues/123)/private/path.", true},
+		{"Markdown link semicolon suffix", "Requires [path](https://github.com/anthony-chaudhary/fak-private/issues/123);private/path.", true},
+		{"raw HTML relative href", `Requires <a href=" fak-private#123 ">path</a>.`, true},
+		{"raw HTML canonical href", `Requires <a href=" https://github.com/anthony-chaudhary/fak-private/issues/123 ">path</a>.`, true},
+		{"raw HTML unsupported attribute", `Requires <img srcset=" fak-private#123 ">.`, true},
+		{"canonical link with unsupported destination", "Coordinates with [path](https://github.com/anthony-chaudhary/fak-private/issues/123); see [other](relative/path).", true},
+		{"resource in companion label", "Requires [fak-private#123;private/path](https://github.com/anthony-chaudhary/fak-private/issues/123).", true},
+		{"embedded canonical link", "Requires private/[path](https://github.com/anthony-chaudhary/fak-private/issues/123).", true},
+		{"terminated issue", "Coordinates with fak-private#123; continue public work.", false},
+		{"issue with public path", "Coordinate internal/issuepolicy/contract.go with fak-private#123.", false},
+		{"spaced private path", "Requires fak-private platform/dispatch/x.go.", true},
+		{"punctuated spaced path", "Requires fak-private platform/dispatch/x.go!", true},
+		{"Markdown spaced path", "Requires fak-private [path](platform/dispatch/x.go).", true},
+		{"ambiguous path", "Coordinate internal/issuepolicy/contract.go with fak-private.", true},
+		{"companion path", "Requires fak-private/platform/dispatch/x.go.", true},
+		{"backslash path", `Requires fak-private\platform\dispatch\x.go.`, true},
+		{"relative path", "Requires ../fak-private/platform/dispatch/x.go.", true},
+		{"Windows drive path", `Requires C:\work\fak-private\platform\dispatch\x.go.`, true},
+		{"spaced Windows path", `Requires fak-private C:\platform\dispatch\x.go.`, true},
+		{"dotted hostname", "Requires fak-private.example.invalid.", true},
+		{"operational identifier", "Requires fak-private-dispatch-prod.", true},
+		{"underscored identifier", "Requires fak-private_dispatch_prod.", true},
+		{"repository URL", "Requires https://github.com/anthony-chaudhary/fak-private.", true},
+		{"blob URL", "Requires https://github.com/anthony-chaudhary/fak-private/blob/main/platform/dispatch/x.go.", true},
+		{"tree URL", "Requires https://github.com/anthony-chaudhary/fak-private/tree/main/platform/dispatch.", true},
+		{"short issue suffix", "Requires fak-private#123/platform/dispatch/x.go.", true},
+		{"qualified issue suffix", "Requires anthony-chaudhary/fak-private#123-private.", true},
+		{"issue URL suffix", "Requires https://github.com/anthony-chaudhary/fak-private/issues/123/private.", true},
+		{"issue URL semicolon suffix", "Requires https://github.com/anthony-chaudhary/fak-private/issues/123;private/platform/dispatch/x.go.", true},
+		{"issue URL comma suffix", "Requires https://github.com/anthony-chaudhary/fak-private/issues/123,private/platform/dispatch/x.go.", true},
+		{"issue URL parenthesis suffix", "Requires https://github.com/anthony-chaudhary/fak-private/issues/123(private/platform/dispatch/x.go).", true},
+		{"issue before locator", "Coordinates with fak-private#123; requires fak-private/platform/dispatch/x.go.", true},
+		{"locator before issue", "Requires fak-private/platform/dispatch/x.go; coordinates with fak-private#123.", true},
+	}
+	for _, needle := range []string{
+		"slack control", "slack-control", "gpu-server reservation", "operator-only evidence",
+		"credential dump", "secret key", "api key", "private token",
+	} {
+		cases = append(cases, boundaryCase{"existing " + needle, "Coordinate with fak-private. Requires " + needle + ".", true})
+	}
+	fields := []struct {
+		name string
+		path bool
+		set  func(*Candidate, string)
+	}{
+		{"title", false, func(c *Candidate, s string) { c.Title = s }},
+		{"parent", false, func(c *Candidate, s string) { c.ParentRef = s }},
+		{"current state", false, func(c *Candidate, s string) { c.CurrentState = s }},
+		{"why now", false, func(c *Candidate, s string) { c.WhyNow = s }},
+		{"working spine", false, func(c *Candidate, s string) { c.WorkingSpine = s }},
+		{"priority", false, func(c *Candidate, s string) { c.PriorityContext = s }},
+		{"in scope", false, func(c *Candidate, s string) { c.InScope = s }},
+		{"out of scope", false, func(c *Candidate, s string) { c.OutOfScope = s }},
+		{"done condition", false, func(c *Candidate, s string) { c.DoneCondition = s }},
+		{"witness", false, func(c *Candidate, s string) { c.Witness = s }},
+		{"acceptance gate", false, func(c *Candidate, s string) { c.AcceptanceGate = s }},
+		{"boundary notes", false, func(c *Candidate, s string) { c.BoundaryNotes = []string{s} }},
+		{"paths", true, func(c *Candidate, s string) { c.Paths = []string{s} }},
+	}
+	for _, tc := range cases {
+		for _, field := range fields {
+			t.Run(tc.name+"/"+field.name, func(t *testing.T) {
+				c := completeCandidate()
+				field.set(&c, tc.text)
+				review := ReviewCandidate(c, Options{})
+				// A companion reference in an explicit path never receives the prose exception.
+				private := tc.private || field.path
+				if has(review.Reasons, ReasonPrivateBoundary) != private {
+					t.Fatalf("private boundary = %v, want %v; review = %+v", review.Reasons, private, review)
+				}
+				if private {
+					if review.OK || review.Dispatchability != Refused || review.Verdict != "refused" {
+						t.Fatalf("review = %+v, want refused", review)
+					}
+				} else if !review.OK || review.Dispatchability != Dispatchable || review.Verdict != "ready" {
+					t.Fatalf("public coordination review = %+v, want ready", review)
+				}
+			})
+		}
+	}
+}
+
 func TestReviewCandidateLiveRequiresDedupeArmor(t *testing.T) {
 	review := ReviewCandidate(completeCandidate(), Options{Live: true})
 	if review.OK || review.Dispatchability != Refused {
