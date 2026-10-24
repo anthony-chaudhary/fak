@@ -1749,6 +1749,95 @@ __global__ void k_q8_gemm(const signed char *W, const float *Wscale,
   if (lane == 0) Y[(size_t)t * out + o] = sum;
 }
 
+// k_q8_gemm_rowtile is the prompt-panel Q8_0 GEMM (block 32 only). Each warp owns
+// kQ8TileOuts outputs and up to kQ8TileRows rows, so one weight-block load feeds every row of
+// the tile. Every (t,o) keeps k_q8_gemm's arithmetic exactly: lane L takes blocks
+// b = L, L+32, ...; acc is the exact integer dot; sum += (float)acc * wsc[b] * xsc[b] in that
+// order. The 32 lane partials are then summed in __shfl_down's grouping (16, 8, 4, 2, 1),
+// replayed in shared memory by one lane per (t,o). The output is bitwise k_q8_gemm's.
+constexpr int kQ8TileRows = 8;
+constexpr int kQ8TileOuts = 4;
+constexpr int kQ8TileWarps = 8;
+__global__ void __launch_bounds__(kQ8TileWarps * 32)
+k_q8_gemm_rowtile(const signed char *__restrict__ W, const float *__restrict__ Wscale,
+                  const signed char *__restrict__ qX, const float *__restrict__ xScale,
+                  float *__restrict__ Y, int out, int in, int P, int rowsPerTile) {
+  constexpr int R = kQ8TileRows, O = kQ8TileOuts, K = R * O;
+  static_assert(K == 32, "one lane replays the reduction of one (row, output) partial");
+  __shared__ float part[kQ8TileWarps][K][33];
+  int lane = threadIdx.x & 31;
+  int warp = threadIdx.x >> 5;
+  int t0 = blockIdx.x * rowsPerTile;
+  int o0 = (blockIdx.y * kQ8TileWarps + warp) * O;
+  if (o0 >= out || t0 >= P) return;
+  int rows = min(rowsPerTile, P - t0);
+  int nblk = in >> 5;
+  const signed char *wrow[O];
+  const float *wsc[O];
+#pragma unroll
+  for (int j = 0; j < O; ++j) {
+    int o = min(o0 + j, out - 1);
+    wrow[j] = W + (size_t)o * in;
+    wsc[j] = Wscale + (size_t)o * nblk;
+  }
+  const signed char *xrows = qX + (size_t)t0 * in;
+  const float *xsc = xScale + (size_t)t0 * nblk;
+  float sum[O][R];
+#pragma unroll
+  for (int j = 0; j < O; ++j)
+#pragma unroll
+    for (int r = 0; r < R; ++r) sum[j][r] = 0.f;
+  for (int b = lane; b < nblk; b += 32) {
+    int4 wlo[O], whi[O];
+    float ws[O];
+#pragma unroll
+    for (int j = 0; j < O; ++j) {
+      const int4 *wb = (const int4 *)(wrow[j] + ((size_t)b << 5));
+      wlo[j] = wb[0];
+      whi[j] = wb[1];
+      ws[j] = wsc[j][b];
+    }
+#pragma unroll
+    for (int r = 0; r < R; ++r) {
+      if (r < rows) {
+        const int4 *xb = (const int4 *)(xrows + (size_t)r * in + ((size_t)b << 5));
+        int4 xlo = xb[0], xhi = xb[1];
+        float xs = xsc[(size_t)r * nblk + b];
+#pragma unroll
+        for (int j = 0; j < O; ++j) {
+          int acc = 0;
+          acc = __dp4a(wlo[j].x, xlo.x, acc);
+          acc = __dp4a(wlo[j].y, xlo.y, acc);
+          acc = __dp4a(wlo[j].z, xlo.z, acc);
+          acc = __dp4a(wlo[j].w, xlo.w, acc);
+          acc = __dp4a(whi[j].x, xhi.x, acc);
+          acc = __dp4a(whi[j].y, xhi.y, acc);
+          acc = __dp4a(whi[j].z, xhi.z, acc);
+          acc = __dp4a(whi[j].w, xhi.w, acc);
+          sum[j][r] += (float)acc * ws[j] * xs;
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (int j = 0; j < O; ++j)
+#pragma unroll
+    for (int r = 0; r < R; ++r) part[warp][r * O + j][lane] = sum[j][r];
+  __syncwarp();
+  const float *v = part[warp][lane];
+  float a[16];
+#pragma unroll
+  for (int i = 0; i < 16; ++i) a[i] = v[i] + v[i + 16];
+#pragma unroll
+  for (int i = 0; i < 8; ++i) a[i] = a[i] + a[i + 8];
+#pragma unroll
+  for (int i = 0; i < 4; ++i) a[i] = a[i] + a[i + 4];
+  a[0] = a[0] + a[2];
+  a[1] = a[1] + a[3];
+  int r = lane / O, j = lane - r * O;
+  if (r < rows && o0 + j < out) Y[(size_t)(t0 + r) * out + o0 + j] = a[0] + a[1];
+}
+
 // Persistent Q8 activation-quantization scratch (#969), grown ONCE and reused like g_attn_scratch.
 // The per-call fcuda_malloc/fcuda_free pair tripped graph capture: the pooled allocator misses
 // (-> cudaMalloc) the first time a given size class is requested, and Q8 GEMV is the decode hot
@@ -1759,11 +1848,9 @@ static signed char *g_q8_qX = nullptr;
 static int g_q8_qX_cap = 0; // bytes
 static float *g_q8_xScale = nullptr;
 static int g_q8_xScale_cap = 0; // floats
-// q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
-// each (row, output) dot runs the same k_q8_gemm warp sum whatever P is, so a row's result is
-// bitwise the P=1 decode GEMV's. Returns 0 or FCUDA_SCRATCH_ALLOC_FAILED before any launch.
-static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const float *dX,
-                          float *dY, int out, int in, int P, int block) {
+// q8_quant_rows grows the activation scratch, then quantizes every row of X on its own. Returns 0
+// or FCUDA_SCRATCH_ALLOC_FAILED before any launch.
+static int q8_quant_rows(const float *dX, int in, int P, int block) {
   int nblk = in / block;
   int needQX = P * in;          // int8 activation codes
   int needScale = P * nblk;     // per-block act scales (floats)
@@ -1788,6 +1875,15 @@ static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const floa
     g_q8_xScale_cap = needScale;
   }
   k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
+  return 0;
+}
+// q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
+// each (row, output) dot runs the same k_q8_gemm warp sum whatever P is, so a row's result is
+// bitwise the P=1 decode GEMV's. Returns 0 or FCUDA_SCRATCH_ALLOC_FAILED before any launch.
+static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const float *dX,
+                          float *dY, int out, int in, int P, int block) {
+  int rc = q8_quant_rows(dX, in, P, block);
+  if (rc != 0) return rc;
   k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block);
   return 0;
@@ -1797,13 +1893,23 @@ extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, c
   if (P >= 128) return q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
   return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
 }
-// fcuda_q8_matmul_rows_f32 is the BitExact prompt-panel GEMM: the per-row path for every P
-// (gridDim.y = P, so callers bound P by the panel chunk).
+// fcuda_q8_matmul_rows_f32 is the BitExact prompt-panel GEMM: every row bitwise the P=1 decode
+// GEMV for every P. Block-32 weights with 16-byte aligned codes run k_q8_gemm_rowtile over
+// balanced tiles of at most kQ8TileRows rows; anything else runs k_q8_gemm itself.
 extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                         float *dY, int out, int in, int P, int block) {
   if (!dCodes || !dScales || !dX || !dY || out <= 0 || in <= 0 || P <= 0 || P > 65535 ||
       block <= 0 || in % block != 0 || P > INT_MAX / in) return -1;
-  return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+  int outGroups = (out + kQ8TileWarps * kQ8TileOuts - 1) / (kQ8TileWarps * kQ8TileOuts);
+  if (block != 32 || ((uintptr_t)dCodes & 15) != 0 || outGroups > 65535)
+    return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+  int rc = q8_quant_rows(dX, in, P, block);
+  if (rc != 0) return rc;
+  int tiles = (P + kQ8TileRows - 1) / kQ8TileRows;
+  int rowsPerTile = (P + tiles - 1) / tiles;
+  k_q8_gemm_rowtile<<<dim3(tiles, outGroups), kQ8TileWarps * 32, 0, g_stream>>>(
+      (const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale, dY, out, in, P, rowsPerTile);
+  return 0;
 }
 
 // getScaleMinK4_dev reproduces the GGUF loader's getScaleMinK4 (internal/ggufload) bit-for-bit:
