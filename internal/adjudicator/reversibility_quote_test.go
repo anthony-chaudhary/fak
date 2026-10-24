@@ -2,6 +2,82 @@ package adjudicator
 
 import "testing"
 
+// TestQuotedDDDeviceTargets is the #3138 classifier-only witness. Every command
+// below is data passed to ClassifyReversibility; none is executed.
+// fak-test:runtime fast est=10ms lane=default
+func TestQuotedDDDeviceTargets(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		cmd  string
+		want ReversibilityClass
+	}{
+		{"double-quoted target", `dd if=img.bin of="/dev/sda"`, ReversibilityIrreversible},
+		{"single-quoted target", `dd if=img.bin of='/dev/sda'`, ReversibilityIrreversible},
+		{"whole operand quoted", `dd if=img.bin 'of=/dev/sda'`, ReversibilityIrreversible},
+		{"adjacent quoted pieces", `dd if=img.bin o'f'="/dev/"sda`, ReversibilityIrreversible},
+		{"escaped path separators", `dd if=img.bin of=\/dev\/sda`, ReversibilityIrreversible},
+		{"quoted executable path", `"/bin/dd" if=img.bin of="/dev/sda"`, ReversibilityIrreversible},
+		{"simple wrappers and assignment", `env MODE=copy sudo dd if=img.bin of="/dev/sda"`, ReversibilityIrreversible},
+		{"real sibling after mention", `echo 'dd of="image.bin"'; dd if=img.bin of="/dev/sda"`, ReversibilityIrreversible},
+		{"real operand after input redirect", `dd < 'of=/dev/sda' if=img.bin of="/dev/sda"`, ReversibilityIrreversible},
+		{"device input and ordinary output", `dd if="/dev/sda" of="image.bin"`, ReversibilityReversible},
+		{"quoted input containing a device-write mention", `dd if="image dd of=/dev/sda" of="copy.bin"`, ReversibilityReversible},
+		{"quoted output containing a device-write mention", `dd if=img.bin of="/tmp/dd of=/dev/sda"`, ReversibilityReversible},
+		{"literal backslash inside double quotes", `dd if=img.bin of="\/dev/sda"`, ReversibilityReversible},
+		{"literal backslash inside single quotes", `dd if=img.bin of='\/dev/sda'`, ReversibilityReversible},
+		{"escaped quote bytes are filename data", `dd if=img.bin of=\"/dev/sda\"`, ReversibilityReversible},
+		{"operand split at real whitespace", `dd if=img.bin of= "/dev/sda"`, ReversibilityReversible},
+		{"unterminated target quote", `dd if=img.bin of="/dev/sda`, ReversibilityReversible},
+		{"inert commit mention", `git commit -m 'note: dd of="/dev/sda" is dangerous'`, ReversibilityReversible},
+		{"inert quoted operator", `echo 'example; dd of="/dev/sda"'`, ReversibilityReversible},
+		{"inert comment", `echo example # ; dd of="/dev/sda"`, ReversibilityReversible},
+		{"inert heredoc", "cat <<'EOF'\ndd of=\"/dev/sda\"\nEOF", ReversibilityReversible},
+		{"quoted output redirect filename", `dd if=img.bin of=copy.bin > 'of=/dev/sda'`, ReversibilityReversible},
+		{"quoted input redirect filename", `dd if=img.bin of=copy.bin < 'of=/dev/sda'`, ReversibilityReversible},
+		{"quoted here-string contents", `dd if=img.bin of=copy.bin <<< 'of=/dev/sda'`, ReversibilityReversible},
+		{"quoted heredoc delimiter at end of input", "dd if=img.bin of=copy.bin << 'of=/dev/sda'\npayload\n", ReversibilityReversible},
+		{"descriptor and adjoining redirect", `dd if=img.bin 2>'of=/dev/sda' of=copy.bin`, ReversibilityReversible},
+		{"redirect adjoining ordinary operand", `dd if=img.bin of=copy.bin> 'of=/dev/sda'`, ReversibilityReversible},
+		{"multiple adjoining redirects", `dd if=img.bin of=copy.bin>out< 'of=/dev/sda'`, ReversibilityReversible},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := ClassifyReversibility("Bash", map[string]any{"command": tc.cmd})
+			if env.Class != tc.want {
+				t.Fatalf("ClassifyReversibility(%q) = %q, want %q", tc.cmd, env.Class, tc.want)
+			}
+		})
+	}
+	t.Run("heredoc delimiter is not a dd operand", func(t *testing.T) {
+		cmd := "dd if=img.bin of=copy.bin << 'of=/dev/sda'\npayload\nof=/dev/sda\n"
+		var family reversibilityFamily
+		for _, candidate := range reversibilityFamilies {
+			if candidate.name == "dd-device-write" {
+				family = candidate
+				break
+			}
+		}
+		if family.matchCmd == nil {
+			t.Fatal("dd-device-write family is missing")
+		}
+		match := family.matchCmd
+		family.matchCmd = func(in familyMatchInput) bool {
+			// Isolate operand detection from the legacy whole-command scan.
+			in.words, in.lowerCmd = nil, ""
+			return match(in)
+		}
+		if got, _ := classifyAgainstFamilies([]reversibilityFamily{family}, "Bash", cmd); got != ReversibilityReversible {
+			t.Fatalf("heredoc delimiter treated as dd argv: %q", got)
+		}
+		// The existing scan still sees the unquoted closing delimiter. Fixing
+		// that separate false positive is not part of this additive repair.
+		if got := ClassifyReversibility("Bash", map[string]any{"command": cmd}); got.Class != ReversibilityIrreversible {
+			t.Fatalf("legacy heredoc verdict changed: %q", got.Class)
+		}
+	})
+}
+
 // TestQuotedMentionsDoNotEscalate is the #2752 witness (residual of #2376): a
 // command that merely MENTIONS a trigger inside a quoted argument — a commit
 // message, a grep pattern, an echoed string — must classify reversible. #2376

@@ -231,9 +231,10 @@ func classifyReversibility(tool string, args map[string]any) (ReversibilityClass
 // familyMatchInput carries the precomputed views of one pending call that
 // family matchers key on: the payload-scan view of the command (quoted
 // mentions blanked, live client payloads kept — #2752) raw and lowered, the
-// quote-aware operator-split segments, the view's word stream, and the
-// lowered tool name.
+// quote-aware operator-split segments, the view's word stream, the original
+// command for operand-aware matchers, and the lowered tool name.
 type familyMatchInput struct {
+	rawCmd    string
 	cmd       string
 	lowerCmd  string
 	segs      [][]string
@@ -293,6 +294,7 @@ func classifyAgainstFamilies(families []reversibilityFamily, tool, cmd string) (
 	// while a quoted payload handed to a DB/shell client stays live (#2752).
 	view := payloadScanView(cmd)
 	in := familyMatchInput{
+		rawCmd:    cmd,
 		cmd:       view,
 		lowerCmd:  strings.ToLower(view),
 		segs:      commandSegments(cmd),
@@ -518,7 +520,8 @@ var reversibilityFamilies = []reversibilityFamily{
 		name:  "dd-device-write",
 		class: ReversibilityIrreversible,
 		matchCmd: func(in familyMatchInput) bool {
-			return containsWord(in.words, "dd") && strings.Contains(in.lowerCmd, "of=/dev/")
+			return (containsWord(in.words, "dd") && strings.Contains(in.lowerCmd, "of=/dev/")) ||
+				ddQuotedDeviceWrite(in.rawCmd)
 		},
 		hint: "write to an image file first and inspect the target device before confirming a raw device write",
 	},
@@ -528,6 +531,136 @@ var reversibilityFamilies = []reversibilityFamily{
 		toolContains: []string{"delete", "remove", "destroy", "truncate", "unlink", "rmdir"},
 		hint:         "use the tool's preview or dry-run mode, or move the target to quarantine first, before confirming destruction",
 	},
+}
+
+// ddQuotedDeviceWrite reads dd's actual operands without exposing all its quoted
+// data to the payload scans. The older whole-command matcher remains conservative
+// for launchers; this additional path closes the quoted-target hole (#3138) without
+// treating a quoted filename such as "image dd of=/dev/sda" as another operation.
+func ddQuotedDeviceWrite(cmd string) bool {
+	// A here-document is input, not an argv list; leave its execution semantics
+	// to the existing payload matcher rather than inventing command heads in it.
+	cmd = stripShellComments(stripHeredocBodies(cmd))
+	for _, seg := range quoteAwareSegmentTexts(cmd) {
+		fields := reversibilityCommandFields(seg)
+		for i, raw := range fields {
+			head, ok := reversibilityShellWord(raw)
+			if !ok {
+				break
+			}
+			if envAssignmentRE.MatchString(raw) || commandWrapperHeads[strings.ToLower(head)] {
+				continue
+			}
+			if ghHead(head) == "dd" {
+				for _, arg := range fields[i+1:] {
+					if word, ok := reversibilityShellWord(arg); ok && strings.HasPrefix(word, "of=/dev/") {
+						return true
+					}
+				}
+			}
+			break // An argument naming dd is not an executable command head.
+		}
+	}
+	return false
+}
+
+// reversibilityCommandFields retains raw quoting while separating command words
+// from redirection operators and their operands. A quoted redirection filename or
+// here-document delimiter is shell syntax, never an argument supplied to dd.
+func reversibilityCommandFields(seg string) []string {
+	var fields []string
+	var b strings.Builder
+	redirect := false
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		if !redirect {
+			fields = append(fields, b.String())
+		}
+		b.Reset()
+		redirect = false
+	}
+	for i := 0; i < len(seg); {
+		c := seg[i]
+		switch {
+		case c == '\\' && i+1 < len(seg):
+			b.WriteString(seg[i : i+2])
+			i += 2
+		case c == '\'' || c == '"':
+			end := quotedSpanEnd(seg, i, c == '\'' && i > 0 && seg[i-1] == '$')
+			b.WriteString(seg[i:end])
+			i = end
+		case c == '<' || c == '>':
+			// Unquoted digits adjoining a redirect are its file descriptor.
+			if !redirect && b.Len() > 0 && strings.Trim(b.String(), "0123456789") == "" {
+				b.Reset()
+			} else {
+				flush()
+			}
+			redirect = true
+			start := i
+			for i < len(seg) && strings.ContainsRune("<>&|", rune(seg[i])) {
+				i++
+			}
+			if seg[start:i] == "<<" && i < len(seg) && seg[i] == '-' {
+				i++
+			}
+		case c == ' ' || c == '\t':
+			flush()
+			i++
+		case c == '(' || c == ')' || c == '`':
+			// Substitutions require another grammar, not ordinary argv splitting.
+			return nil
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	flush()
+	if redirect { // A missing redirection operand cannot execute.
+		return nil
+	}
+	return fields
+}
+
+// reversibilityShellWord removes POSIX quote/escape syntax from one already-split
+// word, without evaluating expansions or executing anything. Unlike unquoteSpans,
+// it removes escapes only where the shell does:
+// a backslash before / inside double quotes is literal, not a /dev path prefix.
+func reversibilityShellWord(raw string) (string, bool) {
+	var b strings.Builder
+	var quote byte
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if c == '\\' && quote != '\'' {
+			if i+1 == len(raw) {
+				return "", false
+			}
+			next := raw[i+1]
+			if quote == 0 || strings.ContainsRune("$`\"\\\n", rune(next)) {
+				i++
+				if next != '\n' {
+					b.WriteByte(next)
+				}
+				continue
+			}
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			} else {
+				b.WriteByte(c)
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), quote == 0
 }
 
 func commandText(args map[string]any) string {
