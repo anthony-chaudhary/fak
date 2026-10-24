@@ -12,6 +12,8 @@ const (
 	deepSeek41PublishedVocabSize           = 129280
 	deepSeek41PublishedCompressedVocabSize = 99092
 	deepSeek41PublishedTokenMapSHA256      = "c60a86322ec17b4142bfef3c57a8d81fb428550cdf487f88a4320cb59fe46481"
+	deepSeek41PublishedBOSTokenID          = 0
+	deepSeek41PublishedEOSTokenID          = 1
 )
 
 var deepSeek41PublishedTokenIDs = map[int]string{
@@ -23,6 +25,27 @@ var deepSeek41PublishedTokenIDs = map[int]string{
 func validateDeepSeek41PublishedTokenizer(f *File, cfg *model.Config, eng *DeepSeek41Engram) error {
 	if cfg.NumLayers != 40 || cfg.HiddenSize != 5120 || cfg.VocabSize != deepSeek41PublishedVocabSize {
 		return nil
+	}
+	for _, special := range []struct {
+		key  string
+		want uint64
+	}{
+		{key: "tokenizer.ggml.bos_token_id", want: deepSeek41PublishedBOSTokenID},
+		{key: "tokenizer.ggml.eos_token_id", want: deepSeek41PublishedEOSTokenID},
+	} {
+		got, ok := f.Uint64(special.key)
+		if !ok {
+			return fmt.Errorf("gguf: deepseek41 published tokenizer is missing %s=%d: %w",
+				special.key, special.want, model.ErrV41ConfigAdmission)
+		}
+		if got != special.want {
+			return fmt.Errorf("gguf: deepseek41 published tokenizer %s=%d, want %d: %w",
+				special.key, got, special.want, model.ErrV41ConfigAdmission)
+		}
+	}
+	if cfg.BOSTokenID == nil || *cfg.BOSTokenID != deepSeek41PublishedBOSTokenID || cfg.EOSTokenID != deepSeek41PublishedEOSTokenID {
+		return fmt.Errorf("gguf: deepseek41 published tokenizer runtime special ids BOS=%v EOS=%d, want %d/%d: %w",
+			cfg.BOSTokenID, cfg.EOSTokenID, deepSeek41PublishedBOSTokenID, deepSeek41PublishedEOSTokenID, model.ErrV41ConfigAdmission)
 	}
 	tokens, ok := f.StringArray("tokenizer.ggml.tokens")
 	if !ok || len(tokens) != deepSeek41PublishedVocabSize {
