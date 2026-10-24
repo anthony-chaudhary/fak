@@ -480,6 +480,9 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if len(eng.LayerIDs) > 0 && eng.MaxNgramSize > 1 {
 		eng.NHeads = max(eng.NHeads, len(eng.Primes)/(len(eng.LayerIDs)*(eng.MaxNgramSize-1)))
 	}
+	if err := validateDeepSeek41PublishedTokenizer(f, cfg, eng); err != nil {
+		return err
+	}
 	if err := validateDeepSeek41Engram(f, p, cfg, eng); err != nil {
 		return err
 	}
