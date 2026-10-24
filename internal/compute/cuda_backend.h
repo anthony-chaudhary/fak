@@ -258,6 +258,15 @@ int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int ou
  * — the weight is the narrow operand. F32 accumulate/output. in must be divisible by block. */
 void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales, const float *dX, float *dY,
                            int out, int in, int P, int block);
+/* NVFP4 W4A16 correctness baseline. dPayload is NewNVFP4's packed row-major E2M1 bytes
+ * [out,in/2], immediately followed by raw E4M3FN scales [out,in/16]. F32 activations are
+ * rounded to BF16 RNE in-kernel; products/additions are serial FP32 without FMA, and the
+ * tensor scale is multiplied once per output after the K reduction. Activations are required
+ * to be finite and remain finite after BF16 RNE; this asynchronous ABI does not scan device
+ * data. The weight remains packed in device memory. Returns 0 or a positive cudaError_t from
+ * launch validation. */
+int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX, float *dY,
+                          int out, int in, int P, float globalScale);
 void fcuda_q5k_matmul_f32(const uint8_t *dQ5K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int out, int in, int P);
 

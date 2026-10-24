@@ -16,15 +16,40 @@ import (
 // Qwen38CUDADirectSwapReceiptSchema identifies the official Qwen3.8 CUDA Direct swap receipt schema.
 const Qwen38CUDADirectSwapReceiptSchema = "fak.modelengine.qwen38-cudadirect-swap/1"
 
+// Provenance labels for cuda-gpudirect reports and the devices they describe.
+const (
+	cudaProvenanceObserved  = "OBSERVED"
+	cudaProvenanceSimulated = "SIMULATED"
+	// cudaRepresentativeSource marks a device taken from the representative
+	// desktop profile because discovery observed none.
+	cudaRepresentativeSource = "representative_profile"
+	cudaHostNotObserved      = "not_observed"
+)
+
 // HostTopologyInfo holds host platform specifications for the representative or probed workstation.
+// Source is "representative_profile" for the simulated reference desktop and
+// "not_observed" when inspect has no host evidence (fields then stay empty).
 type HostTopologyInfo struct {
 	CPU         string `json:"cpu"`
 	Motherboard string `json:"motherboard"`
 	RAM         string `json:"ram"`
+	Source      string `json:"source,omitempty"`
+}
+
+// CUDADiscoverySummary is the typed discovery outcome carried by inspect and audit.
+type CUDADiscoverySummary struct {
+	Status    compute.CUDADiscoveryStatus  `json:"status"`
+	Method    string                       `json:"method,omitempty"`
+	SysfsRoot string                       `json:"sysfs_root,omitempty"`
+	Error     string                       `json:"error,omitempty"`
+	Issues    []compute.CUDADiscoveryIssue `json:"issues,omitempty"`
 }
 
 // CUDAInspectOutput contains the full discovered CUDA GPU, NVMe storage, and PCIe topology details.
+// Every device in it was observed; nothing is filled from the representative profile.
 type CUDAInspectOutput struct {
+	Provenance  string                    `json:"provenance"`
+	Discovery   CUDADiscoverySummary      `json:"discovery"`
 	Host        HostTopologyInfo          `json:"host"`
 	GPUs        []compute.CUDADeviceNode  `json:"gpus"`
 	NVMeDevices []compute.NVMeStorageNode `json:"nvme_devices"`
@@ -42,15 +67,22 @@ type CUDAAuditCheck struct {
 
 // CUDAHardwareAuditReport aggregates system configuration checks for CUDA GPU Direct and BaM P2PDMA.
 type CUDAHardwareAuditReport struct {
-	Healthy          bool             `json:"healthy"`
-	Verdict          string           `json:"verdict"` // PASS, WARN, or FAIL
-	Host             HostTopologyInfo `json:"host"`
-	Checks           []CUDAAuditCheck `json:"checks"`
-	RemediationSteps []string         `json:"remediation_steps,omitempty"`
+	Healthy          bool                 `json:"healthy"`
+	Verdict          string               `json:"verdict"` // PASS, WARN, or FAIL
+	Discovery        CUDADiscoverySummary `json:"discovery"`
+	Host             HostTopologyInfo     `json:"host"`
+	Checks           []CUDAAuditCheck     `json:"checks"`
+	RemediationSteps []string             `json:"remediation_steps,omitempty"`
 }
 
 // CUDABaMBenchResult captures performance and invariant verification metrics for direct NVMe P2PDMA.
+// Provenance is always SIMULATED: the queue runs in host memory and throughput/IOPS
+// are modeled constants. DeviceSource/StorageSource say whether the named device
+// was observed or taken from the representative profile.
 type CUDABaMBenchResult struct {
+	Provenance        string  `json:"provenance"`
+	DeviceSource      string  `json:"device_source"`
+	StorageSource     string  `json:"storage_source"`
 	Device            string  `json:"device"`
 	Storage           string  `json:"storage"`
 	RouteKind         string  `json:"route_kind"`
@@ -72,6 +104,7 @@ type Qwen38CUDADirectSwapReceipt struct {
 	Verdict                string                           `json:"verdict"`
 	Model                  string                           `json:"model"`
 	Architecture           string                           `json:"architecture"`
+	DeviceSource           string                           `json:"device_source,omitempty"`
 	StagingCopyCount       int                              `json:"staging_copy_count"`
 	BytesMoved             uint64                           `json:"bytes_moved"`
 	DirectDMABandwidthGBps float64                          `json:"direct_dma_bandwidth_gbps"`
@@ -84,13 +117,17 @@ type Qwen38CUDADirectSwapReceipt struct {
 	Evidence               []string                         `json:"evidence"`
 }
 
-var defaultHostTopology = HostTopologyInfo{
+// representativeHostTopology, representativeCUDAGPU and representativeNVMeStorage
+// describe the reference desktop the simulated bench and qwen38 modes model when
+// no device was observed. inspect and audit never report them as discovered.
+var representativeHostTopology = HostTopologyInfo{
 	CPU:         "AMD Ryzen 9 5950X (Zen 3, 16c/32t)",
 	Motherboard: "Gigabyte X570 Aorus Elite WiFi",
 	RAM:         "128GB DDR4",
+	Source:      cudaRepresentativeSource,
 }
 
-var defaultCUDAGPU = compute.CUDADeviceNode{
+var representativeCUDAGPU = compute.CUDADeviceNode{
 	PCIAddress:       "0000:09:00.0",
 	DeviceName:       "NVIDIA GeForce RTX 5090 FE",
 	Arch:             "sm_120",
@@ -99,41 +136,99 @@ var defaultCUDAGPU = compute.CUDADeviceNode{
 	ReBAREnabled:     true,
 	UpstreamRootPort: "0000:00:01.1",
 	NUMANode:         0,
+	Source:           cudaRepresentativeSource,
 }
 
-var defaultNVMeStorage = compute.NVMeStorageNode{
+var representativeNVMeStorage = compute.NVMeStorageNode{
 	PCIAddress:       "0000:01:00.0",
 	Model:            "Samsung SSD 990 PRO 2TB",
 	SlotType:         compute.NVMeSlotM2ACPU,
 	UpstreamRootPort: "0000:00:01.2",
 	PeakReadGBps:     7.45,
 	NUMANode:         0,
+	Source:           cudaRepresentativeSource,
 }
 
-func probeOrPopulateCUDATopology(sysfsRoot string) *compute.CUDAPCIeTopologyDiscovery {
-	disco := compute.NewCUDAPCIeTopologyDiscovery(sysfsRoot)
-	if sysfsRoot != "" && sysfsRoot != "/sys" {
-		_ = disco.DiscoverLinuxSysfs(sysfsRoot)
-	} else if runtime.GOOS == "linux" {
-		_ = disco.Discover()
-	}
+// unobservedHost is the inspect/audit host record: no host evidence is collected,
+// so every field stays empty rather than naming the representative desktop.
+var unobservedHost = HostTopologyInfo{Source: cudaHostNotObserved}
 
-	if len(disco.GPUs) == 0 {
-		disco.GPUs = append(disco.GPUs, defaultCUDAGPU)
-		hasDefaultNVMe := false
-		for _, n := range disco.NVMeDevices {
-			if n.Model == defaultNVMeStorage.Model {
-				hasDefaultNVMe = true
-				break
-			}
-		}
-		if !hasDefaultNVMe {
-			disco.NVMeDevices = append(disco.NVMeDevices, defaultNVMeStorage)
-		}
-	} else if len(disco.NVMeDevices) == 0 {
-		disco.NVMeDevices = append(disco.NVMeDevices, defaultNVMeStorage)
+// discoverCUDATopology runs the platform discovery for sysfsRoot. The default
+// "/sys" off Linux selects the platform's own method (WMI on Windows). Nothing
+// is substituted when discovery finds no device; the typed status says why.
+func discoverCUDATopology(sysfsRoot string) (*compute.CUDAPCIeTopologyDiscovery, error) {
+	if sysfsRoot == "/sys" && runtime.GOOS != "linux" {
+		sysfsRoot = ""
 	}
-	return disco
+	disco := compute.NewCUDAPCIeTopologyDiscovery(sysfsRoot)
+	err := disco.Discover()
+	return disco, err
+}
+
+func cudaDiscoverySummary(disco *compute.CUDAPCIeTopologyDiscovery, err error) CUDADiscoverySummary {
+	sum := CUDADiscoverySummary{
+		Status:    disco.Status,
+		Method:    disco.Method,
+		SysfsRoot: disco.SysfsRoot,
+		Issues:    disco.Issues,
+	}
+	if err != nil {
+		sum.Error = err.Error()
+	}
+	return sum
+}
+
+// cudaDiscoveryFailed reports a status under which no device claim can be made.
+func cudaDiscoveryFailed(status compute.CUDADiscoveryStatus) bool {
+	return status == compute.CUDADiscoveryError || status == compute.CUDADiscoveryUnsupported
+}
+
+// simulationGPU returns the first observed GPU, or the representative profile
+// (labelled as such) for the simulated bench/qwen38 modes.
+func simulationGPU(disco *compute.CUDAPCIeTopologyDiscovery) (compute.CUDADeviceNode, string) {
+	if len(disco.GPUs) > 0 {
+		return disco.GPUs[0], "observed:" + disco.GPUs[0].Source
+	}
+	return representativeCUDAGPU, cudaRepresentativeSource
+}
+
+// simulationNVMe mirrors simulationGPU for the storage device.
+func simulationNVMe(disco *compute.CUDAPCIeTopologyDiscovery) (compute.NVMeStorageNode, string) {
+	if len(disco.NVMeDevices) > 0 {
+		return disco.NVMeDevices[0], "observed:" + disco.NVMeDevices[0].Source
+	}
+	return representativeNVMeStorage, cudaRepresentativeSource
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
+}
+
+func cudaGPUDisplayName(g compute.CUDADeviceNode) string {
+	if g.DeviceName != "" {
+		return g.DeviceName
+	}
+	if g.DeviceID != "" {
+		return "NVIDIA PCI device " + g.DeviceID
+	}
+	return "NVIDIA GPU (name not observed)"
+}
+
+func cudaGiB(b uint64) string {
+	if b == 0 {
+		return "unknown"
+	}
+	return fmt.Sprintf("%.1f GiB", float64(b)/(1024*1024*1024))
+}
+
+func cudaNUMA(n int) string {
+	if n < 0 {
+		return "unknown"
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 // RunCUDAGPUDirect coordinates CUDA GPU Direct topology inspection, hardware audit, BaM microbenchmarks, and Qwen 3.8 simulations.
@@ -164,36 +259,70 @@ func RunCUDAGPUDirect(stdout, stderr io.Writer, argv []string) int {
 		sub = fs.Arg(0)
 	}
 
-	disco := probeOrPopulateCUDATopology(*sysfsRoot)
-
 	switch strings.ToLower(sub) {
-	case "inspect":
-		return runCUDAInspect(stdout, stderr, disco, *jsonOut)
-	case "audit":
-		return runCUDAAudit(stdout, stderr, disco, *jsonOut)
-	case "bench":
-		return runCUDABench(stdout, stderr, disco, *jsonOut)
-	case "qwen38", "qwen38-bench", "qwen38-sim":
-		return runCUDA_Qwen38Bench(stdout, stderr, disco, *jsonOut)
+	case "inspect", "audit", "bench", "qwen38", "qwen38-bench", "qwen38-sim":
 	default:
 		fmt.Fprintf(stderr, "fak cuda-gpudirect: unknown mode %q (supported: inspect, audit, bench, qwen38)\n", sub)
 		return 2
 	}
+
+	switch strings.ToLower(sub) {
+	case "inspect", "audit":
+		disco, discoErr := discoverCUDATopology(*sysfsRoot)
+		summary := cudaDiscoverySummary(disco, discoErr)
+		if strings.ToLower(sub) == "inspect" {
+			return runCUDAInspect(stdout, stderr, disco, summary, *jsonOut)
+		}
+		return runCUDAAudit(stdout, stderr, disco, summary, *jsonOut)
+	}
+
+	// The simulated modes keep their original discovery scope (Linux sysfs or
+	// an explicit --sysfs root) so their output does not depend on a host WMI
+	// query; with nothing observed they model the labelled representative.
+	disco := compute.NewCUDAPCIeTopologyDiscovery(*sysfsRoot)
+	if *sysfsRoot != "/sys" || runtime.GOOS == "linux" {
+		_ = disco.Discover()
+	}
+	if strings.ToLower(sub) == "bench" {
+		return runCUDABench(stdout, stderr, disco, *jsonOut)
+	}
+	return runCUDA_Qwen38Bench(stdout, stderr, disco, *jsonOut)
 }
 
-func runCUDAInspect(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDiscovery, jsonOut bool) int {
-	routes := disco.EvaluateAllRoutes()
-	acsStatus := "Direct P2P Permitted (No ACS redirection stall risk detected on primary route)"
+// cudaACSStatus summarises the evaluated routes without claiming a route that
+// was not evaluated or could not be classified.
+func cudaACSStatus(routes []compute.P2PRouteVerdict) string {
+	if len(routes) == 0 {
+		return "Not evaluated: no observed GPU and NVMe device pair"
+	}
+	unknown := false
 	for _, r := range routes {
 		if r.ACSStallRisk {
-			acsStatus = "ACS Stall Risk Detected on one or more interconnect routes (traffic loopback required)"
-			break
+			return "ACS Stall Risk Detected on one or more interconnect routes (traffic loopback required)"
 		}
+		if r.RouteKind == compute.RouteUnknown {
+			unknown = true
+		}
+	}
+	if unknown {
+		return "Unknown: one or more routes lack observed root-port topology"
+	}
+	return "Direct P2P Permitted (No ACS redirection stall risk detected on primary route)"
+}
+
+func runCUDAInspect(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDiscovery, summary CUDADiscoverySummary, jsonOut bool) int {
+	routes := disco.EvaluateAllRoutes()
+	acsStatus := cudaACSStatus(routes)
+	code := 0
+	if cudaDiscoveryFailed(summary.Status) {
+		code = 1
 	}
 
 	if jsonOut {
 		payload := CUDAInspectOutput{
-			Host:        defaultHostTopology,
+			Provenance:  cudaProvenanceObserved,
+			Discovery:   summary,
+			Host:        unobservedHost,
 			GPUs:        disco.GPUs,
 			NVMeDevices: disco.NVMeDevices,
 			Routes:      routes,
@@ -201,24 +330,35 @@ func runCUDAInspect(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDis
 		}
 		data, _ := json.MarshalIndent(payload, "", "  ")
 		fmt.Fprintln(stdout, string(data))
-		return 0
+		return code
 	}
 
 	fmt.Fprintln(stdout, "CUDA GPU Direct Topology & Interconnect Prober:")
-	fmt.Fprintf(stdout, "  Host CPU:            %s\n", defaultHostTopology.CPU)
-	fmt.Fprintf(stdout, "  Motherboard:         %s\n", defaultHostTopology.Motherboard)
-	fmt.Fprintf(stdout, "  Host Memory:         %s\n", defaultHostTopology.RAM)
+	fmt.Fprintf(stdout, "  Discovery:           %s (method: %s)\n", summary.Status, orUnknown(summary.Method))
+	if summary.Error != "" {
+		fmt.Fprintf(stdout, "  Discovery Error:     %s\n", summary.Error)
+	}
+	for _, is := range summary.Issues {
+		fmt.Fprintf(stdout, "    read error: %s: %s\n", is.Path, is.Error)
+	}
+	fmt.Fprintln(stdout, "  Host:                not observed (inspect reports devices only)")
 	fmt.Fprintf(stdout, "  CUDA Devices (%d discovered):\n", len(disco.GPUs))
 	for i, g := range disco.GPUs {
-		vramGiB := float64(g.TotalVRAMBytes) / (1024 * 1024 * 1024)
-		barGiB := float64(g.BAR1SizeBytes) / (1024 * 1024 * 1024)
-		barStatus := "Large BAR (ReBAR enabled)"
-		if !g.ReBAREnabled || g.BAR1SizeBytes < g.TotalVRAMBytes {
-			barStatus = "SMALL BAR (256MB clamped, degraded)"
+		barStatus := "ReBAR state unknown (BAR1 and VRAM not both observed)"
+		if compute.CUDAReBARKnown(g) {
+			barStatus = "Large BAR (ReBAR enabled)"
+			if !g.ReBAREnabled || g.BAR1SizeBytes < g.TotalVRAMBytes {
+				barStatus = "SMALL BAR (degraded)"
+			}
 		}
-		fmt.Fprintf(stdout, "    GPU %d: %s [%s] BDF=%s VRAM=%.1f GiB BAR1=%.1f GiB (%s)\n",
-			i, g.DeviceName, g.Arch, g.PCIAddress, vramGiB, barGiB, barStatus)
-		fmt.Fprintf(stdout, "           Upstream Root Port: %s | NUMA Node: %d\n", g.UpstreamRootPort, g.NUMANode)
+		fmt.Fprintf(stdout, "    GPU %d: %s [%s] BDF=%s VRAM=%s BAR1=%s (%s)\n",
+			i, cudaGPUDisplayName(g), orUnknown(g.Arch), orUnknown(g.PCIAddress), cudaGiB(g.TotalVRAMBytes), cudaGiB(g.BAR1SizeBytes), barStatus)
+		fmt.Fprintf(stdout, "           Upstream Root Port: %s | NUMA Node: %s | Link: %s x%s (max %s x%s)\n",
+			orUnknown(g.UpstreamRootPort), cudaNUMA(g.NUMANode),
+			orUnknown(g.CurrentLinkSpeed), orUnknown(g.CurrentLinkWidth), orUnknown(g.MaxLinkSpeed), orUnknown(g.MaxLinkWidth))
+		if len(g.UnknownFields) > 0 {
+			fmt.Fprintf(stdout, "           Not observed: %s\n", strings.Join(g.UnknownFields, ", "))
+		}
 	}
 
 	fmt.Fprintf(stdout, "  NVMe Storage Devices (%d discovered):\n", len(disco.NVMeDevices))
@@ -229,9 +369,16 @@ func runCUDAInspect(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDis
 		} else if n.SlotType == compute.NVMeSlotM2BSB {
 			slotDesc = "M2B_SB (Chipset / Southbridge downlink)"
 		}
-		fmt.Fprintf(stdout, "    NVMe %d: %s BDF=%s Slot=%s PeakRead=%.2f GB/s\n",
-			i, n.Model, n.PCIAddress, slotDesc, n.PeakReadGBps)
-		fmt.Fprintf(stdout, "            Upstream Root Port: %s | NUMA Node: %d\n", n.UpstreamRootPort, n.NUMANode)
+		peak := "unknown"
+		if n.PeakReadGBps > 0 {
+			peak = fmt.Sprintf("%.2f GB/s", n.PeakReadGBps)
+		}
+		fmt.Fprintf(stdout, "    NVMe %d: %s BDF=%s Slot=%s PeakRead=%s\n",
+			i, orUnknown(n.Model), orUnknown(n.PCIAddress), slotDesc, peak)
+		fmt.Fprintf(stdout, "            Upstream Root Port: %s | NUMA Node: %s\n", orUnknown(n.UpstreamRootPort), cudaNUMA(n.NUMANode))
+		if len(n.UnknownFields) > 0 {
+			fmt.Fprintf(stdout, "            Not observed: %s\n", strings.Join(n.UnknownFields, ", "))
+		}
 	}
 
 	fmt.Fprintf(stdout, "  PCIe P2P Interconnect Routes (%d evaluated):\n", len(routes))
@@ -242,47 +389,85 @@ func runCUDAInspect(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDis
 		}
 		rebarNote := "ReBAR compliant"
 		if !r.ReBARCompliant {
-			rebarNote = "Small BAR bottleneck"
+			rebarNote = "ReBAR not established"
 		}
-		fmt.Fprintf(stdout, "    Route %d: %s | Optimal: %v | Latency: ~%d ns | Max BW: %.1f GB/s\n",
-			i, r.RouteKind, r.IsOptimal, r.LatencyEstimateNs, r.MaxBandwidthGBps)
+		estimate := "no estimate"
+		if r.EstimateSource != "" {
+			estimate = fmt.Sprintf("Latency: ~%d ns | Max BW: %.1f GB/s (%s estimate)", r.LatencyEstimateNs, r.MaxBandwidthGBps, r.EstimateSource)
+		}
+		fmt.Fprintf(stdout, "    Route %d: %s | Optimal: %v | %s\n", i, r.RouteKind, r.IsOptimal, estimate)
 		fmt.Fprintf(stdout, "             ACS Status: %s | %s\n", acsNote, rebarNote)
 		for _, note := range r.DiagnosticNotes {
 			fmt.Fprintf(stdout, "             - %s\n", note)
 		}
 	}
 	fmt.Fprintf(stdout, "  Summary ACS Status: %s\n", acsStatus)
-	return 0
+	return code
 }
 
-func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDiscovery, jsonOut bool) int {
-	gpu := defaultCUDAGPU
-	if len(disco.GPUs) > 0 {
-		gpu = disco.GPUs[0]
+func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDiscovery, summary CUDADiscoverySummary, jsonOut bool) int {
+	if len(disco.GPUs) == 0 {
+		// Auditing the representative desktop would report a healthy host that
+		// was never observed; fail with the typed discovery outcome instead.
+		detail := fmt.Sprintf("No NVIDIA GPU observed (discovery status: %s).", summary.Status)
+		if summary.Error != "" {
+			detail += " " + summary.Error
+		}
+		return emitCUDAAudit(stdout, CUDAHardwareAuditReport{
+			Healthy:   false,
+			Verdict:   "FAIL",
+			Discovery: summary,
+			Host:      unobservedHost,
+			Checks: []CUDAAuditCheck{{
+				Name:        "CUDA device discovery",
+				Status:      "FAIL",
+				Detail:      detail,
+				Remediation: "Run on the CUDA host itself, or pass --sysfs <root> pointing at its sysfs tree.",
+			}},
+		}, jsonOut)
 	}
-	nvme := defaultNVMeStorage
+	gpu := disco.GPUs[0]
+	var nvmeFound bool
+	var nvme compute.NVMeStorageNode
 	if len(disco.NVMeDevices) > 0 {
-		nvme = disco.NVMeDevices[0]
+		nvme, nvmeFound = disco.NVMeDevices[0], true
 	}
 	verdict := compute.EvaluateP2PRoute(gpu, nvme)
 
 	checks := make([]CUDAAuditCheck, 0, 5)
 	var remediations []string
 
-	// Check 1: Above 4G Decoding
-	checks = append(checks, CUDAAuditCheck{
-		Name:        "Above 4G Decoding",
-		Status:      "PASS",
-		Detail:      "Required 64-bit PCIe MMIO aperture enabled above 4GB physical memory boundary.",
-		Remediation: "Ensure 'Above 4G Decoding' is Enabled in Motherboard BIOS (Settings -> IO Ports).",
-	})
+	// Check 1: Above 4G Decoding — a BAR1 of 4 GiB or more cannot be mapped
+	// below the 4 GiB boundary, so its presence witnesses the setting.
+	if gpu.BAR1SizeBytes >= 4*1024*1024*1024 {
+		checks = append(checks, CUDAAuditCheck{
+			Name:        "Above 4G Decoding",
+			Status:      "PASS",
+			Detail:      fmt.Sprintf("BAR1 of %d MiB is mapped, which requires 64-bit MMIO above the 4 GiB boundary.", gpu.BAR1SizeBytes/(1024*1024)),
+			Remediation: "None.",
+		})
+	} else {
+		checks = append(checks, CUDAAuditCheck{
+			Name:        "Above 4G Decoding",
+			Status:      "WARN",
+			Detail:      "Not observed: no BAR1 of 4 GiB or more was read for this GPU.",
+			Remediation: "Ensure 'Above 4G Decoding' is Enabled in Motherboard BIOS (Settings -> IO Ports).",
+		})
+	}
 
 	// Check 2: Resizable BAR (ReBAR)
-	if gpu.ReBAREnabled && gpu.BAR1SizeBytes >= gpu.TotalVRAMBytes && gpu.TotalVRAMBytes > 0 {
+	if !compute.CUDAReBARKnown(gpu) {
+		checks = append(checks, CUDAAuditCheck{
+			Name:        "Resizable BAR (ReBAR)",
+			Status:      "WARN",
+			Detail:      fmt.Sprintf("ReBAR state unknown: BAR1 and VRAM size not both observed (BAR1: %d MiB, VRAM: %d MiB).", gpu.BAR1SizeBytes/(1024*1024), gpu.TotalVRAMBytes/(1024*1024)),
+			Remediation: "Compare BAR1 against the VRAM size reported by the NVIDIA driver on the host.",
+		})
+	} else if gpu.ReBAREnabled && gpu.BAR1SizeBytes >= gpu.TotalVRAMBytes && gpu.TotalVRAMBytes > 0 {
 		checks = append(checks, CUDAAuditCheck{
 			Name:        "Resizable BAR (ReBAR)",
 			Status:      "PASS",
-			Detail:      fmt.Sprintf("Full 32GB BAR1 aperture active (BAR1: %d GiB, VRAM: %d GiB).", gpu.BAR1SizeBytes/(1024*1024*1024), gpu.TotalVRAMBytes/(1024*1024*1024)),
+			Detail:      fmt.Sprintf("Full BAR1 aperture active (BAR1: %d GiB, VRAM: %d GiB).", gpu.BAR1SizeBytes/(1024*1024*1024), gpu.TotalVRAMBytes/(1024*1024*1024)),
 			Remediation: "None (ReBAR fully operational).",
 		})
 	} else {
@@ -295,20 +480,27 @@ func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 		remediations = append(remediations, "Enable 'Re-Size BAR Support' in BIOS: Settings -> IO Ports -> Re-Size BAR Support -> Auto/Enabled.")
 	}
 
-	// Check 3: PCIe Ten Bit Tag Support
+	// Check 3: PCIe Ten Bit Tag Support (device capability registers are not read)
 	checks = append(checks, CUDAAuditCheck{
 		Name:        "PCIe Ten Bit Tag",
-		Status:      "PASS",
-		Detail:      "PCIe 10-bit Tag completer enabled on Zen 3 root complex for up to 768 non-posted outbound transactions.",
-		Remediation: "Enable 'PCIe Ten Bit Tag Support' in AMD CBS -> NBIO Common Options.",
+		Status:      "WARN",
+		Detail:      "Not observed: 10-bit tag capability is not read by this audit.",
+		Remediation: "Check 'lspci -vvv' DevCap2/DevCtl2 10BitTag on the GPU and root port; enable it in firmware if supported.",
 	})
 
 	// Check 4: IOMMU / Access Control Services (ACS)
-	if !verdict.ACSStallRisk && verdict.RouteKind == compute.RouteDirectCPURootComplex {
+	if !nvmeFound || verdict.RouteKind == compute.RouteUnknown {
 		checks = append(checks, CUDAAuditCheck{
 			Name:        "IOMMU / ACS",
-			Status:      "PASS",
-			Detail:      "Direct CPU Root Complex interconnect route: P2P DMA traffic permitted without ACS redirection stalls.",
+			Status:      "WARN",
+			Detail:      "P2P route not adjudicated: no observed NVMe device, or its CPU vs chipset attachment is not determinable from the observed topology.",
+			Remediation: "Inspect the GPU and NVMe PCIe ancestry with 'cuda-gpudirect inspect' on the host.",
+		})
+	} else if !verdict.ACSStallRisk && verdict.RouteKind == compute.RouteDirectCPURootComplex {
+		checks = append(checks, CUDAAuditCheck{
+			Name:        "IOMMU / ACS",
+			Status:      "WARN",
+			Detail:      "Route classified DIRECT_CPU_ROOT_COMPLEX from the declared slot; ACS control registers are not read, so redirection is not verified.",
 			Remediation: "Keep NVMe drive installed in M2A_CPU slot to bypass chipset ACS downstream redirection.",
 		})
 	} else if verdict.ACSStallRisk {
@@ -322,14 +514,21 @@ func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 	} else {
 		checks = append(checks, CUDAAuditCheck{
 			Name:        "IOMMU / ACS",
-			Status:      "PASS",
-			Detail:      "ACS configuration verified.",
-			Remediation: "None.",
+			Status:      "WARN",
+			Detail:      fmt.Sprintf("Route %s; ACS control registers are not read.", verdict.RouteKind),
+			Remediation: "Check 'lspci -vvv' ACSCtl on the root ports between the GPU and NVMe device.",
 		})
 	}
 
 	// Check 5: NVIDIA Driver NVreg_EnableResizableBar=1
-	if gpu.ReBAREnabled {
+	if !compute.CUDAReBARKnown(gpu) {
+		checks = append(checks, CUDAAuditCheck{
+			Name:        "NVreg_EnableResizableBar=1",
+			Status:      "WARN",
+			Detail:      "Large BAR1 mapping not established: BAR1 and VRAM size not both observed.",
+			Remediation: "Confirm 'options nvidia NVreg_EnableResizableBar=1' and compare BAR1 with driver-reported VRAM.",
+		})
+	} else if gpu.ReBAREnabled {
 		checks = append(checks, CUDAAuditCheck{
 			Name:        "NVreg_EnableResizableBar=1",
 			Status:      "PASS",
@@ -358,14 +557,18 @@ func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 		}
 	}
 
-	report := CUDAHardwareAuditReport{
+	return emitCUDAAudit(stdout, CUDAHardwareAuditReport{
 		Healthy:          healthy,
 		Verdict:          overallVerdict,
-		Host:             defaultHostTopology,
+		Discovery:        summary,
+		Host:             unobservedHost,
 		Checks:           checks,
 		RemediationSteps: remediations,
-	}
+	}, jsonOut)
+}
 
+func emitCUDAAudit(stdout io.Writer, report CUDAHardwareAuditReport, jsonOut bool) int {
+	healthy := report.Healthy
 	if jsonOut {
 		data, _ := json.MarshalIndent(report, "", "  ")
 		fmt.Fprintln(stdout, string(data))
@@ -377,20 +580,19 @@ func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 
 	fmt.Fprintln(stdout, "CUDA GPU Direct & BaM P2PDMA Hardware Audit:")
 	fmt.Fprintf(stdout, "  Healthy:             %v (Verdict: %s)\n", report.Healthy, report.Verdict)
-	fmt.Fprintf(stdout, "  Host CPU:            %s\n", defaultHostTopology.CPU)
-	fmt.Fprintf(stdout, "  Motherboard:         %s\n", defaultHostTopology.Motherboard)
-	fmt.Fprintf(stdout, "  Host Memory:         %s\n", defaultHostTopology.RAM)
+	fmt.Fprintf(stdout, "  Discovery:           %s (method: %s)\n", report.Discovery.Status, orUnknown(report.Discovery.Method))
+	fmt.Fprintln(stdout, "  Host:                not observed")
 	fmt.Fprintln(stdout, "  System Settings & Verification Checks:")
-	for _, c := range checks {
+	for _, c := range report.Checks {
 		fmt.Fprintf(stdout, "    [%s] %-26s : %s\n", c.Status, c.Name, c.Detail)
 		if c.Status != "PASS" && c.Remediation != "" {
 			fmt.Fprintf(stdout, "           Remediation: %s\n", c.Remediation)
 		}
 	}
 
-	if len(remediations) > 0 {
-		fmt.Fprintf(stdout, "  Remediation Steps (%d):\n", len(remediations))
-		for i, step := range remediations {
+	if len(report.RemediationSteps) > 0 {
+		fmt.Fprintf(stdout, "  Remediation Steps (%d):\n", len(report.RemediationSteps))
+		for i, step := range report.RemediationSteps {
 			fmt.Fprintf(stdout, "    %d. %s\n", i+1, step)
 		}
 	}
@@ -402,14 +604,8 @@ func runCUDAAudit(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 }
 
 func runCUDABench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDiscovery, jsonOut bool) int {
-	gpu := defaultCUDAGPU
-	if len(disco.GPUs) > 0 {
-		gpu = disco.GPUs[0]
-	}
-	nvme := defaultNVMeStorage
-	if len(disco.NVMeDevices) > 0 {
-		nvme = disco.NVMeDevices[0]
-	}
+	gpu, gpuSource := simulationGPU(disco)
+	nvme, nvmeSource := simulationNVMe(disco)
 	verdict := compute.EvaluateP2PRoute(gpu, nvme)
 
 	const totalBlocks = 1024
@@ -477,8 +673,11 @@ func runCUDABench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 	iops := 118720.0
 
 	res := CUDABaMBenchResult{
-		Device:            fmt.Sprintf("%s (%s)", gpu.DeviceName, gpu.Arch),
-		Storage:           fmt.Sprintf("%s (%s)", nvme.Model, nvme.SlotType),
+		Provenance:        cudaProvenanceSimulated,
+		DeviceSource:      gpuSource,
+		StorageSource:     nvmeSource,
+		Device:            fmt.Sprintf("%s (%s)", cudaGPUDisplayName(gpu), orUnknown(gpu.Arch)),
+		Storage:           fmt.Sprintf("%s (%s)", orUnknown(nvme.Model), nvme.SlotType),
 		RouteKind:         string(verdict.RouteKind),
 		QueueArchitecture: "CUDA BaM VRAM Submission/Completion Queues (ASPLOS 2023)",
 		TotalBytesMoved:   totalBytes,
@@ -498,8 +697,9 @@ func runCUDABench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 	}
 
 	fmt.Fprintln(stdout, "CUDA BaM NVMe P2PDMA Zero-Copy Microbenchmark Results:")
-	fmt.Fprintf(stdout, "  Device:               %s\n", res.Device)
-	fmt.Fprintf(stdout, "  Storage Device:       %s\n", res.Storage)
+	fmt.Fprintf(stdout, "  Provenance:           %s (host-memory queue model; throughput and IOPS are modeled, not measured)\n", res.Provenance)
+	fmt.Fprintf(stdout, "  Device:               %s [%s]\n", res.Device, res.DeviceSource)
+	fmt.Fprintf(stdout, "  Storage Device:       %s [%s]\n", res.Storage, res.StorageSource)
 	fmt.Fprintf(stdout, "  Route Interconnect:   %s (PCIe Root Complex)\n", res.RouteKind)
 	fmt.Fprintf(stdout, "  Queue Architecture:   %s\n", res.QueueArchitecture)
 	fmt.Fprintf(stdout, "  Commands Executed:    %d (16 Reads, 16 Writes)\n", res.CommandsExecuted)
@@ -513,10 +713,7 @@ func runCUDABench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDisco
 }
 
 func runCUDA_Qwen38Bench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopologyDiscovery, jsonOut bool) int {
-	gpu := defaultCUDAGPU
-	if len(disco.GPUs) > 0 {
-		gpu = disco.GPUs[0]
-	}
+	gpu, gpuSource := simulationGPU(disco)
 
 	coord27b, err := model.NewBlackwellModelCoordinator(model.ModelArchQwen38_27B, nil, nil)
 	if err != nil {
@@ -622,7 +819,7 @@ func runCUDA_Qwen38Bench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopolo
 		"Direct CPU Root Complex P2P route verified (7.1 GB/s sustained throughput)",
 	}
 
-	archName := fmt.Sprintf("%s (%s)", gpu.Arch, gpu.DeviceName)
+	archName := fmt.Sprintf("%s (%s)", orUnknown(gpu.Arch), cudaGPUDisplayName(gpu))
 
 	receipt := Qwen38CUDADirectSwapReceipt{
 		Schema:                 Qwen38CUDADirectSwapReceiptSchema,
@@ -630,6 +827,7 @@ func runCUDA_Qwen38Bench(stdout, stderr io.Writer, disco *compute.CUDAPCIeTopolo
 		Verdict:                "PASS",
 		Model:                  "Qwen3.8 (27B & Flash Next)",
 		Architecture:           archName,
+		DeviceSource:           gpuSource,
 		StagingCopyCount:       armNative.StagingCopyCount,
 		BytesMoved:             bytesMoved,
 		DirectDMABandwidthGBps: armNative.BandwidthGBps,

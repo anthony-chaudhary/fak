@@ -408,6 +408,17 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 			Class: class,
 		})
 	}
+	if t.Dtype == NVFP4 {
+		if as != NVFP4 || class != MemoryWeights {
+			panic(&CUDAOpError{
+				Op:    "Upload",
+				Site:  site,
+				Msg:   "cuda packed NVFP4 upload requires matching resident dtype and weight memory class",
+				Class: class,
+			})
+		}
+		return c.uploadNVFP4(t, hb)
+	}
 	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K {
 		if as != t.Dtype {
 			panic(&CUDAOpError{
@@ -502,6 +513,25 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 			uploadCache[ucKey{hp, F32, t.Layout}] = out
 		}
 	}
+	return out
+}
+
+// uploadNVFP4 copies NewNVFP4's owned payload resident without widening it: packed E2M1
+// bytes first, followed immediately by the raw E4M3FN block-scale bytes. Keeping the two
+// regions in one allocation lets Free/CloneTensor use their ordinary single-buffer paths.
+// NVFP4 deliberately does not share uploadCache entries: Tensor has no buffer refcount, so
+// two Upload results must own distinct allocations that either caller may safely Free.
+func (c *cudaBackend) uploadNVFP4(t Tensor, hb HostBuffer) Tensor {
+	packed, scales, _ := nvfp4WeightPayload(t)
+	payload := hb.I8()
+	want := len(packed) + len(scales)
+	if len(payload) != want || want <= 0 {
+		panic(fmt.Errorf("%w: invalid packed CUDA upload payload", ErrNVFP4Shape))
+	}
+	buf := c.dallocWeight(want)
+	out := makeTensor(c, NVFP4, RowMajor, append([]int(nil), t.Shape...), cloneQuantSpec(t.Quant), buf)
+	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&payload[0]), C.size_t(want))
+	c.accountImmutableWeightUpload(want, buf)
 	return out
 }
 
@@ -1023,15 +1053,60 @@ func colMajorFlag(w Tensor) C.int {
 }
 
 // SupportsDeviceWeightDtype reports the exact dtype set cudaBackend.MatMul has a case
-// for, matching that switch: F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0 and Q2_K. Every other
+// for, matching that switch: F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K and NVFP4. Every other
 // dtype falls to the switch's CUDAOpError default, so it is reported false here.
 func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 	switch dt {
-	case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K:
+	case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, NVFP4:
 		return true
 	default:
 		return false
 	}
+}
+
+const cudaNVFP4IntMax = int(^uint32(0) >> 1)
+
+// cudaNVFP4Operands validates every host-visible part of the packed W4A16 contract before
+// a pointer crosses the C ABI. Raw E4M3FN bytes were validated by NewNVFP4 and again by
+// uploadNVFP4; after upload they are immutable device memory and need no host readback.
+func (c *cudaBackend) cudaNVFP4Operands(w, x Tensor, rows int, batched bool) (out, in int, global float32) {
+	if w.Dtype != NVFP4 || w.Layout != RowMajor || len(w.Shape) != 2 {
+		panic(fmt.Errorf("%w: CUDA requires a row-major rank-2 NVFP4 weight", ErrNVFP4Shape))
+	}
+	out, in = w.Shape[0], w.Shape[1]
+	weightBytes, scaleBytes, err := nvfp4PayloadShape(w.Shape)
+	if err != nil {
+		panic(err)
+	}
+	q := w.Quant
+	if q == nil || q.Block != NVFP4BlockSize || q.Axis != 2 || q.Bits != 4 ||
+		!q.Symmetric || q.StaticAct || len(q.ZeroPoint) != 0 || len(q.Scale) != 1 {
+		panic(fmt.Errorf("%w: invalid CUDA NVFP4 quantization metadata", ErrNVFP4Scale))
+	}
+	global = q.Scale[0]
+	if !nvfp4Finite(global) || global < 0 {
+		panic(fmt.Errorf("%w: tensor scale must be finite and non-negative", ErrNVFP4Scale))
+	}
+	wb, ok := w.buf.(*cudaBuf)
+	if !ok || wb == nil || wb.ptr == nil || wb.n != weightBytes+scaleBytes || wb.scales != nil {
+		panic(fmt.Errorf("%w: invalid resident CUDA payload", ErrNVFP4Shape))
+	}
+	validShape := !batched && rows == 1 && len(x.Shape) == 1 && x.Shape[0] == in
+	if batched {
+		validShape = rows > 0 && len(x.Shape) == 2 && x.Shape[0] == rows && x.Shape[1] == in
+	}
+	if !validShape || x.Dtype != F32 || x.Layout != RowMajor || x.Quant != nil {
+		panic(fmt.Errorf("%w: CUDA requires matching row-major F32 activations", ErrNVFP4Input))
+	}
+	xb, ok := x.buf.(*cudaBuf)
+	values, valuesOK := fp8Block32Product(rows, in)
+	bytes, bytesOK := fp8Block32Product(values, F32.Bytes())
+	outputs, outputsOK := fp8Block32Product(rows, out)
+	if !ok || xb == nil || xb.ptr == nil || !valuesOK || !bytesOK || !outputsOK || xb.n != bytes ||
+		out > cudaNVFP4IntMax || in > cudaNVFP4IntMax || rows > cudaNVFP4IntMax || outputs > cudaNVFP4IntMax {
+		panic(fmt.Errorf("%w: invalid or unrepresentable CUDA activation payload", ErrNVFP4Input))
+	}
+	return out, in, global
 }
 
 // MatMul computes y = x @ Wᵀ as a decode GEMV (P=1), dispatching on the weight dtype to the
@@ -1050,7 +1125,13 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
-	out, in := w.Shape[0], w.Shape[1]
+	var out, in int
+	var nvfp4Global float32
+	if w.Dtype == NVFP4 {
+		out, in, nvfp4Global = c.cudaNVFP4Operands(w, x, 1, false)
+	} else {
+		out, in = w.Shape[0], w.Shape[1]
+	}
 	var y Tensor
 	switch w.Dtype {
 	case F32:
@@ -1097,11 +1178,16 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
 			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
+	case NVFP4:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		cudaGEMMStatus("MatMul", int(C.fcuda_nvfp4_w4a16_f32(
+			(*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1, C.float(nvfp4Global))), cudaGEMMScratch{})
 	default:
 		panic(&CUDAOpError{
 			Op:    "MatMul",
 			Site:  "matmul-weight-dtype",
-			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
+			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/NVFP4 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
 			Class: MemoryActivation,
 		})
 	}
@@ -1124,7 +1210,13 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	out, in := w.Shape[0], w.Shape[1]
+	var out, in int
+	var nvfp4Global float32
+	if w.Dtype == NVFP4 {
+		out, in, nvfp4Global = c.cudaNVFP4Operands(w, X, P, true)
+	} else {
+		out, in = w.Shape[0], w.Shape[1]
+	}
 	var y Tensor
 	switch w.Dtype {
 	case F32:
@@ -1169,11 +1261,16 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
 			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
+	case NVFP4:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_nvfp4_w4a16_f32(
+			(*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P), C.float(nvfp4Global))), cudaGEMMScratch{})
 	default:
 		panic(&CUDAOpError{
 			Op:    "BatchedMatMul",
 			Site:  "batched-matmul-weight-dtype",
-			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K weights today (got " + w.Dtype.String() + ")",
+			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/NVFP4 weights today (got " + w.Dtype.String() + ")",
 			Class: MemoryActivation,
 		})
 	}
