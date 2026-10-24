@@ -193,8 +193,16 @@ func probeUpstreamContextWindow(ctx context.Context, t upstreamWindowTarget) int
 		DefaultGenerationSettings struct {
 			SlotWindow int `json:"n_ctx"`
 		} `json:"default_generation_settings"`
+		TotalSlots     int    `json:"total_slots"`
+		FakSlotsSource string `json:"fak_total_slots_source"`
 	}
-	if upstreamWindowGet(ctx, t, "/props", &props) && props.DefaultGenerationSettings.SlotWindow > 0 {
+	propsOK := upstreamWindowGet(ctx, t, "/props", &props)
+	if propsOK && props.FakSlotsSource == "" {
+		// A llama-server /props answer seeds planner discovery, so a fresh gateway's first
+		// long prefill already asks for progress reports (#13781).
+		agent.RecordLlamaServerSlots(t.BaseURL, props.TotalSlots)
+	}
+	if propsOK && props.DefaultGenerationSettings.SlotWindow > 0 {
 		return props.DefaultGenerationSettings.SlotWindow
 	}
 	var slots []struct {

@@ -586,6 +586,8 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 		// Advisory llama-server hint (llama_slot_affinity.go): cache_prompt=true, no id_slot,
 		// so the upstream picks the slot. No-op for non-llama upstreams.
 		extraBody = p.withLlamaSlotAffinity(extraBody)
+		// Streamed llama-server turns ask for prefill reports (llama_prompt_progress.go, #13781).
+		extraBody = p.withLlamaPromptProgress(extraBody, stream)
 		extraBody, slotLease = p.withLlamaSoftSlot(extraBody, safeMessages)
 		if slotLease != nil {
 			slotRelease = slotLease.release
