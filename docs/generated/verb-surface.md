@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1319<br>
-rows: 1300<br>
-unverified rows: 0 / 1300<br>
-source-only rows absent from help: 1064
+parsed files: 1323<br>
+rows: 1301<br>
+unverified rows: 0 / 1301<br>
+source-only rows absent from help: 1065
 
 ## Surface table
 
@@ -755,7 +755,8 @@ source-only rows absent from help: 1064
 | `fak model-default` | report the default model identity and fold dated Qwen3.8 evidence | runModelDefault / internal/modelreg | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe` | proxy and summarize model performance observations or verify cache-state transitions | cmdModelObserve / internal/modelperfobs | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe bandwidth` |  | runModelObserveBandwidth / internal/modelperfobs | `case` arm of the dispatch switch in cmdModelObserve() | NONE | — | **SOURCE ONLY** |
-| `fak model-observe bandwidth collect` |  | runModelObserveBandwidthCollect / internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
+| `fak model-observe bandwidth calibrate` | ingests receipt files into the local calibration store, all or none, and prints its rows | runModelObserveBandwidthCalibrate / internal/compute, internal/fitplan, internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
+| `fak model-observe bandwidth collect` |  | runModelObserveBandwidthCollect / internal/compute, internal/fitplan, internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe bandwidth numa-import` |  | runModelObserveNUMAImport / internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe bandwidth numa-topology` |  | runModelObserveNUMATopology / internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe cache-state-bench` |  | runModelObserveStateBench / internal/modelperfobs | `case` arm of the dispatch switch in cmdModelObserve() | NONE | — | **SOURCE ONLY** |
@@ -961,7 +962,7 @@ source-only rows absent from help: 1064
 | `fak self` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak self-update` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak sensecheck` | evaluate text, commits, or session traces for grounded truth and hallucination drift | cmdSenseCheck / internal/sensecheck | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/compute/strix, internal/deploymanifest, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/l3kv, internal/localadmission, internal/memgate, internal/model, internal/pathutil, internal/policy, internal/power, internal/projectassets, internal/ratelimit, internal/snapshot, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_REMOTE_KV_TIMEOUT`, `POLICY_BLOCK` | yes |
+| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/compute/strix, internal/deploymanifest, internal/fitplan, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/l3kv, internal/localadmission, internal/memgate, internal/model, internal/pathutil, internal/policy, internal/power, internal/projectassets, internal/ratelimit, internal/snapshot, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_REMOTE_KV_TIMEOUT`, `POLICY_BLOCK` | yes |
 | `fak serve help` |  |  | `if` arm of the dispatch in serveHelpTopic() | N/A | — | **SOURCE ONLY** |
 | `fak serve-wiring` | audit fak serve flag -> gateway.Config -> runtime-read wiring | cmdServeWiring | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak service` | run or install fak as a long-lived OS service (Windows service dispatcher + install/status) | cmdService / internal/guardsessions, internal/servicewatchdog, internal/systemservice | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
