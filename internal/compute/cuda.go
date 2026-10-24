@@ -23,7 +23,7 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lstdc++ -lm
+#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lcublasLt -lstdc++ -lm
 #include <stdlib.h>
 #include "cuda_backend.h"
 */
@@ -33,6 +33,8 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -1110,31 +1112,67 @@ func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 
 const cudaNVFP4IntMax = int(^uint32(0) >> 1)
 
+type cudaNVFP4ResidentMeta struct {
+	buf              *cudaBuf
+	packedBytes      int
+	linearScaleBytes int
+	globalScale      float32
+}
+
+// checkedCUDANVFP4Resident validates only the canonical packed-plus-linear
+// resident contract shared by W4A16 and explicit W4A4. Lt tiled geometry is
+// intentionally absent here so ordinary uploads retain their original shape.
+func (c *cudaBackend) checkedCUDANVFP4Resident(t Tensor) (cudaNVFP4ResidentMeta, error) {
+	if t.Backend() != c || t.Dtype != NVFP4 || t.Layout != RowMajor {
+		return cudaNVFP4ResidentMeta{}, fmt.Errorf("%w: requires an owned row-major NVFP4 tensor", ErrNVFP4Shape)
+	}
+	packedBytes, linearBytes, err := nvfp4PayloadShape(t.Shape)
+	if err != nil {
+		return cudaNVFP4ResidentMeta{}, err
+	}
+	q := t.Quant
+	if q == nil || q.Block != NVFP4BlockSize || q.Axis != 2 || q.Bits != 4 ||
+		!q.Symmetric || q.StaticAct || len(q.ZeroPoint) != 0 || len(q.Scale) != 1 {
+		return cudaNVFP4ResidentMeta{}, fmt.Errorf("%w: invalid CUDA NVFP4 quantization metadata", ErrNVFP4Scale)
+	}
+	global := q.Scale[0]
+	if !nvfp4Finite(global) || global < 0 {
+		return cudaNVFP4ResidentMeta{}, fmt.Errorf("%w: tensor scale must be finite and non-negative", ErrNVFP4Scale)
+	}
+	b, ok := t.buf.(*cudaBuf)
+	if !ok || b == nil || b.ptr == nil || b.n != packedBytes+linearBytes || b.scales != nil {
+		return cudaNVFP4ResidentMeta{}, fmt.Errorf("%w: invalid resident CUDA NVFP4 payload", ErrNVFP4Shape)
+	}
+	return cudaNVFP4ResidentMeta{b, packedBytes, linearBytes, global}, nil
+}
+
+func cudaNVFP4SM(tier string) (int, bool) {
+	value, ok := strings.CutPrefix(tier, "sm_")
+	if !ok {
+		return 0, false
+	}
+	sm, err := strconv.Atoi(value)
+	return sm, err == nil
+}
+
+func cudaNVFP4LtUnsupportedStatus(status C.int) bool {
+	return status == C.FCUDA_NVFP4_LT_CAPTURE ||
+		status == C.FCUDA_NVFP4_LT_COMPILE_UNSUPPORTED ||
+		status == C.FCUDA_NVFP4_LT_RUNTIME_UNSUPPORTED ||
+		status == C.FCUDA_NVFP4_LT_WORKSPACE_UNAVAILABLE ||
+		status == C.FCUDA_NVFP4_LT_HEURISTIC_UNAVAILABLE
+}
+
 // cudaNVFP4Operands validates every host-visible part of the packed W4A16 contract before
 // a pointer crosses the C ABI. Raw E4M3FN bytes were validated by NewNVFP4 and again by
 // uploadNVFP4; after upload they are immutable device memory and need no host readback.
 func (c *cudaBackend) cudaNVFP4Operands(w, x Tensor, rows int, batched bool) (out, in int, global float32) {
-	if w.Dtype != NVFP4 || w.Layout != RowMajor || len(w.Shape) != 2 {
-		panic(fmt.Errorf("%w: CUDA requires a row-major rank-2 NVFP4 weight", ErrNVFP4Shape))
-	}
-	out, in = w.Shape[0], w.Shape[1]
-	weightBytes, scaleBytes, err := nvfp4PayloadShape(w.Shape)
+	resident, err := c.checkedCUDANVFP4Resident(w)
 	if err != nil {
 		panic(err)
 	}
-	q := w.Quant
-	if q == nil || q.Block != NVFP4BlockSize || q.Axis != 2 || q.Bits != 4 ||
-		!q.Symmetric || q.StaticAct || len(q.ZeroPoint) != 0 || len(q.Scale) != 1 {
-		panic(fmt.Errorf("%w: invalid CUDA NVFP4 quantization metadata", ErrNVFP4Scale))
-	}
-	global = q.Scale[0]
-	if !nvfp4Finite(global) || global < 0 {
-		panic(fmt.Errorf("%w: tensor scale must be finite and non-negative", ErrNVFP4Scale))
-	}
-	wb, ok := w.buf.(*cudaBuf)
-	if !ok || wb == nil || wb.ptr == nil || wb.n != weightBytes+scaleBytes || wb.scales != nil {
-		panic(fmt.Errorf("%w: invalid resident CUDA payload", ErrNVFP4Shape))
-	}
+	out, in = w.Shape[0], w.Shape[1]
+	global = resident.globalScale
 	validShape := !batched && rows == 1 && len(x.Shape) == 1 && x.Shape[0] == in
 	if batched {
 		validShape = rows > 0 && len(x.Shape) == 2 && x.Shape[0] == rows && x.Shape[1] == in
@@ -1151,6 +1189,134 @@ func (c *cudaBackend) cudaNVFP4Operands(w, x Tensor, rows int, batched bool) (ou
 		panic(fmt.Errorf("%w: invalid or unrepresentable CUDA activation payload", ErrNVFP4Input))
 	}
 	return out, in, global
+}
+func (c *cudaBackend) MatMulNVFP4(w, a Tensor) (Tensor, error) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	wResident, err := c.checkedCUDANVFP4Resident(w)
+	if err != nil {
+		return Tensor{}, err
+	}
+	aResident, err := c.checkedCUDANVFP4Resident(a)
+	if err != nil {
+		return Tensor{}, err
+	}
+	out, k, rows := w.Shape[0], w.Shape[1], a.Shape[0]
+	if a.Shape[1] != k || k%32 != 0 || out%4 != 0 {
+		return Tensor{}, fmt.Errorf("%w: Lt W4A4 needs matching K divisible by 32 and output width divisible by 4", ErrNVFP4Shape)
+	}
+	count, ok := fp8Block32Product(rows, out)
+	if !ok || count <= 0 || out > cudaNVFP4IntMax || k > cudaNVFP4IntMax || rows > cudaNVFP4IntMax {
+		return Tensor{}, fmt.Errorf("%w: invalid or unrepresentable output shape [%d %d]", ErrNVFP4Shape, rows, out)
+	}
+	alpha := nvfp4RoundedF32(wResident.globalScale * aResident.globalScale)
+	if !nvfp4Finite(alpha) || (wResident.globalScale != 0 && aResident.globalScale != 0 && alpha == 0) {
+		return Tensor{}, fmt.Errorf("%w: invalid tensor-global product", ErrNVFP4Scale)
+	}
+	if c.capturing {
+		return Tensor{}, fmt.Errorf("%w: CUDA graph capture is open", ErrNVFP4GEMMUnsupported)
+	}
+	sm, ok := cudaNVFP4SM(c.tier)
+	if !ok {
+		return Tensor{}, fmt.Errorf("%w: unknown CUDA architecture %q", ErrNVFP4GEMMUnsupported, c.tier)
+	}
+	if sm != 100 && sm != 103 && sm != 120 {
+		return Tensor{}, fmt.Errorf("%w: sm_%d is not an NVFP4 cuBLASLt target", ErrNVFP4GEMMUnsupported, sm)
+	}
+	var libraryVersion C.size_t
+	status := C.fcuda_nvfp4_w4a4_preflight(&libraryVersion)
+	if status != C.FCUDA_NVFP4_LT_OK {
+		if cudaNVFP4LtUnsupportedStatus(status) {
+			return Tensor{}, fmt.Errorf("%w: cuBLASLt preflight status %d", ErrNVFP4GEMMUnsupported, int(status))
+		}
+		return Tensor{}, fmt.Errorf("cuda NVFP4 cuBLASLt preflight failed: status %d", int(status))
+	}
+	eligible, skipAlgo66 := nvfp4CUBLASLtPolicy(sm, int(libraryVersion))
+	if !eligible {
+		return Tensor{}, fmt.Errorf("%w: sm_%d with cuBLASLt %d is unqualified", ErrNVFP4GEMMUnsupported, sm, uint64(libraryVersion))
+	}
+	_, wScaleBytes, _, err := nvfp4ScaleLayoutGeometry(out, k/NVFP4BlockSize)
+	if err != nil {
+		return Tensor{}, err
+	}
+	_, aScaleBytes, _, err := nvfp4ScaleLayoutGeometry(rows, k/NVFP4BlockSize)
+	if err != nil {
+		return Tensor{}, err
+	}
+	nbytes, ok := fp8Block32Product(count, F32.Bytes())
+	if !ok {
+		return Tensor{}, fmt.Errorf("%w: output byte size overflows", ErrNVFP4Shape)
+	}
+	allocDevice := func(bytes int, class MemoryClass, site string) (*cudaBuf, error) {
+		p := C.fcuda_malloc(C.size_t(bytes))
+		if p == nil {
+			return nil, &DeviceAllocError{Bytes: bytes, Site: site, Class: class}
+		}
+		return &cudaBuf{ptr: unsafe.Pointer(p), n: bytes, class: class}, nil
+	}
+	yBuf, err := allocDevice(nbytes, MemoryActivation, "nvfp4-w4a4-output")
+	if err != nil {
+		return Tensor{}, err
+	}
+	wScaleBuf, err := allocDevice(wScaleBytes, MemoryScratchpad, "nvfp4-w4a4-weight-scales")
+	if err != nil {
+		C.fcuda_free(yBuf.ptr)
+		yBuf.ptr = nil
+		return Tensor{}, err
+	}
+	aScaleBuf, err := allocDevice(aScaleBytes, MemoryScratchpad, "nvfp4-w4a4-activation-scales")
+	if err != nil {
+		C.fcuda_free(wScaleBuf.ptr)
+		wScaleBuf.ptr = nil
+		C.fcuda_free(yBuf.ptr)
+		yBuf.ptr = nil
+		return Tensor{}, err
+	}
+	y := makeTensor(c, F32, RowMajor, []int{rows, out}, nil, yBuf)
+	wLinearScale := unsafe.Add(wResident.buf.ptr, wResident.packedBytes)
+	aLinearScale := unsafe.Add(aResident.buf.ptr, aResident.packedBytes)
+	skip := C.int(0)
+	if skipAlgo66 {
+		skip = 1
+	}
+	status = C.fcuda_nvfp4_w4a4_f32(
+		(*C.uint8_t)(wResident.buf.ptr), (*C.uint8_t)(wLinearScale), (*C.uint8_t)(wScaleBuf.ptr), C.size_t(wScaleBytes),
+		(*C.uint8_t)(aResident.buf.ptr), (*C.uint8_t)(aLinearScale), (*C.uint8_t)(aScaleBuf.ptr), C.size_t(aScaleBytes),
+		(*C.float)(yBuf.ptr), C.int(out), C.int(k), C.int(rows), C.float(alpha), skip)
+	if status != C.FCUDA_NVFP4_LT_OK {
+		// No Lt enqueue succeeded. Any preceding permutation work is ordered on
+		// g_stream, so returning these buffers to the same-stream pool is safe.
+		C.fcuda_free(aScaleBuf.ptr)
+		aScaleBuf.ptr = nil
+		C.fcuda_free(wScaleBuf.ptr)
+		wScaleBuf.ptr = nil
+		C.fcuda_free(yBuf.ptr)
+		yBuf.ptr = nil
+		if status == C.FCUDA_NVFP4_LT_GEOMETRY {
+			return Tensor{}, fmt.Errorf("%w: cuBLASLt rejected validated geometry", ErrNVFP4Shape)
+		}
+		if cudaNVFP4LtUnsupportedStatus(status) {
+			return Tensor{}, fmt.Errorf("%w: cuBLASLt status %d", ErrNVFP4GEMMUnsupported, int(status))
+		}
+		return Tensor{}, fmt.Errorf("cuda NVFP4 cuBLASLt call failed: status %d", int(status))
+	}
+	generation := atomic.LoadUint64(&c.fenceGen)
+	for _, buffer := range []*cudaBuf{yBuf, wScaleBuf, aScaleBuf} {
+		buffer.be = c
+		buffer.bornGen = generation
+	}
+	// Retain both scale images until the normal post-fence Recycle. They cannot
+	// re-enter g_pool while the asynchronous Lt enqueue may still read them.
+	c.transient = append(c.transient, yBuf, wScaleBuf, aScaleBuf)
+	return y, nil
+}
+
+// cudaNVFP4LtCalls is an unexported QA witness. Tests snapshot it around
+// MatMulNVFP4 and synchronize by Read before asserting a one-call delta.
+func (c *cudaBackend) cudaNVFP4LtCallsForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_nvfp4_w4a4_lt_calls())
 }
 
 // MatMul computes y = x @ Wᵀ as a decode GEMV (P=1), dispatching on the weight dtype to the

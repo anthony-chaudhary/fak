@@ -279,6 +279,36 @@ void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales, const fl
  * launch validation. */
 int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX, float *dY,
                           int out, int in, int P, float globalScale);
+enum {
+  FCUDA_NVFP4_LT_OK = 0,
+  FCUDA_NVFP4_LT_GEOMETRY = -1,
+  FCUDA_NVFP4_LT_CAPTURE = -2,
+  FCUDA_NVFP4_LT_COMPILE_UNSUPPORTED = -3,
+  FCUDA_NVFP4_LT_RUNTIME_UNSUPPORTED = -4,
+  FCUDA_NVFP4_LT_WORKSPACE_UNAVAILABLE = -5,
+  FCUDA_NVFP4_LT_HEURISTIC_UNAVAILABLE = -6,
+  FCUDA_NVFP4_LT_CUBLAS_ERROR_BASE = -100,
+  FCUDA_NVFP4_LT_CUDA_ERROR_BASE = -200
+};
+
+/* Preflight performs no device allocation or launch and returns
+ * cublasLtGetVersion's major*10000+minor*100+patch value. Architecture and
+ * affected-version policy stays in nvfp4CUBLASLtPolicy on the Go side. */
+int fcuda_nvfp4_w4a4_preflight(size_t *library_version);
+
+/* W and A are canonical packed-E2M1 + linear-E4M3 resident payload regions.
+ * The caller supplies distinct device-only scratch buffers; this operation
+ * zero-fills and permutes them to VEC16_UE4M3 128x4 tiles on g_stream before
+ * the equivalent column-major TN GEMM. */
+int fcuda_nvfp4_w4a4_f32(const uint8_t *dW, const uint8_t *dWLinearScale,
+                         uint8_t *dWScaleScratch, size_t wScaleScratchBytes,
+                         const uint8_t *dA, const uint8_t *dALinearScale,
+                         uint8_t *dAScaleScratch, size_t aScaleScratchBytes,
+                         float *dY, int out, int k, int rows,
+                         float alpha, int skip_algo_66);
+
+/* Monotonic count of successful cublasLtMatmul enqueues, for device QA. */
+uint64_t fcuda_nvfp4_w4a4_lt_calls(void);
 void fcuda_q5k_matmul_f32(const uint8_t *dQ5K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int out, int in, int P);
 

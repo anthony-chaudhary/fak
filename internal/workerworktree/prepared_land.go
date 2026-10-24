@@ -154,15 +154,35 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	if rc, out := run(git, root, []string{"rev-parse", "--verify", receipt.RecoveryRef + "^{commit}"}); rc != 0 || strings.TrimSpace(out) != receipt.CandidateSHA {
 		return preparedMismatch("prepared recovery reference is unavailable", tail(out, 200))
 	}
+	rc, current := run(git, root, []string{"rev-parse", "--verify", receipt.TargetRef + "^{commit}"})
+	if rc != 0 {
+		return preparedReprepare("prepared target moved; prepare again", tail(current, 200))
+	}
+	currentTarget := strings.TrimSpace(current)
+	if currentTarget == receipt.CandidateSHA {
+		rc, head := run(git, root, []string{"rev-parse", "--verify", "HEAD^{commit}"})
+		if rc != 0 || strings.TrimSpace(head) != receipt.CandidateSHA {
+			return preparedReprepare("prepared target moved; prepare again", tail(head, 200))
+		}
+		if refusal := validatePreparedLandDisambiguationAt(root, wtPath, receipt, receipt.ParentSHA, git); !refusal.OK {
+			return refusal
+		}
+		if refusal := revalidatePreparedLandForRootSync(root, wtPath, receipt, cfg, git); !refusal.OK {
+			return refusal
+		}
+		sync := syncSharedCheckout(git, root, receipt.ParentSHA, receipt.CandidateSHA, receipt.CandidatePaths)
+		return withSharedSync(Result{OK: true, Code: LandResultSuccess, Applied: true, Committed: true, CommitSHA: receipt.CandidateSHA,
+			Reason: "resumed shared-root sync for accepted verified prospective landing " + shortSHA(receipt.CandidateSHA),
+			Detail: "recovery-ref=" + receipt.RecoveryRef, RecoveryRef: receipt.RecoveryRef}, sync, receipt.CandidateSHA)
+	}
+	if currentTarget != receipt.ParentSHA {
+		return preparedReprepare("prepared target moved; prepare again", tail(current, 200))
+	}
 	if refusal := validatePreparedLandDisambiguation(root, wtPath, receipt, git); !refusal.OK {
 		return refusal
 	}
 	if refusal := revalidatePreparedLand(root, wtPath, receipt, cfg, git); !refusal.OK {
 		return refusal
-	}
-	rc, current := run(git, root, []string{"rev-parse", "--verify", receipt.TargetRef + "^{commit}"})
-	if rc != 0 || strings.TrimSpace(current) != receipt.ParentSHA {
-		return preparedReprepare("prepared target moved; prepare again", tail(current, 200))
 	}
 	if rc, out := run(git, root, []string{"update-ref", receipt.TargetRef, receipt.CandidateSHA, receipt.ParentSHA}); rc != 0 {
 		return preparedReprepare("prepared target changed during acceptance; prepare again", tail(out, 200))
@@ -174,6 +194,14 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 }
 
 func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cfg landConfig, git GitRunner) Result {
+	return revalidatePreparedLandWithRootState(root, wtPath, receipt, cfg, false, git)
+}
+
+func revalidatePreparedLandForRootSync(root, wtPath string, receipt PreparedLandReceipt, cfg landConfig, git GitRunner) Result {
+	return revalidatePreparedLandWithRootState(root, wtPath, receipt, cfg, true, git)
+}
+
+func revalidatePreparedLandWithRootState(root, wtPath string, receipt PreparedLandReceipt, cfg landConfig, rootSyncRecovery bool, git GitRunner) Result {
 	if info, err := os.Stat(wtPath); err != nil || !info.IsDir() {
 		return preparedReprepare("prepared worktree is unavailable", errorDetail(err))
 	}
@@ -220,9 +248,15 @@ func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cf
 			return preparedMismatch("prepared candidate is outside the accepted lease", err.Error())
 		}
 	}
-	statusArgs := append([]string{"status", "--porcelain", "--"}, receipt.CandidatePaths...)
-	if rc, out := run(git, root, statusArgs); rc != 0 || strings.TrimSpace(out) != "" {
-		return preparedReprepare("shared checkout has overlapping local changes", tail(out, 200))
+	if rootSyncRecovery {
+		if err := validatePreparedRootSyncPaths(root, receipt, git); err != nil {
+			return preparedReprepare("shared checkout has overlapping local changes", err.Error())
+		}
+	} else {
+		statusArgs := append([]string{"status", "--porcelain", "--"}, receipt.CandidatePaths...)
+		if rc, out := run(git, root, statusArgs); rc != 0 || strings.TrimSpace(out) != "" {
+			return preparedReprepare("shared checkout has overlapping local changes", tail(out, 200))
+		}
 	}
 	rc, diff := run(git, root, []string{"diff", "--binary", receipt.ParentSHA, receipt.CandidateSHA})
 	if rc != 0 {
@@ -250,6 +284,105 @@ func revalidatePreparedLand(root, wtPath string, receipt PreparedLandReceipt, cf
 		return refusal
 	}
 	return Result{OK: true}
+}
+
+func validatePreparedRootSyncPaths(root string, receipt PreparedLandReceipt, git GitRunner) error {
+	for _, path := range receipt.CandidatePaths {
+		hidden, err := preparedPathHasHiddenIndexFlag(root, path, git)
+		if err != nil {
+			return err
+		}
+		if hidden {
+			return fmt.Errorf("sealed candidate path %q has an index flag that hides worktree changes", path)
+		}
+		indexParent, err := preparedIndexMatchesRevision(root, receipt.ParentSHA, path, git)
+		if err != nil {
+			return err
+		}
+		indexCandidate, err := preparedIndexMatchesRevision(root, receipt.CandidateSHA, path, git)
+		if err != nil {
+			return err
+		}
+		worktreeParent, err := preparedWorktreeMatchesRevision(root, receipt.ParentSHA, path, git)
+		if err != nil {
+			return err
+		}
+		worktreeCandidate, err := preparedWorktreeMatchesRevision(root, receipt.CandidateSHA, path, git)
+		if err != nil {
+			return err
+		}
+		if (!indexParent && !indexCandidate) || (!worktreeParent && !worktreeCandidate) {
+			return fmt.Errorf("sealed candidate path %q is neither parent nor candidate state", path)
+		}
+	}
+	return nil
+}
+
+func preparedPathHasHiddenIndexFlag(root, path string, git GitRunner) (bool, error) {
+	rc, out := run(git, root, []string{"ls-files", "-v", "-z", "--", path})
+	if rc != 0 {
+		return false, fmt.Errorf("could not inspect sealed index flags for %q: %s", path, tail(out, 200))
+	}
+	for _, entry := range strings.Split(out, "\x00") {
+		if len(entry) < 3 || entry[1] != ' ' || syncPathKey(entry[2:]) != syncPathKey(path) {
+			continue
+		}
+		tag := entry[0]
+		return tag == 'S' || tag >= 'a' && tag <= 'z', nil
+	}
+	return false, nil
+}
+
+func preparedIndexMatchesRevision(root, revision, path string, git GitRunner) (bool, error) {
+	rc, out := run(git, root, []string{"diff", "--cached", "--quiet", "--no-ext-diff", revision, "--", path})
+	switch rc {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	default:
+		return false, fmt.Errorf("could not compare sealed index path %q: %s", path, tail(out, 200))
+	}
+}
+
+func preparedWorktreeMatchesRevision(root, revision, path string, git GitRunner) (bool, error) {
+	present, err := preparedRevisionHasPath(root, revision, path, git)
+	if err != nil {
+		return false, err
+	}
+	if !present {
+		_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(path)))
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("could not inspect sealed worktree path %q: %w", path, err)
+		}
+		return false, nil
+	}
+	rc, out := run(git, root, []string{"diff", "--quiet", "--no-ext-diff", revision, "--", path})
+	switch rc {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	default:
+		return false, fmt.Errorf("could not compare sealed worktree path %q: %s", path, tail(out, 200))
+	}
+}
+
+func preparedRevisionHasPath(root, revision, path string, git GitRunner) (bool, error) {
+	rc, out := run(git, root, []string{"ls-tree", "-z", revision, "--", path})
+	if rc != 0 {
+		return false, fmt.Errorf("could not inspect sealed revision path %q: %s", path, tail(out, 200))
+	}
+	for _, entry := range strings.Split(out, "\x00") {
+		_, name, ok := strings.Cut(entry, "\t")
+		if ok && syncPathKey(name) == syncPathKey(path) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 const (
@@ -308,12 +441,16 @@ func bindPreparedLandDisambiguation(root, wtPath, rootRevision, candidateTree st
 }
 
 func validatePreparedLandDisambiguation(root, wtPath string, receipt PreparedLandReceipt, git GitRunner) Result {
+	return validatePreparedLandDisambiguationAt(root, wtPath, receipt, "HEAD", git)
+}
+
+func validatePreparedLandDisambiguationAt(root, wtPath string, receipt PreparedLandReceipt, rootRevision string, git GitRunner) Result {
 	binding := receipt.Disambiguation
 	if binding.AnalyzerIdentity != preparedDisambiguationAnalyzerIdentity() ||
 		binding.CandidateTreeSHA != receipt.TreeSHA || binding.Required != disambiguationRelevant(receipt.CandidatePaths) {
 		return preparedMismatch("prepared disambiguation binding mismatch", "")
 	}
-	rootTree, err := preparedLandTreeSHA(root, "HEAD", git)
+	rootTree, err := preparedLandTreeSHA(root, rootRevision, git)
 	if err != nil {
 		return preparedReprepare("could not recheck prepared disambiguation root", err.Error())
 	}

@@ -652,3 +652,147 @@ func localizePreparedFixture(t *testing.T, f preparedFixture) string {
 	}
 	return original
 }
+
+type preparedSyncRecoveryFixture struct {
+	preparedFixture
+	receipt     PreparedLandReceipt
+	expect      PreparedLandExpectation
+	git         GitRunner
+	updateRefs  *int
+	commitTrees *int
+	peerPath    string
+	peerBytes   string
+}
+
+func newPreparedSyncRecoveryFixture(t *testing.T, rel string) preparedSyncRecoveryFixture {
+	t.Helper()
+	f := newPreparedFixture(t, rel)
+	receipt, prep, _ := prepareCandidate(t, f)
+	if !prep.OK || prep.Code != LandResultPrepared {
+		t.Fatalf("prepare: %+v", prep)
+	}
+	peerPath := filepath.Join(f.root, "peer-wip.txt")
+	peerBytes := "unrelated peer WIP\n"
+	if err := os.WriteFile(peerPath, []byte(peerBytes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updateRefs, commitTrees := 0, 0
+	git := func(root string, args []string) (int, string) {
+		if len(args) > 0 {
+			switch args[0] {
+			case "update-ref":
+				updateRefs++
+			case "commit-tree":
+				commitTrees++
+			}
+		}
+		return defaultGit(root, args)
+	}
+	lock := filepath.Join(f.root, ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := AcceptPreparedLand(f.root, f.wt, preparedWant(f, receipt), git, WithLeasedGlobs([]string{f.rel}))
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if !first.OK || !first.Committed || first.Code != LandResultLandedSyncIncomplete ||
+		first.SharedSync == nil || first.SharedSync.Status != SharedSyncIncomplete {
+		t.Fatalf("first accept must land but fail shared sync: %+v", first)
+	}
+	if got := strings.TrimSpace(mustGit(t, f.root, "rev-parse", receipt.TargetRef)); got != receipt.CandidateSHA {
+		t.Fatalf("target after first accept = %s, want %s", got, receipt.CandidateSHA)
+	}
+	if updateRefs != 1 || commitTrees != 0 {
+		t.Fatalf("first accept mutations: update-ref=%d commit-tree=%d", updateRefs, commitTrees)
+	}
+	return preparedSyncRecoveryFixture{
+		preparedFixture: f,
+		receipt:         receipt,
+		expect:          preparedWant(f, receipt),
+		git:             git,
+		updateRefs:      &updateRefs,
+		commitTrees:     &commitTrees,
+		peerPath:        peerPath,
+		peerBytes:       peerBytes,
+	}
+}
+
+// fak-test:runtime integration est=20s lane=optin
+func TestAcceptPreparedLandResumesSharedSyncAfterCAS(t *testing.T) {
+	f := newPreparedSyncRecoveryFixture(t, "feature.txt")
+	got := AcceptPreparedLand(f.root, f.wt, f.expect, f.git, WithLeasedGlobs([]string{f.rel}))
+	if !got.OK || !got.Committed || got.Code != LandResultSuccess ||
+		got.SharedSync == nil || got.SharedSync.Status != SharedSyncSynced {
+		t.Fatalf("resumed accept: %+v", got)
+	}
+	if *f.updateRefs != 1 || *f.commitTrees != 0 {
+		t.Fatalf("resume repeated commit/ref mutation: update-ref=%d commit-tree=%d", *f.updateRefs, *f.commitTrees)
+	}
+	if got.CommitSHA != f.receipt.CandidateSHA {
+		t.Fatalf("resume commit = %s, want sealed candidate %s", got.CommitSHA, f.receipt.CandidateSHA)
+	}
+	assertRootMatchesHead(t, f.root, []string{f.rel})
+	if peer, err := os.ReadFile(f.peerPath); err != nil || string(peer) != f.peerBytes {
+		t.Fatalf("unrelated peer WIP changed: %q err=%v", peer, err)
+	}
+}
+
+// fak-test:runtime integration est=50s lane=optin
+func TestAcceptPreparedLandResumeRejectsForeignSealedState(t *testing.T) {
+	t.Run("sealed path edit", func(t *testing.T) {
+		f := newPreparedSyncRecoveryFixture(t, "feature.txt")
+		const foreign = "foreign sealed-path edit\n"
+		if err := os.WriteFile(filepath.Join(f.root, f.rel), []byte(foreign), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := AcceptPreparedLand(f.root, f.wt, f.expect, f.git, WithLeasedGlobs([]string{f.rel}))
+		if got.OK {
+			t.Fatalf("foreign sealed-path edit accepted: %+v", got)
+		}
+		if *f.updateRefs != 1 || *f.commitTrees != 0 {
+			t.Fatalf("ref/commit changed on refusal: update-ref=%d commit-tree=%d", *f.updateRefs, *f.commitTrees)
+		}
+		bytes, err := os.ReadFile(filepath.Join(f.root, f.rel))
+		if err != nil || string(bytes) != foreign {
+			t.Fatalf("foreign edit changed: %q err=%v", bytes, err)
+		}
+	})
+
+	t.Run("assume-unchanged hidden edit", func(t *testing.T) {
+		f := newPreparedSyncRecoveryFixture(t, "base.txt")
+		mustGit(t, f.root, "update-index", "--assume-unchanged", "--", f.rel)
+		const foreign = "foreign bytes hidden by assume-unchanged\n"
+		if err := os.WriteFile(filepath.Join(f.root, f.rel), []byte(foreign), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := AcceptPreparedLand(f.root, f.wt, f.expect, f.git, WithLeasedGlobs([]string{f.rel}))
+		if got.OK {
+			t.Fatalf("assume-unchanged foreign edit accepted: %+v", got)
+		}
+		if *f.updateRefs != 1 || *f.commitTrees != 0 {
+			t.Fatalf("ref/commit changed on refusal: update-ref=%d commit-tree=%d", *f.updateRefs, *f.commitTrees)
+		}
+		bytes, err := os.ReadFile(filepath.Join(f.root, f.rel))
+		if err != nil || string(bytes) != foreign {
+			t.Fatalf("hidden foreign edit changed: %q err=%v", bytes, err)
+		}
+	})
+
+	t.Run("target moved", func(t *testing.T) {
+		f := newPreparedSyncRecoveryFixture(t, "feature.txt")
+		moved := strings.TrimSpace(mustGit(t, f.root, "commit-tree", f.receipt.TreeSHA,
+			"-p", f.receipt.CandidateSHA, "-m", "peer target move"))
+		mustGit(t, f.root, "update-ref", f.receipt.TargetRef, moved, f.receipt.CandidateSHA)
+		got := AcceptPreparedLand(f.root, f.wt, f.expect, f.git, WithLeasedGlobs([]string{f.rel}))
+		if got.OK {
+			t.Fatalf("moved target accepted: %+v", got)
+		}
+		if *f.updateRefs != 1 || *f.commitTrees != 0 {
+			t.Fatalf("accept mutated moved target: update-ref=%d commit-tree=%d", *f.updateRefs, *f.commitTrees)
+		}
+		if head := strings.TrimSpace(mustGit(t, f.root, "rev-parse", f.receipt.TargetRef)); head != moved {
+			t.Fatalf("moved target changed: %s, want %s", head, moved)
+		}
+	})
+}

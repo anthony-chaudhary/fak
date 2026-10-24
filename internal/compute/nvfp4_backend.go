@@ -68,28 +68,38 @@ func nvfp4Tensor(w Tensor) bool {
 }
 
 func nvfp4WeightPayload(w Tensor) (packed, scales []byte, globalScale float32) {
-	if w.Dtype != NVFP4 || w.Layout != RowMajor {
-		panic(fmt.Errorf("%w: requires row-major NVFP4 weight", ErrNVFP4Shape))
-	}
-	weightBytes, scaleBytes, err := nvfp4PayloadShape(w.Shape)
+	packed, scales, globalScale, err := checkedNVFP4WeightPayload(w)
 	if err != nil {
 		panic(err)
 	}
+	return packed, scales, globalScale
+}
+
+// checkedNVFP4WeightPayload validates the immutable host representation without
+// changing the panic contract of the established W4A16 callers above.
+func checkedNVFP4WeightPayload(w Tensor) (packed, scales []byte, globalScale float32, err error) {
+	if w.Dtype != NVFP4 || w.Layout != RowMajor {
+		return nil, nil, 0, fmt.Errorf("%w: requires row-major NVFP4 tensor", ErrNVFP4Shape)
+	}
+	weightBytes, scaleBytes, err := nvfp4PayloadShape(w.Shape)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	storage, ok := w.buf.(*hostBuf)
 	if !ok || storage == nil || !storage.nvfp4 || storage.f32 != nil || len(storage.i8) != weightBytes+scaleBytes {
-		panic(fmt.Errorf("%w: invalid packed host payload", ErrNVFP4Shape))
+		return nil, nil, 0, fmt.Errorf("%w: invalid packed host payload", ErrNVFP4Shape)
 	}
 	q := w.Quant
 	if q == nil || q.Block != NVFP4BlockSize || q.Axis != 2 || q.Bits != 4 ||
 		!q.Symmetric || q.StaticAct || len(q.ZeroPoint) != 0 || len(q.Scale) != 1 {
-		panic(fmt.Errorf("%w: invalid NVFP4 quantization metadata", ErrNVFP4Scale))
+		return nil, nil, 0, fmt.Errorf("%w: invalid NVFP4 quantization metadata", ErrNVFP4Scale)
 	}
 	payload := i8View(storage.i8)
 	packed, scales, globalScale = payload[:weightBytes], payload[weightBytes:], q.Scale[0]
 	if err := nvfp4ValidateScales(scales, globalScale); err != nil {
-		panic(err)
+		return nil, nil, 0, err
 	}
-	return packed, scales, globalScale
+	return packed, scales, globalScale, nil
 }
 
 func nvfp4Activations(x Tensor, rows, cols int, batched bool) []float32 {
