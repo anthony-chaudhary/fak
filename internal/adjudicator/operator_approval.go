@@ -53,6 +53,15 @@ func operatorApprovalLiftable(r abi.ReasonCode) bool {
 	return r == abi.ReasonPolicyBlock || r == abi.ReasonDefaultDeny
 }
 
+// operatorApprovalLiftableBy names the rungs whose POLICY_BLOCK / DEFAULT_DENY
+// an approval may lift: the base monitor (arg rules, name deny, default deny)
+// and the dangerous-gotcha floor, which re-checks the same danger classes under
+// a default-open posture. Sub-rungs with their own authority (research egress,
+// credential block) are not liftable.
+func operatorApprovalLiftableBy(by string) bool {
+	return by == "monitor" || by == gotchasBy
+}
+
 // operatorApprovalState tracks one Adjudicate call's approval. The id is
 // derived lazily, so a call that is never refused and a session with no
 // approvals pay no hashing cost.
@@ -80,7 +89,7 @@ func (s *operatorApprovalState) approvalID() string {
 // the later rungs. Otherwise it returns the refusal stamped with the approval
 // id an operator could grant. Any other verdict passes through untouched.
 func (s *operatorApprovalState) lift(v abi.Verdict) (abi.Verdict, bool) {
-	if v.Kind != abi.VerdictDeny || v.By != "monitor" || !operatorApprovalLiftable(v.Reason) {
+	if v.Kind != abi.VerdictDeny || !operatorApprovalLiftableBy(v.By) || !operatorApprovalLiftable(v.Reason) {
 		return v, false
 	}
 	if len(s.approvals) > 0 && s.approvals[s.approvalID()] {
@@ -112,15 +121,22 @@ func (s *operatorApprovalState) confirmHold(v abi.Verdict) (abi.Verdict, bool) {
 // reversibility hold.
 const holdLiftName = "REVERSIBILITY_HOLD"
 
-// finish stamps an admitted call with the approval record when an approval
-// lifted one of its refusals.
+// finish stamps an admitted call with the approval record when the operator
+// approved it, whether or not an approval had to lift a floor refusal. The
+// gateway's later workspace lease admission reads the record (posture), so an
+// approved call is not refused there for an unprovable write footprint.
 func (s *operatorApprovalState) finish(v abi.Verdict) abi.Verdict {
-	if len(s.lifted) == 0 || (v.Kind != abi.VerdictAllow && v.Kind != abi.VerdictTransform) {
+	if v.Kind != abi.VerdictAllow && v.Kind != abi.VerdictTransform {
+		return v
+	}
+	if len(s.lifted) == 0 && (len(s.approvals) == 0 || !s.approvals[s.approvalID()]) {
 		return v
 	}
 	v.Meta = cloneMeta(v.Meta)
 	v.Meta["posture"] = PostureOperatorApproved
-	v.Meta["would_deny"] = strings.Join(s.lifted, ",")
+	if len(s.lifted) > 0 {
+		v.Meta["would_deny"] = strings.Join(s.lifted, ",")
+	}
 	v.Meta[MetaOperatorApprovalID] = s.approvalID()
 	return v
 }

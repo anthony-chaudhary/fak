@@ -8,6 +8,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
+// gotchasBy is the By label of a dangerous-gotcha refusal.
+const gotchasBy = "monitor/gotchas"
+
 // GotchaCategory represents a danger class for high-risk system operations.
 type GotchaCategory string
 
@@ -520,7 +523,7 @@ func EvalDangerousGotchas(tool string, args map[string]any) (abi.Verdict, bool) 
 				return abi.Verdict{
 					Kind:    abi.VerdictDeny,
 					Reason:  abi.ReasonPolicyBlock,
-					By:      "monitor/gotchas",
+					By:      gotchasBy,
 					Payload: abi.WitnessPayload{Claim: claim},
 					Meta:    meta,
 				}, true

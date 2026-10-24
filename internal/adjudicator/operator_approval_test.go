@@ -153,3 +153,28 @@ func TestOperatorApprovalIDStable(t *testing.T) {
 		t.Fatalf("id %q does not match ap-<12 hex>", a)
 	}
 }
+
+// Under a default-open posture (the attended guard floor) the dangerous-gotcha
+// rung re-checks rm -rf after the arg rule. An approval must lift both, or the
+// operator's approval silently fails (witnessed live 2026-10-23: the approved
+// call was refused by monitor/gotchas with no approval id).
+func TestOperatorApprovalLiftsGotchaFloorUnderDefaultOpen(t *testing.T) {
+	p := approvalFloor()
+	p.Posture = PostureDefaultOpen
+	const rmBuild = `{"command":"rm -rf _dogfood/build"}`
+	id := approvalIDOf(t, p, "Bash", rmBuild)
+
+	// Without the arg rule the gotcha rung alone refuses, and it offers the id.
+	gotchaOnly := p
+	gotchaOnly.ArgPredicates = nil
+	v := New(gotchaOnly).Adjudicate(context.Background(), approvalCall("Bash", rmBuild))
+	if v.Kind != abi.VerdictDeny || v.By != gotchasBy || v.Meta[MetaOperatorApprovalID] != id {
+		t.Fatalf("gotcha refusal: kind = %v by %q meta %v, want a %s deny offering %s", v.Kind, v.By, v.Meta, gotchasBy, id)
+	}
+
+	p.OperatorApprovals = map[string]bool{id: true}
+	v = New(p).Adjudicate(context.Background(), approvalCall("Bash", rmBuild))
+	if v.Kind != abi.VerdictAllow || v.Meta["posture"] != PostureOperatorApproved {
+		t.Fatalf("approved call under default-open: kind = %v by %q meta %v, want an operator-approved Allow", v.Kind, v.By, v.Meta)
+	}
+}

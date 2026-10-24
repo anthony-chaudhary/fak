@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
@@ -95,6 +96,9 @@ func renderVerdict(v abi.Verdict, resultMeta map[string]string) WireVerdict {
 			w.Detail = map[string]string{}
 		}
 		w.Detail[detailOperatorApprovalID] = id
+		if v.Meta["posture"] == adjudicator.PostureOperatorApproved {
+			w.Detail["posture"] = adjudicator.PostureOperatorApproved
+		}
 	}
 
 	// A result quarantined by the context-MMU at admit-time overrides the (Allow)
