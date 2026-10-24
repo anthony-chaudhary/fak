@@ -123,7 +123,8 @@ func TestTreeIndexQueryMatchesLegacy(t *testing.T) {
 	}
 	// (c) selfPath varied at query time against the single prebuilt index.
 	selfPaths := []string{"", "beta.go", "triple.go", "mixed.go"}
-	caps := []int{0, 1, 2, 100}
+	caps := []int{-1, 0, 1, 2, 100}
+	files := []string{"triple.go", "trivial.go", "mixed.go", "compute.go", "beta.go", "alpha.go", "alpha.go", "missing.go"}
 
 	for cname, cand := range candidates {
 		for _, self := range selfPaths {
@@ -133,6 +134,14 @@ func TestTreeIndexQueryMatchesLegacy(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("candidate=%s selfPath=%q cap=%d: index path diverged from legacy\n got:  %+v\n want: %+v",
 						cname, self, maxN, got, want)
+				}
+				streamed := QueryFiles(map[string]string{self: cand}, files, func(rel string) (string, bool) {
+					src, ok := tree[rel]
+					return src, ok
+				}, maxN)
+				if !reflect.DeepEqual(streamed[self], want) {
+					t.Fatalf("candidate=%s selfPath=%q cap=%d: streamed path diverged from legacy\n got:  %+v\n want: %+v",
+						cname, self, maxN, streamed[self], want)
 				}
 			}
 		}
@@ -158,6 +167,64 @@ func TestTreeIndexQueryMatchesLegacy(t *testing.T) {
 	}
 	if res[0].File != "triple.go" {
 		t.Fatalf("file with three copies should rank first, got %q", res[0].File)
+	}
+}
+
+func TestQueryFilesBatchCacheLifecycle(t *testing.T) {
+	tree := cloneTree()
+	files := []string{"data.go", "b.go", "a.go"}
+	candidates := map[string]string{"a.go": tree["a.go"], "new.go": tree["b.go"], "empty.go": ""}
+	cache := newSpyCache()
+	reads := 0
+	got := QueryFiles(candidates, files, func(rel string) (string, bool) {
+		// Reading the next file must follow indexing the previous one, not a
+		// whole-corpus source load. Cache maintenance stays at the batch boundary.
+		if cache.gets != reads || cache.maintains != 0 {
+			t.Fatalf("read %d: gets=%d maintains=%d", reads, cache.gets, cache.maintains)
+		}
+		reads++
+		return tree[rel], true
+	}, 5, cache)
+	if reads != len(files) || cache.puts != len(files) || cache.maintains != 1 {
+		t.Fatalf("cold batch: reads=%d puts=%d maintains=%d", reads, cache.puts, cache.maintains)
+	}
+	read := func(rel string) (string, bool) { src, ok := tree[rel]; return src, ok }
+	warm := QueryFiles(candidates, files, read, 5, cache)
+	broken := QueryFiles(candidates, files, read, 5, brokenWindowCache{})
+	if cache.puts != len(files) || cache.hits != len(files) || cache.maintains != 2 {
+		t.Fatalf("warm batch: puts=%d hits=%d maintains=%d", cache.puts, cache.hits, cache.maintains)
+	}
+	for self, candidate := range candidates {
+		want := legacyQuery(candidate, tree, self, 5)
+		if !reflect.DeepEqual(got[self], want) || !reflect.DeepEqual(warm[self], want) || !reflect.DeepEqual(broken[self], want) {
+			t.Fatalf("candidate %q changed across cache paths", self)
+		}
+	}
+	for _, src := range tree {
+		keys, spans := qualifyingWindows(goTokens(src, false))
+		stored := cache.store[src]
+		if !reflect.DeepEqual(stored.keys, keys) || !reflect.DeepEqual(stored.spans, spans) {
+			t.Fatal("streaming cache entry did not preserve all file windows")
+		}
+	}
+}
+
+func TestQueryFilesTopKIncludesLateBestMatch(t *testing.T) {
+	const count = 64
+	files := make([]string, count)
+	tree := make(map[string]string, count)
+	for i := range files {
+		rel := fmt.Sprintf("file-%03d.go", i)
+		files[i] = rel
+		tree[rel] = "package p\n" + namedBlock("process")
+	}
+	tree[files[count-1]] += namedBlock("process")
+	got := QueryFiles(map[string]string{"new.go": namedBlock("process")}, files, func(rel string) (string, bool) {
+		return tree[rel], true
+	}, 5)["new.go"]
+	want := legacyQuery(namedBlock("process"), tree, "new.go", 5)
+	if !reflect.DeepEqual(got, want) || len(got) != 5 || got[0].File != files[count-1] {
+		t.Fatalf("streamed top-k=%+v, want %+v", got, want)
 	}
 }
 

@@ -1502,6 +1502,11 @@
           "category": "test-only",
           "reason": "Test that the JSON-mode grammar mask memo stays bounded on long values.",
           "token": "TestJSONValueMaskLongValuesKeepCacheFinite"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private clonescan helper invokes the existing optional WindowCache Maintain callback once per batch; it adds no cache policy, lifetime, storage or ownership concept.",
+          "token": "maintainWindowCache"
         }
       ],
       "exclude": [
@@ -1772,6 +1777,7 @@
         "liveMatrixPrefixCache",
         "loadCacheValueGateBaseline",
         "loadVCacheRuntimeCalibration",
+        "maintainWindowCache",
         "maxJSONValueMaskCacheStates",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",

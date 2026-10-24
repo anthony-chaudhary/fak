@@ -135,35 +135,88 @@ func BuildTreeIndex(tree map[string]string, cache ...WindowCache) *TreeIndex {
 	}
 	sort.Strings(idx.files)
 	for _, rel := range idx.files {
-		src := tree[rel]
-		var keys []string
-		var spans []span
-		if wc != nil {
-			if k, s, ok := wc.Get(src); ok {
-				keys, spans = k, s
-			} else {
-				keys, spans = qualifyingWindows(goTokens(src, false))
-				wc.Put(src, keys, spans)
-			}
-		} else {
-			keys, spans = qualifyingWindows(goTokens(src, false))
+		if fi := indexSource(tree[rel], wc); len(fi) != 0 {
+			idx.byFile[rel] = fi
 		}
-		if len(keys) == 0 {
-			continue
-		}
-		fi := make(map[string][]span, len(keys))
-		for i, k := range keys {
-			fi[k] = append(fi[k], spans[i])
-		}
-		idx.byFile[rel] = fi
 	}
 	// A persistent implementation may coalesce retention at the consumer-owned end
 	// of the batch. The optional hook keeps the WindowCache contract pure for in-memory
 	// implementations while avoiding one shared-directory scan per Put.
+	maintainWindowCache(wc)
+	return idx
+}
+
+func indexSource(src string, wc WindowCache) map[string][]span {
+	var keys []string
+	var spans []span
+	if wc != nil {
+		if k, s, ok := wc.Get(src); ok {
+			keys, spans = k, s
+		} else {
+			keys, spans = qualifyingWindows(goTokens(src, false))
+			wc.Put(src, keys, spans)
+		}
+	} else {
+		keys, spans = qualifyingWindows(goTokens(src, false))
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	fi := make(map[string][]span, len(keys))
+	for i, k := range keys {
+		fi[k] = append(fi[k], spans[i])
+	}
+	return fi
+}
+
+func maintainWindowCache(wc WindowCache) {
 	if maintainer, ok := wc.(interface{ Maintain() }); ok {
 		maintainer.Maintain()
 	}
-	return idx
+}
+
+// QueryFiles answers candidates against a corpus read one file at a time. Each
+// candidate's map key is its self-excluded path. A false read result skips that
+// file, matching the tracked-but-deleted behavior of the CLI's tree reader.
+// With maxResults > 0, live storage is bounded by candidate keys, the path list,
+// one file's token index, and maxResults matches per candidate, not corpus windows.
+// Cache lookups, fills, and batch maintenance use the same seam as BuildTreeIndex.
+func QueryFiles(candidates map[string]string, files []string, readFile func(string) (string, bool), maxResults int, cache ...WindowCache) map[string][]Match {
+	var wc WindowCache
+	if len(cache) > 0 {
+		wc = cache[0]
+	}
+	wants := make(map[string]map[string]bool, len(candidates))
+	for rel, candidate := range candidates {
+		wants[rel] = CandidateKeys(candidate)
+	}
+	unique := make(map[string]bool, len(files))
+	for _, rel := range files {
+		unique[rel] = true
+	}
+	ordered := make([]string, 0, len(unique))
+	for rel := range unique {
+		ordered = append(ordered, rel)
+	}
+	sort.Strings(ordered)
+	matches := make(map[string][]Match, len(candidates))
+	for _, rel := range ordered {
+		src, ok := readFile(rel)
+		if !ok {
+			continue
+		}
+		index := &TreeIndex{
+			files:  []string{rel},
+			byFile: map[string]map[string][]span{rel: indexSource(src, wc)},
+		}
+		for self, want := range wants {
+			if found := index.Query(want, self, maxResults); len(found) != 0 {
+				matches[self] = rankMatches(append(matches[self], found...), maxResults)
+			}
+		}
+	}
+	maintainWindowCache(wc)
+	return matches
 }
 
 // Query intersects a candidate's `want` key-set (from CandidateKeys) against the
@@ -214,6 +267,10 @@ func (idx *TreeIndex) Query(want map[string]bool, selfPath string, maxResults in
 		})
 	}
 
+	return rankMatches(matches, maxResults)
+}
+
+func rankMatches(matches []Match, maxResults int) []Match {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].Windows != matches[j].Windows {
 			return matches[i].Windows > matches[j].Windows // most overlap first

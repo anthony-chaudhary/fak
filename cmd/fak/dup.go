@@ -197,23 +197,18 @@ func cmdDupGuard(args []string) {
 		return
 	}
 
-	tree, err := trackedGoTree()
+	files, err := trackedGoPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak dup guard: %v (advisory — skipping)\n", err)
 		return
 	}
 
-	// Tokenize the whole tracked tree ONCE, then query each added file against the
-	// prebuilt index. Previously each added file re-tokenized all ~5.7k tracked
-	// files, so the scan cost grew with (added files × tree size); building the
-	// index once makes it (tree size + added files × cheap intersection).
-	//
-	// A persisted, fleet-shared WindowCache (#4330) memoizes each tracked file's
-	// tokenization under its content hash, so the ~5.7k-file re-lex this verb pays on
-	// every run collapses to a directory of lookups for the files that did not change.
-	// A nil cache (FAK_TOKEN_CACHE=off, or common dir unresolvable) degrades to the
-	// exact uncached path.
-	index := clonescan.BuildTreeIndex(tree, tokencache.Open("."))
+	// Keep only one corpus file's index live while preserving full-tree coverage.
+	// The optional shared cache still memoizes each file and is maintained once.
+	matchesByFile := clonescan.QueryFiles(added, files, func(rel string) (string, bool) {
+		b, err := os.ReadFile(rel)
+		return string(b), err == nil
+	}, 5, tokencache.Open("."))
 
 	type warning struct {
 		AddedIn string            `json:"added_in"`
@@ -228,7 +223,7 @@ func cmdDupGuard(args []string) {
 	for _, rel := range addedFiles {
 		// Exclude the file itself: a block appearing in both the added lines and the
 		// committed file is the same code, not a duplicate.
-		matches := index.Query(clonescan.CandidateKeys(added[rel]), rel, 5)
+		matches := matchesByFile[rel]
 		if len(matches) > 0 {
 			warnings = append(warnings, warning{AddedIn: rel, Matches: matches})
 		}
@@ -319,25 +314,37 @@ func parseAddedGo(diff string) map[string]string {
 
 // trackedGoTree returns the git-tracked *.go files as rel-path -> source text.
 func trackedGoTree() (map[string]string, error) {
+	files, err := trackedGoPaths()
+	if err != nil {
+		return nil, err
+	}
+	tree := make(map[string]string)
+	for _, rel := range files {
+		b, err := os.ReadFile(rel)
+		if err != nil {
+			continue // a tracked-but-deleted file; skip
+		}
+		tree[rel] = string(b)
+	}
+	return tree, nil
+}
+
+func trackedGoPaths() ([]string, error) {
 	cmd := exec.Command("git", "ls-files", "*.go")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
-	tree := make(map[string]string)
+	var files []string
 	for _, rel := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		rel = strings.TrimSpace(rel)
 		if rel == "" {
 			continue
 		}
-		b, err := os.ReadFile(rel)
-		if err != nil {
-			continue // a tracked-but-deleted file; skip
-		}
-		tree[filepath.ToSlash(rel)] = string(b)
+		files = append(files, filepath.ToSlash(rel))
 	}
-	return tree, nil
+	return files, nil
 }
 
 // trackedRelPath returns the slash-form repo-relative path of a file if it is

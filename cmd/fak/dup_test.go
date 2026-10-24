@@ -72,14 +72,15 @@ func tallyItems(items []int) int {
 
 	// An added block cloning existing.go warns (>=1 match).
 	added := parseAddedGo("+++ b/new.go\n" + plusPrefix(block))
-	if m := clonescan.Query(added["new.go"], tree, "new.go", 5); len(m) == 0 {
+	read := func(rel string) (string, bool) { src, ok := tree[rel]; return src, ok }
+	if m := clonescan.QueryFiles(added, []string{"existing.go"}, read, 5)["new.go"]; len(m) == 0 {
 		t.Fatalf("guard should flag an added block cloning a tracked site")
 	}
 
 	// A novel added block is silent (0 matches).
 	novel := "func whollyUnique() { println(\"nothing like the tree 987 zxcv\") }\n"
 	added2 := parseAddedGo("+++ b/novel.go\n" + plusPrefix(novel))
-	if m := clonescan.Query(added2["novel.go"], tree, "novel.go", 5); len(m) != 0 {
+	if m := clonescan.QueryFiles(added2, []string{"existing.go"}, read, 5)["novel.go"]; len(m) != 0 {
 		t.Fatalf("guard should be silent on a novel added block, got %+v", m)
 	}
 }
