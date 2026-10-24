@@ -1,0 +1,32 @@
+DeepInfer structured-output carriers on the fak up turnkey routes
+
+Copyright DeepSeek-AI / DeepInfer authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: deepseek-ai/DeepInfer, deepinfer/sampling_params.py (lines 59, 63, 82),
+        deepinfer/engine/llm_engine.py (lines 606-612)
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/sampling_params.py
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/engine/llm_engine.py
+Upstream change: https://github.com/deepseek-ai/DeepInfer/pull/119
+
+Adaptation (cmd/fak turnkey up structured carriers): no upstream code is
+adapted; the contract is inspired by the finding. Upstream carries so_args on
+every request's SamplingParams (sampling_params.py:59,82) and builds the
+structured-output matcher at enqueue (llm_engine.py:606-612), while PR#119
+drops logprobs without a word (sampling_params.py:63). The fak up turnkey
+server had dropped carriers the same silent way: /v1/completions dropped
+response_format and all nine guided-decode carriers (guided_json,
+guided_regex, guided_choice, guided_grammar, guided_decoding_backend,
+json_schema, regex, ebnf, structured_outputs), and /v1/chat/completions,
+which already carried response_format, dropped the nine guided carriers. Both
+routes now pass the same ten carriers to the planner as fak serve does, and a
+native structured-output refusal maps to the gateway's planner-level typed
+code (400 native_structured_output_unsupported, 500
+native_structured_decode_failed) instead of a plain 500 or a silently
+unconstrained 200. The gateway's ingress caps are not reproduced here: a
+guided_regex over 4096 bytes gets 400 native_structured_output_unsupported on
+fak up but 400 parameter_out_of_range on fak serve, and the 422
+invalid_response_format / json_schema_* and 400 invalid_structured_outputs
+ingress codes are not emitted. A mid-stream native_structured_decode_failed
+still surfaces in-band as inference_error.
