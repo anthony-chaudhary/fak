@@ -49,6 +49,9 @@ that command. The `operator-escalation` amendment channel
 | POLICY_BLOCK arg rule (rm -rf, git push, sudo, ...) | yes |
 | POLICY_BLOCK name deny | yes |
 | DEFAULT_DENY | yes |
+| Dangerous-gotcha floor (`monitor/gotchas`, default-open posture) | yes |
+| Gateway workspace lease admission, unprovable write footprint (DEFAULT_DENY) | yes, recorded as `lease-admission-operator-approved` |
+| Lease admission refusal because a peer owns the tree | no |
 | Reversibility preview-confirm hold | answered: the human approval is the confirmation |
 | Credential / host-config path block | no |
 | SELF_MODIFY rungs (including the guard's own config) | no |
@@ -66,11 +69,23 @@ overlay files are already self-modify protected (`protectGuardPolicyConfig`).
 A human command typed at the harness prompt (`!` in Claude Code) is not a model
 tool call, so it is not adjudicated.
 
+## Live witness (2026-10-23)
+
+A headless `fak guard -- claude -p` session proposed `rm -rf _dogfood/build`
+and got POLICY_BLOCK with `ap-616c1102523a`. The operator ran
+`fak guard allow --approve ap-616c1102523a` from their own shell, and the resumed
+session re-proposed the identical call. The first two retries exposed two more
+refusal layers the approval had not reached (the dangerous-gotcha floor, then
+gateway lease admission); after both fixes the call was admitted (audit row
+`ALLOW`) and the directory was deleted. Not yet exercised: an interactive TUI
+session approving through Claude Code's `!` prompt (session scope).
+
 ## Witness
 
 - `internal/adjudicator/operator_approval_test.go`
 - `cmd/fak/guard_allow_approve_test.go` (end to end on the shipped default floor)
 - `internal/gateway/operator_approval_note_test.go`
+- `internal/gateway/lease_admission_operator_approval_test.go`
 - `internal/policy` amendment registry and direction tests
 
 ## Open follow-ups

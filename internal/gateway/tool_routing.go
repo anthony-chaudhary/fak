@@ -139,6 +139,10 @@ func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, re
 	}
 	if v.Kind == abi.VerdictAllow || v.Kind == abi.VerdictTransform {
 		if leaseVerdict, refused := s.adjudicateLeaseAdmission(ctx, tc.Tool, effectiveArgs, readOnly); refused {
+			if operatorApprovedLeaseOverride(v, &wv, leaseVerdict) {
+				return wv, repaired, nil
+			}
+			offerOperatorApproval(&leaseVerdict, tc.Tool, effectiveArgs)
 			if s.workspaceAdmissionPermissive && leaseVerdict.Reason == abi.ReasonName(abi.ReasonDefaultDeny) {
 				// Preserve TRANSFORM so clients still apply the repaired arguments.
 				if wv.Detail == nil {

@@ -368,7 +368,11 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 	}
 
 	if v, ok := preAdmitVerdict(p, state.egressList, c, args, advisoryNotes, cl, pr); ok {
-		return v
+		// Only the dangerous-gotcha floor, the last pre-admit rung, is liftable here.
+		sv, lifted := approval.lift(v)
+		if !lifted {
+			return sv
+		}
 	}
 
 	redactedArgs, redacted := applyRedactionTransforms(p, argPreds, args, cl, pr)
