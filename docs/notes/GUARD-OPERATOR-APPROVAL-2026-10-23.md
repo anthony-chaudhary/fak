@@ -42,6 +42,32 @@ that command. The `operator-escalation` amendment channel
 
 `fak guard allow --approve --remove <id>` revokes an approval early.
 
+### Standalone MCP scope
+
+A standalone `fak serve --stdio` process does not share a guarded child's session
+environment. Approve from an unrelated operator terminal with an explicit user
+layer so the terminal's current repository cannot silently select a different
+repo-local overlay:
+
+```text
+fak guard allow --user --approve ap-0123456789ab
+```
+
+The command reports the resolved layer. Current `fak serve` builds ingest exact-call
+grants, revocations, and TTL expiry live with either an explicit policy or the default
+profile. Approval reload preserves the currently installed base policy and ignores
+unrelated allow/deny edits. An unreadable or malformed approval layer clears live
+approvals while retaining the base policy. An older immutable MCP bridge remains
+unchanged until it is upgraded and Fak is reconnected once to launch the new
+content-addressed binary. Do not infer that an already-running installed bridge has
+refreshed merely because newer source exists.
+
+Unknown native shell-command effects remain fail-closed. An operator may review and
+approve the exact refused call id, but there is no blanket safe `fak-run` family and
+no approval may override a known peer lease. The wrapped agent still cannot approve
+itself; do not replace this flow with permissive workspace admission or a tool-name
+allow.
+
 ## What an approval lifts
 
 | Refusal | Lifted for the approved call? |
@@ -88,11 +114,12 @@ session approving through Claude Code's `!` prompt (session scope).
 - `internal/gateway/lease_admission_operator_approval_test.go`
 - `internal/policy` amendment registry and direction tests
 
+The standalone serve approval-only reload journals capability grants on the
+`operator-escalation` channel; `TestServeOperatorApprovalReloadAuditContract`
+witnesses the grant and configuration-swap records.
+
 ## Open follow-ups
 
 - `fak guard allow <tool>` (plain name widening) is still runnable from the
   agent's shell; only `--approve` is refused there.
-- Capability-grant rows for an approval are journaled on the live-reload
-  channel; tagging them `operator-escalation` needs the reload diff to know
-  which knob moved.
 - `--approve last` (approve the most recent refusal without copying the id).

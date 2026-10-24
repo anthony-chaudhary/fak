@@ -1097,6 +1097,15 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
 
+	// Operator approvals are expiring overlays, not launch-time configuration. Keep
+	// the installed serve floor synchronized for the process lifetime so an MCP client
+	// observes an approval (and its later revocation/expiry) without reconnecting. The
+	// watcher performs a synchronous initial refresh before either transport accepts a
+	// request, closing the policy-load -> watcher-construction race, and its stop joins
+	// the polling goroutine before run returns.
+	stopAllowWatcher := startOperatorApprovalWatcherWithInitialRefresh(ctx, serveOperatorApprovalReloader())
+	defer stopAllowWatcher()
+
 	// Hot-reload the routing policy (#842): when a manifest is installed, follow the
 	// file and atomically swap the live policy on a validated edit — no restart. A
 	// malformed edit is rejected and the last-good policy is kept (the fail-loud

@@ -176,6 +176,86 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 	}
 }
 
+// serveOperatorApprovalReloader changes only the exact-call approval set on the
+// currently installed floor. It cannot restore a stale base manifest/profile or
+// carry unrelated allow/deny edits into an approval event.
+func serveOperatorApprovalReloader() gateway.PolicyReloadFunc {
+	return func(context.Context) (gateway.PolicyReloadResponse, error) {
+		overlay, _, err := loadGuardAllowOverlayLayers()
+		if err != nil {
+			return gateway.PolicyReloadResponse{}, err
+		}
+		return applyServeOperatorApprovals(overlay.Approve, "operator approvals")
+	}
+}
+
+func clearServeOperatorApprovals(context.Context) error {
+	_, err := applyServeOperatorApprovals(nil, "operator approval authority error")
+	return err
+}
+
+func applyServeOperatorApprovals(ids []string, source string) (gateway.PolicyReloadResponse, error) {
+	policyReloadMu.Lock()
+	defer policyReloadMu.Unlock()
+
+	current := adjudicator.Default.PolicySnapshot()
+	next := current
+	next.OperatorApprovals = make(map[string]bool, len(ids))
+	for _, id := range ids {
+		next.OperatorApprovals[id] = true
+	}
+	delta := policy.DiffAmendment(current, next)
+	changes := make([]policy.AmendmentChange, 0, len(delta.Widen)+len(delta.Tighten)+len(delta.Frozen))
+	changes = append(changes, delta.Widen...)
+	changes = append(changes, delta.Tighten...)
+	changes = append(changes, delta.Frozen...)
+	for _, change := range changes {
+		if change.Field != "OperatorApprovals" {
+			return gateway.PolicyReloadResponse{}, fmt.Errorf("operator approval reload changed forbidden field %s", change.Field)
+		}
+	}
+	if delta.Empty() {
+		return gateway.PolicyReloadResponse{Source: source}, nil
+	}
+	knob, ok := policy.KnobByField("OperatorApprovals")
+	if !ok || !policyKnobHasChannel(knob, policy.ChannelOperatorEscalation) {
+		return gateway.PolicyReloadResponse{}, errors.New("operator approval amendment channel unavailable")
+	}
+	if admit, reason := guardCoreLockAllAdmitAmendment(current, next); !admit {
+		err := fmt.Errorf("operator approval reload refused: %s", reason)
+		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, source, "", journal.ConfigSwapRejected, err.Error())
+		return gateway.PolicyReloadResponse{}, err
+	}
+	adjudicator.Default.SetPolicy(next)
+	summaryChanges := make([]policy.AmendmentChange, 0, len(delta.Widen)+len(delta.Tighten))
+	summaryChanges = append(summaryChanges, delta.Widen...)
+	summaryChanges = append(summaryChanges, delta.Tighten...)
+	summary := policy.FormatAmendmentChanges(summaryChanges)
+	j := journal.Active()
+	j.AppendConfigSwap(journal.ConfigSwapFloor, source, "", journal.ConfigSwapOK, summary)
+	for _, change := range delta.Widen {
+		j.AppendCapabilityGrant(journal.CapabilityGrantRow{
+			Knob: change.Field, Class: string(knob.Class), Old: change.Old, New: change.New,
+			Channel: journal.GrantChannelOperatorEscalation, Actor: "operator",
+			Source: "fak guard allow --approve", Reason: "operator approval overlay reloaded",
+		})
+	}
+	return gateway.PolicyReloadResponse{
+		Reloaded: true,
+		Source:   source,
+		Summary:  summary,
+	}, nil
+}
+
+func policyKnobHasChannel(knob policy.PolicyKnob, want string) bool {
+	for _, channel := range knob.Channels {
+		if channel == want {
+			return true
+		}
+	}
+	return false
+}
+
 // guardPolicyReloader is the reloader `fak guard` wires (guard.go). For an explicit
 // --policy FILE it is exactly policyReloader (the file-reload path, unchanged). For the
 // default built-in floor (empty path) it returns a working reloader that re-derives the

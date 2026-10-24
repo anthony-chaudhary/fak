@@ -140,6 +140,10 @@ func adjudicateRawWriteTargets(tool, rawArgs string, readOnly bool) (args map[st
 	}
 	base := adjudicateToolBase(tool)
 	mutating = adjudicateMutatingTool(base)
+	if adjudicateCodexPatchTool(base) {
+		patchTargets, patchKnown := adjudicateCodexPatchFootprint(rawArgs)
+		return args, patchTargets, true, patchKnown
+	}
 	targets = adjudicateDirectWriteTargets(args)
 	// An allowed but unrecognized tool does not earn read status merely because
 	// its name is absent from wipref's small write/edit vocabulary. Path-shaped
@@ -158,15 +162,6 @@ func adjudicateRawWriteTargets(tool, rawArgs string, readOnly bool) (args map[st
 			// extractor does not recognize. Only a read_only call that the kernel's
 			// positive read grammar subsequently admits may bypass lease admission.
 			return args, nil, true, false
-		}
-	}
-	if strings.Contains(base, "patch") || strings.Contains(base, "apply") {
-		if patch, ok := args["patch"].(string); ok {
-			patchTargets := adjudicatePatchTargets(patch)
-			if len(patchTargets) > 0 {
-				mutating = true
-				targets = append(targets, patchTargets...)
-			}
 		}
 	}
 	if !mutating {
@@ -375,18 +370,4 @@ func adjudicateCanonicalTreeGlob(root, treeGlob string) (string, bool) {
 		return suffix, suffix != ""
 	}
 	return canonicalDir + "/" + suffix, true
-}
-
-func adjudicatePatchTargets(patch string) []string {
-	var targets []string
-	for _, line := range strings.Split(patch, "\n") {
-		line = strings.TrimSpace(line)
-		for _, prefix := range []string{"*** Add File:", "*** Update File:", "*** Delete File:"} {
-			if strings.HasPrefix(line, prefix) {
-				targets = append(targets, strings.TrimSpace(strings.TrimPrefix(line, prefix)))
-				break
-			}
-		}
-	}
-	return targets
 }

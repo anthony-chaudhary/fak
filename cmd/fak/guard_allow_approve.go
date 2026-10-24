@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -61,9 +63,24 @@ func runGuardAllowApprove(stdout, stderr io.Writer, path string, ov *guardAllowO
 		return 1
 	}
 	fmt.Fprintf(stdout, "fak guard allow: approved %s for %s (until %s).\n", strings.Join(ids, ", "), ttl, stamp)
-	fmt.Fprintln(stdout, "  A running guard applies it within about a second; tell the agent to re-propose the same call.")
+	fmt.Fprintf(stdout, "  Approval layer: %s (%s). Only a guard/serve process resolving this same layer can ingest it.\n", path, guardAllowApprovalScope(path))
+	fmt.Fprintln(stdout, "  A running fak guard or fak serve approval watcher applies it within about a second; tell the agent to re-propose the same call.")
 	printGuardAllowOverlay(stdout, path, *ov)
 	return 0
+}
+
+func guardAllowApprovalScope(path string) string {
+	clean := filepath.Clean(path)
+	if session := guardAllowSessionLayer().Path; session != "" && clean == filepath.Clean(session) {
+		return "session"
+	}
+	if override := strings.TrimSpace(os.Getenv(guardAllowOverlayEnv)); override != "" && clean == filepath.Clean(override) {
+		return "environment override"
+	}
+	if user := guardAllowUserOverlayPath(); user != "" && clean == filepath.Clean(user) {
+		return "user"
+	}
+	return "repo-local/current working tree"
 }
 
 // guardApplyOperatorApprovals unions approval ids into the runtime floor and

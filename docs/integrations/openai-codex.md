@@ -285,10 +285,40 @@ verdict never authorizes a shell action, execution payload, or a different patch
 
 Re-adjudicate the corrected call with a fresh trace. Execute only an `ALLOW` call
 or the exact repaired call returned by `TRANSFORM`; retain a new `DENY` and continue
-permitted independent work. Human approval authorizes the task, not overriding a
-kernel verdict. `default_open`, `fak guard allow`, and confirmation tokens do not
-lift explicit deny rules or dangerous gotchas. Do not encode, hide, or relabel an
-executable payload to pass an edit as data.
+permitted independent work. Do not encode, hide, or relabel an executable payload
+to pass an edit as data.
+
+### Approve one exact call for a standalone MCP server
+
+When `fak_adjudicate` returns an `operator_approval_id`, an attending human may
+approve that exact tool-and-arguments call from a separate terminal. For an
+installed or standalone MCP server, write the per-user layer explicitly; otherwise
+the default repo-local layer follows the terminal's current directory and may be
+invisible to the already-running MCP child:
+
+```powershell
+fak guard allow --user --approve ap-0123456789ab
+```
+
+The approval defaults to 15 minutes. Re-propose the byte-identical call after the
+command reports the selected layer. Current `fak serve` builds ingest exact-call
+grants, revocations, and expiry live with either an explicit policy or the default
+profile. Approval reload preserves the currently installed base policy and ignores
+unrelated allow/deny edits. An unreadable or malformed approval layer clears live
+approvals while retaining the base policy. An older content-addressed MCP
+installation does not gain new behavior in place: upgrade the immutable bridge and
+reconnect Fak once so Codex launches the new binary.
+
+This is a per-call human escalation, not a permissive policy. The agent cannot run
+the approval command itself. Credential, self-modification, secret, egress, and
+known peer-lease refusals remain authoritative. A native shell command whose write
+effects are still unknown also remains guarded; after reviewing it, approve only
+its printed exact-call id. Do not blanket-allow `fak-run` or treat every factory
+command as having a known safe footprint. Revoke early with:
+
+```powershell
+fak guard allow --user --approve --remove ap-0123456789ab
+```
 
 To retain future MCP verdicts for an appeal, set `FAK_AUDIT_JOURNAL` to an absolute
 file path in the gateway child environment before it starts. The existing journal
