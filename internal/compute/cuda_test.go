@@ -308,50 +308,147 @@ func TestCUDAMatMulNonAlignedShapes(t *testing.T) {
 	t.Logf("MatMul non-aligned shapes: %d cases pass (device=%s)", len(cases), cb.Name())
 }
 
-// TestCUDAForwardMatchesRef — the headline: a full multi-layer Llama decode forward,
-// greedily run for several tokens, on the GPU vs the CPU reference. The Approx gate:
-// every step's argmax must be EXACT (same next token) and the logit cosine ≥ the recorded
-// floor. The per-layer Attention is now the fused flash/online-softmax kernel (#486,
-// Caps.FusedAttn), so this end-to-end witness IS the flash kernel's forward-pass gate; the
-// recorded floor is cudaFlashAttnCosineMin (the same 0.999 the forward witness has used).
-func TestCUDAForwardMatchesRef(t *testing.T) {
-	cb := cudaOrSkip(t)
-	ref := Default()
-	cfg := synthCfg{H: 64, L: 3, nH: 8, nKV: 2, hd: 8, I: 172, vocab: 96, eps: 1e-5, theta: 10000}
-	host := synthHostWeights(cfg)
+// cudaForwardLogitRelErrMax bounds TestCUDAForwardMatchesRef's per-step logit error,
+// max|cuda-ref| / max|ref|. Measured on unmutated kernels (RTX 4070 sm_89, CUDA 12.8,
+// 2026-10-23): worst 1.4e-6 over these prompts and 2.0e-6 over 576 steps of 64 prompts, so 2e-5
+// leaves ~10x for another arch's cuBLAS reduction order. The weakest kernel mutant it kills,
+// RoPE theta x1.001, reaches 5.2e-4; the 0.999 cosine floor passes it and the swiglu, rmsnorm
+// eps and attention-scale mutants. FAK_CUDA_TF32=1 left these P=1 GEMMs bit-identical on sm_89.
+const cudaForwardLogitRelErrMax = 2e-5
 
-	mRef := newSynth(ref, cfg, host)
+// cudaForwardParityPrompts span a one-token prefill, the original witness prompt, vocab edges
+// with repeats, and a window long enough that every flash-attention head streams 30+ keys.
+var cudaForwardParityPrompts = [][]int{
+	{5, 17, 42, 3, 88, 11},
+	{0},
+	{95, 1, 94, 2, 93, 3, 47, 48, 47, 48, 0, 95},
+	{7, 61, 23, 80, 14, 39, 52, 66, 9, 31, 77, 45, 12, 90, 28, 58, 3, 71, 36, 84, 19, 50, 63, 26},
+}
+
+// forwardParityHostWeights draws zero-mean weights at fan-in scale so every op in the chain
+// moves the logits. randVec spans [-1.5, 0.5), so synthHostWeights' draws carry a -0.5 mean:
+// that fixture's residual is a near-constant vector, its logits barely depend on the prompt,
+// and a RoPE theta x1.001 or attention scale x1.001 kernel mutant left them inside f32 noise.
+func forwardParityHostWeights(cfg synthCfg) map[string][]float32 {
+	var seed lcg = 0x5eed1234
+	g := &seed
+	centered := func(n int, std float64) []float32 {
+		v := randVec(g, n)
+		a := float32(std * math.Sqrt(3))
+		for i := range v {
+			v[i] = (v[i] + 0.5) * a // uniform [-a, a): mean 0, standard deviation std
+		}
+		return v
+	}
+	gain := func(n int) []float32 {
+		v := centered(n, 0.1)
+		for i := range v {
+			v[i]++
+		}
+		return v
+	}
+	fan := func(in int) float64 { return 1 / math.Sqrt(float64(in)) }
+	q, kv := cfg.nH*cfg.hd, cfg.nKV*cfg.hd
+	h := map[string][]float32{
+		"emb":  centered(cfg.vocab*cfg.H, 0.05),
+		"norm": gain(cfg.H),
+		"head": centered(cfg.vocab*cfg.H, fan(cfg.H)),
+	}
+	for l := 0; l < cfg.L; l++ {
+		s := itoaC(l)
+		h["in"+s] = gain(cfg.H)
+		h["post"+s] = gain(cfg.H)
+		h["q"+s] = centered(q*cfg.H, fan(cfg.H))
+		h["k"+s] = centered(kv*cfg.H, fan(cfg.H))
+		h["v"+s] = centered(kv*cfg.H, fan(cfg.H))
+		h["o"+s] = centered(cfg.H*q, fan(q))
+		h["gate"+s] = centered(cfg.I*cfg.H, fan(cfg.H))
+		h["up"+s] = centered(cfg.I*cfg.H, fan(cfg.H))
+		h["down"+s] = centered(cfg.H*cfg.I, fan(cfg.I))
+	}
+	return h
+}
+
+func cudaForwardLogitRelErr(ref, got []float32) float64 {
+	var maxRef float64
+	for _, v := range ref {
+		maxRef = math.Max(maxRef, math.Abs(float64(v)))
+	}
+	if maxRef == 0 {
+		return math.Inf(1)
+	}
+	// maxAbsDelta compares len(ref) entries and skips NaN, so a short slice or a
+	// non-finite device logit in the compared range must fail here.
+	if len(got) < len(ref) {
+		return math.Inf(1)
+	}
+	for _, v := range got[:len(ref)] {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return math.Inf(1)
+		}
+	}
+	return maxAbsDelta(ref, got) / maxRef
+}
+
+// cudaForwardParityRun steps prompt plus nGen greedy tokens through fresh cpuref and cuda synth
+// models fed the same reference-chosen tokens, and hands every step's logits pair to check.
+func cudaForwardParityRun(cb *cudaBackend, cfg synthCfg, host map[string][]float32, prompt []int, nGen int, check func(tag string, ref, got []float32)) {
+	mRef := newSynth(Default(), cfg, host)
 	mCu := newSynth(cb, cfg, host)
-
-	prompt := []int{5, 17, 42, 3, 88, 11}
-	const nGen = 8
-
+	defer mRef.kv.Free()
+	defer mCu.kv.Free()
 	var lref, lcu []float32
 	for _, id := range prompt {
-		lref = mRef.step(id)
-		lcu = mCu.step(id)
+		lref, lcu = mRef.step(id), mCu.step(id)
 	}
-	checkPair := func(tag string) {
-		c := cosine(lref, lcu)
-		if c < cudaFlashAttnCosineMin {
-			t.Fatalf("%s logit cosine %.6f < %.4f (flash-attn forward gate)", tag, c, cudaFlashAttnCosineMin)
-		}
-		aCu := cb.Argmax(mkResident(cb, []int{len(lcu)}, lcu)) // device argmax kernel
-		hRef, hCu := argmaxF32(lref), argmaxF32(lcu)
-		if aCu != hCu {
-			t.Fatalf("%s cuda Argmax kernel %d != host %d", tag, aCu, hCu)
-		}
-		if hRef != hCu {
-			t.Fatalf("%s next-token mismatch: ref=%d cuda=%d (cosine=%.6f)", tag, hRef, hCu, c)
-		}
-	}
-	checkPair("prefill")
-
+	check("prefill", lref, lcu)
 	for step := 0; step < nGen; step++ {
 		next := argmaxF32(lref)
-		lref = mRef.step(next)
-		lcu = mCu.step(next)
-		checkPair("gen" + itoaC(step))
+		lref, lcu = mRef.step(next), mCu.step(next)
+		check("gen"+itoaC(step), lref, lcu)
 	}
-	t.Logf("CUDA forward parity (fused flash attention, #486): %d prompt + %d greedy steps, argmax-exact, final cosine=%.8f gate=%.4f", len(prompt), nGen, cosine(lref, lcu), cudaFlashAttnCosineMin)
+}
+
+// TestCUDAForwardMatchesRef — the headline: a full multi-layer Llama decode forward,
+// greedily run for several tokens, on the GPU vs the CPU reference. The Approx gate:
+// every step's argmax must be EXACT (same next token), the logit cosine ≥ the recorded
+// floor, and the scale-relative max logit error within the measured CUDA error budget. The
+// per-layer Attention is the fused flash/online-softmax kernel (#486, Caps.FusedAttn), so this
+// end-to-end witness IS the flash kernel's forward-pass gate.
+func TestCUDAForwardMatchesRef(t *testing.T) {
+	cb := cudaOrSkip(t)
+	cfg := synthCfg{H: 64, L: 3, nH: 8, nKV: 2, hd: 8, I: 172, vocab: 96, eps: 1e-5, theta: 10000}
+	host := forwardParityHostWeights(cfg)
+	const nGen = 8
+
+	var worst float64
+	var worstTag string
+	steps := 0
+	for pi, prompt := range cudaForwardParityPrompts {
+		cudaForwardParityRun(cb, cfg, host, prompt, nGen, func(tag string, lref, lcu []float32) {
+			tag = "prompt" + itoaC(pi) + "/" + tag
+			c := cosine(lref, lcu)
+			if c < cudaFlashAttnCosineMin {
+				t.Fatalf("%s logit cosine %.6f < %.4f (flash-attn forward gate)", tag, c, cudaFlashAttnCosineMin)
+			}
+			rel := cudaForwardLogitRelErr(lref, lcu)
+			if !(rel <= cudaForwardLogitRelErrMax) {
+				t.Fatalf("%s logit max|Δ|/max|ref| %.3e > budget %.3e (tf32=%v cosine=%.8f)", tag, rel, cudaForwardLogitRelErrMax, tf32Enabled, c)
+			}
+			if rel > worst {
+				worst, worstTag = rel, tag
+			}
+			aCu := cb.Argmax(mkResident(cb, []int{len(lcu)}, lcu)) // device argmax kernel
+			hRef, hCu := argmaxF32(lref), argmaxF32(lcu)
+			if aCu != hCu {
+				t.Fatalf("%s cuda Argmax kernel %d != host %d", tag, aCu, hCu)
+			}
+			if hRef != hCu {
+				t.Fatalf("%s next-token mismatch: ref=%d cuda=%d (cosine=%.6f)", tag, hRef, hCu, c)
+			}
+			steps++
+		})
+	}
+	t.Logf("CUDA forward parity (fused flash attention, #486): %d prompts, %d steps, argmax-exact, worst max|Δ|/max|ref|=%.3e at %s, budget=%.3e (tf32=%v), cosine gate=%.4f",
+		len(cudaForwardParityPrompts), steps, worst, worstTag, cudaForwardLogitRelErrMax, tf32Enabled, cudaFlashAttnCosineMin)
 }
