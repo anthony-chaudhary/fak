@@ -212,6 +212,12 @@ func BenchmarkCUDADecodeCapture(b *testing.B) {
 func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 	cb := cudaOrSkip(t)
 	defer withGraphEnabled(true)()
+	// A t.Fatal while capture is open must not leave the shared stream capturing for later tests.
+	t.Cleanup(func() {
+		if cb.IsCapturing() {
+			cb.GraphAbort()
+		}
+	})
 	if !cb.Caps().GraphCompile {
 		t.Fatal("cuda backend must advertise Caps.GraphCompile=true when graphs are enabled")
 	}
@@ -246,24 +252,33 @@ func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 	}
 
 	// Under stream capture: alternating layer configs are unconditionally emitted.
-	if cb.GraphBegin() {
-		if !cb.IsCapturing() {
-			t.Fatal("#10716: IsCapturing() must report true during capture")
-		}
-		// Layer 0: paramA (key 100)
-		cb.UploadConstantParam(dummy, paramA, 100, &lastParam)
-		// Layer 1: paramB (key 200)
-		cb.UploadConstantParam(dummy, paramB, 200, &lastParam)
-		// Layer 0 again with paramB: must NOT be skipped under capture even though lastParam == 200.
-		cb.UploadConstantParam(dummy, paramB, 200, &lastParam)
+	if !cb.GraphBegin() {
+		t.Fatal("#10716: graph capture must engage with graphs enabled")
+	}
+	if !cb.IsCapturing() {
+		t.Fatal("#10716: IsCapturing() must report true during capture")
+	}
+	// Layer 0: paramA (key 100)
+	cb.UploadConstantParam(dummy, paramA, 100, &lastParam)
+	// Layer 1: paramB (key 200)
+	cb.UploadConstantParam(dummy, paramB, 200, &lastParam)
+	// Layer 0 again with paramB: must NOT be skipped under capture even though lastParam == 200.
+	cb.UploadConstantParam(dummy, paramB, 200, &lastParam)
+	if lastParam != 200 {
+		t.Fatalf("#10716: expected lastParam=200 under capture, got %d", lastParam)
+	}
+	if !constantUploadReachedUploadStage(cb, dummy, 200, &lastParam) {
+		t.Fatal("#10716: a repeated paramKey under capture was elided by the host-side upload cache")
+	}
 
-		cb.GraphAbort()
-		if cb.IsCapturing() {
-			t.Fatal("#10716: IsCapturing() must report false after capture is aborted")
-		}
+	cb.GraphAbort()
+	if cb.IsCapturing() {
+		t.Fatal("#10716: IsCapturing() must report false after capture is aborted")
 	}
 
 	cfg, host := asyncWitnessCfg()
+	// Two distinct in-vocab tokens, one per alternating model; embedDev indexes the vocab rows.
+	idA, idB := cfg.vocab-1, cfg.vocab/2
 	m0 := newSynth(cb, cfg, host)
 	m1 := newSynth(cb, cfg, host)
 
@@ -275,11 +290,11 @@ func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 		cb.Recycle()
 	}
 
-	out0, cap0 := m0.stepDevGraph(100)
+	out0, cap0 := m0.stepDevGraph(idA)
 	l0 := cb.Read(out0)
 	cb.Recycle()
 
-	out1, cap1 := m1.stepDevGraph(200)
+	out1, cap1 := m1.stepDevGraph(idB)
 	_ = cb.Read(out1)
 	cb.Recycle()
 
@@ -291,7 +306,7 @@ func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 		t.Fatal("#10716: IsCapturing() must report false after stepDevGraph completion")
 	}
 
-	out0Replay, _ := m0.stepDevGraph(100)
+	out0Replay, _ := m0.stepDevGraph(idA)
 	l0Replay := cb.Read(out0Replay)
 	cb.Recycle()
 
@@ -301,4 +316,22 @@ func TestCUDAGraphSelfContainedConstantUploadInvariant(t *testing.T) {
 	if c := cosine(l0, l0Replay); c < 0.999 {
 		t.Fatalf("graph replay cosine %.6f < 0.999 after alternating layer capture", c)
 	}
+}
+
+// constantUploadReachedUploadStage reports whether UploadConstantParam got past its host-side
+// skip cache for key: a payload one float larger than dst trips the upload stage's
+// destination-size check, while an elided call returns without touching dst.
+func constantUploadReachedUploadStage(cb *cudaBackend, dst Tensor, key uint64, last *uint64) (reached bool) {
+	oversized := make([]float32, dst.buf.(*cudaBuf).n/F32.Bytes()+1)
+	defer func() {
+		if r := recover(); r != nil {
+			op, ok := r.(*CUDAOpError)
+			if !ok || op.Site != "upload-constant-param" {
+				panic(r)
+			}
+			reached = true
+		}
+	}()
+	cb.UploadConstantParam(dst, oversized, key, last)
+	return false
 }
