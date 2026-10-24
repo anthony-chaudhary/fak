@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ghexec"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Schema identifies the versioned JSON payload for solved issues reports.
@@ -116,6 +117,7 @@ func defaultGitExecutor(ctx context.Context, dir string, args ...string) ([]byte
 		ctx = context.Background()
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
