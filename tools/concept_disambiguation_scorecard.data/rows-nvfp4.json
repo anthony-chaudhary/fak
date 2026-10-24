@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "nvfp4-scale-layout-geometry",
+      "canonical": "nvfp4ScaleLayoutGeometry (NVFP4 scale-tile geometry)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Pure checked geometry for NVFP4 scale images: computes rows*scaleCols linearLen, pads rows to 128 and scale columns to 4, and returns the padded swizzledLen and tileCols.",
+      "distinction": "Describes lengths and tile geometry only; it is not SwizzleNVFP4Scales or UnswizzleNVFP4Scales value permutation, tensor element ordering, checkpoint weight packing, state/KV layout, scale-image allocation, execution, or hardware qualification.",
+      "distinct_from": [
+        "layout-tensor",
+        "newmodel-native-weight-layout",
+        "newmodel-native-state-layout",
+        "v41-ep-panel-layout"
+      ],
+      "aliases": [],
+      "grounding": "nvfp4ScaleLayoutGeometry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

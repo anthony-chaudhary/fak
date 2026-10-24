@@ -9,7 +9,8 @@
       "distinction": "Transient wire-exchange geometry derived from routed rows and existing TPPlan owner bands, not tensor element ordering or context-region layout. Named live transport allocations do not cover RSS, device scratch, borrowed normalized input, or all-history Prefill outputs.",
       "distinct_from": [
         "layout-tensor",
-        "layout-ctxplan"
+        "layout-ctxplan",
+        "nvfp4-scale-layout-geometry"
       ],
       "aliases": [],
       "grounding": "v41EPPanelLayout",

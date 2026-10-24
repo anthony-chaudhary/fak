@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **665** (clarity 0 + coverage 665) |
-| **Crystal-clear concepts (and climbing)** | **1299** crystal of 3108 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3184 / 3849** (82.7% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **666** (clarity 0 + coverage 666) |
+| **Crystal-clear concepts (and climbing)** | **1300** crystal of 3109 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3185 / 3851** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4365 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4366 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3108 concepts - score 88.8/100 (grade B) - disambiguation-debt 665
+concept-disambiguation chart - 3109 concepts - score 88.8/100 (grade B) - disambiguation-debt 666
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1299
+  * crystal       ####################........ 1300
   o defined       ############################ 1809
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -48,7 +48,7 @@ clarity mix by family (each cell = one concept):
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
   gateway-engine   ********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (202 concept(s); 80 crystal)
   guard-gate       *********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (455 concept(s); 213 crystal)
-  layout           ***********ooooooooo (20 concept(s); 11 crystal)
+  layout           ************ooooooooo (21 concept(s); 12 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             ********************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (421 concept(s); 176 crystal)
   policy-capability *********************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (212 concept(s); 105 crystal)
@@ -70,21 +70,21 @@ coverage by family (positioned / discovered):
   attention        #####################....... 148/194
   context-ctx      ########################.... 270/316
   pool             ###############............. 46/87
-  policy-capability ########################.... 230/269
+  policy-capability ########################.... 230/270
   support-maturity ####################........ 87/124
   render-materialize ########################.... 217/251
   score-debt       #######################..... 114/139
   witness-proof    #########################... 173/197
   evict            ####################........ 57/79
   loop             ########################.... 100/117
-  layout           ################............ 20/34
+  layout           #################........... 21/35
   decision         #########################... 60/66
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3184/3849 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.7%  (3185/3851 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4365 lookup name(s) -> 3108 concept(s), 89 ambiguous
+name index: 4366 lookup name(s) -> 3109 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2480 / 5712 |
+| Boundaries drawn (mutual / total) | 2488 / 5720 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4365 over 3108 concepts |
+| Lookup names indexed | 4366 over 3109 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3108 |
+| Concepts carrying a contrast set | 3109 |
 
 ## The concepts (best verdict first)
 
@@ -768,6 +768,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | layout | **Layout (tensor)** - Tensor element physical arrangement: RowMajor, ColMajor, or other ordering |
 | * | crystal | symbol | layout | **Layout (ctxplan)** - Base/Current/Recent/Deep region profile for layout-aware planning |
 | * | crystal | symbol | layout | **MLA KV layout seam** - Attention cache variant seam interface: standardKVLayout vs mlaKVLayout |
+| * | crystal | symbol | layout | **nvfp4ScaleLayoutGeometry (NVFP4 scale-tile geometry)** - Pure checked geometry for NVFP4 scale images: computes rows*scaleCols linearLen, pads rows to 128 and scale columns to 4, and returns the padded swizzledLen and tileCols. |
 | * | crystal | symbol | layout | **V4.1 EP panel transport layout** - Checked per-owner request word counts, aggregate payload words, reply words, and explicit live-byte allowance for one V4.1 expert-parallel prefill panel exchange. |
 | * | crystal | symbol | loop | **agentGoalLoop (injected agent-loop seam for the goal endpoint)** - The function seam POST /v1/fak/agent/sessions calls to produce one governed agent-loop session, injected so the HTTP contract — envelope validation, NDJSON framing, and the session.start / call / session.end / error wire shape — can be proven as a standalone tested unit (#3258, epic #3256). |
 | * | crystal | symbol | loop | **loop_constraint.go (agent constraint seam)** - loop_constraint.go is the agent package's loop-side consumer of the out-of-band add-constraint op (#2756): applyConstraints drains the sessionctl constraint mailbox at the turn boundary and carries the tightened floor's standing directive as a system notice, and constraintDenied denies a floor-forbidden tool call before dispatch with a typed receipt carrying the closed CONSTRAINT_* reason. |
@@ -3388,8 +3389,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3232/5712 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3108 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3232/5720 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3109 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3398,7 +3399,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4365 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4366 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3413,14 +3414,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | attention | 148 | 194 | 46 |
 | context-ctx | 270 | 316 | 46 |
 | pool | 46 | 87 | 41 |
-| policy-capability | 230 | 269 | 39 |
+| policy-capability | 230 | 270 | 40 |
 | support-maturity | 87 | 124 | 37 |
 | render-materialize | 217 | 251 | 34 |
 | score-debt | 114 | 139 | 25 |
 | witness-proof | 173 | 197 | 24 |
 | evict | 57 | 79 | 22 |
 | loop | 100 | 117 | 17 |
-| layout | 20 | 34 | 14 |
+| layout | 21 | 35 | 14 |
 | decision | 60 | 66 | 6 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |

@@ -7,7 +7,7 @@
       "kind": "symbol",
       "definition": "Tensor element physical arrangement: RowMajor, ColMajor, or other ordering",
       "distinction": "Tensor element ordering - NOT Layout (ctxplan) (planning profile)",
-      "distinct_from": ["layout-ctxplan", "mla-kv-layout-seam", "kvlayout", "newmodel-native-weight-layout", "newmodel-native-state-layout", "v41-ep-panel-layout"],
+      "distinct_from": ["layout-ctxplan", "mla-kv-layout-seam", "kvlayout", "newmodel-native-weight-layout", "newmodel-native-state-layout", "v41-ep-panel-layout", "nvfp4-scale-layout-geometry"],
       "aliases": [],
       "grounding": "Layout",
       "grounding_kind": "symbol",

@@ -1700,3 +1700,10 @@ cmd/fak record of how a serve resolved its native context: the operator's reques
 HIL ComparisonScope value declaring an engine or optimization comparison on the same named hardware, used to admit a descriptive ratio only when both producer-reported arms have compatible dimensions.
 
 **Distinct from:** ComparisonEngine is a comparison-attribution discriminator, not the Engine inference execution driver. It requires the same named hardware; ComparisonHardware instead compares hardware targets without engine attribution. Structural ratio admission grants neither verified physical execution nor achieved-win credit.
+
+
+### nvfp4ScaleLayoutGeometry (NVFP4 scale-tile geometry)
+
+Pure checked geometry for NVFP4 scale images: computes rows*scaleCols linearLen, pads rows to 128 and scale columns to 4, and returns the padded swizzledLen and tileCols.
+
+**Distinct from:** Describes lengths and tile geometry only; it is not SwizzleNVFP4Scales or UnswizzleNVFP4Scales value permutation, tensor element ordering, checkpoint weight packing, state/KV layout, scale-image allocation, execution, or hardware qualification.
