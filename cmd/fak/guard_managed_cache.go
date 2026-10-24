@@ -98,6 +98,12 @@ func resolveGuardManagedCache(mode string, in guardManagedCacheInputs) (guardMan
 			return guardManagedCachePosture{mode: mode, active: false,
 				reason: "forced on REFUSED — subscription OAuth rejects the 1h TTL tier (HTTP 400 on every turn); activate with --api-key-env, or set FAK_ABLATE_TTL_1H=1 to force the tier anyway"}, nil
 		}
+		// A passthrough client supplies its own credential after this decision. An
+		// empty oauthSource does not prove API-key billing: it can still forward OAuth.
+		if in.provider == "anthropic" && in.apiKey == "" {
+			return guardManagedCachePosture{mode: mode, active: false,
+				reason: "forced on REFUSED — passthrough credential (billing unknown) may be subscription OAuth; activate with --api-key-env, or set FAK_ABLATE_TTL_1H=1 to force the tier anyway"}, nil
+		}
 		return guardManagedCachePosture{mode: mode, active: true, reason: "forced by --managed-cache on"}, nil
 	case guardManagedCacheAuto, "":
 		p := guardManagedCachePosture{mode: guardManagedCacheAuto}
@@ -107,9 +113,9 @@ func resolveGuardManagedCache(mode string, in guardManagedCacheInputs) (guardMan
 		case in.provider != "anthropic":
 			p.reason = fmt.Sprintf("provider %q has no cache_control wire", in.provider)
 		case in.oauthSource != "":
-			p.reason = "subscription OAuth (flat-rate) — pass --managed-cache on to force"
+			p.reason = "subscription OAuth (flat-rate) — activate with --api-key-env"
 		case in.apiKey == "":
-			p.reason = "passthrough credential (billing unknown) — pass --managed-cache on to force"
+			p.reason = "passthrough credential (billing unknown) — activate with --api-key-env"
 		default:
 			p.active = true
 			p.reason = "API-key billing (--api-key-env) — cache economics are operator dollars"

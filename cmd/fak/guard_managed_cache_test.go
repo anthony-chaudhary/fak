@@ -8,7 +8,7 @@ import (
 
 // The managed-cache posture rule (epic #1844 C6): AUTO activates the 1h-TTL lever only on
 // provable API-key billing on the Anthropic wire; every unknown/flat-rate posture stays
-// passive; ON/OFF override; an unknown mode fails loud (usage, not a silent default).
+// passive; ON cannot activate an unknown/OAuth Anthropic seat; an unknown mode fails loud.
 func TestResolveGuardManagedCache(t *testing.T) {
 	apiKeyBilled := guardManagedCacheInputs{provider: "anthropic", apiKey: "sk-ant-api-xyz"}
 	cases := []struct {
@@ -39,12 +39,18 @@ func TestResolveGuardManagedCache(t *testing.T) {
 		{name: "on is refused on subscription oauth and degrades to passive", mode: "on",
 			in:         guardManagedCacheInputs{provider: "anthropic", apiKey: "tok", oauthSource: "env"},
 			wantActive: false, wantReason: "REFUSED"},
+		{name: "on is refused on unknown passthrough billing", mode: "on",
+			in:         guardManagedCacheInputs{provider: "anthropic"},
+			wantReason: "billing unknown"},
 		{name: "on still forces active on api-key billing", mode: "on", in: apiKeyBilled,
 			wantActive: true, wantReason: "forced"},
 		// A non-anthropic wire has no cache_control at all, so a forced on is inert but
 		// harmless there — the OAuth refusal must not leak into other providers.
 		{name: "on stays forced on a non-anthropic wire", mode: "on",
 			in:         guardManagedCacheInputs{provider: "openai", apiKey: "sk-openai", oauthSource: "env"},
+			wantActive: true, wantReason: "forced"},
+		{name: "on stays forced on non-anthropic passthrough", mode: "on",
+			in:         guardManagedCacheInputs{provider: "openai"},
 			wantActive: true, wantReason: "forced"},
 		{name: "off disables even on api-key billing", mode: "off", in: apiKeyBilled, wantReason: "disabled"},
 		{name: "unknown mode fails loud", mode: "sometimes", in: apiKeyBilled, wantErr: true},
@@ -66,6 +72,9 @@ func TestResolveGuardManagedCache(t *testing.T) {
 			}
 			if !strings.Contains(got.reason, tc.wantReason) {
 				t.Fatalf("reason %q does not carry %q", got.reason, tc.wantReason)
+			}
+			if tc.in.provider == "anthropic" && !got.active && strings.Contains(got.reason, "pass --managed-cache on to force") {
+				t.Fatalf("passive reason must not recommend a refused override: %q", got.reason)
 			}
 			// The banner is the operator's only view of the posture: it must state
 			// ACTIVE vs passive and carry the reason verbatim.
