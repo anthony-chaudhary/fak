@@ -56,9 +56,52 @@ func cudaArchiveImageRequirements(repoRoot, arch string) (sass, ptx []string, er
 			return nil, nil, fmt.Errorf("%w: invalid image architecture", ErrCUDAImageAuditInvalid)
 		}
 	}
-	sort.Strings(sass)
-	sort.Strings(ptx)
+	sortCUDAImageArchitectures(sass)
+	sortCUDAImageArchitectures(ptx)
 	return sass, ptx, nil
+}
+
+func sortCUDAImageArchitectures(arches []string) {
+	sort.Slice(arches, func(i, j int) bool {
+		a, aSuffix, aOK := cudaImageArchitectureKey(arches[i])
+		b, bSuffix, bOK := cudaImageArchitectureKey(arches[j])
+		if aOK != bOK {
+			// Ordering must not add validation to the requested architecture matrix.
+			return aOK
+		}
+		if aOK {
+			if len(a) != len(b) {
+				return len(a) < len(b)
+			}
+			if a != b {
+				return a < b
+			}
+			if aSuffix != bSuffix {
+				return aSuffix < bSuffix
+			}
+		}
+		return arches[i] < arches[j]
+	})
+}
+
+func cudaImageArchitectureKey(arch string) (digits, suffix string, ok bool) {
+	prefix, digits, found := strings.Cut(arch, "_")
+	if !found || (prefix != "sm" && prefix != "compute") || digits == "" {
+		return "", "", false
+	}
+	if last := digits[len(digits)-1]; last == 'a' || last == 'f' {
+		digits, suffix = digits[:len(digits)-1], digits[len(digits)-1:]
+	}
+	if digits == "" {
+		return "", "", false
+	}
+	for i := range digits {
+		if digits[i] < '0' || digits[i] > '9' {
+			return "", "", false
+		}
+	}
+	// Compare digit lengths, then digits, without overflowing or changing token identity.
+	return strings.TrimLeft(digits, "0"), suffix, true
 }
 
 func cudaImageAuditTool(tc *Toolchain) (string, error) {
@@ -147,7 +190,7 @@ func parseCUDAImageList(data []byte, kind string) ([]string, int, error) {
 	for arch := range set {
 		arches = append(arches, arch)
 	}
-	sort.Strings(arches)
+	sortCUDAImageArchitectures(arches)
 	return arches, count, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,64 @@ import (
 	"strings"
 	"testing"
 )
+
+// fak-test:justify why=regression when=changed:internal/computebuild/**
+// fak-test:runtime fast est=10ms
+func TestCUDAArchiveImageArchOrder(t *testing.T) {
+	t.Parallel()
+	// Synthetic declarations and listings, not captured CUDA toolkit output.
+	declared := []string{
+		"sm_120", "sm_100f", "sm_100000000000000000000", "sm_103a", "sm_100",
+		"sm_80", "sm_100a", "sm_090a", "sm_99999999999999999999", "sm_103", "sm_90a",
+	}
+	wantSASS := []string{
+		"sm_80", "sm_090a", "sm_90a", "sm_100", "sm_100a", "sm_100f", "sm_103",
+		"sm_103a", "sm_120", "sm_99999999999999999999", "sm_100000000000000000000",
+	}
+	wantPTX := []string{
+		"compute_80", "compute_090a", "compute_90a", "compute_100", "compute_100a", "compute_100f", "compute_103",
+		"compute_103a", "compute_120", "compute_99999999999999999999", "compute_100000000000000000000",
+	}
+	root := t.TempDir()
+	matrix := filepath.Join(root, "internal", "compute", "cuda_arch.txt")
+	writeFixtureFile(t, matrix, strings.Join(declared, "\n")+"\n")
+	t.Run("requested", func(t *testing.T) {
+		sass, ptx, err := cudaArchiveImageRequirements(root, "")
+		if err != nil || !reflect.DeepEqual(sass, wantSASS) || !reflect.DeepEqual(ptx, []string{"compute_90a"}) {
+			t.Fatalf("requirements = %v, %v, %v; want %v and last-declared compute_90a", sass, ptx, err, wantSASS)
+		}
+	})
+	for _, spec := range []struct {
+		kind, extension string
+		want            []string
+	}{{"ELF", "cubin", wantSASS}, {"PTX", "ptx", wantPTX}} {
+		t.Run(spec.kind, func(t *testing.T) {
+			var listing strings.Builder
+			for i, arch := range append(append([]string(nil), declared...), "sm_100") {
+				fmt.Fprintf(&listing, "%s file %d: synthetic.%s.%s\n", spec.kind, i+1, arch, spec.extension)
+			}
+			arches, count, err := parseCUDAImageList([]byte(listing.String()), spec.kind)
+			if err != nil || !reflect.DeepEqual(arches, spec.want) || count != len(declared)+1 {
+				t.Fatalf("listing = %v, count %d, %v; want %v, count %d", arches, count, err, spec.want, len(declared)+1)
+			}
+			malformed := fmt.Sprintf("%s file 1: synthetic.sm_90af.%s\n", spec.kind, spec.extension)
+			if _, _, err := parseCUDAImageList([]byte(malformed), spec.kind); !errors.Is(err, ErrCUDAImageAuditInvalid) {
+				t.Fatalf("malformed architecture error = %v; want ErrCUDAImageAuditInvalid", err)
+			}
+		})
+	}
+	t.Run("requested-validation-unchanged", func(t *testing.T) {
+		writeFixtureFile(t, matrix, "sm_100\nsm_future\nsm_80\nsm_80\n")
+		sass, ptx, err := cudaArchiveImageRequirements(root, "")
+		counts := make(map[string]int)
+		for _, arch := range sass {
+			counts[arch]++
+		}
+		if err != nil || !reflect.DeepEqual(counts, map[string]int{"sm_100": 1, "sm_future": 1, "sm_80": 2}) || !reflect.DeepEqual(ptx, []string{"compute_80"}) {
+			t.Fatalf("requested token preservation changed: %v, %v, %v", sass, ptx, err)
+		}
+	})
+}
 
 func cudaImageAuditFixture(t *testing.T) (string, *Toolchain) {
 	t.Helper()
