@@ -135,7 +135,7 @@ jobs:
         working-directory: internal/compute
         run: |
           cc="${{ matrix.arch }}"; cc="${cc#sm_}"
-          nvcc -O3 -std=c++14 -gencode "arch=compute_${cc},code=${{ matrix.arch }}" \
+          nvcc -O3 -std=c++17 -gencode "arch=compute_${cc},code=${{ matrix.arch }}" \
             -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
           ar rcs libfakcuda.a cuda_kernels.o
           echo "built libfakcuda.a for ${{ matrix.arch }} ($(wc -c < libfakcuda.a) bytes)"
@@ -169,7 +169,7 @@ jobs:
               asm volatile("tcgen05.not_a_real_mnemonic.b32;");
           }
           PROBE
-          if nvcc -O3 -std=c++14 -gencode "arch=compute_${cc},code=${{ matrix.arch }}" \
+          if nvcc -O3 -std=c++17 -gencode "arch=compute_${cc},code=${{ matrix.arch }}" \
                -ccbin g++ -Xcompiler -fPIC -c _fak_blackwell_negative_probe.cu -o _fak_probe.o 2>_fak_probe.log; then
             echo "TOOTHLESS: nvcc ACCEPTED an invalid Blackwell intrinsic for ${{ matrix.arch }} — the compile gate is not doing real per-arch codegen." >&2
             sed 's/^/  nvcc| /' _fak_probe.log || true

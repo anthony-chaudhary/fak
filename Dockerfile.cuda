@@ -55,7 +55,7 @@ RUN cd internal/compute \
          gencode=""; while read -r arch; do cc="${arch#sm_}"; gencode="$gencode -gencode arch=compute_${cc},code=${arch}"; done < cuda_arch.txt; \
          gencode="$gencode -gencode arch=compute_${cc},code=compute_${cc}"; \
        fi \
-    && nvcc -O3 -std=c++14 $gencode -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o \
+    && nvcc -O3 -std=c++17 $gencode -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o \
     && ar rcs libfakcuda.a cuda_kernels.o
 ENV CGO_ENABLED=1 \
     CGO_CFLAGS="-I/usr/local/cuda/include" \

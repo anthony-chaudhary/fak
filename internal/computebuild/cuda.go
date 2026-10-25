@@ -94,7 +94,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 
 	if tc.IsWindows {
 		obj := filepath.Join(pkgDir, "cuda_kernels.obj")
-		nvccArgs := []string{"-O3", "-std=c++14"}
+		nvccArgs := []string{"-O3", "-std=c++17"}
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		nvccArgs = append(nvccArgs, "-Xcompiler", "/MD", "-c", "cuda_kernels.cu", "-o", obj)
 		if err := RunCmd(ctx, tc.NVCC, nvccArgs, pkgDir, env, stdout, os.Stderr); err != nil {
@@ -103,7 +103,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		objs = append(objs, obj)
 	} else {
 		obj := filepath.Join(pkgDir, "cuda_kernels.o")
-		nvccArgs := []string{"-O3", "-std=c++14"}
+		nvccArgs := []string{"-O3", "-std=c++17"}
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		if tc.CXX != "" {
 			nvccArgs = append(nvccArgs, "-ccbin", tc.CXX)
@@ -120,7 +120,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if enableNCCL {
 			for _, ncclFile := range []string{"cuda_nccl.cu", "cuda_nccl_pg.cu"} {
 				ncclObj := filepath.Join(pkgDir, strings.TrimSuffix(ncclFile, ".cu")+".o")
-				nArgs := []string{"-O3", "-std=c++14"}
+				nArgs := []string{"-O3", "-std=c++17"}
 				nArgs = append(nArgs, gencodeArgs...)
 				if tc.CXX != "" {
 					nArgs = append(nArgs, "-ccbin", tc.CXX)

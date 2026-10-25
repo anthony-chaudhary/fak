@@ -120,7 +120,7 @@ $obj = Join-Path $PkgDir 'cuda_kernels.obj'
 $lib = Join-Path $PkgDir 'libfakcuda.a'
 Push-Location $PkgDir
 try {
-  Invoke-Checked $nvcc @('-O3', '-std=c++14') @NvccArchArgs @('-Xcompiler', '/MD', '-c', 'cuda_kernels.cu', '-o', $obj)
+  Invoke-Checked $nvcc @('-O3', '-std=c++17') @NvccArchArgs @('-Xcompiler', '/MD', '-c', 'cuda_kernels.cu', '-o', $obj)
   $ar = Get-Command ar.exe -ErrorAction SilentlyContinue
   if (-not $ar) { $ar = Get-Command llvm-ar.exe -ErrorAction SilentlyContinue }
   if ($ar) {
