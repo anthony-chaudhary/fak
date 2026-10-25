@@ -90,6 +90,16 @@
       "copyright_notice": "No repository-specific copyright line is present; retain the SPDX source header and Apache-2.0 attribution.",
       "notice_file": "NONE",
       "notice_rule": "No root NOTICE exists at the pinned revision; retain LICENSE, source headers, attribution, and changed-file notices required by Apache-2.0."
+    },
+    {
+      "id": "project-maya",
+      "repository": "https://github.com/mw00/project-maya",
+      "sha": "4615f346d9311dd1ce9f5738ab04446f023a6e42",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "copyright_notice": "Copyright (c) 2026 Peasant Smith and the Project Maya contributors; Copyright (c) 2026 Niko1221 and the Strata contributors",
+      "notice_file": "LICENSE",
+      "notice_rule": "Retain both copyright lines and the permission notice in copies or substantial portions."
     }
   ],
   "kernels": [
@@ -137,6 +147,15 @@
       "decision": "ADAPT",
       "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/mmq.cuh, mmq-load-tiles.cuh, mmq-vec-dot.cuh,\n// mmq-config-ampere.cuh, mma.cuh, quantize.cu and common.cuh at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
       "parity_witness": "internal/compute/cuda_q4k_prefill_arms_cuda_test.go"
+    },
+    {
+      "id": "qwen38-cuda-gdn-prompt-panel",
+      "upstream": "project-maya",
+      "source_path": "src/prefill/kernels.cu",
+      "destination": "internal/compute/cuda/qwen35_gdn.cuh",
+      "decision": "ADAPT",
+      "attribution": "Prompt-panel tiling, column split, and split out-norm adapted from mw00/project-maya\n// src/prefill/kernels.cu (gdn_conv_tiled_kernel, gdn_rec_cols_kernel, gdn_out_norm_kernel) at\n// 4615f346d9311dd1ce9f5738ab04446f023a6e42 (MIT; Copyright (c) 2026 Peasant Smith and the\n// Project Maya contributors; Copyright (c) 2026 Niko1221 and the Strata contributors).",
+      "parity_witness": "internal/compute/cuda_qwen35_gdn_panel_cols_test.go"
     }
   ]
 }

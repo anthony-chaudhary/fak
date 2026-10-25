@@ -89,7 +89,7 @@ func TestQwen35GDNAllocationsPreserveDecodeAndSequenceLayouts(t *testing.T) {
 		wantFirstName, wantQ  string
 	}{
 		{"decode", "", "_", 0, 0, []int{convDim}, []int{hidden}, "mixed", "q_norm"},
-		{"sequence-api", "", "_", 0, 3, []int{convDim}, []int{3, hidden}, "mixed", "q_norm"},
+		{"sequence-api", "", "_", 3, 3, []int{3, convDim}, []int{3, hidden}, "mixed", "q_norm"},
 		{"resident-panel", "gdn-", "-", 3, 3, []int{3, convDim}, []int{3, hidden}, "gdn-mixed", "gdn-q-norm"},
 	}
 	for _, tt := range tests {

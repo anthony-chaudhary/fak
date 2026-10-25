@@ -9,6 +9,14 @@ import "C"
 
 import "sync/atomic"
 
+// qwen35GDNPanelMaxKeyHeadDim mirrors kQwen35GDNPanelMaxKeyHeadDim (cuda/qwen35_gdn.cuh): the
+// prompt panel keeps one key-dimension column of state in registers, so a wider key head is a
+// typed geometry refusal before any allocation or launch, never a device fault.
+const (
+	qwen35GDNPanelMaxKeyHeadDim = 128
+	qwen35GDNPanelKeyHeadReason = "the CUDA GDN prompt panel supports key_head_dim <= 128"
+)
+
 // Sequence algorithm adapted from llama.cpp gated_delta_net.cu at
 // 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).
 func (c *cudaBackend) Qwen35GDNSequence(
@@ -32,12 +40,15 @@ func (c *cudaBackend) Qwen35GDNSequence(
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
+	if keyHeadDim > qwen35GDNPanelMaxKeyHeadDim {
+		return Tensor{}, Tensor{}, Tensor{}, &Qwen35GDNGeometryError{Operand: "geometry", Reason: qwen35GDNPanelKeyHeadReason}
+	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if err := c.validateQwen35GDNOperands(operands, convState, recurrentState); err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
-	allocations := qwen35GDNAllocations("", "_", 0, tokens, hidden, keyDim, valueDim, numValueHeads, convDim)
+	allocations := qwen35GDNAllocations("", "_", tokens, tokens, hidden, keyDim, valueDim, numValueHeads, convDim)
 	tensors, buffers, allocErr := c.allocateQwen35GDN(allocations, "qwen35-gdn-sequence-")
 	if allocErr != nil {
 		return Tensor{}, Tensor{}, Tensor{}, allocErr

@@ -186,15 +186,26 @@ __global__ void k_qwen35_gdn_conv_state(
 
 // Normalize each distinct q/k head once. q is additionally scaled by 1/sqrt(kHd),
 // matching the existing CPU recurrence before value-head group expansion.
-// Panel convolution computes every prompt row from the immutable incoming history and panel,
-// then commits only the final K-1 inputs as the next recurrent history. Channels are independent.
-__global__ void k_qwen35_gdn_conv_panel(
-    const float *mixed, const float *convW, float *convState, float *convOut,
+// Prompt-panel tiling, column split, and split out-norm adapted from mw00/project-maya
+// src/prefill/kernels.cu (gdn_conv_tiled_kernel, gdn_rec_cols_kernel, gdn_out_norm_kernel) at
+// 4615f346d9311dd1ce9f5738ab04446f023a6e42 (MIT; Copyright (c) 2026 Peasant Smith and the
+// Project Maya contributors; Copyright (c) 2026 Niko1221 and the Strata contributors).
+// Every element keeps the expression and order of the one-block-per-head panel it replaced,
+// so prompt outputs and recurrent/conv state stay bitwise that panel's (#9359).
+
+// Panel convolution computes every prompt row from the immutable incoming history and panel.
+// Rows depend only on inputs, so grid.y tiles the prompt; k_qwen35_gdn_conv_panel_history
+// commits the final K-1 inputs after every tile has read the incoming history.
+constexpr int kQwen35GDNConvTile = 64;
+__global__ void k_qwen35_gdn_conv_panel_tiled(
+    const float *mixed, const float *convW, const float *convState, float *convOut,
     int tokens, int convDim, int K) {
   int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= convDim) return;
+  int t0 = blockIdx.y * kQwen35GDNConvTile;
+  int t1 = t0 + kQwen35GDNConvTile < tokens ? t0 + kQwen35GDNConvTile : tokens;
   const float *cw = convW + (size_t)c * K;
-  for (int token = 0; token < tokens; ++token) {
+  for (int token = t0; token < t1; ++token) {
     float acc = 0.0f;
 #pragma unroll 1
     for (int j = 0; j < K; ++j) {
@@ -205,6 +216,12 @@ __global__ void k_qwen35_gdn_conv_panel(
     }
     convOut[(size_t)token * convDim + c] = qwen35_gdn_silu(acc);
   }
+}
+
+__global__ void k_qwen35_gdn_conv_panel_history(
+    const float *mixed, float *convState, int tokens, int convDim, int K) {
+  int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= convDim) return;
   if (K > 1) {
     for (int j = 0; j < K - 1; ++j) {
       int panel = tokens - (K - 1) + j;
@@ -327,82 +344,107 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
   }
 }
 
-// One persistent block per value head owns its recurrent state and advances the whole prompt
-// in token order on device. Different heads are independent; no grid-wide synchronization is needed.
-__global__ void k_qwen35_gdn_recurrent_panel(
+// Prompt gate scalars per (token, value head), evaluated once rather than once per value column
+// (their FP64 transcendentals dominated the old per-head panel). In place: b becomes beta and a
+// becomes decay; both are sequence scratch read only by k_qwen35_gdn_recurrent_panel_cols.
+__global__ void k_qwen35_gdn_gate_panel(
+    float *b, float *a, const float *aLog, const float *dtBias, int tokens, int nV) {
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= (size_t)tokens * nV) return;
+  int h = (int)(i % (size_t)nV);
+  float beta = 1.0f / (1.0f + (float)exp((double)-b[i]));
+  float aa = (float)exp((double)aLog[h]);
+  float dt = qwen35_gdn_softplus(a[i] + dtBias[h]);
+  b[i] = beta;
+  a[i] = (float)exp((double)(-aa * dt));
+}
+
+// One thread per (value head, value column) advances the whole prompt in token order, holding
+// its column of recurrent_state[h,:,d] in registers; a block covers kQwen35GDNPanelCols columns
+// of one head and stages the token's q/k rows in shared memory. It writes the raw readout; the
+// head-coupled norm runs in k_qwen35_gdn_out_norm_panel.
+constexpr int kQwen35GDNPanelCols = 32;
+constexpr int kQwen35GDNPanelMaxKeyHeadDim = 128;
+__global__ void __launch_bounds__(kQwen35GDNPanelCols) k_qwen35_gdn_recurrent_panel_cols(
     const float *convOut, const float *qNorm, const float *kNorm,
-    const float *z, const float *b, const float *a,
-    const float *aLog, const float *dtBias, const float *norm,
-    float *state, float *core, int tokens, int convDim,
-    int nK, int nV, int kHd, int vHd, float eps) {
-  int h = blockIdx.x;
-  int d = threadIdx.x;
+    const float *beta, const float *decay, float *state, float *readout,
+    int tokens, int convDim, int nK, int nV, int kHd, int vHd) {
+  constexpr int maxKHd = kQwen35GDNPanelMaxKeyHeadDim;
+  int colBlocks = (vHd + kQwen35GDNPanelCols - 1) / kQwen35GDNPanelCols;
+  int h = blockIdx.x / colBlocks;
+  int d = (blockIdx.x - h * colBlocks) * kQwen35GDNPanelCols + threadIdx.x;
   if (h >= nV) return;
-  int repeat = nV / nK;
-  int kh = h / repeat;
+  bool live = d < vHd;
+  int kh = h / (nV / nK);
   int keyDim = nK * kHd;
-  extern __shared__ float ss[];
-  constexpr int maxKHd = 128;
+  __shared__ float sq[maxKHd], sk[maxKHd];
   float localState[maxKHd];
-  if (d < vHd) {
+  if (live) {
 #pragma unroll
     for (int i = 0; i < maxKHd; ++i) {
       if (i < kHd) localState[i] = state[((size_t)h * kHd + i) * vHd + d];
     }
   }
-
   for (int token = 0; token < tokens; ++token) {
     const float *qRow = qNorm + ((size_t)token * nK + kh) * kHd;
     const float *kRow = kNorm + ((size_t)token * nK + kh) * kHd;
-    const float *convRow = convOut + (size_t)token * convDim;
-    const float *zRow = z + (size_t)token * nV * vHd;
-    const float *bRow = b + (size_t)token * nV;
-    const float *aRow = a + (size_t)token * nV;
-    float beta = 1.0f / (1.0f + (float)exp((double)-bRow[h]));
-    float aa = (float)exp((double)aLog[h]);
-    float dt = qwen35_gdn_softplus(aRow[h] + dtBias[h]);
-    float decay = (float)exp((double)(-aa * dt));
-    float readout = 0.0f;
-    if (d < vHd) {
-      float kvmem = 0.0f;
+    __syncthreads();
+    for (int i = threadIdx.x; i < kHd; i += kQwen35GDNPanelCols) { sq[i] = qRow[i]; sk[i] = kRow[i]; }
+    __syncthreads();
+    if (!live) continue;
+    float tokenBeta = beta[(size_t)token * nV + h];
+    float tokenDecay = decay[(size_t)token * nV + h];
+    float kvmem = 0.0f;
 #pragma unroll
-      for (int i = 0; i < maxKHd; ++i) {
-        if (i < kHd) {
-          float sd = localState[i] * decay;
-          localState[i] = sd;
-          kvmem += sd * kRow[i];
-        }
-      }
-      float v = convRow[2 * keyDim + h * vHd + d];
-      float delta = (v - kvmem) * beta;
-#pragma unroll
-      for (int i = 0; i < maxKHd; ++i) {
-        if (i < kHd) {
-          float sd = localState[i] + kRow[i] * delta;
-          localState[i] = sd;
-          readout += sd * qRow[i];
-        }
+    for (int i = 0; i < maxKHd; ++i) {
+      if (i < kHd) {
+        float sd = localState[i] * tokenDecay;
+        localState[i] = sd;
+        kvmem += sd * sk[i];
       }
     }
-    ss[d] = d < vHd ? readout * readout : 0.0f;
-    __syncthreads();
-    for (int off = blockDim.x / 2; off > 0; off >>= 1) {
-      if (d < off) ss[d] += ss[d + off];
-      __syncthreads();
+    float v = convOut[(size_t)token * convDim + 2 * keyDim + h * vHd + d];
+    float delta = (v - kvmem) * tokenBeta;
+    float out = 0.0f;
+#pragma unroll
+    for (int i = 0; i < maxKHd; ++i) {
+      if (i < kHd) {
+        float sd = localState[i] + sk[i] * delta;
+        localState[i] = sd;
+        out += sd * sq[i];
+      }
     }
-    if (d < vHd) {
-      float inv = (float)(1.0 / sqrt((double)ss[0] / (double)vHd + (double)eps));
-      int vd = h * vHd + d;
-      core[(size_t)token * nV * vHd + vd] = norm[d] * (readout * inv) * qwen35_gdn_silu(zRow[vd]);
-    }
-    __syncthreads();
+    readout[(size_t)token * nV * vHd + (size_t)h * vHd + d] = out;
   }
-  if (d < vHd) {
+  if (live) {
 #pragma unroll
     for (int i = 0; i < maxKHd; ++i) {
       if (i < kHd) state[((size_t)h * kHd + i) * vHd + d] = localState[i];
     }
   }
+}
+
+// Gated out-norm, in place on core: one block per (token, value head) reduces readout^2 over the
+// same power-of-two shared-memory tree as the decode kernel and applies
+// norm[d] * readout * RMS^-1 * silu(z). The inverse RMS is evaluated once per block.
+__global__ void k_qwen35_gdn_out_norm_panel(
+    const float *z, const float *norm, float *core, int nV, int vHd, float eps) {
+  int token = blockIdx.x;
+  int h = blockIdx.y;
+  int d = threadIdx.x;
+  extern __shared__ float ss[];
+  __shared__ float inv;
+  size_t base = (size_t)token * nV * vHd + (size_t)h * vHd;
+  float readout = d < vHd ? core[base + d] : 0.0f;
+  ss[d] = d < vHd ? readout * readout : 0.0f;
+  __syncthreads();
+  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+    if (d < off) ss[d] += ss[d + off];
+    __syncthreads();
+  }
+  if (d == 0) inv = (float)(1.0 / sqrt((double)ss[0] / (double)vHd + (double)eps));
+  __syncthreads();
+  if (d < vHd) core[base + d] = norm[d] * (readout * inv) * qwen35_gdn_silu(z[base + d]);
 }
 __global__ void k_qwen35_gdn_out_proj(
     const void *w, const float *scale, int q8,
@@ -600,6 +642,9 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       !dInQKV || !dInZ || !dInB || !dInA || !dConvW || !dALog || !dDtBias || !dNorm ||
       !dOutW || !dConvState || !dRecurrentState || !dMixed || !dZ || !dB || !dA ||
       !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
+  // The panel keeps one key-dimension column of state in registers and the q/k rows in
+  // fixed shared arrays; a wider key head is refused, never truncated.
+  if (kHd > kQwen35GDNPanelMaxKeyHeadDim || nV % nK != 0) return -1;
   cudaGetLastError();
   if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
     int dq = q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
@@ -616,8 +661,13 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   int status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int convBlocks = (convDim + 255) / 256;
-  k_qwen35_gdn_conv_panel<<<convBlocks, 256, 0, g_stream>>>(
+  int convTiles = (tokens + kQwen35GDNConvTile - 1) / kQwen35GDNConvTile;
+  k_qwen35_gdn_conv_panel_tiled<<<dim3(convBlocks, convTiles), 256, 0, g_stream>>>(
       dMixed, dConvW, dConvState, dConvOut, tokens, convDim, convKernel);
+  status = qwen35_gdn_launch_status(3);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  k_qwen35_gdn_conv_panel_history<<<convBlocks, 256, 0, g_stream>>>(
+      dMixed, dConvState, tokens, convDim, convKernel);
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int qThreads = qwen35_gdn_threads(kHd);
@@ -625,10 +675,19 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       dConvOut, dQNorm, dKNorm, tokens, convDim, nK, kHd);
   status = qwen35_gdn_launch_status(4);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
+  size_t gates = (size_t)tokens * nV;
+  k_qwen35_gdn_gate_panel<<<(unsigned)((gates + 255) / 256), 256, 0, g_stream>>>(
+      dB, dA, dALog, dDtBias, tokens, nV);
+  status = qwen35_gdn_launch_status(5);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  int colBlocks = (vHd + kQwen35GDNPanelCols - 1) / kQwen35GDNPanelCols;
+  k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
+      dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd);
+  status = qwen35_gdn_launch_status(5);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
   int vThreads = qwen35_gdn_threads(vHd);
-  k_qwen35_gdn_recurrent_panel<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
-      dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd, rmsEps);
+  k_qwen35_gdn_out_norm_panel<<<dim3(tokens, nV), vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+      dZ, dNorm, dCore, nV, vHd, rmsEps);
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   if (tokens >= 128 && outWQ8) {

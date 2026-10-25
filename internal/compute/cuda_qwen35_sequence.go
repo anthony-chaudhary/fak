@@ -49,6 +49,9 @@ func validateQwen35SequenceGeometry(req Qwen35SequencePrefillRequest) error {
 	if req.KeyHeadDim > 1024 || req.ValueHeadDim > 1024 {
 		return qwen35SequenceFailure("geometry", -1, "GDN state dimensions must fit one CUDA block")
 	}
+	if req.KeyHeadDim > qwen35GDNPanelMaxKeyHeadDim {
+		return qwen35SequenceFailure("geometry", -1, qwen35GDNPanelKeyHeadReason)
+	}
 	if !(req.RMSNormEpsilon > 0) || math.IsNaN(float64(req.RMSNormEpsilon)) || math.IsInf(float64(req.RMSNormEpsilon), 0) {
 		return qwen35SequenceFailure("geometry", -1, "RMS epsilon must be finite and positive")
 	}
