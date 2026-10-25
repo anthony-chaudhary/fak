@@ -543,7 +543,9 @@
       "definition": "Caps.FusedAttn \u2014 the backend capability bit advertising it can lower the Attention op to ONE fused flash/online-softmax (paged) kernel (e.g. the CUDA backend, issue #486).",
       "distinction": "It is the capability seam the model loop type-asserts, NOT the kernel concept itself (PagedAttention).",
       "distinct_from": [
-        "PagedAttention (paged KV kernel)"
+        "PagedAttention (paged KV kernel)",
+        "cuda-device-op-source-declaration",
+        "cuda-device-weight-dtype-declaration"
       ],
       "aliases": [],
       "grounding": "fusedattn",

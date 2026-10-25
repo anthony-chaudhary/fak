@@ -1714,3 +1714,17 @@ Pure checked geometry for NVFP4 scale images: computes rows*scaleCols linearLen,
 Machine-readable trajectory audit refusal code emitted when an OpenCode source root is present but its corpus parser is unavailable, marking the source unscanned rather than successfully empty.
 
 **Distinct from:** A source-specific audit refusal, not a measured coverage fraction or general capability-support claim; an absent optional root remains non-refusing, while a present root contributes one refused record without exposing its absolute path.
+
+
+### CUDADeviceOpSupported
+
+Pure lookup of a supplied CUDA weight-operation declaration table for an operation, exact storage/scale format and covered generic architecture; missing, duplicate, unknown or malformed rows fail closed.
+
+**Distinct from:** A source declaration lookup, not the actual backend capability advertised by Caps.FusedAttn, a linked-artifact census, device probe, model admission, numerical parity or hardware-performance witness.
+
+
+### cudaDeviceWeightDtypeSupported
+
+Private dtype-only predicate for membership in the CUDA source-declared MatMul format table, preserving the existing nine accepted weight dtypes without adding architecture admission.
+
+**Distinct from:** A dtype-only source declaration membership test without target admission, unlike CUDADeviceOpSupported which checks a supplied operation/format table and generic architecture. Neither predicate is Caps.FusedAttn actual backend lowering capability, a linked-artifact census, model admission or hardware qualification.

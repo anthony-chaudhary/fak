@@ -102,5 +102,45 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "cuda-device-op-source-declaration",
+      "canonical": "CUDADeviceOpSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Pure lookup of a supplied CUDA weight-operation declaration table for an operation, exact storage/scale format and covered generic architecture; missing, duplicate, unknown or malformed rows fail closed.",
+      "distinction": "A source declaration lookup, not the actual backend capability advertised by Caps.FusedAttn, a linked-artifact census, device probe, model admission, numerical parity or hardware-performance witness.",
+      "distinct_from": [
+        "x-attention-fusedattn",
+        "cuda-device-weight-dtype-declaration"
+      ],
+      "aliases": [],
+      "grounding": "CUDADeviceOpSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cuda-device-weight-dtype-declaration",
+      "canonical": "cudaDeviceWeightDtypeSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Private dtype-only predicate for membership in the CUDA source-declared MatMul format table, preserving the existing nine accepted weight dtypes without adding architecture admission.",
+      "distinction": "A dtype-only source declaration membership test without target admission, unlike CUDADeviceOpSupported which checks a supplied operation/format table and generic architecture. Neither predicate is Caps.FusedAttn actual backend lowering capability, a linked-artifact census, model admission or hardware qualification.",
+      "distinct_from": [
+        "x-attention-fusedattn",
+        "cuda-device-op-source-declaration"
+      ],
+      "aliases": [],
+      "grounding": "cudaDeviceWeightDtypeSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }
