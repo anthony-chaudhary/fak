@@ -102,6 +102,7 @@ func init() {
 		faultLatch:  NewDeviceFaultLatch("cuda", cudaFaultReconstructBudget),
 	}
 	Register(cudaDev)
+	initCUDAQ4KPrefillArm(int(sm))
 	if cudaTimestampProfileEnabled(os.Getenv(cudaTimestampProfileEnv)) {
 		installCUDAKernelProfile()
 	}
