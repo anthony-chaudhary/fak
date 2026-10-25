@@ -77,3 +77,30 @@ func TestCurrentGuardPosturesAreClassified(t *testing.T) {
 		}
 	}
 }
+
+// Operator approval/revocation examples are retained documentation, not harness
+// launch entry points. Keep their classification exact rather than broadening
+// the scanner or admitting arbitrary guard commands.
+func TestOperatorApprovalOccurrencesAreClassified(t *testing.T) {
+	want := []struct{ path, line string }{
+		{"docs/integrations/openai-codex.md", "fak guard allow --user --approve ap-0123456789ab"},
+		{"docs/integrations/openai-codex.md", "fak guard allow --user --approve --remove ap-0123456789ab"},
+		{"docs/notes/GUARD-OPERATOR-APPROVAL-2026-10-23.md", "fak guard allow --user --approve ap-0123456789ab"},
+	}
+	for _, occurrence := range want {
+		count := 0
+		for _, retained := range RetainedOccurrences {
+			if retained.Path == occurrence.path && retained.Line == occurrence.line {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s: exact operator example %q has %d classifications, want 1", occurrence.path, occurrence.line, count)
+		}
+	}
+	for _, retained := range RetainedOccurrences {
+		if retained.Path == "docs/integrations/openai-codex.md" && retained.Line == "kernel verdict. `default_open`, `fak guard allow`, and confirmation tokens do not" {
+			t.Error("removed operator-approval wording remains in the occurrence inventory")
+		}
+	}
+}
