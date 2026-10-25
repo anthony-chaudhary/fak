@@ -188,6 +188,13 @@ func TestGatewayHomepageCapturedRichDashboardRoutesDoNotAliasGateway(t *testing.
 }
 
 func TestDashboardRoutesAppendPrivacySafeUsageRows(t *testing.T) {
+	// This fixture must not depend on engines registered by earlier tests.
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	t.Cleanup(func() { abi.RegisterEngine("mock", engine.MockEngine) })
+	abi.RegisterEngine("mock", engine.MockEngine)
+
 	path := filepath.Join(t.TempDir(), "gateway-usage.jsonl")
 	prior := dashboardUsageLedgerPath
 	dashboardUsageLedgerPath = path
