@@ -11,10 +11,13 @@ import (
 // The prompt panel (tiled conv, hoisted gates, column-split recurrence, split out-norm; #9359)
 // keeps every element's expression and order, so a whole-prompt sequence must reproduce the
 // token-by-token decode loop bit for bit: per-token output, final conv state and final
-// recurrent state. Qwen3.8-27B axes put 4 column blocks on each value head and 3 conv tiles
-// (one ragged) on 130 tokens; the ragged geometry leaves part of a column block idle; a
-// 2-token prompt shifts part of the old conv history; K=1 has no history at all.
-// fak-test:runtime fast est=2s
+// recurrent state. The decode loop runs twice, once on the register-state recurrence kernel
+// and once forced onto the global-state kernel, so both decode paths match the panel and each
+// other. Qwen3.8-27B axes put 4 column blocks on each value head and 3 conv tiles (one ragged)
+// on 130 tokens; the ragged geometry leaves part of a column block idle and a key head short of
+// the 128 register slots; a 2-token prompt shifts part of the old conv history; K=1 has no
+// history at all.
+// fak-test:runtime fast est=3s
 func TestCUDAQwen35GDNSequencePanelBitwiseDecodeLoop(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -28,16 +31,14 @@ func TestCUDAQwen35GDNSequencePanelBitwiseDecodeLoop(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			be := cudaGDNBackend(t)
+			t.Cleanup(func() { qwen35GDNDecodeForceGlobalStateForTest(false) })
 			g := tc.g
 			seq := newCUDAGDNOperands(t, be, g)
-			ref := seq
 			rng := cudaGDNLCG(0x9359)
 			convInit := rng.vector((g.kernel-1)*g.convDim(), 1.0)
 			recurrentInit := rng.vector(g.nV*g.kHd*g.vHd, 0.2)
 			seq.convState = uploadCUDAGDN(t, be, []int{g.kernel - 1, g.convDim()}, convInit, MemoryKVCache, "qwen35-gdn-panel-conv-state")
 			seq.recurrentState = uploadCUDAGDN(t, be, []int{g.nV, g.kHd, g.vHd}, recurrentInit, MemoryKVCache, "qwen35-gdn-panel-recurrent-state")
-			ref.convState = uploadCUDAGDN(t, be, []int{g.kernel - 1, g.convDim()}, convInit, MemoryKVCache, "qwen35-gdn-loop-conv-state")
-			ref.recurrentState = uploadCUDAGDN(t, be, []int{g.nV, g.kHd, g.vHd}, recurrentInit, MemoryKVCache, "qwen35-gdn-loop-recurrent-state")
 
 			inputs := rng.vector(tc.tokens*g.hidden, 1.0)
 			panel := uploadCUDAGDN(t, be, []int{tc.tokens, g.hidden}, inputs, MemoryActivation, "qwen35-gdn-panel-input")
@@ -50,35 +51,52 @@ func TestCUDAQwen35GDNSequencePanelBitwiseDecodeLoop(t *testing.T) {
 				t.Fatalf("sequence: %v", err)
 			}
 			gotOut := be.Read(got)
-			want := make([]float32, 0, len(gotOut))
-			for token := 0; token < tc.tokens; token++ {
-				x := uploadCUDAGDN(t, be, []int{g.hidden}, inputs[token*g.hidden:(token+1)*g.hidden], MemoryActivation, "qwen35-gdn-loop-input")
-				out, _, _, err := be.Qwen35GDNDecode(
-					x, ref.inQKV, ref.inZ, ref.inB, ref.inA, ref.convW,
-					ref.aLog, ref.dtBias, ref.norm, ref.outW, ref.convState,
-					ref.recurrentState, g.nK, g.nV, g.kHd, g.vHd, g.kernel, g.eps,
-				)
-				if err != nil {
-					t.Fatalf("decode token %d: %v", token, err)
-				}
-				want = append(want, be.Read(out)...)
-			}
 			requireFiniteNonzeroCUDA(t, "panel output", gotOut)
-			for _, pair := range []struct {
-				name      string
-				got, want []float32
-			}{
-				{"output", gotOut, want},
-				{"conv state", be.Read(seq.convState), be.Read(ref.convState)},
-				{"recurrent state", be.Read(seq.recurrentState), be.Read(ref.recurrentState)},
-			} {
-				if len(pair.got) != len(pair.want) {
-					t.Fatalf("%s len %d != %d", pair.name, len(pair.got), len(pair.want))
+			for _, path := range []struct {
+				name        string
+				globalState bool
+			}{{"register-state", false}, {"global-state", true}} {
+				ref := seq
+				ref.convState = uploadCUDAGDN(t, be, []int{g.kernel - 1, g.convDim()}, convInit, MemoryKVCache, "qwen35-gdn-loop-conv-state")
+				ref.recurrentState = uploadCUDAGDN(t, be, []int{g.nV, g.kHd, g.vHd}, recurrentInit, MemoryKVCache, "qwen35-gdn-loop-recurrent-state")
+				qwen35GDNDecodeForceGlobalStateForTest(path.globalState)
+				launches := qwen35GDNDecodeRegisterStateLaunchesForTest()
+				want := make([]float32, 0, len(gotOut))
+				for token := 0; token < tc.tokens; token++ {
+					x := uploadCUDAGDN(t, be, []int{g.hidden}, inputs[token*g.hidden:(token+1)*g.hidden], MemoryActivation, "qwen35-gdn-loop-input")
+					out, _, _, err := be.Qwen35GDNDecode(
+						x, ref.inQKV, ref.inZ, ref.inB, ref.inA, ref.convW,
+						ref.aLog, ref.dtBias, ref.norm, ref.outW, ref.convState,
+						ref.recurrentState, g.nK, g.nV, g.kHd, g.vHd, g.kernel, g.eps,
+					)
+					if err != nil {
+						t.Fatalf("%s decode token %d: %v", path.name, token, err)
+					}
+					want = append(want, be.Read(out)...)
 				}
-				for i := range pair.want {
-					if math.Float32bits(pair.got[i]) != math.Float32bits(pair.want[i]) {
-						t.Fatalf("%s[%d] = %g (%08x), decode loop %g (%08x)", pair.name, i,
-							pair.got[i], math.Float32bits(pair.got[i]), pair.want[i], math.Float32bits(pair.want[i]))
+				wantLaunches := uint64(tc.tokens)
+				if path.globalState {
+					wantLaunches = 0
+				}
+				if n := qwen35GDNDecodeRegisterStateLaunchesForTest() - launches; n != wantLaunches {
+					t.Fatalf("%s decode loop made %d register-state launches, want %d", path.name, n, wantLaunches)
+				}
+				for _, pair := range []struct {
+					name      string
+					got, want []float32
+				}{
+					{"output", gotOut, want},
+					{"conv state", be.Read(seq.convState), be.Read(ref.convState)},
+					{"recurrent state", be.Read(seq.recurrentState), be.Read(ref.recurrentState)},
+				} {
+					if len(pair.got) != len(pair.want) {
+						t.Fatalf("%s %s len %d != %d", path.name, pair.name, len(pair.got), len(pair.want))
+					}
+					for i := range pair.want {
+						if math.Float32bits(pair.got[i]) != math.Float32bits(pair.want[i]) {
+							t.Fatalf("%s[%d] = %g (%08x), %s decode loop %g (%08x)", pair.name, i,
+								pair.got[i], math.Float32bits(pair.got[i]), path.name, pair.want[i], math.Float32bits(pair.want[i]))
+						}
 					}
 				}
 			}

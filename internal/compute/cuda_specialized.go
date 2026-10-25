@@ -166,6 +166,26 @@ func qwen35GDNInjectFaultForTest(stage int) {
 	C.fcuda_qwen35_gdn_test_fault(C.int(stage))
 }
 
+// qwen35GDNDecodeForceGlobalStateForTest makes GDN decode take the global-state
+// recurrence kernel even where the register-state kernel fits, so package-local
+// -tags cuda tests can hold both paths to the same bits. Unexported like the fault seam.
+func qwen35GDNDecodeForceGlobalStateForTest(on bool) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	flag := 0
+	if on {
+		flag = 1
+	}
+	C.fcuda_qwen35_gdn_decode_force_global_state(C.int(flag))
+}
+
+// qwen35GDNDecodeRegisterStateLaunchesForTest counts register-state recurrence launches.
+func qwen35GDNDecodeRegisterStateLaunchesForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_qwen35_gdn_decode_register_state_launches())
+}
+
 func (c *cudaBackend) allocateQwen35GDN(allocations []qwen35GDNAllocation, sitePrefix string) ([]Tensor, []*cudaBuf, error) {
 	tensors := make([]Tensor, 0, len(allocations))
 	buffers := make([]*cudaBuf, 0, len(allocations))
