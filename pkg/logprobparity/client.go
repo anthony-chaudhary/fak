@@ -141,8 +141,14 @@ func (c Client) Generate(ctx context.Context, prompt string, maxTokens, topK int
 		if rows == nil {
 			return g, nil
 		}
+		if rows.Tokens == nil || rows.TokenLogprobs == nil || rows.TopLogprobs == nil {
+			return Generation{}, fmt.Errorf("%w: %s returned a completion logprobs object without required row arrays", ErrEndpoint, base)
+		}
 		if len(rows.Tokens) != len(rows.TokenLogprobs) || len(rows.Tokens) != len(rows.TopLogprobs) {
 			return Generation{}, fmt.Errorf("%w: %s returned misaligned completion logprob rows: tokens=%d token_logprobs=%d top_logprobs=%d", ErrEndpoint, base, len(rows.Tokens), len(rows.TokenLogprobs), len(rows.TopLogprobs))
+		}
+		if len(rows.Tokens) == 0 && out.Choices[0].Text != "" {
+			return Generation{}, fmt.Errorf("%w: %s returned nonempty completion text without logprob rows", ErrEndpoint, base)
 		}
 		g.Positions = make([]Position, 0, len(rows.Tokens))
 		g.Method = TextPieces

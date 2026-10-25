@@ -73,6 +73,80 @@ func TestScoreOpenAIRefusesMisalignedLogprobRows(t *testing.T) {
 	}
 }
 
+func TestScoreOpenAIRefusesPresentEmptyLogprobObject(t *testing.T) {
+	refs := singleRef(7, "A")
+	cases := map[string]map[string]any{
+		"arrays omitted": {},
+		"tokens null": {
+			"tokens": nil, "token_logprobs": []float64{}, "top_logprobs": []map[string]float64{},
+		},
+		"token logprobs null": {
+			"tokens": []string{}, "token_logprobs": nil, "top_logprobs": []map[string]float64{},
+		},
+		"top logprobs null": {
+			"tokens": []string{}, "token_logprobs": []float64{}, "top_logprobs": nil,
+		},
+	}
+	for name, logprobs := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []map[string]any{{"text": "A", "logprobs": logprobs}},
+				})
+			}))
+			defer srv.Close()
+
+			prs, err := logprobparity.Score(context.Background(), logprobparity.Client{BaseURL: srv.URL, API: logprobparity.APIOpenAI}, refs, 5)
+			if !errors.Is(err, logprobparity.ErrEndpoint) || len(prs) != 1 || prs[0].Verdict != logprobparity.Empty {
+				t.Fatalf("malformed present logprobs: results=%+v err=%v", prs, err)
+			}
+		})
+	}
+}
+
+func TestScoreOpenAIAllowsExplicitEmptyRowsForEmptyText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"text": "",
+				"logprobs": map[string]any{
+					"tokens":         []string{},
+					"token_logprobs": []float64{},
+					"top_logprobs":   []map[string]float64{},
+				},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	g, err := (logprobparity.Client{BaseURL: srv.URL, API: logprobparity.APIOpenAI}).Generate(context.Background(), "prompt", 1, 5)
+	if err != nil || g.Method != logprobparity.TextPieces || g.Positions == nil || len(g.Positions) != 0 {
+		t.Fatalf("explicit empty rows: generation=%+v err=%v", g, err)
+	}
+}
+
+func TestScoreOpenAIRefusesExplicitEmptyRowsForNonemptyText(t *testing.T) {
+	refs := singleRef(7, "A")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"text": "A",
+				"logprobs": map[string]any{
+					"tokens":         []string{},
+					"token_logprobs": []float64{},
+					"top_logprobs":   []map[string]float64{},
+				},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	prs, err := logprobparity.Score(context.Background(), logprobparity.Client{BaseURL: srv.URL, API: logprobparity.APIOpenAI}, refs, 5)
+	if !errors.Is(err, logprobparity.ErrEndpoint) || len(prs) != 1 || prs[0].Verdict != logprobparity.Empty {
+		t.Fatalf("nonempty text with empty rows: results=%+v err=%v", prs, err)
+	}
+}
+
 func TestScoreOpenAINullLogprobsFallsBackToText(t *testing.T) {
 	refs := singleRef(7, "A")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
