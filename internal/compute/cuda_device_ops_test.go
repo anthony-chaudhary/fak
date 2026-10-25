@@ -6,8 +6,36 @@ import "testing"
 func TestCUDADeviceOpDeclaration(t *testing.T) {
 	t.Parallel()
 	table := CUDADeviceOpTable()
-	if len(table) != 13 {
-		t.Fatalf("declaration has %d rows, want nine MatMul and four expert rows", len(table))
+	expected := map[[2]string]struct{}{
+		{"matmul", "f32"}:                             {},
+		{"matmul", "f16"}:                             {},
+		{"matmul", "q8_0"}:                            {},
+		{"matmul", "q4_k"}:                            {},
+		{"matmul", "q5_k"}:                            {},
+		{"matmul", "q6_k"}:                            {},
+		{"matmul", "q2_0"}:                            {},
+		{"matmul", "q2_k"}:                            {},
+		{"matmul", "nvfp4"}:                           {},
+		{"routed-expert-gemv", "F8_E4M3+F8_E8M0"}:     {},
+		{"routed-expert-gemv", "I8+F8_E8M0"}:          {},
+		{"routed-expert-resident", "F8_E4M3+F8_E8M0"}: {},
+		{"routed-expert-resident", "I8+F8_E8M0"}:      {},
+	}
+	seen := make(map[[2]string]struct{}, len(expected))
+	for _, row := range table {
+		key := [2]string{row.Operation, row.Format}
+		if _, ok := expected[key]; !ok {
+			t.Errorf("unexpected operation/format declaration %q/%q", row.Operation, row.Format)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			t.Errorf("duplicate operation/format declaration %q/%q", row.Operation, row.Format)
+		}
+		seen[key] = struct{}{}
+	}
+	for key := range expected {
+		if _, ok := seen[key]; !ok {
+			t.Errorf("missing operation/format declaration %q/%q", key[0], key[1])
+		}
 	}
 	// Independent oracle from cudaBackend.MatMul, not derived from the table.
 	for value := 0; value < 256; value++ {
