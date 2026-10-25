@@ -293,6 +293,97 @@ func TestV41MHCDeviceFailureClosesSessionWithoutHostReplay(t *testing.T) {
 }
 
 // fak-test:runtime medium est=5s lane=default
+func TestV41MHCLateDevicePostFailurePublishesNoPanelOrCarry(t *testing.T) {
+	m := v41FullStepPatchedNorms(t)
+	b := newV41MHCTestBackend(true)
+	s := v41DenseTestSession(t, m, b)
+	st := s.v41State()
+	routeCfg, err := v41RouterConfigFullGeometry(m.Cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const rows = 2
+	H := m.Cfg.HiddenSize
+	clonePanel := func(panel [][][]float32) [][][]float32 {
+		clone := make([][][]float32, len(panel))
+		for i := range panel {
+			clone[i] = make([][]float32, len(panel[i]))
+			for j := range panel[i] {
+				clone[i][j] = append([]float32(nil), panel[i][j]...)
+			}
+		}
+		return clone
+	}
+	streams := make([][][]float32, rows)
+	x := make([][]float32, rows)
+	panel := v41LayerFFNPanel{
+		inputs:   make([][]float32, rows),
+		residual: make([][][]float32, rows),
+		mixes:    make([]v41MHCMix, rows),
+	}
+	routed := make([][]float32, rows)
+	for row := 0; row < rows; row++ {
+		x[row] = make([]float32, H)
+		x[row][0] = float32(10 + row)
+		panel.inputs[row] = make([]float32, H)
+		routed[row] = make([]float32, H)
+		streams[row] = make([][]float32, 4)
+		panel.residual[row] = make([][]float32, 4)
+		for stream := 0; stream < 4; stream++ {
+			streams[row][stream] = make([]float32, H)
+			streams[row][stream][0] = float32(100 + 10*row + stream)
+			panel.residual[row][stream] = append([]float32(nil), streams[row][stream]...)
+		}
+		panel.mixes[row] = v41MHCMix{
+			pre:  []float32{0, 1, 0, 0},
+			post: []float32{1, 1, 1, 1},
+			comb: []float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+		}
+	}
+	carry := newV41MHCCarry(rows)
+	carry.device = st.mhcDevice
+	scratch := &v41ProjScratch{mhcCarry: carry}
+	beforeX := make([][]float32, rows)
+	for row := range x {
+		beforeX[row] = append([]float32(nil), x[row]...)
+	}
+	beforeStreams := clonePanel(streams)
+	beforeCarry := make([][]float32, rows)
+	for row := range carry.pre {
+		beforeCarry[row] = append([]float32(nil), carry.pre[row]...)
+	}
+	beforeNextLayer := carry.nextLayer
+	beforeSession := captureV41ForwardSnapshot(st)
+
+	b.failOp, b.failCall = "post", b.calls["post"]+2
+	b.cause = &compute.BackendError{Backend: "cpu-ref-mhc", Class: compute.VulkanClassExecutionFailed, Err: compute.ErrVulkanExecutionFailed}
+	err = m.v41LayerSharedExpertAndPost(v41LayerMoEInput{
+		l: 0, x: x, streams: streams, full: true, H: H, routeCfg: routeCfg,
+		st: st, scratch: scratch, mhcDevice: st.mhcDevice,
+	}, panel, routed)
+	var selected *V41MHCOperationError
+	if !errors.As(err, &selected) || !errors.Is(err, compute.ErrVulkanExecutionFailed) || errors.Is(err, ErrV41ForwardStage) {
+		t.Fatalf("late post failure = %v, want selected device error and no forward-stage sentinel", err)
+	}
+	if selected.Layer != 0 || selected.Op != "post-mix" {
+		t.Fatalf("late post failure attribution = layer %d op %q", selected.Layer, selected.Op)
+	}
+	if !s.BackendSessionClosed() || b.calls["post"] != b.failCall {
+		t.Fatalf("late post failure left session open=%t or replayed: calls=%d failCall=%d", !s.BackendSessionClosed(), b.calls["post"], b.failCall)
+	}
+	if !reflect.DeepEqual(x, beforeX) || !reflect.DeepEqual(streams, beforeStreams) {
+		t.Fatal("late post failure published a partial x or stream panel")
+	}
+	if carry.nextLayer != beforeNextLayer || !reflect.DeepEqual(carry.pre, beforeCarry) {
+		t.Fatalf("late post failure published carry: nextLayer=%d pre=%v", carry.nextLayer, carry.pre)
+	}
+	if !reflect.DeepEqual(captureV41ForwardSnapshot(st), beforeSession) || len(b.outputs) != 0 {
+		t.Fatalf("late post failure changed session state or leaked outputs: live=%d", len(b.outputs))
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
 func TestV41MHCDeviceOnlyRefusesWithoutDeviceDispatch(t *testing.T) {
 	t.Run("missing capability", func(t *testing.T) {
 		m := v41FullStepPatchedNorms(t)
