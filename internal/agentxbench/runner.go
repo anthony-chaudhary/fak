@@ -41,11 +41,18 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (*AgentXReceipt, error) {
 	if cfg.Model == "" {
 		cfg.Model = "Qwen3.8-27B-Q4_K_M"
 	}
-	if cfg.Engine == "" {
-		cfg.Engine = "fak-inkernel-cuda"
+	mode := ExecutionModeLive
+	if cfg.MockExecution {
+		mode = ExecutionModeMock
+		if cfg.Engine == "" {
+			cfg.Engine = "selfcheck"
+		}
+		if cfg.Hardware == "" {
+			cfg.Hardware = "selfcheck (no endpoint)"
+		}
 	}
-	if cfg.Hardware == "" {
-		cfg.Hardware = "GCP A100-SXM4-40GB"
+	if strings.TrimSpace(cfg.Engine) == "" || strings.TrimSpace(cfg.Hardware) == "" {
+		return nil, fmt.Errorf("live run needs the engine and hardware it measures; no default is assumed")
 	}
 
 	benchmarkID := fmt.Sprintf("agentx-%d-%s", time.Now().Unix(), cfg.Model)
@@ -109,6 +116,9 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (*AgentXReceipt, error) {
 		Schema:           SchemaIdentifier,
 		BenchmarkID:      benchmarkID,
 		TimestampISO:     startTime.UTC().Format(time.RFC3339),
+		ExecutionMode:    mode,
+		Workload:         WorkloadSyntheticTurns,
+		TokenCountSource: receiptTokenSource(requests),
 		Hardware:         cfg.Hardware,
 		Endpoint:         cfg.EndpointURL,
 		Model:            cfg.Model,
@@ -122,10 +132,13 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (*AgentXReceipt, error) {
 
 	validationErrs := ValidateReceipt(receipt)
 	receipt.ValidationErrors = validationErrs
-	if len(validationErrs) == 0 {
-		receipt.ValidationStatus = "VERIFIED_PASS"
-	} else {
-		receipt.ValidationStatus = "VERIFIED_FAIL"
+	switch {
+	case len(validationErrs) > 0:
+		receipt.ValidationStatus = StatusVerifiedFail
+	case mode == ExecutionModeMock:
+		receipt.ValidationStatus = StatusSimulated
+	default:
+		receipt.ValidationStatus = StatusVerifiedPass
 	}
 
 	return receipt, nil
@@ -183,18 +196,37 @@ func (r *Runner) runMockTurn(rng *rand.Rand, agentID, reqID string, turn int, cf
 			EvaluationMS:     evalMS,
 			TotalLifecycleMS: lifecycleMS,
 		},
+		TokenCountSource:        TokenCountsEstimated,
 		Interactivity:           interactivity,
 		TokenTimestampsUnixNano: timestamps,
 		Success:                 true,
-		ResponseText:            "Action verified. Tool execution succeeded.",
+		ResponseText:            MockResponseText,
 	}
 }
 
+// receiptTokenSource is the weakest source among successful requests, so a
+// receipt reads server_usage only when every request carried full usage.
+func receiptTokenSource(reqs []RequestRecord) string {
+	rank := map[string]int{TokenCountsServerUsage: 2, TokenCountsServerUsageNoCacheRpt: 1}
+	src, seen := TokenCountsEstimated, false
+	for _, req := range reqs {
+		if !req.Success {
+			continue
+		}
+		if !seen || rank[req.TokenCountSource] < rank[src] {
+			src = req.TokenCountSource
+		}
+		seen = true
+	}
+	if _, ok := rank[src]; !ok {
+		return TokenCountsEstimated
+	}
+	return src
+}
+
 func (r *Runner) runLiveTurn(ctx context.Context, agentID, reqID string, turn int, cfg Config) RequestRecord {
-	queueWaitStart := time.Now()
-	// Simulated minimal local queue overhead
-	time.Sleep(2 * time.Millisecond)
-	queueWaitMS := float64(time.Since(queueWaitStart).Microseconds()) / 1000.0
+	// Each agent issues its turns back to back; there is no client-side queue.
+	queueWaitMS := 0.0
 
 	execStart := time.Now()
 
@@ -205,11 +237,12 @@ func (r *Runner) runLiveTurn(ctx context.Context, agentID, reqID string, turn in
 	prompt += fmt.Sprintf("\nAgent ID: %s, Turn: %d. Provide structured status.", agentID, turn)
 
 	reqPayload := map[string]any{
-		"model":       cfg.Model,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  cfg.MaxTokens,
-		"temperature": cfg.Temperature,
-		"stream":      true,
+		"model":          cfg.Model,
+		"messages":       []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens":     cfg.MaxTokens,
+		"temperature":    cfg.Temperature,
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
 	}
 	bodyBytes, err := json.Marshal(reqPayload)
 	if err != nil {
@@ -260,9 +293,9 @@ func (r *Runner) runLiveTurn(ctx context.Context, agentID, reqID string, turn in
 	var timestamps []int64
 	var ttftMS float64
 	var responseBuilder strings.Builder
+	var usage *streamUsage
 
 	reader := bufio.NewReader(resp.Body)
-	firstToken := true
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -276,25 +309,31 @@ func (r *Runner) runLiveTurn(ctx context.Context, agentID, reqID string, turn in
 				break
 			}
 			nowNano := time.Now().UnixNano()
-			if firstToken {
-				nanos := time.Since(execStart).Nanoseconds()
-				if nanos <= 0 {
-					nanos = 1000
-				}
-				ttftMS = float64(nanos) / 1e6
-				firstToken = false
-			}
-			timestamps = append(timestamps, nowNano)
-
 			var chunk struct {
 				Choices []struct {
 					Delta struct {
-						Content string `json:"content"`
+						Content          string `json:"content"`
+						ReasoningContent string `json:"reasoning_content"`
 					} `json:"delta"`
 				} `json:"choices"`
+				Usage *streamUsage `json:"usage"`
 			}
-			if json.Unmarshal([]byte(data), &chunk) == nil && len(chunk.Choices) > 0 {
-				responseBuilder.WriteString(chunk.Choices[0].Delta.Content)
+			if json.Unmarshal([]byte(data), &chunk) == nil {
+				if chunk.Usage != nil {
+					usage = chunk.Usage
+				}
+				// Role-only and usage-only frames carry no token; TTFT and ITL
+				// start at the first generated content.
+				if len(chunk.Choices) > 0 {
+					delta := chunk.Choices[0].Delta
+					if delta.Content != "" || delta.ReasoningContent != "" {
+						if len(timestamps) == 0 {
+							ttftMS = float64(max(time.Since(execStart).Nanoseconds(), 1000)) / 1e6
+						}
+						timestamps = append(timestamps, nowNano)
+						responseBuilder.WriteString(delta.Content)
+					}
+				}
 			}
 		}
 		if err == io.EOF {
@@ -321,21 +360,28 @@ func (r *Runner) runLiveTurn(ctx context.Context, agentID, reqID string, turn in
 
 	interactivity := ComputeInteractivity(timestamps, ttftMS, execMS)
 
-	// Approximate token counts from length if not reported in stream footer
-	approxPromptTokens := len(prompt) / 4
-	cachedTokens := 0
-	if turn > 0 {
-		cachedTokens = approxPromptTokens * 8 / 10
+	// Without the server's usage block, counts are estimated and no cache hit
+	// is claimed.
+	promptTokens, completionTokens, cachedTokens := max(len(prompt)/4, 1), numTokens, 0
+	source := TokenCountsEstimated
+	if usage != nil && usage.PromptTokens > 0 {
+		promptTokens, completionTokens = usage.PromptTokens, usage.CompletionTokens
+		source = TokenCountsServerUsageNoCacheRpt
+		if usage.PromptTokensDetails != nil {
+			cachedTokens = usage.PromptTokensDetails.CachedTokens
+			source = TokenCountsServerUsage
+		}
 	}
 
 	return RequestRecord{
 		RequestID:        reqID,
 		AgentID:          agentID,
 		TurnIndex:        turn,
-		PromptTokens:     approxPromptTokens,
-		CompletionTokens: numTokens,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
 		CachedTokens:     cachedTokens,
-		CacheHitRatio:    float64(cachedTokens) / float64(approxPromptTokens),
+		CacheHitRatio:    float64(cachedTokens) / float64(promptTokens),
+		TokenCountSource: source,
 		ClientPhases: ClientPhases{
 			QueueWaitMS:      queueWaitMS,
 			AgentExecutionMS: execMS,
@@ -347,4 +393,14 @@ func (r *Runner) runLiveTurn(ctx context.Context, agentID, reqID string, turn in
 		Success:                 true,
 		ResponseText:            responseBuilder.String(),
 	}
+}
+
+// streamUsage is the OpenAI-compatible usage block a server sends on the final
+// stream frame when stream_options.include_usage is set.
+type streamUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 }

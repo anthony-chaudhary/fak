@@ -143,10 +143,9 @@ func Aggregate(requests []RequestRecord, totalWallMS float64) AggregatedMetrics 
 		agg.WarmTTFTMeanMS = sum / float64(len(warmTTFTs))
 	}
 
+	// Zero means no warm turn was observed, not "no speedup".
 	if agg.WarmTTFTMeanMS > 0 && agg.ColdTTFTMeanMS > 0 {
 		agg.PrefixSpeedupRatio = agg.ColdTTFTMeanMS / agg.WarmTTFTMeanMS
-	} else {
-		agg.PrefixSpeedupRatio = 1.0
 	}
 
 	if len(allTTFTs) > 0 {

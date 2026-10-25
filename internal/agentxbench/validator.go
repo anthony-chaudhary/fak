@@ -31,6 +31,7 @@ func ValidateReceipt(receipt *AgentXReceipt) []string {
 	if strings.TrimSpace(receipt.Hardware) == "" {
 		errs = append(errs, "HARDWARE_MISSING: hardware description is required")
 	}
+	errs = append(errs, provenanceErrors(receipt)...)
 
 	if receipt.AgentCount <= 0 {
 		errs = append(errs, fmt.Sprintf("AGENT_COUNT_INVALID: agent_count must be > 0, got %d", receipt.AgentCount))
@@ -121,4 +122,68 @@ func ValidateReceipt(receipt *AgentXReceipt) []string {
 	}
 
 	return errs
+}
+
+// EvidenceErrors is ValidateReceipt plus the evidence rule: a structurally
+// valid mock receipt is still simulated output, never a measurement.
+func EvidenceErrors(receipt *AgentXReceipt) []string {
+	errs := ValidateReceipt(receipt)
+	if receipt != nil && receipt.ExecutionMode == ExecutionModeMock {
+		errs = append(errs, "SIMULATED: execution_mode is mock; self-check output is not a measurement")
+	}
+	return errs
+}
+
+func provenanceErrors(receipt *AgentXReceipt) []string {
+	var errs []string
+	switch receipt.ExecutionMode {
+	case ExecutionModeLive, ExecutionModeMock:
+	case "":
+		errs = append(errs, "EXECUTION_MODE_MISSING: execution_mode is required; a receipt without it cannot be told apart from self-check output")
+	default:
+		errs = append(errs, fmt.Sprintf("EXECUTION_MODE_UNKNOWN: %q", receipt.ExecutionMode))
+	}
+	if receipt.Workload != WorkloadSyntheticTurns {
+		errs = append(errs, fmt.Sprintf("WORKLOAD_UNKNOWN: expected %q, got %q", WorkloadSyntheticTurns, receipt.Workload))
+	}
+	if receipt.UpstreamComparable {
+		errs = append(errs, "UPSTREAM_COMPARABLE_UNSUPPORTED: synthetic agent turns are not the InferenceX AgentX trace replay")
+	}
+	if receipt.ExecutionMode == ExecutionModeLive {
+		switch receipt.TokenCountSource {
+		case TokenCountsServerUsage, TokenCountsServerUsageNoCacheRpt, TokenCountsEstimated:
+		default:
+			errs = append(errs, fmt.Sprintf("TOKEN_COUNT_SOURCE_UNKNOWN: %q", receipt.TokenCountSource))
+		}
+		if !anySuccess(receipt.Requests) {
+			errs = append(errs, "NO_SUCCESSFUL_REQUESTS: a live run with no successful request measured nothing")
+		}
+		if mockSignature(receipt.Requests) {
+			errs = append(errs, "MOCK_SIGNATURE: every live response equals the self-check mock response")
+		}
+	}
+	return errs
+}
+
+func anySuccess(reqs []RequestRecord) bool {
+	for _, req := range reqs {
+		if req.Success {
+			return true
+		}
+	}
+	return false
+}
+
+func mockSignature(reqs []RequestRecord) bool {
+	seen := false
+	for _, req := range reqs {
+		if !req.Success {
+			continue
+		}
+		if req.ResponseText != MockResponseText {
+			return false
+		}
+		seen = true
+	}
+	return seen
 }

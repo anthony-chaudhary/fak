@@ -36,7 +36,7 @@ source-only rows absent from help: 1065
 | `fak agentic` | compile a declared objective into a deterministic agentic execution contract | cmdAgentic / internal/agentic | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak agents` | query live and historical agent sessions with constrained SQL, grouping, counts, and JSON | cmdAgents / internal/agentquery, internal/secretload, internal/sessionjournal | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak agents list` |  | runAgentsList / internal/agent, internal/pathutil | `if` arm of the dispatch in runAgents() | NONE | — | **SOURCE ONLY** |
-| `fak agentx` | run AgentX multi-agent benchmark sweeps against inference endpoints with concurrent turn metrics | cmdAgentX / internal/agentxbench | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak agentx` | run synthetic AgentX-shaped agent turns against an endpoint (not the InferenceX AgentX trace replay) | cmdAgentX / internal/agentxbench | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak ailuminate` | AILuminate safety-benchmark runner (describe/eval/compare) | cmdAILuminate | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak ailuminate contract` |  | cmdAILuminateContract / internal/ailuminate, internal/dispatchpost, internal/policy | `case` arm of the dispatch switch in cmdAILuminate() | NONE | — | **SOURCE ONLY** |
 | `fak ailuminate help` |  | ailuminateUsage | `case` arm of the dispatch switch in cmdAILuminate() | NONE | — | **SOURCE ONLY** |

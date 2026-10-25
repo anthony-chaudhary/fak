@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,13 +59,16 @@ func TestComputeInteractivity(t *testing.T) {
 
 func TestValidateReceiptInvariants(t *testing.T) {
 	validReceipt := &agentxbench.AgentXReceipt{
-		Schema:        agentxbench.SchemaIdentifier,
-		BenchmarkID:   "bench-1",
-		Model:         "Qwen3.8-27B-Q4_K_M",
-		Engine:        "fak-inkernel-cuda",
-		Hardware:      "NVIDIA A100-SXM4-40GB",
-		AgentCount:    1,
-		TurnsPerAgent: 1,
+		Schema:           agentxbench.SchemaIdentifier,
+		BenchmarkID:      "bench-1",
+		ExecutionMode:    agentxbench.ExecutionModeLive,
+		Workload:         agentxbench.WorkloadSyntheticTurns,
+		TokenCountSource: agentxbench.TokenCountsServerUsage,
+		Model:            "Qwen3.8-27B-Q4_K_M",
+		Engine:           "fak-inkernel-cuda",
+		Hardware:         "NVIDIA A100-SXM4-40GB",
+		AgentCount:       1,
+		TurnsPerAgent:    1,
 		Aggregated: agentxbench.AggregatedMetrics{
 			TotalRequests: 1,
 		},
@@ -130,6 +134,36 @@ func TestValidateReceiptInvariants(t *testing.T) {
 	if errs := agentxbench.ValidateReceipt(&badTokens); len(errs) == 0 {
 		t.Fatalf("expected error on cached tokens > prompt tokens")
 	}
+
+	// 5. Provenance: a receipt must say how it was produced and may never claim
+	// InferenceX AgentX comparability.
+	for name, mutate := range map[string]func(*agentxbench.AgentXReceipt){
+		"EXECUTION_MODE_MISSING":          func(r *agentxbench.AgentXReceipt) { r.ExecutionMode = "" },
+		"WORKLOAD_UNKNOWN":                func(r *agentxbench.AgentXReceipt) { r.Workload = "inferencex-agentx-v1" },
+		"UPSTREAM_COMPARABLE_UNSUPPORTED": func(r *agentxbench.AgentXReceipt) { r.UpstreamComparable = true },
+		"TOKEN_COUNT_SOURCE_UNKNOWN":      func(r *agentxbench.AgentXReceipt) { r.TokenCountSource = "" },
+		"MOCK_SIGNATURE": func(r *agentxbench.AgentXReceipt) {
+			reqs := make([]agentxbench.RequestRecord, len(r.Requests))
+			copy(reqs, r.Requests)
+			reqs[0].ResponseText = agentxbench.MockResponseText
+			r.Requests = reqs
+		},
+	} {
+		bad := *validReceipt
+		mutate(&bad)
+		if !hasCode(agentxbench.ValidateReceipt(&bad), name) {
+			t.Fatalf("%s: expected refusal, got %v", name, agentxbench.ValidateReceipt(&bad))
+		}
+	}
+}
+
+func hasCode(errs []string, code string) bool {
+	for _, e := range errs {
+		if strings.HasPrefix(e, code+":") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRunnerMockExecution(t *testing.T) {
@@ -150,8 +184,11 @@ func TestRunnerMockExecution(t *testing.T) {
 		t.Fatalf("runner failed: %v", err)
 	}
 
-	if receipt.ValidationStatus != "VERIFIED_PASS" {
-		t.Fatalf("expected VERIFIED_PASS, got %s: %v", receipt.ValidationStatus, receipt.ValidationErrors)
+	if receipt.ValidationStatus != agentxbench.StatusSimulated {
+		t.Fatalf("expected SIMULATED, got %s: %v", receipt.ValidationStatus, receipt.ValidationErrors)
+	}
+	if !hasCode(agentxbench.EvidenceErrors(receipt), "SIMULATED") {
+		t.Fatalf("mock receipt admitted as evidence: %v", agentxbench.EvidenceErrors(receipt))
 	}
 
 	if receipt.Aggregated.TotalRequests != 9 {
@@ -233,5 +270,11 @@ func TestRunnerLiveHTTPStreaming(t *testing.T) {
 		if req.Interactivity.TTFTMS <= 0 {
 			t.Fatalf("expected positive TTFT, got %v", req.Interactivity.TTFTMS)
 		}
+		if req.CachedTokens != 0 || req.TokenCountSource != agentxbench.TokenCountsEstimated {
+			t.Fatalf("no usage block: want estimated counts with no cache hit, got cached=%d source=%q", req.CachedTokens, req.TokenCountSource)
+		}
+	}
+	if len(agentxbench.EvidenceErrors(receipt)) != 0 {
+		t.Fatalf("live receipt refused as evidence: %v", agentxbench.EvidenceErrors(receipt))
 	}
 }

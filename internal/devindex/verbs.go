@@ -95,7 +95,7 @@ var verbManifest = []Verb{
 	{Name: "agent-queue", Synopsis: "reconcile an agent-pool snapshot into start/hold queue actions", Lane: "cmd"},
 	{Name: "agentic", Synopsis: "compile a declared objective into a deterministic agentic execution contract", Lane: "cmd"},
 	{Name: "agents", Synopsis: "query live and historical agent sessions with constrained SQL, grouping, counts, and JSON", Lane: "cmd"},
-	{Name: "agentx", Synopsis: "run AgentX multi-agent benchmark sweeps against inference endpoints with concurrent turn metrics", Lane: "cmd"},
+	{Name: "agentx", Synopsis: "run synthetic AgentX-shaped agent turns against an endpoint (not the InferenceX AgentX trace replay)", Lane: "cmd"},
 	{Name: "ailuminate", Synopsis: "AILuminate safety-benchmark runner (describe/eval/compare)", Lane: "cmd"},
 	{Name: "amd-gpu-facts", Synopsis: "AMD GPU facts probe: per-device utilization / VRAM / busiest-engine as JSON, optional --watch sampling", Lane: "cmd"},
 	{Name: "amdgpu", Synopsis: "AMD GPU operations for roofline probing, defect auditing, DPM governor, simulation, and containment", Lane: "cmd"},

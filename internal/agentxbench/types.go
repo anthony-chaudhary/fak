@@ -3,6 +3,39 @@ package agentxbench
 // SchemaIdentifier is the canonical schema for AgentX benchmark receipts.
 const SchemaIdentifier = "fak.agentx-benchmark-receipt.v1"
 
+// Execution modes (closed set). A mock receipt comes from the self-check and
+// never measured an endpoint, so it is never evidence.
+const (
+	ExecutionModeLive = "live"
+	ExecutionModeMock = "mock"
+)
+
+// WorkloadSyntheticTurns is the only workload this runner drives: N agents x T
+// independent single-message turns. It is not the InferenceX AgentX trace
+// replay (published Claude Code corpus, AIPerf DAG, closed-loop live clients),
+// so no receipt may claim comparability with InferenceX AgentX results.
+const WorkloadSyntheticTurns = "fak-synthetic-agent-turns"
+
+// Validation statuses (closed set).
+const (
+	StatusVerifiedPass = "VERIFIED_PASS"
+	StatusVerifiedFail = "VERIFIED_FAIL"
+	StatusSimulated    = "SIMULATED"
+)
+
+// Token count sources (closed set), strongest first. Estimated counts carry no
+// cache hits; cache-unreported usage has prompt and completion counts but its
+// cached_tokens of 0 means "not reported", not "no hit".
+const (
+	TokenCountsServerUsage           = "server_usage"
+	TokenCountsServerUsageNoCacheRpt = "server_usage_cache_unreported"
+	TokenCountsEstimated             = "estimated"
+)
+
+// MockResponseText is the fixed response every mock turn records; a live
+// receipt whose responses all equal it is self-check output relabelled.
+const MockResponseText = "Action verified. Tool execution succeeded."
+
 // ClientPhases decomposes the request lifecycle across client-visible boundaries.
 // Invariant: all phase durations must be non-negative.
 type ClientPhases struct {
@@ -33,6 +66,7 @@ type RequestRecord struct {
 	CompletionTokens        int                  `json:"completion_tokens"`
 	CachedTokens            int                  `json:"cached_tokens"`
 	CacheHitRatio           float64              `json:"cache_hit_ratio"`
+	TokenCountSource        string               `json:"token_count_source,omitempty"`
 	ClientPhases            ClientPhases         `json:"client_phases"`
 	Interactivity           InteractivityMetrics `json:"interactivity"`
 	TokenTimestampsUnixNano []int64              `json:"token_timestamps_unix_nano,omitempty"`
@@ -67,19 +101,23 @@ type AggregatedMetrics struct {
 
 // AgentXReceipt represents the full benchmark artifact witnessing an AgentX evaluation.
 type AgentXReceipt struct {
-	Schema           string            `json:"schema"`
-	BenchmarkID      string            `json:"benchmark_id"`
-	TimestampISO     string            `json:"timestamp_iso"`
-	Hardware         string            `json:"hardware"`
-	Endpoint         string            `json:"endpoint"`
-	Model            string            `json:"model"`
-	Engine           string            `json:"engine"`
-	AgentCount       int               `json:"agent_count"`
-	TurnsPerAgent    int               `json:"turns_per_agent"`
-	Aggregated       AggregatedMetrics `json:"aggregated"`
-	Requests         []RequestRecord   `json:"requests"`
-	ValidationStatus string            `json:"validation_status"`
-	ValidationErrors []string          `json:"validation_errors,omitempty"`
+	Schema             string            `json:"schema"`
+	BenchmarkID        string            `json:"benchmark_id"`
+	TimestampISO       string            `json:"timestamp_iso"`
+	ExecutionMode      string            `json:"execution_mode"`
+	Workload           string            `json:"workload"`
+	UpstreamComparable bool              `json:"upstream_comparable"`
+	TokenCountSource   string            `json:"token_count_source"`
+	Hardware           string            `json:"hardware"`
+	Endpoint           string            `json:"endpoint"`
+	Model              string            `json:"model"`
+	Engine             string            `json:"engine"`
+	AgentCount         int               `json:"agent_count"`
+	TurnsPerAgent      int               `json:"turns_per_agent"`
+	Aggregated         AggregatedMetrics `json:"aggregated"`
+	Requests           []RequestRecord   `json:"requests"`
+	ValidationStatus   string            `json:"validation_status"`
+	ValidationErrors   []string          `json:"validation_errors,omitempty"`
 }
 
 // Config specifies parameters for running an AgentX benchmark.

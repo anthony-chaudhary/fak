@@ -26,7 +26,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "agentdemo", Synopsis: "the offline demo moved off `fak agent`: the scripted mock turn-count A/B, no network/key/model", Tier: "dev"},
 	{Name: "agentic", Synopsis: "compile a declared objective into a deterministic agentic execution contract", Tier: "dev"},
 	{Name: "agents", Synopsis: "query live and historical agent sessions with constrained SQL, grouping, counts, and JSON", Tier: "dev"},
-	{Name: "agentx", Synopsis: "run AgentX multi-agent benchmark sweeps against inference endpoints with concurrent turn metrics", Tier: "dev"},
+	{Name: "agentx", Synopsis: "run synthetic AgentX-shaped agent turns against an endpoint (not the InferenceX AgentX trace replay)", Tier: "dev"},
 	{Name: "ailuminate", Synopsis: "AILuminate safety-benchmark runner (describe/eval/compare)", Tier: "dev"},
 	{Name: "amdgpu", Synopsis: "AMD GPU operations for roofline probing, defect auditing, DPM governor, simulation, and containment", Tier: "dev"},
 	{Name: "answer-shape", Synopsis: "degeneration/verbosity witness: grade how repetitive and how long a candidate answer is", Tier: "dev"},

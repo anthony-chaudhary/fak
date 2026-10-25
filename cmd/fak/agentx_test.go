@@ -24,8 +24,17 @@ func TestAgentXSelfCheck(t *testing.T) {
 	if !strings.Contains(out, "AgentX Benchmark Result:") {
 		t.Fatalf("expected benchmark result header, got: %s", out)
 	}
-	if !strings.Contains(out, "Status         : VERIFIED_PASS") {
-		t.Fatalf("expected VERIFIED_PASS, got: %s", out)
+	if !strings.Contains(out, "Status         : SIMULATED") {
+		t.Fatalf("expected SIMULATED, got: %s", out)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAgentXLiveRunNeedsEngineAndHardware(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runAgentX(&stdout, &stderr, []string{"--endpoint=http://127.0.0.1:1/v1", "--agents=1", "--turns=1"})
+	if code == 0 {
+		t.Fatalf("live run without --engine/--hardware succeeded; stdout: %s", stdout.String())
 	}
 }
 
@@ -54,8 +63,8 @@ func TestAgentXSelfCheckJSONAndValidate(t *testing.T) {
 	if receipt.Schema != agentxbench.SchemaIdentifier {
 		t.Fatalf("unexpected schema: %s", receipt.Schema)
 	}
-	if receipt.ValidationStatus != "VERIFIED_PASS" {
-		t.Fatalf("expected VERIFIED_PASS, got: %s", receipt.ValidationStatus)
+	if receipt.ValidationStatus != agentxbench.StatusSimulated {
+		t.Fatalf("expected SIMULATED, got: %s", receipt.ValidationStatus)
 	}
 
 	// Verify file was written
@@ -67,14 +76,14 @@ func TestAgentXSelfCheckJSONAndValidate(t *testing.T) {
 		t.Fatalf("written receipt is empty")
 	}
 
-	// Test validate subcommand on the written file
+	// A self-check receipt is never admitted as evidence.
 	stdout.Reset()
 	stderr.Reset()
 	valCode := runAgentX(&stdout, &stderr, []string{"--validate=" + receiptPath})
-	if valCode != 0 {
-		t.Fatalf("validate returned code %d. stderr: %s", valCode, stderr.String())
+	if valCode == 0 {
+		t.Fatalf("validate admitted a mock receipt: %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "PASS: receipt") {
-		t.Fatalf("expected PASS in validate output, got: %s", stdout.String())
+	if !strings.Contains(stderr.String(), "SIMULATED") {
+		t.Fatalf("expected SIMULATED refusal, got: %s", stderr.String())
 	}
 }
