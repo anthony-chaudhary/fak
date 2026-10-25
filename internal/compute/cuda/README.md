@@ -11,6 +11,7 @@ and process-wide state, then includes these implementation fragments in dependen
 | `qwen35_gdn.cuh` | Qwen3.5/3.6 Gated-DeltaNet operations |
 | `quant_matmul.cuh` | cuBLAS and native quantized matrix operations |
 | `transformer_ops.cuh` | normalization, RoPE, gating, elementwise, and KV writes |
+| `fattn_mma_hd256.cuh` | Qwen3.8 hd256 tensor-core prompt attention adapted from llama.cpp (opt-in) |
 | `attention.cuh` | decode, flash, and prompt-panel attention |
 | `spec_graph.cuh` | speculative/DSA attention, argmax, and graph capture |
 | `weight_formats.cuh` | AWQ, GPTQ, and cuBLASLt NVFP4 paths |

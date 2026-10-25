@@ -279,6 +279,18 @@ __global__ void k_qwen38_causal_attention_panel_hd256(
   }
 }
 
+// FAK_CUDA_QWEN38_PREFILL_ATTN selects the Qwen3.8 prompt-attention kernel: "simt" forces
+// the SIMT kernel above (the parity oracle and rollback), "mma" the tensor-core port in
+// fattn_mma_hd256.cuh on sm_80+. Unset keeps SIMT until the P-05 hardware A/B records a
+// keep verdict; that receipt flips QWEN38_PREFILL_ATTN_MMA_DEFAULT to 1.
+#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 0
+static bool qwen38_prefill_attention_wants_mma(void) {
+  const char *mode = getenv("FAK_CUDA_QWEN38_PREFILL_ATTN");
+  if (mode && strcmp(mode, "simt") == 0) return false;
+  if (mode && strcmp(mode, "mma") == 0) return true;
+  return QWEN38_PREFILL_ATTN_MMA_DEFAULT != 0;
+}
+
 extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
@@ -298,6 +310,12 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   int positions = prefix + tokens;
   if (positions > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   cudaGetLastError();
+  if (qwen38_prefill_attention_wants_mma()) {
+    // -2 means the mma path is unavailable for this call (below sm_80, or staging growth
+    // inside a graph capture) and has had no effect, so the SIMT kernel runs instead.
+    int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
+    if (mma != -2) return mma;
+  }
   size_t shmem = ((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float);
   k_qwen38_causal_attention_panel_hd256<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
       dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);

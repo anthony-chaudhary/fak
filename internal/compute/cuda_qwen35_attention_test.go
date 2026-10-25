@@ -128,3 +128,59 @@ func TestQwen38PromptAttentionHardwareWitnessRemainsExplicit(t *testing.T) {
 		}
 	}
 }
+
+func TestQwen38PromptAttentionMMADispatchIsOptInAndFallsBack(t *testing.T) {
+	cu := cudaSourceClosure(t, "cuda_kernels.cu")
+	body := qwen38SourceFunction(t, cu, "extern \"C\" int fak_qwen35_causal_attention_panel_f32(")
+	clearError := strings.Index(body, "cudaGetLastError()")
+	selectMMA := strings.Index(body, "qwen38_prefill_attention_wants_mma()")
+	launchMMA := strings.Index(body, "fak_qwen38_fattn_mma_hd256_launch(")
+	fallback := strings.Index(body, "if (mma != -2) return mma;")
+	launchSIMT := strings.Index(body, "k_qwen38_causal_attention_panel_hd256<<<")
+	if clearError < 0 || selectMMA < 0 || launchMMA < 0 || fallback < 0 || launchSIMT < 0 ||
+		!(clearError < selectMMA && selectMMA < launchMMA && launchMMA < fallback && fallback < launchSIMT) {
+		t.Fatalf("mma dispatch must follow every refusal and fall back to the SIMT launch: clear=%d select=%d mma=%d fallback=%d simt=%d", clearError, selectMMA, launchMMA, fallback, launchSIMT)
+	}
+	mode := qwen38SourceFunction(t, cu, "static bool qwen38_prefill_attention_wants_mma(void)")
+	for _, want := range []string{
+		`getenv("FAK_CUDA_QWEN38_PREFILL_ATTN")`,
+		`strcmp(mode, "simt") == 0) return false;`,
+		`strcmp(mode, "mma") == 0) return true;`,
+	} {
+		if !strings.Contains(mode, want) {
+			t.Errorf("prompt-attention kernel selector missing %q", want)
+		}
+	}
+	// SIMT stays the default until the P-05 hardware A/B records a keep verdict.
+	if !strings.Contains(cu, "#define QWEN38_PREFILL_ATTN_MMA_DEFAULT 0") {
+		t.Fatal("mma prompt attention became the default without a hardware keep receipt")
+	}
+	launcher := qwen38SourceFunction(t, cu, "static int fak_qwen38_fattn_mma_hd256_launch(")
+	capacity := strings.Index(launcher, "if (major < 8) return -2;")
+	capture := strings.Index(launcher, "if (g_capture_open) return -2;")
+	stage := strings.Index(launcher, "k_qwen38_fattn_stage_kv_f16<<<")
+	if capacity < 0 || capture < 0 || stage < 0 || !(capacity < stage && capture < stage) {
+		t.Fatalf("mma launcher must decline (-2) before any effect: sm80=%d capture=%d stage=%d", capacity, capture, stage)
+	}
+}
+
+func TestQwen38PromptAttentionMMAHeaderCompilesAsCXX14Port(t *testing.T) {
+	header := qwen38PromptAttentionSource(t, "cuda/fattn_mma_hd256.cuh")
+	for _, want := range []string{
+		"0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT)",
+		"mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32",
+		"ldmatrix.sync.aligned.m8n8.x4.trans.b16",
+		"cp.async.cg.shared.global.L2::64B",
+		"if (i > causal_row0 + j) {",
+		"__launch_bounds__(nthreads, occupancy)",
+	} {
+		if !strings.Contains(header, want) {
+			t.Errorf("hd256 mma port missing %q", want)
+		}
+	}
+	for _, banned := range []string{"if constexpr", "std::is_same_v", "__device__ (auto"} {
+		if strings.Contains(header, banned) {
+			t.Errorf("hd256 mma port retains C++17-only %q; the translation unit compiles as -std=c++14", banned)
+		}
+	}
+}

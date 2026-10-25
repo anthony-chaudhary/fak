@@ -937,3 +937,42 @@ Copyright (c) 2026 KDA Team, under the MIT License (licenses/LICENSE.kda-for-kda
 The split kernel also retains its original Apache-2.0 TIRx-author attribution.
 Source: https://github.com/NVlabs/kda/tree/260927-kda-for-kda
 ```
+
+## llama.cpp fattn-mma-f16 hd256 prompt attention
+
+The Qwen3.8 prompt-attention kernel `internal/compute/cuda/fattn_mma_hd256.cuh` adapts
+one instantiation (DKQ = DV = 256, ncols1 = 8, ncols2 = 8, the Ampere config row) of
+`ggml/src/ggml-cuda/fattn-mma-f16.cuh`, with the tile, `ldmatrix` and `mma.sync`
+primitives it uses from `mma.cuh` and the `cp.async` helpers from `cp-async.cuh`, at
+llama.cpp revision `0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd`:
+https://github.com/ggml-org/llama.cpp/tree/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd/ggml/src/ggml-cuda
+
+Changed for Fak: every C++17 `if constexpr` branch resolved for the one instantiation so
+the code compiles as C++14; an implicit causal bound and causal KV-tile skip replace the
+mask tensor; f32 K/V are staged once per call into a zero-padded f16 copy; Q and the
+output stay f32 in Fak's row-major layout; no ALiBi, softcap, sinks, stream-k split or
+fixup buffer. No upstream runtime is included. The upstream license follows.
+
+```text
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

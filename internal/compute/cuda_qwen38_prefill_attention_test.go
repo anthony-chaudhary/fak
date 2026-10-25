@@ -4,6 +4,7 @@ package compute
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -34,6 +35,7 @@ type cudaQwen38AttnBenchRow struct {
 	LayerMSSamples []float64 `json:"layer_ms_samples"`
 	ModelMS        float64   `json:"full_attention_layers_ms"`
 	FullAttnLayers int       `json:"full_attention_layers"`
+	MMALaunches    uint64    `json:"mma_launches"`
 	EvidenceClass  string    `json:"evidence_class"`
 }
 
@@ -107,12 +109,14 @@ func TestCUDAQwen38PrefillAttentionBench(t *testing.T) {
 			}
 		}
 		run() // warm-up: module load and first-touch costs stay out of the samples
+		mmaBefore := be.qwen38PrefillAttentionMMALaunchesForTest()
 		samples := make([]float64, 0, iterations)
 		for range iterations {
 			start := time.Now()
 			run()
 			samples = append(samples, float64(time.Since(start).Microseconds())/1000)
 		}
+		mmaLaunches := be.qwen38PrefillAttentionMMALaunchesForTest() - mmaBefore
 		sorted := append([]float64(nil), samples...)
 		sort.Float64s(sorted)
 		median := sorted[len(sorted)/2]
@@ -123,12 +127,107 @@ func TestCUDAQwen38PrefillAttentionBench(t *testing.T) {
 		row, err := json.Marshal(cudaQwen38AttnBenchRow{
 			Schema: "fak.qwen38-prefill-attention-bench/1", Kernel: kernel, GPU: gpu,
 			Prompt: prompt, Iterations: iterations, LayerMSMedian: median, LayerMSSamples: samples,
-			ModelMS: median * qwen38FullAttentionLayers, FullAttnLayers: qwen38FullAttentionLayers,
+			ModelMS: median * qwen38FullAttentionLayers, FullAttnLayers: qwen38FullAttentionLayers, MMALaunches: mmaLaunches,
 			EvidenceClass: "HW-WITNESSED",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("%s", row)
+	}
+}
+
+const cudaQwen38PrefillAttnModeEnv = "FAK_CUDA_QWEN38_PREFILL_ATTN"
+
+// cudaQwen38PrefillAttentionPanel runs the Qwen3.8 prompt-attention ABI once under the
+// selected kernel mode and returns the device output read back after the transfer checks.
+func cudaQwen38PrefillAttentionPanel(t *testing.T, be *cudaBackend, mode string, q, k, v []float32, tokens, prefix int, scale float32) []float32 {
+	t.Helper()
+	const (
+		heads    = qwen38CausalAttentionPanelHeads
+		kvHeads  = qwen38CausalAttentionPanelKVHeads
+		headDim  = qwen38CausalAttentionPanelHeadDim
+		sentinel = float32(-12345.75)
+	)
+	t.Setenv(cudaQwen38PrefillAttnModeEnv, mode)
+	upload := func(shape []int, data []float32, site string) Tensor {
+		resident := be.UploadClass(NewF32(Default(), shape, data), F32, MemoryScratchpad, site)
+		t.Cleanup(func() { be.Free(resident) })
+		return resident
+	}
+	sentinels := make([]float32, tokens*heads*headDim)
+	for i := range sentinels {
+		sentinels[i] = sentinel
+	}
+	qDevice := upload([]int{tokens, heads * headDim}, q, "qwen38-mma-witness-query")
+	kDevice := upload([]int{prefix + tokens, kvHeads * headDim}, k, "qwen38-mma-witness-key")
+	vDevice := upload([]int{prefix + tokens, kvHeads * headDim}, v, "qwen38-mma-witness-value")
+	outDevice := upload([]int{tokens, heads * headDim}, sentinels, "qwen38-mma-witness-sentinel-output")
+	be.ResetHostXfer()
+	be.ResetH2DXfer()
+	if err := be.qwen35CausalAttentionPanelIntoForTest(qDevice, kDevice, vDevice, outDevice, tokens, prefix, heads, kvHeads, headDim, scale); err != nil {
+		t.Fatalf("%s prompt attention: %v", mode, err)
+	}
+	if d2h, h2d := be.HostXferBytes(), be.H2DXferBytes(); d2h != 0 || h2d != 0 {
+		t.Fatalf("%s prompt attention transferred host bytes before proof Read: D2H=%d H2D=%d", mode, d2h, h2d)
+	}
+	got := be.Read(outDevice)
+	for i, value := range got {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("%s output[%d] is non-finite: %v", mode, i, value)
+		}
+		if value == sentinel {
+			t.Fatalf("%s output[%d] retained caller sentinel: kernel returned without writing the panel", mode, i)
+		}
+	}
+	return got
+}
+
+// TestCUDAQwen38PrefillAttentionMMA holds the tensor-core port to the cpuref reference and to
+// the SIMT oracle on the same parity table, and refuses a run in which the SIMT fallback
+// silently produced the "mma" output.
+//
+// fak-test:runtime slow est=30s
+func TestCUDAQwen38PrefillAttentionMMA(t *testing.T) {
+	be := cudaGDNBackend(t)
+	t.Cleanup(be.Recycle)
+	for _, panel := range []struct{ tokens, prefix int }{
+		{2, 1}, {1, 0}, {7, 0}, {64, 0}, {33, 5}, {512, 0},
+	} {
+		t.Run(fmt.Sprintf("t%d-p%d", panel.tokens, panel.prefix), func(t *testing.T) {
+			const (
+				heads   = qwen38CausalAttentionPanelHeads
+				kvHeads = qwen38CausalAttentionPanelKVHeads
+				headDim = qwen38CausalAttentionPanelHeadDim
+			)
+			scale := float32(1 / math.Sqrt(headDim))
+			rng := qwen35PanelLCG(0x13984f16)
+			q := rng.values(panel.tokens*heads*headDim, 0.5)
+			k := rng.values((panel.prefix+panel.tokens)*kvHeads*headDim, 0.5)
+			v := rng.values((panel.prefix+panel.tokens)*kvHeads*headDim, 0.5)
+			want := qwen35CausalAttentionPanelCPUReference(q, k, v, panel.tokens, panel.prefix, heads, kvHeads, headDim, scale)
+
+			simt := cudaQwen38PrefillAttentionPanel(t, be, "simt", q, k, v, panel.tokens, panel.prefix, scale)
+			before := be.qwen38PrefillAttentionMMALaunchesForTest()
+			mma := cudaQwen38PrefillAttentionPanel(t, be, "mma", q, k, v, panel.tokens, panel.prefix, scale)
+			if after := be.qwen38PrefillAttentionMMALaunchesForTest(); after != before+1 {
+				t.Fatalf("mma launches %d -> %d: the SIMT fallback produced the mma output (device below sm_80?)", before, after)
+			}
+			for _, pair := range []struct {
+				name      string
+				ref, got  []float32
+				threshold float64
+			}{
+				{"simt-vs-cpuref", want, simt, cudaFlashAttnCosineMin},
+				{"mma-vs-cpuref", want, mma, cudaQwen38PrefillAttnMMACosineMin},
+				{"mma-vs-simt", simt, mma, cudaQwen38PrefillAttnMMACosineMin},
+			} {
+				similarity := cosine(pair.ref, pair.got)
+				if math.IsNaN(similarity) || similarity < pair.threshold {
+					t.Fatalf("%s cosine %.8f < %.4f (max abs delta %.3e)", pair.name, similarity, pair.threshold, maxAbsDelta(pair.ref, pair.got))
+				}
+				t.Logf("%s cosine=%.8f max_abs_delta=%.3e", pair.name, similarity, maxAbsDelta(pair.ref, pair.got))
+			}
+		})
 	}
 }

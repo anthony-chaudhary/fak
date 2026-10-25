@@ -124,6 +124,16 @@ const cudaGPTQCosineMin = 0.995
 // Do not read a pass — or a speedup — from this value alone.
 const cudaFlashAttnCosineMin = 0.999
 
+// cudaQwen38PrefillAttnMMACosineMin is the RECORDED floor for the tensor-core Qwen3.8 hd256
+// prompt-attention port (cuda/fattn_mma_hd256.cuh, adapted from llama.cpp fattn-mma-f16). Unlike
+// the SIMT panel it narrows operands: Q (pre-scaled), K and V are rounded to f16, the softmax
+// weights enter the V product as f16, and V*softmax(KQ) accumulates in f16 exactly as upstream
+// (KQ, the running max and the row sums stay f32). That is the fp16-lane drift class, so the floor
+// is the same 0.997 cudaFP16CosineMin records, held against both the cpuref reference and the SIMT
+// oracle on the same parity table. It RECORDS the threshold; only a committed sm_80+ receipt of
+// TestCUDAQwen38PrefillAttentionMMA proves the port clears it.
+const cudaQwen38PrefillAttnMMACosineMin = 0.997
+
 // cudaDsaSparseAttnCosineMin is the cuda backend's RECORDED Approx cosine floor for the GLM-MoE-DSA
 // sparse-attention kernel (k_dsa_sparse_attend) — the device-vs-cpuref-f32 cosine a witness must
 // clear. The kernel computes the SAME math as model.glmDsaAttendCached — softmax(scale·q·k) then ΣwV,

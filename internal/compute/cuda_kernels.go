@@ -23,6 +23,7 @@ int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale);
 int fak_qwen35_sequence_sync(void);
+unsigned long long fak_qwen38_fattn_mma_launch_count(void);
 */
 import "C"
 
@@ -345,6 +346,14 @@ func (c *cudaBackend) qwen35SequenceAttentionLocked(q Tensor, kv *cudaKV, layer,
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: "causal-attention", Layer: layer, Reason: fmt.Sprintf("CUDA status %d", status)}
 	}
 	return out, b, nil
+}
+
+// qwen38PrefillAttentionMMALaunchesForTest reports how many prompt-attention calls took the
+// tensor-core path, so the mma parity witness can refuse a silent SIMT fallback.
+func (c *cudaBackend) qwen38PrefillAttentionMMALaunchesForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fak_qwen38_fattn_mma_launch_count())
 }
 
 // qwen35CausalAttentionPanelIntoForTest exposes the supplied-output ABI used by the

@@ -16,9 +16,11 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>  /* __half + __float2half — the fp16 compute path (#484) */
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unordered_map>
 #include <vector>
@@ -112,6 +114,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/quant_matmul.cuh"
 #include "cuda/transformer_ops.cuh"
+#include "cuda/fattn_mma_hd256.cuh"
 #include "cuda/attention.cuh"
 #include "cuda/spec_graph.cuh"
 #include "cuda/weight_formats.cuh"

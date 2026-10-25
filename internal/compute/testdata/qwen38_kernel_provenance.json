@@ -119,6 +119,15 @@
       "decision": "ADAPT",
       "attribution": "Algorithm adapted from FlashML-org/FreeToken\n// python/freetoken/kernel/triton/ple_hash.py:31-83 at\n// de77d16a5ac36494d85964f846b50ad36f7acc21 (Apache-2.0).",
       "parity_witness": "internal/compute/cuda_qwen4exp_ple_hash_cuda_test.go"
+    },
+    {
+      "id": "qwen38-cuda-prefill-attention-mma-hd256",
+      "upstream": "llama.cpp",
+      "source_path": "ggml/src/ggml-cuda/fattn-mma-f16.cuh",
+      "destination": "internal/compute/cuda/fattn_mma_hd256.cuh",
+      "decision": "ADAPT",
+      "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/fattn-mma-f16.cuh, mma.cuh and cp-async.cuh at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "parity_witness": "internal/compute/cuda_qwen38_prefill_attention_test.go"
     }
   ]
 }
