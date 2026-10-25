@@ -470,10 +470,17 @@ static int qwen35_gdn_launch_status(int stage) {
   return stage * 10000 + (int)e;
 }
 
+// qwen35_gdn_fence is the capture-legal stream fence. Inside an open graph capture no
+// work has executed and a synchronize would invalidate the capture, so it returns success;
+// the graph fence (fcuda_graph_end_launch) reports a replayed fault instead.
+static cudaError_t qwen35_gdn_fence(void) {
+  return g_capture_open ? cudaSuccess : cudaStreamSynchronize(g_stream);
+}
+
 static int qwen35_gdn_drain_after_error(int status) {
   // A later stage can fail to launch after earlier stages were enqueued. Drain
   // those stages before returning so Go can safely invalidate/free their buffers.
-  cudaError_t e = cudaStreamSynchronize(g_stream);
+  cudaError_t e = qwen35_gdn_fence();
   if (e == cudaSuccess) return status;
   fprintf(stderr, "fak-cuda: Qwen3.5 GDN drain after launch failure also failed: %s\n", cudaGetErrorString(e));
   return 70000 + (int)e;
@@ -552,10 +559,14 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
-  cudaError_t completed = cudaStreamSynchronize(g_stream);
+  cudaError_t completed = qwen35_gdn_fence();
   if (g_qwen35_gdn_test_fault_stage == 7) {
     g_qwen35_gdn_test_fault_stage = 0;
-    completed = cudaErrorLaunchFailure;
+    if (g_capture_open) {
+      g_graph_fence_test_fault = 1; // a captured fault surfaces at the graph fence
+    } else {
+      completed = cudaErrorLaunchFailure;
+    }
   }
   if (completed != cudaSuccess) {
     fprintf(stderr, "fak-cuda: Qwen3.5 GDN asynchronous execution failed: %s\n", cudaGetErrorString(completed));

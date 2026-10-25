@@ -28,6 +28,7 @@
 static cublasHandle_t g_blas = nullptr;
 static void *g_blas_workspace = nullptr; // explicit cuBLAS workspace so it never cudaMalloc's mid-capture (#969)
 static bool g_capture_open = false;      // true between fcuda_graph_begin and end/abort: arms the #969 dalloc guard
+static int g_graph_fence_test_fault = 0; // test hook: the next graph fence reports a replayed fault
 // All device work runs on g_stream (a blocking stream, so a synchronous cudaMemcpy on the
 // legacy default stream still fences it). One stream is what makes the whole per-token op
 // sequence CAPTURABLE into a CUDA graph — the only way to collapse ~600 WSL CUDA calls/

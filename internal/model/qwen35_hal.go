@@ -246,6 +246,38 @@ type qwen35HALLayerState struct {
 // qwen35HALLayerOwner is the physical owner of one convolution/recurrent pair.
 // Snapshot layers retain it without copying device memory; the first branch that
 // writes while refs > 1 receives a transactional pair clone.
+// graphCaptureReady reports whether every recurrent layer's state is allocated, ready and
+// private, so a captured GDN decode updates it in place with no copy-on-write clone (an
+// allocation) inside the capture.
+func (q *qwen35HALState) graphCaptureReady(cfg Config) bool {
+	if q == nil || q.backend == nil || q.sequenceFailure != nil {
+		return false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.layers) < cfg.NumLayers {
+		return false
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		if !cfg.isLinearAttnLayer(l) {
+			continue
+		}
+		st := q.layers[l]
+		if st.conv.Buf() == nil || !st.conv.Ready() || st.recurrent.Buf() == nil || !st.recurrent.Ready() {
+			return false
+		}
+		if st.owner != nil {
+			st.owner.mu.Lock()
+			shared := st.owner.refs > 1
+			st.owner.mu.Unlock()
+			if shared {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 type qwen35HALLayerOwner struct {
 	mu        sync.Mutex
 	refs      int
@@ -434,6 +466,50 @@ type qwen35SigmoidGateBackend interface {
 
 type qwen35QueryGateSplitBackend interface {
 	SplitQwen35QueryGate(qg compute.Tensor, nHeads, headDim int) (compute.Tensor, compute.Tensor)
+}
+
+// Qwen hybrid CUDA-graph capture-eligibility verdicts (see cudaGraphCaptureEligible).
+const (
+	CUDAGraphQwen35ScaledRoPE       = "qwen35-scaled-rope-host-inv-freq"
+	CUDAGraphQwen35NoPartialRoPE    = "qwen35-no-device-partial-rope"
+	CUDAGraphQwen35NoQueryGateSplit = "qwen35-no-device-query-gate-split"
+	CUDAGraphQwen35NoSigmoidGate    = "qwen35-no-device-sigmoid-gate"
+	CUDAGraphQwen35GDNNotCaptured   = "qwen35-gdn-decode-not-capture-legal"
+)
+
+// qwen35GDNCaptureBackend is implemented by a backend whose whole-operation GDN decode
+// skips its in-op stream synchronize while a graph capture is open, so the decode can sit
+// inside a reusable capture and its asynchronous faults surface at the graph fence.
+type qwen35GDNCaptureBackend interface {
+	Qwen35GDNCaptureLegal() bool
+}
+
+// qwen35HybridGraphEligible restores the #9358 hybrid gate (e1a86a6ce) and adds what it
+// lacked: every full-attention step must stay on the device (partial RoPE, query-gate split
+// and the sigmoid output gate), and the GDN decode must be capture-legal. Scaled/YaRN RoPE
+// keeps the cached-inv-freq host fallback, so it stays excluded. QSA sparse gather, which
+// reads the host, is a context-depth condition checked per step by cudaGraphCaptureReady.
+func qwen35HybridGraphEligible(cfg Config, be compute.Backend) (bool, string) {
+	if cfg.RopeScaling != "" || cfg.LongRope != nil {
+		return false, CUDAGraphQwen35ScaledRoPE
+	}
+	if cfg.rotaryDim() != cfg.HeadDim {
+		if _, ok := be.(qwen35PartialRoPEBackend); !ok {
+			return false, CUDAGraphQwen35NoPartialRoPE
+		}
+	}
+	if cfg.AttnOutputGate {
+		if _, ok := be.(qwen35QueryGateSplitBackend); !ok {
+			return false, CUDAGraphQwen35NoQueryGateSplit
+		}
+		if _, ok := be.(qwen35SigmoidGateBackend); !ok {
+			return false, CUDAGraphQwen35NoSigmoidGate
+		}
+	}
+	if gdn, ok := be.(qwen35GDNCaptureBackend); !ok || !gdn.Qwen35GDNCaptureLegal() {
+		return false, CUDAGraphQwen35GDNNotCaptured
+	}
+	return true, CUDAGraphEligible
 }
 
 func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
@@ -892,6 +968,9 @@ func (s *Session) qwen35QueryBiasHAL(layer int) (query, gate compute.Tensor) {
 }
 
 func (s *Session) readQwen35FullAttention(layer int, label string, tensor compute.Tensor) []float32 {
+	if capturer, ok := s.Backend.(interface{ IsCapturing() bool }); ok && capturer.IsCapturing() {
+		s.failBackendForward(layer, label, fmt.Errorf("cannot read tensor to host while graph capture is open"))
+	}
 	data := s.Backend.Read(tensor)
 	if data == nil {
 		s.failBackendForward(layer, label, fmt.Errorf("backend returned an unreadable tensor"))

@@ -455,6 +455,13 @@ void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, const float *dS
  * caller guarantees: no cudaMalloc happens during capture (the pool is pre-warmed and the
  * KV is fixed-capacity), and the host stays pinned to one OS thread across the token. */
 int fcuda_graph_begin(void);
+/* fcuda_graph_end_launch returns 0, or the first failing step: end capture, instantiate,
+ * launch, or the fence synchronize where a fault inside the replayed graph appears.
+ * graph_fence.go mirrors these codes. */
+#define FCUDA_GRAPH_END_CAPTURE_FAILED 1
+#define FCUDA_GRAPH_INSTANTIATE_FAILED 2
+#define FCUDA_GRAPH_LAUNCH_FAILED 3
+#define FCUDA_GRAPH_FENCE_FAILED 4
 int fcuda_graph_end_launch(void);
 /* fcuda_graph_reset drops the kept exec graph so the next session captures fresh (the exec
  * is tied to one session's buffer addresses). Called at session start. */

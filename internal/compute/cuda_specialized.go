@@ -280,6 +280,8 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	}
 	// fcuda_qwen35_gdn_decode_f32 synchronized g_stream successfully. Record the
 	// host fence so this output and any earlier stream-ordered outputs become Ready.
+	// Inside an open capture nothing has run yet: the graph fence reports faults, and
+	// the model refuses host reads until GraphEndLaunch returns.
 	atomic.AddUint64(&c.fenceGen, 1)
 	return output, convState, recurrentState, nil
 }

@@ -460,10 +460,10 @@ extern "C" int fcuda_graph_end_launch(void) {
   cudaGraph_t graph = nullptr;
   g_capture_open = false; // #969: capture closed; device allocation is permitted again
   cudaError_t e = cudaStreamEndCapture(g_stream, &graph);
-  if (e != cudaSuccess || !graph) { fprintf(stderr, "fak-cuda: EndCapture: %s\n", cudaGetErrorString(e)); return 1; }
+  if (e != cudaSuccess || !graph) { fprintf(stderr, "fak-cuda: EndCapture: %s\n", cudaGetErrorString(e)); return FCUDA_GRAPH_END_CAPTURE_FAILED; }
   if (g_exec == nullptr) {
     e = cudaGraphInstantiate(&g_exec, graph, 0);
-    if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); g_exec = nullptr; return 2; }
+    if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); g_exec = nullptr; return FCUDA_GRAPH_INSTANTIATE_FAILED; }
   } else {
     cudaGraphExecUpdateResultInfo info;
     e = cudaGraphExecUpdate(g_exec, graph, &info);
@@ -474,13 +474,23 @@ extern "C" int fcuda_graph_end_launch(void) {
       cudaGetLastError();
       cudaGraphExecDestroy(g_exec);
       e = cudaGraphInstantiate(&g_exec, graph, 0);
-      if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Re-instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); g_exec = nullptr; return 2; }
+      if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Re-instantiate: %s\n", cudaGetErrorString(e)); cudaGraphDestroy(graph); g_exec = nullptr; return FCUDA_GRAPH_INSTANTIATE_FAILED; }
     }
   }
   int rc = 0;
   e = cudaGraphLaunch(g_exec, g_stream);
-  if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Launch: %s\n", cudaGetErrorString(e)); rc = 3; }
-  CK(cudaStreamSynchronize(g_stream));
+  if (e != cudaSuccess) { fprintf(stderr, "fak-cuda: Launch: %s\n", cudaGetErrorString(e)); rc = FCUDA_GRAPH_LAUNCH_FAILED; }
+  // The fence is where an asynchronous fault inside the replayed graph appears; return it
+  // instead of only logging, so GraphEndLaunch raises it at this token, not a later op.
+  e = cudaStreamSynchronize(g_stream);
+  if (g_graph_fence_test_fault) {
+    g_graph_fence_test_fault = 0;
+    e = cudaErrorLaunchFailure;
+  }
+  if (e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: graph fence: %s\n", cudaGetErrorString(e));
+    if (rc == 0) rc = FCUDA_GRAPH_FENCE_FAILED;
+  }
   cudaGraphDestroy(graph); // keep g_exec for the next token's ExecUpdate
   return rc;
 }

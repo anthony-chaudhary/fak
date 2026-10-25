@@ -5,9 +5,8 @@ import "github.com/anthony-chaudhary/fak/internal/compute"
 // CUDA-graph capture-eligibility verdicts. They are stable vocabulary for the serve
 // startup message and the HAL capture decision.
 const (
-	CUDAGraphEligible          = "eligible"
-	CUDAGraphNoCaptureBackend  = "backend-has-no-graph-capture"
-	CUDAGraphQwen35HybridGated = "qwen35-hybrid-gdn-not-capture-legal"
+	CUDAGraphEligible         = "eligible"
+	CUDAGraphNoCaptureBackend = "backend-has-no-graph-capture"
 )
 
 // cudaGraphCaptureEligible is the one static capture predicate. It decides both whether a
@@ -18,26 +17,34 @@ func cudaGraphCaptureEligible(cfg Config, be compute.Backend) (bool, string) {
 		return false, CUDAGraphNoCaptureBackend
 	}
 	if cfg.IsQwen35Hybrid() {
-		// The CUDA GDN whole operation synchronizes before success, and the retained
-		// full-attention correctness bridge reads the host for partial RoPE / output
-		// gating. Neither is legal inside a reusable graph capture.
-		return false, CUDAGraphQwen35HybridGated
+		return qwen35HybridGraphEligible(cfg, be)
 	}
 	return true, CUDAGraphEligible
 }
 
-// cudaGraphCaptureReady adds the per-session conditions to the static predicate: no
-// captured target hidden, no split GPU-layer placement, and a KV store holding the fixed
-// graph capacity (a growable store may cudaMalloc on append, illegal inside a capture).
+// cudaGraphCaptureReady adds the per-session conditions to the static predicate: an open,
+// unfailed session with no captured target hidden, no split GPU-layer placement, a KV store
+// holding the fixed graph capacity (a growable store may cudaMalloc on append, illegal inside
+// a capture) and, for a hybrid, private ready GDN state and a KV depth below the QSA sparse
+// gather threshold (that gather reads the host).
 func (s *Session) cudaGraphCaptureReady(isSplit bool) bool {
-	if s == nil || s.M == nil || s.captureTargetHidden || isSplit {
+	if s == nil || s.M == nil || s.halClosed || s.halFailure != nil || s.captureTargetHidden || isSplit {
 		return false
 	}
 	if ok, _ := cudaGraphCaptureEligible(s.M.Cfg, s.Backend); !ok {
 		return false
 	}
+	if s.halKV == nil {
+		return false
+	}
 	if fixed, ok := s.halKV.(interface{ GraphCaptureReady() bool }); ok && !fixed.GraphCaptureReady() {
 		return false
+	}
+	if cfg := s.M.Cfg; cfg.IsQwen35Hybrid() {
+		if cfg.HasQSASparseAttn() && s.halKV.Len()+1 >= compute.QSADynamicGatingThreshold {
+			return false
+		}
+		return s.qwen35HAL.graphCaptureReady(cfg)
 	}
 	return true
 }

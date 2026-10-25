@@ -276,18 +276,22 @@ func (c *cudaBackend) GraphEndLaunch() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	c.capturing = false
-	if code := C.fcuda_graph_end_launch(); code != 0 {
+	if code := int(C.fcuda_graph_end_launch()); code != 0 {
 		C.fcuda_graph_reset()
-		panic(&CUDALaunchError{
-			CUDAOpError: CUDAOpError{
-				Op:   "GraphEndLaunch",
-				Site: "cuda-graph-launch",
-				Msg:  "cuda graph capture/launch failed",
-				Code: int(code),
-			},
-		})
+		err := graphEndLaunchError(code)
+		if code == graphFenceFailed {
+			// An asynchronous fault inside the replayed graph (for example a captured GDN
+			// decode) surfaces here; latch it so later operations refuse the suspect context.
+			c.faultLatch.Observe(DeviceFaultExecution, err.Site, code)
+		}
+		panic(err)
 	}
 }
+
+// Qwen35GDNCaptureLegal reports that fcuda_qwen35_gdn_decode_f32 skips its in-op stream
+// synchronize while a capture is open, so a hybrid decode step can be captured and its
+// asynchronous faults surface at the graph fence (GraphEndLaunch).
+func (c *cudaBackend) Qwen35GDNCaptureLegal() bool { return true }
 
 // GraphReset drops the kept exec graph so a new session captures fresh (the exec is bound
 // to one session's buffer addresses). The HAL calls it at NewBackendSession.

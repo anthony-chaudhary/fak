@@ -44,7 +44,7 @@ func TestCUDAGraphEligibilityPredicateDrivesKVConfig(t *testing.T) {
 	}{
 		{"dense on a capture backend", cudaGraphDenseConfig(), true, true, CUDAGraphEligible},
 		{"dense without capture", cudaGraphDenseConfig(), false, false, CUDAGraphNoCaptureBackend},
-		{"qwen hybrid", qwen38ContextPlanConfig(), true, false, CUDAGraphQwen35HybridGated},
+		{"qwen hybrid without capture-legal GDN", qwen38ContextPlanConfig(), true, false, CUDAGraphQwen35GDNNotCaptured},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cpu := compute.Pick("cpu-ref")

@@ -233,6 +233,15 @@ func (s *Session) rebuildCacheGeometryOwned(req CacheGeometryRequest) (report Ca
 		s.halKV.Free()
 		s.halKV = nil
 	}
+	// A kept exec this session captured addresses the freed KV and GDN state: drop it,
+	// and run one uncaptured logits step on the new geometry before capturing again.
+	if s.graphCaptured {
+		s.graphCaptured = false
+		if gr, ok := s.Backend.(interface{ GraphReset() }); ok {
+			gr.GraphReset()
+		}
+	}
+	s.halLogitsWarm = false
 	s.closeQwen35HALState()
 	s.Cache, s.expertRing = nil, nil
 

@@ -191,6 +191,13 @@ func (s *Session) closeOwned(scope *backendExecutionScope) {
 			if b, ok := s.Backend.(batchBackend); ok {
 				b.FlushBatch()
 			}
+			// A kept exec this session captured is bound to its buffer addresses.
+			if s.graphCaptured {
+				s.graphCaptured = false
+				if gr, ok := s.Backend.(interface{ GraphReset() }); ok {
+					gr.GraphReset()
+				}
+			}
 			s.releaseGreedyLogits()
 			if s.halW != nil {
 				for name, t := range s.halW {
@@ -1024,6 +1031,7 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	finishGraph := func() {
 		if capturing {
 			gr.GraphEndLaunch() // end capture, instantiate, launch, fence
+			s.graphCaptured = true
 			runtime.UnlockOSThread()
 			capturing = false
 		}

@@ -148,6 +148,9 @@ type Session struct {
 	// noLogits prefill step never touches the logits path, so counting steps (the old
 	// halStep>=2 gate) did not guarantee it was warm; this flag does.
 	halLogitsWarm bool
+	// graphCaptured records that this session replayed a captured graph, so it owns the
+	// backend's kept exec and must drop it on close or cache-geometry rebuild.
+	graphCaptured bool
 	// qwen35HAL owns the backend-resident convolution/recurrent state for every
 	// Qwen3.5/3.6 linear-attention layer. It is separate from Cache.linear, which is
 	// the legacy CPU/reference object's state and is never consulted by a HAL session.
