@@ -504,11 +504,43 @@ func ParallelVerifyKernel(
 		}, nil
 	}
 
-	tBase := target.Cache.Len()
-
 	// Single target forward pass for all K draft tokens (cloning row buffers to avoid aliasing in quantized modes)
 	var rows [][]float32
-	if verifyForwardBatchedOK(target) {
+	var v41Round *v41StepRound
+	var v41OwnedComplete bool
+	v41Transactional := target.M.Cfg.IsDeepSeekV41() && !target.M.v41EPRequested() &&
+		target.v41IncrementalEligible() && len(draft) <= 32 && v41ActivationTraceEnvPath() == ""
+	tBase := 0
+	if !v41Transactional {
+		tBase = target.Cache.Len()
+	}
+	if v41Transactional {
+		scope := target.beginBackendExecution()
+		defer scope.finishCompleted(&v41OwnedComplete)
+		if err := target.refuseUnimplementedV4FlashAttention(); err != nil {
+			return VerificationResult{}, err
+		}
+		defer target.BeginGPUKeepAlive()()
+		target.validateDeviceOnlyExecution("decode")
+		target.ensureOpenBackendSession()
+		var err error
+		v41Round, err = target.M.beginV41StepRound(target.v41State(), len(draft))
+		if err != nil {
+			return VerificationResult{}, err
+		}
+		defer v41Round.abort()
+		rows = make([][]float32, len(draft))
+		for i, tok := range draft {
+			if err := ctx.Err(); err != nil {
+				return VerificationResult{}, err
+			}
+			row, err := target.parallelVerifyV41Step(v41Round, tok)
+			if err != nil {
+				return VerificationResult{}, err
+			}
+			rows[i] = append([]float32(nil), row...)
+		}
+	} else if verifyForwardBatchedOK(target) {
 		rawRows := target.VerifyForward(draft, nil, nil)
 		rows = make([][]float32, len(rawRows))
 		for i, r := range rawRows {
@@ -552,7 +584,12 @@ func ParallelVerifyKernel(
 
 	numAccepted := len(acceptedTokens)
 	rollbackCount := len(draft) - numAccepted
-	if rollbackCount > 0 {
+	if v41Round != nil {
+		if err := v41Round.finish(numAccepted); err != nil {
+			return VerificationResult{}, err
+		}
+		v41OwnedComplete = true
+	} else if rollbackCount > 0 {
 		target.evictKV(tBase+numAccepted, rollbackCount)
 	}
 
@@ -563,6 +600,59 @@ func ParallelVerifyKernel(
 		RollbackKVCount: rollbackCount,
 		TargetLogits:    rows,
 	}, nil
+}
+
+// parallelVerifyV41Step runs one entry of an already-owned speculative round
+// through the same per-token brackets as Session.stepV41. The round remains
+// responsible for retaining the accepted prefix or undoing the whole attempt.
+func (s *Session) parallelVerifyV41Step(round *v41StepRound, tok int) (row []float32, err error) {
+	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
+	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
+	row = s.v41IndexerScoreRecovering(func() []float32 {
+		endBatch := s.v41BeginStepBatch()
+		bodyComplete := false
+		defer func() {
+			v41FinishStepBatch(endBatch, &err, bodyComplete)
+		}()
+		tx, stepErr := round.beginStep(tok, &v41ProjScratch{})
+		if stepErr == nil {
+			for tx.nextLayer < tx.layers {
+				if stepErr = tx.advanceLayer(); stepErr != nil {
+					break
+				}
+			}
+		}
+		if stepErr == nil {
+			row, stepErr = tx.finalize()
+		}
+		err = stepErr
+		bodyComplete = true
+		return row
+	})
+	if err != nil {
+		var selectedScore *V41IndexerScoreOperationError
+		if errors.As(err, &selectedScore) {
+			// The public V4.1 boundary retires a selected indexer failure only
+			// after forward rollback. Undo the entire speculative round while
+			// the backend is live, then let the existing converter latch and
+			// retire it. A direct abort defer preserves the selected primary
+			// over any secondary cleanup failure.
+			s.v41IndexerScoreRecovering(func() []float32 {
+				func() {
+					defer round.abort()
+					panic(err)
+				}()
+				return nil
+			})
+		}
+		return nil, err
+	}
+	s.M.v41NoteWorkload(v41WorkloadDecode, 1, 1)
+	s.M.v41NoteExpertFaultToken(1)
+	if v41IncrementalStepProbe != nil {
+		v41IncrementalStepProbe()
+	}
+	return row, nil
 }
 
 // Admission may retire a device-only session, so a no-forward rejection still owns the backend domain.
