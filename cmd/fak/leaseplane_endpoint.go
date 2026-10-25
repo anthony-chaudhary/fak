@@ -115,16 +115,12 @@ func serveLeasePlaneLeases(ctx context.Context) (gateway.LeasePlaneView, error) 
 func serveLeasePlanePresence(ctx context.Context) (gateway.LeasePresenceView, error) {
 	now := time.Now()
 	store := leaseref.NewInDir(leasePlaneDir())
-	live, _, err := store.LiveSessions(ctx, now)
+	live, classified, err := store.PresenceSnapshot(ctx, "", now)
 	if err != nil {
 		return gateway.LeasePresenceView{}, err
 	}
 	if live == nil {
 		live = []leaseref.SessionDescriptor{}
-	}
-	classified, err := store.ClassifyLive(ctx, "", now)
-	if err != nil {
-		return gateway.LeasePresenceView{}, err
 	}
 	rawSessions, err := json.Marshal(live)
 	if err != nil {

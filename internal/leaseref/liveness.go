@@ -223,9 +223,34 @@ func (s *Store) ClassifyLive(ctx context.Context, selfSession string, now time.T
 	if err != nil {
 		return nil, err
 	}
-	byID, err := s.sessionsByID(ctx)
+	sessions, err := s.ListSessions(ctx)
 	if err != nil {
 		return nil, err
+	}
+	return classifyLiveRecords(live, sessions, selfSession, now), nil
+}
+
+// PresenceSnapshot reads each record and descriptor set once and returns the two projections
+// used by the gateway presence endpoint from the same session-descriptor snapshot. Classification
+// retains expired and stopped descriptors as evidence; only the returned session list is
+// filtered to live descriptors.
+func (s *Store) PresenceSnapshot(ctx context.Context, selfSession string, now time.Time) ([]SessionDescriptor, []ClassifiedLease, error) {
+	live, _, err := s.Live(ctx, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	liveSessions, _ := liveExpire(sessions, now, func(d SessionDescriptor) string { return d.ID })
+	return liveSessions, classifyLiveRecords(live, sessions, selfSession, now), nil
+}
+
+func classifyLiveRecords(live []Record, sessions []SessionDescriptor, selfSession string, now time.Time) []ClassifiedLease {
+	byID := make(map[string]SessionDescriptor, len(sessions))
+	for _, d := range sessions {
+		byID[d.ID] = d
 	}
 	out := make([]ClassifiedLease, 0, len(live))
 	for _, r := range live {
@@ -239,7 +264,7 @@ func (s *Store) ClassifyLive(ctx context.Context, selfSession string, now time.T
 			EvidenceKind: kind,
 		})
 	}
-	return out, nil
+	return out
 }
 
 // LivenessSummary is the aggregate companion to a ClassifyLive array (#5485): how much of

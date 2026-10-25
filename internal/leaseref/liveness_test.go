@@ -377,6 +377,117 @@ func TestStoreClassifyLive(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1s
+func TestPresenceSnapshotReadsSessionDescriptorsOnceAndPreservesClassification(t *testing.T) {
+	g := newFakeGit()
+	seed := NewWithRunner(g.run, "")
+	ctx := context.Background()
+	now := time.Unix(10_000, 0)
+
+	for _, d := range []SessionDescriptor{
+		{ID: "alive", PCBState: "RUNNING", UpdatedAt: 9_950, TTLSecs: 300},
+		{ID: "stopped", PCBState: "STOPPED", UpdatedAt: 9_950, TTLSecs: 300},
+		{ID: "stale", PCBState: "RUNNING", UpdatedAt: 1_000, TTLSecs: 60},
+	} {
+		if _, err := seed.PublishSession(ctx, d); err != nil {
+			t.Fatalf("PublishSession %s: %v", d.ID, err)
+		}
+	}
+	g.blobs["corrupt-session-oid"] = []byte("not json")
+	g.refs[refPrefix+sessionPrefix+"corrupt"] = "corrupt-session-oid"
+
+	for _, r := range []Record{
+		{ID: "alive", Holder: "h", SessionID: "alive", AcquiredAt: 9_000, TTLSeconds: 3_600},
+		{ID: "stopped", Holder: "h", SessionID: "stopped", AcquiredAt: 9_000, TTLSeconds: 3_600},
+		{ID: "stale", Holder: "h", SessionID: "stale", AcquiredAt: 9_000, TTLSeconds: 3_600},
+		{ID: "missing", Holder: "h", SessionID: "missing", AcquiredAt: 9_000, TTLSeconds: 3_600},
+		{ID: "corrupt-session", Holder: "h", SessionID: "corrupt", AcquiredAt: 9_000, TTLSeconds: 3_600},
+		{ID: "unbound", Holder: "h", AcquiredAt: 9_000, TTLSeconds: 3_600},
+		{ID: "expired-lease", Holder: "h", SessionID: "alive", AcquiredAt: 1, TTLSeconds: 1},
+	} {
+		if _, err := seed.Acquire(ctx, r); err != nil {
+			t.Fatalf("Acquire %s: %v", r.ID, err)
+		}
+	}
+	g.blobs["corrupt-lease-oid"] = []byte("not json")
+	g.refs[refPrefix+"corrupt-lease"] = "corrupt-lease-oid"
+
+	var sessionBatches, leaseBatches int
+	countingStdin := func(ctx context.Context, dir, stdin string, args ...string) (string, int, error) {
+		if len(args) >= 2 && args[0] == "cat-file" && args[1] == "--batch" {
+			if strings.Contains(stdin, sessionPrefix) {
+				sessionBatches++
+			} else {
+				leaseBatches++
+			}
+		}
+		return g.runStdin(ctx, dir, stdin, args...)
+	}
+	s := NewWithStdinRunner(g.run, countingStdin, "")
+
+	if _, _, err := s.LiveSessions(ctx, now); err != nil {
+		t.Fatalf("baseline LiveSessions: %v", err)
+	}
+	if _, err := s.ClassifyLive(ctx, "", now); err != nil {
+		t.Fatalf("baseline ClassifyLive: %v", err)
+	}
+	if sessionBatches != 2 || leaseBatches != 1 {
+		t.Fatalf("baseline batch reads = {sessions:%d leases:%d}, want {2 1}", sessionBatches, leaseBatches)
+	}
+	sessionBatches, leaseBatches = 0, 0
+
+	liveSessions, classified, err := s.PresenceSnapshot(ctx, "", now)
+	if err != nil {
+		t.Fatalf("PresenceSnapshot: %v", err)
+	}
+	if sessionBatches != 1 || leaseBatches != 1 {
+		t.Fatalf("batch reads = {sessions:%d leases:%d}, want one of each", sessionBatches, leaseBatches)
+	}
+	t.Log("session descriptor batches: baseline=2 snapshot=1 delta=-50%")
+	if got := descriptorIDs(liveSessions); strings.Join(got, ",") != "alive,stopped" {
+		t.Fatalf("live session ids = %v, want [alive stopped]", got)
+	}
+
+	got := make(map[string]ClassifiedLease, len(classified))
+	for _, row := range classified {
+		got[row.ID] = row
+	}
+	if len(got) != 6 {
+		t.Fatalf("classified ids = %v, want six live parseable leases", got)
+	}
+	if _, ok := got["expired-lease"]; ok {
+		t.Fatal("TTL-expired lease was classified")
+	}
+	want := map[string]struct {
+		class string
+		kind  string
+	}{
+		"alive":           {LivenessPeerLive, EvidenceHeartbeating},
+		"stopped":         {LivenessPeerDead, EvidenceTerminalStopped},
+		"stale":           {LivenessPeerDead, EvidenceHeartbeatLapsed},
+		"missing":         {LivenessPeerUnknown, EvidenceNoDescriptor},
+		"corrupt-session": {LivenessPeerUnknown, EvidenceNoDescriptor},
+		"unbound":         {LivenessPeerUnknown, EvidenceNoBinding},
+	}
+	for id, expected := range want {
+		row, ok := got[id]
+		if !ok {
+			t.Fatalf("classified lease %q missing", id)
+		}
+		if row.Liveness != expected.class || row.EvidenceKind != expected.kind {
+			t.Fatalf("%s = {%s %s}, want {%s %s}", id, row.Liveness, row.EvidenceKind, expected.class, expected.kind)
+		}
+	}
+}
+
+func descriptorIDs(ds []SessionDescriptor) []string {
+	ids := make([]string, 0, len(ds))
+	for _, d := range ds {
+		ids = append(ids, d.ID)
+	}
+	return ids
+}
+
 // TestClassifyLiveEmpty pins the nothing-held shape: a non-nil empty slice, so the CLI
 // emits `[]` rather than `null`.
 func TestClassifyLiveEmpty(t *testing.T) {
