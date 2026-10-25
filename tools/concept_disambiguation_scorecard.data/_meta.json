@@ -14656,6 +14656,11 @@
           "category": "incidental",
           "reason": "This initializer returns the fixed missingness and scope strings of the separately positioned V41WorkloadCoverage receipt contract. It does not independently measure coverage, choose runtime policy or establish request isolation, timing validity or readiness.",
           "token": "V41WorkloadCoverageDefault"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private GGUF TensorType lookup table recording why a fixed storage layout cannot be selected from that enum alone. This is local registry representation bookkeeping, not a hardware/backend support level, execution capability, or implementation maturity claim; the public registry API preserves explicit refusal.",
+          "token": "unsupportedGGUF"
         }
       ],
       "exclude": [
@@ -14926,6 +14931,7 @@
         "topncoverage",
         "unsupported",
         "unsupportedFaultDomain",
+        "unsupportedGGUF",
         "unsupported_activation",
         "unsupported_config",
         "unsupported_cpu_envelope",
