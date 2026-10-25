@@ -48,16 +48,19 @@ import (
 // sections are also the opt-in kernel profile's timed spans (cuda_profile.go).
 var cudaMu cudaDeviceMutex
 
-// graphEnabled gates the CUDA-graph decode path (FAK_CUDA_GRAPH=1). It is OFF by default
-// because PER-TOKEN capture is a measured dead end: re-instantiating a ~600-node graph
-// every token costs ~what the 600 launches it replaces cost (7.0 vs 7.5 tok/s on
-// SmolLM2-135M — no net win). The real win is instantiate-ONCE + replay-many, which needs a
-// length-agnostic graph (device-side pos/nPos + a positioned KV-write kernel so one graph
-// serves every position) — a tracked redesign (issue #35/#3). The capture plumbing here is
-// kept, gated, as its foundation; when on, it also forces a fixed-capacity KV (no realloc
-// during capture). Default-off keeps the lean path (pooled alloc + recycle + async + single
-// stream) at its proven 7.5 tok/s without the fixed-KV memory cost.
+// graphEnabled gates the reusable CUDA-graph decode path (FAK_CUDA_GRAPH=1, or a host's
+// EnableCUDAGraph). The path ships: it instantiates one exec and patches each later token's
+// capture in with cudaGraphExecUpdate (7.5 -> 119-120 tok/s on SmolLM2-135M under WSL2,
+// GPU.md §3b). It stays OFF by default until graph replay shows bit-exact parity and no
+// tok/s regression on CUDA 13.x hardware (P-06, fak#13985): a sm_80 native-Linux run
+// measured 56.6 off vs 55.7 on, and #4370 records a CUDA 13.0 graph/eager divergence. When
+// on, only a capture-eligible session preallocates its fixed-capacity KV (GraphKVPreallocFor),
+// sized to the host's resolved context by SetCUDAGraphKVCapacity.
 var graphEnabled bool
+
+// cudaGraphReplays counts graph replays whose fence completed, so a hardware witness can
+// prove a graph-enabled run actually replayed instead of comparing eager with eager.
+var cudaGraphReplays atomic.Uint64
 
 // tf32Enabled gates the TF32 tensor-core math mode for the f32 SGEMM path (FAK_CUDA_TF32=1,
 // Lever 4 of the H100-KERNEL-5X-ROADMAP). OFF by default so the witnessed device-vs-cpuref cosine
@@ -286,6 +289,7 @@ func (c *cudaBackend) GraphEndLaunch() {
 		}
 		panic(err)
 	}
+	cudaGraphReplays.Add(1)
 }
 
 // Qwen35GDNCaptureLegal reports that fcuda_qwen35_gdn_decode_f32 skips its in-op stream

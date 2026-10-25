@@ -223,10 +223,12 @@ graph replayable across the whole growing decode, so the per-token cost is one l
    masking the decode result entirely.
 
 Result: **7.5 → 119–120 tok/s decode (16×), at parity with `llama.cpp` Q8_0.** It ships
-gated `FAK_CUDA_GRAPH=1` with one honest caveat: the device KV is **fixed-capacity (1024
-positions)** so capture never hits a `cudaMalloc`; lifting that to dynamic/ring is the
-follow-up (dynamic/ring device KV), and fp16 is the lever to also reach the
-F16 number. Native-Linux (no WSL per-call tax) would start from a far lower floor.
+gated `FAK_CUDA_GRAPH=1` with one honest caveat: a capturing session's device KV is
+**fixed-capacity** so capture never hits a `cudaMalloc`. The capacity defaults to 1024
+positions and `fak serve` raises it to the resolved context (`SetCUDAGraphKVCapacity`) for
+both `FAK_CUDA_GRAPH=1` and `--cuda-graph`; sessions that cannot capture stay growable.
+Lifting it to dynamic/ring is the follow-up (dynamic/ring device KV), and fp16 is the lever
+to also reach the F16 number. Native-Linux (no WSL per-call tax) would start from a far lower floor.
 
 Reproduce: fak `FAK_CUDA_GRAPH=1 go run -tags cuda ./cmd/modelbench -dir
 internal/model/.cache/smollm2-135m -backend cuda` (or `internal/compute/build_cuda.sh
@@ -269,6 +271,7 @@ baseline on Qwen2.5-7B-Q4_K_M, same batch-1 protocol — is tracked in the
   WSL (~80 ms/token floor) — the kernel-program boundary, now crossed. vs llama.cpp **F16**
   (261) fak f32 is ~46%, an f32-vs-f16 bandwidth gap (#34), not architecture.
 - **Honest caveat:** the parity path is gated `FAK_CUDA_GRAPH=1` and uses a fixed-capacity
-  device KV (1024 positions, so capture never hits a `cudaMalloc`); making it dynamic and
-  default-on is the follow-up (#39). 7B-on-GPU is still loader-gated (#40/#41). Nothing here
+  device KV (1024 positions by default, raised to the serve's resolved context, so capture
+  never hits a `cudaMalloc`); making it dynamic is the follow-up (#39), and default-on waits
+  on the CUDA 13.x parity and tok/s A/B in fak#13985. 7B-on-GPU is still loader-gated (#40/#41). Nothing here
   is claimed beyond what the committed `modelbench` + `llama-bench` numbers show.
