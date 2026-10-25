@@ -120,3 +120,4 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/attention.cuh"
 #include "cuda/spec_graph.cuh"
 #include "cuda/weight_formats.cuh"
+#include "cuda/peer_handoff.cuh"

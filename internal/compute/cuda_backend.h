@@ -130,6 +130,20 @@ void fcuda_d2d_on(int device, void *dst, const void *src, size_t bytes);
  * sizeof(int). Every successful fcuda_h2d/fcuda_h2d_on copy adds to H2D. Separate
  * reset/accessors let a whole-operation fixture prove neither direction moved inside
  * its measured interval. */
+/* Cross-device hidden-state handoff between layer bands (cuda/peer_handoff.cuh). Each call
+ * restores the caller's current device; every copy is synchronous. Status 0 = ok,
+ * -1 = null out-pointer, else 1000 + cudaError_t. */
+int fcuda_handoff_device_count(int *n);
+int fcuda_handoff_peer_probe(int src, int dst, int *can);
+int fcuda_handoff_peer_enable(int src, int dst);
+void *fcuda_handoff_alloc(int device, size_t bytes);
+int fcuda_handoff_free(int device, void *d);
+void *fcuda_handoff_pinned_alloc(size_t bytes);
+int fcuda_handoff_pinned_free(void *h);
+int fcuda_handoff_h2d(int device, void *d, const void *h, size_t bytes);
+int fcuda_handoff_d2h(int device, void *h, const void *d, size_t bytes);
+int fcuda_handoff_peer_copy(int dst_device, void *dst, int src_device, const void *src, size_t bytes);
+
 size_t fcuda_hostxfer_bytes(void);
 void fcuda_hostxfer_reset(void);
 size_t fcuda_h2dxfer_bytes(void);
