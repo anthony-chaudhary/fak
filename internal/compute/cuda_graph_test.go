@@ -62,6 +62,41 @@ func (m *synthModel) stepDevGraph(id int) (Tensor, bool) {
 	return logits, captured
 }
 
+// TestCUDAGraphRefusesKVGrowInsideCapture: a growable KV (KVConfig without GraphCapture)
+// appended inside an open capture must raise the typed GraphKVGrowSite refusal instead of
+// reaching the #969 allocator guard, and the aborted capture must leave the stream usable.
+func TestCUDAGraphRefusesKVGrowInsideCapture(t *testing.T) {
+	be := Pick("cuda")
+	cb, ok := be.(*cudaBackend)
+	if !ok {
+		t.Skip("no CUDA device")
+	}
+	defer withGraphEnabled(true)()
+	kv := cb.NewKV(KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 4})
+	defer kv.Free()
+	row := []float32{1, 2, 3, 4}
+	kRaw, kRoPE, v := mkResident(cb, []int{4}, row), mkResident(cb, []int{4}, row), mkResident(cb, []int{4}, row)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if !cb.GraphBegin() {
+		t.Fatal("GraphBegin did not open a capture")
+	}
+	var got any
+	func() {
+		defer func() { got = recover() }()
+		kv.AppendKV(0, kRaw, kRoPE, v, 0)
+	}()
+	cb.GraphAbort()
+	op, ok := got.(*CUDAOpError)
+	if !ok || op.Site != GraphKVGrowSite {
+		t.Fatalf("growable KV append inside a capture panicked with %#v, want CUDAOpError site %s", got, GraphKVGrowSite)
+	}
+	kv.AppendKV(0, kRaw, kRoPE, v, 0) // uncaptured: the stream is usable and the cache grows
+	if kv.Len() != 1 {
+		t.Fatalf("uncaptured append after abort: Len=%d, want 1", kv.Len())
+	}
+}
+
 // TestCUDAGraphCompileCapGated pins the #483 advertise/fallback contract: the cuda backend
 // advertises Caps.GraphCompile exactly when the graph path is live (graphEnabled), so a consumer
 // that reads it false falls back to the synchronous per-op core. Runs whenever a cuda backend is

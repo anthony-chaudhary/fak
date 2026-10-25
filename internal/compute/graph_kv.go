@@ -15,6 +15,16 @@ const (
 	GraphKVEmptyGeometry = "empty-kv-geometry"
 )
 
+// GraphKVGrowSite is the CUDAOpError site of a KV append that would grow the cache inside
+// an open graph capture, where a device allocation is illegal. Only a KVConfig with
+// GraphCapture set under graphs preallocates the fixed capacity that avoids it.
+const GraphKVGrowSite = "kv-grow-inside-graph-capture"
+
+func graphKVGrowError(site string) *CUDAOpError {
+	return &CUDAOpError{Op: "AppendKV", Site: GraphKVGrowSite, Class: MemoryKVCache,
+		Msg: "KV append would grow the cache inside an open CUDA graph capture (" + site + "); the session's KV is not fixed-capacity"}
+}
+
 // GraphKVPreallocBytes is the device memory one capturing session preallocates for
 // positions: K, pre-RoPE K and V F32 rows for each of cfg.NumLayers written rows. A Qwen
 // hybrid's KVConfig counts only its compacted full-attention rows, so it is charged for

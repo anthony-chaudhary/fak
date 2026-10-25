@@ -107,6 +107,11 @@ type dslice struct {
 
 func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, site string) {
 	if d.len+nFloats > d.cap {
+		if c.capturing {
+			// Growing allocates, which an open capture forbids; refuse before the
+			// allocator reaches the #969 guard and its managed-memory fallback.
+			panic(graphKVGrowError(site))
+		}
 		ncap := d.cap*2 + nFloats
 		np := c.dallocKV(ncap*F32.Bytes(), site).ptr
 		if d.len > 0 {

@@ -1,6 +1,9 @@
 package compute
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // qwen38GraphKVConfig is the Qwen3.8-27B device-KV geometry: 4 KV heads of 256 dims, and
 // rows = 16 compacted full-attention layers (or 64 when every model layer is charged).
@@ -57,5 +60,14 @@ func TestGraphKVCapacityPreallocatesOnlyEligibleSessionsThatFit(t *testing.T) {
 				t.Fatalf("prealloc bytes = %d, want %d", got.Bytes, need)
 			}
 		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestGraphKVCapacityGrowInsideCaptureIsTyped(t *testing.T) {
+	var err error = graphKVGrowError("kv-key-grow layer 0")
+	var op *CUDAOpError
+	if !errors.As(err, &op) || op.Op != "AppendKV" || op.Site != GraphKVGrowSite || op.Class != MemoryKVCache {
+		t.Fatalf("grow refusal = %#v, want CUDAOpError op=AppendKV site=%s class=kv", err, GraphKVGrowSite)
 	}
 }
