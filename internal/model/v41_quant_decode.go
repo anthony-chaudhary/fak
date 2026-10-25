@@ -340,7 +340,7 @@ func parseV41ExpertQuantWeightName(name string) (stem, projection string, err er
 	return "", "", v4QuantMetadataf("V4.1 weight name %q has unsupported suffix or identity", name)
 }
 
-// ---- Routed-expert device-resident install + device matmul ---------------------
+// ---- Routed-expert packed source ownership + byte-in device matmul -------------
 //
 // The dense V4.1 path installs decoded FP8 into m.q8w. The routed-expert tier is
 // different in two ways that matter to decode throughput:
@@ -356,11 +356,12 @@ func parseV41ExpertQuantWeightName(name string) (stem, projection string, err er
 // So this store holds the checkpoint's OWN packed bytes (E4M3 for FP8, I8-packed
 // E2M1 for MXFP4) plus the raw E8M0 scale bytes, keyed by projection name, and the
 // device matmul below hands them unchanged to compute's RoutedExpertDeviceKernel.
-// It is a device RESIDENT install: installV41ExpertQuantDevice mirrors the dense
-// `m.q8w[weightName] = ...` line but stores the packed pair rather than a Q8 tensor,
-// and it never calls decodeV41ExpertQuant / decodeV41DenseFP8 (no f32 materialization).
+// These are model-owned HOST copies. The byte-in call does not establish an
+// uploaded RoutedExpertResidentWeight. installV41ExpertQuantDevice stores the
+// packed pair rather than a Q8 tensor and never calls decodeV41ExpertQuant /
+// decodeV41DenseFP8 (no f32 materialization).
 
-// v41ExpertDeviceWeight is one routed-expert projection resident in its PACKED
+// v41ExpertDeviceWeight is one immutable host-owned routed-expert projection in its PACKED
 // checkpoint form: weight bytes and raw E8M0 scale bytes, plus the geometry needed to
 // size the device kernel. dtype is the checkpoint dtype string ("F8_E4M3" for the FP8
 // block-32 path, "I8" for the MXFP4 nibble path), which selects the device kernel.
@@ -372,33 +373,60 @@ type v41ExpertDeviceWeight struct {
 	scales     []byte
 }
 
-// v41ExpertDeviceInstall is the per-Model device-expert store. It is kept in a
-// package-level registry (rather than a Model field) so this leaf does not edit
-// weights.go, and it is lazily created on first install. packedPreserved records that
-// the install path never expanded weights to f32 — the invariant the witness pins.
+// v41ExpertDeviceInstall retains copied host-packed bytes, not device handles.
+// Model views sharing a weightCloserState share this store and its retirement.
+// The closer mutex precedes mu whenever both are needed; backend callbacks run
+// after both locks are released.
 type v41ExpertDeviceInstall struct {
+	mu              sync.RWMutex
 	weights         map[string]*v41ExpertDeviceWeight
 	packedPreserved bool
 }
 
-var (
-	v41ExpertDeviceMu   sync.Mutex
-	v41ExpertDeviceRegs = map[*Model]*v41ExpertDeviceInstall{}
-)
-
 func v41ExpertDeviceStore(m *Model, create bool) *v41ExpertDeviceInstall {
-	v41ExpertDeviceMu.Lock()
-	defer v41ExpertDeviceMu.Unlock()
-	store := v41ExpertDeviceRegs[m]
-	if store == nil && create {
-		store = &v41ExpertDeviceInstall{weights: map[string]*v41ExpertDeviceWeight{}}
-		v41ExpertDeviceRegs[m] = store
+	if m == nil {
+		return nil
 	}
-	return store
+	var owner *weightCloserState
+	if create {
+		owner = m.ensureWeightCloser()
+	} else {
+		weightCloserInitMu.Lock()
+		owner = m.weightCloser
+		weightCloserInitMu.Unlock()
+	}
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.closed || (create && owner.closing) {
+		return nil
+	}
+	if owner.v41ExpertPacked == nil && create {
+		owner.v41ExpertPacked = &v41ExpertDeviceInstall{weights: map[string]*v41ExpertDeviceWeight{}}
+	}
+	return owner.v41ExpertPacked
+}
+
+// releaseV41ExpertPackedStore drops the owner's references at final weight
+// retirement. An already-started byte-in call may retain its immutable weight
+// pointer until it returns; this is not synchronous reclamation of every reader.
+func (owner *weightCloserState) releaseV41ExpertPackedStore() {
+	owner.mu.Lock()
+	store := owner.v41ExpertPacked
+	owner.v41ExpertPacked = nil
+	owner.mu.Unlock()
+	if store != nil {
+		store.mu.Lock()
+		store.weights = nil
+		store.packedPreserved = false
+		store.mu.Unlock()
+	}
 }
 
 // installV41ExpertQuantDevice validates one V4.1 routed-expert (weight, scale) pair and
-// installs its PACKED bytes into the model's device-expert store. It mirrors the dense
+// installs its PACKED host bytes into the model's weight-lifetime store. It mirrors the dense
 // quantizeV41DenseFP8TensorInto install (m.q8w[weightName]) but preserves the packed
 // representation: MXFP4 (I8 code nibbles + F8_E8M0) is stored verbatim, with NO call to
 // decodeV41ExpertQuant and therefore NO full-checkpoint dequantization. name is the
@@ -447,7 +475,24 @@ func installV41ExpertQuantDevice(
 	if !ok {
 		return v4QuantMetadataf("V4.1 device install %s unpacked shape overflows", weightName)
 	}
-	store := v41ExpertDeviceStore(m, true)
+	// Use the same initialization and close lock as CloseWeights: a concurrent
+	// first install cannot publish another owner or resurrect a retired store.
+	owner := m.ensureWeightCloser()
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.closing || owner.closed {
+		return v4QuantMetadataf("V4.1 device install %s: model weights are closing or closed", weightName)
+	}
+	store := owner.v41ExpertPacked
+	if store == nil {
+		store = &v41ExpertDeviceInstall{weights: map[string]*v41ExpertDeviceWeight{}}
+		owner.v41ExpertPacked = store
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.weights[weightName] != nil {
+		return v4QuantMetadataf("V4.1 device install %s: routed expert already installed", weightName)
+	}
 	// Preserve the packed checkpoint bytes verbatim (copy so the caller's slab can be
 	// released); this is the "no full-checkpoint dequantization" invariant.
 	store.weights[weightName] = &v41ExpertDeviceWeight{
@@ -462,14 +507,15 @@ func installV41ExpertQuantDevice(
 	return nil
 }
 
-// V41ExpertDeviceInstalled reports whether a routed expert was installed device-resident
-// with its packed bytes preserved (no f32 expansion). It is the observable the witness
-// reads to prove the install happened on the intended representation.
+// V41ExpertDeviceInstalled reports retained host-packed bytes without f32
+// expansion. It does not establish that a device-resident handle was uploaded.
 func (m *Model) V41ExpertDeviceInstalled(weightName string) bool {
 	store := v41ExpertDeviceStore(m, false)
 	if store == nil {
 		return false
 	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
 	return store.weights[weightName] != nil
 }
 
@@ -477,7 +523,12 @@ func (m *Model) V41ExpertDeviceInstalled(weightName string) bool {
 // packed bytes (never materializing f32). False before any install.
 func (m *Model) V41ExpertDevicePackedPreserved() bool {
 	store := v41ExpertDeviceStore(m, false)
-	return store != nil && store.packedPreserved
+	if store == nil {
+		return false
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.packedPreserved
 }
 
 // V41ExpertDeviceMatmul runs one installed routed-expert projection's GEMV on the
@@ -486,13 +537,15 @@ func (m *Model) V41ExpertDevicePackedPreserved() bool {
 // the device result. When be implements no such kernel, compute returns
 // compute.ErrExpertDeviceKernelAbsent and this propagates it wrapped — the call FAILS
 // CLOSED and NEVER falls back to the scalar decodeV41ExpertQuant path. Returns
-// ErrV41ExpertQuantMetadata when the named expert was not installed.
+// ErrV4ExpertQuantMetadata when the named expert was not installed.
 func (m *Model) V41ExpertDeviceMatmul(weightName string, be compute.Backend, x []float32) ([]float32, error) {
 	store := v41ExpertDeviceStore(m, false)
 	if store == nil {
 		return nil, v4QuantMetadataf("V4.1 device matmul: no routed experts installed")
 	}
+	store.mu.RLock()
 	w := store.weights[weightName]
+	store.mu.RUnlock()
 	if w == nil {
 		return nil, v4QuantMetadataf("V4.1 device matmul: routed expert %q is not installed", weightName)
 	}

@@ -686,14 +686,15 @@ func (m *Model) q4k(name string) *q4kTensor {
 }
 
 type weightCloserState struct {
-	mu         sync.Mutex
-	once       sync.Once
-	c          io.Closer
-	err        error
-	halWeights *modelHALWeightResidency
-	sessions   int
-	closing    bool
-	closed     bool
+	mu              sync.Mutex
+	once            sync.Once
+	c               io.Closer
+	err             error
+	halWeights      *modelHALWeightResidency
+	v41ExpertPacked *v41ExpertDeviceInstall
+	sessions        int
+	closing         bool
+	closed          bool
 }
 
 var weightCloserInitMu sync.Mutex
@@ -752,6 +753,7 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 				s.err = &ModelWeightRetirementIncompleteError{}
 			}
 		}()
+		s.releaseV41ExpertPackedStore()
 		// Immutable HAL weights are model-owned and may outlive every individual request,
 		// but never the mapped Q4_K/Q8 or checkpoint bytes from which they were staged.
 		s.halWeights.close()
