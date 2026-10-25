@@ -1,11 +1,71 @@
 package ggufload
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestClassifyArtifactQuantMergesSplitV41Inventory binds artifact classification to the
+// production loader's merged view. The Q3_K encoding exists only on shard two; reading only the
+// caller-named shard would silently report a different load contract.
+// fak-test:runtime fast est=100ms lane=default
+func TestClassifyArtifactQuantMergesSplitV41Inventory(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "v41-00001-of-00002.gguf")
+	p2 := filepath.Join(dir, "v41-00002-of-00002.gguf")
+	// The split writer's config is immaterial to quant classification; the tensor
+	// names and mixed Q2_K/Q3_K encodings model the V4.1 routed-expert inventory.
+	shard1 := writeSplitShard(t, 0, 2, 2, true, []splitTensor{{
+		name: "blk.0.ffn_gate_exps.weight", dims: []uint64{256, 1}, typ: TensorQ2_K,
+		data: make([]byte, blockQ2KBytes),
+	}})
+	shard2 := writeSplitShard(t, 1, 2, 2, false, []splitTensor{{
+		name: "blk.0.ffn_down_exps.weight", dims: []uint64{256, 1}, typ: TensorQ3_K,
+		data: make([]byte, blockQ3KBytes),
+	}})
+	if err := os.WriteFile(p1, shard1, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p2, shard2, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{p1, p2} {
+		got, err := ClassifyArtifactQuant(path)
+		if err != nil {
+			t.Fatalf("ClassifyArtifactQuant(%s): %v", filepath.Base(path), err)
+		}
+		if got.Name != "mixed(Q2_K+Q3_K)" || got.Inventory != got.Name {
+			t.Fatalf("ClassifyArtifactQuant(%s) = %+v, want merged Q2_K/Q3_K inventory", filepath.Base(path), got)
+		}
+	}
+}
+
+// TestClassifyArtifactQuantRefusesIncompleteSplit proves classification does not fall back to a
+// plausible first-shard answer when the declared checkpoint set is incomplete.
+// fak-test:runtime fast est=100ms lane=default
+func TestClassifyArtifactQuantRefusesIncompleteSplit(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "v41-00001-of-00002.gguf")
+	shard1 := writeSplitShard(t, 0, 2, 2, true, []splitTensor{{
+		name: "blk.0.ffn_gate_exps.weight", dims: []uint64{256, 1}, typ: TensorQ2_K,
+		data: make([]byte, blockQ2KBytes),
+	}})
+	if err := os.WriteFile(p1, shard1, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ClassifyArtifactQuant(p1)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ClassifyArtifactQuant(incomplete split) = %+v, %v; want os.ErrNotExist", got, err)
+	}
+	if got != (ArtifactQuant{}) {
+		t.Fatalf("incomplete split returned partial classification %+v", got)
+	}
+}
 
 func TestClassifyTensorQuantUsesActualInventory(t *testing.T) {
 	for _, tc := range []struct {

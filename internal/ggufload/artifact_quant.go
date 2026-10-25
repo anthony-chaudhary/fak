@@ -20,13 +20,16 @@ type ArtifactQuant struct {
 	Recipe      string
 }
 
-// ClassifyArtifactQuant opens a GGUF header and classifies its actual tensor inventory.
+// ClassifyArtifactQuant opens a GGUF checkpoint and classifies its actual tensor inventory.
+// Split checkpoints are assembled through the same OpenWeights path as the production loader,
+// so encodings carried only by later shards cannot disappear from admission decisions.
 func ClassifyArtifactQuant(path string) (ArtifactQuant, error) {
-	gg, err := Open(path)
+	ws, err := OpenWeights(path)
 	if err != nil {
 		return ArtifactQuant{}, err
 	}
-	return ClassifyTensorQuant(gg.Tensors), nil
+	defer ws.Close()
+	return ClassifyTensorQuant(ws.File.Tensors), nil
 }
 
 // ClassifyTensorQuant classifies a parsed GGUF tensor inventory. Resident Q4_K is

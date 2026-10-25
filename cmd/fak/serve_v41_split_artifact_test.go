@@ -201,12 +201,12 @@ func TestServeV41PackedSevenShardProductionArmUsesMergedInventory(t *testing.T) 
 	v41PackedTestEnv(t)
 	v41PackedDefaultFlag(t)
 	path := writeV41PackedSevenShardLoadFixture(t)
-	first, err := ggufload.ClassifyArtifactQuant(path)
+	classified, err := ggufload.ClassifyArtifactQuant(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Name != "mixed(Q2_K+Q6_K)" {
-		t.Fatalf("first-shard discriminator=%q", first.Name)
+	if classified.Name != "mixed(Q2_K+Q3_K+Q6_K)" {
+		t.Fatalf("merged artifact discriminator=%q", classified.Name)
 	}
 	ws, err := ggufload.OpenWeights(path)
 	if err != nil {
