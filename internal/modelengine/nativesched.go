@@ -34,6 +34,18 @@ import (
 
 var errSchedClosed = errors.New("modelengine: native scheduler closed")
 
+// ErrNativePromptExceedsKVCapacity reports a request whose prompt alone can
+// never fit the configured native paged-KV budget. Callers may use errors.Is.
+var ErrNativePromptExceedsKVCapacity = errors.New("modelengine: prompt exceeds native KV capacity")
+
+type nativeAllocationStatus uint8
+
+const (
+	nativeAllocationOK nativeAllocationStatus = iota
+	nativeAllocationLater
+	nativeAllocationNever
+)
+
 type schedPrepare struct {
 	prompt []int
 	tok    NLTokenizer
@@ -432,17 +444,19 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	}
 	capacityGateEnabled := s.effectiveMaxRunningLocked() > 0 && s.preemptionEnabledLocked()
 	if capacityGateEnabled {
-		maxRun := s.effectiveMaxRunningLocked()
-		reservations := len(s.lanes)
+		allocation := s.canMaterializeLaneLocked(ln)
+		if allocation == nativeAllocationNever {
+			s.mu.Unlock()
+			cancel()
+			return nil, ErrNativePromptExceedsKVCapacity
+		}
 		deferredAhead := len(s.preempted) > 0
 		for _, waitingLane := range s.waiting {
-			if waitingLane.materializing || waitingLane.sess != nil {
-				reservations++
-			} else {
+			if !waitingLane.materializing && waitingLane.sess == nil {
 				deferredAhead = true
 			}
 		}
-		deferMaterialization := deferredAhead || reservations >= maxRun
+		deferMaterialization := deferredAhead || allocation == nativeAllocationLater
 		if deferMaterialization {
 			if s.closed {
 				s.mu.Unlock()
@@ -505,13 +519,23 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 			s.closeLaneSession(candidate.sess)
 			initializationErr = ctx.Err()
 		default:
-			ln.sess = candidate.sess
-			ln.logits = candidate.logits
-			ln.state = candidate.state
-			ln.promptCursor = candidate.promptCursor
-			ln.promptLen = candidate.promptLen
-			ln.prefillChunkTokens = candidate.prefillChunkTokens
-			ln.materializing = false
+			switch s.canMaterializeLaneLocked(ln) {
+			case nativeAllocationNever:
+				removeReservation()
+				s.closeLaneSession(candidate.sess)
+				initializationErr = ErrNativePromptExceedsKVCapacity
+			case nativeAllocationLater:
+				s.closeLaneSession(candidate.sess)
+				ln.materializing = false
+			default:
+				ln.sess = candidate.sess
+				ln.logits = candidate.logits
+				ln.state = candidate.state
+				ln.promptCursor = candidate.promptCursor
+				ln.promptLen = candidate.promptLen
+				ln.prefillChunkTokens = candidate.prefillChunkTokens
+				ln.materializing = false
+			}
 		}
 		waitingRemains := len(s.waiting) > 0
 		s.mu.Unlock()
@@ -711,6 +735,78 @@ func (s *NativeScheduler) effectiveMaxRunningLocked() int {
 	return s.maxRunning
 }
 
+func nativePromptBlocks(promptTokens, blockTokens int) int {
+	if promptTokens <= 0 {
+		promptTokens = 1
+	}
+	if blockTokens <= 0 {
+		blockTokens = 1
+	}
+	return 1 + (promptTokens-1)/blockTokens
+}
+
+func (s *NativeScheduler) lanePromptBlocksLocked(ln *schedLane) int {
+	if ln == nil {
+		return 0
+	}
+	return nativePromptBlocks(len(ln.prompt), s.blockTokensLocked())
+}
+
+// canMaterializeLaneLocked combines the scheduler's state-slot and paged-KV
+// capacity checks. Preempted lanes are intentionally absent: their resident KV
+// has already been swapped or dropped. The candidate is excluded from existing
+// reservations so this works both before enqueue and during promotion rechecks.
+func (s *NativeScheduler) canMaterializeLaneLocked(candidate *schedLane) nativeAllocationStatus {
+	maxRun := s.effectiveMaxRunningLocked()
+	if maxRun <= 0 {
+		return nativeAllocationOK
+	}
+	need := s.lanePromptBlocksLocked(candidate)
+	if s.preemption.Mode == NativePreemptRecompute && need > s.preemption.MaxBlocks {
+		return nativeAllocationNever
+	}
+
+	stateReservations := 0
+	reservedBlocks := 0
+	seen := make(map[*schedLane]struct{}, len(s.lanes)+len(s.waiting))
+	reserve := func(ln *schedLane) {
+		if ln == nil || ln == candidate || ln.terminal {
+			return
+		}
+		if _, duplicate := seen[ln]; duplicate {
+			return
+		}
+		seen[ln] = struct{}{}
+		stateReservations++
+		blocks := s.laneKVBlocksLocked(ln)
+		if ln.materializing || ln.sess == nil {
+			blocks = s.lanePromptBlocksLocked(ln)
+		}
+		reservedBlocks += blocks
+	}
+	for _, ln := range s.lanes {
+		reserve(ln)
+	}
+	for _, ln := range s.waiting {
+		if ln.materializing || ln.sess != nil {
+			reserve(ln)
+		}
+	}
+	if maxRun > 0 && stateReservations >= maxRun {
+		return nativeAllocationLater
+	}
+	// Swap policies deliberately materialize overlapping lanes, then relieve
+	// pressure through their configured backing store. Recompute has no backing
+	// allocation, so it uses the hard prompt-capacity decision.
+	if s.preemption.Mode != NativePreemptRecompute {
+		return nativeAllocationOK
+	}
+	if reservedBlocks > s.preemption.MaxBlocks-need {
+		return nativeAllocationLater
+	}
+	return nativeAllocationOK
+}
+
 // SetMaxTokensPerStep bounds the tokens one scheduler step may spend: every running
 // decode lane costs 1 and a prefilling lane costs its next prompt chunk. Waiting lanes
 // that do not fit the remaining budget are skipped, not blocking later lanes that do.
@@ -755,10 +851,26 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
 		}
 	}
 	kept := s.waiting[:0]
+	capacityBlocked := false
 	for _, ln := range s.waiting {
 		if ln.ctx.Err() != nil {
 			ln.finish(nil, ln.ctx.Err())
 			continue
+		}
+		if maxRun > 0 && s.preemptionEnabledLocked() {
+			if capacityBlocked {
+				kept = append(kept, ln)
+				continue
+			}
+			switch s.canMaterializeLaneLocked(ln) {
+			case nativeAllocationNever:
+				ln.finish(nil, ErrNativePromptExceedsKVCapacity)
+				continue
+			case nativeAllocationLater:
+				capacityBlocked = true
+				kept = append(kept, ln)
+				continue
+			}
 		}
 		if maxRun > 0 && len(s.lanes) >= maxRun {
 			kept = append(kept, ln)
@@ -879,13 +991,27 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 	}
 	s.lanes = live
+	maxRun := s.effectiveMaxRunningLocked()
 	// 2. Retire cancelled preempted lanes, then readmit older preempted lanes before
 	// promoting fresh waiting work so a preempted victim cannot starve behind arrivals.
 	s.dropCanceledPreemptedLocked()
-	s.readmitPreemptedLocked()
+	// An Admit may be materializing a reserved waiting lane without the executor.
+	// Do not restore a preempted lane until that reservation has either published
+	// its session or disappeared; readmit's resident-block count cannot see it yet.
+	waitingReservation := false
+	if maxRun > 0 && s.preemptionEnabledLocked() && s.preemption.Mode == NativePreemptRecompute {
+		for _, ln := range s.waiting {
+			if ln.materializing || ln.sess != nil {
+				waitingReservation = true
+				break
+			}
+		}
+	}
+	if !waitingReservation {
+		s.readmitPreemptedLocked()
+	}
 	// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
 	// cancelled while it was still waiting is retired here rather than promoted.
-	maxRun := s.effectiveMaxRunningLocked()
 	waitingMaterialization := false
 	for _, ln := range s.waiting {
 		if ln.materializing {
@@ -927,6 +1053,26 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 	}
 	if pendingMaterialization != nil {
+		if maxRun > 0 && s.preemptionEnabledLocked() {
+			switch s.canMaterializeLaneLocked(pendingMaterialization) {
+			case nativeAllocationNever:
+				pendingMaterialization.finish(nil, ErrNativePromptExceedsKVCapacity)
+				closed = s.closed
+				s.mu.Unlock()
+				return true, false, closed
+			case nativeAllocationLater:
+				for i, ln := range s.lanes {
+					if ln == pendingMaterialization {
+						s.lanes = append(s.lanes[:i], s.lanes[i+1:]...)
+						break
+					}
+				}
+				s.waiting = append([]*schedLane{pendingMaterialization}, s.waiting...)
+				closed = s.closed
+				s.mu.Unlock()
+				return true, false, closed
+			}
+		}
 		closed = s.closed
 		s.mu.Unlock()
 		if err := pendingMaterialization.ctx.Err(); err != nil {
