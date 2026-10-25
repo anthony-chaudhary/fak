@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/computebuild"
@@ -55,6 +56,10 @@ func cudaFirstLightFakeDeps(t *testing.T, calls *[]string, acceptance map[string
 		discover: func() (*computebuild.Toolchain, error) {
 			*calls = append(*calls, "discover")
 			return &computebuild.Toolchain{CC: "cc", NVCC: "nvcc"}, nil
+		},
+		preflight: func(*computebuild.Toolchain) error {
+			*calls = append(*calls, "preflight")
+			return nil
 		},
 		build: func(ctx context.Context, cfg *computebuild.CUDAConfig) error {
 			*calls = append(*calls, "build")
@@ -170,12 +175,12 @@ func TestCUDAFirstLightExecutionAndFailFirst(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := runCUDAFirstLightWith(&stdout, &stderr, args, deps)
 			r := readCUDAFirstLightReceipt(t, root)
-			want := []string{"discover", "header", "build", "accept"}
+			want := []string{"discover", "preflight", "header", "build", "accept"}
 			switch failure {
 			case "header", "timeout":
-				want = want[:2]
-			case "build":
 				want = want[:3]
+			case "build":
+				want = want[:4]
 			}
 			if !reflect.DeepEqual(calls, want) {
 				t.Fatalf("calls=%v want=%v", calls, want)
@@ -269,5 +274,49 @@ func TestCUDAFirstLightPreflightStopsBeforeToolchain(t *testing.T) {
 	r := readCUDAFirstLightReceipt(t, root)
 	if r.Stages[0].Outcome != "failed" || r.Stages[1].Outcome != "pending" {
 		t.Fatalf("preflight continued: %+v", r.Stages)
+	}
+}
+
+// fak-test:runtime fast est=1s
+// fak-test:justify why=regression when=changed:internal/devcmd/**,internal/computebuild/** twin=TestCUDAFirstLightExecutionAndFailFirst
+func TestCUDAFirstLightRefusesMissingCuobjdumpBeforeCompiling(t *testing.T) {
+	root, args := cudaFirstLightFixture(t)
+	toolkit := t.TempDir()
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+	nvcc := filepath.Join(toolkit, "nvcc"+exe)
+	if err := os.WriteFile(nvcc, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	deps := cudaFirstLightFakeDeps(t, &calls, cudaFirstLightAcceptanceFixture())
+	deps.discover = func() (*computebuild.Toolchain, error) {
+		calls = append(calls, "discover")
+		return &computebuild.Toolchain{CC: "cc", NVCC: nvcc}, nil
+	}
+	deps.preflight = computebuild.RequireCUDAImageAuditTool
+	var stdout, stderr bytes.Buffer
+	if code := runCUDAFirstLightWith(&stdout, &stderr, args, deps); code == 0 {
+		t.Fatal("toolkit without cuobjdump passed preflight")
+	}
+	r := readCUDAFirstLightReceipt(t, root)
+	if r.Refusal != computebuild.CUDAPreflightCuobjdumpMissing || r.Stages[0].Outcome != "failed" || r.Stages[1].Outcome != "pending" || r.Stages[2].Outcome != "pending" {
+		t.Fatalf("missing cuobjdump did not refuse at preflight: refusal=%q stages=%+v", r.Refusal, r.Stages)
+	}
+	if !reflect.DeepEqual(calls, []string{"discover"}) {
+		t.Fatalf("refused preflight still ran %v", calls)
+	}
+
+	if err := os.WriteFile(filepath.Join(toolkit, "cuobjdump"+exe), []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls = nil
+	if code := runCUDAFirstLightWith(&stdout, &stderr, args, deps); code != 0 {
+		t.Fatalf("toolkit with cuobjdump refused: exit=%d stderr=%s", code, &stderr)
+	}
+	if r := readCUDAFirstLightReceipt(t, root); r.Outcome != "passed" || r.Refusal != "" {
+		t.Fatalf("receipt after cuobjdump install: outcome=%s refusal=%q", r.Outcome, r.Refusal)
 	}
 }

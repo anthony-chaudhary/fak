@@ -46,18 +46,22 @@ type cudaFirstLightReceipt struct {
 	Stages            []cudaFirstLightStage `json:"stages"`
 	Acceptance        json.RawMessage       `json:"acceptance,omitempty"`
 	Pending           []string              `json:"pending"`
-	Error             string                `json:"error,omitempty"`
+	// Refusal is the closed computebuild.CUDAPreflight* token of a refused preflight.
+	Refusal string `json:"refusal,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type cudaFirstLightDeps struct {
-	discover func() (*computebuild.Toolchain, error)
-	build    func(context.Context, *computebuild.CUDAConfig) error
-	run      func(context.Context, string, []string, string, []string, io.Writer, io.Writer) error
+	discover  func() (*computebuild.Toolchain, error)
+	preflight func(*computebuild.Toolchain) error
+	build     func(context.Context, *computebuild.CUDAConfig) error
+	run       func(context.Context, string, []string, string, []string, io.Writer, io.Writer) error
 }
 
 func runCUDAFirstLight(stdout, stderr io.Writer, args []string) int {
 	return runCUDAFirstLightWith(stdout, stderr, args, cudaFirstLightDeps{
-		discover: computebuild.DiscoverToolchain, build: computebuild.RunCUDA, run: computebuild.RunCmd,
+		discover: computebuild.DiscoverToolchain, preflight: computebuild.RequireCUDAImageAuditTool,
+		build: computebuild.RunCUDA, run: computebuild.RunCmd,
 	})
 }
 
@@ -119,6 +123,10 @@ func runCUDAFirstLightWith(stdout, stderr io.Writer, args []string, deps cudaFir
 		if cause != nil {
 			r.Outcome = "failed"
 			r.Error = cause.Error()
+			var refusal *computebuild.CUDAPreflightRefusal
+			if errors.As(cause, &refusal) {
+				r.Refusal = refusal.Token
+			}
 		}
 		if err := writeJSONAtomic(r.ReceiptPath, r); err != nil {
 			fmt.Fprintf(stderr, "first-light receipt: %v\n", err)
@@ -192,6 +200,9 @@ func runCUDAFirstLightWith(stdout, stderr io.Writer, args []string, deps cudaFir
 		}
 		if tc == nil || tc.NVCC == "" || tc.CC == "" {
 			return errors.New("first-light requires nvcc and a C compiler")
+		}
+		if err := deps.preflight(tc); err != nil {
+			return err
 		}
 		return ctx.Err()
 	}); err != nil {

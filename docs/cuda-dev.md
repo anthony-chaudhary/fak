@@ -183,8 +183,12 @@ fak-dev build-cuda first-light --repo-root /src/fak --arch sm_120 \
 ```
 
 The plan writes pending stages without discovering a toolchain, compiling or running
-a device. Execution checks model files and architecture, parses the C header strictly,
-builds `gpucheck` through the native CUDA builder, then invokes its strict native HF
+a device. Execution checks model files and architecture, and checks that `cuobjdump`
+sits beside the selected `nvcc`, because the archive image audit needs it. A toolkit
+without it refuses before anything compiles, with `refusal` set to
+`CUDA_PREFLIGHT_CUOBJDUMP_MISSING`; on an apt-installed toolkit, install
+`cuda-cuobjdump-<major>-<minor>`. Execution then parses the C header strictly,
+builds `gpucheck` through the native CUDA builder, and invokes its strict native HF
 parity gate. It stops on the first failure and writes `.fak/cuda-first-light.json`,
 including failed stages, the binary digest and the observed acceptance receipt.
 `--arch` must match the observed device tier exactly. `--timeout` bounds the header,
