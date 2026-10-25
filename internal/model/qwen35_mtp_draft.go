@@ -356,7 +356,11 @@ func (d *Qwen35MTPDraftSession) draftTokenEvidence(token int, logits []float32) 
 	if len(logits) == 0 {
 		return DraftTokenEvidence{}, false
 	}
-	row := DraftTokenEvidence{Token: token, LogProbs: make([]float32, len(logits))}
+	row := DraftTokenEvidence{
+		Token:      token,
+		LogProbs:   make([]float32, len(logits)),
+		Provenance: DraftEvidenceModelSoftmaxGreedy,
+	}
 	selected := token
 	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 && len(logits) == len(d.vocabFilter.Subset) {
 		row.TokenIDs = append([]int(nil), d.vocabFilter.Subset...)

@@ -115,6 +115,60 @@ func TestMTPProposalGeneratorCarriesDraftEvidence(t *testing.T) {
 	}
 }
 
+// fak-test:runtime medium est=1s lane=default
+func TestDraftProposalStochasticEvidenceAdmission(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+
+	d, err := NewQwen35MTPDraftSession(target, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	d.WithDraftVocabFilter([]int{0, 1})
+
+	proposal, err := NewMTPProposalGenerator(d).Propose(context.Background(), prompt, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.DraftEvidence) != 2 {
+		t.Fatalf("draft evidence rows = %d, want 2", len(proposal.DraftEvidence))
+	}
+	for i, row := range proposal.DraftEvidence {
+		if row.Provenance != DraftEvidenceModelSoftmaxGreedy {
+			t.Fatalf("row %d provenance = %q, want %q", i, row.Provenance, DraftEvidenceModelSoftmaxGreedy)
+		}
+		finite := 0
+		for _, logp := range row.LogProbs {
+			if !math.IsInf(float64(logp), -1) {
+				finite++
+			}
+		}
+		if finite < 2 {
+			t.Fatalf("row %d did not exercise nondegenerate model evidence: %v", i, row.LogProbs)
+		}
+	}
+	if admitted, err := proposal.StochasticDraftEvidence(); admitted != nil || !errors.Is(err, ErrDraftEvidenceNotProcessedSamplingQ) {
+		t.Fatalf("greedy model evidence admission = (%+v, %v), want nil/%v", admitted, err, ErrDraftEvidenceNotProcessedSamplingQ)
+	}
+
+	impossibleSelection := DraftProposal{
+		Tokens: []int{2},
+		DraftEvidence: []DraftTokenEvidence{{
+			Token:      2,
+			LogProbs:   []float32{float32(math.Log(0.4)), float32(math.Log(0.6)), float32(math.Inf(-1))},
+			Provenance: DraftEvidenceSampledProcessedQ,
+		}},
+	}
+	if admitted, err := impossibleSelection.StochasticDraftEvidence(); admitted != nil || !errors.Is(err, ErrDraftEvidenceIncomplete) {
+		t.Fatalf("zero-q selected token admission = (%+v, %v), want nil/%v", admitted, err, ErrDraftEvidenceIncomplete)
+	}
+}
+
 func TestQwen35MTPDepthNDraftSequentialFeedbackAndCacheCoherence(t *testing.T) {
 	m := qwen35MTPEnabledSyntheticModel(t)
 	target := m.NewSession()
