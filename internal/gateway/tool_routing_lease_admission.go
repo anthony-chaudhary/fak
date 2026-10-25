@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -347,13 +348,25 @@ func adjudicateWorkspacePath(root, workdir, target string) (string, bool) {
 // lease declared through a directory symlink overlap writes through either the
 // alias or its real spelling.
 func adjudicateCanonicalTreeGlob(root, treeGlob string) (string, bool) {
-	treeGlob = filepath.ToSlash(strings.TrimSpace(treeGlob))
-	if treeGlob == "" {
+	treeGlob = filepath.ToSlash(strings.ReplaceAll(strings.TrimSpace(treeGlob), `\`, "/"))
+	if treeGlob == "" || strings.IndexByte(treeGlob, 0) >= 0 {
+		return "", false
+	}
+	for _, component := range strings.Split(treeGlob, "/") {
+		if component == ".." {
+			return "", false
+		}
+	}
+	globPath := filepath.FromSlash(treeGlob)
+	if filepath.VolumeName(globPath) != "" && !filepath.IsAbs(globPath) {
+		return "", false
+	}
+	if _, err := path.Match(treeGlob, ""); err != nil {
 		return "", false
 	}
 	meta := strings.IndexAny(treeGlob, "*?[")
 	if meta < 0 {
-		return adjudicateWorkspacePath(root, "", treeGlob)
+		return adjudicateCanonicalLeaseStaticPrefix(root, treeGlob)
 	}
 	boundary := strings.LastIndex(treeGlob[:meta], "/") + 1
 	staticDir := strings.TrimSuffix(treeGlob[:boundary], "/")
@@ -361,7 +374,7 @@ func adjudicateCanonicalTreeGlob(root, treeGlob string) (string, bool) {
 	canonicalDir := ""
 	if staticDir != "" {
 		var ok bool
-		canonicalDir, ok = adjudicateWorkspacePath(root, "", staticDir)
+		canonicalDir, ok = adjudicateCanonicalLeaseStaticPrefix(root, staticDir)
 		if !ok {
 			return "", false
 		}
@@ -370,4 +383,68 @@ func adjudicateCanonicalTreeGlob(root, treeGlob string) (string, bool) {
 		return suffix, suffix != ""
 	}
 	return canonicalDir + "/" + suffix, true
+}
+
+// adjudicateCanonicalLeaseStaticPrefix projects a possibly not-yet-created
+// lease prefix through its nearest existing ancestor. Proposed write targets
+// deliberately remain strict: their complete parent must already canonicalize.
+// Lstat precedes every ascent so dangling links are indirection, not absence.
+func adjudicateCanonicalLeaseStaticPrefix(root, staticPrefix string) (string, bool) {
+	canonicalRoot, err := canonicalExistingWorkspacePath(root)
+	if err != nil {
+		return "", false
+	}
+	staticPrefix = strings.TrimSpace(staticPrefix)
+	if staticPrefix == "" {
+		return "", true
+	}
+	prefixPath := filepath.FromSlash(staticPrefix)
+	target := prefixPath
+	if !filepath.IsAbs(prefixPath) && filepath.VolumeName(prefixPath) == "" {
+		target = filepath.Join(canonicalRoot, prefixPath)
+	}
+	target = filepath.Clean(target)
+	candidate := target
+	var missingTail []string
+	for {
+		_, lstatErr := os.Lstat(candidate)
+		if lstatErr == nil {
+			canonicalAncestor, canonicalErr := canonicalExistingWorkspacePath(candidate)
+			if canonicalErr != nil || !pathWithinWorkspace(canonicalRoot, canonicalAncestor) {
+				return "", false
+			}
+			if len(missingTail) > 0 {
+				canonicalInfo, statErr := os.Stat(canonicalAncestor)
+				if statErr != nil || !canonicalInfo.IsDir() {
+					return "", false
+				}
+			}
+			projected := canonicalAncestor
+			for i := len(missingTail) - 1; i >= 0; i-- {
+				projected = filepath.Join(projected, missingTail[i])
+			}
+			if !pathWithinWorkspace(canonicalRoot, projected) {
+				return "", false
+			}
+			rel, relErr := filepath.Rel(canonicalRoot, projected)
+			if relErr != nil {
+				return "", false
+			}
+			return filepath.ToSlash(rel), true
+		}
+		if !os.IsNotExist(lstatErr) {
+			return "", false
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return "", false
+		}
+		missingTail = append(missingTail, filepath.Base(candidate))
+		candidate = parent
+	}
+}
+
+func pathWithinWorkspace(root, candidate string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
