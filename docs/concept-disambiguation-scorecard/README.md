@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **668** (clarity 0 + coverage 668) |
 | **Crystal-clear concepts (and climbing)** | **1303** crystal of 3112 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3188 / 3856** (82.7% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3189 / 3857** (82.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **89** of 4369 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -71,7 +71,7 @@ coverage by family (positioned / discovered):
   context-ctx      ########################.... 270/316
   pool             ###############............. 46/87
   policy-capability ########################.... 230/270
-  support-maturity ####################........ 89/126
+  support-maturity ####################........ 90/127
   render-materialize ########################.... 217/251
   score-debt       #######################..... 114/139
   witness-proof    #########################... 173/197
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3188/3856 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.7%  (3189/3857 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -3418,7 +3418,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | context-ctx | 270 | 316 | 46 |
 | pool | 46 | 87 | 41 |
 | policy-capability | 230 | 270 | 40 |
-| support-maturity | 89 | 126 | 37 |
+| support-maturity | 90 | 127 | 37 |
 | render-materialize | 217 | 251 | 34 |
 | score-debt | 114 | 139 | 25 |
 | witness-proof | 173 | 197 | 24 |
