@@ -575,6 +575,8 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 	indexKeys := src.indexKeys
 	var indexList []int32
 	if plan.Ratio > 0 && indexSourceAt(cfg.DeepSeekV41, l) {
+		candidatePath := m.v41ColdIndexerRoute(st) && l >= m.Cfg.DeepSeekV41.CandidateSourceLayerID
+		var candidateScores [][]float32
 		projected := m.v41IndexerProjectionPanels(l, seq, qLatRows, preByPos, scratch)
 		// Projection, normalization, rotation and memo copies have completed.
 		// Scalar and canonically bound native scoring read causal prefixes of
@@ -591,27 +593,58 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 				keyPanel = nil
 			}
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
+			scoreGroups := groups
+			scoreBinding := binding
+			var captured []float32
+			if candidatePath {
+				// DeepInfer scores the complete publication width and applies causal
+				// visibility while selecting. Capture those raw values so the source
+				// can publish one immutable mask per query and later indexers can use
+				// their own scores under that mask.
+				scoreGroups = len(indexKeys)
+				ordinary := binding.scoreFunc()
+				scoreBinding = newV41IndexerScoreBinding(func(layer int, q, keys, weights []float32, heads, headDim, rows int) ([]float32, error) {
+					var values []float32
+					var err error
+					if ordinary == nil {
+						values, err = V41IndexerScore(q, keys, weights, heads, headDim, rows)
+					} else {
+						values, err = ordinary(layer, q, keys, weights, heads, headDim, rows)
+					}
+					if err == nil {
+						captured = append([]float32(nil), values...)
+					}
+					return values, err
+				})
+			}
 			var prefix []float32
 			if keyPanel != nil {
-				end := groups * cfg.IndexHeadDim
+				end := scoreGroups * cfg.IndexHeadDim
 				prefix = keyPanel[:end:end]
 			}
 			panelRow, err := projected.row(t)
 			if err != nil {
 				return nil, err
 			}
-			localIdx, err := m.v41IndexRowsWithPanelRow(l, t, qLatRows[t], preByPos[t], indexKeys[:groups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute, panelRow)
+			localIdx, err := m.v41IndexRowsWithPanelRow(l, t, qLatRows[t], preByPos[t], indexKeys[:scoreGroups], scratch.denseProjection(), scoreBinding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute, panelRow)
 			if borrow.revoked {
 				keyPanel = nil
 			}
 			if err != nil {
 				return nil, err
 			}
+			if candidatePath {
+				candidateScores = append(candidateScores, captured)
+				continue
+			}
 			row, err := m.v41AttentionIndexList(plan, st, localIdx, hd, groups, 1)
 			if err != nil {
 				return nil, err
 			}
 			indexList = append(indexList, row...)
+		}
+		if candidatePath {
+			return m.v41CandidateIndexList(l, seq, hd, plan, candidateScores, st)
 		}
 		return indexList, nil
 	}
@@ -620,6 +653,73 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 		return nil, err
 	}
 	return m.v41AttentionIndexList(plan, st, localIdx, hd, len(src.sharedKV), seq)
+}
+
+func (m *Model) v41CandidateSourceIdentity(seq int) (layer, kvSource, ratio int, err error) {
+	cfg := m.Cfg
+	d41 := cfg.DeepSeekV41
+	if d41 == nil || d41.CandidateSourceLayerID < 0 {
+		return 0, 0, 0, fmt.Errorf("candidate source is not configured")
+	}
+	source := d41.CandidateSourceLayerID
+	plan, err := v41AttentionPlanFor(cfg, source, m.v41AttentionRolesCached())
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return source, plan.KVSourceLayer, plan.kvGroupSize(cfg), nil
+}
+
+func v41CandidateIndexerErr(layer int, err error) error {
+	return v41StageErr(v41StageIndexer, layer, fmt.Errorf("%w: candidate publication: %v", ErrV41ForwardStage, err))
+}
+
+// v41CandidateIndexList composes the already-computed host score rows with one
+// call-local publication. The producer's own top-k stays unmasked; every later
+// index source must match the producer and query-range identity before reading.
+func (m *Model) v41CandidateIndexList(l, seq, hd int, plan V41AttentionPlan, scores [][]float32, st *v41ForwardState) ([]int32, error) {
+	sourceLayer, kvSourceLayer, ratio, err := m.v41CandidateSourceIdentity(seq)
+	if err != nil {
+		return nil, v41CandidateIndexerErr(l, err)
+	}
+	identity := (&v41CandidatePublication{}).source
+	identity.layer, identity.kvSourceLayer, identity.ratio = sourceLayer, kvSourceLayer, ratio
+	identity.queryStart, identity.queryEnd = 0, seq
+	canonical, err := v41AttentionPlanFor(m.Cfg, l, m.v41AttentionRolesCached())
+	if err != nil {
+		return nil, v41CandidateIndexerErr(l, err)
+	}
+	if plan != canonical || plan.KVSourceLayer != identity.kvSourceLayer || plan.kvGroupSize(m.Cfg) != identity.ratio {
+		return nil, v41CandidateIndexerErr(l, fmt.Errorf("candidate consumer plan does not match source geometry"))
+	}
+	rows := make([][]int32, len(scores))
+	var publish *v41CandidatePublication
+	if l == identity.layer {
+		publish, rows, err = v41SelectCandidateSource(identity, scores, m.Cfg.DeepSeekV41.CandidateTopKBlocks, m.Cfg.DeepSeekV41.CandidateBlockSize, m.Cfg.IndexTopK, 0)
+		if err != nil {
+			return nil, v41CandidateIndexerErr(l, err)
+		}
+	} else {
+		for position, score := range scores {
+			rows[position], err = st.candidate.selectRows(identity, l, position, score, m.Cfg.IndexTopK, 0)
+			if err != nil {
+				return nil, v41CandidateIndexerErr(l, err)
+			}
+		}
+	}
+
+	var indexList []int32
+	for position, row := range rows {
+		groups := min((position+1)/plan.kvGroupSize(m.Cfg), len(scores[position]))
+		selected, err := m.v41AttentionIndexList(plan, st, row, hd, groups, 1)
+		if err != nil {
+			return nil, err
+		}
+		indexList = append(indexList, selected...)
+	}
+	if publish != nil {
+		st.candidate = publish
+	}
+	return indexList, nil
 }
 
 // v41LayerPublishAttentionState seeds the layer's session-owned

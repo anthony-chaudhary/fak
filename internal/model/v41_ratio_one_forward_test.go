@@ -46,6 +46,135 @@ type v41RatioOneCall struct {
 	ids                     []int32
 }
 
+// fak-test:justify why=contract when=changed:internal/model/v41_forward.go,internal/model/v41_forward_layer.go
+// fak-test:runtime fast est=1s lane=default
+func TestV41CandidateOrdinaryPathRestrictsConsumer(t *testing.T) {
+	m := v41RatioOneForwardFixture(t, true)
+	cfg := m.Cfg
+	cfg.IndexTopK = 1
+	cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	cfg.DeepSeekV41.CandidateTopKBlocks = 1
+	cfg.DeepSeekV41.CandidateBlockSize = 2
+	m.Cfg = cfg
+
+	st := &v41ForwardState{}
+	st.setIndexerScore(func(layer int, _, _, _ []float32, _, _, rows int) ([]float32, error) {
+		if rows != 4 {
+			t.Fatalf("layer %d scored %d rows, want complete four-row publication", layer, rows)
+		}
+		if layer == 0 {
+			return []float32{100, 99, 2, 1}, nil
+		}
+		return []float32{100, 99, 7, 8}, nil
+	})
+	positions := [2]int{}
+	selected := [2]map[int][]int32{{}, {}}
+	st.setSharedAttention(func(layer int, r v41SharedAttentionRequest) ([]float32, error) {
+		r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
+		at := positions[layer]
+		positions[layer]++
+		width := min(at+1, cfg.Window[layer])
+		ids := append([]int32(nil), r.idx[width:]...)
+		for i, id := range ids {
+			if id >= 0 {
+				ids[i] = id - int32(width)
+			}
+		}
+		selected[layer][at] = ids
+		return V41SparseAttentionSink(r.q, r.kv, r.sink, r.idx, r.plain)
+	})
+
+	if _, err := m.forwardV41([]int{1, 2, 3, 4}, st); err != nil {
+		t.Fatalf("candidate ordinary forward: %v", err)
+	}
+	if st.candidate != nil {
+		t.Fatal("candidate publication escaped its cold forward")
+	}
+	if got := selected[0][3]; !reflect.DeepEqual(got, []int32{0}) {
+		t.Fatalf("candidate source selected %v, want unmasked row 0", got)
+	}
+	if got := selected[1][3]; !reflect.DeepEqual(got, []int32{3}) {
+		t.Fatalf("candidate consumer selected %v, want newest-block row 3", got)
+	}
+
+	t.Run("later failure discards publication", func(t *testing.T) {
+		prior := []int{1}
+		failed := &v41ForwardState{history: append([]int(nil), prior...)}
+		laterErr := errors.New("injected later-layer score failure")
+		failed.setIndexerScore(func(layer int, _, _, _ []float32, _, _, rows int) ([]float32, error) {
+			if layer == 0 {
+				return []float32{100, 99, 2, 1}, nil
+			}
+			return nil, laterErr
+		})
+		failed.setSharedAttention(func(_ int, r v41SharedAttentionRequest) ([]float32, error) {
+			r.kv, r.rowKV = v41TestAttentionFlatKV(r), nil
+			return V41SparseAttentionSink(r.q, r.kv, r.sink, r.idx, r.plain)
+		})
+
+		act, err := m.forwardV41([]int{2, 3, 4}, failed)
+		if act != nil || !errors.Is(err, laterErr) {
+			t.Fatalf("later-layer failure act=%v err=%v, want injected refusal and no logits", act, err)
+		}
+		if failed.candidate != nil {
+			t.Fatal("failed cold forward retained candidate publication")
+		}
+		if !reflect.DeepEqual(failed.history, prior) {
+			t.Fatalf("failed cold forward history=%v, want rollback to %v", failed.history, prior)
+		}
+	})
+}
+
+// fak-test:justify why=contract when=changed:internal/model/v41_forward_layer.go
+// fak-test:runtime fast est=1s lane=default
+func TestV41CandidateOrdinaryPathRefusesMismatchedPublication(t *testing.T) {
+	m := v41RatioOneForwardFixture(t, true)
+	m.Cfg.IndexTopK = 1
+	m.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+	m.Cfg.DeepSeekV41.CandidateTopKBlocks = 1
+	m.Cfg.DeepSeekV41.CandidateBlockSize = 2
+	scores := [][]float32{
+		{4, 3, 2, 1}, {4, 3, 2, 1}, {4, 3, 2, 1}, {4, 3, 2, 1},
+	}
+	wrong := v41CandidateSource{layer: 1, kvSourceLayer: 0, ratio: 1, queryStart: 0, queryEnd: 4}
+	publication, _, err := v41SelectCandidateSource(wrong, scores, 1, 2, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := v41AttentionPlanFor(m.Cfg, 1, m.v41AttentionRolesCached())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := m.v41CandidateIndexList(1, 4, m.Cfg.HeadDim, plan, scores, &v41ForwardState{candidate: publication})
+	var stage *V41ForwardError
+	if rows != nil || !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &stage) || stage.Stage != v41StageIndexer || stage.Layer != 1 {
+		t.Fatalf("mismatched candidate publication rows=%v err=%v, want typed indexer refusal at layer 1", rows, err)
+	}
+
+	t.Run("consumer plan source mismatch", func(t *testing.T) {
+		mismatched := plan
+		mismatched.CandidateSource = 1
+		rows, err := m.v41CandidateIndexList(1, 4, m.Cfg.HeadDim, mismatched, scores, &v41ForwardState{candidate: publication})
+		var mismatchStage *V41ForwardError
+		if rows != nil || !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &mismatchStage) || mismatchStage.Stage != v41StageIndexer || mismatchStage.Layer != 1 {
+			t.Fatalf("mismatched candidate plan rows=%v err=%v, want typed indexer refusal at layer 1", rows, err)
+		}
+	})
+
+	t.Run("unexecutable source retains pool fence", func(t *testing.T) {
+		blocked := v41RatioOneForwardFixture(t, true)
+		blocked.Cfg.DeepSeekV41.CandidateSourceLayerID = 0
+		blocked.Cfg.DeepSeekV41.CandidateTopKBlocks = 1
+		blocked.Cfg.DeepSeekV41.CandidateBlockSize = 2
+		blocked.Cfg.DeepSeekV41.IndexSourceLayerIDs = nil
+		_, err := blocked.forwardV41([]int{1, 2, 3}, &v41ForwardState{})
+		var blockedStage *V41ForwardError
+		if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &blockedStage) || blockedStage.Stage != v41StageIndexer || blockedStage.Layer != 0 {
+			t.Fatalf("unexecutable candidate source: %v, want typed indexer refusal at layer 0", err)
+		}
+	})
+}
+
 // Ratio-one prefill and two incremental decode steps match an independent
 // composition oracle (stepRatioOne + v41CombinedAttention, source:
 // inference/model.py:700-780 at dba1be0a40aa45a94ad051997016db3960a90277) at

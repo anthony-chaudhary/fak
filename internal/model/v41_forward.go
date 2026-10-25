@@ -23,9 +23,9 @@ package model
 // reduced assembly projects a per-layer attn.wkv.weight, executes neither
 // compression stage, and never reuses a shared KV/index source, so an in-range
 // declaration is refused rather than silently run against a per-layer cache. The
-// blocked-candidate selection the lightning indexer reads is not executed; it is
-// the identity below its pool bound, so a forward past that bound is refused
-// (v41CandidatePoolCovers) rather than silently run as unblocked attention. The
+// blocked-candidate selection is wired for the cold host scorer. Incremental and
+// selected-device routes retain v41CandidatePoolCovers rather than silently run
+// past the identity region without an equivalent publication. The
 // mHC hyperconnection multiplicity is likewise fixed at the published four-stream
 // layout (v41HCMultForwardAdmitted), so a declared hc_mult other than 4 is refused
 // rather than silently run as four streams. The assembled
@@ -134,6 +134,9 @@ type v41ForwardState struct {
 	history                []int
 	attn                   *V41AttentionState
 	layers                 []*V41AttentionState
+	// candidate is call-local: cold source layers publish it for later indexers
+	// in the same traversal, but it is never copied into retained step state.
+	candidate *v41CandidatePublication
 	// forwardCoverage names the last successful logits-producing traversal.
 	// Prefix snapshots preserve it as cached-logit provenance, not new execution.
 	forwardCoverage   *NativeForwardCoverage
@@ -210,6 +213,21 @@ type v41ForwardState struct {
 	// dispatches every full-geometry mHC op on the backend or refuses.
 	mhcDevice     *v41MHCDevice
 	callbackOwner *Session
+}
+
+// v41ColdIndexerRoute reports the only route that owns the source-to-reader
+// candidate publication today. Canonically bound scoring and selected device
+// index lists retain their existing pool fence until they publish the same
+// per-query identity.
+func (m *Model) v41ColdIndexerRoute(st *v41ForwardState) bool {
+	if st == nil || st.gatherOps.indexSelectFunc() != nil {
+		return false
+	}
+	d41 := m.Cfg.DeepSeekV41
+	if d41 == nil || !indexSourceAt(d41, d41.CandidateSourceLayerID) {
+		return false
+	}
+	return st.indexerScoreBinding == nil || st.indexerScoreBinding.native.core == nil
 }
 
 // v41ExpertGateUpOutcome is the closed result vocabulary of one v41ExpertGateUpFunc
@@ -411,8 +429,10 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 		}
 		return &Activations{}, nil
 	}
-	if err := v41CandidatePoolCovers(cfg, len(seq)); err != nil {
-		return nil, err
+	if !m.v41ColdIndexerRoute(runState) {
+		if err := v41CandidatePoolCovers(cfg, len(seq)); err != nil {
+			return nil, err
+		}
 	}
 	for _, id := range seq {
 		if id < 0 || id >= cfg.VocabSize {
