@@ -21,6 +21,16 @@ const (
 	MultimodalModeQuarantine MultimodalMode = "quarantine"
 )
 
+// VisionTemplateAssociation selects how template image placeholders are paired with
+// supplied images before the governed multimodal forward. The zero value preserves the
+// historical strict one-placeholder-per-image contract.
+type VisionTemplateAssociation string
+
+const (
+	VisionTemplateAssociationStrict    VisionTemplateAssociation = ""
+	VisionTemplateAssociationDeepInfer VisionTemplateAssociation = "deepinfer"
+)
+
 // MultimodalDecision is the governance verdict for a multimodal request.
 type MultimodalDecision string
 
@@ -61,11 +71,12 @@ var (
 // Mode must be MultimodalModeQuarantine before image embeddings can be released to
 // the model; the raw image bytes never enter the decoder path.
 type MultimodalPolicy struct {
-	Mode               MultimodalMode
-	MaxImages          int
-	MaxImageBytes      int64
-	MaxImagePixels     int64
-	MaxEmbeddingTokens int
+	Mode                MultimodalMode
+	TemplateAssociation VisionTemplateAssociation
+	MaxImages           int
+	MaxImageBytes       int64
+	MaxImagePixels      int64
+	MaxEmbeddingTokens  int
 	// AllowedContentTypes is the content-type axis of the image quarantine gate: an
 	// explicit allow-list of normalized image media types (e.g. "image/png"). An
 	// image part whose media type is not on the list is denied. The wildcard entries
@@ -270,6 +281,11 @@ func (p MultimodalPolicy) valid() error {
 	case MultimodalModeDisabled, MultimodalModeQuarantine:
 	default:
 		return fmt.Errorf("unknown multimodal mode %q", p.Mode)
+	}
+	switch p.TemplateAssociation {
+	case VisionTemplateAssociationStrict, VisionTemplateAssociationDeepInfer:
+	default:
+		return fmt.Errorf("unknown vision template association %q", p.TemplateAssociation)
 	}
 	if p.MaxImages <= 0 {
 		return fmt.Errorf("max images must be positive")

@@ -154,3 +154,77 @@ func TestMultimodalForwardImagePromptRefusesPlaceholderCountMismatch(t *testing.
 		t.Fatalf("no placeholder in vocab: error = %v, want ErrVisionSplice", err)
 	}
 }
+
+func TestMultimodalDeepInferTemplateAssociation(t *testing.T) {
+	m := visionPromptModel(t)
+	const pad = 7
+	img := MultimodalImage{MediaType: "image/png", Bytes: synthPNG(t, 16, 12), Width: 16, Height: 12}
+	ids := []int{1, pad, 2, pad, 3}
+	original := append([]int(nil), ids...)
+	policy := MultimodalPolicy{
+		Mode:                MultimodalModeQuarantine,
+		TemplateAssociation: VisionTemplateAssociationDeepInfer,
+	}
+
+	req, _, err := m.EncodeImagePrompt(ids, pad, []MultimodalImage{img}, policy)
+	if err != nil {
+		t.Fatalf("EncodeImagePrompt: %v", err)
+	}
+	if len(req.Parts) != 3 || req.Parts[1].Image == nil {
+		t.Fatalf("parts = %+v, want text | image | text", req.Parts)
+	}
+	if got := req.Parts[2].TokenIDs; len(got) != 3 || got[0] != 2 || got[1] != pad || got[2] != 3 {
+		t.Fatalf("surplus-placeholder text = %v, want [2 %d 3]", got, pad)
+	}
+	if ids[0] != original[0] || ids[1] != original[1] || ids[2] != original[2] || ids[3] != original[3] || ids[4] != original[4] {
+		t.Fatalf("input ids mutated: got %v want %v", ids, original)
+	}
+	req.Parts[0].TokenIDs[0] = 6
+	if ids[0] != original[0] {
+		t.Fatalf("text span aliases input: ids[0]=%d want %d", ids[0], original[0])
+	}
+
+	act, verdict, err := m.ForwardImagePrompt(ids, pad, []MultimodalImage{img}, policy)
+	if err != nil {
+		t.Fatalf("ForwardImagePrompt: %v", err)
+	}
+	wantSeq := len(ids) - 1 + verdict.EmbeddingTokens
+	if act.Seq != wantSeq || verdict.Images != 1 {
+		t.Fatalf("forward = seq %d verdict %+v, want seq %d with one image", act.Seq, verdict, wantSeq)
+	}
+
+	textOnly, _, err := m.EncodeImagePrompt(ids, pad, nil, policy)
+	if err != nil {
+		t.Fatalf("size-only/no-image EncodeImagePrompt: %v", err)
+	}
+	if len(textOnly.Parts) != 1 || len(textOnly.Parts[0].TokenIDs) != len(ids) {
+		t.Fatalf("size-only/no-image parts = %+v, want one fresh text copy", textOnly.Parts)
+	}
+	textOnly.Parts[0].TokenIDs[0] = 6
+	if ids[0] != original[0] {
+		t.Fatalf("size-only/no-image text aliases input: ids[0]=%d want %d", ids[0], original[0])
+	}
+
+	if _, _, err := m.EncodeImagePrompt([]int{pad}, pad, []MultimodalImage{img, img}, policy); !errors.Is(err, ErrVisionSplice) {
+		t.Fatalf("two images / one placeholder: error = %v, want ErrVisionSplice", err)
+	}
+}
+
+func TestV41VisionPromptRefusesBeforeTower(t *testing.T) {
+	m := multimodalTestModel() // deliberately no vision tower
+	m.Cfg.ModelType = "deepseek_v41"
+	m.Cfg.ImageTokenID = 7
+	img := MultimodalImage{MediaType: "image/png", Bytes: synthPNG(t, 16, 12), Width: 16, Height: 12}
+	policy := MultimodalPolicy{
+		Mode:                MultimodalModeQuarantine,
+		TemplateAssociation: VisionTemplateAssociationDeepInfer,
+	}
+
+	_, verdict, err := m.ForwardImagePrompt([]int{1, 7, 2}, 7, []MultimodalImage{img}, policy)
+	if !errors.Is(err, ErrV41VisionUnsupported) {
+		t.Fatalf("error = %v, want ErrV41VisionUnsupported before any tower access", err)
+	}
+	if verdict.Decision != MultimodalDeny || !strings.Contains(verdict.Reason, ErrV41VisionUnsupported.Error()) {
+		t.Fatalf("verdict = %+v, want typed V4.1 vision denial", verdict)
+	}
+}

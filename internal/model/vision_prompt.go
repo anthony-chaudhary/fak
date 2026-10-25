@@ -55,8 +55,17 @@ func (m *Model) EncodeImagePrompt(ids []int, padID int, images []MultimodalImage
 		return MultimodalRequest{}, verdict, err
 	}
 	if len(images) == 0 {
+		if policy.TemplateAssociation == VisionTemplateAssociationDeepInfer {
+			req, err := associateDeepInferImagePads(ids, padID, nil, policy)
+			return req, verdict, err
+		}
 		req, err := SpliceImagePads(ids, padID, nil, policy)
 		return req, verdict, err
+	}
+	if err := m.Cfg.RefuseDeepSeekV41Vision(); err != nil {
+		verdict.Decision = MultimodalDeny
+		verdict.Reason = err.Error()
+		return MultimodalRequest{}, verdict, err
 	}
 
 	enc, err := m.NewVisionEncoder()
@@ -75,6 +84,14 @@ func (m *Model) EncodeImagePrompt(ids []int, padID int, images []MultimodalImage
 		counts[i] = len(row.Vectors)
 	}
 
+	if policy.TemplateAssociation == VisionTemplateAssociationDeepInfer {
+		req, err := associateDeepInferImagePads(ids, padID, embeds, policy)
+		if err != nil {
+			return MultimodalRequest{}, verdict, err
+		}
+		return req, verdict, nil
+	}
+
 	expanded, err := ExpandImagePads(ids, padID, counts)
 	if err != nil {
 		return MultimodalRequest{}, verdict, err
@@ -84,6 +101,48 @@ func (m *Model) EncodeImagePrompt(ids []int, padID int, images []MultimodalImage
 		return MultimodalRequest{}, verdict, err
 	}
 	return req, verdict, nil
+}
+
+// associateDeepInferImagePads implements DeepInfer's template association rule: image i
+// replaces placeholder i, while surplus placeholders remain ordinary text tokens. More
+// images than placeholders is still a typed wiring error. Every text span is copied so
+// neither a size-only/no-image request nor a surplus-placeholder request aliases ids.
+func associateDeepInferImagePads(ids []int, padID int, images []*VisionEmbedding, policy MultimodalPolicy) (MultimodalRequest, error) {
+	req := MultimodalRequest{Policy: policy}
+	if padID < 0 {
+		if len(images) > 0 {
+			return MultimodalRequest{}, fmt.Errorf("%w: %d image(s) supplied but this vocab has no image placeholder", ErrVisionSplice, len(images))
+		}
+		if len(ids) > 0 {
+			req.Parts = []MultimodalPart{{TokenIDs: append([]int(nil), ids...)}}
+		}
+		return req, nil
+	}
+
+	parts := make([]MultimodalPart, 0, 2*len(images)+1)
+	textStart, slot := 0, 0
+	for i, id := range ids {
+		if id != padID || slot >= len(images) {
+			continue
+		}
+		if i > textStart {
+			parts = append(parts, MultimodalPart{TokenIDs: append([]int(nil), ids[textStart:i]...)})
+		}
+		if images[slot] == nil {
+			return MultimodalRequest{}, fmt.Errorf("%w: image %d is nil", ErrVisionSplice, slot)
+		}
+		parts = append(parts, MultimodalPart{Image: images[slot]})
+		slot++
+		textStart = i + 1
+	}
+	if slot != len(images) {
+		return MultimodalRequest{}, fmt.Errorf("%w: %d image(s) supplied but the prompt carries %d associated image placeholder(s)", ErrVisionSplice, len(images), slot)
+	}
+	if textStart < len(ids) {
+		parts = append(parts, MultimodalPart{TokenIDs: append([]int(nil), ids[textStart:]...)})
+	}
+	req.Parts = parts
+	return req, nil
 }
 
 // ForwardImagePrompt is the one-call image+text forward: EncodeImagePrompt followed by
