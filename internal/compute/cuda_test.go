@@ -141,7 +141,9 @@ func newSynth(be Backend, cfg synthCfg, host map[string][]float32) *synthModel {
 		W["up"+s] = mkResident(be, []int{cfg.I, cfg.H}, host["up"+s])
 		W["down"+s] = mkResident(be, []int{cfg.H, cfg.I}, host["down"+s])
 	}
-	kv := be.NewKV(KVConfig{NumLayers: cfg.L, NumKVHeads: cfg.nKV, HeadDim: cfg.hd, RopeTheta: cfg.theta})
+	// The synthetic dense model is capture-eligible, as model.cudaGraphCaptureEligible rules
+	// for a dense config, so under graphs its KV takes the fixed capacity a capture needs.
+	kv := be.NewKV(KVConfig{NumLayers: cfg.L, NumKVHeads: cfg.nKV, HeadDim: cfg.hd, RopeTheta: cfg.theta, GraphCapture: true})
 	return &synthModel{be: be, cfg: cfg, W: W, kv: kv, pos: 0, emb: host["emb"]}
 }
 

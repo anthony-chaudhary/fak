@@ -32,8 +32,9 @@ import (
 // withGraphEnabled flips the process-global graphEnabled gate (set once from FAK_CUDA_GRAPH at
 // init) and returns a restore func. The witness/benchmarks opt in directly — regardless of the
 // env — because graphEnabled gates BOTH GraphBegin's consent AND NewKV preallocating the fixed-
-// capacity cache capture requires (a cudaMalloc mid-capture is illegal). Must be called BEFORE
-// newSynth so the model's KVStore is created fixed-capacity.
+// capacity cache capture requires (a cudaMalloc mid-capture is illegal) for a KVConfig with
+// GraphCapture set, as newSynth's is. Must be called BEFORE newSynth so the model's KVStore is
+// created fixed-capacity.
 func withGraphEnabled(on bool) func() {
 	prev := graphEnabled
 	graphEnabled = on
@@ -46,7 +47,7 @@ func withGraphEnabled(on bool) func() {
 // does; the goroutine is OS-thread-pinned across the captured token so the open stream capture
 // sees a single consistent submitter. Preconditions the caller guarantees: the buffer pool is
 // warm (every devTr is served from the free list, no cudaMalloc) and the KV is fixed-capacity
-// (graphEnabled true ⇒ NewKV preallocated, so AppendKV never reallocs).
+// (graphEnabled true and KVConfig.GraphCapture ⇒ NewKV preallocated, so AppendKV never reallocs).
 func (m *synthModel) stepDevGraph(id int) (Tensor, bool) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
