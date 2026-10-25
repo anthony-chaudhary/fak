@@ -340,6 +340,11 @@ type KVConfig struct {
 	// therefore only safe to populate when the cache genuinely drops aged-out positions
 	// on a windowed layer; see model.Config.ContextSizeConfig for the gate that decides.
 	WindowPerLayer []int
+	// GraphCapture marks a session the model's capture-eligibility predicate admits to
+	// CUDA-graph decode replay. Only such a session's device KV is preallocated to the
+	// fixed graph capacity (see PlanGraphKVPrealloc); every other session stays growable,
+	// so enabling graphs never charges fixed VRAM to a model that cannot capture.
+	GraphCapture bool
 }
 
 // KVStore is the interface the kernel-owned attention cache lives behind — the one

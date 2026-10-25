@@ -997,11 +997,10 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// step is left uncaptured: its topology differs from the decode graph, and it never warms
 	// the logits path, so it must not be the step that instantiates the reused exec.
 	gr, canGraph := be.(graphBackend)
-	// The current CUDA GDN whole operation synchronizes before success, and the retained
-	// full-attention correctness bridge performs bounded host readback for partial RoPE /
-	// output gating. Neither is legal inside a reusable graph capture.
+	// One predicate (cudaGraphCaptureEligible) decides this capture and the session's
+	// fixed KV prealloc; cudaGraphCaptureReady adds the per-session conditions.
 	gpuLayers, isSplit := s.validateDenseGPULayers()
-	canGraph = canGraph && !s.captureTargetHidden && !cfg.IsQwen35Hybrid() && !isSplit
+	canGraph = canGraph && s.cudaGraphCaptureReady(isSplit)
 	capturing := false
 	if canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()

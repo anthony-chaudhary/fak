@@ -12,7 +12,9 @@ import (
 // the optimized direct []float32 session off its stable default.
 func newHALKVStore(be compute.Backend, cfg Config) compute.KVStore {
 	if !pagedHALKVEnabled() {
-		return be.NewKV(halKVConfig(cfg))
+		kc := halKVConfig(cfg)
+		kc.GraphCapture, _ = cudaGraphCaptureEligible(cfg, be)
+		return be.NewKV(kc)
 	}
 	if be.Name() != "cpu-ref" {
 		panic("model: FAK_PAGED_KV is currently supported only on the cpu-ref HAL path")

@@ -10,29 +10,45 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"sync/atomic"
 	"unsafe"
 )
 
-// cudaKVMaxPos is the fixed cache capacity (in positions) each device KV preallocates, so
-// AppendKV never reallocs — a hard requirement for CUDA-graph capture (a cudaMalloc during
-// capture is illegal). 1024 covers the decode benchmarks; a longer-context serve raises it
-// to the context budget via SetCUDAGraphKVCapacity so a real prompt never grows the cache
-// mid-capture. Read only inside the graphEnabled NewKV prealloc, so a plain const-like var.
-var cudaKVMaxPos = 1024
+// cudaKVMaxPos is the fixed cache capacity (in positions) each capturing session's device
+// KV preallocates, so AppendKV never reallocs — a hard requirement for CUDA-graph capture (a
+// cudaMalloc during capture is illegal). A serve raises it to the resolved context via
+// SetCUDAGraphKVCapacity on every enable path, so a real prompt never grows the cache
+// mid-capture. Read only inside the NewKV prealloc decision, so a plain const-like var.
+var cudaKVMaxPos = GraphKVDefaultPositions
 
-// NewKV creates a device-resident KV store for cfg's geometry; under graph capture it
-// preallocates a fixed cudaKVMaxPos capacity (no mid-token cudaMalloc), otherwise it stays growable.
+// graphKVFitWarned limits the does-not-fit notice to one stderr line per process.
+var graphKVFitWarned atomic.Bool
+
+// NewKV creates a device-resident KV store for cfg's geometry. A capture-eligible session
+// (cfg.GraphCapture) under graphs preallocates a fixed cudaKVMaxPos capacity (no mid-token
+// cudaMalloc) when it fits the free device memory; every other session stays growable and
+// runs uncaptured (GraphCaptureReady reports false).
 func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 	k := &cudaKV{be: c, cfg: cfg}
 	k.K = make([]dslice, cfg.NumLayers)
 	k.Kraw = make([]dslice, cfg.NumLayers)
 	k.V = make([]dslice, cfg.NumLayers)
-	if graphEnabled {
-		// Graph capture forbids a cudaMalloc mid-token, so preallocate a fixed capacity
-		// the cache never has to realloc within. Default (non-graph) path stays growable
-		// and lean (no per-session preallocation).
-		k.maxPos = cudaKVMaxPos
+	free := FreeUnknown
+	if graphEnabled && cfg.GraphCapture {
+		// Unlocked query: RestoreKVFromHost calls NewKV under cudaMu, and cudaMemGetInfo
+		// is thread-safe in the runtime.
+		var freeMem, totalMem C.size_t
+		if C.fcuda_mem_info(&freeMem, &totalMem) == 0 && totalMem > 0 {
+			free = uint64ToCapInt64(uint64(freeMem))
+		}
+	}
+	prealloc := GraphKVPreallocFor(graphEnabled, cfg, cudaKVMaxPos, free)
+	if prealloc.Reason == GraphKVDoesNotFit && graphKVFitWarned.CompareAndSwap(false, true) {
+		fmt.Fprintf(os.Stderr, "fak-cuda: graph KV prealloc %d bytes (%d positions) exceeds free device memory %d bytes; session runs uncaptured\n", prealloc.Bytes, prealloc.Positions, free)
+	}
+	if prealloc.Preallocate {
+		k.maxPos = prealloc.Positions
 		capF := k.maxPos * cfg.NumKVHeads * cfg.HeadDim
 		k.preallocateGraphWithOperations(capF,
 			func(bytes int, site string) unsafe.Pointer { return c.dallocKV(bytes, site).ptr },
@@ -41,6 +57,10 @@ func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 	}
 	return k
 }
+
+// GraphCaptureReady reports whether this store holds the fixed graph capacity. Only such a
+// store can sit under an open capture: a growable or cloned store may cudaMalloc on append.
+func (k *cudaKV) GraphCaptureReady() bool { return k != nil && k.maxPos > 0 }
 
 // preallocateGraphWithOperations owns the fresh, unpublished cache until every
 // row is allocated. A later allocation panic must retire earlier rows without

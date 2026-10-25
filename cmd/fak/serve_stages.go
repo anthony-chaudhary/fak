@@ -611,6 +611,7 @@ func validateServeHaloCPUOffload(halo, cpuOffloadExperts bool, flagGrade, envGra
 // tensor payload read or device allocation.
 func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 	requested := *sf.nativeContextTokens
+	var graphCfg *fakmodel.Config
 	resolution, _, err := resolveServeNativeContext(nil, rt.chatBackend, nil, serveFitBudget{}, requested)
 	if err != nil {
 		return err
@@ -642,7 +643,10 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 			if err != nil {
 				return err
 			}
-			cfg, _ := ws.File.Config()
+			cfg, cfgErr := ws.File.Config()
+			if cfgErr == nil {
+				graphCfg = &cfg
+			}
 			// fak#13286: log the SAME ceiling resolveServeNativeContext sized against, so the
 			// operator line's headroom/weights are honest on a shared-pool APU (the device aperture
 			// over-reports the physical pool the KV lives in).
@@ -668,10 +672,9 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 	if err := validateServeMaxTotalTokens(sf, *sf.nativeAdmissionTokenBudget); err != nil {
 		return err
 	}
-	if *sf.cudaGraph {
-		compute.SetCUDAGraphKVCapacity(resolution.ResolvedTokens)
-		rt.addStartupMessage(newServeStartupMessage("serve", "cuda-graph", "info",
-			fmt.Sprintf("decode replay enabled; KV graph capacity=%d positions", max(resolution.ResolvedTokens, 1024))))
+	if capacity, msg, on := serveCUDAGraphKV(*sf.cudaGraph, os.Getenv, rt.chatBackend, graphCfg, resolution.ResolvedTokens); on {
+		compute.SetCUDAGraphKVCapacity(capacity)
+		rt.addStartupMessage(newServeStartupMessage("serve", "cuda-graph", "info", msg))
 	}
 	rt.addStartupMessage(newServeStartupMessage("serve", "native-context-window", "info",
 		fmt.Sprintf("native context requested=%d model_declared=%d resolved=%d source=%s",
