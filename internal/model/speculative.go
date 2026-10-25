@@ -77,14 +77,21 @@ func (g *MTPProposalGenerator) Propose(ctx context.Context, committed []int, max
 	if g.session == nil {
 		return DraftProposal{Metadata: map[string]any{"proposer": "mtp"}}, nil
 	}
-	toks := g.session.Propose(committed)
+	toks, evidence := g.session.ProposeWithEvidence(committed)
 	if err := g.session.Err(); err != nil {
 		return DraftProposal{}, fmt.Errorf("model: mtp propose: %w", err)
 	}
 	if len(toks) > maxDraft {
 		toks = toks[:maxDraft]
+		if len(evidence) >= maxDraft {
+			evidence = evidence[:maxDraft]
+		}
 	}
-	return NewLinearProposal(toks, map[string]any{"proposer": "mtp", "depth": len(toks)}), nil
+	proposal := NewLinearProposal(toks, map[string]any{"proposer": "mtp", "depth": len(toks)})
+	if len(evidence) == len(toks) {
+		proposal.DraftEvidence = evidence
+	}
+	return proposal, nil
 }
 
 // DraftModelProposalGenerator adapts a compact sidecar draft model to ProposalGenerator.

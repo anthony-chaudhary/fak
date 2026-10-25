@@ -237,53 +237,77 @@ func (d *Qwen35MTPDraftSession) selectCandidate(logits []float32) (int, bool) {
 
 // Propose returns exactly the admitted depth unless a runtime failure is
 // latched. The returned slice never aliases session-owned state.
-func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
+func (d *Qwen35MTPDraftSession) Propose(committed []int) []int {
+	draft, _ := d.propose(committed, false)
+	return draft
+}
+
+// ProposeWithEvidence also returns the processed draft log-probability row
+// that selected each token. Evidence is all-or-nothing and never aliases
+// session state. Greedy callers may continue to use Propose.
+func (d *Qwen35MTPDraftSession) ProposeWithEvidence(committed []int) (draft []int, evidence []DraftTokenEvidence) {
+	return d.propose(committed, true)
+}
+
+func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (draft []int, evidence []DraftTokenEvidence) {
 	if d == nil || d.runtimeErr != nil {
-		return nil
+		return nil, nil
 	}
 	if d.closed {
 		d.latch("lifecycle", -1, ErrQwen35MTPDrafterClosed)
-		return nil
+		return nil, nil
 	}
 	if len(committed) == 0 {
 		d.latch("committed prefix", -1, ErrQwen35MTPEmptyPrefix)
-		return nil
+		return nil, nil
 	}
 
+	evidenceComplete := true
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			draft = nil
+			evidence = nil
 			d.failProposal("forward", -1, fmt.Errorf("%v", recovered))
+		}
+		if !collectEvidence || draft == nil || !evidenceComplete || len(evidence) != len(draft) {
+			evidence = nil
 		}
 	}()
 
 	if err := d.restoreProposal(); err != nil {
 		d.latch("rollback", -1, err)
-		return nil
+		return nil, nil
 	}
 	if err := d.syncCommitted(committed); err != nil {
 		d.latch("committed catch-up", len(d.processed), err)
-		return nil
+		return nil, nil
 	}
 
 	firstToken, ok := d.selectCandidate(d.lastLogits)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	draft = make([]int, 0, d.depth)
 	draft = append(draft, firstToken)
+	if collectEvidence {
+		if row, ok := d.draftTokenEvidence(firstToken, d.lastLogits); ok {
+			evidence = append(evidence, row)
+		} else {
+			evidenceComplete = false
+		}
+	}
 	if d.depth == 1 {
-		return draft
+		return draft, evidence
 	}
 	if err := d.checkpointProposal(); err != nil {
 		d.latch("checkpoint", len(committed), err)
-		return nil
+		return nil, nil
 	}
 
 	priorHidden, err := d.target.TargetHiddenAt(len(committed) - 1)
 	if err != nil {
 		d.failProposal("target hidden", len(committed)-1, err)
-		return nil
+		return nil, nil
 	}
 	current := draft[0]
 	for len(draft) < d.depth {
@@ -291,12 +315,12 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
 		embedding, err := d.target.TokenEmbedding(current)
 		if err != nil {
 			d.failProposal("token embedding", pos, err)
-			return nil
+			return nil, nil
 		}
 		feedback, logits, err := d.step(d.forward, pos, priorHidden, embedding)
 		if err != nil {
 			d.failProposal("forward", pos, err)
-			return nil
+			return nil, nil
 		}
 		if len(feedback) != d.target.M.Cfg.HiddenSize {
 			d.failProposal("forward feedback", pos, qwen35MTPStateError(
@@ -304,11 +328,11 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
 				fmt.Sprintf("[%d]", d.target.M.Cfg.HiddenSize),
 				fmt.Sprintf("[%d]", len(feedback)),
 			))
-			return nil
+			return nil, nil
 		}
 		if len(logits) == 0 {
 			d.failProposal("forward", pos, ErrQwen35MTPEmptyLogits)
-			return nil
+			return nil, nil
 		}
 		cand, ok := d.selectCandidate(logits)
 		if !ok {
@@ -316,9 +340,65 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
 		}
 		current = cand
 		draft = append(draft, current)
+		if collectEvidence {
+			if row, ok := d.draftTokenEvidence(current, logits); ok {
+				evidence = append(evidence, row)
+			} else {
+				evidenceComplete = false
+			}
+		}
 		priorHidden = feedback
 	}
-	return draft
+	return draft, evidence
+}
+
+func (d *Qwen35MTPDraftSession) draftTokenEvidence(token int, logits []float32) (DraftTokenEvidence, bool) {
+	if len(logits) == 0 {
+		return DraftTokenEvidence{}, false
+	}
+	row := DraftTokenEvidence{Token: token, LogProbs: make([]float32, len(logits))}
+	selected := token
+	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 && len(logits) == len(d.vocabFilter.Subset) {
+		row.TokenIDs = append([]int(nil), d.vocabFilter.Subset...)
+		selected = -1
+		for i, tokenID := range row.TokenIDs {
+			if tokenID == token {
+				selected = i
+				break
+			}
+		}
+	}
+	if selected < 0 || selected >= len(logits) {
+		return DraftTokenEvidence{}, false
+	}
+
+	maxLogit := float64(math.Inf(-1))
+	for _, logit := range logits {
+		value := float64(logit)
+		if math.IsNaN(value) || math.IsInf(value, 1) {
+			return DraftTokenEvidence{}, false
+		}
+		if value > maxLogit {
+			maxLogit = value
+		}
+	}
+	if math.IsInf(maxLogit, -1) {
+		return DraftTokenEvidence{}, false
+	}
+	var sumExp float64
+	for _, logit := range logits {
+		if !math.IsInf(float64(logit), -1) {
+			sumExp += math.Exp(float64(logit) - maxLogit)
+		}
+	}
+	if sumExp <= 0 || math.IsNaN(sumExp) || math.IsInf(sumExp, 0) {
+		return DraftTokenEvidence{}, false
+	}
+	logNormalizer := maxLogit + math.Log(sumExp)
+	for i, logit := range logits {
+		row.LogProbs[i] = float32(float64(logit) - logNormalizer)
+	}
+	return row, true
 }
 
 // Drafter returns the polymodel seam used by the native speculative loop.
