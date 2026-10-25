@@ -245,8 +245,9 @@ func RunCUDAGPUDirect(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("cuda-gpudirect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
-	mode := fs.String("mode", "inspect", "subcommand mode: inspect, audit, bench, or qwen38")
+	mode := fs.String("mode", "inspect", "subcommand mode: inspect, audit, binding, bench, or qwen38")
 	sysfsRoot := fs.String("sysfs", "/sys", "path to Linux sysfs root")
+	expectGPUs := fs.Int("expect", 0, "binding: NVIDIA GPUs expected; missing ones report GPU_NOT_ENUMERATED or GPU_TUNNEL_UNAUTHORIZED")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return 2
@@ -260,13 +261,15 @@ func RunCUDAGPUDirect(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	switch strings.ToLower(sub) {
-	case "inspect", "audit", "bench", "qwen38", "qwen38-bench", "qwen38-sim":
+	case "inspect", "audit", "binding", "bench", "qwen38", "qwen38-bench", "qwen38-sim":
 	default:
-		fmt.Fprintf(stderr, "fak cuda-gpudirect: unknown mode %q (supported: inspect, audit, bench, qwen38)\n", sub)
+		fmt.Fprintf(stderr, "fak cuda-gpudirect: unknown mode %q (supported: inspect, audit, binding, bench, qwen38)\n", sub)
 		return 2
 	}
 
 	switch strings.ToLower(sub) {
+	case "binding":
+		return runCUDABinding(stdout, *sysfsRoot, *expectGPUs, *jsonOut)
 	case "inspect", "audit":
 		disco, discoErr := discoverCUDATopology(*sysfsRoot)
 		summary := cudaDiscoverySummary(disco, discoErr)

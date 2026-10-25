@@ -228,7 +228,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  amd-strix-validate [--host HOST] [--json] [flags] validate sub-kernel functions and ablations on Strix Halo")
 	fmt.Fprintln(w, "  amd-strix-probe [--host HOST] [--json] inspect Strix Halo appliance facts")
 	fmt.Fprintln(w, "  amd-gpudirect [inspect|audit|bench]   AMD GPU Direct topology, ReBAR/ACS audit, & zero-copy bench")
-	fmt.Fprintln(w, "  cuda-gpudirect [inspect|audit|bench|qwen38] CUDA GPU Direct topology, BaM P2PDMA bench, & Qwen 3.8 receipt")
+	fmt.Fprintln(w, "  cuda-gpudirect [inspect|audit|binding|bench|qwen38] CUDA GPU Direct topology, GPU binding doctor, BaM P2PDMA bench, & Qwen 3.8 receipt")
 	fmt.Fprintln(w, "  commit-subject-coverage [flags]       audit repository commit subject grammar")
 	fmt.Fprintln(w, "  readme-visual-audit [flags]           audit repository README visual health")
 	fmt.Fprintln(w, "  plan-audit [flags]                   audit repository plan-document drift")

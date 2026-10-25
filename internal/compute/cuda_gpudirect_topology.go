@@ -534,11 +534,13 @@ func ParseWindowsCUDADisplayJSON(jsonData string) ([]CUDADeviceNode, error) {
 }
 
 // DiscoverWindows probes Windows display adapters via a WMI query. NVMe
-// topology is not observable through this path and is left empty.
+// topology is not observable through this path and is left empty. Adapters are
+// selected by PCI vendor ID, not name: an NVIDIA GPU on the Microsoft Basic
+// Display Adapter carries no NVIDIA name but is still an NVIDIA device.
 func (d *CUDAPCIeTopologyDiscovery) DiscoverWindows() error {
 	d.Method = CUDASourceWindowsWMI
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		"Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA|GeForce|RTX' } | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } } | ConvertTo-Json -Compress")
+		"Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -like 'PCI\\VEN_10DE*' } | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } } | ConvertTo-Json -Compress")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
