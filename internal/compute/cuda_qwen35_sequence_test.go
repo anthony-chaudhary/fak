@@ -69,22 +69,30 @@ func TestQwen35SequenceBoundedFixtureGeometry(t *testing.T) {
 }
 
 func TestQwen35CausalAttentionPanelGeometryContract(t *testing.T) {
-	if err := validateQwen35CausalAttentionPanelGeometry(
-		qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix,
-		qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads,
-		qwen38CausalAttentionPanelHeadDim,
-	); err != nil {
-		t.Fatalf("exact Qwen3.8 source-spine geometry refused without a CUDA device: %v", err)
+	for _, panel := range []struct{ tokens, prefix int }{
+		{qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix},
+		{1, 0}, {7, 0}, {64, 0}, {33, 5}, {512, 0}, {1, 32767}, {4096, 0},
+	} {
+		if err := validateQwen35CausalAttentionPanelGeometry(
+			panel.tokens, panel.prefix,
+			qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads,
+			qwen38CausalAttentionPanelHeadDim,
+		); err != nil {
+			t.Fatalf("Qwen3.8 panel tokens=%d prefix=%d refused without a CUDA device: %v", panel.tokens, panel.prefix, err)
+		}
 	}
 
+	maxInt := int(qwen35GDNMaxCInt)
 	for _, geometry := range []struct {
 		name                                    string
 		tokens, prefix, heads, kvHeads, headDim int
 	}{
-		{"tokens-minus-one", qwen38CausalAttentionPanelTokens - 1, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
-		{"tokens-plus-one", qwen38CausalAttentionPanelTokens + 1, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
-		{"prefix-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix - 1, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
-		{"prefix-plus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix + 1, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"tokens-zero", 0, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"tokens-negative", -1, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"prefix-negative", qwen38CausalAttentionPanelTokens, -1, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"positions-overflow", 2, maxInt - 1, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"kv-panel-overflow", 1, maxInt / (qwen38CausalAttentionPanelKVHeads * qwen38CausalAttentionPanelHeadDim), qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
+		{"query-panel-overflow", maxInt/(qwen38CausalAttentionPanelHeads*qwen38CausalAttentionPanelHeadDim) + 1, 0, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
 		{"query-heads-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads - 1, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
 		{"query-heads-plus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads + 1, qwen38CausalAttentionPanelKVHeads, qwen38CausalAttentionPanelHeadDim},
 		{"KV-heads-minus-one", qwen38CausalAttentionPanelTokens, qwen38CausalAttentionPanelPrefix, qwen38CausalAttentionPanelHeads, qwen38CausalAttentionPanelKVHeads - 1, qwen38CausalAttentionPanelHeadDim},
@@ -272,6 +280,11 @@ func TestCUDAQwen35CausalAttentionPanelMatchesCPUReference(t *testing.T) {
 		tokens, prefix, heads, kvHeads, headDim int
 	}{
 		{"qwen3.8-24x4-hd256", 2, 1, 24, 4, qwen38CausalAttentionPanelHeadDim},
+		{"qwen3.8-24x4-hd256-t1-p0", 1, 0, 24, 4, qwen38CausalAttentionPanelHeadDim},
+		{"qwen3.8-24x4-hd256-t7-p0", 7, 0, 24, 4, qwen38CausalAttentionPanelHeadDim},
+		{"qwen3.8-24x4-hd256-t64-p0", 64, 0, 24, 4, qwen38CausalAttentionPanelHeadDim},
+		{"qwen3.8-24x4-hd256-t33-p5", 33, 5, 24, 4, qwen38CausalAttentionPanelHeadDim},
+		{"qwen3.8-24x4-hd256-t512-p0", 512, 0, 24, 4, qwen38CausalAttentionPanelHeadDim},
 	} {
 		t.Run(geometry.name, func(t *testing.T) {
 			const sentinel = float32(-12345.75)

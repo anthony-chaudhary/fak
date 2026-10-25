@@ -72,12 +72,20 @@ func TestQwen38PromptAttentionABIDispatchIsFailClosed(t *testing.T) {
 		t.Fatal("Go/CUDA prompt-attention ABI declarations diverged")
 	}
 	body := qwen38SourceFunction(t, cu, "extern \"C\" "+abi)
-	preflight := strings.Index(body, "tokens != 2 || prefix != 1 || nH != 24 || nKV != 4")
+	preflight := strings.Index(body, "tokens <= 0 || prefix < 0 || nH != 24 || nKV != 4")
 	headDim := strings.Index(body, "hd != QWEN38_PROMPT_HEAD_DIM")
 	clearError := strings.Index(body, "cudaGetLastError()")
 	launch := strings.Index(body, "k_qwen38_causal_attention_panel_hd256<<<")
 	if preflight < 0 || headDim < 0 || clearError < 0 || launch < 0 || !(preflight < headDim && headDim < clearError && clearError < launch) {
 		t.Fatalf("ABI must refuse every non-exact dimension before CUDA effects, then launch hd256: tuple=%d head_dim=%d clear=%d launch=%d", preflight, headDim, clearError, launch)
+	}
+	for _, overflow := range []string{"tokens > INT_MAX / nH", "prefix > INT_MAX - tokens", "positions > INT_MAX / kvWidth", "tokens > INT_MAX / qWidth"} {
+		if guard := strings.Index(body, overflow); guard < 0 || guard > clearError {
+			t.Fatalf("ABI must keep int-overflow refusal %q before CUDA effects: at=%d clear=%d", overflow, guard, clearError)
+		}
+	}
+	if strings.Contains(body, "tokens != 2") || strings.Contains(body, "prefix != 1") {
+		t.Fatal("prompt-attention ABI still pins the single (tokens=2, prefix=1) panel the Go validator no longer requires")
 	}
 	if !strings.Contains(body, "((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float)") {
 		t.Fatal("hd256 dispatcher does not provision query-plus-reduction shared memory")
