@@ -261,10 +261,6 @@ __global__ void k_qwen35_gdn_qk_norm(
   }
 }
 
-// One value head per block; one value dimension per thread. A thread owns every
-// recurrent_state[h,i,d] element for its d, so it can perform decay, k^T S,
-// rank-1 update, and q^T S without atomics. The block then reduces the per-head
-// readout norm and applies norm[d] * RMS(core[d]) * silu(z[h,d]) in the same launch.
 __global__ void k_qwen35_gdn_qk_norm_panel(
     const float *convOut, float *qNorm, float *kNorm, int tokens, int convDim, int nK, int kHd) {
   int token = blockIdx.y;
@@ -294,6 +290,14 @@ __global__ void k_qwen35_gdn_qk_norm_panel(
     kNorm[base] = kv * kinv;
   }
 }
+
+// One value head per block; one value dimension per thread. A thread owns every
+// recurrent_state[h,i,d] element for its d, so it can perform decay, k^T S,
+// rank-1 update, and q^T S without atomics. The block then reduces the per-head
+// readout norm and applies norm[d] * RMS(core[d]) * silu(z[h,d]) in the same launch.
+// beta, decay and the inverse RMS are per-head scalars with FP64 transcendentals (1/64 rate
+// on sm_89): thread 0 evaluates each once and the block reads it back, the same bits as
+// every thread evaluating it (#9359).
 __global__ void k_qwen35_gdn_recurrent_gated_norm(
     const float *convOut, const float *qNorm, const float *kNorm,
     const float *z, const float *b, const float *a,
@@ -306,11 +310,18 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
   int repeat = nV / nK;
   int kh = h / repeat;
   int keyDim = nK * kHd;
-  float beta = 1.0f / (1.0f + (float)exp((double)-b[h]));
-  float aa = (float)exp((double)aLog[h]);
-  float dt = qwen35_gdn_softplus(a[h] + dtBias[h]);
-  float decayArg = -aa * dt;
-  float decay = (float)exp((double)decayArg);
+  __shared__ float headScalar[3];
+  if (d == 0) {
+    float headBeta = 1.0f / (1.0f + (float)exp((double)-b[h]));
+    float aa = (float)exp((double)aLog[h]);
+    float dt = qwen35_gdn_softplus(a[h] + dtBias[h]);
+    float decayArg = -aa * dt;
+    headScalar[0] = headBeta;
+    headScalar[1] = (float)exp((double)decayArg);
+  }
+  __syncthreads();
+  float beta = headScalar[0];
+  float decay = headScalar[1];
   float readout = 0.0f;
   if (d < vHd) {
     float kvmem = 0.0f;
@@ -337,8 +348,10 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
     if (d < off) ss[d] += ss[d + off];
     __syncthreads();
   }
+  if (d == 0) headScalar[2] = (float)(1.0 / sqrt((double)ss[0] / (double)vHd + (double)eps));
+  __syncthreads();
   if (d < vHd) {
-    float inv = (float)(1.0 / sqrt((double)ss[0] / (double)vHd + (double)eps));
+    float inv = headScalar[2];
     int vd = h * vHd + d;
     core[vd] = norm[d] * (readout * inv) * qwen35_gdn_silu(z[vd]);
   }

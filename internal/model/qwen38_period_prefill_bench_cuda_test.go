@@ -35,32 +35,7 @@ func TestCUDAQwen38PeriodPrefillTiming(t *testing.T) {
 	if v, err := strconv.Atoi(os.Getenv("FAK_GDN_E2E_REPS")); err == nil && v > 0 {
 		reps = v
 	}
-	cfg := Config{
-		Name:                  "Qwen3.8-27B one-period synthetic",
-		ModelType:             "qwen3_5_text",
-		HiddenSize:            5120,
-		NumLayers:             4,
-		NumHeads:              24,
-		NumKVHeads:            4,
-		HeadDim:               256,
-		IntermediateSize:      17408,
-		VocabSize:             4096,
-		RMSNormEps:            1e-6,
-		RopeTheta:             10000000,
-		PartialRotaryFactor:   0.25,
-		QKNorm:                false,
-		TieWordEmbeddings:     true,
-		EOSTokenID:            -1,
-		LayerTypes:            []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
-		LinearConvKernelDim:   4,
-		LinearKeyHeadDim:      128,
-		LinearNumKeyHeads:     16,
-		LinearValueHeadDim:    128,
-		LinearNumValueHeads:   48,
-		AttnOutputGate:        true,
-		FullAttentionInterval: 4,
-		NormGain1p:            true,
-	}
+	cfg := qwen38OnePeriodSyntheticConfig()
 	start := time.Now()
 	m := NewSynthetic(cfg)
 	m.Quantize()
@@ -110,4 +85,35 @@ func TestCUDAQwen38PeriodPrefillTiming(t *testing.T) {
 	}
 	sort.Float64s(samples)
 	t.Logf("E2E_SUMMARY tokens=%d reps=%d median_prefill_tok_s=%.3f digest=%s", tokens, reps, samples[len(samples)/2], digest)
+}
+
+// qwen38OnePeriodSyntheticConfig is one 3:1 period of the Qwen3.8-27B hybrid at the 27B axes with
+// a reduced vocabulary and no q/k norm; the 64-layer model repeats it 16 times.
+func qwen38OnePeriodSyntheticConfig() Config {
+	return Config{
+		Name:                  "Qwen3.8-27B one-period synthetic",
+		ModelType:             "qwen3_5_text",
+		HiddenSize:            5120,
+		NumLayers:             4,
+		NumHeads:              24,
+		NumKVHeads:            4,
+		HeadDim:               256,
+		IntermediateSize:      17408,
+		VocabSize:             4096,
+		RMSNormEps:            1e-6,
+		RopeTheta:             10000000,
+		PartialRotaryFactor:   0.25,
+		QKNorm:                false,
+		TieWordEmbeddings:     true,
+		EOSTokenID:            -1,
+		LayerTypes:            []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+		LinearConvKernelDim:   4,
+		LinearKeyHeadDim:      128,
+		LinearNumKeyHeads:     16,
+		LinearValueHeadDim:    128,
+		LinearNumValueHeads:   48,
+		AttnOutputGate:        true,
+		FullAttentionInterval: 4,
+		NormGain1p:            true,
+	}
 }
