@@ -11,14 +11,6 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 	}
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
-	tap := s.activeTap()
-	if tap != nil && !tap.wants(pos) {
-		tap = nil
-	}
-	prevTap := s.tapActive
-	s.tapActive = tap
-	defer func() { s.tapActive = prevTap }()
-
 	var x []float32
 	if m.Q2KEmbedding != nil {
 		x = make([]float32, H)
@@ -30,19 +22,36 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 		x = append([]float32(nil), embed[id*H:(id+1)*H]...)
 		scaleEmbedInPlace(x, cfg) // Gemma sqrt(hidden); no-op for Llama
 	}
+	return s.tokenHiddenRow(id, pos, x)
+}
+
+// tokenHiddenRow advances the ordinary f32 session with an already embedded row.
+// lineageID is the token identity recorded beside the resulting KV position; callers
+// supplying non-text rows use their template placeholder id so rollback bookkeeping
+// remains aligned with the expanded sequence.
+func (s *Session) tokenHiddenRow(lineageID, pos int, x []float32) (out []float32) {
+	m, cfg := s.M, s.M.Cfg
+	H := cfg.HiddenSize
+	tap := s.activeTap()
+	if tap != nil && !tap.wants(pos) {
+		tap = nil
+	}
+	prevTap := s.tapActive
+	s.tapActive = tap
+	defer func() { s.tapActive = prevTap }()
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		cos, sin := ropeRowForLayer(cfg, l, pos)
 		x = s.blockStep(l, pos, x, cos, sin, f32Kernel{m})
 		if capture := s.qwen35TargetLayerCapture; capture != nil {
-			capture.record(id, pos, l, x)
+			capture.record(lineageID, pos, l, x)
 		}
 	}
-	s.Cache.appendPosition(pos, id)
+	s.Cache.appendPosition(pos, lineageID)
 	if tap != nil {
 		tap.writeMeta(cfg, H, pos)
 	}
-	s.rememberTargetHidden(pos, id, x)
+	s.rememberTargetHidden(pos, lineageID, x)
 	out = m.finalNorm(x)
 	return out
 }

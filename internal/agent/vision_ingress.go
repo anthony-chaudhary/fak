@@ -2,10 +2,14 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -13,11 +17,36 @@ import (
 )
 
 var (
-	ErrNativeVisionIngress            = errors.New("native vision ingress")
-	ErrNativeVisionPrefillUnsupported = errors.New("native vision embedding-row prefill is not implemented")
+	ErrNativeVisionIngress = errors.New("native vision ingress")
 )
 
 const maxNativeVisionImageBytes = 10 << 20
+
+type visionPrefillKey struct{}
+
+type nativeVisionPrefill struct {
+	request        *model.MultimodalRequest
+	imageTokenID   int
+	sequenceTokens int
+}
+
+func (p *InKernelPlanner) withNativeVisionPrefill(ctx context.Context, prepared preparedPrompt) (context.Context, error) {
+	if prepared.multimodal == nil {
+		return ctx, nil
+	}
+	if p.backend != nil || p.dflash2 != nil || p.quant || p.q4k || p.metal || p.requireDeviceExecution ||
+		(p.kvPrecision != "" && p.kvPrecision != model.KVPrecisionFP32) {
+		return nil, fmt.Errorf("%w: native vision completion requires the CPU session path", model.ErrMultimodalDenied)
+	}
+	padID, ok := p.tok.ImagePadID()
+	if !ok {
+		return nil, fmt.Errorf("%w: tokenizer has no image pad token", model.ErrMultimodalDenied)
+	}
+	carrier := &nativeVisionPrefill{
+		request: prepared.multimodal, imageTokenID: padID, sequenceTokens: prepared.promptTokens(),
+	}
+	return context.WithValue(ctx, visionPrefillKey{}, carrier), nil
+}
 
 // VisionImageInput is the non-wire image carrier retained from an OpenAI
 // image_url content part. Proxy marshaling deliberately ignores it.

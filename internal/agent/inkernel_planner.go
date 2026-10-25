@@ -1730,7 +1730,8 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	return recoverDeviceCall(func() (res inKernelGenerateResult, err error) {
 		// Speculative acceptance and rollback must share request-local constraints and seeds.
 		_, seeded := nativeTargetSampleSeedFromContext(ctx)
-		targetOnly := seeded || nativeThinkingConstraintFromContext(ctx) != nil || nativeStructuredConstraintFromContext(ctx) != nil
+		visionPrefill, _ := ctx.Value(visionPrefillKey{}).(*nativeVisionPrefill)
+		targetOnly := seeded || nativeThinkingConstraintFromContext(ctx) != nil || nativeStructuredConstraintFromContext(ctx) != nil || visionPrefill != nil
 		if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
 			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
 				return inKernelGenerateResult{}, err
@@ -2234,10 +2235,18 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if err != nil {
 			return nil, err
 		}
+		if prepared.multimodal != nil && sp.NativeInferenceReceipt {
+			return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "multimodal prompt contains embedding rows rather than token ids"}
+		}
 		messages, tools = prepared.messages, prepared.tools
 		chat, ids, maxNew := prepared.rendered, prepared.ids, prepared.maxNew
+		ctx, err = p.withNativeVisionPrefill(ctx, prepared)
+		if err != nil {
+			return nil, err
+		}
 		ctx = withInKernelSharedPrefixBoundary(ctx, prepared.sharedBoundary)
-		if err := p.refuseContextLength(len(ids), maxNew); err != nil {
+		promptTokens := prepared.promptTokens()
+		if err := p.refuseContextLength(promptTokens, maxNew); err != nil {
 			return nil, err
 		}
 		stops := StopIDs(p.tok, p.m.Cfg)
@@ -2327,7 +2336,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		// Flash is target-only and opt-in; unsupported exact layouts retain the
 		// lease through ordinary fallback, and never silently suppress speculation.
 		complete := false
-		coalesced := p.dflash2 == nil && p.coalescesQwenDecode()
+		coalesced := prepared.multimodal == nil && p.dflash2 == nil && p.coalescesQwenDecode()
 		coalesceKind := inKernelCoalesceQwen
 		if !coalesced && p.batchDecode && p.backend != nil && p.m.Cfg.IsDeepSeekV41() &&
 			p.speculativeEngine == nil && !p.vulkanMTP && p.vulkanMTPDraftFactory == nil && p.MetalMTPCoordinator() == nil {
@@ -2362,7 +2371,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 					p.concurrencyProfile.forwardExit(phase)
 					p.devMu.Unlock()
 				}()
-				if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+				if err := p.refuseOversizeRequest(promptTokens, maxNew); err != nil {
 					return nil, err
 				}
 			} else if p.concurrencyProfile != nil {
@@ -2374,7 +2383,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 				defer p.concurrencyProfile.forwardExit(phase)
 			}
 			if coalesced {
-				releaseDeviceMemory, err := p.admitCoalescedDeviceMemory(len(ids), maxNew)
+				releaseDeviceMemory, err := p.admitCoalescedDeviceMemory(promptTokens, maxNew)
 				if err != nil {
 					return nil, err
 				}
@@ -2384,7 +2393,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			// to ask, so an armed host ceiling prices it here, before any session or clone exists.
 			var releaseHostMemory func()
 			var hostErr error
-			ctx, releaseHostMemory, hostErr = p.admitHostMemory(ctx, len(ids), maxNew)
+			ctx, releaseHostMemory, hostErr = p.admitHostMemory(ctx, promptTokens, maxNew)
 			if hostErr != nil {
 				return nil, hostErr
 			}

@@ -139,8 +139,10 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 		if err != nil {
 			return preparedPrompt{}, err
 		}
-		if !sp.nativeVisionEncodeOnly {
-			return preparedPrompt{}, ErrNativeVisionPrefillUnsupported
+		if sp.nativeVisionEncodeOnly {
+			// EncodePrompt exposes accounting, not an executable carrier. Drop the
+			// embedding rows once their bounded metadata has been projected.
+			multimodal = nil
 		}
 	}
 	maxNew := p.maxNew
