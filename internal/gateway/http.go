@@ -955,6 +955,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithNativeInferenceReceipt(receiptRequested),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
+		agent.WithMultimodalMode(req.DeclaredMultimodalMode()),
 	)
 	if err != nil {
 		if comp != nil {
@@ -1533,5 +1534,6 @@ func nativeTokenizeSampleOpts(req ChatRequest) []agent.SampleOpt {
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),
 		agent.WithReasoningEffort(req.ReasoningEffort),
+		agent.WithMultimodalMode(req.DeclaredMultimodalMode()),
 	}
 }

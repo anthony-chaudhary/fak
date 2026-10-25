@@ -463,9 +463,19 @@ type ChatRequest struct {
 type FakRequestExt struct {
 	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
 	NativeDecodeTokenIDs   bool `json:"native_decode_token_ids,omitempty"`
+	// MultimodalMode must be "quarantine" to admit image-bearing native input.
+	// Empty preserves the fail-closed model default.
+	MultimodalMode string `json:"multimodal_mode,omitempty"`
 	// InputTrigger is validated against the real message envelope before the
 	// gateway creates the immutable value used by request routing.
 	InputTrigger *inputtrigger.Explicit `json:"input_trigger,omitempty"`
+}
+
+func (r ChatRequest) DeclaredMultimodalMode() string {
+	if r.Fak == nil {
+		return ""
+	}
+	return r.Fak.MultimodalMode
 }
 
 // ChatStreamOptions is the typed OpenAI `stream_options` request carrier. Only

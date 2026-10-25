@@ -94,6 +94,14 @@ func WithModel(model string) SampleOpt {
 	}
 }
 
+// WithMultimodalMode carries fak's explicit image-admission opt-in. The empty
+// value preserves the fail-closed default.
+func WithMultimodalMode(mode string) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.MultimodalMode = model.MultimodalMode(mode)
+	}
+}
+
 // WithMaxTokens sets the per-request output-token ceiling. It is a NO-OP for n<=0
 // so a caller can forward a client's raw value unconditionally: an omitted
 // max_tokens arrives as 0 and naturally falls through to the planner default.

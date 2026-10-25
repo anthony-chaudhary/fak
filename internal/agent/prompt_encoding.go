@@ -13,17 +13,30 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
-// PromptEncoding is the exact prompt representation consumed by native context
-// admission. TokenIDs is owned by the result and is safe for the caller to mutate.
+// PromptEncoding is the prompt representation consumed by native context
+// admission. For multimodal input TokenIDs is the template stream and
+// Multimodal.SequenceTokens reports the expanded text+embedding row count.
+// TokenIDs is owned by the result and is safe for the caller to mutate.
 type PromptEncoding struct {
-	ModelID              string `json:"model_id"`
-	RendererID           string `json:"renderer_id"`
-	TokenizerID          string `json:"tokenizer_id"`
-	TokenIDs             []int  `json:"token_ids"`
-	PromptTokens         int    `json:"prompt_tokens"`
-	ContextWindowTokens  int    `json:"context_window_tokens"`
-	ReservedOutputTokens int    `json:"reserved_output_tokens"`
-	RenderedSHA256       string `json:"rendered_sha256"`
+	ModelID              string                    `json:"model_id"`
+	RendererID           string                    `json:"renderer_id"`
+	TokenizerID          string                    `json:"tokenizer_id"`
+	TokenIDs             []int                     `json:"token_ids"`
+	PromptTokens         int                       `json:"prompt_tokens"`
+	ContextWindowTokens  int                       `json:"context_window_tokens"`
+	ReservedOutputTokens int                       `json:"reserved_output_tokens"`
+	RenderedSHA256       string                    `json:"rendered_sha256"`
+	Multimodal           *PromptMultimodalEncoding `json:"multimodal,omitempty"`
+}
+
+type PromptMultimodalEncoding struct {
+	Decision            model.MultimodalDecision        `json:"decision"`
+	TemplateAssociation model.VisionTemplateAssociation `json:"template_association,omitempty"`
+	Images              int                             `json:"images"`
+	ImageBytes          int64                           `json:"image_bytes"`
+	EmbeddingTokens     int                             `json:"embedding_tokens"`
+	TemplateTokens      int                             `json:"template_tokens"`
+	SequenceTokens      int                             `json:"sequence_tokens"`
 }
 
 type preparedPrompt struct {
@@ -36,7 +49,9 @@ type preparedPrompt struct {
 	// sharedBoundary is the token length of the rendered system/tools block when it
 	// is an exact prefix of ids (0 otherwise). Prefill admits a complete snapshot
 	// there so sibling requests can restore it on a recurrent hybrid.
-	sharedBoundary int
+	sharedBoundary     int
+	multimodal         *model.MultimodalRequest
+	multimodalEncoding *PromptMultimodalEncoding
 }
 
 // EncodePrompt applies the same request options, prompt shrink, renderer, and
@@ -59,11 +74,12 @@ func (p *InKernelPlanner) EncodePrompt(ctx context.Context, messages []Message, 
 		return PromptEncoding{}, errors.New("native prompt encoding requires a tokenizer identity")
 	}
 	sp := applySampleOpts(opts...)
+	sp.nativeVisionEncodeOnly = true
 	prepared, err := p.preparePrompt(ctx, messages, tools, sp, opts...)
 	if err != nil {
 		return PromptEncoding{}, err
 	}
-	if err := p.refuseContextLength(len(prepared.ids), prepared.maxNew); err != nil {
+	if err := p.refuseContextLength(prepared.promptTokens(), prepared.maxNew); err != nil {
 		return PromptEncoding{}, err
 	}
 	sum := sha256.Sum256([]byte(prepared.rendered))
@@ -72,11 +88,19 @@ func (p *InKernelPlanner) EncodePrompt(ctx context.Context, messages []Message, 
 		RendererID:           p.promptRendererID(sp),
 		TokenizerID:          tokenizerID,
 		TokenIDs:             append([]int(nil), prepared.ids...),
-		PromptTokens:         len(prepared.ids),
+		PromptTokens:         prepared.promptTokens(),
 		ContextWindowTokens:  p.ContextWindow(),
 		ReservedOutputTokens: prepared.maxNew,
 		RenderedSHA256:       hex.EncodeToString(sum[:]),
+		Multimodal:           prepared.multimodalEncoding,
 	}, nil
+}
+
+func (p preparedPrompt) promptTokens() int {
+	if p.multimodalEncoding != nil {
+		return p.multimodalEncoding.SequenceTokens
+	}
+	return len(p.ids)
 }
 
 func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, opts ...SampleOpt) (preparedPrompt, error) {
@@ -87,16 +111,19 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 		return preparedPrompt{}, err
 	}
 	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
+	renderMessages, images, err := prepareVisionMessages(messages)
+	if err != nil {
+		return preparedPrompt{}, err
+	}
 	raw := inKernelRawV41Prompt(p.m.Cfg, sp)
 	var rendered string
 	var ids []int
-	var err error
 	if deepSeekV41SegmentedPrompt(p.m.Cfg, sp) {
-		segs := inKernelRenderDeepSeekV41ChatSegments(messages, tools, sp)
+		segs := inKernelRenderDeepSeekV41ChatSegments(renderMessages, tools, sp)
 		rendered = joinPromptSegments(segs)
 		ids, err = p.tok.EncodeSegments(segs)
 	} else {
-		rendered = inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
+		rendered = inKernelRenderPrompt(renderMessages, tools, p.m.Cfg, sp)
 		ids, err = p.tok.Encode(rendered)
 	}
 	if err != nil {
@@ -104,6 +131,17 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	}
 	if raw && p.m.Cfg.BOSTokenID != nil {
 		ids = append([]int{*p.m.Cfg.BOSTokenID}, ids...)
+	}
+	var multimodal *model.MultimodalRequest
+	var multimodalEncoding *PromptMultimodalEncoding
+	if len(images) > 0 {
+		multimodal, multimodalEncoding, err = p.encodeVisionPrompt(ids, images, sp)
+		if err != nil {
+			return preparedPrompt{}, err
+		}
+		if !sp.nativeVisionEncodeOnly {
+			return preparedPrompt{}, ErrNativeVisionPrefillUnsupported
+		}
 	}
 	maxNew := p.maxNew
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
@@ -113,6 +151,7 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 		messages: messages, tools: tools, rendered: rendered, ids: ids, maxNew: maxNew,
 		nativeCompaction: shrink.nativeCompaction,
 		sharedBoundary:   p.sharedPrefixBoundaryTokens(rendered, ids),
+		multimodal:       multimodal, multimodalEncoding: multimodalEncoding,
 	}, nil
 }
 
@@ -207,7 +246,8 @@ func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp Sam
 	// Validate before shrink can discard the source representation. The zero
 	// profile remains compatible with legacy array-to-text decoding.
 	for _, message := range messages {
-		if message.ContentWasStructured {
+		visionStructured := len(message.VisionImages) > 0 && sp.MultimodalMode == model.MultimodalModeQuarantine
+		if message.ContentWasStructured && !visionStructured {
 			return fmt.Errorf("%w: structured content requires a separate renderer", ErrDeepSeekV41ChatProfile)
 		}
 	}

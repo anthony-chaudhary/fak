@@ -94,6 +94,10 @@ type Message struct {
 	// ContentWasStructured retains intake shape before text flattening. It is local
 	// provenance, not a wire field. Mergers must OR it across merged messages.
 	ContentWasStructured bool `json:"-"`
+	// VisionPrompt and VisionImages retain OpenAI image_url content for the native
+	// planner without changing the historical text-only proxy projection.
+	VisionPrompt string             `json:"-"`
+	VisionImages []VisionImageInput `json:"-"`
 
 	Role         string     `json:"role"`
 	Content      string     `json:"content,omitempty"`
@@ -166,6 +170,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	blocks := bytes.TrimSpace(aux.ContentBlocks)
 	m.ContentWasStructured = (len(rawContent) > 0 && rawContent[0] != '"' && !bytes.Equal(rawContent, []byte("null"))) ||
 		(len(blocks) > 0 && !bytes.Equal(blocks, []byte("null")))
+	m.VisionPrompt, m.VisionImages = visionContent(aux.Content)
 	m.Role = aux.Role
 	m.Content = content
 	m.ToolCalls = aux.ToolCalls
@@ -573,7 +578,9 @@ type NativeDecodeTokenIDs struct {
 // planner like HTTPPlanner already runs temperature 0, so the two only differ when
 // the caller also wants top_p/stop, and a bare float64 could not carry that intent.
 type SampleParams struct {
-	ServiceTier modelroute.ServiceMode
+	ServiceTier            modelroute.ServiceMode
+	MultimodalMode         model.MultimodalMode
+	nativeVisionEncodeOnly bool
 	// Model, when non-empty, overrides the planner's configured ModelID for THIS
 	// request — the gateway's request-model pass-through (#82). It is the model id
 	// that reaches the upstream request body (and, for a path-templated provider

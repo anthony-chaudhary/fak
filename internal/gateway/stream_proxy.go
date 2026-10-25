@@ -697,6 +697,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		agent.WithMinP(req.MinP),
 		agent.WithChatTemplateKwargs(req.ChatTemplateKwargs),
 		agent.WithSpeculativeNMax(req.SpeculativeNMax),
+		agent.WithMultimodalMode(req.DeclaredMultimodalMode()),
 		// A streamed OpenAI request is an explicit request for incremental output.
 		// Select the native per-token seam per call so ordinary `fak serve` works
 		// without requiring the process-wide compatibility environment flag.
