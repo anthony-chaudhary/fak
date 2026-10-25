@@ -298,7 +298,15 @@ __global__ void k_qwen35_gdn_qk_norm_panel(
 // beta, decay and the inverse RMS are per-head scalars with FP64 transcendentals (1/64 rate
 // on sm_89): thread 0 evaluates each once and the block reads it back, the same bits as
 // every thread evaluating it (#9359).
-__global__ void k_qwen35_gdn_recurrent_gated_norm(
+// kRegisterState holds the thread's state column in registers, as the prompt panel does: one
+// global read and one write per state element instead of two of each. Every element keeps
+// the expression and order of the global-state loop, which stays the path for key heads
+// wider than kQwen35GDNDecodeRegisterMaxKeyHeadDim or value heads wider than
+// kQwen35GDNDecodeRegisterMaxThreads, so outputs and state are bitwise (#9359).
+constexpr int kQwen35GDNDecodeRegisterMaxKeyHeadDim = 128;
+constexpr int kQwen35GDNDecodeRegisterMaxThreads = 256;
+template <bool kRegisterState>
+__device__ __forceinline__ void qwen35_gdn_recurrent_gated_norm_body(
     const float *convOut, const float *qNorm, const float *kNorm,
     const float *z, const float *b, const float *a,
     const float *aLog, const float *dtBias, const float *norm,
@@ -325,19 +333,52 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
   float readout = 0.0f;
   if (d < vHd) {
     float kvmem = 0.0f;
-    for (int i = 0; i < kHd; i++) {
-      size_t si = ((size_t)h * kHd + i) * vHd + d;
-      float sd = state[si] * decay;
-      state[si] = sd;
-      kvmem += sd * kNorm[kh * kHd + i];
-    }
-    float v = convOut[2 * keyDim + h * vHd + d];
-    float delta = (v - kvmem) * beta;
-    for (int i = 0; i < kHd; i++) {
-      size_t si = ((size_t)h * kHd + i) * vHd + d;
-      float sd = state[si] + kNorm[kh * kHd + i] * delta;
-      state[si] = sd;
-      readout += sd * qNorm[kh * kHd + i];
+    if constexpr (kRegisterState) {
+      constexpr int maxKHd = kQwen35GDNDecodeRegisterMaxKeyHeadDim;
+      const float *kRow = kNorm + kh * kHd;
+      const float *qRow = qNorm + kh * kHd;
+      float column[maxKHd];
+#pragma unroll
+      for (int i = 0; i < maxKHd; ++i) {
+        if (i < kHd) column[i] = state[((size_t)h * kHd + i) * vHd + d];
+      }
+#pragma unroll
+      for (int i = 0; i < maxKHd; ++i) {
+        if (i < kHd) {
+          float sd = column[i] * decay;
+          column[i] = sd;
+          kvmem += sd * kRow[i];
+        }
+      }
+      float v = convOut[2 * keyDim + h * vHd + d];
+      float delta = (v - kvmem) * beta;
+#pragma unroll
+      for (int i = 0; i < maxKHd; ++i) {
+        if (i < kHd) {
+          float sd = column[i] + kRow[i] * delta;
+          column[i] = sd;
+          readout += sd * qRow[i];
+        }
+      }
+#pragma unroll
+      for (int i = 0; i < maxKHd; ++i) {
+        if (i < kHd) state[((size_t)h * kHd + i) * vHd + d] = column[i];
+      }
+    } else {
+      for (int i = 0; i < kHd; i++) {
+        size_t si = ((size_t)h * kHd + i) * vHd + d;
+        float sd = state[si] * decay;
+        state[si] = sd;
+        kvmem += sd * kNorm[kh * kHd + i];
+      }
+      float v = convOut[2 * keyDim + h * vHd + d];
+      float delta = (v - kvmem) * beta;
+      for (int i = 0; i < kHd; i++) {
+        size_t si = ((size_t)h * kHd + i) * vHd + d;
+        float sd = state[si] + kNorm[kh * kHd + i] * delta;
+        state[si] = sd;
+        readout += sd * qNorm[kh * kHd + i];
+      }
     }
     core[h * vHd + d] = readout;
   }
@@ -355,6 +396,26 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
     int vd = h * vHd + d;
     core[vd] = norm[d] * (readout * inv) * qwen35_gdn_silu(z[vd]);
   }
+}
+
+__global__ void k_qwen35_gdn_recurrent_gated_norm(
+    const float *convOut, const float *qNorm, const float *kNorm,
+    const float *z, const float *b, const float *a,
+    const float *aLog, const float *dtBias, const float *norm,
+    float *state, float *core,
+    int nK, int nV, int kHd, int vHd, float eps) {
+  qwen35_gdn_recurrent_gated_norm_body<false>(
+      convOut, qNorm, kNorm, z, b, a, aLog, dtBias, norm, state, core, nK, nV, kHd, vHd, eps);
+}
+
+__global__ void __launch_bounds__(kQwen35GDNDecodeRegisterMaxThreads) k_qwen35_gdn_recurrent_gated_norm_regstate(
+    const float *convOut, const float *qNorm, const float *kNorm,
+    const float *z, const float *b, const float *a,
+    const float *aLog, const float *dtBias, const float *norm,
+    float *state, float *core,
+    int nK, int nV, int kHd, int vHd, float eps) {
+  qwen35_gdn_recurrent_gated_norm_body<true>(
+      convOut, qNorm, kNorm, z, b, a, aLog, dtBias, norm, state, core, nK, nV, kHd, vHd, eps);
 }
 
 // Prompt gate scalars per (token, value head), evaluated once rather than once per value column
@@ -545,6 +606,17 @@ extern "C" void fcuda_qwen35_gdn_test_fault(int stage) {
   g_qwen35_gdn_test_fault_stage = stage;
 }
 
+// Test seam: force the global-state decode kernel so tests can hold both paths to the same
+// bits; and count register-state launches so a test can prove which path ran.
+static int g_qwen35_gdn_decode_global_state_test = 0;
+static size_t g_qwen35_gdn_decode_register_state_launches = 0;
+extern "C" void fcuda_qwen35_gdn_decode_force_global_state(int on) {
+  g_qwen35_gdn_decode_global_state_test = on != 0;
+}
+extern "C" size_t fcuda_qwen35_gdn_decode_register_state_launches(void) {
+  return g_qwen35_gdn_decode_register_state_launches;
+}
+
 extern "C" int fcuda_qwen35_gdn_decode_f32(
     const float *dX,
     const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
@@ -603,11 +675,21 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   int vThreads = qwen35_gdn_threads(vHd);
-  FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm", nV, k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
-      dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+  bool registerState = !g_qwen35_gdn_decode_global_state_test &&
+                       kHd <= kQwen35GDNDecodeRegisterMaxKeyHeadDim &&
+                       vThreads <= kQwen35GDNDecodeRegisterMaxThreads;
+  if (registerState) {
+    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_regstate", nV, k_qwen35_gdn_recurrent_gated_norm_regstate<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+        dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+  } else {
+    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm", nV, k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+        dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+  }
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
+  if (registerState) g_qwen35_gdn_decode_register_state_launches++;
 
   FCUDA_TS("k_qwen35_gdn_out_proj", hidden, k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
       dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim));

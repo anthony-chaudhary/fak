@@ -213,6 +213,12 @@ int fcuda_qwen35_gdn_sequence_f32(
  * final asynchronous execution failure. Production Go APIs do not expose this knob. */
 void fcuda_qwen35_gdn_test_fault(int stage);
 
+/* Decode recurrence path seam for package-local -tags cuda tests: on != 0 forces the
+ * global-state kernel where the register-state kernel would run; the counter reports
+ * register-state launches, so a test can prove which path a decode took. */
+void fcuda_qwen35_gdn_decode_force_global_state(int on);
+size_t fcuda_qwen35_gdn_decode_register_state_launches(void);
+
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
 void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P);
 
