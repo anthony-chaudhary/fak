@@ -491,9 +491,16 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   return coeff;
 }
 
+// g_q4k_prefill_arm is the P>=128 Q4_K GEMM arm the Go side resolved from FAK_CUDA_Q4K_PREFILL
+// (cuda_backend.h). Any arm this file does not run returns FCUDA_Q4K_PREFILL_ARM_REFUSED.
+#define FCUDA_Q4K_PREFILL_ARM_REFUSED 80003
+static int g_q4k_prefill_arm = 0;
+extern "C" void fcuda_set_q4k_prefill_arm(int arm) { g_q4k_prefill_arm = arm; }
+
 extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                     int out, int in, int P) {
   if (P >= 128) {
+    if (g_q4k_prefill_arm != 0) return FCUDA_Q4K_PREFILL_ARM_REFUSED;
     float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
     if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
     k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(

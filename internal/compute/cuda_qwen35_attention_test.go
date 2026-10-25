@@ -180,7 +180,7 @@ func TestQwen38PromptAttentionMMAHeaderCompilesAsCXX14Port(t *testing.T) {
 	}
 	for _, banned := range []string{"if constexpr", "std::is_same_v", "__device__ (auto"} {
 		if strings.Contains(header, banned) {
-			t.Errorf("hd256 mma port retains C++17-only %q; the translation unit compiles as -std=c++14", banned)
+			t.Errorf("hd256 mma port retains C++17-only %q; the port was written C++14-clean", banned)
 		}
 	}
 }

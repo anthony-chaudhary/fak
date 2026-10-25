@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -9,6 +10,110 @@ import (
 	"testing"
 	"time"
 )
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftLogprobEvidence(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+
+	d, err := NewQwen35MTPDraftSession(target, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	d.WithDraftVocabFilter([]int{0, 1})
+
+	draft, evidence := d.ProposeWithEvidence(prompt)
+	if len(draft) != 3 || len(evidence) != len(draft) {
+		t.Fatalf("draft/evidence lengths = %d/%d, want 3/3", len(draft), len(evidence))
+	}
+	for i, row := range evidence {
+		if row.Token != draft[i] {
+			t.Fatalf("row %d token = %d, want %d", i, row.Token, draft[i])
+		}
+		if !reflect.DeepEqual(row.TokenIDs, []int{0, 1}) {
+			t.Fatalf("row %d token IDs = %v, want compact coordinates [0 1]", i, row.TokenIDs)
+		}
+		if len(row.LogProbs) != 2 {
+			t.Fatalf("row %d log-probability width = %d, want 2", i, len(row.LogProbs))
+		}
+		var probabilityMass float64
+		finite := 0
+		for _, logp := range row.LogProbs {
+			if !math.IsInf(float64(logp), -1) {
+				finite++
+				probabilityMass += math.Exp(float64(logp))
+			}
+		}
+		if finite < 2 {
+			t.Fatalf("row %d is one-hot evidence: %v", i, row.LogProbs)
+		}
+		if math.Abs(probabilityMass-1) > 1e-5 {
+			t.Fatalf("row %d probability mass = %.8f, want 1", i, probabilityMass)
+		}
+	}
+
+	evidence[0].LogProbs[0] = 99
+	evidence[0].TokenIDs[0] = 99
+	_, again := d.ProposeWithEvidence(prompt)
+	if len(again) != 3 || again[0].LogProbs[0] == 99 || again[0].TokenIDs[0] == 99 {
+		t.Fatalf("caller mutation leaked into subsequent evidence: %+v", again)
+	}
+
+	d.SetDraftVocabFilter(nil)
+	realStep := d.step
+	d.step = func(f *Qwen35MTPForward, pos int, prior, embedding []float32) ([]float32, []float32, error) {
+		feedback, _, err := realStep(f, pos, prior, embedding)
+		return feedback, []float32{float32(math.Inf(1)), 0, 0, 0}, err
+	}
+	invalidDraft, invalidEvidence := d.ProposeWithEvidence(prompt)
+	if len(invalidDraft) < 2 {
+		t.Fatalf("non-finite later row did not exercise a selected draft token: %v", invalidDraft)
+	}
+	if invalidEvidence != nil {
+		t.Fatalf("partial evidence escaped after a non-finite row: %+v", invalidEvidence)
+	}
+
+	d.SetCoverageThreshold(2)
+	refused, stale := d.ProposeWithEvidence(prompt)
+	if refused != nil || stale != nil {
+		t.Fatalf("clean refusal returned proposal/evidence = %v/%+v", refused, stale)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestMTPProposalGeneratorCarriesDraftEvidence(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+
+	d, err := NewQwen35MTPDraftSession(target, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	d.WithDraftVocabFilter([]int{0, 1})
+
+	proposal, err := NewMTPProposalGenerator(d).Propose(context.Background(), prompt, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.Tokens) != 2 || len(proposal.DraftEvidence) != 2 {
+		t.Fatalf("proposal token/evidence lengths = %d/%d, want 2/2", len(proposal.Tokens), len(proposal.DraftEvidence))
+	}
+	for i := range proposal.Tokens {
+		if proposal.DraftEvidence[i].Token != proposal.Tokens[i] {
+			t.Fatalf("proposal row %d token = %d, want %d", i, proposal.DraftEvidence[i].Token, proposal.Tokens[i])
+		}
+	}
+}
 
 func TestQwen35MTPDepthNDraftSequentialFeedbackAndCacheCoherence(t *testing.T) {
 	m := qwen35MTPEnabledSyntheticModel(t)

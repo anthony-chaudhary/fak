@@ -260,7 +260,13 @@ int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const f
  * path (the weight, not the activation, is the narrow operand). */
 int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
 /* fcuda_q4k_matmul_f32 and fcuda_q2k_matmul_f32 return 0, or 80001 (f32 dequant scratch) or
- * 80002 (fp16 split scratch) when a P>=128 scratch allocation fails (nothing launched). */
+ * 80002 (fp16 split scratch) when a P>=128 scratch allocation fails (nothing launched).
+ * fcuda_q4k_matmul_f32 also returns 80003 for P>=128 when the selected prefill arm is refused. */
+
+/* fcuda_set_q4k_prefill_arm selects the P>=128 Q4_K GEMM arm (P-04): 0 compensated (the f32
+ * dequant + three compensated FP16 GEMMs above), 1 mmq, 2 fp8lt, -1 refused. The Go side resolves
+ * FAK_CUDA_Q4K_PREFILL and only passes an arm this build implements; any other code refuses. */
+void fcuda_set_q4k_prefill_arm(int arm);
 
 /* fcuda_q2_0_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident PACKED TERNARY
  * Q2_0 (#4872) — 2-bit codes dCodes[out*in/4] (4 weights/byte, LSB-first, u∈{0,1,2} → t=u-1)

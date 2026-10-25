@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/pkg/referenceoracle"
@@ -15,9 +16,8 @@ import (
 
 // Endpoint APIs a Client speaks.
 const (
-	// APIOpenAI is POST /v1/completions with a raw text prompt. It asks for fak's
-	// native decode token ids and falls back to text when the endpoint refuses or
-	// omits them.
+	// APIOpenAI is POST /v1/completions with a raw text prompt. It prefers fak's
+	// native decode token ids, then legacy completion logprob rows, then text.
 	APIOpenAI = "openai"
 	// APILlama is llama-server's POST /completion with n_probs: token ids and
 	// top-k log-probabilities.
@@ -38,11 +38,13 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-// Generation is one greedy continuation. Positions is nil for a text-only API.
+// Generation is one greedy continuation. Positions is nil when the API reports
+// neither token IDs nor usable token-piece logprob rows.
 type Generation struct {
 	Text         string
 	Positions    []Position
 	PromptTokens int
+	Method       string
 }
 
 // Generate decodes maxTokens greedy tokens after the raw prompt (no chat
@@ -84,14 +86,26 @@ func (c Client) Generate(ctx context.Context, prompt string, maxTokens, topK int
 		}
 		return g, nil
 	case APIOpenAI, "":
+		reportK := topK
+		if reportK < 0 {
+			reportK = 0
+		}
+		if reportK > 5 {
+			reportK = 5
+		}
 		body := map[string]any{"prompt": prompt, "max_tokens": maxTokens, "temperature": 0, "seed": 42,
-			"fak_decode_trace": true, "fak": map[string]any{"native_decode_token_ids": true}}
+			"logprobs": reportK, "fak_decode_trace": true, "fak": map[string]any{"native_decode_token_ids": true}}
 		if m := strings.TrimSpace(c.Model); m != "" {
 			body["model"] = m
 		}
 		var out struct {
 			Choices []struct {
-				Text string `json:"text"`
+				Text     string `json:"text"`
+				Logprobs *struct {
+					Tokens        []string              `json:"tokens"`
+					TokenLogprobs []*float64            `json:"token_logprobs"`
+					TopLogprobs   []map[string]*float64 `json:"top_logprobs"`
+				} `json:"logprobs"`
 			} `json:"choices"`
 			Usage struct {
 				PromptTokens int `json:"prompt_tokens"`
@@ -121,6 +135,46 @@ func (c Client) Generate(ctx context.Context, prompt string, maxTokens, topK int
 			for _, id := range out.Fak.TokenIDs.TokenIDs {
 				g.Positions = append(g.Positions, Position{ID: id})
 			}
+			return g, nil
+		}
+		rows := out.Choices[0].Logprobs
+		if rows == nil {
+			return g, nil
+		}
+		if len(rows.Tokens) != len(rows.TokenLogprobs) || len(rows.Tokens) != len(rows.TopLogprobs) {
+			return Generation{}, fmt.Errorf("%w: %s returned misaligned completion logprob rows: tokens=%d token_logprobs=%d top_logprobs=%d", ErrEndpoint, base, len(rows.Tokens), len(rows.TokenLogprobs), len(rows.TopLogprobs))
+		}
+		g.Positions = make([]Position, 0, len(rows.Tokens))
+		g.Method = TextPieces
+		for i, piece := range rows.Tokens {
+			if rows.TokenLogprobs[i] == nil {
+				return Generation{}, fmt.Errorf("%w: %s returned null token_logprobs row %d", ErrEndpoint, base, i)
+			}
+			if rows.TopLogprobs[i] == nil {
+				return Generation{}, fmt.Errorf("%w: %s returned null top_logprobs row %d", ErrEndpoint, base, i)
+			}
+			type entry struct {
+				piece   string
+				logprob float64
+			}
+			entries := make([]entry, 0, len(rows.TopLogprobs[i]))
+			for candidatePiece, logprob := range rows.TopLogprobs[i] {
+				if logprob == nil {
+					return Generation{}, fmt.Errorf("%w: %s returned null top_logprobs value at row %d", ErrEndpoint, base, i)
+				}
+				entries = append(entries, entry{piece: candidatePiece, logprob: *logprob})
+			}
+			sort.Slice(entries, func(i, j int) bool {
+				if entries[i].logprob == entries[j].logprob {
+					return entries[i].piece < entries[j].piece
+				}
+				return entries[i].logprob > entries[j].logprob
+			})
+			pos := Position{ID: UnknownID, Piece: piece, TopK: make([]Candidate, 0, len(entries)), ReportedTopK: reportK}
+			for _, candidate := range entries {
+				pos.TopK = append(pos.TopK, Candidate{ID: UnknownID, Piece: candidate.piece, Logprob: candidate.logprob})
+			}
+			g.Positions = append(g.Positions, pos)
 		}
 		return g, nil
 	}
@@ -230,7 +284,10 @@ func Score(ctx context.Context, actual Client, refs []RefPrompt, topK int) ([]Pr
 			out = append(out, pr)
 			continue
 		}
-		method, positions := TokenIDs, g.Positions
+		method, positions := g.Method, g.Positions
+		if method == "" {
+			method = TokenIDs
+		}
 		if positions == nil {
 			method, positions = TextPieces, SegmentText(g.Text, ref.Positions)
 		}

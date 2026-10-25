@@ -230,16 +230,16 @@ done
 # H100/H200 (sm_90), or B200/GB200 (sm_100). Accept either "89" or "sm_89".
 echo "[cuda] nvcc compile kernels ($BUILD_ARCHS) ..."
 ( cd "$PKG_DIR"
-  "$NVCC" -O3 -std=c++14 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+  "$NVCC" -O3 -std=c++17 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
       -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
   objs="cuda_kernels.o"
   if [ "${FAK_CUDA_NCCL:-0}" = "1" ]; then
     echo "[cuda] nvcc compile NCCL collectives ($BUILD_ARCHS) ..."
-    "$NVCC" -O3 -std=c++14 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+    "$NVCC" -O3 -std=c++17 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
         -Xcompiler -fPIC -c cuda_nccl.cu -o cuda_nccl.o
     objs="$objs cuda_nccl.o"
     echo "[cuda] nvcc compile multi-process NCCL process group ($BUILD_ARCHS) ..."
-    "$NVCC" -O3 -std=c++14 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+    "$NVCC" -O3 -std=c++17 "${GENCODE[@]}" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
         -Xcompiler -fPIC -c cuda_nccl_pg.cu -o cuda_nccl_pg.o
     objs="$objs cuda_nccl_pg.o"
   fi
