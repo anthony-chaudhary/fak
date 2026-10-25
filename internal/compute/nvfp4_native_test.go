@@ -85,8 +85,8 @@ func TestNVFP4NativeMatMulGolden(t *testing.T) {
 			gotTensor.Dtype, gotTensor.Layout, gotTensor.Shape)
 	}
 	got := Default().Read(gotTensor)
-	if len(got) != 6 {
-		t.Fatalf("output length = %d, want 6", len(got))
+	if len(got) != gotTensor.Shape[0]*gotTensor.Shape[1] {
+		t.Fatalf("output length = %d, want shape product %d", len(got), gotTensor.Shape[0]*gotTensor.Shape[1])
 	}
 
 	alpha := f.wGlobal * f.aGlobal

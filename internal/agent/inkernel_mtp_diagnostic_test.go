@@ -112,16 +112,22 @@ func TestVulkanMTPDiagnosticPlannerAcceptanceFloor(t *testing.T) {
 
 func TestVulkanMTPDiagnosticPlannerBoundedRequestOwnership(t *testing.T) {
 	p, prompt, ctx, _ := mtpDiagnosticPlanner(t, 1, []int{7})
-	first, err := p.generateReusedRecovering(ctx, prompt, 514, 0, 0, 0, nil, 0, 0, nil, nil)
+	wantRounds := vulkanMTPDiagnosticRoundLimit + 1
+	wantTokens := wantRounds * 2
+	first, err := p.generateReusedRecovering(ctx, prompt, wantTokens, 0, 0, 0, nil, 0, 0, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := first.vulkanMTP
-	if a == nil || a.ProposalRounds != 257 || len(a.RoundDiagnostics) != 256 || a.RoundDiagnosticsDropped != 1 {
+	if a == nil {
+		t.Fatal("missing receipt")
+	}
+	retainedRounds := len(a.RoundDiagnostics)
+	if a.ProposalRounds != wantRounds || retainedRounds != min(a.ProposalRounds, vulkanMTPDiagnosticRoundLimit) || a.RoundDiagnosticsDropped != a.ProposalRounds-retainedRounds {
 		t.Fatalf("retention changed execution or lost drop count: %+v", a)
 	}
 	totals := a.ClosedRoundTotals
-	if totals == nil || totals.Rounds != 257 || totals.ProposedTokens != 257 || totals.AcceptedTokens != 257 || totals.AcceptedEmittedTokens != 257 || totals.BonusEmittedTokens != 257 || totals.EmittedTokens != 514 || totals.DraftElapsed != 257*3*time.Millisecond || totals.InclusiveElapsed != 257*13*time.Millisecond {
+	if totals == nil || totals.Rounds != a.ProposalRounds || totals.ProposedTokens != a.ProposalRounds || totals.AcceptedTokens != a.ProposalRounds || totals.AcceptedEmittedTokens != a.ProposalRounds || totals.BonusEmittedTokens != a.ProposalRounds || totals.EmittedTokens != wantTokens || totals.DraftElapsed != time.Duration(a.ProposalRounds)*3*time.Millisecond || totals.InclusiveElapsed != time.Duration(a.ProposalRounds)*13*time.Millisecond {
 		t.Fatalf("aggregate truncated with round retention: %+v", totals)
 	}
 	second, err := p.generateReusedRecovering(ctx, prompt, 2, 0, 0, 0, nil, 0, 0, nil, nil)

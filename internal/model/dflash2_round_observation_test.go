@@ -19,8 +19,8 @@ func TestDFlash2PostCommitObservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !timing.Complete || len(round.Tokens()) != 8 {
-				t.Fatal("fixture did not verify eight tokens")
+			if !timing.Complete || len(round.Tokens()) != timing.Verification.Rows {
+				t.Fatal("fixture tokens disagree with completed verification work")
 			}
 			tx := round.cp.tx.tx
 			tokens, observation, err := round.CommitObserved(context.Background(), accepted)

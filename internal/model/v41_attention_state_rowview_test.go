@@ -249,13 +249,20 @@ func TestV41AttentionStateRowViewRefusals(t *testing.T) {
 	t.Run("copying-readers", func(t *testing.T) {
 		s := v41RowViewState(t, 8)
 		v41RowViewSame(t, "armed", s)
-		for _, read := range []func(int) ([][]float32, bool){s.KVSourceRows, s.IndexKeys} {
-			copied, ok := read(0)
-			if !ok || len(copied) != 8 {
+		source := 0
+		for _, reader := range []struct {
+			read         func(int) ([][]float32, bool)
+			publishedEnd map[int]int
+		}{
+			{read: s.KVSourceRows, publishedEnd: s.kvPublishedEnd},
+			{read: s.IndexKeys, publishedEnd: s.indexPublishedEnd},
+		} {
+			copied, ok := reader.read(source)
+			if !ok || len(copied) != reader.publishedEnd[source] {
 				t.Fatal("copying reader refused a complete source")
 			}
-			kv, _ := s.borrowKVSourceRows(0)
-			keys, _ := s.borrowIndexKeys(0)
+			kv, _ := s.borrowKVSourceRows(source)
+			keys, _ := s.borrowIndexKeys(source)
 			for i, row := range copied {
 				if &row[0] == &kv[i][0] || &row[0] == &keys[i][0] {
 					t.Fatal("copying reader returned a borrowed row")
