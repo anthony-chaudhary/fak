@@ -46,6 +46,18 @@ func TestRunCUDAGPUDirect_BindingUnboundAndMissing(t *testing.T) {
 }
 
 // fak-test:runtime fast est=30ms lane=default
+func TestRunCUDAGPUDirect_BindingInfDirReachesReport(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bus", "pci", "devices"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := runBindingJSON(t, "--sysfs", root, "--inf-dir", t.TempDir())
+	if rep.Package == nil || len(rep.Package.Issues) != 1 {
+		t.Fatalf("package = %+v, want the Windows-only refusal on a sysfs host", rep.Package)
+	}
+}
+
+// fak-test:runtime fast est=30ms lane=default
 func TestRunCUDAGPUDirect_BindingMissingSysfsIsError(t *testing.T) {
 	rep, code := runBindingJSON(t, "--sysfs", filepath.Join(t.TempDir(), "absent"), "--expect", "3")
 	if rep.Status != compute.CUDADiscoveryError || len(rep.Devices) != 0 || code != 1 {

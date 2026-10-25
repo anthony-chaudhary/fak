@@ -95,6 +95,10 @@ type GPUBindingDevice struct {
 	CUDAUUID         string            `json:"cuda_uuid,omitempty"`
 	TunnelAuthorized GPULayerState     `json:"tunnel_authorized,omitempty"`
 	Tunnel           string            `json:"tunnel,omitempty"`
+	ParentChain      []GPUPnPHop       `json:"parent_chain,omitempty"`
+	RootPort         string            `json:"root_port,omitempty"`
+	USB4HostRouter   string            `json:"usb4_host_router,omitempty"`
+	USB4RouterBasis  string            `json:"usb4_router_basis,omitempty"`
 	Source           string            `json:"source,omitempty"`
 	Verdict          GPUBindingVerdict `json:"verdict"`
 	UnknownFields    []string          `json:"unknown_fields,omitempty"`
@@ -136,6 +140,11 @@ type GPUBindingReport struct {
 	Devices    []GPUBindingDevice        `json:"devices"`
 	Verdicts   map[GPUBindingVerdict]int `json:"verdicts"`
 	Ready      bool                      `json:"ready"`
+	// USB4HostRouters lists the host's USB4 host routers (Windows); a GPU's
+	// usb4_host_router names the one its tunnel root port belongs to.
+	USB4HostRouters []GPUUSB4HostRouter `json:"usb4_host_routers,omitempty"`
+	// Package is the coverage of an extracted driver package (--inf-dir).
+	Package *GPUDriverPackage `json:"package,omitempty"`
 }
 
 // GPUBindingInputs are the collected observations BuildGPUBindingReport folds.
@@ -149,6 +158,8 @@ type GPUBindingInputs struct {
 	// EnumerationIncomplete means some PCI function could not be read, so a
 	// missing expected GPU may be that function: no absent rows are claimed.
 	EnumerationIncomplete bool
+	USB4HostRouters       []GPUUSB4HostRouter
+	Package               *GPUDriverPackage
 }
 
 // GPUBindingOptions tunes DiagnoseGPUBinding; zero values select host defaults.
@@ -164,6 +175,10 @@ type GPUBindingOptions struct {
 	SupportedGPUsPath string
 	// INFDir is the Windows INF directory; empty means %SystemRoot%\INF.
 	INFDir string
+	// PackageINFDir is an extracted NVIDIA driver package; when set, the report
+	// names the package INF that lists each present GPU and the pnputil plan
+	// (never run) that would bind them. Windows only.
+	PackageINFDir string
 
 	pnpQuery func(ctx context.Context) (string, error)
 	smiQuery func(ctx context.Context) (gpuQueryOutput, error)
@@ -178,8 +193,12 @@ type gpuQueryOutput struct {
 	ExitCode int
 }
 
-// gpuBindingQueryTimeout bounds each external query (PowerShell PnP, nvidia-smi).
-const gpuBindingQueryTimeout = 60 * time.Second
+// gpuBindingQueryTimeout bounds the nvidia-smi query; the PnP query walks one
+// property read per device-tree hop and gets the longer gpuBindingPnPTimeout.
+const (
+	gpuBindingQueryTimeout = 60 * time.Second
+	gpuBindingPnPTimeout   = 120 * time.Second
+)
 
 // ClassifyGPUBinding folds one device's layer observations into its verdict.
 func ClassifyGPUBinding(dev GPUBindingDevice) GPUBindingVerdict {
@@ -227,6 +246,9 @@ func BuildGPUBindingReport(in GPUBindingInputs) GPUBindingReport {
 		CUDA:       in.CUDA,
 		Devices:    make([]GPUBindingDevice, 0, len(in.Devices)),
 		Verdicts:   map[GPUBindingVerdict]int{},
+
+		USB4HostRouters: in.USB4HostRouters,
+		Package:         in.Package,
 	}
 	for _, dev := range in.Devices {
 		dev.Enumerated = true
@@ -471,13 +493,20 @@ func cudaViewIfNeeded(devs []GPUBindingDevice, query func(ctx context.Context) (
 // ---- Windows: PnP problem code, bound INF, INF device-ID coverage ----
 
 // windowsPnPBindingScript lists present NVIDIA PCI functions with the device
-// properties the doctor reads. A failed enumeration must exit non-zero, never
-// print an empty list; a failed per-device property read leaves that
-// property null (unknown). -InputObject keeps a one-device result an array.
+// properties the doctor reads, each GPU's PnP parent chain up to the first
+// non-PCI ancestor (the root complex), and the USB4 host routers. A failed
+// enumeration must exit non-zero, never print an empty list; a failed
+// per-device property read leaves that property null (unknown).
 const windowsPnPBindingScript = `$ErrorActionPreference='Stop'; ` +
-	`$k='DEVPKEY_Device_ProblemCode','DEVPKEY_Device_DriverInfPath','DEVPKEY_Device_DriverVersion','DEVPKEY_Device_DriverProvider','DEVPKEY_Device_BusNumber','DEVPKEY_Device_Address','DEVPKEY_Device_LocationInfo','DEVPKEY_Device_HardwareIds','DEVPKEY_Device_CompatibleIds','DEVPKEY_Device_DeviceDesc'; ` +
-	`$r=@(Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'PCI\VEN_10DE*' } | ForEach-Object { $id=$_.InstanceId; $o=[ordered]@{instance_id=$id; friendly_name=$_.FriendlyName; class=$_.Class}; foreach($p in (Get-PnpDeviceProperty -InstanceId $id -KeyName $k -ErrorAction SilentlyContinue)){ $o[$p.KeyName]=$p.Data }; [pscustomobject]$o }); ` +
-	`ConvertTo-Json -InputObject $r -Compress -Depth 4`
+	`$k='DEVPKEY_Device_ProblemCode','DEVPKEY_Device_DriverInfPath','DEVPKEY_Device_DriverVersion','DEVPKEY_Device_DriverProvider','DEVPKEY_Device_BusNumber','DEVPKEY_Device_Address','DEVPKEY_Device_LocationInfo','DEVPKEY_Device_HardwareIds','DEVPKEY_Device_CompatibleIds','DEVPKEY_Device_DeviceDesc','DEVPKEY_Device_Parent'; ` +
+	`$hk='DEVPKEY_Device_FriendlyName','DEVPKEY_Device_DeviceDesc','DEVPKEY_Device_BusNumber','DEVPKEY_Device_Address','DEVPKEY_Device_LocationPaths','DEVPKEY_Device_Parent'; ` +
+	`$hops=@{}; ` +
+	`function Props($id,$keys){ $h=[ordered]@{instance_id=$id}; foreach($q in (Get-PnpDeviceProperty -InstanceId $id -KeyName $keys -ErrorAction SilentlyContinue)){ $h[$q.KeyName]=$q.Data }; $h }; ` +
+	`function Hop($id){ if(-not $hops.ContainsKey($id)){ $hops[$id]=Props $id $hk }; $hops[$id] }; ` +
+	`$all=@(Get-PnpDevice -PresentOnly); ` +
+	`$r=@($all | Where-Object { $_.InstanceId -like 'PCI\VEN_10DE*' } | ForEach-Object { $o=Props $_.InstanceId $k; $o['friendly_name']=$_.FriendlyName; $o['class']=$_.Class; $c=@(); if(($_.Class -eq 'Display') -or (@($o['DEVPKEY_Device_CompatibleIds']) -like '*CC_03*')){ $cur=$o['DEVPKEY_Device_Parent']; for($i=0; $i -lt 12 -and $cur; $i++){ $h=Hop $cur; $c+=[pscustomobject]$h; if($cur -notlike 'PCI\*'){ break }; $cur=$h['DEVPKEY_Device_Parent'] } }; $o['parent_chain']=$c; [pscustomobject]$o }); ` +
+	`$u=@($all | Where-Object { $_.HardwareID -contains 'PCI\USB4_MS_CM' } | ForEach-Object { [pscustomobject](Props $_.InstanceId $hk) }); ` +
+	`ConvertTo-Json -InputObject ([pscustomobject]@{devices=$r; usb4_host_routers=$u}) -Compress -Depth 8`
 
 func execWindowsPnPBinding(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", windowsPnPBindingScript)
@@ -505,19 +534,20 @@ func (s *psStrings) UnmarshalJSON(b []byte) error {
 }
 
 type winPnPBindingRaw struct {
-	InstanceID    string    `json:"instance_id"`
-	FriendlyName  string    `json:"friendly_name"`
-	Class         string    `json:"class"`
-	ProblemCode   *int      `json:"DEVPKEY_Device_ProblemCode"`
-	DriverInfPath string    `json:"DEVPKEY_Device_DriverInfPath"`
-	DriverVersion string    `json:"DEVPKEY_Device_DriverVersion"`
-	Provider      string    `json:"DEVPKEY_Device_DriverProvider"`
-	BusNumber     *uint32   `json:"DEVPKEY_Device_BusNumber"`
-	Address       *uint32   `json:"DEVPKEY_Device_Address"`
-	LocationInfo  string    `json:"DEVPKEY_Device_LocationInfo"`
-	HardwareIDs   psStrings `json:"DEVPKEY_Device_HardwareIds"`
-	CompatibleIDs psStrings `json:"DEVPKEY_Device_CompatibleIds"`
-	DeviceDesc    string    `json:"DEVPKEY_Device_DeviceDesc"`
+	InstanceID    string         `json:"instance_id"`
+	FriendlyName  string         `json:"friendly_name"`
+	Class         string         `json:"class"`
+	ProblemCode   *int           `json:"DEVPKEY_Device_ProblemCode"`
+	DriverInfPath string         `json:"DEVPKEY_Device_DriverInfPath"`
+	DriverVersion string         `json:"DEVPKEY_Device_DriverVersion"`
+	Provider      string         `json:"DEVPKEY_Device_DriverProvider"`
+	BusNumber     *uint32        `json:"DEVPKEY_Device_BusNumber"`
+	Address       *uint32        `json:"DEVPKEY_Device_Address"`
+	LocationInfo  string         `json:"DEVPKEY_Device_LocationInfo"`
+	HardwareIDs   psStrings      `json:"DEVPKEY_Device_HardwareIds"`
+	CompatibleIDs psStrings      `json:"DEVPKEY_Device_CompatibleIds"`
+	DeviceDesc    string         `json:"DEVPKEY_Device_DeviceDesc"`
+	ParentChain   []winPnPHopRaw `json:"parent_chain"`
 }
 
 // windowsProblemNames names the CM_PROB_* codes seen in GPU bring-up.
@@ -543,24 +573,47 @@ var windowsProblemNames = map[int]string{
 // NVIDIA display devices (PCI class 03; audio and USB functions are dropped).
 // Device-ID coverage is not judged here; it stays unknown until an INF check.
 func ParseWindowsGPUBindingJSON(raw string) ([]GPUBindingDevice, error) {
+	devs, _, err := parseWindowsPnPBinding(raw)
+	return devs, err
+}
+
+// parseWindowsPnPBinding accepts the query's {devices, usb4_host_routers}
+// envelope, a bare device array, or one device object.
+func parseWindowsPnPBinding(raw string) ([]GPUBindingDevice, []GPUUSB4HostRouter, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil, errors.New("cudatopology: empty PnP binding JSON")
+		return nil, nil, errors.New("cudatopology: empty PnP binding JSON")
 	}
 	var items []winPnPBindingRaw
+	var routers []GPUUSB4HostRouter
 	switch {
 	case strings.HasPrefix(trimmed, "["):
 		if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	case strings.HasPrefix(trimmed, "{"):
+		var env struct {
+			Devices *[]winPnPBindingRaw `json:"devices"`
+			Routers []winPnPHopRaw      `json:"usb4_host_routers"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &env); err != nil {
+			return nil, nil, err
+		}
+		if env.Devices != nil {
+			items = *env.Devices
+			for _, r := range env.Routers {
+				hop := r.hop()
+				routers = append(routers, GPUUSB4HostRouter(hop))
+			}
+			break
+		}
 		var one winPnPBindingRaw
 		if err := json.Unmarshal([]byte(trimmed), &one); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		items = append(items, one)
 	default:
-		return nil, errors.New("cudatopology: invalid PnP binding JSON structure")
+		return nil, nil, errors.New("cudatopology: invalid PnP binding JSON structure")
 	}
 
 	devs := make([]GPUBindingDevice, 0, len(items))
@@ -617,10 +670,11 @@ func ParseWindowsGPUBindingJSON(raw string) ([]GPUBindingDevice, error) {
 				dev.DriverStarted = GPULayerYes
 			}
 		}
+		dev.ParentChain, dev.RootPort = windowsParentChain(it.ParentChain)
 		dev.UnknownFields = unknown
 		devs = append(devs, dev)
 	}
-	return devs, nil
+	return devs, routers, nil
 }
 
 // pciClassFromIDs returns the two-hex-digit PCI base class carried by a
@@ -923,15 +977,18 @@ func diagnoseGPUBindingWindows(opts GPUBindingOptions) GPUBindingReport {
 	if query == nil {
 		query = execWindowsPnPBinding
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), gpuBindingQueryTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), gpuBindingPnPTimeout)
 	out, err := query(ctx)
 	cancel()
 	if err != nil {
 		return gpuBindingEnumerationFailed(CUDASourceWindowsPnP, opts.ExpectGPUs, []CUDADiscoveryIssue{{Path: "Get-PnpDevice", Error: err.Error()}})
 	}
-	devs, err := ParseWindowsGPUBindingJSON(out)
+	devs, routers, err := parseWindowsPnPBinding(out)
 	if err != nil {
 		return gpuBindingEnumerationFailed(CUDASourceWindowsPnP, opts.ExpectGPUs, []CUDADiscoveryIssue{{Path: "Get-PnpDevice", Error: err.Error()}})
+	}
+	for i := range devs {
+		associateUSB4HostRouter(&devs[i], routers)
 	}
 	infDir := opts.INFDir
 	if infDir == "" {
@@ -956,12 +1013,18 @@ func diagnoseGPUBindingWindows(opts GPUBindingOptions) GPUBindingReport {
 	if x.err != nil {
 		issues = append(issues, CUDADiscoveryIssue{Path: filepath.ToSlash(infDir), Error: x.err.Error()})
 	}
+	var pkg *GPUDriverPackage
+	if opts.PackageINFDir != "" {
+		pkg = matchDriverPackage(devs, opts.PackageINFDir)
+	}
 	return BuildGPUBindingReport(GPUBindingInputs{
-		Method:     CUDASourceWindowsPnP,
-		Devices:    devs,
-		CUDA:       cudaViewIfNeeded(devs, opts.smiQuery),
-		ExpectGPUs: opts.ExpectGPUs,
-		Issues:     issues,
+		Method:          CUDASourceWindowsPnP,
+		Devices:         devs,
+		CUDA:            cudaViewIfNeeded(devs, opts.smiQuery),
+		ExpectGPUs:      opts.ExpectGPUs,
+		Issues:          issues,
+		USB4HostRouters: routers,
+		Package:         pkg,
 	})
 }
 
@@ -1118,6 +1181,9 @@ func diagnoseGPUBindingLinux(sysfsRoot string, opts GPUBindingOptions) GPUBindin
 		if addr, ok := d.readSysfsAttr(devDir, "address"); ok && addr != "" {
 			dev.PCIAddress = addr
 		}
+		if resolved, err := filepath.EvalSymlinks(devDir); err == nil {
+			dev.ParentChain, dev.RootPort = linuxParentChain(resolved)
+		}
 		dev.DeviceID, _ = d.readSysfsAttr(devDir, "device")
 		dev.DeviceID = strings.ToLower(dev.DeviceID)
 		sv, _ := d.readSysfsAttr(devDir, "subsystem_vendor")
@@ -1172,7 +1238,12 @@ func diagnoseGPUBindingLinux(sysfsRoot string, opts GPUBindingOptions) GPUBindin
 		devs = append(devs, dev)
 	}
 
+	var pkg *GPUDriverPackage
+	if opts.PackageINFDir != "" {
+		pkg = &GPUDriverPackage{Dir: opts.PackageINFDir, Issues: []CUDADiscoveryIssue{{Path: filepath.ToSlash(opts.PackageINFDir), Error: "package coverage matches Windows PnP hardware IDs; sysfs devices carry none"}}}
+	}
 	return BuildGPUBindingReport(GPUBindingInputs{
+		Package:               pkg,
 		Method:                CUDASourceSysfs,
 		Devices:               devs,
 		CUDA:                  cudaViewIfNeeded(devs, opts.smiQuery),

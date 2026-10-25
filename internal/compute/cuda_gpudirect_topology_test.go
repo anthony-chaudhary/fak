@@ -604,3 +604,29 @@ func TestCUDATopology_RouteNeedsDeclaredSlotOrNUMA(t *testing.T) {
 		t.Error("CUDAReBARKnown true with BAR1 unobserved")
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestCUDATopology_WindowsSelectsNVIDIAByVendorNotName(t *testing.T) {
+	// An eGPU on the Microsoft Basic Display Adapter carries no NVIDIA name.
+	prev := windowsVideoControllerQuery
+	t.Cleanup(func() { windowsVideoControllerQuery = prev })
+	windowsVideoControllerQuery = func() ([]byte, error) {
+		return []byte(`[
+			{"name":"Intel(R) UHD Graphics","ram":1073741824,"pnp":"PCI\\VEN_8086&DEV_A788&SUBSYS_0BDA1028&REV_04\\3&11583659&0&10"},
+			{"name":"Microsoft Basic Display Adapter","ram":0,"pnp":"PCI\\VEN_10DE&DEV_2C05&SUBSYS_143C196E&REV_A1\\39AFB300CD2DB04800"},
+			{"name":"NVIDIA GeForce RTX 4070 Laptop GPU","ram":4293918720,"pnp":"PCI\\VEN_10DE&DEV_2820&SUBSYS_0BDA1028&REV_A1\\4&6A7979E&0&0008"},
+			{"name":"Microsoft Remote Display Adapter","ram":0,"pnp":"SWD\\REMOTEDISPLAYENUM\\RDPIDDINDIRECTDISPLAY"}
+		]`), nil
+	}
+	disco := NewCUDAPCIeTopologyDiscovery("")
+	if err := disco.DiscoverWindows(); err != nil {
+		t.Fatalf("DiscoverWindows: %v", err)
+	}
+	var ids []string
+	for _, g := range disco.GPUs {
+		ids = append(ids, g.DeviceID)
+	}
+	if want := []string{"0x2c05", "0x2820"}; strings.Join(ids, ",") != strings.Join(want, ",") || disco.Status != CUDADiscoveryObserved {
+		t.Fatalf("selected device IDs %v status %s, want %v observed", ids, disco.Status, want)
+	}
+}

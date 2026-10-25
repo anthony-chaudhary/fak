@@ -533,16 +533,34 @@ func ParseWindowsCUDADisplayJSON(jsonData string) ([]CUDADeviceNode, error) {
 	return nodes, nil
 }
 
+// windowsVideoControllerQuery lists every Win32_VideoController; the NVIDIA
+// selection happens in Go (selectNVIDIADisplayNodes) so it is testable.
+var windowsVideoControllerQuery = func() ([]byte, error) {
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		"Get-CimInstance Win32_VideoController | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } } | ConvertTo-Json -Compress")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Output()
+}
+
+// selectNVIDIADisplayNodes keeps adapters by PCI vendor ID, not name: an NVIDIA
+// GPU on the Microsoft Basic Display Adapter carries no NVIDIA name but is
+// still an NVIDIA device. An adapter with no PNP vendor ID is kept only when
+// its name says NVIDIA.
+func selectNVIDIADisplayNodes(nodes []CUDADeviceNode) []CUDADeviceNode {
+	var out []CUDADeviceNode
+	for _, n := range nodes {
+		if n.VendorID == "0x10de" || (n.VendorID == "" && strings.Contains(strings.ToUpper(n.DeviceName), "NVIDIA")) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // DiscoverWindows probes Windows display adapters via a WMI query. NVMe
-// topology is not observable through this path and is left empty. Adapters are
-// selected by PCI vendor ID, not name: an NVIDIA GPU on the Microsoft Basic
-// Display Adapter carries no NVIDIA name but is still an NVIDIA device.
+// topology is not observable through this path and is left empty.
 func (d *CUDAPCIeTopologyDiscovery) DiscoverWindows() error {
 	d.Method = CUDASourceWindowsWMI
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		"Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -like 'PCI\\VEN_10DE*' } | ForEach-Object { [pscustomobject]@{ name = $_.Name; driver = $_.DriverVersion; ram = [int64]$_.AdapterRAM; pnp = $_.PNPDeviceID } } | ConvertTo-Json -Compress")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
+	out, err := windowsVideoControllerQuery()
 	if err != nil {
 		d.addIssue("Win32_VideoController", err)
 		d.Status = CUDADiscoveryError
@@ -559,7 +577,7 @@ func (d *CUDAPCIeTopologyDiscovery) DiscoverWindows() error {
 		d.Status = CUDADiscoveryError
 		return fmt.Errorf("cudatopology: parsing WMI display query: %w", err)
 	}
-	d.GPUs = append(d.GPUs, gpus...)
+	d.GPUs = append(d.GPUs, selectNVIDIADisplayNodes(gpus)...)
 	d.finalizeStatus()
 	return nil
 }

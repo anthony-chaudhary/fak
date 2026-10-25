@@ -248,6 +248,7 @@ func RunCUDAGPUDirect(stdout, stderr io.Writer, argv []string) int {
 	mode := fs.String("mode", "inspect", "subcommand mode: inspect, audit, binding, bench, or qwen38")
 	sysfsRoot := fs.String("sysfs", "/sys", "path to Linux sysfs root")
 	expectGPUs := fs.Int("expect", 0, "binding: NVIDIA GPUs expected; missing ones report GPU_NOT_ENUMERATED or GPU_TUNNEL_UNAUTHORIZED")
+	infDir := fs.String("inf-dir", "", "binding (Windows): extracted NVIDIA driver package; report which INF lists each GPU and the pnputil plan (not run)")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return 2
@@ -269,7 +270,7 @@ func RunCUDAGPUDirect(stdout, stderr io.Writer, argv []string) int {
 
 	switch strings.ToLower(sub) {
 	case "binding":
-		return runCUDABinding(stdout, *sysfsRoot, *expectGPUs, *jsonOut)
+		return runCUDABinding(stdout, *sysfsRoot, compute.GPUBindingOptions{ExpectGPUs: *expectGPUs, PackageINFDir: *infDir}, *jsonOut)
 	case "inspect", "audit":
 		disco, discoErr := discoverCUDATopology(*sysfsRoot)
 		summary := cudaDiscoverySummary(disco, discoErr)
