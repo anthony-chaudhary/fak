@@ -1452,7 +1452,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaKQuantScratch(out, in, P))
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaQ4KScratch(out, in, P))
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)

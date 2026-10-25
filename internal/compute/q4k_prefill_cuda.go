@@ -57,7 +57,7 @@ func applyCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm, err error) {
 func SetCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm) error {
 	sm := 0
 	if cudaDev != nil {
-		sm, _ = cudaNVFP4SM(cudaDev.tier)
+		sm = cudaBackendSM(cudaDev)
 	}
 	if err := CheckCUDAQ4KPrefillArm(arm, sm); err != nil {
 		return err
@@ -81,4 +81,30 @@ func cudaQ4KPrefillRefusal() error {
 		return err
 	}
 	return &CUDAQ4KPrefillArmError{Arm: string(arm), Err: ErrCUDAQ4KPrefillArmUnimplemented}
+}
+
+// cudaBackendSM is the device compute capability from its tier ("sm_89" -> 89), 0 if unknown.
+func cudaBackendSM(c *cudaBackend) int {
+	sm, _ := cudaNVFP4SM(c.tier)
+	return sm
+}
+
+// q4kMMQLaunchesForTest reports completed mmq-arm launches, so the parity witness can refuse a
+// run where the compensated route produced the output.
+func (c *cudaBackend) q4kMMQLaunchesForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_q4k_mmq_launch_count())
+}
+
+// cudaQ4KScratch is the scratch one Q4_K GEMM of rows rows allocates on the arm in use. The mmq
+// arm allocates its q8_1 activation (rows padded to 512 values, plus one 128-column tile). Its
+// stream-k fixup buffer depends on the SM count, so a miss there reports the activation bytes.
+func cudaQ4KScratch(out, in, rows int) cudaGEMMScratch {
+	if arm, err := CUDAQ4KPrefillArmInUse(); rows >= 128 && err == nil && arm == CUDAQ4KPrefillMMQ {
+		const q81Block, q81Values = 144, 128 // block_q8_1_mmq
+		padded := (in + 511) / 512 * 512
+		return cudaGEMMScratch{main: rows*padded/q81Values*q81Block + 128*q81Block}
+	}
+	return cudaKQuantScratch(out, in, rows)
 }

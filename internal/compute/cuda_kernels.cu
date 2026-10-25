@@ -113,6 +113,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/runtime_services.cuh"
 #include "cuda/model_candidates.cuh"
 #include "cuda/qwen35_gdn.cuh"
+#include "cuda/q4k_mmq.cuh"
 #include "cuda/quant_matmul.cuh"
 #include "cuda/transformer_ops.cuh"
 #include "cuda/fattn_mma_hd256.cuh"

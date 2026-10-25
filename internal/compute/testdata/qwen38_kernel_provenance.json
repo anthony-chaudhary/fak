@@ -128,6 +128,15 @@
       "decision": "ADAPT",
       "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/fattn-mma-f16.cuh, mma.cuh and cp-async.cuh at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
       "parity_witness": "internal/compute/cuda_qwen38_prefill_attention_test.go"
+    },
+    {
+      "id": "qwen38-cuda-q4k-prefill-mmq",
+      "upstream": "llama.cpp",
+      "source_path": "ggml/src/ggml-cuda/mmq.cuh",
+      "destination": "internal/compute/cuda/q4k_mmq.cuh",
+      "decision": "ADAPT",
+      "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/mmq.cuh, mmq-load-tiles.cuh, mmq-vec-dot.cuh,\n// mmq-config-ampere.cuh, mma.cuh, quantize.cu and common.cuh at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "parity_witness": "internal/compute/cuda_q4k_prefill_arms_cuda_test.go"
     }
   ]
 }

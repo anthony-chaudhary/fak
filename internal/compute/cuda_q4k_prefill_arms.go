@@ -13,7 +13,8 @@ const (
 	// CUDAQ4KPrefillCompensated dequantizes the weight to an f32 transient and runs three
 	// compensated FP16 cuBLAS GEMMs. It is the default.
 	CUDAQ4KPrefillCompensated CUDAQ4KPrefillArm = "compensated"
-	// CUDAQ4KPrefillMMQ is llama.cpp's int8 tensor-core Q4_K MMQ; it never expands the weight.
+	// CUDAQ4KPrefillMMQ is llama.cpp's int8 tensor-core Q4_K MMQ (cuda/q4k_mmq.cuh); it never
+	// expands the weight but quantizes the activation to int8 per 32 values.
 	CUDAQ4KPrefillMMQ CUDAQ4KPrefillArm = "mmq"
 	// CUDAQ4KPrefillFP8LT dequantizes to an FP8 transient and runs one cuBLASLt FP8 GEMM.
 	CUDAQ4KPrefillFP8LT CUDAQ4KPrefillArm = "fp8lt"
@@ -55,8 +56,8 @@ type cudaQ4KPrefillArmSpec struct {
 
 var cudaQ4KPrefillArms = map[CUDAQ4KPrefillArm]cudaQ4KPrefillArmSpec{
 	CUDAQ4KPrefillCompensated: {code: 0, implemented: true},
-	CUDAQ4KPrefillMMQ:         {code: 1},
-	CUDAQ4KPrefillFP8LT:       {code: 2, minSM: 89}, // FP8 tensor cores start at Ada
+	CUDAQ4KPrefillMMQ:         {code: 1, minSM: 80, implemented: true}, // int8 m16n8k32 mma.sync
+	CUDAQ4KPrefillFP8LT:       {code: 2, minSM: 89},                    // FP8 tensor cores start at Ada
 }
 
 // cudaQ4KPrefillArmRefusedCode is the C arm code that makes every P >= 128 Q4_K GEMM return

@@ -14,8 +14,8 @@ func TestQwen38KernelProvenanceManifest(t *testing.T) {
 	if got := len(manifest.Upstreams); got != 9 {
 		t.Fatalf("upstreams = %d, want 9", got)
 	}
-	if got := len(manifest.Kernels); got != 4 {
-		t.Fatalf("kernels = %d, want four bounded Qwen3.8 seeds", got)
+	if got := len(manifest.Kernels); got != 5 {
+		t.Fatalf("kernels = %d, want five bounded Qwen3.8 seeds", got)
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

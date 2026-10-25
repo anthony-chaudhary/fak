@@ -46,7 +46,9 @@ func TestCheckCUDAQ4KPrefillArmArchAndImplementation(t *testing.T) {
 		{CUDAQ4KPrefillFP8LT, 86, ErrCUDAQ4KPrefillArmArch},
 		{CUDAQ4KPrefillFP8LT, 89, ErrCUDAQ4KPrefillArmUnimplemented},
 		{CUDAQ4KPrefillFP8LT, 120, ErrCUDAQ4KPrefillArmUnimplemented},
-		{CUDAQ4KPrefillMMQ, 120, ErrCUDAQ4KPrefillArmUnimplemented},
+		{CUDAQ4KPrefillMMQ, 75, ErrCUDAQ4KPrefillArmArch},
+		{CUDAQ4KPrefillMMQ, 80, nil},
+		{CUDAQ4KPrefillMMQ, 120, nil},
 		{"bogus", 120, ErrCUDAQ4KPrefillArmUnknown},
 	}
 	for _, tc := range cases {

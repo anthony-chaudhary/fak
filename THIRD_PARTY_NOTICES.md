@@ -976,3 +976,42 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## llama.cpp Q4_K MMQ prompt-panel GEMM
+
+The opt-in `mmq` arm of the CUDA Q4_K prompt-panel GEMM, `internal/compute/cuda/q4k_mmq.cuh`,
+adapts the Q4_K instantiation of `ggml/src/ggml-cuda/mmq.cuh` with its Q4_K tile loader
+(`mmq-load-tiles.cuh`), the `vec_dot_q8_1_q8_1_mma` dot product (`mmq-vec-dot.cuh`), the
+Ampere Q4_K config rows (`mmq-config-ampere.cuh`), the int8 tile, `ldmatrix` and `mma.sync`
+primitives it uses (`mma.cuh`), the DS4 `quantize_mmq_q8_1` activation quantizer
+(`quantize.cu`) and the fast-division helpers (`common.cuh`), at llama.cpp revision
+`0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd`:
+https://github.com/ggml-org/llama.cpp/tree/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd/ggml/src/ggml-cuda
+
+Changed for Fak: only the Q4_K instantiation on the NVIDIA MMA data layout (sm_80 and newer);
+no MoE ids, channel or sample broadcast, or NVFP4 scale plumbing; scratch comes from Fak's
+device pool. No upstream runtime is included. The upstream license follows.
+
+```text
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
