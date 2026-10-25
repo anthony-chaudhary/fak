@@ -74,6 +74,11 @@ func New(cfg Config) (*Server, error) {
 	if err := validateDFlash2Config(cfg); err != nil {
 		return nil, err
 	}
+	if cfg.ExpertParallelRanks > 1 {
+		if err := model.ValidateEPFanoutCoverage(cfg.ExpertParallelRanks, epFanoutURLsFromEnv("")); err != nil {
+			return nil, fmt.Errorf("gateway: expert-parallel fanout: %w", err)
+		}
+	}
 	mcpSessionBearer := strings.TrimSpace(cfg.MCPSessionBearer)
 	mcpSessionBearerDigest := sha256.Sum256([]byte(mcpSessionBearer))
 	// fak_read is part of this server's default MCP inventory, so arm its confined
