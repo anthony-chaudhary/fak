@@ -27,7 +27,7 @@ func TestDeviceHopPipelineCUDAMatchesMonolithic(t *testing.T) {
 	}
 	ids := []int{3, 1, 4, 1, 5, 9, 2, 6}
 	full := m.Forward(ids).Logits
-	for _, hop := range []compute.CUDAHop{compute.NewCUDAHopFromEnv(), {ForceBounce: true}} {
+	for _, hop := range []compute.CUDAHop{{}, {ForceBounce: true}} {
 		tr := NewDeviceHopTransport(hop, plan)
 		logits, err := RunPipelineWith(ids, stagesFromPlan(m, plan), tr)
 		if err != nil {
