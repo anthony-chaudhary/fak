@@ -171,3 +171,43 @@ func TestDeepSeekV411017ExplicitPromptAdmission(t *testing.T) {
 		t.Fatalf("raw completion changed: %v", err)
 	}
 }
+
+// fak-test:justify why=regression when=changed:internal/agent/**
+// fak-test:runtime fast est=20ms lane=default
+func TestDeepSeekV41DefaultPromptRefusesUnsupportedReasoning(t *testing.T) {
+	builder := model.NewQuantBuilder(model.Config{ModelType: "deepseek41", HiddenSize: 256, MaxPositionEmbeddings: 8192}, false)
+	if err := builder.AddResidentQ4K("model.layers.0.mlp.down_proj.weight", []int{1, 256}, make([]byte, 144)); err != nil {
+		t.Fatal(err)
+	}
+	m, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewInKernelPlannerWithConfig(m, loadProbeTok(t), "ordinary-v41", true, nil, false, InKernelPlannerConfig{ContextTokens: 8192})
+	user := []Message{{Role: RoleUser, Content: "hello"}}
+	for _, tc := range []struct {
+		name     string
+		messages []Message
+		opts     []SampleOpt
+	}{
+		{name: "reasoning effort", messages: user, opts: []SampleOpt{WithReasoningEffort(EffortTierHigh)}},
+		{name: "thinking budget", messages: user, opts: []SampleOpt{WithThinkingBudget(128)}},
+		{name: "template kwargs", messages: user, opts: []SampleOpt{WithChatTemplateKwargs(json.RawMessage(`{"enable_thinking":true}`))}},
+		{name: "reasoning content history", messages: []Message{{Role: RoleAssistant, ReasoningContent: "hidden", Content: "answer"}, {Role: RoleUser, Content: "next"}}},
+		{name: "thinking history", messages: []Message{{Role: RoleAssistant, Thinking: "hidden", Content: "answer"}, {Role: RoleUser, Content: "next"}}},
+		{name: "thinking signature history", messages: []Message{{Role: RoleAssistant, ThinkingSignature: "sig", Content: "answer"}, {Role: RoleUser, Content: "next"}}},
+		{name: "redacted thinking history", messages: []Message{{Role: RoleAssistant, RedactedThinking: []string{"opaque"}, Content: "answer"}, {Role: RoleUser, Content: "next"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := p.EncodePrompt(context.Background(), tc.messages, nil, tc.opts...); !errors.Is(err, ErrDeepSeekV41ChatProfile) {
+				t.Fatalf("unsupported reasoning reached the non-thinking renderer: %v", err)
+			}
+		})
+	}
+	if _, err := p.EncodePrompt(context.Background(), user, nil, WithReasoningEffort(EffortTierNone), WithThinkingBudget(0)); err != nil {
+		t.Fatalf("explicit non-thinking request refused: %v", err)
+	}
+	if _, err := p.EncodePrompt(context.Background(), user, nil, WithRawPrompt(), WithReasoningEffort(EffortTierHigh)); err != nil {
+		t.Fatalf("raw completion changed: %v", err)
+	}
+}

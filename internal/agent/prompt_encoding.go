@@ -180,6 +180,17 @@ const (
 var ErrDeepSeekV41ChatProfile = errors.New("native DeepSeek V4.1 chat profile not admitted")
 
 func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp SampleParams) error {
+	if p.m != nil && p.m.Cfg.IsDeepSeekV41() && !inKernelRawV41Prompt(p.m.Cfg, sp) {
+		if (sp.ReasoningEffort != "" && sp.ReasoningEffort != EffortTierNone) ||
+			(sp.ThinkingBudget != nil && *sp.ThinkingBudget != 0) || len(sp.ChatTemplateKwargs) != 0 {
+			return fmt.Errorf("%w: only the non-thinking renderer is supported", ErrDeepSeekV41ChatProfile)
+		}
+		for _, message := range messages {
+			if message.Thinking != "" || message.ThinkingSignature != "" || len(message.RedactedThinking) != 0 || message.ReasoningContent != "" {
+				return fmt.Errorf("%w: reasoning history requires a separate renderer", ErrDeepSeekV41ChatProfile)
+			}
+		}
+	}
 	if p.deepSeekV41ChatProfile == "" {
 		return nil
 	}
@@ -202,15 +213,6 @@ func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp Sam
 	}
 	if inKernelRawV41Prompt(p.m.Cfg, sp) {
 		return nil
-	}
-	if (sp.ReasoningEffort != "" && sp.ReasoningEffort != EffortTierNone) ||
-		(sp.ThinkingBudget != nil && *sp.ThinkingBudget != 0) || len(sp.ChatTemplateKwargs) != 0 {
-		return fmt.Errorf("%w: only the non-thinking converter contract is supported", ErrDeepSeekV41ChatProfile)
-	}
-	for _, message := range messages {
-		if message.Thinking != "" || message.ThinkingSignature != "" || len(message.RedactedThinking) != 0 || message.ReasoningContent != "" {
-			return fmt.Errorf("%w: reasoning history requires a separate renderer", ErrDeepSeekV41ChatProfile)
-		}
 	}
 	return nil
 }
