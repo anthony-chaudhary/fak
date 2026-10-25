@@ -9,10 +9,25 @@ Source: deepseek-ai/DeepInfer
 Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
 https://github.com/deepseek-ai/DeepInfer/tree/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
 
-Every adaptation listed here lives in a Go test file under internal/model. Each
-is an unwired host oracle used for measurement: no serving path, forward pass,
-configuration field, environment knob or default calls it, and none claims
-bitwise parity with the DeepInfer CUDA or Ascend kernels.
+Adaptations listed here live in Go production or test files under internal/model.
+Unless a section says otherwise, each is an unwired host oracle used for
+measurement: no serving path, forward pass, configuration field, environment
+knob or default calls it, and none claims bitwise parity with the DeepInfer CUDA
+or Ascend kernels.
+
+EPLB replica and physical-slot placement (internal/model/v4_expert_replica_placement.go)
+
+Upstream path:
+  deepinfer/model_executor/eplb/policy.py at
+  9bd9cf243fc53ef9afbf8f04d391d989117d6ab9
+  https://github.com/deepseek-ai/DeepInfer/blob/9bd9cf243fc53ef9afbf8f04d391d989117d6ab9/deepinfer/model_executor/eplb/policy.py
+
+Adaptation: pure Go translation of one-layer replica selection and physical-slot
+placement. It preserves upstream float32 accumulation, the logical expert ID
+times 1e-4 tie perturbation, stable greedy rank placement, and inverse logical
+slot indexing. It adds read-only owner-rank, resident-mask, and Fak placement
+score queries. No serving path invokes this plan; it defines no history cadence,
+migration, device operation, performance behavior or runtime policy.
 
 Indexer Q/K MXFP4 cast (internal/model/v41_index_mxfp4_test.go)
 
