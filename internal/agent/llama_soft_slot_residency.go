@@ -248,6 +248,7 @@ func llamaPreparedPrefix(body []byte, slot int) ([sha256.Size]byte, [][sha256.Si
 	delete(obj, "messages")
 	delete(obj, "stream")
 	delete(obj, "stream_options")
+	delete(obj, "return_progress")
 	head, err := json.Marshal(obj)
 	if err != nil {
 		return [sha256.Size]byte{}, nil, false
