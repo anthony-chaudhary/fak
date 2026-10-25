@@ -1110,12 +1110,7 @@ func colMajorFlag(w Tensor) C.int {
 // for, matching that switch: F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K and NVFP4. Every other
 // dtype falls to the switch's CUDAOpError default, so it is reported false here.
 func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
-	switch dt {
-	case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, NVFP4:
-		return true
-	default:
-		return false
-	}
+	return cudaDeviceWeightDtypeSupported(dt)
 }
 
 const cudaNVFP4IntMax = int(^uint32(0) >> 1)
