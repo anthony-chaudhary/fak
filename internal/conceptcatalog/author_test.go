@@ -575,3 +575,112 @@ func TestAuthoringModesCloseOneGapWithCriticalCleanAndFreshDocs(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime medium est=2s lane=default
+// #14022: one production occurrence is below min_files=3. Only the proposed
+// glossary heading makes CacheGap structural, so a catalog-only shadow emits a
+// README that is stale against its own postimage. The peer variant also ensures
+// that fixing the missing heading does not import unrelated workspace headings.
+func TestPlanPositionIncludesProposedGlossaryInCanonicalTree(t *testing.T) {
+	for _, peer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("peer=%t", peer), func(t *testing.T) {
+			c, root := scorecardE2EFixture(t, "CacheGap")
+			metaPath := filepath.Join(c.Dir, "_meta.json")
+			meta, err := os.ReadFile(metaPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Count(meta, []byte(`"min_files": 1`)) != 1 {
+				t.Fatal("fixture must have exactly one file-presence threshold")
+			}
+			meta = bytes.Replace(meta, []byte(`"min_files": 1`), []byte(`"min_files": 3`), 1)
+			if err := os.WriteFile(metaPath, meta, 0600); err != nil {
+				t.Fatal(err)
+			}
+			c, err = Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitInitFixture(t, root)
+			if peer {
+				if err := os.WriteFile(filepath.Join(root, "docs", "peer.md"), []byte("# CachePeerNoise\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Snapshot every source byte, including the unrelated untracked peer.
+			// Git's index is checked separately; planning must not stage anything.
+			snapshot := func() map[string]string {
+				t.Helper()
+				files := map[string]string{}
+				err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+					if entry.Name() == ".git" && entry.IsDir() {
+						return filepath.SkipDir
+					}
+					if entry.IsDir() {
+						return nil
+					}
+					b, err := os.ReadFile(path)
+					files[path] = string(b)
+					return err
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return files
+			}
+			before := snapshot()
+			indexPath := filepath.Join(root, ".git", "index")
+			indexBefore, err := os.ReadFile(indexPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := PlanPosition(c, PositionRequest{ID: "cache-gap", Canonical: "CacheGap", Family: "cache", Definition: "the fixture's independently grounded cache", Distinction: "a third cache rather than cache a or cache b", Kind: "symbol", Grounding: "CacheGap", GroundingKind: "symbol", Glossary: "docs/glossary.md", DistinctFrom: []string{"cache-a", "cache-b"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			after := snapshot()
+			if len(after) != len(before) {
+				t.Fatal("position dry-run changed source file universe")
+			}
+			for path, b := range before {
+				if after[path] != b {
+					t.Fatalf("position dry-run changed %s", path)
+				}
+			}
+			indexAfter, err := os.ReadFile(indexPath)
+			if err != nil || !bytes.Equal(indexBefore, indexAfter) {
+				t.Fatalf("position dry-run changed index: %v", err)
+			}
+			if err := Apply(plan); err != nil {
+				t.Fatal(err)
+			}
+			gitAddFixture(t, root, plan.Files...)
+			tree := gitWriteTree(t, root)
+			for pass := 0; pass < 2; pass++ {
+				out := t.TempDir()
+				if _, err := RegenerateFromGitTree(root, tree, out); err != nil {
+					t.Fatal(err)
+				}
+				for _, art := range generatedArtifacts {
+					planned, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(art.Tracked)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					canonical, err := os.ReadFile(filepath.Join(out, filepath.FromSlash(art.Tracked)))
+					if err != nil || !bytes.Equal(planned, canonical) {
+						t.Fatalf("position %s differs from canonical applied tree on render %d: %v", art.Name, pass+1, err)
+					}
+				}
+			}
+			if peer {
+				b, err := os.ReadFile(filepath.Join(root, "docs", "peer.md"))
+				if err != nil || string(b) != "# CachePeerNoise\n" {
+					t.Fatalf("peer bytes changed: %v", err)
+				}
+			}
+		})
+	}
+}

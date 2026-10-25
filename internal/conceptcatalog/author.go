@@ -338,8 +338,27 @@ func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
 	if err != nil {
 		return Plan{}, snap, fmt.Errorf("canonical generation unsupported: %w", err)
 	}
-	cmd := exec.Command(python, script, "--workspace", root, "--data", shadow, "--markdown-dir", outDir, "--json")
-	cmd.Dir = root
+	workspace := conceptGitTree{root: root}
+	if plan.Mode == "position" {
+		var cleanup func()
+		workspace, cleanup, err = positionWorkspace(root, plan)
+		if err != nil {
+			return Plan{}, snap, err
+		}
+		defer cleanup()
+	}
+	// Use the exported script as well as exported source: a peer's generator
+	// edit must not affect the bytes represented by this plan.
+	script = filepath.Join(workspace.root, "tools", "concept_disambiguation_scorecard.py")
+	cmd := exec.Command(python, script, "--workspace", workspace.root, "--data", shadow, "--markdown-dir", outDir, "--json")
+	if workspace.profile != nil {
+		cmd, err = workspace.profile.command(workspace.root, outDir, true)
+		if err != nil {
+			return Plan{}, snap, err
+		}
+		cmd.Args = append(cmd.Args, "--data", shadow)
+	}
+	cmd.Dir = workspace.root
 	windowgate.ConfigureBackgroundCommand(cmd)
 	// Keep stderr off stdout: stdout is the snapshot JSON this plan is judged on.
 	var stderr bytes.Buffer

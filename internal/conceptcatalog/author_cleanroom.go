@@ -2,6 +2,7 @@ package conceptcatalog
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -137,4 +138,103 @@ func sameDir(a, b string) bool {
 		return strings.EqualFold(x, y)
 	}
 	return x == y
+}
+
+// positionWorkspace isolates the corpus seen by position's canonical renderer.
+// Catalog bytes still come from its explicit data shadow; planned glossary bytes
+// must also be visible before the renderer discovers structural heading tokens.
+// HEAD excludes peer source/index edits, just as classify's clean-room does.
+func positionWorkspace(root string, plan Plan) (conceptGitTree, func(), error) {
+	var tree conceptGitTree
+	var cleanup func()
+	var err error
+	if isRepoRoot(root) {
+		tree, cleanup, err = materializeGitTree(root, "HEAD")
+		if err != nil {
+			return tree, func() {}, err
+		}
+	} else {
+		// A standalone fixture has no committed tree. Copy its regular contents
+		// rather than temporarily changing the source or following external links.
+		tree.root, err = os.MkdirTemp("", "fak-concept-position-*")
+		if err != nil {
+			return tree, func() {}, err
+		}
+		cleanup = func() { os.RemoveAll(tree.root) }
+		absRoot, e := filepath.Abs(root)
+		if e != nil {
+			cleanup()
+			return tree, func() {}, e
+		}
+		rel, e := filepath.Rel(absRoot, tree.root)
+		if e != nil || filepath.IsLocal(rel) {
+			cleanup()
+			return tree, func() {}, fmt.Errorf("position scratch must be outside source")
+		}
+		err = filepath.WalkDir(root, func(src string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Name() == ".git" {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			rel, e := filepath.Rel(root, src)
+			if e != nil {
+				return e
+			}
+			dst := filepath.Join(tree.root, rel)
+			if entry.IsDir() {
+				return os.MkdirAll(dst, 0755)
+			}
+			info, e := entry.Info()
+			if e != nil {
+				return e
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("position source is not a regular file: %s", rel)
+			}
+			in, e := os.Open(src)
+			if e != nil {
+				return e
+			}
+			defer in.Close()
+			out, e := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+			if e != nil {
+				return e
+			}
+			_, copyErr := io.Copy(out, in)
+			closeErr := out.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			return closeErr
+		})
+		if err != nil {
+			cleanup()
+			return tree, func() {}, err
+		}
+	}
+	for _, ch := range plan.Changes {
+		rel, e := filepath.Rel(root, ch.Path)
+		if e != nil || !filepath.IsLocal(rel) {
+			cleanup()
+			return tree, func() {}, fmt.Errorf("position change outside workspace: %s", ch.Path)
+		}
+		// The catalog is already rendered from its complete proposed shadow.
+		if filepath.Clean(filepath.Dir(rel)) == filepath.FromSlash(DataRel) {
+			continue
+		}
+		dst := filepath.Join(tree.root, rel)
+		if e = os.MkdirAll(filepath.Dir(dst), 0755); e == nil {
+			e = os.WriteFile(dst, ch.Content, 0600)
+		}
+		if e != nil {
+			cleanup()
+			return tree, func() {}, e
+		}
+	}
+	return tree, cleanup, nil
 }
