@@ -17,7 +17,7 @@ __global__ void k_rmsnorm(const float *X, const float *W, float *Y, int rows, in
   for (int i = threadIdx.x; i < n; i += blockDim.x) y[i] = x[i] * inv * W[i];
 }
 extern "C" void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps) {
-  k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
+  FCUDA_TS("k_rmsnorm", rows, k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps));
 }
 
 // ---- RMSNorm: warp-per-row (fitting widths <= 1024) -----------------------------
@@ -41,9 +41,9 @@ extern "C" void fcuda_rmsnorm_dispatched_f32(const float *dX, const float *dW, f
   if (n <= 1024) {
     int warps = 8;
     int blocks = (rows + warps - 1) / warps;
-    k_rmsnorm_warp_per_row<<<blocks, warps * 32, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
+    FCUDA_TS("k_rmsnorm_warp_per_row", blocks, k_rmsnorm_warp_per_row<<<blocks, warps * 32, 0, g_stream>>>(dX, dW, dY, rows, n, eps));
   } else {
-    k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps);
+    FCUDA_TS("k_rmsnorm", rows, k_rmsnorm<<<rows, 256, 0, g_stream>>>(dX, dW, dY, rows, n, eps));
   }
 }
 
@@ -79,8 +79,8 @@ __global__ void k_rmsnorm_fused_residual_add(
 extern "C" void fcuda_rmsnorm_fused_residual_add_f32(
     const float *dX, const float *dResidualIn, const float *dW,
     float *dResidualOut, float *dY, int rows, int n, float eps) {
-  k_rmsnorm_fused_residual_add<<<rows, 256, 0, g_stream>>>(
-      dX, dResidualIn, dW, dResidualOut, dY, rows, n, eps);
+  FCUDA_TS("k_rmsnorm_fused_residual_add", rows, k_rmsnorm_fused_residual_add<<<rows, 256, 0, g_stream>>>(
+      dX, dResidualIn, dW, dResidualOut, dY, rows, n, eps));
 }
 
 // ---- RoPE (HF non-interleaved rotate_half) at one absolute position -------------
@@ -99,7 +99,7 @@ __global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta)
 }
 extern "C" void fcuda_rope_f32(float *dX, int pos, int nHeads, int headDim, double theta) {
   int total = nHeads * (headDim / 2);
-  k_rope<<<(total + 127) / 128, 128, 0, g_stream>>>(dX, pos, nHeads, headDim, theta);
+  FCUDA_TS("k_rope", (total + 127) / 128, k_rope<<<(total + 127) / 128, 128, 0, g_stream>>>(dX, pos, nHeads, headDim, theta));
 }
 
 // Prompt-panel RoPE for the dense HAL prefill: row t of X [tokens, nHeads*headDim] is
@@ -127,8 +127,8 @@ extern "C" int fcuda_rope_panel_f32(const float *dX, float *dY, int tokens, int 
       (headDim & 1) != 0 || !(theta > 0.0) || start > INT_MAX - tokens) return -1;
   size_t total = (size_t)tokens * nHeads * (headDim / 2);
   cudaGetLastError();
-  k_rope_panel<<<(unsigned)((total + 127) / 128), 128, 0, g_stream>>>(
-      dX, dY, tokens, start, nHeads, headDim, theta);
+  FCUDA_TS("k_rope_panel", (unsigned)((total + 127) / 128), k_rope_panel<<<(unsigned)((total + 127) / 128), 128, 0, g_stream>>>(
+      dX, dY, tokens, start, nHeads, headDim, theta));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 70000 + (int)launch;
 }
@@ -155,9 +155,9 @@ extern "C" void fcuda_partial_rope_qk_f32(const float *dQ, const float *dK,
                                              int nQHeads, int nKHeads, int headDim,
                                              int rotaryDim, double theta) {
   int qn = nQHeads * headDim, kn = nKHeads * headDim;
-  k_partial_rope_copy<<<(qn+255)/256,256,0,g_stream>>>(dQOut,dQ,pos,nQHeads,headDim,rotaryDim,theta);
+  FCUDA_TS("k_partial_rope_copy", (qn+255)/256, k_partial_rope_copy<<<(qn+255)/256,256,0,g_stream>>>(dQOut,dQ,pos,nQHeads,headDim,rotaryDim,theta));
   CK(cudaGetLastError());
-  k_partial_rope_copy<<<(kn+255)/256,256,0,g_stream>>>(dKOut,dK,pos,nKHeads,headDim,rotaryDim,theta);
+  FCUDA_TS("k_partial_rope_copy", (kn+255)/256, k_partial_rope_copy<<<(kn+255)/256,256,0,g_stream>>>(dKOut,dK,pos,nKHeads,headDim,rotaryDim,theta));
   CK(cudaGetLastError());
 }
 __global__ void k_sigmoid_mul(float *x, const float *gate, int n) {
@@ -165,7 +165,7 @@ __global__ void k_sigmoid_mul(float *x, const float *gate, int n) {
   if (i < n) x[i] *= 1.0f / (1.0f + expf(-gate[i]));
 }
 extern "C" void fcuda_sigmoid_mul_f32(float *dX, const float *dGate, int n) {
-  k_sigmoid_mul<<<(n+255)/256,256,0,g_stream>>>(dX,dGate,n);
+  FCUDA_TS("k_sigmoid_mul", (n+255)/256, k_sigmoid_mul<<<(n+255)/256,256,0,g_stream>>>(dX,dGate,n));
   CK(cudaGetLastError());
 }
 __global__ void k_split_qwen35_qg(const float *qg, float *q, float *gate,
@@ -181,7 +181,7 @@ __global__ void k_split_qwen35_qg(const float *qg, float *q, float *gate,
 extern "C" void fcuda_split_qwen35_qg_f32(const float *dQG, float *dQ, float *dGate,
                                              int nHeads, int headDim) {
   int n = nHeads * headDim;
-  k_split_qwen35_qg<<<(n+255)/256,256,0,g_stream>>>(dQG,dQ,dGate,nHeads,headDim);
+  FCUDA_TS("k_split_qwen35_qg", (n+255)/256, k_split_qwen35_qg<<<(n+255)/256,256,0,g_stream>>>(dQG,dQ,dGate,nHeads,headDim));
   CK(cudaGetLastError());
 }
 
@@ -206,8 +206,8 @@ extern "C" int fak_qwen35_split_qg_panel_f32(
   if (!dQG || !dQ || !dGate || tokens <= 0 || nHeads <= 0 || headDim <= 0) return -1;
   cudaGetLastError();
   size_t n = (size_t)tokens * nHeads * headDim;
-  k_qwen35_split_qg_panel<<<(n + 255) / 256, 256, 0, g_stream>>>(
-      dQG, dQ, dGate, tokens, nHeads, headDim);
+  FCUDA_TS("k_qwen35_split_qg_panel", (n + 255) / 256, k_qwen35_split_qg_panel<<<(n + 255) / 256, 256, 0, g_stream>>>(
+      dQG, dQ, dGate, tokens, nHeads, headDim));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 30000 + (int)launch;
 }
@@ -244,12 +244,12 @@ extern "C" int fak_qwen35_partial_rope_panel_f32(
   cudaGetLastError();
   size_t qn = (size_t)tokens * nQHeads * headDim;
   size_t kn = (size_t)tokens * nKHeads * headDim;
-  k_qwen35_partial_rope_panel<<<(qn + 255) / 256, 256, 0, g_stream>>>(
-      dQOut, dQ, tokens, startPos, nQHeads, headDim, rotaryDim, theta);
+  FCUDA_TS("k_qwen35_partial_rope_panel", (qn + 255) / 256, k_qwen35_partial_rope_panel<<<(qn + 255) / 256, 256, 0, g_stream>>>(
+      dQOut, dQ, tokens, startPos, nQHeads, headDim, rotaryDim, theta));
   cudaError_t launch = cudaGetLastError();
   if (launch != cudaSuccess) return 40000 + (int)launch;
-  k_qwen35_partial_rope_panel<<<(kn + 255) / 256, 256, 0, g_stream>>>(
-      dKOut, dK, tokens, startPos, nKHeads, headDim, rotaryDim, theta);
+  FCUDA_TS("k_qwen35_partial_rope_panel", (kn + 255) / 256, k_qwen35_partial_rope_panel<<<(kn + 255) / 256, 256, 0, g_stream>>>(
+      dKOut, dK, tokens, startPos, nKHeads, headDim, rotaryDim, theta));
   launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 41000 + (int)launch;
 }
@@ -262,13 +262,13 @@ __global__ void k_swiglu(const float *G, const float *U, float *Y, int n) {
   Y[i] = (g / (1.f + expf(-g))) * U[i];
 }
 extern "C" void fcuda_swiglu_f32(const float *dG, const float *dU, float *dY, int n) {
-  k_swiglu<<<(n + 255) / 256, 256, 0, g_stream>>>(dG, dU, dY, n);
+  FCUDA_TS("k_swiglu", (n + 255) / 256, k_swiglu<<<(n + 255) / 256, 256, 0, g_stream>>>(dG, dU, dY, n));
 }
 __global__ void k_add(float *D, const float *S, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) D[i] += S[i];
 }
 extern "C" void fcuda_add_f32(float *dDst, const float *dSrc, int n) {
-  k_add<<<(n + 255) / 256, 256, 0, g_stream>>>(dDst, dSrc, n);
+  FCUDA_TS("k_add", (n + 255) / 256, k_add<<<(n + 255) / 256, 256, 0, g_stream>>>(dDst, dSrc, n));
 }
 __global__ void k_add_bias(float *D, const float *B, int rows, int width) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -276,7 +276,7 @@ __global__ void k_add_bias(float *D, const float *B, int rows, int width) {
   D[i] += B[i % width];
 }
 extern "C" void fcuda_add_bias_f32(float *dDst, const float *dBias, int rows, int width) {
-  k_add_bias<<<(rows * width + 255) / 256, 256, 0, g_stream>>>(dDst, dBias, rows, width);
+  FCUDA_TS("k_add_bias", (rows * width + 255) / 256, k_add_bias<<<(rows * width + 255) / 256, 256, 0, g_stream>>>(dDst, dBias, rows, width));
 }
 
 // k_copyrow appends a KV row into a fixed-base buffer at a SCALAR float offset. It replaces
@@ -291,7 +291,7 @@ __global__ void k_copyrow(float *dstBase, const float *src, int offset, int n) {
 extern "C" void fcuda_kv_write(float *dstBase, const float *src, int offset, int n) {
   if (n <= 0) return;
   unsigned blocks = ((unsigned)n + 255u) / 256u;
-  k_copyrow<<<blocks, 256, 0, g_stream>>>(dstBase, src, offset, n);
+  FCUDA_TS("k_copyrow", blocks, k_copyrow<<<blocks, 256, 0, g_stream>>>(dstBase, src, offset, n));
 }
 extern "C" int fak_qwen35_kv_write_f32(
     float *dstBase, const float *src, int offset, int n) {
@@ -299,7 +299,7 @@ extern "C" int fak_qwen35_kv_write_f32(
   cudaError_t prior = cudaGetLastError();
   if (prior != cudaSuccess) return 51000 + (int)prior;
   unsigned blocks = ((unsigned)n + 255u) / 256u;
-  k_copyrow<<<blocks, 256, 0, g_stream>>>(dstBase, src, offset, n);
+  FCUDA_TS("k_copyrow", blocks, k_copyrow<<<blocks, 256, 0, g_stream>>>(dstBase, src, offset, n));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 52000 + (int)launch;
 }

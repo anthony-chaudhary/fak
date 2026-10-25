@@ -188,16 +188,16 @@ extern "C" int fcuda_spec_verify_attention_f32(
   dim3 block_attn(FLASH_THREADS);
   size_t shmem_attn = ((size_t)hd + FLASH_THREADS) * sizeof(float);
 
-  k_spec_verify_attention<<<grid_attn, block_attn, shmem_attn, g_stream>>>(
+  FCUDA_TS("k_spec_verify_attention", grid_attn, k_spec_verify_attention<<<grid_attn, block_attn, shmem_attn, g_stream>>>(
       dQ, dK, dV, d_partial_out, d_partial_max, d_partial_sum,
-      qLen, kvLen, nH, nKV, hd, scale);
+      qLen, kvLen, nH, nKV, hd, scale));
 
   dim3 grid_combine((qLen + BLOCK_M - 1) / BLOCK_M, nH);
   dim3 block_combine(FLASH_THREADS);
 
-  k_spec_verify_combine<<<grid_combine, block_combine, 0, g_stream>>>(
+  FCUDA_TS("k_spec_verify_combine", grid_combine, k_spec_verify_combine<<<grid_combine, block_combine, 0, g_stream>>>(
       d_partial_out, d_partial_max, d_partial_sum,
-      dOut, qLen, nH, hd);
+      dOut, qLen, nH, hd));
 
   fcuda_free(scratch);
   cudaError_t err = cudaGetLastError();
@@ -272,7 +272,7 @@ __global__ void k_dsa_sparse_attend(const float *Q, const float *selK, const flo
 extern "C" void fcuda_dsa_sparse_attend_f32(const float *dQ, const float *dSelK, const float *dSelV,
                                             float *dOut, int nSel, int nH, int kd, int vd, float scale) {
   size_t shmem = ((size_t)kd + FLASH_THREADS) * sizeof(float);
-  k_dsa_sparse_attend<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dSelK, dSelV, dOut, nSel, nH, kd, vd, scale);
+  FCUDA_TS("k_dsa_sparse_attend", nH, k_dsa_sparse_attend<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dSelK, dSelV, dOut, nSel, nH, kd, vd, scale));
 }
 
 // ---- GLM-MoE-DSA learned-indexer score + top-k selection ---------------------------
@@ -382,17 +382,19 @@ extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIn
   if (nKeys > DSA_TOPK_MAX_KEYS) return -1; // window past the maskable top-k tail: decline, host falls back
   int threads = 256;
   double *dScores = (double *)fcuda_malloc(sizeof(double) * (size_t)nKeys);
-  k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
+  FCUDA_TS("k_dsa_index_score", nKeys, k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
                                                      dScores, nKeys, nH, indexDim,
-                                                     queryPos, scale);
+                                                     queryPos, scale));
   int *dSel = (int *)fcuda_malloc(sizeof(int) * (size_t)topK);
   int *dCount = (int *)fcuda_malloc(sizeof(int));
-  k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSel, dCount);
+  FCUDA_TS("k_dsa_index_topk", 1, k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSel, dCount));
   int hCount = 0;
+  fcuda_ts_untimed_transfer();
   CK(cudaMemcpy(&hCount, dCount, sizeof(int), cudaMemcpyDeviceToHost));
   if (hCount < 0) hCount = 0;
   if (hCount > topK) hCount = topK;
   if (hCount > 0) {
+    fcuda_ts_untimed_transfer();
     CK(cudaMemcpy(outIdx, dSel, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost));
   }
   g_host_bytes += sizeof(int) * (size_t)(hCount + 1); // only the index list crosses host-ward
@@ -515,7 +517,8 @@ static void ensure_argmax_idx(void) {
 extern "C" int fcuda_argmax_f32(const float *dLogits, int n) {
   int hIdx = 0;
   ensure_argmax_idx(); // no-op after the first call; never allocates inside a capture
-  k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, g_argmax_idx);
+  FCUDA_TS("k_argmax", 1, k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, g_argmax_idx));
+  fcuda_ts_untimed_transfer();
   CK(cudaMemcpy(&hIdx, g_argmax_idx, sizeof(int), cudaMemcpyDeviceToHost));
   g_host_bytes += sizeof(int); // only the token id crosses host-ward — the #482 witness
   return hIdx;

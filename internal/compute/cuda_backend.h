@@ -55,17 +55,26 @@ void fcuda_sync(void);
 double fcuda_event_elapsed_ms_start(void);
 double fcuda_event_elapsed_ms_end(void);
 
-/* Opt-in kernel profile (FAK_CUDA_TIMESTAMP_PROFILE=1, cuda_profile.go): a fixed pool of
- * CUDA event pairs recorded on g_stream. Event index = slot*2 + (0 start | 1 end). Each
- * call returns 0 or a cudaError_t (-1 for a bad argument). fcuda_prof_elapsed_ms waits on
- * its `to` event; fcuda_prof_record sets *was_idle when g_stream had no work left, and then
- * waits on its own event. The caller serializes every call (Go holds cudaMu) and never
- * records while g_stream is capturing. */
-int fcuda_prof_init(int pairs);
-int fcuda_prof_record(int event, int *was_idle);
-int fcuda_prof_elapsed_ms(int from_event, int to_event, float *ms);
-/* fcuda_prof_capturing is nonzero while g_stream is capturing, or when that cannot be read. */
-int fcuda_prof_capturing(void);
+/* Opt-in kernel timestamp profile (FAK_CUDA_TIMESTAMP_PROFILE=1, cuda/kernel_profile.cuh),
+ * the mirror of the fvk_ts_* ABI. Rows are cumulative per (kid, grid x, grid y); one row is
+ * one event-pair-timed g_stream launch, cuBLAS call or async copy/fill. untimed_compute counts
+ * launches inside a graph capture, untimed_transfer synchronous host copies; barriers_elided
+ * stays 0 (one in-order stream). The caller serializes every call (Go holds cudaMu). */
+typedef struct fak_cuda_ts_row {
+  uint32_t kid, gx, gy, pad;
+  uint64_t calls;
+  double ns;
+} fak_cuda_ts_row;
+typedef struct fak_cuda_ts_totals {
+  int32_t enabled, usable, init_tried, pad;
+  uint64_t batches, ops, truncated, untimed_compute, untimed_transfer, barriers_elided;
+  double gpu_ns, wall_ns;
+} fak_cuda_ts_totals;
+int fcuda_ts_enabled(void);
+int fcuda_ts_init(void);
+void fcuda_ts_boundary(void);
+int fcuda_ts_snapshot(fak_cuda_ts_totals *tot, fak_cuda_ts_row *rows, int cap);
+const char *fcuda_ts_kernel_name(uint32_t kid);
 
 /* Qwen3.8-Flash-Next PLE row-id hash. All buffers are already device-resident.
  * One block owns one token; the request/local index, boundary walk, wrapped

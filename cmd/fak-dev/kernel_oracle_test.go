@@ -584,3 +584,82 @@ func TestKernelOracleStructuredLedgerCLIHashesRawInput(t *testing.T) {
 		t.Fatal("implicit window accepted")
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleParsesCUDATimestampStages(t *testing.T) {
+	stages := parseFakStages(kernelOracleFixture(t, "fak-cuda-profile.txt"))
+	want := []oracleStage{
+		{Kernel: "k_q4k_gemm", Groups: "2560x1", CallsBatch: 128, USPerCall: 234.38, SharePct: 49.2, gx: 2560, gy: 1},
+		{Kernel: "k_qwen35_gdn_recurrent_gated_norm", Groups: "48x1", CallsBatch: 48, USPerCall: 193.75, SharePct: 15.2, gx: 48, gy: 1},
+		{Kernel: "cublas_sgemm", Groups: "151936x1", CallsBatch: 1, USPerCall: 6100, SharePct: 10, gx: 151936, gy: 1},
+		{Kernel: "d2d_copy", Groups: "0x0", CallsBatch: 96, USPerCall: 5, SharePct: 0.8},
+	}
+	if len(stages) != len(want) {
+		t.Fatalf("stages = %+v", stages)
+	}
+	for i := range want {
+		if stages[i] != want[i] {
+			t.Fatalf("stage %d = %+v, want %+v (the last cumulative report wins)", i, stages[i], want[i])
+		}
+	}
+	if vk := parseFakStages(kernelOracleFixture(t, "fak-profile.txt")); len(vk) == 0 || vk[0].Kernel == "" {
+		t.Fatal("the Vulkan ts-stage fixture no longer parses")
+	}
+	rec := rankKernelOracle(oracleRankInput{shapes: oracleShapeList{Shapes: []oracleShape{{Op: "MUL_MAT", Dtype: "q4_k", M: 5120, K: 5120, N: 1}}}, stages: stages})
+	for _, st := range rec.FakStages {
+		if st.Unjoined != "kernel_geometry_unknown" {
+			t.Fatalf("CUDA stage %s joined a model shape without a geometry table: %+v", st.Kernel, st)
+		}
+	}
+}
+
+func oracleCUDALedgerFixture(t *testing.T) perfledger.Record {
+	t.Helper()
+	r := oracleLedgerFixture(t)
+	r.Backend = "cuda"
+	r.NativeTiming.Kernels.Backend = "cuda"
+	r.NativeTiming.Kernels.SelectedKernels = []perfledger.SelectedKernel{
+		{Kernel: "k_q4k_gemm", Groups: "2560x1", CallsPerToken: 128, USPerCall: 234, Share: 0.49},
+		{Kernel: "d2d_copy", Groups: "0x0", CallsPerToken: 96, USPerCall: 5, Share: 0.01},
+	}
+	return r
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestKernelOracleStructuredLedgerAcceptsCUDAEventPairs(t *testing.T) {
+	r := oracleCUDALedgerFixture(t)
+	raw, _ := json.Marshal(r)
+	stages, err := parseOracleLedger(string(raw), r.RequestID, "/models/Qwen-fixture.gguf")
+	if err != nil || len(stages) != 2 {
+		t.Fatalf("stages=%+v err=%v", stages, err)
+	}
+	st := stages[0]
+	if st.Unjoined != "" || st.Ledger == nil || st.Ledger.Method != "structured_device_event_pair_intervals" ||
+		st.Ledger.RequestID != r.RequestID || st.Ledger.CallsPerToken != 128 || st.gx != 2560 || st.gy != 1 {
+		t.Fatalf("CUDA lineage lost: %+v ledger=%+v", st, st.Ledger)
+	}
+	if stages[1].Unjoined != "ledger_sample_invalid" {
+		t.Fatalf("a 0x0 pseudo-kernel row must stay out of shape joins, got %q", stages[1].Unjoined)
+	}
+
+	for name, tc := range map[string]struct {
+		mut  func(*perfledger.Record)
+		want string
+	}{
+		"mixed_backend":   {func(r *perfledger.Record) { r.Backend = "vulkan" }, "ledger_native_identity_unverified"},
+		"unknown_backend": {func(r *perfledger.Record) { r.Backend, r.NativeTiming.Kernels.Backend = "metal", "metal" }, "ledger_native_identity_unverified"},
+		"unknown_source":  {func(r *perfledger.Record) { r.NativeTiming.Kernels.Source = "stderr" }, "ledger_timer_method_unknown"},
+		"pipelined":       {func(r *perfledger.Record) { r.NativeTiming.Kernels.Pipelining = "unknown" }, "ledger_timer_method_unknown"},
+		"truncated":       {func(r *perfledger.Record) { r.NativeTiming.Kernels.Truncated = 3 }, "ledger_device_profile_incomplete"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := oracleCUDALedgerFixture(t)
+			tc.mut(&r)
+			raw, _ := json.Marshal(r)
+			stages, err := parseOracleLedger(string(raw), r.RequestID, "/models/Qwen-fixture.gguf")
+			if err != nil || len(stages) != 2 || stages[0].Unjoined != tc.want {
+				t.Fatalf("stages=%+v err=%v, want first stage %s", stages, err, tc.want)
+			}
+		})
+	}
+}

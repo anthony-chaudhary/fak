@@ -79,10 +79,10 @@ extern "C" int fcuda_qwen4exp_ple_hash_i64(
   int threads = 32;
   while (threads < num_heads) threads <<= 1;
   (void)cudaGetLastError(); // discard stale status before attributing this launch
-  k_qwen4exp_ple_hash_i64<<<tokens, threads, 0, g_stream>>>(
+  FCUDA_TS("k_qwen4exp_ple_hash_i64", tokens, k_qwen4exp_ple_hash_i64<<<tokens, threads, 0, g_stream>>>(
       input_ids, ngram_context, cu_seqlens, multipliers, vocab_sizes, offsets,
       rows, tokens, requests, context_len, ngram_size, heads_per_ngram,
-      num_heads, boundary_token);
+      num_heads, boundary_token));
   const cudaError_t launched = cudaGetLastError();
   if (launched != cudaSuccess) return (int)launched;
   ++g_qwen4exp_ple_hash_launches;
@@ -112,70 +112,6 @@ extern "C" double fcuda_event_elapsed_ms_end(void) {
     CK(cudaEventDestroy(end));
     CK(cudaEventDestroy(g_trace_start));
     return (double)ms;
-}
-
-// Kernel-profile event pool (cuda_profile.go). Created once at init when the profile is on;
-// a failed creation destroys what it made and leaves the pool empty, so every later call
-// refuses and the Go reader reports the profile unavailable. No call here prints, and a
-// failure clears only the last-error it raised itself, never an op's earlier error.
-static std::vector<cudaEvent_t> g_prof_events;
-
-static int prof_status(cudaError_t e, cudaError_t prior) {
-  if (prior == cudaSuccess && cudaPeekAtLastError() != cudaSuccess) (void)cudaGetLastError();
-  return (int)e;
-}
-
-extern "C" int fcuda_prof_init(int pairs) {
-  if (pairs <= 0 || !g_prof_events.empty()) return -1;
-  std::vector<cudaEvent_t> events((size_t)pairs * 2, nullptr);
-  for (size_t i = 0; i < events.size(); ++i) {
-    cudaError_t e = cudaEventCreate(&events[i]);
-    if (e != cudaSuccess) {
-      for (size_t j = 0; j < i; ++j) cudaEventDestroy(events[j]);
-      return (int)e;
-    }
-  }
-  g_prof_events.swap(events);
-  return 0;
-}
-
-// The Go fold never calls this while g_stream is capturing (cudaStreamQuery would
-// invalidate the capture). An event recorded on an idle stream is waited on, so the
-// profile never leaves an idle stream busy for an idle-stream admission check.
-extern "C" int fcuda_prof_record(int event, int *was_idle) {
-  if (!was_idle || event < 0 || (size_t)event >= g_prof_events.size()) return -1;
-  *was_idle = 0;
-  const cudaError_t prior = cudaPeekAtLastError();
-  const cudaError_t query = cudaStreamQuery(g_stream);
-  if (query != cudaSuccess && query != cudaErrorNotReady) return prof_status(query, prior);
-  cudaError_t e = cudaEventRecord(g_prof_events[(size_t)event], g_stream);
-  if (e == cudaSuccess && query == cudaSuccess) {
-    *was_idle = 1;
-    e = cudaEventSynchronize(g_prof_events[(size_t)event]);
-  }
-  return prof_status(e, prior);
-}
-
-extern "C" int fcuda_prof_elapsed_ms(int from_event, int to_event, float *ms) {
-  if (!ms || from_event < 0 || to_event < 0 || (size_t)from_event >= g_prof_events.size() ||
-      (size_t)to_event >= g_prof_events.size()) return -1;
-  const cudaError_t prior = cudaPeekAtLastError();
-  cudaError_t e = cudaEventSynchronize(g_prof_events[(size_t)to_event]);
-  if (e == cudaSuccess)
-    e = cudaEventElapsedTime(ms, g_prof_events[(size_t)from_event], g_prof_events[(size_t)to_event]);
-  return prof_status(e, prior);
-}
-
-extern "C" int fcuda_prof_capturing(void) {
-  if (g_capture_open) return 1;
-  const cudaError_t prior = cudaPeekAtLastError();
-  cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
-  const cudaError_t e = cudaStreamIsCapturing(g_stream, &status);
-  if (e != cudaSuccess) {
-    prof_status(e, prior);
-    return 1;
-  }
-  return status != cudaStreamCaptureStatusNone ? 1 : 0;
 }
 
 extern "C" int fcuda_set_device(int device) {
@@ -222,6 +158,7 @@ extern "C" void fcuda_free_on(int device, void *d) {
 
 extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
   if (fcuda_set_device(device) != 0) return;
+  fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
   if (e == cudaSuccess) g_h2d_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
@@ -229,6 +166,7 @@ extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
 
 extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
   if (fcuda_set_device(device) != 0) return;
+  fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
   if (e == cudaSuccess) g_host_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
@@ -236,6 +174,7 @@ extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
 
 extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
   if (fcuda_set_device(device) != 0) return;
+  fcuda_ts_untimed_transfer(); // a peer device's copy: outside the single-device event ring
   CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream));
 }
 

@@ -17,12 +17,13 @@ extern "C" int fak_qwen35_embedding_gather_f32(
   if (!dEmbedding || !hIDs || !dIDs || !dOut || tokens <= 0 || hidden <= 0) return -1;
   cudaGetLastError();
   size_t idsBytes = (size_t)tokens * sizeof(int);
+  fcuda_ts_untimed_transfer();
   cudaError_t copy = cudaMemcpy(dIDs, hIDs, idsBytes, cudaMemcpyHostToDevice);
   if (copy != cudaSuccess) return 10000 + (int)copy;
   g_h2d_bytes += idsBytes;
   size_t n = (size_t)tokens * hidden;
-  k_qwen35_embedding_gather<<<(n + 255) / 256, 256, 0, g_stream>>>(
-      dEmbedding, dIDs, dOut, tokens, hidden);
+  FCUDA_TS("k_qwen35_embedding_gather", (n + 255) / 256, k_qwen35_embedding_gather<<<(n + 255) / 256, 256, 0, g_stream>>>(
+      dEmbedding, dIDs, dOut, tokens, hidden));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 20000 + (int)launch;
 }
@@ -125,16 +126,17 @@ extern "C" int fak_v41_bf16_publish_f32(
   // Freshness is proved by checked initialization on every call, followed by
   // FIFO header/rounding launches and a checked fence. A cached success record
   // or a status decoder on its own cannot establish this property.
-  cudaError_t error = cudaMemsetAsync(dStatus, 0xff, 16, g_stream);
+  cudaError_t error = cudaSuccess;
+  FCUDA_TS("fill", dim3(0, 0), error = cudaMemsetAsync(dStatus, 0xff, 16, g_stream));
   if (error != cudaSuccess)
     return v41_bf16_publish_drain(20000 + (int)error, dInput, dOutput, dStatus);
-  k_v41_bf16_publish_status<<<1, 1, 0, g_stream>>>(dStatus, (uint32_t)count, site);
+  FCUDA_TS("k_v41_bf16_publish_status", 1, k_v41_bf16_publish_status<<<1, 1, 0, g_stream>>>(dStatus, (uint32_t)count, site));
   error = cudaGetLastError();
   if (error != cudaSuccess)
     return v41_bf16_publish_drain(30000 + (int)error, dInput, dOutput, dStatus);
   unsigned int blocks = ((unsigned int)count + 255u) / 256u;
   if (blocks > 65535u) blocks = 65535u;
-  k_v41_bf16_publish<<<blocks, 256, 0, g_stream>>>(dInput, dOutput, dStatus, (uint32_t)count);
+  FCUDA_TS("k_v41_bf16_publish", blocks, k_v41_bf16_publish<<<blocks, 256, 0, g_stream>>>(dInput, dOutput, dStatus, (uint32_t)count));
   error = cudaGetLastError();
   if (error != cudaSuccess)
     return v41_bf16_publish_drain(40000 + (int)error, dInput, dOutput, dStatus);
@@ -144,6 +146,7 @@ extern "C" int fak_v41_bf16_publish_f32(
   // Synchronous D2H after the successful fence cannot retain the caller's Go
   // status array. Only the 16-byte envelope is transferred, even on arithmetic
   // failure; output publication is decided by the Go decoder after this call.
+  fcuda_ts_untimed_transfer();
   error = cudaMemcpy(hStatus, dStatus, 16, cudaMemcpyDeviceToHost);
   if (error != cudaSuccess)
     return v41_bf16_publish_drain(60000 + (int)error, dInput, dOutput, dStatus);
@@ -278,8 +281,8 @@ static int v41_tail_rope_dispatch(const uint32_t *dQ, const uint32_t *dKV,
   const uint64_t totalWords = qWords + (paired ? (uint64_t)headDim : 0u);
   unsigned int blocks = (unsigned int)((totalWords + 255u) / 256u);
   if (blocks > 65535u) blocks = 65535u;
-  k_v41_tail_rope<<<blocks, 256, 0, g_stream>>>(dQ, dKV, dTable, dQOut, dKVOut,
-      qWords, totalWords, (uint32_t)headDim, (uint32_t)rotaryDim);
+  FCUDA_TS("k_v41_tail_rope", blocks, k_v41_tail_rope<<<blocks, 256, 0, g_stream>>>(dQ, dKV, dTable, dQOut, dKVOut,
+      qWords, totalWords, (uint32_t)headDim, (uint32_t)rotaryDim));
   // State admission inspected, without consuming, the old error. This get is
   // now attributable to this launch, not a way to erase an unknown prior error.
   cudaError_t error = cudaGetLastError();
@@ -320,6 +323,7 @@ extern "C" int fak_v41_tail_rope_readback(void *hOutput, const uint32_t *dInput,
   }
 #endif
   // Synchronous D2H never retains the caller's Go slice across this ABI call.
+  fcuda_ts_untimed_transfer();
   error = cudaMemcpy(hOutput, dInput, (size_t)count * sizeof(uint32_t), cudaMemcpyDeviceToHost);
   if (error != cudaSuccess)
     return v41_tail_rope_drain(50000 + (int)error, dInput, nullptr, nullptr, nullptr, nullptr, false);

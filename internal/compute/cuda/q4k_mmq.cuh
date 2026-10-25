@@ -705,12 +705,12 @@ static int launch_mul_mat_q(const char * x, const int * y, float * dst, int nrow
     const dim3 block_dims_fixup(block_dims.x, block_dims.y/2, block_dims.z);
 
     const int stride_row_x = ncols_x / qk;
-    mul_mat_q<J, fallback><<<block_nums_stream_k, block_dims, nbytes, stream>>>
-        (x, y, dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, stride_row_x, ncols_dst, nrows_x, ntx_fd);
+    FCUDA_TS("mul_mat_q", block_nums_stream_k, mul_mat_q<J, fallback><<<block_nums_stream_k, block_dims, nbytes, stream>>>
+        (x, y, dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, stride_row_x, ncols_dst, nrows_x, ntx_fd));
 
     if (fixup_needed) {
-        mul_mat_q_stream_k_fixup<J, fallback><<<block_nums_fixup, block_dims_fixup, 0, stream>>>
-            (dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, nrows_x, ntx_fd);
+        FCUDA_TS("mul_mat_q_stream_k_fixup", block_nums_fixup, mul_mat_q_stream_k_fixup<J, fallback><<<block_nums_fixup, block_dims_fixup, 0, stream>>>
+            (dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, nrows_x, ntx_fd));
         fcuda_free(tmp_fixup);
     }
     return cudaGetLastError() == cudaSuccess ? 0 : -1;
@@ -814,7 +814,7 @@ static int fcuda_q4k_mmq_matmul(const uint8_t *dQ4K, const float *dX, float *dY,
   const int64_t block_num_y = (in_padded + 4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ - 1) / (4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ);
   const dim3 num_blocks(P, block_num_y, 1);
   const dim3 block_size(CUDA_QUANTIZE_BLOCK_SIZE_MMQ, 1, 1);
-  quantize_mmq_q8_1_ds4<<<num_blocks, block_size, 0, g_stream>>>(dX, y, in, in, in_padded, P);
+  FCUDA_TS("quantize_mmq_q8_1_ds4", num_blocks, quantize_mmq_q8_1_ds4<<<num_blocks, block_size, 0, g_stream>>>(dX, y, in, in, in_padded, P));
 
   const bool fallback = out % 128 != 0;
   int status = fallback

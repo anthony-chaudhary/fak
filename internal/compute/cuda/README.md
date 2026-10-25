@@ -5,6 +5,7 @@ and process-wide state, then includes these implementation fragments in dependen
 
 | Module | Responsibility |
 |---|---|
+| `kernel_profile.cuh` | opt-in per-launch event-pair kernel timestamp profile (`FCUDA_TS`) |
 | `runtime_memory.cuh` | initialization, allocator pools, and transfers |
 | `runtime_services.cuh` | profiling, device services, and transfer witnesses |
 | `model_candidates.cuh` | embedding gather and conditional v4.1 candidates |

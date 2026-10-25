@@ -833,8 +833,8 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     const size_t live2 = (size_t) positions * kvWidth / 2;
     const int stageThreads = 256;
     const size_t stageBlocks = (total2 + stageThreads - 1) / stageThreads;
-    fak_fattn_mma::k_qwen38_fattn_stage_kv_f16<<<(unsigned) (stageBlocks < 65535 ? stageBlocks : 65535), stageThreads, 0, g_stream>>>(
-        (const float2 *) dK, (const float2 *) dV, K16, V16, live2, total2);
+    FCUDA_TS("k_qwen38_fattn_stage_kv_f16", (unsigned) (stageBlocks < 65535 ? stageBlocks : 65535), fak_fattn_mma::k_qwen38_fattn_stage_kv_f16<<<(unsigned) (stageBlocks < 65535 ? stageBlocks : 65535), stageThreads, 0, g_stream>>>(
+        (const float2 *) dK, (const float2 *) dV, K16, V16, live2, total2));
     cudaError_t staged = cudaGetLastError();
     if (staged != cudaSuccess) return 52000 + (int) staged;
 
@@ -847,8 +847,8 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     size_t shmem = shmem_Q > shmem_KV ? shmem_Q : shmem_KV;
     if (shmem_combine > shmem) shmem = shmem_combine;
     dim3 grid((unsigned) ((tokens + ncols1 - 1) / ncols1), (unsigned) nKV, 1);
-    fak_fattn_mma::k_qwen38_fattn_mma_hd256<<<grid, dim3(fak_fattn_mma::warp_size, fak_fattn_mma::nthreads / fak_fattn_mma::warp_size, 1), shmem, g_stream>>>(
-        dQ, K16, V16, dOut, tokens, prefix, nH, nKV, scale);
+    FCUDA_TS("k_qwen38_fattn_mma_hd256", grid, fak_fattn_mma::k_qwen38_fattn_mma_hd256<<<grid, dim3(fak_fattn_mma::warp_size, fak_fattn_mma::nthreads / fak_fattn_mma::warp_size, 1), shmem, g_stream>>>(
+        dQ, K16, V16, dOut, tokens, prefix, nH, nKV, scale));
     cudaError_t launch = cudaGetLastError();
     if (launch != cudaSuccess) return 52000 + (int) launch;
     g_qwen38_fattn_mma_launches++;

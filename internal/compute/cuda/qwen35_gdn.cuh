@@ -55,18 +55,18 @@ static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
     fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
     return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
   }
-  k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn);
-  k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn);
+  FCUDA_TS("k_fp16_split", (wn + 255) / 256, k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn));
+  FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
   const float one = 1.0f, zero = 0.0f;
-  cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
       wHi, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &zero, Y, CUDA_R_32F, out,
-      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
-  cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
       wLo, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
-      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
-  cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
       wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
-      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
   return 0;
 }
@@ -84,8 +84,8 @@ static int q8_dequant_sgemm(const void *codes, const float *scales,
                             const float *X, float *Y, int rows, int cols, int tokens, int block) {
   float *wide = (float *)scratch_malloc((size_t)rows * cols * sizeof(float));
   if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
-  k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
-      (const signed char *)codes, scales, wide, rows, cols, block);
+  FCUDA_TS("k_q8_dequant_transient", ((size_t)rows * cols + 255) / 256, k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
+      (const signed char *)codes, scales, wide, rows, cols, block));
   int status = fp16_compensated_matmul(wide, X, Y, rows, cols, tokens);
   fcuda_free(wide);
   return status;
@@ -567,37 +567,37 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
     fprintf(stderr, "fak-cuda: Qwen3.5 GDN preflight found stale CUDA status: %s\n", cudaGetErrorString(stale));
     return qwen35_gdn_drain_after_error(10000 + (int)stale);
   }
-  k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
+  FCUDA_TS("k_qwen35_gdn_fused_in_proj", (int)fusedRows64, k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
       dX,
       dInQKV, dInQKVScale, inQKVQ8,
       dInZ, dInZScale, inZQ8,
       dInB, dInBScale, inBQ8,
       dInA, dInAScale, inAQ8,
-      dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV);
+      dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV));
   int status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   unsigned int convBlocks = (unsigned int)(((unsigned long long)convDim + 255ULL) / 256ULL);
-  k_qwen35_gdn_conv_state<<<convBlocks, 256, 0, g_stream>>>(
-      dMixed, dConvW, dConvState, dConvOut, convDim, convKernel);
+  FCUDA_TS("k_qwen35_gdn_conv_state", convBlocks, k_qwen35_gdn_conv_state<<<convBlocks, 256, 0, g_stream>>>(
+      dMixed, dConvW, dConvState, dConvOut, convDim, convKernel));
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   int qThreads = qwen35_gdn_threads(kHd);
-  k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, nK, kHd);
+  FCUDA_TS("k_qwen35_gdn_qk_norm", nK, k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, nK, kHd));
   status = qwen35_gdn_launch_status(4);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   int vThreads = qwen35_gdn_threads(vHd);
-  k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+  FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm", nV, k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
       dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
-      dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps);
+      dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
-  k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
-      dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim);
+  FCUDA_TS("k_qwen35_gdn_out_proj", hidden, k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
+      dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim));
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
@@ -653,49 +653,49 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
     if (dq == 0) dq = q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else {
-    k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
+    FCUDA_TS("k_qwen35_gdn_fused_in_proj", dim3(fusedRows, tokens), k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
       dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
       dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
-      dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV);
+      dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV));
   }
   int status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int convBlocks = (convDim + 255) / 256;
   int convTiles = (tokens + kQwen35GDNConvTile - 1) / kQwen35GDNConvTile;
-  k_qwen35_gdn_conv_panel_tiled<<<dim3(convBlocks, convTiles), 256, 0, g_stream>>>(
-      dMixed, dConvW, dConvState, dConvOut, tokens, convDim, convKernel);
+  FCUDA_TS("k_qwen35_gdn_conv_panel_tiled", dim3(convBlocks, convTiles), k_qwen35_gdn_conv_panel_tiled<<<dim3(convBlocks, convTiles), 256, 0, g_stream>>>(
+      dMixed, dConvW, dConvState, dConvOut, tokens, convDim, convKernel));
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
-  k_qwen35_gdn_conv_panel_history<<<convBlocks, 256, 0, g_stream>>>(
-      dMixed, dConvState, tokens, convDim, convKernel);
+  FCUDA_TS("k_qwen35_gdn_conv_panel_history", convBlocks, k_qwen35_gdn_conv_panel_history<<<convBlocks, 256, 0, g_stream>>>(
+      dMixed, dConvState, tokens, convDim, convKernel));
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int qThreads = qwen35_gdn_threads(kHd);
-  k_qwen35_gdn_qk_norm_panel<<<dim3(nK, tokens), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, tokens, convDim, nK, kHd);
+  FCUDA_TS("k_qwen35_gdn_qk_norm_panel", dim3(nK, tokens), k_qwen35_gdn_qk_norm_panel<<<dim3(nK, tokens), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, tokens, convDim, nK, kHd));
   status = qwen35_gdn_launch_status(4);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   size_t gates = (size_t)tokens * nV;
-  k_qwen35_gdn_gate_panel<<<(unsigned)((gates + 255) / 256), 256, 0, g_stream>>>(
-      dB, dA, dALog, dDtBias, tokens, nV);
+  FCUDA_TS("k_qwen35_gdn_gate_panel", (unsigned)((gates + 255) / 256), k_qwen35_gdn_gate_panel<<<(unsigned)((gates + 255) / 256), 256, 0, g_stream>>>(
+      dB, dA, dALog, dDtBias, tokens, nV));
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int colBlocks = (vHd + kQwen35GDNPanelCols - 1) / kQwen35GDNPanelCols;
-  k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
-      dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd);
+  FCUDA_TS("k_qwen35_gdn_recurrent_panel_cols", nV * colBlocks, k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
+      dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int vThreads = qwen35_gdn_threads(vHd);
-  k_qwen35_gdn_out_norm_panel<<<dim3(tokens, nV), vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-      dZ, dNorm, dCore, nV, vHd, rmsEps);
+  FCUDA_TS("k_qwen35_gdn_out_norm_panel", dim3(tokens, nV), k_qwen35_gdn_out_norm_panel<<<dim3(tokens, nV), vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+      dZ, dNorm, dCore, nV, vHd, rmsEps));
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   if (tokens >= 128 && outWQ8) {
     int dq = q8_dequant_sgemm(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else {
-    k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
-        dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd);
+    FCUDA_TS("k_qwen35_gdn_out_proj", dim3(hidden, tokens), k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
+        dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd));
   }
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);  cudaError_t sync = cudaStreamSynchronize(g_stream);

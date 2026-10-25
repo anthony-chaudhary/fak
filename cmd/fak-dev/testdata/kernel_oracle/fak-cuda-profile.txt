@@ -1,0 +1,10 @@
+fak-cuda ts-profile mode=per_launch_event_pairs timing=event_pairs coverage=g_stream_launches graphs=disabled
+fak-cuda ts-profile batches=32 ops/batch=604.0 gpu_ms/batch=61.200 wall_ms/batch=88.400 truncated=0 timing=event_pairs graphs=disabled
+fak-cuda ts-stage kernel=k_q4k_gemm groups=2560x1 calls/batch=128.00 ms/batch=30.100 us/call=235.16 share=49.2%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_gated_norm groups=48x1 calls/batch=48.00 ms/batch=9.400 us/call=195.83 share=15.4%
+other stderr noise
+fak-cuda ts-profile batches=64 ops/batch=604.0 gpu_ms/batch=61.000 wall_ms/batch=88.000 truncated=0 timing=event_pairs graphs=disabled
+fak-cuda ts-stage kernel=k_q4k_gemm groups=2560x1 calls/batch=128.00 ms/batch=30.000 us/call=234.38 share=49.2%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_gated_norm groups=48x1 calls/batch=48.00 ms/batch=9.300 us/call=193.75 share=15.2%
+fak-cuda ts-stage kernel=cublas_sgemm groups=151936x1 calls/batch=1.00 ms/batch=6.100 us/call=6100.00 share=10.0%
+fak-cuda ts-stage kernel=d2d_copy groups=0x0 calls/batch=96.00 ms/batch=0.480 us/call=5.00 share=0.8%

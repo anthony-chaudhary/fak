@@ -244,11 +244,13 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
   }
 }
 extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
+  fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
   if (e == cudaSuccess) g_h2d_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
 }
 extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
+  fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
   if (e == cudaSuccess) g_host_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
@@ -258,5 +260,7 @@ extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
 // so a 30-layer decode paid ~150 full device syncs per token (catastrophic on WSL, where a
 // sync is ~1-2 ms). Stream ordering still serializes them against the kernels correctly;
 // the only host fence we keep is the final logits d2h in Read.
-extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) { CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)); }
+extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) {
+  FCUDA_TS("d2d_copy", dim3(0, 0), CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)));
+}
 extern "C" void fcuda_sync(void) { CK(cudaDeviceSynchronize()); }

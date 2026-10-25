@@ -18,7 +18,7 @@ var (
 	oracleTensorRef  = regexp.MustCompile(`^([a-z0-9_]+)\[(\d+),(\d+),(\d+),(\d+)\]`)
 	oracleBenchRow   = regexp.MustCompile(`^(Benchmark\S+?)(?:-\d+)?\s+(\d+)\s+([0-9.]+) ns/op`)
 	oracleBenchShape = regexp.MustCompile(`^out(\d+)_in(\d+)$`)
-	oracleStageRow   = regexp.MustCompile(`fak-vulkan ts-stage kernel=(\S+) groups=(\d+)x(\d+) calls/batch=([0-9.]+) ms/batch=[0-9.]+ us/call=([0-9.]+) share=([0-9.]+)%`)
+	oracleStageRow   = regexp.MustCompile(`fak-(?:vulkan|cuda) ts-stage kernel=(\S+) groups=(\d+)x(\d+) calls/batch=([0-9.]+) ms/batch=[0-9.]+ us/call=([0-9.]+) share=([0-9.]+)%`)
 )
 
 type ggmlPerf struct {
@@ -258,7 +258,8 @@ func parseFakBench(text, mode string) []oracleMeasurement {
 }
 
 // parseFakStages keeps the last report per (kernel, groups): the profiler
-// prints cumulative aggregates every FAK_VULKAN_TIMESTAMP_PROFILE_EVERY batches.
+// prints cumulative aggregates every FAK_VULKAN_TIMESTAMP_PROFILE_EVERY batches
+// (FAK_CUDA_TIMESTAMP_PROFILE_EVERY token boundaries for fak-cuda lines).
 func parseFakStages(text string) []oracleStage {
 	byKey := map[string]oracleStage{}
 	for _, raw := range strings.Split(text, "\n") {

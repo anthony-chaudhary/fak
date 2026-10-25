@@ -8,13 +8,14 @@ extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, in
   // surfaced on sm_80 / CUDA 13.0) left dY stale and the device output looked structurally wrong
   // (a non-block-aligned out dim came back short) with no diagnostic. Check + name the dims so the
   // next witness run pinpoints the failure instead of reporting silent garbage.
-  cublasStatus_t st = cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N,
+  cublasStatus_t st = CUBLAS_STATUS_SUCCESS;
+  FCUDA_TS("cublas_sgemm", dim3(out, P), st = cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N,
               out, P, in,
               &alpha,
               dW, in,
               dX, in,
               &beta,
-              dY, out);
+              dY, out));
   if (st != CUBLAS_STATUS_SUCCESS) {
     fprintf(stderr, "fak-cuda: cublasSgemm(out=%d,in=%d,P=%d) failed: %d\n", out, in, P, (int)st);
     // FAIL-SAFE (#972): a failed SGEMM leaves dY untouched, and dY is a RECYCLED pool buffer,
@@ -22,7 +23,7 @@ extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, in
     // (the "out=257 -> got 64" ghost the issue reports). Zero the full out*P result so a failed
     // launch yields an unambiguous all-zero vector the cosine/shape gate rejects deterministically,
     // never a short/garbage read that masquerades as a real result.
-    cudaMemsetAsync(dY, 0, (size_t)out * (size_t)P * sizeof(float), g_stream);
+    FCUDA_TS("fill", dim3(0, 0), cudaMemsetAsync(dY, 0, (size_t)out * (size_t)P * sizeof(float), g_stream));
   }
 }
 
@@ -40,7 +41,7 @@ __global__ void k_f32_to_f16(const float *src, __half *dst, int n) {
   if (i < n) dst[i] = __float2half(src[i]);
 }
 extern "C" void fcuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n) {
-  k_f32_to_f16<<<(n + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, n);
+  FCUDA_TS("k_f32_to_f16", (n + 255) / 256, k_f32_to_f16<<<(n + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, n));
 }
 
 // k_f32_to_f16_T narrows AND transpose-repacks a row-major f32 weight [out,in] into a
@@ -55,7 +56,7 @@ __global__ void k_f32_to_f16_T(const float *src, __half *dst, int out, int in) {
 }
 extern "C" void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in) {
   int total = out * in;
-  k_f32_to_f16_T<<<(total + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, out, in);
+  FCUDA_TS("k_f32_to_f16_T", (total + 255) / 256, k_f32_to_f16_T<<<(total + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, out, in));
 }
 
 // fcuda_matmul_f16: Y[P,out] = X[P,in] @ W[out,in]^T on tensor cores. W is resident __half;
@@ -68,19 +69,19 @@ extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
                                  int out, int in, int P, int colMajor) {
   const __half *A = (const __half *)dWhalf;
   __half *dXh = (__half *)fcuda_malloc((size_t)P * in * sizeof(__half));
-  k_f32_to_f16<<<(P * in + 255) / 256, 256, 0, g_stream>>>(dX, dXh, P * in);
+  FCUDA_TS("k_f32_to_f16", (P * in + 255) / 256, k_f32_to_f16<<<(P * in + 255) / 256, 256, 0, g_stream>>>(dX, dXh, P * in));
   const float alpha = 1.0f, beta = 0.0f;
   cublasStatus_t st;
   if (colMajor) {
-    st = cublasGemmEx(g_blas, CUBLAS_OP_N, CUBLAS_OP_N, out, P, in,
+    FCUDA_TS("cublas_gemm_ex", dim3(out, P), st = cublasGemmEx(g_blas, CUBLAS_OP_N, CUBLAS_OP_N, out, P, in,
                       &alpha, A, CUDA_R_16F, out, dXh, CUDA_R_16F, in,
                       &beta, dY, CUDA_R_32F, out,
-                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
-    st = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, P, in,
+    FCUDA_TS("cublas_gemm_ex", dim3(out, P), st = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, P, in,
                       &alpha, A, CUDA_R_16F, in, dXh, CUDA_R_16F, in,
                       &beta, dY, CUDA_R_32F, out,
-                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   }
   if (st != CUBLAS_STATUS_SUCCESS) fprintf(stderr, "fak-cuda: cublasGemmEx(HGEMM) failed: %d\n", (int)st);
   fcuda_free(dXh);
@@ -290,7 +291,7 @@ static int q8_quant_rows(const float *dX, int in, int P, int block) {
     }
     g_q8_xScale_cap = needScale;
   }
-  k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
+  FCUDA_TS("k_q8_quant_act", dim3(nblk, P), k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block));
   return 0;
 }
 // q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
@@ -300,8 +301,8 @@ static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const floa
                           float *dY, int out, int in, int P, int block) {
   int rc = q8_quant_rows(dX, in, P, block);
   if (rc != 0) return rc;
-  k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
-                                                dY, out, in, P, block);
+  FCUDA_TS("k_q8_gemm", dim3((out + 7) / 8, P), k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
+                                                dY, out, in, P, block));
   return 0;
 }
 extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
@@ -323,8 +324,8 @@ extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScal
   if (rc != 0) return rc;
   int tiles = (P + kQ8TileRows - 1) / kQ8TileRows;
   int rowsPerTile = (P + tiles - 1) / tiles;
-  k_q8_gemm_rowtile<<<dim3(tiles, outGroups), kQ8TileWarps * 32, 0, g_stream>>>(
-      (const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale, dY, out, in, P, rowsPerTile);
+  FCUDA_TS("k_q8_gemm_rowtile", dim3(tiles, outGroups), k_q8_gemm_rowtile<<<dim3(tiles, outGroups), kQ8TileWarps * 32, 0, g_stream>>>(
+      (const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale, dY, out, in, P, rowsPerTile));
   return 0;
 }
 
@@ -486,7 +487,7 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   size_t n = (size_t)out * (in / 256) * 8;
   float2 *coeff = nullptr;
   CK(cudaMalloc(&coeff, n * sizeof(float2)));
-  k_q4k_coeffs<<<(n + 255) / 256, 256, 0, g_stream>>>(q, coeff, out, in);
+  FCUDA_TS("k_q4k_coeffs", (n + 255) / 256, k_q4k_coeffs<<<(n + 255) / 256, 256, 0, g_stream>>>(q, coeff, out, in));
   g_q4_coeff_cache[g_q4_coeff_cache_n++] = {q, coeff, out, in, device};
   return coeff;
 }
@@ -505,21 +506,21 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     if (g_q4k_prefill_arm != 0) return FCUDA_Q4K_PREFILL_ARM_REFUSED;
     float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
     if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
-    k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
-        (const unsigned char *)dQ4K, wide, out, in);
+    FCUDA_TS("k_q4k_dequant_transient", ((size_t)out * in + 255) / 256, k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
+        (const unsigned char *)dQ4K, wide, out, in));
     int status = fp16_compensated_matmul(wide, dX, dY, out, in, P);
     fcuda_free(wide);
     return status;
   }
   if (P < 4) {
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
-    k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
-        (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P);
+    FCUDA_TS("k_q4k_gemm", dim3((out + 1) / 2, P), k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
+        (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P));
     return 0;
   }
   constexpr int token_tile = 4;
-  k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
-      (const unsigned char *)dQ4K, dX, dY, out, in, P);
+  FCUDA_TS("k_q4k_gemm_panel", dim3(out, (P + token_tile - 1) / token_tile), k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
+      (const unsigned char *)dQ4K, dX, dY, out, in, P));
   return 0;
 }
 
@@ -564,8 +565,8 @@ __global__ void k_q2_0_gemm(const unsigned char *Codes, const float *Wscale,
 extern "C" void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales,
                                       const float *dX, float *dY, int out, int in, int P,
                                       int block) {
-  k_q2_0_gemm<<<dim3(out, P), 256, 0, g_stream>>>(
-      (const unsigned char *)dCodes, dScales, dX, dY, out, in, P, block);
+  FCUDA_TS("k_q2_0_gemm", dim3(out, P), k_q2_0_gemm<<<dim3(out, P), 256, 0, g_stream>>>(
+      (const unsigned char *)dCodes, dScales, dX, dY, out, in, P, block));
 }
 
 // Reference-order NVFP4 W4A16 path. This is intentionally one thread per output:
@@ -635,8 +636,8 @@ extern "C" int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX,
   const size_t outputs = (size_t)P * (size_t)out;
   const size_t blocks = (outputs + 255u) / 256u;
   if (blocks > (size_t)UINT_MAX) return (int)cudaErrorInvalidConfiguration;
-  k_nvfp4_w4a16_f32<<<(unsigned int)blocks, 256, 0, g_stream>>>(
-      dPayload, dX, dY, out, in, P, globalScale);
+  FCUDA_TS("k_nvfp4_w4a16_f32", (unsigned int)blocks, k_nvfp4_w4a16_f32<<<(unsigned int)blocks, 256, 0, g_stream>>>(
+      dPayload, dX, dY, out, in, P, globalScale));
   return (int)cudaGetLastError();
 }
 
@@ -720,11 +721,11 @@ __global__ void k_q6k_gemm(const unsigned char *W, const float *X, float *Y,
 
 extern "C" void fcuda_q5k_matmul_f32(const uint8_t *w, const float *x, float *y,
                                       int o, int i, int p) {
-  k_q5k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p);
+  FCUDA_TS("k_q5k_gemm", dim3((o + 7) / 8, p), k_q5k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
 }
 extern "C" void fcuda_q6k_matmul_f32(const uint8_t *w, const float *x, float *y,
                                       int o, int i, int p) {
-  k_q6k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p);
+  FCUDA_TS("k_q6k_gemm", dim3((o + 7) / 8, p), k_q6k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
 }
 
 // =================================================================================
@@ -872,15 +873,15 @@ __global__ void k_q2k_gemm_panel(const unsigned char *W, const float *X, float *
 
 extern "C" void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY,
                                int out, int in, int P) {
-  k_q2k_gemv<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>(
-      (const unsigned char *)dQ2K, dX, dY, out, in, P);
+  FCUDA_TS("k_q2k_gemv", dim3((out + 7) / 8, P), k_q2k_gemv<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>(
+      (const unsigned char *)dQ2K, dX, dY, out, in, P));
 }
 
 extern "C" void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY,
                                      int out, int in, int P) {
   constexpr int token_tile = 4;
-  k_q2k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
-      (const unsigned char *)dQ2K, dX, dY, out, in, P);
+  FCUDA_TS("k_q2k_gemm_panel", dim3(out, (P + token_tile - 1) / token_tile), k_q2k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
+      (const unsigned char *)dQ2K, dX, dY, out, in, P));
 }
 
 extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY,
@@ -888,8 +889,8 @@ extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float 
   if (P >= 128) {
     float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
     if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
-    k_q2k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
-        (const unsigned char *)dQ2K, wide, out, in);
+    FCUDA_TS("k_q2k_dequant_transient", ((size_t)out * in + 255) / 256, k_q2k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
+        (const unsigned char *)dQ2K, wide, out, in));
     int status = fp16_compensated_matmul(wide, dX, dY, out, in, P);
     fcuda_free(wide);
     return status;

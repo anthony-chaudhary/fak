@@ -210,6 +210,56 @@ likely to forget (a missing prototype or a missing binding):
    `cpuref` Reference under the floor, and an entry in `cuda_acceptance.sh` so the new path
    joins the one-command verdict.
 
+Wrap every launch, cuBLAS call and async copy/fill on `g_stream` in
+`FCUDA_TS("<kernel symbol>", grid, …)` and put `fcuda_ts_untimed_transfer();` on the line
+before every synchronous `cudaMemcpy`. The GPU-free `TestCUDATimestampSourceCoversEveryLaunch`
+fails on an unwrapped site, and `TestKernelOpClassCUDANames` fails on a new row name that
+classifies as `other` without being listed (section 6).
+
+## 6. Profile — per-kernel GPU time
+
+`FAK_CUDA_TIMESTAMP_PROFILE=1` (exactly `1`, like `FAK_VULKAN_TIMESTAMP_PROFILE`) turns on the
+CUDA kernel timestamp profile. The shim reads it once at load (`cuda/kernel_profile.cuh`), so
+it needs no Go env read. With it unset, each launch site costs one predictable branch and the
+command stream gets no event calls, and no kernel-profile reader is registered.
+
+- **Timing = `event_pairs`.** Each `FCUDA_TS` site records a pre-created start and stop
+  `cudaEvent_t` on `g_stream` around its launch. The pairs resolve in one host wait, never per
+  launch: at the token boundary (`Recycle`), at a reader snapshot, or when the 4096-pair ring
+  fills.
+- **Rows** use the Vulkan `KernelRow` shape and land in the same reader (`cuda`). A row is a
+  kernel symbol without namespace or template arguments plus its grid x × y as `groups`, for
+  example `k_q4k_gemm`, `mul_mat_q` (the P-04 MMQ arm) or `k_qwen38_fattn_mma_hd256` (the P-05
+  mma arm). cuBLAS rows are `cublas_sgemm`, `cublas_gemm_ex` and `cublaslt_matmul`, with the
+  GEMM m × n as `groups`. Async device copies and fills are the pseudo-kernels `d2d_copy` and
+  `fill` (`0x0`). `KernelOpClass` maps `gemv` to `matvec`; `gemm` and `mul_mat` to `matmul`;
+  and `fattn`, `attend`, `spec_verify` and `dsa_index` to `attention`. The rows that stay
+  `other` are listed in `cudaKernelOtherAllowlist`.
+- **Counters.** `GPUNS` is the sum of the pairs, and the rows sum to it. `untimed_transfer`
+  counts synchronous host copies (uploads and readbacks on the legacy stream) and the
+  peer-device copies (`fcuda_d2d_on` and the `fcuda_handoff_*` peer handoff). The ledger
+  reports it without clearing `complete`.
+  `truncated` counts pairs whose events failed. `untimed_compute` counts launches inside a
+  capture. `barriers_elided` stays 0 because there is one in-order stream.
+- **Graphs off.** With the profile on, `GraphBegin` returns false, so a profiled row times the
+  ungraphed launch stream even when `FAK_CUDA_GRAPH=1`. The stderr header says
+  `graphs=disabled`. One device and one `g_stream` only: per-session streams (P-07) and
+  multi-GPU ranks are not profiled.
+- **Stderr**, every `FAK_CUDA_TIMESTAMP_PROFILE_EVERY` token boundaries (default 32), in the
+  Vulkan format with a `fak-cuda` prefix:
+  `fak-cuda ts-profile batches=… ops/batch=… gpu_ms/batch=… wall_ms/batch=… truncated=… timing=event_pairs graphs=disabled`
+  and then up to 40
+  `fak-cuda ts-stage kernel=… groups=XxY calls/batch=… ms/batch=… us/call=… share=…%` lines.
+  `fak-dev kernel-oracle rank --fak-profile` reads them. `--fak-ledger` keeps the lineage of a
+  `cuda` structured `disabled-by-profile` ledger row, with method
+  `structured_device_event_pair_intervals`.
+- **Token-time caveat.** A profiled decode is not token time: each launch adds two event
+  records, graphs are off, and a pair recorded on an idle stream also books the host's launch
+  gap between the start event and the kernel. On a host-bound decode this overstates short
+  kernels. Read shares and per-kernel A/B deltas from profile-on rows, and read tok/s from
+  profile-off rows. The overhead has not been measured yet. The pending CUDA-host rung
+  records profile-on against profile-off decode tok/s on the same card.
+
 ## CI — what's automatic and what isn't
 
 - [`.github/workflows/cuda-build.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/cuda-build.yml) runs

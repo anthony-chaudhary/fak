@@ -3,6 +3,7 @@ package compute
 import (
 	"math"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -419,5 +420,204 @@ func TestTimestampProfileCountsLostBatches(t *testing.T) {
 	}
 	if got := strings.Count(src, "tsBatchCollect();"); got != 2 {
 		t.Errorf("tsBatchCollect call sites = %d, want 2 (each with a lost-batch branch)", got)
+	}
+}
+
+// cudaProfileSources returns cuda_kernels.cu and every file it textually
+// includes (the cuda/*.cuh modules, tree_attention.cu, routed_expert_gemv.cu),
+// with comments stripped, keyed by path relative to this package.
+func cudaProfileSources(t *testing.T) map[string]string {
+	t.Helper()
+	include := regexp.MustCompile(`(?m)^#include "([^"]+)"`)
+	comments := regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`)
+	out := map[string]string{}
+	var walk func(path string)
+	walk = func(path string) {
+		if _, seen := out[path]; seen {
+			return
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[path] = comments.ReplaceAllString(string(raw), "")
+		for _, m := range include.FindAllStringSubmatch(string(raw), -1) {
+			if m[1] == "cuda_backend.h" {
+				continue
+			}
+			walk(filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(path), m[1]))))
+		}
+	}
+	walk("cuda_kernels.cu")
+	return out
+}
+
+var (
+	cudaTSWrap      = regexp.MustCompile(`FCUDA_TS\("([A-Za-z0-9_]+)",`)
+	cudaLaunch      = regexp.MustCompile(`((?:[A-Za-z_][A-Za-z0-9_]*::)*)([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^<>;]*>)?\s*<<<`)
+	cudaBLASCall    = regexp.MustCompile(`\b(cublasSgemm|cublasGemmEx|cublasLtMatmul)\(`)
+	cudaAsyncCopy   = regexp.MustCompile(`\b(cudaMemcpyAsync|cudaMemsetAsync)\(`)
+	cudaSyncCopy    = regexp.MustCompile(`\bcudaMemcpy(?:Peer)?\(`)
+	cudaUntimedNote = regexp.MustCompile(`fcuda_ts_untimed_transfer\(\);[^\n]*\n\s*$`)
+	cudaFuncStart   = regexp.MustCompile(`(?m)^(?:extern "C" |static )?[A-Za-z_][\w *&:<>,]*?\b(\w+)\([^;]*?\)\s*\{`)
+)
+
+// cudaTSEnclosing returns the FCUDA_TS name whose argument list holds offset
+// at, or "" when the call sits outside every FCUDA_TS statement.
+func cudaTSEnclosing(src string, at int) string {
+	var name string
+	for _, m := range cudaTSWrap.FindAllStringSubmatchIndex(src[:at], -1) {
+		if !strings.Contains(src[m[1]:at], ";") {
+			name = src[m[2]:m[3]]
+		} else {
+			name = ""
+		}
+	}
+	return name
+}
+
+func cudaEnclosingFunc(src string, at int) string {
+	var fn string
+	for _, m := range cudaFuncStart.FindAllStringSubmatchIndex(src[:at], -1) {
+		fn = src[m[2]:m[3]]
+	}
+	return fn
+}
+
+// cudaUntimedTransferSites lists the async copies that run outside the event
+// ring: a peer device's copy on the multi-GPU path (the profile keeps one device).
+var cudaUntimedTransferSites = map[string]bool{"cuda/runtime_services.cuh:fcuda_d2d_on": true}
+
+// fak-test:runtime fast est=30ms lane=default
+func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
+	srcs := cudaProfileSources(t)
+	for _, want := range []string{"cuda/kernel_profile.cuh", "tree_attention.cu", "routed_expert_gemv.cu", "cuda/q4k_mmq.cuh", "cuda/fattn_mma_hd256.cuh"} {
+		if _, ok := srcs[want]; !ok {
+			t.Fatalf("cuda_kernels.cu no longer includes %s", want)
+		}
+	}
+	at := func(src string, off int) int { return strings.Count(src[:off], "\n") + 1 }
+	launches, blas, async, sync := 0, 0, 0, 0
+	for path, src := range srcs {
+		if path == "cuda/kernel_profile.cuh" {
+			continue
+		}
+		for _, m := range cudaLaunch.FindAllStringSubmatchIndex(src, -1) {
+			launches++
+			kernel := src[m[4]:m[5]]
+			if got := cudaTSEnclosing(src, m[0]); got != kernel {
+				t.Errorf("%s:%d launch of %s is timed as %q; wrap it in FCUDA_TS(%q, grid, ...)", path, at(src, m[0]), kernel, got, kernel)
+			}
+		}
+		for _, m := range cudaBLASCall.FindAllStringSubmatchIndex(src, -1) {
+			if strings.Count(src[strings.LastIndex(src[:m[0]], "\n")+1:m[0]], `"`)%2 == 1 {
+				continue // a diagnostic string names the call
+			}
+			blas++
+			got := cudaTSEnclosing(src, m[0])
+			if !strings.HasPrefix(got, "cublas") || KernelOpClass(got) != KernelOpMatmul {
+				t.Errorf("%s:%d %s is timed as %q; want a cublas* row that classifies as matmul", path, at(src, m[0]), src[m[2]:m[3]], got)
+			}
+		}
+		for _, m := range cudaAsyncCopy.FindAllStringSubmatchIndex(src, -1) {
+			async++
+			call, got := src[m[2]:m[3]], cudaTSEnclosing(src, m[0])
+			want := map[string]string{"cudaMemcpyAsync": "d2d_copy", "cudaMemsetAsync": "fill"}[call]
+			if got == want {
+				continue
+			}
+			line := src[:strings.LastIndex(src[:m[0]], "\n")+1]
+			if got == "" && cudaUntimedNote.MatchString(line) && cudaUntimedTransferSites[path+":"+cudaEnclosingFunc(src, m[0])] {
+				continue
+			}
+			t.Errorf("%s:%d %s in %s is timed as %q, want %q (or a listed untimed transfer)", path, at(src, m[0]), call, cudaEnclosingFunc(src, m[0]), got, want)
+		}
+		for _, m := range cudaSyncCopy.FindAllStringIndex(src, -1) {
+			sync++
+			if !cudaUntimedNote.MatchString(src[:strings.LastIndex(src[:m[0]], "\n")+1]) {
+				t.Errorf("%s:%d synchronous %s is not counted by fcuda_ts_untimed_transfer()", path, at(src, m[0]), src[m[0]:m[1]-1])
+			}
+		}
+	}
+	if launches < 78 || blas < 7 || async < 5 || sync < 19 {
+		t.Fatalf("scanned %d launches, %d cuBLAS calls, %d async and %d sync copies; want the full CUDA source", launches, blas, async, sync)
+	}
+
+	prof := srcs["cuda/kernel_profile.cuh"]
+	for _, want := range []string{
+		"getenv(\"FAK_CUDA_TIMESTAMP_PROFILE\");\n  return v && v[0] == '1' && v[1] == '\\0';",
+		`getenv("FAK_CUDA_TIMESTAMP_PROFILE_EVERY")`,
+		`"fak-cuda ts-profile batches=%llu ops/batch=%.1f gpu_ms/batch=%.3f wall_ms/batch=%.3f truncated=%llu timing=event_pairs graphs=disabled\n"`,
+		`"fak-cuda ts-stage kernel=%s groups=%ux%u calls/batch=%.2f ms/batch=%.3f us/call=%.2f share=%.1f%%\n"`,
+		"if (!g_ts_on) return -1;",
+	} {
+		if !strings.Contains(prof, want) {
+			t.Errorf("kernel_profile.cuh lost %q", want)
+		}
+	}
+	gosrc, err := os.ReadFile("cuda.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"if !graphEnabled || cudaKernelProfileOn {", "C.fcuda_ts_boundary()", `RegisterKernelProfileReader("cuda", readCUDAKernelProfile)`} {
+		if !strings.Contains(string(gosrc), want) {
+			t.Errorf("cuda.go lost %q", want)
+		}
+	}
+}
+
+// cudaKernelOtherAllowlist names the CUDA rows that stay in op class other:
+// dtype conversions, dequantization and activation quantization, elementwise
+// glue, gathers and status publication.
+var cudaKernelOtherAllowlist = map[string]bool{
+	"k_add": true, "k_add_bias": true, "k_copyrow": true, "k_f32_to_f16": true, "k_f32_to_f16_T": true,
+	"k_fp16_split": true, "k_nvfp4_lt_swizzle_scales": true, "k_q2k_dequant_transient": true,
+	"k_q4k_coeffs": true, "k_q4k_dequant_transient": true, "k_q8_dequant_transient": true,
+	"k_q8_quant_act": true, "k_qwen35_embedding_gather": true, "k_qwen35_split_qg_panel": true,
+	"k_qwen4exp_ple_hash_i64": true, "k_sigmoid_mul": true, "k_split_qwen35_qg": true,
+	"k_v41_bf16_publish": true, "k_v41_bf16_publish_status": true, "quantize_mmq_q8_1_ds4": true,
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestKernelOpClassCUDANames(t *testing.T) {
+	names := map[string]bool{}
+	for _, src := range cudaProfileSources(t) {
+		for _, m := range cudaTSWrap.FindAllStringSubmatch(src, -1) {
+			names[m[1]] = true
+		}
+	}
+	if len(names) < 75 {
+		t.Fatalf("found %d FCUDA_TS row names, want the full CUDA table", len(names))
+	}
+	for name := range names {
+		got := KernelOpClass(name)
+		if got == KernelOpOther && !cudaKernelOtherAllowlist[name] {
+			t.Errorf("CUDA row %s classifies as other; add a token or list it", name)
+		}
+		if got != KernelOpOther && cudaKernelOtherAllowlist[name] {
+			t.Errorf("CUDA row %s now classifies as %s; drop it from the other allowlist", name, got)
+		}
+	}
+	for name := range cudaKernelOtherAllowlist {
+		if !names[name] {
+			t.Errorf("allowlisted %s is no longer a CUDA row", name)
+		}
+	}
+	for name, want := range map[string]string{
+		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec,
+		"k_awq_gemv": KernelOpMatvec, "k_rex_gemv_mxfp4_e8m0": KernelOpMatvec, "k_rex_gemv_fp8_block32_e8m0": KernelOpMatvec,
+		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
+		"cublas_sgemm": KernelOpMatmul, "cublas_gemm_ex": KernelOpMatmul, "cublaslt_matmul": KernelOpMatmul,
+		"k_qwen38_fattn_mma_hd256": KernelOpAttention, "k_qwen38_fattn_stage_kv_f16": KernelOpAttention,
+		"k_dsa_sparse_attend": KernelOpAttention, "k_dsa_index_topk": KernelOpAttention, "k_spec_verify_combine": KernelOpAttention,
+		"k_tree_verify_attention": KernelOpAttention, "k_qwen35_gdn_fused_in_proj": KernelOpMatvec,
+		"k_qwen35_gdn_recurrent_panel_cols": KernelOpGDN, "d2d_copy": KernelOpCopy, "fill": KernelOpCopy,
+	} {
+		if !names[name] {
+			t.Errorf("%s is not a CUDA row", name)
+		}
+		if got := KernelOpClass(name); got != want {
+			t.Errorf("KernelOpClass(%q) = %s, want %s", name, got, want)
+		}
 	}
 }

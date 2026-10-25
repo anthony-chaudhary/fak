@@ -99,14 +99,14 @@ __global__ void k_awq_gemm(const uint8_t *dW, const float *dScales, const float 
 // fcuda_awq_gemv: y[out] = AWQ[out, in] @ x[in]
 extern "C" void fcuda_awq_gemv(const uint8_t *dW, const float *dScales, const float *dX, float *dY, int out, int in) {
   int threads = 256;
-  k_awq_gemv<<<out, threads, 0, g_stream>>>(dW, dScales, dX, dY, out, in);
+  FCUDA_TS("k_awq_gemv", out, k_awq_gemv<<<out, threads, 0, g_stream>>>(dW, dScales, dX, dY, out, in));
 }
 
 // fcuda_awq_gemm: Y[P, out] = X[P, in] @ AWQ[out, in]^T
 extern "C" void fcuda_awq_gemm(const uint8_t *dW, const float *dScales, const float *dX, float *dY, int out, int in, int P) {
   dim3 threads(256, 1);
   dim3 blocks(out, P);
-  k_awq_gemm<<<blocks, threads, 0, g_stream>>>(dW, dScales, dX, dY, out, in, P);
+  FCUDA_TS("k_awq_gemm", blocks, k_awq_gemm<<<blocks, threads, 0, g_stream>>>(dW, dScales, dX, dY, out, in, P));
 }
 
 // ---- GPTQ (AutoGPTQ/GPTQModel) int32-packed weight-only kernels -----------------
@@ -182,8 +182,8 @@ extern "C" void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, cons
                                 const int32_t *dGidx, const float *dX, float *dY,
                                 int out, int in, int bits, int groupSize, int nGroups) {
   int threads = 256;
-  k_gptq_gemv<<<out, threads, 0, g_stream>>>(dW, dZeros, dScales, dGidx, dX, dY,
-                                             out, in, bits, groupSize, nGroups);
+  FCUDA_TS("k_gptq_gemv", out, k_gptq_gemv<<<out, threads, 0, g_stream>>>(dW, dZeros, dScales, dGidx, dX, dY,
+                                             out, in, bits, groupSize, nGroups));
 }
 /* Draft insertion in cuda_kernels.cu. Clean-room use of the documented
  * cuBLASLt API; no NVIDIA sample source is copied. The official BSD-3 sample
@@ -251,11 +251,12 @@ static int nvfp4_lt_swizzle_scales(const uint8_t *linear, uint8_t *tiled,
     return FCUDA_NVFP4_LT_GEOMETRY;
   size_t logical = (size_t)rows * (size_t)scale_cols;
   if (logical > (size_t)INT_MAX) return FCUDA_NVFP4_LT_GEOMETRY;
-  cudaError_t error = cudaMemsetAsync(tiled, 0, tiled_bytes, g_stream);
+  cudaError_t error = cudaSuccess;
+  FCUDA_TS("fill", dim3(0, 0), error = cudaMemsetAsync(tiled, 0, tiled_bytes, g_stream));
   if (error != cudaSuccess) return FCUDA_NVFP4_LT_CUDA_ERROR_BASE - (int)error;
   unsigned int blocks = (unsigned int)((logical + 255u) / 256u);
-  k_nvfp4_lt_swizzle_scales<<<blocks, 256, 0, g_stream>>>(
-      linear, tiled, rows, scale_cols);
+  FCUDA_TS("k_nvfp4_lt_swizzle_scales", blocks, k_nvfp4_lt_swizzle_scales<<<blocks, 256, 0, g_stream>>>(
+      linear, tiled, rows, scale_cols));
   error = cudaPeekAtLastError();
   return error == cudaSuccess ? FCUDA_NVFP4_LT_OK
                               : FCUDA_NVFP4_LT_CUDA_ERROR_BASE - (int)error;
@@ -375,10 +376,10 @@ extern "C" int fcuda_nvfp4_w4a4_f32(const uint8_t *dW,
   if (status != FCUDA_NVFP4_LT_OK) goto cleanup;
   status = FCUDA_NVFP4_LT_RUNTIME_UNSUPPORTED;
   for (int i = 0; i < viableCount; ++i) {
-    cs = cublasLtMatmul(
+    FCUDA_TS("cublaslt_matmul", dim3(out, rows), cs = cublasLtMatmul(
         g_nvfp4_lt, op, &alpha, dW, wLayout, dA, aLayout, &beta,
         dY, cLayout, dY, yLayout, &candidates[viable[i]].algo,
-        g_blas_workspace, g_nvfp4_lt_workspace_bytes, g_stream);
+        g_blas_workspace, g_nvfp4_lt_workspace_bytes, g_stream));
     if (cs == CUBLAS_STATUS_SUCCESS) {
       ++g_nvfp4_lt_calls;
       status = FCUDA_NVFP4_LT_OK;

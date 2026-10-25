@@ -80,6 +80,7 @@ extern "C" int fcuda_handoff_pinned_free(void *h) {
 extern "C" int fcuda_handoff_h2d(int device, void *d, const void *h, size_t bytes) {
   fcuda_handoff_device_guard guard;
   cudaError_t e = cudaSetDevice(device);
+  fcuda_ts_untimed_transfer();
   if (e == cudaSuccess) e = cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice);
   return fcuda_handoff_status(e, "h2d");
 }
@@ -87,11 +88,13 @@ extern "C" int fcuda_handoff_h2d(int device, void *d, const void *h, size_t byte
 extern "C" int fcuda_handoff_d2h(int device, void *h, const void *d, size_t bytes) {
   fcuda_handoff_device_guard guard;
   cudaError_t e = cudaSetDevice(device);
+  fcuda_ts_untimed_transfer();
   if (e == cudaSuccess) e = cudaMemcpy(h, d, bytes, cudaMemcpyDeviceToHost);
   return fcuda_handoff_status(e, "d2h");
 }
 
 extern "C" int fcuda_handoff_peer_copy(int dst_device, void *dst, int src_device, const void *src, size_t bytes) {
   fcuda_handoff_device_guard guard;
+  fcuda_ts_untimed_transfer();
   return fcuda_handoff_status(cudaMemcpyPeer(dst, dst_device, src, src_device, bytes), "cudaMemcpyPeer");
 }

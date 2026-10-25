@@ -105,8 +105,8 @@ extern "C" int fcuda_tree_verify_attention_f32(
   cudaGetLastError();
   dim3 grid(qLen, nH);
   size_t shmem = ((size_t)hd + TREE_ATTN_THREADS) * sizeof(float);
-  k_tree_verify_attention<<<grid, TREE_ATTN_THREADS, shmem, g_stream>>>(
-      dQ, dK, dV, dOut, masks, qLen, kvLen, nH, nKV, hd, scale);
+  FCUDA_TS("k_tree_verify_attention", grid, k_tree_verify_attention<<<grid, TREE_ATTN_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, masks, qLen, kvLen, nH, nKV, hd, scale));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 70000 + (int)launch;
 }

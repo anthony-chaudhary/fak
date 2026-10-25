@@ -59,7 +59,7 @@ extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const floa
     CK(cudaMalloc(&g_attn_scratch, (size_t)need * sizeof(float)));
     g_attn_scratch_cap = need;
   }
-  k_attention<<<nH, 128, 0, g_stream>>>(dQ, dK, dV, dOut, g_attn_scratch, nPos, nH, nKV, hd, scale);
+  FCUDA_TS("k_attention", nH, k_attention<<<nH, 128, 0, g_stream>>>(dQ, dK, dV, dOut, g_attn_scratch, nPos, nH, nKV, hd, scale));
 }
 
 // ---- Flash / online-softmax decode attention (#486) ------------------------------
@@ -149,7 +149,7 @@ extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, cons
                                           int nPos, int maxPos, int nH, int nKV, int hd, float scale) {
   (void)maxPos;
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
-  k_flash_attention<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale);
+  FCUDA_TS("k_flash_attention", nH, k_flash_attention<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale));
 }
 
 // Prompt-panel counterpart of k_flash_attention. K/V already contain the
@@ -317,8 +317,8 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
     if (mma != -2) return mma;
   }
   size_t shmem = ((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float);
-  k_qwen38_causal_attention_panel_hd256<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
-      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
+  FCUDA_TS("k_qwen38_causal_attention_panel_hd256", tokens * nH, k_qwen38_causal_attention_panel_hd256<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 50000 + (int)launch;
 }
@@ -389,8 +389,8 @@ extern "C" int fcuda_causal_attention_panel_f32(
   if (prefix + tokens > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   cudaGetLastError();
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
-  k_prompt_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
-      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale);
+  FCUDA_TS("k_prompt_causal_attention_panel", tokens * nH, k_prompt_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale));
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 71000 + (int)launch;
 }

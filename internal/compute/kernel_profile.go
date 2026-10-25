@@ -233,19 +233,24 @@ var kernelTransferNames = map[string]bool{
 // fused projections whose names carry no matvec token (a GDN in_proj, a routed
 // gate_up or down_sum) before GDN and SwiGLU. A routed *_panel_* kernel is a
 // publication or activation over an already projected row, not a projection.
+// CUDA names spell the same ops gemv/gemm (cuBLAS rows cublas_*gemm*), mul_mat
+// (the llama.cpp MMQ port), and fattn/attend/spec_verify/dsa_index for the
+// attention family.
 func KernelOpClass(name string) string {
 	switch {
 	case kernelTransferNames[name]:
 		return KernelOpCopy
-	case strings.Contains(name, "attention"):
+	case strings.Contains(name, "attention"), strings.Contains(name, "fattn"), strings.Contains(name, "attend"),
+		strings.Contains(name, "spec_verify"), strings.Contains(name, "dsa_index"):
 		return KernelOpAttention
 	case strings.Contains(name, "in_proj"), strings.Contains(name, "gate_up"), strings.Contains(name, "down_sum"):
 		return KernelOpMatvec
 	case strings.Contains(name, "gdn"), strings.Contains(name, "kda"):
 		return KernelOpGDN
-	case strings.Contains(name, "matvec"):
+	case strings.Contains(name, "matvec"), strings.Contains(name, "gemv"):
 		return KernelOpMatvec
-	case strings.Contains(name, "matmul"), strings.Contains(name, "token_panel"), strings.Contains(name, "token_pair"):
+	case strings.Contains(name, "matmul"), strings.Contains(name, "token_panel"), strings.Contains(name, "token_pair"),
+		strings.Contains(name, "gemm"), strings.Contains(name, "mul_mat"), strings.Contains(name, "w4a16"):
 		return KernelOpMatmul
 	case strings.Contains(name, "swiglu"):
 		return KernelOpSwiGLU

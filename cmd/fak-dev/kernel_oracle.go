@@ -190,7 +190,7 @@ func writeKernelOracleUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak-dev kernel-oracle rank --shapes F [--ggml F] [--fak-bench F] [--fak-profile F] [--fak-ledger F --fak-ledger-request ID]")
 	fmt.Fprintln(w, "                                  [--ggml-backend Vulkan0] [--evidence-class C] [--node N] [--out F]")
 	fmt.Fprintln(w, "ggml input: console output of `test-backend-ops perf -b <backend> [--test-file F]`")
-	fmt.Fprintln(w, "fak input:  `go test -bench` lines and/or FAK_VULKAN_TIMESTAMP_PROFILE=1 ts-stage lines")
+	fmt.Fprintln(w, "fak input:  `go test -bench` lines and/or FAK_VULKAN_TIMESTAMP_PROFILE=1 / FAK_CUDA_TIMESTAMP_PROFILE=1 ts-stage lines")
 }
 
 func runKernelOracleShapes(stdout, stderr io.Writer, argv []string) error {
@@ -382,7 +382,7 @@ func runKernelOracleRank(stdout, stderr io.Writer, argv []string) error {
 	shapesPath := fs.String("shapes", "", "shape list from `kernel-oracle shapes`")
 	ggmlPath := fs.String("ggml", "", "test-backend-ops perf console output")
 	benchPath := fs.String("fak-bench", "", "go test -bench output (BenchmarkVulkanRawIQMatvec)")
-	profilePath := fs.String("fak-profile", "", "stderr carrying FAK_VULKAN_TIMESTAMP_PROFILE ts-stage lines")
+	profilePath := fs.String("fak-profile", "", "stderr carrying FAK_VULKAN_TIMESTAMP_PROFILE or FAK_CUDA_TIMESTAMP_PROFILE ts-stage lines")
 	ledgerPath := fs.String("fak-ledger", "", "raw profile-on perf-ledger JSONL; preserves device interval lineage")
 	ledgerRequest := fs.String("fak-ledger-request", "", "exact request_id of one profile-on ledger window")
 	backend := fs.String("ggml-backend", "Vulkan0", "test-backend-ops backend section to read")
@@ -745,15 +745,16 @@ func parseOracleLedger(text, requestID, shapeModel string) ([]oracleStage, error
 		seen[key] = true
 		st := oracleStage{Kernel: sample.Kernel, Groups: sample.Groups, USPerCall: sample.USPerCall, SharePct: sample.Share * 100,
 			Ledger: &oracleLedgerLineage{Line: selectedLine, RequestID: r.RequestID, Model: r.Model, Version: r.Version, WorkloadSHA256: r.WorkloadSHA256, ConfigSHA256: r.ConfigSHA256, Source: k.Source, Method: "unverified", Pipelining: k.Pipelining, Complete: k.Complete, DecodeSteps: k.DecodeSteps, CallsPerToken: sample.CallsPerToken, Truncated: k.Truncated, UntimedCompute: k.UntimedCompute, UntimedTransfer: k.UntimedTransfer, BarriersElided: k.BarriersElided}}
-		if k.Source == perfledger.KernelSourceStructured && k.Backend == "vulkan" && k.Pipelining == perfledger.KernelPipeliningDisabledByProfile {
-			st.Ledger.Method = "structured_device_timestamp_intervals"
+		method, timedBackend := oracleLedgerTimerMethods[k.Backend]
+		if k.Source == perfledger.KernelSourceStructured && timedBackend && k.Pipelining == perfledger.KernelPipeliningDisabledByProfile {
+			st.Ledger.Method = method
 		}
 		gx, gy, ok := strings.Cut(sample.Groups, "x")
 		var errX, errY error
 		st.gx, errX = strconv.ParseInt(gx, 10, 32)
 		st.gy, errY = strconv.ParseInt(gy, 10, 32)
 		switch {
-		case r.Error != "" || r.Planner != "inkernel" || r.Backend != "vulkan" || k.Backend != "vulkan":
+		case r.Error != "" || r.Planner != "inkernel" || !timedBackend || r.Backend != k.Backend:
 			st.Unjoined = "ledger_native_identity_unverified"
 		case r.Model != strings.TrimSuffix(filepath.Base(shapeModel), ".gguf"):
 			st.Unjoined = "ledger_model_mismatch"
@@ -770,6 +771,14 @@ func parseOracleLedger(text, requestID, shapeModel string) ([]oracleStage, error
 		return nil, fmt.Errorf("%w: selected ledger profile has no kernel rows", errKernelOracleUsage)
 	}
 	return stages, nil
+}
+
+// oracleLedgerTimerMethods names the device timer behind each backend whose
+// timestamp profile feeds structured ledger rows: Vulkan timestamp queries
+// between dispatches, CUDA event pairs around each launch.
+var oracleLedgerTimerMethods = map[string]string{
+	"vulkan": "structured_device_timestamp_intervals",
+	"cuda":   "structured_device_event_pair_intervals",
 }
 
 func oracleLedgerPositive(n float64) bool { return n > 0 && !math.IsNaN(n) && !math.IsInf(n, 0) }

@@ -307,11 +307,14 @@ static int rex_run(int format, const rex_geom &g, const uint8_t *weight, const u
     t0 = rex_now_ms();
   }
   if (upload) {
+    fcuda_ts_untimed_transfer();
     if ((e = cudaMemcpy(dW, weight, g.weight, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
     g_h2d_bytes += g.weight;
+    fcuda_ts_untimed_transfer();
     if ((e = cudaMemcpy(dS, scales, g.scale, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
     g_h2d_bytes += g.scale;
   }
+  fcuda_ts_untimed_transfer();
   if ((e = cudaMemcpy(dX, x, g.x, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
   g_h2d_bytes += g.x;
   if (timing_ms) {
@@ -321,11 +324,11 @@ static int rex_run(int format, const rex_geom &g, const uint8_t *weight, const u
   }
   if (rex_take_test_fault(REX_TEST_FAULT_LAUNCH)) { status = (int)cudaErrorInvalidConfiguration; goto done; }
   if (format == REX_FORMAT_FP8_BLOCK32) {
-    k_rex_gemv_fp8_block32_e8m0<<<(unsigned int)g.blocks, REX_THREADS, 0, g_stream>>>(
-        (const uint8_t *)kW, (const uint8_t *)kS, (const float *)dX, (float *)dY, (long long)O, (long long)I);
+    FCUDA_TS("k_rex_gemv_fp8_block32_e8m0", (unsigned int)g.blocks, k_rex_gemv_fp8_block32_e8m0<<<(unsigned int)g.blocks, REX_THREADS, 0, g_stream>>>(
+        (const uint8_t *)kW, (const uint8_t *)kS, (const float *)dX, (float *)dY, (long long)O, (long long)I));
   } else {
-    k_rex_gemv_mxfp4_e8m0<<<(unsigned int)g.blocks, REX_THREADS, 0, g_stream>>>(
-        (const uint8_t *)kW, (const uint8_t *)kS, (const float *)dX, (float *)dY, (long long)O, (long long)I);
+    FCUDA_TS("k_rex_gemv_mxfp4_e8m0", (unsigned int)g.blocks, k_rex_gemv_mxfp4_e8m0<<<(unsigned int)g.blocks, REX_THREADS, 0, g_stream>>>(
+        (const uint8_t *)kW, (const uint8_t *)kS, (const float *)dX, (float *)dY, (long long)O, (long long)I));
   }
   if ((e = cudaGetLastError()) != cudaSuccess) { status = (int)e; goto done; }
   if (timing_ms && (e = cudaEventRecord(ev[1], g_stream)) != cudaSuccess) { status = (int)e; goto done; }
@@ -335,6 +338,7 @@ static int rex_run(int format, const rex_geom &g, const uint8_t *weight, const u
     if ((e = cudaEventElapsedTime(&kernelMs, ev[0], ev[1])) != cudaSuccess) { status = (int)e; goto done; }
     t2 = rex_now_ms();
   }
+  fcuda_ts_untimed_transfer();
   if ((e = cudaMemcpy(y, dY, g.y, cudaMemcpyDeviceToHost)) != cudaSuccess) { status = (int)e; goto done; }
   g_host_bytes += g.y;
   if (timing_ms) {
@@ -406,8 +410,10 @@ extern "C" int fcuda_routed_expert_resident_upload(
     return -3;
   }
   (void)cudaGetLastError();
+  fcuda_ts_untimed_transfer();
   if ((e = cudaMemcpy(dW, weight, weight_bytes, cudaMemcpyHostToDevice)) == cudaSuccess) {
     g_h2d_bytes += weight_bytes;
+    fcuda_ts_untimed_transfer();
     if ((e = cudaMemcpy(dS, scales, scale_bytes, cudaMemcpyHostToDevice)) == cudaSuccess) g_h2d_bytes += scale_bytes;
   }
   if (e != cudaSuccess) {
