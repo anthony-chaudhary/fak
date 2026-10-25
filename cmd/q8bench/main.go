@@ -62,18 +62,20 @@ func minMS(ds []time.Duration) float64 {
 }
 
 type prefillResult struct {
-	Tokens    int     `json:"tokens"`
-	Reps      int     `json:"reps"`
-	MedianMS  float64 `json:"median_ms"`
-	TokPerSec float64 `json:"tok_per_sec"`
+	Tokens                     int      `json:"tokens"`
+	Reps                       int      `json:"reps"`
+	MedianMS                   float64  `json:"median_ms"`
+	TokPerSec                  *float64 `json:"tok_per_sec"`
+	TokPerSecUnavailableReason string   `json:"tok_per_sec_unavailable_reason,omitempty"`
 }
 
 type decodeResult struct {
-	PromptTokens  int     `json:"prompt_tokens"`
-	DecodeSteps   int     `json:"decode_steps"`
-	Reps          int     `json:"reps"`
-	PerTokenMedMS float64 `json:"per_token_median_ms"`
-	TokPerSec     float64 `json:"tok_per_sec"`
+	PromptTokens               int      `json:"prompt_tokens"`
+	DecodeSteps                int      `json:"decode_steps"`
+	Reps                       int      `json:"reps"`
+	PerTokenMedMS              float64  `json:"per_token_median_ms"`
+	TokPerSec                  *float64 `json:"tok_per_sec"`
+	TokPerSecUnavailableReason string   `json:"tok_per_sec_unavailable_reason,omitempty"`
 }
 
 type oraclePrompt struct {
@@ -110,18 +112,40 @@ func readRequiredOracle(dir string) (oracleDoc, error) {
 	return doc, nil
 }
 
+const timingResolutionReason = "duration is zero at host timer resolution"
+
+func finiteTimingRatio(numerator, denominator float64) (*float64, string) {
+	switch {
+	case math.IsNaN(numerator) || math.IsInf(numerator, 0) || numerator < 0:
+		return nil, "numerator is not finite and non-negative"
+	case math.IsNaN(denominator) || math.IsInf(denominator, 0) || denominator < 0:
+		return nil, "duration denominator is not finite and non-negative"
+	case denominator == 0:
+		return nil, timingResolutionReason
+	}
+	value := numerator / denominator
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return nil, "derived timing ratio is not finite"
+	}
+	return &value, ""
+}
+
+func prefillSummary(tokens, reps int, medianMS float64) prefillResult {
+	rate, reason := finiteTimingRatio(float64(tokens)*1e3, medianMS)
+	return prefillResult{Tokens: tokens, Reps: reps, MedianMS: medianMS, TokPerSec: rate, TokPerSecUnavailableReason: reason}
+}
+
 func decodeSummaries(f32D, q8D [2]float64, prompt, steps, reps int) (decodeResult, decodeResult) {
 	mk := func(medianMS float64) decodeResult {
-		r := decodeResult{
-			PromptTokens:  prompt,
-			DecodeSteps:   steps,
-			Reps:          reps,
-			PerTokenMedMS: medianMS,
+		rate, reason := finiteTimingRatio(1e3, medianMS)
+		return decodeResult{
+			PromptTokens:               prompt,
+			DecodeSteps:                steps,
+			Reps:                       reps,
+			PerTokenMedMS:              medianMS,
+			TokPerSec:                  rate,
+			TokPerSecUnavailableReason: reason,
 		}
-		if medianMS > 0 {
-			r.TokPerSec = 1e3 / medianMS
-		}
-		return r
 	}
 	return mk(f32D[1]), mk(q8D[1])
 }
@@ -375,8 +399,13 @@ func main() {
 		var prefs []prefillResult
 		for _, p := range prefillSizes {
 			ms := benchPrefill(m, quant, p, *prefillReps, vocab)
-			prefs = append(prefs, prefillResult{Tokens: p, Reps: *prefillReps, MedianMS: ms, TokPerSec: float64(p) / (ms / 1e3)})
-			fmt.Fprintf(os.Stderr, "[fak %s] prefill P=%d: %.1f ms (%.1f tok/s)\n", tag, p, ms, float64(p)/(ms/1e3))
+			result := prefillSummary(p, *prefillReps, ms)
+			prefs = append(prefs, result)
+			if result.TokPerSec == nil {
+				fmt.Fprintf(os.Stderr, "[fak %s] prefill P=%d: %.1f ms (tok/s unavailable: %s)\n", tag, p, ms, result.TokPerSecUnavailableReason)
+			} else {
+				fmt.Fprintf(os.Stderr, "[fak %s] prefill P=%d: %.1f ms (%.1f tok/s)\n", tag, p, ms, *result.TokPerSec)
+			}
 		}
 		return prefs
 	}
@@ -388,6 +417,8 @@ func main() {
 	hfInt8 := hfBestDecode(filepath.Join(*expDir, "hf-int8.json"), *decodePrompt, *decodeSteps, *decodeReps)
 	decision := decideQ8Bench(totalPos, totalMatch, q8Dec.PerTokenMedMS, hfInt8, hfF32)
 
+	minSpeedup, minSpeedupReason := finiteTimingRatio(f32D[0], q8D[0])
+	medianSpeedup, medianSpeedupReason := finiteTimingRatio(f32Dec.PerTokenMedMS, q8Dec.PerTokenMedMS)
 	report := map[string]any{
 		"app_version": appversion.Current(),
 		"engine":      "fak-in-kernel int8 (Model.Quantize + Session.Quant; pure-Go/AVX dispatch)",
@@ -402,8 +433,8 @@ func main() {
 			"f32":  f32D,
 			"int8": q8D,
 		},
-		"decode_speedup_min_f32_over_int8":    f32D[0] / q8D[0],
-		"decode_speedup_median_f32_over_int8": f32Dec.PerTokenMedMS / q8Dec.PerTokenMedMS,
+		"decode_speedup_min_f32_over_int8":    minSpeedup,
+		"decode_speedup_median_f32_over_int8": medianSpeedup,
 		"correctness": map[string]any{
 			"gate_argmax_exact_vs_hf_oracle": correctnessOK,
 			"total_positions":                totalPos,
@@ -412,7 +443,17 @@ func main() {
 		},
 		"verdict": decision.verdictReport(q8Dec.PerTokenMedMS, hfInt8, hfF32),
 	}
-	jb, _ := benchcli.MarshalReport(report)
+	if minSpeedupReason != "" {
+		report["decode_speedup_min_f32_over_int8_unavailable_reason"] = minSpeedupReason
+	}
+	if medianSpeedupReason != "" {
+		report["decode_speedup_median_f32_over_int8_unavailable_reason"] = medianSpeedupReason
+	}
+	jb, err := benchcli.MarshalReport(report)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "marshal report:", err)
+		os.Exit(1)
+	}
 	if *out != "" {
 		if err := os.WriteFile(*out, jb, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write:", err)

@@ -765,12 +765,12 @@ func stopStartedProcess(cmd *exec.Cmd, identity string, timeout time.Duration) {
 func waitForOriginalProcess(pid int, identity string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !processMatches(pid, identity) {
+		if processDefinitelyGone(pid) || !processMatches(pid, identity) {
 			return true
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	return !processMatches(pid, identity)
+	return processDefinitelyGone(pid) || !processMatches(pid, identity)
 }
 
 type instanceLock struct {

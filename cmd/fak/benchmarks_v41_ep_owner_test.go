@@ -29,9 +29,10 @@ func TestBenchmarksV41EPOwnerRegisteredAdapter(t *testing.T) {
 		}
 	})
 	t.Run("run-dispatches-in-process-validation", func(t *testing.T) {
+		shardPath := filepath.Join(t.TempDir(), "owner.gguf")
 		req := localbench.V41EPOwnerRequest{
 			Schema: localbench.V41EPOwnerRequestSchema, RunID: "registered-diagnostic", WorldSize: 3,
-			Shards:       []ggufload.ShardIdentity{{Path: "/synthetic/owner.gguf", Size: 64, RawFileSHA256: strings.Repeat("a", 64)}},
+			Shards:       []ggufload.ShardIdentity{{Path: shardPath, Size: 64, RawFileSHA256: strings.Repeat("a", 64)}},
 			SourceSHA256: strings.Repeat("c", 64), CoordinatorAddress: "127.0.0.1:19341",
 			Owners: []localbench.V41EPOwnerSelection{
 				{Rank: 0, Backend: "vulkan", ExpectedDevice: "device 0"},

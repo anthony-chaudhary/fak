@@ -515,6 +515,7 @@ func TestDFlash2SourceAcquisitionUnverifiedRetirement(t *testing.T) {
 			}
 			primary, cleanup := errors.New("open failed after acquisition"), errors.New("reader close reported failure")
 			spec := dflash2ValidSpec()
+			spec.SidecarPath = filepath.Join(t.TempDir(), "not-opened.safetensors")
 			original := spec.Shards[0]
 			be := &dflash2GateBackend{owner: new(sync.Mutex)}
 			opens, closes := 0, 0
@@ -654,6 +655,7 @@ func dflash2AuthenticatedProbe(t *testing.T) DFlash2TargetSpec {
 	digest := sha256.Sum256(raw)
 	path := filepath.Join(t.TempDir(), "probe.gguf")
 	spec := dflash2ValidSpec()
+	spec.SidecarPath = filepath.Join(t.TempDir(), "not-opened.safetensors")
 	spec.Shards = []ggufload.ShardIdentity{{Path: path, Size: int64(len(raw)), RawFileSHA256: hex.EncodeToString(digest[:])}}
 	encoded, err := json.Marshal(spec.Shards)
 	if err != nil {

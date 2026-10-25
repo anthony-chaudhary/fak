@@ -29,11 +29,10 @@ safe to rerun. The complete JSON is deliberately not byte-identical: temporary
 process identities, build-dependent executable digests, receipt digests, and
 elapsed milliseconds vary between runs.
 
-Current platform limitation: the captured selfcheck and package test pass under
-Linux/WSL. On the Windows control host used for issue #9245, the same run reached
-owned teardown but `serverlifecycle` reported `STOP_TIMEOUT` after killing the
-fixture process. Use WSL for this witness until the production Windows lifecycle
-wait is repaired; this demo does not mask or reinterpret that refusal.
+The captured selfcheck and package test pass on Windows and Linux. Windows
+teardown treats an exited owned process as stopped even while the launcher still
+retains its process handle; ownership still requires the recorded PID and process
+start identity before the stop signal is sent.
 
 ## What this does not claim
 

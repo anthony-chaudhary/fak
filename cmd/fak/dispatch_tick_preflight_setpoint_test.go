@@ -108,14 +108,17 @@ func TestDispatchPreflightFoldsOperatorSetpoint(t *testing.T) {
 	// the ceiling-bounded worker floor -- 6 fits under the hard ceilings (configured 8,
 	// host 32, seat 12), so the cap lands exactly at the setpoint and admits grow.
 	kernelAlive, kernelTarget = 2, 4
+	dispatchKernelCache.Lock()
+	dispatchKernelCache.at, dispatchKernelCache.root = time.Time{}, ""
+	dispatchKernelCache.Unlock()
 	t.Setenv(dispatchtick.SetpointConcurrencyEnv, "6")
 	out = preflight(t)
-	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 8 {
-		t.Fatalf("grow verdict/cap = %v/%v, want SPAWN_OK/8; payload=%v", out["verdict"], out["cap"], out)
+	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 6 {
+		t.Fatalf("grow verdict/cap = %v/%v, want SPAWN_OK/6; payload=%v", out["verdict"], out["cap"], out)
 	}
 	terms = capTerms(t, out)
-	if terms["limiting"] != "configured" || terms["worker_floor"] != 6 {
-		t.Fatalf("grow cap_terms = %v, want limiting=configured worker_floor=6", terms)
+	if terms["limiting"] != "floor" || terms["worker_floor"] != 6 {
+		t.Fatalf("grow cap_terms = %v, want limiting=floor worker_floor=6", terms)
 	}
 	sp, ok = out["setpoint"].(map[string]any)
 	if !ok || sp["mode"] != "grow" || sp["desired_cap"] != 6 {

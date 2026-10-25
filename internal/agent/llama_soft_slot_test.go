@@ -110,6 +110,17 @@ func softSlotTurn(t *testing.T, p *HTTPPlanner, msgs []Message) (int, *upstreamC
 	return id, call
 }
 
+func setSoftSlotUseOrder(t *testing.T, p *HTTPPlanner, ids ...int) {
+	t.Helper()
+	st := llamaSoftSlotsFor(p.BaseURL)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	base := time.Unix(1, 0)
+	for i, id := range ids {
+		st.slotUsed[id] = base.Add(time.Duration(i) * time.Second)
+	}
+}
+
 func conv(user string, extra ...string) []Message {
 	msgs := []Message{{Role: RoleSystem, Content: "shared harness prompt"}, {Role: RoleUser, Content: user}}
 	for _, e := range extra {
@@ -312,6 +323,7 @@ func TestLlamaSoftSlotReportsOwnershipSteals(t *testing.T) {
 			if got := LlamaSoftSlotCounts()["stolen"] - before; got != 0 {
 				t.Fatalf("assigning unowned slots counted %d steals", got)
 			}
+			setSoftSlotUseOrder(t, p, 0, 1, 2, 3)
 			for i, name := range []string{"E", "A"} {
 				got, call := softSlotTurn(t, p, conv(name, "next turn"))
 				call.releaseSlot()

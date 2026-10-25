@@ -609,6 +609,18 @@ func TestVerifySourceBinding_DirectChecks(t *testing.T) {
 	})
 
 	t.Run("local git repository check matches or mismatches", func(t *testing.T) {
+		root := t.TempDir()
+		for _, args := range [][]string{
+			{"init", "--quiet", "--template="},
+			{"-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=", "commit", "--allow-empty", "--quiet", "-m", "source binding fixture"},
+		} {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("prepare source binding repository: %v: %s", err, out)
+			}
+		}
+		t.Chdir(root)
 		headBytes, err := exec.Command("git", "rev-parse", "HEAD").Output()
 		if err != nil {
 			t.Skip("git not available in environment")

@@ -186,7 +186,11 @@ type suffixPrefillReport struct {
 // No route receipt is exposed by the current model API. These measurements
 // establish actual seeded Session calls, never execution of a requested fast path.
 func suffixPrefillPass(factory func() suffixPrefillSession, w suffixPrefillWorkload, serial bool, vocab int) (sample suffixPrefillSample, suffix, next []float32, err error) {
-	started := time.Now()
+	return suffixPrefillPassWithClock(factory, w, serial, vocab, time.Now)
+}
+
+func suffixPrefillPassWithClock(factory func() suffixPrefillSession, w suffixPrefillWorkload, serial bool, vocab int, now func() time.Time) (sample suffixPrefillSample, suffix, next []float32, err error) {
+	started := now()
 	var s suffixPrefillSession
 	completed := false
 	defer func() {
@@ -207,7 +211,7 @@ func suffixPrefillPass(factory func() suffixPrefillSession, w suffixPrefillWorkl
 				closed = true
 			}()
 		}
-		sample.TotalNanos = time.Since(started).Nanoseconds()
+		sample.TotalNanos = now().Sub(started).Nanoseconds()
 		if err != nil {
 			sample.Error = err.Error()
 		}
@@ -234,9 +238,9 @@ func suffixPrefillPass(factory func() suffixPrefillSession, w suffixPrefillWorkl
 		return sample, nil, nil, errors.New("session is not fresh")
 	}
 	gpuBefore := compute.KernelProfileSnapshot()
-	t := time.Now()
+	t := now()
 	prefix := s.Prefill(w.Prefix)
-	end := time.Now()
+	end := now()
 	sample.PrefixNanos = end.Sub(t).Nanoseconds()
 	sample.GPU["prefix"] = suffixGPUWindow(gpuBefore, compute.KernelProfileSnapshot(), sample.Backend, t, end)
 	if err = checkSuffixLogits(prefix, vocab); err != nil {
@@ -247,7 +251,7 @@ func suffixPrefillPass(factory func() suffixPrefillSession, w suffixPrefillWorkl
 		return
 	}
 	gpuBefore = compute.KernelProfileSnapshot()
-	t = time.Now()
+	t = now()
 	if serial {
 		for _, id := range w.Suffix {
 			suffix = s.Step(id)
@@ -258,7 +262,7 @@ func suffixPrefillPass(factory func() suffixPrefillSession, w suffixPrefillWorkl
 	} else {
 		suffix = s.Prefill(w.Suffix)
 	}
-	end = time.Now()
+	end = now()
 	sample.SuffixNanos = end.Sub(t).Nanoseconds()
 	sample.GPU["suffix"] = suffixGPUWindow(gpuBefore, compute.KernelProfileSnapshot(), sample.Backend, t, end)
 	if err = checkSuffixLogits(suffix, vocab); err != nil {
@@ -270,9 +274,9 @@ func suffixPrefillPass(factory func() suffixPrefillSession, w suffixPrefillWorkl
 		return
 	}
 	gpuBefore = compute.KernelProfileSnapshot()
-	t = time.Now()
+	t = now()
 	next = s.Step(w.Next)
-	end = time.Now()
+	end = now()
 	sample.NextNanos = end.Sub(t).Nanoseconds()
 	sample.GPU["next_step"] = suffixGPUWindow(gpuBefore, compute.KernelProfileSnapshot(), sample.Backend, t, end)
 	if err = checkSuffixLogits(next, vocab); err != nil {
@@ -320,6 +324,10 @@ func compareSuffixLogits(got, want []float32, w suffixPrefillWorkload) (float64,
 }
 
 func measureSuffixPrefill(factory func() suffixPrefillSession, w suffixPrefillWorkload, vocab int) (report suffixPrefillReport, err error) {
+	return measureSuffixPrefillWithClock(factory, w, vocab, time.Now)
+}
+
+func measureSuffixPrefillWithClock(factory func() suffixPrefillSession, w suffixPrefillWorkload, vocab int, now func() time.Time) (report suffixPrefillReport, err error) {
 	report.Schema = "fak.suffix-prefill/1"
 	report.TimingScope = "host phase wall durations; sample total includes session setup, prefix, suffix, next Step, validation, profiling reads and cleanup; excludes model load, artifact hashing and serial numerical control"
 	report.Workload = w
@@ -332,7 +340,7 @@ func measureSuffixPrefill(factory func() suffixPrefillSession, w suffixPrefillWo
 	if err = w.validate(vocab); err != nil {
 		return
 	}
-	reference, refSuffix, refNext, e := suffixPrefillPass(factory, w, true, vocab)
+	reference, refSuffix, refNext, e := suffixPrefillPassWithClock(factory, w, true, vocab, now)
 	report.Reference = reference
 	if e != nil {
 		err = fmt.Errorf("serial-Step numerical reference: %w", e)
@@ -341,7 +349,7 @@ func measureSuffixPrefill(factory func() suffixPrefillSession, w suffixPrefillWo
 	report.ReferenceSuffixDigest = reference.SuffixDigest
 	report.ReferenceNextDigest = reference.NextDigest
 	for i := 0; i < w.Repetitions; i++ {
-		sample, suffix, next, e := suffixPrefillPass(factory, w, false, vocab)
+		sample, suffix, next, e := suffixPrefillPassWithClock(factory, w, false, vocab, now)
 		if e == nil {
 			sample.SuffixMaxAbs, e = compareSuffixLogits(suffix, refSuffix, w)
 		}

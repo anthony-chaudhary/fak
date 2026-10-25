@@ -319,8 +319,11 @@ func TestEngineStepWiringScalarFallbackExecution(t *testing.T) {
 						path, reason, count = enginestep.PathBatched, "", 6-i
 					}
 				}
-				if rec.Path != path || rec.Lanes != count || rec.Tokens != count || engineStepReason(t, rec) != reason || rec.DurationNS <= 0 {
-					t.Errorf("decode row %d = %+v, want %s/%d/%s with its own forward duration", i, rec, path, count, reason)
+				// A completed tiny CPU forward can fall within one Windows clock tick.
+				// Exact rows, tokens, paths, reasons and token parity above prove execution;
+				// zero records below-resolution time without inventing an epsilon.
+				if rec.Path != path || rec.Lanes != count || rec.Tokens != count || engineStepReason(t, rec) != reason || rec.DurationNS < 0 {
+					t.Errorf("decode row %d = %+v, want %s/%d/%s with a non-negative measured forward duration", i, rec, path, count, reason)
 				}
 			}
 		})

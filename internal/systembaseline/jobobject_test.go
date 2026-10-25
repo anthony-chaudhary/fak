@@ -85,4 +85,48 @@ func TestWindowsJobCleanupFailureIsInvalidByPolicy(t *testing.T) {
 	if err := report.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	for _, axis := range []string{"host_cpu", "sut_cpu", "memory", "sampler"} {
+		t.Run(axis, func(t *testing.T) {
+			unknown := report
+			switch axis {
+			case "host_cpu":
+				unknown.Host.CPUPercent = unavailable("percent", "injected unavailable host accounting")
+			case "sut_cpu":
+				unknown.Attribution.SUTCPUPercentOfHost = unavailable("percent", "injected unavailable job accounting")
+			case "memory":
+				unknown.Attribution.SUTRSSBytes = unavailable("bytes", "injected unavailable memory accounting")
+			case "sampler":
+				unknown.CommandSampler.DutyPercent = unavailable("percent", "injected unavailable sampler accounting")
+			}
+			unknown.Seal()
+			if err := unknown.Validate(); err != nil {
+				t.Fatalf("missing %s evidence must not downgrade failed cleanup: %v", axis, err)
+			}
+		})
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/systembaseline/systembaseline.go
+// fak-test:runtime fast est=1ms lane=default
+func TestSamplerCoverageFailurePrecedesUnavailableMetrics(t *testing.T) {
+	for _, baseline := range []bool{false, true} {
+		report := BuildWithCommandAttribution(quietFixture(100e6), fixture(100e6, 0), 10, time.Second, DefaultPolicy(), 0, false, nil)
+		report.Host.CPUPercent = unavailable("percent", "injected unavailable host accounting")
+		report.Verdict = VerdictInvalid
+		if baseline {
+			report.BaselineSampler.CoverageLimited = true
+		} else {
+			report.CommandSampler.CoverageLimited = true
+		}
+		report.Seal()
+		if err := report.Validate(); err != nil {
+			t.Fatalf("limited sampler coverage must remain invalid when metrics are unknown: %v", err)
+		}
+		report.BaselineSampler.CoverageLimited = false
+		report.CommandSampler.CoverageLimited = false
+		report.Seal()
+		if err := report.Validate(); err == nil {
+			t.Fatal("unknown metrics alone must not justify an invalid verdict")
+		}
+	}
 }

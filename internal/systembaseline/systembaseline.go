@@ -751,6 +751,12 @@ func Decode(rd io.Reader) (Report, error) {
 
 func (r Report) policyVerdict() string {
 	p := normalizePolicy(r.Policy)
+	if r.WindowsJobObject != nil && r.WindowsJobObject.Cleanup.Attempted && (!r.WindowsJobObject.Cleanup.Empty || !r.WindowsJobObject.Cleanup.Closed) {
+		return VerdictInvalid
+	}
+	if r.BaselineSampler.CoverageLimited || r.CommandSampler.CoverageLimited {
+		return VerdictInvalid
+	}
 	if r.Baseline.Samples < p.MinimumBaselineSamples || r.Baseline.DurationNS <= 0 || r.Baseline.IntervalNS <= 0 || r.Window.Samples < p.MinimumSamples || r.Window.DurationNS <= 0 || r.Window.IntervalNS <= 0 || r.Coverage.SUTRootPID <= 0 || r.CommandExitCode != 0 || r.TimedOut {
 		return VerdictInvalid
 	}
@@ -762,9 +768,6 @@ func (r Report) policyVerdict() string {
 	}
 	if p.RequireProcessMemory && (!r.Attribution.SUTRSSBytes.Available || !r.Attribution.NonSUTRSSBytes.Available) {
 		return VerdictInvestigate
-	}
-	if r.BaselineSampler.CoverageLimited || r.CommandSampler.CoverageLimited {
-		return VerdictInvalid
 	}
 	if !r.BaselineSampler.DutyPercent.Available || !r.CommandSampler.DutyPercent.Available {
 		return VerdictInvestigate
@@ -789,9 +792,6 @@ func (r Report) policyVerdict() string {
 				}
 			}
 		}
-	}
-	if r.WindowsJobObject != nil && r.WindowsJobObject.Cleanup.Attempted && (!r.WindowsJobObject.Cleanup.Empty || !r.WindowsJobObject.Cleanup.Closed) {
-		return VerdictInvalid
 	}
 	return VerdictClean
 }

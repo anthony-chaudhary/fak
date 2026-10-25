@@ -23,7 +23,12 @@ func TestSuffixPrefillActualCPUSessions(t *testing.T) {
 	defer m.CloseWeights()
 	w := suffixPrefillWorkload{Prefix: []int{1, 2}, Suffix: []int{3, 4, 5}, Next: 6, Repetitions: 2, AbsoluteTolerance: 1e-5, RelativeTolerance: 1e-5}
 	calls := 0
-	report, err := measureSuffixPrefill(func() suffixPrefillSession { calls++; return m.NewSession() }, w, m.Cfg.VocabSize)
+	now := time.Unix(1, 0)
+	clock := func() time.Time {
+		now = now.Add(time.Microsecond)
+		return now
+	}
+	report, err := measureSuffixPrefillWithClock(func() suffixPrefillSession { calls++; return m.NewSession() }, w, m.Cfg.VocabSize, clock)
 	if err != nil {
 		t.Fatal(err)
 	}

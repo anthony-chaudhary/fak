@@ -53,6 +53,7 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 	oldBuildResources := dispatchBuildHostResources
 	oldWorkerCount := dispatchProbeWorkerCount
 	oldProcesses := dispatchProbeProcesses
+	oldFreshSeat := dispatchProbeFreshSeat
 	oldReadAccountRoster := dispatchReadAccountRoster
 	oldFetchIssue := dispatchFetchIssue
 	oldRouteIssues := dispatchRouteIssues
@@ -79,6 +80,7 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 			Thresholds: dispatchtick.DefaultProcGuardThresholds(),
 		}
 	}
+	dispatchProbeFreshSeat = func(string, string) int { return 0 }
 	dispatchReadAccountRoster = func(root string) ([]dispatchtick.AccountRow, error) {
 		return []dispatchtick.AccountRow{
 			{Account: ".claude-preflight", Tag: "acct-preflight", Product: "claude", Dir: filepath.Join(root, "acct"), Available: true, ModelTier: 1, Model: "claude"},
@@ -121,6 +123,7 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 		dispatchBuildHostResources = oldBuildResources
 		dispatchProbeWorkerCount = oldWorkerCount
 		dispatchProbeProcesses = oldProcesses
+		dispatchProbeFreshSeat = oldFreshSeat
 		dispatchReadAccountRoster = oldReadAccountRoster
 		dispatchFetchIssue = oldFetchIssue
 		dispatchRouteIssues = oldRouteIssues
@@ -884,6 +887,8 @@ func TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue(t *testing.T) {
 // (docs) still plans normally -- would_spawn -- because docs/** is shippable under guard.
 func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	t.Setenv("FAK_FLEET_TARGET_IPH", "")
+	t.Setenv(dispatchtick.SetpointConcurrencyEnv, "")
 	root := t.TempDir()
 	initDispatchGit(t, root)
 	if err := os.WriteFile(filepath.Join(root, "dirty.txt"), []byte("peer work in progress\n"), 0o644); err != nil {

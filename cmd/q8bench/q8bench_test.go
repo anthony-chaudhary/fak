@@ -134,6 +134,48 @@ func TestQ8Bench_DecodeVerdictUsesLikeForLikeStatistic(t *testing.T) {
 	}
 }
 
+func TestQ8BenchTimingRatioAvailability(t *testing.T) {
+	tests := []struct {
+		name        string
+		numerator   float64
+		denominator float64
+		want        float64
+		available   bool
+	}{
+		{name: "positive", numerator: 6, denominator: 2, want: 3, available: true},
+		{name: "zero numerator", numerator: 0, denominator: 2, want: 0, available: true},
+		{name: "zero duration", numerator: 1, denominator: 0},
+		{name: "negative numerator", numerator: -1, denominator: 1},
+		{name: "nonfinite numerator", numerator: math.Inf(1), denominator: 1},
+		{name: "negative denominator", numerator: 1, denominator: -1},
+		{name: "nonfinite denominator", numerator: 1, denominator: math.NaN()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, reason := finiteTimingRatio(tt.numerator, tt.denominator)
+			if tt.available {
+				if got == nil || *got != tt.want || reason != "" {
+					t.Fatalf("ratio = %v reason=%q, want %v available", got, reason, tt.want)
+				}
+				return
+			}
+			if got != nil || reason == "" {
+				t.Fatalf("ratio = %v reason=%q, want explicit unavailability", got, reason)
+			}
+		})
+	}
+
+	prefill := prefillSummary(16, 1, 0)
+	_, decode := decodeSummaries([2]float64{}, [2]float64{}, 1, 1, 1)
+	b, err := json.Marshal(map[string]any{"prefill": prefill, "decode": decode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Count(b, []byte(`"tok_per_sec":null`)) != 2 || bytes.Count(b, []byte(`"tok_per_sec_unavailable_reason":"`)) != 2 || bytes.Contains(b, []byte("Inf")) || bytes.Contains(b, []byte("NaN")) {
+		t.Fatalf("zero-duration metrics did not remain explicit finite JSON: %s", b)
+	}
+}
+
 func runQ8BenchCLI(t *testing.T, args ...string) (bytes.Buffer, bytes.Buffer, error) {
 	t.Helper()
 	executable, err := os.Executable()
