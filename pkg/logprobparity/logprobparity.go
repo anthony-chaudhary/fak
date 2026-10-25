@@ -10,8 +10,8 @@
 // with one rule. The reference is either a recorded fak.reference_oracle.v1
 // (pkg/referenceoracle) or a live llama-server; the candidate is either a
 // llama-server (token ids and top-k: the exact two-sided check) or an
-// OpenAI-compatible /v1/completions endpoint that returns text only, which is
-// segmented against the reference's pieces (Method TextPieces).
+// OpenAI-compatible /v1/completions endpoint that returns legacy logprob rows
+// or text, both compared by token pieces (Method TextPieces).
 package logprobparity
 
 import "strings"
@@ -54,9 +54,10 @@ type Candidate struct {
 // Position is one generated token and, when the engine reported it, the top-k
 // at that step, most likely first. A nil TopK means "not reported".
 type Position struct {
-	ID    int         `json:"id"`
-	Piece string      `json:"piece,omitempty"`
-	TopK  []Candidate `json:"top_k,omitempty"`
+	ID           int         `json:"id"`
+	Piece        string      `json:"piece,omitempty"`
+	TopK         []Candidate `json:"top_k,omitempty"`
+	ReportedTopK int         `json:"reported_top_k,omitempty"`
 }
 
 // Result is the parity of one prompt.
@@ -90,39 +91,52 @@ func Check(actual, ref []Position, k int, method string) Result {
 	}
 	for i := 0; i < n; i++ {
 		a, b := actual[i], ref[i]
-		if a.ID == b.ID && a.ID != UnknownID {
+		if a.ID == b.ID && a.ID != UnknownID || method == TextPieces && a.Piece != "" && a.Piece == b.Piece {
 			r.GreedyMatchTokens++
 			continue
 		}
 		at, aid, bid := i, a.ID, b.ID
 		r.DivergedAt, r.ActualID, r.ReferenceID = &at, &aid, &bid
-		r.ActualInRefTopK = inTopK(a.ID, b.TopK, k)
-		r.RefInActualTopK = inTopK(b.ID, a.TopK, k)
-		r.Verdict = closeness(r.ActualInRefTopK, r.RefInActualTopK)
+		var actualUnknown, referenceUnknown bool
+		r.ActualInRefTopK, actualUnknown = inTopK(a, b, k, method)
+		r.RefInActualTopK, referenceUnknown = inTopK(b, a, k, method)
+		r.Verdict = closeness(actualUnknown || referenceUnknown, r.ActualInRefTopK, r.RefInActualTopK)
 		return r
 	}
 	r.Verdict = Match
 	return r
 }
 
-func inTopK(id int, topk []Candidate, k int) *bool {
-	if topk == nil {
-		return nil
+func inTopK(token, reported Position, k int, method string) (*bool, bool) {
+	if reported.TopK == nil {
+		return nil, false
 	}
+	topk := reported.TopK
 	if k > 0 && len(topk) > k {
 		topk = topk[:k]
 	}
-	found := false
 	for _, c := range topk {
-		if c.ID == id && id != UnknownID {
-			found = true
-			break
+		if c.ID == token.ID && token.ID != UnknownID {
+			found := true
+			return &found, false
+		}
+		if method == TextPieces && token.Piece != "" && c.Piece == token.Piece {
+			found := true
+			return &found, false
 		}
 	}
-	return &found
+	available := reported.ReportedTopK
+	if available > len(reported.TopK) {
+		available = len(reported.TopK)
+	}
+	if reported.ReportedTopK > 0 && k > available {
+		return nil, true
+	}
+	found := false
+	return &found, false
 }
 
-func closeness(checks ...*bool) string {
+func closeness(incomplete bool, checks ...*bool) string {
 	ran := false
 	for _, c := range checks {
 		if c == nil {
@@ -132,6 +146,9 @@ func closeness(checks ...*bool) string {
 		if !*c {
 			return NotClose
 		}
+	}
+	if incomplete {
+		return Unchecked
 	}
 	if !ran {
 		return Unchecked
