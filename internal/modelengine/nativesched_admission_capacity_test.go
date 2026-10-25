@@ -15,6 +15,232 @@ import (
 
 // fak-test:runtime medium est=8s lane=default
 func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
+	test.Run("impossible_prompt_is_rejected_before_session_allocation", func(test *testing.T) {
+		engine := New()
+		scheduler := engine.nativeScheduler()
+		scheduler.SetMaxRunning(1)
+		scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{
+			Mode:        NativePreemptRecompute,
+			MaxBlocks:   1,
+			BlockTokens: 4,
+		})
+		scheduler.prepare = nativeSchedulerPrefillPrepare(map[string][]int{
+			"capacity-impossible": {1, 2, 3, 4, 5},
+			"capacity-exact":      {1, 2, 3, 4},
+			"capacity-empty":      {},
+		})
+		var freshSessions atomic.Int64
+		scheduler.SetSessionProfilerFactory(func(lifecycle NativeSessionLifecycle) *model.PhaseProfiler {
+			if lifecycle == NativeSessionFresh {
+				freshSessions.Add(1)
+			}
+			return model.NewPhaseProfiler()
+		})
+		test.Cleanup(func() {
+			closeContext, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelClose()
+			if err := scheduler.CloseAndWait(closeContext); err != nil {
+				test.Errorf("scheduler teardown: %v", err)
+			}
+		})
+
+		request, err := engine.Admit(context.Background(), inlineCall("capacity-impossible", "{}"))
+		if request != nil {
+			test.Fatalf("impossible admission request = %T, want nil", request)
+		}
+		if !errors.Is(err, ErrNativePromptExceedsKVCapacity) {
+			test.Fatalf("impossible admission error = %v, want ErrNativePromptExceedsKVCapacity", err)
+		}
+		if got := freshSessions.Load(); got != 0 {
+			test.Fatalf("fresh sessions after impossible admission = %d, want 0", got)
+		}
+
+		for _, tool := range []string{"capacity-exact", "capacity-empty"} {
+			requestContext, cancelRequest := context.WithCancel(context.Background())
+			validRequest := admitCapacityRequest(test, engine, requestContext, tool)
+			awaitCapacityToken(test, validRequest)
+			cancelRequest()
+			drainCapacityRequest(test, validRequest, context.Canceled)
+		}
+		if got := freshSessions.Load(); got != 2 {
+			test.Fatalf("fresh sessions after exact and normalized-empty admissions = %d, want 2", got)
+		}
+	})
+
+	test.Run("live_budget_shrink_rechecks_before_publish", func(test *testing.T) {
+		engine := New()
+		scheduler := engine.nativeScheduler()
+		scheduler.SetMaxRunning(1)
+		scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptRecompute, MaxBlocks: 2, BlockTokens: 4})
+		scheduler.prepare = nativeSchedulerPrefillPrepare(map[string][]int{
+			"capacity-shrink": {1, 2, 3, 4, 5},
+		})
+		materializing := make(chan struct{})
+		release := make(chan struct{})
+		scheduler.SetSessionProfilerFactory(func(NativeSessionLifecycle) *model.PhaseProfiler {
+			close(materializing)
+			<-release
+			return model.NewPhaseProfiler()
+		})
+		var closedSessions atomic.Int64
+		scheduler.closeSession = func(session *model.Session) {
+			closedSessions.Add(1)
+			session.Close()
+		}
+
+		type admissionResult struct {
+			request abi.EngineRequest
+			err     error
+		}
+		admitted := make(chan admissionResult, 1)
+		go func() {
+			request, err := engine.Admit(context.Background(), inlineCall("capacity-shrink", "{}"))
+			admitted <- admissionResult{request: request, err: err}
+		}()
+		<-materializing
+		scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptRecompute, MaxBlocks: 1, BlockTokens: 4})
+		close(release)
+		result := <-admitted
+		if result.request != nil || !errors.Is(result.err, ErrNativePromptExceedsKVCapacity) {
+			test.Fatalf("shrink admission request=%T error=%v, want nil request and capacity sentinel", result.request, result.err)
+		}
+		if got := closedSessions.Load(); got != 1 {
+			test.Fatalf("closed sessions after shrink = %d, want 1", got)
+		}
+	})
+
+	test.Run("impossible_prompt_is_rejected_while_state_slot_is_occupied", func(test *testing.T) {
+		engine := New()
+		scheduler := engine.nativeScheduler()
+		scheduler.SetMaxRunning(1)
+		scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptRecompute, MaxBlocks: 1, BlockTokens: 4})
+		scheduler.prepare = nativeSchedulerPrefillPrepare(map[string][]int{
+			"capacity-slot-active":     {1},
+			"capacity-slot-impossible": {1, 2, 3, 4, 5},
+		})
+		var freshSessions atomic.Int64
+		scheduler.SetSessionProfilerFactory(func(lifecycle NativeSessionLifecycle) *model.PhaseProfiler {
+			if lifecycle == NativeSessionFresh {
+				freshSessions.Add(1)
+			}
+			return model.NewPhaseProfiler()
+		})
+		test.Cleanup(func() {
+			closeContext, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelClose()
+			if err := scheduler.CloseAndWait(closeContext); err != nil {
+				test.Errorf("scheduler teardown: %v", err)
+			}
+		})
+
+		activeContext, cancelActive := context.WithCancel(context.Background())
+		activeRequest := admitCapacityRequest(test, engine, activeContext, "capacity-slot-active")
+		awaitCapacityToken(test, activeRequest)
+		impossibleRequest, err := engine.Admit(context.Background(), inlineCall("capacity-slot-impossible", "{}"))
+		if impossibleRequest != nil || !errors.Is(err, ErrNativePromptExceedsKVCapacity) {
+			test.Fatalf("occupied-slot impossible request=%T error=%v, want nil request and capacity sentinel", impossibleRequest, err)
+		}
+		if got := freshSessions.Load(); got != 1 {
+			test.Fatalf("fresh sessions after occupied-slot rejection = %d, want 1", got)
+		}
+		cancelActive()
+		drainCapacityRequest(test, activeRequest, context.Canceled)
+	})
+
+	test.Run("transient_kv_pressure_defers_with_spare_bounded_running_slot", func(test *testing.T) {
+		fixture := newEngineAdmissionCapacityFixture(test, true)
+		fixture.scheduler.SetMaxRunning(2)
+		runContext, cancelRun := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelRun()
+
+		activeRequest := admitCapacityRequest(test, fixture.engine, runContext, "capacity-kv-active")
+		awaitCapacityToken(test, activeRequest)
+		waitingRequest := admitCapacityRequest(test, fixture.engine, runContext, "capacity-kv-waiting")
+		assertCapacityMaterialization(test, fixture, 1, 1)
+		assertCapacityNoToken(test, waitingRequest)
+
+		drainCapacityRequest(test, activeRequest, nil)
+		awaitCapacityToken(test, waitingRequest)
+		assertCapacityMaterialization(test, fixture, 2, 2)
+		drainCapacityRequest(test, waitingRequest, nil)
+	})
+
+	test.Run("bounded_swap_preserves_deliberate_preemption_overlap", func(test *testing.T) {
+		fixture := newEngineAdmissionCapacityFixture(test, true)
+		fixture.scheduler.SetMaxRunning(2)
+		fixture.scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{
+			Mode:        NativePreemptSwap,
+			MaxBlocks:   1,
+			BlockTokens: 128,
+		})
+		runContext, cancelRun := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelRun()
+
+		requests := []abi.EngineRequest{
+			admitCapacityRequest(test, fixture.engine, runContext, "capacity-swap-first"),
+			admitCapacityRequest(test, fixture.engine, runContext, "capacity-swap-second"),
+		}
+		assertCapacityMaterialization(test, fixture, 2, 2)
+		var drains sync.WaitGroup
+		for _, request := range requests {
+			drains.Add(1)
+			go func() {
+				defer drains.Done()
+				for range request.Tokens() {
+				}
+			}()
+		}
+		drains.Wait()
+		for _, request := range requests {
+			if _, err := request.Result(); err != nil {
+				test.Fatalf("swap request result: %v", err)
+			}
+		}
+		stats := fixture.scheduler.KVPreemptionStats()
+		if stats.Preemptions == 0 || stats.SwapPreemptions == 0 || stats.Readmitted == 0 {
+			test.Fatalf("swap compatibility stats preemptions=%d swaps=%d readmitted=%d, want each >0", stats.Preemptions, stats.SwapPreemptions, stats.Readmitted)
+		}
+	})
+
+	test.Run("promotion_fills_multi_lane_kv_capacity_once_per_reservation", func(test *testing.T) {
+		fixture := newEngineAdmissionCapacityFixture(test, true)
+		fixture.scheduler.SetMaxRunning(3)
+		runContext, cancelRun := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelRun()
+
+		activeContext, cancelActive := context.WithCancel(runContext)
+		activeRequest := admitCapacityRequest(test, fixture.engine, activeContext, "capacity-fill-active")
+		awaitCapacityToken(test, activeRequest)
+		waitingRequests := make([]abi.EngineRequest, 0, 3)
+		waitingCancels := make([]context.CancelFunc, 0, 3)
+		for index := 0; index < 3; index++ {
+			waitingContext, cancelWaiting := context.WithCancel(runContext)
+			waitingCancels = append(waitingCancels, cancelWaiting)
+			waitingRequests = append(waitingRequests, admitCapacityRequest(test, fixture.engine, waitingContext, "capacity-fill-waiting"))
+		}
+		assertCapacityMaterialization(test, fixture, 1, 1)
+
+		fixture.scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{
+			Mode:        NativePreemptRecompute,
+			MaxBlocks:   3,
+			BlockTokens: 128,
+		})
+		cancelActive()
+		drainCapacityRequest(test, activeRequest, context.Canceled)
+		deadline := time.Now().Add(5 * time.Second)
+		for (fixture.freshSessions.Load() != 4 || capacityPrefillObservations(fixture.scheduler) != 4) && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		assertCapacityMaterialization(test, fixture, 4, 4)
+
+		for _, cancelWaiting := range waitingCancels {
+			cancelWaiting()
+		}
+		for _, waitingRequest := range waitingRequests {
+			drainCapacityRequest(test, waitingRequest, context.Canceled)
+		}
+	})
+
 	test.Run("canceled_waiter_allocates_nothing", func(test *testing.T) {
 		fixture := newEngineAdmissionCapacityFixture(test, true)
 		runContext, cancelRun := context.WithTimeout(context.Background(), 10*time.Second)

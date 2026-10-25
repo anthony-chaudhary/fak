@@ -11,6 +11,20 @@ import (
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
+type qwen38NamedBackend struct {
+	serveCapBackend
+	name string
+}
+
+func (b qwen38NamedBackend) Name() string { return b.name }
+
+type qwen38EmbeddingRowsBackend struct {
+	qwen38NamedBackend
+	path string
+}
+
+func (b qwen38EmbeddingRowsBackend) Qwen35SequenceEmbeddingRowsPath() string { return b.path }
+
 // TestServeQwen38PackedEmbeddingRouting exercises the ordinary serve loader with
 // real GGUF tensor data. The resulting model layout is the oracle: a selected
 // checkpoint retains token_embd.weight in packed Q4_K form, while non-target
@@ -77,6 +91,51 @@ func TestServeQwen38PackedEmbeddingRouting(t *testing.T) {
 			t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
 		}
 		assertServeEmbeddingExpanded(t, m.Q2KEmbedding, m.HasF32("model.embed_tokens.weight"))
+	})
+
+	t.Run("CUDA embedding-row backend retains packed Q4_K rows", func(t *testing.T) {
+		path := writeServePackedEmbeddingFixture(t, "Qwen3.8-27B-Q4_K_M.gguf", true)
+		backend := qwen38EmbeddingRowsBackend{
+			qwen38NamedBackend: qwen38NamedBackend{
+				serveCapBackend: serveCapBackend{Backend: compute.Default(), uploadDtype: true},
+				name:            "cuda",
+			},
+			path: compute.Qwen35SequenceEmbeddingRowsPath,
+		}
+		m, residentQ4K, _, _ := loadServeInKernelModel(path, backend, false, 0, nil, 1, nil)
+		if m == nil || !residentQ4K {
+			t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
+		}
+		if m.Q2KEmbedding == nil || m.Q2KEmbedding.Format() != "Q4_K" {
+			t.Fatalf("token embedding = %v, want packed Q4_K", m.Q2KEmbedding)
+		}
+		if m.HasF32("model.embed_tokens.weight") {
+			t.Fatal("selected CUDA artifact expanded token embedding to F32")
+		}
+	})
+
+	t.Run("CUDA backend without exact embedding-row capability keeps prior F32 layout", func(t *testing.T) {
+		path := writeServePackedEmbeddingFixture(t, "Qwen3.8-27B-Q4_K_M.gguf", true)
+		backends := []compute.Backend{
+			qwen38NamedBackend{
+				serveCapBackend: serveCapBackend{Backend: compute.Default(), uploadDtype: true},
+				name:            "cuda",
+			},
+			qwen38EmbeddingRowsBackend{
+				qwen38NamedBackend: qwen38NamedBackend{
+					serveCapBackend: serveCapBackend{Backend: compute.Default(), uploadDtype: true},
+					name:            "cuda",
+				},
+				path: "wrong-embedding-rows-v0",
+			},
+		}
+		for _, backend := range backends {
+			m, residentQ4K, _, _ := loadServeInKernelModel(path, backend, false, 0, nil, 1, nil)
+			if m == nil || !residentQ4K {
+				t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
+			}
+			assertServeEmbeddingExpanded(t, m.Q2KEmbedding, m.HasF32("model.embed_tokens.weight"))
+		}
 	})
 
 	t.Run("explicit backend on UD-Q2_K_XL keeps prior F32 layout", func(t *testing.T) {
