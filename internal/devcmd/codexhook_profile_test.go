@@ -2,13 +2,147 @@ package devcmd
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/processalive"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
+
+// fak-test:justify why=contract when=changed:internal/devcmd/codexhook_profile.go
+// fak-test:runtime fast est=3s lane=default
+func TestInspectCodexHookProfileContextForwardsCallerContext(t *testing.T) {
+	oldCommand := codexHookAppServerCommand
+	defer func() { codexHookAppServerCommand = oldCommand }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var commandContext context.Context
+	codexHookAppServerCommand = func(got context.Context, _ string, _ ...string) *exec.Cmd {
+		commandContext = got
+		return exec.CommandContext(got, os.Args[0], "-test.run=^TestCodexHookProfileAppServerHelper$", "-test.count=1", "--", "reply")
+	}
+	_, _ = inspectCodexHookProfileContext(ctx, t.TempDir(), t.TempDir(), os.Args[0])
+	if commandContext != ctx {
+		t.Fatal("profile inspection replaced the caller's cancellation context")
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/devcmd/codexhook_profile.go
+// fak-test:runtime fast est=3s lane=default
+func TestQueryCodexHooksContextReapsDescendantHeldPipe(t *testing.T) {
+	dir := t.TempDir()
+	rootPIDPath := filepath.Join(dir, "root-pid")
+	descendantPIDPath := filepath.Join(dir, "descendant-pid")
+	oldCommand := codexHookAppServerCommand
+	defer func() { codexHookAppServerCommand = oldCommand }()
+	codexHookAppServerCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCodexHookProfileAppServerHelper$", "-test.count=1", "--", "parent", rootPIDPath, descendantPIDPath)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var queryErr error
+	descendantPID := 0
+	home, workspace := t.TempDir(), t.TempDir()
+	readPID := func(path string) int {
+		pidBytes, err := os.ReadFile(path)
+		if err != nil {
+			return 0
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+		if err != nil || pid <= 0 {
+			return 0
+		}
+		return pid
+	}
+	t.Cleanup(func() {
+		cancel()
+		for _, pid := range []int{readPID(rootPIDPath), readPID(descendantPIDPath)} {
+			if pid > 0 && processalive.Check(pid) {
+				_, _ = procguard.KillPID(pid)
+			}
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("query goroutine did not join during cleanup")
+		}
+	})
+	go func() {
+		_, queryErr = queryCodexHooksContext(ctx, home, workspace, os.Args[0])
+		close(done)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		pidBytes, err := os.ReadFile(descendantPIDPath)
+		if err == nil {
+			descendantPID, err = strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+			if err != nil || descendantPID <= 0 {
+				t.Fatalf("invalid descendant pid %q: %v", pidBytes, err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("descendant did not reach cancellation handshake")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("query did not return after cancellation")
+	}
+	if !errors.Is(queryErr, context.Canceled) {
+		t.Fatalf("query error=%v, want context cancellation", queryErr)
+	}
+	deathDeadline := time.Now().Add(5 * time.Second)
+	for processalive.Check(descendantPID) {
+		if time.Now().After(deathDeadline) {
+			t.Fatalf("descendant pid %d remained alive after query reaped", descendantPID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCodexHookProfileAppServerHelper(t *testing.T) {
+	separator := slices.Index(os.Args, "--")
+	if separator < 0 || separator+1 >= len(os.Args) {
+		return
+	}
+	switch os.Args[separator+1] {
+	case "reply":
+		_, _ = os.Stdout.WriteString("{\"id\":2,\"result\":{\"data\":[]}}\n")
+	case "parent":
+		rootPIDPath, descendantPIDPath := os.Args[separator+2], os.Args[separator+3]
+		if err := os.WriteFile(rootPIDPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			os.Exit(91)
+		}
+		child := exec.Command(os.Args[0], "-test.run=^TestCodexHookProfileAppServerHelper$", "-test.count=1", "--", "child", descendantPIDPath)
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(92)
+		}
+		_ = child.Wait()
+	case "child":
+		if err := os.WriteFile(os.Args[separator+2], []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			os.Exit(93)
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
 
 func TestClassifyEffectiveHookStates(t *testing.T) {
 	root := t.TempDir()
