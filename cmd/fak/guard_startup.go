@@ -396,6 +396,7 @@ func loadGuardCapabilityFloor(policyPath string, overrides ...string) (rt policy
 	effectiveAllow := mergeLaunchAllowOverlays(allowOverlay, launchGrant)
 	policyDigest = guardEffectivePolicyDigest(policyBytes, effectiveAllow, denyOverlay)
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, policyPath)...)
+	rt = protectRemoteMaintenanceAuthority(rt)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	dur = time.Since(tPolicy)
@@ -432,6 +433,7 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath)...)
+	rt = protectRemoteMaintenanceAuthority(rt)
 	// CORE-LOCK-ALL (#5423). This is the reload path an ordinary `fak guard -- claude`
 	// actually takes — the allow watcher and POST /v1/fak/policy/reload both land here —
 	// and it had NO widening gate of its own: an edit to the operator allow overlay was

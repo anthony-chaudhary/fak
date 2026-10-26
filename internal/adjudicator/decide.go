@@ -189,6 +189,9 @@ func writeShaped(tool string) bool { return writeShapedLower(strings.ToLower(too
 // tool names ("Bash", "Edit") made the old per-probe ToLower allocate on every
 // prefix, on every adjudication; the fold pays it once per decision.
 func writeShapedLower(lowerTool string) bool {
+	if lowerTool == "fak_remote_maintenance" {
+		return true
+	}
 	for _, p := range []string{"write", "edit", "delete", "patch", "put", "exec", "run", "modify", "create"} {
 		if strings.Contains(lowerTool, p) {
 			return true

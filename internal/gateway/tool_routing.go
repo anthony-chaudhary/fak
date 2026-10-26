@@ -120,6 +120,9 @@ func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, re
 		s.metrics.observeOperation("adjudicate", wv, err, dur)
 		s.logGatewayOperation("adjudicate", opTrace, opTool, wv, err, dur)
 	}()
+	if nativeToolName(tool) == remoteMaintenanceTool {
+		readOnly = false
+	}
 	tc, err := s.buildCall(ctx, tool, rawArgs, readOnly, witness, traceID)
 	if err != nil {
 		return WireVerdict{}, "", err
@@ -128,6 +131,10 @@ func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, re
 		tc.SeqNo = callSeq
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
+	if nativeToolName(tc.Tool) == remoteMaintenanceTool {
+		wv, err = s.adjudicateRemoteMaintenance(ctx, tc)
+		return wv, "", err
+	}
 	v := s.k.Decide(ctx, tc)
 	wv = renderVerdict(v, nil)
 	effectiveArgs := rawArgs
@@ -175,11 +182,20 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		s.metrics.observeOperation("syscall", wv, err, dur)
 		s.logGatewayOperation("syscall", opTrace, opTool, wv, err, dur)
 	}()
+	if nativeToolName(tool) == remoteMaintenanceTool {
+		readOnly = false
+	}
 	tc, err := s.buildCall(ctx, tool, rawArgs, readOnly, witness, traceID)
 	if err != nil {
 		return WireVerdict{}, nil, err
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
+	if nativeToolName(tc.Tool) == remoteMaintenanceTool {
+		// Remote maintenance proves a Prepared, trusted remote scope inside its
+		// native handler before it omits the local-workspace footprint gate. No
+		// other native or external tool takes this route.
+		return s.syscallRemoteMaintenance(ctx, tc)
+	}
 	if refusal, refused := s.strictInitialWorkspaceExecution(ctx, tc, readOnly); refused {
 		return refusal, nil, nil
 	}
@@ -489,7 +505,7 @@ func nativeToolName(tool string) string {
 		tool = strings.TrimPrefix(tool, prefix)
 	}
 	switch tool {
-	case "fak_context_restore", "fak_memory_run":
+	case "fak_context_restore", "fak_memory_run", remoteMaintenanceTool:
 		return tool
 	default:
 		return ""
@@ -503,6 +519,10 @@ func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly b
 	tool := nativeToolName(tc.Tool)
 	if tool == "" {
 		return WireVerdict{}, nil, false, nil
+	}
+	if tool == remoteMaintenanceTool {
+		wv, env, err = s.syscallRemoteMaintenance(ctx, tc)
+		return wv, env, true, err
 	}
 	if tc.SeqNo == 0 {
 		tc.SeqNo = s.nextOriginSeq()

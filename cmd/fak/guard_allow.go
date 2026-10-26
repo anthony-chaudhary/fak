@@ -466,8 +466,16 @@ func cmdGuardAllow(argv []string) {
 	fromClaudeSettings := fs.Bool("from-claude-settings", false, "import permissions.allow from Claude settings.json (+ settings.local.json, or a positional path) into the overlay; name-level entries only")
 	fromMCPConfig := fs.Bool("from-mcp-config", false, "import one coarse allow_prefix per mcpServers key from .mcp.json (or a positional path)")
 	approve := fs.Bool("approve", false, "APPROVE the exact refused call(s) named by the positional operator approval id(s) (ap-<12 hex>, printed on the refusal). Each id admits ONE call past a POLICY_BLOCK rule, a DEFAULT_DENY or the reversibility confirm hold; it widens no tool name and never lifts the credential, self-modify, secret or egress floors. Defaults: --ttl 15m, and the session scope when run inside a guarded session (e.g. Claude Code's ! prompt). The agent cannot run this itself: the floor refuses it from the agent's shell tools.")
+	remoteMaintenance := fs.String("remote-maintenance", "", "install a reviewed remote-maintenance config with mandatory --ttl <=15m; with --remove, revoke the named profile id")
 	addAll := fs.Bool("add-all", false, "with an import source, add EVERY mappable entry found to the overlay in one step")
 	_ = fs.Parse(argv)
+	if *remoteMaintenance != "" {
+		if *list || *user || *session || *prefix || *fromJournal || *fromClaudeSettings || *fromMCPConfig || *approve || *addAll || len(fs.Args()) != 0 {
+			fmt.Fprintln(os.Stderr, "fak guard allow --remote-maintenance: cannot combine with allow-overlay/import/approval flags or positional arguments")
+			os.Exit(2)
+		}
+		os.Exit(runGuardRemoteMaintenance(os.Stdout, os.Stderr, *remoteMaintenance, *ttl, *remove))
+	}
 
 	// The write SCOPE (guard_allow_scope.go): --session is the narrowest layer (applied
 	// last, so it is the last word), --user the host-wide one, and the default stays
@@ -763,6 +771,9 @@ func guardAllowUsage() string {
 		"  fak guard allow --session <tool>...    write the session-scope layer (narrowest, applied last; dropped at guard boot AND at session end, so it never outlives a session)",
 		"  fak guard allow --approve <ap-id>...   approve ONE exact refused call (id printed on the refusal); 15m TTL, session scope inside a session",
 		"  fak guard allow --approve --remove <ap-id>   revoke an approval",
+		"  fak guard allow --remote-maintenance REVIEWED_CONFIG --ttl 15m   install bounded reviewed remote-maintenance authority",
+		"  fak guard allow --remove --remote-maintenance PROFILE_ID          revoke one installed remote-maintenance profile",
+		"  fak guard allow --remove --remote-maintenance '*'                 clear the fixed sidecar for malformed-context recovery",
 		"  fak guard allow --from-journal         list what a guarded session BLOCKED + the command to allow each",
 		"  fak guard allow --from-journal --add-all   add every blocked tool in one step",
 		"  fak guard allow --from-claude-settings [path]   import permissions.allow from .claude/settings.json (name-level only)",

@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "c1026-guard-allow-session-id-resolver",
+      "canonical": "guardAllowSessionID (active guard session resolver)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_allow_scope.go: resolves the current guard-launch session identifier for overlay and session-scope selection, preferring the programmatic guardAllowSessionScopeID override, then the trimmed FAK_GUARD_SESSION_ID value, and otherwise returning empty; remote-maintenance administration also treats a non-empty result as a supplemental reason to refuse that CLI invocation.",
+      "distinction": "A caller-removable session marker, not proof of operator identity or maintenance authority - NOT the reviewed remote-maintenance grant, lease, or policy authorization; NOT FAK_GUARD_SESSION_ID (the transported environment value) and NOT guardAllowLayersWithSessionScope (the session policy-layer appender).",
+      "distinct_from": [
+        "c729-fak-guard-session-id-env",
+        "c729-guard-allow-layers-with-session-scope"
+      ],
+      "aliases": [],
+      "grounding": "guardAllowSessionID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

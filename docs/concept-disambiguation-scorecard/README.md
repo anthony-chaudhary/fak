@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **671** (clarity 0 + coverage 671) |
-| **Crystal-clear concepts (and climbing)** | **1303** crystal of 3112 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3189 / 3860** (82.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1303** crystal of 3113 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3190 / 3861** (82.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4369 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4370 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3112 concepts - score 88.7/100 (grade B) - disambiguation-debt 671
+concept-disambiguation chart - 3113 concepts - score 88.7/100 (grade B) - disambiguation-debt 671
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####################........ 1303
-  o defined       ############################ 1809
+  o defined       ############################ 1810
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
   gateway-engine   ********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (202 concept(s); 80 crystal)
-  guard-gate       *********************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (455 concept(s); 213 crystal)
+  guard-gate       *********************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (456 concept(s); 213 crystal)
   layout           ************ooooooooo (21 concept(s); 12 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             ********************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (421 concept(s); 176 crystal)
@@ -63,10 +63,10 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   plan             #######################..... 483/590
-  session-runtime  ######################...... 286/356
+  session-runtime  #######################..... 287/357
   cache            #######################..... 342/411
   gateway-engine   #######################..... 247/306
-  guard-gate       ##########################.. 516/565
+  guard-gate       ##########################.. 517/566
   attention        #####################....... 148/194
   context-ctx      ########################.... 270/316
   pool             ###############............. 46/87
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.6%  (3189/3860 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.6%  (3190/3861 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 227/227
 
-name index: 4369 lookup name(s) -> 3112 concept(s), 89 ambiguous
+name index: 4370 lookup name(s) -> 3113 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **227 / 227** (227 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2498 / 5730 |
+| Boundaries drawn (mutual / total) | 2498 / 5732 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4369 over 3112 concepts |
+| Lookup names indexed | 4370 over 3113 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3112 |
+| Concepts carrying a contrast set | 3113 |
 
 ## The concepts (best verdict first)
 
@@ -2300,6 +2300,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | guard-gate | **guardPreCompactClaudeSettings (Claude hook settings)** - guardPreCompactClaudeSettings is the top-level Claude settings structure whose hook map is updated by guard precompact, stop-hook, and toolproc-hook installation. |
 | o | defined | symbol | guard-gate | **guardPreCompactHookCommand (precompact hook shell)** - guardPreCompactHookCommand builds the concrete command line fak writes into Claude hook settings for the precompact hook path. |
 | o | defined | symbol | guard-gate | **AppendGuarded (advisory-lock-guarded ledger append)** - internal/modver.AppendGuarded appends already-rendered fak-module-versions/1 JSONL to the module-versions ledger while holding an exclusive internal/flock advisory lock on <ledger>.lock, so two agents stamping the shared multi-session trunk cannot interleave a torn or duplicated row (#2473). |
+| o | defined | symbol | guard-gate | **guardAllowSessionID (active guard session resolver)** - cmd/fak/guard_allow_scope.go: resolves the current guard-launch session identifier for overlay and session-scope selection, preferring the programmatic guardAllowSessionScopeID override, then the trimmed FAK_GUARD_SESSION_ID value, and otherwise returning empty; remote-maintenance administration also treats a non-empty result as a supplemental reason to refuse that CLI invocation. |
 | o | defined | symbol | guard-gate | **guardOutboxMaxPendingAge (undelivered-outbox retention floor)** - cmd/fak/guard_slack.go guardOutboxMaxPendingAge: the generous age floor (72h) past which boundUndeliveredOutbox drops an UNDELIVERED guard-session Slack status card from the .dispatch-runs/slack-outbox spool on the no-token finalize path, bounding a spool that can never drain on a headless seat (#5354, census #5345 row 10). |
 | o | defined | symbol | layout | **ggufArchStoresHFRotaryLayout (NEOX-layout allow-list)** - internal/ggufload/gguf_tensor_canonical.go: the allow-list predicate for architectures whose GGUF q/k weights are stored in the HF rotary layout and must be consumed exactly as stored - running those through unpermuteRotaryTensor would scramble every head's rotary pairs. Anything off the list keeps the historical unpermute. |
 | o | defined | symbol | layout | **PreviewLayout** - PreviewLayout (internal/ctxplan/preview.go) renders a Preview of spans under a Layout, forecast, budget, and cost model. |
@@ -3392,8 +3393,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3232/5730 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3112 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3234/5732 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3113 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3402,7 +3403,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4369 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4370 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3410,10 +3411,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | plan | 483 | 590 | 107 |
-| session-runtime | 286 | 356 | 70 |
+| session-runtime | 287 | 357 | 70 |
 | cache | 342 | 411 | 69 |
 | gateway-engine | 247 | 306 | 59 |
-| guard-gate | 516 | 565 | 49 |
+| guard-gate | 517 | 566 | 49 |
 | attention | 148 | 194 | 46 |
 | context-ctx | 270 | 316 | 46 |
 | pool | 46 | 87 | 41 |

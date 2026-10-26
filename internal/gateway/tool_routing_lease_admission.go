@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
@@ -158,10 +159,15 @@ func adjudicateRawWriteTargets(tool, rawArgs string, readOnly bool) (args map[st
 		if len(commandTargets) > 0 {
 			mutating = true
 			targets = append(targets, commandTargets...)
-		} else if adjudicateShellCommandTool(base) && !readOnly {
-			// A shell can hide writes behind scripts, aliases, or syntax the target
-			// extractor does not recognize. Only a read_only call that the kernel's
-			// positive read grammar subsequently admits may bypass lease admission.
+		} else if adjudicateShellCommandTool(base) {
+			// A shell can hide writes behind scripts, aliases, environment stripping,
+			// or syntax the target extractor does not recognize. The caller's
+			// read_only hint requests classification; only the existing positive
+			// gh/git grammar or in-process shell-read grammar can prove a read.
+			_, promotableRead := vdso.ParseShellRead(command)
+			if readOnly && (adjudicator.PositiveCLIReadOnly(command) || promotableRead) {
+				return args, nil, false, true
+			}
 			return args, nil, true, false
 		}
 	}

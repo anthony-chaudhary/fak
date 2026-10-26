@@ -405,6 +405,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	// the --expose gate so a hidden tool answered "unknown" does not count as a real use.
 	s.metrics.observeFakVerbCall()
 	switch p.Name {
+	case remoteMaintenanceTool:
+		response, err := s.callRemoteMaintenance(ctx, p.Arguments)
+		if err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+		}
+		return mcpToolResultWithError(response, response.Result != nil && response.Result.Status == "ERROR"), nil
 	case "fak_syscall":
 		req := decodeSyscallArgs(p.Arguments)
 		if (req.Tool == "view_image" || req.Tool == "functions.view_image") && !s.supportsVision() {
@@ -437,7 +443,9 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
 		env = s.enrichPagedResultEnvelope(env, req.TraceID)
-		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID, PluginTrace: trace, EffectivePreferences: pref}), nil
+		response := SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID, PluginTrace: trace, EffectivePreferences: pref}
+		isRemoteFailure := nativeToolName(req.Tool) == remoteMaintenanceTool && env != nil && env.Status == "ERROR"
+		return mcpToolResultWithError(response, isRemoteFailure), nil
 	case "fak_read":
 		// The vToolcall serve seam (#795): a real, kernel-mediated file read the model can
 		// call INSTEAD of the harness's built-in Read. Routing through k.Syscall means the
@@ -913,6 +921,12 @@ func mcpToolResult(v any) map[string]any {
 	return mcpToolResultSpan(v, toonCacheResident(v))
 }
 
+func mcpToolResultWithError(v any, isError bool) map[string]any {
+	result := mcpToolResult(v)
+	result["isError"] = isError
+	return result
+}
+
 // mcpToolResultSpan is mcpToolResult with the span's cache-residency made explicit —
 // the single wrap point every tool result leaves through. Behind FAK_TOON_WIRE
 // (default off) the text block may carry the payload TOON-encoded instead of JSON,
@@ -1033,6 +1047,13 @@ func toolDescriptors() []map[string]any {
 			Description: "Adjudicate AND execute a tool call through the fak kernel (dispatch to the registered engine + context-MMU result admission). Returns the verdict and the admitted result. Use when fak should run the tool.",
 			InputSchema: schema,
 			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        remoteMaintenanceTool,
+			Description: "Execute one operator-approved remote maintenance profile through the native kernel. The caller selects only profile_id and operation_digest; target, scope, command, leases, and expiry come from trusted operator context.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"profile_id":{"type":"string","minLength":1},"operation_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["profile_id","operation_digest"],"additionalProperties":false}`),
+			Annotations: mutatingToolAnnotations(),
+			Strict:      true,
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_read",

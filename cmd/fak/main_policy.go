@@ -46,6 +46,7 @@ func applyFloorWithProfile(path string, profile string) {
 		must(err)
 		rt, err := policy.RuntimeForProfile(prof)
 		must(err)
+		rt = protectRemoteMaintenanceAuthority(rt)
 		_, err = applyPolicyRuntimeLocked(rt, "profile:"+string(prof), "", "", false)
 		must(err)
 		if !implicitDefault {
@@ -127,6 +128,7 @@ func loadAndApplyPolicyWithProfileLocked(path string, profile string, enforceWid
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, path)...)
+	rt = protectRemoteMaintenanceAuthority(rt)
 	digest := configFileDigest(path)
 	overlayWarning, err = applyPolicyRuntimeLocked(rt, path, digest, overlayWarning, enforceWideningGate)
 	if err != nil {
