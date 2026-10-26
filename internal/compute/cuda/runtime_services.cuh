@@ -1,3 +1,4 @@
+#ifndef FAK_CUDA_DEVICE_SCOPE_HOST_TEST
 // Algorithm adapted from FlashML-org/FreeToken
 // python/freetoken/kernel/triton/ple_hash.py:31-83 at
 // de77d16a5ac36494d85964f846b50ad36f7acc21 (Apache-2.0).
@@ -114,6 +115,8 @@ extern "C" double fcuda_event_elapsed_ms_end(void) {
     return (double)ms;
 }
 
+#endif
+
 extern "C" int fcuda_set_device(int device) {
   cudaError_t e = cudaSetDevice(device);
   if (e != cudaSuccess) {
@@ -123,14 +126,16 @@ extern "C" int fcuda_set_device(int device) {
   return 0;
 }
 
+#include "device_scope.h"
+
 extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
   if (bytes == 0) bytes = 1;
-  if (fcuda_set_device(device) != 0) return nullptr;
+  fcuda_device_scope scope(device);
+  if (scope.status() != 0) return nullptr;
   void *d = nullptr;
   cudaError_t e = cudaMalloc(&d, bytes);
   if (e != cudaSuccess) {
-    fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) on device %d failed: %s\n",
-            bytes, device, cudaGetErrorString(e));
+    fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) on device %d failed: %s\n", bytes, device, cudaGetErrorString(e));
     return nullptr;
   }
   return d;
@@ -148,7 +153,8 @@ extern "C" void fcuda_free_on(int device, void *d) {
     if (d == held) return;
   }
 #endif
-  if (fcuda_set_device(device) != 0) return;
+  fcuda_device_scope scope(device);
+  if (scope.status() != 0) return;
   q4_coeff_cache_evict(d);
 #if defined(FAK_CUDA_V41_TAIL_ROPE) && defined(FAK_CUDA_V41_TAIL_ROPE_TEST)
   ++g_v41_rope_test_free_attempts;
@@ -157,7 +163,8 @@ extern "C" void fcuda_free_on(int device, void *d) {
 }
 
 extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
-  if (fcuda_set_device(device) != 0) return;
+  fcuda_device_scope scope(device);
+  if (scope.status() != 0) return;
   fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
   if (e == cudaSuccess) g_h2d_bytes += n;
@@ -165,7 +172,8 @@ extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
 }
 
 extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
-  if (fcuda_set_device(device) != 0) return;
+  fcuda_device_scope scope(device);
+  if (scope.status() != 0) return;
   fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
   if (e == cudaSuccess) g_host_bytes += n;
@@ -173,9 +181,15 @@ extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
 }
 
 extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
-  if (fcuda_set_device(device) != 0) return;
+  fcuda_device_scope scope(device);
+  if (scope.status() != 0) return;
   fcuda_ts_untimed_transfer(); // a peer device's copy: outside the single-device event ring
-  CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream));
+  // The process stream belongs to device 0. Use this device's legacy stream,
+  // then fence explicitly: even a synchronous D2D memcpy need not block host.
+  cudaError_t e = cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, cudaStreamLegacy);
+  if (e == cudaSuccess) e = cudaStreamSynchronize(cudaStreamLegacy);
+  if (e != cudaSuccess)
+    fprintf(stderr, "fak-cuda: device %d copy/fence failed: %s\n", device, cudaGetErrorString(e));
 }
 
 // host-transfer witness accessors (#482/#4738): see g_host_bytes/g_h2d_bytes above.

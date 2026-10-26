@@ -14,7 +14,7 @@ import (
 
 func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|from-llamacpp|profile|first-divergence|logprobs|logits [flags]")
+		fmt.Fprintln(stderr, "usage: fak compute-trace capture|summary|from-llamacpp|from-sglang|from-vllm|profile|first-divergence|logprobs|logits [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -96,6 +96,10 @@ func runComputeTrace(stdout, stderr io.Writer, args []string) int {
 		return 0
 	case "from-llamacpp":
 		return runComputeTraceFromLlamaCpp(stdout, stderr, args[1:])
+	case "from-sglang":
+		return runComputeTraceFromTorch(stdout, stderr, args[1:], "sglang")
+	case "from-vllm":
+		return runComputeTraceFromTorch(stdout, stderr, args[1:], "vllm")
 	case "profile":
 		return runComputeTraceProfile(stdout, stderr, args[1:])
 	case "first-divergence":

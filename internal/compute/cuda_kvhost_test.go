@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// FAK_CUDA_GDN_REQUIRED=1 requires exact CUDA registration; no host fallback.
+// fak-test:runtime integration est=1s lane=optin
 func TestCUDAKVHostRoundTripOwnsCompletePayload(t *testing.T) {
 	be := cudaGDNBackend(t)
 	cfg := KVConfig{
@@ -18,6 +20,10 @@ func TestCUDAKVHostRoundTripOwnsCompletePayload(t *testing.T) {
 	}
 	kv := be.NewKV(cfg)
 	width := cfg.NumKVHeads * cfg.HeadDim
+	want := KVHostSnapshot{
+		Config: cloneKVConfig(cfg), Pos: []int{7, 8, 9},
+		K: make([][]float32, cfg.NumLayers), KRaw: make([][]float32, cfg.NumLayers), V: make([][]float32, cfg.NumLayers),
+	}
 	for pos := 0; pos < 3; pos++ {
 		for layer := 0; layer < cfg.NumLayers; layer++ {
 			row := func(base float32) []float32 {
@@ -27,9 +33,13 @@ func TestCUDAKVHostRoundTripOwnsCompletePayload(t *testing.T) {
 				}
 				return out
 			}
-			kRaw := mkResident(be, []int{width}, row(float32(100*layer+10*pos+1)))
-			kRoPE := mkResident(be, []int{width}, row(float32(100*layer+10*pos+2)))
-			value := mkResident(be, []int{width}, row(float32(100*layer+10*pos+3)))
+			rawRow, ropeRow, valueRow := row(float32(100*layer+10*pos+1)), row(float32(100*layer+10*pos+2)), row(float32(100*layer+10*pos+3))
+			want.KRaw[layer] = append(want.KRaw[layer], rawRow...)
+			want.K[layer] = append(want.K[layer], ropeRow...)
+			want.V[layer] = append(want.V[layer], valueRow...)
+			kRaw := mkResident(be, []int{width}, rawRow)
+			kRoPE := mkResident(be, []int{width}, ropeRow)
+			value := mkResident(be, []int{width}, valueRow)
 			kv.AppendKV(layer, kRaw, kRoPE, value, pos+7)
 			be.Free(kRaw)
 			be.Free(kRoPE)
@@ -41,6 +51,10 @@ func TestCUDAKVHostRoundTripOwnsCompletePayload(t *testing.T) {
 	if err != nil {
 		kv.Free()
 		t.Fatalf("snapshot CUDA KV to host: %v", err)
+	}
+	if !reflect.DeepEqual(host, want) {
+		kv.Free()
+		t.Fatalf("snapshot changed uploaded K/Kraw/V or positions: got %#v want %#v", host, want)
 	}
 	if host.TransferBytes() <= 0 || host.ResidentBytes() <= host.TransferBytes() {
 		kv.Free()
@@ -58,11 +72,13 @@ func TestCUDAKVHostRoundTripOwnsCompletePayload(t *testing.T) {
 		t.Fatalf("restore CUDA KV from host: %v", err)
 	}
 	defer restored.Free()
+	host.Pos[0] = -1
+	host.K[0][0], host.KRaw[0][0], host.V[0][0] = -1, -2, -3
 	roundTrip, err := SnapshotKVToHost(restored)
 	if err != nil {
 		t.Fatalf("snapshot restored CUDA KV: %v", err)
 	}
-	if !reflect.DeepEqual(roundTrip, host) {
-		t.Fatalf("D2H/H2D round trip changed complete KV payload:\n got %#v\nwant %#v", roundTrip, host)
+	if !reflect.DeepEqual(roundTrip, want) {
+		t.Fatalf("D2H/H2D round trip changed complete KV payload:\n got %#v\nwant %#v", roundTrip, want)
 	}
 }

@@ -389,13 +389,10 @@ func (c *cudaBackend) RestoreKVFromHost(state KVHostSnapshot) (out KVStore, err 
 		if len(src) == 0 {
 			return
 		}
-		if dst.ptr == nil || dst.cap < len(src) {
-			if dst.ptr != nil {
-				C.fcuda_free(dst.ptr)
-			}
-			buf := c.dallocKV(len(src)*F32.Bytes(), site)
-			dst.ptr, dst.cap = buf.ptr, len(src)
-		}
+		restoreCUDAKVAllocation(&dst.ptr, &dst.len, &dst.cap, len(src),
+			func() unsafe.Pointer { return c.dallocKV(len(src)*F32.Bytes(), site).ptr },
+			func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+		)
 		C.fcuda_h2d(dst.ptr, unsafe.Pointer(&src[0]), C.size_t(len(src)*F32.Bytes()))
 		dst.len = len(src)
 	}
