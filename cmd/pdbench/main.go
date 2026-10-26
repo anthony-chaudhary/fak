@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 type cliConfig struct {
@@ -130,6 +131,7 @@ func parseFlags(args []string) (cliConfig, error) {
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err
 	}
+	*gguf = pathutil.ExpandTilde(*gguf)
 	if *mode != "producer" && *mode != "consumer" {
 		return cliConfig{}, errors.New("pdbench: -mode must be producer or consumer")
 	}
