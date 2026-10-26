@@ -1,6 +1,10 @@
 package cachemeta
 
-import "github.com/anthony-chaudhary/fak/internal/abi"
+import (
+	"encoding/binary"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+)
 
 // KVTransferDirection names a live-engine KV residency event: offload (HBM->DRAM/
 // disk/remote), restore (a tier re-materializing a span the engine wants), route
@@ -78,7 +82,16 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 	}
 	digest := t.SpanDigest
 	if digest == "" {
-		digest = DigestBytes([]byte(string(t.Direction) + "\x00" + t.ModelID + "\x00" + t.TokenizerID))
+		// This is descriptor identity, not a content digest: equal-length spans
+		// with different KV contents still require the caller's SpanDigest.
+		// Length prefixes preserve field boundaries even when IDs contain NUL.
+		key := []byte("fak.kv-transfer-descriptor/v1\x00")
+		for _, field := range []string{string(t.Direction), t.ModelID, t.TokenizerID} {
+			key = binary.BigEndian.AppendUint64(key, uint64(len(field)))
+			key = append(key, field...)
+		}
+		key = binary.BigEndian.AppendUint64(key, uint64(t.Tokens))
+		digest = DigestBytes(key)
 	}
 	e := Entry{
 		ID: EntryID{

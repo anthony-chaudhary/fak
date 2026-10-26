@@ -110,3 +110,38 @@ func TestKVRouteAndMigrateDirectionsSupported(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+// TestFromKVTransferDigestStableAndDistinguishesSpans binds the descriptor-only
+// fallback: token counts and field boundaries participate, but caller-provided
+// content identity is authoritative.
+func TestFromKVTransferDigestStableAndDistinguishesSpans(t *testing.T) {
+	t.Parallel()
+	transfer := KVTransfer{Direction: KVRestore, ModelID: "m\x00n", TokenizerID: "tok", Tokens: 128}
+	got := FromKVTransfer(transfer).ID.Digest
+	equal := KVTransfer{Direction: KVRestore, ModelID: "m\x00n", TokenizerID: "tok", Tokens: 128}
+	if FromKVTransfer(equal).ID.Digest != got {
+		t.Fatal("independently constructed equal descriptor changed identity")
+	}
+	differentCount := transfer
+	differentCount.Tokens++
+	if FromKVTransfer(differentCount).ID.Digest == got {
+		t.Fatal("different token counts collided")
+	}
+	// A NUL separator alone cannot distinguish these two field partitions.
+	differentFields := transfer
+	differentFields.ModelID = "m"
+	differentFields.TokenizerID = "n\x00tok"
+	if FromKVTransfer(differentFields).ID.Digest == got {
+		t.Fatal("different model/tokenizer field boundaries collided")
+	}
+	// Versioned domain, length-prefixed UTF-8 bytes, and big-endian int64 count.
+	const want = "c6f20004ce7b130c8a8a801eecd6beeef5bc462ae8fa6bc7695000b8d1df2ff2"
+	if got != want {
+		t.Fatalf("fallback digest = %q, want stable descriptor digest %q", got, want)
+	}
+	transfer.SpanDigest = "caller-owned-content-digest"
+	if FromKVTransfer(transfer).ID.Digest != transfer.SpanDigest {
+		t.Fatal("explicit span digest was replaced by the descriptor fallback")
+	}
+}
