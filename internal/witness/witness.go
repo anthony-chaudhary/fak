@@ -66,6 +66,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -151,6 +152,11 @@ func commandRunner(ctx context.Context, dir string, argv ...string) (string, int
 	return commandRunnerEnv(nil)(ctx, dir, argv...)
 }
 
+func execWitnessScratchGoCommand(dir, executable string) bool {
+	base := strings.ToLower(filepath.Base(executable))
+	return (base == "go" || base == "go.exe") && activeExecWitnessScratch(dir)
+}
+
 func commandRunnerEnv(overlay map[string]string) CommandRunner {
 	return func(ctx context.Context, dir string, argv ...string) (string, int, error) {
 		if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
@@ -175,6 +181,14 @@ func commandRunnerEnv(overlay map[string]string) CommandRunner {
 				cmd.Env = isolatedGitEnv()
 			}
 			cmd.Env = computebuild.MergeEnviron(cmd.Env, overlay)
+		}
+		// A witness-owned checkout must use the workspace committed in that
+		// checkout, never an ambient workspace selected by its caller.
+		if execWitnessScratchGoCommand(dir, argv[0]) {
+			if cmd.Env == nil {
+				cmd.Env = isolatedGitEnv()
+			}
+			cmd.Env = computebuild.MergeEnviron(cmd.Env, map[string]string{"GOWORK": ""})
 		}
 		var out strings.Builder
 		cmd.Stdout = &out

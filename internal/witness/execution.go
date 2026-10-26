@@ -338,6 +338,38 @@ func (v *ExecutionVerifier) workspaceNeedsSiblingTopology(ctx context.Context, r
 	return false
 }
 
+// siblingTopologyScratchParent returns the parent of the repository's canonical
+// checkout. A managed worktree's own parent is an implementation directory, not
+// the sibling topology recorded by the committed workspace.
+func (v *ExecutionVerifier) siblingTopologyScratchParent(ctx context.Context) (string, error) {
+	out, code, err := v.gitRun()(ctx, v.dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || code != 0 {
+		return "", fmt.Errorf("resolve git common directory")
+	}
+	commonDir := strings.TrimSpace(out)
+	if commonDir == "" || strings.ContainsAny(commonDir, "\r\n") {
+		return "", fmt.Errorf("invalid git common directory")
+	}
+	if !filepath.IsAbs(commonDir) {
+		root, absErr := filepath.Abs(v.dir)
+		if absErr != nil {
+			return "", fmt.Errorf("resolve repository root: %w", absErr)
+		}
+		commonDir = filepath.Join(root, commonDir)
+	}
+	commonDir = filepath.Clean(commonDir)
+	info, statErr := os.Stat(commonDir)
+	if statErr != nil || !info.IsDir() || filepath.Base(commonDir) != ".git" {
+		return "", fmt.Errorf("git common directory is not a standard directory")
+	}
+	canonicalRoot := filepath.Dir(commonDir)
+	parent := filepath.Dir(canonicalRoot)
+	if parent == canonicalRoot {
+		return "", fmt.Errorf("canonical repository root has no parent")
+	}
+	return parent, nil
+}
+
 // THE EXEC-WITNESS SCRATCH LEAK
 //
 // scratchWorktree materializes a detached scratch checkout and removes it in a
@@ -481,7 +513,40 @@ func sweepExecWitnessScratch(parent string, now time.Time, apply bool, limit int
 var (
 	execWitnessSweepMu   sync.Mutex
 	execWitnessSweepLast = map[string]time.Time{}
+	execWitnessActive    sync.Map
 )
+
+func execWitnessScratchKey(path string) (string, bool) {
+	abs, err := filepath.Abs(path)
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	return filepath.Clean(abs), true
+}
+
+func registerExecWitnessScratch(path string) bool {
+	key, ok := execWitnessScratchKey(path)
+	if !ok {
+		return false
+	}
+	execWitnessActive.Store(key, struct{}{})
+	return true
+}
+
+func unregisterExecWitnessScratch(path string) {
+	if key, ok := execWitnessScratchKey(path); ok {
+		execWitnessActive.Delete(key)
+	}
+}
+
+func activeExecWitnessScratch(path string) bool {
+	key, ok := execWitnessScratchKey(path)
+	if !ok {
+		return false
+	}
+	_, active := execWitnessActive.Load(key)
+	return active
+}
 
 // sweepExecWitnessScratchBeforeCreate runs the bounded, rate-limited sweep a
 // checkout performs before creating its own scratch directory. A package variable
@@ -511,8 +576,10 @@ func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (st
 	// Ordinary repositories keep the system-temp checkout.
 	parent := ""
 	if v.workspaceNeedsSiblingTopology(ctx, ref) {
-		if rootAbs, err := filepath.Abs(v.dir); err == nil {
-			parent = filepath.Dir(rootAbs)
+		var err error
+		parent, err = v.siblingTopologyScratchParent(ctx)
+		if err != nil {
+			return "", nil, err
 		}
 	}
 	sweepExecWitnessScratchBeforeCreate(parent)
@@ -529,7 +596,12 @@ func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (st
 	// later sweep, rather than a half-checked-out tree. Fall back to the ordinary
 	// full checkout if the phased path fails for any reason.
 	if v.materializeScratchWorktree(ctx, dir, ref) {
+		if !registerExecWitnessScratch(dir) {
+			v.discardScratchWorktree(dir)
+			return "", nil, fmt.Errorf("register scratch worktree")
+		}
 		cleanup := func() {
+			unregisterExecWitnessScratch(dir)
 			_, _, _ = v.gitRun()(context.Background(), v.dir, "worktree", "remove", "--force", dir)
 			_ = os.RemoveAll(dir)
 		}
@@ -544,7 +616,12 @@ func (v *ExecutionVerifier) scratchWorktree(ctx context.Context, ref string) (st
 		_ = os.RemoveAll(dir)
 		return "", nil, fmt.Errorf("git worktree add exited %d", code)
 	}
+	if !registerExecWitnessScratch(dir) {
+		v.discardScratchWorktree(dir)
+		return "", nil, fmt.Errorf("register scratch worktree")
+	}
 	cleanup := func() {
+		unregisterExecWitnessScratch(dir)
 		_, _, _ = v.gitRun()(context.Background(), v.dir, "worktree", "remove", "--force", dir)
 		_ = os.RemoveAll(dir)
 	}
