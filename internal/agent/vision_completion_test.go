@@ -45,12 +45,100 @@ func TestVisionCompletionOrdinaryAndStreamConsumeExpandedRows(t *testing.T) {
 	stream, err := p.CompleteStream(context.Background(), func(piece string) error {
 		streamed.WriteString(piece)
 		return nil
-	}, []Message{message}, nil, append(opts, WithPerTokenStream(false))...)
+	}, []Message{message}, nil, append(opts, WithPerTokenStream(true))...)
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
 	if stream.Message.Content != "a" || streamed.String() != "a" || stream.Usage.PromptTokens != encoded.PromptTokens || stream.Usage.PromptTokensDetails.CachedTokens != 0 {
 		t.Fatalf("stream completion/content = %+v/%q, want forced answer and expanded prompt accounting", stream, streamed.String())
+	}
+}
+
+// fak-test:runtime fast est=500ms
+func TestVisionCompletionSessionLifetime(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		p, message, opts := visionCompletionLifetimeFixture(t, 1)
+		if _, err := p.Complete(context.Background(), []Message{message}, nil, opts...); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		assertVisionModelReleased(t, p)
+	})
+
+	t.Run("prefill error", func(t *testing.T) {
+		p, message, opts := visionCompletionLifetimeFixture(t, 1)
+		sp := applySampleOpts(opts...)
+		prepared, err := p.preparePrompt(context.Background(), []Message{message}, nil, sp, opts...)
+		if err != nil {
+			t.Fatalf("preparePrompt: %v", err)
+		}
+		ctx, err := p.withNativeVisionPrefill(context.Background(), prepared)
+		if err != nil {
+			t.Fatalf("withNativeVisionPrefill: %v", err)
+		}
+		ctx.Value(visionPrefillKey{}).(*nativeVisionPrefill).imageTokenID = -1
+		_, _, _, _, _, _, _, _, err = p.generateReusedContextWithBias(ctx, prepared.ids, prepared.maxNew, 0, 1, 0, nil, 0, 0, nil, nil)
+		if !errors.Is(err, model.ErrMultimodalDenied) {
+			t.Fatalf("generate error = %v, want ErrMultimodalDenied", err)
+		}
+		assertVisionModelReleased(t, p)
+	})
+
+	t.Run("stream cancellation", func(t *testing.T) {
+		p, message, opts := visionCompletionLifetimeFixture(t, 2)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		emitted := 0
+		_, err := p.CompleteStream(ctx, func(string) error {
+			emitted++
+			cancel()
+			return nil
+		}, []Message{message}, nil, append(opts, WithPerTokenStream(true))...)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("CompleteStream error = %v, want context cancellation", err)
+		}
+		if emitted == 0 {
+			t.Fatal("CompleteStream emitted no per-token fragment before cancellation")
+		}
+		assertVisionModelReleased(t, p)
+	})
+
+	t.Run("stream sink error", func(t *testing.T) {
+		p, message, opts := visionCompletionLifetimeFixture(t, 2)
+		sinkErr := errors.New("vision stream sink")
+		emitted := 0
+		_, err := p.CompleteStream(context.Background(), func(string) error {
+			emitted++
+			return sinkErr
+		}, []Message{message}, nil, append(opts, WithPerTokenStream(true))...)
+		if !errors.Is(err, sinkErr) {
+			t.Fatalf("CompleteStream error = %v, want sink sentinel", err)
+		}
+		if emitted == 0 {
+			t.Fatal("CompleteStream did not reach the per-token sink")
+		}
+		assertVisionModelReleased(t, p)
+	})
+}
+
+func visionCompletionLifetimeFixture(t *testing.T, maxTokens int) (*InKernelPlanner, Message, []SampleOpt) {
+	t.Helper()
+	p := visionCompletionPlanner(t)
+	t.Cleanup(func() { _ = p.m.CloseWeights() })
+	answerID, err := p.tok.Encode("a")
+	if err != nil || len(answerID) != 1 {
+		t.Fatalf("encode forced answer: ids=%v err=%v", answerID, err)
+	}
+	return p, visionCompletionMessage(t), []SampleOpt{
+		WithMultimodalMode(string(model.MultimodalModeQuarantine)),
+		WithMaxTokens(maxTokens),
+		WithLogitBias(map[int]float64{answerID[0]: 100}),
+	}
+}
+
+func assertVisionModelReleased(t *testing.T, p *InKernelPlanner) {
+	t.Helper()
+	if err := p.m.CloseWeights(); err != nil {
+		t.Fatalf("CloseWeights after vision completion: %v", err)
 	}
 }
 

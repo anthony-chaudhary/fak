@@ -15,6 +15,17 @@ type mcpAuthenticatedLaunchKey struct{}
 // ownership; the admission provider must independently establish any lease.
 func (s *Server) handleAuthenticatedMCPHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := s.authenticateMCPSession(r.Context(), r.Header.Get("X-Fak-MCP-Session"))
+	if s.mcpAgentID != "" {
+		if !authenticatedMCPLaunch(ctx) {
+			writeErr(w, http.StatusUnauthorized, "MCP launch authentication required")
+			return
+		}
+		ctx = WithPrincipal(ctx, s.mcpAgentID)
+		r = r.Clone(ctx)
+		// The authenticated source host fixes the authority class; a caller's
+		// empty or human-looking header cannot convert this agent into a human.
+		r.Header.Set(inboundPrincipalHeader, string(PrincipalSelfModel))
+	}
 	s.handleMCPHTTP(w, r.WithContext(ctx))
 }
 

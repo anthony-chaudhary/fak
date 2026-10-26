@@ -1,10 +1,56 @@
 package toolproc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// fak-test:justify why=contract when=changed:internal/toolproc/openshare*
+// fak-test:runtime fast est=5ms lane=default
+func TestOpenExclusiveShareDeleteRetainsHeldIdentity(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "claim.lock")
+	f, err := OpenExclusiveShareDelete(path, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	original, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other, err := OpenExclusiveShareDelete(path, 0o600); err == nil {
+		other.Close()
+		t.Fatal("exclusive create replaced a held claim")
+	} else if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("existing claim returned %v, want existence error", err)
+	}
+	prior := path + ".prior"
+	if err := os.Rename(path, prior); err != nil {
+		t.Fatalf("rename held claim: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("successor"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(original, current) {
+		t.Fatal("held claim identity was recycled to its successor")
+	}
+	if err := os.Remove(prior); err != nil {
+		t.Fatalf("remove held claim: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(path); err != nil || string(body) != "successor" {
+		t.Fatalf("successor changed: %q, %v", body, err)
+	}
+}
 
 // The journal's own readers and appenders must not block a concurrent
 // session's compaction swap: while either holds the journal open, the

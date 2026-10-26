@@ -97,8 +97,14 @@ func TestHarnessServerReceiptCrossesInitResolveVerifyImmutably(t *testing.T) {
 		t.Fatalf("init code=%d stderr=%s", code, errb.String())
 	}
 	bindingPath := filepath.Join(harnessDir, harnessserver.BindingFileName)
-	if !strings.Contains(initOut.String(), bindingPath) {
-		t.Fatalf("init result does not name server binding: %s", initOut.String())
+	var initResult struct {
+		ServerBinding string `json:"server_binding"`
+	}
+	if err := json.Unmarshal(initOut.Bytes(), &initResult); err != nil {
+		t.Fatalf("decode init result: %v", err)
+	}
+	if initResult.ServerBinding != bindingPath {
+		t.Fatalf("init server binding=%q, want %q", initResult.ServerBinding, bindingPath)
 	}
 
 	var manifestOut, selectionOut bytes.Buffer

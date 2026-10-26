@@ -18,9 +18,16 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
-const codexHookProfileSchema = "fak/codex-hook-profile/v1"
+const (
+	codexHookProfileSchema      = "fak/codex-hook-profile/v1"
+	codexHookAppServerWaitDelay = 2 * time.Second
+)
+
+var codexHookAppServerCommand = exec.CommandContext
 
 type executableIdentity struct {
 	Path   string `json:"path"`
@@ -168,7 +175,7 @@ func inspectCodexHookProfileContext(ctx context.Context, home, workspace, binary
 		return hookProfileReport{}, errors.New("Codex executable not found")
 	}
 	identity := identifyFile(binary, "codex-app-server")
-	reply, err := queryCodexHooks(home, workspace, binary)
+	reply, err := queryCodexHooksContext(ctx, home, workspace, binary)
 	if err != nil {
 		return hookProfileReport{}, err
 	}
@@ -389,7 +396,9 @@ func queryCodexHooks(home, workspace, binary string) (appServerReply, error) {
 }
 
 func queryCodexHooksContext(ctx context.Context, home, workspace, binary string) (appServerReply, error) {
-	cmd := exec.CommandContext(ctx, binary, "app-server", "--stdio")
+	cmd := codexHookAppServerCommand(ctx, binary, "app-server", "--stdio")
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = codexHookAppServerWaitDelay
 	cmd.Env = append(os.Environ(), "CODEX_HOME="+home)
 	stdin, e := cmd.StdinPipe()
 	if e != nil {
@@ -397,36 +406,74 @@ func queryCodexHooksContext(ctx context.Context, home, workspace, binary string)
 	}
 	stdout, e := cmd.StdoutPipe()
 	if e != nil {
+		_ = stdin.Close()
 		return appServerReply{}, e
 	}
 	var errbuf bytes.Buffer
 	cmd.Stderr = &errbuf
 	if e = cmd.Start(); e != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return appServerReply{}, e
 	}
+	reaped := false
+	reap := func() {
+		if reaped {
+			return
+		}
+		reaped = true
+		_ = stdin.Close()
+		if cmd.Cancel != nil {
+			_ = cmd.Cancel()
+		}
+		_ = cmd.Wait()
+	}
+	defer reap()
 	enc := json.NewEncoder(stdin)
 	for _, v := range []any{map[string]any{"method": "initialize", "id": 1, "params": map[string]any{"clientInfo": map[string]string{"name": "fak_diag", "title": "fak diagnostic", "version": "1"}, "capabilities": map[string]bool{"experimentalApi": true}}}, map[string]any{"method": "initialized", "params": map[string]any{}}, map[string]any{"method": "hooks/list", "id": 2, "params": map[string]any{"cwds": []string{workspace}}}} {
 		if e = enc.Encode(v); e != nil {
 			return appServerReply{}, e
 		}
 	}
-	s := bufio.NewScanner(stdout)
-	s.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for s.Scan() {
-		var r appServerReply
-		if json.Unmarshal(s.Bytes(), &r) == nil && r.ID == 2 {
-			_ = cmd.Process.Kill()
-			if len(r.Error) > 0 {
-				return r, fmt.Errorf("hooks/list: %s", r.Error)
+	type scanResult struct {
+		reply appServerReply
+		found bool
+		err   error
+	}
+	scanDone := make(chan scanResult, 1)
+	go func() {
+		s := bufio.NewScanner(stdout)
+		s.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		for s.Scan() {
+			var r appServerReply
+			if json.Unmarshal(s.Bytes(), &r) == nil && r.ID == 2 {
+				scanDone <- scanResult{reply: r, found: true}
+				return
 			}
-			return r, nil
 		}
-	}
-	_ = cmd.Process.Kill()
-	if ctx.Err() != nil {
+		scanDone <- scanResult{err: s.Err()}
+	}()
+
+	select {
+	case <-ctx.Done():
+		reap()
 		return appServerReply{}, ctx.Err()
+	case result := <-scanDone:
+		reap()
+		if result.found {
+			if len(result.reply.Error) > 0 {
+				return result.reply, fmt.Errorf("hooks/list: %s", result.reply.Error)
+			}
+			return result.reply, nil
+		}
+		if ctx.Err() != nil {
+			return appServerReply{}, ctx.Err()
+		}
+		if result.err != nil {
+			return appServerReply{}, fmt.Errorf("hooks/list output: %w", result.err)
+		}
+		return appServerReply{}, fmt.Errorf("hooks/list produced no response: %s", strings.TrimSpace(errbuf.String()))
 	}
-	return appServerReply{}, fmt.Errorf("hooks/list produced no response: %s", strings.TrimSpace(errbuf.String()))
 }
 func writeHookProfile(w io.Writer, r hookProfileReport) {
 	fmt.Fprintf(w, "Codex effective hook profile\nCODEX_HOME: %s\nconfig: %s\nworkspace: %s\nCodex binary: %s %s\n", r.CodexHome, r.ConfigPath, r.Workspace, r.CodexExecutable.Path, r.CodexExecutable.SHA256)

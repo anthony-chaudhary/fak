@@ -402,8 +402,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		}
 	}
 	// The selected route owns source-read lifetime even on a CPU session.
-	// Keep the historical default-off CPU cleanup behavior unchanged.
-	if closeSession || p.v41EngramLookAhead {
+	// Vision always owns a fresh session because token-prefix reuse is disabled.
+	if closeSession || p.v41EngramLookAhead || visionPrefill != nil {
 		defer finishInKernelCleanup(&err, s.Close)
 	}
 	if measurement != nil {

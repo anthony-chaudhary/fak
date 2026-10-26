@@ -131,3 +131,269 @@ func newStrixPhaseTestRecorder() (*validateResult, *validateRecorder) {
 		res:     res,
 	}
 }
+
+var cudaOnlyComputeValidationPaths = []string{
+	"internal/compute/cuda.go",
+	"internal/compute/cuda/attention.cuh",
+	"internal/compute/cuda/device_context.cuh",
+	"internal/compute/cuda/device_context_table.h",
+	"internal/compute/cuda/fattn_mma_hd256.cuh",
+	"internal/compute/cuda/kernel_profile.cuh",
+	"internal/compute/cuda/model_candidates.cuh",
+	"internal/compute/cuda/peer_handoff.cuh",
+	"internal/compute/cuda/q4k_mmq.cuh",
+	"internal/compute/cuda/quant_matmul.cuh",
+	"internal/compute/cuda/qwen35_gdn.cuh",
+	"internal/compute/cuda/runtime_memory.cuh",
+	"internal/compute/cuda/runtime_services.cuh",
+	"internal/compute/cuda/spec_graph.cuh",
+	"internal/compute/cuda/weight_formats.cuh",
+	"internal/compute/cuda_backend.h",
+	"internal/compute/cuda_backend_state.go",
+	"internal/compute/cuda_clone_serialization_test.go",
+	"internal/compute/cuda_collective.go",
+	"internal/compute/cuda_collective_pg.go",
+	"internal/compute/cuda_device_context.go",
+	"internal/compute/cuda_device_context_table_test.go",
+	"internal/compute/cuda_device_handoff.go",
+	"internal/compute/cuda_devices.go",
+	"internal/compute/cuda_devices_cuda_test.go",
+	"internal/compute/cuda_devices_stub.go",
+	"internal/compute/cuda_devices_stub_test.go",
+	"internal/compute/cuda_f16_stage_ownership_test.go",
+	"internal/compute/cuda_kernels.cu",
+	"internal/compute/cuda_kernels.go",
+	"internal/compute/cuda_kv.go",
+	"internal/compute/cuda_kv_clone_ownership_test.go",
+	"internal/compute/cuda_prompt_panel.go",
+	"internal/compute/cuda_q2_allocation_ownership_test.go",
+	"internal/compute/cuda_q8_allocation_ownership_test.go",
+	"internal/compute/cuda_q8_width_validation_test.go",
+	"internal/compute/cuda_qwen35_gdn.go",
+	"internal/compute/cuda_qwen35_gdn_sequence.go",
+	"internal/compute/cuda_qwen35_sequence.go",
+	"internal/compute/cuda_qwen4exp_ple_hash_cuda.go",
+	"internal/compute/cuda_resident_handoff.go",
+	"internal/compute/cuda_routed_expert_gemv.go",
+	"internal/compute/cuda_spec_verify.go",
+	"internal/compute/cuda_specialized.go",
+	"internal/compute/cuda_v41_bf16_publish.go",
+	"internal/compute/cuda_v41_rope.go",
+	"internal/compute/cuda_v41_rope_contract_test.go",
+	"internal/compute/q4k_prefill_cuda.go",
+	"internal/compute/testdata/cuda_device_context.cpp",
+}
+
+// fak-test:justify why=regression when=changed:internal/validate/**
+// fak-test:runtime fast est=10ms
+func TestStrixValidationSkipsCUDAOnlyComputePaths(t *testing.T) {
+	for _, changed := range cudaOnlyComputeValidationPaths {
+		t.Run(changed, func(t *testing.T) {
+			if isGPURelatedValidation([]string{changed}) {
+				t.Fatalf("CUDA-only compute path selected Strix: %s", changed)
+			}
+		})
+	}
+	if isGPURelatedValidation(cudaOnlyComputeValidationPaths) {
+		t.Fatal("CUDA-only compute scope selected Strix")
+	}
+	for _, changed := range []string{
+		"./internal/compute/cuda.go",
+		"internal//compute/cuda.go",
+		`internal\compute\cuda.go`,
+		"internal/compute/./cuda/attention.cuh",
+	} {
+		if isGPURelatedValidation([]string{changed}) {
+			t.Fatalf("normalized CUDA-only path selected Strix: %s", changed)
+		}
+	}
+}
+
+// fak-test:justify why=guard when=changed:internal/validate/** twin=TestStrixValidationSkipsCUDAOnlyComputePaths
+// fak-test:runtime fast est=10ms
+func TestStrixValidationKeepsSharedAndMixedComputePaths(t *testing.T) {
+	for _, changed := range []string{
+		"internal/compute",
+		"internal/compute/backend.go",
+		"internal/compute/vulkan.go",
+		"internal/compute/hip.go",
+		"internal/compute/rocm.go",
+		"internal/compute/strix.go",
+		"internal/compute/cuda_vulkan_bridge.go",
+		"internal/compute/cuda/hip_bridge.cuh",
+		"internal/compute/cuda/amd_bridge.h",
+		"internal/compute/cuda/gfx1151_bridge.cuh",
+		"internal/compute/cuda/metal_bridge.go",
+		"internal/compute/cuda/backend.comp",
+		"internal/compute/cuda_device_payload.bin",
+		"internal/compute/cuda_generic/shared.go",
+		"internal/amdgpu/cuda_bridge.go",
+		"internal/roofline/cuda.go",
+		"internal/model/cuda_hal.go",
+		"cmd/fak/validate_acceptance.go",
+		"./internal/compute/backend.go",
+		`internal\compute\vulkan.go`,
+		"internal/compute/cuda/../backend.go",
+		"../internal/compute/cuda.go",
+		"internal/compute/../../compute/cuda.go",
+		"/internal/compute/cuda.go",
+		"C:/internal/compute/cuda.go",
+		`\\server\internal\compute\cuda.go`,
+	} {
+		t.Run(changed, func(t *testing.T) {
+			if !isGPURelatedValidation([]string{changed}) {
+				t.Fatalf("shared, mixed, or invalid compute path skipped Strix: %s", changed)
+			}
+		})
+	}
+	for _, changed := range [][]string{
+		{"internal/compute/cuda.go", "internal/compute/backend.go"},
+		{"internal/compute/backend.go", "internal/compute/cuda.go"},
+		{"internal/compute/cuda/attention.cuh", "internal/amdgpu/strixhalo.go"},
+		{"internal/amdgpu/strixhalo.go", "internal/compute/cuda/attention.cuh"},
+	} {
+		if !isGPURelatedValidation(changed) {
+			t.Fatalf("mixed compute scope skipped Strix: %v", changed)
+		}
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/validate/**
+// fak-test:runtime fast est=20ms
+func TestStrixValidationCUDAOnlySkipsBeforeControllerAuthority(t *testing.T) {
+	publicRoot := writeValidationModule(t, publicFakModulePath)
+	originalAuthority := newStrixControllerAuthorityFn
+	originalDiscovery := discoverStrixTargetFn
+	originalArchive := buildStrixCandidateArchiveFn
+	originalRun := runStrixValidationFn
+	t.Cleanup(func() {
+		newStrixControllerAuthorityFn = originalAuthority
+		discoverStrixTargetFn = originalDiscovery
+		buildStrixCandidateArchiveFn = originalArchive
+		runStrixValidationFn = originalRun
+	})
+
+	for _, tc := range []struct {
+		name          string
+		mine          []string
+		explicit      bool
+		wantAuthority int
+	}{
+		{name: "automatic CUDA-only scope", mine: cudaOnlyComputeValidationPaths},
+		{name: "automatic host framework scope", mine: []string{"internal/validate/strix.go", "internal/validate/strix_test.go"}},
+		{name: "explicit host framework remains protected", mine: []string{"internal/validate/strix.go"}, explicit: true, wantAuthority: 1},
+		{name: "mixed host framework remains protected", mine: []string{"internal/validate/strix.go", "internal/compute/vulkan.go"}, wantAuthority: 1},
+		{name: "explicit CUDA scope remains protected", mine: []string{"internal/compute/cuda.go"}, explicit: true, wantAuthority: 1},
+		{name: "generic compute remains protected", mine: []string{"internal/compute/backend.go"}, wantAuthority: 1},
+		{name: "Strix scope remains protected", mine: []string{"internal/amdgpu/strixhalo.go"}, wantAuthority: 1},
+		{name: "mixed compute remains protected", mine: []string{"internal/compute/cuda.go", "internal/compute/vulkan.go"}, wantAuthority: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			authorityErr := errors.New("test controller authority unavailable")
+			authorityCalls, discoveryCalls, archiveCalls, runCalls := 0, 0, 0, 0
+			newStrixControllerAuthorityFn = func(context.Context, string) (amdgpu.StrixControllerAuthority, error) {
+				authorityCalls++
+				return amdgpu.StrixControllerAuthority{}, authorityErr
+			}
+			discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+				discoveryCalls++
+				return nil, authorityErr
+			}
+			buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
+				archiveCalls++
+				return amdgpu.StrixCandidateArchive{}, authorityErr
+			}
+			runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+				runCalls++
+				return nil, authorityErr
+			}
+			res, recorder := newStrixPhaseTestRecorder()
+			err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, res, recorder, publicRoot, tc.explicit, "", "", "", tc.mine)
+			if authorityCalls != tc.wantAuthority || discoveryCalls != 0 || archiveCalls != 0 || runCalls != 0 {
+				t.Fatalf("phase calls authority/discovery/archive/run = %d/%d/%d/%d, want %d/0/0/0", authorityCalls, discoveryCalls, archiveCalls, runCalls, tc.wantAuthority)
+			}
+			if res.StrixValidation != nil {
+				t.Fatal("scope selection earned a hardware receipt")
+			}
+			if tc.wantAuthority == 0 {
+				if err != nil || !res.OK || len(res.Failures) != 0 {
+					t.Fatalf("CUDA-only phase error=%v OK=%v failures=%d", err, res.OK, len(res.Failures))
+				}
+				if len(res.SkippedPhases) != 1 || res.SkippedPhases[0] != "strix_validation" {
+					t.Fatalf("skipped phases = %v, want [strix_validation]", res.SkippedPhases)
+				}
+				return
+			}
+			if !errors.Is(err, authorityErr) || res.OK {
+				t.Fatalf("protected phase error=%v OK=%v, want authority refusal", err, res.OK)
+			}
+			if len(res.SkippedPhases) != 0 || len(res.Failures) != 1 {
+				t.Fatalf("protected phase skipped=%d failures=%d", len(res.SkippedPhases), len(res.Failures))
+			}
+			if res.Failures[0].Step != "strix-controller-authority" {
+				t.Fatalf("failure step=%s, want strix-controller-authority", res.Failures[0].Step)
+			}
+		})
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/validate/**
+// fak-test:runtime fast est=10ms
+func TestStrixValidationSkipsHostFrameworkGoPaths(t *testing.T) {
+	framework := []string{
+		"internal/validate/strix.go",
+		"internal/validate/strix_test.go",
+		"internal/validate/halo_receipt.go",
+		"internal/validate/vulkan_transport.go",
+		"internal/validate/gfx115_probe.go",
+		"./internal/validate/strix.go",
+		`internal\validate\strix.go`,
+	}
+	for _, changed := range framework {
+		if isGPURelatedValidation([]string{changed}) {
+			t.Fatalf("host validator framework path selected Strix: %s", changed)
+		}
+	}
+	if isGPURelatedValidation(framework) {
+		t.Fatal("host validator framework scope selected Strix")
+	}
+}
+
+// fak-test:justify why=guard when=changed:internal/validate/** twin=TestStrixValidationSkipsHostFrameworkGoPaths
+// fak-test:runtime fast est=10ms
+func TestStrixValidationKeepsFrameworkPayloadAndSiblingPaths(t *testing.T) {
+	for _, changed := range []string{
+		"internal/validate/strix.cu",
+		"internal/validate/strix.cuh",
+		"internal/validate/strix.hip",
+		"internal/validate/strix.h",
+		"internal/validate/vulkan.spv",
+		"internal/validate/halo.comp",
+		"internal/validate/gfx1151.bin",
+		"internal/validate-extra/strix.go",
+		"internal/validation/strix.go",
+		"internal/validate/device/strix.go",
+		"internal/devcmd/amd_strix_validate.go",
+		"cmd/fak/validate_acceptance.go",
+		"internal/validate/../compute/cuda.go",
+		"../internal/validate/strix.go",
+		"/internal/validate/strix.go",
+		"C:/internal/validate/strix.go",
+	} {
+		t.Run(changed, func(t *testing.T) {
+			if !isGPURelatedValidation([]string{changed}) {
+				t.Fatalf("device payload, sibling, or invalid path skipped Strix: %s", changed)
+			}
+		})
+	}
+	for _, changed := range [][]string{
+		{"internal/validate/strix.go", "internal/compute/backend.go"},
+		{"internal/compute/backend.go", "internal/validate/strix.go"},
+		{"internal/validate/strix.go", "internal/validate/strix.cu"},
+		{"internal/amdgpu/strixhalo.go", "internal/validate/strix.go"},
+	} {
+		if !isGPURelatedValidation(changed) {
+			t.Fatalf("mixed framework scope skipped Strix: %v", changed)
+		}
+	}
+}

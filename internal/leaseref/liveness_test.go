@@ -378,7 +378,7 @@ func TestStoreClassifyLive(t *testing.T) {
 }
 
 // fak-test:runtime fast est=1s
-func TestPresenceSnapshotReadsSessionDescriptorsOnceAndPreservesClassification(t *testing.T) {
+func TestLeasePlaneBatchReadsSessionDescriptorsOnceAndPreservesClassification(t *testing.T) {
 	g := newFakeGit()
 	seed := NewWithRunner(g.run, "")
 	ctx := context.Background()
@@ -448,16 +448,6 @@ func TestPresenceSnapshotReadsSessionDescriptorsOnceAndPreservesClassification(t
 		t.Fatalf("live session ids = %v, want [alive stopped]", got)
 	}
 
-	got := make(map[string]ClassifiedLease, len(classified))
-	for _, row := range classified {
-		got[row.ID] = row
-	}
-	if len(got) != 6 {
-		t.Fatalf("classified ids = %v, want six live parseable leases", got)
-	}
-	if _, ok := got["expired-lease"]; ok {
-		t.Fatal("TTL-expired lease was classified")
-	}
 	want := map[string]struct {
 		class string
 		kind  string
@@ -468,6 +458,19 @@ func TestPresenceSnapshotReadsSessionDescriptorsOnceAndPreservesClassification(t
 		"missing":         {LivenessPeerUnknown, EvidenceNoDescriptor},
 		"corrupt-session": {LivenessPeerUnknown, EvidenceNoDescriptor},
 		"unbound":         {LivenessPeerUnknown, EvidenceNoBinding},
+	}
+	got := make(map[string]ClassifiedLease, len(classified))
+	for _, row := range classified {
+		if row.ID == "expired-lease" {
+			t.Fatal("TTL-expired lease was classified")
+		}
+		if _, ok := want[row.ID]; !ok {
+			t.Fatalf("unexpected classified lease %q", row.ID)
+		}
+		if _, duplicate := got[row.ID]; duplicate {
+			t.Fatalf("classified lease %q duplicated", row.ID)
+		}
+		got[row.ID] = row
 	}
 	for id, expected := range want {
 		row, ok := got[id]

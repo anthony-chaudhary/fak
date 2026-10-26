@@ -406,15 +406,21 @@ type Findings struct {
 // quarantine trigger. PII is intentionally excluded (see Findings.PII).
 func (f Findings) Any() bool { return f.Secret || f.Injection }
 
+// scanViews is the shared canonicalization pipeline for factual detectors.
+func scanViews(body []byte) (norm, dec, rev string) {
+	raw := string(body)
+	norm = Normalize(raw)
+	dec = Decoded(raw) + " " + Decoded(norm)
+	rev = reverseRunes(norm)
+	return norm, dec, rev
+}
+
 // Scan canonicalizes body and reports whether its canonical views reveal a secret
 // or an injection marker. This is the de-obfuscating detector both normgate (write
 // time) and recall (read-time re-screen) share, so there is exactly one
 // canonicalization to audit and one to keep correct.
 func Scan(body []byte) Findings {
-	raw := string(body)
-	norm := Normalize(raw)
-	dec := Decoded(raw) + " " + Decoded(norm)
-	rev := reverseRunes(norm)
+	norm, dec, rev := scanViews(body)
 
 	var f Findings
 

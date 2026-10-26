@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -91,8 +92,16 @@ func TestWorkHistoryPersistenceIsBoundedAndPrivacySafe(t *testing.T) {
 	if records[0].WorkloadID == "" || !strings.HasPrefix(records[0].RunID, "sha256:") {
 		t.Fatalf("identities not hashed: %#v", records[0])
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("history permissions = %v err=%v", info.Mode(), err)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("history mode = %v, want regular file", info.Mode())
+	}
+	// Windows FileMode permission bits are synthetic and do not describe the ACL.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("history permissions = %v", info.Mode())
 	}
 }
 

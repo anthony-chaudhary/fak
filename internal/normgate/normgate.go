@@ -55,6 +55,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
 	"github.com/anthony-chaudhary/fak/internal/refutil"
+	"github.com/anthony-chaudhary/fak/internal/remotemaintresult"
 )
 
 // enabled is the runtime toggle (FAK_NORMGATE=off makes Admit a no-op Defer) so
@@ -396,6 +397,20 @@ func publicPIIClasses(c *abi.ToolCall) (map[string]bool, bool) {
 }
 
 func (g *Gate) admitPII(ctx context.Context, c *abi.ToolCall, r *abi.Result, body []byte) abi.Verdict {
+	// The typed target exception is email-only. Check the original bytes first so
+	// removing an SSH target cannot also erase an SSN, PAN, phone, IBAN, or other
+	// visible PII class that happens to overlap that target.
+	if !canon.HasCanonicalPIIExcept(body, map[string]bool{canon.PIIClassEmail: true}) {
+		if probe, ok := remotemaintresult.PIIProbe(ctx, c, body); ok {
+			// The original body has already traversed the secret and injection floors.
+			// Re-scan the typed probe across every class so removing the single trusted
+			// SSH target can never hide unrelated PII or a second threat.
+			findings := canon.Scan(probe)
+			if !findings.Secret && !findings.Injection && !findings.PII {
+				return abi.Verdict{Kind: abi.VerdictAllow, By: "normgate"}
+			}
+		}
+	}
 	exempt, valid := publicPIIClasses(c)
 	if valid && len(exempt) > 0 {
 		// Prove the exemption is complete rather than trusting the raw class list:

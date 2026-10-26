@@ -48,6 +48,7 @@ func TestGuardLifecycleIPCAuthenticatedSnapshot(t *testing.T) {
 }
 
 func TestGuardSessionStartClearCreatesFakSessionBoundary(t *testing.T) {
+	t.Chdir(t.TempDir())
 	oldSessions, oldDurability := serveSessions, serveSessionDurability
 	serveSessions, serveSessionDurability = session.NewTable(), nil
 	t.Cleanup(func() {
@@ -139,6 +140,7 @@ func TestGuardSessionStartClearCreatesFakSessionBoundary(t *testing.T) {
 }
 
 func TestGuardSessionStartCodexClearAndNewCreateOneBoundaryEach(t *testing.T) {
+	t.Chdir(t.TempDir())
 	oldSessions, oldDurability := serveSessions, serveSessionDurability
 	serveSessions, serveSessionDurability = session.NewTable(), nil
 	t.Cleanup(func() {

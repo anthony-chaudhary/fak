@@ -45,6 +45,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -437,18 +438,17 @@ func (j *Journal) Flush() error {
 func (j *Journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	var flushErr error
 	if j.bw != nil {
-		if err := j.bw.Flush(); err != nil {
-			return err
-		}
+		flushErr = j.bw.Flush()
 	}
 	if j.f != nil {
 		_ = j.f.Sync()
-		err := j.f.Close()
+		closeErr := j.f.Close()
 		j.f, j.bw = nil, nil
-		return err
+		return errors.Join(flushErr, closeErr)
 	}
-	return nil
+	return flushErr
 }
 
 // writeRow appends one JSONL row and flushes it (per-row durability).

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -85,6 +86,18 @@ func isGPURelatedValidation(mine []string) bool {
 	}
 	for _, p := range mine {
 		norm := strings.ReplaceAll(p, "\\", "/")
+		if strings.HasPrefix(norm, "/") || strings.Contains(norm, ":") {
+			return true
+		}
+		for _, part := range strings.Split(norm, "/") {
+			if part == ".." {
+				return true
+			}
+		}
+		norm = path.Clean(norm)
+		if isCUDAOnlyComputeValidationPath(norm) {
+			continue
+		}
 		lower := strings.ToLower(norm)
 		for _, root := range gpuRoots {
 			if norm == root || strings.HasPrefix(norm, root+"/") {
@@ -123,11 +136,48 @@ func isGPURelatedValidation(mine []string) bool {
 	return false
 }
 
+func isCUDAOnlyComputeValidationPath(norm string) bool {
+	const computeRoot = "internal/compute/"
+	if !strings.HasPrefix(norm, computeRoot) {
+		return false
+	}
+	rel := strings.TrimPrefix(norm, computeRoot)
+	// Keep cross-backend artifacts under CUDA namespaces hardware-relevant.
+	for _, part := range strings.FieldsFunc(strings.ToLower(rel), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	}) {
+		for _, marker := range []string{"strix", "halo", "vulkan", "rocm", "hip", "amd", "gfx", "metal"} {
+			if strings.HasPrefix(part, marker) {
+				return false
+			}
+		}
+	}
+	if rel == "testdata/cuda_device_context.cpp" {
+		return true
+	}
+	switch path.Ext(rel) {
+	case ".go", ".h", ".cu", ".cuh":
+	default:
+		return false
+	}
+	if strings.HasPrefix(rel, "cuda/") {
+		return true
+	}
+	if strings.Contains(rel, "/") {
+		return false
+	}
+	return rel == "cuda.go" || strings.HasPrefix(rel, "cuda_") || strings.HasSuffix(rel, "_cuda.go")
+}
+
 // keywordArmApplies reports whether the loose GPU-keyword substring test may
-// fire for a source path. Test files and private factory/control-plane trees
-// are excluded; see isGPURelatedValidation.
+// fire for a source path. Tests, private factory/control-plane trees, and host
+// Go sources in internal/validate are excluded. That package orchestrates checks,
+// so validator maintenance stays host-testable; device payloads remain eligible.
 func keywordArmApplies(norm string) bool {
 	if strings.HasSuffix(strings.ToLower(norm), "_test.go") {
+		return false
+	}
+	if path.Dir(norm) == "internal/validate" && strings.EqualFold(path.Ext(norm), ".go") {
 		return false
 	}
 	if norm == "platform" || strings.HasPrefix(norm, "platform/") {

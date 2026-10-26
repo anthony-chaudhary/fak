@@ -75,7 +75,7 @@ func TestExtractGitTreeStreamsAndReapsArchive(t *testing.T) {
 					t.Fatalf("extraction failure was lost to producer termination: %v", err)
 				}
 			case "start-failure":
-				if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "git archive fixture-tree") {
+				if (!errors.Is(err, os.ErrNotExist) && !errors.Is(err, exec.ErrNotFound)) || !strings.Contains(err.Error(), "git archive fixture-tree") {
 					t.Fatalf("start failure = %v, want wrapped missing executable", err)
 				}
 			}

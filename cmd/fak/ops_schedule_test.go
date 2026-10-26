@@ -3,10 +3,65 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
+	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func launchdPlistString(t testing.TB, definition, key string) string {
+	t.Helper()
+	decoder := xml.NewDecoder(strings.NewReader(definition))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			t.Fatalf("launchd plist missing key %q", key)
+		}
+		if err != nil {
+			t.Fatalf("decode launchd plist: %v", err)
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "key" {
+			continue
+		}
+		var gotKey string
+		if err := decoder.DecodeElement(&gotKey, &start); err != nil {
+			t.Fatalf("decode launchd key: %v", err)
+		}
+		if gotKey != key {
+			continue
+		}
+		for {
+			token, err = decoder.Token()
+			if err != nil {
+				t.Fatalf("decode launchd value for %q: %v", key, err)
+			}
+			valueStart, ok := token.(xml.StartElement)
+			if !ok {
+				continue
+			}
+			if valueStart.Name.Local != "string" {
+				t.Fatalf("launchd value for %q has element %q, want string", key, valueStart.Name.Local)
+			}
+			var value string
+			if err := decoder.DecodeElement(&value, &valueStart); err != nil {
+				t.Fatalf("decode launchd string for %q: %v", key, err)
+			}
+			return value
+		}
+	}
+}
+
+func launchdLogPathMatchesHost(t testing.TB, got, taskName, extension string) {
+	t.Helper()
+	normalized := filepath.ToSlash(got)
+	wantName := taskName + extension
+	if normalized != "/tmp/"+wantName && !strings.HasSuffix(normalized, "/Library/Logs/fak/"+wantName) {
+		t.Errorf("launchd log path=%q, want host-normalized Library/Logs/fak or /tmp path for %s", got, wantName)
+	}
+}
 
 func TestOpsScheduleUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -225,8 +280,7 @@ func TestOpsScheduleLaunchdEnvironment(t *testing.T) {
 		if !strings.Contains(def, "<string>--workdir</string>") {
 			t.Errorf("task %s launchd plist missing --workdir in ProgramArguments", task.TaskName)
 		}
-		if !strings.Contains(def, "Library/Logs/fak") && !strings.Contains(def, "/tmp/") {
-			t.Errorf("task %s launchd plist missing valid log path", task.TaskName)
-		}
+		launchdLogPathMatchesHost(t, launchdPlistString(t, def, "StandardOutPath"), task.TaskName, ".log")
+		launchdLogPathMatchesHost(t, launchdPlistString(t, def, "StandardErrorPath"), task.TaskName, ".err")
 	}
 }

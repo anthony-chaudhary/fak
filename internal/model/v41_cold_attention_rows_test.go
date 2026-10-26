@@ -447,6 +447,10 @@ func TestV41ColdPlainAttentionSessionParity(t *testing.T) {
 		v41SharedAttentionSessionBits(t, "CPU borrowed rows", got, want)
 		packedAllocs := testing.AllocsPerRun(100, func() {
 			values, _ := v41ColdPlainAttentionInput(q, sink, rows, keys, idx, opt, nil, nil)
+			// Match the ordinary packed path's timed boundary. On Windows the
+			// QueryPerformanceCounter syscall carries allocation overhead that is
+			// unrelated to row packing; omitting it makes the control incomparable.
+			_ = m.v41NowNanos()
 			got, err = V41SparseAttentionSink(q, values, sink, idx, opt)
 		})
 		if err != nil || borrowAllocs >= packedAllocs || !reflect.DeepEqual(rows, [][]float32{{9, 8}, {0.25, 0.5}, {-0.5, 0.75}}) {

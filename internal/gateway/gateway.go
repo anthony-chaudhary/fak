@@ -80,6 +80,10 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 	mcpSessionBearer := strings.TrimSpace(cfg.MCPSessionBearer)
+	mcpAgentID := strings.TrimSpace(cfg.MCPAgentID)
+	if mcpAgentID != "" && (mcpSessionBearer == "" || strings.EqualFold(mcpAgentID, string(PrincipalHuman))) {
+		return nil, &ConfigError{Field: "MCPAgentID", Reason: "requires authenticated non-human MCP launch"}
+	}
 	mcpSessionBearerDigest := sha256.Sum256([]byte(mcpSessionBearer))
 	// fak_read is part of this server's default MCP inventory, so arm its confined
 	// execution route before the server can advertise the tool. Preserve any caller-
@@ -182,7 +186,7 @@ func New(cfg Config) (*Server, error) {
 	startup.phase("vdso-config", time.Since(t))
 
 	t = time.Now()
-	k := kernel.New(engineID)
+	k := kernel.New(engineID, kernel.WithAdjudicators(append([]abi.Adjudicator(nil), cfg.Adjudicators...)))
 	k.SetVDSO(cfg.VDSO)
 	startup.phase("kernel-init", time.Since(t))
 
@@ -302,6 +306,7 @@ func New(cfg Config) (*Server, error) {
 		defaultTraceID:               strings.TrimSpace(cfg.DefaultTraceID),
 		mcpSessionAuthEnabled:        mcpSessionBearer != "",
 		mcpSessionBearerDigest:       mcpSessionBearerDigest,
+		mcpAgentID:                   mcpAgentID,
 		guardRecoveryPrompt:          strings.TrimSpace(cfg.GuardRecoveryPrompt),
 		startup:                      startup,
 		planner:                      planner,

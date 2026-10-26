@@ -3,12 +3,14 @@ package commitintent
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -144,6 +146,39 @@ func TestStoreConcurrentSubmitOrdering(t *testing.T) {
 		if seq != i+1 {
 			t.Fatalf("sequences = %v, want contiguous 1..%d", seqs, n)
 		}
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/commitintent/**
+// fak-test:runtime fast est=1ms lane=default
+func TestIsBusyLockWindowsDeletePendingAccessDenied(t *testing.T) {
+	path := filepath.Join(t.TempDir(), StoreLockFile)
+	missing := func(string) (fs.FileInfo, error) { return nil, fs.ErrNotExist }
+	for _, errno := range []syscall.Errno{5, 32, 33} {
+		err := &fs.PathError{Op: "open", Path: path, Err: errno}
+		if !isBusyLockForOS(err, path, "windows", missing) {
+			t.Fatalf("Windows errno %d with delete-pending missing path must be retried", errno)
+		}
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/commitintent/**
+// fak-test:runtime fast est=1ms lane=default
+func TestIsBusyLockPermissionClassificationRemainsStrict(t *testing.T) {
+	path := filepath.Join(t.TempDir(), StoreLockFile)
+	missing := func(string) (fs.FileInfo, error) { return nil, fs.ErrNotExist }
+	statDenied := func(string) (fs.FileInfo, error) { return nil, fs.ErrPermission }
+	permission := &fs.PathError{Op: "open", Path: path, Err: fs.ErrPermission}
+
+	if isBusyLockForOS(permission, path, "linux", missing) {
+		t.Fatal("non-Windows permission error with an absent lock must fail immediately")
+	}
+	if isBusyLockForOS(permission, path, "windows", missing) {
+		t.Fatal("generic Windows permission error with an absent lock must fail immediately")
+	}
+	accessDenied := &fs.PathError{Op: "open", Path: path, Err: syscall.Errno(5)}
+	if isBusyLockForOS(accessDenied, path, "windows", statDenied) {
+		t.Fatal("Windows access denied without present-or-missing lock evidence must fail immediately")
 	}
 }
 

@@ -231,6 +231,7 @@ var plumbingField = map[string]bool{
 	"ReloadPolicy": true, "PolicyRuntime": true, "ResetTrace": true, "ObserveTrace": true, "ObserveSession": true,
 	"ControlSession": true, "ListSessions": true, "OnBudgetExhausted": true,
 	"DefaultTraceID": true, "Logf": true, "StartTime": true, "StartupPhases": true,
+	"Adjudicators": true, "MCPAgentID": true,
 }
 
 var configFieldRe = regexp.MustCompile(`(?m)^\t([A-Z][A-Za-z0-9]*)\s+[^/]`)

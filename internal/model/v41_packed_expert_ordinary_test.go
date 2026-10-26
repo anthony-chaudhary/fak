@@ -119,7 +119,7 @@ func TestV41PackedExpertOrdinaryConsumer(t *testing.T) {
 		"w2": {weightRows: 32, weightCols: 16, scaleRows: 32, scaleCols: 1},
 		"w3": {weightRows: 32, weightCols: 16, scaleRows: 32, scaleCols: 1},
 	}
-	defer func() { v41ExpertQuantSpecs = saved }()
+	t.Cleanup(func() { v41ExpertQuantSpecs = saved })
 
 	newModel := func() *Model {
 		return &Model{Cfg: Config{
@@ -177,6 +177,46 @@ func TestV41PackedExpertOrdinaryConsumer(t *testing.T) {
 			t.Fatalf("packed ordinary result mismatch: err=%v kernels=%d host=%d fallback=%t", err, b.calls, host, s.HostFallbackObserved())
 		}
 	})
+
+	for _, tc := range []struct {
+		name        string
+		projections []string
+	}{
+		{name: "device-only refuses complete packed expert", projections: []string{"w1", "w3", "w2"}},
+		{name: "device-only refuses partial packed expert", projections: []string{"w1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newModel()
+			defer m.CloseWeights()
+			for i, projection := range tc.projections {
+				v41PackedOrdinaryInstall(t, m, projection, byte(1+i*6))
+			}
+			b := newV41PackedOrdinaryBackend()
+			s := newSession(m, b)
+			defer s.Close()
+			ordinary := requireCallback(t, s)
+			s.SetExecutionPolicy(ExecutionPolicyDeviceOnly)
+			if v41DeviceOnlyRoutedSwiGLUBound(s) {
+				t.Fatal("packed ordinary callback advertised a device-only activation binding")
+			}
+			invoked := 0
+			strict := v41DeviceOnlyRoutedExpert(s, func(layer int, stem string, x []float32, weight float32) ([]float32, v41RoutedExpertOutcome, error) {
+				invoked++
+				return ordinary(layer, stem, x, weight)
+			})
+			got, outcome, err := strict(0, "ffn.experts.0", make([]float32, 32), .5)
+			var closed *BackendForwardOperationError
+			var hostOp *v41DeviceOnlyHostOpError
+			if got != nil || outcome != v41RoutedExpertError || !errors.Is(err, errV41DeviceOnlyHostOp) ||
+				!errors.As(err, &closed) || !errors.As(err, &hostOp) || closed.Path != "device-only" ||
+				!s.BackendSessionClosed() || !s.HostFallbackObserved() || invoked != 0 || b.calls != 0 ||
+				b.v41RoutedSwiGLUTestBackend.calls != 0 || b.v41RoutedSwiGLUTestBackend.reads != 0 {
+				t.Fatalf("device-only packed refusal: result=%v outcome=%v err=%v closed=%t observed=%t callback=%d kernels=%d activations=%d reads=%d",
+					got, outcome, err, s.BackendSessionClosed(), s.HostFallbackObserved(), invoked, b.calls,
+					b.v41RoutedSwiGLUTestBackend.calls, b.v41RoutedSwiGLUTestBackend.reads)
+			}
+		})
+	}
 
 	t.Run("partial metadata refuses before kernels", func(t *testing.T) {
 		m := newModel()

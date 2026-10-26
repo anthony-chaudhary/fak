@@ -261,6 +261,8 @@ func TestPackageVersionReadsOnlyProjectTable(t *testing.T) {
 	}
 }
 
+// fak-test:justify why=regression when=changed:internal/devcmd/codexplugin_sync.go
+// fak-test:runtime fast est=100ms lane=default
 func TestSyncCodexPluginBoundsProfileAttestation(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "source", "claude-plugin")
@@ -269,11 +271,18 @@ func TestSyncCodexPluginBoundsProfileAttestation(t *testing.T) {
 	writePluginFixture(t, destination, "0.30.0", "old")
 
 	oldInspect := codexPluginProfileInspect
+	oldContext := codexPluginAttestContext
 	codexPluginProfileInspect = func(ctx context.Context, _, _, _ string) (hookProfileReport, error) {
 		<-ctx.Done()
 		return hookProfileReport{}, ctx.Err()
 	}
-	t.Cleanup(func() { codexPluginProfileInspect = oldInspect })
+	codexPluginAttestContext = func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 50*time.Millisecond)
+	}
+	t.Cleanup(func() {
+		codexPluginProfileInspect = oldInspect
+		codexPluginAttestContext = oldContext
+	})
 
 	started := time.Now()
 	r, err := syncCodexPlugin(root, source, destination, root, codexPluginSyncOps{rename: os.Rename, remove: os.RemoveAll})
@@ -286,7 +295,7 @@ func TestSyncCodexPluginBoundsProfileAttestation(t *testing.T) {
 	if !strings.Contains(r.Detail, "attestation timed out") || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("detail=%q err=%v", r.Detail, err)
 	}
-	if elapsed := time.Since(started); elapsed > codexPluginAttestTimeout+2*time.Second {
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Fatalf("attestation exceeded bound: %s", elapsed)
 	}
 	installed, readErr := os.ReadFile(filepath.Join(destination, "hooks", "hooks.json"))

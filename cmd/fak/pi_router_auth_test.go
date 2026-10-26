@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -110,7 +111,11 @@ func TestPiRouterAuthConsumesProtectedOriginCredential(t *testing.T) {
 					t.Error("live extension inaccessible")
 					return 70
 				}
-				if info.Mode().Perm() != 0600 {
+				if !info.Mode().IsRegular() {
+					t.Errorf("credential-bearing extension mode=%v, want regular file", info.Mode())
+				}
+				// Windows FileMode permission bits are synthetic and do not describe the ACL.
+				if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 					t.Errorf("credential-bearing extension permissions=%o want0600", info.Mode().Perm())
 				}
 				// Execute the exact generated provider registration in a real child, then

@@ -124,6 +124,8 @@ func TestDecodeSubmitWaitCoverageNeverFabricatesZero(t *testing.T) {
 			ctx, acc := WithDecodeHostWork(context.Background())
 			span := StartDecodeSpan()
 			defer span.Abandon()
+			// A receipt needs positive wall time even within one host clock tick.
+			span.started = span.started.Add(-time.Nanosecond)
 			current = tc.after
 			w := span.Finish(ctx, 1)
 			if (w.Kernel != nil) != tc.observed || (w.Kernel != nil && *w.Kernel != 0) {

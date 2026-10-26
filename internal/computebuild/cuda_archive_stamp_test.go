@@ -119,7 +119,8 @@ func TestBuildCUDAScriptWritesTheGoArchiveStamp(t *testing.T) {
 		if err := os.WriteFile(archive, fixtureCUDAArchive("kernel-v1", pid), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(bash, "-c", "set -euo pipefail\n"+fn+"write_archive_stamp\n")
+		cmd := exec.Command(bash, "-s")
+		cmd.Stdin = strings.NewReader("set -euo pipefail\n" + fn + "write_archive_stamp\n")
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("write_archive_stamp: %v\n%s", err, out)

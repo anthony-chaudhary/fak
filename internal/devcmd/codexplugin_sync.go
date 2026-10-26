@@ -25,6 +25,10 @@ const (
 
 var codexPluginProfileInspect = inspectCodexHookProfileContext
 
+var codexPluginAttestContext = func() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), codexPluginAttestTimeout)
+}
+
 type codexPluginArtifact struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
@@ -242,7 +246,7 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 	}
 	r.StagedDestination = ""
 	r.Status = "INSTALLED"
-	ctx, cancel := context.WithTimeout(context.Background(), codexPluginAttestTimeout)
+	ctx, cancel := codexPluginAttestContext()
 	profile, profileErr := codexPluginProfileInspect(ctx, home, workspace, "")
 	cancel()
 	if profileErr != nil {

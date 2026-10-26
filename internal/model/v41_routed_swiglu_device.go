@@ -232,6 +232,14 @@ func (s *Session) v41RoutedExpertFunc() v41RoutedExpertFunc {
 // typed, so the host clamp and SwiGLU arm is unreachable under device-only.
 func v41DeviceOnlyRoutedExpert(s *Session, f v41RoutedExpertFunc) v41RoutedExpertFunc {
 	return func(layer int, stem string, x []float32, weight float32) ([]float32, v41RoutedExpertOutcome, error) {
+		if s != nil && s.M != nil {
+			packedStem := "layers." + itoa(layer) + "." + stem
+			for _, projection := range [...]string{"w1", "w3", "w2"} {
+				if s.M.V41ExpertDeviceInstalled(packedStem + "." + projection + ".weight") {
+					return nil, v41RoutedExpertError, s.v41DeviceOnlyDeclined(layer, "routed-swiglu-clamp")
+				}
+			}
+		}
 		if f != nil {
 			y, outcome, err := f(layer, stem, x, weight)
 			if outcome != v41RoutedExpertDeclined {
@@ -255,7 +263,11 @@ func v41DeviceOnlyRoutedSwiGLUBound(s *Session) bool {
 		return false
 	}
 	if full {
-		return s.v41RoutedExpertFunc() != nil
+		if s.M.V41ExpertDevicePackedPreserved() || !s.Backend.Caps().DeviceMemory {
+			return false
+		}
+		op, ok := s.Backend.(compute.V41RoutedSwiGLUBackend)
+		return ok && op.V41RoutedSwiGLUAvailable()
 	}
 	limit := float32(s.M.Cfg.SwigluLimit)
 	if !finite32(limit) {

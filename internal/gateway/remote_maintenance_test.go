@@ -287,7 +287,7 @@ func TestRemoteMaintenancePolicyRecognizedAliasesStillCrossCanonicalScopeFloors(
 			path       string
 			wantReason string
 		}{
-			{name: "credential", path: "/home/maint/.aws/credentials", wantReason: "POLICY_BLOCK"},
+			{name: "credential", path: "/fixture/.aws/credentials", wantReason: "POLICY_BLOCK"},
 			{name: "self-config", path: "/root/.fak/guard/remote-maintenance.json", wantReason: "SELF_MODIFY"},
 		} {
 			t.Run(alias+"/"+scope.name, func(t *testing.T) {
@@ -410,9 +410,9 @@ func TestRemoteMaintenanceTrustedScopeCrossesApplicablePathFloors(t *testing.T) 
 		wantExec   int32
 	}{
 		{name: "host-credential-direct-mcp", paths: []string{"/etc/passwd"}, entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "POLICY_BLOCK"},
-		{name: "any-user-credential-direct-mcp", paths: []string{"/home/maint/.aws/credentials"}, entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "POLICY_BLOCK"},
+		{name: "any-user-credential-direct-mcp", paths: []string{"/fixture/.aws/credentials"}, entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "POLICY_BLOCK"},
 		{name: "guard-self-config-fak-syscall", paths: []string{"/root/.fak/guard/remote-maintenance.json"}, entry: "fak_syscall", wantKind: "DENY", wantReason: "SELF_MODIFY"},
-		{name: "mixed-benign-then-credential", paths: []string{"/etc/systemd/system/fak.service", "/home/maint/.aws/credentials"}, entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "POLICY_BLOCK"},
+		{name: "mixed-benign-then-credential", paths: []string{"/etc/systemd/system/fak.service", "/fixture/.aws/credentials"}, entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "POLICY_BLOCK"},
 		{name: "metadata-target-userinfo-port", paths: []string{"/etc/systemd/system/fak.service"}, target: "operator@169.254.169.254:22", entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "EGRESS_BLOCK"},
 		{name: "systemd-credential-basename", paths: []string{"/etc/systemd/system/fak.service.d/.env.conf"}, entry: remoteMaintenanceTool, wantKind: "DENY", wantReason: "POLICY_BLOCK"},
 		{name: "legitimate-systemd", paths: []string{"/etc/systemd/system/fak.service"}, entry: remoteMaintenanceTool, wantKind: "ALLOW", wantExec: 1},

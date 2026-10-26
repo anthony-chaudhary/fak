@@ -22,6 +22,12 @@ func OpenAppendShareDelete(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 }
 
+// OpenExclusiveShareDelete creates a new writable file without replacing an
+// existing path, while permitting its owner to unlink or rename the held file.
+func OpenExclusiveShareDelete(path string, perm os.FileMode) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+}
+
 // renameOverOpenHandles renames oldpath over newpath even while another
 // handle holds newpath open. On POSIX that is what rename(2) already does;
 // the Windows implementation needs an explicit POSIX-semantics rename (#3555).

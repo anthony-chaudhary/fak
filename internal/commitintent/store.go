@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -181,15 +183,36 @@ func (s Store) withLock(fn func() error) error {
 }
 
 func isBusyLock(err error, path string) bool {
+	return isBusyLockForOS(err, path, runtime.GOOS, os.Stat)
+}
+
+func isBusyLockForOS(err error, path, goos string, stat func(string) (fs.FileInfo, error)) bool {
 	if errors.Is(err, fs.ErrExist) {
 		return true
 	}
-	if errors.Is(err, fs.ErrPermission) {
-		if _, statErr := os.Stat(path); statErr == nil {
-			return true
-		}
+	windowsTransient := goos == "windows" && isWindowsLockCreateTransient(err)
+	if !errors.Is(err, fs.ErrPermission) && !windowsTransient {
+		return false
+	}
+	_, statErr := stat(path)
+	if statErr == nil {
+		return true
+	}
+	// CreateFile(CREATE_NEW) can report access denied or a sharing/lock
+	// violation while the prior owner is deleting the lock. By the time Stat
+	// runs, that pathname may already be gone. Retry this Windows-only ambiguous
+	// state within the caller's existing deadline; do not turn other Stat
+	// failures into contention or probe the directory with another write.
+	if windowsTransient && errors.Is(statErr, fs.ErrNotExist) {
+		return true
 	}
 	return false
+}
+
+func isWindowsLockCreateTransient(err error) bool {
+	return errors.Is(err, syscall.Errno(5)) || // ERROR_ACCESS_DENIED
+		errors.Is(err, syscall.Errno(32)) || // ERROR_SHARING_VIOLATION
+		errors.Is(err, syscall.Errno(33)) // ERROR_LOCK_VIOLATION
 }
 
 func (s Store) now() time.Time {
