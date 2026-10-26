@@ -174,6 +174,9 @@ type Session struct {
 	// returns that one-session grant on Close.
 	hostPathBypass        string
 	hostPathBypassRelease func()
+	// Request observations stay on the session, outside arithmetic prefix state.
+	hostStages        map[string]struct{}
+	hostStageObserver func(string)
 
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
 	glmDsaHeadNameLogged bool
@@ -422,6 +425,12 @@ type Session struct {
 	// v41ColdStages is the opt-in per-stage attribution of the cold V4.1
 	// forward (EnableV41ColdStageAttribution); nil keeps every bracket inert.
 	v41ColdStages *v41ColdStageRecorder
+}
+
+func (s *Session) observeHostArm(stage string) {
+	if s != nil && s.hostStageObserver != nil {
+		s.hostStageObserver(stage)
+	}
 }
 
 // NewSession starts a fresh generation session with the default f32 KV cache.
