@@ -1195,77 +1195,114 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	return true, false, closed
 }
 
-// emitToken advances the lane by one token: it argmaxes the current logits, delivers
-// the token on the stream, and records it. It finishes the lane (KV reclaim + stream
-// close) on cancellation — before or during delivery — or once the lane hits EOS or the
-// generation budget. It returns the emitted token id and whether the lane is still
-// running: ok==false means the lane was finished and the caller must not touch it again.
-// The solo and shared-batch step paths differ only in what they do with a still-running
-// lane, so this is the copy-identical per-lane emit both of them share.
-func (ln *schedLane) emitToken(iteration uint64) (next int, ok bool) {
+// nativeDeferredToken separates sampling from externally visible publication.
+// A token sampled from logits produced by forward N is retained until the next
+// scheduler boundary owns its forward, then retired exactly once.
+type nativeDeferredToken struct {
+	id        int
+	done      bool
+	accounted bool
+}
+
+func (ln *schedLane) stageDeferredToken() bool {
 	s := ln.sched
 	s.mu.Lock()
-	if err := ln.ctx.Err(); err != nil { // cancelled between steps
+	defer s.mu.Unlock()
+	if ln.terminal || ln.deferredToken != nil {
+		return !ln.terminal
+	}
+	if err := ln.ctx.Err(); err != nil {
 		ln.finish(nil, err)
-		s.mu.Unlock()
-		return 0, false
+		return false
 	}
 	if ln.state != schedLaneDecode || len(ln.logits) == 0 || ln.sess == nil || ln.sess == ln.statsSess {
 		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
-		s.mu.Unlock()
+		return false
+	}
+	next := argmax(ln.logits)
+	ln.deferredToken = &nativeDeferredToken{
+		id:   next,
+		done: ln.sess.M.Cfg.IsEOS(next) || ln.emitted+1 >= genTokens,
+	}
+	return true
+}
+
+func (ln *schedLane) deferredForForward() (int, bool) {
+	s := ln.sched
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ln.terminal || ln.deferredToken == nil || ln.deferredToken.done {
 		return 0, false
 	}
-	next = argmax(ln.logits)
-	eos := ln.sess.M.Cfg.IsEOS(next)
+	return ln.deferredToken.id, true
+}
+
+// retireDeferredToken is the synchronize/postprocess/release boundary. It is
+// the only operation that publishes a staged token or advances generated state.
+func (ln *schedLane) retireDeferredToken(iteration uint64) bool {
+	s := ln.sched
+	s.mu.Lock()
+	if ln.terminal || ln.deferredToken == nil {
+		s.mu.Unlock()
+		return false
+	}
+	if err := ln.ctx.Err(); err != nil {
+		ln.finish(nil, err)
+		s.mu.Unlock()
+		return false
+	}
+	pending := *ln.deferredToken
+	ln.deferredToken = nil
 	s.mu.Unlock()
 
 	select {
-	case ln.tokens <- abi.EngineToken{ID: next}:
-	case <-ln.ctx.Done(): // cancelled while delivering
+	case ln.tokens <- abi.EngineToken{ID: pending.id}:
+	case <-ln.ctx.Done():
 		s.mu.Lock()
 		ln.finish(nil, ln.ctx.Err())
 		s.mu.Unlock()
-		return 0, false
+		return false
 	}
 
 	s.mu.Lock()
-	ln.gen = append(ln.gen, next)
-	ln.emitted++
-	done := eos || ln.emitted >= genTokens
+	ln.gen = append(ln.gen, pending.id)
+	if !pending.accounted {
+		ln.emitted++
+	}
+	state := ln.state
 	var res *abi.Result
-	if done {
+	if pending.done {
 		modelName := s.modelName
 		if modelName == "" {
 			modelName = Default.ModelName()
 		}
 		res = assembleSyscallResult(ln.putCtx, ln.tool, EngineID, modelName, ln.promptLen, append([]int(nil), ln.gen...), ln.tok)
 	}
-	state := ln.state
 	s.mu.Unlock()
 
-	s.observeEvent(nativeSchedulerEvent{
-		Iteration: iteration,
-		Kind:      nativeSchedulerEventDecode,
-		Lane:      ln,
-		State:     state,
-		Token:     next,
-	})
-	if done {
+	s.observeEvent(nativeSchedulerEvent{Iteration: iteration, Kind: nativeSchedulerEventDecode, Lane: ln, State: state, Token: pending.id})
+	if pending.done {
 		s.mu.Lock()
 		ln.finish(res, nil)
 		s.mu.Unlock()
-		return 0, false
+		return false
 	}
-	return next, true
+	return true
 }
 
 // stepSolo advances one lane without rebuilding the scheduler batch between every token.
 // It returns to run() whenever another Admit/Close signal arrives, preserving in-flight
 // batch addition while keeping uncontended B=1 latency off the shared-batch bookkeeping path.
 func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
+	if ln.deferredToken == nil {
+		if !ln.stageDeferredToken() {
+			return
+		}
+	}
 	for {
-		next, ok := ln.emitToken(iteration)
-		if !ok {
+		next, forward := ln.deferredForForward()
+		if !forward {
+			ln.retireDeferredToken(iteration)
 			return
 		}
 		sess := s.takeDecodeSession(ln)
@@ -1281,6 +1318,9 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		if !s.publishDecodeSession(ln, sess, logits) {
 			return
 		}
+		if !ln.retireDeferredToken(iteration) || !ln.stageDeferredToken() {
+			return
+		}
 		select {
 		case <-s.wake:
 			return
@@ -1289,9 +1329,9 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 	}
 }
 
-// stepOnce emits one token per active lane, then advances every lane that is still
-// running with ONE shared StepBatch. A lane is retired (cancelled or done) before
-// the batch so it never enters StepBatch's id panel.
+// stepOnce stages a token per active lane, advances it with ONE shared StepBatch,
+// then publishes that prior token and stages its successor. A terminal staged token
+// is retired before the batch so it never enters StepBatch's id panel.
 //
 // Batch composition is ordered by the stable request UID (schedLane.seqNo), never by
 // mutable scheduler slice position: promotion appends to the running set, preemption
@@ -1320,8 +1360,14 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	cont := make([]*schedLane, 0, len(active))
 	ids := make([]int, 0, len(active))
 	for _, ln := range active {
-		next, ok := ln.emitToken(iteration)
-		if !ok {
+		if ln.deferredToken == nil {
+			if !ln.stageDeferredToken() {
+				continue
+			}
+		}
+		next, forward := ln.deferredForForward()
+		if !forward {
+			ln.retireDeferredToken(iteration)
 			continue
 		}
 		cont = append(cont, ln)
@@ -1350,7 +1396,10 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 			return seqs[0].Step(execIDs[0])
 		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
-		s.publishDecodeSession(execLanes[0], seqs[0], logits)
+		if s.publishDecodeSession(execLanes[0], seqs[0], logits) {
+			execLanes[0].retireDeferredToken(iteration)
+			execLanes[0].stageDeferredToken()
+		}
 		return
 	}
 	// The shared, weight-stream-amortised decode step: ONE StepBatch over every
@@ -1373,7 +1422,10 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 		s.mu.Unlock()
 	}
 	for i, ln := range execLanes {
-		s.publishDecodeSession(ln, seqs[i], copyF32(out[i]))
+		if s.publishDecodeSession(ln, seqs[i], copyF32(out[i])) {
+			ln.retireDeferredToken(iteration)
+			ln.stageDeferredToken()
+		}
 	}
 }
 
@@ -1389,6 +1441,10 @@ func (s *NativeScheduler) takeDecodeSession(ln *schedLane) *model.Session {
 	if err := ln.ctx.Err(); err != nil {
 		ln.finish(nil, err)
 		return nil
+	}
+	if ln.deferredToken != nil && !ln.deferredToken.accounted {
+		ln.deferredToken.accounted = true
+		ln.emitted++
 	}
 	return ln.takeSessionForModelLocked()
 }
@@ -1559,6 +1615,7 @@ type schedLane struct {
 	gpuDirectKV   *model.Qwen38GPUDirectDescriptor
 	savedLogits   []float32
 	materializing bool
+	deferredToken *nativeDeferredToken
 
 	tokens chan abi.EngineToken
 	done   chan struct{}
