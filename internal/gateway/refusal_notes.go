@@ -74,12 +74,23 @@ const leaseAdmissionBy = "lease-admission"
 // autonomous agents from attempting self-modification loops (#11504). The operator
 // remedy is exposed out-of-band via OperatorRemedyCommand and HTTP headers/metadata.
 func defaultDenyOperatorRemedy(a ToolAdjudication) string {
-	if reasonOrKind(a.Verdict) != "DEFAULT_DENY" {
-		return ""
-	}
 	tool := refusalCommandTool(a.Tool)
 	if a.Verdict.By == leaseAdmissionBy {
-		return "recovery=" + RecoveryUseFileTools + ": " + tool + " is on the capability floor, but workspace lease admission could not prove this call's write footprint. Use the read/list/search tools for inspection and the edit/write tools with an explicit path for workspace changes, or emit a structured ABSTAIN record citing DEFAULT_DENY by lease-admission. Permissive workspace admission is an out-of-band operator setting this session neither makes nor waits for."
+		failureCode := strings.TrimSpace(a.Verdict.Detail["admission_failure"])
+		// Preserve the historical token for legacy wires only. Every current
+		// lease-admission emitter supplies a typed, non-empty failure code.
+		if failureCode == "" && reasonOrKind(a.Verdict) == "DEFAULT_DENY" {
+			return "recovery=" + RecoveryUseFileTools + ": Legacy/untyped lease refusal; cause unavailable. Inspect actual claim and authority; use file tools only for a workspace file mutation."
+		}
+		failure := leaseAdmissionFailure(failureCode)
+		diagnostic, known := diagnosticForLeaseAdmissionFailure(failure)
+		if !known {
+			return "recovery=" + leaseRecoveryInspectAdmission + ": " + tool + " was refused by lease admission. Inspect the actual refusal claim and authority state before choosing a recovery; missing or unrecognized diagnostic metadata does not identify a failure class."
+		}
+		return "recovery=" + diagnostic.recovery + ": " + diagnostic.remedy
+	}
+	if reasonOrKind(a.Verdict) != "DEFAULT_DENY" {
+		return ""
 	}
 	return "recovery=" + RecoveryPivotAdmittedTool + ": " + tool + " is not on this session's capability floor. Redo the step with an admitted tool, decompose into S0/S1 leaves, land safe verified partial progress, or emit a structured ABSTAIN record citing DEFAULT_DENY; `fak recover DEFAULT_DENY` lists the steps. Widening the floor is an out-of-band operator change this session neither makes nor waits for."
 }
@@ -100,7 +111,7 @@ func OperatorRemedyCommand(a ToolAdjudication) string {
 	}
 	r := reasonOrKind(a.Verdict)
 	if r == "DEFAULT_DENY" && a.Verdict.By == leaseAdmissionBy {
-		return "FAK_WORKSPACE_ADMISSION_PERMISSIVE=1 (or --workspace-admission-permissive) on the gateway process"
+		return ""
 	}
 	if r == "DEFAULT_DENY" || r == "POLICY_BLOCK" {
 		tool := refusalCommandTool(a.Tool)

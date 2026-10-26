@@ -33,61 +33,67 @@ func (s *Server) adjudicateLeaseAdmission(ctx context.Context, tool, rawArgs str
 		return WireVerdict{}, false
 	}
 	if !known || len(rawTargets) == 0 {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "write footprint is unknown"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureUnknownFootprint, "write footprint is unknown"), true
 	}
 	admissionProvider := workspaceLeaseAdmissionProvider
 	if admissionProvider == nil {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "workspace lease authority is unavailable"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureWorkspaceAuthorityUnavailable, "workspace lease authority is unavailable"), true
 	}
 	admission, err := admissionProvider(ctx)
 	if err != nil {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "workspace lease authority read failed"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureWorkspaceAuthorityRead, "workspace lease authority read failed"), true
 	}
 	root, err := filepath.Abs(strings.TrimSpace(admission.WorkspaceRoot))
 	if err != nil || strings.TrimSpace(admission.WorkspaceRoot) == "" {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "workspace lease authority returned an invalid root"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureInvalidWorkspaceRoot, "workspace lease authority returned an invalid root"), true
 	}
 	root, err = canonicalExistingWorkspacePath(root)
 	if err != nil {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "workspace lease authority root cannot be canonicalized"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureWorkspaceRootCanonicalization, "workspace lease authority root cannot be canonicalized"), true
 	}
-	targets, known := adjudicateNormalizeWriteTargets(args, rawTargets, root)
-	if !known {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "write footprint is outside the trusted workspace"), true
+	targets, targetFailure := adjudicateNormalizeWriteTargetsDetailed(args, rawTargets, root)
+	if targetFailure != "" {
+		claim := "write target or working directory cannot be canonicalized"
+		if targetFailure == leaseFailureOutsideWorkspace {
+			claim = "write footprint is outside the trusted workspace"
+		}
+		refusal := leaseAdmissionRefusal(abi.ReasonDefaultDeny, targetFailure, claim)
+		refusal.Detail["trusted_workspace"] = root
+		return refusal, true
 	}
 	provider := leasePlanePresence
 	if provider == nil {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "lease authority is unavailable"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureLeaseAuthorityUnavailable, "lease authority is unavailable"), true
 	}
 	view, err := provider(ctx)
 	if err != nil {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "lease authority read failed"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureLeaseAuthorityRead, "lease authority read failed"), true
 	}
 	var leases []adjudicateClassifiedLease
 	if err := json.Unmarshal(view.ClassifiedLeases, &leases); err != nil {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "lease authority returned an invalid view"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureInvalidLeaseView, "lease authority returned an invalid view"), true
 	}
 	for _, lease := range admission.Leases {
 		if len(lease.TreeGlobs) == 0 {
-			return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "workspace lease authority returned an invalid view"), true
+			return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureInvalidWorkspaceLeaseView, "workspace lease authority returned an invalid view"), true
 		}
 		leases = append(leases, adjudicateClassifiedLease(lease))
 	}
 	for _, lease := range leases {
 		if len(lease.TreeGlobs) == 0 {
-			return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "lease authority returned an invalid view"), true
+			return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureInvalidLeaseView, "lease authority returned an invalid view"), true
 		}
 		canonicalGlobs := make([]string, 0, len(lease.TreeGlobs))
 		for _, treeGlob := range lease.TreeGlobs {
 			canonicalGlob, ok := adjudicateCanonicalTreeGlob(root, treeGlob)
 			if !ok {
-				return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "lease authority tree cannot be canonicalized"), true
+				return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureInvalidLeaseTree, "lease authority tree cannot be canonicalized"), true
 			}
 			canonicalGlobs = append(canonicalGlobs, canonicalGlob)
 		}
 		if dispatchorder.TreesOverlap(targets, canonicalGlobs) {
 			claim := "peer lease holds " + strings.Join(lease.TreeGlobs, ",")
-			return leaseAdmissionRefusal(abi.ReasonLeaseHeld, claim), true
+			return leaseAdmissionRefusal(abi.ReasonLeaseHeld, leaseFailurePeerHeld, claim), true
 		}
 	}
 	return WireVerdict{}, false
@@ -122,15 +128,6 @@ func SetWorkspaceLeaseAdmissionProvider(provider func(context.Context) (Workspac
 type adjudicateClassifiedLease struct {
 	TreeGlobs []string `json:"tree_globs"`
 	SessionID string   `json:"session_id"`
-}
-
-func leaseAdmissionRefusal(reason abi.ReasonCode, claim string) WireVerdict {
-	return renderVerdict(abi.Verdict{
-		Kind:    abi.VerdictDeny,
-		Reason:  reason,
-		By:      "lease-admission",
-		Payload: abi.WitnessPayload{Claim: claim},
-	}, nil)
 }
 
 // adjudicateRawWriteTargets extracts an untrusted write footprint without path
@@ -185,18 +182,26 @@ func adjudicateShellCommandTool(tool string) bool {
 }
 
 func adjudicateNormalizeWriteTargets(args map[string]any, targets []string, root string) ([]string, bool) {
-	workdir, validWorkdir := adjudicateWorkdir(args, root)
-	if !validWorkdir {
-		return nil, false
+	normalized, failure := adjudicateNormalizeWriteTargetsDetailed(args, targets, root)
+	return normalized, failure == ""
+}
+
+func adjudicateNormalizeWriteTargetsDetailed(args map[string]any, targets []string, root string) ([]string, leaseAdmissionFailure) {
+	workdir, workdirFailure := adjudicateWorkdirDetailed(args, root)
+	if workdirFailure != "" {
+		return nil, workdirFailure
 	}
 	for i := range targets {
-		var ok bool
-		targets[i], ok = adjudicateWorkspacePath(root, workdir, targets[i])
-		if !ok {
-			return nil, false
+		var targetFailure leaseAdmissionFailure
+		targets[i], targetFailure = adjudicateWorkspacePathDetailed(root, workdir, targets[i])
+		if targetFailure != "" {
+			return nil, targetFailure
 		}
 	}
-	return targets, len(targets) > 0
+	if len(targets) == 0 {
+		return nil, leaseFailureWriteTargetUnresolvable
+	}
+	return targets, ""
 }
 
 // adjudicateDirectWriteTargets mirrors the mutating tool argument vocabulary
@@ -298,30 +303,43 @@ func adjudicateCommandArgument(args map[string]any) (string, bool) {
 }
 
 func adjudicateWorkdir(args map[string]any, root string) (string, bool) {
+	workdir, failure := adjudicateWorkdirDetailed(args, root)
+	return workdir, failure == ""
+}
+
+func adjudicateWorkdirDetailed(args map[string]any, root string) (string, leaseAdmissionFailure) {
 	for _, key := range []string{"workdir", "cwd"} {
 		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
-			path, valid := adjudicateWorkspacePath(root, "", value)
-			if !valid {
-				return "", false
+			path, failure := adjudicateWorkspacePathDetailed(root, "", value)
+			if failure != "" {
+				return "", failure
 			}
 			info, err := os.Stat(filepath.Join(root, filepath.FromSlash(path)))
-			return path, err == nil && info.IsDir()
+			if err != nil || !info.IsDir() {
+				return "", leaseFailureWriteTargetUnresolvable
+			}
+			return path, ""
 		}
 	}
-	return "", true
+	return "", ""
 }
 
 func adjudicateWorkspacePath(root, workdir, target string) (string, bool) {
+	normalized, failure := adjudicateWorkspacePathDetailed(root, workdir, target)
+	return normalized, failure == ""
+}
+
+func adjudicateWorkspacePathDetailed(root, workdir, target string) (string, leaseAdmissionFailure) {
 	// Normalize both sides of Rel: host aliases such as macOS /var and
 	// /private/var must describe the same workspace boundary.
 	canonicalRoot, rootErr := canonicalExistingWorkspacePath(root)
 	if rootErr != nil {
-		return "", false
+		return "", leaseFailureWriteTargetUnresolvable
 	}
 	root = canonicalRoot
 	target = strings.TrimSpace(strings.Trim(target, `"'`))
 	if target == "" {
-		return "", false
+		return "", leaseFailureWriteTargetUnresolvable
 	}
 	osTarget := filepath.FromSlash(strings.ReplaceAll(target, `\`, "/"))
 	if !filepath.IsAbs(osTarget) {
@@ -331,22 +349,26 @@ func adjudicateWorkspacePath(root, workdir, target string) (string, bool) {
 	canonicalTarget, err := canonicalExistingWorkspacePath(osTarget)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return "", false
+			return "", leaseFailureWriteTargetUnresolvable
 		}
 		// A new leaf is safe only when its complete parent already exists and
 		// canonicalizes. Missing intermediate parents are ambiguous because a
 		// later symlink could redirect the proposed write after admission.
 		canonicalParent, parentErr := canonicalExistingWorkspacePath(filepath.Dir(osTarget))
 		if parentErr != nil {
-			return "", false
+			return "", leaseFailureWriteTargetUnresolvable
+		}
+		parentInfo, statErr := os.Stat(canonicalParent)
+		if statErr != nil || !parentInfo.IsDir() {
+			return "", leaseFailureWriteTargetUnresolvable
 		}
 		canonicalTarget = filepath.Join(canonicalParent, filepath.Base(osTarget))
 	}
 	rel, err := filepath.Rel(root, filepath.Clean(canonicalTarget))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
+		return "", leaseFailureOutsideWorkspace
 	}
-	return filepath.ToSlash(rel), true
+	return filepath.ToSlash(rel), ""
 }
 
 // adjudicateCanonicalTreeGlob resolves the non-pattern prefix of a lease tree
