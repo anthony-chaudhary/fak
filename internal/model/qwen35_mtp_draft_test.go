@@ -11,6 +11,218 @@ import (
 	"time"
 )
 
+func qwen35MTPSeedSelectingCoordinate(t *testing.T, logits []float32, wantNot int) (Qwen38SamplerConfig, []float32, int) {
+	t.Helper()
+	for seed := uint64(0); seed < 100; seed++ {
+		cfg := Qwen38SamplerConfig{Temperature: 1, TopP: 1, Seed: seed}
+		sampler, err := NewQwen38SampledSpeculativeVerifier(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, err := sampler.ApplySamplerToLogits(logits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinate := sampler.SampleFromDistribution(q, sampler.PRNG().NextFloat32())
+		if coordinate != wantNot {
+			return cfg, q, coordinate
+		}
+	}
+	t.Fatal("no deterministic non-argmax sampler seed found")
+	return Qwen38SamplerConfig{}, nil, -1
+}
+
+func qwen35MTPSetFixedDraftLogits(d *Qwen35MTPDraftSession, logits []float32) {
+	d.step = func(_ *Qwen35MTPForward, _ int, _, _ []float32) ([]float32, []float32, error) {
+		return make([]float32, d.target.M.Cfg.HiddenSize), append([]float32(nil), logits...), nil
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftSampledProcessedQSelectsNonArgmax(t *testing.T) {
+	logits := []float32{0, 0, 0}
+	cfg, wantQ, wantCoordinate := qwen35MTPSeedSelectingCoordinate(t, logits, 0)
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+	d, err := NewQwen35MTPDraftSessionWithConfig(target, Qwen35MTPDraftConfig{Depth: 1, SamplerConfig: &cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	qwen35MTPSetFixedDraftLogits(d, logits)
+
+	draft, evidence := d.ProposeWithEvidence(prompt)
+	if !reflect.DeepEqual(draft, []int{wantCoordinate}) || wantCoordinate == argmaxF32(logits) {
+		t.Fatalf("sampled draft = %v, want non-argmax coordinate %d", draft, wantCoordinate)
+	}
+	if len(evidence) != 1 || evidence[0].Provenance != DraftEvidenceSampledProcessedQ || evidence[0].Token != wantCoordinate {
+		t.Fatalf("sampled evidence = %+v", evidence)
+	}
+	for i, probability := range wantQ {
+		want := float32(math.Log(float64(probability)))
+		if evidence[0].LogProbs[i] != want {
+			t.Fatalf("log q[%d] = %g, want exact %g", i, evidence[0].LogProbs[i], want)
+		}
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftSampledCompactCoordinates(t *testing.T) {
+	logits := []float32{0, 0}
+	cfg, wantQ, wantCoordinate := qwen35MTPSeedSelectingCoordinate(t, logits, 0)
+	subset := []int{2, 0}
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+	d, err := NewQwen35MTPDraftSessionWithConfig(target, Qwen35MTPDraftConfig{
+		Depth:            1,
+		DraftVocabFilter: NewDraftVocabFilter(subset),
+		SamplerConfig:    &cfg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	qwen35MTPSetFixedDraftLogits(d, logits)
+
+	draft, evidence := d.ProposeWithEvidence(prompt)
+	wantToken := subset[wantCoordinate]
+	if !reflect.DeepEqual(draft, []int{wantToken}) || len(evidence) != 1 {
+		t.Fatalf("compact sampled proposal = %v/%+v, want token %d", draft, evidence, wantToken)
+	}
+	if !reflect.DeepEqual(evidence[0].TokenIDs, subset) || evidence[0].Token != wantToken {
+		t.Fatalf("compact coordinate evidence = %+v", evidence[0])
+	}
+	for i, probability := range wantQ {
+		if want := float32(math.Log(float64(probability))); evidence[0].LogProbs[i] != want {
+			t.Fatalf("compact log q[%d] = %g, want exact %g", i, evidence[0].LogProbs[i], want)
+		}
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftSampledThresholdRejectsSelectedLowProbabilityAndRollsBackRNG(t *testing.T) {
+	logits := []float32{1, 0}
+	cfg, q, selected := qwen35MTPSeedSelectingCoordinate(t, logits, 0)
+	if q[selected] >= 0.5 {
+		t.Fatalf("fixture selected q[%d]=%g, want below threshold", selected, q[selected])
+	}
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	target.captureTargetHidden = true
+	t.Cleanup(target.Close)
+	prompt := []int{0, 1}
+	target.Prefill(prompt)
+	d, err := NewQwen35MTPDraftSessionWithConfig(target, Qwen35MTPDraftConfig{
+		Depth:             1,
+		CoverageThreshold: 0.5,
+		SamplerConfig:     &cfg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	qwen35MTPSetFixedDraftLogits(d, logits)
+	before := d.sampler.CheckpointRNG()
+	draft, evidence := d.ProposeWithEvidence(prompt)
+	after := d.sampler.CheckpointRNG()
+	if draft != nil || evidence != nil {
+		t.Fatalf("low-probability selected token escaped threshold: %v/%+v", draft, evidence)
+	}
+	if after != before {
+		t.Fatalf("refused proposal advanced RNG: before=%+v after=%+v", before, after)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftInvalidSamplerConfigRefused(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+	cfg := Qwen38SamplerConfig{Temperature: 1, TopP: 1, TopK: 4}
+	d, err := NewQwen35MTPDraftSessionWithConfig(target, Qwen35MTPDraftConfig{Depth: 1, SamplerConfig: &cfg})
+	if d != nil || !errors.Is(err, ErrSamplingModeUnsupported) {
+		t.Fatalf("invalid sampler construction = (%v, %v), want nil/%v", d, err, ErrSamplingModeUnsupported)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftNilAndGreedySamplerPreserveLegacyProposal(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	newTarget := func() *Session {
+		target := m.NewSession()
+		target.captureTargetHidden = true
+		t.Cleanup(target.Close)
+		target.Prefill(prompt)
+		return target
+	}
+	legacy, err := NewQwen35MTPDraftSessionWithConfig(newTarget(), Qwen35MTPDraftConfig{Depth: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(legacy.Close)
+	greedyCfg := Qwen38SamplerConfig{Temperature: 0, Greedy: true, Seed: 99}
+	greedy, err := NewQwen35MTPDraftSessionWithConfig(newTarget(), Qwen35MTPDraftConfig{Depth: 2, SamplerConfig: &greedyCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(greedy.Close)
+
+	legacyDraft, legacyEvidence := legacy.ProposeWithEvidence(prompt)
+	greedyDraft, greedyEvidence := greedy.ProposeWithEvidence(prompt)
+	if greedy.sampler != nil || !reflect.DeepEqual(greedyDraft, legacyDraft) || !reflect.DeepEqual(greedyEvidence, legacyEvidence) {
+		t.Fatalf("greedy config changed legacy proposal: legacy=%v/%+v greedy=%v/%+v", legacyDraft, legacyEvidence, greedyDraft, greedyEvidence)
+	}
+	for i, row := range greedyEvidence {
+		if row.Provenance != DraftEvidenceModelSoftmaxGreedy {
+			t.Fatalf("row %d provenance = %q, want legacy %q", i, row.Provenance, DraftEvidenceModelSoftmaxGreedy)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestQwen35MTPDraftSampledConfigRefusedByGreedySpecDecode(t *testing.T) {
+	cfg := Qwen38SamplerConfig{Temperature: 1, TopP: 1, Seed: 7}
+	run, err := SpecDecodeGreedyQwen35MTPConfig(nil, nil, 1, Qwen35MTPDraftConfig{Depth: 1, SamplerConfig: &cfg})
+	var unsupported *Qwen35MTPSpecDecodeUnsupportedError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("sampled config error = %v, want typed Qwen35 speculative-decode refusal", err)
+	}
+	if len(run.Output) != 0 || run.Rounds != 0 || run.DraftedTokens != 0 || run.AcceptedDrafts != 0 {
+		t.Fatalf("sampled config returned run before refusal: %+v", run)
+	}
+}
+
+// fak-test:runtime medium est=1s lane=default
+func TestQwen35MTPDraftGreedySamplerConfigAllowedByGreedySpecDecode(t *testing.T) {
+	m := qwen35MTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1}
+	legacyTarget := m.NewSession()
+	t.Cleanup(legacyTarget.Close)
+	legacy, err := SpecDecodeGreedyQwen35MTPConfig(legacyTarget, prompt, 3, Qwen35MTPDraftConfig{Depth: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	greedyTarget := m.NewSession()
+	t.Cleanup(greedyTarget.Close)
+	greedyCfg := Qwen38SamplerConfig{Temperature: 0, Greedy: true, Seed: 7}
+	greedy, err := SpecDecodeGreedyQwen35MTPConfig(greedyTarget, prompt, 3, Qwen35MTPDraftConfig{Depth: 1, SamplerConfig: &greedyCfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(greedy, legacy) {
+		t.Fatalf("greedy sampler config changed legacy greedy decode: legacy=%+v greedy=%+v", legacy, greedy)
+	}
+}
+
 // fak-test:runtime medium est=1s lane=default
 func TestQwen35MTPDraftLogprobEvidence(t *testing.T) {
 	m := qwen35MTPEnabledSyntheticModel(t)

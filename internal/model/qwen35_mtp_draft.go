@@ -27,6 +27,7 @@ type Qwen35MTPDraftConfig struct {
 	Depth             int
 	DraftVocabFilter  *DraftVocabFilter
 	CoverageThreshold float32
+	SamplerConfig     *Qwen38SamplerConfig
 }
 
 // Qwen35MTPDraftSession owns one native MTP forward/cache and generates an
@@ -47,6 +48,7 @@ type Qwen35MTPDraftSession struct {
 	vocabFilter       *DraftVocabFilter
 	filterDirty       bool
 	coverageThreshold float32
+	sampler           *Qwen38SampledSpeculativeVerifier
 }
 
 // NewQwen35MTPDraftSession binds a native Qwen3.8 MTP cache to the target's
@@ -111,6 +113,18 @@ func NewQwen35MTPDraftSessionWithConfig(target *Session, cfg Qwen35MTPDraftConfi
 	d, err := NewQwen35MTPDraftSession(target, cfg.Depth)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.SamplerConfig != nil {
+		sampler, err := NewQwen38SampledSpeculativeVerifier(*cfg.SamplerConfig)
+		if err != nil {
+			d.Close()
+			return nil, err
+		}
+		// Greedy sampler configuration is deliberately identical to the nil
+		// sampler path, including its model-softmax evidence provenance.
+		if !sampler.greedy() {
+			d.sampler = sampler
+		}
 	}
 	if cfg.DraftVocabFilter != nil {
 		d.SetDraftVocabFilter(cfg.DraftVocabFilter)
@@ -194,6 +208,14 @@ func (d *Qwen35MTPDraftSession) effectiveThreshold() float32 {
 }
 
 func (d *Qwen35MTPDraftSession) selectCandidate(logits []float32) (int, bool) {
+	if d != nil && d.sampler != nil {
+		token, _, ok := d.selectSampledCandidate(logits)
+		return token, ok
+	}
+	return d.selectGreedyCandidate(logits)
+}
+
+func (d *Qwen35MTPDraftSession) selectGreedyCandidate(logits []float32) (int, bool) {
 	if len(logits) == 0 {
 		return -1, false
 	}
@@ -235,6 +257,47 @@ func (d *Qwen35MTPDraftSession) selectCandidate(logits []float32) (int, bool) {
 	return cand, true
 }
 
+func (d *Qwen35MTPDraftSession) selectSampledCandidate(logits []float32) (int, []float32, bool) {
+	if len(logits) == 0 {
+		return -1, nil, false
+	}
+	q, err := d.sampler.ApplySamplerToLogits(logits)
+	if err != nil || len(q) != len(logits) {
+		return -1, nil, false
+	}
+	var mass float64
+	for _, probability := range q {
+		if probability < 0 || math.IsNaN(float64(probability)) || math.IsInf(float64(probability), 0) {
+			return -1, nil, false
+		}
+		mass += float64(probability)
+	}
+	if mass <= 0 || math.IsNaN(mass) || math.IsInf(mass, 0) {
+		return -1, nil, false
+	}
+	rngCheckpoint := d.sampler.CheckpointRNG()
+	coordinate := d.sampler.SampleFromDistribution(q, d.sampler.PRNG().NextFloat32())
+	refuse := func(token int) (int, []float32, bool) {
+		d.sampler.RollbackRNG(rngCheckpoint)
+		return token, nil, false
+	}
+	if coordinate < 0 || coordinate >= len(q) || q[coordinate] <= 0 {
+		return refuse(-1)
+	}
+	if threshold := d.effectiveThreshold(); threshold > 0 && q[coordinate] < threshold {
+		return refuse(-1)
+	}
+	token := coordinate
+	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 {
+		if len(logits) == len(d.vocabFilter.Subset) {
+			token = d.vocabFilter.Subset[coordinate]
+		} else if !d.vocabFilter.Contains(token) {
+			return refuse(token)
+		}
+	}
+	return token, q, true
+}
+
 // Propose returns exactly the admitted depth unless a runtime failure is
 // latched. The returned slice never aliases session-owned state.
 func (d *Qwen35MTPDraftSession) Propose(committed []int) []int {
@@ -263,6 +326,11 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 	}
 
 	evidenceComplete := true
+	var rngCheckpoint Qwen38RNGState
+	commitRNG := d.sampler == nil
+	if d.sampler != nil {
+		rngCheckpoint = d.sampler.CheckpointRNG()
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			draft = nil
@@ -271,6 +339,13 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 		}
 		if !collectEvidence || draft == nil || !evidenceComplete || len(evidence) != len(draft) {
 			evidence = nil
+		}
+		commitRNG = draft != nil
+		// A failed or empty proposal is locally abortable. A returned proposal
+		// commits its RNG advances because the consumer exposes no later commit
+		// callback; rolling back after consumer rejection would require that API.
+		if d.sampler != nil && !commitRNG {
+			d.sampler.RollbackRNG(rngCheckpoint)
 		}
 	}()
 
@@ -283,14 +358,14 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 		return nil, nil
 	}
 
-	firstToken, ok := d.selectCandidate(d.lastLogits)
+	firstToken, firstQ, ok := d.selectProposalCandidate(d.lastLogits)
 	if !ok {
 		return nil, nil
 	}
 	draft = make([]int, 0, d.depth)
 	draft = append(draft, firstToken)
 	if collectEvidence {
-		if row, ok := d.draftTokenEvidence(firstToken, d.lastLogits); ok {
+		if row, ok := d.proposalTokenEvidence(firstToken, d.lastLogits, firstQ); ok {
 			evidence = append(evidence, row)
 		} else {
 			evidenceComplete = false
@@ -334,14 +409,14 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 			d.failProposal("forward", pos, ErrQwen35MTPEmptyLogits)
 			return nil, nil
 		}
-		cand, ok := d.selectCandidate(logits)
+		cand, q, ok := d.selectProposalCandidate(logits)
 		if !ok {
 			break
 		}
 		current = cand
 		draft = append(draft, current)
 		if collectEvidence {
-			if row, ok := d.draftTokenEvidence(current, logits); ok {
+			if row, ok := d.proposalTokenEvidence(current, logits, q); ok {
 				evidence = append(evidence, row)
 			} else {
 				evidenceComplete = false
@@ -350,6 +425,49 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 		priorHidden = feedback
 	}
 	return draft, evidence
+}
+
+func (d *Qwen35MTPDraftSession) selectProposalCandidate(logits []float32) (int, []float32, bool) {
+	if d.sampler != nil {
+		return d.selectSampledCandidate(logits)
+	}
+	token, ok := d.selectGreedyCandidate(logits)
+	return token, nil, ok
+}
+
+func (d *Qwen35MTPDraftSession) proposalTokenEvidence(token int, logits, q []float32) (DraftTokenEvidence, bool) {
+	if d.sampler == nil {
+		return d.draftTokenEvidence(token, logits)
+	}
+	if len(q) != len(logits) {
+		return DraftTokenEvidence{}, false
+	}
+	row := DraftTokenEvidence{
+		Token:      token,
+		LogProbs:   make([]float32, len(q)),
+		Provenance: DraftEvidenceSampledProcessedQ,
+	}
+	selected := token
+	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 && len(logits) == len(d.vocabFilter.Subset) {
+		row.TokenIDs = append([]int(nil), d.vocabFilter.Subset...)
+		selected = -1
+		for i, tokenID := range row.TokenIDs {
+			if tokenID == token {
+				selected = i
+				break
+			}
+		}
+	}
+	if selected < 0 || selected >= len(q) || q[selected] <= 0 {
+		return DraftTokenEvidence{}, false
+	}
+	for i, probability := range q {
+		row.LogProbs[i] = float32(math.Inf(-1))
+		if probability > 0 {
+			row.LogProbs[i] = float32(math.Log(float64(probability)))
+		}
+	}
+	return row, true
 }
 
 func (d *Qwen35MTPDraftSession) draftTokenEvidence(token int, logits []float32) (DraftTokenEvidence, bool) {
@@ -643,6 +761,11 @@ func SpecDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 
 // SpecDecodeGreedyQwen35MTPConfig executes speculative decoding with custom MTP draft configuration.
 func SpecDecodeGreedyQwen35MTPConfig(target *Session, prompt []int, n int, cfg Qwen35MTPDraftConfig) (polymodel.SpecDecodeRun, error) {
+	if cfg.SamplerConfig != nil && !cfg.SamplerConfig.Greedy && cfg.SamplerConfig.Temperature != 0 {
+		return polymodel.SpecDecodeRun{}, &Qwen35MTPSpecDecodeUnsupportedError{
+			Reason: "sampled MTP proposals require stochastic processed-q verification; the greedy verifier cannot consume them",
+		}
+	}
 	builder := func(t *Session, depth int) (*Qwen35MTPDraftSession, error) {
 		return NewQwen35MTPDraftSessionWithConfig(t, cfg)
 	}
