@@ -703,8 +703,23 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// without requiring the process-wide compatibility environment flag.
 		agent.WithPerTokenStream(true),
 	}
-	lease, ok := s.admitStreamedTurn(ctx, w, "stream", sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
-	if !ok {
+	stopQueued := func() {}
+	lease, admissionErr := s.beginServedAdmission(liveCtx, sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts), func() {
+		stopQueued = startPrefillKeepalive(liveCtx, w, flusher, durEnv("FAK_STREAM_PREFILL_KEEPALIVE_S", prefillKeepaliveEvery), commitHeaders)
+	})
+	stopQueued()
+	if admissionErr != nil {
+		s.logf("gateway: scheduler admission refused (stream): %v", admissionErr)
+		if !headersSent {
+			s.writeUpstreamErr(w, admissionErr)
+		} else {
+			_, _, message := s.plannerErrorStatus(admissionErr)
+			if writeSSEData(w, map[string]any{
+				"error": map[string]any{"message": message, "type": "server_error"},
+			}) == nil {
+				writeSSEDone(w, flusher)
+			}
+		}
 		return true
 	}
 	defer lease.Release()
