@@ -165,7 +165,14 @@ func destinationHost(v string) string {
 // 169.254.169.254` with no scheme still reaches the endpoint). Pure parsing, never DNS.
 func commandHosts(cmd string) []string {
 	var out []string
+	sshToken, sshHost := sshDestination(cmd)
+	if sshHost != "" {
+		out = append(out, sshHost)
+	}
 	for _, tok := range tokenizeCommand(cmd) {
+		if tok == sshToken {
+			continue
+		}
 		h := hostOf(tok)
 		if h == "" {
 			h = hostnameNoPort(tok)
@@ -175,6 +182,57 @@ func commandHosts(cmd string) []string {
 		}
 	}
 	return out
+}
+
+// sshDestination projects SSH's destination operand, leaving other command
+// tokens to the existing scanner so proxy and remote-command hosts stay visible.
+func sshDestination(command string) (token, host string) {
+	words := strings.Fields(command)
+	if len(words) < 2 {
+		return "", ""
+	}
+	head := strings.ReplaceAll(words[0], "\\", "/")
+	head = strings.ToLower(head[strings.LastIndexByte(head, '/')+1:])
+	if head != "ssh" && head != "ssh.exe" {
+		return "", ""
+	}
+	i := 1
+	for i < len(words) && strings.HasPrefix(words[i], "-") {
+		flag := words[i]
+		i++
+		if flag == "--" {
+			break
+		}
+		if len(flag) < 2 {
+			return "", ""
+		}
+		if strings.ContainsRune("BbcDEeFIiJLlmOoPpQRSWw", rune(flag[1])) {
+			if len(flag) == 2 {
+				i++
+			}
+		} else {
+			for _, c := range flag[1:] {
+				if !strings.ContainsRune("46AaCfGgKkMNnqsTtVvXxYy", c) {
+					return "", ""
+				}
+			}
+		}
+	}
+	if i >= len(words) {
+		return "", ""
+	}
+	token = strings.Trim(words[i], "\"'")
+	if strings.Contains(token, "://") {
+		return token, hostOf(token)
+	}
+	_, host, ok := strings.Cut(token, "@")
+	if !ok {
+		host = token
+	}
+	if host == "" || strings.ContainsAny(host, "@/\\$` ;|&<>(){}!?*\"'") {
+		return "", ""
+	}
+	return token, hostnameNoPort(host)
 }
 
 // classifyDestinationWith treats the whole value as a single destination and classifies
