@@ -15543,6 +15543,11 @@
           "category": "incidental",
           "reason": "The typed return value of localadmission.ReservationStore.Reserve (admit flag, typed reason, capacity/reserved bytes, pressure, created reservation); consumed only by the native Metal admission seam and its receipt, so it names one struct rather than a separate decision concept.",
           "token": "ReservationDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported lookup method for the existing bounded AdmissionDecisionReceipt. It only reads the retained request-admission outcome for diagnostics; AdmissionController Offer/Acquire chooses the verdict and AdmissionVerdict.HTTPStatus owns wire severity.",
+          "token": "LastAdmissionDecision"
         }
       ],
       "id": "decision",
@@ -15568,6 +15573,7 @@
         "GenerationContentionDecisionContract",
         "IndexDecision",
         "InputTokensDeltaPerDecision",
+        "LastAdmissionDecision",
         "LatencySecondsDeltaPerDecision",
         "LaunchDecision",
         "MeasureHeldDecisionOverhead",
