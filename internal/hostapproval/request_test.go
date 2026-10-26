@@ -28,8 +28,12 @@ func TestPrepareVerifyNonAuthorizingRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Authorization != "none" || r.BrokerStatus != "required" || len(r.Nonce) != 64 {
-		t.Fatalf("request authority shape = authorization %q broker %q nonce %d", r.Authorization, r.BrokerStatus, len(r.Nonce))
+	if r.Authorization != "none" || r.BrokerStatus != "required" {
+		t.Fatalf("request authority shape = authorization %q broker %q", r.Authorization, r.BrokerStatus)
+	}
+	nonce, err := hex.DecodeString(r.Nonce)
+	if err != nil || len(nonce) != sha256.Size || hex.EncodeToString(nonce) != r.Nonce {
+		t.Fatalf("request nonce is not canonical lowercase hex for a 256-bit nonce: bytes=%d error=%v", len(nonce), err)
 	}
 	if err := Verify(r, f.opts.SessionID); err != nil {
 		t.Fatalf("Verify: %v", err)
