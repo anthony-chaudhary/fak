@@ -3,62 +3,110 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
-	"os"
+	"io"
 	"strconv"
 	"strings"
 )
 
-// rejectInvalidResponseFormatCarrier checks the envelope and schema resource caps.
+type responseFormatError struct {
+	code, message, path string
+}
+
+// validateResponseFormatCarrier checks the envelope and schema resource caps.
 // Schema keywords remain the upstream's contract: their meaning differs across
 // JSON Schema drafts. Admitted schemas pass through without rewriting.
-func rejectInvalidResponseFormatCarrier(w http.ResponseWriter, raw json.RawMessage) bool {
-	reject := func(code, message, path string) bool {
-		var fields map[string]any
-		if path != "" {
-			fields = map[string]any{"schema_path": path}
-		}
-		writeErrCodeFields(w, http.StatusUnprocessableEntity, code, message, fields)
-		return true
+func validateResponseFormatCarrier(raw json.RawMessage, maxBytes, maxDepth int) *responseFormatError {
+	reject := func(code, message, path string) *responseFormatError {
+		return &responseFormatError{code: code, message: message, path: path}
 	}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return false
+		return nil
 	}
-	var format struct {
-		Type       string          `json:"type"`
-		JSONSchema json.RawMessage `json:"json_schema"`
-	}
-	if json.Unmarshal(trimmed, &format) != nil {
+	// The raw object is forwarded unchanged. Refuse ambiguous recognized keys so
+	// case-folding or duplicate-key choices cannot change which value is checked.
+	format, ok := responseFormatMembers(trimmed, "type", "json_schema")
+	if !ok {
 		return reject("invalid_response_format", "response_format must be a JSON object", "")
 	}
-	if format.Type != "json_schema" {
-		return false
+	var typ string
+	if value, ok := format["type"]; ok && json.Unmarshal(value, &typ) != nil {
+		return reject("invalid_response_format", "response_format must be a JSON object", "")
 	}
-	inner := bytes.TrimSpace(format.JSONSchema)
+	if typ != "json_schema" {
+		return nil
+	}
+	inner := bytes.TrimSpace(format["json_schema"])
 	if len(inner) == 0 || bytes.Equal(inner, []byte("null")) {
 		return reject("json_schema_missing", "response_format.json_schema is required when type is json_schema", "")
 	}
-	var carrier struct {
-		Schema json.RawMessage `json:"schema"`
-	}
-	if inner[0] != '{' || json.Unmarshal(inner, &carrier) != nil {
+	if inner[0] != '{' {
 		return reject("json_schema_not_object", "response_format.json_schema must be a JSON object", "")
 	}
-	schema := bytes.TrimSpace(carrier.Schema)
+	carrier, ok := responseFormatMembers(inner, "schema")
+	if !ok {
+		return reject("invalid_response_format", "response_format.json_schema has invalid or ambiguous members", "")
+	}
+	schema := bytes.TrimSpace(carrier["schema"])
 	if len(schema) == 0 || bytes.Equal(schema, []byte("null")) {
 		return reject("json_schema_missing", "response_format.json_schema.schema is required when type is json_schema", "")
 	}
-	if maxBytes := jsonSchemaCap(os.Getenv("FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES"), defaultJSONSchemaMaxBytes); len(schema) > maxBytes {
+	if len(schema) > maxBytes {
 		return reject("json_schema_too_large", "response_format.json_schema.schema is "+strconv.Itoa(len(schema))+" bytes; the cap is "+strconv.Itoa(maxBytes), "")
 	}
-	if maxDepth := jsonSchemaCap(os.Getenv("FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH"), defaultJSONSchemaMaxDepth); jsonNestingDepth(schema, maxDepth) > maxDepth {
+	if jsonNestingDepth(schema, maxDepth) > maxDepth {
 		return reject("json_schema_too_deep", "response_format.json_schema.schema nests deeper than the cap of "+strconv.Itoa(maxDepth), "")
 	}
 	if schema[0] != '{' && !bytes.Equal(schema, []byte("true")) && !bytes.Equal(schema, []byte("false")) {
 		return reject("json_schema_not_object", "schema must be a JSON object or boolean", "#")
 	}
-	return false
+	return nil
+}
+
+// responseFormatMembers selects exact carrier keys and refuses their duplicates
+// or case aliases. Unknown fields remain upstream-owned; schema keyword objects
+// are decoded as raw values and are not constrained by this envelope check.
+func responseFormatMembers(raw []byte, keys ...string) (map[string]json.RawMessage, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	members := make(map[string]json.RawMessage, len(keys))
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, false
+		}
+		recognized := false
+		for _, canonical := range keys {
+			if !strings.EqualFold(key, canonical) {
+				continue
+			}
+			if key != canonical {
+				return nil, false
+			}
+			if _, duplicate := members[key]; duplicate {
+				return nil, false
+			}
+			recognized = true
+			break
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return nil, false
+		}
+		if recognized {
+			members[key] = value
+		}
+	}
+	if token, err := decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, false
+	}
+	return members, true
 }
 
 // Structured-output resource caps adapted from PR #13718's TGI-style grammar-input
