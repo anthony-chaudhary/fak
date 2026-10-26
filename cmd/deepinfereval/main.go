@@ -36,9 +36,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	benchmark := fs.String("benchmark", "", "benchmark scorer: aime, gpqa, or hle")
 	prediction := fs.String("prediction", "", "model response text to score")
 	gold := fs.String("gold", "", "reference answer")
+	summary := fs.String("summary", "", "score a bounded rollout-manifest JSON file and emit a coverage summary")
 	jsonOut := fs.Bool("json", false, "emit a versioned JSON receipt")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *summary != "" {
+		if fs.NArg() != 0 || *benchmark == "" || *prediction != "" || *gold != "" {
+			fmt.Fprintln(stderr, "deepinfereval: -summary requires -benchmark and excludes -prediction/-gold")
+			return 2
+		}
+		return runSummary(*benchmark, *summary, stdout, stderr)
 	}
 	if fs.NArg() != 0 || *benchmark == "" || *prediction == "" || *gold == "" {
 		fmt.Fprintln(stderr, "deepinfereval: -benchmark, -prediction, and -gold are required")

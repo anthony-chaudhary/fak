@@ -14661,6 +14661,11 @@
           "category": "incidental",
           "reason": "Private GGUF TensorType lookup table recording why a fixed storage layout cannot be selected from that enum alone. This is local registry representation bookkeeping, not a hardware/backend support level, execution capability, or implementation maturity claim; the public registry API preserves explicit refusal.",
           "token": "unsupportedGGUF"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire diagnostic for incomplete expected observations: DeepInfer task/sample rollouts or the existing router open-issue fetch. It applies coverage completeness to one run, preserves diagnostic/refusal status, and does not introduce an independent support/maturity concept or acceptance claim.",
+          "token": "INCOMPLETE_COVERAGE"
         }
       ],
       "exclude": [
@@ -14712,6 +14717,7 @@
         "GuideCoverage",
         "HOLD_UNSUPPORTED_CANCELLATION",
         "HostDequantSupported",
+        "INCOMPLETE_COVERAGE",
         "INVALID_EVIDENCE",
         "IngestResult",
         "KVQUANT_SUPPORTED",
