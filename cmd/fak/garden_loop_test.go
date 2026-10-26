@@ -101,12 +101,26 @@ func TestGardenLoopSingleIterationJSON(t *testing.T) {
 
 func TestGardenLoopGracefulContextCancellation(t *testing.T) {
 	dir := t.TempDir()
+	candidateDir := filepath.Join(dir, ".dos", "markers")
+	if err := os.MkdirAll(candidateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	candidate := filepath.Join(candidateDir, "stale.jsonl")
+	if err := os.WriteFile(candidate, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staleAt := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(candidate, staleAt, staleAt); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	probeStarted := make(chan struct{})
 
 	opts := gardenLoopOptions{
 		Repo:            dir,
 		Interval:        50 * time.Millisecond,
-		Live:            false,
+		Live:            true,
 		CleanBins:       false,
 		TreeDoctor:      false,
 		PackRefs:        false,
@@ -115,6 +129,11 @@ func TestGardenLoopGracefulContextCancellation(t *testing.T) {
 		TickBudget:      time.Second,
 		Iterations:      0, // infinite
 		AsJSON:          true,
+		WatchdogWIPStatus: func(ctx context.Context, _ string) ([]byte, error) {
+			close(probeStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
 	}
 
 	done := make(chan int, 1)
@@ -123,8 +142,14 @@ func TestGardenLoopGracefulContextCancellation(t *testing.T) {
 		done <- runGardenLoopProcess(ctx, &stdout, &stderr, opts)
 	}()
 
-	// Allow first cycle to run, then cancel context.
-	time.Sleep(100 * time.Millisecond)
+	// Cancel while the initial cycle is blocked in its Git status probe. The
+	// probe must receive the caller context so shutdown does not wait for its
+	// independent command timeout.
+	select {
+	case <-probeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("garden loop never started its WIP probe")
+	}
 	cancel()
 
 	select {
@@ -134,6 +159,25 @@ func TestGardenLoopGracefulContextCancellation(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for garden loop to exit on cancellation")
+	}
+	var report gardenLoopCycleReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode canceled cycle report: %v", err)
+	}
+	eligible := false
+	if report.Watchdog != nil {
+		for _, row := range report.Watchdog.AgeGC.Candidates {
+			if row.Path == candidate {
+				eligible = true
+				break
+			}
+		}
+	}
+	if !eligible {
+		t.Fatalf("aged marker was not an eligible sweep candidate: %+v", report.Watchdog)
+	}
+	if _, err := os.Stat(candidate); err != nil {
+		t.Fatalf("canceled cycle performed a live sweep: %v", err)
 	}
 }
 func TestGardenLoopRegisterDurableUnit(t *testing.T) {

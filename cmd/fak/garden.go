@@ -961,6 +961,7 @@ type gardenWatchdogAgeGC struct {
 }
 
 type gardenWatchdogConfig struct {
+	Context        context.Context
 	Repo           string
 	MaxAgeDays     int
 	StuckThreshold int
@@ -971,7 +972,10 @@ type gardenWatchdogConfig struct {
 	Timeout        time.Duration
 	TickBudget     time.Duration
 	Now            func() time.Time
+	WIPStatus      gardenWatchdogWIPStatus
 }
+
+type gardenWatchdogWIPStatus func(context.Context, string) ([]byte, error)
 
 type gardenWatchdogCommandFactory func(root, cursor string, tickBudget time.Duration) *exec.Cmd
 
@@ -1011,8 +1015,14 @@ func runGardenWatchdog(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runGardenWatchdogConfigured(stdout, stderr io.Writer, cfg gardenWatchdogConfig) int {
+	if cfg.Context == nil {
+		cfg.Context = context.Background()
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.WIPStatus == nil {
+		cfg.WIPStatus = defaultGardenWatchdogWIPStatus
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = gardenWatchdogTimeoutSeconds * time.Second
@@ -1045,13 +1055,33 @@ func runGardenWatchdogConfigured(stdout, stderr io.Writer, cfg gardenWatchdogCon
 	if stuck == nil {
 		stuck = []gardenWatchdogStuck{}
 	}
-	wip := scanGardenWatchdogWIP(cfg.Repo, cfg.Now(), cfg.WIPStaleHours)
-	swept := sweepGardenWatchdog(cfg.Repo, candidates, cfg.Live)
+	wip := scanGardenWatchdogWIP(cfg.Context, cfg.Repo, cfg.Now(), cfg.WIPStaleHours, cfg.WIPStatus)
 	var ageBytes int64
 	for _, c := range candidates {
 		ageBytes += c.Size
 	}
 	hasStale := len(candidates) > 0 || len(stuck) > 0 || wip.Stale
+	if cfg.Context.Err() != nil {
+		env := gardenWatchdogEnvelope{
+			Schema:     "fak.garden-watchdog.v2",
+			Status:     "cancelled",
+			Reason:     "CONTEXT_CANCELLED",
+			Repo:       cfg.Repo,
+			Live:       cfg.Live,
+			MaxAgeDays: cfg.MaxAgeDays,
+			AgeGC: gardenWatchdogAgeGC{
+				Files: len(candidates), Bytes: ageBytes, Candidates: candidates,
+			},
+			Stuck:    stuck,
+			WIP:      wip,
+			HasStale: hasStale,
+			Garden: gardenWatchdogGarden{
+				Status: "skipped", Reason: "CONTEXT_CANCELLED",
+			},
+		}
+		return emitGardenWatchdog(stdout, stderr, env, cfg.AsJSON, 0)
+	}
+	swept := sweepGardenWatchdog(cfg.Repo, candidates, cfg.Live)
 
 	garden := gardenWatchdogGarden{
 		Invoked:       false,
@@ -1059,7 +1089,7 @@ func runGardenWatchdogConfigured(stdout, stderr io.Writer, cfg gardenWatchdogCon
 		Reason:        "DRY_RUN",
 		BudgetSeconds: int64(cfg.Timeout.Seconds()),
 	}
-	if cfg.Live {
+	if cfg.Live && cfg.Context.Err() == nil {
 		remaining := cfg.Timeout - time.Since(start)
 		cursorPath := defaultGardenTickCursor(cfg.Repo)
 		if remaining <= 0 {
@@ -1335,12 +1365,9 @@ func scanGardenWatchdogStuck(root string, threshold int) []gardenWatchdogStuck {
 	return out
 }
 
-func scanGardenWatchdogWIP(root string, now time.Time, thresholdHours int) gardenWatchdogWIP {
+func scanGardenWatchdogWIP(ctx context.Context, root string, now time.Time, thresholdHours int, status gardenWatchdogWIPStatus) gardenWatchdogWIP {
 	out := gardenWatchdogWIP{ThresholdHours: thresholdHours}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := windowgate.CommandContext(ctx, "git", "-C", root, "status", "--porcelain")
-	b, err := cmd.Output()
+	b, err := status(ctx, root)
 	if err != nil {
 		return out
 	}
@@ -1375,6 +1402,13 @@ func scanGardenWatchdogWIP(root string, now time.Time, thresholdHours int) garde
 	out.OldestAgeHours = float64(int(out.OldestAgeHours*10+0.5)) / 10
 	out.Stale = out.Count > 0 && out.OldestAgeHours >= float64(thresholdHours)
 	return out
+}
+
+func defaultGardenWatchdogWIPStatus(ctx context.Context, root string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := windowgate.CommandContext(ctx, "git", "-C", root, "status", "--porcelain")
+	return cmd.Output()
 }
 
 func sweepGardenWatchdog(root string, candidates []gardenWatchdogEphemeralFile, live bool) gardenWatchdogSweep {

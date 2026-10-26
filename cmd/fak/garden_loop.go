@@ -87,19 +87,20 @@ func transientExecutable(path string) bool {
 }
 
 type gardenLoopOptions struct {
-	Repo            string
-	Interval        time.Duration
-	Live            bool
-	CleanBins       bool
-	TreeDoctor      bool
-	PackRefs        bool
-	MaxAgeDays      int
-	WatchdogTimeout time.Duration
-	TickBudget      time.Duration
-	Iterations      int
-	AsJSON          bool
-	LedgerPath      string
-	RegistryPath    string
+	Repo              string
+	Interval          time.Duration
+	Live              bool
+	CleanBins         bool
+	TreeDoctor        bool
+	PackRefs          bool
+	MaxAgeDays        int
+	WatchdogTimeout   time.Duration
+	TickBudget        time.Duration
+	Iterations        int
+	AsJSON            bool
+	LedgerPath        string
+	RegistryPath      string
+	WatchdogWIPStatus gardenWatchdogWIPStatus
 }
 
 type gardenLoopCycleReport struct {
@@ -218,6 +219,9 @@ func runGardenLoopProcess(ctx context.Context, stdout, stderr io.Writer, opts ga
 		rep := executeGardenLoopCycle(ctx, opts, cycle)
 		emitGardenLoopCycleReport(stdout, stderr, rep, opts.AsJSON)
 		witnessGardenLoop(opts.LedgerPath, rep)
+		if ctx.Err() != nil {
+			return false
+		}
 
 		if opts.Iterations > 0 && cycle >= opts.Iterations {
 			return false
@@ -259,10 +263,20 @@ func executeGardenLoopCycle(ctx context.Context, opts gardenLoopOptions, cycle i
 		Reason:     "GARDEN_SWEEP_OK",
 		TreeDoctor: []string{},
 	}
+	finishCanceled := func() gardenLoopCycleReport {
+		rep.Status = "cancelled"
+		rep.Reason = "CONTEXT_CANCELLED"
+		rep.DurationMS = time.Since(start).Milliseconds()
+		return rep
+	}
+	if ctx.Err() != nil {
+		return finishCanceled()
+	}
 
 	// Step 1: Watchdog sweep & child tick.
 	var watchdogBuf, watchdogErr bytes.Buffer
 	wcfg := gardenWatchdogConfig{
+		Context:        ctx,
 		Repo:           opts.Repo,
 		MaxAgeDays:     opts.MaxAgeDays,
 		StuckThreshold: 3,
@@ -272,11 +286,15 @@ func executeGardenLoopCycle(ctx context.Context, opts gardenLoopOptions, cycle i
 		Timeout:        opts.WatchdogTimeout,
 		TickBudget:     opts.TickBudget,
 		Now:            time.Now,
+		WIPStatus:      opts.WatchdogWIPStatus,
 	}
 	_ = runGardenWatchdogConfigured(&watchdogBuf, &watchdogErr, wcfg)
 	var env gardenWatchdogEnvelope
 	if json.Unmarshal(watchdogBuf.Bytes(), &env) == nil {
 		rep.Watchdog = &env
+	}
+	if ctx.Err() != nil {
+		return finishCanceled()
 	}
 
 	// Step 2: Clean stray build binaries at module root.
@@ -290,6 +308,9 @@ func executeGardenLoopCycle(ctx context.Context, opts gardenLoopOptions, cycle i
 		})
 		rep.CleanBins = &cleanRes
 	}
+	if ctx.Err() != nil {
+		return finishCanceled()
+	}
 
 	// Step 3: Tree doctor (prune merged non-live worktrees & stale commit locks).
 	if opts.TreeDoctor {
@@ -302,6 +323,9 @@ func executeGardenLoopCycle(ctx context.Context, opts gardenLoopOptions, cycle i
 		_, actions := treedoctor.Sweep(ctx, gitRunner, docOpts, opts.Live)
 		rep.TreeDoctor = actions
 	}
+	if ctx.Err() != nil {
+		return finishCanceled()
+	}
 
 	// Step 4: Pack loose refs if requested and live.
 	if opts.PackRefs && opts.Live {
@@ -309,6 +333,9 @@ func executeGardenLoopCycle(ctx context.Context, opts gardenLoopOptions, cycle i
 		if err == nil && code == 0 {
 			rep.RefsPacked = true
 		}
+	}
+	if ctx.Err() != nil {
+		return finishCanceled()
 	}
 
 	rep.DurationMS = time.Since(start).Milliseconds()
