@@ -5,13 +5,14 @@
 // rules at deepseek-ai/DeepInfer@9bd9cf243fc53ef9afbf8f04d391d989117d6ab9:
 // eval/aime/bench.py:73-148 and eval/gpqa/bench.py:111-134. HLE remains outside
 // this rule scorer because eval/score.py:43-55 requires an external judge.
+// AIME last-complete-box selection and numeric normalization also follow
+// deepseek-ai/DeepInfer@553741557a57df44a46fb3ab72b6aafeaf945337.
 package reasoneval
 
 import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -60,6 +61,7 @@ func ScoreRule(benchmark, text, gold string) (RuleResult, error) {
 }
 
 func extractAIME(text string) (string, string) {
+boxedSearch:
 	for offset := len(text); offset > 0; {
 		idx := strings.LastIndex(text[:offset], `\boxed`)
 		if idx < 0 {
@@ -79,6 +81,8 @@ func extractAIME(text string) (string, string) {
 						if answer := normalizeAIME(text[open+1 : pos]); answer != "" {
 							return answer, "boxed"
 						}
+						// A complete empty box supersedes earlier boxed answers.
+						break boxedSearch
 					}
 				}
 			}
@@ -139,14 +143,21 @@ func unicodeDecimalSpans(text string) []byteSpan {
 }
 
 func normalizeAIME(answer string) string {
-	answer = strings.TrimSpace(strings.Trim(answer, "$"))
+	answer = strings.TrimSpace(strings.Trim(strings.TrimSpace(answer), "$"))
 	replacer := strings.NewReplacer(`\left`, "", `\right`, "", `\!`, "", `\,`, "", `\;`, "", "{,}", "", ",", "", " ", "")
-	answer = strings.TrimSuffix(replacer.Replace(answer), ".")
+	answer = strings.TrimRight(replacer.Replace(answer), ".")
 	answer = strings.TrimPrefix(answer, "+")
 	if ascii, ok := decimalASCII(answer); ok {
-		if n, err := strconv.Atoi(ascii); err == nil {
-			return strconv.Itoa(n)
+		// Canonicalize validated decimal digits without a machine-int limit.
+		negative := strings.HasPrefix(ascii, "-")
+		digits := strings.TrimLeft(strings.TrimPrefix(ascii, "-"), "0")
+		if digits == "" {
+			return "0"
 		}
+		if negative {
+			return "-" + digits
+		}
+		return digits
 	}
 	return strings.ToLower(answer)
 }

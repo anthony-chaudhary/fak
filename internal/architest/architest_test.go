@@ -788,6 +788,9 @@ var tier = map[string]int{
 	"h2hbench":       1, // off-path engine head-to-head benchmark; stdlib-only, imports nothing internal.
 	"worktreeprune":  1, // stdlib-only broad `git worktree prune` refusal on foreign-OS registrations plus own-registration cleanup.
 	"fitplan":        2,
+
+	"reasoneval": 1, // Pure AIME/GPQA rule scoring and normalization; stdlib-only, off the hot path.
+
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
