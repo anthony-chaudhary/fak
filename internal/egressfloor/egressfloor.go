@@ -166,11 +166,13 @@ func destinationHost(v string) string {
 func commandHosts(cmd string) []string {
 	var out []string
 	sshToken, sshHost := sshDestination(cmd)
+	sshExecutable := ""
 	if sshHost != "" {
 		out = append(out, sshHost)
+		sshExecutable = strings.Fields(cmd)[0]
 	}
 	for _, tok := range tokenizeCommand(cmd) {
-		if tok == sshToken {
+		if tok == sshToken || tok == sshExecutable {
 			continue
 		}
 		h := hostOf(tok)

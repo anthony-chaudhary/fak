@@ -15,6 +15,27 @@ import (
 
 const sshReadProbeOptions = "-F none -T -a -x -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o ClearAllForwardings=yes -o PermitLocalCommand=no -o ProxyCommand=none -o ProxyJump=none -o ControlMaster=no -o ControlPath=none -o AddKeysToAgent=no"
 
+// fak-test:runtime fast est=1s
+func TestSSHReadProbeWindowsAllowedDestinationSurvivesStrictEgress(t *testing.T) {
+	srv, adj := newReloadLatencyServer(t)
+	installSSHReadProbeLeaseAuthority(t)
+	rt, err := policy.ParseRuntime(guardTraceFloorJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := rt.Adjudicator
+	p.Allow = map[string]bool{"Bash": true}
+	p.EgressRestrict = true
+	p.EgressAllowHosts = []string{"node.example"}
+	adj.SetPolicy(p)
+	command := strings.Replace(sshReadProbeCommand(), "/usr/bin/ssh", "C:/Windows/System32/OpenSSH/ssh.exe", 1)
+	raw, _ := json.Marshal(map[string]string{"command": command})
+	verdict, _, err := srv.adjudicate(context.Background(), "Bash", string(raw), true, "", "ssh-windows-egress")
+	if err != nil || verdict.Kind != "ALLOW" || srv.workspaceAdmissionPermissive {
+		t.Fatalf("strict Windows allowlist: verdict=%+v err=%v", verdict, err)
+	}
+}
+
 func sshReadProbeCommand() string {
 	return "/usr/bin/ssh " + sshReadProbeOptions + " operator@node.example /bin/hostname"
 }

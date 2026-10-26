@@ -10,6 +10,15 @@ import (
 )
 
 // fak-test:runtime fast est=1s
+func TestSSHDestinationOmitsWindowsExecutable(t *testing.T) {
+	command := "C:/Windows/System32/OpenSSH/ssh.exe -F none -T -o StrictHostKeyChecking=yes operator@node.example /bin/hostname"
+	hosts := egressfloor.Destinations("Bash", map[string]any{"command": command})
+	if !slices.Equal(hosts, []string{"node.example"}) {
+		t.Fatalf("destinations = %v, want only node.example", hosts)
+	}
+}
+
+// fak-test:runtime fast est=1s
 func TestSSHDestinationHardFloor(t *testing.T) {
 	for _, target := range []string{"operator@169.254.169.254", "operator@metadata.google.internal", "operator@metadata", "operator@[fd00:ec2::254]"} {
 		t.Run(target, func(t *testing.T) {
