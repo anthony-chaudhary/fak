@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -240,6 +241,9 @@ type ControlIngress interface {
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	// Adjudicators optionally supplies a complete per-server kernel chain. A nil
+	// chain preserves the registered pipeline; callers must retain every floor.
+	Adjudicators []abi.Adjudicator
 	// WorkspaceAdmissionPermissive explicitly admits lease DEFAULT_DENY failures.
 	// Peer LEASE_HELD conflicts and kernel policy denials remain enforced.
 	WorkspaceAdmissionPermissive bool
@@ -638,6 +642,9 @@ type Config struct {
 	// current DOS authority has no server-authenticated binding from a launch to a row.
 	// The bearer is hashed during New and the plaintext is not retained by Server.
 	MCPSessionBearer string
+	// MCPAgentID binds authenticated MCP launches to a non-human agent identity.
+	// When set, missing launch authentication refuses before MCP dispatch.
+	MCPAgentID string
 	// GuardRecoveryPrompt is a one-time, model-visible recovery note supplied by
 	// `fak guard` when the previous guarded run recorded capability-floor refusals.
 	// The gateway injects it into the first Anthropic Messages request for this

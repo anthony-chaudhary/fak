@@ -252,6 +252,7 @@ func remoteMaintenanceUnknownEffectReceipt(grant remotemaint.Grant, startedAt, e
 // admission path.
 func (s *Server) callRemoteMaintenance(ctx context.Context, raw json.RawMessage) (SyscallResponse, error) {
 	traceID := s.traceFor("")
+	s.bindTraceOwner(traceID, principalFromContext(ctx))
 	verdict, result, err := s.syscall(ctx, remoteMaintenanceTool, string(raw), false, "", traceID)
 	if err != nil {
 		return SyscallResponse{}, err

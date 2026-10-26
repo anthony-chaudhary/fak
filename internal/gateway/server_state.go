@@ -463,6 +463,7 @@ type Server struct {
 	defaultTraceID          string
 	mcpSessionAuthEnabled   bool
 	mcpSessionBearerDigest  [32]byte
+	mcpAgentID              string
 
 	// warmup is the #3051 boot warmup-inference readiness gate behind /healthz:
 	// when the host arms it, /healthz reports ok:false (warmup_pending) until a
