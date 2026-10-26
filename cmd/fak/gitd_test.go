@@ -49,6 +49,21 @@ func gitdTestRepo(t *testing.T) (root, oid, body string) {
 	return dir, run("hash-object", "-w", "f.txt"), body
 }
 
+type gitdFixtureRunner struct {
+	oid  string
+	body string
+}
+
+// The cross-process tests exercise broker discovery, transport, and caching;
+// keep the live broker's object read deterministic while the dead-broker path
+// below still proves the real Git fallback against gitdTestRepo.
+func (r gitdFixtureRunner) Object(_ context.Context, rev string) (gitbroker.Object, error) {
+	if rev != r.oid {
+		return gitbroker.Object{}, fmt.Errorf("fixture has no object %q", rev)
+	}
+	return gitbroker.Object{OID: r.oid, Type: "blob", Size: int64(len(r.body)), Data: []byte(r.body)}, nil
+}
+
 // gitdRunClientProcess re-execs THIS test binary as a genuinely separate OS
 // process that performs one brokered read and reports its provenance. Nothing but
 // the repo path crosses the boundary -- the child discovers the socket itself,
@@ -122,7 +137,7 @@ func gitdWaitReady(t *testing.T, repo string) {
 // in-process pool (#5621) cannot make and the entire reason this rung exists.
 func TestGitdCachesAcrossSeparateClientProcesses(t *testing.T) {
 	repo, oid, body := gitdTestRepo(t)
-	srv, err := gitbroker.Serve(gitbroker.Config{RepoRoot: repo})
+	srv, err := gitbroker.Serve(gitbroker.Config{RepoRoot: repo, Runner: gitdFixtureRunner{oid: oid, body: body}})
 	if err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
@@ -131,7 +146,7 @@ func TestGitdCachesAcrossSeparateClientProcesses(t *testing.T) {
 
 	prov1, data1 := gitdRunClientProcess(t, repo, oid)
 	if prov1 != string(gitbroker.Broker) {
-		t.Fatalf("first process provenance = %q, want %q (a cold cache must reach git)", prov1, gitbroker.Broker)
+		t.Fatalf("first process provenance = %q, want %q (a cold cache must reach the live broker runner)", prov1, gitbroker.Broker)
 	}
 	prov2, data2 := gitdRunClientProcess(t, repo, oid)
 	if prov2 != string(gitbroker.Cache) {
@@ -151,7 +166,7 @@ func TestGitdCachesAcrossSeparateClientProcesses(t *testing.T) {
 // differ -- never the answer.
 func TestGitdDeadBrokerProducesByteIdenticalOutput(t *testing.T) {
 	repo, oid, body := gitdTestRepo(t)
-	srv, err := gitbroker.Serve(gitbroker.Config{RepoRoot: repo})
+	srv, err := gitbroker.Serve(gitbroker.Config{RepoRoot: repo, Runner: gitdFixtureRunner{oid: oid, body: body}})
 	if err != nil {
 		t.Fatalf("Serve: %v", err)
 	}

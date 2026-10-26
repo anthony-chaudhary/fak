@@ -632,8 +632,12 @@ func TestInstallGuardSessionStartHookAtWiring(t *testing.T) {
 		if !install.Applied {
 			t.Fatalf("expected Applied=true for a codex child, got %+v", install)
 		}
+		if len(out) < 3 {
+			t.Fatalf("codex command missing per-launch overrides: %v", out)
+		}
 		joined := strings.Join(out, " ")
-		if !strings.Contains(joined, "hooks.SessionStart") || !strings.Contains(joined, "guard-sessionstart") {
+		hookScript := decodeGuardCodexHookScript(t, decodeGuardCodexHookOverride(t, out[2]))
+		if !strings.Contains(joined, "hooks.SessionStart") || !strings.Contains(hookScript, "guard-sessionstart") {
 			t.Fatalf("codex command missing per-launch SessionStart adapter: %v", out)
 		}
 	})

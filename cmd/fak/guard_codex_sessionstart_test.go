@@ -7,25 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
 )
 
-func TestGuardCodexSessionStartTrustedHashMatchesPinnedCodex(t *testing.T) {
-	const command = "echo hi"
-	const want = "sha256:9e87c3ad0f08b294d080bebd23a4971ebf5c8d908f22a10ac0a01510508c7917"
-	if got := guardCodexSessionStartTrustedHash(command); got != want {
-		t.Fatalf("trusted hash=%q, want %q", got, want)
-	}
-}
-
-func TestGuardCodexPowerShellCommandRoundTrip(t *testing.T) {
-	got := guardCodexPowerShellCommand([]string{`C:\Program Files\fak's\fak.exe`, "guard-sessionstart", "--state", `C:\state path`})
+func decodeGuardCodexPowerShellScript(t testing.TB, command string) string {
+	t.Helper()
 	const prefix = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand "
-	encoded, ok := strings.CutPrefix(got, prefix)
+	encoded, ok := strings.CutPrefix(command, prefix)
 	if !ok {
-		t.Fatalf("Windows hook command=%q", got)
+		t.Fatalf("Windows hook command=%q", command)
 	}
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
@@ -38,8 +32,72 @@ func TestGuardCodexPowerShellCommandRoundTrip(t *testing.T) {
 	for i := range units {
 		units[i] = binary.LittleEndian.Uint16(raw[i*2:])
 	}
+	return string(utf16.Decode(units))
+}
+
+func decodeGuardCodexHookOverride(t testing.TB, override string) string {
+	t.Helper()
+	const prefix = `hooks.SessionStart=[{hooks=[{type="command",command=`
+	rest, ok := strings.CutPrefix(override, prefix)
+	if !ok {
+		t.Fatalf("SessionStart override=%q", override)
+	}
+	quoted, _, ok := strings.Cut(rest, ",timeout=")
+	if !ok {
+		t.Fatalf("SessionStart override has no timeout boundary: %q", override)
+	}
+	command, err := strconv.Unquote(quoted)
+	if err != nil {
+		t.Fatalf("decode SessionStart command: %v", err)
+	}
+	return command
+}
+
+func decodeGuardCodexStateOverride(t testing.TB, override string) (string, string) {
+	t.Helper()
+	rest, ok := strings.CutPrefix(override, "hooks.state={")
+	if !ok {
+		t.Fatalf("hook state override=%q", override)
+	}
+	quotedKey, rest, ok := strings.Cut(rest, "={trusted_hash=")
+	if !ok {
+		t.Fatalf("hook state override has no trusted hash: %q", override)
+	}
+	quotedHash, ok := strings.CutSuffix(rest, "}}")
+	if !ok {
+		t.Fatalf("hook state override has invalid suffix: %q", override)
+	}
+	key, err := strconv.Unquote(quotedKey)
+	if err != nil {
+		t.Fatalf("decode hook state key: %v", err)
+	}
+	hash, err := strconv.Unquote(quotedHash)
+	if err != nil {
+		t.Fatalf("decode hook trusted hash: %v", err)
+	}
+	return key, hash
+}
+
+func decodeGuardCodexHookScript(t testing.TB, command string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return decodeGuardCodexPowerShellScript(t, command)
+	}
+	return command
+}
+
+func TestGuardCodexSessionStartTrustedHashMatchesPinnedCodex(t *testing.T) {
+	const command = "echo hi"
+	const want = "sha256:9e87c3ad0f08b294d080bebd23a4971ebf5c8d908f22a10ac0a01510508c7917"
+	if got := guardCodexSessionStartTrustedHash(command); got != want {
+		t.Fatalf("trusted hash=%q, want %q", got, want)
+	}
+}
+
+func TestGuardCodexPowerShellCommandRoundTrip(t *testing.T) {
+	got := guardCodexPowerShellCommand([]string{`C:\Program Files\fak's\fak.exe`, "guard-sessionstart", "--state", `C:\state path`})
 	want := `& 'C:\Program Files\fak''s\fak.exe' 'guard-sessionstart' '--state' 'C:\state path'; if ($null -eq $LASTEXITCODE) { exit 1 }; exit $LASTEXITCODE`
-	if decoded := string(utf16.Decode(units)); decoded != want {
+	if decoded := decodeGuardCodexPowerShellScript(t, got); decoded != want {
 		t.Fatalf("decoded command=%q, want %q", decoded, want)
 	}
 }
@@ -61,13 +119,20 @@ func TestInstallGuardCodexSessionStartHookAt(t *testing.T) {
 		t.Fatalf("override shape=%v", got)
 	}
 	hookOverride, stateOverride := got[2], got[4]
+	hookCommand := decodeGuardCodexHookOverride(t, hookOverride)
+	hookScript := decodeGuardCodexHookScript(t, hookCommand)
 	for _, want := range []string{"hooks.SessionStart", "guard-sessionstart", "--provider", "codex", "--managed", "--trace", "trace-8218", "--state", install.StatePath} {
-		if !strings.Contains(hookOverride, want) {
-			t.Errorf("hook override missing %q: %s", want, hookOverride)
+		candidate := hookOverride
+		if want != "hooks.SessionStart" {
+			candidate = hookScript
+		}
+		if !strings.Contains(candidate, want) {
+			t.Errorf("hook override missing %q: %s", want, candidate)
 		}
 	}
-	if !strings.Contains(stateOverride, "hooks.state") || !strings.Contains(stateOverride, guardCodexSessionStartHookKey()) || !strings.Contains(stateOverride, guardCodexSessionStartTrustedHash(guardCodexSessionStartCommand("fak binary", true, "trace-8218", install.StatePath))) {
-		t.Fatalf("trust override=%s", stateOverride)
+	stateKey, trustedHash := decodeGuardCodexStateOverride(t, stateOverride)
+	if stateKey != guardCodexSessionStartHookKey() || trustedHash != guardCodexSessionStartTrustedHash(hookCommand) {
+		t.Fatalf("trust override key/hash=(%q, %q)", stateKey, trustedHash)
 	}
 	if strings.Contains(strings.Join(got, " "), "dangerously-bypass-hook-trust") {
 		t.Fatalf("adapter widened trust beyond its exact handler: %v", got)

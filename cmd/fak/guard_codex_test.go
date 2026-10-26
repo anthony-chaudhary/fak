@@ -665,8 +665,29 @@ func TestResolveWindowsBatchCommandUsesCommandInterpreter(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows batch resolution")
 	}
+	root := t.TempDir()
+	nodeDir := filepath.Join(root, "node")
+	npmDir := filepath.Join(root, "npm")
+	entrypoint := filepath.Join(npmDir, "node_modules", "@openai", "codex", "bin", "codex.js")
+	for _, dir := range []string{nodeDir, filepath.Dir(entrypoint)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	node := filepath.Join(nodeDir, "node.exe")
+	for path, body := range map[string]string{
+		node:                               "fixture",
+		filepath.Join(npmDir, "codex.cmd"): "@node codex.js %*\r\n",
+		entrypoint:                         "// fixture\n",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", nodeDir+string(os.PathListSeparator)+npmDir)
 	got := resolveWindowsBatchCommand([]string{"codex", "exec", "-"})
-	if len(got) < 5 || !strings.EqualFold(filepath.Base(got[0]), "node.exe") || filepath.Base(got[1]) != "codex.js" || got[2] != "exec" || got[3] != "-" {
+	want := []string{node, entrypoint, "exec", "-"}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("extensionless codex was not fronted by node and its npm entrypoint: %v", got)
 	}
 }
