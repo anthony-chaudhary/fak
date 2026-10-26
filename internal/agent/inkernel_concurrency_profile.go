@@ -54,6 +54,8 @@ type ConcurrencyProfile struct {
 	Concurrency   int                  `json:"concurrency"`
 	Mechanism     ConcurrencyMechanism `json:"mechanism"`
 	MaxConcurrent int                  `json:"max_concurrent_forward"`
+	Backend       string               `json:"backend,omitempty"`
+	BackendTier   string               `json:"backend_tier,omitempty"`
 	ForwardPath   string               `json:"forward_path,omitempty"`
 	Phases        []ConcurrencyPhase   `json:"phases"`
 	Witness       string               `json:"witness"`
