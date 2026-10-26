@@ -42,6 +42,7 @@
     "functions.shell_command",
     "exec_command",
     "functions.exec_command",
+    "fak_remote_maintenance",
     "update_plan",
     "functions.update_plan",
     "write_stdin",
@@ -443,7 +444,19 @@
     { "tool": "mcp__fak_guard__fak_memory_run", "arg": "apply", "deny_regex": "^(?i:true)$", "reason": "POLICY_BLOCK",
       "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" },
     { "tool": "fak_fak_memory_run", "arg": "apply", "deny_regex": "^(?i:true)$", "reason": "POLICY_BLOCK",
-      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" }
+      "fix": "drop apply (or pass apply=false) to get the same driver's PROPOSAL — the read-only form is admitted, and it is what the kernel's own capability catalog hands you (`fak capabilities` emits every memory-driver card as a ready fak_memory_run with apply=false). Only the effectful memory WRITE is refused here: apply=true commits the driver's changes to durable memory with no preview step. Grant it deliberately with an operator overlay (`fak guard allow`) when a real memory write is the intent" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "(?i)(?:--remote-maintenance\\b|\\bfak(?:\\.exe)?\\b[^|;&\\n]*\\bguard\\b[^|;&\\n]*--approve\\b)", "reason": "POLICY_BLOCK",
+      "fix": "operator approvals and remote-maintenance authority are human-only overrides: the attending operator acts from their own shell, never the agent. Stop and report the required reviewed action, or redo the step with an admitted tool. This rule has no structural decider, so a quoted mention of either protected flag is refused too; leave protected flag text out of shell commands." },
+    { "tool": "PowerShell", "arg": "command", "deny_regex": "(?i)(?:--remote-maintenance\\b|\\bfak(?:\\.exe)?\\b[^|;&\\n]*\\bguard\\b[^|;&\\n]*--approve\\b)", "reason": "POLICY_BLOCK",
+      "fix": "operator approvals and remote-maintenance authority are human-only overrides: the attending operator acts from their own shell, never the agent. Stop and report the required reviewed action, or redo the step with an admitted tool. This rule has no structural decider, so a quoted mention of either protected flag is refused too; leave protected flag text out of shell commands." },
+    { "tool": "shell_command", "arg": "command", "deny_regex": "(?i)(?:--remote-maintenance\\b|\\bfak(?:\\.exe)?\\b[^|;&\\n]*\\bguard\\b[^|;&\\n]*--approve\\b)", "reason": "POLICY_BLOCK",
+      "fix": "operator approvals and remote-maintenance authority are human-only overrides: the attending operator acts from their own shell, never the agent. Stop and report the required reviewed action, or redo the step with an admitted tool. This rule has no structural decider, so a quoted mention of either protected flag is refused too; leave protected flag text out of shell commands." },
+    { "tool": "functions.shell_command", "arg": "command", "deny_regex": "(?i)(?:--remote-maintenance\\b|\\bfak(?:\\.exe)?\\b[^|;&\\n]*\\bguard\\b[^|;&\\n]*--approve\\b)", "reason": "POLICY_BLOCK",
+      "fix": "operator approvals and remote-maintenance authority are human-only overrides: the attending operator acts from their own shell, never the agent. Stop and report the required reviewed action, or redo the step with an admitted tool. This rule has no structural decider, so a quoted mention of either protected flag is refused too; leave protected flag text out of shell commands." },
+    { "tool": "exec_command", "arg": "cmd", "deny_regex": "(?i)(?:--remote-maintenance\\b|\\bfak(?:\\.exe)?\\b[^|;&\\n]*\\bguard\\b[^|;&\\n]*--approve\\b)", "reason": "POLICY_BLOCK",
+      "fix": "operator approvals and remote-maintenance authority are human-only overrides: the attending operator acts from their own shell, never the agent. Stop and report the required reviewed action, or redo the step with an admitted tool. This rule has no structural decider, so a quoted mention of either protected flag is refused too; leave protected flag text out of shell commands." },
+    { "tool": "functions.exec_command", "arg": "cmd", "deny_regex": "(?i)(?:--remote-maintenance\\b|\\bfak(?:\\.exe)?\\b[^|;&\\n]*\\bguard\\b[^|;&\\n]*--approve\\b)", "reason": "POLICY_BLOCK",
+      "fix": "operator approvals and remote-maintenance authority are human-only overrides: the attending operator acts from their own shell, never the agent. Stop and report the required reviewed action, or redo the step with an admitted tool. This rule has no structural decider, so a quoted mention of either protected flag is refused too; leave protected flag text out of shell commands." }
   ],
 
   "egress": {

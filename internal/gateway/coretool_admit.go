@@ -307,6 +307,12 @@ var CoreToolsPalette = []MCPToolDescriptor{
 		OpenWorldHint:   true,
 	},
 	{
+		Name:            remoteMaintenanceTool,
+		Description:     "Execute one operator-approved remote maintenance profile through the native kernel",
+		DestructiveHint: true,
+		OpenWorldHint:   true,
+	},
+	{
 		Name:            "fak_admit",
 		Description:     "Admit out-of-band tool results into context",
 		DestructiveHint: true,

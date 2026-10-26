@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -135,4 +136,71 @@ func TestDefaultFloorRefusesAgentSelfApproval(t *testing.T) {
 	if v := a.Adjudicate(context.Background(), approveTestCall("Bash", `{"command":"fak guard allow --list"}`)); v.Kind != abi.VerdictAllow {
 		t.Errorf("fak guard allow --list: kind = %v reason %s, want Allow", v.Kind, abi.ReasonName(v.Reason))
 	}
+}
+
+// fak-test:runtime fast est=1s
+// Both shipped floors keep installation and revocation of reviewed remote
+// maintenance authority outside the agent across every supported shell alias.
+func TestDefaultAndStrictFloorsRefuseAgentRemoteMaintenance(t *testing.T) {
+	floors := []struct {
+		name string
+		raw  []byte
+	}{{"default", guardDefaultPolicyJSON}, {"strict", guardStrictPolicyJSON}}
+	cases := []struct{ tool, arg, install, revoke string }{
+		{"Bash", "command", "fak guard allow --remote-maintenance reviewed.json --ttl 15m", "fak guard allow --remove --remote-maintenance profile-a"},
+		{"PowerShell", "command", "fak.exe guard allow --remote-maintenance reviewed.json --ttl 15m", "fak.exe guard allow --remove --remote-maintenance profile-a"},
+		{"shell_command", "command", "fak-run fak guard allow --remote-maintenance reviewed.json --ttl 15m", "fak-run fak guard allow --remove --remote-maintenance profile-a"},
+		{"functions.shell_command", "command", "go run ./cmd/fak guard allow --remote-maintenance reviewed.json --ttl 15m", "go run ./cmd/fak guard allow --remove --remote-maintenance profile-a"},
+		{"exec_command", "cmd", "fak guard allow --remote-maintenance reviewed.json --ttl 15m", "fak guard allow --remove --remote-maintenance profile-a"},
+		{"functions.exec_command", "cmd", "fak.exe guard allow --remote-maintenance reviewed.json --ttl 15m", "fak.exe guard allow --remove --remote-maintenance profile-a"},
+		{"Bash", "command", `x=fak; "$x" guard allow --remote-maintenance reviewed.json --ttl 15m`, `x=fak; "$x" guard allow --remove --remote-maintenance profile-a`},
+		{"PowerShell", "command", `$x="fak.exe"; & $x guard allow "--remote-maintenance" reviewed.json --ttl 15m`, `$x="fak.exe"; & $x guard allow --remove "--remote-maintenance" profile-a`},
+	}
+	for _, floor := range floors {
+		rt, err := policy.ParseRuntime(floor.raw)
+		if err != nil {
+			t.Fatalf("parse %s floor: %v", floor.name, err)
+		}
+		a := adjudicator.New(rt.Adjudicator)
+		for _, tc := range cases {
+			for _, command := range []string{tc.install, tc.revoke} {
+				args := string(remoteMaintenanceMustJSON(t, map[string]string{tc.arg: command}))
+				v := a.Adjudicate(context.Background(), approveTestCall(tc.tool, args))
+				if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+					t.Errorf("%s %s %q: verdict=(%v,%s), want Deny/POLICY_BLOCK", floor.name, tc.tool, command, v.Kind, abi.ReasonName(v.Reason))
+				}
+			}
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestShippedFloorsAdmitOnlyExactRemoteMaintenanceToolName(t *testing.T) {
+	for _, floor := range []struct {
+		name string
+		raw  []byte
+	}{{"default", guardDefaultPolicyJSON}, {"strict", guardStrictPolicyJSON}} {
+		rt, err := policy.ParseRuntime(floor.raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := adjudicator.New(rt.Adjudicator)
+		valid := approveTestCall("fak_remote_maintenance", `{"profile_id":"reviewed","operation_digest":"1111111111111111111111111111111111111111111111111111111111111111"}`)
+		if v := a.Adjudicate(context.Background(), valid); v.Kind != abi.VerdictAllow {
+			t.Fatalf("%s exact typed tool verdict=%v/%s, want Allow", floor.name, v.Kind, abi.ReasonName(v.Reason))
+		}
+		lookalike := approveTestCall("fak_remote_maintenance_extra", `{}`)
+		if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
+			t.Fatalf("%s lookalike verdict=%v/%s, want Deny/DEFAULT_DENY", floor.name, v.Kind, abi.ReasonName(v.Reason))
+		}
+	}
+}
+
+func remoteMaintenanceMustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	b, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

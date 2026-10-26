@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
+	"github.com/anthony-chaudhary/fak/pkg/remotemaint"
 	"github.com/anthony-chaudhary/fak/pkg/turncost"
 )
 
@@ -373,6 +374,8 @@ type Server struct {
 	featureCatalog               atomic.Pointer[FeatureCatalog]
 	responsesContinuationOnce    sync.Once
 	responsesContinuations       *responsesContinuationStore
+	remoteMaintenanceMu          sync.RWMutex
+	remoteMaintenanceAuthority   remotemaint.Authority
 
 	nativeProgress  nativeProgressReplay
 	k               *kernel.Kernel

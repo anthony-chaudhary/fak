@@ -15,6 +15,7 @@ import (
 
 // This stays source-compatible with the parent revision: it exercises the
 // production cmd/fak provider only through the pre-existing gateway MCP wire.
+// fak-test:runtime medium est=10s lane=default
 func TestFakAdjudicateUsesRealDOSWorkspaceLease(t *testing.T) {
 	dos, err := exec.LookPath("dos")
 	if err != nil {
@@ -43,7 +44,7 @@ func TestFakAdjudicateUsesRealDOSWorkspaceLease(t *testing.T) {
 	t.Cleanup(gw.Close)
 	ts := httptest.NewServer(gw.Handler())
 	t.Cleanup(ts.Close)
-	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fak_adjudicate","arguments":{"tool":"apply_patch","arguments":{"patch":"*** Add File: protected/probe.txt\n+must-not-run\n"}}}}`
+	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fak_adjudicate","arguments":{"tool":"apply_patch","arguments":{"patch":"*** Begin Patch\n*** Add File: protected/probe.txt\n+must-not-run\n*** End Patch\n"}}}}`
 	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(frame))
 	if err != nil {
 		t.Fatal(err)
