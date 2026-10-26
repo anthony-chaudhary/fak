@@ -67,6 +67,21 @@ func (g facadeResultDeny) Admit(_ context.Context, _ *abi.ToolCall, result *abi.
 	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, By: "guardedremotemaint-test-result-deny"}
 }
 
+type facadeResultTransform struct {
+	active  *atomic.Bool
+	payload []byte
+}
+
+func (g facadeResultTransform) Tools() []string        { return []string{canonicalTool} }
+func (g facadeResultTransform) Caps() []abi.Capability { return nil }
+func (g facadeResultTransform) Admit(_ context.Context, _ *abi.ToolCall, _ *abi.Result) abi.Verdict {
+	if !g.active.Load() {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "guardedremotemaint-test-transform-inactive"}
+	}
+	ref := abi.Ref{Kind: abi.RefInline, Inline: append([]byte(nil), g.payload...), Len: int64(len(g.payload))}
+	return abi.Verdict{Kind: abi.VerdictTransform, By: "guardedremotemaint-test-transform", Payload: abi.TransformPayload{NewArgs: ref}}
+}
+
 type facadeCallRecorder struct {
 	active     *atomic.Bool
 	mu         sync.Mutex
@@ -114,7 +129,7 @@ func (r *facadeCallRecorder) resultSnapshot() (int, map[string]string) {
 func facadeGrant(now time.Time) remotemaint.Grant {
 	return remotemaint.Grant{
 		ProfileID: "facade-profile", OperationDigest: strings.Repeat("1", 64), ContextID: strings.Repeat("2", 64),
-		Target: "maintenance.example.invalid", HostKey: "SHA256:" + base64.RawStdEncoding.EncodeToString(make([]byte, 32)),
+		Target: "service@maintenance.example.invalid", HostKey: "SHA256:" + base64.RawStdEncoding.EncodeToString(make([]byte, 32)),
 		Operation: remotemaint.OperationSystemdProfileInstallReload, PayloadSHA256: strings.Repeat("3", 64),
 		Holder: "facade-agent", BootID: "boot-facade", PriorStateSHA256: strings.Repeat("4", 64),
 		Paths:        []string{"/etc/systemd/system/fak.service"},
@@ -262,6 +277,7 @@ func TestGuardedRemoteMaintenanceFacadeKernelBoundary(t *testing.T) {
 		abi.RegisterResultAdmitter(1<<30, recorder)
 		t.Cleanup(func() { active.Store(false) })
 		a := newFacadeAuthority()
+		grantDigest := remotemaint.GrantDigest(a.grant)
 		s, err := NewAgentSession(HostConfig{Authority: a, AgentID: agentID})
 		if err != nil {
 			t.Fatal(err)
@@ -271,14 +287,20 @@ func TestGuardedRemoteMaintenanceFacadeKernelBoundary(t *testing.T) {
 			results, meta := recorder.resultSnapshot()
 			t.Fatalf("canonical default-floor refusal: outcome=%+v receipt=%+v err=%v admitted=%d meta=%v", out, out.Receipt, err, results, meta)
 		}
-		if !out.Authorized || out.Effect != "completed" || out.Receipt == nil || out.Receipt.GrantDigest != remotemaint.GrantDigest(a.grant) || out.TraceID == "" {
+		if !out.Authorized || out.Effect != "completed" || out.Receipt == nil || out.Receipt.GrantDigest != grantDigest || out.Receipt.Target != a.grant.Target || out.TraceID == "" {
 			t.Fatalf("outcome=%+v", out)
+		}
+		if got := remotemaint.GrantDigest(a.grant); got != grantDigest {
+			t.Fatalf("authority grant scope changed: got %s want %s", got, grantDigest)
 		}
 		assertFacadeCounts(t, a, 1, 2, 1)
 		if len(a.requests) != 1 || a.requests[0].ProfileID != a.grant.ProfileID {
 			t.Fatalf("authority requests=%+v", a.requests)
 		}
 		active.Store(false)
+		if results, _ := recorder.resultSnapshot(); results != 1 {
+			t.Fatalf("registered result-admission calls=%d, want 1", results)
+		}
 		principals := recorder.snapshot()
 		if len(principals) < 2 {
 			t.Fatalf("recorded kernel calls=%v, want initial and resource decisions", principals)
@@ -309,6 +331,7 @@ func TestGuardedRemoteMaintenanceFacadeKernelBoundary(t *testing.T) {
 		abi.RegisterResultAdmitter(1<<30, gate)
 		t.Cleanup(func() { active.Store(false) })
 		a := newFacadeAuthority()
+		grantDigest := remotemaint.GrantDigest(a.grant)
 		s, err := NewAgentSession(HostConfig{Authority: a, AgentID: agentID})
 		if err != nil {
 			t.Fatal(err)
@@ -323,8 +346,36 @@ func TestGuardedRemoteMaintenanceFacadeKernelBoundary(t *testing.T) {
 			t.Fatalf("denied result leaked: %s", raw)
 		}
 		assertFacadeCounts(t, a, 1, 2, 1)
-		if out.Receipt.ProfileID != a.grant.ProfileID || out.Receipt.ContextID != a.grant.ContextID {
+		if got := remotemaint.GrantDigest(a.grant); got != grantDigest {
+			t.Fatalf("authority grant scope changed: got %s want %s", got, grantDigest)
+		}
+		if out.Receipt.ProfileID != a.grant.ProfileID || out.Receipt.ContextID != a.grant.ContextID || out.Receipt.Target != a.grant.Target {
 			t.Fatalf("unknown receipt lost bound identity: %+v", out.Receipt)
 		}
+	})
+
+	t.Run("transformed applied receipt is never exposed as verified", func(t *testing.T) {
+		a := newFacadeAuthority()
+		forged := a.receipt
+		forged.Target = "attacker.invalid"
+		payload, err := json.Marshal(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var active atomic.Bool
+		active.Store(true)
+		abi.RegisterResultAdmitter(1<<30, facadeResultTransform{active: &active, payload: payload})
+		t.Cleanup(func() { active.Store(false) })
+		s, err := NewAgentSession(HostConfig{Authority: a, AgentID: agentID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		out, err := s.Execute(context.Background(), remotemaint.Request{ProfileID: a.grant.ProfileID, OperationDigest: a.grant.OperationDigest})
+		active.Store(false)
+		if !errors.Is(err, remotemaint.ErrUnknownEffect) || !out.Authorized || out.Effect != "attempted_unknown" || out.Receipt != nil {
+			t.Fatalf("transformed receipt outcome=%+v err=%v", out, err)
+		}
+		assertFacadeCounts(t, a, 1, 2, 1)
 	})
 }

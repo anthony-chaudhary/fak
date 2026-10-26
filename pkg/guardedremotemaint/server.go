@@ -157,10 +157,21 @@ func (s *AgentSession) Execute(ctx context.Context, req remotemaint.Request) (Ou
 		out.Effect = "attempted_unknown"
 		return out, remotemaint.ErrUnknownEffect
 	}
+	admission := wire.Result.Meta["remote_maintenance_result_admission"]
+	admitted := admission == "ALLOW" || admission == "DEFER"
+	safeUnknown := admission == "DENY" && wire.Result.Status == "ERROR" &&
+		wire.Result.Meta["remote_maintenance_effect"] == "attempted_unknown" &&
+		receipt.Outcome == remotemaint.OutcomeUnknownEffect && !receipt.Verified &&
+		receipt.BackupDisposition == remotemaint.BackupUnknown
+	if !boundReceipt(req, wire.Result, receipt) || (!admitted && !safeUnknown) {
+		out.Effect = "attempted_unknown"
+		return out, remotemaint.ErrUnknownEffect
+	}
 	out.Receipt = &receipt
 	switch receipt.Outcome {
 	case remotemaint.OutcomeApplied, remotemaint.OutcomeUnchanged:
 		if !successfulReceipt(req, wire.Result, receipt) {
+			out.Receipt = nil
 			out.Effect = "attempted_unknown"
 			return out, remotemaint.ErrUnknownEffect
 		}
@@ -176,6 +187,7 @@ func (s *AgentSession) Execute(ctx context.Context, req remotemaint.Request) (Ou
 		out.Effect = "attempted_unknown"
 		return out, remotemaint.ErrRollbackFailed
 	default:
+		out.Receipt = nil
 		out.Effect = "attempted_unknown"
 		return out, remotemaint.ErrUnknownEffect
 	}
@@ -189,12 +201,17 @@ func successfulReceipt(req remotemaint.Request, result *gateway.ResultEnvelope, 
 	if admission != "ALLOW" && admission != "DEFER" {
 		return false
 	}
-	if receipt.Schema != remotemaint.ReceiptSchema || !receipt.Verified || receipt.ProfileID != req.ProfileID ||
+	return receipt.Verified && boundReceipt(req, result, receipt)
+}
+
+func boundReceipt(req remotemaint.Request, result *gateway.ResultEnvelope, receipt remotemaint.Receipt) bool {
+	if result == nil || result.Meta["remote_maintenance_authorization"] != "ALLOW" ||
+		receipt.Schema != remotemaint.ReceiptSchema || receipt.ProfileID != req.ProfileID ||
 		receipt.OperationDigest != req.OperationDigest {
 		return false
 	}
 	digest, err := hex.DecodeString(receipt.GrantDigest)
-	return err == nil && len(digest) == 32
+	return err == nil && len(digest) == 32 && result.Meta["remote_maintenance_grant"] == receipt.GrantDigest
 }
 
 // Close releases the embedded gateway and erases the facade's bearer copies.

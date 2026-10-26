@@ -92,6 +92,19 @@ func HasPIIExcept(body []byte, exemptClasses map[string]bool) bool {
 	return false
 }
 
+// HasCanonicalPIIExcept reports whether any of Scan's canonical views contains a
+// PII class outside exemptClasses. It reports facts without authorizing a class
+// exemption or changing the original body.
+func HasCanonicalPIIExcept(body []byte, exemptClasses map[string]bool) bool {
+	norm, dec, rev := scanViews(body)
+	for _, view := range []string{norm, dec, rev} {
+		if HasPIIExcept([]byte(view), exemptClasses) {
+			return true
+		}
+	}
+	return false
+}
+
 // RedactPIIClasses masks only named classes. Normgate uses this to remove declared-public
 // spans temporarily, then re-runs the full canonical scanner to prove nothing protected or
 // obfuscated remains.

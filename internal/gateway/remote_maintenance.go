@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/remotemaintresult"
 	"github.com/anthony-chaudhary/fak/pkg/remotemaint"
 )
 
@@ -190,7 +191,8 @@ func (s *Server) syscallRemoteMaintenance(ctx context.Context, call *abi.ToolCal
 		result.Meta["remote_maintenance_outcome"] = receipt.Outcome
 		result.Meta["remote_maintenance_backup"] = string(receipt.BackupDisposition)
 	}
-	admitted := s.k.AdmitResult(ctx, scopeCall, result)
+	admissionCtx := remotemaintresult.Bind(ctx, scopeCall, knownGrant, body)
+	admitted := s.k.AdmitResult(admissionCtx, scopeCall, result)
 	s.rememberOriginSeq(call.TraceID, call.Tool, string(resolveBytes(ctx, call.Args)), call.SeqNo)
 	if result.Meta == nil {
 		result.Meta = make(map[string]string)
