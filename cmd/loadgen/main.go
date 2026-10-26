@@ -51,6 +51,10 @@ func main() {
 		URL: *url, Model: *model, Stack: *stack, Prompt: *prompt,
 		MaxTokens: *maxTokens, Concurrencies: concs, RequestsPer: *requestsPer, APIKey: apiKey,
 	}
+	if err := validateConfig(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
@@ -74,6 +78,10 @@ func main() {
 		if p.ErrorRate > worst {
 			worst = p.ErrorRate
 		}
+	}
+	if res.Canceled {
+		fmt.Fprintln(os.Stderr, "loadgen: canceled before completing concurrency sweep")
+		os.Exit(1)
 	}
 	if worst > *maxErrorRate {
 		fmt.Fprintf(os.Stderr, "loadgen: FAIL worst error rate %.1f%% > max %.1f%%\n", worst*100, *maxErrorRate*100)
