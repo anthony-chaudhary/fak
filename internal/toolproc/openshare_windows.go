@@ -31,6 +31,13 @@ func OpenAppendShareDelete(path string) (*os.File, error) {
 	return openShareDelete(path, syscall.FILE_APPEND_DATA, syscall.OPEN_ALWAYS)
 }
 
+// OpenExclusiveShareDelete creates a new writable file without replacing an
+// existing path, while permitting its owner to unlink or rename the held file.
+// Windows inherits the parent ACL, as with os.OpenFile; perm is the POSIX mode.
+func OpenExclusiveShareDelete(path string, perm os.FileMode) (*os.File, error) {
+	return openShareDelete(path, syscall.GENERIC_WRITE, syscall.CREATE_NEW)
+}
+
 func openShareDelete(path string, access, createmode uint32) (*os.File, error) {
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {

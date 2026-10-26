@@ -6,7 +6,7 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1326<br>
+parsed files: 1327<br>
 rows: 1301<br>
 unverified rows: 0 / 1301<br>
 source-only rows absent from help: 1065
@@ -554,7 +554,7 @@ source-only rows absent from help: 1065
 | `fak hooks lane-audit` | reports every internal/<leaf> Go package with no declared dos.toml lane — the standing, whole-tree form of the per-commit leaf check the commit-msg stamp lint runs | runHooksLaneAudit / internal/hooks, internal/windowgate | `case` arm of the dispatch switch in runHooks() | RUNTIME | — | **SOURCE ONLY** |
 | `fak hooks popup-scan` | desktop-popup push gate (reason: DESKTOP_POPUP_REGRESSION) | runHooksPopupScan / internal/procguard, internal/windowgate | `case` arm of the dispatch switch in runHooks() | RUNTIME | — | **SOURCE ONLY** |
 | `fak hooks pre-commit` |  | runHooksPreCommit / internal/hooks, internal/safecommit, internal/windowgate | `case` arm of the dispatch switch in runHooks() | RUNTIME | — | yes |
-| `fak hooks pre-push` |  | runHooksPrePush / internal/affectedtests, internal/committedbuildwitness, internal/hooks, internal/jsonlledger, internal/procguard, internal/windowgate | `case` arm of the dispatch switch in runHooks() | STRUCTURAL | `COULD_NOT_RUN`, `PREPUSH_BASE_UNAVAILABLE`, `PREPUSH_WAIT_TIMEOUT`, `TRUNK_WOULD_NOT_COMPILE` | **SOURCE ONLY** |
+| `fak hooks pre-push` |  | runHooksPrePush / internal/affectedtests, internal/committedbuildwitness, internal/hooks, internal/jsonlledger, internal/procguard, internal/toolproc, internal/windowgate | `case` arm of the dispatch switch in runHooks() | STRUCTURAL | `COULD_NOT_RUN`, `PREPUSH_BASE_UNAVAILABLE`, `PREPUSH_WAIT_TIMEOUT`, `TRUNK_WOULD_NOT_COMPILE` | **SOURCE ONLY** |
 | `fak horizon-recovery` | recover stranded / stalled long-horizon work | cmdHorizonRecovery / internal/horizonrecovery | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak host-crash` | watch the host for crash/reboot events and append a durable JSONL signal (--once scans once) | cmdHostCrash / internal/flock, internal/guardsessions, internal/hostfault, internal/hostresurrect, internal/processalive, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak host-relaunch-broker` | drain the control-plane->desktop relaunch spool and launch the queued Windows Terminal sessions | runHostRelaunchBroker / internal/hostresurrect, internal/pathutil, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |

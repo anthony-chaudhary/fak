@@ -860,6 +860,26 @@ func TestPrepushFailureDoesNotCreateSuccessReceipt(t *testing.T) {
 	}
 }
 
+// fak-test:justify why=contract when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=10ms lane=default
+func TestPrepushClaimReleaseAllowsFreshOwner(t *testing.T) {
+	commonDir := t.TempDir()
+	oldCommonDir := prepushSuccessCommonDir
+	prepushSuccessCommonDir = func(string) string { return commonDir }
+	t.Cleanup(func() { prepushSuccessCommonDir = oldCommonDir })
+	for range 2 {
+		owner, release, err := claimPrepushTipWithReuse("repo", "tip", time.Now, func() bool { return false })
+		if err != nil || !owner {
+			t.Fatalf("claim: owner=%v, err=%v", owner, err)
+		}
+		release()
+		release()
+		if _, err := os.Stat(prepushClaimPath("repo", "tip")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("released claim remains: %v", err)
+		}
+	}
+}
+
 func TestClaimPrepushTipCoalescesOnIndependentSuccess(t *testing.T) {
 	commonDir := t.TempDir()
 	oldCommonDir, oldSleep := prepushSuccessCommonDir, prepushSuccessSleep
