@@ -292,7 +292,7 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 func (s *Server) strictInitialWorkspaceExecution(ctx context.Context, call *abi.ToolCall, readOnly bool) (WireVerdict, bool) {
 	_, _, mutating, _ := adjudicateRawWriteTargets(call.Tool, string(resolveBytes(ctx, call.Args)), readOnly)
 	if mutating && !s.workspaceAdmissionPermissive {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, "atomic workspace lease guard is unavailable for mutating syscall"), true
+		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureAtomicGuardUnavailable, "atomic workspace lease guard is unavailable for mutating syscall"), true
 	}
 	return WireVerdict{}, false
 }
@@ -305,7 +305,7 @@ func (s *Server) prepareWorkspaceExecution(ctx context.Context, call *abi.ToolCa
 	if !mutating {
 		return nil, WireVerdict{}, false
 	}
-	atomicRefusal := leaseAdmissionRefusal(abi.ReasonDefaultDeny, "atomic workspace lease guard is unavailable for mutating syscall")
+	atomicRefusal := leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureAtomicGuardUnavailable, "atomic workspace lease guard is unavailable for mutating syscall")
 	if !s.workspaceAdmissionPermissive {
 		return nil, atomicRefusal, true
 	}
