@@ -232,8 +232,8 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 	if strings.Contains(cfg.Receipt.Error, "tool.go") {
 		t.Fatal("fixture source leaked into the bounded audit diagnostic")
 	}
-	// A toolkit without cuobjdump (the micromamba WSL env) refuses the audit after the archive
-	// was replaced; the stamp must still name the archive on disk.
+	// A toolkit without cuobjdump (the micromamba or apt WSL env) refuses before any kernel
+	// compiles, so the archive on disk and its stamp are left as they were.
 	tool, err := os.ReadFile(tc.NVCC)
 	if err != nil {
 		t.Fatal(err)
@@ -243,11 +243,59 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 	if err := os.Chmod(bare, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	staleCUDAArchiveStamp(t, root)
-	if _, err := BuildCUDALib(context.Background(), &Toolchain{NVCC: bare, AR: bare}, root, "sm_120", false, io.Discard); !errors.Is(err, ErrCUDAImageAuditToolMissing) {
-		t.Fatalf("toolkit without cuobjdump did not refuse the audit: %v", err)
+	archive := filepath.Join(root, "internal", "compute", "libfakcuda.a")
+	before, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = BuildCUDALib(context.Background(), &Toolchain{NVCC: bare, AR: bare}, root, "sm_120", false, io.Discard)
+	var refusal *CUDAPreflightRefusal
+	if !errors.As(err, &refusal) || refusal.Token != CUDAPreflightCuobjdumpMissing || !errors.Is(err, ErrCUDAImageAuditToolMissing) {
+		t.Fatalf("toolkit without cuobjdump did not refuse at preflight: %v", err)
+	}
+	if after, err := os.ReadFile(archive); err != nil || string(after) != string(before) {
+		t.Fatalf("refused preflight replaced the archive: %v", err)
 	}
 	requireCUDAArchiveStamp(t, root)
+}
+
+// fak-test:justify why=regression when=changed:internal/computebuild/**
+// fak-test:runtime fast est=10ms
+func TestRequireCUDAImageAuditToolRefusesMissingCuobjdump(t *testing.T) {
+	toolkit := t.TempDir()
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+	// The fixture nvcc is not runnable: a refusal proves no compile was attempted.
+	nvcc := filepath.Join(toolkit, "nvcc"+exe)
+	writeFixtureFile(t, nvcc, "not a compiler")
+	if err := os.Chmod(nvcc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tc := &Toolchain{NVCC: nvcc}
+	for name, run := range map[string]func() error{
+		"preflight": func() error { return RequireCUDAImageAuditTool(tc) },
+		"compile": func() error {
+			_, err := CompileCUDAKernels(context.Background(), tc, t.TempDir(), "sm_120", false, io.Discard)
+			return err
+		},
+	} {
+		err := run()
+		var refusal *CUDAPreflightRefusal
+		if !errors.As(err, &refusal) || refusal.Token != CUDAPreflightCuobjdumpMissing || !errors.Is(err, ErrCUDAImageAuditToolMissing) {
+			t.Fatalf("%s without cuobjdump = %v, want %s", name, err, CUDAPreflightCuobjdumpMissing)
+		}
+	}
+	for _, missing := range []*Toolchain{nil, {}} {
+		if err := RequireCUDAImageAuditTool(missing); !errors.Is(err, ErrCUDAImageAuditToolMissing) {
+			t.Fatalf("no selected toolkit = %v", err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(toolkit, "cuobjdump"+exe), "fixture")
+	if err := RequireCUDAImageAuditTool(tc); err != nil {
+		t.Fatalf("cuobjdump beside nvcc refused: %v", err)
+	}
 }
 
 func staleCUDAArchiveStamp(t *testing.T, root string) {

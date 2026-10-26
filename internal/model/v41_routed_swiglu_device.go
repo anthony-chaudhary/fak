@@ -28,20 +28,22 @@ const (
 // publication is then the identity.
 type v41RoutedExpertFunc func(layer int, stem string, x []float32, weight float32) ([]float32, v41RoutedExpertOutcome, error)
 
-// v41RoutedExpertFunc binds the fused device routed expert, or returns nil when
-// the session backend cannot run it for this model: no device memory, no
-// routed SwiGLU module, a reduced geometry, or a nonfinite clamp limit. Per-pick
-// weight admission (bias, dtype, staging) is a decline, as for the gate/up seam.
+// v41RoutedExpertFunc binds either the fused resident routed expert or the packed
+// expert GEMV path. Per-pick native-weight admission remains a decline; selecting
+// any packed projection makes missing siblings and kernel failures fail closed.
 func (s *Session) v41RoutedExpertFunc() v41RoutedExpertFunc {
 	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
 		return nil
 	}
 	op, ok := s.Backend.(compute.V41RoutedSwiGLUBackend)
-	if !ok || !op.V41RoutedSwiGLUAvailable() {
+	cfg := s.M.Cfg
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
 		return nil
 	}
-	cfg := s.M.Cfg
-	if full, err := v41ForwardGeometry(cfg); err != nil || !full {
+	fusedReady := full && ok && op.V41RoutedSwiGLUAvailable()
+	_, packedReady := s.Backend.(compute.RoutedExpertDeviceKernel)
+	if !fusedReady && !packedReady {
 		return nil
 	}
 	limit := float32(cfg.SwigluLimit)
@@ -97,7 +99,63 @@ func (s *Session) v41RoutedExpertFunc() v41RoutedExpertFunc {
 				gateName := layerName(layer, stem+".w1.weight")
 				upName := layerName(layer, stem+".w3.weight")
 				downName := layerName(layer, stem+".w2.weight")
-				if s.M.has(downName[:len(downName)-len("weight")] + "bias") {
+				weightSuffix := len("weight")
+				if s.M.has(gateName[:len(gateName)-weightSuffix]+"bias") ||
+					s.M.has(upName[:len(upName)-weightSuffix]+"bias") ||
+					s.M.has(downName[:len(downName)-weightSuffix]+"bias") {
+					return nil, v41RoutedExpertDeclined, nil
+				}
+				packedStem := "layers." + itoa(layer) + "." + stem
+				packedW1Name := packedStem + ".w1.weight"
+				packedUpName := packedStem + ".w3.weight"
+				packedDownName := packedStem + ".w2.weight"
+				packedCount := 0
+				for _, name := range [...]string{packedW1Name, packedUpName, packedDownName} {
+					if s.M.V41ExpertDeviceInstalled(name) {
+						packedCount++
+					}
+				}
+				if packedCount != 0 {
+					if packedCount != 3 {
+						metadata := v4QuantMetadataf("V4.1 packed routed expert %s has %d/3 projections", packedStem, packedCount)
+						return nil, v41RoutedExpertError, closeFailure(v41ExpertOperationErr(layer, stage, metadata))
+					}
+					gate, err := s.M.V41ExpertDeviceMatmul(packedW1Name, s.Backend, x)
+					if err != nil {
+						return nil, v41RoutedExpertError, closeFailure(err)
+					}
+					up, err := s.M.V41ExpertDeviceMatmul(packedUpName, s.Backend, x)
+					if err != nil {
+						return nil, v41RoutedExpertError, closeFailure(err)
+					}
+					gate, err = v41RoutedBF16(layer, "gate/up", gate, I)
+					if err != nil {
+						return nil, v41RoutedExpertError, err
+					}
+					up, err = v41RoutedBF16(layer, "gate/up", up, I)
+					if err != nil {
+						return nil, v41RoutedExpertError, err
+					}
+					clampSwiGLUProjections(gate, up, limit)
+					for i := range gate {
+						gate[i] = silu(gate[i]) * up[i] * weight
+					}
+					activation, err := v41RoutedBF16(layer, "down", gate, I)
+					if err != nil {
+						return nil, v41RoutedExpertError, err
+					}
+					stage = "down"
+					out, err := s.M.V41ExpertDeviceMatmul(packedDownName, s.Backend, activation)
+					if err != nil {
+						return nil, v41RoutedExpertError, closeFailure(err)
+					}
+					out, err = v41RoutedBF16(layer, stage, out, H)
+					if err != nil {
+						return nil, v41RoutedExpertError, err
+					}
+					return out, v41RoutedExpertHandled, nil
+				}
+				if !fusedReady {
 					return nil, v41RoutedExpertDeclined, nil
 				}
 				gateW, releaseGate, upW, releaseUp, input, ok := expertInputDeviceAdmitted(s, gateName, upName, x, H)

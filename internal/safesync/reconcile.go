@@ -283,7 +283,9 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 	}
 
 	if r.opts.Fetch {
-		_, _ = checked(ctx, run, repo, "fetch", r.opts.Remote, branch)
+		if _, err := checked(ctx, run, repo, "fetch", r.opts.Remote, branch); err != nil {
+			return ReconcileAssessment{}, fmt.Errorf("reconcile: fetch %s %s: %w", r.opts.Remote, branch, err)
+		}
 	}
 
 	// 1. Observed local HEAD and target remote ref SHA (pinned across all subsequent checks).

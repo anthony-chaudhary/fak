@@ -221,6 +221,13 @@ var registry = []Bench{
 		Doc:     "docs/benchmarks/README.md",
 	},
 	{
+		Name: "deepinfereval", Kind: KindCmd, Need: NeedNone,
+		Summary: "Scores AIME or GPQA responses with the pinned DeepInfer-compatible rule evaluator; HLE requires an external judge.",
+		Run:     "go run ./cmd/deepinfereval",
+		Flags:   []string{"-benchmark  -  aime, gpqa, or hle", "-prediction  -  model response text", "-gold  -  reference answer", "-json  -  versioned receipt"},
+		Doc:     "",
+	},
+	{
 		Name: "fanbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "One-master-goal -> N-subagent fan-out sweep: the prefill-token work floor across a worker sweep.",
 		Run:     "go run ./cmd/fanbench",

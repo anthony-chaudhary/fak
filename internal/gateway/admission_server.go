@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
@@ -344,9 +345,13 @@ func (s *Server) admitStreamedTurn(ctx context.Context, w http.ResponseWriter, l
 // holding — a slice of the budget every other tenant is competing for. The reverse order
 // would let a tenant that is going to be refused anyway still push the shared window
 // toward saturation.
-func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, maxTokens int) (*AdmissionLease, error) {
+func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, maxTokens int, queuedObserver ...func()) (*AdmissionLease, error) {
 	if s == nil {
 		return nil, nil
+	}
+	var onQueued func()
+	if len(queuedObserver) > 0 {
+		onQueued = queuedObserver[0]
 	}
 	s.admissionMu.RLock()
 	c := s.admissionCtl
@@ -372,11 +377,12 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	if c != nil {
 		var err error
 		timePhase(turn.turnCost, turncost.PhaseAdmission, func() {
-			lease, err = c.Acquire(ctx, SeqRequest{
+			req := SeqRequest{
 				TraceID:  turn.traceID,
 				Priority: turn.state.Priority,
 				Tokens:   estimateServedAdmissionTokensWithCap(messages, tools, maxTokens, preallocCeiling),
-			})
+			}
+			lease, err = acquireObserved(ctx, c, req, onQueued)
 		})
 		if err != nil {
 			return nil, err
@@ -414,6 +420,43 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		lease.tokenRes = res
 	}
 	return lease, nil
+}
+
+type admissionAcquireResult struct {
+	lease *AdmissionLease
+	err   error
+}
+
+func acquireObserved(ctx context.Context, c *AdmissionController, req SeqRequest, onQueued func()) (*AdmissionLease, error) {
+	if onQueued == nil {
+		return c.Acquire(ctx, req)
+	}
+	result := make(chan admissionAcquireResult, 1)
+	go func() {
+		lease, err := c.Acquire(ctx, req)
+		result <- admissionAcquireResult{lease: lease, err: err}
+	}()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	queued := false
+	for {
+		select {
+		case got := <-result:
+			return got.lease, got.err
+		case <-ticker.C:
+			if queued {
+				continue
+			}
+			receipt, ok := c.LastAdmissionDecision(req.TraceID)
+			if ok && receipt.Verdict == VerdictQueued.String() {
+				queued = true
+				onQueued()
+			}
+		case <-ctx.Done():
+			got := <-result
+			return got.lease, got.err
+		}
+	}
 }
 
 // servedPromptChars is the raw character volume of one served turn's prompt side —

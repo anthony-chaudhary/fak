@@ -75,6 +75,9 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 	if tc == nil || tc.NVCC == "" {
 		return nil, fmt.Errorf("nvcc not found — install CUDA Toolkit and set CUDA_PATH or CUDA_HOME")
 	}
+	if err := RequireCUDAImageAuditTool(tc); err != nil {
+		return nil, err
+	}
 
 	pkgDir := filepath.Join(repoRoot, "internal", "compute")
 	gencodeArgs, buildArchs, err := LoadCUDAArchMatrix(repoRoot, arch)

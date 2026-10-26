@@ -143,7 +143,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if len(measurementOpt) > 0 {
 		measurement = measurementOpt[0]
 	}
+	visionPrefill, _ := ctx.Value(visionPrefillKey{}).(*nativeVisionPrefill)
 	promptTok = len(ids)
+	if visionPrefill != nil {
+		promptTok = visionPrefill.sequenceTokens
+	}
 	if len(ids) == 0 {
 		return
 	}
@@ -160,7 +164,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// a prime can never sample, emit, run a tool or bill demand usage. The flag is a
 	// request-local purpose: it is read once here and never mutates the served path.
 	cachePopulate := p.cachePopulate
-	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
+	reuse := visionPrefill == nil && p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
 	// admit gates every prefix-cache ADMISSION (checkpoint, full prompt, continuation) while
 	// lookup keeps using reuse: a turn the host-memory arm admitted without room for its
 	// retained copies (#13267, inkernel_host_budget.go) still reuses a cached prefix but
@@ -578,7 +582,21 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				prefillAt = checkpoint
 			}
 		}
-		if !flightPrefilled && prefillAt < len(ids) {
+		if visionPrefill != nil {
+			if prefillAt != 0 || flightPrefilled {
+				err = fmt.Errorf("%w: multimodal prefill cannot restore token-only prefix state", model.ErrMultimodalDenied)
+				return
+			}
+			var verdict model.MultimodalVerdict
+			logits, verdict, err = s.PrefillMultimodal(*visionPrefill.request, visionPrefill.imageTokenID)
+			if err != nil {
+				return
+			}
+			if verdict.Decision != model.MultimodalAllow {
+				err = fmt.Errorf("%w: multimodal prefill verdict %q", model.ErrMultimodalDenied, verdict.Decision)
+				return
+			}
+		} else if !flightPrefilled && prefillAt < len(ids) {
 			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:], measurement)
 			if err != nil {
 				return
@@ -716,7 +734,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		structured:  nativeStructuredConstraintFromContext(ctx),
 		sampleKey:   targetSampleKey,
 		sampleKeyed: targetSampleKeyed,
-		sampleBase:  len(ids),
+		sampleBase:  promptTok,
 		firstDraw: func(token int) {
 			p.recordNativeFirstDraw(traceID, token, stops[token])
 		},
@@ -737,7 +755,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	var coalescedErr error
 	if coordinated, coordinateErr := coalescedDecode(ctx, ln); coordinated {
 		coalescedErr = coordinateErr
-	} else if p.batchDecode {
+	} else if p.batchDecode && visionPrefill == nil {
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
 		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged.
 		inKernelDecodeLanesBatched(ctx, []*decodeLane{ln}, p.m, p.quant)
@@ -766,7 +784,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// was actually FORWARDED (the prompt suffix the prefix cache could not serve, plus what was
 	// generated), because a token served from cache activated no expert and would make the ring's
 	// bytes-per-token read cheaper than it is. Inert on a session with no ring, which is the default.
-	p.noteMoEResidency(s, int64(len(ids)-matched+gen))
+	p.noteMoEResidency(s, int64(promptTok-matched+gen))
 	return
 }
 

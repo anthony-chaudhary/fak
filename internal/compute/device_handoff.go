@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"strings"
 )
 
 // device_handoff.go — the cross-device hidden-state handoff between two layer bands
@@ -15,8 +13,8 @@ import (
 //
 // Route selection is portable and host-tested here; the CUDA backend executes it
 // (cuda_device_handoff.go) with cudaMemcpyPeer for a peer route and a pinned host
-// staging buffer for the bounce route. FAK_CUDA_HANDOFF=bounce forces the bounce route
-// so an operator can A/B the two on hardware where peer access is reported.
+// staging buffer for the bounce route. Set the hop's ForceBounce field to compare
+// bounce against automatic routing on hardware where peer access is reported.
 
 // HandoffRoute is how a hidden state moves from the source band's device to the next.
 type HandoffRoute uint8
@@ -61,11 +59,6 @@ type DeviceHandoffReceipt struct {
 
 // PeerAccessProbe reports whether device src can copy straight into device dst.
 type PeerAccessProbe func(src, dst int) (bool, error)
-
-// HandoffForceBounceFromEnv reads FAK_CUDA_HANDOFF: "bounce" forces the host route.
-func HandoffForceBounceFromEnv() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("FAK_CUDA_HANDOFF")), "bounce")
-}
 
 // SelectHandoffRoute picks the route for one src->dst crossing: same-device when the
 // ordinals match, peer when the probe admits it (and bounce is not forced), else bounce.

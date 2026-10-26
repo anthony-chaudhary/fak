@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **668** (clarity 0 + coverage 668) |
+| **Disambiguation-debt (drive to 0)** | **671** (clarity 0 + coverage 671) |
 | **Crystal-clear concepts (and climbing)** | **1303** crystal of 3112 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3189 / 3857** (82.7% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3189 / 3860** (82.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 227 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **89** of 4369 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 88.8/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3112 concepts - score 88.8/100 (grade B) - disambiguation-debt 668
+concept-disambiguation chart - 3112 concepts - score 88.7/100 (grade B) - disambiguation-debt 671
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ####################........ 1303
@@ -62,9 +62,9 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             #######################..... 483/588
+  plan             #######################..... 483/590
   session-runtime  ######################...... 286/356
-  cache            #######################..... 342/410
+  cache            #######################..... 342/411
   gateway-engine   #######################..... 247/306
   guard-gate       ##########################.. 516/565
   attention        #####################....... 148/194
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.7%  (3189/3857 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.6%  (3189/3860 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 227
@@ -3409,9 +3409,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 483 | 588 | 105 |
+| plan | 483 | 590 | 107 |
 | session-runtime | 286 | 356 | 70 |
-| cache | 342 | 410 | 68 |
+| cache | 342 | 411 | 69 |
 | gateway-engine | 247 | 306 | 59 |
 | guard-gate | 516 | 565 | 49 |
 | attention | 148 | 194 | 46 |

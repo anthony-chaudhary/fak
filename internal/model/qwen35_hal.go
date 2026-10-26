@@ -1009,11 +1009,11 @@ func (s *Session) qwen35ResidentQKNorm(layer int, q, k compute.Tensor) (compute.
 		}
 	}
 	qNorm := s.Backend.RMSNorm(q, qWeight, cfg.qkNormEps())
-	if qNorm.Buf() == nil || !qNorm.Ready() {
+	if qNorm.Buf() == nil {
 		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "backend returned no resident query result"}
 	}
 	kNorm := s.Backend.RMSNorm(k, kWeight, cfg.qkNormEps())
-	if kNorm.Buf() == nil || !kNorm.Ready() {
+	if kNorm.Buf() == nil {
 		s.Backend.Free(qNorm)
 		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "backend returned no resident key result"}
 	}

@@ -18,13 +18,12 @@ import (
 // (cudaMemcpyPeer, or pinned host bounce), and reads it back from the destination. Until
 // bands run on-device it is the hardware witness for the boundary copy itself; the bytes
 // it moves are exactly the bytes a device-resident band will hand on.
+// The zero value selects the automatic route; ForceBounce explicitly selects the
+// host-bounce route between different devices.
 type CUDAHop struct {
 	ForceBounce  bool
 	StagingBytes int // pinned staging size; 0 selects DefaultHandoffStagingBytes
 }
-
-// NewCUDAHopFromEnv honors FAK_CUDA_HANDOFF=bounce.
-func NewCUDAHopFromEnv() CUDAHop { return CUDAHop{ForceBounce: HandoffForceBounceFromEnv()} }
 
 func cudaHandoffErr(stage string, rc C.int) error {
 	if rc == 0 {

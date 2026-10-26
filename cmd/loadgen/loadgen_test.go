@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -135,4 +138,226 @@ func TestParseInts(t *testing.T) {
 	if _, err := parseInts("abc"); err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+// fak-test:runtime fast est=1s
+func TestRun_ReportsObservedHTTPOverlapAndTokens(t *testing.T) {
+	const concurrency = 4
+	entered := make(chan struct{}, concurrency)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+
+	var serverInFlight atomic.Int64
+	var serverPeak atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		inFlight := serverInFlight.Add(1)
+		defer serverInFlight.Add(-1)
+		for {
+			peak := serverPeak.Load()
+			if inFlight <= peak || serverPeak.CompareAndSwap(peak, inFlight) {
+				break
+			}
+		}
+		entered <- struct{}{}
+		<-release
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"completion_tokens":7}}`)
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() { close(release) })
+
+	cfg := &Config{
+		URL: srv.URL, Model: "stub", Prompt: "hi", MaxTokens: 8,
+		Concurrencies: []int{concurrency}, RequestsPer: concurrency,
+	}
+	done := make(chan MatrixResult, 1)
+	go func() { done <- Run(context.Background(), cfg) }()
+
+	testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-entered:
+		case <-testCtx.Done():
+			t.Fatalf("waiting for request %d/%d to overlap: %v", i+1, concurrency, testCtx.Err())
+		}
+	}
+	releaseOnce.Do(func() { close(release) })
+
+	var got MatrixResult
+	select {
+	case got = <-done:
+	case <-testCtx.Done():
+		t.Fatalf("waiting for loadgen: %v", testCtx.Err())
+	}
+	if len(got.Points) != 1 {
+		t.Fatalf("points=%d want 1", len(got.Points))
+	}
+	point := got.Points[0]
+	if peak := int(serverPeak.Load()); peak != concurrency {
+		t.Fatalf("server peak in-flight=%d want %d", peak, concurrency)
+	}
+	if point.PeakInFlight != concurrency {
+		t.Fatalf("reported peak in-flight=%d want %d", point.PeakInFlight, concurrency)
+	}
+	if point.CompletionTokens != concurrency*7 || point.Errors != 0 {
+		t.Fatalf("tokens/errors=%d/%d want %d/0", point.CompletionTokens, point.Errors, concurrency*7)
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestValidateConfigRejectsInvalidConcurrencyBeforeNetwork(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want error
+	}{
+		{name: "zero", cfg: Config{Concurrencies: []int{0}, RequestsPer: 1}, want: errNonPositiveConcurrency},
+		{name: "negative", cfg: Config{Concurrencies: []int{-1}, RequestsPer: 1}, want: errNonPositiveConcurrency},
+		{name: "requests below maximum", cfg: Config{Concurrencies: []int{1, 4, 2}, RequestsPer: 3}, want: errRequestsBelowConcurrency},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var networkCalls atomic.Int64
+			tt.cfg.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				networkCalls.Add(1)
+				return nil, errors.New("unexpected network call")
+			})}
+			if err := validateConfig(&tt.cfg); !errors.Is(err, tt.want) {
+				t.Fatalf("validateConfig error=%v want category %v", err, tt.want)
+			}
+			if calls := networkCalls.Load(); calls != 0 {
+				t.Fatalf("network calls=%d want 0", calls)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestParseIntsPreservesOrderedDuplicates(t *testing.T) {
+	got, err := parseInts("1,2,4,2,1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int{1, 2, 4, 2, 1}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}
+
+// fak-test:runtime fast est=2s
+func TestRun_CanceledContextDoesNotEmitLaterPoints(t *testing.T) {
+	requestEntered := make(chan struct{}, 1)
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		requestEntered <- struct{}{}
+		<-releaseRequest
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"completion_tokens":1}}`)
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() { close(releaseRequest) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := &Config{
+		URL: srv.URL, Model: "stub", Prompt: "hi",
+		Concurrencies: []int{1, 2, 4}, RequestsPer: 4,
+	}
+	done := make(chan MatrixResult, 1)
+	go func() { done <- Run(ctx, cfg) }()
+
+	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer testCancel()
+	select {
+	case <-requestEntered:
+		cancel()
+		releaseOnce.Do(func() { close(releaseRequest) })
+	case <-testCtx.Done():
+		t.Fatalf("waiting for first request: %v", testCtx.Err())
+	}
+
+	var got MatrixResult
+	select {
+	case got = <-done:
+	case <-testCtx.Done():
+		t.Fatalf("waiting for canceled run: %v", testCtx.Err())
+	}
+	if len(got.Points) > 1 {
+		t.Fatalf("canceled run emitted %d points, want at most current point", len(got.Points))
+	}
+	if !got.Canceled {
+		t.Fatal("canceled run did not report canceled=true")
+	}
+	if gotHits := hits.Load(); gotHits != 1 {
+		t.Fatalf("requests after cancellation=%d want only the in-flight request", gotHits)
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestRun_BodyReadErrorCannotCountTokens(t *testing.T) {
+	var closed atomic.Bool
+	body := &validJSONThenErrorBody{
+		data:   []byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"completion_tokens":37}}`),
+		closed: &closed,
+	}
+	cfg := &Config{
+		URL: "http://loadgen.test/v1/chat/completions", Model: "stub", Prompt: "hi",
+		Concurrencies: []int{1}, RequestsPer: 1,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       body,
+			}, nil
+		})},
+	}
+
+	got := Run(context.Background(), cfg)
+	if len(got.Points) != 1 {
+		t.Fatalf("points=%d want 1", len(got.Points))
+	}
+	point := got.Points[0]
+	if point.Errors != 1 || point.CompletionTokens != 0 {
+		t.Fatalf("errors/tokens=%d/%d want 1/0", point.Errors, point.CompletionTokens)
+	}
+	if point.PeakInFlight != 1 {
+		t.Fatalf("peak in-flight=%d want 1", point.PeakInFlight)
+	}
+	if !closed.Load() {
+		t.Fatal("response body was not closed")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type validJSONThenErrorBody struct {
+	data   []byte
+	offset int
+	closed *atomic.Bool
+}
+
+func (b *validJSONThenErrorBody) Read(p []byte) (int, error) {
+	if b.offset < len(b.data) {
+		n := copy(p, b.data[b.offset:])
+		b.offset += n
+		return n, nil
+	}
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (b *validJSONThenErrorBody) Close() error {
+	b.closed.Store(true)
+	return nil
 }

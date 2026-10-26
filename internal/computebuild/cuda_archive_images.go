@@ -120,10 +120,38 @@ func cudaImageAuditTool(tc *Toolchain) (string, error) {
 		directory = filepath.Join(tc.CUDAHome, "bin")
 	}
 	tool := filepath.Join(directory, name)
-	if directory == "" || !FileExists(tool) {
-		return "", fmt.Errorf("%w: expected beside selected nvcc or in CUDAHome/bin", ErrCUDAImageAuditToolMissing)
+	if directory == "" {
+		return "", fmt.Errorf("%w: no nvcc or CUDAHome selected", ErrCUDAImageAuditToolMissing)
+	}
+	if !FileExists(tool) {
+		return "", fmt.Errorf("%w: expected %s beside the selected nvcc", ErrCUDAImageAuditToolMissing, tool)
 	}
 	return tool, nil
+}
+
+// CUDAPreflightCuobjdumpMissing is the closed refusal token for a selected
+// CUDA toolkit that cannot audit the archive it would build.
+const CUDAPreflightCuobjdumpMissing = "CUDA_PREFLIGHT_CUOBJDUMP_MISSING"
+
+// CUDAPreflightRefusal is a CUDA build refused before any kernel compiles.
+// Token is closed (CUDAPreflightCuobjdumpMissing); Err keeps the sentinel.
+type CUDAPreflightRefusal struct {
+	Token string
+	Err   error
+}
+
+func (r *CUDAPreflightRefusal) Error() string { return r.Token + ": " + r.Err.Error() }
+
+func (r *CUDAPreflightRefusal) Unwrap() error { return r.Err }
+
+// RequireCUDAImageAuditTool refuses before compiling when cuobjdump is missing beside
+// the selected nvcc. Without it, the archive image audit fails only after
+// every kernel has compiled.
+func RequireCUDAImageAuditTool(tc *Toolchain) error {
+	if _, err := cudaImageAuditTool(tc); err != nil {
+		return &CUDAPreflightRefusal{Token: CUDAPreflightCuobjdumpMissing, Err: err}
+	}
+	return nil
 }
 
 type cudaImageOutput struct {

@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -53,9 +54,39 @@ type reqResult struct {
 	err              error
 }
 
+// clientInFlight tracks client-side HTTP operations. It does not claim that
+// the server admitted the same number of requests into GPU execution.
+type clientInFlight struct {
+	mu      sync.Mutex
+	current int
+	peak    int
+}
+
+func (f *clientInFlight) begin() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.current++
+	if f.current > f.peak {
+		f.peak = f.current
+	}
+}
+
+func (f *clientInFlight) end() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.current--
+}
+
+func (f *clientInFlight) peakValue() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.peak
+}
+
 // PointResult aggregates one concurrency level.
 type PointResult struct {
 	Concurrency      int     `json:"concurrency"`
+	PeakInFlight     int     `json:"peak_in_flight"` // observed concurrent client HTTP operations, not GPU batch execution
 	Requests         int     `json:"requests"`
 	Errors           int     `json:"errors"`
 	ErrorRate        float64 `json:"error_rate"`
@@ -73,6 +104,7 @@ type MatrixResult struct {
 	Model        string        `json:"model"`
 	Stack        string        `json:"stack,omitempty"`
 	StartedAtUTC string        `json:"started_at_utc"`
+	Canceled     bool          `json:"canceled,omitempty"`
 	Points       []PointResult `json:"points"`
 }
 
@@ -90,6 +122,29 @@ type Config struct {
 	Now           func() time.Time
 }
 
+var (
+	errNonPositiveConcurrency   = errors.New("loadgen: concurrency must be positive")
+	errRequestsBelowConcurrency = errors.New("loadgen: requests-per must be at least maximum concurrency")
+)
+
+// validateConfig rejects sweep shapes that cannot actually put every requested
+// client operation in flight. It deliberately preserves point order and duplicates.
+func validateConfig(cfg *Config) error {
+	maxConcurrency := 0
+	for _, concurrency := range cfg.Concurrencies {
+		if concurrency <= 0 {
+			return fmt.Errorf("%w: got %d", errNonPositiveConcurrency, concurrency)
+		}
+		if concurrency > maxConcurrency {
+			maxConcurrency = concurrency
+		}
+	}
+	if cfg.RequestsPer < maxConcurrency {
+		return fmt.Errorf("%w: requests-per=%d maximum-concurrency=%d", errRequestsBelowConcurrency, cfg.RequestsPer, maxConcurrency)
+	}
+	return nil
+}
+
 func (c *Config) client() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
@@ -105,7 +160,7 @@ func (c *Config) now() time.Time {
 }
 
 // oneRequest issues a single chat completion and measures wall-clock + tokens.
-func oneRequest(ctx context.Context, cfg *Config) reqResult {
+func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight) reqResult {
 	body, _ := json.Marshal(chatRequest{
 		Model:       cfg.Model,
 		Messages:    []chatMessage{{Role: "user", Content: cfg.Prompt}},
@@ -122,13 +177,21 @@ func oneRequest(ctx context.Context, cfg *Config) reqResult {
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 	start := cfg.now()
+	inFlight.begin()
 	resp, err := cfg.client().Do(req)
 	if err != nil {
+		inFlight.end()
 		return reqResult{err: err, latency: cfg.now().Sub(start)}
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
+	defer func() {
+		_ = resp.Body.Close()
+		inFlight.end()
+	}()
+	data, readErr := io.ReadAll(resp.Body)
 	lat := cfg.now().Sub(start)
+	if readErr != nil {
+		return reqResult{err: fmt.Errorf("read response body: %w", readErr), latency: lat}
+	}
 	if resp.StatusCode >= 300 {
 		return reqResult{err: fmt.Errorf("status %d: %.120s", resp.StatusCode, string(data)), latency: lat}
 	}
@@ -143,6 +206,7 @@ func oneRequest(ctx context.Context, cfg *Config) reqResult {
 func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) PointResult {
 	results := make([]reqResult, requests)
 	jobs := make(chan int)
+	inFlight := &clientInFlight{}
 	var wg sync.WaitGroup
 	wallStart := cfg.now()
 	for w := 0; w < concurrency; w++ {
@@ -150,7 +214,7 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				results[i] = oneRequest(ctx, cfg)
+				results[i] = oneRequest(ctx, cfg, inFlight)
 			}
 		}()
 	}
@@ -160,7 +224,9 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 	close(jobs)
 	wg.Wait()
 	wall := cfg.now().Sub(wallStart)
-	return aggregate(concurrency, requests, wall, results)
+	result := aggregate(concurrency, requests, wall, results)
+	result.PeakInFlight = inFlight.peakValue()
+	return result
 }
 
 // aggregate folds raw per-request results into a PointResult.
@@ -219,10 +285,15 @@ func Run(ctx context.Context, cfg *Config) MatrixResult {
 		StartedAtUTC: cfg.now().UTC().Format(time.RFC3339),
 	}
 	for _, c := range cfg.Concurrencies {
-		if c < 1 {
-			c = 1
+		if ctx.Err() != nil {
+			mr.Canceled = true
+			break
 		}
 		mr.Points = append(mr.Points, runPoint(ctx, cfg, c, cfg.RequestsPer))
+		if ctx.Err() != nil {
+			mr.Canceled = true
+			break
+		}
 	}
 	return mr
 }
