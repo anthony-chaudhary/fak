@@ -38,6 +38,25 @@ type RemoteMaintenancePolicyFacts struct {
 // file/drop-in namespace is withheld from the local /etc scalar-path meaning;
 // every other exact path or typed prefix is projected unchanged.
 func ProjectRemoteMaintenancePolicyFacts(grant remotemaint.Grant) ([]RemoteMaintenancePolicyFacts, error) {
+	if grant.Reservation != nil && (grant.Operation == remotemaint.OperationMaintainLeaseAcquire || grant.Operation == remotemaint.OperationMaintainLeaseRelease) {
+		count := len(grant.Paths) + len(grant.Reservation.NodeIDs)
+		if count == 0 || count > MaxRemoteMaintenancePolicyResources {
+			return nil, fmt.Errorf("reservation policy resource count outside bounds")
+		}
+		base := RemoteMaintenancePolicyFacts{ProfileID: grant.ProfileID, OperationDigest: grant.OperationDigest, Operation: grant.Operation, Paths: grant.Paths}
+		out := make([]RemoteMaintenancePolicyFacts, 0, count)
+		for _, node := range grant.Reservation.NodeIDs {
+			facts := base
+			facts.ResourceIndex, facts.ResourceKind, facts.Host = len(out), "reservation_node", node
+			out = append(out, facts)
+		}
+		for _, candidate := range grant.Paths {
+			facts := base
+			facts.ResourceIndex, facts.ResourceKind, facts.Path = len(out), "local_exact_path", candidate
+			out = append(out, facts)
+		}
+		return out, nil
+	}
 	count := len(grant.Paths) + len(grant.PathPrefixes)
 	if count == 0 || count > MaxRemoteMaintenancePolicyResources {
 		return nil, fmt.Errorf("remote maintenance policy resource count %d outside 1..%d", count, MaxRemoteMaintenancePolicyResources)

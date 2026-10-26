@@ -129,6 +129,9 @@ func (s *Server) adjudicateRemoteMaintenance(ctx context.Context, call *abi.Tool
 			return renderVerdict(verdict, nil), nil
 		}
 	}
+	if leaseVerdict, refused := maintenanceWorkspaceAdmission(ctx, prepared.Grant()); refused {
+		return leaseVerdict, nil
+	}
 	return renderVerdict(initial, nil), nil
 }
 
@@ -157,6 +160,9 @@ func (s *Server) syscallRemoteMaintenance(ctx context.Context, call *abi.ToolCal
 		if verdict.Kind != abi.VerdictAllow {
 			return renderVerdict(verdict, nil), nil, nil
 		}
+	}
+	if leaseVerdict, refused := maintenanceWorkspaceAdmission(ctx, prepared.Grant()); refused {
+		return leaseVerdict, nil, nil
 	}
 	scopeCall := scopeCalls[len(scopeCalls)-1]
 	knownGrant := prepared.Grant()
@@ -192,7 +198,16 @@ func (s *Server) syscallRemoteMaintenance(ctx context.Context, call *abi.ToolCal
 		result.Meta["remote_maintenance_backup"] = string(receipt.BackupDisposition)
 	}
 	admissionCtx := remotemaintresult.Bind(ctx, scopeCall, knownGrant, body)
+	// Payload.Inline aliases body: hash before admission so an in-place result
+	// mutation cannot also alter the trusted comparison baseline.
+	validatedReceiptHash := sha256.Sum256(body)
 	admitted := s.k.AdmitResult(admissionCtx, scopeCall, result)
+	boundResultChanged := (knownGrant.Reservation != nil || knownGrant.Operation == remotemaint.OperationSystemdProfileReadback) &&
+		(admitted.Kind == abi.VerdictAllow || admitted.Kind == abi.VerdictDefer) &&
+		validatedReceiptHash != sha256.Sum256(resolveBytes(ctx, result.Payload))
+	if boundResultChanged {
+		executionError = true
+	}
 	s.rememberOriginSeq(call.TraceID, call.Tool, string(resolveBytes(ctx, call.Args)), call.SeqNo)
 	if result.Meta == nil {
 		result.Meta = make(map[string]string)
@@ -204,10 +219,11 @@ func (s *Server) syscallRemoteMaintenance(ctx context.Context, call *abi.ToolCal
 	if admitted.Reason != abi.ReasonNone {
 		result.Meta["remote_maintenance_result_admission_reason"] = abi.ReasonName(admitted.Reason)
 	}
-	if admitted.Kind == abi.VerdictDeny {
+	if admitted.Kind == abi.VerdictDeny || boundResultChanged {
 		// Execution was already attempted. Keep the original authorization and
-		// replace the denied result only with identity known from Prepared before
-		// the effect boundary; the rejected body is never re-exposed.
+		// replace a denied or altered typed observation result with identity known
+		// from Prepared before the effect boundary. Neither the rejected body nor
+		// the original effect receipt is restored around result admission.
 		receipt = safeUnknownReceipt
 		body, marshalErr := json.Marshal(receipt)
 		if marshalErr != nil {
