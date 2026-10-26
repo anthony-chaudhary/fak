@@ -127,7 +127,7 @@ func (c *concurrencyProfiler) forwardExit(ph *ConcurrencyPhase) {
 // naming rule is deterministic from the timeline:
 //
 //	max_concurrent_forward > 1                   -> single-queue-no-batch
-//	max_concurrent_forward == 1 AND admitted > 1 -> device-mutex
+//	max_concurrent_forward == 1 AND admitted > 1 AND all serialized -> device-mutex
 //	otherwise                                     -> unknown
 func (c *concurrencyProfiler) build(forwardPath string) *ConcurrencyProfile {
 	if c == nil {
@@ -144,8 +144,10 @@ func (c *concurrencyProfiler) build(forwardPath string) *ConcurrencyProfile {
 		ForwardPath:   forwardPath,
 		Phases:        make([]ConcurrencyPhase, 0, len(c.phases)),
 	}
+	allSerialized := len(c.phases) > 0
 	for _, ph := range c.phases {
 		prof.Phases = append(prof.Phases, *ph)
+		allSerialized = allSerialized && ph.Serialized
 	}
 	switch {
 	case len(c.phases) == 0:
@@ -154,9 +156,9 @@ func (c *concurrencyProfiler) build(forwardPath string) *ConcurrencyProfile {
 	case c.maxOpen > 1:
 		prof.Mechanism = MechanismSingleQueueNoBatch
 		prof.Witness = "requests entered the forward concurrently (max_concurrent_forward > 1) and no mutex serialized them; the accelerator never fused them into a shared batch"
-	case c.maxOpen == 1 && len(c.phases) > 1:
+	case c.maxOpen == 1 && len(c.phases) > 1 && allSerialized:
 		prof.Mechanism = MechanismDeviceMutex
-		prof.Witness = "admitted concurrently but max_concurrent_forward == 1: a single forward-pass mutex (devMu) serialized the whole Prefill+decode for each request"
+		prof.Witness = "every forward recorded device serialization and max_concurrent_forward == 1: devMu guarded the whole Prefill+decode for each request"
 	default:
 		prof.Mechanism = MechanismUnknown
 		prof.Witness = "single request or no overlap observed; mechanism not determinable"
