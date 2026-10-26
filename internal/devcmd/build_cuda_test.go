@@ -2,10 +2,54 @@ package devcmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/computebuild"
 )
+
+// fak-test:runtime fast est=10ms
+func TestCUDABuildBinarySmoke(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		flags     []string
+		wantSmoke bool
+	}{
+		{name: "default", wantSmoke: true},
+		{name: "explicit-on", flags: []string{"--smoke=true"}, wantSmoke: true},
+		{name: "explicit-off", flags: []string{"--smoke=false"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module cuda-smoke-test\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{"binary", "--repo-root", root}, tc.flags...)
+			var stdout, stderr bytes.Buffer
+			called := false
+			code := runBuildCUDA(&stdout, &stderr, args, func(ctx context.Context, cfg *computebuild.CUDAConfig) error {
+				called = true
+				cfg.Toolchain = &computebuild.Toolchain{}
+				// Missing binary arguments stop the real orchestrator after defaults, before any tool execution.
+				err := computebuild.RunCUDA(ctx, cfg)
+				if err == nil || cfg.Receipt == nil {
+					t.Fatal("expected orchestrator binary validation failure with receipt")
+				}
+				if cfg.Smoke != tc.wantSmoke {
+					t.Errorf("orchestrator Smoke = %v, want %v", cfg.Smoke, tc.wantSmoke)
+				}
+				return err
+			})
+			if !called || code != 1 {
+				t.Fatalf("runner called = %v, exit code = %d; want true, 1", called, code)
+			}
+		})
+	}
+}
 
 func TestCUDABuildHelpAndInvalid(t *testing.T) {
 	var stdout, stderr bytes.Buffer

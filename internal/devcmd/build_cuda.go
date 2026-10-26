@@ -27,6 +27,10 @@ type CUDABuildResult struct {
 
 // RunBuildCUDA parses CLI arguments and runs CUDA build/test/check tasks via computebuild.RunCUDA.
 func RunBuildCUDA(stdout, stderr io.Writer, argv []string) int {
+	return runBuildCUDA(stdout, stderr, argv, computebuild.RunCUDA)
+}
+
+func runBuildCUDA(stdout, stderr io.Writer, argv []string, run func(context.Context, *computebuild.CUDAConfig) error) int {
 	var sub string
 	var flagArgs []string
 	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
@@ -122,6 +126,7 @@ func RunBuildCUDA(stdout, stderr io.Writer, argv []string) int {
 		OutBin:             *outBin,
 		ReceiptPath:        *receiptFlag,
 		Smoke:              *smokeFlag,
+		SkipSmoke:          !*smokeFlag,
 		BenchModelDir:      *benchModel,
 		BenchDecodeSteps:   *benchSteps,
 		SkipSign:           *skipSign,
@@ -179,7 +184,7 @@ func RunBuildCUDA(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	start := time.Now()
-	err := computebuild.RunCUDA(context.Background(), cfg)
+	err := run(context.Background(), cfg)
 	dur := time.Since(start).Milliseconds()
 
 	if *jsonOut {
