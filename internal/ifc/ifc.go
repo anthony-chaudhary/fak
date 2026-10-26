@@ -54,6 +54,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
+	"github.com/anthony-chaudhary/fak/internal/remotemaintresult"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -1051,6 +1052,11 @@ func (g *StampGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) a
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-stamp(off)"}
 	}
 	t := SourceTaint(c, r)
+	if t == abi.TaintTainted && remotemaintresult.TrustedControlReceipt(ctx, c, refutil.Bytes(ctx, r.Payload)) {
+		// Only unchanged, source-bound control receipts qualify after detectors.
+		// Quarantine wins above; RaiseWithRecord still preserves prior trace taint.
+		t = abi.TaintTrusted
+	}
 	r.Payload.Taint = t
 	if g.policy.DenyResultsOverTaintCeiling && taintRank(t) > taintRank(abi.TaintTrusted) {
 		if r.Meta == nil {

@@ -79,6 +79,12 @@ func (s *Server) adjudicateLeaseAdmission(ctx context.Context, tool, rawArgs str
 		}
 		leases = append(leases, adjudicateClassifiedLease(lease))
 	}
+	return adjudicateWorkspaceLeaseOverlap(root, targets, leases)
+}
+
+// adjudicateWorkspaceLeaseOverlap is shared with finite native maintenance;
+// neither reader grants an exemption from unauthenticated holder/session text.
+func adjudicateWorkspaceLeaseOverlap(root string, targets []string, leases []adjudicateClassifiedLease) (WireVerdict, bool) {
 	for _, lease := range leases {
 		if len(lease.TreeGlobs) == 0 {
 			return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureInvalidLeaseView, "lease authority returned an invalid view"), true

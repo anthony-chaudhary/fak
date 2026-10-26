@@ -11,6 +11,9 @@ import (
 
 const (
 	OperationSystemdProfileInstallReload = "systemd-profile-install-reload"
+	OperationSystemdProfileReadback      = "systemd-profile-readback"
+	OperationMaintainLeaseAcquire        = "maintain-lease-acquire"
+	OperationMaintainLeaseRelease        = "maintain-lease-release"
 	ReceiptSchema                        = "fak.remote-maintenance.receipt.v1"
 	ConfigSchema                         = "fak.remote-maintenance.config.v1"
 	RequestEnvelopeSchema                = "fak.remote-maintenance.request.v1"
@@ -62,39 +65,71 @@ type PathPrefix struct {
 	FilenamePrefix string `json:"filename_prefix"`
 }
 
+// TrustedReservation is a finite host-selected local maintenance lease scope.
+// It is never populated from tool arguments. Grant.Paths includes the actual
+// store, lock and journal paths and the narrow state directory conservatively
+// covering random atomic-write temporaries. It carries no SSH authority.
+type TrustedReservation struct {
+	WorkspaceRoot      string   `json:"workspace_root"`
+	NodeIDs            []string `json:"node_ids"`
+	Kind               string   `json:"kind"`
+	TTLSeconds         int64    `json:"ttl_seconds"`
+	CatalogGeneration  string   `json:"catalog_generation"`
+	ExpectedStoreEpoch uint64   `json:"expected_store_epoch"`
+}
+
+// SystemdProfileReadback carries fresh passive observations of the fixed
+// profile. The complete graph remains ordinary result content for all floors.
+type SystemdProfileReadback struct {
+	Hostname  string             `json:"hostname"`
+	Files     []SystemdFileState `json:"files"`
+	UnitGraph string             `json:"unit_graph"`
+}
+
+type SystemdFileState struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Mode   string `json:"mode"`
+	UID    uint32 `json:"uid"`
+	GID    uint32 `json:"gid"`
+}
+
 type Grant struct {
-	ProfileID        string       `json:"profile_id"`
-	OperationDigest  string       `json:"operation_digest"`
-	ContextID        string       `json:"context_id"`
-	Target           string       `json:"target"`
-	HostKey          string       `json:"host_key"`
-	Operation        string       `json:"operation"`
-	PayloadSHA256    string       `json:"payload_sha256"`
-	Holder           string       `json:"holder"`
-	BootID           string       `json:"boot_id"`
-	PriorStateSHA256 string       `json:"prior_state_sha256"`
-	Paths            []string     `json:"paths"`
-	PathPrefixes     []PathPrefix `json:"path_prefixes"`
-	Units            []string     `json:"units"`
-	LeasePins        []LeasePin   `json:"lease_pins"`
-	ExpiresAt        time.Time    `json:"expires_at"`
+	ProfileID        string              `json:"profile_id"`
+	OperationDigest  string              `json:"operation_digest"`
+	ContextID        string              `json:"context_id"`
+	Target           string              `json:"target"`
+	HostKey          string              `json:"host_key"`
+	Operation        string              `json:"operation"`
+	PayloadSHA256    string              `json:"payload_sha256"`
+	Holder           string              `json:"holder"`
+	BootID           string              `json:"boot_id"`
+	PriorStateSHA256 string              `json:"prior_state_sha256"`
+	Paths            []string            `json:"paths"`
+	PathPrefixes     []PathPrefix        `json:"path_prefixes"`
+	Units            []string            `json:"units"`
+	LeasePins        []LeasePin          `json:"lease_pins"`
+	ExpiresAt        time.Time           `json:"expires_at"`
+	Reservation      *TrustedReservation `json:"reservation,omitempty"`
 }
 
 type Receipt struct {
-	Schema            string            `json:"schema"`
-	GrantDigest       string            `json:"grant_digest"`
-	ProfileID         string            `json:"profile_id"`
-	OperationDigest   string            `json:"operation_digest"`
-	ContextID         string            `json:"context_id"`
-	Target            string            `json:"target"`
-	HostKey           string            `json:"host_key"`
-	Operation         string            `json:"operation"`
-	BootID            string            `json:"boot_id"`
-	StartedAt         time.Time         `json:"started_at"`
-	EndedAt           time.Time         `json:"ended_at"`
-	Outcome           string            `json:"outcome"`
-	Verified          bool              `json:"verified"`
-	BackupDisposition BackupDisposition `json:"backup_disposition,omitempty"`
+	Schema            string                  `json:"schema"`
+	GrantDigest       string                  `json:"grant_digest"`
+	ProfileID         string                  `json:"profile_id"`
+	OperationDigest   string                  `json:"operation_digest"`
+	ContextID         string                  `json:"context_id"`
+	Target            string                  `json:"target"`
+	HostKey           string                  `json:"host_key"`
+	Operation         string                  `json:"operation"`
+	BootID            string                  `json:"boot_id"`
+	StartedAt         time.Time               `json:"started_at"`
+	EndedAt           time.Time               `json:"ended_at"`
+	Outcome           string                  `json:"outcome"`
+	Verified          bool                    `json:"verified"`
+	BackupDisposition BackupDisposition       `json:"backup_disposition,omitempty"`
+	ReservationLeases []LeasePin              `json:"reservation_leases,omitempty"`
+	Readback          *SystemdProfileReadback `json:"readback,omitempty"`
 }
 
 type Authority interface {

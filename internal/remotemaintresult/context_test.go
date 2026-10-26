@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/remotemaintresult"
 	"github.com/anthony-chaudhary/fak/pkg/remotemaint"
 )
@@ -49,12 +52,18 @@ func TestSourceBoundPIIProbe(t *testing.T) {
 		if probe, ok := remotemaintresult.PIIProbe(ctx, c, raw); ok || probe != nil {
 			t.Fatalf("unexpected probe: %s", probe)
 		}
+		if remotemaintresult.TrustedControlReceipt(ctx, c, raw) {
+			t.Fatal("unbound control receipt gained trust")
+		}
 	}
 	t.Run("only-target-changes", func(t *testing.T) {
 		original := bytes.Clone(body)
 		probe, ok := remotemaintresult.PIIProbe(ctx, call, body)
 		if !ok {
 			t.Fatal("source-bound receipt refused")
+		}
+		if !remotemaintresult.TrustedControlReceipt(ctx, call, body) {
+			t.Fatal("exact install control receipt was not recognized")
 		}
 		var got remotemaint.Receipt
 		if err := json.Unmarshal(probe, &got); err != nil {
@@ -64,7 +73,7 @@ func TestSourceBoundPIIProbe(t *testing.T) {
 			t.Fatal("probe retains email-shaped target")
 		}
 		got.Target = receipt.Target
-		if got != receipt || !bytes.Equal(body, original) {
+		if !reflect.DeepEqual(got, receipt) || !bytes.Equal(body, original) {
 			t.Fatal("probe changed another field or original payload")
 		}
 		probe[0] = '!'
@@ -156,6 +165,83 @@ func TestSourceBoundPIIProbe(t *testing.T) {
 		probe, ok := remotemaintresult.PIIProbe(remotemaintresult.Bind(context.Background(), call, g, raw), call, raw)
 		if !ok || !bytes.Contains(probe, []byte(g.BootID)) {
 			t.Fatal("probe concealed unrelated email")
+		}
+	})
+	t.Run("native-control-union", func(t *testing.T) {
+		root := t.TempDir()
+		for _, operation := range []string{remotemaint.OperationMaintainLeaseAcquire, remotemaint.OperationMaintainLeaseRelease} {
+			g, r := grant, receipt
+			g.Operation, g.Target, g.HostKey, g.BootID, g.PayloadSHA256, g.PriorStateSHA256 = operation, "", "", "", "", ""
+			g.Paths, g.PathPrefixes, g.Units = []string{filepath.Join(root, ".fak", "nvlease")}, nil, nil
+			g.Reservation = &remotemaint.TrustedReservation{WorkspaceRoot: root, NodeIDs: []string{"node-1"}, Kind: "maintain", TTLSeconds: 120, CatalogGeneration: "catalog", ExpectedStoreEpoch: 1}
+			r.ReservationLeases = []remotemaint.LeasePin{{NodeID: "node-1", ID: "native-lease", Epoch: 2, ExpiresAt: now.Add(time.Minute)}}
+			if operation == remotemaint.OperationMaintainLeaseAcquire {
+				g.LeasePins = nil
+			} else {
+				g.Reservation.TTLSeconds = 0
+				g.Reservation.ExpectedStoreEpoch = 2
+				g.LeasePins = append([]remotemaint.LeasePin(nil), r.ReservationLeases...)
+			}
+			r.Operation, r.Target, r.HostKey, r.BootID, r.GrantDigest = operation, "", "", "", remotemaint.GrantDigest(g)
+			raw := marshal(t, r)
+			bound := remotemaintresult.Bind(context.Background(), call, g, raw)
+			if !remotemaintresult.TrustedControlReceipt(bound, call, raw) {
+				t.Fatalf("closed native receipt not recognized: %s", operation)
+			}
+			if probe, ok := remotemaintresult.PIIProbe(bound, call, raw); ok || probe != nil {
+				t.Fatal("native control binding granted SSH PII exception")
+			}
+		}
+	})
+	t.Run("observations-and-unknown-stay-tainted", func(t *testing.T) {
+		for _, change := range []func(*remotemaint.Receipt){
+			func(r *remotemaint.Receipt) { r.Verified = false },
+			func(r *remotemaint.Receipt) { r.Outcome = remotemaint.OutcomeUnknownEffect },
+			func(r *remotemaint.Receipt) {
+				r.Readback = &remotemaint.SystemdProfileReadback{UnitGraph: "remote observations"}
+			},
+		} {
+			r := receipt
+			change(&r)
+			raw := marshal(t, r)
+			bound := remotemaintresult.Bind(context.Background(), call, grant, raw)
+			if remotemaintresult.TrustedControlReceipt(bound, call, raw) {
+				t.Fatal("non-control evidence gained trust")
+			}
+		}
+		g, r := grant, receipt
+		g.Operation, r.Operation = remotemaint.OperationSystemdProfileReadback, remotemaint.OperationSystemdProfileReadback
+		r.GrantDigest, r.Outcome = remotemaint.GrantDigest(g), remotemaint.OutcomeUnchanged
+		raw := marshal(t, r)
+		if remotemaintresult.TrustedControlReceipt(remotemaintresult.Bind(context.Background(), call, g, raw), call, raw) {
+			t.Fatal("readback operation gained control trust without a graph")
+		}
+	})
+	t.Run("stamp-preserves-quarantine-and-trace-high-water", func(t *testing.T) {
+		ledger := ifc.NewLedger()
+		stamp := ifc.NewStampGate(ledger, ifc.Policy{})
+		result := func(taint abi.TaintLabel, raw []byte) *abi.Result {
+			return &abi.Result{Payload: abi.Ref{Kind: abi.RefInline, Inline: raw, Taint: taint}}
+		}
+		r := result(abi.TaintTainted, body)
+		stamp.Admit(ctx, call, r)
+		if r.Payload.Taint != abi.TaintTrusted || ledger.Level(call.TraceID) != abi.TaintTrusted {
+			t.Fatal("source-bound control receipt tainted a clean trace")
+		}
+		ledger.Raise(call.TraceID, abi.TaintTainted)
+		stamp.Admit(ctx, call, result(abi.TaintTainted, body))
+		if ledger.Level(call.TraceID) != abi.TaintTainted {
+			t.Fatal("control receipt lowered preexisting trace taint")
+		}
+		r = result(abi.TaintQuarantined, body)
+		stamp.Admit(ctx, call, r)
+		if r.Payload.Taint != abi.TaintQuarantined || ledger.Level(call.TraceID) != abi.TaintQuarantined {
+			t.Fatal("control binding bypassed quarantine")
+		}
+		r = result(abi.TaintTainted, append(bytes.Clone(body), '\n'))
+		stamp.Admit(ctx, call, r)
+		if r.Payload.Taint != abi.TaintTainted {
+			t.Fatal("changed result bytes retained control trust")
 		}
 	})
 }

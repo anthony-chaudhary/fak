@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "read-context-budget-14034",
+      "canonical": "readCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "readCtx is the Go cancellation and deadline context used to bound one observational read, such as a staged diff, session presence, or canonical maintenance lease view.",
+      "distinction": "This is a wall-clock read budget; requestCtx scopes an entire inference request and does not identify one bounded read, while readCtx governs neither model-visible context bytes nor maintenance authorization.",
+      "distinct_from": [
+        "agentbench-request-context"
+      ],
+      "aliases": [],
+      "grounding": "readCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

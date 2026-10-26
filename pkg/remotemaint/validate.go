@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -57,13 +58,21 @@ func validateRequest(req Request) error {
 }
 
 func validateGrant(g Grant, now time.Time) error {
+	if g.Operation == OperationMaintainLeaseAcquire || g.Operation == OperationMaintainLeaseRelease {
+		return validateReservationGrant(g, now)
+	}
+	if g.Reservation != nil {
+		return fmt.Errorf("%w: unexpected reservation scope", ErrScope)
+	}
 	if !validName(g.ProfileID, 128) || !isDigest(g.OperationDigest) || !isDigest(g.ContextID) ||
-		!validName(g.Target, 512) || !validHostKey(g.HostKey) || g.Operation != OperationSystemdProfileInstallReload ||
+		!validName(g.Target, 512) || !validHostKey(g.HostKey) || (g.Operation != OperationSystemdProfileInstallReload && g.Operation != OperationSystemdProfileReadback) ||
 		!isDigest(g.PayloadSHA256) || !validName(g.Holder, 256) || !validName(g.BootID, 256) ||
 		!isDigest(g.PriorStateSHA256) {
 		return fmt.Errorf("%w: invalid grant identity", ErrScope)
 	}
-	if !canonicalStrings(g.Paths) || !canonicalPathPrefixes(g.PathPrefixes) || !canonicalStrings(g.Units) || g.PathPrefixes == nil ||
+	if !canonicalStrings(g.Paths) || !canonicalPathPrefixes(g.PathPrefixes) || !canonicalStrings(g.Units) ||
+		(g.Operation == OperationSystemdProfileInstallReload && g.PathPrefixes == nil) ||
+		(g.Operation == OperationSystemdProfileReadback && len(g.PathPrefixes) != 0) ||
 		len(g.Paths) == 0 || len(g.Units) == 0 {
 		return fmt.Errorf("%w: non-canonical scope", ErrScope)
 	}
@@ -114,6 +123,42 @@ func validateReceipt(r Receipt, g Grant, now time.Time) error {
 	if !r.Verified || !validReceiptTimes(r, g, now) {
 		return fmt.Errorf("%w: unverified receipt", ErrAuthority)
 	}
+	if g.Operation == OperationSystemdProfileReadback {
+		if err := validateReadback(r, g); err != nil {
+			return err
+		}
+	}
+	if g.Reservation != nil {
+		if r.Outcome != OutcomeApplied || len(r.ReservationLeases) != len(g.Reservation.NodeIDs) {
+			return fmt.Errorf("%w: reservation receipt scope", ErrAuthority)
+		}
+		if g.Operation == OperationMaintainLeaseRelease {
+			if len(g.LeasePins) != len(r.ReservationLeases) {
+				return fmt.Errorf("%w: release receipt scope", ErrAuthority)
+			}
+			for i, pin := range r.ReservationLeases {
+				if pin != g.LeasePins[i] {
+					return fmt.Errorf("%w: release receipt pin changed", ErrChanged)
+				}
+			}
+			return nil
+		}
+		if uint64(len(g.Reservation.NodeIDs)) > ^uint64(0)-g.Reservation.ExpectedStoreEpoch {
+			return fmt.Errorf("%w: reservation receipt epoch overflow", ErrAuthority)
+		}
+		seenIDs := make(map[string]bool, len(r.ReservationLeases))
+		for i, pin := range r.ReservationLeases {
+			if pin.NodeID != g.Reservation.NodeIDs[i] || !validName(pin.ID, 256) || seenIDs[pin.ID] ||
+				pin.Epoch != g.Reservation.ExpectedStoreEpoch+uint64(i)+1 ||
+				!pin.ExpiresAt.Equal(pin.ExpiresAt.UTC()) || !pin.ExpiresAt.After(r.EndedAt) ||
+				pin.ExpiresAt.After(r.EndedAt.Add(time.Duration(g.Reservation.TTLSeconds)*time.Second)) {
+				return fmt.Errorf("%w: reservation receipt lease", ErrAuthority)
+			}
+			seenIDs[pin.ID] = true
+		}
+	} else if len(r.ReservationLeases) != 0 {
+		return fmt.Errorf("%w: unexpected reservation receipt leases", ErrAuthority)
+	}
 	return nil
 }
 
@@ -139,7 +184,47 @@ func validateReceiptIdentity(r Receipt, g Grant) error {
 		r.HostKey != g.HostKey || r.Operation != g.Operation || r.BootID != g.BootID {
 		return fmt.Errorf("%w: receipt identity mismatch", ErrChanged)
 	}
+	if (g.Reservation == nil || !r.Verified) && len(r.ReservationLeases) != 0 {
+		return fmt.Errorf("%w: unexpected reservation leases", ErrChanged)
+	}
+	if r.Readback != nil && (g.Operation != OperationSystemdProfileReadback || !r.Verified) {
+		return fmt.Errorf("%w: unexpected readback observations", ErrChanged)
+	}
 	return nil
+}
+
+func validateReadback(r Receipt, g Grant) error {
+	b := r.Readback
+	if r.Outcome != OutcomeUnchanged || b == nil || !validName(b.Hostname, 253) || strings.ContainsAny(b.Hostname, " /\\@:#?") ||
+		len(b.Files) != len(g.Paths) || len(b.Files) > 64 || len(b.UnitGraph) == 0 || len(b.UnitGraph) > 64<<10 || strings.ContainsRune(b.UnitGraph, 0) ||
+		(r.BackupDisposition != "" && r.BackupDisposition != BackupNotRequired) {
+		return fmt.Errorf("%w: invalid readback observations", ErrAuthority)
+	}
+	for i, f := range b.Files {
+		if f.Path != g.Paths[i] || !isDigest(f.SHA256) || len(f.Mode) != 4 {
+			return fmt.Errorf("%w: readback file scope", ErrAuthority)
+		}
+		for _, digit := range f.Mode {
+			if digit < '0' || digit > '7' {
+				return fmt.Errorf("%w: readback file mode", ErrAuthority)
+			}
+		}
+	}
+	if ReadbackDigest(*b) != g.PriorStateSHA256 {
+		return fmt.Errorf("%w: changed readback observations", ErrChanged)
+	}
+	return nil
+}
+
+// ReadbackDigest binds the canonical typed observations, including every graph
+// byte, to the trusted grant. Files must already be in exact grant path order.
+func ReadbackDigest(readback SystemdProfileReadback) string {
+	raw, err := json.Marshal(readback)
+	if err != nil {
+		panic("remotemaint: readback contains only JSON-marshalable fields")
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func validReceiptTimes(r Receipt, g Grant, now time.Time) bool {
@@ -175,7 +260,66 @@ func cloneGrant(g Grant) Grant {
 	g.PathPrefixes = append([]PathPrefix(nil), g.PathPrefixes...)
 	g.Units = append([]string(nil), g.Units...)
 	g.LeasePins = append([]LeasePin(nil), g.LeasePins...)
+	if g.Reservation != nil {
+		r := *g.Reservation
+		r.NodeIDs = append([]string(nil), r.NodeIDs...)
+		g.Reservation = &r
+	}
 	return g
+}
+
+func validateReservationGrant(g Grant, now time.Time) error {
+	r := g.Reservation
+	if r == nil || !validName(g.ProfileID, 128) || !isDigest(g.OperationDigest) || !isDigest(g.ContextID) || !validName(g.Holder, 256) ||
+		g.Target != "" || g.HostKey != "" || g.BootID != "" || g.PayloadSHA256 != "" || g.PriorStateSHA256 != "" ||
+		len(g.Units) != 0 || len(g.PathPrefixes) != 0 {
+		return fmt.Errorf("%w: invalid reservation identity", ErrScope)
+	}
+	if !filepath.IsAbs(r.WorkspaceRoot) || filepath.Clean(r.WorkspaceRoot) != r.WorkspaceRoot ||
+		r.Kind != "maintain" || !validName(r.CatalogGeneration, 256) ||
+		len(r.NodeIDs) == 0 || !canonicalStrings(r.NodeIDs) || len(g.Paths) == 0 || !canonicalStrings(g.Paths) {
+		return fmt.Errorf("%w: invalid reservation scope", ErrScope)
+	}
+	switch g.Operation {
+	case OperationMaintainLeaseAcquire:
+		if len(g.LeasePins) != 0 || r.TTLSeconds <= 0 || r.TTLSeconds > 86400 || uint64(len(r.NodeIDs)) > ^uint64(0)-r.ExpectedStoreEpoch {
+			return fmt.Errorf("%w: invalid acquire scope or epoch overflow", ErrScope)
+		}
+	case OperationMaintainLeaseRelease:
+		if r.TTLSeconds != 0 || len(g.LeasePins) != len(r.NodeIDs) {
+			return fmt.Errorf("%w: invalid release scope", ErrScope)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported reservation operation", ErrScope)
+	}
+	for _, node := range r.NodeIDs {
+		if !validName(node, 256) {
+			return fmt.Errorf("%w: invalid reservation node", ErrScope)
+		}
+	}
+	for _, p := range g.Paths {
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+			return fmt.Errorf("%w: invalid reservation path", ErrScope)
+		}
+	}
+	if g.ExpiresAt.IsZero() || !g.ExpiresAt.Equal(g.ExpiresAt.UTC()) || !g.ExpiresAt.After(now) {
+		return fmt.Errorf("%w: reservation grant", ErrExpired)
+	}
+	if g.Operation == OperationMaintainLeaseRelease {
+		seenIDs := make(map[string]bool, len(g.LeasePins))
+		for i, pin := range g.LeasePins {
+			if pin.NodeID != r.NodeIDs[i] || !validName(pin.ID, 256) || seenIDs[pin.ID] || pin.Epoch == 0 || pin.Epoch > r.ExpectedStoreEpoch {
+				return fmt.Errorf("%w: invalid release pin", ErrScope)
+			}
+			// Release removes exact existing rows; their expiry is identity,
+			// not current authority. The fresh grant above still bounds cleanup.
+			if pin.ExpiresAt.IsZero() || pin.ExpiresAt.Location() != time.UTC {
+				return fmt.Errorf("%w: release pin", ErrExpired)
+			}
+			seenIDs[pin.ID] = true
+		}
+	}
+	return nil
 }
 
 func normalizeGrant(g Grant) Grant {

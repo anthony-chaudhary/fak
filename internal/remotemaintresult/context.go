@@ -36,7 +36,7 @@ type binding struct {
 // receipt. Callers must pass the actual canonical call used for result admission;
 // serialized metadata never grants this authority. Invalid input leaves ctx alone.
 func Bind(ctx context.Context, c *abi.ToolCall, grant remotemaint.Grant, receiptBytes []byte) context.Context {
-	if ctx == nil || c == nil || c.Tool != maintenanceTool || !sshTarget(grant.Target) {
+	if ctx == nil || c == nil || c.Tool != maintenanceTool || !bindableGrant(grant) {
 		return ctx
 	}
 	receipt, ok := canonicalReceipt(receiptBytes)
@@ -60,21 +60,59 @@ func Bind(ctx context.Context, c *abi.ToolCall, grant remotemaint.Grant, receipt
 // checks on the original body, then scan the probe for every remaining threat.
 // It must never use the probe as result content.
 func PIIProbe(ctx context.Context, c *abi.ToolCall, receiptBytes []byte) ([]byte, bool) {
-	if ctx == nil || c == nil {
-		return nil, false
-	}
-	b, ok := ctx.Value(bindingKey{}).(binding)
-	if !ok || c != b.call || c.TraceID != b.trace || c.SeqNo != b.seq || c.Tool != b.tool ||
-		c.Tool != maintenanceTool || sha256.Sum256(receiptBytes) != b.bodyHash {
-		return nil, false
-	}
-	receipt, ok := canonicalReceipt(receiptBytes)
-	if !ok || identityOf(receipt) != b.identity {
+	receipt, ok := boundReceipt(ctx, c, receiptBytes)
+	if !ok || !sshTarget(receipt.Target) {
 		return nil, false
 	}
 	receipt.Target = strings.Replace(receipt.Target, "@", " ", 1)
 	probe, err := json.Marshal(receipt)
 	return probe, err == nil
+}
+
+// TrustedControlReceipt recognizes only exact source-validated terminal control
+// bytes after the result detectors have run. It grants no operation authority,
+// never lowers existing trace taint, and excludes all readback observations.
+func TrustedControlReceipt(ctx context.Context, c *abi.ToolCall, receiptBytes []byte) bool {
+	receipt, ok := boundReceipt(ctx, c, receiptBytes)
+	if !ok || !receipt.Verified || receipt.Readback != nil {
+		return false
+	}
+	switch receipt.Operation {
+	case remotemaint.OperationMaintainLeaseAcquire, remotemaint.OperationMaintainLeaseRelease:
+		return receipt.Outcome == remotemaint.OutcomeApplied
+	case remotemaint.OperationSystemdProfileInstallReload:
+		return len(receipt.ReservationLeases) == 0 && (receipt.Outcome == remotemaint.OutcomeApplied ||
+			receipt.Outcome == remotemaint.OutcomeUnchanged || receipt.Outcome == remotemaint.OutcomeRolledBack)
+	default:
+		return false
+	}
+}
+
+func bindableGrant(grant remotemaint.Grant) bool {
+	switch grant.Operation {
+	case remotemaint.OperationMaintainLeaseAcquire, remotemaint.OperationMaintainLeaseRelease:
+		return grant.Reservation != nil && grant.Target == "" && grant.HostKey == "" && grant.BootID == ""
+	case remotemaint.OperationSystemdProfileInstallReload, remotemaint.OperationSystemdProfileReadback:
+		return grant.Reservation == nil && sshTarget(grant.Target)
+	default:
+		return false
+	}
+}
+
+func boundReceipt(ctx context.Context, c *abi.ToolCall, receiptBytes []byte) (remotemaint.Receipt, bool) {
+	if ctx == nil || c == nil {
+		return remotemaint.Receipt{}, false
+	}
+	b, ok := ctx.Value(bindingKey{}).(binding)
+	if !ok || c != b.call || c.TraceID != b.trace || c.SeqNo != b.seq || c.Tool != b.tool ||
+		c.Tool != maintenanceTool || sha256.Sum256(receiptBytes) != b.bodyHash {
+		return remotemaint.Receipt{}, false
+	}
+	receipt, ok := canonicalReceipt(receiptBytes)
+	if !ok || identityOf(receipt) != b.identity {
+		return remotemaint.Receipt{}, false
+	}
+	return receipt, true
 }
 
 func identityOf(r remotemaint.Receipt) receiptIdentity {

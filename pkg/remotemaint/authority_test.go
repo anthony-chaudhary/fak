@@ -3,6 +3,7 @@ package remotemaint
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,7 +67,7 @@ func TestPreparedPropagatesBoundFailureReceiptOnce(t *testing.T) {
 	if !errors.Is(err, ErrUnknownEffect) || receipt.Outcome != OutcomeUnknownEffect || receipt.BackupDisposition != BackupRetained {
 		t.Fatalf("Execute() = (%+v, %v), want bound unknown-effect receipt", receipt, err)
 	}
-	if second, err := prepared.Execute(context.Background()); !errors.Is(err, ErrChanged) || second != (Receipt{}) {
+	if second, err := prepared.Execute(context.Background()); !errors.Is(err, ErrChanged) || !reflect.DeepEqual(second, Receipt{}) {
 		t.Fatalf("retry Execute() = (%+v, %v), want zero/ErrChanged", second, err)
 	}
 	if len(authority.executeCalls) != 1 {
@@ -105,7 +106,7 @@ func TestPreparedDeadlineSynthesizesUnknownEffectOnce(t *testing.T) {
 	if !errors.Is(err, ErrUnknownEffect) || receipt.GrantDigest != GrantDigest(grant) || receipt.Outcome != OutcomeUnknownEffect || receipt.BackupDisposition != BackupUnknown {
 		t.Fatalf("Execute(deadline) = (%+v, %v), want synthesized bound unknown effect", receipt, err)
 	}
-	if second, err := prepared.Execute(context.Background()); !errors.Is(err, ErrChanged) || second != (Receipt{}) {
+	if second, err := prepared.Execute(context.Background()); !errors.Is(err, ErrChanged) || !reflect.DeepEqual(second, Receipt{}) {
 		t.Fatalf("retry Execute() = (%+v, %v), want zero/ErrChanged", second, err)
 	}
 }

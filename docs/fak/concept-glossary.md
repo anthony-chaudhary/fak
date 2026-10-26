@@ -1728,3 +1728,10 @@ Pure lookup of a supplied CUDA weight-operation declaration table for an operati
 Private dtype-only predicate for membership in the CUDA source-declared MatMul format table, preserving the existing nine accepted weight dtypes without adding architecture admission.
 
 **Distinct from:** A dtype-only source declaration membership test without target admission, unlike CUDADeviceOpSupported which checks a supplied operation/format table and generic architecture. Neither predicate is Caps.FusedAttn actual backend lowering capability, a linked-artifact census, model admission or hardware qualification.
+
+
+### readCtx
+
+readCtx is the Go cancellation and deadline context used to bound one observational read, such as a staged diff, session presence, or canonical maintenance lease view.
+
+**Distinct from:** This is a wall-clock read budget; requestCtx scopes an entire inference request and does not identify one bounded read, while readCtx governs neither model-visible context bytes nor maintenance authorization.
