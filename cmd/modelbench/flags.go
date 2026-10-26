@@ -290,8 +290,8 @@ func validateFlagCombinations(f *benchFlags) error {
 			return fmt.Errorf("-q4k cannot be combined with -hf")
 		case *f.lean:
 			return fmt.Errorf("-q4k is its own GGUF resident-quant load path; omit -lean")
-		case *f.backendName != "legacy" && *f.backendName != "vulkan":
-			return fmt.Errorf("-q4k supports the legacy resident-quant path or -backend=vulkan")
+		case *f.backendName != "legacy" && *f.backendName != "vulkan" && *f.backendName != "cuda":
+			return fmt.Errorf("-q4k supports the legacy resident-quant path, -backend=vulkan, or -backend=cuda")
 		case *f.verify:
 			return fmt.Errorf("-q4k -verify is not wired; use go test ./internal/model -run MetalQ4K for the parity gate (darwin/arm64+cgo auto-compiles Metal, no build tag needed)")
 		}
