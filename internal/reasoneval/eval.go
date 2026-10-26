@@ -29,9 +29,18 @@ type RuleResult struct {
 // for the selected benchmark.
 var ErrJudgeRequired = errors.New("benchmark requires an external judge")
 
+// GPQA follows Python's Unicode regex classes at DeepInfer@553741557a57df44a46fb3ab72b6aafeaf945337.
+// Python whitespace includes the separators and U+001C..U+001F, unlike Go's \s.
+const gpqaPythonSpace = `[\t-\r\x1c-\x1f\x85\p{Z}]`
+
 var (
-	gpqaAnswerLine = regexp.MustCompile(`(?im)^\s*ANSWER\s*[:：]\s*\(?([A-D])\b`)
-	gpqaBoxed      = regexp.MustCompile(`\\boxed\{\s*\(?([A-D])\)?\s*\}`)
+	// Python \w is letters, all numbers (not just Nd), and underscore. Consuming
+	// its complement after A-D emulates \b here without losing a following line:
+	// the next ^ match starts after, not on, a consumed newline.
+	// Disable case folding only at the boundary: U+0345 folds to a letter but is
+	// not a Python word character, even in a case-insensitive expression.
+	gpqaAnswerLine = regexp.MustCompile(`(?im)^` + gpqaPythonSpace + `*ANSWER` + gpqaPythonSpace + `*[:：]` + gpqaPythonSpace + `*\(?([A-D])(?-i:[^\p{L}\p{N}_]|\z)`)
+	gpqaBoxed      = regexp.MustCompile(`\\boxed\{` + gpqaPythonSpace + `*\(?([A-D])\)?` + gpqaPythonSpace + `*\}`)
 	gpqaStandalone = regexp.MustCompile(`[A-D]`)
 )
 
