@@ -136,7 +136,6 @@ func TestReloadPolicyRejectsWideningKeepsLastGoodAndJournalsDelta(t *testing.T) 
 
 func TestGuardReloadDefaultFloorJournalsLiveExactGrantProvenance(t *testing.T) {
 	journal.ResetActiveForTest()
-	t.Cleanup(journal.ResetActiveForTest)
 	t.Cleanup(func() { adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy()) })
 
 	dir := t.TempDir()
@@ -154,6 +153,7 @@ func TestGuardReloadDefaultFloorJournalsLiveExactGrantProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(journal.ResetActiveForTest)
 
 	const tool = "issue_8235_exact_tool"
 	j.Emit(abi.Event{
