@@ -40,7 +40,8 @@ func (s *Store) readRefStrict(ctx context.Context, ref string) (Record, error) {
 // view alive, StrictSnapshot returns a CorruptRefError containing the offending
 // ref name if any lease ref points to a missing, unreadable, or malformed blob.
 // Session, intent, and contract refs are ignored (preserving namespace isolation).
-// An empty or absent namespace returns an empty slice and nil error.
+// A successfully enumerated empty or absent namespace returns an empty slice and nil error.
+// Failure to enumerate the namespace returns an error, never an empty successful view.
 func (s *Store) StrictSnapshot(ctx context.Context) ([]Record, error) {
 	if s == nil {
 		return nil, fmt.Errorf("leaseref: nil store")

@@ -39,16 +39,17 @@ func IsCorruptRef(err error) bool {
 
 // listRefs scans every ref under the shared refs/fak/locks/ namespace and reads the
 // ones keep accepts into a T via read, in for-each-ref's own order (the caller sorts
-// to its own key). A non-executable git is the only hard error; an absent/empty
-// namespace (code != 0) and an unreadable/forward-incompatible entry (read returns an
+// to its own key). A non-executable git is the only hard error; failed enumeration
+// (code != 0) and an unreadable/forward-incompatible entry (read returns an
 // error) are both silently skipped — the "absence and corruption never blind the whole
 // view" rule List/ListIntents/ListSessions all share.
 func listRefs[T any](ctx context.Context, s *Store, keep func(ref string) bool, read func(context.Context, string) (T, error)) ([]T, error) {
 	return listRefsInternal(ctx, s, keep, read, false)
 }
 
-// listRefsStrict behaves identically to listRefs, but instead of silently skipping
-// an unreadable, missing, or malformed record, it immediately returns a CorruptRefError
+// listRefsStrict requires successful enumeration of the shared namespace. An
+// enumeration failure returns an error rather than a partial or empty view.
+// An unreadable, missing, or malformed record immediately returns a CorruptRefError
 // referencing the offending ref name and underlying read error.
 func listRefsStrict[T any](ctx context.Context, s *Store, keep func(ref string) bool, read func(context.Context, string) (T, error)) ([]T, error) {
 	return listRefsInternal(ctx, s, keep, read, true)
@@ -60,7 +61,10 @@ func listRefsInternal[T any](ctx context.Context, s *Store, keep func(ref string
 		return nil, fmt.Errorf("leaseref: git not executable: %w", err)
 	}
 	if code != 0 {
-		return nil, nil // absent/empty namespace is an empty list, not an error
+		if strict {
+			return nil, fmt.Errorf("leaseref: git for-each-ref %s exited %d", refPrefix, code)
+		}
+		return nil, nil // preserve tolerant legacy reads when enumeration fails
 	}
 	var recs []T
 	for _, line := range strings.Split(out, "\n") {
