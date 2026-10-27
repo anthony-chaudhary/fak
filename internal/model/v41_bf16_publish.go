@@ -104,8 +104,16 @@ func v41PublishBF16Input(layer int, site string, values []float32, publish v41BF
 // v41LatentNormBF16Publish is v41LatentNormBF16Copy routed through the session's
 // ordinary device publication when one is bound.
 func v41LatentNormBF16Publish(layer int, leaf, phase string, values []float32, publish v41BF16BoundaryFunc) ([]float32, error) {
+	return v41LatentNormBF16PublishObserved(layer, leaf, phase, values, publish, nil)
+}
+
+func v41LatentNormBF16PublishObserved(layer int, leaf, phase string, values []float32, publish v41BF16BoundaryFunc, observe func(string)) ([]float32, error) {
 	return v41PublishBF16(layer, leaf+" "+phase, values, publish, func(values []float32) ([]float32, error) {
-		return v41LatentNormBF16Copy(layer, leaf, phase, values)
+		out, err := v41LatentNormBF16Copy(layer, leaf, phase, values)
+		if observe != nil && len(values) > 0 && finite32(values[0]) {
+			observe("bf16-boundary")
+		}
+		return out, err
 	})
 }
 
