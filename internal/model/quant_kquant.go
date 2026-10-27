@@ -595,14 +595,16 @@ func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi 
 // Bit-identical to looping kQuantMatRowsInto per token: for each (row o, token t) the four-
 // accumulator dot uses the SAME (s0+s1)+(s2+s3) fixed order and the SAME super-block order as
 // kQuantMatRowsRange, and each token's accumulator is independent, so no cross-token reassociation
-// happens. The int8 SDOT path is APPROXIMATE (activation quantization) and not the prefill wall
-// this batch variant targets (the dense Q6_K/Q5_K down_proj/lm_head ride the f32 path), so when
-// kQuantSDOTEnabled(qt.kind) the batch variant falls back to the per-token kQuantMatRowsInto loop
-// â€” correctness first; the f32 batch below is the bit-exact dequant-once speedup.
+// happens. The int8 SDOT path remains APPROXIMATE versus f32 (activation quantization).
+// Its bounded token panels preserve the per-token integer reducer and float combine;
+// unsupported panel routes retain the per-token kQuantMatRowsInto loop.
 func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 	qt.ensureRawCPU("prefill GEMM")
 	dispatchWorkers := currentWorkerCount()
 	if kQuantSDOTEnabled(qt.kind) {
+		if kQuantMatRowsIntoBatchInt8(qt, X, P, Y, dispatchWorkers) {
+			return
+		}
 		in, out := qt.in, qt.out
 		for t := 0; t < P; t++ {
 			// PREFILL keeps the full dispatchWorkers width: the #4974 decode cap targets the
