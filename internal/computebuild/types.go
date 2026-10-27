@@ -163,6 +163,8 @@ const (
 	VulkanBuildReceiptSchemaV37 = "fak.vulkan-build-receipt.v37"
 	// VulkanBuildReceiptSchemaV38 adds the optional packed Q5_K companion tile.
 	VulkanBuildReceiptSchemaV38 = "fak.vulkan-build-receipt.v38"
+	// VulkanBuildReceiptSchemaV39 adds interleaved QG attention postprocessing.
+	VulkanBuildReceiptSchemaV39 = "fak.vulkan-build-receipt.v39"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

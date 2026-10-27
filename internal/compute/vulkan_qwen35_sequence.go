@@ -666,36 +666,48 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		} else {
 			stage = "attention-projections"
 			qg, k, values := mul(layer.Q, n), mul(layer.K, n), mul(layer.V, n)
-			q, _ := v.devTr([]int{tokens, qWidth}, F32)
-			gate, _ := v.devTr([]int{tokens, qWidth}, F32)
-			stage = "attention-split"
-			if err = check(C.fvk_qwen35_split_qg_panel_f32(v.vp(qg), v.vp(q), v.vp(gate), C.int(tokens), C.int(req.NumHeads), C.int(req.HeadDim))); err != nil {
-				return result, err
-			}
-			stage = "attention-postprocess"
-			qr, fusedPostprocess, postprocessErr := v.tryQwen35AttentionPostprocessLocked(
-				q, k, values, layer.QNorm, layer.KNorm, kv, attention, tokens, req.StartPos, req.NumHeads, req.NumKVHeads,
+			stage = "attention-postprocess-qg"
+			qr, gate, fusedQG, qgErr := v.tryQwen35AttentionQGLocked(
+				qg, k, values, layer.QNorm, layer.KNorm, kv, attention, tokens, req.StartPos, req.NumHeads, req.NumKVHeads,
 				req.HeadDim, req.RotaryDim, req.RoPEThetaForLayer[i], qwen35VulkanSequenceQKEpsilon(req),
 			)
-			if postprocessErr != nil {
-				return result, qwen35VulkanSequenceError(stage, layerIndex, postprocessErr.Error())
+			if qgErr != nil {
+				return result, qwen35VulkanSequenceError(stage, layerIndex, qgErr.Error())
 			}
-			if !fusedPostprocess {
-				stage = "attention-qk-norm"
-				if layer.QNorm.Buf() != nil {
-					q = normEpsilon(q, layer.QNorm, tokens*req.NumHeads, qwen35VulkanSequenceQKEpsilon(req))
-					k = normEpsilon(k, layer.KNorm, tokens*req.NumKVHeads, qwen35VulkanSequenceQKEpsilon(req))
-				}
-				qr, _ = v.devTr([]int{tokens, qWidth}, F32)
-				kr, _ := v.devTr([]int{tokens, kvWidth}, F32)
-				stage = "attention-rope"
-				if err = check(C.fvk_qwen35_partial_rope_panel_f32(v.vp(q), v.vp(k), v.vp(qr), v.vp(kr), C.int(tokens), C.int(req.StartPos), C.int(req.NumHeads), C.int(req.NumKVHeads), C.int(req.HeadDim), C.int(req.RotaryDim), C.double(req.RoPEThetaForLayer[i]))); err != nil {
+			if !fusedQG {
+				q, _ := v.devTr([]int{tokens, qWidth}, F32)
+				gate, _ = v.devTr([]int{tokens, qWidth}, F32)
+				stage = "attention-split"
+				if err = check(C.fvk_qwen35_split_qg_panel_f32(v.vp(qg), v.vp(q), v.vp(gate), C.int(tokens), C.int(req.NumHeads), C.int(req.HeadDim))); err != nil {
 					return result, err
 				}
-				stage = "kv-append"
-				v.growAppend(&kv.Kraw[attention], v.vp(k), tokens*kvWidth, "Qwen sequence raw keys")
-				v.growAppend(&kv.K[attention], v.vp(kr), tokens*kvWidth, "Qwen sequence rotated keys")
-				v.growAppend(&kv.V[attention], v.vp(values), tokens*kvWidth, "Qwen sequence values")
+				stage = "attention-postprocess"
+				var fusedPostprocess bool
+				var postprocessErr error
+				qr, fusedPostprocess, postprocessErr = v.tryQwen35AttentionPostprocessLocked(
+					q, k, values, layer.QNorm, layer.KNorm, kv, attention, tokens, req.StartPos, req.NumHeads, req.NumKVHeads,
+					req.HeadDim, req.RotaryDim, req.RoPEThetaForLayer[i], qwen35VulkanSequenceQKEpsilon(req),
+				)
+				if postprocessErr != nil {
+					return result, qwen35VulkanSequenceError(stage, layerIndex, postprocessErr.Error())
+				}
+				if !fusedPostprocess {
+					stage = "attention-qk-norm"
+					if layer.QNorm.Buf() != nil {
+						q = normEpsilon(q, layer.QNorm, tokens*req.NumHeads, qwen35VulkanSequenceQKEpsilon(req))
+						k = normEpsilon(k, layer.KNorm, tokens*req.NumKVHeads, qwen35VulkanSequenceQKEpsilon(req))
+					}
+					qr, _ = v.devTr([]int{tokens, qWidth}, F32)
+					kr, _ := v.devTr([]int{tokens, kvWidth}, F32)
+					stage = "attention-rope"
+					if err = check(C.fvk_qwen35_partial_rope_panel_f32(v.vp(q), v.vp(k), v.vp(qr), v.vp(kr), C.int(tokens), C.int(req.StartPos), C.int(req.NumHeads), C.int(req.NumKVHeads), C.int(req.HeadDim), C.int(req.RotaryDim), C.double(req.RoPEThetaForLayer[i]))); err != nil {
+						return result, err
+					}
+					stage = "kv-append"
+					v.growAppend(&kv.Kraw[attention], v.vp(k), tokens*kvWidth, "Qwen sequence raw keys")
+					v.growAppend(&kv.K[attention], v.vp(kr), tokens*kvWidth, "Qwen sequence rotated keys")
+					v.growAppend(&kv.V[attention], v.vp(values), tokens*kvWidth, "Qwen sequence values")
+				}
 			}
 			context, _ := v.devTr([]int{tokens, qWidth}, F32)
 			stage = "causal-attention"

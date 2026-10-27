@@ -1826,3 +1826,31 @@ Mutation-free C eligibility predicate for the specific Vulkan fused attention po
 Checked C Vulkan command-recording boundary for fused Q/K normalization, partial RoPE and KV-tail outputs.
 
 **Distinct from:** Unlike attention implementation dispatch, validates submission state, buffer extents and nonaliasing, selects scalar/table RoPE input, constructs the push ABI and records the postprocess dispatch. It does not own Go COW/frontier publication or attention score computation. Unlike the similarly named CUDA F32 enqueue boundary, this operates on Vulkan Buffer allocation identity and records through the Vulkan batch dispatcher with scalar/table RoPE; it does not use CUDA pointer attributes or CUDA streams.
+
+
+### tryQwen35AttentionQGLocked
+
+Mutex-held Vulkan Go owner consuming interleaved per-head Q/G F32 panels and publishing separately owned rotated query, unchanged gate and KV append outputs.
+
+**Distinct from:** Unlike the split-Q postprocess owner, consumes doubled-width QG and owns an additional gate transient. Unlike attention implementation dispatch, owns specific tensor/frontier/COW admission and selected-error lifecycle; selected errors never authorize replay.
+
+
+### fvk_qwen35_attention_qg_supported
+
+Mutation-free eligibility predicate for Vulkan fused interleaved-QG postprocessing.
+
+**Distinct from:** Unlike split-Q postprocess eligibility, additionally preserves doubled QG signed-index limits and the original split flattened-grid admission. Requires both QG and predecessor availability; unlike general attention implementation dispatch, records no commands and selects no attention score algorithm.
+
+
+### fvk_qwen35_attention_qg_f32
+
+Checked Vulkan command-recording boundary for direct interleaved QG consumption, Q/K normalization, partial RoPE, unchanged gate extraction and three KV-tail outputs.
+
+**Distinct from:** Unlike split-Q postprocess recording, uses eleven descriptors, independent gate output, doubled QG input extent and five output nonalias checks. Copies gate unchanged, not sigmoid or gate application; owns recording checks, not Go cache lengths or attention score dispatch.
+
+
+### qwen35_attention_qg
+
+Vulkan registered shader module for fused interleaved QG attention postprocessing with a separate unchanged gate output.
+
+**Distinct from:** Unlike the split-Q qwen35_attention_postprocess shader, consumes doubled interleaved QG and emits an additional unchanged gate. Unlike the fvk QG host boundary, this is the numerical shader and trusted artifact-census identity, not buffer validation or command recording. Unlike attention implementation dispatch, it implements one fused module rather than routing algorithms.

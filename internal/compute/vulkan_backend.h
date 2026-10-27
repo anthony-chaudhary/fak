@@ -443,6 +443,14 @@ int fvk_qwen35_attention_postprocess_f32(const void* q, const void* k, const voi
     const void* qNorm, const void* kNorm, void* qOut, void* kRaw, void* kOut, void* vOut,
     int tokens, int startPos, int qHeads, int kHeads, int headDim, int rotaryDim,
     double theta, float eps);
+// Same opt-in; optional QG-strided successor keeps the generic split API intact.
+int fvk_have_qwen35_attention_qg(void);
+int fvk_qwen35_attention_qg_supported(int tokens, int startPos,
+    int qHeads, int kHeads, int headDim, int rotaryDim, double theta, float eps);
+int fvk_qwen35_attention_qg_f32(const void* qg, const void* k, const void* v,
+    const void* qNorm, const void* kNorm, void* qOut, void* kRaw, void* kOut, void* vOut, void* gate,
+    int tokens, int startPos, int qHeads, int kHeads, int headDim, int rotaryDim,
+    double theta, float eps);
 
 int fvk_have_qwen35_gdn_q8_in_proj_panel(void);
 int fvk_qwen35_gdn_q8_in_proj_panel_supported(int out0, int out1, int out2, int out3, int in, int P);

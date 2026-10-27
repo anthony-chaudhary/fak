@@ -90,6 +90,8 @@ const (
 	VulkanShaderRegistryV37ID = "fak.vulkan-shader-registry.v37.current108"
 	// VulkanShaderRegistryV38ID adds the optional packed Q5_K companion tile.
 	VulkanShaderRegistryV38ID = "fak.vulkan-shader-registry.v38.current109"
+	// VulkanShaderRegistryV39ID adds interleaved QG attention postprocessing.
+	VulkanShaderRegistryV39ID = "fak.vulkan-shader-registry.v39.current110"
 )
 
 type vulkanSuccessorRegistry struct {
@@ -167,9 +169,11 @@ var (
 
 	vulkanRegistryV38 = &vulkanSuccessorRegistry{version: "V38", schema: VulkanBuildReceiptSchemaV38, id: VulkanShaderRegistryV38ID, count: 109, parent: vulkanRegistryV37, added: []string{"q5k_matmul_panel"}}
 
-	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26, vulkanRegistryV27, vulkanRegistryV28, vulkanRegistryV29, vulkanRegistryV30, vulkanRegistryV31, vulkanRegistryV32, vulkanRegistryV33, vulkanRegistryV34, vulkanRegistryV35, vulkanRegistryV36, vulkanRegistryV37, vulkanRegistryV38}
+	vulkanRegistryV39 = &vulkanSuccessorRegistry{version: "V39", schema: VulkanBuildReceiptSchemaV39, id: VulkanShaderRegistryV39ID, count: 110, parent: vulkanRegistryV38, added: []string{"qwen35_attention_qg"}}
+
+	vulkanSuccessorRegistries = []*vulkanSuccessorRegistry{vulkanRegistryV5, vulkanRegistryV6, vulkanRegistryV7, vulkanRegistryV8, vulkanRegistryV9, vulkanRegistryV10, vulkanRegistryV11, vulkanRegistryV12, vulkanRegistryV13, vulkanRegistryV14, vulkanRegistryV15, vulkanRegistryV16, vulkanRegistryV17, vulkanRegistryV18, vulkanRegistryV19, vulkanRegistryV20, vulkanRegistryV21, vulkanRegistryV22, vulkanRegistryV23, vulkanRegistryV24, vulkanRegistryV25, vulkanRegistryV26, vulkanRegistryV27, vulkanRegistryV28, vulkanRegistryV29, vulkanRegistryV30, vulkanRegistryV31, vulkanRegistryV32, vulkanRegistryV33, vulkanRegistryV34, vulkanRegistryV35, vulkanRegistryV36, vulkanRegistryV37, vulkanRegistryV38, vulkanRegistryV39}
 	// vulkanCurrentRegistry is the registry the builder compiles and stamps.
-	vulkanCurrentRegistry = vulkanRegistryV38
+	vulkanCurrentRegistry = vulkanRegistryV39
 )
 
 func vulkanSuccessorForSchema(schema string) *vulkanSuccessorRegistry {

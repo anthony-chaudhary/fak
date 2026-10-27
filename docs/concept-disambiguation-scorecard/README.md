@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **677** (clarity 0 + coverage 677) |
-| **Crystal-clear concepts (and climbing)** | **1317** crystal of 3127 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3204 / 3881** (82.6% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1321** crystal of 3131 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3208 / 3885** (82.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 228 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4384 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4388 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3127 concepts - score 88.7/100 (grade B) - disambiguation-debt 677
+concept-disambiguation chart - 3131 concepts - score 88.7/100 (grade B) - disambiguation-debt 677
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ####################........ 1317
+  * crystal       ####################........ 1321
   o defined       ############################ 1810
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,7 +39,7 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ****************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (168 concept(s); 64 crystal)
+  attention        ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (172 concept(s); 68 crystal)
   cache            *********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (299 concept(s); 117 crystal)
   context-ctx      ******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 90 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -67,7 +67,7 @@ coverage by family (positioned / discovered):
   session-runtime  #######################..... 287/357
   gateway-engine   #######################..... 247/306
   guard-gate       ##########################.. 517/566
-  attention        ######################...... 159/206
+  attention        ######################...... 163/210
   context-ctx      ########################.... 271/317
   pool             ###############............. 46/87
   policy-capability ########################.... 230/270
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 82.6%  (3204/3881 confusable tokens positioned)
+namespace coverage  [###########################.....] 82.6%  (3208/3885 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 228
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 228/228
 
-name index: 4384 lookup name(s) -> 3127 concept(s), 89 ambiguous
+name index: 4388 lookup name(s) -> 3131 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **228 / 228** (228 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2528 / 5762 |
+| Boundaries drawn (mutual / total) | 2544 / 5778 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4384 over 3127 concepts |
+| Lookup names indexed | 4388 over 3131 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3127 |
+| Concepts carrying a contrast set | 3131 |
 
 ## The concepts (best verdict first)
 
@@ -153,6 +153,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | attention | **tryQwen35AttentionPostprocessLocked** - Mutex-held Go owner for fused resident F32 Q/K normalization, partial RoPE and KV append publication. |
 | * | crystal | symbol | attention | **fvk_qwen35_attention_postprocess_supported** - Mutation-free C eligibility predicate for the specific Vulkan fused attention postprocess path. |
 | * | crystal | symbol | attention | **fvk_qwen35_attention_postprocess_f32** - Checked C Vulkan command-recording boundary for fused Q/K normalization, partial RoPE and KV-tail outputs. |
+| * | crystal | symbol | attention | **tryQwen35AttentionQGLocked** - Mutex-held Vulkan Go owner consuming interleaved per-head Q/G F32 panels and publishing separately owned rotated query, unchanged gate and KV append outputs. |
+| * | crystal | symbol | attention | **fvk_qwen35_attention_qg_supported** - Mutation-free eligibility predicate for Vulkan fused interleaved-QG postprocessing. |
+| * | crystal | symbol | attention | **fvk_qwen35_attention_qg_f32** - Checked Vulkan command-recording boundary for direct interleaved QG consumption, Q/K normalization, partial RoPE, unchanged gate extraction and three KV-tail outputs. |
+| * | crystal | symbol | attention | **qwen35_attention_qg** - Vulkan registered shader module for fused interleaved QG attention postprocessing with a separate unchanged gate output. |
 | * | crystal | symbol | attention | **attention implementation surface for attnresidual** - `attn_residual` is the attention phase symbol at `internal/model/qwen35_prefill.go:100`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | attention | **attention implementation surface for accumulateattentiongroup** - `accumulateattentiongroup` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | attention | **attention implementation surface for accumulatepackedattentionvalues3** - `accumulatepackedattentionvalues3` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -3407,8 +3411,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3234/5762 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3127 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3234/5778 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3131 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3417,7 +3421,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4384 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4388 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3429,7 +3433,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | session-runtime | 287 | 357 | 70 |
 | gateway-engine | 247 | 306 | 59 |
 | guard-gate | 517 | 566 | 49 |
-| attention | 159 | 206 | 47 |
+| attention | 163 | 210 | 47 |
 | context-ctx | 271 | 317 | 46 |
 | pool | 46 | 87 | 41 |
 | policy-capability | 230 | 270 | 40 |

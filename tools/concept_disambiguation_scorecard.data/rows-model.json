@@ -21,7 +21,11 @@
         "qwen35sequenceattentionpostprocesslocked",
         "tryqwen35attentionpostprocesslocked",
         "fvkqwen35attentionpostprocesssupported",
-        "fvkqwen35attentionpostprocessf32"
+        "fvkqwen35attentionpostprocessf32",
+        "tryqwen35attentionqglocked",
+        "fvkqwen35attentionqgsupported",
+        "fvkqwen35attentionqgf32",
+        "qwen35attentionqg"
       ],
       "aliases": [],
       "grounding": "attnPrefillDispatch",

@@ -2259,6 +2259,16 @@
           "category": "incidental",
           "reason": "Private ABI-qualified availability accessor checking readiness, opt-in flag, nonnull Vulkan pipeline, descriptor count10 and push size36. It does not compute attention or own command recording; the actual numerical operation and Go owner are separately positioned.",
           "token": "fvk_have_qwen35_attention_postprocess"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private cached backend feature-availability boolean consumed by the separately positioned QG owner, not a separate attention operation or lifecycle contract.",
+          "token": "haveQwenAttentionQG"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ABI-qualified availability accessor requiring predecessor postprocess availability, opt-in QG flag, nonnull pipeline, eleven descriptors and36-byte push ABI. These meaningful guards expose availability, not separate numerical computation or command ownership.",
+          "token": "fvk_have_qwen35_attention_qg"
         }
       ],
       "exclude": [
@@ -2305,7 +2315,9 @@
         "executevulkanattentionwithdequantonce",
         "fak_qwen35_attention_postprocess_launch_count",
         "fvk_have_qwen35_attention_postprocess",
+        "fvk_have_qwen35_attention_qg",
         "haveQwenAttentionPostprocess",
+        "haveQwenAttentionQG",
         "linear_attn_out",
         "linear_attn_qkv_mixed",
         "mg_prefill_attn",
@@ -14809,6 +14821,11 @@
           "category": "incidental",
           "reason": "Private runtime eligibility check for opt-in packed Q5_K prompt panel: kernel availability, dimensions and 256-element packing, payload and activation index extents, and Vulkan workgroup limits. Not a support maturity tier, release qualification or performance certification.",
           "token": "fvk_q5k_matmul_panel_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-invocation geometry, doubled-input index and Vulkan grid eligibility, not release maturity, support tier or hardware certification. Its genuine attention eligibility contract is separately positioned.",
+          "token": "fvk_qwen35_attention_qg_supported"
         }
       ],
       "exclude": [
@@ -15016,6 +15033,7 @@
         "fvk_q5k_matmul_panel_supported",
         "fvk_q6k_matmul_panel_supported",
         "fvk_qwen35_attention_postprocess_supported",
+        "fvk_qwen35_attention_qg_supported",
         "fvk_qwen35_gdn_q8_in_proj_panel_supported",
         "fvk_qwen35_q8_pair_supported",
         "fvk_qwen35_residual_norm_supported",

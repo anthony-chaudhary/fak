@@ -13,10 +13,11 @@ import (
 func TestVulkanReceiptV38Q5KPanel(t *testing.T) {
 	const stem = "q5k_matmul_panel"
 	want := append(vulkanRegistryV37.stems(), stem)
-	if len(want) != 109 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 109 || !reflect.DeepEqual(want, vulkanRegistryV38.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V38 must add exactly the optional Q5_K companion panel tile to historical V37")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV38.schema
+	id, err := vulkanRegistryV38.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV38 || id.ID != VulkanShaderRegistryV38ID || id.ModuleCount != 109 {
 		t.Fatalf("V38 identity differs: %s %+v %v", schema, id, err)
 	}

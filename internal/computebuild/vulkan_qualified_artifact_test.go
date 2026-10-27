@@ -159,7 +159,7 @@ func TestVulkanReceiptV23Materialization(t *testing.T) {
 			t.Fatal("canonical materialization provenance missing")
 		}
 		for _, r := range vulkanSuccessorRegistries {
-			if r != vulkanRegistryV23 && r != vulkanRegistryV24 && r != vulkanRegistryV25 && r != vulkanRegistryV26 && r != vulkanRegistryV27 && r != vulkanRegistryV28 && r != vulkanRegistryV29 && r != vulkanRegistryV30 && r != vulkanRegistryV31 && r != vulkanRegistryV32 && r != vulkanRegistryV33 && r != vulkanRegistryV34 && r != vulkanRegistryV35 && r != vulkanRegistryV36 && r != vulkanRegistryV37 && r != vulkanRegistryV38 && r.usesQualifiedIndexScale() {
+			if r != vulkanRegistryV23 && r != vulkanRegistryV24 && r != vulkanRegistryV25 && r != vulkanRegistryV26 && r != vulkanRegistryV27 && r != vulkanRegistryV28 && r != vulkanRegistryV29 && r != vulkanRegistryV30 && r != vulkanRegistryV31 && r != vulkanRegistryV32 && r != vulkanRegistryV33 && r != vulkanRegistryV34 && r != vulkanRegistryV35 && r != vulkanRegistryV36 && r != vulkanRegistryV37 && r != vulkanRegistryV38 && r != vulkanRegistryV39 && r.usesQualifiedIndexScale() {
 				t.Fatal("historical schema acquired materialization claim")
 			}
 		}

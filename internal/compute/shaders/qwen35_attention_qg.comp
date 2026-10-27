@@ -1,0 +1,79 @@
+#version 450
+// Derived from this repository's Apache-2.0 rmsnorm.comp and
+// qwen35_partial_rope_panel.comp. Keep the 256-lane RMS tree and RoPE expression.
+// Same normalized shared F32 boundary. Read Q directly from interleaved QG,
+// and publish the unchanged gate fields into their separately owned output.
+layout(local_size_x = 256) in;
+layout(std430,binding=0) readonly buffer QG { float qg[]; };
+layout(std430,binding=1) readonly buffer K { float k[]; };
+layout(std430,binding=2) readonly buffer V { float v[]; };
+layout(std430,binding=3) readonly buffer QNorm { float qNorm[]; };
+layout(std430,binding=4) readonly buffer KNorm { float kNorm[]; };
+layout(std430,binding=5) writeonly buffer QO { float qo[]; };
+layout(std430,binding=6) writeonly buffer KRaw { float kRaw[]; };
+layout(std430,binding=7) writeonly buffer KO { float ko[]; };
+layout(std430,binding=8) writeonly buffer VO { float vo[]; };
+layout(std430,binding=9) readonly buffer RoPETable { vec2 sinCos[]; };
+layout(std430,binding=10) writeonly buffer Gate { float gate[]; };
+layout(push_constant) uniform PC {
+    int tokens; int startPos; int qHeads; int kHeads; int hd; int rotary;
+    float theta; float eps; int scalarReference;
+} pc;
+shared float red[256];
+shared float normalized[1024];
+void main() {
+    uint head = gl_WorkGroupID.x;
+    uint token = gl_WorkGroupID.y;
+    uint tid = gl_LocalInvocationID.x;
+    if (token >= uint(pc.tokens) || head >= uint(pc.qHeads + 2 * pc.kHeads)) return;
+    // V is an exact copy into the admitted append tail, with no reduction.
+    if (head >= uint(pc.qHeads + pc.kHeads)) {
+        uint h = head - uint(pc.qHeads + pc.kHeads);
+        uint base = (token * uint(pc.kHeads) + h) * uint(pc.hd);
+        uint dst = (uint(pc.startPos) + token) * uint(pc.kHeads * pc.hd) + h * uint(pc.hd);
+        for (uint i = tid; i < uint(pc.hd); i += 256u) vo[dst + i] = v[base + i];
+        return;
+    }
+    bool isQ = head < uint(pc.qHeads);
+    uint h = isQ ? head : head - uint(pc.qHeads);
+    uint base = (token * uint(isQ ? pc.qHeads : pc.kHeads) + h) * uint(pc.hd);
+    float local = 0.0;
+    for (uint i = tid; i < uint(pc.hd); i += 256u) {
+        float value = isQ ? qg[2u * base + i] : k[base + i];
+        local += value * value;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.hd) + pc.eps);
+    for (uint i = tid; i < uint(pc.hd); i += 256u) {
+        normalized[i] = (isQ ? qg[2u * base + i] : k[base + i]) * inv * (isQ ? qNorm[i] : kNorm[i]);
+    }
+    barrier();
+    uint dst = (uint(pc.startPos) + token) * uint(pc.kHeads * pc.hd) + h * uint(pc.hd);
+    for (uint d = tid; d < uint(pc.hd); d += 256u) {
+        float a = normalized[d];
+        if (!isQ) kRaw[dst + d] = a;
+        if (d < uint(pc.rotary)) {
+            uint halfDim = uint(pc.rotary / 2);
+            uint pairDim = d % halfDim;
+            uint other = pairDim + (d < halfDim ? halfDim : 0u);
+            float b = normalized[other];
+            vec2 sc;
+            if (pc.scalarReference != 0) {
+                float angle = float(pc.startPos + int(token)) * pow(pc.theta, -2.0 * float(pairDim) / float(pc.rotary));
+                sc = vec2(sin(angle), cos(angle));
+            } else {
+                sc = sinCos[uint(pc.startPos + int(token)) * halfDim + pairDim];
+            }
+            a = a * sc.y + (d < halfDim ? -b : b) * sc.x;
+        }
+        if (isQ) {
+            qo[base + d] = a;
+            gate[base + d] = qg[2u * base + uint(pc.hd) + d];
+        } else ko[dst + d] = a;
+    }
+}

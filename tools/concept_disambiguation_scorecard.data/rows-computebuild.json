@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "qwen35attentionqg",
+      "canonical": "qwen35_attention_qg",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Vulkan registered shader module for fused interleaved QG attention postprocessing with a separate unchanged gate output.",
+      "distinction": "Unlike the split-Q qwen35_attention_postprocess shader, consumes doubled interleaved QG and emits an additional unchanged gate. Unlike the fvk QG host boundary, this is the numerical shader and trusted artifact-census identity, not buffer validation or command recording. Unlike attention implementation dispatch, it implements one fused module rather than routing algorithms.",
+      "distinct_from": [
+        "fvkqwen35attentionqgf32",
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "qwen35_attention_qg",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
