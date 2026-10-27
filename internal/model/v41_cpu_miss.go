@@ -441,11 +441,11 @@ func (m *Model) v41CPUMissExpert(l int, stem string, x []float32, weight float32
 		if !ok {
 			return nil, v41GateUpError, errV41ExpertResult
 		}
-		gate, cause := v41RoutedBF16(layer, "gate/up", g, I)
+		gate, cause := v41RoutedBF16Owned(layer, "gate/up", g, I)
 		if cause != nil {
 			return nil, v41GateUpError, cause
 		}
-		up, cause := v41RoutedBF16(layer, "gate/up", u, I)
+		up, cause := v41RoutedBF16Owned(layer, "gate/up", u, I)
 		if cause != nil {
 			return nil, v41GateUpError, cause
 		}

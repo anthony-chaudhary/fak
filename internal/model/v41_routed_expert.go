@@ -45,6 +45,19 @@ func v41RoutedBF16Observed(layer int, stage string, values []float32, width int,
 		return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
 	}
 	out := make([]float32, width)
+	return v41RoutedBF16Into(layer, stage, values, out, observe)
+}
+
+// Only fresh private projection/activation arrays may enter this publication.
+// Borrowed inputs and callback results retain the ordinary defensive copy.
+func v41RoutedBF16Owned(layer int, stage string, values []float32, width int) ([]float32, error) {
+	if len(values) != width {
+		return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+	}
+	return v41RoutedBF16Into(layer, stage, values, values, nil)
+}
+
+func v41RoutedBF16Into(layer int, stage string, values, out []float32, observe func(string)) ([]float32, error) {
 	for i, v := range values {
 		if !finite32(v) {
 			return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
@@ -75,6 +88,10 @@ func (m *Model) v41FullRoutedExpertWithDevice(layer int, stem string, input []fl
 // v41RoutedBF16Publish is v41RoutedBF16 routed through the session's ordinary
 // device publication when one is bound.
 func v41RoutedBF16Publish(layer int, stage string, values []float32, width int, publish v41BF16BoundaryFunc) ([]float32, error) {
+	return v41RoutedBF16PublishInput(layer, stage, values, width, publish, false)
+}
+
+func v41RoutedBF16PublishInput(layer int, stage string, values []float32, width int, publish v41BF16BoundaryFunc, owned bool) ([]float32, error) {
 	if len(values) != width {
 		return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
 	}
@@ -82,9 +99,14 @@ func v41RoutedBF16Publish(layer int, stage string, values []float32, width int, 
 	if stage == "down" {
 		site = v41RoutedDownSite
 	}
-	return v41PublishBF16(layer, site, values, publish, func(values []float32) ([]float32, error) {
+	// Selected publications keep their original ownership/dispatch boundary.
+	owned = owned && publish == nil
+	return v41PublishBF16Input(layer, site, values, publish, func(values []float32) ([]float32, error) {
+		if owned {
+			return v41RoutedBF16Owned(layer, stage, values, width)
+		}
 		return v41RoutedBF16(layer, stage, values, width)
-	})
+	}, owned)
 }
 
 func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []float32, weight float32, cfg Config, routed v41RoutedExpertFunc, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool, publish v41BF16BoundaryFunc) ([]float32, error) {
@@ -160,16 +182,22 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 			atomic.AddInt64(&v41SwiGLUParallelCalls, 1)
 		}
 		opened = m.v41NowNanos()
-		gate, cause := v41RoutedBF16Publish(layer, "gate/up", proj(w1, x, I, H), I, publish)
+		gate, cause := v41RoutedBF16PublishInput(layer, "gate/up", proj(w1, x, I, H), I, publish, true)
 		if cause != nil {
 			return nil, cause
 		}
-		up, cause := v41RoutedBF16Publish(layer, "gate/up", proj(w3, x, I, H), I, publish)
+		up, cause := v41RoutedBF16PublishInput(layer, "gate/up", proj(w3, x, I, H), I, publish, true)
 		if cause != nil {
 			return nil, cause
 		}
 		clampSwiGLUProjections(gate, up, float32(cfg.SwigluLimit))
-		fused = make([]float32, I)
+		if publish == nil {
+			// The fresh host gate projection is dead after this elementwise
+			// read. Reuse only this private buffer, never callback storage.
+			fused = gate
+		} else {
+			fused = make([]float32, I)
+		}
 		for i := range fused {
 			fused[i] = silu(gate[i]) * up[i]
 		}
@@ -183,7 +211,7 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 		}
 		weighted[i] = float32(v * weight)
 	}
-	operand, err := v41RoutedBF16Publish(layer, "down", weighted, I, publish)
+	operand, err := v41RoutedBF16PublishInput(layer, "down", weighted, I, publish, true)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +247,7 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 		if len(w2) != H*I {
 			return nil, v41ExpertOperationErr(layer, "down", errV41ExpertResult)
 		}
-		output, err = v41RoutedBF16Publish(layer, "down", proj(w2, operand, H, I), H, publish)
+		output, err = v41RoutedBF16PublishInput(layer, "down", proj(w2, operand, H, I), H, publish, true)
 		if err != nil {
 			return nil, err
 		}
