@@ -69,6 +69,7 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request, 
 	var meta struct {
 		Stream         bool            `json:"stream"`
 		ResponseFormat json.RawMessage `json:"response_format"`
+		Text           json.RawMessage `json:"text"`
 	}
 	if err := json.Unmarshal(body, &meta); err != nil {
 		// Malformed bodies will be rejected by the normal decoder below.
@@ -78,6 +79,19 @@ func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request, 
 	// malformed structured-output carrier before any follower starts its decode.
 	if route == epRouteChatCompletions && rejectInvalidResponseFormatCarrier(w, meta.ResponseFormat) {
 		return nil, false
+	}
+	// Responses can also release before its ordinary handler validation. Reuse
+	// that wire's carrier mapping and the same schema policy before any follower
+	// is contacted; continuation refusal and valid mirror timing stay unchanged.
+	if route == epRouteResponses {
+		format, ok := responsesTextResponseFormat(meta.Text)
+		if !ok {
+			writeErrCode(w, http.StatusBadRequest, "invalid_text_format", "text.format must be an object with a non-empty string type")
+			return nil, false
+		}
+		if rejectInvalidResponseFormatCarrier(w, format) {
+			return nil, false
+		}
 	}
 	// A streaming request must still fan out: rank-local expert parallelism makes
 	// progress only if every rank runs the same forward pass, and each decode step is
