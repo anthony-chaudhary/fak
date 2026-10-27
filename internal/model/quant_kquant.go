@@ -407,6 +407,10 @@ func q2kDequantSuperBlockScalar(dst []float32, blk []byte) {
 // Other architectures leave it nil and retain their existing scalar decoders.
 var iq2DequantSuperBlockArch func(dst []float32, blk []byte, kind kQuantKind) bool
 
+// Installed only by amd64; nil preserves every other architecture's scalar
+// decoder. Each hook may decline without writes for geometry or exceptional data.
+var q5kDequantSuperBlockArch, q6kDequantSuperBlockArch func(dst []float32, blk []byte) bool
+
 func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	switch kind {
 	case kindQ3K:
@@ -414,7 +418,9 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindIQ3S:
 		iq3sDequantSuperBlock(dst, blk)
 	case kindQ6K:
-		q6kDequantSuperBlock(dst, blk)
+		if q6kDequantSuperBlockArch == nil || !q6kDequantSuperBlockArch(dst, blk) {
+			q6kDequantSuperBlock(dst, blk)
+		}
 	case kindIQ3XXS:
 		if !iq3xxsDequantSuperBlockArch(dst, blk) {
 			iq3xxsDequantSuperBlock(dst, blk)
@@ -446,7 +452,9 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindQ2K:
 		q2kDequantSuperBlock(dst, blk)
 	default:
-		q5kDequantSuperBlock(dst, blk)
+		if q5kDequantSuperBlockArch == nil || !q5kDequantSuperBlockArch(dst, blk) {
+			q5kDequantSuperBlock(dst, blk)
+		}
 	}
 }
 

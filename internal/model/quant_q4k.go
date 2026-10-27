@@ -192,7 +192,18 @@ func (qt *q4kTensor) requireRawCPU(op string) {
 // q4kDequantSuperBlock writes the 256 weights of one 144-byte Q4_K super-block into dst
 // (len >= 256). It is ggufload.dequantQ4K factored to one super-block, so the resident
 // dequant is arithmetically identical to the loader's f32 reference path.
+var q4kDequantSuperBlockArch func(dst []float32, blk []byte) bool
+
 func q4kDequantSuperBlock(dst []float32, blk []byte) {
+	if q4kDequantSuperBlockArch != nil && q4kDequantSuperBlockArch(dst, blk) {
+		return
+	}
+	q4kDequantSuperBlockScalar(dst, blk)
+}
+
+// q4kDequantSuperBlockScalar retains the original byte-for-byte arithmetic and
+// malformed-input behavior when an architecture declines before writing.
+func q4kDequantSuperBlockScalar(dst []float32, blk []byte) {
 	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
 	min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 	scales := blk[4 : 4+12]
