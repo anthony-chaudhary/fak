@@ -761,6 +761,11 @@ autopick = [
 # stripped to the real layout, and the leaves that existed in internal/ but had no
 # lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
+gpubinding = ["pkg/gpubinding/**"]
+mcpinstall = ["pkg/mcpinstall/**"]
+hostapproval = ["internal/hostapproval/**"]
+reasoneval = ["internal/reasoneval/**"]
+remotemaintresult = ["internal/remotemaintresult/**"]
 qwen38campaign = ["internal/qwen38campaign/**"]
 factorymigrate = ["internal/factorymigrate/**"]
 stopgate = ["internal/stopgate/**"]
