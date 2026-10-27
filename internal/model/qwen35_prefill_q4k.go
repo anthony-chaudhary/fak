@@ -761,7 +761,12 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	// every linear_attn.* projection, any Q6_K weight). Each panel is fully consumed before
 	// the next is built, so a single buffer is safe — same discipline as prefillBatchedQ4K.
 	scratch := &q8Panel{}
-	qz := func(X []float32, rows, width int) *q8Panel {
+	qz := func(X []float32, rows, width int, names ...string) *q8Panel {
+		// Only unobserved CPU groups whose every consumer ignores the original
+		// Q8 panel may skip it. Needed panels retain the same reused scratch.
+		if !profile && s.qwen35PrefillQ8PanelUnused(X, rows, width, names) {
+			return nil
+		}
 		t := s.phaseStart()
 		quantizeBatchPanelInto(scratch, X, rows, width)
 		s.phaseEnd("q8_panel_quantize", t)
@@ -939,7 +944,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 // so it returns nothing — extracted verbatim from prefillQwen35HybridQ4KHidden's layer loop so
 // the hot method stays under its line ceiling. The projection dispatch (proj/pgroup/qz) and the
 // per-layer f32 math are byte-for-byte identical to the inlined loop body.
-func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) {
+func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize) {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -986,9 +991,10 @@ func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, e
 	})
 	s.phaseEnd("post_attn_norm", t)
 	I := cfg.IntermediateSize
-	Xn2q := qz(Xn2, P, H)
+	gateUpNames := []string{lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight")}
+	Xn2q := qz(Xn2, P, H, gateUpNames...)
 	t = s.phaseStart()
-	gu := pgroup([]string{lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight")}, Xn2, Xn2q)
+	gu := pgroup(gateUpNames, Xn2, Xn2q)
 	G, U := gu[0], gu[1]
 	s.phaseEnd("mlp_gate_up_proj", t)
 	for t := 0; t < P; t++ {
@@ -1003,7 +1009,8 @@ func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, e
 	})
 	s.phaseEnd("mlp_activation", t)
 	t = s.phaseStart()
-	Down := proj(lp("mlp.down_proj.weight"), G, qz(G, P, I))
+	downName := lp("mlp.down_proj.weight")
+	Down := proj(downName, G, qz(G, P, I, downName))
 	s.phaseEnd("mlp_down_proj", t)
 	for t := 0; t < P; t++ {
 		m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
@@ -1076,7 +1083,7 @@ func (s *Session) profileQwen35HybridQ4KPrefill(P int, start time.Time, gemmTime
 		P, ms(q4kGPUCompute), ms(q4kRoundtrip), ms(q4kTime))
 }
 
-func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) []float32 {
+func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -1089,15 +1096,16 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 	}
 	lst := s.Cache.linear.layer(cfg, l)
 
-	Xnq := qz(Xn, P, H)
+	inputNames := []string{
+		p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
+		p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
+	}
+	Xnq := qz(Xn, P, H, inputNames...)
 	t := s.phaseStart()
 	// The in_proj quad all reads the same post-norm panel Xn → one command buffer for whichever
 	// members are q4_k-resident (in a q4_k_m Qwen3.6 the linear_attn.* projections are unpermuted
 	// and resolve to Q8, so pgroup falls back to proj for them — harmless, no regression).
-	ip := pgroup([]string{
-		p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
-		p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
-	}, Xn, Xnq)
+	ip := pgroup(inputNames, Xn, Xnq)
 	mixed, zAll, bvec, avec := ip[0], ip[1], ip[2], ip[3]
 	s.phaseEnd("qwen35_linear_in_proj", t)
 
@@ -1113,7 +1121,8 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 			panic(err)
 		}
 		t = s.phaseStart()
-		out := proj(p("linear_attn.out_proj.weight"), result.Core, qz(result.Core, P, valDim))
+		outName := p("linear_attn.out_proj.weight")
+		out := proj(outName, result.Core, qz(result.Core, P, valDim, outName))
 		s.phaseEnd("qwen35_linear_out_proj", t)
 		return out
 	}
@@ -1255,12 +1264,13 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 	})
 	s.phaseEnd("qwen35_linear_gated_norm", t)
 	t = s.phaseStart()
-	O := proj(p("linear_attn.out_proj.weight"), core, qz(core, P, valDim))
+	outName := p("linear_attn.out_proj.weight")
+	O := proj(outName, core, qz(core, P, valDim, outName))
 	s.phaseEnd("qwen35_linear_out_proj", t)
 	return O
 }
 
-func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) []float32 {
+func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -1271,10 +1281,11 @@ func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int
 	scale := cfg.attnScale()
 	attnCap := float32(cfg.AttnSoftcap)
 	p := func(str string) string { return layerName(l, str) }
-	Xnq := qz(Xn, P, H)
+	qkvNames := []string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight"), p("self_attn.v_proj.weight")}
+	Xnq := qz(Xn, P, H, qkvNames...)
 	t := s.phaseStart()
 	// q/k/v all read the same post-norm panel Xn → one command buffer for the group.
-	qkv := pgroup([]string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight"), p("self_attn.v_proj.weight")}, Xn, Xnq)
+	qkv := pgroup(qkvNames, Xn, Xnq)
 	qf, Kp, V := qkv[0], qkv[1], qkv[2]
 	s.phaseEnd("qwen35_full_qkv_proj", t)
 	Q := make([]float32, P*qWidth)
@@ -1318,7 +1329,8 @@ func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int
 	}
 	s.phaseEnd("qwen35_full_gate", t)
 	t = s.phaseStart()
-	O := proj(p("self_attn.o_proj.weight"), attnOut, qz(attnOut, P, qWidth))
+	outName := p("self_attn.o_proj.weight")
+	O := proj(outName, attnOut, qz(attnOut, P, qWidth, outName))
 	s.phaseEnd("qwen35_full_o_proj", t)
 	for t := 0; t < P; t++ {
 		m.addBiasIfPresent(O[t*H:(t+1)*H], p("self_attn.o_proj.bias"))

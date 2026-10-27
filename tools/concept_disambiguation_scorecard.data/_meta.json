@@ -4796,6 +4796,11 @@
           "category": "incidental",
           "reason": "Dequantizes bounded raw gate/up weight rows and computes scalar dot products across an expert cohort. Gate/up refers to neural-network projection tensors, not access-control, factory-policy or lifecycle gates.",
           "token": "projectRawGateUp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local string list names neural-network MLP gate and up projection tensors and is passed unchanged to projection/quantization helpers; it is not an authorization guard, policy gate, admission gate, or lifecycle barrier.",
+          "token": "gateUpNames"
         }
       ],
       "exclude": [
@@ -4986,6 +4991,7 @@
         "gateReady",
         "gateSkew",
         "gateSourcePaths",
+        "gateUpNames",
         "gateUpShape",
         "gate_reshaped",
         "gate_sigmoid",
