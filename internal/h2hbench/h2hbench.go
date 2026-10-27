@@ -86,23 +86,26 @@ func ParseArm(s string) (Arm, error) {
 
 // Config is one run's workload.
 type Config struct {
-	RunID          string
-	Host           string
-	Model          string
-	Arms           []Arm
-	ColdSizes      []int // approximate prompt tokens per cold request
-	Reps           int
-	DecodeTokens   int // max_tokens for the decode scenario; 0 skips it
-	Turns          int // multi-turn conversation length; 0 skips it
-	SystemTokens   int // multi-turn shared system prefix size
-	TurnTokens     int // new user tokens per turn
-	AnswerTokens   int // max_tokens for cold and multi-turn answers
-	Timeout        time.Duration
-	Client         *http.Client
-	DisableThink   bool // send chat_template_kwargs.enable_thinking=false
-	Progress       io.Writer
-	Sink           func(Row) error
-	ConversationsN int // multi-turn conversations per arm (default Reps)
+	SpeculativeModes  []string // nil preserves a single server-default workload
+	speculativeMode   string
+	requestedDraftCap *int
+	RunID             string
+	Host              string
+	Model             string
+	Arms              []Arm
+	ColdSizes         []int // approximate prompt tokens per cold request
+	Reps              int
+	DecodeTokens      int // max_tokens for the decode scenario; 0 skips it
+	Turns             int // multi-turn conversation length; 0 skips it
+	SystemTokens      int // multi-turn shared system prefix size
+	TurnTokens        int // new user tokens per turn
+	AnswerTokens      int // max_tokens for cold and multi-turn answers
+	Timeout           time.Duration
+	Client            *http.Client
+	DisableThink      bool // send chat_template_kwargs.enable_thinking=false
+	Progress          io.Writer
+	Sink              func(Row) error
+	ConversationsN    int // multi-turn conversations per arm (default Reps)
 	// SlotsURL is a llama-server /slots endpoint on the shared upstream. When
 	// set, each row records how many slots OTHER clients held around it, so a
 	// reading taken under foreign load is flagged and kept out of the medians.
@@ -172,20 +175,28 @@ type ServerTimings struct {
 	PredictedPerSecond float64 `json:"predicted_per_second"`
 	DraftN             int     `json:"draft_n,omitempty"`
 	DraftAccepted      int     `json:"draft_n_accepted,omitempty"`
+	draftPresent       bool
+	acceptedPresent    bool
 }
 
 // Row is one measured request.
 type Row struct {
-	Schema   string `json:"schema"`
-	RunID    string `json:"run_id"`
-	UnixMS   int64  `json:"unix_ms"`
-	Host     string `json:"host,omitempty"`
-	Model    string `json:"model"`
-	Arm      string `json:"arm"`
-	Role     string `json:"role"`
-	Scenario string `json:"scenario"`
-	Size     int    `json:"size"` // cold: target prompt tokens; decode: max tokens; multiturn: turn number
-	Rep      int    `json:"rep"`
+	RequestedSpeculation string `json:"requested_speculation,omitempty"`
+	RequestedDraftCap    *int   `json:"requested_draft_cap,omitempty"`
+	SpeculationEvidence  string `json:"speculation_evidence"`
+	SpeculativeHeader    string `json:"speculative_header,omitempty"`
+	SpeculativeTrailer   string `json:"speculative_trailer,omitempty"`
+	SpeculativeDowngrade string `json:"speculative_downgrade,omitempty"`
+	Schema               string `json:"schema"`
+	RunID                string `json:"run_id"`
+	UnixMS               int64  `json:"unix_ms"`
+	Host                 string `json:"host,omitempty"`
+	Model                string `json:"model"`
+	Arm                  string `json:"arm"`
+	Role                 string `json:"role"`
+	Scenario             string `json:"scenario"`
+	Size                 int    `json:"size"` // cold: target prompt tokens; decode: max tokens; multiturn: turn number
+	Rep                  int    `json:"rep"`
 	// Pos is this request's place in its back-to-back group of arms. On
 	// llama-server the second request of a pair measured ~400 ms slower on warm
 	// multi-turn TTFT regardless of arm (strix3), so the fold balances by Pos.
@@ -287,6 +298,28 @@ func nonce(runID, arm, tag string) string {
 
 // Run replays the workload across every arm and hands each row to cfg.Sink.
 func Run(ctx context.Context, cfg Config) ([]Row, error) {
+	if len(cfg.SpeculativeModes) > 0 {
+		modes, err := ParseSpeculativeModes(strings.Join(cfg.SpeculativeModes, ","))
+		if err != nil {
+			return nil, err
+		}
+		var rows []Row
+		for _, mode := range modes {
+			next := cfg
+			next.SpeculativeModes = nil
+			next.speculativeMode = mode
+			if mode != "server-default" {
+				n, _ := strconv.Atoi(mode)
+				next.requestedDraftCap = &n
+			}
+			part, err := Run(ctx, next)
+			rows = append(rows, part...)
+			if err != nil {
+				return rows, err
+			}
+		}
+		return rows, nil
+	}
 	if len(cfg.Arms) == 0 {
 		return nil, errors.New("h2hbench: no arms")
 	}
@@ -333,7 +366,8 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 	}
 	base := func(arm Arm, scenario string, size, rep int) Row {
 		return Row{Schema: Schema, RunID: cfg.RunID, Host: cfg.Host, Model: cfg.Model,
-			Arm: arm.Name, Role: arm.Role, Scenario: scenario, Size: size, Rep: rep}
+			Arm: arm.Name, Role: arm.Role, Scenario: scenario, Size: size, Rep: rep,
+			RequestedSpeculation: cfg.speculativeMode, RequestedDraftCap: cfg.requestedDraftCap, SpeculationEvidence: "unknown"}
 	}
 
 	// Cold prefill: identical seeded body per (size, rep), unique nonce per arm.
@@ -344,7 +378,7 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 				if err := ctx.Err(); err != nil {
 					return rows, err
 				}
-				msgs := []message{{Role: "user", Content: nonce(cfg.RunID, arm.Name, fmt.Sprintf("cold-%d-%d", size, rep)) + body +
+				msgs := []message{{Role: "user", Content: nonce(speculativeNonceID(cfg), arm.Name, fmt.Sprintf("cold-%d-%d", size, rep)) + body +
 					"\n\nIn one short sentence, what is the most frequent word above?"}}
 				r := base(arm, ScenarioCold, size, rep)
 				r.Pos = pos
@@ -365,7 +399,7 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 				if err := ctx.Err(); err != nil {
 					return rows, err
 				}
-				msgs := []message{{Role: "user", Content: nonce(cfg.RunID, arm.Name, fmt.Sprintf("decode-%d", rep)) +
+				msgs := []message{{Role: "user", Content: nonce(speculativeNonceID(cfg), arm.Name, fmt.Sprintf("decode-%d", rep)) +
 					"Write the integers from 1 to 1000 in English words, separated by commas. Do not stop early."}}
 				r := base(arm, ScenarioDecode, cfg.DecodeTokens, rep)
 				r.Pos = pos
@@ -391,7 +425,7 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 			}
 			hist := map[string][]message{}
 			for _, arm := range cfg.Arms {
-				hist[arm.Name] = []message{{Role: "system", Content: nonce(cfg.RunID, arm.Name, fmt.Sprintf("mt-%d", conv)) +
+				hist[arm.Name] = []message{{Role: "system", Content: nonce(speculativeNonceID(cfg), arm.Name, fmt.Sprintf("mt-%d", conv)) +
 					"You are a terse assistant. Reference material follows.\n" + system}}
 			}
 			for t := 0; t < cfg.Turns; t++ {
@@ -462,6 +496,9 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 		"stream":         true,
 		"stream_options": map[string]bool{"include_usage": true},
 	}
+	if cfg.requestedDraftCap != nil {
+		payload["speculative.n_max"] = *cfg.requestedDraftCap
+	}
 	if cfg.DisableThink {
 		payload["chat_template_kwargs"] = map[string]bool{"enable_thinking": false}
 	}
@@ -486,11 +523,29 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 		return "", err
 	}
 	defer resp.Body.Close()
+	r.SpeculativeHeader = resp.Header.Get("X-Fak-Speculative")
+	defer func() {
+		r.SpeculativeTrailer = resp.Trailer.Get("X-Fak-Speculative")
+		r.SpeculativeDowngrade = resp.Trailer.Get("X-Fak-Speculative-Downgrade")
+		if r.SpeculativeDowngrade == "" {
+			r.SpeculativeDowngrade = resp.Header.Get("X-Fak-Speculative-Downgrade")
+		}
+		r.SpeculationEvidence = "unknown"
+		if r.SpeculativeHeader != "" || r.SpeculativeTrailer != "" {
+			r.SpeculationEvidence = "route-reported"
+		}
+		if r.SpeculativeDowngrade != "" {
+			r.SpeculationEvidence = "downgraded"
+		}
+		if r.Server != nil && r.Server.draftPresent && r.Server.acceptedPresent && r.Server.DraftN > 0 && r.Server.DraftAccepted >= 0 && r.Server.DraftAccepted <= r.Server.DraftN {
+			r.SpeculationEvidence = "draft-observed"
+		}
+	}()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return "", fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	var first time.Time
+	var first, end time.Time
 	var answer strings.Builder
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
@@ -502,6 +557,11 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 		}
 		data = strings.TrimSpace(data)
 		if data == "[DONE]" {
+			// Stop the request clock before draining response trailers.
+			end = time.Now()
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				return answer.String(), err
+			}
 			break
 		}
 		var ch struct {
@@ -550,7 +610,9 @@ func measureOnce(ctx context.Context, cfg Config, arm Arm, msgs []message, maxTo
 	if err := sc.Err(); err != nil {
 		return answer.String(), err
 	}
-	end := time.Now()
+	if end.IsZero() {
+		end = time.Now()
+	}
 	r.E2EMS = ms(end.Sub(start))
 	if first.IsZero() {
 		return answer.String(), errors.New("no output tokens streamed")
@@ -578,30 +640,34 @@ func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 // Cell is one (arm, scenario, size) fold.
 type Cell struct {
-	Arm          string  `json:"arm"`
-	Role         string  `json:"role"`
-	Scenario     string  `json:"scenario"`
-	Size         int     `json:"size"`
-	N            int     `json:"n"`
-	Errors       int     `json:"errors"`
-	Contended    int     `json:"contended"` // rows dropped: another client shared the upstream
-	PromptTokens int     `json:"prompt_tokens_p50"`
-	TTFTP50      float64 `json:"ttft_ms_p50"`
-	TTFTP90      float64 `json:"ttft_ms_p90"`
-	PrefillP50   float64 `json:"prefill_tps_p50"`
-	DecodeP50    float64 `json:"decode_tps_p50"`
-	CacheRatio   float64 `json:"cache_ratio_mean"`
+	RequestedSpeculation string  `json:"requested_speculation,omitempty"`
+	DraftObserved        int     `json:"draft_observed"`
+	SpeculationUnknown   int     `json:"speculation_unknown"`
+	Arm                  string  `json:"arm"`
+	Role                 string  `json:"role"`
+	Scenario             string  `json:"scenario"`
+	Size                 int     `json:"size"`
+	N                    int     `json:"n"`
+	Errors               int     `json:"errors"`
+	Contended            int     `json:"contended"` // rows dropped: another client shared the upstream
+	PromptTokens         int     `json:"prompt_tokens_p50"`
+	TTFTP50              float64 `json:"ttft_ms_p50"`
+	TTFTP90              float64 `json:"ttft_ms_p90"`
+	PrefillP50           float64 `json:"prefill_tps_p50"`
+	DecodeP50            float64 `json:"decode_tps_p50"`
+	CacheRatio           float64 `json:"cache_ratio_mean"`
 }
 
 // Loss is one cell where a fak arm trails the best rival by more than lossTolerance.
 type Loss struct {
-	Scenario string  `json:"scenario"`
-	Size     int     `json:"size"`
-	Metric   string  `json:"metric"`
-	FakArm   string  `json:"fak_arm"`
-	FakValue float64 `json:"fak_value"`
-	Rival    string  `json:"rival"`
-	RivalVal float64 `json:"rival_value"`
+	RequestedSpeculation string  `json:"requested_speculation,omitempty"`
+	Scenario             string  `json:"scenario"`
+	Size                 int     `json:"size"`
+	Metric               string  `json:"metric"`
+	FakArm               string  `json:"fak_arm"`
+	FakValue             float64 `json:"fak_value"`
+	Rival                string  `json:"rival"`
+	RivalVal             float64 `json:"rival_value"`
 	// Gap is how far fak trails, as a fraction: 0.25 = fak is 25% worse.
 	Gap float64 `json:"gap"`
 }
@@ -652,8 +718,8 @@ func balancedMedian(byPos map[int][]float64) float64 {
 func Summarize(rows []Row) Report {
 	rep := Report{Schema: ReportSchema, Rows: len(rows), Losses: []Loss{}, Wins: []Loss{}}
 	type key struct {
-		arm, scenario string
-		size          int
+		arm, scenario, speculation string
+		size                       int
 	}
 	type acc struct {
 		cell                     Cell
@@ -667,14 +733,14 @@ func Summarize(rows []Row) Report {
 		if rep.RunID == "" {
 			rep.RunID, rep.Host, rep.Model = r.RunID, r.Host, r.Model
 		}
-		ks := []key{{r.Arm, r.Scenario, r.Size}}
+		ks := []key{{r.Arm, r.Scenario, r.RequestedSpeculation, r.Size}}
 		if r.Scenario == ScenarioMultiTurn && r.Size >= 2 {
-			ks = append(ks, key{r.Arm, r.Scenario, WarmTurns})
+			ks = append(ks, key{r.Arm, r.Scenario, r.RequestedSpeculation, WarmTurns})
 		}
 		for _, k := range ks {
 			a := accs[k]
 			if a == nil {
-				a = &acc{cell: Cell{Arm: r.Arm, Role: r.Role, Scenario: k.scenario, Size: k.size},
+				a = &acc{cell: Cell{Arm: r.Arm, Role: r.Role, Scenario: k.scenario, Size: k.size, RequestedSpeculation: k.speculation},
 					ttftP: map[int][]float64{}, prefillP: map[int][]float64{}, decodeP: map[int][]float64{}}
 				accs[k] = a
 				keys = append(keys, k)
@@ -686,6 +752,11 @@ func Summarize(rows []Row) Report {
 				a.cell.Contended++
 			default:
 				a.cell.N++
+				if r.SpeculationEvidence == "draft-observed" {
+					a.cell.DraftObserved++
+				} else {
+					a.cell.SpeculationUnknown++
+				}
 				a.ttft = append(a.ttft, r.TTFTMS)
 				a.ttftP[r.Pos] = append(a.ttftP[r.Pos], r.TTFTMS)
 				a.prompts = append(a.prompts, float64(r.PromptTokens))
@@ -705,6 +776,9 @@ func Summarize(rows []Row) Report {
 		}
 		if keys[i].size != keys[j].size {
 			return keys[i].size < keys[j].size
+		}
+		if keys[i].speculation != keys[j].speculation {
+			return keys[i].speculation < keys[j].speculation
 		}
 		return keys[i].arm < keys[j].arm
 	})
@@ -740,13 +814,13 @@ func scenarioRank(s string) int {
 func Compare(cells []Cell) (losses, wins []Loss) {
 	losses, wins = []Loss{}, []Loss{}
 	type sk struct {
-		scenario string
-		size     int
+		scenario, speculation string
+		size                  int
 	}
 	groups := map[sk][]Cell{}
 	var order []sk
 	for _, c := range cells {
-		k := sk{c.Scenario, c.Size}
+		k := sk{c.Scenario, c.RequestedSpeculation, c.Size}
 		if _, ok := groups[k]; !ok {
 			order = append(order, k)
 		}
@@ -792,7 +866,7 @@ func Compare(cells []Cell) (losses, wins []Loss) {
 				}
 				fv, bv := m.get(c), m.get(*best)
 				gap := relGap(fv, bv, m.lowerBetter)
-				l := Loss{Scenario: k.scenario, Size: k.size, Metric: m.name, FakArm: c.Arm, FakValue: fv, Rival: best.Arm, RivalVal: bv}
+				l := Loss{RequestedSpeculation: k.speculation, Scenario: k.scenario, Size: k.size, Metric: m.name, FakArm: c.Arm, FakValue: fv, Rival: best.Arm, RivalVal: bv}
 				switch {
 				case gap > lossTolerance:
 					l.Gap = gap
@@ -876,19 +950,19 @@ func Render(w io.Writer, rep Report) {
 	fmt.Fprintf(w, "%-9s %6s %-12s %4s %4s %4s %8s %10s %10s %11s %10s %6s\n", "scenario", "size", "arm", "n", "err", "busy", "prompt", "ttft_p50", "ttft_p90", "prefill t/s", "decode t/s", "cache")
 	for _, c := range rep.Cells {
 		fmt.Fprintf(w, "%-9s %6s %-12s %4d %4d %4d %8d %10.1f %10.1f %11.1f %10.2f %5.0f%%\n",
-			c.Scenario, sizeLabel(c.Scenario, c.Size), c.Arm, c.N, c.Errors, c.Contended, c.PromptTokens, c.TTFTP50, c.TTFTP90, c.PrefillP50, c.DecodeP50, 100*c.CacheRatio)
+			c.Scenario, sizeLabel(c.Scenario, c.Size), c.Arm+requestedModeLabel(c.RequestedSpeculation), c.N, c.Errors, c.Contended, c.PromptTokens, c.TTFTP50, c.TTFTP90, c.PrefillP50, c.DecodeP50, 100*c.CacheRatio)
 	}
 	fmt.Fprintf(w, "\nwhere fak loses (gap > %.0f%%):\n", 100*lossTolerance)
 	if len(rep.Losses) == 0 {
 		fmt.Fprintln(w, "  none")
 	}
 	for _, l := range rep.Losses {
-		fmt.Fprintf(w, "  %-9s size=%-6s %-16s %s=%.2f vs %s=%.2f  (fak %.0f%% behind)\n", l.Scenario, sizeLabel(l.Scenario, l.Size), l.Metric, l.FakArm, l.FakValue, l.Rival, l.RivalVal, 100*l.Gap)
+		fmt.Fprintf(w, "  %-9s size=%-6s %-16s %s=%.2f vs %s=%.2f  (fak %.0f%% behind)\n", l.Scenario, sizeLabel(l.Scenario, l.Size), l.Metric+requestedModeLabel(l.RequestedSpeculation), l.FakArm, l.FakValue, l.Rival, l.RivalVal, 100*l.Gap)
 	}
 	if len(rep.Wins) > 0 {
 		fmt.Fprintln(w, "where fak leads:")
 		for _, l := range rep.Wins {
-			fmt.Fprintf(w, "  %-9s size=%-6s %-16s %s=%.2f vs %s=%.2f  (fak %.0f%% ahead)\n", l.Scenario, sizeLabel(l.Scenario, l.Size), l.Metric, l.FakArm, l.FakValue, l.Rival, l.RivalVal, 100*l.Gap)
+			fmt.Fprintf(w, "  %-9s size=%-6s %-16s %s=%.2f vs %s=%.2f  (fak %.0f%% ahead)\n", l.Scenario, sizeLabel(l.Scenario, l.Size), l.Metric+requestedModeLabel(l.RequestedSpeculation), l.FakArm, l.FakValue, l.Rival, l.RivalVal, 100*l.Gap)
 		}
 	}
 }
@@ -898,4 +972,11 @@ func sizeLabel(scenario string, size int) string {
 		return "warm"
 	}
 	return strconv.Itoa(size)
+}
+
+func requestedModeLabel(mode string) string {
+	if mode == "" {
+		return ""
+	}
+	return "[requested=" + mode + "]"
 }
