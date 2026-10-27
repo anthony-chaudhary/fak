@@ -7,6 +7,7 @@ package issuepolicy
 // scoring, dispatch classification, and required-section checks stay in contract.go.
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,7 +31,8 @@ type routingBlock struct {
 // parseRoutingBlock scans body for the first fenced ```routing key:value block
 // and returns its parsed routing fields plus whether such a block was found at
 // all. Recognized keys: lane, paths (comma/space separated, each run through the
-// same cleanPathHint as the prose path parse), and expected_steps (a positive
+// same cleanPathHint as the prose path parse; JSON string arrays are also accepted),
+// and expected_steps (a positive
 // int). A key the block omits — or leaves empty / unparseable — stays unset so
 // the caller keeps the prose fallback for that key.
 func parseRoutingBlock(body string) (routingBlock, bool) {
@@ -62,10 +64,30 @@ func parseRoutingBlock(body string) (routingBlock, bool) {
 				rb.laneSet = true
 			}
 		case "paths", "path":
-			var paths []string
-			for _, tok := range strings.FieldsFunc(val, func(r rune) bool {
+			tokens := strings.FieldsFunc(val, func(r rune) bool {
 				return r == ',' || r == ' ' || r == '\t'
-			}) {
+			})
+			if strings.HasPrefix(val, "[") {
+				var values []any
+				if err := json.Unmarshal([]byte(val), &values); err != nil {
+					continue
+				}
+				tokens = nil
+				valid := true
+				for _, value := range values {
+					token, ok := value.(string)
+					if !ok {
+						valid = false
+						break
+					}
+					tokens = append(tokens, token)
+				}
+				if !valid {
+					continue
+				}
+			}
+			var paths []string
+			for _, tok := range tokens {
 				if p := cleanPathHint(tok); p != "" {
 					paths = append(paths, p)
 				}
