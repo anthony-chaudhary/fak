@@ -426,6 +426,7 @@ func TestDispatchCodexAmbientOAuthBucketKeepsConfiguredCap(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	withDispatchJSONHelper(t, func(root string, args ...string) (map[string]any, error) {
 		return map[string]any{"ok": true}, nil
 	})

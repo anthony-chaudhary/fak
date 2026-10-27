@@ -169,6 +169,7 @@ func TestDispatchTickDryRunPredictsLiveCodexLoopRefusal(t *testing.T) {
 }
 
 func TestDispatchTickTerminalHistoricalLoopIsVisibleButAdmitted(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
 	old := readSessionRows
 	readSessionRows = func() ([]sessionregistry.Record, error) {
 		return []sessionregistry.Record{{State: sessionregistry.StateFailed, Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "terminal"}}}, nil

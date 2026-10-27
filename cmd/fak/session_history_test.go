@@ -55,7 +55,9 @@ func TestRunSessionHistoryAggregateAndDrillDown(t *testing.T) {
 }
 
 func TestRunSessionHistoryMissingDefaultIndexUsesRuntimeBehavior(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	var out, errOut bytes.Buffer
 	if code := runSessionHistory(&out, &errOut, nil); code != 0 || strings.Contains(errOut.String(), "--index is required") {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
