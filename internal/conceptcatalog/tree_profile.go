@@ -24,11 +24,14 @@ import (
 // for the qualified baseline, not promised for arbitrary future site plugins.
 const conceptTreeProfileEnv = "FAK_CONCEPT_TREE_PROFILE"
 const conceptTreeProfileV1 = "isolated-v1"
+const conceptTreeProfileV2 = "isolated-v2"
 const conceptScriptSHA = "f03ebadc6443c4f4a0533118ebb007930b0e70218f0bf3c9230f4fd77d786259"
 const conceptPythonSHA = "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7"
 const conceptLibPythonSHA = "7e177a680eabb11fcb7d3867f7a1b9c4b93a9bd5b18129ce1af51ec07977b024"
 const conceptStdlibSHA = "bcd17fc66d37e32b97d12ceda5d089bf47e7ea6e1b494615c5c434ab17297fc8"
+const conceptStdlibV2SHA = "c8646082e9310ad2fa3cb8cd0038c87e63041f95444adba8bffa6163484bff14"
 const conceptToolsSHA = "62313b76d15080e1d912367e6a29170fc5dd71489522e446d10719331a65ddb2"
+const conceptToolsV2SHA = "4312ceeba9394b80c3f4145dc4afe413d3eb4b085513b9fc7ae93b0b80caeade"
 
 // A materialized tree carries its execution contract explicitly. Sparse roots
 // must never be handed to the ordinary generator without this descriptor.
@@ -36,7 +39,7 @@ type conceptGitTree struct {
 	root    string
 	profile *conceptTreeProfile
 }
-type conceptTreeProfile struct{ tree, python, prefix string }
+type conceptTreeProfile struct{ tree, python, prefix, stdlibSHA string }
 
 func conceptDigest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func conceptFileDigest(path string) (string, error) {
@@ -64,7 +67,7 @@ func conceptProfileEnvironmentEligible(env []string) bool {
 	return true
 }
 
-func conceptRuntimeProfile() (*conceptTreeProfile, error) {
+func conceptRuntimeProfile(stdlibSHA string) (*conceptTreeProfile, error) {
 	if runtime.GOOS != "linux" {
 		return nil, nil
 	}
@@ -83,7 +86,7 @@ func conceptRuntimeProfile() (*conceptTreeProfile, error) {
 	if filepath.Base(python) != "python3.12" || filepath.Base(filepath.Dir(python)) != "bin" {
 		return nil, nil
 	}
-	p := &conceptTreeProfile{python: python, prefix: filepath.Dir(filepath.Dir(python))}
+	p := &conceptTreeProfile{python: python, prefix: filepath.Dir(filepath.Dir(python)), stdlibSHA: stdlibSHA}
 	if e = p.verifyRuntime(); e != nil {
 		return nil, nil
 	}
@@ -177,14 +180,28 @@ func (p *conceptTreeProfile) verifyRuntime() error {
 		return e
 	}
 	sort.Strings(records)
-	if conceptDigest([]byte(strings.Join(records, ""))) != conceptStdlibSHA {
+	if conceptDigest([]byte(strings.Join(records, ""))) != p.stdlibSHA {
 		return fmt.Errorf("profile stdlib identity")
 	}
 	return nil
 }
 
+// Each explicit profile admits only its independently qualified tools surface.
+// In particular, v2 does not widen v1 or turn an unknown selector into a profile.
+func conceptProfilePins(profile string) (tools, stdlib string, selected bool) {
+	switch profile {
+	case conceptTreeProfileV1:
+		return conceptToolsSHA, conceptStdlibSHA, true
+	case conceptTreeProfileV2:
+		return conceptToolsV2SHA, conceptStdlibV2SHA, true
+	default:
+		return "", "", false
+	}
+}
+
 func qualifyConceptTreeProfile(root, tree string) (*conceptTreeProfile, error) {
-	if os.Getenv(conceptTreeProfileEnv) != conceptTreeProfileV1 || runtime.GOOS != "linux" {
+	toolsSHA, stdlibSHA, selected := conceptProfilePins(os.Getenv(conceptTreeProfileEnv))
+	if !selected || runtime.GOOS != "linux" {
 		return nil, nil
 	}
 	// Missing/changed script is ineligible, while failure to inspect the tree is fatal.
@@ -212,7 +229,7 @@ func qualifyConceptTreeProfile(root, tree string) (*conceptTreeProfile, error) {
 		surface = append(surface, []byte(row)...)
 		surface = append(surface, 0)
 	}
-	if !scriptPresent || conceptDigest(surface) != conceptToolsSHA {
+	if !scriptPresent || conceptDigest(surface) != toolsSHA {
 		return nil, nil
 	}
 	script, e := git(root, "show", tree+":tools/concept_disambiguation_scorecard.py")
@@ -222,7 +239,7 @@ func qualifyConceptTreeProfile(root, tree string) (*conceptTreeProfile, error) {
 	if conceptDigest(script) != conceptScriptSHA {
 		return nil, nil
 	}
-	p, e := conceptRuntimeProfile()
+	p, e := conceptRuntimeProfile(stdlibSHA)
 	if p != nil {
 		p.tree = tree
 	}
