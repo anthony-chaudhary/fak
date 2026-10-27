@@ -491,7 +491,8 @@ extern "C" int fcuda_graph_end_launch(void) {
   }
   if (e != cudaSuccess) {
     fprintf(stderr, "fak-cuda: graph fence: %s\n", cudaGetErrorString(e));
-    if (rc == 0) rc = FCUDA_GRAPH_FENCE_FAILED;
+    // A failed fence leaves execution uncertain even when the launch also failed.
+    rc = FCUDA_GRAPH_FENCE_FAILED;
   }
   cudaGraphDestroy(graph); // keep g_exec for the next token's ExecUpdate
   return rc;
