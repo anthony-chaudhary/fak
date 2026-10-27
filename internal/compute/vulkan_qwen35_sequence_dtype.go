@@ -56,6 +56,7 @@ func qwen35SequenceKQuantBlockBytes(dt Dtype) (int64, bool) {
 		return 176, true
 	case Q3_K:
 		return 110, true
+	default:
+		return 0, false
 	}
-	return 0, false
 }
