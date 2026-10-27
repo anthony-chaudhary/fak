@@ -198,6 +198,140 @@ def test_global_tick_command_targets_the_global_ledger() -> None:
     assert "recent-feature-dogfood: OK (recent_features_dogfooded)" in cmd
 
 
+def _assert_probe_timeout_reaps_descendant(mode: str) -> None:
+    """Private Linux helper owns and reaps the probe's orphaned descendant."""
+    import ctypes
+    import os
+    import signal
+    import time
+    from unittest.mock import patch
+
+    # This runs only in its own Python subprocess, never in the test runner.
+    # Adoption lets waitpid prove actual reap rather than mistake a zombie for
+    # a live process or depend on the host's PID 1 to clean up the fixture.
+    libc = ctypes.CDLL(None, use_errno=True)
+    assert libc.prctl(36, 1, 0, 0, 0) == 0, ctypes.get_errno()  # PR_SET_CHILD_SUBREAPER
+    mod = load()
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        identity = root / "fixture-pids.json"
+        program = (
+            "import json, os, subprocess, sys\n"
+            "from pathlib import Path\n"
+            "child = subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(10)'])\n"
+            "Path(sys.argv[1]).write_text(json.dumps({'descendant': child.pid}))\n"
+            "if sys.argv[2] == 'exited': os._exit(0)\n"
+            "child.wait(timeout=10)\n"
+        )
+        launched = []
+        real_popen = subprocess.Popen
+
+        def launch(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            launched.append(proc)
+            communicate = proc.communicate
+            ready = False
+
+            def communicate_after_ready(*args, **kwargs):
+                nonlocal ready
+                if not ready:
+                    deadline = time.monotonic() + 3
+                    while not identity.exists() and time.monotonic() < deadline:
+                        time.sleep(0.005)
+                    assert identity.exists(), "fixture did not reach its readiness handshake"
+                    if mode == "exited":
+                        # Observe exit without releasing the leader PID/group
+                        # identity before the production timeout cleanup runs.
+                        info = None
+                        while time.monotonic() < deadline:
+                            info = os.waitid(os.P_PID, proc.pid,
+                                             os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                            if info is not None:
+                                break
+                            time.sleep(0.005)
+                        assert info is not None, "fixture leader did not exit before timeout"
+                        assert info.si_code == os.CLD_EXITED and info.si_status == 0
+                    ready = True
+                return communicate(*args, **kwargs)
+
+            proc.communicate = communicate_after_ready
+            return proc
+
+        descendant = None
+        reaped = False
+        status = None
+        try:
+            probe = mod.Probe("timeout-fixture", "owned descendant fixture",
+                              [sys.executable, "-c", program, str(identity), mode])
+            with patch.object(subprocess, "Popen", side_effect=launch):
+                result = mod.run_probe(probe, root, timeout=0.1, runner=mod.run_completed)
+            assert result["exit_code"] == 124 and not result["ok"]
+            assert result["required"] is True
+            assert result["reason"] == "timed out after 0.1s"
+            assert len(launched) == 1 and launched[0].returncode is not None
+            descendant = json.loads(identity.read_text())["descendant"]
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                pid, status = os.waitpid(descendant, os.WNOHANG)
+                if pid == descendant:
+                    reaped = True
+                    break
+                time.sleep(0.005)
+            assert reaped, "timed-out probe left its owned descendant alive"
+            assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+        finally:
+            # The negative control must also leave no fixture process behind.
+            # Never signal a PID after waitpid has released its owned identity.
+            for proc in launched:
+                if proc.returncode is None:
+                    proc.kill()
+                    proc.wait(timeout=2)
+            if descendant is None and identity.exists():
+                descendant = json.loads(identity.read_text())["descendant"]
+            if descendant is not None and not reaped:
+                pid, _ = os.waitpid(descendant, os.WNOHANG)
+                if pid == 0:
+                    os.kill(descendant, signal.SIGKILL)
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline:
+                        if os.waitpid(descendant, os.WNOHANG)[0] == descendant:
+                            break
+                        time.sleep(0.005)
+                    else:
+                        raise AssertionError("fixture cleanup could not reap owned descendant")
+
+
+def test_probe_timeout_reaps_owned_descendant_and_keeps_failure() -> None:
+    # fak-test:runtime medium est=2s lane=default
+    # Linux subreaper isolation is only a test mechanism; production uses POSIX
+    # sessions. Neither variant invokes fak, Go, git, a shell, or the network.
+    if sys.platform != "linux":
+        return
+    helper = (
+        "import importlib.util, sys\n"
+        "spec = importlib.util.spec_from_file_location('dogfood_test_helper', sys.argv[1])\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "mod._assert_probe_timeout_reaps_descendant(sys.argv[2])\n"
+    )
+    for mode in ("alive", "exited"):
+        result = subprocess.run([sys.executable, "-c", helper, __file__, mode],
+                                capture_output=True, text=True, timeout=12)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_run_completed_preserves_captured_nonzero_result() -> None:
+    # fak-test:runtime fast est=1s lane=default
+    mod = load()
+    with tempfile.TemporaryDirectory() as directory:
+        result = mod.run_completed(
+            [sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr); sys.exit(7)"],
+            Path(directory), timeout=2,
+        )
+    assert result.returncode == 7 and result.stdout == "out\n" and result.stderr == "err\n"
+
+
 def _run_all() -> int:
     tests = sorted((n, f) for n, f in globals().items() if n.startswith("test_") and callable(f))
     failed = 0

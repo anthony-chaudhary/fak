@@ -31,6 +31,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -316,15 +317,36 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
 
 
 def run_completed(command: list[str], root: Path, timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=str(root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
+    options = dict(cwd=str(root), text=True, encoding="utf-8", errors="replace")
+    if os.name != "posix":
+        # Windows needs a separate job-object/tree-reap contract; preserve its
+        # existing launch behavior rather than claim POSIX groups cover it.
+        return subprocess.run(command, capture_output=True, timeout=timeout, **options)
+    proc = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True, **options,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+    except BaseException:
+        # communicate's timeout has not reaped the session leader. Signal its
+        # known group before wait/poll can release that identity, including when
+        # an exited leader's descendant still owns the captured pipe handles.
+        if proc.returncode is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        # Do not use Popen's context manager or an unbounded second communicate:
+        # a descendant that escaped the session could keep a pipe open forever.
+        proc.wait(timeout=5)
+        raise
+    finally:
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
 
 
 def load_probe_json(probe: Probe, proc: subprocess.CompletedProcess[str], root: Path) -> tuple[Any | None, str]:
