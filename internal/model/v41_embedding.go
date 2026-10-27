@@ -54,5 +54,8 @@ func (m *Model) v41EmbeddingPanelOn(ids []int, ops *v41DeviceGatherOps) ([]float
 	for t := range ids {
 		scaleEmbedInPlace(panel[t*H:(t+1)*H], cfg)
 	}
+	if len(ids) > 0 && ops != nil {
+		ops.owner.observeHostArm("embedding-panel")
+	}
 	return panel, nil
 }
