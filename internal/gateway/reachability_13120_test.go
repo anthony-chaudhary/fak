@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -60,6 +62,7 @@ func TestLastAdmissionDecisionResolvesBareServedTrace(t *testing.T) {
 // TestLastAdmissionDecisionPrefersLatestSuffixedForBase pins that when a base trace has
 // several suffixed decisions (a queued request later promoted, a retry), the read-back
 // returns the LATEST one, not an arbitrary map-order pick.
+// fak-test:runtime fast est=10ms lane=default
 func TestLastAdmissionDecisionPrefersLatestSuffixedForBase(t *testing.T) {
 	c := NewAdmissionController(AdmissionPolicy{TokenBudget: 1, MaxWaiting: 8, AgingRounds: 1})
 
@@ -69,12 +72,44 @@ func TestLastAdmissionDecisionPrefersLatestSuffixedForBase(t *testing.T) {
 	}
 	defer l1.Release()
 
-	// Second request on the same base trace queues behind the first (budget exhausted);
-	// an already-cancelled context makes it return promptly after recording #2.
-	canceled, cancel := context.WithCancel(context.Background())
+	// Witness the second request's queued receipt before cancelling: a context
+	// cancelled before Acquire returns without recording an admission decision.
+	queued := make(chan struct{}, 1)
+	c.SetClock(func() time.Time {
+		select {
+		case queued <- struct{}{}:
+		default:
+		}
+		return time.Unix(1, 0)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		lease, err := c.Acquire(ctx, SeqRequest{TraceID: "gw-9", SessionID: "gw-9", Tokens: 1, Priority: 1})
+		if lease != nil {
+			lease.Release()
+		}
+		done <- err
+	}()
+	select {
+	case <-queued:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Acquire never recorded its queued decision")
+	}
+	// The lookup takes the controller mutex, joining the receipt write whose
+	// timestamp signalled queued while Acquire still held that mutex.
+	if rec, ok := c.LastAdmissionDecision("gw-9#2"); !ok || rec.Verdict != "queued" {
+		t.Fatalf("second queued receipt = %+v, found=%v", rec, ok)
+	}
 	cancel()
-	if _, err := c.Acquire(canceled, SeqRequest{TraceID: "gw-9", SessionID: "gw-9", Tokens: 1, Priority: 1}); err == nil {
-		t.Fatal("second Acquire with a cancelled context returned no error")
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("second Acquire error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Acquire did not finish after cancellation")
 	}
 
 	rec, ok := c.LastAdmissionDecision("gw-9")
