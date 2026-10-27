@@ -134,6 +134,7 @@ function Build-Shaders {
     $shaders += "qwen35_gdn_q8_in_proj_panel"
     $shaders += "qwen35_attention_postprocess"
     $shaders += "q6k_matmul_panel"
+    $shaders += "qwen35_residual_norm"
     $shaders += "qwen35_gdn_prefill_tiled"
     $shaders += "qwen35_gdn_prefill_norm"
     $shaders += "qwen35_gdn_verify_tiled"

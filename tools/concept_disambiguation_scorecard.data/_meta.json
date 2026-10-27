@@ -14799,6 +14799,11 @@
           "category": "incidental",
           "reason": "Private runtime eligibility check for opt-in packed Q6_K prompt panel: kernel availability, dimensions and 256-element packing, payload and activation index extents, and Vulkan workgroup limits. Not a support maturity tier, release qualification or performance certification.",
           "token": "fvk_q6k_matmul_panel_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private runtime eligibility predicate for opt-in Vulkan residual normalization checking pipeline availability, positive panel dimensions, finite positive epsilon, signed-index and allocation extents and workgroup count. It expresses no support tier, release maturity or hardware validation claim.",
+          "token": "fvk_qwen35_residual_norm_supported"
         }
       ],
       "exclude": [
@@ -15007,6 +15012,7 @@
         "fvk_qwen35_attention_postprocess_supported",
         "fvk_qwen35_gdn_q8_in_proj_panel_supported",
         "fvk_qwen35_q8_pair_supported",
+        "fvk_qwen35_residual_norm_supported",
         "fvk_v41_f32_finite_count_supported",
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",

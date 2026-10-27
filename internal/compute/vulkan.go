@@ -194,6 +194,7 @@ func init() {
 		haveQ8GDNInProjPanel:         C.fvk_have_qwen35_gdn_q8_in_proj_panel() != 0,
 		haveQwenAttentionPostprocess: C.fvk_have_qwen35_attention_postprocess() != 0,
 		haveQ6KPanel:                 C.fvk_have_q6k_matmul_panel() != 0,
+		haveQwenResidualNorm:         C.fvk_have_qwen35_residual_norm() != 0,
 		haveQ8SequencePair:           C.fvk_have_qwen35_q8_pair() != 0,
 		haveAttention:                true,
 		haveCoopmat:                  C.fvk_have_cooperative_matrix() != 0,
@@ -469,6 +470,7 @@ type vulkanBackend struct {
 	haveQ8GDNInProjPanel         bool
 	haveQwenAttentionPostprocess bool
 	haveQ6KPanel                 bool
+	haveQwenResidualNorm         bool
 	haveQ8SequencePair           bool
 	haveCoopmat                  bool
 	haveAttention                bool

@@ -13,10 +13,11 @@ import (
 func TestVulkanReceiptV36Q6KPanel(t *testing.T) {
 	const stem = "q6k_matmul_panel"
 	want := append(vulkanRegistryV35.stems(), stem)
-	if len(want) != 107 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 107 || !reflect.DeepEqual(want, vulkanRegistryV36.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V36 must add exactly the optional Q6_K panel tile to historical V35")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV36.schema
+	id, err := vulkanRegistryV36.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV36 || id.ID != VulkanShaderRegistryV36ID || id.ModuleCount != 107 {
 		t.Fatalf("V36 identity differs: %s %+v %v", schema, id, err)
 	}

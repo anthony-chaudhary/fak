@@ -709,9 +709,19 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 			branch = mul(layer.O, context)
 			attention++
 		}
-		C.fvk_add_f32(v.vp(x), v.vp(branch), C.int(tokens*req.Hidden))
+		stageBeforeResidualNorm := stage
+		stage = "residual-post-norm"
+		post, fusedResidualNorm, residualNormErr := v.tryQwen35ResidualNormLocked(x, branch, layer.PostNorm, tokens, req.RMSNormEpsilon)
+		if residualNormErr != nil {
+			return result, qwen35VulkanSequenceError(stage, layerIndex, residualNormErr.Error())
+		}
+		if !fusedResidualNorm {
+			stage = stageBeforeResidualNorm
+			C.fvk_add_f32(v.vp(x), v.vp(branch), C.int(tokens*req.Hidden))
+			stage = "ffn"
+			post = norm(x, layer.PostNorm, tokens)
+		}
 		stage = "ffn"
-		post := norm(x, layer.PostNorm, tokens)
 		gate, up := v.qwen35VulkanSequenceMatMulPairLocked(layer.Gate, layer.Up, post, tokens)
 		activated, _ := v.devTr([]int{tokens, req.Intermediate}, F32)
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(activated), C.int(tokens*req.Intermediate))

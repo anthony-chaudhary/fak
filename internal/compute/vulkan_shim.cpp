@@ -412,7 +412,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_ATTENTION_SPLIT_KV, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_V41_SHARED_ATTENTION_SPLIT, K_QWEN35_GDN_Q8_IN_PROJ_PANEL, K_QWEN35_ATTN_POSTPROCESS, K_Q6K_MATMUL_PANEL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_ATTENTION_SPLIT_KV, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_V41_SHARED_ATTENTION_SPLIT, K_QWEN35_GDN_Q8_IN_PROJ_PANEL, K_QWEN35_ATTN_POSTPROCESS, K_Q6K_MATMUL_PANEL, K_QWEN35_RESIDUAL_NORM, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -424,7 +424,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_IQ4XS_MATVEC: case K_IQ1S_MATVEC: case K_IQ2XS_MATVEC: case K_IQ2XXS_MATVEC: case K_IQ3S_MATVEC: case K_IQ2S_MATVEC: case K_IQ3XXS_MATVEC:
     case K_MM_CM1_Q2K: case K_MM_CM1_IQ2XXS: case K_MM_CM1_IQ2XS: case K_MM_CM1_IQ2S: case K_MM_CM1_IQ3XXS: case K_MM_CM1_IQ3S: case K_MM_CM1_IQ1S: case K_MM_CM1_IQ4XS: case K_MM_CM1_Q4K:
         return g_dp.otherMatmul;
-    case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
+    case K_RMSNORM: case K_QWEN35_RESIDUAL_NORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
     case K_RMSNORM_Q4K_MATMUL2: case K_V41_EXACT_RMSNORM:
         return g_dp.otherNorm;
@@ -709,6 +709,7 @@ bool g_have_coopmat_f16_16 = false;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
 int g_have_q6k_matmul_panel = 0;
+int g_have_qwen35_residual_norm = 0;
 bool g_qwen35Q8PairEnabled = false;
 int g_have_q5k_matmul = 0;
 int g_have_q3k_matmul = 0;
@@ -1765,6 +1766,7 @@ const char* const kKernelNames[] = {
     "qwen35_gdn_q8_in_proj_panel",
     "qwen35_attention_postprocess",
     "q6k_matmul_panel",
+    "qwen35_residual_norm",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -3210,6 +3212,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_qwen35_attention_postprocess = 0;
     g_have_q6k_matmul = 0;
     g_have_q6k_matmul_panel = 0;
+    g_have_qwen35_residual_norm = 0;
     g_qwen35Q8PairEnabled = false;
     g_have_q5k_matmul = 0;
     g_have_attention_split_kv = 0;
@@ -3721,6 +3724,15 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
     g_have_q6k_matmul = buildKernel(g_kern[K_Q6K_MATMUL], P("q6k_matmul.spv"),
                                     3, 3 * sizeof(int)) ? 1 : 0;
+    const char* residualNorm = std::getenv("FAK_VULKAN_QWEN35_RESIDUAL_NORM");
+    if (residualNorm && std::strcmp(residualNorm, "1") == 0 &&
+        limits.maxComputeWorkGroupInvocations >= 256 && limits.maxComputeWorkGroupSize[0] >= 256 &&
+        limits.maxComputeSharedMemorySize >= 256 * sizeof(float) &&
+        limits.maxPerStageDescriptorStorageBuffers >= 4 && limits.maxDescriptorSetStorageBuffers >= 4 &&
+        limits.maxPushConstantsSize >= 12) {
+        g_have_qwen35_residual_norm = buildKernel(g_kern[K_QWEN35_RESIDUAL_NORM],
+            P("qwen35_residual_norm.spv"), 4, 12) ? 1 : 0;
+    }
     const char* q6Panel = std::getenv("FAK_VULKAN_Q6K_PANEL");
     if (g_have_q6k_matmul && q6Panel && std::strcmp(q6Panel, "1") == 0 &&
         limits.maxComputeWorkGroupInvocations >= 256 && limits.maxComputeWorkGroupSize[0] >= 256 &&
@@ -5291,6 +5303,11 @@ int fvk_have_qwen35_gdn_q8_in_proj_panel(void) {
 int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 int fvk_have_q6k_matmul(void) { return g_have_q6k_matmul; }
+int fvk_have_qwen35_residual_norm(void) {
+    return g_ready && g_have_qwen35_residual_norm &&
+        g_kern[K_QWEN35_RESIDUAL_NORM].pipe != VK_NULL_HANDLE &&
+        g_kern[K_QWEN35_RESIDUAL_NORM].nbuf == 4 && g_kern[K_QWEN35_RESIDUAL_NORM].pcsize == 12;
+}
 int fvk_have_q6k_matmul_panel(void) {
     return g_ready && g_have_q6k_matmul && g_have_q6k_matmul_panel &&
         g_kern[K_Q6K_MATMUL_PANEL].pipe != VK_NULL_HANDLE &&
@@ -5996,6 +6013,44 @@ void fvk_matmul3_f32(const void* dWq, const void* dWk, const void* dWv, const vo
     struct { int qOut, kOut, vOut, inDim, P; } pc{qOut, kOut, vOut, in, P};
     Buffer* bufs[7] = {B((void*)dWq), B((void*)dWk), B((void*)dWv), B((void*)dX), B(dQ), B(dK), B(dV)};
     dispatch(g_kern[K_MATMUL3], bufs, &pc, sizeof(pc), (uint32_t)P);
+}
+
+extern "C" int fvk_qwen35_residual_norm_supported(int rows, int n, float eps) {
+    return fvk_have_qwen35_residual_norm() && rows > 1 && n > 0 &&
+        std::isfinite(eps) && eps > 0 &&
+        uint64_t(rows) * uint64_t(n) <= INT32_MAX &&
+        uint64_t(rows) * uint64_t(n) <= std::numeric_limits<size_t>::max() / sizeof(float) &&
+        uint64_t(rows) <= g_maxComputeWorkGroupCountX;
+}
+extern "C" int fvk_qwen35_residual_norm_f32(void* x, const void* delta,
+    const void* weight, void* y, int rows, int n, float eps) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (!fvk_qwen35_residual_norm_supported(rows, n, eps)) return 2;
+    const uint64_t panelBytes = uint64_t(rows) * uint64_t(n) * sizeof(float);
+    Buffer* bufs[4] = {B(x), B(delta), B(weight), B(y)};
+    const uint64_t required[4] = {panelBytes, panelBytes, uint64_t(n) * sizeof(float), panelBytes};
+    for (int i = 0; i < 4; ++i) {
+        const Buffer* b = bufs[i];
+        if (!b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE || required[i] > b->bytes ||
+            b->bytes > std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    // X is intentionally read/write; it must be independent of both read-only
+    // operands and the fresh normalized output. Read-only inputs may coincide.
+    for (int i = 1; i < 4; ++i) if (aliases(bufs[0], bufs[i])) return 2;
+    if (aliases(bufs[3], bufs[1]) || aliases(bufs[3], bufs[2])) return 2;
+    struct Push { int32_t rows, n; float eps; } pc{rows, n, eps};
+    static_assert(sizeof(Push) == 12, "Qwen residual norm push ABI must be 12 bytes");
+    if (!dispatch(g_kern[K_QWEN35_RESIDUAL_NORM], bufs, &pc, sizeof(pc), uint32_t(rows), 1, true)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
 }
 
 void fvk_rmsnorm_f32(const void* dX, const void* dW, void* dY, int rows, int n, float eps) {
