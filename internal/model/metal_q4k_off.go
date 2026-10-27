@@ -74,10 +74,10 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 	return nil
 }
 
-// q4kGemmGroupDispatch always declines in the pure-Go build (no Metal) so the prefill caller loops
-// its per-weight proj. The Metal one-command-buffer batched-GEMM group lives in metal_q4k_on.go.
+// q4kGemmGroupDispatch shares activation quantization for eligible CPU Q4_K groups.
+// Declined members retain the caller's ordinary per-weight projection fallback.
 func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
-	return nil
+	return s.q4kGemmGroupCPU(names, Xf, P)
 }
 
 // q4kFusedMLP always declines in the pure-Go build; the fused on-GPU SwiGLU MLP lives in
