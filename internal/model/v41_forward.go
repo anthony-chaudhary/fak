@@ -847,9 +847,40 @@ func v41SuffixFailureIsSelected(m *Model, err error) bool {
 // history on the reference path, so the session state and the returned logits
 // are exactly what a cold prefill would produce.
 func (s *Session) prefillV41Refold(st *v41ForwardState, startLen int, ids []int, wantLogits bool) []float32 {
-	st.history = st.history[:startLen]
 	var act *Activations
 	var ferr error
+	complete := false
+	defer func() {
+		if complete || s.halClosed {
+			return
+		}
+		// Earlier suffix positions may already own advanced layer state. Once
+		// history is rewound, a failed rebuild cannot certify a usable prefix;
+		// restoring history alone also cannot repair a failed ubatch's ring rows.
+		s.halClosed = true
+		if s.halFailure == nil {
+			cause := ferr
+			if cause == nil {
+				cause = errors.New("v41 suffix refold did not complete")
+			}
+			failure := &BackendForwardOperationError{
+				Forward: ForwardPathKind("deepseek41"), Path: "v41-suffix-refold",
+				Layer: -1, Stage: "rebuild", Cause: cause,
+			}
+			s.halFailure = failure
+			// The sticky refusal precedes even diagnostic callbacks. Teardown
+			// remains attempted if Name panics, without replacing the primary.
+			suppressBackendCleanupPanic(func() {
+				defer s.closeBackendOwned()
+				if s.Backend != nil {
+					failure.Backend = s.Backend.Name()
+				}
+			})
+		} else {
+			suppressBackendCleanupPanic(s.closeBackendOwned)
+		}
+	}()
+	st.history = st.history[:startLen]
 	func() {
 		endBatch := s.v41BeginStepBatch()
 		bodyComplete := false
@@ -867,7 +898,9 @@ func (s *Session) prefillV41Refold(st *v41ForwardState, startLen int, ids []int,
 	}
 	s.M.v41NoteWorkload(v41WorkloadSuffixRefold, len(st.history), len(ids))
 	s.M.v41NoteExpertFaultToken(len(ids))
-	return lastLogits(act)
+	logits := lastLogits(act)
+	complete = true
+	return logits
 }
 
 // v41IncrementalStepProbe is an optional test-only observer invoked after

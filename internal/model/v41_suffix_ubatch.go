@@ -90,27 +90,30 @@ func (s *Session) v41SuffixUbatchBody(ids []int, wantLogits bool) (logits []floa
 	view := append(base[:len(base):len(base)], ids...)
 	admissionReusable := false
 	for k, id := range ids {
-		// A step takes its position and Engram context from history; each
-		// position begins as if the earlier suffix positions had committed.
-		st.history = view[:len(base)+k]
-		// Reuse shape admission only across callback-free construction. A
-		// selected embedding, initial-mHC or clock hook may change model wiring;
-		// even if it removes itself, its successor must re-admit normally.
-		callbackFree := st.gatherOps.embeddingGatherFunc() == nil && st.mhcDevice == nil && v41ActivationTraceEnvPath() == ""
-		if ledger := v41ExpertFaultLedgerOf(m, false); ledger != nil {
-			ledger.mu.Lock()
-			callbackFree = callbackFree && ledger.nowNanos == nil
-			ledger.mu.Unlock()
-		}
 		var tx *v41StepTransaction
 		var berr error
-		if admissionReusable && callbackFree {
-			tx, berr = m.beginV41StepAdmitted(id, st, &v41ProjScratch{})
-		} else {
-			tx, berr = m.beginV41Step(id, st, &v41ProjScratch{})
-		}
-		admissionReusable = callbackFree && berr == nil
-		st.history = base
+		func() {
+			// This synthetic history is only position/Engram input to begin.
+			// Restore the committed boundary even if a callback panics or exits;
+			// the step journal owns layer state, not this temporary history view.
+			defer func() { st.history = base }()
+			st.history = view[:len(base)+k]
+			// Reuse shape admission only across callback-free construction. A
+			// selected embedding, initial-mHC or clock hook may change model wiring;
+			// even if it removes itself, its successor must re-admit normally.
+			callbackFree := st.gatherOps.embeddingGatherFunc() == nil && st.mhcDevice == nil && v41ActivationTraceEnvPath() == ""
+			if ledger := v41ExpertFaultLedgerOf(m, false); ledger != nil {
+				ledger.mu.Lock()
+				callbackFree = callbackFree && ledger.nowNanos == nil
+				ledger.mu.Unlock()
+			}
+			if admissionReusable && callbackFree {
+				tx, berr = m.beginV41StepAdmitted(id, st, &v41ProjScratch{})
+			} else {
+				tx, berr = m.beginV41Step(id, st, &v41ProjScratch{})
+			}
+			admissionReusable = callbackFree && berr == nil
+		}()
 		if berr != nil {
 			return nil, berr
 		}
