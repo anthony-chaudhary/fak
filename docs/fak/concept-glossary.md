@@ -1777,3 +1777,10 @@ Grouped-head rectangular prefill attention implementation supporting explicitly 
 Metadata-only constructor for opt-in host expert raw gate/up row-streaming. It validates geometry, absence of retained dense scratch and competing cached/resident representations, an unbounded checkpoint pool and eligible immutable Q2_K/Q3_K checkpoint entries before returning deferred raw-weight loading state; otherwise returns nil.
 
 **Distinct from:** Unlike PlanV41Q2KTokenPanel device launch geometry, this selects checkpoint-backed host expert gate/up streaming and carries tensor names and checkpoint entries for later loading. It does not read checkpoint payloads, materialize float gate/up panels or perform projection during planning.
+
+
+### v41PlanHostSharedCohort
+
+Metadata-only selector and constructor for opt-in host shared-expert gate/up projection cohorts. It validates full-host callback-free execution, immutable BF16-widened inputs, bounded cohort geometry and eligible raw K-quantized gate/up weights before returning deferred cohort state; otherwise returns nil without numeric-buffer or payload effects.
+
+**Distinct from:** Unlike PlanV41Q2KTokenPanel, which constructs device token-panel launch geometry, this selects a host shared-expert projection cohort and retains its inputs/weights for later scalar-ordered publication. It neither reserves whole-process memory nor performs projection, BF16 publication, down contraction, or shared addition during planning.

@@ -52,7 +52,8 @@
         "v41q2ktokenpanelplan",
         "x2-plan-vulkanplan",
         "planv41q3ktokenpanel",
-        "v41planhostrawgateup"
+        "v41planhostrawgateup",
+        "v41planhostsharedcohort"
       ],
       "aliases": [],
       "grounding": "PlanV41Q2KTokenPanel",

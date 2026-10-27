@@ -395,6 +395,7 @@ func (m *Model) v41LayerSharedExpertAndPost(in v41LayerMoEInput, panel v41LayerF
 			err = nil
 		}
 	}
+	hostShared := m.v41PlanHostSharedCohort(in, panel)
 	for t := 0; t < seq; t++ {
 		if sharedPanelFault != nil && t == sharedPanelFault.Row {
 			return sharedPanelFault.finalize()
@@ -410,7 +411,11 @@ func (m *Model) v41LayerSharedExpertAndPost(in v41LayerMoEInput, panel v41LayerF
 			shared, sharedResident, err = sharedChain(xn)
 		}
 		if err == nil && !sharedResident {
-			shared, err = m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, scratch.denseProjection(), scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
+			project := scratch.denseProjection()
+			if hostShared != nil {
+				project = hostShared.projection(t)
+			}
+			shared, err = m.v41SharedExpertSwiGLUWithPublish(l, xn, cfg, project, scratch.sharedActivation, scratch.gatherOps.bf16PublishFunc())
 		}
 		if err != nil {
 			return err

@@ -696,5 +696,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "v41planhostsharedcohort",
+      "canonical": "v41PlanHostSharedCohort",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Metadata-only selector and constructor for opt-in host shared-expert gate/up projection cohorts. It validates full-host callback-free execution, immutable BF16-widened inputs, bounded cohort geometry and eligible raw K-quantized gate/up weights before returning deferred cohort state; otherwise returns nil without numeric-buffer or payload effects.",
+      "distinction": "Unlike PlanV41Q2KTokenPanel, which constructs device token-panel launch geometry, this selects a host shared-expert projection cohort and retains its inputs/weights for later scalar-ordered publication. It neither reserves whole-process memory nor performs projection, BF16 publication, down contraction, or shared addition during planning.",
+      "distinct_from": [
+        "planv41q2ktokenpanel"
+      ],
+      "aliases": [],
+      "grounding": "v41PlanHostSharedCohort",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }
