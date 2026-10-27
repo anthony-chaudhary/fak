@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"sync"
 
@@ -797,7 +798,57 @@ func (t *ExpertCheckpointTier) prefetchJoined(names []string) (int, func()) {
 	}
 }
 
+// prefetchDemandJoined lends the existing prefetch queue to one known triple.
+// Unlike a best-effort hint, each started result (including failure) belongs to
+// this demand until consumed or joined. Completion must not drop an early error
+// and make the later resolver retry it. No result is installed in ready, and its
+// aggregate job slot remains charged until consumption or joined discard.
+//
+// Only plain file reads are admitted: this is the ordinary unmapped loader's
+// reader, supports concurrent ReadAt, and cannot invoke arbitrary reader code.
+// Positive-retention/mapped/overlay/page-cache/custom readers retain the old
+// demand path: speculative cache evictions must not create a later demand miss.
+// The caller must defer join and consume fault serially in original name order.
+func (t *ExpertCheckpointTier) prefetchDemandJoined(names [3]string) (fault func(string) (expertWeight, error), join func()) {
+	owned := make(map[string]*expertCheckpointLoad, len(names))
+	t.startPrefetchOwned(names[:], owned)
+	fault = func(name string) (expertWeight, error) {
+		load := owned[name]
+		if load == nil {
+			return t.fault(name)
+		}
+		<-load.done
+		delete(owned, name)
+		w := load.weight
+		t.mu.Lock()
+		t.prefetchJobs--
+		if load.err == nil {
+			// Another demand waiter may also use the settled slab.
+			w.borrowed = true
+			t.prefetchHits++
+		}
+		t.mu.Unlock()
+		return w, load.err
+	}
+	join = func() {
+		// Consumed results are already settled. Join and discard only the
+		// unconsumed suffix, including after an earlier projection failed.
+		for name, load := range owned {
+			<-load.done
+			t.mu.Lock()
+			t.prefetchJobs--
+			t.mu.Unlock()
+			delete(owned, name)
+		}
+	}
+	return fault, join
+}
+
 func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpointLoad {
+	return t.startPrefetchOwned(names, nil)
+}
+
+func (t *ExpertCheckpointTier) startPrefetchOwned(names []string, demand map[string]*expertCheckpointLoad) []*expertCheckpointLoad {
 	if t == nil || len(names) == 0 {
 		return nil
 	}
@@ -811,11 +862,17 @@ func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpoint
 		off     int64
 	}
 	t.mu.Lock()
-	t.readyGen++
-	for id, r := range t.ready {
-		if r.gen+1 < t.readyGen {
-			delete(t.ready, id)
-			t.prefetchStale++
+	if demand != nil && t.pool.Budget() != 0 {
+		t.mu.Unlock()
+		return nil
+	}
+	if demand == nil {
+		t.readyGen++
+		for id, r := range t.ready {
+			if r.gen+1 < t.readyGen {
+				delete(t.ready, id)
+				t.prefetchStale++
+			}
 		}
 	}
 	remainingJobs := max(0, fakExpertPrefetchJobs-t.prefetchJobs)
@@ -842,6 +899,11 @@ func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpoint
 		if t.prefetchDeclined(src, overlay) {
 			continue
 		}
+		if demand != nil {
+			if _, plainFile := src.r.(*os.File); !plainFile {
+				continue
+			}
+		}
 		// The indexed stride is validated at construction. A hint larger than
 		// a positive TOTAL budget can never be retained, so do not allocate/read
 		// it. This is not a reservation or a check of currently unused capacity.
@@ -858,6 +920,12 @@ func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpoint
 			t.loading = make(map[polymodel.ModelID]*expertCheckpointLoad)
 		}
 		load := &expertCheckpointLoad{done: make(chan struct{})}
+		if demand != nil {
+			// Register the owner before any worker can settle: even a read that
+			// finishes before its turn remains a selected demand result.
+			load.waiters = 1
+			demand[name] = load
+		}
 		t.loading[id] = load
 		var off int64
 		if src != nil {
@@ -900,7 +968,7 @@ func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpoint
 			}
 		}()
 		for j := range queue {
-			t.finishPrefetchJob(j.name, j.id, j.entry, j.src, j.overlay, j.load, gen)
+			t.finishPrefetchJobOwned(j.name, j.id, j.entry, j.src, j.overlay, j.load, gen, demand != nil)
 		}
 		drained = true
 	}
@@ -928,6 +996,13 @@ func (t *ExpertCheckpointTier) startPrefetch(names []string) []*expertCheckpoint
 // or its share of the aggregate bound. A background panic is recovered into the existing
 // aborted-load error class rather than terminating the process.
 func (t *ExpertCheckpointTier) finishPrefetchJob(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay, load *expertCheckpointLoad, gen uint64) {
+	t.finishPrefetchJobOwned(name, id, entry, src, overlay, load, gen, false)
+}
+
+// A joined demand keeps its aggregate slot until its owner consumes/discards the
+// result, not merely until the background read finishes. Ordinary hints retain
+// their original settlement and ready-generation behavior.
+func (t *ExpertCheckpointTier) finishPrefetchJobOwned(name string, id polymodel.ModelID, entry expertCheckpointEntry, src *ggufExpertSource, overlay *ExpertSparseOverlay, load *expertCheckpointLoad, gen uint64, demand bool) {
 	var (
 		w         expertWeight
 		err       error
@@ -945,7 +1020,7 @@ func (t *ExpertCheckpointTier) finishPrefetchJob(name string, id polymodel.Model
 		}
 		load.weight, load.err = w, err
 		delete(t.loading, id)
-		if t.prefetchJobs > 0 {
+		if !demand && t.prefetchJobs > 0 {
 			t.prefetchJobs--
 		}
 		if err == nil && load.waiters == 0 {

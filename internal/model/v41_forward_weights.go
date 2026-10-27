@@ -729,6 +729,12 @@ func expertWeightF32Into(w expertWeight, dst []float32) ([]float32, error) {
 // the identical bytes (v41ExpertF32Into), so the only consequence is a missed
 // optimization, never a wrong value.
 func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch, retain bool) (w1, w3, w2 []float32, err error) {
+	return m.v41ExpertTripleIntoFault(l, stem, scratch, retain, nil)
+}
+
+// v41ExpertTripleIntoFault keeps materialization and cache effects in projection
+// order while allowing one grouped host consumer to join already-admitted reads.
+func (m *Model) v41ExpertTripleIntoFault(l int, stem string, scratch *v41ProjScratch, retain bool, fault func(string) (expertWeight, error)) (w1, w3, w2 []float32, err error) {
 	names := m.v41ExpertStemNames(l, stem)
 	for i, name := range names {
 		if w, ok := scratch.v41LayerCacheGet(name); ok {
@@ -759,7 +765,7 @@ func (m *Model) v41ExpertTripleInto(l int, stem string, scratch *v41ProjScratch,
 		case 2:
 			dst = scratch.exp2
 		}
-		w, rerr := m.v41ExpertF32IntoNamed(l, name, dst)
+		w, rerr := m.v41ExpertF32IntoNamedFault(l, name, dst, fault)
 		if rerr != nil {
 			return nil, nil, nil, v41StageErr(v41StageMoE, l, rerr)
 		}
@@ -892,6 +898,10 @@ func (m *Model) v41ExpertF32Into(l int, leaf string, dst []float32) ([]float32, 
 }
 
 func (m *Model) v41ExpertF32IntoNamed(l int, name string, dst []float32) ([]float32, error) {
+	return m.v41ExpertF32IntoNamedFault(l, name, dst, nil)
+}
+
+func (m *Model) v41ExpertF32IntoNamedFault(l int, name string, dst []float32, fault func(string) (expertWeight, error)) ([]float32, error) {
 	if w, ok := m.residentF32Mat(name); ok {
 		m.v41NoteExpertResidentHit()
 		return append(dst[:0], w...), nil
@@ -902,7 +912,10 @@ func (m *Model) v41ExpertF32IntoNamed(l int, name string, dst []float32) ([]floa
 		// 492 s first token (fak#13294) to disk wait vs dequant. Inert when no
 		// clock is installed (v41NowNanos == 0).
 		doorOpen := m.v41NowNanos()
-		ew, err := m.expertCheckpoint.fault(name)
+		if fault == nil {
+			fault = m.expertCheckpoint.fault
+		}
+		ew, err := fault(name)
 		if err != nil {
 			return nil, v41StageErr(v41StageMoE, l,
 				fmt.Errorf("%w: tensor %s: %w", ErrV41ForwardStage, name, err))

@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"math"
+	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -384,7 +385,7 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 					func() ([]float32, []float32, []float32, error) {
 						if !tripleReady {
 							var cause error
-							w1, w3, w2, cause = m.v41ExpertTripleInto(l, stem, scratch, false)
+							w1, w3, w2, cause = m.v41GroupedHostTripleInto(l, stem, scratch)
 							if cause != nil {
 								return nil, nil, nil, cause
 							}
@@ -512,4 +513,46 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 		}
 	}
 	return nil
+}
+
+// v41HostExpertPrefetchEnv explicitly opts in to overlapping raw checkpoint
+// slabs for grouped host prefill. Job-count admission is not a byte/RSS budget:
+// deployment memory planning must separately cover the admitted artifact's raw
+// strides and concurrent requests. Unset/other values keep serial demand reads.
+const v41HostExpertPrefetchEnv = "FAK_V41_HOST_EXPERT_PREFETCH"
+
+// v41GroupedHostTripleInto overlaps the ordinary unmapped checkpoint reads only
+// after a grouped row actually selects its host triple. Device-only groups never
+// enter here. Metadata screening neither dequantizes nor changes cache recency.
+func (m *Model) v41GroupedHostTripleInto(l int, stem string, scratch *v41ProjScratch) ([]float32, []float32, []float32, error) {
+	if os.Getenv(v41HostExpertPrefetchEnv) != "1" || m.expertCheckpoint == nil || scratch == nil {
+		return m.v41ExpertTripleInto(l, stem, scratch, false)
+	}
+	names := m.v41ExpertStemNames(l, stem)
+	var misses [3]string
+	n := 0
+	for i, name := range names {
+		if _, cached := scratch.layerExperts[name]; cached {
+			continue
+		}
+		// residentShape covers all resident matrix stores without expanding
+		// quant weights. Manifest presence also excludes malformed/non-2D
+		// entries, preserving their original first-resolution behavior.
+		if _, present := m.manifest[name]; present {
+			continue
+		}
+		if _, _, resident := m.residentShape(name); resident {
+			continue
+		}
+		if m.expertCheckpoint.Has(name) {
+			misses[i] = name
+			n++
+		}
+	}
+	if n < 2 {
+		return m.v41ExpertTripleInto(l, stem, scratch, false)
+	}
+	fault, join := m.expertCheckpoint.prefetchDemandJoined(misses)
+	defer join()
+	return m.v41ExpertTripleIntoFault(l, stem, scratch, false, fault)
 }
