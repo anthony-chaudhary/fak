@@ -403,6 +403,10 @@ func q2kDequantSuperBlockScalar(dst []float32, blk []byte) {
 	}
 }
 
+// iq2DequantSuperBlockArch is installed once by the amd64 implementation.
+// Other architectures leave it nil and retain their existing scalar decoders.
+var iq2DequantSuperBlockArch func(dst []float32, blk []byte, kind kQuantKind) bool
+
 func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	switch kind {
 	case kindQ3K:
@@ -420,13 +424,19 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindIQ4NL:
 		iq4nlDequantBlock(dst, blk)
 	case kindIQ2XXS:
-		dequantIQ2XXSScalar(dst, blk)
+		if iq2DequantSuperBlockArch == nil || !iq2DequantSuperBlockArch(dst, blk, kind) {
+			dequantIQ2XXSScalar(dst, blk)
+		}
 	case kindIQ2XS:
-		dequantIQ2XSScalar(dst, blk)
+		if iq2DequantSuperBlockArch == nil || !iq2DequantSuperBlockArch(dst, blk, kind) {
+			dequantIQ2XSScalar(dst, blk)
+		}
 	case kindIQ1S:
 		dequantIQ1SScalar(dst, blk)
 	case kindIQ2S:
-		dequantIQ2SScalar(dst, blk)
+		if iq2DequantSuperBlockArch == nil || !iq2DequantSuperBlockArch(dst, blk, kind) {
+			dequantIQ2SScalar(dst, blk)
+		}
 	case kindIQ1M:
 		dequantIQ1MScalar(dst, blk)
 	case kindQ8_0:
