@@ -727,9 +727,12 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		})
 		Xnq := qz(Xn, P, H)
 
-		gemmInto(ql.qProj, Xnq, Q)
-		gemmInto(ql.kProj, Xnq, K)
-		gemmInto(ql.vProj, Xnq, V)
+		// Eligible CPU groups share one worker launch; the existing dispatcher
+		// retains per-weight fallback for every other tier, mode and panel size.
+		tGroup := tic()
+		qGemm8IntoMany(Xnq, qgemm8Target{qt: ql.qProj, Y: Q},
+			qgemm8Target{qt: ql.kProj, Y: K}, qgemm8Target{qt: ql.vProj, Y: V})
+		toc(&tGemm, tGroup)
 		for t := 0; t < P; t++ {
 			m.applyProjBias(l, Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w], V[t*w:(t+1)*w])
 			m.applyLayerQKNorm(l, Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w])
@@ -780,8 +783,9 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 			}
 		})
 		Xn2q := qz(Xn2, P, H)
-		gemmInto(ql.gateProj, Xn2q, G)
-		gemmInto(ql.upProj, Xn2q, U)
+		tGroup = tic()
+		qGemm8IntoMany(Xn2q, qgemm8Target{qt: ql.gateProj, Y: G}, qgemm8Target{qt: ql.upProj, Y: U})
+		toc(&tGemm, tGroup)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
 			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
