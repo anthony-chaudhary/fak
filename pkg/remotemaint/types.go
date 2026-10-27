@@ -14,6 +14,10 @@ const (
 	OperationSystemdProfileReadback      = "systemd-profile-readback"
 	OperationMaintainLeaseAcquire        = "maintain-lease-acquire"
 	OperationMaintainLeaseRelease        = "maintain-lease-release"
+	OperationInstalledBootStagePlan      = "installed-boot-stage-plan"
+	OperationInstalledBootApply          = "installed-boot-apply"
+	OperationInstalledBootReadback       = "installed-boot-readback"
+	OperationInstalledBootRollback       = "installed-boot-rollback"
 	ReceiptSchema                        = "fak.remote-maintenance.receipt.v1"
 	ConfigSchema                         = "fak.remote-maintenance.config.v1"
 	RequestEnvelopeSchema                = "fak.remote-maintenance.request.v1"
@@ -111,25 +115,27 @@ type Grant struct {
 	LeasePins        []LeasePin          `json:"lease_pins"`
 	ExpiresAt        time.Time           `json:"expires_at"`
 	Reservation      *TrustedReservation `json:"reservation,omitempty"`
+	InstalledBoot    *InstalledBootScope `json:"installed_boot,omitempty"`
 }
 
 type Receipt struct {
-	Schema            string                  `json:"schema"`
-	GrantDigest       string                  `json:"grant_digest"`
-	ProfileID         string                  `json:"profile_id"`
-	OperationDigest   string                  `json:"operation_digest"`
-	ContextID         string                  `json:"context_id"`
-	Target            string                  `json:"target"`
-	HostKey           string                  `json:"host_key"`
-	Operation         string                  `json:"operation"`
-	BootID            string                  `json:"boot_id"`
-	StartedAt         time.Time               `json:"started_at"`
-	EndedAt           time.Time               `json:"ended_at"`
-	Outcome           string                  `json:"outcome"`
-	Verified          bool                    `json:"verified"`
-	BackupDisposition BackupDisposition       `json:"backup_disposition,omitempty"`
-	ReservationLeases []LeasePin              `json:"reservation_leases,omitempty"`
-	Readback          *SystemdProfileReadback `json:"readback,omitempty"`
+	Schema            string                    `json:"schema"`
+	GrantDigest       string                    `json:"grant_digest"`
+	ProfileID         string                    `json:"profile_id"`
+	OperationDigest   string                    `json:"operation_digest"`
+	ContextID         string                    `json:"context_id"`
+	Target            string                    `json:"target"`
+	HostKey           string                    `json:"host_key"`
+	Operation         string                    `json:"operation"`
+	BootID            string                    `json:"boot_id"`
+	StartedAt         time.Time                 `json:"started_at"`
+	EndedAt           time.Time                 `json:"ended_at"`
+	Outcome           string                    `json:"outcome"`
+	Verified          bool                      `json:"verified"`
+	BackupDisposition BackupDisposition         `json:"backup_disposition,omitempty"`
+	ReservationLeases []LeasePin                `json:"reservation_leases,omitempty"`
+	Readback          *SystemdProfileReadback   `json:"readback,omitempty"`
+	InstalledBoot     *InstalledBootObservation `json:"installed_boot,omitempty"`
 }
 
 type Authority interface {

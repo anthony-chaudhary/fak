@@ -58,6 +58,12 @@ func validateRequest(req Request) error {
 }
 
 func validateGrant(g Grant, now time.Time) error {
+	if installedBootOperation(g.Operation) {
+		return validateInstalledBootGrant(g, now)
+	}
+	if g.InstalledBoot != nil {
+		return fmt.Errorf("%w: unexpected installed boot scope", ErrScope)
+	}
 	if g.Operation == OperationMaintainLeaseAcquire || g.Operation == OperationMaintainLeaseRelease {
 		return validateReservationGrant(g, now)
 	}
@@ -122,6 +128,11 @@ func validateReceipt(r Receipt, g Grant, now time.Time) error {
 	}
 	if !r.Verified || !validReceiptTimes(r, g, now) {
 		return fmt.Errorf("%w: unverified receipt", ErrAuthority)
+	}
+	if g.InstalledBoot != nil {
+		if err := validateInstalledBootReceipt(r, g); err != nil {
+			return err
+		}
 	}
 	if g.Operation == OperationSystemdProfileReadback {
 		if err := validateReadback(r, g); err != nil {
@@ -189,6 +200,9 @@ func validateReceiptIdentity(r Receipt, g Grant) error {
 	}
 	if r.Readback != nil && (g.Operation != OperationSystemdProfileReadback || !r.Verified) {
 		return fmt.Errorf("%w: unexpected readback observations", ErrChanged)
+	}
+	if r.InstalledBoot != nil && (g.InstalledBoot == nil || !r.Verified) {
+		return fmt.Errorf("%w: unexpected installed boot observations", ErrChanged)
 	}
 	return nil
 }
@@ -265,6 +279,7 @@ func cloneGrant(g Grant) Grant {
 		r.NodeIDs = append([]string(nil), r.NodeIDs...)
 		g.Reservation = &r
 	}
+	g.InstalledBoot = cloneInstalledBootScope(g.InstalledBoot)
 	return g
 }
 
