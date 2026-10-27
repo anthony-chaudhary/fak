@@ -498,6 +498,104 @@ __global__ void __launch_bounds__(kQwen35GDNPanelCols) k_qwen35_gdn_recurrent_pa
   }
 }
 
+// Original chunk expansion of the delta rule (#9359), not a borrowed kernel.
+// With D(t,j)=product(decay[j+1:t]), S_before=decay[t]*S[t-1],
+// u[t]=beta[t]*(v[t]-k[t]^T*S_before),
+// S[t]=D(t,-1)*S0+sum(j<=t) D(t,j)*k[j]*u[j]. Substituting this into u gives
+// a unit-lower-triangular solve of only 16 scalars per value column. Q/K dot
+// products and readouts run across tokens; the state update runs across keys.
+// Products are formed directly: dividing cumulative decays would produce NaNs
+// when a gate underflows to zero. The serial FP32 evaluation remains the oracle.
+constexpr int kQwen35GDNChunk = 16;
+constexpr int kQwen35GDNChunkCols = 8;
+__global__ void k_qwen35_gdn_recurrent_chunks(
+    const float *convOut, const float *qNorm, const float *kNorm,
+    const float *beta, const float *decay, float *state, float *readout,
+    int tokens, int convDim, int nK, int nV, int kHd, int vHd) {
+  constexpr int T = kQwen35GDNChunk, C = kQwen35GDNChunkCols;
+  constexpr int K = kQwen35GDNPanelMaxKeyHeadDim;
+  int colBlocks = (vHd + C - 1) / C;
+  int h = blockIdx.x / colBlocks;
+  int d0 = (blockIdx.x % colBlocks) * C;
+  int kh = h / (nV / nK), keyDim = nK * kHd;
+  int tid = threadIdx.x;
+  __shared__ float s[K * C], q[T * K], k[T * K];
+  __shared__ float kk[T * T], qk[T * T];
+  __shared__ float ks[T * C], qs[T * C], u[T * C];
+  __shared__ float cumulative[T], tail[T], gates[T];
+  for (int x = tid; x < kHd * C; x += blockDim.x) {
+    int d = d0 + x % C;
+    s[x] = d < vHd ? state[((size_t)h * kHd + x / C) * vHd + d] : 0.0f;
+  }
+  __syncthreads();
+  for (int base = 0; base < tokens; base += T) {
+    int count = tokens - base < T ? tokens - base : T;
+    for (int x = tid; x < count * kHd; x += blockDim.x) {
+      int t = x / kHd, i = x % kHd;
+      size_t src = ((size_t)(base + t) * nK + kh) * kHd + i;
+      q[t * K + i] = qNorm[src]; k[t * K + i] = kNorm[src];
+    }
+    if (tid < count) {
+      float c = 1.0f, last = 1.0f;
+      for (int j = 0; j <= tid; ++j) c *= decay[(size_t)(base + j) * nV + h];
+      for (int j = tid + 1; j < count; ++j) last *= decay[(size_t)(base + j) * nV + h];
+      cumulative[tid] = c; tail[tid] = last;
+      gates[tid] = beta[(size_t)(base + tid) * nV + h];
+    }
+    __syncthreads();
+    for (int x = tid; x < count * count; x += blockDim.x) {
+      int t = x / count, j = x % count;
+      if (j > t) continue;
+      float kd = 0.0f, qd = 0.0f, attenuation = 1.0f;
+      for (int i = 0; i < kHd; ++i) {
+        kd += k[t * K + i] * k[j * K + i];
+        qd += q[t * K + i] * k[j * K + i];
+      }
+      for (int i = j + 1; i <= t; ++i) attenuation *= decay[(size_t)(base + i) * nV + h];
+      kk[t * T + j] = kd * attenuation;
+      qk[t * T + j] = qd * attenuation;
+    }
+    for (int x = tid; x < count * C; x += blockDim.x) {
+      int t = x / C, d = x % C;
+      float kd = 0.0f, qd = 0.0f;
+      for (int i = 0; i < kHd; ++i) {
+        kd += k[t * K + i] * s[i * C + d];
+        qd += q[t * K + i] * s[i * C + d];
+      }
+      ks[x] = cumulative[t] * kd; qs[x] = cumulative[t] * qd;
+    }
+    __syncthreads();
+    if (tid < C) {
+      int d = d0 + tid;
+      for (int t = 0; t < count; ++t) {
+        float predicted = ks[t * C + tid];
+        for (int j = 0; j < t; ++j) predicted += kk[t * T + j] * u[j * C + tid];
+        float v = d < vHd ? convOut[(size_t)(base + t) * convDim + 2 * keyDim + h * vHd + d] : 0.0f;
+        u[t * C + tid] = gates[t] * (v - predicted);
+      }
+    }
+    __syncthreads();
+    for (int x = tid; x < count * C; x += blockDim.x) {
+      int t = x / C, d = x % C;
+      float out = qs[x];
+      for (int j = 0; j <= t; ++j) out += qk[t * T + j] * u[j * C + d];
+      if (d0 + d < vHd) readout[((size_t)(base + t) * nV + h) * vHd + d0 + d] = out;
+    }
+    for (int x = tid; x < kHd * C; x += blockDim.x) {
+      int i = x / C, d = x % C;
+      float next = cumulative[count - 1] * s[x];
+      for (int j = 0; j < count; ++j) next += tail[j] * k[j * K + i] * u[j * C + d];
+      s[x] = next;
+    }
+    // No thread may replace this tile's q/k/u while another reads its update.
+    __syncthreads();
+  }
+  for (int x = tid; x < kHd * C; x += blockDim.x) {
+    int d = d0 + x % C;
+    if (d < vHd) state[((size_t)h * kHd + x / C) * vHd + d] = s[x];
+  }
+}
+
 // Gated out-norm, in place on core: one block per (token, value head) reduces readout^2 over the
 // same power-of-two shared-memory tree as the decode kernel and applies
 // norm[d] * readout * RMS^-1 * silu(z). The inverse RMS is evaluated once per block.
@@ -776,8 +874,18 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int colBlocks = (vHd + kQwen35GDNPanelCols - 1) / kQwen35GDNPanelCols;
-  FCUDA_TS("k_qwen35_gdn_recurrent_panel_cols", nV * colBlocks, k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
-      dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+  // Explicit opt-in until physical NVIDIA state/logit parity and end-to-end
+  // performance qualify the changed FP32 summation order. No allocation or ABI
+  // change: static shared storage is below 24 KiB, within CUDA's 48 KiB floor.
+  const char *recurrence = getenv("FAK_CUDA_GDN_RECURRENCE");
+  if (tokens >= kQwen35GDNChunk && recurrence && strcmp(recurrence, "chunk16") == 0) {
+    int chunkCols = (vHd + kQwen35GDNChunkCols - 1) / kQwen35GDNChunkCols;
+    FCUDA_TS("k_qwen35_gdn_recurrent_chunks", nV * chunkCols, k_qwen35_gdn_recurrent_chunks<<<nV * chunkCols, 128, 0, g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+  } else {
+    FCUDA_TS("k_qwen35_gdn_recurrent_panel_cols", nV * colBlocks, k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+  }
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int vThreads = qwen35_gdn_threads(vHd);
