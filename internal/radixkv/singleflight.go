@@ -222,7 +222,8 @@ func (g *PrefixFlightGroup) CoalesceNS(ctx context.Context, ns string, prefix []
 // leaders it prefers the greatest common-minus-divergent surplus, then the
 // longer common prefix, then the earlier registration. The leader receives the
 // live result returned by fn with matched == 0. A follower receives an
-// independently owned KV clone truncated to matched tokens. Partial matches
+// independently owned KV snapshot truncated to matched tokens. The last reader
+// may own the publication clone directly; concurrent readers copy it. Partial matches
 // never return logits; exact matches receive a logits copy.
 func (g *PrefixFlightGroup) CoalesceSharedPrefixNS(ctx context.Context, ns string, tokens []int, minShared int, fn PrefillFunc) (*model.KVCache, []float32, int, bool, error) {
 	if len(tokens) == 0 {
@@ -275,45 +276,66 @@ func (g *PrefixFlightGroup) CoalesceSharedPrefixNS(ctx context.Context, ns strin
 			cancelled = true
 		case <-ready:
 		}
-		g.releaseSharedPrefixWaiter(candidate, waiterID)
-		if cancelled {
-			return nil, nil, 0, false, ctx.Err()
+		kv, logits, realized, flightFailed, err := g.sharedPrefixFollowerResult(ctx, candidate, waiterID, matched, len(tokens), cancelled)
+		if flightFailed && retries == 0 && ctx.Err() == nil {
+			retries++
+			continue
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, nil, 0, false, err
-		}
+		return kv, logits, realized, false, err
+	}
+}
 
-		if candidate.err != nil {
-			if retries == 0 && ctx.Err() == nil {
-				retries++
-				continue
-			}
-			return nil, nil, 0, false, candidate.err
-		}
-		if candidate.kv == nil || candidate.kv.Len() < matched {
-			return nil, nil, 0, false, fmt.Errorf("%w: incomplete shared-prefix KV", ErrFlightFailed)
-		}
-		// A recurrent cache cannot discard the leader-only suffix safely. Fail
-		// open to the caller's cold path without claiming a realized match.
-		if matched < candidate.kv.Len() && candidate.kv.CanEvict() != nil {
+// A waiter remains registered until every read of the published snapshot has
+// finished. Once ready closes, the flight has left g.shared, so no new waiter
+// can join it. The last registered reader may therefore take the publication's
+// already-detached KV instead of copying it again. Concurrent readers retain
+// the ordinary clone path; none can transfer storage while another reads it.
+func (g *PrefixFlightGroup) sharedPrefixFollowerResult(ctx context.Context, f *flightPromise, waiterID, matched, tokenCount int, cancelled bool) (*model.KVCache, []float32, int, bool, error) {
+	defer g.releaseSharedPrefixWaiter(f, waiterID)
+	if cancelled {
+		return nil, nil, 0, false, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, false, err
+	}
+	if f.err != nil {
+		return nil, nil, 0, true, f.err
+	}
+	snapshot := f.kv
+	if snapshot == nil || snapshot.Len() < matched {
+		return nil, nil, 0, false, fmt.Errorf("%w: incomplete shared-prefix KV", ErrFlightFailed)
+	}
+	// A recurrent cache cannot discard the leader-only suffix safely. Keep
+	// the same decline before either cloning or transferring the snapshot.
+	if matched < snapshot.Len() && snapshot.CanEvict() != nil {
+		return nil, nil, 0, false, nil
+	}
+
+	g.mu.Lock()
+	_, registered := f.waiters[waiterID]
+	exclusive := registered && len(f.waiters) == 1
+	if exclusive {
+		f.kv = nil
+	}
+	g.mu.Unlock()
+
+	kv := snapshot
+	if !exclusive {
+		kv = snapshot.Clone()
+		g.cloneBytes.Add(kv.ClonePayloadBytes())
+	}
+	if matched < kv.Len() {
+		want := kv.Len() - matched
+		removed, evictErr := kv.TryEvict(matched, want)
+		if evictErr != nil || removed != want {
 			return nil, nil, 0, false, nil
 		}
-
-		kv := candidate.kv.Clone()
-		g.cloneBytes.Add(kv.ClonePayloadBytes())
-		if matched < kv.Len() {
-			want := kv.Len() - matched
-			removed, evictErr := kv.TryEvict(matched, want)
-			if evictErr != nil || removed != want {
-				return nil, nil, 0, false, nil
-			}
-		}
-		var logits []float32
-		if matched == len(tokens) && matched == len(candidate.tokens) {
-			logits = append([]float32(nil), candidate.logits...)
-		}
-		return kv, logits, matched, false, nil
 	}
+	var logits []float32
+	if matched == tokenCount && matched == len(f.tokens) {
+		logits = append([]float32(nil), f.logits...)
+	}
+	return kv, logits, matched, false, nil
 }
 
 func (g *PrefixFlightGroup) bestSharedPrefixFlightLocked(ns string, tokens []int, minShared int) (*flightPromise, int) {

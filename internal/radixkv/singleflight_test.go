@@ -738,8 +738,12 @@ func TestPrefixFlightGroupSharedPrefixContract(t *testing.T) {
 			t.Fatalf("prefill callbacks=%d, want 1", callbacks.Load())
 		}
 		bytesPerClone := publishedBytes.Load()
-		if bytesPerClone <= 0 || g.ClonePayloadBytes() != 3*bytesPerClone {
-			t.Fatalf("clone payload bytes=%d, want publication plus two follower clones=%d", g.ClonePayloadBytes(), 3*bytesPerClone)
+		// One follower always clones while both are registered. If that read
+		// finishes before the second claims storage, the last follower takes
+		// the publication; overlapping reads retain both follower clones.
+		copied := g.ClonePayloadBytes()
+		if bytesPerClone <= 0 || (copied != 2*bytesPerClone && copied != 3*bytesPerClone) {
+			t.Fatalf("clone payload bytes=%d, want publication plus one or two follower clones (%d or %d)", copied, 2*bytesPerClone, 3*bytesPerClone)
 		}
 		got[0].kv.Truncate(64)
 		if got[1].kv.Len() != len(common) {
@@ -1157,4 +1161,79 @@ func TestPrefixFlightGroupSharedPrefixContract(t *testing.T) {
 			}
 		})
 	})
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestSharedPrefixLastReaderTransfersPublishedKV(t *testing.T) {
+	m := newSyntheticTiny()
+	leader := m.NewSession()
+	defer leader.Close()
+	tokens := sharedPrefixTestIDs(32, 1)
+	logits := leader.Prefill(tokens)
+	published := leader.Cache.Clone()
+	f := &flightPromise{
+		kv: published, logits: append([]float32(nil), logits...), tokens: tokens,
+		ready:   make(chan struct{}),
+		waiters: map[int]context.Context{1: context.Background(), 2: context.Background()},
+	}
+	close(f.ready)
+	g := NewPrefixFlightGroup(nil)
+	wantBytes := published.ClonePayloadBytes()
+	first, firstLogits, matched, retry, err := g.sharedPrefixFollowerResult(context.Background(), f, 1, len(tokens), len(tokens), false)
+	if err != nil || retry || matched != len(tokens) || first == published || f.kv != published || len(f.waiters) != 1 {
+		t.Fatalf("nonexclusive reader: matched=%d retry=%v err=%v waiters=%d", matched, retry, err, len(f.waiters))
+	}
+	last, lastLogits, matched, retry, err := g.sharedPrefixFollowerResult(context.Background(), f, 2, len(tokens), len(tokens), false)
+	if err != nil || retry || matched != len(tokens) || last != published || f.kv != nil || len(f.waiters) != 0 {
+		t.Fatalf("last reader: matched=%d retry=%v err=%v waiters=%d", matched, retry, err, len(f.waiters))
+	}
+	if g.ClonePayloadBytes() != wantBytes {
+		t.Fatalf("follower copied bytes=%d, want only the nonexclusive clone=%d", g.ClonePayloadBytes(), wantBytes)
+	}
+	beforeFirst, beforeLeader := first.K[0][0], leader.Cache.K[0][0]
+	last.K[0][0]++
+	if first.K[0][0] != beforeFirst || leader.Cache.K[0][0] != beforeLeader {
+		t.Fatal("transferred publication aliases a sibling or leader")
+	}
+	if len(firstLogits) == 0 || len(lastLogits) != len(firstLogits) || &firstLogits[0] == &lastLogits[0] || &lastLogits[0] == &f.logits[0] {
+		t.Fatal("terminal logits lost independent ownership")
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestSharedPrefixSnapshotReaderCleanup(t *testing.T) {
+	m := newSyntheticTiny()
+	leader := m.NewSession()
+	defer leader.Close()
+	tokens := sharedPrefixTestIDs(32, 1)
+	leader.Prefill(tokens)
+	for _, mode := range []string{"cancel", "panic"} {
+		t.Run(mode, func(t *testing.T) {
+			published := leader.Cache.Clone()
+			g := NewPrefixFlightGroup(nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var reader context.Context = ctx
+			marker := errors.New("reader context panic")
+			if mode == "cancel" {
+				cancel()
+			} else {
+				reader = &publicationPausedContext{Context: ctx, inspect: func() { panic(marker) }}
+			}
+			f := &flightPromise{kv: published, tokens: tokens, waiters: map[int]context.Context{1: reader}}
+			var recovered any
+			var got *model.KVCache
+			var err error
+			func() {
+				defer func() { recovered = recover() }()
+				got, _, _, _, err = g.sharedPrefixFollowerResult(reader, f, 1, len(tokens), len(tokens), false)
+			}()
+			if (mode == "panic" && recovered != marker) || (mode == "cancel" && !errors.Is(err, context.Canceled)) {
+				t.Fatalf("reader result panic=%v err=%v", recovered, err)
+			}
+			if got != nil || f.kv != published || len(f.waiters) != 0 || g.ClonePayloadBytes() != 0 {
+				t.Fatal("failed reader transferred storage, leaked registration or copied KV")
+			}
+		})
+	}
 }
