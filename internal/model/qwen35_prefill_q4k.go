@@ -1120,34 +1120,38 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 	convOut := make([]float32, P*convDim)
 	hist := lst.conv
 	t = s.phaseStart()
-	parFor(P, dispatchWorkers, func(lo, hi int) {
-		for t := lo; t < hi; t++ {
-			outRow := convOut[t*convDim : (t+1)*convDim]
-			for c := 0; c < convDim; c++ {
-				var acc float32
-				cb := c * K
-				for j := 0; j < K; j++ {
-					src := t + j - (K - 1)
-					var row []float32
-					switch {
-					case src >= 0:
-						row = mixed[src*convDim : (src+1)*convDim]
-					default:
-						idx := len(hist) + src
-						if idx < 0 {
-							continue
+	if K != 4 || !qwen35PrefillConv4(convOut, mixed, conv, hist, P, convDim, dispatchWorkers) {
+		parFor(P, dispatchWorkers, func(lo, hi int) {
+			for t := lo; t < hi; t++ {
+				outRow := convOut[t*convDim : (t+1)*convDim]
+				for c := 0; c < convDim; c++ {
+					var acc float32
+					cb := c * K
+					for j := 0; j < K; j++ {
+						src := t + j - (K - 1)
+						var row []float32
+						switch {
+						case src >= 0:
+							row = mixed[src*convDim : (src+1)*convDim]
+						default:
+							idx := len(hist) + src
+							if idx < 0 {
+								continue
+							}
+							row = hist[idx]
 						}
-						row = hist[idx]
+						acc += conv[cb+j] * row[c]
 					}
-					acc += conv[cb+j] * row[c]
+					outRow[c] = silu(acc)
 				}
-				outRow[c] = silu(acc)
 			}
-		}
-	})
+		})
+	}
 	s.phaseEnd("qwen35_linear_conv", t)
-	for t := 0; t < P; t++ {
-		lst.pushConvRow(mixed[t*convDim:(t+1)*convDim], K-1)
+	if !lst.pushConvPrefillTail(mixed, P, convDim, K-1) {
+		for t := 0; t < P; t++ {
+			lst.pushConvRow(mixed[t*convDim:(t+1)*convDim], K-1)
+		}
 	}
 
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
