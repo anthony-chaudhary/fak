@@ -201,6 +201,14 @@ func acquireCompletePrefixSnapshot(backend compute.Backend, body func(*backendEx
 }
 
 func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResidentGDN bool) (*PrefixSnapshot, error) {
+	// A failed submission can leave host state ahead of executable backend
+	// state. Refuse it before cloning any cache or recurrent publication.
+	if s != nil && s.halClosed {
+		if s.halFailure != nil {
+			return nil, s.halFailure
+		}
+		return nil, fmt.Errorf("model: cannot snapshot closed backend session")
+	}
 	var out *PrefixSnapshot
 	published := false
 	// Registered before source locks, so cleanup never invokes a backend while

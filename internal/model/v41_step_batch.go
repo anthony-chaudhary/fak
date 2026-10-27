@@ -27,11 +27,36 @@ func (s *Session) v41BeginStepBatch() func() error {
 	if !ok || os.Getenv(v41StepBatchEnv) == "0" || !b.BeginV41StepBatch() {
 		return func() error { return nil }
 	}
-	return func() error {
-		if err := b.EndV41StepBatch(); err != nil {
-			return &v41StepBatchError{err: err}
+	return func() (err error) {
+		complete := false
+		defer func() {
+			if complete && err == nil {
+				return
+			}
+			// Host continuation state can already be committed when submission
+			// fails. It cannot be retried or published as a reusable prefix.
+			// Completion, rather than recover()!=nil, also fences Goexit and
+			// legacy panic(nil) without changing the original unwind.
+			s.halClosed = true
+			cause := err
+			if cause == nil {
+				cause = errors.New("v41 step batch completion did not return")
+			}
+			if s.halFailure == nil {
+				s.halFailure = &BackendForwardOperationError{
+					Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"),
+					Path: "v41-step-batch", Layer: -1, Stage: "submit", Cause: cause,
+				}
+			}
+			// The terminal latch precedes all callbacks. A secondary cleanup
+			// panic must not replace the original submission failure.
+			suppressBackendCleanupPanic(s.closeBackendOwned)
+		}()
+		if endErr := b.EndV41StepBatch(); endErr != nil {
+			err = &v41StepBatchError{err: endErr}
 		}
-		return nil
+		complete = true
+		return err
 	}
 }
 
