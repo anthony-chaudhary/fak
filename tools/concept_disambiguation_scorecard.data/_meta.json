@@ -7422,6 +7422,11 @@
           "category": "incidental",
           "reason": "Benchmark phase report field holding duration and device-counter snapshots around existing session creation. It defines no new session implementation or runtime lifecycle.",
           "token": "SessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private eligibility predicate on the existing model.Session selecting the implemented Q8 hybrid prefill path when its cache and observer state are supported; it does not define a new session, scheduler, or runtime identity.",
+          "token": "q8Qwen35HybridPrefillSessionOK"
         }
       ],
       "exclude": [
@@ -7698,6 +7703,7 @@
         "procRmStartSession",
         "provider_session_start",
         "pumpStdinToSession",
+        "q8Qwen35HybridPrefillSessionOK",
         "readSessionHandoffBlocks",
         "readSessionRows",
         "recordGuardProviderSessionClose",

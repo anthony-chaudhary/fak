@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-// qwen35_prefill.go is the Q8 fresh-prefill path for Qwen3.5/Qwen3.6 hybrid
+// qwen35_prefill.go is the Q8 host-prefill path for Qwen3.5/Qwen3.6 hybrid
 // Gated-DeltaNet models. The generic Q8 prefill batcher deliberately refuses this
 // family because three of four layers are recurrent linear attention, not ordinary
 // causal attention. This path preserves that recurrence but batches each layer's
@@ -31,6 +31,22 @@ func q8Qwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 		!cfg.LayerNorm &&
 		cfg.BlockTopology == PreNorm &&
 		!cfg.hasLayerSpecificRopeTheta()
+}
+
+// q8Qwen35HybridPrefillSessionOK admits complete float-KV prefixes, including
+// restored recurrent state. Packed KV and scalar-only capture/steering/model
+// transforms retain token-loop execution; the panel must not silently skip them.
+func (s *Session) q8Qwen35HybridPrefillSessionOK(promptLen int) bool {
+	if !q8Qwen35HybridPrefillOK(s.M.Cfg, promptLen) || s.Cache.quantized() ||
+		s.captureTargetHidden || s.M.Cfg.EnableResidualHook || s.M.prism != nil || s.activeTap() != nil {
+		return false
+	}
+	for layer := 0; layer < s.M.Cfg.NumLayers; layer++ {
+		if s.M.hasWeight(layerName(layer, "self_attn.sinks")) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Session) prefillQwen35HybridQ(ids []int) []float32 {

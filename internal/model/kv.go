@@ -1155,7 +1155,10 @@ func (s *Session) prefillOwned(ids []int) []float32 {
 		return s.prefillDynamic(ids)
 	}
 	if s.Quant {
-		if q8Qwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
+		// The hybrid panel appends at Cache.Len() and carries the existing
+		// convolution/recurrent state, including a restored prefix. Keep suffix
+		// projections batched instead of re-streaming the weights per token.
+		if s.q8Qwen35HybridPrefillSessionOK(len(ids)) {
 			return s.prefillQwen35HybridQ(ids)
 		}
 		if cfg := s.M.Cfg; q8PrefillNeedsTokenLoop(cfg) {
@@ -1289,7 +1292,7 @@ func (s *Session) prefillNoLogitsOwned(ids []int) {
 		return
 	}
 	if s.Quant {
-		if q8Qwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
+		if s.q8Qwen35HybridPrefillSessionOK(len(ids)) {
 			s.prefillQwen35HybridQNoLogits(ids)
 			return
 		}
