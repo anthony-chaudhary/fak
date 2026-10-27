@@ -80,14 +80,18 @@ func (c *V41CompressorPool) Width() int {
 // the result is cast back to BF16. For ratio 1 the projected KV enters this tail
 // through the same BF16 boundary; projectedScore is unused.
 func (c *V41CompressorPool) PushNormalized(pos int, projectedKV, projectedScore, normWeight []float32, eps float32) ([]float32, bool, error) {
+	return c.pushNormalizedObserved(pos, projectedKV, projectedScore, normWeight, eps, nil)
+}
+
+func (c *V41CompressorPool) pushNormalizedObserved(pos int, projectedKV, projectedScore, normWeight []float32, eps float32, observe func(string)) ([]float32, bool, error) {
 	if err := c.validateNorm(normWeight, eps); err != nil {
 		return nil, false, err
 	}
-	pooled, emitted, err := c.Push(pos, projectedKV, projectedScore)
+	pooled, emitted, err := c.pushObserved(pos, projectedKV, projectedScore, observe)
 	if err != nil || !emitted {
 		return nil, emitted, err
 	}
-	normalized, err := c.normalizePooled(pooled, normWeight, eps)
+	normalized, err := c.normalizeEmittedObserved(pooled, normWeight, eps, observe)
 	return normalized, true, err
 }
 
@@ -109,8 +113,16 @@ func (c *V41CompressorPool) validateNorm(normWeight []float32, eps float32) erro
 // normalizePooled is PushNormalized's tail for an emitted raw pooled row; it
 // may round pooled in place.
 func (c *V41CompressorPool) normalizePooled(pooled, normWeight []float32, eps float32) ([]float32, error) {
+	return c.normalizeEmittedObserved(pooled, normWeight, eps, nil)
+}
+
+func (c *V41CompressorPool) normalizeEmittedObserved(pooled, normWeight []float32, eps float32, observe func(string)) ([]float32, error) {
 	if c.normalize != nil {
 		return c.normalize(pooled, normWeight, eps)
+	}
+	if observe != nil && len(pooled) > 0 {
+		observe("compressor-norm")
+		observe("bf16-boundary")
 	}
 	var meanSquare float32
 	for i := range pooled {
@@ -128,6 +140,10 @@ func (c *V41CompressorPool) normalizePooled(pooled, normWeight []float32, eps fl
 // current group has ratio rows, matching the reference decode path. Softmax is
 // independent for every latent dimension across the token-group axis.
 func (c *V41CompressorPool) Push(pos int, projectedKV, projectedScore []float32) ([]float32, bool, error) {
+	return c.pushObserved(pos, projectedKV, projectedScore, nil)
+}
+
+func (c *V41CompressorPool) pushObserved(pos int, projectedKV, projectedScore []float32, observe func(string)) ([]float32, bool, error) {
 	if c == nil {
 		return nil, false, fmt.Errorf("model: nil V41 compressor")
 	}
@@ -175,6 +191,9 @@ func (c *V41CompressorPool) Push(pos int, projectedKV, projectedScore []float32)
 		return out, true, nil
 	}
 
+	if observe != nil {
+		observe("compressor-gated-pool")
+	}
 	out := make([]float32, c.width)
 	for dim := 0; dim < c.width; dim++ {
 		maxScore := c.scores[dim]
@@ -228,6 +247,10 @@ func v41RoundBF16(value float32) float32 {
 // folded by the caller. The result is a fresh row-major [compressLen] score
 // vector ready to feed V41SelectCandidateBlocks or V41SelectIndexRows.
 func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen int) ([]float32, error) {
+	return v41IndexerScoreObserved(q, keys, weights, nHeads, headDim, compressLen, nil)
+}
+
+func v41IndexerScoreObserved(q, keys, weights []float32, nHeads, headDim, compressLen int, observe func(string)) ([]float32, error) {
 	if nHeads <= 0 || headDim <= 0 {
 		return nil, fmt.Errorf("model: v41 indexer score requires positive nHeads=%d headDim=%d", nHeads, headDim)
 	}
@@ -270,6 +293,9 @@ func V41IndexerScore(q, keys, weights []float32, nHeads, headDim, compressLen in
 	}
 
 	score := make([]float32, compressLen)
+	if observe != nil && compressLen > 0 {
+		observe("attention-indexer-score")
+	}
 	for t := 0; t < compressLen; t++ {
 		keyBase := t * headDim
 		var acc float32
@@ -310,24 +336,28 @@ type V41IndexerPublication struct {
 // and only the final top-k rows are published. topK < 0 is refused; topK == 0
 // publishes an empty result.
 func NewV41IndexerPublication(layer int, q, keys, weights []float32, nHeads, headDim, compressLen, topKBlocks, blockSize, topK, offset int) (*V41IndexerPublication, error) {
+	return newV41IndexerPublicationObserved(layer, q, keys, weights, nHeads, headDim, compressLen, topKBlocks, blockSize, topK, offset, nil)
+}
+
+func newV41IndexerPublicationObserved(layer int, q, keys, weights []float32, nHeads, headDim, compressLen, topKBlocks, blockSize, topK, offset int, observe func(string)) (*V41IndexerPublication, error) {
 	if layer < 0 {
 		return nil, fmt.Errorf("model: v41 indexer publication negative layer %d", layer)
 	}
 	if topK < 0 {
 		return nil, fmt.Errorf("model: v41 indexer publication negative top-k %d", topK)
 	}
-	score, err := V41IndexerScore(q, keys, weights, nHeads, headDim, compressLen)
+	score, err := v41IndexerScoreObserved(q, keys, weights, nHeads, headDim, compressLen, observe)
 	if err != nil {
 		return nil, err
 	}
 	var mask []bool
 	if topKBlocks > 0 {
-		mask, err = V41SelectCandidateBlocks(score, compressLen, topKBlocks, blockSize)
+		mask, err = v41SelectCandidateBlocksObserved(score, compressLen, topKBlocks, blockSize, observe)
 		if err != nil {
 			return nil, err
 		}
 	}
-	rows, err := V41SelectIndexRows(score, compressLen, topK, offset, mask)
+	rows, err := v41SelectIndexRowsObserved(score, compressLen, topK, offset, mask, observe)
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +419,10 @@ type v41RankedScore struct {
 // choose the lower block index first. The newest visible block is pinned even
 // when it is incomplete.
 func V41SelectCandidateBlocks(logits []float32, compressLen, topKBlocks, blockSize int) ([]bool, error) {
+	return v41SelectCandidateBlocksObserved(logits, compressLen, topKBlocks, blockSize, nil)
+}
+
+func v41SelectCandidateBlocksObserved(logits []float32, compressLen, topKBlocks, blockSize int, observe func(string)) ([]bool, error) {
 	if compressLen < 0 || compressLen > len(logits) {
 		return nil, fmt.Errorf("v41 candidate blocks: compress length %d outside [0,%d]", compressLen, len(logits))
 	}
@@ -407,6 +441,9 @@ func V41SelectCandidateBlocks(logits []float32, compressLen, topKBlocks, blockSi
 	keep := make([]bool, len(logits))
 	if len(logits) == 0 || topKBlocks == 0 || compressLen == 0 {
 		return keep, nil
+	}
+	if observe != nil {
+		observe("attention-index-list")
 	}
 	numBlocks := (len(logits)-1)/blockSize + 1
 	ranked := make([]v41RankedScore, numBlocks)
@@ -439,6 +476,10 @@ func V41SelectCandidateBlocks(logits []float32, compressLen, topKBlocks, blockSi
 // Masked or causal-invisible selections are represented by -1. Equal scores
 // choose the lower position first.
 func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candidates []bool) ([]int32, error) {
+	return v41SelectIndexRowsObserved(logits, compressLen, topK, offset, candidates, nil)
+}
+
+func v41SelectIndexRowsObserved(logits []float32, compressLen, topK, offset int, candidates []bool, observe func(string)) ([]int32, error) {
 	if compressLen < 0 || compressLen > len(logits) {
 		return nil, fmt.Errorf("v41 index rows: compress length %d outside [0,%d]", compressLen, len(logits))
 	}
@@ -467,6 +508,9 @@ func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candida
 				rows[position] = int32(offset + position)
 			}
 		}
+		if observe != nil && len(rows) > 0 {
+			observe("attention-index-list")
+		}
 		return rows, nil
 	}
 
@@ -479,6 +523,9 @@ func V41SelectIndexRows(logits []float32, compressLen, topK, offset int, candida
 			score = float32(math.Inf(-1))
 		}
 		ranked[position] = v41RankedScore{index: position, score: score}
+	}
+	if observe != nil && len(ranked) > 0 {
+		observe("attention-index-list")
 	}
 	sortV41Scores(ranked)
 	ranked = ranked[:min(topK, len(ranked))]

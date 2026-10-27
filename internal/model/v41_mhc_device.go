@@ -289,15 +289,23 @@ func (d *v41MHCDevice) postBF16(layer int, x []float32, streams [][]float32, mix
 // the host reference byte-for-byte.
 
 func v41FullInitialStreamsOn(d *v41MHCDevice, x []float32) ([][]float32, error) {
+	return v41FullInitialStreamsOnObserved(d, x, nil)
+}
+
+func v41FullInitialStreamsOnObserved(d *v41MHCDevice, x []float32, observe func(string)) ([][]float32, error) {
 	if d == nil {
-		return v41FullInitialStreams(x)
+		return v41FullInitialStreamsObserved(x, observe)
 	}
 	return d.initialStreams(x)
 }
 
 func v41MHCSplitOn(d *v41MHCDevice, layer int, mixes, scale, base []float32, hc, iters int, eps float32) (v41MHCMix, error) {
+	return v41MHCSplitOnObserved(d, layer, mixes, scale, base, hc, iters, eps, nil)
+}
+
+func v41MHCSplitOnObserved(d *v41MHCDevice, layer int, mixes, scale, base []float32, hc, iters int, eps float32, observe func(string)) (v41MHCMix, error) {
 	if d == nil {
-		mix, err := v41MHCSplit(mixes, scale, base, hc, iters, eps)
+		mix, err := v41MHCSplitObserved(mixes, scale, base, hc, iters, eps, observe)
 		if err != nil {
 			return v41MHCMix{}, v41StageErr(v41StageMHC, layer, err)
 		}
@@ -307,15 +315,23 @@ func v41MHCSplitOn(d *v41MHCDevice, layer int, mixes, scale, base []float32, hc,
 }
 
 func v41MHCPreBF16On(d *v41MHCDevice, layer int, streams [][]float32, pre []float32) ([]float32, error) {
+	return v41MHCPreBF16OnObserved(d, layer, streams, pre, nil)
+}
+
+func v41MHCPreBF16OnObserved(d *v41MHCDevice, layer int, streams [][]float32, pre []float32, observe func(string)) ([]float32, error) {
 	if d == nil {
-		return v41MHCPreBF16(layer, streams, pre)
+		return v41MHCPreBF16Observed(layer, streams, pre, observe)
 	}
 	return d.preBF16(layer, streams, pre)
 }
 
 func v41MHCPostBF16On(d *v41MHCDevice, layer int, x []float32, streams [][]float32, mix v41MHCMix) ([][]float32, error) {
+	return v41MHCPostBF16OnObserved(d, layer, x, streams, mix, nil)
+}
+
+func v41MHCPostBF16OnObserved(d *v41MHCDevice, layer int, x []float32, streams [][]float32, mix v41MHCMix, observe func(string)) ([][]float32, error) {
 	if d == nil {
-		return v41MHCPostBF16(layer, x, streams, mix)
+		return v41MHCPostBF16Observed(layer, x, streams, mix, observe)
 	}
 	return d.postBF16(layer, x, streams, mix)
 }
