@@ -282,6 +282,17 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 			}
 			return w2, nil
 		}
+		hostTriple := func() ([]float32, []float32, []float32, error) {
+			if !tripleReady {
+				var cause error
+				w1, w3, w2, cause = m.v41GroupedHostTripleInto(l, stem, scratch)
+				if cause != nil {
+					return nil, nil, nil, cause
+				}
+				tripleReady = true
+			}
+			return w1, w3, w2, nil
+		}
 		if full && st != nil && st.callbackOwner != nil && !v41PrefillExpertPanelOptedIn() {
 			cohortHandled := false
 			for first := 0; first < len(g.Rows); {
@@ -370,6 +381,15 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 				continue
 			}
 		}
+		if full {
+			handled, cause := m.v41ContractHostExpertGroup(l, stem, g.Rows, xnByToken, perTokenPicks, unweighted, cfg, st, hostTriple, hostDown)
+			if cause != nil {
+				return cause
+			}
+			if handled {
+				continue
+			}
+		}
 		for _, row := range g.Rows {
 			xn := xnByToken[row.Token]
 			if full {
@@ -382,17 +402,7 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 					publish = st.gatherOps.bf16PublishFunc()
 				}
 				output, cause := m.v41FullRoutedExpertPublished(l, stem, xn, perTokenPicks[row.Token][row.Slot].weight, cfg, routedExpert, gateUp, down,
-					func() ([]float32, []float32, []float32, error) {
-						if !tripleReady {
-							var cause error
-							w1, w3, w2, cause = m.v41GroupedHostTripleInto(l, stem, scratch)
-							if cause != nil {
-								return nil, nil, nil, cause
-							}
-							tripleReady = true
-						}
-						return w1, w3, w2, nil
-					}, hostDown, true, publish)
+					hostTriple, hostDown, true, publish)
 				if cause != nil {
 					return cause
 				}

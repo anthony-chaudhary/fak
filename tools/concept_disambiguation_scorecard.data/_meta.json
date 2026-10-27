@@ -4706,6 +4706,11 @@
           "category": "incidental",
           "reason": "enum index into the per-model V4.1 layer name table for the fixed GGUF tensor suffix; a lookup key for an existing weight name, not a new canonical concept (ffn.gate.e_score_correction_bias, the MoE router bias, not a guard gate)",
           "token": "v41LeafGateBias"
+        },
+        {
+          "category": "incidental",
+          "reason": "gateReady is a private per-expert-cohort boolean recording whether the neural-network MLP gate projection vector has been computed. project() chooses gateReady for stage0 and upReady for stage1; computes fdot rows into disjoint output segments, joins c.run, sets the selected flag, and later reuses that projection. It is not an access-control, policy, lifecycle, factory admission, or authorization gate. The flag is scoped to each newly constructed numerical cohort.",
+          "token": "gateReady"
         }
       ],
       "exclude": [
@@ -4893,6 +4898,7 @@
         "gateMicroharnessWitness",
         "gateOut",
         "gateProse",
+        "gateReady",
         "gateSkew",
         "gateSourcePaths",
         "gate_reshaped",

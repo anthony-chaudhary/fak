@@ -110,6 +110,12 @@ func v41RoutedBF16PublishInput(layer int, stage string, values []float32, width 
 }
 
 func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []float32, weight float32, cfg Config, routed v41RoutedExpertFunc, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool, publish v41BF16BoundaryFunc) ([]float32, error) {
+	return m.v41FullRoutedExpertProjected(layer, stem, input, weight, cfg, routed, gateUp, down, triple, downWeight, parallel, publish, nil)
+}
+
+// A private pure-host cohort may supply its owned projection destinations. All
+// publication, validation, activation and row error boundaries stay here.
+func (m *Model) v41FullRoutedExpertProjected(layer int, stem string, input []float32, weight float32, cfg Config, routed v41RoutedExpertFunc, gateUp v41ExpertGateUpFunc, down v41ExpertDownFunc, triple v41RoutedTripleLoader, downWeight v41RoutedDownLoader, parallel bool, publish v41BF16BoundaryFunc, hostProjection v41HostExpertProjection) ([]float32, error) {
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	if H <= 0 || I <= 0 || !finite32(weight) {
 		return nil, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
@@ -167,6 +173,9 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 	proj := matRows
 	if parallel && I*H >= parThreshold {
 		proj = parMatRows
+	}
+	if hostProjection != nil {
+		proj = hostProjection
 	}
 	var opened int64
 	if fused == nil {
