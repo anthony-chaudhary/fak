@@ -423,6 +423,10 @@ func V41SelectCandidateBlocks(logits []float32, compressLen, topKBlocks, blockSi
 }
 
 func v41SelectCandidateBlocksObserved(logits []float32, compressLen, topKBlocks, blockSize int, observe func(string)) ([]bool, error) {
+	return v41SelectRankedBlocksObserved(logits, compressLen, topKBlocks, blockSize, observe)
+}
+
+func v41SelectRankedBlocksObserved(logits []float32, compressLen, topKBlocks, blockSize int, observe func(string)) ([]bool, error) {
 	if compressLen < 0 || compressLen > len(logits) {
 		return nil, fmt.Errorf("v41 candidate blocks: compress length %d outside [0,%d]", compressLen, len(logits))
 	}
