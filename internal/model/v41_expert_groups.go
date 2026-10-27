@@ -173,7 +173,7 @@ var v41TestLayerCacheBudgetOverride int64
 func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState) error {
 	// Preserve direct callers' eager output initialization, including partial
 	// output and short-table panic behavior on errors.
-	return m.v41ContractRoutedGroupedInto(l, xnByToken, perTokenPicks, scratch, cfg, out, st, false)
+	return m.v41ContractRoutedGroupedInto(l, xnByToken, perTokenPicks, scratch, cfg, out, st, false, nil)
 }
 
 // v41ContractRoutedGroupedFresh owns its exact-length output table and exposes
@@ -181,14 +181,18 @@ func (m *Model) v41ContractRoutedGrouped(l int, xnByToken [][]float32, perTokenP
 // replay replaces each row with the existing sum result, so an eager H-wide
 // zero row would be dead storage. Reduced mode still needs its zero accumulator.
 func (m *Model) v41ContractRoutedGroupedFresh(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, st *v41ForwardState) ([][]float32, error) {
+	return m.v41ContractRoutedGroupedFreshPacked(l, xnByToken, perTokenPicks, scratch, cfg, st, nil)
+}
+
+func (m *Model) v41ContractRoutedGroupedFreshPacked(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, st *v41ForwardState, packed []float32) ([][]float32, error) {
 	out := make([][]float32, len(perTokenPicks))
-	if err := m.v41ContractRoutedGroupedInto(l, xnByToken, perTokenPicks, scratch, cfg, out, st, true); err != nil {
+	if err := m.v41ContractRoutedGroupedInto(l, xnByToken, perTokenPicks, scratch, cfg, out, st, true, packed); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState, freshOutput bool) (err error) {
+func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTokenPicks [][]routePick, scratch *v41ProjScratch, cfg Config, out [][]float32, st *v41ForwardState, freshOutput bool, packed []float32) (err error) {
 	H := cfg.HiddenSize
 	full, err := v41ForwardGeometry(cfg)
 	if err != nil {
@@ -204,7 +208,7 @@ func (m *Model) v41ContractRoutedGroupedInto(l int, xnByToken [][]float32, perTo
 		}
 	}
 	if full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m && cfg.HiddenSize == m.Cfg.HiddenSize && !v41PrefillExpertPanelOptedIn() {
-		if inputs := newV41RoutedInputOwner(st.callbackOwner, l, xnByToken); inputs != nil {
+		if inputs := newV41RoutedInputOwnerPacked(st.callbackOwner, l, xnByToken, packed); inputs != nil {
 			defer inputs.finish(&err, &completed)
 		}
 	}

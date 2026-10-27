@@ -54,7 +54,7 @@ func (m *Model) v41LayerMoE(in v41LayerMoEInput) error {
 		return err
 	}
 	stages.enter(V41ColdStageRouted)
-	routedByToken, err := m.v41LayerRoutedContraction(in, panel.inputs, perTokenPicks)
+	routedByToken, err := m.v41LayerRoutedContractionPacked(in, panel.inputs, perTokenPicks, panel.flat)
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,13 @@ func (m *Model) v41LayerFFNInputs(in v41LayerMoEInput) (v41LayerFFNPanel, error)
 	} else {
 		panel.flat = make([]float32, ffnElements)
 		for t, xn := range panel.inputs {
-			copy(panel.flat[t*H:(t+1)*H], xn)
+			start, end := t*H, (t+1)*H
+			copy(panel.flat[start:end], xn)
+			if in.full {
+				// Router and routed experts consume the same immutable panel.
+				// Cap each row so an append cannot overwrite its neighbour.
+				panel.inputs[t] = panel.flat[start:end:end]
+			}
 		}
 	}
 	return panel, nil
@@ -194,6 +200,10 @@ func (m *Model) v41LayerRoute(in v41LayerMoEInput, panel v41LayerFFNPanel) ([][]
 // When the union fits the layer cache the two paths are equivalent; the
 // single-token path keeps the historical token-major stream byte-for-byte.
 func (m *Model) v41LayerRoutedContraction(in v41LayerMoEInput, ffnInputs [][]float32, perTokenPicks [][]routePick) ([][]float32, error) {
+	return m.v41LayerRoutedContractionPacked(in, ffnInputs, perTokenPicks, nil)
+}
+
+func (m *Model) v41LayerRoutedContractionPacked(in v41LayerMoEInput, ffnInputs [][]float32, perTokenPicks [][]routePick, packed []float32) ([][]float32, error) {
 	cfg := m.Cfg
 	l, H, st, scratch := in.l, in.H, in.st, in.scratch
 	seq := len(in.x)
@@ -225,7 +235,7 @@ func (m *Model) v41LayerRoutedContraction(in v41LayerMoEInput, ffnInputs [][]flo
 		// each routed row to the same device seam the token-major arm uses
 		// (#13358). A nil callback (Model.Forward, or no device backend) keeps the
 		// grouped path byte-for-byte.
-		return m.v41ContractRoutedGroupedFresh(l, ffnInputs, perTokenPicks, scratch, cfg, st)
+		return m.v41ContractRoutedGroupedFreshPacked(l, ffnInputs, perTokenPicks, scratch, cfg, st, packed)
 	}
 	routedByToken := make([][]float32, seq)
 	// The multi-token token-major arm (test-forced, or a panel that the grouped

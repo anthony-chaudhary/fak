@@ -713,12 +713,17 @@ type v41RoutedInputOwner struct {
 	scope        *backendExecutionScope
 	layer, width int
 	inputs       [][]float32
+	packed       []float32
 	copies       compute.V41RowLogBackend
 	tensor       compute.Tensor
 	closed       bool
 }
 
 func newV41RoutedInputOwner(s *Session, layer int, inputs [][]float32) *v41RoutedInputOwner {
+	return newV41RoutedInputOwnerPacked(s, layer, inputs, nil)
+}
+
+func newV41RoutedInputOwnerPacked(s *Session, layer int, inputs [][]float32, packed []float32) *v41RoutedInputOwner {
 	if s == nil || s.M == nil || s.Backend == nil || !backendHasComparableIdentity(s.Backend) || s.v41RoutedInputs != nil || s.halClosed || s.halFailure != nil || len(inputs) < 2 || len(inputs) > v41RoutedInputMaxRows || layer < 0 || layer >= s.M.Cfg.NumLayers {
 		return nil
 	}
@@ -739,7 +744,19 @@ func newV41RoutedInputOwner(s *Session, layer int, inputs [][]float32) *v41Route
 			return nil
 		}
 	}
-	o := &v41RoutedInputOwner{session: s, model: s.M, backend: s.Backend, scope: scope, layer: layer, width: width, inputs: inputs, copies: copies}
+	// The admitted row/byte bound above also bounds this multiplication. Only
+	// the exact request-owned row backing is reusable, never equal-valued data.
+	if len(packed) != len(inputs)*width {
+		packed = nil
+	} else {
+		for i, row := range inputs {
+			if &row[0] != &packed[i*width] {
+				packed = nil
+				break
+			}
+		}
+	}
+	o := &v41RoutedInputOwner{session: s, model: s.M, backend: s.Backend, scope: scope, layer: layer, width: width, inputs: inputs, packed: packed, copies: copies}
 	s.v41RoutedInputs = o
 	return o
 }
@@ -782,9 +799,12 @@ func (h *v41RoutedInputHandoff) gather(first, count int, claim func(compute.Tens
 		return compute.Tensor{}, errV41ExpertResult
 	}
 	if o.tensor.Buf() == nil {
-		packed := make([]float32, len(o.inputs)*o.width)
-		for i, row := range o.inputs {
-			copy(packed[i*o.width:(i+1)*o.width], row)
+		packed := o.packed
+		if packed == nil {
+			packed = make([]float32, len(o.inputs)*o.width)
+			for i, row := range o.inputs {
+				copy(packed[i*o.width:(i+1)*o.width], row)
+			}
 		}
 		t := o.session.uploadHostF32([]int{len(o.inputs), o.width}, packed, compute.MemoryActivation, "V4.1 layer routed input")
 		if !claim(t) {
@@ -821,7 +841,7 @@ func (o *v41RoutedInputOwner) release() (cleanup v41RoutedOutputCleanup) {
 		o.session.v41RoutedInputs = nil
 	}
 	t := o.tensor
-	o.tensor, o.inputs = compute.Tensor{}, nil
+	o.tensor, o.inputs, o.packed = compute.Tensor{}, nil, nil
 	if t.Buf() == nil {
 		return cleanup
 	}
