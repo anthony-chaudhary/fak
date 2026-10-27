@@ -168,7 +168,7 @@ func adjudicateRawWriteTargets(tool, rawArgs string, readOnly bool) (args map[st
 			// read_only hint requests classification; only the existing positive
 			// CLI, in-process shell-read, or constrained SSH grammar can prove a read.
 			_, promotableRead := vdso.ParseShellRead(command)
-			if readOnly && (adjudicator.PositiveCLIReadOnly(command) || promotableRead || positiveSSHReadProbe(command)) {
+			if readOnly && (adjudicator.PositiveCLIReadOnly(command) || promotableRead || adjudicator.PositiveSSHReadProbe(command)) {
 				return args, nil, false, true
 			}
 			return args, nil, true, false

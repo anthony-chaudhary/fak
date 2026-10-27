@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
-const sshReadProbeOptions = "-F none -T -a -x -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o ClearAllForwardings=yes -o PermitLocalCommand=no -o ProxyCommand=none -o ProxyJump=none -o ControlMaster=no -o ControlPath=none -o AddKeysToAgent=no"
+const sshReadProbeOptions = "-F none -T -a -x -o BatchMode=yes -o StrictHostKeyChecking=yes -o CheckHostIP=no -o UpdateHostKeys=no -o ClearAllForwardings=yes -o PermitLocalCommand=no -o ProxyCommand=none -o ProxyJump=none -o ControlMaster=no -o ControlPath=none -o AddKeysToAgent=no"
 
 // fak-test:runtime fast est=1s
 func TestSSHReadProbeWindowsAllowedDestinationSurvivesStrictEgress(t *testing.T) {
@@ -31,13 +32,26 @@ func TestSSHReadProbeWindowsAllowedDestinationSurvivesStrictEgress(t *testing.T)
 	command := strings.Replace(sshReadProbeCommand(), "/usr/bin/ssh", "C:/Windows/System32/OpenSSH/ssh.exe", 1)
 	raw, _ := json.Marshal(map[string]string{"command": command})
 	verdict, _, err := srv.adjudicate(context.Background(), "Bash", string(raw), true, "", "ssh-windows-egress")
+	if runtime.GOOS != "windows" {
+		if err != nil || verdict.Kind != "DENY" || verdict.By != "lease-admission" || verdict.Detail["admission_failure"] != "unknown_write_footprint" {
+			t.Fatalf("foreign Windows executable: verdict=%+v err=%v", verdict, err)
+		}
+		return
+	}
 	if err != nil || verdict.Kind != "ALLOW" || srv.workspaceAdmissionPermissive {
 		t.Fatalf("strict Windows allowlist: verdict=%+v err=%v", verdict, err)
 	}
 }
 
 func sshReadProbeCommand() string {
-	return "/usr/bin/ssh " + sshReadProbeOptions + " operator@node.example /bin/hostname"
+	return sshReadProbeExecutable() + " " + sshReadProbeOptions + " operator@node.example /bin/hostname"
+}
+
+func sshReadProbeExecutable() string {
+	if runtime.GOOS == "windows" {
+		return "C:/Windows/System32/OpenSSH/ssh.exe"
+	}
+	return "/usr/bin/ssh"
 }
 
 func sshReadProbeAccepted(command string) bool {
@@ -48,11 +62,15 @@ func sshReadProbeAccepted(command string) bool {
 
 // fak-test:runtime fast est=1s
 func TestPositiveSSHReadProbeAcceptsClosedGrammar(t *testing.T) {
+	alternate := sshReadProbeExecutable()
+	if runtime.GOOS != "windows" {
+		alternate = "/bin/ssh"
+	}
 	for _, command := range []string{
 		sshReadProbeCommand(),
-		"/bin/ssh " + sshReadProbeOptions + " -4 -n -o ConnectTimeout=5 -- operator@192.0.2.10 /usr/bin/hostname",
-		"C:/Windows/System32/OpenSSH/ssh.exe " + sshReadProbeOptions + " operator@node /bin/hostname",
-		"/usr/bin/ssh -o AddKeysToAgent=no -x -a -T -F none -o ControlPath=none -o ControlMaster=no -o ProxyJump=none -o ProxyCommand=none -o PermitLocalCommand=no -o ClearAllForwardings=yes -o UpdateHostKeys=no -o StrictHostKeyChecking=yes -o BatchMode=yes operator@node.example /bin/hostname",
+		alternate + " " + sshReadProbeOptions + " -4 -n -o ConnectTimeout=5 -- operator@192.0.2.10 /usr/bin/hostname",
+		sshReadProbeExecutable() + " " + sshReadProbeOptions + " operator@node /bin/hostname",
+		sshReadProbeExecutable() + " -o AddKeysToAgent=no -x -a -T -F none -o ControlPath=none -o ControlMaster=no -o ProxyJump=none -o ProxyCommand=none -o PermitLocalCommand=no -o ClearAllForwardings=yes -o UpdateHostKeys=no -o StrictHostKeyChecking=yes -o CheckHostIP=no -o BatchMode=yes operator@node.example /bin/hostname",
 	} {
 		if !sshReadProbeAccepted(command) {
 			t.Errorf("closed read probe rejected: %q", command)
@@ -64,12 +82,12 @@ func TestPositiveSSHReadProbeAcceptsClosedGrammar(t *testing.T) {
 func TestPositiveSSHReadProbeRejectsAmbiguityAndSideEffects(t *testing.T) {
 	valid := sshReadProbeCommand()
 	cases := map[string]string{
-		"bare executable":         strings.Replace(valid, "/usr/bin/ssh", "ssh", 1),
-		"spoof executable":        strings.Replace(valid, "/usr/bin/ssh", "/tmp/ssh", 1),
-		"executable suffix":       strings.Replace(valid, "/usr/bin/ssh", "/usr/bin/ssh.evil", 1),
+		"bare executable":         strings.Replace(valid, sshReadProbeExecutable(), "ssh", 1),
+		"spoof executable":        strings.Replace(valid, sshReadProbeExecutable(), "/tmp/ssh", 1),
+		"executable suffix":       strings.Replace(valid, sshReadProbeExecutable(), sshReadProbeExecutable()+".evil", 1),
 		"wrapper":                 "env " + valid,
 		"environment assignment":  "X=1 " + valid,
-		"quoted executable":       strings.Replace(valid, "/usr/bin/ssh", "'/usr/bin/ssh'", 1),
+		"quoted executable":       strings.Replace(valid, sshReadProbeExecutable(), "'"+sshReadProbeExecutable()+"'", 1),
 		"quoted remote":           strings.Replace(valid, "/bin/hostname", "'/bin/hostname'", 1),
 		"double quoted remote":    strings.Replace(valid, "/bin/hostname", `"/bin/hostname"`, 1),
 		"chain":                   valid + "; reboot",
@@ -89,6 +107,7 @@ func TestPositiveSSHReadProbeRejectsAmbiguityAndSideEffects(t *testing.T) {
 		"unknown config":          strings.Replace(valid, " -F", " -o LocalCommand=touch -F", 1),
 		"compact config":          strings.Replace(valid, "-o BatchMode=yes", "-oBatchMode=yes", 1),
 		"proxy override":          strings.Replace(valid, "ProxyCommand=none", "ProxyCommand=evil", 1),
+		"host IP writes":          strings.Replace(valid, "CheckHostIP=no", "CheckHostIP=yes", 1),
 		"duplicate unsafe option": strings.Replace(valid, " -F", " -o ProxyCommand=evil -F", 1),
 		"duplicate safe option":   strings.Replace(valid, " -F", " -o BatchMode=yes -F", 1),
 		"config override":         strings.Replace(valid, "-F none", "-F user.conf", 1),
@@ -99,6 +118,13 @@ func TestPositiveSSHReadProbeRejectsAmbiguityAndSideEffects(t *testing.T) {
 		"extra at":                strings.Replace(valid, "operator@node.example", "operator@other@node.example", 1),
 		"invalid DNS":             strings.Replace(valid, "node.example", "node..example", 1),
 		"invalid IPv4":            strings.Replace(valid, "node.example", "999.999.999.999", 1),
+	}
+	foreignExecutables := []string{"C:/Windows/System32/OpenSSH/ssh.exe"}
+	if runtime.GOOS == "windows" {
+		foreignExecutables = []string{"/usr/bin/ssh", "/bin/ssh"}
+	}
+	for _, executable := range foreignExecutables {
+		cases["opposite OS executable "+executable] = strings.Replace(valid, sshReadProbeExecutable(), executable, 1)
 	}
 	for _, required := range strings.Split(sshReadProbeOptions, " -o ") {
 		if strings.HasPrefix(required, "-F") {
