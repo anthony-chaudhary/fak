@@ -388,6 +388,25 @@ func (v *vulkanBackend) qwen35VulkanSequenceMatMulLocked(w, x Tensor, tokens int
 	return y
 }
 
+// Reuse the existing F32 paired shader only for sequence panels. Its per-output
+// reduction uses the same ordered 1024-element windows as matmul.comp. The
+// sequence preflight has already admitted tensor ownership, byte sizes and the
+// tokens-wide dispatch grid. Keep decode's specialized route and every quantized
+// projection unchanged; in particular, this is not Q8 activation-quantizer reuse.
+func (v *vulkanBackend) qwen35VulkanSequenceMatMulPairLocked(w0, w1, x Tensor, tokens int) (Tensor, Tensor) {
+	out0, in := w0.Shape[0], w0.Shape[1]
+	out1 := w1.Shape[0]
+	if tokens <= 1 || w0.Dtype != F32 || w1.Dtype != F32 || w1.Shape[1] != in ||
+		out0 <= 0 || out1 <= 0 || out1 > math.MaxInt32 || out0 > math.MaxInt32-out1 {
+		return v.qwen35VulkanSequenceMatMulLocked(w0, x, tokens), v.qwen35VulkanSequenceMatMulLocked(w1, x, tokens)
+	}
+	y0, _ := v.devTr([]int{tokens, out0}, F32)
+	y1, _ := v.devTr([]int{tokens, out1}, F32)
+	C.fvk_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(y0), v.vp(y1),
+		C.int(out0), C.int(out1), C.int(in), C.int(tokens))
+	return y0, y1
+}
+
 func (v *vulkanBackend) qwen35VulkanSequenceReleaseLocked(start int, keep ...Tensor) {
 	retained := v.transient[:start]
 	for _, b := range v.transient[start:] {
@@ -612,7 +631,8 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		var branch Tensor
 		if layer.Linear {
 			stage = "gdn-projections"
-			mixed, z, beta, alpha := mul(layer.GDNInQKV, n), mul(layer.GDNInZ, n), mul(layer.GDNInB, n), mul(layer.GDNInA, n)
+			mixed, z := v.qwen35VulkanSequenceMatMulPairLocked(layer.GDNInQKV, layer.GDNInZ, n, tokens)
+			beta, alpha := v.qwen35VulkanSequenceMatMulPairLocked(layer.GDNInB, layer.GDNInA, n, tokens)
 			if req.CapturePrefixReplay {
 				replayProjections = append(replayProjections, vulkanQwen35ReplayProjection{layer: i, mixed: mixed, z: z, beta: beta, alpha: alpha})
 			}
@@ -669,7 +689,7 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		C.fvk_add_f32(v.vp(x), v.vp(branch), C.int(tokens*req.Hidden))
 		stage = "ffn"
 		post := norm(x, layer.PostNorm, tokens)
-		gate, up := mul(layer.Gate, post), mul(layer.Up, post)
+		gate, up := v.qwen35VulkanSequenceMatMulPairLocked(layer.Gate, layer.Up, post, tokens)
 		activated, _ := v.devTr([]int{tokens, req.Intermediate}, F32)
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(activated), C.int(tokens*req.Intermediate))
 		delta := mul(layer.Down, activated)
