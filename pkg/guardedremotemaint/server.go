@@ -179,6 +179,11 @@ func (s *AgentSession) Execute(ctx context.Context, req remotemaint.Request) (Ou
 		return out, nil
 	case remotemaint.OutcomeRolledBack:
 		out.Effect = "rolled_back"
+		if receipt.Operation == remotemaint.OperationInstalledBootRollback &&
+			receipt.InstalledBoot != nil && receipt.InstalledBoot.Kind == "rolled_back" &&
+			successfulReceipt(req, wire.Result, receipt) {
+			return out, nil
+		}
 		return out, fmt.Errorf("%w: effect rolled back", remotemaint.ErrAuthority)
 	case remotemaint.OutcomeUnknownEffect:
 		out.Effect = "attempted_unknown"

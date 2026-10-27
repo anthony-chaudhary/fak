@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -118,7 +119,7 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	var selectedPaths []string
 	selectedMap := make(map[string]bool)
 	for _, p := range opts.Paths {
-		p = filepath.Clean(filepath.ToSlash(strings.TrimSpace(p)))
+		p = path.Clean(filepath.ToSlash(strings.TrimSpace(p)))
 		if p == "" || p == "." {
 			continue
 		}
@@ -237,7 +238,7 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	incomingLines := strings.Fields(string(diffRes.Stdout))
 	incomingMap := make(map[string]bool, len(incomingLines))
 	for _, line := range incomingLines {
-		line = filepath.Clean(filepath.ToSlash(strings.TrimSpace(line)))
+		line = path.Clean(filepath.ToSlash(strings.TrimSpace(line)))
 		if line != "" {
 			incomingMap[line] = true
 		}
@@ -246,7 +247,7 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	// Check for unowned colliding dirty paths and collect unrelated paths preserved
 	var unrelatedPreserved []string
 	for _, dp := range dirtyPaths {
-		normDP := filepath.Clean(filepath.ToSlash(dp))
+		normDP := path.Clean(filepath.ToSlash(dp))
 		if selectedMap[normDP] {
 			continue
 		}
@@ -285,6 +286,17 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 			receipt.Reason = "dry-run preview complete; safe to park and integrate"
 		}
 		return receipt, nil
+	}
+
+	for _, p := range selectedPaths {
+		for _, ref := range []string{baseHEAD, targetSHA} {
+			if _, _, err := readParkGitBlob(ctx, run, repo, ref, p); err != nil {
+				receipt.Status = ParkStatusConflict
+				receipt.Reason = "cannot inspect selected path before integration"
+				receipt.Detail = err.Error()
+				return receipt, nil
+			}
+		}
 	}
 
 	// 4. Acquire worktree writer lease
@@ -419,7 +431,7 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 		// Update working tree for paths that changed between baseHEAD and newCommit (excluding selectedPaths)
 		diffRes := run(ctx, repo, "diff", "--name-only", baseHEAD, newCommit)
 		for _, line := range strings.Fields(string(diffRes.Stdout)) {
-			norm := filepath.Clean(filepath.ToSlash(strings.TrimSpace(line)))
+			norm := path.Clean(filepath.ToSlash(strings.TrimSpace(line)))
 			if norm == "" || selectedMap[norm] {
 				continue
 			}
@@ -447,8 +459,16 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 			// the index keeps the pre-integration base blob (set at the "checkout
 			// HEAD" step above) and `git diff --cached` stages an inverse of the
 			// upstream hunk (#12690).
-			if idx := run(ctx, repo, "checkout", newCommit, "--", p); idx.Code != 0 {
-				return receipt, fmt.Errorf("advance selected index %s to %s: %s", p, newCommit, string(idx.Stderr))
+			_, exists, err := readParkGitBlob(ctx, run, repo, newCommit, p)
+			if err != nil {
+				return receipt, fmt.Errorf("inspect selected index baseline %s: %w", p, err)
+			}
+			indexArgs := []string{"checkout", newCommit, "--", p}
+			if !exists {
+				indexArgs = []string{"rm", "--cached", "--ignore-unmatch", "--", p}
+			}
+			if idx := run(ctx, repo, indexArgs...); idx.Err != nil || idx.Code != 0 {
+				return receipt, fmt.Errorf("advance selected index %s to %s: %v %s", p, newCommit, idx.Err, string(idx.Stderr))
 			}
 			fullPath := filepath.Join(repo, p)
 			dir := filepath.Dir(fullPath)
@@ -490,35 +510,58 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	return receipt, nil
 }
 
+// readParkGitBlob distinguishes proven absence from a failed content lookup.
+func readParkGitBlob(ctx context.Context, run Runner, repo, ref, p string) ([]byte, bool, error) {
+	entry := run(ctx, repo, "ls-tree", "-z", "--full-tree", ref, "--", p)
+	if entry.Err != nil || entry.Code != 0 {
+		return nil, false, fmt.Errorf("inspect Git path %s at %s: %v %s", p, ref, entry.Err, string(entry.Stderr))
+	}
+	if len(entry.Stdout) == 0 {
+		return nil, false, nil
+	}
+	header, name, ok := strings.Cut(strings.TrimSuffix(string(entry.Stdout), "\x00"), "\t")
+	fields := strings.Fields(header)
+	if !ok || name != p || len(fields) != 3 || fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
+		return nil, false, fmt.Errorf("expected one regular Git blob for %s at %s", p, ref)
+	}
+	content := run(ctx, repo, "show", ref+":"+p)
+	if content.Err != nil || content.Code != 0 {
+		return nil, true, fmt.Errorf("read Git path %s at %s: %v %s", p, ref, content.Err, string(content.Stderr))
+	}
+	return content.Stdout, true, nil
+}
+
 // previewPathEffect previews the classification of reapplying path p in dry-run mode.
 func previewPathEffect(ctx context.Context, run Runner, repo, baseHEAD, targetSHA, p string) PathEffect {
 	eff := PathEffect{Path: p}
 	fullPath := filepath.Join(repo, p)
-	var parkedBytes []byte
-	if b, err := os.ReadFile(fullPath); err == nil {
-		parkedBytes = b
+	parkedBytes, err := os.ReadFile(fullPath)
+	parkedExists := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		eff.Classification, eff.Effect, eff.Detail = EffectConflict, EffectConflict, err.Error()
+		return eff
 	}
 
-	var baseBytes []byte
-	baseRes := run(ctx, repo, "show", baseHEAD+":"+p)
-	if baseRes.Code == 0 {
-		baseBytes = baseRes.Stdout
+	baseBytes, baseExists, err := readParkGitBlob(ctx, run, repo, baseHEAD, p)
+	if err != nil {
+		eff.Classification, eff.Effect, eff.Detail = EffectConflict, EffectConflict, err.Error()
+		return eff
 	}
 
-	var targetBytes []byte
-	targetRes := run(ctx, repo, "show", targetSHA+":"+p)
-	if targetRes.Code == 0 {
-		targetBytes = targetRes.Stdout
+	targetBytes, targetExists, err := readParkGitBlob(ctx, run, repo, targetSHA, p)
+	if err != nil {
+		eff.Classification, eff.Effect, eff.Detail = EffectConflict, EffectConflict, err.Error()
+		return eff
 	}
 
-	if bytes.Equal(parkedBytes, targetBytes) {
+	if parkedExists == targetExists && bytes.Equal(parkedBytes, targetBytes) {
 		eff.Classification = EffectUpstreamIdentical
 		eff.Effect = EffectUpstreamIdentical
 		eff.Detail = "upstream already has identical content; suppressed"
 		return eff
 	}
 
-	if targetBytes == nil && parkedBytes != nil {
+	if !targetExists && parkedExists && baseExists {
 		eff.Classification = EffectSuperseded
 		eff.Effect = EffectSuperseded
 		eff.Detail = "upstream removed path; local edits superseded"
@@ -534,7 +577,7 @@ func previewPathEffect(ctx context.Context, run Runner, repo, baseHEAD, targetSH
 		return eff
 	}
 
-	if bytes.Equal(mergedBytes, targetBytes) {
+	if targetExists && bytes.Equal(mergedBytes, targetBytes) {
 		eff.Classification = EffectUpstreamIdentical
 		eff.Effect = EffectUpstreamIdentical
 		eff.Detail = "upstream already contains all changes from parked path; suppressed"
@@ -552,32 +595,32 @@ func previewPathEffect(ctx context.Context, run Runner, repo, baseHEAD, targetSH
 func evaluateAndMergePath(ctx context.Context, run Runner, repo, baseHEAD, checkpointRef, newHEAD, p string) (PathEffect, []byte, bool) {
 	eff := PathEffect{Path: p}
 
-	var parkedBytes []byte
-	parkedRes := run(ctx, repo, "show", checkpointRef+":"+p)
-	if parkedRes.Code == 0 {
-		parkedBytes = parkedRes.Stdout
+	parkedBytes, parkedExists, err := readParkGitBlob(ctx, run, repo, checkpointRef, p)
+	if err != nil {
+		eff.Classification, eff.Effect, eff.Detail = EffectConflict, EffectConflict, err.Error()
+		return eff, nil, false
 	}
 
-	var baseBytes []byte
-	baseRes := run(ctx, repo, "show", baseHEAD+":"+p)
-	if baseRes.Code == 0 {
-		baseBytes = baseRes.Stdout
+	baseBytes, baseExists, err := readParkGitBlob(ctx, run, repo, baseHEAD, p)
+	if err != nil {
+		eff.Classification, eff.Effect, eff.Detail = EffectConflict, EffectConflict, err.Error()
+		return eff, nil, false
 	}
 
-	var newHeadBytes []byte
-	newHeadRes := run(ctx, repo, "show", newHEAD+":"+p)
-	if newHeadRes.Code == 0 {
-		newHeadBytes = newHeadRes.Stdout
+	newHeadBytes, newHeadExists, err := readParkGitBlob(ctx, run, repo, newHEAD, p)
+	if err != nil {
+		eff.Classification, eff.Effect, eff.Detail = EffectConflict, EffectConflict, err.Error()
+		return eff, nil, false
 	}
 
-	if bytes.Equal(parkedBytes, newHeadBytes) {
+	if parkedExists == newHeadExists && bytes.Equal(parkedBytes, newHeadBytes) {
 		eff.Classification = EffectUpstreamIdentical
 		eff.Effect = EffectUpstreamIdentical
 		eff.Detail = "upstream already has identical content; suppressed"
 		return eff, nil, false
 	}
 
-	if newHeadBytes == nil && parkedBytes != nil {
+	if !newHeadExists && parkedExists && baseExists {
 		eff.Classification = EffectSuperseded
 		eff.Effect = EffectSuperseded
 		eff.Detail = "upstream removed path; local edits superseded"
@@ -593,7 +636,7 @@ func evaluateAndMergePath(ctx context.Context, run Runner, repo, baseHEAD, check
 		return eff, nil, false
 	}
 
-	if bytes.Equal(mergedBytes, newHeadBytes) {
+	if newHeadExists && bytes.Equal(mergedBytes, newHeadBytes) {
 		eff.Classification = EffectUpstreamIdentical
 		eff.Effect = EffectUpstreamIdentical
 		eff.Detail = "upstream already contains all changes from parked path; suppressed"
