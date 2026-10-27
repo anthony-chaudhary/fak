@@ -220,6 +220,21 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 				"upstream temporarily unavailable (HTTP 503) — back off and retry (see the Retry-After response header)"
 		}
 	}
+	// A LocalForwardError is a LOCAL inference engine failure (e.g. the CUDA
+	// forward or batcher tokenGenFn failed during prefill/decode), not an
+	// upstream provider failure. It must NOT be masked as the opaque 502
+	// "upstream model error" fallthrough — that would hide the real cause from
+	// the client and operator. Classify it as 503 (retryable with a smaller
+	// prompt) or 500 (non-retryable) with a distinct code instead.
+	var lfe *agent.LocalForwardError
+	if errors.As(err, &lfe) {
+		if lfe.Retryable {
+			return http.StatusServiceUnavailable, "local_forward_retryable",
+				fmt.Sprintf("local forward engine failed during %s; reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx: %v", lfe.Op, lfe.Err)
+		}
+		return http.StatusInternalServerError, "local_forward_failed",
+			fmt.Sprintf("local forward engine failed during %s: %v", lfe.Op, lfe.Err)
+	}
 	return http.StatusBadGateway, "", "upstream model error"
 }
 
