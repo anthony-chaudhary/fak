@@ -426,7 +426,7 @@ func (m *Model) v41LayerSharedExpertAndPost(in v41LayerMoEInput, panel v41LayerF
 		if resident != nil {
 			moeRows[t] = moe
 		} else if in.full {
-			nextPanel[t], err = v41MHCPostBF16On(in.mhcDevice, l, moe, panel.residual[t], panel.mixes[t])
+			nextPanel[t], err = v41PrefillMHCPostBF16On(in.mhcDevice, l, moe, panel.residual[t], panel.mixes[t], seq)
 			if err != nil {
 				return err
 			}
