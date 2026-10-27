@@ -17556,6 +17556,16 @@
           "category": "incidental",
           "reason": "Issue #13964 effect-free geometry/overflow and selected-device fact validator for the existing host-assisted QSA gather; it returns scalar bounds, allocates no scratch and introduces no independent planner or reservation.",
           "token": "planQwen35QSAScratch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private shared implementation core of the existing Qwen35MTPDraftSession.selectSampledCandidate operation. The exactLaw flag adds draw-independent processed-q sampling-law admission before the same token-selection draw; the legacy wrapper passes false and the return contract is unchanged. This is not a separate proposal type or planning-domain concept.",
+          "token": "selectSampledCandidateWithAdmission"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private actual-mass float64 target-probability branch of the existing BuildSpecRejectionPlan operation. It validates and adapts the supported draft sampling law while returning the same SpecRejectionPlan accepted prefix, correction/bonus token and rollback contract; it does not introduce a separate planning-domain concept.",
+          "token": "buildSpecRejectionProbabilityPlan"
         }
       ],
       "exclude": [
@@ -17697,6 +17707,7 @@
         "bound_planning",
         "boundedSelfUpdateCandidateCacheReason",
         "buildMainPlan",
+        "buildSpecRejectionProbabilityPlan",
         "buildreconciledissueplan",
         "bytes_per_candidate",
         "candidateCache",
@@ -17799,6 +17810,7 @@
         "seedCandidate",
         "seen_candidates",
         "selectCandidates",
+        "selectSampledCandidateWithAdmission",
         "select_candidate_blocks",
         "selfUpdateCandidateCacheDisabled",
         "selfUpdateCandidateCacheDisposition",

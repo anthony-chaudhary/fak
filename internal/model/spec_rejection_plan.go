@@ -22,14 +22,26 @@ var (
 	ErrSpecRejectionProbability = errors.New("model: speculative rejection probability row is invalid")
 )
 
+// SpecProbabilityRow preserves a sampler's token-index weights and the exact
+// mass used by its inverse CDF. Weights need not be normalized. In particular,
+// ordinary target sampling must not round these through float32 log probabilities.
+type SpecProbabilityRow struct {
+	Weights []float64
+	Mass    float64
+}
+
 // SpecRejectionPlanInput is the immutable evidence for one stochastic round.
 // TargetLogProbs has exactly K+1 rows: one row for each draft decision and a
 // final row for the bonus decision. StepOffset is the absolute request-local
 // draft position, so separate rounds cannot reuse keyed draws.
 type SpecRejectionPlanInput struct {
-	DraftTokens             []int
-	DraftEvidence           []DraftTokenEvidence
-	TargetLogProbs          [][]float32
+	DraftTokens    []int
+	DraftEvidence  []DraftTokenEvidence
+	TargetLogProbs [][]float32
+	// TargetProbabilityRows is mutually exclusive with TargetLogProbs and
+	// requires original ProcessedQ and an admitted SamplingLaw. The legacy log-probability route
+	// retains its existing float32 decisions and keyed streams.
+	TargetProbabilityRows   []SpecProbabilityRow
 	RequestKey              uint64
 	StepOffset              int
 	ResidualMode            SpecResidualMode
@@ -55,7 +67,14 @@ func BuildSpecRejectionPlan(in SpecRejectionPlanInput) (SpecRejectionPlan, error
 	if k == 0 || len(in.DraftEvidence) != k {
 		return SpecRejectionPlan{}, ErrSpecRejectionShape
 	}
-	if len(in.TargetLogProbs) != k+1 {
+	weighted := len(in.TargetProbabilityRows) > 0
+	if weighted && len(in.TargetLogProbs) > 0 {
+		return SpecRejectionPlan{}, fmt.Errorf("%w: multiple target probability domains", ErrSpecRejectionShape)
+	}
+	if weighted && len(in.TargetProbabilityRows) != k+1 {
+		return SpecRejectionPlan{}, ErrSpecRejectionTargetRows
+	}
+	if !weighted && len(in.TargetLogProbs) != k+1 {
 		return SpecRejectionPlan{}, fmt.Errorf("%w: got %d rows for K=%d", ErrSpecRejectionTargetRows, len(in.TargetLogProbs), k)
 	}
 	if in.RequestKey == 0 {
@@ -84,6 +103,9 @@ func BuildSpecRejectionPlan(in SpecRejectionPlanInput) (SpecRejectionPlan, error
 	evidence, err := proposal.StochasticDraftEvidence()
 	if err != nil {
 		return SpecRejectionPlan{}, err
+	}
+	if weighted {
+		return buildSpecRejectionProbabilityPlan(in, evidence, float64(penalty))
 	}
 	vocab := len(in.TargetLogProbs[0])
 	if vocab == 0 {
@@ -135,6 +157,143 @@ func BuildSpecRejectionPlan(in SpecRejectionPlanInput) (SpecRejectionPlan, error
 
 	plan.CorrectionToken = sampleProbabilityRow32(targets[k], KeyedUniform(in.RequestKey, DomainBonusToken, in.StepOffset+k))
 	return plan, nil
+}
+
+func buildSpecRejectionProbabilityPlan(in SpecRejectionPlanInput, evidence []DraftTokenEvidence, penalty float64) (SpecRejectionPlan, error) {
+	k := len(in.DraftTokens)
+	vocab := len(in.TargetProbabilityRows[0].Weights)
+	for i, row := range in.TargetProbabilityRows {
+		if err := validateSpecProbabilityRow(row, vocab); err != nil {
+			return SpecRejectionPlan{}, fmt.Errorf("%w: target row %d: %v", ErrSpecRejectionProbability, i, err)
+		}
+	}
+	// Validate every q row before any decision, including rows after a possible
+	// early rejection. Derive the producer's actual finite-grid CDF law rather
+	// than silently normalizing or interpreting raw float32 q as exact masses.
+	drafts := make([][]float64, len(evidence))
+	for i, row := range evidence {
+		if len(row.ProcessedQ) == 0 {
+			return SpecRejectionPlan{}, fmt.Errorf("%w: row %d lacks original processed q", ErrDraftEvidenceIncomplete, i)
+		}
+		if err := validateDraftProbabilityCoordinates(row, vocab); err != nil {
+			return SpecRejectionPlan{}, fmt.Errorf("%w: draft row %d: %v", ErrSpecRejectionProbability, i, err)
+		}
+		var err error
+		drafts[i], err = expandDraftSamplingLaw(row, vocab)
+		if err != nil {
+			return SpecRejectionPlan{}, fmt.Errorf("%w: draft row %d: %v", ErrSpecRejectionProbability, i, err)
+		}
+	}
+	plan := SpecRejectionPlan{
+		AcceptedTokens: make([]int, 0, k), CorrectionToken: -1, RejectedAt: -1,
+		AcceptProb: make([]float32, k), NextStep: in.StepOffset + k + 1,
+	}
+	for i, q := range drafts {
+		p := in.TargetProbabilityRows[i]
+		token := in.DraftTokens[i]
+		alpha := min(1, p.Weights[token]/(p.Mass*q[token]))
+		if in.ResidualMode == SpecResidualPenaltyAdjusted {
+			var residualMass float64
+			for j, weight := range p.Weights {
+				residualMass += max(0, weight/p.Mass-penalty*q[j])
+			}
+			alpha = max(0, min(1, 1-residualMass))
+		}
+		plan.AcceptProb[i] = float32(alpha) // diagnostics only; decision stays float64
+		if KeyedUniform64(in.RequestKey, DomainAcceptCoin, in.StepOffset+i) < alpha {
+			plan.AcceptedTokens = append(plan.AcceptedTokens, token)
+			continue
+		}
+		residual := SpecProbabilityRow{Weights: make([]float64, vocab)}
+		for j, weight := range p.Weights {
+			residual.Weights[j] = max(0, weight-p.Mass*penalty*q[j])
+			residual.Mass += residual.Weights[j]
+		}
+		if !(residual.Mass > 0) || math.IsInf(residual.Mass, 0) {
+			return SpecRejectionPlan{}, fmt.Errorf("%w: rejected row has no finite positive residual", ErrSpecRejectionProbability)
+		}
+		plan.CorrectionToken = sampleSpecProbabilityRow(residual, KeyedUniform64(in.RequestKey, DomainResidual, in.StepOffset+i))
+		plan.RejectedAt = i
+		plan.RollbackKVCount = k - i
+		return plan, nil
+	}
+	plan.CorrectionToken = sampleSpecProbabilityRow(in.TargetProbabilityRows[k], KeyedUniform64(in.RequestKey, DomainBonusToken, in.StepOffset+k))
+	return plan, nil
+}
+
+// expandDraftSamplingLaw derives exact dyadic masses of the actual Qwen38
+// producer, including rounded float32 rows with mass just above/below one.
+// The target and rejection decisions still use finite 53-bit draws: this is
+// not a claim of universal real-arithmetic losslessness or seeded identity.
+func expandDraftSamplingLaw(row DraftTokenEvidence, vocab int) ([]float64, error) {
+	if row.SamplingLaw != DraftSamplingLawQwen38UnitCDF24 {
+		return nil, errors.New("unsupported draft sampling law")
+	}
+	const draws = 1 << 24
+	q := make([]float64, vocab)
+	var cumulative float64
+	previous := 0
+	for j, probability := range row.ProcessedQ {
+		cumulative += float64(probability)
+		// There are ceil(CDF * draws) grid points strictly below CDF. Keep
+		// original compact-row order; expansion must happen after counting.
+		boundary := min(draws, max(previous, int(math.Ceil(cumulative*draws))))
+		if j == len(row.ProcessedQ)-1 {
+			boundary = draws // SampleFromDistribution's last-index fallback.
+		}
+		count := boundary - previous
+		if probability == 0 && count > 0 {
+			// The producer refuses a selected raw-zero-q token. Admitting this
+			// row would condition the proposal distribution on non-refusal.
+			return nil, errors.New("zero-q fallback changes the proposal law")
+		}
+		coordinate := j
+		if len(row.TokenIDs) > 0 {
+			coordinate = row.TokenIDs[j]
+		}
+		q[coordinate] = float64(count) / draws
+		previous = boundary
+	}
+	if q[row.Token] <= 0 {
+		return nil, errors.New("selected token is unreachable under the draft sampling law")
+	}
+	return q, nil
+}
+
+func validateSpecProbabilityRow(row SpecProbabilityRow, vocab int) error {
+	if vocab == 0 || len(row.Weights) != vocab || !(row.Mass > 0) || math.IsInf(row.Mass, 0) {
+		return errors.New("invalid vocabulary width or sampling mass")
+	}
+	var sum float64
+	for _, weight := range row.Weights {
+		if !(weight >= 0) || math.IsInf(weight, 0) {
+			return errors.New("invalid target weight")
+		}
+		sum += weight
+	}
+	// Truncation may accumulate mass in ranked rather than token-index order.
+	// Retain that exact mass; this tolerance validates it without replacing it.
+	if math.IsInf(sum, 0) || math.Abs(sum-row.Mass) > 1e-12*row.Mass {
+		return errors.New("target weights do not match sampling mass")
+	}
+	return nil
+}
+
+func sampleSpecProbabilityRow(row SpecProbabilityRow, coin float64) int {
+	target := coin * row.Mass
+	var cumulative float64
+	last := -1
+	for i, weight := range row.Weights {
+		if weight <= 0 {
+			continue
+		}
+		last = i
+		cumulative += weight
+		if cumulative > target {
+			return i
+		}
+	}
+	return last
 }
 
 func normalizedLogProbRow(logp []float32, vocab int) ([]float32, error) {

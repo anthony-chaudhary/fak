@@ -171,3 +171,123 @@ func TestSpecRejectionPlanRejectsStepRangeOverflow(t *testing.T) {
 		t.Fatalf("overflow error = %v, want ErrSpecRejectionShape", err)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestSpecRejectionPlanCanonicalTargetProbabilityRows(t *testing.T) {
+	const key = uint64(19)
+	coin := KeyedUniform64(key, DomainBonusToken, 1)
+	for _, above := range []bool{false, true} {
+		cutoff := math.Nextafter(coin*7, 0)
+		want := 1
+		if above {
+			cutoff = math.Nextafter(coin*7, math.Inf(1))
+			want = 0
+		}
+		q := sampledEvidence(0, 1, 0)
+		q.ProcessedQ = []float32{1, 0}
+		q.SamplingLaw = DraftSamplingLawQwen38UnitCDF24
+		in := SpecRejectionPlanInput{
+			DraftTokens: []int{0}, DraftEvidence: []DraftTokenEvidence{q}, RequestKey: key,
+			TargetProbabilityRows: []SpecProbabilityRow{
+				{Weights: []float64{1, 0}, Mass: 1},
+				{Weights: []float64{cutoff, 7 - cutoff}, Mass: 7},
+			},
+		}
+		before := append([]float64(nil), in.TargetProbabilityRows[1].Weights...)
+		plan, err := BuildSpecRejectionPlan(in)
+		if err != nil || len(plan.AcceptedTokens) != 1 || plan.CorrectionToken != want {
+			t.Fatalf("float64 CDF boundary above=%v: plan=%+v err=%v want correction %d", above, plan, err, want)
+		}
+		if !reflect.DeepEqual(before, in.TargetProbabilityRows[1].Weights) {
+			t.Fatal("planner mutated canonical target weights")
+		}
+		in.DraftEvidence[0].SamplingLaw = DraftSamplingLawUnspecified
+		if _, err := BuildSpecRejectionPlan(in); !errors.Is(err, ErrSpecRejectionProbability) {
+			t.Fatalf("unspecified draft sampling law admitted: %v", err)
+		}
+		in.DraftEvidence[0].SamplingLaw = DraftSamplingLawQwen38UnitCDF24
+		in.DraftEvidence[0].ProcessedQ = nil
+		if _, err := BuildSpecRejectionPlan(in); !errors.Is(err, ErrDraftEvidenceIncomplete) {
+			t.Fatalf("log-only q admitted for canonical target: %v", err)
+		}
+		in.DraftEvidence[0].ProcessedQ = []float32{0.5, 0.5}
+		if _, err := BuildSpecRejectionPlan(in); !errors.Is(err, ErrDraftEvidenceIncomplete) {
+			t.Fatalf("q inconsistent with original log evidence admitted: %v", err)
+		}
+	}
+
+	t.Run("actual unit CDF over and under mass", func(t *testing.T) {
+		const maxAcceptKey = uint64(0xaf55f34f046b4dbf)
+		if got := KeyedUniform64(maxAcceptKey, DomainAcceptCoin, 0); got != 1-0x1p-53 {
+			t.Fatalf("boundary key gives %.17g", got)
+		}
+		for _, raw := range [][]float32{{0.2, 0.8}, {0.1, 0.9}} {
+			for _, compact := range []bool{false, true} {
+				row := sampledEvidence(0, raw...)
+				row.ProcessedQ = append([]float32(nil), raw...)
+				row.SamplingLaw = DraftSamplingLawQwen38UnitCDF24
+				p := []float64{float64(raw[0]), float64(raw[1])}
+				wantCorrection := 1
+				if compact {
+					row.Token, row.TokenIDs = 1, []int{1, 0}
+					p[0], p[1] = p[1], p[0]
+					wantCorrection = 0
+				}
+				q, err := expandDraftSamplingLaw(row, 2)
+				if err != nil || q[0]+q[1] != 1 {
+					t.Fatalf("derived q = %v, %v", q, err)
+				}
+				// Check both sides of the only CDF boundary against the actual
+				// producer sampler, plus its endpoint/fallback behavior.
+				boundary := int(math.Ceil(float64(raw[0]) * (1 << 24)))
+				for _, draw := range []int{0, boundary - 1, boundary, (1 << 24) - 1} {
+					u := float32(draw) / (1 << 24)
+					got := (*Qwen38SampledSpeculativeVerifier)(nil).SampleFromDistribution(raw, u)
+					want := 1
+					if draw < boundary {
+						want = 0
+					}
+					if got != want {
+						t.Fatalf("actual sampler draw %d: %d, want %d", draw, got, want)
+					}
+				}
+				in := SpecRejectionPlanInput{
+					DraftTokens: []int{row.Token}, DraftEvidence: []DraftTokenEvidence{row}, RequestKey: maxAcceptKey,
+					TargetProbabilityRows: []SpecProbabilityRow{{Weights: p, Mass: p[0] + p[1]}, {Weights: p, Mass: p[0] + p[1]}},
+				}
+				plan, err := BuildSpecRejectionPlan(in)
+				if err != nil || plan.RejectedAt != 0 || plan.CorrectionToken != wantCorrection {
+					t.Fatalf("raw=%v compact=%v: plan=%+v err=%v", raw, compact, plan, err)
+				}
+				// Identical scaled dyadic masses must not round alpha below 1
+				// while the consistently scaled residual is exactly zero.
+				for i := range in.TargetProbabilityRows {
+					in.TargetProbabilityRows[i] = SpecProbabilityRow{Weights: []float64{q[0] * 7, q[1] * 7}, Mass: 7}
+				}
+				plan, err = BuildSpecRejectionPlan(in)
+				if err != nil || len(plan.AcceptedTokens) != 1 {
+					t.Fatalf("identical scaled law: plan=%+v err=%v", plan, err)
+				}
+			}
+		}
+	})
+
+	t.Run("refuse conditioned or unreachable q", func(t *testing.T) {
+		for _, row := range []DraftTokenEvidence{
+			{Token: 0, ProcessedQ: []float32{0.1, 0.8999999, 0}},
+			{Token: 1, ProcessedQ: []float32{1, math.SmallestNonzeroFloat32}},
+		} {
+			row.LogProbs = specLogRow(row.ProcessedQ...)
+			row.Provenance, row.SamplingLaw = DraftEvidenceSampledProcessedQ, DraftSamplingLawQwen38UnitCDF24
+			p := make([]float64, len(row.ProcessedQ))
+			p[0] = 1
+			_, err := BuildSpecRejectionPlan(SpecRejectionPlanInput{
+				DraftTokens: []int{row.Token}, DraftEvidence: []DraftTokenEvidence{row}, RequestKey: 1,
+				TargetProbabilityRows: []SpecProbabilityRow{{Weights: p, Mass: 1}, {Weights: p, Mass: 1}},
+			})
+			if !errors.Is(err, ErrSpecRejectionProbability) {
+				t.Fatalf("unsupported actual law admitted: %v, %v", row.ProcessedQ, err)
+			}
+		}
+	})
+}

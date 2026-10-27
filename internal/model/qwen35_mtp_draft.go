@@ -49,6 +49,7 @@ type Qwen35MTPDraftSession struct {
 	filterDirty       bool
 	coverageThreshold float32
 	sampler           *Qwen38SampledSpeculativeVerifier
+	sampledRound      *Qwen35MTPSampledRound
 }
 
 // NewQwen35MTPDraftSession binds a native Qwen3.8 MTP cache to the target's
@@ -258,6 +259,10 @@ func (d *Qwen35MTPDraftSession) selectGreedyCandidate(logits []float32) (int, bo
 }
 
 func (d *Qwen35MTPDraftSession) selectSampledCandidate(logits []float32) (int, []float32, bool) {
+	return d.selectSampledCandidateWithAdmission(logits, false)
+}
+
+func (d *Qwen35MTPDraftSession) selectSampledCandidateWithAdmission(logits []float32, exactLaw bool) (int, []float32, bool) {
 	if len(logits) == 0 {
 		return -1, nil, false
 	}
@@ -273,6 +278,11 @@ func (d *Qwen35MTPDraftSession) selectSampledCandidate(logits []float32) (int, [
 		mass += float64(probability)
 	}
 	if mass <= 0 || math.IsNaN(mass) || math.IsInf(mass, 0) {
+		return -1, nil, false
+	}
+	if exactLaw && !d.admitSampledProposalRow(logits, q) {
+		// This gate is independent of the next RNG draw. A refusal truncates
+		// growth, never discards an earlier valid sampled prefix.
 		return -1, nil, false
 	}
 	rngCheckpoint := d.sampler.CheckpointRNG()
@@ -298,10 +308,45 @@ func (d *Qwen35MTPDraftSession) selectSampledCandidate(logits []float32) (int, [
 	return token, q, true
 }
 
+func (d *Qwen35MTPDraftSession) admitSampledProposalRow(logits, q []float32) bool {
+	if d.effectiveThreshold() > 0 || d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 && len(logits) != len(d.vocabFilter.Subset) {
+		return false
+	}
+	// The first raw-positive coordinate is reachable under the unit CDF law.
+	// Use it only to validate ALL evidence before drawing the actual token.
+	coordinate := -1
+	for i, probability := range q {
+		if probability > 0 {
+			coordinate = i
+			break
+		}
+	}
+	if coordinate < 0 {
+		return false
+	}
+	token := coordinate
+	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 {
+		token = d.vocabFilter.Subset[coordinate]
+	}
+	row, ok := d.proposalTokenEvidence(token, logits, q)
+	if !ok {
+		return false
+	}
+	if _, err := (DraftProposal{Tokens: []int{token}, DraftEvidence: []DraftTokenEvidence{row}}).StochasticDraftEvidence(); err != nil {
+		return false
+	}
+	vocab := d.target.M.Cfg.VocabSize
+	if err := validateDraftProbabilityCoordinates(row, vocab); err != nil {
+		return false
+	}
+	_, err := expandDraftSamplingLaw(row, vocab)
+	return err == nil
+}
+
 // Propose returns exactly the admitted depth unless a runtime failure is
 // latched. The returned slice never aliases session-owned state.
 func (d *Qwen35MTPDraftSession) Propose(committed []int) []int {
-	draft, _ := d.propose(committed, false)
+	draft, _ := d.propose(committed, false, false)
 	return draft
 }
 
@@ -309,11 +354,16 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) []int {
 // that selected each token. Evidence is all-or-nothing and never aliases
 // session state. Greedy callers may continue to use Propose.
 func (d *Qwen35MTPDraftSession) ProposeWithEvidence(committed []int) (draft []int, evidence []DraftTokenEvidence) {
-	return d.propose(committed, true)
+	return d.propose(committed, true, false)
 }
 
-func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (draft []int, evidence []DraftTokenEvidence) {
+func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence, exactSamplingLaw bool) (draft []int, evidence []DraftTokenEvidence) {
 	if d == nil || d.runtimeErr != nil {
+		return nil, nil
+	}
+	// A live sampled round owns both the proposal checkpoint and its RNG draw.
+	// Starting another proposal would invalidate its commit/abort boundary.
+	if d.sampledRound != nil {
 		return nil, nil
 	}
 	if d.closed {
@@ -358,7 +408,13 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 		return nil, nil
 	}
 
-	firstToken, firstQ, ok := d.selectProposalCandidate(d.lastLogits)
+	selectCandidate := d.selectProposalCandidate
+	if exactSamplingLaw {
+		selectCandidate = func(logits []float32) (int, []float32, bool) {
+			return d.selectSampledCandidateWithAdmission(logits, true)
+		}
+	}
+	firstToken, firstQ, ok := selectCandidate(d.lastLogits)
 	if !ok {
 		return nil, nil
 	}
@@ -409,7 +465,7 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence bool) (
 			d.failProposal("forward", pos, ErrQwen35MTPEmptyLogits)
 			return nil, nil
 		}
-		cand, q, ok := d.selectProposalCandidate(logits)
+		cand, q, ok := selectCandidate(logits)
 		if !ok {
 			break
 		}
@@ -443,9 +499,11 @@ func (d *Qwen35MTPDraftSession) proposalTokenEvidence(token int, logits, q []flo
 		return DraftTokenEvidence{}, false
 	}
 	row := DraftTokenEvidence{
-		Token:      token,
-		LogProbs:   make([]float32, len(q)),
-		Provenance: DraftEvidenceSampledProcessedQ,
+		Token:       token,
+		LogProbs:    make([]float32, len(q)),
+		Provenance:  DraftEvidenceSampledProcessedQ,
+		ProcessedQ:  append([]float32(nil), q...),
+		SamplingLaw: DraftSamplingLawQwen38UnitCDF24,
 	}
 	selected := token
 	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 && len(logits) == len(d.vocabFilter.Subset) {
@@ -546,6 +604,11 @@ func (d *Qwen35MTPDraftSession) Err() error {
 func (d *Qwen35MTPDraftSession) Close() {
 	if d == nil || d.closed {
 		return
+	}
+	if d.sampledRound != nil {
+		if err := d.sampledRound.Abort(); err != nil {
+			d.latch("sampled round rollback", -1, err)
+		}
 	}
 	d.closed = true
 	if d.pending != nil {
