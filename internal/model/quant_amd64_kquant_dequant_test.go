@@ -144,7 +144,7 @@ func TestKQuantDequantAVX2OrdinaryPrefillReuse(t *testing.T) {
 			q5kDequantSuperBlockArch = func(dst []float32, blk []byte) bool { calls.Add(1); return old5(dst, blk) }
 			q6kDequantSuperBlockArch = func(dst []float32, blk []byte) bool { calls.Add(1); return old6(dst, blk) }
 			kQuantMatRowsIntoBatch(qt, x, P, got)
-			if calls.Load() != out*nblk {
+			if calls.Load() != int64(out*nblk) {
 				t.Fatalf("decoded%d blocks want%d independent of P", calls.Load(), out*nblk)
 			}
 			assertKDequantBits(t, "ordinary prefill", got, want)
@@ -245,7 +245,7 @@ func TestQ4KFloatDequantAVX2OrdinaryPrefillReuse(t *testing.T) {
 		var calls atomic.Int64
 		q4kDequantSuperBlockArch = func(dst []float32, blk []byte) bool { calls.Add(1); return oldHook(dst, blk) }
 		got := q4kGemm(qt, x, P)
-		if calls.Load() != out*nblk {
+		if calls.Load() != int64(out*nblk) {
 			t.Fatalf("Q4_K decoded%d blocks want%d independent ofP", calls.Load(), out*nblk)
 		}
 		assertKDequantBits(t, "Q4_K ordinary prefill", got, want)
