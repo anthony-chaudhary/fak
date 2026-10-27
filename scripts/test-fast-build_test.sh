@@ -16,10 +16,10 @@ fi
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture="$root/scripts/test-fast-build_test.sh"
 
-ok=$(make --no-print-directory -C "$root" smoke-build GO="$fixture" SMOKE_BUILD_BUDGET=2s)
+ok=$(make --no-print-directory -C "$root" smoke-build GO="sh \"$fixture\"" SMOKE_BUILD_BUDGET=2s)
 printf '%s\n' "$ok" | grep -F -- '-buildvcs=false ./... ' >/dev/null
 
-timed=$(TEST_FAST_BUILD_STALL=1 make --no-print-directory -C "$root" smoke-build GO="$fixture" SMOKE_BUILD_BUDGET=0.1s SMOKE_BUILD_KILL_AFTER=0.1s 2>&1) && {
+timed=$(TEST_FAST_BUILD_STALL=1 make --no-print-directory -C "$root" smoke-build GO="sh \"$fixture\"" SMOKE_BUILD_BUDGET=0.1s SMOKE_BUILD_KILL_AFTER=0.1s 2>&1) && {
     echo "test-fast-build regression: expected timeout" >&2
     exit 1
 }
