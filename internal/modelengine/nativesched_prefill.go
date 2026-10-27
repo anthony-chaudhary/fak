@@ -347,6 +347,11 @@ func (s *NativeScheduler) maybeInsertRadixKV(prompt []int, sess *model.Session, 
 	if matched < len(prompt) {
 		leaf := st.tree.InsertWithLogits(boundary, prompt[matched:], sess.Cache, logits)
 		st.tree.Done(leaf)
+	} else if len(logits) > 0 && boundary != nil && boundary.KV() != nil && boundary.KV().Len() == len(prompt) && len(boundary.Logits()) == 0 {
+		// Complete a state-only boundary after bounded replay so subsequent
+		// exact hits reuse its terminal logits rather than replaying again.
+		leaf := st.tree.InsertWithLogits(boundary, nil, sess.Cache, logits)
+		st.tree.Done(leaf)
 	} else {
 		st.tree.Done(boundary)
 	}
@@ -486,12 +491,6 @@ func (s *NativeScheduler) applyPrefixHitsLocked() {
 			ln.prefillChunkTokens = 0
 			if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 				ln.logits = copyF32(info.boundary.Logits())
-			} else if len(ln.logits) == 0 && ln.sess != nil && ln.sess.M != nil && len(ln.prompt) > 0 {
-				tempSess := s.m.NewSession()
-				tempSess.Quant = true
-				tempSess.Q4K = true
-				ln.logits = copyF32(tempSess.Prefill(ln.prompt))
-				tempSess.Close()
 			}
 			s.observeEvent(nativeSchedulerEvent{
 				Iteration: s.iteration + 1,
@@ -517,8 +516,14 @@ func installPrefixHitLocked(ln *schedLane, info *prefixHitInfo) int {
 	if info.boundary == nil || info.boundary.KV() == nil || ln.sess == nil {
 		return 0
 	}
+	depth := min(info.matched, info.boundary.KV().Len())
+	if info.fullHit && depth == len(ln.prompt) && len(info.boundary.Logits()) == 0 {
+		// Recurrent KV cannot be rewound to recover terminal logits. Decline
+		// before installing it so ordinary bounded prefill stays outside s.mu.
+		return 0
+	}
 	ln.sess.Cache = info.boundary.KV().Clone()
-	return min(info.matched, ln.sess.Cache.Len())
+	return depth
 }
 
 // prefillSafePreemptibleLaneLocked reuses the configured historical victim picker
@@ -589,12 +594,6 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 				ln.prefillChunkTokens = 0
 				if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 					ln.logits = copyF32(info.boundary.Logits())
-				} else if len(ln.logits) == 0 && ln.sess != nil && ln.sess.M != nil && len(ln.prompt) > 0 {
-					tempSess := s.m.NewSession()
-					tempSess.Quant = true
-					tempSess.Q4K = true
-					ln.logits = copyF32(tempSess.Prefill(ln.prompt))
-					tempSess.Close()
 				}
 				s.mu.Unlock()
 				s.observeEvent(nativeSchedulerEvent{
