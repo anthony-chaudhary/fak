@@ -175,7 +175,7 @@ func (m *Model) v41SuffixUbatchRouted(l int, works []*v41LayerStepWork, st *v41F
 	scratch.v41LayerCacheReset()
 	scratch.v41SizeExpertLayerBudget(m)
 	routed := make([][]float32, len(works))
-	if err := m.v41ContractRoutedGroupedInto(l, inputs, picks, scratch, m.Cfg, routed, st, false); err != nil {
+	if err := m.v41ContractRoutedGrouped(l, inputs, picks, scratch, m.Cfg, routed, st); err != nil {
 		return nil, err
 	}
 	return routed, nil
