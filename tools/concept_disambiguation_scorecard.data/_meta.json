@@ -17631,6 +17631,11 @@
           "category": "incidental",
           "reason": "Private numeric score-slice ownership helper: returns nil, transfers a fresh builtin float32 slice, or defensively copies callback-owned values. Candidate/snapshot names scalar inference data; this symbol implements no planning, search scheduling, lifecycle, or policy.",
           "token": "v41CandidateScoreSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local dense KV payload cardinality predicate n/width == rows and n%width == 0 after positive-width admission. It checks full numeric K/V/raw or packed-code arrays, not planning, search, scheduling, lifecycle, or policy.",
+          "token": "fullPlane"
         }
       ],
       "exclude": [
@@ -17813,6 +17818,7 @@
         "fitsMemoryPlanByScopeWithDevice",
         "fixturePlanner",
         "foldCandidate",
+        "fullPlane",
         "hostPlan",
         "idCandidate",
         "inKernelPlannerEPCoordinated",

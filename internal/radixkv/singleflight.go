@@ -321,7 +321,14 @@ func (g *PrefixFlightGroup) sharedPrefixFollowerResult(ctx context.Context, f *f
 
 	kv := snapshot
 	if !exclusive {
-		kv = snapshot.Clone()
+		// Concurrent readers need private state, but dense partial-prefix
+		// followers need not copy the leader-only suffix. Keep the original
+		// clone/eviction path for every unsupported or complete snapshot.
+		var prefixCopied bool
+		kv, prefixCopied = snapshot.TryCloneDensePrefixExact(matched)
+		if !prefixCopied {
+			kv = snapshot.Clone()
+		}
 		g.cloneBytes.Add(kv.ClonePayloadBytes())
 	}
 	if matched < kv.Len() {
