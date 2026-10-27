@@ -250,3 +250,151 @@ func TestPageAwareEvictionCheapestPageFirst(t *testing.T) {
 		t.Fatalf("Chunk 1 leaf c1b should survive, matched %d/%d", m, len(c1b))
 	}
 }
+
+// TestEvictionStrategyFIFOFILOVictimOrder exercises the ordinary Insert eviction
+// seam: creation order is independent of touches, and in-flight leaves stay leased.
+// fak-test:runtime fast est=10ms lane=default
+func TestEvictionStrategyFIFOFILOVictimOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		strategy      string
+		first, second int
+		origin        string
+	}{
+		{"fifo", "fifo", 0, 1, ""},
+		{"filo", "filo", 2, 1, ""},
+		{"default_lru", "", 2, 0, ""},
+		{"fifo_flights", "fifo", 0, 1, "flight"},
+		{"filo_flights", "filo", 2, 1, "flight"},
+		{"filo_unpinned", "filo", 2, 1, "pin"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := New(30)
+			if tc.strategy != "" {
+				if err := tree.SetEvictionStrategy(tc.strategy); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reqs := [][]int{distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)}
+			for i, req := range reqs {
+				if tc.origin == "flight" && i != 1 {
+					// The first demand flight is created at access clock zero.
+					leaf, leader := tree.RegisterFlight(req)
+					if !leader || leaf == nil {
+						t.Fatal("expected new flight")
+					}
+					tree.CommitFlight(leaf, nil, nil)
+					tree.Done(leaf)
+				} else if tc.origin == "pin" && i != 1 {
+					leaf := tree.PinPrefix(req)
+					tree.UnpinNode(leaf)
+				} else {
+					touchPure(tree, req)
+				}
+			}
+			for _, i := range []int{2, 0, 1} {
+				if tc.origin != "" {
+					break // preserve zero-clock flight/pin admission timestamps
+				}
+
+				n, matched := tree.Lookup(reqs[i])
+				if matched != len(reqs[i]) {
+					t.Fatalf("touch %d matched %d tokens", i, matched)
+				}
+				tree.Done(n)
+			}
+			// Keep new requests leased across both insert-time eviction passes so
+			// the second victim must be another original A/B/C leaf, even for FILO.
+			_, d := servePure(tree, distinctReq(3, 10))
+			defer tree.Done(d)
+			for i, req := range reqs {
+				want := len(req)
+				if i == tc.first {
+					want = 0
+				}
+				if got := tree.MatchLen(req); got != want {
+					t.Fatalf("first eviction: leaf %d matched %d, want %d", i, got, want)
+				}
+			}
+			_, e := servePure(tree, distinctReq(4, 10))
+			defer tree.Done(e)
+			for i, req := range reqs {
+				want := len(req)
+				if i == tc.first || i == tc.second {
+					want = 0
+				}
+				if got := tree.MatchLen(req); got != want {
+					t.Fatalf("second eviction: leaf %d matched %d, want %d", i, got, want)
+				}
+			}
+			wantPolicy := tc.strategy
+			if wantPolicy == "" {
+				wantPolicy = "lru"
+			}
+			if st := tree.Stats(); st.Evictions != 2 || st.LastEvictPolicy != wantPolicy {
+				t.Fatalf("evictions/policy = %d/%s, want 2/%s", st.Evictions, st.LastEvictPolicy, wantPolicy)
+			}
+		})
+	}
+	for _, strategy := range []string{"fifo", "filo"} {
+		t.Run(strategy+"_leased", func(t *testing.T) {
+			tree, err := NewWithEvictionStrategy(30, strategy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reqs := [][]int{distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)}
+			for _, req := range reqs {
+				touchPure(tree, req)
+			}
+			protected := 0
+			if strategy == "filo" {
+				protected = 2
+			}
+			lease, _ := tree.Lookup(reqs[protected])
+			defer tree.Done(lease)
+			_, added := servePure(tree, distinctReq(3, 10))
+			defer tree.Done(added)
+			if tree.MatchLen(reqs[protected]) != 10 || tree.MatchLen(reqs[1]) != 0 {
+				t.Fatal("leased preferred victim must survive; next eligible creation-order victim must leave")
+			}
+		})
+		t.Run(strategy+"_warm_full_pool", func(t *testing.T) {
+			tree, err := NewWithEvictionStrategy(20, strategy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, b, warm := distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)
+			touchPure(tree, a)
+			touchPure(tree, b)
+			tree.WarmInsert(warm, nil)
+			if tree.MatchLen(a) != 10 || tree.MatchLen(b) != 10 || tree.MatchLen(warm) != 0 {
+				t.Fatal("opportunistic warm insertion displaced demand from a full pool")
+			}
+		})
+		t.Run(strategy+"_warm", func(t *testing.T) {
+			tree, err := NewWithEvictionStrategy(0, strategy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reqs := [][]int{distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)}
+			for _, req := range reqs {
+				tree.WarmInsert(req, nil)
+			}
+			// Warm inserts share recency zero; creation order must still be unique.
+			tree.SetRetention(20)
+			victim := 0
+			if strategy == "filo" {
+				victim = 2
+			}
+			for i, req := range reqs {
+				want := 10
+				if i == victim {
+					want = 0
+				}
+				if got := tree.MatchLen(req); got != want {
+					t.Fatalf("warm leaf %d matched %d, want %d", i, got, want)
+				}
+			}
+		})
+	}
+}

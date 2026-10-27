@@ -681,6 +681,7 @@ func (t *Tree) attachComputingLeaf(boundary *node, suffix []int, ready chan stru
 		return boundary
 	}
 	s := append([]int(nil), suffix...)
+	t.creationSeq++
 	leaf := &node{
 		key:       s,
 		parent:    boundary,
@@ -689,6 +690,7 @@ func (t *Tree) attachComputingLeaf(boundary *node, suffix []int, ready chan stru
 		state:     uint32(NodeComputingPrefill),
 		ready:     ready,
 		lastUsed:  t.clock,
+		createdAt: t.creationSeq,
 		refs:      1, // leased while computing
 		regimeKey: boundary.regimeKey,
 	}

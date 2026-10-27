@@ -71,6 +71,38 @@ type lruStrategy struct{}
 func (lruStrategy) Name() string               { return "lru" }
 func (lruStrategy) Priority(n *node) victimKey { return victimKey{age: n.lastUsed} }
 
+// FIFO/FILO priority rules ported from SGLang, Copyright 2023-2024 SGLang Team.
+// SPDX-License-Identifier: Apache-2.0
+// Source: python/sglang/srt/mem_cache/evict_policy.py:24-35
+// at 00a9a81b67774e8374172646c092e14999472703.
+// License: https://www.apache.org/licenses/LICENSE-2.0
+// Modified for Fak: use deterministic node-creation ticks instead of wall time,
+// and complement unsigned ticks to reverse ordering without signed overflow.
+// Creation age stays unchanged on demand touches; the common victim selector
+// continues to exclude leased, computing and pinned leaves.
+type fifoStrategy struct{}
+
+func (fifoStrategy) Name() string { return "fifo" }
+func (fifoStrategy) Priority(n *node) victimKey {
+	return insertionOrderKey(n, n.createdAt)
+}
+
+type filoStrategy struct{}
+
+func (filoStrategy) Name() string { return "filo" }
+func (filoStrategy) Priority(n *node) victimKey {
+	return insertionOrderKey(n, ^n.createdAt)
+}
+
+// Preserve prewarm's admission fence: opportunistic work must not displace demand.
+// The origin bit distinguishes prewarm from a demand flight created at clock zero.
+func insertionOrderKey(n *node, age uint64) victimKey {
+	if n.opportunistic && n.lastUsed == warmRecency {
+		return victimKey{seg: -1, age: age}
+	}
+	return victimKey{age: age}
+}
+
 // costAwareStrategy evicts the cheapest-to-lose leaf per compute.KVEvictionCost (#2239):
 // recompute-cost × reuse-probability ÷ bytes, LRU tie-break. It puts that score in cost and
 // leaves seg 0, so the argmin reproduces PickEvictionVictim's ranking (lowest cost, oldest
@@ -158,6 +190,8 @@ func nodeEvictionSeg(n *node, clock uint64) int {
 // first policy the open seam adds. RegisterVictimStrategy extends it in-package.
 var victimStrategies = map[string]func() VictimStrategy{
 	"lru":                func() VictimStrategy { return lruStrategy{} },
+	"fifo":               func() VictimStrategy { return fifoStrategy{} },
+	"filo":               func() VictimStrategy { return filoStrategy{} },
 	"cost-aware":         func() VictimStrategy { return costAwareStrategy{} },
 	"lowest-score-first": func() VictimStrategy { return lowestScoreFirstStrategy{costAwareStrategy{}} },
 	"slru":               func() VictimStrategy { return slruStrategy{protectThreshold: slruProtectThreshold} },

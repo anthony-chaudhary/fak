@@ -97,12 +97,14 @@ type node struct {
 	logits       []float32
 	cachedLogits []float32 // logits owned by a complete device snapshot
 
-	plen      int    // path length in tokens (parent.plen + len(key)); == len(kv) when kv!=nil
-	refs      int    // active leases; a leaf with refs>0 is never LRU-evicted
-	lastUsed  uint64 // logical clock of the most recent match/insert touching this node — LRU key
-	hits      int    // subsequent demand lookups that found this node resident
-	chunkID   int    // physical backing page / allocation chunk identifier (0 = unassigned)
-	regimeKey string // decode regime identifier under which this node's KV was produced
+	plen          int    // path length in tokens (parent.plen + len(key)); == len(kv) when kv!=nil
+	refs          int    // active leases; a leaf with refs>0 is never LRU-evicted
+	lastUsed      uint64 // logical clock of the most recent match/insert touching this node — LRU key
+	createdAt     uint64 // tree-scoped node creation order, unchanged by later touches
+	opportunistic bool   // admitted by prewarm; stays low priority until a demand touch
+	hits          int    // subsequent demand lookups that found this node resident
+	chunkID       int    // physical backing page / allocation chunk identifier (0 = unassigned)
+	regimeKey     string // decode regime identifier under which this node's KV was produced
 
 	pinned    bool              // Tier 0 coordinator prompt: immune from eviction (seg = 3)
 	retention *RetentionRequest // client-declared per-request KV retention descriptor
@@ -291,6 +293,7 @@ type Tree struct {
 	snapshotBytes        int64  // hot complete snapshots plus their cached final logits
 	hostSnapshotBytes    int64  // complete PrefixSnapshot payloads physically owned by host DRAM
 	clock                uint64 // logical access clock
+	creationSeq          uint64 // node creation clock, independent of demand/warm recency
 	recordSeq            uint64 // monotonic, never-reused record incarnation sequence (#12848)
 
 	l1Hits         int
@@ -619,18 +622,21 @@ func (t *Tree) MatchLenNS(ns string, tokens []int) int {
 // diverges in the middle of a run, which fak's declare-the-prefix path could not.
 func (t *Tree) split(parent, child *node, oi int) *node {
 	first := child.key[0]
+	t.creationSeq++
 	mid := &node{
-		key:       append([]int(nil), child.key[:oi]...),
-		parent:    parent,
-		children:  map[int]*node{},
-		plen:      parent.plen + oi,
-		lastUsed:  child.lastUsed,
-		hits:      child.hits,
-		chunkID:   child.chunkID,
-		regimeKey: child.regimeKey,
-		pinned:    child.pinned,
-		tier:      child.tier,
-		tierSet:   child.tierSet,
+		key:           append([]int(nil), child.key[:oi]...),
+		parent:        parent,
+		children:      map[int]*node{},
+		plen:          parent.plen + oi,
+		lastUsed:      child.lastUsed,
+		createdAt:     t.creationSeq,
+		opportunistic: child.opportunistic,
+		hits:          child.hits,
+		chunkID:       child.chunkID,
+		regimeKey:     child.regimeKey,
+		pinned:        child.pinned,
+		tier:          child.tier,
+		tierSet:       child.tierSet,
 	}
 	// Record ownership stays with the snapshot-bearing CHILD: mid is a fresh
 	// structural intermediate that owns no snapshot, so it must never inherit the
@@ -1143,16 +1149,19 @@ func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCac
 	t.probeThrash(boundary, suffix)
 	t.fills++ // one prefix-cache FILL event (#5804): demand Insert or prewarm WarmInsert
 	s := append([]int(nil), suffix...)
+	t.creationSeq++
 	leaf := &node{
-		key:       s,
-		parent:    boundary,
-		children:  map[int]*node{},
-		kv:        kv,
-		logits:    copyCPULogits(logits),
-		plen:      boundary.plen + len(s),
-		lastUsed:  lastUsed,
-		chunkID:   chunkID,
-		regimeKey: boundary.regimeKey,
+		key:           s,
+		parent:        boundary,
+		children:      map[int]*node{},
+		kv:            kv,
+		logits:        copyCPULogits(logits),
+		plen:          boundary.plen + len(s),
+		lastUsed:      lastUsed,
+		createdAt:     t.creationSeq,
+		opportunistic: lastUsed == warmRecency,
+		chunkID:       chunkID,
+		regimeKey:     boundary.regimeKey,
 	}
 	if chunkID == 0 && t.pageTracker != nil {
 		if id := t.pageTracker.ChunkID(leaf); id != 0 {
@@ -1412,6 +1421,7 @@ func (t *Tree) pinPath(n *node) {
 	}
 	for p := n; p != nil && p.parent != nil; p = p.parent {
 		p.pinned = true
+		p.opportunistic = false // explicit pinning is demand, even at access clock zero
 		p.tier = Tier0PinnedRoot
 		p.tierSet = true
 		retCopy := req
