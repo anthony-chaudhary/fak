@@ -1507,6 +1507,16 @@
           "category": "incidental",
           "reason": "Private clonescan helper invokes the existing optional WindowCache Maintain callback once per batch; it adds no cache policy, lifetime, storage or ownership concept.",
           "token": "maintainWindowCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private C ABI float output pointer naming the existing caller-owned normalized unrotated-key backing. This parameter creates no cache store, owner, reuse policy, index or eviction contract.",
+          "token": "KRawCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private C ABI float output pointer naming the existing caller-owned rotated-key backing. This parameter creates no cache store, owner, reuse policy, index or eviction contract.",
+          "token": "KCache"
         }
       ],
       "exclude": [
@@ -1575,6 +1585,8 @@
         "InputUncached",
         "InputUncachedPerMillion",
         "July4CacheValueAutospawn",
+        "KCache",
+        "KRawCache",
         "KVCacheBytesAsymmetric",
         "ManagedProviderCache",
         "MaxCacheLoadWorkers",
@@ -2217,6 +2229,26 @@
           "category": "incidental",
           "reason": "enum index into the per-model V4.1 layer name table for the fixed GGUF tensor suffix; a lookup key for an existing weight name, not a new canonical concept (attn.sink)",
           "token": "v41LeafAttnSink"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic accessor reading the fused launch counter only; no attention computation, selection, lifecycle or publication.",
+          "token": "fak_qwen35_attention_postprocess_launch_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Go diagnostic wrapper reading the C launch counter under existing mutex; no attention computation or routing contract.",
+          "token": "cudaQwen35AttentionPostprocessLaunchesLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-once private boolean holding an opt-in environment flag. It contains no attention arithmetic or backend dispatch implementation; the actual fused operation is separately positioned.",
+          "token": "cudaQwen35AttentionPostprocessEnabled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment variable key for the private default-off opt-in switch. A configuration spelling, not an attention implementation; actual fused operation is separately positioned.",
+          "token": "FAK_CUDA_QWEN35_ATTN_POSTPROCESS"
         }
       ],
       "exclude": [
@@ -2229,6 +2261,7 @@
         "EstimatedAttention",
         "EstimatedAttentionSeconds",
         "ExecutionPrefillAttention",
+        "FAK_CUDA_QWEN35_ATTN_POSTPROCESS",
         "MetalFallbackPrefillAttentionCPU",
         "PrefillAttentionSupported",
         "PrefillAttentionTiming",
@@ -2256,8 +2289,11 @@
         "clearSharedAttention",
         "coldAttentionOwner",
         "copySharedAttentionFrom",
+        "cudaQwen35AttentionPostprocessEnabled",
+        "cudaQwen35AttentionPostprocessLaunchesLocked",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
+        "fak_qwen35_attention_postprocess_launch_count",
         "linear_attn_out",
         "linear_attn_qkv_mixed",
         "mg_prefill_attn",
@@ -11580,6 +11616,11 @@
           "category": "incidental",
           "reason": "Private type-assertion and forwarding helper for the V41EngramLookAheadReadPolicy producer contract; returns ineligible when the contract is absent and introduces no independent policy.",
           "token": "v41EngramForwardLookAheadPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CUDA device/launch eligibility predicate checking capture, token bounds, grid, threads and shared memory. It grants no user authority, policy permission or capability token.",
+          "token": "fak_qwen35_attention_postprocess_capability"
         }
       ],
       "exclude": [
@@ -11726,6 +11767,7 @@
         "executionPolicyError",
         "fak_capability",
         "fak_fleet_goal_adjudications_total",
+        "fak_qwen35_attention_postprocess_capability",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
         "gradeSemanticFiles",

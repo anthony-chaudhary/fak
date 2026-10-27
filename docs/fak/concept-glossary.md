@@ -1784,3 +1784,24 @@ Metadata-only constructor for opt-in host expert raw gate/up row-streaming. It v
 Metadata-only selector and constructor for opt-in host shared-expert gate/up projection cohorts. It validates full-host callback-free execution, immutable BF16-widened inputs, bounded cohort geometry and eligible raw K-quantized gate/up weights before returning deferred cohort state; otherwise returns nil without numeric-buffer or payload effects.
 
 **Distinct from:** Unlike PlanV41Q2KTokenPanel, which constructs device token-panel launch geometry, this selects a host shared-expert projection cohort and retains its inputs/weights for later scalar-ordered publication. It neither reserves whole-process memory nor performs projection, BF16 publication, down contraction, or shared addition during planning.
+
+
+### fak_qwen35_attention_postprocess_capability
+
+CUDA device and launch-geometry eligibility check for fused Qwen attention postprocessing.
+
+**Distinct from:** Unlike attention dispatch or the fused enqueue function, this performs no allocation, enqueue, KV mutation or attention arithmetic; checks device zero, capture state, token bounds, threads, shared memory and grid limits.
+
+
+### fak_qwen35_attention_postprocess_f32
+
+CUDA F32 fused Q/K RMS normalization, partial RoPE and owned KV-tail append enqueue for Qwen sequence prefill.
+
+**Distinct from:** Unlike attention score computation or backend dispatch, processes projected Q/K/V using the fixed 24-query/4-KV-head 256-dimension contract. It validates live pointer extents and rejects overlap before the single fused kernel; does not publish Go KV lengths.
+
+
+### qwen35SequenceAttentionPostprocessLocked
+
+Mutex-held Go sequence owner for opt-in CUDA fused attention postprocessing and exact KV append publication.
+
+**Distinct from:** Unlike attention backend dispatch or the C enqueue primitive, validates tensor ownership and append frontier, owns query transient and error drain, and advances KV lengths only after successful enqueue. It never retries a selected failing operation over a partially written cache.

@@ -144,5 +144,62 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "fakqwen35attentionpostprocesscapability",
+      "canonical": "fak_qwen35_attention_postprocess_capability",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "CUDA device and launch-geometry eligibility check for fused Qwen attention postprocessing.",
+      "distinction": "Unlike attention dispatch or the fused enqueue function, this performs no allocation, enqueue, KV mutation or attention arithmetic; checks device zero, capture state, token bounds, threads, shared memory and grid limits.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "fak_qwen35_attention_postprocess_capability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fakqwen35attentionpostprocessf32",
+      "canonical": "fak_qwen35_attention_postprocess_f32",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "CUDA F32 fused Q/K RMS normalization, partial RoPE and owned KV-tail append enqueue for Qwen sequence prefill.",
+      "distinction": "Unlike attention score computation or backend dispatch, processes projected Q/K/V using the fixed 24-query/4-KV-head 256-dimension contract. It validates live pointer extents and rejects overlap before the single fused kernel; does not publish Go KV lengths.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "fak_qwen35_attention_postprocess_f32",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "qwen35sequenceattentionpostprocesslocked",
+      "canonical": "qwen35SequenceAttentionPostprocessLocked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Mutex-held Go sequence owner for opt-in CUDA fused attention postprocessing and exact KV append publication.",
+      "distinction": "Unlike attention backend dispatch or the C enqueue primitive, validates tensor ownership and append frontier, owns query transient and error drain, and advances KV lengths only after successful enqueue. It never retries a selected failing operation over a partially written cache.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "qwen35SequenceAttentionPostprocessLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

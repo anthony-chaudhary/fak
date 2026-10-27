@@ -335,6 +335,20 @@ var matrix = []Op{
 		Note:        "Bind to NCCL's collectives directly (-lnccl); fak's value is the honest Approx fence around a hardware-ordered reduce, not a new all-reduce.",
 	},
 	{
+		Slug:  "cuda-qwen-attention-postprocess",
+		Title: "CUDA Qwen sequence Q/K norm, partial RoPE and owned KV append",
+		FileGlobs: []string{
+			"internal/compute/cuda/qwen35_attention_postprocess.cuh",
+			"internal/compute/cuda_qwen35_attention_postprocess*.go",
+		},
+		FakPath:     "internal/compute/cuda/qwen35_attention_postprocess.cuh; internal/compute/cuda_qwen35_sequence.go",
+		SOTA:        "FlashInfer fused Q/K RMSNorm + RoPE (technique reference); exact arithmetic donor is fak transformer_ops.cuh@133fc57c9bf4f209390031ed31833a420d87faf6 (Apache-2.0)",
+		PrimaryLink: "https://docs.flashinfer.ai/generated/flashinfer.norm.fused_qk_rmsnorm_rope.html",
+		Route:       RouteStayMinimal,
+		Oracle:      "bit-identical Q, normalized K, rotated K and V versus retained CUDA seven-launch composition, unchanged KV prefix/tail bounds, then ordinary-model greedy/logit parity and same-card uncached-prefill ABCCBA",
+		Note:        "Experimental default-off F32 24-query/4-KV/hd256 path; reuse the existing 256-thread RMS tree and double RoPE expressions rather than importing different precision/reduction or paged ownership. Source-only candidate, no hardware/performance qualification.",
+	},
+	{
 		Slug:  "cuda-qwen-gdn",
 		Title: "CUDA Qwen3.8 Gated-DeltaNet recurrence",
 		FileGlobs: []string{

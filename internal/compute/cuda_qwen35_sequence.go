@@ -448,26 +448,36 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 				return result, &Qwen35SequenceError{Stage: "attention-split", Layer: index, Cause: splitErr}
 			}
 			c.releaseTransientBuffers([]*cudaBuf{qgBuf})
-			if layer.QNorm.Buf() != nil {
-				qNormed, qNormBuf, qNormErr := c.qwen35SequenceRMSNormLocked(q, layer.QNorm, tokens*req.NumHeads, req.RMSNormEpsilon, "attention-q-norm")
-				if qNormErr != nil {
-					return result, &Qwen35SequenceError{Stage: "attention-q-norm", Layer: index, Cause: qNormErr}
-				}
-				kNormed, kNormBuf, kNormErr := c.qwen35SequenceRMSNormLocked(kRaw, layer.KNorm, tokens*req.NumKVHeads, req.RMSNormEpsilon, "attention-k-norm")
-				if kNormErr != nil {
-					return result, &Qwen35SequenceError{Stage: "attention-k-norm", Layer: index, Cause: kNormErr}
-				}
-				c.releaseTransientBuffers([]*cudaBuf{qBuf, kRawBuf})
-				q, qBuf, kRaw, kRawBuf = qNormed, qNormBuf, kNormed, kNormBuf
+			qRoPE, qRoPEBuf, fused, postErr := c.qwen35SequenceAttentionPostprocessLocked(q, kRaw, value, layer.QNorm, layer.KNorm, kv, compactAttention, tokens, req.StartPos, req.RotaryDim, req.RMSNormEpsilon, req.RoPEThetaForLayer[index])
+			if postErr != nil {
+				c.qwen35SequencePoisonStates(req)
+				return result, postErr
 			}
-			qRoPE, qRoPEBuf, kRoPE, kRoPEBuf, ropeErr := c.qwen35SequenceRoPELocked(q, kRaw, tokens, req.StartPos, req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim, req.RoPEThetaForLayer[index])
-			if ropeErr != nil {
-				return result, &Qwen35SequenceError{Stage: "attention-rope", Layer: index, Cause: ropeErr}
+			var kRoPEBuf *cudaBuf
+			if !fused {
+				if layer.QNorm.Buf() != nil {
+					qNormed, qNormBuf, qNormErr := c.qwen35SequenceRMSNormLocked(q, layer.QNorm, tokens*req.NumHeads, req.RMSNormEpsilon, "attention-q-norm")
+					if qNormErr != nil {
+						return result, &Qwen35SequenceError{Stage: "attention-q-norm", Layer: index, Cause: qNormErr}
+					}
+					kNormed, kNormBuf, kNormErr := c.qwen35SequenceRMSNormLocked(kRaw, layer.KNorm, tokens*req.NumKVHeads, req.RMSNormEpsilon, "attention-k-norm")
+					if kNormErr != nil {
+						return result, &Qwen35SequenceError{Stage: "attention-k-norm", Layer: index, Cause: kNormErr}
+					}
+					c.releaseTransientBuffers([]*cudaBuf{qBuf, kRawBuf})
+					q, qBuf, kRaw, kRawBuf = qNormed, qNormBuf, kNormed, kNormBuf
+				}
+				var kRoPE Tensor
+				var ropeErr error
+				qRoPE, qRoPEBuf, kRoPE, kRoPEBuf, ropeErr = c.qwen35SequenceRoPELocked(q, kRaw, tokens, req.StartPos, req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim, req.RoPEThetaForLayer[index])
+				if ropeErr != nil {
+					return result, &Qwen35SequenceError{Stage: "attention-rope", Layer: index, Cause: ropeErr}
+				}
+				if appendErr := c.qwen35SequenceAppendKVLocked(kv, compactAttention, kRaw, kRoPE, value, req.StartPos, tokens); appendErr != nil {
+					return result, appendErr
+				}
 			}
 			c.releaseTransientBuffers([]*cudaBuf{qBuf})
-			if appendErr := c.qwen35SequenceAppendKVLocked(kv, compactAttention, kRaw, kRoPE, value, req.StartPos, tokens); appendErr != nil {
-				return result, appendErr
-			}
 			attn, attnBuf, attnErr := c.qwen35SequenceAttentionLocked(qRoPE, kv, compactAttention, tokens, req.StartPos, req.NumHeads, float32(1/math.Sqrt(float64(req.HeadDim))))
 			if attnErr != nil {
 				return result, &Qwen35SequenceError{Stage: "causal-attention", Layer: index, Cause: attnErr}

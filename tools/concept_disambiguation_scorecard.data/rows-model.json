@@ -15,7 +15,10 @@
         "attnprefillmultibuiltininto",
         "attnprefillmultigqabuiltininto",
         "attnprefillmultigqaloanedinto",
-        "attnprefillmultigqareadmode"
+        "attnprefillmultigqareadmode",
+        "fakqwen35attentionpostprocesscapability",
+        "fakqwen35attentionpostprocessf32",
+        "qwen35sequenceattentionpostprocesslocked"
       ],
       "aliases": [],
       "grounding": "attnPrefillDispatch",
