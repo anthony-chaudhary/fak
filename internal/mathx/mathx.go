@@ -57,9 +57,22 @@ func MaxInt(a, b int) int {
 	return b
 }
 
+// fDotArch is installed once by an architecture implementation. A decline
+// retains the original scalar arithmetic, including short-slice panic behavior.
+var fDotArch func(r, x []float32) (float32, bool)
+
 // FDot is a deterministic eight-accumulator float32 inner product. The fixed
 // combine order is load-bearing for bit-identical model/compute parity.
 func FDot(r, x []float32) float32 {
+	if fDotArch != nil {
+		if value, ok := fDotArch(r, x); ok {
+			return value
+		}
+	}
+	return fDotScalar(r, x)
+}
+
+func fDotScalar(r, x []float32) float32 {
 	var s0, s1, s2, s3, s4, s5, s6, s7 float32
 	n := len(r)
 	i := 0
