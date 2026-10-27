@@ -501,11 +501,18 @@ func q4kGemmRangeInt8(qt *q4kTensor, qvs []q8Vec, P int, Y []float32, lo, hi int
 	}
 }
 
+// q4kGemmF32RangeArch is installed once by a qualified architecture. A nil or
+// declined hook retains the scalar reference below, including its shape behavior.
+var q4kGemmF32RangeArch func(qt *q4kTensor, X []float32, P int, Y []float32, lo, hi int) bool
+
 // q4kGemmRange computes Y[t*out+o] for o in [lo,hi), all t in [0,P). One dequant scratch
 // buffer per worker-row (L1/L2-resident); each super-block is dequantized once per output
 // row and dotted against all P activation rows. The per-(o,t) reduction matches
 // q4kMatRowsRange exactly (same dequant, same 4-accumulator dot, same super-block order).
 func q4kGemmRange(qt *q4kTensor, X []float32, P int, Y []float32, lo, hi int) {
+	if q4kGemmF32RangeArch != nil && q4kGemmF32RangeArch(qt, X, P, Y, lo, hi) {
+		return
+	}
 	buf := make([]float32, qkK) // 256 f32, reused per (o,b); L1/L2-resident
 	rowBytes := qt.q4kRowBytes()
 	acc := make([]float32, P) // per-token accumulator, reused per output row

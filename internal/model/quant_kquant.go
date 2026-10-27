@@ -584,6 +584,13 @@ func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi 
 	}
 }
 
+// kQuantF32BlockPair holds the exact 256-value two-token block dot when an
+// architecture admits it. The selector is evaluated once per prefill call;
+// other architectures leave it nil and retain the original scalar loop.
+type kQuantF32BlockPair func(weights, x0, x1, dst *float32)
+
+var kQuantF32BlockPairArch func() kQuantF32BlockPair
+
 // kQuantMatRowsIntoBatch computes Y[t*out + o] for all P tokens and all out rows, dequantizing
 // each weight super-block ONCE and reusing it across every token column â€” the dequant-once GEMM
 // twin of kQuantMatRowsInto's per-token GEMV. X is PÃ—in row-major (token t's activation at
@@ -617,9 +624,15 @@ func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 	blockWeights := qt.kind.blockWeights()
 	rowBytes := qt.rowBytes()
 	bb := qt.kind.blockBytes()
+	var pairDot kQuantF32BlockPair
+	if kQuantF32BlockPairArch != nil && blockWeights == qkK && P > 1 && in > 0 && out > 0 &&
+		in%qkK == 0 && qt.nblk == in/qkK && P <= len(X)/in && P <= len(Y)/out {
+		pairDot = kQuantF32BlockPairArch()
+	}
 	parForRange(out, out*in*P, func(lo, hi int) {
 		buf := make([]float32, blockWeights) // reused per (row,block); L1/L2-resident
 		acc := make([]float32, P)            // one accumulator per token column
+		var pair [2]float32
 		for o := lo; o < hi; o++ {
 			row := qt.raw[o*rowBytes:]
 			for t := 0; t < P; t++ {
@@ -628,7 +641,17 @@ func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 			for b := 0; b < qt.nblk; b++ {
 				// Dequant this super-block ONCE, then dot it against every token column.
 				kQuantDequantSuperBlock(buf, row[b*bb:(b+1)*bb], qt.kind)
-				for t := 0; t < P; t++ {
+				t := 0
+				if pairDot != nil {
+					for ; t+1 < P; t += 2 {
+						x0, x1 := t*in+b*blockWeights, (t+1)*in+b*blockWeights
+						pairDot(&buf[0], &X[x0], &X[x1], &pair[0])
+						acc[t] += pair[0]
+						acc[t+1] += pair[1]
+					}
+				}
+				// Odd token, 32-wide format or unsupported ISA keeps the old dot.
+				for ; t < P; t++ {
 					xs := X[t*in+b*blockWeights:]
 					var s0, s1, s2, s3 float32
 					for i := 0; i < blockWeights; i += 4 {
