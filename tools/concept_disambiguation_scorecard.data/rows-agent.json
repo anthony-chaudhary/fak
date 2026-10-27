@@ -271,7 +271,8 @@
         "inkernelv41lanecontext",
         "inkernelcoalescekind",
         "inkernelv41requeststate",
-        "inkernelv41lanecontext-cancellation"
+        "inkernelv41lanecontext-cancellation",
+        "inkernelqwenrequeststate"
       ],
       "aliases": [],
       "grounding": "inKernelV41Pending",
@@ -371,7 +372,8 @@
       "distinction": "Prepared-request lifecycle rather than pending sampled-token state; creates no Session lock.",
       "distinct_from": [
         "inkernelv41pending",
-        "errinkernelv41cohortaborted"
+        "errinkernelv41cohortaborted",
+        "inkernelqwenrequeststate"
       ],
       "aliases": [],
       "grounding": "inKernelV41RequestState",
@@ -390,7 +392,8 @@
       "definition": "Terminal no-replay outcome for unfinished or unstarted requests in an aborted selected Flash cohort.",
       "distinction": "Selected-cohort termination rather than retained request state or untouched fallback eligibility.",
       "distinct_from": [
-        "inkernelv41requeststate"
+        "inkernelv41requeststate",
+        "errinkernelqwencohortaborted"
       ],
       "aliases": [],
       "grounding": "errInKernelV41CohortAborted",
@@ -454,6 +457,47 @@
       ],
       "aliases": [],
       "grounding": "inKernelV41LaneContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "inkernelqwenrequeststate",
+      "canonical": "inKernelQwenRequestState",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Associates a Qwen coalesced request with its prepared decode lane and an unknown panic captured by its completion closure.",
+      "distinction": "Qwen request/lane/unknown-panic association rather than V4.1 per-request participation and row accounting, retained sampled-token progress awaiting a forward, or a terminal cohort-abort outcome; it creates no Session lock.",
+      "distinct_from": [
+        "inkernelv41requeststate",
+        "inkernelv41pending",
+        "errinkernelqwencohortaborted"
+      ],
+      "aliases": [],
+      "grounding": "inKernelQwenRequestState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "errinkernelqwencohortaborted",
+      "canonical": "errInKernelQwenCohortAborted",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Terminal no-replay sentinel for affected peer or unstarted work in an aborted selected Qwen cohort; the originating unknown panic is retained separately for cleanup-ordered propagation.",
+      "distinction": "The selected Qwen cohort's terminal no-replay marker, not retained request/lane state, the V4.1-specific abort marker, or permission to retry through scalar fallback.",
+      "distinct_from": [
+        "inkernelqwenrequeststate",
+        "errinkernelv41cohortaborted"
+      ],
+      "aliases": [],
+      "grounding": "errInKernelQwenCohortAborted",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

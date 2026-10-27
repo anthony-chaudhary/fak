@@ -179,16 +179,6 @@ func (p *InKernelPlanner) runCoalescedGenerateKind(ctx context.Context, run func
 	p.coalesceMu.Unlock()
 
 	if leader {
-		if kind != inKernelCoalesceV41 {
-			if hook != nil {
-				hook()
-			} else {
-				runtime.Gosched()
-			}
-			p.drainCoalescedGenerates()
-			out := <-req.result
-			return finishCoalescedRequest(req, out)
-		}
 		var hookPanic any
 		func() {
 			defer func() { hookPanic = recover() }()
@@ -200,9 +190,13 @@ func (p *InKernelPlanner) runCoalescedGenerateKind(ctx context.Context, run func
 		}()
 		if hookPanic != nil {
 			p.withdrawCoalescedRequest(req, true)
-			req.result <- inKernelCoalesceResult{err: errInKernelV41CohortAborted}
+			abortErr := errInKernelQwenCohortAborted
+			if kind == inKernelCoalesceV41 {
+				abortErr = errInKernelV41CohortAborted
+			}
+			req.result <- inKernelCoalesceResult{err: abortErr}
 			close(req.done)
-			req.terminalErr = errInKernelV41CohortAborted
+			req.terminalErr = abortErr
 			req.panicValue = hookPanic
 			req.publishReceipt()
 			out := <-req.result
@@ -215,11 +209,7 @@ func (p *InKernelPlanner) runCoalescedGenerateKind(ctx context.Context, run func
 			if ctx.Err() != nil && p.withdrawCoalescedRequest(req, true) {
 				return inKernelGenerateResult{}, ctx.Err()
 			}
-			if kind == inKernelCoalesceV41 {
-				go p.drainCoalescedGenerates()
-			} else {
-				p.drainCoalescedGenerates()
-			}
+			go p.drainCoalescedGenerates()
 		case out := <-req.result:
 			return finishCoalescedRequest(req, out)
 		case <-ctx.Done():
@@ -324,8 +314,11 @@ func (p *InKernelPlanner) drainCoalescedGenerates() {
 		}
 		return
 	}
-	p.runDecodeCohort(cohort)
+	final := p.runDecodeCohort(cohort)
 	p.finishCoalescedCohort()
+	for _, req := range final {
+		req.publishReceipt()
+	}
 }
 
 func (p *InKernelPlanner) finishCoalescedCohort() {
@@ -342,6 +335,10 @@ func (p *InKernelPlanner) finishCoalescedCohort() {
 }
 
 func (p *InKernelPlanner) dequeueV41CoalescedRequests(limit int) []*inKernelCoalesceRequest {
+	return p.dequeueCoalescedRequests(inKernelCoalesceV41, limit)
+}
+
+func (p *InKernelPlanner) dequeueCoalescedRequests(kind inKernelCoalesceKind, limit int) []*inKernelCoalesceRequest {
 	if limit <= 0 {
 		return nil
 	}
@@ -351,7 +348,7 @@ func (p *InKernelPlanner) dequeueV41CoalescedRequests(limit int) []*inKernelCoal
 		count = limit
 	}
 	for index := 0; index < count; index++ {
-		if p.coalesceReady[index].kind != inKernelCoalesceV41 {
+		if p.coalesceReady[index].kind != kind {
 			count = index
 			break
 		}
@@ -371,71 +368,6 @@ func (p *InKernelPlanner) dequeueV41CoalescedRequests(limit int) []*inKernelCoal
 		enginestep.Default.ObservePhase(enginestep.PhaseCohortWait, time.Since(request.enqueued))
 	}
 	return requests
-}
-
-func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
-	deviceWait := time.Now()
-	p.devMu.Lock()
-	defer p.devMu.Unlock()
-	enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
-
-	lanes := make([]*decodeLane, 0, len(cohort))
-	prepared := make([]*inKernelCoalesceRequest, 0, len(cohort))
-	for _, req := range cohort {
-		go func(r *inKernelCoalesceRequest) {
-			runCtx := context.WithValue(r.ctx, inKernelCoalesceContextKey{}, r)
-			res, err := r.run(runCtx)
-			close(r.done)
-			select {
-			case r.prepared <- nil:
-			default:
-			}
-			r.result <- inKernelCoalesceResult{result: res, err: err}
-		}(req)
-		if lane := <-req.prepared; lane != nil {
-			lane.ctx = req.ctx
-			lanes = append(lanes, lane)
-			prepared = append(prepared, req)
-		}
-	}
-
-	var decodeErr error
-	var panels int
-	var macs int64
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := recoverDevicePanic(r); ok {
-					decodeErr = err
-					return
-				}
-				panic(r)
-			}
-		}()
-		enginestep.Default.ObserveCohort(len(lanes))
-		if p.coalesceBatchHook != nil {
-			p.coalesceBatchHook(len(lanes))
-		}
-		panels, macs = inKernelDecodeLanesBatched(context.Background(), lanes, p.m, p.quant)
-		if p.coalesceSharedHook != nil {
-			p.coalesceSharedHook(panels, macs)
-		}
-	}()
-	for _, req := range prepared {
-		req.proceed <- decodeErr
-	}
-	for _, req := range cohort {
-		<-req.done
-	}
-	cohortID := p.coalesceCohortID.Add(1)
-	receipt := InKernelBatchReceipt{CohortID: cohortID, CohortSize: len(lanes), SharedPanels: panels, SharedMACs: macs}
-	for _, req := range prepared {
-		receipt.SessionCloses += req.closes.Load()
-	}
-	for _, req := range cohort {
-		req.receipt = receipt
-		close(req.receiptReady)
-	}
 }
 
 func coalescedDecode(ctx context.Context, lane *decodeLane) (bool, error) {

@@ -1875,3 +1875,17 @@ Qwen resident-Q4_K full-attention prefill adapter carrying builtin CPU producer 
 CUDA device attention entrypoint reading F16 or BF16 position-major attended KV planes with F32 queries and online-softmax accumulators.
 
 **Distinct from:** Unlike fak_qwen35_attention_postprocess_f32, which normalizes and rotates projection rows while writing F32 KV, this entry reads already populated typed KV and produces grouped causal attention output; it does not mutate cache rows or normalize projections.
+
+
+### inKernelQwenRequestState
+
+Associates a Qwen coalesced request with its prepared decode lane and an unknown panic captured by its completion closure.
+
+**Distinct from:** Qwen request/lane/unknown-panic association rather than V4.1 per-request participation and row accounting, retained sampled-token progress awaiting a forward, or a terminal cohort-abort outcome; it creates no Session lock.
+
+
+### errInKernelQwenCohortAborted
+
+Terminal no-replay sentinel for affected peer or unstarted work in an aborted selected Qwen cohort; the originating unknown panic is retained separately for cleanup-ordered propagation.
+
+**Distinct from:** The selected Qwen cohort's terminal no-replay marker, not retained request/lane state, the V4.1-specific abort marker, or permission to retry through scalar fallback.
