@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,68 @@ func installedBootTestGrant(now time.Time) Grant {
 		LocalScopes: []InstalledBootLocalScope{{Root: filepath.Join(os.TempDir(), "fak-local"), Paths: []string{filepath.Join(os.TempDir(), "fak-local", "store.json")},
 			PathPrefixes: []PathPrefix{{Directory: filepath.Join(os.TempDir(), "fak-local"), FilenamePrefix: "store.tmp."}}}}}
 	return g
+}
+
+// fak-test:runtime fast est=0.1s lane=default
+func TestInstalledBootReadClosureBounds(t *testing.T) {
+	now := time.Now().UTC()
+	paths := func(prefix string, count int) []string {
+		out := make([]string, count)
+		for i := range out {
+			out[i] = fmt.Sprintf("%s/%04d", prefix, i)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name                  string
+		reads, writes, extras int
+		valid                 bool
+	}{
+		{"maximum-exact-union", 1024, 64, 0, true},
+		{"read-cap-plus-one", 1025, 64, 0, false},
+		{"write-cap-plus-one", 1024, 65, 0, false},
+		{"undeclared-at-outer-cap", 1024, 64, 64, false},
+		{"outer-cap-plus-one", 1024, 64, 65, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := installedBootTestGrant(now)
+			g.InstalledBoot.ReadPaths = paths("/boot/read", tc.reads)
+			g.InstalledBoot.WritePaths = paths("/boot/write", tc.writes)
+			g.Paths = append(append(append([]string(nil), g.InstalledBoot.ReadPaths...), g.InstalledBoot.WritePaths...), paths("/boot/z-extra", tc.extras)...)
+			if err := validateGrant(g, now); (err == nil) != tc.valid {
+				t.Fatalf("read=%d write=%d union=%d valid=%t: %v", tc.reads, tc.writes, len(g.Paths), tc.valid, err)
+			}
+			if tc.valid {
+				raw, err := json.Marshal(g)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Component bounds make 1088 the largest reachable exact union;
+				// 1152 is only its separate outer ceiling. This is synthetic data.
+				t.Logf("synthetic closure: read=%d write=%d union=%d grant_json_bytes=%d", tc.reads, tc.writes, len(g.Paths), len(raw))
+			}
+		})
+	}
+	for _, count := range []int{64, 65} {
+		t.Run(fmt.Sprintf("existing-readback-files-%d", count), func(t *testing.T) {
+			g := validTestGrant(now)
+			g.Operation, g.PathPrefixes = OperationSystemdProfileReadback, nil
+			g.Paths = paths("/etc/systemd/system/input", count)
+			b := SystemdProfileReadback{Hostname: "fixture-host", UnitGraph: "fak.service active\n", Files: make([]SystemdFileState, count)}
+			for i, p := range g.Paths {
+				b.Files[i] = SystemdFileState{Path: p, SHA256: repeated("a"), Mode: "0644"}
+			}
+			g.PriorStateSHA256 = ReadbackDigest(b)
+			if err := validateGrant(g, now); err != nil {
+				t.Fatal(err)
+			}
+			r := receiptFor(g, now)
+			r.Outcome, r.BackupDisposition, r.Readback = OutcomeUnchanged, BackupNotRequired, &b
+			if err := validateReceipt(r, g, now); (err == nil) != (count == 64) {
+				t.Fatalf("existing readback files=%d: %v", count, err)
+			}
+		})
+	}
 }
 
 func installedBootTestObservation(g Grant) *InstalledBootObservation {

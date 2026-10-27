@@ -102,8 +102,8 @@ func validateInstalledBootGrant(g Grant, now time.Time) error {
 		(b.Phase != "stage-plan" && !isDigest(b.PlanDigest))) {
 		return fmt.Errorf("%w: missing installed boot execution bindings", ErrScope)
 	}
-	if len(b.ReadPaths) == 0 || len(b.ReadPaths) > 64 || len(b.WritePaths) > 64 ||
-		!canonicalStrings(b.ReadPaths) || !canonicalStrings(b.WritePaths) || !canonicalStrings(g.Paths) || len(g.Paths) > 64 {
+	if len(b.ReadPaths) == 0 || len(b.ReadPaths) > 1024 || len(b.WritePaths) > 64 ||
+		!canonicalStrings(b.ReadPaths) || !canonicalStrings(b.WritePaths) || !canonicalStrings(g.Paths) || len(g.Paths) > 1152 {
 		return fmt.Errorf("%w: invalid installed boot path scope", ErrScope)
 	}
 	paths := append(append([]string(nil), b.ReadPaths...), b.WritePaths...)
