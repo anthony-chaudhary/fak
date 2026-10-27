@@ -25,7 +25,11 @@ func (m *Model) v41HeadWithLogitScale(x []float32, project v41DenseProjectionFun
 }
 
 func (m *Model) v41HeadWithLogitScaleBound(x []float32, project v41DenseProjectionFunc, binding *v41FinalNormBinding, state *v41ForwardState, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
-	xf, err := m.v41PrepareHeadInputBound(x, binding, state)
+	return m.v41HeadWithLogitScaleBoundObserved(x, project, binding, state, scale, refuse, nil)
+}
+
+func (m *Model) v41HeadWithLogitScaleBoundObserved(x []float32, project v41DenseProjectionFunc, binding *v41FinalNormBinding, state *v41ForwardState, scale v41LogitScaleFunc, refuse v41LogitHostRefusal, observe func(string)) ([]float32, error) {
+	xf, err := m.v41PrepareHeadInputBoundObserved(x, binding, state, observe)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +37,7 @@ func (m *Model) v41HeadWithLogitScaleBound(x []float32, project v41DenseProjecti
 	if err != nil {
 		return nil, err
 	}
-	return v41ScaleHeadLogits(logits, m.Cfg, scale, refuse)
+	return v41ScaleHeadLogitsObserved(logits, m.Cfg, scale, refuse, observe)
 }
 
 // v41PrepareHeadInput retains the serial final-normalization and BF16 boundaries.
@@ -43,6 +47,10 @@ func (m *Model) v41PrepareHeadInput(x []float32, normalize v41FinalNormFunc, rou
 }
 
 func (m *Model) v41PrepareHeadInputBound(x []float32, binding *v41FinalNormBinding, state *v41ForwardState) ([]float32, error) {
+	return m.v41PrepareHeadInputBoundObserved(x, binding, state, nil)
+}
+
+func (m *Model) v41PrepareHeadInputBoundObserved(x []float32, binding *v41FinalNormBinding, state *v41ForwardState, observe func(string)) ([]float32, error) {
 	normalize, round := binding.normFunc(), binding.roundFunc()
 	if !m.has("model.norm.weight") {
 		return nil, v41StageErr(v41StageFinalNorm, -1,
@@ -68,11 +76,14 @@ func (m *Model) v41PrepareHeadInputBound(x []float32, binding *v41FinalNormBindi
 			}
 			return values, nil
 		}
-		xf, err = m.v41FullFinalNormWithBF16Boundary(x, normalize, round)
+		xf, err = m.v41FullFinalNormWithBF16BoundaryObserved(x, normalize, round, observe)
 		if err != nil {
 			return nil, err
 		}
 	} else if normalize == nil {
+		if observe != nil && len(x) > 0 && !m.Cfg.LayerNorm {
+			observe("rms-norm")
+		}
 		xf = m.finalNorm(x)
 	} else {
 		var err error
@@ -125,6 +136,10 @@ func (m *Model) v41FullFinalNorm(input []float32, normalize v41FinalNormFunc) ([
 }
 
 func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc) ([]float32, error) {
+	return m.v41FullFinalNormWithBF16BoundaryObserved(input, normalize, round, nil)
+}
+
+func (m *Model) v41FullFinalNormWithBF16BoundaryObserved(input []float32, normalize v41FinalNormFunc, round v41BF16BoundaryFunc, observe func(string)) ([]float32, error) {
 	fail := func(cause error) error {
 		return &V41ProjectionOperationError{Layer: -1, Leaf: "model.norm.weight", Stage: string(v41StageFinalNorm), Cause: v41StageErr(v41StageFinalNorm, -1, cause)}
 	}
@@ -138,7 +153,7 @@ func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41F
 			return nil, fail(errV41ProjectionResult)
 		}
 	}
-	staged, err := v41BF16BoundaryCopy(-1, "model.norm.weight input", input, round)
+	staged, err := v41HeadBF16BoundaryObserved("model.norm.weight input", input, round, observe)
 	if err != nil {
 		if round == nil {
 			return nil, fail(errV41ProjectionResult)
@@ -147,6 +162,9 @@ func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41F
 	}
 	var values []float32
 	if normalize == nil {
+		if observe != nil {
+			observe("rms-norm")
+		}
 		values = rmsnorm(staged, gain, eps)
 	} else {
 		var err error
@@ -158,7 +176,7 @@ func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41F
 	if len(values) != len(input) {
 		return nil, fail(errV41ProjectionResult)
 	}
-	out, err := v41BF16BoundaryCopy(-1, "model.norm.weight output", values, round)
+	out, err := v41HeadBF16BoundaryObserved("model.norm.weight output", values, round, observe)
 	if err != nil {
 		if round == nil {
 			return nil, fail(errV41ProjectionResult)
@@ -166,4 +184,12 @@ func (m *Model) v41FullFinalNormWithBF16Boundary(input []float32, normalize v41F
 		return nil, fail(err)
 	}
 	return out, nil
+}
+
+func v41HeadBF16BoundaryObserved(site string, values []float32, round v41BF16BoundaryFunc, observe func(string)) ([]float32, error) {
+	out, err := v41BF16BoundaryCopy(-1, site, values, round)
+	if observe != nil && round == nil && len(values) > 0 && finite32(values[0]) {
+		observe("bf16-boundary")
+	}
+	return out, err
 }

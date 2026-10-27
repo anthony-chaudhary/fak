@@ -422,7 +422,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		if scratch.activationTrace != nil {
 			headState = nil
 		}
-		return m.v41PrepareHeadInputBound(headInput, st.headNorm, headState)
+		return m.v41PrepareHeadInputBoundObserved(headInput, st.headNorm, headState, st.callbackOwner.observeHostArm)
 	}
 	// Only the synchronous single-row projection can prepare a scaled row.
 	// Shared-panel projection bypasses this callback and retains ordinary finish.
@@ -446,7 +446,7 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		composedScale = nil
 		var err error
 		if res == nil {
-			res, err = v41ScaleHeadLogits(logits, cfg, st.logitScale(), st.logitHostRefusal())
+			res, err = v41ScaleHeadLogitsObserved(logits, cfg, st.logitScale(), st.logitHostRefusal(), st.callbackOwner.observeHostArm)
 		}
 		if err != nil {
 			return nil, err
