@@ -73,8 +73,11 @@ func v41PlanExpertGroups(picks [][]routePick) []v41ExpertGroup {
 	if total == 0 {
 		return nil
 	}
-	groups := make([]v41ExpertGroup, 0, total)
-	index := make(map[int]int, total)
+	// Ordinary V4.1 has at most this many distinct experts, independent of
+	// prompt length. Synthetic wider IDs still grow through append/the map.
+	groupCapacity := min(total, V41RouterExperts)
+	groups := make([]v41ExpertGroup, 0, groupCapacity)
+	index := make(map[int]int, groupCapacity)
 	for _, perToken := range picks {
 		for _, pick := range perToken {
 			if index[pick.expert] == 0 {
@@ -235,9 +238,23 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 	// weight is applied, so the replay below can apply weights in original slot
 	// order regardless of the order the groups materialized experts in.
 	unweighted := make([][][]float32, len(perTokenPicks))
-	for t, picks := range perTokenPicks {
-		unweighted[t] = make([][]float32, len(picks))
+	// The planner has already allocated exactly these rows. Their output-slot
+	// descriptors share the same layer lifetime, so one backing suffices.
+	slots := 0
+	for _, group := range groups {
+		slots += len(group.Rows)
 	}
+	outputs := make([][]float32, slots)
+	at := 0
+	for t, picks := range perTokenPicks {
+		end := at + len(picks)
+		unweighted[t] = outputs[at:end:end]
+		at = end
+	}
+	// Only the internal scalar-cohort path reads this outer descriptor table;
+	// backends receive individual row slices or separately packed tensors. The
+	// table can be reused after that call without changing row ownership.
+	var cohortInputs [][]float32
 	// tripleReady guards lazy materialization of the group's host triple: when the
 	// device seam handles every row, the gate/up f32 weights are never materialized
 	// on the host at all (#13358's whole point). The triple is materialized once
@@ -271,7 +288,11 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 				if len(g.Rows)-last == 1 {
 					last--
 				}
-				inputs := make([][]float32, last-first)
+				if cohortInputs == nil {
+					cohortInputs = make([][]float32, v41ExpertCohortRows)
+				}
+				inputs := cohortInputs[: last-first : last-first]
+				// Chunk backends may retain weight slices; do not reuse them.
 				weights := make([]float32, last-first)
 				for p, row := range g.Rows[first:last] {
 					inputs[p] = xnByToken[row.Token]
