@@ -170,7 +170,15 @@ func (s *Session) v41RunExpertCohortInputs(deferred compute.V41DeferredStatusBac
 	if options != nil && options.sums != nil {
 		owners++ // Sum temporaries follow every expert row in the fault ledger.
 	}
-	owned := make([][]compute.Tensor, owners)
+	// One cohort-local backing replaces independent per-row append growth.
+	// One-based links preserve each row's reverse acquisition order even when
+	// chunk recording returns to an earlier row; zero denotes an empty row.
+	type ownedTensor struct {
+		tensor   compute.Tensor
+		previous int
+	}
+	ownedHeads := make([]int, owners)
+	var owned []ownedTensor
 	seen := map[compute.Buffer]bool{gateW.Buf(): true, upW.Buf(): true, downW.Buf(): true}
 	if options != nil {
 		for _, triple := range options.triples {
@@ -217,7 +225,9 @@ func (s *Session) v41RunExpertCohortInputs(deferred compute.V41DeferredStatusBac
 			return false
 		}
 		seen[t.Buf()] = true
-		owned[current] = append(owned[current], t)
+		previous := ownedHeads[current]
+		owned = append(owned, ownedTensor{tensor: t, previous: previous})
+		ownedHeads[current] = len(owned)
 		return true
 	}
 	borrow := func(t compute.Tensor) bool {
@@ -232,10 +242,10 @@ func (s *Session) v41RunExpertCohortInputs(deferred compute.V41DeferredStatusBac
 	// Always attempt every owned release. The last panic in a row's reverse
 	// traversal is what nested Go defers in the scalar owner would propagate.
 	defer func() {
-		for r := range owned {
+		for r, head := range ownedHeads {
 			var cleanup any
-			for i := len(owned[r]) - 1; i >= 0; i-- {
-				t := owned[r][i]
+			for at := head; at != 0; at = owned[at-1].previous {
+				t := owned[at-1].tensor
 				if consumed[t.Buf()] {
 					continue
 				}
