@@ -1,6 +1,8 @@
 package computebuild
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -116,8 +118,45 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 	if enableNCCL {
 		ldflags = append(ldflags, "-lnccl")
 	}
+	if tc != nil && !tc.IsWindows {
+		var loader, toolkit []string
+		appendUnique := func(paths []string, path string) []string {
+			if path == "" || cudaStubPath(path) {
+				return paths
+			}
+			for _, existing := range paths {
+				if existing == path {
+					return paths
+				}
+			}
+			return append(paths, path)
+		}
+		for _, path := range []string{"/usr/lib/wsl/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu"} {
+			if matches, _ := filepath.Glob(filepath.Join(path, "libcuda.so*")); len(matches) > 0 {
+				loader = appendUnique(loader, path)
+			}
+		}
+		for _, path := range tc.CUDALib {
+			if cudaStubPath(path) {
+				continue
+			}
+			if matches, _ := filepath.Glob(filepath.Join(path, "libcuda.so*")); len(matches) > 0 {
+				loader = appendUnique(loader, path)
+			} else {
+				toolkit = appendUnique(toolkit, path)
+				rpaths = appendUnique(rpaths, path)
+			}
+		}
+		for _, path := range toolkit {
+			loader = appendUnique(loader, path)
+		}
+		for _, path := range filepath.SplitList(os.Getenv("LD_LIBRARY_PATH")) {
+			loader = appendUnique(loader, path)
+		}
+		env["LD_LIBRARY_PATH"] = strings.Join(loader, string(os.PathListSeparator))
+	}
 	for _, rp := range rpaths {
-		if rp != "" {
+		if rp != "" && (tc == nil || tc.IsWindows || !cudaStubPath(rp)) {
 			ldflags = append(ldflags, "-Wl,-rpath,"+QuoteArg(rp))
 		}
 	}
@@ -126,6 +165,112 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 	}
 
 	return env
+}
+
+func cudaStubPath(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if part == "stubs" {
+			return true
+		}
+	}
+	return false
+}
+
+// PrepareCUDANCCLToolchain resolves user-space NCCL layouts and their linker name.
+func PrepareCUDANCCLToolchain(tc *Toolchain, home, repoRoot string) (*Toolchain, error) {
+	if tc == nil {
+		return nil, fmt.Errorf("nil CUDA toolchain")
+	}
+	prepared := *tc
+	prepared.CUDAInc = append([]string(nil), tc.CUDAInc...)
+	prepared.CUDALib = append([]string(nil), tc.CUDALib...)
+	if home != "" {
+		for _, relative := range []string{"include", "usr/include"} {
+			path := filepath.Join(home, filepath.FromSlash(relative))
+			if info, err := os.Stat(path); err == nil && info.IsDir() {
+				prepared.CUDAInc = appendCUDAPath(prepared.CUDAInc, path)
+			}
+		}
+		for _, relative := range []string{"lib64", "lib", "usr/lib/x86_64-linux-gnu", "usr/lib"} {
+			path := filepath.Join(home, filepath.FromSlash(relative))
+			if info, err := os.Stat(path); err == nil && info.IsDir() {
+				prepared.CUDALib = appendCUDAPath(prepared.CUDALib, path)
+			}
+		}
+	}
+	if prepared.IsWindows {
+		return &prepared, nil
+	}
+	for _, path := range prepared.CUDALib {
+		if FileExists(filepath.Join(path, "libnccl.so")) {
+			return &prepared, nil
+		}
+	}
+	for _, path := range prepared.CUDALib {
+		matches, err := filepath.Glob(filepath.Join(path, "libnccl.so.*"))
+		if err != nil {
+			return nil, err
+		}
+		for _, target := range matches {
+			if !FileExists(target) {
+				continue
+			}
+			target, err = filepath.Abs(target)
+			if err != nil {
+				return nil, err
+			}
+			stateDir := filepath.Join(repoRoot, ".fak")
+			if err := os.Mkdir(stateDir, 0755); err != nil && !os.IsExist(err) {
+				return nil, err
+			}
+			stateInfo, err := os.Lstat(stateDir)
+			if err != nil {
+				return nil, err
+			}
+			if !stateInfo.IsDir() || stateInfo.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("NCCL state directory is not a regular directory")
+			}
+			dir := filepath.Join(stateDir, "cuda-nccl-lib")
+			if err := os.Mkdir(dir, 0755); err != nil && !os.IsExist(err) {
+				return nil, err
+			}
+			info, err := os.Lstat(dir)
+			if err != nil {
+				return nil, err
+			}
+			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("NCCL link directory is not a regular directory")
+			}
+			link := filepath.Join(dir, "libnccl.so")
+			if current, err := os.Readlink(link); err == nil {
+				if current != target {
+					if err := os.Remove(link); err != nil {
+						return nil, err
+					}
+				} else {
+					prepared.CUDALib = appendCUDAPath(prepared.CUDALib, dir)
+					return &prepared, nil
+				}
+			} else if _, err := os.Lstat(link); err == nil || !os.IsNotExist(err) {
+				return nil, fmt.Errorf("NCCL linker name is not a replaceable symlink")
+			}
+			if err := os.Symlink(target, link); err != nil {
+				return nil, err
+			}
+			prepared.CUDALib = appendCUDAPath(prepared.CUDALib, dir)
+			return &prepared, nil
+		}
+	}
+	return &prepared, nil
+}
+
+func appendCUDAPath(paths []string, path string) []string {
+	for _, existing := range paths {
+		if existing == path {
+			return paths
+		}
+	}
+	return append(paths, path)
 }
 
 // EnvMapToSlice converts a key-value map to a sorted slice of "KEY=VAL" strings.

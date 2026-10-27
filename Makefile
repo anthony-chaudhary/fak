@@ -672,37 +672,35 @@ gated-tests:
 	@python3 tools/gated_tool_tests.py --run
 
 # ---- CUDA dev loop (see docs/cuda-dev.md) ------------------------------------------------
-# cuda-check: the GPU-FREE local CUDA gate. ABI parity plus standalone cuda_backend.h
-# portability — no nvcc, no GPU, no cgo — so it runs anywhere with bash/python; when a
-# host C compiler exists, build_cuda.sh check also runs a strict header-only parse. The
-# no-toolchain Windows host keeps the python mirror in scripts/ci.ps1, and this remains
-# the local twin of cuda-build.yml's `static` job. A GPU host adds `go vet -tags cuda`
-# for the cgo type-check.
+# Native Go owns CUDA builds, receipts, and acceptance on every supported host.
+CUDA_BUILD ?= $(GO) run ./cmd/fak-dev build-cuda
+CUDA_BUILD_FLAGS ?=
+# Export Make overrides as well as inherited environment settings to the driver.
+export FAK_CUDA_ARCH FAK_CUDA_NCCL CUDA_HOME NCCL_HOME FAK_NVCC_CCBIN
 cuda-check:
-	@bash internal/compute/build_cuda.sh check
+	@$(CUDA_BUILD) check $(CUDA_BUILD_FLAGS)
 	@echo "cuda-check OK (ABI/header preflight; run 'make cuda-build' on a CUDA host for the nvcc build)"
 
 # cuda-build / cuda-test: the REAL -tags cuda build + Approx witness — REQUIRES a CUDA
-# toolchain (nvcc + cuBLAS). Delegates to internal/compute/build_cuda.sh; Linux/WSL/GPU node
-# only (the win32 dev host has none — see docs/cuda-dev.md for the no-sudo WSL setup).
+# toolchain (nvcc + cuBLAS). See docs/cuda-dev.md for the no-sudo WSL setup.
 cuda-build:
-	bash internal/compute/build_cuda.sh build
+	$(CUDA_BUILD) build $(CUDA_BUILD_FLAGS)
 
 # First-class single-arch Blackwell developer builds (#4182). These keep the
 # fast one-architecture path; the multi-arch distributable is owned by #4183.
 cuda-build-sm100:
-	FAK_CUDA_ARCH=sm_100 bash internal/compute/build_cuda.sh build
+	$(CUDA_BUILD) build --arch=sm_100 $(CUDA_BUILD_FLAGS)
 
 cuda-build-sm103:
-	FAK_CUDA_ARCH=sm_103 bash internal/compute/build_cuda.sh build
+	$(CUDA_BUILD) build --arch=sm_103 $(CUDA_BUILD_FLAGS)
 
 cuda-build-sm120:
-	FAK_CUDA_ARCH=sm_120 bash internal/compute/build_cuda.sh build
+	$(CUDA_BUILD) build --arch=sm_120 $(CUDA_BUILD_FLAGS)
 
 cuda-test:
-	bash internal/compute/build_cuda.sh test
+	$(CUDA_BUILD) test $(CUDA_BUILD_FLAGS)
 
-# cuda-accept-model: build the real-model witness with build_cuda.sh's resolved CUDA
+# cuda-accept-model: build the real-model witness with the native driver's resolved CUDA
 # environment, then emit its single JSON receipt on stdout. Progress stays on stderr so
 # callers can consume the receipt directly. FAK_CUDA_ACCEPT_HF must name a compatible
 # HuggingFace config.json + model.safetensors directory; a missing model refuses before
@@ -711,32 +709,13 @@ FAK_CUDA_ACCEPT_TOKENS ?= 12
 CUDA_GPUCHECK_BIN ?= tools/.bin/gpucheck
 
 cuda-accept-model:
-	@if [ -z "$(strip $(FAK_CUDA_ACCEPT_HF))" ]; then \
-		echo "cuda-accept-model: FAK_CUDA_ACCEPT_HF is required (HuggingFace config.json + model.safetensors directory)" >&2; \
-		exit 2; \
-	fi
-	@if [ ! -f "$(FAK_CUDA_ACCEPT_HF)/config.json" ] || [ ! -f "$(FAK_CUDA_ACCEPT_HF)/model.safetensors" ]; then \
-		echo "cuda-accept-model: FAK_CUDA_ACCEPT_HF must contain config.json and model.safetensors" >&2; \
-		exit 2; \
-	fi
-	@case "$(FAK_CUDA_ACCEPT_TOKENS)" in \
-		''|*[!0-9]*) echo "cuda-accept-model: FAK_CUDA_ACCEPT_TOKENS must be a positive integer" >&2; exit 2 ;; \
-	esac; \
-	if [ "$(FAK_CUDA_ACCEPT_TOKENS)" -le 0 ]; then \
-		echo "cuda-accept-model: FAK_CUDA_ACCEPT_TOKENS must be a positive integer" >&2; \
-		exit 2; \
-	fi
-	@mkdir -p "$(dir $(CUDA_GPUCHECK_BIN))"
-	@echo "[cuda] building native gpucheck witness ..." >&2
-	@bash internal/compute/build_cuda.sh binary ./cmd/gpucheck "$(abspath $(CUDA_GPUCHECK_BIN))" >&2
-	@echo "[cuda] comparing $(FAK_CUDA_ACCEPT_TOKENS) greedy tokens on the CPU reference and native CUDA backend ..." >&2
-	@"$(abspath $(CUDA_GPUCHECK_BIN))" -hf "$(FAK_CUDA_ACCEPT_HF)" -backend cuda -n "$(FAK_CUDA_ACCEPT_TOKENS)" -json -require-native
+	@$(CUDA_BUILD) accept-model --hf "$(FAK_CUDA_ACCEPT_HF)" --tokens "$(FAK_CUDA_ACCEPT_TOKENS)" --out-bin "$(abspath $(CUDA_GPUCHECK_BIN))" $(CUDA_BUILD_FLAGS)
 
 # cuda-accept: require the real-model native receipt, then run EVERY per-family on-GPU
-# acceptance witness with one verdict (SKIP-is-not-PASS) via tools/cuda_acceptance.sh.
+# acceptance witness with one verdict (SKIP-is-not-PASS) via native Go orchestration.
 # GPU node only; a no-GPU host exits non-zero (never a false green).
-cuda-accept: cuda-accept-model
-	bash tools/cuda_acceptance.sh
+cuda-accept:
+	@$(CUDA_BUILD) accept --hf "$(FAK_CUDA_ACCEPT_HF)" --tokens "$(FAK_CUDA_ACCEPT_TOKENS)" --out-bin "$(abspath $(CUDA_GPUCHECK_BIN))" $(CUDA_BUILD_FLAGS)
 
 # cuda-occupancy (#4188): print the decode-shaped per-kernel occupancy + HBM-traffic witness
 # (internal/compute/decode_occupancy.go) — the file-after-measurement gate for the KernelWiki
