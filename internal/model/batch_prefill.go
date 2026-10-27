@@ -154,7 +154,9 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 
 	baseB, caches, cosN, sinN := bs.rectPrefillGeometry(P)
 	X := make([]float32, N*H)
-	m.embedRectRowsInto(X, prompts, P, H, cfg)
+	if !m.tryPrefillEmbedRectRows(X, prompts, P, H, cfg, dispatchWorkers) {
+		m.embedRectRowsInto(X, prompts, P, H, cfg)
+	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
@@ -286,7 +288,9 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	}
 	X := grow(pb.X, N*H)
 	pb.X = X
-	m.embedRectRowsInto(X, prompts, P, H, cfg)
+	if !m.tryPrefillEmbedRectRows(X, prompts, P, H, cfg, dispatchWorkers) {
+		m.embedRectRowsInto(X, prompts, P, H, cfg)
+	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
