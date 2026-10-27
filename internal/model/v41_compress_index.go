@@ -296,24 +296,36 @@ func v41IndexerScoreObserved(q, keys, weights []float32, nHeads, headDim, compre
 	if observe != nil && compressLen > 0 {
 		observe("attention-indexer-score")
 	}
-	for t := 0; t < compressLen; t++ {
-		keyBase := t * headDim
-		var acc float32
-		for h := 0; h < nHeads; h++ {
-			queryBase := h * headDim
-			var dot float32
-			for d := 0; d < headDim; d++ {
-				dot = float32(dot + float32(q[queryBase+d]*keys[keyBase+d]))
-			}
-			// The reference rectifies before the learned head reduction:
-			//   index_score = (index_score.relu_() * weights.unsqueeze(-1)).sum(dim=2)
-			if dot < 0 {
-				dot = 0
-			}
-			acc = float32(acc + float32(dot*weights[h]))
-		}
-		score[t] = acc
+	// Only complete output rows are independent. Keep each row's dimension
+	// and head reductions in the original order, using the existing worker
+	// budget and work threshold. Saturation is only a scheduling estimate;
+	// individually valid query/key shapes must not gain a new overflow refusal.
+	work := keyElements
+	if work > maxInt/nHeads {
+		work = maxInt
+	} else {
+		work *= nHeads
 	}
+	parForRange(compressLen, work, func(lo, hi int) {
+		for t := lo; t < hi; t++ {
+			keyBase := t * headDim
+			var acc float32
+			for h := 0; h < nHeads; h++ {
+				queryBase := h * headDim
+				var dot float32
+				for d := 0; d < headDim; d++ {
+					dot = float32(dot + float32(q[queryBase+d]*keys[keyBase+d]))
+				}
+				// The reference rectifies before the learned head reduction:
+				//   index_score = (index_score.relu_() * weights.unsqueeze(-1)).sum(dim=2)
+				if dot < 0 {
+					dot = 0
+				}
+				acc = float32(acc + float32(dot*weights[h]))
+			}
+			score[t] = acc
+		}
+	})
 	return score, nil
 }
 
