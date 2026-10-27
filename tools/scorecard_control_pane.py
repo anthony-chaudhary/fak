@@ -903,8 +903,10 @@ GO_RUN_PREFIX = ("go", "run", "./cmd/fak")
 PROGRESS_PREFIX = "FAK_SCORECARD_PROGRESS "
 PROGRESS_PHASES = {
     "slop": {"gather_go", "gather_asm", "read_metadata", "git_churn",
-             "duplication", "dead_code", "comment_slop", "vacuous_tests",
-             "stub_masquerade", "churn_bloat", "build_payload"},
+             "duplication", "dup_scan_fingerprints", "dup_scan_exact",
+             "dup_select_clones", "dup_merge_blocks", "dup_group_sites",
+             "dup_filter_groups", "dup_classify", "dead_code", "comment_slop",
+             "vacuous_tests", "stub_masquerade", "churn_bloat", "build_payload"},
     "maturity": {"gather_facts", "load_proofs", "runtime_proofs_start",
                  "verify_artifact", "execute_proof", "runtime_proofs_complete",
                  "adjudicate"},

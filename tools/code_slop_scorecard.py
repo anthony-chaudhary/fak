@@ -76,7 +76,7 @@ import tempfile
 import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # Robust sibling import of the shared shift-left skip-gate (tools/scorecard_since.py).
 # Ensure this file's own directory is importable whether the card is run as a script
@@ -852,7 +852,8 @@ def _dup_subcategory(sites: list[tuple[str, int, int]]) -> str:
     return "pair"
 
 
-def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
+def kpi_duplication(files: dict[str, str], *,
+                    progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Copy-paste clones, measured on the normalized Go token stream (#780). For every
     file, slide a CLONE_WINDOW_TOKENS-token window over ``go_tokens`` output, keep only
     windows carrying >= CLONE_MIN_LOGIC_TOKENS logic tokens (so data/declaration regions
@@ -865,11 +866,26 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     Identifiers are kept (``normalize_idents=False``) so distinct code with distinct names
     does not false-match and idiomatic Go does not collapse into phantom clusters; only
     literals are normalized — the precision/recall sweet spot for this tree (#780)."""
-    win_locs, per_file = _dup_scan_windows(files)
+    # Entry markers only: no per-file/window I/O or completion markers.
+    # Keep the callback-absent scanner call compatible with one-argument fixtures.
+    if progress is None:
+        win_locs, per_file = _dup_scan_windows(files)
+    else:
+        win_locs, per_file = _dup_scan_windows(files, progress=progress)
+    if progress is not None:
+        progress("dup_select_clones")
     clone_keys = {k for k, locs in win_locs.items() if len(locs) >= CLONE_MIN_OCCURRENCES}
+    if progress is not None:
+        progress("dup_merge_blocks")
     blocks = _dup_merge_blocks(per_file, clone_keys)
+    if progress is not None:
+        progress("dup_group_sites")
     group_sites = _dup_group_sites(blocks)
+    if progress is not None:
+        progress("dup_filter_groups")
     soft, survivors = _dup_survivor_groups(files, group_sites)
+    if progress is not None:
+        progress("dup_classify")
     defects, counts = _dup_classified_defects(files, survivors)
     groups = len(survivors)
     score = _clamp(100 - 2 * groups)
@@ -896,7 +912,8 @@ _DUP_TOKEN_CACHE_SOURCE_CHARS = 1_048_576
 
 
 def _dup_scan_windows(
-        files: dict[str, str],
+        files: dict[str, str], *,
+        progress: Callable[[str], None] | None = None,
 ) -> tuple[dict[tuple[str, ...], set[tuple[str, int]]],
            dict[str, list[tuple[int, int, int, tuple[str, ...]]]]]:
     """Retain exact windows only when a compact first pass finds a repeat.
@@ -905,6 +922,8 @@ def _dup_scan_windows(
     exact token-key and distinct-location checks. Unique windows cannot enter a
     clone group, so retaining their tuples and singleton sets only consumes space.
     """
+    if progress is not None:
+        progress("dup_scan_fingerprints")
     seen: set[int] = set()
     repeated: set[int] = set()
     token_cache: dict[str, list[tuple[str, int, bool]]] = {}
@@ -924,6 +943,8 @@ def _dup_scan_windows(
             else:
                 seen.add(fingerprint)
     seen.clear()
+    if progress is not None:
+        progress("dup_scan_exact")
     win_locs: dict[tuple[str, ...], set[tuple[str, int]]] = {}
     per_file: dict[str, list[tuple[int, int, int, tuple[str, ...]]]] = {}
     for rel in sorted(files):
@@ -1078,15 +1099,15 @@ def _dup_survivor_groups(
         # of small `case X:` arms with NO loop inside (the no-loop conjunct is the recall
         # guard — a duplicated computation loop stays a real clone).
         same_file = len({f for f, _, _ in sites}) == 1
-        all_case = all(
-            _CASE_ARM_RE.match(_clone_sample(files.get(f, ""), s).lstrip())
-            for f, s, e in sites)
         max_span = max(e - s + 1 for _, s, e in sites)
-        no_loop = not any(
-            _LOOP_TOKEN_RE.search(cl)
-            for f, s, e in sites
-            for cl in _code_of(f)[s - 1:e])
-        if same_file and all_case and max_span <= DISPATCH_ARM_MAX_SPAN and no_loop:
+        # Only dispatch-shaped groups need source-line and loop scans. In particular,
+        # cross-file or overlong groups cannot become dispatch-arm advisories.
+        if (same_file and max_span <= DISPATCH_ARM_MAX_SPAN
+                and all(_CASE_ARM_RE.match(_clone_sample(files.get(f, ""), s).lstrip())
+                        for f, s, e in sites)
+                and not any(_LOOP_TOKEN_RE.search(cl)
+                            for f, s, e in sites
+                            for cl in _code_of(f)[s - 1:e])):
             f0, s0, e0 = sites[0]
             span = max(1, e0 - s0 + 1)
             soft.append(
@@ -1113,7 +1134,7 @@ def _dup_survivor_groups(
                 f"entry-point scaffold ({len(sites)} cmd mains, ~{span} lines): "
                 f"{f0}:{s0}")
             continue
-        if max(e - s + 1 for f, s, e in sites) < CLONE_MIN_GROUP_SPAN:
+        if max_span < CLONE_MIN_GROUP_SPAN:
             continue  # sub-6-line fragment: idiomatic, not extractable slop
         survivors.append(sites)
     return soft, survivors
@@ -1964,12 +1985,13 @@ def collect(workspace: Path, *, run_churn: bool = True,
     else:
         added, removed, n_commits = 0, 0, 0
 
-    def measure(phase, function, *args):
+    def measure(phase, function, *args, **kwargs):
         progress(phase)
-        return function(*args)
+        return function(*args, **kwargs)
 
     kpis = [
-        measure("duplication", kpi_duplication, files),
+        measure("duplication", kpi_duplication, files,
+                progress=progress if progress_path else None),
         measure("dead_code", kpi_dead_code, files, test_files, asm_files),
         measure("comment_slop", kpi_comment_slop, files),
         measure("vacuous_tests", kpi_vacuous_tests, test_files),

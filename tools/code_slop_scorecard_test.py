@@ -1265,6 +1265,62 @@ def test_fix4_dispatch_arm_is_advisory_not_debt():
     assert any("dispatch-arm" in s for s in k["soft"]), k["soft"]
 
 
+def test_dispatch_filter_skips_ineligible_scans_without_changing_results():
+    # fak-test:runtime fast est=1s lane=default
+    # In-memory work counts, not timing: only eligible case groups clean whole files.
+    from unittest.mock import patch
+
+    quiet = ('\tcase CASE:\n\t\t_ = "for range"\n\t\t// for range\n'
+             '\t\tn += 1\n\t\tn *= 2\n\t\tbreak\n')
+    loop = ('\tcase CASE:\n\t\tfor i := 0; i < 1; i++ {\n'
+            '\t\t\tn += i\n\t\t}\n\t\tn *= 2\n\t\tbreak\n')
+    source = ("package fixture\nfunc choose(n int) int {\n\tswitch n {\n"
+              + quiet.replace("CASE", "1") + quiet.replace("CASE", "2")
+              + loop.replace("CASE", "3") + loop.replace("CASE", "4")
+              + "\t}\n\treturn n\n}\n")
+    starts = [i + 1 for i, line in enumerate(source.splitlines())
+              if line.lstrip().startswith("case ")]
+    a, b, c, d = starts
+    files = {"a.go": source, "b.go": source}
+    cases = [
+        ("cross-file", [("a.go", a, a + 5), ("b.go", b, b + 5)], False, True, 0, 0),
+        ("overlong", [("a.go", a, a + 8), ("a.go", b, b + 8)], False, True, 0, 0),
+        ("non-case", [("a.go", a + 1, a + 6), ("a.go", b + 1, b + 6)],
+         False, True, 1, 0),
+        ("dispatch", [("a.go", a, a + 5), ("a.go", b, b + 5)], True, False, 2, 1),
+        ("real-loop", [("a.go", c, c + 5), ("a.go", d, d + 5)], False, True, 2, 1),
+        ("short-dispatch", [("a.go", a, a + 1), ("a.go", b, b + 1)],
+         True, False, 2, 1),
+        ("short-cross-file", [("a.go", a, a + 4), ("b.go", b, b + 4)],
+         False, False, 0, 0),
+    ]
+    sample, code_lines = cs._clone_sample, cs.code_lines_of
+    counts = {"sample": 0, "whole_file": 0}
+
+    def counted_sample(text, line):
+        counts["sample"] += 1
+        return sample(text, line)
+
+    def counted_code(text):
+        if text == source:
+            counts["whole_file"] += 1
+        return code_lines(text)
+
+    with patch.object(cs, "_clone_sample", side_effect=counted_sample), \
+            patch.object(cs, "code_lines_of", side_effect=counted_code):
+        for name, sites, advisory, hard, samples, cleaned in cases:
+            counts.update(sample=0, whole_file=0)
+            soft, survivors = cs._dup_survivor_groups(files, [sites])
+            expected_soft = []
+            if advisory:
+                path, first, last = sites[0]
+                expected_soft = [
+                    f"dispatch-arm boilerplate (2 arms, ~{last - first + 1} lines): "
+                    f"{path}:{first}"]
+            assert (soft, survivors) == (expected_soft, [sites] if hard else []), name
+            assert counts == {"sample": samples, "whole_file": cleaned}, (name, counts)
+
+
 def test_fix4_dispatch_arm_with_loop_stays_debt():
     # RECALL: a duplicated computation LOOP inside arms is real slop regardless of `case`.
     sw = ("package a\nfunc decode(k Kind, raw []byte) []float32 {\n"

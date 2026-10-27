@@ -993,6 +993,78 @@ def test_card_argv_reports_a_missing_script() -> None:
     assert argv == [] and "missing scorecard" in err, (argv, err)
 
 
+def test_duplication_phase_diagnostics_preserve_payload_and_failure() -> None:
+    # fak-test:runtime fast est=1s lane=default
+    # Two in-memory files, no repository scan or subprocess; timing is not a gate.
+    from contextlib import redirect_stderr
+    from io import StringIO
+    from unittest.mock import patch
+    import code_slop_scorecard as cs
+
+    source = ("package fixture\nfunc sum(xs []int) int {\n"
+              " total := 0\n for _, v := range xs {\n  if v > 0 {\n"
+              "   total += v * 2\n   total -= v % 3\n  }\n }\n"
+              " return total\n}\n")
+    files = {"a.go": source, "b.go": source}
+    phases = ["dup_scan_fingerprints", "dup_scan_exact", "dup_select_clones",
+              "dup_merge_blocks", "dup_group_sites", "dup_filter_groups", "dup_classify"]
+    marker = scp.PROGRESS_PREFIX
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.object(cs, "gather_go", return_value=(files, {})), \
+            patch.object(cs, "gather_asm", return_value={}), \
+            patch.object(cs.time, "monotonic", return_value=1.0):
+        root = Path(directory)
+        snapshot = root / "progress.json"
+        scanner = cs._dup_scan_windows
+        # Existing scanner-equivalence fixtures replace it with a one-argument callable.
+        with redirect_stderr(StringIO()) as quiet, \
+                patch.object(cs, "_dup_scan_windows", side_effect=lambda current: scanner(current)):
+            baseline = cs.collect(root, run_churn=False)
+        assert quiet.getvalue() == ""
+        duplication = next(k for k in baseline["kpis"] if k["kpi"] == "duplication")
+        assert duplication["defects"] and duplication["score"] < 100
+        with redirect_stderr(StringIO()) as stderr:
+            traced = cs.collect(root, run_churn=False, progress_path=str(snapshot))
+        assert traced == baseline
+        lines = stderr.getvalue().splitlines()
+        assert all(line.startswith(marker) for line in lines)
+        records = [json.loads(line[len(marker):]) for line in lines]
+        assert [record["phase"] for record in records] == [
+            "gather_go", "gather_asm", "read_metadata", "duplication", *phases,
+            "dead_code", "comment_slop", "vacuous_tests", "stub_masquerade",
+            "churn_bloat", "build_payload"]
+        inner = "\n".join(line for line, record in zip(lines, records)
+                          if record["phase"] in phases)
+        expected = [{"phase": phase, "elapsed_ms": 0, "proof_index": 0} for phase in phases]
+        assert scp._diagnostic_stream(inner, "slop")["progress_tail"] == expected
+        untrusted = {"schema": "fak-scorecard-progress/1", **expected[0],
+                     "untrusted": "fixture-private-value"}
+        unknown = {**untrusted, "phase": "dup_unknown"}
+        sanitized = scp._diagnostic_stream(
+            marker + json.dumps(untrusted) + "\n" + marker + json.dumps(unknown), "slop")
+        assert sanitized["progress_tail"] == expected[:1]
+        assert sanitized["raw_output_retained"] is False
+        assert "untrusted" not in json.dumps(sanitized)
+        assert "fixture-private-value" not in json.dumps(sanitized)
+
+        failure = RuntimeError("fixture-stage-failure")
+        with redirect_stderr(StringIO()) as failed_stderr, \
+                patch.object(cs, "_dup_survivor_groups", side_effect=failure):
+            try:
+                cs.collect(root, run_churn=False, progress_path=str(snapshot))
+            except RuntimeError as exc:
+                assert exc is failure
+            else:
+                raise AssertionError("stage failure was swallowed")
+        retained = snapshot.read_text()
+        assert json.loads(retained) == {"schema": "fak-scorecard-progress/1", **expected[-2]}
+        failed_tail = scp._diagnostic_stream(failed_stderr.getvalue(), "slop")["progress_tail"]
+        assert failed_tail[-1] == expected[-2]
+        assert "fixture-stage-failure" not in retained + failed_stderr.getvalue()
+        assert directory not in retained + failed_stderr.getvalue()
+        assert not list(root.glob(".progress-*.tmp"))
+
+
 # --- tolerant live smoke ----------------------------------------------------
 
 def test_timeout_diagnostics_keep_only_bounded_progress_without_changing_failure() -> None:
