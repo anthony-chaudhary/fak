@@ -2,6 +2,7 @@ package modelengine
 
 import (
 	"container/heap"
+	"sort"
 	"time"
 )
 
@@ -83,10 +84,46 @@ func (h *waitingDeadlineHeap) len() int { return len(h.entries) }
 func (h waitingDeadlineEntries) Len() int { return len(h) }
 
 func (h waitingDeadlineEntries) Less(i, j int) bool {
-	if h[i].deadline.Equal(h[j].deadline) {
-		return h[i].seq < h[j].seq
+	return waitingDeadlineLess(h[i].deadline, h[j].deadline, h[i].seq < h[j].seq)
+}
+
+// waitingDeadlineLess is shared by expiry and promotion: absolute deadline first,
+// then the stable request arrival identity (Vidur EDF, 25e0082, MIT).
+func waitingDeadlineLess(a, b time.Time, earlierArrival bool) bool {
+	if a.Equal(b) {
+		return earlierArrival
 	}
-	return h[i].deadline.Before(h[j].deadline)
+	return a.Before(b)
+}
+
+// orderWaitingDeadlinesLocked leaves the existing queue/picker order untouched
+// without live deadlines. With deadlines, EDF takes precedence over the optional
+// picker: deadline-free requests follow in admission order. Submit priority is
+// deliberately not a promotion key; it remains metadata for preemption policy.
+func (s *NativeScheduler) orderWaitingDeadlinesLocked() bool {
+	hasDeadline := false
+	for _, ln := range s.waiting {
+		if _, ok := ln.ctx.Deadline(); ok && ln.ctx.Err() == nil {
+			hasDeadline = true
+			break
+		}
+	}
+	if !hasDeadline {
+		return false
+	}
+	sort.SliceStable(s.waiting, func(i, j int) bool {
+		a, b := s.waiting[i], s.waiting[j]
+		aDeadline, aHasDeadline := a.ctx.Deadline()
+		bDeadline, bHasDeadline := b.ctx.Deadline()
+		if aHasDeadline != bHasDeadline {
+			return aHasDeadline
+		}
+		if !aHasDeadline {
+			return a.seqNo < b.seqNo
+		}
+		return waitingDeadlineLess(aDeadline, bDeadline, a.seqNo < b.seqNo)
+	})
+	return true
 }
 
 func (h waitingDeadlineEntries) Swap(i, j int) {

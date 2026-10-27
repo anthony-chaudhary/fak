@@ -74,7 +74,8 @@ type NativeScheduler struct {
 	mu sync.Mutex
 	// waiting holds admitted-but-not-yet-running lanes (the WAITING queue); lanes
 	// holds the RUNNING set the per-iteration StepBatch advances. Admit enqueues into
-	// waiting; run() promotes waiting->lanes between steps, FIFO, up to maxRunning.
+	// waiting; run() promotes waiting->lanes between steps, EDF when deadlines exist
+	// and otherwise FIFO, up to maxRunning.
 	waiting []*schedLane
 	lanes   []*schedLane
 	// maxRunning caps the running set; 0 = unbounded (every admitted lane runs at once,
@@ -170,7 +171,7 @@ const (
 )
 
 // SetMaxRunning bounds how many admitted lanes run concurrently; the rest wait in the
-// waiting queue and are promoted FIFO as running slots free between steps. n<=0 means
+// waiting queue and are promoted by deadline, or FIFO without deadlines, as slots free. n<=0 means
 // unbounded (the default). Set it before the first Admit; it is read by the run loop.
 func (s *NativeScheduler) SetMaxRunning(n int) {
 	s.mu.Lock()
@@ -842,7 +843,8 @@ func laneStepTokens(ln *schedLane) int {
 	return chunk
 }
 
-// promoteWaitingLocked moves waiting lanes into the running set in queue order, up to
+// promoteWaitingLocked moves waiting lanes into the running set in deadline order
+// (FIFO without deadlines), up to
 // maxRun and, when set, within maxTokensPerStep (vLLM v1 scheduler token_budget,
 // vllm/v1/core/sched/scheduler.py:569@975dca5, Apache-2.0). An empty running set always
 // admits its first live candidate so an oversized first chunk cannot stall the loop.
@@ -852,6 +854,7 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
 			return
 		}
 	}
+	deadlineOrdered := s.orderWaitingDeadlinesLocked()
 	budget := 0
 	if s.maxTokensPerStep > 0 {
 		budget = s.maxTokensPerStep
@@ -867,7 +870,10 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
 			continue
 		}
 		if maxRun > 0 && s.preemptionEnabledLocked() {
-			if capacityBlocked {
+			// EDF can put a deferred lane ahead of the waiting session whose
+			// reservation blocks it. Let that owner pass through the same capacity
+			// checks and drain; deferred waiters must not overtake the blocked one.
+			if capacityBlocked && (!deadlineOrdered || ln.sess == nil) {
 				kept = append(kept, ln)
 				continue
 			}
@@ -899,7 +905,8 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
 }
 
 // run is the single scheduler loop. Each iteration recomputes the running set: it
-// compacts retired lanes out, then promotes waiting lanes into the freed slots (FIFO,
+// compacts retired lanes out, then promotes waiting lanes into the freed slots (EDF,
+// or FIFO without deadlines,
 // up to maxRunning) — so the per-step batch geometry tracks admissions and completions
 // between every decode step. All lane mutation (terminal/logits/gen) happens HERE, on
 // this one goroutine, so those fields need no lock; only the shared waiting/lanes
@@ -1019,7 +1026,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	if !waitingReservation {
 		s.readmitPreemptedLocked()
 	}
-	// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
+	// 3. Promote waiting lanes by deadline (FIFO without deadlines), up to maxRunning. A lane
 	// cancelled while it was still waiting is retired here rather than promoted.
 	waitingMaterialization := false
 	for _, ln := range s.waiting {
@@ -1502,7 +1509,8 @@ func (s *NativeScheduler) beforeModelExecution(kind nativeSchedulerEventKind, ln
 }
 
 // schedLane is one admitted request's state + its EngineRequest handle.
-// PromotionPicker is an opt-in WAITING-queue order. Nil preserves FIFO.
+// PromotionPicker is an opt-in WAITING-queue order when no live deadline exists.
+// Nil preserves FIFO; deadline-bearing work uses EDF before promotion.
 type PromotionPicker func([]PromotionCandidate, int, map[string]int) []int
 
 type PromotionCandidate struct {
