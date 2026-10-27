@@ -3,6 +3,7 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,138 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 )
+
+// fak-test:runtime medium est=1s lane=default
+// TestNativeSchedulerLaneCarriesSubmitPriority witnesses the production Engine.Admit
+// path, including its native decode events. Submit priority is metadata only: it
+// must survive caller metadata changes without changing FIFO or cancellation.
+func TestNativeSchedulerLaneCarriesSubmitPriority(t *testing.T) {
+	e := New()
+	e.Preload(model.NewSynthetic(SyntheticConfig()))
+	s := e.nativeScheduler()
+	s.SetMaxRunning(1)
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{})
+	s.SetInBatchPrefixDedup(false)
+
+	// Hold execution, not admission, so every request is waiting before any can
+	// decode. A later, more important request must not jump the FIFO queue.
+	s.executor.Lock()
+	var released sync.Once
+	release := func() { released.Do(s.executor.Unlock) }
+	t.Cleanup(func() {
+		s.Close()
+		release()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.CloseAndWait(ctx); err != nil {
+			t.Errorf("CloseAndWait: %v", err)
+		}
+	})
+
+	cases := []struct {
+		name     string
+		raw      string
+		want     int
+		canceled bool
+	}{
+		{name: "default"},
+		{name: "negative", raw: "-7", want: -7},
+		{name: "positive", raw: " +12 ", want: 12},
+		{name: "explicit-zero", raw: "0"},
+		{name: "invalid", raw: "urgent"},
+		{name: "overflow", raw: "999999999999999999999999999999"},
+		{name: "canceled", raw: "-99", want: -99, canceled: true},
+	}
+	events := make(chan *schedLane, len(cases)*genTokens)
+	s.observeNativeEvent = func(event nativeSchedulerEvent) {
+		if event.Kind == nativeSchedulerEventDecode {
+			events <- event.Lane
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lanes := make([]*schedLane, len(cases))
+	for i, tc := range cases {
+		call := inlineCall(tc.name, `{}`)
+		if tc.raw != "" {
+			call.Meta = map[string]string{"priority": tc.raw}
+		}
+		req, err := e.Admit(ctx, call)
+		if err != nil {
+			t.Fatalf("Admit %s: %v", tc.name, err)
+		}
+		var ok bool
+		lanes[i], ok = req.(*schedLane)
+		if !ok {
+			t.Fatalf("Engine.Admit returned %T, want *schedLane", req)
+		}
+		// Even a nil metadata map replaced after admission must not become a
+		// live source of scheduler state.
+		if call.Meta == nil {
+			call.Meta = make(map[string]string)
+		}
+		call.Meta["priority"] = "91"
+		if tc.canceled {
+			req.Cancel()
+		}
+	}
+	release()
+
+	for i, ln := range lanes {
+		count := 0
+		for range ln.Tokens() {
+			count++
+		}
+		result, err := ln.Result()
+		if cases[i].canceled {
+			if count != 0 || result != nil || !errors.Is(err, context.Canceled) || !ln.Reclaimed() {
+				t.Fatalf("canceled lane: tokens=%d result=%v err=%v reclaimed=%v", count, result, err, ln.Reclaimed())
+			}
+		} else if err != nil || result == nil || result.Status != abi.StatusOK || count != genTokens {
+			t.Fatalf("lane %s: tokens=%d result=%v err=%v", cases[i].name, count, result, err)
+		}
+	}
+	if err := s.CloseAndWait(ctx); err != nil {
+		t.Fatalf("CloseAndWait: %v", err)
+	}
+	close(events)
+
+	priority := func(ln *schedLane) int {
+		t.Helper()
+		// Keep the pre-field baseline executable: absence must fail this
+		// contract assertion, not prevent the regression from compiling.
+		field := reflect.ValueOf(ln).Elem().FieldByName("priority")
+		if !field.IsValid() || field.Kind() != reflect.Int {
+			t.Fatalf("native lane %s has no int submit priority", ln.tool)
+		}
+		return int(field.Int())
+	}
+	wants := make(map[*schedLane]int, len(lanes))
+	for i, ln := range lanes {
+		wants[ln] = cases[i].want
+		if got := priority(ln); got != cases[i].want {
+			t.Fatalf("lane %s priority=%d, want submit-time %d", cases[i].name, got, cases[i].want)
+		}
+	}
+	seen := make(map[*schedLane]bool)
+	next := 0
+	for ln := range events {
+		want, ok := wants[ln]
+		if !ok || priority(ln) != want {
+			t.Fatalf("decode event lost its submitted lane/priority: lane=%p", ln)
+		}
+		if !seen[ln] {
+			if next >= len(lanes)-1 || ln != lanes[next] {
+				t.Fatalf("decode order changed at position %d: lane=%s", next, ln.tool)
+			}
+			seen[ln] = true
+			next++
+		}
+	}
+	if next != len(lanes)-1 {
+		t.Fatalf("decode events covered %d lanes, want %d live FIFO lanes", next, len(lanes)-1)
+	}
+}
 
 // TestNativeSchedulerBatchesLanesAndFreesCancelled is the acceptance-#4 witness:
 // the SAME abi.LifecycleEngine the per-request in-kernel engine implements also fits

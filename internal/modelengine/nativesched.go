@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -374,6 +375,9 @@ func (s *NativeScheduler) WeightBearing() bool { return true }
 // enters WAITING in PREFILLING state and lets runIteration advance one bounded prompt
 // chunk before returning to decode work. A surviving lane's output remains independent
 // of promotion timing because each lane owns its KV and decode state.
+// Optional c.Meta["priority"] is a signed decimal integer (lower is more important),
+// captured at admission. Missing, malformed, or out-of-range values default to 0.
+// Priority is metadata only; it does not change promotion or preemption policy.
 func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	return s.AdmitWithHint(ctx, c, dispatchtick.WaveHint{})
 }
@@ -413,6 +417,10 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	}
 	q4k := prep.q4k || s.residentQ4K
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)
+	priority, err := strconv.Atoi(strings.TrimSpace(c.Meta["priority"]))
+	if err != nil {
+		priority = 0
+	}
 
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
@@ -431,6 +439,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		tokens:      make(chan abi.EngineToken, 1),
 		done:        make(chan struct{}),
 		hint:        hint,
+		priority:    priority,
 	}
 
 	s.mu.Lock()
@@ -1606,6 +1615,10 @@ type schedLane struct {
 	terminal           bool
 	hint               dispatchtick.WaveHint
 	seqNo              int64
+	// Immutable submit metadata, also visible through nativeSchedulerEvent.Lane.
+	// Lower values are more important, following vLLM's request-priority convention
+	// (vllm/v1/core/sched/scheduler.py:735@975dca5, Apache-2.0).
+	priority int
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.
