@@ -69,6 +69,9 @@ func (s *NativeScheduler) reuseQwenPrefillExtensionsLocked(donor *schedLane) {
 		if s.preemption.MaxBlocks > 0 && (added > s.preemption.MaxBlocks || used > s.preemption.MaxBlocks-added) {
 			continue
 		}
+		if !s.qwenPrefillExtensionHeadroomLocked(follower, blocks) {
+			continue
+		}
 		follower.sess.Cache = donor.sess.Cache.Clone()
 		follower.promptCursor = depth
 		follower.promptLen = depth
@@ -83,4 +86,35 @@ func (s *NativeScheduler) reuseQwenPrefillExtensionsLocked(donor *schedLane) {
 		st.chunkedPrefixReuses += reused
 		st.mu.Unlock()
 	}
+}
+
+// qwenPrefillExtensionHeadroomLocked checks only whether a proposed clone is
+// safe to add; it does not reserve future KV or change ordinary prefill admission.
+// runIteration advances the first PREFILLING lane. Before a later lane runs,
+// earlier lanes have completed or retired, but later resident checkpoints remain
+// protected. Leave room for each lane's full prompt beside those later prefixes.
+// executor and s.mu are held, as for reuseQwenPrefillExtensionsLocked.
+func (s *NativeScheduler) qwenPrefillExtensionHeadroomLocked(follower *schedLane, copiedBlocks int) bool {
+	limit := s.preemption.MaxBlocks
+	if limit <= 0 {
+		return true
+	}
+	laterBlocks := 0
+	for i := len(s.lanes) - 1; i >= 0; i-- {
+		lane := s.lanes[i]
+		if lane == nil || lane.terminal || lane.state != schedLanePrefilling {
+			continue
+		}
+		resident := s.laneKVBlocksLocked(lane)
+		if lane == follower {
+			resident = copiedBlocks
+		}
+		peak := max(resident, s.lanePromptBlocksLocked(lane))
+		if peak > limit-laterBlocks {
+			return false
+		}
+		// peak >= resident, so the check also bounds this sum by limit.
+		laterBlocks += resident
+	}
+	return true
 }
