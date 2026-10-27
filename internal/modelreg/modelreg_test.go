@@ -505,3 +505,61 @@ func TestResolveFollowsAliasChainAndRejectsCycle(t *testing.T) {
 		t.Fatalf("package Resolve after refused registry = (%q, %v); want embedded target", got, expanded)
 	}
 }
+
+// fak-test:runtime fast est=100ms lane=default
+func TestEntriesResolvesAliasChainCacheStatus(t *testing.T) {
+	for _, cached := range []bool{true, false} {
+		name := "cached_terminal"
+		if !cached {
+			name = "missing_terminal_decoy"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			target := filepath.Join(dir, "model.gguf")
+			const contents = "model fixture"
+			if cached {
+				if err := os.WriteFile(target, []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// An intermediate alias name can also name an unrelated local file.
+			// It must not supply the chain's cache status, path, or size.
+			if err := os.WriteFile("middle", []byte("decoy"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// Local-only entries keep this fixture independent of the user's Hub
+			// credentials, embedded catalog, and network. Register validates each
+			// chain with the same resolver used by ordinary loaded registries.
+			r := &Registry{entries: make(map[string]Entry), cacheDir: dir}
+			names := []string{"chain", "direct", "middle", "qwen2.5-coder:3b", "terminal"}
+			targets := []string{"middle", target, "terminal", "middle", target}
+			for i, alias := range names {
+				if err := r.Register(alias, targets[i]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got, expanded := r.Resolve("chain"); !expanded || got != target {
+				t.Fatalf("Resolve(chain) = (%q, %v), want (%q, true)", got, expanded, target)
+			}
+			entries := r.Entries()
+			if len(entries) != len(names) {
+				t.Fatalf("Entries returned %d rows, want %d", len(entries), len(names))
+			}
+			for i, entry := range entries {
+				want := Entry{Name: names[i], Target: targets[i], Source: "user"}
+				if entry.Entry != want || entry.Coding != (names[i] == "qwen2.5-coder:3b") {
+					t.Errorf("row %d changed alias identity, coding flag, or order: %+v; want %+v", i, entry, want)
+				}
+				wantPath, wantSize := "", int64(0)
+				if cached {
+					wantPath, wantSize = target, int64(len(contents))
+				}
+				if entry.Cached() != cached || entry.LocalPath != wantPath || entry.SizeBytes != wantSize {
+					t.Errorf("%s cache = (%v, %q, %d), want (%v, %q, %d)", entry.Name,
+						entry.Cached(), entry.LocalPath, entry.SizeBytes, cached, wantPath, wantSize)
+				}
+			}
+		})
+	}
+}

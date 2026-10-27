@@ -577,8 +577,16 @@ func (r *Registry) Entries() []ListEntry {
 	out := make([]ListEntry, 0, len(r.entries))
 	for _, e := range r.entries {
 		le := ListEntry{Entry: e, Coding: codingAliases[e.Name]}
-		if hfhub.IsURI(e.Target) {
-			if ref, err := hfhub.ParseURI(e.Target); err == nil && ref.File != "" {
+		// Keep the displayed alias identity, but probe the same terminal target
+		// that resolution uses rather than an intermediate alias's name.
+		resolved, err := r.followAlias(e)
+		if err != nil {
+			out = append(out, le)
+			continue
+		}
+		target := resolved.Target
+		if hfhub.IsURI(target) {
+			if ref, err := hfhub.ParseURI(target); err == nil && ref.File != "" {
 				c := hfhub.NewClient()
 				p := c.CachePath(ref)
 				if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
@@ -586,9 +594,9 @@ func (r *Registry) Entries() []ListEntry {
 					le.SizeBytes = fi.Size()
 				}
 			}
-		} else if fi, err := os.Stat(e.Target); err == nil && !fi.IsDir() {
+		} else if fi, err := os.Stat(target); err == nil && !fi.IsDir() {
 			// A bare-path alias: cached iff the file exists.
-			le.LocalPath = e.Target
+			le.LocalPath = target
 			le.SizeBytes = fi.Size()
 		}
 		out = append(out, le)
