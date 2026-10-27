@@ -59,6 +59,21 @@ func (d *Qwen35MTPDraftSession) BeginSampledRound(ctx context.Context, committed
 // ErrQwen35MTPSampledNoProposal permits target-only fallback; other errors must
 // not discard a sampled prefix and silently restart from the original boundary.
 func (d *Qwen35MTPDraftSession) BeginSampledRoundWithTargetProbabilities(ctx context.Context, committed []int, beforeLogits []float32, requestKey uint64, stepOffset int, targetProbabilities func([]float32) (SpecProbabilityRow, error)) (round *Qwen35MTPSampledRound, err error) {
+	return d.beginSampledRoundWithTargetProbabilities(ctx, committed, beforeLogits, requestKey, stepOffset, targetProbabilities, 0)
+}
+
+// BeginSampledRoundWithTargetProbabilitiesLimit preserves the canonical-policy
+// transaction while bounding proposal growth by a positive per-call maxDraft.
+// It never changes the configured depth. Metal retains its existing depth: its
+// exact P=4 panel must not be redirected to another verifier by this ceiling.
+func (d *Qwen35MTPDraftSession) BeginSampledRoundWithTargetProbabilitiesLimit(ctx context.Context, committed []int, beforeLogits []float32, requestKey uint64, stepOffset, maxDraft int, targetProbabilities func([]float32) (SpecProbabilityRow, error)) (round *Qwen35MTPSampledRound, err error) {
+	if maxDraft <= 0 {
+		return nil, ErrQwen35MTPInvalidDraftLength
+	}
+	return d.beginSampledRoundWithTargetProbabilities(ctx, committed, beforeLogits, requestKey, stepOffset, targetProbabilities, maxDraft)
+}
+
+func (d *Qwen35MTPDraftSession) beginSampledRoundWithTargetProbabilities(ctx context.Context, committed []int, beforeLogits []float32, requestKey uint64, stepOffset int, targetProbabilities func([]float32) (SpecProbabilityRow, error), maxDraft int) (round *Qwen35MTPSampledRound, err error) {
 	if d == nil || d.closed {
 		return nil, ErrQwen35MTPDrafterClosed
 	}
@@ -84,8 +99,12 @@ func (d *Qwen35MTPDraftSession) BeginSampledRoundWithTargetProbabilities(ctx con
 	if requestKey == 0 {
 		return nil, ErrSpecRejectionUnkeyed
 	}
+	depth := d.depth
+	if maxDraft > 0 && d.target != nil && !d.target.Metal && !d.target.MetalQ4K {
+		depth = min(depth, maxDraft)
+	}
 	maxInt := int(^uint(0) >> 1)
-	if stepOffset < 0 || stepOffset >= maxInt || d.depth > maxInt-stepOffset-1 {
+	if stepOffset < 0 || stepOffset >= maxInt || depth > maxInt-stepOffset-1 {
 		return nil, fmt.Errorf("%w: sampled round step range", ErrSpecRejectionShape)
 	}
 	if len(committed) != qwen35MTPResidentPrefixLen(d.target) || !qwen35MTPDepthNTargetHasEvaluatedPrefix(d.target, committed) {
@@ -129,7 +148,7 @@ func (d *Qwen35MTPDraftSession) BeginSampledRoundWithTargetProbabilities(ctx con
 		}
 	}()
 	draftStarted := time.Now()
-	tokens, evidence := d.propose(committed, true, true)
+	tokens, evidence := d.proposeWithLimit(committed, true, true, depth)
 	r.draftElapsed = time.Since(draftStarted)
 	if err := d.Err(); err != nil {
 		return nil, err

@@ -628,7 +628,8 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			attempt.begin(diagnosticStart, gen)
 			// Quantized targets reuse their logits buffer during verification.
 			before := append([]float32(nil), curLogits...)
-			sampledRound, beginErr := sampledDraft.BeginSampledRoundWithTargetProbabilities(ctx, committed, before, requestKey, stepOffset, func(row []float32) (model.SpecProbabilityRow, error) {
+			// The loop guarantees a positive budget; avoid drafting beyond it.
+			sampledRound, beginErr := sampledDraft.BeginSampledRoundWithTargetProbabilitiesLimit(ctx, committed, before, requestKey, stepOffset, maxNew-gen, func(row []float32) (model.SpecProbabilityRow, error) {
 				return sampleLogitsWithPenaltyDistributionWS(row, temp, topP, topK, minP, nil, 0, 0, nil, &samplingWS)
 			})
 			if beginErr != nil {

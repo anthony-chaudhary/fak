@@ -358,8 +358,16 @@ func (d *Qwen35MTPDraftSession) ProposeWithEvidence(committed []int) (draft []in
 }
 
 func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence, exactSamplingLaw bool) (draft []int, evidence []DraftTokenEvidence) {
+	return d.proposeWithLimit(committed, collectEvidence, exactSamplingLaw, 0)
+}
+
+func (d *Qwen35MTPDraftSession) proposeWithLimit(committed []int, collectEvidence, exactSamplingLaw bool, maxDraft int) (draft []int, evidence []DraftTokenEvidence) {
 	if d == nil || d.runtimeErr != nil {
 		return nil, nil
+	}
+	depth := d.depth
+	if maxDraft > 0 {
+		depth = min(depth, maxDraft)
 	}
 	// A live sampled round owns both the proposal checkpoint and its RNG draw.
 	// Starting another proposal would invalidate its commit/abort boundary.
@@ -418,7 +426,7 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence, exactS
 	if !ok {
 		return nil, nil
 	}
-	draft = make([]int, 0, d.depth)
+	draft = make([]int, 0, depth)
 	draft = append(draft, firstToken)
 	if collectEvidence {
 		if row, ok := d.proposalTokenEvidence(firstToken, d.lastLogits, firstQ); ok {
@@ -427,7 +435,7 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence, exactS
 			evidenceComplete = false
 		}
 	}
-	if d.depth == 1 {
+	if depth == 1 {
 		return draft, evidence
 	}
 	if err := d.checkpointProposal(); err != nil {
@@ -441,7 +449,7 @@ func (d *Qwen35MTPDraftSession) propose(committed []int, collectEvidence, exactS
 		return nil, nil
 	}
 	current := draft[0]
-	for len(draft) < d.depth {
+	for len(draft) < depth {
 		pos := len(committed) + len(draft) - 1
 		embedding, err := d.target.TokenEmbedding(current)
 		if err != nil {
