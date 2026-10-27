@@ -156,6 +156,12 @@ void fvk_d2d(void *dst, const void *src, size_t bytes);
 /* fvk_d2d_off copies `bytes` from src[0..] into dst at byte offset dst_off — the
  * device-resident KV append (write a new K/V row at the tail of the layer buffer). */
 void fvk_d2d_off(void *dst, size_t dst_off, const void *src, size_t bytes);
+/* Copy contiguous source rows into disjoint rows of a strided destination
+ * with one checked native command. Both buffers remain owned by the caller;
+ * an open batch retains its owner fence. All bounds/alias checks precede
+ * recording. Returns 2 for invalid geometry, otherwise submission status. */
+int fvk_d2d_strided_rows(void *dst, size_t dst_off, size_t dst_stride,
+                         const void *src, int count, size_t row_bytes);
 /* General device->device range copy. Both handles are opaque Buffer* values; offsets are
  * byte offsets into those buffers, never pointer arithmetic on the handles themselves. */
 void fvk_d2d_range(void *dst, size_t dst_off, const void *src, size_t src_off, size_t bytes);

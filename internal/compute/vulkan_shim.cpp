@@ -4892,6 +4892,71 @@ void fvk_d2d_off(void* dst, size_t dst_off, const void* src, size_t bytes) {
     fvk_d2d_range(dst, dst_off, src, 0, bytes);
 }
 
+// Reassemble a chunked projection's token-major panel without a copy command
+// and dependency barrier for every token. The source rows are contiguous;
+// destination gaps belong to other chunks and must remain untouched.
+int fvk_d2d_strided_rows(void* dstHandle, size_t dstOffset, size_t dstStride,
+                         const void* srcHandle, int count, size_t rowBytes) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!g_ready) return 1;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (count <= 0 || rowBytes == 0 || dstStride < rowBytes ||
+        ((dstOffset | dstStride | rowBytes) & 3u) != 0 ||
+        size_t(count) > std::numeric_limits<size_t>::max() / sizeof(VkBufferCopy)) return 2;
+    Buffer* dst = B(dstHandle);
+    Buffer* src = B((void*)srcHandle);
+    const auto live = [](const Buffer* b) {
+        return b && b->buf != VK_NULL_HANDLE && b->mem != VK_NULL_HANDLE && b->bytes > 0 &&
+            b->bytes <= std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset;
+    };
+    if (!live(dst) || !live(src) || size_t(count) > src->bytes / rowBytes ||
+        dstOffset > dst->bytes || rowBytes > dst->bytes - dstOffset ||
+        size_t(count - 1) > (dst->bytes - dstOffset - rowBytes) / dstStride ||
+        src == dst || src->buf == dst->buf ||
+        (src->mem == dst->mem && src->memoryOffset < dst->memoryOffset + dst->bytes &&
+         dst->memoryOffset < src->memoryOffset + src->bytes) ||
+        (g_batching && (g_batchCmd == VK_NULL_HANDLE || g_batchOps == std::numeric_limits<int>::max()))) return 2;
+    // The source/destination capacity divisions prove these products fit.
+    const size_t total = size_t(count) * rowBytes;
+    VkBufferCopy* regions = (VkBufferCopy*)std::malloc(size_t(count) * sizeof(VkBufferCopy));
+    if (!regions) return (int)VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (int i = 0; i < count; ++i) {
+        regions[i] = VkBufferCopy{size_t(i) * rowBytes, dstOffset + size_t(i) * dstStride, rowBytes};
+    }
+    const bool recording = g_batching;
+    VkCommandBuffer cmd = recording ? g_batchCmd : v41BeginCmdChecked();
+    if (cmd == VK_NULL_HANDLE) {
+        std::free(regions);
+        return (int)g_submissionStatus;
+    }
+    // The source is the preceding GEMM output. Preserve a conservative
+    // shader-write -> transfer-read dependency independent of hazard elision.
+    recordComputeBarrier(cmd);
+    vkCmdCopyBuffer(cmd, src->buf, dst->buf, uint32_t(count), regions);
+    std::free(regions);
+    dp_inc(g_dp.d2d);
+    if (recording) {
+        g_batchHasV41 = true;
+        tsAfterDispatch(cmd, kTsD2DGather, 0, 0);
+        ++g_batchOps;
+        if (uint64_t(count) > std::numeric_limits<uint64_t>::max() - g_batchD2DCount ||
+            total > std::numeric_limits<uint64_t>::max() - g_batchD2DBytes) {
+            g_batchD2DValid = false;
+        } else {
+            g_batchD2DCount += uint64_t(count);
+            g_batchD2DBytes += total;
+        }
+    } else {
+        recordComputeBarrier(cmd);
+        dpOneShot(g_dp.oneShotD2D);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
+        if (!checkedCounterAdd(g_d2dCount, uint64_t(count)) || !checkedCounterAdd(g_d2dBytes, total)) {
+            g_transferCountersValid = false;
+        }
+    }
+    return (int)g_submissionStatus;
+}
+
 // batch entry points (C ABI).
 void fvk_batch_begin(void) { batchBegin(); }
 void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }

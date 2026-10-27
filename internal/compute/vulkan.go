@@ -53,6 +53,7 @@ import "C"
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -2065,6 +2066,17 @@ func (v *vulkanBackend) q8MatMulChunksLocked(wb *vulkanBuf, x, y Tensor, out, in
 }
 
 func (v *vulkanBackend) copyQ8ChunkOutputLocked(dst, src *vulkanBuf, out, rowStart, rows, P int) {
+	if P > 1 && P <= math.MaxInt32 {
+		if out <= 0 || out > math.MaxInt/4 || rowStart < 0 || rowStart > out || rows <= 0 || rows > out-rowStart {
+			panic("compute: Vulkan Q8 chunk output copy has invalid row geometry")
+		}
+		if status := int(C.fvk_d2d_strided_rows(dst.ptr, C.size_t(rowStart*4), C.size_t(out*4), src.ptr, C.int(P), C.size_t(rows*4))); status != 0 {
+			panic(fmt.Errorf("compute: Vulkan Q8 chunk output copy failed closed (code %d)", status))
+		}
+		return
+	}
+	// Keep the single-row decode path allocation-free and preserve the generic
+	// count range beyond the signed native copy ABI without truncation.
 	bytes := rows * F32.Bytes()
 	for p := 0; p < P; p++ {
 		dstOff := (p*out + rowStart) * F32.Bytes()
