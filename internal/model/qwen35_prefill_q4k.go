@@ -767,8 +767,9 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		s.phaseEnd("q8_panel_quantize", t)
 		return scratch
 	}
-	proj := func(name string, Xf []float32, Xq *q8Panel) []float32 {
-		Xrot := m.prismProjectPanel(name, Xf, P)
+	// Every consumer below reads Xrot without retaining or mutating it. A
+	// validated unobserved CPU group may supply one group-local transform.
+	projectRotated := func(name string, Xrot []float32, Xq *q8Panel) []float32 {
 		if qt := m.q4kw[name]; qt != nil {
 			// q4kGemmDispatch is the CPU q4kGemm by default; under -tags fakmetal with
 			// s.MetalQ4K set it routes the q4_k-majority GEMM to the Metal q4_k dequant-GEMM.
@@ -796,6 +797,9 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			Xq = panel
 		}
 		return s.q8GemmDispatch(name, m.q8(name), Xq)
+	}
+	proj := func(name string, Xf []float32, Xq *q8Panel) []float32 {
+		return projectRotated(name, m.prismProjectPanel(name, Xf, P), Xq)
 	}
 	if profile {
 		rawProj := proj
@@ -826,7 +830,8 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	// the GDN in_proj quad) through grouped Metal paths: q4_k-resident members via
 	// q4kGemmGroupDispatch and Q8-minority members via q8GemmGroupDispatch. Any nil member (Q6_K,
 	// singleton, declined upload, or non-Metal build) is filled by the same per-weight `proj`, so
-	// the result is identical to calling proj per name — just fewer command buffers.
+	// Unobserved builtin CPU groups may instead share one exact Prism transform; all
+	// other results are identical to calling proj per name with the same fallback.
 	pgroup := func(names []string, Xf []float32, Xq *q8Panel) [][]float32 {
 		out := make([][]float32, len(names))
 		t0 := time.Now()
@@ -858,6 +863,24 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 				if out[i] == nil {
 					out[i] = q8out[i]
 				}
+			}
+		}
+		// The real Bonsai loader shares an immutable Prism state/sign vector
+		// across declared same-transform weights. Reuse only this group's Xf,
+		// with no persistent cache and no transformed panel retained after return.
+		allPending := true
+		for _, result := range out {
+			if result != nil {
+				allPending = false
+				break
+			}
+		}
+		if !profile && allPending {
+			if rotated := s.prismPrefillGroupPanel(names, Xf, P); rotated != nil {
+				for i, name := range names {
+					out[i] = projectRotated(name, rotated, Xq)
+				}
+				return out
 			}
 		}
 		for i, name := range names {
