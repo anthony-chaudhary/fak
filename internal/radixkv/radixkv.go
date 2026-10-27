@@ -53,6 +53,7 @@
 package radixkv
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"math"
@@ -1252,12 +1253,26 @@ func (t *Tree) evictToBudget() {
 	if !evicts {
 		return // keep-all: eviction disabled
 	}
+	// Leave the common single-victim pass on its existing selector path, with
+	// no heap allocation. Heap setup is attempted only if that eviction did not satisfy budget.
+	var victims *lruVictimHeap
+	heapTried := false
 	for t.tokens > budget {
 		if t.haltPredicate != nil && t.haltPredicate() {
 			t.evictionHaltSufficientCapacity++
 			break
 		}
-		v := t.victimLeaf()
+		var v *node
+		if victims != nil {
+			var ok bool
+			v, ok = victims.victim(t)
+			if !ok {
+				victims = nil // exact ties retain the original rescan behavior
+			}
+		}
+		if victims == nil {
+			v = t.victimLeaf()
+		}
 		if v == nil {
 			return // everything in budget-excess is locked; cannot evict further
 		}
@@ -1269,6 +1284,7 @@ func (t *Tree) evictToBudget() {
 			}
 		}
 		t.noteEviction(v) // thrash detector (#3393): remember the victim before it goes
+		parent := v.parent
 		t.removeLeaf(v)
 		t.evictions++
 		if t.policy == EvictionCostAware {
@@ -1277,6 +1293,118 @@ func (t *Tree) evictToBudget() {
 		if t.policy == EvictionPageAware {
 			t.pageEvictions++
 		}
+		if victims != nil {
+			victims.addLeaf(t, parent) // a removal may expose a new parent victim
+		} else if !heapTried && t.tokens > budget {
+			heapTried = true
+			// Custom strategies/preparers and user callbacks may change priorities
+			// between victims. Keep their existing per-victim traversal untouched.
+			if _, pureLRU := t.evictionStrategy().(lruStrategy); pureLRU && t.haltPredicate == nil && !(t.demoteBeforeDrop && t.demotionDecider != nil) {
+				victims = t.buildLRUVictimHeap()
+			}
+		}
+	}
+}
+
+// Multi-victim heap adapted from SGLang radix_cache.py evict, lines 582-607 at
+// 00a9a81b67774e8374172646c092e14999472703 (Copyright 2023-2024 SGLang Team,
+// Apache-2.0). Modifications: defer setup until after the first victim, restrict
+// to pure LRU, preserve Fak's leaf immunity/tiers/telemetry and fall back on ties.
+// https://github.com/sgl-project/sglang/blob/00a9a81b67774e8374172646c092e14999472703/python/sglang/srt/mem_cache/radix_cache.py
+// SPDX-License-Identifier: Apache-2.0
+// This heap lives for one serialized eviction pass; it is not a persistent index.
+type lruHeapEntry struct {
+	n   *node
+	key victimKey
+}
+
+type lruVictimHeap struct {
+	entries            []lruHeapEntry
+	clock              uint64
+	candidates, locked int
+}
+
+func (h lruVictimHeap) Len() int           { return len(h.entries) }
+func (h lruVictimHeap) Less(i, j int) bool { return h.entries[i].key.less(h.entries[j].key) }
+func (h lruVictimHeap) Swap(i, j int)      { h.entries[i], h.entries[j] = h.entries[j], h.entries[i] }
+func (h *lruVictimHeap) Push(x any)        { h.entries = append(h.entries, x.(lruHeapEntry)) }
+func (h *lruVictimHeap) Pop() any {
+	n := len(h.entries) - 1
+	x := h.entries[n]
+	h.entries[n] = lruHeapEntry{}
+	h.entries = h.entries[:n]
+	return x
+}
+
+func (t *Tree) lruLeafKey(n *node) (victimKey, bool) {
+	if n.refs > 0 || n.IsComputing() || t.isNodePinnedOrImmune(n) {
+		return victimKey{}, false
+	}
+	k := (lruStrategy{}).Priority(n)
+	if seg, ok := t.nodeTierSeg(n); ok {
+		k.seg = seg
+	}
+	return k, k.seg < 3
+}
+
+func (t *Tree) buildLRUVictimHeap() *lruVictimHeap {
+	h := &lruVictimHeap{clock: t.clock}
+	var stack []*node
+	t.forEachRoot(func(r *node) {
+		for _, c := range r.children {
+			stack = append(stack, c)
+		}
+	})
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if len(n.children) > 0 {
+			for _, c := range n.children {
+				stack = append(stack, c)
+			}
+			continue
+		}
+		h.candidates++
+		if k, ok := t.lruLeafKey(n); ok {
+			h.entries = append(h.entries, lruHeapEntry{n, k})
+		} else {
+			h.locked++
+		}
+	}
+	heap.Init(h)
+	return h
+}
+
+func (h *lruVictimHeap) victim(t *Tree) (*node, bool) {
+	if t.clock != h.clock {
+		return nil, false
+	}
+	if len(h.entries) == 0 {
+		t.recordEvictChoice("lru", h.candidates, h.locked, nil)
+		return nil, true
+	}
+	// Every equal-minimum descendant has an equal-minimum child on its path.
+	// Detecting these two children is enough; do not replace the rescan's
+	// first-seen tie behavior with a new arbitrary heap order (warm recency=0).
+	k := h.entries[0].key
+	if len(h.entries) > 1 && h.entries[1].key == k || len(h.entries) > 2 && h.entries[2].key == k {
+		return nil, false
+	}
+	v := heap.Pop(h).(lruHeapEntry).n
+	t.recordEvictChoice("lru", h.candidates, h.locked, v)
+	h.candidates--
+	return v, true
+}
+
+func (h *lruVictimHeap) addLeaf(t *Tree, n *node) {
+	if n == nil || n.parent == nil || len(n.children) > 0 {
+		return
+	}
+	h.candidates++
+	if k, ok := t.lruLeafKey(n); ok {
+		heap.Push(h, lruHeapEntry{n, k})
+	} else {
+		h.locked++
 	}
 }
 

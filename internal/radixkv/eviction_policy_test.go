@@ -2,6 +2,8 @@ package radixkv
 
 import (
 	"math"
+	"math/rand"
+	"reflect"
 	"testing"
 )
 
@@ -396,5 +398,123 @@ func TestEvictionStrategyFIFOFILOVictimOrder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// heapRescanLRU uses the existing per-victim selector as the parity oracle. Its
+// concrete type deliberately differs from the pure-LRU optimized strategy.
+type heapRescanLRU struct{}
+
+func (heapRescanLRU) Name() string               { return "lru" }
+func (heapRescanLRU) Priority(n *node) victimKey { return (lruStrategy{}).Priority(n) }
+
+// TestEvictToBudgetHeapMatchesRescanOrder compares real budget-pressure victim
+// sequences, including newly exposed parents, not a second copy of the algorithm.
+// fak-test:runtime fast est=10ms lane=default
+func TestEvictToBudgetHeapMatchesRescanOrder(t *testing.T) {
+	makeTree := func(rescan bool) *Tree {
+		tree := New(0)
+		if rescan {
+			tree.strategy = heapRescanLRU{}
+		}
+		rng := rand.New(rand.NewSource(26))
+		reqs := make([][]int, 40)
+		for i := range reqs {
+			// Pairs share a prefix under each namespace, so deleting both
+			// leaves exposes an older parent for the next victim selection.
+			reqs[i] = []int{100 + i/4, 1000 + i, 2000 + rng.Intn(1000), 3000 + i}
+			ns := "a"
+			if i%2 == 1 {
+				ns = "b"
+			}
+			b, m := tree.LookupNS(ns, reqs[i])
+			leaf := tree.Insert(b, reqs[i][m:], nil)
+			if i%7 == 0 {
+				tree.SetNodeTier(leaf, Tier1ActiveSubagent)
+			}
+			if i%11 == 0 {
+				tree.SetNodeTier(leaf, Tier3Probationary)
+			}
+			tree.Done(leaf)
+		}
+		for _, i := range rng.Perm(len(reqs)) {
+			ns := "a"
+			if i%2 == 1 {
+				ns = "b"
+			}
+			n, _ := tree.LookupNS(ns, reqs[i])
+			tree.Done(n)
+		}
+		tree.PinPrefixNS("a", reqs[0])
+		tree.LookupNS("b", reqs[5]) // retain a real leaf lease throughout the pass
+		tree.WarmInsertNS("warm", []int{800, 801, 802}, nil)
+		flight, leader := tree.RegisterFlightNS("pending", []int{900, 901, 902})
+		if !leader {
+			t.Fatal("expected fresh flight")
+		}
+		tree.Done(flight) // still computing, even with no active leaf lease
+		return tree
+	}
+	sequence := func(tree *Tree) []thrashRecord {
+		out := make([]thrashRecord, tree.thrashCount)
+		for i := range out {
+			out[i] = tree.thrashRing[(tree.thrashHead+i)%thrashCap]
+		}
+		return out
+	}
+	fast, slow := makeTree(false), makeTree(true)
+	fast.SetRetention(0)
+	slow.SetRetention(0)
+	got, want := sequence(fast), sequence(slow)
+	if len(got) < 20 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("multi-victim sequence differs: got %v want %v", got, want)
+	}
+	if !reflect.DeepEqual(fast.Stats(), slow.Stats()) {
+		t.Fatalf("victim/locked telemetry differs: got %+v want %+v", fast.Stats(), slow.Stats())
+	}
+	parents := 0
+	for _, v := range got {
+		if v.tokens == 1 {
+			parents++
+		}
+	}
+	if parents == 0 {
+		t.Fatal("fixture did not exercise exposed parent eviction")
+	}
+	if fast.MatchLenNS("a", []int{100, 1000}) == 0 {
+		t.Fatal("pinned branch was evicted")
+	}
+	if fast.MatchLenNS("warm", []int{800, 801, 802}) != 0 {
+		t.Fatal("warm leaf survived keep-none")
+	}
+	if fast.Stats().LastEvictLocked < 3 {
+		t.Fatal("pin, live lease and computing leaf must remain locked")
+	}
+
+	// The common one-victim case keeps the existing selector; compare its
+	// output and telemetry without requiring a heap or a new instrumentation hook.
+	a, b := New(0), New(0)
+	b.strategy = heapRescanLRU{}
+	for i := 0; i < 3; i++ {
+		touchPure(a, distinctReq(i, 10))
+		touchPure(b, distinctReq(i, 10))
+	}
+	a.SetRetention(20)
+	b.SetRetention(20)
+	if !reflect.DeepEqual(sequence(a), sequence(b)) || !reflect.DeepEqual(a.Stats(), b.Stats()) {
+		t.Fatal("single-victim parity changed")
+	}
+
+	// Equal warm priorities deliberately keep rescan semantics rather than
+	// invent a heap tie order. Only the demanded leaf may survive this trim.
+	ties := New(0)
+	demand := distinctReq(10, 10)
+	touchPure(ties, demand)
+	for i := 0; i < 3; i++ {
+		ties.WarmInsert(distinctReq(20+i, 3), nil)
+	}
+	ties.SetRetention(10)
+	if ties.MatchLen(demand) != 10 || ties.Stats().Evictions != 3 {
+		t.Fatal("tied warm leaves displaced demand")
 	}
 }
