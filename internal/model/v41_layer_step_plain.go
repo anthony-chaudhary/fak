@@ -235,12 +235,12 @@ func (st *v41PlainLayerStep) collapseMHC(attnNorm, mixScale, mixBase []float32) 
 			input = append(input, stream...)
 		}
 	}
-	projectMHC := m.v41MHCProjector(l, H, st.eps, mhcFlat, mhcTransposed, scratch)
+	projectMHC := m.v41MHCProjectorObserved(l, H, st.eps, mhcFlat, mhcTransposed, scratch, scratch.v41StepMHCObserver())
 	mixes, err := projectMHC(input)
 	if err != nil {
 		return err
 	}
-	st.mix, err = v41MHCSplitOn(st.mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
+	st.mix, err = v41MHCSplitOnObserved(st.mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), scratch.v41StepMHCObserver())
 	if err != nil {
 		return err
 	}
@@ -255,10 +255,10 @@ func (st *v41PlainLayerStep) collapseMHC(attnNorm, mixScale, mixBase []float32) 
 		pre = scratch.mhcCarry.pre[0]
 	}
 	if st.mhcDevice != nil {
-		st.collapsed, err = st.mhcDevice.preBF16(l, streams4, pre)
+		st.collapsed, err = v41MHCPreBF16OnObserved(st.mhcDevice, l, streams4, pre, scratch.v41StepMHCObserver())
 		return err
 	}
-	st.collapsed, err = v41MHCPre(streams4, pre)
+	st.collapsed, err = v41MHCPreObserved(streams4, pre, scratch.v41StepMHCObserver())
 	if err != nil {
 		return v41StageErr(v41StageMHC, l, err)
 	}
@@ -506,14 +506,14 @@ func (st *v41PlainLayerStep) postMix(moe []float32, posted bool) ([][]float32, e
 		}
 		return nil, st.resident.finishLayer(st.l, [][]float32{moe})
 	case st.full:
-		return v41MHCPostBF16On(st.mhcDevice, st.l, moe, st.ffnResidual, st.ffnMix)
+		return v41MHCPostBF16OnObserved(st.mhcDevice, st.l, moe, st.ffnResidual, st.ffnMix, st.scratch.v41StepMHCObserver())
 	}
 	delta := make([]float32, st.m.Cfg.HiddenSize)
 	for i := range delta {
 		delta[i] = st.attnOut[i] + moe[i]
 	}
 	residual := [][]float32{st.collapsed, st.collapsed, st.collapsed, st.collapsed}
-	return v41MHCPost(delta, residual, st.mix.post, st.mix.comb)
+	return v41MHCPostObserved(delta, residual, st.mix.post, st.mix.comb, st.scratch.v41StepMHCObserver())
 }
 
 // commitKV appends the projected KV row once: position 0 seeds the empty state

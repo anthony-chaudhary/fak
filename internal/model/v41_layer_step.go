@@ -361,22 +361,22 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 				input = append(input, stream...)
 			}
 		}
-		projectMHC := m.v41MHCProjector(l, H, eps, mhcFlat, mhcTransposed, scratch)
+		projectMHC := m.v41MHCProjectorObserved(l, H, eps, mhcFlat, mhcTransposed, scratch, scratch.v41StepMHCObserver())
 		mixes, err := projectMHC(input)
 		if err != nil {
 			return v41RoleAttentionContinuation{}, err
 		}
-		mix, err = v41MHCSplitOn(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg))
+		mix, err = v41MHCSplitOnObserved(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), scratch.v41StepMHCObserver())
 		if err != nil {
 			return v41RoleAttentionContinuation{}, err
 		}
 		if mhcDevice != nil {
-			collapsed, err = mhcDevice.preBF16(l, streams, scratch.mhcCarry.pre[0])
+			collapsed, err = v41MHCPreBF16OnObserved(mhcDevice, l, streams, scratch.mhcCarry.pre[0], scratch.v41StepMHCObserver())
 			if err != nil {
 				return v41RoleAttentionContinuation{}, err
 			}
 		} else {
-			collapsed, err = v41MHCPre(streams, scratch.mhcCarry.pre[0])
+			collapsed, err = v41MHCPreObserved(streams, scratch.mhcCarry.pre[0], scratch.v41StepMHCObserver())
 			if err != nil {
 				return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, err)
 			}
@@ -719,7 +719,7 @@ func (m *Model) prepareV41LayerStepRoleFinishInto(l, pos int, x []float32, strea
 			scratch.mhcCarry.nextLayer++
 			return nil
 		}
-		next, err := v41MHCPostBF16On(scratch.mhcCarry.device, l, moe, ffnResidual, ffnMix)
+		next, err := v41MHCPostBF16OnObserved(scratch.mhcCarry.device, l, moe, ffnResidual, ffnMix, scratch.v41StepMHCObserver())
 		if err != nil {
 			return v41StageErr(v41StageMHC, l, err)
 		}
