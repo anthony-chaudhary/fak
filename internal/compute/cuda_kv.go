@@ -5,6 +5,7 @@ package compute
 /*
 #include <stdlib.h>
 #include "cuda_backend.h"
+#include "cuda_kv_precision.h"
 */
 import "C"
 
@@ -30,10 +31,27 @@ var graphKVFitWarned atomic.Bool
 // cudaMalloc) when it fits the free device memory; every other session stays growable and
 // runs uncaptured (GraphCaptureReady reports false).
 func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
+	dtype := F32
+	switch cfg.Precision {
+	case KVPrecisionF32:
+	case KVPrecisionF16:
+		dtype = F16
+	case KVPrecisionBF16:
+		dtype = BF16
+	default:
+		panic(fmt.Sprintf("cuda: unrealized KV precision %s", cfg.Precision))
+	}
+	if dtype != F32 && (cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 || cfg.NumKVHeads > 2147483647/cfg.HeadDim) {
+		panic("cuda: narrowed KV row exceeds native element bound")
+	}
 	k := &cudaKV{be: c, cfg: cfg}
 	k.K = make([]dslice, cfg.NumLayers)
 	k.Kraw = make([]dslice, cfg.NumLayers)
 	k.V = make([]dslice, cfg.NumLayers)
+	for l := range k.K {
+		k.K[l].dtype = dtype
+		k.V[l].dtype = dtype
+	}
 	free := FreeUnknown
 	if graphEnabled && cfg.GraphCapture {
 		// Unlocked query: RestoreKVFromHost calls NewKV under cudaMu, and cudaMemGetInfo
@@ -68,6 +86,11 @@ func (k *cudaKV) GraphCaptureReady() bool { return k != nil && k.maxPos > 0 }
 // Native free returns device allocations to the pool; it does not prove physical
 // reclamation or recovery of a poisoned CUDA context.
 func (k *cudaKV) preallocateGraphWithOperations(capF int, alloc func(int, string) unsafe.Pointer, release func(unsafe.Pointer)) {
+	for _, row := range k.K {
+		if row.dtype != F32 {
+			cudaKVElements(capF)
+		}
+	}
 	complete := false
 	defer func() {
 		if complete {
@@ -85,9 +108,9 @@ func (k *cudaKV) preallocateGraphWithOperations(capF int, alloc func(int, string
 		})
 	}()
 	for l := range k.K {
-		k.K[l] = dslice{ptr: alloc(capF*F32.Bytes(), "kv-key-prealloc layer "+itoaC(l)), cap: capF}
+		k.K[l] = dslice{ptr: alloc(capF*k.K[l].dtype.Bytes(), "kv-key-prealloc layer "+itoaC(l)), cap: capF, dtype: k.K[l].dtype}
 		k.Kraw[l] = dslice{ptr: alloc(capF*F32.Bytes(), "kv-pre-rope-key-prealloc layer "+itoaC(l)), cap: capF}
-		k.V[l] = dslice{ptr: alloc(capF*F32.Bytes(), "kv-value-prealloc layer "+itoaC(l)), cap: capF}
+		k.V[l] = dslice{ptr: alloc(capF*k.V[l].dtype.Bytes(), "kv-value-prealloc layer "+itoaC(l)), cap: capF, dtype: k.V[l].dtype}
 	}
 	complete = true
 }
@@ -103,9 +126,16 @@ func (c *cudaBackend) dallocKV(nbytes int, site string) *cudaBuf {
 type dslice struct {
 	ptr      unsafe.Pointer
 	len, cap int
+	dtype    Dtype // F32 zero value preserves existing callers
 }
 
 func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, site string) {
+	if d.dtype != F32 {
+		cudaKVElements(nFloats)
+		if d.len < 0 || d.len > 2147483647-nFloats {
+			panic("cuda: narrowed KV append exceeds native element bound")
+		}
+	}
 	if d.len+nFloats > d.cap {
 		if c.capturing {
 			// Growing allocates, which an open capture forbids; refuse before the
@@ -113,9 +143,12 @@ func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, 
 			panic(graphKVGrowError(site))
 		}
 		ncap := d.cap*2 + nFloats
-		np := c.dallocKV(ncap*F32.Bytes(), site).ptr
+		if d.dtype != F32 && ncap > 2147483647 {
+			ncap = d.len + nFloats
+		}
+		np := c.dallocKV(ncap*d.dtype.Bytes(), site).ptr
 		if d.len > 0 {
-			C.fcuda_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*4))
+			C.fcuda_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*d.dtype.Bytes()))
 		}
 		if d.ptr != nil {
 			C.fcuda_free(d.ptr)
@@ -125,7 +158,11 @@ func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, 
 	}
 	// kernel-form append (scalar offset) instead of a cudaMemcpy to a moving pointer, so a
 	// captured decode graph stays reusable via cudaGraphExecUpdate as the cache grows.
-	C.fcuda_kv_write((*C.float)(d.ptr), (*C.float)(srcPtr), C.int(d.len), C.int(nFloats))
+	if d.dtype == F32 {
+		C.fcuda_kv_write((*C.float)(d.ptr), (*C.float)(srcPtr), C.int(d.len), C.int(nFloats))
+	} else {
+		cudaKVCheck(C.fcuda_kv_store_typed(d.ptr, (*C.float)(srcPtr), C.int(d.len), C.int(nFloats), C.int(d.dtype)))
+	}
 	d.len += nFloats
 }
 
@@ -142,15 +179,23 @@ type cudaKV struct {
 func (k *cudaKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
 func (k *cudaKV) ResidentBytes() int64 {
-	return kvResidentBytes(len(k.K), len(k.pos), func(layer int) (int, int, int) {
-		return k.K[layer].len, k.Kraw[layer].len, k.V[layer].len
-	})
+	bytes := int64(len(k.pos)) * 8
+	for l := range k.K {
+		for _, d := range []dslice{k.K[l], k.Kraw[l], k.V[l]} {
+			bytes += int64(d.len) * int64(d.dtype.Bytes())
+		}
+	}
+	return bytes
 }
 
 func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	w := k.stride()
+	k.preflightTypedAppend(layer, w)
+	if kRaw.Dtype != F32 || kRoPE.Dtype != F32 || v.Dtype != F32 {
+		panic("cuda: KV append requires F32 source rows")
+	}
 	// Preflight all three sources before the first append so a poisoned second or
 	// third operand cannot leave a partially advanced KV row.
 	kRawBuf := k.be.cudaBufForSubmit(kRaw)
@@ -171,7 +216,7 @@ func (k *cudaKV) Pos() []int { return append([]int(nil), k.pos...) }
 func (k *cudaKV) KeysView(layer int) Tensor {
 	w := k.stride()
 	n := k.K[layer].len / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4, class: MemoryKVCache})
+	return makeTensor(k.be, k.K[layer].dtype, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * k.K[layer].dtype.Bytes(), class: MemoryKVCache})
 }
 
 // ValuesView returns a device handle onto the layer's cached values as a flat [pos, nKV*hd]
@@ -179,7 +224,7 @@ func (k *cudaKV) KeysView(layer int) Tensor {
 func (k *cudaKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := k.V[layer].len / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4, class: MemoryKVCache})
+	return makeTensor(k.be, k.V[layer].dtype, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * k.V[layer].dtype.Bytes(), class: MemoryKVCache})
 }
 
 // Evict compacts the cache ON-GPU — no host round-trip (#479). For every layer it shifts
@@ -212,10 +257,16 @@ func (k *cudaKV) Evict(from, n int) int {
 	// overlapping regions is undefined, so the tail is staged through disjoint VRAM. Stream
 	// ordering (everything on g_stream) serializes the per-layer reuse correctly.
 	var scratch unsafe.Pointer
-	if tailFloats > 0 {
-		scratch = unsafe.Pointer(C.fcuda_malloc(C.size_t(tailFloats * 4)))
+	scratchFloats := tailFloats
+	if k.cfg.Precision == KVPrecisionF16 || k.cfg.Precision == KVPrecisionBF16 {
+		if scratchFloats < w {
+			scratchFloats = w
+		}
+	}
+	if scratchFloats > 0 {
+		scratch = unsafe.Pointer(C.fcuda_malloc(C.size_t(scratchFloats * 4)))
 		if scratch == nil {
-			panic(&DeviceAllocError{Bytes: tailFloats * 4, Site: "evict-scratch", Class: MemoryScratchpad})
+			panic(&DeviceAllocError{Bytes: scratchFloats * 4, Site: "evict-scratch", Class: MemoryScratchpad})
 		}
 	}
 	for l := 0; l < k.cfg.NumLayers; l++ {
@@ -227,9 +278,16 @@ func (k *cudaKV) Evict(from, n int) int {
 				continue // prefix survivor: position unchanged, post-RoPE K stays byte-for-byte
 			}
 			// K[i] <- Kraw[i] (disjoint buffers, no overlap) then one in-place rotation at i.
-			kRow := offsetF(k.K[l].ptr, i*w)
-			C.fcuda_d2d(kRow, offsetF(k.Kraw[l].ptr, i*w), C.size_t(w*4))
-			C.fcuda_rope_f32((*C.float)(kRow), C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+			kRow := unsafe.Add(k.K[l].ptr, i*w*k.K[l].dtype.Bytes())
+			if k.K[l].dtype == F32 {
+				C.fcuda_d2d(kRow, offsetF(k.Kraw[l].ptr, i*w), C.size_t(w*4))
+				C.fcuda_rope_f32((*C.float)(kRow), C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+			} else {
+				// tailFloats >= w whenever a moved survivor exists.
+				C.fcuda_d2d(scratch, offsetF(k.Kraw[l].ptr, i*w), C.size_t(w*4))
+				C.fcuda_rope_f32((*C.float)(scratch), C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+				cudaKVCheck(C.fcuda_kv_store_typed(kRow, (*C.float)(scratch), 0, C.int(w), C.int(k.K[l].dtype)))
+			}
 		}
 	}
 	if scratch != nil {
@@ -256,8 +314,8 @@ func offsetF(p unsafe.Pointer, nFloats int) unsafe.Pointer {
 // host. Both copies ride g_stream, so they stay ordered against each other and the re-RoPE.
 func (c *cudaBackend) compactDS(d *dslice, fromF, endF, tailFloats int, scratch unsafe.Pointer) {
 	if tailFloats > 0 {
-		C.fcuda_d2d(scratch, offsetF(d.ptr, endF), C.size_t(tailFloats*4))
-		C.fcuda_d2d(offsetF(d.ptr, fromF), scratch, C.size_t(tailFloats*4))
+		C.fcuda_d2d(scratch, unsafe.Add(d.ptr, endF*d.dtype.Bytes()), C.size_t(tailFloats*d.dtype.Bytes()))
+		C.fcuda_d2d(unsafe.Add(d.ptr, fromF*d.dtype.Bytes()), scratch, C.size_t(tailFloats*d.dtype.Bytes()))
 	}
 	d.len -= endF - fromF
 }
@@ -303,12 +361,13 @@ func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, cop
 		}
 	}()
 	cp := func(dst, src *dslice, site string) {
+		dst.dtype = src.dtype
 		if src.len == 0 {
 			return
 		}
-		np := alloc(src.len*F32.Bytes(), site)
+		np := alloc(src.len*src.dtype.Bytes(), site)
 		dst.ptr, dst.len, dst.cap = np, src.len, src.len
-		copyDevice(np, src.ptr, src.len*F32.Bytes())
+		copyDevice(np, src.ptr, src.len*src.dtype.Bytes())
 	}
 	for l := range k.K {
 		cp(&n.K[l], &k.K[l], "kv-key-clone layer "+itoaC(l))
@@ -331,7 +390,14 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 	copyDS := func(src dslice) []float32 {
 		out := make([]float32, src.len)
 		if len(out) > 0 {
-			C.fcuda_d2h(unsafe.Pointer(&out[0]), src.ptr, C.size_t(len(out)*F32.Bytes()))
+			if src.dtype == F32 {
+				C.fcuda_d2h(unsafe.Pointer(&out[0]), src.ptr, C.size_t(len(out)*F32.Bytes()))
+			} else {
+				ptr := k.be.dallocClass(src.len*4, MemoryScratchpad, "kv-snapshot-conversion").ptr
+				defer C.fcuda_free(ptr)
+				cudaKVCheck(C.fcuda_kv_load_typed((*C.float)(ptr), src.ptr, C.int(src.len), C.int(src.dtype)))
+				C.fcuda_d2h(unsafe.Pointer(&out[0]), ptr, C.size_t(src.len*4))
+			}
 			atomic.AddUint64(&k.be.fenceGen, 1)
 		}
 		return out
@@ -389,11 +455,21 @@ func (c *cudaBackend) RestoreKVFromHost(state KVHostSnapshot) (out KVStore, err 
 		if len(src) == 0 {
 			return
 		}
+		if dst.dtype != F32 {
+			cudaKVElements(len(src))
+		}
 		restoreCUDAKVAllocation(&dst.ptr, &dst.len, &dst.cap, len(src),
-			func() unsafe.Pointer { return c.dallocKV(len(src)*F32.Bytes(), site).ptr },
+			func() unsafe.Pointer { return c.dallocKV(len(src)*dst.dtype.Bytes(), site).ptr },
 			func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
 		)
-		C.fcuda_h2d(dst.ptr, unsafe.Pointer(&src[0]), C.size_t(len(src)*F32.Bytes()))
+		if dst.dtype == F32 {
+			C.fcuda_h2d(dst.ptr, unsafe.Pointer(&src[0]), C.size_t(len(src)*4))
+		} else {
+			ptr := c.dallocClass(len(src)*4, MemoryScratchpad, "kv-restore-conversion").ptr
+			defer C.fcuda_free(ptr)
+			C.fcuda_h2d(ptr, unsafe.Pointer(&src[0]), C.size_t(len(src)*4))
+			cudaKVCheck(C.fcuda_kv_store_typed(dst.ptr, (*C.float)(ptr), 0, C.int(len(src)), C.int(dst.dtype)))
+		}
 		dst.len = len(src)
 	}
 	for layer := range state.K {
@@ -435,4 +511,32 @@ func itoaC(n int) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// Typed KV launch errors are fatal after submission: callers must not replay a partially written cache.
+func cudaKVCheck(status C.int) {
+	if status != 0 {
+		panic(fmt.Sprintf("cuda: typed KV launch failed (%d)", int(status)))
+	}
+}
+
+func cudaKVElements(n int) C.int {
+	if n < 0 || uint64(n) > 2147483647 {
+		panic("cuda: narrowed KV exceeds native element bound")
+	}
+	return C.int(n)
+}
+
+// Bound every plane before the first append; the F32 shadow must not advance
+// before a narrowed attended plane discovers an unrepresentable native offset.
+func (k *cudaKV) preflightTypedAppend(layer, n int) {
+	if k.cfg.Precision != KVPrecisionF16 && k.cfg.Precision != KVPrecisionBF16 {
+		return
+	}
+	cudaKVElements(n)
+	for _, row := range []dslice{k.Kraw[layer], k.K[layer], k.V[layer]} {
+		if row.len < 0 || row.len > 2147483647-n {
+			panic("cuda: narrowed KV append exceeds native element bound")
+		}
+	}
 }

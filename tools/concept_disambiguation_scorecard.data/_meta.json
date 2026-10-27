@@ -11662,6 +11662,11 @@
           "category": "incidental",
           "reason": "Private CUDA launch eligibility predicate for residual plus normalization: checks row and width bounds, capture state, device zero, thread/shared-memory/grid limits. No user authorization, policy permission, capability token or maturity promise. Declines before allocation or enqueue.",
           "token": "fak_qwen35_residual_norm_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CUDA KV helper checks native integer element-offset bounds on three tensor planes before mutation. This is numerical storage geometry validation, not an authorization capability, policy preflight, access grant, or security decision.",
+          "token": "preflightTypedAppend"
         }
       ],
       "exclude": [
@@ -11877,6 +11882,7 @@
         "postureWorkProfile",
         "postures",
         "preflightServeBackendForward",
+        "preflightTypedAppend",
         "preflightV41EPOwnerELF",
         "preflightWithProbe",
         "printGuardLaunchPostures",

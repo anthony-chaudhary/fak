@@ -37,6 +37,11 @@ func (c *cudaBackend) qwen35SequenceAttentionPostprocessLocked(q, k, value, qWei
 	if kv == nil || kv.be != c || layer < 0 || layer >= len(kv.Kraw) || layer >= len(kv.K) || layer >= len(kv.V) {
 		return fail("KV cache does not own the requested compact attention layer")
 	}
+	// This fused writer has a fixed F32 ABI. Decline before mutation so the
+	// ordinary norm/RoPE plus typed append composition handles narrowed KV.
+	if kv.K[layer].dtype != F32 || kv.V[layer].dtype != F32 {
+		return Tensor{}, nil, false, nil
+	}
 	if err := validateQwen35CausalAttentionPanelGeometry(tokens, start, 24, kv.cfg.NumKVHeads, kv.cfg.HeadDim); err != nil {
 		return Tensor{}, nil, true, err
 	}

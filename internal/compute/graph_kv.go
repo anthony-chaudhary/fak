@@ -33,7 +33,11 @@ func GraphKVPreallocBytes(cfg KVConfig, positions int) int64 {
 	if positions <= 0 || cfg.NumLayers <= 0 || cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 {
 		return 0
 	}
-	return 3 * int64(cfg.NumLayers) * int64(positions) * int64(cfg.NumKVHeads) * int64(cfg.HeadDim) * int64(F32.Bytes())
+	bytesPerElement := int64(12)
+	if cfg.Precision == KVPrecisionF16 || cfg.Precision == KVPrecisionBF16 {
+		bytesPerElement = 8
+	}
+	return saturatingMulInt64(int64(cfg.NumLayers), int64(positions), int64(cfg.NumKVHeads), int64(cfg.HeadDim), bytesPerElement)
 }
 
 // GraphKVPrealloc is the fixed-capacity decision for one session's device KV.

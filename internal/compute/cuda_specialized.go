@@ -7,6 +7,7 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lstdc++ -lm
 #include <stdlib.h>
 #include "cuda_backend.h"
+#include "cuda_kv_precision.h"
 */
 import "C"
 
@@ -80,6 +81,13 @@ func (c *cudaBackend) attentionNaive(q Tensor, kv KVStore, layer int, grp int, s
 	w := nKV * hd
 	nPos := ck.K[layer].len / w
 	out, _ := c.devTr([]int{nH * hd}, F32)
+	if ck.K[layer].dtype != F32 {
+		if q.Dtype != F32 {
+			panic("cuda: typed KV attention requires F32 query")
+		}
+		cudaKVCheck(C.fcuda_kv_attention_typed(c.cf(q), ck.K[layer].ptr, ck.V[layer].ptr, c.cf(out), 1, C.int(nPos-1), cudaKVElements(nH), cudaKVElements(nKV), cudaKVElements(hd), C.float(scale), C.int(ck.K[layer].dtype)))
+		return out
+	}
 	C.fcuda_attention_f32(c.cf(q),
 		(*C.float)(ck.K[layer].ptr), (*C.float)(ck.V[layer].ptr),
 		c.cf(out), C.int(nPos), C.int(ck.maxPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))

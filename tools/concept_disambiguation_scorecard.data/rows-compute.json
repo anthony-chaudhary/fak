@@ -173,7 +173,8 @@
       "distinction": "Unlike attention score computation or backend dispatch, processes projected Q/K/V using the fixed 24-query/4-KV-head 256-dimension contract. It validates live pointer extents and rejects overlap before the single fused kernel; does not publish Go KV lengths.",
       "distinct_from": [
         "attnprefilldispatch",
-        "fvkqwen35attentionpostprocessf32"
+        "fvkqwen35attentionpostprocessf32",
+        "fcudakvattentiontyped"
       ],
       "aliases": [],
       "grounding": "fak_qwen35_attention_postprocess_f32",
@@ -318,6 +319,25 @@
       ],
       "aliases": [],
       "grounding": "fvk_qwen35_attention_qg_f32",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fcudakvattentiontyped",
+      "canonical": "fcuda_kv_attention_typed",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "CUDA device attention entrypoint reading F16 or BF16 position-major attended KV planes with F32 queries and online-softmax accumulators.",
+      "distinction": "Unlike fak_qwen35_attention_postprocess_f32, which normalizes and rotates projection rows while writing F32 KV, this entry reads already populated typed KV and produces grouped causal attention output; it does not mutate cache rows or normalize projections.",
+      "distinct_from": [
+        "fakqwen35attentionpostprocessf32"
+      ],
+      "aliases": [],
+      "grounding": "fcuda_kv_attention_typed",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

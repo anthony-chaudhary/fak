@@ -16,6 +16,9 @@ import (
 // NewKV creates an empty device-resident KV cache sized for cfg.NumLayers, with the
 // pre-RoPE keys, post-RoPE keys, and values each held in their own per-layer slices.
 func (v *vulkanBackend) NewKV(cfg KVConfig) KVStore {
+	if cfg.Precision == KVPrecisionF16 || cfg.Precision == KVPrecisionBF16 {
+		panic("compute: F16/BF16 KV storage is only realized by CUDA")
+	}
 	k := &vulkanKV{be: v, cfg: cfg}
 	k.K = make([]vslice, cfg.NumLayers)
 	k.Kraw = make([]vslice, cfg.NumLayers)

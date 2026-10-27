@@ -39,6 +39,9 @@ const (
 	// pre-RoPE K row F32 so Evict's single-rotation re-positioning stays exact. ~2x denser than
 	// f32, evict-correct by construction. The storage is MIXED (f32 + q8_0), hence StorageLabel.
 	KVPrecisionQ8
+	// CUDA attended K/V use 16-bit storage; exact eviction keeps Kraw F32.
+	KVPrecisionF16
+	KVPrecisionBF16
 )
 
 // String renders the tier as its short selector token ("f32" | "q8"), or "kvprec?" for an
@@ -47,6 +50,10 @@ func (p KVPrecision) String() string {
 	switch p {
 	case KVPrecisionF32:
 		return "f32"
+	case KVPrecisionF16:
+		return "f16"
+	case KVPrecisionBF16:
+		return "bf16"
 	case KVPrecisionQ8:
 		return "q8"
 	default:
@@ -59,7 +66,7 @@ func (p KVPrecision) String() string {
 // the pre-RoPE K row f32 and the attended K/V rows q8_0 — not a single uniform dtype.
 func (p KVPrecision) StorageLabel() string {
 	switch p {
-	case KVPrecisionQ8:
+	case KVPrecisionQ8, KVPrecisionF16, KVPrecisionBF16:
 		return "mixed"
 	default:
 		return F32.String()
@@ -73,10 +80,14 @@ func ParseKVPrecision(s string) (KVPrecision, error) {
 	switch s {
 	case "", "f32":
 		return KVPrecisionF32, nil
+	case "f16":
+		return KVPrecisionF16, nil
+	case "bf16":
+		return KVPrecisionBF16, nil
 	case "q8", "q8_0":
 		return KVPrecisionQ8, nil
 	default:
-		return KVPrecisionF32, fmt.Errorf("compute: unknown kv precision %q (want f32 | q8)", s)
+		return KVPrecisionF32, fmt.Errorf("compute: unknown kv precision %q (want f32 | q8 | f16 | bf16)", s)
 	}
 }
 
@@ -89,6 +100,8 @@ func (p KVPrecision) perTokenPerLayerBytes(elemsPerRow int64) int64 {
 		return 0
 	}
 	switch p {
+	case KVPrecisionF16, KVPrecisionBF16:
+		return saturatingMulInt64(elemsPerRow, 8) // F32 shadow + two 16-bit attended rows
 	case KVPrecisionQ8:
 		// pre-RoPE K stays f32 (exact evict re-positioning); post-RoPE K and V are q8_0. The
 		// "keep the pre-RoPE K row f32" decision is EXPRESSED through the shadow contract

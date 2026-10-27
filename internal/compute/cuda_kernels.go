@@ -5,6 +5,7 @@ package compute
 /*
 #include <stdint.h>
 #include "cuda_backend.h"
+#include "cuda_kv_precision.h"
 
 int fak_qwen35_embedding_gather_f32(
     const float *dEmbedding, const int *hIDs, int *dIDs, float *dOut,
@@ -261,7 +262,7 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 			if dst.cap >= needed {
 				continue
 			}
-			bytes, ok := qwen35GDNShapeBytes([]int{needed}, F32.Bytes())
+			bytes, ok := qwen35GDNShapeBytes([]int{needed}, dst.dtype.Bytes())
 			if !ok {
 				cleanup()
 				return &Qwen35SequenceError{Stage: "kv-reserve", Layer: layer, Reason: "KV capacity byte size overflow"}
@@ -276,7 +277,7 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 	}
 	for _, reservation := range reservations {
 		if reservation.dst.len > 0 {
-			C.fcuda_d2d(reservation.next, reservation.old, C.size_t(reservation.dst.len*F32.Bytes()))
+			C.fcuda_d2d(reservation.next, reservation.old, C.size_t(reservation.dst.len*reservation.dst.dtype.Bytes()))
 		}
 		reservation.dst.ptr = reservation.next
 		reservation.dst.cap = reservation.cap
@@ -311,7 +312,12 @@ func (c *cudaBackend) qwen35SequenceAppendKVLocked(kv *cudaKV, layer int, kRaw, 
 	}
 	n := tokens * width
 	for _, item := range items {
-		status := int(C.fak_qwen35_kv_write_f32((*C.float)(item.dst.ptr), c.cf(item.src), C.int(item.dst.len), C.int(n)))
+		status := 0
+		if item.dst.dtype == F32 {
+			status = int(C.fak_qwen35_kv_write_f32((*C.float)(item.dst.ptr), c.cf(item.src), C.int(item.dst.len), C.int(n)))
+		} else {
+			status = int(C.fcuda_kv_store_typed(item.dst.ptr, c.cf(item.src), C.int(item.dst.len), C.int(n), C.int(item.dst.dtype)))
+		}
 		if status != 0 {
 			C.fak_qwen35_sequence_sync()
 			return &Qwen35SequenceError{Stage: "kv-append", Layer: layer, Reason: fmt.Sprintf("%s CUDA status %d", item.name, status)}
@@ -339,7 +345,12 @@ func (c *cudaBackend) qwen35SequenceAttentionLocked(q Tensor, kv *cudaKV, layer,
 	if err != nil {
 		return Tensor{}, nil, err
 	}
-	status := int(C.fak_qwen35_causal_attention_panel_f32(c.cf(q), (*C.float)(kv.K[layer].ptr), (*C.float)(kv.V[layer].ptr), c.cf(out), C.int(tokens), C.int(prefix), C.int(heads), C.int(kv.cfg.NumKVHeads), C.int(kv.cfg.HeadDim), C.float(scale)))
+	status := 0
+	if kv.K[layer].dtype == F32 {
+		status = int(C.fak_qwen35_causal_attention_panel_f32(c.cf(q), (*C.float)(kv.K[layer].ptr), (*C.float)(kv.V[layer].ptr), c.cf(out), C.int(tokens), C.int(prefix), C.int(heads), C.int(kv.cfg.NumKVHeads), C.int(kv.cfg.HeadDim), C.float(scale)))
+	} else {
+		status = int(C.fcuda_kv_attention_typed(c.cf(q), kv.K[layer].ptr, kv.V[layer].ptr, c.cf(out), cudaKVElements(tokens), C.int(prefix), cudaKVElements(heads), cudaKVElements(kv.cfg.NumKVHeads), cudaKVElements(kv.cfg.HeadDim), C.float(scale), C.int(kv.K[layer].dtype)))
+	}
 	if status != 0 {
 		C.fak_qwen35_sequence_sync()
 		c.releaseTransientBuffers([]*cudaBuf{b})

@@ -503,6 +503,9 @@ func (c *cpuBackend) Argmax(logits Tensor) int { return argmaxF32(c.f32(logits))
 // ---- KV store (verbatim wrap of the model's flat row-major cache) ----------------
 
 func (c *cpuBackend) NewKV(cfg KVConfig) KVStore {
+	if cfg.Precision == KVPrecisionF16 || cfg.Precision == KVPrecisionBF16 {
+		panic("compute: F16/BF16 KV storage is only realized by CUDA")
+	}
 	return &cpuKV{
 		be:   c,
 		cfg:  cfg,

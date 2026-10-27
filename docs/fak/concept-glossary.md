@@ -1868,3 +1868,10 @@ Host prefill attention kernel sharing value traversal across three sibling query
 Qwen resident-Q4_K full-attention prefill adapter carrying builtin CPU producer provenance for reuse of dead interleaved QF storage as grouped-attention score scratch.
 
 **Distinct from:** Unlike prefillQwen35FullAttnLayerQ4K, whose wrapper always passes ownsQF=false, this private entry may loan only the existing QF length after joined Q/gate copies, only for builtin CPU provenance with MetalQ4K false and Backend nil. attnPrefillGQA3FDotInto independently admits shape, observer, worker and scratch-capacity constraints before writes; otherwise original attnPrefillDispatch remains. Unlike attnPrefillGQA3FDotInto, this adapter owns layer orchestration/provenance and not the grouped dot kernel; unlike generic attention dispatch it cannot infer ownership from arbitrary callbacks.
+
+
+### fcuda_kv_attention_typed
+
+CUDA device attention entrypoint reading F16 or BF16 position-major attended KV planes with F32 queries and online-softmax accumulators.
+
+**Distinct from:** Unlike fak_qwen35_attention_postprocess_f32, which normalizes and rotates projection rows while writing F32 KV, this entry reads already populated typed KV and produces grouped causal attention output; it does not mutate cache rows or normalize projections.

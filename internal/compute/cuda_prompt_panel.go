@@ -4,6 +4,7 @@ package compute
 
 /*
 #include "cuda_backend.h"
+#include "cuda_kv_precision.h"
 */
 import "C"
 
@@ -206,6 +207,10 @@ func (c *cudaBackend) PromptPanelAppendKV(kv KVStore, layer int, kRaw, kRoPE, v 
 	defer cudaMu.Unlock()
 	w := ck.stride()
 	n := tokens * w
+	ck.preflightTypedAppend(layer, n)
+	if kRaw.Dtype != F32 || kRoPE.Dtype != F32 || v.Dtype != F32 {
+		cudaPromptPanelFail("prompt-panel-kv-dtype", "KV append requires F32 source rows", 0)
+	}
 	if kRaw.Numel() != n || kRoPE.Numel() != n || v.Numel() != n {
 		cudaPromptPanelFail("prompt-panel-kv-geometry", "prompt panel KV rows do not match tokens x kv width", 0)
 	}
@@ -242,6 +247,13 @@ func (c *cudaBackend) PromptPanelAttention(q Tensor, kv KVStore, layer, tokens, 
 		cudaPromptPanelFail("prompt-panel-attention-geometry", "prompt panel attention query or cache length mismatch", 0)
 	}
 	out, _ := c.devTr([]int{tokens, nH * hd}, F32)
+	if ck.K[layer].dtype != F32 {
+		if q.Dtype != F32 {
+			panic("cuda: typed KV attention requires F32 query")
+		}
+		cudaKVCheck(C.fcuda_kv_attention_typed(c.cf(q), ck.K[layer].ptr, ck.V[layer].ptr, c.cf(out), cudaKVElements(tokens), cudaKVElements(start), cudaKVElements(nH), cudaKVElements(nKV), cudaKVElements(hd), C.float(scale), C.int(ck.K[layer].dtype)))
+		return out
+	}
 	if rc := int(C.fcuda_causal_attention_panel_f32(c.cf(q), (*C.float)(ck.K[layer].ptr), (*C.float)(ck.V[layer].ptr),
 		c.cf(out), C.int(tokens), C.int(start), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))); rc != 0 {
 		cudaPromptPanelFail("prompt-panel-attention-launch", "prompt panel attention launch failed", rc)

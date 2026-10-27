@@ -123,6 +123,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/qwen35_residual_norm.cuh"
 #include "cuda/fattn_mma_hd256.cuh"
 #include "cuda/attention.cuh"
+#include "cuda/kv_precision.cuh"
 #include "cuda/spec_graph.cuh"
 #include "cuda/weight_formats.cuh"
 #include "cuda/q4k_fp8lt.cuh"

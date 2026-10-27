@@ -829,6 +829,9 @@ func (c *metalBackend) Argmax(logits Tensor) int {
 // ---- device-resident KV store ---------------------------------------------------
 
 func (c *metalBackend) NewKV(cfg KVConfig) KVStore {
+	if cfg.Precision == KVPrecisionF16 || cfg.Precision == KVPrecisionBF16 {
+		panic("compute: F16/BF16 KV storage is only realized by CUDA")
+	}
 	return &metalKV{
 		be:   c,
 		cfg:  cfg,
