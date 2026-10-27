@@ -9,7 +9,9 @@ import (
 )
 
 func TestSessionIndexHealthMissingDefaultIndexUsesStatusContract(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	var out, errb bytes.Buffer
 	if code := runSessionIndexHealth(&out, &errb, nil); code != 0 {
 		t.Fatalf("code=%d err=%s", code, errb.String())

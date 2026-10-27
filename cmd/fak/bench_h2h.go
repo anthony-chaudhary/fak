@@ -57,6 +57,7 @@ func runBenchH2HRun(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", "", "model id sent to every arm (required)")
 	host := fs.String("host", "", "machine label recorded on every row (default: hostname)")
 	runID := fs.String("run-id", "", "run id (default: UTC timestamp)")
+	speculative := fs.String("speculative", "0,2", "requested draft-cap matrix (default 0,2); server-default omits control; requires a server configured with a drafter; execution evidence may remain unknown")
 	cold := fs.String("cold", "512,2048,8192", "comma-separated cold prompt sizes in tokens (empty skips)")
 	reps := fs.Int("reps", 3, "repetitions per cold size, decode run, and multi-turn conversation")
 	decode := fs.Int("decode", 256, "max tokens for the decode scenario (0 skips)")
@@ -78,8 +79,14 @@ func runBenchH2HRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak bench h2h run: --model and at least one --arm are required")
 		return 2
 	}
+	modes, err := h2hbench.ParseSpeculativeModes(*speculative)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 	cfg := h2hbench.Config{
-		RunID: *runID, Host: *host, Model: *model, Reps: *reps, DecodeTokens: *decode, Turns: *turns,
+		SpeculativeModes: modes,
+		RunID:            *runID, Host: *host, Model: *model, Reps: *reps, DecodeTokens: *decode, Turns: *turns,
 		SystemTokens: *system, TurnTokens: *turnTokens, AnswerTokens: *answer, Timeout: *timeout,
 		Client: &http.Client{}, DisableThink: !*keepThinking, Progress: stderr, SlotsURL: *slots,
 	}

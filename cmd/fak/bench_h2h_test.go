@@ -42,8 +42,15 @@ func TestBenchH2HRunThenReport(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("report json: %v\n%s", err, out.String())
 	}
-	if rep.Schema != h2hbench.ReportSchema || rep.RunID != "r1" || rep.Rows != 2+2+4 {
+	if rep.Schema != h2hbench.ReportSchema || rep.RunID != "r1" || rep.Rows != 2*(2+2+4) {
 		t.Fatalf("report = %+v", rep)
+	}
+	seen := map[string]bool{}
+	for _, cell := range rep.Cells {
+		seen[cell.RequestedSpeculation] = true
+	}
+	if !seen["0"] || !seen["2"] || len(seen) != 2 {
+		t.Fatalf("default requested modes: %v", seen)
 	}
 	if code := runBenchH2H(&out, &errb, []string{"run", "--model", "m"}); code != 2 {
 		t.Fatalf("missing --arm must exit 2, got %d", code)

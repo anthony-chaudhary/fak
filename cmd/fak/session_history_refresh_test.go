@@ -15,6 +15,7 @@ import (
 func TestSessionHistoryDefaultPathRefreshReadAndStatus(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	codex := filepath.Join(home, ".codex", "sessions")
 	if err := os.MkdirAll(codex, 0755); err != nil {
 		t.Fatal(err)
