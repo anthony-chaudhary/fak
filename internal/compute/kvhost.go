@@ -129,7 +129,8 @@ func RestoreKVFromHost(be Backend, state KVHostSnapshot) (KVStore, error) {
 	installed := false
 	defer func() {
 		if !installed {
-			kv.Free()
+			// A failed attempt already has a primary panic or returned error.
+			releaseKVHostRestoreResource(&installed, kv.Free)
 		}
 	}()
 	stride := state.Config.NumKVHeads * state.Config.HeadDim
@@ -140,14 +141,16 @@ func RestoreKVFromHost(be Backend, state KVHostSnapshot) (KVStore, error) {
 				continue
 			}
 			func() {
+				complete := false
 				// Each successful upload owns a temporary even if a later upload panics.
 				raw := be.Upload(NewF32(be, []int{stride}, state.KRaw[layer][lo:hi]), F32)
-				defer be.Free(raw)
+				defer releaseKVHostRestoreResource(&complete, func() { be.Free(raw) })
 				rope := be.Upload(NewF32(be, []int{stride}, state.K[layer][lo:hi]), F32)
-				defer be.Free(rope)
+				defer releaseKVHostRestoreResource(&complete, func() { be.Free(rope) })
 				value := be.Upload(NewF32(be, []int{stride}, state.V[layer][lo:hi]), F32)
-				defer be.Free(value)
+				defer releaseKVHostRestoreResource(&complete, func() { be.Free(value) })
 				kv.AppendKV(layer, raw, rope, value, pos)
+				complete = true
 			}()
 		}
 	}
@@ -156,6 +159,21 @@ func RestoreKVFromHost(be Backend, state KVHostSnapshot) (KVStore, error) {
 	}
 	installed = true
 	return kv, nil
+}
+
+// releaseKVHostRestoreResource preserves an active body unwind or returned
+// error. A cleanup-only failure stays visible and leaves complete false so later
+// sibling defers cannot replace it. Each release is attempted once, including
+// when the primary unwind is panic(nil) or Goexit.
+func releaseKVHostRestoreResource(complete *bool, release func()) {
+	if !*complete {
+		defer func() { _ = recover() }()
+		release()
+		return
+	}
+	*complete = false
+	release()
+	*complete = true
 }
 
 func (k *cpuKV) SnapshotToHost() (KVHostSnapshot, error) {

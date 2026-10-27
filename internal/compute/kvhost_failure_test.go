@@ -18,10 +18,12 @@ func TestKVHostFallbackRestoreFailureReleasesOwnership(t *testing.T) {
 		V:      [][]float32{{5, 6}},
 	}
 	for _, tc := range []struct {
-		name        string
-		failUpload  int
-		failAppend  int
-		wrongLength bool
+		name         string
+		failUpload   int
+		failAppend   int
+		wrongLength  bool
+		cleanupAfter int
+		failKVFree   bool
 	}{
 		{name: "second upload", failUpload: 2},
 		{name: "third upload", failUpload: 3},
@@ -29,13 +31,20 @@ func TestKVHostFallbackRestoreFailureReleasesOwnership(t *testing.T) {
 		{name: "append after mutation", failAppend: 2},
 		{name: "length mismatch", wrongLength: true},
 		{name: "success transfers owner"},
+		{name: "upload failure survives cleanup failures", failUpload: 3, cleanupAfter: 3, failKVFree: true},
+		{name: "append failure survives cleanup failures", failAppend: 1, cleanupAfter: 3, failKVFree: true},
+		{name: "cleanup-only failure stays visible", cleanupAfter: 3, failKVFree: true},
+		{name: "length error survives KV cleanup failure", wrongLength: true, failKVFree: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fault := errors.New("injected restore failure")
+			fault := &DeviceAllocError{Bytes: 4, Site: "injected restore failure", Class: MemoryKVCache}
+			cleanupFault := errors.New("secondary restore cleanup failure")
 			be := &kvHostFailureBackend{
 				Backend: cpu(), fault: fault, failUpload: tc.failUpload,
 				failAppend: tc.failAppend, wrongLength: tc.wrongLength,
-				uploaded: map[Buffer]int{},
+				uploaded:     map[Buffer]int{},
+				cleanupFault: cleanupFault, cleanupAfter: tc.cleanupAfter, failKVFree: tc.failKVFree,
+				kvCleanupFault: errors.New("secondary KV owner cleanup failure"),
 			}
 			var out KVStore
 			var err error
@@ -44,9 +53,14 @@ func TestKVHostFallbackRestoreFailureReleasesOwnership(t *testing.T) {
 				defer func() { caught = recover() }()
 				out, err = RestoreKVFromHost(be, state)
 			}()
-			wantPanic := tc.failUpload != 0 || tc.failAppend != 0
-			if wantPanic && caught != fault || !wantPanic && caught != nil {
-				t.Fatalf("panic = %v, want original fault only on injected panic", caught)
+			var wantPanic any
+			if tc.failUpload != 0 || tc.failAppend != 0 {
+				wantPanic = fault
+			} else if tc.cleanupAfter > 0 {
+				wantPanic = cleanupFault
+			}
+			if caught != wantPanic {
+				t.Fatalf("panic = %v, want original failure %v", caught, wantPanic)
 			}
 			if (err != nil) != tc.wrongLength {
 				t.Fatalf("error = %v, want length error = %t", err, tc.wrongLength)
@@ -56,7 +70,7 @@ func TestKVHostFallbackRestoreFailureReleasesOwnership(t *testing.T) {
 					t.Fatalf("returned upload %p freed %d times, want once", buffer, freed)
 				}
 			}
-			if wantPanic || tc.wrongLength {
+			if wantPanic != nil || tc.wrongLength {
 				if out != nil || be.kv.freed != 1 {
 					t.Fatalf("failed restore published=%t KV frees=%d, want false/1", out != nil, be.kv.freed)
 				}
@@ -76,13 +90,17 @@ func TestKVHostFallbackRestoreFailureReleasesOwnership(t *testing.T) {
 // Embedding Backend deliberately hides cpuBackend's optional bulk restorer.
 type kvHostFailureBackend struct {
 	Backend
-	fault       error
-	failUpload  int
-	failAppend  int
-	wrongLength bool
-	uploads     int
-	uploaded    map[Buffer]int
-	kv          *kvHostFailureStore
+	fault          error
+	cleanupFault   error
+	kvCleanupFault error
+	cleanupAfter   int
+	failKVFree     bool
+	failUpload     int
+	failAppend     int
+	wrongLength    bool
+	uploads        int
+	uploaded       map[Buffer]int
+	kv             *kvHostFailureStore
 }
 
 func (b *kvHostFailureBackend) NewKV(cfg KVConfig) KVStore {
@@ -103,6 +121,9 @@ func (b *kvHostFailureBackend) Upload(t Tensor, as Dtype) Tensor {
 func (b *kvHostFailureBackend) Free(t Tensor) {
 	b.uploaded[t.Buf()]++
 	b.Backend.Free(t)
+	if b.cleanupAfter > 0 && b.uploads >= b.cleanupAfter {
+		panic(b.cleanupFault)
+	}
 }
 
 type kvHostFailureStore struct {
@@ -129,4 +150,7 @@ func (k *kvHostFailureStore) Len() int {
 func (k *kvHostFailureStore) Free() {
 	k.freed++
 	k.KVStore.Free()
+	if k.owner.failKVFree {
+		panic(k.owner.kvCleanupFault)
+	}
 }
