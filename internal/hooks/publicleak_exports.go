@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -51,7 +52,7 @@ func AuditPublicLeakTree(root string) (PublicLeakTreeReport, error) {
 	if err != nil {
 		return PublicLeakTreeReport{}, err
 	}
-	findings, mode := scanPublicLeakTree(t)
+	findings, mode := scanPublicLeakTreeFiles(t.Paths, oneShotPublicLeakTreeReader(t))
 	return PublicLeakTreeReport{OK: len(findings) == 0, Mode: mode, Count: len(findings), Findings: findings, Misses: findings}, nil
 }
 
@@ -80,31 +81,58 @@ func PublicLeakFindingLines(findings []Finding, where string) []string {
 	return lines
 }
 
+// oneShotPublicLeakTreeReader is for the fresh, exclusively owned tree in
+// AuditPublicLeakTree, not a tree shared with other hygiene gates. Keep the first
+// observation (including a failed read) until its final use: the sidecar can also
+// be tracked, and an unmerged index can list the same path more than once. Bodies
+// used only once need not stay reachable for the rest of the whole-tree scan.
+func oneShotPublicLeakTreeReader(t *TrackedTree) func(string) ([]byte, bool) {
+	remaining := make(map[string]int, len(t.Paths)+1)
+	remaining[privateNeedlesRel]++
+	for _, path := range t.Paths {
+		remaining[path]++
+	}
+	return func(path string) ([]byte, bool) {
+		body, ok := t.FileBytes(path)
+		remaining[path]--
+		if remaining[path] == 0 {
+			delete(t.fileCache, path)
+		}
+		return body, ok
+	}
+}
+
 func scanPublicLeakTree(t *TrackedTree) ([]Finding, string) {
+	return scanPublicLeakTreeFiles(t.Paths, t.FileBytes)
+}
+
+func scanPublicLeakTreeFiles(paths []string, fileBytes func(string) ([]byte, bool)) ([]Finding, string) {
 	mode := "shape-only"
 	var needles []string
-	if b, ok := t.FileBytes(privateNeedlesRel); ok {
+	if b, ok := fileBytes(privateNeedlesRel); ok {
 		needles = treeExportAuditNeedles(b)
 		if len(needles) > 0 {
 			mode = "full"
 		}
 	}
 	var findings []Finding
-	for _, f := range t.Paths {
+	for _, f := range paths {
 		norm := strings.ReplaceAll(f, "\\", "/")
 		if selfReferentialLeak[norm] {
 			continue
 		}
 		findings = append(findings, publicLeakLineFindings(norm, 0, norm, needles)...)
-		body, ok := t.FileBytes(f)
+		body, ok := fileBytes(f)
 		if !ok {
 			continue
 		}
-		if strings.ContainsRune(string(body), '\x00') {
+		if bytes.IndexByte(body, 0) >= 0 {
 			continue
 		}
-		for i, line := range strings.Split(string(body), "\n") {
-			findings = append(findings, publicLeakLineFindings(line, i+1, f, needles)...)
+		lineNo := 1
+		for line := range strings.SplitSeq(string(body), "\n") {
+			findings = append(findings, publicLeakLineFindings(line, lineNo, f, needles)...)
+			lineNo++
 		}
 	}
 	return findings, mode
