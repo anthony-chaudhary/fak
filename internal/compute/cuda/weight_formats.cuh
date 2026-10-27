@@ -193,7 +193,6 @@ extern "C" void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, cons
 #include <cublasLt.h>
 #include <stdint.h>
 
-static cublasLtHandle_t g_nvfp4_lt = nullptr;
 static uint64_t g_nvfp4_lt_calls = 0;
 static const size_t g_nvfp4_lt_workspace_bytes = (size_t)32 * 1024 * 1024;
 
@@ -272,8 +271,8 @@ extern "C" int fcuda_nvfp4_w4a4_preflight(size_t *library_version) {
     return FCUDA_NVFP4_LT_WORKSPACE_UNAVAILABLE;
   int capture = nvfp4_lt_capture_status();
   if (capture != FCUDA_NVFP4_LT_OK) return capture;
-  if (!g_nvfp4_lt) {
-    cublasStatus_t status = cublasLtCreate(&g_nvfp4_lt);
+  if (!g_cublas_lt) {
+    cublasStatus_t status = cublasLtCreate(&g_cublas_lt);
     if (status != CUBLAS_STATUS_SUCCESS) return nvfp4_lt_cublas_status(status);
   }
   return FCUDA_NVFP4_LT_OK;
@@ -349,7 +348,7 @@ extern "C" int fcuda_nvfp4_w4a4_f32(const uint8_t *dW,
       preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
       &g_nvfp4_lt_workspace_bytes, sizeof(g_nvfp4_lt_workspace_bytes)));
   NVFP4_LT_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      g_nvfp4_lt, op, wLayout, aLayout, cLayout, yLayout, preference,
+      g_cublas_lt, op, wLayout, aLayout, cLayout, yLayout, preference,
       8, candidates, &returned));
   for (int i = 0; i < returned; ++i) {
     if (candidates[i].state != CUBLAS_STATUS_SUCCESS) continue;
@@ -377,7 +376,7 @@ extern "C" int fcuda_nvfp4_w4a4_f32(const uint8_t *dW,
   status = FCUDA_NVFP4_LT_RUNTIME_UNSUPPORTED;
   for (int i = 0; i < viableCount; ++i) {
     FCUDA_TS("cublaslt_matmul", dim3(out, rows), cs = cublasLtMatmul(
-        g_nvfp4_lt, op, &alpha, dW, wLayout, dA, aLayout, &beta,
+        g_cublas_lt, op, &alpha, dW, wLayout, dA, aLayout, &beta,
         dY, cLayout, dY, yLayout, &candidates[viable[i]].algo,
         g_blas_workspace, g_nvfp4_lt_workspace_bytes, g_stream));
     if (cs == CUBLAS_STATUS_SUCCESS) {

@@ -43,6 +43,8 @@ func cudaGEMMError(op string, rc int, s cudaGEMMScratch) error {
 		return &DeviceAllocError{Bytes: s.split, Site: op + " gemm fp16 split scratch", Class: MemoryScratchpad}
 	case cudaQ4KPrefillArmRefused:
 		return cudaQ4KPrefillRefusal()
+	case cudaQ4KFP8LTRefused:
+		return &CUDAQ4KPrefillArmError{Arm: string(CUDAQ4KPrefillFP8LT), Err: ErrCUDAQ4KPrefillArmUnavailable}
 	}
 	return &CUDAOpError{Op: op, Site: "gemm-status", Msg: "gemm refused its arguments", Code: rc, Class: MemoryActivation}
 }

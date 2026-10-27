@@ -15,6 +15,7 @@
 #include "cuda_backend.h"
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include <cublasLt.h>
 #include <cuda_fp16.h>  /* __half + __float2half — the fp16 compute path (#484) */
 #include <float.h>
 #include <limits.h>
@@ -26,6 +27,7 @@
 #include <vector>
 
 static cublasHandle_t g_blas = nullptr;
+static cublasLtHandle_t g_cublas_lt = nullptr; // shared by explicit FP8 and NVFP4 arms
 static void *g_blas_workspace = nullptr; // explicit cuBLAS workspace so it never cudaMalloc's mid-capture (#969)
 static bool g_capture_open = false;      // true between fcuda_graph_begin and end/abort: arms the #969 dalloc guard
 static int g_graph_fence_test_fault = 0; // test hook: the next graph fence reports a replayed fault
@@ -121,4 +123,5 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/attention.cuh"
 #include "cuda/spec_graph.cuh"
 #include "cuda/weight_formats.cuh"
+#include "cuda/q4k_fp8lt.cuh"
 #include "cuda/peer_handoff.cuh"

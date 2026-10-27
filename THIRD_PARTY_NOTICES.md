@@ -1015,3 +1015,38 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## NVIDIA cuBLASLt FP8 sample
+
+The experimental Q4_K FP8 arm in `internal/compute/cuda/q4k_fp8lt.cuh` adapts the
+per-tensor scaling, matrix descriptor and vendor-GEMM flow from
+`cuBLASLt/LtFp8Matmul/sample_cublasLt_LtFp8Matmul.cu` at
+NVIDIA/CUDALibrarySamples revision `9b347f161cce5cd2a51a0406b140f2a2d81df024`.
+Source: https://github.com/NVIDIA/CUDALibrarySamples/blob/9b347f161cce5cd2a51a0406b140f2a2d81df024/cuBLASLt/LtFp8Matmul/sample_cublasLt_LtFp8Matmul.cu
+
+That revision carries Apache-2.0 in its source header and root LICENSE.md.
+No separate NOTICE exists in the root, cuBLASLt or sample directory. The Apache
+license is included in this repository LICENSE; the upstream header follows.
+
+Modified for Fak: Q4_K and activation staging, F32 output, shared handle and
+workspace, explicit stream, status returns, and sm_89/sm_90-only admission.
+No upstream executable or inference runtime is used.
+
+```text
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+```

@@ -16,7 +16,8 @@ const (
 	// CUDAQ4KPrefillMMQ is llama.cpp's int8 tensor-core Q4_K MMQ (cuda/q4k_mmq.cuh); it never
 	// expands the weight but quantizes the activation to int8 per 32 values.
 	CUDAQ4KPrefillMMQ CUDAQ4KPrefillArm = "mmq"
-	// CUDAQ4KPrefillFP8LT dequantizes to an FP8 transient and runs one cuBLASLt FP8 GEMM.
+	// CUDAQ4KPrefillFP8LT is experimental: both operands are rounded to per-tensor E4M3
+	// and one cuBLASLt GEMM accumulates to F32. Only sm_89/sm_90 are admitted.
 	CUDAQ4KPrefillFP8LT CUDAQ4KPrefillArm = "fp8lt"
 )
 
@@ -26,7 +27,8 @@ const CUDAQ4KPrefillEnv = "FAK_CUDA_Q4K_PREFILL"
 var (
 	ErrCUDAQ4KPrefillArmUnknown       = errors.New("unknown CUDA Q4_K prefill arm")
 	ErrCUDAQ4KPrefillArmUnimplemented = errors.New("CUDA Q4_K prefill arm is not implemented")
-	ErrCUDAQ4KPrefillArmArch          = errors.New("CUDA Q4_K prefill arm needs a newer GPU arch")
+	ErrCUDAQ4KPrefillArmUnavailable   = errors.New("CUDA Q4_K prefill arm is unavailable for this execution envelope")
+	ErrCUDAQ4KPrefillArmArch          = errors.New("CUDA Q4_K prefill arm is not supported on this GPU arch")
 )
 
 // CUDAQ4KPrefillArmError is the typed refusal of an arm. Err is one of the sentinels above. SM is
@@ -46,18 +48,19 @@ func (e *CUDAQ4KPrefillArmError) Error() string {
 
 func (e *CUDAQ4KPrefillArmError) Unwrap() error { return e.Err }
 
-// cudaQ4KPrefillArmSpec is one arm's C code (fcuda_set_q4k_prefill_arm), its lowest compute
-// capability, and whether the CUDA backend can run it yet.
+// cudaQ4KPrefillArmSpec is one arm's C code, architecture interval (maxSM=0 is
+// unbounded), and whether this source implements it. It is not a quality claim.
 type cudaQ4KPrefillArmSpec struct {
 	code        int
 	minSM       int
+	maxSM       int
 	implemented bool
 }
 
 var cudaQ4KPrefillArms = map[CUDAQ4KPrefillArm]cudaQ4KPrefillArmSpec{
 	CUDAQ4KPrefillCompensated: {code: 0, implemented: true},
-	CUDAQ4KPrefillMMQ:         {code: 1, minSM: 80, implemented: true}, // int8 m16n8k32 mma.sync
-	CUDAQ4KPrefillFP8LT:       {code: 2, minSM: 89},                    // FP8 tensor cores start at Ada
+	CUDAQ4KPrefillMMQ:         {code: 1, minSM: 80, implemented: true},            // int8 m16n8k32 mma.sync
+	CUDAQ4KPrefillFP8LT:       {code: 2, minSM: 89, maxSM: 90, implemented: true}, // per-tensor E4M3, not Blackwell block scaling
 }
 
 // cudaQ4KPrefillArmRefusedCode is the C arm code that makes every P >= 128 Q4_K GEMM return
@@ -76,14 +79,14 @@ func ParseCUDAQ4KPrefillArm(s string) (CUDAQ4KPrefillArm, error) {
 	return arm, nil
 }
 
-// CheckCUDAQ4KPrefillArm refuses an arm the device at compute capability sm cannot run. sm <= 0
-// skips the arch floor (no device arch known).
+// CheckCUDAQ4KPrefillArm refuses an arm outside its admitted architecture interval.
+// sm <= 0 skips that metadata check; the device launcher still checks the actual GPU.
 func CheckCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm, sm int) error {
 	spec, ok := cudaQ4KPrefillArms[arm]
 	switch {
 	case !ok:
 		return &CUDAQ4KPrefillArmError{Arm: string(arm), SM: sm, Err: ErrCUDAQ4KPrefillArmUnknown}
-	case sm > 0 && sm < spec.minSM:
+	case sm > 0 && (sm < spec.minSM || spec.maxSM > 0 && sm > spec.maxSM):
 		return &CUDAQ4KPrefillArmError{Arm: string(arm), SM: sm, Err: ErrCUDAQ4KPrefillArmArch}
 	case !spec.implemented:
 		return &CUDAQ4KPrefillArmError{Arm: string(arm), SM: sm, Err: ErrCUDAQ4KPrefillArmUnimplemented}

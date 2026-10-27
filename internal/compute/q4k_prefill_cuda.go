@@ -21,6 +21,9 @@ import (
 // cudaQ4KPrefillArmRefused is FCUDA_Q4K_PREFILL_ARM_REFUSED in cuda/quant_matmul.cuh.
 const cudaQ4KPrefillArmRefused = 80003
 
+// Runtime toolkit/shape/capture/heuristic refusal, not an alternative-arm decline.
+const cudaQ4KFP8LTRefused = 80005
+
 // cudaQ4KPrefillArm and cudaQ4KPrefillArmErr mirror the C arm; cudaQ4KPrefillArmMu guards them
 // so a GEMM status can be mapped to its refusal with or without cudaMu held.
 var (
@@ -37,6 +40,9 @@ func initCUDAQ4KPrefillArm(sm int) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "fak-cuda: q4k prefill arm=%s\n", arm)
+	if arm == CUDAQ4KPrefillFP8LT {
+		fmt.Fprintln(os.Stderr, "fak-cuda: fp8lt experimental scale=per-tensor operands=e4m3 output=f32; numerical qualification pending")
+	}
 }
 
 func applyCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm, err error) {
@@ -97,10 +103,25 @@ func (c *cudaBackend) q4kMMQLaunchesForTest() uint64 {
 	return uint64(C.fcuda_q4k_mmq_launch_count())
 }
 
+// q4kFP8LTLaunchesForTest counts accepted enqueues, not completed device work.
+func (c *cudaBackend) q4kFP8LTLaunchesForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_q4k_fp8lt_launch_count())
+}
+
 // cudaQ4KScratch is the scratch one Q4_K GEMM of rows rows allocates on the arm in use. The mmq
 // arm allocates its q8_1 activation (rows padded to 512 values, plus one 128-column tile). Its
 // stream-k fixup buffer depends on the SM count, so a miss there reports the activation bytes.
 func cudaQ4KScratch(out, in, rows int) cudaGEMMScratch {
+	if arm, err := CUDAQ4KPrefillArmInUse(); rows >= 128 && err == nil && arm == CUDAQ4KPrefillFP8LT {
+		padded := (rows + 15) / 16 * 16
+		bytes := out*in + padded*in + 16 // E4M3 W/X and device scales, no f32 weight
+		if padded != rows {
+			bytes += padded * out * F32.Bytes()
+		}
+		return cudaGEMMScratch{main: bytes}
+	}
 	if arm, err := CUDAQ4KPrefillArmInUse(); rows >= 128 && err == nil && arm == CUDAQ4KPrefillMMQ {
 		const q81Block, q81Values = 144, 128 // block_q8_1_mmq
 		padded := (in + 511) / 512 * 512

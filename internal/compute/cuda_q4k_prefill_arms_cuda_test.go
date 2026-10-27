@@ -3,8 +3,10 @@
 package compute
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"os"
 	"testing"
 )
 
@@ -13,6 +15,91 @@ import (
 var q4kMMQParityShapes = []struct{ out, in int }{{320, 256}, {1024, 5120}}
 
 var q4kMMQParityPanels = []int{128, 512}
+
+// fak-test:runtime fast est=1ms
+func TestCUDAQ4KFP8LTRefusalTyped(t *testing.T) {
+	err := cudaGEMMError("BatchedMatMul", cudaQ4KFP8LTRefused, cudaGEMMScratch{})
+	var armErr *CUDAQ4KPrefillArmError
+	if !errors.As(err, &armErr) || armErr.Arm != string(CUDAQ4KPrefillFP8LT) ||
+		!errors.Is(err, ErrCUDAQ4KPrefillArmUnavailable) {
+		t.Fatalf("fp8lt runtime refusal: got %T %v", err, err)
+	}
+	if errors.As(cudaGEMMError("BatchedMatMul", 82013, cudaGEMMScratch{}), &armErr) {
+		t.Fatal("vendor runtime failure must not become an arm-selection refusal")
+	}
+}
+
+// TestCUDAQ4KPrefillArmFP8LTMatchesRef is the experimental arm's unchanged
+// keep/remove gate, not evidence that rounding both operands to E4M3 is exact.
+// Require mode turns unavailable hardware into failure rather than a green skip.
+//
+// fak-test:runtime slow est=30s lane=optin
+func TestCUDAQ4KPrefillArmFP8LTMatchesRef(t *testing.T) {
+	be := Pick("cuda")
+	cb, ok := be.(*cudaBackend)
+	var unavailable error
+	if !ok {
+		unavailable = fmt.Errorf("native CUDA backend unavailable")
+	} else {
+		unavailable = CheckCUDAQ4KPrefillArm(CUDAQ4KPrefillFP8LT, cudaBackendSM(cb))
+	}
+	if unavailable != nil {
+		if os.Getenv("FAK_REQUIRE_CUDA_Q4K_FP8LT") == "1" {
+			t.Fatal(unavailable)
+		}
+		t.Skip(unavailable)
+	}
+	before, err := CUDAQ4KPrefillArmInUse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := SetCUDAQ4KPrefillArm(before); err != nil {
+			t.Errorf("restore prefill arm: %v", err)
+		}
+	})
+	if err := SetCUDAQ4KPrefillArm(CUDAQ4KPrefillFP8LT); err != nil {
+		t.Fatal(err)
+	}
+	ref := Default()
+	for _, shape := range q4kMMQParityShapes {
+		var seed lcg = 0x4b4d
+		raw := randQ4KBytes(&seed, shape.out, shape.in)
+		w := mkResident(ref, []int{shape.out, shape.in}, dequantQ4KWeight(raw, shape.out, shape.in))
+		wQ4K := cb.Upload(newQ4KHost(cb, []int{shape.out, shape.in}, raw), Q4_K)
+		for _, rows := range []int{128, 129, 512} {
+			t.Run(fmt.Sprintf("%dx%d/P%d", shape.out, shape.in, rows), func(t *testing.T) {
+				x := rscale(&seed, rows*shape.in, 1.0)
+				xRef := mkResident(ref, []int{rows, shape.in}, x)
+				yRef := ref.BatchedMatMul(w, xRef, rows)
+				want := ref.Read(yRef)
+				xDev := mkResident(cb, []int{rows, shape.in}, x)
+				defer cb.Free(xDev)
+				launches := cb.q4kFP8LTLaunchesForTest()
+				yDev := cb.BatchedMatMul(wQ4K, xDev, rows)
+				defer cb.Free(yDev)
+				got := cb.Read(yDev) // Synchronizes: enqueue counts alone cannot pass.
+				ref.Free(yRef)
+				ref.Free(xRef)
+				if cb.q4kFP8LTLaunchesForTest()-launches != 1 {
+					t.Fatal("fp8lt output did not execute exactly one vendor GEMM")
+				}
+				for i, v := range got {
+					if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+						t.Fatalf("nonfinite output at %d: %v", i, v)
+					}
+				}
+				cos, delta := cosine(want, got), maxAbsDelta(want, got)
+				if cos < cudaQ4KCosineMin || delta > 0.02 || argmaxF32(got) != argmaxF32(want) {
+					t.Fatalf("fp8lt strict gate: cosine=%.8f maxAbs=%.3e argmax=%d want=%d", cos, delta, argmaxF32(got), argmaxF32(want))
+				}
+				t.Logf("arm=fp8lt scale=per-tensor tier=%s P=%d cosine=%.8f maxAbs=%.3e argmax-exact", cb.Tier(), rows, cos, delta)
+			})
+		}
+		cb.Free(wQ4K)
+		ref.Free(w)
+	}
+}
 
 // TestCUDAQ4KPrefillArmMMQMatchesRef is the mmq arm's keep/remove gate (P-04, fak#13983). It
 // drives the arm through SetCUDAQ4KPrefillArm and holds it to the strict large-panel Q4_K gate

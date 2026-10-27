@@ -286,13 +286,19 @@ int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const f
  * DEQUANTS each weight fused into the GEMM tile — w = d*scale*code - dmin*min, with (scale,min)
  * unpacked per 32-elem sub-block exactly as the GGUF loader's getScaleMinK4 — and dots it with the
  * f32 activation, F32 accumulate. in must be divisible by 256. There is no activation quant on this
- * path (the weight, not the activation, is the narrow operand). */
+ * decode/small-panel path. P>=128 uses the selected arm: compensated retains f32
+ * activation semantics, MMQ quantizes activation to Q8_1, and experimental fp8lt
+ * rounds both operands to per-tensor E4M3 with F32 accumulation/output. */
 int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
 /* fcuda_q4k_matmul_f32 and fcuda_q2k_matmul_f32 return 0, or 80001 (f32 dequant scratch) or
  * 80002 (fp16 split scratch) when a P>=128 scratch allocation fails (nothing launched).
  * fcuda_q4k_matmul_f32 also returns 80003 for P>=128 when the selected prefill arm is refused, and
  * on the mmq arm 80004 when the device or its loaded MMQ image is below sm_80, the activation is
- * not 16-byte aligned, P*out overflows int, or the MMQ launch fails. */
+ * not 16-byte aligned, P*out overflows int, or the MMQ launch fails.
+ * fp8lt returns 80005 for unsupported toolkit/device/geometry/capture/heuristic;
+ * 81000+cudaError or 82000+cublasStatus preserve runtime failures. It admits only
+ * sm_89/sm_90, in%256==0, out%16==0, aligned pointers and int-bounded panels.
+ * Non-aligned prompt lengths are padded and trimmed inside the arm. */
 
 /* fcuda_set_q4k_prefill_arm selects the P>=128 Q4_K GEMM arm (P-04): 0 compensated (the f32
  * dequant + three compensated FP16 GEMMs above), 1 mmq, 2 fp8lt, -1 refused. The Go side resolves
@@ -300,6 +306,8 @@ int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int ou
 void fcuda_set_q4k_prefill_arm(int arm);
 /* fcuda_q4k_mmq_launch_count counts completed mmq-arm launches (P-04 parity witness). */
 unsigned long long fcuda_q4k_mmq_launch_count(void);
+/* Counts accepted fp8lt GEMM enqueues; a synchronized read is still required. */
+unsigned long long fcuda_q4k_fp8lt_launch_count(void);
 
 /* fcuda_q2_0_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident PACKED TERNARY
  * Q2_0 (#4872) — 2-bit codes dCodes[out*in/4] (4 weights/byte, LSB-first, u∈{0,1,2} → t=u-1)

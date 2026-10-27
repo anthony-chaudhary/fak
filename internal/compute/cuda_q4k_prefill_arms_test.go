@@ -44,8 +44,12 @@ func TestCheckCUDAQ4KPrefillArmArchAndImplementation(t *testing.T) {
 		{CUDAQ4KPrefillCompensated, 0, nil},
 		{CUDAQ4KPrefillFP8LT, 80, ErrCUDAQ4KPrefillArmArch},
 		{CUDAQ4KPrefillFP8LT, 86, ErrCUDAQ4KPrefillArmArch},
-		{CUDAQ4KPrefillFP8LT, 89, ErrCUDAQ4KPrefillArmUnimplemented},
-		{CUDAQ4KPrefillFP8LT, 120, ErrCUDAQ4KPrefillArmUnimplemented},
+		{CUDAQ4KPrefillFP8LT, 89, nil},
+		{CUDAQ4KPrefillFP8LT, 90, nil},
+		{CUDAQ4KPrefillFP8LT, 91, ErrCUDAQ4KPrefillArmArch},
+		{CUDAQ4KPrefillFP8LT, 100, ErrCUDAQ4KPrefillArmArch},
+		{CUDAQ4KPrefillFP8LT, 103, ErrCUDAQ4KPrefillArmArch},
+		{CUDAQ4KPrefillFP8LT, 120, ErrCUDAQ4KPrefillArmArch},
 		{CUDAQ4KPrefillMMQ, 75, ErrCUDAQ4KPrefillArmArch},
 		{CUDAQ4KPrefillMMQ, 80, nil},
 		{CUDAQ4KPrefillMMQ, 120, nil},
@@ -74,7 +78,7 @@ func TestSetCUDAQ4KPrefillArmRefusalKeepsCurrentArm(t *testing.T) {
 	if err := SetCUDAQ4KPrefillArm(CUDAQ4KPrefillCompensated); err != nil {
 		t.Fatalf("SetCUDAQ4KPrefillArm(compensated) = %v", err)
 	}
-	for _, arm := range []CUDAQ4KPrefillArm{"bogus", CUDAQ4KPrefillFP8LT} {
+	for _, arm := range []CUDAQ4KPrefillArm{"bogus", "FP8LT"} {
 		var armErr *CUDAQ4KPrefillArmError
 		if err := SetCUDAQ4KPrefillArm(arm); !errors.As(err, &armErr) {
 			t.Errorf("SetCUDAQ4KPrefillArm(%q) = %v; want *CUDAQ4KPrefillArmError", arm, err)

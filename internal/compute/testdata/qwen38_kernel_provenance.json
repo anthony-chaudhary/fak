@@ -27,7 +27,7 @@
       "sha": "d5b6c8c49774ed7fd40c97f964b1e7f10e2f0ccb",
       "license": "MIT",
       "license_file": "LICENSE",
-      "copyright_notice": "Copyright © 2023 Apple Inc.",
+      "copyright_notice": "Copyright \u00a9 2023 Apple Inc.",
       "notice_file": "LICENSE",
       "notice_rule": "Retain the copyright and permission notice in copies or substantial portions."
     },
@@ -100,6 +100,16 @@
       "copyright_notice": "Copyright (c) 2026 Peasant Smith and the Project Maya contributors; Copyright (c) 2026 Niko1221 and the Strata contributors",
       "notice_file": "LICENSE",
       "notice_rule": "Retain both copyright lines and the permission notice in copies or substantial portions."
+    },
+    {
+      "id": "nvidia-cublaslt-fp8-sample",
+      "repository": "https://github.com/NVIDIA/CUDALibrarySamples",
+      "sha": "9b347f161cce5cd2a51a0406b140f2a2d81df024",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE.md",
+      "copyright_notice": "Copyright (c) 2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.",
+      "notice_file": "NONE",
+      "notice_rule": "No root, cuBLASLt or LtFp8Matmul NOTICE at the pinned revision; retain LICENSE.md, SPDX source header, copyright, attribution and changed-file notice required by Apache-2.0."
     }
   ],
   "kernels": [
@@ -156,6 +166,15 @@
       "decision": "ADAPT",
       "attribution": "Prompt-panel tiling, column split, and split out-norm adapted from mw00/project-maya\n// src/prefill/kernels.cu (gdn_conv_tiled_kernel, gdn_rec_cols_kernel, gdn_out_norm_kernel) at\n// 4615f346d9311dd1ce9f5738ab04446f023a6e42 (MIT; Copyright (c) 2026 Peasant Smith and the\n// Project Maya contributors; Copyright (c) 2026 Niko1221 and the Strata contributors).",
       "parity_witness": "internal/compute/cuda_qwen35_gdn_panel_cols_test.go"
+    },
+    {
+      "id": "qwen38-cuda-q4k-prefill-fp8lt",
+      "upstream": "nvidia-cublaslt-fp8-sample",
+      "source_path": "cuBLASLt/LtFp8Matmul/sample_cublasLt_LtFp8Matmul.cu",
+      "destination": "internal/compute/cuda/q4k_fp8lt.cuh",
+      "decision": "ADAPT",
+      "attribution": "Q4_K prompt-panel FP8 GEMM descriptor flow adapted from NVIDIA/CUDALibrarySamples\n// cuBLASLt/LtFp8Matmul/sample_cublasLt_LtFp8Matmul.cu at\n// 9b347f161cce5cd2a51a0406b140f2a2d81df024 (Apache-2.0).",
+      "parity_witness": "internal/compute/cuda_q4k_prefill_arms_cuda_test.go"
     }
   ]
 }
