@@ -419,7 +419,13 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 
 	attnOut := make([]float32, P*qWidth)
 	t = s.phaseStart()
-	attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, s.M.attnObs)
+	// qf is dead after the joined split: Q and gate own independent copies,
+	// projection kernels retain no target, and phase profiling records only time.
+	// Loan it as bounded score scratch only for unobserved builtin attention.
+	W := cfg.windowForLayer(l)
+	if !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
+		attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, W, l, scale, attnCap, fdot, s.M.attnObs)
+	}
 	s.phaseEnd("qwen35_full_attn", t)
 	t = s.phaseStart()
 	qwen35PrefillGateDisjoint(attnOut, gate, P, qWidth)

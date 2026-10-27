@@ -129,6 +129,106 @@ func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, l
 	wg.Wait()
 }
 
+// attnPrefillGQA3FDotInto shares KV traversal across up to three sibling heads.
+// It is deliberately a builtin-only entry: each score uses the original fdot,
+// not fdot3's different reduction, and value updates use saxpy3scalar, not SIMD.
+// Generic score callbacks and attention observers keep attnPrefillInto's order.
+//
+// scratch must be exclusively owned, disposable, and disjoint from all panels.
+// The Qwen hybrid caller loans its completed query/gate projection after copying
+// both outputs. No score storage is allocated or retained here. Admission keeps
+// the original worker count; insufficient loan capacity or grouped work declines
+// without changing any panel, rather than increasing memory or cutting workers.
+func attnPrefillGQA3FDotInto(attnOut, Q, Kl, Vl, scratch []float32, P, base, nH, hd, w, grp, W int, scale, attnCap float32, obs AttnObserver) bool {
+	if obs != nil || P <= 0 || base < 0 || nH <= 0 || hd <= 0 || grp < 3 || nH%grp != 0 || W == 0 {
+		return false
+	}
+	maxInt := int(^uint(0) >> 1)
+	if base > maxInt-P || nH > maxInt/hd || P > maxInt/nH {
+		return false
+	}
+	nKV := nH / grp
+	// nKV <= nH, so the head-width guard also bounds nKV*hd.
+	if w != nKV*hd {
+		return false
+	}
+	rowWidth := nH * hd
+	maxPos := base + P
+	if P > len(Q)/rowWidth || P > len(attnOut)/rowWidth || maxPos > len(Kl)/w || maxPos > len(Vl)/w {
+		return false
+	}
+	scoreWidth := maxPos - windowLoContig(maxPos, maxPos-1, W)
+	nw := currentWorkerCount()
+	if units := P * nH; nw > units {
+		nw = units
+	}
+	chunks := grp / 3
+	if grp%3 != 0 {
+		chunks++
+	}
+	// chunks <= grp, so both products are bounded by the checked P*nH.
+	perToken := nKV * chunks
+	units := P * perToken
+	// Division checks capacity without overflowing 3*nw*scoreWidth. A loan
+	// with spare capacity but insufficient length is not authority to extend it.
+	if nw < 1 || units < nw || scoreWidth <= 0 || nw > len(scratch)/scoreWidth/3 {
+		return false
+	}
+	workerWidth := 3 * scoreWidth
+	work := func(wkr int) {
+		buf := scratch[wkr*workerWidth : (wkr+1)*workerWidth]
+		for u := wkr; u < units; u += nw {
+			t, slot := u/perToken, u%perToken
+			kvh, chunk := slot/chunks, slot%chunks
+			h0 := kvh*grp + chunk*3
+			nPos := base + t + 1
+			j0 := windowLoContig(nPos, base+t, W)
+			span := nPos - j0
+			if grp-chunk*3 >= 3 {
+				q0, q1, q2 := packedHead3(Q, t, rowWidth, h0, hd)
+				sc0 := buf[:span]
+				sc1 := buf[scoreWidth : scoreWidth+span]
+				sc2 := buf[2*scoreWidth : 2*scoreWidth+span]
+				fillAttentionScores3(sc0, sc1, sc2, q0, q1, q2, Kl, j0, nPos, w, kvh, hd, scale, prefillIndependentFDot3)
+				softcapInPlace(sc0, attnCap)
+				softmaxInPlace(sc0)
+				softcapInPlace(sc1, attnCap)
+				softmaxInPlace(sc1)
+				softcapInPlace(sc2, attnCap)
+				softmaxInPlace(sc2)
+				accumulatePackedAttentionValues3(attnOut, t, rowWidth, h0, hd, Vl, sc0, sc1, sc2, j0, nPos, w, kvh, false)
+				continue
+			}
+			// A final one/two-head tail never crosses into the next KV group.
+			for h := h0; h < (kvh+1)*grp; h++ {
+				sc := buf[:span]
+				fillAttentionScores(sc, packedHead(Q, t, rowWidth, h, hd), Kl, j0, nPos, w, kvh, hd, scale, fdot)
+				softcapInPlace(sc, attnCap)
+				softmaxInPlace(sc)
+				accumulateAttentionValues(packedHead(attnOut, t, rowWidth, h, hd), Vl, sc, j0, nPos, w, kvh, hd)
+			}
+		}
+	}
+	if nw == 1 {
+		work(0)
+		return true
+	}
+	var wg sync.WaitGroup
+	for k := 0; k < nw; k++ {
+		wg.Add(1)
+		go func(k int) {
+			defer wg.Done()
+			work(k)
+		}(k)
+	}
+	wg.Wait()
+	return true
+}
+
+func prefillIndependentFDot3(q0, q1, q2, key []float32) (float32, float32, float32) {
+	return fdot(q0, key), fdot(q1, key), fdot(q2, key)
+}
+
 // prefillAttnDeviceMinRows is the smallest panel the device prefill attention takes; below it
 // the host loop's P*nH work units finish before a command buffer would round-trip.
 const prefillAttnDeviceMinRows = 8

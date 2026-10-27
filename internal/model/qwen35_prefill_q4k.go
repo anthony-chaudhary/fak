@@ -918,7 +918,9 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	s.prefillQwen35HybridQ4KMetalUpload()
 
 	for l := 0; l < cfg.NumLayers; l++ {
-		s.prefillQwen35HybridQ4KLayer(l, X, P, base, eps, proj, pgroup, qz)
+		// These local builtin producers return fresh, separately owned outputs.
+		// The generic callback entry below never grants a disposable qf loan.
+		s.prefillQwen35HybridQ4KLayerOwnedQF(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil)
 	}
 
 	t = s.phaseStart()
@@ -945,6 +947,13 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 // the hot method stays under its line ceiling. The projection dispatch (proj/pgroup/qz) and the
 // per-layer f32 math are byte-for-byte identical to the inlined loop body.
 func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize) {
+	s.prefillQwen35HybridQ4KLayerOwnedQF(l, X, P, base, eps, proj, pgroup, qz, false)
+}
+
+// ownsQF is private producer provenance, not an inference about nonnil callbacks.
+// Only the local builtin proj/pgroup closures in prefillQwen35HybridQ4KHidden
+// grant it. Arbitrary callback callers must use the non-owning wrapper above.
+func (s *Session) prefillQwen35HybridQ4KLayerOwnedQF(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool) {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -967,7 +976,7 @@ func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, e
 	if cfg.isLinearAttnLayer(l) {
 		o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, pgroup, qz)
 	} else {
-		o = s.prefillQwen35FullAttnLayerQ4K(l, Xn, P, base, proj, pgroup, qz)
+		o = s.prefillQwen35FullAttnLayerQ4KOwnedQF(l, Xn, P, base, proj, pgroup, qz, ownsQF)
 	}
 	t = s.phaseStart()
 	parFor(len(X), dispatchWorkers, func(lo, hi int) {
@@ -1271,6 +1280,11 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 }
 
 func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize) []float32 {
+	return s.prefillQwen35FullAttnLayerQ4KOwnedQF(l, Xn, P, base, proj, pgroup, qz, false)
+}
+
+// See prefillQwen35HybridQ4KLayerOwnedQF for the only production loan authority.
+func (s *Session) prefillQwen35FullAttnLayerQ4KOwnedQF(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -1321,7 +1335,15 @@ func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int
 
 	attnOut := make([]float32, P*qWidth)
 	t = s.phaseStart()
-	s.attnPrefillDispatch(s.MetalQ4K, attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, s.M.attnObs)
+	// The joined split copied Q and gate out of qf. The builtin CPU producer
+	// owns a fresh qf allocation, disjoint from K/V and no longer consumed.
+	// Loan only its existing length; the shared helper keeps the old worker
+	// count and declines before writes when the loan/grouped work is too small.
+	// Custom callback and Metal paths keep the original dispatch unchanged.
+	W := cfg.windowForLayer(l)
+	if !ownsQF || s.MetalQ4K || s.Backend != nil || !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
+		s.attnPrefillDispatch(s.MetalQ4K, attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, W, l, scale, attnCap, fdot, s.M.attnObs)
+	}
 	s.phaseEnd("qwen35_full_attn", t)
 	t = s.phaseStart()
 	qwen35PrefillGateDisjoint(attnOut, gate, P, qWidth)

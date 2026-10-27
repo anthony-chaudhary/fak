@@ -25,7 +25,9 @@
         "tryqwen35attentionqglocked",
         "fvkqwen35attentionqgsupported",
         "fvkqwen35attentionqgf32",
-        "qwen35attentionqg"
+        "qwen35attentionqg",
+        "attnprefillgqa3fdotinto",
+        "prefillqwen35fullattnlayerq4kownedqf"
       ],
       "aliases": [],
       "grounding": "attnPrefillDispatch",
@@ -719,6 +721,46 @@
       ],
       "aliases": [],
       "grounding": "v41PlanHostSharedCohort",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "attnprefillgqa3fdotinto",
+      "canonical": "attnPrefillGQA3FDotInto",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Host prefill attention kernel sharing value traversal across three sibling query heads while preserving scalar dot/saxpy arithmetic and borrowing caller-owned dead projection storage for scores.",
+      "distinction": "Unlike attnPrefillDispatch this computes host grouped attention rather than selecting a backend. Unlike ordinary host attention it requires observer-free eligible grouped geometry and enough supplied score scratch for the unchanged worker count, and returns false before writes if those conditions fail.",
+      "distinct_from": [
+        "attnprefilldispatch",
+        "prefillqwen35fullattnlayerq4kownedqf"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillGQA3FDotInto",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "prefillqwen35fullattnlayerq4kownedqf",
+      "canonical": "prefillQwen35FullAttnLayerQ4KOwnedQF",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Qwen resident-Q4_K full-attention prefill adapter carrying builtin CPU producer provenance for reuse of dead interleaved QF storage as grouped-attention score scratch.",
+      "distinction": "Unlike prefillQwen35FullAttnLayerQ4K, whose wrapper always passes ownsQF=false, this private entry may loan only the existing QF length after joined Q/gate copies, only for builtin CPU provenance with MetalQ4K false and Backend nil. attnPrefillGQA3FDotInto independently admits shape, observer, worker and scratch-capacity constraints before writes; otherwise original attnPrefillDispatch remains. Unlike attnPrefillGQA3FDotInto, this adapter owns layer orchestration/provenance and not the grouped dot kernel; unlike generic attention dispatch it cannot infer ownership from arbitrary callbacks.",
+      "distinct_from": [
+        "attnprefilldispatch",
+        "attnprefillgqa3fdotinto"
+      ],
+      "aliases": [],
+      "grounding": "prefillQwen35FullAttnLayerQ4KOwnedQF",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

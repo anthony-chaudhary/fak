@@ -1854,3 +1854,17 @@ Checked Vulkan command-recording boundary for direct interleaved QG consumption,
 Vulkan registered shader module for fused interleaved QG attention postprocessing with a separate unchanged gate output.
 
 **Distinct from:** Unlike the split-Q qwen35_attention_postprocess shader, consumes doubled interleaved QG and emits an additional unchanged gate. Unlike the fvk QG host boundary, this is the numerical shader and trusted artifact-census identity, not buffer validation or command recording. Unlike attention implementation dispatch, it implements one fused module rather than routing algorithms.
+
+
+### attnPrefillGQA3FDotInto
+
+Host prefill attention kernel sharing value traversal across three sibling query heads while preserving scalar dot/saxpy arithmetic and borrowing caller-owned dead projection storage for scores.
+
+**Distinct from:** Unlike attnPrefillDispatch this computes host grouped attention rather than selecting a backend. Unlike ordinary host attention it requires observer-free eligible grouped geometry and enough supplied score scratch for the unchanged worker count, and returns false before writes if those conditions fail.
+
+
+### prefillQwen35FullAttnLayerQ4KOwnedQF
+
+Qwen resident-Q4_K full-attention prefill adapter carrying builtin CPU producer provenance for reuse of dead interleaved QF storage as grouped-attention score scratch.
+
+**Distinct from:** Unlike prefillQwen35FullAttnLayerQ4K, whose wrapper always passes ownsQF=false, this private entry may loan only the existing QF length after joined Q/gate copies, only for builtin CPU provenance with MetalQ4K false and Backend nil. attnPrefillGQA3FDotInto independently admits shape, observer, worker and scratch-capacity constraints before writes; otherwise original attnPrefillDispatch remains. Unlike attnPrefillGQA3FDotInto, this adapter owns layer orchestration/provenance and not the grouped dot kernel; unlike generic attention dispatch it cannot infer ownership from arbitrary callbacks.
