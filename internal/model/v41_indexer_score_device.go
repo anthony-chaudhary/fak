@@ -446,13 +446,17 @@ func v41IndexRowsSelected(layer int, q, keys, weights []float32, heads, headDim,
 }
 
 func v41IndexRowsSelectedWithBorrow(layer int, q, keys, weights []float32, heads, headDim, rows, topKBlocks, blockSize, topK int, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, sel v41IndexSelectFunc, borrow *v41IndexerScoreBorrow) ([]int32, error) {
+	return v41IndexRowsSelectedWithBorrowObserved(layer, q, keys, weights, heads, headDim, rows, topKBlocks, blockSize, topK, score, health, sel, borrow, nil)
+}
+
+func v41IndexRowsSelectedWithBorrowObserved(layer int, q, keys, weights []float32, heads, headDim, rows, topKBlocks, blockSize, topK int, score v41IndexerScoreFunc, health v41IndexerScoreHealthFunc, sel v41IndexSelectFunc, borrow *v41IndexerScoreBorrow, observe func(string)) ([]int32, error) {
 	if health != nil {
 		if err := health(layer); err != nil {
 			return nil, v41IndexerScoreOperationErr(layer, err)
 		}
 	}
 	if score == nil && sel == nil {
-		pub, err := NewV41IndexerPublication(layer, q, keys, weights, heads, headDim, rows, topKBlocks, blockSize, topK, 0)
+		pub, err := newV41IndexerPublicationObserved(layer, q, keys, weights, heads, headDim, rows, topKBlocks, blockSize, topK, 0, observe)
 		if err != nil {
 			return nil, v41StageErr(v41StageIndexer, layer, err)
 		}
@@ -464,7 +468,7 @@ func v41IndexRowsSelectedWithBorrow(layer int, q, keys, weights []float32, heads
 	var values []float32
 	var err error
 	if score == nil {
-		if values, err = V41IndexerScore(q, keys, weights, heads, headDim, rows); err != nil {
+		if values, err = v41IndexerScoreObserved(q, keys, weights, heads, headDim, rows, observe); err != nil {
 			return nil, v41StageErr(v41StageIndexer, layer, err)
 		}
 	} else {
@@ -496,12 +500,12 @@ func v41IndexRowsSelectedWithBorrow(layer int, q, keys, weights []float32, heads
 	}
 	var mask []bool
 	if topKBlocks > 0 {
-		mask, err = V41SelectCandidateBlocks(values, rows, topKBlocks, blockSize)
+		mask, err = v41SelectRankedBlocksObserved(values, rows, topKBlocks, blockSize, observe)
 		if err != nil {
 			return nil, v41IndexerScoreOperationErr(layer, err)
 		}
 	}
-	selected, err := V41SelectIndexRows(values, rows, topK, 0, mask)
+	selected, err := v41SelectIndexRowsObserved(values, rows, topK, 0, mask, observe)
 	if err != nil {
 		return nil, v41IndexerScoreOperationErr(layer, err)
 	}
