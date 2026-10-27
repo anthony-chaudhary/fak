@@ -201,6 +201,11 @@ func (e *BatchingEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 		putCtx:        ctx,
 		enqueuedAt:    time.Now(),
 	}
+	// A parked no-progress loop has no request context in its select. Wake it
+	// for both handle and parent cancellation, but leave all reclamation to the
+	// scheduler after its current StepPhase completes. Already-canceled contexts
+	// are safe: Admit also signals after publishing the request below.
+	r.stopCancelWake = context.AfterFunc(rctx, e.signal)
 
 	e.mu.Lock()
 	e.requests[sessionID] = r
@@ -214,6 +219,7 @@ func (e *BatchingEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 		e.mu.Unlock()
 		_ = e.cb.Cancel(sessionID)
 		e.acknowledgeRequest(r)
+		r.stopCancelWake()
 		rcancel()
 		return nil, ErrBatcherClosed
 	}
@@ -485,6 +491,10 @@ type batcherRequest struct {
 	cancel context.CancelFunc
 	putCtx context.Context
 
+	// stopCancelWake detaches the cancellation callback on terminal completion.
+	// An already-running callback only performs a nonblocking scheduler wake.
+	stopCancelWake func() bool
+
 	// gen is appended only by the single scheduler goroutine; read only after done.
 	gen []int
 
@@ -515,6 +525,10 @@ func (r *batcherRequest) finished() bool {
 }
 
 func (r *batcherRequest) finish(res *abi.Result, err error) {
+	if r.stopCancelWake != nil {
+		r.stopCancelWake()
+	}
+	r.cancel()
 	if r.recorderDone != nil {
 		r.recorderDone()
 		r.recorderDone = nil
