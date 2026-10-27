@@ -161,6 +161,8 @@ const (
 	VulkanBuildReceiptSchemaV36 = "fak.vulkan-build-receipt.v36"
 	// VulkanBuildReceiptSchemaV37 adds the optional Qwen residual norm module.
 	VulkanBuildReceiptSchemaV37 = "fak.vulkan-build-receipt.v37"
+	// VulkanBuildReceiptSchemaV38 adds the optional packed Q5_K companion tile.
+	VulkanBuildReceiptSchemaV38 = "fak.vulkan-build-receipt.v38"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"

@@ -1,0 +1,80 @@
+#version 450
+// Derived from fak's Apache-2.0 q5k_matmul.comp. A 16-row by 16-token
+// tile decodes each packed block once, reusing the original F32 affine weight.
+// Each output retains the original block/group/lane/w1,w2 accumulation order.
+// No FP16 arithmetic, subgroup reduction, atomics or cooperative matrix.
+layout(local_size_x = 256) in;
+layout(std430,binding=0) readonly buffer Q5K { uint raw[]; };
+layout(std430,binding=1) readonly buffer X { float x[]; };
+layout(std430,binding=2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+shared float weights[16 * 256];
+shared float inputs[16 * 256];
+uint byteAt(uint offset) {
+    uint word = raw[offset >> 2u];
+    return (word >> ((offset & 3u) * 8u)) & 255u;
+}
+float halfAt(uint offset) {
+    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+void scaleMinK4(uint sc, uint j, out uint scale, out uint minv) {
+    if (j < 4u) {
+        scale = byteAt(sc + j) & 63u;
+        minv = byteAt(sc + j + 4u) & 63u;
+        return;
+    }
+    scale = (byteAt(sc + j + 4u) & 0x0fu) | ((byteAt(sc + j - 4u) >> 6u) << 4u);
+    minv = (byteAt(sc + j + 4u) >> 4u) | ((byteAt(sc + j) >> 6u) << 4u);
+}
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint row0 = gl_WorkGroupID.x * 16u;
+    uint token0 = gl_WorkGroupID.y * 16u;
+    uint rowLane = tid % 16u;
+    uint tokenLane = tid / 16u;
+    uint row = row0 + rowLane;
+    uint token = token0 + tokenLane;
+    bool live = row < uint(pc.outDim) && token < uint(pc.tokens);
+    uint blocks = uint(pc.inDim) / 256u;
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        for (uint slot = tid; slot < 16u * 256u; slot += 256u) {
+            uint r = slot / 256u;
+            uint col = slot % 256u;
+            // Full overwrite, including the partial row/token tile slots.
+            float weight = 0.0;
+            if (row0 + r < uint(pc.outDim)) {
+                uint base = ((row0 + r) * blocks + sb) * 176u;
+                uint group = col / 64u;
+                uint halfLane = (col % 64u) / 32u;
+                uint lane = col % 32u;
+                uint j = group * 2u + halfLane;
+                uint scale, minv;
+                scaleMinK4(base + 4u, j, scale, minv);
+                uint low = byteAt(base + 48u + group * 32u + lane);
+                uint hi = (byteAt(base + 16u + lane) & (1u << j)) != 0u ? 16u : 0u;
+                float d = halfAt(base);
+                float dm = halfAt(base + 2u);
+                // Same left-associated products and min subtraction as w1/w2.
+                weight = d * float(scale) * float(((low >> (halfLane * 4u)) & 15u) + hi) - dm * float(minv);
+            }
+            weights[slot] = weight;
+            inputs[slot] = token0 + r < uint(pc.tokens) ?
+                x[(token0 + r) * uint(pc.inDim) + sb * 256u + col] : 0.0;
+        }
+        barrier();
+        if (live) {
+            for (uint group = 0u; group < 4u; ++group) {
+                uint wBase = rowLane * 256u + group * 64u;
+                uint xBase = tokenLane * 256u + group * 64u;
+                for (uint lane = 0u; lane < 32u; ++lane) {
+                    sum += weights[wBase + lane] * inputs[xBase + lane];
+                    sum += weights[wBase + lane + 32u] * inputs[xBase + lane + 32u];
+                }
+            }
+        }
+        barrier();
+    }
+    if (live) y[token * uint(pc.outDim) + row] = sum;
+}

@@ -13,10 +13,11 @@ import (
 func TestVulkanReceiptV37QwenResidualNorm(t *testing.T) {
 	const stem = "qwen35_residual_norm"
 	want := append(vulkanRegistryV36.stems(), stem)
-	if len(want) != 108 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 108 || !reflect.DeepEqual(want, vulkanRegistryV37.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V37 must add exactly the optional Qwen residual norm module to historical V36")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV37.schema
+	id, err := vulkanRegistryV37.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV37 || id.ID != VulkanShaderRegistryV37ID || id.ModuleCount != 108 {
 		t.Fatalf("V37 identity differs: %s %+v %v", schema, id, err)
 	}

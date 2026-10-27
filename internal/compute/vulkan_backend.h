@@ -428,6 +428,10 @@ int fvk_qwen35_residual_norm_supported(int rows, int n, float eps);
 int fvk_qwen35_residual_norm_f32(void* x, const void* delta, const void* weight,
     void* y, int rows, int n, float eps);
 
+// Optional default-off Q5_K companion tile; no dtype/decode admission change.
+int fvk_have_q5k_matmul_panel(void);
+int fvk_q5k_matmul_panel_supported(int out, int in, int P);
+int fvk_q5k_matmul_panel_f32(const void* weight, const void* x, void* y, int out, int in, int P);
 int fvk_have_q6k_matmul_panel(void);
 int fvk_q6k_matmul_panel_supported(int out, int in, int P);
 int fvk_q6k_matmul_panel_f32(const void* weight, const void* x, void* y, int out, int in, int P);
