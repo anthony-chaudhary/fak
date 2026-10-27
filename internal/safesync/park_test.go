@@ -9,6 +9,113 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
+// fak-test:runtime medium est=12s lane=default
+func TestParkNestedGitPathsPreserveDirtyBytes(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "core.autocrlf", "false")
+	git(t, repo, "config", "user.name", "test")
+	git(t, repo, "config", "user.email", "test@example.com")
+	mkdir(t, filepath.Join(repo, "nested"))
+	owned := filepath.Join(repo, "nested", "owned.txt")
+	created := filepath.Join(repo, "nested", "new-local.txt")
+	removed := filepath.Join(repo, "nested", "removed.txt")
+	peer := filepath.Join(repo, "nested", "peer.txt")
+	incoming := filepath.Join(repo, "nested", "incoming.txt")
+	writeFile(t, owned, "base\n")
+	writeFile(t, removed, "")
+	writeFile(t, peer, "peer base\n")
+	writeFile(t, incoming, "incoming base\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "base")
+	base := revString(t, repo, "HEAD")
+	writeFile(t, incoming, "incoming committed\n")
+	git(t, repo, "rm", "nested/removed.txt")
+	git(t, repo, "add", "nested/incoming.txt")
+	git(t, repo, "commit", "-m", "incoming")
+	target := revString(t, repo, "HEAD")
+	git(t, repo, "checkout", "--detach", base)
+	const ownedBytes = "base\nunique local bytes\n"
+	const peerBytes = "unrelated dirty peer bytes\n"
+	const createdBytes = "new local bytes absent from base and target\n"
+	writeFile(t, owned, ownedBytes)
+	writeFile(t, created, createdBytes)
+	writeFile(t, removed, "dirty bytes before upstream removal\n")
+	writeFile(t, peer, peerBytes)
+	opts := ParkOptions{Repo: repo, Session: "nested-git-paths", TargetRef: target,
+		Paths: []string{"nested/./owned.txt", filepath.FromSlash("nested/owned.txt"), "nested/new-local.txt", "nested/removed.txt"}}
+	wantEffects := map[string]string{"nested/owned.txt": EffectCleanReapply,
+		"nested/new-local.txt": EffectCleanReapply, "nested/removed.txt": EffectSuperseded}
+	failedLookups := 0
+	unknown := opts
+	unknown.Runner = func(ctx context.Context, repo string, args ...string) RunResult {
+		if len(args) == 2 && args[0] == "show" && args[1] == target+":nested/owned.txt" {
+			failedLookups++
+			return RunResult{Code: 128}
+		}
+		return RealRunner(ctx, repo, args...)
+	}
+	for _, apply := range []bool{false, true} {
+		unknown.Apply = apply
+		rec, err := Park(context.Background(), unknown)
+		if err == nil && (rec.OK || rec.Status != ParkStatusConflict) {
+			t.Errorf("Park(apply=%v) accepted an unknown Git lookup: %+v", apply, rec)
+		}
+		if got := revString(t, repo, "HEAD"); got != base {
+			t.Fatalf("unknown Git lookup moved HEAD to %s", got)
+		}
+		if readFile(t, owned) != ownedBytes || readFile(t, created) != createdBytes || readFile(t, peer) != peerBytes {
+			t.Fatal("unknown Git lookup changed dirty bytes")
+		}
+	}
+	if failedLookups == 0 {
+		t.Fatal("unknown Git lookup witness did not execute")
+	}
+	for _, apply := range []bool{false, true} {
+		opts.Apply = apply
+		rec, err := Park(context.Background(), opts)
+		if err != nil || !rec.OK {
+			t.Fatalf("Park(apply=%v): err=%v status=%s reason=%s", apply, err, rec.Status, rec.Reason)
+		}
+		if strings.Join(rec.SelectedPaths, ",") != "nested/new-local.txt,nested/owned.txt,nested/removed.txt" {
+			t.Errorf("Park(apply=%v) selected Git paths = %q", apply, rec.SelectedPaths)
+		}
+		if len(rec.Effects) != len(wantEffects) {
+			t.Fatalf("Park(apply=%v) effects = %+v", apply, rec.Effects)
+		}
+		for _, effect := range rec.Effects {
+			if effect.Classification != wantEffects[effect.Path] {
+				t.Errorf("Park(apply=%v) effect = %+v, want %s", apply, effect, wantEffects[effect.Path])
+			}
+		}
+		if got := readFile(t, owned); got != ownedBytes {
+			t.Fatalf("Park(apply=%v) changed selected dirty bytes: %q", apply, got)
+		}
+		if got := readFile(t, created); got != createdBytes {
+			t.Fatalf("Park(apply=%v) changed new selected bytes: %q", apply, got)
+		}
+		if got := readFile(t, peer); got != peerBytes {
+			t.Fatalf("Park(apply=%v) changed unrelated dirty bytes: %q", apply, got)
+		}
+		wantHead := base
+		if apply {
+			wantHead = target
+			if got := readFile(t, incoming); got != "incoming committed\n" {
+				t.Fatalf("incoming nested path not integrated: %q", got)
+			}
+			if got := gitOutput(t, repo, "show", rec.CheckpointRef+":nested/owned.txt"); got != ownedBytes {
+				t.Fatalf("checkpoint lost selected dirty bytes: %q", got)
+			}
+			if got := gitOutput(t, repo, "show", rec.CheckpointRef+":nested/new-local.txt"); got != createdBytes {
+				t.Fatalf("checkpoint lost new selected bytes: %q", got)
+			}
+		}
+		if got := revString(t, repo, "HEAD"); got != wantHead {
+			t.Fatalf("Park(apply=%v) HEAD = %s, want %s", apply, got, wantHead)
+		}
+	}
+}
+
 func TestParkAheadBehindUniqueRetainedIdenticalSuppressed(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
