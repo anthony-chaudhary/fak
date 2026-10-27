@@ -63,6 +63,10 @@ func (st *v41ForwardState) logitHostRefusal() v41LogitHostRefusal {
 // device seam refuses typed before the multiply is selected, and the identity
 // returns the projected row untouched. Softcap and suppression have no seam.
 func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc, refuse v41LogitHostRefusal) ([]float32, error) {
+	return v41ScaleHeadLogitsObserved(logits, cfg, scale, refuse, nil)
+}
+
+func v41ScaleHeadLogitsObserved(logits []float32, cfg Config, scale v41LogitScaleFunc, refuse v41LogitHostRefusal, observe func(string)) ([]float32, error) {
 	factor := v41LogitFactor(cfg)
 	if refuse != nil {
 		switch {
@@ -77,7 +81,7 @@ func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc, r
 		}
 	}
 	if scale == nil || factor == 1 || !finite32(factor) {
-		logitScaleInPlace(logits, cfg)
+		v41PostprocessHeadLogitsObserved(logits, cfg, observe)
 		return logits, nil
 	}
 	// Head projection historically permits nonfinite raw results, including
@@ -86,7 +90,7 @@ func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc, r
 	// A surviving device-only arm already checked this same row above. No
 	// callback or mutation intervenes, so only the permissive arm needs a scan.
 	if refuse == nil && !v41AllFinite32(logits) {
-		logitScaleInPlace(logits, cfg)
+		v41PostprocessHeadLogitsObserved(logits, cfg, observe)
 		return logits, nil
 	}
 	out, err := scale(logits, factor)
@@ -99,8 +103,27 @@ func v41ScaleHeadLogits(logits []float32, cfg Config, scale v41LogitScaleFunc, r
 	// Config is passed by value; preserve all other host postprocessing and the
 	// original model configuration without multiplying a second time.
 	cfg.LogitScale = 1
-	logitScaleInPlace(out, cfg)
+	v41PostprocessHeadLogitsObserved(out, cfg, observe)
 	return out, nil
+}
+
+func v41PostprocessHeadLogitsObserved(logits []float32, cfg Config, observe func(string)) {
+	logitScaleInPlace(logits, cfg)
+	if observe == nil || len(logits) == 0 {
+		return
+	}
+	if v41LogitFactor(cfg) != 1 {
+		observe("logit-scale")
+	}
+	if v41UsesLogitSoftcap(cfg) {
+		observe("logit-softcap")
+	}
+	for _, id := range cfg.SuppressTokens {
+		if id >= 0 && id < len(logits) {
+			observe("logit-token-suppression")
+			break
+		}
+	}
 }
 
 func v41AllFinite32(values []float32) bool {

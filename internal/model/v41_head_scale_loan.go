@@ -148,7 +148,7 @@ func (m *Model) v41TryHeadScaleLoan(st *v41ForwardState, projection *v41Projecti
 			}
 			return append([]float32(nil), read...), nil
 		}
-		scaled, c.cause = v41ScaleHeadLogits(c.raw, cfg, borrowed, st.logitHostRefusal())
+		scaled, c.cause = v41ScaleHeadLogitsObserved(c.raw, cfg, borrowed, st.logitHostRefusal(), st.callbackOwner.observeHostArm)
 		c.completed = c.cause == nil
 	}
 	var outcome v41DenseProjectionOutcome
