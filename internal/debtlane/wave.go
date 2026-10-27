@@ -3,17 +3,21 @@ package debtlane
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/processlock"
 
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
@@ -52,6 +56,8 @@ type Wave struct {
 
 // WavePlan is the full multi-wave campaign dispatch plan.
 type WavePlan struct {
+	BlockedCode      string   `json:"blocked_code,omitempty"`
+	ObservationError string   `json:"observation_error,omitempty"`
 	Schema           string   `json:"schema"`
 	Workspace        string   `json:"workspace"`
 	TargetRepo       string   `json:"target_repo,omitempty"`
@@ -104,8 +110,15 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 
 	var heldLanes []string
 	if opts.AutoDetectHeld && report.Workspace != "" {
-		discovered, _ := DiscoverHeldLanes(report.Workspace)
-		for _, l := range discovered {
+		discovered, err := DiscoverHeldLeases(report.Workspace)
+		if err != nil {
+			return WavePlan{Schema: WavePlanSchema, Workspace: report.Workspace, WaveSizeCap: waveSizeCap, BlockedCode: "LEASE_READER_UNAVAILABLE", ObservationError: err.Error()}
+		}
+		for _, lease := range discovered {
+			l := lease.Lane
+			if len(lease.Tree) == 0 || strings.TrimSpace(l) == "" {
+				return WavePlan{Schema: WavePlanSchema, Workspace: report.Workspace, WaveSizeCap: waveSizeCap, BlockedCode: "LEASE_SCOPE_UNAVAILABLE", ObservationError: "active lease cannot be mapped to a scoped lane"}
+			}
 			lower := strings.ToLower(strings.TrimSpace(l))
 			if lower != "" {
 				heldLanes = append(heldLanes, l)
@@ -497,15 +510,20 @@ var pidLivenessCheck = processalive.Check
 
 // LaneJournalEntry represents a record in .dos/lane-journal.jsonl tracking lane lease lifecycle.
 type LaneJournalEntry struct {
-	Op          string    `json:"op"`
-	Lane        string    `json:"lane"`
-	Tree        []string  `json:"tree,omitempty"`
-	PID         int       `json:"pid,omitempty"`
-	Mode        string    `json:"mode,omitempty"` // "exclusive", "advisory", "shared", "readonly"
-	AcquiredAt  time.Time `json:"acquired_at,omitempty"`
-	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
-	TTLSeconds  int       `json:"ttl_seconds,omitempty"`
-	Worker      string    `json:"worker,omitempty"`
+	Op            string    `json:"op"`
+	LoopTS        string    `json:"loop_ts,omitempty"`
+	Lane          string    `json:"lane"`
+	Tree          []string  `json:"tree,omitempty"`
+	PID           int       `json:"pid,omitempty"`
+	Mode          string    `json:"mode,omitempty"` // "exclusive", "advisory", "shared", "readonly"
+	AcquiredAt    time.Time `json:"acquired_at,omitempty"`
+	HeartbeatAt   time.Time `json:"heartbeat_at,omitempty"`
+	TTLSeconds    int       `json:"ttl_seconds,omitempty"`
+	Worker        string    `json:"worker,omitempty"`
+	pidPresent    bool
+	workerPresent bool
+	timestamp     time.Time
+	checkpoint    *[]LaneJournalEntry
 }
 
 func parseFlexibleTree(raw json.RawMessage) []string {
@@ -579,37 +597,76 @@ func parseFlexibleTime(raw []byte) time.Time {
 
 func (e *LaneJournalEntry) UnmarshalJSON(data []byte) error {
 	type rawEntry struct {
-		Op    string          `json:"op"`
-		Lane  string          `json:"lane"`
-		Tree  json.RawMessage `json:"tree,omitempty"`
-		Lease *struct {
-			Tree json.RawMessage `json:"tree,omitempty"`
-		} `json:"lease,omitempty"`
-		PID         int             `json:"pid,omitempty"`
-		Mode        string          `json:"mode,omitempty"`
-		AcquiredAt  json.RawMessage `json:"acquired_at,omitempty"`
-		HeartbeatAt json.RawMessage `json:"heartbeat_at,omitempty"`
-		TTLSeconds  int             `json:"ttl_seconds,omitempty"`
-		Worker      string          `json:"worker,omitempty"`
+		Op          string              `json:"op"`
+		Lane        string              `json:"lane"`
+		LoopTS      json.RawMessage     `json:"loop_ts"`
+		Tree        json.RawMessage     `json:"tree,omitempty"`
+		Lease       *LaneJournalEntry   `json:"lease,omitempty"`
+		Leases      *[]LaneJournalEntry `json:"leases"`
+		PID         *int                `json:"pid,omitempty"`
+		Mode        string              `json:"mode,omitempty"`
+		AcquiredAt  json.RawMessage     `json:"acquired_at,omitempty"`
+		HeartbeatAt json.RawMessage     `json:"heartbeat_at,omitempty"`
+		TTLSeconds  int                 `json:"ttl_seconds,omitempty"`
+		Worker      string              `json:"worker,omitempty"`
+		Holder      *string             `json:"holder"`
+		TS          json.RawMessage     `json:"ts"`
 	}
 	var raw rawEntry
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	e.Op = raw.Op
-	e.Lane = raw.Lane
-	e.PID = raw.PID
-	e.Mode = raw.Mode
-	e.TTLSeconds = raw.TTLSeconds
-	e.Worker = raw.Worker
-	e.AcquiredAt = parseFlexibleTime(raw.AcquiredAt)
-	e.HeartbeatAt = parseFlexibleTime(raw.HeartbeatAt)
-
-	if len(raw.Tree) > 0 {
-		e.Tree = parseFlexibleTree(raw.Tree)
+	if raw.Lease != nil {
+		*e = *raw.Lease
+		e.Op = raw.Op
+		e.timestamp = parseFlexibleTime(raw.TS)
+		e.checkpoint = raw.Leases
+		return nil
 	}
-	if len(e.Tree) == 0 && raw.Lease != nil && len(raw.Lease.Tree) > 0 {
-		e.Tree = parseFlexibleTree(raw.Lease.Tree)
+	e.Op = raw.Op
+	if raw.Lease == nil {
+		e.Lane = raw.Lane
+	}
+	if len(raw.LoopTS) > 0 && raw.Lease == nil {
+		var identity any
+		if err := json.Unmarshal(raw.LoopTS, &identity); err != nil {
+			return err
+		}
+		switch value := identity.(type) {
+		case string:
+			e.LoopTS = value
+		case float64:
+			if value != 0 {
+				e.LoopTS = strconv.FormatFloat(value, 'f', -1, 64)
+			}
+		}
+	}
+	if raw.PID != nil && (raw.Lease == nil || !e.pidPresent) {
+		e.PID, e.pidPresent = *raw.PID, true
+	}
+	if e.Mode == "" {
+		e.Mode = raw.Mode
+	}
+	if e.TTLSeconds == 0 {
+		e.TTLSeconds = raw.TTLSeconds
+	}
+	if e.Worker == "" {
+		e.Worker = raw.Worker
+	}
+	if raw.Holder != nil && (raw.Lease == nil || !e.workerPresent) {
+		e.Worker, e.workerPresent = *raw.Holder, true
+	}
+	if e.AcquiredAt.IsZero() {
+		e.AcquiredAt = parseFlexibleTime(raw.AcquiredAt)
+	}
+	if e.HeartbeatAt.IsZero() {
+		e.HeartbeatAt = parseFlexibleTime(raw.HeartbeatAt)
+	}
+	e.timestamp = parseFlexibleTime(raw.TS)
+	e.checkpoint = raw.Leases
+
+	if len(raw.Tree) > 0 && raw.Lease == nil {
+		e.Tree = parseFlexibleTree(raw.Tree)
 	}
 	return nil
 }
@@ -623,6 +680,9 @@ type HeldLease struct {
 }
 
 func leaseKey(entry LaneJournalEntry) string {
+	if entry.LoopTS != "" {
+		return fmt.Sprintf("dos:%d:%s%s", len(entry.LoopTS), entry.LoopTS, entry.Lane)
+	}
 	lane := strings.ToLower(strings.TrimSpace(entry.Lane))
 	if len(entry.Tree) > 0 {
 		trees := append([]string(nil), entry.Tree...)
@@ -656,41 +716,62 @@ func sameTrees(t1, t2 []string) bool {
 
 // DiscoverHeldLeases inspects the workspace lane journal (.dos/lane-journal.jsonl)
 // and returns all currently held leases with their lane, tree, and PID.
-func DiscoverHeldLeases(workspace string) ([]HeldLease, error) {
+func readActiveLaneJournal(workspace string) (map[string]LaneJournalEntry, error) {
 	journalPath := filepath.Join(workspace, ".dos", "lane-journal.jsonl")
 	f, err := os.Open(journalPath)
 	if err != nil {
-		return nil, nil // No journal or cannot open; fail-open with nil
+		return nil, fmt.Errorf("read lane journal: %w", err)
 	}
 	defer f.Close()
 
 	active := make(map[string]LaneJournalEntry)
+	corruptFragments := 0
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || !strings.HasPrefix(line, "{") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "{") {
+			corruptFragments++
 			continue
 		}
 		var entry LaneJournalEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, fmt.Errorf("decode lane journal: %w", err)
+		}
+		op := strings.ToUpper(strings.TrimSpace(entry.Op))
+		if op == "CHECKPOINT" {
+			if entry.checkpoint == nil {
+				return nil, fmt.Errorf("lane journal CHECKPOINT lacks a lease snapshot")
+			}
+			active = make(map[string]LaneJournalEntry)
+			for _, lease := range *entry.checkpoint {
+				if strings.TrimSpace(lease.Lane) == "" && lease.LoopTS == "" {
+					return nil, fmt.Errorf("checkpoint lease lacks an identity: %w", os.ErrInvalid)
+				}
+				active[leaseKey(lease)] = lease
+			}
 			continue
 		}
 		lane := strings.TrimSpace(entry.Lane)
-		if lane == "" {
+		if lane == "" && entry.LoopTS == "" {
 			continue
 		}
-		op := strings.ToUpper(strings.TrimSpace(entry.Op))
 		switch op {
-		case "ACQUIRE":
+		case "ACQUIRE", "RECONCILE":
 			active[leaseKey(entry)] = entry
-		case "RELEASE":
+		case "RELEASE", "SCAVENGE":
 			relKey := leaseKey(entry)
 			if _, exists := active[relKey]; exists {
 				delete(active, relKey)
-			} else {
+			} else if entry.LoopTS == "" {
 				for k, cur := range active {
+					if cur.LoopTS != "" {
+						continue
+					}
 					if !strings.EqualFold(cur.Lane, lane) {
 						continue
 					}
@@ -704,12 +785,27 @@ func DiscoverHeldLeases(workspace string) ([]HeldLease, error) {
 				}
 			}
 		case "HEARTBEAT", "TOUCH":
+			if entry.LoopTS != "" {
+				key := leaseKey(entry)
+				if cur, ok := active[key]; ok {
+					if !entry.HeartbeatAt.IsZero() {
+						cur.HeartbeatAt = entry.HeartbeatAt
+					} else if !entry.timestamp.IsZero() {
+						cur.HeartbeatAt = entry.timestamp
+					}
+					active[key] = cur
+				}
+				continue
+			}
 			matchKey := ""
 			candKey := leaseKey(entry)
 			if _, ok := active[candKey]; ok {
 				matchKey = candKey
 			} else {
 				for k, cur := range active {
+					if cur.LoopTS != "" {
+						continue
+					}
 					if strings.EqualFold(cur.Lane, lane) {
 						if entry.PID > 0 && cur.PID == entry.PID {
 							matchKey = k
@@ -756,7 +852,50 @@ func DiscoverHeldLeases(workspace string) ([]HeldLease, error) {
 				}
 				active[candKey] = entry
 			}
+		case "ADOPT":
+			key := leaseKey(entry)
+			if entry.LoopTS == "" {
+				key = ""
+				for candidate, cur := range active {
+					if cur.LoopTS == "" && strings.EqualFold(cur.Lane, lane) {
+						if key != "" {
+							return nil, fmt.Errorf("ambiguous legacy lease adoption")
+						}
+						key = candidate
+					}
+				}
+			}
+			if cur, ok := active[key]; ok {
+				if entry.pidPresent {
+					cur.PID = entry.PID
+				}
+				if entry.workerPresent {
+					cur.Worker = entry.Worker
+				}
+				if !entry.HeartbeatAt.IsZero() {
+					cur.HeartbeatAt = entry.HeartbeatAt
+				} else if !entry.timestamp.IsZero() {
+					cur.HeartbeatAt = entry.timestamp
+				}
+				active[key] = cur
+			}
 		}
+	}
+
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scan lane journal: %w", err)
+	}
+	if corruptFragments > 0 {
+		log.Printf("[debtlane:lease] preserved legacy journal fragment policy: skipped=%d", corruptFragments)
+	}
+	return active, nil
+}
+
+// DiscoverHeldLeases projects structural journal state through the existing native liveness policy.
+func DiscoverHeldLeases(workspace string) ([]HeldLease, error) {
+	active, err := readActiveLaneJournal(workspace)
+	if err != nil {
+		return nil, err
 	}
 
 	var held []HeldLease
@@ -857,121 +996,165 @@ func DiscoverHeldTrees(workspace string) (map[string][]string, error) {
 	trees := make(map[string][]string)
 	for _, l := range leases {
 		lower := strings.ToLower(strings.TrimSpace(l.Lane))
-		if lower != "" && len(l.Tree) > 0 {
+		if len(l.Tree) == 0 {
+			return nil, fmt.Errorf("active lease %q has unknown tree scope: %w", l.Lane, os.ErrInvalid)
+		}
+		if len(l.Tree) > 0 {
 			trees[lower] = append(trees[lower], l.Tree...)
 		}
 	}
 	return trees, nil
 }
 
+// appendLaneJournal keeps the journal inode inside the cross-runtime append critical section.
+func appendLaneJournal(workspace string, action func(*os.File) error) error {
+	dosDir := filepath.Join(workspace, ".dos")
+	if err := os.MkdirAll(dosDir, 0o755); err != nil {
+		return err
+	}
+	release, err := processlock.Try(dosDir, "lane-journal.jsonl.append.lock")
+	if err != nil {
+		return err
+	}
+	defer release()
+	// unbounded: only the checkpoint compactor may replace this shared journal, under this same append mutex.
+	f, err := os.OpenFile(filepath.Join(dosDir, "lane-journal.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return action(f)
+}
+
+func writeLaneJournalEntry(f *os.File, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	n, err := f.Write(data)
+	if err == nil && n != len(data) {
+		return fmt.Errorf("short lane journal append: %d of %d", n, len(data))
+	}
+	if err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// nativeLaneLoopID is a versioned logical API identity, not an OS process-incarnation claim.
+func nativeLaneLoopID(lane string, paths []string, pid int) string {
+	canonical := []string{strings.ToLower(strings.TrimSpace(lane)), strconv.Itoa(pid)}
+	trees := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if strings.TrimSpace(path) != "" {
+			canonicalPath := filepath.ToSlash(filepath.Clean(path))
+			if runtime.GOOS == "windows" {
+				canonicalPath = strings.ToLower(canonicalPath)
+			}
+			trees = append(trees, canonicalPath)
+		}
+	}
+	sort.Strings(trees)
+	canonical = append(canonical, trees...)
+	return fmt.Sprintf("fak-debtlane-v1:%x", sha256.Sum256([]byte(strings.Join(canonical, "\x00"))))
+}
+
 // AcquireTreeLease records an ACQUIRE entry with exact tree in .dos/lane-journal.jsonl.
 func AcquireTreeLease(workspace, lane string, paths []string, pid int) error {
-	dosDir := filepath.Join(workspace, ".dos")
-	if err := os.MkdirAll(dosDir, 0o755); err != nil {
-		return err
-	}
-	journalPath := filepath.Join(dosDir, "lane-journal.jsonl")
-	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	payload := struct {
-		Op         string   `json:"op"`
-		Lane       string   `json:"lane"`
-		Tree       []string `json:"tree,omitempty"`
-		PID        int      `json:"pid,omitempty"`
-		Mode       string   `json:"mode"`
-		AcquiredAt string   `json:"acquired_at"`
-	}{
-		Op:         "ACQUIRE",
-		Lane:       lane,
-		Tree:       paths,
-		PID:        pid,
-		Mode:       "exclusive",
-		AcquiredAt: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = f.Write(data)
-	return err
+	lane = strings.ToLower(strings.TrimSpace(lane))
+	return appendLaneJournal(workspace, func(f *os.File) error {
+		lease := map[string]any{
+			"loop_ts": nativeLaneLoopID(lane, paths, pid), "lane": lane,
+			"tree": paths, "pid": pid, "mode": "exclusive", "acquired_at": time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		entry := make(map[string]any, len(lease)+2)
+		for key, value := range lease {
+			entry[key] = value
+		}
+		entry["op"], entry["lease"] = "ACQUIRE", lease
+		return writeLaneJournalEntry(f, entry)
+	})
 }
 
-// ReleaseTreeLease records a RELEASE entry for the lane and tree in .dos/lane-journal.jsonl.
+// ReleaseTreeLease records releases for the exact existing IDs selected by the legacy API contract.
 func ReleaseTreeLease(workspace, lane string, paths []string, pid int) error {
-	dosDir := filepath.Join(workspace, ".dos")
-	if err := os.MkdirAll(dosDir, 0o755); err != nil {
-		return err
-	}
-	journalPath := filepath.Join(dosDir, "lane-journal.jsonl")
-	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	payload := struct {
-		Op   string   `json:"op"`
-		Lane string   `json:"lane"`
-		Tree []string `json:"tree,omitempty"`
-		PID  int      `json:"pid,omitempty"`
-	}{
-		Op:   "RELEASE",
-		Lane: lane,
-		Tree: paths,
-		PID:  pid,
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = f.Write(data)
-	return err
+	return appendLaneJournal(workspace, func(f *os.File) error {
+		active, err := readActiveLaneJournal(workspace)
+		if err != nil {
+			return err
+		}
+		var matching []LaneJournalEntry
+		for _, cur := range active {
+			if !strings.EqualFold(strings.TrimSpace(cur.Lane), strings.TrimSpace(lane)) {
+				continue
+			}
+			if pid > 0 && (cur.LoopTS != "" && cur.PID != pid || cur.LoopTS == "" && cur.PID > 0 && cur.PID != pid) {
+				continue
+			}
+			if len(paths) > 0 {
+				if cur.LoopTS == "" && !sameTrees(paths, cur.Tree) {
+					continue
+				}
+				if cur.LoopTS != "" && nativeLaneLoopID(cur.Lane, paths, cur.PID) != nativeLaneLoopID(cur.Lane, cur.Tree, cur.PID) {
+					continue
+				}
+			}
+			if cur.LoopTS != "" && cur.LoopTS != nativeLaneLoopID(cur.Lane, cur.Tree, cur.PID) {
+				return fmt.Errorf("release matches a foreign lease identity: %w", os.ErrInvalid)
+			}
+			matching = append(matching, cur)
+		}
+		for _, cur := range matching {
+			if err := writeLaneJournalEntry(f, map[string]any{
+				"op": "RELEASE", "loop_ts": cur.LoopTS, "lane": cur.Lane, "tree": cur.Tree, "pid": cur.PID,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// TouchLaneLease appends a HEARTBEAT entry for the given lane and PID to .dos/lane-journal.jsonl.
+// TouchLaneLease refreshes existing matching identities without inventing a new hold.
 func TouchLaneLease(workspace, lane string, pid int) error {
-	dosDir := filepath.Join(workspace, ".dos")
-	if err := os.MkdirAll(dosDir, 0o755); err != nil {
-		return err
-	}
-	journalPath := filepath.Join(dosDir, "lane-journal.jsonl")
-	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	payload := struct {
-		Op          string `json:"op"`
-		Lane        string `json:"lane"`
-		PID         int    `json:"pid"`
-		HeartbeatAt string `json:"heartbeat_at"`
-	}{
-		Op:          "HEARTBEAT",
-		Lane:        lane,
-		PID:         pid,
-		HeartbeatAt: time.Now().Format(time.RFC3339),
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = f.Write(data)
-	return err
+	return appendLaneJournal(workspace, func(f *os.File) error {
+		active, err := readActiveLaneJournal(workspace)
+		if err != nil {
+			return err
+		}
+		var matching []LaneJournalEntry
+		for _, cur := range active {
+			if strings.EqualFold(strings.TrimSpace(cur.Lane), strings.TrimSpace(lane)) && (pid == 0 || cur.PID == pid) {
+				if cur.LoopTS != "" && cur.LoopTS != nativeLaneLoopID(cur.Lane, cur.Tree, cur.PID) {
+					return fmt.Errorf("heartbeat matches a foreign lease identity: %w", os.ErrInvalid)
+				}
+				matching = append(matching, cur)
+			}
+		}
+		if len(matching) == 0 {
+			return fmt.Errorf("heartbeat has no existing lane identity: %w", os.ErrNotExist)
+		}
+		if pid == 0 && len(matching) != 1 {
+			return fmt.Errorf("heartbeat owner is ambiguous: %w", os.ErrInvalid)
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		for _, cur := range matching {
+			if err := writeLaneJournalEntry(f, map[string]any{
+				"op": "HEARTBEAT", "loop_ts": cur.LoopTS, "lane": cur.Lane, "tree": cur.Tree, "pid": cur.PID, "heartbeat_at": now,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // RenderWaves formats a WavePlan as human-readable terminal text.
 func RenderWaves(plan WavePlan, pg ProductionGrade) string {
+	if plan.BlockedCode != "" {
+		return fmt.Sprintf("Wave plan held: %s: %s\n", plan.BlockedCode, plan.ObservationError)
+	}
 	var b strings.Builder
 	b.WriteString("=== FAK DEBT ORCHESTRATOR: CONCURRENT SAFE WAVE PLAN ===\n")
 	b.WriteString(fmt.Sprintf("Campaign Projection: Grade %s (%.1f%%) → Grade %s (%.1f%%) [Potential Lift: +%.1f pts]\n",
