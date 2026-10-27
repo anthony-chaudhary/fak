@@ -1063,7 +1063,7 @@ func toolDescriptors() []map[string]any {
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_admit",
-			Description: "Submit tool RESULTS your own client executed, to run them through the fak kernel's result-side stack (context-MMU quarantine + IFC source-stamp / per-trace taint ledger) BEFORE admitting them to context. Wire-proxied sessions are gated automatically; fak_admit is for out-of-band client tool results. A poisoned/secret-shaped result comes back QUARANTINE with the bytes paged out; the session's taint high-water mark is raised so a later egress is gated. Prefer {items:[{tool,result},...]} for independent results; {tool,result,trace_id} remains the unchanged single-result form. Every batch item crosses the safety floor independently and returns in request order, so one refusal never drops its peers. This arms the exfil floor on the path where YOU run the tool (the complement of fak_adjudicate).",
+			Description: "Admit out-of-band client tool RESULTS via the fak kernel's context-MMU quarantine + IFC source-stamp/per-trace taint ledger BEFORE context admission. Wire-proxied sessions are gated automatically. Poisoned/secret-shaped results return QUARANTINE with bytes paged out; the raised session taint high-water mark gates later egress. Prefer {items:[{tool,result},...]} for independent results; single {tool,result,trace_id} is unchanged. Each item crosses the safety floor independently, returning in request order; refusals never drop peers. Complements fak_adjudicate, arming the exfil floor when YOU run tools.",
 			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -1082,7 +1082,7 @@ func toolDescriptors() []map[string]any {
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_changes",
-			Description: "Drain the cross-agent 'what changed' feed: the typed write Mutations and Revocations observed since your cursor, so you can re-plan or evict your own cache when another agent changed or refuted shared data. Pass {since: <cursor>} (0 = everything retained); returns the events and your next cursor.",
+			Description: "Drain the cross-agent 'what changed' feed of typed write Mutations and Revocations since {since:<cursor>} (0 = all retained), to re-plan or evict your cache after peers change or refute shared data. Returns events and next cursor.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"since":{"type":"integer","description":"the Seq cursor of the last event you saw (0 = from the start of the retained window)"}},"additionalProperties":false}`),
 			Annotations: readOnlyToolAnnotations(),
 		}.toMap(),
@@ -1127,13 +1127,13 @@ func toolDescriptors() []map[string]any {
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_memory_drivers",
-			Description: "List the built-in memory STRATEGIES (recall/render/clean/compact/dream). Each is a composable query in the memq algebra (scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune), not a hardcoded function — 'build SQL, not a specific query'. Returns each driver's name, doc, and compiled plan so you can see the pipeline and author your own.",
+			Description: "List built-in memory STRATEGIES (recall/render/clean/compact/dream): composable memq query plans, not hardcoded functions (scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune). Returns driver names, docs, compiled plans to inspect or author pipelines.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			Annotations: readOnlyToolAnnotations(),
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_memory_explain",
-			Description: "EXPLAIN a memory query as a plan WITHOUT executing it — every step, which steps are effects, and which mutate durable state (and so are proposal-only). Pass {driver} for a built-in, or {query} with an inline authored memq Query ({intent, ops:[{kind,...}]}). This is the 'step through it before you run it' surface.",
+			Description: "EXPLAIN a memory query plan WITHOUT execution: each step, effects, and durable mutations (proposal-only). Pass {driver} for a built-in or {query} for an inline authored memq Query ({intent, ops:[{kind,...}]}).",
 			InputSchema: memoryInputSchema,
 			Annotations: readOnlyToolAnnotations(),
 		}.toMap(),

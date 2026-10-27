@@ -70,6 +70,7 @@ func TestCanonicalToolNormalization_Table(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestCanonicalToolNormalization(t *testing.T) {
 	installEmptyTestLeaseAuthority(t)
 	abi.ResetForTest()
@@ -103,8 +104,9 @@ func TestCanonicalToolNormalization(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Use the positive read grammar so lease admission does not obscure namespace normalization.
 	// 1. functions.exec_command resolves against canonical "exec_command" allow rule
-	wv, _, err := srv.adjudicate(ctx, "functions.exec_command", `{"command":"echo 1"}`, true, "", "trace-1")
+	wv, _, err := srv.adjudicate(ctx, "functions.exec_command", `{"command":"git status --short"}`, true, "", "trace-1")
 	if err != nil {
 		t.Fatalf("adjudicate(functions.exec_command): %v", err)
 	}
@@ -131,12 +133,31 @@ func TestCanonicalToolNormalization(t *testing.T) {
 	}
 
 	// 4. OpenCode single-prefixed bash_exec_command resolves against canonical "exec_command"
-	wv, _, err = srv.adjudicate(ctx, "bash_exec_command", `{"command":"pwd"}`, true, "", "trace-4")
+	wv, _, err = srv.adjudicate(ctx, "bash_exec_command", `{"command":"git status --short"}`, true, "", "trace-4")
 	if err != nil {
 		t.Fatalf("adjudicate(bash_exec_command): %v", err)
 	}
 	if wv.Kind != "ALLOW" {
 		t.Errorf("bash_exec_command verdict = %q, want ALLOW", wv.Kind)
+	}
+
+	// Namespace normalization must not turn a read_only hint into proof for opaque shell commands.
+	for _, tc := range []struct {
+		tool string
+		args string
+	}{
+		{"functions.exec_command", `{"command":"echo 1"}`},
+		{"bash_exec_command", `{"command":"pwd"}`},
+	} {
+		t.Run(tc.tool+"_unknown_footprint", func(t *testing.T) {
+			wv, _, err := srv.adjudicate(ctx, tc.tool, tc.args, true, "", "trace-opaque")
+			if err != nil {
+				t.Fatalf("adjudicate(%s): %v", tc.tool, err)
+			}
+			if wv.Kind != "DENY" || wv.By != leaseAdmissionBy || wv.Detail["admission_failure"] != string(leaseFailureUnknownFootprint) {
+				t.Errorf("%s opaque-command verdict = %+v, want unknown-footprint lease denial", tc.tool, wv)
+			}
+		})
 	}
 
 	// 5. Unregistered tool is denied as expected
