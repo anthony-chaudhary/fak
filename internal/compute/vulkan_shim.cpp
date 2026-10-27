@@ -23,6 +23,7 @@
 
 #include "vulkan_backend.h"
 #include "vulkan_memory_guard.h"
+#include "vulkan_batch_range_hazards.h"
 #include "vulkan_spirv_admission.h"
 
 using fak::vulkan::spirv::swigluPushConstantABI;
@@ -1710,6 +1711,11 @@ void recordComputeBarrier(VkCommandBuffer cmd) {
 // infer hazard metadata it was not handed; an unarmed or incomplete window falls closed.
 int g_batchHazardsArmed = 0;
 
+// Native recording-time proof, independent of the legacy flush-time Go plan.
+// Explicit qualification gate; unsupported work always keeps the old barrier.
+bool g_nativeBatchHazards = false;
+fak::vulkan::BatchRangeHazards g_nativeRanges;
+
 // Per-dispatch sync verdicts keyed by the dispatch's ordinal within the batch window. The
 // key is the op ordinal the shim itself assigns (g_batchOps BEFORE the increment), so a
 // verdict can only ever elide the exact dispatch it was computed for. A missing entry
@@ -1730,6 +1736,12 @@ bool nextHazardSync(int ordinal) {
 // whose Go-side plan already proved it disjoint from its predecessor needs no device fence
 // at all, so the elided case records nothing. The coarse path records the global barrier.
 void recordDispatchBarrier(VkCommandBuffer cmd, int ordinal) {
+    if (g_nativeBatchHazards) {
+        // This entry also records copies: never infer compute access here.
+        g_nativeRanges.reset();
+        recordComputeBarrier(cmd);
+        return;
+    }
     if (g_batchHazardsArmed && !nextHazardSync(ordinal)) {
         dp_inc(g_dp.barriersElided);
         if (g_tsOn) ++g_tsBarriersElided;
@@ -1933,6 +1945,7 @@ void batchBegin() {
 	tsBatchBegin(g_batchCmd);
 	g_batching = true;
 	g_batchOps = 0;
+    g_nativeRanges.reset();
 	g_batchHasV41 = g_stepBatch;
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
@@ -2072,6 +2085,7 @@ void batchCycle() {
     g_batchCmd = VK_NULL_HANDLE;
     g_batching = false;
     g_batchOps = 0;
+    g_nativeRanges.reset();
     g_batchD2DCount = 0;
     g_batchD2DBytes = 0;
     g_batchD2DValid = true;
@@ -2129,6 +2143,7 @@ void batchFlush() {
     // (endSubmitWait fenced), so every parked buffer is now safe to return to the pool.
 	g_batching = false;
 	g_batchOps = 0;
+    g_nativeRanges.reset();
 	g_batchHasV41 = false;
 	g_batchD2DCount = 0;
 	g_batchD2DBytes = 0;
@@ -2549,6 +2564,78 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
 }
 
 // dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
+// Exact private range proof for positive F32 panels only. No dtype inference,
+// decode selector, status-owning kernel or optional fused shader is admitted.
+template <typename Handle> uint64_t nativeRangeKey(Handle handle) {
+    static_assert(sizeof(Handle) <= sizeof(uint64_t), "native handle must fit range identity");
+    uint64_t key = 0;
+    std::memcpy(&key, &handle, sizeof(handle));
+    return key;
+}
+bool nativePanelRanges(Kernel& k, Buffer* const* bufs, const void* pc, uint32_t pcsize,
+                       uint32_t groupsX, uint32_t groupsY,
+                       fak::vulkan::BatchRangeAccess* ranges, size_t& count) {
+    count = 0;
+    if (g_stepBatch || g_batchHazardsArmed || !pc || groupsY != 1 || k.pcsize != pcsize) return false;
+    uint64_t elements[7]{};
+    bool writes[7]{};
+    if (&k == &g_kern[K_RMSNORM]) {
+        struct Push { int32_t rows, n; float eps; } p{};
+        if (pcsize != sizeof(p) || k.nbuf != 3) return false;
+        std::memcpy(&p, pc, sizeof(p));
+        if (p.rows < 2 || p.n <= 0 || groupsX != uint32_t(p.rows)) return false;
+        elements[0] = elements[2] = uint64_t(p.rows) * uint64_t(p.n);
+        elements[1] = uint64_t(p.n);
+        writes[2] = true;
+        count = 3;
+    } else {
+        int projections = &k == &g_kern[K_MATMUL] ? 1 :
+            &k == &g_kern[K_MATMUL2] ? 2 : &k == &g_kern[K_MATMUL3] ? 3 : 0;
+        if (!projections || k.nbuf != projections * 2 + 1 || pcsize != uint32_t((projections + 2) * sizeof(int32_t))) return false;
+        int32_t p[5]{};
+        std::memcpy(p, pc, pcsize);
+        const int32_t in = p[projections], tokens = p[projections + 1];
+        if (in <= 0 || tokens < 2 || groupsX != uint32_t(tokens)) return false;
+        uint64_t total = 0;
+        for (int i = 0; i < projections; ++i) {
+            if (p[i] <= 0) return false;
+            total += uint64_t(p[i]);
+            elements[i] = uint64_t(p[i]) * uint64_t(in);
+            elements[projections + 1 + i] = uint64_t(p[i]) * uint64_t(tokens);
+            writes[projections + 1 + i] = true; // includes the shader's chunk RMW
+        }
+        if (total > INT32_MAX) return false; // signed push-constant sum in matmul2/3
+        elements[projections] = uint64_t(tokens) * uint64_t(in);
+        count = size_t(projections * 2 + 1);
+    }
+    for (size_t i = 0; i < count; ++i) {
+        const Buffer* b = bufs[i];
+        if (!elements[i] || elements[i] > UINT32_MAX ||
+            elements[i] > std::numeric_limits<size_t>::max() / sizeof(float) ||
+            !b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE ||
+            b->bytes > std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset) return false;
+        const uint64_t bytes = elements[i] * sizeof(float);
+        if (bytes > b->bytes) return false;
+        ranges[i] = {nativeRangeKey(b->buf), nativeRangeKey(b->mem),
+            uint64_t(b->memoryOffset), uint64_t(b->memoryOffset) + bytes, writes[i]};
+    }
+    return true;
+}
+void recordNativePanelDependency(Kernel& k, Buffer* const* bufs, const void* pc, uint32_t pcsize,
+                                 uint32_t groupsX, uint32_t groupsY) {
+    fak::vulkan::BatchRangeAccess ranges[7]{};
+    size_t count = 0;
+    const bool known = nativePanelRanges(k, bufs, pc, pcsize, groupsX, groupsY, ranges, count);
+    const bool sync = g_nativeRanges.record(nativeRangeKey(g_batchCmd), g_batchOps, ranges, count, known);
+    if (g_batchOps > 0) {
+        if (sync) recordComputeBarrier(g_batchCmd);
+        else {
+            dp_inc(g_dp.barriersElided);
+            if (g_tsOn) ++g_tsBarriersElided;
+        }
+    }
+}
+
 bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1, bool forceChecked = false, Buffer* initializedStatus = nullptr, uint32_t statusBytes = 16) {
     if (g_v41SubmissionPendingFailure) return false;
     // Only these concrete synchronous kernels may request the bounded status
@@ -2628,12 +2715,16 @@ bool dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         // When the Go ledger armed exact hazards, it also queued this dispatch's sync
         // verdict by ordinal; an elided verdict (proven disjoint) records no device fence.
         if (initializedStatus != nullptr) {
+            g_nativeRanges.reset(); // fill/status work has no admitted access proof
             // Step batch only: the same fill-then-conservative-dependency contract
             // as the one-shot path, recorded; the status readback submits it.
             if (g_batchOps > 0) recordTransferBarrier(g_batchCmd);
             vkCmdFillBuffer(g_batchCmd, initializedStatus->buf, 0, statusBytes, UINT32_MAX);
             tsAfterDispatch(g_batchCmd, kTsFill, 0, 0);
             recordComputeBarrier(g_batchCmd);
+        } else if (g_nativeBatchHazards) {
+            // The native proof runs BEFORE recording, not at batch flush.
+            recordNativePanelDependency(k, bufs, pc, pcsize, groupsX, groupsY);
         } else if (g_batchOps > 0) {
             recordDispatchBarrier(g_batchCmd, g_batchOps);
         }
@@ -3215,6 +3306,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_q6k_matmul = 0;
     g_have_q6k_matmul_panel = 0;
     g_have_q5k_matmul_panel = 0;
+    g_nativeBatchHazards = false;
+    g_nativeRanges.reset();
     g_have_qwen35_residual_norm = 0;
     g_qwen35Q8PairEnabled = false;
     g_have_q5k_matmul = 0;
@@ -3736,6 +3829,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         g_have_qwen35_residual_norm = buildKernel(g_kern[K_QWEN35_RESIDUAL_NORM],
             P("qwen35_residual_norm.spv"), 4, 12) ? 1 : 0;
     }
+    const char* nativeHazards = std::getenv("FAK_VULKAN_NATIVE_BATCH_HAZARDS");
+    g_nativeBatchHazards = nativeHazards && std::strcmp(nativeHazards, "1") == 0;
     const char* q6Panel = std::getenv("FAK_VULKAN_Q6K_PANEL");
     if (g_have_q6k_matmul && q6Panel && std::strcmp(q6Panel, "1") == 0 &&
         limits.maxComputeWorkGroupInvocations >= 256 && limits.maxComputeWorkGroupSize[0] >= 256 &&
@@ -5035,7 +5130,52 @@ void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }
 void fvk_batch_cycle(void) { dp_inc(g_dp.batchFlushes); batchCycle(); }
 int fvk_batch_inflight(void) { return g_inflight.active ? 1 : 0; }
 bool fvk_batch_active(void) { return g_batching; }
-void fvk_batch_hazards_arm(int armed) { g_batchHazardsArmed = armed != 0 ? 1 : 0; }
+// Pure native proof witness: no Vulkan calls, capability changes or runtime gate
+// mutation. Return the first failed case for the tagged Go source test.
+int fvk_native_batch_hazards_self_check(void) {
+    using fak::vulkan::BatchRangeAccess;
+    fak::vulkan::BatchRangeHazards h;
+    BatchRangeAccess ar{1, 10, 0, 64, false}, aw = ar;
+    aw.writes = true;
+    BatchRangeAccess br{2, 20, 0, 64, false};
+    if (h.record(1, 0, &ar, 1, true) || h.record(1, 1, &ar, 1, true)) return 1;
+    if (!h.record(1, 2, &aw, 1, true)) return 2; // WAR
+    if (!h.record(1, 3, &aw, 1, true)) return 3; // WAW
+    if (!h.record(1, 4, &ar, 1, true)) return 4; // RAW
+    h.record(1, 0, &aw, 1, true);
+    if (h.record(1, 1, &br, 1, true) || !h.record(1, 2, &ar, 1, true)) return 5; // nonadjacent RAW
+    BatchRangeAccess alias{3, 10, 32, 96, false};
+    h.record(1, 0, &aw, 1, true);
+    if (!h.record(1, 1, &alias, 1, true)) return 6; // different handles, same allocation
+    alias.begin = 64; alias.end = 128;
+    h.record(1, 0, &aw, 1, true);
+    if (h.record(1, 1, &alias, 1, true)) return 7; // exact touching ends are disjoint
+    alias.buffer = 1;
+    h.record(1, 0, &aw, 1, true);
+    if (!h.record(1, 1, &alias, 1, true)) return 8; // equal native buffer, conflicting metadata
+    h.record(1, 0, &ar, 1, true);
+    if (!h.record(1, 1, nullptr, 0, false) || !h.record(1, 2, &br, 1, true)) return 9;
+    if (!h.record(1, 4, &br, 1, true) || !h.record(2, 5, &br, 1, true)) return 10;
+    if (h.record(2, 0, &br, 1, true)) return 11; // reused command/new batch
+    h.reset();
+    if (!h.record(2, 1, &br, 1, true)) return 12;
+    for (int i = 0; i < 64; ++i) {
+        BatchRangeAccess r{uint64_t(100 + i), uint64_t(100 + i), 0, 4, false};
+        if (h.record(3, i, &r, 1, true)) return 13;
+    }
+    if (!h.record(3, 64, &br, 1, true) || h.record(3, 65, &br, 1, true)) return 14;
+    BatchRangeAccess internalAlias[2] = {ar, aw};
+    h.record(1, 0, internalAlias, 2, true);
+    if (!h.record(1, 1, &br, 1, true)) return 15;
+    BatchRangeAccess invalid{1, 10, UINT64_MAX, 1, false};
+    h.record(1, 0, &invalid, 1, true);
+    if (!h.record(1, 1, &br, 1, true)) return 16;
+    h.record(1, 0, &ar, 65, true); // must not inspect an oversized declaration
+    if (!h.record(1, 1, &br, 1, true)) return 17;
+    return 0;
+}
+int fvk_native_batch_hazards_enabled(void) { return g_nativeBatchHazards ? 1 : 0; }
+void fvk_batch_hazards_arm(int armed) { g_batchHazardsArmed = armed != 0 ? 1 : 0; g_nativeRanges.reset(); }
 int fvk_batch_hazards_armed(void) { return g_batchHazardsArmed; }
 /* The ordinal the NEXT recorded dispatch will carry. Because a barrier is emitted before
  * op k against op k-1, that barrier's verdict key is k = the value returned here. A Go
@@ -5044,9 +5184,11 @@ int fvk_batch_hazards_armed(void) { return g_batchHazardsArmed; }
 int fvk_batch_next_ordinal(void) { return g_batchOps; }
 void fvk_batch_hazards_set(int ordinal, int needs_sync) {
     g_batchHazardSync[ordinal] = needs_sync != 0 ? 1 : 0;
+    g_nativeRanges.reset();
 }
 void fvk_batch_hazards_reset(void) {
     g_batchHazardSync.clear();
+    g_nativeRanges.reset();
 }
 uint64_t fvk_batch_barriers_elided(void) {
     return g_dp.barriersElided.load(std::memory_order_relaxed);

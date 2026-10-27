@@ -952,6 +952,12 @@ bool fvk_batch_active(void);
  * coarse barrier for the next and every subsequent batch (fail closed). The flag is
  * process-wide and defaults to 0, so an unarmed build is byte-identical to the prior
  * behavior. fvk_batch_hazards_armed() reports the live value. */
+/* Native recording-time F32 panel proof is separately default-off via
+ * FAK_VULKAN_NATIVE_BATCH_HAZARDS=1. It never trusts legacy flush-time verdicts,
+ * changes no kernel arithmetic/lifetime, and keeps unknown/copy/status barriers.
+ * The pure self-check never accesses a device or changes the gate. */
+int fvk_native_batch_hazards_enabled(void);
+int fvk_native_batch_hazards_self_check(void);
 void fvk_batch_hazards_arm(int armed);
 int fvk_batch_hazards_armed(void);
 /* Request retirement uses the same completion fence without counting an extra public
