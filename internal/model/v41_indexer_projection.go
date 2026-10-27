@@ -104,11 +104,42 @@ func (m *Model) v41IndexRowsWithPreparedProjection(l, pos int, qLat, hidden []fl
 }
 
 func (m *Model) v41IndexRowsWithPanelRow(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, projection *v41ProjectionRouteBinding, panel v41IndexerPanelRow, views ...*v41IndexerKeyView) ([]int32, error) {
+	return m.v41IndexRowsWithPanelRowCapture(l, pos, qLat, hidden, keys, project, binding, health, ops, prepared, borrow, projection, panel, nil, nil, views...)
+}
+
+// Capturing a built-in score row does not turn its read-only scalar consumer
+// into an arbitrary callback. Decide prepared-key ownership from the original
+// binding before wrapping it; a nonnil ordinary scorer still gets private keys.
+func (m *Model) v41IndexRowsWithPanelRowCapture(l, pos int, qLat, hidden []float32, keys [][]float32, project v41DenseProjectionFunc, binding *v41IndexerScoreBinding, health v41IndexerScoreHealthFunc, ops *v41DeviceGatherOps, prepared []float32, borrow *v41IndexerScoreBorrow, projection *v41ProjectionRouteBinding, panel v41IndexerPanelRow, captured *[]float32, captureState *v41ForwardState, views ...*v41IndexerKeyView) ([]int32, error) {
 	if projection != nil {
 		project = projection.projectionFunc()
 	}
 
 	score := binding.scoreFunc()
+	scalar := score == nil
+	if captured != nil {
+		ordinary := score
+		score = func(layer int, q, keys, weights []float32, heads, headDim, rows int) ([]float32, error) {
+			var values []float32
+			var err error
+			if ordinary == nil {
+				var observe func(string)
+				if captureState != nil && captureState.callbackOwner != nil {
+					observe = captureState.callbackOwner.observeHostArm
+				}
+				values, err = v41IndexerScoreObserved(q, keys, weights, heads, headDim, rows, observe)
+			} else {
+				values, err = ordinary(layer, q, keys, weights, heads, headDim, rows)
+			}
+			if err == nil {
+				*captured = v41CandidateScoreSnapshot(values, ordinary == nil)
+			}
+			return values, err
+		}
+		// The cold candidate route never owns a canonical native binding.
+		// As with its former ordinary wrapper, it cannot inherit a native loan.
+		borrow = nil
+	}
 	if borrow == nil || borrow.binding != binding || !borrow.valid() {
 		borrow = nil
 	}
@@ -139,7 +170,7 @@ func (m *Model) v41IndexRowsWithPanelRow(l, pos int, qLat, hidden []float32, key
 		}
 	}
 	var flat []float32
-	if !resident && (score == nil || borrow != nil) && prepared != nil && len(prepared) == elements {
+	if !resident && (scalar || borrow != nil) && prepared != nil && len(prepared) == elements {
 		flat = prepared[:elements:elements]
 	} else if !resident {
 		borrow = nil

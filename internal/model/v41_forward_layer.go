@@ -598,32 +598,15 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 			}
 			groups := min((t+1)/plan.kvGroupSize(cfg), len(indexKeys))
 			scoreGroups := groups
-			scoreBinding := binding
 			var captured []float32
+			var capture *[]float32
 			if candidatePath {
 				// DeepInfer scores the complete publication width and applies causal
 				// visibility while selecting. Capture those raw values so the source
 				// can publish one immutable mask per query and later indexers can use
 				// their own scores under that mask.
 				scoreGroups = len(indexKeys)
-				ordinary := binding.scoreFunc()
-				scoreBinding = newV41IndexerScoreBinding(func(layer int, q, keys, weights []float32, heads, headDim, rows int) ([]float32, error) {
-					var values []float32
-					var err error
-					if ordinary == nil {
-						var observe func(string)
-						if st != nil && st.callbackOwner != nil {
-							observe = st.callbackOwner.observeHostArm
-						}
-						values, err = v41IndexerScoreObserved(q, keys, weights, heads, headDim, rows, observe)
-					} else {
-						values, err = ordinary(layer, q, keys, weights, heads, headDim, rows)
-					}
-					if err == nil {
-						captured = append([]float32(nil), values...)
-					}
-					return values, err
-				})
+				capture = &captured
 			}
 			var prefix []float32
 			if keyPanel != nil {
@@ -634,7 +617,7 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 			if err != nil {
 				return nil, err
 			}
-			localIdx, err := m.v41IndexRowsWithPanelRow(l, t, qLatRows[t], preByPos[t], indexKeys[:scoreGroups], scratch.denseProjection(), scoreBinding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute, panelRow)
+			localIdx, err := m.v41IndexRowsWithPanelRowCapture(l, t, qLatRows[t], preByPos[t], indexKeys[:scoreGroups], scratch.denseProjection(), binding, scratch.indexScoreHealth, scratch.gatherOps, prefix, &borrow, scratch.projectionRoute, panelRow, capture, st)
 			if borrow.revoked {
 				keyPanel = nil
 			}
@@ -661,6 +644,20 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 		return nil, err
 	}
 	return m.v41AttentionIndexList(plan, st, localIdx, hd, len(src.sharedKV), seq)
+}
+
+// Only the built-in scalar scorer transfers its fresh result. Selection reads
+// that row without mutation, and no callback receives it before the candidate
+// publication consumes it. Arbitrary scorers may reuse their output on the next
+// query, so they retain the defensive snapshot. Empty captures stay nil.
+func v41CandidateScoreSnapshot(values []float32, owned bool) []float32 {
+	if len(values) == 0 {
+		return nil
+	}
+	if owned {
+		return values
+	}
+	return append([]float32(nil), values...)
 }
 
 func (m *Model) v41CandidateSourceIdentity(seq int) (layer, kvSource, ratio int, err error) {

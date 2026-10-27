@@ -17578,6 +17578,11 @@
           "category": "incidental",
           "reason": "Private actual-mass float64 target-probability branch of the existing BuildSpecRejectionPlan operation. It validates and adapts the supported draft sampling law while returning the same SpecRejectionPlan accepted prefix, correction/bonus token and rollback contract; it does not introduce a separate planning-domain concept.",
           "token": "buildSpecRejectionProbabilityPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private numeric score-slice ownership helper: returns nil, transfers a fresh builtin float32 slice, or defensively copies callback-owned values. Candidate/snapshot names scalar inference data; this symbol implements no planning, search scheduling, lifecycle, or policy.",
+          "token": "v41CandidateScoreSnapshot"
         }
       ],
       "exclude": [
@@ -17840,6 +17845,7 @@
         "stagedStrixCandidate",
         "v41CandidatePoolCovers",
         "v41CandidatePoolRows",
+        "v41CandidateScoreSnapshot",
         "v41EPGatherPlan",
         "v41EPPlan",
         "v41PublishedCandidateBlockSize",
