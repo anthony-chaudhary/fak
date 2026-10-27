@@ -28,6 +28,123 @@ type qwen35SequenceKVReserveParityEvent struct {
 	Bounds         qwen35SequenceParityOracleBounds   `json:"bounds"`
 }
 
+// fak-test:runtime integration est=1s lane=optin
+// A skipped device test is not qualification. Set FAK_VULKAN_REQUIRE_DEVICE=1
+// on the physical witness host; this subprocess enables native copy accounting.
+func TestQwen35VulkanEmbeddingGatherOneDispatch(t *testing.T) {
+	const childEnv = "FAK_TEST_QWEN35_VULKAN_EMBEDDING_GATHER_CHILD"
+	if os.Getenv(childEnv) != "1" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.CommandContext(t.Context(), exe, "-test.v", "-test.run=^TestQwen35VulkanEmbeddingGatherOneDispatch$")
+		cmd.Env = append(os.Environ(), childEnv+"=1", "FAK_VULKAN_DISPATCH_PROFILE=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("embedding gather subprocess: %v\n%s", err, out)
+		}
+		if strings.Contains(string(out), "--- SKIP: TestQwen35VulkanEmbeddingGatherOneDispatch") {
+			t.Skipf("embedding gather subprocess skipped without a Vulkan device:\n%s", out)
+		}
+		t.Logf("%s", out)
+		return
+	}
+	v := vk(t)
+	if !VulkanDispatchProfileEnabled() {
+		t.Fatal("native dispatch profiling must be enabled before process start")
+	}
+	const vocab, hidden = 5, 7
+	table := make([]float32, vocab*hidden)
+	for i := range table {
+		table[i] = float32(i) * .125
+	}
+	table[2*hidden] = math.Float32frombits(0x80000000)
+	table[2*hidden+1] = math.Float32frombits(0x7fc01234)
+	dt := v.Upload(NewF32(Default(), []int{vocab, hidden}, table), F32)
+	defer v.Free(dt)
+	for _, count := range []int{5, 2049} {
+		for _, batched := range []bool{false, true} {
+			for _, useV41 := range []bool{false, true} {
+				t.Run(fmt.Sprintf("rows%d_batch%t_v41%t", count, batched, useV41), func(t *testing.T) {
+					ids := make([]int, count)
+					for i := range ids {
+						ids[i] = []int{2, vocab - 1, 2, 0, 1}[i%5]
+					}
+					var out Tensor
+					if !useV41 {
+						out = v.Upload(NewF32(Default(), []int{count, hidden}, make([]float32, count*hidden)), F32)
+					}
+					defer func() {
+						if out.Buf() != nil {
+							v.Free(out)
+						}
+					}()
+					before, err := v.BackendCounters()
+					if err != nil {
+						t.Fatal(err)
+					}
+					v.VulkanDebugResetDispatchProfile()
+					if batched {
+						v.BeginBatch()
+					}
+					gather := func() int {
+						if useV41 {
+							out, err = v.V41EmbeddingGather(dt, ids, hidden)
+							if errors.Is(err, ErrVulkanInvalidGeometry) {
+								return 2
+							}
+							if err != nil {
+								t.Fatal(err)
+							}
+							return 0
+						}
+						vulkanMu.Lock()
+						defer vulkanMu.Unlock()
+						return int(v.qwen35SequenceEmbeddingGatherLocked(out, dt, ids, hidden))
+					}
+					last := ids[len(ids)-1]
+					ids[len(ids)-1] = vocab
+					if status := gather(); status != 2 {
+						t.Fatalf("late invalid row status=%d, want 2", status)
+					}
+					if p := v.VulkanDebugDispatchProfileSnapshot(); p.D2DCopies != 0 {
+						t.Fatalf("invalid row recorded a partial gather: %+v", p)
+					}
+					ids[len(ids)-1] = last
+					if status := gather(); status != 0 {
+						t.Fatalf("gather status=%d", status)
+					}
+					if batched {
+						v.FlushBatch()
+					}
+					if p := v.VulkanDebugDispatchProfileSnapshot(); p.D2DCopies != 1 {
+						t.Fatalf("physical copies=%d want 1: %+v", p.D2DCopies, p)
+					}
+					after, err := v.BackendCounters()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if after.D2DCopies-before.D2DCopies != uint64(count) || after.D2DBytes-before.D2DBytes != uint64(count*hidden*4) {
+						t.Fatalf("logical row/byte accounting changed: before=%+v after=%+v", before, after)
+					}
+					got := v.Read(out)
+					if len(got) != count*hidden {
+						t.Fatalf("panel length=%d want=%d", len(got), count*hidden)
+					}
+					for row, id := range ids {
+						for d := 0; d < hidden; d++ {
+							if math.Float32bits(got[row*hidden+d]) != math.Float32bits(table[id*hidden+d]) {
+								t.Fatalf("row=%d id=%d lane=%d: got %08x want %08x", row, id, d, math.Float32bits(got[row*hidden+d]), math.Float32bits(table[id*hidden+d]))
+							}
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 // formatQwen35SequenceKVReserveParity renders the fak.strix.subkernel-parity/v1
 // event for the geometric sequence-KV reservation selector registered by #12611.
 // The geometric and exact-growth reserves must produce bit-identical attention

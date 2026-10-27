@@ -29,7 +29,7 @@ func (v *vulkanBackend) Qwen35GDNDecodeTiledOut(
 }
 
 // VulkanDebugQwen35ValueHeadTileAvailable reports whether tiling takes the kernel route (its
-// module loaded and is selected); otherwise it records one device copy per (token, head).
+// module loaded and is selected); otherwise it records one multi-region device copy.
 func (v *vulkanBackend) VulkanDebugQwen35ValueHeadTileAvailable() bool {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()

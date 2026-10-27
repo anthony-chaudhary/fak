@@ -159,6 +159,13 @@ void fvk_d2d_off(void *dst, size_t dst_off, const void *src, size_t bytes);
 /* General device->device range copy. Both handles are opaque Buffer* values; offsets are
  * byte offsets into those buffers, never pointer arithmetic on the handles themselves. */
 void fvk_d2d_range(void *dst, size_t dst_off, const void *src, size_t src_off, size_t bytes);
+/* Gather fixed-size rows from one resident table into fresh, disjoint storage
+ * with one multi-region copy. IDs are borrowed native-width signed integers,
+ * consumed synchronously and never retained. All bounds are checked before
+ * recording; repeated IDs are allowed. Returns 2 for invalid geometry or the
+ * checked submission status, preserving an existing batch's owner fence. */
+int fvk_d2d_gather_rows(void *dst, const void *src, const intptr_t *ids,
+                        int count, size_t row_bytes);
 /* Bounded V4.1 gather into fresh, disjoint destination storage. Destination
  * offsets are implicit, in input order. Repeated source regions are allowed.
  * Every region is checked before commands are recorded. Outside a batch this

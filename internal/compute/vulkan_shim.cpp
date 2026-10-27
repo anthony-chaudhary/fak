@@ -4720,6 +4720,76 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
     }
 }
 
+// Single-table counterpart of the bounded multi-source gather below. Prompt
+// length is not limited by its fixed multi-source metadata budget.
+int fvk_d2d_gather_rows(void* dstHandle, const void* srcHandle, const intptr_t* ids,
+                        int count, size_t rowBytes) {
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!g_ready) return 1;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (!ids || count <= 0 || rowBytes == 0 || (rowBytes & 3u) != 0 ||
+        size_t(count) > std::numeric_limits<size_t>::max() / rowBytes ||
+        size_t(count) > std::numeric_limits<size_t>::max() / sizeof(VkBufferCopy)) return 2;
+    Buffer* dst = B(dstHandle);
+    Buffer* src = B((void*)srcHandle);
+    const auto live = [](const Buffer* b) {
+        return b && b->buf != VK_NULL_HANDLE && b->mem != VK_NULL_HANDLE && b->bytes > 0 &&
+            b->bytes <= std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset;
+    };
+    const size_t total = size_t(count) * rowBytes;
+    if (!live(dst) || !live(src) || total > dst->bytes || rowBytes > src->bytes ||
+        src == dst || src->buf == dst->buf ||
+        (src->mem == dst->mem && src->memoryOffset < dst->memoryOffset + dst->bytes &&
+         dst->memoryOffset < src->memoryOffset + src->bytes) ||
+        (g_batching && (g_batchCmd == VK_NULL_HANDLE || g_batchOps == std::numeric_limits<int>::max()))) return 2;
+    const size_t rows = src->bytes / rowBytes;
+    for (int i = 0; i < count; ++i) {
+        if (ids[i] < 0 || size_t(ids[i]) >= rows) return 2;
+    }
+    // Allocate before touching the command buffer. No C++ allocation exception
+    // may cross the C ABI, and no partial gather may precede an invalid row.
+    VkBufferCopy* regions = (VkBufferCopy*)std::malloc(size_t(count) * sizeof(VkBufferCopy));
+    if (!regions) return (int)VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (int i = 0; i < count; ++i) {
+        regions[i] = VkBufferCopy{size_t(ids[i]) * rowBytes, size_t(i) * rowBytes, rowBytes};
+    }
+    const bool recording = g_batching;
+    VkCommandBuffer cmd = recording ? g_batchCmd : v41BeginCmdChecked();
+    if (cmd == VK_NULL_HANDLE) {
+        std::free(regions);
+        return (int)g_submissionStatus;
+    }
+    // Repeated source rows are legal; destination rows and source/destination
+    // allocations are disjoint (VUID 00117/12482). Keep the conservative barrier
+    // rather than relying on a single-row hazard-elision verdict.
+    recordComputeBarrier(cmd);
+    vkCmdCopyBuffer(cmd, src->buf, dst->buf, uint32_t(count), regions);
+    std::free(regions); // vkCmdCopyBuffer consumes the region metadata now.
+    dp_inc(g_dp.d2d);
+    if (recording) {
+        g_batchHasV41 = true;
+        tsAfterDispatch(cmd, kTsD2DGather, 0, 0);
+        ++g_batchOps;
+        // Transfer counters retain logical rows/bytes; dispatch profiling counts
+        // the single native command, just as the multi-source gather does.
+        if (uint64_t(count) > std::numeric_limits<uint64_t>::max() - g_batchD2DCount ||
+            total > std::numeric_limits<uint64_t>::max() - g_batchD2DBytes) {
+            g_batchD2DValid = false;
+        } else {
+            g_batchD2DCount += uint64_t(count);
+            g_batchD2DBytes += total;
+        }
+    } else {
+        recordComputeBarrier(cmd);
+        dpOneShot(g_dp.oneShotD2D);
+        if (!v41EndSubmitWaitChecked(cmd, true)) return (int)g_submissionStatus;
+        if (!checkedCounterAdd(g_d2dCount, uint64_t(count)) || !checkedCounterAdd(g_d2dBytes, total)) {
+            g_transferCountersValid = false;
+        }
+    }
+    return (int)g_submissionStatus;
+}
+
 // A fresh gather output has no read/write dependency between its disjoint
 // destination regions. Source regions may repeat (VUID 00117/12482): only
 // destination overlap and source/destination memory overlap are forbidden.
@@ -7901,7 +7971,7 @@ extern "C" int fvk_qwen35_split_qg_panel_f32(const void* qg, void* q, void* gate
 }
 // Tiles a [tokens, nV*headDim] GDN core panel into the GGUF ssm_out input-column order: dst
 // head c reads src head (c % nK) * (nV / nK) + c / nK. The optional kernel is one dispatch;
-// without its module the same permutation records one device copy per (token, head).
+// without its module the same permutation records one multi-region device copy.
 extern "C" int fvk_qwen35_value_head_tile_f32(const void* src, void* dst,
     int tokens, int nK, int nV, int headDim) {
     if (!g_ready) return 1;
@@ -7920,14 +7990,20 @@ extern "C" int fvk_qwen35_value_head_tile_f32(const void* src, void* dst,
     }
     const int ratio = nV / nK;
     const size_t headBytes = (size_t)headDim * sizeof(float);
+    // panelFits already bounds tokens*nV*headDim to signed shader indexing.
+    const int count = tokens * nV;
+    if (size_t(count) > std::numeric_limits<size_t>::max() / sizeof(intptr_t)) return 2;
+    intptr_t* ids = (intptr_t*)std::malloc(size_t(count) * sizeof(intptr_t));
+    if (!ids) return (int)VK_ERROR_OUT_OF_HOST_MEMORY;
     for (int t = 0; t < tokens; ++t) {
-        const size_t row = (size_t)t * (size_t)nV * headBytes;
         for (int c = 0; c < nV; ++c) {
             const int h = (c % nK) * ratio + c / nK;
-            fvk_d2d_range(dst, row + (size_t)c * headBytes, src, row + (size_t)h * headBytes, headBytes);
+            ids[t * nV + c] = t * nV + h;
         }
     }
-    return (int)g_submissionStatus;
+    const int status = fvk_d2d_gather_rows(dst, src, ids, count, headBytes);
+    std::free(ids);
+    return status;
 }
 extern "C" int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
     void* qOut, void* kOut, int tokens, int startPos, int nQHeads,

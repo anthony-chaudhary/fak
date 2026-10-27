@@ -9,6 +9,7 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"unsafe"
 )
 
@@ -17,12 +18,12 @@ var (
 	_ V41Q2KEmbeddingGatherBackend = (*vulkanBackend)(nil)
 )
 
-// The gather is a sequence of device-to-device row copies through the core
+// The gather is a multi-region device-to-device copy through the core
 // transfer path, so it needs no SPIR-V module and no registry change.
 func (v *vulkanBackend) V41EmbeddingGatherAvailable() bool { return v != nil }
 
-// V41EmbeddingGather records one buffer-to-buffer copy per id. Inside an open
-// batch the copies are ordered after prior work by the batch barrier; the
+// V41EmbeddingGather records one multi-region copy for a native-sized panel.
+// Inside an open batch the copy is ordered after prior work by the barrier; the
 // caller's checked readback fences them. No public Upload, Read or Free method
 // is called while vulkanMu is held.
 func (v *vulkanBackend) V41EmbeddingGather(table Tensor, ids []int, hidden int) (out Tensor, err error) {
@@ -57,8 +58,18 @@ func (v *vulkanBackend) V41EmbeddingGather(table Tensor, ids []int, hidden int) 
 		return Tensor{}, vulkanV41EmbeddingGatherStatusError(status)
 	}
 	outBuf = v.dallocForClass(len(ids)*rowBytes, MemoryActivation, "V4.1 embedding gather panel")
-	for row, id := range ids {
-		C.fvk_d2d_range(outBuf.ptr, C.size_t(row*rowBytes), tb.ptr, C.size_t(id*rowBytes), C.size_t(rowBytes))
+	if len(ids) <= math.MaxInt32 {
+		// The C call borrows Go's native-width signed IDs synchronously; no ID
+		// upload or temporary integer conversion is needed for a transfer copy.
+		if status := int(C.fvk_d2d_gather_rows(outBuf.ptr, tb.ptr, (*C.intptr_t)(unsafe.Pointer(&ids[0])), C.int(len(ids)), C.size_t(rowBytes))); status != 0 {
+			return Tensor{}, vulkanV41EmbeddingGatherStatusError(status)
+		}
+	} else {
+		// Preserve the generic interface's wider count range rather than narrow
+		// it to the native copy ABI or silently truncate the region count.
+		for row, id := range ids {
+			C.fvk_d2d_range(outBuf.ptr, C.size_t(row*rowBytes), tb.ptr, C.size_t(id*rowBytes), C.size_t(rowBytes))
+		}
 	}
 	if status := int(C.fvk_submission_status()); status != 0 {
 		return Tensor{}, vulkanV41EmbeddingGatherStatusError(status)

@@ -32,11 +32,18 @@ func TestVulkanQwen35ValueHeadTileMatchesHostOnBothRoutes(t *testing.T) {
 			}
 			core := be.UploadClass(NewF32(Default(), []int{g.tokens, g.nV * g.d}, host), F32, MemoryActivation, "tile core")
 			kernelBefore, copyBefore := be.VulkanDebugQwen35ValueHeadTileSnapshot()
+			profileBefore := be.VulkanDebugDispatchProfileSnapshot()
 			tiled, err := be.VulkanDebugQwen35TileValueHeads(core, g.tokens, g.nK, g.nV, g.d)
 			if err != nil {
 				t.Fatal(err)
 			}
 			got := be.Read(tiled)
+			if !useKernel && VulkanDispatchProfileEnabled() {
+				profileAfter := be.VulkanDebugDispatchProfileSnapshot()
+				if copies := profileAfter.D2DCopies - profileBefore.D2DCopies; copies != 1 {
+					t.Fatalf("geometry %+v physical tile copies=%d, want 1", g, copies)
+				}
+			}
 			for i := range want {
 				if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
 					t.Fatalf("kernel=%v geometry %+v element %d = %v, want %v (the tiling is a pure copy)", useKernel, g, i, got[i], want[i])

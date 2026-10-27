@@ -506,6 +506,16 @@ func (v *vulkanBackend) qwen35SequenceFreeVsliceForTest(cache *vslice) {
 	}
 }
 
+// Caller holds vulkanMu and has admitted the table and fresh output ownership.
+// Go int and C intptr_t have the same native width on the supported platforms;
+// the shim consumes these pointer-free IDs before returning, without an upload.
+func (v *vulkanBackend) qwen35SequenceEmbeddingGatherLocked(dst, table Tensor, ids []int, hidden int) C.int {
+	if len(ids) == 0 || len(ids) > math.MaxInt32 || hidden <= 0 || hidden > math.MaxInt/4 {
+		return 2
+	}
+	return C.fvk_d2d_gather_rows(v.vp(dst), v.vp(table), (*C.intptr_t)(unsafe.Pointer(&ids[0])), C.int(len(ids)), C.size_t(hidden*4))
+}
+
 // Qwen35SequencePrefill runs the prompt layer-major. Dense projections and full
 // attention process token panels; recurrent GDN dependencies remain inside the
 // device kernel. Each layer fence bounds scratch lifetime independently of depth.
@@ -588,8 +598,8 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	if req.TokenEmbeddingRows {
 		C.fvk_d2d(v.vp(x), v.vp(req.TokenEmbedding), C.size_t(tokens*req.Hidden*4))
 	} else {
-		for row, id := range req.TokenIDs {
-			C.fvk_d2d_range(v.vp(x), C.size_t(row*req.Hidden*4), v.vp(req.TokenEmbedding), C.size_t(id*req.Hidden*4), C.size_t(req.Hidden*4))
+		if err = check(v.qwen35SequenceEmbeddingGatherLocked(x, req.TokenEmbedding, req.TokenIDs, req.Hidden)); err != nil {
+			return result, err
 		}
 	}
 	attention := 0
