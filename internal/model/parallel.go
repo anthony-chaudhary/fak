@@ -224,6 +224,33 @@ func parWorkerLoop(g *parPoolGeneration, w int) {
 
 func fdot(r, x []float32) float32 { return mathx.FDot(r, x) }
 
+// fdotStrided consumes r[offset+i*stride] without gathering a temporary row.
+// Keep the eight accumulators, combine expression and tail in mathx.FDot's order:
+// even a last-bit difference can cross a downstream BF16 rounding boundary.
+// The caller must ensure each indexed element exists (invalid indices panic,
+// as with fdot); empty x returns zero without indexing r.
+func fdotStrided(r, x []float32, offset, stride int) float32 {
+	var s0, s1, s2, s3, s4, s5, s6, s7 float32
+	n := len(x)
+	i := 0
+	for ; i+8 <= n; i += 8 {
+		j := offset + i*stride
+		s0 += r[j] * x[i]
+		s1 += r[j+stride] * x[i+1]
+		s2 += r[j+2*stride] * x[i+2]
+		s3 += r[j+3*stride] * x[i+3]
+		s4 += r[j+4*stride] * x[i+4]
+		s5 += r[j+5*stride] * x[i+5]
+		s6 += r[j+6*stride] * x[i+6]
+		s7 += r[j+7*stride] * x[i+7]
+	}
+	s := ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7))
+	for ; i < n; i++ {
+		s += r[offset+i*stride] * x[i]
+	}
+	return s
+}
+
 func fdot3(r0, r1, r2, x []float32) (float32, float32, float32) {
 	return fdot3scalar(r0, r1, r2, x)
 }

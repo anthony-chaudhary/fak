@@ -1005,21 +1005,17 @@ func v41MHCProjectFlatObserved(wMix, xflat []float32, eps float32, transposed bo
 	// serial sum differs in the last F32 bit, which the downstream BF16 stream
 	// boundaries amplify into host/device parity drift (#13797).
 	mixes := make([]float32, v41MHCMixWidth)
-	var column []float32
-	if transposed {
-		column = make([]float32, flatWidth)
-	}
 	if observe != nil {
 		observe("mhc-projection")
 	}
+	if transposed {
+		for m := range mixes {
+			mixes[m] = fdotStrided(wMix, xflat, m, v41MHCMixWidth) * rsqrt
+		}
+		return mixes, nil
+	}
 	for m := 0; m < v41MHCMixWidth; m++ {
 		row := wMix[m*flatWidth : (m+1)*flatWidth]
-		if transposed {
-			for i := range column {
-				column[i] = wMix[i*v41MHCMixWidth+m]
-			}
-			row = column
-		}
 		mixes[m] = fdot(row, xflat) * rsqrt
 	}
 	return mixes, nil
