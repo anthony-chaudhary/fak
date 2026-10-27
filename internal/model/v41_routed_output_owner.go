@@ -192,11 +192,35 @@ func (o *v41RoutedOutputOwner) release(token int, all bool) (failure v41RoutedOu
 			o.retire(errors.New("model: incomplete V4.1 routed-output cleanup"))
 		}
 	}()
+	// Ordinary full-mode tokens have at most six picks. Resolve only their
+	// live publications instead of walking the whole retained layer per token.
+	// Sorting the indices (not pick slots) preserves first-touch Free order.
+	var indices [V41RouterTopK]int
+	indexed := !all && token >= 0 && token < len(o.picks) && len(o.picks[token]) <= len(indices)
+	count := len(o.rows)
+	if indexed {
+		count = 0
+		for slot := range o.picks[token] {
+			if i, found := o.index[v41ExpertRow{token, slot}]; found {
+				at := count
+				for at > 0 && indices[at-1] > i {
+					indices[at] = indices[at-1]
+					at--
+				}
+				indices[at] = i
+				count++
+			}
+		}
+	}
 	func() {
 		// Schedule every release before invoking one. Goexit in a backend Free
 		// still runs the remaining defers; reverse registration keeps the
 		// original first-touch publication order.
-		for i := len(o.rows) - 1; i >= 0; i-- {
+		for cursor := count - 1; cursor >= 0; cursor-- {
+			i := cursor
+			if indexed {
+				i = indices[cursor]
+			}
 			entry := &o.rows[i]
 			if entry.tensor.Buf() == nil || !all && entry.row.Token != token {
 				continue
