@@ -154,8 +154,12 @@ func TestInKernelCPUConcurrentPrefixFlight(t *testing.T) {
 			t.Fatalf("leader callbacks=%d, want 1", callbacks.Load())
 		}
 		perClone := cloneBytes.Load()
-		if perClone <= 0 || p.prefixFlights.ClonePayloadBytes() != 3*perClone {
-			t.Fatalf("flight clone bytes=%d, want publication plus two follower clones=%d", p.prefixFlights.ClonePayloadBytes(), 3*perClone)
+		// The publication is detached from the leader. A follower copies it
+		// while another reader is registered; the last reader may instead
+		// take ownership after its sibling has finished reading.
+		copied := p.prefixFlights.ClonePayloadBytes()
+		if perClone <= 0 || (copied != 2*perClone && copied != 3*perClone) {
+			t.Fatalf("flight clone bytes=%d, want publication plus one or two follower clones (%d or %d)", copied, 2*perClone, 3*perClone)
 		}
 	})
 
