@@ -227,16 +227,18 @@ func TestV41PrefillEndFaultRetiresSession(t *testing.T) {
 	})
 	t.Run("warm ubatch", func(t *testing.T) {
 		s, b := newSession(t)
-		s.Prefill([]int{1, 2, 3})
+		prefixIDs, suffixIDs := []int{1, 2, 3}, []int{4, 5, 6}
+		wantHistory := append(append([]int(nil), prefixIDs...), suffixIDs...)
+		s.Prefill(prefixIDs)
 		t.Setenv(v41SuffixUbatchEnv, "2")
 		b.begins, b.ends = 0, 0
 		sentinel := errors.New("suffix ubatch End sentinel")
 		committed := false
 		b.end = func() error {
-			committed = reflect.DeepEqual(s.v41Forward.history, []int{1, 2, 3, 4, 5, 6})
+			committed = reflect.DeepEqual(s.v41Forward.history, wantHistory)
 			return sentinel
 		}
-		got := invoke(func() { s.Prefill([]int{4, 5, 6}) })
+		got := invoke(func() { s.Prefill(suffixIDs) })
 		err, ok := got.payload.(error)
 		if got.returned || !ok || !errors.Is(err, sentinel) || !committed || b.begins != 1 || b.ends != 1 {
 			t.Fatalf("not a committed ubatch End fault: committed=%v begin/end=%d/%d result=%+v", committed, b.begins, b.ends, got)
@@ -279,13 +281,15 @@ func TestV41PrefillEndFaultRetiresSession(t *testing.T) {
 	}
 	t.Run("structural refusal still refolds", func(t *testing.T) {
 		s, b := newSession(t)
-		s.Prefill([]int{1, 2, 3})
+		prefixIDs, suffixIDs := []int{1, 2, 3}, []int{4, 5}
+		wantHistory := append(append([]int(nil), prefixIDs...), suffixIDs...)
+		s.Prefill(prefixIDs)
 		s.v41Forward.layerState(0).nextWindowPos += 5
 		b.begins, b.ends = 0, 0
-		if len(s.Prefill([]int{4, 5})) != s.M.Cfg.VocabSize || s.BackendSessionClosed() {
+		if len(s.Prefill(suffixIDs)) != s.M.Cfg.VocabSize || s.BackendSessionClosed() {
 			t.Fatal("successful End poisoned a recoverable structural refusal")
 		}
-		if !reflect.DeepEqual(s.v41Forward.history, []int{1, 2, 3, 4, 5}) || b.begins != 2 || b.ends != 2 {
+		if !reflect.DeepEqual(s.v41Forward.history, wantHistory) || b.begins != 2 || b.ends != 2 {
 			t.Fatalf("structural refold changed: history=%v begin/end=%d/%d", s.v41Forward.history, b.begins, b.ends)
 		}
 	})
