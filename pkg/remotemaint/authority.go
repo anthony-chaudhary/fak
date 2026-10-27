@@ -70,6 +70,7 @@ func (p *Prepared) Execute(ctx context.Context) (Receipt, error) {
 	// entered, an error or malformed receipt cannot prove that no effect occurred.
 	p.executed = true
 	receipt, err := p.authority.Execute(ctx, cloneGrant(grant))
+	receipt.InstalledBoot = cloneInstalledBootObservation(receipt.InstalledBoot)
 	if err != nil {
 		if validateFailureReceipt(receipt, grant, time.Now().UTC()) == nil {
 			switch receipt.Outcome {
