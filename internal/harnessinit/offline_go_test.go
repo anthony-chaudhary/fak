@@ -3,15 +3,47 @@ package harnessinit
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
+
+// fak-test:justify why=regression when=changed:internal/harnessinit/**
+// fak-test:runtime fast est=1ms lane=default
+func TestOfflineGoEnvBlocksPrivateModuleProxyBypass(t *testing.T) {
+	t.Parallel()
+	environ := []string{
+		"GOPRIVATE=example.invalid/private",
+		"GONOPROXY=example.invalid/private",
+		"GONOSUMDB=example.invalid/private",
+	}
+	before := slices.Clone(environ)
+	got := offlineGoEnv(environ)
+	var noProxy []string
+	for _, kv := range got {
+		key, _, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(key, "GONOPROXY") {
+			noProxy = append(noProxy, kv)
+		}
+	}
+	if !slices.Equal(noProxy, []string{"GONOPROXY=none"}) {
+		t.Fatalf("private modules must not bypass GOPROXY=off: GONOPROXY entries = %q", noProxy)
+	}
+	for _, preserved := range []string{environ[0], environ[2]} {
+		if !slices.Contains(got, preserved) {
+			t.Fatalf("offlineGoEnv lost caller setting %q", preserved)
+		}
+	}
+	if !slices.Equal(environ, before) {
+		t.Fatal("offlineGoEnv changed the caller environment")
+	}
+}
 
 func TestOfflineGoEnvPinsLocalToolchainAndDropsGOROOT(t *testing.T) {
 	got := offlineGoEnv([]string{
 		"PATH=/usr/local/go/bin", "GOROOT=/sdk/go1.26.6", "GOTOOLCHAIN=auto", "GOPROXY=https://proxy.golang.org,direct",
 		"GOSUMDB=sum.golang.org", "GOWORK=/w/go.work", "GOTOOLCHAIN_INTERNAL_SWITCH_COUNT=1", "GOFLAGS=-mod=mod", "HOME=/h",
 	})
-	want := []string{"PATH=/usr/local/go/bin", "GOFLAGS=-mod=mod", "HOME=/h", "GOPROXY=off", "GOSUMDB=off", "GOWORK=off", "GOTOOLCHAIN=local"}
+	want := []string{"PATH=/usr/local/go/bin", "GOFLAGS=-mod=mod", "HOME=/h", "GOPROXY=off", "GONOPROXY=none", "GOSUMDB=off", "GOWORK=off", "GOTOOLCHAIN=local"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("offlineGoEnv=%q\nwant %q", got, want)
 	}

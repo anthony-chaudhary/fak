@@ -27,12 +27,13 @@ const goToolchainModulePrefix = "toolchain@v0.0.1-"
 
 // offlineGoEnv returns environ with the offline module settings forced and GOROOT removed so
 // the selected go binary derives its own root instead of inheriting a different toolchain's.
+// GONOPROXY=none prevents private modules from bypassing GOPROXY=off with a direct fetch.
 func offlineGoEnv(environ []string) []string {
-	out := make([]string, 0, len(environ)+4)
+	out := make([]string, 0, len(environ)+5)
 	for _, kv := range environ {
 		key, _, _ := strings.Cut(kv, "=")
 		switch strings.ToUpper(key) {
-		case "GOROOT", "GOTOOLCHAIN", "GOPROXY", "GOSUMDB", "GOWORK":
+		case "GOROOT", "GOTOOLCHAIN", "GOPROXY", "GONOPROXY", "GOSUMDB", "GOWORK":
 			continue
 		}
 		if strings.HasPrefix(strings.ToUpper(key), "GOTOOLCHAIN_INTERNAL_") {
@@ -40,7 +41,7 @@ func offlineGoEnv(environ []string) []string {
 		}
 		out = append(out, kv)
 	}
-	return append(out, "GOPROXY=off", "GOSUMDB=off", "GOWORK=off", "GOTOOLCHAIN=local")
+	return append(out, "GOPROXY=off", "GONOPROXY=none", "GOSUMDB=off", "GOWORK=off", "GOTOOLCHAIN=local")
 }
 
 // goModDirective returns the argument of the first `go` or `toolchain` directive in a go.mod.
