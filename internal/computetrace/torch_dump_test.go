@@ -18,6 +18,8 @@ const torchFixture = "testdata/sglang-dumper-tiny"
 
 // fak-test:runtime fast est=500ms lane=default
 func TestTorchDumpStreamsLargeAggregate(t *testing.T) {
+	const layerCount = 10
+	promptTokens := []int{1, 2}
 	dir := t.TempDir()
 	source := filepath.Join(torchFixture, "step=0___rank=0___dump_index=1___name=non_intrusive__model.layers.0.output.pt")
 	expanded := torchRewriteFile(t, source, func(name string, b []byte) []byte {
@@ -46,18 +48,19 @@ func TestTorchDumpStreamsLargeAggregate(t *testing.T) {
 		if err = os.WriteFile(filepath.Join(dir, ids), raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		for layer := 0; layer < 10; layer++ {
+		for layer := 0; layer < layerCount; layer++ {
 			name := fmt.Sprintf("step=0___rank=%d___dump_index=%d___name=non_intrusive__model.layers.%d.output.pt", rank, layer+1, layer)
 			if err = os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	result, err := ConvertTorchDump(dir, TorchDumpOptions{Engine: "sglang", Architecture: "LlamaForCausalLM", PromptTokens: []int{1, 2}})
+	result, err := ConvertTorchDump(dir, TorchDumpOptions{Engine: "sglang", Architecture: "LlamaForCausalLM", PromptTokens: promptTokens})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Artifact.Events) != 20 || result.Artifact.RetainedSampleValues != 160 {
+	expectedEvents := layerCount * len(promptTokens)
+	if len(result.Artifact.Events) != expectedEvents || result.Artifact.RetainedSampleValues != uint64(expectedEvents)*LlamaCppActivationSamples {
 		t.Fatalf("events=%d samples=%d", len(result.Artifact.Events), result.Artifact.RetainedSampleValues)
 	}
 	for _, event := range result.Artifact.Events {
@@ -105,19 +108,43 @@ func TestTorchDumpNonFiniteSamplesStayMarked(t *testing.T) {
 
 // fak-test:runtime fast est=100ms lane=default
 func TestTorchDumpRoundTripAndStageCoverage(t *testing.T) {
+	promptTokens := []int{1, 2}
+	layers := []int{0, 1}
+	stages := []string{"residual_streams", "attention_projected"}
 	for _, engine := range []string{"sglang", "vllm"} {
 		t.Run(engine, func(t *testing.T) {
-			result, err := ConvertTorchDump(torchFixture, TorchDumpOptions{Engine: engine, Architecture: "LlamaForCausalLM", PromptTokens: []int{1, 2}})
+			result, err := ConvertTorchDump(torchFixture, TorchDumpOptions{Engine: engine, Architecture: "LlamaForCausalLM", PromptTokens: promptTokens})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Step != 0 || len(result.Artifact.Events) != 8 || len(result.Unmapped) != 0 {
+			if result.Step != 0 || len(result.Unmapped) != 0 {
 				t.Fatalf("step=%d events=%d unmapped=%v", result.Step, len(result.Artifact.Events), result.Unmapped)
 			}
+			type eventKey struct {
+				layer int
+				phase string
+				token int
+			}
+			expected := map[eventKey]bool{}
+			for _, layer := range layers {
+				for _, phase := range stages {
+					for token := range promptTokens {
+						expected[eventKey{layer, phase, token}] = true
+					}
+				}
+			}
 			for _, e := range result.Artifact.Events {
-				if len(e.SampleValues) != 8 {
+				key := eventKey{e.Layer, e.Phase, e.Token}
+				if !expected[key] {
+					t.Fatalf("unexpected or duplicate event: %+v", key)
+				}
+				delete(expected, key)
+				if len(e.SampleValues) != LlamaCppActivationSamples {
 					t.Fatalf("samples=%d", len(e.SampleValues))
 				}
+			}
+			if len(expected) != 0 {
+				t.Fatalf("missing fixture events: %v", expected)
 			}
 			ref := result.Artifact
 			got := Artifact{Schema: Schema, InputTokens: ref.InputTokens}
