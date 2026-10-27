@@ -148,6 +148,9 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 					input = append([]float32(nil), pooled...)
 					for i, value := range input {
 						input[i] = v41RoundBF16(value)
+						if i == 0 {
+							s.observeHostArm("bf16-boundary")
+						}
 						if !finite32(input[i]) {
 							return nil, closeFailure(errV41ProjectionResult)
 						}
@@ -176,6 +179,9 @@ func (s *Session) v41CompressorNormFunc() v41CompressorNormFunc {
 						return nil, closeFailure(errV41ProjectionResult)
 					}
 					values[i] = v41RoundBF16(value)
+					if i == 0 {
+						s.observeHostArm("bf16-boundary")
+					}
 					if !finite32(values[i]) || math.Float32bits(values[i])&0xffff != 0 {
 						return nil, closeFailure(errV41ProjectionResult)
 					}
