@@ -34,7 +34,13 @@ import (
 type v41RoutedTripleLoader func() (gate, up, down []float32, err error)
 type v41RoutedDownLoader func() ([]float32, error)
 
+const v41RoutedExpertHostHandled v41RoutedExpertOutcome = 3
+
 func v41RoutedBF16(layer int, stage string, values []float32, width int) ([]float32, error) {
+	return v41RoutedBF16Observed(layer, stage, values, width, nil)
+}
+
+func v41RoutedBF16Observed(layer int, stage string, values []float32, width int, observe func(string)) ([]float32, error) {
 	if len(values) != width {
 		return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
 	}
@@ -42,6 +48,9 @@ func v41RoutedBF16(layer int, stage string, values []float32, width int) ([]floa
 	for i, v := range values {
 		if !finite32(v) {
 			return nil, v41ExpertOperationErr(layer, stage, errV41ExpertResult)
+		}
+		if i == 0 && observe != nil {
+			observe("bf16-boundary")
 		}
 		out[i] = v41RoundBF16(v)
 		if !finite32(out[i]) {
@@ -90,7 +99,7 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 	if routed != nil {
 		values, outcome, cause := routed(layer, stem, x, weight)
 		switch outcome {
-		case v41RoutedExpertHandled:
+		case v41RoutedExpertHandled, v41RoutedExpertHostHandled:
 			if cause != nil {
 				return nil, v41ExpertOperationErr(layer, "down", cause)
 			}
@@ -98,7 +107,9 @@ func (m *Model) v41FullRoutedExpertPublished(layer int, stem string, input []flo
 			if err != nil {
 				return nil, err
 			}
-			m.v41NoteDeviceExpertContraction()
+			if outcome == v41RoutedExpertHandled {
+				m.v41NoteDeviceExpertContraction()
+			}
 			return output, nil
 		case v41RoutedExpertError:
 			if cause == nil {
