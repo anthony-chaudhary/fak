@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,11 +92,27 @@ func worktreeWorkerGoBuildVerify(wtPath string) (bool, string) {
 	if err == nil {
 		return true, ""
 	}
+	return false, "go build ./... failed: " + worktreeWorkerBuildFailureDetail(out)
+}
+
+const (
+	worktreeWorkerBuildDetailHead = 600
+	worktreeWorkerBuildDetailTail = 400
+)
+
+// worktreeWorkerBuildFailureDetail bounds a failed verify build's combined
+// output for the land refusal. It keeps the HEAD as well as the tail: the Go
+// toolchain prints the cause first (the first compile error, or a linker
+// "fatal error: ..." before kilobytes of goroutine dump), so a tail-only cut
+// left land receipts holding only the last errors or bare stack frames.
+func worktreeWorkerBuildFailureDetail(out []byte) string {
 	detail := strings.TrimSpace(string(out))
-	if len(detail) > 500 {
-		detail = detail[len(detail)-500:]
+	if len(detail) <= worktreeWorkerBuildDetailHead+worktreeWorkerBuildDetailTail {
+		return detail
 	}
-	return false, "go build ./... failed: " + detail
+	head := detail[:worktreeWorkerBuildDetailHead]
+	tail := detail[len(detail)-worktreeWorkerBuildDetailTail:]
+	return fmt.Sprintf("%s ... [%d bytes elided] ... %s", head, len(detail)-len(head)-len(tail), tail)
 }
 
 // worktreeWorkerGoBuildVerifyArgs is the verification-only compile check. Land
