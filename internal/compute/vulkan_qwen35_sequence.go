@@ -394,6 +394,11 @@ func (v *vulkanBackend) qwen35VulkanSequenceMatMulLocked(w, x Tensor, tokens int
 // tokens-wide dispatch grid. Keep decode's specialized route and every quantized
 // projection unchanged; in particular, this is not Q8 activation-quantizer reuse.
 func (v *vulkanBackend) qwen35VulkanSequenceMatMulPairLocked(w0, w1, x Tensor, tokens int) (Tensor, Tensor) {
+	if y0, y1, selected, err := v.tryQwen35Q8PairLocked(x, w0, w1, tokens); err != nil {
+		panic(err) // outer sequence abort owns failure publication; never replay
+	} else if selected {
+		return y0, y1
+	}
 	out0, in := w0.Shape[0], w0.Shape[1]
 	out1 := w1.Shape[0]
 	if tokens <= 1 || w0.Dtype != F32 || w1.Dtype != F32 || w1.Shape[1] != in ||

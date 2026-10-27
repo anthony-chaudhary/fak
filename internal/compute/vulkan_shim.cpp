@@ -705,6 +705,7 @@ bool g_have_shader_f16 = false;
 bool g_have_coopmat_f16_16 = false;
 // Portable packed Q6_K is optional so older SPIR-V bundles remain loadable.
 int g_have_q6k_matmul = 0;
+bool g_qwen35Q8PairEnabled = false;
 int g_have_q5k_matmul = 0;
 int g_have_q3k_matmul = 0;
 // Optional GDN core value-head tiling for a native-order ssm_out; absent SPIR-V keeps the copy route.
@@ -3199,6 +3200,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_v41IndexerScoreReason = "Vulkan initialization did not complete";
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_q6k_matmul = 0;
+    g_qwen35Q8PairEnabled = false;
     g_have_q5k_matmul = 0;
     g_have_attention_split_kv = 0;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -3748,6 +3750,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             g_have_q8 = 0;
         }
     }
+    // Reuse the existing single-window Q8 pair only under an explicit
+    // qualification gate. The ordinary cooperative precision route wins.
+    const char* q8Pair = std::getenv("FAK_VULKAN_QWEN35_Q8_PAIR");
+    g_qwen35Q8PairEnabled = q8Pair && std::strcmp(q8Pair, "1") == 0 && g_have_q8 && !g_have_coopmat &&
+        limits.maxComputeWorkGroupInvocations >= 256 && limits.maxComputeWorkGroupSize[0] >= 256 &&
+        limits.maxComputeSharedMemorySize >= 2048 + 64 * sizeof(float) &&
+        limits.maxPerStageDescriptorStorageBuffers >= 7 && limits.maxDescriptorSetStorageBuffers >= 7 &&
+        limits.maxPushConstantsSize >= 16;
     if (g_have_q8) {
         // Cooperative (8 outputs x 32 lanes) gate/up kernel; bit-identical to the scalar one.
         // Optional: absent SPIR-V or FAK_VULKAN_Q8_GATEUP_COOP=0 keeps rmsnorm_q8_matmul2.spv.
@@ -5549,6 +5559,60 @@ void fvk_q8_matmul_f32(const void* dWcodes, const void* dWscale, const void* dX,
         Kernel& kernel = g_kern[K_Q8_MATMUL_DECODE];
         dispatch(kernel, bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
     }
+}
+
+int fvk_have_qwen35_q8_pair(void) {
+    return g_ready && g_qwen35Q8PairEnabled && g_have_q8 && !g_have_coopmat &&
+        g_kern[K_Q8_MATMUL2].pipe != VK_NULL_HANDLE && g_kern[K_Q8_MATMUL2].nbuf == 7 &&
+        g_kern[K_Q8_MATMUL2].pcsize == 16;
+}
+int fvk_qwen35_q8_pair_supported(int out0, int out1, int in, int P) {
+    if (!fvk_have_qwen35_q8_pair() || out0 <= 0 || out1 <= 0 || in <= 0 || in > 2048 ||
+        in % 32 != 0 || P <= 1) return 0;
+    const uint64_t total = uint64_t(out0) + uint64_t(out1);
+    if (total > INT32_MAX || uint64_t(P) * uint64_t(in) > UINT32_MAX ||
+        uint64_t(P) * uint64_t(in) > std::numeric_limits<size_t>::max() / sizeof(float)) return 0;
+    const int outs[2] = {out0, out1};
+    for (int out : outs) {
+        const uint64_t weights = uint64_t(out) * uint64_t(in), outputs = uint64_t(out) * uint64_t(P);
+        if (weights > UINT32_MAX || outputs > UINT32_MAX || weights > std::numeric_limits<size_t>::max() ||
+            outputs > std::numeric_limits<size_t>::max() / sizeof(float) ||
+            (uint64_t(out) + 7u) / 8u > g_maxComputeWorkGroupCountX) return 0;
+    }
+    // Preserve the ordinary noncooperative two-dimensional admission too.
+    return g_maxComputeWorkGroupCountX != 0 && uint64_t(P) <= g_maxComputeWorkGroupCountY &&
+        ((total + 255u) / 256u) * uint64_t(P) <= g_maxComputeWorkGroupCountX;
+}
+
+int fvk_qwen35_q8_pair_f32(const void* w0, const void* s0, const void* w1, const void* s1,
+                         const void* x, void* y0, void* y1, int out0, int out1, int in, int P) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (!fvk_qwen35_q8_pair_supported(out0, out1, in, P)) return 2;
+    Buffer* bufs[7] = {B(w0), B(s0), B(w1), B(s1), B(x), B(y0), B(y1)};
+    const uint64_t required[7] = {uint64_t(out0) * uint64_t(in), uint64_t(out0) * uint64_t(in / 32) * sizeof(float),
+        uint64_t(out1) * uint64_t(in), uint64_t(out1) * uint64_t(in / 32) * sizeof(float),
+        uint64_t(P) * uint64_t(in) * sizeof(float), uint64_t(P) * uint64_t(out0) * sizeof(float),
+        uint64_t(P) * uint64_t(out1) * sizeof(float)};
+    for (int i = 0; i < 7; ++i) {
+        const Buffer* b = bufs[i];
+        if (!b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE || required[i] > b->bytes ||
+            b->bytes > std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int i = 5; i < 7; ++i) for (int j = 0; j < i; ++j) if (aliases(bufs[i], bufs[j])) return 2;
+    struct Push { int32_t out0, out1, in, tokens; } pc{out0, out1, in, P};
+    static_assert(sizeof(Push) == 16, "Q8 pair push ABI must be four int32 values");
+    const uint64_t groups = ((uint64_t(out0) + uint64_t(out1) + 255u) / 256u) * uint64_t(P);
+    if (!dispatch(g_kern[K_Q8_MATMUL2], bufs, &pc, sizeof(pc), uint32_t(groups), 1, true)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
 }
 
 void fvk_q8_matmul2_f32(const void* dW0codes, const void* dW0scale,

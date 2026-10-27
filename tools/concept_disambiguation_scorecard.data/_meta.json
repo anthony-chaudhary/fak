@@ -14678,6 +14678,11 @@
           "category": "incidental",
           "reason": "Wire diagnostic for incomplete expected observations: DeepInfer task/sample rollouts or the existing router open-issue fetch. It applies coverage completeness to one run, preserves diagnostic/refusal status, and does not introduce an independent support/maturity concept or acceptance claim.",
           "token": "INCOMPLETE_COVERAGE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private request-specific runtime eligibility predicate: checks initialized opt-in kernel, exact panel geometry, integer bounds and device workgroup limits before allocation and dispatch. Returns a boolean capability decision, not a maturity tier, support policy, default promotion or hardware-validation claim.",
+          "token": "fvk_qwen35_q8_pair_supported"
         }
       ],
       "exclude": [
@@ -14882,6 +14887,7 @@
         "fak_parity_value",
         "formatParityValue",
         "forward_coverage_not_single_lane",
+        "fvk_qwen35_q8_pair_supported",
         "fvk_v41_f32_finite_count_supported",
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",

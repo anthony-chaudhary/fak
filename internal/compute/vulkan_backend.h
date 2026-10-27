@@ -358,6 +358,12 @@ int fvk_have_qwen35_gdn_q8_in_proj(void);
 int fvk_have_glm_kda_wave32(void);
 int fvk_have_cooperative_matrix(void);
 /* Q6_K availability is tied to the optional q6k_matmul SPIR-V module. */
+// Private sequence-only noncooperative Q8 pair; the existing shader has one
+// fixed2048-input window. Public decode selectors and oversized fallback stay unchanged.
+int fvk_have_qwen35_q8_pair(void);
+int fvk_qwen35_q8_pair_supported(int out0, int out1, int in, int P);
+int fvk_qwen35_q8_pair_f32(const void* w0, const void* s0, const void* w1, const void* s1,
+    const void* x, void* y0, void* y1, int out0, int out1, int in, int P);
 int fvk_have_q6k_matmul(void);
 /* Q5_K availability is tied to the optional q5k_matmul SPIR-V module. */
 int fvk_have_q5k_matmul(void);
