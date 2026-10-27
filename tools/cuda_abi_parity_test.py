@@ -145,6 +145,8 @@ class TestCollectIncludes(unittest.TestCase):
         self.root = Path(tmp.name)
         for rel in (*m.KERNELS, *m.BINDINGS):
             self.write(rel, "// seam fixture\n")
+        for name in ("cuda_kv_precision.h", "cuda_mxfp8_cast.h"):
+            self.write(f"internal/compute/{name}", "// modular ABI fixture\n")
         self.write(m.HEADER, 'extern "C" int fcuda_test(void);\n')
         self.write(m.BINDINGS[0], "C.fcuda_test()\n")
 
@@ -223,6 +225,83 @@ class TestCollectIncludes(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
         self.assertIn("missing.cuh", payload["reason"])
+
+    # fak-test:runtime fast est=100ms lane=default
+    def test_modular_header_closure_keeps_real_symbol_mismatches_hard(self):
+        self.write(m.HEADER, "// prototypes moved to modular headers\n")
+        self.write("internal/compute/cuda_kv_precision.h",
+                   '#include "parts/entry.h"\n#include "parts/entry.h"\n')
+        self.write("internal/compute/parts/entry.h", '#include "../decl.h"\n')
+        declaration = '#include "parts/entry.h"\nint fcuda_test(void);\n'
+        self.write("internal/compute/decl.h", declaration)
+        self.write("internal/compute/unreachable.h", "int fcuda_unreachable(void);\n")
+        definition = 'extern "C" int fcuda_test(void) { return 0; }\n'
+        self.write(m.KERNELS[0], definition)
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "OK", payload)
+        self.assertEqual(payload["corpus"]["n_declared"], 1)
+        self.assertEqual(payload, m.collect(self.root))
+
+        # Neither an unrelated header nor the definition itself is a declaration.
+        self.write("internal/compute/decl.h", "int fcuda_renamed(void);\n")
+        self.write("internal/compute/unreachable.h", "int fcuda_test(void);\n")
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "ACTION", payload)
+        self.assertEqual(payload["corpus"]["undeclared_calls"], ["fcuda_test"])
+        self.assertEqual(payload["corpus"]["undeclared_defs"], ["fcuda_test"])
+        self.assertEqual(payload["corpus"]["undefined"], ["fcuda_renamed"])
+
+        self.write("internal/compute/decl.h", declaration)
+        self.write(m.KERNELS[0], "// missing implementation\n")
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "ACTION", payload)
+        self.assertEqual(payload["corpus"]["undefined"], ["fcuda_test"])
+
+    def test_modular_header_portability_is_checked_per_file(self):
+        self.write(m.HEADER, "#include <stdint.h>\nint fcuda_test(void);\n")
+        self.write(m.KERNELS[0], 'extern "C" int fcuda_test(void) { return 0; }\n')
+        rel = "internal/compute/cuda_mxfp8_cast.h"
+        self.write(rel, "typedef uint8_t code;\n")
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "ACTION", payload)
+        self.assertIn(rel, payload["corpus"]["hard"][0])
+        self.assertIn("stdint.h", payload["corpus"]["hard"][0])
+        self.write(rel, "#include <stdint.h>\ntypedef uint8_t code;\n")
+        self.assertEqual(m.collect(self.root)["verdict"], "OK")
+
+    def test_invalid_header_closure_is_an_audit_error(self):
+        self.write(m.KERNELS[0], 'extern "C" int fcuda_test(void) { return 0; }\n')
+        self.write("internal/compute/body.cuh", "void f() { fcuda_test(); }\n")
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        target = Path(outside.name) / "outside.h"
+        target.write_text("int fcuda_test(void);\n", encoding="utf-8")
+        escape = f"../../../{target.parent.name}/outside.h"
+        for include in ("missing.h", "body.cuh", "../../../outside.h",
+                        escape,
+                        str(self.root / "internal/compute/cuda_backend.h")):
+            with self.subTest(include=include):
+                self.write("internal/compute/cuda_kv_precision.h", f'#include "{include}"\n')
+                payload = m.collect(self.root)
+                self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+                self.assertIn(include, payload["reason"])
+        link = self.root / "internal/compute/escape.h"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            return  # Some Windows hosts cannot create symlinks; lexical escape ran above.
+        self.write("internal/compute/cuda_kv_precision.h", '#include "escape.h"\n')
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+        self.assertIn("escapes repository", payload["reason"])
+
+    def test_missing_modular_root_is_an_audit_error(self):
+        rel = "internal/compute/cuda_kv_precision.h"
+        (self.root / rel).unlink()
+        self.write(m.KERNELS[0], 'extern "C" int fcuda_test(void) { return 0; }\n')
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+        self.assertIn(rel, payload["reason"])
 
 
 class TestAgainstRealTree(unittest.TestCase):
