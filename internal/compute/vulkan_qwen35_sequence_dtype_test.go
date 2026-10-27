@@ -34,3 +34,24 @@ func TestVulkanQwen35SequenceRejectsUnsupportedDtype(t *testing.T) {
 		t.Fatal("Qwen35SequenceError must unwrap to the dtype sentinel")
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestQwen35SequenceKQuantBlockBytesClosedContract(t *testing.T) {
+	t.Parallel()
+	want := map[Dtype]int64{
+		Q4_K: 144,
+		Q2_K: 84,
+		Q6_K: 210,
+		Q5_K: 176,
+		Q3_K: 110,
+	}
+	for value := 0; value < 256; value++ {
+		dt := Dtype(value)
+		wantBytes, wantSupported := want[dt]
+		gotBytes, gotSupported := qwen35SequenceKQuantBlockBytes(dt)
+		if gotBytes != wantBytes || gotSupported != wantSupported {
+			t.Errorf("dtype %d: block bytes/support = (%d, %t), want (%d, %t)",
+				value, gotBytes, gotSupported, wantBytes, wantSupported)
+		}
+	}
+}
