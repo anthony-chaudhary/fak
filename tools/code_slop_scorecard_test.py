@@ -1925,5 +1925,45 @@ def main() -> int:
     return 1 if failures else 0
 
 
+
+
+def test_dead_code_lexes_each_corpus_entry_once():
+    files = {
+        "z.go": "package z\nfunc dead() {}\n//slop:keep provenance\nvar marker = 1\n",
+        "a.go": "package a\nfunc live() {}\n",
+    }
+    tests = {"z.go": "package z\nfunc TestLive() { live() }\n"}
+    original = cs.code_lines_of
+    calls = []
+
+    def counted(text):
+        calls.append(text)
+        return original(text)
+
+    cs.code_lines_of = counted
+    try:
+        result = cs.kpi_dead_code(files, tests)
+    finally:
+        cs.code_lines_of = original
+    assert result["defects"] == [
+        "dead unexported symbol (defined, never referenced): z.go :: dead"]
+    assert len(calls) == len(files) + len(tests)
+
+    # Preserve sorted output and per-file accounting even after the global cap.
+    file_count = cs.COMMENT_SLOP_CAP // cs.DEAD_CAP_PER_FILE + 2
+    capped = {
+        f"{i:04}.go": "package a\n" + "".join(
+            f"func dead{i}_{j}() {{}}\n" for j in range(cs.DEAD_CAP_PER_FILE + 1))
+        for i in reversed(range(file_count))
+    }
+    result = cs.kpi_dead_code(capped, {})
+    expected = [
+        f"dead unexported symbol (defined, never referenced): {i:04}.go :: dead{i}_{j}"
+        for i in range(file_count) for j in range(cs.DEAD_CAP_PER_FILE)
+    ][:cs.COMMENT_SLOP_CAP]
+    assert result["defects"] == expected
+    assert result["soft"] == [
+        f"dead-code capped at {cs.DEAD_CAP_PER_FILE}/file across {file_count} file(s)"]
+
 if __name__ == "__main__":
     raise SystemExit(main())

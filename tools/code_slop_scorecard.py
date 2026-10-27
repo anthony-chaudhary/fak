@@ -1370,10 +1370,32 @@ def kpi_dead_code(files: dict[str, str], test_files: dict[str, str],
     # token frequency across the WHOLE module (code + tests), code-only so a token
     # inside a string/comment is not a phantom reference.
     freq: dict[str, int] = {}
-    all_text = {**files, **test_files}
-    for rel in all_text:
-        for c in code_lines_of(all_text[rel]):
-            for tok in _IDENT_RE.findall(c):
+    candidates: dict[str, list[str]] = {}
+    for rel in sorted(files):
+        raw = files[rel].splitlines()
+        names: list[str] = []
+        for idx, line in enumerate(code_lines_of(files[rel])):
+            # Test text wins for overlapping paths, as in the original merged corpus.
+            if rel not in test_files:
+                for tok in _IDENT_RE.findall(line):
+                    freq[tok] = freq.get(tok, 0) + 1
+            name = None
+            stripped = line.lstrip()
+            for rx in (_FUNC_DECL_RE, _TYPE_DECL_RE, _VARCONST_DECL_RE):
+                m = rx.match(stripped)
+                if m:
+                    name = m.group(1)
+                    break
+            if not name or name == "_" or name[0].isupper() or name in ("init", "main"):
+                continue
+            # Only an immediately preceding raw slop:keep directive exempts a symbol.
+            if idx >= 1 and idx - 1 < len(raw) and _SLOP_KEEP_RE.match(raw[idx - 1]):
+                continue
+            names.append(name)
+        candidates[rel] = names
+    for text in test_files.values():
+        for line in code_lines_of(text):
+            for tok in _IDENT_RE.findall(line):
                 freq[tok] = freq.get(tok, 0) + 1
     # Assembly references the Go symbol via the middle-dot form `·name(SB)`; the plain
     # ident scan catches the bare `name` and `_ASM_SYM_RE` catches the dotted form. The
@@ -1388,33 +1410,10 @@ def kpi_dead_code(files: dict[str, str], test_files: dict[str, str],
 
     defects: list[str] = []
     per_file: dict[str, int] = {}
-    # only non-test files declare shipped symbols we grade
-    for rel in sorted(files):
-        code = code_lines_of(files[rel])
-        raw = files[rel].splitlines()
-        for idx, line in enumerate(code):
-            s = line.lstrip()
-            name = None
-            for rx in (_FUNC_DECL_RE, _TYPE_DECL_RE, _VARCONST_DECL_RE):
-                m = rx.match(s)
-                if m:
-                    name = m.group(1)
-                    break
-            if not name:
-                continue
-            if name == "_" or name[0].isupper():
-                continue  # exported (API) or blank — skip
-            if name in ("init", "main"):
-                continue  # runtime entry points, never "referenced"
+    # Evaluate declarations only after every Go and assembly reference is counted.
+    for rel, names in candidates.items():
+        for name in names:
             if freq.get(name, 0) <= 1:
-                # FIX 7: an explicit, conscious, non-gameable author opt-out. A symbol is
-                # intentionally unreferenced (a symbol-table provenance marker, a contract
-                # const checked only by an out-of-tree witness) when the line immediately
-                # above its declaration is `//slop:keep [reason]`. Keyed on RAW source (a
-                # directive, not prose) so it is unambiguous and not matched by incidental
-                # wording — and it forces the author to state intent.
-                if idx >= 1 and idx - 1 < len(raw) and _SLOP_KEEP_RE.match(raw[idx - 1]):
-                    continue
                 if per_file.get(rel, 0) >= DEAD_CAP_PER_FILE:
                     continue
                 per_file[rel] = per_file.get(rel, 0) + 1
