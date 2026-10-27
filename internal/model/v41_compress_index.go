@@ -450,6 +450,27 @@ func v41SelectRankedBlocksObserved(logits []float32, compressLen, topKBlocks, bl
 		observe("attention-index-list")
 	}
 	numBlocks := (len(logits)-1)/blockSize + 1
+	if topKBlocks >= numBlocks {
+		// All blocks fit, so score order cannot affect membership. Preserve
+		// empty (-Inf) block exclusion and the newest visible block's pin,
+		// including its causally hidden trailing positions.
+		newest := (compressLen - 1) / blockSize
+		for block := 0; block <= newest; block++ {
+			start := block * blockSize
+			selected := block == newest
+			for position := start; position < min(start+blockSize, compressLen); position++ {
+				if !math.IsInf(float64(logits[position]), -1) {
+					selected = true
+				}
+			}
+			if selected {
+				for position := start; position < min(start+blockSize, len(keep)); position++ {
+					keep[position] = true
+				}
+			}
+		}
+		return keep, nil
+	}
 	ranked := make([]v41RankedScore, numBlocks)
 	for block := 0; block < numBlocks; block++ {
 		best := float32(math.Inf(-1))
@@ -518,7 +539,10 @@ func v41SelectIndexRowsObserved(logits []float32, compressLen, topK, offset int,
 		return rows, nil
 	}
 
-	ranked := make([]v41RankedScore, len(logits))
+	// Retain only the requested rows. The root is the worst retained score
+	// (largest position on ties), so replacement preserves the full-sort
+	// selection without ranking or storing the discarded tail.
+	ranked := make([]v41RankedScore, topK)
 	for position, score := range logits {
 		if math.IsNaN(float64(score)) {
 			return nil, fmt.Errorf("v41 index rows: score %d is NaN", position)
@@ -526,13 +550,23 @@ func v41SelectIndexRowsObserved(logits []float32, compressLen, topK, offset int,
 		if position >= compressLen || (candidates != nil && !candidates[position]) {
 			score = float32(math.Inf(-1))
 		}
-		ranked[position] = v41RankedScore{index: position, score: score}
+		candidate := v41RankedScore{index: position, score: score}
+		if position < topK {
+			ranked[position] = candidate
+			if position == topK-1 {
+				for parent := len(ranked)/2 - 1; parent >= 0; parent-- {
+					v41RankedHeapDown(ranked, parent)
+				}
+			}
+		} else if topK > 0 && compareV41Scores(candidate, ranked[0]) < 0 {
+			ranked[0] = candidate
+			v41RankedHeapDown(ranked, 0)
+		}
 	}
-	if observe != nil && len(ranked) > 0 {
+	// Preserve the host-arm event for a nonempty input even when topK is zero.
+	if observe != nil && len(logits) > 0 {
 		observe("attention-index-list")
 	}
-	sortV41Scores(ranked)
-	ranked = ranked[:min(topK, len(ranked))]
 	slices.SortFunc(ranked, func(a, b v41RankedScore) int { return cmp.Compare(a.index, b.index) })
 
 	rows := make([]int32, len(ranked))
@@ -547,10 +581,65 @@ func v41SelectIndexRowsObserved(logits []float32, compressLen, topK, offset int,
 }
 
 func sortV41Scores(scores []v41RankedScore) {
-	slices.SortFunc(scores, func(a, b v41RankedScore) int {
-		if a.score == b.score {
-			return cmp.Compare(a.index, b.index)
+	slices.SortFunc(scores, compareV41Scores)
+}
+
+func compareV41Scores(a, b v41RankedScore) int {
+	if a.score == b.score {
+		return cmp.Compare(a.index, b.index)
+	}
+	return cmp.Compare(b.score, a.score)
+}
+
+// v41RankedHeapDown adapts Go 1.26.0 container/heap.down to typed storage and
+// the reverse selection order. Typed storage avoids an escaping heap.Interface
+// wrapper; selection still owns only its ranked buffer and result buffer.
+// Source: https://github.com/golang/go/blob/go1.26.0/src/container/heap/heap.go
+//
+// Copyright 2009 The Go Authors. All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//   - Redistributions of source code must retain the above copyright
+//
+// notice, this list of conditions and the following disclaimer.
+//   - Redistributions in binary form must reproduce the above
+//
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//   - Neither the name of Google LLC nor the names of its
+//
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+func v41RankedHeapDown(ranked []v41RankedScore, parent int) {
+	for {
+		left := 2*parent + 1
+		if left >= len(ranked) || left < 0 {
+			return
 		}
-		return cmp.Compare(b.score, a.score)
-	})
+		worst := left
+		if right := left + 1; right < len(ranked) && compareV41Scores(ranked[right], ranked[left]) > 0 {
+			worst = right
+		}
+		if compareV41Scores(ranked[worst], ranked[parent]) <= 0 {
+			return
+		}
+		ranked[parent], ranked[worst] = ranked[worst], ranked[parent]
+		parent = worst
+	}
 }
