@@ -11621,6 +11621,11 @@
           "category": "incidental",
           "reason": "Private CUDA device/launch eligibility predicate checking capture, token bounds, grid, threads and shared memory. It grants no user authority, policy permission or capability token.",
           "token": "fak_qwen35_attention_postprocess_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CUDA launch eligibility predicate for residual plus normalization: checks row and width bounds, capture state, device zero, thread/shared-memory/grid limits. No user authorization, policy permission, capability token or maturity promise. Declines before allocation or enqueue.",
+          "token": "fak_qwen35_residual_norm_capability"
         }
       ],
       "exclude": [
@@ -11768,6 +11773,7 @@
         "fak_capability",
         "fak_fleet_goal_adjudications_total",
         "fak_qwen35_attention_postprocess_capability",
+        "fak_qwen35_residual_norm_capability",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
         "gradeSemanticFiles",

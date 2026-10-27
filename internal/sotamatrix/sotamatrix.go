@@ -142,6 +142,17 @@ var matrix = []Op{
 		Note:        "Borrow only the mechanism selected by a current full-sequence witness; preserve model semantics and permit no runtime or backend fallback.",
 	},
 	{
+		Slug:        "cuda-qwen-residual-norm",
+		Title:       "CUDA Qwen ordinary residual Add and PostNorm consumer",
+		FileGlobs:   []string{"internal/compute/cuda/qwen35_residual_norm.cuh", "internal/compute/cuda_qwen35_residual_norm*.go"},
+		FakPath:     "internal/compute/cuda/qwen35_residual_norm.cuh; internal/compute/cuda_qwen35_sequence.go",
+		SOTA:        "FlashInfer fused_add_rmsnorm technique; existing fak transformer_ops.cuh residual/RMS kernel@133fc57c9bf4f209390031ed31833a420d87faf6 (Apache-2.0)",
+		PrimaryLink: "https://docs.flashinfer.ai/generated/flashinfer.norm.fused_add_rmsnorm.html",
+		Route:       RouteStayMinimal,
+		Oracle:      "bit-identical stored residual and normalized output versus original CUDA Add plus RMSNorm, unchanged read-only operands, then ordinary model greedy/logit parity and same-card net uncached-prefill ABCCBA",
+		Note:        "Default-off checked integration of an already-present kernel, not new kernel credit; preserve F32 residual boundary, 256-thread tree and original off-path allocation order. No physical parity or throughput acceptance yet.",
+	},
+	{
 		Slug:        "dense-f32-gemm",
 		Title:       "Dense f32 GEMM",
 		FileGlobs:   []string{"internal/compute/cpuref.go", "internal/model/parallel.go", "internal/model/fdot_amd64.s"},

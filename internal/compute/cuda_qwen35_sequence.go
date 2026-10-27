@@ -423,12 +423,23 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		if normErr != nil {
 			return result, &Qwen35SequenceError{Stage: "input-norm", Layer: index, Cause: normErr}
 		}
+		var postNorm Tensor
+		var postNormBuf *cudaBuf
+		var residualErr error
+		fusedResidual := false
 		if layer.Linear {
 			branch, branchBuf, branchErr := c.qwen35SequenceGDNLocked(normed, layer, req.States[index], req, tokens, index)
 			if branchErr != nil {
 				return result, branchErr
 			}
-			C.fcuda_add_f32(c.cf(x), c.cf(branch), C.int(tokens*req.Hidden))
+			postNorm, postNormBuf, fusedResidual, residualErr = c.qwen35SequenceResidualNormLocked(x, branch, layer.PostNorm, tokens, req.RMSNormEpsilon)
+			if residualErr != nil {
+				c.qwen35SequencePoisonStates(req)
+				return result, &Qwen35SequenceError{Stage: "residual-post-norm", Layer: index, Cause: residualErr}
+			}
+			if !fusedResidual {
+				C.fcuda_add_f32(c.cf(x), c.cf(branch), C.int(tokens*req.Hidden))
+			}
 			c.releaseTransientBuffers([]*cudaBuf{normBuf, branchBuf})
 		} else {
 			qg, qgBuf, qErr := c.qwen35SequenceMatMulLocked(layer.Q, normed, tokens, "attention-qg")
@@ -487,13 +498,24 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 			if projectErr != nil {
 				return result, &Qwen35SequenceError{Stage: "attention-output", Layer: index, Cause: projectErr}
 			}
-			C.fcuda_add_f32(c.cf(x), c.cf(projected), C.int(tokens*req.Hidden))
+			postNorm, postNormBuf, fusedResidual, residualErr = c.qwen35SequenceResidualNormLocked(x, projected, layer.PostNorm, tokens, req.RMSNormEpsilon)
+			if residualErr != nil {
+				c.qwen35SequencePoisonStates(req)
+				return result, &Qwen35SequenceError{Stage: "residual-post-norm", Layer: index, Cause: residualErr}
+			}
+			if !fusedResidual {
+				C.fcuda_add_f32(c.cf(x), c.cf(projected), C.int(tokens*req.Hidden))
+			}
 			c.releaseTransientBuffers([]*cudaBuf{normBuf, kRawBuf, valueBuf, qRoPEBuf, kRoPEBuf, gateBuf, attnBuf, projectedBuf})
 			compactAttention++
 		}
-		postNorm, postNormBuf, postErr := c.qwen35SequenceRMSNormLocked(x, layer.PostNorm, tokens, req.RMSNormEpsilon, "post-attention-norm")
-		if postErr != nil {
-			return result, &Qwen35SequenceError{Stage: "post-attention-norm", Layer: index, Cause: postErr}
+		if !fusedResidual {
+			// Keep the original off/declined path's release-before-allocation order.
+			var postErr error
+			postNorm, postNormBuf, postErr = c.qwen35SequenceRMSNormLocked(x, layer.PostNorm, tokens, req.RMSNormEpsilon, "post-attention-norm")
+			if postErr != nil {
+				return result, &Qwen35SequenceError{Stage: "post-attention-norm", Layer: index, Cause: postErr}
+			}
 		}
 		gate, gateBuf, gateErr := c.qwen35SequenceMatMulLocked(layer.Gate, postNorm, tokens, "ffn-gate")
 		if gateErr != nil {

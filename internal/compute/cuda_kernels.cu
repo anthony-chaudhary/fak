@@ -120,6 +120,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/quant_matmul.cuh"
 #include "cuda/transformer_ops.cuh"
 #include "cuda/qwen35_attention_postprocess.cuh"
+#include "cuda/qwen35_residual_norm.cuh"
 #include "cuda/fattn_mma_hd256.cuh"
 #include "cuda/attention.cuh"
 #include "cuda/spec_graph.cuh"
