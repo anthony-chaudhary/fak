@@ -104,6 +104,71 @@ func TestDeepSeek41PublishedTokenizerPolicyRefusesDrift(t *testing.T) {
 	}
 }
 
+// The published Q2_K headers record CONTROL(3) at BOS 0, EOS 1, the pad
+// spelling 2 and the image marker 129264. The GGML tokenizer consumer trusts
+// token_type when present (CONTROL/USER_DEFINED mark a literal special token)
+// and its fallback only recognizes ASCII "<|...|>" markers, which the full-width
+// DeepSeek spellings do not match: an ordinary or missing type silently changes
+// encoding semantics, so admission must reject it.
+// fak-test:runtime medium est=1s lane=default
+func TestDeepSeek41PublishedTokenizerRefusesOrdinarySpecialTypes(t *testing.T) {
+	const imageMarkerID = 129264
+	specialIDs := []int{deepSeek41PublishedBOSTokenID, deepSeek41PublishedEOSTokenID, 2, imageMarkerID}
+	base := loadV41HeaderFixture(t)
+	types, ok := base.Int32Array("tokenizer.ggml.token_type")
+	if !ok || len(types) != deepSeek41PublishedVocabSize {
+		t.Fatalf("real header token_type entries=%d present=%t", len(types), ok)
+	}
+	for _, id := range specialIDs {
+		if types[id] != 3 { // CONTROL
+			t.Fatalf("real header token_type[%d]=%d, want CONTROL(3)", id, types[id])
+		}
+	}
+	setType := func(f *File, id int, v int32) {
+		got, _ := f.Int32Array("tokenizer.ggml.token_type")
+		mutated := slices.Clone(got)
+		mutated[id] = v
+		f.Metadata["tokenizer.ggml.token_type"] = vcruzI32Array(mutated)
+	}
+	for _, tc := range []struct {
+		name    string
+		wantErr string
+		edit    func(*File)
+	}{
+		{name: "bos ordinary type", wantErr: "token_type[0]=0", edit: func(f *File) { setType(f, 0, 0) }},
+		{name: "eos ordinary type", wantErr: "token_type[1]=0", edit: func(f *File) { setType(f, 1, 0) }},
+		{name: "pad ordinary type", wantErr: "token_type[2]=0", edit: func(f *File) { setType(f, 2, 0) }},
+		{name: "image marker ordinary type", wantErr: "token_type[129264]=0", edit: func(f *File) { setType(f, imageMarkerID, 0) }},
+		{name: "missing token_type array", wantErr: "missing tokenizer.ggml.token_type", edit: func(f *File) {
+			delete(f.Metadata, "tokenizer.ggml.token_type")
+		}},
+		{name: "truncated token_type array", wantErr: "token_type entries", edit: func(f *File) {
+			got, _ := f.Int32Array("tokenizer.ggml.token_type")
+			f.Metadata["tokenizer.ggml.token_type"] = vcruzI32Array(got[:len(got)-1])
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := *base
+			changed.Metadata = maps.Clone(base.Metadata)
+			tc.edit(&changed)
+			_, err := changed.Config()
+			if !errors.Is(err, model.ErrV41ConfigAdmission) {
+				t.Fatalf("Config error=%v want ErrV41ConfigAdmission", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Config error=%q want branch %q", err, tc.wantErr)
+			}
+		})
+	}
+	// Positive control: USER_DEFINED(4) is a valid special type the consumer trusts.
+	pos := *base
+	pos.Metadata = maps.Clone(base.Metadata)
+	setType(&pos, 2, 4) // USER_DEFINED
+	if _, err := pos.Config(); err != nil {
+		t.Fatalf("USER_DEFINED pad type Config error=%v, want admitted", err)
+	}
+}
+
 func setPublishedTokenMap(t *testing.T, f *File, edit func([]int32) []int32) {
 	t.Helper()
 	got, ok := f.IntArray("deepseek41.engram.token_map")

@@ -14,6 +14,8 @@ const (
 	deepSeek41PublishedTokenMapSHA256      = "c60a86322ec17b4142bfef3c57a8d81fb428550cdf487f88a4320cb59fe46481"
 	deepSeek41PublishedBOSTokenID          = 0
 	deepSeek41PublishedEOSTokenID          = 1
+	deepSeek41PublishedPadTokenID          = 2
+	deepSeek41PublishedImageMarkerID       = 129264
 )
 
 var deepSeek41PublishedTokenIDs = map[int]string{
@@ -56,6 +58,32 @@ func validateDeepSeek41PublishedTokenizer(f *File, cfg *model.Config, eng *DeepS
 		if tokens[id] != spelling {
 			return fmt.Errorf("gguf: deepseek41 tokenizer token %d=%q, want %q: %w",
 				id, tokens[id], spelling, model.ErrV41ConfigAdmission)
+		}
+	}
+	// The GGML tokenizer consumer trusts token_type when present: only CONTROL(3)
+	// and USER_DEFINED(4) mark a literal special token, and its fallback shape
+	// match recognizes ASCII "<|...|>" markers, not the full-width DeepSeek
+	// spellings. An ordinary or missing type would silently change encoding
+	// semantics, so admission requires the full array with a special type at
+	// every required control id.
+	types, ok := f.Int32Array("tokenizer.ggml.token_type")
+	if !ok {
+		return fmt.Errorf("gguf: deepseek41 published tokenizer is missing tokenizer.ggml.token_type: %w",
+			model.ErrV41ConfigAdmission)
+	}
+	if len(types) != deepSeek41PublishedVocabSize {
+		return fmt.Errorf("gguf: deepseek41 published tokenizer has %d token_type entries, want %d: %w",
+			len(types), deepSeek41PublishedVocabSize, model.ErrV41ConfigAdmission)
+	}
+	for _, id := range []int{
+		deepSeek41PublishedBOSTokenID,
+		deepSeek41PublishedEOSTokenID,
+		deepSeek41PublishedPadTokenID,
+		deepSeek41PublishedImageMarkerID,
+	} {
+		if t := types[id]; t != 3 && t != 4 { // CONTROL / USER_DEFINED
+			return fmt.Errorf("gguf: deepseek41 published tokenizer token_type[%d]=%d, want CONTROL(3) or USER_DEFINED(4): %w",
+				id, t, model.ErrV41ConfigAdmission)
 		}
 	}
 	if eng.CompressedVocabSize != 0 && eng.CompressedVocabSize != deepSeek41PublishedCompressedVocabSize {
