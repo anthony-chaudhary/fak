@@ -2813,6 +2813,19 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 			pre.IndexerProjectionDeviceCalls, pre.IndexerProjectionDeviceRows, pre.IndexerProjectionHostCalls, pre.IndexerProjectionHostRows, pre.IndexerProjectionActivationUploadBytes, pre.IndexerProjectionReadbackBytes, float64(pre.IndexerProjectionNanos)/1e9, pre.IndexerScoringCalls, float64(pre.IndexerScoringNanos)/1e9,
 			dec.IndexerProjectionDeviceCalls, dec.IndexerProjectionDeviceRows, dec.IndexerProjectionHostCalls, dec.IndexerProjectionHostRows, dec.IndexerProjectionActivationUploadBytes, dec.IndexerProjectionReadbackBytes, float64(dec.IndexerProjectionNanos)/1e9, dec.IndexerScoringCalls, float64(dec.IndexerScoringNanos)/1e9)
 	}
+	combinedClause := ""
+	if pre.HostExpertCombinedCalls > 0 || dec.HostExpertCombinedCalls > 0 {
+		status := func(c model.V41PhaseFieldCoverage) string {
+			if c.Status == "" {
+				return "unavailable"
+			}
+			return c.Status
+		}
+		combinedClause = fmt.Sprintf(" host_expert_combined prefill=[attempts=%d elapsed=%.3fs coverage=%s] decode=[attempts=%d elapsed=%.3fs coverage=%s] split_coverage prefill=[dequant=%s contraction=%s] decode=[dequant=%s contraction=%s]",
+			pre.HostExpertCombinedCalls, float64(pre.HostExpertCombinedNanos)/1e9, status(pre.Coverage.HostExpertCombinedTime),
+			dec.HostExpertCombinedCalls, float64(dec.HostExpertCombinedNanos)/1e9, status(dec.Coverage.HostExpertCombinedTime),
+			status(pre.Coverage.DequantTime), status(pre.Coverage.ContractionTime), status(dec.Coverage.DequantTime), status(dec.Coverage.ContractionTime))
+	}
 	return fmt.Sprintf(
 		" v41_faults prefill=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] decode=[faults=%df/%.1ffpt faulted_bytes=%.1fMiB dequant=%.2fGiB] hit_fraction=%.2f elapsed prefill=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] decode=[fault=%.3fs/%.3fmspt dequant=%.3fs/%.3fmspt contraction=%.3fs/%.3fmspt] contraction_backend=%s incremental_device prefill=[gate_up=%d down=%d dispatch=%.3fs] decode=[gate_up=%d down=%d dispatch=%.3fs] incremental_engram prefill=[injections=%d rows=%d hash_tokens=%d elapsed=%.3fs] decode=[injections=%d rows=%d hash_tokens=%d elapsed=%.3fs] expert_activation prefill=[device=%d host=%d readback=%dB elapsed=%.3fs] decode=[device=%d host=%d readback=%dB elapsed=%.3fs] dense_projection prefill=[device=%dcalls/%drows host=%dcalls/%drows upload=%dB readback=%dB elapsed=%.3fs] decode=[device=%dcalls/%drows host=%dcalls/%drows upload=%dB readback=%dB elapsed=%.3fs]%s head_projection prefill=[device=%dcalls/%drows host=%dcalls/%drows upload=%dB readback=%dB elapsed=%.3fs] decode=[device=%dcalls/%drows host=%dcalls/%drows upload=%dB readback=%dB elapsed=%.3fs] grouped_output prefill=[device=%dcalls/%drows host=%dcalls/%drows matmul=%d upload=%dB readback=%dB host_f32=%dB elapsed=%.3fs] decode=[device=%dcalls/%drows host=%dcalls/%drows matmul=%d upload=%dB readback=%dB host_f32=%dB elapsed=%.3fs] engram_projection prefill=[device=%dcalls/%drows host=%dcalls/%drows matmul=%d upload=%dB readback=%dB host_f32=%dB elapsed=%.3fs] decode=[device=%dcalls/%drows host=%dcalls/%drows matmul=%d upload=%dB readback=%dB host_f32=%dB elapsed=%.3fs] mhc_projection prefill=[device=%dcalls/%drows host=%dcalls/%drows matmul=%d upload=%dB readback=%dB host_f32=%dB elapsed=%.3fs] decode=[device=%dcalls/%drows host=%dcalls/%drows matmul=%d upload=%dB readback=%dB host_f32=%dB elapsed=%.3fs]",
 		pre.Faults, pre.FaultsPerToken, mib*float64(pre.FaultedBytes), float64(pre.DequantBytes)/(1<<30),
@@ -2833,7 +2846,7 @@ func formatV41FaultClause(fa model.V41ExpertFaultAttribution) string {
 		dec.ExpertActivationDeviceCalls, dec.ExpertActivationHostCalls, dec.ExpertActivationReadbackBytes, float64(dec.ExpertActivationNanos)/1e9,
 		pre.DenseProjectionDeviceCalls, pre.DenseProjectionDeviceRows, pre.DenseProjectionHostCalls, pre.DenseProjectionHostRows, pre.DenseProjectionActivationUploadBytes, pre.DenseProjectionReadbackBytes, float64(pre.DenseProjectionNanos)/1e9,
 		dec.DenseProjectionDeviceCalls, dec.DenseProjectionDeviceRows, dec.DenseProjectionHostCalls, dec.DenseProjectionHostRows, dec.DenseProjectionActivationUploadBytes, dec.DenseProjectionReadbackBytes, float64(dec.DenseProjectionNanos)/1e9,
-		compressorClause+indexerClause,
+		compressorClause+indexerClause+combinedClause,
 		pre.HeadProjectionDeviceCalls, pre.HeadProjectionDeviceRows, pre.HeadProjectionHostCalls, pre.HeadProjectionHostRows, pre.HeadProjectionActivationUploadBytes, pre.HeadProjectionReadbackBytes, float64(pre.HeadProjectionNanos)/1e9,
 		dec.HeadProjectionDeviceCalls, dec.HeadProjectionDeviceRows, dec.HeadProjectionHostCalls, dec.HeadProjectionHostRows, dec.HeadProjectionActivationUploadBytes, dec.HeadProjectionReadbackBytes, float64(dec.HeadProjectionNanos)/1e9,
 		pre.GroupedOutputDeviceCalls, pre.GroupedOutputDeviceRows, pre.GroupedOutputHostCalls, pre.GroupedOutputHostRows, pre.GroupedOutputMatMulCalls, pre.GroupedOutputActivationUploadBytes, pre.GroupedOutputReadbackBytes, pre.GroupedOutputHostWeightF32Bytes, float64(pre.GroupedOutputNanos)/1e9,

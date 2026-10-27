@@ -63,6 +63,7 @@ type V41PhaseFieldCoverage struct {
 }
 
 type V41ExpertPhaseCoverage struct {
+	HostExpertCombinedTime   V41PhaseFieldCoverage `json:"host_expert_combined_time"`
 	HostMaterialization      V41PhaseFieldCoverage `json:"host_materialization"`
 	FaultTime                V41PhaseFieldCoverage `json:"fault_time"`
 	DequantTime              V41PhaseFieldCoverage `json:"dequant_time"`
@@ -114,6 +115,12 @@ func (p V41ExpertPhase) String() string {
 // dequant, each pick by its contraction) but are summed into three independent
 // accumulators so a run can say which one dominates.
 type v41ExpertFaultPhaseLedger struct {
+	// HostExpertCombined observes the first row of a row-streamed cohort:
+	// joined gate/up dequant+dots, BF16/activation/weighting and down. It is
+	// not a pure dequant or contraction measurement and is never split/summed
+	// into those legacy timers. Later rows retain the old contraction timer.
+	HostExpertCombinedCalls   int                    `json:"host_expert_combined_calls"`
+	HostExpertCombinedNanos   int64                  `json:"host_expert_combined_nanos"`
 	Coverage                  V41ExpertPhaseCoverage `json:"coverage"`
 	AttentionContractionCalls int                    `json:"attention_contraction_calls"`
 	AttentionContractionNanos int64                  `json:"attention_contraction_nanos"`
@@ -502,6 +509,7 @@ func (l *v41ExpertFaultLedger) snapshot() V41ExpertFaultAttribution {
 		busy := V41PhaseFieldCoverage{Status: "unavailable", Reason: "ledger_busy"}
 		c.HostMaterialization, c.FaultTime, c.DequantTime = busy, busy, busy
 		c.ContractionTime, c.DeviceDispatchTime, c.DeviceActivationTime = busy, busy, busy
+		c.HostExpertCombinedTime = busy
 		out.Prefill.Coverage, out.Decode.Coverage = c, c
 		return out
 	}
@@ -531,6 +539,15 @@ func (l *v41ExpertFaultLedger) deriveLocked(led v41ExpertFaultPhaseLedger) v41Ex
 		v41DeriveFieldCoverage(&c.ContractionTime, "count_only_or_invalid_clock_pair")
 		c.ContractionTime.Boundary = "host_observed_routed_contraction_excludes_weight_materialization"
 		c.ContractionTime.Outcome = "successful_contractions"
+		v41DeriveFieldCoverage(&c.HostExpertCombinedTime, "combined_host_expert_clock_pair_not_observed")
+		c.HostExpertCombinedTime.Boundary = "host_first_row_envelope_including_cohort_gate_up_dequant_dots_activation_weighting_and_down_excluding_weight_faults_and_down_materialization"
+		c.HostExpertCombinedTime.Outcome = "attempted_combined_host_expert_including_failed_attempts"
+		c.HostExpertCombinedTime.Overlap = "disjoint_from_legacy_split_samples_do_not_partition_into_dequant_and_contraction"
+		if led.HostExpertCombinedCalls == 0 {
+			c.HostExpertCombinedTime.Status, c.HostExpertCombinedTime.Reason = "not_applicable", "row_streamed_host_expert_not_observed"
+		} else if c.ContractionTime.UnavailableSamples > 0 {
+			c.ContractionTime.Reason = "combined_host_expert_split_unavailable_or_invalid_clock_pair"
+		}
 		v41DeriveFieldCoverage(&c.DeviceDispatchTime, "no_completed_clock_pair")
 		c.DeviceDispatchTime.Boundary = "host_observed_attempt_submission_through_return_or_failure_completion_not_guaranteed"
 		c.DeviceDispatchTime.Overlap = "overlaps_device_activation_do_not_sum"
@@ -551,6 +568,9 @@ func (l *v41ExpertFaultLedger) deriveLocked(led v41ExpertFaultPhaseLedger) v41Ex
 		}
 		c.FaultTime.Boundary = "host_checkpoint_fault_door_not_OS_fault_or_physical_disk_latency"
 		c.DequantTime.Boundary = "host_f32_weight_materialization"
+		if led.HostExpertCombinedCalls > 0 && c.DequantTime.UnavailableSamples > 0 {
+			c.DequantTime.Reason = "combined_host_expert_split_unavailable_or_no_completed_clock_pair"
+		}
 		h := &c.HostMaterialization
 		h.Boundary = "host_weight_resolution_only_not_OS_fault_or_physical_disk_measurement"
 		switch {
@@ -1086,5 +1106,50 @@ func (m *Model) v41NoteMHCProjection(deviceCalls, hostCalls, deviceRows, hostRow
 		if elapsed := l.nowLocked() - opened; elapsed > 0 {
 			led.MHCProjectionNanos += elapsed
 		}
+	}
+}
+
+// v41NoteExpertStreamedDequant counts logical f32 row values actually produced.
+// Raw fault accounting was already recorded at resolution. No separate elapsed
+// time is fabricated while row dequant and cohort dots run together.
+func (m *Model) v41NoteExpertStreamedDequant(bytes int64) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil || bytes <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if led := l.ledgerLocked(); led != nil {
+		led.DequantBytes += bytes
+	}
+}
+
+// v41NoteHostExpertCombined observes one first-row attempt after raw gate/up
+// resolution and full down materialization. Workers are joined at each boundary;
+// this is one wall-clock envelope, never a sum of worker times. Only successful
+// rows increment the existing contraction count, with split timing unavailable.
+func (m *Model) v41NoteHostExpertCombined(opened int64, success bool) {
+	l := v41ExpertFaultLedgerOf(m, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	led := l.ledgerLocked()
+	if led == nil {
+		return
+	}
+	led.HostExpertCombinedCalls++
+	c := &led.Coverage.HostExpertCombinedTime
+	if elapsed := l.nowLocked() - opened; opened != 0 && elapsed >= 0 {
+		led.HostExpertCombinedNanos += elapsed
+		c.MeasuredSamples++
+	} else {
+		c.UnavailableSamples++
+	}
+	if success {
+		led.Contractions++
+		led.Coverage.ContractionTime.UnavailableSamples++
+		led.ContractionBackend = l.backendNameLocked()
 	}
 }

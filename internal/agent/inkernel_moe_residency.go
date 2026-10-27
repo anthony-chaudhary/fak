@@ -136,6 +136,8 @@ type V41ExpertCoverageLifetimeSnapshot struct {
 }
 
 type V41ExpertCoverageSnapshot struct {
+	HostExpertCombinedCalls        int                          `json:"host_expert_combined_calls"`
+	HostExpertCombinedNanos        int64                        `json:"host_expert_combined_nanos"`
 	Coverage                       model.V41ExpertPhaseCoverage `json:"coverage"`
 	IncrementalDeviceDispatchNanos int64                        `json:"incremental_device_dispatch_nanos"`
 	IncrementalDeviceGateUpCalls   int                          `json:"incremental_device_gate_up_calls"`
@@ -419,6 +421,7 @@ func v41PhaseSnapshot(in model.V41ExpertFaultAttributionPhase) V41PhaseSnapshot 
 
 func v41ExpertCoverageSnapshot(in model.V41ExpertFaultAttributionPhase) V41ExpertCoverageSnapshot {
 	return V41ExpertCoverageSnapshot{
+		HostExpertCombinedCalls: in.HostExpertCombinedCalls, HostExpertCombinedNanos: in.HostExpertCombinedNanos,
 		Coverage: in.Coverage, IncrementalDeviceDispatchNanos: in.IncrementalDeviceDispatchNanos,
 		IncrementalDeviceGateUpCalls: in.IncrementalDeviceGateUpCalls, IncrementalDeviceDownCalls: in.IncrementalDeviceDownCalls,
 	}
@@ -431,7 +434,8 @@ func v41UnobservedPhaseCoverage(sibling model.V41ExpertPhaseCoverage) model.V41E
 		RequestIsolationReason: sibling.RequestIsolationReason, Dependency: sibling.Dependency,
 		RingPageInSemantics: sibling.RingPageInSemantics,
 		HostMaterialization: unavailable, FaultTime: unavailable, DequantTime: unavailable,
-		ContractionTime: unavailable, DeviceDispatchTime: unavailable, DeviceActivationTime: unavailable,
+		HostExpertCombinedTime: unavailable,
+		ContractionTime:        unavailable, DeviceDispatchTime: unavailable, DeviceActivationTime: unavailable,
 	}
 }
 

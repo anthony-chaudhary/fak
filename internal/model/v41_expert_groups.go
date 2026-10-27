@@ -382,7 +382,7 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 			}
 		}
 		if full {
-			handled, cause := m.v41ContractHostExpertGroup(l, stem, g.Rows, xnByToken, perTokenPicks, unweighted, cfg, st, hostTriple, hostDown)
+			handled, cause := m.v41ContractHostExpertGroup(l, stem, g.Rows, xnByToken, perTokenPicks, unweighted, cfg, st, hostTriple, hostDown, scratch)
 			if cause != nil {
 				return cause
 			}

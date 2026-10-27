@@ -1770,3 +1770,10 @@ Builtin grouped-head rectangular prefill entry that admits dead session-retained
 Grouped-head rectangular prefill attention implementation supporting explicitly prepared K/V panels, bounded builtin worker-local reuse, or generic per-unit fresh reads.
 
 **Distinct from:** Executes grouped attention with supplied dot kernels rather than selecting a backend or validating loan ownership. Unlike scalar per-head read mode this shares grouped-head traversal and accepts already-prepared K/V panels.
+
+
+### v41PlanHostRawGateUp
+
+Metadata-only constructor for opt-in host expert raw gate/up row-streaming. It validates geometry, absence of retained dense scratch and competing cached/resident representations, an unbounded checkpoint pool and eligible immutable Q2_K/Q3_K checkpoint entries before returning deferred raw-weight loading state; otherwise returns nil.
+
+**Distinct from:** Unlike PlanV41Q2KTokenPanel device launch geometry, this selects checkpoint-backed host expert gate/up streaming and carries tensor names and checkpoint entries for later loading. It does not read checkpoint payloads, materialize float gate/up panels or perform projection during planning.

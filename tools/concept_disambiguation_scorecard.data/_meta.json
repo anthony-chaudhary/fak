@@ -4711,6 +4711,31 @@
           "category": "incidental",
           "reason": "gateReady is a private per-expert-cohort boolean recording whether the neural-network MLP gate projection vector has been computed. project() chooses gateReady for stage0 and upReady for stage1; computes fdot rows into disjoint output segments, joins c.run, sets the selected flag, and later reuses that projection. It is not an access-control, policy, lifecycle, factory admission, or authorization gate. The flag is scoped to each newly constructed numerical cohort.",
           "token": "gateReady"
+        },
+        {
+          "category": "incidental",
+          "reason": "Timing-boundary description for numeric host expert work; gate_up denotes neural-network projection arithmetic included in the measured envelope. The string creates no authorization, access, policy or lifecycle admission gate.",
+          "token": "host_first_row_envelope_including_cohort_gate_up_dequant_dots_activation_weighting_and_down_excluding_weight_faults_and_down_materialization"
+        },
+        {
+          "category": "incidental",
+          "reason": "Validates numeric gate/up weight representation dimensions, either dense float slices or ready raw quantized matrices. Gate/up refers to neural-network projection tensors, not access-control, factory-policy or lifecycle gates.",
+          "token": "gateUpShape"
+        },
+        {
+          "category": "incidental",
+          "reason": "Holds expert tensor names, checkpoint entries, raw quantized gate/up weights and down-projection state. Gate/up refers to neural-network projection tensors, not access-control, factory-policy or lifecycle gates.",
+          "token": "v41HostRawGateUp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selects and constructs a raw neural gate/up weight execution plan; its planning role is separately positioned in the plan family. Gate/up refers to neural-network projection tensors, not access-control, factory-policy or lifecycle gates.",
+          "token": "v41PlanHostRawGateUp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Dequantizes bounded raw gate/up weight rows and computes scalar dot products across an expert cohort. Gate/up refers to neural-network projection tensors, not access-control, factory-policy or lifecycle gates.",
+          "token": "projectRawGateUp"
         }
       ],
       "exclude": [
@@ -4901,6 +4926,7 @@
         "gateReady",
         "gateSkew",
         "gateSourcePaths",
+        "gateUpShape",
         "gate_reshaped",
         "gate_sigmoid",
         "gate_test",
@@ -5127,6 +5153,7 @@
         "guardwireretryhop",
         "hasAggregate",
         "hc_gate",
+        "host_first_row_envelope_including_cohort_gate_up_dequant_dots_activation_weighting_and_down_excluding_weight_faults_and_down_materialization",
         "injectGuardProfiles",
         "installGuardCodexSessionStartHookAt",
         "installGuardLogvaultMetrics",
@@ -5171,6 +5198,7 @@
         "prepushLegacyGateContract",
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
+        "projectRawGateUp",
         "proseGate",
         "ptrGuardInfoWorkDone",
         "publicGatewayURL",
@@ -5224,8 +5252,10 @@
         "unguarded",
         "v41EPGuard",
         "v41EPOwnerGuardBinarySHA256",
+        "v41HostRawGateUp",
         "v41LeafGate",
         "v41LeafGateBias",
+        "v41PlanHostRawGateUp",
         "v41UsesGatedCompressor",
         "v41routergatetopk",
         "v41routergatetopkavailable",
@@ -14689,6 +14719,11 @@
           "category": "incidental",
           "reason": "Private request-specific runtime eligibility predicate: checks initialized opt-in kernel, exact panel geometry, integer bounds and device workgroup limits before allocation and dispatch. Returns a boolean capability decision, not a maturity tier, support policy, default promotion or hardware-validation claim.",
           "token": "fvk_qwen35_q8_pair_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic label for separate dequantization/contraction timing-field observation coverage in a combined host-expert report. It reports whether clock samples exist or are unavailable, not support tier, release maturity, capability validation or service readiness.",
+          "token": "split_coverage"
         }
       ],
       "exclude": [
@@ -14944,6 +14979,7 @@
         "setup_parity_flagged",
         "setup_parity_ok",
         "sourcecoverage",
+        "split_coverage",
         "streamingsupported",
         "supported",
         "supportedFleetClass",

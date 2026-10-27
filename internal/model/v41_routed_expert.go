@@ -175,15 +175,20 @@ func (m *Model) v41FullRoutedExpertProjected(layer int, stem string, input []flo
 		proj = parMatRows
 	}
 	if hostProjection != nil {
-		proj = hostProjection
+		proj = hostProjection.project
 	}
 	var opened int64
+	var combined, combinedSuccess bool
 	if fused == nil {
 		w1, w3, wd, cause := triple()
 		if cause != nil {
 			return nil, cause
 		}
-		if len(w1) != I*H || len(w3) != I*H || len(wd) != H*I {
+		gateUpShape := len(w1) == I*H && len(w3) == I*H
+		if hostProjection != nil {
+			gateUpShape = hostProjection.gateUpShape(w1, w3, I, H)
+		}
+		if !gateUpShape || len(wd) != H*I {
 			return nil, v41ExpertOperationErr(layer, "gate/up", errV41ExpertResult)
 		}
 		w2 = wd
@@ -191,6 +196,12 @@ func (m *Model) v41FullRoutedExpertProjected(layer int, stem string, input []flo
 			atomic.AddInt64(&v41SwiGLUParallelCalls, 1)
 		}
 		opened = m.v41NowNanos()
+		combined = hostProjection != nil && hostProjection.combinedHostStage()
+		if combined {
+			// This first-row envelope contains row-streamed dequant, cohort
+			// gate/up dots, activation and down. Do not fabricate split time.
+			defer func() { m.v41NoteHostExpertCombined(opened, combinedSuccess) }()
+		}
 		gate, cause := v41RoutedBF16PublishInput(layer, "gate/up", proj(w1, x, I, H), I, publish, true)
 		if cause != nil {
 			return nil, cause
@@ -261,7 +272,9 @@ func (m *Model) v41FullRoutedExpertProjected(layer int, stem string, input []flo
 			return nil, err
 		}
 	}
-	if opened != 0 {
+	if combined {
+		combinedSuccess = true
+	} else if opened != 0 {
 		m.v41NoteExpertContractionNanos(m.v41NowNanos() - opened)
 	} else {
 		m.v41NoteExpertContraction()

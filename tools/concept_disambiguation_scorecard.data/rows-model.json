@@ -677,5 +677,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "v41planhostrawgateup",
+      "canonical": "v41PlanHostRawGateUp",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Metadata-only constructor for opt-in host expert raw gate/up row-streaming. It validates geometry, absence of retained dense scratch and competing cached/resident representations, an unbounded checkpoint pool and eligible immutable Q2_K/Q3_K checkpoint entries before returning deferred raw-weight loading state; otherwise returns nil.",
+      "distinction": "Unlike PlanV41Q2KTokenPanel device launch geometry, this selects checkpoint-backed host expert gate/up streaming and carries tensor names and checkpoint entries for later loading. It does not read checkpoint payloads, materialize float gate/up panels or perform projection during planning.",
+      "distinct_from": [
+        "planv41q2ktokenpanel"
+      ],
+      "aliases": [],
+      "grounding": "v41PlanHostRawGateUp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }
