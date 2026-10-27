@@ -10,6 +10,8 @@ import (
 var fixtureFiles = []string{
 	"internal/compute/cuda_arch.txt",
 	"internal/compute/build_cuda.sh",
+	"internal/computebuild/cuda.go",
+	"internal/devcmd/build_cuda.go",
 	"scripts/ci.ps1",
 	"tools/build_cuda_windows.ps1",
 	"Dockerfile.cuda",
@@ -64,7 +66,7 @@ func TestCurrentTreeIsValid(t *testing.T) {
 
 func TestEntrypointsUseGoValidator(t *testing.T) {
 	root := fixture(t)
-	for _, rel := range []string{"internal/compute/build_cuda.sh", "scripts/ci.ps1"} {
+	for _, rel := range []string{"internal/computebuild/cuda.go", "scripts/ci.ps1"} {
 		contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
 			t.Fatal(err)
@@ -73,7 +75,7 @@ func TestEntrypointsUseGoValidator(t *testing.T) {
 		if strings.Contains(text, "tools/cuda_arch_matrix.py") {
 			t.Errorf("%s still invokes retired Python validator", rel)
 		}
-		if !strings.Contains(text, "go test ./internal/cudaarch") {
+		if !strings.Contains(text, "go test ./internal/cudaarch") && !strings.Contains(text, `[]string{"test", "./internal/cudaarch"}`) {
 			t.Errorf("%s does not invoke the Go CUDA architecture validator", rel)
 		}
 	}
@@ -86,8 +88,33 @@ func TestRejectsMissingSM120(t *testing.T) {
 
 func TestRejectsMissingPTXFloor(t *testing.T) {
 	root := fixture(t)
-	replaceFixture(t, root, "internal/compute/build_cuda.sh", `GENCODE+=(-gencode "arch=compute_${PTX_CC},code=compute_${PTX_CC}")`, "")
-	assertErrorContains(t, root, "compute_${PTX_CC}")
+	replaceFixture(t, root, "internal/computebuild/cuda.go", `gencode = append(gencode, "-gencode", fmt.Sprintf("arch=compute_%s,code=compute_%s", lastCC, lastCC))`, "")
+	assertErrorContains(t, root, "code=compute_%s")
+}
+
+// fak-test:runtime fast est=20ms
+func TestRejectsMissingNativeSASS(t *testing.T) {
+	root := fixture(t)
+	replaceFixture(t, root, "internal/computebuild/cuda.go", `gencode = append(gencode, "-gencode", fmt.Sprintf("arch=compute_%s,code=%s", cc, arch))`, "")
+	assertErrorContains(t, root, "code=%s")
+}
+
+// fak-test:runtime fast est=20ms
+func TestRejectsBrokenNativeDelegation(t *testing.T) {
+	for _, old := range []string{"build-cuda legacy", ` "$@"`} {
+		t.Run(old, func(t *testing.T) {
+			root := fixture(t)
+			replaceFixture(t, root, "internal/compute/build_cuda.sh", old, "")
+			assertErrorContains(t, root, "linux delegation")
+		})
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestRejectsMissingNativeLegacyRoute(t *testing.T) {
+	root := fixture(t)
+	replaceFixture(t, root, "internal/devcmd/build_cuda.go", `if sub == "legacy" {`, `if sub == "unknown" {`)
+	assertErrorContains(t, root, "native legacy route")
 }
 
 func TestRejectsDocDrift(t *testing.T) {

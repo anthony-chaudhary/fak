@@ -2,18 +2,129 @@ package computebuild
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func init() {
+	if os.Getenv("FAK_CUDA_GRAPH_PHASE_HELPER") == "1" && len(os.Args) > 1 && os.Args[1] == "test" {
+		f, err := os.OpenFile("graph-test-passes", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			os.Exit(27)
+		}
+		_, _ = f.WriteString(os.Getenv("FAK_CUDA_GRAPH") + "\n")
+		_ = f.Close()
+		if os.Getenv("FAK_CUDA_GRAPH") == "1" && os.Getenv("FAK_CUDA_GRAPH_PHASE_FAIL") == "1" {
+			os.Exit(28)
+		}
+		os.Exit(0)
+	}
+	if os.Getenv("FAK_CUDA_SHELL_DELEGATION_HELPER") == "1" {
+		if !FileExists(filepath.Join("cmd", "fak-dev", "main.go")) || !FileExists("go.mod") {
+			os.Exit(29)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(os.Args[1:])
+		os.Exit(0)
+	}
+}
+
+// fak-test:justify why=regression when=changed:internal/computebuild/**
+// fak-test:runtime medium est=5s
+func TestCUDATestGraphPassesShareCompileAndFailureReceipt(t *testing.T) {
+	for _, failSecond := range []bool{false, true} {
+		t.Run(map[bool]string{false: "passed", true: "graph-failed"}[failSecond], func(t *testing.T) {
+			root, tc := cudaIncrementalFixture(t)
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(self)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := "go"
+			if runtime.GOOS == "windows" {
+				name += ".exe"
+			}
+			if err := os.WriteFile(filepath.Join(root, name), raw, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.test/cuda\n\ngo 1.26\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("FAK_CUDA_GRAPH_PHASE_HELPER", "1")
+			t.Setenv("FAK_CUDA_GRAPH", "inherited")
+			t.Setenv("FAK_CUDA_GRAPH_PHASE_FAIL", map[bool]string{false: "0", true: "1"}[failSecond])
+			cfg := &CUDAConfig{Command: "test", RepoRoot: root, Arch: "sm_120", Toolchain: tc, Stdout: io.Discard, Stderr: io.Discard}
+			err = RunCUDA(context.Background(), cfg)
+			if (err != nil) != failSecond {
+				t.Fatalf("graph test result=%v failSecond=%v", err, failSecond)
+			}
+			passes, err := os.ReadFile(filepath.Join(root, "graph-test-passes"))
+			if err != nil || string(passes) != "0\n1\n" {
+				t.Fatalf("graph passes=%q err=%v", passes, err)
+			}
+			if cudaCompileCount(t, root) != 1 {
+				t.Fatal("graph passes did not share one native compilation")
+			}
+			native := cudaReadNativeReceipt(t, root)
+			wantOutcome := map[bool]string{false: "success", true: "failed"}[failSecond]
+			if native.Outcome != wantOutcome || cfg.Receipt.Outcome != wantOutcome {
+				t.Fatalf("main/native outcome=%s/%s", cfg.Receipt.Outcome, native.Outcome)
+			}
+		})
+	}
+}
+
+// fak-test:justify why=contract when=changed:internal/compute/build_cuda.sh,internal/computebuild/**
+// fak-test:runtime fast est=1s
+func TestBuildCUDAScriptDelegatesToNativeDriver(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if runtime.GOOS == "windows" {
+		bash = filepath.Join(os.Getenv("ProgramFiles"), "Git", "bin", "bash.exe")
+		_, err = os.Stat(bash)
+	}
+	if err != nil {
+		t.Skip("bash is required to exercise build_cuda.sh")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "compute", "build_cuda.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bash, script, "binary", "./cmd/fak", "output with spaces/fak")
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(os.Environ(), "GO="+self, "FAK_CUDA_SHELL_DELEGATION_HELPER=1")
+	raw, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"run", "./cmd/fak-dev", "build-cuda", "legacy", "binary", "./cmd/fak", "output with spaces/fak"}
+	if !slices.Equal(args, want) {
+		t.Fatalf("shell native delegation=%q; want %q", args, want)
+	}
+}
 
 // Two nvcc runs over identical sources differ only in the PID-derived host-stub name.
 func fixtureCUDAArchive(code, pid string) []byte {
@@ -83,62 +194,5 @@ func TestCUDAArchiveStampRefusesWhatCannotNameAnArchive(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, CUDAArchiveStampFile)); !os.IsNotExist(err) {
 		t.Fatal("missing archive still wrote a stamp")
-	}
-}
-
-// build_cuda.sh and fak-dev build-cuda must write identical stamps, or alternating between
-// them recompiles the compute package on every build.
-// fak-test:justify why=contract when=changed:internal/compute/build_cuda.sh,internal/computebuild/**
-// fak-test:runtime fast est=1s
-func TestBuildCUDAScriptWritesTheGoArchiveStamp(t *testing.T) {
-	t.Parallel()
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skip("bash is required to exercise build_cuda.sh")
-	}
-	script, err := os.ReadFile(filepath.Join("..", "compute", "build_cuda.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.ReplaceAll(string(script), "\r\n", "\n")
-	start := strings.Index(text, "write_archive_stamp() {\n")
-	end := strings.Index(text[max(start, 0):], "\n}\n")
-	if start < 0 || end < 0 {
-		t.Fatal("build_cuda.sh has no write_archive_stamp function")
-	}
-	fn := text[start : start+end+3]
-	if !strings.Contains(text[start+end:], "\n  write_archive_stamp\n") {
-		t.Fatal("build_cuda.sh never stamps the archive it builds")
-	}
-	if out, err := exec.Command(bash, "-c", "command -v sed && command -v sha256sum").CombinedOutput(); err != nil {
-		t.Skipf("bash lacks sed/sha256sum: %v (%s)", err, strings.TrimSpace(string(out)))
-	}
-	for _, pid := range []string{"000001cb", "000001e3"} {
-		dir := t.TempDir()
-		archive := filepath.Join(dir, "libfakcuda.a")
-		if err := os.WriteFile(archive, fixtureCUDAArchive("kernel-v1", pid), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.Command(bash, "-s")
-		cmd.Stdin = strings.NewReader("set -euo pipefail\n" + fn + "write_archive_stamp\n")
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("write_archive_stamp: %v\n%s", err, out)
-		}
-		got, err := os.ReadFile(filepath.Join(dir, CUDAArchiveStampFile))
-		if err != nil {
-			t.Fatal(err)
-		}
-		digest, err := CUDAArchiveDigest(archive)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := CUDAArchiveStampSource(digest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, want) {
-			t.Fatalf("build_cuda.sh stamp differs from computebuild:\n got %q\nwant %q", got, want)
-		}
 	}
 }

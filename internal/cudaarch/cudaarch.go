@@ -25,7 +25,17 @@ func Validate(root string) ([]string, error) {
 		path    []string
 		needles []string
 	}{
-		{"linux", []string{"internal", "compute", "build_cuda.sh"}, []string{"cuda_arch.txt", "code=${arch}", "code=compute_${PTX_CC}"}},
+		{"linux delegation", []string{"internal", "compute", "build_cuda.sh"}, []string{`cd "$SCRIPT_DIR/../.."`, `exec "${GO:-go}" run ./cmd/fak-dev build-cuda legacy "$@"`}},
+		{"native", []string{"internal", "computebuild", "cuda.go"}, []string{
+			`filepath.Join(repoRoot, "internal", "compute", "cuda_arch.txt")`,
+			`gencodeArgs, buildArchs, err := LoadCUDAArchMatrix(repoRoot, arch)`,
+			`nvccArgs = append(nvccArgs, gencodeArgs...)`,
+			`gencode = []string{"-gencode", fmt.Sprintf("arch=compute_%s,code=%s", cc, arch)}`,
+			`gencode = append(gencode, "-gencode", fmt.Sprintf("arch=compute_%s,code=%s", cc, arch))`,
+			`gencode = append(gencode, "-gencode", fmt.Sprintf("arch=compute_%s,code=compute_%s", lastCC, lastCC))`,
+			`[]string{"test", "./internal/cudaarch"}`,
+		}},
+		{"native legacy route", []string{"internal", "devcmd", "build_cuda.go"}, []string{`if sub == "legacy" {`, `return runCUDALegacy(stdout, stderr, flagArgs, run, command)`}},
 		{"windows", []string{"tools", "build_cuda_windows.ps1"}, []string{"cuda_arch.txt", "code=${item}", "code=compute_${cc}"}},
 		{"docker", []string{"Dockerfile.cuda"}, []string{"cuda_arch.txt", "code=${arch}", "code=compute_${cc}"}},
 		{"docs", []string{"docs", "cuda-dev.md"}, []string{"internal/compute/cuda_arch.txt", "cuda-build-sm100", "cuda-build-sm120"}},

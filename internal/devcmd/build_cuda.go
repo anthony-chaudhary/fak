@@ -49,6 +49,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	if sub == "first-light" {
 		return runCUDAFirstLight(stdout, stderr, flagArgs)
 	}
+	if sub == "legacy" {
+		return runCUDALegacy(stdout, stderr, flagArgs, run, command)
+	}
 
 	fs := flag.NewFlagSet("build-cuda", flag.ContinueOnError)
 	fs.SetOutput(stderr)

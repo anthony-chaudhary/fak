@@ -580,7 +580,12 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		args := []string{"test", "-tags", goTags, "-count=1", "-run", "CUDA|HALDevice", "./internal/compute/", "./internal/model/"}
 		return tracker.recordPhase("build_or_test", func() error {
-			return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
+			for _, graph := range []string{"0", "1"} {
+				if err := RunCmd(ctx, "go", args, cfg.RepoRoot, MergeEnviron(env, map[string]string{"FAK_CUDA_GRAPH": graph}), cfg.Stdout, cfg.Stderr); err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 
 	case "bench":
