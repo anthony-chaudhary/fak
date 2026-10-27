@@ -422,9 +422,7 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 	attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, s.M.attnObs)
 	s.phaseEnd("qwen35_full_attn", t)
 	t = s.phaseStart()
-	for i := range attnOut {
-		attnOut[i] *= sigmoidf(gate[i])
-	}
+	qwen35PrefillGateDisjoint(attnOut, gate, P, qWidth)
 	s.phaseEnd("qwen35_full_gate", t)
 	O := make([]float32, P*H)
 	attnQ := qz(attnOut, P, qWidth)

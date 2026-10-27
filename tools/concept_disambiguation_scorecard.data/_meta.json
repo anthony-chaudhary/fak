@@ -4801,6 +4801,11 @@
           "category": "incidental",
           "reason": "Local string list names neural-network MLP gate and up projection tensors and is passed unchanged to projection/quantization helpers; it is not an authorization guard, policy gate, admission gate, or lifecycle barrier.",
           "token": "gateUpNames"
+        },
+        {
+          "category": "incidental",
+          "reason": "Numeric neural-network sigmoid gating multiplies attention output cells by sigmoid of corresponding gate activations using existing workers. The name denotes model arithmetic, not access control, policy gating, or lifecycle admission; malformed shape retains original scalar mutation and panic behavior.",
+          "token": "qwen35PrefillGateDisjoint"
         }
       ],
       "exclude": [
@@ -5270,6 +5275,7 @@
         "publicGatewayURL",
         "q4kgateupslab",
         "quality_gate",
+        "qwen35PrefillGateDisjoint",
         "qwenEmptyUsageGuardFromEnv",
         "qwenEmptyUsageGuardReceipt",
         "readGuardCompactionWitnesses",
