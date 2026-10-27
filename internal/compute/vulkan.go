@@ -187,20 +187,21 @@ func init() {
 	}
 	totalDeviceLocal := vulkanCapInt64(C.fvk_total_device_local_memory())
 	vulkanDev = &vulkanBackend{
-		name:                    "vulkan",
-		tier:                    tier + ":" + C.GoString(&name[0]),
-		haveQ8:                  C.fvk_have_q8() != 0,
-		haveQ8GDNInProj:         C.fvk_have_qwen35_gdn_q8_in_proj() != 0,
-		haveQ8GDNInProjPanel:    C.fvk_have_qwen35_gdn_q8_in_proj_panel() != 0,
-		haveQ8SequencePair:      C.fvk_have_qwen35_q8_pair() != 0,
-		haveAttention:           true,
-		haveCoopmat:             C.fvk_have_cooperative_matrix() != 0,
-		haveMemoryBudget:        C.fvk_have_memory_budget() != 0,
-		totalMem:                totalDeviceLocal,
-		budgetBytes:             vulkanBudgetBytes(totalDeviceLocal),
-		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
-		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
-		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
+		name:                         "vulkan",
+		tier:                         tier + ":" + C.GoString(&name[0]),
+		haveQ8:                       C.fvk_have_q8() != 0,
+		haveQ8GDNInProj:              C.fvk_have_qwen35_gdn_q8_in_proj() != 0,
+		haveQ8GDNInProjPanel:         C.fvk_have_qwen35_gdn_q8_in_proj_panel() != 0,
+		haveQwenAttentionPostprocess: C.fvk_have_qwen35_attention_postprocess() != 0,
+		haveQ8SequencePair:           C.fvk_have_qwen35_q8_pair() != 0,
+		haveAttention:                true,
+		haveCoopmat:                  C.fvk_have_cooperative_matrix() != 0,
+		haveMemoryBudget:             C.fvk_have_memory_budget() != 0,
+		totalMem:                     totalDeviceLocal,
+		budgetBytes:                  vulkanBudgetBytes(totalDeviceLocal),
+		maxBufferBytes:               vulkanCapInt64(C.fvk_max_buffer_bytes()),
+		maxStorageBufferRange:        vulkanCapInt64(C.fvk_max_storage_buffer_range()),
+		maxMemoryAllocationSize:      vulkanCapInt64(C.fvk_max_memory_allocation_size()),
 	}
 	fusedPresent, fusedMissing := probeFusedShaders(spirv, os.Stat)
 	recordFusedShaderWarnings(fusedMissing, log.Printf)
@@ -462,14 +463,15 @@ type vulkanBackend struct {
 	haveQ8 bool
 	// batchNodeSeq advances per declared dispatch inside a batch window so the hazard
 	// ledger's edges are unique and deterministic (#12218).
-	batchNodeSeq         int
-	haveQ8GDNInProj      bool
-	haveQ8GDNInProjPanel bool
-	haveQ8SequencePair   bool
-	haveCoopmat          bool
-	haveAttention        bool
-	transient            []*vulkanBuf
-	freeTransient        map[int][]*vulkanBuf
+	batchNodeSeq                 int
+	haveQ8GDNInProj              bool
+	haveQ8GDNInProjPanel         bool
+	haveQwenAttentionPostprocess bool
+	haveQ8SequencePair           bool
+	haveCoopmat                  bool
+	haveAttention                bool
+	transient                    []*vulkanBuf
+	freeTransient                map[int][]*vulkanBuf
 	transientPoolGauge
 	// Strix Halo (GFX1151) preflight subsystems, handed over by the serve runtime
 	// when Strix silicon is detected. Retained for the backend's zero-copy UMA and

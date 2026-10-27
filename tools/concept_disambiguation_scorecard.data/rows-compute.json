@@ -172,7 +172,8 @@
       "definition": "CUDA F32 fused Q/K RMS normalization, partial RoPE and owned KV-tail append enqueue for Qwen sequence prefill.",
       "distinction": "Unlike attention score computation or backend dispatch, processes projected Q/K/V using the fixed 24-query/4-KV-head 256-dimension contract. It validates live pointer extents and rejects overlap before the single fused kernel; does not publish Go KV lengths.",
       "distinct_from": [
-        "attnprefilldispatch"
+        "attnprefilldispatch",
+        "fvkqwen35attentionpostprocessf32"
       ],
       "aliases": [],
       "grounding": "fak_qwen35_attention_postprocess_f32",
@@ -195,6 +196,64 @@
       ],
       "aliases": [],
       "grounding": "qwen35SequenceAttentionPostprocessLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "tryqwen35attentionpostprocesslocked",
+      "canonical": "tryQwen35AttentionPostprocessLocked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Mutex-held Go owner for fused resident F32 Q/K normalization, partial RoPE and KV append publication.",
+      "distinction": "Unlike attention implementation dispatch, validates panels and frontiers, invokes existing COW append admission, owns query transient and publishes three append lengths after successful checked recording. It is not the numerical kernel or C eligibility predicate; selected errors remain errors and never authorize replay.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "tryQwen35AttentionPostprocessLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fvkqwen35attentionpostprocesssupported",
+      "canonical": "fvk_qwen35_attention_postprocess_supported",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Mutation-free C eligibility predicate for the specific Vulkan fused attention postprocess path.",
+      "distinction": "Unlike attention implementation dispatch, evaluates ABI-qualified pipeline availability, grouped-head/rotary/numeric bounds, signed-index extents and workgroup geometry. It does not select a broader attention algorithm or record commands.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "fvk_qwen35_attention_postprocess_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fvkqwen35attentionpostprocessf32",
+      "canonical": "fvk_qwen35_attention_postprocess_f32",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Checked C Vulkan command-recording boundary for fused Q/K normalization, partial RoPE and KV-tail outputs.",
+      "distinction": "Unlike attention implementation dispatch, validates submission state, buffer extents and nonaliasing, selects scalar/table RoPE input, constructs the push ABI and records the postprocess dispatch. It does not own Go COW/frontier publication or attention score computation. Unlike the similarly named CUDA F32 enqueue boundary, this operates on Vulkan Buffer allocation identity and records through the Vulkan batch dispatcher with scalar/table RoPE; it does not use CUDA pointer attributes or CUDA streams.",
+      "distinct_from": [
+        "attnprefilldispatch",
+        "fakqwen35attentionpostprocessf32"
+      ],
+      "aliases": [],
+      "grounding": "fvk_qwen35_attention_postprocess_f32",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

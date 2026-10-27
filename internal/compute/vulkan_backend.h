@@ -418,6 +418,17 @@ int fvk_qwen35_gdn_q8_in_proj_f32(
  * with FAK_VULKAN_QWEN35_GDN_Q8_PANEL=1. It admits only the existing non-cooperative
  * Q8 arithmetic route, P>1 and checked physical-grid/index bounds. Unsupported
  * shapes/capability compose before allocation; selected ABI failures do not replay. */
+/* Optional sequence-only F32 Q/K norm, partial RoPE and direct KV append.
+ * Default-off: FAK_VULKAN_QWEN35_ATTN_POSTPROCESS=1 at initialization.
+ * KRaw/K/V already own writable tails; no metadata is published by this ABI. */
+int fvk_have_qwen35_attention_postprocess(void);
+int fvk_qwen35_attention_postprocess_supported(int tokens, int startPos,
+    int qHeads, int kHeads, int headDim, int rotaryDim, double theta, float eps);
+int fvk_qwen35_attention_postprocess_f32(const void* q, const void* k, const void* v,
+    const void* qNorm, const void* kNorm, void* qOut, void* kRaw, void* kOut, void* vOut,
+    int tokens, int startPos, int qHeads, int kHeads, int headDim, int rotaryDim,
+    double theta, float eps);
+
 int fvk_have_qwen35_gdn_q8_in_proj_panel(void);
 int fvk_qwen35_gdn_q8_in_proj_panel_supported(int out0, int out1, int out2, int out3, int in, int P);
 int fvk_qwen35_gdn_q8_in_proj_panel_f32(

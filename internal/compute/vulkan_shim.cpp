@@ -412,7 +412,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_ATTENTION_SPLIT_KV, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_V41_SHARED_ATTENTION_SPLIT, K_QWEN35_GDN_Q8_IN_PROJ_PANEL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_ATTENTION_SPLIT_KV, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_V41_SHARED_ATTENTION_SPLIT, K_QWEN35_GDN_Q8_IN_PROJ_PANEL, K_QWEN35_ATTN_POSTPROCESS, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -428,7 +428,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3: case K_RMSNORM_Q8_MATMUL2_COOP:
     case K_RMSNORM_Q4K_MATMUL2: case K_V41_EXACT_RMSNORM:
         return g_dp.otherNorm;
-    case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK: case K_V41_TAIL_ROPE_EXACT:
+    case K_ROPE: case K_QWEN35_ATTN_POSTPROCESS: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK: case K_V41_TAIL_ROPE_EXACT:
         return g_dp.otherRope;
     case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
     case K_SWIGLU_Q4K_MATMUL_ADD: case K_V41_ROUTED_SWIGLU: case K_V41_ROUTED_SWIGLU_ID: case K_V41_ROUTED_SWIGLU_PANEL_ROW: case K_V41_ROUTED_SWIGLU_PANEL_CHUNK:
@@ -582,6 +582,7 @@ int g_have_q8 = 0;
 int g_have_qwen35_gdn_q8_in_proj = 0;
 // Separate candidate capability: decode selection and cooperative Q8 stay unchanged.
 int g_have_qwen35_gdn_q8_in_proj_panel = 0;
+int g_have_qwen35_attention_postprocess = 0;
 // Mandatory in a current build; published only after complete initialization.
 int g_have_v41_tail_rope_qk = 0;
 #ifdef FAK_V41_TAIL_ROPE_EXACT_WITNESS
@@ -1761,6 +1762,7 @@ const char* const kKernelNames[] = {
     "v41_compressor_ring",
     "v41_shared_attention_split",
     "qwen35_gdn_q8_in_proj_panel",
+    "qwen35_attention_postprocess",
 };
 static_assert(sizeof(kKernelNames) / sizeof(kKernelNames[0]) == K_COUNT, "kernel name table out of sync with KId");
 
@@ -3203,6 +3205,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_v41IndexerScoreReason = "Vulkan initialization did not complete";
     g_have_qwen35_gdn_q8_in_proj = 0;
     g_have_qwen35_gdn_q8_in_proj_panel = 0;
+    g_have_qwen35_attention_postprocess = 0;
     g_have_q6k_matmul = 0;
     g_qwen35Q8PairEnabled = false;
     g_have_q5k_matmul = 0;
@@ -3680,6 +3683,17 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
     ok &= buildKernel(g_kern[K_QWEN35_SPLIT_QG_PANEL], P("qwen35_split_qg_panel.spv"), 3, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 5, 7 * sizeof(int) + sizeof(float));
+    // No default promotion: this optional module needs separate physical parity
+    // and whole-sequence latency evidence. It requires no new device features.
+    const char* attentionPostprocess = std::getenv("FAK_VULKAN_QWEN35_ATTN_POSTPROCESS");
+    if (attentionPostprocess && std::strcmp(attentionPostprocess, "1") == 0 &&
+        limits.maxComputeWorkGroupInvocations >= 256 && limits.maxComputeWorkGroupSize[0] >= 256 &&
+        limits.maxComputeSharedMemorySize >= (256 + 1024) * sizeof(float) &&
+        limits.maxPerStageDescriptorStorageBuffers >= 10 && limits.maxDescriptorSetStorageBuffers >= 10 &&
+        limits.maxPushConstantsSize >= 36) {
+        g_have_qwen35_attention_postprocess = buildKernel(g_kern[K_QWEN35_ATTN_POSTPROCESS],
+            P("qwen35_attention_postprocess.spv"), 10, 36) ? 1 : 0;
+    }
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     g_have_attention_split_kv = buildKernel(g_kern[K_ATTENTION_SPLIT_KV],
         P("attention_split_kv.spv"), 5, 7 * sizeof(int) + sizeof(float)) ? 1 : 0;
@@ -5249,6 +5263,12 @@ void fvk_sync(void) {
 
 int fvk_have_q8(void) { return g_have_q8; }
 int fvk_have_qwen35_gdn_q8_in_proj(void) { return g_have_qwen35_gdn_q8_in_proj; }
+int fvk_have_qwen35_attention_postprocess(void) {
+    return g_ready && g_have_qwen35_attention_postprocess &&
+        g_kern[K_QWEN35_ATTN_POSTPROCESS].pipe != VK_NULL_HANDLE &&
+        g_kern[K_QWEN35_ATTN_POSTPROCESS].nbuf == 10 &&
+        g_kern[K_QWEN35_ATTN_POSTPROCESS].pcsize == 36;
+}
 int fvk_have_qwen35_gdn_q8_in_proj_panel(void) {
     return g_ready && g_have_q8 && g_have_qwen35_gdn_q8_in_proj_panel &&
         g_kern[K_QWEN35_GDN_Q8_IN_PROJ_PANEL].pipe != VK_NULL_HANDLE &&
@@ -8250,6 +8270,74 @@ extern "C" int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
     dispatch(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL],bufs,&pc,sizeof(pc),(uint32_t)((count+255)/256));
     return (int)g_submissionStatus;
 }
+extern "C" int fvk_qwen35_attention_postprocess_supported(int tokens, int startPos,
+    int qHeads, int kHeads, int headDim, int rotaryDim, double theta, float eps) {
+    if (!fvk_have_qwen35_attention_postprocess() || tokens <= 1 || startPos < 0 ||
+        qHeads <= 0 || kHeads <= 0 || qHeads % kHeads != 0 || headDim <= 0 || headDim > 1024 ||
+        rotaryDim < 0 || rotaryDim > headDim || rotaryDim % 2 ||
+        !std::isfinite(theta) || theta <= 0 || theta > 3.402823466e38 ||
+        !std::isfinite((float)theta) || (float)theta <= 0 || !std::isfinite(eps) || eps <= 0) return 0;
+    const uint64_t end = uint64_t(startPos) + uint64_t(tokens);
+    const uint64_t qw = uint64_t(qHeads) * uint64_t(headDim);
+    const uint64_t kw = uint64_t(kHeads) * uint64_t(headDim);
+    const uint64_t heads = uint64_t(qHeads) + 2u * uint64_t(kHeads);
+    return end <= INT32_MAX && qw <= INT32_MAX && kw <= INT32_MAX && heads <= INT32_MAX &&
+        uint64_t(tokens) <= uint64_t(INT32_MAX) / (qw + kw) && end <= uint64_t(INT32_MAX) / kw &&
+        g_maxComputeWorkGroupCountX != 0 && heads <= g_maxComputeWorkGroupCountX &&
+        uint64_t(tokens) <= g_maxComputeWorkGroupCountY;
+}
+
+extern "C" int fvk_qwen35_attention_postprocess_f32(const void* q, const void* k, const void* v,
+    const void* qNorm, const void* kNorm, void* qOut, void* kRaw, void* kOut, void* vOut,
+    int tokens, int startPos, int qHeads, int kHeads, int headDim, int rotaryDim,
+    double theta, float eps) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (g_v41SubmissionPendingFailure || g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) return 4;
+    if (!fvk_qwen35_attention_postprocess_supported(tokens, startPos, qHeads, kHeads,
+                                                   headDim, rotaryDim, theta, eps)) return 2;
+    const uint64_t qBytes = uint64_t(tokens) * uint64_t(qHeads) * uint64_t(headDim) * sizeof(float);
+    const uint64_t kBytes = uint64_t(tokens) * uint64_t(kHeads) * uint64_t(headDim) * sizeof(float);
+    const uint64_t cacheBytes = (uint64_t(startPos) + uint64_t(tokens)) * uint64_t(kHeads) * uint64_t(headDim) * sizeof(float);
+    Buffer* bufs[10] = {B(q), B(k), B(v), B(qNorm), B(kNorm), B(qOut), B(kRaw), B(kOut), B(vOut), nullptr};
+    const uint64_t required[9] = {qBytes, kBytes, kBytes, uint64_t(headDim)*sizeof(float),
+        uint64_t(headDim)*sizeof(float), qBytes, cacheBytes, cacheBytes, cacheBytes};
+    for (int i = 0; i < 9; ++i) {
+        const Buffer* b = bufs[i];
+        if (!b || b->buf == VK_NULL_HANDLE || b->mem == VK_NULL_HANDLE ||
+            required[i] > std::numeric_limits<size_t>::max() || required[i] > b->bytes ||
+            b->bytes > std::numeric_limits<VkDeviceSize>::max() - b->memoryOffset) return 2;
+    }
+    auto aliases = [](const Buffer* a, const Buffer* b) {
+        return a == b || a->buf == b->buf ||
+            (a->mem == b->mem && a->memoryOffset < b->memoryOffset + b->bytes &&
+             b->memoryOffset < a->memoryOffset + a->bytes);
+    };
+    for (int out = 5; out < 9; ++out) {
+        for (int i = 0; i < 9; ++i) if (i != out && aliases(bufs[out], bufs[i])) return 2;
+    }
+    const float tableTheta = (float)theta;
+    const int scalarReference = environmentFlagEnabled("FAK_VULKAN_QWEN35_PARTIAL_ROPE_SCALAR_REFERENCE");
+    Buffer* table = B(q); // Valid descriptor; the scalar/zero-rotary arm never reads it.
+    if (!scalarReference && rotaryDim > 0) {
+        table = partialRoPETable(tableTheta, rotaryDim, size_t(uint64_t(startPos) + uint64_t(tokens)));
+        if (!table) return 3;
+        if (table->buf == VK_NULL_HANDLE || table->mem == VK_NULL_HANDLE ||
+            (uint64_t(startPos) + uint64_t(tokens)) * uint64_t(rotaryDim / 2) * 2u * sizeof(float) > table->bytes ||
+            table->bytes > std::numeric_limits<VkDeviceSize>::max() - table->memoryOffset) return 2;
+        for (int out = 5; out < 9; ++out) if (aliases(bufs[out], table)) return 2;
+    }
+    bufs[9] = table;
+    struct Push { int32_t tokens, startPos, qHeads, kHeads, hd, rotary; float theta, eps; int32_t scalarReference; }
+        pc{tokens, startPos, qHeads, kHeads, headDim, rotaryDim, tableTheta, eps, scalarReference};
+    static_assert(sizeof(Push) == 36, "Qwen attention postprocess push ABI must be 36 bytes");
+    if (!dispatch(g_kern[K_QWEN35_ATTN_POSTPROCESS], bufs, &pc, sizeof(pc),
+                  uint32_t(uint64_t(qHeads) + 2u * uint64_t(kHeads)), uint32_t(tokens), true)) {
+        return g_submissionStatus != VK_SUCCESS ? (int)g_submissionStatus : 4;
+    }
+    return (int)g_submissionStatus;
+}
+
 extern "C" int fvk_qwen35_causal_attention_panel_f32(const void* q, const void* k,
     const void* v, void* out, int tokens, int prefix, int nHeads,
     int nKVHeads, int headDim, float scale) {

@@ -13,10 +13,11 @@ import (
 func TestVulkanReceiptV34QwenGDNQ8Panel(t *testing.T) {
 	const stem = "qwen35_gdn_q8_in_proj_panel"
 	want := append(vulkanRegistryV33.stems(), stem)
-	if len(want) != 105 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 105 || !reflect.DeepEqual(want, vulkanRegistryV34.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V34 must add exactly the optional Qwen GDN Q8 panel to historical V33")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV34.schema
+	id, err := vulkanRegistryV34.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV34 || id.ID != VulkanShaderRegistryV34ID || id.ModuleCount != 105 {
 		t.Fatalf("V34 identity differs: %s %+v %v", schema, id, err)
 	}

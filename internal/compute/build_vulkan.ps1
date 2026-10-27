@@ -132,6 +132,7 @@ function Build-Shaders {
     $shaders += "qwen35_gdn_tiled_transpose"
     $shaders += "qwen35_gdn_q8_in_proj"
     $shaders += "qwen35_gdn_q8_in_proj_panel"
+    $shaders += "qwen35_attention_postprocess"
     $shaders += "qwen35_gdn_prefill_tiled"
     $shaders += "qwen35_gdn_prefill_norm"
     $shaders += "qwen35_gdn_verify_tiled"

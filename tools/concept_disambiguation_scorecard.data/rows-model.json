@@ -18,7 +18,10 @@
         "attnprefillmultigqareadmode",
         "fakqwen35attentionpostprocesscapability",
         "fakqwen35attentionpostprocessf32",
-        "qwen35sequenceattentionpostprocesslocked"
+        "qwen35sequenceattentionpostprocesslocked",
+        "tryqwen35attentionpostprocesslocked",
+        "fvkqwen35attentionpostprocesssupported",
+        "fvkqwen35attentionpostprocessf32"
       ],
       "aliases": [],
       "grounding": "attnPrefillDispatch",

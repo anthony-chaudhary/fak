@@ -99,7 +99,9 @@ func (d *vslice) releaseBacking() {
 	d.ptr, d.cap, d.backing = nil, 0, nil
 }
 
-func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int, what string) {
+// prepareVSliceAppend admits a writable tail without publishing its length.
+// The caller holds vulkanMu and must publish only after recording its writes.
+func (v *vulkanBackend) prepareVSliceAppend(d *vslice, nFloats int, what string) {
 	need := d.len + nFloats
 	d.adoptBacking()
 	// Shared storage is appendable only at the allocation's frontier. The first fork to
@@ -111,15 +113,23 @@ func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int
 	} else {
 		v.makeVSliceWritable(d, need, true, what)
 	}
-	// append the new row at byte offset d.len within the (possibly grown) layer buffer.
-	// d.ptr is an OPAQUE Buffer* handle, not a base address, so the destination offset must
-	// be expressed to the shim (fvk_d2d_off) — pointer arithmetic on d.ptr would be garbage.
-	C.fvk_d2d_off(d.ptr, C.size_t(d.len*4), srcPtr, C.size_t(nFloats*4))
+}
+
+func (d *vslice) publishAppend(nFloats int) {
 	d.len += nFloats
 	d.adoptBacking()
 	if d.backing != nil && d.len > d.backing.highWater {
 		d.backing.highWater = d.len
 	}
+}
+
+func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int, what string) {
+	v.prepareVSliceAppend(d, nFloats, what)
+	// append the new row at byte offset d.len within the (possibly grown) layer buffer.
+	// d.ptr is an OPAQUE Buffer* handle, not a base address, so the destination offset must
+	// be expressed to the shim (fvk_d2d_off) — pointer arithmetic on d.ptr would be garbage.
+	C.fvk_d2d_off(d.ptr, C.size_t(d.len*4), srcPtr, C.size_t(nFloats*4))
+	d.publishAppend(nFloats)
 }
 
 type vulkanKV struct {

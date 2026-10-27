@@ -1805,3 +1805,24 @@ CUDA F32 fused Q/K RMS normalization, partial RoPE and owned KV-tail append enqu
 Mutex-held Go sequence owner for opt-in CUDA fused attention postprocessing and exact KV append publication.
 
 **Distinct from:** Unlike attention backend dispatch or the C enqueue primitive, validates tensor ownership and append frontier, owns query transient and error drain, and advances KV lengths only after successful enqueue. It never retries a selected failing operation over a partially written cache.
+
+
+### tryQwen35AttentionPostprocessLocked
+
+Mutex-held Go owner for fused resident F32 Q/K normalization, partial RoPE and KV append publication.
+
+**Distinct from:** Unlike attention implementation dispatch, validates panels and frontiers, invokes existing COW append admission, owns query transient and publishes three append lengths after successful checked recording. It is not the numerical kernel or C eligibility predicate; selected errors remain errors and never authorize replay.
+
+
+### fvk_qwen35_attention_postprocess_supported
+
+Mutation-free C eligibility predicate for the specific Vulkan fused attention postprocess path.
+
+**Distinct from:** Unlike attention implementation dispatch, evaluates ABI-qualified pipeline availability, grouped-head/rotary/numeric bounds, signed-index extents and workgroup geometry. It does not select a broader attention algorithm or record commands.
+
+
+### fvk_qwen35_attention_postprocess_f32
+
+Checked C Vulkan command-recording boundary for fused Q/K normalization, partial RoPE and KV-tail outputs.
+
+**Distinct from:** Unlike attention implementation dispatch, validates submission state, buffer extents and nonaliasing, selects scalar/table RoPE input, constructs the push ABI and records the postprocess dispatch. It does not own Go COW/frontier publication or attention score computation. Unlike the similarly named CUDA F32 enqueue boundary, this operates on Vulkan Buffer allocation identity and records through the Vulkan batch dispatcher with scalar/table RoPE; it does not use CUDA pointer attributes or CUDA streams.

@@ -155,6 +155,8 @@ const (
 	VulkanBuildReceiptSchemaV33 = "fak.vulkan-build-receipt.v33"
 	// VulkanBuildReceiptSchemaV34 adds the optional Qwen GDN Q8 sequence panel module.
 	VulkanBuildReceiptSchemaV34 = "fak.vulkan-build-receipt.v34"
+	// VulkanBuildReceiptSchemaV35 adds optional Qwen attention postprocessing.
+	VulkanBuildReceiptSchemaV35 = "fak.vulkan-build-receipt.v35"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
