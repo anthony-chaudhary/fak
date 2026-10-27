@@ -177,6 +177,11 @@ func (r v41SparseSinkRows) row(batch, index, count, width int) []float32 {
 func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows) ([]float32, error) {
 	negInf := float32(math.Inf(-1))
 	o := make([]float32, opt.B*opt.M*opt.Heads*opt.HeadDim)
+	// Each head reuses its rounded scores and then its exponential terms. The
+	// inputs stay read-only until contraction ends, so recomputing either in
+	// later passes only repeats work. Masked slots are never read from scratch.
+	// Bound scratch by the existing index payload even for overflowed shapes.
+	terms := make([]float32, min(opt.TopK, len(idx)))
 	for b := 0; b < opt.B; b++ {
 		for m := 0; m < opt.M; m++ {
 			idxBase := (b*opt.M + m) * opt.TopK
@@ -207,6 +212,7 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 					if !finite32(dot) {
 						return nil, sparseSinkNonFinite(v41SinkStageScore, b, m, h, row, -1, dot)
 					}
+					terms[i] = dot
 					if dot > maxScore {
 						maxScore = dot
 					}
@@ -226,17 +232,13 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 					if row < 0 {
 						continue
 					}
-					values := rows.row(b, row, opt.N, opt.HeadDim)
-					var dot float32
-					for d := 0; d < opt.HeadDim; d++ {
-						dot += float32(q[qBase+d] * values[d])
-					}
 					// Match the rounded float32 score used by the maximum pass.
 					// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
-					term := exp32(float32(dot*opt.Softmax) - maxScore)
+					term := exp32(terms[i] - maxScore)
 					if !finite32(term) {
 						return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, row, -1, term)
 					}
+					terms[i] = term
 					sum += term
 				}
 				if !finite32(sum) {
@@ -253,11 +255,7 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 						continue
 					}
 					values := rows.row(b, row, opt.N, opt.HeadDim)
-					var dot float32
-					for d := 0; d < opt.HeadDim; d++ {
-						dot += float32(q[qBase+d] * values[d])
-					}
-					weight := exp32(float32(dot*opt.Softmax)-maxScore) / sum
+					weight := terms[i] / sum
 					if !finite32(weight) {
 						return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
 					}
