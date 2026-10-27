@@ -234,6 +234,9 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 			if rows == 2 {
 				stage = "index rotary BF16 copyback"
 				index, err := v41IndexBF16Copyback(layer, "indexer.k_norm.weight", "rotary", owned[:rotaryDim])
+				if finite32(owned[0]) {
+					s.observeHostArm("bf16-boundary")
+				}
 				if err != nil {
 					return nil, err
 				}
@@ -242,7 +245,14 @@ func (s *Session) v41CompressedPublicationRoPEFunc() v41CompressedPublicationRoP
 			stage = "compressed rotary BF16 copyback"
 			for i := (rows - 1) * rotaryDim; i < len(owned); i++ {
 				value := owned[i]
-				if !finite32(value) || !finite32(v41RoundBF16(value)) {
+				rounded := value
+				if finite32(value) {
+					rounded = v41RoundBF16(value)
+				}
+				if finite32(value) && i == (rows-1)*rotaryDim {
+					s.observeHostArm("bf16-boundary")
+				}
+				if !finite32(value) || !finite32(rounded) {
 					return nil, v41StageErr(v41StageCompress, layer, fmt.Errorf("%w: rotary latent BF16 value[%d] is non-finite or overflows", ErrV41ForwardStage, i-(rows-1)*rotaryDim))
 				}
 				owned[i] = v41RoundBF16(value)
