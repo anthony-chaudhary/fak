@@ -416,6 +416,7 @@ type waitEntry struct {
 	req           SeqRequest
 	enqueuedRound int64
 	ready         chan struct{}
+	ctx           context.Context // Acquire caller; nil for context-free Offer entries
 }
 
 // NewAdmissionController builds a gate under the given policy.
@@ -1045,6 +1046,10 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 	waitStart := time.Now()
 
 	c.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
 	if req.Trust.Deny {
 		c.stats.Denied++
 		c.recordDecisionLocked(req, VerdictDenied, "", req.Trust.Reason)
@@ -1082,7 +1087,7 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		return nil, &AdmissionError{Verdict: VerdictShed, Reason: "queued token volume exceeds cap"}
 	}
 	ready := make(chan struct{})
-	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round, ready: ready})
+	c.waiting = append(c.waiting, waitEntry{req: req, enqueuedRound: c.round, ready: ready, ctx: ctx})
 	c.queuedTokens += req.Tokens
 	c.stats.Queued++
 	c.recordDecisionLocked(req, VerdictQueued, "", "")
@@ -1093,21 +1098,18 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 
 	select {
 	case <-ready:
-		c.recordGrantLocked(req)
-		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
-		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
-	default:
-	}
-	select {
-	case <-ready:
-		c.recordGrantLocked(req)
-		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
-		return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 	case <-ctx.Done():
+	}
+	// A cancellation and promotion may make both channels ready. Cancellation must
+	// still reclaim any reservation instead of returning a lease to a dead caller.
+	if err := ctx.Err(); err != nil {
 		c.cancelAdmission(req.TraceID)
 		c.recordCancelLocked(req)
-		return nil, ctx.Err()
+		return nil, err
 	}
+	c.recordGrantLocked(req)
+	enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
+	return &AdmissionLease{ctl: c, traceID: req.TraceID}, nil
 }
 
 // recordGrantLocked refreshes a promoted queued request's receipt to the terminal admitted
@@ -1156,6 +1158,22 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	// empty-queue early return — so a hint-only round still mints its bounded readback
 	// while never touching admission capacity (pub#13388).
 	c.scanReservationsLocked()
+	// A disconnected caller may not have resumed its Acquire goroutine yet. Prune
+	// its waiter before choosing a winner so it cannot consume capacity or block
+	// a live request under either priority or weighted-fair ordering.
+	kept := c.waiting[:0]
+	for _, e := range c.waiting {
+		if e.ctx != nil && e.ctx.Err() != nil {
+			c.queuedTokens -= e.req.Tokens
+			if e.ready != nil {
+				close(e.ready)
+			}
+			continue
+		}
+		kept = append(kept, e)
+	}
+	clear(c.waiting[len(kept):])
+	c.waiting = kept
 	if len(c.waiting) == 0 {
 		c.credits = make(map[string]int64)
 		return nil

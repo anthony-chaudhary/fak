@@ -214,3 +214,48 @@ func awaitAdmissionWaiting(c *AdmissionController, n int, d time.Duration) bool 
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestAcquireCanceledQueuedRequestDoesNotTakeReleasedCapacity(t *testing.T) {
+	ctl := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 2, TokenBudget: 10})
+	if got := ctl.Offer(SeqRequest{TraceID: "running", Tokens: 1}); got != VerdictAdmitted {
+		t.Fatalf("running Offer = %v, want admitted", got)
+	}
+	if got := ctl.Offer(SeqRequest{TraceID: "healthy", Tokens: 1, Priority: 10}); got != VerdictQueued {
+		t.Fatalf("healthy Offer = %v, want queued", got)
+	}
+	// Complete deliberately leaves the existing waiter for the next scheduling
+	// round. Acquire must join that queue even though the slot is now free.
+	if !ctl.Complete("running") {
+		t.Fatal("running request was not released")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The next clock read stamps Acquire's queued receipt, after enqueue and before
+	// same-round promotion. Cancel at that exact boundary without a scheduler race.
+	ctl.SetClock(func() time.Time {
+		cancel()
+		return time.Unix(1, 0)
+	})
+	lease, err := ctl.Acquire(ctx, SeqRequest{TraceID: "canceled", Tokens: 7, Priority: 0})
+	t.Cleanup(func() {
+		lease.Release()
+		ctl.Complete("healthy")
+	})
+	if lease != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled queued Acquire = (%v, %v), want (nil, context.Canceled)", lease, err)
+	}
+	if st := ctl.Stats(); st.Running != 1 || st.Waiting != 0 || st.TokensInUse != 1 || st.QueuedTokens != 0 || st.Admitted != 2 || st.Queued != 2 {
+		t.Fatalf("post-cancel stats = %+v, want only healthy admitted, canceled never charged, both requests queued", st)
+	}
+	receipt, ok := ctl.LastAdmissionDecision("canceled")
+	if !ok || receipt.Admitted || receipt.Verdict != VerdictExpired.String() {
+		t.Fatalf("canceled receipt = (%+v, %v), want terminal unserved", receipt, ok)
+	}
+	if !ctl.Complete("healthy") {
+		t.Fatal("healthy waiter did not receive released capacity")
+	}
+	if st := ctl.Stats(); st.Running != 0 || st.Waiting != 0 || st.TokensInUse != 0 || st.QueuedTokens != 0 {
+		t.Fatalf("final live gauges = %+v, want zero", st)
+	}
+}
