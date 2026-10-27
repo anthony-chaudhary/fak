@@ -67,6 +67,13 @@ func (scratch *v41ProjScratch) clearV41StepState() {
 	scratch.gatherOps = nil
 }
 
+func (scratch *v41ProjScratch) v41StepMHCObserver() func(string) {
+	if scratch == nil || scratch.gatherOps == nil || scratch.gatherOps.owner == nil {
+		return nil
+	}
+	return scratch.gatherOps.owner.observeHostArm
+}
+
 // v41StepInitialStreams returns resident even on failure so the transaction
 // cleanup frees a panel it already allocated.
 func (m *Model) v41StepInitialStreams(st *v41ForwardState, x []float32, full bool, scratch *v41ProjScratch) (streams [][]float32, resident *v41MHCResident, err error) {
@@ -86,7 +93,7 @@ func (m *Model) v41StepInitialStreams(st *v41ForwardState, x []float32, full boo
 		scratch.mhcCarry.device = st.mhcDevice
 		scratch.mhcCarry.resident = resident
 	case full:
-		streams, err = v41FullInitialStreamsOn(st.mhcDevice, x)
+		streams, err = v41FullInitialStreamsOnObserved(st.mhcDevice, x, scratch.v41StepMHCObserver())
 		if err != nil {
 			return nil, nil, err
 		}
