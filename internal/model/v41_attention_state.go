@@ -463,6 +463,20 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 	eps float32,
 	publication v41CompressorPublication,
 ) (latent, indexKey []float32, emitted bool, start, end int, err error) {
+	return s.appendCompressorSourcePublicationObserved(layer, ratio, pos, input, pool, projectKV, projectScore, normWeight, eps, publication, nil)
+}
+
+func (s *V41AttentionState) appendCompressorSourcePublicationObserved(
+	layer, ratio, pos int,
+	input []float32,
+	pool *V41CompressorPool,
+	projectKV func([]float32) ([]float32, error),
+	projectScore func([]float32) ([]float32, error),
+	normWeight []float32,
+	eps float32,
+	publication v41CompressorPublication,
+	observe func(string),
+) (latent, indexKey []float32, emitted bool, start, end int, err error) {
 	if s == nil {
 		return nil, nil, false, 0, 0, fmt.Errorf("model: nil V41 attention state")
 	}
@@ -518,7 +532,7 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 			if len(raw) != s.headDim {
 				return nil, nil, false, 0, 0, fmt.Errorf("model: V41 compressor ring group %d from %d emitted no latent", ratio, groupLo)
 			}
-			if pooled, err = pool.normalizePooled(raw, normWeight, eps); err != nil {
+			if pooled, err = pool.normalizeEmittedObserved(raw, normWeight, eps, observe); err != nil {
 				return nil, nil, false, 0, 0, err
 			}
 			ringClosed = true
@@ -537,7 +551,7 @@ func (s *V41AttentionState) appendCompressorSourcePublication(
 	}
 
 	if !ringClosed {
-		if pooled, err = s.replayCompressorGroup(ratio, groupLo, pos, input, pool, projectKV, projectScore, normWeight, eps); err != nil {
+		if pooled, err = s.replayCompressorGroupObserved(ratio, groupLo, pos, input, pool, projectKV, projectScore, normWeight, eps, observe); err != nil {
 			return nil, nil, false, 0, 0, err
 		}
 	}
@@ -628,6 +642,19 @@ func (s *V41AttentionState) replayCompressorGroup(
 	normWeight []float32,
 	eps float32,
 ) (pooled []float32, err error) {
+	return s.replayCompressorGroupObserved(ratio, groupLo, pos, input, pool, projectKV, projectScore, normWeight, eps, nil)
+}
+
+func (s *V41AttentionState) replayCompressorGroupObserved(
+	ratio, groupLo, pos int,
+	input []float32,
+	pool *V41CompressorPool,
+	projectKV func([]float32) ([]float32, error),
+	projectScore func([]float32) ([]float32, error),
+	normWeight []float32,
+	eps float32,
+	observe func(string),
+) (pooled []float32, err error) {
 	staged := make([][]float32, 0, ratio)
 	staged = append(staged, s.partialInputs...)
 	staged = append(staged, append([]float32(nil), input...))
@@ -661,7 +688,7 @@ func (s *V41AttentionState) replayCompressorGroup(
 		// v41CompressedRows drives a fresh pool with its 0-based sequence
 		// positions. The pooled arithmetic is position-independent; the absolute
 		// covered range [groupLo,pos] is preserved separately and returned.
-		out, emitted, err := replay.PushNormalized(i, kv, score, normWeight, eps)
+		out, emitted, err := replay.pushNormalizedObserved(i, kv, score, normWeight, eps, observe)
 		if err != nil {
 			return nil, err
 		}

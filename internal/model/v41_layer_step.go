@@ -493,7 +493,11 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 				return keys[0], nil
 			}
 		}
-		_, _, _, _, _, err = layerState.appendCompressorSourcePublication(
+		var observe func(string)
+		if scratch.gatherOps != nil {
+			observe = scratch.gatherOps.owner.observeHostArm
+		}
+		_, _, _, _, _, err = layerState.appendCompressorSourcePublicationObserved(
 			l, plan.Ratio, pos, collapsed, pool, projectKV, projectScore, normWeight, eps,
 			v41CompressorPublication{
 				projectIndex: projectIndex,
@@ -503,7 +507,7 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 				registry: registry,
 				ref:      V41AttentionStateRef{LayerID: l, Ratio: plan.Ratio, IsKVSource: plan.KVSourceLayer == l, IsIndexSource: indexPub},
 				ring:     scratch.gatherOps.compressorRingStep(m, l, plan.Ratio, scratch),
-			})
+			}, observe)
 		if err != nil {
 			return v41RoleAttentionContinuation{}, v41StageErr(v41StageCompress, l, err)
 		}
