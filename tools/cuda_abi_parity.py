@@ -3,7 +3,8 @@
 
 The CUDA backend has three source sets that must agree on one flat C ABI:
 
-    internal/compute/cuda_backend.h   the prototypes (`fcuda_*`)  — the typed seam
+    internal/compute/cuda_backend.h   the base prototypes (`fcuda_*`)
+    internal/compute/cuda_kv_precision.h, cuda_mxfp8_cast.h  modular prototypes
     internal/compute/cuda_kernels.cu  the base definitions (`extern "C" … fcuda_*`)
     internal/compute/cuda_nccl.cu     the NCCL definitions (`extern "C" … fcuda_*`)
     internal/compute/cuda_nccl_pg.cu  the multi-process NCCL PG definitions (`extern "C" … fcuda_*`)
@@ -25,8 +26,11 @@ drift as the kernel set grows.
 
 It also checks the header as if it were parsed standalone by a strict host compiler:
 portable fixed-width / size types must bring their own standard header in
-cuda_backend.h, not arrive accidentally through nvcc or a platform-specific transitive
+each ABI header, not arrive accidentally through nvcc or a platform-specific transitive
 include. That is the cheap sentinel for the uint8_t-class CUDA portability bug.
+
+This is global symbol-set parity, not a C/C++ parser: signature compatibility,
+duplicate definitions, and each cgo preamble's visibility still require compilation.
 
 Defect classes:
   HARD (a real build/link break the checker promotes to a local failure):
@@ -57,6 +61,10 @@ from typing import Any
 SCHEMA = "fak-cuda-abi-parity/1"
 
 HEADER = "internal/compute/cuda_backend.h"
+# Explicit ABI roots, not every header found under compute/. The typed KV header is
+# included by cgo consumers; MXFP8 is a standalone API included by its native source.
+HEADERS = (HEADER, "internal/compute/cuda_kv_precision.h", "internal/compute/cuda_mxfp8_cast.h")
+HEADERS_LABEL = ", ".join(HEADERS)
 KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu", "internal/compute/cuda_nccl_pg.cu")
 KERNELS_LABEL = ", ".join(KERNELS)
 BINDINGS = (
@@ -188,7 +196,7 @@ def header_includes(text: str) -> set[str]:
     return {m.group(1) for m in _INCLUDE_RE.finditer(strip_comments(text))}
 
 
-def header_portability(text: str) -> dict[str, Any]:
+def header_portability(text: str, label: str = HEADER) -> dict[str, Any]:
     """Check that standard C types used by the header include their own standard header.
 
     This is the deterministic form of "parse cuda_backend.h alone": if the header names
@@ -210,7 +218,7 @@ def header_portability(text: str) -> dict[str, Any]:
         if header not in includes
     }
     hard = [
-        f"standalone header parse would fail: {HEADER} uses {', '.join(types)} but does "
+        f"standalone header parse would fail: {label} uses {', '.join(types)} but does "
         f"not include <{header}> directly — do not rely on nvcc/platform transitive includes"
         for header, types in missing.items()
     ]
@@ -237,21 +245,21 @@ def parity(decls: set[str], defs: set[str], calls: set[str]) -> dict[str, Any]:
 
     hard: list[str] = []
     for s in undefined:
-        hard.append(f"prototype with no definition: {s}() is declared in {HEADER} but never "
+        hard.append(f"prototype with no definition: {s}() is declared in the ABI header closure ({HEADERS_LABEL}) but never "
                     f"defined (extern \"C\") in {KERNELS_LABEL} — a call would link to nothing")
     for s in undeclared_calls:
-        hard.append(f"call with no prototype: {BINDINGS_LABEL} calls C.{s}() but {HEADER} declares no "
+        hard.append(f"call with no prototype: {BINDINGS_LABEL} calls C.{s}() but the ABI header closure declares no "
                     f"such symbol — the cgo build cannot see it")
     for s in undeclared_defs:
         hard.append(f"definition with no prototype: {KERNELS_LABEL} exports {s}() (extern \"C\") but "
-                    f"{HEADER} declares no prototype — the seam is undocumented / unreachable")
+                    "the ABI header closure declares no prototype — the seam is undocumented / unreachable")
 
     soft: list[str] = []
     for s in uncalled:
         if s in UNCALLED_OK:
             soft.append(f"{s}() declared but not called from {BINDINGS_LABEL} — OK: {UNCALLED_OK[s]}")
         else:
-            soft.append(f"{s}() declared in {HEADER} but never called from {BINDINGS_LABEL} — dead ABI "
+            soft.append(f"{s}() declared in the ABI header closure but never called from {BINDINGS_LABEL} — dead ABI "
                         "surface? add a caller, drop the prototype, or list it in UNCALLED_OK with a reason")
     return {
         "undefined": undefined,
@@ -264,7 +272,8 @@ def parity(decls: set[str], defs: set[str], calls: set[str]) -> dict[str, Any]:
 
 
 def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set[str],
-                  header_text: str | None = None, error: str | None = None) -> dict[str, Any]:
+                  header_text: str | None = None, header_texts: dict[str, str] | None = None,
+                  error: str | None = None) -> dict[str, Any]:
     if error:
         return {"schema": SCHEMA, "ok": False, "verdict": "AUDIT_ERROR",
                 "reason": error, "workspace": workspace, "corpus": {}}
@@ -272,7 +281,10 @@ def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set
     hp = header_portability(header_text) if header_text is not None else {
         "includes": [], "required": {}, "missing_includes": {}, "hard": [],
     }
-    hard = list(p["hard"]) + list(hp["hard"])
+    headers = {rel: header_portability(text, rel)
+               for rel, text in (header_texts or {}).items()}
+    hard = list(p["hard"]) + (list(h for report in headers.values() for h in report["hard"])
+                              if headers else list(hp["hard"]))
     n_hard = len(hard)
     n_soft = len([s for s in p["soft"] if " — OK: " not in s])  # documented-OK don't count as advisory
     corpus = {
@@ -283,6 +295,7 @@ def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set
         "hard_mismatches": n_hard,
         "soft_signals": n_soft,
         "header_portability": hp,
+        "headers": headers,
         "undefined": p["undefined"],
         "undeclared_calls": p["undeclared_calls"],
         "undeclared_defs": p["undeclared_defs"],
@@ -293,13 +306,13 @@ def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set
     ok = n_hard == 0
     if ok:
         verdict, reason = "OK", (
-            f"CUDA header is standalone-portable and ABI is in parity: {len(decls)} prototypes, "
+            f"CUDA ABI headers are standalone-portable and symbol sets are in parity: {len(decls)} prototypes, "
             f"all defined in {KERNELS_LABEL} and declared for every C.fcuda_* call in {BINDINGS_LABEL} "
             f"({n_soft} standby symbol(s) advisory)")
     else:
         verdict, reason = "ACTION", (
             f"{n_hard} CUDA seam issue(s) — the header / kernels / cgo binding disagree, or "
-            "cuda_backend.h is not standalone-portable under a strict host compiler")
+            "an ABI header is not standalone-portable under a strict host compiler")
     return {"schema": SCHEMA, "ok": ok, "verdict": verdict, "reason": reason,
             "workspace": workspace, "corpus": corpus}
 
@@ -330,7 +343,8 @@ def _read_many(root: Path, rels: tuple[str, ...]) -> tuple[str, list[str]]:
     return "\n".join(texts), missing
 
 
-def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
+def _read_sources(root: Path, rels: tuple[str, ...], *, headers_only: bool = False
+                  ) -> tuple[dict[str, str], list[str]]:
     """Read only the roots' repository-local quoted-include closure.
 
     This is source discovery, not a preprocessor: system headers and conditional
@@ -338,10 +352,10 @@ def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
     repository and deduplicate cycles; root and include order keep it deterministic.
     A missing or escaping include must fail the audit, never yield partial parity.
     """
-    pending = [root / rel for rel in reversed(KERNELS)]
+    pending = [root / rel for rel in reversed(rels)]
     roots = set(pending)
     seen: set[Path] = set()
-    texts: list[str] = []
+    texts: dict[str, str] = {}
     errors: list[str] = []
     while pending:
         source = pending.pop()
@@ -350,6 +364,9 @@ def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
             path = source.resolve(strict=True)
             if not path.is_relative_to(root):
                 errors.append(f"{rel} (quoted include escapes repository)")
+                continue
+            if headers_only and (source.suffix != ".h" or path.suffix != ".h"):
+                errors.append(f"{rel} (ABI header closure requires .h files, not source bodies)")
                 continue
             # Open the original spelling before deduplication: normalization must
             # not hide an unreadable alias such as missing/../leaf.cu.
@@ -363,7 +380,7 @@ def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
             errors.append(rel)
             continue
         stripped = strip_comments(text)
-        texts.append(stripped)
+        texts[path.relative_to(root).as_posix()] = stripped
         includes: list[Path] = []
         for match in _QUOTED_INCLUDE_RE.finditer(stripped):
             name = match.group(1)
@@ -372,22 +389,27 @@ def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
             else:
                 includes.append(source.parent / name)
         pending.extend(reversed(includes))
-    return "\n".join(texts), errors
+    return texts, errors
+
+
+def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
+    texts, errors = _read_sources(root, KERNELS)
+    return "\n".join(texts.values()), errors
 
 
 def collect(root: Path) -> dict[str, Any]:
     root = root.resolve()
-    htext = _read(root, HEADER)
+    htexts, hmissing = _read_sources(root, HEADERS, headers_only=True)
     ktext, kmissing = _read_kernel_sources(root)
     gtext, gmissing = _read_many(root, BINDINGS)
-    missing = [rel for rel, t in ((HEADER, htext),) if not t] + kmissing + gmissing
+    missing = hmissing + kmissing + gmissing
     if missing:
         return build_payload(workspace=str(root), decls=set(), defs=set(), calls=set(),
                              error=f"cannot read CUDA seam file(s): {', '.join(missing)} "
                                    "(run from the repo ROOT)")
-    return build_payload(workspace=str(root), decls=header_decls(htext),
+    return build_payload(workspace=str(root), decls=header_decls("\n".join(htexts.values())),
                          defs=kernel_defs(ktext), calls=binding_calls(gtext),
-                         header_text=htext)
+                         header_text=htexts.get(HEADER), header_texts=htexts)
 
 
 def render(payload: dict[str, Any]) -> str:
