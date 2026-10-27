@@ -1366,7 +1366,10 @@ func (cb *ContinuousBatcher) Cancel(sessionID string) error {
 		// Check waiting queue
 		for i, q := range cb.waitingQueue {
 			if q.SessionID == sessionID {
-				cb.waitingQueue = append(cb.waitingQueue[:i], cb.waitingQueue[i+1:]...)
+				copy(cb.waitingQueue[i:], cb.waitingQueue[i+1:])
+				last := len(cb.waitingQueue) - 1
+				cb.waitingQueue[last] = nil
+				cb.waitingQueue = cb.waitingQueue[:last]
 				return nil
 			}
 		}
@@ -1468,6 +1471,7 @@ func (cb *ContinuousBatcher) tryPromoteWaitingLocked() []string {
 			break
 		}
 
+		cb.waitingQueue[0] = nil
 		cb.waitingQueue = cb.waitingQueue[1:]
 		cb.initSlot(emptyIdx, req)
 		promoted = append(promoted, req.SessionID)
