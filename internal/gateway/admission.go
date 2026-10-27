@@ -1299,7 +1299,9 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 			close(e.ready)
 		}
 		admitted = append(admitted, e.req)
-		c.waiting = append(c.waiting[:winnerIdx], c.waiting[winnerIdx+1:]...)
+		copy(c.waiting[winnerIdx:], c.waiting[winnerIdx+1:])
+		c.waiting[len(c.waiting)-1] = waitEntry{}
+		c.waiting = c.waiting[:len(c.waiting)-1]
 
 		if check.status == batchBudgetReached {
 			break
@@ -1437,7 +1439,9 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 			if c.queuedTokens < 0 {
 				c.queuedTokens = 0
 			}
-			c.waiting = append(c.waiting[:i], c.waiting[i+1:]...)
+			copy(c.waiting[i:], c.waiting[i+1:])
+			c.waiting[len(c.waiting)-1] = waitEntry{}
+			c.waiting = c.waiting[:len(c.waiting)-1]
 			// Removing a blocked queue head can make existing capacity usable.
 			c.scheduleLocked()
 			return

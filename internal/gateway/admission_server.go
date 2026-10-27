@@ -382,6 +382,15 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 				Priority: turn.state.Priority,
 				Tokens:   estimateServedAdmissionTokensWithCap(messages, tools, maxTokens, preallocCeiling),
 			}
+			// The ingress context already carries the effective client deadline.
+			// Preserve that absolute boundary for the controller's existing EDF
+			// tiebreak; do not restart the original budget after request preparation.
+			if ctx != nil {
+				if deadline, ok := ctx.Deadline(); ok {
+					req.CreatedAt = time.Now()
+					req.DecodeTTL = deadline.Sub(req.CreatedAt)
+				}
+			}
 			lease, err = acquireObserved(ctx, c, req, onQueued)
 		})
 		if err != nil {
