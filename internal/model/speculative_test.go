@@ -625,6 +625,7 @@ func TestRollbackResidentSuffixUsesResidentAuthority(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms lane=default
 // TestSpeculativePenaltyScratchReuseMatchesClone pins the per-round penalty scratch row:
 // ApplyPenaltyInto is bit-identical to the ApplyPenalty clone, the chain verify accepts the
 // same tokens as a clone-per-row penalized greedy reference, and the penalty costs one row
@@ -677,21 +678,42 @@ func TestSpeculativePenaltyScratchReuseMatchesClone(t *testing.T) {
 		t.Fatalf("verify = accepted %v correction %d, want %v correction %d", res.AcceptedTokens, res.CorrectionToken, want[:3], want[3])
 	}
 
+	// A first-token rejection skips verify rows entirely. Match the boundary in
+	// both arms, then reject at token two so row work and rollback are identical.
+	allocationRef := m.NewSession()
+	allocationLogits := allocationRef.Prefill(prompt)
+	boundary := argmaxF32(allocationLogits)
+	allocationCounts := make([]int32, cfg.VocabSize)
+	allocationCounts[(boundary+1)%cfg.VocabSize] = 1 // penalize only a nonwinner
+	if argmaxF32(sanitizer.ApplyPenalty(allocationLogits, allocationCounts)) != boundary {
+		t.Fatal("allocation fixture changed the boundary winner")
+	}
+	nextLogits := allocationRef.Step(boundary)
+	nextCounts := append([]int32(nil), allocationCounts...)
+	nextCounts[boundary]++
+	plainNext := argmaxF32(nextLogits)
+	penalizedNext := argmaxF32(sanitizer.ApplyPenalty(nextLogits, nextCounts))
+	allocationRef.Close()
 	rejected := 0
-	for rejected == argmaxF32(lastLogits) || rejected == want[0] {
+	for rejected == plainNext || rejected == penalizedNext {
 		rejected++
 	}
 	const k = 6
-	rejectAll := make([]int, k)
-	for i := range rejectAll {
-		rejectAll[i] = rejected
+	verifyRows := make([]int, k)
+	for i := range verifyRows {
+		verifyRows[i] = rejected
 	}
+	verifyRows[0] = boundary
 	run := func(s *RepetitionPenaltySanitizer) float64 {
 		return testing.AllocsPerRun(5, func() {
 			sess := m.NewSession()
 			ll := sess.Prefill(prompt)
-			if _, err := ParallelVerifyKernel(context.Background(), sess, prompt, NewLinearProposal(rejectAll, nil), ll, s, counts); err != nil {
+			got, err := ParallelVerifyKernel(context.Background(), sess, prompt, NewLinearProposal(verifyRows, nil), ll, s, allocationCounts)
+			if err != nil {
 				t.Fatalf("ParallelVerifyKernel: %v", err)
+			}
+			if len(got.TargetLogits) != k || got.NumAccepted != 1 {
+				t.Fatalf("allocation fixture verified %d rows and accepted %d tokens, want %d and 1", len(got.TargetLogits), got.NumAccepted, k)
 			}
 		})
 	}
