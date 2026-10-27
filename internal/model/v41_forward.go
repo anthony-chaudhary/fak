@@ -791,6 +791,10 @@ var v41PrefillStepProbe func()
 func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 	st := s.v41State()
 	startLen := len(st.history)
+	// Transactions clear token-scoped bindings before the next step. Keep only
+	// the reusable projection buffers for this owned suffix call; every token
+	// still re-admits the model and reloads the current weights.
+	scratch := &v41ProjScratch{}
 	var logits []float32
 	for i, id := range ids {
 		var got []float32
@@ -804,7 +808,7 @@ func (s *Session) prefillV41Suffix(ids []int, wantLogits bool) []float32 {
 					got = nil
 				}
 			}()
-			got, _, err = s.M.forwardV41StepCore(id, st, &v41ProjScratch{}, false, wantLogits && i == len(ids)-1)
+			got, _, err = s.M.forwardV41StepCore(id, st, scratch, false, wantLogits && i == len(ids)-1)
 			bodyComplete = true
 		}()
 		if err != nil {
