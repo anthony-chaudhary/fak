@@ -93,14 +93,15 @@ type prefixHitInfo struct {
 }
 
 type nativePrefixState struct {
-	mu                 sync.RWMutex
-	tree               *radixkv.Tree
-	prefixTree         PrefixTree
-	deterministic      bool
-	stats              PrefixStats
-	chunkedExactReuses uint64
-	holderLookups      map[*model.Session]*prefixHitInfo
-	laneLookups        map[*schedLane]*prefixHitInfo
+	mu                  sync.RWMutex
+	tree                *radixkv.Tree
+	prefixTree          PrefixTree
+	deterministic       bool
+	stats               PrefixStats
+	chunkedExactReuses  uint64
+	chunkedPrefixReuses uint64
+	holderLookups       map[*model.Session]*prefixHitInfo
+	laneLookups         map[*schedLane]*prefixHitInfo
 }
 
 func (s *NativeScheduler) getPrefixState() *nativePrefixState {
@@ -673,6 +674,7 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		s.maybeInsertRadixKV(ln.prompt, ln.sess, logits)
 		exactTwins = s.reuseExactQwenPrefillLocked(ln)
 	}
+	s.reuseQwenPrefillExtensionsLocked(ln)
 	s.mu.Unlock()
 
 	s.observeEvent(nativeSchedulerEvent{
