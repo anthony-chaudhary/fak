@@ -162,8 +162,11 @@ func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
 							return nil, errV41ProjectionResult
 						}
 						stage = "readback"
-						values := s.Backend.Read(y)
-						if len(values) != width {
+						// Reuse the sealed owned-read path used by ordinary RMSNorm.
+						// Wrappers and host buffers retain their defensive copy; the
+						// canonical device row survives the transient tensor releases.
+						values, valid := compute.ReadV41RMSNormOutput(s.Backend, y, width)
+						if !valid {
 							return nil, errV41ProjectionResult
 						}
 						for _, v := range values {
@@ -171,7 +174,7 @@ func (s *Session) v41ExactRMSNormFunc(width int, eps float32) v41RMSNormFunc {
 								return nil, errV41ProjectionResult
 							}
 						}
-						return append([]float32(nil), values...), nil
+						return values, nil
 					}()
 					bodyCompleted = true
 					return result, cause
