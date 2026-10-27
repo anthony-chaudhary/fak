@@ -125,7 +125,7 @@ func (m *Model) SetPrismHadamard(spec PrismHadamardSpec) error {
 		width := 0
 		if name == "model.embed_tokens.weight" && m.Q2KEmbedding != nil {
 			width = m.Q2KEmbedding.Hidden()
-		} else if meta, ok := m.manifest[name]; ok && len(meta.Shape) == 2 && meta.Dtype == "f32" {
+		} else if meta, ok := m.manifest[name]; ok && len(meta.Shape) == 2 && (meta.Dtype == "f32" || meta.Dtype == "F32") {
 			width = meta.Shape[1]
 		}
 		if width == 0 {

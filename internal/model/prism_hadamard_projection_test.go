@@ -106,3 +106,40 @@ func TestPrismHadamardInvertsPackedPQ2EmbeddingRow(t *testing.T) {
 		t.Fatalf("packed embedding expanded: bytes=%d, want %d", m.Q2KEmbedding.Bytes(), q2G128BlockBytes)
 	}
 }
+
+// fak-test:runtime fast est=5ms
+func TestPrismHadamardInverseAcceptsNativeF32Dtypes(t *testing.T) {
+	const embedName = "model.embed_tokens.weight"
+	for _, dtype := range []string{"f32", "F32", "f16", "BF16", ""} {
+		t.Run(dtype, func(t *testing.T) {
+			manifest, raw := synthBuildRaw([]synthTensor{
+				{embedName, []int{1, 4}},
+				{"projection.weight", []int{1, 4}},
+			}, func(_ string, next func() float32) float32 { return next() })
+			meta := manifest[embedName]
+			meta.Dtype = dtype
+			manifest[embedName] = meta
+			m := &Model{manifest: manifest, raw: raw}
+			t.Cleanup(func() { _ = m.CloseWeights() })
+			err := m.SetPrismHadamard(PrismHadamardSpec{
+				BlockSize:    4,
+				SignWidths:   []int{4},
+				SignValues:   []int{1, -1, 1, 1},
+				WeightNames:  []string{"projection.weight"},
+				InverseNames: []string{embedName},
+			})
+			if dtype != "f32" && dtype != "F32" {
+				if err == nil || m.HasPrismHadamard() {
+					t.Fatalf("non-f32 dtype %q attached Prism state: err=%v", dtype, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("native f32 dtype %q refused: %v", dtype, err)
+			}
+			row := []float32{1, 0, 0, 0}
+			m.prismInverseEmbeddingRow(embedName, row)
+			assertFloat32BitsEqual(t, "native f32 inverse", []float32{0.5, -0.5, 0.5, 0.5}, row)
+		})
+	}
+}
