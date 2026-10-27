@@ -36,6 +36,10 @@ type v41MHCMix struct {
 // vector. Projection is a caller boundary; this function begins at the pinned
 // hc_split_sinkhorn kernel's inputs.
 func v41MHCSplit(mixes, scale, base []float32, hc, iters int, eps float32) (v41MHCMix, error) {
+	return v41MHCSplitObserved(mixes, scale, base, hc, iters, eps, nil)
+}
+
+func v41MHCSplitObserved(mixes, scale, base []float32, hc, iters int, eps float32, observe func(string)) (v41MHCMix, error) {
 	n := (2 + hc) * hc
 	if hc != 4 || iters < 1 || !finite32(eps) || eps <= 0 || len(mixes) != n || len(base) != n || len(scale) != 3 {
 		return v41MHCMix{}, fmt.Errorf("model: invalid V41 mHC geometry hc=%d iters=%d mixes=%d base=%d scale=%d eps=%g", hc, iters, len(mixes), len(base), len(scale), eps)
@@ -51,6 +55,9 @@ func v41MHCSplit(mixes, scale, base []float32, hc, iters int, eps float32) (v41M
 		}
 	}
 	out := v41MHCMix{pre: make([]float32, hc), post: make([]float32, hc), comb: make([]float32, hc*hc)}
+	if observe != nil {
+		observe("mhc-streams")
+	}
 	for j := 0; j < hc; j++ {
 		out.pre[j] = sigmoid32(mixes[j]*scale[0]+base[j]) + eps
 		out.post[j] = 2 * sigmoid32(mixes[hc+j]*scale[1]+base[hc+j])
@@ -108,6 +115,10 @@ func v41MHCNormalizeColumns(m []float32, hc int, eps float32) {
 func sigmoid32(x float32) float32 { return float32(1 / (1 + math.Exp(float64(-x)))) }
 
 func v41MHCPre(streams [][]float32, pre []float32) ([]float32, error) {
+	return v41MHCPreObserved(streams, pre, nil)
+}
+
+func v41MHCPreObserved(streams [][]float32, pre []float32, observe func(string)) ([]float32, error) {
 	if len(streams) != 4 || len(pre) != 4 || len(streams[0]) == 0 {
 		return nil, fmt.Errorf("model: invalid V41 mHC pre shape")
 	}
@@ -115,6 +126,9 @@ func v41MHCPre(streams [][]float32, pre []float32) ([]float32, error) {
 	for h := range streams {
 		if len(streams[h]) != len(out) {
 			return nil, fmt.Errorf("model: inconsistent V41 mHC stream width")
+		}
+		if h == 0 && observe != nil {
+			observe("mhc-streams")
 		}
 		for d := range out {
 			out[d] += float32(pre[h] * streams[h][d])
@@ -124,6 +138,10 @@ func v41MHCPre(streams [][]float32, pre []float32) ([]float32, error) {
 }
 
 func v41MHCPost(x []float32, residual [][]float32, post []float32, comb []float32) ([][]float32, error) {
+	return v41MHCPostObserved(x, residual, post, comb, nil)
+}
+
+func v41MHCPostObserved(x []float32, residual [][]float32, post []float32, comb []float32, observe func(string)) ([][]float32, error) {
 	if len(residual) != 4 || len(post) != 4 || len(comb) != 16 || len(x) == 0 {
 		return nil, fmt.Errorf("model: invalid V41 mHC post shape")
 	}
@@ -133,6 +151,9 @@ func v41MHCPost(x []float32, residual [][]float32, post []float32, comb []float3
 		for src := 0; src < 4; src++ {
 			if len(residual[src]) != len(x) {
 				return nil, fmt.Errorf("model: inconsistent V41 mHC residual width")
+			}
+			if dst == 0 && src == 0 && observe != nil {
+				observe("mhc-streams")
 			}
 			for d := range x {
 				out[dst][d] += float32(comb[src*4+dst] * residual[src][d])
@@ -190,14 +211,25 @@ func v41MHCMixLeaf(leaf string) bool {
 // The pinned model's residuals, sublayer results and hc_pre/hc_post publications
 // are BF16. Keep coefficients and arithmetic F32; own every rounded publication.
 func v41MHCBF16(layer int, values []float32) ([]float32, error) {
-	return v41MHCBF16Into(layer, make([]float32, len(values)), values)
+	return v41MHCBF16Observed(layer, values, nil)
+}
+
+func v41MHCBF16Observed(layer int, values []float32, observe func(string)) ([]float32, error) {
+	return v41MHCBF16IntoObserved(layer, make([]float32, len(values)), values, observe)
 }
 
 // v41MHCBF16Into may round in place only when its caller owns the entire row.
 // out must have len(values). The allocating wrapper above retains the
 // borrowed-input publication contract.
 func v41MHCBF16Into(layer int, out, values []float32) ([]float32, error) {
+	return v41MHCBF16IntoObserved(layer, out, values, nil)
+}
+
+func v41MHCBF16IntoObserved(layer int, out, values []float32, observe func(string)) ([]float32, error) {
 	for i, v := range values {
+		if i == 0 && observe != nil {
+			observe("bf16-boundary")
+		}
 		out[i] = v41RoundBF16(v)
 		if !finite32(v) || !finite32(out[i]) {
 			return nil, v41StageErr(v41StageMHC, layer, fmt.Errorf("%w: non-finite full mHC BF16 value %d", ErrV41ForwardStage, i))
@@ -207,12 +239,19 @@ func v41MHCBF16Into(layer int, out, values []float32) ([]float32, error) {
 }
 
 func v41FullInitialStreams(x []float32) ([][]float32, error) {
-	row, err := v41MHCBF16(-1, x)
+	return v41FullInitialStreamsObserved(x, nil)
+}
+
+func v41FullInitialStreamsObserved(x []float32, observe func(string)) ([][]float32, error) {
+	row, err := v41MHCBF16Observed(-1, x, observe)
 	if err != nil {
 		return nil, err
 	}
 	streams := make([][]float32, 4)
 	if len(row) != 0 {
+		if observe != nil {
+			observe("mhc-streams")
+		}
 		streams[0] = row
 	}
 	for h := 1; h < len(streams); h++ {
@@ -222,24 +261,32 @@ func v41FullInitialStreams(x []float32) ([][]float32, error) {
 }
 
 func v41MHCPreBF16(layer int, streams [][]float32, pre []float32) ([]float32, error) {
-	row, err := v41MHCPre(streams, pre)
+	return v41MHCPreBF16Observed(layer, streams, pre, nil)
+}
+
+func v41MHCPreBF16Observed(layer int, streams [][]float32, pre []float32, observe func(string)) ([]float32, error) {
+	row, err := v41MHCPreObserved(streams, pre, observe)
 	if err != nil {
 		return nil, v41StageErr(v41StageMHC, layer, err)
 	}
-	return v41MHCBF16Into(layer, row, row)
+	return v41MHCBF16IntoObserved(layer, row, row, observe)
 }
 
 func v41MHCPostBF16(layer int, x []float32, streams [][]float32, mix v41MHCMix) ([][]float32, error) {
-	row, err := v41MHCBF16(layer, x)
+	return v41MHCPostBF16Observed(layer, x, streams, mix, nil)
+}
+
+func v41MHCPostBF16Observed(layer int, x []float32, streams [][]float32, mix v41MHCMix, observe func(string)) ([][]float32, error) {
+	row, err := v41MHCBF16Observed(layer, x, observe)
 	if err != nil {
 		return nil, err
 	}
-	next, err := v41MHCPost(row, streams, mix.post, mix.comb)
+	next, err := v41MHCPostObserved(row, streams, mix.post, mix.comb, observe)
 	if err != nil {
 		return nil, v41StageErr(v41StageMHC, layer, err)
 	}
 	for h := range next {
-		next[h], err = v41MHCBF16Into(layer, next[h], next[h])
+		next[h], err = v41MHCBF16IntoObserved(layer, next[h], next[h], observe)
 		if err != nil {
 			return nil, err
 		}
