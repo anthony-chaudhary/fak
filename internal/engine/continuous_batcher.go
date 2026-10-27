@@ -502,6 +502,13 @@ func (cb *ContinuousBatcher) PrefixCacheLen() int {
 
 // Submit enqueues a subagent request into an available slot or waiting queue.
 func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
+	return cb.submit(req, nil)
+}
+
+// submit lets the owning driver reserve IDs until their handles are drained.
+// A non-nil reserved set also retires an accepted ID's old completed lookup;
+// public Submit keeps its standalone historical-lookup behavior.
+func (cb *ContinuousBatcher) submit(req *SubagentRequest, reserved map[string]struct{}) (string, error) {
 	if req == nil {
 		return "", ErrNilRequest
 	}
@@ -522,9 +529,17 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 
 	sessionID := req.SessionID
 	if sessionID == "" {
-		id := atomic.AddUint64(&cb.seqCounter, 1)
-		sessionID = fmt.Sprintf("subagent-%d", id)
+		for {
+			id := atomic.AddUint64(&cb.seqCounter, 1)
+			sessionID = fmt.Sprintf("subagent-%d", id)
+			if _, exists := reserved[sessionID]; !exists {
+				break
+			}
+		}
 		req.SessionID = sessionID
+	}
+	if _, exists := reserved[sessionID]; exists {
+		return "", ErrSessionAlreadyExists
 	}
 
 	if slot, exists := cb.sessionMap[sessionID]; exists && slot.State != SlotStateFinished {
@@ -534,6 +549,11 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 		if q.SessionID == sessionID {
 			return "", ErrSessionAlreadyExists
 		}
+	}
+	if reserved != nil {
+		// All rejection checks have passed. A queued replacement must not
+		// resolve to its predecessor's closed slot while awaiting promotion.
+		delete(cb.completedMap, sessionID)
 	}
 
 	// Assign the stable submission-order identity only once the request is known

@@ -73,6 +73,9 @@ type BatchingEngine struct {
 	cfg BatchingEngineConfig
 	cb  *ContinuousBatcher
 
+	// admitMu serializes the reserved-ID snapshot through handle registration.
+	// The scheduler never takes it; mu is released before submitting to cb.
+	admitMu  sync.Mutex
 	mu       sync.Mutex
 	requests map[string]*batcherRequest
 
@@ -168,22 +171,35 @@ func (e *BatchingEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 		ChunkedPrefill: args.ChunkedPrefill,
 		ExecutionDepth: args.Depth,
 	}
-	sessionID, err := e.cb.Submit(req)
+	e.admitMu.Lock()
+	defer e.admitMu.Unlock()
+	if e.ctx.Err() != nil {
+		return nil, ErrBatcherClosed
+	}
+	e.mu.Lock()
+	reserved := make(map[string]struct{}, len(e.requests))
+	for id := range e.requests {
+		// Include finished handles until removeRequest releases ownership.
+		reserved[id] = struct{}{}
+	}
+	e.mu.Unlock()
+	sessionID, err := e.cb.submit(req, reserved)
 	if err != nil {
 		return nil, err
 	}
 
 	rctx, rcancel := context.WithCancel(ctx)
 	r := &batcherRequest{
-		sessionID:  sessionID,
-		tool:       c.Tool,
-		engine:     EngineIDBatcher,
-		tokens:     make(chan abi.EngineToken, req.TargetTokens+16),
-		done:       make(chan struct{}),
-		ctx:        rctx,
-		cancel:     rcancel,
-		putCtx:     ctx,
-		enqueuedAt: time.Now(),
+		sessionID:     sessionID,
+		submissionSeq: req.SubmissionSeq,
+		tool:          c.Tool,
+		engine:        EngineIDBatcher,
+		tokens:        make(chan abi.EngineToken, req.TargetTokens+16),
+		done:          make(chan struct{}),
+		ctx:           rctx,
+		cancel:        rcancel,
+		putCtx:        ctx,
+		enqueuedAt:    time.Now(),
 	}
 
 	e.mu.Lock()
@@ -197,6 +213,7 @@ func (e *BatchingEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engine
 		delete(e.requests, sessionID)
 		e.mu.Unlock()
 		_ = e.cb.Cancel(sessionID)
+		e.acknowledgeRequest(r)
 		rcancel()
 		return nil, ErrBatcherClosed
 	}
@@ -220,7 +237,14 @@ func (e *BatchingEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Re
 func (e *BatchingEngine) Close() error {
 	e.closeOnce.Do(func() { e.cancel() })
 	<-e.done
-	return e.cb.Close()
+	err := e.cb.Close()
+	// NewBatchingEngine creates this private batcher; no supported getter or
+	// injection shares it. Close retires active slots after run's finishAll, so
+	// drop the index only now. Externally held Slot pointers remain untouched.
+	e.cb.mu.Lock()
+	clear(e.cb.completedMap)
+	e.cb.mu.Unlock()
+	return err
 }
 
 // run is the single scheduler loop: it steps the batcher, drains produced tokens
@@ -418,8 +442,21 @@ func (e *BatchingEngine) finishAll(err error) {
 
 func (e *BatchingEngine) removeRequest(r *batcherRequest) {
 	e.mu.Lock()
-	delete(e.requests, r.sessionID)
+	if e.requests[r.sessionID] == r {
+		delete(e.requests, r.sessionID)
+	}
 	e.mu.Unlock()
+	e.acknowledgeRequest(r)
+}
+
+// acknowledgeRequest drops only the consumed submission's historical index
+// reference. Standalone ContinuousBatcher.GetSlot retains its existing contract.
+func (e *BatchingEngine) acknowledgeRequest(r *batcherRequest) {
+	e.cb.mu.Lock()
+	if slot := e.cb.completedMap[r.sessionID]; slot != nil && slot.SubmissionSeq == r.submissionSeq {
+		delete(e.cb.completedMap, r.sessionID)
+	}
+	e.cb.mu.Unlock()
 }
 
 func (e *BatchingEngine) outstanding() int {
@@ -437,9 +474,10 @@ func (e *BatchingEngine) signal() {
 
 // batcherRequest is one in-flight batcher-backed request.
 type batcherRequest struct {
-	sessionID string
-	tool      string
-	engine    string
+	sessionID     string
+	submissionSeq uint64 // Assigned by the accepted Submit, not the caller's ID.
+	tool          string
+	engine        string
 
 	tokens chan abi.EngineToken
 	done   chan struct{}
