@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ParseCUDAArchMatrix parses architecture declarations and generates nvcc -gencode flags.
@@ -71,19 +72,45 @@ func LoadCUDAArchMatrix(repoRoot string, targetArch string) ([]string, string, e
 }
 
 // CompileCUDAKernels compiles cuda_kernels.cu (and optional NCCL files) into object files.
-func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arch string, enableNCCL bool, stdout io.Writer) ([]string, error) {
+func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arch string, enableNCCL bool, stdout io.Writer) (objects []string, result error) {
+	pkgDir := filepath.Join(repoRoot, "internal", "compute")
+	ctx, unlock, err := lockCUDABuild(ctx, pkgDir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	receipt := newCUDANativeReceipt(ctx, repoRoot, arch, enableNCCL)
+	if err := cudaWriteJSON(receipt.ReceiptPath, receipt); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := receipt.finish(repoRoot, result); result == nil && err != nil {
+			result = err
+		}
+	}()
 	if tc == nil || tc.NVCC == "" {
 		return nil, fmt.Errorf("nvcc not found — install CUDA Toolkit and set CUDA_PATH or CUDA_HOME")
 	}
+	nvcc, err := exec.LookPath(tc.NVCC)
+	if err != nil {
+		return nil, err
+	}
+	nvcc, err = filepath.Abs(nvcc)
+	if err != nil {
+		return nil, err
+	}
+	selected := *tc
+	selected.NVCC = nvcc
+	tc = &selected
 	if err := RequireCUDAImageAuditTool(tc); err != nil {
 		return nil, err
 	}
 
-	pkgDir := filepath.Join(repoRoot, "internal", "compute")
 	gencodeArgs, buildArchs, err := LoadCUDAArchMatrix(repoRoot, arch)
 	if err != nil {
 		return nil, err
 	}
+	receipt.Architecture = buildArchs
 
 	if stdout != nil {
 		fmt.Fprintf(stdout, "[cuda] nvcc compile kernels (%s) ...\n", buildArchs)
@@ -100,7 +127,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		nvccArgs := []string{"-O3", "-std=c++17"}
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		nvccArgs = append(nvccArgs, "-Xcompiler", "/MD", "-c", "cuda_kernels.cu", "-o", obj)
-		if err := RunCmd(ctx, tc.NVCC, nvccArgs, pkgDir, env, stdout, os.Stderr); err != nil {
+		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
 			return nil, fmt.Errorf("nvcc compile cuda_kernels.cu: %w", err)
 		}
 		objs = append(objs, obj)
@@ -115,7 +142,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			nvccArgs = append(nvccArgs, "-I"+inc)
 		}
 		nvccArgs = append(nvccArgs, "-Xcompiler", "-fPIC", "-c", "cuda_kernels.cu", "-o", obj)
-		if err := RunCmd(ctx, tc.NVCC, nvccArgs, pkgDir, env, stdout, os.Stderr); err != nil {
+		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
 			return nil, fmt.Errorf("nvcc compile cuda_kernels.cu: %w", err)
 		}
 		objs = append(objs, obj)
@@ -132,7 +159,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 					nArgs = append(nArgs, "-I"+inc)
 				}
 				nArgs = append(nArgs, "-Xcompiler", "-fPIC", "-c", ncclFile, "-o", ncclObj)
-				if err := RunCmd(ctx, tc.NVCC, nArgs, pkgDir, env, stdout, os.Stderr); err != nil {
+				if err := compileCUDAObject(ctx, tc, pkgDir, ncclFile, ncclObj, nArgs, env, receipt, stdout); err != nil {
 					return nil, fmt.Errorf("nvcc compile %s: %w", ncclFile, err)
 				}
 				objs = append(objs, ncclObj)
@@ -144,20 +171,40 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 
 // ArchiveCUDALib packages the compiled object files into libfakcuda.a.
 func ArchiveCUDALib(ctx context.Context, tc *Toolchain, pkgDir string, objs []string, stdout io.Writer) (*BuildArtifact, error) {
+	ctx, unlock, err := lockCUDABuild(ctx, pkgDir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	libOut := filepath.Join(pkgDir, "libfakcuda.a")
+	// Updating an existing archive retains omitted members, including old NCCL
+	// objects. Build a fresh sibling and publish only a successful complete result.
+	tmp, err := os.CreateTemp(pkgDir, ".cuda-archive-*.a")
+	if err != nil {
+		return nil, err
+	}
+	archiveTemp := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		os.Remove(archiveTemp)
+		return nil, err
+	}
+	defer os.Remove(archiveTemp)
+	if err := os.Remove(archiveTemp); err != nil {
+		return nil, err
+	}
 	env := os.Environ()
 	if tc != nil && len(tc.VsDevEnv) > 0 {
 		env = MergeEnviron(env, tc.VsDevEnv)
 	}
 
 	if tc != nil && tc.AR != "" {
-		arArgs := append([]string{"rcs", libOut}, objs...)
+		arArgs := append([]string{"rcs", archiveTemp}, objs...)
 		if err := RunCmd(ctx, tc.AR, arArgs, pkgDir, env, stdout, os.Stderr); err != nil {
 			return nil, fmt.Errorf("archiving libfakcuda.a via ar: %w", err)
 		}
 	} else if tc != nil && tc.IsWindows {
 		// Fallback to nvcc --lib if ar is absent on Windows
-		nvccLibArgs := append([]string{"--lib", "--output-file", libOut}, objs...)
+		nvccLibArgs := append([]string{"--lib", "--output-file", archiveTemp}, objs...)
 		if err := RunCmd(ctx, tc.NVCC, nvccLibArgs, pkgDir, env, stdout, os.Stderr); err != nil {
 			return nil, fmt.Errorf("archiving libfakcuda.a via nvcc --lib: %w", err)
 		}
@@ -165,9 +212,15 @@ func ArchiveCUDALib(ctx context.Context, tc *Toolchain, pkgDir string, objs []st
 		return nil, fmt.Errorf("no archiver (ar/llvm-ar) available to build libfakcuda.a")
 	}
 
-	fi, err := os.Stat(libOut)
+	fi, err := os.Stat(archiveTemp)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", libOut, err)
+	}
+	if !fi.Mode().IsRegular() || fi.Size() == 0 {
+		return nil, fmt.Errorf("empty or nonregular CUDA archive")
+	}
+	if err := os.Rename(archiveTemp, libOut); err != nil {
+		return nil, err
 	}
 
 	if stdout != nil {
@@ -180,7 +233,27 @@ func ArchiveCUDALib(ctx context.Context, tc *Toolchain, pkgDir string, objs []st
 }
 
 // BuildCUDALib compiles cuda_kernels.cu (and optional NCCL files) and archives them into libfakcuda.a.
-func BuildCUDALib(ctx context.Context, tc *Toolchain, repoRoot string, arch string, enableNCCL bool, stdout io.Writer) (*BuildArtifact, error) {
+func BuildCUDALib(ctx context.Context, tc *Toolchain, repoRoot string, arch string, enableNCCL bool, stdout io.Writer) (artifact *BuildArtifact, result error) {
+	ctx, unlock, err := lockCUDABuild(ctx, filepath.Join(repoRoot, "internal", "compute"))
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	initial := newCUDANativeReceipt(ctx, repoRoot, arch, enableNCCL)
+	if err := cudaWriteJSON(initial.ReceiptPath, initial); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := finishCUDANativeArchiveReceipt(repoRoot, "", result); result == nil && err != nil {
+			result = err
+		}
+	}()
+	if enableNCCL {
+		tc, err = PrepareCUDANCCLToolchain(tc, os.Getenv("NCCL_HOME"), repoRoot)
+		if err != nil {
+			return nil, err
+		}
+	}
 	objs, err := CompileCUDAKernels(ctx, tc, repoRoot, arch, enableNCCL, stdout)
 	if err != nil {
 		return nil, err
@@ -222,7 +295,7 @@ func SignArtifact(ctx context.Context, tc *Toolchain, cfg *CUDAConfig, artifactP
 }
 
 // RunCUDA orchestrates CUDA build, test, and check actions.
-func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
+func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg == nil {
 		return fmt.Errorf("nil CUDAConfig")
 	}
@@ -231,6 +304,12 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 		return err
 	}
 	cfg.RepoRoot = root
+	ctx, unlock, err := lockCUDABuild(ctx, filepath.Join(root, "internal", "compute"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	ctx = context.WithValue(ctx, cudaReceiptStartContext{}, time.Now().UTC())
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
@@ -246,6 +325,13 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 	} else if !filepath.IsAbs(cfg.ReceiptPath) {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, cfg.ReceiptPath)
 	}
+	ctx = context.WithValue(ctx, cudaReceiptPathContext{}, CUDANativeReceiptPath(root, cfg.ReceiptPath))
+	if cfg.Command != "check" {
+		initial := newCUDANativeReceipt(ctx, root, cfg.Arch, cfg.EnableNCCL)
+		if err := cudaWriteJSON(initial.ReceiptPath, initial); err != nil {
+			return err
+		}
+	}
 	if cfg.Command == "binary" && !cfg.SkipSmoke {
 		cfg.Smoke = true
 	}
@@ -253,9 +339,31 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) error {
 	tracker := newReceiptTracker("cuda", cfg.Command, cfg.ReceiptPath)
 	cfg.Receipt = tracker.receipt
 	defer func() {
-		_ = tracker.finish(cfg.ReceiptPath)
+		if err := tracker.finish(cfg.ReceiptPath); result == nil && err != nil {
+			result = err
+		}
+		if cfg.Command != "check" {
+			if err := finishCUDANativeArchiveReceipt(root, cfg.ReceiptPath, result); result == nil && err != nil {
+				result = err
+			}
+		}
 	}()
 
+	if cfg.EnableNCCL && cfg.Command != "check" {
+		if err := tracker.recordPhase("prepare_nccl", func() error {
+			home := cfg.NCCLHome
+			if home == "" {
+				home = os.Getenv("NCCL_HOME")
+			}
+			prepared, err := PrepareCUDANCCLToolchain(cfg.Toolchain, home, root)
+			if err == nil {
+				cfg.Toolchain = prepared
+			}
+			return err
+		}); err != nil {
+			return err
+		}
+	}
 	goTags := "cuda"
 	if cfg.EnableNCCL {
 		goTags = "cuda,nccl"

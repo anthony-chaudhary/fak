@@ -24,9 +24,50 @@ func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]fl
 	return nil
 }
 
-// q8GemmGroupDispatchDirect always declines in the pure-Go build (no Metal).
+// q8GemmGroupDispatchDirect reuses the existing CPU grouped launch for resident
+// same-width Q8 members. The env-gated hybrid entry above remains unchanged.
+// Profiling keeps the caller's per-target MAC attribution via the old route.
 func (s *Session) q8GemmGroupDispatchDirect(names []string, Xq *q8Panel, P int) [][]float32 {
-	return nil
+	if s == nil || s.M == nil || s.M.prism != nil || qprofOn || !qgemmGroup ||
+		qgemmMode == qgemmModeLegacy || qgemmMode == qgemmModeAccel ||
+		P <= 1 || P > qgemmGroupMaxP || Xq == nil || Xq.P != P ||
+		Xq.in <= 0 || Xq.in%qBlk != 0 || Xq.nblk != Xq.in/qBlk ||
+		P > len(Xq.q)/Xq.in || P > len(Xq.d)/Xq.nblk {
+		return nil
+	}
+	var targets [4]qgemm8Target
+	var positions [4]int
+	n := 0
+	for i, name := range names {
+		// Match proj's resident-format precedence exactly. A Q8 shadow of a
+		// resident K/Q2 tensor must not silently replace that format's math.
+		if s.M.q4kw[name] != nil || s.M.kqw[name] != nil || s.M.q2w[name] != nil {
+			continue
+		}
+		qt := s.M.q8w[name]
+		if qt == nil {
+			continue // keep on-demand weight creation on the original route
+		}
+		if n == len(targets) || qt.out <= 0 || qt.in != Xq.in || qt.nblk != Xq.nblk ||
+			qt.out > len(qt.q)/qt.in || qt.out > len(qt.d)/qt.nblk ||
+			P > int(^uint(0)>>1)/qt.out {
+			return nil
+		}
+		targets[n], positions[n] = qgemm8Target{qt: qt}, i
+		n++
+	}
+	if n < 2 {
+		return nil
+	}
+	out := make([][]float32, len(names))
+	for i := 0; i < n; i++ {
+		targets[i].Y = make([]float32, P*targets[i].qt.out)
+		out[positions[i]] = targets[i].Y
+	}
+	// Existing ISA/tile dispatch remains authoritative; other architectures
+	// fall back to their same per-target kernels. All writes join before return.
+	qGemm8IntoMany(Xq, targets[:n]...)
+	return out
 }
 
 // denseQ4KPrefillGraphMaxRows mirrors the Metal build's dense prefill graph panel bound; the
@@ -74,10 +115,10 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 	return nil
 }
 
-// q4kGemmGroupDispatch always declines in the pure-Go build (no Metal) so the prefill caller loops
-// its per-weight proj. The Metal one-command-buffer batched-GEMM group lives in metal_q4k_on.go.
+// q4kGemmGroupDispatch shares activation quantization for eligible CPU Q4_K groups.
+// Declined members retain the caller's ordinary per-weight projection fallback.
 func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
-	return nil
+	return s.q4kGemmGroupCPU(names, Xf, P)
 }
 
 // q4kFusedMLP always declines in the pure-Go build; the fused on-GPU SwiGLU MLP lives in

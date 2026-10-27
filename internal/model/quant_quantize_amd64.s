@@ -119,3 +119,164 @@ qznext:
 qzdone:
 	VZEROUPPER
 	RET
+
+
+// quantizeRowAsm256 adapts the in-tree AVX-512 trunc/fraction/clamp algorithm
+// above to four 8-float vectors. Finite abs/max reduction is exact; no sums or
+// rounding operations are reassociated and no FMA or reciprocal approximation
+// is used. Reject NaN/Inf and reciprocal overflow BEFORE writing that block.
+// Prior complete blocks remain valid; Go runs the original scalar suffix.
+// Return done is a block count, so all pointers retain their existing layouts.
+//
+// func quantizeRowAsm256(x *float32, q *int8, d *float32, nblk int) (done int)
+TEXT ·quantizeRowAsm256(SB), NOSPLIT, $0-40
+ MOVQ x+0(FP), SI
+ MOVQ q+8(FP), DI
+ MOVQ d+16(FP), R8
+ MOVQ nblk+24(FP), CX
+ XORQ R9, R9
+ TESTQ CX, CX
+ JLE qz256done
+ VPBROADCASTD qzc<>+0x00(SB), Y15 // abs mask
+ VPBROADCASTD qzc<>+0x18(SB), Y14 // int32 127
+ VPBROADCASTD qzc<>+0x1c(SB), Y13 // int32 -127
+ VBROADCASTSS qzc<>+0x10(SB), Y12 // -0.5
+ VBROADCASTSS qzc<>+0x0c(SB), Y11 // 0.5
+ VPBROADCASTD qzc<>+0x14(SB), Y10 // int32 1
+qz256loop:
+ VMOVUPS (SI), Y0
+ VMOVUPS 32(SI), Y1
+ VMOVUPS 64(SI), Y2
+ VMOVUPS 96(SI), Y3
+ // Scalar amax ignores NaNs. Keep that exceptional policy in scalar rather
+ // than let MAXPS operand ordering choose a different scale or NaN payload.
+ VCMPPS $3, Y0, Y0, Y4
+ VCMPPS $3, Y1, Y1, Y5
+ VORPS Y5, Y4, Y4
+ VCMPPS $3, Y2, Y2, Y5
+ VORPS Y5, Y4, Y4
+ VCMPPS $3, Y3, Y3, Y5
+ VORPS Y5, Y4, Y4
+ VMOVMSKPS Y4, AX
+ TESTL AX, AX
+ JNZ qz256done
+ VANDPS Y15, Y0, Y4
+ VANDPS Y15, Y1, Y5
+ VMAXPS Y5, Y4, Y4
+ VANDPS Y15, Y2, Y5
+ VMAXPS Y5, Y4, Y4
+ VANDPS Y15, Y3, Y5
+ VMAXPS Y5, Y4, Y4
+ VEXTRACTF128 $1, Y4, X5
+ VMAXPS X5, X4, X4
+ VSHUFPS $0x0e, X4, X4, X5
+ VMAXPS X5, X4, X4
+ VSHUFPS $0x01, X4, X4, X5
+ VMAXPS X5, X4, X4
+ VMOVD X4, AX
+ CMPL AX, $0x7f800000 // positive Inf (NaNs already refused)
+ JE qz256done
+ VDIVSS qzc<>+0x04(SB), X4, X6 // d = amax / 127
+ VMOVD X6, AX
+ TESTL AX, AX
+ JZ qz256zero
+ VMOVSS qzc<>+0x08(SB), X7
+ VDIVSS X6, X7, X7 // inv = 1.0 / d, exactly as scalar
+ VMOVD X7, AX
+ CMPL AX, $0x7f800000
+ JE qz256done // subnormal d can overflow its reciprocal
+ VMOVSS X6, (R8)
+ VBROADCASTSS X7, Y7
+
+ // Original q8round for elements 0..7, using only ordered finite values.
+ VMULPS Y7, Y0, Y8
+ VCVTTPS2DQ Y8, Y9
+ VCVTDQ2PS Y9, Y4
+ VSUBPS Y4, Y8, Y8
+ VCMPPS $5, Y11, Y8, Y4 // frac >= 0.5
+ VPAND Y10, Y4, Y4
+ VPADDD Y4, Y9, Y9
+ VCMPPS $2, Y12, Y8, Y4 // frac <= -0.5 (mutually exclusive)
+ VPAND Y10, Y4, Y4
+ VPSUBD Y4, Y9, Y9
+ VPMAXSD Y13, Y9, Y9
+ VPMINSD Y14, Y9, Y9
+ // Join low/high 128-bit halves before packing: output remains scalar order.
+ VEXTRACTI128 $1, Y9, X4
+ VPACKSSDW X4, X9, X9
+ VPACKSSWB X9, X9, X9
+ VMOVQ X9, 0(DI)
+
+ // Original q8round for elements 8..15, using only ordered finite values.
+ VMULPS Y7, Y1, Y8
+ VCVTTPS2DQ Y8, Y9
+ VCVTDQ2PS Y9, Y4
+ VSUBPS Y4, Y8, Y8
+ VCMPPS $5, Y11, Y8, Y4 // frac >= 0.5
+ VPAND Y10, Y4, Y4
+ VPADDD Y4, Y9, Y9
+ VCMPPS $2, Y12, Y8, Y4 // frac <= -0.5 (mutually exclusive)
+ VPAND Y10, Y4, Y4
+ VPSUBD Y4, Y9, Y9
+ VPMAXSD Y13, Y9, Y9
+ VPMINSD Y14, Y9, Y9
+ // Join low/high 128-bit halves before packing: output remains scalar order.
+ VEXTRACTI128 $1, Y9, X4
+ VPACKSSDW X4, X9, X9
+ VPACKSSWB X9, X9, X9
+ VMOVQ X9, 8(DI)
+
+ // Original q8round for elements 16..23, using only ordered finite values.
+ VMULPS Y7, Y2, Y8
+ VCVTTPS2DQ Y8, Y9
+ VCVTDQ2PS Y9, Y4
+ VSUBPS Y4, Y8, Y8
+ VCMPPS $5, Y11, Y8, Y4 // frac >= 0.5
+ VPAND Y10, Y4, Y4
+ VPADDD Y4, Y9, Y9
+ VCMPPS $2, Y12, Y8, Y4 // frac <= -0.5 (mutually exclusive)
+ VPAND Y10, Y4, Y4
+ VPSUBD Y4, Y9, Y9
+ VPMAXSD Y13, Y9, Y9
+ VPMINSD Y14, Y9, Y9
+ // Join low/high 128-bit halves before packing: output remains scalar order.
+ VEXTRACTI128 $1, Y9, X4
+ VPACKSSDW X4, X9, X9
+ VPACKSSWB X9, X9, X9
+ VMOVQ X9, 16(DI)
+
+ // Original q8round for elements 24..31, using only ordered finite values.
+ VMULPS Y7, Y3, Y8
+ VCVTTPS2DQ Y8, Y9
+ VCVTDQ2PS Y9, Y4
+ VSUBPS Y4, Y8, Y8
+ VCMPPS $5, Y11, Y8, Y4 // frac >= 0.5
+ VPAND Y10, Y4, Y4
+ VPADDD Y4, Y9, Y9
+ VCMPPS $2, Y12, Y8, Y4 // frac <= -0.5 (mutually exclusive)
+ VPAND Y10, Y4, Y4
+ VPSUBD Y4, Y9, Y9
+ VPMAXSD Y13, Y9, Y9
+ VPMINSD Y14, Y9, Y9
+ // Join low/high 128-bit halves before packing: output remains scalar order.
+ VEXTRACTI128 $1, Y9, X4
+ VPACKSSDW X4, X9, X9
+ VPACKSSWB X9, X9, X9
+ VMOVQ X9, 24(DI)
+
+ JMP qz256next
+qz256zero:
+ VMOVSS X6, (R8)
+ VXORPS Y4, Y4, Y4
+ VMOVUPS Y4, (DI) // all 32 reused codes must be cleared
+qz256next:
+ ADDQ $128, SI
+ ADDQ $32, DI
+ ADDQ $4, R8
+ INCQ R9
+ DECQ CX
+ JNZ qz256loop
+qz256done:
+ MOVQ R9, done+32(FP)
+ VZEROUPPER
+ RET

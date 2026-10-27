@@ -403,6 +403,14 @@ func q2kDequantSuperBlockScalar(dst []float32, blk []byte) {
 	}
 }
 
+// iq2DequantSuperBlockArch is installed once by the amd64 implementation.
+// Other architectures leave it nil and retain their existing scalar decoders.
+var iq2DequantSuperBlockArch func(dst []float32, blk []byte, kind kQuantKind) bool
+
+// Installed only by amd64; nil preserves every other architecture's scalar
+// decoder. Each hook may decline without writes for geometry or exceptional data.
+var q5kDequantSuperBlockArch, q6kDequantSuperBlockArch func(dst []float32, blk []byte) bool
+
 func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	switch kind {
 	case kindQ3K:
@@ -410,7 +418,9 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindIQ3S:
 		iq3sDequantSuperBlock(dst, blk)
 	case kindQ6K:
-		q6kDequantSuperBlock(dst, blk)
+		if q6kDequantSuperBlockArch == nil || !q6kDequantSuperBlockArch(dst, blk) {
+			q6kDequantSuperBlock(dst, blk)
+		}
 	case kindIQ3XXS:
 		if !iq3xxsDequantSuperBlockArch(dst, blk) {
 			iq3xxsDequantSuperBlock(dst, blk)
@@ -420,13 +430,19 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindIQ4NL:
 		iq4nlDequantBlock(dst, blk)
 	case kindIQ2XXS:
-		dequantIQ2XXSScalar(dst, blk)
+		if iq2DequantSuperBlockArch == nil || !iq2DequantSuperBlockArch(dst, blk, kind) {
+			dequantIQ2XXSScalar(dst, blk)
+		}
 	case kindIQ2XS:
-		dequantIQ2XSScalar(dst, blk)
+		if iq2DequantSuperBlockArch == nil || !iq2DequantSuperBlockArch(dst, blk, kind) {
+			dequantIQ2XSScalar(dst, blk)
+		}
 	case kindIQ1S:
 		dequantIQ1SScalar(dst, blk)
 	case kindIQ2S:
-		dequantIQ2SScalar(dst, blk)
+		if iq2DequantSuperBlockArch == nil || !iq2DequantSuperBlockArch(dst, blk, kind) {
+			dequantIQ2SScalar(dst, blk)
+		}
 	case kindIQ1M:
 		dequantIQ1MScalar(dst, blk)
 	case kindQ8_0:
@@ -436,7 +452,9 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	case kindQ2K:
 		q2kDequantSuperBlock(dst, blk)
 	default:
-		q5kDequantSuperBlock(dst, blk)
+		if q5kDequantSuperBlockArch == nil || !q5kDequantSuperBlockArch(dst, blk) {
+			q5kDequantSuperBlock(dst, blk)
+		}
 	}
 }
 
@@ -574,6 +592,13 @@ func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi 
 	}
 }
 
+// kQuantF32BlockPair holds the exact 256-value two-token block dot when an
+// architecture admits it. The selector is evaluated once per prefill call;
+// other architectures leave it nil and retain the original scalar loop.
+type kQuantF32BlockPair func(weights, x0, x1, dst *float32)
+
+var kQuantF32BlockPairArch func() kQuantF32BlockPair
+
 // kQuantMatRowsIntoBatch computes Y[t*out + o] for all P tokens and all out rows, dequantizing
 // each weight super-block ONCE and reusing it across every token column â€” the dequant-once GEMM
 // twin of kQuantMatRowsInto's per-token GEMV. X is PÃ—in row-major (token t's activation at
@@ -585,14 +610,16 @@ func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi 
 // Bit-identical to looping kQuantMatRowsInto per token: for each (row o, token t) the four-
 // accumulator dot uses the SAME (s0+s1)+(s2+s3) fixed order and the SAME super-block order as
 // kQuantMatRowsRange, and each token's accumulator is independent, so no cross-token reassociation
-// happens. The int8 SDOT path is APPROXIMATE (activation quantization) and not the prefill wall
-// this batch variant targets (the dense Q6_K/Q5_K down_proj/lm_head ride the f32 path), so when
-// kQuantSDOTEnabled(qt.kind) the batch variant falls back to the per-token kQuantMatRowsInto loop
-// â€” correctness first; the f32 batch below is the bit-exact dequant-once speedup.
+// happens. The int8 SDOT path remains APPROXIMATE versus f32 (activation quantization).
+// Its bounded token panels preserve the per-token integer reducer and float combine;
+// unsupported panel routes retain the per-token kQuantMatRowsInto loop.
 func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 	qt.ensureRawCPU("prefill GEMM")
 	dispatchWorkers := currentWorkerCount()
 	if kQuantSDOTEnabled(qt.kind) {
+		if kQuantMatRowsIntoBatchInt8(qt, X, P, Y, dispatchWorkers) {
+			return
+		}
 		in, out := qt.in, qt.out
 		for t := 0; t < P; t++ {
 			// PREFILL keeps the full dispatchWorkers width: the #4974 decode cap targets the
@@ -605,9 +632,15 @@ func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 	blockWeights := qt.kind.blockWeights()
 	rowBytes := qt.rowBytes()
 	bb := qt.kind.blockBytes()
+	var pairDot kQuantF32BlockPair
+	if kQuantF32BlockPairArch != nil && blockWeights == qkK && P > 1 && in > 0 && out > 0 &&
+		in%qkK == 0 && qt.nblk == in/qkK && P <= len(X)/in && P <= len(Y)/out {
+		pairDot = kQuantF32BlockPairArch()
+	}
 	parForRange(out, out*in*P, func(lo, hi int) {
 		buf := make([]float32, blockWeights) // reused per (row,block); L1/L2-resident
 		acc := make([]float32, P)            // one accumulator per token column
+		var pair [2]float32
 		for o := lo; o < hi; o++ {
 			row := qt.raw[o*rowBytes:]
 			for t := 0; t < P; t++ {
@@ -616,7 +649,17 @@ func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
 			for b := 0; b < qt.nblk; b++ {
 				// Dequant this super-block ONCE, then dot it against every token column.
 				kQuantDequantSuperBlock(buf, row[b*bb:(b+1)*bb], qt.kind)
-				for t := 0; t < P; t++ {
+				t := 0
+				if pairDot != nil {
+					for ; t+1 < P; t += 2 {
+						x0, x1 := t*in+b*blockWeights, (t+1)*in+b*blockWeights
+						pairDot(&buf[0], &X[x0], &X[x1], &pair[0])
+						acc[t] += pair[0]
+						acc[t+1] += pair[1]
+					}
+				}
+				// Odd token, 32-wide format or unsupported ISA keeps the old dot.
+				for ; t < P; t++ {
 					xs := X[t*in+b*blockWeights:]
 					var s0, s1, s2, s3 float32
 					for i := 0; i < blockWeights; i += 4 {

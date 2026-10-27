@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -223,10 +224,77 @@ func TestQ4KGemmExtractOnceSelectAMD64(t *testing.T) {
 	}
 }
 
-// TestQ4KGemmExtractOnceSelectAMD64Source is the architecture-independent source witness for
-// this amd64-only selector. It runs on arm64 coordinators and fails if amd64 stops admitting the
-// portable extract-once path, if an amd64 arch hook silently replaces it, or if the production
-// selector/extractor grows a second invocation site that can repeat work per token.
+// fak-test:runtime fast est=20ms
+func TestQ4KGemmExtractOnceAMD64TilesMatchFullExtraction(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("amd64 row-tile extraction witness")
+	}
+	kernel, _ := q8DecodeKernel()
+	if kernel != "avx2" && kernel != "avx512" {
+		t.Skip("requires an already-resolved amd64 SIMD tier")
+	}
+	priorMode := qgemmMode
+	qgemmMode = qgemmModeTile
+	t.Cleanup(func() { qgemmMode = priorMode })
+
+	// Both register-tile shapes have row/token tails. The small shape stays
+	// inline; the larger shape crosses the existing parallel-work threshold.
+	for _, shape := range [][2]int{{2, 1}, {17, 7}} {
+		out, P := shape[0], shape[1]
+		const in = 768
+		rng := rand.New(rand.NewSource(14042))
+		raw := make([]byte, out*(in/qkK)*q4kBlockBytes)
+		for off := 0; off < len(raw); off += q4kBlockBytes {
+			randQ4KBlock(rng, raw[off:off+q4kBlockBytes])
+		}
+		qt := quantizeQ4KFromRaw(raw, out, in)
+		X := make([]float32, P*in)
+		for i := range X {
+			X[i] = float32(rng.NormFloat64())
+		}
+		qp := quantizeBatchPanel(X, P, in)
+		rawBefore := append([]byte(nil), qt.raw...)
+		qBefore := append([]int8(nil), qp.q...)
+		dBefore := append([]float32(nil), qp.d...)
+
+		ex := q4kExtractGemmWeights(qt)
+		want := make([]float32, P*out)
+		qGemm8Into(ex.qt, qp, want)
+		sums := q8PanelBlockSums(qp)
+		q4kSubtractGemmMinTerm(ex.minScale, sums, qp.d, P, out, ex.qt.nblk, want)
+
+		const sentinel = float32(-1234.5)
+		guarded := make([]float32, P*out+2)
+		for i := range guarded {
+			guarded[i] = sentinel
+		}
+		got := guarded[1 : len(guarded)-1]
+		if !q4kGemmExtractOnceInt8IntoArch(qt, qp, got) {
+			t.Fatalf("row-tile hook declined resolved %s", kernel)
+		}
+		for i := range got {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("%s out=%d P=%d output[%d]=%v, full extraction=%v", kernel, out, P, i, got[i], want[i])
+			}
+		}
+		if guarded[0] != sentinel || guarded[len(guarded)-1] != sentinel {
+			t.Fatal("row-tile GEMM wrote outside its output")
+		}
+		if !slices.Equal(qt.raw, rawBefore) || !slices.Equal(qp.q, qBefore) || !slices.Equal(qp.d, dBefore) {
+			t.Fatal("row-tile GEMM modified immutable weights or activation panel")
+		}
+		for _, mode := range []string{qgemmModeLegacy, qgemmModeAccel} {
+			qgemmMode = mode
+			if q4kGemmExtractOnceInt8IntoArch(qt, qp, got) || !slices.Equal(got, want) {
+				t.Fatalf("%s route must decline without modifying output", mode)
+			}
+		}
+		qgemmMode = qgemmModeTile
+	}
+}
+
+// TestQ4KGemmExtractOnceSelectAMD64Source keeps the extract-once selector and
+// bounded amd64 implementation reachable on architecture-independent readers.
 func TestQ4KGemmExtractOnceSelectAMD64Source(t *testing.T) {
 	amd64File := parseModelTestFile(t, "quant_amd64_q4k.go")
 	selector := findModelTestFunc(t, amd64File, "q4kExtractOnceGemmEnabled")
@@ -234,8 +302,16 @@ func TestQ4KGemmExtractOnceSelectAMD64Source(t *testing.T) {
 		t.Fatal("amd64 q4kExtractOnceGemmEnabled must return true inside the existing int8 gate")
 	}
 	archHook := findModelTestFunc(t, amd64File, "q4kGemmExtractOnceInt8IntoArch")
-	if !returnsModelTestBool(archHook, false) {
-		t.Fatal("amd64 arch hook must decline so the existing portable extract-once path remains authoritative")
+	if got := countModelTestCalls(archHook, "q4kGemmExtractOnceInt8IntoAMD64"); got != 1 {
+		t.Fatalf("amd64 row-tile dispatch call sites=%d, want exactly 1", got)
+	}
+	tileFile := parseModelTestFile(t, "quant_amd64_q4k_gemm.go")
+	tile := findModelTestFunc(t, tileFile, "q4kGemmExtractOnceInt8IntoAMD64")
+	if got := countModelTestCalls(tile, "q4kExtractGemmRow"); got != 1 {
+		t.Fatalf("amd64 row-extraction call sites=%d, want exactly 1 inside the row loop", got)
+	}
+	if countModelTestCalls(tile, "q4kExtractGemmWeights") != 0 {
+		t.Fatal("amd64 row tiles must not materialize the full expanded weight")
 	}
 
 	sharedFile := parseModelTestFile(t, "quant_q4k.go")

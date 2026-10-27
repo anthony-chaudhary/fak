@@ -102,8 +102,17 @@ func v41RouteWithNormalization(logits, correctionBias []float32, cfg v41RouterCo
 		return nil, &v4RouteError{Field: "v41_topk", Reason: fmt.Sprintf("%d exceeds experts %d", cfg.TopK, cfg.Experts)}
 	}
 
-	raw := make([]float32, cfg.Experts)
-	choice := make([]float32, cfg.Experts)
+	// Preserve the explicitly selected generic kernel. The ordinary host path
+	// needs only six candidates, not expert-wide score arrays and a full sort.
+	partial := v4BitonicTopKEnabled()
+	var raw, choice []float32
+	if partial {
+		raw = make([]float32, cfg.Experts)
+		choice = make([]float32, cfg.Experts)
+	}
+	var selected [V41RouterTopK]routePick
+	var selectedChoice [V41RouterTopK]float32
+	count := 0
 	for i, z := range logits {
 		if !finite32(z) {
 			return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("non-finite value at expert %d", i)}
@@ -122,28 +131,52 @@ func v41RouteWithNormalization(logits, correctionBias []float32, cfg v41RouterCo
 		if !finite32(score) {
 			return nil, &v4RouteError{Field: "logits", Reason: fmt.Sprintf("non-finite score at expert %d", i)}
 		}
-		raw[i] = score
-		choice[i] = score
+		selection := score
 		if len(correctionBias) != 0 {
 			bias := correctionBias[i]
 			if !finite32(bias) {
 				return nil, &v4RouteError{Field: "correction_bias", Reason: fmt.Sprintf("non-finite value at expert %d", i)}
 			}
-			choice[i] += bias
-			if !finite32(choice[i]) {
+			selection += bias
+			if !finite32(selection) {
 				return nil, &v4RouteError{Field: "selection_score", Reason: fmt.Sprintf("non-finite value at expert %d", i)}
+			}
+		}
+		if partial {
+			raw[i], choice[i] = score, selection
+			continue
+		}
+		// Experts arrive in ascending ID order. Strict comparison puts an
+		// equal score after earlier IDs, exactly like the stable full sort.
+		at := count
+		for at > 0 && selection > selectedChoice[at-1] {
+			at--
+		}
+		if at < cfg.TopK {
+			end := min(count, cfg.TopK-1)
+			copy(selected[at+1:end+1], selected[at:end])
+			copy(selectedChoice[at+1:end+1], selectedChoice[at:end])
+			selected[at] = routePick{expert: i, weight: score}
+			selectedChoice[at] = selection
+			if count < cfg.TopK {
+				count++
 			}
 		}
 	}
 
-	indices := v4TopKIndices(choice, cfg.TopK)
-
 	picks := make([]routePick, cfg.TopK)
+	if partial {
+		indices := v4TopKIndices(choice, cfg.TopK)
+		for i := range picks {
+			expert := indices[i]
+			picks[i] = routePick{expert: expert, weight: raw[expert]}
+		}
+	} else {
+		copy(picks, selected[:])
+	}
 	var sum float32
-	for i := 0; i < cfg.TopK; i++ {
-		expert := indices[i]
-		picks[i] = routePick{expert: expert, weight: raw[expert]}
-		sum += raw[expert]
+	for _, pick := range picks {
+		sum += pick.weight
 	}
 	if !finite32(sum) || sum < 0 || (!full && sum == 0) {
 		return nil, &v4RouteError{Field: "normalization", Reason: fmt.Sprintf("selected score sum must be finite and positive, got %g", sum)}

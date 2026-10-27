@@ -61,3 +61,69 @@ func iq3xxsDequantSuperBlockArch(dst []float32, blk []byte) bool {
 	}
 	return true
 }
+
+func init() {
+	iq2DequantSuperBlockArch = iq2DequantSuperBlockAVX2
+}
+
+// iq2DequantSuperBlockAVX2 reuses the existing eight-byte magnitude/scale/sign
+// kernel for the IQ2 family. Block indices/scales mirror the in-tree scalar
+// decoders in quant_kquant_iqtables.go (llama.cpp 6fe74980162af0ed5e559870d5deccafaa034e7c,
+// MIT; full original notice and unchanged codebooks are retained in that file).
+//
+// For a finite f16 scale, every scaled magnitude remains finite in float32.
+// Moving a lane's sign flip after that multiplication preserves every bit,
+// including signed zero. Nonfinite scales retain the scalar path so NaN payload
+// and sign behavior is not changed by the SIMD multiply-then-XOR formulation.
+func iq2DequantSuperBlockAVX2(dst []float32, blk []byte, kind kQuantKind) bool {
+	if qtier < tierAVX2 || len(dst) != qkK {
+		return false
+	}
+	switch kind {
+	case kindIQ2XXS, kindIQ2XS, kindIQ2S:
+	default:
+		return false
+	}
+	if len(blk) != kind.blockBytes() {
+		return false
+	}
+	half := binary.LittleEndian.Uint16(blk)
+	if half&0x7c00 == 0x7c00 {
+		return false
+	}
+	d := math.Float32frombits(F16BitsToF32Bits(half))
+	for ib32 := 0; ib32 < qkK/32; ib32++ {
+		var db [2]float32
+		var aux0, aux1 uint32
+		if kind == kindIQ2XXS {
+			aux0 = binary.LittleEndian.Uint32(blk[2+8*ib32:])
+			aux1 = binary.LittleEndian.Uint32(blk[2+8*ib32+4:])
+			db[0] = d * (0.5 + float32(aux1>>28)) * 0.25
+			db[1] = db[0]
+		} else {
+			scale := blk[len(blk)-qkK/32+ib32]
+			db[0] = d * (0.5 + float32(scale&0x0f)) * 0.25
+			db[1] = d * (0.5 + float32(scale>>4)) * 0.25
+		}
+		for l := 0; l < 4; l++ {
+			group := 4*ib32 + l
+			var grid uint64
+			var signs byte
+			switch kind {
+			case kindIQ2XXS:
+				grid = iq2XXSGrid[byte(aux0>>uint(8*l))]
+				signs = ksignsIQ2XS[(aux1>>uint(7*l))&127]
+			case kindIQ2XS:
+				q := binary.LittleEndian.Uint16(blk[2+2*group:])
+				grid = iq2XSGrid[q&511]
+				signs = ksignsIQ2XS[q>>9]
+			case kindIQ2S:
+				index := uint16(blk[2+group]) | (uint16(blk[2+qkK/4+ib32])<<uint(8-2*l))&0x300
+				grid = iq2SGrid[index]
+				signs = blk[2+qkK/8+group]
+			}
+			iq3xxsGroupAVX2(&dst[group*8], grid, &iq3xxsAVX2SignMasks[signs][0], db[l/2])
+		}
+	}
+	return true
+}

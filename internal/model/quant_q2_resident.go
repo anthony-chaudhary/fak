@@ -113,8 +113,8 @@ func dequantQ2G128Tensor(qt *q2Tensor) []float32 {
 }
 
 // q2MatRowsBatch projects a row-major token panel through one resident ternary
-// matrix without expanding the full matrix. Each token owns its output row;
-// distinct tokens can dequantize the same immutable blocks concurrently.
+// matrix without expanding the full matrix. Workers own disjoint output-row / token
+// tiles and reuse each decoded block across the tile's bounded token panel.
 func q2MatRowsBatch(qt *q2Tensor, X []float32, rows int) []float32 {
 	if rows <= 0 || len(X) != rows*qt.in {
 		panic("model: Q2_0 activation panel shape mismatch")
@@ -124,9 +124,17 @@ func q2MatRowsBatch(qt *q2Tensor, X []float32, rows int) []float32 {
 		q2MatRowsInto(qt, X, Y)
 		return Y
 	}
-	parFor(rows, currentWorkerCount(), func(lo, hi int) {
-		for row := lo; row < hi; row++ {
-			q2MatRowsRange(qt, X[row*qt.in:(row+1)*qt.in], Y[row*qt.out:(row+1)*qt.out], 0, qt.out)
+	panels := 1 + (rows-1)/q2PrefillTileRows
+	parForRange(qt.out*panels, qt.out*qt.in*rows, func(lo, hi int) {
+		for job := lo; job < hi; job++ {
+			o, first := job/panels, (job%panels)*q2PrefillTileRows
+			count := min(q2PrefillTileRows, rows-first)
+			x, y := X[first*qt.in:], Y[first*qt.out:]
+			if qt.raw != nil {
+				q2G128MatRowsBatchRange(qt, x, y, count, o, o+1)
+			} else {
+				q2G32MatRowsBatchRange(qt, x, y, count, o, o+1)
+			}
 		}
 	})
 	return Y

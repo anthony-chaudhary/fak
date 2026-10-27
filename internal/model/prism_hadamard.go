@@ -216,14 +216,53 @@ func (m *Model) prismProjectPanel(name string, x []float32, rows int) []float32 
 	}
 	y := make([]float32, len(x))
 	signs := m.prism.signs[width]
-	for row := 0; row < rows; row++ {
-		base := row * width
-		for i := 0; i < width; i++ {
-			y[base+i] = x[base+i] * float32(signs[i])
+	// Each row owns its complete signed/block-Hadamard output. Use the existing
+	// worker budget and threshold, with the already-validated panel length as an
+	// overflow-free conservative work estimate. No inner transform is split.
+	parForRange(rows, len(x), func(lo, hi int) {
+		for row := lo; row < hi; row++ {
+			base := row * width
+			for i := 0; i < width; i++ {
+				y[base+i] = x[base+i] * float32(signs[i])
+			}
+			for start := 0; start < width; start += m.prism.blockSize {
+				_ = HadamardTransform(y[base+start : base+start+m.prism.blockSize])
+			}
 		}
-		for start := 0; start < width; start += m.prism.blockSize {
-			_ = HadamardTransform(y[base+start : base+start+m.prism.blockSize])
+	})
+	return y
+}
+
+// prismPrefillGroupPanel transforms one shared input only when every target has
+// the exact same immutable transform identity. The returned panel is owned by
+// one synchronous builtin projection group, never stored on Model or Session.
+// Production SetPrismHadamard installs one state and one signs allocation per
+// declared width; equality here nevertheless checks identity, not width alone.
+func (s *Session) prismPrefillGroupPanel(names []string, x []float32, rows int) []float32 {
+	if s == nil || s.M == nil || s.Backend != nil || s.MetalQ4K || s.PhaseProfiler != nil ||
+		s.tapActive != nil || s.M.attnObs != nil || s.M.lora != nil || q8PanelBuildHook != nil ||
+		qprofOn || !qgemmGroup || qgemmMode == qgemmModeLegacy || qgemmMode == qgemmModeAccel ||
+		rows <= 1 || len(names) < 2 || s.M.prism == nil {
+		return nil
+	}
+	m, state := s.M, s.M.prism
+	width, block := state.weightWidth[names[0]], state.blockSize
+	signs := state.signs[width]
+	if width <= 0 || block <= 0 || len(signs) != width || len(x)%width != 0 || len(x)/width != rows {
+		return nil
+	}
+	for _, name := range names {
+		next := m.prism
+		if next != state || m.Qwen35OutProjTiled(name) || next.blockSize != block || next.weightWidth[name] != width {
+			return nil
+		}
+		other := next.signs[next.weightWidth[name]]
+		if len(other) != len(signs) || &other[0] != &signs[0] {
+			return nil
 		}
 	}
-	return y
+	// A single x argument is the input-identity authority for the whole group.
+	// Observed/custom routes above decline, so no intervening callback may mutate
+	// x, its transform metadata, or this read-only result between consumers.
+	return m.prismProjectPanel(names[0], x, rows)
 }

@@ -49,14 +49,21 @@ func detectAVX512VNNI() bool {
 
 func q4kExtractOnceGemmEnabled() bool {
 	// q4kGemmInto consults this only after q4kSDOTEnabled, so amd64 keeps the existing
-	// FAK_KQ_INT8/test gate and the f32 control unchanged. The arch hook below deliberately
-	// declines: the shared implementation already extracts each Q4_K row once per GEMM and
-	// feeds the resolved amd64 Q8 tile without adding another architecture-specific kernel.
+	// FAK_KQ_INT8/test gate and the f32 control unchanged.
 	return true
 }
 
 func q4kGemmExtractOnceInt8IntoArch(qt *q4kTensor, qp *q8Panel, Y []float32) bool {
-	return false
+	// Keep the full-extraction route for alternate arithmetic modes and unsupported
+	// geometry. The resolved tier includes the existing CPU and OS-state checks.
+	if qgemmMode == qgemmModeLegacy || qgemmMode == qgemmModeAccel ||
+		(qtier != tierAVX2 && qtier != tierAVX512) ||
+		qt.out <= 0 || qt.in <= 0 || qt.nblk <= 0 || qp.P <= 0 ||
+		qp.in != qt.in || qp.nblk != qt.nblk*8 {
+		return false
+	}
+	q4kGemmExtractOnceInt8IntoAMD64(qt, qp, Y)
+	return true
 }
 
 // q4kReduceRow dispatches the integer reduction to the AVX2 kernel when the resolved tier has it,

@@ -197,8 +197,9 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 	}
 	// projGroup runs a same-activation projection set, first through the one-command-buffer
 	// Metal group dispatchers (Q8 members on the shared panel, Q4_K members on the f32
-	// activation), then fills every member they left nil through proj. Both group
-	// dispatchers decline (nil) off-Metal, so the CPU route is the per-weight loop unchanged.
+	// activation), then fills every member they left nil through proj. On non-Metal
+	// builds, eligible Q8 members can share the existing CPU bulk launch. Profiling
+	// retains per-weight dispatch so its unobserved MAC accounting is unchanged.
 	projGroup := func(names []string, lz *lazyQ8) [][]float32 {
 		out := make([][]float32, len(names))
 		q8Members := 0
@@ -208,7 +209,9 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 			}
 		}
 		var Xq *q8Panel
-		if q8Members >= 2 && s.MetalQ4K && m.prism == nil {
+		cpuGroup := !qprofOn && qgemmGroup && P > 1 && P <= qgemmGroupMaxP &&
+			qgemmMode != qgemmModeLegacy && qgemmMode != qgemmModeAccel
+		if q8Members >= 2 && m.prism == nil && (s.MetalQ4K || cpuGroup) {
 			Xq = panel(lz) // built outside the gemm window so quant is not double-counted
 		}
 		t := tic()

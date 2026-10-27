@@ -192,7 +192,18 @@ func (qt *q4kTensor) requireRawCPU(op string) {
 // q4kDequantSuperBlock writes the 256 weights of one 144-byte Q4_K super-block into dst
 // (len >= 256). It is ggufload.dequantQ4K factored to one super-block, so the resident
 // dequant is arithmetically identical to the loader's f32 reference path.
+var q4kDequantSuperBlockArch func(dst []float32, blk []byte) bool
+
 func q4kDequantSuperBlock(dst []float32, blk []byte) {
+	if q4kDequantSuperBlockArch != nil && q4kDequantSuperBlockArch(dst, blk) {
+		return
+	}
+	q4kDequantSuperBlockScalar(dst, blk)
+}
+
+// q4kDequantSuperBlockScalar retains the original byte-for-byte arithmetic and
+// malformed-input behavior when an architecture declines before writing.
+func q4kDequantSuperBlockScalar(dst []float32, blk []byte) {
 	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
 	min := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 	scales := blk[4 : 4+12]
@@ -501,11 +512,18 @@ func q4kGemmRangeInt8(qt *q4kTensor, qvs []q8Vec, P int, Y []float32, lo, hi int
 	}
 }
 
+// q4kGemmF32RangeArch is installed once by a qualified architecture. A nil or
+// declined hook retains the scalar reference below, including its shape behavior.
+var q4kGemmF32RangeArch func(qt *q4kTensor, X []float32, P int, Y []float32, lo, hi int) bool
+
 // q4kGemmRange computes Y[t*out+o] for o in [lo,hi), all t in [0,P). One dequant scratch
 // buffer per worker-row (L1/L2-resident); each super-block is dequantized once per output
 // row and dotted against all P activation rows. The per-(o,t) reduction matches
 // q4kMatRowsRange exactly (same dequant, same 4-accumulator dot, same super-block order).
 func q4kGemmRange(qt *q4kTensor, X []float32, P int, Y []float32, lo, hi int) {
+	if q4kGemmF32RangeArch != nil && q4kGemmF32RangeArch(qt, X, P, Y, lo, hi) {
+		return
+	}
 	buf := make([]float32, qkK) // 256 f32, reused per (o,b); L1/L2-resident
 	rowBytes := qt.q4kRowBytes()
 	acc := make([]float32, P) // per-token accumulator, reused per output row
