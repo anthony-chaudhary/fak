@@ -1687,6 +1687,85 @@ def test_duplication_owner_caches_preserve_outputs_and_bound_work():
         cached_owner.cache_clear()
 
 
+def test_duplication_behavior_memo_is_run_local_bounded_and_exact():
+    # Tiny in-memory call-count witness; no timing threshold or corpus scan.
+    from unittest.mock import patch
+
+    assert cs._DUP_BEHAVIOR_CACHE_ENTRIES == 128
+    assert cs._DUP_BEHAVIOR_CACHE_MAX_CHARS == 8192
+    files = {name + ".go": "package fixture\n" + _dup_block(name)
+             for name in ("one", "two")}
+    sites = [(name, 3, 10) for name in files]
+    groups = [sites, sites, sites]
+    raw_fingerprint, raw_lru = cs._behavior_fingerprint, cs.lru_cache
+
+    def run(current, current_groups, entries=128, chars=8192):
+        calls, caches = [], []
+
+        def counted(text):
+            calls.append(text)
+            return raw_fingerprint(text)
+
+        def observed_lru(*args, **kwargs):
+            decorate = raw_lru(*args, **kwargs)
+
+            def observe(fn):
+                cached = decorate(fn)
+                caches.append(cached)
+                return cached
+            return observe
+
+        with patch.object(cs, "_behavior_fingerprint", counted), \
+                patch.object(cs, "lru_cache", observed_lru), \
+                patch.object(cs, "_DUP_BEHAVIOR_CACHE_ENTRIES", entries), \
+                patch.object(cs, "_DUP_BEHAVIOR_CACHE_MAX_CHARS", chars):
+            result = cs._dup_survivor_groups(current, current_groups)
+        assert len(caches) == 1
+        info = caches[0].cache_info()
+        assert info.currsize <= entries and info.maxsize == entries
+        return result, calls, info
+
+    expected, baseline_calls, _ = run(files, groups, entries=0)
+    assert expected == ([], groups) and len(baseline_calls) == 12
+    actual, calls, info = run(files, groups)
+    assert actual == expected and len(calls) == info.misses == 2
+    assert info.hits == 10 and info.currsize == 2
+
+    # No cache survives a call, including unchanged input and changed source bytes
+    # at the same path/range. Changed returns must keep the original SOFT decision.
+    assert run(files, groups)[1] == calls
+    changed = dict(files)
+    changed["two.go"] = changed["two.go"].replace("return total", "return 99")
+    revised, revised_calls, _ = run(changed, groups)
+    assert revised == run(changed, groups, entries=0)[0]
+    assert len(revised[0]) == 3 and revised[1] == [] and len(revised_calls) == 3
+
+    # Eviction only recomputes; input admission is inclusive, and oversized input
+    # is computed in full without ever entering the LRU (even for repeated text).
+    evicted, evicted_calls, info = run(files, groups, entries=1)
+    assert evicted == expected and len(evicted_calls) == 12 and info.currsize == 1
+    limit = max(map(len, calls))
+    assert run(files, groups, chars=limit)[1] == calls
+    oversized, oversized_calls, info = run(files, groups, chars=1)
+    assert oversized == expected and len(oversized_calls) == 12 and info.currsize == 0
+
+    # Ownerless fallback stays HARD; memoization never invents an owner or skips
+    # the group's subsequent classification. Preserve the pure standalone helper.
+    ownerless = dict(files, **{"unknown.go": "package fixture\nvar item = 1\n"})
+    unknown_group = [[("unknown.go", 2, 8), sites[0]]]
+    assert run(ownerless, unknown_group)[0] == run(ownerless, unknown_group, entries=0)[0]
+    assert run(ownerless, unknown_group)[0] == ([], unknown_group)
+    assert cs._behavior_equivalent_group(files, sites)
+    assert not cs._behavior_equivalent_group(changed, sites)
+
+    # Exercise the real scanner/group/filter/classify path as well, preserving the
+    # complete ordered KPI payload, not merely the number of remaining groups.
+    with patch.object(cs, "_DUP_BEHAVIOR_CACHE_ENTRIES", 0):
+        expected_kpi = cs.kpi_duplication(files)
+    assert cs.kpi_duplication(files) == expected_kpi
+    assert expected_kpi["subcategories"]["pair"] == 1
+
+
 def test_progress_snapshot_survives_phase_failure_without_payload_changes():
     from unittest.mock import patch
 

@@ -655,8 +655,11 @@ def _is_pure_builder_preamble(files: dict[str, str], sites: list[tuple[str, int,
     return True
 
 
-def _behavior_equivalent_group(files: dict[str, str], sites: list[tuple[str, int, int]]) -> bool:
+def _behavior_equivalent_group(files: dict[str, str], sites: list[tuple[str, int, int]],
+                               *, fingerprint=None) -> bool:
     """Cross-definition clones count only when signatures and bodies agree."""
+    if fingerprint is None:
+        fingerprint = _behavior_fingerprint
     owners = []
     for path, start, end in sites:
         owner = _owning_function(files[path], start, end)
@@ -665,7 +668,7 @@ def _behavior_equivalent_group(files: dict[str, str], sites: list[tuple[str, int
         signature, body = owner
         signature = re.sub(
             r"(?s)^(\s*func\s+(?:\([^)]*\)\s*)?)[A-Za-z_]\w*", r"\1NAME", signature)
-        owners.append((_behavior_fingerprint(signature), _behavior_fingerprint(body)))
+        owners.append((fingerprint(signature), fingerprint(body)))
     return len(set(owners)) <= 1
 
 
@@ -1062,6 +1065,12 @@ def _dup_group_sites(
     return group_sites
 
 
+# Bound memoization by entry count and input characters, not bytes/RSS: Python
+# strings, tokens and nested tuples have interpreter-dependent overhead.
+_DUP_BEHAVIOR_CACHE_ENTRIES = 128
+_DUP_BEHAVIOR_CACHE_MAX_CHARS = 8192
+
+
 def _dup_survivor_groups(
         files: dict[str, str],
         group_sites: list[list[tuple[str, int, int]]],
@@ -1074,6 +1083,17 @@ def _dup_survivor_groups(
     # code-only lines per file (cached) for the FIX-4 in-span loop scan, so a `for`
     # inside a string/comment never false-hits the no-loop recall guard.
     code_cache: dict[str, list[str]] = {}
+
+    # Fingerprints depend only on exact immutable text and return immutable tuples.
+    # Share repeated signatures/bodies across this invocation's groups, never runs.
+    # Oversized inputs and evicted entries still take the complete original path.
+    cached_fingerprint = lru_cache(maxsize=_DUP_BEHAVIOR_CACHE_ENTRIES)(
+        _behavior_fingerprint)
+
+    def _fingerprint(text: str):
+        if len(text) <= _DUP_BEHAVIOR_CACHE_MAX_CHARS:
+            return cached_fingerprint(text)
+        return _behavior_fingerprint(text)
 
     def _code_of(rel: str) -> list[str]:
         if rel not in code_cache:
@@ -1122,7 +1142,7 @@ def _dup_survivor_groups(
                 "builder/loop preamble (projection only): "
                 + ", ".join(f"{f}:{start}" for f, start, _ in sites))
             continue
-        if not _behavior_equivalent_group(files, sites):
+        if not _behavior_equivalent_group(files, sites, fingerprint=_fingerprint):
             soft.append(
                 "behavior-divergent token match (signature/body differ): "
                 + ", ".join(f"{f}:{start}" for f, start, _ in sites))
