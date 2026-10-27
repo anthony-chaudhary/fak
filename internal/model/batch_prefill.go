@@ -205,7 +205,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		// below starts attnOut zeroed (the saxpy accumulation requires it), and nil scratch
 		// means no pooling here — the pooled GQA-fused path is the Q8 hot lane only.
 		attnOut := make([]float32, N*nH*hd)
-		attnPrefillMultiInto(attnOut, Q, caches, baseB, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, dot, nil)
+		attnPrefillMultiBuiltinInto(attnOut, Q, caches, baseB, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, nil)
 
 		O := matMulBatch(m.tensor(lp("self_attn.o_proj.weight")), attnOut, H, nH*hd, N)
 		for row := 0; row < N; row++ {
@@ -355,11 +355,11 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		attnOut := grow(pb.attn, N*nH*hd)
 		pb.attn = attnOut
 		clear(attnOut)
-		scoreDot3 := fdot3scalar
-		if attnFdot3SIMD && B >= attnFdot3SIMDMinBatch {
-			scoreDot3 = fdot3SIMD
-		}
-		pb.scores = attnPrefillMultiGQAInto(attnOut, Q, caches, baseB, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, pb.scores)
+		// Cache append copied/packed K/V synchronously. Their projection values
+		// have no later consumer, while pb already retains both separate panels.
+		// Loan them for one joined fresh-cache decode before readonly attention;
+		// prefixes or ineligible shapes keep bounded worker-local read reuse.
+		pb.scores = attnPrefillMultiGQALoanedInto(attnOut, Q, K, V, caches, baseB, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, pb.scores)
 
 		quantizeBatchPanelInto(bs.scratch, attnOut, N, nH*hd)
 		O := grow(pb.O, N*H)

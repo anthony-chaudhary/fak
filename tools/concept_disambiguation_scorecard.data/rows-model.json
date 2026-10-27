@@ -10,7 +10,12 @@
       "distinct_from": [
         "x-attention-attnprefillinto",
         "prefillattention",
-        "v41attentionqkrope"
+        "v41attentionqkrope",
+        "attnprefillmultireadmode",
+        "attnprefillmultibuiltininto",
+        "attnprefillmultigqabuiltininto",
+        "attnprefillmultigqaloanedinto",
+        "attnprefillmultigqareadmode"
       ],
       "aliases": [],
       "grounding": "attnPrefillDispatch",
@@ -571,6 +576,101 @@
       ],
       "aliases": [],
       "grounding": "prepareV41LayerAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "attnprefillmultireadmode",
+      "canonical": "attnPrefillMultiReadMode",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Rectangular scalar per-head prefill attention implementation with an explicit builtin immutable-KV reuse mode.",
+      "distinction": "Executes the scalar head loop rather than selecting a backend. Generic callbacks keep fresh cache reads per unit; builtin mode reuses only the current batch per worker. Unlike grouped-head read mode it accepts no prepared K/V panels.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillMultiReadMode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "attnprefillmultibuiltininto",
+      "canonical": "attnPrefillMultiBuiltinInto",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Builtin F32-weight rectangular prefill entry using the original scalar dot kernel and permitting immutable KV reuse within each worker batch.",
+      "distinction": "An authority-bearing entry wrapper into scalar per-head read mode, not a grouped-head kernel, device selector, or prepared-panel loan producer.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillMultiBuiltinInto",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "attnprefillmultigqabuiltininto",
+      "canonical": "attnPrefillMultiGQABuiltinInto",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Builtin grouped-head rectangular Q8-prefill entry that delegates without caller-provided K/V loan buffers.",
+      "distinction": "Unlike the loaned entry this supplies nil loans. The delegated builtin path preserves original fdot3 selection and falls back to bounded worker-local decoded cache reuse.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillMultiGQABuiltinInto",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "attnprefillmultigqaloanedinto",
+      "canonical": "attnPrefillMultiGQALoanedInto",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Builtin grouped-head rectangular prefill entry that admits dead session-retained K/V buffers for one fresh-cache decode and selects the original builtin dot kernels.",
+      "distinction": "Unlike the non-loaned builtin wrapper this accepts caller-owned dead projection buffers; all-fresh exact geometry is required before any loan writes. Ineligible loans fall back to worker-local reads and generic callbacks do not enter this authority path.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillMultiGQALoanedInto",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "attnprefillmultigqareadmode",
+      "canonical": "attnPrefillMultiGQAReadMode",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Grouped-head rectangular prefill attention implementation supporting explicitly prepared K/V panels, bounded builtin worker-local reuse, or generic per-unit fresh reads.",
+      "distinction": "Executes grouped attention with supplied dot kernels rather than selecting a backend or validating loan ownership. Unlike scalar per-head read mode this shares grouped-head traversal and accepts already-prepared K/V panels.",
+      "distinct_from": [
+        "attnprefilldispatch"
+      ],
+      "aliases": [],
+      "grounding": "attnPrefillMultiGQAReadMode",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

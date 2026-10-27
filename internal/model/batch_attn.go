@@ -118,6 +118,16 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 // slice via saxpy, which `+=`-accumulates, so the caller MUST zero any region attnOut covers
 // before calling — load-bearing when attnOut is a reused buffer.
 func attnPrefillMultiInto(attnOut, Q []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreDot func(a, b []float32) float32, scoreScratch [][]float32) [][]float32 {
+	return attnPrefillMultiReadMode(attnOut, Q, caches, baseB, layer, P, nH, hd, w, grp, W, scale, scoreDot, scoreScratch, false)
+}
+
+// The F32-weight rectangular consumer has the same immutable-cache interval as
+// the Q8-weight builtin entry, but retains its original scalar dot and head loop.
+func attnPrefillMultiBuiltinInto(attnOut, Q []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreScratch [][]float32) [][]float32 {
+	return attnPrefillMultiReadMode(attnOut, Q, caches, baseB, layer, P, nH, hd, w, grp, W, scale, dot, scoreScratch, true)
+}
+
+func attnPrefillMultiReadMode(attnOut, Q []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreDot func(a, b []float32) float32, scoreScratch [][]float32, reuseBuiltinKV bool) [][]float32 {
 	B := len(caches)
 	units := B * P * nH
 	maxPos := 0
@@ -137,16 +147,21 @@ func attnPrefillMultiInto(attnOut, Q []float32, caches []*KVCache, baseB []int, 
 
 	work := func(wkr, nw int) {
 		scores := scoreScratch[wkr][:maxPos]
+		lastBatch := -1
+		var Kl, Vl []float32
 		for u := wkr; u < units; u += nw {
 			row := u / nH
 			h := u % nH
 			b := row / P
 			t := row % P
 			c := caches[b]
-			// Precision-aware read (#12981): on f32 attentionRows returns the cache's own
-			// K/V slices (zero copy, byte-identical); on q8 it dequantizes the layer so the
-			// lane can never read nil.
-			Kl, Vl := c.attentionRows(layer)
+			// Identical bounded loan rule to the GQA builtin below: one current
+			// batch per worker, with a fresh read for every generic-callback unit.
+			if !reuseBuiltinKV || lastBatch != b {
+				Kl, Vl = nil, nil
+				Kl, Vl = c.attentionRows(layer)
+				lastBatch = b
+			}
 			nPos := baseB[b] + t + 1
 			// SWA read-time mask: query (absolute position baseB[b]+t) over the contiguous
 			// prefill cache. j0=0 (full causal) when W<0.
@@ -180,6 +195,88 @@ func attnPrefillMultiInto(attnOut, Q []float32, caches []*KVCache, baseB []int, 
 // attnPrefillMultiGQAInto is the GQA-fused prefill analogue of attnDecodeBatch's fast path.
 // It accepts the same sliding-window W bound as attnPrefillMultiInto; W<0 is full causal.
 func attnPrefillMultiGQAInto(attnOut, Q []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreDot func(a, b []float32) float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32), scoreScratch [][]float32) [][]float32 {
+	return attnPrefillMultiGQAReadMode(attnOut, Q, caches, baseB, layer, P, nH, hd, w, grp, W, scale, scoreDot, scoreDot3, scoreScratch, false, nil, nil)
+}
+
+// attnPrefillMultiGQABuiltinInto is the ordinary rectangular Q8-prefill consumer.
+// Its caller has completed every KV append and holds those caches read-only until
+// this synchronous operation returns. Unlike the generic callback entry, only
+// the original builtin dot kernels can run here, so each worker may reuse its
+// current batch's decoded KV rows without freezing a callback's later cache read.
+func attnPrefillMultiGQABuiltinInto(attnOut, Q []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreScratch [][]float32) [][]float32 {
+	return attnPrefillMultiGQALoanedInto(attnOut, Q, nil, nil, caches, baseB, layer, P, nH, hd, w, grp, W, scale, scoreScratch)
+}
+
+// The ordinary Q8-weight caller may loan its already-retained pb.K/pb.V after
+// their synchronous cache append. They are disjoint from Q, output and cache
+// storage, and no later consumer reads their projection values. An all-fresh
+// admitted cache panel is decoded once into those existing buffers; otherwise
+// the bounded worker-local read mode remains unchanged.
+func attnPrefillMultiGQALoanedInto(attnOut, Q, keyLoan, valueLoan []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreScratch [][]float32) [][]float32 {
+	scoreDot3 := fdot3scalar
+	if attnFdot3SIMD && len(caches) >= attnFdot3SIMDMinBatch {
+		scoreDot3 = fdot3SIMD
+	}
+	if !prepareRectPrefillKVLoan(keyLoan, valueLoan, caches, baseB, layer, P, w) {
+		keyLoan, valueLoan = nil, nil
+	}
+	return attnPrefillMultiGQAReadMode(attnOut, Q, caches, baseB, layer, P, nH, hd, w, grp, W, scale, fdot, scoreDot3, scoreScratch, true, keyLoan, valueLoan)
+}
+
+// prepareRectPrefillKVLoan admits every source and both destination lengths
+// before the first write. At least one Q8 cache is required: all-f32 caches
+// already borrow their existing rows without a decode or copy.
+func prepareRectPrefillKVLoan(keys, values []float32, caches []*KVCache, baseB []int, layer, P, w int) bool {
+	B := len(caches)
+	if B == 0 || len(baseB) != B || layer < 0 || P <= 0 || w <= 0 ||
+		B > len(keys)/P/w || B > len(values)/P/w {
+		return false
+	}
+	rowElements := P * w // B*P*w is bounded by both admitted loan lengths.
+	groups := rowElements / kvQ8_0GroupSize
+	if rowElements%kvQ8_0GroupSize != 0 {
+		groups++
+	}
+	hasQ8 := false
+	for b, c := range caches {
+		if c == nil || baseB[b] != 0 || c.kvStride() != w {
+			return false
+		}
+		if c.quantized() {
+			if layer >= len(c.kQ8) || layer >= len(c.vQ8) {
+				return false
+			}
+			for _, rows := range [2]*kvPackedRow{&c.kQ8[layer], &c.vQ8[layer]} {
+				if rows.width != w || len(rows.codes) != rowElements || len(rows.scales) < groups {
+					return false
+				}
+			}
+			hasQ8 = true
+		} else if layer >= len(c.K) || layer >= len(c.V) || len(c.K[layer]) != rowElements || len(c.V[layer]) != rowElements {
+			return false
+		}
+	}
+	if !hasQ8 {
+		return false
+	}
+	work := B * rowElements
+	maxInt := int(^uint(0) >> 1)
+	if work > maxInt/2 {
+		work = maxInt
+	} else {
+		work *= 2 // Scheduling estimate only: one K and one V row.
+	}
+	parForRange(B*P, work, func(lo, hi int) {
+		for row := lo; row < hi; row++ {
+			c, pos := caches[row/P], row%P
+			c.decodeRowInto(layer, pos, true, keys[row*w:(row+1)*w])
+			c.decodeRowInto(layer, pos, false, values[row*w:(row+1)*w])
+		}
+	})
+	return true
+}
+
+func attnPrefillMultiGQAReadMode(attnOut, Q []float32, caches []*KVCache, baseB []int, layer, P, nH, hd, w, grp, W int, scale float32, scoreDot func(a, b []float32) float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32), scoreScratch [][]float32, reuseBuiltinKV bool, preparedK, preparedV []float32) [][]float32 {
 	B := len(caches)
 	nKV := nH / grp
 	units := B * P * nKV
@@ -200,16 +297,27 @@ func attnPrefillMultiGQAInto(attnOut, Q []float32, caches []*KVCache, baseB []in
 	useSaxpy3SIMD := B >= attnSaxpy3SIMDMinBatch
 
 	work := func(wkr, nw int) {
+		lastBatch := -1
+		var Kl, Vl []float32
 		for u := wkr; u < units; u += nw {
 			row := u / nKV
 			kvh := u % nKV
 			b := row / P
 			t := row % P
 			c := caches[b]
-			// Precision-aware read (#12981): on f32 attentionRows returns the cache's own
-			// K/V slices (zero copy, byte-identical); on q8 it dequantizes the layer so the
-			// lane can never read nil.
-			Kl, Vl := c.attentionRows(layer)
+			// u increases monotonically, so each worker visits a batch once.
+			// Keep only that batch's immutable read loan, not B decoded layers.
+			// On q8 this removes a whole-layer decode per later (token,KV-head)
+			// unit. Drop the prior pair before decoding the next batch. Generic
+			// callbacks retain the historical fresh read on every work unit.
+			if preparedK != nil {
+				start, end := b*P*w, (b+1)*P*w
+				Kl, Vl = preparedK[start:end:end], preparedV[start:end:end]
+			} else if !reuseBuiltinKV || lastBatch != b {
+				Kl, Vl = nil, nil
+				Kl, Vl = c.attentionRows(layer)
+				lastBatch = b
+			}
 			nPos := baseB[b] + t + 1
 			j0 := windowLoContig(nPos, baseB[b]+t, W)
 			span := nPos - j0

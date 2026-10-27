@@ -1735,3 +1735,38 @@ Private dtype-only predicate for membership in the CUDA source-declared MatMul f
 readCtx is the Go cancellation and deadline context used to bound one observational read, such as a staged diff, session presence, or canonical maintenance lease view.
 
 **Distinct from:** This is a wall-clock read budget; requestCtx scopes an entire inference request and does not identify one bounded read, while readCtx governs neither model-visible context bytes nor maintenance authorization.
+
+
+### attnPrefillMultiReadMode
+
+Rectangular scalar per-head prefill attention implementation with an explicit builtin immutable-KV reuse mode.
+
+**Distinct from:** Executes the scalar head loop rather than selecting a backend. Generic callbacks keep fresh cache reads per unit; builtin mode reuses only the current batch per worker. Unlike grouped-head read mode it accepts no prepared K/V panels.
+
+
+### attnPrefillMultiBuiltinInto
+
+Builtin F32-weight rectangular prefill entry using the original scalar dot kernel and permitting immutable KV reuse within each worker batch.
+
+**Distinct from:** An authority-bearing entry wrapper into scalar per-head read mode, not a grouped-head kernel, device selector, or prepared-panel loan producer.
+
+
+### attnPrefillMultiGQABuiltinInto
+
+Builtin grouped-head rectangular Q8-prefill entry that delegates without caller-provided K/V loan buffers.
+
+**Distinct from:** Unlike the loaned entry this supplies nil loans. The delegated builtin path preserves original fdot3 selection and falls back to bounded worker-local decoded cache reuse.
+
+
+### attnPrefillMultiGQALoanedInto
+
+Builtin grouped-head rectangular prefill entry that admits dead session-retained K/V buffers for one fresh-cache decode and selects the original builtin dot kernels.
+
+**Distinct from:** Unlike the non-loaned builtin wrapper this accepts caller-owned dead projection buffers; all-fresh exact geometry is required before any loan writes. Ineligible loans fall back to worker-local reads and generic callbacks do not enter this authority path.
+
+
+### attnPrefillMultiGQAReadMode
+
+Grouped-head rectangular prefill attention implementation supporting explicitly prepared K/V panels, bounded builtin worker-local reuse, or generic per-unit fresh reads.
+
+**Distinct from:** Executes grouped attention with supplied dot kernels rather than selecting a backend or validating loan ownership. Unlike scalar per-head read mode this shares grouped-head traversal and accepts already-prepared K/V panels.
