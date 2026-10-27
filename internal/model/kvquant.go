@@ -388,6 +388,19 @@ type KVQuantQ8_0 struct {
 
 // QuantizeKVQ8_0 quantizes src into symmetric zero-offset int8 codes per block of 32 elements.
 func QuantizeKVQ8_0(src []float32) KVQuantQ8_0 {
+	// General/decode callers may already run inside the model worker pool.
+	// Keep this entry serial; only the joined prefill bulk owner may dispatch.
+	return quantizeKVQ8_0(src, false)
+}
+
+// quantizeKVQ8_0Bulk is reserved for appendRowsBulk after its caller's projection
+// workers have joined. Blocks are independent, but each block retains the exact
+// max scan, float64 reciprocal/Round, clamp and partial-tail order below.
+func quantizeKVQ8_0Bulk(src []float32) KVQuantQ8_0 {
+	return quantizeKVQ8_0(src, true)
+}
+
+func quantizeKVQ8_0(src []float32, bulk bool) KVQuantQ8_0 {
 	q := KVQuantQ8_0{N: len(src)}
 	if len(src) == 0 {
 		return q
@@ -395,7 +408,27 @@ func QuantizeKVQ8_0(src []float32) KVQuantQ8_0 {
 	blocks := (len(src) + KVQuantQ8_0BlockSize - 1) / KVQuantQ8_0BlockSize
 	q.Scale = make([]float32, blocks)
 	q.Codes = make([]int8, len(src))
-	for b := 0; b < blocks; b++ {
+	if bulk {
+		parForRange(blocks, len(src), func(lo, hi int) {
+			quantizeKVQ8_0Blocks(src, q, lo, hi, false)
+		})
+	} else {
+		quantizeKVQ8_0Blocks(src, q, 0, blocks, false)
+	}
+	return q
+}
+
+// quantizeKVQ8_0ReservedBulk writes already-admitted, disjoint cache tail views.
+// Unlike the fresh constructor, their codes may contain retired cache bytes.
+// The caller proves exact whole-block lengths and publishes only after join.
+func quantizeKVQ8_0ReservedBulk(src []float32, q KVQuantQ8_0) {
+	parForRange(len(q.Scale), len(src), func(lo, hi int) {
+		quantizeKVQ8_0Blocks(src, q, lo, hi, true)
+	})
+}
+
+func quantizeKVQ8_0Blocks(src []float32, q KVQuantQ8_0, first, end int, clearZeroCodes bool) {
+	for b := first; b < end; b++ {
 		lo := b * KVQuantQ8_0BlockSize
 		hi := lo + KVQuantQ8_0BlockSize
 		if hi > len(src) {
@@ -413,6 +446,9 @@ func QuantizeKVQ8_0(src []float32) KVQuantQ8_0 {
 		}
 		if maxAbs == 0 {
 			q.Scale[b] = 0
+			if clearZeroCodes {
+				clear(q.Codes[lo:hi])
+			}
 			continue
 		}
 		scale := maxAbs / 127.0
@@ -428,7 +464,6 @@ func QuantizeKVQ8_0(src []float32) KVQuantQ8_0 {
 			q.Codes[i] = int8(c)
 		}
 	}
-	return q
 }
 
 // Dequantize reconstructs the f32 row-set from symmetric int8 codes.

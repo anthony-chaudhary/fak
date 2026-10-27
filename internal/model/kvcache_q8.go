@@ -1,5 +1,7 @@
 package model
 
+import "unsafe"
+
 // kvcache_q8.go — the Q8_0 KV-cache realization (#12981, epic #9430). This is the
 // ENGINE half that compute/kvprecision.go explicitly defers ("The denser KVStore
 // *realization* ... is the engine half ... and is not in this file"). It makes a
@@ -81,10 +83,82 @@ func (p *kvPackedRow) appendRowsBulk(panel []float32, rows, width int) {
 		}
 		return
 	}
-	// Block-aligned: one codec call over the whole panel.
-	q := QuantizeKVQ8_0(panel[:n])
+	// Prefill callers append only after their projection workers join. Encode
+	// independent blocks through the existing worker budget, then publish the
+	// completed codes/scales in the same order. Decode/row callers stay serial.
+	src := panel[:n]
+	if p.appendReservedBulk(src) {
+		return
+	}
+	q := quantizeKVQ8_0Bulk(src)
+	// A cold unreserved packing can take the fresh codec result after every
+	// input read and worker has completed. No input-alias authority is needed,
+	// and existing reserved capacity is never discarded by this transfer.
+	if len(src) > 0 && len(p.codes) == 0 && cap(p.codes) == 0 && len(p.scales) == 0 && cap(p.scales) == 0 {
+		p.codes, p.scales = q.Codes, q.Scale
+		return
+	}
 	p.codes = append(p.codes, q.Codes...)
 	p.scales = append(p.scales, q.Scale...)
+}
+
+// appendReservedBulk uses only capacity already owned by Reserve, clone or a
+// previous append. It does not grow either array or change allocation policy
+// when capacity is missing. All shape and alias checks precede any write; a
+// refusal leaves the original temporary-codec/append path in charge.
+func (p *kvPackedRow) appendReservedBulk(src []float32) bool {
+	if p == nil || p.width <= 0 || p.width%kvQ8_0GroupSize != 0 || len(src) == 0 ||
+		len(src)%p.width != 0 || len(p.codes)%p.width != 0 ||
+		len(p.scales) != len(p.codes)/kvQ8_0GroupSize {
+		return false
+	}
+	blocks := len(src) / kvQ8_0GroupSize
+	if len(src) > cap(p.codes)-len(p.codes) || blocks > cap(p.scales)-len(p.scales) {
+		return false
+	}
+	codes := p.codes[:len(p.codes)+len(src)]
+	scales := p.scales[:len(p.scales)+blocks]
+	q := KVQuantQ8_0{
+		N: len(src), Codes: codes[len(p.codes):len(codes):len(codes)],
+		Scale: scales[len(p.scales):len(scales):len(scales)],
+	}
+	// Ordinary projected panels are disjoint, but this private bulk entry is
+	// also used by generic helpers. Prove rather than assume that fact. The
+	// address-only spans additionally refuse malformed cross-typed cache aliases.
+	if !kvQ8BulkTailDisjoint(src, q, codes[:cap(codes)], scales[:cap(scales)]) {
+		return false
+	}
+	quantizeKVQ8_0ReservedBulk(src, q)
+	// Neither live prefix was written; both logical lengths advance only after
+	// the existing worker join. K still completes before the caller starts V.
+	p.codes, p.scales = codes, scales
+	return true
+}
+
+func kvQ8BulkTailDisjoint(src []float32, tail KVQuantQ8_0, codes []int8, scales []float32) bool {
+	maxBytes := ^uintptr(0)
+	if uintptr(len(src)) > maxBytes/4 || uintptr(len(scales)) > maxBytes/4 {
+		return false
+	}
+	input, codeTail, scaleTail := unsafe.Pointer(unsafe.SliceData(src)), unsafe.Pointer(unsafe.SliceData(tail.Codes)), unsafe.Pointer(unsafe.SliceData(tail.Scale))
+	inputBytes, codeBytes, scaleBytes := uintptr(len(src))*4, uintptr(len(tail.Codes)), uintptr(len(tail.Scale))*4
+	return !kvQ8ByteSpansOverlap(input, inputBytes, codeTail, codeBytes) &&
+		!kvQ8ByteSpansOverlap(input, inputBytes, scaleTail, scaleBytes) &&
+		!kvQ8ByteSpansOverlap(codeTail, codeBytes, unsafe.Pointer(unsafe.SliceData(scales)), uintptr(len(scales))*4) &&
+		!kvQ8ByteSpansOverlap(scaleTail, scaleBytes, unsafe.Pointer(unsafe.SliceData(codes)), uintptr(len(codes)))
+}
+
+// Only compare addresses; no dereference or uintptr-to-pointer conversion.
+// Subtraction avoids overflowing an end-address addition for either span.
+func kvQ8ByteSpansOverlap(a unsafe.Pointer, aBytes uintptr, b unsafe.Pointer, bBytes uintptr) bool {
+	if aBytes == 0 || bBytes == 0 {
+		return false
+	}
+	ax, bx := uintptr(a), uintptr(b)
+	if ax <= bx {
+		return bx-ax < aBytes
+	}
+	return ax-bx < bBytes
 }
 
 // appendPacked appends another packed row-set verbatim (used by Clone fast-paths
