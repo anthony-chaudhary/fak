@@ -3,12 +3,13 @@ package adjudicator
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
-const execCommandReadOnlyFix = "use one supported read-only invocation (git status, or PowerShell Get-Content on a literal path inside the workspace); split mixed commands and gate each separately"
+const execCommandReadOnlyFix = "use one supported read-only invocation (git status, PowerShell Get-Content on a literal workspace path, or a constrained SSH hostname probe); split mixed commands and gate each separately"
 
 var execGitStatusFlags = map[string]bool{
 	"--short": true, "-s": true,
@@ -55,6 +56,10 @@ func (a *Adjudicator) execCommandReadOnlyVerdict(c *abi.ToolCall, args map[strin
 		if err := validateExecGitStatus(fields); err != nil {
 			return execCommandReadOnlyDeny(err.Error()), true
 		}
+	case "ssh", "ssh.exe":
+		if !sshProbeExecEnvelope(args) || !PositiveSSHReadProbe(command) {
+			return execCommandReadOnlyDeny("unsupported SSH identity probe"), true
+		}
 	case "get-content":
 		if !powerShellExecCommand(args) {
 			return execCommandReadOnlyDeny("Get-Content requires the PowerShell shell"), true
@@ -66,6 +71,21 @@ func (a *Adjudicator) execCommandReadOnlyVerdict(c *abi.ToolCall, args map[strin
 		return execCommandReadOnlyDeny("unsupported executable"), true
 	}
 	return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/cli-read-only"}, true
+}
+
+func sshProbeExecEnvelope(args map[string]any) bool {
+	login, ok := args["login"].(bool)
+	if !ok || login {
+		return false
+	}
+	shell, ok := argString(args, "shell")
+	if !ok {
+		return false
+	}
+	if runtime.GOOS != "windows" {
+		return shell == "/bin/sh" || shell == "/usr/bin/sh"
+	}
+	return strings.EqualFold(strings.ReplaceAll(shell, "\\", "/"), "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
 }
 
 func execCommandTool(tool string) bool {

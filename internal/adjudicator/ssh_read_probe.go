@@ -1,13 +1,14 @@
-package gateway
+package adjudicator
 
 import (
 	"net"
+	"runtime"
 	"strings"
 )
 
-// positiveSSHReadProbe proves the local workspace effects of one constrained
+// PositiveSSHReadProbe proves the local workspace effects of one constrained
 // identity probe. It supplies no remote authorization and never skips the kernel.
-func positiveSSHReadProbe(command string) bool {
+func PositiveSSHReadProbe(command string) bool {
 	if command == "" || len(command) > 4096 {
 		return false
 	}
@@ -20,13 +21,16 @@ func positiveSSHReadProbe(command string) bool {
 	if len(words) < 2 {
 		return false
 	}
-	switch words[0] {
-	case "/usr/bin/ssh", "/bin/ssh", "C:/Windows/System32/OpenSSH/ssh.exe":
-	default:
+	if runtime.GOOS == "windows" {
+		if words[0] != "C:/Windows/System32/OpenSSH/ssh.exe" {
+			return false
+		}
+	} else if words[0] != "/usr/bin/ssh" && words[0] != "/bin/ssh" {
 		return false
 	}
 	required := map[string]string{
 		"BatchMode": "yes", "StrictHostKeyChecking": "yes", "UpdateHostKeys": "no",
+		"CheckHostIP":         "no",
 		"ClearAllForwardings": "yes", "PermitLocalCommand": "no",
 		"ProxyCommand": "none", "ProxyJump": "none", "ControlMaster": "no",
 		"ControlPath": "none", "AddKeysToAgent": "no",
