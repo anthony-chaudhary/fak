@@ -17,6 +17,137 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 )
 
+// fak-test:runtime medium est=1s lane=default
+// TestNativePreemptVictimLowestPriorityLatestArrival requires the submit-priority
+// carrier and exercises the reserved rule independently of most-recent ordering.
+func TestNativePreemptVictimLowestPriorityLatestArrival(t *testing.T) {
+	// Use the reserved wire/metric value so the baseline with the priority
+	// carrier but without this rule compiles and fails a behavioral assertion.
+	const lowestPriority = NativePreemptionVictimRule(1)
+	t.Run("selection-and-eligibility", func(t *testing.T) {
+		s := newNativeScheduler(nil, nil)
+		lane := func(name string, seq int64, priority, hits int) *schedLane {
+			ln := nativePreemptTestLane(name, seq, 10, hits, false)
+			ln.priority = priority
+			t.Cleanup(ln.cancel)
+			return ln
+		}
+		first := lane("first", 1, 0, 0)
+		second := lane("second", 2, 2, 4)
+		third := lane("third", 3, 2, 8)
+		newest := lane("newest-important", 4, -1, 6)
+		s.lanes = []*schedLane{first, second, third}
+		s.preemption.VictimRule = lowestPriority
+		wantVictim := func(want *schedLane) {
+			t.Helper()
+			idx := s.preemptibleLaneLocked()
+			if want == nil {
+				if idx != -1 {
+					t.Fatalf("victim index=%d, want no eligible victim", idx)
+				}
+				return
+			}
+			if idx < 0 || idx >= len(s.lanes) || s.lanes[idx] != want {
+				t.Fatalf("victim index=%d, want %s (priority=%d seqNo=%d)", idx, want.tool, want.priority, want.seqNo)
+			}
+		}
+		wantVictim(third) // (p0,seq1), (p2,seq2), (p2,seq3) -> seq3.
+		s.lanes = append(s.lanes, newest)
+		wantVictim(third) // A newer but more important request is not the victim.
+		s.lanes = []*schedLane{third, first, newest, second}
+		wantVictim(third) // Arrival identity, not mutable slice position, breaks ties.
+
+		// Adding the new policy must leave both existing selectors unchanged.
+		s.preemption.VictimRule = NativePreemptVictimMostRecent
+		wantVictim(newest)
+		s.preemption.VictimRule = NativePreemptVictimCostAware
+		wantVictim(first)
+		s.SetKVPreemptionPolicy(NativePreemptionPolicy{VictimRule: 255})
+		if s.preemption.VictimRule != NativePreemptVictimMostRecent {
+			t.Fatal("unknown rule no longer normalizes to most-recent")
+		}
+		wantVictim(newest)
+		s.SetKVPreemptionPolicy(NativePreemptionPolicy{})
+		wantVictim(newest)
+
+		s.SetKVPreemptionPolicy(NativePreemptionPolicy{VictimRule: lowestPriority})
+		if s.preemption.VictimRule != lowestPriority || lowestPriority.String() != "lowest-priority" || nativePreemptVictimRuleCode(lowestPriority, "") != 1 {
+			t.Fatal("priority rule was lost by policy normalization, naming, or metric encoding")
+		}
+		// MaxBlocks is still zero: selecting a policy does not arm preemption.
+		s.enforcePreemptionLocked()
+		if len(s.lanes) != 4 || len(s.preempted) != 0 {
+			t.Fatal("priority policy preempted without a positive KV budget")
+		}
+		third.kvPinned = true
+		wantVictim(second)
+		third.kvPinUntil = time.Unix(1, 0)
+		wantVictim(third) // Expired pins do not permanently make work ineligible.
+
+		canceled := lane("canceled", 10, 99, 0)
+		canceled.cancel()
+		terminal := lane("terminal", 11, 99, 0)
+		terminal.terminal = true
+		unmaterialized := lane("unmaterialized", 12, 99, 0)
+		unmaterialized.sess = nil
+		inflight := lane("inflight", 13, 99, 0)
+		inflight.inflightSess = inflight.sess
+		inflight.statsSess = &model.Session{}
+		inflight.sess = inflight.statsSess
+		prefilling := lane("prefilling", 14, 99, 0)
+		prefilling.state = schedLanePrefilling
+		ineligible := []*schedLane{nil, canceled, terminal, unmaterialized, inflight, prefilling}
+		s.lanes = append(s.lanes, ineligible...)
+		wantVictim(third)
+		if idx := s.prefillSafePreemptibleLaneLocked(); idx < 0 || s.lanes[idx] != third {
+			t.Fatalf("live prefill-safe selector chose index %d, want third", idx)
+		}
+		s.lanes = ineligible
+		wantVictim(nil)
+		s.lanes = []*schedLane{third}
+		wantVictim(nil) // The last running lane keeps the historical progress floor.
+	})
+
+	// The selected rule must reach the native pressure loop without changing
+	// either existing KV round-trip mechanism or the resulting token streams.
+	m := model.NewSynthetic(SyntheticConfig())
+	calls := issue31Calls()
+	calls[0].Meta = map[string]string{"priority": "2"}
+	calls[1].Meta = map[string]string{"priority": "-1"}
+	want := drainIssue31Scheduler(t, m, calls, NativePreemptionPolicy{})
+	for _, tc := range []struct {
+		name string
+		mode NativePreemptionMode
+	}{
+		{name: "swap", mode: NativePreemptSwap},
+		{name: "recompute", mode: NativePreemptRecompute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, stats := drainIssue31SchedulerWithStats(t, m, calls, NativePreemptionPolicy{
+				Mode: tc.mode, VictimRule: lowestPriority, MaxBlocks: 1, BlockTokens: 128,
+			})
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("priority preemption changed generated tokens: got %v, want %v", got, want)
+			}
+			if stats.Preemptions != 1 || stats.Readmitted != 1 || stats.SwappedOut != 0 || stats.CostAwareVictims != 0 || stats.VictimRule != lowestPriority || stats.VictimReason != "lowest-priority" {
+				t.Fatalf("priority pressure-loop stats=%+v, want one priority preemption/readmit", stats)
+			}
+			var metrics strings.Builder
+			writeNativePreemptionMetrics(&metrics, stats)
+			if !strings.Contains(metrics.String(), "fak_sched_preempt_victim_rule 1\n") {
+				t.Fatal("priority pressure-loop metric did not report rule 1")
+			}
+			if tc.mode == NativePreemptSwap {
+				if stats.SwapPreemptions != 1 || stats.SwapBytes == 0 || stats.SwapRestoredBytes != stats.SwapBytes || stats.RecomputeCount != 0 {
+					t.Fatalf("priority swap round trip stats=%+v", stats)
+				}
+			} else if stats.RecomputeCount != 1 || stats.SwapBytes != 0 || stats.SwapRestoredBytes != 0 {
+				t.Fatalf("priority recompute round trip stats=%+v", stats)
+			}
+		})
+	}
+}
+
 // TestNativeSchedulerPreemptionSwapAndRecomputePreserveOutput is the issue-#31
 // scheduler witness: under a paged-KV block budget, admitting two lanes exhausts the
 // single-block budget, so the loop preempts one lane, keeps making forward progress on

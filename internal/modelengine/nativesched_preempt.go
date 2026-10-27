@@ -5,10 +5,11 @@ package modelengine
 // NativeScheduler keeps this disabled until a host sets a positive MaxBlocks. That positive
 // bound is the structural paged-KV dependency: without a paged block budget there is no page
 // unit to reclaim, so the scheduler behaves exactly as it did before. When armed, the loop
-// checks the running set at step boundaries and preempts the most-recently-admitted lane until
-// the live block estimate fits. Swap mode serializes the victim's real KV bytes through the
-// model.PagedKV swap blob; recompute mode drops KV and re-prefills prompt+generated tokens on
-// readmit. In both modes the lane's token stream stays open and resumes after readmit.
+// checks the running set at step boundaries and uses the configured victim rule (most-recent
+// by default) until the live block estimate fits. Swap serializes the victim's real KV
+// bytes through the model.PagedKV swap blob; recompute drops KV and re-prefills the
+// prompt+generated tokens on readmit. In both modes the lane's token stream stays open
+// and resumes after readmit.
 
 import (
 	"fmt"
@@ -23,9 +24,10 @@ import (
 )
 
 const (
-	nativePreemptVictimMostRecent = "most-recent"
-	nativePreemptVictimCostAware  = "cost-aware"
-	nativeKVBMDefaultPinTTL       = time.Minute
+	nativePreemptVictimMostRecent     = "most-recent"
+	nativePreemptVictimLowestPriority = "lowest-priority"
+	nativePreemptVictimCostAware      = "cost-aware"
+	nativeKVBMDefaultPinTTL           = time.Minute
 )
 
 // NativePreemptionMode selects how the scheduler releases a victim's KV under pressure.
@@ -50,6 +52,9 @@ const (
 	// NativePreemptVictimMostRecent preserves the pre-#2239 behavior: preempt the newest
 	// running lane first.
 	NativePreemptVictimMostRecent NativePreemptionVictimRule = 0
+	// NativePreemptVictimLowestPriority chooses the largest submit priority,
+	// then the latest arrival. Lower priority values are more important.
+	NativePreemptVictimLowestPriority NativePreemptionVictimRule = 1
 	// NativePreemptVictimCostAware uses compute.PickEvictionVictim over scheduler-local
 	// KVBM hints. Metric code 1 is already used by the gateway preemptor for
 	// lowest-priority, so native cost-aware is exported as 2.
@@ -58,6 +63,8 @@ const (
 
 func (r NativePreemptionVictimRule) String() string {
 	switch r {
+	case NativePreemptVictimLowestPriority:
+		return nativePreemptVictimLowestPriority
 	case NativePreemptVictimCostAware:
 		return nativePreemptVictimCostAware
 	default:
@@ -127,7 +134,7 @@ func (s *NativeScheduler) SetKVPreemptionPolicy(p NativePreemptionPolicy) {
 		p.Mode = NativePreemptSwap
 	}
 	switch p.VictimRule {
-	case NativePreemptVictimMostRecent, NativePreemptVictimCostAware:
+	case NativePreemptVictimMostRecent, NativePreemptVictimLowestPriority, NativePreemptVictimCostAware:
 	default:
 		p.VictimRule = NativePreemptVictimMostRecent
 	}
@@ -221,6 +228,8 @@ func writeNativeCounter(b *strings.Builder, name, help string, v int64) {
 
 func nativePreemptVictimRuleCode(rule NativePreemptionVictimRule, reason string) int {
 	switch rule {
+	case NativePreemptVictimLowestPriority:
+		return int(NativePreemptVictimLowestPriority)
 	case NativePreemptVictimCostAware:
 		return int(NativePreemptVictimCostAware)
 	case NativePreemptVictimMostRecent:
@@ -229,6 +238,8 @@ func nativePreemptVictimRuleCode(rule NativePreemptionVictimRule, reason string)
 	switch reason {
 	case "", nativePreemptVictimMostRecent:
 		return int(NativePreemptVictimMostRecent)
+	case nativePreemptVictimLowestPriority:
+		return int(NativePreemptVictimLowestPriority)
 	case nativePreemptVictimCostAware:
 		return int(NativePreemptVictimCostAware)
 	default:
@@ -447,11 +458,37 @@ func (s *NativeScheduler) enforcePreemptionLocked() {
 
 func (s *NativeScheduler) preemptibleLaneLocked() int {
 	switch s.preemption.VictimRule {
+	case NativePreemptVictimLowestPriority:
+		return s.lowestPriorityPreemptibleLaneLocked()
 	case NativePreemptVictimCostAware:
 		return s.costAwarePreemptibleLaneLocked()
 	default:
 		return s.mostRecentPreemptibleLaneLocked()
 	}
+}
+
+// lowestPriorityPreemptibleLaneLocked adapts vLLM's max(priority, arrival_time)
+// victim rule (vllm/v1/core/sched/scheduler.py:735-741@975dca5, Apache-2.0).
+// Only resident decode lanes outside model execution are eligible; an active
+// KVBM pin protects a lane regardless of its submitted priority.
+func (s *NativeScheduler) lowestPriorityPreemptibleLaneLocked() int {
+	if len(s.lanes) <= 1 {
+		return -1
+	}
+	best := -1
+	now := time.Now()
+	for i, ln := range s.lanes {
+		if ln == nil || ln.terminal || ln.ctx.Err() != nil || ln.sess == nil ||
+			ln.state != schedLaneDecode || ln.inflightSess != nil || ln.sess == ln.statsSess || ln.kvPinActive(now) {
+			continue
+		}
+		if best < 0 || ln.priority > s.lanes[best].priority ||
+			(ln.priority == s.lanes[best].priority && (ln.seqNo > s.lanes[best].seqNo ||
+				(ln.seqNo == s.lanes[best].seqNo && ln.tool < s.lanes[best].tool))) {
+			best = i
+		}
+	}
+	return best
 }
 
 func (s *NativeScheduler) mostRecentPreemptibleLaneLocked() int {
