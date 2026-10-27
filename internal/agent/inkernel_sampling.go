@@ -62,6 +62,9 @@ type samplerWorkspace struct {
 	vals   []float64
 	eff    []float32
 	sorter probSorter
+	// mass is the exact post-truncation denominator passed to the most recent
+	// stochastic draw. Keep it rather than re-summing or re-normalizing the row.
+	mass float64
 	// nonFinite reports that the last sampled row held NaN or +Inf, or had no
 	// finite logit, so the drawn token is not a sample of the model output.
 	nonFinite bool
@@ -237,6 +240,7 @@ func sampleLogitsMinPCoreWS(logits []float32, temp, topP float64, topK int, minP
 		sum = minPTruncate(probs, sum, minP)
 	}
 	sum = w.applyCPUSamplingTruncation(probs, sum, topP, topK)
+	w.mass = sum
 	if !hasCoin {
 		coin = rng.Float64()
 	}
@@ -374,6 +378,37 @@ func sampleLogitsWithPenaltyWS(logits []float32, temp, topP float64, topK int, b
 
 func sampleLogitsWithPenaltyCoinWS(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, coin float64, w *samplerWorkspace) int {
 	return sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, 0, bias, frequencyPenalty, presencePenalty, counts, nil, coin, true, w)
+}
+
+// sampleLogitsWithPenaltyDistributionWS exposes the served sampler's target row
+// without advancing any RNG. It runs the actual sampler with an explicit zero
+// coin, discards that draw, and retains its float64 weights and exact returned
+// truncation mass. No log/exp round trip, probability conversion, or second
+// normalization is performed. Sampling Weights with Mass via sampleProbabilityRow
+// therefore uses the same strict CDF boundaries as the ordinary sampler.
+//
+// Temperature, min-p, top-k, top-p, bias and penalty behavior stays with the
+// existing core. Greedy rows become a point mass at its existing greedy winner;
+// malformed rows are refused rather than exposing the sampler's invalid sentinel.
+// Weights is token-indexed scratch borrowed until the next use of w. A consumer
+// retaining multiple target positions must copy it before processing another row.
+// This row-only helper cannot advance grammar state or hypothetical prefix counts:
+// a speculative serving caller must separately admit those stateful transforms.
+func sampleLogitsWithPenaltyDistributionWS(logits []float32, temp, topP float64, topK int, minP float64, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, w *samplerWorkspace) (model.SpecProbabilityRow, error) {
+	token := sampleLogitsWithPenaltyCoreWS(logits, temp, topP, topK, minP, bias, frequencyPenalty, presencePenalty, counts, nil, 0, true, w)
+	if w.nonFinite {
+		return model.SpecProbabilityRow{}, ErrNonFiniteLogits
+	}
+	if temp <= 0 {
+		w.resize(len(logits))
+		clear(w.probs)
+		w.probs[token] = 1
+		w.mass = 1
+	}
+	if !(w.mass > 0) || math.IsInf(w.mass, 0) {
+		return model.SpecProbabilityRow{}, model.ErrSpecRejectionProbability
+	}
+	return model.SpecProbabilityRow{Weights: w.probs, Mass: w.mass}, nil
 }
 
 // sampleLogitsWithPenaltyCoreWS is the served decode lane's sampler: logit_bias and

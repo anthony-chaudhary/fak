@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"time"
 
@@ -21,6 +22,24 @@ import (
 // zero because none of them can drop the most probable token.
 func (p *InKernelPlanner) greedySpeculativeRequestEligible(temp float64, logitBias model.LogitBias, freqPenalty, presPenalty float64) bool {
 	return p.speculativeEngine != nil && temp <= 0 && len(logitBias) == 0 && freqPenalty == 0 && presPenalty == 0
+}
+
+// sampledSpeculativeRequestEligible admits only the request-owned native MTP
+// producer. Generic proposal factories and stateful score transforms retain the
+// target-only route; request seed/grammar/vision fences are checked by the caller.
+// Target truncation remains the host sampler's policy, not the draft sampler's.
+func (p *InKernelPlanner) sampledSpeculativeRequestEligible(temp float64, logitBias model.LogitBias, freqPenalty, presPenalty float64) bool {
+	return p.VulkanMTPEnabled() && p.vulkanMTPDraftFactory == nil &&
+		temp > 0 && float32(temp) > 0 && !math.IsInf(float64(float32(temp)), 0) &&
+		len(logitBias) == 0 && freqPenalty == 0 && presPenalty == 0
+}
+
+func sampledMTPRequestKey(seed int64) uint64 {
+	key := model.SplitMix64(uint64(seed))
+	if key == 0 {
+		key = 1 // zero is the planner's explicit unkeyed sentinel
+	}
+	return key
 }
 
 // SetSpeculativeEngine configures the speculative decoding engine for this planner.
@@ -426,6 +445,25 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	}()
 	p.configureNativeSession(s)
 
+	// Choose the request stream once, before constructing the draft. The host
+	// fallback retains its own RNG; no probability callback consumes either RNG.
+	requestSeed := p.requestSampleSeed(ctx, temp)
+	sampled := p.sampledSpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty)
+	var sampledDraft *model.Qwen35MTPDraftSession
+	newDraft := func(target *model.Session) (model.ProposalGenerator, func(), error) {
+		if !sampled {
+			return p.newVulkanMTPProposalGenerator(target, p.specDraftDepth)
+		}
+		// q is an untruncated draft policy. Target top-p/top-k/min-p are applied
+		// only to p by the canonical host callback, never approximated in q.
+		cfg := model.Qwen38SamplerConfig{Temperature: float32(temp), TopP: 1, Seed: uint64(requestSeed)}
+		d, err := model.NewQwen35MTPDraftSessionWithConfig(target, model.Qwen35MTPDraftConfig{Depth: p.specDraftDepth, SamplerConfig: &cfg})
+		if err != nil {
+			return nil, nil, err
+		}
+		sampledDraft = d
+		return nil, d.Close, nil
+	}
 	eng := p.speculativeEngine
 	// Each request begins with a clean rolling acceptance window so a prior
 	// request's degraded draft head cannot force this one onto serial decode.
@@ -433,12 +471,12 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	proposalGenerator := eng.PrimaryGenerator()
 	if mtpExecution != nil {
 		var closeDraft func()
-		proposalGenerator, closeDraft, err = p.newVulkanMTPProposalGenerator(s, p.specDraftDepth)
+		proposalGenerator, closeDraft, err = newDraft(s)
 		if err != nil && closeDraft != nil {
 			closeDraft()
 			closeDraft = nil
 		}
-		if err != nil && matched > 0 {
+		if err != nil && matched > 0 && (!sampled || errors.Is(err, model.ErrQwen35MTPSpecDecodeUnsupported)) {
 			// A snapshot created before raw-hidden capture was enabled cannot bind a
 			// resident MTP draft. Rebuild from a fresh target before prompt prefill;
 			// the failed constructor leaves the restored target unchanged.
@@ -449,13 +487,13 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			cachedLogits = nil
 			sourceTier = radixkv.SnapshotTierMiss
 			skipExactDeviceL1Readmission = false
-			proposalGenerator, closeDraft, err = p.newVulkanMTPProposalGenerator(s, p.specDraftDepth)
+			proposalGenerator, closeDraft, err = newDraft(s)
 			if err != nil && closeDraft != nil {
 				closeDraft()
 				closeDraft = nil
 			}
 		}
-		if err == nil && proposalGenerator == nil {
+		if err == nil && proposalGenerator == nil && sampledDraft == nil {
 			if closeDraft != nil {
 				closeDraft()
 				closeDraft = nil
@@ -464,6 +502,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 		if err != nil {
 			mtpExecution.DowngradeReason = vulkanMTPDowngradeConstructorRefused
+			if sampled {
+				return inKernelGenerateResult{}, err
+			}
 			proposalGenerator = nil
 			err = nil
 		} else if closeDraft != nil {
@@ -555,7 +596,8 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
 	}
-	rng := rand.New(rand.NewSource(p.requestSampleSeed(ctx, temp)))
+	rng := rand.New(rand.NewSource(requestSeed))
+	requestKey, stepOffset := sampledMTPRequestKey(requestSeed), 0
 	minP := nativeMinPFromContext(ctx)
 
 	stopped := false
@@ -578,6 +620,163 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		attempt.close(gen, err, ctx.Err(), diagnosticNow)
 		if err = ctx.Err(); err != nil {
 			break
+		}
+
+		if sampledDraft != nil {
+			diagnosticStart := diagnosticNow()
+			roundStart := time.Now()
+			attempt.begin(diagnosticStart, gen)
+			// Quantized targets reuse their logits buffer during verification.
+			before := append([]float32(nil), curLogits...)
+			sampledRound, beginErr := sampledDraft.BeginSampledRoundWithTargetProbabilities(ctx, committed, before, requestKey, stepOffset, func(row []float32) (model.SpecProbabilityRow, error) {
+				return sampleLogitsWithPenaltyDistributionWS(row, temp, topP, topK, minP, nil, 0, 0, nil, &samplingWS)
+			})
+			if beginErr != nil {
+				if !errors.Is(beginErr, model.ErrQwen35MTPSampledNoProposal) {
+					attempt.verificationFailed(beginErr)
+					err = beginErr
+					break
+				}
+				// This typed refusal certifies no proposal draw and clean rollback.
+				// No other sampled error may discard a prefix and restart serially.
+				attempt.emptyProposal()
+				mtpExecution.DowngradeReason = vulkanMTPDowngradeEmptyProposal
+				sampledDraft = nil
+			} else {
+				plan, targetRows := sampledRound.Plan(), sampledRound.TargetLogits()
+				proposed, accepted := len(targetRows), len(plan.AcceptedTokens)
+				// These host decisions are real even if a later stop suppresses
+				// their emission. Do not label this host policy device sampling.
+				for range accepted + 1 {
+					observeHostSampledToken(p.backend)
+				}
+				attempt.draftFinished(sampledRound.DraftElapsed(), nil)
+				mtpExecution.Used = true
+				mtpExecution.ProposalRounds++
+				mtpExecution.ProposedTokens += proposed
+				// Unlike the legacy greedy seam, Begin owns drafting as well as
+				// verification. Keep the whole measured span; do not manufacture
+				// a verification-only start by subtracting overlapping timings.
+				round.open(roundStart, proposed, accepted, gen)
+				emitted, roundStopped := 0, false
+				for i, tok := range plan.AcceptedTokens {
+					if err = ctx.Err(); err != nil {
+						roundStopped = true
+						break
+					}
+					if tok < 0 || stops[tok] {
+						stopped, roundStopped = true, true
+						break
+					}
+					choice := before
+					if i > 0 {
+						choice = targetRows[i-1]
+					}
+					if err = measurement.record(choice, tok); err != nil {
+						roundStopped = true
+						break
+					}
+					emitStopped := emit != nil && emit(tok)
+					gen++
+					committed = append(committed, tok)
+					emitted++
+					round.acceptedEmitted++
+					if err = measurement.recordDecodeTrace(gen, tok); err != nil {
+						roundStopped = true
+						break
+					}
+					if emitStopped || gen == maxNew {
+						stopped, roundStopped = emitStopped, true
+						break
+					}
+				}
+				if emitted == 0 && !roundStopped {
+					if err = ctx.Err(); err != nil {
+						roundStopped = true
+					} else if accepted == 0 {
+						if plan.CorrectionToken < 0 || stops[plan.CorrectionToken] {
+							stopped, roundStopped = true, true
+						} else if measurement != nil && !measurement.inferenceDisabled {
+							// Validate without publishing a measurement before commit.
+							_, err = chosenTokenLogprob(before, plan.CorrectionToken)
+							roundStopped = err != nil
+						}
+					}
+				}
+				if emitted == 0 && roundStopped {
+					err = errors.Join(err, sampledRound.Abort())
+					break
+				}
+				// Once output escaped, cancellation must not undo its accepted
+				// prefix. Commit is deliberately noncancelable and repairs exactly
+				// that prefix, including stop/maxNew/measurement-error exits.
+				var commitErr error
+				curLogits, commitErr = sampledRound.Commit(emitted)
+				if commitErr != nil {
+					attempt.verificationFailed(commitErr)
+					err = errors.Join(err, commitErr)
+					break
+				}
+				stepOffset = plan.NextStep
+				attempt.outcome = speculativeAttemptCompleted
+				receipt := sampledRound.VerificationReceipt()
+				mtpExecution.AcceptedTokens += accepted
+				mtpExecution.RejectedTokens += proposed - accepted
+				mtpExecution.RollbackTokens += proposed - emitted
+				mtpExecution.TargetOperations += receipt.TargetVerificationOperations
+				mtpExecution.TargetDecodeSteps += receipt.TargetDecodeSteps
+				mtpExecution.FullTargetReplaySteps += receipt.FullTargetReplaySteps
+				mtpExecution.RecurrentRepairTokens += receipt.RecurrentRepairTokens
+				if mtpExecution.ClosedRoundTotals == nil {
+					mtpExecution.ClosedRoundTotals = &VulkanMTPClosedRoundTotals{Scope: "closed-successfully-verified-rounds-only"}
+				}
+				round.totals = mtpExecution.ClosedRoundTotals
+				round.diagnosticStart, round.diagnosticNow = diagnosticStart, diagnosticNow
+				round.draftElapsed = sampledRound.DraftElapsed()
+				if len(mtpExecution.RoundDiagnostics) < vulkanMTPDiagnosticRoundLimit {
+					round.diagnostic = newVulkanMTPRoundDiagnostic(mtpExecution.ProposalRounds, round.genAtOpen, proposed, accepted, sampledRound.DraftElapsed(), &receipt)
+					round.diagnostic.AcceptedEmittedTokens = emitted
+					mtpExecution.RoundDiagnostics = append(mtpExecution.RoundDiagnostics, round.diagnostic)
+				} else {
+					mtpExecution.RoundDiagnosticsDropped++
+				}
+				if roundStopped || gen == maxNew {
+					eng.RecordVerificationOutcome(proposed, accepted, proposed-emitted, false)
+					break
+				}
+				if err = ctx.Err(); err != nil {
+					eng.RecordVerificationOutcome(proposed, accepted, proposed-emitted, false)
+					break
+				}
+				bonus := plan.CorrectionToken
+				if bonus < 0 || stops[bonus] {
+					stopped = true
+					eng.RecordVerificationOutcome(proposed, accepted, proposed-emitted, false)
+					break
+				}
+				if err = measurement.record(curLogits, bonus); err != nil {
+					eng.RecordVerificationOutcome(proposed, accepted, proposed-emitted, false)
+					break
+				}
+				emitStopped := emit != nil && emit(bonus)
+				gen++
+				committed = append(committed, bonus)
+				round.bonusEmitted = true
+				if round.diagnostic != nil {
+					round.diagnostic.BonusEmitted = true
+				}
+				err = measurement.recordDecodeTrace(gen, bonus)
+				eng.RecordVerificationOutcome(proposed, accepted, proposed-emitted, true)
+				// The correction was not evaluated by Commit. Step it exactly
+				// once, even on a terminal emission, so resident state contains
+				// the published prefix before the session is closed.
+				curLogits = s.Step(bonus)
+				if err != nil || emitStopped || gen == maxNew {
+					stopped = emitStopped
+					break
+				}
+				continue
+			}
 		}
 
 		// Native rolling acceptance fallback (Qwen3.8 MTP): once the engine's
@@ -879,6 +1078,8 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 // speculativeRoundObservation carries one verified draft round to enginestep. The
 // round's emitted tokens are only known once its accept/bonus loop finishes, so
 // it is opened after verification and closed at the next round or decode exit.
+// Greedy timing starts at verification; the sampled transaction's conservative
+// span also includes drafting because Begin owns both phases.
 type speculativeRoundObservation struct {
 	start              time.Time
 	proposed, accepted int
@@ -929,7 +1130,7 @@ func (r *speculativeRoundObservation) close(gen int) {
 		r.diagnostic.EmittedTokens = gen - r.genAtOpen
 		r.diagnostic.RoundClosed = true
 	}
-	// Preserve the existing verify-through-advance controller/metric input.
+	// The caller supplies the actual measured start for its transaction scope.
 	enginestep.Default.ObserveSpeculativeRound(r.proposed, r.accepted, gen-r.genAtOpen, time.Since(r.start))
 }
 

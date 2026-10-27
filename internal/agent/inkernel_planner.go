@@ -1740,7 +1740,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 		} else if coord != nil {
 			targetOnly = true
 		}
-		if !targetOnly && p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
+		if !targetOnly && (p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) || p.sampledSpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty)) {
 			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
 				return inKernelGenerateResult{}, err
 			}
@@ -1774,6 +1774,12 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err == nil {
 		return res, nil
+	}
+	if res.vulkanMTP != nil && p.sampledSpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty) {
+		// A sampled transaction failure does not certify an unobserved,
+		// replayable proposal. Only its explicit no-proposal verdict permits
+		// serial fallback; do not restart it through the outer OOM retry seam.
+		return res, err
 	}
 	if retry, retryGate := p.admitDeviceOOMRetry(ctx, err, len(ids), maxNew); !retry {
 		return res, retryGate
