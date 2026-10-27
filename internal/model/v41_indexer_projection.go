@@ -165,7 +165,11 @@ func (m *Model) v41IndexRowsWithPanelRow(l, pos int, qLat, hidden []float32, key
 			return nil, err
 		}
 	}
-	if err := m.v41IndexRoPEPublished(l, pos, q, nHeads, ops.indexRoPEFunc(), publish); err != nil {
+	var observe func(string)
+	if ops != nil && ops.owner != nil {
+		observe = ops.owner.observeHostArm
+	}
+	if err := m.v41IndexRoPEPublishedObserved(l, pos, q, nHeads, ops.indexRoPEFunc(), publish, observe); err != nil {
 		return nil, err
 	}
 	weights := panel.weights
@@ -185,7 +189,7 @@ func (m *Model) v41IndexRowsWithPanelRow(l, pos int, qLat, hidden []float32, key
 	}
 	opened := m.v41NowNanos()
 	defer m.v41NoteIndexerScoring(opened)
-	return v41IndexRowsSelectedWithBorrow(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health, ops.indexSelectFunc(), borrow)
+	return v41IndexRowsSelectedWithBorrowObserved(l, q, flat, weights, nHeads, dim, len(keys), topKBlocks, blockSize, cfg.IndexTopK, score, health, ops.indexSelectFunc(), borrow, observe)
 }
 
 // v41CompressedPublicationRoPE runs only on a producer's fresh rows, after the
@@ -200,6 +204,10 @@ func (m *Model) v41CompressedPublicationRoPE(l, pos int, latent, indexKey []floa
 }
 
 func (m *Model) v41CompressedPublicationRoPEWithDevice(l, pos int, latent, indexKey []float32, rotate v41CompressedPublicationRoPEFunc) error {
+	return m.v41CompressedPublicationRoPEWithDeviceObserved(l, pos, latent, indexKey, rotate, nil)
+}
+
+func (m *Model) v41CompressedPublicationRoPEWithDeviceObserved(l, pos int, latent, indexKey []float32, rotate v41CompressedPublicationRoPEFunc, observe func(string)) error {
 	cfg := m.Cfg
 	rd := cfg.QKRopeHeadDim
 	if pos < 0 || rd <= 0 || rd%2 != 0 || rd > cfg.HeadDim || len(latent) != cfg.HeadDim {
@@ -237,9 +245,12 @@ func (m *Model) v41CompressedPublicationRoPEWithDevice(l, pos int, latent, index
 		copy(latent[len(latent)-rd:], finished[(rows-1)*rd:])
 		return nil
 	}
+	if observe != nil {
+		observe("compressed-publication-rope")
+	}
 	if indexKey != nil {
 		applyRopeTailInterleaved(indexKey, cos, sin, rd)
-		tail, err := v41IndexBF16Copyback(l, "indexer.k_norm.weight", "rotary", indexKey[len(indexKey)-rd:])
+		tail, err := v41IndexBF16CopybackIntoObserved(l, "indexer.k_norm.weight", "rotary", indexKey[len(indexKey)-rd:], make([]float32, rd), observe)
 		if err != nil {
 			return err
 		}
@@ -248,6 +259,9 @@ func (m *Model) v41CompressedPublicationRoPEWithDevice(l, pos int, latent, index
 	applyRopeTailInterleaved(latent, cos, sin, rd)
 	for i := len(latent) - rd; i < len(latent); i++ {
 		latent[i] = v41RoundBF16(latent[i])
+	}
+	if observe != nil {
+		observe("bf16-boundary")
 	}
 	return nil
 }
@@ -261,6 +275,10 @@ func (m *Model) v41IndexRoPEWithDevice(l, pos int, values []float32, heads int, 
 }
 
 func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, rotate v41IndexRoPEFunc, publish v41BF16BoundaryFunc) error {
+	return m.v41IndexRoPEPublishedObserved(l, pos, values, heads, rotate, publish, nil)
+}
+
+func (m *Model) v41IndexRoPEPublishedObserved(l, pos int, values []float32, heads int, rotate v41IndexRoPEFunc, publish v41BF16BoundaryFunc, observe func(string)) error {
 	cfg := m.Cfg
 	dim, rd := cfg.IndexHeadDim, cfg.QKRopeHeadDim
 	width, valid := checkedMulInt(heads, dim)
@@ -286,19 +304,22 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 				return fail(errV41TailRoPEResult)
 			}
 		}
-		if err := v41IndexTailsBF16(l, owned, heads, dim, rd, publish); err != nil {
+		if err := v41IndexTailsBF16Observed(l, owned, heads, dim, rd, publish, observe); err != nil {
 			return fail(err)
 		}
 		copy(values, owned)
 		return nil
 	}
 
+	if observe != nil {
+		observe("indexer-query-rope")
+	}
 	if publish == nil {
 		rounded := make([]float32, rd)
 		for h := 0; h < heads; h++ {
 			head := values[h*dim : (h+1)*dim]
 			applyRopeTailInterleaved(head, cos, sin, rd)
-			tail, err := v41IndexBF16CopybackInto(l, "indexer.wq_b.weight", "rotary", head[dim-rd:], rounded)
+			tail, err := v41IndexBF16CopybackIntoObserved(l, "indexer.wq_b.weight", "rotary", head[dim-rd:], rounded, observe)
 			if err != nil {
 				return err
 			}
@@ -309,7 +330,7 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 	for h := 0; h < heads; h++ {
 		applyRopeTailInterleaved(values[h*dim:(h+1)*dim], cos, sin, rd)
 	}
-	return v41IndexTailsBF16(l, values, heads, dim, rd, publish)
+	return v41IndexTailsBF16Observed(l, values, heads, dim, rd, publish, observe)
 }
 
 // v41IndexTailsBF16 publishes every head's rotary tail as one row and writes the
@@ -317,6 +338,10 @@ func (m *Model) v41IndexRoPEPublished(l, pos int, values []float32, heads int, r
 // publication one call-local scratch is reused across heads. Each head copies
 // back only after its complete tail validates, preserving partial-error state.
 func v41IndexTailsBF16(l int, values []float32, heads, dim, rd int, publish v41BF16BoundaryFunc) error {
+	return v41IndexTailsBF16Observed(l, values, heads, dim, rd, publish, nil)
+}
+
+func v41IndexTailsBF16Observed(l int, values []float32, heads, dim, rd int, publish v41BF16BoundaryFunc, observe func(string)) error {
 	if publish == nil {
 		var scratch []float32
 		for h := 0; h < heads; h++ {
@@ -324,7 +349,7 @@ func v41IndexTailsBF16(l int, values []float32, heads, dim, rd int, publish v41B
 			if h == 0 {
 				scratch = make([]float32, len(tail))
 			}
-			rounded, err := v41IndexBF16CopybackInto(l, "indexer.wq_b.weight", "rotary", tail, scratch)
+			rounded, err := v41IndexBF16CopybackIntoObserved(l, "indexer.wq_b.weight", "rotary", tail, scratch, observe)
 			if err != nil {
 				return err
 			}
@@ -366,8 +391,17 @@ func v41IndexBF16Copyback(l int, leaf, phase string, values []float32) ([]float3
 // out is private scratch with len(values) elements and must not alias values.
 // Keeping writes private until success preserves the caller's error boundary.
 func v41IndexBF16CopybackInto(l int, leaf, phase string, values, out []float32) ([]float32, error) {
+	return v41IndexBF16CopybackIntoObserved(l, leaf, phase, values, out, nil)
+}
+
+func v41IndexBF16CopybackIntoObserved(l int, leaf, phase string, values, out []float32, observe func(string)) ([]float32, error) {
+	observed := false
 	for i, value := range values {
 		if finite32(value) {
+			if observe != nil && !observed {
+				observe("bf16-boundary")
+				observed = true
+			}
 			out[i] = v41RoundBF16(value)
 			if finite32(out[i]) {
 				continue

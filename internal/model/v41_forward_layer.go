@@ -552,7 +552,11 @@ func (m *Model) v41LayerAttentionSources(l, seq, hd int, full bool, kvRows, preB
 		if src.indexKeys != nil && (reusedKeys == nil || !reusedKeys[group]) {
 			key = src.indexKeys[group]
 		}
-		if err := m.v41CompressedPublicationRoPEWithDevice(l, group*plan.Ratio, latent, key, scratch.gatherOps.compressedPublicationRoPEFunc()); err != nil {
+		var observe func(string)
+		if scratch.gatherOps != nil && scratch.gatherOps.owner != nil {
+			observe = scratch.gatherOps.owner.observeHostArm
+		}
+		if err := m.v41CompressedPublicationRoPEWithDeviceObserved(l, group*plan.Ratio, latent, key, scratch.gatherOps.compressedPublicationRoPEFunc(), observe); err != nil {
 			return src, err
 		}
 	}
@@ -607,7 +611,11 @@ func (m *Model) v41LayerIndexList(l, seq, hd int, src v41LayerSources, qLatRows,
 					var values []float32
 					var err error
 					if ordinary == nil {
-						values, err = V41IndexerScore(q, keys, weights, heads, headDim, rows)
+						var observe func(string)
+						if st != nil && st.callbackOwner != nil {
+							observe = st.callbackOwner.observeHostArm
+						}
+						values, err = v41IndexerScoreObserved(q, keys, weights, heads, headDim, rows, observe)
 					} else {
 						values, err = ordinary(layer, q, keys, weights, heads, headDim, rows)
 					}
