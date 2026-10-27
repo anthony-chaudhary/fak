@@ -278,6 +278,11 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 	})
 	s.phaseEnd("qwen35_linear_qk_norm", t)
 	t = s.phaseStart()
+	// Prefill reuse of the existing decode kernel is explicitly opt-in. Do
+	// not promote the default from source reasoning: hardware float32 FMA
+	// and the scalar float64-FMA-to-float32 path can differ even for finite
+	// inputs. Existing numeric/physical qualification remains required.
+	vectorized := os.Getenv("FAK_VECTORIZED_DELTANET") == "1" && HasVectorizedDeltaNetFor(kHd, vHd)
 	parFor(nV, dispatchWorkers, func(lo, hi int) {
 		for h := lo; h < hi; h++ {
 			kh := h / repeat
@@ -294,17 +299,26 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 				bt := sigmoidf(bvec[t*nV+h])
 				dt := softplus(avec[t*nV+h] + dtB)
 				g := float32(math.Exp(float64(-a * dt)))
-				for i := range st {
-					st[i] *= g
+				if vectorized && qwen35PrefillVectorizedStep(st, qn, kn, vh, core, kvmem, delta, bt, g, t, valDim, h) {
+					continue
 				}
-				for d := range kvmem {
-					kvmem[d] = 0
-				}
-				for i := 0; i < kHd; i++ {
-					ki := kn[i]
-					base := i * vHd
-					for d := 0; d < vHd; d++ {
-						kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
+				// The ordinary head state and scratch are disjoint exact-shape
+				// rows. Decay each cell when retrieving it instead of making a
+				// separate full-state pass. Refused geometry keeps the old mutation
+				// and panic order, including extra state/scratch elements.
+				if !qwen35PrefillDecayRead(st, kn, kvmem, g, kHd, vHd) {
+					for i := range st {
+						st[i] *= g
+					}
+					for d := range kvmem {
+						kvmem[d] = 0
+					}
+					for i := 0; i < kHd; i++ {
+						ki := kn[i]
+						base := i * vHd
+						for d := 0; d < vHd; d++ {
+							kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
+						}
 					}
 				}
 				for d := 0; d < vHd; d++ {
