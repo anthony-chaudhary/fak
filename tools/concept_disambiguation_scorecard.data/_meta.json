@@ -7427,6 +7427,11 @@
           "category": "incidental",
           "reason": "Private eligibility predicate on the existing model.Session selecting the implemented Q8 hybrid prefill path when its cache and observer state are supported; it does not define a new session, scheduler, or runtime identity.",
           "token": "q8Qwen35HybridPrefillSessionOK"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing InKernelBatchReceipt telemetry: cohort-cumulative request session-close accounting observed after joined request completion and captured for this receipt; not live cohort width, a process-global counter, a guaranteed final cohort total, or a distinct drive-session or scheduling concept.",
+          "token": "SessionCloses"
         }
       ],
       "exclude": [
@@ -7521,6 +7526,7 @@
         "SessionClientDescriptor",
         "SessionClientDetachRequest",
         "SessionClientTokenHeader",
+        "SessionCloses",
         "SessionComparison",
         "SessionDiscoveryPublication",
         "SessionDiscoveryRecord",
