@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/pkg/mcpinstall"
 )
 
 // fak codex mcp installs an immutable, versioned fak binary and points Codex's
@@ -737,18 +738,7 @@ func readConfigOrEmpty(configPath string) (string, error) {
 // parser round-trips — falling back to escaped basic strings when a value holds a
 // quote or newline.
 func renderCodexMCPSection(server, command string, args []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[mcp_servers.%s]\n", server)
-	fmt.Fprintf(&b, "command = %s\n", tomlLiteralOrBasic(command))
-	b.WriteString("args = [")
-	for i, a := range args {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(tomlLiteralOrBasic(a))
-	}
-	b.WriteString("]\n")
-	return b.String()
+	return mcpinstall.RenderCodexSection(server, command, args, "")
 }
 
 func tomlLiteralOrBasic(s string) string {
