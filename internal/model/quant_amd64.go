@@ -194,14 +194,14 @@ func qgemm8tile512x1(qw, qx *int8, dw, dx *float32, in, nblk, outStride int, dst
 //go:noescape
 func qgemm8tile256(qw, qx *int8, dw, dx *float32, in, nblk, outStride int, dst *float32)
 
-const qgemmMR = 5    // full AVX-512 tile rows; row remainders use qgemm8tile512x1 plus scalar token tail
+const qgemmMR = 5    // full AVX-512 tile rows; tails use bounded SIMD scratch
 const qgemmMR256 = 3 // full AVX2 tile rows
 const qgemmNR256 = 2 // full AVX2 tile tokens
 
-// qGemm8 is the batched Q8_0 prefill GEMM dispatcher: register-blocked tile kernel on
-// AVX-512, with a scalar reference for the row/token remainder (and as the AVX2/scalar
-// fallback until an AVX2 tile lands). Output row-major [P, out], identical layout to the
-// old qMatMulBatch.
+// qGemm8 is the batched Q8_0 prefill GEMM dispatcher: register-blocked tiles
+// and bounded scratch-padded tails on AVX-512/AVX2, with the scalar reference
+// retained for unsupported tiers/shapes. Output is row-major [P, out], matching
+// the old qMatMulBatch.
 func qGemm8(qt *q8Tensor, qp *q8Panel) []float32 {
 	Y := make([]float32, qp.P*qt.out)
 	qGemm8Into(qt, qp, Y)
@@ -234,7 +234,7 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	}
 
 	out, in, nblk, P := qt.out, qt.in, qt.nblk, qp.P
-	Pmain := P &^ (4 - 1) // tokens handled by the NR=4 tile; remainder done by the cell ref
+	Pmain := P &^ (4 - 1) // full NR=4 groups; tail uses bounded padding
 	nTiles := out / qgemmMR
 
 	tile := func(lo, hi int) {
@@ -258,37 +258,37 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	qGemm8avx512Remainder(qt, qp, Y, out, in, nblk, Pmain, nTiles)
 }
 
-// qGemm8avx512Remainder writes the AVX-512 Q8 GEMM tail shared by qGemm8Into and
-// qGemm8IntoMany: the out%qgemmMR row remainder (NR=4 token bulk via qgemm8tile512x1, then
-// the P%4 token tail via the lanes=16 scalar cell reference) and the P%4 token remainder for
-// the already-tiled rows [0, nTiles*qgemmMR). nTiles is the count of full qgemmMR-row tiles
-// the tile kernel already wrote. Bit-identical to the inline tail it replaces.
+// qGemm8avx512Remainder writes the remaining rows with the existing 1x4
+// kernel and the remaining token columns through scratch-padded SIMD tiles.
+// Each valid cell retains the lanes=16 reduction; unsupported shapes keep the
+// scalar reference. Called only after the bulk worker barrier has completed.
 func qGemm8avx512Remainder(qt *q8Tensor, qp *q8Panel, Y []float32, out, in, nblk, Pmain, nTiles int) {
 	P := qp.P
-	// Remainder rows (out % MR): every token, via the matching scalar reference.
+	// Remainder rows (out % MR): the full four-token groups use the 1x4 tile.
 	for o := nTiles * qgemmMR; o < out; o++ {
 		qw := qt.q[o*in : o*in+in]
 		dw := qt.d[o*nblk : o*nblk+nblk]
 		for t := 0; t < Pmain; t += 4 {
 			qgemm8tile512x1(&qw[0], &qp.q[t*in], &dw[0], &qp.d[t*nblk], in, nblk, out, &Y[t*out+o])
 		}
-		qGemm8CellRect(qt, qp, Y, o, o+1, Pmain, P, 16, false)
 	}
-	// Remainder tokens (P % 4): the tiled rows still need these columns.
-	qGemm8CellRect(qt, qp, Y, 0, nTiles*qgemmMR, Pmain, P, 16, true)
+	// The padded token tail covers every row, including the row remainder.
+	if !qGemm8SIMDTokenTail(qt, qp, Y, Pmain, true) {
+		qGemm8CellRect(qt, qp, Y, 0, out, Pmain, P, 16, true)
+	}
 }
 
 // qGemm8avx2Into runs the Q8 prefill GEMM with the AVX2 register-blocked tile (qgemm8tile256,
-// MR=3×NR=2) over the tile-aligned bulk and the lanes=8 scalar reference (qgemm8cell) for the
-// row/token remainders. The whole path is Float32bits-identical to qGemm8scalar(qt, qp, 8) —
-// the tile is pinned bit-for-bit to qgemm8cell(...,8) and the remainders call it directly — so
+// MR=3×NR=2) over the bulk and scratch-padded tails, retaining the lanes=8 scalar
+// reference for unsupported tail shapes. The whole path is Float32bits-identical to
+// qGemm8scalar(qt, qp, 8): every valid cell uses the same pinned tile reduction, so
 // the AVX2 host's prefill GEMM stops running the scalar reference (the #1127 CPU-server floor) while
 // staying on the same authoritative argmax-vs-f32 Q8 gate. Callable directly (not gated on the
 // resolved qtier) so it can be exercised on any AVX2-capable host; wired into qGemm8Into for
 // tierAVX2. Output row-major [P, out].
 func qGemm8avx2Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	out, in, nblk, P := qt.out, qt.in, qt.nblk, qp.P
-	Pmain := P &^ (qgemmNR256 - 1) // tokens handled by the NR=2 tile; remainder via the cell ref
+	Pmain := P &^ (qgemmNR256 - 1) // full NR=2 groups; tail uses bounded padding
 	nTiles := out / qgemmMR256
 
 	tile := func(lo, hi int) {
@@ -309,10 +309,13 @@ func qGemm8avx2Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		parFor(nTiles, currentWorkerCount(), tile)
 	}
 
-	// Remainder rows (out % MR): every token, via the matching lanes=8 scalar reference.
-	qGemm8CellRect(qt, qp, Y, nTiles*qgemmMR256, out, 0, P, 8, false)
-	// Remainder tokens (P % NR): the tiled rows still need these columns.
-	qGemm8CellRect(qt, qp, Y, 0, nTiles*qgemmMR256, Pmain, P, 8, true)
+	// Row-tail token bulk and all-row token tail own disjoint rectangles.
+	if !qGemm8AVX2RowTail(qt, qp, Y, nTiles*qgemmMR256, Pmain) {
+		qGemm8CellRect(qt, qp, Y, nTiles*qgemmMR256, out, 0, Pmain, 8, false)
+	}
+	if !qGemm8SIMDTokenTail(qt, qp, Y, Pmain, false) {
+		qGemm8CellRect(qt, qp, Y, 0, out, Pmain, P, 8, true)
+	}
 }
 
 // qGemm8IntoMany runs several GEMMs that share the same quantized activation panel under
