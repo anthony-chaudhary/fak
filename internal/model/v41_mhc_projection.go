@@ -82,8 +82,9 @@ func (m *Model) v41MHCProjectorNamed(l int, leaf string, H int, eps float32, ful
 			loaded = true
 		}
 		if full {
-			streams := [][]float32{input[:H], input[H : 2*H], input[2*H : 3*H], input[3*H:]}
-			y, err := v41MHCProjectFull(weight, streams, H, eps, transposed)
+			// The producer already owns a flat four-stream row. Consume it
+			// read-only rather than splitting and copying the same 4H values.
+			y, err := v41MHCProjectFlat(weight, input, eps, transposed)
 			if err != nil {
 				return nil, v41StageErr(v41StageMHC, l, err)
 			}

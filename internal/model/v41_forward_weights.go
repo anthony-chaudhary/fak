@@ -974,6 +974,17 @@ func v41MHCProjectFull(wMix []float32, streams [][]float32, H int, eps float32, 
 	for _, s := range streams {
 		xflat = append(xflat, s...)
 	}
+	return v41MHCProjectFlat(wMix, xflat, eps, transposed)
+}
+
+// v41MHCProjectFlat borrows a validated flat four-stream input only for this
+// call. It preserves the whole-row RMS and fdot reduction of the stream wrapper
+// without retaining or mutating the caller's activation storage.
+func v41MHCProjectFlat(wMix, xflat []float32, eps float32, transposed bool) ([]float32, error) {
+	flatWidth := len(xflat)
+	if len(wMix) != v41MHCMixWidth*flatWidth {
+		return nil, fmt.Errorf("model: V41 full mHC projection weight has %d values, want %d", len(wMix), v41MHCMixWidth*flatWidth)
+	}
 	var ss float32
 	for _, v := range xflat {
 		ss += v * v
