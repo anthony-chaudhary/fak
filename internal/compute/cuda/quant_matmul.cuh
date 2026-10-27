@@ -643,18 +643,23 @@ extern "C" int fcuda_nvfp4_w4a16_f32(const uint8_t *dPayload, const float *dX,
   return (int)cudaGetLastError();
 }
 
-// Q5_K/Q6_K resident dequant-fused GEMV. One warp computes one output row.
+// Q5_K/Q6_K resident dequant-fused GEMV/panel. One warp computes one output row
+// for each token in the tile, reusing the packed weight loads across four tokens
+// during prefill. Each accumulator keeps the original GEMV expression, K order
+// and warp shuffle reduction; no activation quantization or wide weight scratch.
+// token_tile=1 keeps the decode/small-batch route. The tail predicate is uniform
+// within each warp, including partial output blocks, so full-mask shuffles are safe.
+template <int token_tile>
 __global__ void k_q5k_gemm(const unsigned char *W, const float *X, float *Y,
                            int out, int in, int P) {
   int lane = threadIdx.x & 31;
   int o = blockIdx.x * 8 + (threadIdx.x >> 5);
-  int t = blockIdx.y;
-  if (o >= out || t >= P) return;
+  int token0 = blockIdx.y * token_tile;
+  if (o >= out || token0 >= P) return;
 
   int nsb = in / 256;
-  float sum = 0.f;
+  float sums[token_tile] = {};
   const unsigned char *wr = W + (size_t)o * nsb * 176;
-  const float *xr = X + (size_t)t * in;
   for (int sb = 0; sb < nsb; ++sb) {
     const unsigned char *b = wr + (size_t)sb * 176;
     float d = __half2float(*(const __half *)b);
@@ -662,7 +667,6 @@ __global__ void k_q5k_gemm(const unsigned char *W, const float *X, float *Y,
     const unsigned char *sc = b + 4;
     const unsigned char *qh = b + 16;
     const unsigned char *ql = b + 48;
-    const float *xb = xr + (size_t)sb * 256;
 #pragma unroll
     for (int g = 0; g < 8; ++g) {
       unsigned char scale, mn;
@@ -671,33 +675,40 @@ __global__ void k_q5k_gemm(const unsigned char *W, const float *X, float *Y,
       int q = (g & 1) ? (ql[pair * 32 + lane] >> 4)
                       : (ql[pair * 32 + lane] & 15);
       if (qh[lane] & (1u << g)) q += 16;
-      sum += (d * (float)scale * (float)q - dm * (float)mn) * xb[g * 32 + lane];
+#pragma unroll
+      for (int j = 0; j < token_tile; ++j) {
+        if (token0 + j >= P) continue;
+        const float *xb = X + (size_t)(token0 + j) * in + (size_t)sb * 256;
+        sums[j] += (d * (float)scale * (float)q - dm * (float)mn) * xb[g * 32 + lane];
+      }
     }
   }
 #pragma unroll
-  for (int z = 16; z; z >>= 1)
-    sum += __shfl_down_sync(0xffffffff, sum, z);
-  if (lane == 0) Y[(size_t)t * out + o] = sum;
+  for (int j = 0; j < token_tile; ++j) {
+#pragma unroll
+    for (int z = 16; z; z >>= 1)
+      sums[j] += __shfl_down_sync(0xffffffff, sums[j], z);
+    if (lane == 0 && token0 + j < P) Y[(size_t)(token0 + j) * out + o] = sums[j];
+  }
 }
 
+template <int token_tile>
 __global__ void k_q6k_gemm(const unsigned char *W, const float *X, float *Y,
                            int out, int in, int P) {
   int lane = threadIdx.x & 31;
   int o = blockIdx.x * 8 + (threadIdx.x >> 5);
-  int t = blockIdx.y;
-  if (o >= out || t >= P) return;
+  int token0 = blockIdx.y * token_tile;
+  if (o >= out || token0 >= P) return;
 
   int nsb = in / 256;
-  float sum = 0.f;
+  float sums[token_tile] = {};
   const unsigned char *wr = W + (size_t)o * nsb * 210;
-  const float *xr = X + (size_t)t * in;
   for (int sb = 0; sb < nsb; ++sb) {
     const unsigned char *b = wr + (size_t)sb * 210;
     const unsigned char *ql = b;
     const unsigned char *qh = b + 128;
     const signed char *sc = (const signed char *)(b + 192);
     float d = __half2float(*(const __half *)(b + 208));
-    const float *xb = xr + (size_t)sb * 256;
 #pragma unroll
     for (int h = 0; h < 2; ++h) {
       int qo = h * 64;
@@ -709,25 +720,45 @@ __global__ void k_q6k_gemm(const unsigned char *W, const float *X, float *Y,
       int q2 = (ql[qo + lane + 32] & 15) | (((qh[ho + lane] >> 2) & 3) << 4);
       int q3 = (ql[qo + lane] >> 4) | (((qh[ho + lane] >> 4) & 3) << 4);
       int q4 = (ql[qo + lane + 32] >> 4) | (((qh[ho + lane] >> 6) & 3) << 4);
-      sum += d * (float)sc[so + is] * (q1 - 32) * xb[base + lane];
-      sum += d * (float)sc[so + is + 2] * (q2 - 32) * xb[base + lane + 32];
-      sum += d * (float)sc[so + is + 4] * (q3 - 32) * xb[base + lane + 64];
-      sum += d * (float)sc[so + is + 6] * (q4 - 32) * xb[base + lane + 96];
+#pragma unroll
+      for (int j = 0; j < token_tile; ++j) {
+        if (token0 + j >= P) continue;
+        const float *xb = X + (size_t)(token0 + j) * in + (size_t)sb * 256;
+        sums[j] += d * (float)sc[so + is] * (q1 - 32) * xb[base + lane];
+        sums[j] += d * (float)sc[so + is + 2] * (q2 - 32) * xb[base + lane + 32];
+        sums[j] += d * (float)sc[so + is + 4] * (q3 - 32) * xb[base + lane + 64];
+        sums[j] += d * (float)sc[so + is + 6] * (q4 - 32) * xb[base + lane + 96];
+      }
     }
   }
 #pragma unroll
-  for (int z = 16; z; z >>= 1)
-    sum += __shfl_down_sync(0xffffffff, sum, z);
-  if (lane == 0) Y[(size_t)t * out + o] = sum;
+  for (int j = 0; j < token_tile; ++j) {
+#pragma unroll
+    for (int z = 16; z; z >>= 1)
+      sums[j] += __shfl_down_sync(0xffffffff, sums[j], z);
+    if (lane == 0 && token0 + j < P) Y[(size_t)(token0 + j) * out + o] = sums[j];
+  }
 }
 
 extern "C" void fcuda_q5k_matmul_f32(const uint8_t *w, const float *x, float *y,
                                       int o, int i, int p) {
-  FCUDA_TS("k_q5k_gemm", dim3((o + 7) / 8, p), k_q5k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
+  if (p >= 4) {
+    // Division-first ceil avoids overflowing p near the C ABI's int limit.
+    int tiles = p / 4 + (p % 4 != 0);
+    FCUDA_TS("k_q5k_gemm_panel", dim3((o + 7) / 8, tiles), k_q5k_gemm<4><<<dim3((o + 7) / 8, tiles), 256, 0, g_stream>>>(w, x, y, o, i, p));
+    return;
+  }
+  FCUDA_TS("k_q5k_gemm", dim3((o + 7) / 8, p), k_q5k_gemm<1><<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
 }
 extern "C" void fcuda_q6k_matmul_f32(const uint8_t *w, const float *x, float *y,
                                       int o, int i, int p) {
-  FCUDA_TS("k_q6k_gemm", dim3((o + 7) / 8, p), k_q6k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
+  if (p >= 4) {
+    // Division-first ceil avoids overflowing p near the C ABI's int limit.
+    int tiles = p / 4 + (p % 4 != 0);
+    FCUDA_TS("k_q6k_gemm_panel", dim3((o + 7) / 8, tiles), k_q6k_gemm<4><<<dim3((o + 7) / 8, tiles), 256, 0, g_stream>>>(w, x, y, o, i, p));
+    return;
+  }
+  FCUDA_TS("k_q6k_gemm", dim3((o + 7) / 8, p), k_q6k_gemm<1><<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
 }
 
 // =================================================================================
