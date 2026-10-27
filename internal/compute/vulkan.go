@@ -193,6 +193,7 @@ func init() {
 		haveQ8GDNInProj:              C.fvk_have_qwen35_gdn_q8_in_proj() != 0,
 		haveQ8GDNInProjPanel:         C.fvk_have_qwen35_gdn_q8_in_proj_panel() != 0,
 		haveQwenAttentionPostprocess: C.fvk_have_qwen35_attention_postprocess() != 0,
+		haveQ6KPanel:                 C.fvk_have_q6k_matmul_panel() != 0,
 		haveQ8SequencePair:           C.fvk_have_qwen35_q8_pair() != 0,
 		haveAttention:                true,
 		haveCoopmat:                  C.fvk_have_cooperative_matrix() != 0,
@@ -467,6 +468,7 @@ type vulkanBackend struct {
 	haveQ8GDNInProj              bool
 	haveQ8GDNInProjPanel         bool
 	haveQwenAttentionPostprocess bool
+	haveQ6KPanel                 bool
 	haveQ8SequencePair           bool
 	haveCoopmat                  bool
 	haveAttention                bool
@@ -1755,6 +1757,9 @@ func (v *vulkanBackend) q6kMatMulLocked(w, x, y Tensor, P int) {
 	out, in := v.validateQ6KMatMulInputs(w, x, P)
 	if y.Dtype != F32 || y.Backend() != Backend(v) || !y.Ready() || y.Numel() != P*out {
 		panic("compute: vulkan Q6_K output is not a ready P*out F32 Vulkan tensor")
+	}
+	if v.tryQ6KPanelLocked(w, x, y, out, in, P) {
+		return
 	}
 	wb := w.buf.(*vulkanBuf)
 	C.fvk_q6k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))

@@ -14794,6 +14794,11 @@
           "category": "incidental",
           "reason": "Private runtime dispatch geometry and numerical parameter eligibility predicate, not a support tier, roadmap maturity or hardware qualification assertion.",
           "token": "fvk_qwen35_attention_postprocess_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private runtime eligibility check for opt-in packed Q6_K prompt panel: kernel availability, dimensions and 256-element packing, payload and activation index extents, and Vulkan workgroup limits. Not a support maturity tier, release qualification or performance certification.",
+          "token": "fvk_q6k_matmul_panel_supported"
         }
       ],
       "exclude": [
@@ -14998,6 +15003,7 @@
         "fak_parity_value",
         "formatParityValue",
         "forward_coverage_not_single_lane",
+        "fvk_q6k_matmul_panel_supported",
         "fvk_qwen35_attention_postprocess_supported",
         "fvk_qwen35_gdn_q8_in_proj_panel_supported",
         "fvk_qwen35_q8_pair_supported",

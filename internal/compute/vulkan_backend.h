@@ -421,6 +421,11 @@ int fvk_qwen35_gdn_q8_in_proj_f32(
 /* Optional sequence-only F32 Q/K norm, partial RoPE and direct KV append.
  * Default-off: FAK_VULKAN_QWEN35_ATTN_POSTPROCESS=1 at initialization.
  * KRaw/K/V already own writable tails; no metadata is published by this ABI. */
+/* Default-off packed Q6_K 16x16 panel, admitted only after the ordinary gates. */
+int fvk_have_q6k_matmul_panel(void);
+int fvk_q6k_matmul_panel_supported(int out, int in, int P);
+int fvk_q6k_matmul_panel_f32(const void* weight, const void* x, void* y, int out, int in, int P);
+
 int fvk_have_qwen35_attention_postprocess(void);
 int fvk_qwen35_attention_postprocess_supported(int tokens, int startPos,
     int qHeads, int kHeads, int headDim, int rotaryDim, double theta, float eps);

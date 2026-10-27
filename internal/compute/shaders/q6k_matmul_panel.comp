@@ -1,0 +1,75 @@
+#version 450
+// Derived from fak's Apache-2.0 q6k_matmul.comp. One 16-row by 16-token
+// tile decodes each 256-value packed block once, then reuses the F32 values.
+// Each output retains the original block/segment/lane/q1..q4 accumulation.
+// No FP16 arithmetic, subgroup reduction, atomics or cooperative matrix.
+layout(local_size_x = 256) in;
+layout(std430,binding=0) readonly buffer Q6K { uint raw[]; };
+layout(std430,binding=1) readonly buffer X { float x[]; };
+layout(std430,binding=2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+shared float weights[16 * 256];
+shared float inputs[16 * 256];
+uint byteAt(uint offset) {
+    uint word = raw[offset >> 2u];
+    return (word >> ((offset & 3u) * 8u)) & 255u;
+}
+int signedByteAt(uint offset) {
+    int value = int(byteAt(offset));
+    return value >= 128 ? value - 256 : value;
+}
+float halfAt(uint offset) {
+    uint bits = byteAt(offset) | (byteAt(offset + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint row0 = gl_WorkGroupID.x * 16u;
+    uint token0 = gl_WorkGroupID.y * 16u;
+    uint rowLane = tid % 16u;
+    uint tokenLane = tid / 16u;
+    uint row = row0 + rowLane;
+    uint token = token0 + tokenLane;
+    bool live = row < uint(pc.outDim) && token < uint(pc.tokens);
+    uint blocks = uint(pc.inDim) / 256u;
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        for (uint slot = tid; slot < 16u * 256u; slot += 256u) {
+            uint r = slot / 256u;
+            uint col = slot % 256u;
+            // Every shared location is overwritten, including partial tiles.
+            float weight = 0.0;
+            if (row0 + r < uint(pc.outDim)) {
+                uint base = ((row0 + r) * blocks + sb) * 210u;
+                uint segment = col / 128u;
+                uint group = (col % 128u) / 32u;
+                uint lane = col % 32u;
+                uint low = byteAt(base + segment * 64u + (group % 2u) * 32u + lane);
+                uint high = byteAt(base + 128u + segment * 32u + lane);
+                int quant = int(((low >> (group >= 2u ? 4u : 0u)) & 15u) |
+                                (((high >> (group * 2u)) & 3u) << 4u)) - 32;
+                int scale = signedByteAt(base + 192u + segment * 8u + group * 2u + lane / 16u);
+                float d = halfAt(base + 208u);
+                weight = (d * float(scale)) * float(quant);
+            }
+            weights[slot] = weight;
+            inputs[slot] = token0 + r < uint(pc.tokens) ?
+                x[(token0 + r) * uint(pc.inDim) + sb * 256u + col] : 0.0;
+        }
+        barrier();
+        if (live) {
+            for (uint segment = 0u; segment < 2u; ++segment) {
+                uint wBase = rowLane * 256u + segment * 128u;
+                uint xBase = tokenLane * 256u + segment * 128u;
+                for (uint lane = 0u; lane < 32u; ++lane) {
+                    sum += weights[wBase + lane] * inputs[xBase + lane];
+                    sum += weights[wBase + lane + 32u] * inputs[xBase + lane + 32u];
+                    sum += weights[wBase + lane + 64u] * inputs[xBase + lane + 64u];
+                    sum += weights[wBase + lane + 96u] * inputs[xBase + lane + 96u];
+                }
+            }
+        }
+        barrier();
+    }
+    if (live) y[token * uint(pc.outDim) + row] = sum;
+}

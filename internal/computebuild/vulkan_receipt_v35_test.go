@@ -13,10 +13,11 @@ import (
 func TestVulkanReceiptV35QwenAttentionPostprocess(t *testing.T) {
 	const stem = "qwen35_attention_postprocess"
 	want := append(vulkanRegistryV34.stems(), stem)
-	if len(want) != 106 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 106 || !reflect.DeepEqual(want, vulkanRegistryV35.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V35 must add exactly the optional Qwen attention postprocess module to historical V34")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV35.schema
+	id, err := vulkanRegistryV35.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV35 || id.ID != VulkanShaderRegistryV35ID || id.ModuleCount != 106 {
 		t.Fatalf("V35 identity differs: %s %+v %v", schema, id, err)
 	}
