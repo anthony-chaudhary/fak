@@ -27,7 +27,7 @@ are refused.
 Install it for a short window:
 
 ```text
-fak guard allow --remote-maintenance REVIEWED_CONFIG --ttl 15m
+fak manage allow --remote-maintenance REVIEWED_CONFIG --ttl 15m
 ```
 
 The TTL is mandatory, positive, and at most 15 minutes. Installation validates
@@ -39,7 +39,7 @@ it never performs maintenance.
 Revoke one profile with:
 
 ```text
-fak guard allow --remove --remote-maintenance PROFILE_ID
+fak manage allow --remove --remote-maintenance PROFILE_ID
 ```
 
 Removing the last profile removes the sidecar. Expiry, deletion, unreadable or
@@ -47,8 +47,8 @@ mutated config, changed executable bytes, host/boot/prior-state drift, or stale
 lease evidence all disable remote maintenance while leaving the base guard/serve
 floor running. An expired remaining profile cannot prevent revocation. If the
 sidecar is too malformed to identify a profile, the operator can remove all remote
-authority with `fak guard allow --remove --remote-maintenance '*'`. Normal
-`fak guard` and `fak serve` load the sidecar; the sidecar path is
+authority with `fak manage allow --remove --remote-maintenance '*'`. Normal
+`fak manage --guard` and `fak serve` load the sidecar; the sidecar path is
 SELF_MODIFY-protected even while absent, and configured adapter executables are
 protected when present.
 
