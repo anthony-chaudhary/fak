@@ -250,6 +250,7 @@ concurrent = [
   "benchruns",
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; not an internal leaf
+  "remotemaint", # shared finite remote-maintenance SDK and guarded facade
   "repocompose", # pkg/repocompose
   "deploykit", # pkg/deploykit shared deployable lifecycle contract (descriptor, stage enum, fak.deploy.receipt/v1)
   "strix", # pkg/strix
@@ -641,6 +642,7 @@ autopick = [
   "benchruns",
   "newleaf",
   "scorecard", # pkg/scorecard shared scorecard fold/render kernel; see [lanes].concurrent note
+  "remotemaint", # shared finite remote-maintenance SDK and guarded facade
   "repocompose", # pkg/repocompose
   "deploykit", # pkg/deploykit
   "strix", # pkg/strix
@@ -991,6 +993,7 @@ benchloop = ["internal/benchloop/**"]
 benchruns = ["internal/benchruns/**"]
 newleaf = ["internal/newleaf/**"]
 scorecard = ["pkg/scorecard/**"]
+remotemaint = ["pkg/remotemaint/**", "pkg/guardedremotemaint/**"]
 repocompose = ["pkg/repocompose/**"]
 deploykit = ["pkg/deploykit/**"]
 strix = ["pkg/strix/**"]
