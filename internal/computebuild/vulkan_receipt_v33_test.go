@@ -9,10 +9,11 @@ import (
 // Pins only the source/receipt census. No shader or native archive is compiled.
 func TestVulkanReceiptV33SharedAttentionSplit(t *testing.T) {
 	want := append(vulkanRegistryV32.stems(), "v41_shared_attention_split")
-	if len(want) != 104 || !reflect.DeepEqual(want, VulkanShaders) || !reflect.DeepEqual(want, CurrentVulkanShaderRegistryLatest()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
+	if len(want) != 104 || !reflect.DeepEqual(want, vulkanRegistryV33.stems()) { //boundarylint:ignore CHANGE_DETECTOR_TEST versioned receipt membership is immutable
 		t.Fatal("V33 must add exactly the V4.1 split-k shared attention module to V32")
 	}
-	schema, id, err := CurrentVulkanBuildIdentity()
+	schema := vulkanRegistryV33.schema
+	id, err := vulkanRegistryV33.identity()
 	if err != nil || schema != VulkanBuildReceiptSchemaV33 || id.ID != VulkanShaderRegistryV33ID || id.ModuleCount != 104 {
 		t.Fatalf("V33 identity differs: %s %+v %v", schema, id, err)
 	}

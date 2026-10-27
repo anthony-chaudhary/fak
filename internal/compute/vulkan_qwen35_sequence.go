@@ -636,8 +636,16 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 		var branch Tensor
 		if layer.Linear {
 			stage = "gdn-projections"
-			mixed, z := v.qwen35VulkanSequenceMatMulPairLocked(layer.GDNInQKV, layer.GDNInZ, n, tokens)
-			beta, alpha := v.qwen35VulkanSequenceMatMulPairLocked(layer.GDNInB, layer.GDNInA, n, tokens)
+			mixed, z, beta, alpha, fused, projectionErr := v.tryQwen35GDNQ8PanelLocked(
+				n, layer.GDNInQKV, layer.GDNInZ, layer.GDNInB, layer.GDNInA, tokens,
+			)
+			if projectionErr != nil {
+				return result, qwen35VulkanSequenceError(stage, layerIndex, projectionErr.Error())
+			}
+			if !fused {
+				mixed, z = v.qwen35VulkanSequenceMatMulPairLocked(layer.GDNInQKV, layer.GDNInZ, n, tokens)
+				beta, alpha = v.qwen35VulkanSequenceMatMulPairLocked(layer.GDNInB, layer.GDNInA, n, tokens)
+			}
 			if req.CapturePrefixReplay {
 				replayProjections = append(replayProjections, vulkanQwen35ReplayProjection{layer: i, mixed: mixed, z: z, beta: beta, alpha: alpha})
 			}

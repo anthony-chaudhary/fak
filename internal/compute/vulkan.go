@@ -191,6 +191,7 @@ func init() {
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
 		haveQ8GDNInProj:         C.fvk_have_qwen35_gdn_q8_in_proj() != 0,
+		haveQ8GDNInProjPanel:    C.fvk_have_qwen35_gdn_q8_in_proj_panel() != 0,
 		haveQ8SequencePair:      C.fvk_have_qwen35_q8_pair() != 0,
 		haveAttention:           true,
 		haveCoopmat:             C.fvk_have_cooperative_matrix() != 0,
@@ -461,13 +462,14 @@ type vulkanBackend struct {
 	haveQ8 bool
 	// batchNodeSeq advances per declared dispatch inside a batch window so the hazard
 	// ledger's edges are unique and deterministic (#12218).
-	batchNodeSeq       int
-	haveQ8GDNInProj    bool
-	haveQ8SequencePair bool
-	haveCoopmat        bool
-	haveAttention      bool
-	transient          []*vulkanBuf
-	freeTransient      map[int][]*vulkanBuf
+	batchNodeSeq         int
+	haveQ8GDNInProj      bool
+	haveQ8GDNInProjPanel bool
+	haveQ8SequencePair   bool
+	haveCoopmat          bool
+	haveAttention        bool
+	transient            []*vulkanBuf
+	freeTransient        map[int][]*vulkanBuf
 	transientPoolGauge
 	// Strix Halo (GFX1151) preflight subsystems, handed over by the serve runtime
 	// when Strix silicon is detected. Retained for the backend's zero-copy UMA and

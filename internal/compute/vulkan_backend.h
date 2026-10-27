@@ -414,6 +414,19 @@ int fvk_qwen35_gdn_q8_in_proj_f32(
     const void *dW3codes, const void *dW3scale,
     const void *dX, void *dY0, void *dY1, void *dY2, void *dY3,
     int out0, int out1, int out2, int out3, int in);
+/* Sequence-only four-projection Q8 candidate, separately opt-in at initialization
+ * with FAK_VULKAN_QWEN35_GDN_Q8_PANEL=1. It admits only the existing non-cooperative
+ * Q8 arithmetic route, P>1 and checked physical-grid/index bounds. Unsupported
+ * shapes/capability compose before allocation; selected ABI failures do not replay. */
+int fvk_have_qwen35_gdn_q8_in_proj_panel(void);
+int fvk_qwen35_gdn_q8_in_proj_panel_supported(int out0, int out1, int out2, int out3, int in, int P);
+int fvk_qwen35_gdn_q8_in_proj_panel_f32(
+    const void *dW0codes, const void *dW0scale,
+    const void *dW1codes, const void *dW1scale,
+    const void *dW2codes, const void *dW2scale,
+    const void *dW3codes, const void *dW3scale,
+    const void *dX, void *dY0, void *dY1, void *dY2, void *dY3,
+    int out0, int out1, int out2, int out3, int in, int P);
 /* RMSNorm(X) followed by two Q8_0 projections over the normalized row (FFN gate/up, Q8). */
 void fvk_rmsnorm_q8_matmul2_f32(const void *dW0codes, const void *dW0scale,
                                 const void *dW1codes, const void *dW1scale,

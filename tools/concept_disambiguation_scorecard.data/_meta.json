@@ -14772,6 +14772,11 @@
           "category": "incidental",
           "reason": "Diagnostic label for separate dequantization/contraction timing-field observation coverage in a combined host-expert report. It reports whether clock samples exist or are unavailable, not support tier, release maturity, capability validation or service readiness.",
           "token": "split_coverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private runtime dispatch eligibility predicate for an opt-in Q8 GDN input projection panel: checks loaded kernel, positive bounded dimensions, INT32 index products and Vulkan workgroup limits. It does not express support maturity, roadmap tier, stability or release qualification.",
+          "token": "fvk_qwen35_gdn_q8_in_proj_panel_supported"
         }
       ],
       "exclude": [
@@ -14976,6 +14981,7 @@
         "fak_parity_value",
         "formatParityValue",
         "forward_coverage_not_single_lane",
+        "fvk_qwen35_gdn_q8_in_proj_panel_supported",
         "fvk_qwen35_q8_pair_supported",
         "fvk_v41_f32_finite_count_supported",
         "gitDailyCoverageKPI",

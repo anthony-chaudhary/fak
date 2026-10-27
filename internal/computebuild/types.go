@@ -153,6 +153,8 @@ const (
 	VulkanBuildReceiptSchemaV32 = "fak.vulkan-build-receipt.v32"
 	// VulkanBuildReceiptSchemaV33 adds the V4.1 split-k shared attention module.
 	VulkanBuildReceiptSchemaV33 = "fak.vulkan-build-receipt.v33"
+	// VulkanBuildReceiptSchemaV34 adds the optional Qwen GDN Q8 sequence panel module.
+	VulkanBuildReceiptSchemaV34 = "fak.vulkan-build-receipt.v34"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
