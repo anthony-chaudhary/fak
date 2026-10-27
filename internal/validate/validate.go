@@ -464,7 +464,7 @@ func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validate
 	} else {
 		phase := recorder.start("build")
 		if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "build", errors.New("affected package build failed"), asJSON, func() (string, bool) {
-			return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("build", buildTargets)...)
+			return validateBuildImportersWithin(ctx, dir, wslWorkspace, buildTargets)
 		}); timedOut {
 			return code, true
 		}
