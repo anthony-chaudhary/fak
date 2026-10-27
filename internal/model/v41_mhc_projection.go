@@ -22,10 +22,18 @@ func v41MHCProjectionErrNamed(l int, leaf string, cause error) error {
 }
 
 func (m *Model) v41MHCProjector(l, H int, eps float32, full, transposed bool, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
-	return m.v41MHCProjectorNamed(l, "mhc.mixes.weight", H, eps, full, transposed, scratch)
+	return m.v41MHCProjectorObserved(l, H, eps, full, transposed, scratch, nil)
+}
+
+func (m *Model) v41MHCProjectorObserved(l, H int, eps float32, full, transposed bool, scratch *v41ProjScratch, observe func(string)) func([]float32) ([]float32, error) {
+	return m.v41MHCProjectorNamedObserved(l, "mhc.mixes.weight", H, eps, full, transposed, scratch, observe)
 }
 
 func (m *Model) v41MHCProjectorNamed(l int, leaf string, H int, eps float32, full, transposed bool, scratch *v41ProjScratch) func([]float32) ([]float32, error) {
+	return m.v41MHCProjectorNamedObserved(l, leaf, H, eps, full, transposed, scratch, nil)
+}
+
+func (m *Model) v41MHCProjectorNamedObserved(l int, leaf string, H int, eps float32, full, transposed bool, scratch *v41ProjScratch, observe func(string)) func([]float32) ([]float32, error) {
 	var weight []float32
 	loaded := false
 	return func(input []float32) ([]float32, error) {
@@ -84,7 +92,7 @@ func (m *Model) v41MHCProjectorNamed(l int, leaf string, H int, eps float32, ful
 		if full {
 			// The producer already owns a flat four-stream row. Consume it
 			// read-only rather than splitting and copying the same 4H values.
-			y, err := v41MHCProjectFlat(weight, input, eps, transposed)
+			y, err := v41MHCProjectFlatObserved(weight, input, eps, transposed, observe)
 			if err != nil {
 				return nil, v41StageErr(v41StageMHC, l, err)
 			}
@@ -94,6 +102,9 @@ func (m *Model) v41MHCProjectorNamed(l int, leaf string, H int, eps float32, ful
 		n, ok := checkedMulInt(v41MHCMixWidth, H)
 		if !ok || len(weight) != n {
 			return nil, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+		}
+		if observe != nil {
+			observe("mhc-projection")
 		}
 		y := matRows(weight, input, v41MHCMixWidth, H)
 		completed = 1
@@ -269,6 +280,7 @@ func (s *Session) v41MHCProjectionFuncNamed(leaf string) v41MHCProjectionFunc {
 			// the host RMS scale and before the output tensor is released.
 			values = append([]float32(nil), values...)
 			if full {
+				s.observeHostArm("rms-norm")
 				var ss float32
 				for _, v := range input {
 					ss += v * v

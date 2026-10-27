@@ -958,6 +958,10 @@ func faultedRawBytes(w expertWeight) int64 {
 // It validates its own inputs so a wrong-width or wrong-stream-count residual
 // cannot masquerade as the flattened geometry and be silently mis-projected.
 func v41MHCProjectFull(wMix []float32, streams [][]float32, H int, eps float32, transposed bool) ([]float32, error) {
+	return v41MHCProjectFullObserved(wMix, streams, H, eps, transposed, nil)
+}
+
+func v41MHCProjectFullObserved(wMix []float32, streams [][]float32, H int, eps float32, transposed bool, observe func(string)) ([]float32, error) {
 	flatWidth := 4 * H
 	if len(streams) != 4 || H <= 0 {
 		return nil, fmt.Errorf("model: V41 full mHC projection wants 4 streams of width %d, got %d", H, len(streams))
@@ -974,18 +978,25 @@ func v41MHCProjectFull(wMix []float32, streams [][]float32, H int, eps float32, 
 	for _, s := range streams {
 		xflat = append(xflat, s...)
 	}
-	return v41MHCProjectFlat(wMix, xflat, eps, transposed)
+	return v41MHCProjectFlatObserved(wMix, xflat, eps, transposed, observe)
 }
 
 // v41MHCProjectFlat borrows a validated flat four-stream input only for this
 // call. It preserves the whole-row RMS and fdot reduction of the stream wrapper
 // without retaining or mutating the caller's activation storage.
 func v41MHCProjectFlat(wMix, xflat []float32, eps float32, transposed bool) ([]float32, error) {
+	return v41MHCProjectFlatObserved(wMix, xflat, eps, transposed, nil)
+}
+
+func v41MHCProjectFlatObserved(wMix, xflat []float32, eps float32, transposed bool, observe func(string)) ([]float32, error) {
 	flatWidth := len(xflat)
 	if len(wMix) != v41MHCMixWidth*flatWidth {
 		return nil, fmt.Errorf("model: V41 full mHC projection weight has %d values, want %d", len(wMix), v41MHCMixWidth*flatWidth)
 	}
 	var ss float32
+	if observe != nil {
+		observe("rms-norm")
+	}
 	for _, v := range xflat {
 		ss += v * v
 	}
@@ -997,6 +1008,9 @@ func v41MHCProjectFlat(wMix, xflat []float32, eps float32, transposed bool) ([]f
 	var column []float32
 	if transposed {
 		column = make([]float32, flatWidth)
+	}
+	if observe != nil {
+		observe("mhc-projection")
 	}
 	for m := 0; m < v41MHCMixWidth; m++ {
 		row := wMix[m*flatWidth : (m+1)*flatWidth]
