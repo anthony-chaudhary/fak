@@ -58,17 +58,25 @@ func (r *modelHALWeightResidency) backend(be compute.Backend) *backendHALWeightR
 }
 
 func (r *backendHALWeightResidency) getOrStage(key string, stage func() compute.Tensor) compute.Tensor {
+	weight, _ := r.getOrStageReport(key, stage)
+	return weight
+}
+
+// getOrStageReport is getOrStage plus whether THIS call performed the staging
+// (false when another session already staged the key). Callers that need to
+// attribute exactly one host-to-device movement per tensor record on staged.
+func (r *backendHALWeightResidency) getOrStageReport(key string, stage func() compute.Tensor) (compute.Tensor, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		panic("model: immutable device weight residency is closed")
 	}
 	if resident, ok := r.weights[key]; ok {
-		return resident
+		return resident, false
 	}
 	resident := stage()
 	r.weights[key] = resident
-	return resident
+	return resident, true
 }
 
 func (r *modelHALWeightResidency) close() {

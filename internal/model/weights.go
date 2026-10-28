@@ -564,7 +564,9 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	if err := materializeNanbeigeSharedWeights(cfg, man); err != nil {
 		return nil, err
 	}
-	return &Model{Cfg: cfg, manifest: man, raw: raw, Vision: vision}, nil
+	m := &Model{Cfg: cfg, manifest: man, raw: raw, Vision: vision}
+	recordHostWeightResidency(m)
+	return m, nil
 }
 
 // Load reads a directory produced by export_oracle.py (config.json, manifest.json,

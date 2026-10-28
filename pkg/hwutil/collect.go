@@ -17,6 +17,11 @@ type Options struct {
 	// Samples is how many windows to average. One (the default) takes two
 	// polls separated by Interval.
 	Samples int
+	// Recorder supplies the tier-residency rows merged into the snapshot;
+	// nil drains the process-wide Default() recorder. The drain consumes
+	// whatever was recorded since the previous drain, so each snapshot is an
+	// interval view of residency and movement.
+	Recorder *Recorder
 }
 
 // DefaultInterval is the standard delta window.
@@ -52,9 +57,10 @@ type familyResults struct {
 // Collect takes one hardware-usage sample for this host. Each family is
 // polled once per window; a family whose source is unread degrades to nil and
 // contributes a HWUTIL_PARTIAL note instead of aborting the others. The total
-// budget is enforced through ctx. Tiers and transfers stay nil here: they are
-// filled from the in-process tier-residency emitter (Recorder drain), not
-// from host counters.
+// budget is enforced through ctx. Tiers and transfers come from the
+// in-process tier-residency emitter (the Options.Recorder drain, Default()
+// when unset): empty when nothing was recorded since the last drain, never
+// zero-filled from host counters.
 func Collect(ctx context.Context, opts Options) (*Snapshot, error) {
 	o, err := opts.normalize()
 	if err != nil {
@@ -75,8 +81,11 @@ func Collect(ctx context.Context, opts Options) (*Snapshot, error) {
 	snap.Net = fam.net
 	snap.Links = fam.links
 	snap.GPUs = collectGPUs(ctx)
-	snap.Tiers = nil
-	snap.Transfers = nil
+	rec := o.Recorder
+	if rec == nil {
+		rec = Default()
+	}
+	snap.Tiers, snap.Transfers = rec.Drain()
 	if len(fam.errs) > 0 {
 		code := fam.code
 		if code == "" {

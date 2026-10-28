@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/fabricmap"
+	"github.com/anthony-chaudhary/fak/pkg/hwutil"
 )
 
 func main() {
@@ -42,6 +43,7 @@ func run(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "usage: fabricmapdemo -selfcheck | -manifest input.json")
 		return 2
 	}
+	registerHwutilHopObserver(input.Graph)
 	route, err := input.Graph.Plan(input.Request)
 	if err != nil {
 		return fail(stderr, err)
@@ -59,6 +61,36 @@ func run(stdout, stderr io.Writer, args []string) int {
 	}
 	return 0
 }
+
+// registerHwutilHopObserver wires the direction-agnostic fabric plane into
+// the hardware-usage telemetry plane: every validated hop whose endpoints
+// both resolve to a memory tier records one cross-tier transfer on the
+// process-wide recorder. Endpoint kinds outside the closed tier vocabulary
+// (e.g. labeled intermediate stops) are skipped rather than guessed.
+// Fabric operations carry no load/evict intent at this layer, so rows land
+// as reason "unknown" until an intent-aware driver records them directly.
+func registerHwutilHopObserver(g fabricmap.Graph) {
+	tierByID := make(map[string]hwutil.TierKind, len(g.Endpoints))
+	for _, ep := range g.Endpoints {
+		switch ep.Kind {
+		case "gpu-memory":
+			tierByID[ep.ID] = hwutil.TierVRAM
+		case "host-memory":
+			tierByID[ep.ID] = hwutil.TierRAM
+		case "ssd":
+			tierByID[ep.ID] = hwutil.TierSSD
+		}
+	}
+	fabricmap.RegisterHopObserver(func(rc fabricmap.HopReceipt) {
+		from, okFrom := tierByID[rc.From]
+		to, okTo := tierByID[rc.To]
+		if !okFrom || !okTo {
+			return
+		}
+		hwutil.Default().RecordTransfer(from, to, int64(rc.Bytes), rc.CompletedAt.Sub(rc.StartedAt), hwutil.TransferUnknown)
+	})
+}
+
 func proofInput() (in struct {
 	Graph   fabricmap.Graph   `json:"graph"`
 	Request fabricmap.Request `json:"request"`

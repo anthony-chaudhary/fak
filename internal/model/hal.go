@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -293,7 +294,11 @@ func (s *Session) cachedImmutableWeight(sessionKey, residencyKey string, stage f
 		}
 	}
 	if resident := s.M.immutableDeviceWeights(s.Backend); resident != nil {
-		weight := resident.getOrStage(residencyKey, stage)
+		started := time.Now()
+		weight, staged := resident.getOrStageReport(residencyKey, stage)
+		if staged {
+			recordWeightUpload(s.M, s.Backend, tensorBytesOf(weight), started)
+		}
 		// Keep a session-local borrowed-handle memo so steady decode retains the original
 		// plain-map fast path. Close distinguishes borrowed model residents from private
 		// routed-expert fallbacks before freeing.
@@ -306,7 +311,9 @@ func (s *Session) cachedImmutableWeight(sessionKey, residencyKey string, stage f
 		}
 		return weight
 	}
+	started := time.Now()
 	t := stage()
+	recordWeightUpload(s.M, s.Backend, tensorBytesOf(t), started)
 	if s.halW != nil {
 		s.halW[sessionKey] = t
 	}
