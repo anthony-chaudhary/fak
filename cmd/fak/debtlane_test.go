@@ -106,6 +106,16 @@ func setupDebtLaneWorkspace(t *testing.T, lanes ...string) string {
 	t.Helper()
 	tmp := t.TempDir()
 
+	// An initialized, empty journal proves that this fixture has no held lanes.
+	// A missing journal is unknown ownership and must continue to block dispatch.
+	dosDir := filepath.Join(tmp, ".dos")
+	if err := os.MkdirAll(dosDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dosDir, "lane-journal.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	var dosContent strings.Builder
 	dosContent.WriteString("workspace = \".\"\n\n[lanes]\nconcurrent = [\n")
 	for _, l := range lanes {
@@ -132,6 +142,32 @@ func setupDebtLaneWorkspace(t *testing.T, lanes ...string) string {
 	}
 
 	return tmp
+}
+
+// fak-test:justify why=invariant when=changed:internal/debtlane/wave.go
+// fak-test:runtime fast est=50ms
+func TestDebtLanesCLIPlanWavesMissingJournalBlocksDispatch(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
+	if err := os.Remove(filepath.Join(tmp, ".dos", "lane-journal.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", tmp,
+		"--plan-waves",
+		"--opencode-commands",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("decode wave plan: %v; raw: %s", err, stdout.String())
+	}
+	if plan.BlockedCode != "LEASE_READER_UNAVAILABLE" || len(plan.Waves) != 0 || len(plan.OpencodeCommands) != 0 {
+		t.Fatalf("unknown lease state admitted dispatch: %s", stdout.String())
+	}
 }
 
 func TestDebtLanesCLIPlanWavesJSON(t *testing.T) {
