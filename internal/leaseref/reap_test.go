@@ -1,6 +1,8 @@
 package leaseref
 
 import (
+	"context"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -134,5 +136,48 @@ func TestReapKeepsLeasesAndSessionsDistinct(t *testing.T) {
 	}
 	if _, ok, _ := s.GetSession(ctx(), "x"); ok {
 		t.Fatalf("session x still present after ReapSessions")
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestReapPreservesConcurrentRenewalAfterBatchFailure(t *testing.T) {
+	g := newFakeGit()
+	writer := NewWithRunner(g.run, "")
+	now := time.Unix(1000, 0)
+	for _, id := range []string{"renewed", "expired", "unknown"} {
+		ttl := int64(10)
+		if id == "unknown" {
+			ttl = 0
+		}
+		if _, err := writer.Acquire(ctx(), Record{ID: id, TreeGlobs: []string{id}, Holder: "h", AcquiredAt: 100, TTLSeconds: ttl}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	injected := false
+	s := NewWithStdinRunner(g.run, func(c context.Context, dir, stdin string, args ...string) (string, int, error) {
+		if len(args) == 2 && args[0] == "update-ref" && args[1] == "--stdin" && !injected {
+			injected = true
+			// Snapshot cost is constant: no per-lease rev-parse/cat-file spawns.
+			want := [][]string{{"for-each-ref", "--format=%(refname)", refPrefix}, {"cat-file", "--batch"}}
+			if !reflect.DeepEqual(g.calls, want) {
+				t.Fatalf("snapshot calls = %v, want %v", g.calls, want)
+			}
+			// Advance the same ref after the expiry/OID snapshot but before deletion.
+			if _, err := writer.Acquire(c, Record{ID: "renewed", TreeGlobs: []string{"renewed"}, Holder: "h", AcquiredAt: now.Unix(), TTLSeconds: 3600}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return g.runStdin(c, dir, stdin, args...)
+	}, "")
+	g.calls = nil
+	reaped, err := s.Reap(ctx(), now)
+	if !injected || err == nil || !reflect.DeepEqual(reaped, []string{"expired"}) {
+		t.Fatalf("injected=%v reaped=%v err=%v; want refused renewal and only expired reaped", injected, reaped, err)
+	}
+	if rec, ok, err := s.Get(ctx(), "renewed"); err != nil || !ok || rec.Expired(now) {
+		t.Fatalf("renewed lease lost: rec=%+v ok=%v err=%v", rec, ok, err)
+	}
+	if _, ok, err := s.Get(ctx(), "unknown"); err != nil || !ok {
+		t.Fatalf("unknown TTL0 lease lost: ok=%v err=%v", ok, err)
 	}
 }

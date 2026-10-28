@@ -91,7 +91,7 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 		ref := args[2]
 		id, ok := f.refs[ref]
 		if !ok {
-			return "", 1, nil
+			id = ref // cat-file also accepts an immutable object ID.
 		}
 		blob, ok := f.blobs[id]
 		if !ok {

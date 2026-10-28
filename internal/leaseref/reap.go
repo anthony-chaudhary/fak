@@ -10,33 +10,83 @@ package leaseref
 // SESSION-side reaper that previously did not exist at all, so a crashed node's descriptor
 // no longer lingers under refs/fak/locks/session-* indefinitely.
 //
-// Reaping is an ordinary converging ref delete (update-ref -d), so it is BEST-EFFORT and
-// IDEMPOTENT: two peers racing the same reap each just delete an already-absent ref, which
-// Release / RemoveSession treat as the already-reaped success state. A per-id delete
-// failure is collected (errors.Join) and never aborts the sweep, so one unreapable ref
-// does not strand the rest. The namespace split is preserved by construction — Reap reads
-// Live (lock leases only; session refs are filtered out) and ReapSessions reads
-// LiveSessions (session refs only) — so neither reaper ever cross-deletes the other kind.
+// Lock-lease reaping is guarded by the immutable OID whose expiry was checked:
+// a concurrently renewed lease survives both batch deletion and its CAS fallback.
+// Session reaping retains its existing best-effort, idempotent delete behavior.
+// The namespace split is preserved: Live scans lock leases, LiveSessions sessions.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
-// Reap deletes every LOCK-LEASE record expired at time now and returns the ids actually
-// reaped. It reads Live (the live-vs-expired partition over refs/fak/locks/<id>, session
-// refs excluded) then deletes each expired id. A read failure from Live is returned with
-// no ids reaped; a per-id delete failure is joined into err and never aborts the sweep.
-// Safe to call concurrently with a peer's reap: each delete is idempotent.
+// Reap deletes expired LOCK-LEASE records using the immutable blob OIDs whose
+// expiry was checked. The normal path uses one ref listing, one batch blob read,
+// and one guarded batch delete, regardless of the expired backlog size.
 func (s *Store) Reap(ctx context.Context, now time.Time) (reaped []string, err error) {
-	_, expired, lerr := s.Live(ctx, now)
-	if lerr != nil {
-		return nil, lerr
+	var observed []observedRecord
+	var ok bool
+	if s.runStdin != nil {
+		observed, ok = s.batchReadObservedRecords(ctx)
 	}
-	return s.reapRefs(ctx, expired, "reap", func(id string) string { return refPrefix + id }, s.Release)
+	if !ok {
+		// Preserve the existing missing/corrupt-entry skip behavior. Pin each
+		// fallback read to its resolved OID, never to the mutable ref name.
+		observed, err = listRefs(ctx, s, isLeaseRef, func(ctx context.Context, ref string) (observedRecord, error) {
+			oid, exists, rerr := s.currentOID(ctx, ref)
+			if rerr != nil {
+				return observedRecord{}, rerr
+			}
+			if !exists {
+				return observedRecord{}, fmt.Errorf("lease %s vanished", ref)
+			}
+			rec, rerr := s.readRef(ctx, oid)
+			return observedRecord{ref: ref, oid: oid, record: rec}, rerr
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(observed, func(i, j int) bool { return observed[i].ref < observed[j].ref })
+	var ids, refs, oids []string
+	var errs []error
+	var batch strings.Builder
+	for _, row := range observed {
+		if !row.record.Expired(now) {
+			continue
+		}
+		// The source ref, not the payload's possibly inconsistent ID, owns
+		// this observation. Keep it paired with the exact batch header OID.
+		ids = append(ids, leaseIDFromRef(row.ref))
+		refs, oids = append(refs, row.ref), append(oids, row.oid)
+		fmt.Fprintf(&batch, "delete %s %s\n", row.ref, row.oid)
+	}
+	if len(ids) == 0 {
+		return nil, errors.Join(errs...)
+	}
+	if s.runStdin != nil {
+		_, code, berr := s.runStdin(ctx, s.dir, batch.String(), "update-ref", "--stdin")
+		if berr == nil && code == 0 {
+			return ids, errors.Join(errs...)
+		}
+	}
+	// Preserve the same expected OIDs after any batch failure. Never degrade
+	// to Release or an unguarded delete, even when a peer has renewed a lease.
+	for i, id := range ids {
+		deleted, derr := s.casDelete(ctx, refs[i], oids[i])
+		if derr != nil {
+			errs = append(errs, fmt.Errorf("reap %s: %w", id, derr))
+		} else if !deleted {
+			errs = append(errs, fmt.Errorf("reap %s: expected-OID delete refused; re-read before retry", id))
+		} else {
+			reaped = append(reaped, id)
+		}
+	}
+	return reaped, errors.Join(errs...)
 }
 
 // ReapSessions deletes every SESSION descriptor expired at time now and returns the ids
