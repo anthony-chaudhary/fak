@@ -462,6 +462,77 @@ var (
 	cudaFuncStart   = regexp.MustCompile(`(?m)^(?:extern "C" |static )?[A-Za-z_][\w *&:<>,]*?\b(\w+)\([^;]*?\)\s*\{`)
 )
 
+// cudaLaunchTimingName preserves semantic profile rows for the exact source
+// specializations that intentionally differ from their CUDA function names.
+// Keep paths and template arguments explicit: a suffix rule would hide drift.
+func cudaLaunchTimingName(path, launch, kernel string) string {
+	launch = strings.Join(strings.Fields(strings.TrimSuffix(launch, "<<<")), "")
+	aliases := map[string]string{
+		"cuda/quant_matmul.cuh:k_q5k_gemm<4>": "k_q5k_gemm_panel",
+		"cuda/quant_matmul.cuh:k_q6k_gemm<4>": "k_q6k_gemm_panel",
+		"cuda/q4k_fp8lt.cuh:amax<true>":       "q4k_fp8lt_weight_amax",
+		"cuda/q4k_fp8lt.cuh:amax<false>":      "q4k_fp8lt_activation_amax",
+		"cuda/q4k_fp8lt.cuh:finish_scales":    "q4k_fp8lt_scales",
+		"cuda/q4k_fp8lt.cuh:convert<true>":    "q4k_fp8lt_dequant",
+		"cuda/q4k_fp8lt.cuh:convert<false>":   "q4k_fp8lt_quantize",
+	}
+	if name, ok := aliases[path+":"+launch]; ok {
+		return name
+	}
+	return kernel
+}
+
+func cudaBLASTimingValid(path, call, name string) bool {
+	semanticMatmul := path == "cuda/q4k_fp8lt.cuh" && call == "cublasLtMatmul" && name == "q4k_fp8lt_matmul"
+	return (strings.HasPrefix(name, "cublas") || semanticMatmul) && KernelOpClass(name) == KernelOpMatmul
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDATimestampSemanticAliases(t *testing.T) {
+	for _, tc := range []struct {
+		path, call, row string
+		want            bool
+	}{
+		{"cuda/q4k_fp8lt.cuh", "cublasLtMatmul", "q4k_fp8lt_matmul", true},
+		{"cuda/other.cuh", "cublasLtMatmul", "q4k_fp8lt_matmul", false},
+		{"cuda/q4k_fp8lt.cuh", "cublasSgemm", "q4k_fp8lt_matmul", false},
+		{"cuda/q4k_fp8lt.cuh", "cublasLtMatmul", "unknown_matmul", false},
+		{"cuda/q4k_fp8lt.cuh", "cublasLtMatmul", "", false},
+		{"cuda/quant_matmul.cuh", "cublasGemmEx", "cublas_gemm_ex", true},
+	} {
+		if got := cudaBLASTimingValid(tc.path, tc.call, tc.row); got != tc.want {
+			t.Errorf("BLAS timing (%s, %s, %q) accepted = %t, want %t", tc.path, tc.call, tc.row, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		name, path, src string
+		want            bool
+	}{
+		{"panel", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, k_q5k_gemm<4><<<grid, block>>>(x));`, true},
+		{"panel whitespace", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q6k_gemm_panel", grid, k_q6k_gemm < 4 > <<<grid, block>>>(x));`, true},
+		{"ordinary template", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm", grid, k_q5k_gemm<1><<<grid, block>>>(x));`, true},
+		{"fp8 conversion", "cuda/q4k_fp8lt.cuh", `FCUDA_TS("q4k_fp8lt_dequant", grid, convert<true><<<grid, block>>>(x));`, true},
+		{"wrong specialization", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, k_q5k_gemm<1><<<grid, block>>>(x));`, false},
+		{"wrong source", "cuda/other.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, k_q5k_gemm<4><<<grid, block>>>(x));`, false},
+		{"wrong row", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q6k_gemm_panel", grid, k_q5k_gemm<4><<<grid, block>>>(x));`, false},
+		{"unknown alias", "cuda/quant_matmul.cuh", `FCUDA_TS("k_new_panel", grid, k_new<4><<<grid, block>>>(x));`, false},
+		{"untimed", "cuda/quant_matmul.cuh", `k_q5k_gemm<4><<<grid, block>>>(x);`, false},
+		{"previous wrapper", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, noop()); k_q5k_gemm<4><<<grid, block>>>(x);`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			matches := cudaLaunch.FindAllStringSubmatchIndex(tc.src, -1)
+			if len(matches) != 1 {
+				t.Fatalf("launch matches = %d, want 1", len(matches))
+			}
+			m := matches[0]
+			want := cudaLaunchTimingName(tc.path, tc.src[m[0]:m[1]], tc.src[m[4]:m[5]])
+			if got := cudaTSEnclosing(tc.src, m[0]) == want; got != tc.want {
+				t.Fatalf("timing accepted = %t, want %t (expected row %q)", got, tc.want, want)
+			}
+		})
+	}
+}
+
 // cudaTSEnclosing returns the FCUDA_TS name whose argument list holds offset
 // at, or "" when the call sits outside every FCUDA_TS statement.
 func cudaTSEnclosing(src string, at int) string {
@@ -505,8 +576,9 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 		for _, m := range cudaLaunch.FindAllStringSubmatchIndex(src, -1) {
 			launches++
 			kernel := src[m[4]:m[5]]
-			if got := cudaTSEnclosing(src, m[0]); got != kernel {
-				t.Errorf("%s:%d launch of %s is timed as %q; wrap it in FCUDA_TS(%q, grid, ...)", path, at(src, m[0]), kernel, got, kernel)
+			want := cudaLaunchTimingName(path, src[m[0]:m[1]], kernel)
+			if got := cudaTSEnclosing(src, m[0]); got != want {
+				t.Errorf("%s:%d launch of %s is timed as %q; wrap it in FCUDA_TS(%q, grid, ...)", path, at(src, m[0]), kernel, got, want)
 			}
 		}
 		for _, m := range cudaBLASCall.FindAllStringSubmatchIndex(src, -1) {
@@ -515,8 +587,8 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 			}
 			blas++
 			got := cudaTSEnclosing(src, m[0])
-			if !strings.HasPrefix(got, "cublas") || KernelOpClass(got) != KernelOpMatmul {
-				t.Errorf("%s:%d %s is timed as %q; want a cublas* row that classifies as matmul", path, at(src, m[0]), src[m[2]:m[3]], got)
+			if !cudaBLASTimingValid(path, src[m[2]:m[3]], got) {
+				t.Errorf("%s:%d %s is timed as %q; want a cublas* or exact semantic row that classifies as matmul", path, at(src, m[0]), src[m[2]:m[3]], got)
 			}
 		}
 		for _, m := range cudaAsyncCopy.FindAllStringSubmatchIndex(src, -1) {
@@ -570,6 +642,8 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 // dtype conversions, dequantization and activation quantization, elementwise
 // glue, gathers and status publication.
 var cudaKernelOtherAllowlist = map[string]bool{
+	"q4k_fp8lt_weight_amax": true, "q4k_fp8lt_activation_amax": true, "q4k_fp8lt_scales": true,
+	"q4k_fp8lt_dequant": true, "q4k_fp8lt_quantize": true,
 	"k_add": true, "k_add_bias": true, "k_copyrow": true, "k_f32_to_f16": true, "k_f32_to_f16_T": true,
 	"k_fp16_split": true, "k_nvfp4_lt_swizzle_scales": true, "k_q2k_dequant_transient": true,
 	"k_q4k_coeffs": true, "k_q4k_dequant_transient": true, "k_q8_dequant_transient": true,
@@ -604,6 +678,7 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
+		"k_q5k_gemm_panel": KernelOpMatmul, "k_q6k_gemm_panel": KernelOpMatmul, "q4k_fp8lt_matmul": KernelOpMatmul,
 		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec,
 		"k_awq_gemv": KernelOpMatvec, "k_rex_gemv_mxfp4_e8m0": KernelOpMatvec, "k_rex_gemv_fp8_block32_e8m0": KernelOpMatvec,
 		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
