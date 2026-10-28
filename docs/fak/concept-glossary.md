@@ -1903,3 +1903,10 @@ Model.newBackendSessionChecked is the shared private implementation of checked H
 Model.NewBackendSessionCheckedDeferredState constructs a checked HAL model.Session without the eager Qwen3.5-hybrid zero conv/recurrent upload; the caller must install snapshot device state through PrefixSnapshot.Restore before forward, otherwise the first forward fails closed with the missing-Qwen35-GDN-backend-state refusal.
 
 **Distinct from:** Not NewBackendSessionChecked or newBackendSessionChecked (eager zero-state construction): the deferred variant skips initQwen35HALState at construction because the warm prefix-restore path immediately replaces it with the snapshot's own device state, so the eager per-linear-layer zero pair would be uploaded and freed unread (fak#13801).
+
+
+### ComputeCapability
+
+NVML-reported CUDA compute capability of a bound GPU row, encoded as major*10+minor (120 = sm_120).
+
+**Distinct from:** Observed per-device property on gpubinding rows, not an admission threshold: MinComputeCapability is the floor this value must meet; capability-floor is the policy side.
