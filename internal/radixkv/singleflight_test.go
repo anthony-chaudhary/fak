@@ -737,13 +737,27 @@ func TestPrefixFlightGroupSharedPrefixContract(t *testing.T) {
 		if callbacks.Load() != 1 {
 			t.Fatalf("prefill callbacks=%d, want 1", callbacks.Load())
 		}
-		bytesPerClone := publishedBytes.Load()
+		published := publishedBytes.Load()
+		if published <= 0 {
+			t.Fatalf("publication payload bytes=%d, want positive", published)
+		}
+		// A concurrent follower copies only the retained dense prefix when the
+		// strict dense-prefix contract applies; unsupported state falls back to
+		// the full snapshot clone. Derive the follower cost through the same
+		// gate the group uses instead of assuming it equals the publication.
+		refSession := m.NewSession()
+		refSession.Prefill(prompts[0])
+		followerClone := refSession.Cache.Clone().ClonePayloadBytes()
+		if cp, ok := refSession.Cache.TryCloneDensePrefixExact(len(common)); ok {
+			followerClone = cp.ClonePayloadBytes()
+		}
 		// One follower always clones while both are registered. If that read
 		// finishes before the second claims storage, the last follower takes
 		// the publication; overlapping reads retain both follower clones.
 		copied := g.ClonePayloadBytes()
-		if bytesPerClone <= 0 || (copied != 2*bytesPerClone && copied != 3*bytesPerClone) {
-			t.Fatalf("clone payload bytes=%d, want publication plus one or two follower clones (%d or %d)", copied, 2*bytesPerClone, 3*bytesPerClone)
+		wantOne, wantTwo := published+followerClone, published+2*followerClone
+		if copied != wantOne && copied != wantTwo {
+			t.Fatalf("clone payload bytes=%d, want publication plus one or two follower clones (%d or %d)", copied, wantOne, wantTwo)
 		}
 		got[0].kv.Truncate(64)
 		if got[1].kv.Len() != len(common) {
