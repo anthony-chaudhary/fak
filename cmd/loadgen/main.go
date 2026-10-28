@@ -1,7 +1,9 @@
 // Command loadgen is a pure-Go (stdlib-only) load generator for OpenAI-compatible
-// /v1/chat/completions endpoints. It runs a concurrency sweep and writes a MATRIX.json
-// with aggregate decode tok/s and latency percentiles per concurrency point. It is the
-// DGX benchmark's load matrix and needs no Python.
+// /v1/chat/completions endpoints. It runs a concurrency sweep against streaming
+// completions and writes a MATRIX.json with end-to-end output tok/s (wall includes
+// per-request prefill/TTFT), phase-separated decode metrics (TTFT p50/p95, mean ITL,
+// decode tok/s), and latency percentiles per concurrency point. It is the DGX
+// benchmark's load matrix and needs no Python.
 //
 //	go run ./cmd/loadgen -url http://127.0.0.1:8080/v1/chat/completions \
 //	  -model smollm2-135m -concurrency 1,4,16 -requests-per 32 -out MATRIX.json
