@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -179,11 +181,32 @@ func TestGoalTopologyCLIExposesExecutionRoots(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=100ms
 func TestGoalCLIShowsWitnessedLifecycleEvidence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "goals.json")
-	var create bytes.Buffer
-	if code := runGoal(&create, io.Discard, []string{"create", "--registry", path, "--title", "Witness", "--actor", "operator", "--authority", "user"}); code != 0 {
-		t.Fatalf("create=%d", code)
+	repo := t.TempDir()
+	t.Chdir(repo)
+	// TestMain clears repository-locating variables; also keep caller hooks,
+	// signing settings, and templates out of this new fixture repository.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	t.Setenv("GIT_CONFIG_PARAMETERS", "")
+	t.Setenv("GIT_TEMPLATE_DIR", t.TempDir())
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "--quiet")
+	git("-c", "user.name=Goal Fixture", "-c", "user.email=goal-fixture@example.invalid", "commit", "--allow-empty", "-m", "goal witness")
+	commitRef := "commit:" + git("rev-parse", "HEAD")
+	path := filepath.Join(repo, "goals.json")
+	var create, stderr bytes.Buffer
+	if code := runGoal(&create, &stderr, []string{"create", "--registry", path, "--title", "Witness", "--actor", "operator", "--authority", "user"}); code != 0 {
+		t.Fatalf("create=%d stderr=%s", code, stderr.String())
 	}
 	var goal struct {
 		GoalID string `json:"goal_id"`
@@ -191,16 +214,36 @@ func TestGoalCLIShowsWitnessedLifecycleEvidence(t *testing.T) {
 	if err := json.Unmarshal(create.Bytes(), &goal); err != nil {
 		t.Fatal(err)
 	}
-	base := []string{"transition", "--registry", path, "--id", goal.GoalID, "--lifecycle", "achieved", "--evidence-author", "judge", "--evidence-ref", "commit:green"}
-	if code := runGoal(io.Discard, io.Discard, append(base, "--evidence-class", "agent_assertion")); code != 1 {
-		t.Fatalf("agent assertion=%d", code)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code := runGoal(io.Discard, io.Discard, append(base, "--evidence-class", "independent_witness")); code != 0 {
-		t.Fatalf("witness=%d", code)
+	base := []string{"transition", "--registry", path, "--id", goal.GoalID, "--lifecycle", "achieved", "--evidence-author", "judge"}
+	for _, refusal := range []struct{ class, reference, diagnostic string }{
+		{"agent_assertion", commitRef, "requires independent_witness"},
+		{"independent_witness", "commit:" + strings.Repeat("0", 40), "does not resolve"},
+	} {
+		stderr.Reset()
+		args := append(base, "--evidence-class", refusal.class, "--evidence-ref", refusal.reference)
+		if code := runGoal(io.Discard, &stderr, args); code != 1 || !strings.Contains(stderr.String(), refusal.diagnostic) {
+			t.Fatalf("%s %s: code=%d stderr=%s", refusal.class, refusal.reference, code, stderr.String())
+		}
+		after, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatalf("refused %s %s mutated registry", refusal.class, refusal.reference)
+		}
+	}
+	stderr.Reset()
+	if code := runGoal(io.Discard, &stderr, append(base, "--evidence-class", "independent_witness", "--evidence-ref", commitRef)); code != 0 {
+		t.Fatalf("witness=%d stderr=%s", code, stderr.String())
 	}
 	var out bytes.Buffer
-	if code := runGoal(&out, io.Discard, []string{"show", "--registry", path, "--id", goal.GoalID}); code != 0 {
-		t.Fatalf("show=%d", code)
+	stderr.Reset()
+	if code := runGoal(&out, &stderr, []string{"show", "--registry", path, "--id", goal.GoalID}); code != 0 {
+		t.Fatalf("show=%d stderr=%s", code, stderr.String())
 	}
 	var got struct {
 		Goal            goalregistry.Goal              `json:"goal"`
@@ -209,10 +252,11 @@ func TestGoalCLIShowsWitnessedLifecycleEvidence(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Goal.Lifecycle != goalregistry.Achieved || len(got.OutcomeEvidence) != 1 || got.OutcomeEvidence[0].Reference != "commit:green" {
+	if got.Goal.Lifecycle != goalregistry.Achieved || len(got.OutcomeEvidence) != 1 || got.OutcomeEvidence[0].Reference != commitRef {
 		t.Fatalf("show=%#v", got)
 	}
-	if code := runGoal(io.Discard, io.Discard, []string{"reopen", "--registry", path, "--id", goal.GoalID, "--evidence-author", "operator", "--evidence-ref", "decision:retry"}); code != 0 {
-		t.Fatalf("reopen=%d", code)
+	stderr.Reset()
+	if code := runGoal(io.Discard, &stderr, []string{"reopen", "--registry", path, "--id", goal.GoalID, "--evidence-author", "operator", "--evidence-ref", "decision:retry"}); code != 0 {
+		t.Fatalf("reopen=%d stderr=%s", code, stderr.String())
 	}
 }
