@@ -8,6 +8,10 @@ type tensorTraits struct {
 }
 
 var ggufTypeTraits = map[TensorType]tensorTraits{
+	// Integer auxiliaries have byte geometry, not a host float decoder.
+	TensorType(26): {1, 4, false}, // GGML I32
+	TensorType(27): {1, 8, false}, // GGML I64
+
 	TensorF32:     {1, 4, false},
 	TensorF16:     {1, 2, false},
 	TensorBF16:    {1, 2, false},
