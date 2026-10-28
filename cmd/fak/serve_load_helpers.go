@@ -110,6 +110,36 @@ func serveArtifactNativeKQuant(backend compute.Backend, artifact ggufload.Artifa
 	return !q6 || serveNativeDenseQ6K(backend)
 }
 
+// serveArtifactMixedQuantHostFallback reports whether a packed mixed(Q2_K+Q3_K[+Q6_K]) artifact
+// may enter the resident-Q4_K load arm on a backend that executes the DENSE Q2_K side natively
+// but has no qualified Q3_K matmul route (the CUDA first-light class, fak#12640). It is a storage
+// decision, not a kernel claim: the Q2_K side stays packed device-resident through the selective
+// Q2_K residency option, routed-expert slabs keep their raw source bytes (the host-down fallback
+// decodes them per projection at execution time), and any DENSE Q3_K weight takes the proven
+// dequant-to-Q8 route whose expanded charge both the estimate and the fit guards carry. The
+// native-family gate (serveArtifactNativeKQuant) is untouched: a backend WITH a qualified Q3_K
+// probe still prefers blanket packed residency, and dtype presence alone can never relabel a
+// missing Q3 execution probe into one.
+func serveArtifactMixedQuantHostFallback(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
+	if backend == nil || os.Getenv("FAK_Q4K") == "0" ||
+		!backend.Caps().DeviceMemory || !backend.Caps().UploadDtype {
+		return false
+	}
+	q6 := false
+	switch artifact.Name {
+	case "mixed(Q2_K+Q3_K)":
+	case "mixed(Q2_K+Q3_K+Q6_K)":
+		q6 = true
+	default:
+		return false
+	}
+	native, ok := backend.(q2kCapableBackend)
+	if !ok || !native.SupportsQ2K() || !compute.BackendSupportsDeviceWeightDtype(backend, compute.Q2_K) {
+		return false
+	}
+	return !q6 || serveNativeDenseQ6K(backend)
+}
+
 // serveResidentQ4KLoadOptions keeps loader and admission storage selection on
 // the same backend/artifact predicates. Sharding and streaming remain explicit
 // additions owned by their respective load paths.
@@ -168,7 +198,8 @@ func serveArtifactResidentQ4K(backend compute.Backend, artifact ggufload.Artifac
 		// checkpoint on a non-Metal host.
 		return backend == nil && os.Getenv("FAK_Q4K") != "0"
 	}
-	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL" || serveArtifactNativeKQuant(backend, artifact)) && serveDeviceResidentQ4K(backend)
+	return (artifact.Q4KResident || artifact.Recipe == "UD-Q2_K_XL" || serveArtifactNativeKQuant(backend, artifact) ||
+		serveArtifactMixedQuantHostFallback(backend, artifact)) && serveDeviceResidentQ4K(backend)
 }
 
 func servePQ2Artifact(artifact ggufload.ArtifactQuant) bool { return artifact.Name == "PQ2_0" }
@@ -561,6 +592,8 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 			// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
 			if serveArtifactNativeKQuant(backend, artifactQuant) {
 				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident %s on backend %q (eligible native packed weights; canonical conversion fallback retained)", artifactQuant.Name, backend.Name())))
+			} else if serveArtifactMixedQuantHostFallback(backend, artifactQuant) {
+				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident %s on backend %q (packed Q2_K device-native; dense Q3_K converted to Q8 with charged bytes; routed experts retain raw source bytes)", artifactQuant.Name, backend.Name())))
 			} else {
 				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)", backend.Name())))
 			}
