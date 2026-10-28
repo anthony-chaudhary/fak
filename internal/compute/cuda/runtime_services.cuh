@@ -171,13 +171,21 @@ extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
 }
 
-extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
+extern "C" int fcuda_d2h_on_checked(int device, void *h, const void *d, size_t n) {
   fcuda_device_scope scope(device);
-  if (scope.status() != 0) return;
+  if (scope.status() != 0) return scope.status();
   fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
-  if (e == cudaSuccess) g_host_bytes += n;
-  else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+  if (e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+    return (int)e + 1000;
+  }
+  g_host_bytes += n;
+  return 0;
+}
+
+extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
+  (void)fcuda_d2h_on_checked(device, h, d, n);
 }
 
 extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {

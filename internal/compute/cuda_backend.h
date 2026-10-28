@@ -49,6 +49,10 @@ void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *largestBucke
 /* fcuda_panel_peak_reset restarts the peak of panel bytes held plus cached. */
 void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
+/* Checked D2H: 0 only after a completed copy; otherwise 1000 + cudaError_t
+ * from device selection or the copy. Bytes count only successful copies.
+ * The ordinary helper uses the current device, like its legacy void wrapper. */
+int fcuda_d2h_checked(void *h, const void *d, size_t bytes);
 void fcuda_d2h(void *h, const void *d, size_t bytes);
 void fcuda_d2d(void *dst, const void *src, size_t bytes);
 void fcuda_sync(void);
@@ -130,6 +134,10 @@ int fcuda_set_device(int device);
 void *fcuda_malloc_on(int device, size_t bytes);
 void fcuda_free_on(int device, void *d);
 void fcuda_h2d_on(int device, void *d, const void *h, size_t bytes);
+/* Select and copy in one invocation, using the existing caller-device scope.
+ * Uses the same checked status encoding. Scope restoration failures remain
+ * diagnostic-only, as in the legacy helpers; they do not undo a completed copy. */
+int fcuda_d2h_on_checked(int device, void *h, const void *d, size_t bytes);
 void fcuda_d2h_on(int device, void *h, const void *d, size_t bytes);
 void fcuda_d2d_on(int device, void *dst, const void *src, size_t bytes);
 

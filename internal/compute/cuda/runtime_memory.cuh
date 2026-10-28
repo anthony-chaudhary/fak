@@ -249,11 +249,18 @@ extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
   if (e == cudaSuccess) g_h2d_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
 }
-extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
+extern "C" int fcuda_d2h_checked(void *h, const void *d, size_t n) {
   fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost);
-  if (e == cudaSuccess) g_host_bytes += n;
-  else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+  if (e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+    return (int)e + 1000;
+  }
+  g_host_bytes += n;
+  return 0;
+}
+extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
+  (void)fcuda_d2h_checked(h, d, n);
 }
 // Device-to-device copies stay on the default stream but are ASYNC w.r.t. the host: a
 // synchronous cudaMemcpy fences the whole device, and RoPE + every KV append issues one,
