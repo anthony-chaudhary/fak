@@ -118,3 +118,18 @@ is gated on two external actions.
    `FAK_CUDA_ARCH=sm_120 FAK_CUDA_ACCEPT_HF=/srv/models/Qwen2.5-1.5B-Instruct
    make cuda-accept` (PATH/CUDA_HOME = /opt/cuda); append the verbatim
    per-family verdicts and full log to this directory.
+
+## Status update - 2026-10-28T14:50Z (post-cutoff re-probe; goal pi-goal-rtx5090-sm120-cuda-accept-rerun)
+
+The two source prerequisites named in Step 1 have since landed on public main; device availability and the runs themselves remain unverified. This section distinguishes the resolved from the open.
+
+| Prerequisite | Landed commit | Verification (re-probed 2026-10-28 ~14:26Z) |
+| --- | --- | --- |
+| Typed sm_120 device receipt (TestCUDADeviceReceipt, internal/compute) | e7a506c76c | git merge-base --is-ancestor e7a506c76c origin/main exit 0; git grep -n TestCUDADeviceReceipt origin/main -- internal/compute/ -> cuda_device_receipt_test.go:14 |
+| Ninth acceptance family (run_nvfp4_w4a4_family, tools/cuda_acceptance.sh) | 99d9a5b383 | git merge-base --is-ancestor 99d9a5b383 origin/main exit 0; git grep -n run_nvfp4_w4a4_family origin/main -- tools/cuda_acceptance.sh -> lines 35/60/72 |
+
+Public main at re-probe: 88b4db37b7a596ce6d2259c209ff7d25abe4881d. The Step-1 source blocker is therefore RESOLVED: a witnessed tree now exists to sync and run from.
+
+Still open (unchanged from cutoff):
+- Device availability: the standing fak service still holds the GPU (re-probed 14:25Z: 22,862/24,463 MiB used, utilization 0%, service active, PID 15768, boot d1026348-79cd-485e-a9b5-c8f5da69e578, unit sha256 b6195d3593d9cfa0fcffa2d6caa7b82cdb1488823d0ec62d66f2e8603e517b40, drop-ins 70-workspace-admission/85-cuda-device-init/90-raider-qualified-model). A peer maintain lease hwl-66b7787b64ae49fc (holder raider-coldprefill-goal) fences the node until 2026-10-28T17:53:11Z; no exclusive action is taken before its expiry. Re-probe also found the service idle (0 active engine requests; single loopback probe connection) and that host router inference routes through the cloud modular backend (live TCP census 14:40Z: router outbound only to 207.210.107.x:443), so stopping it under our own lease breaks no known agent session.
+- Execution: all nine families remain NOT_RUN; no cold-prefill or decode measurement exists yet. The Step-3 re-dispatch recipe below is unchanged and now executable end-to-end once the lease fence clears.
