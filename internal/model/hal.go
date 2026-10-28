@@ -47,6 +47,21 @@ func (*ModelWeightsClosedError) Error() string { return "model: weights are clos
 // upload or generic operator runs. NewBackendSession preserves the established
 // panic-on-invalid-construction API by wrapping this checked entry point.
 func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, err error) {
+	return m.newBackendSessionChecked(be, true)
+}
+
+// NewBackendSessionCheckedDeferredState is NewBackendSessionChecked without the
+// eager Qwen3.5-hybrid zero recurrent state. The prefix-restore path constructs a
+// session and immediately installs a snapshot's own device state through
+// PrefixSnapshot.Restore, so the eager zero conv/recurrent pair per linear layer
+// would be uploaded and then freed unread (fak#13801). A caller that constructs
+// this way and never restores state gets the ordinary fail-closed
+// "validated Qwen35 GDN backend state is missing" refusal on the first forward.
+func (m *Model) NewBackendSessionCheckedDeferredState(be compute.Backend) (session *Session, err error) {
+	return m.newBackendSessionChecked(be, false)
+}
+
+func (m *Model) newBackendSessionChecked(be compute.Backend, materializeQwen35State bool) (session *Session, err error) {
 	if be == nil {
 		be = compute.Default()
 	}
@@ -65,14 +80,14 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (session *Session, 
 			panic(cleanup.value)
 		}
 	}()
-	session, err = m.newBackendSessionOwned(scope, be)
+	session, err = m.newBackendSessionOwned(scope, be, materializeQwen35State)
 	// Include construction rollback defers in the completion boundary. Neither
 	// a primary panic nor Goexit can return a false (nil session, nil error).
 	completed = true
 	return session, err
 }
 
-func (m *Model) newBackendSessionOwned(scope *backendExecutionScope, be compute.Backend) (*Session, error) {
+func (m *Model) newBackendSessionOwned(scope *backendExecutionScope, be compute.Backend, materializeQwen35State bool) (*Session, error) {
 	if !m.holdModelWeights() {
 		return nil, &ModelWeightsClosedError{}
 	}
@@ -129,10 +144,13 @@ func (m *Model) newBackendSessionOwned(scope *backendExecutionScope, be compute.
 		gr.GraphReset()
 	}
 	s.initMixedQKV()
-	if m.Cfg.IsQwen35Hybrid() {
+	if m.Cfg.IsQwen35Hybrid() && materializeQwen35State {
 		// ValidateBackendForwardPath already proved this exact structural capability and
 		// path identity before KV or weight allocation.
 		s.initQwen35HALState(be.(Qwen35GDNBackend))
+	}
+	if m.Cfg.IsQwen35Hybrid() && !materializeQwen35State {
+		s.qwen35StateDeferred = true
 	}
 	if err := m.attachSharedExpertRing(s); err != nil {
 		return nil, err

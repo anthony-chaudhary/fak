@@ -16381,6 +16381,11 @@
           "category": "incidental",
           "reason": "Formats study inventory language counts for markdown output, not prompt rendering or materialization.",
           "token": "renderlanguages"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean constructor parameter selecting eager vs deferred Qwen3.5 zero-state materialization; a local signature detail of newBackendSessionChecked/newBackendSessionOwned, not a reusable concept.",
+          "token": "materializeQwen35State"
         }
       ],
       "id": "render-materialize",
@@ -16427,6 +16432,7 @@
         "incumbentRenderSummary",
         "indexrenderhits",
         "materializePanelRows",
+        "materializeQwen35State",
         "materializeRows",
         "materializeSessionMoveCheckpoint",
         "materialized",

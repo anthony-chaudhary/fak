@@ -1,0 +1,81 @@
+{
+  "schema": "fak-vulkan-warm-disk-restart/2",
+  "issue": 13801,
+  "status": "PASS",
+  "scope": "Source-bound physical Vulkan warm-prefix-disk restart witness on AMD Strix Halo (gfx1151). Two fresh required-device processes; the warm process restores the cold process's persisted SSD prefix snapshot and must upload exactly the continuation state the snapshot carries, with no eager zero-state surplus.",
+  "observed_utc": "2026-10-16T18:24:00Z",
+  "source": {
+    "repository": "anthony-chaudhary/fak",
+    "commit": "f137bd7840025ce1643255665aaa64b7d96fffd3",
+    "base_commit": "a04eb974cb6b8ab581944183a409ca4e7d98c09e",
+    "source_archive_sha256": "4141070ddcb90e1dbeb4defcec4ce5ed3c0f0f3f92a50da60bd6cdbcbb4c884f",
+    "source_modified": false,
+    "executable_sha256": "sha256:1df41ce02c909bdde6e50c7449367efe5860deed1b8e3056d67fa5256edc6013",
+    "shader_bundle_sha256": "sha256:b924bd1cdf1f84b260cfeb9b37106abdd041e58bf6824292a6981651880d193a"
+  },
+  "hardware": {
+    "backend": "vulkan",
+    "tier": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "device_id": "0x1586",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "runtime": "vulkan-1.4.354",
+    "kernel": "7.2.3-arch1-3",
+    "host": "strix-halo-fak"
+  },
+  "witness": {
+    "test": "TestInKernelWarmPrefixDiskAcrossProcessesVulkan",
+    "command": "FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_DISPATCH_PROFILE=1 FAK_VULKAN_EXPECT_DEVICE='RADV STRIX_HALO' ./build/agent.test -test.run=^TestInKernelWarmPrefixDiskAcrossProcessesVulkan$ -test.count=1 -fak-vulkan-warm-disk-restart=true",
+    "verdict": "PASS"
+  },
+  "expected": {
+    "kv_transfer_bytes": 164544,
+    "kv_transfer_count": 9,
+    "cold_d2h_bytes": 167104,
+    "cold_d2h_count": 11,
+    "warm_h2d_bytes": 164544,
+    "warm_h2d_count": 9
+  },
+  "observed": {
+    "cold": {
+      "disk_outcome": "persisted",
+      "disk_tier": "local_ssd_l3",
+      "write_bytes": 246567,
+      "prefilled_tokens": 833,
+      "stable_tokens": 833,
+      "matched_tokens": 833,
+      "compute_dispatches": 110,
+      "dispatch_submits": 77,
+      "h2d_count": 59,
+      "h2d_bytes": 216128,
+      "d2h_count": 11,
+      "d2h_bytes": 167104
+    },
+    "warm": {
+      "disk_outcome": "restored",
+      "disk_tier": "local_ssd_l3",
+      "read_bytes": 246567,
+      "prefilled_tokens": 0,
+      "stable_tokens": 833,
+      "matched_tokens": 833,
+      "compute_dispatches": 0,
+      "dispatch_submits": 7,
+      "h2d_count": 9,
+      "h2d_bytes": 164544,
+      "d2h_count": 0,
+      "d2h_bytes": 0
+    },
+    "token_parity": true,
+    "logit_parity": true,
+    "continuation_logit_parity": true
+  },
+  "delta": {
+    "warm_h2d_count_before": 15,
+    "warm_h2d_count_after": 9,
+    "warm_h2d_bytes_before": 169152,
+    "warm_h2d_bytes_after": 164544,
+    "removed_transfers": 6,
+    "removed_bytes": 4608,
+    "note": "The surplus was the eager zero conv (512 B) + recurrent (1024 B) upload per linear-attention layer performed by initQwen35HALState in the session constructor, immediately freed and replaced by PrefixSnapshot.Restore. The deferred-state constructor skips it for snapshot-restore construction sites."
+  }
+}

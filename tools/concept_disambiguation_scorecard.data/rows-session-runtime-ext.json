@@ -123,7 +123,9 @@
       "distinction": "Not BatchSession (multi-lane decode): this is one fresh session with an empty KV whose math is offloaded to a hardware backend rather than the CPU reference path.",
       "distinct_from": [
         "new-session",
-        "BatchSession (batched decode)"
+        "BatchSession (batched decode)",
+        "newbackendsessionchecked",
+        "newbackendsessioncheckeddeferredstate"
       ],
       "aliases": [],
       "grounding": "newbackendsession",

@@ -457,6 +457,77 @@ func TestQwen35GDNOperationErrorClosesSessionWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestQwen35DeferredStateConstructorSkipsEagerZeroUpload(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	m := NewSynthetic(cfg)
+	be := newRecordingQwen35Backend(m)
+	s, err := m.NewBackendSessionCheckedDeferredState(be)
+	if err != nil {
+		t.Fatalf("NewBackendSessionCheckedDeferredState: %v", err)
+	}
+	defer s.Close()
+	if s.qwen35HAL != nil {
+		t.Fatalf("deferred constructor materialized recurrent state: %#v", s.qwen35HAL)
+	}
+	if !s.qwen35StateDeferred {
+		t.Fatal("deferred constructor did not record the deferred-state marker")
+	}
+	for _, site := range be.sites {
+		if strings.HasPrefix(site, "qwen35-gdn-conv-state layer ") || strings.HasPrefix(site, "qwen35-gdn-recurrent-state layer ") {
+			t.Fatalf("deferred constructor uploaded eager zero state at %q; sites=%v", site, be.sites)
+		}
+	}
+
+	// The ordinary constructor still materializes the zero state, so the deferred
+	// path is an opt-in narrowing rather than a behavior change for every caller.
+	plain := newRecordingQwen35Backend(m)
+	ps, err := m.NewBackendSessionChecked(plain)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+	defer ps.Close()
+	if ps.qwen35HAL == nil || ps.qwen35StateDeferred {
+		t.Fatalf("ordinary constructor state=%#v deferred=%t", ps.qwen35HAL, ps.qwen35StateDeferred)
+	}
+	if !recordedClassSite(plain, compute.MemoryKVCache, "qwen35-gdn-conv-state layer "+itoa(be.linearLayers[0])) {
+		t.Fatalf("ordinary constructor omitted eager zero state; sites=%v", plain.sites)
+	}
+}
+
+func TestQwen35DeferredStateRestoreInstallsSnapshotState(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	be := newRecordingQwen35Backend(m)
+	src, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	src.Prefill([]int{3, 7, 11})
+	snap, err := src.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+
+	target, err := m.NewBackendSessionCheckedDeferredState(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	if err := snap.Restore(target); err != nil {
+		t.Fatalf("restore into deferred session: %v", err)
+	}
+	if target.qwen35HAL == nil || len(target.qwen35HAL.layers) != len(src.qwen35HAL.layers) {
+		t.Fatalf("restore left no recurrent state: %#v", target.qwen35HAL)
+	}
+	for _, layer := range be.linearLayers {
+		state := target.qwen35HAL.layers[layer]
+		if state.conv.Buf() == nil || state.recurrent.Buf() == nil {
+			t.Fatalf("layer %d restored state is incomplete: conv=%v recurrent=%v", layer, state.conv.Buf() != nil, state.recurrent.Buf() != nil)
+		}
+	}
+}
+
 func recordedClassSite(be *recordingQwen35Backend, class compute.MemoryClass, site string) bool {
 	for i := range be.classes {
 		if be.classes[i] == class && be.sites[i] == site {

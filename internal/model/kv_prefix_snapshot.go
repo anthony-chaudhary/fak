@@ -519,6 +519,13 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 		s.halKV, s.halLineage, s.qwen35HAL = p.halKV, p.halLineage, p.qwen35
 		p.halKV, p.qwen35 = nil, nil
 		p.halLineage = tokenLineage{}
+		// A target built by NewBackendSessionCheckedDeferredState carries no eager
+		// zero recurrent state (fak#13801). A hybrid snapshot always carries its own,
+		// so this only fires for a hybrid model whose snapshot has none: materialize
+		// the historical zero state rather than leaving the session unable to forward.
+		if s.qwen35HAL == nil && s.qwen35StateDeferred && s.M != nil && s.M.Cfg.IsQwen35Hybrid() {
+			s.initQwen35HALState(s.Backend.(Qwen35GDNBackend))
+		}
 	}
 	if s.DenseGPULayers == 0 && p.DenseGPULayers != 0 {
 		s.DenseGPULayers = p.DenseGPULayers

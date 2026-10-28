@@ -155,6 +155,12 @@ type Session struct {
 	// Qwen3.5/3.6 linear-attention layer. It is separate from Cache.linear, which is
 	// the legacy CPU/reference object's state and is never consulted by a HAL session.
 	qwen35HAL *qwen35HALState
+	// qwen35StateDeferred records that this session was built by
+	// NewBackendSessionCheckedDeferredState, which skips the eager zero recurrent
+	// state (fak#13801). A restore into such a session must leave it with usable
+	// state, so PrefixSnapshot.Restore backfills the historical zero state when the
+	// snapshot carries none.
+	qwen35StateDeferred bool
 	// qwen35MetalStateIdentity is request-observation state only. Keeping it on
 	// Session lets receipt-opted selector-off Metal control runs own an identity
 	// without fabricating a HAL owner or entering prefix snapshots.

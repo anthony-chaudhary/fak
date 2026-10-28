@@ -1889,3 +1889,17 @@ Associates a Qwen coalesced request with its prepared decode lane and an unknown
 Terminal no-replay sentinel for affected peer or unstarted work in an aborted selected Qwen cohort; the originating unknown panic is retained separately for cleanup-ordered propagation.
 
 **Distinct from:** The selected Qwen cohort's terminal no-replay marker, not retained request/lane state, the V4.1-specific abort marker, or permission to retry through scalar fallback.
+
+
+### newBackendSessionChecked (checked HAL construction core)
+
+Model.newBackendSessionChecked is the shared private implementation of checked HAL session construction: execution-scope allocation, weight holding, KV/weight setup, and optional Qwen3.5-hybrid zero conv/recurrent state materialization, with panic-safe rollback on construction failure.
+
+**Distinct from:** Not NewBackendSessionChecked (public entry point that always materializes the eager zero state) nor NewBackendSessionCheckedDeferredState (deferred variant that skips it): this is the private core both wrappers call, parameterized by whether the eager zero-state upload happens at construction time.
+
+
+### NewBackendSessionCheckedDeferredState (deferred-state HAL construction)
+
+Model.NewBackendSessionCheckedDeferredState constructs a checked HAL model.Session without the eager Qwen3.5-hybrid zero conv/recurrent upload; the caller must install snapshot device state through PrefixSnapshot.Restore before forward, otherwise the first forward fails closed with the missing-Qwen35-GDN-backend-state refusal.
+
+**Distinct from:** Not NewBackendSessionChecked or newBackendSessionChecked (eager zero-state construction): the deferred variant skips initQwen35HALState at construction because the warm prefix-restore path immediately replaces it with the snapshot's own device state, so the eager per-linear-layer zero pair would be uploaded and freed unread (fak#13801).
