@@ -95,16 +95,17 @@ extern "C" int fcuda_mxfp8_cast_f32(const float *input, size_t input_bytes,
     e = cudaStreamIsCapturing(g_stream, &capture);
     if (e != cudaSuccess) return FAK_MXFP8_CAST_CUDA_ERROR_BASE + (int)e;
     if (g_capture_open || capture != cudaStreamCaptureStatusNone) return FAK_MXFP8_CAST_CAPTURE;
-    e = cudaMemsetAsync(device_status, 0, sizeof(uint32_t), g_stream);
+    FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(device_status, 0, sizeof(uint32_t), g_stream));
     if (e != cudaSuccess) return FAK_MXFP8_CAST_CUDA_ERROR_BASE + (int)e;
     const int blocks = p.scale_stride_words * (cols / 128);
-    k_mxfp8_cast_f32<<<blocks, 128, 0, g_stream>>>(input, codes, scales, device_status, rows, cols, p.scale_stride_words);
+    FCUDA_TS("k_mxfp8_cast_f32", blocks, k_mxfp8_cast_f32<<<blocks, 128, 0, g_stream>>>(input, codes, scales, device_status, rows, cols, p.scale_stride_words));
     e = cudaGetLastError();
     // Drain even after a launch error: memset may already be in flight.
     const cudaError_t drain = cudaStreamSynchronize(g_stream);
     if (drain != cudaSuccess) return FAK_MXFP8_CAST_CUDA_ERROR_BASE + (int)drain;
     if (e != cudaSuccess) return FAK_MXFP8_CAST_CUDA_ERROR_BASE + (int)e;
     uint32_t status = 0;
+    fcuda_ts_untimed_transfer();
     e = cudaMemcpy(&status, device_status, sizeof(status), cudaMemcpyDeviceToHost);
     if (e != cudaSuccess) return FAK_MXFP8_CAST_CUDA_ERROR_BASE + (int)e;
     return status ? FAK_MXFP8_CAST_NONFINITE : FAK_MXFP8_CAST_OK;

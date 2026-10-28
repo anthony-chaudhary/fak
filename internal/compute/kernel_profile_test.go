@@ -642,6 +642,7 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 // dtype conversions, dequantization and activation quantization, elementwise
 // glue, gathers and status publication.
 var cudaKernelOtherAllowlist = map[string]bool{
+	"k_kv_store_typed": true, "k_kv_load_typed": true, "k_mxfp8_cast_f32": true,
 	"q4k_fp8lt_weight_amax": true, "q4k_fp8lt_activation_amax": true, "q4k_fp8lt_scales": true,
 	"q4k_fp8lt_dequant": true, "q4k_fp8lt_quantize": true,
 	"k_add": true, "k_add_bias": true, "k_copyrow": true, "k_f32_to_f16": true, "k_f32_to_f16_T": true,
