@@ -107,6 +107,20 @@ func TestQwen38PagedSwapFlagGateRequiresExactNativeMetalPath(t *testing.T) {
 	}
 }
 
+// TestQwen38PagedSwapDecodeTokensPerSecondIsPhasePure pins the known fixture:
+// the phase-pure decode rate is 1000 / mean(inter-token latency ms).
+func TestQwen38PagedSwapDecodeTokensPerSecondIsPhasePure(t *testing.T) {
+	if got := qwen38PagedSwapDecodeTokensPerSecond([]float64{2, 4, 6}); got != 250 {
+		t.Fatalf("ITL [2,4,6]ms -> DecodeTokensPerSecond = %f, want 250 (1000/mean ITL)", got)
+	}
+	if got := qwen38PagedSwapDecodeTokensPerSecond(nil); got != 0 {
+		t.Fatalf("empty ITL list -> DecodeTokensPerSecond = %f, want 0", got)
+	}
+	if got := qwen38PagedSwapDecodeTokensPerSecond([]float64{0, 0}); got != 0 {
+		t.Fatalf("zero ITL list -> DecodeTokensPerSecond = %f, want 0", got)
+	}
+}
+
 func TestQwen38PagedSwapPairFailsClosedBeforeAcceptingInvalidRuntime(t *testing.T) {
 	validSwap := qwen38PagedSwapArm{
 		Pressure:        "ON",

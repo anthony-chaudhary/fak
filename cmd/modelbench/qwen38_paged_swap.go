@@ -69,30 +69,36 @@ type qwen38PagedSwapPair struct {
 }
 
 type qwen38PagedSwapArm struct {
-	Pressure                 string                                  `json:"pressure"`
-	Requests                 []qwen38PagedSwapRequest                `json:"requests"`
-	SessionExecutions        []qwen38PagedSwapSessionExecution       `json:"session_executions"`
-	StateIdentities          []model.Qwen35MetalStateIdentityReceipt `json:"state_identities"`
-	SwapUsage                []modelperfobs.QwenSwapWeeklyUsage      `json:"swap_usage,omitempty"`
-	SwapTotal                int64                                   `json:"swap_total"`
-	ReadmittedTotal          int64                                   `json:"readmitted_total"`
-	SwapBytes                int64                                   `json:"swap_bytes"`
-	RestoredBytes            int64                                   `json:"restored_bytes"`
-	RecomputeTotal           int64                                   `json:"recompute_total"`
-	KVMaxBlocks              int                                     `json:"kv_max_blocks"`
-	PeakRunning              int                                     `json:"peak_running"`
-	PeakUsedBlocks           int                                     `json:"peak_used_blocks"`
-	PeakRSSBytes             uint64                                  `json:"peak_rss_bytes"`
-	TTFTP50Milliseconds      float64                                 `json:"ttft_p50_ms"`
-	TTFTP95Milliseconds      float64                                 `json:"ttft_p95_ms"`
-	ITLP50Milliseconds       float64                                 `json:"itl_p50_ms"`
-	ITLP95Milliseconds       float64                                 `json:"itl_p95_ms"`
-	AggregateTokensPerSecond float64                                 `json:"aggregate_tokens_per_second"`
-	FallbackTotal            int                                     `json:"fallback_total"`
-	ErrorTotal               int                                     `json:"error_total"`
-	RefusalTotal             int                                     `json:"refusal_total"`
-	TeardownMilliseconds     float64                                 `json:"teardown_ms"`
-	TeardownComplete         bool                                    `json:"teardown_complete"`
+	Pressure            string                                  `json:"pressure"`
+	Requests            []qwen38PagedSwapRequest                `json:"requests"`
+	SessionExecutions   []qwen38PagedSwapSessionExecution       `json:"session_executions"`
+	StateIdentities     []model.Qwen35MetalStateIdentityReceipt `json:"state_identities"`
+	SwapUsage           []modelperfobs.QwenSwapWeeklyUsage      `json:"swap_usage,omitempty"`
+	SwapTotal           int64                                   `json:"swap_total"`
+	ReadmittedTotal     int64                                   `json:"readmitted_total"`
+	SwapBytes           int64                                   `json:"swap_bytes"`
+	RestoredBytes       int64                                   `json:"restored_bytes"`
+	RecomputeTotal      int64                                   `json:"recompute_total"`
+	KVMaxBlocks         int                                     `json:"kv_max_blocks"`
+	PeakRunning         int                                     `json:"peak_running"`
+	PeakUsedBlocks      int                                     `json:"peak_used_blocks"`
+	PeakRSSBytes        uint64                                  `json:"peak_rss_bytes"`
+	TTFTP50Milliseconds float64                                 `json:"ttft_p50_ms"`
+	TTFTP95Milliseconds float64                                 `json:"ttft_p95_ms"`
+	ITLP50Milliseconds  float64                                 `json:"itl_p50_ms"`
+	ITLP95Milliseconds  float64                                 `json:"itl_p95_ms"`
+	// AggregateTokensPerSecond is END-TO-END output throughput over the arm wall
+	// (admission wait + prefill + decode); it is NOT decode-only. See
+	// DecodeTokensPerSecond for the phase-pure decode rate.
+	AggregateTokensPerSecond float64 `json:"aggregate_tokens_per_second"`
+	// DecodeTokensPerSecond is the phase-pure decode rate: 1000 divided by the mean
+	// inter-token latency in milliseconds across all requests; 0 when no positive ITL was observed.
+	DecodeTokensPerSecond float64 `json:"decode_tokens_per_second,omitempty"`
+	FallbackTotal         int     `json:"fallback_total"`
+	ErrorTotal            int     `json:"error_total"`
+	RefusalTotal          int     `json:"refusal_total"`
+	TeardownMilliseconds  float64 `json:"teardown_ms"`
+	TeardownComplete      bool    `json:"teardown_complete"`
 }
 
 type qwen38PagedSwapRequest struct {
@@ -465,7 +471,26 @@ func runQwen38PagedSwapArm(m *model.Model, prompts [][]int, pressure bool, maxBl
 	arm.TTFTP50Milliseconds, arm.TTFTP95Milliseconds = qwen38PagedSwapPercentiles(ttft)
 	arm.ITLP50Milliseconds, arm.ITLP95Milliseconds = qwen38PagedSwapPercentiles(itl)
 	arm.AggregateTokensPerSecond = float64(totalTokens) / elapsed.Seconds()
+	arm.DecodeTokensPerSecond = qwen38PagedSwapDecodeTokensPerSecond(itl)
 	return arm, nil
+}
+
+// qwen38PagedSwapDecodeTokensPerSecond returns the phase-pure decode rate:
+// 1000 divided by the mean inter-token latency in milliseconds. It returns 0
+// when no positive ITL was observed.
+func qwen38PagedSwapDecodeTokensPerSecond(itl []float64) float64 {
+	if len(itl) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range itl {
+		sum += v
+	}
+	mean := sum / float64(len(itl))
+	if mean <= 0 {
+		return 0
+	}
+	return 1000 / mean
 }
 
 func qwen38PagedSwapPercentiles(values []float64) (p50, p95 float64) {

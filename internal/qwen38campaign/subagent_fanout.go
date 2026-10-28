@@ -701,19 +701,28 @@ func physicalTrialFromRawDecode(req PhysicalTrialRequest, execution rawdecode.Ex
 		return PhysicalTrialResult{}, errors.New("qwen38campaign: observed fallback count overflows int")
 	}
 
+	// Phase-pure decode rate beside the end-to-end aggregate: useful tokens over
+	// the decode phase alone; 0 when the decode phase did not elapse.
+	decodeMS := float64(run.DecodeDuration.Nanoseconds()) / 1e6
+	var decodeTokensPerSecond float64
+	if decodeMS > 0 {
+		decodeTokensPerSecond = float64(len(output)) / (decodeMS / 1000.0)
+	}
+
 	result := PhysicalTrialResult{
-		RunIndex:         req.RunIndex,
-		Concurrency:      req.Concurrency,
-		Scenario:         req.Scenario,
-		Backend:          execution.Backend.Selected,
-		ExecutionPath:    execution.Engine,
-		WallDurationMS:   float64(wall.Nanoseconds()) / 1e6,
-		UsefulTokens:     len(output),
-		TokensPerSec:     float64(len(output)) / wall.Seconds(),
-		TTFTMS:           float64((run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration).Nanoseconds()) / 1e6,
-		CounterSource:    CountersUnavailable,
-		FallbackCount:    int(backendExecution.Fallbacks),
-		BackendExecution: backendExecution,
+		RunIndex:              req.RunIndex,
+		Concurrency:           req.Concurrency,
+		Scenario:              req.Scenario,
+		Backend:               execution.Backend.Selected,
+		ExecutionPath:         execution.Engine,
+		WallDurationMS:        float64(wall.Nanoseconds()) / 1e6,
+		UsefulTokens:          len(output),
+		TokensPerSec:          float64(len(output)) / wall.Seconds(),
+		DecodeTokensPerSecond: decodeTokensPerSecond,
+		TTFTMS:                float64((run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration).Nanoseconds()) / 1e6,
+		CounterSource:         CountersUnavailable,
+		FallbackCount:         int(backendExecution.Fallbacks),
+		BackendExecution:      backendExecution,
 		PhasesMS: map[string]float64{
 			"session_setup": float64(run.SessionSetupDuration.Nanoseconds()) / 1e6,
 			"prefill":       float64(run.PrefillDuration.Nanoseconds()) / 1e6,
