@@ -52,6 +52,12 @@ func (c CUDACoverage) String() string {
 	}
 }
 
+// MarshalJSON renders the coverage as its short label ("native", "jit-from-ptx",
+// "uncovered") so machine-readable receipts stay human-legible instead of bare ints.
+func (c CUDACoverage) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + c.String() + `"`), nil
+}
+
 // cudaCC is a CUDA compute capability (major.minor): e.g. 8.9 = Ada, 9.0 = Hopper, 10.0 = Blackwell
 // datacenter, 12.0 = Blackwell consumer. It is both a device's reported capability and a
 // cubin/PTX compile target.
@@ -99,7 +105,7 @@ func nativeCovers(cubin, dev cudaCC) bool {
 // cuda.go:95's blind `tier = "sm_" + deviceSM` cannot give — e.g. an 11.x device is UNCOVERED (no
 // cubin, and the 12.0 PTX floor is too high to JIT down to it), not a confident bare "sm_110".
 func ClassifyCUDAArch(devMajor, devMinor int) CUDACoverage {
-	return classifyCUDA(cudaCC{devMajor, devMinor}, cudaEmbeddedArches, true)
+	return classifyCUDA(cudaCC{devMajor, devMinor}, cudaEmbeddedArches, &cudaPTXFloor)
 }
 
 // ClassifyCUDAArchSingle reports coverage for a SINGLE-ARCH build (FAK_CUDA_ARCH=<arch>) that embeds
@@ -108,18 +114,20 @@ func ClassifyCUDAArch(devMajor, devMinor int) CUDACoverage {
 // single-arch sm_89 build on a Blackwell sm_100 (10.0) card is UNCOVERED, the fail-closed truth the
 // blind tier string hides.
 func ClassifyCUDAArchSingle(archMajor, archMinor, devMajor, devMinor int) CUDACoverage {
-	return classifyCUDA(cudaCC{devMajor, devMinor}, []cudaCC{{archMajor, archMinor}}, false)
+	return classifyCUDA(cudaCC{devMajor, devMinor}, []cudaCC{{archMajor, archMinor}}, nil)
 }
 
 // classifyCUDA is the shared rule: native if any cubin in `cubins` covers `dev`, else — only when a
 // PTX floor is present — JIT-from-PTX if the device is at or above the floor, else uncovered.
-func classifyCUDA(dev cudaCC, cubins []cudaCC, ptxFloor bool) CUDACoverage {
+// The floor is a pointer so a single-arch build can express "no PTX floor" without encoding it
+// as a capability; the full-build callers pass &cudaPTXFloor.
+func classifyCUDA(dev cudaCC, cubins []cudaCC, ptxFloor *cudaCC) CUDACoverage {
 	for _, c := range cubins {
 		if nativeCovers(c, dev) {
 			return CUDANative
 		}
 	}
-	if ptxFloor && dev.atLeast(cudaPTXFloor) {
+	if ptxFloor != nil && dev.atLeast(*ptxFloor) {
 		return CUDAJITFromPTX
 	}
 	return CUDAUncovered

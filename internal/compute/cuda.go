@@ -23,8 +23,9 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lcublasLt -lstdc++ -lm
+#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcuda -lcublas -lcublasLt -lstdc++ -lm
 #include <stdlib.h>
+#include <cuda.h>
 #include "cuda_backend.h"
 #include "cuda_kv_precision.h"
 */
@@ -99,12 +100,24 @@ func init() {
 		return // no reachable CUDA device — leave cpu-ref as the only backend
 	}
 	graphEnabled = os.Getenv("FAK_CUDA_GRAPH") == "1"
+	// Typed device receipt (ticket rtx5090-sm120-detection-receipt): capture the raw init facts
+	// here, thin, and hand them to the pure mapper in cuda_device_receipt.go. The receipt keeps
+	// the device name fcuda_init used to discard, adds the driver version, wires in the
+	// native/JIT/uncovered coverage verdict, and records every tracked arm's admission — enabled
+	// or explicitly refused-with-reason, never silently downgraded.
 	cudaDev = &cudaBackend{
 		name:        "cuda",
 		tier:        "sm_" + itoaC(int(sm)),
 		totalMem:    int64(total), // KEEP the device VRAM total — it used to be read and discarded
 		budgetBytes: cudaBudgetBytes(int64(total)),
 		faultLatch:  NewDeviceFaultLatch("cuda", cudaFaultReconstructBudget),
+		receipt: BuildCUDADeviceReceipt(CUDADeviceInitFacts{
+			DeviceName:    C.GoString(&name[0]),
+			Major:         int(sm) / 10,
+			Minor:         int(sm) % 10,
+			TotalMemBytes: int64(total),
+			DriverVersion: captureCUDADriverVersion(),
+		}, CUDABuildArches{}),
 	}
 	Register(cudaDev)
 	initCUDAQ4KPrefillArm(int(sm))
@@ -117,6 +130,18 @@ func init() {
 	// via EnableCUDATF32().
 	tf32Enabled = os.Getenv("FAK_CUDA_TF32") == "1"
 	applyCUDATF32()
+}
+
+// captureCUDADriverVersion asks the CUDA driver for its own version via cuDriverGetVersion
+// and formats it as "major.minor[.patch]". It degrades to "" when the driver cannot answer, so
+// the receipt reports an unknown driver instead of failing init — the receipt is a surface,
+// never a gate. Safe to call here: fcuda_init already selected device 0 and loaded the driver.
+func captureCUDADriverVersion() string {
+	var ver C.int
+	if C.cuDriverGetVersion(&ver) != 0 {
+		return ""
+	}
+	return formatCUDADriverVersion(int(ver))
 }
 
 // installCUDAKernelProfile creates the event ring and registers the "cuda" kernel profile
